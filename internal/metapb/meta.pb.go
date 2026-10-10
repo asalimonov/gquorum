@@ -23,12 +23,14 @@ const (
 
 // Authentication credentials travel in transport metadata, never message bodies.
 type Header struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ClusterId     string                 `protobuf:"bytes,1,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
-	NodeName      string                 `protobuf:"bytes,2,opt,name=node_name,json=nodeName,proto3" json:"node_name,omitempty"`
-	MemberId      uint64                 `protobuf:"varint,3,opt,name=member_id,json=memberId,proto3" json:"member_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	ClusterId        string                 `protobuf:"bytes,1,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
+	NodeName         string                 `protobuf:"bytes,2,opt,name=node_name,json=nodeName,proto3" json:"node_name,omitempty"`
+	MemberId         uint64                 `protobuf:"varint,3,opt,name=member_id,json=memberId,proto3" json:"member_id,omitempty"`
+	AdvertiseAddress string                 `protobuf:"bytes,4,opt,name=advertise_address,json=advertiseAddress,proto3" json:"advertise_address,omitempty"`
+	Peers            []*PeerAddress         `protobuf:"bytes,5,rep,name=peers,proto3" json:"peers,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *Header) Reset() {
@@ -82,19 +84,94 @@ func (x *Header) GetMemberId() uint64 {
 	return 0
 }
 
+func (x *Header) GetAdvertiseAddress() string {
+	if x != nil {
+		return x.AdvertiseAddress
+	}
+	return ""
+}
+
+func (x *Header) GetPeers() []*PeerAddress {
+	if x != nil {
+		return x.Peers
+	}
+	return nil
+}
+
+type PeerAddress struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NodeName      string                 `protobuf:"bytes,1,opt,name=node_name,json=nodeName,proto3" json:"node_name,omitempty"`
+	MemberId      uint64                 `protobuf:"varint,2,opt,name=member_id,json=memberId,proto3" json:"member_id,omitempty"`
+	Address       string                 `protobuf:"bytes,3,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PeerAddress) Reset() {
+	*x = PeerAddress{}
+	mi := &file_internal_metapb_meta_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PeerAddress) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PeerAddress) ProtoMessage() {}
+
+func (x *PeerAddress) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_metapb_meta_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PeerAddress.ProtoReflect.Descriptor instead.
+func (*PeerAddress) Descriptor() ([]byte, []int) {
+	return file_internal_metapb_meta_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *PeerAddress) GetNodeName() string {
+	if x != nil {
+		return x.NodeName
+	}
+	return ""
+}
+
+func (x *PeerAddress) GetMemberId() uint64 {
+	if x != nil {
+		return x.MemberId
+	}
+	return 0
+}
+
+func (x *PeerAddress) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
 type Reply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ErrorCode     string                 `protobuf:"bytes,1,opt,name=error_code,json=errorCode,proto3" json:"error_code,omitempty"`
 	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	LeaderId      uint64                 `protobuf:"varint,3,opt,name=leader_id,json=leaderId,proto3" json:"leader_id,omitempty"`
 	Data          []byte                 `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
+	LeaderAddress string                 `protobuf:"bytes,5,opt,name=leader_address,json=leaderAddress,proto3" json:"leader_address,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Reply) Reset() {
 	*x = Reply{}
-	mi := &file_internal_metapb_meta_proto_msgTypes[1]
+	mi := &file_internal_metapb_meta_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -106,7 +183,7 @@ func (x *Reply) String() string {
 func (*Reply) ProtoMessage() {}
 
 func (x *Reply) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_metapb_meta_proto_msgTypes[1]
+	mi := &file_internal_metapb_meta_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -119,7 +196,7 @@ func (x *Reply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Reply.ProtoReflect.Descriptor instead.
 func (*Reply) Descriptor() ([]byte, []int) {
-	return file_internal_metapb_meta_proto_rawDescGZIP(), []int{1}
+	return file_internal_metapb_meta_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Reply) GetErrorCode() string {
@@ -150,6 +227,13 @@ func (x *Reply) GetData() []byte {
 	return nil
 }
 
+func (x *Reply) GetLeaderAddress() string {
+	if x != nil {
+		return x.LeaderAddress
+	}
+	return ""
+}
+
 type RaftMessage struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Header        *Header                `protobuf:"bytes,1,opt,name=header,proto3" json:"header,omitempty"`
@@ -161,7 +245,7 @@ type RaftMessage struct {
 
 func (x *RaftMessage) Reset() {
 	*x = RaftMessage{}
-	mi := &file_internal_metapb_meta_proto_msgTypes[2]
+	mi := &file_internal_metapb_meta_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -173,7 +257,7 @@ func (x *RaftMessage) String() string {
 func (*RaftMessage) ProtoMessage() {}
 
 func (x *RaftMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_metapb_meta_proto_msgTypes[2]
+	mi := &file_internal_metapb_meta_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -186,7 +270,7 @@ func (x *RaftMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RaftMessage.ProtoReflect.Descriptor instead.
 func (*RaftMessage) Descriptor() ([]byte, []int) {
-	return file_internal_metapb_meta_proto_rawDescGZIP(), []int{2}
+	return file_internal_metapb_meta_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *RaftMessage) GetHeader() *Header {
@@ -223,7 +307,7 @@ type SnapshotChunk struct {
 
 func (x *SnapshotChunk) Reset() {
 	*x = SnapshotChunk{}
-	mi := &file_internal_metapb_meta_proto_msgTypes[3]
+	mi := &file_internal_metapb_meta_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -235,7 +319,7 @@ func (x *SnapshotChunk) String() string {
 func (*SnapshotChunk) ProtoMessage() {}
 
 func (x *SnapshotChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_metapb_meta_proto_msgTypes[3]
+	mi := &file_internal_metapb_meta_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -248,7 +332,7 @@ func (x *SnapshotChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SnapshotChunk.ProtoReflect.Descriptor instead.
 func (*SnapshotChunk) Descriptor() ([]byte, []int) {
-	return file_internal_metapb_meta_proto_rawDescGZIP(), []int{3}
+	return file_internal_metapb_meta_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *SnapshotChunk) GetHeader() *Header {
@@ -296,7 +380,7 @@ type MetaRequest struct {
 
 func (x *MetaRequest) Reset() {
 	*x = MetaRequest{}
-	mi := &file_internal_metapb_meta_proto_msgTypes[4]
+	mi := &file_internal_metapb_meta_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -308,7 +392,7 @@ func (x *MetaRequest) String() string {
 func (*MetaRequest) ProtoMessage() {}
 
 func (x *MetaRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_metapb_meta_proto_msgTypes[4]
+	mi := &file_internal_metapb_meta_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -321,7 +405,7 @@ func (x *MetaRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MetaRequest.ProtoReflect.Descriptor instead.
 func (*MetaRequest) Descriptor() ([]byte, []int) {
-	return file_internal_metapb_meta_proto_rawDescGZIP(), []int{4}
+	return file_internal_metapb_meta_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *MetaRequest) GetHeader() *Header {
@@ -342,18 +426,25 @@ var File_internal_metapb_meta_proto protoreflect.FileDescriptor
 
 const file_internal_metapb_meta_proto_rawDesc = "" +
 	"\n" +
-	"\x1ainternal/metapb/meta.proto\x12\x0fgquorum.meta.v1\"a\n" +
+	"\x1ainternal/metapb/meta.proto\x12\x0fgquorum.meta.v1\"\xc2\x01\n" +
 	"\x06Header\x12\x1d\n" +
 	"\n" +
 	"cluster_id\x18\x01 \x01(\tR\tclusterId\x12\x1b\n" +
 	"\tnode_name\x18\x02 \x01(\tR\bnodeName\x12\x1b\n" +
-	"\tmember_id\x18\x03 \x01(\x04R\bmemberId\"q\n" +
+	"\tmember_id\x18\x03 \x01(\x04R\bmemberId\x12+\n" +
+	"\x11advertise_address\x18\x04 \x01(\tR\x10advertiseAddress\x122\n" +
+	"\x05peers\x18\x05 \x03(\v2\x1c.gquorum.meta.v1.PeerAddressR\x05peers\"a\n" +
+	"\vPeerAddress\x12\x1b\n" +
+	"\tnode_name\x18\x01 \x01(\tR\bnodeName\x12\x1b\n" +
+	"\tmember_id\x18\x02 \x01(\x04R\bmemberId\x12\x18\n" +
+	"\aaddress\x18\x03 \x01(\tR\aaddress\"\x98\x01\n" +
 	"\x05Reply\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x01 \x01(\tR\terrorCode\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1b\n" +
 	"\tleader_id\x18\x03 \x01(\x04R\bleaderId\x12\x12\n" +
-	"\x04data\x18\x04 \x01(\fR\x04data\"\x83\x01\n" +
+	"\x04data\x18\x04 \x01(\fR\x04data\x12%\n" +
+	"\x0eleader_address\x18\x05 \x01(\tR\rleaderAddress\"\x83\x01\n" +
 	"\vRaftMessage\x12/\n" +
 	"\x06header\x18\x01 \x01(\v2\x17.gquorum.meta.v1.HeaderR\x06header\x12 \n" +
 	"\fto_member_id\x18\x02 \x01(\x04R\n" +
@@ -396,45 +487,47 @@ func file_internal_metapb_meta_proto_rawDescGZIP() []byte {
 	return file_internal_metapb_meta_proto_rawDescData
 }
 
-var file_internal_metapb_meta_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_internal_metapb_meta_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_internal_metapb_meta_proto_goTypes = []any{
 	(*Header)(nil),        // 0: gquorum.meta.v1.Header
-	(*Reply)(nil),         // 1: gquorum.meta.v1.Reply
-	(*RaftMessage)(nil),   // 2: gquorum.meta.v1.RaftMessage
-	(*SnapshotChunk)(nil), // 3: gquorum.meta.v1.SnapshotChunk
-	(*MetaRequest)(nil),   // 4: gquorum.meta.v1.MetaRequest
+	(*PeerAddress)(nil),   // 1: gquorum.meta.v1.PeerAddress
+	(*Reply)(nil),         // 2: gquorum.meta.v1.Reply
+	(*RaftMessage)(nil),   // 3: gquorum.meta.v1.RaftMessage
+	(*SnapshotChunk)(nil), // 4: gquorum.meta.v1.SnapshotChunk
+	(*MetaRequest)(nil),   // 5: gquorum.meta.v1.MetaRequest
 }
 var file_internal_metapb_meta_proto_depIdxs = []int32{
-	0,  // 0: gquorum.meta.v1.RaftMessage.header:type_name -> gquorum.meta.v1.Header
-	0,  // 1: gquorum.meta.v1.SnapshotChunk.header:type_name -> gquorum.meta.v1.Header
-	0,  // 2: gquorum.meta.v1.MetaRequest.header:type_name -> gquorum.meta.v1.Header
-	2,  // 3: gquorum.meta.v1.Meta.StreamMessages:input_type -> gquorum.meta.v1.RaftMessage
-	3,  // 4: gquorum.meta.v1.Meta.SendSnapshot:input_type -> gquorum.meta.v1.SnapshotChunk
-	4,  // 5: gquorum.meta.v1.Meta.Join:input_type -> gquorum.meta.v1.MetaRequest
-	4,  // 6: gquorum.meta.v1.Meta.JoinReady:input_type -> gquorum.meta.v1.MetaRequest
-	4,  // 7: gquorum.meta.v1.Meta.KeepAlive:input_type -> gquorum.meta.v1.MetaRequest
-	4,  // 8: gquorum.meta.v1.Meta.IdentityPing:input_type -> gquorum.meta.v1.MetaRequest
-	4,  // 9: gquorum.meta.v1.Meta.MetaStatus:input_type -> gquorum.meta.v1.MetaRequest
-	4,  // 10: gquorum.meta.v1.Meta.MetaControl:input_type -> gquorum.meta.v1.MetaRequest
-	4,  // 11: gquorum.meta.v1.Meta.ProposeMeta:input_type -> gquorum.meta.v1.MetaRequest
-	4,  // 12: gquorum.meta.v1.Meta.ApplyVersion:input_type -> gquorum.meta.v1.MetaRequest
-	4,  // 13: gquorum.meta.v1.Meta.ParkedRead:input_type -> gquorum.meta.v1.MetaRequest
-	1,  // 14: gquorum.meta.v1.Meta.StreamMessages:output_type -> gquorum.meta.v1.Reply
-	1,  // 15: gquorum.meta.v1.Meta.SendSnapshot:output_type -> gquorum.meta.v1.Reply
-	1,  // 16: gquorum.meta.v1.Meta.Join:output_type -> gquorum.meta.v1.Reply
-	1,  // 17: gquorum.meta.v1.Meta.JoinReady:output_type -> gquorum.meta.v1.Reply
-	1,  // 18: gquorum.meta.v1.Meta.KeepAlive:output_type -> gquorum.meta.v1.Reply
-	1,  // 19: gquorum.meta.v1.Meta.IdentityPing:output_type -> gquorum.meta.v1.Reply
-	1,  // 20: gquorum.meta.v1.Meta.MetaStatus:output_type -> gquorum.meta.v1.Reply
-	1,  // 21: gquorum.meta.v1.Meta.MetaControl:output_type -> gquorum.meta.v1.Reply
-	1,  // 22: gquorum.meta.v1.Meta.ProposeMeta:output_type -> gquorum.meta.v1.Reply
-	1,  // 23: gquorum.meta.v1.Meta.ApplyVersion:output_type -> gquorum.meta.v1.Reply
-	1,  // 24: gquorum.meta.v1.Meta.ParkedRead:output_type -> gquorum.meta.v1.Reply
-	14, // [14:25] is the sub-list for method output_type
-	3,  // [3:14] is the sub-list for method input_type
-	3,  // [3:3] is the sub-list for extension type_name
-	3,  // [3:3] is the sub-list for extension extendee
-	0,  // [0:3] is the sub-list for field type_name
+	1,  // 0: gquorum.meta.v1.Header.peers:type_name -> gquorum.meta.v1.PeerAddress
+	0,  // 1: gquorum.meta.v1.RaftMessage.header:type_name -> gquorum.meta.v1.Header
+	0,  // 2: gquorum.meta.v1.SnapshotChunk.header:type_name -> gquorum.meta.v1.Header
+	0,  // 3: gquorum.meta.v1.MetaRequest.header:type_name -> gquorum.meta.v1.Header
+	3,  // 4: gquorum.meta.v1.Meta.StreamMessages:input_type -> gquorum.meta.v1.RaftMessage
+	4,  // 5: gquorum.meta.v1.Meta.SendSnapshot:input_type -> gquorum.meta.v1.SnapshotChunk
+	5,  // 6: gquorum.meta.v1.Meta.Join:input_type -> gquorum.meta.v1.MetaRequest
+	5,  // 7: gquorum.meta.v1.Meta.JoinReady:input_type -> gquorum.meta.v1.MetaRequest
+	5,  // 8: gquorum.meta.v1.Meta.KeepAlive:input_type -> gquorum.meta.v1.MetaRequest
+	5,  // 9: gquorum.meta.v1.Meta.IdentityPing:input_type -> gquorum.meta.v1.MetaRequest
+	5,  // 10: gquorum.meta.v1.Meta.MetaStatus:input_type -> gquorum.meta.v1.MetaRequest
+	5,  // 11: gquorum.meta.v1.Meta.MetaControl:input_type -> gquorum.meta.v1.MetaRequest
+	5,  // 12: gquorum.meta.v1.Meta.ProposeMeta:input_type -> gquorum.meta.v1.MetaRequest
+	5,  // 13: gquorum.meta.v1.Meta.ApplyVersion:input_type -> gquorum.meta.v1.MetaRequest
+	5,  // 14: gquorum.meta.v1.Meta.ParkedRead:input_type -> gquorum.meta.v1.MetaRequest
+	2,  // 15: gquorum.meta.v1.Meta.StreamMessages:output_type -> gquorum.meta.v1.Reply
+	2,  // 16: gquorum.meta.v1.Meta.SendSnapshot:output_type -> gquorum.meta.v1.Reply
+	2,  // 17: gquorum.meta.v1.Meta.Join:output_type -> gquorum.meta.v1.Reply
+	2,  // 18: gquorum.meta.v1.Meta.JoinReady:output_type -> gquorum.meta.v1.Reply
+	2,  // 19: gquorum.meta.v1.Meta.KeepAlive:output_type -> gquorum.meta.v1.Reply
+	2,  // 20: gquorum.meta.v1.Meta.IdentityPing:output_type -> gquorum.meta.v1.Reply
+	2,  // 21: gquorum.meta.v1.Meta.MetaStatus:output_type -> gquorum.meta.v1.Reply
+	2,  // 22: gquorum.meta.v1.Meta.MetaControl:output_type -> gquorum.meta.v1.Reply
+	2,  // 23: gquorum.meta.v1.Meta.ProposeMeta:output_type -> gquorum.meta.v1.Reply
+	2,  // 24: gquorum.meta.v1.Meta.ApplyVersion:output_type -> gquorum.meta.v1.Reply
+	2,  // 25: gquorum.meta.v1.Meta.ParkedRead:output_type -> gquorum.meta.v1.Reply
+	15, // [15:26] is the sub-list for method output_type
+	4,  // [4:15] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_internal_metapb_meta_proto_init() }
@@ -448,7 +541,7 @@ func file_internal_metapb_meta_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_metapb_meta_proto_rawDesc), len(file_internal_metapb_meta_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

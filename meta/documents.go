@@ -3,7 +3,6 @@ package meta
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
@@ -110,9 +109,7 @@ func (g *Group) Status(ctx context.Context) (topology.ClusterStatus, error) {
 	lifecycle := g.lifecycle
 	g.mu.RUnlock()
 	result := topology.ClusterStatus{Lifecycle: lifecycle, ErrorCode: g.terminalCode(), LatestVersion: latest.Version, TargetVersion: target.Version, ActiveVersion: active.Version}
-	g.sessionMu.Lock()
-	result.SessionLive = g.ownSession != "" && time.Until(g.ownDeadline) > 0
-	g.sessionMu.Unlock()
+	result.SessionLive = g.OwnSessionLive()
 	for _, node := range latest.Nodes {
 		result.Nodes = append(result.Nodes, topology.NodeStatus{Node: node, EffectiveState: topology.EffectiveNodeState(latest, node.Name), Health: topology.HealthUnknown})
 	}

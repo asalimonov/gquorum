@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -25,11 +26,51 @@ func (g *Group) run() {
 			return
 		case <-ticker.C:
 		}
+
+		if g.opts.Join && !g.joinDone {
+			ctx, cancel := context.WithTimeout(g.ctx, 5*time.Second)
+			err := g.tryJoin(ctx)
+			cancel()
+			if err != nil {
+				if g.ctx.Err() != nil {
+					return
+				}
+				var fatal *fatalAdmissionError
+				if errors.As(err, &fatal) {
+					g.fail(fatal.error)
+					return
+				}
+				if errors.Is(err, fault.ErrReadmissionRequired) {
+					g.mu.Lock()
+					g.terminal = err
+					g.lifecycle = "blocked"
+					g.mu.Unlock()
+					g.readyOnce.Do(func() { close(g.ready) })
+					return
+				}
+				if g.ctx.Err() != nil {
+					return
+				}
+				g.mu.Lock()
+				g.lifecycle = "parked"
+				g.mu.Unlock()
+				g.opts.Logger.Debug("meta join awaiting admission", "error", err)
+				continue
+			}
+		}
 		engine := g.engine.Load()
 		if engine == nil {
-			g.fail(fault.New(fault.Unsupported, "join orchestration is not yet wired", nil))
-			return
+			continue
 		}
+		if g.opts.Join && !g.joinReady {
+			ctx, cancel := context.WithTimeout(g.ctx, 2*time.Second)
+			err := g.acknowledgeJoin(ctx)
+			cancel()
+			if err != nil {
+				continue
+			}
+		}
+
 		if err := engine.Error(); err != nil {
 			if g.ctx.Err() == nil {
 				g.fail(err)
@@ -77,7 +118,7 @@ func (g *Group) run() {
 			members[id] = true
 		}
 		g.transport.Prune(members)
-		if !voter || g.state().Active().Version == 0 {
+		if !voter || g.state().ActiveVersion() == 0 {
 			continue
 		}
 		ctx, cancel := context.WithTimeout(g.ctx, 5*time.Second)

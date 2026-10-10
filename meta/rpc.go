@@ -37,7 +37,7 @@ func (g *Group) Step(ctx context.Context, header *metapb.Header, msg raftpb.Mess
 			return fault.ErrIdentityMismatch
 		}
 		if name == "" {
-			for _, doc := range []topology.Document{check.Target(), check.Active(), latest} {
+			for _, doc := range []topology.Document{check.Target(), check.Active()} {
 				if meta := doc.MetaGroup(); meta != nil {
 					for _, replica := range meta.Replicas {
 						if replica.ReplicaID == msg.From {
@@ -51,14 +51,24 @@ func (g *Group) Step(ctx context.Context, header *metapb.Header, msg raftpb.Mess
 	if name == "" || name != header.NodeName {
 		return fault.ErrIdentityMismatch
 	}
-	return engine.Step(ctx, msg)
+	err := engine.Step(ctx, msg)
+	if err == nil {
+		g.acceptAddressHints(header)
+	}
+	return err
 }
 func (g *Group) Call(ctx context.Context, method string, header *metapb.Header, data []byte) *metapb.Reply {
 	identity := g.currentIdentity()
 	if header == nil || header.ClusterId != identity.ClusterID {
 		return metatransport.Reply(fault.ErrIdentityMismatch)
 	}
+	if method == "Join" {
+		return g.handleJoin(ctx, header, data)
+	}
 	if method == "IdentityPing" {
+		if engine := g.engine.Load(); engine == nil || !engine.Running() {
+			return metatransport.Reply(fault.ErrUnavailable)
+		}
 		// The caller verifies the returned exact process identity before revoking a lease.
 		encoded, err := json.Marshal(identity)
 		if err != nil {
@@ -91,6 +101,8 @@ func (g *Group) Call(ctx context.Context, method string, header *metapb.Header, 
 		return g.leaderReply(fault.ErrNotLeader)
 	}
 	switch method {
+	case "JoinReady":
+		return g.handleReady(ctx, header, data)
 	case "ApplyVersion":
 		var request struct {
 			Version uint64 `json:"version"`
@@ -169,6 +181,10 @@ func (g *Group) leaderReply(err error) *metapb.Reply {
 	reply := metatransport.Reply(err)
 	if engine := g.engine.Load(); engine != nil {
 		reply.LeaderId = engine.RaftStatus().Lead
+		name := g.memberNode(reply.LeaderId)
+		g.mu.RLock()
+		reply.LeaderAddress = g.addresses[name]
+		g.mu.RUnlock()
 	}
 	return reply
 }

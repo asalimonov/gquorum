@@ -677,7 +677,7 @@ func caughtUpStatus(status GroupStatus, replicaID uint64) (bool, string) {
 func (e *ConvergenceEngine) effectSatisfied(step Step, target Document, status GroupStatus) bool {
 	switch step.Kind {
 	case StepCreateFoundingGroup:
-		return status.Found && groupMatchesTarget(target.Group(step.GroupID), status)
+		return status.Found && foundingMatchesTarget(target.Group(step.GroupID), status)
 	case StepPrepareReplica:
 		return containsID(status.ConfState.Learners, step.ReplicaID) || containsID(status.ConfState.Voters, step.ReplicaID)
 	case StepAddLearner:
@@ -722,11 +722,11 @@ func (e *ConvergenceEngine) validateStep(ctx context.Context, ex ExecutionRecord
 		if active.Group(step.GroupID) != nil || target.Group(step.GroupID) == nil {
 			return fmt.Errorf("%w: founding group is not fresh", ErrExecutionAuthorization)
 		}
-		if status.Found && !groupMatchesTarget(target.Group(step.GroupID), status) {
+		if status.Found && !foundingMatchesTarget(target.Group(step.GroupID), status) {
 			return fmt.Errorf("%w: founding group has conflicting membership", ErrExecutionAuthorization)
 		}
 	case StepPrepareReplica:
-		if targetReplica == nil || active.Group(step.GroupID) == nil {
+		if targetReplica == nil || active.Group(step.GroupID) == nil && (!freshFoundingPlan(ex, step) || targetReplica.Role != ReplicaLearner) {
 			return fmt.Errorf("%w: prepare identity is not an established Target replica", ErrExecutionAuthorization)
 		}
 	case StepAddLearner:
@@ -868,6 +868,48 @@ func requiresObservedVerification(kind StepKind) bool {
 	switch kind {
 	case StepCreateFoundingGroup, StepAddLearner, StepPromoteVoter, StepDemoteVoter, StepRemoveReplica, StepTransferLeader:
 		return true
+	}
+	return false
+}
+
+// Fresh groups seed only their declared voters. Intentional learners enter
+// through subsequent prepared/add-learner steps in the same authorized block.
+func foundingMatchesTarget(group *Group, status GroupStatus) bool {
+	if group == nil || !status.Found || status.ConfState.AutoLeave || len(status.ConfState.VotersOutgoing) > 0 || len(status.ConfState.LearnersNext) > 0 {
+		return false
+	}
+	expected := *group
+	expected.Replicas = nil
+	learners := map[uint64]bool{}
+	for _, r := range group.Replicas {
+		if r.Role == ReplicaVoter {
+			expected.Replicas = append(expected.Replicas, r)
+		} else {
+			learners[r.ReplicaID] = true
+		}
+	}
+	voters := status
+	voters.ConfState.Learners = nil
+	if !groupMatchesTarget(&expected, voters) {
+		return false
+	}
+	seen := map[uint64]bool{}
+	for _, id := range status.ConfState.Learners {
+		if id == 0 || seen[id] || !learners[id] {
+			return false
+		}
+		seen[id] = true
+	}
+	return true
+}
+func freshFoundingPlan(ex ExecutionRecord, step Step) bool {
+	for _, before := range ex.Steps {
+		if before.Seq >= step.Seq {
+			break
+		}
+		if before.GroupID == step.GroupID && before.Kind == StepCreateFoundingGroup {
+			return true
+		}
 	}
 	return false
 }

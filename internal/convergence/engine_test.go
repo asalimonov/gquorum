@@ -200,8 +200,6 @@ func (g *convergenceGroups) CreateGroup(ctx context.Context, cmd AuthorizedStep)
 	for _, replica := range group.Replicas {
 		if replica.Role == ReplicaVoter {
 			status.ConfState.Voters = append(status.ConfState.Voters, replica.ReplicaID)
-		} else {
-			status.ConfState.Learners = append(status.ConfState.Learners, replica.ReplicaID)
 		}
 	}
 	g.setStatus(cmd.GroupID, status)

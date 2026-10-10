@@ -36,6 +36,12 @@ type Group struct {
 	leases              *sessionManager
 	leaseGate           sync.Mutex
 	addresses           map[string]string
+	joinMembers         map[uint64]string
+	recoveryDocuments   []topology.Document
+	joinDone, joinReady bool
+	joinAdmission       metaengine.AdmissionRecord
+	joinLeader          string
+	admissionToken      chan struct{}
 	ctx                 context.Context
 	cancel              context.CancelFunc
 	started             bool
@@ -69,14 +75,14 @@ func New(input Options) (*Group, error) {
 	if !opts.Join && !exists && len(opts.Founders) == 0 {
 		return nil, fault.New(fault.Invalid, "fresh meta storage requires founding members", nil)
 	}
-	g := &Group{opts: opts, rules: topology.Rules{SchemaVersion: 1, Limits: opts.Limits}, identity: opts.Identity, lifecycle: "constructed", coordinator: membership.NewCoordinator(), leases: newSessionManager(opts.SessionTTL), addresses: make(map[string]string), ready: make(chan struct{}), stopped: make(chan struct{}), sessionToken: make(chan struct{}, 1)}
+	g := &Group{opts: opts, rules: topology.Rules{SchemaVersion: 1, Limits: opts.Limits}, identity: opts.Identity, lifecycle: "constructed", coordinator: membership.NewCoordinator(), leases: newSessionManager(opts.SessionTTL), addresses: make(map[string]string), joinMembers: make(map[uint64]string), admissionToken: make(chan struct{}, 1), ready: make(chan struct{}), stopped: make(chan struct{}), sessionToken: make(chan struct{}, 1)}
 	for _, founder := range opts.Founders {
 		g.addresses[founder.Node.Name] = founder.Address
 	}
 	g.addresses[opts.Identity.NodeName] = opts.Network.AdvertiseAddress
 	g.machine = metaengine.NewMachine(g.rules, nil)
 	// The transport refers back to this group through its meta-only handler seam.
-	network, err := metatransport.New(metatransport.Options{Header: &metapb.Header{ClusterId: opts.Identity.ClusterID, NodeName: opts.Identity.NodeName, MemberId: opts.Identity.MemberID}, Listener: opts.Network.Listener, TLS: opts.Network.TLS, ClientTLS: opts.Network.ClientTLS, AllowPlaintext: opts.Network.AllowPlaintext, Credential: opts.Network.ClusterCredential, Handler: g, Resolve: g.resolveMember, SendTimeout: opts.Timing.SendTimeout, SnapshotTimeout: 10 * time.Second, RetryInitial: opts.Timing.PeerRetryInitial, RetryMax: opts.Timing.PeerRetryMax, MaxSnapshotBytes: opts.Network.MaxSnapshotBytes, OnUnreachable: func(id uint64) {
+	network, err := metatransport.New(metatransport.Options{Header: &metapb.Header{ClusterId: opts.Identity.ClusterID, NodeName: opts.Identity.NodeName, MemberId: opts.Identity.MemberID, AdvertiseAddress: opts.Network.AdvertiseAddress}, Listener: opts.Network.Listener, TLS: opts.Network.TLS, ClientTLS: opts.Network.ClientTLS, AllowPlaintext: opts.Network.AllowPlaintext, Credential: opts.Network.ClusterCredential, Handler: g, Resolve: g.resolveMember, SendTimeout: opts.Timing.SendTimeout, SnapshotTimeout: 10 * time.Second, RetryInitial: opts.Timing.PeerRetryInitial, RetryMax: opts.Timing.PeerRetryMax, MaxSnapshotBytes: opts.Network.MaxSnapshotBytes, OnUnreachable: func(id uint64) {
 		if engine := g.engine.Load(); engine != nil {
 			engine.ReportUnreachable(id)
 		}
@@ -89,6 +95,7 @@ func New(input Options) (*Group, error) {
 		return nil, err
 	}
 	g.transport = network
+	g.refreshAddressHints()
 	if opts.Identity.MemberID != 0 {
 		mode := raftengine.Joining
 		var peers []raft.Peer
@@ -112,6 +119,7 @@ func (g *Group) openEngine(identity Identity, mode raftengine.Mode, peers []raft
 	}
 	// Validate the persisted rule pin even when no Raft snapshot was produced.
 	// This materialized state is never used to skip committed-log replay.
+	var recoveryDocuments []topology.Document
 	materialized, err := store.LoadState()
 	if err != nil {
 		store.Close()
@@ -123,6 +131,8 @@ func (g *Group) openEngine(identity Identity, mode raftengine.Mode, peers []raft
 			store.Close()
 			return err
 		}
+		latest, target, active := check.Views()
+		recoveryDocuments = []topology.Document{active, target, latest}
 	}
 	machine := metaengine.NewMachine(g.rules, store)
 	engine, err := raftengine.NewMeta(raftengine.Options{GroupID: topology.MetaGroupID, NodeName: identity.NodeName, ClusterID: identity.ClusterID, ReplicaID: identity.MemberID, Mode: mode, Peers: peers, Timing: raftengine.Timing{TickInterval: g.opts.Timing.TickInterval, ElectionTicks: g.opts.Timing.ElectionTicks, HeartbeatTicks: g.opts.Timing.HeartbeatTicks}, Store: &metastore.Adapter{Store: store}, Machine: machine, Transport: g.transport, Events: g.opts.Events, Logger: g.opts.Logger, SnapshotThreshold: g.opts.SnapshotThreshold})
@@ -132,6 +142,7 @@ func (g *Group) openEngine(identity Identity, mode raftengine.Mode, peers []raft
 	}
 	g.mu.Lock()
 	g.store = store
+	g.recoveryDocuments = recoveryDocuments
 	g.machine = machine
 	g.identity = identity
 	g.mu.Unlock()
@@ -159,7 +170,7 @@ func (g *Group) Start(parent context.Context) error {
 		go g.Stop(context.Background())
 		return err
 	}
-	if engine := g.engine.Load(); engine != nil {
+	if engine := g.engine.Load(); engine != nil && !g.opts.Join {
 		if err := engine.Start(g.ctx); err != nil {
 			g.wg.Done()
 			g.fail(err)
@@ -201,10 +212,10 @@ func (g *Group) Stop(ctx context.Context) error {
 				g.convergence.Stop()
 			}
 			_ = g.transport.Stop(context.Background())
+			g.wg.Wait()
 			if engine := g.engine.Load(); engine != nil {
 				_ = engine.Stop(context.Background())
 			}
-			g.wg.Wait()
 			g.mu.Lock()
 			if g.store != nil {
 				if err := g.store.Close(); err != nil && g.terminal == nil {
@@ -280,25 +291,24 @@ func (g *Group) resolveNode(ctx context.Context, name string) (string, error) {
 	return address, nil
 }
 func (g *Group) memberNode(id uint64) string {
-	machine := g.state()
-	for _, doc := range []topology.Document{machine.Target(), machine.Active(), machine.Latest()} {
-		if meta := doc.MetaGroup(); meta != nil {
-			for _, replica := range meta.Replicas {
-				if replica.ReplicaID == id {
-					return replica.NodeName
-				}
-			}
-		}
+	name, established := g.state().MemberOwner(id)
+	if name != "" || established {
+		return name
 	}
-	if machine.Latest().Version == 0 {
-		for _, founder := range g.opts.Founders {
-			if founder.MemberID == id {
-				return founder.Node.Name
-			}
+	g.mu.RLock()
+	joined := g.joinMembers[id]
+	g.mu.RUnlock()
+	if joined != "" {
+		return joined
+	}
+	for _, founder := range g.opts.Founders {
+		if founder.MemberID == id {
+			return founder.Node.Name
 		}
 	}
 	return ""
 }
+
 func (g *Group) resolveMember(ctx context.Context, id uint64) (string, error) {
 	name := g.memberNode(id)
 	if name == "" {
@@ -334,6 +344,16 @@ func (g *Group) terminalCode() string {
 }
 
 func (g *Group) activeMemberID(name string) uint64 {
-	active := g.state().Active()
-	return active.MemberID(name)
+	return g.state().ActiveMemberID(name)
 }
+
+func (g *Group) sessionLive() bool {
+	if g.ensureRunning(context.Background()) != nil {
+		return false
+	}
+	g.sessionMu.Lock()
+	defer g.sessionMu.Unlock()
+	return g.ownSession != "" && time.Now().Before(g.ownDeadline)
+}
+
+func (g *Group) OwnSessionLive() bool { return g.sessionLive() }

@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/proto"
 )
 
 type Options struct {
@@ -66,7 +67,7 @@ func New(o Options) (*Transport, error) {
 		return nil, fault.ErrInvalid
 	}
 	o.Credential = bytes.Clone(o.Credential)
-	o.Header = &metapb.Header{ClusterId: o.Header.ClusterId, NodeName: o.Header.NodeName, MemberId: o.Header.MemberId}
+	o.Header = proto.Clone(o.Header).(*metapb.Header)
 	if o.TLS != nil {
 		o.TLS = o.TLS.Clone()
 	}
@@ -134,7 +135,7 @@ func (t *Transport) Header() *metapb.Header {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	h := t.opts.Header
-	return &metapb.Header{ClusterId: h.ClusterId, NodeName: h.NodeName, MemberId: h.MemberId}
+	return proto.Clone(h).(*metapb.Header)
 }
 
 // Prune releases queues and connections for removed members. It never changes Raft membership.
@@ -382,4 +383,15 @@ func (t *Transport) CallAddress(ctx context.Context, address, method string, dat
 	default:
 		return nil, fmt.Errorf("%w: unknown meta RPC", fault.ErrInvalid)
 	}
+}
+
+func (t *Transport) SetPeerAddresses(peers []*metapb.PeerAddress) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	header := proto.Clone(t.opts.Header).(*metapb.Header)
+	header.Peers = nil
+	for _, p := range peers {
+		header.Peers = append(header.Peers, proto.Clone(p).(*metapb.PeerAddress))
+	}
+	t.opts.Header = header
 }

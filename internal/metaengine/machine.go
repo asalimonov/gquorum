@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/topology"
@@ -90,3 +91,46 @@ func (m *Machine) Views() (topology.Document, topology.Document, topology.Docume
 func (m *Machine) AdmissionForExecution(id topology.ExecutionID, name string, member uint64) (AdmissionRecord, bool) {
 	return m.admissionForExecution(id, name, member)
 }
+
+func (m *Machine) LiveAdmission(name, except string) (AdmissionRecord, bool) {
+	return m.liveAdmissionForNode(name, except)
+}
+func ReadmissionDocument(base topology.Document, name string, at time.Time) (topology.Document, error) {
+	return buildReadmissionDocument(base, name, at)
+}
+
+// MemberOwner reads the approved routing identities without copying load-group
+// documents. Founding manifests remain authoritative until Target is installed.
+func (m *Machine) MemberOwner(id uint64) (string, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, doc := range []*topology.Document{&m.target, &m.active} {
+		if group := doc.MetaGroup(); group != nil {
+			for _, r := range group.Replicas {
+				if r.ReplicaID == id {
+					return r.NodeName, m.target.Version > 0
+				}
+			}
+		}
+	}
+	return "", m.target.Version > 0
+}
+func (m *Machine) MemberOwners() (map[uint64]string, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	owners := map[uint64]string{}
+	for _, doc := range []*topology.Document{&m.active, &m.target} {
+		if group := doc.MetaGroup(); group != nil {
+			for _, r := range group.Replicas {
+				owners[r.ReplicaID] = r.NodeName
+			}
+		}
+	}
+	return owners, m.target.Version > 0
+}
+func (m *Machine) ActiveMemberID(name string) uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.active.MemberID(name)
+}
+func (m *Machine) ActiveVersion() uint64 { m.mu.RLock(); defer m.mu.RUnlock(); return m.active.Version }

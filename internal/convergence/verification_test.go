@@ -3,6 +3,7 @@ package convergence
 import (
 	"context"
 	"github.com/asalimonov/gquorum/membership"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -42,5 +43,28 @@ func TestPermanentPromotionRefusalDoesNotWaitForever(t *testing.T) {
 	state, _, retry = classifyStepError(Step{Kind: StepRemoveReplica}, &membership.SafetyRefusal{Reason: "post-change live voter quorum would be unavailable"})
 	if !retry || state != ExecutionWaitingReplica {
 		t.Fatal("transient liveness refusal treated as terminal")
+	}
+}
+
+func TestConvergenceFreshGroupSeedsVotersBeforeIntentionalLearner(t *testing.T) {
+	active := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"old"})
+	target := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"old", "new"})
+	target.Version = 2
+	target.Group("new").Replicas[1].Role = ReplicaLearner
+	steps := []Step{{Seq: 1, Kind: StepCreateFoundingGroup, GroupID: "new"}, {Seq: 2, Kind: StepPrepareReplica, GroupID: "new", NodeName: "n2", ReplicaID: 2}, {Seq: 3, Kind: StepAddLearner, GroupID: "new", NodeName: "n2", ReplicaID: 2}}
+	f := newConvergenceFixture(active, target, steps, 0, ExecutionPending)
+	f.engine.Tick(context.Background())
+	ex, _ := f.coord.CurrentExecution(context.Background())
+	if ex.CurrentStep != 2 || ex.State != ExecutionRunning {
+		t.Fatal("founding did not accept exact voter seed", ex)
+	}
+	f.engine.Tick(context.Background())
+	f.engine.Tick(context.Background())
+	ex, _ = f.coord.CurrentExecution(context.Background())
+	if ex.State != ExecutionSucceeded {
+		t.Fatal("intentional learner did not finish", ex)
+	}
+	if !reflect.DeepEqual(f.groups.calls, []StepKind{StepCreateFoundingGroup, StepPrepareReplica, StepAddLearner}) {
+		t.Fatal("learner bypassed prepare/add scope", f.groups.calls)
 	}
 }

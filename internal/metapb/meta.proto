@@ -3,8 +3,9 @@ package gquorum.meta.v1;
 option go_package = "github.com/asalimonov/gquorum/internal/metapb;metapb";
 
 // Authentication credentials travel in transport metadata, never message bodies.
-message Header { string cluster_id = 1; string node_name = 2; uint64 member_id = 3; }
-message Reply { string error_code = 1; string message = 2; uint64 leader_id = 3; bytes data = 4; }
+message Header { string cluster_id = 1; string node_name = 2; uint64 member_id = 3; string advertise_address = 4; repeated PeerAddress peers = 5; }
+message PeerAddress { string node_name = 1; uint64 member_id = 2; string address = 3; }
+message Reply { string error_code = 1; string message = 2; uint64 leader_id = 3; bytes data = 4; string leader_address = 5; }
 message RaftMessage { Header header = 1; uint64 to_member_id = 2; bytes raft_message = 3; }
 message SnapshotChunk { Header header = 1; uint64 to_member_id = 2; bytes raft_message = 3; bytes data = 4; bool final = 5; }
 message MetaRequest { Header header = 1; bytes data = 2; }

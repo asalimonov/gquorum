@@ -410,3 +410,10 @@ func (v membershipView) TransferLeader(ctx context.Context, target uint64) error
 	return v.group.TransferLeader(ctx, target)
 }
 func (g *Group) Membership() membership.RaftGroup { return membershipView{g} }
+
+// Running reports worker lifetime independently of leader/readiness state.
+func (g *Group) Running() bool {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.started && !g.stopped && g.ctx != nil && g.ctx.Err() == nil
+}

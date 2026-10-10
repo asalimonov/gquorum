@@ -134,7 +134,7 @@ func newTestGroup(t *testing.T, s storage.Store, m *machine, n *network, id uint
 	for _, id := range peers {
 		initial = append(initial, raft.Peer{ID: id})
 	}
-	g, err := New(Options{GroupID: "load", NodeName: fmt.Sprint(id), ClusterID: "cluster", ReplicaID: id, Mode: mode, Peers: initial, Timing: Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 10, HeartbeatTicks: 1}, Store: s, Machine: m, Transport: endpoint{n}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	g, err := New(Options{GroupID: "load", NodeName: fmt.Sprint(id), ClusterID: "cluster", ReplicaID: id, Mode: mode, Peers: initial, Timing: Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 50, HeartbeatTicks: 1}, Store: s, Machine: m, Transport: endpoint{n}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	must(t, err)
 	n.mu.Lock()
 	n.nodes[id] = g
