@@ -35,7 +35,7 @@ func (g *Group) recordReconciliation(status topology.ReconciliationStatus) {
 		return
 	}
 	id := g.currentIdentity()
-	g.opts.Events.Publish(events.Event{At: status.Since, Type: events.ReconciliationChanged, NodeName: id.NodeName, InstanceID: id.InstanceID, ClusterID: id.ClusterID, GroupID: topology.MetaGroupID, Code: status.Reason, State: string(status.State)})
+	g.opts.Events.Publish(events.Event{At: status.Since, Type: events.ReconciliationChanged, NodeName: id.NodeName, InstanceID: id.InstanceID, MemberID: id.MemberID, ClusterID: id.ClusterID, GroupID: topology.MetaGroupID, Code: status.Reason, State: string(status.State)})
 }
 
 type reconciliationHost struct{ g *Group }

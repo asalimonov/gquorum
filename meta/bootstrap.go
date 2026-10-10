@@ -2,15 +2,13 @@ package meta
 
 import (
 	"context"
-	"crypto/sha256"
+	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
-	"github.com/asalimonov/gquorum/internal/metatransport"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -122,7 +120,7 @@ func (g *Group) run() {
 			continue
 		}
 		ctx, cancel := context.WithTimeout(g.ctx, 5*time.Second)
-		_, err := g.Activate(ctx)
+		_, err := g.activate(ctx, true)
 		cancel()
 		if err != nil {
 			continue
@@ -182,21 +180,23 @@ type Session struct {
 	TTL                      time.Duration
 }
 
-func (g *Group) Activate(ctx context.Context) (Session, error) {
+func (g *Group) Activate(ctx context.Context) (Session, error) { return g.activate(ctx, false) }
+
+func (g *Group) activate(ctx context.Context, automatic bool) (Session, error) {
 	if err := g.ensureRunning(ctx); err != nil {
 		return Session{}, err
 	}
-	select {
-	case g.sessionToken <- struct{}{}:
-		defer func() { <-g.sessionToken }()
-	case <-ctx.Done():
-		return Session{}, ctx.Err()
-	case <-g.ctx.Done():
-		return Session{}, fault.ErrStopped
+	if err := g.takeSessionToken(ctx); err != nil {
+		return Session{}, err
 	}
+	defer g.releaseSessionToken()
 	g.sessionMu.Lock()
 	sessionID, deadline := g.ownSession, g.ownDeadline
+	paused, previous := g.sessionPaused, g.lastDeactivated
 	g.sessionMu.Unlock()
+	if automatic && paused {
+		return Session{}, fault.ErrUnavailable
+	}
 	identity := g.currentIdentity()
 	machine := g.state()
 	active := machine.Active()
@@ -218,13 +218,21 @@ func (g *Group) Activate(ctx context.Context) (Session, error) {
 		return Session{}, fault.New(fault.IdentityMismatch, "node name is held by another process instance", nil)
 	}
 	if held {
+		// A follower may still have the just-revoked session locally. Do not
+		// regrant its identity while the revocation is catching up.
+		if holder.SessionID == previous {
+			return Session{}, fault.ErrUnavailable
+		}
 		sessionID = holder.SessionID
 	}
 	if sessionID == "" {
-		// The exact process tuple is stable across retries, including uncertain grant outcomes.
-		data, _ := json.Marshal([3]string{identity.ClusterID, identity.NodeName, identity.InstanceID})
-		hash := sha256.Sum256(data)
-		sessionID = "session-" + hex.EncodeToString(hash[:])
+		// Keep this identity across uncertain grant retries. A later activation
+		// after successful deactivation needs a fresh ID to fence delayed revokes.
+		var nonce [24]byte
+		if _, err := rand.Read(nonce[:]); err != nil {
+			return Session{}, err
+		}
+		sessionID = "session-" + hex.EncodeToString(nonce[:])
 	}
 	g.sessionMu.Lock()
 	g.ownSession = sessionID
@@ -239,45 +247,23 @@ func (g *Group) Activate(ctx context.Context) (Session, error) {
 			return Session{}, err
 		}
 	}
-	if time.Until(deadline) <= g.opts.SessionTTL-g.opts.SessionTTL/3 {
-		data, _ := json.Marshal(struct {
-			SessionID  string `json:"session_id"`
-			InstanceID string `json:"instance_id"`
-		}{sessionID, identity.InstanceID})
-		var replyData []byte
-		if g.IsLeader() {
-			reply := g.Call(ctx, "KeepAlive", g.transport.Header(), data)
-			if err := metatransport.ReplyError(reply); err != nil {
-				return Session{}, err
-			}
-			replyData = reply.Data
-		} else {
-			engine := g.engine.Load()
-			if engine == nil || engine.RaftStatus().Lead == 0 {
-				return Session{}, fault.ErrUnavailable
-			}
-			address, err := g.resolveMember(ctx, engine.RaftStatus().Lead)
-			if err != nil {
-				return Session{}, err
-			}
-			reply, err := g.transport.CallAddress(ctx, address, "KeepAlive", data)
-			if err != nil {
-				return Session{}, err
-			}
-			if err = metatransport.ReplyError(reply); err != nil {
-				return Session{}, err
-			}
-			replyData = reply.Data
+	ttl := g.opts.SessionTTL
+	if record, exists := machine.Session(sessionID); exists {
+		session, err := sessionFromRecord(record)
+		if err != nil {
+			return Session{}, err
 		}
-		var response struct {
-			ExpiresIn int `json:"expires_in"`
-		}
-		if err := json.Unmarshal(replyData, &response); err != nil || response.ExpiresIn <= 0 {
-			return Session{}, fault.ErrUnavailable
+		ttl = session.TTL
+	}
+	if paused || time.Until(deadline) <= ttl-ttl/3 {
+		deadline, err := g.renewSession(ctx, sessionID, identity.InstanceID, ttl)
+		if err != nil {
+			return Session{}, err
 		}
 		g.sessionMu.Lock()
-		g.ownDeadline = time.Now().Add(time.Duration(response.ExpiresIn) * time.Second)
+		g.ownDeadline = deadline
+		g.sessionPaused = false
 		g.sessionMu.Unlock()
 	}
-	return Session{ID: sessionID, NodeName: identity.NodeName, InstanceID: identity.InstanceID, TTL: g.opts.SessionTTL}, nil
+	return Session{ID: sessionID, NodeName: identity.NodeName, InstanceID: identity.InstanceID, TTL: ttl}, nil
 }

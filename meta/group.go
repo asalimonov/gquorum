@@ -62,6 +62,9 @@ type Group struct {
 	sessionToken        chan struct{}
 	ownSession          string
 	ownDeadline         time.Time
+	sessionPaused       bool
+	lastDeactivated     string
+	serveOverride       int
 }
 
 // New constructs a meta group without starting network or Raft workers. An
@@ -104,7 +107,7 @@ func New(input Options) (*Group, error) {
 		return nil, err
 	}
 	// The transport refers back to this group through its meta-only handler seam.
-	network, err := metatransport.New(metatransport.Options{Header: &metapb.Header{ClusterId: opts.Identity.ClusterID, NodeName: opts.Identity.NodeName, MemberId: opts.Identity.MemberID, AdvertiseAddress: opts.Network.AdvertiseAddress}, Listener: opts.Network.Listener, TLS: opts.Network.TLS, ClientTLS: opts.Network.ClientTLS, AllowPlaintext: opts.Network.AllowPlaintext, Credential: opts.Network.ClusterCredential, Handler: g, Resolve: g.resolveMember, SendTimeout: opts.Timing.SendTimeout, SnapshotTimeout: 10 * time.Second, RetryInitial: opts.Timing.PeerRetryInitial, RetryMax: opts.Timing.PeerRetryMax, MaxSnapshotBytes: opts.Network.MaxSnapshotBytes, OnUnreachable: func(id uint64) {
+	network, err := metatransport.New(metatransport.Options{Header: &metapb.Header{ClusterId: opts.Identity.ClusterID, NodeName: opts.Identity.NodeName, InstanceId: opts.Identity.InstanceID, MemberId: opts.Identity.MemberID, AdvertiseAddress: opts.Network.AdvertiseAddress}, Listener: opts.Network.Listener, TLS: opts.Network.TLS, ClientTLS: opts.Network.ClientTLS, AllowPlaintext: opts.Network.AllowPlaintext, Credential: opts.Network.ClusterCredential, Handler: g, Resolve: g.resolveMember, SendTimeout: opts.Timing.SendTimeout, SnapshotTimeout: 10 * time.Second, RetryInitial: opts.Timing.PeerRetryInitial, RetryMax: opts.Timing.PeerRetryMax, MaxSnapshotBytes: opts.Network.MaxSnapshotBytes, OnUnreachable: func(id uint64) {
 		if engine := g.engine.Load(); engine != nil {
 			engine.ReportUnreachable(id)
 		}
@@ -156,6 +159,14 @@ func (g *Group) openEngine(identity Identity, mode raftengine.Mode, peers []raft
 		latest, target, active := check.Views()
 		recoveryDocuments = []topology.Document{active, target, latest}
 	}
+	override, err := store.LoadOverride()
+	if err != nil || override < 0 || override > g.rules.Limits.MaxNodes {
+		store.Close()
+		if err != nil {
+			return err
+		}
+		return fault.New(fault.Unreadable, "invalid persisted local serving override", nil)
+	}
 	machine := metaengine.NewMachine(g.rules, store)
 	machine.OnApplied = func(_ uint64, _ raftpb.ConfState) {
 		latest, target, active := machine.Views()
@@ -170,6 +181,7 @@ func (g *Group) openEngine(identity Identity, mode raftengine.Mode, peers []raft
 	}
 	g.mu.Lock()
 	g.store = store
+	g.serveOverride = override
 	g.recoveryDocuments = recoveryDocuments
 	g.machine = machine
 	g.identity = identity

@@ -3,6 +3,7 @@ package meta
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -143,17 +144,17 @@ func (g *Group) Call(ctx context.Context, method string, header *metapb.Header, 
 				return metatransport.Reply(fault.ErrIdentityMismatch)
 			}
 		case *metaengine.GrantSession:
-			if p.NodeName != header.NodeName || g.activeMemberID(p.NodeName) != header.MemberId {
+			if p.NodeName != header.NodeName || p.InstanceID == "" || p.InstanceID != header.InstanceId || g.activeMemberID(p.NodeName) != header.MemberId {
 				return metatransport.Reply(fault.ErrIdentityMismatch)
 			}
 		case *metaengine.AcquireLock:
 			session, ok := g.state().Session(p.SessionID)
-			if !ok || session.NodeName != header.NodeName {
+			if !ok || session.NodeName != header.NodeName || session.InstanceID != header.InstanceId || strings.HasPrefix(p.Key, "node/") && p.Key != "node/"+header.NodeName {
 				return metatransport.Reply(fault.ErrIdentityMismatch)
 			}
 		case *metaengine.RevokeSession:
 			session, ok := g.state().Session(p.SessionID)
-			if ok && session.NodeName != header.NodeName {
+			if ok && (session.NodeName != header.NodeName || session.InstanceID != header.InstanceId) {
 				return metatransport.Reply(fault.ErrIdentityMismatch)
 			}
 		}
@@ -174,7 +175,7 @@ func (g *Group) Call(ctx context.Context, method string, header *metapb.Header, 
 		g.leaseGate.Lock()
 		defer g.leaseGate.Unlock()
 		session, ok := g.state().Session(request.SessionID)
-		if !ok || session.NodeName != header.NodeName || session.InstanceID != request.InstanceID || g.activeMemberID(header.NodeName) != header.MemberId {
+		if !ok || session.NodeName != header.NodeName || session.InstanceID != request.InstanceID || session.InstanceID != header.InstanceId || g.activeMemberID(header.NodeName) != header.MemberId {
 			return metatransport.Reply(fault.ErrIdentityMismatch)
 		}
 		now := time.Now()

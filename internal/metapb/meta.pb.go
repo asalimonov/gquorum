@@ -29,6 +29,7 @@ type Header struct {
 	MemberId         uint64                 `protobuf:"varint,3,opt,name=member_id,json=memberId,proto3" json:"member_id,omitempty"`
 	AdvertiseAddress string                 `protobuf:"bytes,4,opt,name=advertise_address,json=advertiseAddress,proto3" json:"advertise_address,omitempty"`
 	Peers            []*PeerAddress         `protobuf:"bytes,5,rep,name=peers,proto3" json:"peers,omitempty"`
+	InstanceId       string                 `protobuf:"bytes,6,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -96,6 +97,13 @@ func (x *Header) GetPeers() []*PeerAddress {
 		return x.Peers
 	}
 	return nil
+}
+
+func (x *Header) GetInstanceId() string {
+	if x != nil {
+		return x.InstanceId
+	}
+	return ""
 }
 
 type PeerAddress struct {
@@ -426,14 +434,16 @@ var File_internal_metapb_meta_proto protoreflect.FileDescriptor
 
 const file_internal_metapb_meta_proto_rawDesc = "" +
 	"\n" +
-	"\x1ainternal/metapb/meta.proto\x12\x0fgquorum.meta.v1\"\xc2\x01\n" +
+	"\x1ainternal/metapb/meta.proto\x12\x0fgquorum.meta.v1\"\xe3\x01\n" +
 	"\x06Header\x12\x1d\n" +
 	"\n" +
 	"cluster_id\x18\x01 \x01(\tR\tclusterId\x12\x1b\n" +
 	"\tnode_name\x18\x02 \x01(\tR\bnodeName\x12\x1b\n" +
 	"\tmember_id\x18\x03 \x01(\x04R\bmemberId\x12+\n" +
 	"\x11advertise_address\x18\x04 \x01(\tR\x10advertiseAddress\x122\n" +
-	"\x05peers\x18\x05 \x03(\v2\x1c.gquorum.meta.v1.PeerAddressR\x05peers\"a\n" +
+	"\x05peers\x18\x05 \x03(\v2\x1c.gquorum.meta.v1.PeerAddressR\x05peers\x12\x1f\n" +
+	"\vinstance_id\x18\x06 \x01(\tR\n" +
+	"instanceId\"a\n" +
 	"\vPeerAddress\x12\x1b\n" +
 	"\tnode_name\x18\x01 \x01(\tR\bnodeName\x12\x1b\n" +
 	"\tmember_id\x18\x02 \x01(\x04R\bmemberId\x12\x18\n" +
