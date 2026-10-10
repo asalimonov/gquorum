@@ -1,8 +1,11 @@
-.PHONY: test test-unit test-unit-race test-race test-example run-example stop-example clean-example lint proto proto-check generate
+.PHONY: test test-unit test-unit-race test-race test-example test-cluster test-cluster-build test-cluster-run run-example stop-example clean-example lint proto proto-check generate
 
 # Bound concurrent filesystem fixtures while running independent unit cases.
 UNIT_PARALLEL ?= 4
 UNIT_PACKAGES ?= 4
+CLUSTER_IMAGE ?= gquorum-test:local
+CLUSTER_ARGS ?=
+CLUSTER_TIMEOUT ?= 15m
 
 test-unit:
 	go test -short -count=1 -parallel=$(UNIT_PARALLEL) -p=$(UNIT_PACKAGES) ./...
@@ -21,6 +24,16 @@ lint:
 
 test-example:
 	go test -count=1 -timeout=120s ./examples/cluster
+
+test-cluster-build:
+	docker build -f examples/cluster/Dockerfile -t $(CLUSTER_IMAGE) .
+
+test-cluster: test-cluster-build
+	$(MAKE) test-cluster-run
+
+# Separate module keeps Docker tooling out of the library and unit-test loop.
+test-cluster-run:
+	GQUORUM_TEST_IMAGE=$(CLUSTER_IMAGE) go -C tests/cluster test -tags cluster -count=1 -timeout=$(CLUSTER_TIMEOUT) $(CLUSTER_ARGS) ./...
 
 run-example:
 	docker compose -f examples/cluster/compose.yaml up --build -d --wait --wait-timeout 90

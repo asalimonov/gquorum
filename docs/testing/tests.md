@@ -21,8 +21,9 @@ new isolated unit cases should call `t.Parallel()` before creating fixtures.
 
 `make test` runs all unit and functional tests. Short-mode separation does not
 replace the full milestone check. `make test-unit-race` checks the parallel unit
-suite with the race detector; `make test-race` checks the full suite. Cluster and
-example suites will have explicit targets when their harnesses are implemented.
+suite with the race detector; `make test-race` checks the full suite. `make test-example` runs the REST functional suite. `make test-cluster` builds
+the fixture image once and runs the separate Docker test module. Cluster tests
+remain sequential and are excluded from the root unit and functional commands.
 
 Measured on the development machine (Go 1.26.5, macOS arm64, 14 logical CPUs):
 `make test-unit` completed in **6.86 seconds** with test-result caching disabled
@@ -60,3 +61,13 @@ The final reviewed example adds 308 parallel top-level unit cases in total,
 with 96 functional cases kept outside short mode. The uncached unit command
 completed in **18.99 seconds during a simultaneous Docker image rebuild**,
 including compilation/linking overhead, and stays below the 30-second target.
+
+The first process-cluster harness remains outside the unit dependency graph. An
+uncached unit run completed in **24.02 seconds while Docker cluster validation
+was running**. Commit-only WAL and snapshot-boundary durability regressions use
+independent readers before close/probe can flush the encoder, and run in parallel.
+
+After the WAL retry audit, **311 parallel top-level unit cases** remain in the
+root module. The uncached unit suite took **23.17 seconds during Docker image
+compilation and cluster validation**. Full functional coverage still runs with
+`make test`; the Docker suite runs explicitly with `make test-cluster`.

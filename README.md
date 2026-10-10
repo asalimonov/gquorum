@@ -30,6 +30,7 @@ make test-unit       # uncached parallel unit tests, target <30 seconds
 make test-unit-race
 make test           # all unit and functional tests
 make test-example   # real three-node REST functional coverage
+make test-cluster   # build once, then isolated Docker process clusters
 make lint
 make generate       # protoc required; pinned Go generators
 ```
@@ -39,6 +40,7 @@ unit cases per package. Functional tests skip in short mode and remain sequentia
 Override `UNIT_PACKAGES` or `UNIT_PARALLEL` when needed. See
 [testing notes](docs/testing/tests.md) and [runtime ownership](docs/architecture/runtime.md).
 
-Implementation is ongoing. The process-cluster testcontainers suite, complete
-source-test audit and bounded cluster performance checks remain required stages
+Implementation is ongoing. The [process-cluster harness](tests/cluster/README.md)
+uses isolated reusable testcontainers units in a separate test module. Complete
+source-test ports and bounded cluster performance checks remain required stages
 in the [implementation plan](docs/plans/20261010-implementation.md).
