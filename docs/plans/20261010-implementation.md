@@ -32,6 +32,8 @@ After each stage run make test. For runtime/concurrency changes also run scoped 
 - Stages 1–3 implemented: typed faults/topology validation and explicit Limits, fixed membership policy/coordinator, synchronous versioned bbolt meta store and exact identity ledger. Source document, 19 membership and 14 bbolt tests adapted, with additional cancellation, atomicity, overflow and identity regressions. `make test`, scoped `go test -race` and `make lint` pass.
 - Stage 4 verified: exact versioned pins and WAL metadata, full snapshots/real ConfState, contiguous tail replay, two-snapshot fallback retention, scoped quarantine/sweep, process-wide segment registration and joined refillers. Ten reusable conformance scenarios and source WAL/refiller scenarios pass, with added committed-write protection, concurrent idempotent writes, corrupt-newest-after-compaction fallback and caller ownership regressions. `make test`, storage race tests and `make lint` pass. Recovery owns read descriptors while using the upstream WAL decoder, avoiding early-corruption descriptor leaks in etcd 3.6 read-only handles.
 
+- Stage 5 dependency implemented ahead of runtime wiring: local event journal and bounded bus, with source retention/sequence/pagination assertions adapted and added filtering, journal-before-delivery, live-only failure, owned-copy, saturation/gap and shutdown tests. `make test`, events race tests and `make lint` pass. Stage 9 remains open for runtime recorders/facade lifecycle.
+
 ## Outstanding implementation gaps
 
 All unchecked stages above remain required. Force-new, old source-format migration, application SQL/configuration/licensing, witness mode, joint membership and linearizable read APIs remain the previously specified exclusions.
