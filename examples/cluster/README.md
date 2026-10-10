@@ -38,7 +38,13 @@ the worker-only group and receives 503.
 
 Mutations use the observed Latest version in `If-Match`. Staging and approval
 are separate operations; `apply: true` requests both. A successful approval
-returns 202 and an execution ID, whose durable status can be polled:
+returns 202 and an execution ID, whose durable status can be polled.
+
+`POST /api/topology/{version}/apply` accepts an empty body or `{}`. It refuses
+preview/apply flags in either the body or query string; use the explicit
+`POST /api/topology/{version}/plan` endpoint to inspect effects before approval.
+
+For example:
 
 ```sh
 version=$(curl -fsS "$api/api/topology/latest" | jq -r .version)

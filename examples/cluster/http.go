@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -98,6 +99,29 @@ func requestBody(w http.ResponseWriter, r *http.Request, out any) error {
 		return fault.New(fault.Invalid, "body exceeds limit or cannot be read", err)
 	}
 	return decodeJSON(body, out)
+}
+
+// Applying an approved document has no preview mode. Reject option spellings
+// before touching Raft, including valueless query flags and trailing JSON.
+func applyOptions(w http.ResponseWriter, r *http.Request, version uint64) error {
+	refusal := fault.New(fault.Invalid, fmt.Sprintf("apply accepts no preview/apply flags; preview with POST /api/topology/%d/plan", version), nil)
+	query := r.URL.Query()
+	if query.Has("dry_run") || query.Has("preview") || query.Has("apply") {
+		return refusal
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		return refusal
+	}
+	body = bytes.TrimSpace(body)
+	if len(body) == 0 {
+		return nil
+	}
+	var options struct{}
+	if bytes.Equal(body, []byte("null")) || decodeJSON(body, &options) != nil {
+		return refusal
+	}
+	return nil
 }
 func positiveNumber(value string) (uint64, error) {
 	n, err := strconv.ParseUint(value, 10, 64)
@@ -209,6 +233,10 @@ func (a *application) routes() http.Handler {
 	mux.HandleFunc("POST /api/topology/{version}/apply", func(w http.ResponseWriter, r *http.Request) {
 		version, err := positiveNumber(r.PathValue("version"))
 		if err != nil {
+			httpError(w, err)
+			return
+		}
+		if err := applyOptions(w, r, version); err != nil {
 			httpError(w, err)
 			return
 		}

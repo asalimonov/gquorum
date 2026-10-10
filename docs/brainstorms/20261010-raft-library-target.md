@@ -862,7 +862,7 @@ Provide a route for editing desired placement so the demo can show refusal when 
 | GET `/api/topology/history` | handleHistory | Paged versions and horizon. |
 | PUT `/api/topology` | handleStage | Expected version plus explicit document, returns staged version. |
 | POST `/api/topology/{version}/plan` | handlePlan | Side-effect-free plan. |
-| POST `/api/topology/{version}/apply` | handleApply | Execution ID, HTTP 202. |
+| POST `/api/topology/{version}/apply` | handleApply | Execution ID, HTTP 202; empty body or `{}`, refuse body/query mode flags and direct previews to `/plan`. |
 | GET `/api/executions/{id}` | handleExecution | Durable execution status. |
 | POST `/api/nodes` | handleAddNode | Name/type plus expected version/apply options. |
 | POST `/api/nodes/{name}/{drain,activate,exclude}` | handleNodeMutation | Version/execution ID. |

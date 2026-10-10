@@ -40,6 +40,9 @@ three/five/seven-node consensus with worker-only load placement, acknowledged
 local replication, abrupt leader death and retained process recovery. The fifteen
 load-group lifecycle case verifies independent command identities, propagation to
 every host, reserved meta protection and physical removal of every deleted store.
+Additional cases cover non-host meta-controller effects, inert staged documents,
+follower drain/activation, observed-majority drain refusal/recovery and fifteen
+concurrent CAS contenders at each of the three/five/seven-node capacities.
 All node
 counts come from topology.Limits; seven meta voters do not require seven load
 replicas. Fixtures use the library default 100ms Raft tick and a five-second

@@ -71,3 +71,9 @@ After the WAL retry audit, **311 parallel top-level unit cases** remain in the
 root module. The uncached unit suite took **23.17 seconds during Docker image
 compilation and cluster validation**. Full functional coverage still runs with
 `make test`; the Docker suite runs explicitly with `make test-cluster`.
+
+The apply-mode regression brings the root module to **312 parallel top-level unit
+cases**. After restoring and retaining the existing HTTP identity/error tests,
+`make test-unit` completed in **8.34 seconds**, with result caching disabled.
+The full library suite, example race suite and focused HTTP guard race checks
+passed separately; process-cluster cases remain sequential.
