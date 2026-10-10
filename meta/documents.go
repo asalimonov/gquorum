@@ -110,6 +110,9 @@ func (g *Group) Status(ctx context.Context) (topology.ClusterStatus, error) {
 	g.mu.RUnlock()
 	result := topology.ClusterStatus{Lifecycle: lifecycle, ErrorCode: g.terminalCode(), LatestVersion: latest.Version, TargetVersion: target.Version, ActiveVersion: active.Version}
 	result.SessionLive = g.OwnSessionLive()
+	if g.reconciler != nil {
+		result.Reconciliation = g.reconciler.Status()
+	}
 	for _, node := range latest.Nodes {
 		result.Nodes = append(result.Nodes, topology.NodeStatus{Node: node, EffectiveState: topology.EffectiveNodeState(latest, node.Name), Health: topology.HealthUnknown})
 	}

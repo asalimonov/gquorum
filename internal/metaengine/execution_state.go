@@ -95,7 +95,7 @@ func (sm *topologySM) applyCommitRepairExecution(p CommitRepairExecutionProposal
 	if err := topology.ValidatePlanShape(sm.active, doc, p.Plan); err != nil {
 		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
 	}
-	if err := validateRepairDocument(sm.active, doc); err != nil {
+	if err := validateSingleReplicaRepair(sm.active, doc); err != nil {
 		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
 	}
 	if err := validateRepairPlan(sm.active, doc, p.Plan); err != nil {
@@ -311,6 +311,49 @@ func validateRepairDocument(active, repair topology.Document) error {
 				return fmt.Errorf("repair replica ID %d exceeds allocator in group %q", rb.ReplicaID, a.ID)
 			}
 		}
+	}
+	return nil
+}
+
+// validateSingleReplicaRepair re-derives the sole document edit permitted by
+// the atomic repair command. Readmission has a separate validator because it
+// replaces the admitted node's meta and load identities together.
+func validateSingleReplicaRepair(active, repair topology.Document) error {
+	if err := validateRepairDocument(active, repair); err != nil {
+		return err
+	}
+	if repair.ParentVersion != active.Version {
+		return fmt.Errorf("repair parent is not Active")
+	}
+	expected := active.Clone()
+	expected.Version, expected.ParentVersion = repair.Version, repair.ParentVersion
+	expected.Origin, expected.ChangedBy = repair.Origin, repair.ChangedBy
+	// Explicit operator mutations may stamp their document audit comment/time.
+	// Automatic repair preserves these fields from Active.
+	if repair.Origin == topology.OriginOperator {
+		expected.Comment, expected.CreatedAt = repair.Comment, repair.CreatedAt
+	}
+	changed := 0
+	for i, group := range active.Groups {
+		for j, old := range group.Replicas {
+			next := repair.Groups[i].Replicas[j]
+			if old.ReplicaID == next.ReplicaID {
+				continue
+			}
+			node := active.Node(old.NodeName)
+			if group.ID == topology.MetaGroupID || old.Role != topology.ReplicaVoter || node == nil || node.State != topology.NodeActive || next.ReplicaID != group.NextReplicaID || next.ReplicaID == ^uint64(0) {
+				return fmt.Errorf("repair must replace one exact Active load voter with its allocator identity")
+			}
+			changed++
+			expected.Groups[i].Replicas[j].ReplicaID = next.ReplicaID
+			expected.Groups[i].Replicas[j].UpdatedAt = next.UpdatedAt
+			expected.Groups[i].NextReplicaID = next.ReplicaID + 1
+			expected.Groups[i].UpdatedAt = repair.Groups[i].UpdatedAt
+			expected.Node(old.NodeName).UpdatedAt = repair.Node(old.NodeName).UpdatedAt
+		}
+	}
+	if changed != 1 || !reflect.DeepEqual(expected, repair) {
+		return fmt.Errorf("repair changes fields outside one exact Active load voter")
 	}
 	return nil
 }

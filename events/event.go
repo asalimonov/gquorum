@@ -6,14 +6,15 @@ import "time"
 type Type string
 
 const (
-	LeaderChange     Type = "leader_change"
-	QuorumLost       Type = "quorum_lost"
-	QuorumAchieved   Type = "quorum_achieved"
-	NodeAlive        Type = "node_alive"
-	NodeDead         Type = "node_dead"
-	ExecutionChanged Type = "execution_changed"
-	DrainCompleted   Type = "drain_completed"
-	RuntimeError     Type = "runtime_error"
+	LeaderChange          Type = "leader_change"
+	QuorumLost            Type = "quorum_lost"
+	QuorumAchieved        Type = "quorum_achieved"
+	NodeAlive             Type = "node_alive"
+	NodeDead              Type = "node_dead"
+	ExecutionChanged      Type = "execution_changed"
+	DrainCompleted        Type = "drain_completed"
+	RuntimeError          Type = "runtime_error"
+	ReconciliationChanged Type = "reconciliation_changed"
 )
 
 type Event struct {
@@ -32,6 +33,7 @@ type Event struct {
 	Voters        int       `json:"voters,omitempty"`
 	ExecutionID   string    `json:"execution_id,omitempty"`
 	Code          string    `json:"code,omitempty"`
+	State         string    `json:"state,omitempty"`
 }
 type Filter struct {
 	GroupID string

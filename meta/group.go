@@ -15,6 +15,7 @@ import (
 	"github.com/asalimonov/gquorum/internal/metastore"
 	"github.com/asalimonov/gquorum/internal/metatransport"
 	"github.com/asalimonov/gquorum/internal/raftengine"
+	"github.com/asalimonov/gquorum/internal/reconcile"
 	"github.com/asalimonov/gquorum/membership"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3"
@@ -33,6 +34,7 @@ type Group struct {
 	transport           *metatransport.Transport
 	coordinator         *membership.Coordinator
 	convergence         *convergence.ConvergenceEngine
+	reconciler          *reconcile.Reconciler
 	leases              *sessionManager
 	parked              parkedRegistry
 	leaseGate           sync.Mutex
@@ -85,6 +87,10 @@ func New(input Options) (*Group, error) {
 	}
 	g.addresses[opts.Identity.NodeName] = opts.Network.AdvertiseAddress
 	g.machine = metaengine.NewMachine(g.rules, nil)
+	g.reconciler, err = reconcile.New(reconcile.Config{Host: reconciliationHost{g}, Settings: opts.Reconciliation, Logger: opts.Logger, OnTransition: g.recordReconciliation})
+	if err != nil {
+		return nil, err
+	}
 	// The transport refers back to this group through its meta-only handler seam.
 	network, err := metatransport.New(metatransport.Options{Header: &metapb.Header{ClusterId: opts.Identity.ClusterID, NodeName: opts.Identity.NodeName, MemberId: opts.Identity.MemberID, AdvertiseAddress: opts.Network.AdvertiseAddress}, Listener: opts.Network.Listener, TLS: opts.Network.TLS, ClientTLS: opts.Network.ClientTLS, AllowPlaintext: opts.Network.AllowPlaintext, Credential: opts.Network.ClusterCredential, Handler: g, Resolve: g.resolveMember, SendTimeout: opts.Timing.SendTimeout, SnapshotTimeout: 10 * time.Second, RetryInitial: opts.Timing.PeerRetryInitial, RetryMax: opts.Timing.PeerRetryMax, MaxSnapshotBytes: opts.Network.MaxSnapshotBytes, OnUnreachable: func(id uint64) {
 		if engine := g.engine.Load(); engine != nil {
@@ -183,6 +189,12 @@ func (g *Group) Start(parent context.Context) error {
 		}
 	}
 	g.convergence.Start(g.ctx)
+	if err := g.reconciler.Start(g.ctx); err != nil {
+		g.wg.Done()
+		g.fail(err)
+		go g.Stop(context.Background())
+		return err
+	}
 	g.wg.Add(1)
 	go g.runParkedSweep()
 	go g.run()
@@ -214,6 +226,9 @@ func (g *Group) Stop(ctx context.Context) error {
 		}
 		g.mu.Unlock()
 		go func() {
+			if g.reconciler != nil {
+				_ = g.reconciler.Stop(context.Background())
+			}
 			if g.convergence != nil {
 				g.convergence.Stop()
 			}

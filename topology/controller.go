@@ -47,16 +47,17 @@ type NodeStatus struct {
 	Address        string    `json:"address,omitempty"`
 }
 type ClusterStatus struct {
-	Lifecycle     string           `json:"lifecycle"`
-	ErrorCode     string           `json:"error_code,omitempty"`
-	LatestVersion uint64           `json:"latest_version"`
-	TargetVersion uint64           `json:"target_version"`
-	ActiveVersion uint64           `json:"active_version"`
-	Nodes         []NodeStatus     `json:"nodes"`
-	Groups        []GroupStatus    `json:"groups"`
-	MetaLeader    uint64           `json:"meta_leader"`
-	SessionLive   bool             `json:"session_live"`
-	Execution     *ExecutionStatus `json:"execution,omitempty"`
+	Lifecycle      string               `json:"lifecycle"`
+	ErrorCode      string               `json:"error_code,omitempty"`
+	LatestVersion  uint64               `json:"latest_version"`
+	TargetVersion  uint64               `json:"target_version"`
+	ActiveVersion  uint64               `json:"active_version"`
+	Nodes          []NodeStatus         `json:"nodes"`
+	Groups         []GroupStatus        `json:"groups"`
+	MetaLeader     uint64               `json:"meta_leader"`
+	SessionLive    bool                 `json:"session_live"`
+	Execution      *ExecutionStatus     `json:"execution,omitempty"`
+	Reconciliation ReconciliationStatus `json:"reconciliation"`
 }
 
 // GroupController implements idempotent effects on the exact authorized load identities.
@@ -78,5 +79,7 @@ type AddressResolver interface {
 	Resolve(context.Context, string) (string, error)
 }
 type HealthSource interface {
+	// Snapshot returns an owned, coherent node observation. Nil means globally
+	// unknown; a missing node or HealthUnknown remains unknown, never dead.
 	Snapshot(context.Context) (map[string]Health, error)
 }
