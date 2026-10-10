@@ -26,6 +26,8 @@ unmeasured arbitrary-size throughput.
 | Three retained-disk follower stop/restart cycles | Every survivor observes departure; retained majority commits ten commands per cycle; recovering process contains all accumulated acknowledged commands, preserves meta/load IDs, has a new process ID and produces no topology-version churn. |
 | Forty-eight commands with eight workers, WAL wait zero versus five milliseconds | Both arms acknowledge every command; each owning FSM has the same exact values and advances by exactly 48 applied entries; both persist exactly 144 replica entries, while five milliseconds increases mean entries per durable write. |
 | Fifteen-second correlated load-store stall | Every load store is armed under its exact replica identity; at least one real durable writer times out and retries. Meta leader/term stay fixed, a new meta document commits, serving/session readiness remains available, and no unpersisted command is acknowledged. Typed availability refusals recover without a restart; same-ID retries yield exact state on all owners and survive a subsequent retained-process restart. |
+| Ten-command recovery from the process's own durable store | Before/after kill, identity/state.bolt/WAL/snapshot/meta paths exist with nonempty files; full local snapshot and WAL bytes are positive. Exactly ten values recover without a peer snapshot, member/replica IDs remain fixed, process identity changes, topology stays unchanged and an eleventh command commits. |
+| Twenty-second unrelated caller-projection outage | Eight workers at a 400ms gap; every request succeeds, at least twenty per worker. Actual projection writers remain waiting while stored state stays unchanged. At least fifty WAL samples show zero failures and stalls below 500ms. All owner FSMs contain exactly the acknowledged commands, and releasing the writers restores full physical projections including request fingerprints. |
 | Fifteen-group replacement plan at three/five/seven nodes | Complete in less than 200 ms; deterministic exact transfer/remove/stop/cleanup/prepare/add/catch-up/promote ordering. Benchmark reports time and allocations. |
 | Full meta FSM snapshot at three/five/seven nodes | Fifteen groups, 128 retained documents and executions, a pending transfer and a retired group/allocation floor; payload at most four MiB; serialize/validate/restore/roundtrip in less than two seconds; canonical bytes match and restored retirement refuses ID reuse. Benchmarks report payload bytes, serialization/restore time and allocations. |
 
@@ -45,8 +47,8 @@ and cancellation remain active. Snapshot and membership controls wait for batch
 capture. The writer retains one outstanding durable batch, and application and
 outbound messages still follow persistence. A zero wait keeps immediate capture.
 
-Additional unrelated caller-store fault injection and backpressure/resource
-pressure obligations remain in the implementation plan and test-port inventory.
+Additional backpressure/resource pressure obligations remain in the
+implementation plan and test-port inventory.
 
 ## Recorded measurements
 
@@ -138,3 +140,26 @@ final image with the control guard in 102.777 seconds. Individual case bounds
 remain below two minutes. Full library tests, engine races and all three vet
 commands pass; no labeled containers, networks or volumes remain. The separate
 uncached 317-case parallel unit command takes 8.12 seconds.
+
+The normal durable-restart and unrelated caller-store outage ports pass in a
+combined final race-harness run of 110.783 seconds. No labeled containers,
+networks or volumes remain after cleanup.
+
+| Nodes | Own-store recovery seconds | Local snapshot index / bytes | Local WAL bytes | Projection outage seconds | Exact commands | Peak WAL stall ms |
+| --- | ---: | --- | ---: | ---: | ---: | ---: |
+| 3 | 11.44 | 12 / 1,241 | 1,048,576 | 25.39 | 393 | 5.373 |
+| 5 | 10.97 | 12 / 1,241 | 1,048,576 | 24.53 | 393 | 4.447 |
+| 7 | 11.06 | 12 / 1,241 | 1,048,576 | 24.91 | 393 | 3.819 |
+
+Own-store recovery checks the killed process itself, including its physical
+files and zero received peer snapshots, before continuing with an eleventh
+command. Each projection case retains the full twenty-second freeze and all
+eight source-shaped clients, with 100 WAL samples per host and zero shedding.
+The auxiliary worker is caller code compiled only into the test image; it
+persists full Machine state via atomic file replacement. Fault handshakes wait
+for a real pending write before recording a stable disk baseline, so an earlier
+admitted write cannot produce a false failure. Release catches up every exact
+value and request fingerprint without restarting. Worker cancellation/retirement
+and ordinary-build control exclusion are verified separately. Full make test
+passes, tagged example races pass in 35.513s, all vet/diff checks pass and the
+unchanged 317-case uncached parallel unit loop takes 11.21 seconds.

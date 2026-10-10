@@ -21,6 +21,16 @@ do not contribute to successful entry accounting. Meta uses its own unwrapped
 bbolt store. The fixture passes its requested load WAL coalescing wait through
 the application's constructor settings.
 
+`hooks_projection_cluster.go` implements an auxiliary caller-owned full-FSM
+projection only after an authenticated test requests it. It writes atomic JSON
+files below the application's supplied data directory, independently of Raft
+and the local event journal. Controls target an exact group/replica and can stall
+a real pending projection write. Observation reads the actual stored file and
+reports waiting/active writes separately from completed writes. A stalled worker
+does not hold the FSM lock; release resumes catch-up, and cancellation/replica
+retirement joins the worker before application storage teardown. Ordinary
+Compose builds contain neither these workers nor any projection/WAL controls.
+
 Every control request requires the fixture's fresh credential in
 `X-Gquorum-Test-Credential`. The normal application protocol keeps its existing
 credential and exact cluster/member/replica checks. None of these controls add

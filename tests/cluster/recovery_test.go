@@ -7,17 +7,122 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"path"
 	"slices"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/storage/walstore"
 	"github.com/asalimonov/gquorum/topology"
+	docker "github.com/moby/moby/client"
 )
 
 func TestCorrelatedLoadWALStallPreservesMetaAndRecoversThreeNodes(t *testing.T) {
 	correlatedWALStall(t, 3)
+}
+
+func TestDurableOwnSnapshotAndWALRecoverTenCommandsThreeNodes(t *testing.T) { durableOwnRecovery(t, 3) }
+func TestDurableOwnSnapshotAndWALRecoverTenCommandsFiveNodes(t *testing.T)  { durableOwnRecovery(t, 5) }
+func TestDurableOwnSnapshotAndWALRecoverTenCommandsSevenNodes(t *testing.T) { durableOwnRecovery(t, 7) }
+
+func ownDurableFiles(ctx context.Context, c *Cluster, node, group string) error {
+	root := path.Join("/data", "load", group) // Caller-owned fixture mount and layout.
+	for _, item := range []struct {
+		name      string
+		directory bool
+	}{
+		{root, true}, {path.Join(root, walstore.StateFile), false},
+		{path.Join(root, walstore.IdentityFile), false}, {path.Join(root, walstore.WALDir), true},
+		{path.Join(root, walstore.SnapDir), true}, {"/data/meta.bolt", false},
+	} {
+		result, err := c.docker.ContainerStatPath(ctx, c.Node(node).Container.GetContainerID(), docker.ContainerStatPathOptions{Path: item.name})
+		if err != nil {
+			return fmt.Errorf("own durable path %s: %w", item.name, err)
+		}
+		if result.Stat.Mode.IsDir() != item.directory || !item.directory && result.Stat.Size <= 0 {
+			return fmt.Errorf("own durable path has wrong kind or empty contents: %s %+v", item.name, result.Stat)
+		}
+	}
+	return nil
+}
+
+func durableOwnRecovery(t *testing.T, size int) {
+	t.Helper()
+	spec := matrixSpec(size)
+	spec.SnapshotThreshold = 100000
+	ctx, c := performanceClusterSpec(t, spec)
+	created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := map[string]string{}
+	for i := range 10 {
+		key := fmt.Sprintf("durable-%02d", i)
+		if err := c.Put(ctx, c.Spec.Nodes[i%size].Name, "work", key, key, key); err != nil {
+			t.Fatal(err)
+		}
+		expected[key] = key
+	}
+	if err := exactOwnedValues(ctx, c, created.Document, "work", expected); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Snapshot(ctx, "node1", "work"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := c.Local(ctx, "node1", "work")
+	if err != nil || !before.Found || before.Storage.SnapshotIndex == 0 || before.Storage.SnapshotBytes == 0 || before.Storage.LogBytes == 0 {
+		t.Fatal("restart has no actual full snapshot and local WAL", before, err)
+	}
+	if err := ownDurableFiles(ctx, c, "node1", "work"); err != nil {
+		t.Fatal(err)
+	}
+	victim := c.Node("node1")
+	if err := victim.Kill(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := victim.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.WaitReady(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := exactOwnedValues(ctx, c, created.Document, "work", expected); err != nil {
+		t.Fatal("own snapshot recovery lost exact state", err)
+	}
+	after, err := c.Local(ctx, "node1", "work")
+	if err != nil || after.Identity.MemberID != before.Identity.MemberID || after.ReplicaID != before.ReplicaID || after.Identity.InstanceID == before.Identity.InstanceID || after.Storage.SnapshotIndex < before.Storage.SnapshotIndex || after.Storage.SnapshotBytes == 0 || after.Storage.LogBytes == 0 {
+		t.Fatal("restart discarded its own durable identity or files", before, after, err)
+	}
+	// Peer snapshots cannot be used to hide a failed local FSM restore. All ten
+	// commands were compacted into this process's own full snapshot before kill.
+	if after.ReceivedSnapshots != 0 {
+		t.Fatal("own recovery was replaced by a peer snapshot", after.ReceivedSnapshots)
+	}
+	if err := ownDurableFiles(ctx, c, "node1", "work"); err != nil {
+		t.Fatal(err)
+	}
+	for _, node := range c.Nodes() {
+		doc, err := c.Document(ctx, node.Spec.Name, "latest")
+		if err != nil || doc.Version != created.Document.Version || doc.MemberID("node1") != before.Identity.MemberID || replicaID(doc, "work", "node1") != before.ReplicaID {
+			t.Fatal("retained restart churned topology or identity", node.Spec.Name, doc, err)
+		}
+	}
+	if err := Poll(ctx, func() (bool, error) {
+		status, err := groupStatus(ctx, c, "node1", "work")
+		return err == nil && status.LeaderID != 0 && status.HealthKnown && len(status.LiveVoters) >= 2, err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Put(ctx, "node1", "work", "post-restart", "post-restart", "post-restart"); err != nil {
+		t.Fatal(err)
+	}
+	expected["post-restart"] = "post-restart"
+	if err := exactOwnedValues(ctx, c, created.Document, "work", expected); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("METRIC nodes=%d recovered_own_commands=10 snapshot_index=%d snapshot_bytes=%d local_wal_bytes=%d new_process=true peer_snapshots=0 continued_commands=%d", size, after.Storage.SnapshotIndex, after.Storage.SnapshotBytes, after.Storage.LogBytes, len(expected))
 }
 func TestCorrelatedLoadWALStallPreservesMetaAndRecoversFiveNodes(t *testing.T) {
 	correlatedWALStall(t, 5)

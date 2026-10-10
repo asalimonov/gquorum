@@ -110,3 +110,11 @@ control unit runs in parallel under the test image's `clustertest` tag. The
 ordinary 317-case unit loop is unchanged and completes uncached in **8.12
 seconds** (8.34s and 16.11s in preceding runs). The syntax audit uses the active
 Go build context, excluding the tagged test-image unit from this default count.
+
+The retained-store/projection outage ports add two parallel unit tests in the
+test image's build context, covering full-state catch-up and retirement of a
+blocked caller worker. The ordinary example's existing parallel test now checks
+that all projection and WAL control methods are absent. The default-build count
+remains **317 parallel unit cases**, with the uncached command taking **11.21
+seconds** during Docker/race verification. Full unit/functional tests and tagged
+example races (35.513s) pass separately.

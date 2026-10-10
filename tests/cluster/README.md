@@ -95,3 +95,12 @@ and serving/session readiness, commit a meta document and reject unpersisted
 acknowledgments. After release they wait separately for serving readiness and
 actual Raft consensus, retry the same command IDs and inspect every owner after
 a retained-process restart. Controls affect only the authenticated test image.
+
+The remaining durability ports verify ten acknowledged commands recovered from
+the killed process's own full snapshot, physical bbolt/WAL files and unchanged
+member/replica identities, without receiving a peer snapshot. An eleventh command
+proves continued serving. Auxiliary projection tests freeze caller-owned file
+writers for twenty seconds while eight clients keep committing through local
+WALs. Every command and local state is exact; no request is shed and WAL stalls
+stay below 500ms. The real stored projections catch up automatically after
+release. All these cases run separately at three/five/seven nodes.

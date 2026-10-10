@@ -27,15 +27,16 @@ type effectBarrier struct {
 	last    topology.AuthorizedStep
 }
 type clusterHooks struct {
-	mu        sync.Mutex
-	barriers  map[effectKey]*effectBarrier
-	receipts  []topology.AuthorizedStep
-	snapshots map[string]uint64
-	wals      map[walKey]*walControl
+	mu          sync.Mutex
+	barriers    map[effectKey]*effectBarrier
+	receipts    []topology.AuthorizedStep
+	snapshots   map[string]uint64
+	wals        map[walKey]*walControl
+	projections map[walKey]*projectionControl
 }
 
 func newClusterHooks() *clusterHooks {
-	return &clusterHooks{barriers: map[effectKey]*effectBarrier{}, snapshots: map[string]uint64{}, wals: map[walKey]*walControl{}}
+	return &clusterHooks{barriers: map[effectKey]*effectBarrier{}, snapshots: map[string]uint64{}, wals: map[walKey]*walControl{}, projections: map[walKey]*projectionControl{}}
 }
 func (a *application) beforeClusterEffect(ctx context.Context, approved topology.AuthorizedStep) error {
 	if a.clusterHooks == nil {
@@ -116,6 +117,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 		}
 	}
 	a.registerWALRoutes(mux, protect)
+	a.registerProjectionRoutes(mux, protect)
 	mux.HandleFunc("PUT /internal/test/barriers/{group}/{kind}", protect(func(w http.ResponseWriter, r *http.Request) {
 		group, kind := r.PathValue("group"), topology.StepKind(r.PathValue("kind"))
 		if err := topology.ValidateLoadID(group); err != nil {

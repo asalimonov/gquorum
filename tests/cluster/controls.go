@@ -5,6 +5,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/asalimonov/gquorum/meta"
 	"github.com/asalimonov/gquorum/storage"
@@ -22,6 +23,40 @@ type LocalObservation struct {
 	WAL               WALCounters          `json:"wal"`
 	WALStallNS        int64                `json:"wal_stall_ns"`
 }
+
+type ProjectionObservation struct {
+	Node                               string `json:"node"`
+	Group                              string `json:"group"`
+	Replica                            uint64 `json:"replica_id"`
+	Attempts, Writes, Failures, Active uint64
+	Blocked, Waiting, Stopped          bool
+	State                              struct {
+		SchemaVersion int               `json:"schema_version"`
+		Values        map[string]string `json:"values"`
+		Requests      map[string]string `json:"requests"`
+		AppliedIndex  uint64            `json:"applied_index"`
+	} `json:"state"`
+}
+
+func (c *Cluster) Projection(ctx context.Context, node, group string, replica uint64, method string, stall bool) (ProjectionObservation, error) {
+	var view ProjectionObservation
+	var body any
+	if method == "PUT" {
+		body = map[string]bool{"stall": stall}
+	}
+	response, err := c.Request(ctx, node, method, "/internal/test/projection/"+group+"/"+strconv.FormatUint(replica, 10), body, 0)
+	if err := requireStatus(response, err, 200); err != nil {
+		return view, err
+	}
+	if err := response.Decode(&view); err != nil {
+		return view, err
+	}
+	if view.Node != node || view.Group != group || view.Replica != replica {
+		return view, fmt.Errorf("projection belongs to another node/group/replica: %+v", view)
+	}
+	return view, nil
+}
+
 type BarrierObservation struct {
 	Group string                  `json:"group"`
 	Kind  topology.StepKind       `json:"kind"`
