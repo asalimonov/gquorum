@@ -135,7 +135,12 @@ func (c *Cluster) Mutate(ctx context.Context, node, method, path string, body an
 	if err := c.WaitExecution(ctx, node, result.ExecutionID); err != nil {
 		return result, err
 	}
-	err = Poll(ctx, func() (bool, error) {
+	err = c.WaitActive(ctx, result.Document.Version)
+	return result, err
+}
+
+func (c *Cluster) WaitActive(ctx context.Context, version uint64) error {
+	return Poll(ctx, func() (bool, error) {
 		for _, n := range c.Nodes() {
 			if !n.running.Load() {
 				continue
@@ -144,14 +149,43 @@ func (c *Cluster) Mutate(ctx context.Context, node, method, path string, body an
 			if err != nil {
 				return false, err
 			}
-			if doc.Version != result.Document.Version {
+			if doc.Version != version {
 				return false, nil
 			}
 		}
 		return true, nil
 	})
-	return result, err
 }
+
+func (c *Cluster) Stage(ctx context.Context, node string, doc topology.Document) (meta.MutationResult, error) {
+	var result meta.MutationResult
+	response, err := c.Request(ctx, node, "PUT", "/api/topology", doc, doc.Version)
+	if err := requireStatus(response, err, 200); err != nil {
+		return result, err
+	}
+	return result, response.Decode(&result)
+}
+
+func (c *Cluster) Apply(ctx context.Context, node string, version uint64) (topology.ExecutionID, error) {
+	var result struct {
+		ExecutionID topology.ExecutionID `json:"execution_id"`
+	}
+	response, err := c.Request(ctx, node, "POST", fmt.Sprintf("/api/topology/%d/apply", version), nil, 0)
+	if err := requireStatus(response, err, 202); err != nil {
+		return "", err
+	}
+	if err := response.Decode(&result); err != nil {
+		return "", err
+	}
+	if result.ExecutionID == "" {
+		return "", errors.New("apply acknowledged without an execution identity")
+	}
+	if err := c.WaitExecution(ctx, node, result.ExecutionID); err != nil {
+		return result.ExecutionID, err
+	}
+	return result.ExecutionID, c.WaitActive(ctx, version)
+}
+
 func (c *Cluster) CreateGroup(ctx context.Context, node string, spec meta.GroupSpec) (meta.MutationResult, error) {
 	return c.Mutate(ctx, node, "POST", "/api/groups", map[string]any{"group": spec, "mutation": meta.MutationOptions{Apply: true, Actor: "cluster-test"}})
 }
