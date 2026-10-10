@@ -14,6 +14,7 @@ import (
 	"github.com/asalimonov/gquorum/internal/metapb"
 	"github.com/asalimonov/gquorum/internal/metastore"
 	"github.com/asalimonov/gquorum/internal/metatransport"
+	"github.com/asalimonov/gquorum/internal/observe"
 	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/internal/reconcile"
 	"github.com/asalimonov/gquorum/membership"
@@ -36,6 +37,10 @@ type Group struct {
 	coordinator         *membership.Coordinator
 	convergence         *convergence.ConvergenceEngine
 	reconciler          *reconcile.Reconciler
+	observer            *observe.Watch
+	recorderMu          sync.Mutex
+	lastExecution       *topology.ExecutionStatus
+	lastDrained         map[string]bool
 	leases              *sessionManager
 	parked              parkedRegistry
 	watches             *watchRegistry
@@ -91,6 +96,10 @@ func New(input Options) (*Group, error) {
 	g.machine = metaengine.NewMachine(g.rules, nil)
 	g.watches = newWatchRegistry(opts.MaxWatchers)
 	g.reconciler, err = reconcile.New(reconcile.Config{Host: reconciliationHost{g}, Settings: opts.Reconciliation, Logger: opts.Logger, OnTransition: g.recordReconciliation})
+	if err != nil {
+		return nil, err
+	}
+	g.observer, err = observe.New(observe.Config{Source: observationSource{g}, Settings: opts.Observation, Logger: opts.Logger, OnGroupTransition: g.recordGroupHealth, OnNodeTransition: g.recordNodeHealth})
 	if err != nil {
 		return nil, err
 	}
@@ -151,8 +160,10 @@ func (g *Group) openEngine(identity Identity, mode raftengine.Mode, peers []raft
 	machine.OnApplied = func(_ uint64, _ raftpb.ConfState) {
 		latest, target, active := machine.Views()
 		g.watches.publish(latest, target, active)
+		g.recordApplied(machine, active)
+		g.observer.Wake()
 	}
-	engine, err := raftengine.NewMeta(raftengine.Options{GroupID: topology.MetaGroupID, NodeName: identity.NodeName, ClusterID: identity.ClusterID, ReplicaID: identity.MemberID, Mode: mode, Peers: peers, Timing: raftengine.Timing{TickInterval: g.opts.Timing.TickInterval, ElectionTicks: g.opts.Timing.ElectionTicks, HeartbeatTicks: g.opts.Timing.HeartbeatTicks}, Store: &metastore.Adapter{Store: store}, Machine: machine, Transport: g.transport, Events: g.opts.Events, Logger: g.opts.Logger, SnapshotThreshold: g.opts.SnapshotThreshold})
+	engine, err := raftengine.NewMeta(raftengine.Options{GroupID: topology.MetaGroupID, NodeName: identity.NodeName, ClusterID: identity.ClusterID, InstanceID: identity.InstanceID, ReplicaID: identity.MemberID, Mode: mode, Peers: peers, Timing: raftengine.Timing{TickInterval: g.opts.Timing.TickInterval, ElectionTicks: g.opts.Timing.ElectionTicks, HeartbeatTicks: g.opts.Timing.HeartbeatTicks}, Store: &metastore.Adapter{Store: store}, Machine: machine, Transport: g.transport, Events: g.opts.Events, Logger: g.opts.Logger, SnapshotThreshold: g.opts.SnapshotThreshold})
 	if err != nil {
 		store.Close()
 		return err
@@ -202,6 +213,12 @@ func (g *Group) Start(parent context.Context) error {
 		go g.Stop(context.Background())
 		return err
 	}
+	if err := g.observer.Start(g.ctx); err != nil {
+		g.wg.Done()
+		g.fail(err)
+		go g.Stop(context.Background())
+		return err
+	}
 	g.wg.Add(1)
 	go g.runParkedSweep()
 	go g.run()
@@ -235,6 +252,9 @@ func (g *Group) Stop(ctx context.Context) error {
 		go func() {
 			if g.watches != nil {
 				g.watches.close()
+			}
+			if g.observer != nil {
+				_ = g.observer.Stop(context.Background())
 			}
 			if g.reconciler != nil {
 				_ = g.reconciler.Stop(context.Background())

@@ -3,6 +3,7 @@ package meta
 import (
 	"context"
 	"errors"
+	"maps"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
@@ -99,6 +100,10 @@ func (g *Group) Execution(ctx context.Context, id topology.ExecutionID) (topolog
 	}
 	return status, nil
 }
+// Status combines owned local document/runtime state with caller load-group
+// status queries. The caller controller must honor ctx. Health is sampled by
+// the observer; a mismatched Active version is reported as unsampled unknown
+// with a zero observation timestamp until a current sample becomes available.
 func (g *Group) Status(ctx context.Context) (topology.ClusterStatus, error) {
 	if err := ctx.Err(); err != nil {
 		return topology.ClusterStatus{}, err
@@ -107,19 +112,60 @@ func (g *Group) Status(ctx context.Context) (topology.ClusterStatus, error) {
 	latest, target, active := machine.Views()
 	g.mu.RLock()
 	lifecycle := g.lifecycle
+	addresses := maps.Clone(g.addresses)
 	g.mu.RUnlock()
 	result := topology.ClusterStatus{Lifecycle: lifecycle, ErrorCode: g.terminalCode(), LatestVersion: latest.Version, TargetVersion: target.Version, ActiveVersion: active.Version}
 	result.SessionLive = g.OwnSessionLive()
 	if g.reconciler != nil {
 		result.Reconciliation = g.reconciler.Status()
 	}
+	result.Observation = g.HealthObservation()
+	if result.Observation.Version != active.Version {
+		result.Observation = topology.HealthObservation{Version: active.Version, Groups: topology.EvaluateAllGroupHealth(active, nil)}
+	}
 	for _, node := range latest.Nodes {
-		result.Nodes = append(result.Nodes, topology.NodeStatus{Node: node, EffectiveState: topology.EffectiveNodeState(latest, node.Name), Health: topology.HealthUnknown})
+		effective := topology.EffectiveNodeState(active, node.Name)
+		if effective == "" {
+			effective = node.State
+		}
+		health := topology.HealthUnknown
+		if result.Observation.Version == active.Version {
+			if observed, exists := result.Observation.Nodes[node.Name]; exists {
+				health = observed
+			}
+		}
+		result.Nodes = append(result.Nodes, topology.NodeStatus{Node: node, EffectiveState: effective, Health: health, Address: addresses[node.Name]})
 	}
 	if engine := g.engine.Load(); engine != nil {
 		status := engine.Status()
 		result.Groups = append(result.Groups, status)
 		result.MetaLeader = status.LeaderID
+	} else if active.MetaGroup() != nil {
+		result.Groups = append(result.Groups, topology.GroupStatus{GroupID: topology.MetaGroupID, ErrorCode: string(fault.Unavailable)})
+	}
+	for _, group := range active.LoadGroups() {
+		observed := topology.GroupStatus{GroupID: group.ID}
+		var err error
+		if g.opts.LoadGroups == nil {
+			err = fault.ErrNoController
+		} else {
+			observed, err = g.opts.LoadGroups.Status(ctx, group.ID)
+		}
+		if err == nil && observed.GroupID != group.ID {
+			err = fault.ErrIdentityMismatch
+		}
+		if err != nil {
+			code := fault.Unavailable
+			var typed *fault.Error
+			if errors.As(err, &typed) {
+				code = typed.Code
+			}
+			observed = topology.GroupStatus{GroupID: group.ID, ErrorCode: string(code)}
+		}
+		if err := ctx.Err(); err != nil {
+			return topology.ClusterStatus{}, err
+		}
+		result.Groups = append(result.Groups, observed.Clone())
 	}
 	if execution, ok := machine.CurrentExecution(); ok {
 		status := execution.Status

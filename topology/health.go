@@ -1,5 +1,10 @@
 package topology
 
+import (
+	"maps"
+	"time"
+)
+
 // ObservedGroupHealth evaluates the declared Active voters against one node
 // health snapshot. Unknown observations remain nullable rather than measured zero.
 type ObservedGroupHealth struct {
@@ -14,6 +19,41 @@ type GroupHealthEvaluation struct {
 	Voters         int                 `json:"voters"`
 	Quorum         int                 `json:"quorum"`
 	ObservedHealth ObservedGroupHealth `json:"observed_health"`
+}
+
+func (e GroupHealthEvaluation) Clone() GroupHealthEvaluation {
+	if e.ObservedHealth.HealthyVoters != nil {
+		e.ObservedHealth.HealthyVoters = valuePtr(*e.ObservedHealth.HealthyVoters)
+	}
+	if e.ObservedHealth.FailureTolerance != nil {
+		e.ObservedHealth.FailureTolerance = valuePtr(*e.ObservedHealth.FailureTolerance)
+	}
+	if e.ObservedHealth.BelowMinReplicas != nil {
+		e.ObservedHealth.BelowMinReplicas = valuePtr(*e.ObservedHealth.BelowMinReplicas)
+	}
+	return e
+}
+
+// HealthObservation is an observer-local snapshot of one Active document and
+// one node-health sample. At and Version expose its age and document scope.
+// It describes declared voter availability, not a linearizable Raft read.
+type HealthObservation struct {
+	Version uint64                  `json:"version"`
+	At      time.Time               `json:"at"`
+	Nodes   map[string]Health       `json:"nodes"`
+	Groups  []GroupHealthEvaluation `json:"groups"`
+}
+
+func (s HealthObservation) Clone() HealthObservation {
+	s.Nodes = maps.Clone(s.Nodes)
+	if s.Groups != nil {
+		owned := make([]GroupHealthEvaluation, len(s.Groups))
+		for i, g := range s.Groups {
+			owned[i] = g.Clone()
+		}
+		s.Groups = owned
+	}
+	return s
 }
 
 func (h GroupHealth) QuorumLost() bool { return h == GroupQuorumLost }

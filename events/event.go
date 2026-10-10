@@ -15,6 +15,7 @@ const (
 	DrainCompleted        Type = "drain_completed"
 	RuntimeError          Type = "runtime_error"
 	ReconciliationChanged Type = "reconciliation_changed"
+	GroupHealthChanged    Type = "group_health_changed"
 )
 
 type Event struct {
@@ -23,6 +24,7 @@ type Event struct {
 	Type          Type      `json:"type"`
 	NodeName      string    `json:"node_name"`
 	InstanceID    string    `json:"instance_id"`
+	MemberID      uint64    `json:"member_id,omitempty"`
 	ClusterID     string    `json:"cluster_id"`
 	GroupID       string    `json:"group_id,omitempty"`
 	SubjectNode   string    `json:"subject_node,omitempty"`
@@ -34,6 +36,10 @@ type Event struct {
 	ExecutionID   string    `json:"execution_id,omitempty"`
 	Code          string    `json:"code,omitempty"`
 	State         string    `json:"state,omitempty"`
+	Version       uint64    `json:"version,omitempty"`
+	Attempt       uint32    `json:"attempt,omitempty"`
+	StepSeq       int       `json:"step_seq,omitempty"`
+	ReplicaID     uint64    `json:"replica_id,omitempty"`
 }
 type Filter struct {
 	GroupID string

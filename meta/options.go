@@ -17,6 +17,7 @@ import (
 
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/observe"
 	"github.com/asalimonov/gquorum/internal/reconcile"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -66,6 +67,7 @@ type Options struct {
 	LoadGroups        topology.GroupController
 	Health            topology.HealthSource
 	Reconciliation    ReconciliationOptions
+	Observation       ObservationOptions
 	Events            *events.Bus
 	Logger            *slog.Logger
 	OnSelfRemoved     func(context.Context, string) error
@@ -77,6 +79,10 @@ type Options struct {
 // 60s stable-node window and 5m action cooldown. It never repairs _meta members
 // or approves staged operator intent.
 type ReconciliationOptions = reconcile.Settings
+
+// ObservationOptions controls node/group health sampling. Defaults are a 5s
+// interval and 2s timeout. Document application also wakes the sampler.
+type ObservationOptions = observe.Settings
 type Readmission struct {
 	Previous       Identity         `json:"previous"`
 	Granted        Identity         `json:"granted"`
@@ -97,6 +103,7 @@ func DefaultTiming() Timing {
 func (o Options) defaults() Options {
 	o.Limits = o.Limits.WithDefaults()
 	o.Reconciliation = o.Reconciliation.WithDefaults()
+	o.Observation = o.Observation.WithDefaults()
 	d := DefaultTiming()
 	if o.Timing.TickInterval == 0 {
 		o.Timing.TickInterval = d.TickInterval
@@ -178,6 +185,9 @@ func (o Options) defaults() Options {
 func (o Options) Validate() error {
 	invalid := func(message string) error { return fault.New(fault.Invalid, message, nil) }
 	if err := o.Reconciliation.Validate(); err != nil {
+		return err
+	}
+	if err := o.Observation.Validate(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(o.Identity.NodeName) == "" || strings.TrimSpace(o.Identity.ClusterID) == "" || strings.TrimSpace(o.Identity.InstanceID) == "" || strings.ContainsRune(o.Identity.NodeName, 0) || strings.ContainsRune(o.Identity.ClusterID, 0) || strings.ContainsRune(o.Identity.InstanceID, 0) || strings.TrimSpace(o.DBPath) == "" {

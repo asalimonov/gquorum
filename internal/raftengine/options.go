@@ -59,7 +59,9 @@ type Timing struct {
 	WALWriteWait                  time.Duration
 }
 type Options struct {
-	GroupID, NodeName, ClusterID            string
+	GroupID, NodeName, ClusterID string
+	// InstanceID identifies the observer process in local events, when supplied.
+	InstanceID                              string
 	ReplicaID                               uint64
 	Mode                                    Mode
 	Peers                                   []raft.Peer

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"net"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -102,6 +103,20 @@ func TestFoundingIDsAreIndependentOfOrdering(t *testing.T) {
 	for _, names := range [][]string{nil, {""}, {"n1", "n1"}, {"n1\x00n2"}} {
 		if _, err := FoundingIDs("cluster", names); err == nil {
 			t.Fatal("invalid names accepted", names)
+		}
+	}
+}
+
+func TestMetaObservationOptionsRefusedBeforeOpeningStorage(t *testing.T) {
+	t.Parallel()
+	for _, settings := range []ObservationOptions{{Interval: -time.Second}, {Timeout: -time.Second}, {Interval: time.Second, Timeout: time.Second}, {Interval: time.Nanosecond, Timeout: time.Nanosecond}} {
+		o := optionsForTest(t)
+		o.Observation = settings
+		if _, err := New(o); !errors.Is(err, fault.ErrInvalid) {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(o.DBPath); !os.IsNotExist(err) {
+			t.Fatal("invalid observer settings changed storage", err)
 		}
 	}
 }

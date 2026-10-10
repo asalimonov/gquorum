@@ -2,6 +2,8 @@ package topology
 
 import (
 	"context"
+	"maps"
+	"slices"
 
 	"go.etcd.io/raft/v3/raftpb"
 )
@@ -38,6 +40,17 @@ type GroupStatus struct {
 	Progress    map[uint64]ReplicaProgress `json:"progress,omitempty"`
 	LiveVoters  map[uint64]bool            `json:"live_voters,omitempty"`
 	HealthKnown bool                       `json:"health_known"`
+	ErrorCode   string                     `json:"error_code,omitempty"`
+}
+
+func (s GroupStatus) Clone() GroupStatus {
+	s.ConfState.Voters = slices.Clone(s.ConfState.Voters)
+	s.ConfState.Learners = slices.Clone(s.ConfState.Learners)
+	s.ConfState.VotersOutgoing = slices.Clone(s.ConfState.VotersOutgoing)
+	s.ConfState.LearnersNext = slices.Clone(s.ConfState.LearnersNext)
+	s.Progress = maps.Clone(s.Progress)
+	s.LiveVoters = maps.Clone(s.LiveVoters)
+	return s
 }
 
 type NodeStatus struct {
@@ -58,6 +71,7 @@ type ClusterStatus struct {
 	SessionLive    bool                 `json:"session_live"`
 	Execution      *ExecutionStatus     `json:"execution,omitempty"`
 	Reconciliation ReconciliationStatus `json:"reconciliation"`
+	Observation    HealthObservation    `json:"observation"`
 }
 
 // GroupController implements idempotent effects on the exact authorized load identities.

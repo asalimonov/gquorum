@@ -9,6 +9,7 @@ import (
 
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"
 )
@@ -399,16 +400,15 @@ func (g *Group) refresh() {
 			answer(req, Result{}, fault.ErrNotLeader)
 			delete(g.changes, id)
 		}
-		if status.Lead == 0 {
-			g.emit(events.Event{Type: events.QuorumLost, Term: status.Term, Voters: len(g.cs.Voters)})
-		}
-	}
-	if old.RaftState != raft.StateLeader && status.RaftState == raft.StateLeader {
-		g.emit(events.Event{Type: events.QuorumAchieved, Term: status.Term, Voters: len(g.cs.Voters)})
 	}
 }
 func (g *Group) emit(e events.Event) {
 	if g.opts.Events != nil {
+		e.InstanceID = g.opts.InstanceID
+		e.ReplicaID = g.opts.ReplicaID
+		if g.opts.GroupID == topology.MetaGroupID {
+			e.MemberID = g.opts.ReplicaID
+		}
 		e.NodeName = g.opts.NodeName
 		e.ClusterID = g.opts.ClusterID
 		e.GroupID = g.opts.GroupID
