@@ -41,3 +41,26 @@ func TestSnapshotCommitIsDurableBeforePublishingBoundary(t *testing.T) {
 		t.Fatalf("published snapshot outran durable commit: %+v", hs)
 	}
 }
+
+func TestReadyRetryDurableWhenUpstreamHardStateAlreadyAdvanced(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	root := t.TempDir()
+	s := boundTest(t, root, false)
+	check(t, s.SaveReady(ctx, "group", storage.ReadyWrite{Entries: storagetest.Entries(1, 3, 1), HardState: raftpb.HardState{Term: 1, Vote: 7}}))
+	// Model the uncertain acknowledgement boundary: etcd has advanced its own
+	// HardState while the adapter still retains its previous accepted state.
+	// The next Save may skip flushing even though MustSync against that adapter
+	// state says the term changed. No public close/probe may conceal the result.
+	s.mu.Lock()
+	g := s.groups["group"]
+	s.mu.Unlock()
+	check(t, g.w.Save(raftpb.HardState{Term: 2}, nil))
+	check(t, s.SaveReady(ctx, "group", storage.ReadyWrite{HardState: raftpb.HardState{Term: 2, Commit: 3}}))
+	check(t, s.SaveApplied(ctx, "group", 3, raftpb.ConfState{Voters: []uint64{7}}))
+	_, hs, _, err := readLog(filepath.Join(root, "group", WALDir), walpb.Snapshot{})
+	check(t, err)
+	if hs.Term != 2 || hs.Commit != 3 {
+		t.Fatalf("retried Ready was acknowledged before durable WAL: %+v", hs)
+	}
+}
