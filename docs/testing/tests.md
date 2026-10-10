@@ -37,3 +37,6 @@ remain parallel; functional and cluster cases remain outside short mode.
 After the runtime facade and cold-boot additions, an uncached unit run completed
 in **7.26 seconds**. The three new integrated runtime cases remain sequential
 and skip under short mode; all new isolated unit cases run in parallel.
+
+The bootstrap identity/freshness audit adds parallel corruption and orphan-state
+cases. The uncached unit suite completed in **7.40 seconds** after these changes.

@@ -11,6 +11,9 @@ import (
 func (s *Store) MemberSeen() (bool, error) {
 	var seen bool
 	err := s.db.View(func(tx *bolt.Tx) error {
+		if _, _, err := readIdentityChecked(tx); err != nil {
+			return err
+		}
 		raw := tx.Bucket(bucketIdentity).Get(keyMemberSeen)
 		if raw == nil {
 			return nil
@@ -24,7 +27,10 @@ func (s *Store) MemberSeen() (bool, error) {
 	return seen, err
 }
 func recordMemberSeen(tx *bolt.Tx, cs raftpb.ConfState) error {
-	id, pinned := readIdentity(tx)
+	id, pinned, err := readIdentityChecked(tx)
+	if err != nil {
+		return err
+	}
 	if !pinned || id.MemberID == 0 {
 		return nil
 	}

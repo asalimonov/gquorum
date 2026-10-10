@@ -7,6 +7,13 @@ credentials, timers and integration callbacks. Start the returned meta handle
 with a caller context and wait for readiness. `Limits` is the sole capacity
 setting; its default maximum node count is three.
 
+Meta construction checks retained stores without writing them. A complete
+versioned identity pin can resume its exact member. An absent pin requires a
+fresh database, including absence of local ledgers, overrides and membership
+markers. Partial pins, incomplete/unsupported schemas and orphan retained state
+are refused. Caller-owned readmission cleanup must leave a genuinely fresh
+database before a new member pin can be installed.
+
 `OpenLoad(load.Options)` constructs a load engine with the caller's machine,
 transport and store. Start and wait for readiness on the returned handle.
 Constructor readiness and elected leadership are separate: a restored engine

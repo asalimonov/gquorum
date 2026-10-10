@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -365,15 +366,19 @@ func (s *Store) LoadAll() (raftpb.HardState, []raftpb.Entry, raftpb.Snapshot, er
 }
 
 func (s *Store) EnsureIdentity(nodeName, clusterID string, memberID uint64) error {
-	if strings.TrimSpace(nodeName) == "" || strings.TrimSpace(clusterID) == "" || memberID == 0 {
+	if strings.TrimSpace(nodeName) == "" || strings.TrimSpace(clusterID) == "" || strings.ContainsRune(nodeName, '\x00') || strings.ContainsRune(clusterID, '\x00') || memberID == 0 || memberID == math.MaxUint64 {
 		return fault.New(fault.Invalid, "meta identity must be complete", nil)
 	}
 	return s.db.Update(func(tx *bolt.Tx) error {
 		ib := tx.Bucket(bucketIdentity)
-		storedName := ib.Get(keyNodeName)
-		storedCluster := ib.Get(keyClusterID)
-		storedMember := ib.Get(keyMemberID)
-		if storedName == nil && storedCluster == nil {
+		stored, pinned, err := readIdentityChecked(tx)
+		if err != nil {
+			return err
+		}
+		if !pinned {
+			if !storeIsFresh(tx) {
+				return fault.New(fault.Unreadable, "unpinned retained meta state cannot be rebound", nil)
+			}
 			if err := ib.Put(keyNodeName, []byte(nodeName)); err != nil {
 				return err
 			}
@@ -382,7 +387,6 @@ func (s *Store) EnsureIdentity(nodeName, clusterID string, memberID uint64) erro
 			}
 			return ib.Put(keyMemberID, itob(memberID))
 		}
-		stored := Identity{NodeName: string(storedName), ClusterID: string(storedCluster), MemberID: btoi(storedMember)}
 		resolved := Identity{NodeName: nodeName, ClusterID: clusterID, MemberID: memberID}
 		if stored != resolved {
 			return &IdentityMismatchError{Stored: stored, Resolved: resolved}

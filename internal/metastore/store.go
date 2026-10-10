@@ -3,6 +3,7 @@ package metastore
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -71,12 +72,8 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("open meta database: %w", err)
 	}
 	if err := db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucketFormat)
-		if b != nil && string(b.Get(keySchemaVersion)) != "1" {
-			return fault.New(fault.Unsupported, "unsupported meta storage schema", nil)
-		}
-		if b == nil && tx.Bucket(bucketHardState) != nil {
-			return fault.New(fault.Unsupported, "unversioned meta storage schema", nil)
+		if err := validateDiskSchema(tx); err != nil {
+			return err
 		}
 		for _, name := range allBuckets {
 			if _, err := tx.CreateBucketIfNotExists(name); err != nil {
@@ -120,29 +117,103 @@ func readIdentity(tx *bolt.Tx) (Identity, bool) {
 		return Identity{}, false
 	}
 	n, c := b.Get(keyNodeName), b.Get(keyClusterID)
-	return Identity{NodeName: string(n), ClusterID: string(c), MemberID: btoi(b.Get(keyMemberID))}, n != nil || c != nil
+	first, _ := b.Cursor().First()
+	return Identity{NodeName: string(n), ClusterID: string(c), MemberID: btoi(b.Get(keyMemberID))}, first != nil
+}
+
+func readIdentityChecked(tx *bolt.Tx) (Identity, bool, error) {
+	id, found := readIdentity(tx)
+	if !found {
+		return id, false, nil
+	}
+	b := tx.Bucket(bucketIdentity)
+	if err := b.ForEach(func(key, value []byte) error {
+		if value == nil || string(key) != string(keyNodeName) && string(key) != string(keyClusterID) && string(key) != string(keyMemberID) && string(key) != string(keyMemberSeen) {
+			return fault.New(fault.Unreadable, "unknown meta identity field", nil)
+		}
+		return nil
+	}); err != nil {
+		return id, true, err
+	}
+	if strings.TrimSpace(id.NodeName) == "" || strings.TrimSpace(id.ClusterID) == "" || strings.ContainsRune(id.NodeName, '\x00') || strings.ContainsRune(id.ClusterID, '\x00') || len(b.Get(keyMemberID)) != 8 || id.MemberID == 0 || id.MemberID == math.MaxUint64 {
+		return id, true, fault.New(fault.Unreadable, "incomplete or invalid meta identity pin", nil)
+	}
+	if raw := b.Get(keyMemberSeen); raw != nil && (len(raw) != 1 || raw[0] != 1) {
+		return id, true, fault.New(fault.Unreadable, "invalid local membership marker", nil)
+	}
+	return id, true, nil
+}
+
+func validateDiskSchema(tx *bolt.Tx) error {
+	b := tx.Bucket(bucketFormat)
+	if b == nil {
+		if first, _ := tx.Cursor().First(); first != nil {
+			return fault.New(fault.Unsupported, "unversioned meta storage schema", nil)
+		}
+		return nil
+	}
+	if string(b.Get(keySchemaVersion)) != "1" {
+		return fault.New(fault.Unsupported, "unsupported meta storage schema", nil)
+	}
+	if err := b.ForEach(func(key, value []byte) error {
+		if string(key) != string(keySchemaVersion) || value == nil {
+			return fault.New(fault.Unreadable, "unknown meta format field", nil)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, name := range allBuckets {
+		if tx.Bucket(name) == nil {
+			return fault.New(fault.Unreadable, "incomplete meta storage schema", nil)
+		}
+	}
+	return nil
+}
+
+func storeIsFresh(tx *bolt.Tx) bool {
+	fresh := true
+	_ = tx.ForEach(func(name []byte, b *bolt.Bucket) error {
+		if string(name) == string(bucketFormat) {
+			return nil
+		}
+		known := false
+		for _, expected := range allBuckets {
+			if string(name) == string(expected) {
+				known = true
+				break
+			}
+		}
+		if first, _ := b.Cursor().First(); first != nil || !known {
+			fresh = false
+		}
+		return nil
+	})
+	return fresh
 }
 
 func LoadIdentity(path string) (Identity, bool, error) {
 	var id Identity
 	var found bool
-	err := withReadOnly(path, func(tx *bolt.Tx) error { id, found = readIdentity(tx); return nil })
+	err := withReadOnly(path, func(tx *bolt.Tx) error {
+		if err := validateDiskSchema(tx); err != nil {
+			return err
+		}
+		var err error
+		id, found, err = readIdentityChecked(tx)
+		return err
+	})
 	return id, found, err
 }
 
 func StoreIsFresh(path string) (bool, error) {
 	fresh := true
 	err := withReadOnly(path, func(tx *bolt.Tx) error {
-		if _, pinned := readIdentity(tx); pinned {
+		if err := validateDiskSchema(tx); err != nil {
 			fresh = false
+			return err
 		}
-		for _, name := range [][]byte{bucketHardState, bucketEntries, bucketSnapshot, bucketState, bucketApplied} {
-			if b := tx.Bucket(name); b != nil {
-				if k, _ := b.Cursor().First(); k != nil {
-					fresh = false
-				}
-			}
-		}
+		fresh = storeIsFresh(tx)
 		return nil
 	})
 	return fresh, err
@@ -150,7 +221,13 @@ func StoreIsFresh(path string) (bool, error) {
 
 func PeekLocalLineage(path string) (version, memberID uint64, err error) {
 	err = withReadOnly(path, func(tx *bolt.Tx) error {
-		id, _ := readIdentity(tx)
+		if err := validateDiskSchema(tx); err != nil {
+			return err
+		}
+		id, _, err := readIdentityChecked(tx)
+		if err != nil {
+			return err
+		}
 		memberID = id.MemberID
 		if b := tx.Bucket(bucketState); b != nil && b.Get(keyState) != nil {
 			var views struct {

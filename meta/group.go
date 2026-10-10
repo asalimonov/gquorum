@@ -95,6 +95,14 @@ func New(input Options) (*Group, error) {
 			return nil, fault.ErrIdentityMismatch
 		}
 		opts.Identity.MemberID = pin.MemberID
+	} else {
+		fresh, err := metastore.StoreIsFresh(opts.DBPath)
+		if err != nil {
+			return nil, err
+		}
+		if !fresh {
+			return nil, fault.New(fault.Unreadable, "retained meta storage lacks an identity pin", nil)
+		}
 	}
 	if opts.Join && !exists && opts.Identity.MemberID != 0 {
 		return nil, fault.New(fault.IdentityMismatch, "a retained joining identity requires a pinned store; fresh joiners must request an identity", nil)

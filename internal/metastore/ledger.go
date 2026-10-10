@@ -31,7 +31,10 @@ func (s *Store) RecordReplicaCAS(group string, record ReplicaRecord, previous ui
 		return fault.New(fault.Invalid, "replica ID must be positive", nil)
 	}
 	return s.db.Update(func(tx *bolt.Tx) error {
-		id, pinned := readIdentity(tx)
+		id, pinned, err := readIdentityChecked(tx)
+		if err != nil {
+			return err
+		}
 		if !pinned || record.NodeName != id.NodeName || record.ClusterID != id.ClusterID {
 			return fault.New(fault.IdentityMismatch, "replica ledger identity differs from meta pin", nil)
 		}
@@ -73,7 +76,10 @@ func (s *Store) LookupReplica(group string) (record ReplicaRecord, found bool, e
 		if err := json.Unmarshal(raw, &record); err != nil {
 			return err
 		}
-		id, pinned := readIdentity(tx)
+		id, pinned, err := readIdentityChecked(tx)
+		if err != nil {
+			return err
+		}
 		if !pinned || record.ReplicaID == 0 || record.NodeName != id.NodeName || record.ClusterID != id.ClusterID {
 			return fault.New(fault.IdentityMismatch, "replica ledger identity differs from meta pin", nil)
 		}
@@ -98,7 +104,10 @@ func (s *Store) ForgetReplica(group string, expected uint64) error {
 			if err := json.Unmarshal(raw, &record); err != nil {
 				return err
 			}
-			id, pinned := readIdentity(tx)
+			id, pinned, err := readIdentityChecked(tx)
+			if err != nil {
+				return err
+			}
 			if !pinned || record.NodeName != id.NodeName || record.ClusterID != id.ClusterID {
 				return fault.ErrIdentityMismatch
 			}
