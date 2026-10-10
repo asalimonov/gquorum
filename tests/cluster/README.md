@@ -68,3 +68,11 @@ The [test application](testapp/README.md) compiles authenticated controls with
 `clustertest`; the ordinary Compose example has no control routes. Adding a
 joining process keeps its containers/volumes in the lease's generation-scoped
 resource catalog, so normal release verifies their removal with the founders.
+
+Measured performance gates and operational workloads are documented in
+[performance checks](../../docs/testing/performance.md). `make test-perf` runs
+health/status pressure and successful concurrent meta/load writes at three,
+five and seven nodes; each complete case includes resource release and must
+finish within two minutes. The full cluster suite also retains the fifteen-
+second exact local-read, twenty-second readiness/status and three-cycle
+retained-process recovery workloads from the source stability tests.

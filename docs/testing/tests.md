@@ -89,3 +89,11 @@ The learner-policy, deletion-wait, leader-resume and larger-cluster shutdown por
 remain in the separate sequential Docker suite. The root's **313 parallel unit
 cases** are unchanged; an uncached run completed in **7.95 seconds** during the
 test-image rebuild. Full root tests and tagged example races passed separately.
+
+The performance/recovery milestone brings the root module to **317 parallel
+top-level unit cases**, counted from Go syntax trees. A fresh `make test-unit`
+run completed in **16.18 seconds** during image compilation and full functional
+validation. Planner/full-snapshot matrix assertions and isolated outbound queue
+checks run in parallel; the real slow-destination Raft regression remains
+functional and skips before opening fixtures in short mode. Performance and
+sustained recovery cases stay in the separate sequential Docker module.

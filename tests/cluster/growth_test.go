@@ -27,6 +27,20 @@ func stageActivation(t *testing.T, ctx context.Context, c *Cluster, name string)
 	if err := response.Decode(&staged); err != nil {
 		t.Fatal(err)
 	}
+	// Acknowledgement on node2 does not imply node1 has applied the document.
+	// Plan against node1 only after observing this exact staged version there.
+	if err := Poll(ctx, func() (bool, error) {
+		doc, err := c.Document(ctx, "node1", "latest")
+		if err != nil {
+			return false, err
+		}
+		if doc.Version > staged.Document.Version {
+			return true, fmt.Errorf("unexpected topology change before plan: %d > %d", doc.Version, staged.Document.Version)
+		}
+		return doc.Version == staged.Document.Version, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	response, err = c.Request(ctx, "node1", "POST", fmt.Sprintf("/api/topology/%d/plan", staged.Document.Version), nil, 0)
 	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)

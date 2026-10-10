@@ -41,7 +41,8 @@ type AppliedObserver interface {
 }
 
 // Transport owns routing and identity validation. Send receives owned copies;
-// it must honor cancellation. Asynchronous transports report later failures
+// it must honor cancellation. Calls for different destinations can run concurrently;
+// calls for a single destination are serialized. Asynchronous transports report later failures
 // through ReportUnreachable and ReportSnapshot.
 type Transport interface {
 	Send(context.Context, []raftpb.Message) error

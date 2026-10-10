@@ -128,24 +128,3 @@ func (g *Group) retry(write func(context.Context) error) error {
 		backoff = min(backoff*2, 5*time.Second)
 	}
 }
-func (g *Group) sender() {
-	defer g.wg.Done()
-	for {
-		select {
-		case <-g.ctx.Done():
-			return
-		case messages := <-g.sendC:
-			ctx, cancel := context.WithTimeout(g.ctx, g.opts.Timing.TickInterval*time.Duration(g.opts.Timing.ElectionTicks)/2)
-			err := g.opts.Transport.Send(ctx, messages)
-			cancel()
-			if err != nil {
-				for _, m := range messages {
-					g.ReportUnreachable(m.To)
-					if m.Type == raftpb.MsgSnap {
-						g.ReportSnapshot(m.To, raft.SnapshotFailure)
-					}
-				}
-			}
-		}
-	}
-}

@@ -21,6 +21,13 @@ can replay its committed tail before it has a leader. Load stores, machines,
 transports and a supplied event bus remain caller-owned. The runtime inherits
 its logger and event bus into options that omit them.
 
+`Transport.Send` must honor cancellation and accept concurrent calls for different
+destinations. Calls to one destination are serialized. The engine copies outbound
+messages and routes them through a bounded queue per destination, so a stalled
+peer cannot delay healthy-majority traffic. Removed peers discard obsolete queued
+traffic while retaining a bounded attempt to deliver the committed removal.
+Idle removed-peer workers are released; successful `Stop` joins all send workers.
+
 An attached meta handle requires the exact approved Target node, cluster,
 member and load-replica identities. Staged Latest intent cannot open a load
 replica. The observing process ID defaults to the current meta process and an

@@ -1,4 +1,4 @@
-.PHONY: test test-unit test-unit-race test-race test-example test-cluster test-cluster-build test-cluster-run run-example stop-example clean-example lint proto proto-check generate
+.PHONY: test test-unit test-unit-race test-race test-example test-cluster test-cluster-build test-cluster-run test-perf test-perf-run bench run-example stop-example clean-example lint proto proto-check generate
 
 # Bound concurrent filesystem fixtures while running independent unit cases.
 UNIT_PARALLEL ?= 4
@@ -6,6 +6,7 @@ UNIT_PACKAGES ?= 4
 CLUSTER_IMAGE ?= gquorum-test:local
 CLUSTER_ARGS ?=
 CLUSTER_TIMEOUT ?= 15m
+BENCH_TIME ?= 200ms
 
 test-unit:
 	go test -short -count=1 -parallel=$(UNIT_PARALLEL) -p=$(UNIT_PACKAGES) ./...
@@ -34,6 +35,16 @@ test-cluster: test-cluster-build
 # Separate module keeps Docker tooling out of the library and unit-test loop.
 test-cluster-run:
 	GQUORUM_TEST_IMAGE=$(CLUSTER_IMAGE) go -C tests/cluster test -tags cluster -count=1 -timeout=$(CLUSTER_TIMEOUT) $(CLUSTER_ARGS) ./...
+
+# Each performance case owns a separate deadline, including generation cleanup.
+test-perf: test-cluster-build
+	$(MAKE) test-perf-run
+
+test-perf-run:
+	$(MAKE) test-cluster-run CLUSTER_ARGS='-v -run ^TestPerf_'
+
+bench:
+	go test -run '^$$' -bench '^(BenchmarkPlanner|BenchmarkMetaSnapshot)' -benchmem -benchtime=$(BENCH_TIME) ./topology ./internal/metaengine
 
 run-example:
 	docker compose -f examples/cluster/compose.yaml up --build -d --wait --wait-timeout 90

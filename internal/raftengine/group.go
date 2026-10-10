@@ -66,6 +66,7 @@ type Group struct {
 	unreachable                             chan uint64
 	reports                                 chan snapshotReport
 	sendC                                   chan []raftpb.Message
+	sendWorkers                             atomic.Int64
 	writeC                                  chan writeJob
 	writeDone                               chan writeResult
 	pending                                 *writeJob

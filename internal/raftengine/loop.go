@@ -315,6 +315,9 @@ func (g *Group) apply(entry raftpb.Entry) error {
 	return nil
 }
 func (g *Group) advance() error {
+	// Publish applied membership before the sender routes this Ready. A newly
+	// admitted peer must not be mistaken for a retired destination by stale cache.
+	g.refresh()
 	rd := g.pending.rd
 	rd.Messages = append(rd.Messages, g.retirementMessages...)
 	g.retirementMessages = nil
