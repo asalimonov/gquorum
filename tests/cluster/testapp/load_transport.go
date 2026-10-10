@@ -7,9 +7,9 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/asalimonov/gquorum/examples/cluster/loadpb"
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/tests/cluster/testapp/loadpb"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"

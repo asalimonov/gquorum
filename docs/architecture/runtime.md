@@ -21,6 +21,13 @@ can replay its committed tail before it has a leader. Load stores, machines,
 transports and a supplied event bus remain caller-owned. The runtime inherits
 its logger and event bus into options that omit them.
 
+`load.Group.ProposalStats()` observes the local admission limit, in-flight
+callers, queued proposals and registered commit waiters. The commit-waiter
+count comes from the Raft loop; its refresh and the concurrent channel counts
+are independent observations. Canceled callers are pruned while persistence
+is blocked. Cancellation does not roll back an already proposed command;
+the caller's machine must deduplicate exact request identities on retry.
+
 `Transport.Send` must honor cancellation and accept concurrent calls for different
 destinations. Calls to one destination are serialized. The engine copies outbound
 messages and routes them through a bounded queue per destination, so a stalled
@@ -115,3 +122,10 @@ probing peers or invoking application controllers. It reports the exact local
 host, term, leader, membership and cursors; `Found` is false before the engine
 starts and after it stops. Use the aggregate `Status(ctx)` for cluster/load
 observations. Neither method supplies a linearizable read or proves quorum.
+
+The `_meta` Compose demo is intentionally small. The full application-defined
+load FSM/protocol, exact effect receiver, recovery adapter and fault controls
+belong to the independent `tests/cluster/testapp` fixture. Library integration
+and process-cluster scenarios reside in `tests/cluster`; the example compiles
+without test instrumentation or a load protocol. Its actual Compose REST e2e
+also lives in the test module.

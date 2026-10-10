@@ -1,5 +1,3 @@
-//go:build clustertest
-
 package main
 
 import (

@@ -118,3 +118,14 @@ that all projection and WAL control methods are absent. The default-build count
 remains **317 parallel unit cases**, with the uncached command taking **11.21
 seconds** during Docker/race verification. Full unit/functional tests and tagged
 example races (35.513s) pass separately.
+
+The October 11 scope correction separates the small `_meta` demo from all Raft
+fixtures and scenarios. Root default-build syntax audit counts **312 parallel
+unit cases**, and the dedicated `tests/cluster/testapp` adds **ten parallel
+units**. `make test-unit` executes both uncached in **9.49 seconds**. Functional
+fixture tests skip in short mode and run sequentially through `make test` or
+`make test-fixture`; Docker cases use `make test-cluster`. `make test-example`
+now runs the actual Compose demo's REST e2e from `tests/cluster/example_test.go`,
+with independent ports/projects/images/volumes and verified cleanup. Historical
+`clustertest` measurements above predate this relocation; those build tags and
+instrumentation are removed from the example.

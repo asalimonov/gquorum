@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/meta"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
@@ -22,6 +23,7 @@ type LocalObservation struct {
 	ReceivedSnapshots uint64               `json:"received_snapshots"`
 	WAL               WALCounters          `json:"wal"`
 	WALStallNS        int64                `json:"wal_stall_ns"`
+	Proposals         load.ProposalStats   `json:"proposals"`
 }
 
 type ProjectionObservation struct {

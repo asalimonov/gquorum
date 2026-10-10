@@ -13,12 +13,12 @@ import (
 
 	"github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/events"
-	"github.com/asalimonov/gquorum/examples/cluster/loadpb"
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/membership"
 	"github.com/asalimonov/gquorum/meta"
 	"github.com/asalimonov/gquorum/storage/walstore"
+	"github.com/asalimonov/gquorum/tests/cluster/testapp/loadpb"
 	"github.com/asalimonov/gquorum/topology"
 	"google.golang.org/grpc"
 )

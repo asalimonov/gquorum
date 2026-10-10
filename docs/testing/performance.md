@@ -47,8 +47,23 @@ and cancellation remain active. Snapshot and membership controls wait for batch
 capture. The writer retains one outstanding durable batch, and application and
 outbound messages still follow persistence. A zero wait keeps immediate capture.
 
-Additional backpressure/resource pressure obligations remain in the
-implementation plan and test-port inventory.
+Pending-admission cases retain a ten-second baseline and thirty-second
+measurement with forty healthy writers paced at 200 ms, alongside eight
+overload writers paced at 20 ms and 4,000 excess admission attempts. A real
+single-voter load WAL is blocked to keep its leader deterministic; meta and
+the independent three-voter load group remain distributed. Native observations
+must show at least 80% of the default 256 commit-waiter slots occupied throughout,
+never exceed the bound, and clear all callers/queued/registered waiters before
+the writer is released. Every excess request returns typed overload with p95
+below one second. Healthy writes retain at least 30% of the baseline fraction
+within 100 ms and exact state on every owner. Exact canceled-request retries
+materialize 256 values once, and none of the refused identities appear.
+
+The source's 4,000 application reservations are replaced by 4,000 excess
+proposal attempts against the library's bounded admission, rather than
+claiming 4,000 held engine waiters. Domain admission ratios, reservation indexes
+and HTTP retry-header policy belong to the caller. Additional resource pressure
+and supporting source obligations remain in the implementation plan and inventory.
 
 ## Recorded measurements
 
@@ -163,3 +178,17 @@ value and request fingerprint without restarting. Worker cancellation/retirement
 and ordinary-build control exclusion are verified separately. Full make test
 passes, tagged example races pass in 35.513s, all vet/diff checks pass and the
 unchanged 317-case uncached parallel unit loop takes 11.21 seconds.
+
+The dedicated-fixture pressure matrix passes at three/five/seven nodes in
+48.02/48.71/48.20 seconds including cleanup. Each observes all 256 native
+waiter slots for thirty seconds, refuses 15,024/14,976/15,184 excess and paced
+requests with overload p95 2.553/2.870/2.002 ms, and retains 100% of both
+baseline and pressure proposals inside 100 ms in the independent group. Its
+7,751/7,761/7,816 exact healthy values reach every owner. Canceling the held
+callers clears in-flight/queue/registered counts while persistence remains
+blocked; exact retries recover 257 held-group values including warmup, with
+no refused-request keys. These are 4,000 burst attempts plus sustained refusals
+against bounded engine waiters, not 4,000 held application reservations.
+The seven-case regression invocation also passes learner growth, admission
+leader transfer, own-store recovery and projection outage in 199.882 seconds,
+using the separate `tests/cluster/testapp` binary rather than the demo.

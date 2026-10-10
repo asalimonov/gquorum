@@ -25,6 +25,11 @@ func (g *Group) run() {
 		}
 		g.cached.Lead = 0
 		g.cached.RaftState = raft.StateFollower
+		g.cachedPending = 0
+		// The loop exclusively owns these maps. Release canceled request data
+		// even when a caller retains the stopped Group for inspection.
+		clear(g.props)
+		clear(g.changes)
 		g.mu.Unlock()
 	}()
 	ticker := time.NewTicker(g.opts.Timing.TickInterval)
@@ -467,6 +472,7 @@ func (g *Group) refresh() {
 	g.mu.Lock()
 	old := g.cached
 	g.cached = status
+	g.cachedPending = len(g.props)
 	g.mu.Unlock()
 	if old.Lead != status.Lead {
 		g.emit(events.Event{Type: events.LeaderChange, OldLeader: fmt.Sprint(old.Lead), NewLeader: fmt.Sprint(status.Lead), Term: status.Term})

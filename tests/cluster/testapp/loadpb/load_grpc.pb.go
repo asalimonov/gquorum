@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v7.34.1
-// source: examples/cluster/load.proto
+// source: tests/cluster/testapp/load.proto
 
 package loadpb
 
@@ -19,8 +19,8 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Load_Deliver_FullMethodName = "/gquorum.example.load.v1.Load/Deliver"
-	Load_Call_FullMethodName    = "/gquorum.example.load.v1.Load/Call"
+	Load_Deliver_FullMethodName = "/gquorum.fixture.load.v1.Load/Deliver"
+	Load_Call_FullMethodName    = "/gquorum.fixture.load.v1.Load/Call"
 )
 
 // LoadClient is the client API for Load service.
@@ -142,7 +142,7 @@ func _Load_Call_Handler(srv interface{}, ctx context.Context, dec func(interface
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var Load_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "gquorum.example.load.v1.Load",
+	ServiceName: "gquorum.fixture.load.v1.Load",
 	HandlerType: (*LoadServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -155,5 +155,5 @@ var Load_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "examples/cluster/load.proto",
+	Metadata: "tests/cluster/testapp/load.proto",
 }

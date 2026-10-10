@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.10
 // 	protoc        v7.34.1
-// source: examples/cluster/load.proto
+// source: tests/cluster/testapp/load.proto
 
 package loadpb
 
@@ -34,7 +34,7 @@ type Header struct {
 
 func (x *Header) Reset() {
 	*x = Header{}
-	mi := &file_examples_cluster_load_proto_msgTypes[0]
+	mi := &file_tests_cluster_testapp_load_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -46,7 +46,7 @@ func (x *Header) String() string {
 func (*Header) ProtoMessage() {}
 
 func (x *Header) ProtoReflect() protoreflect.Message {
-	mi := &file_examples_cluster_load_proto_msgTypes[0]
+	mi := &file_tests_cluster_testapp_load_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -59,7 +59,7 @@ func (x *Header) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Header.ProtoReflect.Descriptor instead.
 func (*Header) Descriptor() ([]byte, []int) {
-	return file_examples_cluster_load_proto_rawDescGZIP(), []int{0}
+	return file_tests_cluster_testapp_load_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *Header) GetClusterId() string {
@@ -103,7 +103,7 @@ type Request struct {
 
 func (x *Request) Reset() {
 	*x = Request{}
-	mi := &file_examples_cluster_load_proto_msgTypes[1]
+	mi := &file_tests_cluster_testapp_load_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -115,7 +115,7 @@ func (x *Request) String() string {
 func (*Request) ProtoMessage() {}
 
 func (x *Request) ProtoReflect() protoreflect.Message {
-	mi := &file_examples_cluster_load_proto_msgTypes[1]
+	mi := &file_tests_cluster_testapp_load_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -128,7 +128,7 @@ func (x *Request) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Request.ProtoReflect.Descriptor instead.
 func (*Request) Descriptor() ([]byte, []int) {
-	return file_examples_cluster_load_proto_rawDescGZIP(), []int{1}
+	return file_tests_cluster_testapp_load_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Request) GetHeader() *Header {
@@ -178,7 +178,7 @@ type Frame struct {
 
 func (x *Frame) Reset() {
 	*x = Frame{}
-	mi := &file_examples_cluster_load_proto_msgTypes[2]
+	mi := &file_tests_cluster_testapp_load_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -190,7 +190,7 @@ func (x *Frame) String() string {
 func (*Frame) ProtoMessage() {}
 
 func (x *Frame) ProtoReflect() protoreflect.Message {
-	mi := &file_examples_cluster_load_proto_msgTypes[2]
+	mi := &file_tests_cluster_testapp_load_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -203,7 +203,7 @@ func (x *Frame) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Frame.ProtoReflect.Descriptor instead.
 func (*Frame) Descriptor() ([]byte, []int) {
-	return file_examples_cluster_load_proto_rawDescGZIP(), []int{2}
+	return file_tests_cluster_testapp_load_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Frame) GetHeader() *Header {
@@ -246,7 +246,7 @@ type Reply struct {
 
 func (x *Reply) Reset() {
 	*x = Reply{}
-	mi := &file_examples_cluster_load_proto_msgTypes[3]
+	mi := &file_tests_cluster_testapp_load_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -258,7 +258,7 @@ func (x *Reply) String() string {
 func (*Reply) ProtoMessage() {}
 
 func (x *Reply) ProtoReflect() protoreflect.Message {
-	mi := &file_examples_cluster_load_proto_msgTypes[3]
+	mi := &file_tests_cluster_testapp_load_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -271,7 +271,7 @@ func (x *Reply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Reply.ProtoReflect.Descriptor instead.
 func (*Reply) Descriptor() ([]byte, []int) {
-	return file_examples_cluster_load_proto_rawDescGZIP(), []int{3}
+	return file_tests_cluster_testapp_load_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Reply) GetErrorCode() string {
@@ -302,11 +302,11 @@ func (x *Reply) GetReplicaId() uint64 {
 	return 0
 }
 
-var File_examples_cluster_load_proto protoreflect.FileDescriptor
+var File_tests_cluster_testapp_load_proto protoreflect.FileDescriptor
 
-const file_examples_cluster_load_proto_rawDesc = "" +
+const file_tests_cluster_testapp_load_proto_rawDesc = "" +
 	"\n" +
-	"\x1bexamples/cluster/load.proto\x12\x17gquorum.example.load.v1\"\x82\x01\n" +
+	" tests/cluster/testapp/load.proto\x12\x17gquorum.fixture.load.v1\"\x82\x01\n" +
 	"\x06Header\x12\x1d\n" +
 	"\n" +
 	"cluster_id\x18\x01 \x01(\tR\tclusterId\x12\x1b\n" +
@@ -315,14 +315,14 @@ const file_examples_cluster_load_proto_rawDesc = "" +
 	"instanceId\x12\x1b\n" +
 	"\tmember_id\x18\x04 \x01(\x04R\bmemberId\"\xa8\x01\n" +
 	"\aRequest\x127\n" +
-	"\x06header\x18\x01 \x01(\v2\x1f.gquorum.example.load.v1.HeaderR\x06header\x12\x16\n" +
+	"\x06header\x18\x01 \x01(\v2\x1f.gquorum.fixture.load.v1.HeaderR\x06header\x12\x16\n" +
 	"\x06method\x18\x02 \x01(\tR\x06method\x12\x19\n" +
 	"\bgroup_id\x18\x03 \x01(\tR\agroupId\x12\x1d\n" +
 	"\n" +
 	"replica_id\x18\x04 \x01(\x04R\treplicaId\x12\x12\n" +
 	"\x04data\x18\x05 \x01(\fR\x04data\"\xa2\x01\n" +
 	"\x05Frame\x127\n" +
-	"\x06header\x18\x01 \x01(\v2\x1f.gquorum.example.load.v1.HeaderR\x06header\x12\x19\n" +
+	"\x06header\x18\x01 \x01(\v2\x1f.gquorum.fixture.load.v1.HeaderR\x06header\x12\x19\n" +
 	"\bgroup_id\x18\x02 \x01(\tR\agroupId\x12\"\n" +
 	"\rto_replica_id\x18\x03 \x01(\x04R\vtoReplicaId\x12!\n" +
 	"\fraft_message\x18\x04 \x01(\fR\vraftMessage\"s\n" +
@@ -334,35 +334,35 @@ const file_examples_cluster_load_proto_rawDesc = "" +
 	"\n" +
 	"replica_id\x18\x04 \x01(\x04R\treplicaId2\x9b\x01\n" +
 	"\x04Load\x12I\n" +
-	"\aDeliver\x12\x1e.gquorum.example.load.v1.Frame\x1a\x1e.gquorum.example.load.v1.Reply\x12H\n" +
-	"\x04Call\x12 .gquorum.example.load.v1.Request\x1a\x1e.gquorum.example.load.v1.ReplyB>Z<github.com/asalimonov/gquorum/examples/cluster/loadpb;loadpbb\x06proto3"
+	"\aDeliver\x12\x1e.gquorum.fixture.load.v1.Frame\x1a\x1e.gquorum.fixture.load.v1.Reply\x12H\n" +
+	"\x04Call\x12 .gquorum.fixture.load.v1.Request\x1a\x1e.gquorum.fixture.load.v1.ReplyBCZAgithub.com/asalimonov/gquorum/tests/cluster/testapp/loadpb;loadpbb\x06proto3"
 
 var (
-	file_examples_cluster_load_proto_rawDescOnce sync.Once
-	file_examples_cluster_load_proto_rawDescData []byte
+	file_tests_cluster_testapp_load_proto_rawDescOnce sync.Once
+	file_tests_cluster_testapp_load_proto_rawDescData []byte
 )
 
-func file_examples_cluster_load_proto_rawDescGZIP() []byte {
-	file_examples_cluster_load_proto_rawDescOnce.Do(func() {
-		file_examples_cluster_load_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_examples_cluster_load_proto_rawDesc), len(file_examples_cluster_load_proto_rawDesc)))
+func file_tests_cluster_testapp_load_proto_rawDescGZIP() []byte {
+	file_tests_cluster_testapp_load_proto_rawDescOnce.Do(func() {
+		file_tests_cluster_testapp_load_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_tests_cluster_testapp_load_proto_rawDesc), len(file_tests_cluster_testapp_load_proto_rawDesc)))
 	})
-	return file_examples_cluster_load_proto_rawDescData
+	return file_tests_cluster_testapp_load_proto_rawDescData
 }
 
-var file_examples_cluster_load_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
-var file_examples_cluster_load_proto_goTypes = []any{
-	(*Header)(nil),  // 0: gquorum.example.load.v1.Header
-	(*Request)(nil), // 1: gquorum.example.load.v1.Request
-	(*Frame)(nil),   // 2: gquorum.example.load.v1.Frame
-	(*Reply)(nil),   // 3: gquorum.example.load.v1.Reply
+var file_tests_cluster_testapp_load_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_tests_cluster_testapp_load_proto_goTypes = []any{
+	(*Header)(nil),  // 0: gquorum.fixture.load.v1.Header
+	(*Request)(nil), // 1: gquorum.fixture.load.v1.Request
+	(*Frame)(nil),   // 2: gquorum.fixture.load.v1.Frame
+	(*Reply)(nil),   // 3: gquorum.fixture.load.v1.Reply
 }
-var file_examples_cluster_load_proto_depIdxs = []int32{
-	0, // 0: gquorum.example.load.v1.Request.header:type_name -> gquorum.example.load.v1.Header
-	0, // 1: gquorum.example.load.v1.Frame.header:type_name -> gquorum.example.load.v1.Header
-	2, // 2: gquorum.example.load.v1.Load.Deliver:input_type -> gquorum.example.load.v1.Frame
-	1, // 3: gquorum.example.load.v1.Load.Call:input_type -> gquorum.example.load.v1.Request
-	3, // 4: gquorum.example.load.v1.Load.Deliver:output_type -> gquorum.example.load.v1.Reply
-	3, // 5: gquorum.example.load.v1.Load.Call:output_type -> gquorum.example.load.v1.Reply
+var file_tests_cluster_testapp_load_proto_depIdxs = []int32{
+	0, // 0: gquorum.fixture.load.v1.Request.header:type_name -> gquorum.fixture.load.v1.Header
+	0, // 1: gquorum.fixture.load.v1.Frame.header:type_name -> gquorum.fixture.load.v1.Header
+	2, // 2: gquorum.fixture.load.v1.Load.Deliver:input_type -> gquorum.fixture.load.v1.Frame
+	1, // 3: gquorum.fixture.load.v1.Load.Call:input_type -> gquorum.fixture.load.v1.Request
+	3, // 4: gquorum.fixture.load.v1.Load.Deliver:output_type -> gquorum.fixture.load.v1.Reply
+	3, // 5: gquorum.fixture.load.v1.Load.Call:output_type -> gquorum.fixture.load.v1.Reply
 	4, // [4:6] is the sub-list for method output_type
 	2, // [2:4] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
@@ -370,26 +370,26 @@ var file_examples_cluster_load_proto_depIdxs = []int32{
 	0, // [0:2] is the sub-list for field type_name
 }
 
-func init() { file_examples_cluster_load_proto_init() }
-func file_examples_cluster_load_proto_init() {
-	if File_examples_cluster_load_proto != nil {
+func init() { file_tests_cluster_testapp_load_proto_init() }
+func file_tests_cluster_testapp_load_proto_init() {
+	if File_tests_cluster_testapp_load_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_examples_cluster_load_proto_rawDesc), len(file_examples_cluster_load_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tests_cluster_testapp_load_proto_rawDesc), len(file_tests_cluster_testapp_load_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_examples_cluster_load_proto_goTypes,
-		DependencyIndexes: file_examples_cluster_load_proto_depIdxs,
-		MessageInfos:      file_examples_cluster_load_proto_msgTypes,
+		GoTypes:           file_tests_cluster_testapp_load_proto_goTypes,
+		DependencyIndexes: file_tests_cluster_testapp_load_proto_depIdxs,
+		MessageInfos:      file_tests_cluster_testapp_load_proto_msgTypes,
 	}.Build()
-	File_examples_cluster_load_proto = out.File
-	file_examples_cluster_load_proto_goTypes = nil
-	file_examples_cluster_load_proto_depIdxs = nil
+	File_tests_cluster_testapp_load_proto = out.File
+	file_tests_cluster_testapp_load_proto_goTypes = nil
+	file_tests_cluster_testapp_load_proto_depIdxs = nil
 }

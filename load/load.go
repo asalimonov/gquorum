@@ -11,6 +11,7 @@ type Mode = raftengine.Mode
 type Timing = raftengine.Timing
 type Options = raftengine.Options
 type Proposal = raftengine.Proposal
+type ProposalStats = raftengine.ProposalStats
 type Group = raftengine.Group
 type Registry = raftengine.Registry
 

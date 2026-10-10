@@ -849,11 +849,24 @@ Runtime.Close stops proposals/approval/convergence, cancels effect calls and joi
 
 ## 9. Example files, REST routes and validation
 
-CREATED `examples/cluster/{main,controller,machine,http,load_transport}.go`, `load.proto`/generated files, `Dockerfile`, `compose.yaml`, `README.md`. Keep the example caller protocol inside the example, never exported from the library. Use Go standard HTTP handlers; any grpc implementation for load is the example's choice.
+Updated by the user's October 11 scope correction: `examples/cluster` is a small
+three-voter `_meta` demo. It contains startup/shutdown and HTTP adapters for
+status, documents, drain/activate, approval and execution status. Two workers
+and one observer all participate in meta. Each Compose volume supplies its
+explicit `/data/meta.bolt` path. The demo has no load FSM/protocol, recovery
+controller, fault controls, test build tags or embedded cluster scenarios.
 
-Three Compose nodes have separate durable volumes and caller-selected `/data/meta.bolt`, `/data/load`, `/data/events.bolt` paths. Example chooses these paths and passes them; library contains no such literals. Use a small full-state key/value Machine, nodes of caller types `worker` and `observer`, and two groups: an unrestricted demo group and a worker-only group. For a useful maintenance demonstration use two workers plus one observer, unrestricted placement 2..3, worker-only placement 1..2. Draining the observer demonstrates a successful unrestricted-group shrink from three voters to two and retains all meta voters. Draining a worker stages a worker-only shrink from two voters to one, which the preserved current-quorum safety floor refuses at approval. Do not weaken that floor to make the example succeed. The HTTP API exposes the staged version and refusal; Target and Active remain approved. Restore the approved document to undo that staged edit.
+The independent application in `tests/cluster/testapp` owns the full caller
+load FSM/protocol, effect receiver, lifecycle/recovery adapter, optional local
+journal and authenticated fault controls. All process-cluster scenarios and
+fixture integration tests stay under `tests/cluster`. Its independently
+generated protocol is confined to that test module. Applicable load placement,
+unsafe-shrink, identity, events and recovery obligations remain required there.
+The real Compose demo has REST e2e coverage in `tests/cluster/example_test.go`,
+using a unique project/image, private volumes and random host ports.
 
-Provide a route for editing desired placement so the demo can show refusal when a caller asks for min two worker replicas in a staged document with only one eligible active worker. Demonstrate node replacement by excluding the old node before admitting its replacement, keeping the example within its default Limits.MaxNodes. All admitted example nodes remain meta voters regardless of type.
+The following larger HTTP surface belongs to the **test fixture**; the small
+demo implements only its status/document/drain/activate/approval/execution subset.
 
 | Method/path | Handler | Result |
 | --- | --- | --- |
@@ -879,7 +892,7 @@ Provide a route for editing desired placement so the demo can show refusal when 
 
 All mutations carry explicit expected versions/actor/apply intent; use If-Match to populate ExpectedVersion in HTTP handlers. Typed errors map to 400 invalid input, 409 CAS/retired identity conflicts, 422 unsafe placement/membership, 503 unavailable and 500 unexpected errors. No data-wipe/reset endpoint is inferred from the request's likely “REST” typo. No application-specific proxy routes or UI catch-all are introduced.
 
-DI in main: parse flags/environment in example only; open journal/bus; open WAL root; build local registry/Machine factories and application load server/controller; create meta listener/resolver; construct meta with controller; start application load server and meta; establish initial topology through the same public APIs; serve HTTP; on signal perform explicit ownership-ordered shutdown.
+DI in demo main: parse caller environment/manifest, create the meta listener/resolver, open meta through the public runtime, serve HTTP and join shutdown. The richer fixture independently owns its bus/journal, WAL root, machine factories, load protocol/controller and fault workers. No test hooks are compiled into the demo.
 
 CREATED Makefile targets: `test` (go test ./...), `test-race` (scoped race tests), `test-cluster` (build the test application once, run all required isolated process-cluster scenarios including larger-cluster and failure cases, always clean unit resources), `test-cluster-run` (select a test by RUN without changing the full-suite obligation), `bench` (planner and snapshot size/cost measurements), `run-example` (docker compose up --build -d and print endpoint/instructions), `stop-example` (compose down preserving volumes), `clean-example` (explicit example volume removal), `generate` (pinned protobuf generators), `lint` (go vet plus chosen static checker). Provide no default publish/deploy target.
 

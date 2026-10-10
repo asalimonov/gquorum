@@ -64,8 +64,8 @@ module and compiler caches across source changes. Source-test audit, additional
 fault controls and remaining performance scenarios are still tracked in the
 implementation plan.
 
-The [test application](testapp/README.md) compiles authenticated controls with
-`clustertest`; the ordinary Compose example has no control routes. Adding a
+The [test application](testapp/README.md) is a dedicated binary under `tests/cluster/testapp`; the ordinary Compose
+example contains no test instrumentation. Adding a
 joining process keeps its containers/volumes in the lease's generation-scoped
 resource catalog, so normal release verifies their removal with the founders.
 

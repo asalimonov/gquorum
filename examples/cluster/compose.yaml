@@ -11,9 +11,9 @@ x-env: &env
   GQUORUM_CREDENTIAL: local-example-credential
   GQUORUM_DATA: /data
   GQUORUM_PEERS: >-
-    [{"name":"node1","type":"worker","member_id":1,"meta_address":"node1:9000","load_address":"node1:9001","http_address":"node1:8080"},
-     {"name":"node2","type":"worker","member_id":2,"meta_address":"node2:9000","load_address":"node2:9001","http_address":"node2:8080"},
-     {"name":"node3","type":"observer","member_id":3,"meta_address":"node3:9000","load_address":"node3:9001","http_address":"node3:8080"}]
+    [{"name":"node1","type":"worker","member_id":1,"meta_address":"node1:9000"},
+     {"name":"node2","type":"worker","member_id":2,"meta_address":"node2:9000"},
+     {"name":"node3","type":"observer","member_id":3,"meta_address":"node3:9000"}]
 services:
   node1:
     <<: *node

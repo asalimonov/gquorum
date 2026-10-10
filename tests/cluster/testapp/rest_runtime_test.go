@@ -195,7 +195,7 @@ func (c *restCluster) waitExecution(t *testing.T, id topology.ExecutionID) {
 		return status.State == topology.ExecutionSucceeded
 	})
 }
-func TestExampleRESTDrainActivateAndRetirement(t *testing.T) {
+func TestFixtureRESTDrainActivateAndRetirement(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real three-node HTTP/meta/load functional test")
 	}
@@ -429,7 +429,7 @@ func TestExampleRESTDrainActivateAndRetirement(t *testing.T) {
 
 }
 
-func TestExampleRESTExcludeAndReadmitRetainedNode(t *testing.T) {
+func TestFixtureRESTExcludeAndReadmitRetainedNode(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real REST admission and physical readmission test")
 	}

@@ -17,8 +17,9 @@ make run-example
 make stop-example
 ```
 
-The example supplies its own gRPC load protocol, key/value state machine and
-REST routes for documents, executions, membership, load data and local events.
+The example is a small `_meta` application with topology/status/drain/activate
+REST routes. The full caller-defined load application, protocols, recovery
+adapters and fault scenarios live under `tests/cluster`, separate from the demo.
 Callbacks must be idempotent and verify their exact authorized identities.
 Deleted load-group IDs are permanently retired. External application transactions
 and outboxes remain caller-owned.
@@ -29,7 +30,8 @@ For development:
 make test-unit       # uncached parallel unit tests, target <30 seconds
 make test-unit-race
 make test           # all unit and functional tests
-make test-example   # real three-node REST functional coverage
+make test-example   # actual Compose demo REST e2e, tests under tests/cluster
+make test-fixture   # load/meta integration fixture, outside the demo
 make test-cluster   # build once, then isolated Docker process clusters
 make lint
 make generate       # protoc required; pinned Go generators

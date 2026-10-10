@@ -2,8 +2,10 @@ FROM golang:1.26.5-alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY tests/cluster/go.mod tests/cluster/go.sum ./tests/cluster/
+RUN --mount=type=cache,target=/go/pkg/mod go -C tests/cluster mod download
 COPY . .
-RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 go build -tags=clustertest -trimpath -o /out/cluster ./examples/cluster
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 go -C tests/cluster build -trimpath -o /out/cluster ./testapp
 RUN mkdir -p /out/data && chmod 0700 /out/data
 
 FROM scratch

@@ -1,6 +1,6 @@
 syntax = "proto3";
-package gquorum.example.load.v1;
-option go_package = "github.com/asalimonov/gquorum/examples/cluster/loadpb;loadpb";
+package gquorum.fixture.load.v1;
+option go_package = "github.com/asalimonov/gquorum/tests/cluster/testapp/loadpb;loadpb";
 
 // This protocol belongs to the example application, not the library.
 message Header {

@@ -54,6 +54,7 @@ type Group struct {
 	durableHS                               raftpb.HardState
 	mu                                      sync.RWMutex
 	cached                                  raft.Status
+	cachedPending                           int
 	err                                     error
 	started, stopped                        bool
 	ctx                                     context.Context
@@ -254,6 +255,21 @@ func (g *Group) Propose(ctx context.Context, p Proposal) (Result, error) {
 	}
 	req := &request{ctx: ctx, correlation: g.newID(), proposal: Proposal{RequestID: p.RequestID, Data: bytes.Clone(p.Data)}, reply: make(chan response, 1)}
 	return g.submit(ctx, g.proposals, req)
+}
+
+// ProposalStats describes local proposal admission. InFlight includes callers
+// waiting to enqueue or receive a result. AwaitingCommit is the last run-loop
+// observation of registered waiters; canceled callers are pruned independently
+// of persistence. The fields are observations, not a transactional snapshot.
+type ProposalStats struct {
+	Limit, InFlight, Queued, AwaitingCommit int
+}
+
+func (g *Group) ProposalStats() ProposalStats {
+	g.mu.RLock()
+	pending := g.cachedPending
+	g.mu.RUnlock()
+	return ProposalStats{Limit: cap(g.slots), InFlight: len(g.slots), Queued: len(g.proposals), AwaitingCommit: pending}
 }
 func (g *Group) newID() string { return fmt.Sprintf("%s-%d", g.nonce, g.sequence.Add(1)) }
 func (g *Group) submit(ctx context.Context, queue chan *request, req *request) (Result, error) {

@@ -1,19 +1,29 @@
-//go:build clustertest
-
 package main
 
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/meta"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
+
+func clusterRequestTimeout(r *http.Request) time.Duration {
+	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/internal/test/propose/") {
+		return time.Minute
+	}
+	return 10 * time.Second
+}
 
 // These controls exist only in the process-test image. They use the caller's
 // lifecycle/transport; the library neither defines nor serves this protocol.
@@ -101,6 +111,7 @@ type localObservation struct {
 	ReceivedSnapshots uint64               `json:"received_snapshots"`
 	WAL               walCounters          `json:"wal"`
 	WALStallNS        int64                `json:"wal_stall_ns"`
+	Proposals         load.ProposalStats   `json:"proposals"`
 }
 
 func (a *application) registerClusterRoutes(mux *http.ServeMux) {
@@ -118,6 +129,36 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 	}
 	a.registerWALRoutes(mux, protect)
 	a.registerProjectionRoutes(mux, protect)
+	mux.HandleFunc("POST /internal/test/propose/{group}/{replica}", protect(func(w http.ResponseWriter, r *http.Request) {
+		group := r.PathValue("group")
+		if err := topology.ValidateLoadID(group); err != nil {
+			httpError(w, err)
+			return
+		}
+		g, found := a.runtime.Load(group)
+		if !found || fmt.Sprint(g.ReplicaID()) != r.PathValue("replica") {
+			httpError(w, fault.ErrIdentityMismatch)
+			return
+		}
+		var command putCommand
+		if err := requestBody(w, r, &command); err != nil {
+			httpError(w, err)
+			return
+		}
+		data, err := json.Marshal(command)
+		if err == nil {
+			var result load.Result
+			result, err = g.Propose(r.Context(), load.Proposal{RequestID: command.RequestID, Data: data})
+			if err == nil && result.Code != "ok" {
+				err = fault.New(fault.Code(result.Code), "proposal rejected", nil)
+			}
+		}
+		if err != nil {
+			httpError(w, err)
+			return
+		}
+		jsonResponse(w, http.StatusOK, map[string]bool{"applied": true})
+	}))
 	mux.HandleFunc("PUT /internal/test/barriers/{group}/{kind}", protect(func(w http.ResponseWriter, r *http.Request) {
 		group, kind := r.PathValue("group"), topology.StepKind(r.PathValue("kind"))
 		if err := topology.ValidateLoadID(group); err != nil {
@@ -185,6 +226,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 		if local != nil {
 			observation.Found, observation.ReplicaID = true, local.group.ReplicaID()
 			observation.Status = local.group.Status()
+			observation.Proposals = local.group.ProposalStats()
 			observation.Values = local.machine.values()
 			observation.WAL = a.clusterHooks.walMetrics(walKey{group, local.group.ReplicaID()})
 			observation.WALStallNS = int64(local.group.WALStall())
