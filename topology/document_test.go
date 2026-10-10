@@ -100,6 +100,8 @@ func TestDocumentValidate(t *testing.T) {
 	}
 	cases := map[string]func(*Document){
 		"duplicate node":      func(d *Document) { d.Nodes[1].Name = "a" },
+		"null node name":      func(d *Document) { d.Nodes[1].Name = "b\x00other" },
+		"null cluster ID":     func(d *Document) { d.ClusterID = "cluster\x00other" },
 		"empty type":          func(d *Document) { d.Nodes[1].Type = "" },
 		"unknown state":       func(d *Document) { d.Nodes[1].State = "other" },
 		"duplicate meta":      func(d *Document) { d.Groups = append(d.Groups, d.Groups[0]) },

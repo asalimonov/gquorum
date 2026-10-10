@@ -27,6 +27,9 @@ func validateSnapshot(ss raftpb.Snapshot) error {
 	return nil
 }
 func validateRecovery(r storage.Recovery) error {
+	if raft.IsEmptySnap(r.Snapshot) && (len(r.Snapshot.Data) != 0 || r.Snapshot.Metadata.Term != 0 || len(r.Snapshot.Metadata.ConfState.Voters) != 0 || len(r.Snapshot.Metadata.ConfState.Learners) != 0) {
+		return fault.New(fault.Unreadable, "snapshot state has no recovery index", nil)
+	}
 	if !raft.IsEmptySnap(r.Snapshot) {
 		if err := validateSnapshot(r.Snapshot); err != nil {
 			return fault.New(fault.Unreadable, "invalid recovered snapshot", err)

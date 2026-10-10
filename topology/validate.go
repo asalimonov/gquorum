@@ -51,7 +51,7 @@ func (d *Document) Validate(rules Rules) error {
 	if d.Version == 0 && len(d.Nodes) == 0 && len(d.Groups) == 0 {
 		return nil
 	}
-	if strings.TrimSpace(d.ClusterID) == "" {
+	if strings.TrimSpace(d.ClusterID) == "" || strings.ContainsRune(d.ClusterID, 0) {
 		return invalid("empty cluster ID")
 	}
 	if err := d.Placement.validate(rules.Limits); err != nil {
@@ -65,7 +65,7 @@ func (d *Document) Validate(rules Rules) error {
 	nodes := make(map[string]Node, len(d.Nodes))
 	live := 0
 	for _, n := range d.Nodes {
-		if strings.TrimSpace(n.Name) == "" || strings.TrimSpace(string(n.Type)) == "" {
+		if strings.TrimSpace(n.Name) == "" || strings.ContainsRune(n.Name, 0) || strings.TrimSpace(string(n.Type)) == "" {
 			return invalid("node name and type must be nonempty")
 		}
 		if !n.State.Places() && n.State != NodeExcluded {

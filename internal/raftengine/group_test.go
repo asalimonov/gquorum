@@ -623,6 +623,7 @@ func TestOptions_RejectUnsafeInputsBeforeCreatingState(t *testing.T) {
 	for _, change := range []func(*Options){
 		func(o *Options) { o.GroupID = "_meta" }, func(o *Options) { o.ReplicaID = 0 }, func(o *Options) { o.Mode = "" }, func(o *Options) { o.Store = nil }, func(o *Options) { o.Machine = nil }, func(o *Options) { o.Transport = nil },
 		func(o *Options) { o.Timing.TickInterval = -time.Second }, func(o *Options) { o.Timing.TickInterval = time.Millisecond }, func(o *Options) { o.Timing.ElectionTicks = 1 }, func(o *Options) { o.Timing.ElectionTicks = 2; o.Timing.HeartbeatTicks = 2 },
+		func(o *Options) { o.Timing.TickInterval = time.Duration(1<<63 - 1); o.Timing.ElectionTicks = 2 },
 		func(o *Options) { o.Timing.WALWriteWait = -time.Millisecond }, func(o *Options) { o.Timing.WALWriteWait = 11 * time.Millisecond }, func(o *Options) { o.MaxPendingProposals = -1 }, func(o *Options) { o.Peers = []raft.Peer{{ID: 1}, {ID: 1}} }, func(o *Options) { o.Peers = []raft.Peer{{ID: 2}} }, func(o *Options) { o.Mode = Joining },
 	} {
 		candidate := valid
@@ -683,5 +684,13 @@ func TestRecoveredUnappliedConfigurationBlocksSecondChange(t *testing.T) {
 	result := <-request.reply
 	if !errors.Is(result.err, fault.ErrOverloaded) {
 		t.Fatal("second change accepted before recovered configuration applied", result.err)
+	}
+}
+
+func TestRecoveryRejectsSnapshotStateWithoutIndex(t *testing.T) {
+	for _, ss := range []raftpb.Snapshot{{Data: []byte("state")}, {Metadata: raftpb.SnapshotMetadata{Term: 1}}, {Metadata: raftpb.SnapshotMetadata{ConfState: raftpb.ConfState{Voters: []uint64{1}}}}} {
+		if err := validateRecovery(storage.Recovery{Snapshot: ss}); !errors.Is(err, fault.ErrUnreadable) {
+			t.Fatal("orphaned snapshot state accepted", err)
+		}
 	}
 }

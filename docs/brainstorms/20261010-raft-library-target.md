@@ -314,9 +314,11 @@ type NetworkOptions struct {
     ClientTLS *tls.Config
     AllowPlaintext bool
     ClusterCredential []byte
+    MaxSnapshotBytes int
 }
 type Options struct {
     Identity Identity
+    Node topology.Node // explicit local type/metadata for admission; may derive from matching founder
     DBPath string
     Founders []FoundingMember
     JoinSeeds []string
@@ -326,6 +328,7 @@ type Options struct {
     Timing Timing
     SessionTTL time.Duration
     SnapshotThreshold uint64
+    MaxWatchers int
     Network NetworkOptions
     LoadGroups topology.GroupController
     Health topology.HealthSource

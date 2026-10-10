@@ -249,7 +249,8 @@ func (t *Transport) runPeer(p *peer) {
 				}
 				continue
 			}
-			delay := min(t.opts.RetryMax, backoff+time.Duration(rand.Int64N(max(1, int64(backoff/4)))))
+			jitterLimit := min(backoff/4, t.opts.RetryMax-backoff)
+			delay := backoff + time.Duration(rand.Int64N(max(1, int64(jitterLimit))))
 			p.until.Store(time.Now().Add(delay).UnixNano())
 			t.fail(msg)
 			// Failed and buffered messages are discarded; a later Raft tick sends fresh traffic.
