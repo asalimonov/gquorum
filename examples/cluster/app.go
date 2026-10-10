@@ -61,6 +61,7 @@ type application struct {
 	closing, closed              chan struct{}
 	closeOnce                    sync.Once
 	closeErr                     error
+	clusterHooks                 *clusterHooks
 }
 
 func nodeForPeer(p peer) topology.Node {
@@ -98,6 +99,7 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 	}
 	a := &application{cfg: cfg, logger: logger, locals: map[string]*localReplica{}, clients: map[string]*loadClient{}, localGate: make(chan struct{}, 1), coordinator: membership.NewCoordinator(), closing: make(chan struct{}), closed: make(chan struct{})}
 	a.workCtx, a.stopWork = context.WithCancel(context.Background())
+	a.clusterHooks = newClusterHooks()
 	a.lifeCtx, a.stopLife = context.WithCancel(context.Background())
 	a.httpCtx, a.stopHTTP = context.WithCancel(context.Background())
 	var ls listeners

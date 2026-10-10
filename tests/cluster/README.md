@@ -1,7 +1,7 @@
 # Process cluster tests
 
 Run `make test-cluster` from the repository root. It builds the caller-owned
-key/value application image once, then runs this module with the `cluster` build
+key/value test application image once, then runs this module with the `cluster` build
 tag. Docker must be reachable. For focused validation, reuse the built image:
 
 ```sh
@@ -43,11 +43,20 @@ every host, reserved meta protection and physical removal of every deleted store
 Additional cases cover non-host meta-controller effects, inert staged documents,
 follower drain/activation, observed-majority drain refusal/recovery and fifteen
 concurrent CAS contenders at each of the three/five/seven-node capacities.
-All node
-counts come from topology.Limits; seven meta voters do not require seven load
+Learner growth uses cancelable effect barriers and reads the returning process's
+own identity, membership and values. Compacted catch-up verifies a received full
+snapshot and all 1,100 acknowledged commands. Dynamic admission starts a genuine
+joining process, observes its meta learner phase, refuses early application
+serving and verifies retained identities across process replacement.
+All node counts come from topology.Limits; seven meta voters do not require seven load
 replicas. Fixtures use the library default 100ms Raft tick and a five-second
 activation TTL. Build the image before running cluster cases, so compilation
 does not contend with the processes being measured. The image build retains Go
 module and compiler caches across source changes. Source-test audit, additional
 fault controls and remaining performance scenarios are still tracked in the
 implementation plan.
+
+The [test application](testapp/README.md) compiles authenticated controls with
+`clustertest`; the ordinary Compose example has no control routes. Adding a
+joining process keeps its containers/volumes in the lease's generation-scoped
+resource catalog, so normal release verifies their removal with the founders.

@@ -269,7 +269,14 @@ func (a *application) stopLocal(ctx context.Context, id string, expected uint64)
 	a.mu.Unlock()
 	return nil
 }
-func (a *application) receiveEffect(ctx context.Context, approved topology.AuthorizedStep, receiver uint64) error {
+func (a *application) receiveEffect(ctx context.Context, approved topology.AuthorizedStep, receiver uint64) (err error) {
+	if err := a.meta.Authorize(ctx, approved); err != nil {
+		return err
+	}
+	if err := a.beforeClusterEffect(ctx, approved); err != nil {
+		return err
+	}
+	defer func() { a.afterClusterEffect(approved, err) }()
 	if err := a.meta.Authorize(ctx, approved); err != nil {
 		return err
 	}

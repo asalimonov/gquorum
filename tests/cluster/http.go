@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/asalimonov/gquorum/meta"
@@ -43,6 +44,9 @@ func (c *Cluster) Request(ctx context.Context, name, method, path string, body a
 		return response, err
 	}
 	request.Header.Set("Content-Type", "application/json")
+	if strings.HasPrefix(path, "/internal/test/") {
+		request.Header.Set("X-Gquorum-Test-Credential", c.Credential)
+	}
 	if expected > 0 {
 		request.Header.Set("If-Match", strconv.FormatUint(expected, 10))
 	}

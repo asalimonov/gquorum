@@ -26,7 +26,7 @@ test-example:
 	go test -count=1 -timeout=120s ./examples/cluster
 
 test-cluster-build:
-	docker build -f examples/cluster/Dockerfile -t $(CLUSTER_IMAGE) .
+	docker build -f tests/cluster/testapp/Dockerfile -t $(CLUSTER_IMAGE) .
 
 test-cluster: test-cluster-build
 	$(MAKE) test-cluster-run

@@ -170,6 +170,7 @@ func mutationResponse(w http.ResponseWriter, result meta.MutationResult, err err
 }
 func (a *application) routes() http.Handler {
 	mux := http.NewServeMux()
+	a.registerClusterRoutes(mux)
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, http.StatusOK, map[string]any{"node": a.cfg.NodeName})
 	})

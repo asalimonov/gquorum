@@ -77,3 +77,10 @@ cases**. After restoring and retaining the existing HTTP identity/error tests,
 `make test-unit` completed in **8.34 seconds**, with result caching disabled.
 The full library suite, example race suite and focused HTTP guard race checks
 passed separately; process-cluster cases remain sequential.
+
+The ordinary example's control-route exclusion test brings the root unit suite
+to **313 parallel top-level cases** (verified from Go syntax trees). The uncached
+unit run completed in **11.96 seconds during Docker snapshot-catch-up testing**.
+Test-image hooks have separate `clustertest` coverage, including cancellation,
+authentication and release; their full example race suite passed in 35.613s.
+Functional and cluster cases continue outside the short parallel loop.

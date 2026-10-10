@@ -297,6 +297,9 @@ func (a *application) Deliver(ctx context.Context, frame *loadpb.Frame) (*loadpb
 	if err := g.Step(ctx, message); err != nil {
 		return domainReply(err), nil
 	}
+	if message.Type == raftpb.MsgSnap {
+		a.receivedClusterSnapshot(frame.GroupId)
+	}
 	return &loadpb.Reply{}, nil
 }
 

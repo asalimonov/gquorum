@@ -169,6 +169,8 @@ type Cluster struct {
 	resourcePrefix                 string
 	operationTimeout               time.Duration
 	uncertainCreate                error
+	image                          string
+	creationMu                     sync.Mutex
 }
 
 // Acquisitions can stop waiting promptly, while the lifecycle owner joins an
@@ -209,7 +211,7 @@ func newCluster(ctx context.Context, p *Pool, u *deploymentUnit, spec Spec) (*Cl
 	labels["gquorum.test.run"] = p.runID
 	labels["gquorum.test.unit"] = fmt.Sprint(u.id)
 	labels["gquorum.test.generation"] = fmt.Sprint(u.generation)
-	c := &Cluster{ID: "test-" + id, Credential: credential, Network: u.network.Name, RunID: p.runID, UnitID: u.id, Generation: u.generation, Spec: spec, http: &http.Client{Timeout: 6 * time.Second, Transport: http.DefaultTransport.(*http.Transport).Clone()}, docker: cli, labels: labels, resourcePrefix: prefix, operationTimeout: p.opts.OperationTimeout}
+	c := &Cluster{ID: "test-" + id, Credential: credential, Network: u.network.Name, RunID: p.runID, UnitID: u.id, Generation: u.generation, Spec: spec, http: &http.Client{Timeout: 6 * time.Second, Transport: http.DefaultTransport.(*http.Transport).Clone()}, docker: cli, labels: labels, resourcePrefix: prefix, operationTimeout: p.opts.OperationTimeout, image: p.opts.Image}
 	// Return the partial cluster on failure so its lifecycle owner can clean every
 	// resource whose creation was acknowledged, including a failed-start node.
 	peers := make([]peer, len(spec.Nodes))
@@ -271,7 +273,7 @@ func (c *Cluster) createNode(ctx context.Context, image string, spec NodeSpec, p
 	}
 	request := testcontainers.ContainerRequest{
 		Image: image, Name: volumeName, ExposedPorts: []string{"8080/tcp"}, Networks: []string{c.Network}, NetworkAliases: map[string][]string{c.Network: {spec.Name}}, Labels: maps.Clone(c.labels), Mounts: testcontainers.Mounts(testcontainers.VolumeMount(node.Volume, "/data")),
-		Env:            map[string]string{"GQUORUM_NODE": spec.Name, "GQUORUM_TYPE": string(spec.Type), "GQUORUM_CLUSTER": c.ID, "GQUORUM_CREDENTIAL": c.Credential, "GQUORUM_DATA": "/data", "GQUORUM_PEERS": string(manifest)},
+		Env:            map[string]string{"GQUORUM_NODE": spec.Name, "GQUORUM_TYPE": string(spec.Type), "GQUORUM_CLUSTER": c.ID, "GQUORUM_CREDENTIAL": c.Credential, "GQUORUM_DATA": "/data", "GQUORUM_PEERS": string(manifest), "GQUORUM_META_ADDRESS": spec.Name + ":9000", "GQUORUM_LOAD_ADDRESS": spec.Name + ":9001", "GQUORUM_HTTP_ADDRESS": spec.Name + ":8080"},
 		Cmd:            []string{"-bootstrap=" + strconv.FormatBool(c.Spec.Bootstrap), "-join=" + strconv.FormatBool(join), "-max-nodes=" + strconv.Itoa(c.Spec.Limits.MaxNodes), "-max-replicas=" + strconv.Itoa(c.Spec.Limits.MaxReplicas), "-session-ttl=" + c.Spec.SessionTTL.String(), "-tick=" + c.Spec.Tick.String(), "-snapshot-threshold=" + strconv.FormatUint(c.Spec.SnapshotThreshold, 10), "-disable-reconciliation=" + strconv.FormatBool(!c.Spec.Reconciliation)},
 		WaitingFor:     wait.ForListeningPort("8080/tcp").SkipInternalCheck().WithStartupTimeout(20 * time.Second),
 		ConfigModifier: func(config *containerapi.Config) { config.Hostname = spec.Name },
@@ -286,6 +288,25 @@ func (c *Cluster) createNode(ctx context.Context, image string, spec NodeSpec, p
 		c.uncertainCreate = err
 	}
 	return node, err
+}
+
+// PrepareJoinNode allocates an owned, stopped process with fresh storage. The
+// caller first approves its topology admission, then starts the exact process.
+// Only the initial processes supply seeds; the joining node is no founder.
+func (c *Cluster) PrepareJoinNode(ctx context.Context, spec NodeSpec) (*Node, error) {
+	c.creationMu.Lock()
+	defer c.creationMu.Unlock()
+	if err := topology.ValidateID(spec.Name); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(string(spec.Type)) == "" || c.Node(spec.Name) != nil {
+		return nil, errors.New("invalid or already allocated joining node")
+	}
+	peers := make([]peer, len(c.Spec.Nodes))
+	for i, seed := range c.Spec.Nodes {
+		peers[i] = peer{Name: seed.Name, Type: seed.Type, MetaAddress: seed.Name + ":9000", LoadAddress: seed.Name + ":9001", HTTPAddress: seed.Name + ":8080"}
+	}
+	return c.createNode(ctx, c.image, spec, peers, true)
 }
 func (c *Cluster) WaitReady(ctx context.Context) error {
 	ticker := time.NewTicker(60 * time.Millisecond)
