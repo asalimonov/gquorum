@@ -18,6 +18,12 @@ type ReplicaRecord struct {
 }
 
 func (s *Store) RecordReplica(group string, record ReplicaRecord) error {
+	return s.RecordReplicaCAS(group, record, 0)
+}
+
+// RecordReplicaCAS replaces only the exact previous local identity. Repeating
+// the new identity is idempotent and preserves its original audit fields.
+func (s *Store) RecordReplicaCAS(group string, record ReplicaRecord, previous uint64) error {
 	if err := topology.ValidateLoadID(group); err != nil {
 		return err
 	}
@@ -35,10 +41,17 @@ func (s *Store) RecordReplica(group string, record ReplicaRecord) error {
 			if err := json.Unmarshal(raw, &old); err != nil {
 				return err
 			}
-			if old.NodeName != record.NodeName || old.ClusterID != record.ClusterID || old.ReplicaID != record.ReplicaID {
+			if old.NodeName != record.NodeName || old.ClusterID != record.ClusterID || old.ReplicaID == 0 {
 				return fault.New(fault.IdentityMismatch, "replica record already belongs to another identity", nil)
 			}
-			return nil
+			if old.ReplicaID == record.ReplicaID {
+				return nil
+			}
+			if previous == 0 || old.ReplicaID != previous {
+				return fault.New(fault.IdentityMismatch, "replica replacement differs from expected identity", nil)
+			}
+		} else if previous != 0 {
+			return fault.New(fault.IdentityMismatch, "expected previous replica record is missing", nil)
 		}
 		data, err := json.Marshal(record)
 		if err != nil {
@@ -61,7 +74,7 @@ func (s *Store) LookupReplica(group string) (record ReplicaRecord, found bool, e
 			return err
 		}
 		id, pinned := readIdentity(tx)
-		if !pinned || record.NodeName != id.NodeName || record.ClusterID != id.ClusterID {
+		if !pinned || record.ReplicaID == 0 || record.NodeName != id.NodeName || record.ClusterID != id.ClusterID {
 			return fault.New(fault.IdentityMismatch, "replica ledger identity differs from meta pin", nil)
 		}
 		found = true
@@ -72,6 +85,9 @@ func (s *Store) LookupReplica(group string) (record ReplicaRecord, found bool, e
 
 // ForgetReplica refuses to erase the ledger of a replacement replica.
 func (s *Store) ForgetReplica(group string, expected uint64) error {
+	if expected == 0 {
+		return fault.New(fault.Invalid, "expected replica ID must be positive", nil)
+	}
 	if err := topology.ValidateLoadID(group); err != nil {
 		return err
 	}
@@ -81,6 +97,10 @@ func (s *Store) ForgetReplica(group string, expected uint64) error {
 			var record ReplicaRecord
 			if err := json.Unmarshal(raw, &record); err != nil {
 				return err
+			}
+			id, pinned := readIdentity(tx)
+			if !pinned || record.NodeName != id.NodeName || record.ClusterID != id.ClusterID {
+				return fault.ErrIdentityMismatch
 			}
 			if record.ReplicaID != expected {
 				return fault.New(fault.IdentityMismatch, "refusing to erase replacement replica", nil)

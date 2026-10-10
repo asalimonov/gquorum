@@ -372,10 +372,14 @@ func (g *Group) ensureRuntime(ctx context.Context, shutdown bool) error {
 	}
 	g.mu.RLock()
 	defer g.mu.RUnlock()
+	return g.ensureRuntimeLocked(shutdown)
+}
+
+func (g *Group) ensureRuntimeLocked(shutdown bool) error {
 	if g.terminal != nil {
 		return g.terminal
 	}
-	if !g.started || g.ctx.Err() != nil || (g.quiescing || g.selfRemoval != nil) && !shutdown {
+	if !g.started || g.ctx == nil || g.ctx.Err() != nil || (g.quiescing || g.selfRemoval != nil) && !shutdown {
 		return fault.ErrStopped
 	}
 	return nil

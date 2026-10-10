@@ -33,3 +33,7 @@ a fully cold compiler cache.
 After the meta lifecycle/removal additions, another uncached run completed in
 **8.36 seconds** while the full functional suite ran separately. Unit cases
 remain parallel; functional and cluster cases remain outside short mode.
+
+After the runtime facade and cold-boot additions, an uncached unit run completed
+in **7.26 seconds**. The three new integrated runtime cases remain sequential
+and skip under short mode; all new isolated unit cases run in parallel.
