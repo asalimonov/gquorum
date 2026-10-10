@@ -12,7 +12,7 @@ The process-cluster harness must use testcontainers with isolated, reusable depl
 - [x] 2. Fixed membership policy/coordinator (target §§3–4); port safety/promotion/serialization tests with cancellation and lifetime regressions.
 - [x] 3. Explicit-path synchronous meta bbolt persistence and local identity ledger (target §6); port atomic snapshot, replay, applied ConfState and identity tests.
 - [x] 4. Generic etcd WAL store and complete snapshot recovery (target §§5–6, 8.5, 11); conformance, tail overwrite, pins, quarantine, fallback and refiller tests.
-- [ ] 5. Caller-defined load runtime (target §§5, 8.4–8.5, 11); Ready ordering, cancellation, membership, snapshots, retry/backpressure and multi-group tests.
+- [x] 5. Caller-defined load runtime (target §§5, 8.4–8.5, 11); Ready ordering, cancellation, membership, snapshots, retry/backpressure and multi-group tests.
 - [ ] 6. Full replicated meta FSM (target §§3–6, 8, 11); documents/history, approvals/executions, admission, sessions/locks, deterministic replay and retirement tests.
 - [ ] 7. Meta runtime/protocol/bootstrap/join (target §§5, 7–8); real meta groups, authorization, restore, peer isolation and failover functional tests.
 - [ ] 8. Topology mutation/planning/convergence and caller effects (target §§4–5, 8, 11); preserve all applicable source contracts and idempotent exact-identity verification.
@@ -33,6 +33,8 @@ After each stage run make test. For runtime/concurrency changes also run scoped 
 - Stage 4 verified: exact versioned pins and WAL metadata, full snapshots/real ConfState, contiguous tail replay, two-snapshot fallback retention, scoped quarantine/sweep, process-wide segment registration and joined refillers. Ten reusable conformance scenarios and source WAL/refiller scenarios pass, with added committed-write protection, concurrent idempotent writes, corrupt-newest-after-compaction fallback and caller ownership regressions. `make test`, storage race tests and `make lint` pass. Recovery owns read descriptors while using the upstream WAL decoder, avoiding early-corruption descriptor leaks in etcd 3.6 read-only handles.
 
 - Stage 5 dependency implemented ahead of runtime wiring: local event journal and bounded bus, with source retention/sequence/pagination assertions adapted and added filtering, journal-before-delivery, live-only failure, owned-copy, saturation/gap and shutdown tests. `make test`, events race tests and `make lint` pass. Stage 9 remains open for runtime recorders/facade lifecycle.
+
+- Stage 5 verified: caller-defined Machine/Transport runtime, durable founding seed, committed-tail reconstruction, one outstanding Ready, off-loop WAL retry and advisory hint flushing, bounded proposals/cancellation, V2 membership waiter ordering, full snapshots, snapshot-on-membership for joining learners, independent shared-store groups, owned transport messages and joined shutdown. Real three-node consensus/failover and learner promotion/transfer/removal tests, received-snapshot durability ordering, business/fatal machine outcomes, transient/stalled writes, concurrent batching and restart tests pass under the race detector. `make test` and `make lint` pass. The remaining source-port audit/cluster obligations remain in stage 11.
 
 ## Outstanding implementation gaps
 

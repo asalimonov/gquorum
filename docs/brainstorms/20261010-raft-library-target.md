@@ -430,7 +430,7 @@ TransferLeader uses the meta protocol for `_meta`; for load groups it uses the c
 ### CREATED `load/options.go`, `load/machine.go`, `load/group.go`, `load/registry.go`
 
 ```go
-type Command struct { Index, Term uint64; Data []byte }
+type Command struct { Index, Term uint64; RequestID string; Data []byte }
 type Result struct { Code string; Data []byte }
 type Machine interface {
     Apply(context.Context, Command) (Result, error)
@@ -472,6 +472,9 @@ func (g *Group) Snapshot(context.Context) error
 func (g *Group) ReportUnreachable(uint64)
 func (g *Group) ReportSnapshot(uint64, raft.SnapshotStatus)
 func (g *Group) Stop(context.Context) error
+func (g *Group) Membership() membership.RaftGroup
+func (g *Group) RaftStatus() raft.Status
+func (g *Group) WALStall() time.Duration
 func NewRegistry() *Registry
 func (r *Registry) Add(*Group) error
 func (r *Registry) Get(string) (*Group, bool)
@@ -481,11 +484,11 @@ func (r *Registry) IDs() []string
 
 The Machine receives normal application commands only. The runtime handles empty Raft entries and membership entries itself. Machine operations are serialized on a group apply/snapshot path; callers synchronize their own concurrent reads. An Apply error means a failed machine operation and halts that replica. Business rejection consumes the committed entry and returns a deterministic Result.Code. No in-loop compensating budget proposal exists.
 
-Internally frame proposals as versioned request ID plus opaque application bytes. Assign a unique correlation ID if RequestID is empty; return the requested outcome after local committed application. Caller-specified RequestID is not an exactly-once guarantee: applications implement any durable deduplication inside Machine state/snapshots. Caller cancellation removes its waiter but may not cancel a submitted log proposal; document the uncertain outcome.
+Internally frame proposals as versioned request ID plus opaque application bytes. Assign a unique correlation ID if RequestID is empty; return the requested outcome after local committed application. RequestID is passed to Machine. Caller-specified RequestID is not an exactly-once guarantee: applications implement any durable deduplication inside Machine state/snapshots. Caller cancellation removes its waiter but may not cancel a submitted log proposal; document the uncertain outcome.
 
 Transport.Send receives owned message copies, including snapshots. Caller code serializes and routes by cluster/group identity and reports snapshot delivery success/failure through ReportSnapshot. A Send error reports its destination replicas unreachable; the transport may report later asynchronous failures too. Receiving code validates cluster/group/from/to and then calls Step. Step accepts only remote-network Raft messages, not local control messages. No grpc dependency or load proto is introduced in load.
 
-Load founding uses an exact, durable seed snapshot with the supplied founding voter set, preserving the existing V2-only membership runtime. Join mode creates no founding voters. Existing durable state wins over constructor Peers; a voted store cannot be treated as fresh. Start/WaitReady do not serve application reads before full recovery. Stop joins its writer but does not close shared Store or caller Machine. Applications invoke membership through the fixed coordinator; ProposeConfChange is a documented low-level primitive, not a safe administrative replacement for the coordinator.
+Load founding uses an exact, durable seed snapshot with the supplied founding voter set, preserving the existing V2-only membership runtime. Join mode creates no founding voters. A committed membership change also triggers a complete snapshot with that exact ConfState; otherwise a newly added learner could be rejected when catching up from a founding snapshot that does not contain it. Existing durable state wins over constructor Peers; a voted store cannot be treated as fresh. Start/WaitReady do not serve application reads before full recovery. Stop joins its writer but does not close shared Store or caller Machine. Applications invoke membership through the fixed coordinator; ProposeConfChange is a documented low-level primitive, not a safe administrative replacement for the coordinator.
 
 Defaults retain source queue/message mechanics: proposal queue 256, inbound queue 1024, compact queue 64, transfer/conf-change/snapshot queues 16 each, unreachable queue 256, snapshot-report queue 64, one writer request/result slot, MaxSizePerMsg 64 KiB, MaxInflightMsgs 256 and committed apply batch 1 MiB. Source-derived writer defaults are one attempt timeout five seconds, backoff 200 ms through five seconds, applied-hint idle flush 250 ms and enqueue timeout five seconds. WALWriteWait defaults to zero and follows the source ten-millisecond cap and election-time relationship.
 
