@@ -147,6 +147,13 @@ func (s *Store) SaveSnapshot(ctx context.Context, id string, snapshot raftpb.Sna
 	if err := g.w.Save(next, nil); err != nil {
 		return err
 	}
+	// SaveSnapshot flushed the marker before this HardState was encoded. The
+	// snapshot's recovery commit must also be durable before publishing it.
+	if !raft.MustSync(next, g.hs, 0) {
+		if err := g.w.Sync(); err != nil {
+			return err
+		}
+	}
 	g.hs = next
 	g.last = max(g.last, snapshot.Metadata.Index)
 	if err := g.state.Update(func(tx *bolt.Tx) error { return putU64(tx.Bucket(bucketMeta), keySnapmark, snapshot.Metadata.Index) }); err != nil {

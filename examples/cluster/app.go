@@ -347,6 +347,7 @@ func (a *application) owner(ctx context.Context, group string, replica uint64) (
 func (a *application) superviseLoads() {
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
+	lastErrors := map[string]string{}
 	for {
 		select {
 		case <-a.workCtx.Done():
@@ -367,8 +368,17 @@ func (a *application) superviseLoads() {
 						continue
 					}
 					ctx, cancel := context.WithTimeout(a.workCtx, 3*time.Second)
-					_, _ = a.openLocal(ctx, group.ID, replica.ReplicaID, load.Joining, nil)
+					_, err := a.openLocal(ctx, group.ID, replica.ReplicaID, load.Joining, nil)
 					cancel()
+					if err != nil {
+						message := fmt.Sprintf("%v: %v", err, errors.Unwrap(err))
+						if lastErrors[group.ID] != message {
+							lastErrors[group.ID] = message
+							a.logger.Warn("load recovery pending", "group", group.ID, "replica", replica.ReplicaID, "error", err, "cause", errors.Unwrap(err))
+						}
+					} else {
+						delete(lastErrors, group.ID)
+					}
 				}
 			}
 		}

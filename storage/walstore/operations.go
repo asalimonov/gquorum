@@ -90,6 +90,14 @@ func (s *Store) SaveReady(ctx context.Context, id string, write storage.ReadyWri
 	if err := g.w.Save(next, write.Entries); err != nil {
 		return err
 	}
+	// etcd's MustSync ignores commit-only updates. Our applied marker is
+	// persisted separately in bbolt, so flush that commit before allowing it to
+	// advance. Otherwise process death can leave applied ahead of recovered WAL.
+	if next.Commit > g.hs.Commit && !raft.MustSync(next, g.hs, len(write.Entries)) {
+		if err := g.w.Sync(); err != nil {
+			return err
+		}
+	}
 	g.hs, g.last = next, last
 	return nil
 }
