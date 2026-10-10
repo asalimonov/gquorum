@@ -86,3 +86,7 @@ func (m *Machine) Views() (topology.Document, topology.Document, topology.Docume
 	defer m.mu.RUnlock()
 	return m.latest.Clone(), m.target.Clone(), m.active.Clone()
 }
+
+func (m *Machine) AdmissionForExecution(id topology.ExecutionID, name string, member uint64) (AdmissionRecord, bool) {
+	return m.admissionForExecution(id, name, member)
+}

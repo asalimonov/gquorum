@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/convergence"
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metapb"
 	"github.com/asalimonov/gquorum/internal/metastore"
@@ -31,6 +32,7 @@ type Group struct {
 	store               *metastore.Store
 	transport           *metatransport.Transport
 	coordinator         *membership.Coordinator
+	convergence         *convergence.ConvergenceEngine
 	leases              *sessionManager
 	leaseGate           sync.Mutex
 	addresses           map[string]string
@@ -100,6 +102,7 @@ func New(input Options) (*Group, error) {
 			return nil, err
 		}
 	}
+	g.convergence = convergence.NewConvergenceEngine(convergence.ConvergenceConfig{Store: g, Rules: g.rules, Coordinator: executionCoordinator{g}, Groups: groupControllers{g}, OwnsGroup: func(string) bool { return true }, Interval: g.opts.Timing.TickInterval, MaxRetryInterval: time.Second, FinalValidator: g.finalTarget})
 	return g, nil
 }
 func (g *Group) openEngine(identity Identity, mode raftengine.Mode, peers []raft.Peer) error {
@@ -164,6 +167,7 @@ func (g *Group) Start(parent context.Context) error {
 			return err
 		}
 	}
+	g.convergence.Start(g.ctx)
 	go g.run()
 	return nil
 }
@@ -193,6 +197,9 @@ func (g *Group) Stop(ctx context.Context) error {
 		}
 		g.mu.Unlock()
 		go func() {
+			if g.convergence != nil {
+				g.convergence.Stop()
+			}
 			_ = g.transport.Stop(context.Background())
 			if engine := g.engine.Load(); engine != nil {
 				_ = engine.Stop(context.Background())
@@ -243,6 +250,12 @@ func (g *Group) WaitReady(ctx context.Context) error {
 }
 func (g *Group) Rules() topology.Rules { return g.rules }
 func (g *Group) IsLeader() bool {
+	g.mu.RLock()
+	running := g.started && g.ctx != nil && g.ctx.Err() == nil
+	g.mu.RUnlock()
+	if !running {
+		return false
+	}
 	engine := g.engine.Load()
 	return engine != nil && engine.Error() == nil && engine.IsLeader()
 }

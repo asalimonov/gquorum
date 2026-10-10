@@ -6,11 +6,13 @@ import (
 	"context"
 	"crypto/hmac"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metapb"
+	"github.com/asalimonov/gquorum/membership"
 	"go.etcd.io/raft/v3/raftpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -57,7 +59,17 @@ func Reply(err error) *metapb.Reply {
 	if errors.As(err, &typed) {
 		code = typed.Code
 	}
-	return &metapb.Reply{ErrorCode: string(code), Message: err.Error()}
+	details := errorDetails{}
+	if typed != nil {
+		details.ExpectedVersion, details.CurrentVersion = typed.ExpectedVersion, typed.CurrentVersion
+	}
+	var safety *membership.SafetyRefusal
+	if errors.As(err, &safety) {
+		code = fault.UnsafeMembership
+		details.Membership = safety
+	}
+	data, _ := json.Marshal(details)
+	return &metapb.Reply{ErrorCode: string(code), Message: err.Error(), Data: data}
 }
 func ReplyError(r *metapb.Reply) error {
 	if r == nil {
@@ -66,7 +78,20 @@ func ReplyError(r *metapb.Reply) error {
 	if r.ErrorCode == "" {
 		return nil
 	}
-	return fault.New(fault.Code(r.ErrorCode), r.Message, nil)
+	var details errorDetails
+	if len(r.Data) > 0 {
+		if err := json.Unmarshal(r.Data, &details); err != nil {
+			return fault.New(fault.Unreadable, "invalid refusal metadata", err)
+		}
+	}
+	result := fault.New(fault.Code(r.ErrorCode), r.Message, nil)
+	if result.Code == fault.VersionConflict {
+		result.ExpectedVersion, result.CurrentVersion = details.ExpectedVersion, details.CurrentVersion
+	}
+	if result.Code == fault.UnsafeMembership && details.Membership != nil {
+		result.Cause = details.Membership
+	}
+	return result
 }
 func (s *server) StreamMessages(stream grpc.ClientStreamingServer[metapb.RaftMessage, metapb.Reply]) error {
 	if err := s.auth(stream.Context()); err != nil {
@@ -193,4 +218,10 @@ func (s *server) ApplyVersion(ctx context.Context, req *metapb.MetaRequest) (*me
 
 func (s *server) ParkedRead(ctx context.Context, req *metapb.MetaRequest) (*metapb.Reply, error) {
 	return s.call(ctx, "ParkedRead", req)
+}
+
+type errorDetails struct {
+	ExpectedVersion uint64                    `json:"expected_version,omitempty"`
+	CurrentVersion  uint64                    `json:"current_version,omitempty"`
+	Membership      *membership.SafetyRefusal `json:"membership,omitempty"`
 }

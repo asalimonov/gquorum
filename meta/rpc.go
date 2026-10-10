@@ -67,11 +67,18 @@ func (g *Group) Call(ctx context.Context, method string, header *metapb.Header, 
 		return &metapb.Reply{Data: encoded}
 	}
 	if method == "MetaStatus" {
+		if !g.IsLeader() {
+			return g.leaderReply(fault.ErrNotLeader)
+		}
 		engine := g.engine.Load()
 		if engine == nil {
 			return metatransport.Reply(fault.ErrUnavailable)
 		}
-		encoded, err := json.Marshal(engine.Status())
+		status, err := (groupControllers{g}).Status(ctx, topology.MetaGroupID)
+		if err != nil {
+			return g.leaderReply(err)
+		}
+		encoded, err := json.Marshal(status)
 		if err != nil {
 			return metatransport.Reply(err)
 		}
@@ -84,6 +91,25 @@ func (g *Group) Call(ctx context.Context, method string, header *metapb.Header, 
 		return g.leaderReply(fault.ErrNotLeader)
 	}
 	switch method {
+	case "ApplyVersion":
+		var request struct {
+			Version uint64 `json:"version"`
+		}
+		if json.Unmarshal(data, &request) != nil {
+			return metatransport.Reply(fault.ErrInvalid)
+		}
+		id, err := g.applyLocal(ctx, request.Version)
+		if err != nil {
+			return g.leaderReply(err)
+		}
+		encoded, _ := json.Marshal(id)
+		return &metapb.Reply{Data: encoded}
+	case "MetaControl":
+		var a topology.AuthorizedStep
+		if json.Unmarshal(data, &a) != nil {
+			return metatransport.Reply(fault.ErrInvalid)
+		}
+		return metatransport.Reply(g.metaEffect(ctx, a))
 	case "ProposeMeta":
 		proposal, err := metaengine.DecodeProposal(data)
 		if err != nil {

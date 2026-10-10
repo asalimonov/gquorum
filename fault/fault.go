@@ -10,6 +10,7 @@ const (
 	VersionConflict        Code = "version_conflict"
 	HistoryUnavailable     Code = "history_unavailable"
 	NotLeader              Code = "not_leader"
+	ReplicaNotReady        Code = "replica_not_ready"
 	Unavailable            Code = "unavailable"
 	NoController           Code = "no_controller"
 	UnsafeMembership       Code = "unsafe_membership"
@@ -52,6 +53,7 @@ var (
 	ErrVersionConflict        = New(VersionConflict, "", nil)
 	ErrHistoryUnavailable     = New(HistoryUnavailable, "", nil)
 	ErrNotLeader              = New(NotLeader, "", nil)
+	ErrReplicaNotReady        = New(ReplicaNotReady, "", nil)
 	ErrUnavailable            = New(Unavailable, "", nil)
 	ErrNoController           = New(NoController, "", nil)
 	ErrUnsafeMembership       = New(UnsafeMembership, "", nil)

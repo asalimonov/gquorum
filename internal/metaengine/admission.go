@@ -374,3 +374,6 @@ func (sm *topologySM) completeAdmissionsLocked(executionID topology.ExecutionID)
 	}
 	return changed
 }
+
+// Prepared reports whether an exact admitted runtime has acknowledged readiness.
+func (s AdmissionState) Prepared() bool { return s.prepared() }

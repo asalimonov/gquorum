@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -49,10 +48,12 @@ func (g *Group) run() {
 		if leader {
 			ctx, cancel := context.WithTimeout(g.ctx, 5*time.Second)
 			err := g.bootstrap(ctx)
+			if err == nil {
+				err = g.activateCompleted(ctx)
+			}
 			cancel()
-			if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, fault.ErrNotLeader) && !errors.Is(err, fault.ErrUnavailable) && !errors.Is(err, fault.ErrVersionConflict) {
-				g.fail(err)
-				return
+			if err != nil && g.ctx.Err() == nil {
+				g.opts.Logger.Debug("meta bootstrap or activation retry", "error", err)
 			}
 		}
 		if leader && !time.Now().Before(nextExpiry) {
@@ -117,7 +118,7 @@ func (g *Group) bootstrap(ctx context.Context) error {
 	if latest.Origin != topology.OriginFounding || latest.Version != 1 || machine.Active().Version != 0 {
 		return nil
 	}
-	execution, ok := machine.CurrentExecution()
+	_, ok := machine.CurrentExecution()
 	if !ok {
 		observed := map[string]topology.GroupStatus{topology.MetaGroupID: g.engine.Load().Status()}
 		plan, err := topology.BuildPlan(machine.Active(), latest, observed, g.rules)
@@ -127,26 +128,12 @@ func (g *Group) bootstrap(ctx context.Context) error {
 		if len(plan.Steps) != 0 {
 			return fault.New(fault.ExecutionAuthorization, "founding membership differs from durable seed", nil)
 		}
-		started, err := g.propose(ctx, metaengine.BeginExecutionProposal{Version: latest.Version, Plan: plan, Actor: identity.NodeName, Origin: topology.OriginFounding, At: time.Now().UTC()})
-		if err != nil {
-			return err
-		}
-		execution, _ = machine.ExecutionRecord(started.ExecutionID)
-	}
-	if execution.Status.State == topology.ExecutionPending {
-		_, err := g.propose(ctx, metaengine.TransitionExecutionProposal{Transition: topology.ExecutionTransition{ExecutionID: execution.Status.ID, Version: execution.Status.Version, Attempt: execution.Status.Attempt, State: topology.ExecutionSucceeded, At: maxTime(time.Now().UTC(), execution.UpdatedAt)}})
+		_, err = g.propose(ctx, metaengine.BeginExecutionProposal{Version: latest.Version, Plan: plan, Actor: identity.NodeName, Origin: topology.OriginFounding, At: time.Now().UTC()})
 		if err != nil {
 			return err
 		}
 	}
-	_, err := g.propose(ctx, metaengine.ActivateTargetProposal{ExecutionID: execution.Status.ID, Version: execution.Status.Version, Attempt: execution.Status.Attempt})
-	return err
-}
-func maxTime(a, b time.Time) time.Time {
-	if a.Before(b) {
-		return b
-	}
-	return a
+	return nil
 }
 
 type Session struct {

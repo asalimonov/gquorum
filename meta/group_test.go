@@ -12,6 +12,10 @@ import (
 )
 
 func publicFoundingCluster(t *testing.T, count int) []*Group {
+	return publicFoundingClusterWith(t, count, nil)
+}
+
+func publicFoundingClusterWith(t *testing.T, count int, modify func(*Options)) []*Group {
 	t.Helper()
 	listeners := make([]net.Listener, count)
 	founders := make([]FoundingMember, count)
@@ -25,7 +29,11 @@ func publicFoundingCluster(t *testing.T, count int) []*Group {
 	}
 	groups := make([]*Group, count)
 	for i := range count {
-		group, err := New(Options{Identity: Identity{NodeName: founders[i].Node.Name, ClusterID: "cluster", InstanceID: fmt.Sprintf("instance-%d", i), MemberID: founders[i].MemberID}, DBPath: filepath.Join(t.TempDir(), "meta.bolt"), Founders: founders, Limits: topology.Limits{MaxNodes: count}, Timing: Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 50}, SessionTTL: 3 * time.Second, Network: NetworkOptions{Listener: listeners[i], AdvertiseAddress: founders[i].Address, AllowPlaintext: true, ClusterCredential: []byte("test-cluster-credential")}})
+		opts := Options{Identity: Identity{NodeName: founders[i].Node.Name, ClusterID: "cluster", InstanceID: fmt.Sprintf("instance-%d", i), MemberID: founders[i].MemberID}, DBPath: filepath.Join(t.TempDir(), "meta.bolt"), Founders: founders, Limits: topology.Limits{MaxNodes: count}, Timing: Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 50}, SessionTTL: 3 * time.Second, Network: NetworkOptions{Listener: listeners[i], AdvertiseAddress: founders[i].Address, AllowPlaintext: true, ClusterCredential: []byte("test-cluster-credential")}}
+		if modify != nil {
+			modify(&opts)
+		}
+		group, err := New(opts)
 		if err != nil {
 			t.Fatal(err)
 		}
