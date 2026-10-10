@@ -102,7 +102,9 @@ func (g *Group) metaEffect(ctx context.Context, a topology.AuthorizedStep) error
 		if !ok || !admission.State.Prepared() {
 			return fault.New(fault.ReplicaNotReady, "exact join admission has not acknowledged its runtime", nil)
 		}
-		if !g.probeMember(ctx, a.NodeName, a.ReplicaID, admission.InstanceID) {
+		// Readiness is durable for this exact member identity. A retained-store
+		// restart may have a new process instance without losing that proof.
+		if !g.probeMember(ctx, a.NodeName, a.ReplicaID, "") {
 			return fault.ErrReplicaNotReady
 		}
 		return nil

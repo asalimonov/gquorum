@@ -34,6 +34,7 @@ type Group struct {
 	coordinator         *membership.Coordinator
 	convergence         *convergence.ConvergenceEngine
 	leases              *sessionManager
+	parked              parkedRegistry
 	leaseGate           sync.Mutex
 	addresses           map[string]string
 	joinMembers         map[uint64]string
@@ -71,6 +72,9 @@ func New(input Options) (*Group, error) {
 			return nil, fault.ErrIdentityMismatch
 		}
 		opts.Identity.MemberID = pin.MemberID
+	}
+	if opts.Join && !exists && opts.Identity.MemberID != 0 {
+		return nil, fault.New(fault.IdentityMismatch, "a retained joining identity requires a pinned store; fresh joiners must request an identity", nil)
 	}
 	if !opts.Join && !exists && len(opts.Founders) == 0 {
 		return nil, fault.New(fault.Invalid, "fresh meta storage requires founding members", nil)
@@ -179,6 +183,8 @@ func (g *Group) Start(parent context.Context) error {
 		}
 	}
 	g.convergence.Start(g.ctx)
+	g.wg.Add(1)
+	go g.runParkedSweep()
 	go g.run()
 	return nil
 }

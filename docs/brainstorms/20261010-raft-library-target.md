@@ -414,6 +414,7 @@ func (g *Group) Activate(context.Context) (Session, error)
 func (g *Group) Deactivate(context.Context, string) error
 func (g *Group) KeepAlive(context.Context, string) error
 func (g *Group) OwnSessionLive() bool
+func (g *Group) ParkedJoins(context.Context) ([]ParkedJoin, error)
 func (g *Group) AcquireLock(context.Context, string, string) error
 func (g *Group) LockHolder(context.Context, string) (Session, bool, error)
 func (g *Group) ServeOverride() int
@@ -777,7 +778,9 @@ If any constructor fails, close only resources it opened before returning. If st
 5. Meta convergence adds learner, transfers a full snapshot/log, verifies catch-up and promotes. Joiner activates a session only after exact voter membership.
 6. Approved load effects prepare fresh-ID replicas through caller protocols. Observe, record progress and finally activate Target. Retried joins return the existing exact admission rather than allocate again.
 
-Duplicate active process identity is refused and shown in parked observations. Unreadable voted state is blocked for explicit repair, never restarted empty under the same ID. Normal reconnect uses its pinned identity/log rather than fresh-ID readmission.
+Duplicate active process identity is refused and shown in parked observations. ParkedJoin includes name, caller-defined type, process/cluster identity, advertised address, reported document/member lineage, stable refusal kind, reason, first/last seen and saturating attempt count. The leader-local registry keys by name plus instance, expires silent entries after five minutes and caps at 128 observations with oldest-first eviction; a 30-second owned sweep runs independently of leadership/readers. Followers and blank joiners read the current leader through ParkedRead/address redirects. Admission clears obsolete incarnations while preserving a different process's name-conflict warning. Refusal classes are chosen explicitly in the handler, never parsed from prose; malformed identities, cluster mismatches and redirects are excluded.
+
+A positive retained joining identity requires an existing pinned store. A constructor cannot claim a used member ID with an unopened path. Pending admissions can rebind to a stopped process's replacement instance without allocating more IDs, then require a new exact ready acknowledgement; prepared admissions retain their durable exact-member proof through a pinned-store restart. Lookup and phase updates ignore superseded/retired records for the same execution/node/member tuple. A process already pinned to a readmission's granted ID resumes the replacement store and never quarantines it again. Unreadable voted state is blocked for explicit repair, never restarted empty under the same ID. Normal reconnect uses its pinned identity/log rather than fresh-ID readmission.
 
 ### 8.3 Document reads, staging, approval and effects
 

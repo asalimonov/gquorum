@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metapb"
+	"github.com/asalimonov/gquorum/internal/metastore"
 	"github.com/asalimonov/gquorum/internal/metatransport"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -85,6 +87,9 @@ func TestMetaJoinRequiresApprovalAndPreparedExactRuntimeBeforeLearner(t *testing
 	var grant joinResponse
 	if err = json.Unmarshal(reply.Data, &grant); err != nil {
 		t.Fatal(err)
+	}
+	if len(leader.parked.snapshot()) != 0 {
+		t.Fatal("accepted admission retained park")
 	}
 	if grant.MemberID != 3 || grant.Admission.State != metaengine.AdmissionPending {
 		t.Fatal("invalid admission", grant)
@@ -261,5 +266,88 @@ func TestMetaDataLostReadmissionBlocksWithoutHookAndRetriesSameGrant(t *testing.
 	cs := retry.engine.Load().Status().ConfState
 	if len(cs.Voters) != 3 || containsMember(cs, old.currentIdentity().MemberID) || !containsMember(cs, retry.currentIdentity().MemberID) {
 		t.Fatal("readmission did not converge fresh voter", cs)
+	}
+	// The same durable grant can be resumed after its replacement store was
+	// pinned. Do not rerun quarantine against the healthy replacement itself.
+	if err = retry.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	opts := restartOptions(t, retry)
+	opts.OnReadmission = func(context.Context, Readmission) error {
+		return errors.New("replacement store must be resumed, not quarantined")
+	}
+	resumed, err := New(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { resumed.Stop(context.Background()) })
+	if err = resumed.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err = resumed.WaitReady(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if resumed.currentIdentity().MemberID != retry.currentIdentity().MemberID || leader.state().Latest().Version != 2 {
+		t.Fatal("resumed grant changed identity/version")
+	}
+}
+
+func TestMetaPinnedAdmissionRestartsBeforeAndAfterReadyWithoutAllocatingIDs(t *testing.T) {
+	for _, prepared := range []bool{false, true} {
+		t.Run(fmt.Sprint(prepared), func(t *testing.T) {
+			groups := publicFoundingClusterWith(t, 2, func(o *Options) { o.Limits.MaxNodes = 3 })
+			leader := readyPublic(t, groups)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			doc := approvedNode(t, leader, "n3", "worker")
+			staged, err := leader.Stage(ctx, doc, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			id, err := leader.Apply(ctx, staged.Version)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := joinRequest{Identity: Identity{NodeName: "n3", ClusterID: "cluster", InstanceID: "before-crash"}, Node: topology.Node{Name: "n3", Type: "worker"}, Address: "127.0.0.1:1"}
+			data, _ := json.Marshal(req)
+			reply := leader.handleJoin(ctx, &metapb.Header{ClusterId: "cluster", NodeName: "n3"}, data)
+			if err = metatransport.ReplyError(reply); err != nil {
+				t.Fatal(err)
+			}
+			var grant joinResponse
+			if err = json.Unmarshal(reply.Data, &grant); err != nil {
+				t.Fatal(err)
+			}
+			if prepared {
+				ready, _ := json.Marshal(readyRequest{NodeName: "n3", InstanceID: "before-crash", MemberID: grant.MemberID, ExecutionID: grant.Admission.ExecutionID, Address: req.Address})
+				if err = metatransport.ReplyError(leader.handleReady(ctx, &metapb.Header{ClusterId: "cluster", NodeName: "n3", MemberId: grant.MemberID}, ready)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Constructor identity binding was durable before the process crashed. No
+			// membership was added yet: recovery must preserve this reserved identity.
+			path := filepath.Join(t.TempDir(), "pinned.bolt")
+			store, err := metastore.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = store.EnsureIdentity("n3", "cluster", grant.MemberID); err != nil {
+				t.Fatal(err)
+			}
+			if err = store.Close(); err != nil {
+				t.Fatal(err)
+			}
+			joined := joiningGroup(t, leader, "n3", "worker", "after-crash", []string{leader.opts.Network.AdvertiseAddress}, func(o *Options) { o.DBPath = path })
+			if err = joined.WaitReady(ctx); err != nil {
+				t.Fatal(err)
+			}
+			status, err := joined.WaitExecution(ctx, id)
+			if err != nil || status.State != topology.ExecutionSucceeded {
+				t.Fatal(status, err)
+			}
+			if joined.currentIdentity().MemberID != grant.MemberID || leader.state().Latest().Version != 2 {
+				t.Fatal("restart allocated another identity/version")
+			}
+		})
 	}
 }

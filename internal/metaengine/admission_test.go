@@ -340,3 +340,46 @@ func assumedReadmissionStatuses(active topology.Document, returningNode string) 
 	}
 	return statuses
 }
+
+func TestAdmissionRebindingNeverSelectsSupersededProcessForExecution(t *testing.T) {
+	sm, old, plan, at, index := admissionExecutionSM(t)
+	if r := apply(t, sm, index, BindAdmissionProposal{Admission: old, At: at.Add(3 * time.Second)}); !r.Accepted {
+		t.Fatal(r)
+	}
+	index++
+	replacement := old
+	replacement.InstanceID = "replacement"
+	if r := apply(t, sm, index, BindAdmissionProposal{Admission: replacement, ReplaceInstance: true, At: at.Add(4 * time.Second)}); !r.Accepted {
+		t.Fatal(r)
+	}
+	index++
+	if r := apply(t, sm, index, ReadyAdmissionProposal{NodeName: replacement.NodeName, InstanceID: replacement.InstanceID, MemberID: replacement.MemberID, ExecutionID: replacement.ExecutionID}); !r.Accepted {
+		t.Fatal(r)
+	}
+	for i := 0; i < 512; i++ {
+		record, ok := sm.admissionForExecution(old.ExecutionID, old.NodeName, old.MemberID)
+		if !ok || record.InstanceID != replacement.InstanceID {
+			t.Fatal("superseded process selected", record)
+		}
+	}
+	sm.mu.Lock()
+	changed := sm.updateAdmissionForCompletedStepLocked(sm.executions[old.ExecutionID], plan.Steps[1])
+	sm.mu.Unlock()
+	if !changed {
+		t.Fatal("replacement admission did not advance")
+	}
+	requireAdmissionState(t, sm, old.InstanceID, AdmissionSuperseded)
+	requireAdmissionState(t, sm, replacement.InstanceID, AdmissionLearner)
+	snapshot, err := sm.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored := newTopologySM(nil, testRules())
+	if err = restored.Restore(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	record, ok := restored.admissionForExecution(old.ExecutionID, old.NodeName, old.MemberID)
+	if !ok || record.InstanceID != replacement.InstanceID {
+		t.Fatal("restored lookup chose superseded process", record)
+	}
+}

@@ -75,7 +75,8 @@ func (sm *topologySM) liveAdmissionForNode(nodeName, exceptInstance string) (Adm
 
 func (sm *topologySM) admissionForStepLocked(executionID topology.ExecutionID, nodeName string, memberID uint64) (*AdmissionRecord, bool) {
 	for _, record := range sm.admissions {
-		if record.ExecutionID == executionID && record.NodeName == nodeName && record.MemberID == memberID {
+		if record.ExecutionID == executionID && record.NodeName == nodeName && record.MemberID == memberID &&
+			record.State != AdmissionSuperseded && record.State != AdmissionRetired {
 			return record, true
 		}
 	}

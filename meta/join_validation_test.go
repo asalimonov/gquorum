@@ -3,6 +3,8 @@ package meta
 import (
 	"context"
 	"errors"
+	"net"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -89,5 +91,25 @@ func TestJoinGrantValidatesEveryHintBeforeRoutingMutation(t *testing.T) {
 				t.Fatal("invalid grant accepted")
 			}
 		})
+	}
+}
+
+func TestJoiningCannotClaimUsedMemberWithoutPinnedStore(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	path := filepath.Join(t.TempDir(), "unopened.bolt")
+	opts := Options{Identity: Identity{NodeName: "one", ClusterID: "cluster", InstanceID: "fresh-process", MemberID: 1}, Node: topology.Node{Name: "one", Type: "worker"}, DBPath: path, Join: true, JoinSeeds: []string{"127.0.0.1:1"}, Network: NetworkOptions{Listener: listener, AdvertiseAddress: listener.Addr().String(), AllowPlaintext: true, ClusterCredential: []byte("test-credential")}}
+	group, err := New(opts)
+	if group != nil {
+		group.Stop(context.Background())
+	}
+	if !errors.Is(err, fault.ErrIdentityMismatch) {
+		t.Fatal("unbacked retained identity accepted", err)
+	}
+	if _, err = os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("identity refusal touched storage", err)
 	}
 }

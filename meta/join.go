@@ -7,6 +7,7 @@ import (
 	"net"
 	"reflect"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -21,9 +22,10 @@ import (
 )
 
 type joinRequest struct {
-	Identity Identity      `json:"identity"`
-	Node     topology.Node `json:"node"`
-	Address  string        `json:"address"`
+	Identity       Identity      `json:"identity"`
+	Node           topology.Node `json:"node"`
+	Address        string        `json:"address"`
+	LastDocVersion uint64        `json:"last_doc_version"`
 }
 type joinMember struct {
 	Name, Address string
@@ -62,7 +64,7 @@ func (g *Group) primeAddress(name, address string) {
 }
 func (g *Group) handleJoin(ctx context.Context, h *metapb.Header, data []byte) (reply *metapb.Reply) {
 	var req joinRequest
-	if json.Unmarshal(data, &req) != nil || req.Identity.NodeName != h.NodeName || req.Identity.ClusterID != h.ClusterId || req.Identity.InstanceID == "" || req.Identity.MemberID != h.MemberId || req.Node.Name != h.NodeName || req.Node.Type == "" {
+	if json.Unmarshal(data, &req) != nil || strings.TrimSpace(req.Identity.NodeName) == "" || strings.ContainsRune(req.Identity.NodeName, 0) || strings.ContainsRune(req.Identity.InstanceID, 0) || req.Identity.NodeName != h.NodeName || req.Identity.ClusterID != h.ClusterId || req.Identity.InstanceID == "" || req.Identity.MemberID != h.MemberId || req.Node.Name != h.NodeName || req.Node.Type == "" {
 		return metatransport.Reply(fault.ErrInvalid)
 	}
 	if _, _, err := net.SplitHostPort(req.Address); err != nil {
@@ -72,6 +74,7 @@ func (g *Group) handleJoin(ctx context.Context, h *metapb.Header, data []byte) (
 		// A refused copied identity must never replace the healthy holder's route.
 		if reply != nil && reply.ErrorCode == "" {
 			g.primeAddress(req.Identity.NodeName, req.Address)
+			g.parked.clear(req.Identity.NodeName, req.Identity.InstanceID)
 		}
 	}()
 	if !g.IsLeader() {
@@ -97,9 +100,17 @@ func (g *Group) handleJoin(ctx context.Context, h *metapb.Header, data []byte) (
 	if target.Version == 0 {
 		return metatransport.Reply(fault.ErrUnavailable)
 	}
+	refuse := func(kind string, err error) *metapb.Reply {
+		g.parked.record(req, kind, err.Error())
+		return metatransport.Reply(err)
+	}
 	node := target.Node(req.Node.Name)
 	if node == nil || !node.State.Places() {
-		return metatransport.Reply(fault.New(fault.ExecutionAuthorization, "node needs an approved topology admission", nil))
+		kind := parkedUnapproved
+		if node != nil && node.State == topology.NodeExcluded {
+			kind = parkedExcluded
+		}
+		return refuse(kind, fault.New(fault.ExecutionAuthorization, "node needs an approved topology admission", nil))
 	}
 	if node.Type != req.Node.Type {
 		return metatransport.Reply(fault.New(fault.IdentityMismatch, "node type differs from approved topology", nil))
@@ -108,7 +119,7 @@ func (g *Group) handleJoin(ctx context.Context, h *metapb.Header, data []byte) (
 	// address. A copied disk does not bypass the live process's name lock.
 	if holder, held := machine.LockSession("node/" + req.Node.Name); held && holder.InstanceID != req.Identity.InstanceID {
 		if g.probeSession(ctx, holder) {
-			return metatransport.Reply(fault.New(fault.IdentityMismatch, "node name is held by another live process", nil))
+			return refuse(parkedNameConflict, fault.New(fault.IdentityMismatch, "node name is held by another live process", nil))
 		}
 		g.leaseGate.Lock()
 		_, err := g.propose(ctx, metaengine.RevokeSession{SessionID: holder.SessionID, Reason: "stale process during admission"})
@@ -119,22 +130,26 @@ func (g *Group) handleJoin(ctx context.Context, h *metapb.Header, data []byte) (
 	}
 	if admission, ok := machine.Admission(req.Node.Name, req.Identity.InstanceID); ok {
 		if admission.State == metaengine.AdmissionSuperseded || admission.State == metaengine.AdmissionRetired {
-			return metatransport.Reply(fault.New(fault.ExecutionAuthorization, "process admission was superseded or retired", nil))
+			return refuse(parkedSuperseded, fault.New(fault.ExecutionAuthorization, "process admission was superseded or retired", nil))
 		}
 		return g.joinReply(ctx, admission, false)
 	}
+	member := target.MemberID(req.Node.Name)
 	var replace bool
 	if other, ok := machine.LiveAdmission(req.Node.Name, req.Identity.InstanceID); ok {
 		if g.probeMember(ctx, other.NodeName, other.MemberID, other.InstanceID) {
-			return metatransport.Reply(fault.New(fault.IdentityMismatch, "node name has another live admission", nil))
+			return refuse(parkedNameConflict, fault.New(fault.IdentityMismatch, "node name has another live admission", nil))
 		}
-		if other.State != metaengine.AdmissionPending || containsMember(g.engine.Load().Status().ConfState, other.MemberID) {
-			return metatransport.Reply(fault.New(fault.ExecutionAuthorization, "entered admission requires fresh identity repair", nil))
+		// An unprepared crash needs a new process-bound ready acknowledgement;
+		// rebinding pending admission preserves the exact allocated member ID.
+		if other.State == metaengine.AdmissionPending && !containsMember(g.engine.Load().Status().ConfState, other.MemberID) {
+			replace = true
+		} else if req.Identity.MemberID != member {
+			return refuse(parkedUnapproved, fault.New(fault.ExecutionAuthorization, "entered admission requires fresh identity repair", nil))
 		}
-		replace = true
 	}
-	member := target.MemberID(req.Node.Name)
-	if member != 0 && req.Identity.MemberID == member {
+
+	if member != 0 && req.Identity.MemberID == member && !replace {
 		// Ordinary retained-disk restart: no version or membership change.
 		response := g.membershipReply(ctx)
 		response.MemberID = member
@@ -142,8 +157,8 @@ func (g *Group) handleJoin(ctx context.Context, h *metapb.Header, data []byte) (
 		encoded, _ := json.Marshal(response)
 		return &metapb.Reply{Data: encoded}
 	}
-	if node.State != topology.NodeActive {
-		return metatransport.Reply(fault.New(fault.ExecutionAuthorization, "draining nodes may only restart their retained identity", nil))
+	if node.State != topology.NodeActive && req.Identity.MemberID != member {
+		return refuse(parkedUnapproved, fault.New(fault.ExecutionAuthorization, "draining nodes may only restart their retained identity", nil))
 	}
 	if ex, ok := machine.CurrentExecution(); ok && !ex.Status.State.Terminal() && ex.Status.Version == target.Version && hasAdmissionSteps(ex.Plan, req.Node.Name, member) {
 		result, err := g.propose(ctx, metaengine.BindAdmissionProposal{Admission: metaengine.AdmissionRecord{NodeName: req.Node.Name, InstanceID: req.Identity.InstanceID, MemberID: member, ExecutionID: ex.Status.ID}, ReplaceInstance: replace, At: time.Now().UTC()})
@@ -180,7 +195,7 @@ func (g *Group) handleJoin(ctx context.Context, h *metapb.Header, data []byte) (
 		}
 		return g.joinReply(ctx, result.Admission, false)
 	}
-	return metatransport.Reply(fault.New(fault.ExecutionAuthorization, "node has no current approved learner-first admission", nil))
+	return refuse(parkedUnapproved, fault.New(fault.ExecutionAuthorization, "node has no current approved learner-first admission", nil))
 }
 func hasAdmissionSteps(plan topology.Plan, name string, id uint64) bool {
 	wanted := []topology.StepKind{topology.StepPrepareReplica, topology.StepAddLearner, topology.StepWaitCaughtUp, topology.StepPromoteVoter}
@@ -256,7 +271,13 @@ func (g *Group) handleReady(ctx context.Context, h *metapb.Header, data []byte) 
 
 func (g *Group) tryJoin(ctx context.Context) error {
 	identity := g.currentIdentity()
-	data, _ := json.Marshal(joinRequest{Identity: identity, Node: g.opts.Node, Address: g.opts.Network.AdvertiseAddress})
+	lastVersion := g.state().Latest().Version
+	g.mu.RLock()
+	for _, doc := range g.recoveryDocuments {
+		lastVersion = max(lastVersion, doc.Version)
+	}
+	g.mu.RUnlock()
+	data, _ := json.Marshal(joinRequest{Identity: identity, Node: g.opts.Node, Address: g.opts.Network.AdvertiseAddress, LastDocVersion: lastVersion})
 	addresses := append([]string(nil), g.opts.JoinSeeds...)
 	if g.joinLeader != "" {
 		addresses = append([]string{g.joinLeader}, addresses...)
@@ -307,7 +328,10 @@ func (g *Group) tryJoin(ctx context.Context) error {
 			}
 		}
 		g.joinLeader = result.LeaderAddress
-		if result.Readmitted || identity.MemberID != 0 && identity.MemberID != result.MemberID {
+		// A retry already pinned to the granted identity resumes that store. Its
+		// admission may still describe the earlier readmission, but quarantining
+		// the replacement itself would destroy the lineage we just authorized.
+		if identity.MemberID != result.MemberID && (result.Readmitted || identity.MemberID != 0) {
 			if err = g.prepareReadmission(ctx, identity, result); err != nil {
 				return err
 			}

@@ -76,6 +76,16 @@ func (g *Group) Call(ctx context.Context, method string, header *metapb.Header, 
 		}
 		return &metapb.Reply{Data: encoded}
 	}
+	if method == "ParkedRead" {
+		if !g.IsLeader() {
+			return g.leaderReply(fault.ErrNotLeader)
+		}
+		encoded, err := json.Marshal(g.parked.snapshot())
+		if err != nil {
+			return metatransport.Reply(err)
+		}
+		return &metapb.Reply{Data: encoded}
+	}
 	if method == "MetaStatus" {
 		if !g.IsLeader() {
 			return g.leaderReply(fault.ErrNotLeader)
