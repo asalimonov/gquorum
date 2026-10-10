@@ -84,3 +84,8 @@ unit run completed in **11.96 seconds during Docker snapshot-catch-up testing**.
 Test-image hooks have separate `clustertest` coverage, including cancellation,
 authentication and release; their full example race suite passed in 35.613s.
 Functional and cluster cases continue outside the short parallel loop.
+
+The learner-policy, deletion-wait, leader-resume and larger-cluster shutdown ports
+remain in the separate sequential Docker suite. The root's **313 parallel unit
+cases** are unchanged; an uncached run completed in **7.95 seconds** during the
+test-image rebuild. Full root tests and tagged example races passed separately.

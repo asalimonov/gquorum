@@ -48,6 +48,14 @@ own identity, membership and values. Compacted catch-up verifies a received full
 snapshot and all 1,100 acknowledged commands. Dynamic admission starts a genuine
 joining process, observes its meta learner phase, refuses early application
 serving and verifies retained identities across process replacement.
+Admission also transfers meta leadership during the learner phase and requires
+the same execution ID, attempt and exact authorized promotion to finish. A real
+one-second repair interval preserves intentional learners through several ticks;
+a staged promotion remains inert until approval. Whole-group deletion waits for
+an unreachable former host while Active and its retained local state remain
+intact. Multi-group shutdown grows from three founders to five/seven admitted
+workers, verifies each host's membership and acknowledged values, then requires
+all concurrent process stops to finish within thirty seconds with exit code zero.
 All node counts come from topology.Limits; seven meta voters do not require seven load
 replicas. Fixtures use the library default 100ms Raft tick and a five-second
 activation TTL. Build the image before running cluster cases, so compilation

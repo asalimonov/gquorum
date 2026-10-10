@@ -71,6 +71,8 @@ func main() {
 	flag.DurationVar(&c.TickInterval, "tick", 50*time.Millisecond, "Raft tick interval")
 	flag.Uint64Var(&c.SnapshotThreshold, "snapshot-threshold", 64, "load snapshot interval in applied entries")
 	flag.BoolVar(&c.Reconciliation.Disabled, "disable-reconciliation", false, "disable automatic load replica repair")
+	flag.DurationVar(&c.Reconciliation.Interval, "reconciliation-interval", 0, "automatic repair observation interval; zero selects the library default")
+	flag.DurationVar(&c.Reconciliation.TickTimeout, "reconciliation-timeout", 0, "automatic repair observation timeout; zero selects the library default")
 	flag.Parse()
 	if healthcheck != "" {
 		client := &http.Client{Timeout: 2 * time.Second}

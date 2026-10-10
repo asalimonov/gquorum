@@ -39,18 +39,38 @@ func stageActivation(t *testing.T, ctx context.Context, c *Cluster, name string)
 }
 func startApply(t *testing.T, ctx context.Context, c *Cluster, node string, version uint64) topology.ExecutionID {
 	t.Helper()
-	response, err := c.Request(ctx, node, "POST", fmt.Sprintf("/api/topology/%d/apply", version), nil, 0)
-	if err := requireStatus(response, err, 202); err != nil {
+	var id topology.ExecutionID
+	// A follower loss can interrupt leader observation after the intent was
+	// staged. Apply is idempotent for this exact version; retry only transient
+	// unavailable responses, and fail immediately on any other refusal.
+	if err := Poll(ctx, func() (bool, error) {
+		response, err := c.Request(ctx, node, "POST", fmt.Sprintf("/api/topology/%d/apply", version), nil, 0)
+		if err != nil {
+			return false, err
+		}
+		if response.Status == 503 {
+			return false, requireStatus(response, nil, 202)
+		}
+		if err := requireStatus(response, nil, 202); err != nil {
+			return true, err
+		}
+		var result struct {
+			ID topology.ExecutionID `json:"execution_id"`
+		}
+		if err := response.Decode(&result); err != nil {
+			return true, err
+		}
+		if result.ID == "" {
+			return true, fmt.Errorf("apply lacks exact execution identity: %s", response.Data)
+		}
+		id = result.ID
+		return true, nil
+	}); err != nil {
 		t.Fatal(err)
 	}
-	var result struct {
-		ID topology.ExecutionID `json:"execution_id"`
-	}
-	if err := response.Decode(&result); err != nil || result.ID == "" {
-		t.Fatal("apply lacks exact execution identity", string(response.Data), err)
-	}
-	return result.ID
+	return id
 }
+
 func replicaID(doc topology.Document, group, name string) uint64 {
 	for _, replica := range doc.Group(group).Replicas {
 		if replica.NodeName == name {

@@ -22,6 +22,15 @@ func joiningNode(spec NodeSpec) topology.Node {
 }
 
 func TestMetaAdmissionUsesLearnerBeforeServingAndRetainsIdentityOnRestart(t *testing.T) {
+	testMetaAdmission(t, false)
+}
+
+func TestAdmissionExecutionResumesAfterMetaLeaderTransferWithoutNewAttempt(t *testing.T) {
+	testMetaAdmission(t, true)
+}
+
+func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
+	t.Helper()
 	spec := matrixSpec(3)
 	spec.Limits.MaxNodes, spec.Limits.MaxReplicas = 4, 4
 	c := acquire(t, spec).Cluster
@@ -72,6 +81,8 @@ func TestMetaAdmissionUsesLearnerBeforeServingAndRetainsIdentityOnRestart(t *tes
 	go func() { started <- node.Start(ctx) }()
 	defer func() { cancel(); <-started }()
 	learnerSeen := false
+	transferred := false
+	var replacementMember uint64
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -80,6 +91,17 @@ func TestMetaAdmissionUsesLearnerBeforeServingAndRetainsIdentityOnRestart(t *tes
 			for _, group := range status.Groups {
 				if group.GroupID == topology.MetaGroupID && slices.Contains(group.ConfState.Learners, member) {
 					learnerSeen = true
+					if transferDuringLearner && !transferred {
+						target := "node1"
+						if admitted.Document.MemberID(target) == status.MetaLeader {
+							target = "node2"
+						}
+						replacementMember = admitted.Document.MemberID(target)
+						if err := transferMeta(ctx, c, "node3", target, replacementMember); err != nil {
+							t.Fatal("transfer during admitted meta learner execution", err)
+						}
+						transferred = true
+					}
 				}
 			}
 			if status.Execution != nil && status.Execution.ID == admitted.ExecutionID && status.Execution.GroupID == "work" && status.Execution.CurrentStep > 0 {
@@ -91,6 +113,9 @@ func TestMetaAdmissionUsesLearnerBeforeServingAndRetainsIdentityOnRestart(t *tes
 			t.Fatal("meta admission did not reach load growth", err)
 		case <-ticker.C:
 		}
+	}
+	if transferDuringLearner && !transferred {
+		t.Fatal("execution never transferred while the new meta member was a learner")
 	}
 	if !learnerSeen {
 		t.Fatal("new meta member was never observed as a learner")
@@ -115,6 +140,42 @@ func TestMetaAdmissionUsesLearnerBeforeServingAndRetainsIdentityOnRestart(t *tes
 		t.Fatal("joining process owns another meta identity", local.Identity, err)
 	}
 	instance := local.Identity.InstanceID
+	if transferDuringLearner {
+		execution, err := c.Execution(ctx, "node2", admitted.ExecutionID)
+		if err != nil || execution.ID != admitted.ExecutionID || execution.Attempt != 1 || execution.Version != admitted.Document.Version || execution.State.Terminal() {
+			t.Fatal("leader replacement changed or finished the paused execution", execution, err)
+		}
+		status, err := c.Status(ctx, "node2")
+		if err != nil || status.MetaLeader != replacementMember {
+			t.Fatal("replacement meta leader did not retain the ongoing execution", status.MetaLeader, err)
+		}
+		// The stored execution's current exact step is exposed by the authorized
+		// receiver, even if planning against already changed membership differs.
+		if err := Poll(ctx, func() (bool, error) {
+			current, err := c.Execution(ctx, "node2", admitted.ExecutionID)
+			if err != nil {
+				return false, err
+			}
+			if current.ID != admitted.ExecutionID || current.Attempt != 1 || current.Version != admitted.Document.Version || current.State.Terminal() {
+				return true, fmt.Errorf("replacement changed the paused execution: %+v", current)
+			}
+			for _, seed := range c.Spec.Nodes {
+				controls, err := c.Controls(ctx, seed.Name)
+				if err != nil {
+					return false, err
+				}
+				for _, barrier := range controls.Barriers {
+					a := barrier.Last
+					if barrier.Hits > 0 && a.ExecutionID == admitted.ExecutionID && a.Attempt == 1 && a.Version == admitted.Document.Version && a.StepSeq == current.CurrentStep && a.Kind == topology.StepPromoteVoter && a.GroupID == "work" && a.NodeName == "node4" && a.ReplicaID == loadID {
+						return true, nil
+					}
+				}
+			}
+			return false, nil
+		}); err != nil {
+			t.Fatal("replacement controller did not resume the exact authorized promotion", err)
+		}
+	}
 	response, err = c.Request(ctx, "node4", "GET", "/health/ready", nil, 0)
 	if err := requireStatus(response, err, 503); err != nil {
 		t.Fatal("joining learner became application-ready before approval completed", err)
@@ -130,6 +191,12 @@ func TestMetaAdmissionUsesLearnerBeforeServingAndRetainsIdentityOnRestart(t *tes
 	}
 	if err := c.WaitExecution(ctx, "node2", admitted.ExecutionID); err != nil {
 		t.Fatal(err)
+	}
+	if transferDuringLearner {
+		execution, err := c.Execution(ctx, "node2", admitted.ExecutionID)
+		if err != nil || execution.Attempt != 1 || execution.ID != admitted.ExecutionID || execution.State != topology.ExecutionSucceeded {
+			t.Fatal("resumed admission created another attempt", execution, err)
+		}
 	}
 	if err := c.WaitActive(ctx, admitted.Document.Version); err != nil {
 		t.Fatal(err)
