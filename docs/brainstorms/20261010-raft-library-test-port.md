@@ -575,3 +575,6 @@ Design-stage verification only: verify every discovered source cluster symbol oc
 
 - `framework/cluster/topology/metaraft/session_manager_test.go`: four pure lease-table cases ported with their source names to `meta/leases_test.go`; exact runtime identity ping, leader/follower keepalive and own-session readiness cases remain outstanding in stage 7.
 - Shared runtime tests now live in `internal/raftengine/group_test.go` behind the public `load` API. New meta gRPC/bbolt tests in `internal/metaengine/runtime_test.go` verify real consensus, full committed-tail restart and leader replacement; they do not replace the required public bootstrap/join or process-cluster scenarios.
+
+- `framework/cluster/topology/planner_test.go`: first fourteen BuildPlan/ValidatePlanShape scenarios ported with retained names to `topology/planner_test.go`, supplying pinned Rules explicitly. Manager/PlanFor status-collection cases remain required in stage 8.
+- `framework/cluster/topology/metaraft/admission_test.go::TestBuildReadmissionPlan_ShrinksBeforeLearnerFirstReplacementAtMaximum`: ported to `internal/metaengine/admission_test.go` at Limits sizes 3, 5 and 7. The earlier direct learner-sequence fixture now calls the real BuildPlan. Remaining network join cases remain required.

@@ -732,7 +732,7 @@ func encodeCommand(command MetaCommand) ([]byte, error)
 func decodeCommand(data []byte) (MetaCommand, error)
 func ValidateDocument(Document, Rules) error
 func ValidateTransition(Document, Document, AllocationState, RetiredState) error
-func BuildPlan(active, desired Document, live map[string]GroupStatus) (Plan, error)
+func BuildPlan(active, desired Document, live map[string]GroupStatus, rules Rules) (Plan, error)
 func ValidatePlan(active, desired Document, plan Plan) error
 func NewConvergence(ConvergenceOptions) (*Convergence, error)
 func (c *Convergence) Start(context.Context) error
@@ -971,7 +971,7 @@ func (g *Group) Apply(ctx context.Context, version uint64) (ExecutionID, error) 
     if err != nil { return "", err }
     status, err := observeAllRelevantGroups(ctx, active, desired, g.controllers)
     if err != nil { return "", err }
-    plan, err := BuildPlan(active, desired, status)
+    plan, err := BuildPlan(active, desired, status, c.rules)
     if err != nil { return "", err }
     result, err := g.proposeMeta(ctx, BeginExecution{Version: version, Plan: plan})
     // FSM atomically installs Target, exact execution and approved-deletion tombstones.

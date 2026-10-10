@@ -47,12 +47,10 @@ func admissionExecutionSM(t *testing.T) (*topologySM, AdmissionRecord, topology.
 		t.Fatalf("propose target: %s", res.Reason)
 	}
 	target := sm.Current()
-	plan := topology.Plan{Version: target.Version, Steps: []topology.Step{
-		{Seq: 1, Kind: topology.StepPrepareReplica, GroupID: topology.MetaGroupID, NodeName: "n2", ReplicaID: 2},
-		{Seq: 2, Kind: topology.StepAddLearner, GroupID: topology.MetaGroupID, NodeName: "n2", ReplicaID: 2},
-		{Seq: 3, Kind: topology.StepWaitCaughtUp, GroupID: topology.MetaGroupID, NodeName: "n2", ReplicaID: 2},
-		{Seq: 4, Kind: topology.StepPromoteVoter, GroupID: topology.MetaGroupID, NodeName: "n2", ReplicaID: 2},
-	}}
+	plan, err := topology.BuildPlan(sm.Active(), target, assumedReadmissionStatuses(sm.Active(), ""), testRules())
+	if err != nil {
+		t.Fatal(err)
+	}
 	started := apply(t, sm, 6, BeginExecutionProposal{
 		Version: target.Version, Plan: plan, Actor: target.ChangedBy, Origin: target.Origin,
 		At: at.Add(2 * time.Second), ProposalID: "begin-target",
@@ -261,4 +259,84 @@ func TestAdmission_DifferentInstanceCannotReusePreparedMemberID(t *testing.T) {
 		t.Fatal("different instance reused a prepared member ID")
 	}
 	requireAdmissionState(t, sm, admission.InstanceID, AdmissionReady)
+}
+
+func TestBuildReadmissionPlan_ShrinksBeforeLearnerFirstReplacementAtMaximum(t *testing.T) {
+	for _, count := range []int{3, 5, 7} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			rules := topology.Rules{SchemaVersion: 1, Limits: topology.Limits{MaxNodes: count, MaxReplicas: 5}}
+
+			nodes := make([]topology.Node, 0, rules.Limits.MaxNodes)
+			metaReplicas := make([]topology.Replica, 0, rules.Limits.MaxNodes)
+			for i := 1; i <= rules.Limits.MaxNodes; i++ {
+				name := fmt.Sprintf("n%d", i)
+				nodes = append(nodes, topology.Node{Name: name, Type: "worker", State: topology.NodeActive})
+				metaReplicas = append(metaReplicas, topology.Replica{NodeName: name, ReplicaID: uint64(i), Role: topology.ReplicaVoter})
+			}
+			active := topology.Document{
+				Version: 9, ClusterID: "cluster-max", ChangedBy: "operator",
+				Placement: topology.PlacementRule{MinReplicas: 1, MaxReplicas: 3}, Nodes: nodes,
+				Groups: []topology.Group{
+					{ID: topology.MetaGroupID, NextReplicaID: uint64(rules.Limits.MaxNodes + 1), Replicas: metaReplicas},
+					{ID: "shard0", NextReplicaID: 4, Replicas: []topology.Replica{
+						{NodeName: "n1", ReplicaID: 1, Role: topology.ReplicaVoter},
+						{NodeName: "n2", ReplicaID: 2, Role: topology.ReplicaVoter},
+						{NodeName: "n3", ReplicaID: 3, Role: topology.ReplicaVoter},
+					}},
+				},
+			}
+			desired, err := buildReadmissionDocument(active, "n3", time.Date(2026, 7, 16, 13, 0, 0, 0, time.UTC))
+			if err != nil {
+				t.Fatalf("buildReadmissionDocument: %v", err)
+			}
+			plan, err := topology.BuildPlan(active, desired, assumedReadmissionStatuses(active, "n3"), rules)
+			if err != nil {
+				t.Fatalf("BuildPlan: %v", err)
+			}
+			for _, groupID := range []string{topology.MetaGroupID, "shard0"} {
+				oldID := active.Group(groupID).Replicas[2].ReplicaID
+				newID := desired.Group(groupID).Replicas[2].ReplicaID
+				indices := map[topology.StepKind]int{}
+				for i, step := range plan.Steps {
+					if step.GroupID != groupID {
+						continue
+					}
+					if step.ReplicaID == oldID && step.Kind == topology.StepRemoveReplica {
+						indices[step.Kind] = i
+					}
+					if step.ReplicaID == newID {
+						switch step.Kind {
+						case topology.StepPrepareReplica, topology.StepAddLearner, topology.StepPromoteVoter:
+							indices[step.Kind] = i
+						}
+					}
+				}
+				if indices[topology.StepRemoveReplica] >= indices[topology.StepPrepareReplica] ||
+					indices[topology.StepPrepareReplica] >= indices[topology.StepAddLearner] ||
+					indices[topology.StepAddLearner] >= indices[topology.StepPromoteVoter] {
+					t.Fatalf("group %s replacement is not shrink-first then learner-first: %+v (plan=%+v)", groupID, indices, plan.Steps)
+				}
+			}
+		})
+	}
+}
+
+func assumedReadmissionStatuses(active topology.Document, returningNode string) map[string]topology.GroupStatus {
+	statuses := make(map[string]topology.GroupStatus, len(active.Groups))
+	for _, group := range active.Groups {
+		status := topology.GroupStatus{GroupID: group.ID, Found: true, Commit: 1}
+		for _, replica := range group.Replicas {
+			switch replica.Role {
+			case topology.ReplicaLearner:
+				status.ConfState.Learners = append(status.ConfState.Learners, replica.ReplicaID)
+			case topology.ReplicaVoter:
+				status.ConfState.Voters = append(status.ConfState.Voters, replica.ReplicaID)
+				if status.LeaderID == 0 && replica.NodeName != returningNode {
+					status.LeaderID = replica.ReplicaID
+				}
+			}
+		}
+		statuses[group.ID] = status
+	}
+	return statuses
 }

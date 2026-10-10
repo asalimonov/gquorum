@@ -42,6 +42,8 @@ After each stage run make test. For runtime/concurrency changes also run scoped 
 
 - Stage 7 constructor contracts added: explicit identity/local node type, DB path, founders/join seeds, clone-owned TLS/credentials/labels, pinned Limits (default three nodes), validation of policy/timing/overflow, stable founding IDs and readmission hook payload/error. Four source leader-local lease-table scenarios are ported; runtime keepalive/expiry tests remain required. Validation includes defaults/large-limit/type conflicts and caller-input cloning. The public running meta Group is still outstanding; options alone do not satisfy stage 7. `make test`, scoped race checks and `make lint` pass.
 
+- Stage 8 planner dependency implemented ahead of public runtime wiring: deterministic global-observation membership planning, founding groups/intentional learners, prepare/add and wait/promote adjacency, transfer before demotion/removal, bounded shrink-first replacement, exact former-host stop/cleanup/delete and observed membership validation. Fourteen source planner/shape scenarios plus malformed-observation regressions are ported. The source maximum-size readmission replacement test runs at three/five/seven nodes using only Limits; existing admission FSM fixtures now call the real planner. `make test`, meta/topology race tests and `make lint` pass. Status collection/PlanFor, administrative mutation building, convergence, reconciliation and actual caller-effect execution remain outstanding in stage 8.
+
 ## Outstanding implementation gaps
 
 All unchecked stages above remain required. Force-new, old source-format migration, application SQL/configuration/licensing, witness mode, joint membership and linearizable read APIs remain the previously specified exclusions.
