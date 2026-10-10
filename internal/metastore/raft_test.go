@@ -30,6 +30,7 @@ func (s *Store) setAppliedIndexOnly(idx uint64) error {
 }
 
 func TestStoreIsFresh(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "meta.bolt")
 
 	if fresh, err := StoreIsFresh(dir); err != nil || !fresh {
@@ -81,6 +82,7 @@ func TestStoreIsFresh(t *testing.T) {
 }
 
 func TestBoltStore_Roundtrip(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "meta.bolt")
 	s, err := Open(dir)
 	if err != nil {
@@ -139,6 +141,7 @@ func TestBoltStore_Roundtrip(t *testing.T) {
 }
 
 func TestBoltStore_LoadAllWithoutSnapshot(t *testing.T) {
+	t.Parallel()
 	s := openTestStore(t)
 	entries := []raftpb.Entry{ent(1, 1, "a"), ent(2, 1, "b"), ent(3, 1, "c")}
 	if err := s.SaveReady(entries, raftpb.HardState{Term: 1, Commit: 3}); err != nil {
@@ -162,6 +165,7 @@ func TestBoltStore_LoadAllWithoutSnapshot(t *testing.T) {
 }
 
 func TestBoltStore_EmptyHardStateNotClobbered(t *testing.T) {
+	t.Parallel()
 	s := openTestStore(t)
 	if err := s.SaveReady([]raftpb.Entry{ent(1, 1, "a")}, raftpb.HardState{Term: 5, Vote: 2, Commit: 1}); err != nil {
 		t.Fatalf("SaveReady 1: %v", err)
@@ -179,6 +183,7 @@ func TestBoltStore_EmptyHardStateNotClobbered(t *testing.T) {
 }
 
 func TestBoltStore_LeaderOverwriteTruncatesTail(t *testing.T) {
+	t.Parallel()
 	s := openTestStore(t)
 	if err := s.SaveReady([]raftpb.Entry{ent(1, 1, "a"), ent(2, 1, "b"), ent(3, 1, "c")}, raftpb.HardState{Term: 1, Commit: 1}); err != nil {
 		t.Fatalf("SaveReady 1: %v", err)
@@ -199,6 +204,7 @@ func TestBoltStore_LeaderOverwriteTruncatesTail(t *testing.T) {
 }
 
 func TestBoltStore_Compaction(t *testing.T) {
+	t.Parallel()
 	s := openTestStore(t)
 	var entries []raftpb.Entry
 	for i := uint64(1); i <= 10; i++ {
@@ -238,6 +244,7 @@ func TestBoltStore_Compaction(t *testing.T) {
 }
 
 func TestBoltStore_StaleSnapshotIgnored(t *testing.T) {
+	t.Parallel()
 	s := openTestStore(t)
 	newer := raftpb.Snapshot{Data: []byte("new"), Metadata: raftpb.SnapshotMetadata{Index: 10, Term: 2}}
 	older := raftpb.Snapshot{Data: []byte("old"), Metadata: raftpb.SnapshotMetadata{Index: 4, Term: 1}}
@@ -257,6 +264,7 @@ func TestBoltStore_StaleSnapshotIgnored(t *testing.T) {
 }
 
 func TestBoltStore_AppliedMonotone(t *testing.T) {
+	t.Parallel()
 	s := openTestStore(t)
 	if err := s.SetApplied(7, raftpb.ConfState{Voters: []uint64{1}}); err != nil {
 		t.Fatalf("SetApplied 7: %v", err)
@@ -274,6 +282,7 @@ func TestBoltStore_AppliedMonotone(t *testing.T) {
 }
 
 func TestBoltStore_SetAppliedPersistsConfState(t *testing.T) {
+	t.Parallel()
 	s := openTestStore(t)
 
 	if _, found, err := s.AppliedConfState(); err != nil || found {
@@ -305,6 +314,7 @@ func TestBoltStore_SetAppliedPersistsConfState(t *testing.T) {
 }
 
 func TestBoltStore_ReopenAfterPartialWrite(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "meta.bolt")
 	s, err := Open(dir)
 	if err != nil {
@@ -350,6 +360,7 @@ func TestBoltStore_ReopenAfterPartialWrite(t *testing.T) {
 }
 
 func TestBoltStore_IdentityPinning(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "meta.bolt")
 	s, err := Open(dir)
 	if err != nil {
@@ -403,6 +414,7 @@ func TestBoltStore_IdentityPinning(t *testing.T) {
 }
 
 func TestInstallSnapshot_AtomicAndCommitClamped(t *testing.T) {
+	t.Parallel()
 	s := openTestStore(t)
 
 	if err := s.SaveReady([]raftpb.Entry{ent(8, 2, "a"), ent(9, 2, "b"), ent(10, 2, "c")},
@@ -448,6 +460,7 @@ func TestInstallSnapshot_AtomicAndCommitClamped(t *testing.T) {
 }
 
 func TestInstallSnapshot_IgnoresStale(t *testing.T) {
+	t.Parallel()
 	s := openTestStore(t)
 	newer := raftpb.Snapshot{
 		Data:     []byte("v2"),
@@ -473,6 +486,7 @@ func TestInstallSnapshot_IgnoresStale(t *testing.T) {
 }
 
 func TestPeekLocalLineage(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "meta.bolt")
 	if v, m, err := PeekLocalLineage(dir); err != nil || v != 0 || m != 0 {
 		t.Fatalf("PeekLocalLineage(absent) = (%d, %d, %v), want (0, 0, nil)", v, m, err)

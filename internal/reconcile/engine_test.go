@@ -192,6 +192,9 @@ func assertStatus(t *testing.T, r *Reconciler, state topology.ReconciliationStat
 }
 
 func TestReconcilerStartStopLifecycle(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	h := newTestHost(t, 1, 2, 3)
 	r := newTestReconciler(t, h, Settings{})
 	if err := r.Stop(context.Background()); err != nil {
@@ -214,6 +217,9 @@ func TestReconcilerStartStopLifecycle(t *testing.T) {
 	}
 }
 func TestReconcilerGatesLeaderHealthAndDisabled(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	for _, mode := range []string{"follower", "unknown", "disabled"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newTestHost(t, 1, 2)
@@ -234,6 +240,9 @@ func TestReconcilerGatesLeaderHealthAndDisabled(t *testing.T) {
 }
 
 func TestReconcilerLocalKillSwitchResetsStability(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	h := newTestHost(t, 1, 2)
 	r := newTestReconciler(t, h, Settings{})
 	if err := r.SetEnabled(context.Background(), false); err != nil {
@@ -272,6 +281,9 @@ func TestReconcilerLocalKillSwitchResetsStability(t *testing.T) {
 	}
 }
 func TestReconcilerResumesApprovedExecutionBeforeHealthGate(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	for _, state := range []topology.ExecutionState{topology.ExecutionPending, topology.ExecutionRunning, topology.ExecutionWaitingForCatchUp, topology.ExecutionSucceeded} {
 		t.Run(string(state), func(t *testing.T) {
 			for _, leader := range []bool{true, false} {
@@ -296,6 +308,9 @@ func TestReconcilerResumesApprovedExecutionBeforeHealthGate(t *testing.T) {
 	}
 }
 func TestReconcilerDoesNotMergeStagedOrFailedOperatorIntent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	for _, failed := range []bool{true, false} {
 		t.Run(fmt.Sprint(failed), func(t *testing.T) {
 			h := newTestHost(t, 1, 2)
@@ -317,6 +332,9 @@ func TestReconcilerDoesNotMergeStagedOrFailedOperatorIntent(t *testing.T) {
 	}
 }
 func TestReconcilerCommitsExactLearnerFirstRepair(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	h := newTestHost(t, 1, 2)
 	r := newTestReconciler(t, h, Settings{})
 	tick(t, r)
@@ -340,6 +358,9 @@ func TestReconcilerCommitsExactLearnerFirstRepair(t *testing.T) {
 	assertStatus(t, r, topology.ReconciliationRunning, ReconcileReasonApprovedExecution)
 }
 func TestReconcilerCASRaceLeavesOperatorVersionStaged(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	h := newTestHost(t, 1, 2)
 	r := newTestReconciler(t, h, Settings{})
 	h.beforeCommit = func() { h.stage(topology.OriginOperator, 1) }
@@ -355,6 +376,9 @@ type stubPolicy struct{ decision ReconcileDecision }
 func (*stubPolicy) Name() string                                { return "test-policy" }
 func (p *stubPolicy) Evaluate(ReconcileInput) ReconcileDecision { return p.decision }
 func TestReconcilerRejectsPolicyActionsOutsideAllowList(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	h := newTestHost(t, 1, 2, 3)
 	r := newTestReconciler(t, h, Settings{})
 	r.policy = &stubPolicy{ReconcileDecision{Action: &ReconcileAction{Kind: "remove_voter", GroupID: "shard0", ReplicaID: 3, Reason: "external text"}}}
@@ -365,6 +389,7 @@ func TestReconcilerRejectsPolicyActionsOutsideAllowList(t *testing.T) {
 	}
 }
 func TestHealableMatrix(t *testing.T) {
+	t.Parallel()
 	for _, origin := range []topology.Origin{topology.OriginInternal, topology.OriginOperator, topology.OriginSystem, topology.OriginReconciler, topology.OriginFounding} {
 		for _, parentOK := range []bool{true, false} {
 			for _, empty := range []bool{true, false} {
@@ -397,6 +422,9 @@ func TestHealableMatrix(t *testing.T) {
 	}
 }
 func TestReconcilerHealsStagedInternal(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	h := newTestHost(t, 1, 2, 3)
 	h.stage(topology.OriginInternal, 1)
 	r := newTestReconciler(t, h, Settings{})
@@ -408,6 +436,9 @@ func TestReconcilerHealsStagedInternal(t *testing.T) {
 	}
 }
 func TestReconcilerHealRefusals(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	for _, mode := range []string{"operator", "laundered", "follower", "plan-error", "apply-error", "nonempty", "unknown"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newTestHost(t, 1, 2, 3)
@@ -445,6 +476,9 @@ func TestReconcilerHealRefusals(t *testing.T) {
 	}
 }
 func TestReconcileTickIsBoundedAndCancelable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	h := newTestHost(t, 1, 2, 3)
 	h.blockViews = true
 	r := newTestReconciler(t, h, Settings{Interval: 100 * time.Millisecond, TickTimeout: 20 * time.Millisecond})
@@ -468,6 +502,9 @@ func TestReconcileTickIsBoundedAndCancelable(t *testing.T) {
 	}
 }
 func TestReconcilerFollowerResetsStabilityObservations(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	for _, mode := range []string{"standby", "staged", "failed", "approved"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newTestHost(t, 1, 2)
@@ -496,6 +533,9 @@ func TestReconcilerFollowerResetsStabilityObservations(t *testing.T) {
 	}
 }
 func TestReconcilerStatusGatesAndStableSince(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	for _, mode := range []string{"converged", "stability", "quorum", "cooldown", "status-error", "read-error", "execution-error"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newTestHost(t, 1, 2)
@@ -538,6 +578,9 @@ func TestReconcilerStatusGatesAndStableSince(t *testing.T) {
 	}
 }
 func TestReconcilerStatusTransitionsAreOwnedAndLoggedOnce(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	h := newTestHost(t, 1, 2, 3)
 	r := newTestReconciler(t, h, Settings{})
 	var buf bytes.Buffer
@@ -578,6 +621,9 @@ func TestReconcilerStatusTransitionsAreOwnedAndLoggedOnce(t *testing.T) {
 	}
 }
 func TestReconcilerStatusErrorWarnsOnce(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	h := newTestHost(t, 1, 2, 3)
 	r := newTestReconciler(t, h, Settings{})
 	var buf bytes.Buffer
@@ -591,6 +637,9 @@ func TestReconcilerStatusErrorWarnsOnce(t *testing.T) {
 	}
 }
 func TestReconcilerStatusConcurrentAccess(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	h := newTestHost(t, 1, 2, 3)
 	r := newTestReconciler(t, h, Settings{})
 	var wg sync.WaitGroup
@@ -607,6 +656,7 @@ func TestReconcilerStatusConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 func TestReconcilerSettingsValidation(t *testing.T) {
+	t.Parallel()
 	for _, s := range []Settings{{Interval: -1}, {TickTimeout: -1}, {StabilityWindow: -1}, {Cooldown: -1}, {Interval: time.Second, TickTimeout: time.Second}} {
 		if _, err := New(Config{Host: newTestHost(t, 1, 2, 3), Settings: s}); !errors.Is(err, fault.ErrInvalid) {
 			t.Fatal(s, err)

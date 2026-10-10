@@ -48,6 +48,7 @@ func deadline(t *testing.T) context.Context {
 }
 
 func TestOpen_CreatesExplicitStoreAndSurvivesReopen(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "nested", "caller-name.db")
 	j := testJournal(t, JournalOptions{Path: path})
 	e := appendTest(t, j, Event{Type: LeaderChange, NodeName: "a", InstanceID: "boot", ClusterID: "cluster", GroupID: "_meta"})
@@ -69,6 +70,7 @@ func TestOpen_CreatesExplicitStoreAndSurvivesReopen(t *testing.T) {
 	}
 }
 func TestJournal_AppendListOrdering(t *testing.T) {
+	t.Parallel()
 	j := testJournal(t, JournalOptions{})
 	for range 5 {
 		e := appendTest(t, j, Event{Type: NodeAlive, Seq: 999})
@@ -84,6 +86,7 @@ func TestJournal_AppendListOrdering(t *testing.T) {
 	}
 }
 func TestJournal_KeysetPagination(t *testing.T) {
+	t.Parallel()
 	j := testJournal(t, JournalOptions{})
 	for i := range 8 {
 		typ := NodeAlive
@@ -103,6 +106,7 @@ func TestJournal_KeysetPagination(t *testing.T) {
 	}
 }
 func TestJournal_AgeRotation(t *testing.T) {
+	t.Parallel()
 	j := testJournal(t, JournalOptions{Retention: time.Hour})
 	now := time.Now().UTC()
 	j.now = func() time.Time { return now }
@@ -117,6 +121,7 @@ func TestJournal_AgeRotation(t *testing.T) {
 	}
 }
 func TestJournal_AmortizedRotation(t *testing.T) {
+	t.Parallel()
 	j := testJournal(t, JournalOptions{Retention: time.Hour})
 	for range 63 {
 		appendTest(t, j, Event{At: time.Now().Add(-2 * time.Hour)})
@@ -130,6 +135,7 @@ func TestJournal_AmortizedRotation(t *testing.T) {
 	}
 }
 func TestJournal_SizeCapRotation(t *testing.T) {
+	t.Parallel()
 	j := testJournal(t, JournalOptions{MaxLiveBytes: 1 << 20})
 	for range 100 {
 		appendTest(t, j, Event{Type: NodeAlive})
@@ -141,6 +147,7 @@ func TestJournal_SizeCapRotation(t *testing.T) {
 	}
 }
 func TestRotate_IgnoresFileSizeAndOtherBuckets(t *testing.T) {
+	t.Parallel()
 	j := testJournal(t, JournalOptions{MaxLiveBytes: 1 << 20})
 	must(t, j.db.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucket([]byte("other"))
@@ -158,6 +165,7 @@ func TestRotate_IgnoresFileSizeAndOtherBuckets(t *testing.T) {
 	}
 }
 func TestRotate_SizePruneConvergesOnLiveBytes(t *testing.T) {
+	t.Parallel()
 	j := testJournal(t, JournalOptions{MaxLiveBytes: 8 << 10})
 	for range 500 {
 		appendTest(t, j, Event{NodeName: "node", Type: NodeAlive})
@@ -177,6 +185,7 @@ func TestRotate_SizePruneConvergesOnLiveBytes(t *testing.T) {
 	t.Fatalf("live-byte retention did not converge: %d", size)
 }
 func TestRotate_StatsWalkIsGatedButStillPrunes(t *testing.T) {
+	t.Parallel()
 	j := testJournal(t, JournalOptions{})
 	for range 100 {
 		appendTest(t, j, Event{Type: NodeAlive})
@@ -191,6 +200,7 @@ func TestRotate_StatsWalkIsGatedButStillPrunes(t *testing.T) {
 	}
 }
 func TestJournal_NilSafeAndAppendAfterClose(t *testing.T) {
+	t.Parallel()
 	var absent *Journal
 	_, err := absent.Append(Event{})
 	must(t, err)
@@ -227,6 +237,7 @@ func delivery(t *testing.T, ch <-chan Delivery) Delivery {
 	}
 }
 func TestBus_JournalBeforeDeliveryAndOwnedCopies(t *testing.T) {
+	t.Parallel()
 	j := testJournal(t, JournalOptions{})
 	b := testBus(t, BusOptions{Journal: j})
 	a, err := b.Subscribe(deadline(t), Filter{}, 4)
@@ -249,6 +260,7 @@ func TestBus_JournalBeforeDeliveryAndOwnedCopies(t *testing.T) {
 	}
 }
 func TestBus_JournalFailureIsLiveOnly(t *testing.T) {
+	t.Parallel()
 	j := testJournal(t, JournalOptions{})
 	b := testBus(t, BusOptions{Journal: j})
 	ch, err := b.Subscribe(deadline(t), Filter{}, 2)
@@ -260,6 +272,7 @@ func TestBus_JournalFailureIsLiveOnly(t *testing.T) {
 	}
 }
 func TestBus_BoundedIngressAndSubscriberLoss(t *testing.T) {
+	t.Parallel()
 	j := testJournal(t, JournalOptions{})
 	b := testBus(t, BusOptions{Journal: j, Buffer: 1})
 	ch, err := b.Subscribe(deadline(t), Filter{}, 1)
@@ -308,6 +321,7 @@ func TestBus_BoundedIngressAndSubscriberLoss(t *testing.T) {
 	}
 }
 func TestBus_FilterCancelAndCloseOwnership(t *testing.T) {
+	t.Parallel()
 	j := testJournal(t, JournalOptions{})
 	b := testBus(t, BusOptions{Journal: j})
 	ctx, cancel := context.WithCancel(context.Background())

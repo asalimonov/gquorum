@@ -154,6 +154,9 @@ func loadDocument(t *testing.T, g *Group) topology.Document {
 }
 
 func TestMetaCallerEffectCompletionLostAcrossLeaderReplacement(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	controller := &verifiedLoadController{groups: map[string]topology.Group{}, hosts: map[string]map[string]uint64{}, firstEffect: make(chan struct{})}
 	effect := controller.firstEffect
 	groups := publicFoundingClusterWith(t, 3, func(o *Options) { o.LoadGroups = controller })

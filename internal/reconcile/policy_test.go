@@ -11,6 +11,7 @@ import (
 const reconcileTestStability = 60 * time.Second
 
 func TestRestoreDegradedPolicyAllowList(t *testing.T) {
+	t.Parallel()
 	doc := clusterDocument(true)
 	matching := topology.GroupStatus{GroupID: "shard0", Found: true, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}}
 	missing := topology.GroupStatus{GroupID: "shard0", Found: true, ConfState: raftpb.ConfState{Voters: []uint64{1, 2}}}
@@ -122,6 +123,7 @@ func TestRestoreDegradedPolicyAllowList(t *testing.T) {
 }
 
 func TestRestoreDegradedPolicyNeverRepairsMeta(t *testing.T) {
+	t.Parallel()
 	doc := clusterDocument(false)
 	decision := NewRestoreDegradedPolicy(time.Second).Evaluate(ReconcileInput{
 		Active: doc,

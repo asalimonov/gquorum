@@ -24,6 +24,7 @@ func testDocument() Document {
 func testRules() Rules { return Rules{SchemaVersion: 1, Limits: (Limits{}).WithDefaults()} }
 
 func TestDocumentLookupHelpers(t *testing.T) {
+	t.Parallel()
 	d := testDocument()
 	if d.Node("a") == nil || d.Node("missing") != nil || d.Group("load") == nil || d.Group("missing") != nil || d.MemberID("a") != 1 || d.MemberID("missing") != 0 || len(d.LoadGroups()) != 1 {
 		t.Fatal("document lookup failure")
@@ -34,6 +35,7 @@ func TestDocumentLookupHelpers(t *testing.T) {
 }
 
 func TestDocumentCloneIsolation(t *testing.T) {
+	t.Parallel()
 	d := testDocument()
 	d.Audit = &ChangeAudit{Reason: "original"}
 	d.Placement.AllowedNodeTypes = []NodeType{"worker"}
@@ -53,6 +55,7 @@ func TestDocumentCloneIsolation(t *testing.T) {
 }
 
 func TestGroupBounds(t *testing.T) {
+	t.Parallel()
 	d := testDocument()
 	if a, b := d.GroupBounds("load"); a != 1 || b != 2 {
 		t.Fatal(a, b)
@@ -63,6 +66,7 @@ func TestGroupBounds(t *testing.T) {
 }
 
 func TestEffectiveNodeStateDoesNotMutate(t *testing.T) {
+	t.Parallel()
 	d := testDocument()
 	d.Nodes[1].State = NodeDraining
 	if EffectiveNodeState(d, "b") != NodeDrained || d.Node("b").State != NodeDraining {
@@ -75,6 +79,7 @@ func TestEffectiveNodeStateDoesNotMutate(t *testing.T) {
 }
 
 func TestAllocateMemberID(t *testing.T) {
+	t.Parallel()
 	d := testDocument()
 	d.MetaGroup().NextReplicaID = 0
 	a, err := d.AllocateMemberID()
@@ -95,6 +100,7 @@ func TestAllocateMemberID(t *testing.T) {
 }
 
 func TestDocumentValidate(t *testing.T) {
+	t.Parallel()
 	if err := testDocumentPointer().Validate(testRules()); err != nil {
 		t.Fatal(err)
 	}
@@ -139,6 +145,7 @@ func TestDocumentValidate(t *testing.T) {
 func testDocumentPointer() *Document { d := testDocument(); return &d }
 
 func TestLimitsCapacityAndExcludedTombstones(t *testing.T) {
+	t.Parallel()
 	l := (Limits{}).WithDefaults()
 	if l.MaxNodes != 3 || l.MaxReplicas != 5 {
 		t.Fatal(l)
@@ -167,6 +174,7 @@ func TestLimitsCapacityAndExcludedTombstones(t *testing.T) {
 }
 
 func TestMetaIgnoresNodeTypeEligibility(t *testing.T) {
+	t.Parallel()
 	d := testDocument()
 	d.Placement.AllowedNodeTypes = []NodeType{"worker"}
 	if err := d.Validate(testRules()); err != nil {
@@ -183,6 +191,7 @@ func TestMetaIgnoresNodeTypeEligibility(t *testing.T) {
 }
 
 func TestValidateTransitionRetiredIdentities(t *testing.T) {
+	t.Parallel()
 	before := testDocument()
 	after := before.Clone()
 	after.MetaGroup().Replicas[0].ReplicaID = 2
@@ -207,6 +216,7 @@ func TestValidateTransitionRetiredIdentities(t *testing.T) {
 }
 
 func TestAuthorizedStepMatchesExactScope(t *testing.T) {
+	t.Parallel()
 	step := Step{Seq: 1, Kind: StepPrepareReplica, GroupID: "load", NodeName: "a", ReplicaID: 7}
 	a := AuthorizedStep{ExecutionID: "v2-a1", Version: 2, Attempt: 1, StepSeq: step.Seq, Kind: step.Kind, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID}
 	if !a.Matches("v2-a1", 1, 2, step) {

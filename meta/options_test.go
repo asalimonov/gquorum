@@ -24,6 +24,7 @@ func optionsForTest(t *testing.T) Options {
 	return Options{Identity: Identity{NodeName: "n1", ClusterID: "cluster", InstanceID: "instance", MemberID: 1}, DBPath: filepath.Join(t.TempDir(), "meta.bolt"), Founders: []FoundingMember{{Node: topology.Node{Name: "n1", Type: "worker"}, MemberID: 1, Address: listener.Addr().String()}}, Network: NetworkOptions{Listener: listener, AdvertiseAddress: listener.Addr().String(), AllowPlaintext: true, ClusterCredential: []byte("test-secret")}}
 }
 func TestMetaOptionsDefaultsAndOnlyLimitsControlClusterSize(t *testing.T) {
+	t.Parallel()
 	o := optionsForTest(t)
 	if err := o.Validate(); err != nil {
 		t.Fatal(err)
@@ -42,6 +43,7 @@ func TestMetaOptionsDefaultsAndOnlyLimitsControlClusterSize(t *testing.T) {
 	}
 }
 func TestMetaOptionsRejectUnsafeInputs(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		mutate func(*Options)
@@ -69,6 +71,7 @@ func TestMetaOptionsRejectUnsafeInputs(t *testing.T) {
 	}
 }
 func TestMetaOptionClonesCallerInputs(t *testing.T) {
+	t.Parallel()
 	o := optionsForTest(t)
 	o.Founders[0].Node.Labels = map[string]string{"zone": "a"}
 	o.Network.TLS = &tls.Config{ServerName: "server"}
@@ -83,6 +86,7 @@ func TestMetaOptionClonesCallerInputs(t *testing.T) {
 	}
 }
 func TestFoundingIDsAreIndependentOfOrdering(t *testing.T) {
+	t.Parallel()
 	a, err := FoundingIDs("cluster", []string{"n1", "n2", "n3"})
 	if err != nil {
 		t.Fatal(err)

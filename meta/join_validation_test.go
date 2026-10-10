@@ -15,6 +15,7 @@ import (
 )
 
 func TestReadmissionHookMustReleaseAndQuarantineOldMetaIdentity(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "meta.bolt")
 	store, err := metastore.Open(path)
 	if err != nil {
@@ -47,6 +48,7 @@ func TestReadmissionHookMustReleaseAndQuarantineOldMetaIdentity(t *testing.T) {
 }
 
 func TestReadmissionPreviousScopeNeverIncludesGrantedOrOtherNodeReplicas(t *testing.T) {
+	t.Parallel()
 	previous := topology.Document{Groups: []topology.Group{{ID: "work", Replicas: []topology.Replica{{NodeName: "one", ReplicaID: 1}, {NodeName: "two", ReplicaID: 2}}}}}
 	granted := previous.Clone()
 	granted.Groups[0].Replicas[0].ReplicaID = 3
@@ -63,6 +65,7 @@ func TestReadmissionPreviousScopeNeverIncludesGrantedOrOtherNodeReplicas(t *test
 }
 
 func TestJoinGrantValidatesEveryHintBeforeRoutingMutation(t *testing.T) {
+	t.Parallel()
 	rules := topology.Rules{SchemaVersion: 1, Limits: topology.Limits{}.WithDefaults()}
 	now := time.Now().UTC()
 	doc := topology.Document{Version: 1, ClusterID: "cluster", Placement: topology.PlacementRule{MinReplicas: 1, MaxReplicas: 3}, Nodes: []topology.Node{{Name: "one", Type: "worker", State: topology.NodeActive}}, Groups: []topology.Group{{ID: topology.MetaGroupID, NextReplicaID: 2, Replicas: []topology.Replica{{NodeName: "one", ReplicaID: 1, Role: topology.ReplicaVoter}}}}, Origin: topology.OriginFounding, CreatedAt: now}
@@ -95,6 +98,7 @@ func TestJoinGrantValidatesEveryHintBeforeRoutingMutation(t *testing.T) {
 }
 
 func TestJoiningCannotClaimUsedMemberWithoutPinnedStore(t *testing.T) {
+	t.Parallel()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

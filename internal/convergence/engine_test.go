@@ -431,6 +431,9 @@ func statusFor(group string, voters, learners []uint64, leader uint64) GroupStat
 }
 
 func TestConvergence_LearnerFirstSteps(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	active, target, replica := growDocuments()
 	tests := []struct {
 		name    string
@@ -468,6 +471,9 @@ func TestConvergence_LearnerFirstSteps(t *testing.T) {
 }
 
 func TestConvergence_FinalValidatorFailureLeavesActiveUnchanged(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	active, target, replica := growDocuments()
 	step := Step{Seq: 1, Kind: StepPromoteVoter, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}
 	f := newConvergenceFixture(active, target, []Step{step}, 0, ExecutionPending)
@@ -487,6 +493,9 @@ func TestConvergence_FinalValidatorFailureLeavesActiveUnchanged(t *testing.T) {
 }
 
 func TestConvergence_ForcedRetirementWaivesOnlyDeadNodeTeardown(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	active := threeNodeDoc()
 	target := active.Clone()
 	target.Version = 2
@@ -514,6 +523,9 @@ func TestConvergence_ForcedRetirementWaivesOnlyDeadNodeTeardown(t *testing.T) {
 }
 
 func TestConvergence_DestructiveAndLifecycleSteps(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	active := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"shard0"})
 	target := active.Clone()
 	target.Version = 2
@@ -538,6 +550,9 @@ func TestConvergence_DestructiveAndLifecycleSteps(t *testing.T) {
 }
 
 func TestConvergence_DeleteShardStopsEveryHostBeforeSharedDelete(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	active := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"shard0", "shard9"})
 	target := active.Clone()
 	target.Version = 2
@@ -565,6 +580,9 @@ func TestConvergence_DeleteShardStopsEveryHostBeforeSharedDelete(t *testing.T) {
 }
 
 func TestConvergence_DeleteShardWaitsForUnreachableHost(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	active := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"shard0", "shard9"})
 	target := active.Clone()
 	target.Version = 2
@@ -591,6 +609,9 @@ func TestConvergence_DeleteShardWaitsForUnreachableHost(t *testing.T) {
 }
 
 func TestConvergence_DeleteShardCompletesAfterGroupLosesLeader(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	active := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"shard0", "shard9"})
 	target := active.Clone()
 	target.Version = 2
@@ -611,6 +632,9 @@ func TestConvergence_DeleteShardCompletesAfterGroupLosesLeader(t *testing.T) {
 }
 
 func TestConvergence_DeleteShardContinuesAfterGroupBecomesAbsent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	active := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"shard0", "shard9"})
 	target := active.Clone()
 	target.Version = 2
@@ -631,6 +655,9 @@ func TestConvergence_DeleteShardContinuesAfterGroupBecomesAbsent(t *testing.T) {
 }
 
 func TestConvergence_FoundingDemotionTransferAndDelete(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	base := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"shard0"})
 	t.Run("founding", func(t *testing.T) {
 		target := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"shard0", "shard1"})
@@ -701,6 +728,9 @@ func TestConvergence_FoundingDemotionTransferAndDelete(t *testing.T) {
 }
 
 func TestConvergence_WaitFailureOwnershipAndCancellation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	active, target, replica := growDocuments()
 	prepare := Step{Seq: 1, Kind: StepPrepareReplica, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}
 	t.Run("unreachable prepare waits", func(t *testing.T) {
@@ -777,6 +807,9 @@ func TestConvergence_WaitFailureOwnershipAndCancellation(t *testing.T) {
 }
 
 func TestConvergence_EmptyPlanAndActivationFailure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	target := clusterDoc(1, 1, []string{"n1"}, []string{"shard0"})
 	target.Version = 2
 	active := target.Clone()
@@ -795,6 +828,9 @@ type countingSignal struct{ calls int }
 func (s *countingSignal) Signal() { s.calls++ }
 
 func TestConvergence_FailoverResumesExactStep(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	active, target, replica := growDocuments()
 	tests := []struct {
 		name      string
@@ -862,6 +898,9 @@ func TestConvergence_FailoverResumesExactStep(t *testing.T) {
 }
 
 func TestConvergence_SupersedesOnlyAtStepBoundary(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	active, target, replica := growDocuments()
 	add := Step{Seq: 1, Kind: StepAddLearner, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}
 
@@ -918,6 +957,9 @@ func TestConvergence_SupersedesOnlyAtStepBoundary(t *testing.T) {
 }
 
 func TestConvergence_ResumePreservesDurableWaiting(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	active, target, replica := growDocuments()
 	wait := Step{Seq: 1, Kind: StepWaitCaughtUp, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}
 	promote := Step{Seq: 2, Kind: StepPromoteVoter, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}
@@ -947,6 +989,9 @@ func TestConvergence_ResumePreservesDurableWaiting(t *testing.T) {
 }
 
 func TestConvergence_ResumeMixedPlaneOwnership(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	target := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"shard0"})
 	target.Version = 2
 	active := target.Clone()
@@ -996,6 +1041,9 @@ func TestConvergence_ResumeMixedPlaneOwnership(t *testing.T) {
 }
 
 func TestConvergence_ShutdownCancelsBlockedWorkAndIsIdempotent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	active, target, replica := growDocuments()
 	prepare := Step{Seq: 1, Kind: StepPrepareReplica, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}
 	f := newConvergenceFixture(active, target, []Step{prepare}, 0, ExecutionPending)
@@ -1052,6 +1100,9 @@ func TestConvergence_ShutdownCancelsBlockedWorkAndIsIdempotent(t *testing.T) {
 }
 
 func TestConvergence_ShutdownReusesBoundedRetryTimer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	active, target, replica := growDocuments()
 	prepare := Step{Seq: 1, Kind: StepPrepareReplica, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}
 	f := newConvergenceFixture(active, target, []Step{prepare}, 0, ExecutionPending)
@@ -1080,6 +1131,9 @@ func TestConvergence_ShutdownReusesBoundedRetryTimer(t *testing.T) {
 }
 
 func TestConvergence_ResumeSerializesConcurrentTicks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	active, target, replica := growDocuments()
 	prepare := Step{Seq: 1, Kind: StepPrepareReplica, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}
 	f := newConvergenceFixture(active, target, []Step{prepare}, 0, ExecutionPending)
@@ -1159,6 +1213,9 @@ func (c *blockingConvergenceCoordinator) RecordExecutionTransition(ctx context.C
 // reproduces). The engine's loop context is cancel-only, so without the
 // per-proposal deadline this test hangs.
 func TestConvergence_TickSurvivesLostProposal(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	active, target, replica := growDocuments()
 	steps := []Step{
 		{Seq: 1, Kind: StepWaitCaughtUp, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID},

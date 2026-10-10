@@ -12,6 +12,7 @@ import (
 )
 
 func TestCoordinatorCanceledWaitDoesNotPropose(t *testing.T) {
+	t.Parallel()
 	c := NewCoordinator()
 	entered, release := make(chan struct{}), make(chan struct{})
 	t.Cleanup(func() {
@@ -54,6 +55,7 @@ func TestCoordinatorCanceledWaitDoesNotPropose(t *testing.T) {
 }
 
 func TestSafetyRejectsZeroAndCurrentJointConfiguration(t *testing.T) {
+	t.Parallel()
 	g := &fakeGroup{id: "load", st: statusOf([]uint64{1, 2, 3}, nil, 1, 10, nil)}
 	if err := (SafetyPolicy{}).Check(g, knownLive(1, 2, 3), AddLearner(0)); !errors.Is(err, fault.ErrUnsafeMembership) {
 		t.Fatal(err)

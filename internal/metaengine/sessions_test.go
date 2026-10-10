@@ -11,6 +11,7 @@ import (
 // from sm_test.go) exercises the deterministic session+lock rules (N2/N3).
 
 func TestSM_GrantSession_AndIdempotent(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	r := apply(t, sm, 1, GrantSession{SessionID: "s1", NodeName: "n1", InstanceID: "i1", TTLSeconds: 15, ProposalID: "p1"})
 	assert.True(t, r.Accepted)
@@ -24,6 +25,7 @@ func TestSM_GrantSession_AndIdempotent(t *testing.T) {
 }
 
 func TestSM_AcquireLock_RequiresSession(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	// Acquiring under a non-existent session is rejected.
 	r := apply(t, sm, 1, AcquireLock{Key: "node/n1", SessionID: "ghost", ProposalID: "p1"})
@@ -32,6 +34,7 @@ func TestSM_AcquireLock_RequiresSession(t *testing.T) {
 }
 
 func TestSM_AcquireLock_Grant_Reacquire_Conflict(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, GrantSession{SessionID: "s1", NodeName: "n1", InstanceID: "i1", ProposalID: "g1", TTLSeconds: 15})
 	apply(t, sm, 2, GrantSession{SessionID: "s2", NodeName: "n1", InstanceID: "i2", ProposalID: "g2", TTLSeconds: 15})
@@ -54,6 +57,7 @@ func TestSM_AcquireLock_Grant_Reacquire_Conflict(t *testing.T) {
 }
 
 func TestSM_RevokeSession_ReleasesLocks(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, GrantSession{SessionID: "s1", NodeName: "n1", InstanceID: "i1", ProposalID: "g1", TTLSeconds: 15})
 	apply(t, sm, 2, AcquireLock{Key: "node/n1", SessionID: "s1", ProposalID: "a1"})
@@ -74,6 +78,7 @@ func TestSM_RevokeSession_ReleasesLocks(t *testing.T) {
 }
 
 func TestSM_AcquireLock_ReclaimsAfterHolderGone(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, GrantSession{SessionID: "s1", NodeName: "n1", InstanceID: "i1", ProposalID: "g1", TTLSeconds: 15})
 	apply(t, sm, 2, AcquireLock{Key: "node/n1", SessionID: "s1", ProposalID: "a1"})
@@ -91,6 +96,7 @@ func TestSM_AcquireLock_ReclaimsAfterHolderGone(t *testing.T) {
 // Sessions/locks survive a snapshot/restore round-trip AND do not pollute the
 // document version history.
 func TestSM_Sessions_SnapshotRestore_NoVersionBump(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "d1"})
 	verBefore := sm.Current().Version

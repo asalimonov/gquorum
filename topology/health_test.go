@@ -16,6 +16,7 @@ func healthDocument() Document {
 // Ports the source's declared-voter health cases, including independence of
 // placement policy and nullable observations before health is known.
 func TestEvaluateGroupHealth(t *testing.T) {
+	t.Parallel()
 	for alive := 0; alive <= 3; alive++ {
 		t.Run(fmt.Sprint(alive), func(t *testing.T) {
 			doc := healthDocument()
@@ -46,6 +47,7 @@ func TestEvaluateGroupHealth(t *testing.T) {
 	}
 }
 func TestEvaluateGroupHealthBelowMinIndependent(t *testing.T) {
+	t.Parallel()
 	for lo := 1; lo <= 3; lo++ {
 		doc := healthDocument()
 		doc.Groups[1].Placement = &PlacementRule{MinReplicas: lo, MaxReplicas: 3}
@@ -56,6 +58,7 @@ func TestEvaluateGroupHealthBelowMinIndependent(t *testing.T) {
 	}
 }
 func TestEvaluateGroupHealthUnknown(t *testing.T) {
+	t.Parallel()
 	for _, health := range []map[string]Health{nil, {}, {"a": HealthAlive, "b": HealthUnknown, "c": HealthDead}, {"a": HealthAlive, "c": HealthDead}} {
 		e := EvaluateGroupHealth(healthDocument(), "load", health)
 		if e.Voters != 3 || e.Quorum != 2 || e.ObservedHealth.State != GroupUnknown || e.ObservedHealth.HealthyVoters != nil || e.ObservedHealth.FailureTolerance != nil || e.ObservedHealth.BelowMinReplicas != nil {
@@ -71,6 +74,7 @@ func TestEvaluateGroupHealthUnknown(t *testing.T) {
 	}
 }
 func TestEvaluateDataAndAllGroupHealth(t *testing.T) {
+	t.Parallel()
 	doc := healthDocument()
 	data := EvaluateDataGroupHealth(doc, nil)
 	all := EvaluateAllGroupHealth(doc, nil)

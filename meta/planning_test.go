@@ -11,6 +11,9 @@ import (
 )
 
 func TestMetaFollowerApprovesEmptyPlanAndActivationIsDurable(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	groups := publicFoundingCluster(t, 3)
 	leader := readyPublic(t, groups)
 	var follower *Group
@@ -58,6 +61,9 @@ func TestMetaFollowerApprovesEmptyPlanAndActivationIsDurable(t *testing.T) {
 }
 
 func TestMetaDrainTransfersLeadershipAndKeepsEveryAdmittedVoter(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	groups := publicFoundingCluster(t, 3)
 	leader := readyPublic(t, groups)
 	departing := leader.currentIdentity()
@@ -99,6 +105,9 @@ func TestMetaDrainTransfersLeadershipAndKeepsEveryAdmittedVoter(t *testing.T) {
 }
 
 func TestMetaUnknownLoadControllerRefusesApprovalWithoutChangingTarget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	g := readyPublic(t, publicFoundingCluster(t, 1))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

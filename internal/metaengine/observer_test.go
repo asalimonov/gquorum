@@ -24,6 +24,7 @@ func (p *observerPersister) SaveApplication(uint64, raftpb.ConfState, []byte) er
 }
 
 func TestAppliedObserverRunsOutsideLockAfterPersistence(t *testing.T) {
+	t.Parallel()
 	for _, fail := range []bool{true, false} {
 		p := &observerPersister{}
 		if fail {

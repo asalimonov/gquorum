@@ -160,6 +160,9 @@ func propose(t *testing.T, g *Group, data string) Result {
 }
 
 func TestFoundingStorage_SeedHasFullMachineAndVoters(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	s := openStore(t, t.TempDir(), "1")
 	g, _ := singleton(t, s)
 	recovery, err := s.Load(testContext(t), "load")
@@ -169,6 +172,9 @@ func TestFoundingStorage_SeedHasFullMachineAndVoters(t *testing.T) {
 	}
 }
 func TestLoad_ProposeSnapshotRestartReplaysCommittedTail(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	root := t.TempDir()
 	s := openStore(t, root, "1")
 	g, m := singleton(t, s)
@@ -200,6 +206,9 @@ func TestLoad_ProposeSnapshotRestartReplaysCommittedTail(t *testing.T) {
 	}
 }
 func TestLoad_BusinessRejectionConsumesEntryAndMachineFailureHalts(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	g, m := singleton(t, openStore(t, t.TempDir(), "1"))
 	if result := propose(t, g, "reject"); result.Code != "rejected" {
 		t.Fatalf("business refusal: %+v", result)
@@ -218,6 +227,9 @@ func TestLoad_BusinessRejectionConsumesEntryAndMachineFailureHalts(t *testing.T)
 	}
 }
 func TestLoad_ThreeNodeConsensusAndLeaderReplacement(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	n := &network{nodes: make(map[uint64]*Group), disconnected: make(map[uint64]bool)}
 	var groups []*Group
 	var machines []*machine
@@ -310,6 +322,9 @@ func (s *failingStore) SaveReady(ctx context.Context, id string, w storage.Ready
 	return s.Store.SaveReady(ctx, id, w)
 }
 func TestWAL_TransientFailureRecoversWithoutHalt(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	s := &failingStore{Store: openStore(t, t.TempDir(), "1")}
 	g, m := singleton(t, s)
 	s.failures.Store(2)
@@ -320,6 +335,9 @@ func TestWAL_TransientFailureRecoversWithoutHalt(t *testing.T) {
 	}
 }
 func TestWAL_StepNeverBlocksAndShutdownDuringStallIsQuiet(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	s := &failingStore{Store: openStore(t, t.TempDir(), "1"), entered: make(chan struct{})}
 	g, m := singleton(t, s)
 	s.blocked.Store(true)
@@ -350,6 +368,9 @@ func TestWAL_StepNeverBlocksAndShutdownDuringStallIsQuiet(t *testing.T) {
 	}
 }
 func TestLoad_RejectsLocalMessagesAndUnsupportedMembership(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	g, _ := singleton(t, openStore(t, t.TempDir(), "1"))
 	for _, typ := range []raftpb.MessageType{raftpb.MsgHup, raftpb.MsgBeat, raftpb.MsgProp, raftpb.MsgUnreachable, raftpb.MsgSnapStatus} {
 		if err := g.Step(testContext(t), raftpb.Message{Type: typ, From: 2, To: 1}); !errors.Is(err, fault.ErrInvalid) {
@@ -363,6 +384,7 @@ func TestLoad_RejectsLocalMessagesAndUnsupportedMembership(t *testing.T) {
 	}
 }
 func TestLoad_StopBeforeStartAndRegistryIdentity(t *testing.T) {
+	t.Parallel()
 	n := &network{nodes: make(map[uint64]*Group), disconnected: make(map[uint64]bool)}
 	g := newTestGroup(t, openStore(t, t.TempDir(), "1"), &machine{}, n, 1, []uint64{1}, Founding)
 	r := NewRegistry()
@@ -393,6 +415,9 @@ func (l liveNetwork) Live(string) (map[uint64]bool, bool) {
 	return live, true
 }
 func TestLoad_MembershipLearnerPromotionTransferAndRemoval(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	n := &network{nodes: make(map[uint64]*Group), disconnected: make(map[uint64]bool)}
 	a, b := &machine{}, &machine{}
 	one := newTestGroup(t, openStore(t, t.TempDir(), "1"), a, n, 1, []uint64{1}, Founding)
@@ -425,6 +450,9 @@ func TestLoad_MembershipLearnerPromotionTransferAndRemoval(t *testing.T) {
 }
 
 func TestRecover_UncommittedTailIsNotAppliedAtReady(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	s := openStore(t, t.TempDir(), "1")
 	n := &network{nodes: make(map[uint64]*Group), disconnected: make(map[uint64]bool)}
 	g := newTestGroup(t, s, &machine{}, n, 1, []uint64{1}, Founding)
@@ -474,6 +502,9 @@ func (c *captureTransport) Send(ctx context.Context, m []raftpb.Message) error {
 	return nil
 }
 func TestWAL_ReceivedSnapshotIsPersistedBeforeRestoreAndAck(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	base := openStore(t, t.TempDir(), "2")
 	gate := &snapshotGate{Store: base, entered: make(chan struct{}), release: make(chan struct{})}
 	m := &machine{}
@@ -507,6 +538,9 @@ func TestWAL_ReceivedSnapshotIsPersistedBeforeRestoreAndAck(t *testing.T) {
 }
 
 func TestLoad_MultipleGroupsShareStoreAndStopIndependently(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	s := openStore(t, t.TempDir(), "1")
 	n := &network{nodes: make(map[uint64]*Group), disconnected: make(map[uint64]bool)}
 	var groups []*Group
@@ -535,6 +569,9 @@ func TestLoad_MultipleGroupsShareStoreAndStopIndependently(t *testing.T) {
 }
 
 func TestPropose_OverloadedWhileDegradedAndCancellationIsBounded(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	s := &failingStore{Store: openStore(t, t.TempDir(), "1"), entered: make(chan struct{})}
 	g, m := singleton(t, s)
 	s.blocked.Store(true)
@@ -566,6 +603,9 @@ func TestPropose_OverloadedWhileDegradedAndCancellationIsBounded(t *testing.T) {
 }
 
 func TestLoad_ConcurrentProposalsHaveExactResults(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	for _, wait := range []time.Duration{0, time.Millisecond} {
 		t.Run(fmt.Sprint(wait), func(t *testing.T) {
 			s := openStore(t, t.TempDir(), "1")
@@ -617,6 +657,7 @@ func TestLoad_ConcurrentProposalsHaveExactResults(t *testing.T) {
 }
 
 func TestOptions_RejectUnsafeInputsBeforeCreatingState(t *testing.T) {
+	t.Parallel()
 	s := openStore(t, t.TempDir(), "1")
 	n := &network{nodes: make(map[uint64]*Group), disconnected: make(map[uint64]bool)}
 	valid := Options{GroupID: "load", NodeName: "1", ClusterID: "cluster", ReplicaID: 1, Mode: Founding, Peers: []raft.Peer{{ID: 1}}, Store: s, Machine: &machine{}, Transport: endpoint{n}}
@@ -640,6 +681,7 @@ func TestOptions_RejectUnsafeInputsBeforeCreatingState(t *testing.T) {
 }
 
 func TestRecoveredUnappliedConfigurationBlocksSecondChange(t *testing.T) {
+	t.Parallel()
 	s := openStore(t, t.TempDir(), "1")
 	n := &network{nodes: make(map[uint64]*Group), disconnected: make(map[uint64]bool)}
 	original := newTestGroup(t, s, &machine{}, n, 1, []uint64{1}, Founding)
@@ -688,6 +730,7 @@ func TestRecoveredUnappliedConfigurationBlocksSecondChange(t *testing.T) {
 }
 
 func TestRecoveryRejectsSnapshotStateWithoutIndex(t *testing.T) {
+	t.Parallel()
 	for _, ss := range []raftpb.Snapshot{{Data: []byte("state")}, {Metadata: raftpb.SnapshotMetadata{Term: 1}}, {Metadata: raftpb.SnapshotMetadata{ConfState: raftpb.ConfState{Voters: []uint64{1}}}}} {
 		if err := validateRecovery(storage.Recovery{Snapshot: ss}); !errors.Is(err, fault.ErrUnreadable) {
 			t.Fatal("orphaned snapshot state accepted", err)

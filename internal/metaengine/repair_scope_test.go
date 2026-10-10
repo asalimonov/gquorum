@@ -11,6 +11,7 @@ import (
 // Ports the source's exact repair-candidate edit refusals at the replicated
 // boundary, so calling the generic proposal API cannot bypass the builder.
 func TestRepairCommandRejectsEditsOutsideOneActiveVoter(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		edit func(*topology.Document)

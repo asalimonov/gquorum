@@ -35,6 +35,7 @@ func activatedSM(t *testing.T) (*topologySM, uint64) {
 }
 
 func TestRetirementFencesAtApprovalAndSurvivesRestart(t *testing.T) {
+	t.Parallel()
 	sm, index := activatedSM(t)
 	original := sm.Active()
 	d := original.Clone()
@@ -73,6 +74,7 @@ func TestRetirementFencesAtApprovalAndSurvivesRestart(t *testing.T) {
 }
 
 func TestAuthorizeEveryIdentityAndProgressBoundary(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc()})
 	at := time.Unix(100, 0).UTC()
@@ -110,6 +112,7 @@ func TestAuthorizeEveryIdentityAndProgressBoundary(t *testing.T) {
 }
 
 func TestRestoreRejectsCorruptionWithoutChangingLiveState(t *testing.T) {
+	t.Parallel()
 	sm, _ := activatedSM(t)
 	before, err := sm.Snapshot()
 	if err != nil {
@@ -145,6 +148,7 @@ func TestRestoreRejectsCorruptionWithoutChangingLiveState(t *testing.T) {
 }
 
 func TestSessionIdentityCannotBeRebound(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	p := GrantSession{SessionID: "s", NodeName: "n", InstanceID: "i", TTLSeconds: 10}
 	apply(t, sm, 1, p)
@@ -158,6 +162,7 @@ func TestSessionIdentityCannotBeRebound(t *testing.T) {
 }
 
 func TestReadmissionAllocatorOverflow(t *testing.T) {
+	t.Parallel()
 	d := baseDoc()
 	d.MetaGroup().NextReplicaID = math.MaxUint64
 	if _, err := buildReadmissionDocument(d, "n1", time.Unix(1, 0)); !errors.Is(err, fault.ErrInvalid) {
@@ -170,6 +175,7 @@ type failingPersister struct{ err error }
 func (p failingPersister) SaveState([]byte) error { return p.err }
 
 func TestDurabilityFailureIsFatal(t *testing.T) {
+	t.Parallel()
 	boom := errors.New("disk failed")
 	sm := newTopologySM(failingPersister{boom}, testRules())
 	_, err := sm.Apply(1, 1, mustEncode(t, ProposeDocument{Doc: baseDoc()}))

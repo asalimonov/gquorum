@@ -94,6 +94,7 @@ func requireAdmissionState(t *testing.T, sm *topologySM, instanceID string, want
 }
 
 func TestAdmission_SameInstanceRetryAcrossPhasesAndSnapshot(t *testing.T) {
+	t.Parallel()
 	sm, admission, plan, at, index := admissionExecutionSM(t)
 	bind := BindAdmissionProposal{Admission: admission, At: at.Add(3 * time.Second), ProposalID: "bind"}
 	if res := apply(t, sm, index, bind); !res.Accepted || res.Admission.State != AdmissionPending {
@@ -196,6 +197,7 @@ func TestAdmission_SameInstanceRetryAcrossPhasesAndSnapshot(t *testing.T) {
 }
 
 func TestAdmission_SupersededInstanceCannotBeResurrected(t *testing.T) {
+	t.Parallel()
 	sm, oldAdmission, plan, at, index := admissionExecutionSM(t)
 	if res := apply(t, sm, index, BindAdmissionProposal{
 		Admission: oldAdmission, At: at.Add(3 * time.Second), ProposalID: "bind-old",
@@ -236,6 +238,7 @@ func TestAdmission_SupersededInstanceCannotBeResurrected(t *testing.T) {
 }
 
 func TestAdmission_DifferentInstanceCannotReusePreparedMemberID(t *testing.T) {
+	t.Parallel()
 	sm, admission, _, at, index := admissionExecutionSM(t)
 	if res := apply(t, sm, index, BindAdmissionProposal{
 		Admission: admission, At: at.Add(3 * time.Second), ProposalID: "bind-old",
@@ -262,6 +265,7 @@ func TestAdmission_DifferentInstanceCannotReusePreparedMemberID(t *testing.T) {
 }
 
 func TestBuildReadmissionPlan_ShrinksBeforeLearnerFirstReplacementAtMaximum(t *testing.T) {
+	t.Parallel()
 	for _, count := range []int{3, 5, 7} {
 		t.Run(fmt.Sprint(count), func(t *testing.T) {
 			rules := topology.Rules{SchemaVersion: 1, Limits: topology.Limits{MaxNodes: count, MaxReplicas: 5}}
@@ -342,6 +346,7 @@ func assumedReadmissionStatuses(active topology.Document, returningNode string) 
 }
 
 func TestAdmissionRebindingNeverSelectsSupersededProcessForExecution(t *testing.T) {
+	t.Parallel()
 	sm, old, plan, at, index := admissionExecutionSM(t)
 	if r := apply(t, sm, index, BindAdmissionProposal{Admission: old, At: at.Add(3 * time.Second)}); !r.Accepted {
 		t.Fatal(r)

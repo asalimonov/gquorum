@@ -13,6 +13,7 @@ import (
 )
 
 func TestMetaAdapterSnapshotTailAndExactScope(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "meta.bolt")
 	store, err := Open(path)
 	if err != nil {

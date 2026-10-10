@@ -10,6 +10,7 @@ import (
 // --- pure sessionManager TTL table (deterministic, injected clock) ---
 
 func TestSessionManager_RefreshAndExpiry(t *testing.T) {
+	t.Parallel()
 	m := newSessionManager(15 * time.Second)
 	t0 := time.Unix(1_000_000, 0)
 	m.refresh("s1", t0)
@@ -31,6 +32,7 @@ func TestSessionManager_RefreshAndExpiry(t *testing.T) {
 // restart on ErrNameActive with no escape (unlike a data-lost node, which
 // readmitNode can probe-and-revoke).
 func TestSessionManager_SeedMissing(t *testing.T) {
+	t.Parallel()
 	m := newSessionManager(15 * time.Second)
 	t0 := time.Unix(1_000_000, 0)
 
@@ -46,6 +48,7 @@ func TestSessionManager_SeedMissing(t *testing.T) {
 }
 
 func TestSessionManager_SeedMissingPreservesExistingDeadlines(t *testing.T) {
+	t.Parallel()
 	m := newSessionManager(15 * time.Second)
 	t0 := time.Unix(1_000_000, 0)
 
@@ -62,6 +65,7 @@ func TestSessionManager_SeedMissingPreservesExistingDeadlines(t *testing.T) {
 }
 
 func TestSessionManager_ResetFrom(t *testing.T) {
+	t.Parallel()
 	m := newSessionManager(15 * time.Second)
 	t0 := time.Unix(1_000_000, 0)
 	m.refresh("stale", t0.Add(-time.Hour)) // long expired

@@ -164,6 +164,9 @@ func runtimeWait(t *testing.T, condition func() bool) {
 	t.Fatal("meta convergence timed out")
 }
 func TestMetaRuntimeRealGRPCConsensusAndBboltRestart(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	nodes, _ := runtimeCluster(t, 3)
 	leader := runtimeLeader(t, nodes)
 	d := baseDoc()
@@ -255,6 +258,9 @@ func TestMetaRuntimeRealGRPCConsensusAndBboltRestart(t *testing.T) {
 }
 
 func TestMetaRuntimeLeaderReplacement(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	nodes, _ := runtimeCluster(t, 3)
 	leader := runtimeLeader(t, nodes)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

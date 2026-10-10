@@ -87,6 +87,9 @@ func recvMessage(t *testing.T, ch <-chan raftpb.Message) raftpb.Message {
 	}
 }
 func TestMetaTransportMessagesAndChunkedSnapshotPreserveTerms(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	receiver := &testHandler{received: make(chan raftpb.Message, 8)}
 	remote := testTransport(t, 2, receiver, nowhere, nil)
 	reports := make(chan raft.SnapshotStatus, 8)
@@ -118,6 +121,9 @@ func TestMetaTransportMessagesAndChunkedSnapshotPreserveTerms(t *testing.T) {
 	}
 }
 func TestMetaTransportCredentialAndClusterIsolation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	receiver := &testHandler{received: make(chan raftpb.Message, 1)}
 	remote := testTransport(t, 2, receiver, nowhere, nil)
 	tests := []struct {
@@ -151,6 +157,9 @@ func TestMetaTransportCredentialAndClusterIsolation(t *testing.T) {
 	}
 }
 func TestMetaTransportPeerBackoffDoesNotBlockOtherPeer(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	blocked := testTransport(t, 2, &testHandler{block: true}, nowhere, nil)
 	h := &testHandler{received: make(chan raftpb.Message, 32)}
 	healthy := testTransport(t, 3, h, nowhere, nil)
@@ -196,6 +205,9 @@ func TestMetaTransportPeerBackoffDoesNotBlockOtherPeer(t *testing.T) {
 	}
 }
 func TestMetaTransportStopCancelsAndJoinsControlCall(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	h := &testHandler{block: true, calls: make(chan string, 1)}
 	remote := testTransport(t, 2, h, nowhere, nil)
 	local := testTransport(t, 1, &testHandler{received: make(chan raftpb.Message, 1)}, nowhere, nil)
@@ -227,6 +239,9 @@ func TestMetaTransportStopCancelsAndJoinsControlCall(t *testing.T) {
 	}
 }
 func TestMetaTransportRefusesMissingSnapshotFinalAndWrongMessageDomain(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	h := &testHandler{received: make(chan raftpb.Message, 2)}
 	remote := testTransport(t, 2, h, nowhere, nil)
 	local := testTransport(t, 1, &testHandler{received: make(chan raftpb.Message, 1)}, nowhere, nil)

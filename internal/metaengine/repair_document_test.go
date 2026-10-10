@@ -9,6 +9,7 @@ import (
 )
 
 func TestBuildReplicaRepairSameMutationForBothOrigins(t *testing.T) {
+	t.Parallel()
 	active := baseDoc()
 	active.Version = 1
 	at := time.Now().UTC()

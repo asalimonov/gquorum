@@ -1,4 +1,14 @@
-.PHONY: test test-race lint proto proto-check
+.PHONY: test test-unit test-unit-race test-race lint proto proto-check
+
+# Bound concurrent filesystem fixtures while running independent unit cases.
+UNIT_PARALLEL ?= 4
+UNIT_PACKAGES ?= 4
+
+test-unit:
+	go test -short -count=1 -parallel=$(UNIT_PARALLEL) -p=$(UNIT_PACKAGES) ./...
+
+test-unit-race:
+	go test -race -short -count=1 -parallel=$(UNIT_PARALLEL) -p=$(UNIT_PACKAGES) ./...
 
 test:
 	go test ./...

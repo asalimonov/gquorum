@@ -9,6 +9,7 @@ import (
 )
 
 func TestDrainSafetyUsesActualQuorumAndKnownRetainedLeader(t *testing.T) {
+	t.Parallel()
 	active := planDoc(1, 3, []string{"n1", "n2", "n3"})
 	target := active.Clone()
 	target.Version++

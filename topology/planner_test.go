@@ -91,6 +91,7 @@ func requirePlan(t *testing.T, got Plan, version uint64, want []Step) {
 }
 
 func TestBuildPlanFreshFounding(t *testing.T) {
+	t.Parallel()
 	active := planDoc(1, 3, []string{"n1", "n2"})
 	desired := active.Clone()
 	desired.Version++
@@ -106,6 +107,7 @@ func TestBuildPlanFreshFounding(t *testing.T) {
 }
 
 func TestBuildPlanFreshFoundingAddsIntentionalLearnerAfterFounders(t *testing.T) {
+	t.Parallel()
 	active := planDoc(1, 3, []string{"n1", "n2"})
 	desired := active.Clone()
 	desired.Version++
@@ -125,6 +127,7 @@ func TestBuildPlanFreshFoundingAddsIntentionalLearnerAfterFounders(t *testing.T)
 }
 
 func TestBuildPlanEstablishedVoterGrowAddsLearnerThenVoter(t *testing.T) {
+	t.Parallel()
 	active := planDoc(1, 3, []string{"n1", "n2"}, shardOf("shard0", rep("n1", 1)))
 	desired := active.Clone()
 	desired.Version++
@@ -145,6 +148,7 @@ func TestBuildPlanEstablishedVoterGrowAddsLearnerThenVoter(t *testing.T) {
 }
 
 func TestBuildPlanExistingLearnerPromotion(t *testing.T) {
+	t.Parallel()
 	active := planDoc(1, 3, []string{"n1", "n2"}, shardOf("shard0", rep("n1", 1), learner("n2", 2)))
 	desired := active.Clone()
 	desired.Version++
@@ -162,6 +166,7 @@ func TestBuildPlanExistingLearnerPromotion(t *testing.T) {
 }
 
 func TestBuildPlanIntentionalLearnerStopsAfterAdd(t *testing.T) {
+	t.Parallel()
 	active := planDoc(1, 3, []string{"n1", "n2"}, shardOf("shard0", rep("n1", 1)))
 	desired := active.Clone()
 	desired.Version++
@@ -180,6 +185,7 @@ func TestBuildPlanIntentionalLearnerStopsAfterAdd(t *testing.T) {
 }
 
 func TestBuildPlanDemotesVoterAndTransfersLeader(t *testing.T) {
+	t.Parallel()
 	active := planDoc(1, 3, []string{"n1", "n2", "n3"}, shardOf("shard0", rep("n1", 1), rep("n2", 2), rep("n3", 3)))
 	desired := active.Clone()
 	desired.Version++
@@ -198,6 +204,7 @@ func TestBuildPlanDemotesVoterAndTransfersLeader(t *testing.T) {
 }
 
 func TestBuildPlanIncludesMetaLearnerThenVoterChange(t *testing.T) {
+	t.Parallel()
 	active := planDoc(1, 3, []string{"n1", "n2", "n3"})
 	desired := active.Clone()
 	desired.Version++
@@ -218,6 +225,7 @@ func TestBuildPlanIncludesMetaLearnerThenVoterChange(t *testing.T) {
 }
 
 func TestBuildPlanReplacementAtMaxShrinksFirst(t *testing.T) {
+	t.Parallel()
 	active := planDoc(1, 4, []string{"n1", "n2", "n3", "n4"}, shardOf("shard0", rep("n1", 1), rep("n2", 2), rep("n3", 3)))
 	active.Group("shard0").Placement = &PlacementRule{MinReplicas: 1, MaxReplicas: 3}
 	desired := active.Clone()
@@ -244,6 +252,7 @@ func TestBuildPlanReplacementAtMaxShrinksFirst(t *testing.T) {
 }
 
 func TestBuildPlanWholeGroupDeletionStopsEveryFormerHost(t *testing.T) {
+	t.Parallel()
 	active := planDoc(1, 3, []string{"n1", "n2"}, shardOf("shard9", rep("n1", 1), rep("n2", 2)))
 	desired := active.Clone()
 	desired.Version++
@@ -262,6 +271,7 @@ func TestBuildPlanWholeGroupDeletionStopsEveryFormerHost(t *testing.T) {
 }
 
 func TestBuildPlanRefusesUnsafeDisjointReplacement(t *testing.T) {
+	t.Parallel()
 	active := planDoc(1, 5, []string{"n1", "n2", "n3", "n4", "n5"}, shardOf("shard0", rep("n1", 1), rep("n2", 2), rep("n3", 3)))
 	active.Group("shard0").Placement = &PlacementRule{MinReplicas: 1, MaxReplicas: 3}
 	desired := active.Clone()
@@ -277,6 +287,7 @@ func TestBuildPlanRefusesUnsafeDisjointReplacement(t *testing.T) {
 }
 
 func TestBuildPlanEstablishedGroupMissingGloballyIsUnavailable(t *testing.T) {
+	t.Parallel()
 	active := planDoc(1, 3, []string{"n1"}, shardOf("shard0", rep("n1", 1)))
 	desired := active.Clone()
 	desired.Version++
@@ -290,6 +301,7 @@ func TestBuildPlanEstablishedGroupMissingGloballyIsUnavailable(t *testing.T) {
 }
 
 func TestBuildPlanRefusesObservedGroupWithoutActiveIdentities(t *testing.T) {
+	t.Parallel()
 	active := planDoc(1, 3, []string{"n1"})
 	desired := active.Clone()
 	desired.Version++
@@ -303,6 +315,7 @@ func TestBuildPlanRefusesObservedGroupWithoutActiveIdentities(t *testing.T) {
 }
 
 func TestBuildPlanDeterministic(t *testing.T) {
+	t.Parallel()
 	active := planDoc(1, 3, []string{"n1", "n2", "n3"},
 		shardOf("shardB", rep("n1", 1)), shardOf("shardA", rep("n1", 1)))
 	desired := active.Clone()
@@ -329,6 +342,7 @@ func TestBuildPlanDeterministic(t *testing.T) {
 }
 
 func TestValidatePlanShapeRejectsMissingAcknowledgementAdjacency(t *testing.T) {
+	t.Parallel()
 	active := planDoc(1, 3, []string{"n1", "n2"}, shardOf("shard0", rep("n1", 1), rep("n2", 2)))
 	desired := active.Clone()
 	desired.Version++
@@ -360,6 +374,7 @@ func plannerRules() Rules {
 }
 
 func TestPlannerRejectsMalformedObservedMembership(t *testing.T) {
+	t.Parallel()
 	active := planDoc(1, 3, []string{"n1", "n2"}, shardOf("load", rep("n1", 1), rep("n2", 2)))
 	desired := active.Clone()
 	desired.Version++

@@ -9,6 +9,9 @@ import (
 )
 
 func TestConvergenceAcknowledgedMembershipRequiresObservedExactResult(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	active, target, replica := growDocuments()
 	step := Step{Seq: 1, Kind: StepAddLearner, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}
 	f := newConvergenceFixture(active, target, []Step{step, {Seq: 2, Kind: StepWaitCaughtUp, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID}}, 0, ExecutionPending)
@@ -28,6 +31,7 @@ func TestConvergenceAcknowledgedMembershipRequiresObservedExactResult(t *testing
 	}
 }
 func TestExecutionTransitionDoesNotRegressWallClock(t *testing.T) {
+	t.Parallel()
 	before := time.Unix(20, 0)
 	now := before.Add(-time.Second)
 	if !executionTime(now, before).Equal(before) {
@@ -36,6 +40,7 @@ func TestExecutionTransitionDoesNotRegressWallClock(t *testing.T) {
 }
 
 func TestPermanentPromotionRefusalDoesNotWaitForever(t *testing.T) {
+	t.Parallel()
 	state, _, retry := classifyStepError(Step{Kind: StepPromoteVoter}, &membership.SafetyRefusal{Reason: "replica is not a current learner; add it as a learner first"})
 	if retry || state != ExecutionFailed {
 		t.Fatal("permanent promotion refusal treated as waiting")
@@ -47,6 +52,9 @@ func TestPermanentPromotionRefusalDoesNotWaitForever(t *testing.T) {
 }
 
 func TestConvergenceFreshGroupSeedsVotersBeforeIntentionalLearner(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	active := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"old"})
 	target := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"old", "new"})
 	target.Version = 2

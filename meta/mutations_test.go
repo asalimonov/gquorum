@@ -81,6 +81,7 @@ func mutationDoc(t *testing.T, r MutationResult, err error) topology.Document {
 	return r.Document
 }
 func TestAddNodeHappyPath(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	r, err := f.g.AddNode(context.Background(), topology.Node{Name: "n4", Type: "worker", Region: "west", Labels: map[string]string{"rack": "a"}}, preview())
 	doc := mutationDoc(t, r, err)
@@ -100,6 +101,7 @@ func TestAddNodeHappyPath(t *testing.T) {
 	}
 }
 func TestAddNodeReplacesExcludedNodeWithFreshIdentity(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	ctx := context.Background()
 	r, err := f.g.DrainNode(ctx, "n3", preview())
@@ -115,6 +117,7 @@ func TestAddNodeReplacesExcludedNodeWithFreshIdentity(t *testing.T) {
 	}
 }
 func TestDrainNodeHappyPath(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	r, err := f.g.DrainNode(context.Background(), "n3", preview())
 	doc := mutationDoc(t, r, err)
@@ -126,6 +129,7 @@ func TestDrainNodeHappyPath(t *testing.T) {
 	}
 }
 func TestActivateNodeReversesDrain(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	ctx := context.Background()
 	r, err := f.g.DrainNode(ctx, "n3", preview())
@@ -138,6 +142,7 @@ func TestActivateNodeReversesDrain(t *testing.T) {
 	}
 }
 func TestDrainNodeBelowMinRefused(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	doc := f.g.machine.Latest()
 	doc.Placement.MinReplicas = 3
@@ -147,6 +152,7 @@ func TestDrainNodeBelowMinRefused(t *testing.T) {
 	}
 }
 func TestDrainNodeRefusalIsActionable(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	r, err := f.g.DrainNode(context.Background(), "n3", preview())
 	doc := mutationDoc(t, r, err)
@@ -162,6 +168,7 @@ func TestDrainNodeRefusalIsActionable(t *testing.T) {
 	}
 }
 func TestRemoveNodeRefusals(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	if _, err := f.g.ExcludeNode(context.Background(), "n3", preview()); err == nil {
 		t.Fatal("undrained retirement admitted")
@@ -174,6 +181,7 @@ func TestRemoveNodeRefusals(t *testing.T) {
 	}
 }
 func TestRemoveNodeCancelsStagedOnlyAdmission(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	initial := f.g.machine.Latest()
 	initial.Placement.MaxReplicas = 4
@@ -189,6 +197,7 @@ func TestRemoveNodeCancelsStagedOnlyAdmission(t *testing.T) {
 	}
 }
 func TestChangeReplicaDemote(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	r, err := f.g.ChangeReplica(context.Background(), "work", "n3", topology.ReplicaLearner, preview())
 	doc := mutationDoc(t, r, err)
@@ -201,6 +210,7 @@ type mutationHealth map[string]topology.Health
 
 func (h mutationHealth) Snapshot(context.Context) (map[string]topology.Health, error) { return h, nil }
 func TestChangeReplicaDemoteQuorumSafety(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	f.g.opts.Health = mutationHealth{"n1": topology.HealthAlive, "n2": topology.HealthDead, "n3": topology.HealthAlive}
 	if _, err := f.g.ChangeReplica(context.Background(), "work", "n3", topology.ReplicaLearner, preview()); !errors.Is(err, fault.ErrUnsafeMembership) {
@@ -208,6 +218,7 @@ func TestChangeReplicaDemoteQuorumSafety(t *testing.T) {
 	}
 }
 func TestPlacementInvariantClampsOnVotersNotReplicas(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	doc := f.g.machine.Latest()
 	doc.Group("work").Replicas[2].Role = topology.ReplicaLearner
@@ -219,6 +230,7 @@ func TestPlacementInvariantClampsOnVotersNotReplicas(t *testing.T) {
 	}
 }
 func TestForceRetireNodeRequiresReasonAndActor(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	for _, o := range []RetireOptions{{}, {Reason: "lost"}, {Mutation: MutationOptions{Actor: "operator"}}} {
 		if _, err := f.g.ForceRetireNode(context.Background(), "n3", o); err == nil {
@@ -227,6 +239,7 @@ func TestForceRetireNodeRequiresReasonAndActor(t *testing.T) {
 	}
 }
 func TestForceRetireNodeAuditsAndAllocatesFreshReplacement(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	ctx := context.Background()
 	r, err := f.g.AddNode(ctx, topology.Node{Name: "n4", Type: "worker"}, preview())
@@ -239,6 +252,7 @@ func TestForceRetireNodeAuditsAndAllocatesFreshReplacement(t *testing.T) {
 	}
 }
 func TestCreateLoadGroupHonorsCallerTypesAndExplicitSubset(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	var doc topology.Document
 	r, err := f.g.AddNode(context.Background(), topology.Node{Name: "n4", Type: "coordinator"}, preview())
@@ -257,6 +271,7 @@ func TestCreateLoadGroupHonorsCallerTypesAndExplicitSubset(t *testing.T) {
 	}
 }
 func TestCreateLoadGroupRefusals(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	for _, id := range []string{"", topology.MetaGroupID, "../escape", "old.quarantine-1", "work"} {
 		if _, err := f.g.CreateLoadGroup(context.Background(), GroupSpec{ID: id}, preview()); err == nil {
@@ -268,12 +283,14 @@ func TestCreateLoadGroupRefusals(t *testing.T) {
 	}
 }
 func TestSetPlacementRefusals(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	if _, err := f.g.SetPlacement(context.Background(), topology.PlacementRule{MinReplicas: 1, MaxReplicas: 2}, preview()); err == nil {
 		t.Fatal("placement silently shrank group")
 	}
 }
 func TestRollbackLineage(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	r, err := f.g.SetPlacement(context.Background(), topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3}, preview())
 	doc := mutationDoc(t, r, err)
@@ -285,6 +302,7 @@ func TestRollbackLineage(t *testing.T) {
 	}
 }
 func TestRollbackStagedRemovalKeepsApprovedIdentityUntilApproval(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	r, err := f.g.DrainNode(context.Background(), "n3", preview())
 	doc := mutationDoc(t, r, err)
@@ -303,6 +321,7 @@ func TestRollbackStagedRemovalKeepsApprovedIdentityUntilApproval(t *testing.T) {
 	}
 }
 func TestRollbackRefusesResurrectedIdentity(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	r, err := f.g.DrainNode(context.Background(), "n3", preview())
 	doc := mutationDoc(t, r, err)
@@ -312,6 +331,7 @@ func TestRollbackRefusesResurrectedIdentity(t *testing.T) {
 	}
 }
 func TestMutationExpectedVersionAndPreviewAreExact(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	before := f.g.machine.Latest()
 	o := preview()
@@ -330,6 +350,7 @@ func TestMutationExpectedVersionAndPreviewAreExact(t *testing.T) {
 }
 
 func TestReseatReplicaAllocatesFreshIDAndRefusesUnstableViews(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	r, err := f.g.ReseatReplica(context.Background(), "work", "n2", preview())
 	doc := mutationDoc(t, r, err)
@@ -344,6 +365,7 @@ func TestReseatReplicaAllocatesFreshIDAndRefusesUnstableViews(t *testing.T) {
 	}
 }
 func TestReseatReplicaRetainsAuditAndRejectsMetaLearnersAndUnknown(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	doc := f.g.machine.Latest()
 	doc.Audit = &topology.ChangeAudit{Operation: topology.AuditOperationForceRetireNode, TargetNode: "old", Forced: true, Reason: "lost", StagedBy: "operator", StagedAt: time.Now().UTC()}
@@ -367,6 +389,7 @@ func TestReseatReplicaRetainsAuditAndRejectsMetaLearnersAndUnknown(t *testing.T)
 }
 
 func TestSetPlacementQuorumSafetyAndHealthyGrow(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	doc := f.g.machine.Latest()
 	doc.Placement.MaxReplicas = 2
@@ -384,6 +407,7 @@ func TestSetPlacementQuorumSafetyAndHealthyGrow(t *testing.T) {
 	}
 }
 func TestAddNodeAllowsDeclareBeforeBoot(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	f.g.opts.Health = mutationHealth{"n1": topology.HealthAlive, "n2": topology.HealthAlive, "n3": topology.HealthAlive, "n4": topology.HealthDead}
 	if _, err := f.g.AddNode(context.Background(), topology.Node{Name: "n4", Type: "worker"}, preview()); err != nil {
@@ -391,6 +415,7 @@ func TestAddNodeAllowsDeclareBeforeBoot(t *testing.T) {
 	}
 }
 func TestCreateLoadGroupQuorumSafety(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	f.g.opts.Health = mutationHealth{"n1": topology.HealthAlive, "n2": topology.HealthDead, "n3": topology.HealthDead}
 	if _, err := f.g.CreateLoadGroup(context.Background(), GroupSpec{ID: "new"}, preview()); !errors.Is(err, fault.ErrUnsafeMembership) {
@@ -401,6 +426,7 @@ func TestCreateLoadGroupQuorumSafety(t *testing.T) {
 	}
 }
 func TestRollbackApprovedGroupDeletionIsPermanentlyRetired(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	r, err := f.g.DeleteLoadGroup(context.Background(), "work", preview())
 	doc := mutationDoc(t, r, err)
@@ -411,6 +437,7 @@ func TestRollbackApprovedGroupDeletionIsPermanentlyRetired(t *testing.T) {
 }
 
 func TestMutationConcurrentCommitReturnsTypedCASConflict(t *testing.T) {
+	t.Parallel()
 	f := newMutationFixture(t)
 	_, _, err := f.g.computeMutation(context.Background(), preview(), "edit", false, func(_ *topology.Document, _ time.Time) error {
 		concurrent := f.g.machine.Latest()

@@ -34,6 +34,9 @@ func restartOptions(t *testing.T, g *Group) Options {
 }
 
 func TestPublicMetaRestartUsesPinReplaysTailAndRefusesChangedRules(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	old := readyPublic(t, publicFoundingCluster(t, 1))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -88,6 +91,7 @@ func TestPublicMetaRestartUsesPinReplaysTailAndRefusesChangedRules(t *testing.T)
 }
 
 func TestPublicMetaConstructorInvalidDoesNotCreateStorage(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "untouched", "meta.bolt")
 	if _, err := New(Options{DBPath: path}); !errors.Is(err, fault.ErrInvalid) {
 		t.Fatal(err)
@@ -98,6 +102,9 @@ func TestPublicMetaConstructorInvalidDoesNotCreateStorage(t *testing.T) {
 }
 
 func TestPublicMetaParentCancellationJoinsWorkers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	old := readyPublic(t, publicFoundingCluster(t, 1))
 	if err := old.Stop(context.Background()); err != nil {
 		t.Fatal(err)

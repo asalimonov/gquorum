@@ -74,6 +74,7 @@ func beginProposal(version uint64, count int, id string, at time.Time) BeginExec
 }
 
 func TestCodec_Roundtrip(t *testing.T) {
+	t.Parallel()
 	at := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 	plan := testPlan(5, 1)
 	executionID := topology.MakeExecutionID(5, 1)
@@ -168,12 +169,14 @@ func TestCodec_Roundtrip(t *testing.T) {
 }
 
 func TestCodec_EncodeUnknownType(t *testing.T) {
+	t.Parallel()
 	if _, err := Encode(struct{ X int }{X: 1}); err == nil {
 		t.Fatal("expected error encoding an unknown proposal type")
 	}
 }
 
 func TestSM_ProposeDocument_AssignsVersionAndCommits(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	res := apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
 	if !res.Accepted {
@@ -191,6 +194,7 @@ func TestSM_ProposeDocument_AssignsVersionAndCommits(t *testing.T) {
 }
 
 func TestSM_ProposeDocument_CASReject(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
 
@@ -220,6 +224,7 @@ func TestSM_ProposeDocument_CASReject(t *testing.T) {
 }
 
 func TestSM_ProposeDocument_ValidationReject(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	bad := baseDoc()
 	bad.Placement.MinReplicas = 0 // violates 1 <= min
@@ -233,6 +238,7 @@ func TestSM_ProposeDocument_ValidationReject(t *testing.T) {
 }
 
 func TestSM_AdmitNode_AddAndIdempotent(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
 
@@ -269,6 +275,7 @@ func TestSM_AdmitNode_AddAndIdempotent(t *testing.T) {
 // NextReplicaID++ and bumps Version, so a replay re-swaps the identity and
 // leaves this node permanently diverged from quorum.
 func TestSM_Apply_RefusesReplayedEntry(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
 	apply(t, sm, 2, AdmitNode{Node: topology.Node{Name: "n2", Type: "worker"}, MemberID: 2, ProposalID: "j1"})
@@ -331,6 +338,7 @@ func TestSM_Apply_RefusesReplayedEntry(t *testing.T) {
 // stamp must come from the proposal: this SM is replicated, and an applier
 // reading its own clock would land a different value on every node.
 func TestSM_AdmitNode_StampsAuditFieldsFromProposal(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
 
@@ -378,6 +386,7 @@ func TestSM_AdmitNode_StampsAuditFieldsFromProposal(t *testing.T) {
 // byte-identical state, which is exactly why the timestamp rides in the proposal
 // instead of being read from each applier's clock.
 func TestSM_AdmitNode_StampIsDeterministicAcrossReplicas(t *testing.T) {
+	t.Parallel()
 	at := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
 	admit := AdmitNode{Node: topology.Node{Name: "n2", Type: "worker"}, MemberID: 2, At: at, ProposalID: "j1"}
 
@@ -401,6 +410,7 @@ func TestSM_AdmitNode_StampIsDeterministicAcrossReplicas(t *testing.T) {
 
 // Replacement allocates new replica identities from each group allocator.
 func TestSM_AdmitNode_ReplaceExisting_FreshMemberID(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
 
@@ -444,6 +454,7 @@ func TestSM_AdmitNode_ReplaceExisting_FreshMemberID(t *testing.T) {
 }
 
 func TestSM_History_Ordering(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
 	apply(t, sm, 2, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 1, ProposalID: "p2"})
@@ -479,6 +490,7 @@ func TestSM_History_Ordering(t *testing.T) {
 // newest one that still shows it excluded), and answer 0 rather than guess when
 // the exclusion has aged out of the ring or never happened.
 func TestSM_ExclusionVersion(t *testing.T) {
+	t.Parallel()
 	withNode := func(state topology.NodeState) topology.Document {
 		d := baseDoc()
 		d.Nodes = append(d.Nodes, topology.Node{Name: "n2", Type: "worker", State: state})
@@ -520,6 +532,7 @@ func TestSM_ExclusionVersion(t *testing.T) {
 // "excluded at v<horizon>" as fact for a node retired long before — the tile and
 // the confirm dialog both print that number.
 func TestSM_ExclusionVersion_AgedOutOfRing(t *testing.T) {
+	t.Parallel()
 	withNode := func(state topology.NodeState) topology.Document {
 		d := baseDoc()
 		d.Nodes = append(d.Nodes, topology.Node{Name: "n2", Type: "worker", State: state})
@@ -548,6 +561,7 @@ func TestSM_ExclusionVersion_AgedOutOfRing(t *testing.T) {
 // offset skips the N newest documents, order stays newest-first, and paging past
 // the ring returns nothing.
 func TestSM_History_Paging(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	for v := range uint64(4) {
 		apply(t, sm, v+1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: v, ProposalID: fmt.Sprintf("p%d", v)})
@@ -574,6 +588,7 @@ func TestSM_History_Paging(t *testing.T) {
 }
 
 func TestSM_ExactExecutionTransitions(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
 	at := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
@@ -639,6 +654,7 @@ func TestSM_ExactExecutionTransitions(t *testing.T) {
 }
 
 func TestSM_ForcedRetirementRecordsApplyingActor(t *testing.T) {
+	t.Parallel()
 	active := multiNodeDoc()
 	active.Version = 1
 	target := active.Clone()
@@ -675,6 +691,7 @@ func TestSM_ForcedRetirementRecordsApplyingActor(t *testing.T) {
 }
 
 func TestSM_ExecutionSupersededAtExactBoundary(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
 	at := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
@@ -702,6 +719,7 @@ func TestSM_ExecutionSupersededAtExactBoundary(t *testing.T) {
 }
 
 func TestSM_ExecutionBeginRetryAndSupersession(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
 	at := time.Date(2026, 7, 16, 13, 0, 0, 0, time.UTC)
@@ -755,6 +773,7 @@ func TestSM_ExecutionBeginRetryAndSupersession(t *testing.T) {
 }
 
 func TestSM_RejectsMalformedPlanAndPrematureActivation(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
 	at := time.Date(2026, 7, 16, 13, 30, 0, 0, time.UTC)
@@ -790,6 +809,7 @@ func TestSM_RejectsMalformedPlanAndPrematureActivation(t *testing.T) {
 }
 
 func TestSM_CommitRepairExecutionGuardrails(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
 	at := time.Date(2026, 7, 16, 14, 0, 0, 0, time.UTC)
@@ -844,6 +864,7 @@ func TestSM_CommitRepairExecutionGuardrails(t *testing.T) {
 }
 
 func TestSM_PinsTargetActiveAndNonterminalBeyondHistory(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
 	at := time.Date(2026, 7, 16, 16, 0, 0, 0, time.UTC)
@@ -877,6 +898,7 @@ func TestSM_PinsTargetActiveAndNonterminalBeyondHistory(t *testing.T) {
 }
 
 func TestSM_ApplyDeterminism(t *testing.T) {
+	t.Parallel()
 	// The same committed-entry sequence must yield byte-identical snapshots on
 	// two independent state machines (the raft SM determinism contract).
 	at := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
@@ -912,6 +934,7 @@ func TestSM_ApplyDeterminism(t *testing.T) {
 }
 
 func TestSM_SnapshotRestoreEquivalence(t *testing.T) {
+	t.Parallel()
 	src := newTopologySM(nil, testRules())
 	apply(t, src, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
 	apply(t, src, 2, AdmitNode{Node: topology.Node{Name: "n2", Type: "worker"}, MemberID: 2, ProposalID: "j1"})
@@ -963,6 +986,7 @@ func TestSM_SnapshotRestoreEquivalence(t *testing.T) {
 }
 
 func TestSM_HistoryRingBounded(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
 
@@ -1007,6 +1031,7 @@ func TestSM_HistoryRingBounded(t *testing.T) {
 // TestSM_ExecutionsBounded verifies terminal, unreferenced executions are
 // pruned with the history ring while Target and Active remain pinned.
 func TestSM_ExecutionsBounded(t *testing.T) {
+	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
 
@@ -1088,6 +1113,7 @@ func multiNodeDoc() topology.Document {
 }
 
 func TestSM_PersistsToBoltStateBucket(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	store, err := metastore.Open(filepath.Join(dir, "meta.bolt"))
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 )
 
 func TestReplyPreservesVersionConflictAndSafetyIdentity(t *testing.T) {
+	t.Parallel()
 	conflict := &fault.Error{Code: fault.VersionConflict, ExpectedVersion: 9, CurrentVersion: 10, Message: "stale version"}
 	var got *fault.Error
 	if !errors.As(ReplyError(Reply(conflict)), &got) || got.ExpectedVersion != 9 || got.CurrentVersion != 10 {

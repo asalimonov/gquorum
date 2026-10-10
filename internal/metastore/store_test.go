@@ -14,6 +14,7 @@ import (
 )
 
 func TestOpenUsesExactCallerPathAndSchema(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "chosen", "topology.data")
 	s, err := Open(path)
 	if err != nil {
@@ -59,6 +60,7 @@ func TestOpenUsesExactCallerPathAndSchema(t *testing.T) {
 }
 
 func TestSaveApplicationAtomicDurableState(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "meta.bolt")
 	s, err := Open(path)
 	if err != nil {
@@ -98,6 +100,7 @@ func TestSaveApplicationAtomicDurableState(t *testing.T) {
 }
 
 func TestSnapshotCannotRewindMaterializedState(t *testing.T) {
+	t.Parallel()
 	s := openTestStore(t)
 	if err := s.SaveReady([]raftpb.Entry{ent(1, 1, "a"), ent(2, 1, "b")}, raftpb.HardState{Term: 1, Commit: 2}); err != nil {
 		t.Fatal(err)
@@ -117,6 +120,7 @@ func TestSnapshotCannotRewindMaterializedState(t *testing.T) {
 }
 
 func TestHardStateAndCommittedTailNeverRegress(t *testing.T) {
+	t.Parallel()
 	s := openTestStore(t)
 	entries := []raftpb.Entry{ent(1, 2, "a"), ent(2, 2, "b")}
 	hs := raftpb.HardState{Term: 2, Vote: 1, Commit: 2}
@@ -141,6 +145,7 @@ func TestHardStateAndCommittedTailNeverRegress(t *testing.T) {
 }
 
 func TestReplicaLedgerExactIdentityAndReplacementProtection(t *testing.T) {
+	t.Parallel()
 	s := openTestStore(t)
 	if err := s.EnsureIdentity("a", "cluster", 1); err != nil {
 		t.Fatal(err)

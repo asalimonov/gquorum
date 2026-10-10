@@ -84,6 +84,7 @@ func knownLive(ids ...uint64) fakeHealth {
 }
 
 func TestChangeConstructorsUseLearnerThenVoterGrowth(t *testing.T) {
+	t.Parallel()
 	add := AddLearner(7)
 	if len(add.Changes) != 1 || add.Changes[0].Type != raftpb.ConfChangeAddLearnerNode || add.Changes[0].NodeID != 7 {
 		t.Fatalf("AddLearner = %+v", add)
@@ -103,6 +104,7 @@ func TestChangeConstructorsUseLearnerThenVoterGrowth(t *testing.T) {
 }
 
 func TestSafetyAllowsLearnerAddWithUnknownHealth(t *testing.T) {
+	t.Parallel()
 	g := &fakeGroup{id: "s0", st: statusOf([]uint64{1, 2, 3}, nil, 1, 10, nil)}
 	if err := (SafetyPolicy{}).Check(g, nil, AddLearner(4)); err != nil {
 		t.Fatalf("learner add rejected: %v", err)
@@ -110,6 +112,7 @@ func TestSafetyAllowsLearnerAddWithUnknownHealth(t *testing.T) {
 }
 
 func TestSafetyAllowsSafeRemoval(t *testing.T) {
+	t.Parallel()
 	g := &fakeGroup{id: "s0", st: statusOf([]uint64{1, 2, 3}, nil, 1, 10, nil)}
 	if err := (SafetyPolicy{}).Check(g, knownLive(1, 2, 3), RemoveReplica(3)); err != nil {
 		t.Fatalf("safe removal rejected: %v", err)
@@ -117,6 +120,7 @@ func TestSafetyAllowsSafeRemoval(t *testing.T) {
 }
 
 func TestSafetyUnknownHealthRefusesRemovalAndDemotion(t *testing.T) {
+	t.Parallel()
 	for name, cc := range map[string]raftpb.ConfChangeV2{
 		"remove": RemoveReplica(3),
 		"demote": DemoteVoter(3),
@@ -136,6 +140,7 @@ func TestSafetyUnknownHealthRefusesRemovalAndDemotion(t *testing.T) {
 }
 
 func TestSafetyKnownTotalOutageRefusesRemoval(t *testing.T) {
+	t.Parallel()
 	g := &fakeGroup{id: "s0", st: statusOf([]uint64{1, 2, 3}, nil, 1, 10, nil)}
 	err := (SafetyPolicy{}).Check(g, knownLive(), RemoveReplica(3))
 	var refusal *SafetyRefusal
@@ -145,6 +150,7 @@ func TestSafetyKnownTotalOutageRefusesRemoval(t *testing.T) {
 }
 
 func TestSafetyRefusesQuorumBreakingRemoval(t *testing.T) {
+	t.Parallel()
 	g := &fakeGroup{id: "s0", st: statusOf([]uint64{1, 2, 3}, nil, 1, 10, nil)}
 	if err := (SafetyPolicy{}).Check(g, knownLive(1), RemoveReplica(2)); err == nil {
 		t.Fatal("quorum-breaking removal was allowed")
@@ -152,6 +158,7 @@ func TestSafetyRefusesQuorumBreakingRemoval(t *testing.T) {
 }
 
 func TestSafetyRequiresLeaderTransfer(t *testing.T) {
+	t.Parallel()
 	g := &fakeGroup{id: "meta", st: statusOf([]uint64{1, 2, 3}, nil, 1, 10, nil)}
 	for _, cc := range []raftpb.ConfChangeV2{RemoveReplica(1), DemoteVoter(1)} {
 		if err := (SafetyPolicy{}).Check(g, knownLive(1, 2, 3), cc); err == nil || !strings.Contains(err.Error(), "transfer") {
@@ -161,6 +168,7 @@ func TestSafetyRequiresLeaderTransfer(t *testing.T) {
 }
 
 func TestSafetyRefusesFinalVoterRemoval(t *testing.T) {
+	t.Parallel()
 	g := &fakeGroup{id: "meta", st: statusOf([]uint64{1}, nil, 0, 10, nil)}
 	if err := (SafetyPolicy{}).Check(g, knownLive(1), RemoveReplica(1)); err == nil {
 		t.Fatal("final voter removal was allowed")
@@ -168,6 +176,7 @@ func TestSafetyRefusesFinalVoterRemoval(t *testing.T) {
 }
 
 func TestSafetyRefusesDirectVoterGrow(t *testing.T) {
+	t.Parallel()
 	g := &fakeGroup{id: "s0", leader: true, st: statusOf([]uint64{1, 2, 3}, nil, 1, 10, nil)}
 	err := (SafetyPolicy{}).Check(g, knownLive(1, 2, 3, 4), PromoteLearner(4))
 	if err == nil || !strings.Contains(err.Error(), "not a current learner") {
@@ -176,6 +185,7 @@ func TestSafetyRefusesDirectVoterGrow(t *testing.T) {
 }
 
 func TestCaughtUpRequiresExactActiveLearner(t *testing.T) {
+	t.Parallel()
 	base := statusOf([]uint64{1}, []uint64{4, 5}, 1, 2000, map[uint64]uint64{4: 1000, 5: 1999})
 	g := &fakeGroup{id: "s0", leader: true, st: base}
 	if !CaughtUp(g, 4) {
@@ -199,6 +209,7 @@ func TestCaughtUpRequiresExactActiveLearner(t *testing.T) {
 }
 
 func TestCaughtUpRejectsLagMissingProgressZeroCommitAndFollower(t *testing.T) {
+	t.Parallel()
 	tests := map[string]*fakeGroup{
 		"lag": {
 			id: "s0", leader: true,
@@ -227,6 +238,7 @@ func TestCaughtUpRejectsLagMissingProgressZeroCommitAndFollower(t *testing.T) {
 }
 
 func TestSafetyPromotesOnlyCaughtUpActiveLearner(t *testing.T) {
+	t.Parallel()
 	g := &fakeGroup{
 		id: "s0", leader: true,
 		st: statusOf([]uint64{1, 2}, []uint64{4}, 1, 100, map[uint64]uint64{1: 100, 2: 100, 4: 100}),
@@ -250,6 +262,7 @@ func TestSafetyPromotesOnlyCaughtUpActiveLearner(t *testing.T) {
 }
 
 func TestSafetyRefusalIncludesOperationalContext(t *testing.T) {
+	t.Parallel()
 	g := &fakeGroup{
 		id: "shard7", leader: true,
 		st: statusOf([]uint64{1}, []uint64{9}, 1, 2500, map[uint64]uint64{9: 1000}),
@@ -263,6 +276,7 @@ func TestSafetyRefusalIncludesOperationalContext(t *testing.T) {
 }
 
 func TestSafetyRejectsMultiChange(t *testing.T) {
+	t.Parallel()
 	g := &fakeGroup{id: "s0", st: statusOf([]uint64{1, 2, 3}, nil, 1, 10, nil)}
 	cc := raftpb.ConfChangeV2{Changes: []raftpb.ConfChangeSingle{
 		{Type: raftpb.ConfChangeRemoveNode, NodeID: 3},
@@ -274,6 +288,7 @@ func TestSafetyRejectsMultiChange(t *testing.T) {
 }
 
 func TestSafetyRejectsJointTransition(t *testing.T) {
+	t.Parallel()
 	g := &fakeGroup{id: "s0", st: statusOf([]uint64{1, 2, 3}, nil, 1, 10, nil)}
 	cc := AddLearner(4)
 	cc.Transition = raftpb.ConfChangeTransitionJointExplicit
@@ -283,6 +298,7 @@ func TestSafetyRejectsJointTransition(t *testing.T) {
 }
 
 func TestCoordinatorAppliesOneExactChange(t *testing.T) {
+	t.Parallel()
 	g := &fakeGroup{id: "s0", st: statusOf([]uint64{1, 2, 3}, nil, 1, 10, nil)}
 	c := NewCoordinator()
 	if err := c.Apply(context.Background(), g, nil, AddLearner(4)); err != nil {
@@ -294,6 +310,7 @@ func TestCoordinatorAppliesOneExactChange(t *testing.T) {
 }
 
 func TestCoordinatorStopsBeforeUnsafeProposal(t *testing.T) {
+	t.Parallel()
 	g := &fakeGroup{id: "s0", st: statusOf([]uint64{1, 2, 3}, nil, 1, 10, nil)}
 	err := NewCoordinator().Apply(context.Background(), g, knownLive(1), RemoveReplica(2))
 	if err == nil {
@@ -305,6 +322,7 @@ func TestCoordinatorStopsBeforeUnsafeProposal(t *testing.T) {
 }
 
 func TestCoordinatorWrapsProposalFailure(t *testing.T) {
+	t.Parallel()
 	g := &fakeGroup{id: "s0", st: statusOf([]uint64{1}, nil, 1, 10, nil), proposeErr: errors.New("boom")}
 	err := NewCoordinator().Apply(context.Background(), g, nil, AddLearner(4))
 	if err == nil || !strings.Contains(err.Error(), "group \"s0\"") || !strings.Contains(err.Error(), "replica 4") {
@@ -313,6 +331,7 @@ func TestCoordinatorWrapsProposalFailure(t *testing.T) {
 }
 
 func TestCoordinatorSerializesPerGroup(t *testing.T) {
+	t.Parallel()
 	var active atomic.Int32
 	var maxActive atomic.Int32
 	g := &fakeGroup{id: "s0", st: statusOf([]uint64{1}, nil, 1, 10, nil)}

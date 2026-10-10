@@ -11,6 +11,7 @@ import (
 )
 
 func TestRefillRecreatesPipelineFiles(t *testing.T) {
+	t.Parallel()
 	// Register the test segment size through Open, never mutate the upstream global.
 	s := openTest(t, t.TempDir(), "a", "test-cluster", true)
 	dir := t.TempDir()

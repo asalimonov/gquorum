@@ -35,6 +35,9 @@ func assertWatchQuiet(t *testing.T, ch <-chan Update) {
 }
 
 func TestMetaWatchSeparatesLatestTargetAndActive(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	groups := publicFoundingCluster(t, 1)
 	g := readyPublic(t, groups)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -81,6 +84,9 @@ func TestMetaWatchSeparatesLatestTargetAndActive(t *testing.T) {
 }
 
 func TestMetaWatchFanoutIsOwnedAndDurablyAppliedOnFollowers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	groups := publicFoundingCluster(t, 3)
 	g := readyPublic(t, groups)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -125,6 +131,7 @@ func TestMetaWatchFanoutIsOwnedAndDurablyAppliedOnFollowers(t *testing.T) {
 }
 
 func TestMetaWatchSeedIsNotRepeatedByLateApply(t *testing.T) {
+	t.Parallel()
 	r := newWatchRegistry(2)
 	defer r.close()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -147,6 +154,7 @@ func TestMetaWatchSeedIsNotRepeatedByLateApply(t *testing.T) {
 }
 
 func TestMetaWatchDropOldestKeepsNewestWithoutBlocking(t *testing.T) {
+	t.Parallel()
 	r := newWatchRegistry(1)
 	defer r.close()
 	ch, err := r.watch(context.Background(), Latest, func() topology.Document { return topology.Document{} })
@@ -162,6 +170,7 @@ func TestMetaWatchDropOldestKeepsNewestWithoutBlocking(t *testing.T) {
 }
 
 func TestMetaWatchCancelAndBound(t *testing.T) {
+	t.Parallel()
 	r := newWatchRegistry(2)
 	defer r.close()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -193,6 +202,9 @@ func TestMetaWatchCancelAndBound(t *testing.T) {
 }
 
 func TestMetaStopJoinsAndClosesWatchers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	g := readyPublic(t, publicFoundingCluster(t, 1))
 	ch, err := g.Watch(context.Background(), Latest)
 	if err != nil {
@@ -214,6 +226,9 @@ func TestMetaStopJoinsAndClosesWatchers(t *testing.T) {
 }
 
 func TestMetaWatchRejectsCanceledAndInvalidView(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	g := readyPublic(t, publicFoundingCluster(t, 1))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -226,6 +241,7 @@ func TestMetaWatchRejectsCanceledAndInvalidView(t *testing.T) {
 }
 
 func TestMetaWatchConcurrentSubscribePublishCancelAndClose(t *testing.T) {
+	t.Parallel()
 	r := newWatchRegistry(256)
 	var wg sync.WaitGroup
 	for range 64 {

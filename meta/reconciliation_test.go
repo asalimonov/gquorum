@@ -98,10 +98,16 @@ func (c *repairLoadController) Status(ctx context.Context, id string) (topology.
 }
 
 func TestMetaAutomaticRepairApprovesAndRunsExactFreshIdentity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	testMetaReplicaRepair(t, true)
 }
 
 func TestMetaOperatorReseatRunsExactFreshIdentity(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	testMetaReplicaRepair(t, false)
 }
 
@@ -186,6 +192,9 @@ func testMetaReplicaRepair(t *testing.T, automatic bool) {
 }
 
 func TestMetaReconciliationConstructorSettingsAndDisabledStatus(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	o := optionsForTest(t)
 	o.Reconciliation.TickTimeout = -time.Second
 	if _, err := New(o); !errors.Is(err, fault.ErrInvalid) {

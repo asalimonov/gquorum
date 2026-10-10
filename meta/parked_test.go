@@ -16,6 +16,7 @@ func parkedRequest(name, instance string) joinRequest {
 	return joinRequest{Identity: Identity{NodeName: name, InstanceID: instance, ClusterID: "cluster", MemberID: 7}, Node: topology.Node{Name: name, Type: "worker"}, Address: "127.0.0.1:1234", LastDocVersion: 3}
 }
 func TestParkedRegistry_UpsertAttemptsExpiryRemoval(t *testing.T) {
+	t.Parallel()
 	var registry parkedRegistry
 	req := parkedRequest("node2", "a")
 	registry.record(req, parkedExcluded, "excluded")
@@ -55,6 +56,7 @@ func TestParkedRegistry_UpsertAttemptsExpiryRemoval(t *testing.T) {
 	}
 }
 func TestParkedRegistry_KeyedByNameAndInstance(t *testing.T) {
+	t.Parallel()
 	var registry parkedRegistry
 	registry.record(parkedRequest("node2", "holder"), parkedExcluded, "excluded")
 	registry.record(parkedRequest("node2", "intruder"), parkedNameConflict, "conflict")
@@ -84,6 +86,7 @@ func TestParkedRegistry_KeyedByNameAndInstance(t *testing.T) {
 	}
 }
 func TestParkedRegistry_SweepExpiresWithoutAReader(t *testing.T) {
+	t.Parallel()
 	var registry parkedRegistry
 	registry.record(parkedRequest("stale", "old"), parkedExcluded, "excluded")
 	registry.record(parkedRequest("retrying", "new"), parkedExcluded, "excluded")
@@ -100,6 +103,7 @@ func TestParkedRegistry_SweepExpiresWithoutAReader(t *testing.T) {
 	}
 }
 func TestParkedRegistry_CapsCardinalityByEvictingOldest(t *testing.T) {
+	t.Parallel()
 	var registry parkedRegistry
 	for i := 0; i < parkedJoinCap; i++ {
 		registry.record(parkedRequest("same", fmt.Sprint(i)), parkedExcluded, "excluded")
@@ -117,6 +121,7 @@ func TestParkedRegistry_CapsCardinalityByEvictingOldest(t *testing.T) {
 	}
 }
 func TestParkedJoins_NilReceiver(t *testing.T) {
+	t.Parallel()
 	var g *Group
 	records, err := g.ParkedJoins(context.Background())
 	if err != nil || records != nil {
@@ -124,6 +129,9 @@ func TestParkedJoins_NilReceiver(t *testing.T) {
 	}
 }
 func TestHandleJoin_RefusalRecordsParkAndFollowersReadCurrentLeader(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
 	groups := publicFoundingCluster(t, 3)
 	leader := readyPublic(t, groups)
 	var follower *Group

@@ -65,12 +65,14 @@ func segmentedSeed(t *testing.T, s *Store, batches int) uint64 {
 }
 
 func TestWalStore_Conformance(t *testing.T) {
+	t.Parallel()
 	storagetest.Run(t, func(t *testing.T, node string) storage.Store {
 		return openTest(t, filepath.Join(t.TempDir(), node), node, "test-cluster", false)
 	})
 }
 
 func TestWalStore_ReopenAcrossSegments(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	root := t.TempDir()
 	s := boundTest(t, root, false)
@@ -102,6 +104,7 @@ func TestWalStore_ReopenAcrossSegments(t *testing.T) {
 }
 
 func TestWalStore_BaseMarkerSurvivesReopen(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	root := t.TempDir()
 	s := boundTest(t, root, false)
@@ -120,6 +123,7 @@ func TestWalStore_BaseMarkerSurvivesReopen(t *testing.T) {
 }
 
 func TestWalStore_IdentityMismatch(t *testing.T) {
+	t.Parallel()
 	for _, field := range []string{"node", "cluster", "group", "replica", "metadata"} {
 		t.Run(field, func(t *testing.T) {
 			root := t.TempDir()
@@ -163,6 +167,7 @@ func TestWalStore_IdentityMismatch(t *testing.T) {
 }
 
 func TestWalStore_ProbeInputs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	t.Run("absent", func(t *testing.T) {
 		root := t.TempDir()
@@ -236,6 +241,7 @@ func TestWalStore_ProbeInputs(t *testing.T) {
 }
 
 func TestWalStore_QuarantineSweep(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	root := t.TempDir()
 	s := boundTest(t, root, false)
@@ -272,6 +278,7 @@ func TestWalStore_QuarantineSweep(t *testing.T) {
 }
 
 func TestWalStore_RefillerRace(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	s := boundTest(t, root, true)
 	index := segmentedSeed(t, s, 120)
@@ -296,6 +303,7 @@ func TestWalStore_RefillerRace(t *testing.T) {
 }
 
 func TestWalStore_LoadWhileOpenSeesLastWrite(t *testing.T) {
+	t.Parallel()
 	s := boundTest(t, t.TempDir(), false)
 	seed(t, s, 5)
 	cs := raftpb.ConfState{Voters: []uint64{7, 9}, Learners: []uint64{11}}
@@ -306,6 +314,7 @@ func TestWalStore_LoadWhileOpenSeesLastWrite(t *testing.T) {
 }
 
 func TestWalStore_SnapshotReadWriteConcurrent(t *testing.T) {
+	t.Parallel()
 	s := boundTest(t, t.TempDir(), false)
 	seed(t, s, 40)
 	errC := make(chan error, 2)
@@ -338,6 +347,7 @@ func TestWalStore_SnapshotReadWriteConcurrent(t *testing.T) {
 }
 
 func TestWalStore_HardStateNoRegress(t *testing.T) {
+	t.Parallel()
 	s := boundTest(t, t.TempDir(), false)
 	seed(t, s, 10)
 	before := loadTest(t, s)
@@ -358,6 +368,7 @@ func TestWalStore_HardStateNoRegress(t *testing.T) {
 }
 
 func TestWalStore_FloorFiltering(t *testing.T) {
+	t.Parallel()
 	s := boundTest(t, t.TempDir(), false)
 	seed(t, s, 10)
 	if err := s.Compact(context.Background(), "group", 5); !errors.Is(err, fault.ErrInvalid) {
@@ -371,6 +382,7 @@ func TestWalStore_FloorFiltering(t *testing.T) {
 }
 
 func TestWalStore_CorruptOnlySnapshotIsUnreadable(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	s := boundTest(t, root, false)
 	seed(t, s, 3)
@@ -389,6 +401,7 @@ func TestWalStore_CorruptOnlySnapshotIsUnreadable(t *testing.T) {
 }
 
 func TestWalStore_CorruptNewestAfterCompactionFallsBack(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	s := boundTest(t, root, false)
 	segmentedSeed(t, s, 100)
@@ -409,6 +422,7 @@ func TestWalStore_CorruptNewestAfterCompactionFallsBack(t *testing.T) {
 }
 
 func TestWalStore_Stats(t *testing.T) {
+	t.Parallel()
 	s := boundTest(t, t.TempDir(), true)
 	stats, err := s.Stats(context.Background(), "absent")
 	check(t, err)
@@ -430,6 +444,7 @@ func TestWalStore_Stats(t *testing.T) {
 }
 
 func TestWalStore_CloseIdempotent(t *testing.T) {
+	t.Parallel()
 	s := boundTest(t, t.TempDir(), true)
 	seed(t, s, 2)
 	var wg sync.WaitGroup
@@ -447,6 +462,7 @@ func TestWalStore_CloseIdempotent(t *testing.T) {
 }
 
 func TestWalStore_ContextAndOptions(t *testing.T) {
+	t.Parallel()
 	s := boundTest(t, t.TempDir(), false)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -467,6 +483,7 @@ func TestWalStore_ContextAndOptions(t *testing.T) {
 }
 
 func TestWalStore_CallerCannotMutateStoredState(t *testing.T) {
+	t.Parallel()
 	s := boundTest(t, t.TempDir(), false)
 	entries := storagetest.Entries(1, 3, 1)
 	check(t, s.SaveReady(context.Background(), "group", storage.ReadyWrite{Entries: entries, HardState: raftpb.HardState{Term: 1, Commit: 3}}))
@@ -488,6 +505,7 @@ func TestWalStore_CallerCannotMutateStoredState(t *testing.T) {
 }
 
 func TestWalStore_ConcurrentWriters(t *testing.T) {
+	t.Parallel()
 	s := boundTest(t, t.TempDir(), false)
 	write := storage.ReadyWrite{Entries: storagetest.Entries(1, 3, 1), HardState: raftpb.HardState{Term: 1, Commit: 3}}
 	var wg sync.WaitGroup
