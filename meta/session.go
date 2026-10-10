@@ -22,9 +22,9 @@ func (g *Group) takeSessionToken(ctx context.Context) error {
 			g.releaseSessionToken()
 			return err
 		}
-		if g.ctx.Err() != nil {
+		if err := g.ensureRunning(ctx); err != nil {
 			g.releaseSessionToken()
-			return fault.ErrStopped
+			return err
 		}
 		return nil
 	case <-ctx.Done():
@@ -243,7 +243,7 @@ func (g *Group) SetServeOverride(ctx context.Context, value int) error {
 	if g.store == nil || g.identity.MemberID == 0 {
 		return fault.ErrUnavailable
 	}
-	if g.lifecycle == "stopped" || g.lifecycle == "stopping" {
+	if g.quiescing || g.lifecycle == "stopped" || g.lifecycle == "stopping" {
 		return fault.ErrStopped
 	}
 	if err := g.store.SaveOverride(value); err != nil {

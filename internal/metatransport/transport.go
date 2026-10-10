@@ -53,6 +53,7 @@ type peer struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	queue  chan raftpb.Message
+	retire chan struct{}
 	until  atomic.Int64
 }
 
@@ -138,13 +139,15 @@ func (t *Transport) Header() *metapb.Header {
 	return proto.Clone(h).(*metapb.Header)
 }
 
-// Prune releases queues and connections for removed members. It never changes Raft membership.
+// Prune retires removed peers after their already admitted messages drain. It
+// must not cancel the final commit carrying a removal. Stop still cancels and
+// joins every retiring worker immediately; this never changes Raft membership.
 func (t *Transport) Prune(ids map[uint64]bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for id, p := range t.peers {
 		if !ids[id] {
-			p.cancel()
+			close(p.retire)
 			delete(t.peers, id)
 		}
 	}
@@ -165,7 +168,7 @@ func (t *Transport) Send(ctx context.Context, messages []raftpb.Message) error {
 		p := t.peers[msg.To]
 		if p == nil {
 			peerCtx, cancel := context.WithCancel(t.ctx)
-			p = &peer{id: msg.To, ctx: peerCtx, cancel: cancel, queue: make(chan raftpb.Message, 128)}
+			p = &peer{id: msg.To, ctx: peerCtx, cancel: cancel, queue: make(chan raftpb.Message, 128), retire: make(chan struct{})}
 			t.peers[msg.To] = p
 			t.wg.Add(1)
 			go t.runPeer(p)
@@ -205,6 +208,7 @@ func (t *Transport) authenticated(ctx context.Context) context.Context {
 }
 func (t *Transport) runPeer(p *peer) {
 	defer t.wg.Done()
+	defer p.cancel()
 	var conn *grpc.ClientConn
 	var address string
 	defer func() {
@@ -221,10 +225,18 @@ func (t *Transport) runPeer(p *peer) {
 		}
 	}()
 	backoff := t.opts.RetryInitial
+	retire := p.retire
+	retiring := false
 	for {
+		if retiring && len(p.queue) == 0 {
+			return
+		}
 		select {
 		case <-p.ctx.Done():
 			return
+		case <-retire:
+			retiring, retire = true, nil
+			continue
 		case msg := <-p.queue:
 			timeout := t.opts.SendTimeout
 			if msg.Type == raftpb.MsgSnap {

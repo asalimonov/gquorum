@@ -16,6 +16,7 @@ const (
 	RuntimeError          Type = "runtime_error"
 	ReconciliationChanged Type = "reconciliation_changed"
 	GroupHealthChanged    Type = "group_health_changed"
+	SelfRemoved           Type = "self_removed"
 )
 
 type Event struct {

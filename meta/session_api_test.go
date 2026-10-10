@@ -64,7 +64,7 @@ func TestSessionTokenWaitingHonorsContextAndStoppedParent(t *testing.T) {
 	t.Parallel()
 	parent, stop := context.WithCancel(context.Background())
 	defer stop()
-	g := &Group{ctx: parent, sessionToken: make(chan struct{}, 1)}
+	g := &Group{started: true, ctx: parent, sessionToken: make(chan struct{}, 1)}
 	if err := g.takeSessionToken(context.Background()); err != nil {
 		t.Fatal(err)
 	}

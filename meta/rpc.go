@@ -16,6 +16,11 @@ import (
 )
 
 func (g *Group) Step(ctx context.Context, header *metapb.Header, msg raftpb.Message) error {
+	ctx, done, err := g.beginRPC(ctx)
+	if err != nil {
+		return err
+	}
+	defer done()
 	identity := g.currentIdentity()
 	engine := g.engine.Load()
 	if engine == nil {
@@ -52,13 +57,23 @@ func (g *Group) Step(ctx context.Context, header *metapb.Header, msg raftpb.Mess
 	if name == "" || name != header.NodeName {
 		return fault.ErrIdentityMismatch
 	}
-	err := engine.Step(ctx, msg)
+	err = engine.Step(ctx, msg)
 	if err == nil {
 		g.acceptAddressHints(header)
 	}
 	return err
 }
 func (g *Group) Call(ctx context.Context, method string, header *metapb.Header, data []byte) *metapb.Reply {
+	ctx, done, err := g.beginRPC(ctx)
+	if err != nil {
+		return metatransport.Reply(err)
+	}
+	defer done()
+	if method != "IdentityPing" && method != "MetaStatus" && method != "ParkedRead" {
+		if err := g.ensureRunning(ctx); err != nil {
+			return metatransport.Reply(err)
+		}
+	}
 	identity := g.currentIdentity()
 	if header == nil || header.ClusterId != identity.ClusterID {
 		return metatransport.Reply(fault.ErrIdentityMismatch)
@@ -200,7 +215,10 @@ func (g *Group) leaderReply(err error) *metapb.Reply {
 	return reply
 }
 func (g *Group) propose(ctx context.Context, proposal any) (metaengine.ApplyResult, error) {
-	if err := g.ensureRunning(ctx); err != nil {
+	return g.submitProposal(ctx, proposal, false)
+}
+func (g *Group) submitProposal(ctx context.Context, proposal any, shutdown bool) (metaengine.ApplyResult, error) {
+	if err := g.ensureRuntime(ctx, shutdown); err != nil {
 		return metaengine.ApplyResult{}, err
 	}
 	data, err := metaengine.Encode(proposal)

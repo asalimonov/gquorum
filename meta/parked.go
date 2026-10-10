@@ -134,7 +134,7 @@ func (g *Group) runParkedSweep() {
 	defer ticker.Stop()
 	for {
 		select {
-		case <-g.ctx.Done():
+		case <-g.workCtx.Done():
 			return
 		case now := <-ticker.C:
 			g.parked.sweep(now)

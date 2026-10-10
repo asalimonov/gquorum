@@ -13,24 +13,29 @@ import (
 )
 
 func (g *Group) run() {
-	defer func() { g.wg.Done(); go g.Stop(context.Background()) }()
+	defer func() {
+		g.wg.Done()
+		if g.autoStopNeeded() {
+			g.RequestStop()
+		}
+	}()
 	ticker := time.NewTicker(g.opts.Timing.TickInterval)
 	defer ticker.Stop()
 	var wasLeader bool
 	var nextExpiry time.Time
 	for {
 		select {
-		case <-g.ctx.Done():
+		case <-g.workCtx.Done():
 			return
 		case <-ticker.C:
 		}
 
 		if g.opts.Join && !g.joinDone {
-			ctx, cancel := context.WithTimeout(g.ctx, 5*time.Second)
+			ctx, cancel := context.WithTimeout(g.workCtx, 5*time.Second)
 			err := g.tryJoin(ctx)
 			cancel()
 			if err != nil {
-				if g.ctx.Err() != nil {
+				if g.workCtx.Err() != nil {
 					return
 				}
 				var fatal *fatalAdmissionError
@@ -46,7 +51,7 @@ func (g *Group) run() {
 					g.readyOnce.Do(func() { close(g.ready) })
 					return
 				}
-				if g.ctx.Err() != nil {
+				if g.workCtx.Err() != nil {
 					return
 				}
 				g.mu.Lock()
@@ -61,7 +66,7 @@ func (g *Group) run() {
 			continue
 		}
 		if g.opts.Join && !g.joinReady {
-			ctx, cancel := context.WithTimeout(g.ctx, 2*time.Second)
+			ctx, cancel := context.WithTimeout(g.workCtx, 2*time.Second)
 			err := g.acknowledgeJoin(ctx)
 			cancel()
 			if err != nil {
@@ -70,7 +75,7 @@ func (g *Group) run() {
 		}
 
 		if err := engine.Error(); err != nil {
-			if g.ctx.Err() == nil {
+			if g.workCtx.Err() == nil {
 				g.fail(err)
 			}
 			return
@@ -79,25 +84,30 @@ func (g *Group) run() {
 			g.fail(err)
 			return
 		}
+		status := engine.Status()
+		g.observeRemoval(g.currentIdentity(), g.state().Target(), status.ConfState, status.Applied)
+		if g.workCtx.Err() != nil {
+			return
+		}
 		leader := g.IsLeader()
 		if leader && !wasLeader {
 			g.seedLeases(time.Now(), true)
 		}
 		wasLeader = leader
 		if leader {
-			ctx, cancel := context.WithTimeout(g.ctx, 5*time.Second)
+			ctx, cancel := context.WithTimeout(g.workCtx, 5*time.Second)
 			err := g.bootstrap(ctx)
 			if err == nil {
 				err = g.activateCompleted(ctx)
 			}
 			cancel()
-			if err != nil && g.ctx.Err() == nil {
+			if err != nil && g.workCtx.Err() == nil {
 				g.opts.Logger.Debug("meta bootstrap or activation retry", "error", err)
 			}
 		}
 		if leader && !time.Now().Before(nextExpiry) {
-			ctx, cancel := context.WithTimeout(g.ctx, 5*time.Second)
-			if err := g.expireSessions(ctx, time.Now()); err != nil && g.ctx.Err() == nil {
+			ctx, cancel := context.WithTimeout(g.workCtx, 5*time.Second)
+			if err := g.expireSessions(ctx, time.Now()); err != nil && g.workCtx.Err() == nil {
 				g.opts.Logger.Debug("meta lease expiry retry", "error", err)
 			}
 			cancel()
@@ -105,7 +115,7 @@ func (g *Group) run() {
 		}
 
 		identity := g.currentIdentity()
-		status := engine.Status()
+		status = engine.Status()
 		members := make(map[uint64]bool)
 		voter := false
 		for _, id := range status.ConfState.Voters {
@@ -119,14 +129,16 @@ func (g *Group) run() {
 		if !voter || g.state().ActiveVersion() == 0 {
 			continue
 		}
-		ctx, cancel := context.WithTimeout(g.ctx, 5*time.Second)
+		ctx, cancel := context.WithTimeout(g.workCtx, 5*time.Second)
 		_, err := g.activate(ctx, true)
 		cancel()
 		if err != nil {
 			continue
 		}
 		g.mu.Lock()
-		g.lifecycle = "ready"
+		if !g.quiescing && g.selfRemoval == nil && g.workCtx.Err() == nil {
+			g.lifecycle = "ready"
+		}
 		g.mu.Unlock()
 		g.readyOnce.Do(func() { close(g.ready) })
 	}
@@ -235,6 +247,10 @@ func (g *Group) activate(ctx context.Context, automatic bool) (Session, error) {
 		sessionID = "session-" + hex.EncodeToString(nonce[:])
 	}
 	g.sessionMu.Lock()
+	if err := g.ensureRunning(ctx); err != nil {
+		g.sessionMu.Unlock()
+		return Session{}, err
+	}
 	g.ownSession = sessionID
 	g.sessionMu.Unlock()
 	if _, exists := machine.Session(sessionID); !exists {
@@ -261,6 +277,10 @@ func (g *Group) activate(ctx context.Context, automatic bool) (Session, error) {
 			return Session{}, err
 		}
 		g.sessionMu.Lock()
+		if err := g.ensureRunning(ctx); err != nil {
+			g.sessionMu.Unlock()
+			return Session{}, err
+		}
 		g.ownDeadline = deadline
 		g.sessionPaused = false
 		g.sessionMu.Unlock()

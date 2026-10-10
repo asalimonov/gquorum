@@ -135,6 +135,9 @@ func (s *Store) InstallSnapshot(snap raftpb.Snapshot, hs raftpb.HardState) error
 				return err
 			}
 		}
+		if err := recordMemberSeen(tx, snap.Metadata.ConfState); err != nil {
+			return err
+		}
 		ab := tx.Bucket(bucketApplied)
 		if v := ab.Get(keyApplied); len(v) != 8 || btoi(v) < snap.Metadata.Index {
 			if err := ab.Put(keyApplied, itob(snap.Metadata.Index)); err != nil {
@@ -262,7 +265,10 @@ func (s *Store) SetApplied(idx uint64, cs raftpb.ConfState) error {
 		if err := ab.Put(keyApplied, itob(idx)); err != nil {
 			return err
 		}
-		return ab.Put(keyConfState, csBytes)
+		if err := ab.Put(keyConfState, csBytes); err != nil {
+			return err
+		}
+		return recordMemberSeen(tx, cs)
 	})
 }
 

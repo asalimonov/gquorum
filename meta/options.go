@@ -70,8 +70,13 @@ type Options struct {
 	Observation       ObservationOptions
 	Events            *events.Bus
 	Logger            *slog.Logger
-	OnSelfRemoved     func(context.Context, string) error
-	OnReadmission     func(context.Context, Readmission) error
+	// OnSelfRemoved is invoked asynchronously after durable approved removal.
+	// It must honor cancellation and return before Stop/Quiesce can join it.
+	// Use Group.RequestStop to schedule teardown instead of waiting on this
+	// same group's Stop/Quiesce inside the callback. Callbacks are idempotent
+	// across crashes/restarts and must verify the reason's exact local identity.
+	OnSelfRemoved func(context.Context, string) error
+	OnReadmission func(context.Context, Readmission) error
 }
 
 // ReconciliationOptions controls local automatic load-replica repair. Disabled

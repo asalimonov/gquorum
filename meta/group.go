@@ -24,47 +24,58 @@ import (
 )
 
 type Group struct {
-	opts                Options
-	rules               topology.Rules
-	mu                  sync.RWMutex
-	lifecycle           string
-	terminal            error
-	identity            Identity
-	machine             *metaengine.Machine
-	engine              atomic.Pointer[raftengine.Group]
-	store               *metastore.Store
-	transport           *metatransport.Transport
-	coordinator         *membership.Coordinator
-	convergence         *convergence.ConvergenceEngine
-	reconciler          *reconcile.Reconciler
-	observer            *observe.Watch
-	recorderMu          sync.Mutex
-	lastExecution       *topology.ExecutionStatus
-	lastDrained         map[string]bool
-	leases              *sessionManager
-	parked              parkedRegistry
-	watches             *watchRegistry
-	leaseGate           sync.Mutex
-	addresses           map[string]string
-	joinMembers         map[uint64]string
-	recoveryDocuments   []topology.Document
-	joinDone, joinReady bool
-	joinAdmission       metaengine.AdmissionRecord
-	joinLeader          string
-	admissionToken      chan struct{}
-	ctx                 context.Context
-	cancel              context.CancelFunc
-	started             bool
-	ready, stopped      chan struct{}
-	readyOnce, stopOnce sync.Once
-	wg                  sync.WaitGroup
-	sessionMu           sync.Mutex
-	sessionToken        chan struct{}
-	ownSession          string
-	ownDeadline         time.Time
-	sessionPaused       bool
-	lastDeactivated     string
-	serveOverride       int
+	opts                 Options
+	rules                topology.Rules
+	mu                   sync.RWMutex
+	startGate            sync.Mutex
+	lifecycle            string
+	terminal             error
+	identity             Identity
+	machine              *metaengine.Machine
+	engine               atomic.Pointer[raftengine.Group]
+	store                *metastore.Store
+	transport            *metatransport.Transport
+	coordinator          *membership.Coordinator
+	convergence          *convergence.ConvergenceEngine
+	reconciler           *reconcile.Reconciler
+	observer             *observe.Watch
+	recorderMu           sync.Mutex
+	lastExecution        *topology.ExecutionStatus
+	lastDrained          map[string]bool
+	leases               *sessionManager
+	parked               parkedRegistry
+	watches              *watchRegistry
+	leaseGate            sync.Mutex
+	addresses            map[string]string
+	joinMembers          map[uint64]string
+	recoveryDocuments    []topology.Document
+	joinDone, joinReady  bool
+	joinAdmission        metaengine.AdmissionRecord
+	joinLeader           string
+	admissionToken       chan struct{}
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	workCtx              context.Context
+	workCancel           context.CancelFunc
+	quiescing, rpcClosed bool
+	quiesced             chan struct{}
+	quiesceOnce          sync.Once
+	effectWG, rpcWG      sync.WaitGroup
+	memberSeen           bool
+	selfRemoval          *topology.SelfRemovalStatus
+	removalSignal        chan struct{}
+	removalWG            sync.WaitGroup
+	started              bool
+	ready, stopped       chan struct{}
+	readyOnce, stopOnce  sync.Once
+	wg                   sync.WaitGroup
+	sessionMu            sync.Mutex
+	sessionToken         chan struct{}
+	ownSession           string
+	ownDeadline          time.Time
+	sessionPaused        bool
+	lastDeactivated      string
+	serveOverride        int
 }
 
 // New constructs a meta group without starting network or Raft workers. An
@@ -91,7 +102,7 @@ func New(input Options) (*Group, error) {
 	if !opts.Join && !exists && len(opts.Founders) == 0 {
 		return nil, fault.New(fault.Invalid, "fresh meta storage requires founding members", nil)
 	}
-	g := &Group{opts: opts, rules: topology.Rules{SchemaVersion: 1, Limits: opts.Limits}, identity: opts.Identity, lifecycle: "constructed", coordinator: membership.NewCoordinator(), leases: newSessionManager(opts.SessionTTL), addresses: make(map[string]string), joinMembers: make(map[uint64]string), admissionToken: make(chan struct{}, 1), ready: make(chan struct{}), stopped: make(chan struct{}), sessionToken: make(chan struct{}, 1)}
+	g := &Group{opts: opts, rules: topology.Rules{SchemaVersion: 1, Limits: opts.Limits}, identity: opts.Identity, lifecycle: "constructed", coordinator: membership.NewCoordinator(), leases: newSessionManager(opts.SessionTTL), addresses: make(map[string]string), joinMembers: make(map[uint64]string), admissionToken: make(chan struct{}, 1), ready: make(chan struct{}), stopped: make(chan struct{}), quiesced: make(chan struct{}), removalSignal: make(chan struct{}, 1), sessionToken: make(chan struct{}, 1)}
 	for _, founder := range opts.Founders {
 		g.addresses[founder.Node.Name] = founder.Address
 	}
@@ -167,12 +178,18 @@ func (g *Group) openEngine(identity Identity, mode raftengine.Mode, peers []raft
 		}
 		return fault.New(fault.Unreadable, "invalid persisted local serving override", nil)
 	}
+	seen, err := store.MemberSeen()
+	if err != nil {
+		store.Close()
+		return err
+	}
 	machine := metaengine.NewMachine(g.rules, store)
-	machine.OnApplied = func(_ uint64, _ raftpb.ConfState) {
+	machine.OnApplied = func(index uint64, cs raftpb.ConfState) {
 		latest, target, active := machine.Views()
 		g.watches.publish(latest, target, active)
 		g.recordApplied(machine, active)
 		g.observer.Wake()
+		g.observeRemoval(identity, target, cs, index)
 	}
 	engine, err := raftengine.NewMeta(raftengine.Options{GroupID: topology.MetaGroupID, NodeName: identity.NodeName, ClusterID: identity.ClusterID, InstanceID: identity.InstanceID, ReplicaID: identity.MemberID, Mode: mode, Peers: peers, Timing: raftengine.Timing{TickInterval: g.opts.Timing.TickInterval, ElectionTicks: g.opts.Timing.ElectionTicks, HeartbeatTicks: g.opts.Timing.HeartbeatTicks}, Store: &metastore.Adapter{Store: store}, Machine: machine, Transport: g.transport, Events: g.opts.Events, Logger: g.opts.Logger, SnapshotThreshold: g.opts.SnapshotThreshold})
 	if err != nil {
@@ -185,51 +202,52 @@ func (g *Group) openEngine(identity Identity, mode raftengine.Mode, peers []raft
 	g.recoveryDocuments = recoveryDocuments
 	g.machine = machine
 	g.identity = identity
+	g.memberSeen = seen || containsMember(engine.Status().ConfState, identity.MemberID)
+	g.selfRemoval = nil
 	g.mu.Unlock()
 	g.engine.Store(engine)
 	g.transport.SetMemberID(identity.MemberID)
 	return nil
 }
 func (g *Group) Start(parent context.Context) error {
+	g.startGate.Lock()
+	defer g.startGate.Unlock()
 	if err := parent.Err(); err != nil {
 		return err
 	}
 	g.mu.Lock()
-	if g.started || g.lifecycle == "stopped" || g.lifecycle == "stopping" {
+	if g.started || g.quiescing || g.lifecycle == "stopped" || g.lifecycle == "stopping" {
 		g.mu.Unlock()
 		return fault.ErrStopped
 	}
 	g.started = true
 	g.lifecycle = "starting"
 	g.ctx, g.cancel = context.WithCancel(parent)
+	g.workCtx, g.workCancel = context.WithCancel(g.ctx)
 	g.wg.Add(1)
 	g.mu.Unlock()
 	if err := g.transport.Start(g.ctx); err != nil {
 		g.wg.Done()
-		g.fail(err)
-		go g.Stop(context.Background())
-		return err
+		return g.startFailed(err)
 	}
 	if engine := g.engine.Load(); engine != nil && !g.opts.Join {
 		if err := engine.Start(g.ctx); err != nil {
 			g.wg.Done()
-			g.fail(err)
-			go g.Stop(context.Background())
-			return err
+			return g.startFailed(err)
 		}
 	}
-	g.convergence.Start(g.ctx)
-	if err := g.reconciler.Start(g.ctx); err != nil {
+	g.convergence.Start(g.workCtx)
+	if err := g.reconciler.Start(g.workCtx); err != nil {
 		g.wg.Done()
-		g.fail(err)
-		go g.Stop(context.Background())
-		return err
+		return g.startFailed(err)
 	}
-	if err := g.observer.Start(g.ctx); err != nil {
+	if err := g.observer.Start(g.workCtx); err != nil {
 		g.wg.Done()
-		g.fail(err)
-		go g.Stop(context.Background())
-		return err
+		return g.startFailed(err)
+	}
+	if g.opts.OnSelfRemoved != nil {
+		g.removalWG.Add(1)
+		go g.notifyRemoval(g.ctx)
 	}
 	g.wg.Add(1)
 	go g.runParkedSweep()
@@ -249,56 +267,6 @@ func (g *Group) fail(err error) {
 	}
 }
 
-// Stop cancels and joins all owned workers before closing its meta database.
-// Injected controllers, resolver, event bus and caller storage remain caller-owned.
-func (g *Group) Stop(ctx context.Context) error {
-	g.stopOnce.Do(func() {
-		g.mu.Lock()
-		if g.cancel != nil {
-			g.cancel()
-		}
-		if g.terminal == nil {
-			g.lifecycle = "stopping"
-		}
-		g.mu.Unlock()
-		go func() {
-			if g.watches != nil {
-				g.watches.close()
-			}
-			if g.observer != nil {
-				_ = g.observer.Stop(context.Background())
-			}
-			if g.reconciler != nil {
-				_ = g.reconciler.Stop(context.Background())
-			}
-			if g.convergence != nil {
-				g.convergence.Stop()
-			}
-			_ = g.transport.Stop(context.Background())
-			g.wg.Wait()
-			if engine := g.engine.Load(); engine != nil {
-				_ = engine.Stop(context.Background())
-			}
-			g.mu.Lock()
-			if g.store != nil {
-				if err := g.store.Close(); err != nil && g.terminal == nil {
-					g.terminal = err
-				}
-			}
-			if g.terminal == nil {
-				g.lifecycle = "stopped"
-			}
-			g.mu.Unlock()
-			close(g.stopped)
-		}()
-	})
-	select {
-	case <-g.stopped:
-		return nil
-	case <-ctx.Done():
-		return fault.New(fault.ShutdownTimeout, "meta workers have not stopped", ctx.Err())
-	}
-}
 func (g *Group) WaitReady(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
@@ -315,7 +283,7 @@ func (g *Group) WaitReady(ctx context.Context) error {
 	}
 	g.mu.RLock()
 	err := g.terminal
-	stopped := g.lifecycle == "stopped" || g.lifecycle == "stopping" || g.ctx != nil && g.ctx.Err() != nil
+	stopped := g.selfRemoval != nil || g.quiescing || g.lifecycle == "stopped" || g.lifecycle == "stopping" || g.ctx != nil && g.ctx.Err() != nil
 	g.mu.RUnlock()
 	if err == nil && stopped {
 		return fault.ErrStopped
@@ -325,7 +293,7 @@ func (g *Group) WaitReady(ctx context.Context) error {
 func (g *Group) Rules() topology.Rules { return g.rules }
 func (g *Group) IsLeader() bool {
 	g.mu.RLock()
-	running := g.started && g.ctx != nil && g.ctx.Err() == nil
+	running := g.started && g.selfRemoval == nil && g.ctx != nil && g.ctx.Err() == nil
 	g.mu.RUnlock()
 	if !running {
 		return false
@@ -374,12 +342,31 @@ func (g *Group) memberNode(id uint64) string {
 
 func (g *Group) resolveMember(ctx context.Context, id uint64) (string, error) {
 	name := g.memberNode(id)
+	// Ready messages can still carry a retired peer's final commit when Active
+	// advances before the asynchronous sender drains. Retained documents may
+	// resolve that destination, but never authorize incoming retired identities.
+	if name == "" {
+		for _, doc := range g.state().History(0, 0) {
+			if group := doc.MetaGroup(); group != nil {
+				for _, replica := range group.Replicas {
+					if replica.ReplicaID == id {
+						name = replica.NodeName
+						break
+					}
+				}
+			}
+			if name != "" {
+				break
+			}
+		}
+	}
 	if name == "" {
 		return "", fault.ErrIdentityMismatch
 	}
 	return g.resolveNode(ctx, name)
 }
-func (g *Group) ensureRunning(ctx context.Context) error {
+func (g *Group) ensureRunning(ctx context.Context) error { return g.ensureRuntime(ctx, false) }
+func (g *Group) ensureRuntime(ctx context.Context, shutdown bool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -388,7 +375,7 @@ func (g *Group) ensureRunning(ctx context.Context) error {
 	if g.terminal != nil {
 		return g.terminal
 	}
-	if !g.started || g.ctx.Err() != nil {
+	if !g.started || g.ctx.Err() != nil || (g.quiescing || g.selfRemoval != nil) && !shutdown {
 		return fault.ErrStopped
 	}
 	return nil
@@ -402,6 +389,9 @@ func (g *Group) terminalCode() string {
 	}
 	if g.terminal != nil {
 		return string(fault.Unavailable)
+	}
+	if g.selfRemoval != nil {
+		return string(fault.IdentityMismatch)
 	}
 	return ""
 }

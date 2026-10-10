@@ -88,6 +88,9 @@ func (g *Group) Stage(ctx context.Context, doc topology.Document, expected uint6
 	return result.Doc, err
 }
 func (g *Group) Authorize(ctx context.Context, a topology.AuthorizedStep) error {
+	if err := g.ensureRunning(ctx); err != nil {
+		return err
+	}
 	return g.state().Authorize(ctx, a)
 }
 func (g *Group) Execution(ctx context.Context, id topology.ExecutionID) (topology.ExecutionStatus, error) {
@@ -100,6 +103,7 @@ func (g *Group) Execution(ctx context.Context, id topology.ExecutionID) (topolog
 	}
 	return status, nil
 }
+
 // Status combines owned local document/runtime state with caller load-group
 // status queries. The caller controller must honor ctx. Health is sampled by
 // the observer; a mismatched Active version is reported as unsampled unknown
@@ -113,8 +117,13 @@ func (g *Group) Status(ctx context.Context) (topology.ClusterStatus, error) {
 	g.mu.RLock()
 	lifecycle := g.lifecycle
 	addresses := maps.Clone(g.addresses)
+	var removal *topology.SelfRemovalStatus
+	if g.selfRemoval != nil {
+		owned := *g.selfRemoval
+		removal = &owned
+	}
 	g.mu.RUnlock()
-	result := topology.ClusterStatus{Lifecycle: lifecycle, ErrorCode: g.terminalCode(), LatestVersion: latest.Version, TargetVersion: target.Version, ActiveVersion: active.Version}
+	result := topology.ClusterStatus{Lifecycle: lifecycle, ErrorCode: g.terminalCode(), LatestVersion: latest.Version, TargetVersion: target.Version, ActiveVersion: active.Version, SelfRemoval: removal}
 	result.SessionLive = g.OwnSessionLive()
 	if g.reconciler != nil {
 		result.Reconciliation = g.reconciler.Status()

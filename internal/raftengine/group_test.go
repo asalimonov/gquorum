@@ -446,6 +446,9 @@ func TestLoad_MembershipLearnerPromotionTransferAndRemoval(t *testing.T) {
 	eventually(t, two.IsLeader)
 	must(t, coordinator.Apply(testContext(t), two.Membership(), health, membership.RemoveReplica(1)))
 	eventually(t, func() bool { return reflect.DeepEqual(two.Status().ConfState.Voters, []uint64{2}) })
+	// The departing host must learn the committed removal too, even though the
+	// leader has already discarded its normal replication progress.
+	eventually(t, func() bool { return reflect.DeepEqual(one.Status().ConfState.Voters, []uint64{2}) })
 	propose(t, two, "after removal")
 }
 

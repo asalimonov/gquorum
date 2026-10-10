@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,9 +21,13 @@ type testHandler struct {
 	received chan raftpb.Message
 	block    bool
 	calls    chan string
+	stepHook func(context.Context, raftpb.Message) error
 }
 
 func (h *testHandler) Step(ctx context.Context, header *metapb.Header, msg raftpb.Message) error {
+	if h.stepHook != nil {
+		return h.stepHook(ctx, msg)
+	}
 	if h.block {
 		<-ctx.Done()
 		return ctx.Err()
@@ -32,6 +37,59 @@ func (h *testHandler) Step(ctx context.Context, header *metapb.Header, msg raftp
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
+	}
+}
+
+func TestMetaTransportPruneDrainsFinalAdmittedCommit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	received := make(chan raftpb.Message, 4)
+	h := &testHandler{stepHook: func(ctx context.Context, msg raftpb.Message) error {
+		if msg.Index == 1 {
+			close(entered)
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		received <- msg
+		return nil
+	}}
+	remote := testTransport(t, 2, h, nowhere, nil)
+	local := testTransport(t, 1, &testHandler{received: make(chan raftpb.Message, 1)}, func(context.Context, uint64) (string, error) { return remote.opts.Listener.Addr().String(), nil }, func(o *Options) { o.SendTimeout = 2 * time.Second })
+	// A deferred release runs before transport cleanup even after an assertion
+	// failure, so the fixture cannot leave its server call blocked.
+	var once sync.Once
+	finish := func() { once.Do(func() { close(release) }) }
+	defer finish()
+	if err := local.Send(context.Background(), []raftpb.Message{{Type: raftpb.MsgApp, From: 1, To: 2, Index: 1, Commit: 1}, {Type: raftpb.MsgApp, From: 1, To: 2, Index: 2, Commit: 2}}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("first message did not enter receiver")
+	}
+	local.Prune(map[uint64]bool{})
+	local.mu.Lock()
+	_, present := local.peers[2]
+	local.mu.Unlock()
+	if present {
+		t.Fatal("retired destination remains registered")
+	}
+	finish()
+	for index := uint64(1); index <= 2; index++ {
+		if msg := recvMessage(t, received); msg.Index != index || msg.Commit != index {
+			t.Fatal("prune lost or reordered final commit", msg)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := local.Stop(ctx); err != nil {
+		t.Fatal("retiring worker outlived Stop", err)
 	}
 }
 func (h *testHandler) Call(ctx context.Context, method string, header *metapb.Header, data []byte) *metapb.Reply {

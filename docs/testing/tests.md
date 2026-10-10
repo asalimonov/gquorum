@@ -29,3 +29,7 @@ Measured on the development machine (Go 1.26.5, macOS arm64, 14 logical CPUs):
 and an existing Go compilation cache. The slowest package was WAL storage at
 4.398 seconds. This measurement does not include a clean dependency download or
 a fully cold compiler cache.
+
+After the meta lifecycle/removal additions, another uncached run completed in
+**8.36 seconds** while the full functional suite ran separately. Unit cases
+remain parallel; functional and cluster cases remain outside short mode.

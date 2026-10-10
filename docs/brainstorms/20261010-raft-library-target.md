@@ -554,7 +554,7 @@ Zero SegmentBytes resolves the agreed process-wide default of 64 MiB; negative v
 
 ```go
 type Type string // leader_change, quorum_lost, quorum_achieved, node_alive, node_dead,
-                 // execution_changed, drain_completed, runtime_error
+                 // execution_changed, drain_completed, self_removed, runtime_error
 type Event struct {
     Seq uint64 `json:"seq"`
     At time.Time `json:"at"`

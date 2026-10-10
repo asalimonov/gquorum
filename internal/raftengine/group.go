@@ -71,6 +71,7 @@ type Group struct {
 	pending                                 *writeJob
 	props, changes                          map[string]*request
 	confNotify                              []*request
+	retirementMessages                      []raftpb.Message
 	membershipChanged                       bool
 	nonce                                   string
 	sequence                                atomic.Uint64

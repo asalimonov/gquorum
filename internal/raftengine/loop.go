@@ -297,6 +297,9 @@ func (g *Group) apply(entry raftpb.Entry) error {
 		if cc.Transition != raftpb.ConfChangeTransitionAuto || len(cc.Changes) != 1 || cc.Changes[0].NodeID == 0 {
 			return fault.ErrUnsafeMembership
 		}
+		if change := cc.Changes[0]; change.Type == raftpb.ConfChangeRemoveNode && change.NodeID != g.opts.ReplicaID {
+			g.queueRetirement(entry, change.NodeID)
+		}
 		g.cs = copyConf(*g.rn.ApplyConfChange(cc))
 		g.membershipChanged = true
 		var e envelope
@@ -313,6 +316,8 @@ func (g *Group) apply(entry raftpb.Entry) error {
 }
 func (g *Group) advance() error {
 	rd := g.pending.rd
+	rd.Messages = append(rd.Messages, g.retirementMessages...)
+	g.retirementMessages = nil
 	if len(rd.Messages) > 0 {
 		select {
 		case g.sendC <- rd.Messages:
@@ -339,6 +344,43 @@ func (g *Group) advance() error {
 		}
 	}
 	return nil
+}
+
+// Once ApplyConfChange drops a peer, Raft no longer retries its final commit.
+// Queue a bounded, prefix-checked append carrying the committed removal itself.
+// Advance sends it only after application durability, through the same FIFO as
+// ordinary messages. This is best effort for an offline/compacted-away peer;
+// it never fabricates membership or commits an unmatched follower log.
+func (g *Group) queueRetirement(entry raftpb.Entry, peer uint64) {
+	status := g.rn.Status()
+	progress, present := status.Progress[peer]
+	if status.RaftState != raft.StateLeader || !present {
+		return
+	}
+	first, err := g.ms.FirstIndex()
+	if err != nil {
+		return
+	}
+	base := max(first-1, min(progress.Match, entry.Index-1))
+	term, err := g.ms.Term(base)
+	if err != nil {
+		return
+	}
+	entries, err := g.ms.Entries(base+1, entry.Index+1, g.opts.MaxApplyBatchBytes)
+	if err != nil || len(entries) == 0 {
+		return
+	}
+	if entries[len(entries)-1].Index != entry.Index {
+		// Keep the handoff bounded if the peer is far behind. A prefix match is
+		// still mandatory at the receiver; unavailable old state is not replaced.
+		base = entry.Index - 1
+		term, err = g.ms.Term(base)
+		if err != nil {
+			return
+		}
+		entries = []raftpb.Entry{entry}
+	}
+	g.retirementMessages = append(g.retirementMessages, raftpb.Message{Type: raftpb.MsgApp, From: g.opts.ReplicaID, To: peer, Term: status.Term, Index: base, LogTerm: term, Entries: copyEntries(entries), Commit: entry.Index})
 }
 func (g *Group) beginSnapshot(req *request) error {
 	if req != nil && req.ctx.Err() != nil {

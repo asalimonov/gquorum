@@ -72,6 +72,7 @@ type ClusterStatus struct {
 	Execution      *ExecutionStatus     `json:"execution,omitempty"`
 	Reconciliation ReconciliationStatus `json:"reconciliation"`
 	Observation    HealthObservation    `json:"observation"`
+	SelfRemoval    *SelfRemovalStatus   `json:"self_removal,omitempty"`
 }
 
 // GroupController implements idempotent effects on the exact authorized load identities.

@@ -35,6 +35,7 @@ var (
 	keyNodeName        = []byte("node_name")
 	keyClusterID       = []byte("cluster_id")
 	keyMemberID        = []byte("member_id")
+	keyMemberSeen      = []byte("member_seen")
 	keyOverride        = []byte("current")
 )
 
@@ -197,7 +198,10 @@ func (s *Store) SaveApplication(index uint64, cs raftpb.ConfState, data []byte) 
 		if err := applied.Put(keyApplied, itob(index)); err != nil {
 			return err
 		}
-		return applied.Put(keyConfState, encoded)
+		if err := applied.Put(keyConfState, encoded); err != nil {
+			return err
+		}
+		return recordMemberSeen(tx, cs)
 	})
 }
 

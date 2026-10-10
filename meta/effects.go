@@ -43,7 +43,7 @@ func (c groupControllers) Status(ctx context.Context, id string) (topology.Group
 	status.HealthKnown = true
 	return status, nil
 }
-func (c groupControllers) effect(ctx context.Context, a topology.AuthorizedStep, kind topology.StepKind, invoke func(topology.GroupController) error) error {
+func (c groupControllers) effect(ctx context.Context, a topology.AuthorizedStep, kind topology.StepKind, invoke func(context.Context, topology.GroupController) error) error {
 	if a.Kind != kind {
 		return fault.ErrExecutionAuthorization
 	}
@@ -56,13 +56,25 @@ func (c groupControllers) effect(ctx context.Context, a topology.AuthorizedStep,
 	if c.g.opts.LoadGroups == nil {
 		return fault.ErrNoController
 	}
-	return invoke(c.g.opts.LoadGroups)
+	ctx, done, err := c.g.beginEffect(ctx)
+	if err != nil {
+		return err
+	}
+	defer done()
+	if err := c.g.Authorize(ctx, a); err != nil {
+		return err
+	}
+	return invoke(ctx, c.g.opts.LoadGroups)
 }
 func (c groupControllers) CreateGroup(ctx context.Context, a topology.AuthorizedStep) error {
-	return c.effect(ctx, a, topology.StepCreateFoundingGroup, func(controller topology.GroupController) error { return controller.CreateGroup(ctx, a) })
+	return c.effect(ctx, a, topology.StepCreateFoundingGroup, func(ctx context.Context, controller topology.GroupController) error {
+		return controller.CreateGroup(ctx, a)
+	})
 }
 func (c groupControllers) PrepareReplica(ctx context.Context, a topology.AuthorizedStep) error {
-	return c.effect(ctx, a, topology.StepPrepareReplica, func(controller topology.GroupController) error { return controller.PrepareReplica(ctx, a) })
+	return c.effect(ctx, a, topology.StepPrepareReplica, func(ctx context.Context, controller topology.GroupController) error {
+		return controller.PrepareReplica(ctx, a)
+	})
 }
 func (c groupControllers) ApplyMembership(ctx context.Context, a topology.AuthorizedStep) error {
 	switch a.Kind {
@@ -70,22 +82,37 @@ func (c groupControllers) ApplyMembership(ctx context.Context, a topology.Author
 	default:
 		return fault.ErrExecutionAuthorization
 	}
-	return c.effect(ctx, a, a.Kind, func(controller topology.GroupController) error { return controller.ApplyMembership(ctx, a) })
+	return c.effect(ctx, a, a.Kind, func(ctx context.Context, controller topology.GroupController) error {
+		return controller.ApplyMembership(ctx, a)
+	})
 }
 func (c groupControllers) TransferLeader(ctx context.Context, a topology.AuthorizedStep) error {
-	return c.effect(ctx, a, topology.StepTransferLeader, func(controller topology.GroupController) error { return controller.TransferLeader(ctx, a) })
+	return c.effect(ctx, a, topology.StepTransferLeader, func(ctx context.Context, controller topology.GroupController) error {
+		return controller.TransferLeader(ctx, a)
+	})
 }
 func (c groupControllers) StopReplica(ctx context.Context, a topology.AuthorizedStep) error {
-	return c.effect(ctx, a, topology.StepStopReplica, func(controller topology.GroupController) error { return controller.StopReplica(ctx, a) })
+	return c.effect(ctx, a, topology.StepStopReplica, func(ctx context.Context, controller topology.GroupController) error {
+		return controller.StopReplica(ctx, a)
+	})
 }
 func (c groupControllers) CleanupReplicaState(ctx context.Context, a topology.AuthorizedStep) error {
-	return c.effect(ctx, a, topology.StepCleanupReplicaState, func(controller topology.GroupController) error { return controller.CleanupReplicaState(ctx, a) })
+	return c.effect(ctx, a, topology.StepCleanupReplicaState, func(ctx context.Context, controller topology.GroupController) error {
+		return controller.CleanupReplicaState(ctx, a)
+	})
 }
 func (c groupControllers) DeleteGroupState(ctx context.Context, a topology.AuthorizedStep) error {
-	return c.effect(ctx, a, topology.StepDeleteGroupState, func(controller topology.GroupController) error { return controller.DeleteGroupState(ctx, a) })
+	return c.effect(ctx, a, topology.StepDeleteGroupState, func(ctx context.Context, controller topology.GroupController) error {
+		return controller.DeleteGroupState(ctx, a)
+	})
 }
 
 func (g *Group) metaEffect(ctx context.Context, a topology.AuthorizedStep) error {
+	ctx, done, err := g.beginEffect(ctx)
+	if err != nil {
+		return err
+	}
+	defer done()
 	if a.GroupID != topology.MetaGroupID {
 		return fault.ErrExecutionAuthorization
 	}
@@ -153,6 +180,9 @@ type metaLive struct{ ids map[uint64]bool }
 
 func (h metaLive) Live(id string) (map[uint64]bool, bool) { return h.ids, id == topology.MetaGroupID }
 func containsMember(cs raftpb.ConfState, id uint64) bool {
+	if id == 0 {
+		return false
+	}
 	for _, members := range [][]uint64{cs.Voters, cs.Learners, cs.VotersOutgoing, cs.LearnersNext} {
 		for _, member := range members {
 			if member == id {
