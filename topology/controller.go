@@ -63,6 +63,8 @@ type ClusterStatus struct {
 // Receivers must revalidate authorization and verify existing results before succeeding.
 type GroupController interface {
 	Status(context.Context, string) (GroupStatus, error)
+	// CreateGroup seeds only the approved founding voters. Intentional learners
+	// are prepared and admitted by later exact steps.
 	CreateGroup(context.Context, AuthorizedStep) error
 	PrepareReplica(context.Context, AuthorizedStep) error
 	ApplyMembership(context.Context, AuthorizedStep) error

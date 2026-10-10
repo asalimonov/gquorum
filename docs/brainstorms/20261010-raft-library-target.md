@@ -391,7 +391,7 @@ func (g *Group) Execution(context.Context, topology.ExecutionID) (topology.Execu
 func (g *Group) WaitExecution(context.Context, topology.ExecutionID) (topology.ExecutionStatus, error)
 
 // mutations.go
-type MutationOptions struct { ExpectedVersion uint64; Actor, Comment string; Apply bool }
+type MutationOptions struct { ExpectedVersion uint64; Actor, Comment string; Apply, Preview bool }
 type MutationResult struct { Document topology.Document; ExecutionID topology.ExecutionID }
 type GroupSpec struct { ID string; Placement *topology.PlacementRule; Nodes []string }
 type RetireOptions struct { Reason string; Mutation MutationOptions }
@@ -423,6 +423,8 @@ func (g *Group) SetServeOverride(context.Context, int) error
 Start launches the meta service and bootstrap/join worker and returns without waiting for all founders to start. WaitReady waits for exact voter membership plus a leader-acknowledged activation session. Status reports the explicit Lifecycle and ErrorCode fields in ClusterStatus; no HTTP handlers are part of this package. OnSelfRemoved is delivered asynchronously once after durable removal, never from FSM Apply; callback failures are observable without reversing removal. Quiesce refuses new approval/proposals, stops and joins convergence/effect calls, attempts deactivation and cancels network workers without closing owned state; Stop completes teardown. This lets the facade stop load runtimes after meta effects have stopped.
 
 OnReadmission is a local orchestration hook, not a replicated FSM effect. If the leader grants a superseding identity, the library first stops its old meta runtime and closes its DB handle, then supplies exact old/granted identities, group tuples and the caller's DB path to this hook. Caller code stops affected load runtimes and quarantines exact old storage/application state. Only after successful callback completion and verification that the previous meta path is fresh does the library reopen the meta DB under the granted identity and acknowledge join-ready. If the hook is absent or fails, WaitReady returns ReadmissionRequiredError/callback error and status stays blocked; it never silently wipes or rebinds state. Retry the same durable admission without allocating more IDs. The hook must be idempotent across crashes, and no shared event journal is part of its quarantine scope.
+
+Mutation Preview computes the same edited/validated document with no proposal; combining Preview and Apply is refused. MutationResult preserves a durably staged Document when subsequent approval fails. Staged removals retain exact Target identities until approval, while approved removals/replacements permanently fence them. ReseatReplica is an atomic document-and-approval repair against equal Latest/Target/Active and no running execution; every real reseat returns an execution regardless of the Apply flag, while Preview computes it without approval. Operator and reconciler repair share the same exact Active-voter document builder and preserve existing forced audit. Explicit GroupSpec.Nodes selects initial hosts; caller type restrictions and placement bounds still apply.
 
 Reads return deep copies of locally applied materialized state. They are explicitly not linearizable ReadIndex reads. Watches emit an initial view followed by monotonic versions, use a bounded coalescing buffer and may skip intermediate versions. History is the bounded retained document window (128); callers receive its horizon. WaitExecution observes durable replicated transitions, not event subscriptions.
 

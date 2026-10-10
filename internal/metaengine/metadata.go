@@ -59,7 +59,7 @@ func (sm *topologySM) validateDocument(d topology.Document) error {
 	if d.Version == 0 {
 		return fault.New(fault.Invalid, "document version overflow", nil)
 	}
-	if err := topology.ValidateTransition(sm.latest, d, sm.rules, sm.retiredIDs()); err != nil {
+	if err := topology.ValidateTransition(sm.availableIdentities(), d, sm.rules, sm.retiredIDs()); err != nil {
 		return err
 	}
 	for _, g := range d.Groups {
@@ -210,4 +210,31 @@ func (sm *topologySM) retiredIDs() map[string]bool {
 		ids[id] = true
 	}
 	return ids
+}
+
+// A staged removal retires no identity. Target identities remain available until
+// an approved replacement/removal fences them; Latest replacements still forbid
+// restoring a different ID for the same node, even before approval.
+func (sm *topologySM) availableIdentities() topology.Document {
+	base := sm.latest.Clone()
+	for _, group := range sm.target.Groups {
+		current := base.Group(group.ID)
+		if current == nil {
+			base.Groups = append(base.Groups, group)
+			continue
+		}
+		for _, r := range group.Replicas {
+			conflict := false
+			for _, retained := range current.Replicas {
+				if retained.NodeName == r.NodeName || retained.ReplicaID == r.ReplicaID {
+					conflict = true
+					break
+				}
+			}
+			if !conflict {
+				current.Replicas = append(current.Replicas, r)
+			}
+		}
+	}
+	return base
 }

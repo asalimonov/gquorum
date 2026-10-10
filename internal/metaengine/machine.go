@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3/raftpb"
@@ -134,3 +135,29 @@ func (m *Machine) ActiveMemberID(name string) uint64 {
 	return m.active.MemberID(name)
 }
 func (m *Machine) ActiveVersion() uint64 { m.mu.RLock(); defer m.mu.RUnlock(); return m.active.Version }
+
+// ValidateDesired performs the same historical-identity preflight as a committed
+// document. CAS and validation are repeated by the replicated proposal.
+func (m *Machine) ValidateDesired(doc topology.Document) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if doc.Version != m.latest.Version+1 {
+		var expected uint64
+		if doc.Version > 0 {
+			expected = doc.Version - 1
+		}
+		return &fault.Error{Code: fault.VersionConflict, ExpectedVersion: expected, CurrentVersion: m.latest.Version}
+	}
+	return m.validateDocument(doc)
+}
+
+// AllocationFloors returns owned historical counters, including removed groups.
+func (m *Machine) AllocationFloors() map[string]uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	floors := make(map[string]uint64, len(m.allocations))
+	for id, next := range m.allocations {
+		floors[id] = next
+	}
+	return floors
+}
