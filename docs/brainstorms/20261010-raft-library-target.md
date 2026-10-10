@@ -47,7 +47,7 @@ flowchart TD
 
 `topology` owns wire-neutral data and the controller contract; it does not import `meta`, `load`, grpc, or the facade. `membership` imports only Raft and defines its own small status/evidence types, with adapters in topology; it does not import topology, avoiding a planner/coordinator import cycle. `load` imports `storage`, Raft and events, not meta or grpc. Internal meta transport depends on handler interfaces and topology types; `meta` implements those interfaces and assembles the transport. Only the example imports both meta and its own load-network implementation.
 
-Do not unify both Raft loops in the first extraction. Preserve the specialized bbolt meta loop and generalize the existing WAL load loop independently. Share status, logger adapters, membership safety and event contracts where useful without making the core packages depend on application features.
+Use one internal persistence-ordered Raft loop for meta and load groups, with distinct storage and Machine adapters. The meta adapter retains synchronous bbolt Ready/snapshot transactions and atomic materialized/applied membership persistence; the load adapter retains WAL recovery and advisory hints. This implementation decision avoids duplicating the verified Ready/retry/shutdown behavior. The public packages keep their separate constructor, protocol and state-machine responsibilities; real gRPC/bbolt consensus, restart and failover tests validate the meta adapter.
 
 Keep the source dependency versions initially: Go 1.26.5, Raft v3.6.0, etcd server/WAL v3.6.12, bbolt v1.4.3. Derive grpc/protobuf/zap dependency pins from the corresponding source module and reduce go.mod to actual imports. These are extraction pins, not claims about current upstream releases. Generate new protobuf code from the new protocol definition.
 
@@ -60,7 +60,7 @@ Keep the source dependency versions initially: Go 1.26.5, Raft v3.6.0, etcd serv
 5. IDs are positive and stable. Retired replica IDs are never allocated again. Rollback preserves allocation high-water marks. Deleted group IDs are not reused.
 6. All nondeterministic inputs to meta state changes are proposal fields. Replicated Apply does not read clocks, resolve network addresses, call caller hooks, perform probes, or inspect local filesystem layout.
 7. Unknown health differs from known total outage. Destructive membership changes fail closed without current liveness evidence. Learner addition may proceed without changing quorum.
-8. Durable Raft writes precede application of committed entries and sending messages whose safety depends on those writes. There is one unadvanced Ready per load group.
+8. Durable Raft writes precede application of committed entries and sending messages whose safety depends on those writes. There is one unadvanced Ready per Raft group.
 9. Application snapshots contain complete replicated application state and exact current ConfState. The source WAL's placeholder single-voter ConfState is removed.
 10. A stored applied hint cannot prove application restoration. Load recovery restores a snapshot and replays its committed tail.
 11. Events, local identity/overrides, and replica ledgers do not enter replicated meta snapshots. Event backpressure cannot block heartbeat processing.
