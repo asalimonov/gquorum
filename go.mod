@@ -6,6 +6,7 @@ toolchain go1.26.5
 
 require (
 	go.etcd.io/bbolt v1.4.3
+	go.etcd.io/etcd/client/pkg/v3 v3.6.12
 	go.etcd.io/etcd/server/v3 v3.6.12
 	go.etcd.io/raft/v3 v3.6.0
 	go.uber.org/zap v1.27.0
@@ -25,7 +26,6 @@ require (
 	github.com/prometheus/common v0.62.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	go.etcd.io/etcd/api/v3 v3.6.12 // indirect
-	go.etcd.io/etcd/client/pkg/v3 v3.6.12 // indirect
 	go.etcd.io/etcd/pkg/v3 v3.6.12 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.40.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect

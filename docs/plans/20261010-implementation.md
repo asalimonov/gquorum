@@ -11,7 +11,7 @@ The process-cluster harness must use testcontainers with isolated, reusable depl
 - [x] 1. Public topology, limits, identities, faults and contracts (target §§3–5); deterministic validation and source document tests.
 - [x] 2. Fixed membership policy/coordinator (target §§3–4); port safety/promotion/serialization tests with cancellation and lifetime regressions.
 - [x] 3. Explicit-path synchronous meta bbolt persistence and local identity ledger (target §6); port atomic snapshot, replay, applied ConfState and identity tests.
-- [ ] 4. Generic etcd WAL store and complete snapshot recovery (target §§5–6, 8.5, 11); conformance, tail overwrite, pins, quarantine, fallback and refiller tests.
+- [x] 4. Generic etcd WAL store and complete snapshot recovery (target §§5–6, 8.5, 11); conformance, tail overwrite, pins, quarantine, fallback and refiller tests.
 - [ ] 5. Caller-defined load runtime (target §§5, 8.4–8.5, 11); Ready ordering, cancellation, membership, snapshots, retry/backpressure and multi-group tests.
 - [ ] 6. Full replicated meta FSM (target §§3–6, 8, 11); documents/history, approvals/executions, admission, sessions/locks, deterministic replay and retirement tests.
 - [ ] 7. Meta runtime/protocol/bootstrap/join (target §§5, 7–8); real meta groups, authorization, restore, peer isolation and failover functional tests.
@@ -30,7 +30,7 @@ After each stage run make test. For runtime/concurrency changes also run scoped 
 
 - Initial repository/source and Docker inspection completed; Go 1.26.5 toolchain resolved.
 - Stages 1–3 implemented: typed faults/topology validation and explicit Limits, fixed membership policy/coordinator, synchronous versioned bbolt meta store and exact identity ledger. Source document, 19 membership and 14 bbolt tests adapted, with additional cancellation, atomicity, overflow and identity regressions. `make test`, scoped `go test -race` and `make lint` pass.
-- Stage 4 is in progress: generic WAL store compiles; recovery, conformance, quarantine and refiller validation remains required before marking complete.
+- Stage 4 verified: exact versioned pins and WAL metadata, full snapshots/real ConfState, contiguous tail replay, two-snapshot fallback retention, scoped quarantine/sweep, process-wide segment registration and joined refillers. Ten reusable conformance scenarios and source WAL/refiller scenarios pass, with added committed-write protection, concurrent idempotent writes, corrupt-newest-after-compaction fallback and caller ownership regressions. `make test`, storage race tests and `make lint` pass. Recovery owns read descriptors while using the upstream WAL decoder, avoiding early-corruption descriptor leaks in etcd 3.6 read-only handles.
 
 ## Outstanding implementation gaps
 
