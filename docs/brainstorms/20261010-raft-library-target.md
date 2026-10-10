@@ -427,7 +427,9 @@ Stage CAS is checked at committed apply, not only before submission. If a mutati
 
 TransferLeader uses the meta protocol for `_meta`; for load groups it uses the caller controller with source step-zero validation. ForceRetireNode requires an audit reason and live safe membership transitions; it is not force-new and cannot manufacture a majority. Excluded nodes stay in history/tombstones. ServeOverride is a persisted local operator input, not consensus, not an automatic application bypass; callers decide its serving semantics.
 
-### CREATED `load/options.go`, `load/machine.go`, `load/group.go`, `load/registry.go`
+### CREATED `load/load.go`, `internal/raftengine/{options,group,loop,writer,recovery,registry}.go`
+
+The public load types and constructors delegate to a shared internal Raft engine. Its public load constructor rejects `_meta`; only the internal `NewMeta` path admits that reserved group. Meta uses `internal/metastore.Adapter` and `internal/metaengine.Machine`; load uses caller-provided Store/Machine/Transport. This shares Ready ordering, retry, committed-tail recovery and shutdown while keeping the public load package independent of the meta network protocol. Runtime tests live in `internal/raftengine/group_test.go`.
 
 ```go
 type Command struct { Index, Term uint64; RequestID string; Data []byte }

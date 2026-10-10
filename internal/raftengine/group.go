@@ -1,4 +1,4 @@
-package load
+package raftengine
 
 import (
 	"bytes"
@@ -77,8 +77,12 @@ type Group struct {
 	stallSince                              atomic.Int64
 }
 
-func New(opts Options) (*Group, error) {
-	if err := opts.Validate(); err != nil {
+func New(opts Options) (*Group, error) { return newGroup(opts, false) }
+
+// NewMeta is restricted to the library's internal topology runtime.
+func NewMeta(opts Options) (*Group, error) { return newGroup(opts, true) }
+func newGroup(opts Options, meta bool) (*Group, error) {
+	if err := opts.validate(meta); err != nil {
 		return nil, err
 	}
 	opts = opts.defaults()

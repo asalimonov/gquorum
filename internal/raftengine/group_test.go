@@ -1,4 +1,4 @@
-package load
+package raftengine
 
 import (
 	"context"
@@ -635,5 +635,53 @@ func TestOptions_RejectUnsafeInputsBeforeCreatingState(t *testing.T) {
 	must(t, err)
 	if p.Exists {
 		t.Fatal("rejected constructor created state")
+	}
+}
+
+func TestRecoveredUnappliedConfigurationBlocksSecondChange(t *testing.T) {
+	s := openStore(t, t.TempDir(), "1")
+	n := &network{nodes: make(map[uint64]*Group), disconnected: make(map[uint64]bool)}
+	original := newTestGroup(t, s, &machine{}, n, 1, []uint64{1}, Founding)
+	if err := original.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cc := raftpb.ConfChangeV2{Changes: []raftpb.ConfChangeSingle{{Type: raftpb.ConfChangeAddLearnerNode, NodeID: 2}}}
+	data, err := cc.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.SaveReady(context.Background(), "load", storage.ReadyWrite{Entries: []raftpb.Entry{{Index: 2, Term: 1, Type: raftpb.EntryConfChangeV2, Data: data}}, HardState: raftpb.HardState{Term: 1, Commit: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	recovered := newTestGroup(t, s, &machine{}, n, 1, nil, Joining)
+	if err = recovered.rn.Campaign(); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-vote and election self votes are released after successive Ready batches.
+	for i := 0; i < 4 && recovered.rn.BasicStatus().RaftState != raft.StateLeader; i++ {
+		rd := recovered.rn.Ready()
+		if err = s.SaveReady(context.Background(), "load", storage.ReadyWrite{Entries: rd.Entries, HardState: rd.HardState}); err != nil {
+			t.Fatal(err)
+		}
+		if err = recovered.ms.Append(rd.Entries); err != nil {
+			t.Fatal(err)
+		}
+		if !raft.IsEmptyHardState(rd.HardState) {
+			if err = recovered.ms.SetHardState(rd.HardState); err != nil {
+				t.Fatal(err)
+			}
+		}
+		recovered.rn.Advance(rd)
+	}
+	if recovered.rn.BasicStatus().RaftState != raft.StateLeader {
+		t.Fatal("test election did not finish")
+	}
+
+	change := raftpb.ConfChangeV2{Changes: []raftpb.ConfChangeSingle{{Type: raftpb.ConfChangeRemoveNode, NodeID: 2}}}
+	request := &request{ctx: context.Background(), change: &change, reply: make(chan response, 1)}
+	recovered.handleControl(request)
+	result := <-request.reply
+	if !errors.Is(result.err, fault.ErrOverloaded) {
+		t.Fatal("second change accepted before recovered configuration applied", result.err)
 	}
 }

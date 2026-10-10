@@ -1,0 +1,23 @@
+syntax = "proto3";
+package gquorum.meta.v1;
+option go_package = "github.com/asalimonov/gquorum/internal/metapb;metapb";
+
+// Authentication credentials travel in transport metadata, never message bodies.
+message Header { string cluster_id = 1; string node_name = 2; uint64 member_id = 3; }
+message Reply { string error_code = 1; string message = 2; uint64 leader_id = 3; bytes data = 4; }
+message RaftMessage { Header header = 1; uint64 to_member_id = 2; bytes raft_message = 3; }
+message SnapshotChunk { Header header = 1; uint64 to_member_id = 2; bytes raft_message = 3; bytes data = 4; bool final = 5; }
+message MetaRequest { Header header = 1; bytes data = 2; }
+service Meta {
+ rpc StreamMessages(stream RaftMessage) returns (Reply);
+ rpc SendSnapshot(stream SnapshotChunk) returns (Reply);
+ rpc Join(MetaRequest) returns (Reply);
+ rpc JoinReady(MetaRequest) returns (Reply);
+ rpc KeepAlive(MetaRequest) returns (Reply);
+ rpc IdentityPing(MetaRequest) returns (Reply);
+ rpc MetaStatus(MetaRequest) returns (Reply);
+ rpc MetaControl(MetaRequest) returns (Reply);
+ rpc ProposeMeta(MetaRequest) returns (Reply);
+ rpc ApplyVersion(MetaRequest) returns (Reply);
+ rpc ParkedRead(MetaRequest) returns (Reply);
+}

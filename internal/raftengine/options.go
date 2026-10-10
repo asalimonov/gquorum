@@ -1,5 +1,5 @@
-// Package load runs Raft groups with caller-defined state machines and transports.
-package load
+// Package raftengine implements the shared persistence-ordered Raft runtime.
+package raftengine
 
 import (
 	"context"
@@ -31,6 +31,12 @@ type Machine interface {
 	Apply(context.Context, Command) (Result, error)
 	Snapshot(context.Context) ([]byte, error)
 	Restore(context.Context, []byte) error
+}
+
+// AppliedObserver is an internal integration seam for materialized meta state.
+// The engine invokes it after the committed batch and before Advance/messages.
+type AppliedObserver interface {
+	AfterApply(context.Context, uint64, uint64, raftpb.ConfState) error
 }
 
 // Transport owns routing and identity validation. Send receives owned copies;
@@ -71,8 +77,13 @@ type Proposal struct {
 	Data      []byte
 }
 
-func (o Options) Validate() error {
-	if err := topology.ValidateLoadID(o.GroupID); err != nil {
+func (o Options) Validate() error { return o.validate(false) }
+func (o Options) validate(meta bool) error {
+	if meta {
+		if o.GroupID != topology.MetaGroupID {
+			return fault.New(fault.Invalid, "meta engine requires reserved group ID", nil)
+		}
+	} else if err := topology.ValidateLoadID(o.GroupID); err != nil {
 		return err
 	}
 	if o.NodeName == "" || o.ClusterID == "" || o.ReplicaID == 0 || o.Store == nil || o.Machine == nil || o.Transport == nil {

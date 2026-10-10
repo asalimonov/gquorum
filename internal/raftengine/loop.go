@@ -1,4 +1,4 @@
-package load
+package raftengine
 
 import (
 	"bytes"
@@ -120,7 +120,7 @@ func (g *Group) handleControl(req *request) {
 		return
 	}
 	if req.change != nil {
-		if len(g.changes) > 0 {
+		if len(g.changes) > 0 || g.pendingConfEntry() {
 			answer(req, Result{}, fault.ErrOverloaded)
 			return
 		}
@@ -145,6 +145,26 @@ func (g *Group) handleControl(req *request) {
 		g.rn.TransferLeader(req.transfer)
 		answer(req, Result{}, nil)
 	}
+}
+
+// A configuration entry from an earlier leader may still be unapplied even
+// though this process has no local change waiter. Raft can silently turn a
+// second change into a no-op; refuse it until the first entry is applied.
+func (g *Group) pendingConfEntry() bool {
+	last, err := g.ms.LastIndex()
+	if err != nil || last <= g.applied {
+		return false
+	}
+	entries, err := g.ms.Entries(g.applied+1, last+1, ^uint64(0))
+	if err != nil {
+		return true
+	}
+	for _, entry := range entries {
+		if entry.Type == raftpb.EntryConfChange || entry.Type == raftpb.EntryConfChangeV2 {
+			return true
+		}
+	}
+	return false
 }
 func (g *Group) pruneWaiters() {
 	for id, req := range g.props {
@@ -233,6 +253,15 @@ func (g *Group) finishWrite(kind writeKind) error {
 		g.applied = entry.Index
 	}
 	if len(rd.CommittedEntries) > 0 || !raft.IsEmptySnap(rd.Snapshot) {
+		if observer, ok := g.opts.Machine.(AppliedObserver); ok {
+			term, err := g.ms.Term(g.applied)
+			if err != nil {
+				return err
+			}
+			if err := observer.AfterApply(g.ctx, g.applied, term, copyConf(g.cs)); err != nil {
+				return err
+			}
+		}
 		next := writeJob{kind: writeApplied, rd: rd, applied: g.applied, conf: copyConf(g.cs)}
 		g.pending = &next
 		g.writeC <- next

@@ -1,4 +1,4 @@
-package load
+package raftengine
 
 import (
 	"github.com/asalimonov/gquorum/fault"
