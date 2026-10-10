@@ -19,9 +19,13 @@ func newSessionManager(ttl time.Duration) *sessionManager {
 
 // refresh sets (or extends) a session's deadline to now+ttl.
 func (m *sessionManager) refresh(sessionID string, now time.Time) {
+	m.refreshTTL(sessionID, now, m.ttl)
+}
+
+func (m *sessionManager) refreshTTL(sessionID string, now time.Time, ttl time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.deadlines[sessionID] = now.Add(m.ttl)
+	m.deadlines[sessionID] = now.Add(ttl)
 }
 
 // remove drops a session's deadline (after revoke).
@@ -92,4 +96,11 @@ func (m *sessionManager) remaining(sessionID string, now time.Time) int {
 		return secs
 	}
 	return 0
+}
+
+func (m *sessionManager) isExpired(id string, now time.Time) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d, ok := m.deadlines[id]
+	return ok && !d.After(now)
 }

@@ -110,7 +110,7 @@ func runtimeCluster(t *testing.T, count int) ([]*runtimeNode, []string) {
 		for j := range count {
 			peers[j].ID = uint64(j + 1)
 		}
-		group, err := raftengine.NewMeta(raftengine.Options{GroupID: topology.MetaGroupID, NodeName: fmt.Sprint(id), ClusterID: "cluster-abc", ReplicaID: id, Mode: raftengine.Founding, Peers: peers, Timing: raftengine.Timing{TickInterval: 10 * time.Millisecond}, Store: &metastore.Adapter{Store: store}, Machine: machine, Transport: transport, SnapshotThreshold: 512})
+		group, err := raftengine.NewMeta(raftengine.Options{GroupID: topology.MetaGroupID, NodeName: fmt.Sprint(id), ClusterID: "cluster-abc", ReplicaID: id, Mode: raftengine.Founding, Peers: peers, Timing: raftengine.Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 50}, Store: &metastore.Adapter{Store: store}, Machine: machine, Transport: transport, SnapshotThreshold: 512})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -231,7 +231,7 @@ func TestMetaRuntimeRealGRPCConsensusAndBboltRestart(t *testing.T) {
 	}
 	node.handler.group.Store(nil)
 	machine := NewMachine(testRules(), node.store)
-	restarted, err := raftengine.NewMeta(raftengine.Options{GroupID: topology.MetaGroupID, NodeName: "1", ClusterID: "cluster-abc", ReplicaID: 1, Mode: raftengine.Joining, Timing: raftengine.Timing{TickInterval: 10 * time.Millisecond}, Store: &metastore.Adapter{Store: node.store}, Machine: machine, Transport: node.transport})
+	restarted, err := raftengine.NewMeta(raftengine.Options{GroupID: topology.MetaGroupID, NodeName: "1", ClusterID: "cluster-abc", ReplicaID: 1, Mode: raftengine.Joining, Timing: raftengine.Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 50}, Store: &metastore.Adapter{Store: node.store}, Machine: machine, Transport: node.transport})
 	if err != nil {
 		t.Fatal(err)
 	}

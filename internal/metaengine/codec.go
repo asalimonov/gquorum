@@ -173,3 +173,48 @@ func decodeEnvelope(data []byte) (ProposalKind, json.RawMessage, error) {
 	}
 	return e.Kind, e.Body, nil
 }
+
+// DecodeProposal permits only the versioned meta command set. The transport
+// validates caller scope before submitting the decoded command to Raft.
+func DecodeProposal(data []byte) (any, error) {
+	kind, body, err := decodeEnvelope(data)
+	if err != nil {
+		return nil, err
+	}
+	var proposal any
+	switch kind {
+	case KindProposeDocument:
+		proposal = &ProposeDocument{}
+	case KindAdmitNode:
+		proposal = &AdmitNode{}
+	case KindBeginExecution:
+		proposal = &BeginExecutionProposal{}
+	case KindCommitRepairExecution:
+		proposal = &CommitRepairExecutionProposal{}
+	case KindTransitionExecution:
+		proposal = &TransitionExecutionProposal{}
+	case KindActivateTarget:
+		proposal = &ActivateTargetProposal{}
+	case KindBindAdmission:
+		proposal = &BindAdmissionProposal{}
+	case KindCommitReadmission:
+		proposal = &CommitReadmissionProposal{}
+	case KindReadyAdmission:
+		proposal = &ReadyAdmissionProposal{}
+	case KindGrantSession:
+		proposal = &GrantSession{}
+	case KindRevokeSession:
+		proposal = &RevokeSession{}
+	case KindAcquireLock:
+		proposal = &AcquireLock{}
+	default:
+		return nil, fmt.Errorf("meta: unknown proposal kind %q", kind)
+	}
+	if string(body) == "null" {
+		return nil, fmt.Errorf("meta: null command body")
+	}
+	if err = json.Unmarshal(body, proposal); err != nil {
+		return nil, err
+	}
+	return proposal, nil
+}

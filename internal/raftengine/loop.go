@@ -3,6 +3,7 @@ package raftengine
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -415,9 +416,12 @@ func (g *Group) emit(e events.Event) {
 	}
 }
 func (g *Group) halt(err error) {
+	if cause := g.ctx.Err(); cause != nil && errors.Is(err, cause) {
+		return
+	}
 	g.mu.Lock()
 	g.err = err
 	g.mu.Unlock()
-	g.emit(events.Event{Type: events.RuntimeError, Code: "load_halted"})
-	g.opts.Logger.Error("load group halted", "group", g.opts.GroupID, "error", err)
+	g.emit(events.Event{Type: events.RuntimeError, Code: "raft_halted"})
+	g.opts.Logger.Error("Raft group halted", "group", g.opts.GroupID, "error", err)
 }

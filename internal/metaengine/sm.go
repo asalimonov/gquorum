@@ -18,14 +18,15 @@ type statePersister interface {
 }
 
 type ApplyResult struct {
-	ProposalID  string
-	Accepted    bool
-	Reason      string
-	Code        proposalErrorCode
-	Dropped     bool
-	Doc         topology.Document
-	ExecutionID topology.ExecutionID
-	Admission   AdmissionRecord
+	ProposalID     string
+	CurrentVersion uint64
+	Accepted       bool
+	Reason         string
+	Code           proposalErrorCode
+	Dropped        bool
+	Doc            topology.Document
+	ExecutionID    topology.ExecutionID
+	Admission      AdmissionRecord
 }
 
 type proposalErrorCode string
@@ -203,6 +204,7 @@ func (sm *topologySM) Apply(index, term uint64, data []byte) (ApplyResult, error
 		return ApplyResult{}, fmt.Errorf("meta: unknown proposal kind %q", kind)
 	}
 
+	res.CurrentVersion = sm.latest.Version
 	sm.appliedIndex = index
 	sm.appliedTerm = term
 	if changed {

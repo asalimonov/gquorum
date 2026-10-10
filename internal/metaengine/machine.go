@@ -51,6 +51,14 @@ func (m *Machine) Restore(ctx context.Context, data []byte) error {
 
 var _ raftengine.Machine = (*Machine)(nil)
 
+type SessionRecord = sessionState
+
+func (m *Machine) Session(id string) (SessionRecord, bool) { return m.topologySM.session(id) }
+func (m *Machine) LockSession(key string) (SessionRecord, bool) {
+	_, s, ok := m.topologySM.lockHolderSession(key)
+	return s, ok && s.SessionID != ""
+}
+
 func (m *Machine) AfterApply(ctx context.Context, index, term uint64, cs raftpb.ConfState) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -70,4 +78,11 @@ func (m *Machine) AfterApply(ctx context.Context, index, term uint64, cs raftpb.
 		}
 	}
 	return nil
+}
+
+// Views captures the locally applied documents at one FSM boundary.
+func (m *Machine) Views() (topology.Document, topology.Document, topology.Document) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.latest.Clone(), m.target.Clone(), m.active.Clone()
 }
