@@ -51,6 +51,26 @@ func TestPublicLoadGroupCreateDeleteAndRetiredID(t *testing.T) {
 		t.Fatal(status, err)
 	}
 	waitPublic(t, func() bool { return leader.state().Active().Version == 2 })
+	// Native meta observation must remain available while the caller's load
+	// status dependency is blocked; the full cluster status invokes that caller.
+	controller.mu.Lock()
+	local := make(chan topology.GroupStatus, 1)
+	go func() { local <- leader.LocalStatus() }()
+	var native topology.GroupStatus
+	select {
+	case native = <-local:
+		controller.mu.Unlock()
+	case <-time.After(time.Second):
+		controller.mu.Unlock()
+		t.Fatal("local meta observation waited on the load controller")
+	}
+	if !native.Found || native.HostNode != leader.Identity().NodeName || native.GroupID != topology.MetaGroupID || native.Term == 0 || native.LeaderID != leader.Identity().MemberID || len(native.ConfState.Voters) != 3 {
+		t.Fatal("local meta observation lost native consensus identity", native)
+	}
+	native.ConfState.Voters[0] = 999
+	if leader.LocalStatus().ConfState.Voters[0] == 999 {
+		t.Fatal("local meta observation aliased engine membership")
+	}
 	result, err = leader.DeleteLoadGroup(ctx, "work", MutationOptions{ExpectedVersion: 2, Apply: true})
 	if err != nil {
 		t.Fatal(err)

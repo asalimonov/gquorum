@@ -90,3 +90,14 @@ meta/load joining. The same case passed three subsequent uncached race runs in
 7.94/8.94/7.24 seconds. The broad invocation is retained as a failed run, rather
 than reported as a successful suite. All run-labeled containers, networks and
 volumes were absent after teardown.
+
+The additional dead-peer isolation cases abruptly kill a process leading none
+of three groups (meta plus two load groups). At three/five/seven nodes they
+collect 100 native leader/term observations throughout twenty seconds and
+acknowledge 100 commands per load group. Every surviving owner and the restarted
+process contain the exact acknowledged values. Case times including deployment
+and cleanup are 32.60/30.22/29.37 seconds. Dedicated native inspection avoids
+aggregate status's caller-controller probes; no missing response or leader is
+skipped. The independent load-ingress/accounting cases take 6.65/7.23/8.18
+seconds and prove exact independent group state after every ingress's retries,
+business conflicts and subsequent leadership changes.

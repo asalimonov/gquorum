@@ -76,3 +76,13 @@ five and seven nodes; each complete case includes resource release and must
 finish within two minutes. The full cluster suite also retains the fifteen-
 second exact local-read, twenty-second readiness/status and three-cycle
 retained-process recovery workloads from the source stability tests.
+
+`TestDeadPeerPreservesContinuousLeadership{Three,Five,Seven}Nodes` abruptly kills
+a process leading neither meta nor either load group, then requires every
+survivor's native leader/term to remain unchanged throughout twenty seconds.
+Two independent groups keep acknowledging commands during that window, and
+the killed process must recover every acknowledged value under its retained ID.
+`TestLoadIngressAndExactIndependentCommands{Three,Five,Seven}Nodes` checks
+routing through every ingress, exact follower state in independent groups,
+quiet-state stability, same-ID retries/conflicts and subsequent leader transfers.
+All cases remain sequential and outside the root unit suite.

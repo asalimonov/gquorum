@@ -388,7 +388,7 @@ func (g *Group) RaftStatus() raft.Status {
 func (g *Group) Status() topology.GroupStatus {
 	s := g.RaftStatus()
 	pt := tracker.ProgressTracker{Config: s.Config}
-	result := topology.GroupStatus{GroupID: g.opts.GroupID, HostNode: g.opts.NodeName, Found: true, LeaderID: s.Lead, Commit: s.Commit, Applied: s.Applied, ConfState: pt.ConfState(), Progress: make(map[uint64]topology.ReplicaProgress)}
+	result := topology.GroupStatus{GroupID: g.opts.GroupID, HostNode: g.opts.NodeName, Found: true, LeaderID: s.Lead, Term: s.Term, Commit: s.Commit, Applied: s.Applied, ConfState: pt.ConfState(), Progress: make(map[uint64]topology.ReplicaProgress)}
 	for id, p := range s.Progress {
 		result.Progress[id] = topology.ReplicaProgress{Match: p.Match, RecentActive: p.RecentActive}
 	}

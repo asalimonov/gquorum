@@ -97,3 +97,10 @@ validation. Planner/full-snapshot matrix assertions and isolated outbound queue
 checks run in parallel; the real slow-destination Raft regression remains
 functional and skips before opening fixtures in short mode. Performance and
 sustained recovery cases stay in the separate sequential Docker module.
+
+The load-ingress/dead-peer ports stay in the sequential Docker module. Native
+meta status is exposed through `meta.Group.LocalStatus()` without calling load
+controllers; the real public create/delete test verifies it stays available
+with the caller controller locked and returns owned membership. The unchanged
+317 parallel unit cases take **21.77 seconds** uncached during concurrent full
+functional, race and Docker validation (17.64s in the preceding run).

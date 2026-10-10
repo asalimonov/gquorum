@@ -104,6 +104,16 @@ func (g *Group) Execution(ctx context.Context, id topology.ExecutionID) (topolog
 	return status, nil
 }
 
+// LocalStatus returns owned, locally observed meta Raft state. It does not probe
+// peers or invoke caller load controllers. Found is false before engine startup
+// and after shutdown; an observation is not a linearizable read or quorum proof.
+func (g *Group) LocalStatus() topology.GroupStatus {
+	if engine := g.engine.Load(); engine != nil {
+		return engine.Status()
+	}
+	return topology.GroupStatus{GroupID: topology.MetaGroupID, HostNode: g.Identity().NodeName, ErrorCode: string(fault.Unavailable)}
+}
+
 // Status combines owned local document/runtime state with caller load-group
 // status queries. The caller controller must honor ctx. Health is sampled by
 // the observer; a mismatched Active version is reported as unsampled unknown

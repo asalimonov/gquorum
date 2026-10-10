@@ -224,6 +224,7 @@ type GroupStatus struct {
     HostNode string
     Found bool
     LeaderID uint64
+    Term uint64
     Commit uint64
     Applied uint64
     ConfState raftpb.ConfState
@@ -366,6 +367,7 @@ func (g *Group) Start(context.Context) error
 func (g *Group) WaitReady(context.Context) error
 func (g *Group) Quiesce(context.Context) error
 func (g *Group) Stop(context.Context) error
+func (g *Group) LocalStatus() topology.GroupStatus // local meta state; no controller/probe calls
 func (g *Group) Status(context.Context) (topology.ClusterStatus, error)
 func (g *Group) IsLeader() bool
 func (g *Group) Rules() topology.Rules

@@ -104,3 +104,14 @@ eligible identities, assigns fresh IDs on expansion and refuses an unsatisfied
 minimum. Approval uses observed membership and the fixed current-quorum floor.
 Staging can succeed before approval fails; callers must inspect the committed
 version instead of assuming a refusal rolled the edit back.
+
+`topology.GroupStatus.Term` reports the observed Raft term alongside leader,
+commit and applied cursors. Compare both leader and term when checking
+leadership continuity: a leader can step down and regain leadership between
+samples while retaining its ID. Each status remains a locally applied observation.
+
+`meta.Group.LocalStatus()` reads owned local meta consensus state without
+probing peers or invoking application controllers. It reports the exact local
+host, term, leader, membership and cursors; `Found` is false before the engine
+starts and after it stops. Use the aggregate `Status(ctx)` for cluster/load
+observations. Neither method supplies a linearizable read or proves quorum.

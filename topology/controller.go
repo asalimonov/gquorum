@@ -34,6 +34,7 @@ type GroupStatus struct {
 	HostNode    string                     `json:"host_node"`
 	Found       bool                       `json:"found"`
 	LeaderID    uint64                     `json:"leader_id"`
+	Term        uint64                     `json:"term"`
 	Commit      uint64                     `json:"commit"`
 	Applied     uint64                     `json:"applied"`
 	ConfState   raftpb.ConfState           `json:"conf_state"`

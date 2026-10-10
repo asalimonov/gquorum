@@ -160,6 +160,11 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 	}))
 	mux.HandleFunc("GET /internal/test/local/{group}", protect(func(w http.ResponseWriter, r *http.Request) {
 		group := r.PathValue("group")
+		if group == topology.MetaGroupID {
+			status := a.meta.LocalStatus()
+			jsonResponse(w, http.StatusOK, localObservation{Identity: a.meta.Identity(), Found: status.Found, ReplicaID: a.meta.Identity().MemberID, Status: status})
+			return
+		}
 		if err := topology.ValidateLoadID(group); err != nil {
 			httpError(w, err)
 			return
