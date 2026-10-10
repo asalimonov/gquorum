@@ -29,12 +29,26 @@ func (g *Group) run() {
 	}()
 	ticker := time.NewTicker(g.opts.Timing.TickInterval)
 	defer ticker.Stop()
+	var lastEntriesWrite time.Time
+	var readyTimer *time.Timer
+	defer func() {
+		if readyTimer != nil {
+			readyTimer.Stop()
+		}
+	}()
 	for {
 		g.pruneWaiters()
-		if g.pending == nil && g.rn.HasReady() {
-			if err := g.beginReady(); err != nil {
-				g.halt(err)
-				return
+		if g.pending == nil && readyTimer == nil && g.rn.HasReady() {
+			// Delay capture, rather than an already frozen Ready: proposals and
+			// inbound entries received during this window join the durable batch.
+			// The loop keeps handling ticks, cancellation and network traffic.
+			if wait := g.opts.Timing.WALWriteWait; wait > 0 && !lastEntriesWrite.IsZero() && time.Since(lastEntriesWrite) < 10*time.Millisecond {
+				readyTimer = time.NewTimer(wait)
+			} else {
+				if err := g.beginReady(); err != nil {
+					g.halt(err)
+					return
+				}
 			}
 		}
 		g.refresh()
@@ -42,14 +56,31 @@ func (g *Group) run() {
 			g.readyOnce.Do(func() { close(g.ready) })
 		}
 		var snapshotC chan *request
-		if g.pending == nil {
+		if g.pending == nil && readyTimer == nil {
 			snapshotC = g.snapshots
+		}
+		var readyC <-chan time.Time
+		controlC := g.controls
+		if readyTimer != nil {
+			readyC = readyTimer.C
+			// Capture any incoming configuration entries before validating a
+			// subsequent control against the local log and membership state.
+			controlC = nil
 		}
 		select {
 		case <-g.ctx.Done():
 			return
 		case <-ticker.C:
 			g.rn.Tick()
+		case <-readyC:
+			readyTimer.Stop()
+			readyTimer = nil
+			if g.rn.HasReady() {
+				if err := g.beginReady(); err != nil {
+					g.halt(err)
+					return
+				}
+			}
 		case result := <-g.writeDone:
 			if result.err != nil {
 				if g.ctx.Err() == nil {
@@ -57,9 +88,13 @@ func (g *Group) run() {
 				}
 				return
 			}
+			entriesWritten := result.kind == writeReady && g.pending != nil && len(g.pending.rd.Entries) > 0
 			if err := g.finishWrite(result.kind); err != nil {
 				g.halt(err)
 				return
+			}
+			if entriesWritten {
+				lastEntriesWrite = time.Now()
 			}
 		case req := <-g.proposals:
 			g.handleProposal(req)
@@ -69,7 +104,7 @@ func (g *Group) run() {
 				continue
 			}
 			answer(req, Result{}, g.rn.Step(*req.message))
-		case req := <-g.controls:
+		case req := <-controlC:
 			g.handleControl(req)
 		case req := <-snapshotC:
 			if err := g.beginSnapshot(req); err != nil {

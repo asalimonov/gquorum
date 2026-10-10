@@ -104,3 +104,9 @@ controllers; the real public create/delete test verifies it stays available
 with the caller controller locked and returns owned membership. The unchanged
 317 parallel unit cases take **21.77 seconds** uncached during concurrent full
 functional, race and Docker validation (17.64s in the preceding run).
+
+The WAL-fault/coalescing ports stay in the separate Docker module. Their storage
+control unit runs in parallel under the test image's `clustertest` tag. The
+ordinary 317-case unit loop is unchanged and completes uncached in **8.12
+seconds** (8.34s and 16.11s in preceding runs). The syntax audit uses the active
+Go build context, excluding the tagged test-image unit from this default count.

@@ -39,7 +39,6 @@ func (g *Group) writer() {
 	var hint uint64
 	var cs raftpb.ConfState
 	dirty := false
-	var lastWrite time.Time
 	flush := func() {
 		if !dirty {
 			return
@@ -66,14 +65,6 @@ func (g *Group) writer() {
 					hint, cs, dirty = job.applied, copyConf(job.conf), true
 				}
 			} else {
-				if job.kind == writeReady && g.opts.Timing.WALWriteWait > 0 && !lastWrite.IsZero() && time.Since(lastWrite) < 10*time.Millisecond {
-					timer := time.NewTimer(g.opts.Timing.WALWriteWait)
-					select {
-					case <-timer.C:
-					case <-g.ctx.Done():
-					}
-					timer.Stop()
-				}
 				err = g.retry(func(ctx context.Context) error {
 					if job.kind == writeSnapshot {
 						if err := g.opts.Store.SaveSnapshot(ctx, g.opts.GroupID, job.snapshot); err != nil {
@@ -88,7 +79,6 @@ func (g *Group) writer() {
 					}
 					return g.opts.Store.SaveReady(ctx, g.opts.GroupID, storage.ReadyWrite{Entries: job.rd.Entries, HardState: job.rd.HardState})
 				})
-				lastWrite = time.Now()
 				if err == nil {
 					flush()
 				}

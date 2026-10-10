@@ -31,10 +31,11 @@ type clusterHooks struct {
 	barriers  map[effectKey]*effectBarrier
 	receipts  []topology.AuthorizedStep
 	snapshots map[string]uint64
+	wals      map[walKey]*walControl
 }
 
 func newClusterHooks() *clusterHooks {
-	return &clusterHooks{barriers: map[effectKey]*effectBarrier{}, snapshots: map[string]uint64{}}
+	return &clusterHooks{barriers: map[effectKey]*effectBarrier{}, snapshots: map[string]uint64{}, wals: map[walKey]*walControl{}}
 }
 func (a *application) beforeClusterEffect(ctx context.Context, approved topology.AuthorizedStep) error {
 	if a.clusterHooks == nil {
@@ -97,6 +98,8 @@ type localObservation struct {
 	Storage           storage.Stats        `json:"storage"`
 	Values            map[string]string    `json:"values"`
 	ReceivedSnapshots uint64               `json:"received_snapshots"`
+	WAL               walCounters          `json:"wal"`
+	WALStallNS        int64                `json:"wal_stall_ns"`
 }
 
 func (a *application) registerClusterRoutes(mux *http.ServeMux) {
@@ -112,6 +115,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			handler(w, r)
 		}
 	}
+	a.registerWALRoutes(mux, protect)
 	mux.HandleFunc("PUT /internal/test/barriers/{group}/{kind}", protect(func(w http.ResponseWriter, r *http.Request) {
 		group, kind := r.PathValue("group"), topology.StepKind(r.PathValue("kind"))
 		if err := topology.ValidateLoadID(group); err != nil {
@@ -180,6 +184,8 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			observation.Found, observation.ReplicaID = true, local.group.ReplicaID()
 			observation.Status = local.group.Status()
 			observation.Values = local.machine.values()
+			observation.WAL = a.clusterHooks.walMetrics(walKey{group, local.group.ReplicaID()})
+			observation.WALStallNS = int64(local.group.WALStall())
 			stats, err := a.store.Stats(r.Context(), group)
 			if err != nil {
 				httpError(w, err)

@@ -36,6 +36,7 @@ type config struct {
 	Join                                                 bool
 	Limits                                               topology.Limits
 	SessionTTL, TickInterval                             time.Duration
+	WALWriteWait                                         time.Duration
 	SnapshotThreshold                                    uint64
 	Bootstrap                                            bool
 	Reconciliation                                       meta.ReconciliationOptions
@@ -69,6 +70,7 @@ func main() {
 	flag.IntVar(&c.Limits.MaxReplicas, "max-replicas", c.Limits.MaxReplicas, "Limits.MaxReplicas")
 	flag.DurationVar(&c.SessionTTL, "session-ttl", 3*time.Second, "meta activation session TTL")
 	flag.DurationVar(&c.TickInterval, "tick", 50*time.Millisecond, "Raft tick interval")
+	flag.DurationVar(&c.WALWriteWait, "wal-write-wait", 0, "load WAL coalescing wait")
 	flag.Uint64Var(&c.SnapshotThreshold, "snapshot-threshold", 64, "load snapshot interval in applied entries")
 	flag.BoolVar(&c.Reconciliation.Disabled, "disable-reconciliation", false, "disable automatic load replica repair")
 	flag.DurationVar(&c.Reconciliation.Interval, "reconciliation-interval", 0, "automatic repair observation interval; zero selects the library default")

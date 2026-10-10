@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -16,3 +17,5 @@ func (*application) registerClusterRoutes(*http.ServeMux)                       
 func (*application) beforeClusterEffect(context.Context, topology.AuthorizedStep) error { return nil }
 func (*application) afterClusterEffect(topology.AuthorizedStep, error)                  {}
 func (*application) receivedClusterSnapshot(string)                                     {}
+
+func (*application) clusterStore(base storage.Store, _ string, _ uint64) storage.Store { return base }

@@ -224,7 +224,7 @@ func (a *application) openLocal(ctx context.Context, id string, replica uint64, 
 		}
 	}
 	machine := newMachine()
-	g, err := a.runtime.OpenLoad(load.Options{GroupID: id, NodeName: a.cfg.NodeName, ClusterID: a.cfg.ClusterID, ReplicaID: replica, Mode: mode, Peers: peers, Store: a.store, Machine: machine, Transport: loadTransport{app: a, group: id, replica: replica}, Timing: load.Timing{TickInterval: a.cfg.TickInterval, ElectionTicks: 10}, SnapshotThreshold: a.cfg.SnapshotThreshold})
+	g, err := a.runtime.OpenLoad(load.Options{GroupID: id, NodeName: a.cfg.NodeName, ClusterID: a.cfg.ClusterID, ReplicaID: replica, Mode: mode, Peers: peers, Store: a.clusterStore(a.store, id, replica), Machine: machine, Transport: loadTransport{app: a, group: id, replica: replica}, Timing: load.Timing{TickInterval: a.cfg.TickInterval, ElectionTicks: 10, WALWriteWait: a.cfg.WALWriteWait}, SnapshotThreshold: a.cfg.SnapshotThreshold})
 	if err != nil {
 		return nil, err
 	}

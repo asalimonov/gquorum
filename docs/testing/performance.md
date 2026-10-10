@@ -24,6 +24,8 @@ unmeasured arbitrary-size throughput.
 | Fifteen-second sustained reads of ten acknowledged keys | Each tested node owns the FSM and returns exact local node/value/index/consistency evidence; zero errors/mismatches; at least 100 reads per node. |
 | Twenty-second readiness and status reliability | Stable active version, live serving sessions and every declared member alive; zero errors/mismatches; at least 20 samples per node. |
 | Three retained-disk follower stop/restart cycles | Every survivor observes departure; retained majority commits ten commands per cycle; recovering process contains all accumulated acknowledged commands, preserves meta/load IDs, has a new process ID and produces no topology-version churn. |
+| Forty-eight commands with eight workers, WAL wait zero versus five milliseconds | Both arms acknowledge every command; each owning FSM has the same exact values and advances by exactly 48 applied entries; both persist exactly 144 replica entries, while five milliseconds increases mean entries per durable write. |
+| Fifteen-second correlated load-store stall | Every load store is armed under its exact replica identity; at least one real durable writer times out and retries. Meta leader/term stay fixed, a new meta document commits, serving/session readiness remains available, and no unpersisted command is acknowledged. Typed availability refusals recover without a restart; same-ID retries yield exact state on all owners and survive a subsequent retained-process restart. |
 | Fifteen-group replacement plan at three/five/seven nodes | Complete in less than 200 ms; deterministic exact transfer/remove/stop/cleanup/prepare/add/catch-up/promote ordering. Benchmark reports time and allocations. |
 | Full meta FSM snapshot at three/five/seven nodes | Fifteen groups, 128 retained documents and executions, a pending transfer and a retired group/allocation floor; payload at most four MiB; serialize/validate/restore/roundtrip in less than two seconds; canonical bytes match and restored retirement refuses ID reuse. Benchmarks report payload bytes, serialization/restore time and allocations. |
 
@@ -36,9 +38,15 @@ removal attempt and release their worker when that attempt completes. Stop
 cancels and joins all owned send workers. Actual Raft and queue-lifecycle
 regressions verify these guarantees.
 
-Additional fault injection,
-backpressure/resource-pressure and source WAL-coalescing obligations remain in
-the implementation plan and test-port inventory.
+For a busy load group, a nonzero `Timing.WALWriteWait` delays capture of the next
+Raft Ready batch after recent successful entry persistence. Proposals and
+incoming messages continue through the loop during that bounded window; ticks
+and cancellation remain active. Snapshot and membership controls wait for batch
+capture. The writer retains one outstanding durable batch, and application and
+outbound messages still follow persistence. A zero wait keeps immediate capture.
+
+Additional unrelated caller-store fault injection and backpressure/resource
+pressure obligations remain in the implementation plan and test-port inventory.
 
 ## Recorded measurements
 
@@ -101,3 +109,32 @@ aggregate status's caller-controller probes; no missing response or leader is
 skipped. The independent load-ingress/accounting cases take 6.65/7.23/8.18
 seconds and prove exact independent group state after every ingress's retries,
 business conflicts and subsequent leadership changes.
+
+The WAL-coalescing and correlated-stall cases use the same hardware and build
+conditions above. Final race-harness measurements include generation cleanup:
+
+| Nodes | Entry writes, wait off / 5 ms | Entries per write, off / 5 ms | Coalescing case seconds | Correlated-stall case seconds |
+| --- | --- | --- | ---: | ---: |
+| 3 | 65 / 51 | 2.215 / 2.824 | 8.13 | 24.50 |
+| 5 | 78 / 49 | 1.846 / 2.939 | 9.72 | 23.31 |
+| 7 | 80 / 44 | 1.800 / 3.273 | 9.21 | 25.48 |
+
+Every coalescing arm acknowledges all 48 commands, persists exactly 144 replica
+entries and checks each local owner's exact values and 48-entry applied delta.
+Each stall retains 75 native meta observations, 39/65/91 successful readiness
+samples, eleven typed availability refusals and fourteen exact recovered values.
+A meta edit commits during the fifteen-second outage. Every store is armed and
+actual writers time out/retry; idle followers need not enter a writer if a
+blocked leader cannot send its unpersisted entries. Serving/session readiness
+and actual consensus recovery are checked separately. Successful retries and
+retained-process restart require every owner's full expected state and local WAL.
+
+The initial frozen-Ready writer delay did not consistently increase batching in
+repeat runs. Capture now waits while the loop continues collecting input, and
+controls wait until the pending batch is captured. Real learner/promotion/
+transfer/removal tests run with zero and five milliseconds under race detection.
+The corrected six cluster cases passed twice in 209.951 seconds, followed by the
+final image with the control guard in 102.777 seconds. Individual case bounds
+remain below two minutes. Full library tests, engine races and all three vet
+commands pass; no labeled containers, networks or volumes remain. The separate
+uncached 317-case parallel unit command takes 8.12 seconds.

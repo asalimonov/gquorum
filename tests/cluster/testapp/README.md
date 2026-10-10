@@ -13,6 +13,14 @@ effects. Released effects recheck their complete authorization before changing
 state. Controller RPC cancellation releases its own wait; the armed barrier
 remains for a later retry until the test explicitly releases it.
 
+`hooks_wal_cluster.go` wraps the actual load store with cancelable write stalls
+and bounded transient-failure injection, keyed by group and exact replica ID.
+Local inspection distinguishes attempted writes, entry attempts, failed calls,
+active calls and successfully persisted entry batches. Failed or canceled calls
+do not contribute to successful entry accounting. Meta uses its own unwrapped
+bbolt store. The fixture passes its requested load WAL coalescing wait through
+the application's constructor settings.
+
 Every control request requires the fixture's fresh credential in
 `X-Gquorum-Test-Credential`. The normal application protocol keeps its existing
 credential and exact cluster/member/replica checks. None of these controls add

@@ -78,6 +78,9 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 	if err = cfg.Limits.Validate(); err != nil {
 		return nil, err
 	}
+	if cfg.WALWriteWait < 0 || cfg.WALWriteWait > 10*time.Millisecond {
+		return nil, fault.New(fault.Invalid, "load WAL coalescing wait must be between zero and 10ms", nil)
+	}
 	for _, p := range cfg.Peers {
 		if p.Name == cfg.NodeName {
 			if p.Type != cfg.NodeType {

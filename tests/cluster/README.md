@@ -86,3 +86,12 @@ the killed process must recover every acknowledged value under its retained ID.
 routing through every ingress, exact follower state in independent groups,
 quiet-state stability, same-ID retries/conflicts and subsequent leader transfers.
 All cases remain sequential and outside the root unit suite.
+
+WAL coalescing compares zero and five milliseconds with the same 48-command,
+eight-worker workload, checking exact local values/entry counts and larger
+successful persistence batches. Correlated storage-stall cases arm durable-write
+stalls on all three load owners for fifteen seconds, sample independent native meta
+and serving/session readiness, commit a meta document and reject unpersisted
+acknowledgments. After release they wait separately for serving readiness and
+actual Raft consensus, retry the same command IDs and inspect every owner after
+a retained-process restart. Controls affect only the authenticated test image.

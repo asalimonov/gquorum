@@ -19,6 +19,8 @@ type LocalObservation struct {
 	Storage           storage.Stats        `json:"storage"`
 	Values            map[string]string    `json:"values"`
 	ReceivedSnapshots uint64               `json:"received_snapshots"`
+	WAL               WALCounters          `json:"wal"`
+	WALStallNS        int64                `json:"wal_stall_ns"`
 }
 type BarrierObservation struct {
 	Group string                  `json:"group"`
@@ -63,5 +65,25 @@ func (c *Cluster) SetBarrier(ctx context.Context, node, group string, kind topol
 }
 func (c *Cluster) Snapshot(ctx context.Context, node, group string) error {
 	response, err := c.Request(ctx, node, "POST", "/internal/test/local/"+group+"/snapshot", nil, 0)
+	return requireStatus(response, err, 200)
+}
+
+type WALCounters struct {
+	Attempts          uint64 `json:"attempts"`
+	EntryAttempts     uint64 `json:"entry_attempts"`
+	Failures          uint64 `json:"failures"`
+	Active            uint64 `json:"active"`
+	EntryWrites       uint64 `json:"entry_writes"`
+	Entries           uint64 `json:"entries"`
+	Blocked           bool   `json:"blocked"`
+	RemainingFailures uint64 `json:"remaining_failures"`
+}
+
+func (c *Cluster) WALFault(ctx context.Context, node, group string, replica uint64, stall bool, failNext uint64, release bool) error {
+	method := "PUT"
+	if release {
+		method = "DELETE"
+	}
+	response, err := c.Request(ctx, node, method, "/internal/test/wal/"+group, map[string]any{"replica_id": replica, "stall": stall, "fail_next": failNext}, 0)
 	return requireStatus(response, err, 200)
 }

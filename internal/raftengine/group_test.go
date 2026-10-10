@@ -128,13 +128,17 @@ func openStore(t *testing.T, root, node string) *walstore.Store {
 	t.Cleanup(func() { must(t, s.Close()) })
 	return s
 }
-func newTestGroup(t *testing.T, s storage.Store, m *machine, n *network, id uint64, peers []uint64, mode Mode) *Group {
+func newTestGroup(t *testing.T, s storage.Store, m *machine, n *network, id uint64, peers []uint64, mode Mode, waits ...time.Duration) *Group {
 	t.Helper()
 	var initial []raft.Peer
 	for _, id := range peers {
 		initial = append(initial, raft.Peer{ID: id})
 	}
-	g, err := New(Options{GroupID: "load", NodeName: fmt.Sprint(id), ClusterID: "cluster", ReplicaID: id, Mode: mode, Peers: initial, Timing: Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 50, HeartbeatTicks: 1}, Store: s, Machine: m, Transport: endpoint{n}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	var wait time.Duration
+	if len(waits) != 0 {
+		wait = waits[0]
+	}
+	g, err := New(Options{GroupID: "load", NodeName: fmt.Sprint(id), ClusterID: "cluster", ReplicaID: id, Mode: mode, Peers: initial, Timing: Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 50, HeartbeatTicks: 1, WALWriteWait: wait}, Store: s, Machine: m, Transport: endpoint{n}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	must(t, err)
 	n.mu.Lock()
 	n.nodes[id] = g
@@ -418,10 +422,16 @@ func TestLoad_MembershipLearnerPromotionTransferAndRemoval(t *testing.T) {
 	if testing.Short() {
 		t.Skip("functional test; run make test")
 	}
+	for _, wait := range []time.Duration{0, 5 * time.Millisecond} {
+		t.Run(wait.String(), func(t *testing.T) { loadMembership(t, wait) })
+	}
+}
+func loadMembership(t *testing.T, wait time.Duration) {
+	t.Helper()
 	n := &network{nodes: make(map[uint64]*Group), disconnected: make(map[uint64]bool)}
 	a, b := &machine{}, &machine{}
-	one := newTestGroup(t, openStore(t, t.TempDir(), "1"), a, n, 1, []uint64{1}, Founding)
-	two := newTestGroup(t, openStore(t, t.TempDir(), "2"), b, n, 2, nil, Joining)
+	one := newTestGroup(t, openStore(t, t.TempDir(), "1"), a, n, 1, []uint64{1}, Founding, wait)
+	two := newTestGroup(t, openStore(t, t.TempDir(), "2"), b, n, 2, nil, Joining, wait)
 	must(t, one.Start(context.Background()))
 	must(t, two.Start(context.Background()))
 	must(t, one.WaitReady(testContext(t)))
