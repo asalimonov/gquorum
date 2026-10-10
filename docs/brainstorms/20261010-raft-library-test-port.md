@@ -1,6 +1,6 @@
 # Required source test port inventory
 
-Date: 2026-10-10. Source baseline: `fc982c0`. Status: design inventory; no tests have been implemented or run here.
+Date: 2026-10-10. Source baseline: `fc982c0`. Status: implementation in progress; stages 1–6 have verified unit/function ports. Process-cluster ports remain outstanding.
 
 ## Scope and acceptance
 
@@ -565,3 +565,10 @@ Only Limits sets maximum node and replica capacity. Node lists, partition sets a
 When implemented, `go test ./...` runs unit/in-process correctness tests; scoped `go test -race` covers engine/controller/watch/journal lifetime; `make test-cluster` runs every required process-cluster case, including scale and normally slow recovery cases; `make bench` records planner/snapshot measurements. `make test-cluster-run RUN=<test expression>` is for targeted iterations. Record source-to-target mapping, tested capacities, command results and diagnostics. A successful smoke run or explicit short run does not satisfy the full port requirement.
 
 Design-stage verification only: verify every discovered source cluster symbol occurs exactly once in the process inventory and every supporting source symbol/file exists; verify larger-cluster testing is absent from deferred lists and required in the main target scope. No source or destination Go/Docker test run is claimed.
+
+## Verified implementation traceability (in progress)
+
+- `framework/cluster/topology/metaraft/sm_test.go`: applicable codec, document CAS/validation/admission, history/exclusion, execution transitions/retry/supersession/repair/retention, determinism, snapshot equivalence and bbolt materialization cases retain their source test names in `internal/metaengine/sm_test.go`. `LastStep` assertions use the equivalent `CurrentStep` field. Node types and meta membership are explicit inputs. Legacy-current restoration is replaced by schema refusal in `TestRestoreRejectsCorruptionWithoutChangingLiveState`; empty bbolt state is covered by metastore tests.
+- `framework/cluster/topology/metaraft/sessions_test.go`: all six scenarios ported to `internal/metaengine/sessions_test.go`, supplying a positive TTL. Exact identity conflict is additionally covered by `TestSessionIdentityCannotBeRebound`.
+- `framework/cluster/topology/metaraft/admission_test.go`: the three FSM admission scenarios ported to `internal/metaengine/admission_test.go`; the fixture supplies the same exact learner-first sequence directly. Readmission planner and network join cases remain required in stages 7–8.
+- Validation for these ports: `make test`, `go test -race ./internal/metaengine ./topology`, `make lint`; all passed. This entry does not satisfy the outstanding process-cluster inventory.

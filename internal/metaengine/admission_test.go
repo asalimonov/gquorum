@@ -1,0 +1,264 @@
+package metaengine
+
+import (
+	"bytes"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/asalimonov/gquorum/topology"
+)
+
+func admissionExecutionSM(t *testing.T) (*topologySM, AdmissionRecord, topology.Plan, time.Time, uint64) {
+	t.Helper()
+	sm := newTopologySM(nil, testRules())
+	at := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	if res := apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "seed"}); !res.Accepted {
+		t.Fatalf("seed: %s", res.Reason)
+	}
+	founding := apply(t, sm, 2, BeginExecutionProposal{
+		Version: 1, Plan: topology.Plan{Version: 1}, Actor: "n1", At: at, ProposalID: "founding",
+	})
+	if !founding.Accepted {
+		t.Fatalf("begin founding activation: %s", founding.Reason)
+	}
+	if res := apply(t, sm, 3, TransitionExecutionProposal{Transition: topology.ExecutionTransition{
+		ExecutionID: founding.ExecutionID, Version: 1, Attempt: 1,
+		State: topology.ExecutionSucceeded, At: at.Add(time.Second),
+	}, ProposalID: "founding-succeeded"}); !res.Accepted {
+		t.Fatalf("complete founding activation: %s", res.Reason)
+	}
+	if res := apply(t, sm, 4, ActivateTargetProposal{
+		ExecutionID: founding.ExecutionID, Version: 1, Attempt: 1, ProposalID: "activate-founding",
+	}); !res.Accepted {
+		t.Fatalf("activate founding: %s", res.Reason)
+	}
+
+	desired := sm.Active()
+	desired.Nodes = append(desired.Nodes, topology.Node{Name: "n2", Type: "worker", State: topology.NodeActive})
+	desired.MetaGroup().Replicas = append(desired.MetaGroup().Replicas, topology.Replica{
+		NodeName: "n2", ReplicaID: 2, Role: topology.ReplicaVoter,
+	})
+	desired.MetaGroup().NextReplicaID = 3
+	desired.ParentVersion = desired.Version
+	desired.ChangedBy = "operator"
+	desired.Origin = topology.OriginAPI
+	if res := apply(t, sm, 5, ProposeDocument{Doc: desired, ExpectedVersion: 1, ProposalID: "target"}); !res.Accepted {
+		t.Fatalf("propose target: %s", res.Reason)
+	}
+	target := sm.Current()
+	plan := topology.Plan{Version: target.Version, Steps: []topology.Step{
+		{Seq: 1, Kind: topology.StepPrepareReplica, GroupID: topology.MetaGroupID, NodeName: "n2", ReplicaID: 2},
+		{Seq: 2, Kind: topology.StepAddLearner, GroupID: topology.MetaGroupID, NodeName: "n2", ReplicaID: 2},
+		{Seq: 3, Kind: topology.StepWaitCaughtUp, GroupID: topology.MetaGroupID, NodeName: "n2", ReplicaID: 2},
+		{Seq: 4, Kind: topology.StepPromoteVoter, GroupID: topology.MetaGroupID, NodeName: "n2", ReplicaID: 2},
+	}}
+	started := apply(t, sm, 6, BeginExecutionProposal{
+		Version: target.Version, Plan: plan, Actor: target.ChangedBy, Origin: target.Origin,
+		At: at.Add(2 * time.Second), ProposalID: "begin-target",
+	})
+	if !started.Accepted {
+		t.Fatalf("begin target: %s", started.Reason)
+	}
+	return sm, AdmissionRecord{
+		NodeName: "n2", InstanceID: "instance-n2", MemberID: 2, ExecutionID: started.ExecutionID,
+	}, plan, at, 7
+}
+
+func applyAdmissionTransition(
+	t *testing.T,
+	sm *topologySM,
+	index uint64,
+	id topology.ExecutionID,
+	plan topology.Plan,
+	stepSeq int,
+	state topology.ExecutionState,
+	at time.Time,
+) {
+	t.Helper()
+	step := plan.Steps[stepSeq-1]
+	res := apply(t, sm, index, TransitionExecutionProposal{Transition: topology.ExecutionTransition{
+		ExecutionID: id, Version: plan.Version, Attempt: 1, StepSeq: stepSeq,
+		State: state, GroupID: step.GroupID, NodeName: step.NodeName, At: at,
+	}, ProposalID: fmt.Sprintf("transition-%d-%s", stepSeq, state)})
+	if !res.Accepted {
+		t.Fatalf("transition step %d to %s: %s", stepSeq, state, res.Reason)
+	}
+}
+
+func requireAdmissionState(t *testing.T, sm *topologySM, instanceID string, want AdmissionState) AdmissionRecord {
+	t.Helper()
+	record, ok := sm.Admission("n2", instanceID)
+	if !ok || record.State != want {
+		t.Fatalf("admission n2/%s = (%+v,%v), want state %s", instanceID, record, ok, want)
+	}
+	return record
+}
+
+func TestAdmission_SameInstanceRetryAcrossPhasesAndSnapshot(t *testing.T) {
+	sm, admission, plan, at, index := admissionExecutionSM(t)
+	bind := BindAdmissionProposal{Admission: admission, At: at.Add(3 * time.Second), ProposalID: "bind"}
+	if res := apply(t, sm, index, bind); !res.Accepted || res.Admission.State != AdmissionPending {
+		t.Fatalf("bind = %+v, want pending admission", res)
+	}
+	index++
+	bind.ProposalID = "bind-retry-pending"
+	if res := apply(t, sm, index, bind); !res.Accepted || res.Admission.ExecutionID != admission.ExecutionID {
+		t.Fatalf("pending Join retry = %+v, want same execution", res)
+	}
+	index++
+
+	wrong := apply(t, sm, index, ReadyAdmissionProposal{
+		NodeName: "n2", InstanceID: admission.InstanceID, MemberID: 99,
+		ExecutionID: admission.ExecutionID, ProposalID: "ready-wrong-member",
+	})
+	if wrong.Accepted {
+		t.Fatal("JoinReady accepted a different member tuple")
+	}
+	index++
+	ready := ReadyAdmissionProposal{
+		NodeName: "n2", InstanceID: admission.InstanceID, MemberID: admission.MemberID,
+		ExecutionID: admission.ExecutionID, ProposalID: "ready",
+	}
+	if res := apply(t, sm, index, ready); !res.Accepted || res.Admission.State != AdmissionReady {
+		t.Fatalf("JoinReady = %+v, want ready", res)
+	}
+	index++
+	ready.ProposalID = "ready-duplicate"
+	if res := apply(t, sm, index, ready); !res.Accepted || res.Admission.State != AdmissionReady {
+		t.Fatalf("duplicate JoinReady = %+v, want idempotent ready", res)
+	}
+	index++
+	bind.ProposalID = "bind-retry-ready"
+	if res := apply(t, sm, index, bind); !res.Accepted || res.Admission.State != AdmissionReady {
+		t.Fatalf("ready Join retry = %+v", res)
+	}
+	index++
+
+	snapshot, err := sm.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if bytes.Contains(snapshot, []byte("9090")) {
+		t.Fatalf("admission snapshot persisted a resolver address: %s", snapshot)
+	}
+	restored := newTopologySM(nil, testRules())
+	if err := restored.Restore(snapshot); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if got := requireAdmissionState(t, restored, admission.InstanceID, AdmissionReady); got != requireAdmissionState(t, sm, admission.InstanceID, AdmissionReady) {
+		t.Fatalf("restored admission = %+v, want %+v", got, admission)
+	}
+	sm = restored
+
+	applyAdmissionTransition(t, sm, index, admission.ExecutionID, plan, 1, topology.ExecutionRunning, at.Add(4*time.Second))
+	index++
+	applyAdmissionTransition(t, sm, index, admission.ExecutionID, plan, 2, topology.ExecutionRunning, at.Add(5*time.Second))
+	index++
+	applyAdmissionTransition(t, sm, index, admission.ExecutionID, plan, 3, topology.ExecutionRunning, at.Add(6*time.Second))
+	index++
+	requireAdmissionState(t, sm, admission.InstanceID, AdmissionLearner)
+	bind.ProposalID = "bind-retry-learner"
+	if res := apply(t, sm, index, bind); !res.Accepted || res.Admission.State != AdmissionLearner {
+		t.Fatalf("learner Join retry = %+v", res)
+	}
+	index++
+	ready.ProposalID = "ready-retry-learner"
+	if res := apply(t, sm, index, ready); !res.Accepted || res.Admission.State != AdmissionLearner {
+		t.Fatalf("learner JoinReady retry = %+v", res)
+	}
+	index++
+
+	applyAdmissionTransition(t, sm, index, admission.ExecutionID, plan, 4, topology.ExecutionRunning, at.Add(7*time.Second))
+	index++
+	applyAdmissionTransition(t, sm, index, admission.ExecutionID, plan, 4, topology.ExecutionSucceeded, at.Add(8*time.Second))
+	index++
+	requireAdmissionState(t, sm, admission.InstanceID, AdmissionPromoted)
+	bind.ProposalID = "bind-retry-promoted"
+	if res := apply(t, sm, index, bind); !res.Accepted || res.Admission.State != AdmissionPromoted {
+		t.Fatalf("promoted Join retry = %+v", res)
+	}
+	index++
+	if res := apply(t, sm, index, ActivateTargetProposal{
+		ExecutionID: admission.ExecutionID, Version: plan.Version, Attempt: 1, ProposalID: "activate",
+	}); !res.Accepted {
+		t.Fatalf("activate target: %s", res.Reason)
+	}
+	index++
+	requireAdmissionState(t, sm, admission.InstanceID, AdmissionCompleted)
+	bind.ProposalID = "bind-retry-completed"
+	if res := apply(t, sm, index, bind); !res.Accepted || res.Admission.State != AdmissionCompleted {
+		t.Fatalf("completed Join retry = %+v", res)
+	}
+	index++
+	ready.ProposalID = "ready-retry-completed"
+	if res := apply(t, sm, index, ready); !res.Accepted || res.Admission.State != AdmissionCompleted {
+		t.Fatalf("completed JoinReady retry = %+v", res)
+	}
+}
+
+func TestAdmission_SupersededInstanceCannotBeResurrected(t *testing.T) {
+	sm, oldAdmission, plan, at, index := admissionExecutionSM(t)
+	if res := apply(t, sm, index, BindAdmissionProposal{
+		Admission: oldAdmission, At: at.Add(3 * time.Second), ProposalID: "bind-old",
+	}); !res.Accepted {
+		t.Fatalf("bind old: %s", res.Reason)
+	}
+	index++
+	newAdmission := oldAdmission
+	newAdmission.InstanceID = "instance-n2-new"
+	if res := apply(t, sm, index, BindAdmissionProposal{
+		Admission: newAdmission, ReplaceInstance: true, At: at.Add(4 * time.Second), ProposalID: "bind-new",
+	}); !res.Accepted {
+		t.Fatalf("replace admission: %s", res.Reason)
+	}
+	index++
+	requireAdmissionState(t, sm, oldAdmission.InstanceID, AdmissionSuperseded)
+
+	for seq := 1; seq <= len(plan.Steps); seq++ {
+		state := topology.ExecutionRunning
+		applyAdmissionTransition(t, sm, index, oldAdmission.ExecutionID, plan, seq, state, at.Add(time.Duration(4+seq)*time.Second))
+		index++
+	}
+	applyAdmissionTransition(t, sm, index, oldAdmission.ExecutionID, plan, len(plan.Steps), topology.ExecutionSucceeded, at.Add(10*time.Second))
+	index++
+	if res := apply(t, sm, index, ActivateTargetProposal{
+		ExecutionID: oldAdmission.ExecutionID, Version: plan.Version, Attempt: 1, ProposalID: "activate",
+	}); !res.Accepted {
+		t.Fatalf("activate: %s", res.Reason)
+	}
+	requireAdmissionState(t, sm, oldAdmission.InstanceID, AdmissionSuperseded)
+	requireAdmissionState(t, sm, newAdmission.InstanceID, AdmissionCompleted)
+	if res := apply(t, sm, index+1, ReadyAdmissionProposal{
+		NodeName: oldAdmission.NodeName, InstanceID: oldAdmission.InstanceID,
+		MemberID: oldAdmission.MemberID, ExecutionID: oldAdmission.ExecutionID, ProposalID: "old-ready",
+	}); res.Accepted {
+		t.Fatal("superseded instance JoinReady was accepted")
+	}
+}
+
+func TestAdmission_DifferentInstanceCannotReusePreparedMemberID(t *testing.T) {
+	sm, admission, _, at, index := admissionExecutionSM(t)
+	if res := apply(t, sm, index, BindAdmissionProposal{
+		Admission: admission, At: at.Add(3 * time.Second), ProposalID: "bind-old",
+	}); !res.Accepted {
+		t.Fatalf("bind old: %s", res.Reason)
+	}
+	index++
+	if res := apply(t, sm, index, ReadyAdmissionProposal{
+		NodeName: admission.NodeName, InstanceID: admission.InstanceID,
+		MemberID: admission.MemberID, ExecutionID: admission.ExecutionID, ProposalID: "ready-old",
+	}); !res.Accepted {
+		t.Fatalf("ready old: %s", res.Reason)
+	}
+	index++
+	replacement := admission
+	replacement.InstanceID = "instance-n2-new"
+	res := apply(t, sm, index, BindAdmissionProposal{
+		Admission: replacement, ReplaceInstance: true, At: at.Add(4 * time.Second), ProposalID: "bind-new",
+	})
+	if res.Accepted {
+		t.Fatal("different instance reused a prepared member ID")
+	}
+	requireAdmissionState(t, sm, admission.InstanceID, AdmissionReady)
+}

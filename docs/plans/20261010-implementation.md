@@ -13,7 +13,7 @@ The process-cluster harness must use testcontainers with isolated, reusable depl
 - [x] 3. Explicit-path synchronous meta bbolt persistence and local identity ledger (target §6); port atomic snapshot, replay, applied ConfState and identity tests.
 - [x] 4. Generic etcd WAL store and complete snapshot recovery (target §§5–6, 8.5, 11); conformance, tail overwrite, pins, quarantine, fallback and refiller tests.
 - [x] 5. Caller-defined load runtime (target §§5, 8.4–8.5, 11); Ready ordering, cancellation, membership, snapshots, retry/backpressure and multi-group tests.
-- [ ] 6. Full replicated meta FSM (target §§3–6, 8, 11); documents/history, approvals/executions, admission, sessions/locks, deterministic replay and retirement tests.
+- [x] 6. Full replicated meta FSM (target §§3–6, 8, 11); documents/history, approvals/executions, admission, sessions/locks, deterministic replay and retirement tests.
 - [ ] 7. Meta runtime/protocol/bootstrap/join (target §§5, 7–8); real meta groups, authorization, restore, peer isolation and failover functional tests.
 - [ ] 8. Topology mutation/planning/convergence and caller effects (target §§4–5, 8, 11); preserve all applicable source contracts and idempotent exact-identity verification.
 - [ ] 9. Event subscriptions/local bbolt journal and public runtime lifecycle (target §§5–6, 8.7); ordering, loss semantics, ownership and shutdown tests.
@@ -35,6 +35,8 @@ After each stage run make test. For runtime/concurrency changes also run scoped 
 - Stage 5 dependency implemented ahead of runtime wiring: local event journal and bounded bus, with source retention/sequence/pagination assertions adapted and added filtering, journal-before-delivery, live-only failure, owned-copy, saturation/gap and shutdown tests. `make test`, events race tests and `make lint` pass. Stage 9 remains open for runtime recorders/facade lifecycle.
 
 - Stage 5 verified: caller-defined Machine/Transport runtime, durable founding seed, committed-tail reconstruction, one outstanding Ready, off-loop WAL retry and advisory hint flushing, bounded proposals/cancellation, V2 membership waiter ordering, full snapshots, snapshot-on-membership for joining learners, independent shared-store groups, owned transport messages and joined shutdown. Real three-node consensus/failover and learner promotion/transfer/removal tests, received-snapshot durability ordering, business/fatal machine outcomes, transient/stalled writes, concurrent batching and restart tests pass under the race detector. `make test` and `make lint` pass. The remaining source-port audit/cluster obligations remain in stage 11.
+
+- Stage 6 verified: full replicated meta FSM with schema-pinned rules, owned Latest/Target/Active views, 128-document history, exact execution approvals/transitions, admission phases, sessions/locks, replay guards, persistent allocation high water and approval-time group retirement. Forty-one FSM tests include applicable source codec/document/execution/session/admission cases, real bbolt restart, corruption refusal without partial restore, exact authorization fields, callback progress boundaries, session identity conflicts, allocation overflow and fatal persistence classification. `make test`, meta/topology race tests, `make lint` and `git diff --check` pass. Source legacy-current restore is intentionally replaced by explicit schema refusal; network admission/planner cases remain in stages 7–8.
 
 ## Outstanding implementation gaps
 

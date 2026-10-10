@@ -23,6 +23,10 @@ func (s ExecutionState) Terminal() bool {
 	return s == ExecutionSucceeded || s == ExecutionFailed || s == ExecutionSuperseded
 }
 
+func (s ExecutionState) Waiting() bool {
+	return s == ExecutionWaitingForReplica || s == ExecutionWaitingForCatchUp || s == ExecutionWaitingForLeader
+}
+
 type StepKind string
 
 const (
@@ -47,10 +51,14 @@ type Step struct {
 	ReplicaID uint64   `json:"replica_id,omitempty"`
 }
 
+func (s Step) Equal(other Step) bool { return s == other }
+
 type Plan struct {
 	Version uint64 `json:"version"`
 	Steps   []Step `json:"steps"`
 }
+
+func (p Plan) IsEmpty() bool { return len(p.Steps) == 0 }
 
 type AuthorizedStep struct {
 	ExecutionID ExecutionID `json:"execution_id"`
@@ -74,6 +82,8 @@ type ExecutionStatus struct {
 	State         ExecutionState `json:"state"`
 	CurrentStep   int            `json:"current_step"`
 	TotalSteps    int            `json:"total_steps"`
+	GroupID       string         `json:"group_id,omitempty"`
+	NodeName      string         `json:"node_name,omitempty"`
 	WaitingReason string         `json:"waiting_reason,omitempty"`
 	ErrorCode     string         `json:"error_code,omitempty"`
 	Error         string         `json:"error,omitempty"`
@@ -89,5 +99,23 @@ type ExecutionRecord struct {
 }
 
 func MakeExecutionID(version uint64, attempt uint32) ExecutionID {
-	return ExecutionID(fmt.Sprintf("v%d-a%d", version, attempt))
+	return ExecutionID(fmt.Sprintf("exec-v%d-a%d", version, attempt))
+}
+
+type ExecutionTransition struct {
+	ExecutionID   ExecutionID    `json:"execution_id"`
+	Version       uint64         `json:"version"`
+	Attempt       uint32         `json:"attempt"`
+	StepSeq       int            `json:"step_seq"`
+	State         ExecutionState `json:"state"`
+	GroupID       string         `json:"group_id,omitempty"`
+	NodeName      string         `json:"node_name,omitempty"`
+	WaitingReason string         `json:"waiting_reason,omitempty"`
+	Error         string         `json:"error,omitempty"`
+	At            time.Time      `json:"at"`
+}
+
+// Valid reports whether a state is part of the execution protocol.
+func (s ExecutionState) Valid() bool {
+	return s == ExecutionPending || s == ExecutionRunning || s.Waiting() || s.Terminal()
 }
