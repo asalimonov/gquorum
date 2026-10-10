@@ -1,0 +1,47 @@
+name: gquorum-example
+x-node: &node
+  image: gquorum-example:local
+  build:
+    context: ../..
+    dockerfile: examples/cluster/Dockerfile
+  stop_grace_period: 20s
+  networks: [cluster]
+x-env: &env
+  GQUORUM_CLUSTER: example
+  GQUORUM_CREDENTIAL: local-example-credential
+  GQUORUM_DATA: /data
+  GQUORUM_PEERS: >-
+    [{"name":"node1","type":"worker","member_id":1,"meta_address":"node1:9000","load_address":"node1:9001","http_address":"node1:8080"},
+     {"name":"node2","type":"worker","member_id":2,"meta_address":"node2:9000","load_address":"node2:9001","http_address":"node2:8080"},
+     {"name":"node3","type":"observer","member_id":3,"meta_address":"node3:9000","load_address":"node3:9001","http_address":"node3:8080"}]
+services:
+  node1:
+    <<: *node
+    environment:
+      <<: *env
+      GQUORUM_NODE: node1
+      GQUORUM_TYPE: worker
+    ports: ["127.0.0.1:18081:8080"]
+    volumes: ["node1:/data"]
+  node2:
+    <<: *node
+    environment:
+      <<: *env
+      GQUORUM_NODE: node2
+      GQUORUM_TYPE: worker
+    ports: ["127.0.0.1:18082:8080"]
+    volumes: ["node2:/data"]
+  node3:
+    <<: *node
+    environment:
+      <<: *env
+      GQUORUM_NODE: node3
+      GQUORUM_TYPE: observer
+    ports: ["127.0.0.1:18083:8080"]
+    volumes: ["node3:/data"]
+networks:
+  cluster:
+volumes:
+  node1:
+  node2:
+  node3:

@@ -32,11 +32,21 @@ func (sm *topologySM) Authorize(ctx context.Context, a topology.AuthorizedStep) 
 		return fault.New(fault.Unavailable, "receiver has not applied required approval", nil)
 	}
 	ex, ok := sm.executions[a.ExecutionID]
-	if !ok || ex.Version != sm.target.Version || ex.State.Terminal() || ex.State == topology.ExecutionPending || ex.CurrentStep < 1 || ex.CurrentStep > len(ex.Steps) {
+	if !ok || ex.Version != sm.target.Version || ex.State.Terminal() || a.StepSeq < 1 || a.StepSeq > len(ex.Steps) || ex.CurrentStep > len(ex.Steps) {
 		return refuse()
 	}
 	latest, found := sm.latestAttemptLocked(ex.Version)
-	if !found || latest.ID != ex.ID || ex.CurrentStep != a.StepSeq || !a.Matches(ex.ID, ex.Attempt, ex.Version, ex.Steps[ex.CurrentStep-1]) {
+	if !found || latest.ID != ex.ID || !a.Matches(ex.ID, ex.Attempt, ex.Version, ex.Steps[a.StepSeq-1]) {
+		return refuse()
+	}
+	// The leader can deliver an effect before this follower applies the
+	// already-committed progress transition. Match every immutable approval
+	// field first, then refuse execution with a retryable lag result. No effect
+	// is authorized until this receiver reaches the exact current step.
+	if ex.State == topology.ExecutionPending || ex.CurrentStep < a.StepSeq {
+		return fault.New(fault.Unavailable, "receiver has not applied required execution progress", nil)
+	}
+	if ex.CurrentStep != a.StepSeq {
 		return refuse()
 	}
 	return nil

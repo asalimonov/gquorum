@@ -40,3 +40,23 @@ and skip under short mode; all new isolated unit cases run in parallel.
 
 The bootstrap identity/freshness audit adds parallel corruption and orphan-state
 cases. The uncached unit suite completed in **7.40 seconds** after these changes.
+
+With the example and public placement/readmission helpers, the uncached unit
+suite completed in **8.13 seconds**. The audit found 307 parallel top-level unit
+cases and 95 functional cases at that checkpoint. The additional exclusion and
+readmission case is also functional and skips before opening fixtures in short
+mode. `make test-example` covers real HTTP/meta/load protocols, snapshots,
+idempotent retry, local event streaming, durable restart and fresh-ID readmission.
+Compose retained-volume recovery is verified separately from the in-process
+HTTP suite. Functional tests account for the longer `make test` duration; use
+`make test-unit` for the below-30-second development loop.
+
+A subsequent uncached unit run completed in **16.87 seconds while the full
+functional suite ran concurrently**. Both measurements remain below 30 seconds.
+The final callback audit adds a parallel constructor/storage case for multiple
+historical replica IDs and refusal to quarantine a foreign retained identity.
+
+The final reviewed example adds 308 parallel top-level unit cases in total,
+with 96 functional cases kept outside short mode. The uncached unit command
+completed in **18.99 seconds during a simultaneous Docker image rebuild**,
+including compilation/linking overhead, and stays below the 30-second target.

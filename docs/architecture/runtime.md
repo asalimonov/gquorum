@@ -78,3 +78,22 @@ New constructors and local stop operations are refused after shutdown starts.
 Standalone runtimes can open load engines without meta. Their callers supply
 consensus identities, membership approval and protocol validation; no meta
 boot ledger exists in that mode. `load.New` also remains available directly.
+
+`meta.LoadStoredIdentity(path)` reads a closed database's validated durable pin
+without creating or mutating storage. It intentionally returns no process ID.
+Caller readmission hooks can compare the exact old node, cluster and member tuple
+before moving their supplied path; an absent pin does not prove an existing file
+is fresh (the constructor separately checks all retained state).
+
+An effect receiver behind the required execution progress returns retryable
+unavailability only after the immutable retained plan matches every authorized
+field and the attempt is current. It never authorizes a pending or future step.
+Stale steps, retired attempts, terminal executions and mismatched tuples remain
+permanent authorization refusals.
+
+`meta.Group.SetGroupPlacement` edits one load group's policy and desired replicas
+through the same CAS/preview/approval pipeline as other mutations. It retains
+eligible identities, assigns fresh IDs on expansion and refuses an unsatisfied
+minimum. Approval uses observed membership and the fixed current-quorum floor.
+Staging can succeed before approval fails; callers must inspect the committed
+version instead of assuming a refusal rolled the edit back.

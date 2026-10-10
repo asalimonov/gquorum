@@ -1,0 +1,34 @@
+syntax = "proto3";
+package gquorum.example.load.v1;
+option go_package = "github.com/asalimonov/gquorum/examples/cluster/loadpb;loadpb";
+
+// This protocol belongs to the example application, not the library.
+message Header {
+  string cluster_id = 1;
+  string node_name = 2;
+  string instance_id = 3;
+  uint64 member_id = 4;
+}
+message Request {
+  Header header = 1;
+  string method = 2;
+  string group_id = 3;
+  uint64 replica_id = 4;
+  bytes data = 5;
+}
+message Frame {
+  Header header = 1;
+  string group_id = 2;
+  uint64 to_replica_id = 3;
+  bytes raft_message = 4;
+}
+message Reply {
+  string error_code = 1;
+  string message = 2;
+  bytes data = 3;
+  uint64 replica_id = 4;
+}
+service Load {
+  rpc Deliver(Frame) returns (Reply);
+  rpc Call(Request) returns (Reply);
+}

@@ -328,6 +328,59 @@ func (g *Group) SetPlacement(ctx context.Context, rule topology.PlacementRule, o
 		return g.enforcePlacement(doc, now)
 	})
 }
+
+// SetGroupPlacement edits one load group's policy and desired replicas in one
+// CAS document. Eligible existing identities are retained; new hosts get fresh
+// identities. Approval still checks actual membership and live-majority safety.
+func (g *Group) SetGroupPlacement(ctx context.Context, id string, rule topology.PlacementRule, o MutationOptions) (MutationResult, error) {
+	if err := topology.ValidateLoadID(id); err != nil {
+		return MutationResult{}, err
+	}
+	return g.mutation(ctx, o, fmt.Sprintf("set placement of group %q", id), true, func(doc *topology.Document, now time.Time) error {
+		group := doc.Group(id)
+		if group == nil {
+			return unknownGroup(id)
+		}
+		if rule.MinReplicas < 1 || rule.MaxReplicas < rule.MinReplicas || rule.MaxReplicas > g.rules.Limits.MaxReplicas {
+			return fault.ErrInvalid
+		}
+		policy := rule
+		policy.AllowedNodeTypes = slices.Clone(rule.AllowedNodeTypes)
+		group.Placement = &policy
+		voters := 0
+		group.Replicas = slices.DeleteFunc(group.Replicas, func(replica topology.Replica) bool {
+			node := doc.Node(replica.NodeName)
+			if node == nil || node.State != topology.NodeActive || !policy.Allows(node.Type) {
+				return true
+			}
+			if replica.Role == topology.ReplicaVoter {
+				if voters >= policy.MaxReplicas {
+					return true
+				}
+				voters++
+			}
+			return false
+		})
+		for _, node := range doc.Nodes {
+			if voters >= policy.MaxReplicas || len(group.Replicas) >= g.rules.Limits.MaxReplicas {
+				break
+			}
+			if node.State != topology.NodeActive || !policy.Allows(node.Type) || slices.ContainsFunc(group.Replicas, func(r topology.Replica) bool { return r.NodeName == node.Name }) {
+				continue
+			}
+			fresh, err := group.AllocateReplicaID()
+			if err != nil {
+				return err
+			}
+			group.Replicas = append(group.Replicas, topology.Replica{NodeName: node.Name, ReplicaID: fresh, Role: topology.ReplicaVoter, CreatedAt: now, UpdatedAt: now})
+			voters++
+		}
+		if voters < policy.MinReplicas {
+			return fault.New(fault.UnsafeMembership, "too few eligible active voters for group placement", nil)
+		}
+		return nil
+	})
+}
 func (g *Group) CreateLoadGroup(ctx context.Context, spec GroupSpec, o MutationOptions) (MutationResult, error) {
 	if err := topology.ValidateLoadID(spec.ID); err != nil {
 		return MutationResult{}, err

@@ -80,8 +80,13 @@ func TestAuthorizeEveryIdentityAndProgressBoundary(t *testing.T) {
 	at := time.Unix(100, 0).UTC()
 	b := apply(t, sm, 2, beginProposal(1, 1, "begin", at))
 	a := topology.AuthorizedStep{ExecutionID: b.ExecutionID, Version: 1, Attempt: 1, StepSeq: 1, Kind: topology.StepTransferLeader, GroupID: "shard0", NodeName: "n1", ReplicaID: 1}
-	if err := sm.Authorize(context.Background(), a); !errors.Is(err, fault.ErrExecutionAuthorization) {
+	if err := sm.Authorize(context.Background(), a); !errors.Is(err, fault.ErrUnavailable) {
 		t.Fatal("pending effect authorized", err)
+	}
+	badPending := a
+	badPending.ReplicaID++
+	if err := sm.Authorize(context.Background(), badPending); !errors.Is(err, fault.ErrExecutionAuthorization) {
+		t.Fatal("invalid pending identity treated as lag", err)
 	}
 	apply(t, sm, 3, TransitionExecutionProposal{Transition: topology.ExecutionTransition{ExecutionID: b.ExecutionID, Version: 1, Attempt: 1, StepSeq: 1, State: topology.ExecutionRunning, GroupID: "shard0", NodeName: "n1", At: at.Add(time.Second)}})
 	if err := sm.Authorize(context.Background(), a); err != nil {
