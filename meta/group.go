@@ -19,6 +19,7 @@ import (
 	"github.com/asalimonov/gquorum/membership"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3"
+	"go.etcd.io/raft/v3/raftpb"
 )
 
 type Group struct {
@@ -37,6 +38,7 @@ type Group struct {
 	reconciler          *reconcile.Reconciler
 	leases              *sessionManager
 	parked              parkedRegistry
+	watches             *watchRegistry
 	leaseGate           sync.Mutex
 	addresses           map[string]string
 	joinMembers         map[uint64]string
@@ -87,6 +89,7 @@ func New(input Options) (*Group, error) {
 	}
 	g.addresses[opts.Identity.NodeName] = opts.Network.AdvertiseAddress
 	g.machine = metaengine.NewMachine(g.rules, nil)
+	g.watches = newWatchRegistry(opts.MaxWatchers)
 	g.reconciler, err = reconcile.New(reconcile.Config{Host: reconciliationHost{g}, Settings: opts.Reconciliation, Logger: opts.Logger, OnTransition: g.recordReconciliation})
 	if err != nil {
 		return nil, err
@@ -145,6 +148,10 @@ func (g *Group) openEngine(identity Identity, mode raftengine.Mode, peers []raft
 		recoveryDocuments = []topology.Document{active, target, latest}
 	}
 	machine := metaengine.NewMachine(g.rules, store)
+	machine.OnApplied = func(_ uint64, _ raftpb.ConfState) {
+		latest, target, active := machine.Views()
+		g.watches.publish(latest, target, active)
+	}
 	engine, err := raftengine.NewMeta(raftengine.Options{GroupID: topology.MetaGroupID, NodeName: identity.NodeName, ClusterID: identity.ClusterID, ReplicaID: identity.MemberID, Mode: mode, Peers: peers, Timing: raftengine.Timing{TickInterval: g.opts.Timing.TickInterval, ElectionTicks: g.opts.Timing.ElectionTicks, HeartbeatTicks: g.opts.Timing.HeartbeatTicks}, Store: &metastore.Adapter{Store: store}, Machine: machine, Transport: g.transport, Events: g.opts.Events, Logger: g.opts.Logger, SnapshotThreshold: g.opts.SnapshotThreshold})
 	if err != nil {
 		store.Close()
@@ -226,6 +233,9 @@ func (g *Group) Stop(ctx context.Context) error {
 		}
 		g.mu.Unlock()
 		go func() {
+			if g.watches != nil {
+				g.watches.close()
+			}
 			if g.reconciler != nil {
 				_ = g.reconciler.Stop(context.Background())
 			}

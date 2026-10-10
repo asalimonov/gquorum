@@ -14,10 +14,15 @@ import (
 )
 
 // Machine adapts the deterministic topology FSM to the shared Raft loop.
-type Machine struct{ *topologySM }
+type Machine struct {
+	*topologySM
+	// OnApplied is installed before the engine is constructed. It runs after
+	// durable application persistence, outside the FSM lock, and must be bounded.
+	OnApplied func(uint64, raftpb.ConfState)
+}
 
 func NewMachine(rules topology.Rules, persister statePersister) *Machine {
-	return &Machine{newTopologySM(persister, rules)}
+	return &Machine{topologySM: newTopologySM(persister, rules)}
 }
 func (m *Machine) Apply(ctx context.Context, c raftengine.Command) (raftengine.Result, error) {
 	if err := ctx.Err(); err != nil {
@@ -66,18 +71,23 @@ func (m *Machine) AfterApply(ctx context.Context, index, term uint64, cs raftpb.
 		return err
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.appliedIndex, m.appliedTerm = index, term
 	data, err := m.marshalLocked()
 	if err != nil {
+		m.mu.Unlock()
 		return err
 	}
 	if store, ok := m.persister.(interface {
 		SaveApplication(uint64, raftpb.ConfState, []byte) error
 	}); ok {
 		if err := store.SaveApplication(index, cs, data); err != nil {
+			m.mu.Unlock()
 			return fmt.Errorf("%w: %w", errDurablePersist, err)
 		}
+	}
+	m.mu.Unlock()
+	if m.OnApplied != nil {
+		m.OnApplied(index, cs)
 	}
 	return nil
 }
