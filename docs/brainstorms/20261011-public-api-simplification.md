@@ -4,10 +4,12 @@ Status: clean API refactor, separate group/replica operations and a deliberate
 public group wrapper agreed. Managed local replica lifecycle through a caller
 factory and transport, and stop holds lasting only for the current node lifetime,
 are agreed. Startup-selectable defaults and caller-replaceable policies are user
-requirements. The Scheduler/LifecyclePolicy split, ReplicaChecker,
-library-owned operator.Controller and Operator vocabulary are agreed. The
-remaining substantive decision is scheduler agreement across nodes; detailed
-contracts and inventories belong in the target specification.
+requirements. The Scheduler/LifecyclePolicy split, policy.RestoreDegraded,
+library-owned operator.Controller and Operator vocabulary are agreed. Scheduler
+selection/configuration remains caller-supplied; cluster-wide agreement is
+explicitly postponed. The refactor also includes HTTP naming and method review
+in examples/cluster, its README and corresponding tests. Detailed contracts and
+inventories belong in the target specification.
 This is a discussion record, not an implementation specification.
 
 ## Initial request
@@ -868,6 +870,10 @@ the same validation regardless of which implementation produced the decision.
 
 ### Cluster agreement and custom implementations
 
+Historical proposal: iteration 8 explicitly postpones this agreement mechanism.
+Do not implement its declaration, fingerprint, mismatch gate or metadata schema
+in this refactor. Scheduler selection remains caller-supplied.
+
 Cluster-affecting repair behavior needs explicit declared identity, version and
 configuration identity in the startup policy selection. Nodes can validate that
 declaration against the cluster's agreed policy metadata; local readiness,
@@ -1008,6 +1014,9 @@ whether callers may also replace the managed executor remains unanswered.
 No implementation or persistence changes result from this naming investigation.
 
 ## Iteration 6: agreed policy split and consistent operator names
+
+Historical naming note: iteration 8 replaces the proposed policy.ReplicaChecker
+with policy.RestoreDegraded; Scheduler and operator.Controller are retained.
 
 User response to iteration 5:
 
@@ -1193,7 +1202,7 @@ leader change to select a different automatic repair policy. Mandatory action
 validation still applies under either model. The distinction is predictability
 of automatic decisions and rolling configuration changes, not optional safety.
 
-Pending question: choose cluster-pinned Scheduler identity/configuration with
+Question at this iteration: choose cluster-pinned Scheduler identity/configuration with
 the mismatch behavior above, or permit node-local selection. After this choice,
 the target can specify bootstrap/recovery defaults, an explicit update API,
 rolling-change behavior and version checks at decision commit.
@@ -1223,12 +1232,193 @@ rolling-change behavior and version checks at decision commit.
   tests, including the new Scheduler agreement data if selected. Preserve the
   small meta example and the tests/cluster fixture boundary.
 
-These are required design tasks, not postponed features. No final target is
-emitted yet because the scheduler agreement choice is still pending.
+These are required design tasks, not postponed features. At this iteration the
+target was pending the scheduler choice; iteration 8 resolves that choice by
+explicitly postponing the cluster-wide agreement mechanism.
+
+## Iteration 8: caller-configured scheduling, RestoreDegraded and demo HTTP
+
+User decisions:
+
+> Let postpone this for future, we assume that the user configres it in caller's
+> code or configuration which passed for caller's code.
+>
+> RestoreDegradedPolicy need to rename policy.RestoreDegraded
+>
+> Also we will need to review and align http methods in ./example/cluster
+
+The actual example directory is `examples/cluster`. These decisions supersede
+the earlier Scheduler agreement proposal and ReplicaChecker naming; the rest of
+the accepted Node/Cluster, Scheduler/LifecyclePolicy and Operator design remains.
+
+### Scheduler selection is a startup dependency
+
+Caller code selects/configures the Scheduler and passes it through NodeOptions.
+The library parses no application configuration files. Built-in defaults remain
+available, and a caller can supply its own Scheduler implementation.
+
+No Scheduler declaration, implementation fingerprint, cluster-wide agreement
+record, policy update proposal, startup mismatch refusal or scheduling mismatch
+gate is introduced. Coordinating selections and rolling configuration changes
+is the caller's responsibility. Leader changes can select different automatic
+behavior when callers provide different implementations/options. Each concrete
+decision is still validated and committed through the ordinary `_meta` protocol;
+followers never rerun custom Scheduler code inside the FSM. Existing approved
+Operators resume from their durable records regardless of local policy changes.
+Mandatory topology/version/identity/membership checks are unaffected.
+
+No new persisted schema is needed for Scheduler configuration. Local diagnostic
+names can identify the installed policy without asserting agreement with other
+nodes. Startup selection stays fixed for a Node lifetime; existing local
+scheduling enable/disable controls do not become a policy hot-swap API.
+
+### Revised built-in name
+
+```go
+package policy
+
+type RestoreDegraded struct {
+    // Private, validated decision options.
+}
+
+func NewRestoreDegraded(options RestoreDegradedOptions) (*RestoreDegraded, error)
+
+func (*RestoreDegraded) Schedule(
+    context.Context, ScheduleInput,
+) (ScheduleDecision, error)
+
+var _ Scheduler = (*RestoreDegraded)(nil)
+```
+
+The type moves from internal/reconcile.RestoreDegradedPolicy to the public
+policy package. Do not add a ReplicaChecker alias or a second equivalent
+implementation. RestoreDegradedOptions replaces the proposed
+ReplicaCheckerOptions. Existing missing-required-voter semantics, stability
+handling and bounded supported action set remain; the broader type name does
+not imply general balancing, quorum reconstruction or repair of `_meta`.
+
+The resulting terminology is:
+
+```text
+policy.Scheduler (default implementation: policy.RestoreDegraded)
+    -> validated decision and approval
+    -> topology.Operator
+    -> internal/operator.Controller
+    -> managed, idempotent and identity-verified effects
+```
+
+### HTTP review: preserve the small example
+
+Inspected [http.go](../../examples/cluster/http.go),
+[main.go](../../examples/cluster/main.go),
+[README](../../examples/cluster/README.md),
+[HTTP unit tests](../../examples/cluster/http_test.go) and
+[Compose smoke test](../../tests/cluster/example_test.go).
+
+The demo currently exposes local health, cluster status, three document views,
+drain/activate, approval spelled apply, and execution progress. Keep exactly
+those capabilities. Domain commands use POST and observations use GET. Drain
+is a topology workflow, so retain the explicit drain/activate command routes
+rather than introducing an arbitrary node-status setter.
+
+Use these target routes, with the current Latest/Target/Active document names
+retained. Desired/Approved were optional earlier naming suggestions, and need
+not add another rename to this refactor.
+
+| HTTP method and route | Library integration | Response |
+| --- | --- | --- |
+| `GET /health/live` | HTTP process liveness | 200 with local node name while the server is serving. |
+| `GET /health/ready` | Local admission/session status plus Active node state | 200 when ready to serve the demo; 503 while starting, drained or fenced. |
+| `GET /api/cluster/status` | `cluster.Status(ctx)` | 200 with cluster observations and operator progress. |
+| `GET /api/topology/latest` | `cluster.Latest(ctx)` | 200 document and version ETag. |
+| `GET /api/topology/target` | `cluster.Target(ctx)` | 200 approved document and version ETag. |
+| `GET /api/topology/active` | `cluster.Active(ctx)` | 200 active document and version ETag. |
+| `POST /api/nodes/{name}/drain` | `cluster.DrainNode(ctx, name, options)` | 200 staged/preview result; 202 when approved with an operator ID. |
+| `POST /api/nodes/{name}/activate` | `cluster.ActivateNode(ctx, name, options)` | Same mutation contract. |
+| `POST /api/topology/{version}/approve` | `cluster.Approve(ctx, version)` | 202 with `operator_id`. |
+| `GET /api/operators/{id}` | `cluster.Operator(ctx, id)` | 200 progress, including state and waiting/failure detail. |
+
+Register the two command routes explicitly rather than accepting every action
+segment and switching over arbitrary strings. Existing Go ServeMux behavior
+handles unsupported methods; no library HTTP server or protocol is introduced.
+
+Corresponding vocabulary changes:
+
+| Old HTTP spelling | New spelling |
+| --- | --- |
+| `/api/topology/{version}/apply` | `/api/topology/{version}/approve` |
+| `/api/executions/{id}` | `/api/operators/{id}` |
+| Mutation request `apply` | `approve` |
+| Mutation/approval response `execution_id` | `operator_id` |
+| Cluster-status execution progress field | `operator` |
+
+The Go mutation option becomes Approve consistently. Keep Preview as a separate
+existing capability, rejecting Preview+Approve together. No compatibility routes
+or dual JSON fields are required under the accepted clean API refactor. Example
+HTTP DTOs must project the intended public names even where old field names
+remain in persisted records or the internal meta wire protocol.
+
+Keep exact If-Match validation on drain/activate, body/header version agreement,
+bounded strict JSON decoding, version ETags and stale-version 409 replies.
+Retain X-Staged-Version when staging committed but approval failed, so clients
+can inspect/approve that version without repeating the mutation. A 202 response
+means approval was accepted, not that the workflow finished; clients poll the
+Operator state. A locally lagging follower may temporarily return 404 for a new
+operator, as the existing smoke test already permits.
+
+The approval route's positive path version is its expected Latest version; it
+needs no second required version header. If If-Match is supplied, require it to
+match the path version. Validate before invoking Raft. Accept an empty body or
+an empty JSON object and reject unknown options/query parameters, including
+preview/dry_run/apply/approve flags; an approve command must not silently ignore
+a purported preview. The current example ignores approval options, while the
+test fixture already checks this distinction. Port that small validation
+contract without importing the full fixture.
+
+Preserve HTTP error classification: invalid requests 400, absent history 404,
+version/identity/authorization conflicts 409, membership safety refusals 422,
+unavailable/not-ready/stopped 503, and unexpected failures 500. All errors return
+stable code/error fields and version conflict metadata where present. The final
+signature inventory will align Go fault names while retaining intentional
+persistence and internal protocol compatibility.
+
+### Example and test changes required by the target
+
+- `examples/cluster/main.go`: construct/start Node once, pass Node/Cluster to
+  the HTTP adapter and stop through Node. Continue to keep configuration parsing
+  and HTTP listener lifecycle in the application.
+- `examples/cluster/http.go`: call the public interfaces and use the route/DTO
+  vocabulary above. Keep Raft execution switches, WAL handling and load protocol
+  implementation out of this adapter.
+- `examples/cluster/README.md`: update all curl commands, response field names,
+  operator polling and the complete route table together.
+- `examples/cluster/http_test.go`: retain parallel fast decoder/version/error
+  checks. Test strict approve input and verify rejected requests never invoke
+  the mutation. Replace the current helper-test `/api/groups` dummy URL with a
+  route that exists in this demo.
+- `tests/cluster/example_test.go`: migrate the Compose smoke test to approve and
+  operator names. Exercise both immediate approval and stage-then-approve, and
+  retain node types, readiness, unchanged meta membership, stale-version refusal
+  and absence of internal test-control routes.
+- `tests/cluster/testapp/http.go` and its clients/tests: align shared endpoint
+  vocabulary as library callers migrate. Keep the richer fixture-only routes and
+  fault scenarios under tests/cluster; do not move them into the demo.
+
+The refactor does not expand the Compose demo into a group administration API,
+add load networking, or add a Scheduler configuration endpoint. The example
+uses built-in policies and remains runnable with make run-example.
+
+### Current resolution
+
+The previously identified final policy decision is resolved. HTTP alignment is
+now a concrete part of the refactor with the route contract above. Remaining
+work is to consolidate the full target specification and its file/signature,
+ownership, persistence and verification inventories. No implementation code was
+changed in this discussion step.
 
 ## NOT CONSIDERED & TODO
 
-These are unresolved design details, not exclusions from the refactoring:
+The following are required target-design details, not exclusions from the refactoring:
 
 - [potential-improvement] Finalize the exact public package boundary under the
   agreed clean API refactor before specifying created/updated files.
@@ -1237,8 +1427,7 @@ These are unresolved design details, not exclusions from the refactoring:
   local to the current Node lifetime.
 - [potential-improvement] Finalize replaceable policy inputs, decisions and default
   configuration under the agreed library-owned Controller boundary. Specify
-  local versus cluster-agreed settings, the durable agreement for custom repair
-  policies and the treatment of existing runtime controls.
+  caller-supplied startup settings and the treatment of existing runtime controls.
 - [potential-improvement] Specify Start/WaitReady/retry/partial-failure behavior,
   callback reentrancy and cancellation ownership.
 - [potential-improvement] Map every existing document, watch, session, lock,
@@ -1249,7 +1438,15 @@ These are unresolved design details, not exclusions from the refactoring:
   No persistence schema change is implied by the current proposal.
 - [potential-improvement] Specify the treatment of standalone load engines and
   preserve the small meta demo / separate cluster fixture boundary.
+- [potential-improvement] Include the reviewed example HTTP contract, README and
+  common fixture/client vocabulary migration in the target and verification plan.
 
-The final target document will follow after these decisions. It must include the
+Explicitly deferred by the user:
+
+- [postponed] Cluster-agreed Scheduler identity/version/configuration, durable
+  policy metadata, mismatch handling and cluster-wide policy update operations.
+  Current behavior uses the Scheduler configured in caller code at Node startup.
+
+The final target document must consolidate these decisions and include the
 full public signature map, ownership and startup/shutdown flows, failure handling,
 storage/protocol compatibility inventory and implementation pseudocode.
