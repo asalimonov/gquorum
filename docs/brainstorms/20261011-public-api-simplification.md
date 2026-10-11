@@ -4,7 +4,9 @@ Status: clean API refactor, separate group/replica operations and a deliberate
 public group wrapper agreed. Managed local replica lifecycle through a caller
 factory and transport, and stop holds lasting only for the current node lifetime,
 are agreed. Startup-selectable defaults and caller-replaceable policies are user
-requirements. Detailed extension and lifecycle contracts are under discussion.
+requirements. The Scheduler/LifecyclePolicy split is agreed; the user also asks
+to align ReplicaChecker and operator.Controller terminology with PD. Detailed
+extension and lifecycle contracts are under discussion.
 This is a discussion record, not an implementation specification.
 
 ## Initial request
@@ -1003,6 +1005,154 @@ This iteration proposes a revision to iteration 4; the two-interface split and
 exact type/package names are not yet user-approved. The earlier question about
 whether callers may also replace the managed executor remains unanswered.
 No implementation or persistence changes result from this naming investigation.
+
+## Iteration 6: agreed policy split and consistent operator names
+
+User response to iteration 5:
+
+> I agree. Also let unify ReplicaChecker and operator.Controller if it is possible
+
+Resolution: the two public decision interfaces, `policy.Scheduler` and
+`policy.LifecyclePolicy`, replace the earlier aggregate Behavior proposal.
+The user additionally authorizes aligning the repair and execution names with
+PD where the responsibilities fit. This is terminology unification, not a
+request to merge replica checking and operation execution into one component.
+
+### Implementation mapping checked
+
+The current [RestoreDegradedPolicy](../../internal/reconcile/policy.go) evaluates
+observed Active replicas and requests a narrowly supported fresh-ID replacement
+for a missing required voter. It does not execute the repair. This is a good
+match for the name `ReplicaChecker`.
+
+The current [Reconciler](../../internal/reconcile/engine.go) owns the observation
+loop, leader and staging gates, stability/cooldown observations, validation and
+submission of a repair. It also signals the execution engine when there is an
+already approved execution to resume. Renaming the entire Reconciler to
+ReplicaChecker would incorrectly put scheduling coordination into the decision
+implementation. Its coordination work stays library-owned, invoking the public
+Scheduler contract; the final file inventory will locate this work.
+
+The current [ConvergenceEngine](../../internal/convergence/engine.go) reads a
+durably approved execution, checks ownership and exact authorization, dispatches
+its next step, verifies observed results, and records progress. It already fills
+the role of an operator controller. Its implementation can move to
+`internal/operator` with concrete type `Controller`, constructed and supervised
+by the Node. The local replica host remains in `internal/managed`.
+
+The current [ExecutionRecord](../../topology/execution.go) combines an ordered
+Plan with identity, attempt, state, current step and audit metadata. It is the
+closest data-model counterpart to an Operator. The public
+[GroupController](../../topology/controller.go) is a different abstraction: an
+effect adapter currently supplied by callers. Under managed hosting, its action
+dispatch becomes library-owned and application dependencies are supplied through
+the agreed factory, transport, storage and retirement hooks. It must not simply
+be renamed to operator.Controller, which would preserve the integration burden.
+
+### Recommended coherent vocabulary
+
+| Current/provisional name | Refactored name | Responsibility |
+| --- | --- | --- |
+| `ReconcilePolicy` / proposed `Behavior.Repair` | `policy.Scheduler.Schedule` | Public replaceable cluster decision contract. |
+| `RestoreDegradedPolicy` | `policy.ReplicaChecker` | Concrete default Scheduler; proposes supported missing-replica corrections. |
+| `ConvergenceEngine` | `internal/operator.Controller` | Concrete library-owned driver of approved steps and verified progress. |
+| `topology.Plan` | `topology.Plan` | Preview of ordered steps for a topology version, before authorization. |
+| `topology.ExecutionRecord` | `topology.Operator` | Approved plan and execution progress for one version/attempt. |
+| `topology.ExecutionID`, `ExecutionStatus`, `ExecutionState` | `topology.OperatorID`, `OperatorStatus`, `OperatorState` | Public identity and progress vocabulary. |
+| Proposed `cluster.Operation` / `WaitOperation` | `cluster.Operator` / `WaitOperator` | Read or await an approved operator through the Cluster interface. |
+
+The requested ReplicaChecker and Controller names can be adopted directly.
+The related Operator value/API names above complete the recommendation and
+supersede the provisional Operation spelling if adopted in the final target.
+No additional public Controller or Checker interface is necessary. Keeping
+public operator value types in topology avoids another package solely for data
+types and allows internal/operator to depend on topology without cycles.
+
+Candidate signatures, with the complete data structures still to be specified:
+
+```go
+// package policy
+func NewReplicaChecker(options ReplicaCheckerOptions) (*ReplicaChecker, error)
+
+func (*ReplicaChecker) Schedule(
+    context.Context, ScheduleInput,
+) (ScheduleDecision, error)
+
+var _ Scheduler = (*ReplicaChecker)(nil)
+
+// Relevant members of the public Cluster interface.
+type Cluster interface {
+    Plan(context.Context, uint64) (topology.Plan, error)
+    Approve(context.Context, uint64) (topology.OperatorID, error)
+    Operator(context.Context, topology.OperatorID) (topology.OperatorStatus, error)
+    WaitOperator(context.Context, topology.OperatorID) (topology.OperatorStatus, error)
+    // Other cluster methods omitted from this scope sketch.
+}
+```
+
+ReplicaCheckerOptions contains decision-specific settings such as the stability
+threshold. Driver timing, cooldown and enablement belong to the scheduling
+options owned by the Node, rather than forcing every custom Scheduler to own a
+worker. Zero values select defaults, a custom Scheduler can replace the default,
+and users do not manually construct or start the operator Controller.
+
+### Decision, approval and execution flow
+
+```text
+observations -> configured Scheduler (default: ReplicaChecker)
+            -> typed ScheduleDecision
+            -> mandatory identity/version/safety validation and plan building
+            -> replicated approval and Operator record
+            -> internal/operator.Controller
+            -> managed local actions or caller-supplied load transport
+            -> exact-result verification and durable progress
+
+explicit cluster mutations -> Plan/Approve -> same Operator execution path
+```
+
+Scheduler output requests a change. It neither establishes authorization nor
+supplies an executable arbitrary callback. The fixed core builds and validates
+the supported plan and commits its approval before effects can run. An explicit
+user approval and an automatically approved repair retain their existing audit
+origins and admission rules while using the same execution machinery.
+
+Controller owns ordered dispatch, retries, waits, leadership recovery and
+progress. The managed host/receivers enforce exact effect authorization and
+idempotent callbacks with verification of their exact authorized identities.
+These checks remain required regardless of the selected Scheduler. The
+recommendation remains to keep this Controller internal and library-owned;
+the request to unify its name does not by itself authorize exposing a replaceable
+execution implementation. Application execution remains customizable through
+the already agreed explicit hooks.
+
+Disabling automatic scheduling prevents new automatic decisions; it does not
+cancel an approved Operator. Leader changes resume the recorded approved plan
+instead of rerunning Scheduler to reconstruct an in-progress operation. A stale
+decision must fail validation before approval, and stale work must fail the
+exact-identity/attempt/step check before dispatch or progress recording.
+
+### Granularity and persistence
+
+PD operators are region-scoped. Our existing approved execution can include
+several groups; retain that granularity when naming it Operator. Splitting it
+into independent group operators would alter ordering, failure recovery and
+approval semantics, so it is not implied by this naming refactor. Every Step
+continues to identify its exact group and replica target.
+
+The Go names do not require changing stored identity strings, bbolt bucket names,
+JSON/protobuf field names or ledger keys. In particular, preserve the existing
+version/attempt identity and exact authorization tuple during the refactor.
+`Plan` is a preview; approval still validates the current version and observations
+before durably creating or reusing its Operator. Candidate Operator values
+returned to callers remain owned snapshots, not mutable controller handles.
+
+The final target must inventory record/status/transition conversions, all public
+query/history/watch methods, error and event names, and persisted encodings before
+declaring the vocabulary migration complete. Existing scheduling, execution,
+authorization, replay and cluster tests must follow the new API and retain their
+behavioral assertions. The small example continues to use the defaults.
+
+No implementation code was changed during this brainstorm iteration.
 
 ## NOT CONSIDERED & TODO
 
