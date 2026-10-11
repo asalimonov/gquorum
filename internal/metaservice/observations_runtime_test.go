@@ -64,7 +64,7 @@ func eventBarrier(t *testing.T, b *events.Bus, ch <-chan events.Delivery) {
 }
 func TestMetaHealthEventsStatusAndDrainUseApprovedActiveScope(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	bus, j := eventFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

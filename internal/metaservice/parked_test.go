@@ -130,7 +130,7 @@ func TestParkedJoins_NilReceiver(t *testing.T) {
 }
 func TestHandleJoin_RefusalRecordsParkAndFollowersReadCurrentLeader(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	groups := publicFoundingCluster(t, 3)
 	leader := readyPublic(t, groups)

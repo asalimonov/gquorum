@@ -42,7 +42,7 @@ func (h *testHandler) Step(ctx context.Context, header *metapb.Header, msg raftp
 
 func TestMetaTransportPruneDrainsFinalAdmittedCommit(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	entered, release := make(chan struct{}), make(chan struct{})
 	received := make(chan raftpb.Message, 4)
@@ -146,7 +146,7 @@ func recvMessage(t *testing.T, ch <-chan raftpb.Message) raftpb.Message {
 }
 func TestMetaTransportMessagesAndChunkedSnapshotPreserveTerms(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	receiver := &testHandler{received: make(chan raftpb.Message, 8)}
 	remote := testTransport(t, 2, receiver, nowhere, nil)
@@ -180,7 +180,7 @@ func TestMetaTransportMessagesAndChunkedSnapshotPreserveTerms(t *testing.T) {
 }
 func TestMetaTransportCredentialAndClusterIsolation(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	receiver := &testHandler{received: make(chan raftpb.Message, 1)}
 	remote := testTransport(t, 2, receiver, nowhere, nil)
@@ -216,7 +216,7 @@ func TestMetaTransportCredentialAndClusterIsolation(t *testing.T) {
 }
 func TestMetaTransportPeerBackoffDoesNotBlockOtherPeer(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	blocked := testTransport(t, 2, &testHandler{block: true}, nowhere, nil)
 	h := &testHandler{received: make(chan raftpb.Message, 32)}
@@ -264,7 +264,7 @@ func TestMetaTransportPeerBackoffDoesNotBlockOtherPeer(t *testing.T) {
 }
 func TestMetaTransportStopCancelsAndJoinsControlCall(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	h := &testHandler{block: true, calls: make(chan string, 1)}
 	remote := testTransport(t, 2, h, nowhere, nil)
@@ -298,7 +298,7 @@ func TestMetaTransportStopCancelsAndJoinsControlCall(t *testing.T) {
 }
 func TestMetaTransportRefusesMissingSnapshotFinalAndWrongMessageDomain(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	h := &testHandler{received: make(chan raftpb.Message, 2)}
 	remote := testTransport(t, 2, h, nowhere, nil)

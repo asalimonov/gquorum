@@ -15,7 +15,7 @@ import (
 
 func TestActivateDeactivateReleasesLocksAndFencesDelayedRevoke(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	groups := publicFoundingCluster(t, 3)
 	leader := readyPublic(t, groups)
@@ -110,7 +110,7 @@ func TestActivateDeactivateReleasesLocksAndFencesDelayedRevoke(t *testing.T) {
 }
 func TestSessionRPCRejectsAnotherProcessInstanceAndReservedNodeLocks(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	g := readyPublic(t, publicFoundingCluster(t, 1))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

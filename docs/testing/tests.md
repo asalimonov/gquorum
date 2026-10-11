@@ -3,7 +3,8 @@
 Current results and acceptance status are in the
 [API refactor validation record](api-refactor-validation.md).
 
-`make test-unit` runs uncached unit tests with `-short -count=1` in the library,
+`make test` (also available as `make test-unit`) compiles all three modules and
+runs uncached unit tests with `-short -count=1` in the library,
 the separate `examples/cluster` module and the caller fixture module. Independent
 top-level unit cases call `t.Parallel()`. The default runs four packages and four
 cases per package concurrently; `UNIT_PACKAGES` and `UNIT_PARALLEL` can override
@@ -20,6 +21,7 @@ meta/journal compatibility and the separate fixture module. This uses Go 1.26.5 
 macOS arm64, Apple M4 Pro with 14 logical CPUs, and a warm compilation cache;
 dependency download and a cold compiler cache are separate setup costs.
 
+`make test-cluster` runs the full functional and Docker process suites.
 Functional cases explicitly skip when `testing.Short()` is true. These exercise
 real running Raft engines, network protocols, public multi-node lifecycles, or
 integrated FSM/planner/operator/scheduling workflows. Constructor and
@@ -29,13 +31,11 @@ new isolated unit cases should call `t.Parallel()` before creating fixtures.
 
 | Command | Coverage |
 | --- | --- |
-| `make test-unit` | Uncached parallel library, example and fixture units |
-| `make test-unit-race` | The same parallel units under the race detector |
-| `make test` | All library, example and fixture unit/functional cases |
-| `make test-race` | All library, example and fixture cases under the race detector |
+| `make test` / `make test-unit` | Compile all three modules and run uncached parallel units |
+| `make test-race` / `make test-unit-race` | The same parallel units under the race detector |
 | `make test-fixture` | Caller load/meta integration in `tests/cluster/testapp` |
 | `make test-example` | Actual small Compose demo REST e2e |
-| `make test-cluster` | Build once, then run the Docker process suite |
+| `make test-cluster` | Build once, run full library/example functional tests, then fixture and Docker process tests |
 | `make test-perf` | Nine measured Docker cases, each under two minutes |
 | `make bench` | Planner and complete meta FSM snapshot matrices |
 | `make lint` | Library, example and fixture vet |

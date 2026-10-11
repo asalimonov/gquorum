@@ -165,7 +165,7 @@ func propose(t *testing.T, g *Group, data string) Result {
 
 func TestFoundingStorage_SeedHasFullMachineAndVoters(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	s := openStore(t, t.TempDir(), "1")
 	g, _ := singleton(t, s)
@@ -177,7 +177,7 @@ func TestFoundingStorage_SeedHasFullMachineAndVoters(t *testing.T) {
 }
 func TestLoad_ProposeSnapshotRestartReplaysCommittedTail(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	root := t.TempDir()
 	s := openStore(t, root, "1")
@@ -211,7 +211,7 @@ func TestLoad_ProposeSnapshotRestartReplaysCommittedTail(t *testing.T) {
 }
 func TestLoad_BusinessRejectionConsumesEntryAndMachineFailureHalts(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	g, m := singleton(t, openStore(t, t.TempDir(), "1"))
 	if result := propose(t, g, "reject"); result.Code != "rejected" {
@@ -232,7 +232,7 @@ func TestLoad_BusinessRejectionConsumesEntryAndMachineFailureHalts(t *testing.T)
 }
 func TestLoad_ThreeNodeConsensusAndLeaderReplacement(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	n := &network{nodes: make(map[uint64]*Group), disconnected: make(map[uint64]bool)}
 	var groups []*Group
@@ -327,7 +327,7 @@ func (s *failingStore) SaveReady(ctx context.Context, id string, w storage.Ready
 }
 func TestWAL_TransientFailureRecoversWithoutHalt(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	s := &failingStore{Store: openStore(t, t.TempDir(), "1")}
 	g, m := singleton(t, s)
@@ -340,7 +340,7 @@ func TestWAL_TransientFailureRecoversWithoutHalt(t *testing.T) {
 }
 func TestWAL_StepNeverBlocksAndShutdownDuringStallIsQuiet(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	s := &failingStore{Store: openStore(t, t.TempDir(), "1"), entered: make(chan struct{})}
 	g, m := singleton(t, s)
@@ -373,7 +373,7 @@ func TestWAL_StepNeverBlocksAndShutdownDuringStallIsQuiet(t *testing.T) {
 }
 func TestLoad_RejectsLocalMessagesAndUnsupportedMembership(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	g, _ := singleton(t, openStore(t, t.TempDir(), "1"))
 	for _, typ := range []raftpb.MessageType{raftpb.MsgHup, raftpb.MsgBeat, raftpb.MsgProp, raftpb.MsgUnreachable, raftpb.MsgSnapStatus} {
@@ -420,7 +420,7 @@ func (l liveNetwork) Live(string) (map[uint64]bool, bool) {
 }
 func TestLoad_MembershipLearnerPromotionTransferAndRemoval(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	for _, wait := range []time.Duration{0, 5 * time.Millisecond} {
 		t.Run(wait.String(), func(t *testing.T) { loadMembership(t, wait) })
@@ -464,7 +464,7 @@ func loadMembership(t *testing.T, wait time.Duration) {
 
 func TestRecover_UncommittedTailIsNotAppliedAtReady(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	s := openStore(t, t.TempDir(), "1")
 	n := &network{nodes: make(map[uint64]*Group), disconnected: make(map[uint64]bool)}
@@ -516,7 +516,7 @@ func (c *captureTransport) Send(ctx context.Context, m []raftpb.Message) error {
 }
 func TestWAL_ReceivedSnapshotIsPersistedBeforeRestoreAndAck(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	base := openStore(t, t.TempDir(), "2")
 	gate := &snapshotGate{Store: base, entered: make(chan struct{}), release: make(chan struct{})}
@@ -552,7 +552,7 @@ func TestWAL_ReceivedSnapshotIsPersistedBeforeRestoreAndAck(t *testing.T) {
 
 func TestLoad_MultipleGroupsShareStoreAndStopIndependently(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	s := openStore(t, t.TempDir(), "1")
 	n := &network{nodes: make(map[uint64]*Group), disconnected: make(map[uint64]bool)}
@@ -583,7 +583,7 @@ func TestLoad_MultipleGroupsShareStoreAndStopIndependently(t *testing.T) {
 
 func TestPropose_OverloadedWhileDegradedAndCancellationIsBounded(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	s := &failingStore{Store: openStore(t, t.TempDir(), "1"), entered: make(chan struct{})}
 	g, m := singleton(t, s)
@@ -617,7 +617,7 @@ func TestPropose_OverloadedWhileDegradedAndCancellationIsBounded(t *testing.T) {
 
 func TestLoad_ConcurrentProposalsHaveExactResults(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	for _, wait := range []time.Duration{0, time.Millisecond} {
 		t.Run(fmt.Sprint(wait), func(t *testing.T) {

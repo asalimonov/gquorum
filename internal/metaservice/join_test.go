@@ -63,7 +63,7 @@ func approvedNode(t *testing.T, leader *Group, name string, kind topology.NodeTy
 
 func TestMetaJoinRequiresApprovalAndPreparedExactRuntimeBeforeLearner(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	groups := publicFoundingClusterWith(t, 2, func(o *Options) { o.Limits.MaxNodes = 3 })
 	leader := readyPublic(t, groups)
@@ -149,7 +149,7 @@ func TestMetaJoinRequiresApprovalAndPreparedExactRuntimeBeforeLearner(t *testing
 
 func TestMetaRetainedDiskJoinIsReadOnlyAndCopiedLiveIdentityIsFenced(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	groups := publicFoundingCluster(t, 3)
 	leader := readyPublic(t, groups)
@@ -209,7 +209,7 @@ func TestMetaRetainedDiskJoinIsReadOnlyAndCopiedLiveIdentityIsFenced(t *testing.
 
 func TestMetaDataLostReadmissionBlocksWithoutHookAndRetriesSameGrant(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	groups := publicFoundingCluster(t, 3)
 	leader := readyPublic(t, groups)
@@ -300,7 +300,7 @@ func TestMetaDataLostReadmissionBlocksWithoutHookAndRetriesSameGrant(t *testing.
 
 func TestMetaPinnedAdmissionRestartsBeforeAndAfterReadyWithoutAllocatingIDs(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	for _, prepared := range []bool{false, true} {
 		t.Run(fmt.Sprint(prepared), func(t *testing.T) {

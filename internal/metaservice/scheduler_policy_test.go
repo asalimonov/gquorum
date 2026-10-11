@@ -66,7 +66,7 @@ func TestSchedulingStatusLeaderNamesUseCapturedActive(t *testing.T) {
 
 func TestMetaUsesSelectedSchedulerWithOwnedHoldsAndCallbackDeadline(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	type observation struct {
 		input    policy.ScheduleInput

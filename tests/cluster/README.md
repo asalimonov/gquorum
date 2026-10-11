@@ -1,8 +1,10 @@
 # Process cluster tests
 
 Run `make test-cluster` from the repository root. It builds the caller-owned
-key/value test application image once, then runs this module with the `cluster` build
-tag. Docker must be reachable. For focused validation, reuse the built image:
+key/value test application image once, runs full library and example functional
+tests, then runs this module (including caller fixture tests) with the `cluster`
+build tag. `make test` runs only fast unit checks across all three modules.
+Docker must be reachable. For focused process validation, reuse the built image:
 
 ```sh
 make test-cluster-run CLUSTER_ARGS='-v -run TestPool'

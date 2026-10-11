@@ -161,7 +161,7 @@ func loadDocument(t *testing.T, g *Group) topology.Document {
 
 func TestMetaCallerEffectCompletionLostAcrossLeaderReplacement(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	controller := &verifiedLoadController{groups: map[string]topology.Group{}, hosts: map[string]map[string]uint64{}, firstEffect: make(chan struct{})}
 	effect := controller.firstEffect
@@ -221,7 +221,7 @@ func TestMetaCallerEffectCompletionLostAcrossLeaderReplacement(t *testing.T) {
 
 func TestMetaDeletesInterruptedFoundingBeforeActive(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	release := make(chan struct{})
 	controller := &verifiedLoadController{groups: map[string]topology.Group{}, hosts: map[string]map[string]uint64{}, firstEffect: make(chan struct{}), firstRelease: release}

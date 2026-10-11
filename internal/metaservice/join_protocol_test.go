@@ -157,7 +157,7 @@ func TestJoinClientRefusalClassificationAndBoundedRedirects(t *testing.T) {
 
 func TestJoinClientSkipsColdSeedsAndFollowsLeaderHintToExactGrant(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	accepted := &joinProtocolHandler{}
 	leader := joinProtocolServer(t, accepted, []byte("test-secret"))

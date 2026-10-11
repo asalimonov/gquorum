@@ -60,7 +60,7 @@ func (h *approvalHandler) Call(ctx context.Context, method string, header *metap
 
 func TestFollowerApprovalPreservesExactRequestAndRejectsEmptyReply(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	resolvers := map[string]*approvalResolver{}
 	groups := publicFoundingClusterWith(t, 3, func(o *Options) {

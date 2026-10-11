@@ -12,7 +12,7 @@ import (
 
 func TestMutationApprovalFailureReturnsDurablyStagedDocument(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	groups := publicFoundingCluster(t, 3)
 	leader := readyPublic(t, groups)
@@ -32,7 +32,7 @@ func TestMutationApprovalFailureReturnsDurablyStagedDocument(t *testing.T) {
 }
 func TestPublicLoadGroupCreateDeleteAndRetiredID(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	controller := &verifiedLoadController{groups: map[string]topology.Group{}, hosts: map[string]map[string]uint64{}}
 	groups := publicFoundingClusterWith(t, 3, func(o *Options) { o.LoadGroups = controller })
@@ -91,7 +91,7 @@ func TestPublicLoadGroupCreateDeleteAndRetiredID(t *testing.T) {
 }
 func TestPublicTransferMetaLeaderFromFollowerUsesActiveScope(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	groups := publicFoundingCluster(t, 3)
 	leader := readyPublic(t, groups)

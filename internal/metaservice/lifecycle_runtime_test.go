@@ -32,7 +32,7 @@ func (c *slowEffectController) CreateGroup(ctx context.Context, a topology.Autho
 }
 func TestMetaQuiesceJoinsEffectBeforeReturningAndKeepsOwnedState(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	c := &slowEffectController{verifiedLoadController: verifiedLoadController{groups: map[string]topology.Group{}, hosts: map[string]map[string]uint64{}}, entered: make(chan struct{}), canceled: make(chan struct{}), release: make(chan struct{}), returned: make(chan struct{})}
 	groups := publicFoundingClusterWith(t, 1, func(o *Options) { o.LoadGroups = c })
@@ -110,7 +110,7 @@ func TestMetaQuiesceJoinsEffectBeforeReturningAndKeepsOwnedState(t *testing.T) {
 }
 func TestMetaQuiesceAcknowledgesOwnSessionRevocation(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	g := readyPublic(t, publicFoundingCluster(t, 1))
 	s, err := g.Activate(context.Background())
@@ -135,7 +135,7 @@ func TestMetaQuiesceAcknowledgesOwnSessionRevocation(t *testing.T) {
 }
 func TestMetaStartRacingWithStopHasNoLateWorkers(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	for range 12 {
 		g, err := New(optionsForTest(t))

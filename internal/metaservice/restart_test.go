@@ -35,7 +35,7 @@ func restartOptions(t *testing.T, g *Group) Options {
 
 func TestPublicMetaRestartUsesPinReplaysTailAndRefusesChangedRules(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	old := readyPublic(t, publicFoundingCluster(t, 1))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -103,7 +103,7 @@ func TestPublicMetaConstructorInvalidDoesNotCreateStorage(t *testing.T) {
 
 func TestPublicMetaParentCancellationJoinsWorkers(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	old := readyPublic(t, publicFoundingCluster(t, 1))
 	if err := old.Stop(context.Background()); err != nil {

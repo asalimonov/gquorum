@@ -195,7 +195,7 @@ func assertStatus(t *testing.T, r *Driver, state topology.SchedulingState, reaso
 
 func TestDriverStartStopLifecycle(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	h := newTestHost(t, 1, 2, 3)
 	r := newTestDriver(t, h, Settings{})
@@ -220,7 +220,7 @@ func TestDriverStartStopLifecycle(t *testing.T) {
 }
 func TestDriverGatesLeaderHealthAndDisabled(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	for _, mode := range []string{"follower", "unknown", "disabled"} {
 		t.Run(mode, func(t *testing.T) {
@@ -243,7 +243,7 @@ func TestDriverGatesLeaderHealthAndDisabled(t *testing.T) {
 
 func TestDriverLocalKillSwitchResetsStability(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	h := newTestHost(t, 1, 2)
 	r := newTestDriver(t, h, Settings{})
@@ -284,7 +284,7 @@ func TestDriverLocalKillSwitchResetsStability(t *testing.T) {
 }
 func TestDriverResumesApprovedOperatorBeforeHealthGate(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	for _, state := range []topology.OperatorState{topology.OperatorPending, topology.OperatorRunning, topology.OperatorWaitingForCatchUp, topology.OperatorSucceeded} {
 		t.Run(string(state), func(t *testing.T) {
@@ -311,7 +311,7 @@ func TestDriverResumesApprovedOperatorBeforeHealthGate(t *testing.T) {
 }
 func TestDriverDoesNotMergeStagedOrFailedOperatorIntent(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	for _, failed := range []bool{true, false} {
 		t.Run(fmt.Sprint(failed), func(t *testing.T) {
@@ -335,7 +335,7 @@ func TestDriverDoesNotMergeStagedOrFailedOperatorIntent(t *testing.T) {
 }
 func TestDriverCommitsExactLearnerFirstRepair(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	h := newTestHost(t, 1, 2)
 	r := newTestDriver(t, h, Settings{})
@@ -361,7 +361,7 @@ func TestDriverCommitsExactLearnerFirstRepair(t *testing.T) {
 }
 func TestDriverCASRaceLeavesOperatorVersionStaged(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	h := newTestHost(t, 1, 2)
 	r := newTestDriver(t, h, Settings{})
@@ -380,7 +380,7 @@ func (p *stubPolicy) Schedule(context.Context, policy.ScheduleInput) (policy.Sch
 }
 func TestDriverRejectsPolicyActionsOutsideAllowList(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	h := newTestHost(t, 1, 2, 3)
 	r := newTestDriver(t, h, Settings{})
@@ -426,7 +426,7 @@ func TestHealableMatrix(t *testing.T) {
 }
 func TestDriverHealsStagedInternal(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	h := newTestHost(t, 1, 2, 3)
 	h.stage(topology.OriginInternal, 1)
@@ -440,7 +440,7 @@ func TestDriverHealsStagedInternal(t *testing.T) {
 }
 func TestDriverHealRefusals(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	for _, mode := range []string{"operator", "laundered", "follower", "plan-error", "apply-error", "nonempty", "unknown"} {
 		t.Run(mode, func(t *testing.T) {
@@ -480,7 +480,7 @@ func TestDriverHealRefusals(t *testing.T) {
 }
 func TestReconcileTickIsBoundedAndCancelable(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	h := newTestHost(t, 1, 2, 3)
 	h.blockViews = true
@@ -506,7 +506,7 @@ func TestReconcileTickIsBoundedAndCancelable(t *testing.T) {
 }
 func TestDriverFollowerResetsStabilityObservations(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	for _, mode := range []string{"standby", "staged", "failed", "approved"} {
 		t.Run(mode, func(t *testing.T) {
@@ -537,7 +537,7 @@ func TestDriverFollowerResetsStabilityObservations(t *testing.T) {
 }
 func TestDriverStatusGatesAndStableSince(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	for _, mode := range []string{"converged", "stability", "quorum", "cooldown", "status-error", "read-error", "execution-error"} {
 		t.Run(mode, func(t *testing.T) {
@@ -582,7 +582,7 @@ func TestDriverStatusGatesAndStableSince(t *testing.T) {
 }
 func TestDriverStatusTransitionsAreOwnedAndLoggedOnce(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	h := newTestHost(t, 1, 2, 3)
 	r := newTestDriver(t, h, Settings{})
@@ -625,7 +625,7 @@ func TestDriverStatusTransitionsAreOwnedAndLoggedOnce(t *testing.T) {
 }
 func TestDriverStatusErrorWarnsOnce(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	h := newTestHost(t, 1, 2, 3)
 	r := newTestDriver(t, h, Settings{})
@@ -641,7 +641,7 @@ func TestDriverStatusErrorWarnsOnce(t *testing.T) {
 }
 func TestDriverStatusConcurrentAccess(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	h := newTestHost(t, 1, 2, 3)
 	r := newTestDriver(t, h, Settings{})

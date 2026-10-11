@@ -165,7 +165,7 @@ func runtimeWait(t *testing.T, condition func() bool) {
 }
 func TestMetaRuntimeRealGRPCConsensusAndBboltRestart(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	nodes, _ := runtimeCluster(t, 3)
 	leader := runtimeLeader(t, nodes)
@@ -259,7 +259,7 @@ func TestMetaRuntimeRealGRPCConsensusAndBboltRestart(t *testing.T) {
 
 func TestMetaRuntimeLeaderReplacement(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	nodes, _ := runtimeCluster(t, 3)
 	leader := runtimeLeader(t, nodes)

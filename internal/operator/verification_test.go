@@ -10,7 +10,7 @@ import (
 
 func TestControllerAcknowledgedMembershipRequiresObservedExactResult(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	active, target, replica := growDocuments()
 	step := Step{Seq: 1, Kind: StepAddLearner, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}
@@ -53,7 +53,7 @@ func TestPermanentPromotionRefusalDoesNotWaitForever(t *testing.T) {
 
 func TestControllerFreshGroupSeedsVotersBeforeIntentionalLearner(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	active := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"old"})
 	target := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"old", "new"})

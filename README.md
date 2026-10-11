@@ -96,7 +96,9 @@ orchestration; the application authenticates its protocol and implements its
 business state machine. `load.NewStandalone` is available for independent
 consensus with caller-owned lifecycle and authorization.
 
-See the [cluster-building guide](docs/architecture/library.md) for integration
+See the [Raft overview](docs/architecture/raft.md) for consensus domains,
+elections, heartbeat protocols and durability. See the
+[cluster-building guide](docs/architecture/library.md) for integration
 contracts and the [ownership and recovery guide](docs/architecture/runtime.md)
 for lifecycle details. Document and status reads are observations, not
 linearizable read barriers. Forced recovery after permanent majority loss is
@@ -143,15 +145,15 @@ compatibility impact.
 3. Run the relevant checks and include their results in your pull request:
 
    ```sh
-   make test-unit       # Uncached library, example and fixture units
-   make lint            # go vet in all three modules
-   make test-unit-race  # Unit checks under the race detector
-   make test            # Library, example and fixture unit/functional tests
+   make test       # Compile all three modules and run fast, uncached units
+   make lint       # go vet in all three modules
+   make test-race  # Fast unit checks under the race detector
    ```
 
 Use `make test-fixture` for application integration, `make test-example` for the
-actual Compose demo and `make test-cluster` for Docker process tests. The process
-suite covers three-, five- and seven-node clusters, faults, recovery and multiple
+actual Compose demo and `make test-cluster` for full functional and Docker process
+tests. `make test-unit` and `make test-unit-race` are aliases for the fast checks.
+The process suite covers three-, five- and seven-node clusters, faults, recovery and multiple
 load groups. Docker is required for the example and process suites. Protocol
 changes use `make generate` and `make proto-check`, which require `protoc` and
 install pinned Go generators.

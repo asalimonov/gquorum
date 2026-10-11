@@ -126,7 +126,7 @@ type apiCluster struct {
 func newAPICluster(t *testing.T, size int, loads bool, configure func(int, *quorum.NodeOptions)) *apiCluster {
 	t.Helper()
 	if testing.Short() {
-		t.Skip("functional public API test; run make test")
+		t.Skip("functional public API test; run make test-cluster")
 	}
 	c := &apiCluster{network: &apiNetwork{nodes: map[string]quorum.Node{}}, machines: map[string]*apiCounter{}}
 	c.ctx, c.cancel = context.WithCancel(context.Background())

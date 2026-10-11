@@ -37,7 +37,7 @@ func (s *slowDestination) Send(ctx context.Context, messages []raftpb.Message) e
 
 func TestSlowDestinationCannotDelayHealthyMajorityAndStopJoinsSenders(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	n := &network{nodes: map[uint64]*Group{}, disconnected: map[uint64]bool{}}
 	transport := &slowDestination{network: n}

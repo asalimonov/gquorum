@@ -55,7 +55,7 @@ func publicFoundingClusterWith(t *testing.T, count int, modify func(*Options)) [
 }
 func TestPublicMetaFoundingApprovesTopologyAndActivatesEveryNode(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	groups := publicFoundingCluster(t, 3)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

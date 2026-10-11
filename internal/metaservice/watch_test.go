@@ -37,7 +37,7 @@ func assertWatchQuiet(t *testing.T, ch <-chan topology.Update) {
 
 func TestMetaWatchSeparatesLatestTargetAndActive(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	groups := publicFoundingCluster(t, 1)
 	g := readyPublic(t, groups)
@@ -86,7 +86,7 @@ func TestMetaWatchSeparatesLatestTargetAndActive(t *testing.T) {
 
 func TestMetaWatchFanoutIsOwnedAndDurablyAppliedOnFollowers(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	for _, size := range []int{3, 5, 7} {
 		t.Run(strconv.Itoa(size)+"-nodes", func(t *testing.T) {
@@ -258,7 +258,7 @@ func TestMetaWatchCancelAndBound(t *testing.T) {
 
 func TestMetaStopJoinsAndClosesWatchers(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	g := readyPublic(t, publicFoundingCluster(t, 1))
 	ch, err := g.Watch(context.Background(), topology.Latest)
@@ -282,7 +282,7 @@ func TestMetaStopJoinsAndClosesWatchers(t *testing.T) {
 
 func TestMetaWatchRejectsCanceledAndInvalidView(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	g := readyPublic(t, publicFoundingCluster(t, 1))
 	ctx, cancel := context.WithCancel(context.Background())

@@ -56,7 +56,7 @@ func verifyRemovalStore(g *Group, reason string) error {
 
 func TestSelfRemoval_FiresThroughApplyEntry(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

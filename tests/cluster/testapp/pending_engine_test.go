@@ -41,7 +41,7 @@ func (s *pressureStore) SaveReady(ctx context.Context, id string, write storage.
 
 func TestProposalPressureBoundsCancellationAndRecovery(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	for _, stop := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stop=%t", stop), func(t *testing.T) {

@@ -432,7 +432,7 @@ func statusFor(group string, voters, learners []uint64, leader uint64) GroupStat
 
 func TestController_LearnerFirstSteps(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	active, target, replica := growDocuments()
 	tests := []struct {
@@ -472,7 +472,7 @@ func TestController_LearnerFirstSteps(t *testing.T) {
 
 func TestController_FinalValidatorFailureLeavesActiveUnchanged(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	active, target, replica := growDocuments()
 	step := Step{Seq: 1, Kind: StepPromoteVoter, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}
@@ -494,7 +494,7 @@ func TestController_FinalValidatorFailureLeavesActiveUnchanged(t *testing.T) {
 
 func TestController_ForcedRetirementWaivesOnlyDeadNodeTeardown(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	active := threeNodeDoc()
 	target := active.Clone()
@@ -524,7 +524,7 @@ func TestController_ForcedRetirementWaivesOnlyDeadNodeTeardown(t *testing.T) {
 
 func TestController_DestructiveAndLifecycleSteps(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	active := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"shard0"})
 	target := active.Clone()
@@ -551,7 +551,7 @@ func TestController_DestructiveAndLifecycleSteps(t *testing.T) {
 
 func TestController_DeleteShardStopsEveryHostBeforeSharedDelete(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	active := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"shard0", "shard9"})
 	target := active.Clone()
@@ -581,7 +581,7 @@ func TestController_DeleteShardStopsEveryHostBeforeSharedDelete(t *testing.T) {
 
 func TestController_DeleteShardWaitsForUnreachableHost(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	active := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"shard0", "shard9"})
 	target := active.Clone()
@@ -610,7 +610,7 @@ func TestController_DeleteShardWaitsForUnreachableHost(t *testing.T) {
 
 func TestController_DeleteShardCompletesAfterGroupLosesLeader(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	active := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"shard0", "shard9"})
 	target := active.Clone()
@@ -633,7 +633,7 @@ func TestController_DeleteShardCompletesAfterGroupLosesLeader(t *testing.T) {
 
 func TestController_DeleteShardContinuesAfterGroupBecomesAbsent(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	active := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"shard0", "shard9"})
 	target := active.Clone()
@@ -656,7 +656,7 @@ func TestController_DeleteShardContinuesAfterGroupBecomesAbsent(t *testing.T) {
 
 func TestController_FoundingDemotionTransferAndDelete(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	base := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"shard0"})
 	t.Run("founding", func(t *testing.T) {
@@ -729,7 +729,7 @@ func TestController_FoundingDemotionTransferAndDelete(t *testing.T) {
 
 func TestController_WaitFailureOwnershipAndCancellation(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	active, target, replica := growDocuments()
 	prepare := Step{Seq: 1, Kind: StepPrepareReplica, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}
@@ -808,7 +808,7 @@ func TestController_WaitFailureOwnershipAndCancellation(t *testing.T) {
 
 func TestController_EmptyPlanAndActivationFailure(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	target := clusterDoc(1, 1, []string{"n1"}, []string{"shard0"})
 	target.Version = 2
@@ -829,7 +829,7 @@ func (s *countingSignal) Signal() { s.calls++ }
 
 func TestController_FailoverResumesExactStep(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	active, target, replica := growDocuments()
 	tests := []struct {
@@ -899,7 +899,7 @@ func TestController_FailoverResumesExactStep(t *testing.T) {
 
 func TestController_SupersedesOnlyAtStepBoundary(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	active, target, replica := growDocuments()
 	add := Step{Seq: 1, Kind: StepAddLearner, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}
@@ -958,7 +958,7 @@ func TestController_SupersedesOnlyAtStepBoundary(t *testing.T) {
 
 func TestController_ResumePreservesDurableWaiting(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	active, target, replica := growDocuments()
 	wait := Step{Seq: 1, Kind: StepWaitCaughtUp, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}
@@ -990,7 +990,7 @@ func TestController_ResumePreservesDurableWaiting(t *testing.T) {
 
 func TestController_ResumeMixedPlaneOwnership(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	target := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"shard0"})
 	target.Version = 2
@@ -1042,7 +1042,7 @@ func TestController_ResumeMixedPlaneOwnership(t *testing.T) {
 
 func TestController_ShutdownCancelsBlockedWorkAndIsIdempotent(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	active, target, replica := growDocuments()
 	prepare := Step{Seq: 1, Kind: StepPrepareReplica, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}
@@ -1101,7 +1101,7 @@ func TestController_ShutdownCancelsBlockedWorkAndIsIdempotent(t *testing.T) {
 
 func TestController_ShutdownReusesBoundedRetryTimer(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	active, target, replica := growDocuments()
 	prepare := Step{Seq: 1, Kind: StepPrepareReplica, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}
@@ -1132,7 +1132,7 @@ func TestController_ShutdownReusesBoundedRetryTimer(t *testing.T) {
 
 func TestController_ResumeSerializesConcurrentTicks(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	active, target, replica := growDocuments()
 	prepare := Step{Seq: 1, Kind: StepPrepareReplica, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}
@@ -1214,7 +1214,7 @@ func (c *blockingControllerCoordinator) RecordOperatorTransition(ctx context.Con
 // per-proposal deadline this test hangs.
 func TestController_TickSurvivesLostProposal(t *testing.T) {
 	if testing.Short() {
-		t.Skip("functional test; run make test")
+		t.Skip("functional test; run make test-cluster")
 	}
 	active, target, replica := growDocuments()
 	steps := []Step{
