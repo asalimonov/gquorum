@@ -115,18 +115,9 @@ func (h *Host) retire(ctx context.Context, req load.RetirementRequest) (load.Ret
 	if err := h.checkRetirementLedger(ctx, req, false); err != nil {
 		return load.RetirementResult{}, err
 	}
-	result := retirementProof(req)
-	if h.cfg.RetireApplication != nil {
-		call, cancel := context.WithTimeout(ctx, h.cfg.CallbackTimeout)
-		var err error
-		result, err = h.cfg.RetireApplication(call, cloneRetirement(req))
-		if err == nil {
-			err = call.Err()
-		}
-		cancel()
-		if err != nil {
-			return load.RetirementResult{}, err
-		}
+	result, err := h.callRetireApplication(ctx, req)
+	if err != nil {
+		return load.RetirementResult{}, err
 	}
 	if !matchingRetirement(req, result) {
 		return load.RetirementResult{}, fault.ErrOperatorAuthorization
@@ -152,6 +143,19 @@ func (h *Host) retire(ctx context.Context, req load.RetirementRequest) (load.Ret
 	}
 	h.mu.Unlock()
 	return retirementProof(req), nil
+}
+
+func (h *Host) callRetireApplication(ctx context.Context, req load.RetirementRequest) (load.RetirementResult, error) {
+	if h.cfg.RetireApplication == nil {
+		return retirementProof(req), ctx.Err()
+	}
+	call, cancel := context.WithTimeout(ctx, h.cfg.CallbackTimeout)
+	defer cancel()
+	result, err := h.cfg.RetireApplication(call, cloneRetirement(req))
+	if err == nil {
+		err = call.Err()
+	}
+	return result, err
 }
 
 func (h *Host) checkRetirementLedger(ctx context.Context, req load.RetirementRequest, forget bool) error {

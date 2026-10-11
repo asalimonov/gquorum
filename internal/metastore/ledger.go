@@ -17,6 +17,40 @@ type ReplicaRecord struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// LoadReplicaRecords inspects the closed old database during readmission. It
+// does not open a writer, create a file, or clear evidence before retirement.
+func LoadReplicaRecords(path string) (map[string]ReplicaRecord, error) {
+	result := make(map[string]ReplicaRecord)
+	err := withReadOnly(path, func(tx *bolt.Tx) error {
+		if err := validateDiskSchema(tx); err != nil {
+			return err
+		}
+		pin, pinned, err := readIdentityChecked(tx)
+		if err != nil {
+			return err
+		}
+		bucket := tx.Bucket(bucketLoadReplicas)
+		if bucket == nil {
+			return nil
+		}
+		return bucket.ForEach(func(key, value []byte) error {
+			if topology.ValidateLoadID(string(key)) != nil {
+				return fault.ErrUnreadable
+			}
+			var record ReplicaRecord
+			if err := json.Unmarshal(value, &record); err != nil {
+				return fault.New(fault.Unreadable, "invalid retained replica record", err)
+			}
+			if !pinned || record.ReplicaID == 0 || record.NodeName != pin.NodeName || record.ClusterID != pin.ClusterID {
+				return fault.ErrIdentityMismatch
+			}
+			result[string(key)] = record
+			return nil
+		})
+	})
+	return result, err
+}
+
 func (s *Store) RecordReplica(group string, record ReplicaRecord) error {
 	return s.RecordReplicaCAS(group, record, 0)
 }

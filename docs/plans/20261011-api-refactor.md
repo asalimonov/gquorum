@@ -19,7 +19,7 @@ verification progress; checking a stage does not waive any target requirement.
   reports, retirement/retention, readmission and removal fencing.
 - [x] Preserve topology cleanup proof across the 128-document history horizon
   and interrupted founding before Active, including exact approval retries.
-- [ ] Feed all retained approved replica evidence into readmission; exclude
+- [x] Feed all retained approved replica evidence into readmission; exclude
   staged-only identities from its cleanup catalog and verify actual retained
   identities against the exact admission grant.
 - [ ] Node/Cluster facade and settings: startup/readiness/shutdown, policy wiring,
@@ -150,3 +150,32 @@ verification progress; checking a stage does not waive any target requirement.
   metaengine suite and the running-service interrupted-founding/retired-group
   regressions. Readmission catalog composition, the public Node/Cluster facade,
   application migration and Docker acceptance remain outstanding.
+- Readmission foundation: the private FSM recovery catalog includes Active,
+  Target, retained approved documents and exact older Operator identities;
+  staged-only Latest never authorizes retirement. The meta service captures
+  both materialized and replayed evidence. An optional `previous_groups` field
+  in the existing JSON Join reply carries the leader's exact former identities
+  when the joining process has lost its meta database. Existing fields and
+  protobuf definitions are unchanged; no durable schema or bucket changed.
+- The service retains an owned authenticated grant and verifies the entire
+  grant at the private Node/host boundary. Managed Readmit validates node,
+  process, member pair, path and catalogs; fences/joins its old lifetime; checks
+  closed-meta ledger and actual load identities; verifies application retirement
+  with a readmission proof; quarantines only exact Raft identities; then backs up
+  the old meta file under the existing deterministic admission-derived name.
+  The backup retains its ledger, parent sync completes the move, and the live
+  path must be fresh. Exact backup plus absent original is a verified retry;
+  foreign pins, symlinks and overlapping replacement identities are refused.
+- Readmission retries re-run application verification even after a WAL move.
+  Host Stop cancels and joins in-flight readmission callbacks; failed cleanup
+  preserves ownership and evidence. Former owned identities remain recorded
+  across retries after their handles close, so an incomplete catalog cannot
+  become accepted on its second attempt. A metadata-only recovery helper shares
+  the pin/backup checks and refuses former load resources without a load host.
+- Node composition must still wire these private paths and replace the stopped
+  host only after the granted meta pin is installed. The public API and fixture
+  migration have not yet occurred. Stage validation: `make test`, `make lint`,
+  full managed/metaengine/metastore race suites and focused meta admission race
+  tests pass. The uncached unit suite takes **10.53 seconds**. Tests cover
+  history/snapshot catalogs, malformed grants, real machine Close ordering,
+  interrupted quarantine, backup retry, foreign state and joined cancellation.

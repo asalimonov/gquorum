@@ -26,6 +26,8 @@ import (
 
 type Config struct {
 	Identity                                         func() topology.Identity
+	MetaDBPath                                       string
+	AuthorizeReadmission                             func(context.Context, Readmission) error
 	Scope                                            func(context.Context, storage.Identity) (metaengine.LoadScope, error)
 	LookupRecord                                     func(context.Context, string) (metastore.ReplicaRecord, bool, error)
 	RecordReplica                                    func(context.Context, string, metastore.ReplicaRecord, uint64) error
@@ -78,6 +80,10 @@ type Host struct {
 	workWG                      sync.WaitGroup
 	membership                  *membership.Coordinator
 	retentionGate               chan struct{}
+	readmissionGate             chan struct{}
+	readmissionCancel           context.CancelFunc
+	readmissionOwned            map[storage.Identity]bool
+	shutdownRequested           bool
 }
 
 func New(cfg Config) (*Host, error) {
@@ -109,6 +115,7 @@ func New(cfg Config) (*Host, error) {
 	h.operations, h.operationsDone = make(map[string]*groupOperation), make(chan struct{})
 	close(h.operationsDone)
 	h.membership, h.retentionGate = membership.NewCoordinator(), make(chan struct{}, 1)
+	h.readmissionGate = make(chan struct{}, 1)
 	// Validate engine settings without opening storage or invoking application code.
 	check := h.engineOptions(&replica{identity: storage.Identity{NodeName: "validation", ClusterID: "validation", GroupID: "validation", ReplicaID: 1}}, load.Application{}, raftengine.Joining, nil)
 	if err := check.Validate(); err != nil {
@@ -168,6 +175,25 @@ func (h *Host) Quiesce(ctx context.Context) error {
 }
 
 func (h *Host) Stop(ctx context.Context) error {
+	h.mu.Lock()
+	h.shutdownRequested = true
+	if h.readmissionCancel != nil {
+		h.readmissionCancel()
+	}
+	h.mu.Unlock()
+	if err := h.Quiesce(ctx); err != nil {
+		return err
+	}
+	select {
+	case h.readmissionGate <- struct{}{}:
+		defer func() { <-h.readmissionGate }()
+	case <-ctx.Done():
+		return fault.New(fault.ShutdownTimeout, "readmission work has not joined", ctx.Err())
+	}
+	return h.stopReplicas(ctx)
+}
+
+func (h *Host) stopReplicas(ctx context.Context) error {
 	select {
 	case h.stopGate <- struct{}{}:
 		defer func() { <-h.stopGate }()

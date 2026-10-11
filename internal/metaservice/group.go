@@ -48,7 +48,9 @@ type Group struct {
 	leaseGate            sync.Mutex
 	addresses            map[string]string
 	joinMembers          map[uint64]string
-	recoveryDocuments    []topology.Document
+	recoveryGroups       []topology.Group
+	recoveryVersion      uint64
+	readmissionGrant     *Readmission
 	joinDone, joinReady  bool
 	joinAdmission        metaengine.AdmissionRecord
 	joinLeader           string
@@ -167,7 +169,8 @@ func (g *Group) openEngine(identity topology.Identity, mode raftengine.Mode, pee
 	}
 	// Validate the persisted rule pin even when no Raft snapshot was produced.
 	// This materialized state is never used to skip committed-log replay.
-	var recoveryDocuments []topology.Document
+	var recoveryGroups []topology.Group
+	var recoveryVersion uint64
 	materialized, err := store.LoadState()
 	if err != nil {
 		store.Close()
@@ -179,8 +182,12 @@ func (g *Group) openEngine(identity topology.Identity, mode raftengine.Mode, pee
 			store.Close()
 			return err
 		}
-		latest, target, active := check.Views()
-		recoveryDocuments = []topology.Document{active, target, latest}
+		recoveryVersion = check.Latest().Version
+		recoveryGroups, err = check.RecoveryCatalog(context.Background())
+		if err != nil {
+			store.Close()
+			return err
+		}
 	}
 	override, err := store.LoadOverride()
 	if err != nil || override < 0 || override > g.rules.Limits.MaxNodes {
@@ -211,7 +218,7 @@ func (g *Group) openEngine(identity topology.Identity, mode raftengine.Mode, pee
 	g.mu.Lock()
 	g.store = store
 	g.serveOverride = override
-	g.recoveryDocuments = recoveryDocuments
+	g.recoveryGroups, g.recoveryVersion = recoveryGroups, recoveryVersion
 	g.machine = machine
 	g.identity = identity
 	g.memberSeen = seen || containsMember(engine.Status().ConfState, identity.MemberID)

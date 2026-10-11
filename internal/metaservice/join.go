@@ -41,6 +41,7 @@ type joinResponse struct {
 	LeaderAddress     string                     `json:"leader_address"`
 	Readmitted        bool                       `json:"readmitted"`
 	Previous, Granted topology.Document
+	PreviousGroups    []topology.Group `json:"previous_groups,omitempty"`
 }
 type readyRequest struct {
 	NodeName, InstanceID, Address string
@@ -256,6 +257,17 @@ func (g *Group) joinReply(ctx context.Context, a metaengine.AdmissionRecord, rea
 			}
 		}
 	}
+	if response.Readmitted {
+		catalog, err := g.state().RecoveryCatalog(ctx)
+		if err != nil {
+			return metatransport.Reply(err)
+		}
+		for _, group := range previousNodeGroups([]topology.Document{{Groups: catalog}}, response.Granted, a.NodeName) {
+			if group.ID != topology.MetaGroupID {
+				response.PreviousGroups = append(response.PreviousGroups, group)
+			}
+		}
+	}
 	encoded, err := json.Marshal(response)
 	if err != nil {
 		return metatransport.Reply(err)
@@ -282,9 +294,7 @@ func (g *Group) tryJoin(ctx context.Context) error {
 	identity := g.currentIdentity()
 	lastVersion := g.state().Latest().Version
 	g.mu.RLock()
-	for _, doc := range g.recoveryDocuments {
-		lastVersion = max(lastVersion, doc.Version)
-	}
+	lastVersion = max(lastVersion, g.recoveryVersion)
 	g.mu.RUnlock()
 	data, _ := json.Marshal(joinRequest{Identity: identity, Node: g.opts.Node, Address: g.opts.Network.AdvertiseAddress, LastDocVersion: lastVersion})
 	addresses := append([]string(nil), g.opts.JoinSeeds...)
@@ -372,6 +382,9 @@ func (g *Group) tryJoin(ctx context.Context) error {
 		g.joinAdmission = result.Admission
 		g.joinReady = result.Existing || result.Admission.State == metaengine.AdmissionCompleted
 		g.joinDone = true
+		g.mu.Lock()
+		g.readmissionGrant = nil
+		g.mu.Unlock()
 		return nil
 	}
 	return last
@@ -382,6 +395,15 @@ func (g *Group) prepareReadmission(ctx context.Context, previous topology.Identi
 			return err
 		}
 		g.engine.Store(nil)
+	}
+	// Include replay completed since openEngine inspected the materialized state.
+	var appliedCatalog []topology.Group
+	if machine := g.state(); machine != nil {
+		var err error
+		appliedCatalog, err = machine.RecoveryCatalog(ctx)
+		if err != nil {
+			return err
+		}
 	}
 	g.mu.Lock()
 	store := g.store
@@ -398,19 +420,43 @@ func (g *Group) prepareReadmission(ctx context.Context, previous topology.Identi
 		previous.MemberID = result.Previous.MemberID(previous.NodeName)
 	}
 	g.mu.RLock()
-	oldDocuments := append([]topology.Document{result.Previous}, g.recoveryDocuments...)
+	oldDocuments := []topology.Document{result.Previous, {Groups: result.PreviousGroups}, {Groups: g.recoveryGroups}, {Groups: appliedCatalog}}
 	g.mu.RUnlock()
 	payload := Readmission{Previous: previous, Granted: granted, AdmissionID: string(result.Admission.OperatorID) + "/" + result.Admission.InstanceID, MetaDBPath: g.opts.DBPath, PreviousGroups: previousNodeGroups(oldDocuments, result.Granted, previous.NodeName), GrantedGroups: nodeGroups(result.Granted, previous.NodeName)}
+	owned := cloneReadmission(payload)
+	g.mu.Lock()
+	g.readmissionGrant = &owned
+	g.mu.Unlock()
 	if g.opts.OnReadmission == nil {
 		return &ReadmissionRequiredError{Readmission: payload}
 	}
-	// Caller code owns exact storage/application quarantine. The old database is
-	// closed before invoking this idempotent hook; the library never wipes it.
-	if err := g.opts.OnReadmission(ctx, payload); err != nil {
+	// Node's managed host owns resource retirement. Keep the old database closed
+	// and retain the authenticated grant across retries until the new pin opens.
+	if err := g.opts.OnReadmission(ctx, cloneReadmission(payload)); err != nil {
 		return fault.New(fault.ReadmissionRequired, "caller readmission hook failed", err)
 	}
 	if fresh, err := metastore.StoreIsFresh(g.opts.DBPath); err != nil || !fresh {
 		return fault.New(fault.ReadmissionRequired, "caller readmission hook did not quarantine the previous meta lineage", err)
+	}
+	return nil
+}
+
+func cloneReadmission(in Readmission) Readmission {
+	in.PreviousGroups = (topology.Document{Groups: in.PreviousGroups}).Clone().Groups
+	in.GrantedGroups = (topology.Document{Groups: in.GrantedGroups}).Clone().Groups
+	return in
+}
+
+// AuthorizeReadmission checks the exact grant delivered by the authenticated
+// Join protocol. It is a private Node composition boundary, never an RPC.
+func (g *Group) AuthorizeReadmission(ctx context.Context, grant Readmission) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	if g.readmissionGrant == nil || !reflect.DeepEqual(*g.readmissionGrant, grant) {
+		return fault.ErrOperatorAuthorization
 	}
 	return nil
 }
@@ -594,6 +640,27 @@ func validateJoinGrant(identity topology.Identity, rules topology.Rules, result 
 		}
 		if err := result.Previous.Validate(rules); err != nil {
 			return fault.New(fault.Invalid, "invalid previous topology", err)
+		}
+	}
+	seenGroups := make(map[string]bool)
+	for _, group := range result.PreviousGroups {
+		if topology.ValidateLoadID(group.ID) != nil || seenGroups[group.ID] || len(group.Replicas) == 0 {
+			return fault.ErrIdentityMismatch
+		}
+		seenGroups[group.ID] = true
+		seenReplicas := make(map[uint64]bool)
+		for _, r := range group.Replicas {
+			if r.NodeName != identity.NodeName || r.ReplicaID == 0 || seenReplicas[r.ReplicaID] {
+				return fault.ErrIdentityMismatch
+			}
+			seenReplicas[r.ReplicaID] = true
+			if next := result.Granted.Group(group.ID); next != nil {
+				for _, fresh := range next.Replicas {
+					if fresh.ReplicaID == r.ReplicaID {
+						return fault.ErrIdentityMismatch
+					}
+				}
+			}
 		}
 	}
 	owners := map[uint64]string{}

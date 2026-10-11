@@ -110,6 +110,21 @@ func TestInterruptedLoadCleanupSurvivesHistoryAndSnapshot(t *testing.T) {
 			if err != nil || !slices.Equal(ids, want) {
 				t.Fatal("incomplete recovered deletion catalog", ids, err)
 			}
+			catalog, err := restored.RecoveryCatalog(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var recovered []storage.Identity
+			for _, group := range catalog {
+				if group.ID == "shard0" {
+					for _, replica := range group.Replicas {
+						recovered = append(recovered, storage.Identity{ClusterID: base.ClusterID, NodeName: replica.NodeName, GroupID: group.ID, ReplicaID: replica.ReplicaID})
+					}
+				}
+			}
+			if !slices.Equal(recovered, want) {
+				t.Fatal("readmission lost approved preparation after snapshot/history pruning", recovered)
+			}
 			if sm.active.Group("shard0") != nil && founding {
 				t.Fatal("planning rewrote Active")
 			}

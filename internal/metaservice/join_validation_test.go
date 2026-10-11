@@ -2,6 +2,7 @@ package metaservice
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metastore"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -83,6 +85,18 @@ func TestJoinGrantValidatesEveryHintBeforeRoutingMutation(t *testing.T) {
 		"invalid leader address": func(r *joinResponse) { r.LeaderAddress = "bad" },
 		"wrong cluster":          func(r *joinResponse) { r.Granted.ClusterID = "other" },
 		"wrong limits":           func(r *joinResponse) { r.Rules.Limits.MaxNodes++ },
+		"foreign cleanup owner": func(r *joinResponse) {
+			r.PreviousGroups = []topology.Group{{ID: "work", Replicas: []topology.Replica{{NodeName: "intruder", ReplicaID: 1}}}}
+		},
+		"zero cleanup identity": func(r *joinResponse) {
+			r.PreviousGroups = []topology.Group{{ID: "work", Replicas: []topology.Replica{{NodeName: "one"}}}}
+		},
+		"invalid cleanup group": func(r *joinResponse) {
+			r.PreviousGroups = []topology.Group{{ID: "../work", Replicas: []topology.Replica{{NodeName: "one", ReplicaID: 1}}}}
+		},
+		"duplicate cleanup identity": func(r *joinResponse) {
+			r.PreviousGroups = []topology.Group{{ID: "work", Replicas: []topology.Replica{{NodeName: "one", ReplicaID: 1}, {NodeName: "one", ReplicaID: 1}}}}
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -94,6 +108,62 @@ func TestJoinGrantValidatesEveryHintBeforeRoutingMutation(t *testing.T) {
 				t.Fatal("invalid grant accepted")
 			}
 		})
+	}
+}
+
+func TestReadmissionCallbackUsesOwnedExactGrant(t *testing.T) {
+	t.Parallel()
+	g := &Group{opts: Options{DBPath: filepath.Join(t.TempDir(), "missing.bolt")}}
+	previous := topology.Identity{NodeName: "one", ClusterID: "cluster", InstanceID: "process", MemberID: 1}
+	r := joinResponse{MemberID: 2, PreviousGroups: []topology.Group{{ID: "old", Replicas: []topology.Replica{{NodeName: "one", ReplicaID: 7}}}}}
+	r.Admission.OperatorID, r.Admission.InstanceID = "exec-v3-a1", "process"
+	g.opts.OnReadmission = func(ctx context.Context, grant Readmission) error {
+		if err := g.AuthorizeReadmission(ctx, grant); err != nil {
+			t.Fatal(err)
+		}
+		if len(grant.PreviousGroups) != 1 || grant.PreviousGroups[0].Replicas[0].ReplicaID != 7 {
+			t.Fatal("lost remote approved catalog", grant)
+		}
+		grant.PreviousGroups[0].Replicas[0].ReplicaID = 9
+		if !errors.Is(g.AuthorizeReadmission(ctx, grant), fault.ErrOperatorAuthorization) {
+			t.Fatal("mutated callback grant altered authorization")
+		}
+		return nil
+	}
+	if err := g.prepareReadmission(t.Context(), previous, r); err != nil {
+		t.Fatal(err)
+	}
+	if r.PreviousGroups[0].Replicas[0].ReplicaID != 7 {
+		t.Fatal("callback mutated source grant")
+	}
+}
+
+func TestReadmissionReplyCarriesApprovedFormerReplicasWithoutLocalMetaDisk(t *testing.T) {
+	t.Parallel()
+	f := newMutationFixture(t)
+	doc := f.g.machine.Latest()
+	for i := range doc.Groups {
+		for j := range doc.Groups[i].Replicas {
+			if doc.Groups[i].Replicas[j].NodeName == "n1" {
+				doc.Groups[i].Replicas[j].ReplicaID = 4
+			}
+		}
+		doc.Groups[i].NextReplicaID = 5
+	}
+	f.commit(t, doc, true)
+	staged := f.g.machine.Latest()
+	staged.Groups = append(staged.Groups, topology.Group{ID: "unapproved", NextReplicaID: 2, Replicas: []topology.Replica{{NodeName: "n1", ReplicaID: 1, Role: topology.ReplicaVoter}}})
+	f.commit(t, staged, false)
+	reply := f.g.joinReply(t.Context(), metaengine.AdmissionRecord{NodeName: "n1", InstanceID: "fresh-process", MemberID: 4, OperatorID: topology.MakeOperatorID(2, 1)}, true)
+	if reply.ErrorCode != "" {
+		t.Fatal(reply)
+	}
+	var result joinResponse
+	if err := json.Unmarshal(reply.Data, &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.PreviousGroups) != 1 || result.PreviousGroups[0].ID != "work" || len(result.PreviousGroups[0].Replicas) != 1 || result.PreviousGroups[0].Replicas[0].NodeName != "n1" || result.PreviousGroups[0].Replicas[0].ReplicaID != 1 {
+		t.Fatal("readmission reply lost old approval or included staged/granted/foreign identities", result.PreviousGroups)
 	}
 }
 
