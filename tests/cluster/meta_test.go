@@ -71,7 +71,7 @@ func TestMetaConsensusLoadReplicationAndRetainedLeaderRecovery(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			oldLeader := status.MetaLeader
+			oldLeader := status.MetaLeaderID
 			var stopped *Node
 			for _, node := range c.Nodes() {
 				if result.Document.MemberID(node.Spec.Name) == oldLeader {
@@ -94,7 +94,7 @@ func TestMetaConsensusLoadReplicationAndRetainedLeaderRecovery(t *testing.T) {
 			}
 			if err := Poll(ctx, func() (bool, error) {
 				s, err := c.Status(ctx, survivor)
-				return s.MetaLeader != 0 && s.MetaLeader != oldLeader, err
+				return s.MetaLeaderID != 0 && s.MetaLeaderID != oldLeader, err
 			}); err != nil {
 				t.Fatal("leader replacement", err)
 			}

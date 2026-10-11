@@ -42,6 +42,11 @@ type GroupStatus struct {
 	LiveVoters  map[uint64]bool            `json:"live_voters,omitempty"`
 	HealthKnown bool                       `json:"health_known"`
 	ErrorCode   string                     `json:"error_code,omitempty"`
+	// LeaderNodeName is resolved from LeaderID through the captured Active view
+	// in cluster status, local meta status and scheduler inputs. In those views,
+	// empty means leadership is unknown or the replica is absent from Active.
+	// Raw replica status does not resolve node names; use LeaderID there.
+	LeaderNodeName string `json:"leader_node_name"`
 }
 
 func (s GroupStatus) Clone() GroupStatus {
@@ -61,19 +66,22 @@ type NodeStatus struct {
 	Address        string    `json:"address,omitempty"`
 }
 type ClusterStatus struct {
-	Lifecycle     string             `json:"lifecycle"`
-	ErrorCode     string             `json:"error_code,omitempty"`
-	LatestVersion uint64             `json:"latest_version"`
-	TargetVersion uint64             `json:"target_version"`
-	ActiveVersion uint64             `json:"active_version"`
-	Nodes         []NodeStatus       `json:"nodes"`
-	Groups        []GroupStatus      `json:"groups"`
-	MetaLeader    uint64             `json:"meta_leader"`
-	SessionLive   bool               `json:"session_live"`
-	Operator      *OperatorStatus    `json:"operator,omitempty"`
-	Scheduling    SchedulingStatus   `json:"scheduling"`
-	Observation   HealthObservation  `json:"observation"`
-	SelfRemoval   *SelfRemovalStatus `json:"self_removal,omitempty"`
+	Lifecycle     string        `json:"lifecycle"`
+	ErrorCode     string        `json:"error_code,omitempty"`
+	LatestVersion uint64        `json:"latest_version"`
+	TargetVersion uint64        `json:"target_version"`
+	ActiveVersion uint64        `json:"active_version"`
+	Nodes         []NodeStatus  `json:"nodes"`
+	Groups        []GroupStatus `json:"groups"`
+	MetaLeaderID  uint64        `json:"meta_leader_id"`
+	// MetaLeaderNodeName is resolved from the numeric MetaLeaderID through Active.
+	// Empty means leadership is unknown or that member is absent from Active.
+	MetaLeaderNodeName string             `json:"meta_leader_node_name"`
+	SessionLive        bool               `json:"session_live"`
+	Operator           *OperatorStatus    `json:"operator,omitempty"`
+	Scheduling         SchedulingStatus   `json:"scheduling"`
+	Observation        HealthObservation  `json:"observation"`
+	SelfRemoval        *SelfRemovalStatus `json:"self_removal,omitempty"`
 }
 
 type AddressResolver interface {

@@ -1,5 +1,17 @@
 # Three-node `_meta` example
 
+This is a separate Go application module using Kong for CLI/environment parsing
+and the standard `net/http` server. Its files separate the application concerns:
+
+| File | Responsibility |
+| --- | --- |
+| `main.go` | Commands, process signals and joined application shutdown. |
+| `config.go` | Flags, environment variables and the typed JSON peer manifest. |
+| `cluster.go` | Node construction, founding identities, address resolution and readiness rules. |
+| `http.go` | HTTP server, routes, request validation, JSON/error responses and health probes. |
+
+Run the demo from the repository root with Docker Compose:
+
 ```sh
 make run-example
 make stop-example
@@ -7,11 +19,44 @@ make stop-example
 
 HTTP endpoints are `http://localhost:18081`, `:18082` and `:18083`. The manifest
 supplies two `worker` nodes and one `observer`; all three vote in `_meta`.
-The example passes identities, peer addresses, credentials, limits and each
-node's `/data/meta.bolt` path to the library. Compose owns the three durable
+The example passes identities, peer addresses, credentials and each node's
+`/data/meta.bolt` path to the library. It uses the default `topology.Limits`:
+three nodes and five replicas per load group. Compose owns the three durable
 volumes named `meta-node1`, `meta-node2` and `meta-node3`. These isolate the
 small demo from volumes created by an earlier application. Stopping preserves
 them; `make clean-example` explicitly deletes them.
+
+For local development, use the example's module:
+
+```sh
+go -C examples/cluster run . serve --help
+go -C examples/cluster test ./...
+go -C examples/cluster build -o ../../bin/cluster .
+```
+
+`serve` is the default command. Configure it with flags or their corresponding
+environment variables; explicit flags take precedence:
+
+| Flag | Environment variable | Default |
+| --- | --- | --- |
+| `--node` | `GQUORUM_NODE` | Required |
+| `--peers` | `GQUORUM_PEERS` | Required JSON array |
+| `--credential` | `GQUORUM_CREDENTIAL` | Required |
+| `--cluster` | `GQUORUM_CLUSTER` | `example` |
+| `--data` | `GQUORUM_DATA` | `/data` |
+| `--meta-listen` | `GQUORUM_META_LISTEN` | `:9000` |
+| `--http-listen` | `GQUORUM_HTTP_LISTEN` | `:8080` |
+
+Node types come from the peer manifest. The `healthcheck` command needs only a
+URL and has a two-second timeout, configurable through `--timeout`:
+
+```sh
+go -C examples/cluster run . healthcheck http://localhost:18081/health/ready
+```
+
+The module uses `replace github.com/asalimonov/gquorum => ../..` to build against
+the repository library. Root unit, functional, race and vet targets explicitly
+include this module; the Compose smoke test lives in `tests/cluster`.
 
 This demo creates a `gquorum.Node` from caller-supplied `NodeOptions`, calls
 `Start` once, and uses `node.Cluster()` for topology operations. `Stop` joins
@@ -22,6 +67,7 @@ scenarios live in `tests/cluster/testapp` and `tests/cluster`.
 ```sh
 api=http://localhost:18081
 curl -fsS "$api/api/cluster/status" | jq
+curl -fsS "$api/api/cluster/status" | jq -r .meta_leader_node_name
 curl -fsS "$api/api/topology/active" | jq
 
 version=$(curl -fsS "$api/api/topology/latest" | jq -r .version)
@@ -31,6 +77,13 @@ result=$(curl -fsS -X POST "$api/api/nodes/node3/drain" \
 operator=$(printf '%s' "$result" | jq -r .operator_id)
 curl -fsS "$api/api/operators/$operator" | jq
 ```
+
+`meta_leader_id` is the numeric `_meta` Raft member ID.
+`meta_leader_node_name` gives its readable node name, such as `"node2"`.
+Each group similarly reports numeric `leader_id` and string `leader_node_name`;
+`host_node` is the reporting host. Names resolve through the active topology.
+An empty leader name means unknown or unmapped; the numeric ID can still be
+available as a diagnostic.
 
 Poll the operator until `state` is `succeeded`; `failed` and `superseded` are
 terminal failures. A follower can briefly return 404 before observing the

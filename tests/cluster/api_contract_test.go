@@ -54,7 +54,7 @@ func documentAPIContracts(t *testing.T, size int) {
 			if err != nil {
 				return false, err
 			}
-			if !status.SessionLive || status.MetaLeader == 0 || status.LatestVersion != base.Version || status.TargetVersion != base.Version || status.ActiveVersion != base.Version || len(status.Nodes) != size || len(status.Groups) != 2 {
+			if !status.SessionLive || status.MetaLeaderID == 0 || status.LatestVersion != base.Version || status.TargetVersion != base.Version || status.ActiveVersion != base.Version || len(status.Nodes) != size || len(status.Groups) != 2 {
 				return false, nil
 			}
 			for _, n := range status.Nodes {
@@ -319,7 +319,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 			if err != nil {
 				return false, err
 			}
-			if status.MetaLeader != base.MemberID("node1") {
+			if status.MetaLeaderID != base.MemberID("node1") {
 				return true, fmt.Errorf("drain changed meta leader: %+v", status)
 			}
 			return slices.ContainsFunc(status.Nodes, func(n topology.NodeStatus) bool {

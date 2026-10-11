@@ -130,6 +130,11 @@ func TestComposeExampleTopologyDrainActivate(t *testing.T) {
 	for _, n := range []string{"node1", "node2", "node3"} {
 		request(n, "GET", "/health/ready", nil, 0, 200, nil)
 		request(n, "GET", "/internal/test/controls", nil, 0, 404, nil)
+		var status topology.ClusterStatus
+		request(n, "GET", "/api/cluster/status", nil, 0, 200, &status)
+		if status.MetaLeaderNodeName == "" || initial.MemberID(status.MetaLeaderNodeName) != status.MetaLeaderID || len(status.Groups) != 1 || status.Groups[0].LeaderNodeName != status.MetaLeaderNodeName || status.Groups[0].LeaderID != status.MetaLeaderID {
+			t.Fatalf("leader name and Raft ID disagree: %+v", status)
+		}
 	}
 	request("node1", "POST", "/api/topology/1/apply", nil, 0, 404, nil)
 	request("node1", "GET", "/api/executions/old", nil, 0, 404, nil)

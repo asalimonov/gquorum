@@ -146,10 +146,10 @@ func (s *statusController) Status(context.Context, string) (topology.GroupStatus
 func TestClusterStatusReportsLeaders(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
-	c := &statusController{value: topology.GroupStatus{GroupID: "work", Found: true, LeaderID: 3, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}, Progress: map[uint64]topology.ReplicaProgress{3: {Match: 7}}, LiveVoters: map[uint64]bool{3: true}}}
+	c := &statusController{value: topology.GroupStatus{GroupID: "work", Found: true, LeaderID: 3, LeaderNodeName: "incorrect-caller-name", ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}, Progress: map[uint64]topology.ReplicaProgress{3: {Match: 7}}, LiveVoters: map[uint64]bool{3: true}}}
 	f.g.opts.LoadGroups = c
 	s := readStatus(t, f.g)
-	if s.Groups[1].LeaderID != 3 {
+	if s.Groups[1].LeaderID != 3 || s.Groups[1].LeaderNodeName != "n3" || c.value.LeaderNodeName != "incorrect-caller-name" {
 		t.Fatal(s)
 	}
 	s.Groups[1].ConfState.Voters[0] = 99
@@ -162,14 +162,14 @@ func TestClusterStatusReportsLeaders(t *testing.T) {
 func TestClusterStatusLeaderUnknown(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
-	c := &statusController{value: topology.GroupStatus{GroupID: "work", Found: true, LeaderID: 99}}
+	c := &statusController{value: topology.GroupStatus{GroupID: "work", Found: true, LeaderID: 99, LeaderNodeName: "fabricated"}}
 	f.g.opts.LoadGroups = c
 	s := readStatus(t, f.g)
-	if s.MetaLeader != 0 || s.Groups[1].LeaderID != 99 {
+	if s.MetaLeaderID != 0 || s.MetaLeaderNodeName != "" || s.Groups[1].LeaderID != 99 || s.Groups[1].LeaderNodeName != "" {
 		t.Fatal("changed observed identity", s)
 	}
 	c.value.LeaderID = 0
-	if readStatus(t, f.g).Groups[1].LeaderID != 0 {
+	if got := readStatus(t, f.g).Groups[1]; got.LeaderID != 0 || got.LeaderNodeName != "" {
 		t.Fatal("invented leader during election")
 	}
 	c.err = fault.ErrUnavailable
@@ -178,11 +178,40 @@ func TestClusterStatusLeaderUnknown(t *testing.T) {
 		t.Fatal(s)
 	}
 }
+
+func TestClusterStatusLeaderNamesUseActiveIncludingCachedReads(t *testing.T) {
+	t.Parallel()
+	f := newMutationFixture(t)
+	staged := f.g.machine.Latest()
+	staged.Group("work").Replicas[2].ReplicaID = 4
+	staged.Group("work").NextReplicaID = 5
+	f.commit(t, staged, false)
+	c := &statusController{value: topology.GroupStatus{GroupID: "work", Found: true, LeaderID: 3}}
+	f.g.opts.LoadGroups = c
+	if got := readStatus(t, f.g).Groups[1]; got.LeaderNodeName != "n3" || got.LeaderID != 3 {
+		t.Fatal("staged replacement hid the active leader", got)
+	}
+	c.value.LeaderID = 4
+	if got := readStatus(t, f.g).Groups[1]; got.LeaderNodeName != "" || got.LeaderID != 4 {
+		t.Fatal("staged replacement was reported as an active leader", got)
+	}
+	c.err = errors.New("cached reads must not call controller")
+	f.g.lastLoadStatus["work"] = topology.GroupStatus{GroupID: "work", LeaderNodeName: "stale", LeaderID: 3}
+	s, err := f.g.CachedStatus(context.Background())
+	if err != nil || s.Groups[1].LeaderNodeName != "n3" {
+		t.Fatal(s, err)
+	}
+	f.commit(t, staged, true)
+	s, err = f.g.CachedStatus(context.Background())
+	if err != nil || s.Groups[1].LeaderNodeName != "" || s.Groups[1].LeaderID != 3 {
+		t.Fatal("cached leader was attributed to its replacement", s, err)
+	}
+}
 func TestClusterStatusNoRuntimeDeps(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
 	s := readStatus(t, f.g)
-	if s.MetaLeader != 0 || len(s.Groups) != 2 || s.Groups[0].ErrorCode != string(fault.Unavailable) || s.Groups[1].ErrorCode != string(fault.NoController) {
+	if s.MetaLeaderID != 0 || len(s.Groups) != 2 || s.Groups[0].ErrorCode != string(fault.Unavailable) || s.Groups[1].ErrorCode != string(fault.NoController) {
 		t.Fatal(s)
 	}
 }
@@ -191,7 +220,7 @@ func TestClusterStatusNoMetaGroup(t *testing.T) {
 	f := newMutationFixture(t)
 	f.g.machine = metaengine.NewMachine(f.g.rules, nil)
 	s := readStatus(t, f.g)
-	if len(s.Groups) != 0 || len(s.Observation.Groups) != 0 || s.MetaLeader != 0 {
+	if len(s.Groups) != 0 || len(s.Observation.Groups) != 0 || s.MetaLeaderID != 0 {
 		t.Fatal("invented pre-founding groups", s)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/fault"
@@ -47,6 +48,40 @@ type httpCluster struct {
 	calls  int
 	result gquorum.MutationResult
 	err    error
+	active topology.Document
+	status topology.ClusterStatus
+}
+
+func (c *httpCluster) Status(context.Context) (topology.ClusterStatus, error) {
+	return c.status, c.err
+}
+
+func TestClusterStatusHTTPIncludesLeaderNodeNames(t *testing.T) {
+	t.Parallel()
+	cluster := &httpCluster{status: topology.ClusterStatus{
+		MetaLeaderID: 2, MetaLeaderNodeName: "worker-west",
+		Nodes:  []topology.NodeStatus{{Node: topology.Node{Name: "worker-west"}}},
+		Groups: []topology.GroupStatus{{GroupID: topology.MetaGroupID, HostNode: "worker-east", LeaderID: 2, LeaderNodeName: "worker-west"}},
+	}}
+	w := httptest.NewRecorder()
+	routes(httpNode{cluster: cluster}).ServeHTTP(w, httptest.NewRequest("GET", "/api/cluster/status", nil))
+	if w.Code != http.StatusOK {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var body struct {
+		MetaLeaderID       uint64 `json:"meta_leader_id"`
+		MetaLeaderNodeName string `json:"meta_leader_node_name"`
+		Groups             []struct {
+			LeaderID       uint64 `json:"leader_id"`
+			LeaderNodeName string `json:"leader_node_name"`
+		} `json:"groups"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.MetaLeaderID != 2 || body.MetaLeaderNodeName != "worker-west" || len(body.Groups) != 1 || body.Groups[0].LeaderID != 2 || body.Groups[0].LeaderNodeName != "worker-west" {
+		t.Fatal(w.Body.String())
+	}
 }
 
 func (c *httpCluster) Approve(context.Context, uint64) (topology.OperatorID, error) {
@@ -56,6 +91,10 @@ func (c *httpCluster) Approve(context.Context, uint64) (topology.OperatorID, err
 func (c *httpCluster) DrainNode(context.Context, string, gquorum.MutationOptions) (gquorum.MutationResult, error) {
 	c.calls++
 	return c.result, c.err
+}
+
+func (c *httpCluster) Active(context.Context) (topology.Document, error) {
+	return c.active, c.err
 }
 
 func TestApprovalValidationBeforeClusterCall(t *testing.T) {
@@ -138,6 +177,59 @@ func TestReadinessRequiresNodeGateAndSession(t *testing.T) {
 		routes(httpNode{cluster: &httpCluster{}, status: status}).ServeHTTP(w, httptest.NewRequest("GET", "/health/ready", nil))
 		if w.Code != http.StatusServiceUnavailable {
 			t.Fatal(w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestReadinessRequiresActiveMember(t *testing.T) {
+	t.Parallel()
+	for _, state := range []topology.NodeState{topology.NodeActive, topology.NodeDraining, topology.NodeDrained, topology.NodeExcluded} {
+		cluster := &httpCluster{active: topology.Document{Version: 3, Nodes: []topology.Node{{Name: "node1", State: state}}}}
+		w := httptest.NewRecorder()
+		routes(httpNode{cluster: cluster, status: gquorum.NodeStatus{Ready: true, SessionLive: true}}).ServeHTTP(w, httptest.NewRequest("GET", "/health/ready", nil))
+		if state != topology.NodeActive {
+			if w.Code != http.StatusServiceUnavailable {
+				t.Fatal(state, w.Code, w.Body.String())
+			}
+			continue
+		}
+		var ready readiness
+		if err := json.Unmarshal(w.Body.Bytes(), &ready); err != nil || w.Code != 200 || ready.Node != "node1" || !ready.SessionLive || ready.ActiveVersion != 3 {
+			t.Fatal(ready, w.Code, err)
+		}
+	}
+}
+
+func TestMutationResponseRetainsStatusAndVersionHeaders(t *testing.T) {
+	t.Parallel()
+	for _, operator := range []topology.OperatorID{"", "op1"} {
+		cluster := &httpCluster{result: gquorum.MutationResult{Document: topology.Document{Version: 3}, OperatorID: operator}}
+		r := httptest.NewRequest("POST", "/api/nodes/node1/drain", strings.NewReader(`{}`))
+		r.Header.Set("If-Match", "2")
+		w := httptest.NewRecorder()
+		routes(httpNode{cluster: cluster}).ServeHTTP(w, r)
+		want := http.StatusOK
+		if operator != "" {
+			want = http.StatusAccepted
+		}
+		var result gquorum.MutationResult
+		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || w.Code != want || w.Header().Get("ETag") != `"3"` || result.OperatorID != operator || result.Document.Version != 3 {
+			t.Fatal(w.Code, w.Header(), result, err)
+		}
+	}
+}
+
+func TestHealthcheckReportsReadinessStatus(t *testing.T) {
+	if testing.Short() {
+		t.Skip("running HTTP protocol")
+	}
+	t.Parallel()
+	for _, status := range []int{http.StatusOK, http.StatusServiceUnavailable} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(status) }))
+		err := (&healthcheckCommand{URL: server.URL, Timeout: time.Second}).Run()
+		server.Close()
+		if (err == nil) != (status == http.StatusOK) {
+			t.Fatal(status, err)
 		}
 	}
 }

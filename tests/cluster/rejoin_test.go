@@ -47,7 +47,7 @@ func duplicateNameIntruder(t *testing.T, size int) {
 	}
 	holder := ""
 	for _, node := range c.Spec.Nodes {
-		if before.MemberID(node.Name) != status.MetaLeader {
+		if before.MemberID(node.Name) != status.MetaLeaderID {
 			holder = node.Name
 			break
 		}

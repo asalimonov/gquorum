@@ -91,7 +91,7 @@ func (g *Group) Operator(ctx context.Context, id topology.OperatorID) (topology.
 // and after shutdown; an observation is not a linearizable read or quorum proof.
 func (g *Group) LocalStatus() topology.GroupStatus {
 	if engine := g.engine.Load(); engine != nil {
-		return engine.Status()
+		return withLeaderNodeName(engine.Status(), g.state().Active())
 	}
 	return topology.GroupStatus{GroupID: topology.MetaGroupID, HostNode: g.Identity().NodeName, ErrorCode: string(fault.Unavailable)}
 }
@@ -149,9 +149,10 @@ func (g *Group) status(ctx context.Context, live bool) (topology.ClusterStatus, 
 		result.Nodes = append(result.Nodes, topology.NodeStatus{Node: node, EffectiveState: effective, Health: health, Address: addresses[node.Name]})
 	}
 	if engine := g.engine.Load(); engine != nil {
-		status := engine.Status()
+		status := withLeaderNodeName(engine.Status(), active)
 		result.Groups = append(result.Groups, status)
-		result.MetaLeader = status.LeaderID
+		result.MetaLeaderID = status.LeaderID
+		result.MetaLeaderNodeName = status.LeaderNodeName
 	} else if active.MetaGroup() != nil {
 		result.Groups = append(result.Groups, topology.GroupStatus{GroupID: topology.MetaGroupID, ErrorCode: string(fault.Unavailable)})
 	}
@@ -161,7 +162,7 @@ func (g *Group) status(ctx context.Context, live bool) (topology.ClusterStatus, 
 			if !found {
 				observed = topology.GroupStatus{GroupID: group.ID, ErrorCode: string(fault.Unavailable)}
 			}
-			result.Groups = append(result.Groups, observed.Clone())
+			result.Groups = append(result.Groups, withLeaderNodeName(observed.Clone(), active))
 			continue
 		}
 		observed := topology.GroupStatus{GroupID: group.ID}
@@ -185,7 +186,7 @@ func (g *Group) status(ctx context.Context, live bool) (topology.ClusterStatus, 
 		if err := ctx.Err(); err != nil {
 			return topology.ClusterStatus{}, err
 		}
-		result.Groups = append(result.Groups, observed.Clone())
+		result.Groups = append(result.Groups, withLeaderNodeName(observed.Clone(), active))
 		g.mu.Lock()
 		if g.lastLoadStatus == nil {
 			g.lastLoadStatus = make(map[string]topology.GroupStatus)
@@ -198,4 +199,21 @@ func (g *Group) status(ctx context.Context, live bool) (topology.ClusterStatus, 
 		result.Operator = &status
 	}
 	return result, nil
+}
+
+// Resolve names from the same Active snapshot used by the status response.
+// Never trust a caller's name or map a retired ID through a staged replacement.
+func withLeaderNodeName(status topology.GroupStatus, active topology.Document) topology.GroupStatus {
+	status.LeaderNodeName = ""
+	if status.LeaderID != 0 {
+		if group := active.Group(status.GroupID); group != nil {
+			for _, replica := range group.Replicas {
+				if replica.ReplicaID == status.LeaderID {
+					status.LeaderNodeName = replica.NodeName
+					break
+				}
+			}
+		}
+	}
+	return status
 }

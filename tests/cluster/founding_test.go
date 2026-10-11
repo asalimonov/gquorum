@@ -78,7 +78,7 @@ func assertFoundedTopology(t *testing.T, ctx context.Context, c *Cluster) topolo
 			if err != nil {
 				return false, err
 			}
-			if status.MetaLeader == 0 || !status.SessionLive || status.ActiveVersion != doc.Version {
+			if status.MetaLeaderID == 0 || !status.SessionLive || status.ActiveVersion != doc.Version {
 				return false, fmt.Errorf("meta not activated: %+v", status)
 			}
 			for _, group := range []string{topology.MetaGroupID, "demo", "workers"} {

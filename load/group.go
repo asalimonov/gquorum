@@ -39,6 +39,10 @@ func (g *Group) WaitReady(ctx context.Context) error {
 	return core.WaitReady(ctx)
 }
 func (g *Group) IsLeader() bool { core := g.core(); return core != nil && core.IsLeader() }
+
+// Status returns a local Raft observation. LeaderID is a numeric replica ID;
+// LeaderNodeName is empty because this handle does not resolve topology names.
+// Use Cluster.Status for group observations with resolved node names.
 func (g *Group) Status() topology.GroupStatus {
 	core := g.core()
 	if core == nil {

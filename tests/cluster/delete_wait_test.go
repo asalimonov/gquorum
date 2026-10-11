@@ -30,7 +30,7 @@ func TestDeletionWaitsForUnreachableFormerHostBeforeDeletingState(t *testing.T) 
 	}
 	var stopped *Node
 	for _, node := range c.Nodes() {
-		if created.Document.MemberID(node.Spec.Name) != status.MetaLeader {
+		if created.Document.MemberID(node.Spec.Name) != status.MetaLeaderID {
 			stopped = node
 			break
 		}

@@ -20,7 +20,6 @@ services:
     environment:
       <<: *env
       GQUORUM_NODE: node1
-      GQUORUM_TYPE: worker
     ports: ["127.0.0.1:18081:8080"]
     volumes: ["meta-node1:/data"]
   node2:
@@ -28,7 +27,6 @@ services:
     environment:
       <<: *env
       GQUORUM_NODE: node2
-      GQUORUM_TYPE: worker
     ports: ["127.0.0.1:18082:8080"]
     volumes: ["meta-node2:/data"]
   node3:
@@ -36,7 +34,6 @@ services:
     environment:
       <<: *env
       GQUORUM_NODE: node3
-      GQUORUM_TYPE: observer
     ports: ["127.0.0.1:18083:8080"]
     volumes: ["meta-node3:/data"]
 networks:

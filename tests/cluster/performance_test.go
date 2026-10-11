@@ -117,7 +117,7 @@ func perfConcurrentHealth(t *testing.T, size int) {
 				if err == nil && request%10 == 0 {
 					status, statusErr := c.Status(ctx, node)
 					err = statusErr
-					if err == nil && (len(status.Nodes) != size || status.MetaLeader == 0 || status.ActiveVersion != base.Version || !status.SessionLive) {
+					if err == nil && (len(status.Nodes) != size || status.MetaLeaderID == 0 || status.ActiveVersion != base.Version || !status.SessionLive) {
 						err = fmt.Errorf("health/status lost stable cluster membership: %+v", status)
 					}
 				}

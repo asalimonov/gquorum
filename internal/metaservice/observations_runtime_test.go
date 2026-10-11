@@ -92,11 +92,14 @@ func TestMetaHealthEventsStatusAndDrainUseApprovedActiveScope(t *testing.T) {
 	for _, g := range groups {
 		waitPublic(t, func() bool {
 			s, e := g.Status(ctx)
-			return e == nil && s.MetaLeader == leader.currentIdentity().MemberID
+			return e == nil && s.MetaLeaderID == leader.currentIdentity().MemberID && s.MetaLeaderNodeName == leader.currentIdentity().NodeName
 		})
 		s := readStatus(t, g)
-		if len(s.Groups) != 1 || !s.Groups[0].Found || s.Groups[0].LeaderID != s.MetaLeader || len(s.Groups[0].ConfState.Voters) != 3 {
+		if len(s.Groups) != 1 || !s.Groups[0].Found || s.Groups[0].LeaderID != s.MetaLeaderID || s.Groups[0].LeaderNodeName != s.MetaLeaderNodeName || len(s.Groups[0].ConfState.Voters) != 3 {
 			t.Fatal(s)
+		}
+		if got := g.LocalStatus(); got.LeaderNodeName != s.MetaLeaderNodeName {
+			t.Fatal("local meta status lost the leader name", got, s)
 		}
 	}
 	waitPublic(t, func() bool {

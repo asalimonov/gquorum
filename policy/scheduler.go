@@ -27,10 +27,12 @@ type Scheduler interface {
 type ScheduleInput struct {
 	Now                    time.Time
 	Latest, Target, Active topology.Document
-	Status                 map[string]topology.GroupStatus
-	Health                 map[string]topology.GroupHealthEvaluation
-	Alive                  map[string]time.Duration
-	Held                   []storage.Identity
+	// Status contains group observations with leader names resolved through
+	// this input's Active view, not a peer-supplied name or a newer document.
+	Status map[string]topology.GroupStatus
+	Health map[string]topology.GroupHealthEvaluation
+	Alive  map[string]time.Duration
+	Held   []storage.Identity
 }
 
 // Clone creates an independent callback input, including nested observations.

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -16,11 +18,89 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
+type healthcheckCommand struct {
+	URL     string        `arg:"" help:"Readiness URL to probe."`
+	Timeout time.Duration `default:"2s" help:"Probe timeout."`
+}
+
+func (cmd *healthcheckCommand) Run() error {
+	if cmd.Timeout <= 0 {
+		return fmt.Errorf("healthcheck timeout must be positive")
+	}
+	client := http.Client{Timeout: cmd.Timeout}
+	response, err := client.Get(cmd.URL)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("readiness: HTTP %d", response.StatusCode)
+	}
+	return nil
+}
+
+func serveHTTP(ctx context.Context, address string, handler http.Handler) error {
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+	server := &http.Server{Handler: handler, ReadHeaderTimeout: 3 * time.Second, IdleTimeout: 30 * time.Second, BaseContext: func(net.Listener) context.Context { return ctx }}
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- server.Serve(listener) }()
+	slog.Info("example listening", "http", listener.Addr())
+	select {
+	case <-ctx.Done():
+	case err := <-serveDone:
+		if !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	}
+	shutdown, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdown); err != nil {
+		_ = server.Close()
+		<-serveDone
+		return err
+	}
+	<-serveDone
+	return nil
+}
+
+type response struct {
+	status  int
+	headers http.Header
+	body    any
+}
+
+// endpoint writes headers even on failure, preserving a successfully staged
+// version when subsequent approval fails. Domain errors share one HTTP mapping.
+func endpoint(call func(*http.Request) (response, error)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		result, err := call(r)
+		for name, values := range result.headers {
+			for _, value := range values {
+				w.Header().Add(name, value)
+			}
+		}
+		if err != nil {
+			httpError(w, err)
+			return
+		}
+		if result.status == 0 {
+			result.status = http.StatusOK
+		}
+		jsonResponse(w, result.status, result.body)
+	}
+}
+
 func jsonResponse(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(data)
 }
+
 func httpError(w http.ResponseWriter, err error) {
 	code, status := fault.Code("internal"), http.StatusInternalServerError
 	var typed *fault.Error
@@ -47,8 +127,9 @@ func httpError(w http.ResponseWriter, err error) {
 	}
 	jsonResponse(w, status, body)
 }
-func requestBody(w http.ResponseWriter, r *http.Request, out any) error {
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+
+func requestBody(r *http.Request, out any) error {
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return fault.New(fault.Invalid, "body exceeds limit or cannot be read", err)
 	}
@@ -67,6 +148,7 @@ func positiveNumber(value string) (uint64, error) {
 	}
 	return n, nil
 }
+
 func expectedVersion(r *http.Request) (uint64, error) {
 	if len(r.Header.Values("If-Match")) != 1 {
 		return 0, fault.New(fault.Invalid, "exactly one If-Match version is required", nil)
@@ -80,6 +162,7 @@ func expectedVersion(r *http.Request) (uint64, error) {
 	}
 	return positiveNumber(value)
 }
+
 func mutationOptions(r *http.Request, opts gquorum.MutationOptions) (gquorum.MutationOptions, error) {
 	if opts.Approve && opts.Preview {
 		return opts, fault.New(fault.Invalid, "preview cannot be approved", nil)
@@ -94,7 +177,8 @@ func mutationOptions(r *http.Request, opts gquorum.MutationOptions) (gquorum.Mut
 	opts.ExpectedVersion = expected
 	return opts, nil
 }
-func approvalOptions(w http.ResponseWriter, r *http.Request, version uint64) error {
+
+func approvalOptions(r *http.Request, version uint64) error {
 	if r.URL.RawQuery != "" {
 		return fault.New(fault.Invalid, "approval does not accept query parameters", nil)
 	}
@@ -107,7 +191,7 @@ func approvalOptions(w http.ResponseWriter, r *http.Request, version uint64) err
 			return fault.New(fault.Invalid, "path version differs from If-Match", nil)
 		}
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return fault.New(fault.Invalid, "body exceeds limit or cannot be read", err)
 	}
@@ -117,22 +201,19 @@ func approvalOptions(w http.ResponseWriter, r *http.Request, version uint64) err
 	return decodeJSON(body, &struct{}{})
 }
 
-func mutationResponse(w http.ResponseWriter, result gquorum.MutationResult, err error) {
+func mutationResponse(result gquorum.MutationResult, err error) (response, error) {
 	if err != nil {
-		// Staging may have succeeded before approval failed. Preserve that committed
-		// version so an operator can inspect and approve it rather than repeat an edit.
+		headers := http.Header{}
 		if result.Document.Version != 0 {
-			w.Header().Set("X-Staged-Version", strconv.FormatUint(result.Document.Version, 10))
+			headers.Set("X-Staged-Version", strconv.FormatUint(result.Document.Version, 10))
 		}
-		httpError(w, err)
-		return
+		return response{headers: headers}, err
 	}
-	w.Header().Set("ETag", fmt.Sprintf("\"%d\"", result.Document.Version))
 	status := http.StatusOK
 	if result.OperatorID != "" {
 		status = http.StatusAccepted
 	}
-	jsonResponse(w, status, result)
+	return response{status: status, headers: http.Header{"ETag": {fmt.Sprintf("\"%d\"", result.Document.Version)}}, body: result}, nil
 }
 
 func decodeJSON(data []byte, out any) error {
@@ -153,96 +234,65 @@ func decodeJSON(data []byte, out any) error {
 
 func routes(node gquorum.Node) http.Handler {
 	cluster := node.Cluster()
-	name := node.Identity().NodeName
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) { jsonResponse(w, 200, map[string]string{"node": name}) })
-	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, r *http.Request) {
-		status := node.Status()
-		if !status.Ready || !status.SessionLive {
-			httpError(w, fault.ErrReplicaNotReady)
-			return
-		}
-		active, err := cluster.Active(r.Context())
-		if err != nil {
-			httpError(w, err)
-			return
-		}
-		member := active.Node(name)
-		if member == nil || member.State != topology.NodeActive {
-			httpError(w, fault.ErrReplicaNotReady)
-			return
-		}
-		jsonResponse(w, 200, map[string]any{"node": name, "session_live": true, "active_version": active.Version})
-	})
-	mux.HandleFunc("GET /api/cluster/status", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /health/live", endpoint(func(r *http.Request) (response, error) {
+		return response{body: map[string]string{"node": node.Identity().NodeName}}, nil
+	}))
+	mux.HandleFunc("GET /health/ready", endpoint(func(r *http.Request) (response, error) {
+		ready, err := readReadiness(r.Context(), node)
+		return response{body: ready}, err
+	}))
+	mux.HandleFunc("GET /api/cluster/status", endpoint(func(r *http.Request) (response, error) {
 		status, err := cluster.Status(r.Context())
-		if err != nil {
-			httpError(w, err)
-			return
-		}
-		jsonResponse(w, 200, status)
-	})
+		return response{body: status}, err
+	}))
 	for path, read := range map[string]func(context.Context) (topology.Document, error){
 		"GET /api/topology/latest": cluster.Latest,
 		"GET /api/topology/target": cluster.Target,
 		"GET /api/topology/active": cluster.Active,
 	} {
-		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc(path, endpoint(func(r *http.Request) (response, error) {
 			document, err := read(r.Context())
 			if err != nil {
-				httpError(w, err)
-				return
+				return response{}, err
 			}
-			w.Header().Set("ETag", fmt.Sprintf("\"%d\"", document.Version))
-			jsonResponse(w, 200, document)
-		})
+			return response{headers: http.Header{"ETag": {fmt.Sprintf("\"%d\"", document.Version)}}, body: document}, nil
+		}))
 	}
 	mutate := func(change func(context.Context, string, gquorum.MutationOptions) (gquorum.MutationResult, error)) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
+		return endpoint(func(r *http.Request) (response, error) {
 			var options gquorum.MutationOptions
-			if err := requestBody(w, r, &options); err != nil {
-				httpError(w, err)
-				return
+			if err := requestBody(r, &options); err != nil {
+				return response{}, err
 			}
 			options, err := mutationOptions(r, options)
 			if err != nil {
-				httpError(w, err)
-				return
+				return response{}, err
 			}
-			result, err := change(r.Context(), r.PathValue("name"), options)
-			mutationResponse(w, result, err)
-		}
+			return mutationResponse(change(r.Context(), r.PathValue("name"), options))
+		})
 	}
 	mux.HandleFunc("POST /api/nodes/{name}/drain", mutate(cluster.DrainNode))
 	mux.HandleFunc("POST /api/nodes/{name}/activate", mutate(cluster.ActivateNode))
-	mux.HandleFunc("POST /api/topology/{version}/approve", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/topology/{version}/approve", endpoint(func(r *http.Request) (response, error) {
 		version, err := positiveNumber(r.PathValue("version"))
 		if err != nil {
-			httpError(w, err)
-			return
+			return response{}, err
 		}
-		if err := approvalOptions(w, r, version); err != nil {
-			httpError(w, err)
-			return
+		if err := approvalOptions(r, version); err != nil {
+			return response{}, err
 		}
 		id, err := cluster.Approve(r.Context(), version)
-		if err != nil {
-			httpError(w, err)
-			return
-		}
-		jsonResponse(w, 202, map[string]any{"operator_id": id})
-	})
-	mux.HandleFunc("GET /api/operators/{id}", func(w http.ResponseWriter, r *http.Request) {
+		return response{status: http.StatusAccepted, body: map[string]any{"operator_id": id}}, err
+	}))
+	mux.HandleFunc("GET /api/operators/{id}", endpoint(func(r *http.Request) (response, error) {
 		operator, err := cluster.Operator(r.Context(), topology.OperatorID(r.PathValue("id")))
-		if err != nil {
-			httpError(w, err)
-			return
-		}
-		jsonResponse(w, 200, operator)
-	})
+		return response{body: operator}, err
+	}))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		mux.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

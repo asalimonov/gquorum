@@ -93,7 +93,7 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 					learnerSeen = true
 					if transferDuringLearner && !transferred {
 						target := "node1"
-						if admitted.Document.MemberID(target) == status.MetaLeader {
+						if admitted.Document.MemberID(target) == status.MetaLeaderID {
 							target = "node2"
 						}
 						replacementMember = admitted.Document.MemberID(target)
@@ -146,8 +146,8 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 			t.Fatal("leader replacement changed or finished the paused execution", operator, err)
 		}
 		status, err := c.Status(ctx, "node2")
-		if err != nil || status.MetaLeader != replacementMember {
-			t.Fatal("replacement meta leader did not retain the ongoing execution", status.MetaLeader, err)
+		if err != nil || status.MetaLeaderID != replacementMember {
+			t.Fatal("replacement meta leader did not retain the ongoing execution", status.MetaLeaderID, err)
 		}
 		// The stored execution's current exact step is exposed by the authorized
 		// receiver, even if planning against already changed membership differs.

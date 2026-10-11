@@ -3,7 +3,8 @@
 Current results and acceptance status are in the
 [API refactor validation record](api-refactor-validation.md).
 
-`make test-unit` runs uncached unit tests with `-short -count=1`. Independent
+`make test-unit` runs uncached unit tests with `-short -count=1` in the library,
+the separate `examples/cluster` module and the caller fixture module. Independent
 top-level unit cases call `t.Parallel()`. The default runs four packages and four
 cases per package concurrently; `UNIT_PACKAGES` and `UNIT_PARALLEL` can override
 those values. Storage fixtures use separate temporary directories and the same
@@ -28,16 +29,16 @@ new isolated unit cases should call `t.Parallel()` before creating fixtures.
 
 | Command | Coverage |
 | --- | --- |
-| `make test-unit` | Uncached parallel library and fixture units |
+| `make test-unit` | Uncached parallel library, example and fixture units |
 | `make test-unit-race` | The same parallel units under the race detector |
-| `make test` | All library and fixture unit/functional cases |
-| `make test-race` | All library and fixture cases under the race detector |
+| `make test` | All library, example and fixture unit/functional cases |
+| `make test-race` | All library, example and fixture cases under the race detector |
 | `make test-fixture` | Caller load/meta integration in `tests/cluster/testapp` |
 | `make test-example` | Actual small Compose demo REST e2e |
 | `make test-cluster` | Build once, then run the Docker process suite |
 | `make test-perf` | Nine measured Docker cases, each under two minutes |
 | `make bench` | Planner and complete meta FSM snapshot matrices |
-| `make lint` | Library and fixture vet |
+| `make lint` | Library, example and fixture vet |
 | `make proto-check` | Regenerate pinned protocol code and require no diff |
 
 The small `_meta` demo contains topology/status/drain/activate HTTP routes.
@@ -46,7 +47,9 @@ project/image names, random ports and temporary volumes. Full load FSMs,
 protocols, application retirement and fault controls belong to
 `tests/cluster/testapp`; all process scenarios belong to `tests/cluster`.
 The separate test module keeps Docker tooling outside the library dependency
-graph and the normal development loop.
+graph. The example module keeps Kong outside the library dependency graph;
+root test and vet targets include its tests explicitly. Use
+`go -C examples/cluster test ./...` for a focused example check.
 
 Cluster cases remain sequential. Each owns isolated testcontainers resources;
 the bounded pool reuses only its private network after verified cleanup.

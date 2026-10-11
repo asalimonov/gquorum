@@ -128,7 +128,7 @@ func metaCredentialIsolation(t *testing.T, size int) {
 			t.Fatal("protocol refusals changed approved topology", node.Spec.Name, doc, err)
 		}
 		status, err := c.Status(ctx, node.Spec.Name)
-		if err != nil || !status.SessionLive || status.MetaLeader == 0 {
+		if err != nil || !status.SessionLive || status.MetaLeaderID == 0 {
 			t.Fatal("refusals disturbed admission", status, err)
 		}
 		response, err := c.Request(ctx, node.Spec.Name, "GET", "/api/cluster/parked", nil, 0)

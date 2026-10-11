@@ -60,13 +60,15 @@ Each founder supplies `FoundingMember{Node, MemberID, Address}` with a unique
 positive member ID. `FoundingIDs(clusterID, names)` derives a stable founding map.
 `LoadStoredIdentity(path)` reads a closed meta database's validated durable pin
 without creating it; it returns no process incarnation. See the executable
-[startup integration](../../examples/cluster/main.go) for founding, retained
-restart, joining, listener creation and shutdown.
+[node construction](../../examples/cluster/cluster.go) and
+[process wiring](../../examples/cluster/main.go) for founding, retained restart,
+listener creation and shutdown.
 
 ## Topology and cluster administration
 
-`topology.Document` contains the cluster ID, version, nodes, groups, placement
-and permanently retired group IDs. Replica identity is a node name plus a fresh
+`topology.Document` contains the cluster ID, version, nodes, groups and placement.
+The metadata service tracks permanently retired group IDs separately from the
+document. Replica identity is a node name plus a fresh
 monotonic replica ID within its group. Node states include active, draining and
 excluded. Drain changes eligibility and load placement while preserving `_meta`
 membership. Exclusion and readmission use the approved membership workflow.
@@ -114,6 +116,21 @@ permanent majority loss remains deferred.
 local snapshot without network probes; it separates the startup `Ready` gate
 from current `SessionLive` and includes meta, local replicas, removal and errors.
 Group status exposes leader, term, membership and commit/applied positions.
+
+`Identity.NodeName`, `Node.Name` and `Replica.NodeName` identify the logical
+node across restarts. `InstanceID` identifies one process run and must be fresh
+on restart; it fences stale process messages independently of durable identity.
+Numeric `MemberID` and `ReplicaID` are Raft identities, not node names.
+
+Status exposes numeric `MetaLeaderID` / `meta_leader_id` and `LeaderID` /
+`leader_id` fields. It additionally exposes `MetaLeaderNodeName` /
+`meta_leader_node_name` and group `LeaderNodeName` / `leader_node_name`.
+Cluster status, local meta status and `policy.ScheduleInput.Status` resolve names
+by exact group/replica ID through their captured Active view, including cached
+cluster reads. Empty names mean unknown or unmapped;
+numeric observations remain available. `HostNode` names the reporting host,
+which may be a follower. Raw load-group status does not resolve topology names;
+use `Cluster.Status(ctx)` for the enriched group view.
 
 `Node.ActivateSession`, `KeepAlive` and `DeactivateSession` support caller-owned
 sessions. `Cluster.AcquireLock` and `LockHolder` use session IDs. Node's own
@@ -221,6 +238,11 @@ scheduling event names are public vocabulary; legacy persisted encodings remain
 private. Events are never replicated through `_meta`. The bus and journal remain
 caller-owned and should be closed after Node has joined.
 
+For `events.LeaderChange`, `OldLeader` and `NewLeader` contain decimal Raft IDs:
+meta member IDs or load replica IDs, rather than logical node names. The string
+`"0"` means no known leader; an empty field means it was not supplied. Retained
+journals use the same encoding.
+
 `RequestStop` begins asynchronous teardown. `Stop(ctx)` joins it; timeout retains
 ownership and may be followed by another Stop. Failed application Close also
 remains owned until a serialized retry succeeds. `_meta` storage remains open
@@ -242,7 +264,7 @@ readmission, removal fencing and resource order.
 | `internal/metatransport/`, `internal/metapb/` | Included meta transport, protocol and generated code. |
 | `internal/operator/`, `internal/scheduling/`, `internal/observe/` | Approved plan execution, scheduling driver and health observations. |
 | `internal/raftengine/`, `internal/raftlog/` | Shared Raft loop, replay, persistence, queues, pressure and logging. |
-| `examples/cluster/` | Small meta-only executable and HTTP/Compose demo; `make run-example`. |
+| `examples/cluster/` | Separate Go module for the small meta-only HTTP/Compose demo, with Kong configuration and distinct cluster/HTTP files; `make run-example`. |
 | `tests/cluster/` | Separate Go module for Docker correctness/fault/scale tests and the actual example smoke test. |
 | `tests/cluster/testapp/` | Full application FSM, typed protocol adapter, application retirement and test-only fault controls; public Node integration tests. |
 | `docs/architecture/`, `docs/testing/` | Current contracts, test commands, coverage and validation evidence. |

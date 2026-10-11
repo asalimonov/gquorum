@@ -38,7 +38,7 @@ func transferMeta(ctx context.Context, c *Cluster, ingress, target string, membe
 	}
 	return Poll(ctx, func() (bool, error) {
 		status, err := c.Status(ctx, target)
-		return status.MetaLeader == memberID, err
+		return status.MetaLeaderID == memberID, err
 	})
 }
 
@@ -59,7 +59,7 @@ func TestRemoteApplyFromNonHostMetaLeader(t *testing.T) {
 	}
 	var metaHost string
 	for _, node := range created.Document.Nodes {
-		if created.Document.MemberID(node.Name) == status.MetaLeader {
+		if created.Document.MemberID(node.Name) == status.MetaLeaderID {
 			metaHost = node.Name
 		}
 	}
@@ -309,7 +309,7 @@ func callerRefusedDeletion(t *testing.T, size int) {
 	}
 	var oldLeader *Node
 	for _, node := range c.Nodes() {
-		if created.Document.MemberID(node.Spec.Name) == status.MetaLeader {
+		if created.Document.MemberID(node.Spec.Name) == status.MetaLeaderID {
 			oldLeader = node
 		}
 	}
@@ -346,7 +346,7 @@ func callerRefusedDeletion(t *testing.T, size int) {
 	}
 	if err := Poll(ctx, func() (bool, error) {
 		observed, err := c.Status(ctx, survivor)
-		return observed.MetaLeader != 0 && observed.MetaLeader != status.MetaLeader && observed.Operator != nil && *observed.Operator == failed, err
+		return observed.MetaLeaderID != 0 && observed.MetaLeaderID != status.MetaLeaderID && observed.Operator != nil && *observed.Operator == failed, err
 	}); err != nil {
 		t.Fatal("failed execution did not survive leader replacement", err)
 	}
@@ -355,7 +355,7 @@ func callerRefusedDeletion(t *testing.T, size int) {
 	}
 	if err := Poll(ctx, func() (bool, error) {
 		observed, err := c.Status(ctx, oldLeader.Spec.Name)
-		return observed.SessionLive && observed.MetaLeader != 0 && observed.Operator != nil && *observed.Operator == failed, err
+		return observed.SessionLive && observed.MetaLeaderID != 0 && observed.Operator != nil && *observed.Operator == failed, err
 	}); err != nil {
 		t.Fatal("retained meta did not recover the failed execution", err)
 	}

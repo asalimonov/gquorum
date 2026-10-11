@@ -70,7 +70,7 @@ func TestDrainViaNonLeaderPreservesMetaMembership(t *testing.T) {
 	}
 	assertDrained(t, ctx, c, "node3", "work", drained.Document.Version)
 	status, err := c.Status(ctx, "node3")
-	if err != nil || status.MetaLeader != created.Document.MemberID("node1") {
+	if err != nil || status.MetaLeaderID != created.Document.MemberID("node1") {
 		t.Fatal("issuer became leader instead of forwarding", status, err)
 	}
 	path := fmt.Sprintf("/api/topology/%d/approve", drained.Document.Version)

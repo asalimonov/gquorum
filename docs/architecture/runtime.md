@@ -155,8 +155,16 @@ and term when assessing continuity. Follower approvals make at most one control
 hop to the observed leader. Domain errors preserve exact expected/current CAS
 versions; empty success replies cannot identify an operator and are refused.
 
-The small `examples/cluster` app demonstrates `_meta` topology, status, approval,
-drain and activation. Full application FSM/protocol/retirement and fault controls
+Status adds `MetaLeaderNodeName` and `LeaderNodeName` to the existing numeric
+Raft observations. Names resolve through the local Active topology. Unknown or
+retired replicas have empty names; staged replacements cannot supply them.
+Cached status re-resolves names against its current Active view.
+
+The small `examples/cluster` app is a separate Go module. Kong parses its commands
+and environment; `cluster.go` constructs Node and evaluates readiness, `http.go`
+adapts the public API to HTTP, and `main.go` joins their lifetimes. It demonstrates
+`_meta` topology, status, approval, drain and activation. Full application
+FSM/protocol/retirement and fault controls
 belong to `tests/cluster/testapp`; lifecycle orchestration belongs to the library.
 See the [public integration guide](library.md) and
 [ownership test mapping](../testing/runtime-ports.md).

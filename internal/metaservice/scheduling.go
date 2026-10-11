@@ -85,7 +85,14 @@ func (h schedulingHost) Health(ctx context.Context) (map[string]topology.Health,
 	return health, nil
 }
 func (h schedulingHost) GlobalStatus(ctx context.Context, active topology.Document) (map[string]topology.GroupStatus, error) {
-	return h.g.observeGroups(ctx, active, active)
+	observed, err := h.g.observeGroups(ctx, active, active)
+	if err != nil {
+		return nil, err
+	}
+	for id, status := range observed {
+		observed[id] = withLeaderNodeName(status, active)
+	}
+	return observed, nil
 }
 func (h schedulingHost) PlanFor(ctx context.Context, doc topology.Document) (topology.Plan, error) {
 	return h.g.PlanFor(ctx, doc)

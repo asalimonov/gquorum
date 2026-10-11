@@ -34,8 +34,10 @@ type ReplicaQuery struct {
 	To   Peer
 }
 type ReplicaStatus struct {
-	Peer       Peer
-	Found      bool
+	Peer  Peer
+	Found bool
+	// Status is a raw replica observation. LeaderNodeName is not authoritative;
+	// cluster status and scheduler inputs resolve it through their Active view.
 	Status     topology.GroupStatus
 	LocalState string
 }
