@@ -13,7 +13,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaservice"
-	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/storage/walstore"
 	"github.com/asalimonov/gquorum/topology"
@@ -26,14 +26,14 @@ type testMachine struct {
 	value []byte
 }
 
-func (m *testMachine) Apply(ctx context.Context, c load.Command) (load.Result, error) {
+func (m *testMachine) Apply(ctx context.Context, c raftengine.Command) (raftengine.Result, error) {
 	if err := ctx.Err(); err != nil {
-		return load.Result{}, err
+		return raftengine.Result{}, err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.value = append([]byte(nil), c.Data...)
-	return load.Result{Code: "ok"}, nil
+	return raftengine.Result{Code: "ok"}, nil
 }
 func (m *testMachine) Snapshot(context.Context) ([]byte, error) {
 	m.mu.Lock()
@@ -76,8 +76,8 @@ func testStoreAt(t *testing.T) (*walstore.Store, string) {
 	})
 	return s, root
 }
-func testLoadOptions(s storage.Store, id string, replica uint64) load.Options {
-	return load.Options{GroupID: id, NodeName: "a", ClusterID: "cluster", ReplicaID: replica, Mode: load.Founding, Peers: []raft.Peer{{ID: replica}}, Store: s, Machine: &testMachine{}, Transport: testTransport{}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Timing: load.Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 20}}
+func testLoadOptions(s storage.Store, id string, replica uint64) raftengine.Options {
+	return raftengine.Options{GroupID: id, NodeName: "a", ClusterID: "cluster", ReplicaID: replica, Mode: raftengine.Founding, Peers: []raft.Peer{{ID: replica}}, Store: s, Machine: &testMachine{}, Transport: testTransport{}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Timing: raftengine.Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 20}}
 }
 func testRuntime(t *testing.T) *Runtime {
 	t.Helper()
@@ -292,7 +292,7 @@ func TestRuntimeForeignWALRetainedUntilExactCallerQuarantine(t *testing.T) {
 	t.Parallel()
 	store := testStore(t)
 	r := testRuntime(t)
-	foreign, err := load.New(testLoadOptions(store, "work", 99))
+	foreign, err := raftengine.New(testLoadOptions(store, "work", 99))
 	if err != nil {
 		t.Fatal(err)
 	}

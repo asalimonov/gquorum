@@ -17,7 +17,7 @@ import (
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaservice"
-	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/membership"
 	"github.com/asalimonov/gquorum/storage/walstore"
 	"github.com/asalimonov/gquorum/tests/cluster/testapp/loadpb"
@@ -33,7 +33,7 @@ const (
 
 type listeners struct{ meta, load, http net.Listener }
 type localReplica struct {
-	group   *load.Group
+	group   *raftengine.Group
 	machine *kvMachine
 }
 type application struct {
@@ -504,7 +504,7 @@ func (a *application) superviseLoads() {
 						continue
 					}
 					ctx, cancel := context.WithTimeout(a.workCtx, 3*time.Second)
-					_, err := a.openLocal(ctx, group.ID, replica.ReplicaID, load.Joining, nil)
+					_, err := a.openLocal(ctx, group.ID, replica.ReplicaID, raftengine.Joining, nil)
 					cancel()
 					if err != nil {
 						message := fmt.Sprintf("%v: %v", err, errors.Unwrap(err))

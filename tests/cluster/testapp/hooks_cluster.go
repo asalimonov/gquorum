@@ -17,7 +17,7 @@ import (
 	gquorum "github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaservice"
-	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -123,7 +123,7 @@ type localObservation struct {
 	ReceivedSnapshots uint64                     `json:"received_snapshots"`
 	WAL               walCounters                `json:"wal"`
 	WALStallNS        int64                      `json:"wal_stall_ns"`
-	Proposals         load.ProposalStats         `json:"proposals"`
+	Proposals         raftengine.ProposalStats   `json:"proposals"`
 	Parked            *gquorum.ParkedLoad        `json:"parked,omitempty"`
 	Ledger            *metaservice.ReplicaRecord `json:"ledger,omitempty"`
 	ServeOverride     int                        `json:"serve_override"`
@@ -251,8 +251,8 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 		}
 		data, err := json.Marshal(command)
 		if err == nil {
-			var result load.Result
-			result, err = g.Propose(r.Context(), load.Proposal{RequestID: command.RequestID, Data: data})
+			var result raftengine.Result
+			result, err = g.Propose(r.Context(), raftengine.Proposal{RequestID: command.RequestID, Data: data})
 			if err == nil && result.Code != "ok" {
 				err = fault.New(fault.Code(result.Code), "proposal rejected", nil)
 			}

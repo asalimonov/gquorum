@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/tests/cluster/testapp/loadpb"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3"
@@ -212,7 +212,7 @@ func (a *application) receiveCall(ctx context.Context, request *loadpb.Request) 
 		if err := decodeJSON(request.Data, &put); err != nil {
 			return domainReply(err), nil
 		}
-		result, err := g.Propose(ctx, load.Proposal{RequestID: put.RequestID, Data: request.Data})
+		result, err := g.Propose(ctx, raftengine.Proposal{RequestID: put.RequestID, Data: request.Data})
 		if err != nil {
 			return domainReply(err), nil
 		}

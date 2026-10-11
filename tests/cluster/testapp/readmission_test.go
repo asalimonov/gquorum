@@ -11,7 +11,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaservice"
-	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3"
 )
@@ -31,7 +31,7 @@ func TestReadmissionVerifiesActualRetainedIDWithinEntirePreviousCatalog(t *testi
 					t.Error(err)
 				}
 			})
-			g, err := load.New(load.Options{NodeName: cfg.NodeName, ClusterID: cfg.ClusterID, GroupID: "demo", ReplicaID: retained, Mode: load.Founding, Peers: []raft.Peer{{ID: retained}}, Store: app.store, Machine: newMachine(), Transport: loadTransport{app: app, group: "demo", replica: retained}})
+			g, err := raftengine.New(raftengine.Options{NodeName: cfg.NodeName, ClusterID: cfg.ClusterID, GroupID: "demo", ReplicaID: retained, Mode: raftengine.Founding, Peers: []raft.Peer{{ID: retained}}, Store: app.store, Machine: newMachine(), Transport: loadTransport{app: app, group: "demo", replica: retained}})
 			if err != nil {
 				t.Fatal(err)
 			}

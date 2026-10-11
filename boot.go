@@ -10,7 +10,7 @@ import (
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaservice"
-	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -47,10 +47,10 @@ func (r *Runtime) ParkedLoads() map[string]ParkedLoad {
 	defer r.mu.RUnlock()
 	return maps.Clone(r.parked)
 }
-func loadIdentity(opts load.Options) storage.Identity {
+func loadIdentity(opts raftengine.Options) storage.Identity {
 	return storage.Identity{NodeName: opts.NodeName, ClusterID: opts.ClusterID, GroupID: opts.GroupID, ReplicaID: opts.ReplicaID}
 }
-func (r *Runtime) parkLoad(opts load.Options, reason ParkReason, cause error) error {
+func (r *Runtime) parkLoad(opts raftengine.Options, reason ParkReason, cause error) error {
 	id := loadIdentity(opts)
 	r.mu.Lock()
 	park, exists := r.parked[id.GroupID]
@@ -100,7 +100,7 @@ func decideLoadBoot(want storage.Identity, record metaservice.ReplicaRecord, rec
 	return result, ""
 }
 
-func (r *Runtime) preflightLoad(m *metaservice.Group, opts load.Options) (bootResult, error) {
+func (r *Runtime) preflightLoad(m *metaservice.Group, opts raftengine.Options) (bootResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	want := loadIdentity(opts)
@@ -131,7 +131,7 @@ func (r *Runtime) preflightLoad(m *metaservice.Group, opts load.Options) (bootRe
 	}
 	if m != nil && !probe.HasLog {
 		if scope.Founding {
-			if opts.Mode != load.Founding {
+			if opts.Mode != raftengine.Founding {
 				return bootResult{}, fault.New(fault.Invalid, "new founding group requires founding mode", nil)
 			}
 			voters := map[uint64]bool{}
@@ -148,7 +148,7 @@ func (r *Runtime) preflightLoad(m *metaservice.Group, opts load.Options) (bootRe
 					return bootResult{}, fault.New(fault.IdentityMismatch, "founding peers differ from approved voters", nil)
 				}
 			}
-		} else if opts.Mode != load.Joining {
+		} else if opts.Mode != raftengine.Joining {
 			return bootResult{}, fault.New(fault.Invalid, "new prepared replica requires joining mode", nil)
 		}
 	}

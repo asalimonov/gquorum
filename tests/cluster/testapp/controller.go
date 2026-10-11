@@ -15,7 +15,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaservice"
-	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/membership"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
@@ -198,7 +198,7 @@ func (a *application) takeLocal(ctx context.Context) error {
 		return ctx.Err()
 	}
 }
-func (a *application) openLocal(ctx context.Context, id string, replica uint64, mode load.Mode, peers []raft.Peer) (*localReplica, error) {
+func (a *application) openLocal(ctx context.Context, id string, replica uint64, mode raftengine.Mode, peers []raft.Peer) (*localReplica, error) {
 	if err := a.takeLocal(ctx); err != nil {
 		return nil, err
 	}
@@ -224,7 +224,7 @@ func (a *application) openLocal(ctx context.Context, id string, replica uint64, 
 		}
 	}
 	machine := newMachine()
-	g, err := a.runtime.OpenLoad(load.Options{GroupID: id, NodeName: a.cfg.NodeName, ClusterID: a.cfg.ClusterID, ReplicaID: replica, Mode: mode, Peers: peers, Store: a.clusterStore(a.store, id, replica), Machine: machine, Transport: loadTransport{app: a, group: id, replica: replica}, Timing: load.Timing{TickInterval: a.cfg.TickInterval, ElectionTicks: 10, WALWriteWait: a.cfg.WALWriteWait}, SnapshotThreshold: a.cfg.SnapshotThreshold})
+	g, err := a.runtime.OpenLoad(raftengine.Options{GroupID: id, NodeName: a.cfg.NodeName, ClusterID: a.cfg.ClusterID, ReplicaID: replica, Mode: mode, Peers: peers, Store: a.clusterStore(a.store, id, replica), Machine: machine, Transport: loadTransport{app: a, group: id, replica: replica}, Timing: raftengine.Timing{TickInterval: a.cfg.TickInterval, ElectionTicks: 10, WALWriteWait: a.cfg.WALWriteWait}, SnapshotThreshold: a.cfg.SnapshotThreshold})
 	if err != nil {
 		return nil, err
 	}
@@ -306,7 +306,7 @@ func (a *application) receiveEffect(ctx context.Context, approved topology.Autho
 		if !localVoter {
 			return fault.ErrIdentityMismatch
 		}
-		local, err := a.openLocal(ctx, approved.GroupID, receiver, load.Founding, peers)
+		local, err := a.openLocal(ctx, approved.GroupID, receiver, raftengine.Founding, peers)
 		if err != nil {
 			return err
 		}
@@ -332,7 +332,7 @@ func (a *application) receiveEffect(ctx context.Context, approved topology.Autho
 		if approved.NodeName != a.cfg.NodeName || approved.ReplicaID != receiver {
 			return fault.ErrIdentityMismatch
 		}
-		_, err := a.openLocal(ctx, approved.GroupID, receiver, load.Joining, nil)
+		_, err := a.openLocal(ctx, approved.GroupID, receiver, raftengine.Joining, nil)
 		return err
 	case topology.StepStopReplica:
 		if approved.NodeName != a.cfg.NodeName || approved.ReplicaID != receiver {

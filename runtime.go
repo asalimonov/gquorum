@@ -8,7 +8,7 @@ import (
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaservice"
-	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/internal/raftengine"
 )
 
 type Options struct {
@@ -23,7 +23,7 @@ type Runtime struct {
 	opts            Options
 	mu              sync.RWMutex
 	meta            *metaservice.Group
-	loads           *load.Registry
+	loads           *raftengine.Registry
 	parked          map[string]ParkedLoad
 	node, cluster   string
 	gate            chan struct{}
@@ -34,7 +34,7 @@ type Runtime struct {
 
 // New creates an empty runtime without opening stores or starting workers.
 func New(opts Options) (*Runtime, error) {
-	return &Runtime{opts: opts, loads: load.NewRegistry(), parked: make(map[string]ParkedLoad), gate: make(chan struct{}, 1), closing: make(chan struct{}), closed: make(chan struct{})}, nil
+	return &Runtime{opts: opts, loads: raftengine.NewRegistry(), parked: make(map[string]ParkedLoad), gate: make(chan struct{}, 1), closing: make(chan struct{}), closed: make(chan struct{})}, nil
 }
 func (r *Runtime) takeGate(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
@@ -108,7 +108,7 @@ func (r *Runtime) OpenMeta(opts metaservice.Options) (*metaservice.Group, error)
 // OpenLoad constructs a replica. With meta attached it verifies approved local
 // identity and the local ledger before opening storage. Effect receivers must
 // still call metaservice.Authorize for the full execution/attempt/step scope.
-func (r *Runtime) OpenLoad(opts load.Options) (*load.Group, error) {
+func (r *Runtime) OpenLoad(opts raftengine.Options) (*raftengine.Group, error) {
 	if err := r.takeGate(context.Background()); err != nil {
 		return nil, err
 	}
@@ -138,12 +138,12 @@ func (r *Runtime) OpenLoad(opts load.Options) (*load.Group, error) {
 	if err != nil {
 		return nil, err
 	}
-	g, err := load.New(opts)
+	g, err := raftengine.New(opts)
 	if err != nil {
 		return nil, r.parkLoad(opts, parkReason(err), err)
 	}
 	if hasMeta {
-		// load.New has durably opened/restored the store before recording its
+		// raftengine.New has durably opened/restored the store before recording its
 		// identity. A crash cannot create a ledger record without a store first.
 		err = m.RecordLoadReplica(context.Background(), opts.GroupID, metaservice.ReplicaRecord{ReplicaID: opts.ReplicaID, Origin: boot.origin}, boot.previous)
 		if err != nil {
@@ -173,8 +173,8 @@ func (r *Runtime) Meta() (*metaservice.Group, bool) {
 	defer r.mu.RUnlock()
 	return r.meta, r.meta != nil
 }
-func (r *Runtime) Load(id string) (*load.Group, bool) { return r.loads.Get(id) }
-func (r *Runtime) LoadIDs() []string                  { return r.loads.IDs() }
+func (r *Runtime) Load(id string) (*raftengine.Group, bool) { return r.loads.Get(id) }
+func (r *Runtime) LoadIDs() []string                        { return r.loads.IDs() }
 
 // StopLoad joins exactly the expected local handle and unregisters it. It does not delete durable
 // state, forget a voted identity, or delete the consensus group.

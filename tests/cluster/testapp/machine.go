@@ -12,7 +12,7 @@ import (
 	"sync"
 
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/internal/raftengine"
 )
 
 type putCommand struct {
@@ -34,13 +34,13 @@ type kvMachine struct {
 func newMachine() *kvMachine {
 	return &kvMachine{state: machineState{SchemaVersion: 1, Values: map[string]string{}, Requests: map[string]string{}}}
 }
-func (m *kvMachine) Apply(ctx context.Context, cmd load.Command) (load.Result, error) {
+func (m *kvMachine) Apply(ctx context.Context, cmd raftengine.Command) (raftengine.Result, error) {
 	if err := ctx.Err(); err != nil {
-		return load.Result{}, err
+		return raftengine.Result{}, err
 	}
 	var put putCommand
 	if err := decodeJSON(cmd.Data, &put); err != nil || put.RequestID == "" || len(put.RequestID) > 128 || put.RequestID != cmd.RequestID || put.Key == "" || len(put.Key) > 256 || len(put.Value) > 1<<16 {
-		return load.Result{Code: string(fault.Invalid)}, nil
+		return raftengine.Result{Code: string(fault.Invalid)}, nil
 	}
 	hash := sha256.Sum256(cmd.Data)
 	fingerprint := hex.EncodeToString(hash[:])
@@ -49,12 +49,12 @@ func (m *kvMachine) Apply(ctx context.Context, cmd load.Command) (load.Result, e
 	m.state.AppliedIndex = cmd.Index
 	if old, found := m.state.Requests[put.RequestID]; found {
 		if old != fingerprint {
-			return load.Result{Code: string(fault.VersionConflict)}, nil
+			return raftengine.Result{Code: string(fault.VersionConflict)}, nil
 		}
-		return load.Result{Code: "ok"}, nil
+		return raftengine.Result{Code: "ok"}, nil
 	}
 	m.state.Values[put.Key], m.state.Requests[put.RequestID] = put.Value, fingerprint
-	return load.Result{Code: "ok"}, nil
+	return raftengine.Result{Code: "ok"}, nil
 }
 func (m *kvMachine) Snapshot(ctx context.Context) ([]byte, error) {
 	if err := ctx.Err(); err != nil {

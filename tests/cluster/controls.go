@@ -9,7 +9,7 @@ import (
 
 	gquorum "github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/internal/metaservice"
-	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -24,7 +24,7 @@ type LocalObservation struct {
 	ReceivedSnapshots uint64                     `json:"received_snapshots"`
 	WAL               WALCounters                `json:"wal"`
 	WALStallNS        int64                      `json:"wal_stall_ns"`
-	Proposals         load.ProposalStats         `json:"proposals"`
+	Proposals         raftengine.ProposalStats   `json:"proposals"`
 	Parked            *gquorum.ParkedLoad        `json:"parked,omitempty"`
 	Ledger            *metaservice.ReplicaRecord `json:"ledger,omitempty"`
 	ServeOverride     int                        `json:"serve_override"`

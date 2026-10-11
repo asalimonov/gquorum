@@ -8,7 +8,7 @@ import (
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaservice"
-	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/storage"
 )
 
@@ -69,7 +69,7 @@ func TestParkedLoadOwnedObservationAndTypedError(t *testing.T) {
 	}
 	r, _ := New(Options{Events: bus})
 	defer r.Close(context.Background())
-	opts := load.Options{NodeName: "a", ClusterID: "cluster", GroupID: "work", ReplicaID: 7, InstanceID: "process", Events: bus}
+	opts := raftengine.Options{NodeName: "a", ClusterID: "cluster", GroupID: "work", ReplicaID: 7, InstanceID: "process", Events: bus}
 	err = r.parkLoad(opts, ParkStoreMissing, fault.ErrUnreadable)
 	var parked *LoadParkedError
 	if !errors.As(err, &parked) || !errors.Is(err, fault.ErrReplicaNotReady) || !errors.Is(err, fault.ErrUnreadable) {

@@ -10,7 +10,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaservice"
-	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3"
@@ -200,7 +200,7 @@ func TestRuntimeIdentityMismatchParkSurvivesMetaRestart(t *testing.T) {
 	if _, err = store.Quarantine(ctx, "work", 1); err != nil {
 		t.Fatal(err)
 	}
-	foreign, err := load.New(testLoadOptions(store, "work", 99))
+	foreign, err := raftengine.New(testLoadOptions(store, "work", 99))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestRuntimeApprovedLoadParksLostWALRecoversAndRetires(t *testing.T) {
 		case <-ticker.C:
 		}
 	}
-	if _, err = g.Propose(ctx, load.Proposal{RequestID: "first", Data: []byte("committed")}); err != nil {
+	if _, err = g.Propose(ctx, raftengine.Proposal{RequestID: "first", Data: []byte("committed")}); err != nil {
 		t.Fatal(err)
 	}
 	before, found, err := m.LookupLoadReplica(ctx, "work")
