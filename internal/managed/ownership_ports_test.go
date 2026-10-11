@@ -10,9 +10,62 @@ import (
 
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/storage"
 )
+
+func TestReplicaObservationCannotCompleteEffectBeforeStartupPublishes(t *testing.T) {
+	functional(t)
+	f := newFixture(t)
+	entered, proceed := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	release := func() { once.Do(func() { close(proceed) }) }
+	defer release()
+	var h *Host
+	scope := f.cfg.Scope
+	f.cfg.Scope = func(ctx context.Context, id storage.Identity) (metaengine.LoadScope, error) {
+		got, err := scope(ctx, id)
+		if err != nil {
+			return got, err
+		}
+		h.mu.Lock()
+		slot := h.slots[id.GroupID]
+		started := slot != nil && slot.core != nil && slot.core.Running()
+		h.mu.Unlock()
+		if started {
+			close(entered)
+			select {
+			case <-proceed:
+			case <-ctx.Done():
+				return got, ctx.Err()
+			}
+		}
+		return got, nil
+	}
+	h = f.host(t)
+	ctx := deadline(t)
+	ref := load.ReplicaRef{GroupID: "work", ReplicaID: 1}
+	done := make(chan error, 1)
+	go func() { _, err := h.StartReplica(ctx, ref, StartExplicit); done <- err }()
+	waitSignal(t, entered)
+	query := load.ReplicaQuery{From: f.node, To: load.Peer{Node: f.node, Replica: ref}}
+	observed, err := h.ReadReplica(ctx, query)
+	must(t, err)
+	if observed.Found || observed.Status.Found || observed.LocalState != "starting" {
+		t.Fatal("unpublished engine attested a completed effect", observed)
+	}
+	if _, found := h.Lookup("work"); found {
+		t.Fatal("startup reservation published before authorization")
+	}
+	release()
+	must(t, <-done)
+	observed, err = h.ReadReplica(ctx, query)
+	must(t, err)
+	if !observed.Found || !observed.Status.Found || observed.LocalState != "ready" {
+		t.Fatal("published replica not observed", observed)
+	}
+}
 
 // These assertions followed ownership from the former Runtime into Host.
 func TestHostRefusesUnstartedAndForeignAssignmentsBeforeStoreMutation(t *testing.T) {

@@ -315,3 +315,18 @@ verification progress; checking a stage does not waive any target requirement.
   obligations remain intact. Historical validation is explicitly labeled as
   pre-refactor evidence. make bench passes all planner and snapshot matrices;
   final process, performance and Compose acceptance is still in progress.
+
+- Uncached fixture validation exposed early startup publication: ReadReplica
+  advertised an engine before the final approval check published its handle.
+  An observer could advance the operator and invalidate the in-flight check.
+  ReadReplica now attests only ready, published replicas; startup diagnostics
+  remain available. A deterministic test holds that final check and verifies
+  no completed-effect observation can escape. The public Close-failure case
+  passes twenty consecutive race runs; the full managed race suite passes.
+- Publication-fix validation: make test (85.237s fixture), make test-fixture
+  (83.332s), make test-example (29.906s), make lint and tagged cluster vet pass.
+  Uncached make test-unit takes **12.10 seconds**. make test-perf passes all nine
+  3/5/7-node health, concurrent-write and fifteen-group resource cases against
+  gquorum-test:api-refactor-validation (147.242s total; maximum case 42.30s).
+  A complete process run against that updated image is in progress. The earlier
+  complete run uses the pre-fix image and cannot close final-image acceptance.

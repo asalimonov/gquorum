@@ -181,7 +181,11 @@ func (h *Host) ReadReplica(ctx context.Context, query load.ReplicaQuery) (load.R
 		return result, nil
 	}
 	result.LocalState = slot.state
-	if slot.core != nil && !slot.released && slot.core.Running() {
+	// Only a published replica can attest to a completed topology effect.
+	// During startup the engine already exchanges Raft traffic, but replay and
+	// the final authorization check still belong to the startup reservation.
+	// Advertising it early could advance its operator and invalidate that check.
+	if slot.state == "ready" && slot.handle != nil && slot.core != nil && !slot.released && slot.core.Running() {
 		result.Found, result.Status = true, slot.core.Status()
 	}
 	return result, nil
