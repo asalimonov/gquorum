@@ -193,14 +193,11 @@ func TestMetaRetainedDiskJoinIsReadOnlyAndCopiedLiveIdentityIsFenced(t *testing.
 		t.Fatal(err)
 	}
 	clone := joiningGroup(t, leader, old.currentIdentity().NodeName, "worker", "copied-process", []string{leader.opts.Network.AdvertiseAddress}, func(o *Options) { o.DBPath = copiedPath })
-	waitPublic(t, func() bool { clone.mu.RLock(); defer clone.mu.RUnlock(); return clone.lifecycle == "parked" })
+	if err := clone.WaitReady(ctx); !errors.Is(err, fault.ErrIdentityMismatch) {
+		t.Fatal("copied live identity must fail startup", err)
+	}
 	if clone.engine.Load().Running() {
 		t.Fatal("copied voter started before name fencing")
-	}
-	short, done := context.WithTimeout(ctx, 100*time.Millisecond)
-	defer done()
-	if err = clone.WaitReady(short); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatal("copied live identity became ready", err)
 	}
 	if leader.state().Latest().Version != 1 {
 		t.Fatal("fenced clone changed topology")

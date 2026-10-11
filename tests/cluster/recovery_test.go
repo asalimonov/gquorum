@@ -81,6 +81,11 @@ func durableOwnRecovery(t *testing.T, size int) {
 	if err := ownDurableFiles(ctx, c, "node1", "work"); err != nil {
 		t.Fatal(err)
 	}
+	// The source current-voter restart chooses a nonleader. Transfer only meta
+	// leadership; this changes neither the document nor the retained load store.
+	if err := transferMeta(ctx, c, "node1", "node2", created.Document.MemberID("node2")); err != nil {
+		t.Fatal(err)
+	}
 	victim := c.Node("node1")
 	if err := victim.Kill(ctx); err != nil {
 		t.Fatal(err)
@@ -110,6 +115,14 @@ func durableOwnRecovery(t *testing.T, size int) {
 		doc, err := c.Document(ctx, node.Spec.Name, "latest")
 		if err != nil || doc.Version != created.Document.Version || doc.MemberID("node1") != before.Identity.MemberID || replicaID(doc, "work", "node1") != before.ReplicaID {
 			t.Fatal("retained restart churned topology or identity", node.Spec.Name, doc, err)
+		}
+		response, err := c.Request(ctx, node.Spec.Name, "GET", "/api/cluster/parked", nil, 0)
+		if err := requireStatus(response, err, 200); err != nil {
+			t.Fatal("current-voter restart warning query", err)
+		}
+		var parked []meta.ParkedJoin
+		if err := response.Decode(&parked); err != nil || len(parked) != 0 {
+			t.Fatal("healthy retained restart was recorded as awaiting admission", parked, err)
 		}
 	}
 	if err := Poll(ctx, func() (bool, error) {

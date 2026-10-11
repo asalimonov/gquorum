@@ -301,6 +301,12 @@ func (g *Group) tryJoin(ctx context.Context) error {
 			continue
 		}
 		if err = metatransport.ReplyError(reply); err != nil {
+			// A live name fence, incompatible type or other immutable identity
+			// refusal cannot become valid by retrying this process. The leader keeps
+			// its exact-process warning; admission/availability refusals still park.
+			if errors.Is(err, fault.ErrIdentityMismatch) {
+				return &fatalAdmissionError{err}
+			}
 			last = err
 			if errors.Is(err, fault.ErrNotLeader) && reply.LeaderAddress != "" {
 				addresses = append(addresses, reply.LeaderAddress)

@@ -134,3 +134,18 @@ with a configured peer absent. All four families run separately at three/five/se
 nodes, with no slow-test skip. The library's WaitReady contract still checks its own
 exact activated meta voter and acknowledged session. These policies and tests are
 entirely under `tests/cluster`, independent of the small `_meta` Compose demo.
+
+Duplicate-name cases allocate a separate host and private volume claiming a live
+nonleader's node name. The intruder must exit with code 1; every founder then reads
+the identical typed warning, including the actual intruding process ID from its
+startup record. The legitimate holder's running process, durable member ID,
+resolver address, readiness and full topology remain unchanged. These cases use
+the library's public parked registry instead of importing application UI/gossip
+rendering, and run at three/five/seven nodes.
+
+Retained-voter restart ports select a meta nonleader explicitly. Every founder
+keeps the same document/member/load IDs and reads an empty parked registry after
+the same container/volume returns. The recovering process restores ten commands
+from its own full snapshot and WAL without receiving a peer snapshot, then commits
+an eleventh command. Physical durable file checks and exact native membership
+replace the source application's boot-verdict log and UI assertions.

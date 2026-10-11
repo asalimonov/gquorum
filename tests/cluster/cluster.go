@@ -264,6 +264,9 @@ func newCluster(ctx context.Context, p *Pool, u *deploymentUnit, spec Spec) (*Cl
 	return c, nil
 }
 func (c *Cluster) createNode(ctx context.Context, image string, spec NodeSpec, peers []peer, join bool) (*Node, error) {
+	return c.createNodeClaiming(ctx, image, spec, peers, join, spec.Name)
+}
+func (c *Cluster) createNodeClaiming(ctx context.Context, image string, spec NodeSpec, peers []peer, join bool, claim string) (*Node, error) {
 	volumeName := c.resourcePrefix + "-" + spec.Name
 	owned, cancel, err := c.operation(ctx)
 	if err != nil {
@@ -285,7 +288,7 @@ func (c *Cluster) createNode(ctx context.Context, image string, spec NodeSpec, p
 	}
 	request := testcontainers.ContainerRequest{
 		Image: image, Name: volumeName, ExposedPorts: []string{"8080/tcp"}, Networks: []string{c.Network}, NetworkAliases: map[string][]string{c.Network: {spec.Name}}, Labels: maps.Clone(c.labels), Mounts: testcontainers.Mounts(testcontainers.VolumeMount(node.Volume, "/data")),
-		Env:            map[string]string{"GQUORUM_NODE": spec.Name, "GQUORUM_TYPE": string(spec.Type), "GQUORUM_CLUSTER": c.ID, "GQUORUM_CREDENTIAL": c.Credential, "GQUORUM_DATA": "/data", "GQUORUM_PEERS": string(manifest), "GQUORUM_META_ADDRESS": spec.Name + ":9000", "GQUORUM_LOAD_ADDRESS": spec.Name + ":9001", "GQUORUM_HTTP_ADDRESS": spec.Name + ":8080"},
+		Env:            map[string]string{"GQUORUM_NODE": claim, "GQUORUM_TYPE": string(spec.Type), "GQUORUM_CLUSTER": c.ID, "GQUORUM_CREDENTIAL": c.Credential, "GQUORUM_DATA": "/data", "GQUORUM_PEERS": string(manifest), "GQUORUM_META_ADDRESS": spec.Name + ":9000", "GQUORUM_LOAD_ADDRESS": spec.Name + ":9001", "GQUORUM_HTTP_ADDRESS": spec.Name + ":8080"},
 		Cmd:            []string{"-gate-founders=" + strconv.FormatBool(c.Spec.GateFounders), "-founding-timeout=" + c.Spec.FoundingTimeout.String(), "-address-free=" + strconv.FormatBool(c.Spec.AddressFree), "-bootstrap=" + strconv.FormatBool(c.Spec.Bootstrap), "-join=" + strconv.FormatBool(join), "-max-nodes=" + strconv.Itoa(c.Spec.Limits.MaxNodes), "-max-replicas=" + strconv.Itoa(c.Spec.Limits.MaxReplicas), "-session-ttl=" + c.Spec.SessionTTL.String(), "-tick=" + c.Spec.Tick.String(), "-snapshot-threshold=" + strconv.FormatUint(c.Spec.SnapshotThreshold, 10), "-wal-write-wait=" + c.Spec.WALWriteWait.String(), "-disable-reconciliation=" + strconv.FormatBool(!c.Spec.Reconciliation), "-reconciliation-interval=" + c.Spec.ReconciliationInterval.String(), "-reconciliation-timeout=" + c.Spec.ReconciliationTimeout.String()},
 		WaitingFor:     wait.ForListeningPort("8080/tcp").SkipInternalCheck().WithStartupTimeout(20 * time.Second),
 		ConfigModifier: func(config *containerapi.Config) { config.Hostname = spec.Name },
@@ -319,6 +322,26 @@ func (c *Cluster) PrepareJoinNode(ctx context.Context, spec NodeSpec) (*Node, er
 		peers[i] = peer{Name: seed.Name, Type: seed.Type, MetaAddress: seed.Name + ":9000", LoadAddress: seed.Name + ":9001", HTTPAddress: seed.Name + ":8080"}
 	}
 	return c.createNode(ctx, c.image, spec, peers, true)
+}
+
+// PrepareNameClaimingNode gives an unauthorized process its own host/volume
+// while it claims an existing node identity. It never overwrites the resource
+// catalog entry, DNS endpoint or storage of the legitimate holder.
+func (c *Cluster) PrepareNameClaimingNode(ctx context.Context, host NodeSpec, claim string) (*Node, error) {
+	c.creationMu.Lock()
+	defer c.creationMu.Unlock()
+	if err := topology.ValidateID(host.Name); err != nil {
+		return nil, err
+	}
+	holder := c.Node(claim)
+	if c.Node(host.Name) != nil || holder == nil || host.Type != holder.Spec.Type {
+		return nil, errors.New("invalid conflict host or claimed identity")
+	}
+	peers := make([]peer, len(c.Spec.Nodes))
+	for i, seed := range c.Spec.Nodes {
+		peers[i] = peer{Name: seed.Name, Type: seed.Type, MetaAddress: seed.Name + ":9000", LoadAddress: seed.Name + ":9001", HTTPAddress: seed.Name + ":8080"}
+	}
+	return c.createNodeClaiming(ctx, c.image, host, peers, true, claim)
 }
 func (c *Cluster) WaitReady(ctx context.Context) error {
 	ticker := time.NewTicker(60 * time.Millisecond)

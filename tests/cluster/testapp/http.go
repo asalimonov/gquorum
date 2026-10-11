@@ -204,6 +204,14 @@ func (a *application) routes() http.Handler {
 		jsonResponse(w, http.StatusOK, map[string]any{"node": a.cfg.NodeName})
 	})
 	mux.HandleFunc("GET /health/ready", a.readyHTTP)
+	mux.HandleFunc("GET /api/cluster/parked", func(w http.ResponseWriter, r *http.Request) {
+		parked, err := a.meta.ParkedJoins(r.Context())
+		if err != nil {
+			httpError(w, err)
+			return
+		}
+		jsonResponse(w, http.StatusOK, parked)
+	})
 	mux.HandleFunc("GET /api/cluster/status", func(w http.ResponseWriter, r *http.Request) {
 		status, err := a.meta.Status(r.Context())
 		if err != nil {

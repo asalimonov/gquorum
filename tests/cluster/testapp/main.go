@@ -117,6 +117,7 @@ func main() {
 		slog.Error("start example", "error", err)
 		os.Exit(1)
 	}
+	slog.Info("fixture process identity", "node", c.NodeName, "instance_id", c.InstanceID, "meta_address", app.cfg.MetaAddress)
 	slog.Info("example listening", "node", c.NodeName, "http", app.httpListener.Addr().String())
 	select {
 	case <-ctx.Done():

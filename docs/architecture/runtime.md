@@ -149,3 +149,12 @@ through a synced temporary file, atomic rename and directory sync before opening
 the gate. Timeouts retain no successful marker; established retained-state recovery
 bypasses the initial gate with only a healthy majority. This policy is fixture code,
 not a library configuration dependency or a change to meta.WaitReady.
+
+Join identity refusals are terminal: a live name fence or incompatible approved
+identity/type wakes WaitReady with ErrIdentityMismatch and joins the stopped
+runtime. Availability and pending/excluded admission refusals continue parking
+for approval. The leader retains its volatile exact-process name_conflict warning
+after the refused process exits; it cannot poison the holder's cached route or
+allocate membership. Followers read that current leader-owned warning through
+ParkedJoins. Executables decide how a terminal library error affects their process;
+the process fixture propagates it to joined fatal startup/exit 1.

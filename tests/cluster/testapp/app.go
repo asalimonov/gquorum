@@ -116,6 +116,13 @@ func (c *config) recoverBootMode() (bool, error) {
 }
 func (a *application) markEstablished() {
 	if err := a.meta.WaitReady(a.workCtx); err != nil {
+		select {
+		case <-a.closing:
+		default:
+			if a.workCtx.Err() == nil {
+				a.fail(err)
+			}
+		}
 		return
 	}
 	if a.foundingGate {
