@@ -21,7 +21,7 @@ by the gates below.
 | Sections 7–8: holds and recovery evidence | Boot matrix, host holds/registry tests, public stop/restart test and durable-ledger test. Staged intent cannot start a replica; missing/foreign WAL never silently refounds; retained restart/readmission and restoration preserve exact identities. |
 | Sections 7–8: retired history and incomplete founding | History-horizon, retained cleanup evidence, interrupted preparation/founding and readmission catalog tests preserve approved identities while excluding staged-only data. |
 | Section 9 / Appendix A: physical schema and codec compatibility | Baseline-generated physical meta, WAL, snapshot and journal fixtures, with captured generator and immutable hashes. Current recovery preserves pins, full bucket records, native membership and committed application tail. Existing JSON proposal/result/snapshot fixtures unchanged. |
-| Section 10: meta protocol and example HTTP | Meta protocol fields preserved; load.proto remains caller-owned. Strict approval and If-Match tests, legacy rejection, both approval flows, staged-version errors and CAS assertions. Compose example revalidation passes (29.906s). |
+| Section 10: meta protocol and example HTTP | Meta protocol fields preserved; load.proto remains caller-owned. Strict approval and If-Match tests, legacy rejection, both approval flows, staged-version errors and CAS assertions. Compose example revalidation passes (32.272s). |
 | Section 11: public/test migration | Baseline signatures and all 550 test names recorded; 64 renamed/split tests map to present symbols. `runtime-ports.md` records transferred assertions and intentional contract changes. Symbol coverage alone is not behavioral proof. |
 | Section 12: complete process/fault/scale coverage | Source inventory retained and target references updated. Selected 3/5/7-node recovery, founding, learner, projection and fifteen-group tests pass. Complete final-image process run pending; all nine performance cases pass; a small demo smoke test cannot substitute. |
 | Appendix B: caller integration | Small meta-only example and full public Node test application use the new contracts without application-written consensus lifecycle switches. |
@@ -31,14 +31,14 @@ by the gates below.
 
 | Gate | Evidence |
 | --- | --- |
-| `make test` | Passed after the scheduler/shutdown audit fixes (96.525s for the complete fixture). |
-| `make test-unit` | Uncached pass after the scheduler/shutdown audit fixes: 17.02s, including physical compatibility. |
+| `make test` | Passed after the scheduler/shutdown and fixture corrections (84.784s for the complete fixture). |
+| `make test-unit` | Uncached pass after the fixture corrections: 15.61s, including physical compatibility. |
 | `make test-unit-race` | Passed after the audit fixes in both modules; managed suite (4.599s) and fifty Close-error repetitions (96.654s) also pass under race. |
 | `make lint` / cluster-tagged vet | Passed after the audit fixes. |
 | `make test-fixture` | Passed uncached after the audit fixes (95.173s); fifty focused Close-error race repetitions also pass. |
 | `make test-example` | Passed actual Compose app after the audit fixes (32.272s). |
-| `make test-cluster` | Revalidation required with gquorum-test:api-final-validation, containing both final audit fixes; earlier image runs are separate evidence. |
-| `make test-perf` | Passed all nine cases against publication-fix image (147.242s total; each case 2.53–42.30s). |
+| `make test-cluster` | The audit-fix image run found an initial founding diagnostic race; corrected-image complete validation is still required. See the [current validation record](api-refactor-validation.md). |
+| `make test-perf` | Passed all nine cases against the final image (148.917s total; each case 2.45–42.88s). |
 | `make bench` | Passed planner and full snapshot matrices at 3/5/7 nodes. |
 | `make proto-check` | Passed after checked-in load protocol comment regeneration. |
 | Baseline physical hashes / `git diff --check` | Passed. |

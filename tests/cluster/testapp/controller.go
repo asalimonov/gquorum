@@ -129,6 +129,7 @@ func (p *fixtureLifecycle) Readiness(ctx context.Context, input policy.Readiness
 	p.app.mu.Lock()
 	previous := p.app.startupMissing
 	p.app.startupMissing = names
+	p.app.startupObserved = true
 	p.app.mu.Unlock()
 	if p.app.cfg.GateFounders && decision.State == policy.Waiting && input.FirstBootstrap && names != previous {
 		p.app.logger.Info("waiting for configured cluster members to activate", "missing", names)
@@ -141,7 +142,17 @@ func (p *fixtureLifecycle) Readiness(ctx context.Context, input policy.Readiness
 func (a *application) foundingMessage() string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return "greenfield founding: waiting for configured members " + a.startupMissing
+	missing := a.startupMissing
+	if !a.startupObserved {
+		// HTTP starts independently of the first policy observation. Until it
+		// arrives, every configured founder is still unverified by this caller.
+		names := make([]string, len(a.cfg.Peers))
+		for i, peer := range a.cfg.Peers {
+			names[i] = peer.Name
+		}
+		missing = strings.Join(names, ",")
+	}
+	return "greenfield founding: waiting for configured members " + missing
 }
 
 // Materialized projections are the fixture's only durable application resources.

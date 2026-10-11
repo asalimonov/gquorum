@@ -50,6 +50,7 @@ type application struct {
 	mu                           sync.RWMutex
 	machines                     map[load.ReplicaRef]*kvMachine
 	startupMissing               string
+	startupObserved              bool
 	clients                      map[string]*loadClient
 	workCtx, lifeCtx, httpCtx    context.Context
 	stopWork, stopLife, stopHTTP context.CancelFunc

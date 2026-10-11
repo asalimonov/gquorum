@@ -11,7 +11,7 @@ Unit tests cover deterministic FSM commands, codecs, validation, mutation
 previews, planning, membership policy, worker components with fake sources,
 subscriptions, local journals, bbolt adapters and WAL recovery. Keep this suite
 below 30 seconds of elapsed time on the development machine. The latest uncached
-refactor run completed in **17.02 seconds**, including physical baseline
+refactor run completed in **15.61 seconds**, including physical baseline
 meta/journal compatibility and the separate fixture module. This uses Go 1.26.5 on
 macOS arm64, Apple M4 Pro with 14 logical CPUs, and a warm compilation cache;
 dependency download and a cold compiler cache are separate setup costs.

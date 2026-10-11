@@ -9,8 +9,10 @@ import (
 	"github.com/asalimonov/gquorum"
 	"maps"
 	"net/http"
+	"net/http/httptrace"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -93,8 +95,35 @@ func pendingPressure(t *testing.T, size int) {
 		t.Fatal(err)
 	}
 	heldReplies := make([]pressureReply, limit)
+	// Acquire every HTTP connection before releasing the initial wave. The
+	// engine intentionally sheds new work after one second of WAL stall; slow
+	// client connection setup must not consume that admission window before
+	// this test has filled the bounded waiter set.
+	connected := make(chan struct{})
+	var connections atomic.Int32
+	connectCtx, cancelConnect := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelConnect()
 	for i := range limit {
-		holders.Go(func() { heldReplies[i] = nativeProposal(holderCtx, c, r, "held", fmt.Sprintf("holder-%d", i)) })
+		holders.Go(func() {
+			var arrival sync.Once
+			trace := &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) {
+				arrival.Do(func() {
+					if connections.Add(1) == int32(limit) {
+						close(connected)
+					}
+				})
+				select {
+				case <-connected:
+				case <-connectCtx.Done():
+				}
+			}}
+			heldReplies[i] = nativeProposal(httptrace.WithClientTrace(holderCtx, trace), c, r, "held", fmt.Sprintf("holder-%d", i))
+		})
+	}
+	select {
+	case <-connected:
+	case <-connectCtx.Done():
+		t.Fatalf("could not prepare holder connections: %d/%d: %v", connections.Load(), limit, connectCtx.Err())
 	}
 	var peak int
 	if err := Poll(ctx, func() (bool, error) {

@@ -357,3 +357,22 @@ verification progress; checking a stage does not waive any target requirement.
 - Final audit stage: `make test` passes (96.525s for the complete fixture),
   `make test-fixture` passes uncached (95.173s), and `make lint` plus the
   cluster-tagged vet pass. Final-image Docker/performance validation remains.
+- The complete publication-fix image run finished with a seven-node pressure
+  setup failure (pending peak 196 before the engine's one-second stall refusal).
+  The audit-fix image run subsequently found a founding HTTP message emitted
+  before the first policy observation populated missing-peer names. Neither run
+  closes acceptance. The fixture now names unverified configured peers until
+  its first observation; an HTTP regression passes under race. The pressure
+  harness acquires all initial HTTP connections behind a bounded barrier before
+  sending proposals, preserving every pending/overload/durability assertion.
+- Corrected fixture validation: `make test` passes (84.784s fixture), units pass
+  uncached in **15.61 seconds**, and normal/cluster-tagged vet pass. Founding
+  timeout scenarios pass twice at each of three/five/seven nodes (62.302s).
+  Seven-node pressure repeats and final complete process acceptance remain.
+- The corrected seven-node pressure setup passes twice (97.821s total), reaching
+  256/256 pending slots, 147/148 continuous samples and more than 15,000 overload
+  attempts per run. Overload p95 stays below 1.4ms; all measured healthy writes
+  stay within 100ms and exact durability/cancellation assertions pass. Unit race
+  checks pass after the fixture changes. Complete validation now uses
+  `gquorum-test:api-final-gates`, with unchanged library implementation from
+  `e135c7e` and the corrected application diagnostics/test setup.
