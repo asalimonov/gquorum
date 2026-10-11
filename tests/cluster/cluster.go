@@ -158,6 +158,40 @@ func (n *Node) Kill(ctx context.Context) error {
 	}
 	return err
 }
+
+// StartJoining replaces only the stopped process container, retaining its exact
+// private volume, host identity and lease catalog entry. Join is a caller-supplied
+// constructor parameter; the library supplies the grant/fencing/quarantine flow.
+func (n *Node) StartJoining(ctx context.Context) error {
+	c := n.cluster
+	c.creationMu.Lock()
+	defer c.creationMu.Unlock()
+	state, err := n.Container.State(ctx)
+	if err != nil {
+		return err
+	}
+	if state.Running {
+		return errors.New("cannot change boot mode of a running process")
+	}
+	owned, cancel, err := c.operation(ctx)
+	if err != nil {
+		return err
+	}
+	err = n.Container.Terminate(owned, testcontainers.StopTimeout(2*time.Second))
+	cancel()
+	if err != nil {
+		return err
+	}
+	n.running.Store(false)
+	peers := make([]peer, len(c.Spec.Nodes))
+	for i, seed := range c.Spec.Nodes {
+		peers[i] = peer{Name: seed.Name, Type: seed.Type, MetaAddress: seed.Name + ":9000", LoadAddress: seed.Name + ":9001", HTTPAddress: seed.Name + ":8080"}
+	}
+	if err := c.createNodeContainer(ctx, n, c.image, peers, true, n.Spec.Name); err != nil {
+		return err
+	}
+	return n.Start(ctx)
+}
 func (n *Node) Logs(ctx context.Context) (string, error) {
 	reader, err := n.Container.Logs(ctx)
 	if err != nil {
@@ -282,9 +316,14 @@ func (c *Cluster) createNodeClaiming(ctx context.Context, image string, spec Nod
 	c.mu.Lock()
 	c.nodes = append(c.nodes, node)
 	c.mu.Unlock()
+	return node, c.createNodeContainer(ctx, node, image, peers, join, claim)
+}
+func (c *Cluster) createNodeContainer(ctx context.Context, node *Node, image string, peers []peer, join bool, claim string) error {
+	spec := node.Spec
+	volumeName := c.resourcePrefix + "-" + spec.Name
 	manifest, err := json.Marshal(peers)
 	if err != nil {
-		return node, err
+		return err
 	}
 	request := testcontainers.ContainerRequest{
 		Image: image, Name: volumeName, ExposedPorts: []string{"8080/tcp"}, Networks: []string{c.Network}, NetworkAliases: map[string][]string{c.Network: {spec.Name}}, Labels: maps.Clone(c.labels), Mounts: testcontainers.Mounts(testcontainers.VolumeMount(node.Volume, "/data")),
@@ -293,16 +332,16 @@ func (c *Cluster) createNodeClaiming(ctx context.Context, image string, spec Nod
 		WaitingFor:     wait.ForListeningPort("8080/tcp").SkipInternalCheck().WithStartupTimeout(20 * time.Second),
 		ConfigModifier: func(config *containerapi.Config) { config.Hostname = spec.Name },
 	}
-	owned, cancel, err = c.operation(ctx)
+	owned, cancel, err := c.operation(ctx)
 	if err != nil {
-		return node, err
+		return err
 	}
 	node.Container, err = testcontainers.GenericContainer(owned, testcontainers.GenericContainerRequest{ContainerRequest: request, Started: false})
 	cancel()
 	if err != nil && node.Container == nil {
 		c.uncertainCreate = err
 	}
-	return node, err
+	return err
 }
 
 // PrepareJoinNode allocates an owned, stopped process with fresh storage. The

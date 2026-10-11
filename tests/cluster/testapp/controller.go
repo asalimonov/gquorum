@@ -527,5 +527,9 @@ func (a *application) readmission(ctx context.Context, change meta.Readmission) 
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	return os.Rename(path, backup)
+	if err := os.Rename(path, backup); err != nil {
+		return err
+	}
+	a.logger.Info("readmission quarantined meta identity", "path", backup, "node", before.NodeName, "member_id", before.MemberID, "new_member_id", after.MemberID, "instance_id", own.InstanceID)
+	return nil
 }

@@ -398,6 +398,7 @@ type MutationResult struct { Document topology.Document; ExecutionID topology.Ex
 type GroupSpec struct { ID string; Placement *topology.PlacementRule; Nodes []string }
 type RetireOptions struct { Reason string; Mutation MutationOptions }
 func (g *Group) AddNode(context.Context, topology.Node, MutationOptions) (MutationResult, error)
+func (g *Group) ReadmitNode(context.Context, string, MutationOptions) (MutationResult, error)
 func (g *Group) DrainNode(context.Context, string, MutationOptions) (MutationResult, error)
 func (g *Group) ActivateNode(context.Context, string, MutationOptions) (MutationResult, error)
 func (g *Group) ExcludeNode(context.Context, string, MutationOptions) (MutationResult, error)
@@ -436,6 +437,8 @@ Every node exposes owned `ReconciliationStatus` diagnostics. Followers report ap
 Pure `topology.EvaluateGroupHealth`, `EvaluateDataGroupHealth` and `EvaluateAllGroupHealth` join Active-declared voters to one coherent node snapshot. Unknown or missing node observations keep numeric fields null; zero is reserved for measured dead voters. Failure tolerance and per-load-group below-minimum placement are independent of quorum state. `_meta` has no below-minimum placement field.
 
 Reads return deep copies of locally applied materialized state. They are explicitly not linearizable ReadIndex reads. Watches emit an initial view followed by monotonic versions, use a bounded coalescing buffer and may skip intermediate versions. History is the bounded retained document window (128); callers receive its horizon. WaitExecution observes durable replicated transitions, not event subscriptions.
+
+ReadmitNode explicitly rotates a down active node's meta and owned load identities through the normal CAS/preview/approval pipeline. Latest/Target/Active must agree and a fresh health sample must classify the node dead; live/unknown health and pending intent are refused before allocation/staging. The node's type, placement and other hosts' identities are retained. Approval performs the ordinary safe learner-first execution and may wait for the absent process. The caller supplies Join on its retained path and an exact idempotent OnReadmission hook when it returns. If staging commits but approval fails, inspect the returned Document and retry Apply for that exact version instead of sending the old CAS mutation again.
 
 Stage CAS is checked at committed apply, not only before submission. If a mutation stages successfully but Apply fails, return MutationResult containing the committed document plus a typed error; do not imply staging was rolled back. Apply from a follower is forwarded once to the known meta leader. The receiver never forwards again. Empty plans still durably approve and activate without membership effects.
 

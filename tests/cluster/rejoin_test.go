@@ -3,10 +3,19 @@
 package cluster
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"io"
+	"maps"
+	"os"
 	"reflect"
+	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/asalimonov/gquorum/meta"
 	"github.com/asalimonov/gquorum/topology"
@@ -146,4 +155,352 @@ func duplicateNameIntruder(t *testing.T, size int) {
 	if err != nil || !reflect.DeepEqual(before, latest) {
 		t.Fatal("conflict allocated a membership identity", latest, err)
 	}
+}
+
+func TestExcludedSameDiskProcessParksAndReadmitsThreeNodes(t *testing.T) {
+	excludedSameDiskRejoin(t, 3)
+}
+func TestExcludedSameDiskProcessParksAndReadmitsFiveNodes(t *testing.T) { excludedSameDiskRejoin(t, 5) }
+func TestExcludedSameDiskProcessParksAndReadmitsSevenNodes(t *testing.T) {
+	excludedSameDiskRejoin(t, 7)
+}
+func TestDownNodeRotatedIdentityQuarantinesAndRejoinsThreeNodes(t *testing.T) {
+	rotatedDownNodeRejoin(t, 3)
+}
+func TestDownNodeRotatedIdentityQuarantinesAndRejoinsFiveNodes(t *testing.T) {
+	rotatedDownNodeRejoin(t, 5)
+}
+func TestDownNodeRotatedIdentityQuarantinesAndRejoinsSevenNodes(t *testing.T) {
+	rotatedDownNodeRejoin(t, 7)
+}
+
+func rejoinWorkload(t *testing.T, size int) (context.Context, *Cluster, topology.Document, LocalObservation, map[string]string) {
+	t.Helper()
+	ctx, c := performanceCluster(t, size)
+	created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := transferMeta(ctx, c, "node2", "node1", created.Document.MemberID("node1")); err != nil {
+		t.Fatal(err)
+	}
+	values := map[string]string{}
+	for i := range 10 {
+		key := fmt.Sprintf("rejoin-%02d", i)
+		value := "value-" + key
+		if err := c.Put(ctx, "node3", "work", key, key, value); err != nil {
+			t.Fatal(err)
+		}
+		values[key] = value
+	}
+	if err := exactOwnedValues(ctx, c, created.Document, "work", values); err != nil {
+		t.Fatal(err)
+	}
+	before, err := c.Local(ctx, "node3", "work")
+	if err != nil || !before.Found || before.ReplicaID == 0 {
+		t.Fatal("missing exact returning replica", before, err)
+	}
+	return ctx, c, created.Document, before, values
+}
+
+func assertRejoinedIdentities(t *testing.T, ctx context.Context, c *Cluster, before, after topology.Document, previous LocalObservation, expectedProcess string, values map[string]string) {
+	t.Helper()
+	if after.MemberID("node3") <= before.MetaGroup().NextReplicaID-1 || replicaID(after, "work", "node3") <= before.Group("work").NextReplicaID-1 || len(after.MetaGroup().Replicas) != len(c.Spec.Nodes) {
+		t.Fatal("readmission reused a retired identity or lost membership", before, after)
+	}
+	if err := c.WaitReady(ctx); err != nil {
+		t.Fatal("returning process failed its serving gate", err)
+	}
+	if err := c.WaitActive(ctx, after.Version); err != nil {
+		t.Fatal(err)
+	}
+	if err := exactOwnedValues(ctx, c, after, "work", values); err != nil {
+		t.Fatal("fresh identity failed snapshot recovery", err)
+	}
+	for _, node := range c.Spec.Nodes {
+		native, err := c.Local(ctx, node.Name, topology.MetaGroupID)
+		if err != nil || !native.Found || len(native.Status.ConfState.Voters) != len(c.Spec.Nodes) || slices.Contains(native.Status.ConfState.Voters, previous.Identity.MemberID) || !slices.Contains(native.Status.ConfState.Voters, after.MemberID("node3")) {
+			t.Fatal("fresh meta voter set did not converge", native, err)
+		}
+		for _, old := range before.MetaGroup().Replicas {
+			if old.NodeName != "node3" && after.MemberID(old.NodeName) != old.ReplicaID {
+				t.Fatal("readmission rotated another meta member", old)
+			}
+		}
+		response, err := c.Request(ctx, node.Name, "GET", "/api/cluster/parked", nil, 0)
+		if err := requireStatus(response, err, 200); err != nil {
+			t.Fatal(err)
+		}
+		var parked []meta.ParkedJoin
+		if err := response.Decode(&parked); err != nil || len(parked) != 0 {
+			t.Fatal("admitted process remains parked", parked, err)
+		}
+	}
+	local, err := c.Local(ctx, "node3", "work")
+	if err != nil || local.Identity.MemberID != after.MemberID("node3") || local.ReplicaID != replicaID(after, "work", "node3") || local.Identity.InstanceID != expectedProcess || local.Identity.InstanceID == previous.Identity.InstanceID || local.Ledger == nil || local.Ledger.ReplicaID != local.ReplicaID {
+		t.Fatal("readmission did not keep the same returning process under exact fresh identities", local, err)
+	}
+	if err := ownDurableFiles(ctx, c, "node3", "work"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Put(ctx, "node3", "work", "after-rejoin", "after-rejoin", "serving"); err != nil {
+		t.Fatal(err)
+	}
+	values = maps.Clone(values)
+	values["after-rejoin"] = "serving"
+	if err := exactOwnedValues(ctx, c, after, "work", values); err != nil {
+		t.Fatal(err)
+	}
+	assertRetiredMetaPin(t, ctx, c, previous.Identity)
+}
+
+// Inspect the actual quarantined bbolt file, not just a successful callback log.
+func assertRetiredMetaPin(t *testing.T, ctx context.Context, c *Cluster, old meta.Identity) {
+	t.Helper()
+	logs, err := c.Node(old.NodeName).Logs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matches := regexp.MustCompile(`path=(/data/meta\.bolt\.retired-[0-9]+-[0-9a-f]{16})`).FindAllStringSubmatch(logs, -1)
+	paths := map[string]bool{}
+	for _, match := range matches {
+		paths[match[1]] = true
+	}
+	if len(paths) != 1 {
+		t.Fatal("readmission did not quarantine one exact old meta store", matches, logs)
+	}
+	for remote := range paths {
+		source, err := c.Node(old.NodeName).Container.CopyFileFromContainer(ctx, remote)
+		if err != nil {
+			t.Fatal(err)
+		}
+		file, err := os.CreateTemp(t.TempDir(), "retired-*.bolt")
+		if err != nil {
+			_ = source.Close()
+			t.Fatal(err)
+		}
+		_, copyErr := io.Copy(file, io.LimitReader(source, 16<<20))
+		err = errors.Join(copyErr, source.Close(), file.Close())
+		if err != nil {
+			t.Fatal(err)
+		}
+		pin, found, err := meta.LoadStoredIdentity(file.Name())
+		if err != nil || !found || pin.NodeName != old.NodeName || pin.ClusterID != old.ClusterID || pin.MemberID != old.MemberID {
+			t.Fatal("quarantined a foreign/successor meta pin", pin, old, err)
+		}
+	}
+}
+
+func excludedSameDiskRejoin(t *testing.T, size int) {
+	t.Helper()
+	ctx, c, before, previous, values := rejoinWorkload(t, size)
+	drained, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/drain", meta.MutationOptions{Actor: "operator", Apply: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Self-removal makes the process disappear during convergence; observe the
+	// surviving execution explicitly before waiting for its clean exit.
+	response, err := c.Request(ctx, "node2", "POST", "/api/nodes/node3/exclude", meta.MutationOptions{Actor: "operator", Apply: true}, drained.Document.Version)
+	if err := requireStatus(response, err, 202); err != nil {
+		t.Fatal(err)
+	}
+	var excluded meta.MutationResult
+	if err := response.Decode(&excluded); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.WaitExecution(ctx, "node1", excluded.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+	victim := c.Node("node3")
+	if err := Poll(ctx, func() (bool, error) {
+		state, err := victim.Container.State(ctx)
+		if err != nil {
+			return false, err
+		}
+		if state.Running {
+			return false, nil
+		}
+		if state.ExitCode != 0 {
+			return true, fmt.Errorf("approved self-removal exited %d", state.ExitCode)
+		}
+		victim.running.Store(false)
+		return true, nil
+	}); err != nil {
+		t.Fatal("exclusion alone must cause clean self-exit", err)
+	}
+	if err := c.WaitActive(ctx, excluded.Document.Version); err != nil {
+		t.Fatal("restart requires fully active exclusion", err)
+	}
+	logs, err := victim.Logs(ctx)
+	if err != nil || !strings.Contains(logs, "self-removal identity verified") || !strings.Contains(logs, "member_id="+strconv.FormatUint(previous.Identity.MemberID, 10)) {
+		t.Fatal("self-exit did not verify its exact authorized identity", logs, err)
+	}
+	volume := victim.Volume
+	if err := victim.StartJoining(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if victim.Volume != volume {
+		t.Fatal("retained restart replaced the disk")
+	}
+	parkedIdentity, err := c.Local(ctx, "node3", topology.MetaGroupID)
+	if err != nil || parkedIdentity.Identity.MemberID != previous.Identity.MemberID || parkedIdentity.Identity.InstanceID == previous.Identity.InstanceID {
+		t.Fatal("parked restart replaced pin or reused process", parkedIdentity, err)
+	}
+	// Keep the excluded process alive and nonserving while every observer reads
+	// its exact typed refusal. The same parked process must later resume.
+	if err := Poll(ctx, func() (bool, error) {
+		for _, node := range c.Spec.Nodes {
+			reply, err := c.Request(ctx, node.Name, "GET", "/api/cluster/parked", nil, 0)
+			if err := requireStatus(reply, err, 200); err != nil {
+				return false, err
+			}
+			var entries []meta.ParkedJoin
+			if err := reply.Decode(&entries); err != nil {
+				return true, err
+			}
+			if len(entries) != 1 {
+				return false, nil
+			}
+			p := entries[0]
+			if p.Name != "node3" || p.InstanceID != parkedIdentity.Identity.InstanceID || p.ClusterID != c.ID || p.ReportedMemberID != previous.Identity.MemberID || p.RefusalKind != "excluded" || p.Address != "node3:9000" {
+				return true, fmt.Errorf("wrong excluded refusal: %+v", p)
+			}
+		}
+		return true, nil
+	}); err != nil {
+		t.Fatal("excluded return must park with exact typed identity", err)
+	}
+	hold := time.Now().Add(2 * time.Second)
+	for time.Now().Before(hold) {
+		live, err := c.Request(ctx, "node3", "GET", "/health/live", nil, 0)
+		if err := requireStatus(live, err, 200); err != nil {
+			t.Fatal(err)
+		}
+		ready, err := c.Request(ctx, "node3", "GET", "/health/ready", nil, 0)
+		if err := requireStatus(ready, err, 503); err != nil {
+			t.Fatal("excluded process is serving", err)
+		}
+		status, err := c.Status(ctx, "node3")
+		if err != nil || status.Lifecycle != "parked" || status.SessionLive || status.SelfRemoval != nil {
+			t.Fatal("excluded retained pin restarted its removed voter", status, err)
+		}
+		load, err := c.Local(ctx, "node3", "work")
+		if err != nil || load.Found {
+			t.Fatal("parked process hosts application state", load, err)
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	latest, err := c.Document(ctx, "node1", "latest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err = c.Request(ctx, "node2", "POST", "/api/nodes", map[string]any{"node": joiningNode(victim.Spec), "mutation": meta.MutationOptions{Actor: "operator", Apply: true}}, latest.Version)
+	if err := requireStatus(response, err, 202); err != nil {
+		t.Fatal(err)
+	}
+	var admitted meta.MutationResult
+	if err := response.Decode(&admitted); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.WaitExecution(ctx, "node1", admitted.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+	assertRejoinedIdentities(t, ctx, c, before, admitted.Document, previous, parkedIdentity.Identity.InstanceID, values)
+}
+
+func rotatedDownNodeRejoin(t *testing.T, size int) {
+	t.Helper()
+	ctx, c, before, previous, values := rejoinWorkload(t, size)
+	// A healthy node must be refused before any allocation/proposal.
+	response, err := c.Request(ctx, "node2", "POST", "/api/nodes/node3/readmit", meta.MutationOptions{Actor: "operator", Apply: true}, before.Version)
+	if err := requireStatus(response, err, 422); err != nil {
+		t.Fatal("readmission rotated a live holder", err)
+	}
+	victim := c.Node("node3")
+	if err := victim.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitClusterHealth(ctx, c, "node3"); err != nil {
+		t.Fatal(err)
+	}
+	var rotated meta.MutationResult
+	if err := Poll(ctx, func() (bool, error) {
+		response, err = c.Request(ctx, "node2", "POST", "/api/nodes/node3/readmit", meta.MutationOptions{Actor: "operator", Apply: true}, before.Version)
+		if err != nil {
+			return false, err
+		}
+		if response.Status == 202 {
+			return true, response.Decode(&rotated)
+		}
+		// The source helper preserves a committed staged version when Apply
+		// fails. A repeated mutation with the original CAS would only conflict
+		// and must never allocate another incarnation.
+		latest, readErr := c.Document(ctx, "node1", "latest")
+		if readErr != nil {
+			return false, readErr
+		}
+		if latest.Version > before.Version {
+			if latest.Version != before.Version+1 || latest.ParentVersion != before.Version || latest.ChangedBy != "operator" || latest.MemberID("node3") != before.MetaGroup().NextReplicaID || replicaID(latest, "work", "node3") != before.Group("work").NextReplicaID {
+				return true, fmt.Errorf("cannot adopt unrelated staged readmission: %+v", latest)
+			}
+			t.Logf("readmission staged v%d; retry approval after HTTP %d: %s", latest.Version, response.Status, response.Data)
+			rotated.Document = latest
+			return true, nil
+		}
+		return false, requireStatus(response, nil, 202)
+	}); err != nil {
+		t.Fatal("operator readmission while down", err)
+	}
+	if rotated.ExecutionID == "" {
+		if err := Poll(ctx, func() (bool, error) {
+			response, err := c.Request(ctx, "node2", "POST", fmt.Sprintf("/api/topology/%d/apply", rotated.Document.Version), nil, 0)
+			if err != nil {
+				return false, err
+			}
+			if response.Status != 202 {
+				return false, requireStatus(response, nil, 202)
+			}
+			var approval struct {
+				ExecutionID topology.ExecutionID `json:"execution_id"`
+			}
+			if err := response.Decode(&approval); err != nil {
+				return true, err
+			}
+			rotated.ExecutionID = approval.ExecutionID
+			return approval.ExecutionID != "", nil
+		}); err != nil {
+			t.Fatal("approval of exact staged readmission", err)
+		}
+	}
+	if rotated.Document.MemberID("node3") <= previous.Identity.MemberID || replicaID(rotated.Document, "work", "node3") <= previous.ReplicaID || rotated.ExecutionID == "" {
+		t.Fatal("operator did not commit/approve exact fresh identities", rotated)
+	}
+	// The old physical files still exist while it is down. Approval alone cannot
+	// erase them or replace the disk; quarantine belongs to the returning callback.
+	if err := ownDurableFiles(ctx, c, "node3", "work"); err != nil {
+		t.Fatal(err)
+	}
+	execution, err := c.Execution(ctx, "node1", rotated.ExecutionID)
+	if err != nil || execution.State.Terminal() {
+		t.Fatal("down node completed learner admission without its process", execution, err)
+	}
+	volume := victim.Volume
+	if err := victim.StartJoining(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if victim.Volume != volume {
+		t.Fatal("rotated return wiped its disk")
+	}
+	returned, err := c.Local(ctx, "node3", topology.MetaGroupID)
+	if err != nil || returned.Identity.InstanceID == previous.Identity.InstanceID {
+		t.Fatal("returning process identity missing", returned, err)
+	}
+	if err := c.WaitExecution(ctx, "node1", rotated.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+	assertRejoinedIdentities(t, ctx, c, before, rotated.Document, previous, returned.Identity.InstanceID, values)
 }

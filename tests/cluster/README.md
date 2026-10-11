@@ -149,3 +149,17 @@ the same container/volume returns. The recovering process restores ten commands
 from its own full snapshot and WAL without receiving a peer snapshot, then commits
 an eleventh command. Physical durable file checks and exact native membership
 replace the source application's boot-verdict log and UI assertions.
+
+Excluded returns drain first, then wait for the exclusion's actual self-exit
+(code 0) and Active convergence on the survivors. The caller selects retained
+Join for the same private volume; the excluded process stays live, not ready and
+without load engines while every observer reads its exact typed refusal. Operator
+Add resumes that same process under fresh IDs. Down-node rotation uses the public
+ReadmitNode mutation, with live/unknown health and pending-intent refusal before
+staging; a committed staged version survives approval failure and is approved by
+its exact version. No down process can finish its admission or delete its own
+files before returning. Both families inspect the actual quarantined old bbolt
+pin and exact native meta/load IDs, ledger and recovered commands; each runs at
+three/five/seven nodes. Constructor Join and public parked reads replace the source
+application's configuration-driven boot probe and UI/gossip surface. These
+controls and storage adapters remain wholly outside the small Compose demo.

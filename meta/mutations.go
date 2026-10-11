@@ -226,6 +226,44 @@ func (g *Group) AddNode(ctx context.Context, node topology.Node, o MutationOptio
 		return g.enforcePlacement(doc, now)
 	})
 }
+
+// ReadmitNode rotates the meta and load identities of a declared active node
+// observed dead. It preserves its type, placement and other nodes' identities.
+// Latest, Target and Active must already agree; approval remains an ordinary
+// learner-first execution that can wait for the returning process. The caller
+// restarts that process with Join and an exact OnReadmission quarantine hook.
+func (g *Group) ReadmitNode(ctx context.Context, name string, o MutationOptions) (MutationResult, error) {
+	return g.mutation(ctx, o, fmt.Sprintf("readmit node %q", name), false, func(doc *topology.Document, now time.Time) error {
+		node := doc.Node(name)
+		if node == nil {
+			return unknownNode(name)
+		}
+		if node.State != topology.NodeActive || doc.MemberID(name) == 0 {
+			return fault.New(fault.Invalid, "readmission requires an admitted active node", nil)
+		}
+		_, target, active := g.state().Views()
+		if doc.Version != target.Version || doc.Version != active.Version {
+			return fault.New(fault.ExecutionAuthorization, "readmission requires converged topology; apply or restore pending intent first", nil)
+		}
+		health, err := (observationSource{g}).Health(ctx, active)
+		if err != nil {
+			return err
+		}
+		switch health[name] {
+		case topology.HealthDead:
+		case topology.HealthAlive:
+			return fault.New(fault.UnsafeMembership, "cannot readmit a live node", nil)
+		default:
+			return fault.New(fault.Unavailable, "readmission requires known dead node health", nil)
+		}
+		fresh, err := metaengine.ReadmissionDocument(*doc, name, now)
+		if err != nil {
+			return err
+		}
+		*doc = fresh
+		return nil
+	})
+}
 func (g *Group) DrainNode(ctx context.Context, name string, o MutationOptions) (MutationResult, error) {
 	return g.mutation(ctx, o, fmt.Sprintf("drain node %q", name), false, func(doc *topology.Document, now time.Time) error {
 		node := doc.Node(name)

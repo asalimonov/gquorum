@@ -158,3 +158,23 @@ after the refused process exits; it cannot poison the holder's cached route or
 allocate membership. Followers read that current leader-owned warning through
 ParkedJoins. Executables decide how a terminal library error affects their process;
 the process fixture propagates it to joined fatal startup/exit 1.
+
+ReadmitNode rotates only a declared active node's meta/load identities after a
+fresh caller or meta identity probe reports it dead. Live/unknown health and
+nonconverged Latest/Target/Active are refused before staging. It retains caller
+node type, placement and other hosts' IDs. This helper uses the ordinary CAS and
+optional approval pipeline: a committed document is returned even if subsequent
+approval fails; re-drive Apply for that version instead of allocating again.
+A caller starts the returning process with Join and its retained path. The grant
+then invokes the exact OnReadmission hook after closing its old meta handle.
+The process fixture keeps the same private volume when selecting this constructor
+mode; configuration-driven boot probing is an application startup concern.
+
+Its self-removal callback verifies its own node/cluster/process/member tuple,
+recorded reason/version/index, native applied removal and the exact retained
+approved document before scheduling joined shutdown. It waits within its caller
+budget for publication of the native status after the durable apply notification.
+Unrelated changes to Target do not replace the recorded version's authorization.
+Process ports check actual clean exit, typed parking from all observers, resumption
+of the same waiting process, native voter convergence and old physical bbolt pin
+quarantine. The original journal remains node-local throughout admission.

@@ -212,6 +212,20 @@ func (a *application) routes() http.Handler {
 		}
 		jsonResponse(w, http.StatusOK, parked)
 	})
+	mux.HandleFunc("POST /api/nodes/{name}/readmit", func(w http.ResponseWriter, r *http.Request) {
+		var opts meta.MutationOptions
+		if err := requestBody(w, r, &opts); err != nil {
+			httpError(w, err)
+			return
+		}
+		opts, err := mutationOptions(r, opts)
+		if err != nil {
+			httpError(w, err)
+			return
+		}
+		result, err := a.meta.ReadmitNode(r.Context(), r.PathValue("name"), opts)
+		mutationResponse(w, result, err)
+	})
 	mux.HandleFunc("GET /api/cluster/status", func(w http.ResponseWriter, r *http.Request) {
 		status, err := a.meta.Status(r.Context())
 		if err != nil {
