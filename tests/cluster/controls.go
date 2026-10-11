@@ -64,10 +64,11 @@ func (c *Cluster) Projection(ctx context.Context, node, group string, replica ui
 }
 
 type BarrierObservation struct {
-	Group string                  `json:"group"`
-	Kind  topology.StepKind       `json:"kind"`
-	Hits  uint64                  `json:"hits"`
-	Last  topology.AuthorizedStep `json:"last"`
+	Group  string                  `json:"group"`
+	Kind   topology.StepKind       `json:"kind"`
+	Hits   uint64                  `json:"hits"`
+	Last   topology.AuthorizedStep `json:"last"`
+	Refuse bool                    `json:"refuse"`
 }
 type Controls struct {
 	Barriers []BarrierObservation      `json:"barriers"`

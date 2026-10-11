@@ -4,8 +4,11 @@ package cluster
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -163,5 +166,244 @@ func TestRemoteApplyFromNonHostMetaLeader(t *testing.T) {
 		if _, err := c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(), client.ContainerStatPathOptions{Path: "/data/load/remote"}); !errdefs.IsNotFound(err) {
 			t.Fatal("deleted remote store remains", node.Spec.Name, err)
 		}
+	}
+}
+
+func TestCallerRefusedDeletionRetainsDataThreeNodes(t *testing.T) { callerRefusedDeletion(t, 3) }
+func TestCallerRefusedDeletionRetainsDataFiveNodes(t *testing.T)  { callerRefusedDeletion(t, 5) }
+func TestCallerRefusedDeletionRetainsDataSevenNodes(t *testing.T) { callerRefusedDeletion(t, 7) }
+
+// Port of the source non-empty deletion refusal. Application occupancy belongs
+// to the caller: refuse the first destructive callback, persist its failure,
+// and retry the same desired version under a fresh authorized attempt.
+func callerRefusedDeletion(t *testing.T, size int) {
+	t.Helper()
+	ctx, c := performanceClusterSpec(t, matrixSpec(size))
+	created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "occupied", Placement: &topology.PlacementRule{MinReplicas: 3, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := map[string]string{"owned": "retained"}
+	if err := c.Put(ctx, "node2", "occupied", "owned", "owned", "retained"); err != nil {
+		t.Fatal(err)
+	}
+	if err := exactOwnedValues(ctx, c, created.Document, "occupied", expected); err != nil {
+		t.Fatal(err)
+	}
+	for _, replica := range created.Document.Group("occupied").Replicas {
+		response, err := c.Request(ctx, replica.NodeName, "PUT", "/internal/test/barriers/occupied/stop_replica?refuse=true", nil, 0)
+		if err := requireStatus(response, err, 200); err != nil {
+			t.Fatal(err)
+		}
+	}
+	response, err := c.Request(ctx, "node2", "DELETE", "/api/groups/occupied", meta.MutationOptions{Actor: "cluster-test"}, created.Document.Version)
+	if err := requireStatus(response, err, 200); err != nil {
+		t.Fatal(err)
+	}
+	var deleted meta.MutationResult
+	if err := response.Decode(&deleted); err != nil {
+		t.Fatal(err)
+	}
+	if deleted.Document.Group("occupied") != nil || deleted.Document.Version != created.Document.Version+1 {
+		t.Fatal(deleted)
+	}
+	if err := Poll(ctx, func() (bool, error) {
+		latest, err := c.Document(ctx, "node2", "latest")
+		return latest.Version == deleted.Document.Version, err
+	}); err != nil {
+		t.Fatal("staged deletion did not reach planning ingress", err)
+	}
+	response, err = c.Request(ctx, "node2", "POST", fmt.Sprintf("/api/topology/%d/plan", deleted.Document.Version), nil, 0)
+	if err := requireStatus(response, err, 200); err != nil {
+		t.Fatal(err)
+	}
+	var plan topology.Plan
+	if err := response.Decode(&plan); err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Steps) != 4 || plan.Steps[0].Kind != topology.StepStopReplica || plan.Steps[3].Kind != topology.StepDeleteGroupState {
+		t.Fatal(plan)
+	}
+	approve := func() topology.ExecutionID {
+		t.Helper()
+		response, err := c.Request(ctx, "node2", "POST", fmt.Sprintf("/api/topology/%d/apply", deleted.Document.Version), nil, 0)
+		if err := requireStatus(response, err, 202); err != nil {
+			t.Fatal(err)
+		}
+		var result struct {
+			ID topology.ExecutionID `json:"execution_id"`
+		}
+		if err := response.Decode(&result); err != nil || result.ID == "" {
+			t.Fatal(result, err)
+		}
+		return result.ID
+	}
+	failedID := approve()
+	var failed topology.ExecutionStatus
+	if err := Poll(ctx, func() (bool, error) {
+		var err error
+		failed, err = c.Execution(ctx, "node2", failedID)
+		return failed.State.Terminal(), err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if failed.State != topology.ExecutionFailed || failed.Attempt != 1 || failed.Version != deleted.Document.Version || failed.CurrentStep != 1 || !strings.Contains(failed.Error, "caller refuses deletion") {
+		t.Fatal(failed)
+	}
+	assertFailure := func(restarted string) {
+		t.Helper()
+		for _, node := range c.Nodes() {
+			if err := Poll(ctx, func() (bool, error) {
+				status, err := c.Status(ctx, node.Spec.Name)
+				return status.LatestVersion == deleted.Document.Version && status.TargetVersion == deleted.Document.Version && status.ActiveVersion == created.Document.Version && status.Execution != nil && *status.Execution == failed, err
+			}); err != nil {
+				t.Fatal(node.Spec.Name, err)
+			}
+		}
+		serving := created.Document.Clone()
+		serving.Group("occupied").Replicas = slices.DeleteFunc(serving.Group("occupied").Replicas, func(r topology.Replica) bool { return r.NodeName == restarted })
+		if err := exactOwnedValues(ctx, c, serving, "occupied", expected); err != nil {
+			t.Fatal("refusal destroyed surviving data", err)
+		}
+		for _, replica := range created.Document.Group("occupied").Replicas {
+			local, err := c.Local(ctx, replica.NodeName, "occupied")
+			if err != nil || local.Ledger == nil || local.Ledger.ReplicaID != replica.ReplicaID || replica.NodeName != restarted && (!local.Found || local.ReplicaID != replica.ReplicaID) || replica.NodeName == restarted && local.Found {
+				t.Fatal("refusal changed retained owner or reopened a retired group", local, err)
+			}
+			if err := ownDurableFiles(ctx, c, replica.NodeName, "occupied"); err != nil {
+				t.Fatal("refusal lost durable files", err)
+			}
+			if _, err := c.docker.ContainerStatPath(ctx, c.Node(replica.NodeName).Container.GetContainerID(), client.ContainerStatPathOptions{Path: "/data/load/occupied"}); err != nil {
+				t.Fatal("refusal removed physical store", err)
+			}
+		}
+	}
+	assertFailure("")
+	hits := uint64(0)
+	for _, replica := range created.Document.Group("occupied").Replicas {
+		controls, err := c.Controls(ctx, replica.NodeName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, b := range controls.Barriers {
+			if b.Group == "occupied" {
+				hits += b.Hits
+			}
+			if b.Group == "occupied" && b.Hits > 0 && (!b.Refuse || !b.Last.Matches(failedID, 1, deleted.Document.Version, plan.Steps[0])) {
+				t.Fatal("refusal lost exact authorized scope", b)
+			}
+		}
+		for _, receipt := range controls.Receipts {
+			if receipt.ExecutionID == failedID {
+				t.Fatal("refused attempt performed an effect", receipt)
+			}
+		}
+	}
+	if hits == 0 {
+		t.Fatal("no caller observed the refused identity")
+	}
+	// The failed attempt survives replacement of the meta leader and its disk restart.
+	status, err := c.Status(ctx, "node2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var oldLeader *Node
+	for _, node := range c.Nodes() {
+		if created.Document.MemberID(node.Spec.Name) == status.MetaLeader {
+			oldLeader = node
+		}
+	}
+	if oldLeader == nil {
+		t.Fatal("leader has no exact owner")
+	}
+	if err := oldLeader.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var retainedDigest [32]byte
+	wasOwner := slices.ContainsFunc(created.Document.Group("occupied").Replicas, func(r topology.Replica) bool { return r.NodeName == oldLeader.Spec.Name })
+	digest := func() [32]byte {
+		t.Helper()
+		reader, err := oldLeader.Container.CopyFileFromContainer(ctx, "/data/load/occupied/state.bolt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, readErr := io.ReadAll(io.LimitReader(reader, (16<<20)+1))
+		closeErr := reader.Close()
+		if readErr != nil || closeErr != nil || len(data) == 0 || len(data) > 16<<20 {
+			t.Fatal("unreadable retained state", len(data), readErr, closeErr)
+		}
+		return sha256.Sum256(data)
+	}
+	if wasOwner {
+		retainedDigest = digest()
+	}
+	var survivor string
+	for _, node := range c.Nodes() {
+		if node != oldLeader {
+			survivor = node.Spec.Name
+			break
+		}
+	}
+	if err := Poll(ctx, func() (bool, error) {
+		observed, err := c.Status(ctx, survivor)
+		return observed.MetaLeader != 0 && observed.MetaLeader != status.MetaLeader && observed.Execution != nil && *observed.Execution == failed, err
+	}); err != nil {
+		t.Fatal("failed execution did not survive leader replacement", err)
+	}
+	if err := oldLeader.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := Poll(ctx, func() (bool, error) {
+		observed, err := c.Status(ctx, oldLeader.Spec.Name)
+		return observed.SessionLive && observed.MetaLeader != 0 && observed.Execution != nil && *observed.Execution == failed, err
+	}); err != nil {
+		t.Fatal("retained meta did not recover the failed execution", err)
+	}
+	assertFailure(oldLeader.Spec.Name)
+	if wasOwner && digest() != retainedDigest {
+		t.Fatal("restart changed the refused group's durable state")
+	}
+
+	// Process controls are intentionally ephemeral. Re-arm only the restarted
+	// owner's control so removal below has the same exact local lifecycle.
+	if wasOwner {
+		response, err := c.Request(ctx, oldLeader.Spec.Name, "PUT", "/internal/test/barriers/occupied/stop_replica?refuse=true", nil, 0)
+		if err := requireStatus(response, err, 200); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The caller permits deletion. The same desired version gets a fresh attempt.
+	for _, replica := range created.Document.Group("occupied").Replicas {
+		if err := c.SetBarrier(ctx, replica.NodeName, "occupied", topology.StepStopReplica, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	retryID := approve()
+	if retryID == failedID {
+		t.Fatal("retry reused failed attempt", retryID)
+	}
+	if err := c.WaitExecution(ctx, "node2", retryID); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.WaitActive(ctx, deleted.Document.Version); err != nil {
+		t.Fatal(err)
+	}
+	retry, err := c.Execution(ctx, "node2", retryID)
+	if err != nil || retry.Attempt != 2 || retry.Version != failed.Version {
+		t.Fatal(retry, err)
+	}
+	for _, node := range c.Nodes() {
+		prior, err := c.Execution(ctx, node.Spec.Name, failedID)
+		if err != nil || prior != failed {
+			t.Fatal("retry rewrote historical failure", prior, err)
+		}
+		if _, err := c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(), client.ContainerStatPathOptions{Path: "/data/load/occupied"}); !errdefs.IsNotFound(err) {
+			t.Fatal("successful deletion retained usable store", node.Spec.Name, err)
+		}
+	}
+	response, err = c.Request(ctx, "node2", "POST", "/api/groups", map[string]any{"group": meta.GroupSpec{ID: "occupied"}, "mutation": meta.MutationOptions{Actor: "cluster-test"}}, deleted.Document.Version)
+	if err := requireStatus(response, err, 409); err != nil {
+		t.Fatal("deleted group ID became reusable", err)
 	}
 }

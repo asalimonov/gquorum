@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -73,5 +74,50 @@ func TestClusterBarrierCancellationAndAuthenticatedRelease(t *testing.T) {
 	}
 	if code := call("DELETE", path, a.cfg.Credential); code != 404 {
 		t.Fatal("duplicate release changed another barrier", code)
+	}
+}
+
+func TestCallerDeletionRefusalRecordsScopeAndReleases(t *testing.T) {
+	t.Parallel()
+	a := &application{cfg: config{Credential: "owned"}, workCtx: t.Context(), closing: make(chan struct{}), clusterHooks: newClusterHooks()}
+	handler := a.routes()
+	call := func(method, path, credential string) int {
+		request := httptest.NewRequest(method, path, nil)
+		request.Header.Set("X-Gquorum-Test-Credential", credential)
+		reply := httptest.NewRecorder()
+		handler.ServeHTTP(reply, request)
+		return reply.Code
+	}
+	path := "/internal/test/barriers/occupied/stop_replica"
+	if code := call("PUT", path+"?refuse=true", "foreign"); code != 403 {
+		t.Fatal(code)
+	}
+	if code := call("PUT", "/internal/test/barriers/occupied/promote_voter?refuse=true", "owned"); code != 400 {
+		t.Fatal(code)
+	}
+	if code := call("PUT", path+"?refuse=garbage", "owned"); code != 400 {
+		t.Fatal(code)
+	}
+	if code := call("PUT", path+"?refuse=true", "owned"); code != 200 {
+		t.Fatal(code)
+	}
+	approved := topology.AuthorizedStep{ExecutionID: "exec-v3-a1", Version: 3, Attempt: 1, StepSeq: 1, Kind: topology.StepStopReplica, GroupID: "occupied", NodeName: "node1", ReplicaID: 7}
+	if err := a.beforeClusterEffect(t.Context(), approved); !errors.Is(err, fault.ErrUnsafeMembership) {
+		t.Fatal(err)
+	}
+	b := a.clusterHooks.barriers[effectKey{"occupied", topology.StepStopReplica}]
+	if b.hits != 1 || b.last != approved || !b.refuse {
+		t.Fatal(b)
+	}
+	other := approved
+	other.GroupID = "other"
+	if err := a.beforeClusterEffect(t.Context(), other); err != nil {
+		t.Fatal("refusal escaped exact group", err)
+	}
+	if code := call("DELETE", path, "owned"); code != 200 {
+		t.Fatal(code)
+	}
+	if err := a.beforeClusterEffect(t.Context(), approved); err != nil {
+		t.Fatal("refusal survived release", err)
 	}
 }

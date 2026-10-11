@@ -39,6 +39,7 @@ type effectBarrier struct {
 	release chan struct{}
 	hits    uint64
 	last    topology.AuthorizedStep
+	refuse  bool
 }
 type clusterHooks struct {
 	mu          sync.Mutex
@@ -66,6 +67,12 @@ func (a *application) beforeClusterEffect(ctx context.Context, approved topology
 	h.mu.Unlock()
 	if b == nil {
 		return nil
+	}
+	if b.refuse {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return fault.New(fault.UnsafeMembership, "caller refuses deletion while application data is occupied", nil)
 	}
 	select {
 	case <-ctx.Done():
@@ -100,10 +107,11 @@ func (a *application) receivedClusterSnapshot(group string) {
 }
 
 type barrierObservation struct {
-	Group string                  `json:"group"`
-	Kind  topology.StepKind       `json:"kind"`
-	Hits  uint64                  `json:"hits"`
-	Last  topology.AuthorizedStep `json:"last"`
+	Group  string                  `json:"group"`
+	Kind   topology.StepKind       `json:"kind"`
+	Hits   uint64                  `json:"hits"`
+	Last   topology.AuthorizedStep `json:"last"`
+	Refuse bool                    `json:"refuse"`
 }
 type localObservation struct {
 	Identity          meta.Identity        `json:"identity"`
@@ -264,6 +272,11 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			httpError(w, fault.ErrInvalid)
 			return
 		}
+		mode := r.URL.Query().Get("refuse")
+		if mode != "" && mode != "true" || mode == "true" && kind != topology.StepStopReplica {
+			httpError(w, fault.ErrInvalid)
+			return
+		}
 		h := a.clusterHooks
 		h.mu.Lock()
 		defer h.mu.Unlock()
@@ -272,7 +285,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			httpError(w, fault.ErrOverloaded)
 			return
 		}
-		h.barriers[key] = &effectBarrier{release: make(chan struct{})}
+		h.barriers[key] = &effectBarrier{release: make(chan struct{}), refuse: mode == "true"}
 		jsonResponse(w, http.StatusOK, map[string]bool{"armed": true})
 	}))
 	mux.HandleFunc("DELETE /internal/test/barriers/{group}/{kind}", protect(func(w http.ResponseWriter, r *http.Request) {
@@ -294,7 +307,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 		h.mu.Lock()
 		barriers := make([]barrierObservation, 0, len(h.barriers))
 		for key, b := range h.barriers {
-			barriers = append(barriers, barrierObservation{key.group, key.kind, b.hits, b.last})
+			barriers = append(barriers, barrierObservation{key.group, key.kind, b.hits, b.last, b.refuse})
 		}
 		receipts := slices.Clone(h.receipts)
 		h.mu.Unlock()

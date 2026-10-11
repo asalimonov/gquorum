@@ -163,3 +163,11 @@ pin and exact native meta/load IDs, ledger and recovered commands; each runs at
 three/five/seven nodes. Constructor Join and public parked reads replace the source
 application's configuration-driven boot probe and UI/gossip surface. These
 controls and storage adapters remain wholly outside the small Compose demo.
+
+The caller-deletion refusal cases run at three/five/seven nodes. A caller-owned
+occupancy control refuses the first destructive, fully authorized callback.
+The failed execution survives meta-leader replacement and retained restart;
+surviving replicas retain exact values, and the restarted host retains the
+byte-identical state file and boot ledger without reopening a retired group.
+The caller then permits a fresh attempt of the same desired version. Only that
+attempt cleans the stores, and the retired group ID remains unavailable.
