@@ -101,6 +101,15 @@ func (g *Group) LocalStatus() topology.GroupStatus {
 // the observer; a mismatched Active version is reported as unsampled unknown
 // with a zero observation timestamp until a current sample becomes available.
 func (g *Group) Status(ctx context.Context) (topology.ClusterStatus, error) {
+	return g.status(ctx, true)
+}
+
+// CachedStatus remains available after fencing without starting peer probes.
+func (g *Group) CachedStatus(ctx context.Context) (topology.ClusterStatus, error) {
+	return g.status(ctx, false)
+}
+
+func (g *Group) status(ctx context.Context, live bool) (topology.ClusterStatus, error) {
 	if err := ctx.Err(); err != nil {
 		return topology.ClusterStatus{}, err
 	}
@@ -109,6 +118,8 @@ func (g *Group) Status(ctx context.Context) (topology.ClusterStatus, error) {
 	g.mu.RLock()
 	lifecycle := g.lifecycle
 	addresses := maps.Clone(g.addresses)
+	live = live && !g.quiescing && g.selfRemoval == nil
+	cached := maps.Clone(g.lastLoadStatus)
 	var removal *topology.SelfRemovalStatus
 	if g.selfRemoval != nil {
 		owned := *g.selfRemoval
@@ -145,6 +156,14 @@ func (g *Group) Status(ctx context.Context) (topology.ClusterStatus, error) {
 		result.Groups = append(result.Groups, topology.GroupStatus{GroupID: topology.MetaGroupID, ErrorCode: string(fault.Unavailable)})
 	}
 	for _, group := range active.LoadGroups() {
+		if !live {
+			observed, found := cached[group.ID]
+			if !found {
+				observed = topology.GroupStatus{GroupID: group.ID, ErrorCode: string(fault.Unavailable)}
+			}
+			result.Groups = append(result.Groups, observed.Clone())
+			continue
+		}
 		observed := topology.GroupStatus{GroupID: group.ID}
 		var err error
 		if g.opts.LoadGroups == nil {
@@ -167,6 +186,12 @@ func (g *Group) Status(ctx context.Context) (topology.ClusterStatus, error) {
 			return topology.ClusterStatus{}, err
 		}
 		result.Groups = append(result.Groups, observed.Clone())
+		g.mu.Lock()
+		if g.lastLoadStatus == nil {
+			g.lastLoadStatus = make(map[string]topology.GroupStatus)
+		}
+		g.lastLoadStatus[group.ID] = observed.Clone()
+		g.mu.Unlock()
 	}
 	if operator, ok := machine.CurrentOperator(); ok {
 		status := operator.Status

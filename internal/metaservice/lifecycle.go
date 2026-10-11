@@ -159,8 +159,9 @@ func (g *Group) RequestStop() {
 			<-g.quiesced
 			g.mu.Lock()
 			if g.store != nil {
-				if err := g.store.Close(); err != nil && g.terminal == nil {
-					g.terminal = err
+				g.closeErr = g.store.Close()
+				if g.closeErr != nil && g.terminal == nil {
+					g.terminal = g.closeErr
 				}
 			}
 			if g.terminal == nil {
@@ -178,7 +179,9 @@ func (g *Group) Stop(ctx context.Context) error {
 	g.RequestStop()
 	select {
 	case <-g.stopped:
-		return nil
+		g.mu.RLock()
+		defer g.mu.RUnlock()
+		return g.closeErr
 	case <-ctx.Done():
 		return fault.New(fault.ShutdownTimeout, "meta workers have not stopped", ctx.Err())
 	}
@@ -189,10 +192,18 @@ func (g *Group) startFailed(err error) error {
 	stopping := g.quiescing || g.ctx != nil && g.ctx.Err() != nil
 	g.mu.RUnlock()
 	if stopping {
-		g.RequestStop()
+		g.requestOwnerStop()
 		return fault.ErrStopped
 	}
 	g.fail(err)
-	g.RequestStop()
+	g.requestOwnerStop()
 	return err
+}
+
+func (g *Group) requestOwnerStop() {
+	if g.opts.RequestOwnerStop != nil {
+		g.opts.RequestOwnerStop()
+		return
+	}
+	g.RequestStop()
 }

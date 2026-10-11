@@ -116,6 +116,9 @@ func TestLifecycleTimeoutRetainsCallbackUntilReturn(t *testing.T) {
 		if len(done) != 0 {
 			t.Fatal("callback ownership released at deadline")
 		}
+		if err := r.Error(); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatal("stalled callback missing from local diagnostics", err)
+		}
 		// Retention cannot invoke its nil callback while Readiness is still held.
 		if _, err := r.Retention(context.Background(), policy.RetentionInput{}); !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatal("queued callback did not expire", err)

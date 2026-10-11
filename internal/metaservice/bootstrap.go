@@ -16,7 +16,7 @@ func (g *Group) run() {
 	defer func() {
 		g.wg.Done()
 		if g.autoStopNeeded() {
-			g.RequestStop()
+			g.requestOwnerStop()
 		}
 	}()
 	ticker := time.NewTicker(g.opts.Timing.TickInterval)

@@ -407,12 +407,16 @@ func (g *Group) prepareReadmission(ctx context.Context, previous topology.Identi
 	}
 	g.mu.Lock()
 	store := g.store
-	g.store = nil
 	g.mu.Unlock()
 	if store != nil {
 		if err := store.Close(); err != nil {
 			return err
 		}
+		g.mu.Lock()
+		if g.store == store {
+			g.store = nil
+		}
+		g.mu.Unlock()
 	}
 	granted := previous
 	granted.MemberID = result.MemberID

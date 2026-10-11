@@ -30,6 +30,9 @@ type Group struct {
 	startGate            sync.Mutex
 	lifecycle            string
 	terminal             error
+	closeErr             error
+	firstBootstrap       bool
+	lastLoadStatus       map[string]topology.GroupStatus
 	identity             topology.Identity
 	machine              *metaengine.Machine
 	engine               atomic.Pointer[raftengine.Group]
@@ -113,6 +116,8 @@ func New(input Options) (*Group, error) {
 		return nil, fault.New(fault.Invalid, "fresh meta storage requires founding members", nil)
 	}
 	g := &Group{opts: opts, rules: topology.Rules{SchemaVersion: 1, Limits: opts.Limits}, identity: opts.Identity, lifecycle: "constructed", coordinator: membership.NewCoordinator(), leases: newSessionManager(opts.SessionTTL), addresses: make(map[string]string), joinMembers: make(map[uint64]string), admissionToken: make(chan struct{}, 1), ready: make(chan struct{}), stopped: make(chan struct{}), quiesced: make(chan struct{}), removalSignal: make(chan struct{}, 1), sessionToken: make(chan struct{}, 1)}
+	g.firstBootstrap = !exists && !opts.Join
+	g.lastLoadStatus = make(map[string]topology.GroupStatus)
 	for _, founder := range opts.Founders {
 		g.addresses[founder.Node.Name] = founder.Address
 	}
@@ -209,6 +214,9 @@ func (g *Group) openEngine(identity topology.Identity, mode raftengine.Mode, pee
 		g.recordApplied(machine, active)
 		g.observer.Wake()
 		g.observeRemoval(identity, target, cs, index)
+		if g.opts.OnApplied != nil {
+			g.opts.OnApplied()
+		}
 	}
 	engine, err := raftengine.NewMeta(raftengine.Options{GroupID: topology.MetaGroupID, NodeName: identity.NodeName, ClusterID: identity.ClusterID, InstanceID: identity.InstanceID, ReplicaID: identity.MemberID, Mode: mode, Peers: peers, Timing: raftengine.Timing{TickInterval: g.opts.Timing.TickInterval, ElectionTicks: g.opts.Timing.ElectionTicks, HeartbeatTicks: g.opts.Timing.HeartbeatTicks}, Store: &metastore.Adapter{Store: store}, Machine: machine, Transport: g.transport, Events: g.opts.Events, Logger: g.opts.Logger, SnapshotThreshold: g.opts.SnapshotThreshold})
 	if err != nil {

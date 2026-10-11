@@ -77,6 +77,9 @@ type Options struct {
 	// across crashes/restarts and must verify the reason's exact local identity.
 	OnSelfRemoved func(context.Context, string) error
 	OnReadmission func(context.Context, Readmission) error
+	// Node owns final closure after managed application resources have joined.
+	RequestOwnerStop func()
+	OnApplied        func()
 }
 
 // SchedulingOptions controls local automatic load-replica repair. Disabled

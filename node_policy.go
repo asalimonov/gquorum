@@ -15,15 +15,17 @@ import (
 // Node and the managed host can use different workers without overlapping calls
 // to the same selected policy. No node/storage mutex is held during caller code.
 type lifecycleRunner struct {
-	policy  policy.LifecyclePolicy
-	timeout time.Duration
-	ctx     context.Context
-	cancel  context.CancelFunc
-	gate    chan struct{}
-	mu      sync.Mutex
-	closed  bool
-	active  int
-	done    chan struct{}
+	policy   policy.LifecyclePolicy
+	timeout  time.Duration
+	ctx      context.Context
+	cancel   context.CancelFunc
+	gate     chan struct{}
+	mu       sync.Mutex
+	closed   bool
+	active   int
+	done     chan struct{}
+	callback context.Context
+	kind     string
 }
 
 func newLifecycleRunner(parent context.Context, selected policy.LifecyclePolicy, timeout time.Duration) *lifecycleRunner {
@@ -33,7 +35,7 @@ func newLifecycleRunner(parent context.Context, selected policy.LifecyclePolicy,
 	return r
 }
 
-func (r *lifecycleRunner) begin(parent context.Context) (context.Context, func(), error) {
+func (r *lifecycleRunner) begin(parent context.Context, kind string) (context.Context, func(), error) {
 	if err := parent.Err(); err != nil {
 		return nil, nil, err
 	}
@@ -72,11 +74,30 @@ func (r *lifecycleRunner) begin(parent context.Context) (context.Context, func()
 			release()
 			return nil, nil, err
 		}
-		return ctx, func() { <-r.gate; release() }, nil
+		r.mu.Lock()
+		r.callback, r.kind = ctx, kind
+		r.mu.Unlock()
+		return ctx, func() {
+			r.mu.Lock()
+			r.callback, r.kind = nil, ""
+			r.mu.Unlock()
+			<-r.gate
+			release()
+		}, nil
 	case <-ctx.Done():
 		release()
 		return nil, nil, ctx.Err()
 	}
+}
+
+// Error exposes a stalled callback without detaching it or admitting a retry.
+func (r *lifecycleRunner) Error() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.callback != nil && r.callback.Err() != nil {
+		return fault.New(fault.Unavailable, "lifecycle "+r.kind+" callback has not returned after cancellation", r.callback.Err())
+	}
+	return nil
 }
 
 func (r *lifecycleRunner) Stop(ctx context.Context) error {
@@ -94,7 +115,7 @@ func (r *lifecycleRunner) Stop(ctx context.Context) error {
 }
 
 func (r *lifecycleRunner) Readiness(parent context.Context, in policy.ReadinessInput) (policy.ReadinessDecision, error) {
-	ctx, done, err := r.begin(parent)
+	ctx, done, err := r.begin(parent, "readiness")
 	if err != nil {
 		return policy.ReadinessDecision{}, err
 	}
@@ -116,7 +137,7 @@ func (r *lifecycleRunner) Readiness(parent context.Context, in policy.ReadinessI
 }
 
 func (r *lifecycleRunner) Retention(parent context.Context, in policy.RetentionInput) (policy.RetentionDecision, error) {
-	ctx, done, err := r.begin(parent)
+	ctx, done, err := r.begin(parent, "retention")
 	if err != nil {
 		return policy.RetentionDecision{}, err
 	}
@@ -137,7 +158,7 @@ func (r *lifecycleRunner) Removal(parent context.Context, in policy.RemovalInput
 	if !in.Fenced || !removal.Fenced || id.NodeName == "" || id.ClusterID == "" || id.InstanceID == "" || id.MemberID == 0 || removal.MemberID != id.MemberID || removal.Version == 0 || removal.AppliedIndex == 0 || removal.Reason == "" {
 		return policy.RemovalDecision{}, fault.ErrIdentityMismatch
 	}
-	ctx, done, err := r.begin(parent)
+	ctx, done, err := r.begin(parent, "removal")
 	if err != nil {
 		return policy.RemovalDecision{}, err
 	}

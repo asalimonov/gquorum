@@ -14,7 +14,7 @@ verification progress; checking a stage does not waive any target requirement.
   compatibility fixtures; internal metaservice/operator/scheduling packages.
 - [x] Deliberate load.Group and Standalone owners, explicit application values,
   state-machine adapter and typed managed transport contracts; no engine aliases.
-- [ ] Managed host: exact boot evidence, factory/Close ownership, start/stop
+- [x] Managed host: exact boot evidence, factory/Close ownership, start/stop
   reservations and holds, recovery supervision, action verification, delivery
   reports, retirement/retention, readmission and removal fencing.
 - [x] Preserve topology cleanup proof across the 128-document history horizon
@@ -22,7 +22,7 @@ verification progress; checking a stage does not waive any target requirement.
 - [x] Feed all retained approved replica evidence into readmission; exclude
   staged-only identities from its cleanup catalog and verify actual retained
   identities against the exact admission grant.
-- [ ] Node/Cluster facade and settings: startup/readiness/shutdown, policy wiring,
+- [x] Node/Cluster facade and settings: startup/readiness/shutdown, policy wiring,
   complete document/mutation/session/lock/status surface, observer ownership.
 - [ ] Migrate the small example and full cluster fixture to Node/Cluster; align
   HTTP approval/operator routes, requests, responses, clients and README.
@@ -202,3 +202,40 @@ verification progress; checking a stage does not waive any target requirement.
   seconds**. No generated protocols or durable schemas changed. The complete
   Node/Cluster facade, mandatory removal flow, caller migrations and Docker
   acceptance remain outstanding.
+- Node/Cluster composition: added the complete deliberate public facades,
+  identity helpers, local status/session/load methods and document/mutation/
+  approval/lock forwarding. NewNode is pure; Start owns one context and launches
+  admission without waiting for quorum. WaitReady combines mandatory local
+  activation with the selected gate and does not own replica lifetimes. Applied
+  topology wakes recovery. One lifecycle runner serves all decision kinds and
+  exposes callbacks still held after their cancellation deadline.
+- Node owns teardown ordering: private meta failures request owner shutdown,
+  Quiesce retains its database, policies and managed replicas join before owned
+  stores close, and a failed application Close remains owned until a serial Stop
+  retry. Removal immediately fences managed engines independently of a stalled
+  readiness callback; the response policy runs only after meta/load participation
+  joins. Successful KeepDiagnostics retains local reads and cached cluster status
+  without new load probes. Normal joined engine Stop is not a startup failure.
+- Load routing binds process/member identities to the local applied admission
+  or node session. Current Raft/query authorization is separate from retained
+  cleanup routing; unknown locally unapplied replica declarations are refused as
+  retryable observations. Readmission replaces the permanently stopped host only
+  after the granted meta pin is installed, using dynamic service/host adapters.
+  A failed old-meta close keeps its store reference for final owned teardown.
+- Public integration tests live in `tests/cluster/testapp/node*_api_test.go`
+  with only public library imports. They cover sequential three-node startup,
+  canceled readiness waits, managed counter replication, exact local holds,
+  stable old handles, snapshots/retained restart, delayed-founder gates, first-
+  bootstrap timeout versus retained recovery, noncooperative callbacks, Close
+  failure/retry with an actual bbolt ownership check, removal policy retry after
+  mandatory fencing, and fresh-ID readmission with both lost and retained meta
+  databases while the former load WAL remains. Pure constructor/routing tests
+  stay next to their packages; functional tests skip short mode.
+- Facade stage validation: final `make test` and `make lint` pass, including the
+  full existing fixture tests (78.028s). All new public scenarios pass under the
+  race detector; retained-readmission and Close-error additions also pass under
+  race. Short race suites pass for root/managed/metaengine/metaservice. Uncached
+  `make test-unit` completes in **12.46 seconds**. Runtime/OpenMeta/OpenLoad are
+  still transitional surfaces used by the existing example and fixture; migrate
+  those callers and remove the old API before final completion. Full Docker,
+  physical baseline compatibility, documentation and target audit gates remain.

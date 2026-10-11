@@ -174,6 +174,21 @@ func (h *Host) Quiesce(ctx context.Context) error {
 	return nil
 }
 
+// Fence immediately cancels replica participation and refuses new operations.
+// Joining and application Close remain owned by Stop, after effects quiesce.
+// Removal cannot wait for a noncooperative policy before stopping Raft work.
+func (h *Host) Fence() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.quiescing = true
+	if h.workCancel != nil {
+		h.workCancel()
+	}
+	for _, slot := range h.slots {
+		slot.cancel()
+	}
+}
+
 func (h *Host) Stop(ctx context.Context) error {
 	h.mu.Lock()
 	h.shutdownRequested = true
@@ -249,6 +264,31 @@ func (h *Host) Parked() map[string]ParkedReplica {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return maps.Clone(h.parked)
+}
+
+func (h *Host) Held() []storage.Identity {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	result := make([]storage.Identity, 0, len(h.holds))
+	for id := range h.holds {
+		result = append(result, id)
+	}
+	slices.SortFunc(result, func(a, b storage.Identity) int {
+		if a.GroupID < b.GroupID {
+			return -1
+		}
+		if a.GroupID > b.GroupID {
+			return 1
+		}
+		if a.ReplicaID < b.ReplicaID {
+			return -1
+		}
+		if a.ReplicaID > b.ReplicaID {
+			return 1
+		}
+		return 0
+	})
+	return result
 }
 func (h *Host) Snapshot() []ReplicaStatus {
 	h.mu.Lock()

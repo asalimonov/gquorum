@@ -3,6 +3,7 @@ package managed
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -72,7 +73,7 @@ func (h *Host) ObserveGroup(parent context.Context, group string) (topology.Grou
 			mu.Lock()
 			defer mu.Unlock()
 			if errors.Is(err, fault.ErrIdentityMismatch) || errors.Is(err, fault.ErrUnreadable) {
-				invalid = err
+				invalid = fmt.Errorf("load observation from %s replica %d: %w", id.NodeName, id.ReplicaID, err)
 			}
 			if err != nil || !reply.Found {
 				return
