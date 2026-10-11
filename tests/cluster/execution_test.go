@@ -6,13 +6,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"github.com/asalimonov/gquorum"
 	"io"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
@@ -49,7 +49,7 @@ func TestRemoteApplyFromNonHostMetaLeader(t *testing.T) {
 	c := lease.Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 105*time.Second)
 	defer cancel()
-	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "remote", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3}})
+	created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "remote", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestRemoteApplyFromNonHostMetaLeader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Apply(ctx, metaHost, staged.Document.Version); err != nil {
+	if _, err := c.Approve(ctx, metaHost, staged.Document.Version); err != nil {
 		t.Fatal("remove meta leader's load replica", err)
 	}
 	if err := transferMeta(ctx, c, "node2", metaHost, base.MemberID(metaHost)); err != nil {
@@ -132,7 +132,7 @@ func TestRemoteApplyFromNonHostMetaLeader(t *testing.T) {
 			t.Fatal("regrowth missing exact learner-first step", kind, plan)
 		}
 	}
-	if _, err := c.Apply(ctx, metaHost, staged.Document.Version); err != nil {
+	if _, err := c.Approve(ctx, metaHost, staged.Document.Version); err != nil {
 		t.Fatal("remote regrowth", err)
 	}
 	if err := c.WaitValue(ctx, metaHost, "remote", "before-growth", "retained"); err != nil {
@@ -147,7 +147,7 @@ func TestRemoteApplyFromNonHostMetaLeader(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Apply(ctx, metaHost, staged.Document.Version); err != nil {
+	if _, err := c.Approve(ctx, metaHost, staged.Document.Version); err != nil {
 		t.Fatal("remove regrown replica", err)
 	}
 	if err := transferMeta(ctx, c, "node2", metaHost, base.MemberID(metaHost)); err != nil {
@@ -158,7 +158,7 @@ func TestRemoteApplyFromNonHostMetaLeader(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	deleted, err := c.Mutate(ctx, metaHost, "DELETE", "/api/groups/remote", metaservice.MutationOptions{Apply: true, Actor: "cluster-test"})
+	deleted, err := c.Mutate(ctx, metaHost, "DELETE", "/api/groups/remote", gquorum.MutationOptions{Approve: true, Actor: "cluster-test"})
 	if err != nil || deleted.Document.Group("remote") != nil {
 		t.Fatal("remote deletion", deleted, err)
 	}
@@ -179,7 +179,7 @@ func TestCallerRefusedDeletionRetainsDataSevenNodes(t *testing.T) { callerRefuse
 func callerRefusedDeletion(t *testing.T, size int) {
 	t.Helper()
 	ctx, c := performanceClusterSpec(t, matrixSpec(size))
-	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "occupied", Placement: &topology.PlacementRule{MinReplicas: 3, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "occupied", Placement: &topology.PlacementRule{MinReplicas: 3, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,11 +196,11 @@ func callerRefusedDeletion(t *testing.T, size int) {
 			t.Fatal(err)
 		}
 	}
-	response, err := c.Request(ctx, "node2", "DELETE", "/api/groups/occupied", metaservice.MutationOptions{Actor: "cluster-test"}, created.Document.Version)
+	response, err := c.Request(ctx, "node2", "DELETE", "/api/groups/occupied", gquorum.MutationOptions{Actor: "cluster-test"}, created.Document.Version)
 	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
 	}
-	var deleted metaservice.MutationResult
+	var deleted gquorum.MutationResult
 	if err := response.Decode(&deleted); err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func callerRefusedDeletion(t *testing.T, size int) {
 	}
 	approve := func() topology.OperatorID {
 		t.Helper()
-		response, err := c.Request(ctx, "node2", "POST", fmt.Sprintf("/api/topology/%d/apply", deleted.Document.Version), nil, 0)
+		response, err := c.Request(ctx, "node2", "POST", fmt.Sprintf("/api/topology/%d/approve", deleted.Document.Version), nil, 0)
 		if err := requireStatus(response, err, 202); err != nil {
 			t.Fatal(err)
 		}
@@ -267,7 +267,7 @@ func callerRefusedDeletion(t *testing.T, size int) {
 		}
 		for _, replica := range created.Document.Group("occupied").Replicas {
 			local, err := c.Local(ctx, replica.NodeName, "occupied")
-			if err != nil || local.Ledger == nil || local.Ledger.ReplicaID != replica.ReplicaID || replica.NodeName != restarted && (!local.Found || local.ReplicaID != replica.ReplicaID) || replica.NodeName == restarted && local.Found {
+			if err != nil || local.StorageIdentity == nil || local.StorageIdentity.ReplicaID != replica.ReplicaID || replica.NodeName != restarted && (!local.Found || local.ReplicaID != replica.ReplicaID) || replica.NodeName == restarted && local.Found {
 				t.Fatal("refusal changed retained owner or reopened a retired group", local, err)
 			}
 			if err := ownDurableFiles(ctx, c, replica.NodeName, "occupied"); err != nil {
@@ -402,7 +402,7 @@ func callerRefusedDeletion(t *testing.T, size int) {
 			t.Fatal("successful deletion retained usable store", node.Spec.Name, err)
 		}
 	}
-	response, err = c.Request(ctx, "node2", "POST", "/api/groups", map[string]any{"group": metaservice.GroupSpec{ID: "occupied"}, "mutation": metaservice.MutationOptions{Actor: "cluster-test"}}, deleted.Document.Version)
+	response, err = c.Request(ctx, "node2", "POST", "/api/groups", map[string]any{"group": gquorum.GroupSpec{ID: "occupied"}, "mutation": gquorum.MutationOptions{Actor: "cluster-test"}}, deleted.Document.Version)
 	if err := requireStatus(response, err, 409); err != nil {
 		t.Fatal("deleted group ID became reusable", err)
 	}

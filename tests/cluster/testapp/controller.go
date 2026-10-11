@@ -2,534 +2,202 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
-	"sort"
+	"strings"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/internal/metaservice"
-	"github.com/asalimonov/gquorum/internal/raftengine"
-	"github.com/asalimonov/gquorum/membership"
-	"github.com/asalimonov/gquorum/storage"
+	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/policy"
 	"github.com/asalimonov/gquorum/topology"
-	"go.etcd.io/raft/v3"
-	"go.etcd.io/raft/v3/raftpb"
 )
 
-func (a *application) Status(ctx context.Context, id string) (topology.GroupStatus, error) {
-	target, active, err := a.documents(ctx)
-	if err != nil {
-		return topology.GroupStatus{}, err
-	}
-	names := map[string]map[uint64]bool{}
-	for _, doc := range []*topology.Document{&target, &active} {
-		if group := doc.Group(id); group != nil {
-			for _, replica := range group.Replicas {
-				if names[replica.NodeName] == nil {
-					names[replica.NodeName] = map[uint64]bool{}
-				}
-				names[replica.NodeName][replica.ReplicaID] = true
-			}
-		}
-	}
-	if len(names) == 0 {
-		return topology.GroupStatus{GroupID: id}, nil
-	}
-	type observation struct {
-		status  topology.GroupStatus
-		replica uint64
-	}
-	observed := make([]observation, 0, len(names))
-	live := map[uint64]bool{}
-	ordered := make([]string, 0, len(names))
-	for name := range names {
-		ordered = append(ordered, name)
-	}
-	sort.Strings(ordered)
-	for _, name := range ordered {
-		probeCtx, cancel := context.WithTimeout(ctx, 350*time.Millisecond)
-		reply, callErr := a.callNode(probeCtx, name, "Status", id, 0, nil)
-		cancel()
-		if callErr != nil {
-			continue
-		}
-		var status topology.GroupStatus
-		if json.Unmarshal(reply.Data, &status) != nil || status.GroupID != id || status.HostNode != name {
-			return topology.GroupStatus{}, fault.ErrIdentityMismatch
-		}
-		if status.Found {
-			if !names[name][reply.ReplicaId] {
-				return topology.GroupStatus{}, fault.ErrIdentityMismatch
-			}
-			live[reply.ReplicaId] = true
-			observed = append(observed, observation{status, reply.ReplicaId})
-		}
-	}
+// The application owns its machine data. Node owns Raft recovery, membership,
+// effects and the lifetime of every successful factory result.
+func (a *application) newReplica(ctx context.Context, spec load.ReplicaSpec) (load.Application, error) {
 	if err := ctx.Err(); err != nil {
-		return topology.GroupStatus{}, err
+		return load.Application{}, err
 	}
-	for _, observed := range observed {
-		if observed.status.LeaderID == observed.replica {
-			result := observed.status.Clone()
-			result.HealthKnown = true
-			result.LiveVoters = live
-			return result, nil
-		}
+	if spec.Identity.NodeName != a.cfg.NodeName || spec.Identity.ClusterID != a.cfg.ClusterID || spec.Node != a.node.Identity() {
+		return load.Application{}, fault.ErrIdentityMismatch
 	}
-	if len(observed) == 0 {
-		if active.Group(id) == nil {
-			return topology.GroupStatus{GroupID: id}, nil
-		}
-		return topology.GroupStatus{GroupID: id, Found: true}, fault.ErrUnavailable
-	}
-	return topology.GroupStatus{GroupID: id, Found: true}, fault.ErrUnavailable
-}
-
-func (a *application) CreateGroup(ctx context.Context, approved topology.AuthorizedStep) error {
-	if err := a.meta.Authorize(ctx, approved); err != nil {
-		return err
-	}
-	target, err := a.meta.Target(ctx)
-	if err != nil {
-		return err
-	}
-	group := target.Group(approved.GroupID)
-	if group == nil {
-		return fault.ErrIdentityMismatch
-	}
-	var firstError error
-	for _, replica := range group.Replicas {
-		if replica.Role == topology.ReplicaVoter {
-			if _, err := a.callNode(ctx, replica.NodeName, "Effect", approved.GroupID, replica.ReplicaID, approved); err != nil {
-				if firstError == nil {
-					firstError = err
-				}
-			}
-		}
-	}
-	return firstError
-}
-func (a *application) PrepareReplica(ctx context.Context, approved topology.AuthorizedStep) error {
-	_, err := a.callNode(ctx, approved.NodeName, "Effect", approved.GroupID, approved.ReplicaID, approved)
-	return err
-}
-func (a *application) ApplyMembership(ctx context.Context, approved topology.AuthorizedStep) error {
-	return a.leaderEffect(ctx, approved)
-}
-func (a *application) TransferLeader(ctx context.Context, approved topology.AuthorizedStep) error {
-	return a.leaderEffect(ctx, approved)
-}
-func (a *application) leaderEffect(ctx context.Context, approved topology.AuthorizedStep) error {
-	if err := a.meta.Authorize(ctx, approved); err != nil {
-		return err
-	}
-	status, err := a.Status(ctx, approved.GroupID)
-	if err != nil {
-		return err
-	}
-	if status.LeaderID == 0 {
-		return fault.ErrUnavailable
-	}
-	name, err := a.owner(ctx, approved.GroupID, status.LeaderID)
-	if err != nil {
-		return err
-	}
-	_, err = a.callNode(ctx, name, "Effect", approved.GroupID, status.LeaderID, approved)
-	return err
-}
-func (a *application) StopReplica(ctx context.Context, approved topology.AuthorizedStep) error {
-	_, err := a.callNode(ctx, approved.NodeName, "Effect", approved.GroupID, approved.ReplicaID, approved)
-	return err
-}
-func (a *application) CleanupReplicaState(ctx context.Context, approved topology.AuthorizedStep) error {
-	_, err := a.callNode(ctx, approved.NodeName, "Effect", approved.GroupID, approved.ReplicaID, approved)
-	return err
-}
-func (a *application) DeleteGroupState(ctx context.Context, approved topology.AuthorizedStep) error {
-	if err := a.meta.Authorize(ctx, approved); err != nil {
-		return err
-	}
-	target, active, err := a.documents(ctx)
-	if err != nil {
-		return err
-	}
-	names := map[string]bool{}
-	for _, doc := range []*topology.Document{&target, &active} {
-		if group := doc.Group(approved.GroupID); group != nil {
-			for _, r := range group.Replicas {
-				names[r.NodeName] = true
-			}
-		}
-	}
-	// Include the immediately preceding desired document for prepared replicas
-	// from an interrupted execution that never became Active.
-	if approved.Version > 1 {
-		if previous, err := a.meta.Get(ctx, approved.Version-1); err == nil {
-			if group := previous.Group(approved.GroupID); group != nil {
-				for _, r := range group.Replicas {
-					names[r.NodeName] = true
-				}
-			}
-		}
-	}
-	for name := range names {
-		if _, err := a.callNode(ctx, name, "Effect", approved.GroupID, 0, approved); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (a *application) takeLocal(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	select {
-	case a.localGate <- struct{}{}:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-func (a *application) openLocal(ctx context.Context, id string, replica uint64, mode raftengine.Mode, peers []raft.Peer) (*localReplica, error) {
-	if err := a.takeLocal(ctx); err != nil {
-		return nil, err
-	}
-	defer func() { <-a.localGate }()
-	if g, exists := a.runtime.Load(id); exists {
-		if g.ReplicaID() != replica {
-			return nil, fault.ErrIdentityMismatch
-		}
-		a.mu.RLock()
-		local := a.locals[id]
-		a.mu.RUnlock()
-		if local == nil || local.group != g {
-			return nil, fault.ErrIdentityMismatch
-		}
-		if g.Running() {
-			return local, nil
-		}
-		if err := g.Stop(ctx); err != nil {
-			return nil, err
-		}
-		if err := a.runtime.StopLoad(ctx, id, replica); err != nil {
-			return nil, err
-		}
-	}
+	ref := load.ReplicaRef{GroupID: spec.Identity.GroupID, ReplicaID: spec.Identity.ReplicaID}
 	machine := newMachine()
-	g, err := a.runtime.OpenLoad(raftengine.Options{GroupID: id, NodeName: a.cfg.NodeName, ClusterID: a.cfg.ClusterID, ReplicaID: replica, Mode: mode, Peers: peers, Store: a.clusterStore(a.store, id, replica), Machine: machine, Transport: loadTransport{app: a, group: id, replica: replica}, Timing: raftengine.Timing{TickInterval: a.cfg.TickInterval, ElectionTicks: 10, WALWriteWait: a.cfg.WALWriteWait}, SnapshotThreshold: a.cfg.SnapshotThreshold})
-	if err != nil {
-		return nil, err
-	}
-	local := &localReplica{group: g, machine: machine}
 	a.mu.Lock()
-	a.locals[id] = local
-	a.mu.Unlock()
-	if err = g.Start(a.lifeCtx); err == nil {
-		err = g.WaitReady(ctx)
-	}
-	if err != nil {
-		_ = a.runtime.StopLoad(context.Background(), id, replica)
-		a.mu.Lock()
-		if a.locals[id] == local {
-			delete(a.locals, id)
-		}
+	if a.machines[ref] != nil {
 		a.mu.Unlock()
-		return nil, err
+		return load.Application{}, fault.ErrIdentityMismatch
 	}
-	return local, nil
-}
-func (a *application) stopLocal(ctx context.Context, id string, expected uint64) error {
-	if err := a.takeLocal(ctx); err != nil {
-		return err
-	}
-	defer func() { <-a.localGate }()
-	return a.stopLocalLocked(ctx, id, expected)
-}
-func (a *application) stopLocalLocked(ctx context.Context, id string, expected uint64) error {
-	if g, exists := a.runtime.Load(id); exists && g.ReplicaID() != expected {
-		// An exact approved replacement proves the old handle is gone. A stale
-		// cleanup must acknowledge that result without stopping its successor.
-		if _, err := a.meta.LoadReplicaScope(ctx, storage.Identity{NodeName: a.cfg.NodeName, ClusterID: a.cfg.ClusterID, GroupID: id, ReplicaID: g.ReplicaID()}); err != nil {
-			return err
-		}
-		return nil
-	}
-	if err := a.runtime.StopLoad(ctx, id, expected); err != nil {
-		return err
-	}
-	a.mu.Lock()
-	if old := a.locals[id]; old != nil && old.group.ReplicaID() == expected {
-		delete(a.locals, id)
-	}
+	a.machines[ref] = machine
 	a.mu.Unlock()
-	return nil
-}
-func (a *application) receiveEffect(ctx context.Context, approved topology.AuthorizedStep, receiver uint64) (err error) {
-	if err := a.meta.Authorize(ctx, approved); err != nil {
-		return err
-	}
-	if err := a.beforeClusterEffect(ctx, approved); err != nil {
-		return err
-	}
-	defer func() { a.afterClusterEffect(approved, err) }()
-	if err := a.meta.Authorize(ctx, approved); err != nil {
-		return err
-	}
-	switch approved.Kind {
-	case topology.StepCreateFoundingGroup:
-		target, err := a.meta.Target(ctx)
-		if err != nil {
+	return load.Application{StateMachine: machine, Close: func(ctx context.Context) error {
+		if err := a.joinProjection(ctx, walKey{ref.GroupID, ref.ReplicaID}); err != nil {
 			return err
 		}
-		group := target.Group(approved.GroupID)
-		if group == nil {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		if current := a.machines[ref]; current != nil && current != machine {
 			return fault.ErrIdentityMismatch
 		}
-		var peers []raft.Peer
-		localVoter := false
-		for _, r := range group.Replicas {
-			if r.Role == topology.ReplicaVoter {
-				peers = append(peers, raft.Peer{ID: r.ReplicaID})
-				if r.NodeName == a.cfg.NodeName && r.ReplicaID == receiver {
-					localVoter = true
-				}
-			}
-		}
-		if !localVoter {
-			return fault.ErrIdentityMismatch
-		}
-		local, err := a.openLocal(ctx, approved.GroupID, receiver, raftengine.Founding, peers)
-		if err != nil {
-			return err
-		}
-		cs := local.group.Status().ConfState
-		got := slices.Clone(cs.Voters)
-		want := make([]uint64, len(peers))
-		for i, p := range peers {
-			want[i] = p.ID
-		}
-		slices.Sort(got)
-		slices.Sort(want)
-		if len(cs.VotersOutgoing)+len(cs.Learners)+len(cs.LearnersNext) != 0 || slices.ContainsFunc(got, func(id uint64) bool { return !slices.Contains(want, id) }) {
-			return fault.ErrIdentityMismatch
-		}
-		// Startup readiness precedes commitment of the founding ConfChanges.
-		// Start every founder even if an earlier one is awaiting its peers, then
-		// retry and attest the complete exact voter set before acknowledging.
-		if !slices.Equal(got, want) {
-			return fault.ErrUnavailable
-		}
+		delete(a.machines, ref)
 		return nil
-	case topology.StepPrepareReplica:
-		if approved.NodeName != a.cfg.NodeName || approved.ReplicaID != receiver {
-			return fault.ErrIdentityMismatch
-		}
-		_, err := a.openLocal(ctx, approved.GroupID, receiver, raftengine.Joining, nil)
-		return err
-	case topology.StepStopReplica:
-		if approved.NodeName != a.cfg.NodeName || approved.ReplicaID != receiver {
-			return fault.ErrIdentityMismatch
-		}
-		return a.stopLocal(ctx, approved.GroupID, receiver)
-	case topology.StepCleanupReplicaState:
-		if approved.NodeName != a.cfg.NodeName || approved.ReplicaID != receiver {
-			return fault.ErrIdentityMismatch
-		}
-		return a.cleanupLocal(ctx, approved, receiver)
-	case topology.StepDeleteGroupState:
-		if receiver != 0 {
-			return fault.ErrIdentityMismatch
-		}
-		record, found, err := a.meta.LookupLoadReplica(ctx, approved.GroupID)
-		if err != nil {
-			return err
-		}
-		if !found {
-			probe, err := a.store.Probe(ctx, approved.GroupID)
-			if err != nil {
-				return err
-			}
-			if probe.Exists {
-				return fault.ErrIdentityMismatch
-			}
-			return nil
-		}
-		return a.cleanupLocal(ctx, approved, record.ReplicaID)
-	case topology.StepAddLearner, topology.StepPromoteVoter, topology.StepDemoteVoter, topology.StepRemoveReplica, topology.StepTransferLeader:
-		g, exists := a.runtime.Load(approved.GroupID)
-		if !exists || !g.Running() {
-			return fault.ErrReplicaNotReady
-		}
-		if g.ReplicaID() != receiver {
-			return fault.ErrIdentityMismatch
-		}
-		if !g.IsLeader() {
-			return fault.ErrNotLeader
-		}
-		if approved.Kind == topology.StepTransferLeader {
-			return g.TransferLeader(ctx, approved.ReplicaID)
-		}
-		status, err := a.Status(ctx, approved.GroupID)
-		if err != nil {
-			return err
-		}
-		if err := a.meta.Authorize(ctx, approved); err != nil {
-			return err
-		}
-		var change raftpb.ConfChangeV2
-		switch approved.Kind {
-		case topology.StepAddLearner:
-			change = membership.AddLearner(approved.ReplicaID)
-		case topology.StepPromoteVoter:
-			change = membership.PromoteLearner(approved.ReplicaID)
-		case topology.StepDemoteVoter:
-			change = membership.DemoteVoter(approved.ReplicaID)
-		case topology.StepRemoveReplica:
-			change = membership.RemoveReplica(approved.ReplicaID)
-		}
-		return a.coordinator.Apply(ctx, g.Membership(), observedLive{approved.GroupID, status.LiveVoters}, change)
-	default:
-		return fault.ErrUnsupported
-	}
+	}}, nil
 }
 
-type observedLive struct {
-	group string
-	ids   map[uint64]bool
-}
-
-func (h observedLive) Live(group string) (map[uint64]bool, bool) { return h.ids, group == h.group }
-
-func (a *application) cleanupLocal(ctx context.Context, approved topology.AuthorizedStep, expected uint64) error {
-	if err := a.takeLocal(ctx); err != nil {
-		return err
-	}
-	defer func() { <-a.localGate }()
-	// Serialize the complete stop/probe/quarantine/forget transaction with
-	// retries and local opens. Two successful probes must not race a single move.
-	if err := a.stopLocalLocked(ctx, approved.GroupID, expected); err != nil {
-		return err
-	}
-	probe, err := a.store.Probe(ctx, approved.GroupID)
-	if err != nil {
-		return err
-	}
-	want := storage.Identity{NodeName: a.cfg.NodeName, ClusterID: a.cfg.ClusterID, GroupID: approved.GroupID, ReplicaID: expected}
-	if probe.Exists && probe.Identity != want {
-		if approved.Kind == topology.StepDeleteGroupState {
-			return fault.ErrIdentityMismatch
-		}
-		if _, err := a.meta.LoadReplicaScope(ctx, probe.Identity); err != nil {
-			return err
-		}
-		return nil
-	}
-	if probe.Exists {
-		if _, err := a.store.Quarantine(ctx, approved.GroupID, expected); err != nil {
-			return err
-		}
-	}
-	return a.meta.ForgetLoadReplica(ctx, approved, expected)
-}
-
-func (a *application) readmission(ctx context.Context, change metaservice.Readmission) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	own := a.meta.Identity()
-	before, after := change.Previous, change.Granted
-	path := filepath.Join(a.cfg.DataDir, "meta.bolt")
-	if before.NodeName != a.cfg.NodeName || after.NodeName != a.cfg.NodeName || before.ClusterID != a.cfg.ClusterID || after.ClusterID != a.cfg.ClusterID || before.MemberID == 0 || after.MemberID == 0 || before.MemberID == after.MemberID || change.AdmissionID == "" || change.MetaDBPath != path || own.MemberID != 0 && own.MemberID != before.MemberID {
-		return fault.ErrIdentityMismatch
-	}
-	if err := a.takeLocal(ctx); err != nil {
-		return err
-	}
-	defer func() { <-a.localGate }()
-	for _, group := range change.PreviousGroups {
-		if group.ID == topology.MetaGroupID {
-			continue
-		}
-		if err := topology.ValidateLoadID(group.ID); err != nil {
-			return err
-		}
-		previousIDs := map[uint64]bool{}
-		for _, old := range group.Replicas {
-			if old.NodeName != a.cfg.NodeName || old.ReplicaID == 0 {
-				return fault.ErrIdentityMismatch
-			}
-			previousIDs[old.ReplicaID] = true
-		}
-		for _, granted := range change.GrantedGroups {
-			if granted.ID != group.ID {
-				continue
-			}
-			for _, fresh := range granted.Replicas {
-				if fresh.NodeName == a.cfg.NodeName && previousIDs[fresh.ReplicaID] {
-					return fault.ErrIdentityMismatch
-				}
-			}
-		}
-		// PreviousGroups can contain both Active and interrupted Target IDs.
-		// Stop and quarantine the actual retained identity once, after verifying
-		// its membership in that exact catalog; ordering must not select an ID.
-		if local, found := a.runtime.Load(group.ID); found {
-			if !previousIDs[local.ReplicaID()] {
-				return fault.ErrIdentityMismatch
-			}
-			if err := a.runtime.StopLoad(ctx, group.ID, local.ReplicaID()); err != nil {
-				return err
-			}
-			a.mu.Lock()
-			delete(a.locals, group.ID)
-			a.mu.Unlock()
-		}
-		probe, err := a.store.Probe(ctx, group.ID)
-		if err != nil {
-			return err
-		}
-		if !probe.Exists {
-			continue
-		}
-		want := storage.Identity{NodeName: a.cfg.NodeName, ClusterID: a.cfg.ClusterID, GroupID: group.ID, ReplicaID: probe.Identity.ReplicaID}
-		if probe.Identity != want || !previousIDs[probe.Identity.ReplicaID] {
-			return fault.ErrIdentityMismatch
-		}
-		if _, err := a.store.Quarantine(ctx, group.ID, probe.Identity.ReplicaID); err != nil {
-			return err
-		}
-	}
-	stored, found, err := metaservice.LoadStoredIdentity(path)
-	if err != nil {
-		return err
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
+func (a *application) local(id string) *localReplica {
+	group, found := a.node.LoadGroup(id)
 	if !found {
 		return nil
 	}
-	if stored.NodeName != before.NodeName || stored.ClusterID != before.ClusterID || stored.MemberID != before.MemberID {
-		return fault.ErrIdentityMismatch
+	a.mu.RLock()
+	machine := a.machines[load.ReplicaRef{GroupID: id, ReplicaID: group.ReplicaID()}]
+	a.mu.RUnlock()
+	if machine == nil {
+		return nil
 	}
-	nonce := sha256.Sum256([]byte(change.AdmissionID))
-	backup := path + fmt.Sprintf(".retired-%d-", before.MemberID) + hex.EncodeToString(nonce[:8])
-	if _, err := os.Stat(backup); err == nil {
-		return fault.New(fault.IdentityMismatch, "readmission quarantine destination already exists", nil)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
+	return &localReplica{group: group, machine: machine}
+}
+
+// Embedding the default policy lets this application decide only its process
+// response after Node has completed mandatory removal fencing.
+type fixtureLifecycle struct {
+	*policy.DefaultLifecycle
+	app *application
+}
+
+func (p *fixtureLifecycle) Removal(ctx context.Context, input policy.RemovalInput) (policy.RemovalDecision, error) {
+	decision, err := p.DefaultLifecycle.Removal(ctx, input)
+	if err != nil {
+		return decision, err
 	}
-	if err := os.Rename(path, backup); err != nil {
-		return err
+	if input.Identity != p.app.node.Identity() {
+		return policy.RemovalDecision{}, fault.ErrIdentityMismatch
 	}
-	a.logger.Info("readmission quarantined meta identity", "path", backup, "node", before.NodeName, "member_id", before.MemberID, "new_member_id", after.MemberID, "instance_id", own.InstanceID)
-	return nil
+	p.app.logger.Info("self-removal identity verified", "node", input.Identity.NodeName, "member_id", input.Identity.MemberID, "instance_id", input.Identity.InstanceID, "reason", input.Removal.Reason)
+	p.app.RequestClose()
+	return decision, nil
+}
+
+// Routing application writes needs only this group's leader hint. It does not
+// probe every other group or supply membership-health authority to Node.
+func (a *application) groupStatus(ctx context.Context, id string) (topology.GroupStatus, error) {
+	if group, found := a.node.LoadGroup(id); found {
+		status := group.Status()
+		if status.Found && status.LeaderID != 0 {
+			return status, nil
+		}
+	}
+	active, err := a.cluster.Active(ctx)
+	if err != nil {
+		return topology.GroupStatus{}, err
+	}
+	group := active.Group(id)
+	if group == nil {
+		return topology.GroupStatus{GroupID: id}, fault.ErrReplicaNotReady
+	}
+	for _, replica := range group.Replicas {
+		probe, cancel := context.WithTimeout(ctx, 350*time.Millisecond)
+		reply, err := a.callNode(probe, replica.NodeName, "Status", id, replica.ReplicaID, nil)
+		cancel()
+		if err != nil {
+			continue
+		}
+		var status topology.GroupStatus
+		if err := json.Unmarshal(reply.Data, &status); err != nil || reply.ReplicaId != replica.ReplicaID || status.GroupID != id || status.HostNode != replica.NodeName {
+			return topology.GroupStatus{}, fault.ErrIdentityMismatch
+		}
+		if status.Found && status.LeaderID != 0 {
+			return status, nil
+		}
+	}
+	return topology.GroupStatus{GroupID: id}, fault.ErrUnavailable
+}
+
+func (p *fixtureLifecycle) Readiness(ctx context.Context, input policy.ReadinessInput) (policy.ReadinessDecision, error) {
+	decision, err := p.DefaultLifecycle.Readiness(ctx, input)
+	if err != nil {
+		return decision, err
+	}
+	missing := make([]string, len(input.MissingFounders))
+	for i, node := range input.MissingFounders {
+		missing[i] = node.NodeName
+	}
+	names := strings.Join(missing, ",")
+	p.app.mu.Lock()
+	previous := p.app.startupMissing
+	p.app.startupMissing = names
+	p.app.mu.Unlock()
+	if p.app.cfg.GateFounders && decision.State == policy.Waiting && input.FirstBootstrap && names != previous {
+		p.app.logger.Info("waiting for configured cluster members to activate", "missing", names)
+	}
+	if decision.State == policy.Failed {
+		decision.Reason = fmt.Sprintf("greenfield founding timed out after %s; missing: %s", p.app.cfg.FoundingTimeout, names)
+	}
+	return decision, nil
+}
+func (a *application) foundingMessage() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return "greenfield founding: waiting for configured members " + a.startupMissing
+}
+
+// Materialized projections are the fixture's only durable application resources.
+// Raft WAL/quarantine and the meta ledger remain entirely Node-owned.
+func (a *application) retireReplica(ctx context.Context, req load.RetirementRequest) (load.RetirementResult, error) {
+	if err := ctx.Err(); err != nil {
+		return load.RetirementResult{}, err
+	}
+	key := walKey{req.Identity.GroupID, req.Identity.ReplicaID}
+	if req.Identity != a.projectionIdentity(key) || key.replica == 0 {
+		return load.RetirementResult{}, fault.ErrIdentityMismatch
+	}
+	if err := topology.ValidateLoadID(key.group); err != nil {
+		return load.RetirementResult{}, err
+	}
+	if err := a.joinProjection(ctx, key); err != nil {
+		return load.RetirementResult{}, err
+	}
+	path := a.projectionPath(key)
+	info, err := os.Lstat(path)
+	if err == nil {
+		if !info.Mode().IsRegular() {
+			return load.RetirementResult{}, fault.ErrIdentityMismatch
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return load.RetirementResult{}, err
+		}
+		var saved projectionFile
+		if err := decodeJSON(raw, &saved); err != nil {
+			return load.RetirementResult{}, err
+		}
+		if saved.Identity != req.Identity {
+			return load.RetirementResult{}, fault.ErrIdentityMismatch
+		}
+		if err := ctx.Err(); err != nil {
+			return load.RetirementResult{}, err
+		}
+		if err := os.Remove(path); err != nil {
+			return load.RetirementResult{}, err
+		}
+	} else if !os.IsNotExist(err) {
+		return load.RetirementResult{}, err
+	}
+	// Sync even after an earlier removal succeeded but its acknowledgement failed.
+	if dir, err := os.Open(filepath.Dir(path)); err == nil {
+		syncErr := dir.Sync()
+		closeErr := dir.Close()
+		if syncErr != nil {
+			return load.RetirementResult{}, syncErr
+		}
+		if closeErr != nil {
+			return load.RetirementResult{}, closeErr
+		}
+	} else if !os.IsNotExist(err) {
+		return load.RetirementResult{}, err
+	}
+	return load.RetirementResult{Identity: req.Identity, Reason: req.Reason, Authorization: req.Authorization, AdmissionID: req.AdmissionID, PreviousMemberID: req.PreviousMemberID, GrantedMemberID: req.GrantedMemberID, Verified: true}, nil
 }

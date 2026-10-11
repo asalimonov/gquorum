@@ -145,7 +145,7 @@ func (a *application) registerWALRoutes(mux *http.ServeMux, protect func(http.Ha
 			httpError(w, err)
 			return
 		}
-		local, found := a.runtime.Load(group)
+		local, found := a.node.LoadGroup(group)
 		if !found || body.ReplicaID == 0 || local.ReplicaID() != body.ReplicaID {
 			httpError(w, fault.ErrIdentityMismatch)
 			return

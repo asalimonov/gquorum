@@ -59,20 +59,26 @@ func (h *Host) ObserveGroup(parent context.Context, group string) (topology.Grou
 		wg.Go(func() {
 			peer, err := h.peerFor(ctx, id)
 			var reply load.ReplicaStatus
+			invalidObservation := errors.Is(err, fault.ErrIdentityMismatch) || errors.Is(err, fault.ErrUnreadable)
 			if err == nil {
 				query := load.ReplicaQuery{From: h.cfg.Identity(), To: peer}
 				if peer.Node == h.cfg.Identity() {
 					reply, err = h.ReadReplica(ctx, query)
+					invalidObservation = errors.Is(err, fault.ErrIdentityMismatch) || errors.Is(err, fault.ErrUnreadable)
 				} else {
 					reply, err = h.cfg.Transport.ReadReplica(ctx, query)
+					// A restarted peer can refuse our locally stale process pin.
+					// A refusal supplies no live replica evidence. Only a successful
+					// reply can be checked as an affirmative identity attestation.
 				}
-				if err == nil && (reply.Peer != peer || reply.Found && (reply.Status.GroupID != group || reply.Status.HostNode != peer.Node.NodeName || !reply.Status.Found)) {
+				if err == nil && (reply.Peer != peer || reply.Found != reply.Status.Found || reply.Found && (reply.Status.GroupID != group || reply.Status.HostNode != peer.Node.NodeName)) {
 					err = fault.ErrIdentityMismatch
+					invalidObservation = true
 				}
 			}
 			mu.Lock()
 			defer mu.Unlock()
-			if errors.Is(err, fault.ErrIdentityMismatch) || errors.Is(err, fault.ErrUnreadable) {
+			if invalidObservation {
 				invalid = fmt.Errorf("load observation from %s replica %d: %w", id.NodeName, id.ReplicaID, err)
 			}
 			if err != nil || !reply.Found {
@@ -180,20 +186,14 @@ func (h *Host) sendAction(ctx context.Context, req load.ActionRequest) error {
 	if err := h.cfg.Authorize(ctx, req.Authorization); err != nil {
 		return err
 	}
-	var result load.ActionResult
-	var err error
 	local := req.To.Node == h.cfg.Identity()
-	if local {
-		result, err = h.ApplyAction(ctx, req)
-	} else {
-		result, err = h.cfg.Transport.ApplyAction(ctx, req)
-	}
+	result, err := h.cfg.Transport.ApplyAction(ctx, req)
 	if err != nil {
-		// A remote participant can still lack the approved plan. It refuses the
-		// request; the fully-authorized dispatcher retries without interpreting
-		// that refusal as proof of any completed effect.
-		if !local && errors.Is(err, fault.ErrOperatorAuthorization) && h.cfg.Authorize(ctx, req.Authorization) == nil {
-			return fault.New(fault.Unavailable, "remote participant refused the current approval", err)
+		// A remote participant can still lack the approved plan or the applied
+		// process session used for routing. Keep its refusal separate from an
+		// affirmative attestation; retry only while our full approval stays valid.
+		if !local && (errors.Is(err, fault.ErrOperatorAuthorization) || errors.Is(err, fault.ErrIdentityMismatch)) && h.cfg.Authorize(ctx, req.Authorization) == nil {
+			return fault.New(fault.Unavailable, "remote participant refused the current approval or identity", err)
 		}
 		return err
 	}

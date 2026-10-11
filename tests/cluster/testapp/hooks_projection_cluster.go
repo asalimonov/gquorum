@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -17,6 +18,7 @@ import (
 // persistence or admission. Its worker and files exist only in the test image.
 type projectionControl struct {
 	release chan struct{}
+	done    chan struct{}
 	metrics projectionMetrics
 }
 type projectionMetrics struct {
@@ -28,6 +30,11 @@ type projectionMetrics struct {
 	Waiting  bool   `json:"waiting"`
 	Stopped  bool   `json:"stopped"`
 }
+type projectionFile struct {
+	Identity storage.Identity `json:"identity"`
+	State    machineState     `json:"state"`
+}
+
 type projectionObservation struct {
 	Node    string `json:"node"`
 	Group   string `json:"group"`
@@ -41,7 +48,14 @@ func (a *application) projectionPath(key walKey) string {
 }
 func (a *application) projectionLoop(key walKey, machine *kvMachine, running func() bool, control *projectionControl) {
 	h := a.clusterHooks
-	defer func() { h.mu.Lock(); control.metrics.Stopped = true; h.mu.Unlock() }()
+	defer func() {
+		h.mu.Lock()
+		control.metrics.Stopped = true
+		if control.done != nil {
+			close(control.done)
+		}
+		h.mu.Unlock()
+	}()
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	for running() && a.workCtx.Err() == nil {
@@ -73,7 +87,13 @@ func (a *application) projectionLoop(key walKey, machine *kvMachine, running fun
 		}
 	released:
 		if err == nil {
-			err = writeProjection(a.workCtx, a.projectionPath(key), data)
+			var state machineState
+			if err = json.Unmarshal(data, &state); err == nil {
+				data, err = json.Marshal(projectionFile{Identity: a.projectionIdentity(key), State: state})
+				if err == nil {
+					err = writeProjection(a.workCtx, a.projectionPath(key), data)
+				}
+			}
 		}
 		h.mu.Lock()
 		control.metrics.Active--
@@ -147,9 +167,14 @@ func (a *application) projectionView(key walKey) (projectionObservation, error) 
 	if err != nil {
 		return view, err
 	}
-	if err := json.Unmarshal(data, &view.State); err != nil {
+	var saved projectionFile
+	if err := decodeJSON(data, &saved); err != nil {
 		return view, err
 	}
+	if saved.Identity != a.projectionIdentity(key) {
+		return view, fault.ErrIdentityMismatch
+	}
+	view.State = saved.State
 	return view, nil
 }
 func (a *application) registerProjectionRoutes(mux *http.ServeMux, protect func(http.HandlerFunc) http.HandlerFunc) {
@@ -164,7 +189,7 @@ func (a *application) registerProjectionRoutes(mux *http.ServeMux, protect func(
 			httpError(w, fault.ErrInvalid)
 			return
 		}
-		g, found := a.runtime.Load(group)
+		g, found := a.node.LoadGroup(group)
 		if !found || g.ReplicaID() != replica {
 			httpError(w, fault.ErrIdentityMismatch)
 			return
@@ -187,9 +212,7 @@ func (a *application) registerProjectionRoutes(mux *http.ServeMux, protect func(
 				return
 			default:
 			}
-			a.mu.RLock()
-			local := a.locals[group]
-			a.mu.RUnlock()
+			local := a.local(group)
 			if local == nil || local.group != g {
 				httpError(w, fault.ErrIdentityMismatch)
 				return
@@ -202,7 +225,7 @@ func (a *application) registerProjectionRoutes(mux *http.ServeMux, protect func(
 					httpError(w, fault.ErrOverloaded)
 					return
 				}
-				control = &projectionControl{}
+				control = &projectionControl{done: make(chan struct{})}
 				h.projections[key] = control
 				a.workWG.Go(func() { a.projectionLoop(key, local.machine, g.Running, control) })
 			}
@@ -241,4 +264,27 @@ func (a *application) registerProjectionRoutes(mux *http.ServeMux, protect func(
 	for _, method := range []string{"GET", "PUT", "DELETE"} {
 		mux.HandleFunc(method+" /internal/test/projection/{group}/{replica}", handler)
 	}
+}
+
+func (a *application) joinProjection(ctx context.Context, key walKey) error {
+	h := a.clusterHooks
+	h.mu.Lock()
+	var done <-chan struct{}
+	if control := h.projections[key]; control != nil {
+		done = control.done
+	}
+	h.mu.Unlock()
+	if done == nil {
+		return ctx.Err()
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (a *application) projectionIdentity(key walKey) storage.Identity {
+	return storage.Identity{NodeName: a.cfg.NodeName, ClusterID: a.cfg.ClusterID, GroupID: key.group, ReplicaID: key.replica}
 }

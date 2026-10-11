@@ -8,26 +8,25 @@ import (
 	"strconv"
 
 	gquorum "github.com/asalimonov/gquorum"
-	"github.com/asalimonov/gquorum/internal/metaservice"
-	"github.com/asalimonov/gquorum/internal/raftengine"
+	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
 type LocalObservation struct {
-	Identity          topology.Identity          `json:"identity"`
-	Found             bool                       `json:"found"`
-	ReplicaID         uint64                     `json:"replica_id"`
-	Status            topology.GroupStatus       `json:"status"`
-	Storage           storage.Stats              `json:"storage"`
-	Values            map[string]string          `json:"values"`
-	ReceivedSnapshots uint64                     `json:"received_snapshots"`
-	WAL               WALCounters                `json:"wal"`
-	WALStallNS        int64                      `json:"wal_stall_ns"`
-	Proposals         raftengine.ProposalStats   `json:"proposals"`
-	Parked            *gquorum.ParkedLoad        `json:"parked,omitempty"`
-	Ledger            *metaservice.ReplicaRecord `json:"ledger,omitempty"`
-	ServeOverride     int                        `json:"serve_override"`
+	Identity          topology.Identity    `json:"identity"`
+	Found             bool                 `json:"found"`
+	ReplicaID         uint64               `json:"replica_id"`
+	Status            topology.GroupStatus `json:"status"`
+	Storage           storage.Stats        `json:"storage"`
+	Values            map[string]string    `json:"values"`
+	ReceivedSnapshots uint64               `json:"received_snapshots"`
+	WAL               WALCounters          `json:"wal"`
+	WALStallNS        int64                `json:"wal_stall_ns"`
+	Proposals         load.ProposalStats   `json:"proposals"`
+	Parked            *gquorum.ParkedLoad  `json:"parked,omitempty"`
+	StorageIdentity   *storage.Identity    `json:"storage_identity,omitempty"`
+	ServeOverride     int                  `json:"serve_override"`
 }
 
 type ProjectionObservation struct {

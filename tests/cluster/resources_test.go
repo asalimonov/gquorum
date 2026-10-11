@@ -5,12 +5,12 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"github.com/asalimonov/gquorum"
 	"math"
 	"slices"
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 	"github.com/containerd/errdefs"
 	docker "github.com/moby/moby/client"
@@ -79,7 +79,7 @@ func fifteenGroupResources(t *testing.T, size int) {
 	expected := map[string]map[string]string{}
 	for i := range 15 {
 		id := fmt.Sprintf("resource-%02d", i)
-		created, err := c.CreateGroup(ctx, c.Spec.Nodes[i%size].Name, metaservice.GroupSpec{ID: id, Placement: &topology.PlacementRule{MinReplicas: 3, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+		created, err := c.CreateGroup(ctx, c.Spec.Nodes[i%size].Name, gquorum.GroupSpec{ID: id, Placement: &topology.PlacementRule{MinReplicas: 3, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 		if err != nil {
 			t.Fatal(id, err)
 		}
@@ -165,7 +165,7 @@ func fifteenGroupResources(t *testing.T, size int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Apply(ctx, "node2", staged.Document.Version); err != nil {
+	if _, err := c.Approve(ctx, "node2", staged.Document.Version); err != nil {
 		t.Fatal(err)
 	}
 	if err := Poll(ctx, func() (bool, error) {

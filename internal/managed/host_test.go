@@ -172,7 +172,15 @@ func (f *fixture) setScope(group string, id uint64, founding, established bool) 
 }
 func (f *fixture) host(t *testing.T) *Host {
 	t.Helper()
+	var loopback *loopbackTransport
+	if _, ok := f.cfg.Transport.(discardTransport); ok {
+		loopback = &loopbackTransport{}
+		f.cfg.Transport = loopback
+	}
 	h, err := New(f.cfg)
+	if loopback != nil {
+		loopback.host = h
+	}
 	must(t, err)
 	must(t, h.Start(t.Context()))
 	t.Cleanup(func() {
@@ -503,4 +511,16 @@ func TestEstablishedMissingStoreParksBeforeFactoryAndPreservesEvidence(t *testin
 	if probe.Exists {
 		t.Fatal("missing established replica was silently re-created")
 	}
+}
+
+type loopbackTransport struct {
+	discardTransport
+	host *Host
+}
+
+func (t *loopbackTransport) ApplyAction(ctx context.Context, request load.ActionRequest) (load.ActionResult, error) {
+	if request.To.Node != t.host.cfg.Identity() {
+		return load.ActionResult{}, fault.ErrUnavailable
+	}
+	return t.host.ApplyAction(ctx, request)
 }

@@ -5,12 +5,12 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"github.com/asalimonov/gquorum"
 	"slices"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -192,7 +192,7 @@ func perfConcurrentWrites(t *testing.T, size int) {
 					operationErr = err
 					break
 				}
-				var committed metaservice.MutationResult
+				var committed gquorum.MutationResult
 				if err := response.Decode(&committed); err != nil || committed.Document.Version != candidate.Version+1 || committed.Document.ParentVersion != candidate.Version || committed.Document.Node("node1") == nil || committed.Document.Node("node1").Labels[key] != value {
 					operationErr = fmt.Errorf("write returned a different commit: %+v: %v", committed, err)
 					break
@@ -239,10 +239,10 @@ func perfConcurrentWrites(t *testing.T, size int) {
 	if syncElapsed >= 10*time.Second {
 		t.Fatal("meta convergence exceeded ten seconds", syncElapsed)
 	}
-	if _, err := c.Apply(ctx, c.Spec.Nodes[size-1].Name, finalVersion); err != nil {
+	if _, err := c.Approve(ctx, c.Spec.Nodes[size-1].Name, finalVersion); err != nil {
 		t.Fatal(err)
 	}
-	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

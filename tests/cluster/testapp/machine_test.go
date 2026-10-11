@@ -8,19 +8,19 @@ import (
 	"testing"
 
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/internal/raftengine"
+	"github.com/asalimonov/gquorum/load"
 )
 
 func TestMachineRetryAndSnapshotPreserveRequestIdentity(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	machine := newMachine()
-	command := func(id, value string, index uint64) raftengine.Command {
+	command := func(id, value string, index uint64) load.Command {
 		data, err := json.Marshal(putCommand{RequestID: id, Key: "key", Value: value})
 		if err != nil {
 			t.Fatal(err)
 		}
-		return raftengine.Command{RequestID: id, Data: data, Index: index}
+		return load.Command{RequestID: id, Data: data, Index: index}
 	}
 	if result, err := machine.Apply(ctx, command("one", "first", 1)); err != nil || result.Code != "ok" {
 		t.Fatal(result, err)
@@ -60,7 +60,7 @@ func TestMachineRetryAndSnapshotPreserveRequestIdentity(t *testing.T) {
 func TestInvalidLoadCommandsAreBusinessResults(t *testing.T) {
 	t.Parallel()
 	m := newMachine()
-	for _, cmd := range []raftengine.Command{{RequestID: "one", Data: []byte(`{"request_id":"other","key":"k","value":"v"}`)}, {Data: []byte(`null`)}, {RequestID: "one", Data: []byte(`{"request_id":"one","key":"k","value":"v","unexpected":1}`)}} {
+	for _, cmd := range []load.Command{{RequestID: "one", Data: []byte(`{"request_id":"other","key":"k","value":"v"}`)}, {Data: []byte(`null`)}, {RequestID: "one", Data: []byte(`{"request_id":"one","key":"k","value":"v","unexpected":1}`)}} {
 		result, err := m.Apply(t.Context(), cmd)
 		if err != nil || result.Code != string(fault.Invalid) {
 			t.Fatal(result, err)

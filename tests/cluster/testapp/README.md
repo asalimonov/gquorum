@@ -1,16 +1,20 @@
 # Process-test application
 
 The Dockerfile builds the dedicated caller-owned key/value fixture in this
-directory. It owns its FSM, load protocol, effect receiver, process lifecycle
-and fault instrumentation. It uses the public library APIs. The Compose demo
+directory. It supplies a state-machine factory, typed load transport, application retirement
+callback and process lifecycle around a `gquorum.Node`. Node owns Raft startup,
+recovery, approved effects, membership, readmission and local stop holds.
+`node.Cluster()` supplies the topology API. The fixture imports no private meta
+or Raft engine packages. The Compose demo
 is a separate application; fixture controls and integration tests stay here.
 
 Test controls live in `hooks_cluster.go`. They provide direct
-local replica identity/membership/materialized values, durable snapshot size and
+local replica and actual storage identities, membership/materialized values, durable snapshot size and
 index, received-snapshot counts, exact successful effect receipts and cancelable
 effect barriers. Barriers can hold prepare, promote, stop, cleanup or delete
 effects. Released effects recheck their complete authorization before changing
-state. Controller RPC cancellation releases its own wait; the armed barrier
+state. The transport also routes local actions through the Node receiver, so
+fault injection covers the same path on every host. RPC cancellation releases its own wait; the armed barrier
 remains for a later retry until the test explicitly releases it.
 
 Local inspection includes the library's native proposal-admission observation.
@@ -35,7 +39,9 @@ and the local event journal. Controls target an exact group/replica and can stal
 a real pending projection write. Observation reads the actual stored file and
 reports waiting/active writes separately from completed writes. A stalled worker
 does not hold the FSM lock; release resumes catch-up, and cancellation/replica
-retirement joins the worker before application storage teardown. The fixture runs independently of the ordinary Compose demo.
+retirement joins the worker before application storage teardown. Projection files
+carry their complete storage identity. The retirement callback verifies that pin,
+removes only the exact file, syncs its directory and repeats safely after success. The fixture runs independently of the ordinary Compose demo.
 
 Every control request requires the fixture's fresh credential in
 `X-Gquorum-Test-Credential`. The normal application protocol keeps its existing
@@ -44,3 +50,14 @@ library configuration or load-protocol fields.
 
 Use `make test-cluster-build` to build the image. Run focused scenarios with
 `make test-cluster-run CLUSTER_ARGS='-race -v -run TestRuntimeGrowth'`.
+
+HTTP mutations use `approve` and return `operator_id`. Separate approval uses
+`POST /api/topology/{version}/approve`; progress uses `GET /api/operators/{id}`.
+The fixture retains its additional load/group/event and fault endpoints. The
+small example remains limited to `_meta` topology/status/drain/activate.
+
+Direct metadata-ledger assertions now run beside the private owner in
+`internal/managed/durable_ledger_test.go`, together with exact retirement and
+readmission tests. Process tests still prove missing-store parking, persisted
+identity, fresh-ID reseating, verified cleanup and recovery from actual WAL data;
+its inspection endpoint reads the caller-supplied store rather than meta internals.

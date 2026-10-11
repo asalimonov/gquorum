@@ -21,7 +21,7 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// This protocol belongs to the example application, not the library.
+// This protocol belongs to the cluster test application, not the library.
 type Header struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ClusterId     string                 `protobuf:"bytes,1,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
@@ -167,11 +167,12 @@ func (x *Request) GetData() []byte {
 }
 
 type Frame struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Header        *Header                `protobuf:"bytes,1,opt,name=header,proto3" json:"header,omitempty"`
-	GroupId       string                 `protobuf:"bytes,2,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
-	ToReplicaId   uint64                 `protobuf:"varint,3,opt,name=to_replica_id,json=toReplicaId,proto3" json:"to_replica_id,omitempty"`
-	RaftMessage   []byte                 `protobuf:"bytes,4,opt,name=raft_message,json=raftMessage,proto3" json:"raft_message,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Header      *Header                `protobuf:"bytes,1,opt,name=header,proto3" json:"header,omitempty"`
+	GroupId     string                 `protobuf:"bytes,2,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
+	ToReplicaId uint64                 `protobuf:"varint,3,opt,name=to_replica_id,json=toReplicaId,proto3" json:"to_replica_id,omitempty"`
+	// JSON-encoded load.RaftBatch, including exact endpoints and delivery identity.
+	RaftMessage   []byte `protobuf:"bytes,4,opt,name=raft_message,json=raftMessage,proto3" json:"raft_message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

@@ -16,9 +16,8 @@ import (
 	"github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/internal/metaservice"
-	"github.com/asalimonov/gquorum/internal/raftengine"
-	"github.com/asalimonov/gquorum/membership"
+	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/policy"
 	"github.com/asalimonov/gquorum/storage/walstore"
 	"github.com/asalimonov/gquorum/tests/cluster/testapp/loadpb"
 	"github.com/asalimonov/gquorum/topology"
@@ -33,15 +32,15 @@ const (
 
 type listeners struct{ meta, load, http net.Listener }
 type localReplica struct {
-	group   *raftengine.Group
+	group   *load.Group
 	machine *kvMachine
 }
 type application struct {
 	loadpb.UnimplementedLoadServer
 	cfg                          config
 	logger                       *slog.Logger
-	runtime                      *gquorum.Runtime
-	meta                         *metaservice.Group
+	node                         gquorum.Node
+	cluster                      gquorum.Cluster
 	store                        *walstore.Store
 	journal                      *events.Journal
 	bus                          *events.Bus
@@ -49,10 +48,9 @@ type application struct {
 	httpServer                   *http.Server
 	loadServer                   *grpc.Server
 	mu                           sync.RWMutex
-	locals                       map[string]*localReplica
+	machines                     map[load.ReplicaRef]*kvMachine
+	startupMissing               string
 	clients                      map[string]*loadClient
-	localGate                    chan struct{}
-	coordinator                  *membership.Coordinator
 	workCtx, lifeCtx, httpCtx    context.Context
 	stopWork, stopLife, stopHTTP context.CancelFunc
 	workWG, serveWG              sync.WaitGroup
@@ -64,8 +62,6 @@ type application struct {
 	closeOnce                    sync.Once
 	closeErr                     error
 	clusterHooks                 *clusterHooks
-	foundingReady                chan struct{}
-	foundingGate                 bool
 	fatalMu                      sync.Mutex
 	fatalErr                     error
 }
@@ -85,7 +81,7 @@ func (c config) nodeForPeer(p peer) topology.Node {
 // Retained stores resume their pin; missing stores on established nodes join.
 // Malformed or foreign markers fail closed; this is fixture startup policy.
 func (c *config) recoverBootMode() (bool, error) {
-	pin, found, err := metaservice.LoadStoredIdentity(filepath.Join(c.DataDir, "meta.bolt"))
+	pin, found, err := gquorum.LoadStoredIdentity(filepath.Join(c.DataDir, "meta.bolt"))
 	if err != nil {
 		return false, err
 	}
@@ -115,7 +111,7 @@ func (c *config) recoverBootMode() (bool, error) {
 	return false, nil
 }
 func (a *application) markEstablished() {
-	if err := a.meta.WaitReady(a.workCtx); err != nil {
+	if err := a.node.WaitReady(a.workCtx); err != nil {
 		select {
 		case <-a.closing:
 		default:
@@ -123,11 +119,6 @@ func (a *application) markEstablished() {
 				a.fail(err)
 			}
 		}
-		return
-	}
-	if a.foundingGate {
-		// The gated worker owns the marker and opens readiness only after sync.
-		_ = a.waitFounders(a.workCtx)
 		return
 	}
 	if err := a.persistEstablished(); err != nil {
@@ -198,24 +189,7 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 	if err != nil {
 		return nil, err
 	}
-	a := &application{cfg: cfg, logger: logger, locals: map[string]*localReplica{}, clients: map[string]*loadClient{}, localGate: make(chan struct{}, 1), coordinator: membership.NewCoordinator(), closing: make(chan struct{}), closed: make(chan struct{})}
-	a.foundingReady = make(chan struct{})
-	if cfg.GateFounders && !cfg.Join {
-		raw, markerErr := os.ReadFile(filepath.Join(cfg.DataDir, "established.json"))
-		if markerErr == nil {
-			var marker struct{ ClusterID, NodeName string }
-			if decodeJSON(raw, &marker) != nil || marker.ClusterID != cfg.ClusterID || marker.NodeName != cfg.NodeName {
-				return nil, fault.ErrIdentityMismatch
-			}
-		} else if errors.Is(markerErr, os.ErrNotExist) {
-			a.foundingGate = true
-		} else {
-			return nil, markerErr
-		}
-	}
-	if !a.foundingGate {
-		close(a.foundingReady)
-	}
+	a := &application{cfg: cfg, logger: logger, machines: map[load.ReplicaRef]*kvMachine{}, clients: map[string]*loadClient{}, closing: make(chan struct{}), closed: make(chan struct{})}
 	a.workCtx, a.stopWork = context.WithCancel(context.Background())
 	a.clusterHooks = newClusterHooks()
 	a.lifeCtx, a.stopLife = context.WithCancel(context.Background())
@@ -267,18 +241,14 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 	if err != nil {
 		return nil, err
 	}
-	a.runtime, err = gquorum.New(gquorum.Options{Events: a.bus, Logger: logger})
-	if err != nil {
-		return nil, err
-	}
-	var founders []metaservice.FoundingMember
+	var founders []gquorum.FoundingMember
 	var seeds []string
 	var member uint64
 	for _, p := range cfg.Peers {
 		if cfg.Join {
 			seeds = append(seeds, p.MetaAddress)
 		} else if !resume {
-			founders = append(founders, metaservice.FoundingMember{Node: cfg.nodeForPeer(p), MemberID: p.MemberID, Address: p.MetaAddress})
+			founders = append(founders, gquorum.FoundingMember{Node: cfg.nodeForPeer(p), MemberID: p.MemberID, Address: p.MetaAddress})
 		}
 		if p.Name == cfg.NodeName && !cfg.Join && !resume {
 			member = p.MemberID
@@ -288,10 +258,32 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 	if placement.MinReplicas == 0 {
 		placement = topology.PlacementRule{MinReplicas: 1, MaxReplicas: 3}
 	}
-	a.meta, err = a.runtime.OpenMeta(metaservice.Options{Identity: topology.Identity{NodeName: cfg.NodeName, ClusterID: cfg.ClusterID, InstanceID: cfg.InstanceID, MemberID: member}, Node: cfg.nodeForPeer(peer{Name: cfg.NodeName, Type: cfg.NodeType, MetaAddress: cfg.MetaAddress, LoadAddress: cfg.LoadAddress, HTTPAddress: cfg.HTTPAddress}), DBPath: filepath.Join(cfg.DataDir, "meta.bolt"), Founders: founders, Join: cfg.Join, JoinSeeds: seeds, Limits: cfg.Limits, Placement: placement, SessionTTL: cfg.SessionTTL, Timing: metaservice.Timing{TickInterval: cfg.TickInterval, ElectionTicks: 10}, Network: metaservice.NetworkOptions{Listener: ls.meta, AdvertiseAddress: cfg.MetaAddress, AllowPlaintext: true, ClusterCredential: []byte(cfg.Credential), Resolver: metaResolver{a}}, LoadGroups: a, Scheduling: cfg.Scheduling, OnSelfRemoved: a.selfRemoved, OnReadmission: a.readmission})
+	lifecycleOptions := policy.DefaultLifecycleOptions{}
+	if cfg.GateFounders {
+		lifecycleOptions.Startup = policy.AllFounders
+		lifecycleOptions.FoundersTimeout = cfg.FoundingTimeout
+	}
+	defaults, err := policy.NewDefaultLifecycle(lifecycleOptions)
 	if err != nil {
 		return nil, err
 	}
+	a.node, err = gquorum.NewNode(gquorum.NodeOptions{
+		Identity:  topology.Identity{NodeName: cfg.NodeName, ClusterID: cfg.ClusterID, InstanceID: cfg.InstanceID, MemberID: member},
+		Node:      cfg.nodeForPeer(peer{Name: cfg.NodeName, Type: cfg.NodeType, MetaAddress: cfg.MetaAddress, LoadAddress: cfg.LoadAddress, HTTPAddress: cfg.HTTPAddress}),
+		Bootstrap: gquorum.BootstrapOptions{Founders: founders, Join: cfg.Join, JoinSeeds: seeds},
+		Limits:    cfg.Limits, Placement: placement, Events: a.bus, Logger: logger,
+		Meta: gquorum.MetaOptions{DBPath: filepath.Join(cfg.DataDir, "meta.bolt"), SessionTTL: cfg.SessionTTL,
+			Timing:  gquorum.MetaTiming{TickInterval: cfg.TickInterval, ElectionTicks: 10},
+			Network: gquorum.MetaNetworkOptions{Listener: ls.meta, AdvertiseAddress: cfg.MetaAddress, AllowPlaintext: true, ClusterCredential: []byte(cfg.Credential), Resolver: metaResolver{a}}},
+		Loads: gquorum.LoadOptions{Factory: a.newReplica, Retire: a.retireReplica, Transport: loadTransport{app: a},
+			Storage: gquorum.LoadStorageOptions{Store: &fixtureStore{Store: a.store, app: a}, Retirement: a.store},
+			Engine:  load.EngineOptions{Timing: load.Timing{TickInterval: cfg.TickInterval, ElectionTicks: 10, WALWriteWait: cfg.WALWriteWait}, SnapshotThreshold: cfg.SnapshotThreshold}},
+		Policies: gquorum.PolicyOptions{Scheduling: cfg.Scheduling, Lifecycle: &fixtureLifecycle{DefaultLifecycle: defaults, app: a}},
+	})
+	if err != nil {
+		return nil, err
+	}
+	a.cluster = a.node.Cluster()
 	a.loadServer = grpc.NewServer(grpc.MaxRecvMsgSize(64<<20), grpc.MaxSendMsgSize(64<<20), grpc.MaxConcurrentStreams(128), grpc.WaitForHandlers(true))
 	loadpb.RegisterLoadServer(a.loadServer, a)
 	a.httpServer = &http.Server{Handler: a.routes(), ReadHeaderTimeout: 3 * time.Second, IdleTimeout: 30 * time.Second, BaseContext: func(net.Listener) context.Context { return a.httpCtx }}
@@ -325,7 +317,7 @@ func (a *application) Start(parent context.Context) error {
 			a.RequestClose()
 		}
 	})
-	if err := a.meta.Start(a.lifeCtx); err != nil {
+	if err := a.node.Start(a.lifeCtx); err != nil {
 		a.RequestClose()
 		return err
 	}
@@ -337,10 +329,6 @@ func (a *application) Start(parent context.Context) error {
 		}
 	})
 	a.workWG.Go(a.markEstablished)
-	if a.foundingGate {
-		a.workWG.Go(a.runFoundingGate)
-	}
-	a.workWG.Go(a.superviseLoads)
 	if a.cfg.Bootstrap {
 		a.workWG.Go(a.bootstrap)
 	}
@@ -377,13 +365,10 @@ func (a *application) finishClose() {
 			a.closeErr = err
 		}
 	}
-	if a.meta != nil {
-		remember(a.meta.Quiesce(context.Background()))
-	}
 	a.workWG.Wait()
 	a.effectWG.Wait()
-	if a.runtime != nil {
-		remember(a.runtime.Close(context.Background()))
+	if a.node != nil {
+		remember(a.node.Stop(context.Background()))
 	}
 	a.stopLife()
 	if a.loadServer != nil {
@@ -424,15 +409,15 @@ func (a *application) finishClose() {
 }
 
 func (a *application) documents(ctx context.Context) (topology.Document, topology.Document, error) {
-	target, err := a.meta.Target(ctx)
+	target, err := a.cluster.Target(ctx)
 	if err != nil {
 		return target, topology.Document{}, err
 	}
-	active, err := a.meta.Active(ctx)
+	active, err := a.cluster.Active(ctx)
 	return target, active, err
 }
 func (a *application) address(ctx context.Context, name, label string) (string, error) {
-	if a.meta != nil {
+	if a.cluster != nil {
 		target, active, err := a.documents(ctx)
 		if err != nil {
 			return "", err
@@ -480,57 +465,14 @@ func (a *application) owner(ctx context.Context, group string, replica uint64) (
 	return "", fault.ErrIdentityMismatch
 }
 
-func (a *application) superviseLoads() {
-	ticker := time.NewTicker(250 * time.Millisecond)
-	defer ticker.Stop()
-	lastErrors := map[string]string{}
-	for {
-		select {
-		case <-a.workCtx.Done():
-			return
-		case <-ticker.C:
-		}
-		if !a.meta.OwnSessionLive() {
-			continue
-		}
-		active, err := a.meta.Active(a.workCtx)
-		if err != nil {
-			continue
-		}
-		for _, group := range active.LoadGroups() {
-			for _, replica := range group.Replicas {
-				if replica.NodeName == a.cfg.NodeName {
-					if _, found := a.runtime.Load(group.ID); found {
-						continue
-					}
-					ctx, cancel := context.WithTimeout(a.workCtx, 3*time.Second)
-					_, err := a.openLocal(ctx, group.ID, replica.ReplicaID, raftengine.Joining, nil)
-					cancel()
-					if err != nil {
-						message := fmt.Sprintf("%v: %v", err, errors.Unwrap(err))
-						if lastErrors[group.ID] != message {
-							lastErrors[group.ID] = message
-							a.logger.Warn("load recovery pending", "group", group.ID, "replica", replica.ReplicaID, "error", err, "cause", errors.Unwrap(err))
-						}
-					} else {
-						delete(lastErrors, group.ID)
-					}
-				}
-			}
-		}
-	}
-}
 func (a *application) bootstrap() {
-	if err := a.waitFounders(a.workCtx); err != nil {
-		return
-	}
-	if err := a.meta.WaitReady(a.workCtx); err != nil {
+	if err := a.node.WaitReady(a.workCtx); err != nil {
 		return
 	}
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if a.meta.IsLeader() {
+		if a.cluster.IsLeader() {
 			ctx, cancel := context.WithTimeout(a.workCtx, 5*time.Second)
 			done, err := a.bootstrapOnce(ctx)
 			cancel()
@@ -549,20 +491,20 @@ func (a *application) bootstrap() {
 	}
 }
 func (a *application) bootstrapOnce(ctx context.Context) (bool, error) {
-	for _, spec := range []metaservice.GroupSpec{{ID: "demo"}, {ID: "workers", Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}}}} {
-		latest, err := a.meta.Latest(ctx)
+	for _, spec := range []gquorum.GroupSpec{{ID: "demo"}, {ID: "workers", Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}}}} {
+		latest, err := a.cluster.Latest(ctx)
 		if err != nil {
 			return false, err
 		}
 		if latest.Group(spec.ID) == nil {
-			created, err := a.meta.CreateLoadGroup(ctx, spec, metaservice.MutationOptions{ExpectedVersion: latest.Version, Actor: a.cfg.NodeName, Apply: true})
+			created, err := a.cluster.CreateGroup(ctx, spec, gquorum.MutationOptions{ExpectedVersion: latest.Version, Actor: a.cfg.NodeName, Approve: true})
 			if errors.Is(err, fault.ErrGroupRetired) {
 				continue
 			}
 			if err != nil {
 				return false, err
 			}
-			status, err := a.meta.WaitOperator(ctx, created.OperatorID)
+			status, err := a.cluster.WaitOperator(ctx, created.OperatorID)
 			if err != nil {
 				return false, err
 			}
@@ -570,16 +512,16 @@ func (a *application) bootstrapOnce(ctx context.Context) (bool, error) {
 				return false, fault.New(fault.Unavailable, status.Error, nil)
 			}
 		} else {
-			active, err := a.meta.Active(ctx)
+			active, err := a.cluster.Active(ctx)
 			if err != nil {
 				return false, err
 			}
 			if active.Group(spec.ID) == nil {
-				id, err := a.meta.Apply(ctx, latest.Version)
+				id, err := a.cluster.Approve(ctx, latest.Version)
 				if err != nil {
 					return false, err
 				}
-				status, err := a.meta.WaitOperator(ctx, id)
+				status, err := a.cluster.WaitOperator(ctx, id)
 				if err != nil || status.State != topology.OperatorSucceeded {
 					return false, err
 				}

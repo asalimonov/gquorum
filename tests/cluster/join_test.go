@@ -5,11 +5,11 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"github.com/asalimonov/gquorum"
 	"slices"
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -36,7 +36,7 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 	c := acquire(t, spec).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 105*time.Second)
 	defer cancel()
-	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work"})
+	created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Apply(ctx, "node2", staged.Document.Version); err != nil {
+	if _, err := c.Approve(ctx, "node2", staged.Document.Version); err != nil {
 		t.Fatal(err)
 	}
 	node, err := c.PrepareJoinNode(ctx, NodeSpec{Name: "node4", Type: "worker"})
@@ -63,12 +63,12 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 		}
 	}
 	response, err := c.Request(ctx, "node2", "POST", "/api/nodes", map[string]any{
-		"node": joiningNode(node.Spec), "mutation": metaservice.MutationOptions{Actor: "cluster-test", Apply: true},
+		"node": joiningNode(node.Spec), "mutation": gquorum.MutationOptions{Actor: "cluster-test", Approve: true},
 	}, staged.Document.Version)
 	if err := requireStatus(response, err, 202); err != nil {
 		t.Fatal(err)
 	}
-	var admitted metaservice.MutationResult
+	var admitted gquorum.MutationResult
 	if err := response.Decode(&admitted); err != nil || admitted.OperatorID == "" {
 		t.Fatal("admission did not start an exact execution", admitted, err)
 	}

@@ -4,10 +4,10 @@ package cluster
 
 import (
 	"context"
+	"github.com/asalimonov/gquorum"
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 	"github.com/containerd/errdefs"
 	docker "github.com/moby/moby/client"
@@ -17,7 +17,7 @@ func TestDeletionWaitsForUnreachableFormerHostBeforeDeletingState(t *testing.T) 
 	c := acquire(t, matrixSpec(3)).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 110*time.Second)
 	defer cancel()
-	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "delete-wait"})
+	created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "delete-wait"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,11 +45,11 @@ func TestDeletionWaitsForUnreachableFormerHostBeforeDeletingState(t *testing.T) 
 	if stopped.Spec.Name == ingress {
 		ingress = "node3"
 	}
-	response, err := c.Request(ctx, ingress, "DELETE", "/api/groups/delete-wait", metaservice.MutationOptions{Actor: "cluster-test"}, created.Document.Version)
+	response, err := c.Request(ctx, ingress, "DELETE", "/api/groups/delete-wait", gquorum.MutationOptions{Actor: "cluster-test"}, created.Document.Version)
 	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
 	}
-	var staged metaservice.MutationResult
+	var staged gquorum.MutationResult
 	if err := response.Decode(&staged); err != nil {
 		t.Fatal(err)
 	}

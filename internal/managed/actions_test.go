@@ -207,3 +207,27 @@ func TestDispatcherRejectsAnUnverifiedOrMismatchedReply(t *testing.T) {
 	mode.Store(4)
 	must(t, h.Dispatch(deadline(t), a))
 }
+
+func TestDispatcherRetriesRefusedIdentityOnlyForCurrentApproval(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	remote := storage.Identity{NodeName: "b", ClusterID: "cluster", GroupID: "work", ReplicaID: 2}
+	approval := f.approve(topology.StepPrepareReplica, remote)
+	revoke := false
+	f.cfg.Transport = actionTransport{action: func(context.Context, load.ActionRequest) (load.ActionResult, error) {
+		if revoke {
+			f.mu.Lock()
+			f.approval.Attempt++
+			f.mu.Unlock()
+		}
+		return load.ActionResult{}, fault.ErrIdentityMismatch
+	}}
+	h := f.host(t)
+	if err := h.Dispatch(t.Context(), approval); !errors.Is(err, fault.ErrUnavailable) {
+		t.Fatal("current approved action did not remain retryable", err)
+	}
+	revoke = true
+	if err := h.Dispatch(t.Context(), approval); !errors.Is(err, fault.ErrIdentityMismatch) {
+		t.Fatal("obsolete approval was retried", err)
+	}
+}

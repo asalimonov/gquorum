@@ -4,11 +4,11 @@ package cluster
 
 import (
 	"fmt"
+	"github.com/asalimonov/gquorum"
 	"reflect"
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -30,7 +30,7 @@ func stoppedFollowerPolicy(t *testing.T, size int) {
 	spec.Scheduling = true
 	spec.SchedulingInterval, spec.SchedulingTimeout = 200*time.Millisecond, 150*time.Millisecond
 	ctx, c := performanceClusterSpec(t, spec)
-	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work"})
+	created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,11 +53,11 @@ func stoppedFollowerPolicy(t *testing.T, size int) {
 	}
 	rule := base.Placement
 	rule.MinReplicas, rule.MaxReplicas = 3, 3
-	response, err = c.Request(ctx, "node2", "PUT", "/api/placement", globalPlacementBody(rule, metaservice.MutationOptions{Actor: "operator"}), base.Version)
+	response, err = c.Request(ctx, "node2", "PUT", "/api/placement", globalPlacementBody(rule, gquorum.MutationOptions{Actor: "operator"}), base.Version)
 	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
 	}
-	var staged metaservice.MutationResult
+	var staged gquorum.MutationResult
 	if err := response.Decode(&staged); err != nil || staged.Document.Version != base.Version+1 || staged.Document.Placement.MinReplicas != 3 || staged.OperatorID != "" {
 		t.Fatal(staged, err)
 	}

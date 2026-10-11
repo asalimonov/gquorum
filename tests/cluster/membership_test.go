@@ -6,11 +6,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/asalimonov/gquorum"
 	"slices"
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
@@ -54,7 +54,7 @@ func TestDrainViaNonLeaderPreservesMetaMembership(t *testing.T) {
 	c := acquire(t, matrixSpec(3)).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
-	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work"})
+	created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestDrainViaNonLeaderPreservesMetaMembership(t *testing.T) {
 	if err := c.Put(ctx, "node3", "work", "before-drain", "before-drain", "retained"); err != nil {
 		t.Fatal(err)
 	}
-	drained, err := c.Mutate(ctx, "node3", "POST", "/api/nodes/node3/drain", metaservice.MutationOptions{Apply: true, Actor: "cluster-test"})
+	drained, err := c.Mutate(ctx, "node3", "POST", "/api/nodes/node3/drain", gquorum.MutationOptions{Approve: true, Actor: "cluster-test"})
 	if err != nil || drained.OperatorID == "" {
 		t.Fatal("follower did not forward both stage and apply", drained, err)
 	}
@@ -73,7 +73,7 @@ func TestDrainViaNonLeaderPreservesMetaMembership(t *testing.T) {
 	if err != nil || status.MetaLeader != created.Document.MemberID("node1") {
 		t.Fatal("issuer became leader instead of forwarding", status, err)
 	}
-	path := fmt.Sprintf("/api/topology/%d/apply", drained.Document.Version)
+	path := fmt.Sprintf("/api/topology/%d/approve", drained.Document.Version)
 	for _, request := range []struct {
 		query string
 		body  any
@@ -88,7 +88,7 @@ func TestDrainViaNonLeaderPreservesMetaMembership(t *testing.T) {
 	if err := requireStatus(response, err, 202); err != nil || !bytes.Contains(response.Data, []byte(drained.OperatorID)) {
 		t.Fatal("repeated apply created another attempt", response, err)
 	}
-	activated, err := c.Mutate(ctx, "node3", "POST", "/api/nodes/node3/activate", metaservice.MutationOptions{Apply: true, Actor: "cluster-test"})
+	activated, err := c.Mutate(ctx, "node3", "POST", "/api/nodes/node3/activate", gquorum.MutationOptions{Approve: true, Actor: "cluster-test"})
 	if err != nil || len(activated.Document.Group("work").Replicas) != 3 || activated.Document.MemberID("node3") != created.Document.MemberID("node3") {
 		t.Fatal("activation changed meta identity or failed to regrow", activated, err)
 	}
@@ -117,18 +117,18 @@ func TestDrainApprovalChecksObservedActualMetaQuorum(t *testing.T) {
 	c := acquire(t, matrixSpec(3)).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 95*time.Second)
 	defer cancel()
-	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work"})
+	created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := transferMeta(ctx, c, "node2", "node1", created.Document.MemberID("node1")); err != nil {
 		t.Fatal(err)
 	}
-	response, err := c.Request(ctx, "node2", "POST", "/api/nodes/node2/drain", metaservice.MutationOptions{Actor: "cluster-test"}, created.Document.Version)
+	response, err := c.Request(ctx, "node2", "POST", "/api/nodes/node2/drain", gquorum.MutationOptions{Actor: "cluster-test"}, created.Document.Version)
 	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
 	}
-	var staged metaservice.MutationResult
+	var staged gquorum.MutationResult
 	if err := response.Decode(&staged); err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestDrainApprovalChecksObservedActualMetaQuorum(t *testing.T) {
 		t.Fatal("leader did not observe stopped voter", err)
 	}
 	if err := Poll(ctx, func() (bool, error) {
-		response, err := c.Request(ctx, "node1", "POST", fmt.Sprintf("/api/topology/%d/apply", staged.Document.Version), nil, 0)
+		response, err := c.Request(ctx, "node1", "POST", fmt.Sprintf("/api/topology/%d/approve", staged.Document.Version), nil, 0)
 		if err != nil || response.Status == 503 {
 			return false, requireStatus(response, err, 422)
 		}
@@ -171,7 +171,7 @@ func TestDrainApprovalChecksObservedActualMetaQuorum(t *testing.T) {
 	if err := c.WaitReady(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Apply(ctx, "node2", staged.Document.Version); err != nil {
+	if _, err := c.Approve(ctx, "node2", staged.Document.Version); err != nil {
 		t.Fatal("safe retained-voter recovery could not apply original staged version", err)
 	}
 	assertDrained(t, ctx, c, "node2", "work", staged.Document.Version)
@@ -184,7 +184,7 @@ func TestForceRetireDeadNodePreservesSafetySevenNodes(t *testing.T) { forceRetir
 func forceRetireDeadNode(t *testing.T, size int) {
 	t.Helper()
 	ctx, c := performanceCluster(t, size)
-	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func forceRetireDeadNode(t *testing.T, size int) {
 	}); err != nil {
 		t.Fatal("surviving load majority did not elect after abrupt loss", err)
 	}
-	retired, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/force-retire", metaservice.RetireOptions{Reason: "disk destroyed", Mutation: metaservice.MutationOptions{Actor: "operator", Apply: true}})
+	retired, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/force-retire", gquorum.RetireOptions{Reason: "disk destroyed", Mutation: gquorum.MutationOptions{Actor: "operator", Approve: true}})
 	if err != nil {
 		t.Fatal("forced retirement did not complete against healthy majority", retired, err)
 	}
@@ -259,11 +259,11 @@ func forceRetireDeadNode(t *testing.T, size int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := c.Request(ctx, "node2", "POST", "/api/nodes", map[string]any{"node": joiningNode(victim.Spec), "mutation": metaservice.MutationOptions{Actor: "operator"}}, current.Version)
+	response, err := c.Request(ctx, "node2", "POST", "/api/nodes", map[string]any{"node": joiningNode(victim.Spec), "mutation": gquorum.MutationOptions{Actor: "operator"}}, current.Version)
 	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
 	}
-	var replacement metaservice.MutationResult
+	var replacement gquorum.MutationResult
 	if err := response.Decode(&replacement); err != nil {
 		t.Fatal(err)
 	}

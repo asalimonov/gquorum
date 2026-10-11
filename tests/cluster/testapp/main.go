@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
+	"github.com/asalimonov/gquorum"
 	"log/slog"
 	"net/http"
 	"os"
@@ -15,7 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -42,7 +42,7 @@ type config struct {
 	Bootstrap                                            bool
 	GateFounders                                         bool
 	FoundingTimeout                                      time.Duration
-	Scheduling                                           metaservice.SchedulingOptions
+	Scheduling                                           gquorum.SchedulingOptions
 }
 
 func envOr(name, fallback string) string {
@@ -80,7 +80,7 @@ func main() {
 	flag.Uint64Var(&c.SnapshotThreshold, "snapshot-threshold", 64, "load snapshot interval in applied entries")
 	flag.BoolVar(&c.Scheduling.Disabled, "disable-reconciliation", false, "disable automatic load replica repair")
 	flag.DurationVar(&c.Scheduling.Interval, "reconciliation-interval", 0, "automatic repair observation interval; zero selects the library default")
-	flag.DurationVar(&c.Scheduling.TickTimeout, "reconciliation-timeout", 0, "automatic repair observation timeout; zero selects the library default")
+	flag.DurationVar(&c.Scheduling.Timeout, "reconciliation-timeout", 0, "automatic repair observation timeout; zero selects the library default")
 	flag.Parse()
 	if healthcheck != "" {
 		client := &http.Client{Timeout: 2 * time.Second}

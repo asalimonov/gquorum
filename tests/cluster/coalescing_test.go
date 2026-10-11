@@ -5,11 +5,11 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"github.com/asalimonov/gquorum"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -58,7 +58,7 @@ func walCoalescing(t *testing.T, size int) {
 			spec.WALWriteWait = wait
 			spec.SnapshotThreshold = 100000
 			ctx, c := performanceClusterSpec(t, spec)
-			created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+			created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/internal/raftengine"
+	"github.com/asalimonov/gquorum/load"
 )
 
 func TestCallerProjectionStallCatchesUpFullStateAndJoins(t *testing.T) {
@@ -25,7 +25,7 @@ func TestCallerProjectionStallCatchesUpFullStateAndJoins(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := m.Apply(ctx, raftengine.Command{RequestID: id, Index: index, Data: data})
+		result, err := m.Apply(ctx, load.Command{RequestID: id, Index: index, Data: data})
 		if err != nil || result.Code != "ok" {
 			t.Fatal(result, err)
 		}

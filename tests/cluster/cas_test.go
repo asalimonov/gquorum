@@ -5,11 +5,10 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"github.com/asalimonov/gquorum"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/asalimonov/gquorum/internal/metaservice"
 )
 
 func TestConcurrentCASHasOneCommitAtEveryClusterSize(t *testing.T) {
@@ -52,7 +51,7 @@ func TestConcurrentCASHasOneCommitAtEveryClusterSize(t *testing.T) {
 				}
 				switch result.response.Status {
 				case 200:
-					var committed metaservice.MutationResult
+					var committed gquorum.MutationResult
 					if err := result.response.Decode(&committed); err != nil || committed.Document.Version != base.Version+1 || committed.Document.ParentVersion != base.Version || committed.Document.Node("node1").Labels["test.cas"] != result.value {
 						t.Fatal("commit returned another operation's result", committed, err)
 					}
@@ -87,7 +86,7 @@ func TestConcurrentCASHasOneCommitAtEveryClusterSize(t *testing.T) {
 				t.Fatal("winning commit did not propagate to every meta member", err)
 			}
 			// A follower can approve the exact winning version after contention.
-			if _, err := c.Apply(ctx, c.Spec.Nodes[size-1].Name, base.Version+1); err != nil {
+			if _, err := c.Approve(ctx, c.Spec.Nodes[size-1].Name, base.Version+1); err != nil {
 				t.Fatal(err)
 			}
 			for _, node := range c.Nodes() {

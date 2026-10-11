@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/asalimonov/gquorum"
 	"maps"
 	"net/http"
 	"slices"
@@ -13,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -46,11 +46,11 @@ func pendingPressure(t *testing.T, size int) {
 	c.http.Timeout = 65 * time.Second
 	transport := c.http.Transport.(*http.Transport)
 	transport.MaxIdleConnsPerHost, transport.MaxIdleConns = 512, 1024
-	work, err := c.CreateGroup(ctx, "node1", metaservice.GroupSpec{ID: "held", Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 1, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	work, err := c.CreateGroup(ctx, "node1", gquorum.GroupSpec{ID: "held", Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 1, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	healthy, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "healthy", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	healthy, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "healthy", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

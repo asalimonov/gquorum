@@ -5,11 +5,11 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"github.com/asalimonov/gquorum"
 	"slices"
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -20,7 +20,7 @@ func TestIntentionalLearnerSurvivesSchedulingUntilApprovedPromotion(t *testing.T
 	c := acquire(t, spec).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
-	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work"})
+	created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestIntentionalLearnerSurvivesSchedulingUntilApprovedPromotion(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Apply(ctx, "node2", staged.Document.Version); err != nil {
+	if _, err := c.Approve(ctx, "node2", staged.Document.Version); err != nil {
 		t.Fatal(err)
 	}
 	assertLearner := func() error {
@@ -113,7 +113,7 @@ observe:
 	}); err != nil {
 		t.Fatal("staged promotion did not leave the learner intact and block repair", err)
 	}
-	if _, err := c.Apply(ctx, "node2", staged.Document.Version); err != nil {
+	if _, err := c.Approve(ctx, "node2", staged.Document.Version); err != nil {
 		t.Fatal(err)
 	}
 	if err := Poll(ctx, func() (bool, error) {

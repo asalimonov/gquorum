@@ -5,25 +5,25 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"github.com/asalimonov/gquorum"
 	"slices"
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func stageActivation(t *testing.T, ctx context.Context, c *Cluster, name string) (metaservice.MutationResult, topology.Plan) {
+func stageActivation(t *testing.T, ctx context.Context, c *Cluster, name string) (gquorum.MutationResult, topology.Plan) {
 	t.Helper()
 	base, err := c.Document(ctx, "node1", "latest")
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := c.Request(ctx, "node2", "POST", "/api/nodes/"+name+"/activate", metaservice.MutationOptions{Actor: "cluster-test"}, base.Version)
+	response, err := c.Request(ctx, "node2", "POST", "/api/nodes/"+name+"/activate", gquorum.MutationOptions{Actor: "cluster-test"}, base.Version)
 	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
 	}
-	var staged metaservice.MutationResult
+	var staged gquorum.MutationResult
 	if err := response.Decode(&staged); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func startApply(t *testing.T, ctx context.Context, c *Cluster, node string, vers
 	// staged. Apply is idempotent for this exact version; retry only transient
 	// unavailable responses, and fail immediately on any other refusal.
 	if err := Poll(ctx, func() (bool, error) {
-		response, err := c.Request(ctx, node, "POST", fmt.Sprintf("/api/topology/%d/apply", version), nil, 0)
+		response, err := c.Request(ctx, node, "POST", fmt.Sprintf("/api/topology/%d/approve", version), nil, 0)
 		if err != nil {
 			return false, err
 		}
@@ -98,14 +98,14 @@ func TestRuntimeGrowthExposesLearnerBeforePromotionAndSurvivesRestart(t *testing
 	c := acquire(t, matrixSpec(3)).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 105*time.Second)
 	defer cancel()
-	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work"})
+	created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Put(ctx, "node1", "work", "before-grow", "before-grow", "retained"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/drain", metaservice.MutationOptions{Apply: true}); err != nil {
+	if _, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/drain", gquorum.MutationOptions{Approve: true}); err != nil {
 		t.Fatal(err)
 	}
 	for _, node := range c.Nodes() {
@@ -196,14 +196,14 @@ func TestCompactedLearnerCatchesUpFromFullSnapshot(t *testing.T) {
 	c := acquire(t, matrixSpec(3)).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 110*time.Second)
 	defer cancel()
-	if _, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work"}); err != nil {
+	if _, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "work"}); err != nil {
 		t.Fatal(err)
 	}
 	before, err := c.Local(ctx, "node3", "work")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/drain", metaservice.MutationOptions{Apply: true}); err != nil {
+	if _, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/drain", gquorum.MutationOptions{Approve: true}); err != nil {
 		t.Fatal(err)
 	}
 	// Retain the source's nonempty >1000-command workload, with exact values.
@@ -224,7 +224,7 @@ func TestCompactedLearnerCatchesUpFromFullSnapshot(t *testing.T) {
 	if err != nil || leader.Storage.SnapshotIndex <= before.Storage.SnapshotIndex || leader.Storage.SnapshotBytes == 0 || len(leader.Values) != 1100 {
 		t.Fatal("workload did not produce a durable compacted snapshot", leader.Storage, len(leader.Values), err)
 	}
-	grown, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/activate", metaservice.MutationOptions{Apply: true})
+	grown, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/activate", gquorum.MutationOptions{Approve: true})
 	if err != nil {
 		t.Fatal(err)
 	}

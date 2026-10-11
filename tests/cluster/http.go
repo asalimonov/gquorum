@@ -8,13 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/asalimonov/gquorum"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -85,7 +85,7 @@ func (c *Cluster) Status(ctx context.Context, node string) (topology.ClusterStat
 	return status, response.Decode(&status)
 }
 func (c *Cluster) Operator(ctx context.Context, node string, id topology.OperatorID) (topology.OperatorStatus, error) {
-	response, err := c.Request(ctx, node, "GET", "/api/executions/"+string(id), nil, 0)
+	response, err := c.Request(ctx, node, "GET", "/api/operators/"+string(id), nil, 0)
 	var status topology.OperatorStatus
 	if err := requireStatus(response, err, 200); err != nil {
 		return status, err
@@ -123,8 +123,8 @@ func (c *Cluster) WaitOperator(ctx context.Context, node string, id topology.Ope
 		return status.State == topology.OperatorSucceeded, nil
 	})
 }
-func (c *Cluster) Mutate(ctx context.Context, node, method, path string, body any) (metaservice.MutationResult, error) {
-	var result metaservice.MutationResult
+func (c *Cluster) Mutate(ctx context.Context, node, method, path string, body any) (gquorum.MutationResult, error) {
+	var result gquorum.MutationResult
 	doc, err := c.Document(ctx, node, "latest")
 	if err != nil {
 		return result, err
@@ -161,8 +161,8 @@ func (c *Cluster) WaitActive(ctx context.Context, version uint64) error {
 	})
 }
 
-func (c *Cluster) Stage(ctx context.Context, node string, doc topology.Document) (metaservice.MutationResult, error) {
-	var result metaservice.MutationResult
+func (c *Cluster) Stage(ctx context.Context, node string, doc topology.Document) (gquorum.MutationResult, error) {
+	var result gquorum.MutationResult
 	response, err := c.Request(ctx, node, "PUT", "/api/topology", doc, doc.Version)
 	if err := requireStatus(response, err, 200); err != nil {
 		return result, err
@@ -170,11 +170,11 @@ func (c *Cluster) Stage(ctx context.Context, node string, doc topology.Document)
 	return result, response.Decode(&result)
 }
 
-func (c *Cluster) Apply(ctx context.Context, node string, version uint64) (topology.OperatorID, error) {
+func (c *Cluster) Approve(ctx context.Context, node string, version uint64) (topology.OperatorID, error) {
 	var result struct {
 		OperatorID topology.OperatorID `json:"operator_id"`
 	}
-	response, err := c.Request(ctx, node, "POST", fmt.Sprintf("/api/topology/%d/apply", version), nil, 0)
+	response, err := c.Request(ctx, node, "POST", fmt.Sprintf("/api/topology/%d/approve", version), nil, 0)
 	if err := requireStatus(response, err, 202); err != nil {
 		return "", err
 	}
@@ -190,8 +190,8 @@ func (c *Cluster) Apply(ctx context.Context, node string, version uint64) (topol
 	return result.OperatorID, c.WaitActive(ctx, version)
 }
 
-func (c *Cluster) CreateGroup(ctx context.Context, node string, spec metaservice.GroupSpec) (metaservice.MutationResult, error) {
-	return c.Mutate(ctx, node, "POST", "/api/groups", map[string]any{"group": spec, "mutation": metaservice.MutationOptions{Apply: true, Actor: "cluster-test"}})
+func (c *Cluster) CreateGroup(ctx context.Context, node string, spec gquorum.GroupSpec) (gquorum.MutationResult, error) {
+	return c.Mutate(ctx, node, "POST", "/api/groups", map[string]any{"group": spec, "mutation": gquorum.MutationOptions{Approve: true, Actor: "cluster-test"}})
 }
 func (c *Cluster) Put(ctx context.Context, node, group, key, id, value string) error {
 	response, err := c.Request(ctx, node, "PUT", "/api/load/"+group+"/keys/"+key, map[string]string{"request_id": id, "value": value}, 0)

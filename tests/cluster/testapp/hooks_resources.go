@@ -57,6 +57,6 @@ func (a *application) registerResourceRoutes(mux *http.ServeMux, protect func(ht
 		var memory runtime.MemStats
 		runtime.ReadMemStats(&memory)
 		cpu := uint64(usage.Utime.Sec+usage.Stime.Sec)*uint64(time.Second) + uint64(usage.Utime.Usec+usage.Stime.Usec)*uint64(time.Microsecond)
-		jsonResponse(w, http.StatusOK, processResources{Identity: a.meta.Identity(), At: time.Now().UTC(), HeapBytes: memory.HeapAlloc, ResidentBytes: pages * uint64(os.Getpagesize()), CPUNS: cpu, Goroutines: runtime.NumGoroutine(), OpenFiles: len(descriptors), LoadGroups: len(a.runtime.LoadIDs())})
+		jsonResponse(w, http.StatusOK, processResources{Identity: a.node.Identity(), At: time.Now().UTC(), HeapBytes: memory.HeapAlloc, ResidentBytes: pages * uint64(os.Getpagesize()), CPUNS: cpu, Goroutines: runtime.NumGoroutine(), OpenFiles: len(descriptors), LoadGroups: len(a.node.LoadGroupIDs())})
 	}))
 }

@@ -11,6 +11,8 @@ import (
 // Transport is the application-selected network adapter. Authenticate the
 // encoded sender before dispatching to Node. Honor cancellation; calls to one
 // destination are serialized while different destinations run independently.
+// ApplyAction can target this same node; forward it to Node.ApplyLoadAction
+// through an in-process call or the application protocol.
 // SendRaft receives owned messages. A nil return means acceptance, not completed
 // snapshot transfer: report that exact delivery through Node.ReportLoadDelivery.
 type Transport interface {

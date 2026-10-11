@@ -2,11 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/asalimonov/gquorum"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/internal/metaservice"
+	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -25,11 +27,11 @@ func TestConcurrentAuthorizedCleanupRetriesAreIdempotent(t *testing.T) {
 	var release sync.Once
 	defer release.Do(func() { close(barrier.release) })
 	base := c.document(t, 0, "latest")
-	code, data := c.request(t, 0, "POST", "/api/nodes/node3/drain", metaservice.MutationOptions{Actor: "operator", Apply: true}, base.Version)
+	code, data := c.request(t, 0, "POST", "/api/nodes/node3/drain", gquorum.MutationOptions{Actor: "operator", Approve: true}, base.Version)
 	if code != 202 {
 		t.Fatalf("approve drain: %d %s", code, data)
 	}
-	var result metaservice.MutationResult
+	var result gquorum.MutationResult
 	if err := json.Unmarshal(data, &result); err != nil {
 		t.Fatal(err)
 	}
@@ -51,11 +53,8 @@ func TestConcurrentAuthorizedCleanupRetriesAreIdempotent(t *testing.T) {
 	for range 32 {
 		workers.Go(func() {
 			<-start
-			if err := app.meta.Authorize(c.ctx, approved); err != nil {
-				results <- err
-				return
-			}
-			results <- app.cleanupLocal(c.ctx, approved, approved.ReplicaID)
+			_, err := app.node.ApplyLoadAction(c.ctx, load.ActionRequest{From: app.node.Identity(), To: load.Peer{Node: app.node.Identity(), Replica: load.ReplicaRef{GroupID: approved.GroupID, ReplicaID: approved.ReplicaID}}, Authorization: approved, LocalTarget: storage.Identity{NodeName: app.cfg.NodeName, ClusterID: app.cfg.ClusterID, GroupID: approved.GroupID, ReplicaID: approved.ReplicaID}})
+			results <- err
 		})
 	}
 	close(start)
@@ -66,8 +65,8 @@ func TestConcurrentAuthorizedCleanupRetriesAreIdempotent(t *testing.T) {
 			t.Fatal("concurrent approved cleanup retry failed", err)
 		}
 	}
-	if _, found, err := app.meta.LookupLoadReplica(c.ctx, "demo"); err != nil || found {
-		t.Fatal("retired ledger retained after cleanup", found, err)
+	if _, found := app.node.LoadGroup("demo"); found {
+		t.Fatal("retired replica still published")
 	}
 	if probe, err := app.store.Probe(c.ctx, "demo"); err != nil || probe.Exists {
 		t.Fatal("retired store retained after cleanup", probe, err)

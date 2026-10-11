@@ -319,3 +319,41 @@ func TestMetaOnlyReadmissionFreshJoinAndExactBackup(t *testing.T) {
 		t.Fatal(pin, found, err)
 	}
 }
+
+// Ported from tests/cluster/testapp: catalog selection is now owned by Host.
+func TestReadmissionVerifiesActualRetainedIDWithinEntirePreviousCatalog(t *testing.T) {
+	for _, retained := range []uint64{4, 20} {
+		name := "known-interrupted-target"
+		if retained == 20 {
+			name = "foreign-id"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			f := newFixture(t)
+			grant := configureReadmission(t, f, 3, 4)
+			must(t, f.store.BindReplica(t.Context(), f.localID(retained)))
+			must(t, f.store.Ensure(t.Context(), "work"))
+			h := f.host(t)
+			err := h.Readmit(t.Context(), grant)
+			probe, probeErr := f.store.Probe(t.Context(), "work")
+			must(t, probeErr)
+			if retained == 20 {
+				if !errors.Is(err, fault.ErrIdentityMismatch) || !probe.Exists || probe.Identity.ReplicaID != 20 {
+					t.Fatal("foreign state was changed", err, probe)
+				}
+				if _, found, err := metastore.LoadIdentity(grant.MetaDBPath); err != nil || !found {
+					t.Fatal("refusal moved meta pin", found, err)
+				}
+				return
+			}
+			if err != nil || probe.Exists {
+				t.Fatal("historical ordering blocked exact known state", err, probe)
+			}
+			must(t, h.Readmit(t.Context(), grant))
+			backups, err := filepath.Glob(grant.MetaDBPath + ".retired-*")
+			if err != nil || len(backups) != 1 {
+				t.Fatal(backups, err)
+			}
+		})
+	}
+}

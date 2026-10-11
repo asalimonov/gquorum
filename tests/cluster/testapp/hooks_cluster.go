@@ -16,8 +16,7 @@ import (
 
 	gquorum "github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/internal/metaservice"
-	"github.com/asalimonov/gquorum/internal/raftengine"
+	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -114,19 +113,19 @@ type barrierObservation struct {
 	Refuse bool                    `json:"refuse"`
 }
 type localObservation struct {
-	Identity          topology.Identity          `json:"identity"`
-	Found             bool                       `json:"found"`
-	ReplicaID         uint64                     `json:"replica_id"`
-	Status            topology.GroupStatus       `json:"status"`
-	Storage           storage.Stats              `json:"storage"`
-	Values            map[string]string          `json:"values"`
-	ReceivedSnapshots uint64                     `json:"received_snapshots"`
-	WAL               walCounters                `json:"wal"`
-	WALStallNS        int64                      `json:"wal_stall_ns"`
-	Proposals         raftengine.ProposalStats   `json:"proposals"`
-	Parked            *gquorum.ParkedLoad        `json:"parked,omitempty"`
-	Ledger            *metaservice.ReplicaRecord `json:"ledger,omitempty"`
-	ServeOverride     int                        `json:"serve_override"`
+	Identity          topology.Identity    `json:"identity"`
+	Found             bool                 `json:"found"`
+	ReplicaID         uint64               `json:"replica_id"`
+	Status            topology.GroupStatus `json:"status"`
+	Storage           storage.Stats        `json:"storage"`
+	Values            map[string]string    `json:"values"`
+	ReceivedSnapshots uint64               `json:"received_snapshots"`
+	WAL               walCounters          `json:"wal"`
+	WALStallNS        int64                `json:"wal_stall_ns"`
+	Proposals         load.ProposalStats   `json:"proposals"`
+	Parked            *gquorum.ParkedLoad  `json:"parked,omitempty"`
+	StorageIdentity   *storage.Identity    `json:"storage_identity,omitempty"`
+	ServeOverride     int                  `json:"serve_override"`
 }
 
 func (a *application) registerClusterRoutes(mux *http.ServeMux) {
@@ -145,6 +144,14 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 	a.registerResourceRoutes(mux, protect)
 	a.registerWALRoutes(mux, protect)
 	a.registerProjectionRoutes(mux, protect)
+	mux.HandleFunc("GET /internal/test/meta-backups", protect(func(w http.ResponseWriter, r *http.Request) {
+		paths, err := filepath.Glob(filepath.Join(a.cfg.DataDir, "meta.bolt.retired-*"))
+		if err != nil {
+			httpError(w, err)
+			return
+		}
+		jsonResponse(w, http.StatusOK, paths)
+	}))
 
 	mux.HandleFunc("POST /internal/test/serve-override", protect(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -155,19 +162,19 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			httpError(w, err)
 			return
 		}
-		if body.Identity != a.meta.Identity() {
+		if body.Identity != a.node.Identity() {
 			httpError(w, fault.ErrIdentityMismatch)
 			return
 		}
-		if err := a.meta.SetServeOverride(r.Context(), body.Minimum); err != nil {
+		if err := a.node.SetServeOverride(r.Context(), body.Minimum); err != nil {
 			httpError(w, err)
 			return
 		}
-		jsonResponse(w, http.StatusOK, map[string]any{"identity": a.meta.Identity(), "minimum": a.meta.ServeOverride()})
+		jsonResponse(w, http.StatusOK, map[string]any{"identity": a.node.Identity(), "minimum": a.node.ServeOverride()})
 	}))
 	mux.HandleFunc("POST /internal/test/lose-meta/{member}", protect(func(w http.ResponseWriter, r *http.Request) {
-		own := a.meta.Identity()
-		if fmt.Sprint(own.MemberID) != r.PathValue("member") || !a.meta.OwnSessionLive() {
+		own := a.node.Identity()
+		if fmt.Sprint(own.MemberID) != r.PathValue("member") || !a.node.OwnSessionLive() {
 			httpError(w, fault.ErrIdentityMismatch)
 			return
 		}
@@ -197,12 +204,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			httpError(w, err)
 			return
 		}
-		if err := a.takeLocal(r.Context()); err != nil {
-			httpError(w, err)
-			return
-		}
-		defer func() { <-a.localGate }()
-		g, found := a.runtime.Load(group)
+		g, found := a.node.LoadGroup(group)
 		if !found || fmt.Sprint(g.ReplicaID()) != r.PathValue("replica") {
 			httpError(w, fault.ErrIdentityMismatch)
 			return
@@ -213,7 +215,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			err = fault.ErrIdentityMismatch
 		}
 		if err == nil {
-			err = a.runtime.StopLoad(r.Context(), group, want.ReplicaID)
+			err = a.node.StopLoadGroup(r.Context(), load.ReplicaRef{GroupID: group, ReplicaID: want.ReplicaID})
 		}
 		if err != nil {
 			httpError(w, err)
@@ -224,9 +226,6 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			httpError(w, err)
 			return
 		}
-		a.mu.Lock()
-		delete(a.locals, group)
-		a.mu.Unlock()
 		if _, err := a.store.Quarantine(r.Context(), group, want.ReplicaID); err != nil {
 			httpError(w, err)
 			return
@@ -239,7 +238,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			httpError(w, err)
 			return
 		}
-		g, found := a.runtime.Load(group)
+		g, found := a.node.LoadGroup(group)
 		if !found || fmt.Sprint(g.ReplicaID()) != r.PathValue("replica") {
 			httpError(w, fault.ErrIdentityMismatch)
 			return
@@ -251,8 +250,8 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 		}
 		data, err := json.Marshal(command)
 		if err == nil {
-			var result raftengine.Result
-			result, err = g.Propose(r.Context(), raftengine.Proposal{RequestID: command.RequestID, Data: data})
+			var result load.Result
+			result, err = g.Propose(r.Context(), load.Proposal{RequestID: command.RequestID, Data: data})
 			if err == nil && result.Code != "ok" {
 				err = fault.New(fault.Code(result.Code), "proposal rejected", nil)
 			}
@@ -317,30 +316,28 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /internal/test/local/{group}", protect(func(w http.ResponseWriter, r *http.Request) {
 		group := r.PathValue("group")
 		if group == topology.MetaGroupID {
-			status := a.meta.LocalStatus()
-			jsonResponse(w, http.StatusOK, localObservation{Identity: a.meta.Identity(), Found: status.Found, ReplicaID: a.meta.Identity().MemberID, Status: status, ServeOverride: a.meta.ServeOverride()})
+			status := a.node.Status().Meta
+			jsonResponse(w, http.StatusOK, localObservation{Identity: a.node.Identity(), Found: status.Found, ReplicaID: a.node.Identity().MemberID, Status: status, ServeOverride: a.node.ServeOverride()})
 			return
 		}
 		if err := topology.ValidateLoadID(group); err != nil {
 			httpError(w, err)
 			return
 		}
-		observation := localObservation{Identity: a.meta.Identity()}
-		if park, found := a.runtime.ParkedLoads()[group]; found {
+		observation := localObservation{Identity: a.node.Identity()}
+		if park, found := a.node.ParkedLoads()[group]; found {
 			observation.Parked = &park
 		}
-		if record, found, err := a.meta.LookupLoadReplica(r.Context(), group); err != nil {
+		if probe, err := a.store.Probe(r.Context(), group); err != nil {
 			httpError(w, err)
 			return
-		} else if found {
-			observation.Ledger = &record
+		} else if probe.Exists {
+			observation.StorageIdentity = &probe.Identity
 		}
 		a.clusterHooks.mu.Lock()
 		observation.ReceivedSnapshots = a.clusterHooks.snapshots[group]
 		a.clusterHooks.mu.Unlock()
-		a.mu.RLock()
-		local := a.locals[group]
-		a.mu.RUnlock()
+		local := a.local(group)
 		if local != nil {
 			observation.Found, observation.ReplicaID = true, local.group.ReplicaID()
 			observation.Status = local.group.Status()
@@ -358,7 +355,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 		jsonResponse(w, http.StatusOK, observation)
 	}))
 	mux.HandleFunc("POST /internal/test/local/{group}/snapshot", protect(func(w http.ResponseWriter, r *http.Request) {
-		g, found := a.runtime.Load(r.PathValue("group"))
+		g, found := a.node.LoadGroup(r.PathValue("group"))
 		if !found {
 			httpError(w, fault.ErrReplicaNotReady)
 			return

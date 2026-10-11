@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/asalimonov/gquorum"
 	"io"
 	"net/http"
 	"slices"
@@ -15,7 +16,6 @@ import (
 
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -23,18 +23,18 @@ import (
 // Fresh health and exact Active identity remain required. Consensus writes keep
 // their ordinary Raft quorum requirements regardless of this local decision.
 func (a *application) canServe(ctx context.Context) bool {
-	if a.meta.OwnSessionLive() {
+	if a.node.OwnSessionLive() {
 		return true
 	}
-	minimum := a.meta.ServeOverride()
-	if minimum == 0 || !a.meta.LocalStatus().Found {
+	minimum := a.node.ServeOverride()
+	if minimum == 0 || !a.node.Status().Meta.Found {
 		return false
 	}
-	active, err := a.meta.Active(ctx)
+	active, err := a.cluster.Active(ctx)
 	if err != nil || active.Version == 0 || active.MetaGroup() == nil {
 		return false
 	}
-	observation := a.meta.HealthObservation()
+	observation := a.cluster.HealthObservation()
 	if observation.Version != active.Version || observation.At.IsZero() || time.Since(observation.At) > a.cfg.SessionTTL {
 		return false
 	}
@@ -61,11 +61,11 @@ func (a *application) localServing(ctx context.Context, id string) (*localReplic
 	if !a.canServe(ctx) {
 		return nil, fault.ErrUnavailable
 	}
-	active, err := a.meta.Active(ctx)
+	active, err := a.cluster.Active(ctx)
 	if err != nil {
 		return nil, err
 	}
-	identity := a.meta.Identity()
+	identity := a.node.Identity()
 	if active.MemberID(identity.NodeName) != identity.MemberID {
 		return nil, fault.ErrIdentityMismatch
 	}
@@ -73,13 +73,11 @@ func (a *application) localServing(ctx context.Context, id string) (*localReplic
 	if group == nil {
 		return nil, fault.ErrReplicaNotReady
 	}
-	a.mu.RLock()
-	local := a.locals[id]
-	a.mu.RUnlock()
+	local := a.local(id)
 	if local == nil || !local.group.Running() || local.group.Error() != nil {
 		return nil, fault.ErrReplicaNotReady
 	}
-	native, found := a.runtime.Load(id)
+	native, found := a.node.LoadGroup(id)
 	if !found || native != local.group {
 		return nil, fault.ErrReplicaNotReady
 	}
@@ -127,32 +125,19 @@ func requestBody(w http.ResponseWriter, r *http.Request, out any) error {
 	if err != nil {
 		return fault.New(fault.Invalid, "body exceeds limit or cannot be read", err)
 	}
+	body = bytes.TrimSpace(body)
+	if len(body) == 0 || body[0] != '{' {
+		return fault.ErrInvalid
+	}
 	return decodeJSON(body, out)
 }
 
-// Applying an approved document has no preview mode. Reject option spellings
-// before touching Raft, including valueless query flags and trailing JSON.
-func applyOptions(w http.ResponseWriter, r *http.Request, version uint64) error {
-	refusal := fault.New(fault.Invalid, fmt.Sprintf("apply accepts no preview/apply flags; preview with POST /api/topology/%d/plan", version), nil)
-	query := r.URL.Query()
-	if query.Has("dry_run") || query.Has("preview") || query.Has("apply") {
-		return refusal
-	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
-	if err != nil {
-		return refusal
-	}
-	body = bytes.TrimSpace(body)
-	if len(body) == 0 {
-		return nil
-	}
-	var options struct{}
-	if bytes.Equal(body, []byte("null")) || decodeJSON(body, &options) != nil {
-		return refusal
-	}
-	return nil
-}
 func positiveNumber(value string) (uint64, error) {
+	for _, digit := range value {
+		if digit < '0' || digit > '9' {
+			return 0, fault.New(fault.Invalid, "positive decimal version required", nil)
+		}
+	}
 	n, err := strconv.ParseUint(value, 10, 64)
 	if err != nil || n == 0 {
 		return 0, fault.New(fault.Invalid, "positive version required", err)
@@ -160,6 +145,9 @@ func positiveNumber(value string) (uint64, error) {
 	return n, nil
 }
 func expectedVersion(r *http.Request) (uint64, error) {
+	if len(r.Header.Values("If-Match")) != 1 {
+		return 0, fault.New(fault.Invalid, "exactly one If-Match version is required", nil)
+	}
 	value := r.Header.Get("If-Match")
 	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
 		value = value[1 : len(value)-1]
@@ -169,7 +157,10 @@ func expectedVersion(r *http.Request) (uint64, error) {
 	}
 	return positiveNumber(value)
 }
-func mutationOptions(r *http.Request, opts metaservice.MutationOptions) (metaservice.MutationOptions, error) {
+func mutationOptions(r *http.Request, opts gquorum.MutationOptions) (gquorum.MutationOptions, error) {
+	if opts.Approve && opts.Preview {
+		return opts, fault.New(fault.Invalid, "preview cannot be approved", nil)
+	}
 	expected, err := expectedVersion(r)
 	if err != nil {
 		return opts, err
@@ -180,7 +171,34 @@ func mutationOptions(r *http.Request, opts metaservice.MutationOptions) (metaser
 	opts.ExpectedVersion = expected
 	return opts, nil
 }
-func mutationResponse(w http.ResponseWriter, result metaservice.MutationResult, err error) {
+func approvalOptions(w http.ResponseWriter, r *http.Request, version uint64) error {
+	if r.URL.RawQuery != "" {
+		return fault.New(fault.Invalid, "approval does not accept query parameters", nil)
+	}
+	if len(r.Header.Values("If-Match")) != 0 {
+		expected, err := expectedVersion(r)
+		if err != nil {
+			return err
+		}
+		if expected != version {
+			return fault.New(fault.Invalid, "path version differs from If-Match", nil)
+		}
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		return fault.New(fault.Invalid, "body exceeds limit or cannot be read", err)
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return nil
+	}
+	body = bytes.TrimSpace(body)
+	if body[0] != '{' {
+		return fault.ErrInvalid
+	}
+	return decodeJSON(body, &struct{}{})
+}
+
+func mutationResponse(w http.ResponseWriter, result gquorum.MutationResult, err error) {
 	if err != nil {
 		// Staging may have succeeded before approval failed. Preserve that committed
 		// version so an operator can inspect and apply it rather than repeat an edit.
@@ -205,7 +223,7 @@ func (a *application) routes() http.Handler {
 	})
 	mux.HandleFunc("GET /health/ready", a.readyHTTP)
 	mux.HandleFunc("GET /api/cluster/parked", func(w http.ResponseWriter, r *http.Request) {
-		parked, err := a.meta.ParkedJoins(r.Context())
+		parked, err := a.cluster.ParkedJoins(r.Context())
 		if err != nil {
 			httpError(w, err)
 			return
@@ -213,7 +231,7 @@ func (a *application) routes() http.Handler {
 		jsonResponse(w, http.StatusOK, parked)
 	})
 	mux.HandleFunc("POST /api/nodes/{name}/readmit", func(w http.ResponseWriter, r *http.Request) {
-		var opts metaservice.MutationOptions
+		var opts gquorum.MutationOptions
 		if err := requestBody(w, r, &opts); err != nil {
 			httpError(w, err)
 			return
@@ -223,11 +241,11 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		result, err := a.meta.ReadmitNode(r.Context(), r.PathValue("name"), opts)
+		result, err := a.cluster.ReadmitNode(r.Context(), r.PathValue("name"), opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("GET /api/cluster/status", func(w http.ResponseWriter, r *http.Request) {
-		status, err := a.meta.Status(r.Context())
+		status, err := a.cluster.Status(r.Context())
 		if err != nil {
 			httpError(w, err)
 			return
@@ -240,16 +258,16 @@ func (a *application) routes() http.Handler {
 		var err error
 		switch r.PathValue("view") {
 		case "latest":
-			doc, err = a.meta.Latest(r.Context())
+			doc, err = a.cluster.Latest(r.Context())
 		case "target":
-			doc, err = a.meta.Target(r.Context())
+			doc, err = a.cluster.Target(r.Context())
 		case "active":
-			doc, err = a.meta.Active(r.Context())
+			doc, err = a.cluster.Active(r.Context())
 		default:
 			var version uint64
 			version, err = positiveNumber(r.PathValue("view"))
 			if err == nil {
-				doc, err = a.meta.Get(r.Context(), version)
+				doc, err = a.cluster.Get(r.Context(), version)
 			}
 		}
 		if err != nil {
@@ -270,8 +288,8 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		committed, err := a.meta.Stage(r.Context(), doc, version)
-		mutationResponse(w, metaservice.MutationResult{Document: committed}, err)
+		committed, err := a.cluster.Stage(r.Context(), doc, version)
+		mutationResponse(w, gquorum.MutationResult{Document: committed}, err)
 	})
 	mux.HandleFunc("POST /api/topology/preview/plan", func(w http.ResponseWriter, r *http.Request) {
 		var doc topology.Document
@@ -279,7 +297,7 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		plan, err := a.meta.PlanFor(r.Context(), doc)
+		plan, err := a.cluster.PlanFor(r.Context(), doc)
 		if err != nil {
 			httpError(w, err)
 			return
@@ -288,8 +306,8 @@ func (a *application) routes() http.Handler {
 	})
 	mux.HandleFunc("PUT /api/placement", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Placement topology.PlacementRule      `json:"placement"`
-			Mutation  metaservice.MutationOptions `json:"mutation"`
+			Placement topology.PlacementRule  `json:"placement"`
+			Mutation  gquorum.MutationOptions `json:"mutation"`
 		}
 		if err := requestBody(w, r, &body); err != nil {
 			httpError(w, err)
@@ -300,7 +318,7 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		result, err := a.meta.SetPlacement(r.Context(), body.Placement, opts)
+		result, err := a.cluster.SetPlacement(r.Context(), body.Placement, opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("POST /api/topology/{version}/plan", func(w http.ResponseWriter, r *http.Request) {
@@ -309,32 +327,32 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		plan, err := a.meta.Plan(r.Context(), version)
+		plan, err := a.cluster.Plan(r.Context(), version)
 		if err != nil {
 			httpError(w, err)
 			return
 		}
 		jsonResponse(w, http.StatusOK, plan)
 	})
-	mux.HandleFunc("POST /api/topology/{version}/apply", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /api/topology/{version}/approve", func(w http.ResponseWriter, r *http.Request) {
 		version, err := positiveNumber(r.PathValue("version"))
 		if err != nil {
 			httpError(w, err)
 			return
 		}
-		if err := applyOptions(w, r, version); err != nil {
-			httpError(w, err)
+		if err := approvalOptions(w, r, version); err != nil {
+			httpError(w, fault.New(fault.Invalid, fmt.Sprintf("approve accepts no options; preview with POST /api/topology/%d/plan", version), err))
 			return
 		}
-		id, err := a.meta.Apply(r.Context(), version)
+		id, err := a.cluster.Approve(r.Context(), version)
 		if err != nil {
 			httpError(w, err)
 			return
 		}
 		jsonResponse(w, http.StatusAccepted, map[string]any{"operator_id": id})
 	})
-	mux.HandleFunc("GET /api/executions/{id}", func(w http.ResponseWriter, r *http.Request) {
-		status, err := a.meta.Operator(r.Context(), topology.OperatorID(r.PathValue("id")))
+	mux.HandleFunc("GET /api/operators/{id}", func(w http.ResponseWriter, r *http.Request) {
+		status, err := a.cluster.Operator(r.Context(), topology.OperatorID(r.PathValue("id")))
 		if err != nil {
 			httpError(w, err)
 			return
@@ -343,8 +361,8 @@ func (a *application) routes() http.Handler {
 	})
 	mux.HandleFunc("POST /api/nodes", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Node     topology.Node               `json:"node"`
-			Mutation metaservice.MutationOptions `json:"mutation"`
+			Node     topology.Node           `json:"node"`
+			Mutation gquorum.MutationOptions `json:"mutation"`
 		}
 		if err := requestBody(w, r, &body); err != nil {
 			httpError(w, err)
@@ -355,11 +373,11 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		result, err := a.meta.AddNode(r.Context(), body.Node, opts)
+		result, err := a.cluster.AddNode(r.Context(), body.Node, opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("POST /api/nodes/{name}/{action}", func(w http.ResponseWriter, r *http.Request) {
-		var opts metaservice.MutationOptions
+		var opts gquorum.MutationOptions
 		if err := requestBody(w, r, &opts); err != nil {
 			httpError(w, err)
 			return
@@ -369,14 +387,14 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		var result metaservice.MutationResult
+		var result gquorum.MutationResult
 		switch r.PathValue("action") {
 		case "drain":
-			result, err = a.meta.DrainNode(r.Context(), r.PathValue("name"), opts)
+			result, err = a.cluster.DrainNode(r.Context(), r.PathValue("name"), opts)
 		case "activate":
-			result, err = a.meta.ActivateNode(r.Context(), r.PathValue("name"), opts)
+			result, err = a.cluster.ActivateNode(r.Context(), r.PathValue("name"), opts)
 		case "exclude":
-			result, err = a.meta.ExcludeNode(r.Context(), r.PathValue("name"), opts)
+			result, err = a.cluster.ExcludeNode(r.Context(), r.PathValue("name"), opts)
 		default:
 			err = fault.ErrInvalid
 		}
@@ -384,8 +402,8 @@ func (a *application) routes() http.Handler {
 	})
 	mux.HandleFunc("POST /api/groups", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Group    metaservice.GroupSpec       `json:"group"`
-			Mutation metaservice.MutationOptions `json:"mutation"`
+			Group    gquorum.GroupSpec       `json:"group"`
+			Mutation gquorum.MutationOptions `json:"mutation"`
 		}
 		if err := requestBody(w, r, &body); err != nil {
 			httpError(w, err)
@@ -396,11 +414,11 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		result, err := a.meta.CreateLoadGroup(r.Context(), body.Group, opts)
+		result, err := a.cluster.CreateGroup(r.Context(), body.Group, opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("DELETE /api/groups/{id}", func(w http.ResponseWriter, r *http.Request) {
-		var opts metaservice.MutationOptions
+		var opts gquorum.MutationOptions
 		if err := requestBody(w, r, &opts); err != nil {
 			httpError(w, err)
 			return
@@ -410,13 +428,13 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		result, err := a.meta.DeleteLoadGroup(r.Context(), r.PathValue("id"), opts)
+		result, err := a.cluster.DeleteGroup(r.Context(), r.PathValue("id"), opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("PUT /api/groups/{id}/placement", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Placement topology.PlacementRule      `json:"placement"`
-			Mutation  metaservice.MutationOptions `json:"mutation"`
+			Placement topology.PlacementRule  `json:"placement"`
+			Mutation  gquorum.MutationOptions `json:"mutation"`
 		}
 		if err := requestBody(w, r, &body); err != nil {
 			httpError(w, err)
@@ -427,18 +445,18 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		result, err := a.meta.SetGroupPlacement(r.Context(), r.PathValue("id"), body.Placement, opts)
+		result, err := a.cluster.SetGroupPlacement(r.Context(), r.PathValue("id"), body.Placement, opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("POST /api/groups/{id}/leader/{name}", func(w http.ResponseWriter, r *http.Request) {
-		if err := a.meta.TransferLeader(r.Context(), r.PathValue("id"), r.PathValue("name")); err != nil {
+		if err := a.cluster.TransferLeader(r.Context(), r.PathValue("id"), r.PathValue("name")); err != nil {
 			httpError(w, err)
 			return
 		}
 		jsonResponse(w, http.StatusOK, map[string]bool{"transferred": true})
 	})
 	mux.HandleFunc("POST /api/nodes/{name}/force-retire", func(w http.ResponseWriter, r *http.Request) {
-		var opts metaservice.RetireOptions
+		var opts gquorum.RetireOptions
 		if err := requestBody(w, r, &opts); err != nil {
 			httpError(w, err)
 			return
@@ -449,11 +467,11 @@ func (a *application) routes() http.Handler {
 			return
 		}
 		opts.Mutation = mutation
-		result, err := a.meta.ForceRetireNode(r.Context(), r.PathValue("name"), opts)
+		result, err := a.cluster.ForceRetireNode(r.Context(), r.PathValue("name"), opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("POST /api/groups/{id}/replicas/{name}/reseat", func(w http.ResponseWriter, r *http.Request) {
-		var opts metaservice.MutationOptions
+		var opts gquorum.MutationOptions
 		if err := requestBody(w, r, &opts); err != nil {
 			httpError(w, err)
 			return
@@ -463,7 +481,7 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		result, err := a.meta.ReseatReplica(r.Context(), r.PathValue("id"), r.PathValue("name"), opts)
+		result, err := a.cluster.ReseatReplica(r.Context(), r.PathValue("id"), r.PathValue("name"), opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("PUT /api/load/{id}/keys/{key}", a.putHTTP)
@@ -477,8 +495,8 @@ func (a *application) routes() http.Handler {
 			return
 		}
 		defer done()
-		if !a.foundersReady() && (strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/health/ready") {
-			httpError(w, fault.New(fault.Unavailable, "greenfield founding: waiting for configured members "+strings.Join(a.missingFounders(ctx), ","), nil))
+		if a.cfg.GateFounders && a.node != nil && !a.node.Status().Ready && (strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/health/ready") {
+			httpError(w, fault.New(fault.Unavailable, a.foundingMessage(), nil))
 			return
 		}
 		if r.URL.Path != "/api/events/watch" {
@@ -494,12 +512,12 @@ func (a *application) readyHTTP(w http.ResponseWriter, r *http.Request) {
 		httpError(w, fault.ErrUnavailable)
 		return
 	}
-	active, err := a.meta.Active(r.Context())
+	active, err := a.cluster.Active(r.Context())
 	if err != nil {
 		httpError(w, err)
 		return
 	}
-	if active.Version == 0 || active.MemberID(a.cfg.NodeName) != a.meta.Identity().MemberID {
+	if active.Version == 0 || active.MemberID(a.cfg.NodeName) != a.node.Identity().MemberID {
 		httpError(w, fault.ErrReplicaNotReady)
 		return
 	}
@@ -525,7 +543,7 @@ func (a *application) readyHTTP(w http.ResponseWriter, r *http.Request) {
 		httpError(w, fault.ErrReplicaNotReady)
 		return
 	}
-	jsonResponse(w, http.StatusOK, map[string]any{"node": a.cfg.NodeName, "session_live": a.meta.OwnSessionLive(), "serve_override": a.meta.ServeOverride(), "groups": groups, "active_version": active.Version})
+	jsonResponse(w, http.StatusOK, map[string]any{"node": a.cfg.NodeName, "session_live": a.node.OwnSessionLive(), "serve_override": a.node.ServeOverride(), "groups": groups, "active_version": active.Version})
 }
 func (a *application) historyHTTP(w http.ResponseWriter, r *http.Request) {
 	offset, limit := 0, 100
@@ -548,7 +566,7 @@ func (a *application) historyHTTP(w http.ResponseWriter, r *http.Request) {
 		httpError(w, fault.ErrInvalid)
 		return
 	}
-	result, err := a.meta.History(r.Context(), topology.Page{Offset: offset, Limit: limit})
+	result, err := a.cluster.History(r.Context(), topology.Page{Offset: offset, Limit: limit})
 	if err != nil {
 		httpError(w, err)
 		return
@@ -577,7 +595,7 @@ func (a *application) putHTTP(w http.ResponseWriter, r *http.Request) {
 	// serving voter on the observed leader accepts the replicated proposal.
 	var last error
 	for attempt := 0; attempt < 3; attempt++ {
-		status, err := a.Status(r.Context(), group)
+		status, err := a.groupStatus(r.Context(), group)
 		if err == nil && status.Found && status.LeaderID != 0 {
 			name, ownerErr := a.owner(r.Context(), group, status.LeaderID)
 			err = ownerErr

@@ -5,13 +5,11 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
-	"sync"
 
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/internal/raftengine"
+	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/tests/cluster/testapp/loadpb"
 	"github.com/asalimonov/gquorum/topology"
-	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -27,7 +25,7 @@ type loadClient struct {
 }
 
 func (a *application) header() *loadpb.Header {
-	id := a.meta.Identity()
+	id := a.node.Identity()
 	return &loadpb.Header{ClusterId: id.ClusterID, NodeName: id.NodeName, InstanceId: id.InstanceID, MemberId: id.MemberID}
 }
 func (a *application) client(ctx context.Context, name string) (*loadClient, error) {
@@ -150,50 +148,63 @@ func (a *application) Call(ctx context.Context, request *loadpb.Request) (*loadp
 	}
 	return a.receiveCall(ctx, request)
 }
+func headerIdentity(h *loadpb.Header) topology.Identity {
+	if h == nil {
+		return topology.Identity{}
+	}
+	return topology.Identity{ClusterID: h.ClusterId, NodeName: h.NodeName, InstanceID: h.InstanceId, MemberID: h.MemberId}
+}
 func (a *application) receiveCall(ctx context.Context, request *loadpb.Request) (*loadpb.Reply, error) {
 	if request == nil {
 		return domainReply(fault.ErrInvalid), nil
 	}
+	owned, done, err := a.beginEffect(ctx)
+	if err != nil {
+		return domainReply(err), nil
+	}
+	defer done()
+	ctx = owned
 	if err := topology.ValidateLoadID(request.GroupId); err != nil {
 		return domainReply(err), nil
 	}
-	if request.Method == "Effect" {
-		owned, done, err := a.beginEffect(ctx)
+	switch request.Method {
+	case "ReadReplica":
+		var query load.ReplicaQuery
+		if err := decodeJSON(request.Data, &query); err != nil {
+			return domainReply(err), nil
+		}
+		if headerIdentity(request.Header) != query.From || query.To.Replica.GroupID != request.GroupId || query.To.Replica.ReplicaID != request.ReplicaId {
+			return domainReply(fault.ErrIdentityMismatch), nil
+		}
+		result, err := a.node.ReadLoadReplica(ctx, query)
 		if err != nil {
 			return domainReply(err), nil
 		}
-		defer done()
-		ctx = owned
-		var approved topology.AuthorizedStep
-		if err := decodeJSON(request.Data, &approved); err != nil {
+		return dataReply(result, request.ReplicaId)
+	case "Action":
+		var action load.ActionRequest
+		if err := decodeJSON(request.Data, &action); err != nil {
 			return domainReply(err), nil
 		}
-		// Check required version first so a lagging receiver reports retryable
-		// unavailability instead of confusing a fresh member with a foreign one.
-		if err := a.meta.Authorize(ctx, approved); err != nil {
+		if headerIdentity(request.Header) != action.From || action.To.Replica.GroupID != request.GroupId || action.To.Replica.ReplicaID != request.ReplicaId {
+			return domainReply(fault.ErrIdentityMismatch), nil
+		}
+		// Fault injection delays/refuses delivery. Node still validates the complete
+		// authorization immediately before performing any local effect.
+		if err := a.beforeClusterEffect(ctx, action.Authorization); err != nil {
 			return domainReply(err), nil
 		}
-		if err := a.validateHeader(ctx, request.Header); err != nil {
+		result, err := a.node.ApplyLoadAction(ctx, action)
+		a.afterClusterEffect(action.Authorization, err)
+		if err != nil {
 			return domainReply(err), nil
 		}
-		if approved.GroupID != request.GroupId {
-			return domainReply(fault.ErrOperatorAuthorization), nil
-		}
-		if err := a.receiveEffect(ctx, approved, request.ReplicaId); err != nil {
-			return domainReply(err), nil
-		}
-		return &loadpb.Reply{}, nil
+		return dataReply(result, request.ReplicaId)
 	}
 	if err := a.validateHeader(ctx, request.Header); err != nil {
 		return domainReply(err), nil
 	}
-	g, found := a.runtime.Load(request.GroupId)
-	if request.Method == "Status" {
-		if !found {
-			return dataReply(topology.GroupStatus{GroupID: request.GroupId, HostNode: a.cfg.NodeName}, 0)
-		}
-		return dataReply(g.Status(), g.ReplicaID())
-	}
+	g, found := a.node.LoadGroup(request.GroupId)
 	if !found || !g.Running() {
 		return domainReply(fault.ErrReplicaNotReady), nil
 	}
@@ -201,6 +212,8 @@ func (a *application) receiveCall(ctx context.Context, request *loadpb.Request) 
 		return domainReply(fault.ErrIdentityMismatch), nil
 	}
 	switch request.Method {
+	case "Status":
+		return dataReply(g.Status(), g.ReplicaID())
 	case "Put":
 		if _, err := a.localServing(ctx, request.GroupId); err != nil {
 			return domainReply(err), nil
@@ -212,7 +225,7 @@ func (a *application) receiveCall(ctx context.Context, request *loadpb.Request) 
 		if err := decodeJSON(request.Data, &put); err != nil {
 			return domainReply(err), nil
 		}
-		result, err := g.Propose(ctx, raftengine.Proposal{RequestID: put.RequestID, Data: request.Data})
+		result, err := g.Propose(ctx, load.Proposal{RequestID: put.RequestID, Data: request.Data})
 		if err != nil {
 			return domainReply(err), nil
 		}
@@ -229,7 +242,6 @@ func (a *application) receiveCall(ctx context.Context, request *loadpb.Request) 
 		return domainReply(fault.ErrUnsupported), nil
 	}
 }
-
 func (a *application) beginEffect(parent context.Context) (context.Context, func(), error) {
 	a.effectMu.Lock()
 	select {
@@ -252,16 +264,6 @@ func (a *application) beginEffect(parent context.Context) (context.Context, func
 	}, nil
 }
 
-func contains(cs raftpb.ConfState, id uint64) bool {
-	for _, ids := range [][]uint64{cs.Voters, cs.VotersOutgoing, cs.Learners, cs.LearnersNext} {
-		for _, candidate := range ids {
-			if candidate == id {
-				return true
-			}
-		}
-	}
-	return false
-}
 func (a *application) Deliver(ctx context.Context, frame *loadpb.Frame) (*loadpb.Reply, error) {
 	if err := a.auth(ctx); err != nil {
 		return domainReply(err), nil
@@ -269,94 +271,65 @@ func (a *application) Deliver(ctx context.Context, frame *loadpb.Frame) (*loadpb
 	if frame == nil {
 		return domainReply(fault.ErrInvalid), nil
 	}
-	if err := a.validateHeader(ctx, frame.Header); err != nil {
+	var batch load.RaftBatch
+	if err := decodeJSON(frame.RaftMessage, &batch); err != nil {
 		return domainReply(err), nil
 	}
-	if err := topology.ValidateLoadID(frame.GroupId); err != nil {
+	if headerIdentity(frame.Header) != batch.From.Node || frame.GroupId != batch.To.Replica.GroupID || frame.ToReplicaId != batch.To.Replica.ReplicaID {
+		return domainReply(fault.ErrIdentityMismatch), nil
+	}
+	if err := a.node.ReceiveLoadRaft(ctx, batch); err != nil {
 		return domainReply(err), nil
 	}
-	g, found := a.runtime.Load(frame.GroupId)
-	if !found || !g.Running() {
-		return domainReply(fault.ErrReplicaNotReady), nil
-	}
-	var message raftpb.Message
-	if err := message.Unmarshal(frame.RaftMessage); err != nil {
-		return domainReply(fault.ErrInvalid), nil
-	}
-	if frame.ToReplicaId != g.ReplicaID() || message.To != g.ReplicaID() || message.From == 0 {
-		return domainReply(fault.ErrIdentityMismatch), nil
-	}
-	owner, err := a.owner(ctx, frame.GroupId, message.From)
-	if err != nil || owner != frame.Header.NodeName {
-		return domainReply(fault.ErrIdentityMismatch), nil
-	}
-	cs := g.Status().ConfState
-	if len(cs.Voters)+len(cs.VotersOutgoing)+len(cs.Learners)+len(cs.LearnersNext) > 0 && !contains(cs, message.From) {
-		return domainReply(fault.ErrIdentityMismatch), nil
-	}
-	if err := g.Step(ctx, message); err != nil {
-		return domainReply(err), nil
-	}
-	if message.Type == raftpb.MsgSnap {
-		a.receivedClusterSnapshot(frame.GroupId)
+	for _, message := range batch.Messages {
+		if message.Type == raftpb.MsgSnap {
+			a.receivedClusterSnapshot(frame.GroupId)
+		}
 	}
 	return &loadpb.Reply{}, nil
 }
 
-type loadTransport struct {
-	app     *application
-	group   string
-	replica uint64
-}
+type loadTransport struct{ app *application }
 
-func (t loadTransport) Send(ctx context.Context, messages []raftpb.Message) error {
-	// Independent peers share a bounded batch pool, so a dead destination does
-	// not prevent delivery to healthy voters. Each RPC honors the engine context.
-	var wg sync.WaitGroup
-	slots := make(chan struct{}, 8)
-	for _, message := range messages {
-		select {
-		case slots <- struct{}{}:
-		case <-ctx.Done():
-			t.report(message, false)
-			continue
-		}
-		wg.Go(func() {
-			defer func() { <-slots }()
-			name, err := t.app.owner(ctx, t.group, message.To)
-			if err == nil {
-				var client *loadClient
-				client, err = t.app.client(ctx, name)
-				if err == nil {
-					var encoded []byte
-					encoded, err = message.Marshal()
-					if err == nil {
-						var reply *loadpb.Reply
-						rpcCtx := metadata.AppendToOutgoingContext(ctx, credentialHeader, t.app.cfg.Credential)
-						reply, err = client.client.Deliver(rpcCtx, &loadpb.Frame{Header: t.app.header(), GroupId: t.group, ToReplicaId: message.To, RaftMessage: encoded})
-						if err == nil {
-							err = replyError(reply)
-						}
-					}
-				}
-			}
-			t.report(message, err == nil)
-		})
+func (t loadTransport) SendRaft(ctx context.Context, batch load.RaftBatch) error {
+	client, err := t.app.client(ctx, batch.To.Node.NodeName)
+	if err != nil {
+		return err
 	}
-	wg.Wait()
+	encoded, err := json.Marshal(batch)
+	if err != nil {
+		return err
+	}
+	from := batch.From.Node
+	header := &loadpb.Header{ClusterId: from.ClusterID, NodeName: from.NodeName, InstanceId: from.InstanceID, MemberId: from.MemberID}
+	rpcCtx := metadata.AppendToOutgoingContext(ctx, credentialHeader, t.app.cfg.Credential)
+	reply, err := client.client.Deliver(rpcCtx, &loadpb.Frame{Header: header, GroupId: batch.To.Replica.GroupID, ToReplicaId: batch.To.Replica.ReplicaID, RaftMessage: encoded})
+	if err != nil {
+		return err
+	}
+	if err := replyError(reply); err != nil {
+		return err
+	}
+	for _, message := range batch.Messages {
+		if message.Type == raftpb.MsgSnap {
+			return t.app.node.ReportLoadDelivery(ctx, load.DeliveryReport{From: batch.From, To: batch.To, DeliveryID: batch.DeliveryID, Kind: load.DeliverySnapshotSucceeded})
+		}
+	}
 	return nil
 }
-func (t loadTransport) report(message raftpb.Message, success bool) {
-	if group, found := t.app.runtime.Load(t.group); found && group.ReplicaID() == t.replica {
-		if !success {
-			group.ReportUnreachable(message.To)
-		}
-		if message.Type == raftpb.MsgSnap {
-			state := raft.SnapshotFailure
-			if success {
-				state = raft.SnapshotFinish
-			}
-			group.ReportSnapshot(message.To, state)
-		}
+func (t loadTransport) ReadReplica(ctx context.Context, query load.ReplicaQuery) (load.ReplicaStatus, error) {
+	var result load.ReplicaStatus
+	reply, err := t.app.callNode(ctx, query.To.Node.NodeName, "ReadReplica", query.To.Replica.GroupID, query.To.Replica.ReplicaID, query)
+	if err == nil {
+		err = decodeJSON(reply.Data, &result)
 	}
+	return result, err
+}
+func (t loadTransport) ApplyAction(ctx context.Context, action load.ActionRequest) (load.ActionResult, error) {
+	var result load.ActionResult
+	reply, err := t.app.callNode(ctx, action.To.Node.NodeName, "Action", action.To.Replica.GroupID, action.To.Replica.ReplicaID, action)
+	if err == nil {
+		err = decodeJSON(reply.Data, &result)
+	}
+	return result, err
 }

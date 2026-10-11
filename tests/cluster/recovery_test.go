@@ -14,7 +14,6 @@ import (
 	"time"
 
 	gquorum "github.com/asalimonov/gquorum"
-	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/storage/walstore"
 	"github.com/asalimonov/gquorum/topology"
@@ -56,7 +55,7 @@ func durableOwnRecovery(t *testing.T, size int) {
 	spec := matrixSpec(size)
 	spec.SnapshotThreshold = 100000
 	ctx, c := performanceClusterSpec(t, spec)
-	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +151,7 @@ func correlatedWALStall(t *testing.T, size int) {
 	spec := matrixSpec(size)
 	spec.SnapshotThreshold = 100000
 	ctx, c := performanceClusterSpec(t, spec)
-	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +235,7 @@ func correlatedWALStall(t *testing.T, size int) {
 			results[i].repliedAt = time.Now()
 		})
 	}
-	var staged metaservice.MutationResult
+	var staged gquorum.MutationResult
 	observed := 0
 	readySamples := 0
 	var nextReady time.Time
@@ -383,7 +382,7 @@ func correlatedWALStall(t *testing.T, size int) {
 	if err := exactOwnedValues(ctx, c, staged.Document, "work", expected); err != nil {
 		t.Fatal("recovery lost/duplicated exact commands", err)
 	}
-	if _, err := c.Apply(ctx, "node3", staged.Document.Version); err != nil {
+	if _, err := c.Approve(ctx, "node3", staged.Document.Version); err != nil {
 		t.Fatal(err)
 	}
 	victim := c.Node("node3")
@@ -420,7 +419,7 @@ func parkedReplicaReseat(t *testing.T, size int) {
 	spec := matrixSpec(size)
 	spec.SnapshotThreshold = 100000
 	ctx, c := performanceClusterSpec(t, spec)
-	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,8 +431,8 @@ func parkedReplicaReseat(t *testing.T, size int) {
 		t.Fatal(err)
 	}
 	before, err := c.Local(ctx, "node3", "work")
-	if err != nil || before.Ledger == nil || before.Ledger.ReplicaID != before.ReplicaID || before.Parked != nil {
-		t.Fatal("missing established boot ledger", before, err)
+	if err != nil || before.StorageIdentity == nil || before.StorageIdentity.ReplicaID != before.ReplicaID || before.Parked != nil {
+		t.Fatal("missing established store identity", before, err)
 	}
 	oldID := before.ReplicaID
 	var largest uint64
@@ -474,12 +473,15 @@ func parkedReplicaReseat(t *testing.T, size int) {
 			return false, err
 		}
 		parked = local
-		return !local.Found && local.Parked != nil && local.Parked.Reason == gquorum.ParkStoreMissing && local.Parked.Identity == want, nil
+		// Node can diagnose load storage before its fresh process session has
+		// rejoined _meta. Wait for that session before the explicit topology edit.
+		status, err := c.Status(ctx, "node3")
+		return !local.Found && local.Parked != nil && local.Parked.Reason == gquorum.ParkStoreMissing && local.Parked.Identity == want && status.SessionLive, err
 	}); err != nil {
 		t.Fatal("voted replica did not park after lost WAL", parked, err)
 	}
-	if parked.Ledger == nil || *parked.Ledger != *before.Ledger || parked.Identity.MemberID != before.Identity.MemberID || parked.Identity.InstanceID == before.Identity.InstanceID {
-		t.Fatal("restart erased ledger or changed meta pin", before, parked)
+	if parked.StorageIdentity != nil || parked.Parked == nil || parked.Parked.Identity.ReplicaID != oldID || parked.Identity.MemberID != before.Identity.MemberID || parked.Identity.InstanceID == before.Identity.InstanceID {
+		t.Fatal("restart changed parked identity or meta pin", before, parked)
 	}
 	response, err = c.Request(ctx, "node3", "GET", "/health/ready", nil, 0)
 	if err := requireStatus(response, err, 503); err != nil {
@@ -503,7 +505,7 @@ func parkedReplicaReseat(t *testing.T, size int) {
 			t.Fatal("data loss silently reseated a voter", view, doc, err)
 		}
 	}
-	repaired, err := c.Mutate(ctx, "node2", "POST", "/api/groups/work/replicas/node3/reseat", metaservice.MutationOptions{Actor: "operator", Comment: "replace lost voted WAL"})
+	repaired, err := c.Mutate(ctx, "node2", "POST", "/api/groups/work/replicas/node3/reseat", gquorum.MutationOptions{Actor: "operator", Comment: "replace lost voted WAL"})
 	if err != nil {
 		t.Fatal("explicit reseat failed", repaired, err)
 	}
@@ -518,8 +520,8 @@ func parkedReplicaReseat(t *testing.T, size int) {
 		t.Fatal("reseated process did not recover exact committed state", err)
 	}
 	after, err := c.Local(ctx, "node3", "work")
-	if err != nil || after.Parked != nil || !after.Found || after.ReplicaID != freshID || after.Ledger == nil || after.Ledger.ReplicaID != freshID {
-		t.Fatal("fresh replica retained park or old ledger", after, err)
+	if err != nil || after.Parked != nil || !after.Found || after.ReplicaID != freshID || after.StorageIdentity == nil || after.StorageIdentity.ReplicaID != freshID {
+		t.Fatal("fresh replica retained park or old storage identity", after, err)
 	}
 	if err := c.Put(ctx, "node3", "work", "after-reseat", "after-reseat", "resumed"); err != nil {
 		t.Fatal(err)
@@ -544,7 +546,7 @@ func TestLostMetaLeaderAutomaticallyReadmitsFreshIdentitySevenNodes(t *testing.T
 func lostMetaLeaderReadmission(t *testing.T, size int) {
 	t.Helper()
 	ctx, c := performanceCluster(t, size)
-	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

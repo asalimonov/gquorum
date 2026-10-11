@@ -1,0 +1,1055 @@
+{
+  "baseline_commit": "75ba513f07405dafd4cafdac7369814aed6e31da",
+  "public_signatures": {
+    "boot.go": [
+      "func (e *LoadParkedError) Error() string",
+      "func (e *LoadParkedError) Unwrap() error    ",
+      "func (e *LoadParkedError) Is(err error) bool",
+      "func (r *Runtime) ParkedLoads() map[string]ParkedLoad"
+    ],
+    "events/bus.go": [
+      "func NewBus(opts BusOptions) (*Bus, error)",
+      "func (b *Bus) Publish(e Event) bool",
+      "func (b *Bus) Subscribe(ctx context.Context, f Filter, capacity int) (<-chan Delivery, error)",
+      "func (b *Bus) Dropped() uint64",
+      "func (b *Bus) Close(ctx context.Context) error"
+    ],
+    "events/journal.go": [
+      "func OpenJournal(opts JournalOptions) (*Journal, error)",
+      "func (j *Journal) Append(e Event) (Event, error)",
+      "func (j *Journal) List(ctx context.Context, q Query) ([]Event, error)",
+      "func (j *Journal) Prune(ctx context.Context) error",
+      "func (j *Journal) Close() error"
+    ],
+    "fault/fault.go": [
+      "func (e *Error) Error() string",
+      "func (e *Error) Unwrap() error",
+      "func (e *Error) Is(target error) bool",
+      "func New(code Code, message string, cause error) *Error"
+    ],
+    "load/load.go": [
+      "func New(opts Options) (*Group, error)",
+      "func NewRegistry() *Registry          "
+    ],
+    "membership/coordinator.go": [
+      "func NewCoordinator() *Coordinator",
+      "func (c *Coordinator) Apply(ctx context.Context, g RaftGroup, live HealthSource, cc raftpb.ConfChangeV2) error"
+    ],
+    "membership/policy.go": [
+      "func AddLearner(replicaID uint64) raftpb.ConfChangeV2",
+      "func PromoteLearner(replicaID uint64) raftpb.ConfChangeV2",
+      "func RemoveReplica(replicaID uint64) raftpb.ConfChangeV2",
+      "func DemoteVoter(replicaID uint64) raftpb.ConfChangeV2"
+    ],
+    "membership/promotion.go": [
+      "func CaughtUp(g RaftGroup, replicaID uint64) bool"
+    ],
+    "membership/safety.go": [
+      "func (e *SafetyRefusal) Unwrap() error",
+      "func (e *SafetyRefusal) Error() string",
+      "func (SafetyPolicy) Check(g RaftGroup, health HealthSource, cc raftpb.ConfChangeV2) error"
+    ],
+    "meta/bootstrap.go": [
+      "func (g *Group) Activate(ctx context.Context) (Session, error)"
+    ],
+    "meta/documents.go": [
+      "func (g *Group) Latest(ctx context.Context) (topology.Document, error)",
+      "func (g *Group) Target(ctx context.Context) (topology.Document, error)",
+      "func (g *Group) Active(ctx context.Context) (topology.Document, error)",
+      "func (g *Group) Get(ctx context.Context, version uint64) (topology.Document, error)",
+      "func (g *Group) History(ctx context.Context, page Page) (HistoryResult, error)",
+      "func (g *Group) Stage(ctx context.Context, doc topology.Document, expected uint64) (topology.Document, error)",
+      "func (g *Group) Authorize(ctx context.Context, a topology.AuthorizedStep) error",
+      "func (g *Group) Execution(ctx context.Context, id topology.ExecutionID) (topology.ExecutionStatus, error)",
+      "func (g *Group) LocalStatus() topology.GroupStatus",
+      "func (g *Group) Status(ctx context.Context) (topology.ClusterStatus, error)"
+    ],
+    "meta/effects.go": [
+      "func (c groupControllers) Status(ctx context.Context, id string) (topology.GroupStatus, error)",
+      "func (c groupControllers) CreateGroup(ctx context.Context, a topology.AuthorizedStep) error",
+      "func (c groupControllers) PrepareReplica(ctx context.Context, a topology.AuthorizedStep) error",
+      "func (c groupControllers) ApplyMembership(ctx context.Context, a topology.AuthorizedStep) error",
+      "func (c groupControllers) TransferLeader(ctx context.Context, a topology.AuthorizedStep) error",
+      "func (c groupControllers) StopReplica(ctx context.Context, a topology.AuthorizedStep) error",
+      "func (c groupControllers) CleanupReplicaState(ctx context.Context, a topology.AuthorizedStep) error",
+      "func (c groupControllers) DeleteGroupState(ctx context.Context, a topology.AuthorizedStep) error",
+      "func (h metaLive) Live(id string) (map[uint64]bool, bool)"
+    ],
+    "meta/group.go": [
+      "func New(input Options) (*Group, error)",
+      "func (g *Group) Start(parent context.Context) error",
+      "func (g *Group) WaitReady(ctx context.Context) error",
+      "func (g *Group) Rules() topology.Rules",
+      "func (g *Group) IsLeader() bool",
+      "func (g *Group) OwnSessionLive() bool"
+    ],
+    "meta/identity.go": [
+      "func LoadStoredIdentity(path string) (Identity, bool, error)"
+    ],
+    "meta/join.go": [
+      "func (e *fatalAdmissionError) Unwrap() error"
+    ],
+    "meta/lifecycle.go": [
+      "func (g *Group) Quiesce(ctx context.Context) error",
+      "func (g *Group) RequestStop()",
+      "func (g *Group) Stop(ctx context.Context) error"
+    ],
+    "meta/mutations.go": [
+      "func (g *Group) AddNode(ctx context.Context, node topology.Node, o MutationOptions) (MutationResult, error)",
+      "func (g *Group) ReadmitNode(ctx context.Context, name string, o MutationOptions) (MutationResult, error)",
+      "func (g *Group) DrainNode(ctx context.Context, name string, o MutationOptions) (MutationResult, error)",
+      "func (g *Group) ActivateNode(ctx context.Context, name string, o MutationOptions) (MutationResult, error)",
+      "func (g *Group) ExcludeNode(ctx context.Context, name string, o MutationOptions) (MutationResult, error)",
+      "func (g *Group) ForceRetireNode(ctx context.Context, name string, o RetireOptions) (MutationResult, error)",
+      "func (g *Group) SetPlacement(ctx context.Context, rule topology.PlacementRule, o MutationOptions) (MutationResult, error)",
+      "func (g *Group) SetGroupPlacement(ctx context.Context, id string, rule topology.PlacementRule, o MutationOptions) (MutationResult, error)",
+      "func (g *Group) CreateLoadGroup(ctx context.Context, spec GroupSpec, o MutationOptions) (MutationResult, error)",
+      "func (g *Group) DeleteLoadGroup(ctx context.Context, id string, o MutationOptions) (MutationResult, error)",
+      "func (g *Group) ChangeReplica(ctx context.Context, id, name string, role topology.ReplicaRole, o MutationOptions) (MutationResult, error)",
+      "func (g *Group) RollbackTo(ctx context.Context, version uint64, o MutationOptions) (MutationResult, error)",
+      "func (g *Group) ReseatReplica(ctx context.Context, id, name string, o MutationOptions) (MutationResult, error)",
+      "func (g *Group) TransferLeader(ctx context.Context, id, name string) error"
+    ],
+    "meta/observations.go": [
+      "func (g *Group) HealthObservation() topology.HealthObservation",
+      "func (s observationSource) Active(ctx context.Context) (topology.Document, error)",
+      "func (s observationSource) Health(ctx context.Context, active topology.Document) (map[string]topology.Health, error)"
+    ],
+    "meta/options.go": [
+      "func (e *ReadmissionRequiredError) Error() string",
+      "func (e *ReadmissionRequiredError) Unwrap() error",
+      "func DefaultTiming() Timing",
+      "func (o Options) Validate() error",
+      "func FoundingIDs(clusterID string, names []string) (map[string]uint64, error)"
+    ],
+    "meta/parked.go": [
+      "func (g *Group) ParkedJoins(ctx context.Context) ([]ParkedJoin, error)"
+    ],
+    "meta/planning.go": [
+      "func (g *Group) Plan(ctx context.Context, version uint64) (topology.Plan, error)",
+      "func (g *Group) PlanFor(ctx context.Context, doc topology.Document) (topology.Plan, error)",
+      "func (g *Group) Apply(ctx context.Context, version uint64) (topology.ExecutionID, error)",
+      "func (g *Group) WaitExecution(ctx context.Context, id topology.ExecutionID) (topology.ExecutionStatus, error)",
+      "func (c executionCoordinator) IsMetaLeader() bool",
+      "func (c executionCoordinator) CurrentExecution(ctx context.Context) (convergence.ExecutionRecord, bool)",
+      "func (c executionCoordinator) RecordExecutionTransition(ctx context.Context, t topology.ExecutionTransition) error"
+    ],
+    "meta/reconciliation.go": [
+      "func (g *Group) ReconciliationStatus() topology.ReconciliationStatus",
+      "func (g *Group) SetReconciliationEnabled(ctx context.Context, enabled bool) error",
+      "func (h reconciliationHost) Views(ctx context.Context) (topology.Document, topology.Document, topology.Document, error)",
+      "func (h reconciliationHost) CurrentExecution(ctx context.Context) (topology.ExecutionRecord, bool, error)",
+      "func (h reconciliationHost) IsLeader() bool",
+      "func (h reconciliationHost) Health(ctx context.Context) (map[string]topology.Health, error)",
+      "func (h reconciliationHost) GlobalStatus(ctx context.Context, active topology.Document) (map[string]topology.GroupStatus, error)",
+      "func (h reconciliationHost) PlanFor(ctx context.Context, doc topology.Document) (topology.Plan, error)",
+      "func (h reconciliationHost) Approve(ctx context.Context, version uint64) (topology.ExecutionID, error)",
+      "func (h reconciliationHost) CommitRepair(ctx context.Context, doc topology.Document, expected uint64, plan topology.Plan) (topology.ExecutionID, error)",
+      "func (h reconciliationHost) WakeConvergence()"
+    ],
+    "meta/replicas.go": [
+      "func (g *Group) Identity() Identity",
+      "func (g *Group) LookupLoadReplica(ctx context.Context, group string) (ReplicaRecord, bool, error)",
+      "func (g *Group) LoadReplicaScope(ctx context.Context, id storage.Identity) (scope LoadReplicaScope, err error)",
+      "func (g *Group) RecordLoadReplica(ctx context.Context, group string, record ReplicaRecord, previous uint64) error",
+      "func (g *Group) ForgetLoadReplica(ctx context.Context, a topology.AuthorizedStep, expected uint64) error"
+    ],
+    "meta/rpc.go": [
+      "func (g *Group) Step(ctx context.Context, header *metapb.Header, msg raftpb.Message) error",
+      "func (g *Group) Call(ctx context.Context, method string, header *metapb.Header, data []byte) *metapb.Reply"
+    ],
+    "meta/session.go": [
+      "func (g *Group) KeepAlive(ctx context.Context, id string) error",
+      "func (g *Group) Deactivate(ctx context.Context, id string) error",
+      "func (g *Group) AcquireLock(ctx context.Context, key, id string) error",
+      "func (g *Group) LockHolder(ctx context.Context, key string) (Session, bool, error)",
+      "func (g *Group) ServeOverride() int",
+      "func (g *Group) SetServeOverride(ctx context.Context, value int) error"
+    ],
+    "meta/watch.go": [
+      "func (g *Group) Watch(ctx context.Context, view View) (<-chan Update, error)"
+    ],
+    "runtime.go": [
+      "func New(opts Options) (*Runtime, error)",
+      "func (r *Runtime) OpenMeta(opts meta.Options) (*meta.Group, error)",
+      "func (r *Runtime) OpenLoad(opts load.Options) (*load.Group, error)",
+      "func (r *Runtime) Meta() (*meta.Group, bool)",
+      "func (r *Runtime) Load(id string) (*load.Group, bool)",
+      "func (r *Runtime) LoadIDs() []string                 ",
+      "func (r *Runtime) StopLoad(ctx context.Context, id string, expectedReplicaID uint64) error",
+      "func (r *Runtime) RequestClose()",
+      "func (r *Runtime) Close(ctx context.Context) error"
+    ],
+    "storage/storagetest/conformance.go": [
+      "func Run(t *testing.T, open Opener)",
+      "func Entries(from, to, term uint64) []raftpb.Entry",
+      "func Snapshot(index, term uint64) raftpb.Snapshot"
+    ],
+    "storage/walstore/lifecycle.go": [
+      "func (s *Store) Quarantine(ctx context.Context, id string, expectedReplicaID uint64) (string, error)",
+      "func (s *Store) SweepQuarantine(ctx context.Context) error",
+      "func (s *Store) Stats(ctx context.Context, id string) (storage.Stats, error)"
+    ],
+    "storage/walstore/operations.go": [
+      "func (s *Store) SaveReady(ctx context.Context, id string, write storage.ReadyWrite) error",
+      "func (s *Store) SaveApplied(ctx context.Context, id string, index uint64, cs raftpb.ConfState) error",
+      "func (s *Store) Load(ctx context.Context, id string) (storage.Recovery, error)",
+      "func (s *Store) Probe(ctx context.Context, id string) (storage.Probe, error)"
+    ],
+    "storage/walstore/snapshot.go": [
+      "func (s *Store) SaveSnapshot(ctx context.Context, id string, snapshot raftpb.Snapshot) error",
+      "func (s *Store) Compact(ctx context.Context, id string, index uint64) error"
+    ],
+    "storage/walstore/store.go": [
+      "func (e *IdentityMismatchError) Error() string",
+      "func (e *IdentityMismatchError) Unwrap() error",
+      "func Open(opts Options) (*Store, error)",
+      "func (s *Store) BindReplica(ctx context.Context, id storage.Identity) error",
+      "func (s *Store) Ensure(ctx context.Context, id string) error",
+      "func (s *Store) Close() error"
+    ],
+    "topology/controller.go": [
+      "func (s GroupStatus) Clone() GroupStatus"
+    ],
+    "topology/document.go": [
+      "func (s NodeState) Places() bool",
+      "func (l Limits) WithDefaults() Limits",
+      "func (l Limits) Validate() error",
+      "func (p PlacementRule) Allows(t NodeType) bool",
+      "func (d *Document) Group(id string) *Group",
+      "func (d *Document) Node(name string) *Node",
+      "func (d *Document) MetaGroup() *Group",
+      "func (d *Document) LoadGroups() []Group",
+      "func (d *Document) MemberID(name string) uint64",
+      "func (g *Group) AllocateReplicaID() (uint64, error)",
+      "func (d *Document) AllocateMemberID() (uint64, error)",
+      "func (d *Document) SetMemberID(name string, id uint64, at time.Time) error",
+      "func (d *Document) VotersOf(id string) []Replica",
+      "func QuorumOf(voters int) int",
+      "func (d *Document) GroupPlacement(id string) PlacementRule",
+      "func (d *Document) GroupBounds(id string) (int, int)",
+      "func EffectiveNodeState(active Document, name string) NodeState",
+      "func (d Document) Clone() Document"
+    ],
+    "topology/drain_safety.go": [
+      "func ValidateMetaDrainSafety(active, target Document, status GroupStatus, health map[string]Health, final bool) (uint64, error)"
+    ],
+    "topology/execution.go": [
+      "func (s ExecutionState) Terminal() bool",
+      "func (s ExecutionState) Waiting() bool",
+      "func (s Step) Equal(other Step) bool",
+      "func (p Plan) IsEmpty() bool",
+      "func (a AuthorizedStep) Matches(id ExecutionID, attempt uint32, version uint64, step Step) bool",
+      "func MakeExecutionID(version uint64, attempt uint32) ExecutionID",
+      "func (s ExecutionState) Valid() bool"
+    ],
+    "topology/health.go": [
+      "func (e GroupHealthEvaluation) Clone() GroupHealthEvaluation",
+      "func (s HealthObservation) Clone() HealthObservation",
+      "func (h GroupHealth) QuorumLost() bool",
+      "func EvaluateGroupHealth(doc Document, id string, health map[string]Health) GroupHealthEvaluation",
+      "func EvaluateDataGroupHealth(doc Document, health map[string]Health) []GroupHealthEvaluation",
+      "func EvaluateAllGroupHealth(doc Document, health map[string]Health) []GroupHealthEvaluation"
+    ],
+    "topology/plan.go": [
+      "func ValidatePlanShape(active, desired Document, plan Plan) error"
+    ],
+    "topology/planner.go": [
+      "func BuildPlan(active, desired Document, observed map[string]GroupStatus, rules Rules) (Plan, error)",
+      "func BuildPlanPreferred(active, desired Document, observed map[string]GroupStatus, rules Rules, preferred uint64) (Plan, error)"
+    ],
+    "topology/reconciliation.go": [
+      "func (s ReconciliationStatus) Clone() ReconciliationStatus"
+    ],
+    "topology/validate.go": [
+      "func ValidateID(id string) error",
+      "func ValidateLoadID(id string) error",
+      "func (d *Document) Validate(rules Rules) error",
+      "func ValidateTransition(previous, next Document, rules Rules, retired map[string]bool) error"
+    ]
+  },
+  "test_functions": {
+    "boot_test.go": [
+      "TestLoadBootCurrentFormatMatrix",
+      "TestParkedLoadOwnedObservationAndTypedError"
+    ],
+    "events/events_test.go": [
+      "TestOpen_CreatesExplicitStoreAndSurvivesReopen",
+      "TestJournal_AppendListOrdering",
+      "TestJournal_KeysetPagination",
+      "TestJournal_AgeRotation",
+      "TestJournal_AmortizedRotation",
+      "TestJournal_SizeCapRotation",
+      "TestRotate_IgnoresFileSizeAndOtherBuckets",
+      "TestRotate_SizePruneConvergesOnLiveBytes",
+      "TestRotate_StatsWalkIsGatedButStillPrunes",
+      "TestJournal_NilSafeAndAppendAfterClose",
+      "TestBus_JournalBeforeDeliveryAndOwnedCopies",
+      "TestBus_JournalFailureIsLiveOnly",
+      "TestBus_BoundedIngressAndSubscriberLoss",
+      "TestBus_FilterCancelAndCloseOwnership"
+    ],
+    "examples/cluster/http_test.go": [
+      "TestHTTPVersionRequiresOneExactStrongIdentity",
+      "TestHTTPFaultsHaveStableStatusAndCASVersions"
+    ],
+    "fault/fault_test.go": [
+      "TestClassificationPreservesCause"
+    ],
+    "internal/convergence/engine_test.go": [
+      "TestConvergence_LearnerFirstSteps",
+      "TestConvergence_FinalValidatorFailureLeavesActiveUnchanged",
+      "TestConvergence_ForcedRetirementWaivesOnlyDeadNodeTeardown",
+      "TestConvergence_DestructiveAndLifecycleSteps",
+      "TestConvergence_DeleteShardStopsEveryHostBeforeSharedDelete",
+      "TestConvergence_DeleteShardWaitsForUnreachableHost",
+      "TestConvergence_DeleteShardCompletesAfterGroupLosesLeader",
+      "TestConvergence_DeleteShardContinuesAfterGroupBecomesAbsent",
+      "TestConvergence_FoundingDemotionTransferAndDelete",
+      "TestConvergence_WaitFailureOwnershipAndCancellation",
+      "TestConvergence_EmptyPlanAndActivationFailure",
+      "TestConvergence_FailoverResumesExactStep",
+      "TestConvergence_SupersedesOnlyAtStepBoundary",
+      "TestConvergence_ResumePreservesDurableWaiting",
+      "TestConvergence_ResumeMixedPlaneOwnership",
+      "TestConvergence_ShutdownCancelsBlockedWorkAndIsIdempotent",
+      "TestConvergence_ShutdownReusesBoundedRetryTimer",
+      "TestConvergence_ResumeSerializesConcurrentTicks",
+      "TestConvergence_TickSurvivesLostProposal"
+    ],
+    "internal/convergence/verification_test.go": [
+      "TestConvergenceAcknowledgedMembershipRequiresObservedExactResult",
+      "TestExecutionTransitionDoesNotRegressWallClock",
+      "TestPermanentPromotionRefusalDoesNotWaitForever",
+      "TestConvergenceFreshGroupSeedsVotersBeforeIntentionalLearner"
+    ],
+    "internal/metaengine/admission_test.go": [
+      "TestAdmission_SameInstanceRetryAcrossPhasesAndSnapshot",
+      "TestAdmission_SupersededInstanceCannotBeResurrected",
+      "TestAdmission_DifferentInstanceCannotReusePreparedMemberID",
+      "TestBuildReadmissionPlan_ShrinksBeforeLearnerFirstReplacementAtMaximum",
+      "TestAdmissionRebindingNeverSelectsSupersededProcessForExecution"
+    ],
+    "internal/metaengine/authorization_test.go": [
+      "TestExactFutureProgressIsRetryableButNeverAuthorized"
+    ],
+    "internal/metaengine/codec_transport_test.go": [
+      "TestDecodeProposalWhitelistsCompleteCommandSet"
+    ],
+    "internal/metaengine/load_scope_test.go": [
+      "TestLoadScopeCreationProgressDistinguishesEmptyPreparedLearners",
+      "TestLoadScopeRejectsOldOwnerAndRetiredGroupAtApproval"
+    ],
+    "internal/metaengine/observer_test.go": [
+      "TestAppliedObserverRunsOutsideLockAfterPersistence"
+    ],
+    "internal/metaengine/repair_document_test.go": [
+      "TestBuildReplicaRepairSameMutationForBothOrigins"
+    ],
+    "internal/metaengine/repair_scope_test.go": [
+      "TestRepairCommandRejectsEditsOutsideOneActiveVoter"
+    ],
+    "internal/metaengine/runtime_test.go": [
+      "TestMetaRuntimeRealGRPCConsensusAndBboltRestart",
+      "TestMetaRuntimeLeaderReplacement"
+    ],
+    "internal/metaengine/safety_test.go": [
+      "TestRetirementFencesAtApprovalAndSurvivesRestart",
+      "TestAuthorizeEveryIdentityAndProgressBoundary",
+      "TestRestoreRejectsCorruptionWithoutChangingLiveState",
+      "TestSessionIdentityCannotBeRebound",
+      "TestReadmissionAllocatorOverflow",
+      "TestDurabilityFailureIsFatal"
+    ],
+    "internal/metaengine/sessions_test.go": [
+      "TestSM_GrantSession_AndIdempotent",
+      "TestSM_AcquireLock_RequiresSession",
+      "TestSM_AcquireLock_Grant_Reacquire_Conflict",
+      "TestSM_RevokeSession_ReleasesLocks",
+      "TestSM_AcquireLock_ReclaimsAfterHolderGone",
+      "TestSM_Sessions_SnapshotRestore_NoVersionBump"
+    ],
+    "internal/metaengine/sm_test.go": [
+      "TestCodec_Roundtrip",
+      "TestCodec_EncodeUnknownType",
+      "TestSM_ProposeDocument_AssignsVersionAndCommits",
+      "TestSM_ProposeDocument_CASReject",
+      "TestSM_ProposeDocument_ValidationReject",
+      "TestSM_AdmitNode_AddAndIdempotent",
+      "TestSM_Apply_RefusesReplayedEntry",
+      "TestSM_AdmitNode_StampsAuditFieldsFromProposal",
+      "TestSM_AdmitNode_StampIsDeterministicAcrossReplicas",
+      "TestSM_AdmitNode_ReplaceExisting_FreshMemberID",
+      "TestSM_History_Ordering",
+      "TestSM_ExclusionVersion",
+      "TestSM_ExclusionVersion_AgedOutOfRing",
+      "TestSM_History_Paging",
+      "TestSM_ExactExecutionTransitions",
+      "TestSM_ForcedRetirementRecordsApplyingActor",
+      "TestSM_ExecutionSupersededAtExactBoundary",
+      "TestSM_ExecutionBeginRetryAndSupersession",
+      "TestSM_RejectsMalformedPlanAndPrematureActivation",
+      "TestSM_CommitRepairExecutionGuardrails",
+      "TestSM_PinsTargetActiveAndNonterminalBeyondHistory",
+      "TestSM_ApplyDeterminism",
+      "TestSM_SnapshotRestoreEquivalence",
+      "TestSM_HistoryRingBounded",
+      "TestSM_ExecutionsBounded",
+      "TestSM_PersistsToBoltStateBucket"
+    ],
+    "internal/metaengine/snapshot_bench_test.go": [
+      "TestMetaFullSnapshotMatrixPreservesHistoryExecutionsAndRetirement"
+    ],
+    "internal/metastore/adapter_test.go": [
+      "TestMetaAdapterSnapshotTailAndExactScope"
+    ],
+    "internal/metastore/ledger_test.go": [
+      "TestReplicaLedgerReplacementCASPreservesNewIdentity",
+      "TestReplicaLedgerRejectsCorruptAndForeignLocalRecords"
+    ],
+    "internal/metastore/membership_test.go": [
+      "TestMemberSeenPersistsAppliedMembershipAcrossRemovalAndRestart",
+      "TestMemberSeenSnapshotAndApplicationRollback",
+      "TestMemberSeenDoesNotClassifyPreMembershipJoiner",
+      "TestMemberSeenRefusesCorruptMarker"
+    ],
+    "internal/metastore/pin_test.go": [
+      "TestIdentityPinRejectsEveryPartialOrMalformedFieldWithoutRepair",
+      "TestFreshnessIncludesOrphanLocalAndConsensusState",
+      "TestMetaSchemaProbeRefusesIncompleteAndUnversionedStores"
+    ],
+    "internal/metastore/raft_test.go": [
+      "TestStoreIsFresh",
+      "TestBoltStore_Roundtrip",
+      "TestBoltStore_LoadAllWithoutSnapshot",
+      "TestBoltStore_EmptyHardStateNotClobbered",
+      "TestBoltStore_LeaderOverwriteTruncatesTail",
+      "TestBoltStore_Compaction",
+      "TestBoltStore_StaleSnapshotIgnored",
+      "TestBoltStore_AppliedMonotone",
+      "TestBoltStore_SetAppliedPersistsConfState",
+      "TestBoltStore_ReopenAfterPartialWrite",
+      "TestBoltStore_IdentityPinning",
+      "TestInstallSnapshot_AtomicAndCommitClamped",
+      "TestInstallSnapshot_IgnoresStale",
+      "TestPeekLocalLineage"
+    ],
+    "internal/metastore/store_test.go": [
+      "TestOpenUsesExactCallerPathAndSchema",
+      "TestSaveApplicationAtomicDurableState",
+      "TestSnapshotCannotRewindMaterializedState",
+      "TestHardStateAndCommittedTailNeverRegress",
+      "TestReplicaLedgerExactIdentityAndReplacementProtection"
+    ],
+    "internal/metatransport/refusal_test.go": [
+      "TestReplyPreservesVersionConflictAndSafetyIdentity"
+    ],
+    "internal/metatransport/transport_test.go": [
+      "TestMetaTransportPruneDrainsFinalAdmittedCommit",
+      "TestMetaTransportMessagesAndChunkedSnapshotPreserveTerms",
+      "TestMetaTransportCredentialAndClusterIsolation",
+      "TestMetaTransportPeerBackoffDoesNotBlockOtherPeer",
+      "TestMetaTransportStopCancelsAndJoinsControlCall",
+      "TestMetaTransportRefusesMissingSnapshotFinalAndWrongMessageDomain"
+    ],
+    "internal/observe/watch_test.go": [
+      "TestWatchStartStopLifecycle",
+      "TestWatchReflectsDegradationIntoOwnedSnapshot",
+      "TestWatchPublishesMetaAndDataUniformly",
+      "TestWatchBelowMinReplicasSeparate",
+      "TestWatchUnknownRemovesNumericObservations",
+      "TestWatchRemovedGroupCleared",
+      "TestWatchTransitionLogsOncePerChange",
+      "TestWatchOnTransitionFiresOncePerEdgeEvenWithoutLogger",
+      "TestWatchObservationLossWarnsOnce",
+      "TestWatchSnapshotOwnershipAndConcurrentReaders",
+      "TestWatchBoundedSourceFailureAndJoinedCancellation",
+      "TestWatchSettingsValidation"
+    ],
+    "internal/raftengine/group_test.go": [
+      "TestFoundingStorage_SeedHasFullMachineAndVoters",
+      "TestLoad_ProposeSnapshotRestartReplaysCommittedTail",
+      "TestLoad_BusinessRejectionConsumesEntryAndMachineFailureHalts",
+      "TestLoad_ThreeNodeConsensusAndLeaderReplacement",
+      "TestWAL_TransientFailureRecoversWithoutHalt",
+      "TestWAL_StepNeverBlocksAndShutdownDuringStallIsQuiet",
+      "TestLoad_RejectsLocalMessagesAndUnsupportedMembership",
+      "TestLoad_StopBeforeStartAndRegistryIdentity",
+      "TestLoad_MembershipLearnerPromotionTransferAndRemoval",
+      "TestRecover_UncommittedTailIsNotAppliedAtReady",
+      "TestWAL_ReceivedSnapshotIsPersistedBeforeRestoreAndAck",
+      "TestLoad_MultipleGroupsShareStoreAndStopIndependently",
+      "TestPropose_OverloadedWhileDegradedAndCancellationIsBounded",
+      "TestLoad_ConcurrentProposalsHaveExactResults",
+      "TestOptions_RejectUnsafeInputsBeforeCreatingState",
+      "TestRecoveredUnappliedConfigurationBlocksSecondChange",
+      "TestRecoveryRejectsSnapshotStateWithoutIndex"
+    ],
+    "internal/raftengine/outbound_test.go": [
+      "TestSlowDestinationCannotDelayHealthyMajorityAndStopJoinsSenders",
+      "TestOutboundQueuesPreserveFIFOAndRetireIdleMembershipWorkers",
+      "TestRemovedDestinationDropsStaleBacklogAndAttemptsFinalCommit"
+    ],
+    "internal/reconcile/engine_test.go": [
+      "TestReconcilerStartStopLifecycle",
+      "TestReconcilerGatesLeaderHealthAndDisabled",
+      "TestReconcilerLocalKillSwitchResetsStability",
+      "TestReconcilerResumesApprovedExecutionBeforeHealthGate",
+      "TestReconcilerDoesNotMergeStagedOrFailedOperatorIntent",
+      "TestReconcilerCommitsExactLearnerFirstRepair",
+      "TestReconcilerCASRaceLeavesOperatorVersionStaged",
+      "TestReconcilerRejectsPolicyActionsOutsideAllowList",
+      "TestHealableMatrix",
+      "TestReconcilerHealsStagedInternal",
+      "TestReconcilerHealRefusals",
+      "TestReconcileTickIsBoundedAndCancelable",
+      "TestReconcilerFollowerResetsStabilityObservations",
+      "TestReconcilerStatusGatesAndStableSince",
+      "TestReconcilerStatusTransitionsAreOwnedAndLoggedOnce",
+      "TestReconcilerStatusErrorWarnsOnce",
+      "TestReconcilerStatusConcurrentAccess",
+      "TestReconcilerSettingsValidation"
+    ],
+    "internal/reconcile/policy_test.go": [
+      "TestRestoreDegradedPolicyAllowList",
+      "TestRestoreDegradedPolicyNeverRepairsMeta"
+    ],
+    "membership/coordinator_test.go": [
+      "TestCoordinatorCanceledWaitDoesNotPropose",
+      "TestSafetyRejectsZeroAndCurrentJointConfiguration"
+    ],
+    "membership/membership_test.go": [
+      "TestChangeConstructorsUseLearnerThenVoterGrowth",
+      "TestSafetyAllowsLearnerAddWithUnknownHealth",
+      "TestSafetyAllowsSafeRemoval",
+      "TestSafetyUnknownHealthRefusesRemovalAndDemotion",
+      "TestSafetyKnownTotalOutageRefusesRemoval",
+      "TestSafetyRefusesQuorumBreakingRemoval",
+      "TestSafetyRequiresLeaderTransfer",
+      "TestSafetyRefusesFinalVoterRemoval",
+      "TestSafetyRefusesDirectVoterGrow",
+      "TestCaughtUpRequiresExactActiveLearner",
+      "TestCaughtUpRejectsLagMissingProgressZeroCommitAndFollower",
+      "TestSafetyPromotesOnlyCaughtUpActiveLearner",
+      "TestSafetyRefusalIncludesOperationalContext",
+      "TestSafetyRejectsMultiChange",
+      "TestSafetyRejectsJointTransition",
+      "TestCoordinatorAppliesOneExactChange",
+      "TestCoordinatorStopsBeforeUnsafeProposal",
+      "TestCoordinatorWrapsProposalFailure",
+      "TestCoordinatorSerializesPerGroup"
+    ],
+    "meta/forwarding_test.go": [
+      "TestFollowerApprovalPreservesExactRequestAndRejectsEmptyReply",
+      "TestMetaMemberRoutingSeparatesApprovedInboundFromRetainedOutbound"
+    ],
+    "meta/group_placement_test.go": [
+      "TestGroupPlacementRetainsEligibleIDsAndUsesFreshIDsWhenExpanded",
+      "TestGroupPlacementRefusesIneligibleMinimumWithoutChangingState"
+    ],
+    "meta/group_test.go": [
+      "TestPublicMetaFoundingApprovesTopologyAndActivatesEveryNode"
+    ],
+    "meta/identity_test.go": [
+      "TestLoadStoredIdentityIsReadOnlyAndOmitsProcessID"
+    ],
+    "meta/join_barrier_test.go": [
+      "TestJoinClassificationWaitsForAppliedCurrentTerm"
+    ],
+    "meta/join_protocol_test.go": [
+      "TestJoinClientRefusalClassificationAndBoundedRedirects",
+      "TestJoinClientSkipsColdSeedsAndFollowsLeaderHintToExactGrant"
+    ],
+    "meta/join_test.go": [
+      "TestMetaJoinRequiresApprovalAndPreparedExactRuntimeBeforeLearner",
+      "TestMetaRetainedDiskJoinIsReadOnlyAndCopiedLiveIdentityIsFenced",
+      "TestMetaDataLostReadmissionBlocksWithoutHookAndRetriesSameGrant",
+      "TestMetaPinnedAdmissionRestartsBeforeAndAfterReadyWithoutAllocatingIDs"
+    ],
+    "meta/join_validation_test.go": [
+      "TestReadmissionHookMustReleaseAndQuarantineOldMetaIdentity",
+      "TestReadmissionPreviousScopeNeverIncludesGrantedOrOtherNodeReplicas",
+      "TestJoinGrantValidatesEveryHintBeforeRoutingMutation",
+      "TestJoiningCannotClaimUsedMemberWithoutPinnedStore"
+    ],
+    "meta/leases_test.go": [
+      "TestSessionManager_RefreshAndExpiry",
+      "TestSessionManager_SeedMissing",
+      "TestSessionManager_SeedMissingPreservesExistingDeadlines",
+      "TestSessionManager_ResetFrom"
+    ],
+    "meta/lifecycle_runtime_test.go": [
+      "TestMetaQuiesceJoinsEffectBeforeReturningAndKeepsOwnedState",
+      "TestMetaQuiesceAcknowledgesOwnSessionRevocation",
+      "TestMetaStartRacingWithStopHasNoLateWorkers"
+    ],
+    "meta/lifecycle_test.go": [
+      "TestQuiesceBeforeStartRetainsStoreUntilStop",
+      "TestJoinContextCancelsAndJoinsOwnerHook",
+      "TestLifecycleCallGatesRefuseQuiescentBeforeWait",
+      "TestQuiesceAndStopConcurrentBeforeStartJoinOnce",
+      "TestSessionWaiterRechecksQuiescenceAfterSerialGate"
+    ],
+    "meta/load_effects_test.go": [
+      "TestMetaCallerEffectCompletionLostAcrossLeaderReplacement"
+    ],
+    "meta/mutation_contracts_test.go": [
+      "TestActivateNodeIdempotentAndRefusals",
+      "TestNodeLifecycleStamps",
+      "TestTransferLeaderUsesExactActiveScopeAndRefusesIneligibleTargets",
+      "TestDrainNodeQuorumSafetyAllowsStagingButLeavesApprovedViews",
+      "TestDrainNodeStateRefusals",
+      "TestChangeReplicaPromoteIsDeclarativeAndPlansCatchUpBeforePromotion",
+      "TestChangeReplicaErrors",
+      "TestRollbackRefusalsAndAllocationFloors",
+      "TestExecutionMalformedIDsDoNotAliasRetainedAttempt"
+    ],
+    "meta/mutations_runtime_test.go": [
+      "TestMutationApprovalFailureReturnsDurablyStagedDocument",
+      "TestPublicLoadGroupCreateDeleteAndRetiredID",
+      "TestPublicTransferMetaLeaderFromFollowerUsesActiveScope"
+    ],
+    "meta/mutations_test.go": [
+      "TestAddNodeHappyPath",
+      "TestAddNodeReplacesExcludedNodeWithFreshIdentity",
+      "TestDrainNodeHappyPath",
+      "TestActivateNodeReversesDrain",
+      "TestDrainNodeBelowMinRefused",
+      "TestDrainNodeRefusalIsActionable",
+      "TestRemoveNodeRefusals",
+      "TestRemoveNodeCancelsStagedOnlyAdmission",
+      "TestChangeReplicaDemote",
+      "TestChangeReplicaDemoteQuorumSafety",
+      "TestPlacementInvariantClampsOnVotersNotReplicas",
+      "TestForceRetireNodeRequiresReasonAndActor",
+      "TestForceRetireNodeAuditsAndAllocatesFreshReplacement",
+      "TestCreateLoadGroupHonorsCallerTypesAndExplicitSubset",
+      "TestCreateLoadGroupRefusals",
+      "TestSetPlacementRefusals",
+      "TestRollbackLineage",
+      "TestRollbackStagedRemovalKeepsApprovedIdentityUntilApproval",
+      "TestRollbackRefusesResurrectedIdentity",
+      "TestMutationExpectedVersionAndPreviewAreExact",
+      "TestReseatReplicaAllocatesFreshIDAndRefusesUnstableViews",
+      "TestReseatReplicaRetainsAuditAndRejectsMetaLearnersAndUnknown",
+      "TestSetPlacementQuorumSafetyAndHealthyGrow",
+      "TestAddNodeAllowsDeclareBeforeBoot",
+      "TestCreateLoadGroupQuorumSafety",
+      "TestRollbackApprovedGroupDeletionIsPermanentlyRetired",
+      "TestMutationConcurrentCommitReturnsTypedCASConflict"
+    ],
+    "meta/observations_runtime_test.go": [
+      "TestMetaHealthEventsStatusAndDrainUseApprovedActiveScope"
+    ],
+    "meta/observations_test.go": [
+      "TestRecordersNilBusNoOp",
+      "TestHealthRecorderQuorumCrossingsOnly",
+      "TestHealthRecorderQuorumRegainedWhileDegraded",
+      "TestHealthRecorderRecordsQuorumLostFromUnknown",
+      "TestLivenessRecorderObserverAndSubjectIdentities",
+      "TestAppliedRecorderIsLocalAndDeduplicatesUnchangedExecutionAndDrain"
+    ],
+    "meta/options_test.go": [
+      "TestMetaOptionsDefaultsAndOnlyLimitsControlClusterSize",
+      "TestMetaOptionsRejectUnsafeInputs",
+      "TestMetaOptionClonesCallerInputs",
+      "TestFoundingIDsAreIndependentOfOrdering",
+      "TestMetaObservationOptionsRefusedBeforeOpeningStorage"
+    ],
+    "meta/parked_test.go": [
+      "TestParkedRegistry_UpsertAttemptsExpiryRemoval",
+      "TestParkedRegistry_KeyedByNameAndInstance",
+      "TestParkedRegistry_SweepExpiresWithoutAReader",
+      "TestParkedRegistry_CapsCardinalityByEvictingOldest",
+      "TestParkedJoins_NilReceiver",
+      "TestHandleJoin_RefusalRecordsParkAndFollowersReadCurrentLeader"
+    ],
+    "meta/pin_test.go": [
+      "TestMetaConstructorRefusesOrphanStateBeforeFoundingOrJoin",
+      "TestMetaConstructorAllowsAnEmptyVersionedStore"
+    ],
+    "meta/planning_test.go": [
+      "TestMetaFollowerApprovesEmptyPlanAndActivationIsDurable",
+      "TestMetaDrainTransfersLeadershipAndKeepsEveryAdmittedVoter",
+      "TestMetaUnknownLoadControllerRefusesApprovalWithoutChangingTarget"
+    ],
+    "meta/readmit_test.go": [
+      "TestReadmitNodeRotatesOnlyExactNodeIdentities",
+      "TestReadmitNodeRefusesUnverifiedAndPendingIdentities"
+    ],
+    "meta/reconciliation_test.go": [
+      "TestMetaAutomaticRepairApprovesAndRunsExactFreshIdentity",
+      "TestMetaOperatorReseatRunsExactFreshIdentity",
+      "TestMetaReconciliationConstructorSettingsAndDisabledStatus"
+    ],
+    "meta/removal_runtime_test.go": [
+      "TestSelfRemoval_FiresThroughApplyEntry",
+      "TestSelfRemovalCallbackFailureStaysFencedAndIsLocallyObservable"
+    ],
+    "meta/removal_test.go": [
+      "TestSelfRemoval_FiresOnceWhenExcluded",
+      "TestSelfRemoval_OtherMemberRemovedDoesNotFire",
+      "TestSelfRemoval_DemotionToLearnerDoesNotFire",
+      "TestSelfRemoval_NotExcludedDoesNotFire",
+      "TestSelfRemoval_SupersededMemberIDFires",
+      "TestSelfRemoval_JointDemotionDoesNotFire",
+      "TestSelfRemoval_JointRemovalFiresOnLeavingJoint",
+      "TestSelfRemoval_NoMembershipDeltaIsInert",
+      "TestSelfRemoval_UnknownMemberIDDoesNotFire",
+      "TestSelfRemoval_NilCallbackIsInert",
+      "TestConfStateContains",
+      "TestSelfRemovalRequiresApprovedIntentAndPreviouslyAppliedMembership",
+      "TestRetiredOutboundRouteDoesNotRestoreIncomingMembership",
+      "TestSelfRemovalQuiesceJoinsCanceledCallback",
+      "TestSelfRemoval_ApplyEntryDoesNotDeliverBeforeDurable"
+    ],
+    "meta/replicas_test.go": [
+      "TestLoadReplicaScopeUsesApprovedIdentityAndOwnedViews",
+      "TestPublicLoadLedgerIdempotenceAndApprovedReseat",
+      "TestPublicLoadLedgerReadinessCancellationAndQuiescedRead",
+      "TestPublicLoadLedgerCleanupRequiresExactAuthorization"
+    ],
+    "meta/restart_test.go": [
+      "TestPublicMetaRestartUsesPinReplaysTailAndRefusesChangedRules",
+      "TestPublicMetaConstructorInvalidDoesNotCreateStorage",
+      "TestPublicMetaParentCancellationJoinsWorkers"
+    ],
+    "meta/session_api_runtime_test.go": [
+      "TestActivateDeactivateReleasesLocksAndFencesDelayedRevoke",
+      "TestSessionRPCRejectsAnotherProcessInstanceAndReservedNodeLocks"
+    ],
+    "meta/session_api_test.go": [
+      "TestLockHolderUsesOwnedLocallyAppliedSession",
+      "TestSessionOwnershipAndTTLValidation",
+      "TestSessionTokenWaitingHonorsContextAndStoppedParent",
+      "TestSessionMutableAPIsRefuseStoppedHandle",
+      "TestServeOverridePersistsClearsAndStaysOutsideConsensus",
+      "TestServeOverrideInvalidOrCanceledDoesNotWrite",
+      "TestServeOverrideBindsToVerifiedLocalIdentity"
+    ],
+    "meta/session_runtime_test.go": [
+      "TestMetaIdentityPingAndExactKeepAlive",
+      "TestMetaExpiryPreservesLiveExactInstanceAndRevokesDeadLock",
+      "TestMetaActivationUsesContextWhileAnotherActivationIsInFlight",
+      "TestMetaFollowerDocumentCASAndOwnedHistory"
+    ],
+    "meta/status_test.go": [
+      "TestClusterStatusWithHealth",
+      "TestClusterStatusHealthUnknown",
+      "TestClusterStatusEffectiveState",
+      "TestClusterStatusReportsAllViewVersionsAndUsesActiveGroups",
+      "TestClusterStatusReportsLeaders",
+      "TestClusterStatusLeaderUnknown",
+      "TestClusterStatusNoRuntimeDeps",
+      "TestClusterStatusNoMetaGroup",
+      "TestClusterStatusRejectsWrongGroupAndCanceledCalls",
+      "TestClusterStatusDoesNotMixHealthFromDifferentActiveVersion"
+    ],
+    "meta/watch_test.go": [
+      "TestMetaWatchSeparatesLatestTargetAndActive",
+      "TestMetaWatchFanoutIsOwnedAndDurablyAppliedOnFollowers",
+      "TestMetaWatchSeedIsNotRepeatedByLateApply",
+      "TestMetaWatchDropOldestKeepsNewestWithoutBlocking",
+      "TestMetaWatchCancelAndBound",
+      "TestMetaStopJoinsAndClosesWatchers",
+      "TestMetaWatchRejectsCanceledAndInvalidView",
+      "TestMetaWatchConcurrentSubscribePublishCancelAndClose"
+    ],
+    "runtime_integration_test.go": [
+      "TestRuntimeIdentityMismatchParkSurvivesMetaRestart",
+      "TestRuntimeApprovedLoadParksLostWALRecoversAndRetires",
+      "TestRuntimeCloseJoinsEffectsBeforeLoadAndDatabase"
+    ],
+    "runtime_test.go": [
+      "TestRuntimeConstructorsRegistryAndSharedOwnership",
+      "TestRuntimeOwnerRejectedBeforeStoreMutation",
+      "TestRuntimeMetaConstructorAndStoppedAdmission",
+      "TestRuntimeCloseDuringConstructorRetainsOwnershipAndJoins",
+      "TestRuntimeConcurrentCloseAndCanceledStopGate",
+      "TestRuntimeForeignWALRetainedUntilExactCallerQuarantine",
+      "TestRuntimeFailedRestoreParksAndCanRetryWithoutLosingStore"
+    ],
+    "storage/walstore/durability_test.go": [
+      "TestCommitOnlyReadyIsDurableBeforeAppliedMarker",
+      "TestSnapshotCommitIsDurableBeforePublishingBoundary",
+      "TestReadyRetryDurableWhenUpstreamHardStateAlreadyAdvanced"
+    ],
+    "storage/walstore/probe_test.go": [
+      "TestColdProbeReadsRetainedLogWithoutBindingOrWorkers"
+    ],
+    "storage/walstore/refill_test.go": [
+      "TestRefillRecreatesPipelineFiles"
+    ],
+    "storage/walstore/store_test.go": [
+      "TestWalStore_Conformance",
+      "TestWalStore_ReopenAcrossSegments",
+      "TestWalStore_BaseMarkerSurvivesReopen",
+      "TestWalStore_IdentityMismatch",
+      "TestWalStore_ProbeInputs",
+      "TestWalStore_QuarantineSweep",
+      "TestWalStore_RefillerRace",
+      "TestWalStore_LoadWhileOpenSeesLastWrite",
+      "TestWalStore_SnapshotReadWriteConcurrent",
+      "TestWalStore_HardStateNoRegress",
+      "TestWalStore_FloorFiltering",
+      "TestWalStore_CorruptOnlySnapshotIsUnreadable",
+      "TestWalStore_CorruptNewestAfterCompactionFallsBack",
+      "TestWalStore_Stats",
+      "TestWalStore_CloseIdempotent",
+      "TestWalStore_ContextAndOptions",
+      "TestWalStore_CallerCannotMutateStoredState",
+      "TestWalStore_ConcurrentWriters"
+    ],
+    "tests/cluster/api_contract_test.go": [
+      "TestDocumentStatusPreviewGuardsAndHistoryThreeNodes",
+      "TestDocumentStatusPreviewGuardsAndHistoryFiveNodes",
+      "TestDocumentStatusPreviewGuardsAndHistorySevenNodes",
+      "TestNodeLifecyclePlacementAndLeaderTransferThreeNodes",
+      "TestNodeLifecyclePlacementAndLeaderTransferFiveNodes",
+      "TestNodeLifecyclePlacementAndLeaderTransferSevenNodes"
+    ],
+    "tests/cluster/cas_test.go": [
+      "TestConcurrentCASHasOneCommitAtEveryClusterSize"
+    ],
+    "tests/cluster/coalescing_test.go": [
+      "TestWALCoalescingPreservesExactCommandsAndRaisesBatchingThreeNodes",
+      "TestWALCoalescingPreservesExactCommandsAndRaisesBatchingFiveNodes",
+      "TestWALCoalescingPreservesExactCommandsAndRaisesBatchingSevenNodes"
+    ],
+    "tests/cluster/delete_wait_test.go": [
+      "TestDeletionWaitsForUnreachableFormerHostBeforeDeletingState"
+    ],
+    "tests/cluster/example_test.go": [
+      "TestComposeExampleTopologyDrainActivate"
+    ],
+    "tests/cluster/execution_test.go": [
+      "TestRemoteApplyFromNonHostMetaLeader",
+      "TestCallerRefusedDeletionRetainsDataThreeNodes",
+      "TestCallerRefusedDeletionRetainsDataFiveNodes",
+      "TestCallerRefusedDeletionRetainsDataSevenNodes"
+    ],
+    "tests/cluster/founding_test.go": [
+      "TestFoundingFullTopologyThreeNodes",
+      "TestFoundingFullTopologyFiveNodes",
+      "TestFoundingFullTopologySevenNodes",
+      "TestFoundingDelayedMemberThreeNodes",
+      "TestFoundingDelayedMemberFiveNodes",
+      "TestFoundingDelayedMemberSevenNodes",
+      "TestFoundingTimeoutExitThreeNodes",
+      "TestFoundingTimeoutExitFiveNodes",
+      "TestFoundingTimeoutExitSevenNodes",
+      "TestRetainedFoundingStateBypassesAbsentPeerGateThreeNodes",
+      "TestRetainedFoundingStateBypassesAbsentPeerGateFiveNodes",
+      "TestRetainedFoundingStateBypassesAbsentPeerGateSevenNodes"
+    ],
+    "tests/cluster/growth_test.go": [
+      "TestRuntimeGrowthExposesLearnerBeforePromotionAndSurvivesRestart",
+      "TestCompactedLearnerCatchesUpFromFullSnapshot"
+    ],
+    "tests/cluster/health_recovery_test.go": [
+      "TestStoppedFollowerHealthUsesActivePolicyAndRetainsStagingThreeNodes",
+      "TestStoppedFollowerHealthUsesActivePolicyAndRetainsStagingFiveNodes",
+      "TestStoppedFollowerHealthUsesActivePolicyAndRetainsStagingSevenNodes"
+    ],
+    "tests/cluster/identity_test.go": [
+      "TestIdentityReadinessAndMinorityOverrideThreeNodes",
+      "TestIdentityReadinessAndMinorityOverrideFiveNodes",
+      "TestIdentityReadinessAndMinorityOverrideSevenNodes"
+    ],
+    "tests/cluster/intentional_learner_test.go": [
+      "TestIntentionalLearnerSurvivesReconciliationUntilApprovedPromotion"
+    ],
+    "tests/cluster/join_test.go": [
+      "TestMetaAdmissionUsesLearnerBeforeServingAndRetainsIdentityOnRestart",
+      "TestAdmissionExecutionResumesAfterMetaLeaderTransferWithoutNewAttempt"
+    ],
+    "tests/cluster/load_test.go": [
+      "TestLoadIngressAndExactIndependentCommandsThreeNodes",
+      "TestLoadIngressAndExactIndependentCommandsFiveNodes",
+      "TestLoadIngressAndExactIndependentCommandsSevenNodes"
+    ],
+    "tests/cluster/main_test.go": [
+      "TestMain"
+    ],
+    "tests/cluster/membership_test.go": [
+      "TestDrainViaNonLeaderPreservesMetaMembership",
+      "TestDrainApprovalChecksObservedActualMetaQuorum",
+      "TestForceRetireDeadNodePreservesSafetyThreeNodes",
+      "TestForceRetireDeadNodePreservesSafetyFiveNodes",
+      "TestForceRetireDeadNodePreservesSafetySevenNodes"
+    ],
+    "tests/cluster/meta_protocol_test.go": [
+      "TestMetaCredentialClusterIsolationThreeNodes",
+      "TestMetaCredentialClusterIsolationFiveNodes",
+      "TestMetaCredentialClusterIsolationSevenNodes"
+    ],
+    "tests/cluster/meta_test.go": [
+      "TestMetaConsensusLoadReplicationAndRetainedLeaderRecovery"
+    ],
+    "tests/cluster/performance_test.go": [
+      "TestPerf_ConcurrentHealthThreeNodes",
+      "TestPerf_ConcurrentHealthFiveNodes",
+      "TestPerf_ConcurrentHealthSevenNodes",
+      "TestPerf_ConcurrentWritesThreeNodes",
+      "TestPerf_ConcurrentWritesFiveNodes",
+      "TestPerf_ConcurrentWritesSevenNodes"
+    ],
+    "tests/cluster/pool_test.go": [
+      "TestPoolReusesIsolatedNetworkAndReplacesAllPersistentState",
+      "TestPoolSimultaneousUnitsHavePrivateRoutingAndClusterState",
+      "TestPoolCanceledBootReturnsUnitOnlyAfterOwnedResourcesAreGone",
+      "TestPoolCanceledWarmupJoinsAndRemovesItsNetworks"
+    ],
+    "tests/cluster/pressure_test.go": [
+      "TestPendingPressureBoundAndIndependentApplyThreeNodes",
+      "TestPendingPressureBoundAndIndependentApplyFiveNodes",
+      "TestPendingPressureBoundAndIndependentApplySevenNodes"
+    ],
+    "tests/cluster/projection_test.go": [
+      "TestCallerProjectionStallDoesNotShedLocalWALThreeNodes",
+      "TestCallerProjectionStallDoesNotShedLocalWALFiveNodes",
+      "TestCallerProjectionStallDoesNotShedLocalWALSevenNodes"
+    ],
+    "tests/cluster/recovery_test.go": [
+      "TestCorrelatedLoadWALStallPreservesMetaAndRecoversThreeNodes",
+      "TestDurableOwnSnapshotAndWALRecoverTenCommandsThreeNodes",
+      "TestDurableOwnSnapshotAndWALRecoverTenCommandsFiveNodes",
+      "TestDurableOwnSnapshotAndWALRecoverTenCommandsSevenNodes",
+      "TestCorrelatedLoadWALStallPreservesMetaAndRecoversFiveNodes",
+      "TestCorrelatedLoadWALStallPreservesMetaAndRecoversSevenNodes",
+      "TestParkedVotedReplicaReseatThreeNodes",
+      "TestParkedVotedReplicaReseatFiveNodes",
+      "TestParkedVotedReplicaReseatSevenNodes",
+      "TestLostMetaLeaderAutomaticallyReadmitsFreshIdentityThreeNodes",
+      "TestLostMetaLeaderAutomaticallyReadmitsFreshIdentityFiveNodes",
+      "TestLostMetaLeaderAutomaticallyReadmitsFreshIdentitySevenNodes"
+    ],
+    "tests/cluster/rejoin_test.go": [
+      "TestDuplicateNameIntruderExitsWithoutDisturbingHolderThreeNodes",
+      "TestDuplicateNameIntruderExitsWithoutDisturbingHolderFiveNodes",
+      "TestDuplicateNameIntruderExitsWithoutDisturbingHolderSevenNodes",
+      "TestExcludedSameDiskProcessParksAndReadmitsThreeNodes",
+      "TestExcludedSameDiskProcessParksAndReadmitsFiveNodes",
+      "TestExcludedSameDiskProcessParksAndReadmitsSevenNodes",
+      "TestDownNodeRotatedIdentityQuarantinesAndRejoinsThreeNodes",
+      "TestDownNodeRotatedIdentityQuarantinesAndRejoinsFiveNodes",
+      "TestDownNodeRotatedIdentityQuarantinesAndRejoinsSevenNodes"
+    ],
+    "tests/cluster/resources_test.go": [
+      "TestPerf_FifteenGroupResourcesThreeNodes",
+      "TestPerf_FifteenGroupResourcesFiveNodes",
+      "TestPerf_FifteenGroupResourcesSevenNodes"
+    ],
+    "tests/cluster/scale_test.go": [
+      "TestFifteenLoadGroupsCommitIndependentlyAndDeleteEveryLocalStore"
+    ],
+    "tests/cluster/shutdown_test.go": [
+      "TestMultiGroupControllerShutdownAtFiveAndSevenNodes"
+    ],
+    "tests/cluster/stability_test.go": [
+      "TestStability_HealthAndExactLocalReadsThreeNodes",
+      "TestStability_HealthAndExactLocalReadsFiveNodes",
+      "TestStability_HealthAndExactLocalReadsSevenNodes",
+      "TestStability_RetainedFollowerThreeCyclesThreeNodes",
+      "TestStability_RetainedFollowerThreeCyclesFiveNodes",
+      "TestStability_RetainedFollowerThreeCyclesSevenNodes"
+    ],
+    "tests/cluster/testapp/apply_http_test.go": [
+      "TestApplyRejectsModeFlagsBeforeCallingMeta"
+    ],
+    "tests/cluster/testapp/cleanup_test.go": [
+      "TestConcurrentAuthorizedCleanupRetriesAreIdempotent"
+    ],
+    "tests/cluster/testapp/hooks_cluster_test.go": [
+      "TestClusterBarrierCancellationAndAuthenticatedRelease",
+      "TestCallerDeletionRefusalRecordsScopeAndReleases"
+    ],
+    "tests/cluster/testapp/hooks_projection_cluster_test.go": [
+      "TestCallerProjectionStallCatchesUpFullStateAndJoins",
+      "TestCallerProjectionBlockedWriterCancellationAndRetirement"
+    ],
+    "tests/cluster/testapp/hooks_wal_cluster_test.go": [
+      "TestControlledWALCancellationAndExactDurableAccounting"
+    ],
+    "tests/cluster/testapp/http_test.go": [
+      "TestHTTPVersionRequiresOneExactStrongIdentity",
+      "TestHTTPFaultsHaveStableStatusAndCASVersions"
+    ],
+    "tests/cluster/testapp/machine_test.go": [
+      "TestMachineRetryAndSnapshotPreserveRequestIdentity",
+      "TestInvalidLoadCommandsAreBusinessResults"
+    ],
+    "tests/cluster/testapp/pending_engine_test.go": [
+      "TestProposalPressureBoundsCancellationAndRecovery"
+    ],
+    "tests/cluster/testapp/readmission_test.go": [
+      "TestReadmissionVerifiesActualRetainedIDWithinEntirePreviousCatalog"
+    ],
+    "tests/cluster/testapp/rest_runtime_test.go": [
+      "TestFixtureRESTDrainActivateAndRetirement",
+      "TestFixtureRESTExcludeAndReadmitRetainedNode"
+    ],
+    "tests/cluster/topology_test.go": [
+      "TestStagedTopologyDoesNotChangeApprovedMembershipOrStartGroups",
+      "TestStagedReplicaRepairRequiresExplicitApplyThreeNodes",
+      "TestStagedReplicaRepairRequiresExplicitApplyFiveNodes",
+      "TestStagedReplicaRepairRequiresExplicitApplySevenNodes",
+      "TestAddressFreeTopologyRoutesMetaAndLoadThreeNodes",
+      "TestAddressFreeTopologyRoutesMetaAndLoadFiveNodes",
+      "TestAddressFreeTopologyRoutesMetaAndLoadSevenNodes"
+    ],
+    "tests/cluster/transport_test.go": [
+      "TestDeadPeerPreservesContinuousLeadershipThreeNodes",
+      "TestDeadPeerPreservesContinuousLeadershipFiveNodes",
+      "TestDeadPeerPreservesContinuousLeadershipSevenNodes"
+    ],
+    "topology/document_test.go": [
+      "TestDocumentLookupHelpers",
+      "TestDocumentCloneIsolation",
+      "TestGroupBounds",
+      "TestEffectiveNodeStateDoesNotMutate",
+      "TestAllocateMemberID",
+      "TestDocumentValidate",
+      "TestLimitsCapacityAndExcludedTombstones",
+      "TestMetaIgnoresNodeTypeEligibility",
+      "TestValidateTransitionRetiredIdentities",
+      "TestAuthorizedStepMatchesExactScope"
+    ],
+    "topology/drain_safety_test.go": [
+      "TestDrainSafetyUsesActualQuorumAndKnownRetainedLeader",
+      "TestMetaDrainSafetyActualQuorumSizes",
+      "TestMetaDrainSafetyFailsClosed"
+    ],
+    "topology/health_serialization_test.go": [
+      "TestClusterStatusHealthSerializationUnknown",
+      "TestClusterStatusHealthSerializationKnown",
+      "TestClusterStatusNoHealthKnownField"
+    ],
+    "topology/health_test.go": [
+      "TestEvaluateGroupHealth",
+      "TestEvaluateGroupHealthBelowMinIndependent",
+      "TestEvaluateGroupHealthUnknown",
+      "TestEvaluateDataAndAllGroupHealth"
+    ],
+    "topology/planner_bench_test.go": [
+      "TestPlannerMatrixDeterministicSafeAndWithinDeadline"
+    ],
+    "topology/planner_test.go": [
+      "TestBuildPlanFreshFounding",
+      "TestBuildPlanFreshFoundingAddsIntentionalLearnerAfterFounders",
+      "TestBuildPlanEstablishedVoterGrowAddsLearnerThenVoter",
+      "TestBuildPlanExistingLearnerPromotion",
+      "TestBuildPlanIntentionalLearnerStopsAfterAdd",
+      "TestBuildPlanDemotesVoterAndTransfersLeader",
+      "TestBuildPlanIncludesMetaLearnerThenVoterChange",
+      "TestBuildPlanReplacementAtMaxShrinksFirst",
+      "TestBuildPlanWholeGroupDeletionStopsEveryFormerHost",
+      "TestBuildPlanRefusesUnsafeDisjointReplacement",
+      "TestBuildPlanEstablishedGroupMissingGloballyIsUnavailable",
+      "TestBuildPlanRefusesObservedGroupWithoutActiveIdentities",
+      "TestBuildPlanDeterministic",
+      "TestValidatePlanShapeRejectsMissingAcknowledgementAdjacency",
+      "TestPlannerRejectsMalformedObservedMembership"
+    ]
+  }
+}

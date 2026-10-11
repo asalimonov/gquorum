@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/asalimonov/gquorum"
 	"io"
 	"log/slog"
 	"net"
@@ -16,7 +17,6 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/events"
-	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -50,22 +50,25 @@ func newRESTCluster(t *testing.T) *restCluster {
 		}
 		c.peers = append(c.peers, peer{Name: fmt.Sprintf("node%d", i+1), Type: typ, MemberID: uint64(i + 1), MetaAddress: ls.meta.Addr().String(), LoadAddress: ls.load.Addr().String(), HTTPAddress: ls.http.Addr().String()})
 	}
-	t.Cleanup(func() {
-		for _, app := range c.apps {
-			app.RequestClose()
-		}
-		for _, app := range c.apps {
-			closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			err := app.Close(closeCtx)
-			cancel()
-			if err != nil {
-				t.Errorf("close example: %v", err)
+	defer func() {
+		t.Cleanup(func() {
+			c.client.CloseIdleConnections()
+			for _, app := range c.apps {
+				app.RequestClose()
 			}
-		}
-	})
+			for _, app := range c.apps {
+				closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				err := app.Close(closeCtx)
+				cancel()
+				if err != nil {
+					t.Errorf("close example: %v", err)
+				}
+			}
+		})
+	}()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	for i, p := range c.peers {
-		cfg := config{NodeName: p.Name, NodeType: p.Type, ClusterID: t.Name(), InstanceID: fmt.Sprintf("process-%d", i), DataDir: filepath.Join(t.TempDir(), p.Name), Credential: "example-test", Peers: c.peers, Limits: (topology.Limits{}).WithDefaults(), SessionTTL: 3 * time.Second, TickInterval: 50 * time.Millisecond, SnapshotThreshold: 8, Bootstrap: true, Scheduling: metaservice.SchedulingOptions{Disabled: true}}
+		cfg := config{NodeName: p.Name, NodeType: p.Type, ClusterID: t.Name(), InstanceID: fmt.Sprintf("process-%d", i), DataDir: filepath.Join(t.TempDir(), p.Name), Credential: "example-test", Peers: c.peers, Limits: (topology.Limits{}).WithDefaults(), SessionTTL: 3 * time.Second, TickInterval: 50 * time.Millisecond, SnapshotThreshold: 8, Bootstrap: true, Scheduling: gquorum.SchedulingOptions{Disabled: true}}
 		app, err := newApplication(cfg, logger, &all[i])
 		if err != nil {
 			t.Fatal(err)
@@ -156,14 +159,14 @@ func (c *restCluster) document(t *testing.T, node int, view string) topology.Doc
 	}
 	return doc
 }
-func (c *restCluster) mutate(t *testing.T, path, method string, body any) metaservice.MutationResult {
+func (c *restCluster) mutate(t *testing.T, path, method string, body any) gquorum.MutationResult {
 	t.Helper()
 	doc := c.document(t, 0, "latest")
 	code, data := c.request(t, 0, method, path, body, doc.Version)
 	if code != 202 {
 		t.Fatalf("%s %s: %d %s", method, path, code, data)
 	}
-	var result metaservice.MutationResult
+	var result gquorum.MutationResult
 	if err := json.Unmarshal(data, &result); err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +184,7 @@ func (c *restCluster) mutate(t *testing.T, path, method string, body any) metase
 func (c *restCluster) waitOperator(t *testing.T, id topology.OperatorID) {
 	t.Helper()
 	c.wait(t, "execution "+string(id), 25*time.Second, func() bool {
-		code, data := c.request(t, 0, "GET", "/api/executions/"+string(id), nil, 0)
+		code, data := c.request(t, 0, "GET", "/api/operators/"+string(id), nil, 0)
 		if code != 200 {
 			return false
 		}
@@ -216,11 +219,11 @@ func TestFixtureRESTDrainActivateAndRetirement(t *testing.T) {
 	}
 	c.mutate(t, "/api/groups/demo/placement", "PUT", map[string]any{
 		"placement": topology.PlacementRule{MinReplicas: 2, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}},
-		"mutation":  metaservice.MutationOptions{Apply: true},
+		"mutation":  gquorum.MutationOptions{Approve: true},
 	})
 	c.mutate(t, "/api/groups/demo/placement", "PUT", map[string]any{
 		"placement": topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3},
-		"mutation":  metaservice.MutationOptions{Apply: true},
+		"mutation":  gquorum.MutationOptions{Approve: true},
 	})
 	doc = c.document(t, 0, "active")
 	for _, replica := range doc.Group("demo").Replicas {
@@ -248,10 +251,10 @@ func TestFixtureRESTDrainActivateAndRetirement(t *testing.T) {
 	if code, data := c.request(t, 2, "PUT", "/api/load/workers/keys/key", map[string]string{"request_id": "write-1", "value": "changed"}, 0); code != 409 {
 		t.Fatal("conflicting request identity", code, string(data))
 	}
-	if code, data := c.request(t, 0, "POST", "/api/nodes/node1/drain", metaservice.MutationOptions{Apply: true}, 1); code != 409 {
+	if code, data := c.request(t, 0, "POST", "/api/nodes/node1/drain", gquorum.MutationOptions{Approve: true}, 1); code != 409 {
 		t.Fatal("CAS guard", code, string(data))
 	}
-	c.mutate(t, "/api/nodes/node3/drain", "POST", metaservice.MutationOptions{Actor: "operator", Apply: true})
+	c.mutate(t, "/api/nodes/node3/drain", "POST", gquorum.MutationOptions{Actor: "operator", Approve: true})
 	doc = c.document(t, 0, "active")
 	if len(doc.MetaGroup().Replicas) != 3 || len(doc.Group("demo").Replicas) != 2 || len(doc.Group("workers").Replicas) != 2 {
 		t.Fatal("drain changed wrong memberships", doc)
@@ -260,7 +263,7 @@ func TestFixtureRESTDrainActivateAndRetirement(t *testing.T) {
 		t.Fatal("drained node still ready", code, string(data))
 	}
 
-	c.mutate(t, "/api/nodes/node3/activate", "POST", metaservice.MutationOptions{Apply: true})
+	c.mutate(t, "/api/nodes/node3/activate", "POST", gquorum.MutationOptions{Approve: true})
 	doc = c.document(t, 0, "active")
 	for _, replica := range doc.Group("demo").Replicas {
 		if replica.NodeName == "node3" && replica.ReplicaID <= oldDemoID {
@@ -270,7 +273,7 @@ func TestFixtureRESTDrainActivateAndRetirement(t *testing.T) {
 	c.wait(t, "reactivated replica serving", 5*time.Second, func() bool { code, _ := c.request(t, 2, "GET", "/health/ready", nil, 0); return code == 200 })
 	// The fixed policy refuses a two-voter group's shrink below its current
 	// quorum. A staged worker drain can be inspected but cannot be approved.
-	code, data := c.request(t, 0, "POST", "/api/nodes/node1/drain", metaservice.MutationOptions{Apply: true}, doc.Version)
+	code, data := c.request(t, 0, "POST", "/api/nodes/node1/drain", gquorum.MutationOptions{Approve: true}, doc.Version)
 	if code != 422 {
 		t.Fatal("two-voter shrink should be refused", code, string(data))
 	}
@@ -278,7 +281,7 @@ func TestFixtureRESTDrainActivateAndRetirement(t *testing.T) {
 	// while the staging response was acknowledged by the leader.
 	c.wait(t, "failed approval's staged edit applied locally", 5*time.Second, func() bool { return c.document(t, 0, "latest").Version == doc.Version+1 })
 	staged := c.document(t, 0, "latest")
-	body := map[string]any{"placement": topology.PlacementRule{MinReplicas: 2, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}}, "mutation": metaservice.MutationOptions{Apply: true}}
+	body := map[string]any{"placement": topology.PlacementRule{MinReplicas: 2, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}}, "mutation": gquorum.MutationOptions{Approve: true}}
 	if code, data := c.request(t, 0, "PUT", "/api/groups/workers/placement", body, staged.Version); code != 422 {
 		t.Fatal("unsatisfiable placement", code, string(data))
 	}
@@ -288,11 +291,11 @@ func TestFixtureRESTDrainActivateAndRetirement(t *testing.T) {
 	if code != 200 {
 		t.Fatal("restore staged document", code, string(data))
 	}
-	var restored metaservice.MutationResult
+	var restored gquorum.MutationResult
 	if err := json.Unmarshal(data, &restored); err != nil {
 		t.Fatal(err)
 	}
-	code, data = c.request(t, 0, "POST", fmt.Sprintf("/api/topology/%d/apply", restored.Document.Version), nil, 0)
+	code, data = c.request(t, 0, "POST", fmt.Sprintf("/api/topology/%d/approve", restored.Document.Version), nil, 0)
 	if code != 202 {
 		t.Fatal("apply restored document", code, string(data))
 	}
@@ -322,10 +325,10 @@ func TestFixtureRESTDrainActivateAndRetirement(t *testing.T) {
 	if code, data := c.request(t, 2, "GET", "/api/load/demo/keys/recover", nil, 0); code != 200 || !bytes.Contains(data, []byte(`"value":"value-19"`)) {
 		t.Fatal("retry overwrote recovered data", code, string(data))
 	}
-	c.mutate(t, "/api/groups", "POST", map[string]any{"group": metaservice.GroupSpec{ID: "temporary", Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}}}, "mutation": metaservice.MutationOptions{Apply: true}})
-	c.mutate(t, "/api/groups/temporary", "DELETE", metaservice.MutationOptions{Apply: true})
+	c.mutate(t, "/api/groups", "POST", map[string]any{"group": gquorum.GroupSpec{ID: "temporary", Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}}}, "mutation": gquorum.MutationOptions{Approve: true}})
+	c.mutate(t, "/api/groups/temporary", "DELETE", gquorum.MutationOptions{Approve: true})
 	doc = c.document(t, 0, "latest")
-	if code, data := c.request(t, 0, "POST", "/api/groups", map[string]any{"group": metaservice.GroupSpec{ID: "temporary"}, "mutation": metaservice.MutationOptions{Apply: true}}, doc.Version); code != 409 || !bytes.Contains(data, []byte(`"group_retired"`)) {
+	if code, data := c.request(t, 0, "POST", "/api/groups", map[string]any{"group": gquorum.GroupSpec{ID: "temporary"}, "mutation": gquorum.MutationOptions{Approve: true}}, doc.Version); code != 409 || !bytes.Contains(data, []byte(`"group_retired"`)) {
 		t.Fatal("group ID reused", code, string(data))
 	}
 
@@ -343,7 +346,7 @@ func TestFixtureRESTDrainActivateAndRetirement(t *testing.T) {
 	if stream.StatusCode != 200 || stream.Header.Get("Content-Type") != "text/event-stream" {
 		t.Fatal("SSE response", stream.StatusCode)
 	}
-	status, err := c.apps[0].Status(c.ctx, "demo")
+	status, err := c.apps[0].groupStatus(c.ctx, "demo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,7 +426,7 @@ func TestFixtureRESTDrainActivateAndRetirement(t *testing.T) {
 		code, data := c.request(t, 0, "GET", "/api/load/workers/keys/key", nil, 0)
 		return code == 200 && bytes.Contains(data, []byte(`"value":"first"`))
 	})
-	if restarted.meta.Identity().MemberID != old.meta.Identity().MemberID {
+	if restarted.node.Identity().MemberID != old.node.Identity().MemberID {
 		t.Fatal("restart changed durable meta ID")
 	}
 
@@ -441,16 +444,16 @@ func TestFixtureRESTExcludeAndReadmitRetainedNode(t *testing.T) {
 		}
 	}
 	old := c.apps[2]
-	oldIdentity := old.meta.Identity()
+	oldIdentity := old.node.Identity()
 	// Drain load replicas first; the excluded process shuts down when its actual
 	// meta membership is removed, so it cannot receive later cleanup callbacks.
-	c.mutate(t, "/api/nodes/node3/drain", "POST", metaservice.MutationOptions{Apply: true})
+	c.mutate(t, "/api/nodes/node3/drain", "POST", gquorum.MutationOptions{Approve: true})
 	doc := c.document(t, 0, "latest")
-	code, data := c.request(t, 0, "POST", "/api/nodes/node3/exclude", metaservice.MutationOptions{Actor: "operator", Apply: true}, doc.Version)
+	code, data := c.request(t, 0, "POST", "/api/nodes/node3/exclude", gquorum.MutationOptions{Actor: "operator", Approve: true}, doc.Version)
 	if code != 202 {
 		t.Fatal("exclude", code, string(data))
 	}
-	var excluded metaservice.MutationResult
+	var excluded gquorum.MutationResult
 	if err := json.Unmarshal(data, &excluded); err != nil {
 		t.Fatal(err)
 	}
@@ -466,17 +469,17 @@ func TestFixtureRESTExcludeAndReadmitRetainedNode(t *testing.T) {
 	c.wait(t, "exclusion on surviving nodes", 5*time.Second, func() bool {
 		return c.document(t, 0, "active").Version == excluded.Document.Version && c.document(t, 1, "active").Version == excluded.Document.Version
 	})
-	oldPin, found, err := metaservice.LoadStoredIdentity(filepath.Join(old.cfg.DataDir, "meta.bolt"))
+	oldPin, found, err := gquorum.LoadStoredIdentity(filepath.Join(old.cfg.DataDir, "meta.bolt"))
 	if err != nil || !found || oldPin.MemberID != oldIdentity.MemberID {
 		t.Fatal("closed retained pin", oldPin, found, err)
 	}
 	doc = c.document(t, 0, "latest")
-	body := map[string]any{"node": nodeForPeer(c.peers[2]), "mutation": metaservice.MutationOptions{Actor: "operator", Apply: true}}
+	body := map[string]any{"node": nodeForPeer(c.peers[2]), "mutation": gquorum.MutationOptions{Actor: "operator", Approve: true}}
 	code, data = c.request(t, 0, "POST", "/api/nodes", body, doc.Version)
 	if code != 202 {
 		t.Fatal("readmit declaration", code, string(data))
 	}
-	var added metaservice.MutationResult
+	var added gquorum.MutationResult
 	if err := json.Unmarshal(data, &added); err != nil {
 		t.Fatal(err)
 	}
@@ -499,14 +502,14 @@ func TestFixtureRESTExcludeAndReadmitRetainedNode(t *testing.T) {
 		code, data := c.request(t, 2, "GET", "/api/load/demo/keys/readmit", nil, 0)
 		return code == 200 && bytes.Contains(data, []byte(`"value":"value-19"`))
 	})
-	if replacement.meta.Identity().MemberID <= oldIdentity.MemberID || replacement.meta.Identity().InstanceID == oldIdentity.InstanceID {
-		t.Fatal("readmission reused old identity", replacement.meta.Identity())
+	if replacement.node.Identity().MemberID <= oldIdentity.MemberID || replacement.node.Identity().InstanceID == oldIdentity.InstanceID {
+		t.Fatal("readmission reused old identity", replacement.node.Identity())
 	}
 	backups, err := filepath.Glob(filepath.Join(cfg.DataDir, "meta.bolt.retired-*"))
 	if err != nil || len(backups) != 1 {
 		t.Fatal("exact old pin was not quarantined", backups, err)
 	}
-	retired, found, err := metaservice.LoadStoredIdentity(backups[0])
+	retired, found, err := gquorum.LoadStoredIdentity(backups[0])
 	if err != nil || !found || retired != oldPin {
 		t.Fatal("wrong physical pin quarantined", retired, oldPin, err)
 	}
@@ -517,8 +520,8 @@ func TestFixtureRESTExcludeAndReadmitRetainedNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	current, found, err := metaservice.LoadStoredIdentity(filepath.Join(cfg.DataDir, "meta.bolt"))
-	if err != nil || !found || current.MemberID != replacement.meta.Identity().MemberID {
+	current, found, err := gquorum.LoadStoredIdentity(filepath.Join(cfg.DataDir, "meta.bolt"))
+	if err != nil || !found || current.MemberID != replacement.node.Identity().MemberID {
 		t.Fatal("replacement pin", current, found, err)
 	}
 }

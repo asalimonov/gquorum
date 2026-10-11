@@ -12,7 +12,7 @@ import (
 
 	"encoding/json"
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/internal/raftengine"
+	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/storage/walstore"
 	"go.etcd.io/raft/v3"
@@ -48,10 +48,11 @@ func TestProposalPressureBoundsCancellationAndRecovery(t *testing.T) {
 			const limit = 32
 			s := &pressureStore{Store: pressureOpenStore(t)}
 			m := newMachine()
-			g, err := raftengine.New(raftengine.Options{GroupID: "load", NodeName: "1", ClusterID: "cluster", ReplicaID: 1, Mode: raftengine.Founding, Peers: []raft.Peer{{ID: 1}}, Timing: raftengine.Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 50}, MaxPendingProposals: limit, Store: s, Machine: m, Transport: pressureTransport{}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+			owner, err := load.NewStandalone(load.StandaloneOptions{Identity: storage.Identity{GroupID: "load", NodeName: "1", ClusterID: "cluster", ReplicaID: 1}, Mode: load.Founding, Peers: []raft.Peer{{ID: 1}}, Engine: load.EngineOptions{Timing: load.Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 50}, MaxPendingProposals: limit}, Store: s, StateMachine: m, Transport: pressureTransport{}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 			pressureMust(t, err)
-			t.Cleanup(func() { pressureMust(t, g.Stop(pressureContext(t))) })
-			pressureMust(t, g.Start(t.Context()))
+			g := owner.Group()
+			t.Cleanup(func() { pressureMust(t, owner.Stop(pressureContext(t))) })
+			pressureMust(t, owner.Start(t.Context()))
 			pressureEventually(t, g.IsLeader)
 			s.mu.Lock()
 			s.gate = make(chan struct{})
@@ -95,7 +96,7 @@ func TestProposalPressureBoundsCancellationAndRecovery(t *testing.T) {
 			}
 			if stop {
 				started := time.Now()
-				pressureMust(t, g.Stop(pressureContext(t)))
+				pressureMust(t, owner.Stop(pressureContext(t)))
 				if time.Since(started) > time.Second || g.ProposalStats().AwaitingCommit != 0 {
 					t.Fatal("blocked writer or waiter retained after shutdown")
 				}
@@ -115,9 +116,9 @@ func TestProposalPressureBoundsCancellationAndRecovery(t *testing.T) {
 type pressureTransport struct{}
 
 func (pressureTransport) Send(ctx context.Context, _ []raftpb.Message) error { return ctx.Err() }
-func pressureCommand(id string) raftengine.Proposal {
+func pressureCommand(id string) load.Proposal {
 	data, _ := json.Marshal(putCommand{RequestID: id, Key: id, Value: id})
-	return raftengine.Proposal{RequestID: id, Data: data}
+	return load.Proposal{RequestID: id, Data: data}
 }
 func pressureOpenStore(t *testing.T) *walstore.Store {
 	t.Helper()
