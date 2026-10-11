@@ -2,7 +2,8 @@
 
 Status: clean API refactor, separate group/replica operations and a deliberate
 public group wrapper agreed. Startup-selectable built-in policies are a user
-requirement. Detailed policy and hosting contracts are under discussion.
+requirement. Managed local replica lifecycle through a caller factory and
+transport is agreed. Detailed policy and lifecycle contracts are under discussion.
 This is a discussion record, not an implementation specification.
 
 ## Initial request
@@ -479,7 +480,210 @@ resolved choices and any reason a requested action is waiting or refused.
 > is to retain explicit lifecycle orchestration in caller code and provide helper
 > functions, which removes less integration work.
 
-No answer recorded yet. The catalog and names above are draft recommendations.
+User answer: "I agree."
+
+Resolution: Node manages approved local replica creation, recovery, membership
+and retirement by default. Callers provide their application components and
+load transport. Explicit local group operations remain available. The policy
+catalog and exact signatures above remain draft recommendations.
+
+## Iteration 3: managed hosting contracts
+
+### One normal integration path
+
+Use the same library executor for automatic topology effects, restart recovery
+and explicit local group operations. Avoid independent public managed/manual
+hosting implementations that could disagree about identity or storage ownership.
+
+The caller supplies application state machines through one factory function,
+sets storage and networking once on NodeOptions, and chooses policy values.
+Node derives its replica's permitted startup mode, peer set and identity from
+approved topology and retained evidence. The normal API should not ask the caller
+to recreate those decisions in every factory invocation.
+
+This refines the first iteration's `StartLoadGroup(ctx, options)` sketch: with
+dependencies registered at node construction, the common start call only needs
+an exact `ReplicaRef`. The factory receives a richer, immutable specification
+including cluster, node, group, replica and approved group description. Start
+never accepts arbitrary peers that differ from that declaration.
+
+### Factory and ownership model
+
+Candidate shape, shown independently of the final package placement:
+
+```go
+type GroupFactory func(context.Context, ReplicaSpec) (GroupApplication, error)
+
+type GroupApplication struct {
+    StateMachine load.StateMachine
+    Close        func(context.Context) error // optional per-replica resource release
+}
+```
+
+The factory creates application resources; it does not inspect action kinds or
+implement learner promotion, leadership transfer, stop or Raft cleanup. A caller
+with different machine types may dispatch by its own group metadata, which is
+application logic rather than a switch over consensus lifecycle operations.
+
+Ownership proposal:
+
+| Resource | Ownership |
+| --- | --- |
+| Included meta database | Node opens/closes it at its explicit supplied path. |
+| Included WAL backend selected through node storage settings | Node opens/closes it at its explicit supplied root. |
+| Injected shared custom `storage.Store` | Borrowed; caller closes it after Node has stopped. |
+| Injected load transport and caller listeners | Borrowed; caller manages the wire protocol and connection lifecycle. |
+| Successful factory result | Node owns that replica's machine lifetime and invokes its optional Close after engine work has joined. |
+| Failed factory call | Factory releases resources it acquired before returning its error; ownership was not transferred. |
+| Injected event bus/journal | Borrowed; caller closes them after producers have stopped. |
+
+The provided WAL selection and custom-store injection are mutually exclusive;
+constructors reject ambiguous settings. A meta-only node supplies neither a load
+factory nor load transport. Enabling load hosting requires a complete set of
+factory, transport and storage dependencies.
+
+Factory cancellation governs acquisition. A successful replica runs under Node's
+lifetime; it cannot inherit a short-lived incoming effect request's context.
+After successful transfer of ownership, Close must be available for failed startup
+as well as ordinary shutdown. Calls are serialized with replica retirement.
+If resource release fails or does not finish, the node retains a failed/stopping
+record and must not create a competing successor instance blindly. Exact retry
+and terminal-error behavior belongs in the final lifecycle specification.
+
+Persistent application cleanup is separate from closing a live machine. A typed
+retirement hook receives an exact, authorized retirement description, and must
+work without constructing the retired machine after restart. The library
+verifies authorization and Raft-state ownership; the hook verifies and disposes
+only the application's resources for that same identity. External transactions
+and idempotent retry verification remain application responsibilities.
+
+### One load-network adapter with typed operations
+
+Recommendation: combine load Raft delivery and the small set of remote control
+operations into one load transport interface. The existing public GroupController
+is then internal orchestration rather than an application implementation burden.
+The caller supplies encoding, authentication, addressing and RPC/stream machinery.
+
+Illustrative shape, with public value types to be specified in the target:
+
+```go
+type Transport interface {
+    SendRaft(ctx context.Context, batch RaftBatch) error
+    ReadReplica(ctx context.Context, request ReplicaQuery) (ReplicaStatus, error)
+    ApplyAction(ctx context.Context, request ActionRequest) (ActionResult, error)
+}
+```
+
+`Node` provides matching receiving methods, so an application can connect each
+RPC handler to one method after authentication and decoding. Three typed
+operations avoid a caller-written action switch and avoid an untyped command bus.
+Batch routing keeps the existing cancellation and independent-destination
+backpressure guarantees. Snapshot send completion/failure reporting must remain
+available to the library even if the caller's transport is asynchronous.
+
+Transport values must include explicit cluster affiliation and sender/receiver
+identity, with no wildcard acceptance. The action's target replica is distinct
+from the replica receiving a control request: adding a learner is sent to the
+current leader, while the authorized action identifies the learner. Both tuples
+must be validated. Library receivers revalidate after waits and serialize exact
+local changes; transport authentication alone is not authorization.
+
+Whole-group creation and retirement are expanded internally into exact local
+work. Delete retries must protect successor state and account for previously
+prepared replicas, even where the original topology action is group-wide.
+Malformed replies or an absent confirmation cannot count as effect success.
+
+This adapter is a Go contract. It does not install a load gRPC server, prescribe
+a protobuf schema or carry load payloads over the built-in meta protocol. The
+test application continues to own its load protocol, and the small example
+continues to demonstrate meta only.
+
+### Deliberate group handle and local ownership
+
+A public group handle exposes proposals, identity, leadership/status, readiness
+and explicit snapshot requests. Raw engine construction, startup, membership
+translation, ledger manipulation and backend worker controls stay behind Node.
+
+Any public stop operation on a group handle must delegate to Node's local stop
+path. It must not call the internal engine's Stop in isolation, because doing so
+would bypass stop intent and let the supervisor restart it. Exposing stop only
+through `node.StopLoadGroup` is the simpler initial surface. The standalone load
+use case needs an explicit equivalent owner in the final public API inventory.
+
+Explicit membership changes are cluster operations that produce approved steps.
+The normal managed group handle must not provide a second, unauthorised route
+around the cluster planner by forwarding raw `ProposeConfChange` methods.
+
+### Explicit stop versus automatic recovery
+
+Observed current behavior: `tests/cluster/testapp/app.go:superviseLoads` scans
+Active every 250 ms and opens missing local handles. Moving this loop into Node
+without a stop-intent contract would make an explicit StopLoadGroup temporary
+and surprising.
+
+Recommendation for the default behavior:
+
+1. `StopLoadGroup(ctx, ref)` records a local hold for that exact group/replica
+   identity before canceling or joining its running work.
+2. The supervisor and action receiver respect the hold. An approved action that
+   needs this replica to start reports a typed waiting condition rather than
+   silently reversing the stop.
+3. `StartLoadGroup(ctx, ref)` explicitly releases the hold for that same identity
+   and starts/resumes it using registered components and approved topology.
+4. The hold does not change cluster membership or remove the node's assignment.
+   Durable maintenance/placement changes use cluster.DrainNode or topology changes.
+5. A hold on an old ID must not affect a different, newly approved replica ID.
+   Approved removal/cleanup of the held old identity remains executable.
+6. Internal stops for retirement, node shutdown or failed initialization do not
+   create operator holds. They use the same synchronization with an explicit
+   internal stop reason.
+
+Two possible hold lifetimes:
+
+| Choice | Semantics | Storage impact |
+| --- | --- | --- |
+| Current Node lifetime (recommended) | The replica stays stopped until explicit StartLoadGroup or a new Node starts and recovers approved assignments. | In-memory identity-keyed hold; no added durable bucket. |
+| Across process restarts | The replica remains stopped after restart until an explicit start clears its hold. | Durable identity-keyed local hold, removal/readmission rules and recovery validation required. |
+
+Current-lifetime holds keep restart recovery aligned with approved topology and
+avoid a forgotten local flag preventing recovery indefinitely. Persistent holds
+are appropriate if local maintenance is explicitly intended to survive process
+restarts. This is a user-facing behavior choice, not just an implementation detail.
+
+### Lifecycle pseudocode: shared start path
+
+```text
+startLocal(ctx, exactReplica, reason):
+    reject if Node is stopping or its identity is fenced
+    enter the local replica lifecycle gate
+    validate exact approved identity and permitted founding/recovery scope
+    if operator hold exists:
+        if reason is explicit user start: release this exact hold
+        else: return waiting_for_explicit_start
+    if same identity is already running: return its public handle
+    if another instance still owns resources: return stopping/not-ready
+    probe retained storage and boot evidence
+    if established state is missing or foreign: park and return typed error
+    acquire application resources through factory
+    open/recover engine and durably record identity
+    register owned handle and start under Node lifetime
+    on partial failure: retain ownership until engine/resources are joined
+    return public handle; readiness can be awaited independently
+```
+
+The final specification must refine context timeouts, exact replay readiness,
+resource release failures, idempotent retries and lock ordering. It must also
+show that callbacks can access status/request stop without reentering a gate
+held by their own invocation.
+
+### Next question
+
+> Should an explicit local StopLoadGroup hold survive a process restart?
+> Recommendation: no. It lasts until explicit StartLoadGroup or Node restart;
+> restart recovers the approved assignment. The alternative persists the hold
+> until an explicit start, even across restarts.
+
+No answer recorded yet.
 
 ## NOT CONSIDERED & TODO
 
@@ -487,8 +691,8 @@ These are unresolved design details, not exclusions from the refactoring:
 
 - [potential-improvement] Finalize the exact public package boundary under the
   agreed clean API refactor before specifying created/updated files.
-- [potential-improvement] Confirm managed local hosting and its factory/resource
-  ownership, explicit stop/suspension and inbound effect dispatch contracts.
+- [potential-improvement] Finalize agreed managed hosting's factory/resource
+  ownership, explicit stop-hold lifetime and inbound effect dispatch contracts.
 - [potential-improvement] Finalize built-in policy names, defaults, validation
   and local versus cluster-agreed settings. Specify the durable agreement needed
   for topology-changing policies and the treatment of existing runtime controls.
