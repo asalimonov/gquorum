@@ -42,7 +42,9 @@ unit cases per package. Functional tests skip in short mode and remain sequentia
 Override `UNIT_PACKAGES` or `UNIT_PARALLEL` when needed. See
 [testing notes](docs/testing/tests.md) and [runtime ownership](docs/architecture/runtime.md).
 
-Implementation is ongoing. The [process-cluster harness](tests/cluster/README.md)
-uses isolated reusable testcontainers units in a separate test module. Complete
-source-test ports and bounded cluster performance checks remain required stages
-in the [implementation plan](docs/plans/20261010-implementation.md).
+The [process-cluster harness](tests/cluster/README.md) uses isolated reusable
+testcontainers units in a separate test module. It covers three-, five- and
+seven-node consensus, membership, recovery, authorized effects, fifteen load
+groups and bounded performance/resource checks. See the
+[validation results](docs/testing/validation.md) and
+[source-test adaptations](docs/brainstorms/20261010-raft-library-test-port.md).

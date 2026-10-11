@@ -64,9 +64,9 @@ All node counts come from topology.Limits; seven meta voters do not require seve
 replicas. Fixtures use the library default 100ms Raft tick and a five-second
 activation TTL. Build the image before running cluster cases, so compilation
 does not contend with the processes being measured. The image build retains Go
-module and compiler caches across source changes. Source-test audit, additional
-fault controls and remaining performance scenarios are still tracked in the
-implementation plan.
+module and compiler caches across source changes. Source adaptations are tracked
+in the [inventory](../../docs/brainstorms/20261010-raft-library-test-port.md);
+the completed regression is recorded in [validation](../../docs/testing/validation.md).
 
 The [test application](testapp/README.md) is a dedicated binary under `tests/cluster/testapp`; the ordinary Compose
 example contains no test instrumentation. Adding a

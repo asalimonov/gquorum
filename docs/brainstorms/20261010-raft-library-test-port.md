@@ -1,6 +1,6 @@
 # Required source test port inventory
 
-Date: 2026-10-10. Source baseline: `fc982c0`. Status: implementation in progress; stages 1–6 and the small example have verified ports. The expanded process suite is implemented and undergoing full regression; supporting assertion-level and final audits remain outstanding.
+Date: 2026-10-10; validated October 11. Source baseline: `fc982c0`. Status: the agreed extraction and applicable process ports are implemented. Full runtime/race and process regressions pass; final results are recorded in [validation](../testing/validation.md). Supporting contract adaptations below explain retained assertions and removed application helpers. Milestone entries are chronological; final validation supersedes their earlier pending notes.
 
 ## Scope and acceptance
 
@@ -493,6 +493,30 @@ and application readiness remains refused until activation. The declared
 Draining/effective Drained split preserves the source's placement-based restart
 contract without requiring a new persisted state transition.
 
+### Supporting contract adaptations
+
+The source inventory includes tests for concrete application helpers that the
+selected public API replaces. Their retained consensus obligations map as follows;
+the helper names and optional legacy implementations do not become SDK features.
+
+| Source contracts | Target evidence / adaptation |
+| --- | --- |
+| Manager association/disassociation and role edits | Public Stage/ChangeReplica/SetGroupPlacement and actual learner-first growth, staged repair and intentional-learner process tests. Arbitrary desired host sets use owned documents; there is no additional source-style manager facade. Preview, minimum/maximum, fresh IDs and fixed approval safety remain enforced. |
+| ConfVer mirror and internally staged approval | Group membership is observed as native ConfState/cursors; the source application's replicated runtime-counter mirror is omitted from the agreed document schema. MutationApprovalFailureReturnsDurablyStagedDocument, the reconciler heal/CAS/parentage tables and stopped-follower/staged-repair process cases preserve committed-result visibility, unchanged operator intent and guarded automatic approval. No observation-only read manufactures topology versions. |
+| Source provider chains, static/caching providers and gossip-derived region | Caller-owned Resolver/HealthSource implementations. Meta validates grants before priming hints and preserves approved inbound identities, retained outbound routes, resolver fallback, concurrent copies and post-close refusal. Caller node region/type/labels are explicit; no discovery provider/configuration chain is exported. |
+| Optional coordinator/forwarder/handler and registry typed accessors | Constructors wire mandatory meta machinery and protocol; absent caller load controllers produce typed NoController. Runtime/load registry tests cover exact duplicate ownership, unknown groups, stop/unregister, concurrent teardown and separate groups. Reserved meta never becomes a load group. |
+| Application metrics and numeric series lifecycle | Owned native Status/ProposalStats/HealthObservation/StorageStats, local event edges and actual process resource measurements. Unknown health removes numeric pointers, removed groups disappear, transitions are deduplicated and shutdown retires registrations. No process-global application metric registry is introduced. |
+| Admission reservation exemptions, settlement compensation, redirect GC and reservation trackers | Caller FSM/policy. Generic queue limits, unique correlations, exact retry outcomes, canceled/abandoned waiter cleanup, unaffected committed application, writer retry and bounded snapshot/shutdown remain engine tests and process pressure/recovery cases. A caller RequestID is passed to Machine for durable deduplication; it is not reused as the engine's waiter correlation key. |
+| Config-backed identity/mode resolution and token/hash holders | Explicit constructor Identity, Join, Founders and cluster credential. Pin/identity/options tests preserve reserved-name, conflicting-mode/identity and fresh-store refusal. Actual unary/message/snapshot isolation tests require exact immutable cluster IDs and credentials; the old foreign-cluster Join exemption is removed. |
+| Source store naming, SQL/legacy seeding and quarantine paths | Caller paths, versioned bbolt pins, generic complete WAL snapshots and exact-ID Quarantine. Conformance/retained recovery verify ownership, concurrent writes, immutable state and replay. Format migrations are explicitly excluded; ordinary restart/readmission/reseat remains tested. Hooks cannot acknowledge quarantine while leaving the old meta lineage bound. |
+| Governance runtime/controller/lifecycle seams | Runtime boot matrix, public ledger/scope tests, callback crash-window and close-joining tests, and real non-host controller, admission, deletion/refusal, lost-store, fresh-ID and multi-group shutdown process families. Prepared learners stay empty/non-serving, Latest cannot open runtimes, and every destructive receiver rechecks complete authorization and exact retained identity. Shared caller state follows exact local cleanup. |
+| Caller-serving thresholds and ratchet policy | Public exact-identity persistent local override plus fixture-owned serving policy. Three/five/seven-node minority tests prove an override never grants a session or permits a write without Raft quorum; retained restart preserves the input. |
+
+All 150 source process symbols occur exactly once in the process inventory:
+60 ADAPT, 89 APPLICATION and one deferred FORCE-NEW. A symbol audit resolves all
+156 expanded target references. This is a traceability check; behavioral evidence
+comes from the assertions and recorded test runs, not the symbol counts.
+
 - `activation_test.go` (9 cases): `TestWaitForSelfVoter_EmptyDocumentAcceptsMatchingFounder`, `TestWaitForSelfVoter_EmptyDocumentStillRejectsUnadmittedIdentity`, `TestWaitForSelfVoter_JoinedFounderSeedDoesNotBypassPromotion`, `TestWaitForSelfVoter_BlocksLearnerUntilPromotion`, `TestActivate_MultiFounderQuorumCommits`, `TestActivate_MultiFounderWithoutQuorumFails`, `TestActivate_SingleNodeSucceeds`, `TestActivate_DuplicateNameRejected`, `TestActivate_Deactivate_ReleasesLock`
 - `admission_test.go` (6 cases): `TestAdmission_SameInstanceRetryAcrossPhasesAndSnapshot`, `TestAdmission_SupersededInstanceCannotBeResurrected`, `TestAdmission_DifferentInstanceCannotReusePreparedMemberID`, `TestBuildReadmissionPlan_ShrinksBeforeLearnerFirstReplacementAtMaximum`, `TestJoinAndJoinReady_PrimeResolverWithoutReplicatingAddress`, `TestJoinReady_MetaConfStateIsLearnerBeforeVoter`
 - `bolt_test.go` (17 cases): `TestStoreIsFresh`, `TestBoltStore_Roundtrip`, `TestBoltStore_LoadAllWithoutSnapshot`, `TestBoltStore_EmptyHardStateNotClobbered`, `TestBoltStore_LeaderOverwriteTruncatesTail`, `TestBoltStore_Compaction`, `TestBoltStore_StaleSnapshotIgnored`, `TestBoltStore_AppliedMonotone`, `TestBoltStore_SetAppliedPersistsConfState`, `TestBoltStore_ReopenAfterPartialWrite`, `TestBoltStore_IdentityPinning`, `TestResolveDataDir_Precedence`, `TestOpenBoltStore_CreatesFileAndBuckets`, `TestInstallSnapshot_AtomicAndCommitClamped`, `TestInstallSnapshot_IgnoresStale`, `TestBoltStore_LegacyCurrentStateRestoresNamedViews`, `TestPeekLocalLineage`
@@ -645,7 +669,7 @@ When implemented, `go test ./...` runs unit/in-process correctness tests; scoped
 
 Design-stage verification only: verify every discovered source cluster symbol occurs exactly once in the process inventory and every supporting source symbol/file exists; verify larger-cluster testing is absent from deferred lists and required in the main target scope. No source or destination Go/Docker test run is claimed.
 
-## Verified implementation traceability (in progress)
+## Implementation traceability and milestone history
 
 - `framework/cluster/topology/metaraft/sm_test.go`: applicable codec, document CAS/validation/admission, history/exclusion, execution transitions/retry/supersession/repair/retention, determinism, snapshot equivalence and bbolt materialization cases retain their source test names in `internal/metaengine/sm_test.go`. `LastStep` assertions use the equivalent `CurrentStep` field. Node types and meta membership are explicit inputs. Legacy-current restoration is replaced by schema refusal in `TestRestoreRejectsCorruptionWithoutChangingLiveState`; empty bbolt state is covered by metastore tests.
 - `framework/cluster/topology/metaraft/sessions_test.go`: all six scenarios ported to `internal/metaengine/sessions_test.go`, supplying a positive TTL. Exact identity conflict is additionally covered by `TestSessionIdentityCannotBeRebound`.

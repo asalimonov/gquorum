@@ -3,6 +3,7 @@ package meta
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -87,30 +88,61 @@ func TestMetaWatchFanoutIsOwnedAndDurablyAppliedOnFollowers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("functional test; run make test")
 	}
-	groups := publicFoundingCluster(t, 3)
-	g := readyPublic(t, groups)
+	for _, size := range []int{3, 5, 7} {
+		t.Run(strconv.Itoa(size)+"-nodes", func(t *testing.T) {
+			testMetaWatchFanout(t, size)
+		})
+	}
+}
+
+func testMetaWatchFanout(t *testing.T, size int) {
+	t.Helper()
+	groups := publicFoundingClusterWith(t, size, func(o *Options) { o.Limits.MaxNodes = size })
+	boot, cancelBoot := context.WithTimeout(t.Context(), 15*time.Second)
+	for _, node := range groups {
+		if err := node.WaitReady(boot); err != nil {
+			cancelBoot()
+			t.Fatal("watch fixture readiness", node.Identity(), node.LocalStatus(), err)
+		}
+	}
+	cancelBoot()
+	var g *Group
+	for _, node := range groups {
+		if node.IsLeader() {
+			g = node
+			break
+		}
+	}
+	if g == nil {
+		t.Fatal("watch fixture has no meta leader")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	var streams []<-chan Update
+	streams := map[View][]<-chan Update{}
 	for _, node := range groups {
-		ch, err := node.Watch(ctx, Latest)
-		if err != nil {
-			t.Fatal(err)
+		for _, view := range []View{Latest, Target, Active} {
+			ch, err := node.Watch(ctx, view)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if u := receiveUpdate(t, ch); u.View != view || u.Document.Version != 1 {
+				t.Fatal("watch lost its seed scope", u)
+			}
+			streams[view] = append(streams[view], ch)
 		}
-		receiveUpdate(t, ch)
-		streams = append(streams, ch)
 	}
 	doc := g.state().Latest()
 	doc.Version++
 	doc.ParentVersion = 1
 	doc.Nodes[0].Labels = map[string]string{"rack": "one"}
 	if _, err := g.Stage(ctx, doc, 1); err != nil {
-		t.Fatal(err)
+		t.Fatal("watch staging", err)
 	}
-	for i, ch := range streams {
-		u := receiveUpdate(t, ch)
-		if u.Document.Version != 2 || u.Document.Nodes[0].Labels["rack"] != "one" {
-			t.Fatal(u)
+	assertUpdate := func(i int, view View) {
+		t.Helper()
+		u := receiveUpdate(t, streams[view][i])
+		if u.View != view || u.Document.Version != 2 || u.Document.Nodes[0].Labels["rack"] != "one" {
+			t.Fatal("watch lost approved scope/content", u)
 		}
 		// Delivery follows the materialized/application transaction, including
 		// follower state. Subscriber mutations cannot touch any other observer.
@@ -119,13 +151,36 @@ func TestMetaWatchFanoutIsOwnedAndDurablyAppliedOnFollowers(t *testing.T) {
 			t.Fatal(err)
 		}
 		persisted := metaengine.NewMachine(groups[i].rules, nil)
-		if err := persisted.Restore(ctx, data); err != nil || persisted.Latest().Version != u.Document.Version {
+		if err := persisted.Restore(ctx, data); err != nil {
+			t.Fatal(err)
+		}
+		stored := map[View]topology.Document{Latest: persisted.Latest(), Target: persisted.Target(), Active: persisted.Active()}[view]
+		if stored.Version != u.Document.Version || stored.Nodes[0].Labels["rack"] != "one" {
 			t.Fatal("watch preceded durable follower application", err)
 		}
 		u.Document.Nodes[0].Labels["rack"] = "changed"
 		current := groups[i].state().Latest()
 		if current.Nodes[0].Labels["rack"] != "one" {
 			t.Fatal("watch aliased FSM")
+		}
+	}
+	for i := range groups {
+		assertUpdate(i, Latest)
+		assertWatchQuiet(t, streams[Target][i])
+		assertWatchQuiet(t, streams[Active][i])
+	}
+	ex, err := g.Apply(ctx, 2)
+	if err != nil {
+		t.Fatal("watch approval", err)
+	}
+	if _, err := g.WaitExecution(ctx, ex); err != nil {
+		t.Fatal("watch execution", err)
+	}
+	for i := range groups {
+		assertUpdate(i, Target)
+		assertUpdate(i, Active)
+		for _, view := range []View{Latest, Target, Active} {
+			assertWatchQuiet(t, streams[view][i])
 		}
 	}
 }
