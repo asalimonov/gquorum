@@ -246,7 +246,11 @@ func (a *application) routes() http.Handler {
 		case "active":
 			doc, err = a.meta.Active(r.Context())
 		default:
-			err = fault.ErrInvalid
+			var version uint64
+			version, err = positiveNumber(r.PathValue("view"))
+			if err == nil {
+				doc, err = a.meta.Get(r.Context(), version)
+			}
 		}
 		if err != nil {
 			httpError(w, err)
@@ -268,6 +272,36 @@ func (a *application) routes() http.Handler {
 		}
 		committed, err := a.meta.Stage(r.Context(), doc, version)
 		mutationResponse(w, meta.MutationResult{Document: committed}, err)
+	})
+	mux.HandleFunc("POST /api/topology/preview/plan", func(w http.ResponseWriter, r *http.Request) {
+		var doc topology.Document
+		if err := requestBody(w, r, &doc); err != nil {
+			httpError(w, err)
+			return
+		}
+		plan, err := a.meta.PlanFor(r.Context(), doc)
+		if err != nil {
+			httpError(w, err)
+			return
+		}
+		jsonResponse(w, http.StatusOK, plan)
+	})
+	mux.HandleFunc("PUT /api/placement", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Placement topology.PlacementRule `json:"placement"`
+			Mutation  meta.MutationOptions   `json:"mutation"`
+		}
+		if err := requestBody(w, r, &body); err != nil {
+			httpError(w, err)
+			return
+		}
+		opts, err := mutationOptions(r, body.Mutation)
+		if err != nil {
+			httpError(w, err)
+			return
+		}
+		result, err := a.meta.SetPlacement(r.Context(), body.Placement, opts)
+		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("POST /api/topology/{version}/plan", func(w http.ResponseWriter, r *http.Request) {
 		version, err := positiveNumber(r.PathValue("version"))

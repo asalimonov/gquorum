@@ -26,6 +26,9 @@ func (g *Group) PlanFor(ctx context.Context, doc topology.Document) (topology.Pl
 	if err := g.ensureRunning(ctx); err != nil {
 		return topology.Plan{}, err
 	}
+	if doc.ClusterID != g.currentIdentity().ClusterID {
+		return topology.Plan{}, fault.ErrIdentityMismatch
+	}
 	if err := doc.Validate(g.rules); err != nil {
 		return topology.Plan{}, err
 	}

@@ -178,3 +178,9 @@ Unrelated changes to Target do not replace the recorded version's authorization.
 Process ports check actual clean exit, typed parking from all observers, resumption
 of the same waiting process, native voter convergence and old physical bbolt pin
 quarantine. The original journal remains node-local throughout admission.
+
+Preview planning validates the caller document's cluster ID against the running
+meta identity before collecting group observations. It never stages or approves
+that document. The full process-test adapter exposes this through
+`POST /api/topology/preview/plan`, and exposes the existing global `SetPlacement`
+and exact-version `Get` APIs. These routes stay in the test fixture.

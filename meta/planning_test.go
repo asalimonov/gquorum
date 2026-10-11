@@ -36,6 +36,11 @@ func TestMetaFollowerApprovesEmptyPlanAndActivationIsDurable(t *testing.T) {
 	if err != nil || !plan.IsEmpty() {
 		t.Fatal(plan, err)
 	}
+	foreign := staged.Clone()
+	foreign.ClusterID = "foreign-cluster"
+	if _, err := follower.PlanFor(ctx, foreign); !errors.Is(err, fault.ErrIdentityMismatch) {
+		t.Fatal("preview planned a foreign cluster", err)
+	}
 	if follower.state().Target().Version != 1 {
 		t.Fatal("dry planning approved intent")
 	}
