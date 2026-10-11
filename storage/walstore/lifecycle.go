@@ -15,7 +15,7 @@ import (
 	"go.etcd.io/etcd/server/v3/storage/wal"
 )
 
-const quarantineRetention = 7 * 24 * time.Hour
+var _ storage.RetirementStore = (*Store)(nil)
 
 // Quarantine closes and moves precisely the specified local replica. A stale
 // caller cannot move a replacement replica's directory.
@@ -82,50 +82,144 @@ func (s *Store) Quarantine(ctx context.Context, id string, expectedReplicaID uin
 	return target, nil
 }
 
-// SweepQuarantine removes only this store's expired quarantine directories.
-// Live groups and unrelated application directories are never selected.
-func (s *Store) SweepQuarantine(ctx context.Context) error {
+// Retired enumerates this store's exact quarantined identities. Age selection is
+// the lifecycle policy's responsibility. Unrelated and foreign entries stay put.
+func (s *Store) Retired(ctx context.Context) ([]storage.RetiredReplica, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, fault.ErrStopped
+	}
+	entries, err := os.ReadDir(s.opts.RootDir)
+	if err != nil {
+		return nil, err
+	}
+	var result []storage.RetiredReplica
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if !entry.IsDir() {
+			continue
+		}
+		base, at, ok := retirementToken(entry.Name())
+		if !ok {
+			continue
+		}
+		dir := filepath.Join(s.opts.RootDir, entry.Name())
+		owner, found, err := retirementIdentity(dir)
+		if err != nil {
+			return nil, err
+		}
+		if !found || owner.NodeName != s.opts.NodeName || owner.ClusterID != s.opts.ClusterID || owner.GroupID != base {
+			continue
+		}
+		result = append(result, storage.RetiredReplica{Identity: owner, Token: entry.Name(), QuarantinedAt: at})
+	}
+	return result, nil
+}
+
+// Collect removes precisely an enumerated retirement record after rechecking
+// confinement, its timestamp and durable pin. A successor in the live namespace
+// is untouched; the same identity still bound or live is refused.
+func (s *Store) Collect(ctx context.Context, record storage.RetiredReplica) error {
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	base, at, ok := retirementToken(record.Token)
+	if !ok || !at.Equal(record.QuarantinedAt) {
+		return fault.ErrInvalid
+	}
+	want := record.Identity
+	if want.NodeName != s.opts.NodeName || want.ClusterID != s.opts.ClusterID || want.GroupID != base || want.ReplicaID == 0 {
+		return fault.ErrIdentityMismatch
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return fault.ErrStopped
 	}
-	entries, err := os.ReadDir(s.opts.RootDir)
+	if bound, exists := s.bindings[base]; exists && bound == want {
+		return fault.ErrIdentityMismatch
+	}
+	if live := s.groups[base]; live != nil && live.identity == want {
+		return fault.ErrIdentityMismatch
+	}
+	live, found, err := retirementIdentity(filepath.Join(s.opts.RootDir, base))
 	if err != nil {
 		return err
 	}
-	cutoff := time.Now().Add(-quarantineRetention)
-	for _, entry := range entries {
-		if err := ctx.Err(); err != nil {
+	if found && live == want {
+		return fault.ErrIdentityMismatch
+	}
+	dir := filepath.Join(s.opts.RootDir, record.Token)
+	owner, found, err := retirementIdentity(dir)
+	if err != nil {
+		return err
+	}
+	if !found {
+		// A missing pin in an existing directory cannot prove prior collection.
+		if _, err := os.Lstat(dir); errors.Is(err, os.ErrNotExist) {
+			return nil
+		} else if err != nil {
 			return err
 		}
-		if !entry.IsDir() {
-			continue
-		}
-		base, stamp, found := strings.Cut(entry.Name(), ".quarantine-")
-		if !found || validateGroup(base) != nil {
-			continue
-		}
-		ns, err := strconv.ParseInt(stamp, 10, 64)
-		if err != nil || ns <= 0 || !time.Unix(0, ns).Before(cutoff) {
-			continue
-		}
-		dir := filepath.Join(s.opts.RootDir, entry.Name())
-		owner, found, err := readIdentity(dir)
-		if err != nil {
-			return err
-		}
-		if !found || owner.NodeName != s.opts.NodeName || owner.ClusterID != s.opts.ClusterID || owner.GroupID != base {
-			continue
-		}
-		if err := os.RemoveAll(dir); err != nil {
-			return err
-		}
+		return unreadable("retired directory lacks identity pin", nil)
+	}
+	if owner != want {
+		return &IdentityMismatchError{Stored: owner, Resolved: want}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return err
 	}
 	return syncDir(s.opts.RootDir)
+}
+
+func retirementToken(token string) (string, time.Time, bool) {
+	if token == "" || filepath.Base(token) != token || strings.ContainsAny(token, `/\\`) {
+		return "", time.Time{}, false
+	}
+	base, stamp, found := strings.Cut(token, ".quarantine-")
+	if !found || validateGroup(base) != nil {
+		return "", time.Time{}, false
+	}
+	ns, err := strconv.ParseInt(stamp, 10, 64)
+	if err != nil || ns <= 0 || strconv.FormatInt(ns, 10) != stamp {
+		return "", time.Time{}, false
+	}
+	return base, time.Unix(0, ns).UTC(), true
+}
+
+// Check directory and pin without following links. RemoveAll itself does not
+// follow links inside the selected directory. RootDir remains caller-owned.
+func retirementIdentity(dir string) (storage.Identity, bool, error) {
+	info, err := os.Lstat(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return storage.Identity{}, false, nil
+	}
+	if err != nil {
+		return storage.Identity{}, false, err
+	}
+	if !info.IsDir() {
+		return storage.Identity{}, false, unreadable("retirement location is not a directory", nil)
+	}
+	info, err = os.Lstat(filepath.Join(dir, IdentityFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return storage.Identity{}, false, nil
+	}
+	if err != nil {
+		return storage.Identity{}, false, err
+	}
+	if !info.Mode().IsRegular() {
+		return storage.Identity{}, false, unreadable("retirement pin is not a regular file", nil)
+	}
+	return readIdentity(dir)
 }
 
 func (s *Store) Stats(ctx context.Context, id string) (storage.Stats, error) {

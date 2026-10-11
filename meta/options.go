@@ -18,7 +18,7 @@ import (
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/observe"
-	"github.com/asalimonov/gquorum/internal/reconcile"
+	"github.com/asalimonov/gquorum/internal/scheduling"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -83,7 +83,7 @@ type Options struct {
 // is an explicit opt-out. Zero timings use a 30s interval, 20s tick timeout,
 // 60s stable-node window and 5m action cooldown. It never repairs _meta members
 // or approves staged operator intent.
-type ReconciliationOptions = reconcile.Settings
+type ReconciliationOptions = scheduling.Settings
 
 // ObservationOptions controls node/group health sampling. Defaults are a 5s
 // interval and 2s timeout. Document application also wakes the sampler.

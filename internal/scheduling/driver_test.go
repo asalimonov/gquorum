@@ -1,4 +1,4 @@
-package reconcile
+package scheduling
 
 import (
 	"bytes"
@@ -16,6 +16,8 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/raftengine"
+	"github.com/asalimonov/gquorum/policy"
+	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3/raftpb"
 )
@@ -164,7 +166,7 @@ func (h *testHost) stage(origin topology.Origin, parent uint64) topology.Documen
 	doc.Comment = "staged intent"
 	return h.mustApply(metaengine.ProposeDocument{Doc: doc, ExpectedVersion: doc.Version - 1}).Doc
 }
-func newTestReconciler(t *testing.T, h *testHost, settings Settings) *Reconciler {
+func newTestDriver(t *testing.T, h *testHost, settings Settings) *Driver {
 	t.Helper()
 	r, err := New(Config{Host: h, Settings: settings})
 	if err != nil {
@@ -177,13 +179,13 @@ func newTestReconciler(t *testing.T, h *testHost, settings Settings) *Reconciler
 	}
 	return r
 }
-func tick(t *testing.T, r *Reconciler) {
+func tick(t *testing.T, r *Driver) {
 	t.Helper()
 	if err := r.Tick(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 }
-func assertStatus(t *testing.T, r *Reconciler, state topology.ReconciliationState, reason string) {
+func assertStatus(t *testing.T, r *Driver, state topology.ReconciliationState, reason string) {
 	t.Helper()
 	s := r.Status()
 	if s.State != state || s.Reason != reason {
@@ -191,19 +193,19 @@ func assertStatus(t *testing.T, r *Reconciler, state topology.ReconciliationStat
 	}
 }
 
-func TestReconcilerStartStopLifecycle(t *testing.T) {
+func TestDriverStartStopLifecycle(t *testing.T) {
 	if testing.Short() {
 		t.Skip("functional test; run make test")
 	}
 	h := newTestHost(t, 1, 2, 3)
-	r := newTestReconciler(t, h, Settings{})
+	r := newTestDriver(t, h, Settings{})
 	if err := r.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Start(context.Background()); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal(err)
 	}
-	r = newTestReconciler(t, h, Settings{})
+	r = newTestDriver(t, h, Settings{})
 	if err := r.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +218,7 @@ func TestReconcilerStartStopLifecycle(t *testing.T) {
 		}
 	}
 }
-func TestReconcilerGatesLeaderHealthAndDisabled(t *testing.T) {
+func TestDriverGatesLeaderHealthAndDisabled(t *testing.T) {
 	if testing.Short() {
 		t.Skip("functional test; run make test")
 	}
@@ -230,7 +232,7 @@ func TestReconcilerGatesLeaderHealthAndDisabled(t *testing.T) {
 			if mode == "unknown" {
 				h.health = nil
 			}
-			r := newTestReconciler(t, h, settings)
+			r := newTestDriver(t, h, settings)
 			tick(t, r)
 			if h.commits != 0 || h.statusCalls != 0 {
 				t.Fatal("gate allowed repair observations")
@@ -239,12 +241,12 @@ func TestReconcilerGatesLeaderHealthAndDisabled(t *testing.T) {
 	}
 }
 
-func TestReconcilerLocalKillSwitchResetsStability(t *testing.T) {
+func TestDriverLocalKillSwitchResetsStability(t *testing.T) {
 	if testing.Short() {
 		t.Skip("functional test; run make test")
 	}
 	h := newTestHost(t, 1, 2)
-	r := newTestReconciler(t, h, Settings{})
+	r := newTestDriver(t, h, Settings{})
 	if err := r.SetEnabled(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +282,7 @@ func TestReconcilerLocalKillSwitchResetsStability(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-func TestReconcilerResumesApprovedExecutionBeforeHealthGate(t *testing.T) {
+func TestDriverResumesApprovedExecutionBeforeHealthGate(t *testing.T) {
 	if testing.Short() {
 		t.Skip("functional test; run make test")
 	}
@@ -293,7 +295,7 @@ func TestReconcilerResumesApprovedExecutionBeforeHealthGate(t *testing.T) {
 				h.stage(topology.OriginOperator, 1)
 				h.mustApply(metaengine.BeginExecutionProposal{Version: 2, Plan: topology.Plan{Version: 2}, At: time.Now().UTC()})
 				h.executionOverride = &topology.ExecutionRecord{Status: topology.ExecutionStatus{ID: "exec-v2-a1", Version: 2, State: state}}
-				r := newTestReconciler(t, h, Settings{})
+				r := newTestDriver(t, h, Settings{})
 				tick(t, r)
 				assertStatus(t, r, topology.ReconciliationRunning, ReconcileReasonApprovedExecution)
 				want := 0
@@ -307,7 +309,7 @@ func TestReconcilerResumesApprovedExecutionBeforeHealthGate(t *testing.T) {
 		})
 	}
 }
-func TestReconcilerDoesNotMergeStagedOrFailedOperatorIntent(t *testing.T) {
+func TestDriverDoesNotMergeStagedOrFailedOperatorIntent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("functional test; run make test")
 	}
@@ -318,7 +320,7 @@ func TestReconcilerDoesNotMergeStagedOrFailedOperatorIntent(t *testing.T) {
 			if failed {
 				h.executionOverride = &topology.ExecutionRecord{Status: topology.ExecutionStatus{ID: "exec-v2-a1", Version: 2, State: topology.ExecutionFailed}}
 			}
-			r := newTestReconciler(t, h, Settings{})
+			r := newTestDriver(t, h, Settings{})
 			tick(t, r)
 			want := ReconcileReasonStagedLatest
 			if failed {
@@ -331,12 +333,12 @@ func TestReconcilerDoesNotMergeStagedOrFailedOperatorIntent(t *testing.T) {
 		})
 	}
 }
-func TestReconcilerCommitsExactLearnerFirstRepair(t *testing.T) {
+func TestDriverCommitsExactLearnerFirstRepair(t *testing.T) {
 	if testing.Short() {
 		t.Skip("functional test; run make test")
 	}
 	h := newTestHost(t, 1, 2)
-	r := newTestReconciler(t, h, Settings{})
+	r := newTestDriver(t, h, Settings{})
 	tick(t, r)
 	latest, target, active := h.machine.Views()
 	if latest.Version != 2 || target.Version != 2 || active.Version != 1 || h.commits != 1 || h.wakes != 1 {
@@ -357,12 +359,12 @@ func TestReconcilerCommitsExactLearnerFirstRepair(t *testing.T) {
 	}
 	assertStatus(t, r, topology.ReconciliationRunning, ReconcileReasonApprovedExecution)
 }
-func TestReconcilerCASRaceLeavesOperatorVersionStaged(t *testing.T) {
+func TestDriverCASRaceLeavesOperatorVersionStaged(t *testing.T) {
 	if testing.Short() {
 		t.Skip("functional test; run make test")
 	}
 	h := newTestHost(t, 1, 2)
-	r := newTestReconciler(t, h, Settings{})
+	r := newTestDriver(t, h, Settings{})
 	h.beforeCommit = func() { h.stage(topology.OriginOperator, 1) }
 	tick(t, r)
 	assertStatus(t, r, topology.ReconciliationError, ReconcileReasonCASConflict)
@@ -371,17 +373,18 @@ func TestReconcilerCASRaceLeavesOperatorVersionStaged(t *testing.T) {
 	}
 }
 
-type stubPolicy struct{ decision ReconcileDecision }
+type stubPolicy struct{ decision policy.ScheduleDecision }
 
-func (*stubPolicy) Name() string                                { return "test-policy" }
-func (p *stubPolicy) Evaluate(ReconcileInput) ReconcileDecision { return p.decision }
-func TestReconcilerRejectsPolicyActionsOutsideAllowList(t *testing.T) {
+func (p *stubPolicy) Schedule(context.Context, policy.ScheduleInput) (policy.ScheduleDecision, error) {
+	return p.decision, nil
+}
+func TestDriverRejectsPolicyActionsOutsideAllowList(t *testing.T) {
 	if testing.Short() {
 		t.Skip("functional test; run make test")
 	}
 	h := newTestHost(t, 1, 2, 3)
-	r := newTestReconciler(t, h, Settings{})
-	r.policy = &stubPolicy{ReconcileDecision{Action: &ReconcileAction{Kind: "remove_voter", GroupID: "shard0", ReplicaID: 3, Reason: "external text"}}}
+	r := newTestDriver(t, h, Settings{})
+	r.policy = &stubPolicy{policy.ScheduleDecision{Action: &policy.ScheduleAction{Kind: "remove_voter", Identity: storage.Identity{GroupID: "shard0", ReplicaID: 3}}}}
 	tick(t, r)
 	assertStatus(t, r, topology.ReconciliationError, ReconcileReasonPolicyRejected)
 	if h.commits != 0 || h.wakes != 0 {
@@ -409,7 +412,7 @@ func TestHealableMatrix(t *testing.T) {
 							parent = 99
 						}
 						latest := h.stage(origin, parent)
-						r := newTestReconciler(t, h, Settings{})
+						r := newTestDriver(t, h, Settings{})
 						got, err := r.healable(context.Background(), latest, h.machine.Active())
 						want := origin == topology.OriginInternal && parentOK && empty && known
 						if err != nil || got != want {
@@ -421,13 +424,13 @@ func TestHealableMatrix(t *testing.T) {
 		}
 	}
 }
-func TestReconcilerHealsStagedInternal(t *testing.T) {
+func TestDriverHealsStagedInternal(t *testing.T) {
 	if testing.Short() {
 		t.Skip("functional test; run make test")
 	}
 	h := newTestHost(t, 1, 2, 3)
 	h.stage(topology.OriginInternal, 1)
-	r := newTestReconciler(t, h, Settings{})
+	r := newTestDriver(t, h, Settings{})
 	r.lastRun = r.now()
 	tick(t, r)
 	assertStatus(t, r, topology.ReconciliationRunning, ReconcileReasonApprovedExecution)
@@ -435,7 +438,7 @@ func TestReconcilerHealsStagedInternal(t *testing.T) {
 		t.Fatal("internal heal blocked by cooldown")
 	}
 }
-func TestReconcilerHealRefusals(t *testing.T) {
+func TestDriverHealRefusals(t *testing.T) {
 	if testing.Short() {
 		t.Skip("functional test; run make test")
 	}
@@ -462,7 +465,7 @@ func TestReconcilerHealRefusals(t *testing.T) {
 				h.health = nil
 			}
 			h.stage(origin, parent)
-			r := newTestReconciler(t, h, Settings{})
+			r := newTestDriver(t, h, Settings{})
 			tick(t, r)
 			if mode == "plan-error" {
 				assertStatus(t, r, topology.ReconciliationError, ReconcileReasonStatusUnavailable)
@@ -481,7 +484,7 @@ func TestReconcileTickIsBoundedAndCancelable(t *testing.T) {
 	}
 	h := newTestHost(t, 1, 2, 3)
 	h.blockViews = true
-	r := newTestReconciler(t, h, Settings{Interval: 100 * time.Millisecond, TickTimeout: 20 * time.Millisecond})
+	r := newTestDriver(t, h, Settings{Interval: 100 * time.Millisecond, TickTimeout: 20 * time.Millisecond})
 	start := time.Now()
 	err := r.Tick(context.Background())
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > time.Second {
@@ -490,7 +493,7 @@ func TestReconcileTickIsBoundedAndCancelable(t *testing.T) {
 	assertStatus(t, r, topology.ReconciliationError, ReconcileReasonStatusUnavailable)
 	// Stop must cancel a read already inside the automatic worker, rather than
 	// waiting for the configured tick timeout.
-	r = newTestReconciler(t, h, Settings{Interval: 100 * time.Millisecond, TickTimeout: 90 * time.Millisecond})
+	r = newTestDriver(t, h, Settings{Interval: 100 * time.Millisecond, TickTimeout: 90 * time.Millisecond})
 	if err := r.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -501,14 +504,14 @@ func TestReconcileTickIsBoundedAndCancelable(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-func TestReconcilerFollowerResetsStabilityObservations(t *testing.T) {
+func TestDriverFollowerResetsStabilityObservations(t *testing.T) {
 	if testing.Short() {
 		t.Skip("functional test; run make test")
 	}
 	for _, mode := range []string{"standby", "staged", "failed", "approved"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newTestHost(t, 1, 2)
-			r := newTestReconciler(t, h, Settings{})
+			r := newTestDriver(t, h, Settings{})
 			h.leader = false
 			if mode != "standby" {
 				h.stage(topology.OriginOperator, 1)
@@ -532,14 +535,14 @@ func TestReconcilerFollowerResetsStabilityObservations(t *testing.T) {
 		})
 	}
 }
-func TestReconcilerStatusGatesAndStableSince(t *testing.T) {
+func TestDriverStatusGatesAndStableSince(t *testing.T) {
 	if testing.Short() {
 		t.Skip("functional test; run make test")
 	}
 	for _, mode := range []string{"converged", "stability", "quorum", "cooldown", "status-error", "read-error", "execution-error"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newTestHost(t, 1, 2)
-			r := newTestReconciler(t, h, Settings{})
+			r := newTestDriver(t, h, Settings{})
 			state, reason := topology.ReconciliationIdle, ReconcileReasonConverged
 			switch mode {
 			case "converged":
@@ -577,12 +580,12 @@ func TestReconcilerStatusGatesAndStableSince(t *testing.T) {
 		})
 	}
 }
-func TestReconcilerStatusTransitionsAreOwnedAndLoggedOnce(t *testing.T) {
+func TestDriverStatusTransitionsAreOwnedAndLoggedOnce(t *testing.T) {
 	if testing.Short() {
 		t.Skip("functional test; run make test")
 	}
 	h := newTestHost(t, 1, 2, 3)
-	r := newTestReconciler(t, h, Settings{})
+	r := newTestDriver(t, h, Settings{})
 	var buf bytes.Buffer
 	r.logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	changes := 0
@@ -620,12 +623,12 @@ func TestReconcilerStatusTransitionsAreOwnedAndLoggedOnce(t *testing.T) {
 		t.Fatal("action alias")
 	}
 }
-func TestReconcilerStatusErrorWarnsOnce(t *testing.T) {
+func TestDriverStatusErrorWarnsOnce(t *testing.T) {
 	if testing.Short() {
 		t.Skip("functional test; run make test")
 	}
 	h := newTestHost(t, 1, 2, 3)
-	r := newTestReconciler(t, h, Settings{})
+	r := newTestDriver(t, h, Settings{})
 	var buf bytes.Buffer
 	r.logger = slog.New(slog.NewTextHandler(&buf, nil))
 	h.viewErr = errors.New("raw error detail")
@@ -636,12 +639,12 @@ func TestReconcilerStatusErrorWarnsOnce(t *testing.T) {
 		t.Fatal(buf.String(), r.Status())
 	}
 }
-func TestReconcilerStatusConcurrentAccess(t *testing.T) {
+func TestDriverStatusConcurrentAccess(t *testing.T) {
 	if testing.Short() {
 		t.Skip("functional test; run make test")
 	}
 	h := newTestHost(t, 1, 2, 3)
-	r := newTestReconciler(t, h, Settings{})
+	r := newTestDriver(t, h, Settings{})
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Go(func() {
@@ -655,7 +658,7 @@ func TestReconcilerStatusConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 }
-func TestReconcilerSettingsValidation(t *testing.T) {
+func TestDriverSettingsValidation(t *testing.T) {
 	t.Parallel()
 	for _, s := range []Settings{{Interval: -1}, {TickTimeout: -1}, {StabilityWindow: -1}, {Cooldown: -1}, {Interval: time.Second, TickTimeout: time.Second}} {
 		if _, err := New(Config{Host: newTestHost(t, 1, 2, 3), Settings: s}); !errors.Is(err, fault.ErrInvalid) {

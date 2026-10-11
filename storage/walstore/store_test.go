@@ -240,7 +240,7 @@ func TestWalStore_ProbeInputs(t *testing.T) {
 	})
 }
 
-func TestWalStore_QuarantineSweep(t *testing.T) {
+func TestWalStore_ExplicitQuarantineCollection(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	root := t.TempDir()
@@ -262,7 +262,17 @@ func TestWalStore_QuarantineSweep(t *testing.T) {
 	check(t, writeIdentity(foreign, storage.Identity{NodeName: "b", ClusterID: "test-cluster", GroupID: "foreign", ReplicaID: 2}))
 	garbled := filepath.Join(root, "other.quarantine-invalid")
 	check(t, os.Mkdir(garbled, dirMode))
-	check(t, s.SweepQuarantine(ctx))
+	retired, err := s.Retired(ctx)
+	check(t, err)
+	if len(retired) != 2 {
+		t.Fatalf("retired = %+v", retired)
+	}
+	for _, record := range retired {
+		if record.Identity.GroupID == "expired" {
+			check(t, s.Collect(ctx, record))
+			check(t, s.Collect(ctx, record)) // exact absent token remains idempotent
+		}
+	}
 	if _, err := os.Stat(old); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expired quarantine survived: %v", err)
 	}

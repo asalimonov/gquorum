@@ -1,13 +1,11 @@
-package reconcile
+package scheduling
 
 import (
 	"context"
 	"github.com/asalimonov/gquorum/topology"
-	"time"
 )
 
 const (
-	ActionRepairReplica              = "repair_replica"
 	ReconcileReasonConfigDisabled    = "config_disabled"
 	ReconcileReasonNotLeader         = "not_leader"
 	ReconcileReasonStarting          = "starting"
@@ -36,23 +34,4 @@ type Host interface {
 	Approve(context.Context, uint64) (topology.ExecutionID, error)
 	CommitRepair(context.Context, topology.Document, uint64, topology.Plan) (topology.ExecutionID, error)
 	WakeConvergence()
-}
-type ReconcileInput struct {
-	Latest, Target, Active topology.Document
-	Status                 map[string]topology.GroupStatus
-	Health                 map[string]topology.GroupHealthEvaluation
-	Alive                  map[string]time.Duration
-}
-type ReconcileAction struct {
-	Kind, GroupID, NodeName string
-	ReplicaID               uint64
-	Reason                  string
-}
-type ReconcileDecision struct {
-	Action *ReconcileAction
-	Reason string
-}
-type ReconcilePolicy interface {
-	Name() string
-	Evaluate(ReconcileInput) ReconcileDecision
 }

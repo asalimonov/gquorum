@@ -1,4 +1,4 @@
-package reconcile
+package scheduling
 
 import (
 	"context"
@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
+	"github.com/asalimonov/gquorum/policy"
+	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -53,20 +56,25 @@ func (s Settings) Validate() error {
 }
 
 type Config struct {
-	Host     Host
-	Settings Settings
-	Logger   *slog.Logger
+	Host            Host
+	Settings        Settings
+	Logger          *slog.Logger
+	Scheduler       policy.Scheduler
+	CallbackTimeout time.Duration
+	Held            func() []storage.Identity
 	// OnTransition receives owned diagnostic snapshots, once per state change.
 	// It must return promptly; event bus publication is suitable here.
 	OnTransition func(topology.ReconciliationStatus)
 }
 
-// Reconciler deliberately has no caller-provided policy extension point.
-// The narrow policy and replicated repair command enforce the same identity.
-type Reconciler struct {
+// Driver invokes the selected scheduler only after leader/staging/health gates.
+// It owns validation and concrete repair proposals; callbacks cannot bypass them.
+type Driver struct {
 	host             Host
 	settings         Settings
-	policy           ReconcilePolicy
+	policy           policy.Scheduler
+	callbackTimeout  time.Duration
+	held             func() []storage.Identity
 	logger           *slog.Logger
 	onTransition     func(topology.ReconciliationStatus)
 	now              func() time.Time
@@ -82,15 +90,28 @@ type Reconciler struct {
 	enabled          atomic.Bool
 }
 
-func New(cfg Config) (*Reconciler, error) {
+func New(cfg Config) (*Driver, error) {
 	if cfg.Host == nil {
 		return nil, fault.New(fault.Invalid, "repair host is required", nil)
 	}
 	if err := cfg.Settings.Validate(); err != nil {
 		return nil, err
 	}
-	r := &Reconciler{host: cfg.Host, settings: cfg.Settings.WithDefaults(), logger: cfg.Logger, onTransition: cfg.OnTransition, now: time.Now, gate: make(chan struct{}, 1), done: make(chan struct{}), aliveSince: make(map[string]time.Time)}
-	r.policy = NewRestoreDegradedPolicy(r.settings.StabilityWindow)
+	if cfg.CallbackTimeout < 0 {
+		return nil, fault.ErrInvalid
+	}
+	if cfg.CallbackTimeout == 0 {
+		cfg.CallbackTimeout = 10 * time.Second
+	}
+	r := &Driver{host: cfg.Host, settings: cfg.Settings.WithDefaults(), logger: cfg.Logger, onTransition: cfg.OnTransition, now: time.Now, gate: make(chan struct{}, 1), done: make(chan struct{}), aliveSince: make(map[string]time.Time)}
+	r.policy, r.callbackTimeout, r.held = cfg.Scheduler, cfg.CallbackTimeout, cfg.Held
+	if r.policy == nil {
+		var err error
+		r.policy, err = policy.NewRestoreDegraded(policy.RestoreDegradedOptions{StableFor: r.settings.StabilityWindow})
+		if err != nil {
+			return nil, err
+		}
+	}
 	r.enabled.Store(!r.settings.Disabled)
 	r.status = r.newStatus(cfg.Host.IsLeader(), topology.ReconciliationWaiting, ReconcileReasonStarting)
 	if r.settings.Disabled {
@@ -100,7 +121,7 @@ func New(cfg Config) (*Reconciler, error) {
 	return r, nil
 }
 
-func (r *Reconciler) Start(parent context.Context) error {
+func (r *Driver) Start(parent context.Context) error {
 	if err := parent.Err(); err != nil {
 		return err
 	}
@@ -130,7 +151,7 @@ func (r *Reconciler) Start(parent context.Context) error {
 
 // Stop cancels the current bounded tick and joins the owned worker. Calling it
 // before Start permanently closes the lifecycle, without starting a goroutine.
-func (r *Reconciler) Stop(ctx context.Context) error {
+func (r *Driver) Stop(ctx context.Context) error {
 	r.mu.Lock()
 	if !r.stopped {
 		r.stopped = true
@@ -150,7 +171,7 @@ func (r *Reconciler) Stop(ctx context.Context) error {
 	}
 }
 
-func (r *Reconciler) Status() topology.ReconciliationStatus {
+func (r *Driver) Status() topology.ReconciliationStatus {
 	r.statusMu.RLock()
 	defer r.statusMu.RUnlock()
 	return r.status.Clone()
@@ -159,7 +180,7 @@ func (r *Reconciler) Status() topology.ReconciliationStatus {
 // SetEnabled serializes the local kill switch with the current tick. Once
 // disabling returns successfully, no originating repair remains in flight.
 // Previously approved convergence remains independent of this switch.
-func (r *Reconciler) SetEnabled(ctx context.Context, enabled bool) error {
+func (r *Driver) SetEnabled(ctx context.Context, enabled bool) error {
 	select {
 	case r.gate <- struct{}{}:
 		defer func() { <-r.gate }()
@@ -189,7 +210,7 @@ func (r *Reconciler) SetEnabled(ctx context.Context, enabled bool) error {
 
 // Tick serializes observations and bounds reads and proposals. It is an
 // internal testing/maintenance seam, not an alternative authorization path.
-func (r *Reconciler) Tick(parent context.Context) error {
+func (r *Driver) Tick(parent context.Context) error {
 	ctx, cancel := context.WithTimeout(parent, r.settings.TickTimeout)
 	defer cancel()
 	select {
@@ -211,13 +232,8 @@ func (r *Reconciler) Tick(parent context.Context) error {
 	return ctx.Err()
 }
 
-func (r *Reconciler) reconcileOnce(ctx context.Context) {
+func (r *Driver) reconcileOnce(ctx context.Context) {
 	leader := r.host.IsLeader()
-	if !r.enabled.Load() {
-		r.resetAlive()
-		r.transition(r.newStatus(leader, topology.ReconciliationDisabled, ReconcileReasonConfigDisabled), "")
-		return
-	}
 	latest, target, active, err := r.host.Views(ctx)
 	if err != nil {
 		r.resetAlive()
@@ -231,6 +247,14 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) {
 	execution, exists, err := r.host.CurrentExecution(ctx)
 	if err != nil {
 		r.transition(r.newStatus(leader, topology.ReconciliationError, ReconcileReasonStatusUnavailable), err.Error())
+		return
+	}
+	if !r.enabled.Load() {
+		r.resetAlive()
+		if leader && resumable(execution, exists, active, target) {
+			r.host.WakeConvergence()
+		}
+		r.transition(r.newStatus(leader, topology.ReconciliationDisabled, ReconcileReasonConfigDisabled), "")
 		return
 	}
 	if resumable(execution, exists, active, target) {
@@ -278,12 +302,22 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) {
 	for _, item := range topology.EvaluateDataGroupHealth(active, health) {
 		evaluations[item.GroupID] = item
 	}
-	decision := r.policy.Evaluate(ReconcileInput{Latest: latest, Target: target, Active: active, Status: status, Health: evaluations, Alive: r.aliveDurations(now)})
+	in := policy.ScheduleInput{Now: now, Latest: latest, Target: target, Active: active, Status: status, Health: evaluations, Alive: r.aliveDurations(now), Held: r.heldIdentities()}
+	callbackCtx, cancel := context.WithTimeout(ctx, r.callbackTimeout)
+	decision, err := r.policy.Schedule(callbackCtx, in.Clone())
+	if err == nil {
+		err = callbackCtx.Err()
+	}
+	cancel()
+	if err != nil {
+		r.transition(r.newStatus(true, topology.ReconciliationError, ReconcileReasonPolicyRejected), err.Error())
+		return
+	}
 	if decision.Action == nil {
-		s := r.newStatus(true, topology.ReconciliationIdle, ReconcileReasonConverged)
+		s := r.newStatus(true, topology.ReconciliationIdle, decision.Reason)
 		switch decision.Reason {
-		case ReconcileReasonStabilityWindow:
-			s = r.newStatus(true, topology.ReconciliationWaiting, ReconcileReasonStabilityWindow)
+		case ReconcileReasonStabilityWindow, "local_stop":
+			s = r.newStatus(true, topology.ReconciliationWaiting, decision.Reason)
 		case ReconcileReasonQuorumLost:
 			s = r.newStatus(true, topology.ReconciliationBlocked, ReconcileReasonQuorumLost)
 		}
@@ -291,12 +325,12 @@ func (r *Reconciler) reconcileOnce(ctx context.Context) {
 		return
 	}
 	action := *decision.Action
-	if action.Kind != ActionRepairReplica {
+	if action.Kind != policy.RestoreMissingReplica {
 		r.transition(r.newStatus(true, topology.ReconciliationError, ReconcileReasonPolicyRejected), fmt.Sprintf("forbidden action %q", action.Kind))
 		return
 	}
 	s := r.newStatus(true, topology.ReconciliationRunning, ReconcileReasonMissingReplica)
-	s.CurrentAction = &topology.ReconciliationActionStatus{Kind: action.Kind, GroupID: action.GroupID, NodeName: action.NodeName, ReplicaID: action.ReplicaID}
+	s.CurrentAction = &topology.ReconciliationActionStatus{Kind: string(action.Kind), GroupID: action.Identity.GroupID, NodeName: action.Identity.NodeName, ReplicaID: action.Identity.ReplicaID}
 	r.transition(s, "")
 	id, err := r.commitReplicaRepair(ctx, latest, active, status, action, now)
 	r.lastRun = now
@@ -315,7 +349,7 @@ func resumable(ex topology.ExecutionRecord, exists bool, active, target topology
 	return exists && (!ex.Status.State.Terminal() || ex.Status.State == topology.ExecutionSucceeded && !reflect.DeepEqual(active, target))
 }
 
-func (r *Reconciler) healable(ctx context.Context, latest, active topology.Document) (bool, error) {
+func (r *Driver) healable(ctx context.Context, latest, active topology.Document) (bool, error) {
 	if latest.Origin != topology.OriginInternal || latest.ParentVersion != active.Version {
 		return false, nil
 	}
@@ -326,7 +360,7 @@ func (r *Reconciler) healable(ctx context.Context, latest, active topology.Docum
 	plan, err := r.host.PlanFor(ctx, latest)
 	return err == nil && plan.IsEmpty(), err
 }
-func (r *Reconciler) healStagedInternal(ctx context.Context, latest, active topology.Document) bool {
+func (r *Driver) healStagedInternal(ctx context.Context, latest, active topology.Document) bool {
 	ok, err := r.healable(ctx, latest, active)
 	if err != nil {
 		s := r.newStatus(true, topology.ReconciliationError, ReconcileReasonStatusUnavailable)
@@ -346,18 +380,19 @@ func (r *Reconciler) healStagedInternal(ctx context.Context, latest, active topo
 	return true
 }
 
-func (r *Reconciler) commitReplicaRepair(ctx context.Context, latest, active topology.Document, status map[string]topology.GroupStatus, action ReconcileAction, at time.Time) (topology.ExecutionID, error) {
-	group, node := active.Group(action.GroupID), active.Node(action.NodeName)
-	observed, ok := status[action.GroupID]
-	if action.Kind != ActionRepairReplica || group == nil || action.GroupID == topology.MetaGroupID || node == nil || node.State != topology.NodeActive || !ok || !observed.Found || observed.GroupID != action.GroupID {
+func (r *Driver) commitReplicaRepair(ctx context.Context, latest, active topology.Document, status map[string]topology.GroupStatus, action policy.ScheduleAction, at time.Time) (topology.ExecutionID, error) {
+	identity := action.Identity
+	group, node := active.Group(identity.GroupID), active.Node(identity.NodeName)
+	observed, ok := status[identity.GroupID]
+	if action.Kind != policy.RestoreMissingReplica || identity.ClusterID != active.ClusterID || group == nil || identity.GroupID == topology.MetaGroupID || node == nil || node.State != topology.NodeActive || !ok || !observed.Found || observed.GroupID != identity.GroupID || slices.Contains(r.heldIdentities(), identity) {
 		return "", fault.ErrExecutionAuthorization
 	}
 	for _, id := range append(append([]uint64(nil), observed.ConfState.Voters...), observed.ConfState.Learners...) {
-		if id == action.ReplicaID {
+		if id == identity.ReplicaID {
 			return "", fault.New(fault.ExecutionAuthorization, "repair identity is already a member", nil)
 		}
 	}
-	repair, _, err := metaengine.ReplicaRepairDocument(active, latest, action.GroupID, action.NodeName, action.ReplicaID, at, topology.OriginReconciler, "auto-repair")
+	repair, _, err := metaengine.ReplicaRepairDocument(active, latest, identity.GroupID, identity.NodeName, identity.ReplicaID, at, topology.OriginReconciler, "auto-repair")
 	if err != nil {
 		return "", err
 	}
@@ -378,7 +413,7 @@ func (r *Reconciler) commitReplicaRepair(ctx context.Context, latest, active top
 	return id, err
 }
 
-func (r *Reconciler) sampleAlive(doc topology.Document, health map[string]topology.Health, now time.Time) {
+func (r *Driver) sampleAlive(doc topology.Document, health map[string]topology.Health, now time.Time) {
 	declared := make(map[string]bool, len(doc.Nodes))
 	for _, node := range doc.Nodes {
 		declared[node.Name] = true
@@ -406,28 +441,39 @@ func knownHealth(doc topology.Document, health map[string]topology.Health) bool 
 	}
 	return true
 }
-func (r *Reconciler) resetAlive() { clear(r.aliveSince) }
-func (r *Reconciler) aliveDurations(now time.Time) map[string]time.Duration {
+func (r *Driver) resetAlive() { clear(r.aliveSince) }
+func (r *Driver) aliveDurations(now time.Time) map[string]time.Duration {
 	out := make(map[string]time.Duration, len(r.aliveSince))
 	for name, since := range r.aliveSince {
 		out[name] = max(0, now.Sub(since))
 	}
 	return out
 }
-func (r *Reconciler) newStatus(leader bool, state topology.ReconciliationState, reason string) topology.ReconciliationStatus {
-	return topology.ReconciliationStatus{Enabled: r.enabled.Load(), IsLeader: leader, State: state, Reason: reason, Policy: r.policy.Name()}
+func (r *Driver) newStatus(leader bool, state topology.ReconciliationState, reason string) topology.ReconciliationStatus {
+	name := fmt.Sprintf("%T", r.policy)
+	if _, builtIn := r.policy.(*policy.RestoreDegraded); builtIn {
+		name = "restore-required-replica"
+	}
+	return topology.ReconciliationStatus{Enabled: r.enabled.Load(), IsLeader: leader, State: state, Reason: reason, Policy: name}
 }
-func (r *Reconciler) runningExecutionStatus(leader bool, id topology.ExecutionID) topology.ReconciliationStatus {
+
+func (r *Driver) heldIdentities() []storage.Identity {
+	if r.held == nil {
+		return nil
+	}
+	return slices.Clone(r.held())
+}
+func (r *Driver) runningExecutionStatus(leader bool, id topology.ExecutionID) topology.ReconciliationStatus {
 	s := r.newStatus(leader, topology.ReconciliationRunning, ReconcileReasonApprovedExecution)
 	s.CurrentExecutionID = &id
 	return s
 }
-func (r *Reconciler) blockedStagedStatus(leader bool, version uint64) topology.ReconciliationStatus {
+func (r *Driver) blockedStagedStatus(leader bool, version uint64) topology.ReconciliationStatus {
 	s := r.newStatus(leader, topology.ReconciliationBlocked, ReconcileReasonStagedLatest)
 	s.BlockingVersion = &version
 	return s
 }
-func (r *Reconciler) transition(next topology.ReconciliationStatus, detail string) {
+func (r *Driver) transition(next topology.ReconciliationStatus, detail string) {
 	r.statusMu.Lock()
 	previous := r.status
 	a, b := previous.Clone(), next.Clone()

@@ -16,7 +16,7 @@ import (
 	"github.com/asalimonov/gquorum/internal/metatransport"
 	"github.com/asalimonov/gquorum/internal/observe"
 	"github.com/asalimonov/gquorum/internal/raftengine"
-	"github.com/asalimonov/gquorum/internal/reconcile"
+	"github.com/asalimonov/gquorum/internal/scheduling"
 	"github.com/asalimonov/gquorum/membership"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3"
@@ -37,7 +37,7 @@ type Group struct {
 	transport            *metatransport.Transport
 	coordinator          *membership.Coordinator
 	convergence          *convergence.ConvergenceEngine
-	reconciler           *reconcile.Reconciler
+	reconciler           *scheduling.Driver
 	observer             *observe.Watch
 	recorderMu           sync.Mutex
 	lastExecution        *topology.ExecutionStatus
@@ -117,7 +117,7 @@ func New(input Options) (*Group, error) {
 	g.addresses[opts.Identity.NodeName] = opts.Network.AdvertiseAddress
 	g.machine = metaengine.NewMachine(g.rules, nil)
 	g.watches = newWatchRegistry(opts.MaxWatchers)
-	g.reconciler, err = reconcile.New(reconcile.Config{Host: reconciliationHost{g}, Settings: opts.Reconciliation, Logger: opts.Logger, OnTransition: g.recordReconciliation})
+	g.reconciler, err = scheduling.New(scheduling.Config{Host: reconciliationHost{g}, Settings: opts.Reconciliation, Logger: opts.Logger, OnTransition: g.recordReconciliation})
 	if err != nil {
 		return nil, err
 	}

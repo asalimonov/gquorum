@@ -8,7 +8,7 @@ import (
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
-	"github.com/asalimonov/gquorum/internal/reconcile"
+	"github.com/asalimonov/gquorum/internal/scheduling"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -40,7 +40,7 @@ func (g *Group) recordReconciliation(status topology.ReconciliationStatus) {
 
 type reconciliationHost struct{ g *Group }
 
-var _ reconcile.Host = reconciliationHost{}
+var _ scheduling.Host = reconciliationHost{}
 
 func (h reconciliationHost) Views(ctx context.Context) (topology.Document, topology.Document, topology.Document, error) {
 	if err := h.g.ensureRunning(ctx); err != nil {
