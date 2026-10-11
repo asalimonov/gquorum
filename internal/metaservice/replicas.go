@@ -15,6 +15,20 @@ import (
 type ReplicaRecord = metastore.ReplicaRecord
 type LoadReplicaScope = metaengine.LoadScope
 
+func (g *Group) LoadActionTargets(ctx context.Context, a topology.AuthorizedStep) ([]storage.Identity, error) {
+	if err := g.ensureRunning(ctx); err != nil {
+		return nil, err
+	}
+	return g.state().LoadActionTargets(ctx, a)
+}
+
+func (g *Group) LoadCatalog(ctx context.Context, group string) ([]storage.Identity, error) {
+	if err := g.ensureRunning(ctx); err != nil {
+		return nil, err
+	}
+	return g.state().LoadCatalog(ctx, group)
+}
+
 // Identity returns the current owned meta pin, including readmission changes.
 func (g *Group) Identity() topology.Identity { return g.currentIdentity() }
 

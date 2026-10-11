@@ -18,6 +18,8 @@ import (
 	"github.com/asalimonov/gquorum/internal/metastore"
 	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/membership"
+	"github.com/asalimonov/gquorum/policy"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -27,6 +29,15 @@ type Config struct {
 	Scope                                            func(context.Context, storage.Identity) (metaengine.LoadScope, error)
 	LookupRecord                                     func(context.Context, string) (metastore.ReplicaRecord, bool, error)
 	RecordReplica                                    func(context.Context, string, metastore.ReplicaRecord, uint64) error
+	Authorize                                        func(context.Context, topology.AuthorizedStep) error
+	ActionTargets                                    func(context.Context, topology.AuthorizedStep) ([]storage.Identity, error)
+	Catalog                                          func(context.Context, string) ([]storage.Identity, error)
+	Active                                           func(context.Context) (topology.Document, error)
+	ForgetReplica                                    func(context.Context, topology.AuthorizedStep, uint64) error
+	RetireApplication                                func(context.Context, load.RetirementRequest) (load.RetirementResult, error)
+	Retirement                                       storage.RetirementStore
+	Retention                                        func(context.Context, policy.RetentionInput) (policy.RetentionDecision, error)
+	RetirementInterval                               time.Duration
 	Assignments                                      func(context.Context) ([]load.ReplicaRef, error)
 	Factory                                          func(context.Context, load.ReplicaSpec) (load.Application, error)
 	Store                                            storage.Store
@@ -60,13 +71,23 @@ type Host struct {
 	parked                      map[string]ParkedReplica
 	stopGate                    chan struct{}
 	deliverySeq                 uint64
+	operations                  map[string]*groupOperation
+	operationCount              int
+	operationsDone              chan struct{}
+	operationContext            context.Context
+	workWG                      sync.WaitGroup
+	membership                  *membership.Coordinator
+	retentionGate               chan struct{}
 }
 
 func New(cfg Config) (*Host, error) {
 	if cfg.Identity == nil || cfg.Scope == nil || cfg.LookupRecord == nil || cfg.RecordReplica == nil || cfg.Factory == nil || cfg.Store == nil || cfg.Transport == nil || cfg.ResolvePeer == nil || cfg.ValidatePeer == nil || cfg.ValidateNode == nil {
 		return nil, fault.New(fault.Invalid, "managed host dependencies are required", nil)
 	}
-	if cfg.EffectTimeout < 0 || cfg.CallbackTimeout < 0 || cfg.RecoveryInterval < 0 {
+	if cfg.Authorize == nil || cfg.ActionTargets == nil || cfg.Catalog == nil || cfg.Active == nil || cfg.ForgetReplica == nil || cfg.Retirement == nil || cfg.Retention == nil {
+		return nil, fault.New(fault.Invalid, "managed approval and retirement dependencies are required", nil)
+	}
+	if cfg.EffectTimeout < 0 || cfg.CallbackTimeout < 0 || cfg.RecoveryInterval < 0 || cfg.RetirementInterval < 0 {
 		return nil, fault.New(fault.Invalid, "negative managed host duration", nil)
 	}
 	if cfg.EffectTimeout == 0 {
@@ -78,10 +99,16 @@ func New(cfg Config) (*Host, error) {
 	if cfg.RecoveryInterval == 0 {
 		cfg.RecoveryInterval = 250 * time.Millisecond
 	}
+	if cfg.RetirementInterval == 0 {
+		cfg.RetirementInterval = time.Minute
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
 	h := &Host{cfg: cfg, slots: make(map[string]*replica), holds: make(map[storage.Identity]bool), parked: make(map[string]ParkedReplica), stopGate: make(chan struct{}, 1), wake: make(chan struct{}, 1)}
+	h.operations, h.operationsDone = make(map[string]*groupOperation), make(chan struct{})
+	close(h.operationsDone)
+	h.membership, h.retentionGate = membership.NewCoordinator(), make(chan struct{}, 1)
 	// Validate engine settings without opening storage or invoking application code.
 	check := h.engineOptions(&replica{identity: storage.Identity{NodeName: "validation", ClusterID: "validation", GroupID: "validation", ReplicaID: 1}}, load.Application{}, raftengine.Joining, nil)
 	if err := check.Validate(); err != nil {
@@ -108,7 +135,11 @@ func (h *Host) Start(ctx context.Context) error {
 	h.started, h.ctx = true, ctx
 	work, cancel := context.WithCancel(ctx)
 	h.workCancel, h.workDone = cancel, make(chan struct{})
-	go h.maintain(work)
+	h.operationContext = work
+	h.workWG.Add(2)
+	go func() { defer h.workWG.Done(); h.maintain(work) }()
+	go func() { defer h.workWG.Done(); h.collectLoop(work) }()
+	go func() { h.workWG.Wait(); close(h.workDone) }()
 	return nil
 }
 
@@ -118,19 +149,22 @@ func (h *Host) Quiesce(ctx context.Context) error {
 	h.mu.Lock()
 	h.quiescing = true
 	done := h.workDone
+	operations := h.operationsDone
 	if h.workCancel != nil {
 		h.workCancel()
 	}
 	h.mu.Unlock()
-	if done == nil {
-		return nil
+	for _, wait := range []<-chan struct{}{done, operations} {
+		if wait == nil {
+			continue
+		}
+		select {
+		case <-wait:
+		case <-ctx.Done():
+			return fault.New(fault.ShutdownTimeout, "managed work has not joined", ctx.Err())
+		}
 	}
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		return fault.New(fault.ShutdownTimeout, "managed maintenance has not joined", ctx.Err())
-	}
+	return nil
 }
 
 func (h *Host) Stop(ctx context.Context) error {
@@ -252,7 +286,6 @@ func (h *Host) Wake() {
 }
 
 func (h *Host) maintain(ctx context.Context) {
-	defer close(h.workDone)
 	tick := time.NewTicker(min(h.cfg.RecoveryInterval, h.cfg.EffectTimeout))
 	defer tick.Stop()
 	var nextRecovery time.Time
@@ -293,7 +326,7 @@ func (h *Host) RecoverAssignments(ctx context.Context) error {
 			h.beginStopLocked(slot)
 		}
 		h.mu.Unlock()
-		if _, err := h.acceptStart(ctx, ref, StartRecovery); err != nil {
+		if _, err := h.reserveStart(ctx, ref, StartRecovery); err != nil {
 			failures = append(failures, err)
 		}
 	}

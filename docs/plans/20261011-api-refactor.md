@@ -17,6 +17,10 @@ verification progress; checking a stage does not waive any target requirement.
 - [ ] Managed host: exact boot evidence, factory/Close ownership, start/stop
   reservations and holds, recovery supervision, action verification, delivery
   reports, retirement/retention, readmission and removal fencing.
+- [ ] Audit retained cleanup/readmission proof across the 128-document history
+  horizon and interrupted founding before Active. Current catalog extraction
+  uses retained Operators/history; pruning must not silently omit an outstanding
+  prepared identity or cause false completion of whole-group deletion.
 - [ ] Node/Cluster facade and settings: startup/readiness/shutdown, policy wiring,
   complete document/mutation/session/lock/status surface, observer ownership.
 - [ ] Migrate the small example and full cluster fixture to Node/Cluster; align
@@ -99,3 +103,25 @@ verification progress; checking a stage does not waive any target requirement.
   raftengine, including the three-host snapshot scenario. Both `cluster` and
   `example` build-tag suites compile. Docker acceptance and the final architecture
   audit remain outstanding until the Node and caller migrations are complete.
+- Approved effects (in progress): added exact action endpoint/approval checks,
+  per-group operation reservations, founding fan-out, typed verified replies,
+  leader-directed membership/transfer with the fixed safety coordinator, and the
+  private Operator adapter. Startup revalidates its originating approval after
+  factory/replay waits. Unknown future approvals are refused; the authorized
+  dispatcher may retry a remote refusal without treating it as completed work.
+- Topology retirement now joins the exact replica, checks catalog/store/ledger
+  identities, verifies the complete application proof, quarantines exact Raft
+  state and forgets only the matching ledger. Retries verify the application even
+  after a previous quarantine move; approved successors remain untouched.
+  Retention callbacks are bounded/serialized, and collection refuses live or
+  still-recorded identities. Host shutdown cancels and joins in-flight effects,
+  including callbacks. Readmission retirement intentionally still requires its
+  separate grant path and is not wired through ordinary topology authorization.
+- Added a private FSM/service catalog for current routing and approved deletion
+  targets, including retained interrupted preparation and excluding staged intent.
+  Durably completed cleanup/deletion avoids unnecessary repeat contacts. No
+  durable fields, proposal encodings or protobuf definitions changed. This
+  foundation still needs the history-horizon audit listed above, readmission,
+  removal policies and Node/Cluster composition before application migration.
+- Checkpoint validation: `make test` and `make lint` pass, including the exact
+  replica-query regression for reseating. Docker acceptance remains outstanding.

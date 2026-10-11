@@ -126,6 +126,22 @@ func TestReceiveChecksAllMessageIdentitiesBeforeStepping(t *testing.T) {
 	if status.Found || status.Peer != to {
 		t.Fatal("absence did not retain the queried exact identity", status)
 	}
+	_, err = f.store.Quarantine(deadline(t), "work", 1)
+	must(t, err)
+	f.setScope("work", 2, false, false)
+	_, err = h.StartReplica(deadline(t), load.ReplicaRef{GroupID: "work", ReplicaID: 2}, StartExplicit)
+	must(t, err)
+	status, err = h.ReadReplica(deadline(t), query)
+	must(t, err)
+	if status.Found || status.Peer != to {
+		t.Fatal("old query aliased the successor", status)
+	}
+	query.To.Replica.ReplicaID = 2
+	status, err = h.ReadReplica(deadline(t), query)
+	must(t, err)
+	if !status.Found || status.Peer != query.To {
+		t.Fatal("successor not independently observable", status)
+	}
 }
 
 func TestDeliveryBookkeepingIsBoundedWithoutDiscardingSnapshots(t *testing.T) {

@@ -175,7 +175,10 @@ func (h *Host) ReadReplica(ctx context.Context, query load.ReplicaQuery) (load.R
 		return result, nil
 	}
 	if localPeer(slot) != query.To {
-		return load.ReplicaStatus{}, fault.ErrIdentityMismatch
+		// The query's exact identity was authorized above. During reseating,
+		// Active and Target may name different local replicas; absence of this
+		// one must not expose or misidentify the other handle.
+		return result, nil
 	}
 	result.LocalState = slot.state
 	if slot.core != nil && !slot.released && slot.core.Running() {

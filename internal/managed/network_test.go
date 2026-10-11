@@ -24,6 +24,25 @@ type hostNetwork struct {
 	snapshots atomic.Int32
 }
 
+func (n *hostNetwork) ReadReplica(ctx context.Context, query load.ReplicaQuery) (load.ReplicaStatus, error) {
+	n.mu.Lock()
+	h := n.hosts[query.To.Node.NodeName]
+	n.mu.Unlock()
+	if h == nil {
+		return load.ReplicaStatus{}, fault.ErrUnavailable
+	}
+	return h.ReadReplica(ctx, query)
+}
+func (n *hostNetwork) ApplyAction(ctx context.Context, req load.ActionRequest) (load.ActionResult, error) {
+	n.mu.Lock()
+	h := n.hosts[req.To.Node.NodeName]
+	n.mu.Unlock()
+	if h == nil {
+		return load.ActionResult{}, fault.ErrUnavailable
+	}
+	return h.ApplyAction(ctx, req)
+}
+
 func (n *hostNetwork) SendRaft(ctx context.Context, batch load.RaftBatch) error {
 	n.mu.Lock()
 	from, to := n.hosts[batch.From.Node.NodeName], n.hosts[batch.To.Node.NodeName]

@@ -15,6 +15,13 @@ func (sm *topologySM) Authorize(ctx context.Context, a topology.AuthorizedStep) 
 	}
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
+	return sm.authorizeLocked(ctx, a)
+}
+
+func (sm *topologySM) authorizeLocked(ctx context.Context, a topology.AuthorizedStep) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	refuse := func() error {
 		return fault.New(fault.OperatorAuthorization, "effect does not match current approval", nil)
 	}
@@ -29,7 +36,7 @@ func (sm *topologySM) Authorize(ctx context.Context, a topology.AuthorizedStep) 
 		return nil
 	}
 	if a.Version > sm.target.Version {
-		return fault.New(fault.Unavailable, "receiver has not applied required approval", nil)
+		return refuse()
 	}
 	ex, ok := sm.operators[a.OperatorID]
 	if !ok || ex.Version != sm.target.Version || ex.State.Terminal() || a.StepSeq < 1 || a.StepSeq > len(ex.Steps) || ex.CurrentStep > len(ex.Steps) {

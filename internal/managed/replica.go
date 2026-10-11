@@ -46,6 +46,7 @@ type replica struct {
 	ownsApp, released bool
 	release           *releaseAttempt
 	deliveries        map[uint64]delivery
+	startGuard        func(context.Context) error
 }
 type releaseAttempt struct {
 	done chan struct{}
@@ -53,10 +54,14 @@ type releaseAttempt struct {
 }
 
 func (h *Host) StartReplica(ctx context.Context, ref load.ReplicaRef, why StartReason) (*loadhandle.Handle, error) {
-	slot, err := h.acceptStart(ctx, ref, why)
+	slot, err := h.reserveStart(ctx, ref, why)
 	if err != nil {
 		return nil, err
 	}
+	return h.waitStarted(ctx, slot)
+}
+
+func (h *Host) waitStarted(ctx context.Context, slot *replica) (*loadhandle.Handle, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -74,6 +79,10 @@ func (h *Host) StartReplica(ctx context.Context, ref load.ReplicaRef, why StartR
 }
 
 func (h *Host) acceptStart(ctx context.Context, ref load.ReplicaRef, why StartReason) (*replica, error) {
+	return h.acceptGuardedStart(ctx, ref, why, nil)
+}
+
+func (h *Host) acceptGuardedStart(ctx context.Context, ref load.ReplicaRef, why StartReason, guard func(context.Context) error) (*replica, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -113,6 +122,7 @@ func (h *Host) acceptStart(ctx context.Context, ref load.ReplicaRef, why StartRe
 	}
 	owned, cancel := context.WithCancel(h.ctx)
 	slot = &replica{identity: id, node: node, ctx: owned, cancel: cancel, startDone: make(chan struct{}), state: "starting", deliveries: make(map[uint64]delivery)}
+	slot.startGuard = guard
 	h.slots[id.GroupID] = slot
 	go h.startReplica(slot)
 	return slot, nil
@@ -177,6 +187,11 @@ func (h *Host) openReplica(slot *replica) error {
 	if err != nil {
 		return err
 	}
+	if slot.startGuard != nil {
+		if err := slot.startGuard(ctx); err != nil {
+			return err
+		}
+	}
 	spec := load.ReplicaSpec{Identity: slot.identity, Node: slot.node, Group: (topology.Document{Groups: []topology.Group{scope.Group}}).Clone().Groups[0], ApprovedVersion: scope.Version}
 	call, cancel := context.WithTimeout(ctx, h.cfg.CallbackTimeout)
 	app, factoryErr := h.cfg.Factory(call, spec)
@@ -207,6 +222,11 @@ func (h *Host) openReplica(slot *replica) error {
 	if current.Version != scope.Version {
 		return fault.ErrVersionConflict
 	}
+	if slot.startGuard != nil {
+		if err := slot.startGuard(ctx); err != nil {
+			return err
+		}
+	}
 	mode := raftengine.Joining
 	var peers []raft.Peer
 	if !probe.HasLog && scope.Founding {
@@ -227,6 +247,11 @@ func (h *Host) openReplica(slot *replica) error {
 	if _, err := h.startScope(ctx, slot.node, slot.identity); err != nil {
 		return err
 	}
+	if slot.startGuard != nil {
+		if err := slot.startGuard(ctx); err != nil {
+			return err
+		}
+	}
 	if err := h.cfg.RecordReplica(ctx, slot.identity.GroupID, metastore.ReplicaRecord{NodeName: slot.identity.NodeName, ClusterID: slot.identity.ClusterID, ReplicaID: slot.identity.ReplicaID, Origin: boot.origin, CreatedAt: time.Now().UTC()}, boot.previous); err != nil {
 		return err
 	}
@@ -237,6 +262,9 @@ func (h *Host) openReplica(slot *replica) error {
 		return err
 	}
 	_, err = h.startScope(ctx, slot.node, slot.identity)
+	if err == nil && slot.startGuard != nil {
+		err = slot.startGuard(ctx)
+	}
 	return err
 }
 
@@ -255,6 +283,15 @@ func (m machineAdapter) Apply(ctx context.Context, command raftengine.Command) (
 }
 
 func (h *Host) StopReplica(ctx context.Context, ref load.ReplicaRef, why StopReason) error {
+	ctx, done, err := h.beginOperation(ctx, ref.GroupID)
+	if err != nil {
+		return err
+	}
+	defer done()
+	return h.stopReplica(ctx, ref, why)
+}
+
+func (h *Host) stopReplica(ctx context.Context, ref load.ReplicaRef, why StopReason) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}

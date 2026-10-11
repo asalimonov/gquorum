@@ -16,18 +16,21 @@ import (
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metastore"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/policy"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/storage/walstore"
 	"github.com/asalimonov/gquorum/topology"
 )
 
 type fixture struct {
-	mu      sync.Mutex
-	node    topology.Identity
-	scopes  map[string]metaengine.LoadScope
-	records map[string]metastore.ReplicaRecord
-	store   *walstore.Store
-	cfg     Config
+	mu       sync.Mutex
+	node     topology.Identity
+	scopes   map[string]metaengine.LoadScope
+	records  map[string]metastore.ReplicaRecord
+	store    *walstore.Store
+	cfg      Config
+	approval topology.AuthorizedStep
+	targets  []storage.Identity
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -104,6 +107,60 @@ func newFixtureAt(t *testing.T, name string, member uint64) *fixture {
 			}
 			return ctx.Err()
 		},
+	}
+	lifecycle, err := policy.NewDefaultLifecycle(policy.DefaultLifecycleOptions{})
+	must(t, err)
+	f.cfg.Retirement, f.cfg.Retention = s, lifecycle.Retention
+	f.cfg.Authorize = func(ctx context.Context, a topology.AuthorizedStep) error {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if a != f.approval || a.Version == 0 {
+			return fault.ErrOperatorAuthorization
+		}
+		return ctx.Err()
+	}
+	f.cfg.ActionTargets = func(ctx context.Context, a topology.AuthorizedStep) ([]storage.Identity, error) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if a != f.approval || a.Version == 0 {
+			return nil, fault.ErrOperatorAuthorization
+		}
+		return slices.Clone(f.targets), ctx.Err()
+	}
+	f.cfg.Catalog = func(ctx context.Context, group string) ([]storage.Identity, error) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		var ids []storage.Identity
+		for _, r := range f.scopes[group].Group.Replicas {
+			ids = append(ids, storage.Identity{NodeName: r.NodeName, ClusterID: f.node.ClusterID, GroupID: group, ReplicaID: r.ReplicaID})
+		}
+		return ids, ctx.Err()
+	}
+	f.cfg.Active = func(ctx context.Context) (topology.Document, error) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		doc := topology.Document{ClusterID: f.node.ClusterID}
+		for _, scope := range f.scopes {
+			if scope.Established {
+				doc.Groups = append(doc.Groups, scope.Group)
+			}
+		}
+		return doc.Clone(), ctx.Err()
+	}
+	f.cfg.ForgetReplica = func(ctx context.Context, a topology.AuthorizedStep, expected uint64) error {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if a != f.approval {
+			return fault.ErrOperatorAuthorization
+		}
+		if record, found := f.records[a.GroupID]; found && record.ReplicaID != expected {
+			return fault.ErrIdentityMismatch
+		}
+		delete(f.records, a.GroupID)
+		return nil
 	}
 	return f
 }
