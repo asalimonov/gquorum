@@ -36,9 +36,9 @@ Paths in the following tables are relative to the source checkout. Target paths 
 
 | Source test | Disposition / target | Required adaptation or reason |
 | --- | --- | --- |
-| `TestAutoRepair_DataLostReturn` | ADAPT → `tests/cluster/{identity,topology}_test.go` | Preserve fresh identity after leader data loss, operator-stage protection and address-free documents; inject discovery through caller resolver. |
-| `TestAutoRepair_StagedRepairRequiresOperatorApply` | ADAPT → `tests/cluster/{identity,topology}_test.go` | Preserve fresh identity after leader data loss, operator-stage protection and address-free documents; inject discovery through caller resolver. |
-| `TestTopology_AddressFreeRouting` | ADAPT → `tests/cluster/{identity,topology}_test.go` | Preserve fresh identity after leader data loss, operator-stage protection and address-free documents; inject discovery through caller resolver. |
+| `TestAutoRepair_DataLostReturn` | ADAPT → `tests/cluster/recovery_test.go::TestLostMetaLeaderAutomaticallyReadmitsFreshIdentity{Three,Five,Seven}Nodes` | Lose the current meta leader’s bbolt store; caller startup distinguishes retained recovery from fresh admission. Without operator mutation, a survivor commits a fresh monotonic member/load identity and learner-first durable execution. Inspect the returning process, exact values and a second stable restart. |
+| `TestAutoRepair_StagedRepairRequiresOperatorApply` | ADAPT → `tests/cluster/topology_test.go::TestStagedReplicaRepairRequiresExplicitApply{Three,Five,Seven}Nodes` | Enable 200ms reconciliation and sample three seconds of staged operator disassociation. Latest stays staged, Target/Active and actual voters stay approved, and the controller reports staged_latest. Explicitly apply removal, allocate a fresh ID, verify ordered prepare/add/wait/promote planning, approve and inspect exact recovered values. |
+| `TestTopology_AddressFreeRouting` | ADAPT → `tests/cluster/topology_test.go::TestAddressFreeTopologyRoutesMetaAndLoad{Three,Five,Seven}Nodes` | Found with no address labels; caller manifest resolver supplies all locations. Every raw view and node stays address-free, status enriches each identity with its resolved meta endpoint, all ingress nodes route load commands and every owner has exact state. |
 
 ### `tests/cluster/budget_disabledreservation_test.go`
 
@@ -99,7 +99,7 @@ Paths in the following tables are relative to the source checkout. Target paths 
 | `TestClusterAPI_MetaJoinLearnerFirst` | ADAPT → `tests/cluster/{membership,execution,scale}_test.go` | Retain the exact membership/execution assertions; replace application traffic and SQL rows with acknowledged Machine commands and controller-owned cleanup records. |
 | `TestClusterAPI_RemoteApplyFromNonHostMetaLeader` | ADAPT → `tests/cluster/{membership,execution,scale}_test.go` | Retain the exact membership/execution assertions; replace application traffic and SQL rows with acknowledged Machine commands and controller-owned cleanup records. |
 | `TestClusterAPI_DrainChecksActualMetaQuorum` | ADAPT → `tests/cluster/{membership,execution,scale}_test.go` | Retain the exact membership/execution assertions; replace application traffic and SQL rows with acknowledged Machine commands and controller-owned cleanup records. |
-| `TestClusterAPI_ForceRetireDeadNode` | ADAPT → `tests/cluster/{membership,execution,scale}_test.go` | Retain the exact membership/execution assertions; replace application traffic and SQL rows with acknowledged Machine commands and controller-owned cleanup records. |
+| `TestClusterAPI_ForceRetireDeadNode` | ADAPT → `tests/cluster/membership_test.go::TestForceRetireDeadNodePreservesSafety{Three,Five,Seven}Nodes` | Abruptly lose a nonleader voter, force-retire through the healthy majority and check durable actor/reason/target audit and actual removal. A stale retained process must remain nonready across repeated samples. Stage readdition while down and require fresh meta/load IDs without changing Active or starting an execution. |
 | `TestClusterAPI_ExecutionResumesAfterMetaLeaderChange` | ADAPT → `tests/cluster/join_test.go::TestAdmissionExecutionResumesAfterMetaLeaderTransferWithoutNewAttempt` | Retain the exact membership/execution assertions; replace application traffic and SQL rows with acknowledged Machine commands and controller-owned cleanup records. |
 | `TestClusterAPI_CompactedLearnerCatchUp` | ADAPT → `tests/cluster/{membership,execution,scale}_test.go` | Retain the exact membership/execution assertions; replace application traffic and SQL rows with acknowledged Machine commands and controller-owned cleanup records. |
 | `TestClusterAPI_IntentionalLearnerNotPromoted` | ADAPT → `tests/cluster/intentional_learner_test.go::TestIntentionalLearnerSurvivesReconciliationUntilApprovedPromotion` | Retain the exact membership/execution assertions; replace application traffic and SQL rows with acknowledged Machine commands and controller-owned cleanup records. |
@@ -178,8 +178,8 @@ Paths in the following tables are relative to the source checkout. Target paths 
 
 | Source test | Disposition / target | Required adaptation or reason |
 | --- | --- | --- |
-| `TestIdentity_HealthAndStatusSurfaces` | ADAPT → `tests/cluster/identity_test.go` | Check exact runtime identity/session health and minority serving observation; test caller-defined serving policy and identity-checked local override. Override must not create commit quorum. |
-| `TestIdentity_ServingGate_MinorityAndOverride` | ADAPT → `tests/cluster/identity_test.go` | Check exact runtime identity/session health and minority serving observation; test caller-defined serving policy and identity-checked local override. Override must not create commit quorum. |
+| `TestIdentity_HealthAndStatusSurfaces` | ADAPT → `tests/cluster/identity_test.go::TestIdentityReadinessAndMinorityOverride{Three,Five,Seven}Nodes` | Inspect each responding process’s exact pin, fresh process ID, activation session and ready status; verify the caller-mounted meta/journal/full-snapshot/WAL files. |
+| `TestIdentity_ServingGate_MinorityAndOverride` | ADAPT → `tests/cluster/identity_test.go::TestIdentityReadinessAndMinorityOverride{Three,Five,Seven}Nodes` | Retain majority readiness, lose all other voters and require session expiry/readiness refusal. Exact node/cluster/member/process override targeting is mandatory. Caller-local override relaxes serving only; meta/load writes still refuse without quorum. Restart retains the override and pin; restoring all processes recovers activation and exact committed values. |
 
 ### `tests/cluster/main_test.go`
 
@@ -375,7 +375,7 @@ Paths in the following tables are relative to the source checkout. Target paths 
 | Source test | Disposition / target | Required adaptation or reason |
 | --- | --- | --- |
 | `TestShard_SharedTablesSeedToWAL` | APPLICATION | Tests SQL legacy-to-WAL migration. Current-format WAL restart, boot identity ledger and full snapshot recovery remain required. |
-| `TestShard_ParkedReplicaReseat` | ADAPT → `tests/cluster/recovery_test.go` | Prove a previously voted replica with missing local WAL parks, receives a new monotonic replica ID through explicit reseat, catches up and resumes commits; inspect the recovering node itself. |
+| `TestShard_ParkedReplicaReseat` | ADAPT → `tests/cluster/recovery_test.go::TestParkedVotedReplicaReseat{Three,Five,Seven}Nodes` | Verify a nonzero durable vote/term/commit before removing the exact usable WAL and restarting. The returning process must park store_missing, retain its ledger/meta pin, deny readiness and keep the old approved topology while the majority commits. Only explicit reseat allocates a monotonic fresh replica ID, completes durable execution, clears parking and restores exact acknowledged values. |
 
 ## Supporting tests required by the extraction
 
@@ -633,3 +633,20 @@ is a small meta-only program with separate e2e coverage in that same test tree.
 Full root/fixture tests, fixture races, vet and protocol regeneration pass;
 322 uncached parallel units complete in 9.49s. Remaining source and resource
 obligations are still required.
+
+Process-cluster identity/data-loss progress: the four autorepair/parked-WAL
+functions, two identity functions and forced-retirement function now map to the
+concrete test families in their rows. All eighteen three/five/seven-node cases
+pass together under the Docker harness race detector in 201.156s (individual
+4.00–23.37s, including release). Four retained startup/growth/admission regressions
+pass in 54.258s. The caller keeps affiliation separately from meta state, resumes
+retained pins directly and requests fresh admission after established-store loss.
+Unapproved operator intent remains inert across real reconciliation ticks; every
+repaired identity and recovered command is checked on its actual owner. Local
+serve policy cannot bypass meta or load quorum. Missing-store cleanup is idempotent,
+and a real approved cleanup with thirty-two concurrent retries is race-verified.
+Four affected cases pass again after cleanup serialization in 44.484s, with no
+run-labeled Docker resources left. Full library/fixture tests, fixture races and vet
+pass; parallel units remain below
+thirty seconds (10.39s). Founding/rejoin/refusal and other source/supporting/resource
+obligations remain open; these measurements do not mark them complete.

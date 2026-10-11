@@ -34,6 +34,7 @@ type config struct {
 	MetaAddress, LoadAddress, HTTPAddress                string
 	Peers                                                []peer
 	Join                                                 bool
+	AddressFree                                          bool
 	Limits                                               topology.Limits
 	SessionTTL, TickInterval                             time.Duration
 	WALWriteWait                                         time.Duration
@@ -64,6 +65,7 @@ func main() {
 	flag.StringVar(&c.MetaAddress, "meta-address", os.Getenv("GQUORUM_META_ADDRESS"), "advertised meta address; defaults to local manifest entry")
 	flag.StringVar(&c.LoadAddress, "load-address", os.Getenv("GQUORUM_LOAD_ADDRESS"), "advertised load address; defaults to local manifest entry")
 	flag.StringVar(&c.HTTPAddress, "http-address", os.Getenv("GQUORUM_HTTP_ADDRESS"), "advertised HTTP address; defaults to local manifest entry")
+	flag.BoolVar(&c.AddressFree, "address-free", false, "resolve all locations from the caller manifest without topology labels")
 	flag.BoolVar(&c.Join, "join", false, "join through supplied peers instead of founding")
 	flag.BoolVar(&c.Bootstrap, "bootstrap", true, "declare the demo groups after founding")
 	flag.IntVar(&c.Limits.MaxNodes, "max-nodes", c.Limits.MaxNodes, "Limits.MaxNodes")

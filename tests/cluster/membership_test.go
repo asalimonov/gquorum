@@ -176,3 +176,103 @@ func TestDrainApprovalChecksObservedActualMetaQuorum(t *testing.T) {
 	}
 	assertDrained(t, ctx, c, "node2", "work", staged.Document.Version)
 }
+
+func TestForceRetireDeadNodePreservesSafetyThreeNodes(t *testing.T) { forceRetireDeadNode(t, 3) }
+func TestForceRetireDeadNodePreservesSafetyFiveNodes(t *testing.T)  { forceRetireDeadNode(t, 5) }
+func TestForceRetireDeadNodePreservesSafetySevenNodes(t *testing.T) { forceRetireDeadNode(t, 7) }
+
+func forceRetireDeadNode(t *testing.T, size int) {
+	t.Helper()
+	ctx, c := performanceCluster(t, size)
+	created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := map[string]string{"before-retirement": "retained"}
+	if err := c.Put(ctx, "node1", "work", "before-retirement", "before-retirement", "retained"); err != nil {
+		t.Fatal(err)
+	}
+	if err := exactOwnedValues(ctx, c, created.Document, "work", expected); err != nil {
+		t.Fatal(err)
+	}
+	if err := transferMeta(ctx, c, "node2", "node1", created.Document.MemberID("node1")); err != nil {
+		t.Fatal(err)
+	}
+	oldMember := created.Document.MemberID("node3")
+	oldReplica := replicaID(created.Document, "work", "node3")
+	victim := c.Node("node3")
+	if err := victim.Kill(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := Poll(ctx, func() (bool, error) {
+		status, err := groupStatus(ctx, c, "node1", "work")
+		return err == nil && status.LeaderID != 0 && status.HealthKnown && len(status.LiveVoters) >= 2, err
+	}); err != nil {
+		t.Fatal("surviving load majority did not elect after abrupt loss", err)
+	}
+	retired, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/force-retire", meta.RetireOptions{Reason: "disk destroyed", Mutation: meta.MutationOptions{Actor: "operator", Apply: true}})
+	if err != nil {
+		t.Fatal("forced retirement did not complete against healthy majority", retired, err)
+	}
+	audit := retired.Document.Audit
+	if audit == nil || !audit.Forced || audit.Operation != topology.AuditOperationForceRetireNode || audit.TargetNode != "node3" || audit.Reason != "disk destroyed" || audit.StagedBy != "operator" || audit.StagedAt.IsZero() {
+		t.Fatal("retirement lost durable audit", audit)
+	}
+	if retired.Document.Node("node3").State != topology.NodeExcluded || retired.Document.MemberID("node3") != 0 || replicaID(retired.Document, "work", "node3") != 0 {
+		t.Fatal("retired identities remain declared", retired.Document)
+	}
+	for _, n := range c.Nodes() {
+		if n.Spec.Name == "node3" {
+			continue
+		}
+		own, err := c.Local(ctx, n.Spec.Name, topology.MetaGroupID)
+		if err != nil || len(own.Status.ConfState.Voters) != size-1 || slices.Contains(own.Status.ConfState.Voters, oldMember) {
+			t.Fatal("actual meta membership kept retired voter", own, err)
+		}
+	}
+	if err := exactOwnedValues(ctx, c, retired.Document, "work", expected); err != nil {
+		t.Fatal(err)
+	}
+	if err := victim.Start(ctx); err != nil {
+		t.Fatal("stale return failed before its identity could be inspected", err)
+	}
+	// Probe repeatedly across real session/health ticks; a single early 503 would
+	// allow a stale process to become ready after the assertion had finished.
+	until := time.Now().Add(2 * time.Second)
+	for time.Now().Before(until) {
+		response, err := c.Request(ctx, "node3", "GET", "/health/ready", nil, 0)
+		if err == nil && response.Status == 200 {
+			t.Fatal("forcibly retired stale process resumed serving")
+		}
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			t.Fatal(ctx.Err())
+		case <-timer.C:
+		}
+	}
+	if err := victim.Kill(ctx); err != nil {
+		t.Fatal(err)
+	}
+	current, err := c.Document(ctx, "node1", "latest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := c.Request(ctx, "node2", "POST", "/api/nodes", map[string]any{"node": joiningNode(victim.Spec), "mutation": meta.MutationOptions{Actor: "operator"}}, current.Version)
+	if err := requireStatus(response, err, 200); err != nil {
+		t.Fatal(err)
+	}
+	var replacement meta.MutationResult
+	if err := response.Decode(&replacement); err != nil {
+		t.Fatal(err)
+	}
+	if replacement.ExecutionID != "" || replacement.Document.MemberID("node3") <= oldMember || replicaID(replacement.Document, "work", "node3") <= oldReplica {
+		t.Fatal("staged replacement reused retired identities or self-approved", replacement)
+	}
+	active, err := c.Document(ctx, "node1", "active")
+	if err != nil || active.Version != retired.Document.Version || active.MemberID("node3") != 0 {
+		t.Fatal("replacement declaration changed approved membership", active, err)
+	}
+	t.Logf("METRIC nodes=%d retired_meta=%d replacement_meta=%d retired_load=%d replacement_load=%d audit_preserved=true", size, oldMember, replacement.Document.MemberID("node3"), oldReplica, replicaID(replacement.Document, "work", "node3"))
+}

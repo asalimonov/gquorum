@@ -251,6 +251,9 @@ func (a *application) stopLocal(ctx context.Context, id string, expected uint64)
 		return err
 	}
 	defer func() { <-a.localGate }()
+	return a.stopLocalLocked(ctx, id, expected)
+}
+func (a *application) stopLocalLocked(ctx context.Context, id string, expected uint64) error {
 	if g, exists := a.runtime.Load(id); exists && g.ReplicaID() != expected {
 		// An exact approved replacement proves the old handle is gone. A stale
 		// cleanup must acknowledge that result without stopping its successor.
@@ -406,7 +409,13 @@ type observedLive struct {
 func (h observedLive) Live(group string) (map[uint64]bool, bool) { return h.ids, group == h.group }
 
 func (a *application) cleanupLocal(ctx context.Context, approved topology.AuthorizedStep, expected uint64) error {
-	if err := a.stopLocal(ctx, approved.GroupID, expected); err != nil {
+	if err := a.takeLocal(ctx); err != nil {
+		return err
+	}
+	defer func() { <-a.localGate }()
+	// Serialize the complete stop/probe/quarantine/forget transaction with
+	// retries and local opens. Two successful probes must not race a single move.
+	if err := a.stopLocalLocked(ctx, approved.GroupID, expected); err != nil {
 		return err
 	}
 	probe, err := a.store.Probe(ctx, approved.GroupID)
@@ -423,8 +432,10 @@ func (a *application) cleanupLocal(ctx context.Context, approved topology.Author
 		}
 		return nil
 	}
-	if _, err := a.store.Quarantine(ctx, approved.GroupID, expected); err != nil {
-		return err
+	if probe.Exists {
+		if _, err := a.store.Quarantine(ctx, approved.GroupID, expected); err != nil {
+			return err
+		}
 	}
 	return a.meta.ForgetLoadReplica(ctx, approved, expected)
 }

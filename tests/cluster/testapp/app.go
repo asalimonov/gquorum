@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -67,6 +69,65 @@ type application struct {
 func nodeForPeer(p peer) topology.Node {
 	return topology.Node{Name: p.Name, Type: p.Type, Labels: map[string]string{loadAddressLabel: p.LoadAddress, metaAddressLabel: p.MetaAddress, httpAddressLabel: p.HTTPAddress}}
 }
+func (c config) nodeForPeer(p peer) topology.Node {
+	node := nodeForPeer(p)
+	if c.AddressFree {
+		node.Labels = nil
+	}
+	return node
+}
+
+// The caller retains a cluster-affiliation marker separately from Raft storage.
+// Retained stores resume their pin; missing stores on established nodes join.
+// Malformed or foreign markers fail closed; this is fixture startup policy.
+func (c *config) recoverBootMode() (bool, error) {
+	pin, found, err := meta.LoadStoredIdentity(filepath.Join(c.DataDir, "meta.bolt"))
+	if err != nil {
+		return false, err
+	}
+	if found {
+		if pin.ClusterID != c.ClusterID || pin.NodeName != c.NodeName {
+			return false, fault.ErrIdentityMismatch
+		}
+		// Resume directly, without founding declarations that could conflict with a
+		// readmitted pin. Explicit joining requests retain their admission semantics.
+		return !c.Join, nil
+	}
+	raw, err := os.ReadFile(filepath.Join(c.DataDir, "established.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var marker struct{ ClusterID, NodeName string }
+	if err := decodeJSON(raw, &marker); err != nil {
+		return false, err
+	}
+	if marker.ClusterID != c.ClusterID || marker.NodeName != c.NodeName {
+		return false, fault.ErrIdentityMismatch
+	}
+	c.Join = true
+	return false, nil
+}
+func (a *application) markEstablished() {
+	if err := a.meta.WaitReady(a.workCtx); err != nil {
+		return
+	}
+	raw, err := json.Marshal(struct{ ClusterID, NodeName string }{a.cfg.ClusterID, a.cfg.NodeName})
+	if err == nil {
+		var file *os.File
+		file, err = os.OpenFile(filepath.Join(a.cfg.DataDir, "established.json"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+		if err == nil {
+			_, err = file.Write(raw)
+			err = errors.Join(err, file.Sync(), file.Close())
+		}
+	}
+	if err != nil {
+		a.logger.Error("persist caller cluster affiliation", "error", err)
+		a.RequestClose()
+	}
+}
 func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *application, err error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -99,6 +160,10 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 	}
 	if cfg.MetaAddress == "" || cfg.LoadAddress == "" || cfg.HTTPAddress == "" {
 		return nil, fault.New(fault.Invalid, "advertised addresses required", nil)
+	}
+	resume, err := cfg.recoverBootMode()
+	if err != nil {
+		return nil, err
 	}
 	a := &application{cfg: cfg, logger: logger, locals: map[string]*localReplica{}, clients: map[string]*loadClient{}, localGate: make(chan struct{}, 1), coordinator: membership.NewCoordinator(), closing: make(chan struct{}), closed: make(chan struct{})}
 	a.workCtx, a.stopWork = context.WithCancel(context.Background())
@@ -162,10 +227,10 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 	for _, p := range cfg.Peers {
 		if cfg.Join {
 			seeds = append(seeds, p.MetaAddress)
-		} else {
-			founders = append(founders, meta.FoundingMember{Node: nodeForPeer(p), MemberID: p.MemberID, Address: p.MetaAddress})
+		} else if !resume {
+			founders = append(founders, meta.FoundingMember{Node: cfg.nodeForPeer(p), MemberID: p.MemberID, Address: p.MetaAddress})
 		}
-		if p.Name == cfg.NodeName && !cfg.Join {
+		if p.Name == cfg.NodeName && !cfg.Join && !resume {
 			member = p.MemberID
 		}
 	}
@@ -173,7 +238,7 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 	if placement.MinReplicas == 0 {
 		placement = topology.PlacementRule{MinReplicas: 1, MaxReplicas: 3}
 	}
-	a.meta, err = a.runtime.OpenMeta(meta.Options{Identity: meta.Identity{NodeName: cfg.NodeName, ClusterID: cfg.ClusterID, InstanceID: cfg.InstanceID, MemberID: member}, Node: nodeForPeer(peer{Name: cfg.NodeName, Type: cfg.NodeType, MetaAddress: cfg.MetaAddress, LoadAddress: cfg.LoadAddress, HTTPAddress: cfg.HTTPAddress}), DBPath: filepath.Join(cfg.DataDir, "meta.bolt"), Founders: founders, Join: cfg.Join, JoinSeeds: seeds, Limits: cfg.Limits, Placement: placement, SessionTTL: cfg.SessionTTL, Timing: meta.Timing{TickInterval: cfg.TickInterval, ElectionTicks: 10}, Network: meta.NetworkOptions{Listener: ls.meta, AdvertiseAddress: cfg.MetaAddress, AllowPlaintext: true, ClusterCredential: []byte(cfg.Credential), Resolver: metaResolver{a}}, LoadGroups: a, Reconciliation: cfg.Reconciliation, OnSelfRemoved: func(context.Context, string) error { a.RequestClose(); return nil }, OnReadmission: a.readmission})
+	a.meta, err = a.runtime.OpenMeta(meta.Options{Identity: meta.Identity{NodeName: cfg.NodeName, ClusterID: cfg.ClusterID, InstanceID: cfg.InstanceID, MemberID: member}, Node: cfg.nodeForPeer(peer{Name: cfg.NodeName, Type: cfg.NodeType, MetaAddress: cfg.MetaAddress, LoadAddress: cfg.LoadAddress, HTTPAddress: cfg.HTTPAddress}), DBPath: filepath.Join(cfg.DataDir, "meta.bolt"), Founders: founders, Join: cfg.Join, JoinSeeds: seeds, Limits: cfg.Limits, Placement: placement, SessionTTL: cfg.SessionTTL, Timing: meta.Timing{TickInterval: cfg.TickInterval, ElectionTicks: 10}, Network: meta.NetworkOptions{Listener: ls.meta, AdvertiseAddress: cfg.MetaAddress, AllowPlaintext: true, ClusterCredential: []byte(cfg.Credential), Resolver: metaResolver{a}}, LoadGroups: a, Reconciliation: cfg.Reconciliation, OnSelfRemoved: func(context.Context, string) error { a.RequestClose(); return nil }, OnReadmission: a.readmission})
 	if err != nil {
 		return nil, err
 	}
@@ -221,6 +286,7 @@ func (a *application) Start(parent context.Context) error {
 		case <-a.workCtx.Done():
 		}
 	})
+	a.workWG.Go(a.markEstablished)
 	a.workWG.Go(a.superviseLoads)
 	if a.cfg.Bootstrap {
 		a.workWG.Go(a.bootstrap)

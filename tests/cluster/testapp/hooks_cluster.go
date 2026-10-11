@@ -4,13 +4,17 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	gquorum "github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/meta"
@@ -112,6 +116,9 @@ type localObservation struct {
 	WAL               walCounters          `json:"wal"`
 	WALStallNS        int64                `json:"wal_stall_ns"`
 	Proposals         load.ProposalStats   `json:"proposals"`
+	Parked            *gquorum.ParkedLoad  `json:"parked,omitempty"`
+	Ledger            *meta.ReplicaRecord  `json:"ledger,omitempty"`
+	ServeOverride     int                  `json:"serve_override"`
 }
 
 func (a *application) registerClusterRoutes(mux *http.ServeMux) {
@@ -129,6 +136,94 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 	}
 	a.registerWALRoutes(mux, protect)
 	a.registerProjectionRoutes(mux, protect)
+
+	mux.HandleFunc("POST /internal/test/serve-override", protect(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Identity meta.Identity `json:"identity"`
+			Minimum  int           `json:"minimum"`
+		}
+		if err := requestBody(w, r, &body); err != nil {
+			httpError(w, err)
+			return
+		}
+		if body.Identity != a.meta.Identity() {
+			httpError(w, fault.ErrIdentityMismatch)
+			return
+		}
+		if err := a.meta.SetServeOverride(r.Context(), body.Minimum); err != nil {
+			httpError(w, err)
+			return
+		}
+		jsonResponse(w, http.StatusOK, map[string]any{"identity": a.meta.Identity(), "minimum": a.meta.ServeOverride()})
+	}))
+	mux.HandleFunc("POST /internal/test/lose-meta/{member}", protect(func(w http.ResponseWriter, r *http.Request) {
+		own := a.meta.Identity()
+		if fmt.Sprint(own.MemberID) != r.PathValue("member") || !a.meta.OwnSessionLive() {
+			httpError(w, fault.ErrIdentityMismatch)
+			return
+		}
+		marker, err := os.ReadFile(filepath.Join(a.cfg.DataDir, "established.json"))
+		if err != nil || len(marker) == 0 {
+			httpError(w, fault.ErrReplicaNotReady)
+			return
+		}
+		// An open bbolt descriptor survives rename. The next process sees no Raft
+		// store and must obtain an approved fresh identity from the healthy majority.
+		lost := filepath.Join(a.cfg.DataDir, "meta.bolt.lost")
+		if _, err := os.Lstat(lost); !errors.Is(err, os.ErrNotExist) {
+			httpError(w, fault.ErrIdentityMismatch)
+			return
+		}
+		if err := os.Rename(filepath.Join(a.cfg.DataDir, "meta.bolt"), lost); err != nil {
+			httpError(w, err)
+			return
+		}
+		jsonResponse(w, http.StatusOK, own)
+	}))
+	// Retain the node-local boot ledger while removing the exact replica's
+	// usable store. Quarantine preserves evidence without making it reopenable.
+	mux.HandleFunc("POST /internal/test/lose-store/{group}/{replica}", protect(func(w http.ResponseWriter, r *http.Request) {
+		group := r.PathValue("group")
+		if err := topology.ValidateLoadID(group); err != nil {
+			httpError(w, err)
+			return
+		}
+		if err := a.takeLocal(r.Context()); err != nil {
+			httpError(w, err)
+			return
+		}
+		defer func() { <-a.localGate }()
+		g, found := a.runtime.Load(group)
+		if !found || fmt.Sprint(g.ReplicaID()) != r.PathValue("replica") {
+			httpError(w, fault.ErrIdentityMismatch)
+			return
+		}
+		probe, err := a.store.Probe(r.Context(), group)
+		want := storage.Identity{NodeName: a.cfg.NodeName, ClusterID: a.cfg.ClusterID, GroupID: group, ReplicaID: g.ReplicaID()}
+		if err == nil && (!probe.Exists || probe.Identity != want) {
+			err = fault.ErrIdentityMismatch
+		}
+		if err == nil {
+			err = a.runtime.StopLoad(r.Context(), group, want.ReplicaID)
+		}
+		if err != nil {
+			httpError(w, err)
+			return
+		}
+		recovered, err := a.store.Load(r.Context(), group)
+		if err != nil {
+			httpError(w, err)
+			return
+		}
+		a.mu.Lock()
+		delete(a.locals, group)
+		a.mu.Unlock()
+		if _, err := a.store.Quarantine(r.Context(), group, want.ReplicaID); err != nil {
+			httpError(w, err)
+			return
+		}
+		jsonResponse(w, http.StatusOK, map[string]any{"identity": want, "hard_state": recovered.HardState})
+	}))
 	mux.HandleFunc("POST /internal/test/propose/{group}/{replica}", protect(func(w http.ResponseWriter, r *http.Request) {
 		group := r.PathValue("group")
 		if err := topology.ValidateLoadID(group); err != nil {
@@ -209,7 +304,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 		group := r.PathValue("group")
 		if group == topology.MetaGroupID {
 			status := a.meta.LocalStatus()
-			jsonResponse(w, http.StatusOK, localObservation{Identity: a.meta.Identity(), Found: status.Found, ReplicaID: a.meta.Identity().MemberID, Status: status})
+			jsonResponse(w, http.StatusOK, localObservation{Identity: a.meta.Identity(), Found: status.Found, ReplicaID: a.meta.Identity().MemberID, Status: status, ServeOverride: a.meta.ServeOverride()})
 			return
 		}
 		if err := topology.ValidateLoadID(group); err != nil {
@@ -217,6 +312,15 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			return
 		}
 		observation := localObservation{Identity: a.meta.Identity()}
+		if park, found := a.runtime.ParkedLoads()[group]; found {
+			observation.Parked = &park
+		}
+		if record, found, err := a.meta.LookupLoadReplica(r.Context(), group); err != nil {
+			httpError(w, err)
+			return
+		} else if found {
+			observation.Ledger = &record
+		}
 		a.clusterHooks.mu.Lock()
 		observation.ReceivedSnapshots = a.clusterHooks.snapshots[group]
 		a.clusterHooks.mu.Unlock()

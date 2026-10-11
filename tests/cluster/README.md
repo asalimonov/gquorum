@@ -104,3 +104,20 @@ writers for twenty seconds while eight clients keep committing through local
 WALs. Every command and local state is exact; no request is shed and WAL stalls
 stay below 500ms. The real stored projections catch up automatically after
 release. All these cases run separately at three/five/seven nodes.
+
+Data-loss ports verify durable voting before an exact WAL loss, persisted parking,
+explicit fresh-ID reseat and recovery on the returning process. Losing the current
+meta leader's bbolt store instead uses fresh admission from the healthy majority;
+retained stores start their pinned Raft engine directly. The fixture keeps its
+cluster-affiliation marker outside Raft storage, as caller-owned startup policy.
+The library reads no application configuration or marker files.
+
+Operator staging is observed across real reconciliation ticks before explicit
+remove/repair approval. Address-free cases use the caller manifest resolver from
+founding through meta and load routing, with locations enriched only in status.
+Minority cases check identity-targeted persisted serve overrides, their retained
+restart and their inability to bypass either Raft quorum. Forced retirement checks
+actual removed membership, actor/reason audit, stale-process fencing and new IDs.
+Each family runs at three/five/seven nodes under the existing per-case deadline.
+Only the authenticated fixture exposes store-loss and serve-override controls;
+none of these routes or policies is part of the small Compose demo.

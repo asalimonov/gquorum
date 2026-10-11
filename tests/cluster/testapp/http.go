@@ -18,7 +18,35 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// Serving requires both the activation lease and the exact Active load voter.
+// Caller policy may relax serving readiness using the persisted local override.
+// Fresh health and exact Active identity remain required. Consensus writes keep
+// their ordinary Raft quorum requirements regardless of this local decision.
+func (a *application) canServe(ctx context.Context) bool {
+	if a.meta.OwnSessionLive() {
+		return true
+	}
+	minimum := a.meta.ServeOverride()
+	if minimum == 0 || !a.meta.LocalStatus().Found {
+		return false
+	}
+	active, err := a.meta.Active(ctx)
+	if err != nil || active.Version == 0 || active.MetaGroup() == nil {
+		return false
+	}
+	observation := a.meta.HealthObservation()
+	if observation.Version != active.Version || observation.At.IsZero() || time.Since(observation.At) > a.cfg.SessionTTL {
+		return false
+	}
+	alive := 0
+	for _, replica := range active.MetaGroup().Replicas {
+		if replica.Role == topology.ReplicaVoter && observation.Nodes[replica.NodeName] == topology.HealthAlive {
+			alive++
+		}
+	}
+	return alive >= minimum
+}
+
+// Serving follows caller policy and requires the exact Active load voter.
 // Prepared learners and stale handles never serve application reads or writes.
 func (a *application) localServing(ctx context.Context, id string) (*localReplica, error) {
 	if err := ctx.Err(); err != nil {
@@ -29,7 +57,7 @@ func (a *application) localServing(ctx context.Context, id string) (*localReplic
 		return nil, fault.ErrStopped
 	default:
 	}
-	if !a.meta.OwnSessionLive() {
+	if !a.canServe(ctx) {
 		return nil, fault.ErrUnavailable
 	}
 	active, err := a.meta.Active(ctx)
@@ -352,6 +380,35 @@ func (a *application) routes() http.Handler {
 		}
 		jsonResponse(w, http.StatusOK, map[string]bool{"transferred": true})
 	})
+	mux.HandleFunc("POST /api/nodes/{name}/force-retire", func(w http.ResponseWriter, r *http.Request) {
+		var opts meta.RetireOptions
+		if err := requestBody(w, r, &opts); err != nil {
+			httpError(w, err)
+			return
+		}
+		mutation, err := mutationOptions(r, opts.Mutation)
+		if err != nil {
+			httpError(w, err)
+			return
+		}
+		opts.Mutation = mutation
+		result, err := a.meta.ForceRetireNode(r.Context(), r.PathValue("name"), opts)
+		mutationResponse(w, result, err)
+	})
+	mux.HandleFunc("POST /api/groups/{id}/replicas/{name}/reseat", func(w http.ResponseWriter, r *http.Request) {
+		var opts meta.MutationOptions
+		if err := requestBody(w, r, &opts); err != nil {
+			httpError(w, err)
+			return
+		}
+		opts, err := mutationOptions(r, opts)
+		if err != nil {
+			httpError(w, err)
+			return
+		}
+		result, err := a.meta.ReseatReplica(r.Context(), r.PathValue("id"), r.PathValue("name"), opts)
+		mutationResponse(w, result, err)
+	})
 	mux.HandleFunc("PUT /api/load/{id}/keys/{key}", a.putHTTP)
 	mux.HandleFunc("GET /api/load/{id}/keys/{key}", a.getHTTP)
 	mux.HandleFunc("GET /api/events", a.eventsHTTP)
@@ -372,7 +429,7 @@ func (a *application) routes() http.Handler {
 	})
 }
 func (a *application) readyHTTP(w http.ResponseWriter, r *http.Request) {
-	if !a.meta.OwnSessionLive() {
+	if !a.canServe(r.Context()) {
 		httpError(w, fault.ErrUnavailable)
 		return
 	}
@@ -407,7 +464,7 @@ func (a *application) readyHTTP(w http.ResponseWriter, r *http.Request) {
 		httpError(w, fault.ErrReplicaNotReady)
 		return
 	}
-	jsonResponse(w, http.StatusOK, map[string]any{"node": a.cfg.NodeName, "session_live": true, "groups": groups, "active_version": active.Version})
+	jsonResponse(w, http.StatusOK, map[string]any{"node": a.cfg.NodeName, "session_live": a.meta.OwnSessionLive(), "serve_override": a.meta.ServeOverride(), "groups": groups, "active_version": active.Version})
 }
 func (a *application) historyHTTP(w http.ResponseWriter, r *http.Request) {
 	offset, limit := 0, 100

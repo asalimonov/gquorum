@@ -129,3 +129,13 @@ belong to the independent `tests/cluster/testapp` fixture. Library integration
 and process-cluster scenarios reside in `tests/cluster`; the example compiles
 without test instrumentation or a load protocol. Its actual Compose REST e2e
 also lives in the test module.
+
+The fixture's restart policy reads the public durable meta pin before constructing
+its runtime. A retained store resumes without obsolete founding declarations;
+a missing store with the caller's affiliation marker requests fresh admission.
+It retains no cluster events in the meta quorum. Its authorized cleanup callback
+serializes stop, identity probe, optional quarantine and ledger retirement with
+local opens and retries. An already absent store satisfies cleanup, while a
+mismatched successor remains protected by exact approved-identity verification.
+The caller's local serve override can relax readiness using fresh health data;
+Raft membership, activation sessions and write quorum requirements stay intact.
