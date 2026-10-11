@@ -4,9 +4,10 @@ Status: clean API refactor, separate group/replica operations and a deliberate
 public group wrapper agreed. Managed local replica lifecycle through a caller
 factory and transport, and stop holds lasting only for the current node lifetime,
 are agreed. Startup-selectable defaults and caller-replaceable policies are user
-requirements. The Scheduler/LifecyclePolicy split is agreed; the user also asks
-to align ReplicaChecker and operator.Controller terminology with PD. Detailed
-extension and lifecycle contracts are under discussion.
+requirements. The Scheduler/LifecyclePolicy split, ReplicaChecker,
+library-owned operator.Controller and Operator vocabulary are agreed. The
+remaining substantive decision is scheduler agreement across nodes; detailed
+contracts and inventories belong in the target specification.
 This is a discussion record, not an implementation specification.
 
 ## Initial request
@@ -906,8 +907,8 @@ to use defaults and contains no custom policy machinery.
 > Recommendation: replace decisions; use the existing state-machine, storage,
 > transport and retirement hooks for application-specific execution.
 
-No answer recorded yet. This question scopes replacement, not whether custom
-policy implementations are supported; that support is already required.
+At this iteration no answer was recorded. Iteration 7 closes this question:
+the user accepts the library-owned Controller and explicit application hooks.
 
 ## Iteration 5: TiKV and PD terminology for replaceable decisions
 
@@ -1154,6 +1155,77 @@ behavioral assertions. The small example continues to use the defaults.
 
 No implementation code was changed during this brainstorm iteration.
 
+## Iteration 7: decision audit before the target specification
+
+User response to iteration 6:
+
+> I agree. Do we have other remaining questions/decisions?
+
+The agreement covers ReplicaChecker, the internally owned operator.Controller,
+Plan versus Operator, OperatorID and the Cluster operator query/wait methods.
+It also resolves the earlier executor replacement question: the Node constructs
+and manages the Controller; caller implementations replace decision policies
+and application dependencies through the explicit hooks. Do not ask that
+question again.
+
+### One remaining substantive decision: scheduler agreement
+
+The earlier recommendation to agree on cluster-affecting policy identity has
+not yet been resolved explicitly. Current reconciliation settings are local;
+persisting an agreed Scheduler identity/configuration therefore changes the
+cluster contract, unlike a Go symbol rename.
+
+Recommendation: store the active Scheduler identity, implementation version
+and configuration fingerprint through `_meta`. Each node installs its Go
+implementation at startup and declares the corresponding metadata. A node may
+make new automatic topology decisions only when its declaration matches the
+active cluster choice. This is a declared compatibility check, not proof that
+the custom implementations contain identical code.
+
+On a mismatch, keep Raft participation, approved Operator execution, local
+replica recovery and explicit cluster administration available; report automatic
+scheduling as blocked on that node. Do not halt the node or revoke already
+approved work. Changing the active declaration requires an explicit replicated
+cluster administration operation; a restart must not silently overwrite it.
+
+The alternative is to keep Scheduler selection entirely local, allowing a
+leader change to select a different automatic repair policy. Mandatory action
+validation still applies under either model. The distinction is predictability
+of automatic decisions and rolling configuration changes, not optional safety.
+
+Pending question: choose cluster-pinned Scheduler identity/configuration with
+the mismatch behavior above, or permit node-local selection. After this choice,
+the target can specify bootstrap/recovery defaults, an explicit update API,
+rolling-change behavior and version checks at decision commit.
+
+### Remaining work that does not need another user questionnaire
+
+- Use the concise Node/Cluster names and complete their signatures, package
+  boundaries, owned public values and the method migration inventory.
+- Carry the discussed configurable defaults into the target: readiness after
+  local admission/recovery, missing-required-voter repair, seven-day retired-Raft
+  quarantine and fencing plus node stop after approved removal. These are the
+  author's recommended defaults, not individually recorded user votes.
+- Specify factory/resource ownership, the typed load transport and receiver
+  methods, cancellation, partial startup and shutdown behavior using the rules
+  already discussed. Keep Start separate from readiness and construction of a
+  new Node separate from restarting a stopped instance.
+- Preserve the existing advanced standalone load capability, documented in
+  [the library guide](../architecture/library.md), behind a deliberate public
+  wrapper. The source already exports load.New and supports load-only runtimes;
+  removing that capability should not be inferred from simplifying the normal
+  managed path. Its caller-owned membership/recovery authority must not leak
+  into managed handles. Exact constructor and owner types are target-design work.
+- Specify serialization per installed policy implementation and require caller
+  synchronization for state shared between implementations or Nodes.
+- Inventory every document, operator, history/watch, session, lock, admission,
+  recovery and diagnostic capability. Complete persistence/protocol mapping and
+  tests, including the new Scheduler agreement data if selected. Preserve the
+  small meta example and the tests/cluster fixture boundary.
+
+These are required design tasks, not postponed features. No final target is
+emitted yet because the scheduler agreement choice is still pending.
+
 ## NOT CONSIDERED & TODO
 
 These are unresolved design details, not exclusions from the refactoring:
@@ -1163,8 +1235,8 @@ These are unresolved design details, not exclusions from the refactoring:
 - [potential-improvement] Finalize agreed managed hosting's factory/resource
   ownership and inbound effect dispatch contracts. Stop holds are confirmed as
   local to the current Node lifetime.
-- [potential-improvement] Finalize replaceable policy inputs, decisions, default
-  configuration and the boundary between policy and managed execution. Specify
+- [potential-improvement] Finalize replaceable policy inputs, decisions and default
+  configuration under the agreed library-owned Controller boundary. Specify
   local versus cluster-agreed settings, the durable agreement for custom repair
   policies and the treatment of existing runtime controls.
 - [potential-improvement] Specify Start/WaitReady/retry/partial-failure behavior,
