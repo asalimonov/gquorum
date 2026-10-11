@@ -106,7 +106,7 @@ func TestChangeConstructorsUseLearnerThenVoterGrowth(t *testing.T) {
 func TestSafetyAllowsLearnerAddWithUnknownHealth(t *testing.T) {
 	t.Parallel()
 	g := &fakeGroup{id: "s0", st: statusOf([]uint64{1, 2, 3}, nil, 1, 10, nil)}
-	if err := (SafetyPolicy{}).Check(g, nil, AddLearner(4)); err != nil {
+	if err := (SafetyRules{}).Check(g, nil, AddLearner(4)); err != nil {
 		t.Fatalf("learner add rejected: %v", err)
 	}
 }
@@ -114,7 +114,7 @@ func TestSafetyAllowsLearnerAddWithUnknownHealth(t *testing.T) {
 func TestSafetyAllowsSafeRemoval(t *testing.T) {
 	t.Parallel()
 	g := &fakeGroup{id: "s0", st: statusOf([]uint64{1, 2, 3}, nil, 1, 10, nil)}
-	if err := (SafetyPolicy{}).Check(g, knownLive(1, 2, 3), RemoveReplica(3)); err != nil {
+	if err := (SafetyRules{}).Check(g, knownLive(1, 2, 3), RemoveReplica(3)); err != nil {
 		t.Fatalf("safe removal rejected: %v", err)
 	}
 }
@@ -127,7 +127,7 @@ func TestSafetyUnknownHealthRefusesRemovalAndDemotion(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			g := &fakeGroup{id: "s0", st: statusOf([]uint64{1, 2, 3}, nil, 1, 10, nil)}
-			err := (SafetyPolicy{}).Check(g, fakeHealth{known: false}, cc)
+			err := (SafetyRules{}).Check(g, fakeHealth{known: false}, cc)
 			var refusal *SafetyRefusal
 			if !errors.As(err, &refusal) {
 				t.Fatalf("error = %v, want *SafetyRefusal", err)
@@ -142,7 +142,7 @@ func TestSafetyUnknownHealthRefusesRemovalAndDemotion(t *testing.T) {
 func TestSafetyKnownTotalOutageRefusesRemoval(t *testing.T) {
 	t.Parallel()
 	g := &fakeGroup{id: "s0", st: statusOf([]uint64{1, 2, 3}, nil, 1, 10, nil)}
-	err := (SafetyPolicy{}).Check(g, knownLive(), RemoveReplica(3))
+	err := (SafetyRules{}).Check(g, knownLive(), RemoveReplica(3))
 	var refusal *SafetyRefusal
 	if !errors.As(err, &refusal) || !refusal.HealthKnown || refusal.LiveVoters != 0 || refusal.Quorum != 2 {
 		t.Fatalf("refusal = %+v, error = %v", refusal, err)
@@ -152,7 +152,7 @@ func TestSafetyKnownTotalOutageRefusesRemoval(t *testing.T) {
 func TestSafetyRefusesQuorumBreakingRemoval(t *testing.T) {
 	t.Parallel()
 	g := &fakeGroup{id: "s0", st: statusOf([]uint64{1, 2, 3}, nil, 1, 10, nil)}
-	if err := (SafetyPolicy{}).Check(g, knownLive(1), RemoveReplica(2)); err == nil {
+	if err := (SafetyRules{}).Check(g, knownLive(1), RemoveReplica(2)); err == nil {
 		t.Fatal("quorum-breaking removal was allowed")
 	}
 }
@@ -161,7 +161,7 @@ func TestSafetyRequiresLeaderTransfer(t *testing.T) {
 	t.Parallel()
 	g := &fakeGroup{id: "meta", st: statusOf([]uint64{1, 2, 3}, nil, 1, 10, nil)}
 	for _, cc := range []raftpb.ConfChangeV2{RemoveReplica(1), DemoteVoter(1)} {
-		if err := (SafetyPolicy{}).Check(g, knownLive(1, 2, 3), cc); err == nil || !strings.Contains(err.Error(), "transfer") {
+		if err := (SafetyRules{}).Check(g, knownLive(1, 2, 3), cc); err == nil || !strings.Contains(err.Error(), "transfer") {
 			t.Fatalf("leader change error = %v, want transfer refusal", err)
 		}
 	}
@@ -170,7 +170,7 @@ func TestSafetyRequiresLeaderTransfer(t *testing.T) {
 func TestSafetyRefusesFinalVoterRemoval(t *testing.T) {
 	t.Parallel()
 	g := &fakeGroup{id: "meta", st: statusOf([]uint64{1}, nil, 0, 10, nil)}
-	if err := (SafetyPolicy{}).Check(g, knownLive(1), RemoveReplica(1)); err == nil {
+	if err := (SafetyRules{}).Check(g, knownLive(1), RemoveReplica(1)); err == nil {
 		t.Fatal("final voter removal was allowed")
 	}
 }
@@ -178,7 +178,7 @@ func TestSafetyRefusesFinalVoterRemoval(t *testing.T) {
 func TestSafetyRefusesDirectVoterGrow(t *testing.T) {
 	t.Parallel()
 	g := &fakeGroup{id: "s0", leader: true, st: statusOf([]uint64{1, 2, 3}, nil, 1, 10, nil)}
-	err := (SafetyPolicy{}).Check(g, knownLive(1, 2, 3, 4), PromoteLearner(4))
+	err := (SafetyRules{}).Check(g, knownLive(1, 2, 3, 4), PromoteLearner(4))
 	if err == nil || !strings.Contains(err.Error(), "not a current learner") {
 		t.Fatalf("direct voter grow error = %v", err)
 	}
@@ -243,20 +243,20 @@ func TestSafetyPromotesOnlyCaughtUpActiveLearner(t *testing.T) {
 		id: "s0", leader: true,
 		st: statusOf([]uint64{1, 2}, []uint64{4}, 1, 100, map[uint64]uint64{1: 100, 2: 100, 4: 100}),
 	}
-	if err := (SafetyPolicy{}).Check(g, knownLive(1, 2, 4), PromoteLearner(4)); err != nil {
+	if err := (SafetyRules{}).Check(g, knownLive(1, 2, 4), PromoteLearner(4)); err != nil {
 		t.Fatalf("caught-up learner promotion rejected: %v", err)
 	}
 
 	progress := g.st.Progress[4]
 	progress.RecentActive = false
 	g.st.Progress[4] = progress
-	if err := (SafetyPolicy{}).Check(g, knownLive(1, 2, 4), PromoteLearner(4)); err != nil {
+	if err := (SafetyRules{}).Check(g, knownLive(1, 2, 4), PromoteLearner(4)); err != nil {
 		t.Fatalf("idle caught-up learner promotion rejected: %v", err)
 	}
 
 	progress.Match = 90
 	g.st.Progress[4] = progress
-	if err := (SafetyPolicy{}).Check(g, knownLive(1, 2, 4), PromoteLearner(4)); err == nil {
+	if err := (SafetyRules{}).Check(g, knownLive(1, 2, 4), PromoteLearner(4)); err == nil {
 		t.Fatal("lagging inactive learner promotion was allowed")
 	}
 }
@@ -267,7 +267,7 @@ func TestSafetyRefusalIncludesOperationalContext(t *testing.T) {
 		id: "shard7", leader: true,
 		st: statusOf([]uint64{1}, []uint64{9}, 1, 2500, map[uint64]uint64{9: 1000}),
 	}
-	err := (SafetyPolicy{}).Check(g, knownLive(1, 9), PromoteLearner(9))
+	err := (SafetyRules{}).Check(g, knownLive(1, 9), PromoteLearner(9))
 	for _, want := range []string{"shard7", "promote_learner", "replica 9", "quorum=2", "catch_up_lag=1500"} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("error %q missing %q", err, want)
@@ -282,7 +282,7 @@ func TestSafetyRejectsMultiChange(t *testing.T) {
 		{Type: raftpb.ConfChangeRemoveNode, NodeID: 3},
 		{Type: raftpb.ConfChangeAddLearnerNode, NodeID: 4},
 	}}
-	if err := (SafetyPolicy{}).Check(g, knownLive(1, 2, 3), cc); err == nil {
+	if err := (SafetyRules{}).Check(g, knownLive(1, 2, 3), cc); err == nil {
 		t.Fatal("multi-change ConfChangeV2 was allowed")
 	}
 }
@@ -292,7 +292,7 @@ func TestSafetyRejectsJointTransition(t *testing.T) {
 	g := &fakeGroup{id: "s0", st: statusOf([]uint64{1, 2, 3}, nil, 1, 10, nil)}
 	cc := AddLearner(4)
 	cc.Transition = raftpb.ConfChangeTransitionJointExplicit
-	if err := (SafetyPolicy{}).Check(g, knownLive(1, 2, 3), cc); err == nil {
+	if err := (SafetyRules{}).Check(g, knownLive(1, 2, 3), cc); err == nil {
 		t.Fatal("joint ConfChangeV2 was allowed")
 	}
 }

@@ -122,7 +122,7 @@ func documentAPIContracts(t *testing.T, size int) {
 		t.Fatal(err)
 	}
 	var preview metaservice.MutationResult
-	if err := response.Decode(&preview); err != nil || preview.ExecutionID != "" || preview.Document.Version != base.Version+1 || preview.Document.Node("node3").State != topology.NodeDraining {
+	if err := response.Decode(&preview); err != nil || preview.OperatorID != "" || preview.Document.Version != base.Version+1 || preview.Document.Node("node3").State != topology.NodeDraining {
 		t.Fatal("preview staged or approved", preview, err)
 	}
 	response, err = c.Request(ctx, "node2", "POST", "/api/topology/preview/plan", preview.Document, 0)
@@ -282,7 +282,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 			t.Fatal(err)
 		}
 		var staged metaservice.MutationResult
-		if err := response.Decode(&staged); err != nil || staged.ExecutionID != "" {
+		if err := response.Decode(&staged); err != nil || staged.OperatorID != "" {
 			t.Fatal(staged, err)
 		}
 		if err := Poll(ctx, func() (bool, error) {
@@ -308,7 +308,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 		t.Fatal("staged drain lacks exact removal", drainPlan)
 	}
 	assertActualAPIMembership(t, ctx, c, base, 3)
-	drained.ExecutionID, err = c.Apply(ctx, c.Spec.Nodes[size-1].Name, drained.Document.Version)
+	drained.OperatorID, err = c.Apply(ctx, c.Spec.Nodes[size-1].Name, drained.Document.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +398,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 		}
 	}
 	assertActualAPIMembership(t, ctx, c, activated.Document, 2)
-	grown.ExecutionID, err = c.Apply(ctx, "node2", grown.Document.Version)
+	grown.OperatorID, err = c.Apply(ctx, "node2", grown.Document.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -453,7 +453,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 		t.Fatal(err)
 	}
 	var added metaservice.MutationResult
-	if err := response.Decode(&added); err != nil || added.Document.Node("staged-only") == nil || added.Document.MemberID("staged-only") <= uint64(size) || added.ExecutionID != "" {
+	if err := response.Decode(&added); err != nil || added.Document.Node("staged-only") == nil || added.Document.MemberID("staged-only") <= uint64(size) || added.OperatorID != "" {
 		t.Fatal("staged admission lost fresh identity", added, err)
 	}
 	if err := Poll(ctx, func() (bool, error) {

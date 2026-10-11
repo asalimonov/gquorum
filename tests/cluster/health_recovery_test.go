@@ -27,8 +27,8 @@ func TestStoppedFollowerHealthUsesActivePolicyAndRetainsStagingSevenNodes(t *tes
 // admitted type; the data plane remains a caller-defined three-worker subset.
 func stoppedFollowerPolicy(t *testing.T, size int) {
 	spec := matrixSpec(size)
-	spec.Reconciliation = true
-	spec.ReconciliationInterval, spec.ReconciliationTimeout = 200*time.Millisecond, 150*time.Millisecond
+	spec.Scheduling = true
+	spec.SchedulingInterval, spec.SchedulingTimeout = 200*time.Millisecond, 150*time.Millisecond
 	ctx, c := performanceClusterSpec(t, spec)
 	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work"})
 	if err != nil {
@@ -58,7 +58,7 @@ func stoppedFollowerPolicy(t *testing.T, size int) {
 		t.Fatal(err)
 	}
 	var staged metaservice.MutationResult
-	if err := response.Decode(&staged); err != nil || staged.Document.Version != base.Version+1 || staged.Document.Placement.MinReplicas != 3 || staged.ExecutionID != "" {
+	if err := response.Decode(&staged); err != nil || staged.Document.Version != base.Version+1 || staged.Document.Placement.MinReplicas != 3 || staged.OperatorID != "" {
 		t.Fatal(staged, err)
 	}
 	assertBlocked := func() {
@@ -69,7 +69,7 @@ func stoppedFollowerPolicy(t *testing.T, size int) {
 			}
 			if err := Poll(ctx, func() (bool, error) {
 				status, err := c.Status(ctx, node.Spec.Name)
-				return status.LatestVersion == staged.Document.Version && status.TargetVersion == base.Version && status.ActiveVersion == base.Version && status.Reconciliation.State == topology.ReconciliationBlocked && status.Reconciliation.Reason == "staged_latest", err
+				return status.LatestVersion == staged.Document.Version && status.TargetVersion == base.Version && status.ActiveVersion == base.Version && status.Scheduling.State == topology.SchedulingBlocked && status.Scheduling.Reason == "staged_latest", err
 			}); err != nil {
 				t.Fatal("durable staged policy did not block repair", node.Spec.Name, err)
 			}

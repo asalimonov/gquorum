@@ -218,14 +218,14 @@ func TestValidateTransitionRetiredIdentities(t *testing.T) {
 func TestAuthorizedStepMatchesExactScope(t *testing.T) {
 	t.Parallel()
 	step := Step{Seq: 1, Kind: StepPrepareReplica, GroupID: "load", NodeName: "a", ReplicaID: 7}
-	a := AuthorizedStep{ExecutionID: "v2-a1", Version: 2, Attempt: 1, StepSeq: step.Seq, Kind: step.Kind, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID}
+	a := AuthorizedStep{OperatorID: "v2-a1", Version: 2, Attempt: 1, StepSeq: step.Seq, Kind: step.Kind, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID}
 	if !a.Matches("v2-a1", 1, 2, step) {
 		t.Fatal("exact identity rejected")
 	}
-	for _, mutate := range []func(*AuthorizedStep){func(a *AuthorizedStep) { a.ExecutionID = "v3-a1" }, func(a *AuthorizedStep) { a.Version++ }, func(a *AuthorizedStep) { a.Attempt++ }, func(a *AuthorizedStep) { a.StepSeq++ }, func(a *AuthorizedStep) { a.Kind = StepStopReplica }, func(a *AuthorizedStep) { a.GroupID = "other" }, func(a *AuthorizedStep) { a.NodeName = "b" }, func(a *AuthorizedStep) { a.ReplicaID++ }} {
+	for _, mutate := range []func(*AuthorizedStep){func(a *AuthorizedStep) { a.OperatorID = "v3-a1" }, func(a *AuthorizedStep) { a.Version++ }, func(a *AuthorizedStep) { a.Attempt++ }, func(a *AuthorizedStep) { a.StepSeq++ }, func(a *AuthorizedStep) { a.Kind = StepStopReplica }, func(a *AuthorizedStep) { a.GroupID = "other" }, func(a *AuthorizedStep) { a.NodeName = "b" }, func(a *AuthorizedStep) { a.ReplicaID++ }} {
 		bad := a
 		mutate(&bad)
-		if bad.Matches(a.ExecutionID, a.Attempt, a.Version, step) {
+		if bad.Matches(a.OperatorID, a.Attempt, a.Version, step) {
 			t.Fatal("conflicting authorization accepted", bad)
 		}
 	}

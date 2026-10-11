@@ -123,7 +123,7 @@ func TestClusterStatusReportsAllViewVersionsAndUsesActiveGroups(t *testing.T) {
 	target := f.g.machine.Latest()
 	target.Groups = append(target.Groups, topology.Group{ID: "target-work", NextReplicaID: 2, Replicas: []topology.Replica{{NodeName: "n1", ReplicaID: 1, Role: topology.ReplicaVoter}}})
 	f.commit(t, target, false)
-	f.command(t, metaengine.BeginExecutionProposal{Version: 2, Plan: topology.Plan{Version: 2}, Actor: "test", Origin: topology.OriginFounding, At: time.Now().UTC()})
+	f.command(t, metaengine.BeginOperatorProposal{Version: 2, Plan: topology.Plan{Version: 2}, Actor: "test", Origin: topology.OriginFounding, At: time.Now().UTC()})
 	latest := f.g.machine.Latest()
 	latest.Comment = "staged"
 	f.commit(t, latest, false)

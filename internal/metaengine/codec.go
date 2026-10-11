@@ -11,18 +11,18 @@ import (
 type ProposalKind string
 
 const (
-	KindProposeDocument       ProposalKind = "propose_document"
-	KindAdmitNode             ProposalKind = "admit_node"
-	KindBeginExecution        ProposalKind = "begin_execution"
-	KindCommitRepairExecution ProposalKind = "commit_repair_execution"
-	KindTransitionExecution   ProposalKind = "transition_execution"
-	KindActivateTarget        ProposalKind = "activate_target"
-	KindBindAdmission         ProposalKind = "bind_admission"
-	KindCommitReadmission     ProposalKind = "commit_readmission"
-	KindReadyAdmission        ProposalKind = "ready_admission"
-	KindGrantSession          ProposalKind = "grant_session"
-	KindRevokeSession         ProposalKind = "revoke_session"
-	KindAcquireLock           ProposalKind = "acquire_lock"
+	KindProposeDocument      ProposalKind = "propose_document"
+	KindAdmitNode            ProposalKind = "admit_node"
+	KindBeginOperator        ProposalKind = "begin_execution"
+	KindCommitRepairOperator ProposalKind = "commit_repair_execution"
+	KindTransitionOperator   ProposalKind = "transition_execution"
+	KindActivateTarget       ProposalKind = "activate_target"
+	KindBindAdmission        ProposalKind = "bind_admission"
+	KindCommitReadmission    ProposalKind = "commit_readmission"
+	KindReadyAdmission       ProposalKind = "ready_admission"
+	KindGrantSession         ProposalKind = "grant_session"
+	KindRevokeSession        ProposalKind = "revoke_session"
+	KindAcquireLock          ProposalKind = "acquire_lock"
 )
 
 type envelope struct {
@@ -45,7 +45,7 @@ type AdmitNode struct {
 	ProposalID      string        `json:"proposal_id"`
 }
 
-type BeginExecutionProposal struct {
+type BeginOperatorProposal struct {
 	Version    uint64          `json:"version"`
 	Plan       topology.Plan   `json:"plan"`
 	Actor      string          `json:"actor"`
@@ -54,7 +54,7 @@ type BeginExecutionProposal struct {
 	ProposalID string          `json:"proposal_id"`
 }
 
-type CommitRepairExecutionProposal struct {
+type CommitRepairOperatorProposal struct {
 	Doc             topology.Document `json:"doc"`
 	ExpectedVersion uint64            `json:"expected_version"`
 	Plan            topology.Plan     `json:"plan"`
@@ -62,16 +62,16 @@ type CommitRepairExecutionProposal struct {
 	ProposalID      string            `json:"proposal_id"`
 }
 
-type TransitionExecutionProposal struct {
-	Transition topology.ExecutionTransition `json:"transition"`
-	ProposalID string                       `json:"proposal_id"`
+type TransitionOperatorProposal struct {
+	Transition topology.OperatorTransition `json:"transition"`
+	ProposalID string                      `json:"proposal_id"`
 }
 
 type ActivateTargetProposal struct {
-	ExecutionID topology.ExecutionID `json:"execution_id"`
-	Version     uint64               `json:"version"`
-	Attempt     uint32               `json:"attempt"`
-	ProposalID  string               `json:"proposal_id"`
+	OperatorID topology.OperatorID `json:"execution_id"`
+	Version    uint64              `json:"version"`
+	Attempt    uint32              `json:"attempt"`
+	ProposalID string              `json:"proposal_id"`
 }
 
 type BindAdmissionProposal struct {
@@ -92,11 +92,11 @@ type CommitReadmissionProposal struct {
 }
 
 type ReadyAdmissionProposal struct {
-	NodeName    string               `json:"node_name"`
-	InstanceID  string               `json:"instance_id"`
-	MemberID    uint64               `json:"member_id"`
-	ExecutionID topology.ExecutionID `json:"execution_id"`
-	ProposalID  string               `json:"proposal_id"`
+	NodeName   string              `json:"node_name"`
+	InstanceID string              `json:"instance_id"`
+	MemberID   uint64              `json:"member_id"`
+	OperatorID topology.OperatorID `json:"execution_id"`
+	ProposalID string              `json:"proposal_id"`
 }
 
 type GrantSession struct {
@@ -126,12 +126,12 @@ func Encode(proposal any) ([]byte, error) {
 		kind = KindProposeDocument
 	case AdmitNode:
 		kind = KindAdmitNode
-	case BeginExecutionProposal:
-		kind = KindBeginExecution
-	case CommitRepairExecutionProposal:
-		kind = KindCommitRepairExecution
-	case TransitionExecutionProposal:
-		kind = KindTransitionExecution
+	case BeginOperatorProposal:
+		kind = KindBeginOperator
+	case CommitRepairOperatorProposal:
+		kind = KindCommitRepairOperator
+	case TransitionOperatorProposal:
+		kind = KindTransitionOperator
 	case ActivateTargetProposal:
 		kind = KindActivateTarget
 	case BindAdmissionProposal:
@@ -187,12 +187,12 @@ func DecodeProposal(data []byte) (any, error) {
 		proposal = &ProposeDocument{}
 	case KindAdmitNode:
 		proposal = &AdmitNode{}
-	case KindBeginExecution:
-		proposal = &BeginExecutionProposal{}
-	case KindCommitRepairExecution:
-		proposal = &CommitRepairExecutionProposal{}
-	case KindTransitionExecution:
-		proposal = &TransitionExecutionProposal{}
+	case KindBeginOperator:
+		proposal = &BeginOperatorProposal{}
+	case KindCommitRepairOperator:
+		proposal = &CommitRepairOperatorProposal{}
+	case KindTransitionOperator:
+		proposal = &TransitionOperatorProposal{}
 	case KindActivateTarget:
 		proposal = &ActivateTargetProposal{}
 	case KindBindAdmission:

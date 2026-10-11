@@ -76,7 +76,7 @@ func TestMetaJoinRequiresApprovalAndPreparedExactRuntimeBeforeLearner(t *testing
 	}
 	header := &metapb.Header{ClusterId: "cluster", NodeName: "n3"}
 	request, _ := json.Marshal(joinRequest{Identity: topology.Identity{NodeName: "n3", ClusterID: "cluster", InstanceID: "join-three"}, Node: topology.Node{Name: "n3", Type: "coordinator"}, Address: "127.0.0.1:1"})
-	if err = metatransport.ReplyError(leader.handleJoin(ctx, header, request)); !errors.Is(err, fault.ErrExecutionAuthorization) {
+	if err = metatransport.ReplyError(leader.handleJoin(ctx, header, request)); !errors.Is(err, fault.ErrOperatorAuthorization) {
 		t.Fatal("staged node bypassed Apply", err)
 	}
 	id, err := leader.Apply(ctx, staged.Version)
@@ -98,14 +98,14 @@ func TestMetaJoinRequiresApprovalAndPreparedExactRuntimeBeforeLearner(t *testing
 		t.Fatal("invalid admission", grant)
 	}
 	waitPublic(t, func() bool {
-		status, ok := leader.state().Execution(id)
-		return ok && status.State == topology.ExecutionWaitingForReplica
+		status, ok := leader.state().Operator(id)
+		return ok && status.State == topology.OperatorWaitingForReplica
 	})
 	if containsMember(leader.engine.Load().Status().ConfState, 3) {
 		t.Fatal("unprepared runtime entered meta")
 	}
-	malformed, _ := json.Marshal(readyRequest{NodeName: "n3", InstanceID: "wrong-instance", MemberID: 3, ExecutionID: grant.Admission.ExecutionID, Address: "127.0.0.1:2"})
-	if err = metatransport.ReplyError(leader.handleReady(ctx, &metapb.Header{ClusterId: "cluster", NodeName: "n3", MemberId: 3}, malformed)); !errors.Is(err, fault.ErrExecutionAuthorization) {
+	malformed, _ := json.Marshal(readyRequest{NodeName: "n3", InstanceID: "wrong-instance", MemberID: 3, OperatorID: grant.Admission.OperatorID, Address: "127.0.0.1:2"})
+	if err = metatransport.ReplyError(leader.handleReady(ctx, &metapb.Header{ClusterId: "cluster", NodeName: "n3", MemberId: 3}, malformed)); !errors.Is(err, fault.ErrOperatorAuthorization) {
 		t.Fatal("wrong prepared identity was acknowledged", err)
 	}
 	if address, _ := leader.resolveNode(ctx, "n3"); address != "127.0.0.1:1" {
@@ -127,8 +127,8 @@ func TestMetaJoinRequiresApprovalAndPreparedExactRuntimeBeforeLearner(t *testing
 	if joined.currentIdentity().MemberID != 3 || active.Node("n3").Type != "coordinator" {
 		t.Fatal("lost caller node type or grant")
 	}
-	status, err := joined.WaitExecution(ctx, id)
-	if err != nil || status.State != topology.ExecutionSucceeded {
+	status, err := joined.WaitOperator(ctx, id)
+	if err != nil || status.State != topology.OperatorSucceeded {
 		t.Fatal(status, err)
 	}
 	if len(joined.engine.Load().Status().ConfState.Voters) != 3 || !joined.OwnSessionLive() {
@@ -328,7 +328,7 @@ func TestMetaPinnedAdmissionRestartsBeforeAndAfterReadyWithoutAllocatingIDs(t *t
 				t.Fatal(err)
 			}
 			if prepared {
-				ready, _ := json.Marshal(readyRequest{NodeName: "n3", InstanceID: "before-crash", MemberID: grant.MemberID, ExecutionID: grant.Admission.ExecutionID, Address: req.Address})
+				ready, _ := json.Marshal(readyRequest{NodeName: "n3", InstanceID: "before-crash", MemberID: grant.MemberID, OperatorID: grant.Admission.OperatorID, Address: req.Address})
 				if err = metatransport.ReplyError(leader.handleReady(ctx, &metapb.Header{ClusterId: "cluster", NodeName: "n3", MemberId: grant.MemberID}, ready)); err != nil {
 					t.Fatal(err)
 				}
@@ -350,8 +350,8 @@ func TestMetaPinnedAdmissionRestartsBeforeAndAfterReadyWithoutAllocatingIDs(t *t
 			if err = joined.WaitReady(ctx); err != nil {
 				t.Fatal(err)
 			}
-			status, err := joined.WaitExecution(ctx, id)
-			if err != nil || status.State != topology.ExecutionSucceeded {
+			status, err := joined.WaitOperator(ctx, id)
+			if err != nil || status.State != topology.OperatorSucceeded {
 				t.Fatal(status, err)
 			}
 			if joined.currentIdentity().MemberID != grant.MemberID || leader.state().Latest().Version != 2 {

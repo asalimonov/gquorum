@@ -121,7 +121,7 @@ func (c *verifiedLoadController) StopReplica(ctx context.Context, a topology.Aut
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if a.Kind != topology.StepStopReplica {
-		return fault.ErrExecutionAuthorization
+		return fault.ErrOperatorAuthorization
 	}
 	if existing := c.hosts[a.GroupID][a.NodeName]; existing != 0 && existing != a.ReplicaID {
 		return fault.ErrIdentityMismatch
@@ -136,7 +136,7 @@ func (c *verifiedLoadController) DeleteGroupState(ctx context.Context, a topolog
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if a.Kind != topology.StepDeleteGroupState || a.NodeName != "" || a.ReplicaID != 0 {
-		return fault.ErrExecutionAuthorization
+		return fault.ErrOperatorAuthorization
 	}
 	if len(c.hosts[a.GroupID]) > 0 {
 		return fault.ErrReplicaNotReady
@@ -191,8 +191,8 @@ func TestMetaCallerEffectCompletionLostAcrossLeaderReplacement(t *testing.T) {
 		}
 		return false
 	})
-	status, err := next.WaitExecution(ctx, id)
-	if err != nil || status.State != topology.ExecutionSucceeded {
+	status, err := next.WaitOperator(ctx, id)
+	if err != nil || status.State != topology.OperatorSucceeded {
 		t.Fatal(status, err)
 	}
 	waitPublic(t, func() bool { return next.state().Active().Version == 2 })
@@ -203,8 +203,8 @@ func TestMetaCallerEffectCompletionLostAcrossLeaderReplacement(t *testing.T) {
 		t.Fatal("duplicated caller-owned effect", effects)
 	}
 	// The old authorization is unusable once the execution completed.
-	old := topology.AuthorizedStep{ExecutionID: id, Version: 2, Attempt: 1, StepSeq: 1, Kind: topology.StepCreateFoundingGroup, GroupID: "load-one"}
-	if err = controller.CreateGroup(ctx, old); !errors.Is(err, fault.ErrExecutionAuthorization) {
+	old := topology.AuthorizedStep{OperatorID: id, Version: 2, Attempt: 1, StepSeq: 1, Kind: topology.StepCreateFoundingGroup, GroupID: "load-one"}
+	if err = controller.CreateGroup(ctx, old); !errors.Is(err, fault.ErrOperatorAuthorization) {
 		t.Fatal("accepted stale authorized identity", err)
 	}
 	statusGroup, err := controller.Status(ctx, "load-one")

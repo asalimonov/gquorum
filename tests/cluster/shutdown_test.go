@@ -50,13 +50,13 @@ func TestMultiGroupControllerShutdownAtFiveAndSevenNodes(t *testing.T) {
 					t.Fatal(err)
 				}
 				var admitted metaservice.MutationResult
-				if err := response.Decode(&admitted); err != nil || admitted.ExecutionID == "" {
+				if err := response.Decode(&admitted); err != nil || admitted.OperatorID == "" {
 					t.Fatal("missing admission execution", admitted, err)
 				}
 				if err := node.Start(ctx); err != nil {
 					t.Fatal(err)
 				}
-				if err := c.WaitExecution(ctx, "node2", admitted.ExecutionID); err != nil {
+				if err := c.WaitOperator(ctx, "node2", admitted.OperatorID); err != nil {
 					t.Fatal(err)
 				}
 				if err := c.WaitActive(ctx, admitted.Document.Version); err != nil {

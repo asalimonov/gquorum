@@ -127,7 +127,7 @@ func TestLivenessRecorderObserverAndSubjectIdentities(t *testing.T) {
 		}
 	}
 }
-func TestAppliedRecorderIsLocalAndDeduplicatesUnchangedExecutionAndDrain(t *testing.T) {
+func TestAppliedRecorderIsLocalAndDeduplicatesUnchangedOperatorAndDrain(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
 	doc := f.g.machine.Latest()
@@ -154,7 +154,7 @@ func TestAppliedRecorderIsLocalAndDeduplicatesUnchangedExecutionAndDrain(t *test
 		t.Fatal(err)
 	}
 	got := journalEvents(t, j, events.Filter{})
-	if len(got) != 2 || got[1].Type != events.DrainCompleted || got[1].SubjectNode != "n3" || got[1].Version != 2 || got[0].Type != events.OperatorChanged || got[0].Version != 2 || got[0].OperatorID == "" || got[0].Attempt != 1 || got[0].State != string(topology.ExecutionSucceeded) {
+	if len(got) != 2 || got[1].Type != events.DrainCompleted || got[1].SubjectNode != "n3" || got[1].Version != 2 || got[0].Type != events.OperatorChanged || got[0].Version != 2 || got[0].OperatorID == "" || got[0].Attempt != 1 || got[0].State != string(topology.OperatorSucceeded) {
 		t.Fatal(got)
 	}
 	if !reflect.DeepEqual(f.g.lastDrained, map[string]bool{"n3": true}) {

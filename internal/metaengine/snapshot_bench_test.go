@@ -92,34 +92,34 @@ func snapshotMatrix(tb testing.TB, size int) *Machine {
 			tb.Fatal("fixture plan", version, err)
 		}
 		now := at.Add(time.Duration(index) * time.Second)
-		begun := submit(BeginExecutionProposal{Version: version, Plan: plan, Actor: "benchmark", Origin: topology.OriginAPI, At: now, ProposalID: fmt.Sprintf("begin-%d", version)})
+		begun := submit(BeginOperatorProposal{Version: version, Plan: plan, Actor: "benchmark", Origin: topology.OriginAPI, At: now, ProposalID: fmt.Sprintf("begin-%d", version)})
 		if preferred != 0 {
 			if len(plan.Steps) != 1 || plan.Steps[0].Kind != topology.StepTransferLeader {
 				tb.Fatal("pending fixture is not an exact meta transfer", plan)
 			}
 			step := plan.Steps[0]
-			submit(TransitionExecutionProposal{Transition: topology.ExecutionTransition{ExecutionID: begun.ExecutionID, Version: version, Attempt: 1, StepSeq: step.Seq, GroupID: step.GroupID, NodeName: step.NodeName, State: topology.ExecutionWaitingForLeader, WaitingReason: "pending benchmark transfer", At: now.Add(time.Second)}})
+			submit(TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: begun.OperatorID, Version: version, Attempt: 1, StepSeq: step.Seq, GroupID: step.GroupID, NodeName: step.NodeName, State: topology.OperatorWaitingForLeader, WaitingReason: "pending benchmark transfer", At: now.Add(time.Second)}})
 			break
 		}
 		if len(plan.Steps) == 0 {
-			submit(TransitionExecutionProposal{Transition: topology.ExecutionTransition{ExecutionID: begun.ExecutionID, Version: version, Attempt: 1, State: topology.ExecutionSucceeded, At: now.Add(time.Second)}})
+			submit(TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: begun.OperatorID, Version: version, Attempt: 1, State: topology.OperatorSucceeded, At: now.Add(time.Second)}})
 		} else {
 			for i, step := range plan.Steps {
-				state := topology.ExecutionRunning
+				state := topology.OperatorRunning
 				if i == len(plan.Steps)-1 {
-					state = topology.ExecutionSucceeded
+					state = topology.OperatorSucceeded
 				}
-				submit(TransitionExecutionProposal{Transition: topology.ExecutionTransition{ExecutionID: begun.ExecutionID, Version: version, Attempt: 1, StepSeq: step.Seq, GroupID: step.GroupID, NodeName: step.NodeName, State: state, At: now.Add(time.Duration(i+1) * time.Second)}})
+				submit(TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: begun.OperatorID, Version: version, Attempt: 1, StepSeq: step.Seq, GroupID: step.GroupID, NodeName: step.NodeName, State: state, At: now.Add(time.Duration(i+1) * time.Second)}})
 			}
 		}
-		submit(ActivateTargetProposal{ExecutionID: begun.ExecutionID, Version: version, Attempt: 1, ProposalID: fmt.Sprintf("activate-%d", version)})
+		submit(ActivateTargetProposal{OperatorID: begun.OperatorID, Version: version, Attempt: 1, ProposalID: fmt.Sprintf("activate-%d", version)})
 	}
 	// Native membership is a separate Raft snapshot field, not serialized in the
 	// FSM payload. It is covered by storage/runtime snapshot conformance tests.
 	return machine
 }
 
-func TestMetaFullSnapshotMatrixPreservesHistoryExecutionsAndRetirement(t *testing.T) {
+func TestMetaFullSnapshotMatrixPreservesHistoryOperatorsAndRetirement(t *testing.T) {
 	t.Parallel()
 	for _, size := range []int{3, 5, 7} {
 		t.Run(fmt.Sprintf("%d-nodes", size), func(t *testing.T) {
@@ -136,11 +136,11 @@ func TestMetaFullSnapshotMatrixPreservesHistoryExecutionsAndRetirement(t *testin
 			if err := json.Unmarshal(snapshot, &state); err != nil {
 				t.Fatal(err)
 			}
-			if len(state.History) != historyRetention || len(state.Latest.LoadGroups()) != 15 || len(state.Executions) < historyRetention || len(state.RetiredGroups) != 1 || len(state.Allocations) != 17 || state.Active.Version != historyRetention+2 || state.Target.Version != historyRetention+3 || state.Latest.Version != state.Target.Version {
-				t.Fatal("matrix lost retained full-state workload", len(state.History), len(state.Executions), len(state.Allocations), state.Active.Version, state.Target.Version)
+			if len(state.History) != historyRetention || len(state.Latest.LoadGroups()) != 15 || len(state.Operators) < historyRetention || len(state.RetiredGroups) != 1 || len(state.Allocations) != 17 || state.Active.Version != historyRetention+2 || state.Target.Version != historyRetention+3 || state.Latest.Version != state.Target.Version {
+				t.Fatal("matrix lost retained full-state workload", len(state.History), len(state.Operators), len(state.Allocations), state.Active.Version, state.Target.Version)
 			}
-			pending, found := machine.Execution(topology.MakeExecutionID(state.Target.Version, 1))
-			if !found || pending.State != topology.ExecutionWaitingForLeader {
+			pending, found := machine.Operator(topology.MakeOperatorID(state.Target.Version, 1))
+			if !found || pending.State != topology.OperatorWaitingForLeader {
 				t.Fatal("pending execution missing", pending)
 			}
 			restored := NewMachine(state.Rules, nil)

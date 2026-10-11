@@ -40,7 +40,7 @@ func TestConcurrentAuthorizedCleanupRetriesAreIdempotent(t *testing.T) {
 		approved = barrier.last
 		return barrier.hits > 0
 	})
-	if approved.GroupID != "demo" || approved.NodeName != "node3" || approved.Kind != topology.StepCleanupReplicaState || approved.ExecutionID != result.ExecutionID || approved.ReplicaID == 0 {
+	if approved.GroupID != "demo" || approved.NodeName != "node3" || approved.Kind != topology.StepCleanupReplicaState || approved.OperatorID != result.OperatorID || approved.ReplicaID == 0 {
 		t.Fatal("barrier captured wrong authorization", approved)
 	}
 	// Keep the dispatcher blocked while concurrent retries perform the exact same
@@ -73,6 +73,6 @@ func TestConcurrentAuthorizedCleanupRetriesAreIdempotent(t *testing.T) {
 		t.Fatal("retired store retained after cleanup", probe, err)
 	}
 	release.Do(func() { close(barrier.release) })
-	c.waitExecution(t, result.ExecutionID)
+	c.waitOperator(t, result.OperatorID)
 	c.wait(t, "drain activates after idempotent primary callback", 5*time.Second, func() bool { return c.document(t, 0, "active").Version == result.Document.Version })
 }

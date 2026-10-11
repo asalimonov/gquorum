@@ -99,7 +99,7 @@ func testMetaOptions(t *testing.T) metaservice.Options {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = listener.Close() })
-	return metaservice.Options{Identity: topology.Identity{NodeName: "a", ClusterID: "cluster", InstanceID: "process", MemberID: 1}, DBPath: filepath.Join(t.TempDir(), "meta.bolt"), Founders: []metaservice.FoundingMember{{Node: topology.Node{Name: "a", Type: "worker"}, MemberID: 1, Address: listener.Addr().String()}}, Placement: topology.PlacementRule{MinReplicas: 1, MaxReplicas: 1}, Timing: metaservice.Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 20}, Network: metaservice.NetworkOptions{Listener: listener, AdvertiseAddress: listener.Addr().String(), AllowPlaintext: true, ClusterCredential: []byte("test-credential")}, Reconciliation: metaservice.ReconciliationOptions{Disabled: true}}
+	return metaservice.Options{Identity: topology.Identity{NodeName: "a", ClusterID: "cluster", InstanceID: "process", MemberID: 1}, DBPath: filepath.Join(t.TempDir(), "meta.bolt"), Founders: []metaservice.FoundingMember{{Node: topology.Node{Name: "a", Type: "worker"}, MemberID: 1, Address: listener.Addr().String()}}, Placement: topology.PlacementRule{MinReplicas: 1, MaxReplicas: 1}, Timing: metaservice.Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 20}, Network: metaservice.NetworkOptions{Listener: listener, AdvertiseAddress: listener.Addr().String(), AllowPlaintext: true, ClusterCredential: []byte("test-credential")}, Scheduling: metaservice.SchedulingOptions{Disabled: true}}
 }
 
 func TestRuntimeConstructorsRegistryAndSharedOwnership(t *testing.T) {

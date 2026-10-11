@@ -100,10 +100,10 @@ func (g *Group) recordNodeHealth(name string, _ topology.Health, next topology.H
 func (g *Group) recordApplied(machine *metaengine.Machine, active topology.Document) {
 	g.recorderMu.Lock()
 	defer g.recorderMu.Unlock()
-	if ex, exists := machine.CurrentExecution(); exists {
+	if ex, exists := machine.CurrentOperator(); exists {
 		next := ex.Status
-		if g.lastExecution == nil || !reflect.DeepEqual(*g.lastExecution, next) {
-			g.lastExecution = &next
+		if g.lastOperator == nil || !reflect.DeepEqual(*g.lastOperator, next) {
+			g.lastOperator = &next
 			if g.opts.Events != nil {
 				e := g.observerEvent(events.OperatorChanged)
 				e.OperatorID = string(next.ID)

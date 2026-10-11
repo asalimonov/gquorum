@@ -3,6 +3,7 @@ package metaservice
 import (
 	"context"
 	"encoding/json"
+	"github.com/asalimonov/gquorum/internal/operator"
 	"sync"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -43,9 +44,9 @@ func (c groupControllers) Status(ctx context.Context, id string) (topology.Group
 	status.HealthKnown = true
 	return status, nil
 }
-func (c groupControllers) effect(ctx context.Context, a topology.AuthorizedStep, kind topology.StepKind, invoke func(context.Context, topology.GroupController) error) error {
+func (c groupControllers) effect(ctx context.Context, a topology.AuthorizedStep, kind topology.StepKind, invoke func(context.Context, operator.GroupEffects) error) error {
 	if a.Kind != kind {
-		return fault.ErrExecutionAuthorization
+		return fault.ErrOperatorAuthorization
 	}
 	if err := c.g.Authorize(ctx, a); err != nil {
 		return err
@@ -67,12 +68,12 @@ func (c groupControllers) effect(ctx context.Context, a topology.AuthorizedStep,
 	return invoke(ctx, c.g.opts.LoadGroups)
 }
 func (c groupControllers) CreateGroup(ctx context.Context, a topology.AuthorizedStep) error {
-	return c.effect(ctx, a, topology.StepCreateFoundingGroup, func(ctx context.Context, controller topology.GroupController) error {
+	return c.effect(ctx, a, topology.StepCreateFoundingGroup, func(ctx context.Context, controller operator.GroupEffects) error {
 		return controller.CreateGroup(ctx, a)
 	})
 }
 func (c groupControllers) PrepareReplica(ctx context.Context, a topology.AuthorizedStep) error {
-	return c.effect(ctx, a, topology.StepPrepareReplica, func(ctx context.Context, controller topology.GroupController) error {
+	return c.effect(ctx, a, topology.StepPrepareReplica, func(ctx context.Context, controller operator.GroupEffects) error {
 		return controller.PrepareReplica(ctx, a)
 	})
 }
@@ -80,29 +81,29 @@ func (c groupControllers) ApplyMembership(ctx context.Context, a topology.Author
 	switch a.Kind {
 	case topology.StepAddLearner, topology.StepPromoteVoter, topology.StepDemoteVoter, topology.StepRemoveReplica:
 	default:
-		return fault.ErrExecutionAuthorization
+		return fault.ErrOperatorAuthorization
 	}
-	return c.effect(ctx, a, a.Kind, func(ctx context.Context, controller topology.GroupController) error {
+	return c.effect(ctx, a, a.Kind, func(ctx context.Context, controller operator.GroupEffects) error {
 		return controller.ApplyMembership(ctx, a)
 	})
 }
 func (c groupControllers) TransferLeader(ctx context.Context, a topology.AuthorizedStep) error {
-	return c.effect(ctx, a, topology.StepTransferLeader, func(ctx context.Context, controller topology.GroupController) error {
+	return c.effect(ctx, a, topology.StepTransferLeader, func(ctx context.Context, controller operator.GroupEffects) error {
 		return controller.TransferLeader(ctx, a)
 	})
 }
 func (c groupControllers) StopReplica(ctx context.Context, a topology.AuthorizedStep) error {
-	return c.effect(ctx, a, topology.StepStopReplica, func(ctx context.Context, controller topology.GroupController) error {
+	return c.effect(ctx, a, topology.StepStopReplica, func(ctx context.Context, controller operator.GroupEffects) error {
 		return controller.StopReplica(ctx, a)
 	})
 }
 func (c groupControllers) CleanupReplicaState(ctx context.Context, a topology.AuthorizedStep) error {
-	return c.effect(ctx, a, topology.StepCleanupReplicaState, func(ctx context.Context, controller topology.GroupController) error {
+	return c.effect(ctx, a, topology.StepCleanupReplicaState, func(ctx context.Context, controller operator.GroupEffects) error {
 		return controller.CleanupReplicaState(ctx, a)
 	})
 }
 func (c groupControllers) DeleteGroupState(ctx context.Context, a topology.AuthorizedStep) error {
-	return c.effect(ctx, a, topology.StepDeleteGroupState, func(ctx context.Context, controller topology.GroupController) error {
+	return c.effect(ctx, a, topology.StepDeleteGroupState, func(ctx context.Context, controller operator.GroupEffects) error {
 		return controller.DeleteGroupState(ctx, a)
 	})
 }
@@ -114,7 +115,7 @@ func (g *Group) metaEffect(ctx context.Context, a topology.AuthorizedStep) error
 	}
 	defer done()
 	if a.GroupID != topology.MetaGroupID {
-		return fault.ErrExecutionAuthorization
+		return fault.ErrOperatorAuthorization
 	}
 	if err := g.Authorize(ctx, a); err != nil {
 		return err
@@ -125,7 +126,7 @@ func (g *Group) metaEffect(ctx context.Context, a topology.AuthorizedStep) error
 	engine := g.engine.Load()
 	switch a.Kind {
 	case topology.StepPrepareReplica:
-		admission, ok := g.state().AdmissionForExecution(a.ExecutionID, a.NodeName, a.ReplicaID)
+		admission, ok := g.state().AdmissionForOperator(a.OperatorID, a.NodeName, a.ReplicaID)
 		if !ok || !admission.State.Prepared() {
 			return fault.New(fault.ReplicaNotReady, "exact join admission has not acknowledged its runtime", nil)
 		}
@@ -140,14 +141,14 @@ func (g *Group) metaEffect(ctx context.Context, a topology.AuthorizedStep) error
 		// observer. Stopping it here could discard the approval's remaining progress.
 		status := engine.Status()
 		if containsMember(status.ConfState, a.ReplicaID) {
-			return fault.ErrExecutionAuthorization
+			return fault.ErrOperatorAuthorization
 		}
 		return nil
 	case topology.StepTransferLeader:
 		return engine.TransferLeader(ctx, a.ReplicaID)
 	case topology.StepAddLearner, topology.StepPromoteVoter, topology.StepDemoteVoter, topology.StepRemoveReplica:
 		if a.Kind == topology.StepAddLearner {
-			admission, ok := g.state().AdmissionForExecution(a.ExecutionID, a.NodeName, a.ReplicaID)
+			admission, ok := g.state().AdmissionForOperator(a.OperatorID, a.NodeName, a.ReplicaID)
 			if !ok || !admission.State.Prepared() {
 				return fault.ErrReplicaNotReady
 			}
@@ -172,7 +173,7 @@ func (g *Group) metaEffect(ctx context.Context, a topology.AuthorizedStep) error
 		}
 		return g.coordinator.Apply(ctx, engine.Membership(), metaLive{live}, change)
 	default:
-		return fault.ErrExecutionAuthorization
+		return fault.ErrOperatorAuthorization
 	}
 }
 
@@ -262,5 +263,5 @@ func (g *Group) metaHealth(ctx context.Context, status topology.GroupStatus) (ma
 	return result, nil
 }
 
-var _ topology.GroupController = groupControllers{}
+var _ operator.GroupEffects = groupControllers{}
 var _ membership.HealthSource = metaLive{}

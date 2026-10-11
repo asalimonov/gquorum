@@ -64,7 +64,7 @@ type Config struct {
 	Held            func() []storage.Identity
 	// OnTransition receives owned diagnostic snapshots, once per state change.
 	// It must return promptly; event bus publication is suitable here.
-	OnTransition func(topology.ReconciliationStatus)
+	OnTransition func(topology.SchedulingStatus)
 }
 
 // Driver invokes the selected scheduler only after leader/staging/health gates.
@@ -76,7 +76,7 @@ type Driver struct {
 	callbackTimeout  time.Duration
 	held             func() []storage.Identity
 	logger           *slog.Logger
-	onTransition     func(topology.ReconciliationStatus)
+	onTransition     func(topology.SchedulingStatus)
 	now              func() time.Time
 	gate             chan struct{}
 	aliveSince       map[string]time.Time
@@ -86,7 +86,7 @@ type Driver struct {
 	cancel           context.CancelFunc
 	done             chan struct{}
 	statusMu         sync.RWMutex
-	status           topology.ReconciliationStatus
+	status           topology.SchedulingStatus
 	enabled          atomic.Bool
 }
 
@@ -113,9 +113,9 @@ func New(cfg Config) (*Driver, error) {
 		}
 	}
 	r.enabled.Store(!r.settings.Disabled)
-	r.status = r.newStatus(cfg.Host.IsLeader(), topology.ReconciliationWaiting, ReconcileReasonStarting)
+	r.status = r.newStatus(cfg.Host.IsLeader(), topology.SchedulingWaiting, ReconcileReasonStarting)
 	if r.settings.Disabled {
-		r.status = r.newStatus(cfg.Host.IsLeader(), topology.ReconciliationDisabled, ReconcileReasonConfigDisabled)
+		r.status = r.newStatus(cfg.Host.IsLeader(), topology.SchedulingDisabled, ReconcileReasonConfigDisabled)
 	}
 	r.status.Since = r.now().UTC()
 	return r, nil
@@ -171,7 +171,7 @@ func (r *Driver) Stop(ctx context.Context) error {
 	}
 }
 
-func (r *Driver) Status() topology.ReconciliationStatus {
+func (r *Driver) Status() topology.SchedulingStatus {
 	r.statusMu.RLock()
 	defer r.statusMu.RUnlock()
 	return r.status.Clone()
@@ -200,9 +200,9 @@ func (r *Driver) SetEnabled(ctx context.Context, enabled bool) error {
 		return nil
 	}
 	r.resetAlive()
-	s := r.newStatus(r.host.IsLeader(), topology.ReconciliationDisabled, ReconcileReasonConfigDisabled)
+	s := r.newStatus(r.host.IsLeader(), topology.SchedulingDisabled, ReconcileReasonConfigDisabled)
 	if enabled {
-		s = r.newStatus(r.host.IsLeader(), topology.ReconciliationWaiting, ReconcileReasonStarting)
+		s = r.newStatus(r.host.IsLeader(), topology.SchedulingWaiting, ReconcileReasonStarting)
 	}
 	r.transition(s, "")
 	return nil
@@ -237,36 +237,36 @@ func (r *Driver) reconcileOnce(ctx context.Context) {
 	latest, target, active, err := r.host.Views(ctx)
 	if err != nil {
 		r.resetAlive()
-		r.transition(r.newStatus(leader, topology.ReconciliationError, ReconcileReasonStatusUnavailable), err.Error())
+		r.transition(r.newStatus(leader, topology.SchedulingError, ReconcileReasonStatusUnavailable), err.Error())
 		return
 	}
 	leader = r.host.IsLeader()
 	if !leader {
 		r.resetAlive()
 	}
-	execution, exists, err := r.host.CurrentExecution(ctx)
+	operator, exists, err := r.host.CurrentOperator(ctx)
 	if err != nil {
-		r.transition(r.newStatus(leader, topology.ReconciliationError, ReconcileReasonStatusUnavailable), err.Error())
+		r.transition(r.newStatus(leader, topology.SchedulingError, ReconcileReasonStatusUnavailable), err.Error())
 		return
 	}
 	if !r.enabled.Load() {
 		r.resetAlive()
-		if leader && resumable(execution, exists, active, target) {
-			r.host.WakeConvergence()
+		if leader && resumable(operator, exists, active, target) {
+			r.host.WakeOperator()
 		}
-		r.transition(r.newStatus(leader, topology.ReconciliationDisabled, ReconcileReasonConfigDisabled), "")
+		r.transition(r.newStatus(leader, topology.SchedulingDisabled, ReconcileReasonConfigDisabled), "")
 		return
 	}
-	if resumable(execution, exists, active, target) {
+	if resumable(operator, exists, active, target) {
 		if leader {
-			r.host.WakeConvergence()
+			r.host.WakeOperator()
 		}
-		r.transition(r.runningExecutionStatus(leader, execution.Status.ID), "")
+		r.transition(r.runningOperatorStatus(leader, operator.Status.ID), "")
 		return
 	}
-	if exists && execution.Status.State == topology.ExecutionFailed && execution.Status.Version == latest.Version {
-		s := r.newStatus(leader, topology.ReconciliationBlocked, ReconcileReasonFailedExecution)
-		s.BlockingVersion, s.CurrentExecutionID = &execution.Status.Version, &execution.Status.ID
+	if exists && operator.Status.State == topology.OperatorFailed && operator.Status.Version == latest.Version {
+		s := r.newStatus(leader, topology.SchedulingBlocked, ReconcileReasonFailedOperator)
+		s.BlockingVersion, s.CurrentOperatorID = &operator.Status.Version, &operator.Status.ID
 		r.transition(s, "")
 		return
 	}
@@ -278,24 +278,24 @@ func (r *Driver) reconcileOnce(ctx context.Context) {
 		return
 	}
 	if !leader {
-		r.transition(r.newStatus(false, topology.ReconciliationStandby, ReconcileReasonNotLeader), "")
+		r.transition(r.newStatus(false, topology.SchedulingStandby, ReconcileReasonNotLeader), "")
 		return
 	}
 	health, err := r.host.Health(ctx)
 	if err != nil || !knownHealth(active, health) {
 		r.resetAlive()
-		r.transition(r.newStatus(true, topology.ReconciliationWaiting, ReconcileReasonUnknownHealth), "")
+		r.transition(r.newStatus(true, topology.SchedulingWaiting, ReconcileReasonUnknownHealth), "")
 		return
 	}
 	now := r.now()
 	r.sampleAlive(active, health, now)
 	if !r.lastRun.IsZero() && now.Sub(r.lastRun) < r.settings.Cooldown {
-		r.transition(r.newStatus(true, topology.ReconciliationWaiting, ReconcileReasonCooldown), "")
+		r.transition(r.newStatus(true, topology.SchedulingWaiting, ReconcileReasonCooldown), "")
 		return
 	}
 	status, err := r.host.GlobalStatus(ctx, active)
 	if err != nil {
-		r.transition(r.newStatus(true, topology.ReconciliationError, ReconcileReasonStatusUnavailable), err.Error())
+		r.transition(r.newStatus(true, topology.SchedulingError, ReconcileReasonStatusUnavailable), err.Error())
 		return
 	}
 	evaluations := map[string]topology.GroupHealthEvaluation{}
@@ -310,27 +310,27 @@ func (r *Driver) reconcileOnce(ctx context.Context) {
 	}
 	cancel()
 	if err != nil {
-		r.transition(r.newStatus(true, topology.ReconciliationError, ReconcileReasonPolicyRejected), err.Error())
+		r.transition(r.newStatus(true, topology.SchedulingError, ReconcileReasonPolicyRejected), err.Error())
 		return
 	}
 	if decision.Action == nil {
-		s := r.newStatus(true, topology.ReconciliationIdle, decision.Reason)
+		s := r.newStatus(true, topology.SchedulingIdle, decision.Reason)
 		switch decision.Reason {
 		case ReconcileReasonStabilityWindow, "local_stop":
-			s = r.newStatus(true, topology.ReconciliationWaiting, decision.Reason)
+			s = r.newStatus(true, topology.SchedulingWaiting, decision.Reason)
 		case ReconcileReasonQuorumLost:
-			s = r.newStatus(true, topology.ReconciliationBlocked, ReconcileReasonQuorumLost)
+			s = r.newStatus(true, topology.SchedulingBlocked, ReconcileReasonQuorumLost)
 		}
 		r.transition(s, "")
 		return
 	}
 	action := *decision.Action
 	if action.Kind != policy.RestoreMissingReplica {
-		r.transition(r.newStatus(true, topology.ReconciliationError, ReconcileReasonPolicyRejected), fmt.Sprintf("forbidden action %q", action.Kind))
+		r.transition(r.newStatus(true, topology.SchedulingError, ReconcileReasonPolicyRejected), fmt.Sprintf("forbidden action %q", action.Kind))
 		return
 	}
-	s := r.newStatus(true, topology.ReconciliationRunning, ReconcileReasonMissingReplica)
-	s.CurrentAction = &topology.ReconciliationActionStatus{Kind: string(action.Kind), GroupID: action.Identity.GroupID, NodeName: action.Identity.NodeName, ReplicaID: action.Identity.ReplicaID}
+	s := r.newStatus(true, topology.SchedulingRunning, ReconcileReasonMissingReplica)
+	s.CurrentAction = &topology.SchedulingActionStatus{Kind: string(action.Kind), GroupID: action.Identity.GroupID, NodeName: action.Identity.NodeName, ReplicaID: action.Identity.ReplicaID}
 	r.transition(s, "")
 	id, err := r.commitReplicaRepair(ctx, latest, active, status, action, now)
 	r.lastRun = now
@@ -339,14 +339,14 @@ func (r *Driver) reconcileOnce(ctx context.Context) {
 		if errors.Is(err, fault.ErrVersionConflict) {
 			reason = ReconcileReasonCASConflict
 		}
-		r.transition(r.newStatus(true, topology.ReconciliationError, reason), err.Error())
+		r.transition(r.newStatus(true, topology.SchedulingError, reason), err.Error())
 		return
 	}
-	r.transition(r.runningExecutionStatus(true, id), "")
+	r.transition(r.runningOperatorStatus(true, id), "")
 }
 
-func resumable(ex topology.ExecutionRecord, exists bool, active, target topology.Document) bool {
-	return exists && (!ex.Status.State.Terminal() || ex.Status.State == topology.ExecutionSucceeded && !reflect.DeepEqual(active, target))
+func resumable(ex topology.Operator, exists bool, active, target topology.Document) bool {
+	return exists && (!ex.Status.State.Terminal() || ex.Status.State == topology.OperatorSucceeded && !reflect.DeepEqual(active, target))
 }
 
 func (r *Driver) healable(ctx context.Context, latest, active topology.Document) (bool, error) {
@@ -363,7 +363,7 @@ func (r *Driver) healable(ctx context.Context, latest, active topology.Document)
 func (r *Driver) healStagedInternal(ctx context.Context, latest, active topology.Document) bool {
 	ok, err := r.healable(ctx, latest, active)
 	if err != nil {
-		s := r.newStatus(true, topology.ReconciliationError, ReconcileReasonStatusUnavailable)
+		s := r.newStatus(true, topology.SchedulingError, ReconcileReasonStatusUnavailable)
 		s.BlockingVersion = &latest.Version
 		r.transition(s, err.Error())
 		return true
@@ -376,20 +376,20 @@ func (r *Driver) healStagedInternal(ctx context.Context, latest, active topology
 		r.transition(r.blockedStagedStatus(true, latest.Version), err.Error())
 		return true
 	}
-	r.transition(r.runningExecutionStatus(true, id), "")
+	r.transition(r.runningOperatorStatus(true, id), "")
 	return true
 }
 
-func (r *Driver) commitReplicaRepair(ctx context.Context, latest, active topology.Document, status map[string]topology.GroupStatus, action policy.ScheduleAction, at time.Time) (topology.ExecutionID, error) {
+func (r *Driver) commitReplicaRepair(ctx context.Context, latest, active topology.Document, status map[string]topology.GroupStatus, action policy.ScheduleAction, at time.Time) (topology.OperatorID, error) {
 	identity := action.Identity
 	group, node := active.Group(identity.GroupID), active.Node(identity.NodeName)
 	observed, ok := status[identity.GroupID]
 	if action.Kind != policy.RestoreMissingReplica || identity.ClusterID != active.ClusterID || group == nil || identity.GroupID == topology.MetaGroupID || node == nil || node.State != topology.NodeActive || !ok || !observed.Found || observed.GroupID != identity.GroupID || slices.Contains(r.heldIdentities(), identity) {
-		return "", fault.ErrExecutionAuthorization
+		return "", fault.ErrOperatorAuthorization
 	}
 	for _, id := range append(append([]uint64(nil), observed.ConfState.Voters...), observed.ConfState.Learners...) {
 		if id == identity.ReplicaID {
-			return "", fault.New(fault.ExecutionAuthorization, "repair identity is already a member", nil)
+			return "", fault.New(fault.OperatorAuthorization, "repair identity is already a member", nil)
 		}
 	}
 	repair, _, err := metaengine.ReplicaRepairDocument(active, latest, identity.GroupID, identity.NodeName, identity.ReplicaID, at, topology.OriginReconciler, "auto-repair")
@@ -401,14 +401,14 @@ func (r *Driver) commitReplicaRepair(ctx context.Context, latest, active topolog
 		return "", err
 	}
 	if plan.IsEmpty() {
-		return "", fault.New(fault.ExecutionAuthorization, "fresh identity repair cannot have an empty plan", nil)
+		return "", fault.New(fault.OperatorAuthorization, "fresh identity repair cannot have an empty plan", nil)
 	}
 	if !r.host.IsLeader() {
 		return "", fault.ErrNotLeader
 	}
 	id, err := r.host.CommitRepair(ctx, repair, latest.Version, plan)
 	if err == nil {
-		r.host.WakeConvergence()
+		r.host.WakeOperator()
 	}
 	return id, err
 }
@@ -449,12 +449,12 @@ func (r *Driver) aliveDurations(now time.Time) map[string]time.Duration {
 	}
 	return out
 }
-func (r *Driver) newStatus(leader bool, state topology.ReconciliationState, reason string) topology.ReconciliationStatus {
+func (r *Driver) newStatus(leader bool, state topology.SchedulingState, reason string) topology.SchedulingStatus {
 	name := fmt.Sprintf("%T", r.policy)
 	if _, builtIn := r.policy.(*policy.RestoreDegraded); builtIn {
 		name = "restore-required-replica"
 	}
-	return topology.ReconciliationStatus{Enabled: r.enabled.Load(), IsLeader: leader, State: state, Reason: reason, Policy: name}
+	return topology.SchedulingStatus{Enabled: r.enabled.Load(), IsLeader: leader, State: state, Reason: reason, Policy: name}
 }
 
 func (r *Driver) heldIdentities() []storage.Identity {
@@ -463,17 +463,17 @@ func (r *Driver) heldIdentities() []storage.Identity {
 	}
 	return slices.Clone(r.held())
 }
-func (r *Driver) runningExecutionStatus(leader bool, id topology.ExecutionID) topology.ReconciliationStatus {
-	s := r.newStatus(leader, topology.ReconciliationRunning, ReconcileReasonApprovedExecution)
-	s.CurrentExecutionID = &id
+func (r *Driver) runningOperatorStatus(leader bool, id topology.OperatorID) topology.SchedulingStatus {
+	s := r.newStatus(leader, topology.SchedulingRunning, ReconcileReasonApprovedOperator)
+	s.CurrentOperatorID = &id
 	return s
 }
-func (r *Driver) blockedStagedStatus(leader bool, version uint64) topology.ReconciliationStatus {
-	s := r.newStatus(leader, topology.ReconciliationBlocked, ReconcileReasonStagedLatest)
+func (r *Driver) blockedStagedStatus(leader bool, version uint64) topology.SchedulingStatus {
+	s := r.newStatus(leader, topology.SchedulingBlocked, ReconcileReasonStagedLatest)
 	s.BlockingVersion = &version
 	return s
 }
-func (r *Driver) transition(next topology.ReconciliationStatus, detail string) {
+func (r *Driver) transition(next topology.SchedulingStatus, detail string) {
 	r.statusMu.Lock()
 	previous := r.status
 	a, b := previous.Clone(), next.Clone()
@@ -493,9 +493,9 @@ func (r *Driver) transition(next topology.ReconciliationStatus, detail string) {
 	}
 	level := slog.LevelDebug
 	if next.IsLeader {
-		if next.State == topology.ReconciliationBlocked || next.State == topology.ReconciliationError {
+		if next.State == topology.SchedulingBlocked || next.State == topology.SchedulingError {
 			level = slog.LevelWarn
-		} else if previous.State == topology.ReconciliationBlocked || previous.State == topology.ReconciliationError {
+		} else if previous.State == topology.SchedulingBlocked || previous.State == topology.SchedulingError {
 			level = slog.LevelInfo
 		}
 	}

@@ -16,10 +16,10 @@ func (sm *topologySM) Authorize(ctx context.Context, a topology.AuthorizedStep) 
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	refuse := func() error {
-		return fault.New(fault.ExecutionAuthorization, "effect does not match current approval", nil)
+		return fault.New(fault.OperatorAuthorization, "effect does not match current approval", nil)
 	}
 	if a.StepSeq == 0 {
-		if a.ExecutionID != "" || a.Attempt != 0 || a.Version == 0 || a.Version != sm.active.Version || a.Kind != topology.StepTransferLeader {
+		if a.OperatorID != "" || a.Attempt != 0 || a.Version == 0 || a.Version != sm.active.Version || a.Kind != topology.StepTransferLeader {
 			return refuse()
 		}
 		r := documentReplica(sm.active, a.GroupID, a.ReplicaID)
@@ -31,7 +31,7 @@ func (sm *topologySM) Authorize(ctx context.Context, a topology.AuthorizedStep) 
 	if a.Version > sm.target.Version {
 		return fault.New(fault.Unavailable, "receiver has not applied required approval", nil)
 	}
-	ex, ok := sm.executions[a.ExecutionID]
+	ex, ok := sm.operators[a.OperatorID]
 	if !ok || ex.Version != sm.target.Version || ex.State.Terminal() || a.StepSeq < 1 || a.StepSeq > len(ex.Steps) || ex.CurrentStep > len(ex.Steps) {
 		return refuse()
 	}
@@ -43,7 +43,7 @@ func (sm *topologySM) Authorize(ctx context.Context, a topology.AuthorizedStep) 
 	// already-committed progress transition. Match every immutable approval
 	// field first, then refuse execution with a retryable lag result. No effect
 	// is authorized until this receiver reaches the exact current step.
-	if ex.State == topology.ExecutionPending || ex.CurrentStep < a.StepSeq {
+	if ex.State == topology.OperatorPending || ex.CurrentStep < a.StepSeq {
 		return fault.New(fault.Unavailable, "receiver has not applied required execution progress", nil)
 	}
 	if ex.CurrentStep != a.StepSeq {

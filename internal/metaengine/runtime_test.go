@@ -200,7 +200,7 @@ func TestMetaRuntimeRealGRPCConsensusAndBboltRestart(t *testing.T) {
 		return true
 	})
 	at := time.Unix(1234, 0).UTC()
-	for _, p := range []any{beginProposal(1, 0, "begin", at), TransitionExecutionProposal{Transition: topology.ExecutionTransition{ExecutionID: topology.MakeExecutionID(1, 1), Version: 1, Attempt: 1, State: topology.ExecutionSucceeded, At: at.Add(time.Second)}}, ActivateTargetProposal{ExecutionID: topology.MakeExecutionID(1, 1), Version: 1, Attempt: 1}} {
+	for _, p := range []any{beginProposal(1, 0, "begin", at), TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: topology.MakeOperatorID(1, 1), Version: 1, Attempt: 1, State: topology.OperatorSucceeded, At: at.Add(time.Second)}}, ActivateTargetProposal{OperatorID: topology.MakeOperatorID(1, 1), Version: 1, Attempt: 1}} {
 		result, err := leader.group.Propose(ctx, raftengine.Proposal{Data: mustEncode(t, p)})
 		if err != nil {
 			t.Fatal(err)

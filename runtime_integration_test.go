@@ -186,8 +186,8 @@ func TestRuntimeIdentityMismatchParkSurvivesMetaRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, err := m.WaitExecution(ctx, created.ExecutionID)
-	if err != nil || status.State != topology.ExecutionSucceeded {
+	status, err := m.WaitOperator(ctx, created.OperatorID)
+	if err != nil || status.State != topology.OperatorSucceeded {
 		t.Fatal(status, err)
 	}
 	record, found, err := m.LookupLoadReplica(ctx, "work")
@@ -255,8 +255,8 @@ func TestRuntimeApprovedLoadParksLostWALRecoversAndRetires(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, err := m.WaitExecution(ctx, id)
-	if err != nil || status.State != topology.ExecutionSucceeded {
+	status, err := m.WaitOperator(ctx, id)
+	if err != nil || status.State != topology.OperatorSucceeded {
 		t.Fatal(status, err)
 	}
 	g, exists := r.Load("work")
@@ -320,8 +320,8 @@ func TestRuntimeApprovedLoadParksLostWALRecoversAndRetires(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, err = m.WaitExecution(ctx, deleted.ExecutionID)
-	if err != nil || status.State != topology.ExecutionSucceeded {
+	status, err = m.WaitOperator(ctx, deleted.OperatorID)
+	if err != nil || status.State != topology.OperatorSucceeded {
 		t.Fatal(status, err)
 	}
 	if _, exists := r.Load("work"); exists {

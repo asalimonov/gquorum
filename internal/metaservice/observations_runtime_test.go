@@ -146,7 +146,7 @@ func TestMetaHealthEventsStatusAndDrainUseApprovedActiveScope(t *testing.T) {
 	if watched.state().Latest().Version != 1 || watched.state().Target().Version != 1 || watched.state().Active().Version != 1 {
 		t.Fatal("health churned topology")
 	}
-	// Choose a follower to drain; it retains its meta vote after convergence.
+	// Choose a follower to drain; it retains its meta vote after operator.
 	var departing *Group
 	for _, g := range groups {
 		if g != leader {
@@ -170,7 +170,7 @@ func TestMetaHealthEventsStatusAndDrainUseApprovedActiveScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = leader.WaitExecution(ctx, ex); err != nil {
+	if _, err = leader.WaitOperator(ctx, ex); err != nil {
 		t.Fatal(err)
 	}
 	waitPublic(t, func() bool { return watched.state().Active().Version == 2 })
@@ -187,15 +187,15 @@ func TestMetaHealthEventsStatusAndDrainUseApprovedActiveScope(t *testing.T) {
 	if len(drained) != 1 || drained[0].SubjectNode != name || drained[0].Version != 2 || active.MemberID(name) != departing.currentIdentity().MemberID {
 		t.Fatal(drained)
 	}
-	executions := journalEvents(t, j, events.Filter{Types: []events.Type{events.OperatorChanged}})
+	operators := journalEvents(t, j, events.Filter{Types: []events.Type{events.OperatorChanged}})
 	found := false
-	for _, e := range executions {
-		if e.OperatorID == string(ex) && e.Version == 2 && e.Attempt == 1 && e.State == string(topology.ExecutionSucceeded) {
+	for _, e := range operators {
+		if e.OperatorID == string(ex) && e.Version == 2 && e.Attempt == 1 && e.State == string(topology.OperatorSucceeded) {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatal("missing applied execution result", executions)
+		t.Fatal("missing applied execution result", operators)
 	}
 	// Transfer is observed directly, without making another topology version.
 	target := departing

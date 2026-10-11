@@ -25,7 +25,7 @@ type ApplyResult struct {
 	Code           proposalErrorCode
 	Dropped        bool
 	Doc            topology.Document
-	ExecutionID    topology.ExecutionID
+	OperatorID     topology.OperatorID
 	Admission      AdmissionRecord
 }
 
@@ -38,21 +38,21 @@ const (
 	proposalGuardrail       proposalErrorCode = "guardrail"
 )
 
-type executionRecord struct {
-	ID            topology.ExecutionID    `json:"id,omitempty"`
-	Version       uint64                  `json:"version"`
-	Attempt       uint32                  `json:"attempt,omitempty"`
-	State         topology.ExecutionState `json:"state"`
-	Steps         []topology.Step         `json:"steps,omitempty"`
-	CurrentStep   int                     `json:"current_step,omitempty"`
-	GroupID       string                  `json:"group_id,omitempty"`
-	NodeName      string                  `json:"node_name,omitempty"`
-	WaitingReason string                  `json:"waiting_reason,omitempty"`
-	Error         string                  `json:"error,omitempty"`
-	Origin        topology.Origin         `json:"origin,omitempty"`
-	Actor         string                  `json:"actor,omitempty"`
-	StartedAt     time.Time               `json:"started_at,omitempty"`
-	UpdatedAt     time.Time               `json:"updated_at,omitempty"`
+type operatorRecord struct {
+	ID            topology.OperatorID    `json:"id,omitempty"`
+	Version       uint64                 `json:"version"`
+	Attempt       uint32                 `json:"attempt,omitempty"`
+	State         topology.OperatorState `json:"state"`
+	Steps         []topology.Step        `json:"steps,omitempty"`
+	CurrentStep   int                    `json:"current_step,omitempty"`
+	GroupID       string                 `json:"group_id,omitempty"`
+	NodeName      string                 `json:"node_name,omitempty"`
+	WaitingReason string                 `json:"waiting_reason,omitempty"`
+	Error         string                 `json:"error,omitempty"`
+	Origin        topology.Origin        `json:"origin,omitempty"`
+	Actor         string                 `json:"actor,omitempty"`
+	StartedAt     time.Time              `json:"started_at,omitempty"`
+	UpdatedAt     time.Time              `json:"updated_at,omitempty"`
 }
 
 type topologySM struct {
@@ -64,7 +64,7 @@ type topologySM struct {
 	target     topology.Document
 	active     topology.Document
 	history    []topology.Document
-	executions map[topology.ExecutionID]*executionRecord
+	operators  map[topology.OperatorID]*operatorRecord
 	admissions map[string]*AdmissionRecord
 
 	sessions map[string]*sessionState // sessionID → session
@@ -84,7 +84,7 @@ func newTopologySM(persister statePersister, rules topology.Rules) *topologySM {
 		rules:       rules,
 		retired:     make(map[string]uint64),
 		allocations: make(map[string]uint64),
-		executions:  make(map[topology.ExecutionID]*executionRecord),
+		operators:   make(map[topology.OperatorID]*operatorRecord),
 		admissions:  make(map[string]*AdmissionRecord),
 		sessions:    make(map[string]*sessionState),
 		locks:       make(map[string]string),
@@ -93,21 +93,21 @@ func newTopologySM(persister statePersister, rules topology.Rules) *topologySM {
 }
 
 type smState struct {
-	SchemaVersion uint32                     `json:"schema_version"`
-	Rules         topology.Rules             `json:"rules"`
-	RetiredGroups []retiredGroup             `json:"retired_groups"`
-	Allocations   []allocationRecord         `json:"allocations"`
-	Latest        topology.Document          `json:"latest"`
-	Target        topology.Document          `json:"target"`
-	Active        topology.Document          `json:"active"`
-	History       []topology.Document        `json:"history"`
-	Executions    []topology.ExecutionRecord `json:"executions"`
-	Admissions    []AdmissionRecord          `json:"admissions,omitempty"`
-	Sessions      []sessionState             `json:"sessions"`
-	Locks         []lockEntry                `json:"locks"`
-	Activated     []string                   `json:"activated,omitempty"` // sorted node names that ever activated
-	AppliedIndex  uint64                     `json:"applied_index"`
-	AppliedTerm   uint64                     `json:"applied_term"`
+	SchemaVersion uint32              `json:"schema_version"`
+	Rules         topology.Rules      `json:"rules"`
+	RetiredGroups []retiredGroup      `json:"retired_groups"`
+	Allocations   []allocationRecord  `json:"allocations"`
+	Latest        topology.Document   `json:"latest"`
+	Target        topology.Document   `json:"target"`
+	Active        topology.Document   `json:"active"`
+	History       []topology.Document `json:"history"`
+	Operators     []topology.Operator `json:"executions"`
+	Admissions    []AdmissionRecord   `json:"admissions,omitempty"`
+	Sessions      []sessionState      `json:"sessions"`
+	Locks         []lockEntry         `json:"locks"`
+	Activated     []string            `json:"activated,omitempty"` // sorted node names that ever activated
+	AppliedIndex  uint64              `json:"applied_index"`
+	AppliedTerm   uint64              `json:"applied_term"`
 }
 
 func (sm *topologySM) Apply(index, term uint64, data []byte) (ApplyResult, error) {
@@ -140,24 +140,24 @@ func (sm *topologySM) Apply(index, term uint64, data []byte) (ApplyResult, error
 			return ApplyResult{}, fmt.Errorf("meta: unmarshal admit_node: %w", err)
 		}
 		res, changed = sm.applyAdmitNode(p)
-	case KindBeginExecution:
-		var p BeginExecutionProposal
+	case KindBeginOperator:
+		var p BeginOperatorProposal
 		if err := json.Unmarshal(body, &p); err != nil {
 			return ApplyResult{}, fmt.Errorf("meta: unmarshal begin_execution: %w", err)
 		}
-		res, changed = sm.applyBeginExecution(p)
-	case KindCommitRepairExecution:
-		var p CommitRepairExecutionProposal
+		res, changed = sm.applyBeginOperator(p)
+	case KindCommitRepairOperator:
+		var p CommitRepairOperatorProposal
 		if err := json.Unmarshal(body, &p); err != nil {
 			return ApplyResult{}, fmt.Errorf("meta: unmarshal commit_repair_execution: %w", err)
 		}
-		res, changed = sm.applyCommitRepairExecution(p)
-	case KindTransitionExecution:
-		var p TransitionExecutionProposal
+		res, changed = sm.applyCommitRepairOperator(p)
+	case KindTransitionOperator:
+		var p TransitionOperatorProposal
 		if err := json.Unmarshal(body, &p); err != nil {
 			return ApplyResult{}, fmt.Errorf("meta: unmarshal transition_execution: %w", err)
 		}
-		res, changed = sm.applyTransitionExecution(p)
+		res, changed = sm.applyTransitionOperator(p)
 	case KindActivateTarget:
 		var p ActivateTargetProposal
 		if err := json.Unmarshal(body, &p); err != nil {
@@ -299,18 +299,18 @@ func (sm *topologySM) commitLatestLocked(doc *topology.Document) {
 		sm.history = sm.history[1:]
 	}
 	sm.history = append(sm.history, doc.Clone())
-	sm.pruneExecutionsLocked()
+	sm.pruneOperatorsLocked()
 }
 
-func (sm *topologySM) pruneExecutionsLocked() {
+func (sm *topologySM) pruneOperatorsLocked() {
 	if len(sm.history) == 0 {
 		return
 	}
 	horizon := sm.history[0].Version
-	for id, ex := range sm.executions {
+	for id, ex := range sm.operators {
 		if ex.Version < horizon && ex.State.Terminal() &&
 			ex.Version != sm.target.Version && ex.Version != sm.active.Version {
-			delete(sm.executions, id)
+			delete(sm.operators, id)
 		}
 	}
 }
@@ -327,9 +327,9 @@ func (sm *topologySM) persistLocked() error {
 }
 
 func (sm *topologySM) marshalLocked() ([]byte, error) {
-	records := make([]executionRecord, 0, len(sm.executions))
-	for _, ex := range sm.executions {
-		records = append(records, cloneExecutionRecord(*ex))
+	records := make([]operatorRecord, 0, len(sm.operators))
+	for _, ex := range sm.operators {
+		records = append(records, cloneOperatorRecord(*ex))
 	}
 	sort.Slice(records, func(i, j int) bool {
 		if records[i].Version != records[j].Version {
@@ -337,9 +337,9 @@ func (sm *topologySM) marshalLocked() ([]byte, error) {
 		}
 		return records[i].Attempt < records[j].Attempt
 	})
-	execs := make([]topology.ExecutionRecord, 0, len(records))
+	execs := make([]topology.Operator, 0, len(records))
 	for _, rec := range records {
-		execs = append(execs, executionRecordView(rec))
+		execs = append(execs, operatorRecordView(rec))
 	}
 	activated := make([]string, 0, len(sm.activated))
 	for name := range sm.activated {
@@ -352,7 +352,7 @@ func (sm *topologySM) marshalLocked() ([]byte, error) {
 		Target:       sm.target,
 		Active:       sm.active,
 		History:      sm.history,
-		Executions:   execs,
+		Operators:    execs,
 		Admissions:   sm.admissionSnapshotLocked(),
 		Sessions:     sm.sessionSnapshotLocked(),
 		Locks:        sm.lockSnapshotLocked(),
@@ -390,10 +390,10 @@ func (sm *topologySM) Restore(data []byte) error {
 	sm.target = st.Target.Clone()
 	sm.active = st.Active.Clone()
 	sm.history = st.History
-	sm.executions = make(map[topology.ExecutionID]*executionRecord, len(st.Executions))
-	for i := range st.Executions {
-		rec := executionFromView(st.Executions[i])
-		sm.executions[rec.ID] = &rec
+	sm.operators = make(map[topology.OperatorID]*operatorRecord, len(st.Operators))
+	for i := range st.Operators {
+		rec := operatorFromView(st.Operators[i])
+		sm.operators[rec.ID] = &rec
 	}
 	sm.admissions = make(map[string]*AdmissionRecord, len(st.Admissions))
 	for i := range st.Admissions {
@@ -497,40 +497,40 @@ func (sm *topologySM) Get(version uint64) (topology.Document, bool) {
 	return topology.Document{}, false
 }
 
-func (sm *topologySM) Execution(id topology.ExecutionID) (topology.ExecutionStatus, bool) {
+func (sm *topologySM) Operator(id topology.OperatorID) (topology.OperatorStatus, bool) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	ex, ok := sm.executions[id]
+	ex, ok := sm.operators[id]
 	if !ok {
-		return topology.ExecutionStatus{}, false
+		return topology.OperatorStatus{}, false
 	}
-	return executionStatus(*ex), true
+	return operatorStatus(*ex), true
 }
 
-func (sm *topologySM) ExecutionRecord(id topology.ExecutionID) (topology.ExecutionRecord, bool) {
+func (sm *topologySM) OperatorRecord(id topology.OperatorID) (topology.Operator, bool) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	ex, ok := sm.executions[id]
+	ex, ok := sm.operators[id]
 	if !ok {
-		return topology.ExecutionRecord{}, false
+		return topology.Operator{}, false
 	}
-	return executionRecordView(*ex), true
+	return operatorRecordView(*ex), true
 }
 
-func (sm *topologySM) CurrentExecution() (topology.ExecutionRecord, bool) {
+func (sm *topologySM) CurrentOperator() (topology.Operator, bool) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	var current *executionRecord
-	for _, ex := range sm.executions {
+	var current *operatorRecord
+	for _, ex := range sm.operators {
 		if current == nil || ex.Version > current.Version ||
 			(ex.Version == current.Version && ex.Attempt > current.Attempt) {
 			current = ex
 		}
 	}
 	if current == nil {
-		return topology.ExecutionRecord{}, false
+		return topology.Operator{}, false
 	}
-	return executionRecordView(*current), true
+	return operatorRecordView(*current), true
 }
 
 func (sm *topologySM) AppliedState() (index, term uint64) {

@@ -84,9 +84,9 @@ func (c *Cluster) Status(ctx context.Context, node string) (topology.ClusterStat
 	}
 	return status, response.Decode(&status)
 }
-func (c *Cluster) Execution(ctx context.Context, node string, id topology.ExecutionID) (topology.ExecutionStatus, error) {
+func (c *Cluster) Operator(ctx context.Context, node string, id topology.OperatorID) (topology.OperatorStatus, error) {
 	response, err := c.Request(ctx, node, "GET", "/api/executions/"+string(id), nil, 0)
-	var status topology.ExecutionStatus
+	var status topology.OperatorStatus
 	if err := requireStatus(response, err, 200); err != nil {
 		return status, err
 	}
@@ -111,16 +111,16 @@ func Poll(ctx context.Context, check func() (bool, error)) error {
 		}
 	}
 }
-func (c *Cluster) WaitExecution(ctx context.Context, node string, id topology.ExecutionID) error {
+func (c *Cluster) WaitOperator(ctx context.Context, node string, id topology.OperatorID) error {
 	return Poll(ctx, func() (bool, error) {
-		status, err := c.Execution(ctx, node, id)
+		status, err := c.Operator(ctx, node, id)
 		if err != nil {
 			return false, err
 		}
-		if status.State.Terminal() && status.State != topology.ExecutionSucceeded {
+		if status.State.Terminal() && status.State != topology.OperatorSucceeded {
 			return true, fmt.Errorf("execution %s terminated: %+v", id, status)
 		}
-		return status.State == topology.ExecutionSucceeded, nil
+		return status.State == topology.OperatorSucceeded, nil
 	})
 }
 func (c *Cluster) Mutate(ctx context.Context, node, method, path string, body any) (metaservice.MutationResult, error) {
@@ -136,7 +136,7 @@ func (c *Cluster) Mutate(ctx context.Context, node, method, path string, body an
 	if err := response.Decode(&result); err != nil {
 		return result, err
 	}
-	if err := c.WaitExecution(ctx, node, result.ExecutionID); err != nil {
+	if err := c.WaitOperator(ctx, node, result.OperatorID); err != nil {
 		return result, err
 	}
 	err = c.WaitActive(ctx, result.Document.Version)
@@ -170,9 +170,9 @@ func (c *Cluster) Stage(ctx context.Context, node string, doc topology.Document)
 	return result, response.Decode(&result)
 }
 
-func (c *Cluster) Apply(ctx context.Context, node string, version uint64) (topology.ExecutionID, error) {
+func (c *Cluster) Apply(ctx context.Context, node string, version uint64) (topology.OperatorID, error) {
 	var result struct {
-		ExecutionID topology.ExecutionID `json:"execution_id"`
+		OperatorID topology.OperatorID `json:"operator_id"`
 	}
 	response, err := c.Request(ctx, node, "POST", fmt.Sprintf("/api/topology/%d/apply", version), nil, 0)
 	if err := requireStatus(response, err, 202); err != nil {
@@ -181,13 +181,13 @@ func (c *Cluster) Apply(ctx context.Context, node string, version uint64) (topol
 	if err := response.Decode(&result); err != nil {
 		return "", err
 	}
-	if result.ExecutionID == "" {
+	if result.OperatorID == "" {
 		return "", errors.New("apply acknowledged without an execution identity")
 	}
-	if err := c.WaitExecution(ctx, node, result.ExecutionID); err != nil {
-		return result.ExecutionID, err
+	if err := c.WaitOperator(ctx, node, result.OperatorID); err != nil {
+		return result.OperatorID, err
 	}
-	return result.ExecutionID, c.WaitActive(ctx, version)
+	return result.OperatorID, c.WaitActive(ctx, version)
 }
 
 func (c *Cluster) CreateGroup(ctx context.Context, node string, spec metaservice.GroupSpec) (metaservice.MutationResult, error) {

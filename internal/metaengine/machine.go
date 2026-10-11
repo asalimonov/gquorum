@@ -99,8 +99,8 @@ func (m *Machine) Views() (topology.Document, topology.Document, topology.Docume
 	return m.latest.Clone(), m.target.Clone(), m.active.Clone()
 }
 
-func (m *Machine) AdmissionForExecution(id topology.ExecutionID, name string, member uint64) (AdmissionRecord, bool) {
-	return m.admissionForExecution(id, name, member)
+func (m *Machine) AdmissionForOperator(id topology.OperatorID, name string, member uint64) (AdmissionRecord, bool) {
+	return m.admissionForOperator(id, name, member)
 }
 
 func (m *Machine) LiveAdmission(name, except string) (AdmissionRecord, bool) {

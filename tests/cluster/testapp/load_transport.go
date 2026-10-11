@@ -97,7 +97,7 @@ func domainReply(err error) *loadpb.Reply {
 	if errors.As(err, &typed) {
 		code = typed.Code
 	} else {
-		for _, candidate := range []fault.Code{fault.IdentityMismatch, fault.UnsafeMembership, fault.ExecutionAuthorization, fault.ReplicaNotReady, fault.NotLeader, fault.Invalid, fault.Stopped, fault.GroupRetired} {
+		for _, candidate := range []fault.Code{fault.IdentityMismatch, fault.UnsafeMembership, fault.OperatorAuthorization, fault.ReplicaNotReady, fault.NotLeader, fault.Invalid, fault.Stopped, fault.GroupRetired} {
 			if errors.Is(err, fault.New(candidate, "", nil)) {
 				code = candidate
 				break
@@ -177,7 +177,7 @@ func (a *application) receiveCall(ctx context.Context, request *loadpb.Request) 
 			return domainReply(err), nil
 		}
 		if approved.GroupID != request.GroupId {
-			return domainReply(fault.ErrExecutionAuthorization), nil
+			return domainReply(fault.ErrOperatorAuthorization), nil
 		}
 		if err := a.receiveEffect(ctx, approved, request.ReplicaId); err != nil {
 			return domainReply(err), nil

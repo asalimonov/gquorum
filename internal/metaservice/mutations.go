@@ -26,8 +26,8 @@ type MutationOptions struct {
 	Preview         bool   `json:"preview"`
 }
 type MutationResult struct {
-	Document    topology.Document    `json:"document"`
-	ExecutionID topology.ExecutionID `json:"execution_id,omitempty"`
+	Document   topology.Document   `json:"document"`
+	OperatorID topology.OperatorID `json:"operator_id,omitempty"`
 }
 type GroupSpec struct {
 	ID        string                  `json:"id"`
@@ -57,7 +57,7 @@ func (g *Group) mutation(ctx context.Context, o MutationOptions, comment string,
 	if err != nil || !o.Apply {
 		return result, err
 	}
-	result.ExecutionID, err = g.Apply(ctx, doc.Version)
+	result.OperatorID, err = g.Apply(ctx, doc.Version)
 	return result, err
 }
 func (g *Group) computeMutation(ctx context.Context, o MutationOptions, comment string, checkHealth bool, edit documentEdit) (topology.Document, topology.Document, error) {
@@ -243,7 +243,7 @@ func (g *Group) ReadmitNode(ctx context.Context, name string, o MutationOptions)
 		}
 		_, target, active := g.state().Views()
 		if doc.Version != target.Version || doc.Version != active.Version {
-			return fault.New(fault.ExecutionAuthorization, "readmission requires converged topology; apply or restore pending intent first", nil)
+			return fault.New(fault.OperatorAuthorization, "readmission requires converged topology; apply or restore pending intent first", nil)
 		}
 		health, err := (observationSource{g}).Health(ctx, active)
 		if err != nil {
@@ -526,7 +526,7 @@ func (g *Group) RollbackTo(ctx context.Context, version uint64, o MutationOption
 	if err != nil || !o.Apply {
 		return result, err
 	}
-	result.ExecutionID, err = g.Apply(ctx, doc.Version)
+	result.OperatorID, err = g.Apply(ctx, doc.Version)
 	return result, err
 }
 
@@ -539,10 +539,10 @@ func (g *Group) ReseatReplica(ctx context.Context, id, name string, o MutationOp
 	}
 	latest, target, active := g.state().Views()
 	if !reflect.DeepEqual(latest, target) || !reflect.DeepEqual(target, active) {
-		return MutationResult{}, fault.New(fault.ExecutionAuthorization, "reseat requires equal Latest, Target and Active", nil)
+		return MutationResult{}, fault.New(fault.OperatorAuthorization, "reseat requires equal Latest, Target and Active", nil)
 	}
-	if ex, ok := g.state().CurrentExecution(); ok && !ex.Status.State.Terminal() {
-		return MutationResult{}, fault.New(fault.ExecutionAuthorization, "reseat requires no running execution", nil)
+	if ex, ok := g.state().CurrentOperator(); ok && !ex.Status.State.Terminal() {
+		return MutationResult{}, fault.New(fault.OperatorAuthorization, "reseat requires no running execution", nil)
 	}
 	base, next, err := g.computeMutation(ctx, o, "reseat replica", false, func(doc *topology.Document, now time.Time) error {
 		group := doc.Group(id)
@@ -577,12 +577,12 @@ func (g *Group) ReseatReplica(ctx context.Context, id, name string, o MutationOp
 		return MutationResult{}, err
 	}
 	if plan.IsEmpty() {
-		return MutationResult{}, fault.ErrExecutionAuthorization
+		return MutationResult{}, fault.ErrOperatorAuthorization
 	}
-	committed, err := g.propose(ctx, metaengine.CommitRepairExecutionProposal{Doc: next, ExpectedVersion: base.Version, Plan: plan, At: time.Now().UTC()})
-	result := MutationResult{Document: committed.Doc, ExecutionID: committed.ExecutionID}
+	committed, err := g.propose(ctx, metaengine.CommitRepairOperatorProposal{Doc: next, ExpectedVersion: base.Version, Plan: plan, At: time.Now().UTC()})
+	result := MutationResult{Document: committed.Doc, OperatorID: committed.OperatorID}
 	if err == nil {
-		g.convergence.Signal()
+		g.controller.Signal()
 	}
 	return result, err
 }
@@ -625,7 +625,7 @@ func (g *Group) TransferLeader(ctx context.Context, id, name string) error {
 	}
 	a := topology.AuthorizedStep{Version: doc.Version, Kind: topology.StepTransferLeader, GroupID: id, NodeName: name, ReplicaID: member}
 	if id == topology.MetaGroupID && !g.IsLeader() {
-		_, err := g.callLeader(ctx, "MetaControl", a)
+		_, err := g.callLeader(ctx, "MetaControl", toWireAuthorization(a))
 		return err
 	}
 	return (groupControllers{g}).TransferLeader(ctx, a)

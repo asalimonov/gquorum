@@ -129,7 +129,7 @@ func TestFollowerApprovalPreservesExactRequestAndRejectsEmptyReply(t *testing.T)
 	for _, tc := range []struct {
 		name  string
 		reply *metapb.Reply
-		want  topology.ExecutionID
+		want  topology.OperatorID
 		err   error
 	}{
 		{"success", &metapb.Reply{Data: []byte(`"exec-v17-a2"`)}, "exec-v17-a2", nil},
@@ -220,7 +220,7 @@ func TestMetaMemberRoutingSeparatesApprovedInboundFromRetainedOutbound(t *testin
 	if address, err := g.resolveMember(t.Context(), 4); err != nil || address != "meta-four" {
 		t.Fatal("retained outbound route absent", address, err)
 	}
-	f.command(t, metaengine.BeginExecutionProposal{Version: 2, Plan: topology.Plan{Version: 2}, Actor: "test", Origin: topology.OriginOperator, At: time.Now().UTC()})
+	f.command(t, metaengine.BeginOperatorProposal{Version: 2, Plan: topology.Plan{Version: 2}, Actor: "test", Origin: topology.OriginOperator, At: time.Now().UTC()})
 	if address, err := g.resolveMember(t.Context(), 4); err != nil || address != "meta-four" {
 		t.Fatal("approved Target route absent", address, err)
 	}

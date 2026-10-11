@@ -508,7 +508,7 @@ func parkedReplicaReseat(t *testing.T, size int) {
 		t.Fatal("explicit reseat failed", repaired, err)
 	}
 	freshID := replicaID(repaired.Document, "work", "node3")
-	if repaired.ExecutionID == "" || freshID <= largest || repaired.Document.MemberID("node3") != before.Identity.MemberID {
+	if repaired.OperatorID == "" || freshID <= largest || repaired.Document.MemberID("node3") != before.Identity.MemberID {
 		t.Fatal("reseat reused retired ID or changed meta identity", repaired)
 	}
 	if err := c.WaitReady(ctx); err != nil {
@@ -607,13 +607,13 @@ func lostMetaLeaderReadmission(t *testing.T, size int) {
 		t.Fatal("same-name data-lost founder did not readmit", repaired, err)
 	}
 	freshMember := repaired.MemberID("node3")
-	executionID := topology.MakeExecutionID(repaired.Version, 1)
-	if err := c.WaitExecution(ctx, "node1", executionID); err != nil {
+	operatorID := topology.MakeOperatorID(repaired.Version, 1)
+	if err := c.WaitOperator(ctx, "node1", operatorID); err != nil {
 		t.Fatal(err)
 	}
-	execution, err := c.Execution(ctx, "node1", executionID)
-	if err != nil || execution.TotalSteps < 4 || execution.State != topology.ExecutionSucceeded {
-		t.Fatal("readmission omitted durable learner-first execution", execution, err)
+	operator, err := c.Operator(ctx, "node1", operatorID)
+	if err != nil || operator.TotalSteps < 4 || operator.State != topology.OperatorSucceeded {
+		t.Fatal("readmission omitted durable learner-first execution", operator, err)
 	}
 	if err := c.WaitActive(ctx, repaired.Version); err != nil {
 		t.Fatal(err)
@@ -655,5 +655,5 @@ func lostMetaLeaderReadmission(t *testing.T, size int) {
 	if err := exactOwnedValues(ctx, c, repaired, "work", expected); err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("METRIC nodes=%d lost_meta_leader=%d readmitted_member=%d fresh_load_replica=%d execution_steps=%d recovered_commands=%d", size, oldMember, freshMember, replicaID(repaired, "work", "node3"), execution.TotalSteps, len(expected))
+	t.Logf("METRIC nodes=%d lost_meta_leader=%d readmitted_member=%d fresh_load_replica=%d execution_steps=%d recovered_commands=%d", size, oldMember, freshMember, replicaID(repaired, "work", "node3"), operator.TotalSteps, len(expected))
 }

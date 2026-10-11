@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/internal/convergence"
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metatransport"
+	"github.com/asalimonov/gquorum/internal/operator"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -100,7 +100,7 @@ func (g *Group) finalTarget(ctx context.Context, active, target topology.Documen
 	_, err = topology.ValidateMetaDrainSafety(active, target, status, healthFromMeta(active, target, status), true)
 	return err
 }
-func (g *Group) Apply(ctx context.Context, version uint64) (topology.ExecutionID, error) {
+func (g *Group) Apply(ctx context.Context, version uint64) (topology.OperatorID, error) {
 	if err := g.ensureRunning(ctx); err != nil {
 		return "", err
 	}
@@ -111,7 +111,7 @@ func (g *Group) Apply(ctx context.Context, version uint64) (topology.ExecutionID
 		if err != nil {
 			return "", err
 		}
-		var id topology.ExecutionID
+		var id topology.OperatorID
 		if err = json.Unmarshal(reply, &id); err != nil {
 			return "", fault.New(fault.Unreadable, "invalid execution response", err)
 		}
@@ -122,7 +122,7 @@ func (g *Group) Apply(ctx context.Context, version uint64) (topology.ExecutionID
 	}
 	return g.applyLocal(ctx, version)
 }
-func (g *Group) applyLocal(ctx context.Context, version uint64) (topology.ExecutionID, error) {
+func (g *Group) applyLocal(ctx context.Context, version uint64) (topology.OperatorID, error) {
 	if !g.IsLeader() {
 		return "", fault.ErrNotLeader
 	}
@@ -131,12 +131,12 @@ func (g *Group) applyLocal(ctx context.Context, version uint64) (topology.Execut
 	if latest.Version != version {
 		return "", &fault.Error{Code: fault.VersionConflict, ExpectedVersion: version, CurrentVersion: latest.Version, Message: "only current Latest can be approved"}
 	}
-	if ex, ok := machine.CurrentExecution(); ok && ex.Status.Version == version {
-		if ex.Status.State == topology.ExecutionSucceeded || !ex.Status.State.Terminal() {
-			g.convergence.Signal()
+	if ex, ok := machine.CurrentOperator(); ok && ex.Status.Version == version {
+		if ex.Status.State == topology.OperatorSucceeded || !ex.Status.State.Terminal() {
+			g.controller.Signal()
 			return ex.Status.ID, nil
 		}
-		if ex.Status.State == topology.ExecutionSuperseded {
+		if ex.Status.State == topology.OperatorSuperseded {
 			return "", fault.ErrVersionConflict
 		}
 	}
@@ -144,18 +144,18 @@ func (g *Group) applyLocal(ctx context.Context, version uint64) (topology.Execut
 	if err != nil {
 		return "", err
 	}
-	result, err := g.propose(ctx, metaengine.BeginExecutionProposal{Version: version, Plan: plan, Actor: g.currentIdentity().NodeName, Origin: latest.Origin, At: time.Now().UTC()})
+	result, err := g.propose(ctx, metaengine.BeginOperatorProposal{Version: version, Plan: plan, Actor: g.currentIdentity().NodeName, Origin: latest.Origin, At: time.Now().UTC()})
 	if err != nil {
 		return "", err
 	}
-	g.convergence.Signal()
-	return result.ExecutionID, nil
+	g.controller.Signal()
+	return result.OperatorID, nil
 }
-func (g *Group) WaitExecution(ctx context.Context, id topology.ExecutionID) (topology.ExecutionStatus, error) {
+func (g *Group) WaitOperator(ctx context.Context, id topology.OperatorID) (topology.OperatorStatus, error) {
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		status, err := g.Execution(ctx, id)
+		status, err := g.Operator(ctx, id)
 		if err == nil && status.State.Terminal() {
 			return status, nil
 		}
@@ -194,31 +194,31 @@ func (g *Group) callLeader(ctx context.Context, method string, request any) ([]b
 	return reply.Data, nil
 }
 
-type executionCoordinator struct{ g *Group }
+type operatorCoordinator struct{ g *Group }
 
-func (c executionCoordinator) IsMetaLeader() bool { return c.g.IsLeader() }
-func (c executionCoordinator) CurrentExecution(ctx context.Context) (convergence.ExecutionRecord, bool) {
+func (c operatorCoordinator) IsMetaLeader() bool { return c.g.IsLeader() }
+func (c operatorCoordinator) CurrentOperator(ctx context.Context) (operator.Record, bool) {
 	if ctx.Err() != nil {
-		return convergence.ExecutionRecord{}, false
+		return operator.Record{}, false
 	}
-	record, ok := c.g.state().CurrentExecution()
-	return convergence.FromPublic(record), ok
+	record, ok := c.g.state().CurrentOperator()
+	return operator.FromPublic(record), ok
 }
-func (c executionCoordinator) RecordExecutionTransition(ctx context.Context, t topology.ExecutionTransition) error {
+func (c operatorCoordinator) RecordOperatorTransition(ctx context.Context, t topology.OperatorTransition) error {
 	if !c.g.IsLeader() {
 		return fault.ErrNotLeader
 	}
-	if _, err := c.g.propose(ctx, metaengine.TransitionExecutionProposal{Transition: t}); err != nil {
+	if _, err := c.g.propose(ctx, metaengine.TransitionOperatorProposal{Transition: t}); err != nil {
 		return err
 	}
-	if t.State == topology.ExecutionSucceeded {
+	if t.State == topology.OperatorSucceeded {
 		return c.g.activateCompleted(ctx)
 	}
 	return nil
 }
 func (g *Group) activateCompleted(ctx context.Context) error {
-	ex, ok := g.state().CurrentExecution()
-	if !ok || ex.Status.State != topology.ExecutionSucceeded {
+	ex, ok := g.state().CurrentOperator()
+	if !ok || ex.Status.State != topology.OperatorSucceeded {
 		return nil
 	}
 	_, target, active := g.state().Views()
@@ -228,6 +228,6 @@ func (g *Group) activateCompleted(ctx context.Context) error {
 	if err := g.finalTarget(ctx, active, target); err != nil {
 		return err
 	}
-	_, err := g.propose(ctx, metaengine.ActivateTargetProposal{ExecutionID: ex.Status.ID, Version: ex.Status.Version, Attempt: ex.Status.Attempt})
+	_, err := g.propose(ctx, metaengine.ActivateTargetProposal{OperatorID: ex.Status.ID, Version: ex.Status.Version, Attempt: ex.Status.Attempt})
 	return err
 }

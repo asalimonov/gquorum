@@ -35,16 +35,16 @@ func TestRepairCommandRejectsEditsOutsideOneActiveVoter(t *testing.T) {
 			sm := newTopologySM(nil, topology.Rules{SchemaVersion: 1, Limits: (topology.Limits{}).WithDefaults()})
 			active := apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0}).Doc
 			at := time.Now().UTC()
-			ex := apply(t, sm, 2, BeginExecutionProposal{Version: 1, Plan: topology.Plan{Version: 1}, At: at})
-			apply(t, sm, 3, TransitionExecutionProposal{Transition: topology.ExecutionTransition{ExecutionID: ex.ExecutionID, Version: 1, Attempt: 1, State: topology.ExecutionSucceeded, At: at}})
-			apply(t, sm, 4, ActivateTargetProposal{ExecutionID: ex.ExecutionID, Version: 1, Attempt: 1})
+			ex := apply(t, sm, 2, BeginOperatorProposal{Version: 1, Plan: topology.Plan{Version: 1}, At: at})
+			apply(t, sm, 3, TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: ex.OperatorID, Version: 1, Attempt: 1, State: topology.OperatorSucceeded, At: at}})
+			apply(t, sm, 4, ActivateTargetProposal{OperatorID: ex.OperatorID, Version: 1, Attempt: 1})
 			repair, _, err := ReplicaRepairDocument(active, active, "shard0", "n1", 1, at, topology.OriginReconciler, "auto-repair")
 			if err != nil {
 				t.Fatal(err)
 			}
 			tc.edit(&repair)
 			plan := topology.Plan{Version: 2, Steps: []topology.Step{{Seq: 1, Kind: topology.StepPrepareReplica, GroupID: "shard0", NodeName: "n1", ReplicaID: 2}, {Seq: 2, Kind: topology.StepAddLearner, GroupID: "shard0", NodeName: "n1", ReplicaID: 2}, {Seq: 3, Kind: topology.StepWaitCaughtUp, GroupID: "shard0", NodeName: "n1", ReplicaID: 2}, {Seq: 4, Kind: topology.StepPromoteVoter, GroupID: "shard0", NodeName: "n1", ReplicaID: 2}}}
-			result := apply(t, sm, 5, CommitRepairExecutionProposal{Doc: repair, ExpectedVersion: 1, Plan: plan, At: at})
+			result := apply(t, sm, 5, CommitRepairOperatorProposal{Doc: repair, ExpectedVersion: 1, Plan: plan, At: at})
 			if result.Accepted || !reflect.DeepEqual(active, sm.Latest()) || !reflect.DeepEqual(active, sm.Target()) || !reflect.DeepEqual(active, sm.Active()) {
 				t.Fatal("repair edit escaped replicated refusal", result)
 			}

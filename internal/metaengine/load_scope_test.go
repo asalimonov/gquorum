@@ -16,16 +16,16 @@ func TestLoadScopeCreationProgressDistinguishesEmptyPreparedLearners(t *testing.
 		role                           topology.ReplicaRole
 		kind                           topology.StepKind
 		current                        int
-		state                          topology.ExecutionState
+		state                          topology.OperatorState
 		started, established, founding bool
 	}{
-		{"pending founding voter", topology.ReplicaVoter, topology.StepCreateFoundingGroup, 0, topology.ExecutionPending, false, false, true},
-		{"failed founding effect", topology.ReplicaVoter, topology.StepCreateFoundingGroup, 1, topology.ExecutionFailed, false, false, true},
-		{"completed founding effect", topology.ReplicaVoter, topology.StepCreateFoundingGroup, 2, topology.ExecutionRunning, true, true, true},
-		{"intentional learner skipped by founding", topology.ReplicaLearner, topology.StepCreateFoundingGroup, 2, topology.ExecutionRunning, false, false, false},
-		{"prepared learner", topology.ReplicaLearner, topology.StepPrepareReplica, 2, topology.ExecutionRunning, true, false, false},
-		{"admitted learner", topology.ReplicaLearner, topology.StepAddLearner, 2, topology.ExecutionRunning, true, true, false},
-		{"succeeded final prepare", topology.ReplicaLearner, topology.StepPrepareReplica, 1, topology.ExecutionSucceeded, true, false, false},
+		{"pending founding voter", topology.ReplicaVoter, topology.StepCreateFoundingGroup, 0, topology.OperatorPending, false, false, true},
+		{"failed founding effect", topology.ReplicaVoter, topology.StepCreateFoundingGroup, 1, topology.OperatorFailed, false, false, true},
+		{"completed founding effect", topology.ReplicaVoter, topology.StepCreateFoundingGroup, 2, topology.OperatorRunning, true, true, true},
+		{"intentional learner skipped by founding", topology.ReplicaLearner, topology.StepCreateFoundingGroup, 2, topology.OperatorRunning, false, false, false},
+		{"prepared learner", topology.ReplicaLearner, topology.StepPrepareReplica, 2, topology.OperatorRunning, true, false, false},
+		{"admitted learner", topology.ReplicaLearner, topology.StepAddLearner, 2, topology.OperatorRunning, true, true, false},
+		{"succeeded final prepare", topology.ReplicaLearner, topology.StepPrepareReplica, 1, topology.OperatorSucceeded, true, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -35,9 +35,9 @@ func TestLoadScopeCreationProgressDistinguishesEmptyPreparedLearners(t *testing.
 			doc.Group("shard0").Replicas[0].Role = tc.role
 			m.latest, m.target = doc.Clone(), doc.Clone()
 			m.history = []topology.Document{doc.Clone()}
-			ex := newExecutionRecord(1, 1, []topology.Step{{Seq: 1, Kind: tc.kind, GroupID: "shard0", NodeName: "n1", ReplicaID: 1}}, "actor", topology.OriginOperator, doc.CreatedAt)
+			ex := newOperatorRecord(1, 1, []topology.Step{{Seq: 1, Kind: tc.kind, GroupID: "shard0", NodeName: "n1", ReplicaID: 1}}, "actor", topology.OriginOperator, doc.CreatedAt)
 			ex.CurrentStep, ex.State = tc.current, tc.state
-			m.executions[ex.ID] = &ex
+			m.operators[ex.ID] = &ex
 			id := storage.Identity{NodeName: "n1", ClusterID: doc.ClusterID, GroupID: "shard0", ReplicaID: 1}
 			if err := m.WithLoadScope(id, 1, func(scope LoadScope) error {
 				if scope.Started != tc.started || scope.Established != tc.established || scope.Founding != tc.founding {

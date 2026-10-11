@@ -75,13 +75,13 @@ func (g *Group) Authorize(ctx context.Context, a topology.AuthorizedStep) error 
 	}
 	return g.state().Authorize(ctx, a)
 }
-func (g *Group) Execution(ctx context.Context, id topology.ExecutionID) (topology.ExecutionStatus, error) {
+func (g *Group) Operator(ctx context.Context, id topology.OperatorID) (topology.OperatorStatus, error) {
 	if err := ctx.Err(); err != nil {
-		return topology.ExecutionStatus{}, err
+		return topology.OperatorStatus{}, err
 	}
-	status, ok := g.state().Execution(id)
+	status, ok := g.state().Operator(id)
 	if !ok {
-		return topology.ExecutionStatus{}, fault.New(fault.HistoryUnavailable, "execution is not retained", nil)
+		return topology.OperatorStatus{}, fault.New(fault.HistoryUnavailable, "execution is not retained", nil)
 	}
 	return status, nil
 }
@@ -117,8 +117,8 @@ func (g *Group) Status(ctx context.Context) (topology.ClusterStatus, error) {
 	g.mu.RUnlock()
 	result := topology.ClusterStatus{Lifecycle: lifecycle, ErrorCode: g.terminalCode(), LatestVersion: latest.Version, TargetVersion: target.Version, ActiveVersion: active.Version, SelfRemoval: removal}
 	result.SessionLive = g.OwnSessionLive()
-	if g.reconciler != nil {
-		result.Reconciliation = g.reconciler.Status()
+	if g.scheduler != nil {
+		result.Scheduling = g.scheduler.Status()
 	}
 	result.Observation = g.HealthObservation()
 	if result.Observation.Version != active.Version {
@@ -168,9 +168,9 @@ func (g *Group) Status(ctx context.Context) (topology.ClusterStatus, error) {
 		}
 		result.Groups = append(result.Groups, observed.Clone())
 	}
-	if execution, ok := machine.CurrentExecution(); ok {
-		status := execution.Status
-		result.Execution = &status
+	if operator, ok := machine.CurrentOperator(); ok {
+		status := operator.Status
+		result.Operator = &status
 	}
 	return result, nil
 }

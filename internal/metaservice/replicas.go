@@ -107,7 +107,7 @@ func (g *Group) ForgetLoadReplica(ctx context.Context, a topology.AuthorizedStep
 		return fault.ErrReplicaNotReady
 	}
 	if a.Kind != topology.StepDeleteGroupState && (a.Kind != topology.StepCleanupReplicaState || a.NodeName != g.identity.NodeName || a.ReplicaID != expected) {
-		return fault.ErrExecutionAuthorization
+		return fault.ErrOperatorAuthorization
 	}
 	if err := g.machine.Authorize(ctx, a); err != nil {
 		return err

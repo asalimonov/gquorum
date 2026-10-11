@@ -48,8 +48,8 @@ func TestMetaFollowerApprovesEmptyPlanAndActivationIsDurable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, err := follower.WaitExecution(ctx, id)
-	if err != nil || status.State != topology.ExecutionSucceeded {
+	status, err := follower.WaitOperator(ctx, id)
+	if err != nil || status.State != topology.OperatorSucceeded {
 		t.Fatal(status, err)
 	}
 	waitPublic(t, func() bool { return follower.state().Active().Version == 2 })
@@ -92,8 +92,8 @@ func TestMetaDrainTransfersLeadershipAndKeepsEveryAdmittedVoter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, err := leader.WaitExecution(ctx, id)
-	if err != nil || status.State != topology.ExecutionSucceeded {
+	status, err := leader.WaitOperator(ctx, id)
+	if err != nil || status.State != topology.OperatorSucceeded {
 		t.Fatal(status, err)
 	}
 	waitPublic(t, func() bool { return leader.state().Active().Version == 2 })

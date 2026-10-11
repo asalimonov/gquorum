@@ -3,6 +3,7 @@ package metaservice
 import (
 	"context"
 	"errors"
+	"github.com/asalimonov/gquorum/internal/operator"
 	"reflect"
 	"testing"
 
@@ -73,7 +74,7 @@ func TestNodeLifecycleStamps(t *testing.T) {
 }
 
 type transferRecorder struct {
-	topology.GroupController
+	operator.GroupEffects
 	calls []topology.AuthorizedStep
 	err   error
 }
@@ -279,21 +280,21 @@ func TestRollbackRefusalsAndAllocationFloors(t *testing.T) {
 	}
 }
 
-func TestExecutionMalformedIDsDoNotAliasRetainedAttempt(t *testing.T) {
+func TestOperatorMalformedIDsDoNotAliasRetainedAttempt(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
-	id := topology.MakeExecutionID(1, 1)
-	for _, value := range []topology.ExecutionID{
+	id := topology.MakeOperatorID(1, 1)
+	for _, value := range []topology.OperatorID{
 		"exec-v1xyz", "exec-v1 ", "exec-v1.5", "exec-v", "exec-v-1",
 		"exec-v+1", "prefix-v1", "exec-vv1", " exec-v1", "exec-v0x1",
 		id + "xyz", id + " ", " " + id, "exec-v1-a+1", "exec-v1-a0",
 	} {
-		if _, err := f.g.Execution(t.Context(), value); !errors.Is(err, fault.ErrHistoryUnavailable) {
+		if _, err := f.g.Operator(t.Context(), value); !errors.Is(err, fault.ErrHistoryUnavailable) {
 			t.Fatal("malformed handle aliased a retained execution", value, err)
 		}
 	}
-	status, err := f.g.Execution(t.Context(), id)
-	if err != nil || status.ID != id || status.Version != 1 || status.Attempt != 1 || status.State != topology.ExecutionSucceeded {
+	status, err := f.g.Operator(t.Context(), id)
+	if err != nil || status.ID != id || status.Version != 1 || status.Attempt != 1 || status.State != topology.OperatorSucceeded {
 		t.Fatal("valid retained execution did not resolve", status, err)
 	}
 }

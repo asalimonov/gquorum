@@ -9,7 +9,7 @@ verification progress; checking a stage does not waive any target requirement.
 - [x] Policy and retirement foundations: public Scheduler/LifecyclePolicy,
   RestoreDegraded/DefaultLifecycle, external contract helpers, explicit WAL
   retirement enumeration/collection, existing scheduling algorithm migration.
-- [ ] Public values and persistence boundaries: Identity/document/session views,
+- [x] Public values and persistence boundaries: Identity/document/session views,
   Operator/Scheduling names, private legacy disk/wire/event DTOs and baseline
   compatibility fixtures; internal metaservice/operator/scheduling packages.
 - [ ] Deliberate load.Group and Standalone owners, explicit application values,
@@ -60,3 +60,15 @@ verification progress; checking a stage does not waive any target requirement.
   `cluster` and `example` build-tag suites compile; process execution is still
   required after caller migration. Operator/Scheduling public types, private meta
   codec adapters, and internal/operator remain the next boundary work.
+- Operator boundary complete: renamed public approval/progress and scheduling
+  values, removed public GroupController, moved execution into the concrete
+  internal/operator.Controller, and renamed fixed membership SafetyRules.
+  Controller construction now returns classified invalid-setting errors. Private
+  snapshot/proposal/result/MetaControl records preserve legacy bytes and all
+  authorization fields; JoinReady retains its original capitalized reply key.
+  Golden fixtures were not rewritten. Application responses now use operator_id;
+  full HTTP route/approval and Node caller migration remains a later stage.
+- Operator validation: `make test` passed (metaservice 102.205s, testapp 39.677s),
+  `make test-unit`, `make lint`, targeted short race checks and both tagged test
+  compiles passed. Final acceptance must additionally exercise physical retained
+  meta/WAL stores, Docker cluster behavior and every target ownership contract.

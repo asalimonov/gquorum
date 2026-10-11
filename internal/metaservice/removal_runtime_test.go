@@ -89,7 +89,7 @@ func TestSelfRemoval_FiresThroughApplyEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = leader.WaitExecution(ctx, drain.ExecutionID); err != nil {
+	if _, err = leader.WaitOperator(ctx, drain.OperatorID); err != nil {
 		t.Fatal(err)
 	}
 	waitPublic(t, func() bool { return leader.state().Active().Version == drain.Document.Version })
@@ -114,11 +114,11 @@ func TestSelfRemoval_FiresThroughApplyEntry(t *testing.T) {
 		t.Fatal("staged exclusion notified removal", err)
 	default:
 	}
-	execution, err := leader.Apply(ctx, exclude.Document.Version)
+	operator, err := leader.Apply(ctx, exclude.Document.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = leader.WaitExecution(ctx, execution); err != nil {
+	if _, err = leader.WaitOperator(ctx, operator); err != nil {
 		t.Fatal(err)
 	}
 	select {

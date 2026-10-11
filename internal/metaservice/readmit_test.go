@@ -39,7 +39,7 @@ func TestReadmitNodeRotatesOnlyExactNodeIdentities(t *testing.T) {
 			}
 		}
 	}
-	if !reflect.DeepEqual(f.g.machine.Latest(), before) || result.ExecutionID != "" {
+	if !reflect.DeepEqual(f.g.machine.Latest(), before) || result.OperatorID != "" {
 		t.Fatal("preview committed or approved readmission")
 	}
 }
@@ -69,7 +69,7 @@ func TestReadmitNodeRefusesUnverifiedAndPendingIdentities(t *testing.T) {
 		{"stale_version", fault.ErrVersionConflict, func(t *testing.T, f *mutationFixture) (string, MutationOptions, context.Context) {
 			return "n3", MutationOptions{ExpectedVersion: 2, Preview: true}, t.Context()
 		}},
-		{"pending_topology", fault.ErrExecutionAuthorization, func(t *testing.T, f *mutationFixture) (string, MutationOptions, context.Context) {
+		{"pending_topology", fault.ErrOperatorAuthorization, func(t *testing.T, f *mutationFixture) (string, MutationOptions, context.Context) {
 			next := f.g.machine.Latest()
 			next.Comment = "staged"
 			f.commit(t, next, false)

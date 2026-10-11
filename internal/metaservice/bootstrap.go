@@ -169,7 +169,7 @@ func (g *Group) bootstrap(ctx context.Context) error {
 	if latest.Origin != topology.OriginFounding || latest.Version != 1 || machine.Active().Version != 0 {
 		return nil
 	}
-	_, ok := machine.CurrentExecution()
+	_, ok := machine.CurrentOperator()
 	if !ok {
 		observed := map[string]topology.GroupStatus{topology.MetaGroupID: g.engine.Load().Status()}
 		plan, err := topology.BuildPlan(machine.Active(), latest, observed, g.rules)
@@ -177,9 +177,9 @@ func (g *Group) bootstrap(ctx context.Context) error {
 			return err
 		}
 		if len(plan.Steps) != 0 {
-			return fault.New(fault.ExecutionAuthorization, "founding membership differs from durable seed", nil)
+			return fault.New(fault.OperatorAuthorization, "founding membership differs from durable seed", nil)
 		}
-		_, err = g.propose(ctx, metaengine.BeginExecutionProposal{Version: latest.Version, Plan: plan, Actor: identity.NodeName, Origin: topology.OriginFounding, At: time.Now().UTC()})
+		_, err = g.propose(ctx, metaengine.BeginOperatorProposal{Version: latest.Version, Plan: plan, Actor: identity.NodeName, Origin: topology.OriginFounding, At: time.Now().UTC()})
 		if err != nil {
 			return err
 		}
@@ -214,11 +214,11 @@ func (g *Group) activate(ctx context.Context, automatic bool) (topology.Session,
 		return topology.Session{}, fault.ErrUnavailable
 	}
 	if !machine.HasActivated(identity.NodeName) && active.Origin == topology.OriginFounding {
-		execution, ok := machine.CurrentExecution()
-		if !ok || execution.Status.State != topology.ExecutionSucceeded {
+		operator, ok := machine.CurrentOperator()
+		if !ok || operator.Status.State != topology.OperatorSucceeded {
 			return topology.Session{}, fault.ErrUnavailable
 		}
-		if _, err := g.propose(ctx, metaengine.BindAdmissionProposal{Admission: metaengine.AdmissionRecord{NodeName: identity.NodeName, InstanceID: identity.InstanceID, MemberID: identity.MemberID, ExecutionID: execution.Status.ID}, Founding: true, At: time.Now().UTC()}); err != nil {
+		if _, err := g.propose(ctx, metaengine.BindAdmissionProposal{Admission: metaengine.AdmissionRecord{NodeName: identity.NodeName, InstanceID: identity.InstanceID, MemberID: identity.MemberID, OperatorID: operator.Status.ID}, Founding: true, At: time.Now().UTC()}); err != nil {
 			return topology.Session{}, err
 		}
 	}

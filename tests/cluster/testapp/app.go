@@ -288,7 +288,7 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 	if placement.MinReplicas == 0 {
 		placement = topology.PlacementRule{MinReplicas: 1, MaxReplicas: 3}
 	}
-	a.meta, err = a.runtime.OpenMeta(metaservice.Options{Identity: topology.Identity{NodeName: cfg.NodeName, ClusterID: cfg.ClusterID, InstanceID: cfg.InstanceID, MemberID: member}, Node: cfg.nodeForPeer(peer{Name: cfg.NodeName, Type: cfg.NodeType, MetaAddress: cfg.MetaAddress, LoadAddress: cfg.LoadAddress, HTTPAddress: cfg.HTTPAddress}), DBPath: filepath.Join(cfg.DataDir, "meta.bolt"), Founders: founders, Join: cfg.Join, JoinSeeds: seeds, Limits: cfg.Limits, Placement: placement, SessionTTL: cfg.SessionTTL, Timing: metaservice.Timing{TickInterval: cfg.TickInterval, ElectionTicks: 10}, Network: metaservice.NetworkOptions{Listener: ls.meta, AdvertiseAddress: cfg.MetaAddress, AllowPlaintext: true, ClusterCredential: []byte(cfg.Credential), Resolver: metaResolver{a}}, LoadGroups: a, Reconciliation: cfg.Reconciliation, OnSelfRemoved: a.selfRemoved, OnReadmission: a.readmission})
+	a.meta, err = a.runtime.OpenMeta(metaservice.Options{Identity: topology.Identity{NodeName: cfg.NodeName, ClusterID: cfg.ClusterID, InstanceID: cfg.InstanceID, MemberID: member}, Node: cfg.nodeForPeer(peer{Name: cfg.NodeName, Type: cfg.NodeType, MetaAddress: cfg.MetaAddress, LoadAddress: cfg.LoadAddress, HTTPAddress: cfg.HTTPAddress}), DBPath: filepath.Join(cfg.DataDir, "meta.bolt"), Founders: founders, Join: cfg.Join, JoinSeeds: seeds, Limits: cfg.Limits, Placement: placement, SessionTTL: cfg.SessionTTL, Timing: metaservice.Timing{TickInterval: cfg.TickInterval, ElectionTicks: 10}, Network: metaservice.NetworkOptions{Listener: ls.meta, AdvertiseAddress: cfg.MetaAddress, AllowPlaintext: true, ClusterCredential: []byte(cfg.Credential), Resolver: metaResolver{a}}, LoadGroups: a, Scheduling: cfg.Scheduling, OnSelfRemoved: a.selfRemoved, OnReadmission: a.readmission})
 	if err != nil {
 		return nil, err
 	}
@@ -562,11 +562,11 @@ func (a *application) bootstrapOnce(ctx context.Context) (bool, error) {
 			if err != nil {
 				return false, err
 			}
-			status, err := a.meta.WaitExecution(ctx, created.ExecutionID)
+			status, err := a.meta.WaitOperator(ctx, created.OperatorID)
 			if err != nil {
 				return false, err
 			}
-			if status.State != topology.ExecutionSucceeded {
+			if status.State != topology.OperatorSucceeded {
 				return false, fault.New(fault.Unavailable, status.Error, nil)
 			}
 		} else {
@@ -579,8 +579,8 @@ func (a *application) bootstrapOnce(ctx context.Context) (bool, error) {
 				if err != nil {
 					return false, err
 				}
-				status, err := a.meta.WaitExecution(ctx, id)
-				if err != nil || status.State != topology.ExecutionSucceeded {
+				status, err := a.meta.WaitOperator(ctx, id)
+				if err != nil || status.State != topology.OperatorSucceeded {
 					return false, err
 				}
 			}

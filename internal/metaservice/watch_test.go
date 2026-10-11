@@ -71,7 +71,7 @@ func TestMetaWatchSeparatesLatestTargetAndActive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := g.WaitExecution(ctx, ex); err != nil {
+	if _, err := g.WaitOperator(ctx, ex); err != nil {
 		t.Fatal(err)
 	}
 	for _, view := range []topology.View{topology.Target, topology.Active} {
@@ -173,7 +173,7 @@ func testMetaWatchFanout(t *testing.T, size int) {
 	if err != nil {
 		t.Fatal("watch approval", err)
 	}
-	if _, err := g.WaitExecution(ctx, ex); err != nil {
+	if _, err := g.WaitOperator(ctx, ex); err != nil {
 		t.Fatal("watch execution", err)
 	}
 	for i := range groups {

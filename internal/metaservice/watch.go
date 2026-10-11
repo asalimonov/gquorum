@@ -29,7 +29,7 @@ func newWatchRegistry(limit int) *watchRegistry {
 // Watch returns an owned initial locally applied view and then monotonically
 // increasing versions. Its single-slot buffer coalesces intermediate versions:
 // a slow observer never blocks Raft apply. Execution progress is available via
-// Execution/WaitExecution and the event bus, independently of document versions.
+// Operator/WaitOperator and the event bus, independently of document versions.
 func (g *Group) Watch(ctx context.Context, view topology.View) (<-chan topology.Update, error) {
 	if view != topology.Latest && view != topology.Target && view != topology.Active {
 		return nil, fault.ErrInvalid

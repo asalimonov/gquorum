@@ -13,10 +13,10 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func TestIntentionalLearnerSurvivesReconciliationUntilApprovedPromotion(t *testing.T) {
+func TestIntentionalLearnerSurvivesSchedulingUntilApprovedPromotion(t *testing.T) {
 	spec := matrixSpec(3)
-	spec.Reconciliation = true
-	spec.ReconciliationInterval, spec.ReconciliationTimeout = time.Second, 500*time.Millisecond
+	spec.Scheduling = true
+	spec.SchedulingInterval, spec.SchedulingTimeout = time.Second, 500*time.Millisecond
 	c := acquire(t, spec).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
@@ -57,8 +57,8 @@ func TestIntentionalLearnerSurvivesReconciliationUntilApprovedPromotion(t *testi
 			if err != nil {
 				return false, err
 			}
-			r := status.Reconciliation
-			if r.Enabled && r.IsLeader && r.State == topology.ReconciliationIdle && r.Reason == "converged" {
+			r := status.Scheduling
+			if r.Enabled && r.IsLeader && r.State == topology.SchedulingIdle && r.Reason == "converged" {
 				return true, assertLearner()
 			}
 		}
@@ -104,8 +104,8 @@ observe:
 			if err != nil {
 				return false, err
 			}
-			r := status.Reconciliation
-			if r.Enabled && r.IsLeader && r.State == topology.ReconciliationBlocked && r.Reason == "staged_latest" {
+			r := status.Scheduling
+			if r.Enabled && r.IsLeader && r.State == topology.SchedulingBlocked && r.Reason == "staged_latest" {
 				return true, assertLearner()
 			}
 		}

@@ -308,7 +308,7 @@ func excludedSameDiskRejoin(t *testing.T, size int) {
 	if err := response.Decode(&excluded); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WaitExecution(ctx, "node1", excluded.ExecutionID); err != nil {
+	if err := c.WaitOperator(ctx, "node1", excluded.OperatorID); err != nil {
 		t.Fatal(err)
 	}
 	victim := c.Node("node3")
@@ -406,7 +406,7 @@ func excludedSameDiskRejoin(t *testing.T, size int) {
 	if err := response.Decode(&admitted); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WaitExecution(ctx, "node1", admitted.ExecutionID); err != nil {
+	if err := c.WaitOperator(ctx, "node1", admitted.OperatorID); err != nil {
 		t.Fatal(err)
 	}
 	assertRejoinedIdentities(t, ctx, c, before, admitted.Document, previous, parkedIdentity.Identity.InstanceID, values)
@@ -455,7 +455,7 @@ func rotatedDownNodeRejoin(t *testing.T, size int) {
 	}); err != nil {
 		t.Fatal("operator readmission while down", err)
 	}
-	if rotated.ExecutionID == "" {
+	if rotated.OperatorID == "" {
 		if err := Poll(ctx, func() (bool, error) {
 			response, err := c.Request(ctx, "node2", "POST", fmt.Sprintf("/api/topology/%d/apply", rotated.Document.Version), nil, 0)
 			if err != nil {
@@ -465,18 +465,18 @@ func rotatedDownNodeRejoin(t *testing.T, size int) {
 				return false, requireStatus(response, nil, 202)
 			}
 			var approval struct {
-				ExecutionID topology.ExecutionID `json:"execution_id"`
+				OperatorID topology.OperatorID `json:"operator_id"`
 			}
 			if err := response.Decode(&approval); err != nil {
 				return true, err
 			}
-			rotated.ExecutionID = approval.ExecutionID
-			return approval.ExecutionID != "", nil
+			rotated.OperatorID = approval.OperatorID
+			return approval.OperatorID != "", nil
 		}); err != nil {
 			t.Fatal("approval of exact staged readmission", err)
 		}
 	}
-	if rotated.Document.MemberID("node3") <= previous.Identity.MemberID || replicaID(rotated.Document, "work", "node3") <= previous.ReplicaID || rotated.ExecutionID == "" {
+	if rotated.Document.MemberID("node3") <= previous.Identity.MemberID || replicaID(rotated.Document, "work", "node3") <= previous.ReplicaID || rotated.OperatorID == "" {
 		t.Fatal("operator did not commit/approve exact fresh identities", rotated)
 	}
 	// The old physical files still exist while it is down. Approval alone cannot
@@ -484,9 +484,9 @@ func rotatedDownNodeRejoin(t *testing.T, size int) {
 	if err := ownDurableFiles(ctx, c, "node3", "work"); err != nil {
 		t.Fatal(err)
 	}
-	execution, err := c.Execution(ctx, "node1", rotated.ExecutionID)
-	if err != nil || execution.State.Terminal() {
-		t.Fatal("down node completed learner admission without its process", execution, err)
+	operator, err := c.Operator(ctx, "node1", rotated.OperatorID)
+	if err != nil || operator.State.Terminal() {
+		t.Fatal("down node completed learner admission without its process", operator, err)
 	}
 	volume := victim.Volume
 	if err := victim.StartJoining(ctx); err != nil {
@@ -499,7 +499,7 @@ func rotatedDownNodeRejoin(t *testing.T, size int) {
 	if err != nil || returned.Identity.InstanceID == previous.Identity.InstanceID {
 		t.Fatal("returning process identity missing", returned, err)
 	}
-	if err := c.WaitExecution(ctx, "node1", rotated.ExecutionID); err != nil {
+	if err := c.WaitOperator(ctx, "node1", rotated.OperatorID); err != nil {
 		t.Fatal(err)
 	}
 	assertRejoinedIdentities(t, ctx, c, before, rotated.Document, previous, returned.Identity.InstanceID, values)

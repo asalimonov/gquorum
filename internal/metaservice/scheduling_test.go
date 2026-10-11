@@ -25,7 +25,7 @@ func (c *repairLoadController) PrepareReplica(ctx context.Context, a topology.Au
 	target := g.state().Target()
 	group := target.Group(a.GroupID)
 	if group == nil || a.Kind != topology.StepPrepareReplica {
-		return fault.ErrExecutionAuthorization
+		return fault.ErrOperatorAuthorization
 	}
 	for _, r := range group.Replicas {
 		if r.NodeName == a.NodeName && r.ReplicaID == a.ReplicaID {
@@ -59,7 +59,7 @@ func (c *repairLoadController) ApplyMembership(ctx context.Context, a topology.A
 		}
 	}
 	if wanted == nil || a.Kind != topology.StepAddLearner && a.Kind != topology.StepPromoteVoter {
-		return fault.ErrExecutionAuthorization
+		return fault.ErrOperatorAuthorization
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -127,7 +127,7 @@ func testMetaReplicaRepair(t *testing.T, automatic bool) {
 	groups := publicFoundingClusterWith(t, 3, func(o *Options) {
 		o.LoadGroups = controller
 		o.Events = bus
-		o.Reconciliation = ReconciliationOptions{Disabled: !automatic, Interval: 100 * time.Millisecond, TickTimeout: 75 * time.Millisecond, StabilityWindow: 50 * time.Millisecond, Cooldown: time.Second}
+		o.Scheduling = SchedulingOptions{Disabled: !automatic, Interval: 100 * time.Millisecond, TickTimeout: 75 * time.Millisecond, StabilityWindow: 50 * time.Millisecond, Cooldown: time.Second}
 	})
 	leader := readyPublic(t, groups)
 	controller.mu.Lock()
@@ -137,8 +137,8 @@ func testMetaReplicaRepair(t *testing.T, automatic bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	completed, err := leader.WaitExecution(ctx, created.ExecutionID)
-	if err != nil || completed.State != topology.ExecutionSucceeded {
+	completed, err := leader.WaitOperator(ctx, created.OperatorID)
+	if err != nil || completed.State != topology.OperatorSucceeded {
 		t.Fatal(completed, err)
 	}
 	waitPublic(t, func() bool { return leader.state().Active().Version == 2 })
@@ -154,11 +154,11 @@ func testMetaReplicaRepair(t *testing.T, automatic bool) {
 	controller.mu.Unlock()
 	if !automatic {
 		result, err := leader.ReseatReplica(ctx, "work", old.NodeName, MutationOptions{Actor: "operator", Comment: "replace lost replica"})
-		if err != nil || result.ExecutionID == "" {
+		if err != nil || result.OperatorID == "" {
 			t.Fatal(result, err)
 		}
-		completed, err := leader.WaitExecution(ctx, result.ExecutionID)
-		if err != nil || completed.State != topology.ExecutionSucceeded {
+		completed, err := leader.WaitOperator(ctx, result.OperatorID)
+		if err != nil || completed.State != topology.OperatorSucceeded {
 			t.Fatal(completed, err)
 		}
 	}
@@ -180,33 +180,33 @@ func testMetaReplicaRepair(t *testing.T, automatic bool) {
 	for !observed {
 		select {
 		case e := <-stream:
-			observed = e.Event.State == string(topology.ReconciliationRunning) && e.Event.Code == "missing_replica"
+			observed = e.Event.State == string(topology.SchedulingRunning) && e.Event.Code == "missing_replica"
 		case <-ctx.Done():
 			t.Fatal("repair event missing")
 		}
 	}
 	status, err := leader.Status(ctx)
-	if err != nil || status.Reconciliation.Enabled != automatic || status.Reconciliation.Policy != "restore-required-replica" {
+	if err != nil || status.Scheduling.Enabled != automatic || status.Scheduling.Policy != "restore-required-replica" {
 		t.Fatal(status, err)
 	}
 }
 
-func TestMetaReconciliationConstructorSettingsAndDisabledStatus(t *testing.T) {
+func TestMetaSchedulingConstructorSettingsAndDisabledStatus(t *testing.T) {
 	if testing.Short() {
 		t.Skip("functional test; run make test")
 	}
 	o := optionsForTest(t)
-	o.Reconciliation.TickTimeout = -time.Second
+	o.Scheduling.TickTimeout = -time.Second
 	if _, err := New(o); !errors.Is(err, fault.ErrInvalid) {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(o.DBPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("invalid repair settings changed storage", err)
 	}
-	groups := publicFoundingClusterWith(t, 1, func(o *Options) { o.Reconciliation.Disabled = true })
+	groups := publicFoundingClusterWith(t, 1, func(o *Options) { o.Scheduling.Disabled = true })
 	leader := readyPublic(t, groups)
-	s := leader.ReconciliationStatus()
-	if s.Enabled || s.State != topology.ReconciliationDisabled || s.Reason != "config_disabled" {
+	s := leader.SchedulingStatus()
+	if s.Enabled || s.State != topology.SchedulingDisabled || s.Reason != "config_disabled" {
 		t.Fatal(s)
 	}
 }

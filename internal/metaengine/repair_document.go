@@ -17,7 +17,7 @@ func ReplicaRepairDocument(active, latest topology.Document, groupID, nodeName s
 	repair := active.Clone()
 	group := repair.Group(groupID)
 	if group == nil {
-		return topology.Document{}, 0, fault.ErrExecutionAuthorization
+		return topology.Document{}, 0, fault.ErrOperatorAuthorization
 	}
 	for i := range group.Replicas {
 		r := &group.Replicas[i]
@@ -46,5 +46,5 @@ func ReplicaRepairDocument(active, latest topology.Document, groupID, nodeName s
 		}
 		return repair, fresh, nil
 	}
-	return topology.Document{}, 0, fault.ErrExecutionAuthorization
+	return topology.Document{}, 0, fault.ErrOperatorAuthorization
 }

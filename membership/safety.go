@@ -9,7 +9,7 @@ import (
 	"go.etcd.io/raft/v3/raftpb"
 )
 
-type SafetyPolicy struct{}
+type SafetyRules struct{}
 
 type SafetyRefusal struct {
 	GroupID     string
@@ -35,7 +35,7 @@ func (e *SafetyRefusal) Error() string {
 	)
 }
 
-func (SafetyPolicy) Check(g RaftGroup, health HealthSource, cc raftpb.ConfChangeV2) error {
+func (SafetyRules) Check(g RaftGroup, health HealthSource, cc raftpb.ConfChangeV2) error {
 	op, replicaID := describeChange(cc)
 	if len(cc.Changes) != 1 {
 		return &SafetyRefusal{

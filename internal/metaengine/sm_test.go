@@ -66,8 +66,8 @@ func testPlan(version uint64, count int) topology.Plan {
 	return plan
 }
 
-func beginProposal(version uint64, count int, id string, at time.Time) BeginExecutionProposal {
-	return BeginExecutionProposal{
+func beginProposal(version uint64, count int, id string, at time.Time) BeginOperatorProposal {
+	return BeginOperatorProposal{
 		Version: version, Plan: testPlan(version, count), Actor: "n1",
 		At: at, ProposalID: id,
 	}
@@ -77,8 +77,8 @@ func TestCodec_Roundtrip(t *testing.T) {
 	t.Parallel()
 	at := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 	plan := testPlan(5, 1)
-	executionID := topology.MakeExecutionID(5, 1)
-	admission := AdmissionRecord{NodeName: "n2", InstanceID: "instance-n2", MemberID: 2, ExecutionID: executionID, State: AdmissionPending}
+	operatorID := topology.MakeOperatorID(5, 1)
+	admission := AdmissionRecord{NodeName: "n2", InstanceID: "instance-n2", MemberID: 2, OperatorID: operatorID, State: AdmissionPending}
 	cases := []struct {
 		name string
 		want any
@@ -86,13 +86,13 @@ func TestCodec_Roundtrip(t *testing.T) {
 	}{
 		{"propose_document", ProposeDocument{Doc: baseDoc(), ExpectedVersion: 3, ProposalID: "p1"}, KindProposeDocument},
 		{"admit_node", AdmitNode{Node: topology.Node{Name: "n2", Type: "worker", State: topology.NodeActive}, MemberID: 2, ProposalID: "p2"}, KindAdmitNode},
-		{"begin_execution", BeginExecutionProposal{Version: 5, Plan: plan, Actor: "n1", At: at, ProposalID: "p3"}, KindBeginExecution},
-		{"commit_repair_execution", CommitRepairExecutionProposal{Doc: baseDoc(), ExpectedVersion: 4, Plan: plan, At: at, ProposalID: "p4"}, KindCommitRepairExecution},
-		{"transition_execution", TransitionExecutionProposal{Transition: topology.ExecutionTransition{ExecutionID: executionID, Version: 5, Attempt: 1, StepSeq: 1, State: topology.ExecutionRunning, GroupID: "shard0", NodeName: "n1", At: at}, ProposalID: "p5"}, KindTransitionExecution},
-		{"activate_target", ActivateTargetProposal{ExecutionID: executionID, Version: 5, Attempt: 1, ProposalID: "p6"}, KindActivateTarget},
+		{"begin_execution", BeginOperatorProposal{Version: 5, Plan: plan, Actor: "n1", At: at, ProposalID: "p3"}, KindBeginOperator},
+		{"commit_repair_execution", CommitRepairOperatorProposal{Doc: baseDoc(), ExpectedVersion: 4, Plan: plan, At: at, ProposalID: "p4"}, KindCommitRepairOperator},
+		{"transition_execution", TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: operatorID, Version: 5, Attempt: 1, StepSeq: 1, State: topology.OperatorRunning, GroupID: "shard0", NodeName: "n1", At: at}, ProposalID: "p5"}, KindTransitionOperator},
+		{"activate_target", ActivateTargetProposal{OperatorID: operatorID, Version: 5, Attempt: 1, ProposalID: "p6"}, KindActivateTarget},
 		{"bind_admission", BindAdmissionProposal{Admission: admission, ReplaceInstance: true, At: at, ProposalID: "p7"}, KindBindAdmission},
 		{"commit_readmission", CommitReadmissionProposal{Admission: admission, Doc: baseDoc(), ExpectedVersion: 4, Plan: plan, At: at, ProposalID: "p8"}, KindCommitReadmission},
-		{"ready_admission", ReadyAdmissionProposal{NodeName: "n2", InstanceID: "instance-n2", MemberID: 2, ExecutionID: executionID, ProposalID: "p9"}, KindReadyAdmission},
+		{"ready_admission", ReadyAdmissionProposal{NodeName: "n2", InstanceID: "instance-n2", MemberID: 2, OperatorID: operatorID, ProposalID: "p9"}, KindReadyAdmission},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -118,20 +118,20 @@ func TestCodec_Roundtrip(t *testing.T) {
 					t.Fatal(err)
 				}
 				got = p
-			case KindBeginExecution:
-				var p BeginExecutionProposal
+			case KindBeginOperator:
+				var p BeginOperatorProposal
 				if err := json.Unmarshal(body, &p); err != nil {
 					t.Fatal(err)
 				}
 				got = p
-			case KindCommitRepairExecution:
-				var p CommitRepairExecutionProposal
+			case KindCommitRepairOperator:
+				var p CommitRepairOperatorProposal
 				if err := json.Unmarshal(body, &p); err != nil {
 					t.Fatal(err)
 				}
 				got = p
-			case KindTransitionExecution:
-				var p TransitionExecutionProposal
+			case KindTransitionOperator:
+				var p TransitionOperatorProposal
 				if err := json.Unmarshal(body, &p); err != nil {
 					t.Fatal(err)
 				}
@@ -587,60 +587,60 @@ func TestSM_History_Paging(t *testing.T) {
 	}
 }
 
-func TestSM_ExactExecutionTransitions(t *testing.T) {
+func TestSM_ExactOperatorTransitions(t *testing.T) {
 	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
 	at := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
-	id := topology.MakeExecutionID(1, 1)
+	id := topology.MakeOperatorID(1, 1)
 
-	if _, ok := sm.Execution(id); ok {
+	if _, ok := sm.Operator(id); ok {
 		t.Fatal("no execution should exist before BeginExecution")
 	}
 
 	begin := apply(t, sm, 2, beginProposal(1, 3, "b1", at))
-	if !begin.Accepted || begin.ExecutionID != id {
+	if !begin.Accepted || begin.OperatorID != id {
 		t.Fatalf("begin = %+v, want accepted %q", begin, id)
 	}
-	apply(t, sm, 3, TransitionExecutionProposal{Transition: topology.ExecutionTransition{
-		ExecutionID: id, Version: 1, Attempt: 1, StepSeq: 1, State: topology.ExecutionRunning,
+	apply(t, sm, 3, TransitionOperatorProposal{Transition: topology.OperatorTransition{
+		OperatorID: id, Version: 1, Attempt: 1, StepSeq: 1, State: topology.OperatorRunning,
 		GroupID: "shard0", NodeName: "n1", At: at.Add(time.Second),
 	}, ProposalID: "s1"})
-	apply(t, sm, 4, TransitionExecutionProposal{Transition: topology.ExecutionTransition{
-		ExecutionID: id, Version: 1, Attempt: 1, StepSeq: 2, State: topology.ExecutionRunning,
+	apply(t, sm, 4, TransitionOperatorProposal{Transition: topology.OperatorTransition{
+		OperatorID: id, Version: 1, Attempt: 1, StepSeq: 2, State: topology.OperatorRunning,
 		GroupID: "shard0", NodeName: "n1", At: at.Add(2 * time.Second),
 	}, ProposalID: "s2"})
 
-	st, ok := sm.Execution(id)
+	st, ok := sm.Operator(id)
 	if !ok {
 		t.Fatal("execution should exist after plan steps")
 	}
-	if st.CurrentStep != 2 || st.State != topology.ExecutionRunning {
+	if st.CurrentStep != 2 || st.State != topology.OperatorRunning {
 		t.Fatalf("execution = %+v, want CurrentStep 2 running", st)
 	}
 
 	// A stale lower-sequence transition is rejected and cannot rewind progress.
-	stale := apply(t, sm, 5, TransitionExecutionProposal{Transition: topology.ExecutionTransition{
-		ExecutionID: id, Version: 1, Attempt: 1, StepSeq: 1, State: topology.ExecutionRunning,
+	stale := apply(t, sm, 5, TransitionOperatorProposal{Transition: topology.OperatorTransition{
+		OperatorID: id, Version: 1, Attempt: 1, StepSeq: 1, State: topology.OperatorRunning,
 		GroupID: "shard0", NodeName: "n1", At: at.Add(3 * time.Second),
 	}, ProposalID: "s1replay"})
 	if stale.Accepted {
 		t.Fatal("stale transition accepted")
 	}
-	if st, _ := sm.Execution(id); st.CurrentStep != 2 {
+	if st, _ := sm.Operator(id); st.CurrentStep != 2 {
 		t.Fatalf("CurrentStep rewound to %d after stale replay, want 2", st.CurrentStep)
 	}
 
-	apply(t, sm, 6, TransitionExecutionProposal{Transition: topology.ExecutionTransition{
-		ExecutionID: id, Version: 1, Attempt: 1, StepSeq: 3, State: topology.ExecutionFailed,
+	apply(t, sm, 6, TransitionOperatorProposal{Transition: topology.OperatorTransition{
+		OperatorID: id, Version: 1, Attempt: 1, StepSeq: 3, State: topology.OperatorFailed,
 		GroupID: "shard0", NodeName: "n1", Error: "conf change timeout", At: at.Add(4 * time.Second),
 	}, ProposalID: "s3"})
-	st, _ = sm.Execution(id)
-	if st.State != topology.ExecutionFailed || st.Error != "conf change timeout" || st.CurrentStep != 3 {
+	st, _ = sm.Operator(id)
+	if st.State != topology.OperatorFailed || st.Error != "conf change timeout" || st.CurrentStep != 3 {
 		t.Fatalf("failed execution = %+v", st)
 	}
-	terminalReplay := apply(t, sm, 7, TransitionExecutionProposal{Transition: topology.ExecutionTransition{
-		ExecutionID: id, Version: 1, Attempt: 1, StepSeq: 3, State: topology.ExecutionRunning,
+	terminalReplay := apply(t, sm, 7, TransitionOperatorProposal{Transition: topology.OperatorTransition{
+		OperatorID: id, Version: 1, Attempt: 1, StepSeq: 3, State: topology.OperatorRunning,
 		GroupID: "shard0", NodeName: "n1", At: at.Add(5 * time.Second),
 	}, ProposalID: "terminal-rewind"})
 	if terminalReplay.Accepted {
@@ -675,50 +675,50 @@ func TestSM_ForcedRetirementRecordsApplyingActor(t *testing.T) {
 	sm.latest = target.Clone()
 	sm.target = active.Clone()
 	at := time.Now().UTC()
-	missing := apply(t, sm, 1, BeginExecutionProposal{Version: 2, Plan: plan, Origin: topology.OriginAPI, At: at, ProposalID: "missing"})
+	missing := apply(t, sm, 1, BeginOperatorProposal{Version: 2, Plan: plan, Origin: topology.OriginAPI, At: at, ProposalID: "missing"})
 	if missing.Accepted {
 		t.Fatal("forced retirement accepted without applying actor")
 	}
-	res := apply(t, sm, 2, BeginExecutionProposal{Version: 2, Plan: plan, Actor: "applying-admin",
+	res := apply(t, sm, 2, BeginOperatorProposal{Version: 2, Plan: plan, Actor: "applying-admin",
 		Origin: topology.OriginAPI, At: at, ProposalID: "apply"})
 	if !res.Accepted {
 		t.Fatalf("forced begin rejected: %s", res.Reason)
 	}
-	record, ok := sm.CurrentExecution()
+	record, ok := sm.CurrentOperator()
 	if !ok || record.Actor != "applying-admin" || target.Audit.StagedBy != "staging-admin" {
 		t.Fatalf("execution/audit actors = %+v / %+v", record, target.Audit)
 	}
 }
 
-func TestSM_ExecutionSupersededAtExactBoundary(t *testing.T) {
+func TestSM_OperatorSupersededAtExactBoundary(t *testing.T) {
 	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
 	at := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
-	id := topology.MakeExecutionID(1, 1)
+	id := topology.MakeOperatorID(1, 1)
 	apply(t, sm, 2, beginProposal(1, 3, "begin", at))
 
-	result := apply(t, sm, 3, TransitionExecutionProposal{Transition: topology.ExecutionTransition{
-		ExecutionID: id, Version: 1, Attempt: 1, StepSeq: 1,
-		State: topology.ExecutionSuperseded, GroupID: "shard0", NodeName: "n1", At: at.Add(time.Second),
+	result := apply(t, sm, 3, TransitionOperatorProposal{Transition: topology.OperatorTransition{
+		OperatorID: id, Version: 1, Attempt: 1, StepSeq: 1,
+		State: topology.OperatorSuperseded, GroupID: "shard0", NodeName: "n1", At: at.Add(time.Second),
 	}, ProposalID: "supersede"})
 	if !result.Accepted {
 		t.Fatalf("boundary supersession rejected: %+v", result)
 	}
-	status, ok := sm.Execution(id)
-	if !ok || status.State != topology.ExecutionSuperseded || status.CurrentStep != 1 {
+	status, ok := sm.Operator(id)
+	if !ok || status.State != topology.OperatorSuperseded || status.CurrentStep != 1 {
 		t.Fatalf("superseded execution = (%+v, %v)", status, ok)
 	}
-	retry := apply(t, sm, 4, TransitionExecutionProposal{Transition: topology.ExecutionTransition{
-		ExecutionID: id, Version: 1, Attempt: 1, StepSeq: 1,
-		State: topology.ExecutionRunning, GroupID: "shard0", NodeName: "n1", At: at.Add(2 * time.Second),
+	retry := apply(t, sm, 4, TransitionOperatorProposal{Transition: topology.OperatorTransition{
+		OperatorID: id, Version: 1, Attempt: 1, StepSeq: 1,
+		State: topology.OperatorRunning, GroupID: "shard0", NodeName: "n1", At: at.Add(2 * time.Second),
 	}, ProposalID: "retry-old"})
 	if retry.Accepted || retry.Code != proposalSuperseded {
 		t.Fatalf("terminal superseded execution accepted retry: %+v", retry)
 	}
 }
 
-func TestSM_ExecutionBeginRetryAndSupersession(t *testing.T) {
+func TestSM_OperatorBeginRetryAndSupersession(t *testing.T) {
 	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
@@ -726,36 +726,36 @@ func TestSM_ExecutionBeginRetryAndSupersession(t *testing.T) {
 	plan := testPlan(1, 1)
 
 	first := apply(t, sm, 2, beginProposal(1, 1, "b1", at))
-	firstID := topology.MakeExecutionID(1, 1)
-	if !first.Accepted || first.ExecutionID != firstID {
+	firstID := topology.MakeOperatorID(1, 1)
+	if !first.Accepted || first.OperatorID != firstID {
 		t.Fatalf("first begin = %+v", first)
 	}
 	replay := apply(t, sm, 3, beginProposal(1, 1, "b1-replay", at.Add(time.Second)))
-	if !replay.Accepted || replay.ExecutionID != firstID || len(sm.executions) != 1 {
-		t.Fatalf("idempotent begin = %+v, executions=%d", replay, len(sm.executions))
+	if !replay.Accepted || replay.OperatorID != firstID || len(sm.operators) != 1 {
+		t.Fatalf("idempotent begin = %+v, executions=%d", replay, len(sm.operators))
 	}
 	conflictPlan := plan
 	conflictPlan.Steps = append(conflictPlan.Steps, topology.Step{
 		Seq: 2, GroupID: "shard0", Kind: topology.StepPromoteVoter, NodeName: "n1", ReplicaID: 1,
 	})
-	conflict := apply(t, sm, 4, BeginExecutionProposal{
+	conflict := apply(t, sm, 4, BeginOperatorProposal{
 		Version: 1, Plan: conflictPlan, Actor: "n1", At: at.Add(2 * time.Second), ProposalID: "b-conflict",
 	})
 	if conflict.Accepted || conflict.Code != proposalAuthorization {
 		t.Fatalf("conflicting begin = %+v, want authorization rejection", conflict)
 	}
 
-	apply(t, sm, 5, TransitionExecutionProposal{Transition: topology.ExecutionTransition{
-		ExecutionID: firstID, Version: 1, Attempt: 1, StepSeq: 1, State: topology.ExecutionFailed,
+	apply(t, sm, 5, TransitionOperatorProposal{Transition: topology.OperatorTransition{
+		OperatorID: firstID, Version: 1, Attempt: 1, StepSeq: 1, State: topology.OperatorFailed,
 		GroupID: "shard0", NodeName: "n1", Error: "injected", At: at.Add(3 * time.Second),
 	}, ProposalID: "fail-a1"})
 	retry := apply(t, sm, 6, beginProposal(1, 0, "retry", at.Add(4*time.Second)))
-	retryID := topology.MakeExecutionID(1, 2)
-	if !retry.Accepted || retry.ExecutionID != retryID {
+	retryID := topology.MakeOperatorID(1, 2)
+	if !retry.Accepted || retry.OperatorID != retryID {
 		t.Fatalf("retry = %+v, want %q", retry, retryID)
 	}
-	if replayRetry := apply(t, sm, 7, beginProposal(1, 0, "retry-replay", at.Add(5*time.Second))); !replayRetry.Accepted || replayRetry.ExecutionID != retryID || len(sm.executions) != 2 {
-		t.Fatalf("retry replay = %+v, executions=%d", replayRetry, len(sm.executions))
+	if replayRetry := apply(t, sm, 7, beginProposal(1, 0, "retry-replay", at.Add(5*time.Second))); !replayRetry.Accepted || replayRetry.OperatorID != retryID || len(sm.operators) != 2 {
+		t.Fatalf("retry replay = %+v, executions=%d", replayRetry, len(sm.operators))
 	}
 
 	apply(t, sm, 8, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 1, ProposalID: "p2"})
@@ -763,8 +763,8 @@ func TestSM_ExecutionBeginRetryAndSupersession(t *testing.T) {
 	if !newer.Accepted {
 		t.Fatalf("newer begin rejected: %+v", newer)
 	}
-	old, _ := sm.Execution(retryID)
-	if old.State != topology.ExecutionSuperseded {
+	old, _ := sm.Operator(retryID)
+	if old.State != topology.OperatorSuperseded {
 		t.Fatalf("old retry state = %q, want superseded", old.State)
 	}
 	if stale := apply(t, sm, 10, beginProposal(1, 0, "stale", at.Add(7*time.Second))); stale.Accepted || stale.Code != proposalSuperseded {
@@ -789,7 +789,7 @@ func TestSM_RejectsMalformedPlanAndPrematureActivation(t *testing.T) {
 	index := uint64(1)
 	for i, plan := range malformed {
 		index++
-		res := apply(t, sm, index, BeginExecutionProposal{
+		res := apply(t, sm, index, BeginOperatorProposal{
 			Version: 1, Plan: plan, Actor: "n1", At: at.Add(time.Duration(i) * time.Second),
 			ProposalID: fmt.Sprintf("bad-%d", i),
 		})
@@ -801,24 +801,24 @@ func TestSM_RejectsMalformedPlanAndPrematureActivation(t *testing.T) {
 	begin := apply(t, sm, index, beginProposal(1, 0, "begin", at.Add(4*time.Second)))
 	index++
 	early := apply(t, sm, index, ActivateTargetProposal{
-		ExecutionID: begin.ExecutionID, Version: 1, Attempt: 1, ProposalID: "early-activate",
+		OperatorID: begin.OperatorID, Version: 1, Attempt: 1, ProposalID: "early-activate",
 	})
 	if early.Accepted || sm.Active().Version != 0 {
 		t.Fatalf("premature activation = %+v, Active v%d", early, sm.Active().Version)
 	}
 }
 
-func TestSM_CommitRepairExecutionGuardrails(t *testing.T) {
+func TestSM_CommitRepairOperatorGuardrails(t *testing.T) {
 	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
 	at := time.Date(2026, 7, 16, 14, 0, 0, 0, time.UTC)
-	id := topology.MakeExecutionID(1, 1)
+	id := topology.MakeOperatorID(1, 1)
 	apply(t, sm, 2, beginProposal(1, 0, "b1", at))
-	apply(t, sm, 3, TransitionExecutionProposal{Transition: topology.ExecutionTransition{
-		ExecutionID: id, Version: 1, Attempt: 1, State: topology.ExecutionSucceeded, At: at.Add(time.Second),
+	apply(t, sm, 3, TransitionOperatorProposal{Transition: topology.OperatorTransition{
+		OperatorID: id, Version: 1, Attempt: 1, State: topology.OperatorSucceeded, At: at.Add(time.Second),
 	}, ProposalID: "done"})
-	apply(t, sm, 4, ActivateTargetProposal{ExecutionID: id, Version: 1, Attempt: 1, ProposalID: "activate"})
+	apply(t, sm, 4, ActivateTargetProposal{OperatorID: id, Version: 1, Attempt: 1, ProposalID: "activate"})
 
 	repair := sm.Active()
 	repair.Origin = topology.OriginReconciler
@@ -834,12 +834,12 @@ func TestSM_CommitRepairExecutionGuardrails(t *testing.T) {
 	}}
 	badOrigin := repair.Clone()
 	badOrigin.Origin = topology.OriginAPI
-	if res := apply(t, sm, 5, CommitRepairExecutionProposal{
+	if res := apply(t, sm, 5, CommitRepairOperatorProposal{
 		Doc: badOrigin, ExpectedVersion: 1, Plan: repairPlan, At: at.Add(2 * time.Second), ProposalID: "api",
 	}); res.Accepted || res.Code != proposalAuthorization {
 		t.Fatalf("API repair = %+v", res)
 	}
-	if res := apply(t, sm, 6, CommitRepairExecutionProposal{
+	if res := apply(t, sm, 6, CommitRepairOperatorProposal{
 		Doc: repair, ExpectedVersion: 0, Plan: repairPlan, At: at.Add(3 * time.Second), ProposalID: "stale",
 	}); res.Accepted || res.Code != proposalVersionConflict {
 		t.Fatalf("stale repair = %+v", res)
@@ -847,15 +847,15 @@ func TestSM_CommitRepairExecutionGuardrails(t *testing.T) {
 	dangerousPlan := topology.Plan{Version: 2, Steps: []topology.Step{{
 		Seq: 1, GroupID: "shard0", Kind: topology.StepTransferLeader, NodeName: "n1", ReplicaID: 2,
 	}}}
-	if res := apply(t, sm, 7, CommitRepairExecutionProposal{
+	if res := apply(t, sm, 7, CommitRepairOperatorProposal{
 		Doc: repair, ExpectedVersion: 1, Plan: dangerousPlan, At: at.Add(4 * time.Second), ProposalID: "dangerous",
 	}); res.Accepted || res.Code != proposalAuthorization {
 		t.Fatalf("dangerous repair plan = %+v", res)
 	}
-	accepted := apply(t, sm, 8, CommitRepairExecutionProposal{
+	accepted := apply(t, sm, 8, CommitRepairOperatorProposal{
 		Doc: repair, ExpectedVersion: 1, Plan: repairPlan, At: at.Add(4 * time.Second), ProposalID: "repair",
 	})
-	if !accepted.Accepted || accepted.Doc.Version != 2 || accepted.ExecutionID != topology.MakeExecutionID(2, 1) {
+	if !accepted.Accepted || accepted.Doc.Version != 2 || accepted.OperatorID != topology.MakeOperatorID(2, 1) {
 		t.Fatalf("repair = %+v", accepted)
 	}
 	if sm.Latest().Version != 2 || sm.Target().Version != 2 || sm.Active().Version != 1 {
@@ -868,14 +868,14 @@ func TestSM_PinsTargetActiveAndNonterminalBeyondHistory(t *testing.T) {
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
 	at := time.Date(2026, 7, 16, 16, 0, 0, 0, time.UTC)
-	id1 := topology.MakeExecutionID(1, 1)
+	id1 := topology.MakeOperatorID(1, 1)
 	apply(t, sm, 2, beginProposal(1, 0, "b1", at))
-	apply(t, sm, 3, TransitionExecutionProposal{Transition: topology.ExecutionTransition{
-		ExecutionID: id1, Version: 1, Attempt: 1, State: topology.ExecutionSucceeded, At: at.Add(time.Second),
+	apply(t, sm, 3, TransitionOperatorProposal{Transition: topology.OperatorTransition{
+		OperatorID: id1, Version: 1, Attempt: 1, State: topology.OperatorSucceeded, At: at.Add(time.Second),
 	}, ProposalID: "done1"})
-	apply(t, sm, 4, ActivateTargetProposal{ExecutionID: id1, Version: 1, Attempt: 1, ProposalID: "activate1"})
+	apply(t, sm, 4, ActivateTargetProposal{OperatorID: id1, Version: 1, Attempt: 1, ProposalID: "activate1"})
 	apply(t, sm, 5, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 1, ProposalID: "p2"})
-	id2 := topology.MakeExecutionID(2, 1)
+	id2 := topology.MakeOperatorID(2, 1)
 	apply(t, sm, 6, beginProposal(2, 1, "b2", at.Add(2*time.Second)))
 
 	index := uint64(6)
@@ -889,10 +889,10 @@ func TestSM_PinsTargetActiveAndNonterminalBeyondHistory(t *testing.T) {
 	if _, ok := sm.Get(1); ok {
 		t.Fatal("version 1 unexpectedly remained in bounded Latest history")
 	}
-	if _, ok := sm.Execution(id1); !ok {
+	if _, ok := sm.Operator(id1); !ok {
 		t.Fatal("Active-referenced terminal execution was pruned")
 	}
-	if st, ok := sm.Execution(id2); !ok || st.State.Terminal() {
+	if st, ok := sm.Operator(id2); !ok || st.State.Terminal() {
 		t.Fatalf("Target nonterminal execution = (%+v,%v), want pinned", st, ok)
 	}
 }
@@ -902,7 +902,7 @@ func TestSM_ApplyDeterminism(t *testing.T) {
 	// The same committed-entry sequence must yield byte-identical snapshots on
 	// two independent state machines (the raft SM determinism contract).
 	at := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
-	id := topology.MakeExecutionID(2, 1)
+	id := topology.MakeOperatorID(2, 1)
 	seq := []struct {
 		index uint64
 		prop  any
@@ -911,8 +911,8 @@ func TestSM_ApplyDeterminism(t *testing.T) {
 		{2, AdmitNode{Node: topology.Node{Name: "n2", Type: "worker"}, MemberID: 2, ProposalID: "j1"}},
 		{3, beginProposal(2, 1, "b1", at)},
 		{4, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "pStale"}}, // rejected CAS
-		{5, TransitionExecutionProposal{Transition: topology.ExecutionTransition{
-			ExecutionID: id, Version: 2, Attempt: 1, StepSeq: 1, State: topology.ExecutionRunning,
+		{5, TransitionOperatorProposal{Transition: topology.OperatorTransition{
+			OperatorID: id, Version: 2, Attempt: 1, StepSeq: 1, State: topology.OperatorRunning,
 			GroupID: "shard0", NodeName: "n1", At: at.Add(time.Second),
 		}, ProposalID: "s1"}},
 	}
@@ -940,9 +940,9 @@ func TestSM_SnapshotRestoreEquivalence(t *testing.T) {
 	apply(t, src, 2, AdmitNode{Node: topology.Node{Name: "n2", Type: "worker"}, MemberID: 2, ProposalID: "j1"})
 	at := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 	apply(t, src, 3, beginProposal(2, 1, "b1", at))
-	id := topology.MakeExecutionID(2, 1)
-	apply(t, src, 4, TransitionExecutionProposal{Transition: topology.ExecutionTransition{
-		ExecutionID: id, Version: 2, Attempt: 1, StepSeq: 1, State: topology.ExecutionRunning,
+	id := topology.MakeOperatorID(2, 1)
+	apply(t, src, 4, TransitionOperatorProposal{Transition: topology.OperatorTransition{
+		OperatorID: id, Version: 2, Attempt: 1, StepSeq: 1, State: topology.OperatorRunning,
 		GroupID: "shard0", NodeName: "n1", At: at.Add(time.Second),
 	}, ProposalID: "s1"})
 
@@ -972,8 +972,8 @@ func TestSM_SnapshotRestoreEquivalence(t *testing.T) {
 	if !reflect.DeepEqual(src.History(0, 0), dst.History(0, 0)) {
 		t.Fatal("history differs after restore")
 	}
-	if si, sok := src.Execution(id); true {
-		di, dok := dst.Execution(id)
+	if si, sok := src.Operator(id); true {
+		di, dok := dst.Operator(id)
 		if sok != dok || !reflect.DeepEqual(si, di) {
 			t.Fatalf("execution differs after restore: src=(%+v,%v) dst=(%+v,%v)", si, sok, di, dok)
 		}
@@ -1030,7 +1030,7 @@ func TestSM_HistoryRingBounded(t *testing.T) {
 
 // TestSM_ExecutionsBounded verifies terminal, unreferenced executions are
 // pruned with the history ring while Target and Active remain pinned.
-func TestSM_ExecutionsBounded(t *testing.T) {
+func TestSM_OperatorsBounded(t *testing.T) {
 	t.Parallel()
 	sm := newTopologySM(nil, testRules())
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
@@ -1043,23 +1043,23 @@ func TestSM_ExecutionsBounded(t *testing.T) {
 		idx++
 		newVersion := expected + 1
 		apply(t, sm, idx, beginProposal(newVersion, 0, fmt.Sprintf("b%d", newVersion), at.Add(time.Duration(newVersion)*time.Second)))
-		id := topology.MakeExecutionID(newVersion, 1)
+		id := topology.MakeOperatorID(newVersion, 1)
 		idx++
-		apply(t, sm, idx, TransitionExecutionProposal{Transition: topology.ExecutionTransition{
-			ExecutionID: id, Version: newVersion, Attempt: 1, State: topology.ExecutionSucceeded,
+		apply(t, sm, idx, TransitionOperatorProposal{Transition: topology.OperatorTransition{
+			OperatorID: id, Version: newVersion, Attempt: 1, State: topology.OperatorSucceeded,
 			At: at.Add(time.Duration(newVersion)*time.Second + time.Millisecond),
 		}, ProposalID: fmt.Sprintf("s%d", newVersion)})
 		idx++
-		apply(t, sm, idx, ActivateTargetProposal{ExecutionID: id, Version: newVersion, Attempt: 1, ProposalID: fmt.Sprintf("a%d", newVersion)})
+		apply(t, sm, idx, ActivateTargetProposal{OperatorID: id, Version: newVersion, Attempt: 1, ProposalID: fmt.Sprintf("a%d", newVersion)})
 	}
 
-	if got := len(sm.executions); got > historyRetention {
+	if got := len(sm.operators); got > historyRetention {
 		t.Fatalf("executions map = %d records after 299 commits, want <= %d (must prune with the history ring)", got, historyRetention)
 	}
 	// No record may linger below the retained history horizon.
 	all := sm.History(0, 0)
 	horizon := all[len(all)-1].Version
-	for _, ex := range sm.executions {
+	for _, ex := range sm.operators {
 		if ex.Version < horizon && ex.Version != sm.target.Version && ex.Version != sm.active.Version {
 			t.Fatalf("execution record for pruned version %d retained (history horizon %d)", ex.Version, horizon)
 		}

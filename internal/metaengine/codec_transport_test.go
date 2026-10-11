@@ -7,7 +7,7 @@ import (
 
 func TestDecodeProposalWhitelistsCompleteCommandSet(t *testing.T) {
 	t.Parallel()
-	for _, want := range []any{ProposeDocument{ExpectedVersion: 9}, AdmitNode{MemberID: 8}, BeginExecutionProposal{Version: 7}, CommitRepairExecutionProposal{ExpectedVersion: 6}, TransitionExecutionProposal{ProposalID: "transition"}, ActivateTargetProposal{Version: 5}, BindAdmissionProposal{Founding: true}, CommitReadmissionProposal{ExpectedVersion: 4}, ReadyAdmissionProposal{MemberID: 3}, GrantSession{SessionID: "session", TTLSeconds: 30}, RevokeSession{Reason: "expired"}, AcquireLock{Key: "node/n1"}} {
+	for _, want := range []any{ProposeDocument{ExpectedVersion: 9}, AdmitNode{MemberID: 8}, BeginOperatorProposal{Version: 7}, CommitRepairOperatorProposal{ExpectedVersion: 6}, TransitionOperatorProposal{ProposalID: "transition"}, ActivateTargetProposal{Version: 5}, BindAdmissionProposal{Founding: true}, CommitReadmissionProposal{ExpectedVersion: 4}, ReadyAdmissionProposal{MemberID: 3}, GrantSession{SessionID: "session", TTLSeconds: 30}, RevokeSession{Reason: "expired"}, AcquireLock{Key: "node/n1"}} {
 		data, err := Encode(want)
 		if err != nil {
 			t.Fatal(err)

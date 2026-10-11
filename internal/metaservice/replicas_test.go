@@ -149,15 +149,15 @@ func TestPublicLoadLedgerCleanupRequiresExactAuthorization(t *testing.T) {
 	f.commit(t, doc, false)
 	at := time.Now().UTC()
 	steps := []topology.Step{{Seq: 1, Kind: topology.StepStopReplica, GroupID: "work", NodeName: "n1", ReplicaID: 1}, {Seq: 2, Kind: topology.StepStopReplica, GroupID: "work", NodeName: "n2", ReplicaID: 2}, {Seq: 3, Kind: topology.StepStopReplica, GroupID: "work", NodeName: "n3", ReplicaID: 3}, {Seq: 4, Kind: topology.StepDeleteGroupState, GroupID: "work"}}
-	b := f.command(t, metaengine.BeginExecutionProposal{Version: 2, Plan: topology.Plan{Version: 2, Steps: steps}, At: at})
+	b := f.command(t, metaengine.BeginOperatorProposal{Version: 2, Plan: topology.Plan{Version: 2, Steps: steps}, At: at})
 	for _, step := range steps {
 		at = at.Add(time.Millisecond)
-		f.command(t, metaengine.TransitionExecutionProposal{Transition: topology.ExecutionTransition{ExecutionID: b.ExecutionID, Version: 2, Attempt: 1, StepSeq: step.Seq, State: topology.ExecutionRunning, GroupID: step.GroupID, NodeName: step.NodeName, At: at}})
+		f.command(t, metaengine.TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: b.OperatorID, Version: 2, Attempt: 1, StepSeq: step.Seq, State: topology.OperatorRunning, GroupID: step.GroupID, NodeName: step.NodeName, At: at}})
 	}
-	a := topology.AuthorizedStep{ExecutionID: b.ExecutionID, Version: 2, Attempt: 1, StepSeq: 4, Kind: topology.StepDeleteGroupState, GroupID: "work"}
+	a := topology.AuthorizedStep{OperatorID: b.OperatorID, Version: 2, Attempt: 1, StepSeq: 4, Kind: topology.StepDeleteGroupState, GroupID: "work"}
 	wrong := a
 	wrong.Attempt++
-	if err := f.g.ForgetLoadReplica(ctx, wrong, 1); !errors.Is(err, fault.ErrExecutionAuthorization) {
+	if err := f.g.ForgetLoadReplica(ctx, wrong, 1); !errors.Is(err, fault.ErrOperatorAuthorization) {
 		t.Fatal("stale cleanup accepted", err)
 	}
 	if err := f.g.ForgetLoadReplica(ctx, a, 2); !errors.Is(err, fault.ErrIdentityMismatch) {

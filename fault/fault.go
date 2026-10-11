@@ -6,23 +6,23 @@ import "fmt"
 type Code string
 
 const (
-	Invalid                Code = "invalid"
-	VersionConflict        Code = "version_conflict"
-	HistoryUnavailable     Code = "history_unavailable"
-	NotLeader              Code = "not_leader"
-	ReplicaNotReady        Code = "replica_not_ready"
-	Unavailable            Code = "unavailable"
-	NoController           Code = "no_controller"
-	UnsafeMembership       Code = "unsafe_membership"
-	ExecutionAuthorization Code = "execution_authorization"
-	IdentityMismatch       Code = "identity_mismatch"
-	Unreadable             Code = "unreadable"
-	GroupRetired           Code = "group_retired"
-	Overloaded             Code = "overloaded"
-	Stopped                Code = "stopped"
-	ShutdownTimeout        Code = "shutdown_timeout"
-	Unsupported            Code = "unsupported"
-	ReadmissionRequired    Code = "readmission_required"
+	Invalid               Code = "invalid"
+	VersionConflict       Code = "version_conflict"
+	HistoryUnavailable    Code = "history_unavailable"
+	NotLeader             Code = "not_leader"
+	ReplicaNotReady       Code = "replica_not_ready"
+	Unavailable           Code = "unavailable"
+	NoController          Code = "no_controller"
+	UnsafeMembership      Code = "unsafe_membership"
+	OperatorAuthorization Code = "execution_authorization"
+	IdentityMismatch      Code = "identity_mismatch"
+	Unreadable            Code = "unreadable"
+	GroupRetired          Code = "group_retired"
+	Overloaded            Code = "overloaded"
+	Stopped               Code = "stopped"
+	ShutdownTimeout       Code = "shutdown_timeout"
+	Unsupported           Code = "unsupported"
+	ReadmissionRequired   Code = "readmission_required"
 )
 
 type Error struct {
@@ -49,21 +49,21 @@ func New(code Code, message string, cause error) *Error {
 }
 
 var (
-	ErrInvalid                = New(Invalid, "", nil)
-	ErrVersionConflict        = New(VersionConflict, "", nil)
-	ErrHistoryUnavailable     = New(HistoryUnavailable, "", nil)
-	ErrNotLeader              = New(NotLeader, "", nil)
-	ErrReplicaNotReady        = New(ReplicaNotReady, "", nil)
-	ErrUnavailable            = New(Unavailable, "", nil)
-	ErrNoController           = New(NoController, "", nil)
-	ErrUnsafeMembership       = New(UnsafeMembership, "", nil)
-	ErrExecutionAuthorization = New(ExecutionAuthorization, "", nil)
-	ErrIdentityMismatch       = New(IdentityMismatch, "", nil)
-	ErrUnreadable             = New(Unreadable, "", nil)
-	ErrGroupRetired           = New(GroupRetired, "", nil)
-	ErrOverloaded             = New(Overloaded, "", nil)
-	ErrStopped                = New(Stopped, "", nil)
-	ErrShutdownTimeout        = New(ShutdownTimeout, "", nil)
-	ErrUnsupported            = New(Unsupported, "", nil)
-	ErrReadmissionRequired    = New(ReadmissionRequired, "", nil)
+	ErrInvalid               = New(Invalid, "", nil)
+	ErrVersionConflict       = New(VersionConflict, "", nil)
+	ErrHistoryUnavailable    = New(HistoryUnavailable, "", nil)
+	ErrNotLeader             = New(NotLeader, "", nil)
+	ErrReplicaNotReady       = New(ReplicaNotReady, "", nil)
+	ErrUnavailable           = New(Unavailable, "", nil)
+	ErrNoController          = New(NoController, "", nil)
+	ErrUnsafeMembership      = New(UnsafeMembership, "", nil)
+	ErrOperatorAuthorization = New(OperatorAuthorization, "", nil)
+	ErrIdentityMismatch      = New(IdentityMismatch, "", nil)
+	ErrUnreadable            = New(Unreadable, "", nil)
+	ErrGroupRetired          = New(GroupRetired, "", nil)
+	ErrOverloaded            = New(Overloaded, "", nil)
+	ErrStopped               = New(Stopped, "", nil)
+	ErrShutdownTimeout       = New(ShutdownTimeout, "", nil)
+	ErrUnsupported           = New(Unsupported, "", nil)
+	ErrReadmissionRequired   = New(ReadmissionRequired, "", nil)
 )

@@ -41,18 +41,18 @@ func clusterDocument(load bool) topology.Document {
 }
 
 type testHost struct {
-	t                                                     *testing.T
-	machine                                               *metaengine.Machine
-	index                                                 uint64
-	leader                                                bool
-	health                                                map[string]topology.Health
-	status                                                map[string]topology.GroupStatus
-	viewErr, executionErr, statusErr, planErr, approveErr error
-	beforeCommit                                          func()
-	executionOverride                                     *topology.ExecutionRecord
-	planOverride                                          *topology.Plan
-	blockViews                                            bool
-	wakes, commits, approvals, healthCalls, statusCalls   int
+	t                                                    *testing.T
+	machine                                              *metaengine.Machine
+	index                                                uint64
+	leader                                               bool
+	health                                               map[string]topology.Health
+	status                                               map[string]topology.GroupStatus
+	viewErr, operatorErr, statusErr, planErr, approveErr error
+	beforeCommit                                         func()
+	operatorOverride                                     *topology.Operator
+	planOverride                                         *topology.Plan
+	blockViews                                           bool
+	wakes, commits, approvals, healthCalls, statusCalls  int
 }
 
 func newTestHost(t *testing.T, voters ...uint64) *testHost {
@@ -61,9 +61,9 @@ func newTestHost(t *testing.T, voters ...uint64) *testHost {
 	h.status[topology.MetaGroupID] = topology.GroupStatus{GroupID: topology.MetaGroupID, Found: true, LeaderID: 1, Commit: 10, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}, HealthKnown: true, LiveVoters: map[uint64]bool{1: true, 2: true, 3: true}}
 	h.status["shard0"] = topology.GroupStatus{GroupID: "shard0", Found: true, LeaderID: 1, Commit: 10, ConfState: raftpb.ConfState{Voters: voters}, HealthKnown: true, LiveVoters: map[uint64]bool{1: true, 2: true, 3: true}}
 	h.mustApply(metaengine.ProposeDocument{Doc: clusterDocument(true), ExpectedVersion: 0})
-	ex := h.mustApply(metaengine.BeginExecutionProposal{Version: 1, Plan: topology.Plan{Version: 1}, Origin: topology.OriginFounding, At: time.Now().UTC()})
-	h.mustApply(metaengine.TransitionExecutionProposal{Transition: topology.ExecutionTransition{ExecutionID: ex.ExecutionID, Version: 1, Attempt: 1, State: topology.ExecutionSucceeded, At: time.Now().UTC()}})
-	h.mustApply(metaengine.ActivateTargetProposal{ExecutionID: ex.ExecutionID, Version: 1, Attempt: 1})
+	ex := h.mustApply(metaengine.BeginOperatorProposal{Version: 1, Plan: topology.Plan{Version: 1}, Origin: topology.OriginFounding, At: time.Now().UTC()})
+	h.mustApply(metaengine.TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: ex.OperatorID, Version: 1, Attempt: 1, State: topology.OperatorSucceeded, At: time.Now().UTC()}})
+	h.mustApply(metaengine.ActivateTargetProposal{OperatorID: ex.OperatorID, Version: 1, Attempt: 1})
 	return h
 }
 func (h *testHost) apply(ctx context.Context, proposal any) (metaengine.ApplyResult, error) {
@@ -81,7 +81,7 @@ func (h *testHost) apply(ctx context.Context, proposal any) (metaengine.ApplyRes
 		return out, err
 	}
 	if !out.Accepted {
-		code := fault.ExecutionAuthorization
+		code := fault.OperatorAuthorization
 		if string(out.Code) == "version_conflict" {
 			code = fault.VersionConflict
 		}
@@ -105,12 +105,12 @@ func (h *testHost) Views(ctx context.Context) (topology.Document, topology.Docum
 	a, b, c := h.machine.Views()
 	return a, b, c, h.viewErr
 }
-func (h *testHost) CurrentExecution(context.Context) (topology.ExecutionRecord, bool, error) {
-	if h.executionOverride != nil {
-		return *h.executionOverride, true, h.executionErr
+func (h *testHost) CurrentOperator(context.Context) (topology.Operator, bool, error) {
+	if h.operatorOverride != nil {
+		return *h.operatorOverride, true, h.operatorErr
 	}
-	ex, ok := h.machine.CurrentExecution()
-	return ex, ok, h.executionErr
+	ex, ok := h.machine.CurrentOperator()
+	return ex, ok, h.operatorErr
 }
 func (h *testHost) IsLeader() bool { return h.leader }
 func (h *testHost) Health(context.Context) (map[string]topology.Health, error) {
@@ -132,7 +132,7 @@ func (h *testHost) PlanFor(_ context.Context, doc topology.Document) (topology.P
 	}
 	return topology.BuildPlan(h.machine.Active(), doc, h.status, topology.Rules{SchemaVersion: 1, Limits: (topology.Limits{}).WithDefaults()})
 }
-func (h *testHost) Approve(ctx context.Context, version uint64) (topology.ExecutionID, error) {
+func (h *testHost) Approve(ctx context.Context, version uint64) (topology.OperatorID, error) {
 	if h.approveErr != nil {
 		return "", h.approveErr
 	}
@@ -141,23 +141,23 @@ func (h *testHost) Approve(ctx context.Context, version uint64) (topology.Execut
 	if err != nil {
 		return "", err
 	}
-	res, err := h.apply(ctx, metaengine.BeginExecutionProposal{Version: version, Plan: plan, At: time.Now().UTC(), Actor: "auto-repair", Origin: doc.Origin})
+	res, err := h.apply(ctx, metaengine.BeginOperatorProposal{Version: version, Plan: plan, At: time.Now().UTC(), Actor: "auto-repair", Origin: doc.Origin})
 	if err == nil {
 		h.approvals++
 	}
-	return res.ExecutionID, err
+	return res.OperatorID, err
 }
-func (h *testHost) CommitRepair(ctx context.Context, doc topology.Document, expected uint64, plan topology.Plan) (topology.ExecutionID, error) {
+func (h *testHost) CommitRepair(ctx context.Context, doc topology.Document, expected uint64, plan topology.Plan) (topology.OperatorID, error) {
 	if h.beforeCommit != nil {
 		h.beforeCommit()
 	}
-	res, err := h.apply(ctx, metaengine.CommitRepairExecutionProposal{Doc: doc, ExpectedVersion: expected, Plan: plan, At: time.Now().UTC()})
+	res, err := h.apply(ctx, metaengine.CommitRepairOperatorProposal{Doc: doc, ExpectedVersion: expected, Plan: plan, At: time.Now().UTC()})
 	if err == nil {
 		h.commits++
 	}
-	return res.ExecutionID, err
+	return res.OperatorID, err
 }
-func (h *testHost) WakeConvergence() { h.wakes++ }
+func (h *testHost) WakeOperator() { h.wakes++ }
 func (h *testHost) stage(origin topology.Origin, parent uint64) topology.Document {
 	doc := h.machine.Latest()
 	doc.Version++
@@ -185,7 +185,7 @@ func tick(t *testing.T, r *Driver) {
 		t.Fatal(err)
 	}
 }
-func assertStatus(t *testing.T, r *Driver, state topology.ReconciliationState, reason string) {
+func assertStatus(t *testing.T, r *Driver, state topology.SchedulingState, reason string) {
 	t.Helper()
 	s := r.Status()
 	if s.State != state || s.Reason != reason {
@@ -251,16 +251,16 @@ func TestDriverLocalKillSwitchResetsStability(t *testing.T) {
 		t.Fatal(err)
 	}
 	tick(t, r)
-	assertStatus(t, r, topology.ReconciliationDisabled, ReconcileReasonConfigDisabled)
+	assertStatus(t, r, topology.SchedulingDisabled, ReconcileReasonConfigDisabled)
 	if len(r.aliveSince) != 0 || h.commits != 0 {
 		t.Fatal("disabled worker retained observations or repaired")
 	}
 	if err := r.SetEnabled(context.Background(), true); err != nil {
 		t.Fatal(err)
 	}
-	assertStatus(t, r, topology.ReconciliationWaiting, ReconcileReasonStarting)
+	assertStatus(t, r, topology.SchedulingWaiting, ReconcileReasonStarting)
 	tick(t, r)
-	assertStatus(t, r, topology.ReconciliationWaiting, ReconcileReasonStabilityWindow)
+	assertStatus(t, r, topology.SchedulingWaiting, ReconcileReasonStabilityWindow)
 	if h.commits != 0 {
 		t.Fatal("re-enabled worker trusted old observations")
 	}
@@ -282,22 +282,22 @@ func TestDriverLocalKillSwitchResetsStability(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-func TestDriverResumesApprovedExecutionBeforeHealthGate(t *testing.T) {
+func TestDriverResumesApprovedOperatorBeforeHealthGate(t *testing.T) {
 	if testing.Short() {
 		t.Skip("functional test; run make test")
 	}
-	for _, state := range []topology.ExecutionState{topology.ExecutionPending, topology.ExecutionRunning, topology.ExecutionWaitingForCatchUp, topology.ExecutionSucceeded} {
+	for _, state := range []topology.OperatorState{topology.OperatorPending, topology.OperatorRunning, topology.OperatorWaitingForCatchUp, topology.OperatorSucceeded} {
 		t.Run(string(state), func(t *testing.T) {
 			for _, leader := range []bool{true, false} {
 				h := newTestHost(t, 1, 2, 3)
 				h.leader = leader
 				h.health = nil
 				h.stage(topology.OriginOperator, 1)
-				h.mustApply(metaengine.BeginExecutionProposal{Version: 2, Plan: topology.Plan{Version: 2}, At: time.Now().UTC()})
-				h.executionOverride = &topology.ExecutionRecord{Status: topology.ExecutionStatus{ID: "exec-v2-a1", Version: 2, State: state}}
+				h.mustApply(metaengine.BeginOperatorProposal{Version: 2, Plan: topology.Plan{Version: 2}, At: time.Now().UTC()})
+				h.operatorOverride = &topology.Operator{Status: topology.OperatorStatus{ID: "exec-v2-a1", Version: 2, State: state}}
 				r := newTestDriver(t, h, Settings{})
 				tick(t, r)
-				assertStatus(t, r, topology.ReconciliationRunning, ReconcileReasonApprovedExecution)
+				assertStatus(t, r, topology.SchedulingRunning, ReconcileReasonApprovedOperator)
 				want := 0
 				if leader {
 					want = 1
@@ -318,15 +318,15 @@ func TestDriverDoesNotMergeStagedOrFailedOperatorIntent(t *testing.T) {
 			h := newTestHost(t, 1, 2)
 			latest := h.stage(topology.OriginOperator, 1)
 			if failed {
-				h.executionOverride = &topology.ExecutionRecord{Status: topology.ExecutionStatus{ID: "exec-v2-a1", Version: 2, State: topology.ExecutionFailed}}
+				h.operatorOverride = &topology.Operator{Status: topology.OperatorStatus{ID: "exec-v2-a1", Version: 2, State: topology.OperatorFailed}}
 			}
 			r := newTestDriver(t, h, Settings{})
 			tick(t, r)
 			want := ReconcileReasonStagedLatest
 			if failed {
-				want = ReconcileReasonFailedExecution
+				want = ReconcileReasonFailedOperator
 			}
-			assertStatus(t, r, topology.ReconciliationBlocked, want)
+			assertStatus(t, r, topology.SchedulingBlocked, want)
 			if !reflect.DeepEqual(latest, h.machine.Latest()) || h.commits != 0 || h.approvals != 0 {
 				t.Fatal("merged operator intent")
 			}
@@ -347,7 +347,7 @@ func TestDriverCommitsExactLearnerFirstRepair(t *testing.T) {
 	if latest.Origin != topology.OriginReconciler || latest.ParentVersion != 1 || latest.ChangedBy != "auto-repair" || latest.Group("shard0").NextReplicaID != 5 || latest.Group("shard0").Replicas[2].ReplicaID != 4 {
 		t.Fatalf("wrong repair %+v", latest)
 	}
-	ex, _ := h.machine.CurrentExecution()
+	ex, _ := h.machine.CurrentOperator()
 	want := []topology.StepKind{topology.StepPrepareReplica, topology.StepAddLearner, topology.StepWaitCaughtUp, topology.StepPromoteVoter}
 	if len(ex.Plan.Steps) != len(want) {
 		t.Fatal(ex.Plan)
@@ -357,7 +357,7 @@ func TestDriverCommitsExactLearnerFirstRepair(t *testing.T) {
 			t.Fatal(ex.Plan)
 		}
 	}
-	assertStatus(t, r, topology.ReconciliationRunning, ReconcileReasonApprovedExecution)
+	assertStatus(t, r, topology.SchedulingRunning, ReconcileReasonApprovedOperator)
 }
 func TestDriverCASRaceLeavesOperatorVersionStaged(t *testing.T) {
 	if testing.Short() {
@@ -367,7 +367,7 @@ func TestDriverCASRaceLeavesOperatorVersionStaged(t *testing.T) {
 	r := newTestDriver(t, h, Settings{})
 	h.beforeCommit = func() { h.stage(topology.OriginOperator, 1) }
 	tick(t, r)
-	assertStatus(t, r, topology.ReconciliationError, ReconcileReasonCASConflict)
+	assertStatus(t, r, topology.SchedulingError, ReconcileReasonCASConflict)
 	if h.machine.Latest().Origin != topology.OriginOperator || h.machine.Target().Version != 1 || h.machine.Active().Version != 1 || h.commits != 0 || h.wakes != 0 {
 		t.Fatal("repair overwrote operator CAS")
 	}
@@ -386,7 +386,7 @@ func TestDriverRejectsPolicyActionsOutsideAllowList(t *testing.T) {
 	r := newTestDriver(t, h, Settings{})
 	r.policy = &stubPolicy{policy.ScheduleDecision{Action: &policy.ScheduleAction{Kind: "remove_voter", Identity: storage.Identity{GroupID: "shard0", ReplicaID: 3}}}}
 	tick(t, r)
-	assertStatus(t, r, topology.ReconciliationError, ReconcileReasonPolicyRejected)
+	assertStatus(t, r, topology.SchedulingError, ReconcileReasonPolicyRejected)
 	if h.commits != 0 || h.wakes != 0 {
 		t.Fatal("forbidden action")
 	}
@@ -433,7 +433,7 @@ func TestDriverHealsStagedInternal(t *testing.T) {
 	r := newTestDriver(t, h, Settings{})
 	r.lastRun = r.now()
 	tick(t, r)
-	assertStatus(t, r, topology.ReconciliationRunning, ReconcileReasonApprovedExecution)
+	assertStatus(t, r, topology.SchedulingRunning, ReconcileReasonApprovedOperator)
 	if h.approvals != 1 || h.machine.Target().Version != 2 {
 		t.Fatal("internal heal blocked by cooldown")
 	}
@@ -468,9 +468,9 @@ func TestDriverHealRefusals(t *testing.T) {
 			r := newTestDriver(t, h, Settings{})
 			tick(t, r)
 			if mode == "plan-error" {
-				assertStatus(t, r, topology.ReconciliationError, ReconcileReasonStatusUnavailable)
+				assertStatus(t, r, topology.SchedulingError, ReconcileReasonStatusUnavailable)
 			} else {
-				assertStatus(t, r, topology.ReconciliationBlocked, ReconcileReasonStagedLatest)
+				assertStatus(t, r, topology.SchedulingBlocked, ReconcileReasonStagedLatest)
 			}
 			if h.approvals != 0 || h.commits != 0 || r.Status().BlockingVersion == nil || *r.Status().BlockingVersion != 2 {
 				t.Fatal("heal escaped refusal", r.Status())
@@ -490,7 +490,7 @@ func TestReconcileTickIsBoundedAndCancelable(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > time.Second {
 		t.Fatal(err, time.Since(start))
 	}
-	assertStatus(t, r, topology.ReconciliationError, ReconcileReasonStatusUnavailable)
+	assertStatus(t, r, topology.SchedulingError, ReconcileReasonStatusUnavailable)
 	// Stop must cancel a read already inside the automatic worker, rather than
 	// waiting for the configured tick timeout.
 	r = newTestDriver(t, h, Settings{Interval: 100 * time.Millisecond, TickTimeout: 90 * time.Millisecond})
@@ -517,11 +517,11 @@ func TestDriverFollowerResetsStabilityObservations(t *testing.T) {
 				h.stage(topology.OriginOperator, 1)
 			}
 			if mode == "failed" || mode == "approved" {
-				state := topology.ExecutionFailed
+				state := topology.OperatorFailed
 				if mode == "approved" {
-					state = topology.ExecutionPending
+					state = topology.OperatorPending
 				}
-				h.executionOverride = &topology.ExecutionRecord{Status: topology.ExecutionStatus{Version: 2, State: state}}
+				h.operatorOverride = &topology.Operator{Status: topology.OperatorStatus{Version: 2, State: state}}
 			}
 			tick(t, r)
 			if len(r.aliveSince) != 0 || h.healthCalls != 0 || h.commits != 0 {
@@ -530,7 +530,7 @@ func TestDriverFollowerResetsStabilityObservations(t *testing.T) {
 			if mode == "standby" {
 				h.leader = true
 				tick(t, r)
-				assertStatus(t, r, topology.ReconciliationWaiting, ReconcileReasonStabilityWindow)
+				assertStatus(t, r, topology.SchedulingWaiting, ReconcileReasonStabilityWindow)
 			}
 		})
 	}
@@ -543,7 +543,7 @@ func TestDriverStatusGatesAndStableSince(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			h := newTestHost(t, 1, 2)
 			r := newTestDriver(t, h, Settings{})
-			state, reason := topology.ReconciliationIdle, ReconcileReasonConverged
+			state, reason := topology.SchedulingIdle, ReconcileReasonConverged
 			switch mode {
 			case "converged":
 				s := h.status["shard0"]
@@ -551,23 +551,23 @@ func TestDriverStatusGatesAndStableSince(t *testing.T) {
 				h.status["shard0"] = s
 			case "stability":
 				r.resetAlive()
-				state, reason = topology.ReconciliationWaiting, ReconcileReasonStabilityWindow
+				state, reason = topology.SchedulingWaiting, ReconcileReasonStabilityWindow
 			case "quorum":
 				h.health["n1"] = topology.HealthDead
 				h.health["n2"] = topology.HealthDead
-				state, reason = topology.ReconciliationBlocked, ReconcileReasonQuorumLost
+				state, reason = topology.SchedulingBlocked, ReconcileReasonQuorumLost
 			case "cooldown":
 				r.lastRun = r.now()
-				state, reason = topology.ReconciliationWaiting, ReconcileReasonCooldown
+				state, reason = topology.SchedulingWaiting, ReconcileReasonCooldown
 			case "status-error":
 				h.statusErr = fault.ErrUnavailable
-				state, reason = topology.ReconciliationError, ReconcileReasonStatusUnavailable
+				state, reason = topology.SchedulingError, ReconcileReasonStatusUnavailable
 			case "read-error":
 				h.viewErr = fault.ErrUnreadable
-				state, reason = topology.ReconciliationError, ReconcileReasonStatusUnavailable
+				state, reason = topology.SchedulingError, ReconcileReasonStatusUnavailable
 			case "execution-error":
-				h.executionErr = fault.ErrUnreadable
-				state, reason = topology.ReconciliationError, ReconcileReasonStatusUnavailable
+				h.operatorErr = fault.ErrUnreadable
+				state, reason = topology.SchedulingError, ReconcileReasonStatusUnavailable
 			}
 			tick(t, r)
 			assertStatus(t, r, state, reason)
@@ -589,7 +589,7 @@ func TestDriverStatusTransitionsAreOwnedAndLoggedOnce(t *testing.T) {
 	var buf bytes.Buffer
 	r.logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	changes := 0
-	r.onTransition = func(s topology.ReconciliationStatus) {
+	r.onTransition = func(s topology.SchedulingStatus) {
 		changes++
 		if s.BlockingVersion != nil {
 			*s.BlockingVersion = 99
@@ -606,17 +606,17 @@ func TestDriverStatusTransitionsAreOwnedAndLoggedOnce(t *testing.T) {
 	if *r.Status().BlockingVersion != 2 {
 		t.Fatal("status mutation escaped")
 	}
-	h.executionOverride = &topology.ExecutionRecord{Status: topology.ExecutionStatus{ID: "exec-v2-a1", Version: 2, State: topology.ExecutionRunning}}
+	h.operatorOverride = &topology.Operator{Status: topology.OperatorStatus{ID: "exec-v2-a1", Version: 2, State: topology.OperatorRunning}}
 	tick(t, r)
 	if strings.Count(buf.String(), "level=INFO") != 1 {
 		t.Fatal(buf.String())
 	}
 	s = r.Status()
-	*s.CurrentExecutionID = "changed"
-	if *r.Status().CurrentExecutionID != "exec-v2-a1" {
+	*s.CurrentOperatorID = "changed"
+	if *r.Status().CurrentOperatorID != "exec-v2-a1" {
 		t.Fatal("execution alias")
 	}
-	r.transition(topology.ReconciliationStatus{State: topology.ReconciliationRunning, CurrentAction: &topology.ReconciliationActionStatus{ReplicaID: 3}}, "")
+	r.transition(topology.SchedulingStatus{State: topology.SchedulingRunning, CurrentAction: &topology.SchedulingActionStatus{ReplicaID: 3}}, "")
 	s = r.Status()
 	s.CurrentAction.ReplicaID = 99
 	if r.Status().CurrentAction.ReplicaID != 3 {

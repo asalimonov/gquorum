@@ -45,7 +45,7 @@ func TestBaselineProposalAndResultBytes(t *testing.T) {
 	if err := json.Unmarshal(raw, &result); err != nil {
 		t.Fatal(err)
 	}
-	if !result.Accepted || result.ExecutionID != "exec-v1-a1" {
+	if !result.Accepted || result.OperatorID != "exec-v1-a1" {
 		t.Fatalf("lost approval identity: %+v", result)
 	}
 	got, err := json.Marshal(result)
@@ -65,8 +65,8 @@ func TestBaselineSnapshotRestoresCompleteState(t *testing.T) {
 	if latest.Version != 1 || target.Version != 1 || active.Version != 1 || len(active.Nodes) != 3 || active.ClusterID != "compat-cluster" {
 		t.Fatal("lost document state", latest, target, active)
 	}
-	ex, ok := m.CurrentExecution()
-	if !ok || ex.Status.ID != "exec-v1-a1" || ex.Status.State != topology.ExecutionSucceeded {
+	ex, ok := m.CurrentOperator()
+	if !ok || ex.Status.ID != "exec-v1-a1" || ex.Status.State != topology.OperatorSucceeded {
 		t.Fatalf("lost operator: %+v", ex)
 	}
 	a, ok := m.Admission("n1", "process-1")

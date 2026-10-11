@@ -9,27 +9,27 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func admissionExecutionSM(t *testing.T) (*topologySM, AdmissionRecord, topology.Plan, time.Time, uint64) {
+func admissionOperatorSM(t *testing.T) (*topologySM, AdmissionRecord, topology.Plan, time.Time, uint64) {
 	t.Helper()
 	sm := newTopologySM(nil, testRules())
 	at := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 	if res := apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "seed"}); !res.Accepted {
 		t.Fatalf("seed: %s", res.Reason)
 	}
-	founding := apply(t, sm, 2, BeginExecutionProposal{
+	founding := apply(t, sm, 2, BeginOperatorProposal{
 		Version: 1, Plan: topology.Plan{Version: 1}, Actor: "n1", At: at, ProposalID: "founding",
 	})
 	if !founding.Accepted {
 		t.Fatalf("begin founding activation: %s", founding.Reason)
 	}
-	if res := apply(t, sm, 3, TransitionExecutionProposal{Transition: topology.ExecutionTransition{
-		ExecutionID: founding.ExecutionID, Version: 1, Attempt: 1,
-		State: topology.ExecutionSucceeded, At: at.Add(time.Second),
+	if res := apply(t, sm, 3, TransitionOperatorProposal{Transition: topology.OperatorTransition{
+		OperatorID: founding.OperatorID, Version: 1, Attempt: 1,
+		State: topology.OperatorSucceeded, At: at.Add(time.Second),
 	}, ProposalID: "founding-succeeded"}); !res.Accepted {
 		t.Fatalf("complete founding activation: %s", res.Reason)
 	}
 	if res := apply(t, sm, 4, ActivateTargetProposal{
-		ExecutionID: founding.ExecutionID, Version: 1, Attempt: 1, ProposalID: "activate-founding",
+		OperatorID: founding.OperatorID, Version: 1, Attempt: 1, ProposalID: "activate-founding",
 	}); !res.Accepted {
 		t.Fatalf("activate founding: %s", res.Reason)
 	}
@@ -51,7 +51,7 @@ func admissionExecutionSM(t *testing.T) (*topologySM, AdmissionRecord, topology.
 	if err != nil {
 		t.Fatal(err)
 	}
-	started := apply(t, sm, 6, BeginExecutionProposal{
+	started := apply(t, sm, 6, BeginOperatorProposal{
 		Version: target.Version, Plan: plan, Actor: target.ChangedBy, Origin: target.Origin,
 		At: at.Add(2 * time.Second), ProposalID: "begin-target",
 	})
@@ -59,7 +59,7 @@ func admissionExecutionSM(t *testing.T) (*topologySM, AdmissionRecord, topology.
 		t.Fatalf("begin target: %s", started.Reason)
 	}
 	return sm, AdmissionRecord{
-		NodeName: "n2", InstanceID: "instance-n2", MemberID: 2, ExecutionID: started.ExecutionID,
+		NodeName: "n2", InstanceID: "instance-n2", MemberID: 2, OperatorID: started.OperatorID,
 	}, plan, at, 7
 }
 
@@ -67,16 +67,16 @@ func applyAdmissionTransition(
 	t *testing.T,
 	sm *topologySM,
 	index uint64,
-	id topology.ExecutionID,
+	id topology.OperatorID,
 	plan topology.Plan,
 	stepSeq int,
-	state topology.ExecutionState,
+	state topology.OperatorState,
 	at time.Time,
 ) {
 	t.Helper()
 	step := plan.Steps[stepSeq-1]
-	res := apply(t, sm, index, TransitionExecutionProposal{Transition: topology.ExecutionTransition{
-		ExecutionID: id, Version: plan.Version, Attempt: 1, StepSeq: stepSeq,
+	res := apply(t, sm, index, TransitionOperatorProposal{Transition: topology.OperatorTransition{
+		OperatorID: id, Version: plan.Version, Attempt: 1, StepSeq: stepSeq,
 		State: state, GroupID: step.GroupID, NodeName: step.NodeName, At: at,
 	}, ProposalID: fmt.Sprintf("transition-%d-%s", stepSeq, state)})
 	if !res.Accepted {
@@ -95,21 +95,21 @@ func requireAdmissionState(t *testing.T, sm *topologySM, instanceID string, want
 
 func TestAdmission_SameInstanceRetryAcrossPhasesAndSnapshot(t *testing.T) {
 	t.Parallel()
-	sm, admission, plan, at, index := admissionExecutionSM(t)
+	sm, admission, plan, at, index := admissionOperatorSM(t)
 	bind := BindAdmissionProposal{Admission: admission, At: at.Add(3 * time.Second), ProposalID: "bind"}
 	if res := apply(t, sm, index, bind); !res.Accepted || res.Admission.State != AdmissionPending {
 		t.Fatalf("bind = %+v, want pending admission", res)
 	}
 	index++
 	bind.ProposalID = "bind-retry-pending"
-	if res := apply(t, sm, index, bind); !res.Accepted || res.Admission.ExecutionID != admission.ExecutionID {
+	if res := apply(t, sm, index, bind); !res.Accepted || res.Admission.OperatorID != admission.OperatorID {
 		t.Fatalf("pending Join retry = %+v, want same execution", res)
 	}
 	index++
 
 	wrong := apply(t, sm, index, ReadyAdmissionProposal{
 		NodeName: "n2", InstanceID: admission.InstanceID, MemberID: 99,
-		ExecutionID: admission.ExecutionID, ProposalID: "ready-wrong-member",
+		OperatorID: admission.OperatorID, ProposalID: "ready-wrong-member",
 	})
 	if wrong.Accepted {
 		t.Fatal("JoinReady accepted a different member tuple")
@@ -117,7 +117,7 @@ func TestAdmission_SameInstanceRetryAcrossPhasesAndSnapshot(t *testing.T) {
 	index++
 	ready := ReadyAdmissionProposal{
 		NodeName: "n2", InstanceID: admission.InstanceID, MemberID: admission.MemberID,
-		ExecutionID: admission.ExecutionID, ProposalID: "ready",
+		OperatorID: admission.OperatorID, ProposalID: "ready",
 	}
 	if res := apply(t, sm, index, ready); !res.Accepted || res.Admission.State != AdmissionReady {
 		t.Fatalf("JoinReady = %+v, want ready", res)
@@ -150,11 +150,11 @@ func TestAdmission_SameInstanceRetryAcrossPhasesAndSnapshot(t *testing.T) {
 	}
 	sm = restored
 
-	applyAdmissionTransition(t, sm, index, admission.ExecutionID, plan, 1, topology.ExecutionRunning, at.Add(4*time.Second))
+	applyAdmissionTransition(t, sm, index, admission.OperatorID, plan, 1, topology.OperatorRunning, at.Add(4*time.Second))
 	index++
-	applyAdmissionTransition(t, sm, index, admission.ExecutionID, plan, 2, topology.ExecutionRunning, at.Add(5*time.Second))
+	applyAdmissionTransition(t, sm, index, admission.OperatorID, plan, 2, topology.OperatorRunning, at.Add(5*time.Second))
 	index++
-	applyAdmissionTransition(t, sm, index, admission.ExecutionID, plan, 3, topology.ExecutionRunning, at.Add(6*time.Second))
+	applyAdmissionTransition(t, sm, index, admission.OperatorID, plan, 3, topology.OperatorRunning, at.Add(6*time.Second))
 	index++
 	requireAdmissionState(t, sm, admission.InstanceID, AdmissionLearner)
 	bind.ProposalID = "bind-retry-learner"
@@ -168,9 +168,9 @@ func TestAdmission_SameInstanceRetryAcrossPhasesAndSnapshot(t *testing.T) {
 	}
 	index++
 
-	applyAdmissionTransition(t, sm, index, admission.ExecutionID, plan, 4, topology.ExecutionRunning, at.Add(7*time.Second))
+	applyAdmissionTransition(t, sm, index, admission.OperatorID, plan, 4, topology.OperatorRunning, at.Add(7*time.Second))
 	index++
-	applyAdmissionTransition(t, sm, index, admission.ExecutionID, plan, 4, topology.ExecutionSucceeded, at.Add(8*time.Second))
+	applyAdmissionTransition(t, sm, index, admission.OperatorID, plan, 4, topology.OperatorSucceeded, at.Add(8*time.Second))
 	index++
 	requireAdmissionState(t, sm, admission.InstanceID, AdmissionPromoted)
 	bind.ProposalID = "bind-retry-promoted"
@@ -179,7 +179,7 @@ func TestAdmission_SameInstanceRetryAcrossPhasesAndSnapshot(t *testing.T) {
 	}
 	index++
 	if res := apply(t, sm, index, ActivateTargetProposal{
-		ExecutionID: admission.ExecutionID, Version: plan.Version, Attempt: 1, ProposalID: "activate",
+		OperatorID: admission.OperatorID, Version: plan.Version, Attempt: 1, ProposalID: "activate",
 	}); !res.Accepted {
 		t.Fatalf("activate target: %s", res.Reason)
 	}
@@ -198,7 +198,7 @@ func TestAdmission_SameInstanceRetryAcrossPhasesAndSnapshot(t *testing.T) {
 
 func TestAdmission_SupersededInstanceCannotBeResurrected(t *testing.T) {
 	t.Parallel()
-	sm, oldAdmission, plan, at, index := admissionExecutionSM(t)
+	sm, oldAdmission, plan, at, index := admissionOperatorSM(t)
 	if res := apply(t, sm, index, BindAdmissionProposal{
 		Admission: oldAdmission, At: at.Add(3 * time.Second), ProposalID: "bind-old",
 	}); !res.Accepted {
@@ -216,14 +216,14 @@ func TestAdmission_SupersededInstanceCannotBeResurrected(t *testing.T) {
 	requireAdmissionState(t, sm, oldAdmission.InstanceID, AdmissionSuperseded)
 
 	for seq := 1; seq <= len(plan.Steps); seq++ {
-		state := topology.ExecutionRunning
-		applyAdmissionTransition(t, sm, index, oldAdmission.ExecutionID, plan, seq, state, at.Add(time.Duration(4+seq)*time.Second))
+		state := topology.OperatorRunning
+		applyAdmissionTransition(t, sm, index, oldAdmission.OperatorID, plan, seq, state, at.Add(time.Duration(4+seq)*time.Second))
 		index++
 	}
-	applyAdmissionTransition(t, sm, index, oldAdmission.ExecutionID, plan, len(plan.Steps), topology.ExecutionSucceeded, at.Add(10*time.Second))
+	applyAdmissionTransition(t, sm, index, oldAdmission.OperatorID, plan, len(plan.Steps), topology.OperatorSucceeded, at.Add(10*time.Second))
 	index++
 	if res := apply(t, sm, index, ActivateTargetProposal{
-		ExecutionID: oldAdmission.ExecutionID, Version: plan.Version, Attempt: 1, ProposalID: "activate",
+		OperatorID: oldAdmission.OperatorID, Version: plan.Version, Attempt: 1, ProposalID: "activate",
 	}); !res.Accepted {
 		t.Fatalf("activate: %s", res.Reason)
 	}
@@ -231,7 +231,7 @@ func TestAdmission_SupersededInstanceCannotBeResurrected(t *testing.T) {
 	requireAdmissionState(t, sm, newAdmission.InstanceID, AdmissionCompleted)
 	if res := apply(t, sm, index+1, ReadyAdmissionProposal{
 		NodeName: oldAdmission.NodeName, InstanceID: oldAdmission.InstanceID,
-		MemberID: oldAdmission.MemberID, ExecutionID: oldAdmission.ExecutionID, ProposalID: "old-ready",
+		MemberID: oldAdmission.MemberID, OperatorID: oldAdmission.OperatorID, ProposalID: "old-ready",
 	}); res.Accepted {
 		t.Fatal("superseded instance JoinReady was accepted")
 	}
@@ -239,7 +239,7 @@ func TestAdmission_SupersededInstanceCannotBeResurrected(t *testing.T) {
 
 func TestAdmission_DifferentInstanceCannotReusePreparedMemberID(t *testing.T) {
 	t.Parallel()
-	sm, admission, _, at, index := admissionExecutionSM(t)
+	sm, admission, _, at, index := admissionOperatorSM(t)
 	if res := apply(t, sm, index, BindAdmissionProposal{
 		Admission: admission, At: at.Add(3 * time.Second), ProposalID: "bind-old",
 	}); !res.Accepted {
@@ -248,7 +248,7 @@ func TestAdmission_DifferentInstanceCannotReusePreparedMemberID(t *testing.T) {
 	index++
 	if res := apply(t, sm, index, ReadyAdmissionProposal{
 		NodeName: admission.NodeName, InstanceID: admission.InstanceID,
-		MemberID: admission.MemberID, ExecutionID: admission.ExecutionID, ProposalID: "ready-old",
+		MemberID: admission.MemberID, OperatorID: admission.OperatorID, ProposalID: "ready-old",
 	}); !res.Accepted {
 		t.Fatalf("ready old: %s", res.Reason)
 	}
@@ -345,9 +345,9 @@ func assumedReadmissionStatuses(active topology.Document, returningNode string) 
 	return statuses
 }
 
-func TestAdmissionRebindingNeverSelectsSupersededProcessForExecution(t *testing.T) {
+func TestAdmissionRebindingNeverSelectsSupersededProcessForOperator(t *testing.T) {
 	t.Parallel()
-	sm, old, plan, at, index := admissionExecutionSM(t)
+	sm, old, plan, at, index := admissionOperatorSM(t)
 	if r := apply(t, sm, index, BindAdmissionProposal{Admission: old, At: at.Add(3 * time.Second)}); !r.Accepted {
 		t.Fatal(r)
 	}
@@ -358,17 +358,17 @@ func TestAdmissionRebindingNeverSelectsSupersededProcessForExecution(t *testing.
 		t.Fatal(r)
 	}
 	index++
-	if r := apply(t, sm, index, ReadyAdmissionProposal{NodeName: replacement.NodeName, InstanceID: replacement.InstanceID, MemberID: replacement.MemberID, ExecutionID: replacement.ExecutionID}); !r.Accepted {
+	if r := apply(t, sm, index, ReadyAdmissionProposal{NodeName: replacement.NodeName, InstanceID: replacement.InstanceID, MemberID: replacement.MemberID, OperatorID: replacement.OperatorID}); !r.Accepted {
 		t.Fatal(r)
 	}
 	for i := 0; i < 512; i++ {
-		record, ok := sm.admissionForExecution(old.ExecutionID, old.NodeName, old.MemberID)
+		record, ok := sm.admissionForOperator(old.OperatorID, old.NodeName, old.MemberID)
 		if !ok || record.InstanceID != replacement.InstanceID {
 			t.Fatal("superseded process selected", record)
 		}
 	}
 	sm.mu.Lock()
-	changed := sm.updateAdmissionForCompletedStepLocked(sm.executions[old.ExecutionID], plan.Steps[1])
+	changed := sm.updateAdmissionForCompletedStepLocked(sm.operators[old.OperatorID], plan.Steps[1])
 	sm.mu.Unlock()
 	if !changed {
 		t.Fatal("replacement admission did not advance")
@@ -383,7 +383,7 @@ func TestAdmissionRebindingNeverSelectsSupersededProcessForExecution(t *testing.
 	if err = restored.Restore(snapshot); err != nil {
 		t.Fatal(err)
 	}
-	record, ok := restored.admissionForExecution(old.ExecutionID, old.NodeName, old.MemberID)
+	record, ok := restored.admissionForOperator(old.OperatorID, old.NodeName, old.MemberID)
 	if !ok || record.InstanceID != replacement.InstanceID {
 		t.Fatal("restored lookup chose superseded process", record)
 	}

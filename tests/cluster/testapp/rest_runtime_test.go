@@ -65,7 +65,7 @@ func newRESTCluster(t *testing.T) *restCluster {
 	})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	for i, p := range c.peers {
-		cfg := config{NodeName: p.Name, NodeType: p.Type, ClusterID: t.Name(), InstanceID: fmt.Sprintf("process-%d", i), DataDir: filepath.Join(t.TempDir(), p.Name), Credential: "example-test", Peers: c.peers, Limits: (topology.Limits{}).WithDefaults(), SessionTTL: 3 * time.Second, TickInterval: 50 * time.Millisecond, SnapshotThreshold: 8, Bootstrap: true, Reconciliation: metaservice.ReconciliationOptions{Disabled: true}}
+		cfg := config{NodeName: p.Name, NodeType: p.Type, ClusterID: t.Name(), InstanceID: fmt.Sprintf("process-%d", i), DataDir: filepath.Join(t.TempDir(), p.Name), Credential: "example-test", Peers: c.peers, Limits: (topology.Limits{}).WithDefaults(), SessionTTL: 3 * time.Second, TickInterval: 50 * time.Millisecond, SnapshotThreshold: 8, Bootstrap: true, Scheduling: metaservice.SchedulingOptions{Disabled: true}}
 		app, err := newApplication(cfg, logger, &all[i])
 		if err != nil {
 			t.Fatal(err)
@@ -167,7 +167,7 @@ func (c *restCluster) mutate(t *testing.T, path, method string, body any) metase
 	if err := json.Unmarshal(data, &result); err != nil {
 		t.Fatal(err)
 	}
-	c.waitExecution(t, result.ExecutionID)
+	c.waitOperator(t, result.OperatorID)
 	c.wait(t, "active document on all nodes", 5*time.Second, func() bool {
 		for i := range c.apps {
 			if c.document(t, i, "active").Version != result.Document.Version {
@@ -178,21 +178,21 @@ func (c *restCluster) mutate(t *testing.T, path, method string, body any) metase
 	})
 	return result
 }
-func (c *restCluster) waitExecution(t *testing.T, id topology.ExecutionID) {
+func (c *restCluster) waitOperator(t *testing.T, id topology.OperatorID) {
 	t.Helper()
 	c.wait(t, "execution "+string(id), 25*time.Second, func() bool {
 		code, data := c.request(t, 0, "GET", "/api/executions/"+string(id), nil, 0)
 		if code != 200 {
 			return false
 		}
-		var status topology.ExecutionStatus
+		var status topology.OperatorStatus
 		if err := json.Unmarshal(data, &status); err != nil {
 			t.Fatal(err)
 		}
-		if status.State.Terminal() && status.State != topology.ExecutionSucceeded {
+		if status.State.Terminal() && status.State != topology.OperatorSucceeded {
 			t.Fatalf("failed execution: %s", data)
 		}
-		return status.State == topology.ExecutionSucceeded
+		return status.State == topology.OperatorSucceeded
 	})
 }
 func TestFixtureRESTDrainActivateAndRetirement(t *testing.T) {
@@ -297,12 +297,12 @@ func TestFixtureRESTDrainActivateAndRetirement(t *testing.T) {
 		t.Fatal("apply restored document", code, string(data))
 	}
 	var apply struct {
-		ID topology.ExecutionID `json:"execution_id"`
+		ID topology.OperatorID `json:"operator_id"`
 	}
 	if err := json.Unmarshal(data, &apply); err != nil {
 		t.Fatal(err)
 	}
-	c.waitExecution(t, apply.ID)
+	c.waitOperator(t, apply.ID)
 	c.wait(t, "restored approved document on all nodes", 5*time.Second, func() bool {
 		for i := range c.apps {
 			if c.document(t, i, "active").Version != restored.Document.Version {
@@ -454,7 +454,7 @@ func TestFixtureRESTExcludeAndReadmitRetainedNode(t *testing.T) {
 	if err := json.Unmarshal(data, &excluded); err != nil {
 		t.Fatal(err)
 	}
-	c.waitExecution(t, excluded.ExecutionID)
+	c.waitOperator(t, excluded.OperatorID)
 	c.wait(t, "excluded process joined shutdown", 10*time.Second, func() bool {
 		select {
 		case <-old.closed:
@@ -494,7 +494,7 @@ func TestFixtureRESTExcludeAndReadmitRetainedNode(t *testing.T) {
 	if err := replacement.Start(c.ctx); err != nil {
 		t.Fatal(err)
 	}
-	c.waitExecution(t, added.ExecutionID)
+	c.waitOperator(t, added.OperatorID)
 	c.wait(t, "readmitted serving with recovered data", 15*time.Second, func() bool {
 		code, data := c.request(t, 2, "GET", "/api/load/demo/keys/readmit", nil, 0)
 		return code == 200 && bytes.Contains(data, []byte(`"value":"value-19"`))

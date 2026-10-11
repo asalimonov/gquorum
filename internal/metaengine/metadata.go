@@ -92,9 +92,9 @@ func (sm *topologySM) validateDocument(d topology.Document) error {
 	}
 	return nil
 }
-func executionFromView(v topology.ExecutionRecord) executionRecord {
+func operatorFromView(v topology.Operator) operatorRecord {
 	s := v.Status
-	return executionRecord{ID: s.ID, Version: s.Version, Attempt: s.Attempt, State: s.State, Steps: append([]topology.Step(nil), v.Plan.Steps...), CurrentStep: s.CurrentStep, GroupID: s.GroupID, NodeName: s.NodeName, WaitingReason: s.WaitingReason, Error: s.Error, Origin: v.Origin, Actor: v.Actor, StartedAt: v.StartedAt, UpdatedAt: v.UpdatedAt}
+	return operatorRecord{ID: s.ID, Version: s.Version, Attempt: s.Attempt, State: s.State, Steps: append([]topology.Step(nil), v.Plan.Steps...), CurrentStep: s.CurrentStep, GroupID: s.GroupID, NodeName: s.NodeName, WaitingReason: s.WaitingReason, Error: s.Error, Origin: v.Origin, Actor: v.Actor, StartedAt: v.StartedAt, UpdatedAt: v.UpdatedAt}
 }
 func validateRestoredState(st smState, rules topology.Rules) error {
 	if st.SchemaVersion != 1 {
@@ -151,19 +151,19 @@ func validateRestoredState(st smState, rules topology.Rules) error {
 			}
 		}
 	}
-	seen := make(map[topology.ExecutionID]bool)
-	for _, v := range st.Executions {
-		r := executionFromView(v)
-		if r.Version == 0 || r.Version > st.Latest.Version || r.Attempt == 0 || r.ID != topology.MakeExecutionID(r.Version, r.Attempt) || seen[r.ID] || v.Plan.Version != r.Version || validateExactPlan(v.Plan) != nil || r.CurrentStep < 0 || r.CurrentStep > len(r.Steps) || !r.State.Valid() || v.Status.TotalSteps != len(r.Steps) || r.StartedAt.IsZero() || r.UpdatedAt.Before(r.StartedAt) {
+	seen := make(map[topology.OperatorID]bool)
+	for _, v := range st.Operators {
+		r := operatorFromView(v)
+		if r.Version == 0 || r.Version > st.Latest.Version || r.Attempt == 0 || r.ID != topology.MakeOperatorID(r.Version, r.Attempt) || seen[r.ID] || v.Plan.Version != r.Version || validateExactPlan(v.Plan) != nil || r.CurrentStep < 0 || r.CurrentStep > len(r.Steps) || !r.State.Valid() || v.Status.TotalSteps != len(r.Steps) || r.StartedAt.IsZero() || r.UpdatedAt.Before(r.StartedAt) {
 			return fault.New(fault.Unreadable, "invalid execution record", nil)
 		}
-		if r.State == topology.ExecutionPending {
+		if r.State == topology.OperatorPending {
 			if r.CurrentStep != 0 || r.GroupID != "" || r.NodeName != "" || r.Error != "" || r.WaitingReason != "" {
 				return fault.New(fault.Unreadable, "pending execution has progress", nil)
 			}
-		} else if err := validateTransition(r, topology.ExecutionTransition{State: r.State, StepSeq: r.CurrentStep, GroupID: r.GroupID, NodeName: r.NodeName, Error: r.Error, WaitingReason: r.WaitingReason}); err != nil {
+		} else if err := validateTransition(r, topology.OperatorTransition{State: r.State, StepSeq: r.CurrentStep, GroupID: r.GroupID, NodeName: r.NodeName, Error: r.Error, WaitingReason: r.WaitingReason}); err != nil {
 			// Supersession before the first effect is a valid approval boundary.
-			if r.State != topology.ExecutionSuperseded || r.CurrentStep != 0 || r.GroupID != "" || r.NodeName != "" || r.Error != "" || r.WaitingReason != "" {
+			if r.State != topology.OperatorSuperseded || r.CurrentStep != 0 || r.GroupID != "" || r.NodeName != "" || r.Error != "" || r.WaitingReason != "" {
 				return fault.New(fault.Unreadable, "invalid restored execution progress", err)
 			}
 		}
@@ -195,7 +195,7 @@ func validateRestoredState(st smState, rules topology.Rules) error {
 			return fault.New(fault.Unreadable, "unknown admission state", nil)
 		}
 		if !a.State.terminal() {
-			if !seen[a.ExecutionID] || liveAdmissions[a.NodeName] {
+			if !seen[a.OperatorID] || liveAdmissions[a.NodeName] {
 				return fault.New(fault.Unreadable, "invalid live admission execution", nil)
 			}
 			liveAdmissions[a.NodeName] = true

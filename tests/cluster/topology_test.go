@@ -50,7 +50,7 @@ func TestStagedTopologyDoesNotChangeApprovedMembershipOrStartGroups(t *testing.T
 		}
 		for _, node := range c.Nodes() {
 			status, err := c.Status(ctx, node.Spec.Name)
-			if err != nil || status.LatestVersion != latestVersion || status.TargetVersion != base.Version || status.ActiveVersion != base.Version || status.Execution == nil || status.Execution.ID != created.ExecutionID || status.Execution.State != topology.ExecutionSucceeded {
+			if err != nil || status.LatestVersion != latestVersion || status.TargetVersion != base.Version || status.ActiveVersion != base.Version || status.Operator == nil || status.Operator.ID != created.OperatorID || status.Operator.State != topology.OperatorSucceeded {
 				t.Fatal("staging changed an approved view or started an execution", node.Spec.Name, status, err)
 			}
 			for _, view := range []string{"target", "active"} {
@@ -134,8 +134,8 @@ func TestStagedReplicaRepairRequiresExplicitApplySevenNodes(t *testing.T) { stag
 func stagedReplicaRepair(t *testing.T, size int) {
 	t.Helper()
 	spec := matrixSpec(size)
-	spec.Reconciliation = true
-	spec.ReconciliationInterval, spec.ReconciliationTimeout = 200*time.Millisecond, 150*time.Millisecond
+	spec.Scheduling = true
+	spec.SchedulingInterval, spec.SchedulingTimeout = 200*time.Millisecond, 150*time.Millisecond
 	ctx, c := performanceClusterSpec(t, spec)
 	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
@@ -183,8 +183,8 @@ func stagedReplicaRepair(t *testing.T, size int) {
 			if err != nil || status.LatestVersion != staged.Document.Version || status.TargetVersion != created.Document.Version || status.ActiveVersion != created.Document.Version {
 				t.Fatal("reconciler overwrote unapproved operator intent", node.Spec.Name, status, err)
 			}
-			r := status.Reconciliation
-			blocked = blocked || r.Enabled && r.IsLeader && r.State == topology.ReconciliationBlocked && r.Reason == "staged_latest"
+			r := status.Scheduling
+			blocked = blocked || r.Enabled && r.IsLeader && r.State == topology.SchedulingBlocked && r.Reason == "staged_latest"
 		}
 		local, err := c.Local(ctx, "node3", "work")
 		if err != nil || local.ReplicaID != oldID || !slices.Contains(local.Status.ConfState.Voters, oldID) || !maps.Equal(local.Values, expected) {

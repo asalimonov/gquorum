@@ -126,16 +126,16 @@ func TestComposeExampleTopologyDrainActivate(t *testing.T) {
 		var mutation metaservice.MutationResult
 		request("node2", "POST", "/api/nodes/node3/"+action, map[string]any{"actor": "demo-test", "apply": true}, latest.Version, 202, &mutation)
 		for {
-			var execution topology.ExecutionStatus
-			status := request("node1", "GET", "/api/executions/"+string(mutation.ExecutionID), nil, 0, 0, &execution)
+			var operator topology.OperatorStatus
+			status := request("node1", "GET", "/api/executions/"+string(mutation.OperatorID), nil, 0, 0, &operator)
 			if status != 200 && status != 404 {
 				t.Fatalf("execution observation returned HTTP %d", status)
 			}
-			if execution.State == topology.ExecutionSucceeded {
+			if operator.State == topology.OperatorSucceeded {
 				break
 			}
-			if execution.State.Terminal() {
-				t.Fatalf("execution failed: %+v", execution)
+			if operator.State.Terminal() {
+				t.Fatalf("execution failed: %+v", operator)
 			}
 			select {
 			case <-ctx.Done():

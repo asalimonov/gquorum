@@ -8,7 +8,7 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func (sm *topologySM) applyBeginExecution(p BeginExecutionProposal) (ApplyResult, bool) {
+func (sm *topologySM) applyBeginOperator(p BeginOperatorProposal) (ApplyResult, bool) {
 	if p.Version != sm.latest.Version {
 		return rejectProposal(p.ProposalID, proposalSuperseded,
 			"version %d is not Latest %d", p.Version, sm.latest.Version), false
@@ -35,13 +35,13 @@ func (sm *topologySM) applyBeginExecution(p BeginExecutionProposal) (ApplyResult
 	previous, found := sm.latestAttemptLocked(p.Version)
 	if found {
 		switch {
-		case !previous.State.Terminal(), previous.State == topology.ExecutionSucceeded:
+		case !previous.State.Terminal(), previous.State == topology.OperatorSucceeded:
 			if exactStepsEqual(previous.Steps, p.Plan.Steps) {
-				return ApplyResult{ProposalID: p.ProposalID, Accepted: true, ExecutionID: previous.ID}, false
+				return ApplyResult{ProposalID: p.ProposalID, Accepted: true, OperatorID: previous.ID}, false
 			}
 			return rejectProposal(p.ProposalID, proposalAuthorization,
 				"version %d already has a different exact plan", p.Version), false
-		case previous.State == topology.ExecutionSuperseded:
+		case previous.State == topology.OperatorSuperseded:
 			return rejectProposal(p.ProposalID, proposalSuperseded,
 				"execution %q is superseded", previous.ID), false
 		}
@@ -57,12 +57,12 @@ func (sm *topologySM) applyBeginExecution(p BeginExecutionProposal) (ApplyResult
 	sm.supersedeOlderLocked(p.Version, p.At)
 	sm.retireRemovedGroups(sm.latest)
 	sm.target = sm.latest.Clone()
-	rec := newExecutionRecord(p.Version, attempt, p.Plan.Steps, p.Actor, p.Origin, p.At)
-	sm.executions[rec.ID] = &rec
-	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, ExecutionID: rec.ID}, true
+	rec := newOperatorRecord(p.Version, attempt, p.Plan.Steps, p.Actor, p.Origin, p.At)
+	sm.operators[rec.ID] = &rec
+	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, OperatorID: rec.ID}, true
 }
 
-func (sm *topologySM) applyCommitRepairExecution(p CommitRepairExecutionProposal) (ApplyResult, bool) {
+func (sm *topologySM) applyCommitRepairOperator(p CommitRepairOperatorProposal) (ApplyResult, bool) {
 	if p.ExpectedVersion != sm.latest.Version {
 		return rejectProposal(p.ProposalID, proposalVersionConflict,
 			"expected Latest %d, current Latest %d", p.ExpectedVersion, sm.latest.Version), false
@@ -71,7 +71,7 @@ func (sm *topologySM) applyCommitRepairExecution(p CommitRepairExecutionProposal
 		return rejectProposal(p.ProposalID, proposalAuthorization,
 			"automatic repair requires Latest, Target, and Active to match"), false
 	}
-	if sm.hasNonterminalExecutionLocked() {
+	if sm.hasNonterminalOperatorLocked() {
 		return rejectProposal(p.ProposalID, proposalAuthorization,
 			"automatic repair requires no nonterminal execution"), false
 	}
@@ -108,25 +108,25 @@ func (sm *topologySM) applyCommitRepairExecution(p CommitRepairExecutionProposal
 	sm.commitLatestLocked(&doc)
 	sm.retireRemovedGroups(doc)
 	sm.target = doc.Clone()
-	rec := newExecutionRecord(doc.Version, 1, p.Plan.Steps, doc.ChangedBy, doc.Origin, p.At)
-	sm.executions[rec.ID] = &rec
+	rec := newOperatorRecord(doc.Version, 1, p.Plan.Steps, doc.ChangedBy, doc.Origin, p.At)
+	sm.operators[rec.ID] = &rec
 	return ApplyResult{
-		ProposalID:  p.ProposalID,
-		Accepted:    true,
-		Doc:         doc.Clone(),
-		ExecutionID: rec.ID,
+		ProposalID: p.ProposalID,
+		Accepted:   true,
+		Doc:        doc.Clone(),
+		OperatorID: rec.ID,
 	}, true
 }
 
-func (sm *topologySM) applyTransitionExecution(p TransitionExecutionProposal) (ApplyResult, bool) {
+func (sm *topologySM) applyTransitionOperator(p TransitionOperatorProposal) (ApplyResult, bool) {
 	t := p.Transition
-	ex, ok := sm.executions[t.ExecutionID]
+	ex, ok := sm.operators[t.OperatorID]
 	if !ok {
 		return rejectProposal(p.ProposalID, proposalAuthorization,
-			"execution %q does not exist", t.ExecutionID), false
+			"execution %q does not exist", t.OperatorID), false
 	}
 	if t.Version != ex.Version || t.Attempt != ex.Attempt ||
-		t.ExecutionID != topology.MakeExecutionID(t.Version, t.Attempt) {
+		t.OperatorID != topology.MakeOperatorID(t.Version, t.Attempt) {
 		return rejectProposal(p.ProposalID, proposalAuthorization,
 			"transition identity does not match execution %q", ex.ID), false
 	}
@@ -136,10 +136,10 @@ func (sm *topologySM) applyTransitionExecution(p TransitionExecutionProposal) (A
 	}
 	if ex.State.Terminal() {
 		if transitionMatchesRecord(t, *ex) {
-			return ApplyResult{ProposalID: p.ProposalID, Accepted: true, ExecutionID: ex.ID}, false
+			return ApplyResult{ProposalID: p.ProposalID, Accepted: true, OperatorID: ex.ID}, false
 		}
 		code := proposalAuthorization
-		if ex.State == topology.ExecutionSuperseded {
+		if ex.State == topology.OperatorSuperseded {
 			code = proposalSuperseded
 		}
 		return rejectProposal(p.ProposalID, code,
@@ -148,14 +148,14 @@ func (sm *topologySM) applyTransitionExecution(p TransitionExecutionProposal) (A
 	if err := validateTransition(*ex, t); err != nil {
 		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
 	}
-	if t.State == topology.ExecutionSuperseded {
+	if t.State == topology.OperatorSuperseded {
 		for _, admission := range sm.admissions {
-			if admission.ExecutionID == ex.ID && !admission.State.terminal() {
+			if admission.OperatorID == ex.ID && !admission.State.terminal() {
 				admission.State = AdmissionSuperseded
 			}
 		}
 	} else if ex.CurrentStep > 0 && ex.CurrentStep <= len(ex.Steps) &&
-		(t.StepSeq > ex.CurrentStep || t.State == topology.ExecutionSucceeded) {
+		(t.StepSeq > ex.CurrentStep || t.State == topology.OperatorSucceeded) {
 		sm.updateAdmissionForCompletedStepLocked(ex, ex.Steps[ex.CurrentStep-1])
 	}
 
@@ -166,16 +166,16 @@ func (sm *topologySM) applyTransitionExecution(p TransitionExecutionProposal) (A
 	ex.WaitingReason = t.WaitingReason
 	ex.Error = t.Error
 	ex.UpdatedAt = t.At
-	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, ExecutionID: ex.ID}, true
+	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, OperatorID: ex.ID}, true
 }
 
 func (sm *topologySM) applyActivateTarget(p ActivateTargetProposal) (ApplyResult, bool) {
-	ex, ok := sm.executions[p.ExecutionID]
+	ex, ok := sm.operators[p.OperatorID]
 	if !ok || ex.Version != p.Version || ex.Attempt != p.Attempt {
 		return rejectProposal(p.ProposalID, proposalAuthorization,
 			"activation does not identify an exact execution"), false
 	}
-	if ex.State != topology.ExecutionSucceeded {
+	if ex.State != topology.OperatorSucceeded {
 		return rejectProposal(p.ProposalID, proposalAuthorization,
 			"execution %q has not succeeded", ex.ID), false
 	}
@@ -188,8 +188,8 @@ func (sm *topologySM) applyActivateTarget(p ActivateTargetProposal) (ApplyResult
 		sm.active = sm.target.Clone()
 		changed = true
 	}
-	sm.pruneExecutionsLocked()
-	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, ExecutionID: ex.ID}, changed
+	sm.pruneOperatorsLocked()
+	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, OperatorID: ex.ID}, changed
 }
 
 func validateExactPlan(plan topology.Plan) error {
@@ -234,8 +234,8 @@ func validStepKind(kind topology.StepKind) bool {
 	}
 }
 
-func validateTransition(ex executionRecord, t topology.ExecutionTransition) error {
-	if !t.State.Valid() || t.State == topology.ExecutionPending {
+func validateTransition(ex operatorRecord, t topology.OperatorTransition) error {
+	if !t.State.Valid() || t.State == topology.OperatorPending {
 		return fmt.Errorf("invalid requested execution state %q", t.State)
 	}
 	if t.StepSeq < ex.CurrentStep || t.StepSeq > ex.CurrentStep+1 {
@@ -262,14 +262,14 @@ func validateTransition(ex executionRecord, t topology.ExecutionTransition) erro
 	} else if t.WaitingReason != "" {
 		return fmt.Errorf("non-waiting transition carries a waiting reason")
 	}
-	if t.State == topology.ExecutionFailed {
+	if t.State == topology.OperatorFailed {
 		if t.Error == "" {
 			return fmt.Errorf("failed transition requires an error")
 		}
 	} else if t.Error != "" {
 		return fmt.Errorf("non-failed transition carries an error")
 	}
-	if t.State == topology.ExecutionSucceeded && t.StepSeq != len(ex.Steps) {
+	if t.State == topology.OperatorSucceeded && t.StepSeq != len(ex.Steps) {
 		return fmt.Errorf("success at step %d before exact plan length %d", t.StepSeq, len(ex.Steps))
 	}
 	return nil
@@ -409,18 +409,18 @@ func documentReplica(doc topology.Document, groupID string, replicaID uint64) *t
 	return nil
 }
 
-func newExecutionRecord(version uint64, attempt uint32, steps []topology.Step, actor string, origin topology.Origin, at time.Time) executionRecord {
-	id := topology.MakeExecutionID(version, attempt)
-	return executionRecord{
-		ID: id, Version: version, Attempt: attempt, State: topology.ExecutionPending,
+func newOperatorRecord(version uint64, attempt uint32, steps []topology.Step, actor string, origin topology.Origin, at time.Time) operatorRecord {
+	id := topology.MakeOperatorID(version, attempt)
+	return operatorRecord{
+		ID: id, Version: version, Attempt: attempt, State: topology.OperatorPending,
 		Steps: append([]topology.Step(nil), steps...), Actor: actor, Origin: origin,
 		StartedAt: at, UpdatedAt: at,
 	}
 }
 
-func (sm *topologySM) latestAttemptLocked(version uint64) (*executionRecord, bool) {
-	var latest *executionRecord
-	for _, ex := range sm.executions {
+func (sm *topologySM) latestAttemptLocked(version uint64) (*operatorRecord, bool) {
+	var latest *operatorRecord
+	for _, ex := range sm.operators {
 		if ex.Version == version && (latest == nil || ex.Attempt > latest.Attempt) {
 			latest = ex
 		}
@@ -429,14 +429,14 @@ func (sm *topologySM) latestAttemptLocked(version uint64) (*executionRecord, boo
 }
 
 func (sm *topologySM) supersedeOlderLocked(version uint64, at time.Time) {
-	for _, ex := range sm.executions {
+	for _, ex := range sm.operators {
 		if ex.Version < version && !ex.State.Terminal() {
-			ex.State = topology.ExecutionSuperseded
+			ex.State = topology.OperatorSuperseded
 			ex.WaitingReason = ""
 			ex.Error = ""
 			ex.UpdatedAt = at
 			for _, admission := range sm.admissions {
-				if admission.ExecutionID == ex.ID && !admission.State.terminal() {
+				if admission.OperatorID == ex.ID && !admission.State.terminal() {
 					admission.State = AdmissionSuperseded
 				}
 			}
@@ -444,8 +444,8 @@ func (sm *topologySM) supersedeOlderLocked(version uint64, at time.Time) {
 	}
 }
 
-func (sm *topologySM) hasNonterminalExecutionLocked() bool {
-	for _, ex := range sm.executions {
+func (sm *topologySM) hasNonterminalOperatorLocked() bool {
+	for _, ex := range sm.operators {
 		if !ex.State.Terminal() {
 			return true
 		}
@@ -453,18 +453,18 @@ func (sm *topologySM) hasNonterminalExecutionLocked() bool {
 	return false
 }
 
-func cloneExecutionRecord(in executionRecord) executionRecord {
+func cloneOperatorRecord(in operatorRecord) operatorRecord {
 	out := in
 	out.Steps = append([]topology.Step(nil), in.Steps...)
 	return out
 }
 
-func executionRecordView(in executionRecord) topology.ExecutionRecord {
-	return topology.ExecutionRecord{Status: executionStatus(in), Plan: topology.Plan{Version: in.Version, Steps: append([]topology.Step(nil), in.Steps...)}, Origin: in.Origin, Actor: in.Actor, StartedAt: in.StartedAt, UpdatedAt: in.UpdatedAt}
+func operatorRecordView(in operatorRecord) topology.Operator {
+	return topology.Operator{Status: operatorStatus(in), Plan: topology.Plan{Version: in.Version, Steps: append([]topology.Step(nil), in.Steps...)}, Origin: in.Origin, Actor: in.Actor, StartedAt: in.StartedAt, UpdatedAt: in.UpdatedAt}
 }
 
-func executionStatus(in executionRecord) topology.ExecutionStatus {
-	return topology.ExecutionStatus{
+func operatorStatus(in operatorRecord) topology.OperatorStatus {
+	return topology.OperatorStatus{
 		ID: in.ID, Version: in.Version, Attempt: in.Attempt, State: in.State,
 		CurrentStep: in.CurrentStep, TotalSteps: len(in.Steps),
 		GroupID: in.GroupID, NodeName: in.NodeName, WaitingReason: in.WaitingReason, Error: in.Error,
@@ -483,8 +483,8 @@ func exactStepsEqual(a, b []topology.Step) bool {
 	return true
 }
 
-func transitionMatchesRecord(t topology.ExecutionTransition, ex executionRecord) bool {
-	return t.ExecutionID == ex.ID && t.Version == ex.Version && t.Attempt == ex.Attempt &&
+func transitionMatchesRecord(t topology.OperatorTransition, ex operatorRecord) bool {
+	return t.OperatorID == ex.ID && t.Version == ex.Version && t.Attempt == ex.Attempt &&
 		t.StepSeq == ex.CurrentStep && t.State == ex.State && t.GroupID == ex.GroupID &&
 		t.NodeName == ex.NodeName && t.WaitingReason == ex.WaitingReason && t.Error == ex.Error
 }

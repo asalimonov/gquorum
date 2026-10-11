@@ -90,11 +90,11 @@ func (g *Group) finishQuiesce() {
 	if g.observer != nil {
 		_ = g.observer.Stop(context.Background())
 	}
-	if g.reconciler != nil {
-		_ = g.reconciler.Stop(context.Background())
+	if g.scheduler != nil {
+		_ = g.scheduler.Stop(context.Background())
 	}
-	if g.convergence != nil {
-		g.convergence.Stop()
+	if g.controller != nil {
+		g.controller.Stop()
 	}
 	g.effectWG.Wait()
 	g.wg.Wait()

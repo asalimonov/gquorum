@@ -33,20 +33,20 @@ type NodeSpec struct {
 	Type topology.NodeType
 }
 type Spec struct {
-	Nodes                                         []NodeSpec
-	Limits                                        topology.Limits
-	Bootstrap                                     bool
-	Deferred                                      []string
-	SkipReady                                     bool
-	AddressFree                                   bool
-	PublishMeta                                   bool
-	GateFounders                                  bool
-	FoundingTimeout                               time.Duration
-	SessionTTL, Tick                              time.Duration
-	WALWriteWait                                  time.Duration
-	SnapshotThreshold                             uint64
-	Reconciliation                                bool
-	ReconciliationInterval, ReconciliationTimeout time.Duration
+	Nodes                                 []NodeSpec
+	Limits                                topology.Limits
+	Bootstrap                             bool
+	Deferred                              []string
+	SkipReady                             bool
+	AddressFree                           bool
+	PublishMeta                           bool
+	GateFounders                          bool
+	FoundingTimeout                       time.Duration
+	SessionTTL, Tick                      time.Duration
+	WALWriteWait                          time.Duration
+	SnapshotThreshold                     uint64
+	Scheduling                            bool
+	SchedulingInterval, SchedulingTimeout time.Duration
 }
 
 func (s Spec) normalized() Spec {
@@ -96,7 +96,7 @@ func (s Spec) validate() error {
 	if s.WALWriteWait < 0 || s.WALWriteWait > 10*time.Millisecond {
 		return errors.New("invalid load WAL coalescing wait")
 	}
-	return (metaservice.ReconciliationOptions{Interval: s.ReconciliationInterval, TickTimeout: s.ReconciliationTimeout}).Validate()
+	return (metaservice.SchedulingOptions{Interval: s.SchedulingInterval, TickTimeout: s.SchedulingTimeout}).Validate()
 }
 func randomID() (string, error) {
 	var value [12]byte
@@ -333,7 +333,7 @@ func (c *Cluster) createNodeContainer(ctx context.Context, node *Node, image str
 	request := testcontainers.ContainerRequest{
 		Image: image, Name: volumeName, ExposedPorts: ports, Networks: []string{c.Network}, NetworkAliases: map[string][]string{c.Network: {spec.Name}}, Labels: maps.Clone(c.labels), Mounts: testcontainers.Mounts(testcontainers.VolumeMount(node.Volume, "/data")),
 		Env:            map[string]string{"GQUORUM_NODE": claim, "GQUORUM_TYPE": string(spec.Type), "GQUORUM_CLUSTER": c.ID, "GQUORUM_CREDENTIAL": c.Credential, "GQUORUM_DATA": "/data", "GQUORUM_PEERS": string(manifest), "GQUORUM_META_ADDRESS": spec.Name + ":9000", "GQUORUM_LOAD_ADDRESS": spec.Name + ":9001", "GQUORUM_HTTP_ADDRESS": spec.Name + ":8080"},
-		Cmd:            []string{"-gate-founders=" + strconv.FormatBool(c.Spec.GateFounders), "-founding-timeout=" + c.Spec.FoundingTimeout.String(), "-address-free=" + strconv.FormatBool(c.Spec.AddressFree), "-bootstrap=" + strconv.FormatBool(c.Spec.Bootstrap), "-join=" + strconv.FormatBool(join), "-max-nodes=" + strconv.Itoa(c.Spec.Limits.MaxNodes), "-max-replicas=" + strconv.Itoa(c.Spec.Limits.MaxReplicas), "-session-ttl=" + c.Spec.SessionTTL.String(), "-tick=" + c.Spec.Tick.String(), "-snapshot-threshold=" + strconv.FormatUint(c.Spec.SnapshotThreshold, 10), "-wal-write-wait=" + c.Spec.WALWriteWait.String(), "-disable-reconciliation=" + strconv.FormatBool(!c.Spec.Reconciliation), "-reconciliation-interval=" + c.Spec.ReconciliationInterval.String(), "-reconciliation-timeout=" + c.Spec.ReconciliationTimeout.String()},
+		Cmd:            []string{"-gate-founders=" + strconv.FormatBool(c.Spec.GateFounders), "-founding-timeout=" + c.Spec.FoundingTimeout.String(), "-address-free=" + strconv.FormatBool(c.Spec.AddressFree), "-bootstrap=" + strconv.FormatBool(c.Spec.Bootstrap), "-join=" + strconv.FormatBool(join), "-max-nodes=" + strconv.Itoa(c.Spec.Limits.MaxNodes), "-max-replicas=" + strconv.Itoa(c.Spec.Limits.MaxReplicas), "-session-ttl=" + c.Spec.SessionTTL.String(), "-tick=" + c.Spec.Tick.String(), "-snapshot-threshold=" + strconv.FormatUint(c.Spec.SnapshotThreshold, 10), "-wal-write-wait=" + c.Spec.WALWriteWait.String(), "-disable-reconciliation=" + strconv.FormatBool(!c.Spec.Scheduling), "-reconciliation-interval=" + c.Spec.SchedulingInterval.String(), "-reconciliation-timeout=" + c.Spec.SchedulingTimeout.String()},
 		WaitingFor:     wait.ForListeningPort("8080/tcp").SkipInternalCheck().WithStartupTimeout(20 * time.Second),
 		ConfigModifier: func(config *containerapi.Config) { config.Hostname = spec.Name },
 	}

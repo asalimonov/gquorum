@@ -23,11 +23,11 @@ const (
 )
 
 type AdmissionRecord struct {
-	NodeName    string               `json:"node_name"`
-	InstanceID  string               `json:"instance_id"`
-	MemberID    uint64               `json:"member_id"`
-	ExecutionID topology.ExecutionID `json:"execution_id"`
-	State       AdmissionState       `json:"state"`
+	NodeName   string              `json:"node_name"`
+	InstanceID string              `json:"instance_id"`
+	MemberID   uint64              `json:"member_id"`
+	OperatorID topology.OperatorID `json:"execution_id"`
+	State      AdmissionState      `json:"state"`
 }
 
 func admissionKey(nodeName, instanceID string) string {
@@ -73,9 +73,9 @@ func (sm *topologySM) liveAdmissionForNode(nodeName, exceptInstance string) (Adm
 	return cloneAdmission(*record), true
 }
 
-func (sm *topologySM) admissionForStepLocked(executionID topology.ExecutionID, nodeName string, memberID uint64) (*AdmissionRecord, bool) {
+func (sm *topologySM) admissionForStepLocked(operatorID topology.OperatorID, nodeName string, memberID uint64) (*AdmissionRecord, bool) {
 	for _, record := range sm.admissions {
-		if record.ExecutionID == executionID && record.NodeName == nodeName && record.MemberID == memberID &&
+		if record.OperatorID == operatorID && record.NodeName == nodeName && record.MemberID == memberID &&
 			record.State != AdmissionSuperseded && record.State != AdmissionRetired {
 			return record, true
 		}
@@ -83,10 +83,10 @@ func (sm *topologySM) admissionForStepLocked(executionID topology.ExecutionID, n
 	return nil, false
 }
 
-func (sm *topologySM) admissionForExecution(executionID topology.ExecutionID, nodeName string, memberID uint64) (AdmissionRecord, bool) {
+func (sm *topologySM) admissionForOperator(operatorID topology.OperatorID, nodeName string, memberID uint64) (AdmissionRecord, bool) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	record, ok := sm.admissionForStepLocked(executionID, nodeName, memberID)
+	record, ok := sm.admissionForStepLocked(operatorID, nodeName, memberID)
 	if !ok {
 		return AdmissionRecord{}, false
 	}
@@ -103,7 +103,7 @@ func (sm *topologySM) applyBindAdmission(p BindAdmissionProposal) (ApplyResult, 
 	}
 	key := admissionKey(record.NodeName, record.InstanceID)
 	if existing, ok := sm.admissions[key]; ok {
-		if existing.MemberID == record.MemberID && existing.ExecutionID == record.ExecutionID {
+		if existing.MemberID == record.MemberID && existing.OperatorID == record.OperatorID {
 			return ApplyResult{ProposalID: p.ProposalID, Accepted: true, Admission: cloneAdmission(*existing)}, false
 		}
 		return rejectProposal(p.ProposalID, proposalAuthorization,
@@ -124,21 +124,21 @@ func (sm *topologySM) applyBindAdmission(p BindAdmissionProposal) (ApplyResult, 
 		return rejectProposal(p.ProposalID, proposalAuthorization,
 			"admission member %d is not Target identity for %q", record.MemberID, record.NodeName), false
 	}
-	execution, ok := sm.executions[record.ExecutionID]
+	operator, ok := sm.operators[record.OperatorID]
 	if !ok {
 		return rejectProposal(p.ProposalID, proposalAuthorization,
-			"admission execution %q does not exist", record.ExecutionID), false
+			"admission execution %q does not exist", record.OperatorID), false
 	}
 	if p.Founding {
-		if execution.State != topology.ExecutionSucceeded || sm.target.Version != sm.active.Version ||
-			sm.target.Version != execution.Version || sm.target.Origin != topology.OriginFounding {
+		if operator.State != topology.OperatorSucceeded || sm.target.Version != sm.active.Version ||
+			sm.target.Version != operator.Version || sm.target.Origin != topology.OriginFounding {
 			return rejectProposal(p.ProposalID, proposalAuthorization,
 				"founding admission is not backed by the active founding execution"), false
 		}
 		record.State = AdmissionCompleted
 	} else {
-		if execution.State.Terminal() || execution.Version != sm.target.Version ||
-			!hasAdmissionSequence(execution.Steps, record.NodeName, record.MemberID) {
+		if operator.State.Terminal() || operator.Version != sm.target.Version ||
+			!hasAdmissionSequence(operator.Steps, record.NodeName, record.MemberID) {
 			return rejectProposal(p.ProposalID, proposalAuthorization,
 				"admission is not backed by an exact current _meta learner-first sequence"), false
 		}
@@ -158,12 +158,12 @@ func (sm *topologySM) applyCommitReadmission(p CommitReadmissionProposal) (Apply
 	}
 	key := admissionKey(p.Admission.NodeName, p.Admission.InstanceID)
 	if existing, ok := sm.admissions[key]; ok {
-		if existing.MemberID != p.Admission.MemberID || existing.ExecutionID != p.Admission.ExecutionID {
+		if existing.MemberID != p.Admission.MemberID || existing.OperatorID != p.Admission.OperatorID {
 			return rejectProposal(p.ProposalID, proposalAuthorization, "readmission retry identity differs"), false
 		}
 		return ApplyResult{
 			ProposalID: p.ProposalID, Accepted: true, Doc: sm.latest.Clone(),
-			ExecutionID: existing.ExecutionID, Admission: cloneAdmission(*existing),
+			OperatorID: existing.OperatorID, Admission: cloneAdmission(*existing),
 		}, false
 	}
 	if p.ExpectedVersion != sm.latest.Version {
@@ -174,7 +174,7 @@ func (sm *topologySM) applyCommitReadmission(p CommitReadmissionProposal) (Apply
 		return rejectProposal(p.ProposalID, proposalAuthorization,
 			"readmission requires Latest, Target, and Active to match"), false
 	}
-	if sm.hasNonterminalExecutionLocked() {
+	if sm.hasNonterminalOperatorLocked() {
 		return rejectProposal(p.ProposalID, proposalAuthorization,
 			"readmission requires no nonterminal execution"), false
 	}
@@ -218,22 +218,22 @@ func (sm *topologySM) applyCommitReadmission(p CommitReadmissionProposal) (Apply
 
 	sm.commitLatestLocked(&doc)
 	sm.target = doc.Clone()
-	record := newExecutionRecord(doc.Version, 1, p.Plan.Steps, doc.ChangedBy, doc.Origin, p.At)
-	sm.executions[record.ID] = &record
+	record := newOperatorRecord(doc.Version, 1, p.Plan.Steps, doc.ChangedBy, doc.Origin, p.At)
+	sm.operators[record.ID] = &record
 	admission := p.Admission
-	admission.ExecutionID = record.ID
+	admission.OperatorID = record.ID
 	admission.State = AdmissionPending
 	sm.retireNodeAdmissionsLocked(admission.NodeName, admission.InstanceID, AdmissionSuperseded)
 	sm.admissions[key] = &admission
 	return ApplyResult{
-		ProposalID: p.ProposalID, Accepted: true, Doc: doc.Clone(), ExecutionID: record.ID,
+		ProposalID: p.ProposalID, Accepted: true, Doc: doc.Clone(), OperatorID: record.ID,
 		Admission: cloneAdmission(admission),
 	}, true
 }
 
 func (sm *topologySM) applyReadyAdmission(p ReadyAdmissionProposal) (ApplyResult, bool) {
 	record, ok := sm.admissions[admissionKey(p.NodeName, p.InstanceID)]
-	if !ok || record.MemberID != p.MemberID || record.ExecutionID != p.ExecutionID {
+	if !ok || record.MemberID != p.MemberID || record.OperatorID != p.OperatorID {
 		return rejectProposal(p.ProposalID, proposalAuthorization,
 			"join ready tuple does not match a durable admission"), false
 	}
@@ -244,9 +244,9 @@ func (sm *topologySM) applyReadyAdmission(p ReadyAdmissionProposal) (ApplyResult
 	if record.State.prepared() {
 		return ApplyResult{ProposalID: p.ProposalID, Accepted: true, Admission: cloneAdmission(*record)}, false
 	}
-	execution, ok := sm.executions[record.ExecutionID]
-	if !ok || execution.State.Terminal() || sm.target.Version != execution.Version ||
-		!hasAdmissionSequence(execution.Steps, record.NodeName, record.MemberID) {
+	operator, ok := sm.operators[record.OperatorID]
+	if !ok || operator.State.Terminal() || sm.target.Version != operator.Version ||
+		!hasAdmissionSequence(operator.Steps, record.NodeName, record.MemberID) {
 		return rejectProposal(p.ProposalID, proposalSuperseded,
 			"admission execution is no longer current"), false
 	}
@@ -350,7 +350,7 @@ func buildReadmissionDocument(base topology.Document, nodeName string, at time.T
 	return doc, nil
 }
 
-func (sm *topologySM) updateAdmissionForCompletedStepLocked(ex *executionRecord, step topology.Step) bool {
+func (sm *topologySM) updateAdmissionForCompletedStepLocked(ex *operatorRecord, step topology.Step) bool {
 	record, ok := sm.admissionForStepLocked(ex.ID, step.NodeName, step.ReplicaID)
 	if !ok || record.State.terminal() {
 		return false
@@ -365,10 +365,10 @@ func (sm *topologySM) updateAdmissionForCompletedStepLocked(ex *executionRecord,
 	return before != record.State
 }
 
-func (sm *topologySM) completeAdmissionsLocked(executionID topology.ExecutionID) bool {
+func (sm *topologySM) completeAdmissionsLocked(operatorID topology.OperatorID) bool {
 	changed := false
 	for _, record := range sm.admissions {
-		if record.ExecutionID == executionID && !record.State.terminal() {
+		if record.OperatorID == operatorID && !record.State.terminal() {
 			record.State = AdmissionCompleted
 			changed = true
 		}

@@ -10,11 +10,11 @@ const (
 	ReconcileReasonNotLeader         = "not_leader"
 	ReconcileReasonStarting          = "starting"
 	ReconcileReasonConverged         = "converged"
-	ReconcileReasonApprovedExecution = "approved_execution"
+	ReconcileReasonApprovedOperator  = "approved_execution"
 	ReconcileReasonMissingReplica    = "missing_replica"
 	ReconcileReasonStagedLatest      = "staged_latest"
 	ReconcileReasonStagedInternal    = "staged_internal"
-	ReconcileReasonFailedExecution   = "failed_execution"
+	ReconcileReasonFailedOperator    = "failed_execution"
 	ReconcileReasonQuorumLost        = "quorum_lost"
 	ReconcileReasonUnknownHealth     = "unknown_health"
 	ReconcileReasonStabilityWindow   = "stability_window"
@@ -26,12 +26,12 @@ const (
 
 type Host interface {
 	Views(context.Context) (topology.Document, topology.Document, topology.Document, error)
-	CurrentExecution(context.Context) (topology.ExecutionRecord, bool, error)
+	CurrentOperator(context.Context) (topology.Operator, bool, error)
 	IsLeader() bool
 	Health(context.Context) (map[string]topology.Health, error)
 	GlobalStatus(context.Context, topology.Document) (map[string]topology.GroupStatus, error)
 	PlanFor(context.Context, topology.Document) (topology.Plan, error)
-	Approve(context.Context, uint64) (topology.ExecutionID, error)
-	CommitRepair(context.Context, topology.Document, uint64, topology.Plan) (topology.ExecutionID, error)
-	WakeConvergence()
+	Approve(context.Context, uint64) (topology.OperatorID, error)
+	CommitRepair(context.Context, topology.Document, uint64, topology.Plan) (topology.OperatorID, error)
+	WakeOperator()
 }

@@ -1,4 +1,4 @@
-package convergence
+package operator
 
 import "time"
 

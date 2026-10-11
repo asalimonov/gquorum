@@ -25,7 +25,7 @@ func TestMetaAdmissionUsesLearnerBeforeServingAndRetainsIdentityOnRestart(t *tes
 	testMetaAdmission(t, false)
 }
 
-func TestAdmissionExecutionResumesAfterMetaLeaderTransferWithoutNewAttempt(t *testing.T) {
+func TestAdmissionOperatorResumesAfterMetaLeaderTransferWithoutNewAttempt(t *testing.T) {
 	testMetaAdmission(t, true)
 }
 
@@ -69,7 +69,7 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 		t.Fatal(err)
 	}
 	var admitted metaservice.MutationResult
-	if err := response.Decode(&admitted); err != nil || admitted.ExecutionID == "" {
+	if err := response.Decode(&admitted); err != nil || admitted.OperatorID == "" {
 		t.Fatal("admission did not start an exact execution", admitted, err)
 	}
 	member := admitted.Document.MemberID("node4")
@@ -104,7 +104,7 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 					}
 				}
 			}
-			if status.Execution != nil && status.Execution.ID == admitted.ExecutionID && status.Execution.GroupID == "work" && status.Execution.CurrentStep > 0 {
+			if status.Operator != nil && status.Operator.ID == admitted.OperatorID && status.Operator.GroupID == "work" && status.Operator.CurrentStep > 0 {
 				break
 			}
 		}
@@ -141,9 +141,9 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 	}
 	instance := local.Identity.InstanceID
 	if transferDuringLearner {
-		execution, err := c.Execution(ctx, "node2", admitted.ExecutionID)
-		if err != nil || execution.ID != admitted.ExecutionID || execution.Attempt != 1 || execution.Version != admitted.Document.Version || execution.State.Terminal() {
-			t.Fatal("leader replacement changed or finished the paused execution", execution, err)
+		operator, err := c.Operator(ctx, "node2", admitted.OperatorID)
+		if err != nil || operator.ID != admitted.OperatorID || operator.Attempt != 1 || operator.Version != admitted.Document.Version || operator.State.Terminal() {
+			t.Fatal("leader replacement changed or finished the paused execution", operator, err)
 		}
 		status, err := c.Status(ctx, "node2")
 		if err != nil || status.MetaLeader != replacementMember {
@@ -152,11 +152,11 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 		// The stored execution's current exact step is exposed by the authorized
 		// receiver, even if planning against already changed membership differs.
 		if err := Poll(ctx, func() (bool, error) {
-			current, err := c.Execution(ctx, "node2", admitted.ExecutionID)
+			current, err := c.Operator(ctx, "node2", admitted.OperatorID)
 			if err != nil {
 				return false, err
 			}
-			if current.ID != admitted.ExecutionID || current.Attempt != 1 || current.Version != admitted.Document.Version || current.State.Terminal() {
+			if current.ID != admitted.OperatorID || current.Attempt != 1 || current.Version != admitted.Document.Version || current.State.Terminal() {
 				return true, fmt.Errorf("replacement changed the paused execution: %+v", current)
 			}
 			for _, seed := range c.Spec.Nodes {
@@ -166,7 +166,7 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 				}
 				for _, barrier := range controls.Barriers {
 					a := barrier.Last
-					if barrier.Hits > 0 && a.ExecutionID == admitted.ExecutionID && a.Attempt == 1 && a.Version == admitted.Document.Version && a.StepSeq == current.CurrentStep && a.Kind == topology.StepPromoteVoter && a.GroupID == "work" && a.NodeName == "node4" && a.ReplicaID == loadID {
+					if barrier.Hits > 0 && a.OperatorID == admitted.OperatorID && a.Attempt == 1 && a.Version == admitted.Document.Version && a.StepSeq == current.CurrentStep && a.Kind == topology.StepPromoteVoter && a.GroupID == "work" && a.NodeName == "node4" && a.ReplicaID == loadID {
 						return true, nil
 					}
 				}
@@ -189,13 +189,13 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 			t.Fatal(err)
 		}
 	}
-	if err := c.WaitExecution(ctx, "node2", admitted.ExecutionID); err != nil {
+	if err := c.WaitOperator(ctx, "node2", admitted.OperatorID); err != nil {
 		t.Fatal(err)
 	}
 	if transferDuringLearner {
-		execution, err := c.Execution(ctx, "node2", admitted.ExecutionID)
-		if err != nil || execution.Attempt != 1 || execution.ID != admitted.ExecutionID || execution.State != topology.ExecutionSucceeded {
-			t.Fatal("resumed admission created another attempt", execution, err)
+		operator, err := c.Operator(ctx, "node2", admitted.OperatorID)
+		if err != nil || operator.Attempt != 1 || operator.ID != admitted.OperatorID || operator.State != topology.OperatorSucceeded {
+			t.Fatal("resumed admission created another attempt", operator, err)
 		}
 	}
 	if err := c.WaitActive(ctx, admitted.Document.Version); err != nil {

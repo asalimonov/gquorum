@@ -107,7 +107,7 @@ func httpError(w http.ResponseWriter, err error) {
 	switch code {
 	case fault.Invalid, fault.Unsupported:
 		status = http.StatusBadRequest
-	case fault.VersionConflict, fault.GroupRetired, fault.IdentityMismatch, fault.ExecutionAuthorization:
+	case fault.VersionConflict, fault.GroupRetired, fault.IdentityMismatch, fault.OperatorAuthorization:
 		status = http.StatusConflict
 	case fault.UnsafeMembership:
 		status = http.StatusUnprocessableEntity
@@ -192,7 +192,7 @@ func mutationResponse(w http.ResponseWriter, result metaservice.MutationResult, 
 	}
 	w.Header().Set("ETag", fmt.Sprintf("\"%d\"", result.Document.Version))
 	status := http.StatusOK
-	if result.ExecutionID != "" {
+	if result.OperatorID != "" {
 		status = http.StatusAccepted
 	}
 	jsonResponse(w, status, result)
@@ -331,10 +331,10 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		jsonResponse(w, http.StatusAccepted, map[string]any{"execution_id": id})
+		jsonResponse(w, http.StatusAccepted, map[string]any{"operator_id": id})
 	})
 	mux.HandleFunc("GET /api/executions/{id}", func(w http.ResponseWriter, r *http.Request) {
-		status, err := a.meta.Execution(r.Context(), topology.ExecutionID(r.PathValue("id")))
+		status, err := a.meta.Operator(r.Context(), topology.OperatorID(r.PathValue("id")))
 		if err != nil {
 			httpError(w, err)
 			return

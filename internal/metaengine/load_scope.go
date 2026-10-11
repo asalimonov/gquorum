@@ -53,12 +53,12 @@ func (m *Machine) WithLoadScope(id storage.Identity, member uint64, fn func(Load
 			}
 		}
 	}
-	for _, ex := range m.executions {
+	for _, ex := range m.operators {
 		for _, step := range ex.Steps {
 			if ex.Version == m.target.Version && step.GroupID == id.GroupID && step.Kind == topology.StepCreateFoundingGroup && scope.Replica.Role == topology.ReplicaVoter {
 				scope.Founding = true
 			}
-			completed := step.Seq < ex.CurrentStep || ex.State == topology.ExecutionSucceeded && step.Seq == ex.CurrentStep
+			completed := step.Seq < ex.CurrentStep || ex.State == topology.OperatorSucceeded && step.Seq == ex.CurrentStep
 			if !completed || step.GroupID != id.GroupID {
 				continue
 			}

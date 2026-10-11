@@ -143,11 +143,11 @@ func (g *Group) Call(ctx context.Context, method string, header *metapb.Header, 
 		encoded, _ := json.Marshal(id)
 		return &metapb.Reply{Data: encoded}
 	case "MetaControl":
-		var a topology.AuthorizedStep
+		var a wireAuthorization
 		if json.Unmarshal(data, &a) != nil {
 			return metatransport.Reply(fault.ErrInvalid)
 		}
-		return metatransport.Reply(g.metaEffect(ctx, a))
+		return metatransport.Reply(g.metaEffect(ctx, a.public()))
 	case "ProposeMeta":
 		proposal, err := metaengine.DecodeProposal(data)
 		if err != nil {
@@ -260,7 +260,7 @@ func (g *Group) submitProposal(ctx context.Context, proposal any, shutdown bool)
 		case "version_conflict":
 			code = fault.VersionConflict
 		case "authorization", "superseded":
-			code = fault.ExecutionAuthorization
+			code = fault.OperatorAuthorization
 		}
 		return result, fault.New(code, result.Reason, nil)
 	}

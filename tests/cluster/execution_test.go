@@ -224,14 +224,14 @@ func callerRefusedDeletion(t *testing.T, size int) {
 	if len(plan.Steps) != 4 || plan.Steps[0].Kind != topology.StepStopReplica || plan.Steps[3].Kind != topology.StepDeleteGroupState {
 		t.Fatal(plan)
 	}
-	approve := func() topology.ExecutionID {
+	approve := func() topology.OperatorID {
 		t.Helper()
 		response, err := c.Request(ctx, "node2", "POST", fmt.Sprintf("/api/topology/%d/apply", deleted.Document.Version), nil, 0)
 		if err := requireStatus(response, err, 202); err != nil {
 			t.Fatal(err)
 		}
 		var result struct {
-			ID topology.ExecutionID `json:"execution_id"`
+			ID topology.OperatorID `json:"operator_id"`
 		}
 		if err := response.Decode(&result); err != nil || result.ID == "" {
 			t.Fatal(result, err)
@@ -239,15 +239,15 @@ func callerRefusedDeletion(t *testing.T, size int) {
 		return result.ID
 	}
 	failedID := approve()
-	var failed topology.ExecutionStatus
+	var failed topology.OperatorStatus
 	if err := Poll(ctx, func() (bool, error) {
 		var err error
-		failed, err = c.Execution(ctx, "node2", failedID)
+		failed, err = c.Operator(ctx, "node2", failedID)
 		return failed.State.Terminal(), err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if failed.State != topology.ExecutionFailed || failed.Attempt != 1 || failed.Version != deleted.Document.Version || failed.CurrentStep != 1 || !strings.Contains(failed.Error, "caller refuses deletion") {
+	if failed.State != topology.OperatorFailed || failed.Attempt != 1 || failed.Version != deleted.Document.Version || failed.CurrentStep != 1 || !strings.Contains(failed.Error, "caller refuses deletion") {
 		t.Fatal(failed)
 	}
 	assertFailure := func(restarted string) {
@@ -255,7 +255,7 @@ func callerRefusedDeletion(t *testing.T, size int) {
 		for _, node := range c.Nodes() {
 			if err := Poll(ctx, func() (bool, error) {
 				status, err := c.Status(ctx, node.Spec.Name)
-				return status.LatestVersion == deleted.Document.Version && status.TargetVersion == deleted.Document.Version && status.ActiveVersion == created.Document.Version && status.Execution != nil && *status.Execution == failed, err
+				return status.LatestVersion == deleted.Document.Version && status.TargetVersion == deleted.Document.Version && status.ActiveVersion == created.Document.Version && status.Operator != nil && *status.Operator == failed, err
 			}); err != nil {
 				t.Fatal(node.Spec.Name, err)
 			}
@@ -294,7 +294,7 @@ func callerRefusedDeletion(t *testing.T, size int) {
 			}
 		}
 		for _, receipt := range controls.Receipts {
-			if receipt.ExecutionID == failedID {
+			if receipt.OperatorID == failedID {
 				t.Fatal("refused attempt performed an effect", receipt)
 			}
 		}
@@ -346,7 +346,7 @@ func callerRefusedDeletion(t *testing.T, size int) {
 	}
 	if err := Poll(ctx, func() (bool, error) {
 		observed, err := c.Status(ctx, survivor)
-		return observed.MetaLeader != 0 && observed.MetaLeader != status.MetaLeader && observed.Execution != nil && *observed.Execution == failed, err
+		return observed.MetaLeader != 0 && observed.MetaLeader != status.MetaLeader && observed.Operator != nil && *observed.Operator == failed, err
 	}); err != nil {
 		t.Fatal("failed execution did not survive leader replacement", err)
 	}
@@ -355,7 +355,7 @@ func callerRefusedDeletion(t *testing.T, size int) {
 	}
 	if err := Poll(ctx, func() (bool, error) {
 		observed, err := c.Status(ctx, oldLeader.Spec.Name)
-		return observed.SessionLive && observed.MetaLeader != 0 && observed.Execution != nil && *observed.Execution == failed, err
+		return observed.SessionLive && observed.MetaLeader != 0 && observed.Operator != nil && *observed.Operator == failed, err
 	}); err != nil {
 		t.Fatal("retained meta did not recover the failed execution", err)
 	}
@@ -383,18 +383,18 @@ func callerRefusedDeletion(t *testing.T, size int) {
 	if retryID == failedID {
 		t.Fatal("retry reused failed attempt", retryID)
 	}
-	if err := c.WaitExecution(ctx, "node2", retryID); err != nil {
+	if err := c.WaitOperator(ctx, "node2", retryID); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.WaitActive(ctx, deleted.Document.Version); err != nil {
 		t.Fatal(err)
 	}
-	retry, err := c.Execution(ctx, "node2", retryID)
+	retry, err := c.Operator(ctx, "node2", retryID)
 	if err != nil || retry.Attempt != 2 || retry.Version != failed.Version {
 		t.Fatal(retry, err)
 	}
 	for _, node := range c.Nodes() {
-		prior, err := c.Execution(ctx, node.Spec.Name, failedID)
+		prior, err := c.Operator(ctx, node.Spec.Name, failedID)
 		if err != nil || prior != failed {
 			t.Fatal("retry rewrote historical failure", prior, err)
 		}

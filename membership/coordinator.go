@@ -54,7 +54,7 @@ func (c *Coordinator) Apply(ctx context.Context, g RaftGroup, live HealthSource,
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := (SafetyPolicy{}).Check(g, live, cc); err != nil {
+	if err := (SafetyRules{}).Check(g, live, cc); err != nil {
 		return err
 	}
 	if err := g.ProposeConfChangeV2(ctx, cc); err != nil {

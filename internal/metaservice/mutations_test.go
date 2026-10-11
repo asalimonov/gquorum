@@ -68,9 +68,9 @@ func (f *mutationFixture) commit(t *testing.T, doc topology.Document, activate b
 	}
 	at := time.Now().UTC()
 	version := result.Doc.Version
-	begin := f.command(t, metaengine.BeginExecutionProposal{Version: version, Plan: topology.Plan{Version: version}, Actor: "test", Origin: result.Doc.Origin, At: at})
-	f.command(t, metaengine.TransitionExecutionProposal{Transition: topology.ExecutionTransition{ExecutionID: begin.ExecutionID, Version: version, Attempt: 1, State: topology.ExecutionSucceeded, At: at.Add(time.Millisecond)}})
-	f.command(t, metaengine.ActivateTargetProposal{ExecutionID: begin.ExecutionID, Version: version, Attempt: 1})
+	begin := f.command(t, metaengine.BeginOperatorProposal{Version: version, Plan: topology.Plan{Version: version}, Actor: "test", Origin: result.Doc.Origin, At: at})
+	f.command(t, metaengine.TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: begin.OperatorID, Version: version, Attempt: 1, State: topology.OperatorSucceeded, At: at.Add(time.Millisecond)}})
+	f.command(t, metaengine.ActivateTargetProposal{OperatorID: begin.OperatorID, Version: version, Attempt: 1})
 }
 func preview() MutationOptions { return MutationOptions{Preview: true} }
 func mutationDoc(t *testing.T, r MutationResult, err error) topology.Document {
@@ -360,7 +360,7 @@ func TestReseatReplicaAllocatesFreshIDAndRefusesUnstableViews(t *testing.T) {
 	r, err = f.g.DrainNode(context.Background(), "n3", preview())
 	doc = mutationDoc(t, r, err)
 	f.commit(t, doc, false)
-	if _, err = f.g.ReseatReplica(context.Background(), "work", "n2", preview()); !errors.Is(err, fault.ErrExecutionAuthorization) {
+	if _, err = f.g.ReseatReplica(context.Background(), "work", "n2", preview()); !errors.Is(err, fault.ErrOperatorAuthorization) {
 		t.Fatal("repair extended staged operator intent", err)
 	}
 }

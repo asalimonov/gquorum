@@ -61,34 +61,19 @@ type NodeStatus struct {
 	Address        string    `json:"address,omitempty"`
 }
 type ClusterStatus struct {
-	Lifecycle      string               `json:"lifecycle"`
-	ErrorCode      string               `json:"error_code,omitempty"`
-	LatestVersion  uint64               `json:"latest_version"`
-	TargetVersion  uint64               `json:"target_version"`
-	ActiveVersion  uint64               `json:"active_version"`
-	Nodes          []NodeStatus         `json:"nodes"`
-	Groups         []GroupStatus        `json:"groups"`
-	MetaLeader     uint64               `json:"meta_leader"`
-	SessionLive    bool                 `json:"session_live"`
-	Execution      *ExecutionStatus     `json:"execution,omitempty"`
-	Reconciliation ReconciliationStatus `json:"reconciliation"`
-	Observation    HealthObservation    `json:"observation"`
-	SelfRemoval    *SelfRemovalStatus   `json:"self_removal,omitempty"`
-}
-
-// GroupController implements idempotent effects on the exact authorized load identities.
-// Receivers must revalidate authorization and verify existing results before succeeding.
-type GroupController interface {
-	Status(context.Context, string) (GroupStatus, error)
-	// CreateGroup seeds only the approved founding voters. Intentional learners
-	// are prepared and admitted by later exact steps.
-	CreateGroup(context.Context, AuthorizedStep) error
-	PrepareReplica(context.Context, AuthorizedStep) error
-	ApplyMembership(context.Context, AuthorizedStep) error
-	TransferLeader(context.Context, AuthorizedStep) error
-	StopReplica(context.Context, AuthorizedStep) error
-	CleanupReplicaState(context.Context, AuthorizedStep) error
-	DeleteGroupState(context.Context, AuthorizedStep) error
+	Lifecycle     string             `json:"lifecycle"`
+	ErrorCode     string             `json:"error_code,omitempty"`
+	LatestVersion uint64             `json:"latest_version"`
+	TargetVersion uint64             `json:"target_version"`
+	ActiveVersion uint64             `json:"active_version"`
+	Nodes         []NodeStatus       `json:"nodes"`
+	Groups        []GroupStatus      `json:"groups"`
+	MetaLeader    uint64             `json:"meta_leader"`
+	SessionLive   bool               `json:"session_live"`
+	Operator      *OperatorStatus    `json:"operator,omitempty"`
+	Scheduling    SchedulingStatus   `json:"scheduling"`
+	Observation   HealthObservation  `json:"observation"`
+	SelfRemoval   *SelfRemovalStatus `json:"self_removal,omitempty"`
 }
 
 type AddressResolver interface {

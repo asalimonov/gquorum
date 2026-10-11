@@ -65,7 +65,7 @@ func TestDrainViaNonLeaderPreservesMetaMembership(t *testing.T) {
 		t.Fatal(err)
 	}
 	drained, err := c.Mutate(ctx, "node3", "POST", "/api/nodes/node3/drain", metaservice.MutationOptions{Apply: true, Actor: "cluster-test"})
-	if err != nil || drained.ExecutionID == "" {
+	if err != nil || drained.OperatorID == "" {
 		t.Fatal("follower did not forward both stage and apply", drained, err)
 	}
 	assertDrained(t, ctx, c, "node3", "work", drained.Document.Version)
@@ -85,7 +85,7 @@ func TestDrainViaNonLeaderPreservesMetaMembership(t *testing.T) {
 	}
 	// Empty options remain compatible; repeated apply returns the exact attempt.
 	response, err := c.Request(ctx, "node3", "POST", path, struct{}{}, 0)
-	if err := requireStatus(response, err, 202); err != nil || !bytes.Contains(response.Data, []byte(drained.ExecutionID)) {
+	if err := requireStatus(response, err, 202); err != nil || !bytes.Contains(response.Data, []byte(drained.OperatorID)) {
 		t.Fatal("repeated apply created another attempt", response, err)
 	}
 	activated, err := c.Mutate(ctx, "node3", "POST", "/api/nodes/node3/activate", metaservice.MutationOptions{Apply: true, Actor: "cluster-test"})
@@ -267,7 +267,7 @@ func forceRetireDeadNode(t *testing.T, size int) {
 	if err := response.Decode(&replacement); err != nil {
 		t.Fatal(err)
 	}
-	if replacement.ExecutionID != "" || replacement.Document.MemberID("node3") <= oldMember || replicaID(replacement.Document, "work", "node3") <= oldReplica {
+	if replacement.OperatorID != "" || replacement.Document.MemberID("node3") <= oldMember || replicaID(replacement.Document, "work", "node3") <= oldReplica {
 		t.Fatal("staged replacement reused retired identities or self-approved", replacement)
 	}
 	active, err := c.Document(ctx, "node1", "active")

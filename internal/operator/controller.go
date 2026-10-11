@@ -1,4 +1,4 @@
-package convergence
+package operator
 
 import (
 	"context"
@@ -9,12 +9,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/membership"
 )
 
 const (
-	defaultConvergenceInterval = time.Second
-	defaultMaxRetryInterval    = 30 * time.Second
+	defaultControllerInterval = time.Second
+	defaultMaxRetryInterval   = 30 * time.Second
 	// defaultProposalTimeout bounds one replicated execution-record write. A
 	// committed proposal applies in milliseconds; ten seconds is far past any
 	// healthy commit yet far below the joiner's boot catch-up budget, so a lost
@@ -22,30 +23,30 @@ const (
 	defaultProposalTimeout = 10 * time.Second
 )
 
-type convergenceClock interface {
+type controllerClock interface {
 	Now() time.Time
-	NewTimer(time.Duration) convergenceTimer
+	NewTimer(time.Duration) controllerTimer
 }
 
-type convergenceTimer interface {
+type controllerTimer interface {
 	C() <-chan time.Time
 	Reset(time.Duration)
 	Stop()
 }
 
-type systemConvergenceClock struct{}
+type systemControllerClock struct{}
 
-func (systemConvergenceClock) Now() time.Time { return time.Now() }
+func (systemControllerClock) Now() time.Time { return time.Now() }
 
-func (systemConvergenceClock) NewTimer(delay time.Duration) convergenceTimer {
-	return &systemConvergenceTimer{timer: time.NewTimer(delay)}
+func (systemControllerClock) NewTimer(delay time.Duration) controllerTimer {
+	return &systemControllerTimer{timer: time.NewTimer(delay)}
 }
 
-type systemConvergenceTimer struct{ timer *time.Timer }
+type systemControllerTimer struct{ timer *time.Timer }
 
-func (t *systemConvergenceTimer) C() <-chan time.Time { return t.timer.C }
+func (t *systemControllerTimer) C() <-chan time.Time { return t.timer.C }
 
-func (t *systemConvergenceTimer) Reset(delay time.Duration) {
+func (t *systemControllerTimer) Reset(delay time.Duration) {
 	if !t.timer.Stop() {
 		select {
 		case <-t.timer.C:
@@ -55,110 +56,113 @@ func (t *systemConvergenceTimer) Reset(delay time.Duration) {
 	t.timer.Reset(delay)
 }
 
-func (t *systemConvergenceTimer) Stop() { t.timer.Stop() }
+func (t *systemControllerTimer) Stop() { t.timer.Stop() }
 
-type convergenceRun struct {
+type controllerRun struct {
 	cancel   context.CancelFunc
 	done     chan struct{}
 	stopping bool
 }
 
-type convergenceOutcome uint8
+type controllerOutcome uint8
 
 const (
-	convergenceIdle convergenceOutcome = iota
-	convergenceProgressed
-	convergenceWaiting
+	controllerIdle controllerOutcome = iota
+	controllerProgressed
+	controllerWaiting
 )
 
-// ConvergenceEngine executes one durably authorized topology step per tick.
+// ControllerEngine executes one durably authorized topology step per tick.
 // Two instances may observe the same execution: ownsGroup gives _meta and data
 // groups disjoint owners, while replicated transitions provide the handoff.
-type ConvergenceEngine struct {
+type Controller struct {
 	store           Store
 	rules           Rules
-	coordinator     ExecutionCoordinator
-	groups          GroupController
+	coordinator     OperatorCoordinator
+	groups          GroupEffects
 	membership      MembershipCoordinator
 	ownsGroup       func(groupID string) bool
 	interval        time.Duration
 	maxRetry        time.Duration
 	proposalTimeout time.Duration
-	clock           convergenceClock
+	clock           controllerClock
 	finalValidator  func(context.Context, Document, Document) error
 
 	mu     sync.Mutex
-	run    *convergenceRun
+	run    *controllerRun
 	wake   chan struct{}
 	tickMu sync.Mutex
 }
 
-type ConvergenceConfig struct {
+type Config struct {
 	Store            Store
 	Rules            Rules
-	Coordinator      ExecutionCoordinator
-	Groups           GroupController
+	Coordinator      OperatorCoordinator
+	Groups           GroupEffects
 	Membership       MembershipCoordinator
 	OwnsGroup        func(groupID string) bool
 	Interval         time.Duration
 	MaxRetryInterval time.Duration
 	// ProposalTimeout bounds each replicated execution-record write the engine
 	// makes (transition/fail/supersede). Zero selects the default. See the
-	// deadline rationale on ConvergenceEngine.transition.
+	// deadline rationale on ControllerEngine.transition.
 	ProposalTimeout time.Duration
 	FinalValidator  func(context.Context, Document, Document) error
 
-	clock convergenceClock
+	clock controllerClock
 }
 
-func NewConvergenceEngine(cfg ConvergenceConfig) *ConvergenceEngine {
+func New(cfg Config) (*Controller, error) {
 	if err := cfg.Rules.Limits.Validate(); err != nil || cfg.Rules.SchemaVersion != 1 {
-		panic("convergence: explicit valid cluster rules are required")
+		return nil, fault.New(fault.Invalid, "operator requires explicit valid cluster rules", err)
 	}
 	if cfg.Store == nil || cfg.Coordinator == nil || cfg.Groups == nil {
-		panic("topology: convergence requires store, coordinator, and group controller")
+		return nil, fault.New(fault.Invalid, "operator requires store, coordinator and group effects", nil)
 	}
 	if cfg.OwnsGroup == nil {
-		panic("topology: convergence requires an immutable owns-group predicate")
+		return nil, fault.New(fault.Invalid, "operator requires an immutable owns-group predicate", nil)
 	}
-	if cfg.Interval <= 0 {
-		cfg.Interval = defaultConvergenceInterval
+	if cfg.Interval < 0 || cfg.MaxRetryInterval < 0 || cfg.ProposalTimeout < 0 {
+		return nil, fault.New(fault.Invalid, "negative operator timing", nil)
 	}
-	if cfg.MaxRetryInterval <= 0 {
+	if cfg.Interval == 0 {
+		cfg.Interval = defaultControllerInterval
+	}
+	if cfg.MaxRetryInterval == 0 {
 		cfg.MaxRetryInterval = defaultMaxRetryInterval
 	}
 	if cfg.MaxRetryInterval < cfg.Interval {
 		cfg.MaxRetryInterval = cfg.Interval
 	}
-	if cfg.ProposalTimeout <= 0 {
+	if cfg.ProposalTimeout == 0 {
 		cfg.ProposalTimeout = defaultProposalTimeout
 	}
 	if cfg.clock == nil {
-		cfg.clock = systemConvergenceClock{}
+		cfg.clock = systemControllerClock{}
 	}
 	if cfg.Membership == nil {
 		cfg.Membership = NewFixedMembershipCoordinator(cfg.Groups)
 	}
-	return &ConvergenceEngine{
+	return &Controller{
 		store: cfg.Store, rules: cfg.Rules, coordinator: cfg.Coordinator, groups: cfg.Groups,
 		membership: cfg.Membership, ownsGroup: cfg.OwnsGroup,
 		interval: cfg.Interval, maxRetry: cfg.MaxRetryInterval,
 		proposalTimeout: cfg.ProposalTimeout, clock: cfg.clock,
 		finalValidator: cfg.FinalValidator,
 		wake:           make(chan struct{}, 1),
-	}
+	}, nil
 }
 
 // SetFinalValidator installs the last-moment safety check. It is synchronized
 // because server wiring may complete after the engine has been constructed.
-func (e *ConvergenceEngine) SetFinalValidator(validator func(context.Context, Document, Document) error) {
+func (e *Controller) SetFinalValidator(validator func(context.Context, Document, Document) error) {
 	e.mu.Lock()
 	e.finalValidator = validator
 	e.mu.Unlock()
 }
 
 // Signal schedules a prompt pass without blocking Apply or accumulating work.
-func (e *ConvergenceEngine) Signal() {
+func (e *Controller) Signal() {
 	if e == nil {
 		return
 	}
@@ -174,7 +178,7 @@ func (e *ConvergenceEngine) Signal() {
 	}
 }
 
-func (e *ConvergenceEngine) Start(parent context.Context) {
+func (e *Controller) Start(parent context.Context) {
 	if e == nil {
 		return
 	}
@@ -184,14 +188,14 @@ func (e *ConvergenceEngine) Start(parent context.Context) {
 		return
 	}
 	ctx, cancel := context.WithCancel(parent)
-	run := &convergenceRun{cancel: cancel, done: make(chan struct{})}
+	run := &controllerRun{cancel: cancel, done: make(chan struct{})}
 	e.run = run
 	e.mu.Unlock()
 
 	go e.loop(ctx, run)
 }
 
-func (e *ConvergenceEngine) Stop() {
+func (e *Controller) Stop() {
 	if e == nil {
 		return
 	}
@@ -214,7 +218,7 @@ func (e *ConvergenceEngine) Stop() {
 	e.mu.Unlock()
 }
 
-func (e *ConvergenceEngine) loop(ctx context.Context, run *convergenceRun) {
+func (e *Controller) loop(ctx context.Context, run *controllerRun) {
 	defer func() {
 		close(run.done)
 		e.mu.Lock()
@@ -242,8 +246,8 @@ func (e *ConvergenceEngine) loop(ctx context.Context, run *convergenceRun) {
 	}
 }
 
-func (e *ConvergenceEngine) nextDelay(outcome convergenceOutcome, previous time.Duration) time.Duration {
-	if outcome != convergenceWaiting {
+func (e *Controller) nextDelay(outcome controllerOutcome, previous time.Duration) time.Duration {
+	if outcome != controllerWaiting {
 		return e.interval
 	}
 	if previous < e.interval {
@@ -258,51 +262,51 @@ func (e *ConvergenceEngine) nextDelay(outcome convergenceOutcome, previous time.
 // Tick observes and advances at most one exact step. It deliberately returns no
 // error: every retryable or terminal outcome is part of the replicated
 // execution record, while loss of leadership simply leaves the record intact.
-func (e *ConvergenceEngine) Tick(ctx context.Context) {
+func (e *Controller) Tick(ctx context.Context) {
 	e.tick(ctx)
 }
 
-func (e *ConvergenceEngine) tick(ctx context.Context) convergenceOutcome {
+func (e *Controller) tick(ctx context.Context) controllerOutcome {
 	e.tickMu.Lock()
 	defer e.tickMu.Unlock()
 	if ctx.Err() != nil || !e.coordinator.IsMetaLeader() {
-		return convergenceIdle
+		return controllerIdle
 	}
-	execution, ok := e.coordinator.CurrentExecution(ctx)
+	operator, ok := e.coordinator.CurrentOperator(ctx)
 	if !ok {
-		return convergenceIdle
+		return controllerIdle
 	}
-	if execution.State.Terminal() {
-		return convergenceIdle
+	if operator.State.Terminal() {
+		return controllerIdle
 	}
 	target, err := e.store.Target(ctx)
 	if err != nil {
-		return convergenceWaiting
+		return controllerWaiting
 	}
-	if target.Version != execution.Version {
-		if target.Version > execution.Version {
-			return e.supersede(ctx, execution)
+	if target.Version != operator.Version {
+		if target.Version > operator.Version {
+			return e.supersede(ctx, operator)
 		}
-		return convergenceIdle
+		return controllerIdle
 	}
 	active, err := e.store.Active(ctx)
 	if err != nil {
-		return convergenceWaiting
+		return controllerWaiting
 	}
-	if len(execution.Steps) == 0 {
-		return e.finish(ctx, execution, target, nil)
+	if len(operator.Steps) == 0 {
+		return e.finish(ctx, operator, target, nil)
 	}
-	seq := execution.CurrentStep
+	seq := operator.CurrentStep
 	if seq == 0 {
 		seq = 1
 	}
-	if seq < 1 || seq > len(execution.Steps) {
-		e.fail(ctx, execution, Step{Seq: seq}, fmt.Errorf("%w: execution cursor is outside its exact plan", ErrExecutionAuthorization))
-		return convergenceProgressed
+	if seq < 1 || seq > len(operator.Steps) {
+		e.fail(ctx, operator, Step{Seq: seq}, fmt.Errorf("%w: execution cursor is outside its exact plan", ErrOperatorAuthorization))
+		return controllerProgressed
 	}
-	step := execution.Steps[seq-1]
+	step := operator.Steps[seq-1]
 	if !e.ownsGroup(step.GroupID) {
-		return convergenceIdle
+		return controllerIdle
 	}
 
 	status, statusErr := e.groups.Status(ctx, step.GroupID)
@@ -323,62 +327,62 @@ func (e *ConvergenceEngine) tick(ctx context.Context) convergenceOutcome {
 			// remain the reachability and authorization boundary.
 			status = GroupStatus{GroupID: step.GroupID, Found: step.Kind == StepStopReplica}
 		} else {
-			return e.recordError(ctx, execution, step, statusErr)
+			return e.recordError(ctx, operator, step, statusErr)
 		}
 	}
-	if err := e.validateStep(ctx, execution, active, target, step, status); err != nil {
-		if errors.Is(err, ErrExecutionSuperseded) {
-			return e.supersede(ctx, execution)
+	if err := e.validateStep(ctx, operator, active, target, step, status); err != nil {
+		if errors.Is(err, ErrOperatorSuperseded) {
+			return e.supersede(ctx, operator)
 		}
-		return e.recordError(ctx, execution, step, err)
+		return e.recordError(ctx, operator, step, err)
 	}
-	if err := e.ensureRunning(ctx, execution, step); err != nil {
-		return convergenceIdle
+	if err := e.ensureRunning(ctx, operator, step); err != nil {
+		return controllerIdle
 	}
 	if e.effectSatisfied(step, target, status) {
-		return e.advance(ctx, execution, target, step)
+		return e.advance(ctx, operator, target, step)
 	}
-	if err := e.revalidateExact(ctx, execution, step); err != nil {
-		if errors.Is(err, ErrExecutionSuperseded) {
-			return e.supersede(ctx, execution)
+	if err := e.revalidateExact(ctx, operator, step); err != nil {
+		if errors.Is(err, ErrOperatorSuperseded) {
+			return e.supersede(ctx, operator)
 		}
-		e.fail(ctx, execution, step, err)
-		return convergenceProgressed
+		e.fail(ctx, operator, step, err)
+		return controllerProgressed
 	}
 	if err := e.runStep(ctx, step, status); err != nil {
-		if ctx.Err() == nil && e.coordinator.IsMetaLeader() && e.executionIsCurrent(ctx, execution, step) {
-			return e.recordError(ctx, execution, step, err)
+		if ctx.Err() == nil && e.coordinator.IsMetaLeader() && e.operatorIsCurrent(ctx, operator, step) {
+			return e.recordError(ctx, operator, step, err)
 		}
-		return convergenceIdle
+		return controllerIdle
 	}
 	// A submitted ConfChange is never rolled back or overlapped. Its call is
 	// allowed to finish, then leadership and the exact replicated boundary are
 	// observed again before this worker records progress.
 	if ctx.Err() != nil || !e.coordinator.IsMetaLeader() {
-		return convergenceIdle
+		return controllerIdle
 	}
-	if err := e.revalidateExact(ctx, execution, step); err != nil {
-		if errors.Is(err, ErrExecutionSuperseded) {
-			return e.supersede(ctx, execution)
+	if err := e.revalidateExact(ctx, operator, step); err != nil {
+		if errors.Is(err, ErrOperatorSuperseded) {
+			return e.supersede(ctx, operator)
 		}
-		return convergenceIdle
+		return controllerIdle
 	}
 	// Membership/create/transfer acknowledgements are verified by a fresh
 	// global observation. Host-local lifecycle callbacks attest their verified
-	// exact identity result as part of the GroupController contract.
+	// exact identity result as part of the GroupEffects contract.
 	if requiresObservedVerification(step.Kind) {
 		observed, err := e.groups.Status(ctx, step.GroupID)
 		if err != nil {
-			return e.recordError(ctx, execution, step, err)
+			return e.recordError(ctx, operator, step, err)
 		}
 		if observed.GroupID != step.GroupID {
-			return e.recordError(ctx, execution, step, ErrExecutionAuthorization)
+			return e.recordError(ctx, operator, step, ErrOperatorAuthorization)
 		}
 		if !e.effectSatisfied(step, target, observed) {
-			return e.recordError(ctx, execution, step, fmt.Errorf("%w: acknowledged effect is not observed for exact replica %d", ErrReplicaNotReady, step.ReplicaID))
+			return e.recordError(ctx, operator, step, fmt.Errorf("%w: acknowledged effect is not observed for exact replica %d", ErrReplicaNotReady, step.ReplicaID))
 		}
 	}
-	return e.advance(ctx, execution, target, step)
+	return e.advance(ctx, operator, target, step)
 }
 
 func canResumeFounding(step Step, active, target Document, err error) bool {
@@ -386,29 +390,29 @@ func canResumeFounding(step Step, active, target Document, err error) bool {
 		active.Group(step.GroupID) == nil && target.Group(step.GroupID) != nil
 }
 
-func (e *ConvergenceEngine) ensureRunning(ctx context.Context, ex ExecutionRecord, step Step) error {
-	if ex.CurrentStep == step.Seq && ex.State == ExecutionRunning {
+func (e *Controller) ensureRunning(ctx context.Context, ex Record, step Step) error {
+	if ex.CurrentStep == step.Seq && ex.State == OperatorRunning {
 		return nil
 	}
-	return e.transition(ctx, ex, step, ExecutionRunning, "", "")
+	return e.transition(ctx, ex, step, OperatorRunning, "", "")
 }
 
-func (e *ConvergenceEngine) advance(ctx context.Context, ex ExecutionRecord, target Document, step Step) convergenceOutcome {
+func (e *Controller) advance(ctx context.Context, ex Record, target Document, step Step) controllerOutcome {
 	if step.Seq == len(ex.Steps) {
 		return e.finish(ctx, ex, target, &step)
 	}
 	next := ex.Steps[step.Seq]
-	if err := e.transition(ctx, ex, next, ExecutionRunning, "", ""); err == nil {
-		return convergenceProgressed
+	if err := e.transition(ctx, ex, next, OperatorRunning, "", ""); err == nil {
+		return controllerProgressed
 	}
-	return convergenceIdle
+	return controllerIdle
 }
 
-func (e *ConvergenceEngine) finish(ctx context.Context, ex ExecutionRecord, target Document, last *Step) convergenceOutcome {
+func (e *Controller) finish(ctx context.Context, ex Record, target Document, last *Step) controllerOutcome {
 	if err := target.Validate(e.rules); err != nil {
 		step := transitionStep(ex, last)
 		e.fail(ctx, ex, step, fmt.Errorf("final Target validation: %w", err))
-		return convergenceProgressed
+		return controllerProgressed
 	}
 	for _, groupID := range affectedGroupIDs(ex.Steps) {
 		status, err := e.groups.Status(ctx, groupID)
@@ -434,17 +438,17 @@ func (e *ConvergenceEngine) finish(ctx context.Context, ex ExecutionRecord, targ
 	if validator != nil {
 		if err := validator(ctx, active, target); err != nil {
 			e.fail(ctx, ex, transitionStep(ex, last), fmt.Errorf("final drain safety validation: %w", err))
-			return convergenceProgressed
+			return controllerProgressed
 		}
 	}
 	step := transitionStep(ex, last)
-	if err := e.transition(ctx, ex, step, ExecutionSucceeded, "", ""); err == nil {
-		return convergenceProgressed
+	if err := e.transition(ctx, ex, step, OperatorSucceeded, "", ""); err == nil {
+		return controllerProgressed
 	}
-	return convergenceIdle
+	return controllerIdle
 }
 
-func transitionStep(ex ExecutionRecord, last *Step) Step {
+func transitionStep(ex Record, last *Step) Step {
 	if last != nil {
 		return *last
 	}
@@ -454,13 +458,13 @@ func transitionStep(ex ExecutionRecord, last *Step) Step {
 	return ex.Steps[len(ex.Steps)-1]
 }
 
-func (e *ConvergenceEngine) runStep(ctx context.Context, step Step, status GroupStatus) error {
+func (e *Controller) runStep(ctx context.Context, step Step, status GroupStatus) error {
 	if ctx.Err() != nil || !e.coordinator.IsMetaLeader() {
 		return ErrNotMetaLeader
 	}
 	cmd := authorizedStepForCurrent(e.coordinator, ctx, step)
-	if cmd.ExecutionID == "" {
-		return fmt.Errorf("%w: current execution changed before side effect", ErrExecutionAuthorization)
+	if cmd.OperatorID == "" {
+		return fmt.Errorf("%w: current execution changed before side effect", ErrOperatorAuthorization)
 	}
 	switch step.Kind {
 	case StepCreateFoundingGroup:
@@ -486,44 +490,44 @@ func (e *ConvergenceEngine) runStep(ctx context.Context, step Step, status Group
 	case StepDeleteGroupState:
 		return e.groups.DeleteGroupState(ctx, cmd)
 	default:
-		return fmt.Errorf("%w: unknown step kind %q", ErrExecutionAuthorization, step.Kind)
+		return fmt.Errorf("%w: unknown step kind %q", ErrOperatorAuthorization, step.Kind)
 	}
 }
 
-func authorizedStepForCurrent(coordinator ExecutionCoordinator, ctx context.Context, step Step) AuthorizedStep {
-	ex, ok := coordinator.CurrentExecution(ctx)
+func authorizedStepForCurrent(coordinator OperatorCoordinator, ctx context.Context, step Step) AuthorizedStep {
+	ex, ok := coordinator.CurrentOperator(ctx)
 	if !ok || ex.State.Terminal() || step.Seq < 1 || step.Seq > len(ex.Steps) ||
 		ex.CurrentStep != step.Seq || !ex.Steps[step.Seq-1].Equal(step) {
 		return AuthorizedStep{}
 	}
 	return AuthorizedStep{
-		ExecutionID: ex.ID, Version: ex.Version, Attempt: ex.Attempt,
+		OperatorID: ex.ID, Version: ex.Version, Attempt: ex.Attempt,
 		StepSeq: step.Seq, Kind: step.Kind, GroupID: step.GroupID,
 		NodeName: step.NodeName, ReplicaID: step.ReplicaID,
 	}
 }
 
-func (e *ConvergenceEngine) revalidateExact(ctx context.Context, expected ExecutionRecord, step Step) error {
+func (e *Controller) revalidateExact(ctx context.Context, expected Record, step Step) error {
 	if ctx.Err() != nil || !e.coordinator.IsMetaLeader() {
 		return ErrNotMetaLeader
 	}
-	current, ok := e.coordinator.CurrentExecution(ctx)
+	current, ok := e.coordinator.CurrentOperator(ctx)
 	if !ok || current.ID != expected.ID || current.Version != expected.Version || current.Attempt != expected.Attempt ||
 		current.State.Terminal() || current.CurrentStep != step.Seq || step.Seq > len(current.Steps) ||
 		!current.Steps[step.Seq-1].Equal(step) {
-		return fmt.Errorf("%w: exact execution step changed", ErrExecutionAuthorization)
+		return fmt.Errorf("%w: exact execution step changed", ErrOperatorAuthorization)
 	}
 	target, err := e.store.Target(ctx)
 	if err != nil {
 		return err
 	}
 	if target.Version != expected.Version {
-		return fmt.Errorf("%w: Target version changed", ErrExecutionSuperseded)
+		return fmt.Errorf("%w: Target version changed", ErrOperatorSuperseded)
 	}
 	return nil
 }
 
-func (e *ConvergenceEngine) transition(ctx context.Context, ex ExecutionRecord, step Step, state ExecutionState, waiting, failure string) error {
+func (e *Controller) transition(ctx context.Context, ex Record, step Step, state OperatorState, waiting, failure string) error {
 	if ctx.Err() != nil || !e.coordinator.IsMetaLeader() {
 		return ErrNotMetaLeader
 	}
@@ -538,97 +542,97 @@ func (e *ConvergenceEngine) transition(ctx context.Context, ex ExecutionRecord, 
 	// proposal ID and the record converges.
 	wctx, cancel := context.WithTimeout(ctx, e.proposalTimeout)
 	defer cancel()
-	return e.coordinator.RecordExecutionTransition(wctx, ExecutionTransition{
-		ExecutionID: ex.ID, Version: ex.Version, Attempt: ex.Attempt,
+	return e.coordinator.RecordOperatorTransition(wctx, OperatorTransition{
+		OperatorID: ex.ID, Version: ex.Version, Attempt: ex.Attempt,
 		StepSeq: step.Seq, State: state, GroupID: step.GroupID,
 		NodeName: step.NodeName, WaitingReason: waiting, Error: failure,
-		At: executionTime(e.clock.Now().UTC(), ex.UpdatedAt),
+		At: operatorTime(e.clock.Now().UTC(), ex.UpdatedAt),
 	})
 }
 
-func (e *ConvergenceEngine) recordError(ctx context.Context, ex ExecutionRecord, step Step, err error) convergenceOutcome {
-	if ctx.Err() != nil || !e.coordinator.IsMetaLeader() || !e.executionIsCurrent(ctx, ex, step) {
-		return convergenceIdle
+func (e *Controller) recordError(ctx context.Context, ex Record, step Step, err error) controllerOutcome {
+	if ctx.Err() != nil || !e.coordinator.IsMetaLeader() || !e.operatorIsCurrent(ctx, ex, step) {
+		return controllerIdle
 	}
 	state, reason, retry := classifyStepError(step, err)
 	if retry {
 		if e.transition(ctx, ex, step, state, reason, "") == nil {
-			return convergenceWaiting
+			return controllerWaiting
 		}
-		return convergenceIdle
+		return controllerIdle
 	}
 	e.fail(ctx, ex, step, err)
-	return convergenceProgressed
+	return controllerProgressed
 }
 
-func (e *ConvergenceEngine) fail(ctx context.Context, ex ExecutionRecord, step Step, err error) {
+func (e *Controller) fail(ctx context.Context, ex Record, step Step, err error) {
 	reason := fmt.Sprintf("failed-at-step-%d: %v", step.Seq, err)
-	if e.transition(ctx, ex, step, ExecutionFailed, "", reason) == nil {
+	if e.transition(ctx, ex, step, OperatorFailed, "", reason) == nil {
 	}
 }
 
-func (e *ConvergenceEngine) supersede(ctx context.Context, ex ExecutionRecord) convergenceOutcome {
+func (e *Controller) supersede(ctx context.Context, ex Record) controllerOutcome {
 	step := Step{}
 	if ex.CurrentStep > 0 && ex.CurrentStep <= len(ex.Steps) {
 		step = ex.Steps[ex.CurrentStep-1]
 	} else if len(ex.Steps) > 0 {
 		step = ex.Steps[0]
 	}
-	if err := e.transition(ctx, ex, step, ExecutionSuperseded, "", ""); err == nil {
-		return convergenceProgressed
+	if err := e.transition(ctx, ex, step, OperatorSuperseded, "", ""); err == nil {
+		return controllerProgressed
 	}
-	return convergenceIdle
+	return controllerIdle
 }
 
-func (e *ConvergenceEngine) executionIsCurrent(ctx context.Context, expected ExecutionRecord, step Step) bool {
-	current, ok := e.coordinator.CurrentExecution(ctx)
+func (e *Controller) operatorIsCurrent(ctx context.Context, expected Record, step Step) bool {
+	current, ok := e.coordinator.CurrentOperator(ctx)
 	cursorMatches := current.CurrentStep == step.Seq || current.CurrentStep == 0 && step.Seq == 1
 	return ok && current.ID == expected.ID && current.Version == expected.Version && current.Attempt == expected.Attempt &&
 		!current.State.Terminal() && cursorMatches && step.Seq >= 1 && step.Seq <= len(current.Steps) &&
 		current.Steps[step.Seq-1].Equal(step)
 }
 
-func classifyStepError(step Step, err error) (ExecutionState, string, bool) {
+func classifyStepError(step Step, err error) (OperatorState, string, bool) {
 	if errors.Is(err, ErrReplicaNotReady) {
 		if step.Kind == StepWaitCaughtUp || step.Kind == StepPromoteVoter {
-			return ExecutionWaitingCatchUp, err.Error(), true
+			return OperatorWaitingCatchUp, err.Error(), true
 		}
-		return ExecutionWaitingReplica, err.Error(), true
+		return OperatorWaitingReplica, err.Error(), true
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.Is(err, ErrGroupUnavailable) || errors.Is(err, ErrNoQuorum) || errors.Is(err, ErrNotMetaLeader) {
 		if step.Kind == StepPrepareReplica {
-			return ExecutionWaitingReplica, err.Error(), true
+			return OperatorWaitingReplica, err.Error(), true
 		}
-		return ExecutionWaitingLeader, err.Error(), true
+		return OperatorWaitingLeader, err.Error(), true
 	}
 	var refusal *membership.SafetyRefusal
 	if errors.As(err, &refusal) {
 		if refusal.Reason == "replica is not a current learner; add it as a learner first" {
-			return ExecutionFailed, "", false
+			return OperatorFailed, "", false
 		}
 		if step.Kind == StepPromoteVoter || step.Kind == StepWaitCaughtUp {
-			return ExecutionWaitingCatchUp, err.Error(), true
+			return OperatorWaitingCatchUp, err.Error(), true
 		}
 		if refusal.Reason == "replica liveness is unknown" || refusal.Reason == "post-change live voter quorum would be unavailable" {
-			return ExecutionWaitingReplica, err.Error(), true
+			return OperatorWaitingReplica, err.Error(), true
 		}
 	} else if errors.Is(err, ErrSafetyRefused) {
 		// Caller transports should preserve SafetyRefusal. Without its reason,
 		// waiting on promotion remains conservative; destructive refusals fail.
 		if step.Kind == StepPromoteVoter || step.Kind == StepWaitCaughtUp {
-			return ExecutionWaitingCatchUp, err.Error(), true
+			return OperatorWaitingCatchUp, err.Error(), true
 		}
 	}
 
-	return ExecutionFailed, "", false
+	return OperatorFailed, "", false
 }
 
-// fixedMembershipCoordinator keeps convergence on the scoped GroupController
+// fixedMembershipCoordinator keeps controller on the scoped GroupEffects
 // path. The receiving group leader owns the concrete membership.Coordinator;
 // CaughtUp applies the same fixed neutral status rule before promotion.
-type fixedMembershipCoordinator struct{ groups GroupController }
+type fixedMembershipCoordinator struct{ groups GroupEffects }
 
-func NewFixedMembershipCoordinator(groups GroupController) MembershipCoordinator {
+func NewFixedMembershipCoordinator(groups GroupEffects) MembershipCoordinator {
 	return &fixedMembershipCoordinator{groups: groups}
 }
 
@@ -674,7 +678,7 @@ func caughtUpStatus(status GroupStatus, replicaID uint64) (bool, string) {
 	return true, ""
 }
 
-func (e *ConvergenceEngine) effectSatisfied(step Step, target Document, status GroupStatus) bool {
+func (e *Controller) effectSatisfied(step Step, target Document, status GroupStatus) bool {
 	switch step.Kind {
 	case StepCreateFoundingGroup:
 		return status.Found && foundingMatchesTarget(target.Group(step.GroupID), status)
@@ -705,7 +709,7 @@ func forcedRetirementStep(target Document, step Step) bool {
 		audit.TargetNode == step.NodeName
 }
 
-func (e *ConvergenceEngine) validateStep(ctx context.Context, ex ExecutionRecord, active, target Document, step Step, status GroupStatus) error {
+func (e *Controller) validateStep(ctx context.Context, ex Record, active, target Document, step Step, status GroupStatus) error {
 	if err := target.Validate(e.rules); err != nil {
 		return err
 	}
@@ -713,53 +717,53 @@ func (e *ConvergenceEngine) validateStep(ctx context.Context, ex ExecutionRecord
 		return err
 	}
 	if status.GroupID != "" && status.GroupID != step.GroupID {
-		return fmt.Errorf("%w: status group %q does not match %q", ErrExecutionAuthorization, status.GroupID, step.GroupID)
+		return fmt.Errorf("%w: status group %q does not match %q", ErrOperatorAuthorization, status.GroupID, step.GroupID)
 	}
 	targetReplica := documentReplicaByID(target, step.GroupID, step.ReplicaID)
 	activeReplica := documentReplicaByID(active, step.GroupID, step.ReplicaID)
 	switch step.Kind {
 	case StepCreateFoundingGroup:
 		if active.Group(step.GroupID) != nil || target.Group(step.GroupID) == nil {
-			return fmt.Errorf("%w: founding group is not fresh", ErrExecutionAuthorization)
+			return fmt.Errorf("%w: founding group is not fresh", ErrOperatorAuthorization)
 		}
 		if status.Found && !foundingMatchesTarget(target.Group(step.GroupID), status) {
-			return fmt.Errorf("%w: founding group has conflicting membership", ErrExecutionAuthorization)
+			return fmt.Errorf("%w: founding group has conflicting membership", ErrOperatorAuthorization)
 		}
 	case StepPrepareReplica:
 		if targetReplica == nil || active.Group(step.GroupID) == nil && (!freshFoundingPlan(ex, step) || targetReplica.Role != ReplicaLearner) {
-			return fmt.Errorf("%w: prepare identity is not an established Target replica", ErrExecutionAuthorization)
+			return fmt.Errorf("%w: prepare identity is not an established Target replica", ErrOperatorAuthorization)
 		}
 	case StepAddLearner:
 		if targetReplica == nil {
-			return fmt.Errorf("%w: learner is absent from Target", ErrExecutionAuthorization)
+			return fmt.Errorf("%w: learner is absent from Target", ErrOperatorAuthorization)
 		}
 	case StepWaitCaughtUp, StepPromoteVoter:
 		if targetReplica == nil || targetReplica.Role != ReplicaVoter {
-			return fmt.Errorf("%w: promotion target is not a desired voter", ErrExecutionAuthorization)
+			return fmt.Errorf("%w: promotion target is not a desired voter", ErrOperatorAuthorization)
 		}
 	case StepDemoteVoter:
 		if targetReplica == nil || targetReplica.Role != ReplicaLearner {
-			return fmt.Errorf("%w: demotion target is not a desired learner", ErrExecutionAuthorization)
+			return fmt.Errorf("%w: demotion target is not a desired learner", ErrOperatorAuthorization)
 		}
 	case StepTransferLeader:
 		if targetReplica == nil || targetReplica.Role != ReplicaVoter {
-			return fmt.Errorf("%w: leadership target is not a desired voter", ErrExecutionAuthorization)
+			return fmt.Errorf("%w: leadership target is not a desired voter", ErrOperatorAuthorization)
 		}
 	case StepRemoveReplica, StepStopReplica:
 		if targetReplica != nil || activeReplica == nil || activeReplica.NodeName != step.NodeName {
-			return fmt.Errorf("%w: removal does not name an exact former replica", ErrExecutionAuthorization)
+			return fmt.Errorf("%w: removal does not name an exact former replica", ErrOperatorAuthorization)
 		}
 	case StepCleanupReplicaState:
 		if step.GroupID == MetaGroupID || targetReplica != nil || activeReplica == nil ||
 			step.Seq < 3 || ex.Steps[step.Seq-2].Kind != StepStopReplica || ex.Steps[step.Seq-3].Kind != StepRemoveReplica {
-			return fmt.Errorf("%w: cleanup is not authorized after exact data replica removal and stop", ErrExecutionAuthorization)
+			return fmt.Errorf("%w: cleanup is not authorized after exact data replica removal and stop", ErrOperatorAuthorization)
 		}
 	case StepDeleteGroupState:
 		if step.GroupID == MetaGroupID || target.Group(step.GroupID) != nil || active.Group(step.GroupID) == nil {
-			return fmt.Errorf("%w: delete does not name an exact removed data group", ErrExecutionAuthorization)
+			return fmt.Errorf("%w: delete does not name an exact removed data group", ErrOperatorAuthorization)
 		}
 	default:
-		return fmt.Errorf("%w: unknown step kind %q", ErrExecutionAuthorization, step.Kind)
+		return fmt.Errorf("%w: unknown step kind %q", ErrOperatorAuthorization, step.Kind)
 	}
 	deletingGroupStop := step.Kind == StepStopReplica && active.Group(step.GroupID) != nil && target.Group(step.GroupID) == nil
 	if step.Kind != StepCreateFoundingGroup && step.Kind != StepDeleteGroupState && !deletingGroupStop && !status.Found {
@@ -772,13 +776,13 @@ func (e *ConvergenceEngine) validateStep(ctx context.Context, ex ExecutionRecord
 	return nil
 }
 
-func (e *ConvergenceEngine) revalidateExactBeforeStart(ctx context.Context, ex ExecutionRecord, step Step) error {
-	current, ok := e.coordinator.CurrentExecution(ctx)
+func (e *Controller) revalidateExactBeforeStart(ctx context.Context, ex Record, step Step) error {
+	current, ok := e.coordinator.CurrentOperator(ctx)
 	if !ok || current.ID != ex.ID || current.Version != ex.Version || current.Attempt != ex.Attempt || current.State.Terminal() {
-		return fmt.Errorf("%w: execution changed before validation", ErrExecutionAuthorization)
+		return fmt.Errorf("%w: execution changed before validation", ErrOperatorAuthorization)
 	}
 	if step.Seq > len(current.Steps) || !current.Steps[step.Seq-1].Equal(step) {
-		return fmt.Errorf("%w: exact step changed before validation", ErrExecutionAuthorization)
+		return fmt.Errorf("%w: exact step changed before validation", ErrOperatorAuthorization)
 	}
 	return nil
 }
@@ -857,7 +861,7 @@ func equalUint64s(a, b []uint64) bool {
 	return true
 }
 
-func executionTime(now, previous time.Time) time.Time {
+func operatorTime(now, previous time.Time) time.Time {
 	if now.Before(previous) {
 		return previous
 	}
@@ -902,7 +906,7 @@ func foundingMatchesTarget(group *Group, status GroupStatus) bool {
 	}
 	return true
 }
-func freshFoundingPlan(ex ExecutionRecord, step Step) bool {
+func freshFoundingPlan(ex Record, step Step) bool {
 	for _, before := range ex.Steps {
 		if before.Seq >= step.Seq {
 			break

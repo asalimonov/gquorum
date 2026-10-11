@@ -9,12 +9,12 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/internal/convergence"
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metapb"
 	"github.com/asalimonov/gquorum/internal/metastore"
 	"github.com/asalimonov/gquorum/internal/metatransport"
 	"github.com/asalimonov/gquorum/internal/observe"
+	"github.com/asalimonov/gquorum/internal/operator"
 	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/internal/scheduling"
 	"github.com/asalimonov/gquorum/membership"
@@ -36,11 +36,11 @@ type Group struct {
 	store                *metastore.Store
 	transport            *metatransport.Transport
 	coordinator          *membership.Coordinator
-	convergence          *convergence.ConvergenceEngine
-	reconciler           *scheduling.Driver
+	controller           *operator.Controller
+	scheduler            *scheduling.Driver
 	observer             *observe.Watch
 	recorderMu           sync.Mutex
-	lastExecution        *topology.ExecutionStatus
+	lastOperator         *topology.OperatorStatus
 	lastDrained          map[string]bool
 	leases               *sessionManager
 	parked               parkedRegistry
@@ -117,11 +117,15 @@ func New(input Options) (*Group, error) {
 	g.addresses[opts.Identity.NodeName] = opts.Network.AdvertiseAddress
 	g.machine = metaengine.NewMachine(g.rules, nil)
 	g.watches = newWatchRegistry(opts.MaxWatchers)
-	g.reconciler, err = scheduling.New(scheduling.Config{Host: reconciliationHost{g}, Settings: opts.Reconciliation, Logger: opts.Logger, OnTransition: g.recordReconciliation})
+	g.scheduler, err = scheduling.New(scheduling.Config{Host: schedulingHost{g}, Settings: opts.Scheduling, Logger: opts.Logger, OnTransition: g.recordScheduling})
 	if err != nil {
 		return nil, err
 	}
 	g.observer, err = observe.New(observe.Config{Source: observationSource{g}, Settings: opts.Observation, Logger: opts.Logger, OnGroupTransition: g.recordGroupHealth, OnNodeTransition: g.recordNodeHealth})
+	if err != nil {
+		return nil, err
+	}
+	g.controller, err = operator.New(operator.Config{Store: g, Rules: g.rules, Coordinator: operatorCoordinator{g}, Groups: groupControllers{g}, OwnsGroup: func(string) bool { return true }, Interval: g.opts.Timing.TickInterval, MaxRetryInterval: time.Second, FinalValidator: g.finalTarget})
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +157,7 @@ func New(input Options) (*Group, error) {
 			return nil, err
 		}
 	}
-	g.convergence = convergence.NewConvergenceEngine(convergence.ConvergenceConfig{Store: g, Rules: g.rules, Coordinator: executionCoordinator{g}, Groups: groupControllers{g}, OwnsGroup: func(string) bool { return true }, Interval: g.opts.Timing.TickInterval, MaxRetryInterval: time.Second, FinalValidator: g.finalTarget})
+
 	return g, nil
 }
 func (g *Group) openEngine(identity topology.Identity, mode raftengine.Mode, peers []raft.Peer) error {
@@ -244,8 +248,8 @@ func (g *Group) Start(parent context.Context) error {
 			return g.startFailed(err)
 		}
 	}
-	g.convergence.Start(g.workCtx)
-	if err := g.reconciler.Start(g.workCtx); err != nil {
+	g.controller.Start(g.workCtx)
+	if err := g.scheduler.Start(g.workCtx); err != nil {
 		g.wg.Done()
 		return g.startFailed(err)
 	}

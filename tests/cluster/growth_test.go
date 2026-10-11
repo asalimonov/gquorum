@@ -51,9 +51,9 @@ func stageActivation(t *testing.T, ctx context.Context, c *Cluster, name string)
 	}
 	return staged, plan
 }
-func startApply(t *testing.T, ctx context.Context, c *Cluster, node string, version uint64) topology.ExecutionID {
+func startApply(t *testing.T, ctx context.Context, c *Cluster, node string, version uint64) topology.OperatorID {
 	t.Helper()
-	var id topology.ExecutionID
+	var id topology.OperatorID
 	// A follower loss can interrupt leader observation after the intent was
 	// staged. Apply is idempotent for this exact version; retry only transient
 	// unavailable responses, and fail immediately on any other refusal.
@@ -69,7 +69,7 @@ func startApply(t *testing.T, ctx context.Context, c *Cluster, node string, vers
 			return true, err
 		}
 		var result struct {
-			ID topology.ExecutionID `json:"execution_id"`
+			ID topology.OperatorID `json:"operator_id"`
 		}
 		if err := response.Decode(&result); err != nil {
 			return true, err
@@ -166,7 +166,7 @@ func TestRuntimeGrowthExposesLearnerBeforePromotionAndSurvivesRestart(t *testing
 			t.Fatal(err)
 		}
 	}
-	if err := c.WaitExecution(ctx, "node2", id); err != nil {
+	if err := c.WaitOperator(ctx, "node2", id); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.WaitActive(ctx, staged.Document.Version); err != nil {

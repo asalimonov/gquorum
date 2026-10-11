@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
+	"github.com/asalimonov/gquorum/internal/operator"
 	"log/slog"
 	"math"
 	"net"
@@ -58,9 +59,9 @@ type Options struct {
 	SnapshotThreshold uint64
 	MaxWatchers       int
 	Network           NetworkOptions
-	LoadGroups        topology.GroupController
+	LoadGroups        operator.GroupEffects
 	Health            topology.HealthSource
-	Reconciliation    ReconciliationOptions
+	Scheduling        SchedulingOptions
 	Observation       ObservationOptions
 	Events            *events.Bus
 	Logger            *slog.Logger
@@ -73,11 +74,11 @@ type Options struct {
 	OnReadmission func(context.Context, Readmission) error
 }
 
-// ReconciliationOptions controls local automatic load-replica repair. Disabled
+// SchedulingOptions controls local automatic load-replica repair. Disabled
 // is an explicit opt-out. Zero timings use a 30s interval, 20s tick timeout,
 // 60s stable-node window and 5m action cooldown. It never repairs _meta members
 // or approves staged operator intent.
-type ReconciliationOptions = scheduling.Settings
+type SchedulingOptions = scheduling.Settings
 
 // ObservationOptions controls node/group health sampling. Defaults are a 5s
 // interval and 2s timeout. Document application also wakes the sampler.
@@ -101,7 +102,7 @@ func DefaultTiming() Timing {
 }
 func (o Options) defaults() Options {
 	o.Limits = o.Limits.WithDefaults()
-	o.Reconciliation = o.Reconciliation.WithDefaults()
+	o.Scheduling = o.Scheduling.WithDefaults()
 	o.Observation = o.Observation.WithDefaults()
 	d := DefaultTiming()
 	if o.Timing.TickInterval == 0 {
@@ -183,7 +184,7 @@ func (o Options) defaults() Options {
 }
 func (o Options) Validate() error {
 	invalid := func(message string) error { return fault.New(fault.Invalid, message, nil) }
-	if err := o.Reconciliation.Validate(); err != nil {
+	if err := o.Scheduling.Validate(); err != nil {
 		return err
 	}
 	if err := o.Observation.Validate(); err != nil {
