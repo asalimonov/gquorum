@@ -142,6 +142,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			handler(w, r)
 		}
 	}
+	a.registerResourceRoutes(mux, protect)
 	a.registerWALRoutes(mux, protect)
 	a.registerProjectionRoutes(mux, protect)
 

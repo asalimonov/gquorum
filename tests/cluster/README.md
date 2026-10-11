@@ -171,3 +171,11 @@ surviving replicas retain exact values, and the restarted host retains the
 byte-identical state file and boot ledger without reopening a retired group.
 The caller then permits a fresh attempt of the same desired version. Only that
 attempt cleans the stores, and the retired group ID remains unavailable.
+
+`TestPerf_FifteenGroupResources{Three,Five,Seven}Nodes` measures the actual
+Linux test processes with fifteen live load groups, including heap/RSS, CPU,
+goroutines and descriptors. It checks every acknowledged command on each owner,
+then approves a sixty-step deletion plan and verifies bounded joined teardown,
+absent usable store paths and meta readiness. Limits and measurement conditions
+are recorded in `docs/testing/performance.md`. The authenticated measurement
+route exists only in the full test fixture.

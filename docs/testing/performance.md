@@ -31,6 +31,26 @@ unmeasured arbitrary-size throughput.
 | Fifteen-group replacement plan at three/five/seven nodes | Complete in less than 200 ms; deterministic exact transfer/remove/stop/cleanup/prepare/add/catch-up/promote ordering. Benchmark reports time and allocations. |
 | Full meta FSM snapshot at three/five/seven nodes | Fifteen groups, 128 retained documents and executions, a pending transfer and a retired group/allocation floor; payload at most four MiB; serialize/validate/restore/roundtrip in less than two seconds; canonical bytes match and restored retirement refuses ID reuse. Benchmarks report payload bytes, serialization/restore time and allocations. |
 
+The fifteen-group resource cases create fifteen independent three-voter load
+engines on the eligible workers of each three/five/seven-node cluster. Every
+observer remains in meta while owning no load engine. Twenty-five samples per
+process cover creation and ten rounds of writes across all fifteen groups.
+Measurements come from the actual Linux process: Go heap, resident pages,
+goroutine count, open file descriptors and user/system CPU time. Missing metrics
+or a changed process identity fail the case.
+
+Each full fixture process must stay below 128 MiB heap and 256 MiB resident
+memory, with at most `baseline + 15*32 + 64` goroutines and
+`baseline + 15*8 + 32` descriptors. Average CPU during the write interval must
+not exceed four cores. All 165 acknowledged commands have exact results on
+every owning FSM. One approved sixty-step deletion plan then removes all
+fifteen groups. Joined teardown must leave zero load engines, at most
+`baseline + 96` goroutines and `baseline + 32` descriptors, no usable load-store
+paths and a healthy retained meta quorum. The relative allowance includes
+caller transport connections opened during the workload. These bounds apply
+to the tested full fixture, including its caller protocol and storage, and make
+no arbitrary-size resource guarantee.
+
 The load transport remains caller-defined. `Transport.Send` receives owned
 messages and must support concurrent calls for different destinations and honor
 cancellation; calls for one destination are serialized. The engine's bounded
@@ -62,8 +82,8 @@ materialize 256 values once, and none of the refused identities appear.
 The source's 4,000 application reservations are replaced by 4,000 excess
 proposal attempts against the library's bounded admission, rather than
 claiming 4,000 held engine waiters. Domain admission ratios, reservation indexes
-and HTTP retry-header policy belong to the caller. Additional resource pressure
-and supporting source obligations remain in the implementation plan and inventory.
+and HTTP retry-header policy belong to the caller. Fifteen-group resource measurements and supporting source obligations are
+tracked in the implementation plan and inventory.
 
 ## Recorded measurements
 
@@ -192,3 +212,22 @@ against bounded engine waiters, not 4,000 held application reservations.
 The seven-case regression invocation also passes learner growth, admission
 leader transfer, own-store recovery and projection outage in 199.882 seconds,
 using the separate `tests/cluster/testapp` binary rather than the demo.
+
+### Fifteen-group process resources
+
+All three cases pass in 130.785 seconds combined. Each row reports the maximum
+measured value across that case's processes; elapsed time includes deployment
+and cleanup. Every case verifies all 165 acknowledged commands before deleting
+all fifteen groups and checking the retained meta quorum.
+
+| Meta nodes | Case elapsed | Peak heap | Peak RSS | Peak goroutines | Peak descriptors | Maximum average CPU cores |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3 | 40.68 s | 38.98 MiB | 74.00 MiB | 161 | 82 | 0.212 |
+| 5 | 44.93 s | 40.27 MiB | 73.86 MiB | 156 | 84 | 0.207 |
+| 7 | 42.74 s | 40.02 MiB | 74.03 MiB | 168 | 84 | 0.181 |
+
+After deletion, every process reports zero load engines. The largest observed
+cleanup increase is 30 goroutines and 8 descriptors over the initial baseline,
+within the explicit allowances for caller transport connections. All usable
+load-store paths are absent. Measurements use Linux process counters inside
+the normal compiled fixture and a race-instrumented Go test harness.
