@@ -1,5 +1,8 @@
 # Test suites
 
+Current results and acceptance status are in the
+[API refactor validation record](api-refactor-validation.md).
+
 `make test-unit` runs uncached unit tests with `-short -count=1`. Independent
 top-level unit cases call `t.Parallel()`. The default runs four packages and four
 cases per package concurrently; `UNIT_PACKAGES` and `UNIT_PARALLEL` can override

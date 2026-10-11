@@ -1,9 +1,10 @@
 # Baseline validation record
 
-These results precede the public Node/Cluster API refactor. Current refactor
-stages and measured checks are recorded in the
-[implementation progress](../plans/20261011-api-refactor.md); full refactor
-acceptance remains pending. This baseline remains comparison evidence.
+These results precede the public Node/Cluster API refactor. Current results and
+acceptance status are recorded in the
+[API refactor validation](api-refactor-validation.md), with stage history in the
+[implementation progress](../plans/20261011-api-refactor.md). This baseline
+remains comparison evidence.
 
 Validated October 11, 2026, with Go 1.26.5 on macOS arm64, Apple M4 Pro
 (14 logical CPUs), Docker 29.6.1 linux arm64 and Compose 5.3.

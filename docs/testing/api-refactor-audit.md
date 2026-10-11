@@ -1,10 +1,11 @@
 # Public API refactor acceptance audit
 
-Status: **in progress**. This is an evidence index for the
+Status: **complete**, October 11, 2026. This is an evidence index for the
 [target architecture](../brainstorms/20261011-public-api-simplification-target.md),
-not a declaration that the goal is complete. Full process validation must use
-an image containing the final implementation, including any fixes discovered
-by the gates below.
+with source review and runtime gates completed against the final implementation.
+The [validation record](api-refactor-validation.md) identifies source `355b728`,
+the exact process image and the complete passing run, including fixes discovered
+during review.
 
 ## Requirements and evidence
 
@@ -13,7 +14,7 @@ by the gates below.
 | Sections 1–2: clean Node/Cluster API and package direction | `go doc` shows Node/Cluster and explicit load types. Runtime/New(Options)/OpenMeta/OpenLoad and public meta/engine aliases are removed. Public guide and project tree updated. No private library imports in examples or test application. |
 | Section 3: pure settings, one owner, asynchronous Start, readiness and shutdown | Root constructor/options tests, managed ownership tests and `node_api_test.go`, `node_lifecycle_api_test.go`. Sequential startup, canceled waits, borrowed resources, stalled callbacks, Close failure/retry and actual meta DB lock assertions. |
 | Section 3: identity, limits and local diagnostics | Node settings tests, public readmission/recovery cases and limits tests. Only topology.Limits bounds cluster size; default 3/5. Parked values survive API cleanup with owned observations and typed errors. |
-| Section 4: complete administration surface | Cluster facade files cover section 11's migration inventory. Existing document/mutation/session/lock/status tests retained in internal/metaservice, with process clients migrated to public values. Full process acceptance pending. |
+| Section 4: complete administration surface | Cluster facade files cover section 11's migration inventory. Existing document/mutation/session/lock/status tests retained in internal/metaservice, with process clients migrated to public values. Full final-image process suite passes. |
 | Section 5: deliberate Group and Standalone ownership | `load/group_test.go` checks exact method boundary and no exposed raw fields; retained standalone snapshot/tail/dedup tests; physical baseline recovery. Managed transport tests validate endpoint, payload, delivery and lifetime identity. |
 | Section 6: configurable/replaced policies | External policy embedding/contract helpers, scheduler callback tests, serialized lifecycle tests and public three-node scheduler leadership test. Different caller policy selections work across leadership transfer without a replicated agreement gate. |
 | Sections 7–8: approved effects and serialized ownership | Managed action/retirement/readmission/transport tests and public fault application. Exact sender/receiver/target and approval tuple checks; retry proofs; successor protection; cancellation and shutdown joining. |
@@ -23,9 +24,9 @@ by the gates below.
 | Section 9 / Appendix A: physical schema and codec compatibility | Baseline-generated physical meta, WAL, snapshot and journal fixtures, with captured generator and immutable hashes. Current recovery preserves pins, full bucket records, native membership and committed application tail. Existing JSON proposal/result/snapshot fixtures unchanged. |
 | Section 10: meta protocol and example HTTP | Meta protocol fields preserved; load.proto remains caller-owned. Strict approval and If-Match tests, legacy rejection, both approval flows, staged-version errors and CAS assertions. Compose example revalidation passes (32.272s). |
 | Section 11: public/test migration | Baseline signatures and all 550 test names recorded; 64 renamed/split tests map to present symbols. `runtime-ports.md` records transferred assertions and intentional contract changes. Symbol coverage alone is not behavioral proof. |
-| Section 12: complete process/fault/scale coverage | Source inventory retained and target references updated. Selected 3/5/7-node recovery, founding, learner, projection and fifteen-group tests pass. Complete final-image process run pending; all nine performance cases pass; a small demo smoke test cannot substitute. |
+| Section 12: complete process/fault/scale coverage | Source inventory retained and target references updated. All 108 final-image process scenarios pass, covering 3/5/7-node recovery, founding, learner, projection and fifteen-group cases. All nine performance cases pass; the separate small Compose demo also passes. |
 | Appendix B: caller integration | Small meta-only example and full public Node test application use the new contracts without application-written consensus lifecycle switches. |
-| Appendix C: algorithms and failure matrix | Source review completed against each algorithm and failure row; detailed mappings below. Final process and fixture gates must cover the fixes found during this review. |
+| Appendix C: algorithms and failure matrix | Source review completed against each algorithm and failure row; detailed mappings below. Final process and fixture gates pass with the fixes found during this review. |
 
 ## Validation state
 
@@ -35,10 +36,10 @@ by the gates below.
 | `make test-unit` | Uncached pass after the fixture corrections: 15.61s, including physical compatibility. |
 | `make test-unit-race` | Passed after the audit fixes in both modules; managed suite (4.599s) and fifty Close-error repetitions (96.654s) also pass under race. |
 | `make lint` / cluster-tagged vet | Passed after the audit fixes. |
-| `make test-fixture` | Passed uncached after the audit fixes (95.173s); fifty focused Close-error race repetitions also pass. |
+| `make test-fixture` | Passed uncached after the audit fixes (95.173s); corrected fixture passes all 28 tests in the final process run (80.056s). Fifty focused Close-error race repetitions also pass. |
 | `make test-example` | Passed actual Compose app after the audit fixes (32.272s). |
-| `make test-cluster` | The audit-fix image run found an initial founding diagnostic race; corrected-image complete validation is still required. See the [current validation record](api-refactor-validation.md). |
-| `make test-perf` | Passed all nine cases against the final image (148.917s total; each case 2.45–42.88s). |
+| `make test-cluster` | Build plus complete run passed against `api-final-gates`: 108 process cases in 1417.516s, exit status 0, no skipped test cases and no remaining run-owned Docker resources. See the [validation record](api-refactor-validation.md). |
+| `make test-perf` | Dedicated nine-case run passed (148.917s). All nine also pass against the final image in the complete run, with each case taking 2.12–46.20s. |
 | `make bench` | Passed planner and full snapshot matrices at 3/5/7 nodes. |
 | `make proto-check` | Passed after checked-in load protocol comment regeneration. |
 | Baseline physical hashes / `git diff --check` | Passed. |

@@ -1,16 +1,17 @@
 # Public API refactor validation
 
-Status: targeted fixture/setup corrections pass; corrected-image complete
-process validation is pending. The
+Status: **complete**, validated October 11, 2026. The corrected-image complete
+process run and all other required gates pass. The
 [requirement audit](api-refactor-audit.md) covers the accepted target, algorithm
 inventory and failure matrix. This record separates current results from the
 [pre-refactor baseline](validation.md).
 
-Library source: `e135c7e`, including the scheduler revalidation and canceled
-recovery/shutdown fixes; subsequent fixture-only corrections are described
-below. Environment: Go 1.26.5, macOS arm64, Apple M4 Pro,
-Docker 29.6.1. Compilation caches were warm; short units, fixture, Compose and
-Docker scenarios were uncached. Timings include concurrent validation work.
+Validated source: `355b728`. Library changes end at `e135c7e`, including the
+scheduler revalidation and canceled recovery/shutdown fixes; `355b728` contains
+the fixture-only corrections described below. Environment: Go 1.26.5, macOS
+arm64, Apple M4 Pro, Docker 29.6.1. Compilation caches were warm; short units,
+fixture, Compose and Docker scenarios were uncached. Timings include concurrent
+validation work.
 
 The corrected process image is `gquorum-test:api-final-gates`:
 
@@ -25,10 +26,10 @@ The corrected process image is `gquorum-test:api-final-gates`:
 | `make test-unit` | PASS, uncached elapsed **15.61s**, below the 30-second budget. |
 | `make test-unit-race` | PASS in both modules. |
 | `make lint` and cluster-tagged vet | PASS. |
-| `make test-fixture` | PASS, uncached caller fixture 95.173s. |
+| `make test-fixture` | PASS, uncached caller fixture 95.173s; the corrected fixture also passes in `make test` and the final complete process run (28 tests, 80.056s). |
 | `make test-example` | PASS, actual Compose application 32.272s. |
-| `make test-cluster-run CLUSTER_IMAGE=gquorum-test:api-final-gates CLUSTER_ARGS=-json` | Complete run pending; focused corrected-image regressions pass. |
-| `make test-perf-run CLUSTER_IMAGE=gquorum-test:api-final-validation` | PASS, all nine process cases, 148.917s total. |
+| `make test-cluster-run CLUSTER_IMAGE=gquorum-test:api-final-gates CLUSTER_ARGS=-json` | PASS, all **108** process scenarios (1417.516s) and **28** caller fixture tests (80.056s). Exit status 0; no skipped test cases. |
+| `make test-perf-run CLUSTER_IMAGE=gquorum-test:api-final-validation` | PASS, all nine process cases, 148.917s total. All nine also pass against `api-final-gates` within the complete process run; see the matrix below. |
 | `make bench` | PASS, planner and complete FSM snapshot matrices at 3/5/7 nodes; those implementations did not change in the final audit fixes. |
 | `make proto-check` | PASS, pinned protocol regeneration; no protocol changes in the final audit fixes. |
 | Physical baseline fixture hashes | All seven match the captured baseline manifest. |
@@ -40,13 +41,21 @@ by `make test-cluster` and `make test-perf`. Earlier complete runs using
 `gquorum-test:api-refactor-validation` are supplementary evidence; they do not
 contain the final scheduler/shutdown fixes.
 
+The final complete run includes the three/five/seven-node fault and recovery
+matrices, all nine performance cases, fifteen independent load groups and
+removal of every local store. After command completion, no containers, networks
+or volumes remained for run `9cc003fea2a5af0716099606`; the image digest still
+matched the recorded build. The generated `testapp/loadpb` package has no tests;
+every actual test case ran.
+
 The earlier publication-fix run completed with one seven-node pending-pressure
 setup failure: connection establishment consumed the engine's one-second
 WAL-stall admission window before 80% of its waiter slots were filled. The
 harness now acquires the initial HTTP connections behind a barrier before
 releasing proposals; pending bounds, excess counts, duration and correctness
-assertions remain unchanged. The other failure was the fixture's initial
-founding HTTP message omitting all names until its first lifecycle observation.
+assertions remain unchanged. The subsequent audit-fix image run finished with
+107 process cases passing and one failure: the fixture's initial founding HTTP
+message omitted all names until its first lifecycle observation.
 It now names configured peers until an observation supplies the exact missing
 set, with a deterministic HTTP unit regression. These fixture corrections are
 checked using `gquorum-test:api-final-gates`. Founding timeout cases passed twice
@@ -56,16 +65,22 @@ attempts per run, overload p95 below 1.4ms, and exact cancellation/durability
 checks. The first focused pressure command matched no tests because of Make's
 handling of the regex end marker; that invocation is excluded from evidence.
 
+The complete corrected-image run also passes pressure cases at three, five and
+seven nodes. Each reaches 256 pending requests; overload p95 is respectively
+3.098ms, 2.000ms and 1.766ms, with 146–147 continuous samples per case. Exact
+cancellation and durability assertions pass at every size.
+
 ## Performance matrix
 
+These results use `gquorum-test:api-final-gates` in the complete process run.
 Each case includes deployment, workload and generation release, with its own
 two-minute deadline and correctness/resource assertions.
 
 | Nodes | Concurrent health | Concurrent writes | Fifteen groups |
 | --- | ---: | ---: | ---: |
-| 3 | 2.45s | 5.36s | 37.84s |
-| 5 | 2.90s | 5.37s | 42.88s |
-| 7 | 3.33s | 6.60s | 40.65s |
+| 3 | 2.12s | 4.49s | 41.01s |
+| 5 | 2.33s | 5.95s | 41.52s |
+| 7 | 2.79s | 5.34s | 46.20s |
 
 ## Targeted regression evidence
 

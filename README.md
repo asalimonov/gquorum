@@ -52,5 +52,5 @@ The [process-cluster harness](tests/cluster/README.md) uses isolated reusable
 testcontainers units in a separate test module. It covers three-, five- and
 seven-node consensus, membership, recovery, authorized effects, fifteen load
 groups and bounded performance/resource checks. See the
-[validation results](docs/testing/validation.md) and
+[validation results](docs/testing/api-refactor-validation.md) and
 [source-test adaptations](docs/brainstorms/20261010-raft-library-test-port.md).

@@ -32,7 +32,7 @@ verification progress; checking a stage does not waive any target requirement.
   add meaningful coverage for new ownership/policy/transport boundaries.
 - [x] Update library guide and current architecture/testing docs; remove all old
   public compatibility surfaces; inspect complete public API and target inventory.
-- [ ] Complete validation: make test, test-unit (<30s), test-unit-race, lint,
+- [x] Complete validation: make test, test-unit (<30s), test-unit-race, lint,
   test-fixture, test-example, test-cluster, test-perf, bench; proto-check if changed.
 - [x] Requirement-by-requirement source audit against the entire target; final
   runtime acceptance remains governed by the validation item above.
@@ -376,3 +376,17 @@ verification progress; checking a stage does not waive any target requirement.
   checks pass after the fixture changes. Complete validation now uses
   `gquorum-test:api-final-gates`, with unchanged library implementation from
   `e135c7e` and the corrected application diagnostics/test setup.
+
+- Final acceptance: the complete `api-final-gates` run passes all **108** process
+  scenarios (1417.516s) and **28** fixture tests (80.056s), with exit status 0 and
+  no skipped test cases. This includes all nine performance cases, the full
+  three/five/seven-node fault and recovery matrices, fifteen-group operation,
+  local-store deletion and shutdown. Every pressure size reaches its 256-request
+  bound, and all durability/cancellation assertions pass. Run-owned containers,
+  networks and volumes are gone after completion; the image digest is unchanged.
+- All required gates are complete. Uncached short units remain **15.61 seconds**;
+  unit races, full tests, lint, the actual Compose example, fixture, benchmarks,
+  protocol regeneration and physical compatibility checks pass. The requirement
+  audit and current validation record are finalized under `docs/testing`, and
+  README/testing links point to the refactor results. Source validated by the
+  final image is `355b728`; subsequent changes only record these results.
