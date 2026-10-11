@@ -67,6 +67,51 @@ func TestReplicaObservationCannotCompleteEffectBeforeStartupPublishes(t *testing
 	}
 }
 
+func TestCanceledRecoveryLeavesApplicationReleaseToShutdown(t *testing.T) {
+	functional(t)
+	f := newFixture(t)
+	var closes atomic.Int32
+	want := errors.New("application close must be retried explicitly")
+	f.cfg.Factory = func(context.Context, load.ReplicaSpec) (load.Application, error) {
+		return load.Application{StateMachine: &stateMachine{}, Close: func(context.Context) error {
+			if closes.Add(1) == 1 {
+				return want
+			}
+			return nil
+		}}, nil
+	}
+	h, err := New(f.cfg)
+	must(t, err)
+	lifetime, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	defer h.Stop(context.Background())
+	must(t, h.Start(lifetime))
+	ref := load.ReplicaRef{GroupID: "work", ReplicaID: 1}
+	handle, err := h.StartReplica(deadline(t), ref, StartExplicit)
+	must(t, err)
+	cancel()
+	must(t, handle.Core().Stop(deadline(t)))
+	waitSignal(t, h.workDone)
+	// Model an assignments read that completed concurrently with cancellation.
+	// Maintenance is joined, so installing this deterministic read is exclusive.
+	h.cfg.Assignments = func(context.Context) ([]load.ReplicaRef, error) { return []load.ReplicaRef{ref}, nil }
+	_ = h.RecoverAssignments(lifetime)
+	h.mu.Lock()
+	slot := h.slots[ref.GroupID]
+	startedRelease := slot == nil || slot.release != nil
+	h.mu.Unlock()
+	if startedRelease {
+		t.Fatal("canceled recovery admitted teardown ahead of the shutdown owner")
+	}
+	if err := h.Stop(deadline(t)); !errors.Is(err, want) || closes.Load() != 1 {
+		t.Fatalf("first shutdown lost its Close failure: err=%v calls=%d", err, closes.Load())
+	}
+	must(t, h.Stop(deadline(t)))
+	if closes.Load() != 2 {
+		t.Fatal("shutdown did not retry the retained application exactly once", closes.Load())
+	}
+}
+
 // These assertions followed ownership from the former Runtime into Host.
 func TestHostRefusesUnstartedAndForeignAssignmentsBeforeStoreMutation(t *testing.T) {
 	t.Parallel()

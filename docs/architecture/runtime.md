@@ -144,7 +144,10 @@ Scheduler calls are serialized per node. The lifecycle runner serializes readine
 retention and removal callbacks together. Deadlines bound accepted results; a
 noncooperative callback stays owned until actual return, with no overlapping
 replacement invocation. Policy decisions cannot bypass core authorization,
-persistence, identity or membership checks.
+persistence, identity or membership checks. Scheduling status reports
+`policy_stalled` while a canceled callback has not returned. The driver refreshes
+topology, health and native membership after the callback, then uses the ordinary
+replicated CAS to guard approval against concurrent document changes.
 
 `Node.Status()` reads local owned snapshots without probes. `Cluster.Status(ctx)`
 collects observations; neither proves quorum or linearizability. Compare leader

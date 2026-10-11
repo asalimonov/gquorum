@@ -28,13 +28,14 @@ verification progress; checking a stage does not waive any target requirement.
   HTTP approval/operator routes, requests, responses, clients and README.
   - [x] Small meta-only example and its process test use public Node/Cluster.
   - [x] Full load application, typed protocol adapter and fault fixtures.
-- [ ] Preserve/migrate all unit, functional and process-cluster assertions;
+- [x] Preserve/migrate all unit, functional and process-cluster assertions;
   add meaningful coverage for new ownership/policy/transport boundaries.
-- [ ] Update library guide and current architecture/testing docs; remove all old
+- [x] Update library guide and current architecture/testing docs; remove all old
   public compatibility surfaces; inspect complete public API and target inventory.
 - [ ] Complete validation: make test, test-unit (<30s), test-unit-race, lint,
   test-fixture, test-example, test-cluster, test-perf, bench; proto-check if changed.
-- [ ] Requirement-by-requirement completion audit against the entire target.
+- [x] Requirement-by-requirement source audit against the entire target; final
+  runtime acceptance remains governed by the validation item above.
 
 ## Progress and evidence
 
@@ -330,3 +331,29 @@ verification progress; checking a stage does not waive any target requirement.
   gquorum-test:api-refactor-validation (147.242s total; maximum case 42.30s).
   A complete process run against that updated image is in progress. The earlier
   complete run uses the pre-fix image and cannot close final-image acceptance.
+
+- Final source audit covers every section, Appendix C algorithm and failure row
+  in `docs/testing/api-refactor-audit.md`. All 550 baseline test names still
+  resolve, including the 64 explicit renamed/split mappings; all seven physical
+  baseline hashes remain unchanged. Public API inspection and private-import
+  searches confirm the intended Node/Cluster/Group boundary.
+- The audit reproduced a stale scheduler decision replacing a replica that
+  recovered during caller code. The driver now refreshes documents, health and
+  native membership after the callback and preserves final replicated CAS.
+  Callback tests cover recovered membership, new staged intent, unknown health,
+  lost quorum and leadership transfer. A canceled scheduler still running is
+  visible as `policy_stalled` and stays owned until actual return.
+- Full fixture validation exposed a second Close-error race after the earlier
+  publication fix: canceled recovery could start release ahead of Node shutdown,
+  consuming the first Close failure. A deterministic managed regression proves
+  it; recovery now checks cancellation/quiescence after observing engine state.
+  The original public assertions pass fifty consecutive race runs (96.654s),
+  and the complete managed race suite passes (4.599s).
+- Updated short units and unit races pass in both modules. Uncached unit elapsed
+  time is **17.02 seconds** during concurrent validation. The actual Compose
+  example passes in **32.272 seconds**. The final image is
+  `gquorum-test:api-final-validation`; broad fixture/process/performance gates
+  remain in progress and earlier-image passes cannot substitute for them.
+- Final audit stage: `make test` passes (96.525s for the complete fixture),
+  `make test-fixture` passes uncached (95.173s), and `make lint` plus the
+  cluster-tagged vet pass. Final-image Docker/performance validation remains.

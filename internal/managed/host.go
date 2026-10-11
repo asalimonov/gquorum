@@ -388,7 +388,19 @@ func (h *Host) RecoverAssignments(ctx context.Context) error {
 	for _, ref := range refs {
 		h.mu.Lock()
 		slot := h.slots[ref.GroupID]
-		if slot != nil && slot.identity.ReplicaID == ref.ReplicaID && slot.state == "ready" && slot.core != nil && !slot.core.Running() {
+		needsStop := slot != nil && slot.identity.ReplicaID == ref.ReplicaID && slot.state == "ready" && slot.core != nil && !slot.core.Running()
+		// An engine stopped by lifetime cancellation belongs to the shutdown
+		// coordinator. Check after observing Running: a late recovery read must
+		// not consume a Close failure before the owner's first Stop attempt.
+		if err := ctx.Err(); err != nil {
+			h.mu.Unlock()
+			return err
+		}
+		if !h.started || h.quiescing || h.stopped || h.ctx.Err() != nil {
+			h.mu.Unlock()
+			return fault.ErrStopped
+		}
+		if needsStop {
 			h.beginStopLocked(slot)
 		}
 		h.mu.Unlock()

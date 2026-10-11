@@ -87,6 +87,8 @@ type Driver struct {
 	done             chan struct{}
 	statusMu         sync.RWMutex
 	status           topology.SchedulingStatus
+	callback         context.Context
+	callbackStarted  time.Time
 	enabled          atomic.Bool
 }
 
@@ -174,7 +176,11 @@ func (r *Driver) Stop(ctx context.Context) error {
 func (r *Driver) Status() topology.SchedulingStatus {
 	r.statusMu.RLock()
 	defer r.statusMu.RUnlock()
-	return r.status.Clone()
+	status := r.status.Clone()
+	if r.callback != nil && r.callback.Err() != nil {
+		status.State, status.Reason, status.Since = topology.SchedulingError, "policy_stalled", r.callbackStarted
+	}
+	return status
 }
 
 // SetEnabled serializes the local kill switch with the current tick. Once
@@ -304,7 +310,13 @@ func (r *Driver) reconcileOnce(ctx context.Context) {
 	}
 	in := policy.ScheduleInput{Now: now, Latest: latest, Target: target, Active: active, Status: status, Health: evaluations, Alive: r.aliveDurations(now), Held: r.heldIdentities()}
 	callbackCtx, cancel := context.WithTimeout(ctx, r.callbackTimeout)
+	r.statusMu.Lock()
+	r.callback, r.callbackStarted = callbackCtx, now
+	r.statusMu.Unlock()
 	decision, err := r.policy.Schedule(callbackCtx, in.Clone())
+	r.statusMu.Lock()
+	r.callback = nil
+	r.statusMu.Unlock()
 	if err == nil {
 		err = callbackCtx.Err()
 	}
@@ -332,7 +344,7 @@ func (r *Driver) reconcileOnce(ctx context.Context) {
 	s := r.newStatus(true, topology.SchedulingRunning, ReconcileReasonMissingReplica)
 	s.CurrentAction = &topology.SchedulingActionStatus{Kind: string(action.Kind), GroupID: action.Identity.GroupID, NodeName: action.Identity.NodeName, ReplicaID: action.Identity.ReplicaID}
 	r.transition(s, "")
-	id, err := r.commitReplicaRepair(ctx, latest, active, status, action, now)
+	id, err := r.commitReplicaRepair(ctx, latest, active, action, now)
 	r.lastRun = now
 	if err != nil {
 		reason := ReconcileReasonPolicyRejected
@@ -380,7 +392,34 @@ func (r *Driver) healStagedInternal(ctx context.Context, latest, active topology
 	return true
 }
 
-func (r *Driver) commitReplicaRepair(ctx context.Context, latest, active topology.Document, status map[string]topology.GroupStatus, action policy.ScheduleAction, at time.Time) (topology.OperatorID, error) {
+func (r *Driver) commitReplicaRepair(ctx context.Context, latest, active topology.Document, action policy.ScheduleAction, at time.Time) (topology.OperatorID, error) {
+	// Caller code may have waited while topology or native membership changed.
+	// Recheck the decision boundary using fresh owned observations. The replicated
+	// CAS still protects changes occurring after this local validation.
+	currentLatest, currentTarget, currentActive, err := r.host.Views(ctx)
+	if err != nil {
+		return "", err
+	}
+	if !reflect.DeepEqual(currentLatest, latest) || !reflect.DeepEqual(currentTarget, latest) || !reflect.DeepEqual(currentActive, active) {
+		return "", fault.ErrVersionConflict
+	}
+	if !r.host.IsLeader() {
+		return "", fault.ErrNotLeader
+	}
+	health, err := r.host.Health(ctx)
+	if err != nil {
+		return "", err
+	}
+	if !knownHealth(active, health) {
+		return "", fault.New(fault.Unavailable, "repair health observation is unknown", nil)
+	}
+	if topology.EvaluateGroupHealth(active, action.Identity.GroupID, health).ObservedHealth.State.QuorumLost() {
+		return "", fault.New(fault.UnsafeMembership, "repair group has lost its observed quorum", nil)
+	}
+	status, err := r.host.GlobalStatus(ctx, active)
+	if err != nil {
+		return "", err
+	}
 	identity := action.Identity
 	group, node := active.Group(identity.GroupID), active.Node(identity.NodeName)
 	observed, ok := status[identity.GroupID]

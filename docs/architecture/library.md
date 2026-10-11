@@ -194,7 +194,11 @@ revalidates every decision before approval. It does not approve staged operator
 intent or alter `_meta` membership. Set `Policies.RestoreDegraded` options,
 `Policies.Scheduling` intervals/cooldown, or provide `Policies.Scheduler`.
 `Node.SetSchedulingEnabled` controls the local scheduler; `SchedulingStatus`
-reports its observations and decisions. Scheduler agreement metadata is deferred:
+reports its observations and decisions. A callback still running after its
+deadline reports `policy_stalled`; it remains owned until it returns. Decisions
+are checked against refreshed topology, health and native membership before
+approval, so a replica recovering during the callback is not replaced from an
+old observation. Scheduler agreement metadata is deferred:
 applications are responsible for choosing consistent startup settings.
 
 `policy.DefaultLifecycle` supplies local-admission or all-founders startup gates,

@@ -17,7 +17,9 @@ import (
 // Scheduler selects at most one supported repair from owned observations.
 // Returning an action requests validation and approval, never direct execution.
 // One node serializes calls to its scheduler. Shared implementations must
-// synchronize any state shared across nodes.
+// synchronize any state shared across nodes. Honor cancellation; status reads
+// and RequestStop are allowed, but do not wait for Stop or a scheduling change
+// that must join this callback.
 type Scheduler interface {
 	Schedule(context.Context, ScheduleInput) (ScheduleDecision, error)
 }
