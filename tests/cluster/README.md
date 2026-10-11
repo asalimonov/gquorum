@@ -12,6 +12,10 @@ make test-cluster-run CLUSTER_ARGS='-v -run TestPool'
 a different application image; that image must implement the fixture's REST and
 startup contracts. Cluster cases remain sequential.
 
+The complete inventory has a 45-minute suite timeout (`CLUSTER_TIMEOUT`). Each
+performance case still has its own deadline covering deployment, workload and
+cleanup and must complete in less than two minutes.
+
 This separate Go module pins testcontainers and Docker tooling without adding
 them to the library's dependency graph or the parallel unit-test loop.
 
@@ -179,3 +183,13 @@ then approves a sixty-step deletion plan and verifies bounded joined teardown,
 absent usable store paths and meta readiness. Limits and measurement conditions
 are recorded in `docs/testing/performance.md`. The authenticated measurement
 route exists only in the full test fixture.
+
+The API contract cases cover three/five/seven-node status and document views,
+nonmutating previews, exact CAS refusals, historical page slices and exact
+version reads. Lifecycle cases inspect staged drain and learner-first restore
+plans before approval, prove native membership remains unchanged until apply,
+then check policy caps, exact transfer, type immutability and staged-admission
+cancellation. The stopped-follower cases retain unapproved placement drift
+through follower and survivor restarts, verify reconciliation's staged blocker
+on every observer and measure both planes' nullable health from Active policy.
+Caller HTTP codes and envelopes are deliberately separate from SDK contracts.

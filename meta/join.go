@@ -17,6 +17,7 @@ import (
 	"github.com/asalimonov/gquorum/internal/metatransport"
 	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/topology"
+	"go.etcd.io/raft/v3"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -92,10 +93,10 @@ func (g *Group) handleJoin(ctx context.Context, h *metapb.Header, data []byte) (
 	// Admission decisions must use all committed state, including the current
 	// term's leader entry, before classifying an identity or superseding a disk.
 	status := g.engine.Load().RaftStatus()
-	if status.Commit == 0 || status.Applied < status.Commit {
+	machine := g.state()
+	if !joinClassificationReady(status, machine) {
 		return metatransport.Reply(fault.ErrUnavailable)
 	}
-	machine := g.state()
 	latest, target, active := machine.Views()
 	if target.Version == 0 {
 		return metatransport.Reply(fault.ErrUnavailable)
@@ -196,6 +197,14 @@ func (g *Group) handleJoin(ctx context.Context, h *metapb.Header, data []byte) (
 		return g.joinReply(ctx, result.Admission, false)
 	}
 	return refuse(parkedUnapproved, fault.New(fault.ExecutionAuthorization, "node has no current approved learner-first admission", nil))
+}
+
+// Equal indexes can still belong to a previous term just after election. Wait
+// until this leader's committed no-op has reached the durable meta machine.
+func joinClassificationReady(status raft.Status, machine *metaengine.Machine) bool {
+	index, term := machine.AppliedState()
+	return status.RaftState == raft.StateLeader && status.Term > 0 && status.Commit > 0 &&
+		status.Applied >= status.Commit && index >= status.Commit && term >= status.Term
 }
 func hasAdmissionSteps(plan topology.Plan, name string, id uint64) bool {
 	wanted := []topology.StepKind{topology.StepPrepareReplica, topology.StepAddLearner, topology.StepWaitCaughtUp, topology.StepPromoteVoter}

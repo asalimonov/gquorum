@@ -99,6 +99,9 @@ func TestMetaHealthEventsStatusAndDrainUseApprovedActiveScope(t *testing.T) {
 			t.Fatal(s)
 		}
 	}
+	waitPublic(t, func() bool {
+		return len(journalEvents(t, j, events.Filter{Types: []events.Type{events.LeaderChange}})) > 0
+	})
 	initial := journalEvents(t, j, events.Filter{Types: []events.Type{events.LeaderChange}})
 	if len(initial) == 0 {
 		t.Fatal("real election not journaled")
@@ -112,6 +115,9 @@ func TestMetaHealthEventsStatusAndDrainUseApprovedActiveScope(t *testing.T) {
 	waitObservation(t, watched, topology.GroupDegraded)
 	health.set("n2", topology.HealthDead)
 	waitObservation(t, watched, topology.GroupQuorumLost)
+	waitPublic(t, func() bool {
+		return len(journalEvents(t, j, events.Filter{Types: []events.Type{events.QuorumLost}})) > 0
+	})
 	eventBarrier(t, bus, stream)
 	lost := journalEvents(t, j, events.Filter{Types: []events.Type{events.QuorumLost}})
 	if len(lost) != 1 || lost[0].Version != 1 || lost[0].HealthyVoters == nil || *lost[0].HealthyVoters != 1 || lost[0].Voters != 3 {
@@ -120,6 +126,9 @@ func TestMetaHealthEventsStatusAndDrainUseApprovedActiveScope(t *testing.T) {
 	// Restore one node: degraded still has quorum and must report regained.
 	health.set("n2", topology.HealthAlive)
 	waitObservation(t, watched, topology.GroupDegraded)
+	waitPublic(t, func() bool {
+		return len(journalEvents(t, j, events.Filter{Types: []events.Type{events.QuorumAchieved}})) > 0
+	})
 	eventBarrier(t, bus, stream)
 	gained := journalEvents(t, j, events.Filter{Types: []events.Type{events.QuorumAchieved}})
 	if len(gained) != 1 || *gained[0].HealthyVoters != 2 {
@@ -166,6 +175,12 @@ func TestMetaHealthEventsStatusAndDrainUseApprovedActiveScope(t *testing.T) {
 	}
 	waitPublic(t, func() bool { return watched.state().Active().Version == 2 })
 	waitObservation(t, watched, topology.GroupHealthy)
+	// Active and observer snapshots become visible before the asynchronous
+	// recorder publishes its event. A dispatch barrier only flushes events
+	// already published, so wait for the drain event itself first.
+	waitPublic(t, func() bool {
+		return len(journalEvents(t, j, events.Filter{Types: []events.Type{events.DrainCompleted}})) > 0
+	})
 	eventBarrier(t, bus, stream)
 	drained := journalEvents(t, j, events.Filter{Types: []events.Type{events.DrainCompleted}})
 	active := watched.state().Active()

@@ -12,6 +12,11 @@ previews, planning, membership policy, individual worker components with fake
 sources, owned subscriptions, local journals, bbolt adapters and WAL recovery.
 Keep this suite below 30 seconds of elapsed time on the development machine.
 
+The admission/mutation source audit's latest uncached run completed in
+**13.23 seconds**, including the separate fixture module, while full runtime
+and Docker validations ran separately. The added isolated cases remain
+parallel; the real forwarding and joining-engine cases skip short mode.
+
 Functional cases explicitly skip when `testing.Short()` is true. These exercise
 real running Raft engines, network protocols, public multi-node lifecycles, or
 integrated FSM/planner/convergence/reconciliation workflows. Constructor and

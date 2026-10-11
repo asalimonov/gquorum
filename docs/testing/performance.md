@@ -1,6 +1,6 @@
 # Performance and operational checks
 
-Run `make test-perf` to build the test application and execute the six measured
+Run `make test-perf` to build the test application and execute the nine measured
 cluster cases. `make test-perf-run` reuses the existing image. The full
 `make test-cluster` includes these cases and the separate stability cases.
 Run `make bench` for planner and full meta FSM snapshot benchmarks; `BENCH_TIME`
@@ -82,8 +82,9 @@ materialize 256 values once, and none of the refused identities appear.
 The source's 4,000 application reservations are replaced by 4,000 excess
 proposal attempts against the library's bounded admission, rather than
 claiming 4,000 held engine waiters. Domain admission ratios, reservation indexes
-and HTTP retry-header policy belong to the caller. Fifteen-group resource measurements and supporting source obligations are
-tracked in the implementation plan and inventory.
+and HTTP retry-header policy belong to the caller. Fifteen-group resource
+measurements are recorded below; supporting source obligations remain tracked
+in the implementation plan and inventory.
 
 ## Recorded measurements
 

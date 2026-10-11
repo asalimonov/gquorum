@@ -329,6 +329,46 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 			t.Fatal("drain did not publish fresh liveness/effective state", node.Spec.Name, err)
 		}
 	}
+	// A drained node remains a current meta voter. Explicit Join on its retained
+	// disk must not quarantine that live lineage or allocate a replacement.
+	beforeRestart, err := c.Local(ctx, "node3", topology.MetaGroupID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Node("node3").Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Node("node3").StartJoining(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := Poll(ctx, func() (bool, error) {
+		local, err := c.Local(ctx, "node3", topology.MetaGroupID)
+		if err != nil {
+			return false, nil // The returning HTTP server may not be listening yet.
+		}
+		status, err := c.Status(ctx, "node3")
+		return err == nil && status.SessionLive && status.ActiveVersion == drained.Document.Version &&
+			local.Identity.MemberID == beforeRestart.Identity.MemberID &&
+			local.Identity.InstanceID != beforeRestart.Identity.InstanceID &&
+			len(local.Status.ConfState.Voters) == size && local.Status.Applied >= beforeRestart.Status.Applied, nil
+	}); err != nil {
+		t.Fatal("drained voter did not resume its retained lineage", err)
+	}
+	assertAPIViews(t, ctx, c, drained.Document)
+	for _, node := range c.Nodes() {
+		response, err := c.Request(ctx, node.Spec.Name, "GET", "/api/cluster/parked", nil, 0)
+		if err := requireStatus(response, err, 200); err != nil {
+			t.Fatal(err)
+		}
+		var parked []meta.ParkedJoin
+		if err := response.Decode(&parked); err != nil || len(parked) != 0 {
+			t.Fatal("current drained voter was parked", node.Spec.Name, parked, err)
+		}
+	}
+	response, err := c.Request(ctx, "node3", "GET", "/health/ready", nil, 0)
+	if err := requireStatus(response, err, 503); err != nil {
+		t.Fatal("meta restart silently activated the drained application", err)
+	}
 	capRule := topology.PlacementRule{MinReplicas: 1, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}}
 	capped, err := c.Mutate(ctx, "node2", "PUT", "/api/placement", globalPlacementBody(capRule, meta.MutationOptions{Apply: true, Actor: "operator"}))
 	if err != nil {
@@ -339,7 +379,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 		t.Fatal("activation failed or changed its policy/meta pin", activated, err)
 	}
 	assertActualAPIMembership(t, ctx, c, activated.Document, 2)
-	response, err := c.Request(ctx, "node3", "GET", "/api/load/work/keys/before-lifecycle", nil, 0)
+	response, err = c.Request(ctx, "node3", "GET", "/api/load/work/keys/before-lifecycle", nil, 0)
 	if err := requireStatus(response, err, 503); err != nil {
 		t.Fatal("capped activation silently regrew a local replica", err)
 	}

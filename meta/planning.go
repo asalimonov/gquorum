@@ -115,6 +115,9 @@ func (g *Group) Apply(ctx context.Context, version uint64) (topology.ExecutionID
 		if err = json.Unmarshal(reply, &id); err != nil {
 			return "", fault.New(fault.Unreadable, "invalid execution response", err)
 		}
+		if id == "" {
+			return "", fault.New(fault.Unreadable, "approval returned no execution ID", nil)
+		}
 		return id, nil
 	}
 	return g.applyLocal(ctx, version)

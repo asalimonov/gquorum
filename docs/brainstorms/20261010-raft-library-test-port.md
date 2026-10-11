@@ -1,6 +1,6 @@
 # Required source test port inventory
 
-Date: 2026-10-10. Source baseline: `fc982c0`. Status: implementation in progress; stages 1–6 have verified unit/function ports. Process-cluster ports remain outstanding.
+Date: 2026-10-10. Source baseline: `fc982c0`. Status: implementation in progress; stages 1–6 and the small example have verified ports. The expanded process suite is implemented and undergoing full regression; supporting assertion-level and final audits remain outstanding.
 
 ## Scope and acceptance
 
@@ -87,21 +87,21 @@ Paths in the following tables are relative to the source checkout. Target paths 
 
 | Source test | Disposition / target | Required adaptation or reason |
 | --- | --- | --- |
-| `TestCluster_APICrossNodeForwarding` | ADAPT → `tests/cluster/meta_test.go` | Port one-hop meta leader forwarding and cross-node result/refusal propagation; use caller test ingress for load routing. |
+| `TestCluster_APICrossNodeForwarding` | ADAPT → `TestMetaConsensusLoadReplicationAndRetainedLeaderRecovery`, `TestNodeLifecyclePlacementAndLeaderTransfer{Three,Five,Seven}Nodes` and `meta/forwarding_test.go` | Preserve real distributed ingress, exact answering identities and one-hop meta approval/result/refusal propagation. Source HTTP `?target=` selectors, served-by header, gossip lookup and remote journal reads are application ingress/aggregation policy, not an extracted SDK protocol. The caller load ingress has its own routing tests. |
 | `TestAuthzForward_RequiresGlobalClusterRead` | APPLICATION | Tests the application permission model. Meta credentials/cluster-ID checks and exact effect authorization remain required. |
 
 ### `tests/cluster/cluster_api_task18_test.go`
 
 | Source test | Disposition / target | Required adaptation or reason |
 | --- | --- | --- |
-| `TestClusterAPI_StagedTopologyIsInert` | ADAPT → `tests/cluster/{membership,execution,scale}_test.go` | Retain the exact membership/execution assertions; replace application traffic and SQL rows with acknowledged Machine commands and controller-owned cleanup records. |
-| `TestClusterAPI_RuntimeGrowLearnerFirst` | ADAPT → `tests/cluster/{membership,execution,scale}_test.go` | Retain the exact membership/execution assertions; replace application traffic and SQL rows with acknowledged Machine commands and controller-owned cleanup records. |
-| `TestClusterAPI_MetaJoinLearnerFirst` | ADAPT → `tests/cluster/{membership,execution,scale}_test.go` | Retain the exact membership/execution assertions; replace application traffic and SQL rows with acknowledged Machine commands and controller-owned cleanup records. |
-| `TestClusterAPI_RemoteApplyFromNonHostMetaLeader` | ADAPT → `tests/cluster/{membership,execution,scale}_test.go` | Retain the exact membership/execution assertions; replace application traffic and SQL rows with acknowledged Machine commands and controller-owned cleanup records. |
-| `TestClusterAPI_DrainChecksActualMetaQuorum` | ADAPT → `tests/cluster/{membership,execution,scale}_test.go` | Retain the exact membership/execution assertions; replace application traffic and SQL rows with acknowledged Machine commands and controller-owned cleanup records. |
+| `TestClusterAPI_StagedTopologyIsInert` | ADAPT → `tests/cluster/topology_test.go::TestStagedTopologyDoesNotChangeApprovedMembershipOrStartGroups` | Stage role, placement, never-started admission and group creation separately; every process retains exact Target/Active/execution/native voters. No staged-only runtime or physical store exists; the approved group still acknowledges exact commands. |
+| `TestClusterAPI_RuntimeGrowLearnerFirst` | ADAPT → `tests/cluster/growth_test.go::TestRuntimeGrowthExposesLearnerBeforePromotionAndSurvivesRestart` | Inspect exact prepare/add/catch-up/promote planning and a real promotion barrier, observed native learner and non-serving readiness; fresh identity survives restart with exact recovered values. |
+| `TestClusterAPI_MetaJoinLearnerFirst` | ADAPT → `tests/cluster/join_test.go::TestMetaAdmissionUsesLearnerBeforeServingAndRetainsIdentityOnRestart` | Start a genuine extra joining process, observe its native meta learner before the exact promotion, refuse early serving, finish the durable execution and retain granted identity across process replacement. |
+| `TestClusterAPI_RemoteApplyFromNonHostMetaLeader` | ADAPT → `tests/cluster/execution_test.go::TestRemoteApplyFromNonHostMetaLeader` | Remove the meta leader's load replica; remote status and immediate transfer still work through the caller controller while local reads refuse. Fresh-ID regrowth catches up, drain/activate and whole-group deletion verify exact effects and usable-store cleanup. |
+| `TestClusterAPI_DrainChecksActualMetaQuorum` | ADAPT → `tests/cluster/membership_test.go::TestDrainApprovalChecksObservedActualMetaQuorum` | Stage drain independently, lose the current healthy majority and require typed approval refusal with unchanged Target/Active; restore health and approve the same staged version. |
 | `TestClusterAPI_ForceRetireDeadNode` | ADAPT → `tests/cluster/membership_test.go::TestForceRetireDeadNodePreservesSafety{Three,Five,Seven}Nodes` | Abruptly lose a nonleader voter, force-retire through the healthy majority and check durable actor/reason/target audit and actual removal. A stale retained process must remain nonready across repeated samples. Stage readdition while down and require fresh meta/load IDs without changing Active or starting an execution. |
 | `TestClusterAPI_ExecutionResumesAfterMetaLeaderChange` | ADAPT → `tests/cluster/join_test.go::TestAdmissionExecutionResumesAfterMetaLeaderTransferWithoutNewAttempt` | Retain the exact membership/execution assertions; replace application traffic and SQL rows with acknowledged Machine commands and controller-owned cleanup records. |
-| `TestClusterAPI_CompactedLearnerCatchUp` | ADAPT → `tests/cluster/{membership,execution,scale}_test.go` | Retain the exact membership/execution assertions; replace application traffic and SQL rows with acknowledged Machine commands and controller-owned cleanup records. |
+| `TestClusterAPI_CompactedLearnerCatchUp` | ADAPT → `tests/cluster/growth_test.go::TestCompactedLearnerCatchesUpFromFullSnapshot` | Retain the 1,100-command compaction workload, fresh returning learner and final native promotion; its own process reports a received full snapshot and every exact acknowledged value before continued writes. |
 | `TestClusterAPI_IntentionalLearnerNotPromoted` | ADAPT → `tests/cluster/intentional_learner_test.go::TestIntentionalLearnerSurvivesReconciliationUntilApprovedPromotion` | Retain the exact membership/execution assertions; replace application traffic and SQL rows with acknowledged Machine commands and controller-owned cleanup records. |
 | `TestClusterAPI_DeleteShardWaitsForAllHosts` | ADAPT → `tests/cluster/delete_wait_test.go::TestDeletionWaitsForUnreachableFormerHostBeforeDeletingState` | Retain the exact membership/execution assertions; replace application traffic and SQL rows with acknowledged Machine commands and controller-owned cleanup records. |
 | `TestClusterAPI_FiveNodeMultiShardControllerShutdown` | ADAPT → `tests/cluster/shutdown_test.go::TestMultiGroupControllerShutdownAtFiveAndSevenNodes` | Retain the exact membership/execution assertions; replace application traffic and SQL rows with acknowledged Machine commands and controller-owned cleanup records. |
@@ -120,13 +120,13 @@ Paths in the following tables are relative to the source checkout. Target paths 
 
 | Source test | Disposition / target | Required adaptation or reason |
 | --- | --- | --- |
-| `TestCluster_HealthEndpoint` | ADAPT → `tests/cluster/meta_test.go` | Keep real node liveness/status, persisted restart and converged local observations. Assert each node identity, applied cursor and group state instead of application payloads. |
+| `TestCluster_HealthEndpoint` | ADAPT → `TestIdentityReadinessAndMinorityOverride{Three,Five,Seven}Nodes` and `TestDocumentStatusPreviewGuardsAndHistory{Three,Five,Seven}Nodes` | Every responding process has a unique exact node/member/process pin, live activation session and observed admitted topology. Gossip enabled/mode/config fields are caller application data. |
 | `TestCluster_ConfigPropagation` | APPLICATION | Application budget/reservation/rate-limit/billing, customer migration, SQL view, cache/pub-sub configuration propagation, plugin or permission behavior; no generic Raft contract is asserted by this case. Applicable consensus, durability and topology portions are covered by the required ports listed separately. |
 | `TestCluster_VirtualKeySync` | APPLICATION | Application budget/reservation/rate-limit/billing, customer migration, SQL view, cache/pub-sub configuration propagation, plugin or permission behavior; no generic Raft contract is asserted by this case. Applicable consensus, durability and topology portions are covered by the required ports listed separately. |
-| `TestCluster_NodeRestart` | ADAPT → `tests/cluster/meta_test.go` | Keep real node liveness/status, persisted restart and converged local observations. Assert each node identity, applied cursor and group state instead of application payloads. |
+| `TestCluster_NodeRestart` | ADAPT → `TestMetaConsensusLoadReplicationAndRetainedLeaderRecovery` and `TestDurableOwnSnapshotAndWALRecoverTenCommands{Three,Five,Seven}Nodes` | Persisted meta and exact caller values recover under unchanged member/load IDs, with a fresh process and continued quorum writes. Source customer configuration propagation is application-owned. |
 | `TestCluster_ConcurrentConfigWrites` | APPLICATION | Application budget/reservation/rate-limit/billing, customer migration, SQL view, cache/pub-sub configuration propagation, plugin or permission behavior; no generic Raft contract is asserted by this case. Applicable consensus, durability and topology portions are covered by the required ports listed separately. |
-| `TestCluster_StatusEndpoint` | ADAPT → `tests/cluster/meta_test.go` | Keep real node liveness/status, persisted restart and converged local observations. Assert each node identity, applied cursor and group state instead of application payloads. |
-| `TestCluster_StatusEndpoint_AllNodesConsistent` | ADAPT → `tests/cluster/meta_test.go` | Keep real node liveness/status, persisted restart and converged local observations. Assert each node identity, applied cursor and group state instead of application payloads. |
+| `TestCluster_StatusEndpoint` | ADAPT → `TestDocumentStatusPreviewGuardsAndHistory{Three,Five,Seven}Nodes` plus identity cases | Both observed leaders, native quorum sizes, alive caller types, exact owned views and each observer's local identity. Source gossip health-score/port/config and is-self HTTP fields are replaced by exact SDK observations. |
+| `TestCluster_StatusEndpoint_AllNodesConsistent` | ADAPT → `TestDocumentStatusPreviewGuardsAndHistory{Three,Five,Seven}Nodes` plus identity cases | Every process reads the identical approved topology and native meta voter count while retaining its own unique exact responding identity; no global gossip subsystem is introduced. |
 
 ### `tests/cluster/configmerge/configmerge_test.go`
 
@@ -385,6 +385,55 @@ The source symbols below make the smaller correctness tests discoverable alongsi
 
 Target: `topology/*_test.go and tests/cluster/topology_test.go`. Port generic document, guardrail, health, plan, CAS, drain, execution, reconciliation, readmission and watcher assertions. Remove source license and application counter expectations; adapt bound checks to Limits and node eligibility to caller types. Pause/force-new features remain unsupported as already specified.
 
+The current forwarding assertion audit maps the source exact-hop/empty-answer/
+domain-refusal/local-loop cases to
+`meta/forwarding_test.go::TestFollowerApprovalPreservesExactRequestAndRejectsEmptyReply`
+and the existing real follower approval case in `meta/planning_test.go`. The new
+real-gRPC table checks seven reply shapes, exact caller identity/request version,
+one call even with a new leader hint, unchanged documents, and received-follower
+refusal without forwarding. Empty/null success replies now return Unreadable.
+`TestMetaMemberRoutingSeparatesApprovedInboundFromRetainedOutbound` covers known,
+zero/unmapped, unresolved and canceled destinations plus the distinction between
+retained outbound history and approved Target/Active inbound membership. Source
+optional absent-forwarder/legacy HTTP 421 behavior is replaced by the mandatory
+meta protocol and typed SDK availability/refusal errors. Document validation and
+historical identity validation prevent ambiguous member owners before approval;
+no corrupt document is installed merely to recreate an invalid manager mock.
+
+The source manager activation-idempotence/refusals, lifecycle stamps, four drain
+health-staging subcases, drain state refusals, promotion/catch-up/repeated-role
+edit, invalid-role/group/node refusals, rollback current/missing/version lineage
+and allocation-floor cases now have explicit ports in
+`meta/mutation_contracts_test.go`. Its transfer table preserves seven eligible/
+ineligible/unknown-health/group/node cases, exact Active scope under newer staged
+intent, no callback after refusal and no document mutation. Source synthetic
+execution-ID/attempt fields for immediate transfer are replaced by the SDK's
+distinct authorized Active-version scope with step zero and no execution ID.
+These nine parallel unit functions supplement the existing manager ports;
+they do not close the remaining supporting inventory by name similarity.
+The ninth preserves every malformed-handle case from executor_test.go and adds
+attempt-shaped corruption; none can alias the exact retained successful attempt.
+The current drain audit also ports all five source actual-quorum cases into
+`topology/drain_safety_test.go::TestMetaDrainSafetyActualQuorumSizes`, extends the
+table to seven voters and repeats each membership shrink against the original
+native quorum. `TestMetaDrainSafetyFailsClosed` covers unknown/unresolved native
+membership/leader, unsampled health, absent groups and joint membership at both
+planning and final activation boundaries.
+
+The source `discovered_test.go` tests an application UI's merge of gossip and
+parked observations. Gossip-only new/excluded/dead membership, gossip/parked
+merge, placed-tile suppression, name-sorted UI tiles and the `discovered` status
+field remain caller presentation/discovery policy. No gossip provider or tile
+model belongs in the library. The applicable parked-only, empty, owned-copy,
+newest-first exact-process and admission-clearing contracts are implemented in
+`meta/parked_test.go` and the duplicate-name/excluded/current-voter process
+families in `tests/cluster/rejoin_test.go` and `recovery_test.go`. Parked records
+are concrete values, so the source nullable UI-enrichment case has no SDK
+equivalent. Exclusion provenance comes from exact retained document history;
+the SDK never fabricates it from the current Active version. The raw registry
+preserves both legitimate and intruding processes, rather than collapsing
+authorization identities into a name-only UI tile.
+
 - `cluster_health_test.go` (3 cases): `TestClusterStatus_HealthSerializationUnknown`, `TestClusterStatus_HealthSerializationKnown`, `TestClusterStatus_NoHealthKnownField`
 - `contracts_test.go` (5 cases): `TestExecutionErrorsSupportClassification`, `TestExecutionStateClassification`, `TestAuthorizedStepMatchesExactScope`, `TestStepJSONUsesGroupAndNodeNames`, `TestExecutionIDAttemptRoundTrip`
 - `convergence_test.go` (21 cases): `TestConvergence_LearnerFirstSteps`, `TestConvergence_FinalValidatorFailureLeavesActiveUnchanged`, `TestConvergence_ForcedRetirementWaivesOnlyDeadNodeTeardown`, `TestConvergence_DestructiveAndLifecycleSteps`, `TestConvergence_DeleteShardStopsEveryHostBeforeSharedDelete`, `TestConvergence_DeleteShardWaitsForUnreachableHost`, `TestConvergence_DeleteShardCompletesAfterGroupLosesLeader`, `TestConvergence_DeleteShardContinuesAfterGroupBecomesAbsent`, `TestConvergence_FoundingDemotionTransferAndDelete`, `TestConvergence_WaitFailureOwnershipAndCancellation`, `TestConvergence_EmptyPlanAndActivationFailure`, `TestApply_BeginsSignalsAndRetriesFailedAttempt`, `TestConvergence_MetricsAreBounded`, `TestConvergence_FailoverResumesExactStep`, `TestConvergence_SupersedesOnlyAtStepBoundary`, `TestConvergence_ResumePreservesDurableWaiting`, `TestConvergence_ResumeMixedPlaneOwnership`, `TestConvergence_ShutdownCancelsBlockedWorkAndIsIdempotent`, `TestConvergence_ShutdownReusesBoundedRetryTimer`, `TestConvergence_ResumeSerializesConcurrentTicks`, `TestConvergence_TickSurvivesLostProposal`
@@ -413,6 +462,36 @@ Target: `topology/*_test.go and tests/cluster/topology_test.go`. Port generic do
 ### Meta FSM, bbolt and real-meta clusters — `framework/cluster/topology/metaraft`
 
 Target: `internal/metaengine/*_test.go and internal/testcluster`. Port actual Raft election/follower propose/concurrent CAS/watch fanout/snapshot catch-up and executor failover harnesses, plus FSM/durable-state/join/session/activation tests. Replace implicit-directory and legacy-format fixtures. Quarantine tests become explicit caller readmission-hook contract tests. forcenew_test.go is the explicitly deferred feature, not a normal recovery exception.
+
+The source admission read barrier's two halves (applied behind commit and equal
+indexes still belonging to the previous leader term) now map to
+`meta/join_barrier_test.go::TestJoinClassificationWaitsForAppliedCurrentTerm`.
+Eight table cases require native and durable machine application to cover the
+committed index and current term before handleJoin classifies a name or grants
+readmission. An unavailable verdict precedes parked-registry updates. Existing
+real join, copied-live-pin, data-loss readmission and pinned admission-restart
+families exercise this production path. The table allows a durable machine ahead
+of native observation publication; it never mistakes an old-term equality for
+current-term completeness.
+
+`meta/join_protocol_test.go::TestJoinClientRefusalClassificationAndBoundedRedirects`
+ports client refusal classification, definitive authentication/identity refusal,
+retryable not-ready/pending results and redirect exhaustion. It adds malformed,
+empty and null grant refusal before store creation or routing mutation, checks
+the exact request lineage and visits duplicate seeds/self-hints only once.
+`TestJoinClientSkipsColdSeedsAndFollowsLeaderHintToExactGrant` walks an unreachable
+seed and a cold seed before following a follower's leader hint. The exact grant
+starts an empty joining engine with no invented membership, remains unready for
+the ready acknowledgement, and preserves its durable pin after joined shutdown.
+Actual readmitted/superseded grants, retry reuse and callback quarantine are
+covered by the real join/readmission and process families above. Old optional
+handler/legacy protocol behavior is replaced by the mandatory meta protocol.
+The three/five/seven-node lifecycle family additionally restarts a completed
+drain in explicit Join mode on its retained disk: the meta voter ID stays exact,
+the process ID changes, all document views and parked registries stay unchanged,
+and application readiness remains refused until activation. The declared
+Draining/effective Drained split preserves the source's placement-based restart
+contract without requiring a new persisted state transition.
 
 - `activation_test.go` (9 cases): `TestWaitForSelfVoter_EmptyDocumentAcceptsMatchingFounder`, `TestWaitForSelfVoter_EmptyDocumentStillRejectsUnadmittedIdentity`, `TestWaitForSelfVoter_JoinedFounderSeedDoesNotBypassPromotion`, `TestWaitForSelfVoter_BlocksLearnerUntilPromotion`, `TestActivate_MultiFounderQuorumCommits`, `TestActivate_MultiFounderWithoutQuorumFails`, `TestActivate_SingleNodeSucceeds`, `TestActivate_DuplicateNameRejected`, `TestActivate_Deactivate_ReleasesLock`
 - `admission_test.go` (6 cases): `TestAdmission_SameInstanceRetryAcrossPhasesAndSnapshot`, `TestAdmission_SupersededInstanceCannotBeResurrected`, `TestAdmission_DifferentInstanceCannotReusePreparedMemberID`, `TestBuildReadmissionPlan_ShrinksBeforeLearnerFirstReplacementAtMaximum`, `TestJoinAndJoinReady_PrimeResolverWithoutReplicatingAddress`, `TestJoinReady_MetaConfStateIsLearnerBeforeVoter`

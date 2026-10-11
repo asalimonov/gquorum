@@ -150,6 +150,18 @@ the gate. Timeouts retain no successful marker; established retained-state recov
 bypasses the initial gate with only a healthy majority. This policy is fixture code,
 not a library configuration dependency or a change to meta.WaitReady.
 
+Follower approval makes one control hop to the observed meta leader. A received
+request on a follower returns its typed leader refusal without another hop.
+Domain faults retain exact expected/current CAS versions. Empty or null success
+replies cannot identify an execution and are refused as Unreadable; they never
+become a successful mutation result for callers to poll.
+
+Join classification also requires the native applied cursor and durable meta
+machine cursor to cover the committed index, with the machine's applied term at
+least the observed leader term. Equal indexes from the previous term are
+insufficient just after election. Until the current-term no-op applies, the
+leader returns retryable Unavailable before parking or granting an identity.
+
 Join identity refusals are terminal: a live name fence or incompatible approved
 identity/type wakes WaitReady with ErrIdentityMismatch and joins the stopped
 runtime. Availability and pending/excluded admission refusals continue parking
