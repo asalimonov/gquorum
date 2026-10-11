@@ -45,6 +45,7 @@ func transferMeta(ctx context.Context, c *Cluster, ingress, target string, membe
 // Port of the source non-host meta-leader execution scenario. Each operation
 // uses the caller's load transport; meta leadership alone grants no local FSM.
 func TestRemoteApplyFromNonHostMetaLeader(t *testing.T) {
+	t.Parallel()
 	lease := acquire(t, matrixSpec(3))
 	c := lease.Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 105*time.Second)
@@ -169,9 +170,10 @@ func TestRemoteApplyFromNonHostMetaLeader(t *testing.T) {
 	}
 }
 
-func TestCallerRefusedDeletionRetainsDataThreeNodes(t *testing.T) { callerRefusedDeletion(t, 3) }
-func TestCallerRefusedDeletionRetainsDataFiveNodes(t *testing.T)  { callerRefusedDeletion(t, 5) }
-func TestCallerRefusedDeletionRetainsDataSevenNodes(t *testing.T) { callerRefusedDeletion(t, 7) }
+func TestCallerRefusedDeletionRetainsDataThreeNodes(t *testing.T) {
+	t.Parallel()
+	callerRefusedDeletion(t, 3)
+}
 
 // Port of the source non-empty deletion refusal. Application occupancy belongs
 // to the caller: refuse the first destructive callback, persist its failure,

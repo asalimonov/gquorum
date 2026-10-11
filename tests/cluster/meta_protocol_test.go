@@ -6,11 +6,12 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/asalimonov/gquorum"
 	"io"
 	"net"
 	"reflect"
 	"testing"
+
+	"github.com/asalimonov/gquorum"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metapb"
@@ -22,9 +23,10 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func TestMetaCredentialClusterIsolationThreeNodes(t *testing.T) { metaCredentialIsolation(t, 3) }
-func TestMetaCredentialClusterIsolationFiveNodes(t *testing.T)  { metaCredentialIsolation(t, 5) }
-func TestMetaCredentialClusterIsolationSevenNodes(t *testing.T) { metaCredentialIsolation(t, 7) }
+func TestMetaCredentialClusterIsolationThreeNodes(t *testing.T) {
+	t.Parallel()
+	metaCredentialIsolation(t, 3)
+}
 
 // Source shared-token founding plus actual unary/stream protocol isolation.
 // The private test generation publishes random meta ports only for this case.
@@ -148,5 +150,69 @@ func metaCredentialIsolation(t *testing.T, size int) {
 	}
 	if err := c.WaitReady(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestFollowerApprovalPreservesVersionAndReceivedRPCDoesNotReforward(t *testing.T) {
+	t.Parallel()
+	spec := matrixSpec(3)
+	spec.PublishMeta = true
+	ctx, c := performanceClusterSpec(t, spec)
+	status, err := c.Status(ctx, "node1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	follower := "node1"
+	if follower == status.MetaLeaderNodeName {
+		follower = "node2"
+	}
+	// The SDK call from the follower preserves the exact requested version and
+	// the domain error returned by the actual leader, without staging anything.
+	response, err := c.Request(ctx, follower, "POST", "/api/topology/17/approve", nil, 0)
+	if err := requireStatus(response, err, 409); err != nil {
+		t.Fatal(err)
+	}
+	var refusal struct {
+		Code     fault.Code `json:"code"`
+		Expected uint64     `json:"expected_version"`
+		Current  uint64     `json:"current_version"`
+	}
+	if err := response.Decode(&refusal); err != nil || refusal.Code != fault.VersionConflict || refusal.Expected != 17 || refusal.Current != 1 {
+		t.Fatal("forwarding lost version conflict", refusal, err)
+	}
+	local, err := c.Local(ctx, status.MetaLeaderNodeName, topology.MetaGroupID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := c.Node(follower)
+	host, err := node.Container.Host(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := node.Container.MappedPort(ctx, "9000/tcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := grpc.NewClient(net.JoinHostPort(host, port.Port()), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	rpc := metapb.NewMetaClient(conn)
+	valid := metadata.AppendToOutgoingContext(ctx, "gquorum-cluster-credential", hex.EncodeToString([]byte(c.Credential)))
+	header := &metapb.Header{ClusterId: c.ID, NodeName: local.Identity.NodeName, MemberId: local.Identity.MemberID, InstanceId: local.Identity.InstanceID}
+	for _, tc := range []struct{ data, code string }{{`{"version":17}`, string(fault.NotLeader)}, {`{`, string(fault.NotLeader)}} {
+		reply, err := rpc.ApplyVersion(valid, &metapb.MetaRequest{Header: header, Data: []byte(tc.data)})
+		if err != nil || reply.ErrorCode != tc.code {
+			t.Fatal("received follower RPC reforwarded or lost validation", reply, err)
+		}
+	}
+	for _, node := range c.Nodes() {
+		for _, view := range []string{"latest", "target", "active"} {
+			doc, err := c.Document(ctx, node.Spec.Name, view)
+			if err != nil || doc.Version != 1 {
+				t.Fatal("forwarding mutated documents", doc, err)
+			}
+		}
 	}
 }

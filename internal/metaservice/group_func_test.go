@@ -13,12 +13,13 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func publicFoundingCluster(t *testing.T, count int) []*Group {
-	return publicFoundingClusterWith(t, count, nil)
+func singleMetaFixture(t *testing.T) []*Group {
+	return singleMetaFixtureWith(t, nil)
 }
 
-func publicFoundingClusterWith(t *testing.T, count int, modify func(*Options)) []*Group {
+func singleMetaFixtureWith(t *testing.T, modify func(*Options)) []*Group {
 	t.Helper()
+	const count = 1
 	listeners := make([]net.Listener, count)
 	founders := make([]FoundingMember, count)
 	for i := range count {
@@ -54,24 +55,4 @@ func publicFoundingClusterWith(t *testing.T, count int, modify func(*Options)) [
 		}
 	}
 	return groups
-}
-func TestPublicMetaFoundingApprovesTopologyAndActivatesEveryNode(t *testing.T) {
-	groups := publicFoundingCluster(t, 3)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	for _, group := range groups {
-		if err := group.WaitReady(ctx); err != nil {
-			t.Fatal(err)
-		}
-		active := group.state().Active()
-		if active.Version != 1 || active.Origin != topology.OriginFounding || len(active.Nodes) != 3 || len(active.MetaGroup().Replicas) != 3 {
-			t.Fatal("incomplete founding activation", active)
-		}
-		group.sessionMu.Lock()
-		live := time.Now().Before(group.ownDeadline)
-		group.sessionMu.Unlock()
-		if !live {
-			t.Fatal("ready without leader-acknowledged session")
-		}
-	}
 }

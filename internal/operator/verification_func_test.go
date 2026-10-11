@@ -9,6 +9,7 @@ import (
 )
 
 func TestControllerAcknowledgedMembershipRequiresObservedExactResult(t *testing.T) {
+	t.Parallel()
 	active, target, replica := growDocuments()
 	step := Step{Seq: 1, Kind: StepAddLearner, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}
 	f := newControllerFixture(active, target, []Step{step, {Seq: 2, Kind: StepWaitCaughtUp, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID}}, 0, OperatorPending)
@@ -29,6 +30,7 @@ func TestControllerAcknowledgedMembershipRequiresObservedExactResult(t *testing.
 }
 
 func TestControllerFreshGroupSeedsVotersBeforeIntentionalLearner(t *testing.T) {
+	t.Parallel()
 	active := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"old"})
 	target := clusterDoc(1, 2, []string{"n1", "n2"}, []string{"old", "new"})
 	target.Version = 2

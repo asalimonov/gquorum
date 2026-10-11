@@ -65,6 +65,7 @@ type application struct {
 	clusterHooks                 *clusterHooks
 	fatalMu                      sync.Mutex
 	fatalErr                     error
+	callerScheduler              *fixtureScheduler
 }
 
 func nodeForPeer(p peer) topology.Node {
@@ -186,6 +187,11 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 	if cfg.MetaAddress == "" || cfg.LoadAddress == "" || cfg.HTTPAddress == "" {
 		return nil, fault.New(fault.Invalid, "advertised addresses required", nil)
 	}
+	if cfg.AdmissionPinPhase != "" {
+		if err := cfg.prepareAdmissionPin(); err != nil {
+			return nil, err
+		}
+	}
 	resume, err := cfg.recoverBootMode()
 	if err != nil {
 		return nil, err
@@ -268,6 +274,11 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 	if err != nil {
 		return nil, err
 	}
+	var scheduler policy.Scheduler
+	if cfg.CallerScheduler {
+		a.callerScheduler = &fixtureScheduler{reason: "caller-policy-" + cfg.NodeName}
+		scheduler = a.callerScheduler
+	}
 	a.node, err = gquorum.NewNode(gquorum.NodeOptions{
 		Identity:  topology.Identity{NodeName: cfg.NodeName, ClusterID: cfg.ClusterID, InstanceID: cfg.InstanceID, MemberID: member},
 		Node:      cfg.nodeForPeer(peer{Name: cfg.NodeName, Type: cfg.NodeType, MetaAddress: cfg.MetaAddress, LoadAddress: cfg.LoadAddress, HTTPAddress: cfg.HTTPAddress}),
@@ -279,10 +290,13 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 		Loads: gquorum.LoadOptions{Factory: a.newReplica, Retire: a.retireReplica, Transport: loadTransport{app: a},
 			Storage: gquorum.LoadStorageOptions{Store: &fixtureStore{Store: a.store, app: a}, Retirement: a.store},
 			Engine:  load.EngineOptions{Timing: load.Timing{TickInterval: cfg.TickInterval, ElectionTicks: 10, WALWriteWait: cfg.WALWriteWait}, SnapshotThreshold: cfg.SnapshotThreshold}},
-		Policies: gquorum.PolicyOptions{Scheduling: cfg.Scheduling, Lifecycle: &fixtureLifecycle{DefaultLifecycle: defaults, app: a}},
+		Policies: gquorum.PolicyOptions{Scheduler: scheduler, Scheduling: cfg.Scheduling, Lifecycle: &fixtureLifecycle{DefaultLifecycle: defaults, app: a}},
 	})
 	if err != nil {
 		return nil, err
+	}
+	if cfg.AdmissionPinPhase != "" {
+		_ = ls.meta.Close()
 	}
 	a.cluster = a.node.Cluster()
 	a.loadServer = grpc.NewServer(grpc.MaxRecvMsgSize(64<<20), grpc.MaxSendMsgSize(64<<20), grpc.MaxConcurrentStreams(128), grpc.WaitForHandlers(true))
@@ -318,6 +332,9 @@ func (a *application) Start(parent context.Context) error {
 			a.RequestClose()
 		}
 	})
+	if a.cfg.AdmissionPinPhase != "" {
+		return nil
+	}
 	if err := a.node.Start(a.lifeCtx); err != nil {
 		a.RequestClose()
 		return err

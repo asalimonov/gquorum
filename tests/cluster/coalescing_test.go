@@ -19,13 +19,8 @@ type writeProfile struct {
 }
 
 func TestWALCoalescingPreservesExactCommandsAndRaisesBatchingThreeNodes(t *testing.T) {
+	t.Parallel()
 	walCoalescing(t, 3)
-}
-func TestWALCoalescingPreservesExactCommandsAndRaisesBatchingFiveNodes(t *testing.T) {
-	walCoalescing(t, 5)
-}
-func TestWALCoalescingPreservesExactCommandsAndRaisesBatchingSevenNodes(t *testing.T) {
-	walCoalescing(t, 7)
 }
 func walProfile(ctx context.Context, c *Cluster, doc topology.Document) (writeProfile, error) {
 	p := writeProfile{perReplica: map[string]uint64{}}

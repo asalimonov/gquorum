@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/policy"
@@ -32,6 +33,9 @@ func (a *application) newReplica(ctx context.Context, spec load.ReplicaSpec) (lo
 		return load.Application{}, fault.ErrIdentityMismatch
 	}
 	a.machines[ref] = machine
+	if a.clusterHooks != nil {
+		a.clusterHooks.runtime.factories.Add(1)
+	}
 	a.mu.Unlock()
 	return load.Application{StateMachine: machine, Close: func(ctx context.Context) error {
 		if err := a.joinProjection(ctx, walKey{ref.GroupID, ref.ReplicaID}); err != nil {
@@ -75,6 +79,22 @@ func (p *fixtureLifecycle) Removal(ctx context.Context, input policy.RemovalInpu
 	}
 	if input.Identity != p.app.node.Identity() {
 		return policy.RemovalDecision{}, fault.ErrIdentityMismatch
+	}
+	status := p.app.node.Status()
+	if status.State != gquorum.NodeFenced || status.Ready || status.SessionLive || status.Meta.Found {
+		return policy.RemovalDecision{}, fault.New(fault.Invalid, "removal policy ran before mandatory fence", nil)
+	}
+	for _, replica := range status.Loads {
+		if replica.State == "ready" || replica.State == "starting" {
+			return policy.RemovalDecision{}, fault.New(fault.Invalid, "load owner remains during removal", nil)
+		}
+	}
+	calls := p.app.clusterHooks.runtime.removalCalls.Add(1)
+	if p.app.cfg.RetryRemoval {
+		if calls == 1 {
+			return policy.RemovalDecision{}, fmt.Errorf("fixture: retry removal response")
+		}
+		return policy.RemovalDecision{Action: policy.KeepDiagnostics}, nil
 	}
 	p.app.logger.Info("self-removal identity verified", "node", input.Identity.NodeName, "member_id", input.Identity.MemberID, "instance_id", input.Identity.InstanceID, "reason", input.Removal.Reason)
 	p.app.RequestClose()

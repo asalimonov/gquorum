@@ -158,6 +158,7 @@ func TestJoinClientRefusalClassificationAndBoundedRedirects(t *testing.T) {
 }
 
 func TestJoinClientSkipsColdSeedsAndFollowsLeaderHintToExactGrant(t *testing.T) {
+	t.Parallel()
 	accepted := &joinProtocolHandler{}
 	leader := joinProtocolServer(t, accepted, []byte("test-secret"))
 	redirect := metatransport.Reply(fault.ErrNotLeader)

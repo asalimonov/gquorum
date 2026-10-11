@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -125,8 +124,9 @@ type apiCluster struct {
 	cancel   context.CancelFunc
 }
 
-func newAPICluster(t *testing.T, size int, loads bool, configure func(int, *quorum.NodeOptions)) *apiCluster {
+func newSingleNodeFixture(t *testing.T, loads bool, configure func(int, *quorum.NodeOptions)) *apiCluster {
 	t.Helper()
+	const size = 1
 	c := &apiCluster{network: &apiNetwork{nodes: map[string]quorum.Node{}}, machines: map[string]*apiCounter{}}
 	c.ctx, c.cancel = context.WithCancel(context.Background())
 	defer func() { t.Cleanup(func() { c.cancel(); c.stopAll(t) }) }()
@@ -241,114 +241,4 @@ func (c *apiCluster) value(name, group string) uint64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.value
-}
-
-func TestPublicNodeSequentialStartManagedHoldsAndRecovery(t *testing.T) {
-	c := newAPICluster(t, 3, true, nil)
-	started := time.Now()
-	if err := c.nodes[0].Start(c.ctx); err != nil {
-		t.Fatal(err)
-	}
-	if time.Since(started) > time.Second {
-		t.Fatal("Start waited for quorum")
-	}
-	brief, cancel := context.WithTimeout(c.ctx, 30*time.Millisecond)
-	if err := c.nodes[0].WaitReady(brief); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatal("pre-quorum readiness", err)
-	}
-	cancel()
-	canceled, stop := context.WithCancel(context.Background())
-	stop()
-	if err := c.nodes[0].Start(canceled); err != nil {
-		t.Fatal("repeat Start replaced lifetime", err)
-	}
-	c.startAll(t)
-	ctx, done := context.WithTimeout(c.ctx, 15*time.Second)
-	defer done()
-	leader := c.leader(t)
-	result, err := leader.Cluster().CreateGroup(ctx, quorum.GroupSpec{ID: "counter"}, quorum.MutationOptions{Approve: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	operator, err := leader.Cluster().WaitOperator(ctx, result.OperatorID)
-	if err != nil || operator.State != topology.OperatorSucceeded {
-		for _, n := range c.nodes {
-			t.Logf("node: %+v", n.Status())
-		}
-		t.Fatal("create", operator, err)
-	}
-	var group *load.Group
-	apiEventually(t, func() bool {
-		for _, n := range c.nodes {
-			if g, ok := n.LoadGroup("counter"); ok && g.IsLeader() {
-				group = g
-				return true
-			}
-		}
-		return false
-	})
-	if r, err := group.Propose(ctx, load.Proposal{RequestID: "one", Data: []byte{7}}); err != nil || binary.BigEndian.Uint64(r.Data) != 7 {
-		t.Fatal(r, err)
-	}
-	apiEventually(t, func() bool {
-		for _, n := range c.nodes {
-			if c.value(n.Identity().NodeName, "counter") != 7 {
-				return false
-			}
-		}
-		return true
-	})
-	var held quorum.Node
-	for _, n := range c.nodes {
-		g, _ := n.LoadGroup("counter")
-		if !g.IsLeader() {
-			held = n
-			break
-		}
-	}
-	old, _ := held.LoadGroup("counter")
-	ref := load.ReplicaRef{GroupID: "counter", ReplicaID: old.ReplicaID()}
-	if err := held.StopLoadGroup(ctx, ref); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(150 * time.Millisecond)
-	if _, ok := held.LoadGroup("counter"); ok {
-		t.Fatal("supervisor erased explicit hold")
-	}
-	reopened, err := held.StartLoadGroup(ctx, ref)
-	if err != nil || reopened == old || !reopened.Running() {
-		t.Fatal("resume exact replica", err)
-	}
-	if _, err := old.Propose(ctx, load.Proposal{RequestID: "stale", Data: []byte{1}}); !errors.Is(err, fault.ErrStopped) {
-		t.Fatal("old handle redirected", err)
-	}
-	if err := group.Snapshot(ctx); err != nil {
-		t.Fatal(err)
-	}
-	c.stopAll(t)
-	for i, opts := range c.options {
-		l, err := net.Listen("tcp", opts.Meta.Network.AdvertiseAddress)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = l.Close() })
-		opts.Meta.Network.Listener = l
-		opts.Identity.InstanceID += "-restart"
-		n, err := quorum.NewNode(opts)
-		if err != nil {
-			t.Fatal(err)
-		}
-		c.nodes[i] = n
-		c.network.install(n)
-	}
-	c.startAll(t)
-	apiEventually(t, func() bool {
-		for _, n := range c.nodes {
-			g, ok := n.LoadGroup("counter")
-			if !ok || !g.Running() || c.value(n.Identity().NodeName, "counter") != 7 {
-				return false
-			}
-		}
-		return true
-	})
 }

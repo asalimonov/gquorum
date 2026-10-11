@@ -34,7 +34,8 @@ func restartOptions(t *testing.T, g *Group) Options {
 }
 
 func TestPublicMetaRestartUsesPinReplaysTailAndRefusesChangedRules(t *testing.T) {
-	old := readyPublic(t, publicFoundingCluster(t, 1))
+	t.Parallel()
+	old := readyPublic(t, singleMetaFixture(t))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	doc, _ := old.Latest(ctx)
@@ -88,7 +89,8 @@ func TestPublicMetaRestartUsesPinReplaysTailAndRefusesChangedRules(t *testing.T)
 }
 
 func TestPublicMetaParentCancellationJoinsWorkers(t *testing.T) {
-	old := readyPublic(t, publicFoundingCluster(t, 1))
+	t.Parallel()
+	old := readyPublic(t, singleMetaFixture(t))
 	if err := old.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}

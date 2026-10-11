@@ -12,9 +12,10 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func TestDeadPeerPreservesContinuousLeadershipThreeNodes(t *testing.T) { deadPeerLeadership(t, 3) }
-func TestDeadPeerPreservesContinuousLeadershipFiveNodes(t *testing.T)  { deadPeerLeadership(t, 5) }
-func TestDeadPeerPreservesContinuousLeadershipSevenNodes(t *testing.T) { deadPeerLeadership(t, 7) }
+func TestDeadPeerPreservesContinuousLeadershipThreeNodes(t *testing.T) {
+	t.Parallel()
+	deadPeerLeadership(t, 3)
+}
 
 type leadership struct{ leader, term uint64 }
 

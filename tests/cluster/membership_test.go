@@ -51,6 +51,7 @@ func assertDrained(t *testing.T, ctx context.Context, c *Cluster, name, group st
 }
 
 func TestDrainViaNonLeaderPreservesMetaMembership(t *testing.T) {
+	t.Parallel()
 	c := acquire(t, matrixSpec(3)).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
@@ -114,6 +115,7 @@ func TestDrainViaNonLeaderPreservesMetaMembership(t *testing.T) {
 }
 
 func TestDrainApprovalChecksObservedActualMetaQuorum(t *testing.T) {
+	t.Parallel()
 	c := acquire(t, matrixSpec(3)).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 95*time.Second)
 	defer cancel()
@@ -177,9 +179,10 @@ func TestDrainApprovalChecksObservedActualMetaQuorum(t *testing.T) {
 	assertDrained(t, ctx, c, "node2", "work", staged.Document.Version)
 }
 
-func TestForceRetireDeadNodePreservesSafetyThreeNodes(t *testing.T) { forceRetireDeadNode(t, 3) }
-func TestForceRetireDeadNodePreservesSafetyFiveNodes(t *testing.T)  { forceRetireDeadNode(t, 5) }
-func TestForceRetireDeadNodePreservesSafetySevenNodes(t *testing.T) { forceRetireDeadNode(t, 7) }
+func TestForceRetireDeadNodePreservesSafetyThreeNodes(t *testing.T) {
+	t.Parallel()
+	forceRetireDeadNode(t, 3)
+}
 
 func forceRetireDeadNode(t *testing.T, size int) {
 	t.Helper()

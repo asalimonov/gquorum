@@ -155,6 +155,7 @@ func TestReadmissionRetriesActualPreparedIdentityAfterQuarantineMove(t *testing.
 }
 
 func TestReadmissionRefusesForeignEvidenceAndUnverifiedCallbacks(t *testing.T) {
+	t.Parallel()
 	cases := []string{"grant", "catalog", "ledger", "backup", "foreign_live", "symlink", "unverified", "revoked"}
 	for _, name := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -285,6 +286,7 @@ func TestStopCancelsAndJoinsReadmissionCallback(t *testing.T) {
 
 // Ported from tests/cluster/testapp: catalog selection is now owned by Host.
 func TestReadmissionVerifiesActualRetainedIDWithinEntirePreviousCatalog(t *testing.T) {
+	t.Parallel()
 	for _, retained := range []uint64{4, 20} {
 		name := "known-interrupted-target"
 		if retained == 20 {

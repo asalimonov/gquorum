@@ -28,8 +28,9 @@ import (
 )
 
 type NodeSpec struct {
-	Name string
-	Type topology.NodeType
+	Name              string
+	Type              topology.NodeType
+	AdmissionPinPhase string
 }
 type Spec struct {
 	Nodes                                 []NodeSpec
@@ -45,6 +46,8 @@ type Spec struct {
 	WALWriteWait                          time.Duration
 	SnapshotThreshold                     uint64
 	Scheduling                            bool
+	CallerScheduler                       bool
+	RetryRemoval                          bool
 	SchedulingInterval, SchedulingTimeout time.Duration
 }
 
@@ -73,6 +76,9 @@ func (s Spec) validate() error {
 	}
 	names := map[string]bool{}
 	for _, node := range s.Nodes {
+		if node.AdmissionPinPhase != "" {
+			return errors.New("admission pin driver is only valid for joining processes")
+		}
 		if node.Name == "" || strings.TrimSpace(string(node.Type)) == "" || names[node.Name] {
 			return errors.New("invalid initial node identities")
 		}
@@ -190,7 +196,7 @@ func (n *Node) StartJoining(ctx context.Context) error {
 	for i, seed := range c.Spec.Nodes {
 		peers[i] = peer{Name: seed.Name, Type: seed.Type, MetaAddress: seed.Name + ":9000", LoadAddress: seed.Name + ":9001", HTTPAddress: seed.Name + ":8080"}
 	}
-	if err := c.createNodeContainer(ctx, n, c.image, peers, true, n.Spec.Name); err != nil {
+	if err := c.createNodeContainer(ctx, n, c.image, peers, true, n.Spec.Name, ""); err != nil {
 		return err
 	}
 	return n.Start(ctx)
@@ -319,9 +325,9 @@ func (c *Cluster) createNodeClaiming(ctx context.Context, image string, spec Nod
 	c.mu.Lock()
 	c.nodes = append(c.nodes, node)
 	c.mu.Unlock()
-	return node, c.createNodeContainer(ctx, node, image, peers, join, claim)
+	return node, c.createNodeContainer(ctx, node, image, peers, join, claim, spec.AdmissionPinPhase)
 }
-func (c *Cluster) createNodeContainer(ctx context.Context, node *Node, image string, peers []peer, join bool, claim string) error {
+func (c *Cluster) createNodeContainer(ctx context.Context, node *Node, image string, peers []peer, join bool, claim, pinPhase string) error {
 	spec := node.Spec
 	volumeName := c.resourcePrefix + "-" + spec.Name
 	manifest, err := json.Marshal(peers)
@@ -335,9 +341,16 @@ func (c *Cluster) createNodeContainer(ctx context.Context, node *Node, image str
 	request := testcontainers.ContainerRequest{
 		Image: image, Name: volumeName, ExposedPorts: ports, Networks: []string{c.Network}, NetworkAliases: map[string][]string{c.Network: {spec.Name}}, Labels: maps.Clone(c.labels), Mounts: testcontainers.Mounts(testcontainers.VolumeMount(node.Volume, "/data")),
 		Env:            map[string]string{"GQUORUM_NODE": claim, "GQUORUM_TYPE": string(spec.Type), "GQUORUM_CLUSTER": c.ID, "GQUORUM_CREDENTIAL": c.Credential, "GQUORUM_DATA": "/data", "GQUORUM_PEERS": string(manifest), "GQUORUM_META_ADDRESS": spec.Name + ":9000", "GQUORUM_LOAD_ADDRESS": spec.Name + ":9001", "GQUORUM_HTTP_ADDRESS": spec.Name + ":8080"},
-		Cmd:            []string{"-gate-founders=" + strconv.FormatBool(c.Spec.GateFounders), "-founding-timeout=" + c.Spec.FoundingTimeout.String(), "-address-free=" + strconv.FormatBool(c.Spec.AddressFree), "-bootstrap=" + strconv.FormatBool(c.Spec.Bootstrap), "-join=" + strconv.FormatBool(join), "-max-nodes=" + strconv.Itoa(c.Spec.Limits.MaxNodes), "-max-replicas=" + strconv.Itoa(c.Spec.Limits.MaxReplicas), "-session-ttl=" + c.Spec.SessionTTL.String(), "-tick=" + c.Spec.Tick.String(), "-snapshot-threshold=" + strconv.FormatUint(c.Spec.SnapshotThreshold, 10), "-wal-write-wait=" + c.Spec.WALWriteWait.String(), "-disable-reconciliation=" + strconv.FormatBool(!c.Spec.Scheduling), "-reconciliation-interval=" + c.Spec.SchedulingInterval.String(), "-reconciliation-timeout=" + c.Spec.SchedulingTimeout.String()},
+		Cmd:            []string{"-admission-pin-phase=" + pinPhase, "-caller-scheduler=" + strconv.FormatBool(c.Spec.CallerScheduler), "-retry-removal=" + strconv.FormatBool(c.Spec.RetryRemoval), "-gate-founders=" + strconv.FormatBool(c.Spec.GateFounders), "-founding-timeout=" + c.Spec.FoundingTimeout.String(), "-address-free=" + strconv.FormatBool(c.Spec.AddressFree), "-bootstrap=" + strconv.FormatBool(c.Spec.Bootstrap), "-join=" + strconv.FormatBool(join), "-max-nodes=" + strconv.Itoa(c.Spec.Limits.MaxNodes), "-max-replicas=" + strconv.Itoa(c.Spec.Limits.MaxReplicas), "-session-ttl=" + c.Spec.SessionTTL.String(), "-tick=" + c.Spec.Tick.String(), "-snapshot-threshold=" + strconv.FormatUint(c.Spec.SnapshotThreshold, 10), "-wal-write-wait=" + c.Spec.WALWriteWait.String(), "-disable-reconciliation=" + strconv.FormatBool(!c.Spec.Scheduling), "-reconciliation-interval=" + c.Spec.SchedulingInterval.String(), "-reconciliation-timeout=" + c.Spec.SchedulingTimeout.String()},
 		WaitingFor:     wait.ForListeningPort("8080/tcp").SkipInternalCheck().WithStartupTimeout(20 * time.Second),
 		ConfigModifier: func(config *containerapi.Config) { config.Hostname = spec.Name },
+	}
+	if pinPhase != "" {
+		// A published Docker port can accept connections before the protocol
+		// driver pins identity and starts HTTP. Wait for its actual diagnostic.
+		request.WaitingFor = wait.ForHTTP("/internal/test/admission-pin").WithPort("8080/tcp").
+			WithHeaders(map[string]string{"X-Gquorum-Test-Credential": c.Credential}).
+			WithStartupTimeout(20 * time.Second)
 	}
 	owned, cancel, err := c.operation(ctx)
 	if err != nil {
@@ -359,6 +372,9 @@ func (c *Cluster) PrepareJoinNode(ctx context.Context, spec NodeSpec) (*Node, er
 	defer c.creationMu.Unlock()
 	if err := topology.ValidateID(spec.Name); err != nil {
 		return nil, err
+	}
+	if spec.AdmissionPinPhase != "" && spec.AdmissionPinPhase != "pending" && spec.AdmissionPinPhase != "ready" {
+		return nil, errors.New("invalid admission pin phase")
 	}
 	if strings.TrimSpace(string(spec.Type)) == "" || c.Node(spec.Name) != nil {
 		return nil, errors.New("invalid or already allocated joining node")

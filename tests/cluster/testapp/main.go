@@ -8,13 +8,14 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
-	"github.com/asalimonov/gquorum"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/asalimonov/gquorum"
 
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -43,6 +44,8 @@ type config struct {
 	GateFounders                                         bool
 	FoundingTimeout                                      time.Duration
 	Scheduling                                           gquorum.SchedulingOptions
+	AdmissionPinPhase                                    string
+	CallerScheduler, RetryRemoval                        bool
 }
 
 func envOr(name, fallback string) string {
@@ -81,6 +84,9 @@ func main() {
 	flag.BoolVar(&c.Scheduling.Disabled, "disable-reconciliation", false, "disable automatic load replica repair")
 	flag.DurationVar(&c.Scheduling.Interval, "reconciliation-interval", 0, "automatic repair observation interval; zero selects the library default")
 	flag.DurationVar(&c.Scheduling.Timeout, "reconciliation-timeout", 0, "automatic repair observation timeout; zero selects the library default")
+	flag.BoolVar(&c.CallerScheduler, "caller-scheduler", false, "fixture: node-specific caller scheduler")
+	flag.BoolVar(&c.RetryRemoval, "retry-removal", false, "fixture: retry removal once and retain diagnostics")
+	flag.StringVar(&c.AdmissionPinPhase, "admission-pin-phase", "", "fixture: stop joining after pending or ready identity pin")
 	flag.Parse()
 	if healthcheck != "" {
 		client := &http.Client{Timeout: 2 * time.Second}

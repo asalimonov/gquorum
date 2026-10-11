@@ -114,17 +114,23 @@ func (g *Group) Apply(ctx context.Context, version uint64) (topology.OperatorID,
 		if err != nil {
 			return "", err
 		}
-		var id topology.OperatorID
-		if err = json.Unmarshal(reply, &id); err != nil {
-			return "", fault.New(fault.Unreadable, "invalid execution response", err)
-		}
-		if id == "" {
-			return "", fault.New(fault.Unreadable, "approval returned no execution ID", nil)
-		}
-		return id, nil
+		return approvalOperatorID(reply)
 	}
 	return g.applyLocal(ctx, version)
 }
+
+// approvalOperatorID validates the follower's one-hop approval response.
+func approvalOperatorID(reply []byte) (topology.OperatorID, error) {
+	var id topology.OperatorID
+	if err := json.Unmarshal(reply, &id); err != nil {
+		return "", fault.New(fault.Unreadable, "invalid execution response", err)
+	}
+	if id == "" {
+		return "", fault.New(fault.Unreadable, "approval returned no execution ID", nil)
+	}
+	return id, nil
+}
+
 func (g *Group) applyLocal(ctx context.Context, version uint64) (topology.OperatorID, error) {
 	if !g.IsLeader() {
 		return "", fault.ErrNotLeader

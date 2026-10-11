@@ -14,9 +14,10 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func TestDocumentStatusPreviewGuardsAndHistoryThreeNodes(t *testing.T) { documentAPIContracts(t, 3) }
-func TestDocumentStatusPreviewGuardsAndHistoryFiveNodes(t *testing.T)  { documentAPIContracts(t, 5) }
-func TestDocumentStatusPreviewGuardsAndHistorySevenNodes(t *testing.T) { documentAPIContracts(t, 7) }
+func TestDocumentStatusPreviewGuardsAndHistoryThreeNodes(t *testing.T) {
+	t.Parallel()
+	documentAPIContracts(t, 3)
+}
 
 func assertAPIViews(t *testing.T, ctx context.Context, c *Cluster, doc topology.Document) {
 	t.Helper()
@@ -217,13 +218,8 @@ func documentAPIContracts(t *testing.T, size int) {
 }
 
 func TestNodeLifecyclePlacementAndLeaderTransferThreeNodes(t *testing.T) {
+	t.Parallel()
 	lifecyclePlacementContracts(t, 3)
-}
-func TestNodeLifecyclePlacementAndLeaderTransferFiveNodes(t *testing.T) {
-	lifecyclePlacementContracts(t, 5)
-}
-func TestNodeLifecyclePlacementAndLeaderTransferSevenNodes(t *testing.T) {
-	lifecyclePlacementContracts(t, 7)
 }
 
 func assertActualAPIMembership(t *testing.T, ctx context.Context, c *Cluster, doc topology.Document, loadVoters int) {

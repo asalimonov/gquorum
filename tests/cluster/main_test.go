@@ -4,6 +4,7 @@ package cluster
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"strconv"
@@ -14,11 +15,30 @@ import (
 var suitePool *Pool
 
 func TestMain(m *testing.M) {
+	flag.Parse()
+	parallelSet := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "test.parallel" {
+			parallelSet = true
+		}
+	})
+	if !parallelSet {
+		if err := flag.Set("test.parallel", "8"); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
+	// Match pool capacity to Go's test slots, including focused raw go test runs.
+	parallel, err := strconv.Atoi(flag.Lookup("test.parallel").Value.String())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	image := os.Getenv("GQUORUM_TEST_IMAGE")
 	if image == "" {
 		image = "gquorum-test:local"
 	}
-	size, cook := 2, 1
+	size := parallel
 	if text := os.Getenv("GQUORUM_TEST_POOL_SIZE"); text != "" {
 		value, err := strconv.Atoi(text)
 		if err != nil {
@@ -27,6 +47,7 @@ func TestMain(m *testing.M) {
 		}
 		size = value
 	}
+	cook := size
 	if text := os.Getenv("GQUORUM_TEST_COOK_PARALLEL"); text != "" {
 		value, err := strconv.Atoi(text)
 		if err != nil {
@@ -35,7 +56,7 @@ func TestMain(m *testing.M) {
 		}
 		cook = value
 	}
-	var err error
+	fmt.Fprintf(os.Stderr, "Cluster pool: parallel=%d units=%d concurrent-starts=%d\n", parallel, size, cook)
 	suitePool, err = NewPool(PoolOptions{Image: image, Size: size, CookParallel: cook})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -63,9 +84,14 @@ func TestMain(m *testing.M) {
 }
 func acquire(t *testing.T, spec Spec) *Lease {
 	t.Helper()
+	return acquireFrom(t, suitePool, spec)
+}
+
+func acquireFrom(t *testing.T, pool *Pool, spec Spec) *Lease {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Second)
 	defer cancel()
-	lease, err := suitePool.Acquire(ctx, spec)
+	lease, err := pool.Acquire(ctx, spec)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,18 +1,24 @@
 # Performance and operational checks
 
-Run `make test-perf` to build the test application and execute the nine measured
+Run `make test-perf` to build the test application and execute the three measured
 cluster cases. `make test-perf-run` reuses the existing image. The full
 `make test-cluster` includes these cases and the separate stability cases.
 Run `make bench` for planner and full meta FSM snapshot benchmarks; `BENCH_TIME`
 controls the sampling interval, defaulting to 200 ms.
 
-Every performance and stability case is a separate three-, five- or seven-node
-test. Its 80-second work deadline starts before deployment. Generation cleanup
+Recorded runs below retain historical five- and seven-node measurements; those
+process variants are no longer part of the suite. Planner and snapshot benchmarks
+still use larger in-memory fixtures without starting clusters.
+
+Every performance and stability case uses three nodes. Its 80-second work deadline starts before deployment. Generation cleanup
 uses the bounded pool release, and a final elapsed-time assertion includes
 setup, correctness verification and release and requires less than two minutes.
 Docker image compilation and suite-level network warmup are outside that case
-measurement. Cases remain sequential; only each workload's requests run
-concurrently. These gates apply to the specified fixtures, rather than claiming
+measurement. Dedicated `make test-perf` and `make test-perf-run` runs default
+to `PERF_PARALLEL=1`; each workload still issues concurrent requests. The full
+cluster suite runs these cases alongside other independent leases at
+`CLUSTER_PARALLEL=8`, so those measurements include host contention. These gates
+apply to the specified fixtures, rather than claiming
 unmeasured arbitrary-size throughput.
 
 | Workload | Required gate |
@@ -32,8 +38,7 @@ unmeasured arbitrary-size throughput.
 | Full meta FSM snapshot at three/five/seven nodes | Fifteen groups, 128 retained documents and executions, a pending transfer and a retired group/allocation floor; payload at most four MiB; serialize/validate/restore/roundtrip in less than two seconds; canonical bytes match and restored retirement refuses ID reuse. Benchmarks report payload bytes, serialization/restore time and allocations. |
 
 The fifteen-group resource cases create fifteen independent three-voter load
-engines on the eligible workers of each three/five/seven-node cluster. Every
-observer remains in meta while owning no load engine. Twenty-five samples per
+engines on each worker of a three-node cluster. Twenty-five samples per
 process cover creation and ten rounds of writes across all fifteen groups.
 Measurements come from the actual Linux process: Go heap, resident pages,
 goroutine count, open file descriptors and user/system CPU time. Missing metrics

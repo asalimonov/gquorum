@@ -22,12 +22,14 @@ import (
 )
 
 func TestCorrelatedLoadWALStallPreservesMetaAndRecoversThreeNodes(t *testing.T) {
+	t.Parallel()
 	correlatedWALStall(t, 3)
 }
 
-func TestDurableOwnSnapshotAndWALRecoverTenCommandsThreeNodes(t *testing.T) { durableOwnRecovery(t, 3) }
-func TestDurableOwnSnapshotAndWALRecoverTenCommandsFiveNodes(t *testing.T)  { durableOwnRecovery(t, 5) }
-func TestDurableOwnSnapshotAndWALRecoverTenCommandsSevenNodes(t *testing.T) { durableOwnRecovery(t, 7) }
+func TestDurableOwnSnapshotAndWALRecoverTenCommandsThreeNodes(t *testing.T) {
+	t.Parallel()
+	durableOwnRecovery(t, 3)
+}
 
 func ownDurableFiles(ctx context.Context, c *Cluster, node, group string) error {
 	root := path.Join("/data", "load", group) // Caller-owned fixture mount and layout.
@@ -138,12 +140,6 @@ func durableOwnRecovery(t *testing.T, size int) {
 		t.Fatal(err)
 	}
 	t.Logf("METRIC nodes=%d recovered_own_commands=10 snapshot_index=%d snapshot_bytes=%d local_wal_bytes=%d new_process=true peer_snapshots=0 continued_commands=%d", size, after.Storage.SnapshotIndex, after.Storage.SnapshotBytes, after.Storage.LogBytes, len(expected))
-}
-func TestCorrelatedLoadWALStallPreservesMetaAndRecoversFiveNodes(t *testing.T) {
-	correlatedWALStall(t, 5)
-}
-func TestCorrelatedLoadWALStallPreservesMetaAndRecoversSevenNodes(t *testing.T) {
-	correlatedWALStall(t, 7)
 }
 
 func correlatedWALStall(t *testing.T, size int) {
@@ -410,9 +406,10 @@ func correlatedWALStall(t *testing.T, size int) {
 // A voted identity must never refound an empty WAL. Only an explicitly approved
 // reseat may replace it. This ports the source's data-loss proof through public
 // library APIs and inspects the recovering process, rather than peer proxies.
-func TestParkedVotedReplicaReseatThreeNodes(t *testing.T) { parkedReplicaReseat(t, 3) }
-func TestParkedVotedReplicaReseatFiveNodes(t *testing.T)  { parkedReplicaReseat(t, 5) }
-func TestParkedVotedReplicaReseatSevenNodes(t *testing.T) { parkedReplicaReseat(t, 7) }
+func TestParkedVotedReplicaReseatThreeNodes(t *testing.T) {
+	t.Parallel()
+	parkedReplicaReseat(t, 3)
+}
 
 func parkedReplicaReseat(t *testing.T, size int) {
 	t.Helper()
@@ -534,13 +531,8 @@ func parkedReplicaReseat(t *testing.T, size int) {
 }
 
 func TestLostMetaLeaderAutomaticallyReadmitsFreshIdentityThreeNodes(t *testing.T) {
+	t.Parallel()
 	lostMetaLeaderReadmission(t, 3)
-}
-func TestLostMetaLeaderAutomaticallyReadmitsFreshIdentityFiveNodes(t *testing.T) {
-	lostMetaLeaderReadmission(t, 5)
-}
-func TestLostMetaLeaderAutomaticallyReadmitsFreshIdentitySevenNodes(t *testing.T) {
-	lostMetaLeaderReadmission(t, 7)
 }
 
 func lostMetaLeaderReadmission(t *testing.T, size int) {

@@ -23,6 +23,7 @@ func (t observationTransport) ReadReplica(ctx context.Context, q load.ReplicaQue
 }
 
 func TestObservationRefusalDoesNotAttestAReplicaButMalformedSuccessFails(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"stale_process", "unreadable", "wrong_process", "wrong_group", "false_found", "valid"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()

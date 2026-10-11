@@ -33,8 +33,9 @@ func (c *slowEffectController) CreateGroup(ctx context.Context, a topology.Autho
 	return ctx.Err()
 }
 func TestMetaQuiesceJoinsEffectBeforeReturningAndKeepsOwnedState(t *testing.T) {
+	t.Parallel()
 	c := &slowEffectController{verifiedLoadController: verifiedLoadController{groups: map[string]topology.Group{}, hosts: map[string]map[string]uint64{}}, entered: make(chan struct{}), canceled: make(chan struct{}), release: make(chan struct{}), returned: make(chan struct{})}
-	groups := publicFoundingClusterWith(t, 1, func(o *Options) { o.LoadGroups = c })
+	groups := singleMetaFixtureWith(t, func(o *Options) { o.LoadGroups = c })
 	g := readyPublic(t, groups)
 	c.mu.Lock()
 	c.meta = groups
@@ -62,7 +63,7 @@ func TestMetaQuiesceJoinsEffectBeforeReturningAndKeepsOwnedState(t *testing.T) {
 	}
 	select {
 	case <-c.canceled:
-	default:
+	case <-ctx.Done():
 		t.Fatal("effect not canceled")
 	}
 	select {
@@ -108,7 +109,8 @@ func TestMetaQuiesceJoinsEffectBeforeReturningAndKeepsOwnedState(t *testing.T) {
 	}
 }
 func TestMetaQuiesceAcknowledgesOwnSessionRevocation(t *testing.T) {
-	g := readyPublic(t, publicFoundingCluster(t, 1))
+	t.Parallel()
+	g := readyPublic(t, singleMetaFixture(t))
 	s, err := g.Activate(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -130,6 +132,7 @@ func TestMetaQuiesceAcknowledgesOwnSessionRevocation(t *testing.T) {
 	}
 }
 func TestMetaStartRacingWithStopHasNoLateWorkers(t *testing.T) {
+	t.Parallel()
 	for range 12 {
 		g, err := New(optionsForTest(t))
 		if err != nil {

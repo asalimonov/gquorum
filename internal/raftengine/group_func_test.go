@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/membership"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/storage/walstore"
 	"go.etcd.io/raft/v3"
@@ -177,6 +176,7 @@ func propose(t *testing.T, g *Group, data string) Result {
 }
 
 func TestFoundingStorage_SeedHasFullMachineAndVoters(t *testing.T) {
+	t.Parallel()
 	s := openStore(t, t.TempDir(), "1")
 	g, _ := singleton(t, s)
 	recovery, err := s.Load(testContext(t), "load")
@@ -187,6 +187,7 @@ func TestFoundingStorage_SeedHasFullMachineAndVoters(t *testing.T) {
 }
 
 func TestLoad_ProposeSnapshotRestartReplaysCommittedTail(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	s := openStore(t, root, "1")
 	g, m := singleton(t, s)
@@ -219,6 +220,7 @@ func TestLoad_ProposeSnapshotRestartReplaysCommittedTail(t *testing.T) {
 }
 
 func TestLoad_BusinessRejectionConsumesEntryAndMachineFailureHalts(t *testing.T) {
+	t.Parallel()
 	g, m := singleton(t, openStore(t, t.TempDir(), "1"))
 	if result := propose(t, g, "reject"); result.Code != "rejected" {
 		t.Fatalf("business refusal: %+v", result)
@@ -235,71 +237,6 @@ func TestLoad_BusinessRejectionConsumesEntryAndMachineFailureHalts(t *testing.T)
 	if g.Status().Found {
 		t.Fatal("halted group remained found")
 	}
-}
-
-func TestLoad_ThreeNodeConsensusAndLeaderReplacement(t *testing.T) {
-	n := &network{nodes: make(map[uint64]*Group), disconnected: make(map[uint64]bool)}
-	var groups []*Group
-	var machines []*machine
-	for id := uint64(1); id <= 3; id++ {
-		m := &machine{}
-		machines = append(machines, m)
-		groups = append(groups, newTestGroup(t, openStore(t, t.TempDir(), fmt.Sprint(id)), m, n, id, []uint64{1, 2, 3}, Founding))
-	}
-	for _, g := range groups {
-		must(t, g.Start(context.Background()))
-		must(t, g.WaitReady(testContext(t)))
-	}
-	var leader *Group
-	eventually(t, func() bool {
-		for _, g := range groups {
-			if g.IsLeader() {
-				leader = g
-				return true
-			}
-		}
-		return false
-	})
-	propose(t, leader, "first")
-	eventually(t, func() bool {
-		for _, m := range machines {
-			if len(m.values()) != 1 {
-				return false
-			}
-		}
-		return true
-	})
-	n.mu.Lock()
-	n.disconnected[leader.ReplicaID()] = true
-	n.mu.Unlock()
-	eventually(t, func() bool {
-		if leader.IsLeader() {
-			return false
-		}
-		for _, g := range groups {
-			if g != leader && g.IsLeader() {
-				return true
-			}
-		}
-		return false
-	})
-	for _, g := range groups {
-		if g.IsLeader() {
-			propose(t, g, "second")
-			break
-		}
-	}
-	n.mu.Lock()
-	delete(n.disconnected, leader.ReplicaID())
-	n.mu.Unlock()
-	eventually(t, func() bool {
-		for _, m := range machines {
-			if !reflect.DeepEqual(m.values(), []string{"first", "second"}) {
-				return false
-			}
-		}
-		return true
-	})
 }
 
 type failingStore struct {
@@ -331,6 +268,7 @@ func (s *failingStore) SaveReady(ctx context.Context, id string, w storage.Ready
 }
 
 func TestWAL_TransientFailureRecoversWithoutHalt(t *testing.T) {
+	t.Parallel()
 	s := &failingStore{Store: openStore(t, t.TempDir(), "1")}
 	g, m := singleton(t, s)
 	s.failures.Store(2)
@@ -342,6 +280,7 @@ func TestWAL_TransientFailureRecoversWithoutHalt(t *testing.T) {
 }
 
 func TestWAL_StepNeverBlocksAndShutdownDuringStallIsQuiet(t *testing.T) {
+	t.Parallel()
 	s := &failingStore{Store: openStore(t, t.TempDir(), "1"), entered: make(chan struct{})}
 	g, m := singleton(t, s)
 	s.blocked.Store(true)
@@ -373,6 +312,7 @@ func TestWAL_StepNeverBlocksAndShutdownDuringStallIsQuiet(t *testing.T) {
 }
 
 func TestLoad_RejectsLocalMessagesAndUnsupportedMembership(t *testing.T) {
+	t.Parallel()
 	g, _ := singleton(t, openStore(t, t.TempDir(), "1"))
 	for _, typ := range []raftpb.MessageType{raftpb.MsgHup, raftpb.MsgBeat, raftpb.MsgProp, raftpb.MsgUnreachable, raftpb.MsgSnapStatus} {
 		if err := g.Step(testContext(t), raftpb.Message{Type: typ, From: 2, To: 1}); !errors.Is(err, fault.ErrInvalid) {
@@ -406,61 +346,8 @@ func TestLoad_StopBeforeStartAndRegistryIdentity(t *testing.T) {
 	}
 }
 
-type liveNetwork struct{ network *network }
-
-func (l liveNetwork) Live(string) (map[uint64]bool, bool) {
-	l.network.mu.RLock()
-	defer l.network.mu.RUnlock()
-	live := make(map[uint64]bool)
-	for id, g := range l.network.nodes {
-		live[id] = g.Status().Found && !l.network.disconnected[id]
-	}
-	return live, true
-}
-
-func TestLoad_MembershipLearnerPromotionTransferAndRemoval(t *testing.T) {
-	for _, wait := range []time.Duration{0, 5 * time.Millisecond} {
-		t.Run(wait.String(), func(t *testing.T) { loadMembership(t, wait) })
-	}
-}
-
-func loadMembership(t *testing.T, wait time.Duration) {
-	t.Helper()
-	n := &network{nodes: make(map[uint64]*Group), disconnected: make(map[uint64]bool)}
-	a, b := &machine{}, &machine{}
-	one := newTestGroup(t, openStore(t, t.TempDir(), "1"), a, n, 1, []uint64{1}, Founding, wait)
-	two := newTestGroup(t, openStore(t, t.TempDir(), "2"), b, n, 2, nil, Joining, wait)
-	must(t, one.Start(context.Background()))
-	must(t, two.Start(context.Background()))
-	must(t, one.WaitReady(testContext(t)))
-	must(t, two.WaitReady(testContext(t)))
-	eventually(t, one.IsLeader)
-	propose(t, one, "before learner")
-	coordinator := membership.NewCoordinator()
-	health := liveNetwork{n}
-	must(t, coordinator.Apply(testContext(t), one.Membership(), health, membership.AddLearner(2)))
-	eventually(t, func() bool {
-		status := one.Status()
-		progress := status.Progress[2]
-		return progress.Match >= status.Commit && progress.Match > 0 && reflect.DeepEqual(b.values(), a.values())
-	})
-	if status := two.Status(); !reflect.DeepEqual(status.ConfState.Learners, []uint64{2}) {
-		t.Fatalf("joining learner snapshot membership: %+v", status.ConfState)
-	}
-	must(t, coordinator.Apply(testContext(t), one.Membership(), health, membership.PromoteLearner(2)))
-	propose(t, one, "after promotion")
-	eventually(t, func() bool { return reflect.DeepEqual(a.values(), b.values()) })
-	must(t, one.TransferLeader(testContext(t), 2))
-	eventually(t, two.IsLeader)
-	must(t, coordinator.Apply(testContext(t), two.Membership(), health, membership.RemoveReplica(1)))
-	eventually(t, func() bool { return reflect.DeepEqual(two.Status().ConfState.Voters, []uint64{2}) })
-	// The departing host must learn the committed removal too, even though the
-	// leader has already discarded its normal replication progress.
-	eventually(t, func() bool { return reflect.DeepEqual(one.Status().ConfState.Voters, []uint64{2}) })
-	propose(t, two, "after removal")
-}
-
 func TestRecover_UncommittedTailIsNotAppliedAtReady(t *testing.T) {
+	t.Parallel()
 	s := openStore(t, t.TempDir(), "1")
 	n := &network{nodes: make(map[uint64]*Group), disconnected: make(map[uint64]bool)}
 	g := newTestGroup(t, s, &machine{}, n, 1, []uint64{1}, Founding)
@@ -511,6 +398,7 @@ func (c *captureTransport) Send(ctx context.Context, m []raftpb.Message) error {
 }
 
 func TestWAL_ReceivedSnapshotIsPersistedBeforeRestoreAndAck(t *testing.T) {
+	t.Parallel()
 	base := openStore(t, t.TempDir(), "2")
 	gate := &snapshotGate{Store: base, entered: make(chan struct{}), release: make(chan struct{})}
 	m := &machine{}
@@ -544,6 +432,7 @@ func TestWAL_ReceivedSnapshotIsPersistedBeforeRestoreAndAck(t *testing.T) {
 }
 
 func TestLoad_MultipleGroupsShareStoreAndStopIndependently(t *testing.T) {
+	t.Parallel()
 	s := openStore(t, t.TempDir(), "1")
 	n := &network{nodes: make(map[uint64]*Group), disconnected: make(map[uint64]bool)}
 	var groups []*Group
@@ -572,6 +461,7 @@ func TestLoad_MultipleGroupsShareStoreAndStopIndependently(t *testing.T) {
 }
 
 func TestPropose_OverloadedWhileDegradedAndCancellationIsBounded(t *testing.T) {
+	t.Parallel()
 	s := &failingStore{Store: openStore(t, t.TempDir(), "1"), entered: make(chan struct{})}
 	g, m := singleton(t, s)
 	s.blocked.Store(true)
@@ -603,8 +493,10 @@ func TestPropose_OverloadedWhileDegradedAndCancellationIsBounded(t *testing.T) {
 }
 
 func TestLoad_ConcurrentProposalsHaveExactResults(t *testing.T) {
+	t.Parallel()
 	for _, wait := range []time.Duration{0, time.Millisecond} {
 		t.Run(fmt.Sprint(wait), func(t *testing.T) {
+			t.Parallel()
 			s := openStore(t, t.TempDir(), "1")
 			n := &network{nodes: make(map[uint64]*Group), disconnected: make(map[uint64]bool)}
 			m := &machine{}

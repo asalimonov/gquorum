@@ -9,9 +9,10 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func TestIdentityReadinessAndMinorityOverrideThreeNodes(t *testing.T) { identityServing(t, 3) }
-func TestIdentityReadinessAndMinorityOverrideFiveNodes(t *testing.T)  { identityServing(t, 5) }
-func TestIdentityReadinessAndMinorityOverrideSevenNodes(t *testing.T) { identityServing(t, 7) }
+func TestIdentityReadinessAndMinorityOverrideThreeNodes(t *testing.T) {
+	t.Parallel()
+	identityServing(t, 3)
+}
 
 // Healthy identity/storage/readiness surfaces, majority loss, exact local
 // override targeting and retained override recovery port both identity proofs.

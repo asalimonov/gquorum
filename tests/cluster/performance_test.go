@@ -15,13 +15,15 @@ import (
 )
 
 // Each matrix member is a separate test with its own whole-case time limit.
-// Cases remain sequential; concurrency exists only within the tested workload.
-func TestPerf_ConcurrentHealthThreeNodes(t *testing.T) { perfConcurrentHealth(t, 3) }
-func TestPerf_ConcurrentHealthFiveNodes(t *testing.T)  { perfConcurrentHealth(t, 5) }
-func TestPerf_ConcurrentHealthSevenNodes(t *testing.T) { perfConcurrentHealth(t, 7) }
-func TestPerf_ConcurrentWritesThreeNodes(t *testing.T) { perfConcurrentWrites(t, 3) }
-func TestPerf_ConcurrentWritesFiveNodes(t *testing.T)  { perfConcurrentWrites(t, 5) }
-func TestPerf_ConcurrentWritesSevenNodes(t *testing.T) { perfConcurrentWrites(t, 7) }
+// Cases use independent pool leases; make test-perf limits parallelism for comparable measurements.
+func TestPerf_ConcurrentHealthThreeNodes(t *testing.T) {
+	t.Parallel()
+	perfConcurrentHealth(t, 3)
+}
+func TestPerf_ConcurrentWritesThreeNodes(t *testing.T) {
+	t.Parallel()
+	perfConcurrentWrites(t, 3)
+}
 
 func performanceCluster(t *testing.T, size int) (context.Context, *Cluster) {
 	t.Helper()

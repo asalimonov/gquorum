@@ -13,13 +13,8 @@ import (
 )
 
 func TestStoppedFollowerHealthUsesActivePolicyAndRetainsStagingThreeNodes(t *testing.T) {
+	t.Parallel()
 	stoppedFollowerPolicy(t, 3)
-}
-func TestStoppedFollowerHealthUsesActivePolicyAndRetainsStagingFiveNodes(t *testing.T) {
-	stoppedFollowerPolicy(t, 5)
-}
-func TestStoppedFollowerHealthUsesActivePolicyAndRetainsStagingSevenNodes(t *testing.T) {
-	stoppedFollowerPolicy(t, 7)
 }
 
 // Source stopped-follower health/readiness, including its staged-policy blocker

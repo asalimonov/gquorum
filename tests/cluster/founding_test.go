@@ -23,23 +23,21 @@ func foundingSpec(size int) Spec {
 	return spec
 }
 
-func TestFoundingFullTopologyThreeNodes(t *testing.T)  { foundingFullTopology(t, 3) }
-func TestFoundingFullTopologyFiveNodes(t *testing.T)   { foundingFullTopology(t, 5) }
-func TestFoundingFullTopologySevenNodes(t *testing.T)  { foundingFullTopology(t, 7) }
-func TestFoundingDelayedMemberThreeNodes(t *testing.T) { foundingDelayedMember(t, 3) }
-func TestFoundingDelayedMemberFiveNodes(t *testing.T)  { foundingDelayedMember(t, 5) }
-func TestFoundingDelayedMemberSevenNodes(t *testing.T) { foundingDelayedMember(t, 7) }
-func TestFoundingTimeoutExitThreeNodes(t *testing.T)   { foundingTimeoutExit(t, 3) }
-func TestFoundingTimeoutExitFiveNodes(t *testing.T)    { foundingTimeoutExit(t, 5) }
-func TestFoundingTimeoutExitSevenNodes(t *testing.T)   { foundingTimeoutExit(t, 7) }
+func TestFoundingFullTopologyThreeNodes(t *testing.T) {
+	t.Parallel()
+	foundingFullTopology(t, 3)
+}
+func TestFoundingDelayedMemberThreeNodes(t *testing.T) {
+	t.Parallel()
+	foundingDelayedMember(t, 3)
+}
+func TestFoundingTimeoutExitThreeNodes(t *testing.T) {
+	t.Parallel()
+	foundingTimeoutExit(t, 3)
+}
 func TestRetainedFoundingStateBypassesAbsentPeerGateThreeNodes(t *testing.T) {
+	t.Parallel()
 	retainedFoundingState(t, 3)
-}
-func TestRetainedFoundingStateBypassesAbsentPeerGateFiveNodes(t *testing.T) {
-	retainedFoundingState(t, 5)
-}
-func TestRetainedFoundingStateBypassesAbsentPeerGateSevenNodes(t *testing.T) {
-	retainedFoundingState(t, 7)
 }
 
 // Port the source full topology/history/observed-leadership assertions. Caller

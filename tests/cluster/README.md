@@ -3,7 +3,7 @@
 Run `make test-cluster` from the repository root. It builds the caller-owned
 key/value test application image once, then runs Docker process tests with the
 `clustertest` build tag. Non-Docker functional tests stay in their owning packages
-in `*_func_test.go` files and run with `make test-function` (`-tags=functional`).
+in `*_func_test.go` files, use at most one local participant, and run with `make test-function` (`-tags=functional`).
 `make test` runs fast unit checks with default build tags across the
 library, example and application-fixture modules.
 Docker must be reachable. For focused process validation, reuse the built image:
@@ -12,19 +12,36 @@ Docker must be reachable. For focused process validation, reuse the built image:
 make test-cluster-run CLUSTER_ARGS='-v -run TestPool'
 ```
 
+The shared runner prints the same summary table as `make test` and
+`make test-function`. Each invocation keeps package logs, raw Go events, JUnit
+XML, detailed Markdown results and a Markdown Gantt timeline in a fresh
+`test-reports/cluster/<timestamp>/` directory. `test-reports/cluster/latest`
+links to the latest completed run. The `make test-cluster` report includes the
+image-build phase and its full log, including failed builds. See the
+[reporting guide](../../docs/testing/tests.md#test-reports).
+
 `CLUSTER_IMAGE` selects
 a different application image; that image must implement the fixture's REST and
-startup contracts. Cluster cases remain sequential.
+startup contracts. Cluster cases run in parallel, with eight concurrent cases by
+default (`CLUSTER_PARALLEL=8`). Each case acquires its own isolated lease. The former multi-node functional scenarios
+also acquire leases from this pool; see the [migration map](../../docs/testing/cluster-migration.md).
 
-The complete inventory has a 45-minute suite timeout (`CLUSTER_TIMEOUT`). Each
+The complete inventory uses the `CLUSTER_TIMEOUT` suite timeout (ten minutes by default). Each
 performance case still has its own deadline covering deployment, workload and
 cleanup and must complete in less than two minutes.
 
 This separate Go module pins testcontainers and Docker tooling without adding
 them to the library's dependency graph or the parallel unit-test loop.
 
-The bounded pool defaults to two deployment units and one concurrent cook.
+The bounded pool defaults to eight deployment units and eight concurrent cooks.
+Pool capacity and startup concurrency follow Go's `-parallel` setting;
 `GQUORUM_TEST_POOL_SIZE` and `GQUORUM_TEST_COOK_PARALLEL` override these counts.
+Both `make test-cluster` and `make test-cluster-run` pass `CLUSTER_PARALLEL` to Go.
+Raw `go test -tags=clustertest` also defaults to eight, or accepts `-parallel=N`.
+Independent admission-phase subtests each acquire their own
+lease and run in parallel. Subtests mutating a shared lease remain sequential.
+Dedicated `make test-perf` and `make test-perf-run` default to `PERF_PARALLEL=1`
+to measure latency without competition from other cases.
 Start returns after the first isolated network is usable; later units finish
 warming independently. A unit's lifecycle goroutine owns its resources through
 boot, lease, cancellation, reset and final teardown. Release is generation
@@ -42,15 +59,25 @@ the unit as ready. Failed cleanup retires the unit and fails the suite. Close
 cancels and joins every lifecycle worker before returning; the reaper is a
 fallback, not the success criterion for cleanup.
 
+Ordinary quorum, fault, API and performance tests use three nodes. Generic five-
+and seven-node repetitions are omitted. The only four-node membership cases are:
+
+- `TestMetaAdmissionUsesLearnerBeforeServingAndRetainsIdentityOnRestart`: learner-first admission, early-serving refusal and retained promotion.
+- `TestAdmissionOperatorResumesAfterMetaLeaderTransferWithoutNewAttempt`: leadership changes during admission must retain the exact operator attempt.
+- `TestMetaPinnedAdmissionRestartsBeforeAndAfterReadyWithoutAllocatingIDs`, with `pending` and `ready` cases: a crash after durable pinning must preserve the member ID and admission attempt.
+
+A new larger-cluster case must explain the specific failure requiring the extra
+member. Ordinary checks must not grow a node-count matrix.
+
 Current coverage proves isolated simultaneous clusters, fresh persistent state
 and retired-ID isolation on reuse, canceled partial boot, joined cleanup and
-three/five/seven-node consensus with worker-only load placement, acknowledged
+three-node consensus with worker-only load placement, acknowledged
 local replication, abrupt leader death and retained process recovery. The fifteen
 load-group lifecycle case verifies independent command identities, propagation to
 every host, reserved meta protection and physical removal of every deleted store.
 Additional cases cover non-host meta-controller effects, inert staged documents,
 follower drain/activation, observed-majority drain refusal/recovery and fifteen
-concurrent CAS contenders at each of the three/five/seven-node capacities.
+concurrent CAS contenders in a three-node cluster.
 Learner growth uses cancelable effect barriers and reads the returning process's
 own identity, membership and values. Compacted catch-up verifies a received full
 snapshot and all 1,100 acknowledged commands. Dynamic admission starts a genuine
@@ -61,11 +88,10 @@ the same execution ID, attempt and exact authorized promotion to finish. A real
 one-second repair interval preserves intentional learners through several ticks;
 a staged promotion remains inert until approval. Whole-group deletion waits for
 an unreachable former host while Active and its retained local state remain
-intact. Multi-group shutdown grows from three founders to five/seven admitted
-workers, verifies each host's membership and acknowledged values, then requires
+intact. Multi-group shutdown uses three founders, verifies each host's membership and
+acknowledged values, then requires
 all concurrent process stops to finish within thirty seconds with exit code zero.
-All node counts come from topology.Limits; seven meta voters do not require seven load
-replicas. Fixtures use the library default 100ms Raft tick and a five-second
+Node limits come from `topology.Limits`; routine scenarios use three nodes. Fixtures use the library default 100ms Raft tick and a five-second
 activation TTL. Build the image before running cluster cases, so compilation
 does not contend with the processes being measured. The image build retains Go
 module and compiler caches across source changes. Source adaptations are tracked
@@ -79,21 +105,20 @@ resource catalog, so normal release verifies their removal with the founders.
 
 Measured performance gates and operational workloads are documented in
 [performance checks](../../docs/testing/performance.md). `make test-perf` runs
-health/status pressure and successful concurrent meta/load writes at three,
-five and seven nodes; each complete case includes resource release and must
+health/status pressure and successful concurrent meta/load writes at three nodes; each complete case includes resource release and must
 finish within two minutes. The full cluster suite also retains the fifteen-
 second exact local-read, twenty-second readiness/status and three-cycle
 retained-process recovery workloads from the source stability tests.
 
-`TestDeadPeerPreservesContinuousLeadership{Three,Five,Seven}Nodes` abruptly kills
+`TestDeadPeerPreservesContinuousLeadershipThreeNodes` abruptly kills
 a process leading neither meta nor either load group, then requires every
 survivor's native leader/term to remain unchanged throughout twenty seconds.
 Two independent groups keep acknowledging commands during that window, and
 the killed process must recover every acknowledged value under its retained ID.
-`TestLoadIngressAndExactIndependentCommands{Three,Five,Seven}Nodes` checks
+`TestLoadIngressAndExactIndependentCommandsThreeNodes` checks
 routing through every ingress, exact follower state in independent groups,
 quiet-state stability, same-ID retries/conflicts and subsequent leader transfers.
-All cases remain sequential and outside the root unit suite.
+All cases use independent parallel leases and remain outside the root unit suite.
 
 WAL coalescing compares zero and five milliseconds with the same 48-command,
 eight-worker workload, checking exact local values/entry counts and larger
@@ -111,7 +136,7 @@ proves continued serving. Auxiliary projection tests freeze caller-owned file
 writers for twenty seconds while eight clients keep committing through local
 WALs. Every command and local state is exact; no request is shed and WAL stalls
 stay below 500ms. The real stored projections catch up automatically after
-release. All these cases run separately at three/five/seven nodes.
+release. All these cases run separately at three nodes.
 
 Data-loss ports verify durable voting before an exact WAL loss, persisted parking,
 explicit fresh-ID reseat and recovery on the returning process. Losing the current
@@ -126,7 +151,7 @@ founding through meta and load routing, with locations enriched only in status.
 Minority cases check identity-targeted persisted serve overrides, their retained
 restart and their inability to bypass either Raft quorum. Forced retirement checks
 actual removed membership, actor/reason audit, stale-process fencing and new IDs.
-Each family runs at three/five/seven nodes under the existing per-case deadline.
+Each family runs at three nodes under the existing per-case deadline.
 Only the authenticated fixture exposes store-loss and serve-override controls;
 none of these routes or policies is part of the small Compose demo.
 
@@ -138,8 +163,8 @@ supplied deadline produces a diagnosed exit with code 1. Successful startup writ
 an atomic, synced caller marker. Timeout leaves that marker absent, so same-disk
 restart still waits. A retained established majority bypasses this initial gate,
 recovers leaders and commands, and keeps its entire topology and replica identities
-with a configured peer absent. All four families run separately at three/five/seven
-nodes, with no slow-test skip. The library's WaitReady contract still checks its own
+with a configured peer absent. All four families use three nodes, with no
+slow-test skip. The library's WaitReady contract still checks its own
 exact activated meta voter and acknowledged session. These policies and tests are
 entirely under `tests/cluster`, independent of the small `_meta` Compose demo.
 
@@ -149,7 +174,7 @@ the identical typed warning, including the actual intruding process ID from its
 startup record. The legitimate holder's running process, durable member ID,
 resolver address, readiness and full topology remain unchanged. These cases use
 the library's public parked registry instead of importing application UI/gossip
-rendering, and run at three/five/seven nodes.
+rendering, and run at three nodes.
 
 Retained-voter restart ports select a meta nonleader explicitly. Every founder
 keeps the same document/member/load IDs and reads an empty parked registry after
@@ -168,11 +193,11 @@ staging; a committed staged version survives approval failure and is approved by
 its exact version. No down process can finish its admission or delete its own
 files before returning. Both families inspect the actual quarantined old bbolt
 pin and exact native meta/load IDs, ledger and recovered commands; each runs at
-three/five/seven nodes. Constructor Join and public parked reads replace the source
+three nodes. Constructor Join and public parked reads replace the source
 application's configuration-driven boot probe and UI/gossip surface. These
 controls and storage adapters remain wholly outside the small Compose demo.
 
-The caller-deletion refusal cases run at three/five/seven nodes. A caller-owned
+The caller-deletion refusal cases run at three nodes. A caller-owned
 occupancy control refuses the first destructive, fully authorized callback.
 The failed execution survives meta-leader replacement and retained restart;
 surviving replicas retain exact values, and the restarted host retains the
@@ -180,7 +205,7 @@ byte-identical state file and boot ledger without reopening a retired group.
 The caller then permits a fresh attempt of the same desired version. Only that
 attempt cleans the stores, and the retired group ID remains unavailable.
 
-`TestPerf_FifteenGroupResources{Three,Five,Seven}Nodes` measures the actual
+`TestPerf_FifteenGroupResourcesThreeNodes` measures the actual
 Linux test processes with fifteen live load groups, including heap/RSS, CPU,
 goroutines and descriptors. It checks every acknowledged command on each owner,
 then approves a sixty-step deletion plan and verifies bounded joined teardown,
@@ -188,7 +213,7 @@ absent usable store paths and meta readiness. Limits and measurement conditions
 are recorded in `docs/testing/performance.md`. The authenticated measurement
 route exists only in the full test fixture.
 
-The API contract cases cover three/five/seven-node status and document views,
+The API contract cases cover three-node status and document views,
 nonmutating previews, exact CAS refusals, historical page slices and exact
 version reads. Lifecycle cases inspect staged drain and learner-first restore
 plans before approval, prove native membership remains unchanged until apply,
@@ -197,3 +222,16 @@ cancellation. The stopped-follower cases retain unapproved placement drift
 through follower and survivor restarts, verify reconciliation's staged blocker
 on every observer and measure both planes' nullable health from Active policy.
 Caller HTTP codes and envelopes are deliberately separate from SDK contracts.
+
+The runtime controls use the private lease credential and the public Node/Cluster
+APIs for sessions, locks, replica holds, scheduling and exact approved actions.
+Topology watches stream owned updates; their readers cancel and join before
+lease release. An `after=true` effect barrier holds an acknowledgement after
+the local effect completed, allowing abrupt meta-leader loss to test retry safety.
+The admission pin driver pauses a joining process before engine acquisition,
+after `Join` and optionally `JoinReady`; its replacement uses the ordinary SDK
+join path and the retained bbolt pin. These controls belong only to the test image.
+Removal policies verify mandatory fencing inside the callback. A retry mode
+refuses the first response and retains diagnostics after the second; the process
+test stops the participant and then inspects its closed bbolt store for durable
+exclusion, membership history and applied-index ordering.

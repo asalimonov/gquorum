@@ -6,13 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/asalimonov/gquorum"
 	"io"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/asalimonov/gquorum"
 
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
@@ -499,7 +500,7 @@ func (a *application) routes() http.Handler {
 			httpError(w, fault.New(fault.Unavailable, a.foundingMessage(), nil))
 			return
 		}
-		if r.URL.Path != "/api/events/watch" {
+		if r.URL.Path != "/api/events/watch" && !strings.HasPrefix(r.URL.Path, "/internal/test/watch/") {
 			bounded, cancel := context.WithTimeout(ctx, clusterRequestTimeout(r))
 			defer cancel()
 			ctx = bounded

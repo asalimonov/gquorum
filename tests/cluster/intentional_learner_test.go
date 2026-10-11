@@ -14,6 +14,7 @@ import (
 )
 
 func TestIntentionalLearnerSurvivesSchedulingUntilApprovedPromotion(t *testing.T) {
+	t.Parallel()
 	spec := matrixSpec(3)
 	spec.Scheduling = true
 	spec.SchedulingInterval, spec.SchedulingTimeout = time.Second, 500*time.Millisecond

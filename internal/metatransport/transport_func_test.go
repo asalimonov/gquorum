@@ -43,6 +43,7 @@ func (h *testHandler) Step(ctx context.Context, header *metapb.Header, msg raftp
 }
 
 func TestMetaTransportPruneDrainsFinalAdmittedCommit(t *testing.T) {
+	t.Parallel()
 	entered, release := make(chan struct{}), make(chan struct{})
 	received := make(chan raftpb.Message, 4)
 	h := &testHandler{stepHook: func(ctx context.Context, msg raftpb.Message) error {
@@ -144,6 +145,7 @@ func recvMessage(t *testing.T, ch <-chan raftpb.Message) raftpb.Message {
 	}
 }
 func TestMetaTransportMessagesAndChunkedSnapshotPreserveTerms(t *testing.T) {
+	t.Parallel()
 	receiver := &testHandler{received: make(chan raftpb.Message, 8)}
 	remote := testTransport(t, 2, receiver, nowhere, nil)
 	reports := make(chan raft.SnapshotStatus, 8)
@@ -175,6 +177,7 @@ func TestMetaTransportMessagesAndChunkedSnapshotPreserveTerms(t *testing.T) {
 	}
 }
 func TestMetaTransportCredentialAndClusterIsolation(t *testing.T) {
+	t.Parallel()
 	receiver := &testHandler{received: make(chan raftpb.Message, 1)}
 	remote := testTransport(t, 2, receiver, nowhere, nil)
 	tests := []struct {
@@ -208,6 +211,7 @@ func TestMetaTransportCredentialAndClusterIsolation(t *testing.T) {
 	}
 }
 func TestMetaTransportPeerBackoffDoesNotBlockOtherPeer(t *testing.T) {
+	t.Parallel()
 	blocked := testTransport(t, 2, &testHandler{block: true}, nowhere, nil)
 	h := &testHandler{received: make(chan raftpb.Message, 32)}
 	healthy := testTransport(t, 3, h, nowhere, nil)
@@ -253,6 +257,7 @@ func TestMetaTransportPeerBackoffDoesNotBlockOtherPeer(t *testing.T) {
 	}
 }
 func TestMetaTransportStopCancelsAndJoinsControlCall(t *testing.T) {
+	t.Parallel()
 	h := &testHandler{block: true, calls: make(chan string, 1)}
 	remote := testTransport(t, 2, h, nowhere, nil)
 	local := testTransport(t, 1, &testHandler{received: make(chan raftpb.Message, 1)}, nowhere, nil)
@@ -284,6 +289,7 @@ func TestMetaTransportStopCancelsAndJoinsControlCall(t *testing.T) {
 	}
 }
 func TestMetaTransportRefusesMissingSnapshotFinalAndWrongMessageDomain(t *testing.T) {
+	t.Parallel()
 	h := &testHandler{received: make(chan raftpb.Message, 2)}
 	remote := testTransport(t, 2, h, nowhere, nil)
 	local := testTransport(t, 1, &testHandler{received: make(chan raftpb.Message, 1)}, nowhere, nil)

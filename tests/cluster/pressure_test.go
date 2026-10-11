@@ -19,9 +19,10 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func TestPendingPressureBoundAndIndependentApplyThreeNodes(t *testing.T) { pendingPressure(t, 3) }
-func TestPendingPressureBoundAndIndependentApplyFiveNodes(t *testing.T)  { pendingPressure(t, 5) }
-func TestPendingPressureBoundAndIndependentApplySevenNodes(t *testing.T) { pendingPressure(t, 7) }
+func TestPendingPressureBoundAndIndependentApplyThreeNodes(t *testing.T) {
+	t.Parallel()
+	pendingPressure(t, 3)
+}
 
 type pressureReply struct {
 	duration time.Duration

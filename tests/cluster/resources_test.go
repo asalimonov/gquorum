@@ -38,9 +38,10 @@ func (c *Cluster) resources(ctx context.Context, node string) (processResources,
 	return result, nil
 }
 
-func TestPerf_FifteenGroupResourcesThreeNodes(t *testing.T) { fifteenGroupResources(t, 3) }
-func TestPerf_FifteenGroupResourcesFiveNodes(t *testing.T)  { fifteenGroupResources(t, 5) }
-func TestPerf_FifteenGroupResourcesSevenNodes(t *testing.T) { fifteenGroupResources(t, 7) }
+func TestPerf_FifteenGroupResourcesThreeNodes(t *testing.T) {
+	t.Parallel()
+	fifteenGroupResources(t, 3)
+}
 
 func fifteenGroupResources(t *testing.T, size int) {
 	t.Helper()

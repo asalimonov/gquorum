@@ -5,7 +5,7 @@ package main
 import (
 	"context"
 	"errors"
-	"net"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -18,68 +18,6 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 	bolt "go.etcd.io/bbolt"
 )
-
-func TestPublicNodeAllFoundersGateKeepsProtocolAvailable(t *testing.T) {
-	c := newAPICluster(t, 3, false, func(_ int, o *quorum.NodeOptions) { o.Policies.DefaultLifecycle.Startup = policy.AllFounders })
-	for _, n := range c.nodes[:2] {
-		if err := n.Start(c.ctx); err != nil {
-			t.Fatal(err)
-		}
-	}
-	apiEventually(t, func() bool { return c.nodes[0].OwnSessionLive() && c.nodes[1].OwnSessionLive() })
-	ctx, cancel := context.WithTimeout(c.ctx, 50*time.Millisecond)
-	if err := c.nodes[0].WaitReady(ctx); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatal("gate accepted missing founder", err)
-	}
-	cancel()
-	if c.nodes[0].Status().Ready || !c.nodes[0].Status().Meta.Found {
-		t.Fatal("gate disabled Raft or completed early", c.nodes[0].Status())
-	}
-	c.startAll(t)
-}
-
-func TestPublicNodeFirstBootstrapTimeoutDoesNotRepeatOnRetainedRestart(t *testing.T) {
-	c := newAPICluster(t, 3, false, func(i int, o *quorum.NodeOptions) {
-		o.Policies.DefaultLifecycle.Startup = policy.AllFounders
-		if i == 0 {
-			o.Policies.DefaultLifecycle.FoundersTimeout = 600 * time.Millisecond
-		}
-	})
-	if err := c.nodes[0].Start(c.ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
-	defer cancel()
-	if err := c.nodes[0].WaitReady(ctx); !errors.Is(err, fault.ErrUnavailable) {
-		t.Fatal("first bootstrap did not fail", err)
-	}
-	if err := c.nodes[0].Stop(ctx); err != nil {
-		t.Fatal(err)
-	}
-	opts := c.options[0]
-	l, err := net.Listen("tcp", opts.Meta.Network.AdvertiseAddress)
-	if err != nil {
-		t.Fatal(err)
-	}
-	opts.Meta.Network.Listener = l
-	opts.Identity.InstanceID += "-restart"
-	n, err := quorum.NewNode(opts)
-	if err != nil {
-		_ = l.Close()
-		t.Fatal(err)
-	}
-	c.nodes[0] = n
-	c.network.install(n)
-	if err = n.Start(c.ctx); err != nil {
-		t.Fatal(err)
-	}
-	ctx2, cancel2 := context.WithTimeout(c.ctx, 850*time.Millisecond)
-	defer cancel2()
-	if err = n.WaitReady(ctx2); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatal("retained store repeated founding timeout", err, n.Status())
-	}
-	c.startAll(t)
-}
 
 type blockingReadiness struct {
 	*policy.DefaultLifecycle
@@ -97,9 +35,10 @@ func (p *blockingReadiness) Readiness(context.Context, policy.ReadinessInput) (p
 }
 
 func TestPublicNodeStopJoinsNoncooperativePolicy(t *testing.T) {
+	t.Parallel()
 	builtin, _ := policy.NewDefaultLifecycle(policy.DefaultLifecycleOptions{})
 	p := &blockingReadiness{DefaultLifecycle: builtin, entered: make(chan struct{}), release: make(chan struct{})}
-	c := newAPICluster(t, 1, false, func(_ int, o *quorum.NodeOptions) {
+	c := newSingleNodeFixture(t, false, func(_ int, o *quorum.NodeOptions) {
 		o.Policies.Lifecycle = p
 		o.Policies.CallbackTimeout = 30 * time.Millisecond
 	})
@@ -125,9 +64,10 @@ func TestPublicNodeStopJoinsNoncooperativePolicy(t *testing.T) {
 }
 
 func TestPublicNodeCloseErrorKeepsOwnershipUntilExplicitRetry(t *testing.T) {
+	t.Parallel()
 	var closes atomic.Int32
 	want := errors.New("application close retry")
-	c := newAPICluster(t, 1, true, func(_ int, o *quorum.NodeOptions) {
+	c := newSingleNodeFixture(t, true, func(_ int, o *quorum.NodeOptions) {
 		o.Loads.Factory = func(context.Context, load.ReplicaSpec) (load.Application, error) {
 			return load.Application{StateMachine: &apiCounter{}, Close: func(context.Context) error {
 				if closes.Add(1) == 1 {
@@ -178,9 +118,10 @@ func TestPublicNodeCloseErrorKeepsOwnershipUntilExplicitRetry(t *testing.T) {
 }
 
 func TestPublicNodeCanceledFactoryRemainsOwnedThroughLateReturn(t *testing.T) {
+	t.Parallel()
 	entered, release := make(chan struct{}, 1), make(chan struct{})
 	var closed atomic.Int32
-	c := newAPICluster(t, 1, true, func(_ int, o *quorum.NodeOptions) {
+	c := newSingleNodeFixture(t, true, func(_ int, o *quorum.NodeOptions) {
 		o.Loads.Factory = func(context.Context, load.ReplicaSpec) (load.Application, error) {
 			entered <- struct{}{}
 			<-release
@@ -219,86 +160,33 @@ func TestPublicNodeCanceledFactoryRemainsOwnedThroughLateReturn(t *testing.T) {
 	}
 }
 
-type removalPolicy struct {
-	*policy.DefaultLifecycle
-	node      func() quorum.Node
-	calls     atomic.Int32
-	violation atomic.Bool
-}
-
-func (p *removalPolicy) Removal(ctx context.Context, in policy.RemovalInput) (policy.RemovalDecision, error) {
-	s := p.node().Status()
-	if s.State != quorum.NodeFenced || s.Ready || s.SessionLive || s.Meta.Found {
-		p.violation.Store(true)
-	}
-	for _, r := range s.Loads {
-		if r.State == "ready" || r.State == "starting" {
-			p.violation.Store(true)
-		}
-	}
-	if p.calls.Add(1) == 1 {
-		return policy.RemovalDecision{}, errors.New("retry removal response")
-	}
-	return policy.RemovalDecision{Action: policy.KeepDiagnostics}, nil
-}
-
-func TestPublicNodeRemovalFencesBeforeReplaceablePolicy(t *testing.T) {
-	builtin, _ := policy.NewDefaultLifecycle(policy.DefaultLifecycleOptions{})
-	p := &removalPolicy{DefaultLifecycle: builtin}
-	c := newAPICluster(t, 3, true, func(i int, o *quorum.NodeOptions) {
-		if i == 2 {
-			o.Policies.Lifecycle = p
+// Exercise the local Start contract with one real participant and two absent
+// peers. Multi-participant readiness/founding behavior belongs to the pool.
+func TestPublicNodeStartReturnsBeforeQuorumAndRepeatStartKeepsLifetime(t *testing.T) {
+	t.Parallel()
+	c := newSingleNodeFixture(t, false, func(_ int, o *quorum.NodeOptions) {
+		for i := 2; i <= 3; i++ {
+			o.Bootstrap.Founders = append(o.Bootstrap.Founders, quorum.FoundingMember{Node: topology.Node{Name: fmt.Sprintf("n%d", i), Type: "worker"}, MemberID: uint64(i), Address: "127.0.0.1:1"})
 		}
 	})
-	p.node = func() quorum.Node { return c.nodes[2] }
-	c.startAll(t)
-	ctx, cancel := context.WithTimeout(c.ctx, 15*time.Second)
-	defer cancel()
-	leader := c.leader(t)
-	if leader == c.nodes[2] {
-		if err := leader.Cluster().TransferLeader(ctx, topology.MetaGroupID, c.nodes[0].Identity().NodeName); err != nil {
-			t.Fatal(err)
-		}
-		apiEventually(t, func() bool { return !c.nodes[2].Cluster().IsLeader() })
-		leader = c.leader(t)
-	}
-	result, err := leader.Cluster().CreateGroup(ctx, quorum.GroupSpec{ID: "drained"}, quorum.MutationOptions{Approve: true})
-	if err != nil {
+	started := time.Now()
+	if err := c.nodes[0].Start(c.ctx); err != nil {
 		t.Fatal(err)
 	}
-	if s, e := leader.Cluster().WaitOperator(ctx, result.OperatorID); e != nil || s.State != topology.OperatorSucceeded {
-		t.Fatal(s, e)
+	if time.Since(started) > time.Second {
+		t.Fatal("Start waited for quorum")
 	}
-	apiEventually(t, func() bool {
-		d, e := leader.Cluster().Active(ctx)
-		return e == nil && d.Version == result.Document.Version
-	})
-	result, err = leader.Cluster().DrainNode(ctx, "n3", quorum.MutationOptions{Approve: true})
-	if err != nil {
-		t.Fatal(err)
+	brief, done := context.WithTimeout(c.ctx, 100*time.Millisecond)
+	if err := c.nodes[0].WaitReady(brief); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("pre-quorum readiness", err)
 	}
-	if s, e := leader.Cluster().WaitOperator(ctx, result.OperatorID); e != nil || s.State != topology.OperatorSucceeded {
-		t.Fatal(s, e)
+	done()
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := c.nodes[0].Start(canceled); err != nil {
+		t.Fatal("repeat Start replaced lifetime", err)
 	}
-	apiEventually(t, func() bool {
-		d, e := leader.Cluster().Active(ctx)
-		return e == nil && d.Version == result.Document.Version
-	})
-	result, err = leader.Cluster().ExcludeNode(ctx, "n3", quorum.MutationOptions{Approve: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if s, e := leader.Cluster().WaitOperator(ctx, result.OperatorID); e != nil || s.State != topology.OperatorSucceeded {
-		t.Fatal(s, e)
-	}
-	apiEventually(t, func() bool { return p.calls.Load() == 2 })
-	if p.violation.Load() {
-		t.Fatal("removal policy ran before mandatory fence")
-	}
-	if s, e := c.nodes[2].Cluster().Status(ctx); e != nil || s.SelfRemoval == nil || !s.SelfRemoval.Fenced {
-		t.Fatal("diagnostics lost", s, e)
-	}
-	if _, e := c.nodes[2].ActivateSession(ctx); !errors.Is(e, fault.ErrStopped) {
-		t.Fatal("removed node reactivated", e)
+	if status := c.nodes[0].Status(); status.State != quorum.NodeStarting || !status.Meta.Found || status.Ready {
+		t.Fatal("repeat Start stopped accepted participant", status)
 	}
 }

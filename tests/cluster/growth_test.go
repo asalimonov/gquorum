@@ -95,6 +95,7 @@ func replicaID(doc topology.Document, group, name string) uint64 {
 }
 
 func TestRuntimeGrowthExposesLearnerBeforePromotionAndSurvivesRestart(t *testing.T) {
+	t.Parallel()
 	c := acquire(t, matrixSpec(3)).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 105*time.Second)
 	defer cancel()
@@ -193,6 +194,7 @@ func TestRuntimeGrowthExposesLearnerBeforePromotionAndSurvivesRestart(t *testing
 }
 
 func TestCompactedLearnerCatchesUpFromFullSnapshot(t *testing.T) {
+	t.Parallel()
 	c := acquire(t, matrixSpec(3)).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 110*time.Second)
 	defer cancel()

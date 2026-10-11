@@ -196,6 +196,7 @@ func assertStatus(t *testing.T, r *Driver, state topology.SchedulingState, reaso
 }
 
 func TestDriverStartStopLifecycle(t *testing.T) {
+	t.Parallel()
 	h := newTestHost(t, 1, 2, 3)
 	r := newTestDriver(t, h, Settings{})
 	if err := r.Stop(context.Background()); err != nil {
@@ -218,6 +219,7 @@ func TestDriverStartStopLifecycle(t *testing.T) {
 	}
 }
 func TestDriverGatesLeaderHealthAndDisabled(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"follower", "unknown", "disabled"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newTestHost(t, 1, 2)
@@ -238,6 +240,7 @@ func TestDriverGatesLeaderHealthAndDisabled(t *testing.T) {
 }
 
 func TestDriverLocalKillSwitchResetsStability(t *testing.T) {
+	t.Parallel()
 	h := newTestHost(t, 1, 2)
 	r := newTestDriver(t, h, Settings{})
 	if err := r.SetEnabled(context.Background(), false); err != nil {
@@ -276,6 +279,7 @@ func TestDriverLocalKillSwitchResetsStability(t *testing.T) {
 	}
 }
 func TestDriverResumesApprovedOperatorBeforeHealthGate(t *testing.T) {
+	t.Parallel()
 	for _, state := range []topology.OperatorState{topology.OperatorPending, topology.OperatorRunning, topology.OperatorWaitingForCatchUp, topology.OperatorSucceeded} {
 		t.Run(string(state), func(t *testing.T) {
 			for _, leader := range []bool{true, false} {
@@ -300,6 +304,7 @@ func TestDriverResumesApprovedOperatorBeforeHealthGate(t *testing.T) {
 	}
 }
 func TestDriverDoesNotMergeStagedOrFailedOperatorIntent(t *testing.T) {
+	t.Parallel()
 	for _, failed := range []bool{true, false} {
 		t.Run(fmt.Sprint(failed), func(t *testing.T) {
 			h := newTestHost(t, 1, 2)
@@ -321,6 +326,7 @@ func TestDriverDoesNotMergeStagedOrFailedOperatorIntent(t *testing.T) {
 	}
 }
 func TestDriverCommitsExactLearnerFirstRepair(t *testing.T) {
+	t.Parallel()
 	h := newTestHost(t, 1, 2)
 	r := newTestDriver(t, h, Settings{})
 	tick(t, r)
@@ -344,6 +350,7 @@ func TestDriverCommitsExactLearnerFirstRepair(t *testing.T) {
 	assertStatus(t, r, topology.SchedulingRunning, ReconcileReasonApprovedOperator)
 }
 func TestDriverCASRaceLeavesOperatorVersionStaged(t *testing.T) {
+	t.Parallel()
 	h := newTestHost(t, 1, 2)
 	r := newTestDriver(t, h, Settings{})
 	h.beforeCommit = func() { h.stage(topology.OriginOperator, 1) }
@@ -360,6 +367,7 @@ func (p *stubPolicy) Schedule(context.Context, policy.ScheduleInput) (policy.Sch
 	return p.decision, nil
 }
 func TestDriverRejectsPolicyActionsOutsideAllowList(t *testing.T) {
+	t.Parallel()
 	h := newTestHost(t, 1, 2, 3)
 	r := newTestDriver(t, h, Settings{})
 	r.policy = &stubPolicy{policy.ScheduleDecision{Action: &policy.ScheduleAction{Kind: "remove_voter", Identity: storage.Identity{GroupID: "shard0", ReplicaID: 3}}}}
@@ -403,6 +411,7 @@ func TestHealableMatrix(t *testing.T) {
 	}
 }
 func TestDriverHealsStagedInternal(t *testing.T) {
+	t.Parallel()
 	h := newTestHost(t, 1, 2, 3)
 	h.stage(topology.OriginInternal, 1)
 	r := newTestDriver(t, h, Settings{})
@@ -414,6 +423,7 @@ func TestDriverHealsStagedInternal(t *testing.T) {
 	}
 }
 func TestDriverHealRefusals(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"operator", "laundered", "follower", "plan-error", "apply-error", "nonempty", "unknown"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newTestHost(t, 1, 2, 3)
@@ -451,6 +461,7 @@ func TestDriverHealRefusals(t *testing.T) {
 	}
 }
 func TestReconcileTickIsBoundedAndCancelable(t *testing.T) {
+	t.Parallel()
 	h := newTestHost(t, 1, 2, 3)
 	h.blockViews = true
 	r := newTestDriver(t, h, Settings{Interval: 100 * time.Millisecond, TickTimeout: 20 * time.Millisecond})
@@ -474,6 +485,7 @@ func TestReconcileTickIsBoundedAndCancelable(t *testing.T) {
 	}
 }
 func TestDriverFollowerResetsStabilityObservations(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"standby", "staged", "failed", "approved"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newTestHost(t, 1, 2)
@@ -502,6 +514,7 @@ func TestDriverFollowerResetsStabilityObservations(t *testing.T) {
 	}
 }
 func TestDriverStatusGatesAndStableSince(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"converged", "stability", "quorum", "cooldown", "status-error", "read-error", "execution-error"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newTestHost(t, 1, 2)
@@ -544,6 +557,7 @@ func TestDriverStatusGatesAndStableSince(t *testing.T) {
 	}
 }
 func TestDriverStatusTransitionsAreOwnedAndLoggedOnce(t *testing.T) {
+	t.Parallel()
 	h := newTestHost(t, 1, 2, 3)
 	r := newTestDriver(t, h, Settings{})
 	var buf bytes.Buffer
@@ -584,6 +598,7 @@ func TestDriverStatusTransitionsAreOwnedAndLoggedOnce(t *testing.T) {
 	}
 }
 func TestDriverStatusErrorWarnsOnce(t *testing.T) {
+	t.Parallel()
 	h := newTestHost(t, 1, 2, 3)
 	r := newTestDriver(t, h, Settings{})
 	var buf bytes.Buffer
@@ -597,6 +612,7 @@ func TestDriverStatusErrorWarnsOnce(t *testing.T) {
 	}
 }
 func TestDriverStatusConcurrentAccess(t *testing.T) {
+	t.Parallel()
 	h := newTestHost(t, 1, 2, 3)
 	r := newTestDriver(t, h, Settings{})
 	var wg sync.WaitGroup

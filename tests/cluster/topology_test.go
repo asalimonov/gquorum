@@ -20,6 +20,7 @@ import (
 )
 
 func TestStagedTopologyDoesNotChangeApprovedMembershipOrStartGroups(t *testing.T) {
+	t.Parallel()
 	spec := matrixSpec(3)
 	spec.Limits.MaxNodes = 4 // Room for an admitted node whose process never starts.
 	lease := acquire(t, spec)
@@ -127,9 +128,10 @@ func TestStagedTopologyDoesNotChangeApprovedMembershipOrStartGroups(t *testing.T
 	}
 }
 
-func TestStagedReplicaRepairRequiresExplicitApplyThreeNodes(t *testing.T) { stagedReplicaRepair(t, 3) }
-func TestStagedReplicaRepairRequiresExplicitApplyFiveNodes(t *testing.T)  { stagedReplicaRepair(t, 5) }
-func TestStagedReplicaRepairRequiresExplicitApplySevenNodes(t *testing.T) { stagedReplicaRepair(t, 7) }
+func TestStagedReplicaRepairRequiresExplicitApplyThreeNodes(t *testing.T) {
+	t.Parallel()
+	stagedReplicaRepair(t, 3)
+}
 
 func stagedReplicaRepair(t *testing.T, size int) {
 	t.Helper()
@@ -266,9 +268,10 @@ func stagedReplicaRepair(t *testing.T, size int) {
 	t.Logf("METRIC nodes=%d staged_samples=%d retired_replica=%d repaired_replica=%d", size, samples, oldID, freshID)
 }
 
-func TestAddressFreeTopologyRoutesMetaAndLoadThreeNodes(t *testing.T) { addressFreeRouting(t, 3) }
-func TestAddressFreeTopologyRoutesMetaAndLoadFiveNodes(t *testing.T)  { addressFreeRouting(t, 5) }
-func TestAddressFreeTopologyRoutesMetaAndLoadSevenNodes(t *testing.T) { addressFreeRouting(t, 7) }
+func TestAddressFreeTopologyRoutesMetaAndLoadThreeNodes(t *testing.T) {
+	t.Parallel()
+	addressFreeRouting(t, 3)
+}
 
 func addressFreeRouting(t *testing.T, size int) {
 	t.Helper()

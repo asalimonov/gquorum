@@ -150,19 +150,23 @@ compatibility impact.
    make test-race  # Fast unit checks under the race detector
    ```
 
-Use `make test-function` for non-Docker functional tests,
+Use `make test-function` for isolated non-Docker functional and storage tests,
 `make test-example` for the actual Compose demo and `make test-cluster` for Docker
 process tests. `make test-unit` and `make test-unit-race` are aliases for the fast
 checks. Functional tests stay beside their packages in `*_func_test.go` files
 with the `functional` build tag. Unit files use `!functional`, so the commands
 run separate suites. `make test-functional` remains an alias for `make test-function`.
-The process suite covers three-, five- and seven-node clusters, faults, recovery and multiple
-load groups. Docker is required for the example and process suites. Protocol
+Multi-node scenarios run through the bounded Docker pool under `make test-cluster`;
+functional fixtures start at most one local participant. The process suite covers
+three-node quorum, faults, recovery and multiple load groups, with targeted
+four-node admission regressions. Docker is required for the example and process suites. Protocol
 changes use `make generate` and `make proto-check`, which require `protoc` and
 install pinned Go generators.
 
-The [testing guide](docs/testing/tests.md) describes test boundaries and commands;
-the [validation record](docs/testing/api-refactor-validation.md) records the
+The [testing guide](docs/testing/tests.md) describes test boundaries and commands.
+Test targets require Python 3.9+ and save detailed results and Markdown Gantt
+timelines under `test-reports/<suite>/latest/`. Each run keeps its own directory.
+The [validation record](docs/testing/api-refactor-validation.md) records the
 completed public API refactor checks. Separate `examples/cluster` and
 `tests/cluster` Go modules keep CLI and Docker dependencies outside the library
 dependency graph. The example uses Kong for configuration and `net/http` for its

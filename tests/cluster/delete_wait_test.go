@@ -14,6 +14,7 @@ import (
 )
 
 func TestDeletionWaitsForUnreachableFormerHostBeforeDeletingState(t *testing.T) {
+	t.Parallel()
 	c := acquire(t, matrixSpec(3)).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 110*time.Second)
 	defer cancel()

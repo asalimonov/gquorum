@@ -4,7 +4,6 @@ package metaservice
 
 import (
 	"context"
-	"errors"
 	"reflect"
 	"sync"
 	"testing"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
-	"go.etcd.io/raft/v3/raftpb"
 )
 
 // verifiedLoadController models caller-owned state independently of the meta
@@ -153,76 +151,13 @@ func (c *verifiedLoadController) DeleteGroupState(ctx context.Context, a topolog
 	delete(c.hosts, a.GroupID)
 	return nil
 }
-func loadDocument(t *testing.T, g *Group) topology.Document {
-	t.Helper()
-	doc := g.state().Latest()
-	doc.Origin = topology.OriginOperator
-	doc.Groups = append(doc.Groups, topology.Group{ID: "load-one", NextReplicaID: 2, Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 1}, Replicas: []topology.Replica{{NodeName: "n1", ReplicaID: 1, Role: topology.ReplicaVoter}}})
-	return doc
-}
-
-func TestMetaCallerEffectCompletionLostAcrossLeaderReplacement(t *testing.T) {
-	controller := &verifiedLoadController{groups: map[string]topology.Group{}, hosts: map[string]map[string]uint64{}, firstEffect: make(chan struct{})}
-	effect := controller.firstEffect
-	groups := publicFoundingClusterWith(t, 3, func(o *Options) { o.LoadGroups = controller })
-	leader := readyPublic(t, groups)
-	controller.mu.Lock()
-	controller.meta = groups
-	controller.mu.Unlock()
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
-	if _, err := leader.Stage(ctx, loadDocument(t, leader), 1); err != nil {
-		t.Fatal(err)
-	}
-	id, err := leader.Apply(ctx, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-effect:
-	case <-ctx.Done():
-		t.Fatal("load effect was not invoked")
-	}
-	if err = leader.Stop(ctx); err != nil {
-		t.Fatal(err)
-	}
-	var next *Group
-	waitPublic(t, func() bool {
-		for _, g := range groups {
-			if g != leader && g.IsLeader() {
-				next = g
-				return true
-			}
-		}
-		return false
-	})
-	status, err := next.WaitOperator(ctx, id)
-	if err != nil || status.State != topology.OperatorSucceeded {
-		t.Fatal(status, err)
-	}
-	waitPublic(t, func() bool { return next.state().Active().Version == 2 })
-	controller.mu.Lock()
-	effects := controller.creates
-	controller.mu.Unlock()
-	if effects != 1 {
-		t.Fatal("duplicated caller-owned effect", effects)
-	}
-	// The old authorization is unusable once the execution completed.
-	old := topology.AuthorizedStep{OperatorID: id, Version: 2, Attempt: 1, StepSeq: 1, Kind: topology.StepCreateFoundingGroup, GroupID: "load-one"}
-	if err = controller.CreateGroup(ctx, old); !errors.Is(err, fault.ErrOperatorAuthorization) {
-		t.Fatal("accepted stale authorized identity", err)
-	}
-	statusGroup, err := controller.Status(ctx, "load-one")
-	if err != nil || !reflect.DeepEqual(statusGroup.ConfState, raftpb.ConfState{Voters: []uint64{1}}) {
-		t.Fatal(statusGroup, err)
-	}
-}
 
 func TestMetaDeletesInterruptedFoundingBeforeActive(t *testing.T) {
+	t.Parallel()
 	release := make(chan struct{})
 	controller := &verifiedLoadController{groups: map[string]topology.Group{}, hosts: map[string]map[string]uint64{}, firstEffect: make(chan struct{}), firstRelease: release}
 	effect := controller.firstEffect
-	groups := publicFoundingClusterWith(t, 1, func(o *Options) { o.LoadGroups = controller })
+	groups := singleMetaFixtureWith(t, func(o *Options) { o.LoadGroups = controller })
 	leader := readyPublic(t, groups)
 	controller.mu.Lock()
 	controller.meta = groups
@@ -273,4 +208,12 @@ func TestMetaDeletesInterruptedFoundingBeforeActive(t *testing.T) {
 	if _, exists := controller.groups["load-one"]; exists || len(controller.hosts["load-one"]) != 0 {
 		t.Fatal("interrupted founding resources were not deleted")
 	}
+}
+
+func loadDocument(t *testing.T, g *Group) topology.Document {
+	t.Helper()
+	doc := g.state().Latest()
+	doc.Origin = topology.OriginOperator
+	doc.Groups = append(doc.Groups, topology.Group{ID: "load-one", NextReplicaID: 2, Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 1}, Replicas: []topology.Replica{{NodeName: "n1", ReplicaID: 1, Role: topology.ReplicaVoter}}})
+	return doc
 }

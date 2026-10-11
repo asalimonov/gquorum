@@ -18,6 +18,7 @@ import (
 // groups and exact caller-owned cleanup. Source workload-specific reserved IDs
 // are replaced by the library's single reserved group, _meta.
 func TestFifteenLoadGroupsCommitIndependentlyAndDeleteEveryLocalStore(t *testing.T) {
+	t.Parallel()
 	c := acquire(t, threeNodes()).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 110*time.Second)
 	defer cancel()

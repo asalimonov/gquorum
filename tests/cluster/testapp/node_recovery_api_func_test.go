@@ -27,7 +27,7 @@ func borrowedAPICluster(t *testing.T, configure func(*quorum.NodeOptions)) (*api
 	t.Helper()
 	var store *walstore.Store
 	var root string
-	c := newAPICluster(t, 1, true, func(_ int, o *quorum.NodeOptions) {
+	c := newSingleNodeFixture(t, true, func(_ int, o *quorum.NodeOptions) {
 		wal := o.Loads.Storage.WAL
 		root = wal.RootDir
 		var err error
@@ -84,6 +84,7 @@ func restartAPINode(t *testing.T, c *apiCluster, i int) quorum.Node {
 }
 
 func TestPublicNodeIdentityMismatchParkSurvivesMetaRestart(t *testing.T) {
+	t.Parallel()
 	c, store, _ := borrowedAPICluster(t, nil)
 	c.startAll(t)
 	n := c.nodes[0]
@@ -141,6 +142,7 @@ func TestPublicNodeIdentityMismatchParkSurvivesMetaRestart(t *testing.T) {
 }
 
 func TestPublicNodeApprovedLoadParksLostWALRecoversAndRetires(t *testing.T) {
+	t.Parallel()
 	c, store, root := borrowedAPICluster(t, nil)
 	c.startAll(t)
 	n := c.nodes[0]
@@ -231,6 +233,7 @@ func (s *joiningActionTransport) ApplyAction(ctx context.Context, req load.Actio
 }
 
 func TestPublicNodeStopJoinsEffectsBeforeDatabase(t *testing.T) {
+	t.Parallel()
 	blocked := &joiningActionTransport{entered: make(chan struct{}), canceled: make(chan struct{}), release: make(chan struct{})}
 	c, store, _ := borrowedAPICluster(t, func(o *quorum.NodeOptions) {
 		blocked.Transport = o.Loads.Transport

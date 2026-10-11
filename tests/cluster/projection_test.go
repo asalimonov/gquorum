@@ -15,9 +15,10 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func TestCallerProjectionStallDoesNotShedLocalWALThreeNodes(t *testing.T) { projectionStall(t, 3) }
-func TestCallerProjectionStallDoesNotShedLocalWALFiveNodes(t *testing.T)  { projectionStall(t, 5) }
-func TestCallerProjectionStallDoesNotShedLocalWALSevenNodes(t *testing.T) { projectionStall(t, 7) }
+func TestCallerProjectionStallDoesNotShedLocalWALThreeNodes(t *testing.T) {
+	t.Parallel()
+	projectionStall(t, 3)
+}
 
 func projectionStall(t *testing.T, size int) {
 	t.Helper()

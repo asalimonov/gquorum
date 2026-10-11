@@ -5,10 +5,11 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"github.com/asalimonov/gquorum"
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/asalimonov/gquorum"
 
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -22,10 +23,12 @@ func joiningNode(spec NodeSpec) topology.Node {
 }
 
 func TestMetaAdmissionUsesLearnerBeforeServingAndRetainsIdentityOnRestart(t *testing.T) {
+	t.Parallel()
 	testMetaAdmission(t, false)
 }
 
 func TestAdmissionOperatorResumesAfterMetaLeaderTransferWithoutNewAttempt(t *testing.T) {
+	t.Parallel()
 	testMetaAdmission(t, true)
 }
 
@@ -234,5 +237,85 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 		if err != nil || len(status.ConfState.Voters) != 4 || slices.Contains(status.ConfState.Learners, member) {
 			t.Fatal(fmt.Sprintf("%s meta member did not retain promotion", current.Spec.Name), status, err)
 		}
+	}
+}
+
+func TestMetaPinnedAdmissionRestartsBeforeAndAfterReadyWithoutAllocatingIDs(t *testing.T) {
+	t.Parallel()
+	for _, phase := range []string{"pending", "ready"} {
+		t.Run(phase, func(t *testing.T) {
+			t.Parallel()
+			spec := matrixSpec(3)
+			spec.Limits.MaxNodes = 4
+			c := acquire(t, spec).Cluster
+			ctx, cancel := context.WithTimeout(t.Context(), 80*time.Second)
+			defer cancel()
+			// Only the joining container uses the protocol-driver boot mode. Its next
+			// process uses the ordinary SDK; both processes retain the same private volume.
+			node, err := c.PrepareJoinNode(ctx, NodeSpec{Name: "node4", Type: "worker", AdmissionPinPhase: phase})
+			if err != nil {
+				t.Fatal(err)
+			}
+			base, err := c.Document(ctx, "node1", "latest")
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err := c.Request(ctx, "node1", "POST", "/api/nodes", map[string]any{"node": joiningNode(node.Spec), "mutation": gquorum.MutationOptions{Approve: true}}, base.Version)
+			if err := requireStatus(response, err, 202); err != nil {
+				t.Fatal(err)
+			}
+			var admission gquorum.MutationResult
+			if err := response.Decode(&admission); err != nil {
+				t.Fatal(err)
+			}
+			if err := node.Start(ctx); err != nil {
+				t.Fatal(err)
+			}
+			response, err = c.Request(ctx, "node4", "GET", "/internal/test/admission-pin", nil, 0)
+			if err := requireStatus(response, err, 200); err != nil {
+				t.Fatal(err)
+			}
+			var pin struct {
+				Identity topology.Identity `json:"identity"`
+				Found    bool              `json:"found"`
+				Instance string            `json:"instance_id"`
+				Phase    string            `json:"phase"`
+			}
+			if err := response.Decode(&pin); err != nil {
+				t.Fatal(err)
+			}
+			if !pin.Found || pin.Identity.MemberID != admission.Document.MemberID("node4") || pin.Identity.ClusterID != c.ID || pin.Identity.NodeName != "node4" || pin.Instance == "" || pin.Phase != phase {
+				t.Fatal("pending grant was not durably pinned", pin)
+			}
+			if err := node.Kill(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := node.StartJoining(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.WaitOperator(ctx, "node1", admission.OperatorID); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.WaitActive(ctx, admission.Document.Version); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.WaitReady(ctx); err != nil {
+				t.Fatal(err)
+			}
+			own, err := c.Local(ctx, "node4", topology.MetaGroupID)
+			if err != nil || own.Identity.MemberID != pin.Identity.MemberID || own.Identity.InstanceID == pin.Instance {
+				t.Fatal("restart allocated another identity or retained process incarnation", own, err)
+			}
+			for _, participant := range c.Nodes() {
+				latest, err := c.Document(ctx, participant.Spec.Name, "latest")
+				if err != nil || latest.Version != admission.Document.Version || latest.MemberID("node4") != pin.Identity.MemberID {
+					t.Fatal("pinned admission restart churned topology", latest, err)
+				}
+			}
+			operator, err := c.Operator(ctx, "node1", admission.OperatorID)
+			if err != nil || operator.Attempt != 1 || operator.State != topology.OperatorSucceeded {
+				t.Fatal("restart replaced the exact admission attempt", operator, err)
+			}
+		})
 	}
 }

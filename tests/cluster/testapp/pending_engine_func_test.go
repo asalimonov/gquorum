@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"encoding/json"
+
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/storage"
@@ -42,8 +43,10 @@ func (s *pressureStore) SaveReady(ctx context.Context, id string, write storage.
 }
 
 func TestProposalPressureBoundsCancellationAndRecovery(t *testing.T) {
+	t.Parallel()
 	for _, stop := range []bool{false, true} {
 		t.Run(fmt.Sprintf("stop=%t", stop), func(t *testing.T) {
+			t.Parallel()
 			const limit = 32
 			s := &pressureStore{Store: pressureOpenStore(t)}
 			m := newMachine()

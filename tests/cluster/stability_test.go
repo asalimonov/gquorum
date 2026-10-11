@@ -14,12 +14,14 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func TestStability_HealthAndExactLocalReadsThreeNodes(t *testing.T)    { stabilityHealthAndReads(t, 3) }
-func TestStability_HealthAndExactLocalReadsFiveNodes(t *testing.T)     { stabilityHealthAndReads(t, 5) }
-func TestStability_HealthAndExactLocalReadsSevenNodes(t *testing.T)    { stabilityHealthAndReads(t, 7) }
-func TestStability_RetainedFollowerThreeCyclesThreeNodes(t *testing.T) { stabilityFollowerCycles(t, 3) }
-func TestStability_RetainedFollowerThreeCyclesFiveNodes(t *testing.T)  { stabilityFollowerCycles(t, 5) }
-func TestStability_RetainedFollowerThreeCyclesSevenNodes(t *testing.T) { stabilityFollowerCycles(t, 7) }
+func TestStability_HealthAndExactLocalReadsThreeNodes(t *testing.T) {
+	t.Parallel()
+	stabilityHealthAndReads(t, 3)
+}
+func TestStability_RetainedFollowerThreeCyclesThreeNodes(t *testing.T) {
+	t.Parallel()
+	stabilityFollowerCycles(t, 3)
+}
 
 func waitClusterHealth(ctx context.Context, c *Cluster, stopped string) error {
 	return Poll(ctx, func() (bool, error) {

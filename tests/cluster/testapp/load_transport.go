@@ -196,6 +196,9 @@ func (a *application) receiveCall(ctx context.Context, request *loadpb.Request) 
 		}
 		result, err := a.node.ApplyLoadAction(ctx, action)
 		a.afterClusterEffect(action.Authorization, err)
+		if err == nil {
+			err = a.waitAfterClusterEffect(ctx, action.Authorization)
+		}
 		if err != nil {
 			return domainReply(err), nil
 		}

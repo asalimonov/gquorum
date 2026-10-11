@@ -19,8 +19,9 @@ func threeNodes() Spec {
 	return Spec{Nodes: []NodeSpec{{Name: "node1", Type: "worker"}, {Name: "node2", Type: "worker"}, {Name: "node3", Type: "observer"}}, Limits: (topology.Limits{}).WithDefaults()}
 }
 func TestPoolReusesIsolatedNetworkAndReplacesAllPersistentState(t *testing.T) {
+	t.Parallel()
 	// This dedicated one-unit pool makes reuse observable rather than relying on
-	// scheduler order in the suite pool. Cluster cases intentionally stay serial.
+	// scheduler order in the parallel suite pool.
 	pool, err := NewPool(PoolOptions{Image: suitePool.opts.Image, Size: 1, CookParallel: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -120,10 +121,24 @@ func TestPoolReusesIsolatedNetworkAndReplacesAllPersistentState(t *testing.T) {
 	}
 }
 func TestPoolSimultaneousUnitsHavePrivateRoutingAndClusterState(t *testing.T) {
+	t.Parallel()
+	// Holding two suite leases could starve the second acquisition when the
+	// other parallel cases occupy every remaining unit (or -parallel=1).
+	pool, err := NewPool(PoolOptions{Image: suitePool.opts.Image, Size: 2, CookParallel: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+		defer cancel()
+		if err := pool.Close(ctx); err != nil {
+			t.Error(err)
+		}
+	})
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
-	first := acquire(t, threeNodes())
-	second := acquire(t, threeNodes())
+	first := acquireFrom(t, pool, threeNodes())
+	second := acquireFrom(t, pool, threeNodes())
 	a, b := first.Cluster, second.Cluster
 	if a.Network == b.Network || a.ID == b.ID || a.Credential == b.Credential {
 		t.Fatal("units share a security or network namespace")
@@ -147,6 +162,7 @@ func TestPoolSimultaneousUnitsHavePrivateRoutingAndClusterState(t *testing.T) {
 }
 
 func TestPoolCanceledBootReturnsUnitOnlyAfterOwnedResourcesAreGone(t *testing.T) {
+	t.Parallel()
 	pool, err := NewPool(PoolOptions{Image: suitePool.opts.Image, Size: 1, CookParallel: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -222,6 +238,7 @@ func TestPoolCanceledBootReturnsUnitOnlyAfterOwnedResourcesAreGone(t *testing.T)
 }
 
 func TestPoolCanceledWarmupJoinsAndRemovesItsNetworks(t *testing.T) {
+	t.Parallel()
 	pool, err := NewPool(PoolOptions{Image: suitePool.opts.Image, Size: 2, CookParallel: 1})
 	if err != nil {
 		t.Fatal(err)

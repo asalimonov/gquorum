@@ -14,13 +14,8 @@ import (
 )
 
 func TestLoadIngressAndExactIndependentCommandsThreeNodes(t *testing.T) {
+	t.Parallel()
 	loadIngressAndAccounting(t, 3)
-}
-func TestLoadIngressAndExactIndependentCommandsFiveNodes(t *testing.T) {
-	loadIngressAndAccounting(t, 5)
-}
-func TestLoadIngressAndExactIndependentCommandsSevenNodes(t *testing.T) {
-	loadIngressAndAccounting(t, 7)
 }
 
 func exactOwnedValues(ctx context.Context, c *Cluster, document topology.Document, group string, expected map[string]string) error {

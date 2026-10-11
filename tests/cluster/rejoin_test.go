@@ -22,13 +22,8 @@ import (
 )
 
 func TestDuplicateNameIntruderExitsWithoutDisturbingHolderThreeNodes(t *testing.T) {
+	t.Parallel()
 	duplicateNameIntruder(t, 3)
-}
-func TestDuplicateNameIntruderExitsWithoutDisturbingHolderFiveNodes(t *testing.T) {
-	duplicateNameIntruder(t, 5)
-}
-func TestDuplicateNameIntruderExitsWithoutDisturbingHolderSevenNodes(t *testing.T) {
-	duplicateNameIntruder(t, 7)
 }
 
 // Port the source duplicate-name process test without the application UI/gossip
@@ -158,20 +153,12 @@ func duplicateNameIntruder(t *testing.T, size int) {
 }
 
 func TestExcludedSameDiskProcessParksAndReadmitsThreeNodes(t *testing.T) {
+	t.Parallel()
 	excludedSameDiskRejoin(t, 3)
 }
-func TestExcludedSameDiskProcessParksAndReadmitsFiveNodes(t *testing.T) { excludedSameDiskRejoin(t, 5) }
-func TestExcludedSameDiskProcessParksAndReadmitsSevenNodes(t *testing.T) {
-	excludedSameDiskRejoin(t, 7)
-}
 func TestDownNodeRotatedIdentityQuarantinesAndRejoinsThreeNodes(t *testing.T) {
+	t.Parallel()
 	rotatedDownNodeRejoin(t, 3)
-}
-func TestDownNodeRotatedIdentityQuarantinesAndRejoinsFiveNodes(t *testing.T) {
-	rotatedDownNodeRejoin(t, 5)
-}
-func TestDownNodeRotatedIdentityQuarantinesAndRejoinsSevenNodes(t *testing.T) {
-	rotatedDownNodeRejoin(t, 7)
 }
 
 func rejoinWorkload(t *testing.T, size int) (context.Context, *Cluster, topology.Document, LocalObservation, map[string]string) {

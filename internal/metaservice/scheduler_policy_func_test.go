@@ -67,13 +67,14 @@ func TestSchedulingStatusLeaderNamesUseCapturedActive(t *testing.T) {
 }
 
 func TestMetaUsesSelectedSchedulerWithOwnedHoldsAndCallbackDeadline(t *testing.T) {
+	t.Parallel()
 	type observation struct {
 		input    policy.ScheduleInput
 		duration time.Duration
 	}
 	seen := make(chan observation, 1)
 	held := []storage.Identity{{NodeName: "n1", ClusterID: "cluster", GroupID: "work", ReplicaID: 9}}
-	groups := publicFoundingClusterWith(t, 1, func(o *Options) {
+	groups := singleMetaFixtureWith(t, func(o *Options) {
 		o.Scheduling = SchedulingOptions{Interval: 100 * time.Millisecond, TickTimeout: 80 * time.Millisecond}
 		o.CallbackTimeout = 25 * time.Millisecond
 		o.HeldLoads = func() []storage.Identity { return held }

@@ -39,8 +39,10 @@ type effectBarrier struct {
 	hits    uint64
 	last    topology.AuthorizedStep
 	refuse  bool
+	after   bool
 }
 type clusterHooks struct {
+	runtime     runtimeHooks
 	mu          sync.Mutex
 	barriers    map[effectKey]*effectBarrier
 	receipts    []topology.AuthorizedStep
@@ -50,7 +52,7 @@ type clusterHooks struct {
 }
 
 func newClusterHooks() *clusterHooks {
-	return &clusterHooks{barriers: map[effectKey]*effectBarrier{}, snapshots: map[string]uint64{}, wals: map[walKey]*walControl{}, projections: map[walKey]*projectionControl{}}
+	return &clusterHooks{runtime: runtimeHooks{stopped: map[load.ReplicaRef]*load.Group{}}, barriers: map[effectKey]*effectBarrier{}, snapshots: map[string]uint64{}, wals: map[walKey]*walControl{}, projections: map[walKey]*projectionControl{}}
 }
 func (a *application) beforeClusterEffect(ctx context.Context, approved topology.AuthorizedStep) error {
 	if a.clusterHooks == nil {
@@ -59,12 +61,12 @@ func (a *application) beforeClusterEffect(ctx context.Context, approved topology
 	h := a.clusterHooks
 	h.mu.Lock()
 	b := h.barriers[effectKey{approved.GroupID, approved.Kind}]
-	if b != nil {
+	if b != nil && !b.after {
 		b.hits++
 		b.last = approved
 	}
 	h.mu.Unlock()
-	if b == nil {
+	if b == nil || b.after {
 		return nil
 	}
 	if b.refuse {
@@ -80,6 +82,29 @@ func (a *application) beforeClusterEffect(ctx context.Context, approved topology
 		return nil
 	}
 }
+func (a *application) waitAfterClusterEffect(ctx context.Context, approved topology.AuthorizedStep) error {
+	if a.clusterHooks == nil {
+		return nil
+	}
+	h := a.clusterHooks
+	h.mu.Lock()
+	b := h.barriers[effectKey{approved.GroupID, approved.Kind}]
+	if b != nil && b.after {
+		b.hits++
+		b.last = approved
+	}
+	h.mu.Unlock()
+	if b == nil || !b.after {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-b.release:
+		return nil
+	}
+}
+
 func (a *application) afterClusterEffect(approved topology.AuthorizedStep, err error) {
 	if a.clusterHooks == nil || err != nil {
 		return
@@ -141,6 +166,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			handler(w, r)
 		}
 	}
+	a.registerRuntimeRoutes(mux, protect)
 	a.registerResourceRoutes(mux, protect)
 	a.registerWALRoutes(mux, protect)
 	a.registerProjectionRoutes(mux, protect)
@@ -268,12 +294,17 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			httpError(w, err)
 			return
 		}
-		if !slices.Contains([]topology.StepKind{topology.StepPrepareReplica, topology.StepPromoteVoter, topology.StepStopReplica, topology.StepCleanupReplicaState, topology.StepDeleteGroupState}, kind) {
+		if !slices.Contains([]topology.StepKind{topology.StepCreateFoundingGroup, topology.StepPrepareReplica, topology.StepPromoteVoter, topology.StepStopReplica, topology.StepCleanupReplicaState, topology.StepDeleteGroupState}, kind) {
+			httpError(w, fault.ErrInvalid)
+			return
+		}
+		after := r.URL.Query().Get("after")
+		if after != "" && after != "true" {
 			httpError(w, fault.ErrInvalid)
 			return
 		}
 		mode := r.URL.Query().Get("refuse")
-		if mode != "" && mode != "true" || mode == "true" && kind != topology.StepStopReplica {
+		if after == "true" && mode == "true" || mode != "" && mode != "true" || mode == "true" && kind != topology.StepStopReplica {
 			httpError(w, fault.ErrInvalid)
 			return
 		}
@@ -285,7 +316,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			httpError(w, fault.ErrOverloaded)
 			return
 		}
-		h.barriers[key] = &effectBarrier{release: make(chan struct{}), refuse: mode == "true"}
+		h.barriers[key] = &effectBarrier{release: make(chan struct{}), refuse: mode == "true", after: after == "true"}
 		jsonResponse(w, http.StatusOK, map[string]bool{"armed": true})
 	}))
 	mux.HandleFunc("DELETE /internal/test/barriers/{group}/{kind}", protect(func(w http.ResponseWriter, r *http.Request) {

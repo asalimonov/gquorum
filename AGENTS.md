@@ -69,6 +69,7 @@ cleanup evidence and shutdown release ownership.
 | `examples/cluster/` | Separate Go module: Kong CLI/configuration, cluster construction/readiness in `cluster.go`, HTTP adapter in `http.go` and process wiring in `main.go`. |
 | `tests/cluster/testapp/` | Caller FSM, load protocol, retirement, unit/functional fixture tests and authenticated fault controls. |
 | `tests/cluster/` | Separate module for Docker process, fault, scale, performance and Compose tests. |
+| `scripts/test_report.py` | Shared test runner: Meridian-style stdout summaries, persistent package logs/JUnit and Markdown timelines. |
 
 ## Contracts to preserve
 
@@ -172,6 +173,9 @@ Events are node-local and never replicated through `_meta`.
 Keep `examples/cluster` small and meta-only. Full load integration and fault
 controls belong in `tests/cluster/testapp`, using public APIs. Functional tests,
 including private ledger and engine assertions, stay in their owning packages.
+They may start one local participant or protocol doubles. Multi-node consensus,
+admission and application scenarios belong to the Docker pool under
+`tests/cluster`, even when their former fixtures ran inside a single Go process.
 The library does not load application configuration or choose implicit storage roots.
 
 ## Development and verification
@@ -196,6 +200,15 @@ crossing replica or process boundaries. For documentation-only changes, verify
 paths, API names, commands and `git diff --check`. Report what actually ran and
 any unverified scope; historical validation records are not a new test run.
 
+Test targets require Python 3.9+ and write a fresh run directory under
+`test-reports/<suite>/`; `latest` links to the latest completed run. Read
+`report.md`, `timeline.md` and package logs for failures. Summary counts include
+parent tests and subtests, unlike the top-level source inventory. Preserve Go
+failure exit codes and reports for build failures, timeouts and interruptions.
+When changing the runner, run
+`python3 -m unittest discover -s scripts -p '*_test.py'` and exercise the relevant
+Make targets. `TEST_REPORTS_DIR` overrides the report root.
+
 Keep `make test` lightweight. Units must not start network services, mocked
 services, application replicas or subprocesses. Non-Docker functional tests stay
 beside their owning packages in `*_func_test.go` files with
@@ -210,9 +223,30 @@ Keep isolated units parallel with temporary fixtures. Do not mutate
 process environment, working directory or the upstream WAL segment-size global
 in parallel tests.
 The uncached unit target should remain below 30 seconds on the documented
-machine; `UNIT_PACKAGES` and `UNIT_PARALLEL` default to four.
+machine; `UNIT_PACKAGES` defaults to four and `UNIT_PARALLEL` to eight.
 
-Process cases remain sequential with isolated resources. Build with
+Independent functional tests also call `t.Parallel()` before acquiring fixtures.
+Use private temporary roots, ephemeral listeners, per-test transports and joined
+cleanup. Parallelize table cases only when each case owns its fixture; keep
+mutations of a shared component or store sequential within a parent test.
+Do not add multi-node fixture helpers to functional packages; use the existing
+Docker pool and authenticated fixture controls for those scenarios.
+`FUNCTIONAL_PACKAGES` defaults to four and `FUNCTIONAL_PARALLEL` to eight for
+ordinary and race runs, bounding concurrent I/O across functional packages.
+
+Use three nodes for ordinary cluster, quorum, fault and performance coverage.
+Do not repeat these scenarios at five or seven nodes. A larger cluster test must
+name a specific regression that cannot be exercised at three nodes; currently
+only four-node admission/promotion and durable admission-pin restart cases need
+that capacity.
+
+Process cases call `t.Parallel()` before acquiring isolated resources. Independent
+admission-phase subtests also run in parallel; subtests sharing
+a lease stay sequential. `CLUSTER_PARALLEL` defaults to eight, and the pool
+capacity and concurrent startup limit follow Go's `-parallel` setting unless
+overridden with `GQUORUM_TEST_POOL_SIZE` or `GQUORUM_TEST_COOK_PARALLEL`.
+Dedicated `make test-perf` runs default to `PERF_PARALLEL=1` for comparable
+latency measurements. Build with
 `make test-cluster-build`, then focus with
 `make test-cluster-run CLUSTER_ARGS='-v -run TestName'`. Rebuild after application
 changes; do not replace a shared image tag during a run. Preserve verified

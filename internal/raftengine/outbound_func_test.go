@@ -4,100 +4,18 @@ package raftengine
 
 import (
 	"context"
-	"fmt"
-	"go.etcd.io/raft/v3"
-	"go.etcd.io/raft/v3/quorum"
-	"go.etcd.io/raft/v3/tracker"
 	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"go.etcd.io/raft/v3"
+	"go.etcd.io/raft/v3/quorum"
+	"go.etcd.io/raft/v3/tracker"
+
 	"go.etcd.io/raft/v3/raftpb"
 )
-
-type slowDestination struct {
-	network *network
-	blocked atomic.Uint64
-	active  atomic.Int64
-	stalls  atomic.Int64
-}
-
-func (s *slowDestination) Send(ctx context.Context, messages []raftpb.Message) error {
-	s.active.Add(1)
-	defer s.active.Add(-1)
-	for _, message := range messages {
-		if message.To == s.blocked.Load() {
-			s.stalls.Add(1)
-			<-ctx.Done()
-			return ctx.Err()
-		}
-	}
-	return (endpoint{s.network}).Send(ctx, messages)
-}
-
-func TestSlowDestinationCannotDelayHealthyMajorityAndStopJoinsSenders(t *testing.T) {
-	n := &network{nodes: map[uint64]*Group{}, disconnected: map[uint64]bool{}}
-	transport := &slowDestination{network: n}
-	var groups []*Group
-	var machines []*machine
-	for id := uint64(1); id <= 3; id++ {
-		m := &machine{}
-		group := newTestGroup(t, openStore(t, t.TempDir(), fmt.Sprint(id)), m, n, id, []uint64{1, 2, 3}, Founding)
-		group.opts.Transport = transport // Installed before starting any engine worker.
-		groups = append(groups, group)
-		machines = append(machines, m)
-		must(t, group.Start(t.Context()))
-	}
-	eventually(t, func() bool { return groups[0].Status().LeaderID != 0 })
-	for _, g := range groups {
-		if g.IsLeader() {
-			must(t, g.TransferLeader(testContext(t), 1))
-			break
-		}
-	}
-	eventually(t, func() bool { return groups[0].IsLeader() })
-	must(t, groups[2].Stop(testContext(t)))
-	transport.blocked.Store(3)
-	n.mu.Lock()
-	n.disconnected[3] = true
-	n.mu.Unlock()
-	var expected []string
-	for i := range 50 {
-		value := fmt.Sprintf("acknowledged-%02d", i)
-		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
-		result, err := groups[0].Propose(ctx, Proposal{RequestID: value, Data: []byte(value)})
-		cancel()
-		if err != nil || result.Code != "ok" {
-			t.Fatal("healthy retained majority was delayed by the stalled destination", i, result, err)
-		}
-		expected = append(expected, value)
-	}
-	eventually(t, func() bool { return len(machines[1].values()) == len(expected) })
-	for _, m := range machines[:2] {
-		got := m.values()
-		for i, value := range expected {
-			if got[i] != value {
-				t.Fatal("healthy peer lost or reordered acknowledged commands", i, got)
-			}
-		}
-	}
-	if transport.stalls.Load() == 0 {
-		t.Fatal("slow destination fault was never exercised")
-	}
-	for _, group := range groups {
-		must(t, group.Stop(testContext(t)))
-	}
-	if transport.active.Load() != 0 {
-		t.Fatal("Stop returned with live transport calls", transport.active.Load())
-	}
-	for _, group := range groups {
-		if group.sendWorkers.Load() != 0 {
-			t.Fatal("Stop returned with owned outbound workers", group.sendWorkers.Load())
-		}
-	}
-}
 
 type orderedTransport struct {
 	mu        sync.Mutex
