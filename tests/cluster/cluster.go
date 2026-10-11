@@ -19,7 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 	"github.com/containerd/errdefs"
 	containerapi "github.com/moby/moby/api/types/container"
@@ -96,7 +96,7 @@ func (s Spec) validate() error {
 	if s.WALWriteWait < 0 || s.WALWriteWait > 10*time.Millisecond {
 		return errors.New("invalid load WAL coalescing wait")
 	}
-	return (meta.ReconciliationOptions{Interval: s.ReconciliationInterval, TickTimeout: s.ReconciliationTimeout}).Validate()
+	return (metaservice.ReconciliationOptions{Interval: s.ReconciliationInterval, TickTimeout: s.ReconciliationTimeout}).Validate()
 }
 func randomID() (string, error) {
 	var value [12]byte

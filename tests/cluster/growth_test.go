@@ -9,21 +9,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func stageActivation(t *testing.T, ctx context.Context, c *Cluster, name string) (meta.MutationResult, topology.Plan) {
+func stageActivation(t *testing.T, ctx context.Context, c *Cluster, name string) (metaservice.MutationResult, topology.Plan) {
 	t.Helper()
 	base, err := c.Document(ctx, "node1", "latest")
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := c.Request(ctx, "node2", "POST", "/api/nodes/"+name+"/activate", meta.MutationOptions{Actor: "cluster-test"}, base.Version)
+	response, err := c.Request(ctx, "node2", "POST", "/api/nodes/"+name+"/activate", metaservice.MutationOptions{Actor: "cluster-test"}, base.Version)
 	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
 	}
-	var staged meta.MutationResult
+	var staged metaservice.MutationResult
 	if err := response.Decode(&staged); err != nil {
 		t.Fatal(err)
 	}
@@ -98,14 +98,14 @@ func TestRuntimeGrowthExposesLearnerBeforePromotionAndSurvivesRestart(t *testing
 	c := acquire(t, matrixSpec(3)).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 105*time.Second)
 	defer cancel()
-	created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "work"})
+	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Put(ctx, "node1", "work", "before-grow", "before-grow", "retained"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/drain", meta.MutationOptions{Apply: true}); err != nil {
+	if _, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/drain", metaservice.MutationOptions{Apply: true}); err != nil {
 		t.Fatal(err)
 	}
 	for _, node := range c.Nodes() {
@@ -196,14 +196,14 @@ func TestCompactedLearnerCatchesUpFromFullSnapshot(t *testing.T) {
 	c := acquire(t, matrixSpec(3)).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 110*time.Second)
 	defer cancel()
-	if _, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "work"}); err != nil {
+	if _, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work"}); err != nil {
 		t.Fatal(err)
 	}
 	before, err := c.Local(ctx, "node3", "work")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/drain", meta.MutationOptions{Apply: true}); err != nil {
+	if _, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/drain", metaservice.MutationOptions{Apply: true}); err != nil {
 		t.Fatal(err)
 	}
 	// Retain the source's nonempty >1000-command workload, with exact values.
@@ -224,7 +224,7 @@ func TestCompactedLearnerCatchesUpFromFullSnapshot(t *testing.T) {
 	if err != nil || leader.Storage.SnapshotIndex <= before.Storage.SnapshotIndex || leader.Storage.SnapshotBytes == 0 || len(leader.Values) != 1100 {
 		t.Fatal("workload did not produce a durable compacted snapshot", leader.Storage, len(leader.Values), err)
 	}
-	grown, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/activate", meta.MutationOptions{Apply: true})
+	grown, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/activate", metaservice.MutationOptions{Apply: true})
 	if err != nil {
 		t.Fatal(err)
 	}

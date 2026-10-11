@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -89,14 +89,14 @@ func duplicateNameIntruder(t *testing.T, size int) {
 	}
 	// Exact identity can be learned from the leader's retained refusal and matched
 	// against the actual intruding executable's startup record after it exits.
-	var refused meta.ParkedJoin
+	var refused topology.ParkedJoin
 	if err := Poll(ctx, func() (bool, error) {
 		for _, node := range c.Spec.Nodes {
 			response, err := c.Request(ctx, node.Name, "GET", "/api/cluster/parked", nil, 0)
 			if err := requireStatus(response, err, 200); err != nil {
 				return false, err
 			}
-			var entries []meta.ParkedJoin
+			var entries []topology.ParkedJoin
 			if err := response.Decode(&entries); err != nil {
 				return true, err
 			}
@@ -122,7 +122,7 @@ func duplicateNameIntruder(t *testing.T, size int) {
 	// A passive conflict never becomes an Add affordance. The public mutation
 	// must refuse that admitted name before staging or allocating any new ID.
 	response, err := c.Request(ctx, holder, "POST", "/api/nodes", map[string]any{
-		"node": joiningNode(c.Node(holder).Spec), "mutation": meta.MutationOptions{Actor: "cluster-test", Apply: true},
+		"node": joiningNode(c.Node(holder).Spec), "mutation": metaservice.MutationOptions{Actor: "cluster-test", Apply: true},
 	}, before.Version)
 	if err := requireStatus(response, err, 400); err != nil {
 		t.Fatal("live-name warning must not authorize admission", err)
@@ -177,7 +177,7 @@ func TestDownNodeRotatedIdentityQuarantinesAndRejoinsSevenNodes(t *testing.T) {
 func rejoinWorkload(t *testing.T, size int) (context.Context, *Cluster, topology.Document, LocalObservation, map[string]string) {
 	t.Helper()
 	ctx, c := performanceCluster(t, size)
-	created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func assertRejoinedIdentities(t *testing.T, ctx context.Context, c *Cluster, bef
 		if err := requireStatus(response, err, 200); err != nil {
 			t.Fatal(err)
 		}
-		var parked []meta.ParkedJoin
+		var parked []topology.ParkedJoin
 		if err := response.Decode(&parked); err != nil || len(parked) != 0 {
 			t.Fatal("admitted process remains parked", parked, err)
 		}
@@ -255,7 +255,7 @@ func assertRejoinedIdentities(t *testing.T, ctx context.Context, c *Cluster, bef
 }
 
 // Inspect the actual quarantined bbolt file, not just a successful callback log.
-func assertRetiredMetaPin(t *testing.T, ctx context.Context, c *Cluster, old meta.Identity) {
+func assertRetiredMetaPin(t *testing.T, ctx context.Context, c *Cluster, old topology.Identity) {
 	t.Helper()
 	logs, err := c.Node(old.NodeName).Logs(ctx)
 	if err != nil {
@@ -284,7 +284,7 @@ func assertRetiredMetaPin(t *testing.T, ctx context.Context, c *Cluster, old met
 		if err != nil {
 			t.Fatal(err)
 		}
-		pin, found, err := meta.LoadStoredIdentity(file.Name())
+		pin, found, err := metaservice.LoadStoredIdentity(file.Name())
 		if err != nil || !found || pin.NodeName != old.NodeName || pin.ClusterID != old.ClusterID || pin.MemberID != old.MemberID {
 			t.Fatal("quarantined a foreign/successor meta pin", pin, old, err)
 		}
@@ -294,17 +294,17 @@ func assertRetiredMetaPin(t *testing.T, ctx context.Context, c *Cluster, old met
 func excludedSameDiskRejoin(t *testing.T, size int) {
 	t.Helper()
 	ctx, c, before, previous, values := rejoinWorkload(t, size)
-	drained, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/drain", meta.MutationOptions{Actor: "operator", Apply: true})
+	drained, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/drain", metaservice.MutationOptions{Actor: "operator", Apply: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Self-removal makes the process disappear during convergence; observe the
 	// surviving execution explicitly before waiting for its clean exit.
-	response, err := c.Request(ctx, "node2", "POST", "/api/nodes/node3/exclude", meta.MutationOptions{Actor: "operator", Apply: true}, drained.Document.Version)
+	response, err := c.Request(ctx, "node2", "POST", "/api/nodes/node3/exclude", metaservice.MutationOptions{Actor: "operator", Apply: true}, drained.Document.Version)
 	if err := requireStatus(response, err, 202); err != nil {
 		t.Fatal(err)
 	}
-	var excluded meta.MutationResult
+	var excluded metaservice.MutationResult
 	if err := response.Decode(&excluded); err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +354,7 @@ func excludedSameDiskRejoin(t *testing.T, size int) {
 			if err := requireStatus(reply, err, 200); err != nil {
 				return false, err
 			}
-			var entries []meta.ParkedJoin
+			var entries []topology.ParkedJoin
 			if err := reply.Decode(&entries); err != nil {
 				return true, err
 			}
@@ -398,11 +398,11 @@ func excludedSameDiskRejoin(t *testing.T, size int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err = c.Request(ctx, "node2", "POST", "/api/nodes", map[string]any{"node": joiningNode(victim.Spec), "mutation": meta.MutationOptions{Actor: "operator", Apply: true}}, latest.Version)
+	response, err = c.Request(ctx, "node2", "POST", "/api/nodes", map[string]any{"node": joiningNode(victim.Spec), "mutation": metaservice.MutationOptions{Actor: "operator", Apply: true}}, latest.Version)
 	if err := requireStatus(response, err, 202); err != nil {
 		t.Fatal(err)
 	}
-	var admitted meta.MutationResult
+	var admitted metaservice.MutationResult
 	if err := response.Decode(&admitted); err != nil {
 		t.Fatal(err)
 	}
@@ -416,7 +416,7 @@ func rotatedDownNodeRejoin(t *testing.T, size int) {
 	t.Helper()
 	ctx, c, before, previous, values := rejoinWorkload(t, size)
 	// A healthy node must be refused before any allocation/proposal.
-	response, err := c.Request(ctx, "node2", "POST", "/api/nodes/node3/readmit", meta.MutationOptions{Actor: "operator", Apply: true}, before.Version)
+	response, err := c.Request(ctx, "node2", "POST", "/api/nodes/node3/readmit", metaservice.MutationOptions{Actor: "operator", Apply: true}, before.Version)
 	if err := requireStatus(response, err, 422); err != nil {
 		t.Fatal("readmission rotated a live holder", err)
 	}
@@ -427,9 +427,9 @@ func rotatedDownNodeRejoin(t *testing.T, size int) {
 	if err := waitClusterHealth(ctx, c, "node3"); err != nil {
 		t.Fatal(err)
 	}
-	var rotated meta.MutationResult
+	var rotated metaservice.MutationResult
 	if err := Poll(ctx, func() (bool, error) {
-		response, err = c.Request(ctx, "node2", "POST", "/api/nodes/node3/readmit", meta.MutationOptions{Actor: "operator", Apply: true}, before.Version)
+		response, err = c.Request(ctx, "node2", "POST", "/api/nodes/node3/readmit", metaservice.MutationOptions{Actor: "operator", Apply: true}, before.Version)
 		if err != nil {
 			return false, err
 		}

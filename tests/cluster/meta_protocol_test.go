@@ -13,7 +13,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metapb"
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -33,7 +33,7 @@ func metaCredentialIsolation(t *testing.T, size int) {
 	spec := matrixSpec(size)
 	spec.PublishMeta = true
 	ctx, c := performanceClusterSpec(t, spec)
-	created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 3, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 3, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func metaCredentialIsolation(t *testing.T, size int) {
 			if err != nil || ping.ErrorCode != "" {
 				t.Fatal("matched credential failed", ping, err)
 			}
-			var identity meta.Identity
+			var identity topology.Identity
 			if err := json.Unmarshal(ping.Data, &identity); err != nil || identity != local.Identity {
 				t.Fatal("RPC returned another process identity", identity, local.Identity, err)
 			}
@@ -135,7 +135,7 @@ func metaCredentialIsolation(t *testing.T, size int) {
 		if err := requireStatus(response, err, 200); err != nil {
 			t.Fatal(err)
 		}
-		var warnings []meta.ParkedJoin
+		var warnings []topology.ParkedJoin
 		if err := response.Decode(&warnings); err != nil || len(warnings) != 0 {
 			t.Fatal("foreign traffic became a parked admission", warnings, err)
 		}

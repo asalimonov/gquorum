@@ -45,3 +45,18 @@ verification progress; checking a stage does not waive any target requirement.
   short race tests passed. Uncached `make test-unit` passed in **9.40 seconds**.
   This is foundation validation only: Node integration, public-name migration,
   the example refactor and process-cluster acceptance are still outstanding.
+- Boundary stage (in progress): moved meta and all its tests into
+  internal/metaservice; moved identity/document/session/parked-join values to
+  topology. Existing Runtime and applications temporarily call the private
+  service while their Node/Cluster replacement is implemented; this is not the
+  final application-facing API. Storage paths and protocol literals are preserved.
+- Renamed public event values to OperatorChanged/SchedulingChanged/OperatorID
+  with a separate unchanged disk record. Fixed pre-rename fixtures verify exact
+  bytes, filtering, append sequence and reopen without rewriting rows. Captured
+  original meta proposal, reply and snapshot fixtures before the Operator rename;
+  their exact round trips and restored documents/admission/session/lock pass.
+- Boundary validation: `make test` passed (metaservice 101.827s; cluster testapp
+  36.665s); `make lint` passed; event/metaservice short race tests passed. Both
+  `cluster` and `example` build-tag suites compile; process execution is still
+  required after caller migration. Operator/Scheduling public types, private meta
+  codec adapters, and internal/operator remain the next boundary work.

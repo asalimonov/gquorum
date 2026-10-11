@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -34,13 +34,13 @@ func assertAPIViews(t *testing.T, ctx context.Context, c *Cluster, doc topology.
 	}
 }
 
-func globalPlacementBody(rule topology.PlacementRule, options meta.MutationOptions) any {
+func globalPlacementBody(rule topology.PlacementRule, options metaservice.MutationOptions) any {
 	return map[string]any{"placement": rule, "mutation": options}
 }
 
 func documentAPIContracts(t *testing.T, size int) {
 	ctx, c := performanceCluster(t, size)
-	created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "work"})
+	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,17 +86,17 @@ func documentAPIContracts(t *testing.T, size int) {
 	if groups := base.LoadGroups(); len(groups) != 1 || groups[0].ID != "work" {
 		t.Fatal("meta appeared in load document helpers", groups)
 	}
-	response, err := c.Request(ctx, "node2", "POST", "/api/groups", map[string]any{"group": meta.GroupSpec{ID: topology.MetaGroupID}, "mutation": meta.MutationOptions{Actor: "cluster-test"}}, base.Version)
+	response, err := c.Request(ctx, "node2", "POST", "/api/groups", map[string]any{"group": metaservice.GroupSpec{ID: topology.MetaGroupID}, "mutation": metaservice.MutationOptions{Actor: "cluster-test"}}, base.Version)
 	if err := requireStatus(response, err, 400); err != nil {
 		t.Fatal("meta accepted as a load group", err)
 	}
 	// Adapter codes are caller-defined; stable SDK fault identities and exact
 	// CAS versions survive the adapter. Missing/stale requests commit nothing.
-	response, err = c.Request(ctx, "node2", "PUT", "/api/placement", globalPlacementBody(base.Placement, meta.MutationOptions{}), 0)
+	response, err = c.Request(ctx, "node2", "PUT", "/api/placement", globalPlacementBody(base.Placement, metaservice.MutationOptions{}), 0)
 	if err := requireStatus(response, err, 400); err != nil {
 		t.Fatal("missing If-Match accepted", err)
 	}
-	response, err = c.Request(ctx, "node2", "PUT", "/api/placement", globalPlacementBody(base.Placement, meta.MutationOptions{}), base.Version-1)
+	response, err = c.Request(ctx, "node2", "PUT", "/api/placement", globalPlacementBody(base.Placement, metaservice.MutationOptions{}), base.Version-1)
 	if err := requireStatus(response, err, 409); err != nil {
 		t.Fatal("stale If-Match accepted", err)
 	}
@@ -117,11 +117,11 @@ func documentAPIContracts(t *testing.T, size int) {
 		}
 		receipts[node.Spec.Name] = observed
 	}
-	response, err = c.Request(ctx, "node2", "POST", "/api/nodes/node3/drain", meta.MutationOptions{Preview: true, Actor: "preview-test"}, base.Version)
+	response, err = c.Request(ctx, "node2", "POST", "/api/nodes/node3/drain", metaservice.MutationOptions{Preview: true, Actor: "preview-test"}, base.Version)
 	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
 	}
-	var preview meta.MutationResult
+	var preview metaservice.MutationResult
 	if err := response.Decode(&preview); err != nil || preview.ExecutionID != "" || preview.Document.Version != base.Version+1 || preview.Document.Node("node3").State != topology.NodeDraining {
 		t.Fatal("preview staged or approved", preview, err)
 	}
@@ -154,23 +154,23 @@ func documentAPIContracts(t *testing.T, size int) {
 	// Two approved documents preserve separate content in newest-first history.
 	firstRule := base.Placement
 	firstRule.MinReplicas = 2
-	first, err := c.Mutate(ctx, "node2", "PUT", "/api/placement", globalPlacementBody(firstRule, meta.MutationOptions{Apply: true, Actor: "history-first"}))
+	first, err := c.Mutate(ctx, "node2", "PUT", "/api/placement", globalPlacementBody(firstRule, metaservice.MutationOptions{Apply: true, Actor: "history-first"}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	secondRule := firstRule
 	secondRule.MinReplicas = 1
-	second, err := c.Mutate(ctx, "node2", "PUT", "/api/placement", globalPlacementBody(secondRule, meta.MutationOptions{Apply: true, Actor: "history-second"}))
+	second, err := c.Mutate(ctx, "node2", "PUT", "/api/placement", globalPlacementBody(secondRule, metaservice.MutationOptions{Apply: true, Actor: "history-second"}))
 	if err != nil || second.Document.Version != first.Document.Version+1 {
 		t.Fatal(second, err)
 	}
-	page := func(offset, limit int) meta.HistoryResult {
+	page := func(offset, limit int) topology.HistoryResult {
 		t.Helper()
 		response, err := c.Request(ctx, "node2", "GET", fmt.Sprintf("/api/topology/history?offset=%d&limit=%d", offset, limit), nil, 0)
 		if err := requireStatus(response, err, 200); err != nil {
 			t.Fatal(err)
 		}
-		var result meta.HistoryResult
+		var result topology.HistoryResult
 		if err := response.Decode(&result); err != nil {
 			t.Fatal(err)
 		}
@@ -256,7 +256,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 	spec := matrixSpec(size)
 	spec.Limits.MaxNodes = size + 1 // A staged admission whose process never starts.
 	ctx, c := performanceClusterSpec(t, spec)
-	created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "work"})
+	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,19 +269,19 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 	}
 	assertActualAPIMembership(t, ctx, c, base, 3)
 	for _, bad := range []topology.PlacementRule{{MinReplicas: 1, MaxReplicas: 2}, {MinReplicas: 1}} {
-		response, err := c.Request(ctx, "node2", "PUT", "/api/placement", globalPlacementBody(bad, meta.MutationOptions{Actor: "cluster-test"}), base.Version)
+		response, err := c.Request(ctx, "node2", "PUT", "/api/placement", globalPlacementBody(bad, metaservice.MutationOptions{Actor: "cluster-test"}), base.Version)
 		if err := requireStatus(response, err, 400); err != nil {
 			t.Fatal("invalid implicit shrink/half rule accepted", err)
 		}
 	}
 	assertAPIViews(t, ctx, c, base)
-	stagePlan := func(ingress, method, path string, body any, version uint64) (meta.MutationResult, topology.Plan) {
+	stagePlan := func(ingress, method, path string, body any, version uint64) (metaservice.MutationResult, topology.Plan) {
 		t.Helper()
 		response, err := c.Request(ctx, ingress, method, path, body, version)
 		if err := requireStatus(response, err, 200); err != nil {
 			t.Fatal(err)
 		}
-		var staged meta.MutationResult
+		var staged metaservice.MutationResult
 		if err := response.Decode(&staged); err != nil || staged.ExecutionID != "" {
 			t.Fatal(staged, err)
 		}
@@ -301,7 +301,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 		}
 		return staged, plan
 	}
-	drained, drainPlan := stagePlan(c.Spec.Nodes[size-1].Name, "POST", "/api/nodes/node3/drain", meta.MutationOptions{Actor: "operator"}, base.Version)
+	drained, drainPlan := stagePlan(c.Spec.Nodes[size-1].Name, "POST", "/api/nodes/node3/drain", metaservice.MutationOptions{Actor: "operator"}, base.Version)
 	if !slices.ContainsFunc(drainPlan.Steps, func(s topology.Step) bool {
 		return s.Kind == topology.StepRemoveReplica && s.GroupID == "work" && s.NodeName == "node3" && s.ReplicaID == replicaID(base, "work", "node3")
 	}) {
@@ -360,7 +360,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 		if err := requireStatus(response, err, 200); err != nil {
 			t.Fatal(err)
 		}
-		var parked []meta.ParkedJoin
+		var parked []topology.ParkedJoin
 		if err := response.Decode(&parked); err != nil || len(parked) != 0 {
 			t.Fatal("current drained voter was parked", node.Spec.Name, parked, err)
 		}
@@ -370,11 +370,11 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 		t.Fatal("meta restart silently activated the drained application", err)
 	}
 	capRule := topology.PlacementRule{MinReplicas: 1, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}}
-	capped, err := c.Mutate(ctx, "node2", "PUT", "/api/placement", globalPlacementBody(capRule, meta.MutationOptions{Apply: true, Actor: "operator"}))
+	capped, err := c.Mutate(ctx, "node2", "PUT", "/api/placement", globalPlacementBody(capRule, metaservice.MutationOptions{Apply: true, Actor: "operator"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	activated, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/activate", meta.MutationOptions{Apply: true, Actor: "operator"})
+	activated, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/activate", metaservice.MutationOptions{Apply: true, Actor: "operator"})
 	if err != nil || activated.Document.Node("node3").State != topology.NodeActive || activated.Document.MemberID("node3") != base.MemberID("node3") || !reflect.DeepEqual(activated.Document.Placement, capped.Document.Placement) {
 		t.Fatal("activation failed or changed its policy/meta pin", activated, err)
 	}
@@ -385,7 +385,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 	}
 	growRule := capRule
 	growRule.MaxReplicas = 3
-	grown, growPlan := stagePlan("node2", "PUT", "/api/placement", globalPlacementBody(growRule, meta.MutationOptions{Actor: "operator"}), activated.Document.Version)
+	grown, growPlan := stagePlan("node2", "PUT", "/api/placement", globalPlacementBody(growRule, metaservice.MutationOptions{Actor: "operator"}), activated.Document.Version)
 	fresh := replicaID(grown.Document, "work", "node3")
 	if fresh <= replicaID(base, "work", "node3") {
 		t.Fatal("policy growth reused a retired identity", grown)
@@ -435,7 +435,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 	if err := requireStatus(response, err, 400); err != nil {
 		t.Fatal("undeclared transfer accepted", err)
 	}
-	response, err = c.Request(ctx, "node2", "POST", "/api/nodes", map[string]any{"node": map[string]any{"name": "unsupported-field", "type": "worker", "unrecognized": "foreign"}, "mutation": meta.MutationOptions{Actor: "operator"}}, grown.Document.Version)
+	response, err = c.Request(ctx, "node2", "POST", "/api/nodes", map[string]any{"node": map[string]any{"name": "unsupported-field", "type": "worker", "unrecognized": "foreign"}, "mutation": metaservice.MutationOptions{Actor: "operator"}}, grown.Document.Version)
 	if err := requireStatus(response, err, 400); err != nil {
 		t.Fatal("caller node decoder silently accepted an unsupported field", err)
 	}
@@ -448,11 +448,11 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 	assertAPIViews(t, ctx, c, grown.Document)
 	// Declare then cancel a never-started admission. The unused ID stays burned;
 	// only Latest moves before approval, and no real meta/load voter is allocated.
-	response, err = c.Request(ctx, "node2", "POST", "/api/nodes", map[string]any{"node": topology.Node{Name: "staged-only", Type: "worker"}, "mutation": meta.MutationOptions{Actor: "operator"}}, grown.Document.Version)
+	response, err = c.Request(ctx, "node2", "POST", "/api/nodes", map[string]any{"node": topology.Node{Name: "staged-only", Type: "worker"}, "mutation": metaservice.MutationOptions{Actor: "operator"}}, grown.Document.Version)
 	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
 	}
-	var added meta.MutationResult
+	var added metaservice.MutationResult
 	if err := response.Decode(&added); err != nil || added.Document.Node("staged-only") == nil || added.Document.MemberID("staged-only") <= uint64(size) || added.ExecutionID != "" {
 		t.Fatal("staged admission lost fresh identity", added, err)
 	}
@@ -462,7 +462,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	response, err = c.Request(ctx, "node2", "POST", "/api/nodes", map[string]any{"node": topology.Node{Name: "staged-only", Type: "worker"}, "mutation": meta.MutationOptions{Actor: "operator"}}, added.Document.Version)
+	response, err = c.Request(ctx, "node2", "POST", "/api/nodes", map[string]any{"node": topology.Node{Name: "staged-only", Type: "worker"}, "mutation": metaservice.MutationOptions{Actor: "operator"}}, added.Document.Version)
 	if err := requireStatus(response, err, 400); err != nil {
 		t.Fatal("duplicate declared name was admitted", err)
 	}
@@ -474,7 +474,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 		}
 	}
 	assertActualAPIMembership(t, ctx, c, grown.Document, 3)
-	excluded, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/staged-only/exclude", meta.MutationOptions{Apply: true, Actor: "operator"})
+	excluded, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/staged-only/exclude", metaservice.MutationOptions{Apply: true, Actor: "operator"})
 	if err != nil || excluded.Document.Node("staged-only") == nil || excluded.Document.Node("staged-only").State != topology.NodeExcluded || excluded.Document.MemberID("staged-only") != 0 || excluded.Document.MetaGroup().NextReplicaID != added.Document.MetaGroup().NextReplicaID {
 		t.Fatal("cancellation lost tombstone/allocation floor", excluded, err)
 	}

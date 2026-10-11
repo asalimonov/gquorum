@@ -20,7 +20,7 @@ import (
 
 	"github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -59,13 +59,13 @@ func run(ctx context.Context) (result error) {
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return err
 	}
-	identity := meta.Identity{NodeName: name, ClusterID: envOr("GQUORUM_CLUSTER", "example"), InstanceID: hex.EncodeToString(nonce[:])}
-	var founders []meta.FoundingMember
+	identity := topology.Identity{NodeName: name, ClusterID: envOr("GQUORUM_CLUSTER", "example"), InstanceID: hex.EncodeToString(nonce[:])}
+	var founders []metaservice.FoundingMember
 	var local topology.Node
 	resolve := addresses{}
 	for _, p := range peers {
 		node := topology.Node{Name: p.Name, Type: p.Type, State: topology.NodeActive}
-		founders = append(founders, meta.FoundingMember{Node: node, MemberID: p.MemberID, Address: p.MetaAddress})
+		founders = append(founders, metaservice.FoundingMember{Node: node, MemberID: p.MemberID, Address: p.MetaAddress})
 		resolve[p.Name] = p.MetaAddress
 		if p.Name == name {
 			local = node
@@ -88,7 +88,7 @@ func run(ctx context.Context) (result error) {
 			result = errors.Join(result, err)
 		}
 	}()
-	group, err := runtime.OpenMeta(meta.Options{Identity: identity, Node: local, Founders: founders, DBPath: filepath.Join(envOr("GQUORUM_DATA", "/data"), "meta.bolt"), Limits: topology.Limits{}, Network: meta.NetworkOptions{Listener: metaListener, AdvertiseAddress: resolve[name], Resolver: resolve, AllowPlaintext: true, ClusterCredential: []byte(os.Getenv("GQUORUM_CREDENTIAL"))}})
+	group, err := runtime.OpenMeta(metaservice.Options{Identity: identity, Node: local, Founders: founders, DBPath: filepath.Join(envOr("GQUORUM_DATA", "/data"), "meta.bolt"), Limits: topology.Limits{}, Network: metaservice.NetworkOptions{Listener: metaListener, AdvertiseAddress: resolve[name], Resolver: resolve, AllowPlaintext: true, ClusterCredential: []byte(os.Getenv("GQUORUM_CREDENTIAL"))}})
 	if err != nil {
 		return err
 	}

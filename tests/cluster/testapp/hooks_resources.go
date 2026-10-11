@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/asalimonov/gquorum/topology"
 	"net/http"
 	"os"
 	"runtime"
@@ -11,14 +12,13 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/meta"
 )
 
 // Linux process observations belong to the Docker test fixture. They are not
 // part of the library status document or demo protocol.
 type processResources struct {
-	Identity                          meta.Identity `json:"identity"`
-	At                                time.Time     `json:"at"`
+	Identity                          topology.Identity `json:"identity"`
+	At                                time.Time         `json:"at"`
 	HeapBytes, ResidentBytes, CPUNS   uint64
 	Goroutines, OpenFiles, LoadGroups int
 }

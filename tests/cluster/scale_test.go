@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 	"github.com/containerd/errdefs"
 	docker "github.com/moby/moby/client"
@@ -21,7 +21,7 @@ func TestFifteenLoadGroupsCommitIndependentlyAndDeleteEveryLocalStore(t *testing
 	c := acquire(t, threeNodes()).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 110*time.Second)
 	defer cancel()
-	if _, err := c.CreateGroup(ctx, "node3", meta.GroupSpec{ID: "baseline"}); err != nil {
+	if _, err := c.CreateGroup(ctx, "node3", metaservice.GroupSpec{ID: "baseline"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Put(ctx, "node1", "baseline", "state", "command", "baseline-value"); err != nil {
@@ -31,7 +31,7 @@ func TestFifteenLoadGroupsCommitIndependentlyAndDeleteEveryLocalStore(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	reserved, err := c.Request(ctx, "node2", "DELETE", "/api/groups/"+topology.MetaGroupID, meta.MutationOptions{Apply: true}, doc.Version)
+	reserved, err := c.Request(ctx, "node2", "DELETE", "/api/groups/"+topology.MetaGroupID, metaservice.MutationOptions{Apply: true}, doc.Version)
 	if err := requireStatus(reserved, err, 400); err != nil {
 		t.Fatal("reserved meta deletion", err)
 	}
@@ -39,7 +39,7 @@ func TestFifteenLoadGroupsCommitIndependentlyAndDeleteEveryLocalStore(t *testing
 	for i := range 15 {
 		id := fmt.Sprintf("scale-%02d", i)
 		ids = append(ids, id)
-		if _, err := c.CreateGroup(ctx, c.Spec.Nodes[i%len(c.Spec.Nodes)].Name, meta.GroupSpec{ID: id}); err != nil {
+		if _, err := c.CreateGroup(ctx, c.Spec.Nodes[i%len(c.Spec.Nodes)].Name, metaservice.GroupSpec{ID: id}); err != nil {
 			t.Fatal(id, err)
 		}
 		// Identical command/key IDs across groups must not share state or deduplication.
@@ -69,7 +69,7 @@ func TestFifteenLoadGroupsCommitIndependentlyAndDeleteEveryLocalStore(t *testing
 		}
 	}
 	for i, id := range ids {
-		if _, err := c.Mutate(ctx, c.Spec.Nodes[i%len(c.Spec.Nodes)].Name, "DELETE", "/api/groups/"+id, meta.MutationOptions{Apply: true}); err != nil {
+		if _, err := c.Mutate(ctx, c.Spec.Nodes[i%len(c.Spec.Nodes)].Name, "DELETE", "/api/groups/"+id, metaservice.MutationOptions{Apply: true}); err != nil {
 			t.Fatal(id, err)
 		}
 		for _, node := range c.Nodes() {

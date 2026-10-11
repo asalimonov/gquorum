@@ -16,8 +16,8 @@ import (
 
 	gquorum "github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/load"
-	"github.com/asalimonov/gquorum/meta"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -114,19 +114,19 @@ type barrierObservation struct {
 	Refuse bool                    `json:"refuse"`
 }
 type localObservation struct {
-	Identity          meta.Identity        `json:"identity"`
-	Found             bool                 `json:"found"`
-	ReplicaID         uint64               `json:"replica_id"`
-	Status            topology.GroupStatus `json:"status"`
-	Storage           storage.Stats        `json:"storage"`
-	Values            map[string]string    `json:"values"`
-	ReceivedSnapshots uint64               `json:"received_snapshots"`
-	WAL               walCounters          `json:"wal"`
-	WALStallNS        int64                `json:"wal_stall_ns"`
-	Proposals         load.ProposalStats   `json:"proposals"`
-	Parked            *gquorum.ParkedLoad  `json:"parked,omitempty"`
-	Ledger            *meta.ReplicaRecord  `json:"ledger,omitempty"`
-	ServeOverride     int                  `json:"serve_override"`
+	Identity          topology.Identity          `json:"identity"`
+	Found             bool                       `json:"found"`
+	ReplicaID         uint64                     `json:"replica_id"`
+	Status            topology.GroupStatus       `json:"status"`
+	Storage           storage.Stats              `json:"storage"`
+	Values            map[string]string          `json:"values"`
+	ReceivedSnapshots uint64                     `json:"received_snapshots"`
+	WAL               walCounters                `json:"wal"`
+	WALStallNS        int64                      `json:"wal_stall_ns"`
+	Proposals         load.ProposalStats         `json:"proposals"`
+	Parked            *gquorum.ParkedLoad        `json:"parked,omitempty"`
+	Ledger            *metaservice.ReplicaRecord `json:"ledger,omitempty"`
+	ServeOverride     int                        `json:"serve_override"`
 }
 
 func (a *application) registerClusterRoutes(mux *http.ServeMux) {
@@ -148,8 +148,8 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("POST /internal/test/serve-override", protect(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Identity meta.Identity `json:"identity"`
-			Minimum  int           `json:"minimum"`
+			Identity topology.Identity `json:"identity"`
+			Minimum  int               `json:"minimum"`
 		}
 		if err := requestBody(w, r, &body); err != nil {
 			httpError(w, err)

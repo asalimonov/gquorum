@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -123,8 +123,8 @@ func (c *Cluster) WaitExecution(ctx context.Context, node string, id topology.Ex
 		return status.State == topology.ExecutionSucceeded, nil
 	})
 }
-func (c *Cluster) Mutate(ctx context.Context, node, method, path string, body any) (meta.MutationResult, error) {
-	var result meta.MutationResult
+func (c *Cluster) Mutate(ctx context.Context, node, method, path string, body any) (metaservice.MutationResult, error) {
+	var result metaservice.MutationResult
 	doc, err := c.Document(ctx, node, "latest")
 	if err != nil {
 		return result, err
@@ -161,8 +161,8 @@ func (c *Cluster) WaitActive(ctx context.Context, version uint64) error {
 	})
 }
 
-func (c *Cluster) Stage(ctx context.Context, node string, doc topology.Document) (meta.MutationResult, error) {
-	var result meta.MutationResult
+func (c *Cluster) Stage(ctx context.Context, node string, doc topology.Document) (metaservice.MutationResult, error) {
+	var result metaservice.MutationResult
 	response, err := c.Request(ctx, node, "PUT", "/api/topology", doc, doc.Version)
 	if err := requireStatus(response, err, 200); err != nil {
 		return result, err
@@ -190,8 +190,8 @@ func (c *Cluster) Apply(ctx context.Context, node string, version uint64) (topol
 	return result.ExecutionID, c.WaitActive(ctx, version)
 }
 
-func (c *Cluster) CreateGroup(ctx context.Context, node string, spec meta.GroupSpec) (meta.MutationResult, error) {
-	return c.Mutate(ctx, node, "POST", "/api/groups", map[string]any{"group": spec, "mutation": meta.MutationOptions{Apply: true, Actor: "cluster-test"}})
+func (c *Cluster) CreateGroup(ctx context.Context, node string, spec metaservice.GroupSpec) (metaservice.MutationResult, error) {
+	return c.Mutate(ctx, node, "POST", "/api/groups", map[string]any{"group": spec, "mutation": metaservice.MutationOptions{Apply: true, Actor: "cluster-test"}})
 }
 func (c *Cluster) Put(ctx context.Context, node, group, key, id, value string) error {
 	response, err := c.Request(ctx, node, "PUT", "/api/load/"+group+"/keys/"+key, map[string]string{"request_id": id, "value": value}, 0)

@@ -7,8 +7,8 @@ import (
 
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/load"
-	"github.com/asalimonov/gquorum/meta"
 )
 
 type Options struct {
@@ -22,7 +22,7 @@ type Options struct {
 type Runtime struct {
 	opts            Options
 	mu              sync.RWMutex
-	meta            *meta.Group
+	meta            *metaservice.Group
 	loads           *load.Registry
 	parked          map[string]ParkedLoad
 	node, cluster   string
@@ -68,7 +68,7 @@ func (r *Runtime) checkOwner(node, cluster string) error {
 	return nil
 }
 
-func (r *Runtime) OpenMeta(opts meta.Options) (*meta.Group, error) {
+func (r *Runtime) OpenMeta(opts metaservice.Options) (*metaservice.Group, error) {
 	if err := r.takeGate(context.Background()); err != nil {
 		return nil, err
 	}
@@ -88,7 +88,7 @@ func (r *Runtime) OpenMeta(opts meta.Options) (*meta.Group, error) {
 	if opts.Events == nil {
 		opts.Events = r.opts.Events
 	}
-	g, err := meta.New(opts)
+	g, err := metaservice.New(opts)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +107,7 @@ func (r *Runtime) OpenMeta(opts meta.Options) (*meta.Group, error) {
 
 // OpenLoad constructs a replica. With meta attached it verifies approved local
 // identity and the local ledger before opening storage. Effect receivers must
-// still call meta.Authorize for the full execution/attempt/step scope.
+// still call metaservice.Authorize for the full execution/attempt/step scope.
 func (r *Runtime) OpenLoad(opts load.Options) (*load.Group, error) {
 	if err := r.takeGate(context.Background()); err != nil {
 		return nil, err
@@ -145,7 +145,7 @@ func (r *Runtime) OpenLoad(opts load.Options) (*load.Group, error) {
 	if hasMeta {
 		// load.New has durably opened/restored the store before recording its
 		// identity. A crash cannot create a ledger record without a store first.
-		err = m.RecordLoadReplica(context.Background(), opts.GroupID, meta.ReplicaRecord{ReplicaID: opts.ReplicaID, Origin: boot.origin}, boot.previous)
+		err = m.RecordLoadReplica(context.Background(), opts.GroupID, metaservice.ReplicaRecord{ReplicaID: opts.ReplicaID, Origin: boot.origin}, boot.previous)
 		if err != nil {
 			_ = g.Stop(context.Background())
 			return nil, err
@@ -168,7 +168,7 @@ func (r *Runtime) OpenLoad(opts load.Options) (*load.Group, error) {
 	return g, nil
 }
 
-func (r *Runtime) Meta() (*meta.Group, bool) {
+func (r *Runtime) Meta() (*metaservice.Group, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.meta, r.meta != nil

@@ -7,8 +7,8 @@ import (
 
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/load"
-	"github.com/asalimonov/gquorum/meta"
 	"github.com/asalimonov/gquorum/storage"
 )
 
@@ -24,7 +24,7 @@ func TestLoadBootCurrentFormatMatrix(t *testing.T) {
 		name     string
 		record   uint64
 		probe    storage.Probe
-		scope    meta.LoadReplicaScope
+		scope    metaservice.LoadReplicaScope
 		origin   string
 		reason   ParkReason
 		previous uint64
@@ -37,16 +37,16 @@ func TestLoadBootCurrentFormatMatrix(t *testing.T) {
 		{name: "resume", record: 7, probe: good, origin: "resume"},
 		{name: "replacement landed before ledger", record: 3, probe: good, origin: "reseat", previous: 3},
 		{name: "recorded foreign store retained", record: 7, probe: foreign, reason: ParkIdentityMismatch},
-		{name: "prepared empty learner resumes", record: 7, probe: empty, scope: meta.LoadReplicaScope{Started: true}, origin: "resume"},
-		{name: "empty learner adoption", probe: empty, scope: meta.LoadReplicaScope{Started: true}, origin: "adopt"},
-		{name: "active proof survives lost ledger", scope: meta.LoadReplicaScope{Started: true, Established: true}, reason: ParkStoreMissing},
-		{name: "active proof refuses empty WAL", probe: empty, scope: meta.LoadReplicaScope{Started: true, Established: true}, reason: ParkStoreMissing},
-		{name: "replacement already started then lost", record: 3, scope: meta.LoadReplicaScope{Started: true}, reason: ParkStoreMissing},
+		{name: "prepared empty learner resumes", record: 7, probe: empty, scope: metaservice.LoadReplicaScope{Started: true}, origin: "resume"},
+		{name: "empty learner adoption", probe: empty, scope: metaservice.LoadReplicaScope{Started: true}, origin: "adopt"},
+		{name: "active proof survives lost ledger", scope: metaservice.LoadReplicaScope{Started: true, Established: true}, reason: ParkStoreMissing},
+		{name: "active proof refuses empty WAL", probe: empty, scope: metaservice.LoadReplicaScope{Started: true, Established: true}, reason: ParkStoreMissing},
+		{name: "replacement already started then lost", record: 3, scope: metaservice.LoadReplicaScope{Started: true}, reason: ParkStoreMissing},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, reason := decideLoadBoot(id, meta.ReplicaRecord{ReplicaID: tc.record}, tc.record != 0, tc.probe, tc.scope)
+			got, reason := decideLoadBoot(id, metaservice.ReplicaRecord{ReplicaID: tc.record}, tc.record != 0, tc.probe, tc.scope)
 			if reason != tc.reason || reason == "" && (got.origin != tc.origin || got.previous != tc.previous) {
 				t.Fatal(got, reason)
 			}

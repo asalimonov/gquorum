@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -20,7 +20,7 @@ func TestIntentionalLearnerSurvivesReconciliationUntilApprovedPromotion(t *testi
 	c := acquire(t, spec).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
-	created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "work"})
+	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}

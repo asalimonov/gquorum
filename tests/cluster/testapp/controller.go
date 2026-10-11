@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/membership"
-	"github.com/asalimonov/gquorum/meta"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3"
@@ -440,7 +440,7 @@ func (a *application) cleanupLocal(ctx context.Context, approved topology.Author
 	return a.meta.ForgetLoadReplica(ctx, approved, expected)
 }
 
-func (a *application) readmission(ctx context.Context, change meta.Readmission) error {
+func (a *application) readmission(ctx context.Context, change metaservice.Readmission) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -507,7 +507,7 @@ func (a *application) readmission(ctx context.Context, change meta.Readmission) 
 			return err
 		}
 	}
-	stored, found, err := meta.LoadStoredIdentity(path)
+	stored, found, err := metaservice.LoadStoredIdentity(path)
 	if err != nil {
 		return err
 	}

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 	docker "github.com/moby/moby/client"
 )
@@ -22,7 +22,7 @@ func TestMultiGroupControllerShutdownAtFiveAndSevenNodes(t *testing.T) {
 			c := acquire(t, spec).Cluster
 			ctx, cancel := context.WithTimeout(t.Context(), 110*time.Second)
 			defer cancel()
-			created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "baseline"})
+			created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "baseline"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -45,11 +45,11 @@ func TestMultiGroupControllerShutdownAtFiveAndSevenNodes(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				response, err := c.Request(ctx, "node2", "POST", "/api/nodes", map[string]any{"node": joiningNode(node.Spec), "mutation": meta.MutationOptions{Apply: true, Actor: "cluster-test"}}, base.Version)
+				response, err := c.Request(ctx, "node2", "POST", "/api/nodes", map[string]any{"node": joiningNode(node.Spec), "mutation": metaservice.MutationOptions{Apply: true, Actor: "cluster-test"}}, base.Version)
 				if err := requireStatus(response, err, 202); err != nil {
 					t.Fatal(err)
 				}
-				var admitted meta.MutationResult
+				var admitted metaservice.MutationResult
 				if err := response.Decode(&admitted); err != nil || admitted.ExecutionID == "" {
 					t.Fatal("missing admission execution", admitted, err)
 				}
@@ -68,7 +68,7 @@ func TestMultiGroupControllerShutdownAtFiveAndSevenNodes(t *testing.T) {
 			}
 			groups := []string{"baseline", "shutdown-a", "shutdown-b"}
 			for _, id := range groups[1:] {
-				if _, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: id}); err != nil {
+				if _, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: id}); err != nil {
 					t.Fatal(err)
 				}
 			}

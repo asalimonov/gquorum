@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 	"github.com/containerd/errdefs"
 	docker "github.com/moby/moby/client"
@@ -39,7 +39,7 @@ func TestPoolReusesIsolatedNetworkAndReplacesAllPersistentState(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := first.Cluster
-	result, err := c.CreateGroup(ctx, "node1", meta.GroupSpec{ID: "retire-me", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3}})
+	result, err := c.CreateGroup(ctx, "node1", metaservice.GroupSpec{ID: "retire-me", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,14 +54,14 @@ func TestPoolReusesIsolatedNetworkAndReplacesAllPersistentState(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := c.Mutate(ctx, "node2", "DELETE", "/api/groups/retire-me", meta.MutationOptions{Apply: true}); err != nil {
+	if _, err := c.Mutate(ctx, "node2", "DELETE", "/api/groups/retire-me", metaservice.MutationOptions{Apply: true}); err != nil {
 		t.Fatal(err)
 	}
 	latest, err := c.Document(ctx, "node1", "latest")
 	if err != nil {
 		t.Fatal(err)
 	}
-	retired, err := c.Request(ctx, "node1", "POST", "/api/groups", map[string]any{"group": meta.GroupSpec{ID: "retire-me"}}, latest.Version)
+	retired, err := c.Request(ctx, "node1", "POST", "/api/groups", map[string]any{"group": metaservice.GroupSpec{ID: "retire-me"}}, latest.Version)
 	if err := requireStatus(retired, err, 409); err != nil {
 		t.Fatal("group ID was not retired", err)
 	}
@@ -115,7 +115,7 @@ func TestPoolReusesIsolatedNetworkAndReplacesAllPersistentState(t *testing.T) {
 			t.Fatal("reused node storage")
 		}
 	}
-	if _, err := d.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "retire-me"}); err != nil {
+	if _, err := d.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "retire-me"}); err != nil {
 		t.Fatal("previous cluster group/identity state leaked", err)
 	}
 }
@@ -129,7 +129,7 @@ func TestPoolSimultaneousUnitsHavePrivateRoutingAndClusterState(t *testing.T) {
 		t.Fatal("units share a security or network namespace")
 	}
 	for _, cluster := range []*Cluster{a, b} {
-		if _, err := cluster.CreateGroup(ctx, "node1", meta.GroupSpec{ID: "same-logical-group"}); err != nil {
+		if _, err := cluster.CreateGroup(ctx, "node1", metaservice.GroupSpec{ID: "same-logical-group"}); err != nil {
 			t.Fatal(err)
 		}
 	}

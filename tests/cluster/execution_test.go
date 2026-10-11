@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
@@ -49,7 +49,7 @@ func TestRemoteApplyFromNonHostMetaLeader(t *testing.T) {
 	c := lease.Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 105*time.Second)
 	defer cancel()
-	created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "remote", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3}})
+	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "remote", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestRemoteApplyFromNonHostMetaLeader(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	deleted, err := c.Mutate(ctx, metaHost, "DELETE", "/api/groups/remote", meta.MutationOptions{Apply: true, Actor: "cluster-test"})
+	deleted, err := c.Mutate(ctx, metaHost, "DELETE", "/api/groups/remote", metaservice.MutationOptions{Apply: true, Actor: "cluster-test"})
 	if err != nil || deleted.Document.Group("remote") != nil {
 		t.Fatal("remote deletion", deleted, err)
 	}
@@ -179,7 +179,7 @@ func TestCallerRefusedDeletionRetainsDataSevenNodes(t *testing.T) { callerRefuse
 func callerRefusedDeletion(t *testing.T, size int) {
 	t.Helper()
 	ctx, c := performanceClusterSpec(t, matrixSpec(size))
-	created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "occupied", Placement: &topology.PlacementRule{MinReplicas: 3, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "occupied", Placement: &topology.PlacementRule{MinReplicas: 3, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,11 +196,11 @@ func callerRefusedDeletion(t *testing.T, size int) {
 			t.Fatal(err)
 		}
 	}
-	response, err := c.Request(ctx, "node2", "DELETE", "/api/groups/occupied", meta.MutationOptions{Actor: "cluster-test"}, created.Document.Version)
+	response, err := c.Request(ctx, "node2", "DELETE", "/api/groups/occupied", metaservice.MutationOptions{Actor: "cluster-test"}, created.Document.Version)
 	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
 	}
-	var deleted meta.MutationResult
+	var deleted metaservice.MutationResult
 	if err := response.Decode(&deleted); err != nil {
 		t.Fatal(err)
 	}
@@ -402,7 +402,7 @@ func callerRefusedDeletion(t *testing.T, size int) {
 			t.Fatal("successful deletion retained usable store", node.Spec.Name, err)
 		}
 	}
-	response, err = c.Request(ctx, "node2", "POST", "/api/groups", map[string]any{"group": meta.GroupSpec{ID: "occupied"}, "mutation": meta.MutationOptions{Actor: "cluster-test"}}, deleted.Document.Version)
+	response, err = c.Request(ctx, "node2", "POST", "/api/groups", map[string]any{"group": metaservice.GroupSpec{ID: "occupied"}, "mutation": metaservice.MutationOptions{Actor: "cluster-test"}}, deleted.Document.Version)
 	if err := requireStatus(response, err, 409); err != nil {
 		t.Fatal("deleted group ID became reusable", err)
 	}

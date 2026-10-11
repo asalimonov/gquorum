@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -22,7 +22,7 @@ func TestCallerProjectionStallDoesNotShedLocalWALSevenNodes(t *testing.T) { proj
 func projectionStall(t *testing.T, size int) {
 	t.Helper()
 	ctx, c := performanceCluster(t, size)
-	created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -93,7 +92,7 @@ func (j *Journal) Append(e Event) (Event, error) {
 			return err
 		}
 		e.Seq = seq
-		data, err := json.Marshal(e)
+		data, err := encodeEvent(e)
 		if err != nil {
 			return err
 		}
@@ -121,10 +120,10 @@ func (j *Journal) rotate(tx *bolt.Tx, fullAgeScan bool) error {
 	var doomed [][]byte
 	c := b.Cursor()
 	for k, v := c.First(); k != nil; k, v = c.Next() {
-		var e Event
+		e, err := decodeEvent(v)
 		// Periodic rotation prunes the head with bounded amortized work. Explicit
 		// Prune also finds expired entries after an observer clock moved backwards.
-		if json.Unmarshal(v, &e) != nil || !e.At.After(cutoff) {
+		if err != nil || !e.At.After(cutoff) {
 			doomed = append(doomed, bytes.Clone(k))
 		} else if !fullAgeScan {
 			break
@@ -184,8 +183,8 @@ func (j *Journal) List(ctx context.Context, q Query) ([]Event, error) {
 			if binary.BigEndian.Uint64(k) <= q.AfterSeq {
 				continue
 			}
-			var e Event
-			if err := json.Unmarshal(v, &e); err != nil {
+			e, err := decodeEvent(v)
+			if err != nil {
 				return fault.New(fault.Unreadable, "decode journal event", err)
 			}
 			if q.Filter.matches(e) {

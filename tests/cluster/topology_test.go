@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
@@ -26,7 +26,7 @@ func TestStagedTopologyDoesNotChangeApprovedMembershipOrStartGroups(t *testing.T
 	c := lease.Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 70*time.Second)
 	defer cancel()
-	created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 3}})
+	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 3}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestStagedTopologyDoesNotChangeApprovedMembershipOrStartGroups(t *testing.T
 	assertInert(staged.Document.Version)
 	response, err := c.Request(ctx, "node3", "PUT", "/api/groups/work/placement", map[string]any{
 		"placement": topology.PlacementRule{MinReplicas: 1, MaxReplicas: 2},
-		"mutation":  meta.MutationOptions{Actor: "cluster-test"},
+		"mutation":  metaservice.MutationOptions{Actor: "cluster-test"},
 	}, staged.Document.Version)
 	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestStagedTopologyDoesNotChangeApprovedMembershipOrStartGroups(t *testing.T
 	assertInert(staged.Document.Version)
 	response, err = c.Request(ctx, "node1", "POST", "/api/nodes", map[string]any{
 		"node":     topology.Node{Name: "staged-no-process", Type: "worker"},
-		"mutation": meta.MutationOptions{Actor: "cluster-test"},
+		"mutation": metaservice.MutationOptions{Actor: "cluster-test"},
 	}, staged.Document.Version)
 	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
@@ -95,8 +95,8 @@ func TestStagedTopologyDoesNotChangeApprovedMembershipOrStartGroups(t *testing.T
 	}
 	assertInert(staged.Document.Version)
 	response, err = c.Request(ctx, "node3", "POST", "/api/groups", map[string]any{
-		"group":    meta.GroupSpec{ID: "staged-only"},
-		"mutation": meta.MutationOptions{Actor: "cluster-test"},
+		"group":    metaservice.GroupSpec{ID: "staged-only"},
+		"mutation": metaservice.MutationOptions{Actor: "cluster-test"},
 	}, staged.Document.Version)
 	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
@@ -137,7 +137,7 @@ func stagedReplicaRepair(t *testing.T, size int) {
 	spec.Reconciliation = true
 	spec.ReconciliationInterval, spec.ReconciliationTimeout = 200*time.Millisecond, 150*time.Millisecond
 	ctx, c := performanceClusterSpec(t, spec)
-	created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +301,7 @@ func addressFreeRouting(t *testing.T, size int) {
 	for _, view := range []string{"latest", "target", "active"} {
 		assertAddressFree(view)
 	}
-	created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal("meta proposal could not use external caller resolver", err)
 	}

@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -42,7 +42,7 @@ type config struct {
 	Bootstrap                                            bool
 	GateFounders                                         bool
 	FoundingTimeout                                      time.Duration
-	Reconciliation                                       meta.ReconciliationOptions
+	Reconciliation                                       metaservice.ReconciliationOptions
 }
 
 func envOr(name, fallback string) string {

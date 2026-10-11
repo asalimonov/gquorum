@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 )
 
 func TestConcurrentCASHasOneCommitAtEveryClusterSize(t *testing.T) {
@@ -52,7 +52,7 @@ func TestConcurrentCASHasOneCommitAtEveryClusterSize(t *testing.T) {
 				}
 				switch result.response.Status {
 				case 200:
-					var committed meta.MutationResult
+					var committed metaservice.MutationResult
 					if err := result.response.Decode(&committed); err != nil || committed.Document.Version != base.Version+1 || committed.Document.ParentVersion != base.Version || committed.Document.Node("node1").Labels["test.cas"] != result.value {
 						t.Fatal("commit returned another operation's result", committed, err)
 					}

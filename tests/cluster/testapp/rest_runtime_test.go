@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/events"
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -65,7 +65,7 @@ func newRESTCluster(t *testing.T) *restCluster {
 	})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	for i, p := range c.peers {
-		cfg := config{NodeName: p.Name, NodeType: p.Type, ClusterID: t.Name(), InstanceID: fmt.Sprintf("process-%d", i), DataDir: filepath.Join(t.TempDir(), p.Name), Credential: "example-test", Peers: c.peers, Limits: (topology.Limits{}).WithDefaults(), SessionTTL: 3 * time.Second, TickInterval: 50 * time.Millisecond, SnapshotThreshold: 8, Bootstrap: true, Reconciliation: meta.ReconciliationOptions{Disabled: true}}
+		cfg := config{NodeName: p.Name, NodeType: p.Type, ClusterID: t.Name(), InstanceID: fmt.Sprintf("process-%d", i), DataDir: filepath.Join(t.TempDir(), p.Name), Credential: "example-test", Peers: c.peers, Limits: (topology.Limits{}).WithDefaults(), SessionTTL: 3 * time.Second, TickInterval: 50 * time.Millisecond, SnapshotThreshold: 8, Bootstrap: true, Reconciliation: metaservice.ReconciliationOptions{Disabled: true}}
 		app, err := newApplication(cfg, logger, &all[i])
 		if err != nil {
 			t.Fatal(err)
@@ -156,14 +156,14 @@ func (c *restCluster) document(t *testing.T, node int, view string) topology.Doc
 	}
 	return doc
 }
-func (c *restCluster) mutate(t *testing.T, path, method string, body any) meta.MutationResult {
+func (c *restCluster) mutate(t *testing.T, path, method string, body any) metaservice.MutationResult {
 	t.Helper()
 	doc := c.document(t, 0, "latest")
 	code, data := c.request(t, 0, method, path, body, doc.Version)
 	if code != 202 {
 		t.Fatalf("%s %s: %d %s", method, path, code, data)
 	}
-	var result meta.MutationResult
+	var result metaservice.MutationResult
 	if err := json.Unmarshal(data, &result); err != nil {
 		t.Fatal(err)
 	}
@@ -216,11 +216,11 @@ func TestFixtureRESTDrainActivateAndRetirement(t *testing.T) {
 	}
 	c.mutate(t, "/api/groups/demo/placement", "PUT", map[string]any{
 		"placement": topology.PlacementRule{MinReplicas: 2, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}},
-		"mutation":  meta.MutationOptions{Apply: true},
+		"mutation":  metaservice.MutationOptions{Apply: true},
 	})
 	c.mutate(t, "/api/groups/demo/placement", "PUT", map[string]any{
 		"placement": topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3},
-		"mutation":  meta.MutationOptions{Apply: true},
+		"mutation":  metaservice.MutationOptions{Apply: true},
 	})
 	doc = c.document(t, 0, "active")
 	for _, replica := range doc.Group("demo").Replicas {
@@ -248,10 +248,10 @@ func TestFixtureRESTDrainActivateAndRetirement(t *testing.T) {
 	if code, data := c.request(t, 2, "PUT", "/api/load/workers/keys/key", map[string]string{"request_id": "write-1", "value": "changed"}, 0); code != 409 {
 		t.Fatal("conflicting request identity", code, string(data))
 	}
-	if code, data := c.request(t, 0, "POST", "/api/nodes/node1/drain", meta.MutationOptions{Apply: true}, 1); code != 409 {
+	if code, data := c.request(t, 0, "POST", "/api/nodes/node1/drain", metaservice.MutationOptions{Apply: true}, 1); code != 409 {
 		t.Fatal("CAS guard", code, string(data))
 	}
-	c.mutate(t, "/api/nodes/node3/drain", "POST", meta.MutationOptions{Actor: "operator", Apply: true})
+	c.mutate(t, "/api/nodes/node3/drain", "POST", metaservice.MutationOptions{Actor: "operator", Apply: true})
 	doc = c.document(t, 0, "active")
 	if len(doc.MetaGroup().Replicas) != 3 || len(doc.Group("demo").Replicas) != 2 || len(doc.Group("workers").Replicas) != 2 {
 		t.Fatal("drain changed wrong memberships", doc)
@@ -260,7 +260,7 @@ func TestFixtureRESTDrainActivateAndRetirement(t *testing.T) {
 		t.Fatal("drained node still ready", code, string(data))
 	}
 
-	c.mutate(t, "/api/nodes/node3/activate", "POST", meta.MutationOptions{Apply: true})
+	c.mutate(t, "/api/nodes/node3/activate", "POST", metaservice.MutationOptions{Apply: true})
 	doc = c.document(t, 0, "active")
 	for _, replica := range doc.Group("demo").Replicas {
 		if replica.NodeName == "node3" && replica.ReplicaID <= oldDemoID {
@@ -270,7 +270,7 @@ func TestFixtureRESTDrainActivateAndRetirement(t *testing.T) {
 	c.wait(t, "reactivated replica serving", 5*time.Second, func() bool { code, _ := c.request(t, 2, "GET", "/health/ready", nil, 0); return code == 200 })
 	// The fixed policy refuses a two-voter group's shrink below its current
 	// quorum. A staged worker drain can be inspected but cannot be approved.
-	code, data := c.request(t, 0, "POST", "/api/nodes/node1/drain", meta.MutationOptions{Apply: true}, doc.Version)
+	code, data := c.request(t, 0, "POST", "/api/nodes/node1/drain", metaservice.MutationOptions{Apply: true}, doc.Version)
 	if code != 422 {
 		t.Fatal("two-voter shrink should be refused", code, string(data))
 	}
@@ -278,7 +278,7 @@ func TestFixtureRESTDrainActivateAndRetirement(t *testing.T) {
 	// while the staging response was acknowledged by the leader.
 	c.wait(t, "failed approval's staged edit applied locally", 5*time.Second, func() bool { return c.document(t, 0, "latest").Version == doc.Version+1 })
 	staged := c.document(t, 0, "latest")
-	body := map[string]any{"placement": topology.PlacementRule{MinReplicas: 2, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}}, "mutation": meta.MutationOptions{Apply: true}}
+	body := map[string]any{"placement": topology.PlacementRule{MinReplicas: 2, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}}, "mutation": metaservice.MutationOptions{Apply: true}}
 	if code, data := c.request(t, 0, "PUT", "/api/groups/workers/placement", body, staged.Version); code != 422 {
 		t.Fatal("unsatisfiable placement", code, string(data))
 	}
@@ -288,7 +288,7 @@ func TestFixtureRESTDrainActivateAndRetirement(t *testing.T) {
 	if code != 200 {
 		t.Fatal("restore staged document", code, string(data))
 	}
-	var restored meta.MutationResult
+	var restored metaservice.MutationResult
 	if err := json.Unmarshal(data, &restored); err != nil {
 		t.Fatal(err)
 	}
@@ -322,10 +322,10 @@ func TestFixtureRESTDrainActivateAndRetirement(t *testing.T) {
 	if code, data := c.request(t, 2, "GET", "/api/load/demo/keys/recover", nil, 0); code != 200 || !bytes.Contains(data, []byte(`"value":"value-19"`)) {
 		t.Fatal("retry overwrote recovered data", code, string(data))
 	}
-	c.mutate(t, "/api/groups", "POST", map[string]any{"group": meta.GroupSpec{ID: "temporary", Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}}}, "mutation": meta.MutationOptions{Apply: true}})
-	c.mutate(t, "/api/groups/temporary", "DELETE", meta.MutationOptions{Apply: true})
+	c.mutate(t, "/api/groups", "POST", map[string]any{"group": metaservice.GroupSpec{ID: "temporary", Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}}}, "mutation": metaservice.MutationOptions{Apply: true}})
+	c.mutate(t, "/api/groups/temporary", "DELETE", metaservice.MutationOptions{Apply: true})
 	doc = c.document(t, 0, "latest")
-	if code, data := c.request(t, 0, "POST", "/api/groups", map[string]any{"group": meta.GroupSpec{ID: "temporary"}, "mutation": meta.MutationOptions{Apply: true}}, doc.Version); code != 409 || !bytes.Contains(data, []byte(`"group_retired"`)) {
+	if code, data := c.request(t, 0, "POST", "/api/groups", map[string]any{"group": metaservice.GroupSpec{ID: "temporary"}, "mutation": metaservice.MutationOptions{Apply: true}}, doc.Version); code != 409 || !bytes.Contains(data, []byte(`"group_retired"`)) {
 		t.Fatal("group ID reused", code, string(data))
 	}
 
@@ -444,13 +444,13 @@ func TestFixtureRESTExcludeAndReadmitRetainedNode(t *testing.T) {
 	oldIdentity := old.meta.Identity()
 	// Drain load replicas first; the excluded process shuts down when its actual
 	// meta membership is removed, so it cannot receive later cleanup callbacks.
-	c.mutate(t, "/api/nodes/node3/drain", "POST", meta.MutationOptions{Apply: true})
+	c.mutate(t, "/api/nodes/node3/drain", "POST", metaservice.MutationOptions{Apply: true})
 	doc := c.document(t, 0, "latest")
-	code, data := c.request(t, 0, "POST", "/api/nodes/node3/exclude", meta.MutationOptions{Actor: "operator", Apply: true}, doc.Version)
+	code, data := c.request(t, 0, "POST", "/api/nodes/node3/exclude", metaservice.MutationOptions{Actor: "operator", Apply: true}, doc.Version)
 	if code != 202 {
 		t.Fatal("exclude", code, string(data))
 	}
-	var excluded meta.MutationResult
+	var excluded metaservice.MutationResult
 	if err := json.Unmarshal(data, &excluded); err != nil {
 		t.Fatal(err)
 	}
@@ -466,17 +466,17 @@ func TestFixtureRESTExcludeAndReadmitRetainedNode(t *testing.T) {
 	c.wait(t, "exclusion on surviving nodes", 5*time.Second, func() bool {
 		return c.document(t, 0, "active").Version == excluded.Document.Version && c.document(t, 1, "active").Version == excluded.Document.Version
 	})
-	oldPin, found, err := meta.LoadStoredIdentity(filepath.Join(old.cfg.DataDir, "meta.bolt"))
+	oldPin, found, err := metaservice.LoadStoredIdentity(filepath.Join(old.cfg.DataDir, "meta.bolt"))
 	if err != nil || !found || oldPin.MemberID != oldIdentity.MemberID {
 		t.Fatal("closed retained pin", oldPin, found, err)
 	}
 	doc = c.document(t, 0, "latest")
-	body := map[string]any{"node": nodeForPeer(c.peers[2]), "mutation": meta.MutationOptions{Actor: "operator", Apply: true}}
+	body := map[string]any{"node": nodeForPeer(c.peers[2]), "mutation": metaservice.MutationOptions{Actor: "operator", Apply: true}}
 	code, data = c.request(t, 0, "POST", "/api/nodes", body, doc.Version)
 	if code != 202 {
 		t.Fatal("readmit declaration", code, string(data))
 	}
-	var added meta.MutationResult
+	var added metaservice.MutationResult
 	if err := json.Unmarshal(data, &added); err != nil {
 		t.Fatal(err)
 	}
@@ -506,7 +506,7 @@ func TestFixtureRESTExcludeAndReadmitRetainedNode(t *testing.T) {
 	if err != nil || len(backups) != 1 {
 		t.Fatal("exact old pin was not quarantined", backups, err)
 	}
-	retired, found, err := meta.LoadStoredIdentity(backups[0])
+	retired, found, err := metaservice.LoadStoredIdentity(backups[0])
 	if err != nil || !found || retired != oldPin {
 		t.Fatal("wrong physical pin quarantined", retired, oldPin, err)
 	}
@@ -517,7 +517,7 @@ func TestFixtureRESTExcludeAndReadmitRetainedNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	current, found, err := meta.LoadStoredIdentity(filepath.Join(cfg.DataDir, "meta.bolt"))
+	current, found, err := metaservice.LoadStoredIdentity(filepath.Join(cfg.DataDir, "meta.bolt"))
 	if err != nil || !found || current.MemberID != replacement.meta.Identity().MemberID {
 		t.Fatal("replacement pin", current, found, err)
 	}

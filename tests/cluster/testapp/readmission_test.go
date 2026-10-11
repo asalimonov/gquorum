@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/load"
-	"github.com/asalimonov/gquorum/meta"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3"
 )
@@ -46,7 +46,7 @@ func TestReadmissionVerifiesActualRetainedIDWithinEntirePreviousCatalog(t *testi
 			}
 			after := before
 			after.MemberID = 2
-			change := meta.Readmission{Previous: before, Granted: after, AdmissionID: "authorized", MetaDBPath: filepath.Join(cfg.DataDir, "meta.bolt"), PreviousGroups: []topology.Group{{ID: "demo", Replicas: []topology.Replica{{NodeName: cfg.NodeName, ReplicaID: 3}, {NodeName: cfg.NodeName, ReplicaID: 4}}}}, GrantedGroups: []topology.Group{{ID: "demo", Replicas: []topology.Replica{{NodeName: cfg.NodeName, ReplicaID: 7}}}}}
+			change := metaservice.Readmission{Previous: before, Granted: after, AdmissionID: "authorized", MetaDBPath: filepath.Join(cfg.DataDir, "meta.bolt"), PreviousGroups: []topology.Group{{ID: "demo", Replicas: []topology.Replica{{NodeName: cfg.NodeName, ReplicaID: 3}, {NodeName: cfg.NodeName, ReplicaID: 4}}}}, GrantedGroups: []topology.Group{{ID: "demo", Replicas: []topology.Replica{{NodeName: cfg.NodeName, ReplicaID: 7}}}}}
 			err = app.readmission(t.Context(), change)
 			probe, probeErr := app.store.Probe(t.Context(), "demo")
 			if probeErr != nil {
@@ -56,7 +56,7 @@ func TestReadmissionVerifiesActualRetainedIDWithinEntirePreviousCatalog(t *testi
 				if !errors.Is(err, fault.ErrIdentityMismatch) || !probe.Exists || probe.Identity.ReplicaID != 20 {
 					t.Fatal("foreign state was changed", err, probe)
 				}
-				if _, found, err := meta.LoadStoredIdentity(change.MetaDBPath); err != nil || !found {
+				if _, found, err := metaservice.LoadStoredIdentity(change.MetaDBPath); err != nil || !found {
 					t.Fatal("refusal moved meta pin", found, err)
 				}
 				return

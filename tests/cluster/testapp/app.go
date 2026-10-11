@@ -16,9 +16,9 @@ import (
 	"github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/membership"
-	"github.com/asalimonov/gquorum/meta"
 	"github.com/asalimonov/gquorum/storage/walstore"
 	"github.com/asalimonov/gquorum/tests/cluster/testapp/loadpb"
 	"github.com/asalimonov/gquorum/topology"
@@ -41,7 +41,7 @@ type application struct {
 	cfg                          config
 	logger                       *slog.Logger
 	runtime                      *gquorum.Runtime
-	meta                         *meta.Group
+	meta                         *metaservice.Group
 	store                        *walstore.Store
 	journal                      *events.Journal
 	bus                          *events.Bus
@@ -85,7 +85,7 @@ func (c config) nodeForPeer(p peer) topology.Node {
 // Retained stores resume their pin; missing stores on established nodes join.
 // Malformed or foreign markers fail closed; this is fixture startup policy.
 func (c *config) recoverBootMode() (bool, error) {
-	pin, found, err := meta.LoadStoredIdentity(filepath.Join(c.DataDir, "meta.bolt"))
+	pin, found, err := metaservice.LoadStoredIdentity(filepath.Join(c.DataDir, "meta.bolt"))
 	if err != nil {
 		return false, err
 	}
@@ -271,14 +271,14 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 	if err != nil {
 		return nil, err
 	}
-	var founders []meta.FoundingMember
+	var founders []metaservice.FoundingMember
 	var seeds []string
 	var member uint64
 	for _, p := range cfg.Peers {
 		if cfg.Join {
 			seeds = append(seeds, p.MetaAddress)
 		} else if !resume {
-			founders = append(founders, meta.FoundingMember{Node: cfg.nodeForPeer(p), MemberID: p.MemberID, Address: p.MetaAddress})
+			founders = append(founders, metaservice.FoundingMember{Node: cfg.nodeForPeer(p), MemberID: p.MemberID, Address: p.MetaAddress})
 		}
 		if p.Name == cfg.NodeName && !cfg.Join && !resume {
 			member = p.MemberID
@@ -288,7 +288,7 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 	if placement.MinReplicas == 0 {
 		placement = topology.PlacementRule{MinReplicas: 1, MaxReplicas: 3}
 	}
-	a.meta, err = a.runtime.OpenMeta(meta.Options{Identity: meta.Identity{NodeName: cfg.NodeName, ClusterID: cfg.ClusterID, InstanceID: cfg.InstanceID, MemberID: member}, Node: cfg.nodeForPeer(peer{Name: cfg.NodeName, Type: cfg.NodeType, MetaAddress: cfg.MetaAddress, LoadAddress: cfg.LoadAddress, HTTPAddress: cfg.HTTPAddress}), DBPath: filepath.Join(cfg.DataDir, "meta.bolt"), Founders: founders, Join: cfg.Join, JoinSeeds: seeds, Limits: cfg.Limits, Placement: placement, SessionTTL: cfg.SessionTTL, Timing: meta.Timing{TickInterval: cfg.TickInterval, ElectionTicks: 10}, Network: meta.NetworkOptions{Listener: ls.meta, AdvertiseAddress: cfg.MetaAddress, AllowPlaintext: true, ClusterCredential: []byte(cfg.Credential), Resolver: metaResolver{a}}, LoadGroups: a, Reconciliation: cfg.Reconciliation, OnSelfRemoved: a.selfRemoved, OnReadmission: a.readmission})
+	a.meta, err = a.runtime.OpenMeta(metaservice.Options{Identity: topology.Identity{NodeName: cfg.NodeName, ClusterID: cfg.ClusterID, InstanceID: cfg.InstanceID, MemberID: member}, Node: cfg.nodeForPeer(peer{Name: cfg.NodeName, Type: cfg.NodeType, MetaAddress: cfg.MetaAddress, LoadAddress: cfg.LoadAddress, HTTPAddress: cfg.HTTPAddress}), DBPath: filepath.Join(cfg.DataDir, "meta.bolt"), Founders: founders, Join: cfg.Join, JoinSeeds: seeds, Limits: cfg.Limits, Placement: placement, SessionTTL: cfg.SessionTTL, Timing: metaservice.Timing{TickInterval: cfg.TickInterval, ElectionTicks: 10}, Network: metaservice.NetworkOptions{Listener: ls.meta, AdvertiseAddress: cfg.MetaAddress, AllowPlaintext: true, ClusterCredential: []byte(cfg.Credential), Resolver: metaResolver{a}}, LoadGroups: a, Reconciliation: cfg.Reconciliation, OnSelfRemoved: a.selfRemoved, OnReadmission: a.readmission})
 	if err != nil {
 		return nil, err
 	}
@@ -549,13 +549,13 @@ func (a *application) bootstrap() {
 	}
 }
 func (a *application) bootstrapOnce(ctx context.Context) (bool, error) {
-	for _, spec := range []meta.GroupSpec{{ID: "demo"}, {ID: "workers", Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}}}} {
+	for _, spec := range []metaservice.GroupSpec{{ID: "demo"}, {ID: "workers", Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}}}} {
 		latest, err := a.meta.Latest(ctx)
 		if err != nil {
 			return false, err
 		}
 		if latest.Group(spec.ID) == nil {
-			created, err := a.meta.CreateLoadGroup(ctx, spec, meta.MutationOptions{ExpectedVersion: latest.Version, Actor: a.cfg.NodeName, Apply: true})
+			created, err := a.meta.CreateLoadGroup(ctx, spec, metaservice.MutationOptions{ExpectedVersion: latest.Version, Actor: a.cfg.NodeName, Apply: true})
 			if errors.Is(err, fault.ErrGroupRetired) {
 				continue
 			}

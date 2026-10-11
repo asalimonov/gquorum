@@ -9,8 +9,8 @@ import (
 
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/load"
-	"github.com/asalimonov/gquorum/meta"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -73,7 +73,7 @@ type bootResult struct {
 
 // decideLoadBoot never mutates storage or the ledger. A prepared learner may
 // legitimately have an empty log; an established replica may not refound one.
-func decideLoadBoot(want storage.Identity, record meta.ReplicaRecord, recorded bool, probe storage.Probe, scope meta.LoadReplicaScope) (bootResult, ParkReason) {
+func decideLoadBoot(want storage.Identity, record metaservice.ReplicaRecord, recorded bool, probe storage.Probe, scope metaservice.LoadReplicaScope) (bootResult, ParkReason) {
 	result := bootResult{origin: "fresh"}
 	if recorded && record.ReplicaID != want.ReplicaID {
 		result.previous = record.ReplicaID
@@ -100,12 +100,12 @@ func decideLoadBoot(want storage.Identity, record meta.ReplicaRecord, recorded b
 	return result, ""
 }
 
-func (r *Runtime) preflightLoad(m *meta.Group, opts load.Options) (bootResult, error) {
+func (r *Runtime) preflightLoad(m *metaservice.Group, opts load.Options) (bootResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	want := loadIdentity(opts)
-	var scope meta.LoadReplicaScope
-	var record meta.ReplicaRecord
+	var scope metaservice.LoadReplicaScope
+	var record metaservice.ReplicaRecord
 	var recorded bool
 	var err error
 	if m != nil {

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -57,7 +57,7 @@ func deadPeerLeadership(t *testing.T, size int) {
 	groups := []string{"alpha", "beta"}
 	var document topology.Document
 	for _, id := range groups {
-		created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: id, Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+		created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: id, Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 		if err != nil {
 			t.Fatal(err)
 		}

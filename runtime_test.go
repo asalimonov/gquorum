@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/load"
-	"github.com/asalimonov/gquorum/meta"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/storage/walstore"
 	"github.com/asalimonov/gquorum/topology"
@@ -92,14 +92,14 @@ func testRuntime(t *testing.T) *Runtime {
 	})
 	return r
 }
-func testMetaOptions(t *testing.T) meta.Options {
+func testMetaOptions(t *testing.T) metaservice.Options {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = listener.Close() })
-	return meta.Options{Identity: meta.Identity{NodeName: "a", ClusterID: "cluster", InstanceID: "process", MemberID: 1}, DBPath: filepath.Join(t.TempDir(), "meta.bolt"), Founders: []meta.FoundingMember{{Node: topology.Node{Name: "a", Type: "worker"}, MemberID: 1, Address: listener.Addr().String()}}, Placement: topology.PlacementRule{MinReplicas: 1, MaxReplicas: 1}, Timing: meta.Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 20}, Network: meta.NetworkOptions{Listener: listener, AdvertiseAddress: listener.Addr().String(), AllowPlaintext: true, ClusterCredential: []byte("test-credential")}, Reconciliation: meta.ReconciliationOptions{Disabled: true}}
+	return metaservice.Options{Identity: topology.Identity{NodeName: "a", ClusterID: "cluster", InstanceID: "process", MemberID: 1}, DBPath: filepath.Join(t.TempDir(), "meta.bolt"), Founders: []metaservice.FoundingMember{{Node: topology.Node{Name: "a", Type: "worker"}, MemberID: 1, Address: listener.Addr().String()}}, Placement: topology.PlacementRule{MinReplicas: 1, MaxReplicas: 1}, Timing: metaservice.Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 20}, Network: metaservice.NetworkOptions{Listener: listener, AdvertiseAddress: listener.Addr().String(), AllowPlaintext: true, ClusterCredential: []byte("test-credential")}, Reconciliation: metaservice.ReconciliationOptions{Disabled: true}}
 }
 
 func TestRuntimeConstructorsRegistryAndSharedOwnership(t *testing.T) {

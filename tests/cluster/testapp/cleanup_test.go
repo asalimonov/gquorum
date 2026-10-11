@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -25,11 +25,11 @@ func TestConcurrentAuthorizedCleanupRetriesAreIdempotent(t *testing.T) {
 	var release sync.Once
 	defer release.Do(func() { close(barrier.release) })
 	base := c.document(t, 0, "latest")
-	code, data := c.request(t, 0, "POST", "/api/nodes/node3/drain", meta.MutationOptions{Actor: "operator", Apply: true}, base.Version)
+	code, data := c.request(t, 0, "POST", "/api/nodes/node3/drain", metaservice.MutationOptions{Actor: "operator", Apply: true}, base.Version)
 	if code != 202 {
 		t.Fatalf("approve drain: %d %s", code, data)
 	}
-	var result meta.MutationResult
+	var result metaservice.MutationResult
 	if err := json.Unmarshal(data, &result); err != nil {
 		t.Fatal(err)
 	}

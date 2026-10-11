@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/load"
-	"github.com/asalimonov/gquorum/meta"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3"
@@ -20,7 +20,7 @@ import (
 // and transport independently of the library, even for a one-node test group.
 type runtimeController struct {
 	r                          *Runtime
-	m                          *meta.Group
+	m                          *metaservice.Group
 	store                      storage.Store
 	entered, canceled, release chan struct{}
 	dbPath                     string
@@ -147,7 +147,7 @@ func (c *runtimeController) DeleteGroupState(ctx context.Context, a topology.Aut
 	return c.m.ForgetLoadReplica(ctx, a, record.ReplicaID)
 }
 
-func startRuntimeMeta(t *testing.T, r *Runtime, controller *runtimeController) *meta.Group {
+func startRuntimeMeta(t *testing.T, r *Runtime, controller *runtimeController) *metaservice.Group {
 	t.Helper()
 	opts := testMetaOptions(t)
 	if controller.dbPath != "" {
@@ -182,7 +182,7 @@ func TestRuntimeIdentityMismatchParkSurvivesMetaRestart(t *testing.T) {
 	m := startRuntimeMeta(t, first, c)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	created, err := m.CreateLoadGroup(ctx, meta.GroupSpec{ID: "work"}, meta.MutationOptions{Apply: true})
+	created, err := m.CreateLoadGroup(ctx, metaservice.GroupSpec{ID: "work"}, metaservice.MutationOptions{Apply: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +240,7 @@ func TestRuntimeApprovedLoadParksLostWALRecoversAndRetires(t *testing.T) {
 	m := startRuntimeMeta(t, r, c)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	staged, err := m.CreateLoadGroup(ctx, meta.GroupSpec{ID: "work"}, meta.MutationOptions{})
+	staged, err := m.CreateLoadGroup(ctx, metaservice.GroupSpec{ID: "work"}, metaservice.MutationOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +316,7 @@ func TestRuntimeApprovedLoadParksLostWALRecoversAndRetires(t *testing.T) {
 	if string(data) != "committed" {
 		t.Fatal("committed tail not replayed", string(data))
 	}
-	deleted, err := m.DeleteLoadGroup(ctx, "work", meta.MutationOptions{Apply: true})
+	deleted, err := m.DeleteLoadGroup(ctx, "work", metaservice.MutationOptions{Apply: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +352,7 @@ func TestRuntimeCloseJoinsEffectsBeforeLoadAndDatabase(t *testing.T) {
 	m := startRuntimeMeta(t, r, c)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if _, err := m.CreateLoadGroup(ctx, meta.GroupSpec{ID: "work"}, meta.MutationOptions{Apply: true}); err != nil {
+	if _, err := m.CreateLoadGroup(ctx, metaservice.GroupSpec{ID: "work"}, metaservice.MutationOptions{Apply: true}); err != nil {
 		t.Fatal(err)
 	}
 	select {

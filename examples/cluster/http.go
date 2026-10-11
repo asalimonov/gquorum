@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 	"io"
 	"net/http"
@@ -71,7 +71,7 @@ func expectedVersion(r *http.Request) (uint64, error) {
 	}
 	return positiveNumber(value)
 }
-func mutationOptions(r *http.Request, opts meta.MutationOptions) (meta.MutationOptions, error) {
+func mutationOptions(r *http.Request, opts metaservice.MutationOptions) (metaservice.MutationOptions, error) {
 	expected, err := expectedVersion(r)
 	if err != nil {
 		return opts, err
@@ -82,7 +82,7 @@ func mutationOptions(r *http.Request, opts meta.MutationOptions) (meta.MutationO
 	opts.ExpectedVersion = expected
 	return opts, nil
 }
-func mutationResponse(w http.ResponseWriter, result meta.MutationResult, err error) {
+func mutationResponse(w http.ResponseWriter, result metaservice.MutationResult, err error) {
 	if err != nil {
 		// Staging may have succeeded before approval failed. Preserve that committed
 		// version so an operator can inspect and apply it rather than repeat an edit.
@@ -112,7 +112,7 @@ func decodeJSON(data []byte, out any) error {
 	return nil
 }
 
-func routes(group *meta.Group, name string) http.Handler {
+func routes(group *metaservice.Group, name string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) { jsonResponse(w, 200, map[string]string{"node": name}) })
 	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, r *http.Request) {
@@ -158,7 +158,7 @@ func routes(group *meta.Group, name string) http.Handler {
 		jsonResponse(w, 200, document)
 	})
 	mux.HandleFunc("POST /api/nodes/{name}/{action}", func(w http.ResponseWriter, r *http.Request) {
-		var options meta.MutationOptions
+		var options metaservice.MutationOptions
 		if err := requestBody(w, r, &options); err != nil {
 			httpError(w, err)
 			return
@@ -168,7 +168,7 @@ func routes(group *meta.Group, name string) http.Handler {
 			httpError(w, err)
 			return
 		}
-		var result meta.MutationResult
+		var result metaservice.MutationResult
 		switch r.PathValue("action") {
 		case "drain":
 			result, err = group.DrainNode(r.Context(), r.PathValue("name"), options)

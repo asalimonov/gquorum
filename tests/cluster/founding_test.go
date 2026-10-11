@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/meta"
 	"github.com/asalimonov/gquorum/topology"
 	"github.com/containerd/errdefs"
 	docker "github.com/moby/moby/client"
@@ -97,7 +96,7 @@ func assertFoundedTopology(t *testing.T, ctx context.Context, c *Cluster) topolo
 			if err := requireStatus(response, err, 200); err != nil {
 				return false, err
 			}
-			var history meta.HistoryResult
+			var history topology.HistoryResult
 			if err := response.Decode(&history); err != nil {
 				return true, err
 			}
@@ -286,7 +285,7 @@ func retainedFoundingState(t *testing.T, size int) {
 	if err := exactOwnedValues(ctx, c, before, "demo", expected); err != nil {
 		t.Fatal(err)
 	}
-	identities := map[string]meta.Identity{}
+	identities := map[string]topology.Identity{}
 	for _, node := range c.Nodes() {
 		local, err := c.Local(ctx, node.Spec.Name, topology.MetaGroupID)
 		if err != nil {

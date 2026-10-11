@@ -15,7 +15,7 @@ import (
 
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -169,7 +169,7 @@ func expectedVersion(r *http.Request) (uint64, error) {
 	}
 	return positiveNumber(value)
 }
-func mutationOptions(r *http.Request, opts meta.MutationOptions) (meta.MutationOptions, error) {
+func mutationOptions(r *http.Request, opts metaservice.MutationOptions) (metaservice.MutationOptions, error) {
 	expected, err := expectedVersion(r)
 	if err != nil {
 		return opts, err
@@ -180,7 +180,7 @@ func mutationOptions(r *http.Request, opts meta.MutationOptions) (meta.MutationO
 	opts.ExpectedVersion = expected
 	return opts, nil
 }
-func mutationResponse(w http.ResponseWriter, result meta.MutationResult, err error) {
+func mutationResponse(w http.ResponseWriter, result metaservice.MutationResult, err error) {
 	if err != nil {
 		// Staging may have succeeded before approval failed. Preserve that committed
 		// version so an operator can inspect and apply it rather than repeat an edit.
@@ -213,7 +213,7 @@ func (a *application) routes() http.Handler {
 		jsonResponse(w, http.StatusOK, parked)
 	})
 	mux.HandleFunc("POST /api/nodes/{name}/readmit", func(w http.ResponseWriter, r *http.Request) {
-		var opts meta.MutationOptions
+		var opts metaservice.MutationOptions
 		if err := requestBody(w, r, &opts); err != nil {
 			httpError(w, err)
 			return
@@ -271,7 +271,7 @@ func (a *application) routes() http.Handler {
 			return
 		}
 		committed, err := a.meta.Stage(r.Context(), doc, version)
-		mutationResponse(w, meta.MutationResult{Document: committed}, err)
+		mutationResponse(w, metaservice.MutationResult{Document: committed}, err)
 	})
 	mux.HandleFunc("POST /api/topology/preview/plan", func(w http.ResponseWriter, r *http.Request) {
 		var doc topology.Document
@@ -288,8 +288,8 @@ func (a *application) routes() http.Handler {
 	})
 	mux.HandleFunc("PUT /api/placement", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Placement topology.PlacementRule `json:"placement"`
-			Mutation  meta.MutationOptions   `json:"mutation"`
+			Placement topology.PlacementRule      `json:"placement"`
+			Mutation  metaservice.MutationOptions `json:"mutation"`
 		}
 		if err := requestBody(w, r, &body); err != nil {
 			httpError(w, err)
@@ -343,8 +343,8 @@ func (a *application) routes() http.Handler {
 	})
 	mux.HandleFunc("POST /api/nodes", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Node     topology.Node        `json:"node"`
-			Mutation meta.MutationOptions `json:"mutation"`
+			Node     topology.Node               `json:"node"`
+			Mutation metaservice.MutationOptions `json:"mutation"`
 		}
 		if err := requestBody(w, r, &body); err != nil {
 			httpError(w, err)
@@ -359,7 +359,7 @@ func (a *application) routes() http.Handler {
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("POST /api/nodes/{name}/{action}", func(w http.ResponseWriter, r *http.Request) {
-		var opts meta.MutationOptions
+		var opts metaservice.MutationOptions
 		if err := requestBody(w, r, &opts); err != nil {
 			httpError(w, err)
 			return
@@ -369,7 +369,7 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		var result meta.MutationResult
+		var result metaservice.MutationResult
 		switch r.PathValue("action") {
 		case "drain":
 			result, err = a.meta.DrainNode(r.Context(), r.PathValue("name"), opts)
@@ -384,8 +384,8 @@ func (a *application) routes() http.Handler {
 	})
 	mux.HandleFunc("POST /api/groups", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Group    meta.GroupSpec       `json:"group"`
-			Mutation meta.MutationOptions `json:"mutation"`
+			Group    metaservice.GroupSpec       `json:"group"`
+			Mutation metaservice.MutationOptions `json:"mutation"`
 		}
 		if err := requestBody(w, r, &body); err != nil {
 			httpError(w, err)
@@ -400,7 +400,7 @@ func (a *application) routes() http.Handler {
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("DELETE /api/groups/{id}", func(w http.ResponseWriter, r *http.Request) {
-		var opts meta.MutationOptions
+		var opts metaservice.MutationOptions
 		if err := requestBody(w, r, &opts); err != nil {
 			httpError(w, err)
 			return
@@ -415,8 +415,8 @@ func (a *application) routes() http.Handler {
 	})
 	mux.HandleFunc("PUT /api/groups/{id}/placement", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Placement topology.PlacementRule `json:"placement"`
-			Mutation  meta.MutationOptions   `json:"mutation"`
+			Placement topology.PlacementRule      `json:"placement"`
+			Mutation  metaservice.MutationOptions `json:"mutation"`
 		}
 		if err := requestBody(w, r, &body); err != nil {
 			httpError(w, err)
@@ -438,7 +438,7 @@ func (a *application) routes() http.Handler {
 		jsonResponse(w, http.StatusOK, map[string]bool{"transferred": true})
 	})
 	mux.HandleFunc("POST /api/nodes/{name}/force-retire", func(w http.ResponseWriter, r *http.Request) {
-		var opts meta.RetireOptions
+		var opts metaservice.RetireOptions
 		if err := requestBody(w, r, &opts); err != nil {
 			httpError(w, err)
 			return
@@ -453,7 +453,7 @@ func (a *application) routes() http.Handler {
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("POST /api/groups/{id}/replicas/{name}/reseat", func(w http.ResponseWriter, r *http.Request) {
-		var opts meta.MutationOptions
+		var opts metaservice.MutationOptions
 		if err := requestBody(w, r, &opts); err != nil {
 			httpError(w, err)
 			return
@@ -548,7 +548,7 @@ func (a *application) historyHTTP(w http.ResponseWriter, r *http.Request) {
 		httpError(w, fault.ErrInvalid)
 		return
 	}
-	result, err := a.meta.History(r.Context(), meta.Page{Offset: offset, Limit: limit})
+	result, err := a.meta.History(r.Context(), topology.Page{Offset: offset, Limit: limit})
 	if err != nil {
 		httpError(w, err)
 		return

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -36,7 +36,7 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 	c := acquire(t, spec).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 105*time.Second)
 	defer cancel()
-	created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "work"})
+	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,12 +63,12 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 		}
 	}
 	response, err := c.Request(ctx, "node2", "POST", "/api/nodes", map[string]any{
-		"node": joiningNode(node.Spec), "mutation": meta.MutationOptions{Actor: "cluster-test", Apply: true},
+		"node": joiningNode(node.Spec), "mutation": metaservice.MutationOptions{Actor: "cluster-test", Apply: true},
 	}, staged.Document.Version)
 	if err := requireStatus(response, err, 202); err != nil {
 		t.Fatal(err)
 	}
-	var admitted meta.MutationResult
+	var admitted metaservice.MutationResult
 	if err := response.Decode(&admitted); err != nil || admitted.ExecutionID == "" {
 		t.Fatal("admission did not start an exact execution", admitted, err)
 	}

@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -123,7 +123,7 @@ func TestComposeExampleTopologyDrainActivate(t *testing.T) {
 	for _, action := range []string{"drain", "activate"} {
 		var latest topology.Document
 		request("node2", "GET", "/api/topology/latest", nil, 0, 200, &latest)
-		var mutation meta.MutationResult
+		var mutation metaservice.MutationResult
 		request("node2", "POST", "/api/nodes/node3/"+action, map[string]any{"actor": "demo-test", "apply": true}, latest.Version, 202, &mutation)
 		for {
 			var execution topology.ExecutionStatus

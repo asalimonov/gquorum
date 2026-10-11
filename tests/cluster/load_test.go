@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -52,7 +52,7 @@ func loadIngressAndAccounting(t *testing.T, size int) {
 	groups := []string{"primary", "secondary"}
 	var document topology.Document
 	for _, group := range groups {
-		created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: group, Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+		created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: group, Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 		if err != nil {
 			t.Fatal(err)
 		}

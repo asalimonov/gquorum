@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -47,7 +47,7 @@ func TestMetaConsensusLoadReplicationAndRetainedLeaderRecovery(t *testing.T) {
 					t.Fatal("founder did not join meta", node.Spec.Name, status)
 				}
 			}
-			spec := meta.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}}
+			spec := metaservice.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}}
 			result, err := c.CreateGroup(ctx, c.Spec.Nodes[size-1].Name, spec)
 			if err != nil {
 				t.Fatal(err)
@@ -103,7 +103,7 @@ func TestMetaConsensusLoadReplicationAndRetainedLeaderRecovery(t *testing.T) {
 			// is down; the recovering process must replay this new document.
 			staged := result.Document.Clone()
 			staged.Node(survivor).Labels["test.after_leader"] = "committed"
-			var stagedResult meta.MutationResult
+			var stagedResult metaservice.MutationResult
 			if err := Poll(ctx, func() (bool, error) {
 				response, err := c.Request(ctx, survivor, "PUT", "/api/topology", staged, staged.Version)
 				if err != nil {

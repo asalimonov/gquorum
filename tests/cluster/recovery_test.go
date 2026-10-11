@@ -14,7 +14,7 @@ import (
 	"time"
 
 	gquorum "github.com/asalimonov/gquorum"
-	"github.com/asalimonov/gquorum/meta"
+	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/storage/walstore"
 	"github.com/asalimonov/gquorum/topology"
@@ -56,7 +56,7 @@ func durableOwnRecovery(t *testing.T, size int) {
 	spec := matrixSpec(size)
 	spec.SnapshotThreshold = 100000
 	ctx, c := performanceClusterSpec(t, spec)
-	created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func durableOwnRecovery(t *testing.T, size int) {
 		if err := requireStatus(response, err, 200); err != nil {
 			t.Fatal("current-voter restart warning query", err)
 		}
-		var parked []meta.ParkedJoin
+		var parked []topology.ParkedJoin
 		if err := response.Decode(&parked); err != nil || len(parked) != 0 {
 			t.Fatal("healthy retained restart was recorded as awaiting admission", parked, err)
 		}
@@ -152,7 +152,7 @@ func correlatedWALStall(t *testing.T, size int) {
 	spec := matrixSpec(size)
 	spec.SnapshotThreshold = 100000
 	ctx, c := performanceClusterSpec(t, spec)
-	created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func correlatedWALStall(t *testing.T, size int) {
 			results[i].repliedAt = time.Now()
 		})
 	}
-	var staged meta.MutationResult
+	var staged metaservice.MutationResult
 	observed := 0
 	readySamples := 0
 	var nextReady time.Time
@@ -420,7 +420,7 @@ func parkedReplicaReseat(t *testing.T, size int) {
 	spec := matrixSpec(size)
 	spec.SnapshotThreshold = 100000
 	ctx, c := performanceClusterSpec(t, spec)
-	created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -503,7 +503,7 @@ func parkedReplicaReseat(t *testing.T, size int) {
 			t.Fatal("data loss silently reseated a voter", view, doc, err)
 		}
 	}
-	repaired, err := c.Mutate(ctx, "node2", "POST", "/api/groups/work/replicas/node3/reseat", meta.MutationOptions{Actor: "operator", Comment: "replace lost voted WAL"})
+	repaired, err := c.Mutate(ctx, "node2", "POST", "/api/groups/work/replicas/node3/reseat", metaservice.MutationOptions{Actor: "operator", Comment: "replace lost voted WAL"})
 	if err != nil {
 		t.Fatal("explicit reseat failed", repaired, err)
 	}
@@ -544,7 +544,7 @@ func TestLostMetaLeaderAutomaticallyReadmitsFreshIdentitySevenNodes(t *testing.T
 func lostMetaLeaderReadmission(t *testing.T, size int) {
 	t.Helper()
 	ctx, c := performanceCluster(t, size)
-	created, err := c.CreateGroup(ctx, "node2", meta.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	created, err := c.CreateGroup(ctx, "node2", metaservice.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -569,7 +569,7 @@ func lostMetaLeaderReadmission(t *testing.T, size int) {
 	for _, replica := range created.Document.MetaGroup().Replicas {
 		largest = max(largest, replica.ReplicaID)
 	}
-	var faultIdentity meta.Identity
+	var faultIdentity topology.Identity
 	if err := Poll(ctx, func() (bool, error) {
 		response, err := c.Request(ctx, "node3", "POST", fmt.Sprintf("/internal/test/lose-meta/%d", oldMember), nil, 0)
 		if err != nil {
