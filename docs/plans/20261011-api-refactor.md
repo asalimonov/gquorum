@@ -301,3 +301,17 @@ verification progress; checking a stage does not waive any target requirement.
   and focused physical recovery races. Uncached make test-unit takes **11.06
   seconds**. All physical hashes match the captured baseline manifest. The full
   Docker suite remains in progress; no broad process/performance claim yet.
+
+- Added public three-node coverage for independently configured caller schedulers:
+  each selected implementation runs after native leadership transfer, topology
+  stays unchanged, and the local scheduling toggle resumes the selected policy.
+  Three race runs pass (17.007s). The test waits for target replication and uses
+  a one-second election window so the race detector does not exhaust native
+  leadership transfer during transport delivery. make test passes (84.203s
+  for the complete fixture), and make lint passes.
+- The baseline-name audit resolves all 550 recorded tests, including 64 renamed
+  or split tests in api-refactor-test-map.json. The source inventory's target
+  references now point to internal/metaservice and renamed cluster cases; source
+  obligations remain intact. Historical validation is explicitly labeled as
+  pre-refactor evidence. make bench passes all planner and snapshot matrices;
+  final process, performance and Compose acceptance is still in progress.

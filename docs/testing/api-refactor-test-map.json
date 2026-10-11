@@ -1,0 +1,204 @@
+{
+  "baseline_commit": "75ba513f07405dafd4cafdac7369814aed6e31da",
+  "note": "Only renamed or split tests; unchanged test names remain discoverable in source. Assertion responsibilities and intentional contract changes are documented in runtime-ports.md. Symbol resolution alone is not behavioral verification.",
+  "renamed_tests": {
+    "internal/convergence/engine_test.go::TestConvergence_LearnerFirstSteps": [
+      "internal/operator/controller_test.go::TestController_LearnerFirstSteps"
+    ],
+    "internal/convergence/engine_test.go::TestConvergence_FinalValidatorFailureLeavesActiveUnchanged": [
+      "internal/operator/controller_test.go::TestController_FinalValidatorFailureLeavesActiveUnchanged"
+    ],
+    "internal/convergence/engine_test.go::TestConvergence_ForcedRetirementWaivesOnlyDeadNodeTeardown": [
+      "internal/operator/controller_test.go::TestController_ForcedRetirementWaivesOnlyDeadNodeTeardown"
+    ],
+    "internal/convergence/engine_test.go::TestConvergence_DestructiveAndLifecycleSteps": [
+      "internal/operator/controller_test.go::TestController_DestructiveAndLifecycleSteps"
+    ],
+    "internal/convergence/engine_test.go::TestConvergence_DeleteShardStopsEveryHostBeforeSharedDelete": [
+      "internal/operator/controller_test.go::TestController_DeleteShardStopsEveryHostBeforeSharedDelete"
+    ],
+    "internal/convergence/engine_test.go::TestConvergence_DeleteShardWaitsForUnreachableHost": [
+      "internal/operator/controller_test.go::TestController_DeleteShardWaitsForUnreachableHost"
+    ],
+    "internal/convergence/engine_test.go::TestConvergence_DeleteShardCompletesAfterGroupLosesLeader": [
+      "internal/operator/controller_test.go::TestController_DeleteShardCompletesAfterGroupLosesLeader"
+    ],
+    "internal/convergence/engine_test.go::TestConvergence_DeleteShardContinuesAfterGroupBecomesAbsent": [
+      "internal/operator/controller_test.go::TestController_DeleteShardContinuesAfterGroupBecomesAbsent"
+    ],
+    "internal/convergence/engine_test.go::TestConvergence_FoundingDemotionTransferAndDelete": [
+      "internal/operator/controller_test.go::TestController_FoundingDemotionTransferAndDelete"
+    ],
+    "internal/convergence/engine_test.go::TestConvergence_WaitFailureOwnershipAndCancellation": [
+      "internal/operator/controller_test.go::TestController_WaitFailureOwnershipAndCancellation"
+    ],
+    "internal/convergence/engine_test.go::TestConvergence_EmptyPlanAndActivationFailure": [
+      "internal/operator/controller_test.go::TestController_EmptyPlanAndActivationFailure"
+    ],
+    "internal/convergence/engine_test.go::TestConvergence_FailoverResumesExactStep": [
+      "internal/operator/controller_test.go::TestController_FailoverResumesExactStep"
+    ],
+    "internal/convergence/engine_test.go::TestConvergence_SupersedesOnlyAtStepBoundary": [
+      "internal/operator/controller_test.go::TestController_SupersedesOnlyAtStepBoundary"
+    ],
+    "internal/convergence/engine_test.go::TestConvergence_ResumePreservesDurableWaiting": [
+      "internal/operator/controller_test.go::TestController_ResumePreservesDurableWaiting"
+    ],
+    "internal/convergence/engine_test.go::TestConvergence_ResumeMixedPlaneOwnership": [
+      "internal/operator/controller_test.go::TestController_ResumeMixedPlaneOwnership"
+    ],
+    "internal/convergence/engine_test.go::TestConvergence_ShutdownCancelsBlockedWorkAndIsIdempotent": [
+      "internal/operator/controller_test.go::TestController_ShutdownCancelsBlockedWorkAndIsIdempotent"
+    ],
+    "internal/convergence/engine_test.go::TestConvergence_ShutdownReusesBoundedRetryTimer": [
+      "internal/operator/controller_test.go::TestController_ShutdownReusesBoundedRetryTimer"
+    ],
+    "internal/convergence/engine_test.go::TestConvergence_ResumeSerializesConcurrentTicks": [
+      "internal/operator/controller_test.go::TestController_ResumeSerializesConcurrentTicks"
+    ],
+    "internal/convergence/engine_test.go::TestConvergence_TickSurvivesLostProposal": [
+      "internal/operator/controller_test.go::TestController_TickSurvivesLostProposal"
+    ],
+    "internal/convergence/verification_test.go::TestConvergenceAcknowledgedMembershipRequiresObservedExactResult": [
+      "internal/operator/verification_test.go::TestControllerAcknowledgedMembershipRequiresObservedExactResult"
+    ],
+    "internal/convergence/verification_test.go::TestExecutionTransitionDoesNotRegressWallClock": [
+      "internal/operator/verification_test.go::TestOperatorTransitionDoesNotRegressWallClock"
+    ],
+    "internal/convergence/verification_test.go::TestConvergenceFreshGroupSeedsVotersBeforeIntentionalLearner": [
+      "internal/operator/verification_test.go::TestControllerFreshGroupSeedsVotersBeforeIntentionalLearner"
+    ],
+    "internal/metaengine/admission_test.go::TestAdmissionRebindingNeverSelectsSupersededProcessForExecution": [
+      "internal/metaengine/admission_test.go::TestAdmissionRebindingNeverSelectsSupersededProcessForOperator"
+    ],
+    "internal/metaengine/sm_test.go::TestSM_ExactExecutionTransitions": [
+      "internal/metaengine/sm_test.go::TestSM_ExactOperatorTransitions"
+    ],
+    "internal/metaengine/sm_test.go::TestSM_ExecutionSupersededAtExactBoundary": [
+      "internal/metaengine/sm_test.go::TestSM_OperatorSupersededAtExactBoundary"
+    ],
+    "internal/metaengine/sm_test.go::TestSM_ExecutionBeginRetryAndSupersession": [
+      "internal/metaengine/sm_test.go::TestSM_OperatorBeginRetryAndSupersession"
+    ],
+    "internal/metaengine/sm_test.go::TestSM_CommitRepairExecutionGuardrails": [
+      "internal/metaengine/sm_test.go::TestSM_CommitRepairOperatorGuardrails"
+    ],
+    "internal/metaengine/sm_test.go::TestSM_ExecutionsBounded": [
+      "internal/metaengine/sm_test.go::TestSM_OperatorsBounded"
+    ],
+    "internal/metaengine/snapshot_bench_test.go::TestMetaFullSnapshotMatrixPreservesHistoryExecutionsAndRetirement": [
+      "internal/metaengine/snapshot_bench_test.go::TestMetaFullSnapshotMatrixPreservesHistoryOperatorsAndRetirement"
+    ],
+    "internal/reconcile/engine_test.go::TestReconcilerStartStopLifecycle": [
+      "internal/scheduling/driver_test.go::TestDriverStartStopLifecycle"
+    ],
+    "internal/reconcile/engine_test.go::TestReconcilerGatesLeaderHealthAndDisabled": [
+      "internal/scheduling/driver_test.go::TestDriverGatesLeaderHealthAndDisabled"
+    ],
+    "internal/reconcile/engine_test.go::TestReconcilerLocalKillSwitchResetsStability": [
+      "internal/scheduling/driver_test.go::TestDriverLocalKillSwitchResetsStability"
+    ],
+    "internal/reconcile/engine_test.go::TestReconcilerResumesApprovedExecutionBeforeHealthGate": [
+      "internal/scheduling/driver_test.go::TestDriverResumesApprovedOperatorBeforeHealthGate"
+    ],
+    "internal/reconcile/engine_test.go::TestReconcilerDoesNotMergeStagedOrFailedOperatorIntent": [
+      "internal/scheduling/driver_test.go::TestDriverDoesNotMergeStagedOrFailedOperatorIntent"
+    ],
+    "internal/reconcile/engine_test.go::TestReconcilerCommitsExactLearnerFirstRepair": [
+      "internal/scheduling/driver_test.go::TestDriverCommitsExactLearnerFirstRepair"
+    ],
+    "internal/reconcile/engine_test.go::TestReconcilerCASRaceLeavesOperatorVersionStaged": [
+      "internal/scheduling/driver_test.go::TestDriverCASRaceLeavesOperatorVersionStaged"
+    ],
+    "internal/reconcile/engine_test.go::TestReconcilerRejectsPolicyActionsOutsideAllowList": [
+      "internal/scheduling/driver_test.go::TestDriverRejectsPolicyActionsOutsideAllowList"
+    ],
+    "internal/reconcile/engine_test.go::TestReconcilerHealsStagedInternal": [
+      "internal/scheduling/driver_test.go::TestDriverHealsStagedInternal"
+    ],
+    "internal/reconcile/engine_test.go::TestReconcilerHealRefusals": [
+      "internal/scheduling/driver_test.go::TestDriverHealRefusals"
+    ],
+    "internal/reconcile/engine_test.go::TestReconcilerFollowerResetsStabilityObservations": [
+      "internal/scheduling/driver_test.go::TestDriverFollowerResetsStabilityObservations"
+    ],
+    "internal/reconcile/engine_test.go::TestReconcilerStatusGatesAndStableSince": [
+      "internal/scheduling/driver_test.go::TestDriverStatusGatesAndStableSince"
+    ],
+    "internal/reconcile/engine_test.go::TestReconcilerStatusTransitionsAreOwnedAndLoggedOnce": [
+      "internal/scheduling/driver_test.go::TestDriverStatusTransitionsAreOwnedAndLoggedOnce"
+    ],
+    "internal/reconcile/engine_test.go::TestReconcilerStatusErrorWarnsOnce": [
+      "internal/scheduling/driver_test.go::TestDriverStatusErrorWarnsOnce"
+    ],
+    "internal/reconcile/engine_test.go::TestReconcilerStatusConcurrentAccess": [
+      "internal/scheduling/driver_test.go::TestDriverStatusConcurrentAccess"
+    ],
+    "internal/reconcile/engine_test.go::TestReconcilerSettingsValidation": [
+      "internal/scheduling/driver_test.go::TestDriverSettingsValidation"
+    ],
+    "internal/reconcile/policy_test.go::TestRestoreDegradedPolicyAllowList": [
+      "policy/restore_degraded_test.go::TestRestoreDegradedAllowList"
+    ],
+    "internal/reconcile/policy_test.go::TestRestoreDegradedPolicyNeverRepairsMeta": [
+      "policy/restore_degraded_test.go::TestRestoreDegradedNeverRepairsMeta"
+    ],
+    "meta/mutation_contracts_test.go::TestExecutionMalformedIDsDoNotAliasRetainedAttempt": [
+      "internal/metaservice/mutation_contracts_test.go::TestOperatorMalformedIDsDoNotAliasRetainedAttempt"
+    ],
+    "meta/observations_test.go::TestAppliedRecorderIsLocalAndDeduplicatesUnchangedExecutionAndDrain": [
+      "internal/metaservice/observations_test.go::TestAppliedRecorderIsLocalAndDeduplicatesUnchangedOperatorAndDrain"
+    ],
+    "meta/reconciliation_test.go::TestMetaReconciliationConstructorSettingsAndDisabledStatus": [
+      "internal/metaservice/scheduling_test.go::TestMetaSchedulingConstructorSettingsAndDisabledStatus"
+    ],
+    "runtime_integration_test.go::TestRuntimeIdentityMismatchParkSurvivesMetaRestart": [
+      "tests/cluster/testapp/node_recovery_api_test.go::TestPublicNodeIdentityMismatchParkSurvivesMetaRestart",
+      "internal/managed/durable_ledger_test.go::TestDurableLedgerSurvivesParkedRestartAndExactRetirement"
+    ],
+    "runtime_integration_test.go::TestRuntimeApprovedLoadParksLostWALRecoversAndRetires": [
+      "tests/cluster/testapp/node_recovery_api_test.go::TestPublicNodeApprovedLoadParksLostWALRecoversAndRetires",
+      "internal/managed/durable_ledger_test.go::TestDurableLedgerSurvivesParkedRestartAndExactRetirement"
+    ],
+    "runtime_integration_test.go::TestRuntimeCloseJoinsEffectsBeforeLoadAndDatabase": [
+      "tests/cluster/testapp/node_recovery_api_test.go::TestPublicNodeStopJoinsEffectsBeforeDatabase",
+      "tests/cluster/testapp/node_lifecycle_api_test.go::TestPublicNodeCloseErrorKeepsOwnershipUntilExplicitRetry"
+    ],
+    "runtime_test.go::TestRuntimeConstructorsRegistryAndSharedOwnership": [
+      "internal/managed/ownership_ports_test.go::TestHostRegistryAndSharedOwnership",
+      "node_test.go::TestNodeConstructionAndStopBeforeStartAcquireNothing"
+    ],
+    "runtime_test.go::TestRuntimeOwnerRejectedBeforeStoreMutation": [
+      "internal/managed/ownership_ports_test.go::TestHostRefusesUnstartedAndForeignAssignmentsBeforeStoreMutation"
+    ],
+    "runtime_test.go::TestRuntimeMetaConstructorAndStoppedAdmission": [
+      "node_test.go::TestNodeConstructionAndStopBeforeStartAcquireNothing",
+      "internal/managed/ownership_ports_test.go::TestHostRefusesUnstartedAndForeignAssignmentsBeforeStoreMutation"
+    ],
+    "runtime_test.go::TestRuntimeCloseDuringConstructorRetainsOwnershipAndJoins": [
+      "internal/managed/ownership_ports_test.go::TestHostStopDuringProbeRetainsOwnershipAndJoins",
+      "tests/cluster/testapp/node_lifecycle_api_test.go::TestPublicNodeCanceledFactoryRemainsOwnedThroughLateReturn"
+    ],
+    "runtime_test.go::TestRuntimeConcurrentCloseAndCanceledStopGate": [
+      "internal/managed/ownership_ports_test.go::TestHostRegistryAndSharedOwnership"
+    ],
+    "runtime_test.go::TestRuntimeForeignWALRetainedUntilExactCallerQuarantine": [
+      "internal/managed/ownership_ports_test.go::TestHostForeignWALRetainedUntilExactQuarantine"
+    ],
+    "runtime_test.go::TestRuntimeFailedRestoreParksAndCanRetryWithoutLosingStore": [
+      "internal/managed/ownership_ports_test.go::TestHostFailedRestoreParksAndRetriesWithoutLosingStore"
+    ],
+    "storage/walstore/store_test.go::TestWalStore_QuarantineSweep": [
+      "storage/walstore/store_test.go::TestWalStore_ExplicitQuarantineCollection"
+    ],
+    "tests/cluster/intentional_learner_test.go::TestIntentionalLearnerSurvivesReconciliationUntilApprovedPromotion": [
+      "tests/cluster/intentional_learner_test.go::TestIntentionalLearnerSurvivesSchedulingUntilApprovedPromotion"
+    ],
+    "tests/cluster/join_test.go::TestAdmissionExecutionResumesAfterMetaLeaderTransferWithoutNewAttempt": [
+      "tests/cluster/join_test.go::TestAdmissionOperatorResumesAfterMetaLeaderTransferWithoutNewAttempt"
+    ],
+    "tests/cluster/testapp/apply_http_test.go::TestApplyRejectsModeFlagsBeforeCallingMeta": [
+      "tests/cluster/testapp/approval_http_test.go::TestApprovalRejectsModeFlagsBeforeCallingCluster"
+    ]
+  }
+}

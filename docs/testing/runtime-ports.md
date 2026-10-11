@@ -3,7 +3,9 @@
 The original boot and ownership assertions follow their implementation into
 `internal/managed` and the public integration tests in `tests/cluster/testapp`.
 The historical public signatures and test names are retained in
-[api-refactor-baseline.json](api-refactor-baseline.json), captured from `75ba513`.
+[api-refactor-baseline.json](api-refactor-baseline.json), captured from `75ba513`. The [test-name migration map](api-refactor-test-map.json)
+resolves all 550 baseline test names, including 64 renamed or split tests;
+assertion preservation is recorded here and in the source inventory.
 Tests that run Raft engines skip short mode. Independent decision, constructor,
 ledger and cancellation tests run in parallel under `make test-unit`.
 
