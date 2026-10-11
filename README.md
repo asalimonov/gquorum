@@ -10,6 +10,10 @@ Topology supports caller-defined node types. All admitted nodes join `_meta`;
 placement rules determine which nodes can host load groups. Only `topology.Limits`
 sets cluster capacity; its defaults are three nodes and five replicas per group.
 
+Read the [library and cluster-building guide](docs/architecture/library.md) for
+the key interfaces, topology structures, startup and effect contracts, and
+repository layout.
+
 Start with the [three-node example](examples/cluster/README.md):
 
 ```sh
