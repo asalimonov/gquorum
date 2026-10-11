@@ -119,7 +119,7 @@ func New(input Options) (*Group, error) {
 	g.addresses[opts.Identity.NodeName] = opts.Network.AdvertiseAddress
 	g.machine = metaengine.NewMachine(g.rules, nil)
 	g.watches = newWatchRegistry(opts.MaxWatchers)
-	g.scheduler, err = scheduling.New(scheduling.Config{Host: schedulingHost{g}, Settings: opts.Scheduling, Logger: opts.Logger, OnTransition: g.recordScheduling})
+	g.scheduler, err = scheduling.New(scheduling.Config{Host: schedulingHost{g}, Settings: opts.Scheduling, Scheduler: opts.Scheduler, CallbackTimeout: opts.CallbackTimeout, Held: opts.HeldLoads, Logger: opts.Logger, OnTransition: g.recordScheduling})
 	if err != nil {
 		return nil, err
 	}

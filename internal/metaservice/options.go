@@ -20,6 +20,8 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/observe"
 	"github.com/asalimonov/gquorum/internal/scheduling"
+	"github.com/asalimonov/gquorum/policy"
+	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -62,6 +64,9 @@ type Options struct {
 	LoadGroups        operator.GroupEffects
 	Health            topology.HealthSource
 	Scheduling        SchedulingOptions
+	Scheduler         policy.Scheduler
+	CallbackTimeout   time.Duration
+	HeldLoads         func() []storage.Identity
 	Observation       ObservationOptions
 	Events            *events.Bus
 	Logger            *slog.Logger
@@ -100,6 +105,11 @@ func (e *ReadmissionRequiredError) Unwrap() error { return fault.ErrReadmissionR
 func DefaultTiming() Timing {
 	return Timing{TickInterval: 100 * time.Millisecond, ElectionTicks: 10, HeartbeatTicks: 1, DialTimeout: 500 * time.Millisecond, SendTimeout: 500 * time.Millisecond, PeerRetryInitial: 100 * time.Millisecond, PeerRetryMax: 5 * time.Second}
 }
+
+// WithDefaults returns owned settings without acquiring resources or invoking
+// dependencies. The public Node constructor shares this normalization path.
+func (o Options) WithDefaults() Options { return o.defaults() }
+
 func (o Options) defaults() Options {
 	o.Limits = o.Limits.WithDefaults()
 	o.Scheduling = o.Scheduling.WithDefaults()
@@ -173,17 +183,16 @@ func (o Options) defaults() Options {
 	o.JoinSeeds = append([]string(nil), o.JoinSeeds...)
 	o.Placement.AllowedNodeTypes = append([]topology.NodeType(nil), o.Placement.AllowedNodeTypes...)
 	o.Network.ClusterCredential = bytes.Clone(o.Network.ClusterCredential)
-	if o.Network.TLS != nil {
-		o.Network.TLS = o.Network.TLS.Clone()
-	}
-	if o.Network.ClientTLS != nil {
-		o.Network.ClientTLS = o.Network.ClientTLS.Clone()
-	}
+	o.Network.TLS = cloneTLS(o.Network.TLS)
+	o.Network.ClientTLS = cloneTLS(o.Network.ClientTLS)
 	sort.Slice(o.Founders, func(i, j int) bool { return o.Founders[i].Node.Name < o.Founders[j].Node.Name })
 	return o
 }
 func (o Options) Validate() error {
 	invalid := func(message string) error { return fault.New(fault.Invalid, message, nil) }
+	if o.CallbackTimeout < 0 {
+		return invalid("negative policy callback timeout")
+	}
 	if err := o.Scheduling.Validate(); err != nil {
 		return err
 	}

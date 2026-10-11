@@ -179,3 +179,26 @@ verification progress; checking a stage does not waive any target requirement.
   tests pass. The uncached unit suite takes **10.53 seconds**. Tests cover
   history/snapshot catalogs, malformed grants, real machine Close ordering,
   interrupted quarantine, backup retry, foreign state and joined cancellation.
+- Node settings foundation: added the explicit public NodeOptions/Bootstrap/
+  Meta/Load/Policy settings and factory/retirement callback types. Validation
+  resolves built-ins without invoking caller code or opening stores; ambiguous
+  policy settings and load storage selections are refused. Shared meta and
+  engine validation preserves timing constraints. Limits remains the only
+  cluster-size setting. Nested topology, credentials, TLS configuration slices
+  and WAL prewrite values are owned copies; injected dependencies are borrowed.
+- The private meta service now installs the selected Scheduler, callback bound
+  and held-replica observation source. A running-service test proves a custom
+  scheduler receives owned inputs and its configured deadline. This fixes a
+  missing connection between the existing scheduling driver and Node settings.
+- Added the private lifecycle runner shared by readiness, retention and removal.
+  It serializes all three callback kinds, owns queued and active calls through
+  actual return, propagates lifetime/deadline cancellation, rejects late/invalid
+  decisions and refuses removal decisions without exact mandatory fencing.
+  Deterministic concurrency tests prove timeout ownership, joined retry and
+  absence of callback overlap. Node construction and worker composition still
+  need to connect this runner to the managed host and public facade.
+- Settings/policy stage validation: `make test`, `make lint` and focused root/
+  metaservice race tests pass. Uncached `make test-unit` completes in **13.39
+  seconds**. No generated protocols or durable schemas changed. The complete
+  Node/Cluster facade, mandatory removal flow, caller migrations and Docker
+  acceptance remain outstanding.

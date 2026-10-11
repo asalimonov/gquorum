@@ -96,15 +96,8 @@ func (o Options) validate(meta bool) error {
 	if o.Mode != Founding && o.Mode != Joining {
 		return fault.New(fault.Invalid, "explicit founding or joining mode required", nil)
 	}
-	if o.Timing.TickInterval < 0 || o.Timing.ElectionTicks < 0 || o.Timing.HeartbeatTicks < 0 || o.Timing.WALWriteWait < 0 || o.MaxPendingProposals < 0 {
-		return fault.New(fault.Invalid, "negative load timing or proposal bound", nil)
-	}
-	o = o.defaults()
-	if o.Timing.TickInterval > 0 && int64(o.Timing.ElectionTicks) > math.MaxInt64/int64(o.Timing.TickInterval) {
-		return fault.New(fault.Invalid, "Raft election interval overflows duration", nil)
-	}
-	if o.Timing.TickInterval < 10*time.Millisecond || o.Timing.HeartbeatTicks < 1 || o.Timing.ElectionTicks < 2 || o.Timing.HeartbeatTicks >= o.Timing.ElectionTicks || o.Timing.WALWriteWait > 10*time.Millisecond || o.Timing.WALWriteWait > 0 && o.Timing.WALWriteWait >= o.Timing.TickInterval*time.Duration(o.Timing.ElectionTicks)/2 {
-		return fault.New(fault.Invalid, "invalid Raft timing", nil)
+	if err := o.ValidateSettings(); err != nil {
+		return err
 	}
 	ids := make(map[uint64]bool)
 	local := false
@@ -120,6 +113,22 @@ func (o Options) validate(meta bool) error {
 	}
 	if o.Mode == Joining && len(o.Peers) > 0 {
 		return fault.New(fault.Invalid, "joining cannot supply founding voters", nil)
+	}
+	return nil
+}
+
+// ValidateSettings checks tuning without requiring an open store or a machine.
+// Node uses this same validation before acquiring any per-replica resources.
+func (o Options) ValidateSettings() error {
+	if o.Timing.TickInterval < 0 || o.Timing.ElectionTicks < 0 || o.Timing.HeartbeatTicks < 0 || o.Timing.WALWriteWait < 0 || o.MaxPendingProposals < 0 {
+		return fault.New(fault.Invalid, "negative load timing or proposal bound", nil)
+	}
+	o = o.defaults()
+	if int64(o.Timing.ElectionTicks) > math.MaxInt64/int64(o.Timing.TickInterval) {
+		return fault.New(fault.Invalid, "Raft election interval overflows duration", nil)
+	}
+	if o.Timing.TickInterval < 10*time.Millisecond || o.Timing.HeartbeatTicks < 1 || o.Timing.ElectionTicks < 2 || o.Timing.HeartbeatTicks >= o.Timing.ElectionTicks || o.Timing.WALWriteWait > 10*time.Millisecond || o.Timing.WALWriteWait > 0 && o.Timing.WALWriteWait >= o.Timing.TickInterval*time.Duration(o.Timing.ElectionTicks)/2 {
+		return fault.New(fault.Invalid, "invalid Raft timing", nil)
 	}
 	return nil
 }
