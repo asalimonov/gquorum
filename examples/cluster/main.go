@@ -20,7 +20,6 @@ import (
 
 	"github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -60,12 +59,12 @@ func run(ctx context.Context) (result error) {
 		return err
 	}
 	identity := topology.Identity{NodeName: name, ClusterID: envOr("GQUORUM_CLUSTER", "example"), InstanceID: hex.EncodeToString(nonce[:])}
-	var founders []metaservice.FoundingMember
+	var founders []gquorum.FoundingMember
 	var local topology.Node
 	resolve := addresses{}
 	for _, p := range peers {
 		node := topology.Node{Name: p.Name, Type: p.Type, State: topology.NodeActive}
-		founders = append(founders, metaservice.FoundingMember{Node: node, MemberID: p.MemberID, Address: p.MetaAddress})
+		founders = append(founders, gquorum.FoundingMember{Node: node, MemberID: p.MemberID, Address: p.MetaAddress})
 		resolve[p.Name] = p.MetaAddress
 		if p.Name == name {
 			local = node
@@ -77,22 +76,29 @@ func run(ctx context.Context) (result error) {
 		return err
 	}
 	defer metaListener.Close()
-	runtime, err := gquorum.New(gquorum.Options{})
+	node, err := gquorum.NewNode(gquorum.NodeOptions{
+		Identity:  identity,
+		Node:      local,
+		Bootstrap: gquorum.BootstrapOptions{Founders: founders},
+		Meta: gquorum.MetaOptions{
+			DBPath: filepath.Join(envOr("GQUORUM_DATA", "/data"), "meta.bolt"),
+			Network: gquorum.MetaNetworkOptions{
+				Listener: metaListener, AdvertiseAddress: resolve[name], Resolver: resolve,
+				AllowPlaintext: true, ClusterCredential: []byte(os.Getenv("GQUORUM_CREDENTIAL")),
+			},
+		},
+	})
 	if err != nil {
 		return err
 	}
 	defer func() {
 		shutdown, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		if err := runtime.Close(shutdown); err != nil {
+		if err := node.Stop(shutdown); err != nil {
 			result = errors.Join(result, err)
 		}
 	}()
-	group, err := runtime.OpenMeta(metaservice.Options{Identity: identity, Node: local, Founders: founders, DBPath: filepath.Join(envOr("GQUORUM_DATA", "/data"), "meta.bolt"), Limits: topology.Limits{}, Network: metaservice.NetworkOptions{Listener: metaListener, AdvertiseAddress: resolve[name], Resolver: resolve, AllowPlaintext: true, ClusterCredential: []byte(os.Getenv("GQUORUM_CREDENTIAL"))}})
-	if err != nil {
-		return err
-	}
-	if err := group.Start(ctx); err != nil {
+	if err := node.Start(ctx); err != nil {
 		return err
 	}
 	listener, err := net.Listen("tcp", envOr("GQUORUM_HTTP_LISTEN", ":8080"))
@@ -100,7 +106,7 @@ func run(ctx context.Context) (result error) {
 		return err
 	}
 	defer listener.Close()
-	server := &http.Server{Handler: routes(group, name), ReadHeaderTimeout: 3 * time.Second, IdleTimeout: 30 * time.Second, BaseContext: func(net.Listener) context.Context { return ctx }}
+	server := &http.Server{Handler: routes(node), ReadHeaderTimeout: 3 * time.Second, IdleTimeout: 30 * time.Second, BaseContext: func(net.Listener) context.Context { return ctx }}
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- server.Serve(listener) }()
 	slog.Info("example listening", "node", name, "http", listener.Addr())

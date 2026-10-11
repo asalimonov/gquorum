@@ -26,6 +26,8 @@ verification progress; checking a stage does not waive any target requirement.
   complete document/mutation/session/lock/status surface, observer ownership.
 - [ ] Migrate the small example and full cluster fixture to Node/Cluster; align
   HTTP approval/operator routes, requests, responses, clients and README.
+  - [x] Small meta-only example and its process test use public Node/Cluster.
+  - [ ] Full load application, typed protocol adapter and fault fixtures.
 - [ ] Preserve/migrate all unit, functional and process-cluster assertions;
   add meaningful coverage for new ownership/policy/transport boundaries.
 - [ ] Update library guide and current architecture/testing docs; remove all old
@@ -239,3 +241,16 @@ verification progress; checking a stage does not waive any target requirement.
   still transitional surfaces used by the existing example and fixture; migrate
   those callers and remove the old API before final completion. Full Docker,
   physical baseline compatibility, documentation and target audit gates remain.
+- Small example migrated to public Node/Cluster with caller-owned startup settings
+  and joined Stop. Its HTTP adapter uses explicit approve/operators routes,
+  public mutation values, strict empty-object approval input and exact If-Match
+  parsing before cluster calls. Readiness combines Node's gate/session with the
+  Active node state. Legacy mutation fields/routes are refused; staging errors
+  preserve X-Staged-Version. Compose paths, volumes, ports and commands stay intact.
+- Example verification: `make test`, `make lint` and example race tests pass;
+  uncached `make test-unit` takes **11.03 seconds**. `make test-example` passes
+  against the actual Compose application, covering previews, both approval flows,
+  node types, drain/activate readiness, CAS conflicts, unchanged meta membership
+  and exact retained topology after restart. The harness rediscovers ephemeral
+  ports after restart. Full load-fixture migration and process/performance suites
+  remain required; the demo smoke test does not substitute for those suites.

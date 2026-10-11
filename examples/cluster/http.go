@@ -6,13 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/internal/metaservice"
-	"github.com/asalimonov/gquorum/topology"
 	"io"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/asalimonov/gquorum"
+	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/topology"
 )
 
 func jsonResponse(w http.ResponseWriter, status int, data any) {
@@ -55,6 +56,11 @@ func requestBody(w http.ResponseWriter, r *http.Request, out any) error {
 }
 
 func positiveNumber(value string) (uint64, error) {
+	for _, digit := range value {
+		if digit < '0' || digit > '9' {
+			return 0, fault.New(fault.Invalid, "positive decimal version required", nil)
+		}
+	}
 	n, err := strconv.ParseUint(value, 10, 64)
 	if err != nil || n == 0 {
 		return 0, fault.New(fault.Invalid, "positive version required", err)
@@ -62,6 +68,9 @@ func positiveNumber(value string) (uint64, error) {
 	return n, nil
 }
 func expectedVersion(r *http.Request) (uint64, error) {
+	if len(r.Header.Values("If-Match")) != 1 {
+		return 0, fault.New(fault.Invalid, "exactly one If-Match version is required", nil)
+	}
 	value := r.Header.Get("If-Match")
 	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
 		value = value[1 : len(value)-1]
@@ -71,7 +80,10 @@ func expectedVersion(r *http.Request) (uint64, error) {
 	}
 	return positiveNumber(value)
 }
-func mutationOptions(r *http.Request, opts metaservice.MutationOptions) (metaservice.MutationOptions, error) {
+func mutationOptions(r *http.Request, opts gquorum.MutationOptions) (gquorum.MutationOptions, error) {
+	if opts.Approve && opts.Preview {
+		return opts, fault.New(fault.Invalid, "preview cannot be approved", nil)
+	}
 	expected, err := expectedVersion(r)
 	if err != nil {
 		return opts, err
@@ -82,10 +94,33 @@ func mutationOptions(r *http.Request, opts metaservice.MutationOptions) (metaser
 	opts.ExpectedVersion = expected
 	return opts, nil
 }
-func mutationResponse(w http.ResponseWriter, result metaservice.MutationResult, err error) {
+func approvalOptions(w http.ResponseWriter, r *http.Request, version uint64) error {
+	if r.URL.RawQuery != "" {
+		return fault.New(fault.Invalid, "approval does not accept query parameters", nil)
+	}
+	if len(r.Header.Values("If-Match")) != 0 {
+		expected, err := expectedVersion(r)
+		if err != nil {
+			return err
+		}
+		if expected != version {
+			return fault.New(fault.Invalid, "path version differs from If-Match", nil)
+		}
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		return fault.New(fault.Invalid, "body exceeds limit or cannot be read", err)
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return nil
+	}
+	return decodeJSON(body, &struct{}{})
+}
+
+func mutationResponse(w http.ResponseWriter, result gquorum.MutationResult, err error) {
 	if err != nil {
 		// Staging may have succeeded before approval failed. Preserve that committed
-		// version so an operator can inspect and apply it rather than repeat an edit.
+		// version so an operator can inspect and approve it rather than repeat an edit.
 		if result.Document.Version != 0 {
 			w.Header().Set("X-Staged-Version", strconv.FormatUint(result.Document.Version, 10))
 		}
@@ -101,6 +136,10 @@ func mutationResponse(w http.ResponseWriter, result metaservice.MutationResult, 
 }
 
 func decodeJSON(data []byte, out any) error {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || data[0] != '{' {
+		return fault.New(fault.Invalid, "JSON object required", nil)
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(out); err != nil {
@@ -112,89 +151,89 @@ func decodeJSON(data []byte, out any) error {
 	return nil
 }
 
-func routes(group *metaservice.Group, name string) http.Handler {
+func routes(node gquorum.Node) http.Handler {
+	cluster := node.Cluster()
+	name := node.Identity().NodeName
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) { jsonResponse(w, 200, map[string]string{"node": name}) })
 	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, r *http.Request) {
-		active, err := group.Active(r.Context())
+		status := node.Status()
+		if !status.Ready || !status.SessionLive {
+			httpError(w, fault.ErrReplicaNotReady)
+			return
+		}
+		active, err := cluster.Active(r.Context())
 		if err != nil {
 			httpError(w, err)
 			return
 		}
-		node := active.Node(name)
-		if !group.OwnSessionLive() || node == nil || node.State != topology.NodeActive {
+		member := active.Node(name)
+		if member == nil || member.State != topology.NodeActive {
 			httpError(w, fault.ErrReplicaNotReady)
 			return
 		}
 		jsonResponse(w, 200, map[string]any{"node": name, "session_live": true, "active_version": active.Version})
 	})
 	mux.HandleFunc("GET /api/cluster/status", func(w http.ResponseWriter, r *http.Request) {
-		status, err := group.Status(r.Context())
+		status, err := cluster.Status(r.Context())
 		if err != nil {
 			httpError(w, err)
 			return
 		}
 		jsonResponse(w, 200, status)
 	})
-	mux.HandleFunc("GET /api/topology/{view}", func(w http.ResponseWriter, r *http.Request) {
-		var document topology.Document
-		var err error
-		switch r.PathValue("view") {
-		case "latest":
-			document, err = group.Latest(r.Context())
-		case "target":
-			document, err = group.Target(r.Context())
-		case "active":
-			document, err = group.Active(r.Context())
-		default:
-			http.NotFound(w, r)
-			return
+	for path, read := range map[string]func(context.Context) (topology.Document, error){
+		"GET /api/topology/latest": cluster.Latest,
+		"GET /api/topology/target": cluster.Target,
+		"GET /api/topology/active": cluster.Active,
+	} {
+		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+			document, err := read(r.Context())
+			if err != nil {
+				httpError(w, err)
+				return
+			}
+			w.Header().Set("ETag", fmt.Sprintf("\"%d\"", document.Version))
+			jsonResponse(w, 200, document)
+		})
+	}
+	mutate := func(change func(context.Context, string, gquorum.MutationOptions) (gquorum.MutationResult, error)) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			var options gquorum.MutationOptions
+			if err := requestBody(w, r, &options); err != nil {
+				httpError(w, err)
+				return
+			}
+			options, err := mutationOptions(r, options)
+			if err != nil {
+				httpError(w, err)
+				return
+			}
+			result, err := change(r.Context(), r.PathValue("name"), options)
+			mutationResponse(w, result, err)
 		}
-		if err != nil {
-			httpError(w, err)
-			return
-		}
-		w.Header().Set("ETag", fmt.Sprintf("\"%d\"", document.Version))
-		jsonResponse(w, 200, document)
-	})
-	mux.HandleFunc("POST /api/nodes/{name}/{action}", func(w http.ResponseWriter, r *http.Request) {
-		var options metaservice.MutationOptions
-		if err := requestBody(w, r, &options); err != nil {
-			httpError(w, err)
-			return
-		}
-		options, err := mutationOptions(r, options)
-		if err != nil {
-			httpError(w, err)
-			return
-		}
-		var result metaservice.MutationResult
-		switch r.PathValue("action") {
-		case "drain":
-			result, err = group.DrainNode(r.Context(), r.PathValue("name"), options)
-		case "activate":
-			result, err = group.ActivateNode(r.Context(), r.PathValue("name"), options)
-		default:
-			http.NotFound(w, r)
-			return
-		}
-		mutationResponse(w, result, err)
-	})
-	mux.HandleFunc("POST /api/topology/{version}/apply", func(w http.ResponseWriter, r *http.Request) {
+	}
+	mux.HandleFunc("POST /api/nodes/{name}/drain", mutate(cluster.DrainNode))
+	mux.HandleFunc("POST /api/nodes/{name}/activate", mutate(cluster.ActivateNode))
+	mux.HandleFunc("POST /api/topology/{version}/approve", func(w http.ResponseWriter, r *http.Request) {
 		version, err := positiveNumber(r.PathValue("version"))
 		if err != nil {
 			httpError(w, err)
 			return
 		}
-		id, err := group.Apply(r.Context(), version)
+		if err := approvalOptions(w, r, version); err != nil {
+			httpError(w, err)
+			return
+		}
+		id, err := cluster.Approve(r.Context(), version)
 		if err != nil {
 			httpError(w, err)
 			return
 		}
 		jsonResponse(w, 202, map[string]any{"operator_id": id})
 	})
-	mux.HandleFunc("GET /api/executions/{id}", func(w http.ResponseWriter, r *http.Request) {
-		operator, err := group.Operator(r.Context(), topology.OperatorID(r.PathValue("id")))
+	mux.HandleFunc("GET /api/operators/{id}", func(w http.ResponseWriter, r *http.Request) {
+		operator, err := cluster.Operator(r.Context(), topology.OperatorID(r.PathValue("id")))
 		if err != nil {
 			httpError(w, err)
 			return
