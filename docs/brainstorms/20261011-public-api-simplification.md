@@ -1,9 +1,10 @@
 # Brainstorm: simpler node, cluster and load-group APIs
 
 Status: clean API refactor, separate group/replica operations and a deliberate
-public group wrapper agreed. Startup-selectable built-in policies are a user
-requirement. Managed local replica lifecycle through a caller factory and
-transport is agreed. Detailed policy and lifecycle contracts are under discussion.
+public group wrapper agreed. Managed local replica lifecycle through a caller
+factory and transport, and stop holds lasting only for the current node lifetime,
+are agreed. Startup-selectable defaults and caller-replaceable policies are user
+requirements. Detailed extension and lifecycle contracts are under discussion.
 This is a discussion record, not an implementation specification.
 
 ## Initial request
@@ -296,6 +297,11 @@ The specific spelling of candidate names and the full method inventory still
 require the final target specification.
 
 ## Iteration 2: built-in mechanics and selectable policies
+
+Historical note: this iteration's closed enum-only policy selection was revised
+by the user's customization requirement in iteration 4. Its standard behavior
+catalog remains useful; the public selection mechanism must support custom Go
+implementations as well as those presets.
 
 ### What moves into the library
 
@@ -683,7 +689,223 @@ held by their own invocation.
 > restart recovers the approved assignment. The alternative persists the hold
 > until an explicit start, even across restarts.
 
-No answer recorded yet.
+User answer: "I agree with recommended."
+
+Resolution: an explicit local stop hold lasts only for the current Node lifetime.
+Explicit StartLoadGroup clears the exact hold. A new Node recovers approved
+assignments normally; no persistent stop-hold bucket is introduced.
+
+The user additionally requires default behavior to live in dedicated policy or
+managed-behavior code with clear public contracts. Callers must be able to replace
+included policy/behavior implementations in their own code without changing the
+library. This supersedes a closed enum-only extension model.
+
+## Iteration 4: replaceable policy implementations
+
+### Extension requirement and structural recommendation
+
+Default behavior must be implemented through the same public contract available
+to application-defined behavior. Built-in settings are conveniences for creating
+those implementations. No library source edit, import of an internal package,
+registration through an init hook, reflection, plugin loader or upstream PR is
+required to install a caller implementation.
+
+Recommended package separation:
+
+```text
+gquorum/
+    node.go, cluster.go, options.go       public entry points and composition
+    policy/
+        behavior.go                     public behavior contract and input/result values
+        default.go                      complete default implementation
+        startup.go, repair.go           configurable built-in decision logic
+        retirement.go, removal.go       retention and removal decisions
+        policytest/                     reusable contract checks for custom behavior
+    internal/managed/
+        host.go, replica.go             owned group lifecycle and supervision
+        actions.go                      execution of exact approved actions
+        policies.go                     invocation, validation and status reporting
+        recovery.go, retirement.go      recovery and retirement coordination
+```
+
+Existing consensus, persistence, planner and execution machinery can remain in
+their focused internal packages. The managed host composes them rather than
+merging all implementations into a large node file. Final file names and public
+package dependencies are still to be specified.
+
+### One public behavior interface
+
+Recommendation: expose one policy behavior interface with a small set of typed
+methods, rather than an interface per knob or an untyped Evaluate(kind, any).
+
+```go
+package policy
+
+type Behavior interface {
+    Readiness(context.Context, ReadinessInput) (ReadinessDecision, error)
+    Repair(context.Context, RepairInput) (RepairDecision, error)
+    Retention(context.Context, RetentionInput) (RetentionDecision, error)
+    Removal(context.Context, RemovalInput) (RemovalDecision, error)
+}
+
+func NewDefault(options Options) (*Default, error)
+```
+
+`Default` implements all four methods. Its Options have documented defaults and
+built-in mode selections. A caller can embed that default and override one
+method while inheriting the others:
+
+```go
+type siteBehavior struct {
+    *policy.Default
+}
+
+func (p *siteBehavior) Repair(
+    ctx context.Context,
+    in policy.RepairInput,
+) (policy.RepairDecision, error) {
+    // Apply this application's candidate selection or maintenance window.
+    // Return a typed decision; no membership or storage switch is needed.
+    return p.Default.Repair(ctx, in)
+}
+
+var _ policy.Behavior = (*siteBehavior)(nil)
+```
+
+The delegation above illustrates the substitution mechanism; a real override
+changes the decision before returning or chooses a different supported action.
+An implementation may instead provide all methods without embedding Default.
+Ordinary callers can omit the selection entirely and receive Default.
+
+The concrete policy selection object can carry implementation identity and
+configuration metadata without adding another policy interface. Exact field
+names in NodeOptions will be set in the target. A custom behavior must not
+silently inherit the default's identity for cluster-affecting decisions.
+
+### Typed policy inputs and decisions
+
+| Method | Input data | Output meaning |
+| --- | --- | --- |
+| Readiness | Owned startup/admission/recovery observations, founder progress, elapsed time and current node identity | Additional startup gate satisfied, wait with a reason, or fail startup. Mandatory admission/fencing checks still apply. |
+| Repair | Owned versioned Desired/Approved/Active views, group observations, health/stability, holds and recent action information | No change, wait, or request a supported typed topology action for exact identities. |
+| Retention | Verified retired replica identity, quarantine record, retirement time and current time | Keep quarantined state or allow collection after an explicit threshold. |
+| Removal | Verified durable self-removal identity and completed fencing state | Stop the owned node or remain fenced with local diagnostics available. |
+
+Input is a snapshot of observations, not a linearizable read. It carries enough
+version and identity information to explain what the policy based its decision
+on. The runtime clones mutable maps/slices before passing them to caller code.
+Policies receive no store handles, raw Raft handles or internal locks through
+these values.
+
+Decisions are requests, not pre-authorized effects. An input's facts can become
+stale while a policy runs. The managed host must recheck live ownership and
+authorization and use version-checked proposals before making a topology change.
+For retention it rechecks the exact quarantine identity and active ownership
+immediately before collection. No policy output may manufacture durable proof.
+
+This model permits custom candidate ordering, extra readiness conditions,
+maintenance windows, retention calculations and removal response without a
+caller action switch. Supported repair operations must be documented explicitly.
+The present core accepts only a narrowly scoped replacement of a missing Active
+voter; exposing a policy must not falsely promise arbitrary placement, scaling
+or meta-membership rewrites through that same repair command. Broader decisions
+can be supported only through existing validated topology operations or a
+deliberately specified extension to those operations.
+
+### Stable execution and mandatory validation
+
+Recommended flow:
+
+```text
+owned observations
+    -> selected built-in or caller Behavior method
+    -> typed decision
+    -> validate policy result and refresh authorization/version/identity
+    -> normal planner and approved operation, or guarded local lifecycle action
+    -> managed executor
+    -> verify exact postconditions and publish progress
+```
+
+Swapping a policy changes decisions. The managed executor continues to enforce
+the rules already agreed for this library: exact identities, approval, permanent
+group-ID retirement, stop holds, majority/catch-up checks, durable ordering and
+joined resource ownership. Existing application-defined state machines, stores,
+transports and retirement hooks remain separate execution extension points.
+
+The runtime must not hard-code a switch on concrete policy implementation types.
+Both Default and a caller implementation are invoked through Behavior. Switching
+over the bounded typed decision variants belongs inside the library, followed by
+the same validation regardless of which implementation produced the decision.
+
+### Callback execution contract
+
+- Policies are installed at startup and remain fixed for a Node lifetime. A
+  runtime policy hot-swap API is not implied by startup configuration.
+- Callbacks receive a bounded context and must honor cancellation. Node does not
+  abandon timed-out goroutines and start replacement callbacks concurrently.
+  A Go context cannot forcibly terminate caller code; a callback still running
+  after cancellation remains owned and visible to shutdown.
+- Policy invocation must occur without holding replica, topology or storage
+  locks. Reacquire locks and revalidate observations after return. A callback may
+  query public status or request stop without joining its own shutdown.
+- Recommend serializing invocations on each installed behavior instance owned
+  by one Node, making default embedding and caller state straightforward. Callers
+  sharing one instance between several Nodes must provide their own concurrency
+  safety, or construct an instance per Node.
+- Errors, invalid results and canceled evaluation cannot count as success or
+  silently select a permissive fallback. Report a reason through status/events
+  and retry according to the owning worker's bounded scheduling policy. Exact
+  fatal versus retryable classification will be specified per policy method.
+- A policy proposes decisions without performing topology, consensus or storage
+  side effects itself. Application external effects belong in their explicit
+  idempotent hooks, where postconditions and resource ownership can be verified.
+- Custom configuration must be stable during the Node lifetime. The library can
+  copy value options and observations; it cannot freeze the internals of a caller
+  Go object. This immutability is part of the custom implementation contract.
+
+### Cluster agreement and custom implementations
+
+Cluster-affecting repair behavior needs explicit declared identity, version and
+configuration identity in the startup policy selection. Nodes can validate that
+declaration against the cluster's agreed policy metadata; local readiness,
+retention and removal choices can remain node-specific.
+
+An identity/configuration fingerprint is an agreement declaration, not proof
+that arbitrary caller binaries or external observations are identical. The
+library executes custom decision code outside the deterministic meta FSM. The
+leader commits the concrete validated result; followers apply that result through
+ordinary consensus without rerunning custom callbacks. This preserves replay
+determinism and permits observations such as a maintenance window to inform the
+leader's decision.
+
+Built-in constructors can provide stable identity metadata automatically. Custom
+implementations must declare their repair identity explicitly so an embedded
+Default cannot mislabel changed logic. Failover and startup mismatch handling,
+including the durable metadata schema, require the final target specification.
+
+### Contract tests and regression scope
+
+Provide reusable checks for inputs remaining owned, cancellation, valid decision
+forms and predictable default delegation. Tests cannot prove arbitrary callback
+code is deterministic, terminating or free of external side effects; document
+those limits and exercise runtime guards separately.
+
+Port the existing default-policy tests so built-in behavior retains its documented
+decisions. Add an external-package test importing only public packages and
+installing a custom Behavior. Process-cluster tests should verify that the
+override affects decisions, that stale/invalid decisions remain refused, and that
+leadership changes preserve policy agreement. The small meta example continues
+to use defaults and contains no custom policy machinery.
+
+### Remaining extension boundary question
+
+> Should caller replacement cover policy decisions while the managed executor
+> stays library-owned, or should callers also be able to replace that executor?
+> Recommendation: replace decisions; use the existing state-machine, storage,
+> transport and retirement hooks for application-specific execution.
+
+No answer recorded yet. This question scopes replacement, not whether custom
+policy implementations are supported; that support is already required.
 
 ## NOT CONSIDERED & TODO
 
@@ -692,10 +914,12 @@ These are unresolved design details, not exclusions from the refactoring:
 - [potential-improvement] Finalize the exact public package boundary under the
   agreed clean API refactor before specifying created/updated files.
 - [potential-improvement] Finalize agreed managed hosting's factory/resource
-  ownership, explicit stop-hold lifetime and inbound effect dispatch contracts.
-- [potential-improvement] Finalize built-in policy names, defaults, validation
-  and local versus cluster-agreed settings. Specify the durable agreement needed
-  for topology-changing policies and the treatment of existing runtime controls.
+  ownership and inbound effect dispatch contracts. Stop holds are confirmed as
+  local to the current Node lifetime.
+- [potential-improvement] Finalize replaceable policy inputs, decisions, default
+  configuration and the boundary between policy and managed execution. Specify
+  local versus cluster-agreed settings, the durable agreement for custom repair
+  policies and the treatment of existing runtime controls.
 - [potential-improvement] Specify Start/WaitReady/retry/partial-failure behavior,
   callback reentrancy and cancellation ownership.
 - [potential-improvement] Map every existing document, watch, session, lock,
