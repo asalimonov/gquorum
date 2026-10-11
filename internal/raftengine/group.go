@@ -80,11 +80,20 @@ type Group struct {
 	stallSince                              atomic.Int64
 }
 
-func New(opts Options) (*Group, error) { return newGroup(opts, false) }
+func New(opts Options) (*Group, error) { return NewContext(context.Background(), opts) }
+
+// NewContext binds storage and restores the machine under its owner's startup
+// context. It starts no workers and never closes borrowed dependencies.
+func NewContext(ctx context.Context, opts Options) (*Group, error) {
+	return newGroup(ctx, opts, false)
+}
 
 // NewMeta is restricted to the library's internal topology runtime.
-func NewMeta(opts Options) (*Group, error) { return newGroup(opts, true) }
-func newGroup(opts Options, meta bool) (*Group, error) {
+func NewMeta(opts Options) (*Group, error) { return newGroup(context.Background(), opts, true) }
+func newGroup(parent context.Context, opts Options, meta bool) (*Group, error) {
+	if err := parent.Err(); err != nil {
+		return nil, err
+	}
 	if err := opts.validate(meta); err != nil {
 		return nil, err
 	}
@@ -94,7 +103,7 @@ func newGroup(opts Options, meta bool) (*Group, error) {
 		peers[i] = raft.Peer{ID: p.ID, Context: bytes.Clone(p.Context)}
 	}
 	opts.Peers = peers
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 	id := storage.Identity{NodeName: opts.NodeName, ClusterID: opts.ClusterID, GroupID: opts.GroupID, ReplicaID: opts.ReplicaID}
 	if err := opts.Store.BindReplica(ctx, id); err != nil {
@@ -119,6 +128,9 @@ func newGroup(opts Options, meta bool) (*Group, error) {
 	}
 	if err := opts.Machine.Restore(ctx, bytes.Clone(recovery.Snapshot.Data)); err != nil {
 		return nil, fault.New(fault.Unreadable, "restore load machine", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	if raft.IsEmptyHardState(recovery.HardState) && raft.IsEmptySnap(recovery.Snapshot) && len(recovery.Entries) == 0 && opts.Mode == Founding {
 		data, err := opts.Machine.Snapshot(ctx)

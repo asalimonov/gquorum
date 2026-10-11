@@ -12,7 +12,7 @@ verification progress; checking a stage does not waive any target requirement.
 - [x] Public values and persistence boundaries: Identity/document/session views,
   Operator/Scheduling names, private legacy disk/wire/event DTOs and baseline
   compatibility fixtures; internal metaservice/operator/scheduling packages.
-- [ ] Deliberate load.Group and Standalone owners, explicit application values,
+- [x] Deliberate load.Group and Standalone owners, explicit application values,
   state-machine adapter and typed managed transport contracts; no engine aliases.
 - [ ] Managed host: exact boot evidence, factory/Close ownership, start/stop
   reservations and holds, recovery supervision, action verification, delivery
@@ -72,3 +72,30 @@ verification progress; checking a stage does not waive any target requirement.
   `make test-unit`, `make lint`, targeted short race checks and both tagged test
   compiles passed. Final acceptance must additionally exercise physical retained
   meta/WAL stores, Docker cluster behavior and every target ownership contract.
+- Load ownership: replaced public engine aliases with the deliberate Group
+  handle and separate Standalone owner. External-package tests verify the public
+  method boundary, zero-handle refusals, fixed membership safety, borrowed store
+  ownership, snapshot plus committed-tail recovery and retained request IDs.
+  Existing Runtime and fixture code still use the private engine until their
+  Node migration; those transitional surfaces must be removed before completion.
+- Managed host (in progress): implemented per-group startup reservations,
+  independent owned contexts, duplicate waiters, exact stop holds, local replay
+  readiness, serial Close/retry ownership, startup cleanup, parked evidence,
+  assignment recovery and joined host shutdown. Ported the existing boot evidence
+  matrix. Engine construction now accepts the owner's cancellation context.
+  Scope includes the approved version for factory specifications; factory inputs
+  cannot mutate founding peers. Explicit stop can retry cleanup of an owned
+  identity after it leaves the current topology.
+- Managed transport foundation: typed sender, Raft receiver, replica observations
+  and delivery reports validate complete identities; snapshot acknowledgements
+  require exact issued tuples. Per-engine pending reports are bounded and expire;
+  old reports cannot affect replacement handles. A three-host test exercises
+  founding, replication, local stop/restart and snapshot delivery through these
+  methods. This host is not yet connected to Node or the cluster fixture:
+  approved-action dispatch, retirement/readmission, policy integration and the
+  public facade remain required work.
+- Load/host validation: `make test` and `make lint` passed; the uncached unit
+  suite completed in **10.34 seconds**. Full race tests passed for managed/load/
+  raftengine, including the three-host snapshot scenario. Both `cluster` and
+  `example` build-tag suites compile. Docker acceptance and the final architecture
+  audit remain outstanding until the Node and caller migrations are complete.

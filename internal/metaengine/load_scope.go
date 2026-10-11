@@ -9,6 +9,7 @@ import (
 // LoadScope is an owned view of an approved local load replica. Started is
 // durable evidence that this identity has already been created or prepared.
 type LoadScope struct {
+	Version     uint64
 	Group       topology.Group
 	Replica     topology.Replica
 	Started     bool
@@ -34,7 +35,7 @@ func (m *Machine) WithLoadScope(id storage.Identity, member uint64, fn func(Load
 	if group == nil {
 		return fault.New(fault.IdentityMismatch, "load group is not approved", nil)
 	}
-	var scope LoadScope
+	scope := LoadScope{Version: m.target.Version}
 	for _, replica := range group.Replicas {
 		if replica.NodeName == id.NodeName && replica.ReplicaID == id.ReplicaID {
 			scope.Replica = replica
