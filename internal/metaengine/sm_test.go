@@ -1,77 +1,19 @@
+//go:build !functional
+
 package metaengine
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/asalimonov/gquorum/internal/metastore"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/asalimonov/gquorum/internal/metastore"
 	"github.com/asalimonov/gquorum/topology"
 )
-
-// baseDoc returns a minimal structurally valid document (one active node, one
-// shard with a single voter). The state machine assigns the version, so the
-// Version field here is advisory.
-func baseDoc() topology.Document {
-	return topology.Document{
-		ClusterID: "cluster-abc",
-		Placement: topology.PlacementRule{MinReplicas: 1, MaxReplicas: 3},
-		Nodes: []topology.Node{
-			{Name: "n1", Type: "worker", State: topology.NodeActive},
-		},
-		Groups: []topology.Group{
-			{ID: topology.MetaGroupID, NextReplicaID: 2, Replicas: []topology.Replica{
-				{NodeName: "n1", ReplicaID: 1, Role: topology.ReplicaVoter},
-			}},
-			{ID: "shard0", NextReplicaID: 2, Replicas: []topology.Replica{
-				{NodeName: "n1", ReplicaID: 1, Role: topology.ReplicaVoter},
-			}},
-		},
-		ChangedBy: "n1",
-	}
-}
-
-// mustEncode encodes a proposal or fails the test.
-func mustEncode(t *testing.T, p any) []byte {
-	t.Helper()
-	data, err := Encode(p)
-	if err != nil {
-		t.Fatalf("Encode(%T): %v", p, err)
-	}
-	return data
-}
-
-// apply applies an encoded proposal at the next index (term 1) or fails.
-func apply(t *testing.T, sm *topologySM, index uint64, p any) ApplyResult {
-	t.Helper()
-	res, err := sm.Apply(index, 1, mustEncode(t, p))
-	if err != nil {
-		t.Fatalf("Apply(%T): %v", p, err)
-	}
-	return res
-}
-
-func testPlan(version uint64, count int) topology.Plan {
-	plan := topology.Plan{Version: version}
-	for seq := 1; seq <= count; seq++ {
-		plan.Steps = append(plan.Steps, topology.Step{
-			Seq: seq, GroupID: "shard0", Kind: topology.StepTransferLeader,
-			NodeName: "n1", ReplicaID: 1,
-		})
-	}
-	return plan
-}
-
-func beginProposal(version uint64, count int, id string, at time.Time) BeginOperatorProposal {
-	return BeginOperatorProposal{
-		Version: version, Plan: testPlan(version, count), Actor: "n1",
-		At: at, ProposalID: id,
-	}
-}
 
 func TestCodec_Roundtrip(t *testing.T) {
 	t.Parallel()
@@ -1028,52 +970,6 @@ func TestSM_HistoryRingBounded(t *testing.T) {
 	}
 }
 
-// TestSM_ExecutionsBounded verifies terminal, unreferenced executions are
-// pruned with the history ring while Target and Active remain pinned.
-func TestSM_OperatorsBounded(t *testing.T) {
-	t.Parallel()
-	sm := newTopologySM(nil, testRules())
-	apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "p1"})
-
-	idx := uint64(1)
-	at := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
-	for expected := uint64(1); expected < 300; expected++ {
-		idx++
-		apply(t, sm, idx, ProposeDocument{Doc: baseDoc(), ExpectedVersion: expected, ProposalID: fmt.Sprintf("d%d", expected)})
-		idx++
-		newVersion := expected + 1
-		apply(t, sm, idx, beginProposal(newVersion, 0, fmt.Sprintf("b%d", newVersion), at.Add(time.Duration(newVersion)*time.Second)))
-		id := topology.MakeOperatorID(newVersion, 1)
-		idx++
-		apply(t, sm, idx, TransitionOperatorProposal{Transition: topology.OperatorTransition{
-			OperatorID: id, Version: newVersion, Attempt: 1, State: topology.OperatorSucceeded,
-			At: at.Add(time.Duration(newVersion)*time.Second + time.Millisecond),
-		}, ProposalID: fmt.Sprintf("s%d", newVersion)})
-		idx++
-		apply(t, sm, idx, ActivateTargetProposal{OperatorID: id, Version: newVersion, Attempt: 1, ProposalID: fmt.Sprintf("a%d", newVersion)})
-	}
-
-	if got := len(sm.operators); got > historyRetention {
-		t.Fatalf("executions map = %d records after 299 commits, want <= %d (must prune with the history ring)", got, historyRetention)
-	}
-	// No record may linger below the retained history horizon.
-	all := sm.History(0, 0)
-	horizon := all[len(all)-1].Version
-	for _, ex := range sm.operators {
-		if ex.Version < horizon && ex.Version != sm.target.Version && ex.Version != sm.active.Version {
-			t.Fatalf("execution record for pruned version %d retained (history horizon %d)", ex.Version, horizon)
-		}
-	}
-}
-
-// NOTE: the former TestSM_BackfillsNextMemberID was removed with Task 2. It
-// covered the legacy NextMemberID==0 backfill for documents that predated the
-// member-ID counter — a backward-compatibility path that no longer exists:
-// Document was never released, the _meta Group's NextReplicaID is always seeded
-// by founding/legacy-import and advanced by SetMemberID, and a document reaching
-// commit must pass Validate (which requires every _meta replica ID below
-// NextReplicaID). See docs/plans/20260714-plane-policy-unification.md (Task 2).
-
 // versionsOf is a small helper for readable failure messages.
 func versionsOf(docs []topology.Document) []uint64 {
 	out := make([]uint64, len(docs))
@@ -1081,10 +977,6 @@ func versionsOf(docs []topology.Document) []uint64 {
 		out[i] = d.Version
 	}
 	return out
-}
-
-func testRules() topology.Rules {
-	return topology.Rules{SchemaVersion: 1, Limits: topology.Limits{}.WithDefaults()}
 }
 
 func multiNodeDoc() topology.Document {

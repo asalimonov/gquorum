@@ -56,8 +56,9 @@ HTTP mutations use `approve` and return `operator_id`. Separate approval uses
 The fixture retains its additional load/group/event and fault endpoints. The
 small example remains limited to `_meta` topology/status/drain/activate.
 
-Direct metadata-ledger assertions now run beside the private owner in
-`internal/managed/durable_ledger_test.go`, together with exact retirement and
-readmission tests. Process tests still prove missing-store parking, persisted
+In-process application and private metadata-ledger assertions run through
+`make test-function`, in tagged `*_func_test.go` files in `tests/cluster/testapp`
+and `internal/managed`, together with exact retirement
+and readmission tests. Process tests still prove missing-store parking, persisted
 identity, fresh-ID reseating, verified cleanup and recovery from actual WAL data;
 its inspection endpoint reads the caller-supplied store rather than meta internals.

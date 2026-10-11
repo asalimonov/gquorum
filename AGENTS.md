@@ -67,7 +67,7 @@ cleanup evidence and shutdown release ownership.
 | `internal/operator/`, `internal/scheduling/`, `internal/observe/` | Approved plan execution, scheduling and health observations. |
 | `internal/raftengine/`, `internal/raftlog/` | Shared Raft loop, replay, persistence, bounded queues and logging. |
 | `examples/cluster/` | Separate Go module: Kong CLI/configuration, cluster construction/readiness in `cluster.go`, HTTP adapter in `http.go` and process wiring in `main.go`. |
-| `tests/cluster/testapp/` | Caller FSM, load protocol, retirement, integration tests and authenticated fault controls. |
+| `tests/cluster/testapp/` | Caller FSM, load protocol, retirement, unit/functional fixture tests and authenticated fault controls. |
 | `tests/cluster/` | Separate module for Docker process, fault, scale, performance and Compose tests. |
 
 ## Contracts to preserve
@@ -170,9 +170,9 @@ the application. Forced recovery after permanent majority loss is deferred.
 Events are node-local and never replicated through `_meta`.
 
 Keep `examples/cluster` small and meta-only. Full load integration and fault
-controls belong in `tests/cluster/testapp`, using public APIs. Private ledger and
-engine assertions belong beside their internal owners. The library does not
-load application configuration or choose implicit storage roots.
+controls belong in `tests/cluster/testapp`, using public APIs. Functional tests,
+including private ledger and engine assertions, stay in their owning packages.
+The library does not load application configuration or choose implicit storage roots.
 
 ## Development and verification
 
@@ -181,12 +181,12 @@ separate example and test modules. Choose checks according to the change:
 
 | Command | Coverage |
 | --- | --- |
-| `make test` / `make test-unit` | Compile the library, example and fixture; run fast, uncached units in short mode. |
-| `make lint` | `go vet` for the library, example and caller fixture. |
+| `make test` / `make test-unit` | Compile the library, example and fixture; run fast, uncached units with default build tags. |
+| `make lint` | `go vet` for unit and functional builds of the library, example and caller fixture. |
 | `make test-race` / `make test-unit-race` | Fast unit checks under the race detector. |
-| `make test-fixture` | Public Node/Cluster and caller load integration. |
+| `make test-function` / `make test-function-race` | Non-Docker functional tests using `-tags=functional`, with optional race detection. |
 | `make test-example` | Actual demo; requires Docker Compose. |
-| `make test-cluster` | Full library/example functional and VERY SLOW tests, then fixture and Docker process scenarios with the `cluster` tag. RUN ONLY on end of a set of changes/commits, not afte small or intermediate changes.  |
+| `make test-cluster` | VERY SLOW Docker process scenarios with the `clustertest` tag. Run only at the end of a set of changes/commits, not after small or intermediate changes. |
 | `make test-perf` / `make bench` | Process performance/resource gates or planner/snapshot benchmarks. |
 | `make generate` / `make proto-check` | Regenerate protocols / require no generated diff; needs `protoc`. |
 
@@ -196,9 +196,17 @@ crossing replica or process boundaries. For documentation-only changes, verify
 paths, API names, commands and `git diff --check`. Report what actually ran and
 any unverified scope; historical validation records are not a new test run.
 
-Keep `make test` lightweight; full functional and cluster coverage belongs in
-`make test-cluster`. Keep isolated units parallel with temporary fixtures.
-Functional tests check `testing.Short()` before opening fixtures. Do not mutate
+Keep `make test` lightweight. Units must not start network services, mocked
+services, application replicas or subprocesses. Non-Docker functional tests stay
+beside their owning packages in `*_func_test.go` files with
+`//go:build functional`. Unit and benchmark files use `//go:build !functional`.
+Keep shared helpers in untagged `*_helpers_test.go` files; exclusive helpers stay
+with their suite. Separate each build constraint from the package clause with a
+blank line. Select suites through build tags rather than short-mode skip guards.
+`make test-functional` and `make test-functional-race` remain aliases for the
+`test-function` targets. Tests against separately running applications belong in
+`tests/cluster` and use the `clustertest` tag and Docker; Compose tests use `example`.
+Keep isolated units parallel with temporary fixtures. Do not mutate
 process environment, working directory or the upstream WAL segment-size global
 in parallel tests.
 The uncached unit target should remain below 30 seconds on the documented

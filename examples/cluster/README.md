@@ -117,6 +117,6 @@ Routes: `GET /health/{live,ready}`, `GET /api/cluster/status`,
 using a unique project/image, random host ports and private temporary volumes.
 It checks bootstrap, node types, both approval flows, previews, drain/activate,
 unchanged meta membership, readiness, stale-version refusal and restart from
-retained volumes. `make test-fixture` runs the richer
+retained volumes. `make test-function` runs the richer
 in-process library integration tests under the cluster test tree. Docker Raft
 correctness/fault scenarios use `make test-cluster`.

@@ -1,4 +1,4 @@
-//go:build example && !cluster
+//go:build example && !clustertest
 
 package cluster
 

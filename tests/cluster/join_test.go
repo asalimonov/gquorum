@@ -1,4 +1,4 @@
-//go:build cluster
+//go:build clustertest
 
 package cluster
 

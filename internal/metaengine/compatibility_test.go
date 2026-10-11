@@ -1,25 +1,16 @@
+//go:build !functional
+
 package metaengine
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 
 	"github.com/asalimonov/gquorum/topology"
 )
-
-func baselineBytes(t *testing.T, name string) []byte {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join("testdata", "api-baseline", name))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return data
-}
 
 func TestBaselineProposalAndResultBytes(t *testing.T) {
 	t.Parallel()

@@ -1,9 +1,11 @@
 # Process cluster tests
 
 Run `make test-cluster` from the repository root. It builds the caller-owned
-key/value test application image once, runs full library and example functional
-tests, then runs this module (including caller fixture tests) with the `cluster`
-build tag. `make test` runs only fast unit checks across all three modules.
+key/value test application image once, then runs Docker process tests with the
+`clustertest` build tag. Non-Docker functional tests stay in their owning packages
+in `*_func_test.go` files and run with `make test-function` (`-tags=functional`).
+`make test` runs fast unit checks with default build tags across the
+library, example and application-fixture modules.
 Docker must be reachable. For focused process validation, reuse the built image:
 
 ```sh

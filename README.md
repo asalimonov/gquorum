@@ -150,9 +150,12 @@ compatibility impact.
    make test-race  # Fast unit checks under the race detector
    ```
 
-Use `make test-fixture` for application integration, `make test-example` for the
-actual Compose demo and `make test-cluster` for full functional and Docker process
-tests. `make test-unit` and `make test-unit-race` are aliases for the fast checks.
+Use `make test-function` for non-Docker functional tests,
+`make test-example` for the actual Compose demo and `make test-cluster` for Docker
+process tests. `make test-unit` and `make test-unit-race` are aliases for the fast
+checks. Functional tests stay beside their packages in `*_func_test.go` files
+with the `functional` build tag. Unit files use `!functional`, so the commands
+run separate suites. `make test-functional` remains an alias for `make test-function`.
 The process suite covers three-, five- and seven-node clusters, faults, recovery and multiple
 load groups. Docker is required for the example and process suites. Protocol
 changes use `make generate` and `make proto-check`, which require `protoc` and

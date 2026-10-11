@@ -1,13 +1,14 @@
 # Node ownership and cold-boot ports
 
-The original boot and ownership assertions follow their implementation into
-`internal/managed` and the public integration tests in `tests/cluster/testapp`.
+Pure boot decisions, ownership and durable recovery assertions remain in
+`internal/managed`; public integration assertions live in `tests/cluster/testapp`.
 The historical public signatures and test names are retained in
 [api-refactor-baseline.json](api-refactor-baseline.json), captured from `75ba513`. The [test-name migration map](api-refactor-test-map.json)
 resolves all 550 baseline test names, including 64 renamed or split tests;
 assertion preservation is recorded here and in the source inventory.
-Tests that run Raft engines skip short mode. Independent decision, constructor,
-ledger and cancellation tests run in parallel under `make test-unit`.
+Fast isolated decisions run under `make test`; Raft, service-double and durable
+recovery fixtures run under `make test-function`. Functional tests live in
+`*_func_test.go` files with the `functional` build tag, excluded from `make test`.
 
 | Source obligation | Current coverage |
 | --- | --- |
@@ -19,7 +20,7 @@ ledger and cancellation tests run in parallel under `make test-unit`.
 | Same-ID refusal and approved replacement | Boot matrix, `TestEstablishedMissingStoreParksBeforeFactoryAndPreservesEvidence`, exact bbolt CAS and retirement successor tests. |
 | Approved identity; Latest stays inert | Public Node recovery test refuses staged-only startup before creating a WAL; host scope/action tests reject foreign identity and stale approval before effects. |
 | Empty prepared replicas remain non-serving | Native joining and membership progress tests retain empty-learner versus lost-established distinctions. |
-| Local ledger lookup, record, retry and forget | `internal/metastore` ledger tests, `internal/metaservice/replicas_test.go` and managed durable-ledger/retirement tests retain pin stamping, audit fields, cancellation, unavailable stores and exact replacement CAS. |
+| Local ledger lookup, record, retry and forget | `internal/metastore`, `internal/metaservice/replicas_func_test.go` and managed functional durable-ledger/retirement tests retain pin stamping, audit fields, cancellation, unavailable stores and exact replacement CAS. |
 | Teardown joins admitted effects before closing storage | `TestPublicNodeStopJoinsEffectsBeforeDatabase` holds transport cancellation cleanup, checks retained replica ownership and the actual bbolt lock, then checks joined release and retained borrowed WAL. Node cancellation fences Raft participation immediately; resource ownership lasts through callback return. |
 | Duplicate registry ownership and exact stop | `TestHostRegistryAndSharedOwnership` checks idempotent same-handle start, owned sorted IDs, stale stop, canceled stop, new handle on restart, concurrent joined shutdown and borrowed store retention. |
 | Constructor/shutdown overlap | `TestHostStopDuringProbeRetainsOwnershipAndJoins`, managed delayed restore and late factory tests, plus `TestPublicNodeCanceledFactoryRemainsOwnedThroughLateReturn`. |

@@ -1,45 +1,63 @@
 # Test suites
 
-Current results and acceptance status are in the
-[API refactor validation record](api-refactor-validation.md).
+Tests are grouped by what they exercise. Units check deterministic logic and
+isolated components. Non-Docker functional tests cover running Raft engines,
+network fixtures, service doubles, background application workers and substantial
+persistence/recovery fixtures. Both stay in the original packages beside the
+code they test. Tests against separately running applications live in
+`tests/cluster` and use Docker.
 
-`make test` (also available as `make test-unit`) compiles all three modules and
-runs uncached unit tests with `-short -count=1` in the library,
-the separate `examples/cluster` module and the caller fixture module. Independent
-top-level unit cases call `t.Parallel()`. The default runs four packages and four
-cases per package concurrently; `UNIT_PACKAGES` and `UNIT_PARALLEL` can override
-those values. Storage fixtures use separate temporary directories and the same
-registered WAL segment size. Tests do not mutate process environment, working
-directory or the upstream WAL segment-size global.
+`make test` compiles the library, the separate `examples/cluster` module and the
+caller application fixture, then runs their uncached units with `-count=1`.
+Go build constraints select the suites at the file level:
 
-Unit tests cover deterministic FSM commands, codecs, validation, mutation
-previews, planning, membership policy, worker components with fake sources,
-subscriptions, local journals, bbolt adapters and WAL recovery. Keep this suite
-below 30 seconds of elapsed time on the development machine. The latest uncached
-refactor run completed in **15.61 seconds**, including physical baseline
-meta/journal compatibility and the separate fixture module. This uses Go 1.26.5 on
-macOS arm64, Apple M4 Pro with 14 logical CPUs, and a warm compilation cache;
-dependency download and a cold compiler cache are separate setup costs.
+| File | Build constraint | Contents |
+| --- | --- | --- |
+| `*_test.go` | `//go:build !functional` | Unit tests and benchmarks |
+| `*_func_test.go` | `//go:build functional` | Non-Docker functional tests and exclusive helpers |
+| `*_helpers_test.go` | None | Helpers shared by both suites |
 
-`make test-cluster` runs the full functional and Docker process suites.
-Functional cases explicitly skip when `testing.Short()` is true. These exercise
-real running Raft engines, network protocols, public multi-node lifecycles, or
-integrated FSM/planner/operator/scheduling workflows. Constructor and
-direct RawNode recovery checks that do not start a runtime remain unit tests.
-New functional cases must include the short-mode guard before opening fixtures;
-new isolated unit cases should call `t.Parallel()` before creating fixtures.
+Put each build constraint at the top of the file, followed by a blank line before
+`package`. Shared helper-only files may retain their existing names, such as
+`fixtures_test.go`. Unit helpers used only by units stay with their unit files.
+
+`make test-function` uses `go test -tags=functional` in all three modules, so it
+runs only functional tests. The `!functional` constraint excludes unit tests
+from that command; default `go test` excludes functional files. Classification
+does not depend on `testing.Short()` or per-test skip guards. Lightweight value
+stubs and callbacks testing a single local component are units; fixtures modeling
+interacting services are functional.
+
+There are **191 unit tests**, **349 functional tests**, **108 Docker cluster
+tests** (including nine performance cases) and **one Compose example test**.
+These are top-level test functions, excluding table cases and subtests. The
+unit suite also contains one executable documentation example and two benchmarks.
+
+Independent units call `t.Parallel()`. The defaults run four packages and four
+cases per package concurrently; `UNIT_PACKAGES` and `UNIT_PARALLEL` override them.
+Keep units fast and the complete warm-cache unit command below 30 seconds on the
+development machine. Dependency download and a cold compiler cache are separate
+setup costs. Tests must not mutate process environment, working directory or the
+upstream WAL segment-size global while running in parallel.
 
 | Command | Coverage |
 | --- | --- |
-| `make test` / `make test-unit` | Compile all three modules and run uncached parallel units |
-| `make test-race` / `make test-unit-race` | The same parallel units under the race detector |
-| `make test-fixture` | Caller load/meta integration in `tests/cluster/testapp` |
+| `make test` / `make test-unit` | Compile the library, example and fixture; run uncached parallel units |
+| `make test-race` / `make test-unit-race` | The same units under the race detector |
+| `make test-function` | Non-Docker functional tests in `*_func_test.go` files |
+| `make test-function-race` | Functional tests under the race detector |
 | `make test-example` | Actual small Compose demo REST e2e |
-| `make test-cluster` | Build once, run full library/example functional tests, then fixture and Docker process tests |
+| `make test-cluster` | Build the image, then run Docker process tests with `-tags=clustertest` |
 | `make test-perf` | Nine measured Docker cases, each under two minutes |
 | `make bench` | Planner and complete meta FSM snapshot matrices |
-| `make lint` | Library, example and fixture vet |
+| `make lint` | Vet unit and functional builds of the library, example and fixture |
 | `make proto-check` | Regenerate pinned protocol code and require no diff |
+
+`make test-functional` and `make test-functional-race` remain aliases for the
+`test-function` targets. Use `make test-function FUNCTIONAL_ARGS='-v -run TestName'` for a focused
+non-Docker regression. `FUNCTIONAL_TIMEOUT` defaults to ten minutes per package.
+Use functional race checks for changes to ownership and concurrency. Keep the
+full Docker suite for the end of a related set of changes.
 
 The small `_meta` demo contains topology/status/drain/activate HTTP routes.
 Its actual Compose e2e lives in `tests/cluster/example_test.go` and uses private

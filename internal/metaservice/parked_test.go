@@ -1,20 +1,14 @@
+//go:build !functional
+
 package metaservice
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
-
-	"github.com/asalimonov/gquorum/internal/metapb"
-	"github.com/asalimonov/gquorum/internal/metatransport"
-	"github.com/asalimonov/gquorum/topology"
 )
 
-func parkedRequest(name, instance string) joinRequest {
-	return joinRequest{Identity: topology.Identity{NodeName: name, InstanceID: instance, ClusterID: "cluster", MemberID: 7}, Node: topology.Node{Name: name, Type: "worker"}, Address: "127.0.0.1:1234", LastDocVersion: 3}
-}
 func TestParkedRegistry_UpsertAttemptsExpiryRemoval(t *testing.T) {
 	t.Parallel()
 	var registry parkedRegistry
@@ -55,6 +49,7 @@ func TestParkedRegistry_UpsertAttemptsExpiryRemoval(t *testing.T) {
 		t.Fatal("admitted instance remains parked")
 	}
 }
+
 func TestParkedRegistry_KeyedByNameAndInstance(t *testing.T) {
 	t.Parallel()
 	var registry parkedRegistry
@@ -85,6 +80,7 @@ func TestParkedRegistry_KeyedByNameAndInstance(t *testing.T) {
 		t.Fatal("earlier incarnation survived admission")
 	}
 }
+
 func TestParkedRegistry_SweepExpiresWithoutAReader(t *testing.T) {
 	t.Parallel()
 	var registry parkedRegistry
@@ -102,6 +98,7 @@ func TestParkedRegistry_SweepExpiresWithoutAReader(t *testing.T) {
 		t.Fatal("retrying process expired")
 	}
 }
+
 func TestParkedRegistry_CapsCardinalityByEvictingOldest(t *testing.T) {
 	t.Parallel()
 	var registry parkedRegistry
@@ -120,58 +117,12 @@ func TestParkedRegistry_CapsCardinalityByEvictingOldest(t *testing.T) {
 		t.Fatal("oldest process was not evicted")
 	}
 }
+
 func TestParkedJoins_NilReceiver(t *testing.T) {
 	t.Parallel()
 	var g *Group
 	records, err := g.ParkedJoins(context.Background())
 	if err != nil || records != nil {
 		t.Fatal(records, err)
-	}
-}
-func TestHandleJoin_RefusalRecordsParkAndFollowersReadCurrentLeader(t *testing.T) {
-	if testing.Short() {
-		t.Skip("functional test; run make test-cluster")
-	}
-	groups := publicFoundingCluster(t, 3)
-	leader := readyPublic(t, groups)
-	var follower *Group
-	for _, g := range groups {
-		if g != leader {
-			follower = g
-			break
-		}
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-	defer cancel()
-	req := parkedRequest("stranger", "instance")
-	data, _ := json.Marshal(req)
-	header := &metapb.Header{ClusterId: "cluster", NodeName: req.Identity.NodeName, MemberId: req.Identity.MemberID}
-	reply := follower.Call(ctx, "Join", header, data)
-	if reply.ErrorCode == "" || len(follower.parked.snapshot()) != 0 {
-		t.Fatal("follower redirect parked a process", reply)
-	}
-	reply = leader.Call(ctx, "Join", header, data)
-	if reply.ErrorCode == "" {
-		t.Fatal("unapproved node admitted")
-	}
-	records, err := follower.ParkedJoins(ctx)
-	if err != nil || len(records) != 1 || records[0].RefusalKind != parkedUnapproved || records[0].ReportedMemberID != 7 || records[0].ReportedDocVersion != 3 {
-		t.Fatal(records, err)
-	}
-	before := len(leader.parked.snapshot())
-	header.ClusterId = "other"
-	leader.Call(ctx, "Join", header, data)
-	header.ClusterId = "cluster"
-	header.NodeName = ""
-	req = parkedRequest("", "bad")
-	data, _ = json.Marshal(req)
-	leader.Call(ctx, "Join", header, data)
-	if len(leader.parked.snapshot()) != before {
-		t.Fatal("malformed/foreign-cluster join parked")
-	}
-	// A follower refuses its local registry over the wire, even when it has old entries.
-	follower.parked.record(parkedRequest("old-leader-only", "old"), parkedExcluded, "stale")
-	if err = metatransport.ReplyError(follower.Call(ctx, "ParkedRead", follower.transport.Header(), nil)); err == nil {
-		t.Fatal("follower published stale local registry")
 	}
 }
