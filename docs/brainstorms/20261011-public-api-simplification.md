@@ -907,6 +907,103 @@ to use defaults and contains no custom policy machinery.
 No answer recorded yet. This question scopes replacement, not whether custom
 policy implementations are supported; that support is already required.
 
+## Iteration 5: TiKV and PD terminology for replaceable decisions
+
+The user asks whether TiKV has an equivalent of the proposed `Behavior`
+interface, with the intention of unifying names, and points again to the local
+checkout at `/Users/speckzzz/reps/neria/tikv`.
+
+### Source findings
+
+The local checkout remains at commit
+`137cbb2593decafebf99905b4d570869230565c2`. There is no direct counterpart in the
+inspected Raft extension points to an interface combining readiness, repair,
+retention and removal decisions.
+
+In `components/raftstore/src/coprocessor/mod.rs`:
+
+- `Coprocessor` (line 64) supplies common start/stop hooks for injected behavior.
+- `RoleObserver` (line 314) receives local Raft role changes.
+- `RegionChangeObserver` (line 342) handles region changes and persistence hooks.
+- `DestroyPeerObserver` (line 633) receives peer destruction notifications.
+- `TransferLeaderObserver` (line 653) participates in leadership-transfer hooks.
+
+`CoprocessorHost` in `components/raftstore/src/coprocessor/dispatcher.rs`
+(line 539) holds the registry and invokes these extensions. Observer does not
+necessarily mean passive notification: some hooks can reject, alter or defer
+processing. Nevertheless, a destruction hook is not a retired-storage retention
+policy, and these hooks do not collectively implement our proposed contract.
+
+The local `components/raftstore/src/store/worker/pd.rs` sends heartbeats to PD
+and handles the returned membership/leadership commands. Cluster scheduling
+terminology therefore needs the separate PD source as well as this checkout.
+Official PD sources inspected on 2026-10-11:
+
+| PD name | Responsibility | Closest role here |
+| --- | --- | --- |
+| [Scheduler](https://raw.githubusercontent.com/tikv/pd/master/pkg/schedule/schedulers/scheduler.go) | Selects resource scheduling operations. | Cluster-level automatic decision extension. |
+| [ReplicaChecker](https://raw.githubusercontent.com/tikv/pd/master/pkg/schedule/checker/replica_checker.go) | Checks replica count, health and placement; can return a corrective operator. It is a concrete type. | Current missing-voter repair decision, with a narrower supported action set here. |
+| [Operator](https://raw.githubusercontent.com/tikv/pd/master/pkg/schedule/operator/operator.go) | Tracks ordered execution steps for a region change. | An approved per-group operation, conceptually. |
+| [operator.Controller](https://raw.githubusercontent.com/tikv/pd/master/pkg/schedule/operator/operator_controller.go) | Dispatches steps and tracks operation progress. | Library-owned operation execution and verification. |
+
+These are conceptual correspondences. A topology approval here can span several
+groups; it is not automatically equivalent to one PD region operator. PD's
+Scheduler interface also includes HTTP/configuration machinery that does not
+belong in this library.
+
+### Revised naming recommendation, pending discussion
+
+Do not rename the entire four-method `Behavior` to `Scheduler`: three methods
+concern local lifecycle rather than cluster scheduling. A clearer candidate is
+two public extension interfaces in the dedicated `policy` package:
+
+```go
+package policy
+
+type Scheduler interface {
+    Schedule(context.Context, ScheduleInput) (ScheduleDecision, error)
+}
+
+type LifecyclePolicy interface {
+    Readiness(context.Context, ReadinessInput) (ReadinessDecision, error)
+    Retention(context.Context, RetentionInput) (RetentionDecision, error)
+    Removal(context.Context, RemovalInput) (RemovalDecision, error)
+}
+```
+
+`Scheduler` is adapted from PD terminology. `LifecyclePolicy` is our descriptive
+name, not a TiKV interface name. `ScheduleInput`/`ScheduleDecision` would replace
+the corresponding proposed Repair values, with their supported actions still
+explicitly bounded. The rename does not add arbitrary balancing or placement.
+`ReplicaChecker` is a candidate name for the built-in corrective decision
+implementation; adapting it to our Scheduler interface would be our design,
+not a claim that PD's ReplicaChecker implements PD's Scheduler interface.
+
+This separates cluster-agreed decisions from node-local choices with two
+extension contracts, without copying TiKV's observer hierarchy. Both can have
+configurable defaults and direct startup injection of caller implementations.
+A caller can override only scheduling or embed the default lifecycle policy to
+override one local decision. Ordinary users need implement neither interface.
+
+The typed-input ownership, bounded callback lifetime, idempotent effect hooks,
+exact authorized-identity verification and revalidation rules from iteration 4
+remain applicable. Cluster scheduling agreement metadata applies to Scheduler;
+local lifecycle choices remain node-specific. The previous recommendation to
+serialize invocation was scoped to one Behavior instance; if split, the target
+must specify serialization per installed implementation and caller responsibility
+when sharing state between them.
+
+If keeping one aggregate interface is preferred, `policy.Policy` is an honest
+name for it, but has no exact TiKV equivalent. `Observer` and `Coprocessor` would
+misdescribe an aggregate decision contract. `Operator`/`Controller` are useful
+execution vocabulary to evaluate in the final signature inventory, not approved
+mechanical renames of our document/plan/execution types.
+
+This iteration proposes a revision to iteration 4; the two-interface split and
+exact type/package names are not yet user-approved. The earlier question about
+whether callers may also replace the managed executor remains unanswered.
+No implementation or persistence changes result from this naming investigation.
+
 ## NOT CONSIDERED & TODO
 
 These are unresolved design details, not exclusions from the refactoring:
