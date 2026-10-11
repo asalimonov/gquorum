@@ -355,7 +355,7 @@ Paths in the following tables are relative to the source checkout. Target paths 
 | `TestTopology_FoundingAndLegacyImport` | ADAPT → `tests/cluster/topology_test.go` | Retain founding, drain/restore, actual quorum/readiness and token checks. Supply initial groups directly rather than importing SQL; meta membership survives drain. |
 | `TestTopology_DrainPlanApplyRestore` | ADAPT → `tests/cluster/topology_test.go` | Retain founding, drain/restore, actual quorum/readiness and token checks. Supply initial groups directly rather than importing SQL; meta membership survives drain. |
 | `TestTopology_StoppedFollowerHealthAndReadiness` | ADAPT → `tests/cluster/topology_test.go` | Retain founding, drain/restore, actual quorum/readiness and token checks. Supply initial groups directly rather than importing SQL; meta membership survives drain. |
-| `TestTopology_ClusterTokenEnabled` | ADAPT → `tests/cluster/topology_test.go` | Retain founding, drain/restore, actual quorum/readiness and token checks. Supply initial groups directly rather than importing SQL; meta membership survives drain. |
+| `TestTopology_ClusterTokenEnabled` | ADAPT → `TestMetaCredentialClusterIsolation{Three,Five,Seven}Nodes` in `tests/cluster/meta_protocol_test.go` | Shared-credential founding admits every member and retains identical typed topology/native voters. Actual unary, Raft-message and snapshot RPCs reject absent/foreign/duplicate credentials and reject foreign cluster IDs independently of credentials. Refusals leave sessions/topology/parked registry unchanged and actual load commands still replicate. |
 
 ### `tests/cluster/transport_deadpeer_test.go`
 
