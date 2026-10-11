@@ -16,12 +16,13 @@ import (
 // verifiedLoadController models caller-owned state independently of the meta
 // process. Its acknowledgements verify exact identities and deduplicate effects.
 type verifiedLoadController struct {
-	mu          sync.Mutex
-	meta        []*Group
-	groups      map[string]topology.Group
-	hosts       map[string]map[string]uint64
-	creates     int
-	firstEffect chan struct{}
+	mu           sync.Mutex
+	meta         []*Group
+	groups       map[string]topology.Group
+	hosts        map[string]map[string]uint64
+	creates      int
+	firstEffect  chan struct{}
+	firstRelease <-chan struct{}
 }
 
 func (c *verifiedLoadController) leader() *Group {
@@ -93,12 +94,17 @@ func (c *verifiedLoadController) CreateGroup(ctx context.Context, a topology.Aut
 	}
 	c.creates++
 	first := c.firstEffect
+	release := c.firstRelease
 	c.firstEffect = nil
 	c.mu.Unlock()
 	if first != nil {
 		close(first)
-		<-ctx.Done()
-		return ctx.Err()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-release:
+			return fault.ErrUnavailable
+		}
 	}
 	return nil
 }
@@ -210,5 +216,65 @@ func TestMetaCallerEffectCompletionLostAcrossLeaderReplacement(t *testing.T) {
 	statusGroup, err := controller.Status(ctx, "load-one")
 	if err != nil || !reflect.DeepEqual(statusGroup.ConfState, raftpb.ConfState{Voters: []uint64{1}}) {
 		t.Fatal(statusGroup, err)
+	}
+}
+
+func TestMetaDeletesInterruptedFoundingBeforeActive(t *testing.T) {
+	if testing.Short() {
+		t.Skip("functional test; run make test")
+	}
+	release := make(chan struct{})
+	controller := &verifiedLoadController{groups: map[string]topology.Group{}, hosts: map[string]map[string]uint64{}, firstEffect: make(chan struct{}), firstRelease: release}
+	effect := controller.firstEffect
+	groups := publicFoundingClusterWith(t, 1, func(o *Options) { o.LoadGroups = controller })
+	leader := readyPublic(t, groups)
+	controller.mu.Lock()
+	controller.meta = groups
+	controller.mu.Unlock()
+	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
+	defer cancel()
+	if _, err := leader.Stage(ctx, loadDocument(t, leader), 1); err != nil {
+		t.Fatal(err)
+	}
+	creating, err := leader.Apply(ctx, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-effect:
+	case <-ctx.Done():
+		t.Fatal("founding effect did not start")
+	}
+	active := leader.state().Active()
+	if active.Group("load-one") != nil {
+		t.Fatal("unacknowledged group reached Active")
+	}
+	desired := leader.state().Latest()
+	for i, g := range desired.Groups {
+		if g.ID == "load-one" {
+			desired.Groups = append(desired.Groups[:i], desired.Groups[i+1:]...)
+			break
+		}
+	}
+	if _, err = leader.Stage(ctx, desired, 2); err != nil {
+		t.Fatal(err)
+	}
+	deleting, err := leader.Apply(ctx, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(release) // The old RPC returns without a durable completion record.
+	status, err := leader.WaitOperator(ctx, deleting)
+	if err != nil || status.State != topology.OperatorSucceeded {
+		t.Fatal(status, err)
+	}
+	old, err := leader.Operator(ctx, creating)
+	if err != nil || old.State != topology.OperatorSuperseded {
+		t.Fatal(old, err)
+	}
+	controller.mu.Lock()
+	defer controller.mu.Unlock()
+	if _, exists := controller.groups["load-one"]; exists || len(controller.hosts["load-one"]) != 0 {
+		t.Fatal("interrupted founding resources were not deleted")
 	}
 }

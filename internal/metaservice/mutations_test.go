@@ -68,8 +68,25 @@ func (f *mutationFixture) commit(t *testing.T, doc topology.Document, activate b
 	}
 	at := time.Now().UTC()
 	version := result.Doc.Version
-	begin := f.command(t, metaengine.BeginOperatorProposal{Version: version, Plan: topology.Plan{Version: version}, Actor: "test", Origin: result.Doc.Origin, At: at})
-	f.command(t, metaengine.TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: begin.OperatorID, Version: version, Attempt: 1, State: topology.OperatorSucceeded, At: at.Add(time.Millisecond)}})
+	plan := topology.Plan{Version: version}
+	active := f.g.machine.Active()
+	for _, group := range active.Groups {
+		if group.ID == topology.MetaGroupID || result.Doc.Group(group.ID) != nil {
+			continue
+		}
+		for _, replica := range group.Replicas {
+			plan.Steps = append(plan.Steps, topology.Step{Seq: len(plan.Steps) + 1, Kind: topology.StepStopReplica, GroupID: group.ID, NodeName: replica.NodeName, ReplicaID: replica.ReplicaID})
+		}
+		plan.Steps = append(plan.Steps, topology.Step{Seq: len(plan.Steps) + 1, Kind: topology.StepDeleteGroupState, GroupID: group.ID})
+	}
+	begin := f.command(t, metaengine.BeginOperatorProposal{Version: version, Plan: plan, Actor: "test", Origin: result.Doc.Origin, At: at})
+	transition := topology.OperatorTransition{OperatorID: begin.OperatorID, Version: version, Attempt: 1, At: at.Add(time.Millisecond)}
+	for _, step := range plan.Steps {
+		transition.StepSeq, transition.GroupID, transition.NodeName, transition.State = step.Seq, step.GroupID, step.NodeName, topology.OperatorRunning
+		f.command(t, metaengine.TransitionOperatorProposal{Transition: transition})
+	}
+	transition.State = topology.OperatorSucceeded
+	f.command(t, metaengine.TransitionOperatorProposal{Transition: transition})
 	f.command(t, metaengine.ActivateTargetProposal{OperatorID: begin.OperatorID, Version: version, Attempt: 1})
 }
 func preview() MutationOptions { return MutationOptions{Preview: true} }

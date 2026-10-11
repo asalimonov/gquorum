@@ -230,7 +230,9 @@ func (sm *topologySM) applyProposeDocument(p ProposeDocument) (ApplyResult, bool
 	if err := sm.validateDocument(doc); err != nil {
 		return ApplyResult{ProposalID: p.ProposalID, Accepted: false, Reason: err.Error(), Code: proposalGuardrail}, false
 	}
-	sm.commitLatestLocked(&doc)
+	if err := sm.commitLatestLocked(&doc); err != nil {
+		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
+	}
 	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, Doc: doc.Clone()}, true
 }
 
@@ -264,7 +266,9 @@ func (sm *topologySM) applyAdmitNode(p AdmitNode) (ApplyResult, bool) {
 		if err := sm.validateDocument(doc); err != nil {
 			return ApplyResult{ProposalID: p.ProposalID, Accepted: false, Reason: err.Error()}, false
 		}
-		sm.commitLatestLocked(&doc)
+		if err := sm.commitLatestLocked(&doc); err != nil {
+			return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
+		}
 		return ApplyResult{ProposalID: p.ProposalID, Accepted: true, Doc: doc.Clone()}, true
 	}
 	doc := sm.latest.Clone()
@@ -285,34 +289,25 @@ func (sm *topologySM) applyAdmitNode(p AdmitNode) (ApplyResult, bool) {
 	if err := sm.validateDocument(doc); err != nil {
 		return ApplyResult{ProposalID: p.ProposalID, Accepted: false, Reason: err.Error()}, false
 	}
-	sm.commitLatestLocked(&doc)
+	if err := sm.commitLatestLocked(&doc); err != nil {
+		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
+	}
 	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, Doc: doc.Clone()}, true
 }
 
 const historyRetention = 128
 
-func (sm *topologySM) commitLatestLocked(doc *topology.Document) {
+func (sm *topologySM) commitLatestLocked(doc *topology.Document) error {
 	canonicalizeDocument(doc)
+	history, err := sm.nextHistoryLocked(*doc)
+	if err != nil {
+		return err
+	}
 	sm.rememberAllocations(*doc)
 	sm.latest = doc.Clone()
-	if len(sm.history) >= historyRetention {
-		sm.history = sm.history[1:]
-	}
-	sm.history = append(sm.history, doc.Clone())
+	sm.history = history
 	sm.pruneOperatorsLocked()
-}
-
-func (sm *topologySM) pruneOperatorsLocked() {
-	if len(sm.history) == 0 {
-		return
-	}
-	horizon := sm.history[0].Version
-	for id, ex := range sm.operators {
-		if ex.Version < horizon && ex.State.Terminal() &&
-			ex.Version != sm.target.Version && ex.Version != sm.active.Version {
-			delete(sm.operators, id)
-		}
-	}
+	return nil
 }
 
 func (sm *topologySM) persistLocked() error {

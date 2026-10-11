@@ -17,10 +17,11 @@ verification progress; checking a stage does not waive any target requirement.
 - [ ] Managed host: exact boot evidence, factory/Close ownership, start/stop
   reservations and holds, recovery supervision, action verification, delivery
   reports, retirement/retention, readmission and removal fencing.
-- [ ] Audit retained cleanup/readmission proof across the 128-document history
-  horizon and interrupted founding before Active. Current catalog extraction
-  uses retained Operators/history; pruning must not silently omit an outstanding
-  prepared identity or cause false completion of whole-group deletion.
+- [x] Preserve topology cleanup proof across the 128-document history horizon
+  and interrupted founding before Active, including exact approval retries.
+- [ ] Feed all retained approved replica evidence into readmission; exclude
+  staged-only identities from its cleanup catalog and verify actual retained
+  identities against the exact admission grant.
 - [ ] Node/Cluster facade and settings: startup/readiness/shutdown, policy wiring,
   complete document/mutation/session/lock/status surface, observer ownership.
 - [ ] Migrate the small example and full cluster fixture to Node/Cluster; align
@@ -125,3 +126,27 @@ verification progress; checking a stage does not waive any target requirement.
   removal policies and Node/Cluster composition before application migration.
 - Checkpoint validation: `make test` and `make lint` pass, including the exact
   replica-query regression for reseating. Docker acceptance remains outstanding.
+- Cleanup evidence: terminal preparation records survive while their identities
+  are outside Active and lack verified cleanup. Founding documents needed to
+  reconstruct exact founders remain pinned in the existing bounded history;
+  cleanup proof dependencies are retained deterministically and released once
+  ordinary history and live views no longer need them. No disk record, bucket,
+  proposal encoding or schema version changed. At 127 unresolved founding
+  documents, a further founding approval is refused until prior founding or
+  cleanup completes, preserving a history slot for cleanup edits. This is a
+  bound on unresolved evidence, not the number of nodes or groups.
+- Deletion planning and the private Operator store include retained approved
+  identities for removed groups, including groups that never reached Active.
+  Public Active stays the fully converged document. The FSM rejects plans that
+  omit required whole-group cleanup and deduplicates an already accepted exact
+  approval before consulting cleanup observations changed by its effects.
+- Added snapshot/restart and history-horizon regressions for interrupted
+  preparation/founding, bounded-history cleanup capacity, proof release after
+  cleanup, immutable approval retries, and a running meta-service deletion of
+  interrupted founding. Updated the mutation test fixture to record actual
+  stop/delete steps; its existing rollback/retired-ID assertions are preserved.
+- Cleanup stage validation: `make test` and `make lint` pass. Uncached
+  `make test-unit` completes in **10.95 seconds**. Race checks pass for the full
+  metaengine suite and the running-service interrupted-founding/retired-group
+  regressions. Readmission catalog composition, the public Node/Cluster facade,
+  application migration and Docker acceptance remain outstanding.

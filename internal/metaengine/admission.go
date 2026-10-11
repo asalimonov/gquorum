@@ -216,7 +216,9 @@ func (sm *topologySM) applyCommitReadmission(p CommitReadmissionProposal) (Apply
 		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
 	}
 
-	sm.commitLatestLocked(&doc)
+	if err := sm.commitLatestLocked(&doc); err != nil {
+		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
+	}
 	sm.target = doc.Clone()
 	record := newOperatorRecord(doc.Version, 1, p.Plan.Steps, doc.ChangedBy, doc.Origin, p.At)
 	sm.operators[record.ID] = &record

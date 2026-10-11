@@ -125,7 +125,7 @@ func New(input Options) (*Group, error) {
 	if err != nil {
 		return nil, err
 	}
-	g.controller, err = operator.New(operator.Config{Store: g, Rules: g.rules, Coordinator: operatorCoordinator{g}, Groups: groupControllers{g}, OwnsGroup: func(string) bool { return true }, Interval: g.opts.Timing.TickInterval, MaxRetryInterval: time.Second, FinalValidator: g.finalTarget})
+	g.controller, err = operator.New(operator.Config{Store: operatorStore{g}, Rules: g.rules, Coordinator: operatorCoordinator{g}, Groups: groupControllers{g}, OwnsGroup: func(string) bool { return true }, Interval: g.opts.Timing.TickInterval, MaxRetryInterval: time.Second, FinalValidator: g.finalTarget})
 	if err != nil {
 		return nil, err
 	}

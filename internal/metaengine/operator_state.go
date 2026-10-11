@@ -20,9 +20,6 @@ func (sm *topologySM) applyBeginOperator(p BeginOperatorProposal) (ApplyResult, 
 	if err := validateExactPlan(p.Plan); err != nil {
 		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
 	}
-	if err := topology.ValidatePlanShape(sm.active, sm.latest, p.Plan); err != nil {
-		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
-	}
 	if audit := sm.latest.Audit; audit != nil && audit.Forced &&
 		(audit.Operation != topology.AuditOperationForceRetireNode || p.Actor == "" || p.Origin == "") {
 		return rejectProposal(p.ProposalID, proposalAuthorization,
@@ -47,12 +44,37 @@ func (sm *topologySM) applyBeginOperator(p BeginOperatorProposal) (ApplyResult, 
 		}
 	}
 
+	// Retry the immutable accepted plan before consulting its evolving cleanup
+	// observations. Completed effects may have removed all former identities.
+	base, err := sm.deletionBaseLocked(sm.latest)
+	if err != nil {
+		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
+	}
+	if err := topology.ValidatePlanShape(base, sm.latest, p.Plan); err != nil {
+		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
+	}
+	for _, group := range base.Groups {
+		if group.ID == topology.MetaGroupID || sm.latest.Group(group.ID) != nil {
+			continue
+		}
+		deleted := false
+		for _, step := range p.Plan.Steps {
+			deleted = deleted || step.GroupID == group.ID && step.Kind == topology.StepDeleteGroupState
+		}
+		if !deleted {
+			return rejectProposal(p.ProposalID, proposalAuthorization, "plan omits cleanup of approved group %q", group.ID), false
+		}
+	}
+
 	attempt := uint32(1)
 	if found {
 		if previous.Attempt == ^uint32(0) {
 			return rejectProposal(p.ProposalID, proposalGuardrail, "execution attempt exhausted"), false
 		}
 		attempt = previous.Attempt + 1
+	}
+	if err := sm.validateCleanupCapacity(p.Plan); err != nil {
+		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
 	}
 	sm.supersedeOlderLocked(p.Version, p.At)
 	sm.retireRemovedGroups(sm.latest)
@@ -105,7 +127,9 @@ func (sm *topologySM) applyCommitRepairOperator(p CommitRepairOperatorProposal) 
 		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
 	}
 
-	sm.commitLatestLocked(&doc)
+	if err := sm.commitLatestLocked(&doc); err != nil {
+		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
+	}
 	sm.retireRemovedGroups(doc)
 	sm.target = doc.Clone()
 	rec := newOperatorRecord(doc.Version, 1, p.Plan.Steps, doc.ChangedBy, doc.Origin, p.At)

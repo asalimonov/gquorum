@@ -45,39 +45,9 @@ func (sm *topologySM) LoadActionTargets(ctx context.Context, a topology.Authoriz
 		if sm.target.Group(a.GroupID) != nil {
 			return nil, fault.ErrOperatorAuthorization
 		}
-		addGroup(sm.active, false)
-		approved := make(map[uint64]bool)
-		cleaned := make(map[storage.Identity]bool)
-		for _, op := range sm.operators {
-			if op.Version > a.Version {
-				continue
-			}
-			approved[op.Version] = true
-			for _, step := range op.Steps {
-				if step.GroupID == a.GroupID {
-					add(step.NodeName, step.ReplicaID)
-					completed := step.Seq < op.CurrentStep || op.State == topology.OperatorSucceeded && step.Seq == op.CurrentStep
-					if completed && step.Kind == topology.StepDeleteGroupState {
-						// A prior attempt durably verified whole-group cleanup.
-						// Group IDs cannot be reused, so no new incarnation exists.
-						return []storage.Identity{}, nil
-					}
-					if completed && step.Kind == topology.StepCleanupReplicaState {
-						cleaned[storage.Identity{ClusterID: sm.target.ClusterID, NodeName: step.NodeName, GroupID: a.GroupID, ReplicaID: step.ReplicaID}] = true
-					}
-				}
-			}
-		}
-		for _, doc := range sm.history {
-			if approved[doc.Version] {
-				addGroup(doc, false)
-			}
-		}
-		if len(ids) == 0 {
-			return nil, fault.ErrHistoryUnavailable
-		}
-		for id := range cleaned {
-			delete(ids, id)
+		ids, err := sm.deletionCatalogLocked(a.GroupID)
+		if err != nil {
+			return nil, err
 		}
 		return orderedIdentities(ids), nil
 	case topology.StepPrepareReplica, topology.StepAddLearner, topology.StepPromoteVoter, topology.StepDemoteVoter, topology.StepRemoveReplica, topology.StepTransferLeader, topology.StepStopReplica, topology.StepCleanupReplicaState:
@@ -125,4 +95,99 @@ func orderedIdentities(ids map[storage.Identity]bool) []storage.Identity {
 		return cmp.Compare(a.ReplicaID, b.ReplicaID)
 	})
 	return out
+}
+
+// DeletionBase supplies approved historical identities only for removed groups.
+// It is private planning input, never a replacement for the public Active view.
+func (sm *topologySM) DeletionBase(ctx context.Context, desired topology.Document) (topology.Document, error) {
+	if err := ctx.Err(); err != nil {
+		return topology.Document{}, err
+	}
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	return sm.deletionBaseLocked(desired)
+}
+
+func (sm *topologySM) deletionBaseLocked(desired topology.Document) (topology.Document, error) {
+	base := sm.active.Clone()
+	groups := make(map[string]bool)
+	for _, g := range base.Groups {
+		groups[g.ID] = true
+	}
+	for _, op := range sm.operators {
+		for _, step := range op.Steps {
+			groups[step.GroupID] = true
+		}
+	}
+	for group := range groups {
+		if group == topology.MetaGroupID || desired.Group(group) != nil {
+			continue
+		}
+		// A deletion already incorporated into Active needs no new operator.
+		if base.Group(group) == nil && sm.retired[group] != 0 && sm.active.Version >= sm.retired[group] {
+			continue
+		}
+		ids, err := sm.deletionCatalogLocked(group)
+		if err != nil {
+			return topology.Document{}, err
+		}
+		g := base.Group(group)
+		if g == nil {
+			base.Groups = append(base.Groups, topology.Group{ID: group})
+			g = &base.Groups[len(base.Groups)-1]
+		}
+		g.Replicas = nil
+		for _, id := range orderedIdentities(ids) {
+			g.Replicas = append(g.Replicas, topology.Replica{NodeName: id.NodeName, ReplicaID: id.ReplicaID, Role: topology.ReplicaVoter})
+		}
+	}
+	canonicalizeDocument(&base)
+	return base, nil
+}
+
+func (sm *topologySM) deletionCatalogLocked(group string) (map[storage.Identity]bool, error) {
+	ids := make(map[storage.Identity]bool)
+	proofs := sm.cleanupProofsLocked()
+	if proofs.groups[group] != "" {
+		return ids, nil
+	}
+	known := false
+	addGroup := func(doc topology.Document) {
+		if g := doc.Group(group); g != nil {
+			known = true
+			for _, r := range g.Replicas {
+				ids[sm.loadIdentity(group, r.NodeName, r.ReplicaID)] = true
+			}
+		}
+	}
+	addGroup(sm.active)
+	for _, op := range sm.operators {
+		if doc, ok := sm.documentLocked(op.Version); ok {
+			addGroup(doc)
+		}
+		for _, step := range op.Steps {
+			if step.GroupID != group {
+				continue
+			}
+			known = true
+			if step.Kind == topology.StepCreateFoundingGroup && sm.active.Version < op.Version {
+				doc, ok := sm.documentLocked(op.Version)
+				if !ok || doc.Group(group) == nil {
+					return nil, fault.ErrHistoryUnavailable
+				}
+			}
+			if step.NodeName != "" && step.ReplicaID != 0 {
+				ids[sm.loadIdentity(group, step.NodeName, step.ReplicaID)] = true
+			}
+		}
+	}
+	if !known {
+		return nil, fault.ErrHistoryUnavailable
+	}
+	for id := range ids {
+		if proofs.covers(id) {
+			delete(ids, id)
+		}
+	}
+	return ids, nil
 }

@@ -32,7 +32,10 @@ func (g *Group) PlanFor(ctx context.Context, doc topology.Document) (topology.Pl
 	if err := doc.Validate(g.rules); err != nil {
 		return topology.Plan{}, err
 	}
-	active := g.state().Active()
+	active, err := g.state().DeletionBase(ctx, doc)
+	if err != nil {
+		return topology.Plan{}, err
+	}
 	observed, err := g.observeGroups(ctx, active, doc)
 	if err != nil {
 		return topology.Plan{}, err
@@ -195,6 +198,12 @@ func (g *Group) callLeader(ctx context.Context, method string, request any) ([]b
 }
 
 type operatorCoordinator struct{ g *Group }
+
+type operatorStore struct{ *Group }
+
+func (s operatorStore) Active(ctx context.Context) (topology.Document, error) {
+	return s.state().DeletionBase(ctx, s.state().Target())
+}
 
 func (c operatorCoordinator) IsMetaLeader() bool { return c.g.IsLeader() }
 func (c operatorCoordinator) CurrentOperator(ctx context.Context) (operator.Record, bool) {
