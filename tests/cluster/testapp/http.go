@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/asalimonov/gquorum/events"
@@ -420,6 +421,10 @@ func (a *application) routes() http.Handler {
 			return
 		}
 		defer done()
+		if !a.foundersReady() && (strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/health/ready") {
+			httpError(w, fault.New(fault.Unavailable, "greenfield founding: waiting for configured members "+strings.Join(a.missingFounders(ctx), ","), nil))
+			return
+		}
 		if r.URL.Path != "/api/events/watch" {
 			bounded, cancel := context.WithTimeout(ctx, clusterRequestTimeout(r))
 			defer cancel()

@@ -121,3 +121,16 @@ actual removed membership, actor/reason audit, stale-process fencing and new IDs
 Each family runs at three/five/seven nodes under the existing per-case deadline.
 Only the authenticated fixture exposes store-loss and serve-override controls;
 none of these routes or policies is part of the small Compose demo.
+
+Founding cases use an optional caller startup policy in `testapp`: hold load
+bootstrap and application HTTP APIs until every configured founder is observed
+under its declared meta identity. Liveness and the meta protocol remain available
+throughout the wait. Delayed members release the same waiting processes; a caller
+supplied deadline produces a diagnosed exit with code 1. Successful startup writes
+an atomic, synced caller marker. Timeout leaves that marker absent, so same-disk
+restart still waits. A retained established majority bypasses this initial gate,
+recovers leaders and commands, and keeps its entire topology and replica identities
+with a configured peer absent. All four families run separately at three/five/seven
+nodes, with no slow-test skip. The library's WaitReady contract still checks its own
+exact activated meta voter and acknowledged session. These policies and tests are
+entirely under `tests/cluster`, independent of the small `_meta` Compose demo.

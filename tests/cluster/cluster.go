@@ -39,6 +39,8 @@ type Spec struct {
 	Deferred                                      []string
 	SkipReady                                     bool
 	AddressFree                                   bool
+	GateFounders                                  bool
+	FoundingTimeout                               time.Duration
 	SessionTTL, Tick                              time.Duration
 	WALWriteWait                                  time.Duration
 	SnapshotThreshold                             uint64
@@ -86,6 +88,9 @@ func (s Spec) validate() error {
 	}
 	if s.SessionTTL <= 0 || s.Tick <= 0 {
 		return errors.New("invalid cluster timing")
+	}
+	if s.FoundingTimeout < 0 {
+		return errors.New("negative founding timeout")
 	}
 	if s.WALWriteWait < 0 || s.WALWriteWait > 10*time.Millisecond {
 		return errors.New("invalid load WAL coalescing wait")
@@ -281,7 +286,7 @@ func (c *Cluster) createNode(ctx context.Context, image string, spec NodeSpec, p
 	request := testcontainers.ContainerRequest{
 		Image: image, Name: volumeName, ExposedPorts: []string{"8080/tcp"}, Networks: []string{c.Network}, NetworkAliases: map[string][]string{c.Network: {spec.Name}}, Labels: maps.Clone(c.labels), Mounts: testcontainers.Mounts(testcontainers.VolumeMount(node.Volume, "/data")),
 		Env:            map[string]string{"GQUORUM_NODE": spec.Name, "GQUORUM_TYPE": string(spec.Type), "GQUORUM_CLUSTER": c.ID, "GQUORUM_CREDENTIAL": c.Credential, "GQUORUM_DATA": "/data", "GQUORUM_PEERS": string(manifest), "GQUORUM_META_ADDRESS": spec.Name + ":9000", "GQUORUM_LOAD_ADDRESS": spec.Name + ":9001", "GQUORUM_HTTP_ADDRESS": spec.Name + ":8080"},
-		Cmd:            []string{"-address-free=" + strconv.FormatBool(c.Spec.AddressFree), "-bootstrap=" + strconv.FormatBool(c.Spec.Bootstrap), "-join=" + strconv.FormatBool(join), "-max-nodes=" + strconv.Itoa(c.Spec.Limits.MaxNodes), "-max-replicas=" + strconv.Itoa(c.Spec.Limits.MaxReplicas), "-session-ttl=" + c.Spec.SessionTTL.String(), "-tick=" + c.Spec.Tick.String(), "-snapshot-threshold=" + strconv.FormatUint(c.Spec.SnapshotThreshold, 10), "-wal-write-wait=" + c.Spec.WALWriteWait.String(), "-disable-reconciliation=" + strconv.FormatBool(!c.Spec.Reconciliation), "-reconciliation-interval=" + c.Spec.ReconciliationInterval.String(), "-reconciliation-timeout=" + c.Spec.ReconciliationTimeout.String()},
+		Cmd:            []string{"-gate-founders=" + strconv.FormatBool(c.Spec.GateFounders), "-founding-timeout=" + c.Spec.FoundingTimeout.String(), "-address-free=" + strconv.FormatBool(c.Spec.AddressFree), "-bootstrap=" + strconv.FormatBool(c.Spec.Bootstrap), "-join=" + strconv.FormatBool(join), "-max-nodes=" + strconv.Itoa(c.Spec.Limits.MaxNodes), "-max-replicas=" + strconv.Itoa(c.Spec.Limits.MaxReplicas), "-session-ttl=" + c.Spec.SessionTTL.String(), "-tick=" + c.Spec.Tick.String(), "-snapshot-threshold=" + strconv.FormatUint(c.Spec.SnapshotThreshold, 10), "-wal-write-wait=" + c.Spec.WALWriteWait.String(), "-disable-reconciliation=" + strconv.FormatBool(!c.Spec.Reconciliation), "-reconciliation-interval=" + c.Spec.ReconciliationInterval.String(), "-reconciliation-timeout=" + c.Spec.ReconciliationTimeout.String()},
 		WaitingFor:     wait.ForListeningPort("8080/tcp").SkipInternalCheck().WithStartupTimeout(20 * time.Second),
 		ConfigModifier: func(config *containerapi.Config) { config.Hostname = spec.Name },
 	}

@@ -64,6 +64,10 @@ type application struct {
 	closeOnce                    sync.Once
 	closeErr                     error
 	clusterHooks                 *clusterHooks
+	foundingReady                chan struct{}
+	foundingGate                 bool
+	fatalMu                      sync.Mutex
+	fatalErr                     error
 }
 
 func nodeForPeer(p peer) topology.Node {
@@ -114,19 +118,38 @@ func (a *application) markEstablished() {
 	if err := a.meta.WaitReady(a.workCtx); err != nil {
 		return
 	}
+	if a.foundingGate {
+		// The gated worker owns the marker and opens readiness only after sync.
+		_ = a.waitFounders(a.workCtx)
+		return
+	}
+	if err := a.persistEstablished(); err != nil {
+		a.fail(err)
+	}
+}
+func (a *application) persistEstablished() error {
 	raw, err := json.Marshal(struct{ ClusterID, NodeName string }{a.cfg.ClusterID, a.cfg.NodeName})
-	if err == nil {
-		var file *os.File
-		file, err = os.OpenFile(filepath.Join(a.cfg.DataDir, "established.json"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-		if err == nil {
-			_, err = file.Write(raw)
-			err = errors.Join(err, file.Sync(), file.Close())
-		}
-	}
 	if err != nil {
-		a.logger.Error("persist caller cluster affiliation", "error", err)
-		a.RequestClose()
+		return err
 	}
+	file, err := os.CreateTemp(a.cfg.DataDir, ".established-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+	_, err = file.Write(raw)
+	err = errors.Join(err, file.Sync(), file.Close())
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(file.Name(), filepath.Join(a.cfg.DataDir, "established.json")); err != nil {
+		return err
+	}
+	dir, err := os.Open(a.cfg.DataDir)
+	if err != nil {
+		return err
+	}
+	return errors.Join(dir.Sync(), dir.Close())
 }
 func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *application, err error) {
 	if logger == nil {
@@ -141,6 +164,9 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 	}
 	if cfg.WALWriteWait < 0 || cfg.WALWriteWait > 10*time.Millisecond {
 		return nil, fault.New(fault.Invalid, "load WAL coalescing wait must be between zero and 10ms", nil)
+	}
+	if cfg.FoundingTimeout < 0 {
+		return nil, fault.New(fault.Invalid, "negative founding timeout", nil)
 	}
 	for _, p := range cfg.Peers {
 		if p.Name == cfg.NodeName {
@@ -166,6 +192,23 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 		return nil, err
 	}
 	a := &application{cfg: cfg, logger: logger, locals: map[string]*localReplica{}, clients: map[string]*loadClient{}, localGate: make(chan struct{}, 1), coordinator: membership.NewCoordinator(), closing: make(chan struct{}), closed: make(chan struct{})}
+	a.foundingReady = make(chan struct{})
+	if cfg.GateFounders && !cfg.Join {
+		raw, markerErr := os.ReadFile(filepath.Join(cfg.DataDir, "established.json"))
+		if markerErr == nil {
+			var marker struct{ ClusterID, NodeName string }
+			if decodeJSON(raw, &marker) != nil || marker.ClusterID != cfg.ClusterID || marker.NodeName != cfg.NodeName {
+				return nil, fault.ErrIdentityMismatch
+			}
+		} else if errors.Is(markerErr, os.ErrNotExist) {
+			a.foundingGate = true
+		} else {
+			return nil, markerErr
+		}
+	}
+	if !a.foundingGate {
+		close(a.foundingReady)
+	}
 	a.workCtx, a.stopWork = context.WithCancel(context.Background())
 	a.clusterHooks = newClusterHooks()
 	a.lifeCtx, a.stopLife = context.WithCancel(context.Background())
@@ -287,6 +330,9 @@ func (a *application) Start(parent context.Context) error {
 		}
 	})
 	a.workWG.Go(a.markEstablished)
+	if a.foundingGate {
+		a.workWG.Go(a.runFoundingGate)
+	}
 	a.workWG.Go(a.superviseLoads)
 	if a.cfg.Bootstrap {
 		a.workWG.Go(a.bootstrap)
@@ -295,6 +341,15 @@ func (a *application) Start(parent context.Context) error {
 }
 func (a *application) RequestClose() {
 	a.closeOnce.Do(func() { a.effectMu.Lock(); close(a.closing); a.effectMu.Unlock(); go a.finishClose() })
+}
+func (a *application) fail(err error) {
+	a.fatalMu.Lock()
+	if a.fatalErr == nil {
+		a.fatalErr = err
+	}
+	a.fatalMu.Unlock()
+	a.logger.Error("caller startup failed", "error", err)
+	a.RequestClose()
 }
 func (a *application) Close(ctx context.Context) error {
 	a.RequestClose()
@@ -355,6 +410,9 @@ func (a *application) finishClose() {
 	if a.journal != nil {
 		remember(a.journal.Close())
 	}
+	a.fatalMu.Lock()
+	remember(a.fatalErr)
+	a.fatalMu.Unlock()
 	close(a.closed)
 }
 
@@ -456,6 +514,9 @@ func (a *application) superviseLoads() {
 	}
 }
 func (a *application) bootstrap() {
+	if err := a.waitFounders(a.workCtx); err != nil {
+		return
+	}
 	if err := a.meta.WaitReady(a.workCtx); err != nil {
 		return
 	}

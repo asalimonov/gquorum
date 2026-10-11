@@ -139,3 +139,13 @@ local opens and retries. An already absent store satisfies cleanup, while a
 mismatched successor remains protected by exact approved-identity verification.
 The caller's local serve override can relax readiness using fresh health data;
 Raft membership, activation sessions and write quorum requirements stay intact.
+
+The process fixture optionally holds application bootstrap/HTTP readiness until
+all configured founders are observed with the declared meta IDs. The meta service
+and liveness remain available during this caller-owned gate; a late founder needs
+no peer restart. Its caller-supplied deadline requests joined shutdown and reports
+a fatal startup error to the executable. The successful startup marker is written
+through a synced temporary file, atomic rename and directory sync before opening
+the gate. Timeouts retain no successful marker; established retained-state recovery
+bypasses the initial gate with only a healthy majority. This policy is fixture code,
+not a library configuration dependency or a change to meta.WaitReady.
