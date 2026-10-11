@@ -2,6 +2,9 @@ package gquorum
 
 import (
 	"errors"
+	"fmt"
+	"time"
+
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
@@ -87,3 +90,30 @@ func (n *node) Status() NodeStatus {
 	}
 	return s
 }
+
+type ParkReason string
+
+const (
+	ParkStoreMissing     ParkReason = "store_missing"
+	ParkStoreUnreadable  ParkReason = "store_unreadable"
+	ParkIdentityMismatch ParkReason = "identity_mismatch"
+)
+
+// ParkedLoad describes a refused local boot, not a replicated cluster event.
+// Entries clear only after a successful start of the approved identity.
+type ParkedLoad struct {
+	Identity storage.Identity `json:"identity"`
+	Reason   ParkReason       `json:"reason"`
+	Since    time.Time        `json:"since"`
+}
+
+type LoadParkedError struct {
+	ParkedLoad
+	Cause error
+}
+
+func (e *LoadParkedError) Error() string {
+	return fmt.Sprintf("load group %s replica %d parked: %s", e.Identity.GroupID, e.Identity.ReplicaID, e.Reason)
+}
+func (e *LoadParkedError) Unwrap() error     { return e.Cause }
+func (e *LoadParkedError) Is(err error) bool { return errors.Is(fault.ErrReplicaNotReady, err) }

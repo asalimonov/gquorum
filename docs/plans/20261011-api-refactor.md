@@ -24,10 +24,10 @@ verification progress; checking a stage does not waive any target requirement.
   identities against the exact admission grant.
 - [x] Node/Cluster facade and settings: startup/readiness/shutdown, policy wiring,
   complete document/mutation/session/lock/status surface, observer ownership.
-- [ ] Migrate the small example and full cluster fixture to Node/Cluster; align
+- [x] Migrate the small example and full cluster fixture to Node/Cluster; align
   HTTP approval/operator routes, requests, responses, clients and README.
   - [x] Small meta-only example and its process test use public Node/Cluster.
-  - [ ] Full load application, typed protocol adapter and fault fixtures.
+  - [x] Full load application, typed protocol adapter and fault fixtures.
 - [ ] Preserve/migrate all unit, functional and process-cluster assertions;
   add meaningful coverage for new ownership/policy/transport boundaries.
 - [ ] Update library guide and current architecture/testing docs; remove all old
@@ -254,3 +254,38 @@ verification progress; checking a stage does not waive any target requirement.
   and exact retained topology after restart. The harness rediscovers ephemeral
   ports after restart. Full load-fixture migration and process/performance suites
   remain required; the demo smoke test does not substitute for those suites.
+
+- Full application migration: the cluster fixture now owns only its application
+  FSM/projection, typed load protocol, borrowed store fault wrappers and HTTP
+  adapter. Node owns founding gates, managed replicas, membership effects,
+  readmission and mandatory removal. The fixture has no private library imports.
+  Root public mutation values and approve/operator HTTP names are used by every
+  process client. Retired-meta assertions inspect actual backup files through an
+  authenticated test-only discovery endpoint, independent of log wording.
+- Docker recovery exposed transient stale process pins after restart. Remote
+  observation refusals provide no live attestation; successful replies must still
+  match exact peer/group/found state. Remote approved-action refusals retry only
+  while the dispatcher's complete approval remains valid. Unit/race regressions
+  cover refusal classification and malformed affirmative replies.
+- Fixture stage checks passed: make test (71.750s for the full test application),
+  make lint and tagged process vet. Selected Docker cases cover founders/delay/
+  timeout, learner promotion/restart, snapshot catch-up, refused deletion,
+  projection stalls, parked reseating, lost-meta recovery, same-disk exclusion
+  and rotated identity readmission. These selections do not close the full
+  process/performance gates.
+- Removed Runtime/New(Options)/OpenMeta/OpenLoad and the duplicate root boot
+  implementation after recording baseline signatures/test names. Public parked
+  values remain in node_status.go; boot decisions belong to internal/managed.
+  Root integrated tests moved to public Node tests in the cluster module; fast
+  ownership/boot/ledger assertions live with the managed implementation. The
+  updated runtime-ports coverage map records each transferred obligation and
+  the intentional idempotent-start/owned-lifetime contract changes.
+- API-removal stage validation: make test, make lint, tagged cluster vet and
+  proto-check pass. The managed suite and new public recovery/effect-join tests
+  pass under race. Uncached make test-unit completes in **10.81 seconds**.
+  Public go doc lists Node/Cluster and explicit load types without Runtime or
+  OpenMeta/OpenLoad. The current library/ownership guides describe the new API.
+  Docker selections also pass at five/seven nodes for same-disk readmission and
+  multi-group shutdown, and for fifteen independent load groups with deletion
+  of every local store (76.738s total). The complete process suite is now running;
+  physical baseline fixtures, remaining acceptance gates and final audit remain.

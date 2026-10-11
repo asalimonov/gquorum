@@ -5,7 +5,8 @@ and application-defined Raft load groups.
 
 The library owns Raft loops and recovery. `_meta` uses bbolt and the included
 meta protocol; load groups use etcd WALs with caller-supplied state machines and
-transports. Callers pass settings, identities and storage paths directly.
+transports. `NewNode(NodeOptions)` creates a participant; `Start` begins admission
+and recovery, and `node.Cluster()` exposes topology administration. Callers pass settings, identities and storage paths directly.
 Topology supports caller-defined node types. All admitted nodes join `_meta`;
 placement rules determine which nodes can host load groups. Only `topology.Limits`
 sets cluster capacity; its defaults are three nodes and five replicas per group.
@@ -22,8 +23,8 @@ make stop-example
 ```
 
 The example is a small `_meta` application with topology/status/drain/activate
-REST routes. The full caller-defined load application, protocols, recovery
-adapters and fault scenarios live under `tests/cluster`, separate from the demo.
+REST routes. The full caller-defined load application, protocols, application retirement
+and fault scenarios live under `tests/cluster`, separate from the demo.
 Callbacks must be idempotent and verify their exact authorized identities.
 Deleted load-group IDs are permanently retired. External application transactions
 and outboxes remain caller-owned.
@@ -42,9 +43,10 @@ make generate       # protoc required; pinned Go generators
 ```
 
 `make test-unit` uses short mode, four concurrent packages and four concurrent
-unit cases per package. Functional tests skip in short mode and remain sequential.
+unit cases per package. Functional tests skip in short mode; independent managed lifecycle tests also
+run in parallel.
 Override `UNIT_PACKAGES` or `UNIT_PARALLEL` when needed. See
-[testing notes](docs/testing/tests.md) and [runtime ownership](docs/architecture/runtime.md).
+[testing notes](docs/testing/tests.md) and [Node ownership](docs/architecture/runtime.md).
 
 The [process-cluster harness](tests/cluster/README.md) uses isolated reusable
 testcontainers units in a separate test module. It covers three-, five- and

@@ -1,6 +1,10 @@
-# Meta lifecycle
+# Internal meta lifecycle
 
-`meta.New` constructs an owned handle without starting workers. `Start` begins
+These are private service contracts used by Node. Applications use
+`NewNode`, `Start`, `WaitReady`, `RequestStop` and `Stop`; see
+[Node ownership](../architecture/runtime.md).
+
+`internal/metaservice.New` constructs an owned handle without starting workers. `Start` begins
 Raft and networking. Startup and shutdown serialize, including concurrent
 `Start` and `Stop` calls. A stopped or quiescent handle cannot restart; create a
 new handle with the same explicit database path to recover its pinned identity.
@@ -9,13 +13,13 @@ new handle with the same explicit database path to recover its pinned identity.
 convergence, reconciliation, health, document watches and admitted effects, then
 attempts session revocation while Raft is still available. Revocation is bounded
 and best effort under quorum loss. It then cancels networking, joins admitted
-RPCs, and stops the Raft runtime. The meta database stays open so the application
-can stop its load runtimes before `Stop(ctx)` closes that database.
+RPCs, and stops the Raft runtime. The meta database stays open so Node
+can join its managed load replicas before `Stop(ctx)` closes that database.
 
 Both calls are idempotent. A timeout returns `fault.ShutdownTimeout` while the
 same teardown continues; retry to join it. Storage remains owned until teardown
-completes. Caller controllers, shared load storage, the event bus and local
-journal are caller-owned.
+completes. Borrowed load storage, transport, event bus and local journal are caller-owned;
+Node owns the managed effect adapter and successful factory applications.
 
 `OnSelfRemoved` runs asynchronously after applied membership is durable and an
 approved Target excludes the local node or replaces its exact member ID. Staged
@@ -42,8 +46,9 @@ best effort; normal explicit join and
 fresh-ID readmission remain the recovery path. No local membership is invented
 from an unverified notification.
 
-Tests in `meta/lifecycle*_test.go`, `meta/removal*_test.go` and
+Tests in `internal/metaservice/lifecycle*_test.go`,
+`internal/metaservice/removal*_test.go` and
 `internal/metastore/membership_test.go` cover cancellation and joining, concurrent
 startup, durable notification, source removal predicates, failure observability,
-outgoing routing and snapshot recovery. Runtime cases remain outside short mode;
+outgoing routing and snapshot recovery. Integrated cases remain outside short mode;
 isolated cases run in parallel.
