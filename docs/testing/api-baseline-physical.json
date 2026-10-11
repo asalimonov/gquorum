@@ -1,0 +1,35 @@
+{
+  "baseline_commit": "75ba513f07405dafd4cafdac7369814aed6e31da",
+  "code_equivalent_to_target_baseline": "4b7721a",
+  "files": {
+    "events/testdata/legacy-events.bolt": {
+      "bytes": 131072,
+      "sha256": "d0c72d6eea8e3d4e526dfa5ba7857958f899bd624c72d84f41b69ee858f26afa"
+    },
+    "internal/metaengine/testdata/api-baseline/meta.bolt": {
+      "bytes": 262144,
+      "sha256": "ce657aaf812cfda04199a2cb98a8b1fb07bd475b6d1ffdc9064013ffdd313f04"
+    },
+    "load/testdata/api-baseline/work/identity.json": {
+      "bytes": 100,
+      "sha256": "6832c9b1991a08bc295bf20d17d57143c1c045f38e46e19f4c8e3f54fade21c0"
+    },
+    "load/testdata/api-baseline/work/snap/0000000000000001-0000000000000001.snap": {
+      "bytes": 24,
+      "sha256": "f48dee2e0ab7bc536f4a5269efe2a77acbc8282eabe2da731f0e91d2e4f04e77"
+    },
+    "load/testdata/api-baseline/work/snap/0000000000000002-0000000000000003.snap": {
+      "bytes": 37,
+      "sha256": "9be56e39d6c05218e4728a815478e671ec95fd1cf743bf1761d2c78642e67ca5"
+    },
+    "load/testdata/api-baseline/work/state.bolt": {
+      "bytes": 131072,
+      "sha256": "7dc464a1653e2b6fe025b0d0cdf625439f9e8b31950116ee4e1630f58c3c77c9"
+    },
+    "load/testdata/api-baseline/work/wal/0000000000000000-0000000000000000.wal": {
+      "bytes": 32768,
+      "sha256": "5a0f7d85379b729e412edfbc64c8bd1ffa4aefac805ec3ba79c7ba3cfc31ef8f"
+    }
+  },
+  "generator": "docs/testing/api-baseline-generator.go.txt"
+}

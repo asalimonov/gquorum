@@ -14,3 +14,14 @@ as baseline `75ba513`). Do not regenerate these files using the refactored codec
 Tests require exact round trips as well as restored documents, operator,
 admission and lock state. Names in fixture bytes are storage/protocol contracts,
 not deprecated public API aliases.
+
+`meta.bolt` is a physical database produced by the baseline store and FSM at
+`75ba513` (whose Go code is identical to the target's `4b7721a` baseline). It
+contains the snapshot above at index 7/term 2, hard state, applied membership,
+identity and membership-seen pins, a serve override and an exact local load
+ledger record. The physical compatibility test opens it through the current
+store and Raft engine, restores its FSM and checks every retained bucket row
+without rewriting identities or legacy operator records.
+
+Provenance, generator and immutable hashes are recorded in
+[the physical compatibility notes](../../../../docs/testing/api-baseline-physical.md).

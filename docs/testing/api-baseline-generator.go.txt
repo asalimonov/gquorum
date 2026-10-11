@@ -1,0 +1,71 @@
+// Run only in an exported checkout of baseline 75ba513, never against current code.
+// go run ./cmd/compat-fixtures OUTPUT_DIRECTORY BASELINE_SNAPSHOT_JSON
+package main
+
+import (
+ "context"
+ "encoding/json"
+ "io"
+ "log/slog"
+ "os"
+ "path/filepath"
+ "sync"
+ "time"
+
+ "github.com/asalimonov/gquorum/events"
+ "github.com/asalimonov/gquorum/internal/metaengine"
+ "github.com/asalimonov/gquorum/internal/metastore"
+ "github.com/asalimonov/gquorum/load"
+ "github.com/asalimonov/gquorum/storage/walstore"
+ "github.com/asalimonov/gquorum/topology"
+ "go.etcd.io/raft/v3"
+ "go.etcd.io/raft/v3/raftpb"
+)
+
+func must(err error) { if err != nil { panic(err) } }
+type transport struct{}
+func (transport) Send(ctx context.Context, _ []raftpb.Message) error { return ctx.Err() }
+type machine struct { mu sync.Mutex; requests map[string]string }
+func (m *machine) Apply(_ context.Context, c load.Command) (load.Result,error) {
+ m.mu.Lock(); defer m.mu.Unlock()
+ if old, ok := m.requests[c.RequestID]; ok && old != string(c.Data) { return load.Result{Code:"conflict"},nil }
+ m.requests[c.RequestID] = string(c.Data)
+ return load.Result{Code:"ok",Data:c.Data},nil
+}
+func (m *machine) Snapshot(context.Context) ([]byte,error) { m.mu.Lock(); defer m.mu.Unlock(); return json.Marshal(m.requests) }
+func (m *machine) Restore(_ context.Context, data []byte) error {
+ m.mu.Lock(); defer m.mu.Unlock(); m.requests=map[string]string{}
+ if len(data)==0 { return nil }; return json.Unmarshal(data,&m.requests)
+}
+func main() {
+ out:=os.Args[1]; must(os.MkdirAll(out,0700))
+ raw,err:=os.ReadFile(os.Args[2]); must(err)
+ db,err:=metastore.Open(filepath.Join(out,"meta.bolt")); must(err)
+ must(db.EnsureIdentity("n1","compat-cluster",1))
+ // Restore and serialize with the baseline codec, rather than using renamed values.
+ fsm:=metaengine.NewMachine(topology.Rules{SchemaVersion:1,Limits:(topology.Limits{}).WithDefaults()},nil)
+ must(fsm.Restore(context.Background(),raw)); raw,err=fsm.Snapshot(context.Background()); must(err)
+ cs:=raftpb.ConfState{Voters:[]uint64{1,2,3}}
+ must(db.SaveReady(nil,raftpb.HardState{Term:2,Vote:1,Commit:7}))
+ must(db.SaveSnapshot(raftpb.Snapshot{Data:raw,Metadata:raftpb.SnapshotMetadata{Index:7,Term:2,ConfState:cs}}))
+ must(db.SaveApplication(7,cs,raw))
+ must(db.SaveOverride(2))
+ must(db.RecordReplica("work",metastore.ReplicaRecord{NodeName:"n1",ClusterID:"compat-cluster",ReplicaID:7,Origin:"fresh",CreatedAt:time.Unix(100,0).UTC()}))
+ must(db.Close())
+ journal,err:=events.OpenJournal(events.JournalOptions{Path:filepath.Join(out,"events.bolt")}); must(err)
+ for _,typ:=range []events.Type{events.ExecutionChanged,events.ReconciliationChanged} {
+  _,err=journal.Append(events.Event{At:time.Unix(100,0).UTC(),Type:typ,NodeName:"n1",ClusterID:"compat-cluster",MemberID:1,InstanceID:"baseline-process",GroupID:"work",ExecutionID:"exec-v1-a1",Version:1,Attempt:1,StepSeq:2,ReplicaID:7}); must(err)
+ }
+ must(journal.Close())
+ prewrite:=false
+ logger:=slog.New(slog.NewTextHandler(io.Discard,nil))
+ store,err:=walstore.Open(walstore.Options{RootDir:filepath.Join(out,"loads"),NodeName:"n1",ClusterID:"compat-cluster",SegmentBytes:32<<10,Prewrite:&prewrite,Logger:logger}); must(err)
+ g,err:=load.New(load.Options{GroupID:"work",NodeName:"n1",ClusterID:"compat-cluster",ReplicaID:7,InstanceID:"baseline-process",Mode:load.Founding,Peers:[]raft.Peer{{ID:7}},Store:store,Machine:&machine{},Transport:transport{},Timing:load.Timing{TickInterval:10*time.Millisecond},Logger:logger}); must(err)
+ ctx,cancel:=context.WithTimeout(context.Background(),10*time.Second); defer cancel()
+ must(g.Start(ctx)); must(g.WaitReady(ctx))
+ for !g.IsLeader() { select { case <-ctx.Done(): panic(ctx.Err()); case <-time.After(10*time.Millisecond): } }
+ _,err=g.Propose(ctx,load.Proposal{RequestID:"one",Data:[]byte("first")}); must(err)
+ must(g.Snapshot(ctx))
+ _,err=g.Propose(ctx,load.Proposal{RequestID:"two",Data:[]byte("tail")}); must(err)
+ must(g.Stop(ctx)); must(store.Close())
+}

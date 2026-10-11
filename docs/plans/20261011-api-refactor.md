@@ -289,3 +289,15 @@ verification progress; checking a stage does not waive any target requirement.
   multi-group shutdown, and for fifteen independent load groups with deletion
   of every local store (76.738s total). The complete process suite is now running;
   physical baseline fixtures, remaining acceptance gates and final audit remain.
+- Physical compatibility: generated closed meta bbolt, load etcd WAL/snapshot/
+  applied-state files and event bbolt from an isolated export of baseline75ba513
+  (Go source identical to target baseline4b7721a). The captured generator,
+  provenance and seven file hashes are documented under docs/testing. Current
+  tests restore the actual meta engine and compare every retained bucket row;
+  recover full load snapshot plus committed tail and retained request IDs;
+  and filter/append/reopen legacy event rows without rewriting them. Existing
+  JSON golden files remain unchanged.
+- Physical stage checks pass: make test, make lint, complete make test-unit-race
+  and focused physical recovery races. Uncached make test-unit takes **11.06
+  seconds**. All physical hashes match the captured baseline manifest. The full
+  Docker suite remains in progress; no broad process/performance claim yet.

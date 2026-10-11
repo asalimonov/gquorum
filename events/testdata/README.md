@@ -7,3 +7,10 @@ nullable healthy-voter count. Do not regenerate these from the new codec.
 
 The compatibility tests require exact decode/re-encode bytes, the new public
 names, and journal reads without rewriting retained rows.
+
+`legacy-events.bolt` is a physical journal produced by `events.OpenJournal` and
+`Append` at baseline `75ba513`. Its two records use the original execution and
+reconciliation spellings and retain the native bbolt sequence. The physical
+compatibility test reads them through current public operator/scheduling values,
+appends sequence 3, reopens, and verifies the old records were never rewritten.
+See [physical compatibility provenance](../../docs/testing/api-baseline-physical.md).
