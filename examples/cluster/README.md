@@ -9,7 +9,9 @@ HTTP endpoints are `http://localhost:18081`, `:18082` and `:18083`. The manifest
 supplies two `worker` nodes and one `observer`; all three vote in `_meta`.
 The example passes identities, peer addresses, credentials, limits and each
 node's `/data/meta.bolt` path to the library. Compose owns the three durable
-volumes. Stopping preserves them; `make clean-example` explicitly deletes them.
+volumes named `meta-node1`, `meta-node2` and `meta-node3`. These isolate the
+small demo from volumes created by an earlier application. Stopping preserves
+them; `make clean-example` explicitly deletes them.
 
 This demo contains only startup/shutdown and a small HTTP adapter. Load-group
 FSMs, protocols, lifecycle/recovery adapters, WAL fault controls and cluster
