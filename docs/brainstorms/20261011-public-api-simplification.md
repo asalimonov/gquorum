@@ -1,7 +1,11 @@
 # Brainstorm: simpler node, cluster and load-group APIs
 
-Status: clean API refactor, separate group/replica operations and a deliberate
-public group wrapper agreed. Managed local replica lifecycle through a caller
+Status: brainstorm complete. The [target architecture](20261011-public-api-simplification-target.md)
+consolidates the accepted design and supersedes intermediate sketches below.
+Implementation has not started as part of this brainstorm.
+
+The clean API refactor, separate group/replica operations and a deliberate
+public group wrapper are agreed. Managed local replica lifecycle through a caller
 factory and transport, and stop holds lasting only for the current node lifetime,
 are agreed. Startup-selectable defaults and caller-replaceable policies are user
 requirements. The Scheduler/LifecyclePolicy split, policy.RestoreDegraded,
@@ -9,7 +13,7 @@ library-owned operator.Controller and Operator vocabulary are agreed. Scheduler
 selection/configuration remains caller-supplied; cluster-wide agreement is
 explicitly postponed. The refactor also includes HTTP naming and method review
 in examples/cluster, its README and corresponding tests. Detailed contracts and
-inventories belong in the target specification.
+inventories are recorded in the target specification.
 This is a discussion record, not an implementation specification.
 
 ## Initial request
@@ -1416,30 +1420,40 @@ work is to consolidate the full target specification and its file/signature,
 ownership, persistence and verification inventories. No implementation code was
 changed in this discussion step.
 
+## Final resolution — target architecture
+
+The user confirmed the revised design and requested the target architecture
+document if no questions remained. No further product decisions are required.
+The [target specification](20261011-public-api-simplification-target.md) now covers:
+
+- Public Node/Cluster/load.Group contracts, package boundaries, file inventory
+  and the complete public API migration map (sections 2–5 and 11).
+- Managed factory/resource ownership, typed inbound transport/action receivers,
+  exact authorization verification, retirement and Node-lifetime stop holds
+  (sections 3, 5, 7–8).
+- Replaceable Scheduler/LifecyclePolicy contracts, policy.RestoreDegraded,
+  startup settings and concrete library-owned operator.Controller (sections 6–7).
+- Start/WaitReady/retry/cancellation, callback serialization, partial failures,
+  stalled cleanup and joined shutdown (sections 3, 6–8).
+- Complete relevant bbolt/WAL/event schemas, private compatibility DTOs, cache
+  lifetimes and unchanged protocol encodings (sections 9–10 and appendix A).
+- Standalone load ownership and the simple example/separate cluster-test fixture
+  boundary (sections 5, 10 and 12).
+- The reviewed approve/operator HTTP routes, strict parsing, error semantics,
+  README/client migration and required test coverage (sections 10 and 12).
+- Caller integration and key algorithm pseudocode (appendices B–C).
+
+Document verification checks relative links, Markdown fences and Go declaration
+syntax. An isolated Go prototype verifies that the defined public handle can wrap
+the private representation without inheriting privileged methods. These checks
+validate the specification's construction approach, not runtime behavior of an
+implemented refactor. No implementation files were changed.
+
 ## NOT CONSIDERED & TODO
 
-The following are required target-design details, not exclusions from the refactoring:
-
-- [potential-improvement] Finalize the exact public package boundary under the
-  agreed clean API refactor before specifying created/updated files.
-- [potential-improvement] Finalize agreed managed hosting's factory/resource
-  ownership and inbound effect dispatch contracts. Stop holds are confirmed as
-  local to the current Node lifetime.
-- [potential-improvement] Finalize replaceable policy inputs, decisions and default
-  configuration under the agreed library-owned Controller boundary. Specify
-  caller-supplied startup settings and the treatment of existing runtime controls.
-- [potential-improvement] Specify Start/WaitReady/retry/partial-failure behavior,
-  callback reentrancy and cancellation ownership.
-- [potential-improvement] Map every existing document, watch, session, lock,
-  reconciliation, admission and recovery API so simplification loses no required
-  capability. Avoid exporting internal protocol entry points accidentally.
-- [potential-improvement] Inventory bbolt buckets, WAL metadata, protocol fields
-  and persisted identities; distinguish Go API renames from storage migrations.
-  No persistence schema change is implied by the current proposal.
-- [potential-improvement] Specify the treatment of standalone load engines and
-  preserve the small meta demo / separate cluster fixture boundary.
-- [potential-improvement] Include the reviewed example HTTP contract, README and
-  common fixture/client vocabulary migration in the target and verification plan.
+All target-design details previously listed here are resolved in the target
+specification. There are no unanswered questions blocking implementation
+planning. Required implementation and validation work is specified there.
 
 Explicitly deferred by the user:
 
@@ -1447,6 +1461,7 @@ Explicitly deferred by the user:
   policy metadata, mismatch handling and cluster-wide policy update operations.
   Current behavior uses the Scheduler configured in caller code at Node startup.
 
-The final target document must consolidate these decisions and include the
-full public signature map, ownership and startup/shutdown flows, failure handling,
-storage/protocol compatibility inventory and implementation pseudocode.
+The earlier force-new-cluster recovery deferral also remains unchanged; normal
+recovery, readmission and reseating remain in scope. Larger-cluster correctness,
+ported Raft tests, idempotent callbacks and exact authorized-identity verification
+are required scope, not deferred items.
