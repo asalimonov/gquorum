@@ -12,8 +12,9 @@ import (
 
 type RestoreDegradedOptions struct{ StableFor time.Duration }
 
-// RestoreDegraded restores only missing required Active voters. It never repairs
-// meta membership, promotes intentional learners or balances healthy groups.
+// RestoreDegraded converges replicated voter policies using stable learners.
+// Legacy groups retain missing-voter repair. Pinned learners and healthy seats
+// are preserved; every action is independently checked by the node.
 type RestoreDegraded struct{ stableFor time.Duration }
 
 func NewRestoreDegraded(opts RestoreDegradedOptions) (*RestoreDegraded, error) {
@@ -33,6 +34,10 @@ func (p *RestoreDegraded) Schedule(ctx context.Context, in ScheduleInput) (Sched
 	if p == nil {
 		return ScheduleDecision{}, fault.ErrInvalid
 	}
+	voterDecision := chooseVoterChange(in)
+	if voterDecision.Action != nil {
+		return voterDecision, nil
+	}
 	stableFor := p.stableFor
 	if stableFor == 0 {
 		stableFor = time.Minute
@@ -42,7 +47,7 @@ func (p *RestoreDegraded) Schedule(ctx context.Context, in ScheduleInput) (Sched
 		if err := ctx.Err(); err != nil {
 			return ScheduleDecision{}, err
 		}
-		if group.ID == topology.MetaGroupID {
+		if group.ID == topology.MetaGroupID || group.VoterPolicy != nil {
 			continue
 		}
 		status, ok := in.Status[group.ID]
@@ -73,7 +78,7 @@ func (p *RestoreDegraded) Schedule(ctx context.Context, in ScheduleInput) (Sched
 			return ScheduleDecision{Action: &ScheduleAction{Kind: RestoreMissingReplica, Identity: identity}, Reason: "missing_replica"}, nil
 		}
 	}
-	reason := "converged"
+	reason := voterDecision.Reason
 	switch {
 	case sawLost:
 		reason = "quorum_lost"

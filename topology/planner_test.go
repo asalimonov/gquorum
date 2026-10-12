@@ -201,7 +201,7 @@ func TestBuildPlanDemotesVoterAndTransfersLeader(t *testing.T) {
 	}
 	requirePlan(t, plan, desired.Version, []Step{
 		step("shard0", StepTransferLeader, "n1", 1),
-		step("shard0", StepDemoteVoter, "n2", 2),
+		{GroupID: "shard0", Kind: StepDemoteVoter, NodeName: "n2", ReplicaID: 2, TransferNodeName: "n1", TransferReplicaID: 1},
 	})
 }
 

@@ -94,10 +94,12 @@ func (g *Group) sender() {
 					})
 				}
 				peer.pending.Add(1)
+				g.outboundPending.Add(1)
 				select {
 				case peer.queue <- batches[id]:
 				default:
 					peer.pending.Add(-1)
+					g.outboundPending.Add(-1)
 					g.reportUndelivered(batches[id])
 				}
 			}
@@ -106,6 +108,7 @@ func (g *Group) sender() {
 }
 
 func (g *Group) sendPeer(ctx context.Context, peer *outboundPeer) {
+	defer func() { g.outboundPending.Add(-peer.pending.Load()) }()
 	for {
 		if ctx.Err() != nil {
 			return
@@ -127,6 +130,7 @@ func (g *Group) sendPeer(ctx context.Context, peer *outboundPeer) {
 			}
 			if len(messages) == 0 {
 				peer.pending.Add(-1)
+				g.outboundPending.Add(-1)
 				continue
 			}
 			sendCtx, cancel := context.WithTimeout(ctx, g.opts.Timing.TickInterval*time.Duration(g.opts.Timing.ElectionTicks)/2)
@@ -136,11 +140,15 @@ func (g *Group) sendPeer(ctx context.Context, peer *outboundPeer) {
 				g.reportUndelivered(messages)
 			}
 			peer.pending.Add(-1)
+			g.outboundPending.Add(-1)
 		}
 	}
 }
 
 func (g *Group) reportUndelivered(messages []raftpb.Message) {
+	if len(messages) > 0 {
+		g.meter.ObserveSendError()
+	}
 	for _, message := range messages {
 		g.ReportUnreachable(message.To)
 		if message.Type == raftpb.MsgSnap {

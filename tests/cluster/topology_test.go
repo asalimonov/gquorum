@@ -68,6 +68,7 @@ func TestStagedTopologyDoesNotChangeApprovedMembershipOrStartGroups(t *testing.T
 	}
 	role := base.Clone()
 	role.Group("work").Replicas[2].Role = topology.ReplicaLearner
+	role.Group("work").VoterPolicy.TargetVoters = 2
 	staged, err := c.Stage(ctx, "node2", role)
 	if err != nil {
 		t.Fatal(err)

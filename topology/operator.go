@@ -44,11 +44,13 @@ const (
 )
 
 type Step struct {
-	Seq       int      `json:"seq"`
-	Kind      StepKind `json:"kind"`
-	GroupID   string   `json:"group_id"`
-	NodeName  string   `json:"node_name,omitempty"`
-	ReplicaID uint64   `json:"replica_id,omitempty"`
+	Seq               int      `json:"seq"`
+	Kind              StepKind `json:"kind"`
+	GroupID           string   `json:"group_id"`
+	NodeName          string   `json:"node_name,omitempty"`
+	ReplicaID         uint64   `json:"replica_id,omitempty"`
+	TransferNodeName  string   `json:"transfer_node_name,omitempty"`
+	TransferReplicaID uint64   `json:"transfer_replica_id,omitempty"`
 }
 
 func (s Step) Equal(other Step) bool { return s == other }
@@ -61,18 +63,20 @@ type Plan struct {
 func (p Plan) IsEmpty() bool { return len(p.Steps) == 0 }
 
 type AuthorizedStep struct {
-	OperatorID OperatorID `json:"operator_id"`
-	Version    uint64     `json:"version"`
-	Attempt    uint32     `json:"attempt"`
-	StepSeq    int        `json:"step_seq"`
-	Kind       StepKind   `json:"kind"`
-	GroupID    string     `json:"group_id"`
-	NodeName   string     `json:"node_name,omitempty"`
-	ReplicaID  uint64     `json:"replica_id,omitempty"`
+	OperatorID        OperatorID `json:"operator_id"`
+	Version           uint64     `json:"version"`
+	Attempt           uint32     `json:"attempt"`
+	StepSeq           int        `json:"step_seq"`
+	Kind              StepKind   `json:"kind"`
+	GroupID           string     `json:"group_id"`
+	NodeName          string     `json:"node_name,omitempty"`
+	ReplicaID         uint64     `json:"replica_id,omitempty"`
+	TransferNodeName  string     `json:"transfer_node_name,omitempty"`
+	TransferReplicaID uint64     `json:"transfer_replica_id,omitempty"`
 }
 
 func (a AuthorizedStep) Matches(id OperatorID, attempt uint32, version uint64, step Step) bool {
-	return a.OperatorID == id && a.Attempt == attempt && a.Version == version && a.StepSeq == step.Seq && a.Kind == step.Kind && a.GroupID == step.GroupID && a.NodeName == step.NodeName && a.ReplicaID == step.ReplicaID
+	return a.OperatorID == id && a.Attempt == attempt && a.Version == version && a.StepSeq == step.Seq && a.Kind == step.Kind && a.GroupID == step.GroupID && a.NodeName == step.NodeName && a.ReplicaID == step.ReplicaID && a.TransferNodeName == step.TransferNodeName && a.TransferReplicaID == step.TransferReplicaID
 }
 
 type OperatorStatus struct {

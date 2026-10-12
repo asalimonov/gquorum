@@ -70,6 +70,8 @@ type Rules struct {
 }
 
 type PlacementRule struct {
+	// MinReplicas and MaxReplicas bound voters, not hosted learners.
+	// Limits.MaxReplicas bounds the total replicas of a load group.
 	MinReplicas      int        `json:"min_replicas"`
 	MaxReplicas      int        `json:"max_replicas"`
 	AllowedNodeTypes []NodeType `json:"allowed_node_types,omitempty"`
@@ -90,11 +92,12 @@ type Node struct {
 }
 
 type Replica struct {
-	NodeName  string      `json:"node_name"`
-	ReplicaID uint64      `json:"replica_id"`
-	Role      ReplicaRole `json:"role"`
-	CreatedAt time.Time   `json:"created_at"`
-	UpdatedAt time.Time   `json:"updated_at"`
+	NodeName      string      `json:"node_name"`
+	ReplicaID     uint64      `json:"replica_id"`
+	Role          ReplicaRole `json:"role"`
+	PinnedLearner bool        `json:"pinned_learner,omitempty"`
+	CreatedAt     time.Time   `json:"created_at"`
+	UpdatedAt     time.Time   `json:"updated_at"`
 }
 
 type Group struct {
@@ -102,6 +105,8 @@ type Group struct {
 	Replicas      []Replica      `json:"replicas"`
 	NextReplicaID uint64         `json:"next_replica_id"`
 	Placement     *PlacementRule `json:"placement,omitempty"`
+	VoterPolicy   *VoterPolicy   `json:"voter_policy,omitempty"`
+	Hosting       *HostingRule   `json:"hosting,omitempty"`
 	CreatedAt     time.Time      `json:"created_at"`
 	UpdatedAt     time.Time      `json:"updated_at"`
 }
@@ -220,7 +225,11 @@ func (d *Document) SetMemberID(name string, id uint64, at time.Time) error {
 			return nil
 		}
 	}
-	g.Replicas = append(g.Replicas, Replica{NodeName: name, ReplicaID: id, Role: ReplicaVoter, CreatedAt: at, UpdatedAt: at})
+	role := ReplicaVoter
+	if g.VoterPolicy != nil {
+		role = ReplicaLearner
+	}
+	g.Replicas = append(g.Replicas, Replica{NodeName: name, ReplicaID: id, Role: role, CreatedAt: at, UpdatedAt: at})
 	return nil
 }
 
@@ -285,6 +294,15 @@ func (d Document) Clone() Document {
 	out.Groups = slices.Clone(d.Groups)
 	for i := range out.Groups {
 		out.Groups[i].Replicas = slices.Clone(d.Groups[i].Replicas)
+		if d.Groups[i].VoterPolicy != nil {
+			p := *d.Groups[i].VoterPolicy
+			out.Groups[i].VoterPolicy = &p
+		}
+		if d.Groups[i].Hosting != nil {
+			h := *d.Groups[i].Hosting
+			h.Nodes = slices.Clone(h.Nodes)
+			out.Groups[i].Hosting = &h
+		}
 		if d.Groups[i].Placement != nil {
 			p := *d.Groups[i].Placement
 			p.AllowedNodeTypes = slices.Clone(p.AllowedNodeTypes)

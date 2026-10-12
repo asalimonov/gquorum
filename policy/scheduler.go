@@ -10,6 +10,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/asalimonov/gquorum/metrics"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -29,10 +30,12 @@ type ScheduleInput struct {
 	Latest, Target, Active topology.Document
 	// Status contains group observations with leader names resolved through
 	// this input's Active view, not a peer-supplied name or a newer document.
-	Status map[string]topology.GroupStatus
-	Health map[string]topology.GroupHealthEvaluation
-	Alive  map[string]time.Duration
-	Held   []storage.Identity
+	Status   map[string]topology.GroupStatus
+	Health   map[string]topology.GroupHealthEvaluation
+	Alive    map[string]time.Duration
+	Held     []storage.Identity
+	Metrics  metrics.ClusterSnapshot
+	Switches []topology.VoterSwitchState
 }
 
 // Clone creates an independent callback input, including nested observations.
@@ -48,19 +51,50 @@ func (in ScheduleInput) Clone() ScheduleInput {
 	}
 	in.Alive = maps.Clone(in.Alive)
 	in.Held = slices.Clone(in.Held)
+	in.Metrics = copyMetrics(in.Metrics)
+	in.Switches = slices.Clone(in.Switches)
+	for i := range in.Switches {
+		in.Switches[i] = in.Switches[i].Clone()
+	}
 	return in
 }
 
 type ScheduleActionKind string
 
 const RestoreMissingReplica ScheduleActionKind = "restore_missing_replica"
+const ReconfigureVoters ScheduleActionKind = "reconfigure_voters"
 
 type ScheduleAction struct {
-	Kind     ScheduleActionKind
-	Identity storage.Identity // The old missing voter; the core allocates its successor.
+	Kind        ScheduleActionKind
+	VoterChange *topology.VoterChange
+	Identity    storage.Identity // The old missing voter; the core allocates its successor.
 }
 
 type ScheduleDecision struct {
 	Action *ScheduleAction
 	Reason string
+}
+
+// copyMetrics preserves input values exactly, including nil/unknown spellings.
+// The public metrics Clone methods additionally normalize their JSON read shape.
+func copyMetrics(in metrics.ClusterSnapshot) metrics.ClusterSnapshot {
+	copyReplica := func(r metrics.ReplicaObservation) metrics.ReplicaObservation {
+		r.Sample.Voters = slices.Clone(r.Sample.Voters)
+		r.Sample.Learners = slices.Clone(r.Sample.Learners)
+		r.Sample.Progress = slices.Clone(r.Sample.Progress)
+		r.Evidence.Reasons = slices.Clone(r.Evidence.Reasons)
+		return r
+	}
+	in.Local = slices.Clone(in.Local)
+	for i := range in.Local {
+		in.Local[i] = copyReplica(in.Local[i])
+	}
+	in.Groups = slices.Clone(in.Groups)
+	for i := range in.Groups {
+		in.Groups[i].Replicas = slices.Clone(in.Groups[i].Replicas)
+		for j := range in.Groups[i].Replicas {
+			in.Groups[i].Replicas[j] = copyReplica(in.Groups[i].Replicas[j])
+		}
+	}
+	return in
 }

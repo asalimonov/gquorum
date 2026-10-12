@@ -26,7 +26,7 @@ func (sm *topologySM) authorizeLocked(ctx context.Context, a topology.Authorized
 		return fault.New(fault.OperatorAuthorization, "effect does not match current approval", nil)
 	}
 	if a.StepSeq == 0 {
-		if a.OperatorID != "" || a.Attempt != 0 || a.Version == 0 || a.Version != sm.active.Version || a.Kind != topology.StepTransferLeader {
+		if a.OperatorID != "" || a.Attempt != 0 || a.Version == 0 || a.Version != sm.active.Version || a.Kind != topology.StepTransferLeader || a.TransferNodeName != "" || a.TransferReplicaID != 0 {
 			return refuse()
 		}
 		r := documentReplica(sm.active, a.GroupID, a.ReplicaID)

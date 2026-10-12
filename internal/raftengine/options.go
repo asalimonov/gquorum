@@ -9,6 +9,7 @@ import (
 
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
+	internalmetrics "github.com/asalimonov/gquorum/internal/metrics"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3"
@@ -62,10 +63,14 @@ type Timing struct {
 type Options struct {
 	GroupID, NodeName, ClusterID string
 	// InstanceID identifies the observer process in local events, when supplied.
-	InstanceID                              string
-	ReplicaID                               uint64
-	Mode                                    Mode
-	Peers                                   []raft.Peer
+	InstanceID string
+	Metrics    internalmetrics.Options
+	ReplicaID  uint64
+	Mode       Mode
+	Peers      []raft.Peer
+	// FoundingLearners are seeded alongside Peers, which remain the voters.
+	// Only fresh founding uses these sets; retained recovery uses durable state.
+	FoundingLearners                        []raft.Peer
 	Timing                                  Timing
 	Store                                   storage.Store
 	Machine                                 Machine
@@ -74,6 +79,7 @@ type Options struct {
 	Logger                                  *slog.Logger
 	SnapshotThreshold                       uint64
 	MaxPendingProposals                     int
+	ProposalTimeout                         time.Duration
 	MaxUncommittedBytes, MaxApplyBatchBytes uint64
 }
 type Proposal struct {
@@ -108,11 +114,21 @@ func (o Options) validate(meta bool) error {
 		ids[peer.ID] = true
 		local = local || peer.ID == o.ReplicaID
 	}
+	for _, peer := range o.FoundingLearners {
+		if peer.ID == 0 || ids[peer.ID] {
+			return fault.New(fault.Invalid, "zero, duplicate or voting founding learner", nil)
+		}
+		ids[peer.ID] = true
+		local = local || peer.ID == o.ReplicaID
+	}
+	if o.Mode == Founding && len(o.Peers) == 0 {
+		return fault.New(fault.Invalid, "founding requires at least one voter", nil)
+	}
 	if o.Mode == Founding && !local {
 		return fault.New(fault.Invalid, "founding peers must contain the local replica", nil)
 	}
-	if o.Mode == Joining && len(o.Peers) > 0 {
-		return fault.New(fault.Invalid, "joining cannot supply founding voters", nil)
+	if o.Mode == Joining && (len(o.Peers) > 0 || len(o.FoundingLearners) > 0) {
+		return fault.New(fault.Invalid, "joining cannot supply founding members", nil)
 	}
 	return nil
 }
@@ -120,7 +136,10 @@ func (o Options) validate(meta bool) error {
 // ValidateSettings checks tuning without requiring an open store or a machine.
 // Node uses this same validation before acquiring any per-replica resources.
 func (o Options) ValidateSettings() error {
-	if o.Timing.TickInterval < 0 || o.Timing.ElectionTicks < 0 || o.Timing.HeartbeatTicks < 0 || o.Timing.WALWriteWait < 0 || o.MaxPendingProposals < 0 {
+	if _, err := o.Metrics.Resolve(); err != nil {
+		return err
+	}
+	if o.Timing.TickInterval < 0 || o.Timing.ElectionTicks < 0 || o.Timing.HeartbeatTicks < 0 || o.Timing.WALWriteWait < 0 || o.MaxPendingProposals < 0 || o.ProposalTimeout < 0 {
 		return fault.New(fault.Invalid, "negative load timing or proposal bound", nil)
 	}
 	o = o.defaults()
@@ -133,6 +152,7 @@ func (o Options) ValidateSettings() error {
 	return nil
 }
 func (o Options) defaults() Options {
+	o.Metrics, _ = o.Metrics.Resolve()
 	if o.Timing.TickInterval == 0 {
 		o.Timing.TickInterval = 100 * time.Millisecond
 	}
@@ -144,6 +164,9 @@ func (o Options) defaults() Options {
 	}
 	if o.MaxPendingProposals == 0 {
 		o.MaxPendingProposals = 256
+	}
+	if o.ProposalTimeout == 0 {
+		o.ProposalTimeout = 30 * time.Second
 	}
 	if o.MaxUncommittedBytes == 0 {
 		o.MaxUncommittedBytes = 64 << 20

@@ -20,15 +20,17 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/observe"
 	"github.com/asalimonov/gquorum/internal/scheduling"
+	"github.com/asalimonov/gquorum/metrics"
 	"github.com/asalimonov/gquorum/policy"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
 type FoundingMember struct {
-	Node     topology.Node
-	MemberID uint64
-	Address  string
+	Node          topology.Node
+	MemberID      uint64
+	Address       string
+	PinnedLearner bool
 }
 type Timing struct {
 	TickInterval                   time.Duration
@@ -56,18 +58,22 @@ type Options struct {
 	Join              bool
 	Limits            topology.Limits
 	Placement         topology.PlacementRule
+	VoterPolicy       *topology.VoterPolicy
 	Timing            Timing
 	SessionTTL        time.Duration
 	SnapshotThreshold uint64
 	MaxWatchers       int
 	Network           NetworkOptions
 	LoadGroups        operator.GroupEffects
+	LoadMetricsReads  func(context.Context, topology.Document) []observe.ReplicaRead
+	LocalLoadMetrics  func() []metrics.ReplicaObservation
 	Health            topology.HealthSource
 	Scheduling        SchedulingOptions
 	Scheduler         policy.Scheduler
 	CallbackTimeout   time.Duration
 	HeldLoads         func() []storage.Identity
 	Observation       ObservationOptions
+	Metrics           observe.MetricsSettings
 	Events            *events.Bus
 	Logger            *slog.Logger
 	// OnSelfRemoved is invoked asynchronously after durable approved removal.
@@ -114,9 +120,14 @@ func DefaultTiming() Timing {
 func (o Options) WithDefaults() Options { return o.defaults() }
 
 func (o Options) defaults() Options {
+	o.Metrics, _ = o.Metrics.Resolve()
 	o.Limits = o.Limits.WithDefaults()
 	o.Scheduling = o.Scheduling.WithDefaults()
 	o.Observation = o.Observation.WithDefaults()
+	if o.VoterPolicy != nil {
+		policy := *o.VoterPolicy
+		o.VoterPolicy = &policy
+	}
 	d := DefaultTiming()
 	if o.Timing.TickInterval == 0 {
 		o.Timing.TickInterval = d.TickInterval
@@ -192,6 +203,9 @@ func (o Options) defaults() Options {
 	return o
 }
 func (o Options) Validate() error {
+	if _, err := o.Metrics.Resolve(); err != nil {
+		return err
+	}
 	invalid := func(message string) error { return fault.New(fault.Invalid, message, nil) }
 	if o.CallbackTimeout < 0 {
 		return invalid("negative policy callback timeout")
@@ -211,6 +225,11 @@ func (o Options) Validate() error {
 	o = o.defaults()
 	if err := o.Limits.Validate(); err != nil {
 		return err
+	}
+	if o.VoterPolicy != nil {
+		if err := o.VoterPolicy.Validate(1, o.Limits.MaxNodes); err != nil {
+			return err
+		}
 	}
 	if o.Node.Name != o.Identity.NodeName || strings.TrimSpace(string(o.Node.Type)) == "" || o.Node.State != topology.NodeActive {
 		return invalid("local admission requires matching node name, user-defined type and active state")
@@ -247,7 +266,8 @@ func (o Options) Validate() error {
 	}
 	names := make(map[string]bool)
 	ids := make(map[uint64]bool)
-	doc := topology.Document{Version: 1, ClusterID: o.Identity.ClusterID, Placement: o.Placement, Groups: []topology.Group{{ID: topology.MetaGroupID, NextReplicaID: 1}}}
+	doc := topology.Document{Version: 1, ClusterID: o.Identity.ClusterID, Placement: o.Placement, Groups: []topology.Group{{ID: topology.MetaGroupID, NextReplicaID: 1, VoterPolicy: o.VoterPolicy}}}
+	roles := o.foundingRoles()
 	for _, founder := range o.Founders {
 		if names[founder.Node.Name] || ids[founder.MemberID] || founder.MemberID == 0 || founder.MemberID == math.MaxUint64 || founder.Node.State != topology.NodeActive {
 			return invalid("founder names and positive member IDs must be unique")
@@ -261,6 +281,8 @@ func (o Options) Validate() error {
 		if err := doc.SetMemberID(founder.Node.Name, founder.MemberID, time.Time{}); err != nil {
 			return err
 		}
+		replica := &doc.MetaGroup().Replicas[len(doc.MetaGroup().Replicas)-1]
+		replica.Role, replica.PinnedLearner = roles[founder.Node.Name], founder.PinnedLearner
 		if founder.Node.Name == o.Identity.NodeName && founder.MemberID != o.Identity.MemberID {
 			return invalid("local identity differs from founder declaration")
 		}
@@ -279,6 +301,26 @@ func (o Options) Validate() error {
 	// A restart may omit founders: New verifies the existing pinned store before
 	// constructing an engine, and refuses an empty store without founding peers.
 	return nil
+}
+
+// foundingRoles is shared by the durable engine seed and initial topology.
+func (o Options) foundingRoles() map[string]topology.ReplicaRole {
+	names := make([]string, 0, len(o.Founders))
+	pinned := make(map[string]bool, len(o.Founders))
+	for _, f := range o.Founders {
+		names = append(names, f.Node.Name)
+		pinned[f.Node.Name] = f.PinnedLearner
+	}
+	return topology.FoundingRoles(names, pinned, o.freshVoterPolicy().TargetVoters)
+}
+
+// A constructor default is fresh-founding intent, never a reinterpretation of
+// retained topology. Validate it only after storage has proven fresh founding.
+func (o Options) freshVoterPolicy() topology.VoterPolicy {
+	if o.VoterPolicy != nil {
+		return *o.VoterPolicy
+	}
+	return topology.DefaultVoterPolicy()
 }
 
 // FoundingIDs derives stable positive IDs independently of peer ordering.

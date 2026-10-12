@@ -19,17 +19,18 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Meta_StreamMessages_FullMethodName = "/gquorum.meta.v1.Meta/StreamMessages"
-	Meta_SendSnapshot_FullMethodName   = "/gquorum.meta.v1.Meta/SendSnapshot"
-	Meta_Join_FullMethodName           = "/gquorum.meta.v1.Meta/Join"
-	Meta_JoinReady_FullMethodName      = "/gquorum.meta.v1.Meta/JoinReady"
-	Meta_KeepAlive_FullMethodName      = "/gquorum.meta.v1.Meta/KeepAlive"
-	Meta_IdentityPing_FullMethodName   = "/gquorum.meta.v1.Meta/IdentityPing"
-	Meta_MetaStatus_FullMethodName     = "/gquorum.meta.v1.Meta/MetaStatus"
-	Meta_MetaControl_FullMethodName    = "/gquorum.meta.v1.Meta/MetaControl"
-	Meta_ProposeMeta_FullMethodName    = "/gquorum.meta.v1.Meta/ProposeMeta"
-	Meta_ApplyVersion_FullMethodName   = "/gquorum.meta.v1.Meta/ApplyVersion"
-	Meta_ParkedRead_FullMethodName     = "/gquorum.meta.v1.Meta/ParkedRead"
+	Meta_StreamMessages_FullMethodName     = "/gquorum.meta.v1.Meta/StreamMessages"
+	Meta_SendSnapshot_FullMethodName       = "/gquorum.meta.v1.Meta/SendSnapshot"
+	Meta_Join_FullMethodName               = "/gquorum.meta.v1.Meta/Join"
+	Meta_JoinReady_FullMethodName          = "/gquorum.meta.v1.Meta/JoinReady"
+	Meta_KeepAlive_FullMethodName          = "/gquorum.meta.v1.Meta/KeepAlive"
+	Meta_IdentityPing_FullMethodName       = "/gquorum.meta.v1.Meta/IdentityPing"
+	Meta_MetaStatus_FullMethodName         = "/gquorum.meta.v1.Meta/MetaStatus"
+	Meta_MetaReplicaMetrics_FullMethodName = "/gquorum.meta.v1.Meta/MetaReplicaMetrics"
+	Meta_MetaControl_FullMethodName        = "/gquorum.meta.v1.Meta/MetaControl"
+	Meta_ProposeMeta_FullMethodName        = "/gquorum.meta.v1.Meta/ProposeMeta"
+	Meta_ApplyVersion_FullMethodName       = "/gquorum.meta.v1.Meta/ApplyVersion"
+	Meta_ParkedRead_FullMethodName         = "/gquorum.meta.v1.Meta/ParkedRead"
 )
 
 // MetaClient is the client API for Meta service.
@@ -43,6 +44,7 @@ type MetaClient interface {
 	KeepAlive(ctx context.Context, in *MetaRequest, opts ...grpc.CallOption) (*Reply, error)
 	IdentityPing(ctx context.Context, in *MetaRequest, opts ...grpc.CallOption) (*Reply, error)
 	MetaStatus(ctx context.Context, in *MetaRequest, opts ...grpc.CallOption) (*Reply, error)
+	MetaReplicaMetrics(ctx context.Context, in *MetaRequest, opts ...grpc.CallOption) (*Reply, error)
 	MetaControl(ctx context.Context, in *MetaRequest, opts ...grpc.CallOption) (*Reply, error)
 	ProposeMeta(ctx context.Context, in *MetaRequest, opts ...grpc.CallOption) (*Reply, error)
 	ApplyVersion(ctx context.Context, in *MetaRequest, opts ...grpc.CallOption) (*Reply, error)
@@ -133,6 +135,16 @@ func (c *metaClient) MetaStatus(ctx context.Context, in *MetaRequest, opts ...gr
 	return out, nil
 }
 
+func (c *metaClient) MetaReplicaMetrics(ctx context.Context, in *MetaRequest, opts ...grpc.CallOption) (*Reply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Reply)
+	err := c.cc.Invoke(ctx, Meta_MetaReplicaMetrics_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *metaClient) MetaControl(ctx context.Context, in *MetaRequest, opts ...grpc.CallOption) (*Reply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Reply)
@@ -184,6 +196,7 @@ type MetaServer interface {
 	KeepAlive(context.Context, *MetaRequest) (*Reply, error)
 	IdentityPing(context.Context, *MetaRequest) (*Reply, error)
 	MetaStatus(context.Context, *MetaRequest) (*Reply, error)
+	MetaReplicaMetrics(context.Context, *MetaRequest) (*Reply, error)
 	MetaControl(context.Context, *MetaRequest) (*Reply, error)
 	ProposeMeta(context.Context, *MetaRequest) (*Reply, error)
 	ApplyVersion(context.Context, *MetaRequest) (*Reply, error)
@@ -218,6 +231,9 @@ func (UnimplementedMetaServer) IdentityPing(context.Context, *MetaRequest) (*Rep
 }
 func (UnimplementedMetaServer) MetaStatus(context.Context, *MetaRequest) (*Reply, error) {
 	return nil, status.Error(codes.Unimplemented, "method MetaStatus not implemented")
+}
+func (UnimplementedMetaServer) MetaReplicaMetrics(context.Context, *MetaRequest) (*Reply, error) {
+	return nil, status.Error(codes.Unimplemented, "method MetaReplicaMetrics not implemented")
 }
 func (UnimplementedMetaServer) MetaControl(context.Context, *MetaRequest) (*Reply, error) {
 	return nil, status.Error(codes.Unimplemented, "method MetaControl not implemented")
@@ -356,6 +372,24 @@ func _Meta_MetaStatus_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Meta_MetaReplicaMetrics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MetaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MetaServer).MetaReplicaMetrics(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Meta_MetaReplicaMetrics_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MetaServer).MetaReplicaMetrics(ctx, req.(*MetaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Meta_MetaControl_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(MetaRequest)
 	if err := dec(in); err != nil {
@@ -454,6 +488,10 @@ var Meta_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MetaStatus",
 			Handler:    _Meta_MetaStatus_Handler,
+		},
+		{
+			MethodName: "MetaReplicaMetrics",
+			Handler:    _Meta_MetaReplicaMetrics_Handler,
 		},
 		{
 			MethodName: "MetaControl",

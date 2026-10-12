@@ -59,6 +59,7 @@ func NewStandalone(opts StandaloneOptions) (*Standalone, error) {
 		InstanceID: opts.InstanceID, Mode: raftengine.Mode(opts.Mode), Peers: opts.Peers, Timing: raftengine.Timing(opts.Engine.Timing),
 		Store: opts.Store, Machine: machineAdapter{opts.StateMachine}, Transport: opts.Transport, Events: opts.Events, Logger: opts.Logger,
 		SnapshotThreshold: opts.Engine.SnapshotThreshold, MaxPendingProposals: opts.Engine.MaxPendingProposals,
+		ProposalTimeout:     opts.Engine.ProposalTimeout,
 		MaxUncommittedBytes: opts.Engine.MaxUncommittedBytes, MaxApplyBatchBytes: opts.Engine.MaxApplyBatchBytes,
 	})
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/membership"
 	"github.com/asalimonov/gquorum/tests/cluster/testapp/loadpb"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3/raftpb"
@@ -17,6 +18,11 @@ import (
 )
 
 const credentialHeader = "x-gquorum-example-credential"
+
+type loadErrorDetails struct {
+	Schema int                       `json:"schema"`
+	Safety *membership.SafetyRefusal `json:"safety,omitempty"`
+}
 
 type loadClient struct {
 	address string
@@ -102,13 +108,27 @@ func domainReply(err error) *loadpb.Reply {
 			}
 		}
 	}
-	return &loadpb.Reply{ErrorCode: string(code), Message: err.Error()}
+	reply := &loadpb.Reply{ErrorCode: string(code), Message: err.Error()}
+	var safety *membership.SafetyRefusal
+	if code == fault.UnsafeMembership && errors.As(err, &safety) {
+		// Keep the structured refusal across both remote and loopback calls.
+		// The operator can then retry transient quorum/health loss while still
+		// terminating permanent membership refusals. Error text is not a parser.
+		reply.Data, _ = json.Marshal(loadErrorDetails{Schema: 1, Safety: safety})
+	}
+	return reply
 }
 func replyError(reply *loadpb.Reply) error {
 	if reply == nil {
 		return fault.ErrUnavailable
 	}
 	if reply.ErrorCode != "" {
+		if reply.ErrorCode == string(fault.UnsafeMembership) && len(reply.Data) != 0 {
+			var details loadErrorDetails
+			if json.Unmarshal(reply.Data, &details) == nil && details.Schema == 1 && details.Safety != nil && details.Safety.GroupID != "" && details.Safety.ReplicaID != 0 && details.Safety.Reason != "" {
+				return fault.New(fault.UnsafeMembership, reply.Message, details.Safety)
+			}
+		}
 		return fault.New(fault.Code(reply.ErrorCode), reply.Message, nil)
 	}
 	return nil

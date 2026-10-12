@@ -9,6 +9,7 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/scheduling"
+	"github.com/asalimonov/gquorum/metrics"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -108,3 +109,29 @@ func (h schedulingHost) CommitRepair(ctx context.Context, doc topology.Document,
 	return result.OperatorID, err
 }
 func (h schedulingHost) WakeOperator() { h.g.controller.Signal() }
+
+func (h schedulingHost) Observations() metrics.ClusterSnapshot { return h.g.Metrics() }
+func (h schedulingHost) VoterSwitches() []topology.VoterSwitchState {
+	return h.g.state().VoterSwitches()
+}
+func (h schedulingHost) CommitVoterChange(ctx context.Context, change topology.VoterChange, doc topology.Document, expected uint64, plan topology.Plan) (topology.OperatorID, error) {
+	if !h.g.IsLeader() {
+		return "", fault.ErrNotLeader
+	}
+	group := doc.Group(change.GroupID)
+	if group == nil {
+		return "", fault.ErrInvalid
+	}
+	result, err := h.g.propose(ctx, metaengine.CommitVoterChangeProposal{Change: change.Clone(), Doc: doc, ExpectedVersion: expected, Plan: plan, At: group.UpdatedAt})
+	return result.OperatorID, err
+}
+
+func (h schedulingHost) RefreshObservations(ctx context.Context) error {
+	return h.g.collector.Revalidate(ctx)
+}
+
+func (h schedulingHost) ResetObservations() {
+	if h.g.collector != nil {
+		h.g.collector.ResetDecisions()
+	}
+}

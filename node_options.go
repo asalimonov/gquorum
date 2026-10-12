@@ -11,6 +11,7 @@ import (
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaservice"
+	internalmetrics "github.com/asalimonov/gquorum/internal/metrics"
 	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/policy"
@@ -30,6 +31,7 @@ type NodeOptions struct {
 	Meta      MetaOptions
 	Loads     LoadOptions
 	Policies  PolicyOptions
+	Metrics   MetricsOptions
 	Health    topology.HealthSource
 	Events    *events.Bus
 	Logger    *slog.Logger
@@ -41,11 +43,15 @@ type BootstrapOptions struct {
 	JoinSeeds []string
 }
 type FoundingMember struct {
-	Node     topology.Node
-	MemberID uint64
-	Address  string
+	Node          topology.Node
+	MemberID      uint64
+	Address       string
+	PinnedLearner bool
 }
 type MetaOptions struct {
+	// VoterPolicy applies only to fresh founding; nil selects the default.
+	// Retained topology is changed through Cluster.SetGroupVoterPolicy.
+	VoterPolicy       *topology.VoterPolicy
 	DBPath            string
 	Network           MetaNetworkOptions
 	Timing            MetaTiming
@@ -141,6 +147,11 @@ func resolveNodeOptions(input NodeOptions) (NodeOptions, metaservice.Options, er
 		return invalid("custom lifecycle cannot also configure DefaultLifecycle")
 	}
 	var err error
+	metricsSettings, err := internalmetrics.Settings(o.Metrics).Resolve()
+	if err != nil {
+		return NodeOptions{}, metaservice.Options{}, err
+	}
+	o.Metrics = MetricsOptions(metricsSettings)
 	if o.Policies.Scheduler == nil {
 		o.Policies.Scheduler, err = policy.NewRestoreDegraded(o.Policies.RestoreDegraded)
 		if err != nil {
@@ -182,10 +193,12 @@ func resolveNodeOptions(input NodeOptions) (NodeOptions, metaservice.Options, er
 		Identity: o.Identity, Node: o.Node, DBPath: o.Meta.DBPath,
 		Join: o.Bootstrap.Join, JoinSeeds: o.Bootstrap.JoinSeeds,
 		Limits: o.Limits, Placement: o.Placement,
-		Timing: metaservice.Timing(o.Meta.Timing), SessionTTL: o.Meta.SessionTTL,
+		VoterPolicy: o.Meta.VoterPolicy,
+		Timing:      metaservice.Timing(o.Meta.Timing), SessionTTL: o.Meta.SessionTTL,
 		SnapshotThreshold: o.Meta.SnapshotThreshold, MaxWatchers: o.Meta.MaxWatchers,
 		Network:     metaservice.NetworkOptions(o.Meta.Network),
 		Observation: metaservice.ObservationOptions(o.Meta.Observation),
+		Metrics:     metricsSettings,
 		Scheduling: metaservice.SchedulingOptions{
 			Disabled: o.Policies.Scheduling.Disabled, Interval: o.Policies.Scheduling.Interval,
 			TickTimeout: o.Policies.Scheduling.Timeout, Cooldown: o.Policies.Scheduling.Cooldown,
@@ -209,6 +222,7 @@ func resolveNodeOptions(input NodeOptions) (NodeOptions, metaservice.Options, er
 	o.Meta.Network, o.Meta.Timing = MetaNetworkOptions(m.Network), MetaTiming(m.Timing)
 	o.Meta.SessionTTL, o.Meta.SnapshotThreshold, o.Meta.MaxWatchers = m.SessionTTL, m.SnapshotThreshold, m.MaxWatchers
 	o.Meta.Observation = ObservationOptions(m.Observation)
+	o.Meta.VoterPolicy = m.VoterPolicy
 	o.Policies.Scheduling = SchedulingOptions{
 		Disabled: m.Scheduling.Disabled, Interval: m.Scheduling.Interval,
 		Timeout: m.Scheduling.TickTimeout, Cooldown: m.Scheduling.Cooldown,
@@ -235,5 +249,5 @@ func validateLoadOptions(o LoadOptions) error {
 	} else if o.Storage.Store == nil || o.Storage.Retirement == nil {
 		return invalid("borrowed load storage requires both Store and Retirement")
 	}
-	return (raftengine.Options{Timing: raftengine.Timing(o.Engine.Timing), MaxPendingProposals: o.Engine.MaxPendingProposals}).ValidateSettings()
+	return (raftengine.Options{Timing: raftengine.Timing(o.Engine.Timing), MaxPendingProposals: o.Engine.MaxPendingProposals, ProposalTimeout: o.Engine.ProposalTimeout}).ValidateSettings()
 }

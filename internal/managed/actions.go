@@ -154,6 +154,17 @@ func (h *Host) applyConsensusAction(ctx context.Context, req load.ActionRequest)
 	if err := h.cfg.Authorize(ctx, a); err != nil {
 		return err
 	}
+	if a.Kind == topology.StepDemoteVoter && core.Status().LeaderID == a.ReplicaID && a.TransferReplicaID != 0 {
+		if !observed.HealthKnown || !observed.LiveVoters[a.TransferReplicaID] || !slices.Contains(core.Status().ConfState.Voters, a.TransferReplicaID) {
+			return fault.New(fault.Unavailable, "transfer_target_unavailable", nil)
+		}
+		if err := core.TransferLeader(ctx, a.TransferReplicaID); err != nil {
+			return err
+		}
+		// Resolve the new leader and revalidate the current demotion scope
+		// on retry; this response does not acknowledge a completed demotion.
+		return fault.ErrNotLeader
+	}
 	var change raftpb.ConfChangeV2
 	switch a.Kind {
 	case topology.StepAddLearner:

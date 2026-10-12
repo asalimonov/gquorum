@@ -117,16 +117,15 @@ func (g *Group) run() {
 		identity := g.currentIdentity()
 		status = engine.Status()
 		members := make(map[uint64]bool)
-		voter := false
 		for _, id := range status.ConfState.Voters {
 			members[id] = true
-			voter = voter || id == identity.MemberID
 		}
 		for _, id := range status.ConfState.Learners {
 			members[id] = true
 		}
 		g.transport.Prune(members)
-		if !voter || g.state().ActiveVersion() == 0 {
+		active := g.state().Active()
+		if !members[identity.MemberID] || active.Version == 0 || active.MemberID(identity.NodeName) != identity.MemberID {
 			continue
 		}
 		ctx, cancel := context.WithTimeout(g.workCtx, 5*time.Second)
@@ -151,7 +150,9 @@ func (g *Group) bootstrap(ctx context.Context) error {
 			return fault.ErrUnavailable
 		}
 		now := time.Now().UTC()
-		doc := topology.Document{ClusterID: identity.ClusterID, Placement: g.opts.Placement, ChangedBy: identity.NodeName, Origin: topology.OriginFounding, CreatedAt: now, Groups: []topology.Group{{ID: topology.MetaGroupID, NextReplicaID: 1, CreatedAt: now, UpdatedAt: now}}}
+		policy := g.opts.freshVoterPolicy()
+		doc := topology.Document{ClusterID: identity.ClusterID, Placement: g.opts.Placement, ChangedBy: identity.NodeName, Origin: topology.OriginFounding, CreatedAt: now, Groups: []topology.Group{{ID: topology.MetaGroupID, NextReplicaID: 1, VoterPolicy: &policy, CreatedAt: now, UpdatedAt: now}}}
+		roles := g.opts.foundingRoles()
 		for _, founder := range g.opts.Founders {
 			node := founder.Node
 			node.CreatedAt = now
@@ -160,6 +161,8 @@ func (g *Group) bootstrap(ctx context.Context) error {
 			if err := doc.SetMemberID(node.Name, founder.MemberID, now); err != nil {
 				return err
 			}
+			replica := &doc.MetaGroup().Replicas[len(doc.MetaGroup().Replicas)-1]
+			replica.Role, replica.PinnedLearner = roles[node.Name], founder.PinnedLearner
 		}
 		if _, err := g.propose(ctx, metaengine.ProposeDocument{Doc: doc, ExpectedVersion: 0}); err != nil {
 			return err

@@ -504,6 +504,7 @@ func authorizedStepForCurrent(coordinator OperatorCoordinator, ctx context.Conte
 		OperatorID: ex.ID, Version: ex.Version, Attempt: ex.Attempt,
 		StepSeq: step.Seq, Kind: step.Kind, GroupID: step.GroupID,
 		NodeName: step.NodeName, ReplicaID: step.ReplicaID,
+		TransferNodeName: step.TransferNodeName, TransferReplicaID: step.TransferReplicaID,
 	}
 }
 
@@ -660,9 +661,6 @@ func caughtUpStatus(status GroupStatus, replicaID uint64) (bool, string) {
 	if !ok {
 		return false, "learner progress is unavailable"
 	}
-	if progress.Match > status.Commit {
-		return false, "learner match exceeds group commit"
-	}
 	// RecentActive gates only a LAGGING learner. The bit is reset by every
 	// CheckQuorum pass and set again on the next response, so on an idle group
 	// a caught-up learner (match == commit) samples false in a window every
@@ -672,7 +670,7 @@ func caughtUpStatus(status GroupStatus, replicaID uint64) (bool, string) {
 	if !progress.RecentActive && progress.Match < status.Commit {
 		return false, "learner is not recently active"
 	}
-	if status.Commit-progress.Match > membership.PromotionLagLimit {
+	if progress.Match < status.Commit && status.Commit-progress.Match > membership.PromotionLagLimit {
 		return false, fmt.Sprintf("learner lag %d exceeds limit %d", status.Commit-progress.Match, membership.PromotionLagLimit)
 	}
 	return true, ""

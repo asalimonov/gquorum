@@ -58,7 +58,13 @@ func assertFoundedTopology(t *testing.T, ctx context.Context, c *Cluster) topolo
 			if doc.Version < 3 || len(doc.Nodes) != len(c.Spec.Nodes) || doc.MetaGroup() == nil || len(doc.MetaGroup().Replicas) != len(c.Spec.Nodes) || len(doc.LoadGroups()) != 2 || doc.Group("demo") == nil || doc.Group("workers") == nil {
 				return false, fmt.Errorf("incomplete founding document: %+v", doc)
 			}
-			if doc.Placement.MinReplicas != 2 || doc.Placement.MaxReplicas != 3 || len(doc.Group("demo").Replicas) != 3 || len(doc.Group("workers").Replicas) != 2 {
+			eligibleWorkers := 0
+			for _, n := range c.Spec.Nodes {
+				if n.Type == "worker" {
+					eligibleWorkers++
+				}
+			}
+			if doc.Placement.MinReplicas != 2 || doc.Placement.MaxReplicas != 3 || len(doc.Group("demo").Replicas) != 3 || len(doc.Group("workers").Replicas) != eligibleWorkers || doc.Group("workers").VoterPolicy == nil || doc.Group("workers").VoterPolicy.TargetVoters != 2 {
 				return true, fmt.Errorf("caller founding placement changed: %+v", doc)
 			}
 			for _, declared := range c.Spec.Nodes {
@@ -117,7 +123,9 @@ func assertFoundedTopology(t *testing.T, ctx context.Context, c *Cluster) topolo
 					if err != nil {
 						return false, err
 					}
-					if !native.Found || native.ReplicaID != replica.ReplicaID || len(native.Status.ConfState.Voters) != len(group.Replicas) || !slices.Contains(native.Status.ConfState.Voters, replica.ReplicaID) {
+					voters := len(doc.VotersOf(group.ID))
+					isVoter := replica.Role == topology.ReplicaVoter
+					if !native.Found || native.ReplicaID != replica.ReplicaID || len(native.Status.ConfState.Voters) != voters || len(native.Status.ConfState.Learners) != len(group.Replicas)-voters || slices.Contains(native.Status.ConfState.Voters, replica.ReplicaID) != isVoter || slices.Contains(native.Status.ConfState.Learners, replica.ReplicaID) == isVoter {
 						return false, fmt.Errorf("native founding load membership differs: %+v", native)
 					}
 				}

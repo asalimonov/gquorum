@@ -11,18 +11,33 @@ is a separate application; fixture controls and integration tests stay here.
 Test controls live in `hooks_cluster.go`. They provide direct
 local replica and actual storage identities, membership/materialized values, durable snapshot size and
 index, received-snapshot counts, exact successful effect receipts and cancelable
-effect barriers. Barriers can hold prepare, promote, stop, cleanup or delete
+effect barriers. Barriers can hold prepare, add learner, promote, demote,
+leadership transfer, stop, cleanup or delete
 effects. Released effects recheck their complete authorization before changing
 state. The transport also routes local actions through the Node receiver, so
 fault injection covers the same path on every host. RPC cancellation releases its own wait; the armed barrier
 remains for a later retry until the test explicitly releases it.
 
+Action errors preserve structured `membership.SafetyRefusal` details in the
+existing reply data envelope, including on loopback calls. A transient loss of
+post-change live quorum therefore keeps the approved operator waiting instead
+of becoming an unclassified terminal failure. Unknown detail schemas retain the
+conservative unstructured refusal; error messages are never parsed for policy.
+
 Local inspection includes the library's native proposal-admission observation.
 `POST /internal/test/propose/{group}/{replica}` submits to the exact local
-engine without aggregate peer probes. Its bounded one-minute HTTP lifetime
-allows the thirty-second pending-waiter test; ordinary example requests keep
-their ten-second deadline. Request cancellation still participates in the
+engine without aggregate peer probes. The thirty-second pending-waiter test
+explicitly sets `-proposal-timeout=1m`; other cases use the library's thirty-second
+default. The control's HTTP deadline is one minute and ordinary application
+requests keep their ten-second deadline. Request cancellation participates in the
 application's owned effect lifetime and engine waiter cleanup.
+
+Approved load learners can serve local observations and forward writes through
+their Raft leader. The serving gate requires the exact Active assignment and
+matching native role, so prepared replicas cannot serve early. Bootstrap gives
+the `workers` group an explicit two-voter target and places learners on remaining
+eligible hosts. Group administration also exposes `voter-policy`, `hosting` and
+`pinned-learner` mutations through the fixture's public API adapter.
 
 `hooks_wal_cluster.go` wraps the actual load store with cancelable write stalls
 and bounded transient-failure injection, keyed by group and exact replica ID.

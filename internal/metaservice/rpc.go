@@ -123,6 +123,12 @@ func (g *Group) Call(ctx context.Context, method string, header *metapb.Header, 
 	if header.MemberId == 0 || g.memberNode(header.MemberId) != header.NodeName {
 		return metatransport.Reply(fault.ErrIdentityMismatch)
 	}
+	if method == "MetaReplicaMetrics" {
+		if len(data) != 0 {
+			return metatransport.Reply(fault.ErrInvalid)
+		}
+		return g.localReplicaMetrics(ctx, header)
+	}
 	if !g.IsLeader() {
 		return g.leaderReply(fault.ErrNotLeader)
 	}

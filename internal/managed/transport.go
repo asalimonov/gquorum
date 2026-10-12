@@ -139,11 +139,15 @@ func (h *Host) ReceiveRaft(ctx context.Context, batch load.RaftBatch) error {
 	}
 	core := slot.core
 	stopping := slot.state == "stopping" || slot.released
+	published := slot.state == "ready" && slot.handle != nil && !slot.released
 	h.mu.Unlock()
 	if core == nil || stopping || !core.Running() {
 		return fault.ErrReplicaNotReady
 	}
 	for _, msg := range batch.Messages {
+		if msg.Type == raftpb.MsgProp && !published {
+			return fault.ErrReplicaNotReady
+		}
 		if err := core.Step(ctx, msg); err != nil {
 			return err
 		}
@@ -187,6 +191,8 @@ func (h *Host) ReadReplica(ctx context.Context, query load.ReplicaQuery) (load.R
 	// Advertising it early could advance its operator and invalidate that check.
 	if slot.state == "ready" && slot.handle != nil && slot.core != nil && !slot.released && slot.core.Running() {
 		result.Found, result.Status = true, slot.core.Status()
+		sample := slot.core.Metrics().Sample
+		result.Metrics = &sample
 	}
 	return result, nil
 }

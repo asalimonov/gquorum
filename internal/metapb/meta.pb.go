@@ -469,7 +469,7 @@ const file_internal_metapb_meta_proto_rawDesc = "" +
 	"\x05final\x18\x05 \x01(\bR\x05final\"R\n" +
 	"\vMetaRequest\x12/\n" +
 	"\x06header\x18\x01 \x01(\v2\x17.gquorum.meta.v1.HeaderR\x06header\x12\x12\n" +
-	"\x04data\x18\x02 \x01(\fR\x04data2\xfc\x05\n" +
+	"\x04data\x18\x02 \x01(\fR\x04data2\xc8\x06\n" +
 	"\x04Meta\x12H\n" +
 	"\x0eStreamMessages\x12\x1c.gquorum.meta.v1.RaftMessage\x1a\x16.gquorum.meta.v1.Reply(\x01\x12H\n" +
 	"\fSendSnapshot\x12\x1e.gquorum.meta.v1.SnapshotChunk\x1a\x16.gquorum.meta.v1.Reply(\x01\x12<\n" +
@@ -478,7 +478,8 @@ const file_internal_metapb_meta_proto_rawDesc = "" +
 	"\tKeepAlive\x12\x1c.gquorum.meta.v1.MetaRequest\x1a\x16.gquorum.meta.v1.Reply\x12D\n" +
 	"\fIdentityPing\x12\x1c.gquorum.meta.v1.MetaRequest\x1a\x16.gquorum.meta.v1.Reply\x12B\n" +
 	"\n" +
-	"MetaStatus\x12\x1c.gquorum.meta.v1.MetaRequest\x1a\x16.gquorum.meta.v1.Reply\x12C\n" +
+	"MetaStatus\x12\x1c.gquorum.meta.v1.MetaRequest\x1a\x16.gquorum.meta.v1.Reply\x12J\n" +
+	"\x12MetaReplicaMetrics\x12\x1c.gquorum.meta.v1.MetaRequest\x1a\x16.gquorum.meta.v1.Reply\x12C\n" +
 	"\vMetaControl\x12\x1c.gquorum.meta.v1.MetaRequest\x1a\x16.gquorum.meta.v1.Reply\x12C\n" +
 	"\vProposeMeta\x12\x1c.gquorum.meta.v1.MetaRequest\x1a\x16.gquorum.meta.v1.Reply\x12D\n" +
 	"\fApplyVersion\x12\x1c.gquorum.meta.v1.MetaRequest\x1a\x16.gquorum.meta.v1.Reply\x12B\n" +
@@ -518,23 +519,25 @@ var file_internal_metapb_meta_proto_depIdxs = []int32{
 	5,  // 8: gquorum.meta.v1.Meta.KeepAlive:input_type -> gquorum.meta.v1.MetaRequest
 	5,  // 9: gquorum.meta.v1.Meta.IdentityPing:input_type -> gquorum.meta.v1.MetaRequest
 	5,  // 10: gquorum.meta.v1.Meta.MetaStatus:input_type -> gquorum.meta.v1.MetaRequest
-	5,  // 11: gquorum.meta.v1.Meta.MetaControl:input_type -> gquorum.meta.v1.MetaRequest
-	5,  // 12: gquorum.meta.v1.Meta.ProposeMeta:input_type -> gquorum.meta.v1.MetaRequest
-	5,  // 13: gquorum.meta.v1.Meta.ApplyVersion:input_type -> gquorum.meta.v1.MetaRequest
-	5,  // 14: gquorum.meta.v1.Meta.ParkedRead:input_type -> gquorum.meta.v1.MetaRequest
-	2,  // 15: gquorum.meta.v1.Meta.StreamMessages:output_type -> gquorum.meta.v1.Reply
-	2,  // 16: gquorum.meta.v1.Meta.SendSnapshot:output_type -> gquorum.meta.v1.Reply
-	2,  // 17: gquorum.meta.v1.Meta.Join:output_type -> gquorum.meta.v1.Reply
-	2,  // 18: gquorum.meta.v1.Meta.JoinReady:output_type -> gquorum.meta.v1.Reply
-	2,  // 19: gquorum.meta.v1.Meta.KeepAlive:output_type -> gquorum.meta.v1.Reply
-	2,  // 20: gquorum.meta.v1.Meta.IdentityPing:output_type -> gquorum.meta.v1.Reply
-	2,  // 21: gquorum.meta.v1.Meta.MetaStatus:output_type -> gquorum.meta.v1.Reply
-	2,  // 22: gquorum.meta.v1.Meta.MetaControl:output_type -> gquorum.meta.v1.Reply
-	2,  // 23: gquorum.meta.v1.Meta.ProposeMeta:output_type -> gquorum.meta.v1.Reply
-	2,  // 24: gquorum.meta.v1.Meta.ApplyVersion:output_type -> gquorum.meta.v1.Reply
-	2,  // 25: gquorum.meta.v1.Meta.ParkedRead:output_type -> gquorum.meta.v1.Reply
-	15, // [15:26] is the sub-list for method output_type
-	4,  // [4:15] is the sub-list for method input_type
+	5,  // 11: gquorum.meta.v1.Meta.MetaReplicaMetrics:input_type -> gquorum.meta.v1.MetaRequest
+	5,  // 12: gquorum.meta.v1.Meta.MetaControl:input_type -> gquorum.meta.v1.MetaRequest
+	5,  // 13: gquorum.meta.v1.Meta.ProposeMeta:input_type -> gquorum.meta.v1.MetaRequest
+	5,  // 14: gquorum.meta.v1.Meta.ApplyVersion:input_type -> gquorum.meta.v1.MetaRequest
+	5,  // 15: gquorum.meta.v1.Meta.ParkedRead:input_type -> gquorum.meta.v1.MetaRequest
+	2,  // 16: gquorum.meta.v1.Meta.StreamMessages:output_type -> gquorum.meta.v1.Reply
+	2,  // 17: gquorum.meta.v1.Meta.SendSnapshot:output_type -> gquorum.meta.v1.Reply
+	2,  // 18: gquorum.meta.v1.Meta.Join:output_type -> gquorum.meta.v1.Reply
+	2,  // 19: gquorum.meta.v1.Meta.JoinReady:output_type -> gquorum.meta.v1.Reply
+	2,  // 20: gquorum.meta.v1.Meta.KeepAlive:output_type -> gquorum.meta.v1.Reply
+	2,  // 21: gquorum.meta.v1.Meta.IdentityPing:output_type -> gquorum.meta.v1.Reply
+	2,  // 22: gquorum.meta.v1.Meta.MetaStatus:output_type -> gquorum.meta.v1.Reply
+	2,  // 23: gquorum.meta.v1.Meta.MetaReplicaMetrics:output_type -> gquorum.meta.v1.Reply
+	2,  // 24: gquorum.meta.v1.Meta.MetaControl:output_type -> gquorum.meta.v1.Reply
+	2,  // 25: gquorum.meta.v1.Meta.ProposeMeta:output_type -> gquorum.meta.v1.Reply
+	2,  // 26: gquorum.meta.v1.Meta.ApplyVersion:output_type -> gquorum.meta.v1.Reply
+	2,  // 27: gquorum.meta.v1.Meta.ParkedRead:output_type -> gquorum.meta.v1.Reply
+	16, // [16:28] is the sub-list for method output_type
+	4,  // [4:16] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name
 	4,  // [4:4] is the sub-list for extension extendee
 	0,  // [0:4] is the sub-list for field type_name

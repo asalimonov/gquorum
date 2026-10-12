@@ -1,0 +1,141 @@
+//go:build !functional
+
+package policy
+
+import (
+	"context"
+	"fmt"
+	"reflect"
+	"testing"
+	"time"
+
+	"github.com/asalimonov/gquorum/metrics"
+	"github.com/asalimonov/gquorum/storage"
+	"github.com/asalimonov/gquorum/topology"
+	"go.etcd.io/raft/v3/raftpb"
+)
+
+func voterInput() ScheduleInput {
+	p := topology.DefaultVoterPolicy()
+	doc := topology.Document{ClusterID: "cluster", Version: 1, Groups: []topology.Group{{ID: topology.MetaGroupID, VoterPolicy: &p}}}
+	group := metrics.GroupObservation{GroupID: topology.MetaGroupID, LeaderID: 1, Term: 2, MembershipDigest: "members", State: metrics.Current, TargetVoters: 3, NativeVoters: 3, EligibleStandbys: 2}
+	for i := uint64(1); i <= 5; i++ {
+		name := fmt.Sprintf("n%d", i)
+		role := topology.ReplicaVoter
+		if i > 3 {
+			role = topology.ReplicaLearner
+		}
+		doc.Nodes = append(doc.Nodes, topology.Node{Name: name, Type: "worker", State: topology.NodeActive})
+		doc.Groups[0].Replicas = append(doc.Groups[0].Replicas, topology.Replica{NodeName: name, ReplicaID: i, Role: role})
+		stamp := metrics.Stamp{State: metrics.Current, Sequence: 10}
+		observation := metrics.ReplicaObservation{State: metrics.Current, Reachability: "alive", Sample: metrics.ReplicaSample{Identity: metrics.ReplicaIdentity{ClusterID: "cluster", GroupID: topology.MetaGroupID, NodeName: name, ReplicaID: i, InstanceID: name + "-process", RunID: name + "-run"}, Meter: stamp, Raft: stamp, Writer: stamp, Ready: true, Running: true, LeaderID: 1, Term: 2, Voters: []uint64{1, 2, 3}, Learners: []uint64{4, 5}, MembershipDigest: "members"}, ReplicationLag: metrics.UnsignedValue{State: metrics.Current}, ApplyBacklog: metrics.UnsignedValue{State: metrics.Current}, Evidence: metrics.Evidence{StandbyReadyFor: metrics.DurationValue{State: metrics.Current, Value: time.Minute}}}
+		if i == 3 {
+			observation.Reachability = "unreachable"
+			observation.Evidence.UnavailableFor = metrics.DurationValue{State: metrics.Current, Value: 30 * time.Second}
+		}
+		group.Replicas = append(group.Replicas, observation)
+	}
+	return ScheduleInput{Active: doc, Latest: doc.Clone(), Target: doc.Clone(), Metrics: metrics.ClusterSnapshot{ActiveVersion: 1, IsCollectorLeader: true, CollectorRunID: "collector", Groups: []metrics.GroupObservation{group}}, Status: map[string]topology.GroupStatus{topology.MetaGroupID: {GroupID: topology.MetaGroupID, Found: true, LeaderID: 1, Term: 2, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}, Learners: []uint64{4, 5}}, HealthKnown: true, LiveVoters: map[uint64]bool{1: true, 2: true, 3: false, 4: true, 5: true}}}}
+}
+func TestVoterPolicySelectsOneStableLearnerAndPreservesHealthyVoters(t *testing.T) {
+	t.Parallel()
+	in := voterInput()
+	before := in.Clone()
+	p, _ := NewRestoreDegraded(RestoreDegradedOptions{})
+	got, err := p.Schedule(context.Background(), in)
+	if err != nil || got.Action == nil || got.Action.Kind != ReconfigureVoters || got.Action.VoterChange.Promote.ReplicaID != 4 || got.Action.VoterChange.Demote.ReplicaID != 3 {
+		t.Fatalf("decision %+v %v", got, err)
+	}
+	if !reflect.DeepEqual(in, before) {
+		t.Fatal("mutated input")
+	}
+	in.Metrics.Groups[0].Replicas[2].Evidence.UnavailableFor = metrics.DurationValue{State: metrics.Current}
+	got, err = p.Schedule(context.Background(), in)
+	if err != nil || got.Action != nil || got.Reason != "converged" {
+		t.Fatalf("rotated healthy seats %+v %v", got, err)
+	}
+}
+func TestVoterPolicyMandatoryGuards(t *testing.T) {
+	t.Parallel()
+	cases := map[string]func(*ScheduleInput){
+		"stale group":       func(in *ScheduleInput) { in.Metrics.Groups[0].State = metrics.Stale },
+		"wrong active":      func(in *ScheduleInput) { in.Metrics.ActiveVersion++ },
+		"follower observer": func(in *ScheduleInput) { in.Metrics.IsCollectorLeader = false },
+		"lost quorum":       func(in *ScheduleInput) { in.Status[topology.MetaGroupID].LiveVoters[2] = false },
+		"changed leader": func(in *ScheduleInput) {
+			s := in.Status[topology.MetaGroupID]
+			s.Term++
+			in.Status[topology.MetaGroupID] = s
+		},
+		"failure too short": func(in *ScheduleInput) {
+			in.Metrics.Groups[0].Replicas[2].Evidence.UnavailableFor.Value = 29 * time.Second
+		},
+		"all pinned": func(in *ScheduleInput) {
+			in.Active.Groups[0].Replicas[3].PinnedLearner = true
+			in.Active.Groups[0].Replicas[4].PinnedLearner = true
+		},
+		"both cooling": func(in *ScheduleInput) {
+			for i := 3; i <= 4; i++ {
+				in.Metrics.Groups[0].Replicas[i].Evidence.DemotionCooldownRemaining = time.Second
+			}
+		},
+		"group cooling": func(in *ScheduleInput) { in.Metrics.Groups[0].CooldownRemaining = time.Minute },
+		"both stale writer": func(in *ScheduleInput) {
+			for i := 3; i <= 4; i++ {
+				in.Metrics.Groups[0].Replicas[i].Sample.Writer.State = metrics.Stale
+			}
+		},
+		"stability too short": func(in *ScheduleInput) {
+			for i := 3; i <= 4; i++ {
+				in.Metrics.Groups[0].Replicas[i].Evidence.StandbyReadyFor.Value = 59 * time.Second
+			}
+		},
+		"held learners": func(in *ScheduleInput) {
+			for i := uint64(4); i <= 5; i++ {
+				in.Held = append(in.Held, storage.Identity{ClusterID: "cluster", GroupID: topology.MetaGroupID, NodeName: fmt.Sprintf("n%d", i), ReplicaID: i})
+			}
+		},
+	}
+	for name, edit := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			in := voterInput()
+			edit(&in)
+			p, _ := NewRestoreDegraded(RestoreDegradedOptions{})
+			got, err := p.Schedule(context.Background(), in)
+			if err != nil || got.Action != nil {
+				t.Fatalf("unsafe decision %+v %v", got, err)
+			}
+		})
+	}
+}
+func TestVoterPolicyCooldownExceptionAndDeficit(t *testing.T) {
+	t.Parallel()
+	in := voterInput()
+	p, _ := NewRestoreDegraded(RestoreDegradedOptions{})
+	in.Metrics.Groups[0].CooldownRemaining = time.Minute
+	in.Metrics.Groups[0].Replicas[2].Evidence.Reasons = []string{"new_failure"}
+	in.Active.Groups[0].Replicas[3].PinnedLearner = true
+	got, err := p.Schedule(context.Background(), in)
+	if err != nil || got.Action == nil || got.Action.VoterChange.Promote.ReplicaID != 5 {
+		t.Fatalf("exception failed %+v %v", got, err)
+	}
+	in.Active.Groups[0].VoterPolicy.TargetVoters = 4
+	in.Metrics.Groups[0].TargetVoters = 4
+	in.Metrics.Groups[0].Replicas[2].Evidence.Reasons = nil
+	got, err = p.Schedule(context.Background(), in)
+	if err != nil || got.Action == nil || got.Action.VoterChange.Promote == nil || got.Action.VoterChange.Demote != nil {
+		t.Fatalf("cooldown blocked deficit %+v %v", got, err)
+	}
+}
+func TestScheduleInputOwnsMetricsAndSwitchRecords(t *testing.T) {
+	t.Parallel()
+	in := voterInput()
+	in.Switches = []topology.VoterSwitchState{{GroupID: topology.MetaGroupID, Replicas: []topology.RoleChangeRecord{{Index: 7}}}}
+	copy := in.Clone()
+	copy.Metrics.Groups[0].Replicas[0].Sample.Voters[0] = 99
+	copy.Switches[0].Replicas[0].Index = 99
+	if in.Metrics.Groups[0].Replicas[0].Sample.Voters[0] != 1 || in.Switches[0].Replicas[0].Index != 7 {
+		t.Fatal("callback aliases evidence")
+	}
+}

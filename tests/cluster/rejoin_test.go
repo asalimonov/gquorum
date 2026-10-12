@@ -204,10 +204,23 @@ func assertRejoinedIdentities(t *testing.T, ctx context.Context, c *Cluster, bef
 	if err := exactOwnedValues(ctx, c, after, "work", values); err != nil {
 		t.Fatal("fresh identity failed snapshot recovery", err)
 	}
+	wantVoters, wantLearners := []uint64{}, []uint64{}
+	for _, replica := range after.MetaGroup().Replicas {
+		if replica.Role == topology.ReplicaVoter {
+			wantVoters = append(wantVoters, replica.ReplicaID)
+		} else {
+			wantLearners = append(wantLearners, replica.ReplicaID)
+		}
+	}
+	slices.Sort(wantVoters)
+	slices.Sort(wantLearners)
 	for _, node := range c.Spec.Nodes {
 		native, err := c.Local(ctx, node.Name, topology.MetaGroupID)
-		if err != nil || !native.Found || len(native.Status.ConfState.Voters) != len(c.Spec.Nodes) || slices.Contains(native.Status.ConfState.Voters, previous.Identity.MemberID) || !slices.Contains(native.Status.ConfState.Voters, after.MemberID("node3")) {
-			t.Fatal("fresh meta voter set did not converge", native, err)
+		gotVoters, gotLearners := slices.Clone(native.Status.ConfState.Voters), slices.Clone(native.Status.ConfState.Learners)
+		slices.Sort(gotVoters)
+		slices.Sort(gotLearners)
+		if err != nil || !native.Found || !slices.Equal(gotVoters, wantVoters) || !slices.Equal(gotLearners, wantLearners) || slices.Contains(gotVoters, previous.Identity.MemberID) || slices.Contains(gotLearners, previous.Identity.MemberID) {
+			t.Fatal("fresh meta membership did not match the approved roles", native, err)
 		}
 		for _, old := range before.MetaGroup().Replicas {
 			if old.NodeName != "node3" && after.MemberID(old.NodeName) != old.ReplicaID {
@@ -330,6 +343,18 @@ func excludedSameDiskRejoin(t *testing.T, size int) {
 	}
 	if victim.Volume != volume {
 		t.Fatal("retained restart replaced the disk")
+	}
+	// HTTP starts before Node finishes loading and publishing its retained meta
+	// identity. Wait for the actual parked lifecycle, not just an open port,
+	// before asserting the recovered pin. This also proves admission was refused.
+	if err := Poll(ctx, func() (bool, error) {
+		status, err := c.Status(ctx, "node3")
+		if err != nil {
+			return false, err
+		}
+		return status.Lifecycle == "parked", nil
+	}); err != nil {
+		t.Fatal("retained excluded process did not reach parked state", err)
 	}
 	parkedIdentity, err := c.Local(ctx, "node3", topology.MetaGroupID)
 	if err != nil || parkedIdentity.Identity.MemberID != previous.Identity.MemberID || parkedIdentity.Identity.InstanceID == previous.Identity.InstanceID {

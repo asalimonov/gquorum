@@ -21,6 +21,16 @@ func TestDocumentStatusPreviewGuardsAndHistoryThreeNodes(t *testing.T) {
 
 func assertAPIViews(t *testing.T, ctx context.Context, c *Cluster, doc topology.Document) {
 	t.Helper()
+	voters, learners := []uint64{}, []uint64{}
+	for _, replica := range doc.MetaGroup().Replicas {
+		if replica.Role == topology.ReplicaVoter {
+			voters = append(voters, replica.ReplicaID)
+		} else {
+			learners = append(learners, replica.ReplicaID)
+		}
+	}
+	slices.Sort(voters)
+	slices.Sort(learners)
 	for _, node := range c.Nodes() {
 		for _, view := range []string{"latest", "target", "active"} {
 			observed, err := c.Document(ctx, node.Spec.Name, view)
@@ -29,7 +39,9 @@ func assertAPIViews(t *testing.T, ctx context.Context, c *Cluster, doc topology.
 			}
 		}
 		native, err := c.Local(ctx, node.Spec.Name, topology.MetaGroupID)
-		if err != nil || len(native.Status.ConfState.Voters) != len(c.Spec.Nodes) || len(native.Status.ConfState.Learners) != 0 {
+		slices.Sort(native.Status.ConfState.Voters)
+		slices.Sort(native.Status.ConfState.Learners)
+		if err != nil || !slices.Equal(native.Status.ConfState.Voters, voters) || !slices.Equal(native.Status.ConfState.Learners, learners) {
 			t.Fatal("operation changed native meta membership", native, err)
 		}
 	}
@@ -225,6 +237,13 @@ func TestNodeLifecyclePlacementAndLeaderTransferThreeNodes(t *testing.T) {
 func assertActualAPIMembership(t *testing.T, ctx context.Context, c *Cluster, doc topology.Document, loadVoters int) {
 	t.Helper()
 	want := make([]uint64, 0, loadVoters)
+	wantLearners := []uint64{}
+	for _, replica := range doc.Group("work").Replicas {
+		if replica.Role == topology.ReplicaLearner {
+			wantLearners = append(wantLearners, replica.ReplicaID)
+		}
+	}
+	slices.Sort(wantLearners)
 	for _, replica := range doc.VotersOf("work") {
 		want = append(want, replica.ReplicaID)
 	}
@@ -240,8 +259,10 @@ func assertActualAPIMembership(t *testing.T, ctx context.Context, c *Cluster, do
 		if err := Poll(ctx, func() (bool, error) {
 			observed, err := groupStatus(ctx, c, node.Spec.Name, "work")
 			got := slices.Clone(observed.ConfState.Voters)
+			learners := slices.Clone(observed.ConfState.Learners)
 			slices.Sort(got)
-			return slices.Equal(got, want) && len(observed.ConfState.Learners) == 0 && observed.LeaderID != 0, err
+			slices.Sort(learners)
+			return slices.Equal(got, want) && slices.Equal(learners, wantLearners) && observed.LeaderID != 0, err
 		}); err != nil {
 			t.Fatal("declared placement did not govern actual membership", node.Spec.Name, err)
 		}
@@ -366,6 +387,11 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 		t.Fatal("meta restart silently activated the drained application", err)
 	}
 	capRule := topology.PlacementRule{MinReplicas: 1, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}}
+	if _, err := c.Mutate(ctx, "node2", "PUT", "/api/groups/work/voter-policy", map[string]any{
+		"policy": voterPolicy(2), "mutation": gquorum.MutationOptions{Approve: true, Actor: "operator"},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	capped, err := c.Mutate(ctx, "node2", "PUT", "/api/placement", globalPlacementBody(capRule, gquorum.MutationOptions{Approve: true, Actor: "operator"}))
 	if err != nil {
 		t.Fatal(err)
@@ -375,18 +401,36 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 		t.Fatal("activation failed or changed its policy/meta pin", activated, err)
 	}
 	assertActualAPIMembership(t, ctx, c, activated.Document, 2)
-	response, err = c.Request(ctx, "node3", "GET", "/api/load/work/keys/before-lifecycle", nil, 0)
-	if err := requireStatus(response, err, 503); err != nil {
-		t.Fatal("capped activation silently regrew a local replica", err)
+	// Voter bounds no longer cap hosting: the third eligible host returns as a
+	// learner and can serve its recovered state without increasing quorum.
+	if len(activated.Document.Group("work").Replicas) != 3 {
+		t.Fatal("all-host placement omitted the reactivated learner")
+	}
+	if err := c.WaitValue(ctx, "node3", "work", "before-lifecycle", "retained"); err != nil {
+		t.Fatal(err)
 	}
 	growRule := capRule
 	growRule.MaxReplicas = 3
 	grown, growPlan := stagePlan("node2", "PUT", "/api/placement", globalPlacementBody(growRule, gquorum.MutationOptions{Actor: "operator"}), activated.Document.Version)
+	if len(growPlan.Steps) != 0 {
+		t.Fatal("placement bound alone changed roles", growPlan)
+	}
+	desired := grown.Document.Clone()
+	desired.Group("work").VoterPolicy.TargetVoters = 3
+	for i := range desired.Group("work").Replicas {
+		if desired.Group("work").Replicas[i].NodeName == "node3" {
+			desired.Group("work").Replicas[i].Role = topology.ReplicaVoter
+		}
+	}
+	grown, growPlan = stagePlan("node2", "PUT", "/api/topology", desired, grown.Document.Version)
 	fresh := replicaID(grown.Document, "work", "node3")
 	if fresh <= replicaID(base, "work", "node3") {
 		t.Fatal("policy growth reused a retired identity", grown)
 	}
-	for _, kind := range []topology.StepKind{topology.StepPrepareReplica, topology.StepAddLearner, topology.StepWaitCaughtUp, topology.StepPromoteVoter} {
+	if fresh != replicaID(activated.Document, "work", "node3") {
+		t.Fatal("promotion changed an existing learner identity")
+	}
+	for _, kind := range []topology.StepKind{topology.StepWaitCaughtUp, topology.StepPromoteVoter} {
 		if !slices.ContainsFunc(growPlan.Steps, func(s topology.Step) bool {
 			return s.Kind == kind && s.GroupID == "work" && s.NodeName == "node3" && s.ReplicaID == fresh
 		}) {

@@ -263,6 +263,9 @@ func TestConcurrentAuthorizedCleanupRetriesAreIdempotent(t *testing.T) {
 	spec := matrixSpec(3)
 	spec.Bootstrap = true
 	ctx, c := performanceClusterSpec(t, spec)
+	// Bootstrap creates both declared application groups asynchronously; wait
+	// for their convergence before taking the CAS version used for deletion.
+	assertFoundedTopology(t, ctx, c)
 	if err := c.SetBarrier(ctx, "node3", "demo", topology.StepCleanupReplicaState, true); err != nil {
 		t.Fatal(err)
 	}
@@ -570,7 +573,7 @@ func TestMetaCallerEffectCompletionLostAcrossLeaderReplacement(t *testing.T) {
 	}
 	// Stage on the transferred leader, then retry only this exact version's
 	// approval through the follower while its leader observation catches up.
-	response, err = c.Request(ctx, "node1", "POST", "/api/groups", map[string]any{"group": gquorum.GroupSpec{ID: "lost-ack", Nodes: []string{"node2", "node3"}, Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 2}}, "mutation": gquorum.MutationOptions{}}, base.Version)
+	response, err = c.Request(ctx, "node1", "POST", "/api/groups", map[string]any{"group": gquorum.GroupSpec{ID: "lost-ack", Nodes: []string{"node2", "node3"}, VoterPolicy: voterPolicy(2), Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 2}}, "mutation": gquorum.MutationOptions{}}, base.Version)
 	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
 	}

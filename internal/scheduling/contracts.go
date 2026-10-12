@@ -2,6 +2,7 @@ package scheduling
 
 import (
 	"context"
+	"github.com/asalimonov/gquorum/metrics"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -33,5 +34,12 @@ type Host interface {
 	PlanFor(context.Context, topology.Document) (topology.Plan, error)
 	Approve(context.Context, uint64) (topology.OperatorID, error)
 	CommitRepair(context.Context, topology.Document, uint64, topology.Plan) (topology.OperatorID, error)
+	RefreshObservations(context.Context) error
+	// ResetObservations is an internal, in-memory reset invoked under the
+	// scheduler gate before another enabled tick can reuse temporal evidence.
+	ResetObservations()
+	Observations() metrics.ClusterSnapshot
+	VoterSwitches() []topology.VoterSwitchState
+	CommitVoterChange(context.Context, topology.VoterChange, topology.Document, uint64, topology.Plan) (topology.OperatorID, error)
 	WakeOperator()
 }

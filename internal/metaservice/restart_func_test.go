@@ -88,6 +88,42 @@ func TestPublicMetaRestartUsesPinReplaysTailAndRefusesChangedRules(t *testing.T)
 	}
 }
 
+func TestRetainedSingletonDoesNotAcquireFreshVoterDefault(t *testing.T) {
+	t.Parallel()
+	old := readyPublic(t, singleMetaFixture(t))
+	mustStop := func(g *Group) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := g.Stop(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustStop(old)
+	opts := restartOptions(t, old)
+	opts.VoterPolicy = nil
+	opts.Founders = nil
+	// MaxNodes is one. Only fresh default founding would require target three;
+	// retained topology remains the authority when no constructor policy is set.
+	restarted, err := New(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { mustStop(restarted) })
+	if err := restarted.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	if err := restarted.WaitReady(ctx); err != nil {
+		t.Fatal(err)
+	}
+	active, err := restarted.Active(ctx)
+	if err != nil || active.MetaGroup().VoterPolicy.TargetVoters != 1 {
+		t.Fatal(active, err)
+	}
+}
+
 func TestPublicMetaParentCancellationJoinsWorkers(t *testing.T) {
 	t.Parallel()
 	old := readyPublic(t, singleMetaFixture(t))

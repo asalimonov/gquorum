@@ -18,6 +18,7 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/raftengine"
+	"github.com/asalimonov/gquorum/metrics"
 	"github.com/asalimonov/gquorum/policy"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
@@ -43,6 +44,8 @@ func clusterDocument(load bool) topology.Document {
 }
 
 type testHost struct {
+	limits                                               topology.Limits
+	observations                                         metrics.ClusterSnapshot
 	t                                                    *testing.T
 	machine                                              *metaengine.Machine
 	index                                                uint64
@@ -132,7 +135,7 @@ func (h *testHost) PlanFor(_ context.Context, doc topology.Document) (topology.P
 		p.Version = doc.Version
 		return p, nil
 	}
-	return topology.BuildPlan(h.machine.Active(), doc, h.status, topology.Rules{SchemaVersion: 1, Limits: (topology.Limits{}).WithDefaults()})
+	return topology.BuildPlan(h.machine.Active(), doc, h.status, topology.Rules{SchemaVersion: 1, Limits: h.limits.WithDefaults()})
 }
 func (h *testHost) Approve(ctx context.Context, version uint64) (topology.OperatorID, error) {
 	if h.approveErr != nil {
@@ -637,5 +640,29 @@ func TestDriverSettingsValidation(t *testing.T) {
 	}
 	if _, err := New(Config{}); !errors.Is(err, fault.ErrInvalid) {
 		t.Fatal(err)
+	}
+}
+
+func (h *testHost) Observations() metrics.ClusterSnapshot      { return h.observations.Clone() }
+func (h *testHost) VoterSwitches() []topology.VoterSwitchState { return h.machine.VoterSwitches() }
+func (h *testHost) CommitVoterChange(ctx context.Context, change topology.VoterChange, doc topology.Document, expected uint64, plan topology.Plan) (topology.OperatorID, error) {
+	if h.beforeCommit != nil {
+		h.beforeCommit()
+	}
+	result, err := h.apply(ctx, metaengine.CommitVoterChangeProposal{Change: change, Doc: doc, ExpectedVersion: expected, Plan: plan, At: doc.Group(change.GroupID).UpdatedAt})
+	if err == nil {
+		h.commits++
+	}
+	return result.OperatorID, err
+}
+
+func (h *testHost) RefreshObservations(ctx context.Context) error { return ctx.Err() }
+
+func (h *testHost) ResetObservations() {
+	h.observations.CollectorRunID += "/reset"
+	for gi := range h.observations.Groups {
+		for ri := range h.observations.Groups[gi].Replicas {
+			h.observations.Groups[gi].Replicas[ri].Evidence = metrics.Evidence{}
+		}
 	}
 }

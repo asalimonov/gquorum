@@ -270,8 +270,9 @@ func (h *Host) openReplica(slot *replica) error {
 
 func (h *Host) engineOptions(slot *replica, app load.Application, mode raftengine.Mode, peers []raft.Peer) raftengine.Options {
 	return raftengine.Options{NodeName: slot.identity.NodeName, ClusterID: slot.identity.ClusterID, GroupID: slot.identity.GroupID, ReplicaID: slot.identity.ReplicaID,
-		InstanceID: slot.node.InstanceID, Mode: mode, Peers: peers, Store: h.cfg.Store, Machine: machineAdapter{app.StateMachine}, Transport: engineTransport{h, slot},
+		InstanceID: slot.node.InstanceID, Mode: mode, Peers: peers, Metrics: h.cfg.Metrics.Local(), Store: h.cfg.Store, Machine: machineAdapter{app.StateMachine}, Transport: engineTransport{h, slot},
 		Timing: raftengine.Timing(h.cfg.Engine.Timing), SnapshotThreshold: h.cfg.Engine.SnapshotThreshold, MaxPendingProposals: h.cfg.Engine.MaxPendingProposals,
+		ProposalTimeout:     h.cfg.Engine.ProposalTimeout,
 		MaxUncommittedBytes: h.cfg.Engine.MaxUncommittedBytes, MaxApplyBatchBytes: h.cfg.Engine.MaxApplyBatchBytes, Events: h.cfg.Events, Logger: h.cfg.Logger}
 }
 

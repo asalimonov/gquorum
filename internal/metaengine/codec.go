@@ -15,6 +15,7 @@ const (
 	KindAdmitNode            ProposalKind = "admit_node"
 	KindBeginOperator        ProposalKind = "begin_execution"
 	KindCommitRepairOperator ProposalKind = "commit_repair_execution"
+	KindCommitVoterChange    ProposalKind = "commit_voter_change"
 	KindTransitionOperator   ProposalKind = "transition_execution"
 	KindActivateTarget       ProposalKind = "activate_target"
 	KindBindAdmission        ProposalKind = "bind_admission"
@@ -60,6 +61,15 @@ type CommitRepairOperatorProposal struct {
 	Plan            topology.Plan     `json:"plan"`
 	At              time.Time         `json:"at"`
 	ProposalID      string            `json:"proposal_id"`
+}
+
+type CommitVoterChangeProposal struct {
+	Change          topology.VoterChange `json:"change"`
+	Doc             topology.Document    `json:"doc"`
+	ExpectedVersion uint64               `json:"expected_version"`
+	Plan            topology.Plan        `json:"plan"`
+	At              time.Time            `json:"at"`
+	ProposalID      string               `json:"proposal_id"`
 }
 
 type TransitionOperatorProposal struct {
@@ -130,6 +140,8 @@ func Encode(proposal any) ([]byte, error) {
 		kind = KindBeginOperator
 	case CommitRepairOperatorProposal:
 		kind = KindCommitRepairOperator
+	case CommitVoterChangeProposal:
+		kind = KindCommitVoterChange
 	case TransitionOperatorProposal:
 		kind = KindTransitionOperator
 	case ActivateTargetProposal:
@@ -191,6 +203,8 @@ func DecodeProposal(data []byte) (any, error) {
 		proposal = &BeginOperatorProposal{}
 	case KindCommitRepairOperator:
 		proposal = &CommitRepairOperatorProposal{}
+	case KindCommitVoterChange:
+		proposal = &CommitVoterChangeProposal{}
 	case KindTransitionOperator:
 		proposal = &TransitionOperatorProposal{}
 	case KindActivateTarget:

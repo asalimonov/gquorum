@@ -39,6 +39,7 @@ type config struct {
 	Limits                                               topology.Limits
 	SessionTTL, TickInterval                             time.Duration
 	WALWriteWait                                         time.Duration
+	ProposalTimeout                                      time.Duration
 	SnapshotThreshold                                    uint64
 	Bootstrap                                            bool
 	GateFounders                                         bool
@@ -80,6 +81,7 @@ func main() {
 	flag.DurationVar(&c.SessionTTL, "session-ttl", 3*time.Second, "meta activation session TTL")
 	flag.DurationVar(&c.TickInterval, "tick", 50*time.Millisecond, "Raft tick interval")
 	flag.DurationVar(&c.WALWriteWait, "wal-write-wait", 0, "load WAL coalescing wait")
+	flag.DurationVar(&c.ProposalTimeout, "proposal-timeout", 0, "load proposal result timeout; zero selects the library default")
 	flag.Uint64Var(&c.SnapshotThreshold, "snapshot-threshold", 64, "load snapshot interval in applied entries")
 	flag.BoolVar(&c.Scheduling.Disabled, "disable-reconciliation", false, "disable automatic load replica repair")
 	flag.DurationVar(&c.Scheduling.Interval, "reconciliation-interval", 0, "automatic repair observation interval; zero selects the library default")

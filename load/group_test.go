@@ -22,7 +22,7 @@ func TestManagedHandleHasNoOwnerEscapeHatch(t *testing.T) {
 	for i := 0; i < typ.NumMethod(); i++ {
 		methods = append(methods, typ.Method(i).Name)
 	}
-	want := []string{"Error", "GroupID", "Identity", "IsLeader", "ProposalStats", "Propose", "ReplicaID", "Running", "Snapshot", "Status", "WALStall", "WaitReady"}
+	want := []string{"Error", "GroupID", "Identity", "IsLeader", "Metrics", "MetricsHistory", "ProposalStats", "Propose", "ReplicaID", "Running", "Snapshot", "Status", "WALStall", "WaitReady"}
 	if !slices.Equal(methods, want) {
 		t.Fatalf("managed handle method set: %v", methods)
 	}

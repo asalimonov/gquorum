@@ -85,6 +85,9 @@ func buildPlan(active, desired Document, observed map[string]GroupStatus, rules 
 	for i := range plan.Steps {
 		plan.Steps[i].Seq = i + 1
 	}
+	if err := bindDemotionGuards(&plan, desired, observed, preferredMetaTransfer); err != nil {
+		return Plan{}, err
+	}
 	if err := ValidatePlanShape(active, desired, plan); err != nil {
 		return Plan{}, planUnsafef("%v", err)
 	}
@@ -191,7 +194,24 @@ func planEstablishedGroup(
 		}
 	}
 	_, hi := planGroupBounds(doc, target.ID, rules)
+	if p := target.VoterPolicy; p != nil && promotions > 0 {
+		// The policy limits temporary voting headroom independently of hosts.
+		if p.TargetVoters < hi {
+			hi = p.TargetVoters + p.MaxSurgeVoters
+		}
+	}
 	shrinkFirst := promotions > 0 && voterDestructions > 0 && len(haveVoters)+promotions > hi
+	if target.VoterPolicy != nil && promotions > 0 && voterDestructions > 0 {
+		if !status.HealthKnown {
+			return fmt.Errorf("%w: group %q replacement needs live membership observations", fault.ErrUnavailable, target.ID)
+		}
+		if !replacementOrderSafe(status, additions, demotions, removals, shrinkFirst, hi) {
+			if shrinkFirst || !replacementOrderSafe(status, additions, demotions, removals, true, hi) {
+				return planUnsafef("group %q has no safe live-quorum replacement order", target.ID)
+			}
+			shrinkFirst = true
+		}
+	}
 
 	currentVoters := cloneIDSet(haveVoters)
 	currentLeader := status.LeaderID
@@ -201,7 +221,7 @@ func planEstablishedGroup(
 				return err
 			}
 			if replica.ReplicaID == currentLeader {
-				transfer, ok := transferTarget(target, currentVoters, replica.ReplicaID, preferredTransfer)
+				transfer, ok := transferTarget(target, liveTransferVoters(currentVoters, status), replica.ReplicaID, preferredTransfer)
 				if !ok {
 					return planUnsafef("group %q has no voter to receive leadership before demoting %d", target.ID, replica.ReplicaID)
 				}
@@ -217,7 +237,7 @@ func planEstablishedGroup(
 					return err
 				}
 				if replica.ReplicaID == currentLeader {
-					transfer, ok := transferTarget(target, currentVoters, replica.ReplicaID, preferredTransfer)
+					transfer, ok := transferTarget(target, liveTransferVoters(currentVoters, status), replica.ReplicaID, preferredTransfer)
 					if !ok {
 						return planUnsafef("group %q has no voter to receive leadership before removing %d", target.ID, replica.ReplicaID)
 					}
@@ -339,6 +359,11 @@ func validatePlannedSteps(active, desired Document, observed map[string]GroupSta
 		case StepDemoteVoter:
 			if _, ok := state.voters[step.ReplicaID]; !ok {
 				return planUnsafef("demotion %s/%d does not name a voter", step.GroupID, step.ReplicaID)
+			}
+			if step.TransferReplicaID != 0 {
+				if _, ok := state.voters[step.TransferReplicaID]; !ok {
+					return planUnsafef("demotion guard %s/%d does not target a current voter", step.GroupID, step.TransferReplicaID)
+				}
 			}
 			delete(state.voters, step.ReplicaID)
 			state.learners[step.ReplicaID] = struct{}{}

@@ -60,12 +60,13 @@ type topologySM struct {
 	persister statePersister
 	rules     topology.Rules
 
-	latest     topology.Document
-	target     topology.Document
-	active     topology.Document
-	history    []topology.Document
-	operators  map[topology.OperatorID]*operatorRecord
-	admissions map[string]*AdmissionRecord
+	latest        topology.Document
+	target        topology.Document
+	active        topology.Document
+	history       []topology.Document
+	operators     map[topology.OperatorID]*operatorRecord
+	admissions    map[string]*AdmissionRecord
+	voterSwitches map[string]topology.VoterSwitchState
 
 	sessions map[string]*sessionState // sessionID → session
 	locks    map[string]string        // lock key → holding sessionID
@@ -80,34 +81,36 @@ type topologySM struct {
 
 func newTopologySM(persister statePersister, rules topology.Rules) *topologySM {
 	return &topologySM{
-		persister:   persister,
-		rules:       rules,
-		retired:     make(map[string]uint64),
-		allocations: make(map[string]uint64),
-		operators:   make(map[topology.OperatorID]*operatorRecord),
-		admissions:  make(map[string]*AdmissionRecord),
-		sessions:    make(map[string]*sessionState),
-		locks:       make(map[string]string),
-		activated:   make(map[string]struct{}),
+		persister:     persister,
+		rules:         rules,
+		retired:       make(map[string]uint64),
+		allocations:   make(map[string]uint64),
+		operators:     make(map[topology.OperatorID]*operatorRecord),
+		admissions:    make(map[string]*AdmissionRecord),
+		voterSwitches: make(map[string]topology.VoterSwitchState),
+		sessions:      make(map[string]*sessionState),
+		locks:         make(map[string]string),
+		activated:     make(map[string]struct{}),
 	}
 }
 
 type smState struct {
-	SchemaVersion uint32              `json:"schema_version"`
-	Rules         topology.Rules      `json:"rules"`
-	RetiredGroups []retiredGroup      `json:"retired_groups"`
-	Allocations   []allocationRecord  `json:"allocations"`
-	Latest        topology.Document   `json:"latest"`
-	Target        topology.Document   `json:"target"`
-	Active        topology.Document   `json:"active"`
-	History       []topology.Document `json:"history"`
-	Operators     []topology.Operator `json:"executions"`
-	Admissions    []AdmissionRecord   `json:"admissions,omitempty"`
-	Sessions      []sessionState      `json:"sessions"`
-	Locks         []lockEntry         `json:"locks"`
-	Activated     []string            `json:"activated,omitempty"` // sorted node names that ever activated
-	AppliedIndex  uint64              `json:"applied_index"`
-	AppliedTerm   uint64              `json:"applied_term"`
+	SchemaVersion uint32                      `json:"schema_version"`
+	Rules         topology.Rules              `json:"rules"`
+	RetiredGroups []retiredGroup              `json:"retired_groups"`
+	Allocations   []allocationRecord          `json:"allocations"`
+	Latest        topology.Document           `json:"latest"`
+	Target        topology.Document           `json:"target"`
+	Active        topology.Document           `json:"active"`
+	History       []topology.Document         `json:"history"`
+	Operators     []topology.Operator         `json:"executions"`
+	Admissions    []AdmissionRecord           `json:"admissions,omitempty"`
+	Sessions      []sessionState              `json:"sessions"`
+	Locks         []lockEntry                 `json:"locks"`
+	Activated     []string                    `json:"activated,omitempty"` // sorted node names that ever activated
+	VoterSwitches []topology.VoterSwitchState `json:"voter_switches,omitempty"`
+	AppliedIndex  uint64                      `json:"applied_index"`
+	AppliedTerm   uint64                      `json:"applied_term"`
 }
 
 func (sm *topologySM) Apply(index, term uint64, data []byte) (ApplyResult, error) {
@@ -157,7 +160,13 @@ func (sm *topologySM) Apply(index, term uint64, data []byte) (ApplyResult, error
 		if err := json.Unmarshal(body, &p); err != nil {
 			return ApplyResult{}, fmt.Errorf("meta: unmarshal transition_execution: %w", err)
 		}
-		res, changed = sm.applyTransitionOperator(p)
+		res, changed = sm.applyTransitionOperator(index, p)
+	case KindCommitVoterChange:
+		var p CommitVoterChangeProposal
+		if err := json.Unmarshal(body, &p); err != nil {
+			return ApplyResult{}, fmt.Errorf("meta: unmarshal commit_voter_change: %w", err)
+		}
+		res, changed = sm.applyCommitVoterChange(p)
 	case KindActivateTarget:
 		var p ActivateTargetProposal
 		if err := json.Unmarshal(body, &p); err != nil {
@@ -343,17 +352,18 @@ func (sm *topologySM) marshalLocked() ([]byte, error) {
 	sort.Strings(activated)
 	return json.Marshal(smState{
 		SchemaVersion: 1, Rules: sm.rules, RetiredGroups: sm.retiredSnapshot(), Allocations: sm.allocationSnapshot(),
-		Latest:       sm.latest,
-		Target:       sm.target,
-		Active:       sm.active,
-		History:      sm.history,
-		Operators:    execs,
-		Admissions:   sm.admissionSnapshotLocked(),
-		Sessions:     sm.sessionSnapshotLocked(),
-		Locks:        sm.lockSnapshotLocked(),
-		Activated:    activated,
-		AppliedIndex: sm.appliedIndex,
-		AppliedTerm:  sm.appliedTerm,
+		Latest:        sm.latest,
+		Target:        sm.target,
+		Active:        sm.active,
+		History:       sm.history,
+		Operators:     execs,
+		Admissions:    sm.admissionSnapshotLocked(),
+		Sessions:      sm.sessionSnapshotLocked(),
+		Locks:         sm.lockSnapshotLocked(),
+		Activated:     activated,
+		VoterSwitches: sm.voterSwitchSnapshotLocked(),
+		AppliedIndex:  sm.appliedIndex,
+		AppliedTerm:   sm.appliedTerm,
 	})
 }
 
@@ -391,6 +401,10 @@ func (sm *topologySM) Restore(data []byte) error {
 		sm.operators[rec.ID] = &rec
 	}
 	sm.admissions = make(map[string]*AdmissionRecord, len(st.Admissions))
+	sm.voterSwitches = make(map[string]topology.VoterSwitchState, len(st.VoterSwitches))
+	for _, state := range st.VoterSwitches {
+		sm.voterSwitches[state.GroupID] = state.Clone()
+	}
 	for i := range st.Admissions {
 		record := st.Admissions[i]
 		sm.admissions[admissionKey(record.NodeName, record.InstanceID)] = &record

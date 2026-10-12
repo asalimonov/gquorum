@@ -3,7 +3,6 @@ package managed
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -23,102 +22,6 @@ func (h *Host) peerFor(ctx context.Context, id storage.Identity) (load.Peer, err
 		return load.Peer{}, fault.ErrIdentityMismatch
 	}
 	return peer, nil
-}
-
-func (h *Host) ObserveGroup(parent context.Context, group string) (topology.GroupStatus, error) {
-	ctx, cancel := context.WithTimeout(parent, h.cfg.EffectTimeout)
-	defer cancel()
-	ctx, done, err := h.beginWork(ctx)
-	if err != nil {
-		return topology.GroupStatus{}, err
-	}
-	defer done()
-	ids, err := h.cfg.Catalog(ctx, group)
-	if err != nil {
-		return topology.GroupStatus{}, err
-	}
-	result := topology.GroupStatus{GroupID: group}
-	if len(ids) == 0 {
-		return result, nil
-	}
-	type observation struct {
-		replica uint64
-		status  topology.GroupStatus
-	}
-	var mu sync.Mutex
-	var observed []observation
-	var invalid error
-	live := make(map[uint64]bool)
-	var wg sync.WaitGroup
-	seen := make(map[storage.Identity]bool)
-	for _, id := range ids {
-		if seen[id] {
-			continue
-		}
-		seen[id] = true
-		wg.Go(func() {
-			peer, err := h.peerFor(ctx, id)
-			var reply load.ReplicaStatus
-			invalidObservation := errors.Is(err, fault.ErrIdentityMismatch) || errors.Is(err, fault.ErrUnreadable)
-			if err == nil {
-				query := load.ReplicaQuery{From: h.cfg.Identity(), To: peer}
-				if peer.Node == h.cfg.Identity() {
-					reply, err = h.ReadReplica(ctx, query)
-					invalidObservation = errors.Is(err, fault.ErrIdentityMismatch) || errors.Is(err, fault.ErrUnreadable)
-				} else {
-					reply, err = h.cfg.Transport.ReadReplica(ctx, query)
-					// A restarted peer can refuse our locally stale process pin.
-					// A refusal supplies no live replica evidence. Only a successful
-					// reply can be checked as an affirmative identity attestation.
-				}
-				if err == nil && (reply.Peer != peer || reply.Found != reply.Status.Found || reply.Found && (reply.Status.GroupID != group || reply.Status.HostNode != peer.Node.NodeName)) {
-					err = fault.ErrIdentityMismatch
-					invalidObservation = true
-				}
-			}
-			mu.Lock()
-			defer mu.Unlock()
-			if invalidObservation {
-				invalid = fmt.Errorf("load observation from %s replica %d: %w", id.NodeName, id.ReplicaID, err)
-			}
-			if err != nil || !reply.Found {
-				return
-			}
-			live[id.ReplicaID] = true
-			observed = append(observed, observation{id.ReplicaID, reply.Status.Clone()})
-		})
-	}
-	wg.Wait()
-	if err := ctx.Err(); err != nil {
-		return result, err
-	}
-	if invalid != nil {
-		return result, invalid
-	}
-	for _, got := range observed {
-		if got.status.LeaderID != got.replica {
-			continue
-		}
-		if result.LeaderID != 0 && result.Term == got.status.Term && result.LeaderID != got.replica {
-			return result, fault.ErrUnavailable
-		}
-		if result.LeaderID == 0 || got.status.Term > result.Term {
-			result = got.status.Clone()
-		}
-	}
-	if result.LeaderID != 0 {
-		result.HealthKnown, result.LiveVoters = true, live
-		return result, nil
-	}
-	active, err := h.cfg.Active(ctx)
-	if err != nil {
-		return result, err
-	}
-	if len(observed) == 0 && active.Group(group) == nil {
-		return result, nil
-	}
-	result.Found = true
-	return result, fault.ErrUnavailable
 }
 
 func (h *Host) Dispatch(parent context.Context, a topology.AuthorizedStep) error {

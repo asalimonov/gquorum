@@ -162,7 +162,7 @@ func (g *Group) handleJoin(ctx context.Context, h *metapb.Header, data []byte) (
 	if node.State != topology.NodeActive && req.Identity.MemberID != member {
 		return refuse(parkedUnapproved, fault.New(fault.OperatorAuthorization, "draining nodes may only restart their retained identity", nil))
 	}
-	if ex, ok := machine.CurrentOperator(); ok && !ex.Status.State.Terminal() && ex.Status.Version == target.Version && hasAdmissionSteps(ex.Plan, req.Node.Name, member) {
+	if ex, ok := machine.CurrentOperator(); ok && !ex.Status.State.Terminal() && ex.Status.Version == target.Version && hasAdmissionSteps(ex.Plan, target, req.Node.Name, member) {
 		result, err := g.propose(ctx, metaengine.BindAdmissionProposal{Admission: metaengine.AdmissionRecord{NodeName: req.Node.Name, InstanceID: req.Identity.InstanceID, MemberID: member, OperatorID: ex.Status.ID}, ReplaceInstance: replace, At: time.Now().UTC()})
 		if err != nil {
 			return g.leaderReply(err)
@@ -207,20 +207,17 @@ func joinClassificationReady(status raft.Status, machine *metaengine.Machine) bo
 	return status.RaftState == raft.StateLeader && status.Term > 0 && status.Commit > 0 &&
 		status.Applied >= status.Commit && index >= status.Commit && term >= status.Term
 }
-func hasAdmissionSteps(plan topology.Plan, name string, id uint64) bool {
-	wanted := []topology.StepKind{topology.StepPrepareReplica, topology.StepAddLearner, topology.StepWaitCaughtUp, topology.StepPromoteVoter}
-	for i := 0; i+len(wanted) <= len(plan.Steps); i++ {
-		match := true
-		for j, kind := range wanted {
-			s := plan.Steps[i+j]
-			match = match && s.Kind == kind && s.GroupID == topology.MetaGroupID && s.NodeName == name && s.ReplicaID == id
-		}
-		if match {
-			return true
+func hasAdmissionSteps(plan topology.Plan, desired topology.Document, name string, id uint64) bool {
+	if meta := desired.MetaGroup(); meta != nil {
+		for _, r := range meta.Replicas {
+			if r.NodeName == name && r.ReplicaID == id {
+				return topology.ValidAdmissionSequence(plan.Steps, name, id, r.Role)
+			}
 		}
 	}
 	return false
 }
+
 func (g *Group) membershipReply(ctx context.Context) joinResponse {
 	response := joinResponse{Rules: g.rules, LeaderAddress: g.opts.Network.AdvertiseAddress}
 	_, target, active := g.state().Views()

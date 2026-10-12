@@ -100,6 +100,30 @@ func (d *Document) Validate(rules Rules) error {
 		} else if err := placement.validate(rules.Limits); err != nil {
 			return err
 		}
+		if g.Hosting != nil {
+			if g.ID == MetaGroupID || g.VoterPolicy == nil {
+				return invalid("hosting rule requires a policy-managed load group")
+			}
+			if err := g.Hosting.Validate(); err != nil {
+				return err
+			}
+			for _, name := range g.Hosting.Nodes {
+				if _, ok := nodes[name]; !ok {
+					return invalid("explicit hosting references an unknown node")
+				}
+			}
+		}
+		if g.VoterPolicy != nil {
+			lo, hi := placement.MinReplicas, placement.MaxReplicas
+			if g.ID == MetaGroupID {
+				lo, hi = 1, rules.Limits.MaxNodes
+			} else if g.Hosting == nil {
+				return invalid("policy-managed load group requires a hosting rule")
+			}
+			if err := g.VoterPolicy.Validate(lo, hi); err != nil {
+				return err
+			}
+		}
 		ids := make(map[uint64]bool, len(g.Replicas))
 		hosts := make(map[string]bool, len(g.Replicas))
 		voters := 0
@@ -113,6 +137,9 @@ func (d *Document) Validate(rules Rules) error {
 			}
 			if r.Role != ReplicaVoter && r.Role != ReplicaLearner {
 				return invalid("unknown replica role")
+			}
+			if r.PinnedLearner && r.Role != ReplicaLearner {
+				return invalid("pinned learner cannot be a voter")
 			}
 			ids[r.ReplicaID], hosts[r.NodeName] = true, true
 			if r.Role == ReplicaVoter {
@@ -145,7 +172,7 @@ func (d *Document) Validate(rules Rules) error {
 			return invalid("admitted node lacks meta membership")
 		}
 	}
-	return nil
+	return ValidateHostingCapacity(*d, rules)
 }
 
 // ValidateTransition checks identity and allocator invariants against the previous declaration.
@@ -172,6 +199,10 @@ func ValidateTransition(previous, next Document, rules Rules, retired map[string
 		old := previous.Group(g.ID)
 		if old == nil {
 			continue
+		}
+		if g.VoterPolicy != nil && g.VoterPolicy.TargetVoters == 1 && len(previous.VotersOf(g.ID)) > 1 &&
+			(old.VoterPolicy == nil || old.VoterPolicy.TargetVoters != 1) {
+			return invalid("voter target reduction would require an unsupported two-to-one transition")
 		}
 		if g.NextReplicaID < old.NextReplicaID {
 			return invalid("replica allocation counter cannot decrease")

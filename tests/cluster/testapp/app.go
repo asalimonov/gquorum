@@ -289,7 +289,7 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 			Network: gquorum.MetaNetworkOptions{Listener: ls.meta, AdvertiseAddress: cfg.MetaAddress, AllowPlaintext: true, ClusterCredential: []byte(cfg.Credential), Resolver: metaResolver{a}}},
 		Loads: gquorum.LoadOptions{Factory: a.newReplica, Retire: a.retireReplica, Transport: loadTransport{app: a},
 			Storage: gquorum.LoadStorageOptions{Store: &fixtureStore{Store: a.store, app: a}, Retirement: a.store},
-			Engine:  load.EngineOptions{Timing: load.Timing{TickInterval: cfg.TickInterval, ElectionTicks: 10, WALWriteWait: cfg.WALWriteWait}, SnapshotThreshold: cfg.SnapshotThreshold}},
+			Engine:  load.EngineOptions{Timing: load.Timing{TickInterval: cfg.TickInterval, ElectionTicks: 10, WALWriteWait: cfg.WALWriteWait}, SnapshotThreshold: cfg.SnapshotThreshold, ProposalTimeout: cfg.ProposalTimeout}},
 		Policies: gquorum.PolicyOptions{Scheduler: scheduler, Scheduling: cfg.Scheduling, Lifecycle: &fixtureLifecycle{DefaultLifecycle: defaults, app: a}},
 	})
 	if err != nil {
@@ -509,7 +509,9 @@ func (a *application) bootstrap() {
 	}
 }
 func (a *application) bootstrapOnce(ctx context.Context) (bool, error) {
-	for _, spec := range []gquorum.GroupSpec{{ID: "demo"}, {ID: "workers", Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}}}} {
+	workersPolicy := topology.DefaultVoterPolicy()
+	workersPolicy.TargetVoters = 2
+	for _, spec := range []gquorum.GroupSpec{{ID: "demo"}, {ID: "workers", VoterPolicy: &workersPolicy, Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}}}} {
 		latest, err := a.cluster.Latest(ctx)
 		if err != nil {
 			return false, err

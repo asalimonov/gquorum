@@ -4,6 +4,8 @@ package raftengine
 
 import (
 	"context"
+	internalmetrics "github.com/asalimonov/gquorum/internal/metrics"
+	"github.com/asalimonov/gquorum/metrics"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -23,6 +25,13 @@ type orderedTransport struct {
 	delivered chan uint64
 }
 
+func outboundTestMeter(t *testing.T) *internalmetrics.Meter {
+	t.Helper()
+	m, err := internalmetrics.NewMeter(metrics.ReplicaIdentity{ClusterID: "cluster", GroupID: "load", NodeName: "1", ReplicaID: 1, RunID: "sender-test"}, internalmetrics.Options{})
+	must(t, err)
+	return m
+}
+
 func (o *orderedTransport) Send(ctx context.Context, messages []raftpb.Message) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -37,6 +46,7 @@ func TestOutboundQueuesPreserveFIFOAndRetireIdleMembershipWorkers(t *testing.T) 
 	transport := &orderedTransport{indexes: map[uint64][]uint64{}, delivered: make(chan uint64, 20)}
 	ctx, cancel := context.WithCancel(t.Context())
 	group := &Group{ctx: ctx, opts: Options{Transport: transport, Timing: Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 10}}, sendC: make(chan []raftpb.Message, 20), unreachable: make(chan uint64, 20), reports: make(chan snapshotReport, 20), cached: raft.Status{Config: tracker.Config{Voters: quorum.JointConfig{quorum.MajorityConfig{1: {}, 2: {}}, nil}}}}
+	group.meter = outboundTestMeter(t)
 	group.wg.Add(1)
 	go group.sender()
 	t.Cleanup(func() { cancel(); group.wg.Wait() })
@@ -108,6 +118,7 @@ func TestRemovedDestinationDropsStaleBacklogAndAttemptsFinalCommit(t *testing.T)
 	transport := &retiringTransport{entered: make(chan struct{}, 1), final: make(chan struct{})}
 	ctx, cancel := context.WithCancel(t.Context())
 	group := &Group{ctx: ctx, opts: Options{Transport: transport, Timing: Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 20}}, sendC: make(chan []raftpb.Message, 64), unreachable: make(chan uint64, 64), reports: make(chan snapshotReport, 64), cached: raft.Status{Config: tracker.Config{Voters: quorum.JointConfig{quorum.MajorityConfig{1: {}, 2: {}}, nil}}}}
+	group.meter = outboundTestMeter(t)
 	group.wg.Add(1)
 	go group.sender()
 	t.Cleanup(func() { cancel(); group.wg.Wait() })

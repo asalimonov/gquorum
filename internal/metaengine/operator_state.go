@@ -142,7 +142,7 @@ func (sm *topologySM) applyCommitRepairOperator(p CommitRepairOperatorProposal) 
 	}, true
 }
 
-func (sm *topologySM) applyTransitionOperator(p TransitionOperatorProposal) (ApplyResult, bool) {
+func (sm *topologySM) applyTransitionOperator(index uint64, p TransitionOperatorProposal) (ApplyResult, bool) {
 	t := p.Transition
 	ex, ok := sm.operators[t.OperatorID]
 	if !ok {
@@ -181,6 +181,7 @@ func (sm *topologySM) applyTransitionOperator(p TransitionOperatorProposal) (App
 	} else if ex.CurrentStep > 0 && ex.CurrentStep <= len(ex.Steps) &&
 		(t.StepSeq > ex.CurrentStep || t.State == topology.OperatorSucceeded) {
 		sm.updateAdmissionForCompletedStepLocked(ex, ex.Steps[ex.CurrentStep-1])
+		sm.recordRoleEffectLocked(index, ex, ex.Steps[ex.CurrentStep-1], t.At)
 	}
 
 	ex.State = t.State
@@ -237,6 +238,11 @@ func validateExactPlan(plan topology.Plan) error {
 			lastGroup = step.GroupID
 		}
 		wholeGroup := step.Kind == topology.StepCreateFoundingGroup || step.Kind == topology.StepDeleteGroupState
+		if step.TransferNodeName != "" || step.TransferReplicaID != 0 {
+			if step.Kind != topology.StepDemoteVoter || step.TransferNodeName == "" || step.TransferReplicaID == 0 || step.TransferReplicaID == step.ReplicaID {
+				return fmt.Errorf("step %d has invalid demotion transfer identity", step.Seq)
+			}
+		}
 		if wholeGroup && (step.NodeName != "" || step.ReplicaID != 0) {
 			return fmt.Errorf("whole-group step %d carries replica identity", step.Seq)
 		}
@@ -318,13 +324,15 @@ func validateRepairDocument(active, repair topology.Document) error {
 		a, b := active.Groups[i], repair.Groups[i]
 		if a.ID != b.ID ||
 			!reflect.DeepEqual(a.Placement, b.Placement) ||
+			!reflect.DeepEqual(a.VoterPolicy, b.VoterPolicy) ||
+			!reflect.DeepEqual(a.Hosting, b.Hosting) ||
 			!a.CreatedAt.Equal(b.CreatedAt) || len(a.Replicas) != len(b.Replicas) ||
 			b.NextReplicaID < a.NextReplicaID {
 			return fmt.Errorf("repair changes group %q outside identity repair", a.ID)
 		}
 		for j := range a.Replicas {
 			ra, rb := a.Replicas[j], b.Replicas[j]
-			if ra.NodeName != rb.NodeName || ra.Role != rb.Role ||
+			if ra.NodeName != rb.NodeName || ra.Role != rb.Role || ra.PinnedLearner != rb.PinnedLearner ||
 				!ra.CreatedAt.Equal(rb.CreatedAt) {
 				return fmt.Errorf("repair changes replica placement or role in group %q", a.ID)
 			}

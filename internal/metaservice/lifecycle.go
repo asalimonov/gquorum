@@ -87,6 +87,9 @@ func (g *Group) finishQuiesce() {
 	if g.watches != nil {
 		g.watches.close()
 	}
+	if g.collector != nil {
+		_ = g.collector.Stop(context.Background())
+	}
 	if g.observer != nil {
 		_ = g.observer.Stop(context.Background())
 	}

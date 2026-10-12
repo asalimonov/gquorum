@@ -13,6 +13,11 @@ import (
 
 func admissionOperatorSM(t *testing.T) (*topologySM, AdmissionRecord, topology.Plan, time.Time, uint64) {
 	t.Helper()
+	return admissionOperatorForRole(t, topology.ReplicaVoter)
+}
+
+func admissionOperatorForRole(t *testing.T, role topology.ReplicaRole) (*topologySM, AdmissionRecord, topology.Plan, time.Time, uint64) {
+	t.Helper()
 	sm := newTopologySM(nil, testRules())
 	at := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 	if res := apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0, ProposalID: "seed"}); !res.Accepted {
@@ -39,7 +44,7 @@ func admissionOperatorSM(t *testing.T) (*topologySM, AdmissionRecord, topology.P
 	desired := sm.Active()
 	desired.Nodes = append(desired.Nodes, topology.Node{Name: "n2", Type: "worker", State: topology.NodeActive})
 	desired.MetaGroup().Replicas = append(desired.MetaGroup().Replicas, topology.Replica{
-		NodeName: "n2", ReplicaID: 2, Role: topology.ReplicaVoter,
+		NodeName: "n2", ReplicaID: 2, Role: role,
 	})
 	desired.MetaGroup().NextReplicaID = 3
 	desired.ParentVersion = desired.Version
@@ -63,6 +68,47 @@ func admissionOperatorSM(t *testing.T) (*topologySM, AdmissionRecord, topology.P
 	return sm, AdmissionRecord{
 		NodeName: "n2", InstanceID: "instance-n2", MemberID: 2, OperatorID: started.OperatorID,
 	}, plan, at, 7
+}
+
+func TestAdmissionStableLearnerCompletesAndSurvivesSnapshot(t *testing.T) {
+	t.Parallel()
+	sm, admission, plan, at, index := admissionOperatorForRole(t, topology.ReplicaLearner)
+	at = at.Add(3 * time.Second)
+	if len(plan.Steps) != 2 {
+		t.Fatal("learner admission includes promotion", plan)
+	}
+	if res := apply(t, sm, index, BindAdmissionProposal{Admission: admission, At: at}); !res.Accepted {
+		t.Fatal(res)
+	}
+	index++
+	if res := apply(t, sm, index, ReadyAdmissionProposal{NodeName: admission.NodeName, InstanceID: admission.InstanceID, MemberID: admission.MemberID, OperatorID: admission.OperatorID}); !res.Accepted {
+		t.Fatal(res)
+	}
+	index++
+	for _, step := range plan.Steps {
+		applyAdmissionTransition(t, sm, index, admission.OperatorID, plan, step.Seq, topology.OperatorRunning, at)
+		index++
+	}
+	applyAdmissionTransition(t, sm, index, admission.OperatorID, plan, 2, topology.OperatorSucceeded, at)
+	index++
+	requireAdmissionState(t, sm, admission.InstanceID, AdmissionLearner)
+	if res := apply(t, sm, index, ActivateTargetProposal{OperatorID: admission.OperatorID, Version: plan.Version, Attempt: 1}); !res.Accepted {
+		t.Fatal(res)
+	}
+	requireAdmissionState(t, sm, admission.InstanceID, AdmissionCompleted)
+	data, err := sm.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored := newTopologySM(nil, testRules())
+	if err := restored.Restore(data); err != nil {
+		t.Fatal(err)
+	}
+	requireAdmissionState(t, restored, admission.InstanceID, AdmissionCompleted)
+	active := restored.Active()
+	if active.MetaGroup().Replicas[1].Role != topology.ReplicaLearner {
+		t.Fatal("learner promoted during restoration")
+	}
 }
 
 func applyAdmissionTransition(

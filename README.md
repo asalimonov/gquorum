@@ -33,6 +33,9 @@ cross-group transactions require application coordination.
 
 - **Multiple Raft groups:** a shared topology quorum and independent application
   groups built on `go.etcd.io/raft/v3`, with managed local replica lifetimes.
+- **Replica-local proposal results:** ready load followers and learners forward
+  ordinary writes to their leader and return results after local application,
+  with bounded waits and application request IDs preserved across forwarding.
 - **Durable recovery:** bbolt-backed metadata, an included etcd WAL backend for
   load groups, full state-machine snapshots, committed-tail replay, compaction
   and snapshot catch-up.
@@ -47,9 +50,11 @@ cross-group transactions require application coordination.
   readmission and replica reseating, parking of missing or foreign storage,
   verified retirement, quarantine and configurable retention. Deleted group IDs
   are permanently retired.
-- **Automatic replica repair:** the default `policy.RestoreDegraded` scheduler
-  restores missing required load voters after a stability window. Decisions are
-  revalidated against current topology, health, leadership and membership.
+- **Stable learners and voter policies:** new groups default to three voters;
+  additional eligible hosts hold promotable learners. Per-group replicated
+  policies control voter targets, failure/stability windows and switch cooldowns.
+  The default scheduler replaces persistently unhealthy voters with qualified
+  learners, with independent authorization and live-quorum checks.
 - **Replaceable policies:** customize supported repair decisions through
   `policy.Scheduler`, and startup readiness, retired-storage retention and
   removal behavior through `policy.LifecyclePolicy`.
@@ -62,11 +67,14 @@ cross-group transactions require application coordination.
   address resolution and health observations; included gRPC meta transport with
   TLS configuration and cluster credentials.
 
-The default scheduler handles degraded load replicas; automatic balancing of
-healthy groups and infrastructure provisioning belong to application
-controllers. `topology.Limits` controls capacity and defaults to three nodes and
-five replicas per load group. All admitted node types participate in `_meta`;
-placement rules select which types host application replicas.
+The default scheduler preserves healthy voter seats. Existing groups without a
+voter policy retain their legacy repair behavior until explicit policy adoption.
+`topology.Limits` controls capacity and defaults to three nodes and five total
+replicas per load group. Seven-node all-host deployments explicitly configure
+both limits to at least seven. All admitted node types participate in `_meta`;
+placement rules select load hosts, and voter policy selects their voting roles.
+Infrastructure provisioning and automatic data partitioning remain application
+responsibilities.
 
 ## Architecture and key interfaces
 
@@ -158,16 +166,19 @@ with the `functional` build tag. Unit files use `!functional`, so the commands
 run separate suites. `make test-functional` remains an alias for `make test-function`.
 Multi-node scenarios run through the bounded Docker pool under `make test-cluster`;
 functional fixtures start at most one local participant. The process suite covers
-three-node quorum, faults, recovery and multiple load groups, with targeted
-four-node admission regressions. Docker is required for the example and process suites. Protocol
+three-node quorum, faults, recovery and multiple load groups, targeted
+four-node admission and voter-swap regressions, five-node automatic learner
+promotion with retained return and cooldown, and seven-host capacity validation.
+Docker is required for the example and process suites. Protocol
 changes use `make generate` and `make proto-check`, which require `protoc` and
 install pinned Go generators.
 
 The [testing guide](docs/testing/tests.md) describes test boundaries and commands.
 Test targets require Python 3.9+ and save detailed results and Markdown Gantt
 timelines under `test-reports/<suite>/latest/`. Each run keeps its own directory.
-The [validation record](docs/testing/api-refactor-validation.md) records the
-completed public API refactor checks. Separate `examples/cluster` and
+The [API validation record](docs/testing/api-refactor-validation.md) records the
+completed public API refactor checks. The [stable learner validation record](docs/testing/stable-learner-validation.md)
+maps voter policies, metrics, forwarding and recovery to their implementation and tests. Separate `examples/cluster` and
 `tests/cluster` Go modules keep CLI and Docker dependencies outside the library
 dependency graph. The example uses Kong for configuration and `net/http` for its
 HTTP adapter; see its README for module-local build and run commands.

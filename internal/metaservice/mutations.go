@@ -30,9 +30,11 @@ type MutationResult struct {
 	OperatorID topology.OperatorID `json:"operator_id,omitempty"`
 }
 type GroupSpec struct {
-	ID        string                  `json:"id"`
-	Placement *topology.PlacementRule `json:"placement,omitempty"`
-	Nodes     []string                `json:"nodes,omitempty"`
+	ID          string                  `json:"id"`
+	Placement   *topology.PlacementRule `json:"placement,omitempty"`
+	Nodes       []string                `json:"nodes,omitempty"`
+	VoterPolicy *topology.VoterPolicy   `json:"voter_policy,omitempty"`
+	Hosting     *topology.HostingRule   `json:"hosting,omitempty"`
 }
 type RetireOptions struct {
 	Reason   string          `json:"reason"`
@@ -82,7 +84,7 @@ func (g *Group) computeMutation(ctx context.Context, o MutationOptions, comment 
 	}
 	for i := range next.Groups {
 		group := &next.Groups[i]
-		if old := base.Group(group.ID); old != nil && (!reflect.DeepEqual(old.Replicas, group.Replicas) || !reflect.DeepEqual(old.Placement, group.Placement) || old.NextReplicaID != group.NextReplicaID) {
+		if old := base.Group(group.ID); old != nil && (!reflect.DeepEqual(old.Replicas, group.Replicas) || !reflect.DeepEqual(old.Placement, group.Placement) || !reflect.DeepEqual(old.VoterPolicy, group.VoterPolicy) || !reflect.DeepEqual(old.Hosting, group.Hosting) || old.NextReplicaID != group.NextReplicaID) {
 			group.UpdatedAt = now
 		}
 	}
@@ -157,9 +159,18 @@ func (g *Group) checkMutationHealth(ctx context.Context, before, after topology.
 	return nil
 }
 func (g *Group) enforcePlacement(doc *topology.Document, now time.Time) error {
+	if err := topology.ValidateHostingCapacity(*doc, g.rules); err != nil {
+		return err
+	}
 	for i := range doc.Groups {
 		group := &doc.Groups[i]
 		if group.ID == topology.MetaGroupID {
+			continue
+		}
+		if group.VoterPolicy != nil {
+			if err := materializeHosting(doc, group, now); err != nil {
+				return err
+			}
 			continue
 		}
 		rule := doc.GroupPlacement(group.ID)
@@ -385,6 +396,9 @@ func (g *Group) SetGroupPlacement(ctx context.Context, id string, rule topology.
 		policy := rule
 		policy.AllowedNodeTypes = slices.Clone(rule.AllowedNodeTypes)
 		group.Placement = &policy
+		if group.VoterPolicy != nil {
+			return g.enforcePlacement(doc, now)
+		}
 		voters := 0
 		group.Replicas = slices.DeleteFunc(group.Replicas, func(replica topology.Replica) bool {
 			node := doc.Node(replica.NodeName)
@@ -424,39 +438,7 @@ func (g *Group) CreateLoadGroup(ctx context.Context, spec GroupSpec, o MutationO
 		return MutationResult{}, err
 	}
 	return g.mutation(ctx, o, fmt.Sprintf("create group %q", spec.ID), true, func(doc *topology.Document, now time.Time) error {
-		if doc.Group(spec.ID) != nil {
-			return fault.New(fault.Invalid, "group already exists", nil)
-		}
-		group := topology.Group{ID: spec.ID, NextReplicaID: 1, CreatedAt: now, UpdatedAt: now}
-		if spec.Placement != nil {
-			p := *spec.Placement
-			p.AllowedNodeTypes = slices.Clone(p.AllowedNodeTypes)
-			group.Placement = &p
-		}
-		doc.Groups = append(doc.Groups, group)
-		if len(spec.Nodes) == 0 {
-			return g.enforcePlacement(doc, now)
-		}
-		group = doc.Groups[len(doc.Groups)-1]
-		for _, name := range spec.Nodes {
-			node := doc.Node(name)
-			if node == nil {
-				return unknownNode(name)
-			}
-			if node.State != topology.NodeActive || !doc.GroupPlacement(spec.ID).Allows(node.Type) {
-				return fault.New(fault.Invalid, "requested host is not eligible", nil)
-			}
-			if slices.ContainsFunc(group.Replicas, func(r topology.Replica) bool { return r.NodeName == name }) {
-				return fault.New(fault.Invalid, "duplicate requested host", nil)
-			}
-			id, err := group.AllocateReplicaID()
-			if err != nil {
-				return err
-			}
-			group.Replicas = append(group.Replicas, topology.Replica{NodeName: name, ReplicaID: id, Role: topology.ReplicaVoter, CreatedAt: now, UpdatedAt: now})
-		}
-		doc.Groups[len(doc.Groups)-1] = group
-		return nil
+		return g.createLoadGroup(doc, spec, now)
 	})
 }
 func (g *Group) DeleteLoadGroup(ctx context.Context, id string, o MutationOptions) (MutationResult, error) {
@@ -483,8 +465,10 @@ func (g *Group) ChangeReplica(ctx context.Context, id, name string, role topolog
 		for i := range group.Replicas {
 			r := &group.Replicas[i]
 			if r.NodeName == name {
-				if r.Role != role {
+				pin := group.VoterPolicy != nil && role == topology.ReplicaLearner
+				if r.Role != role || r.PinnedLearner != pin {
 					r.Role = role
+					r.PinnedLearner = pin
 					r.UpdatedAt = now
 				}
 				return nil

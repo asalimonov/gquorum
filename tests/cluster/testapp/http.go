@@ -48,8 +48,9 @@ func (a *application) canServe(ctx context.Context) bool {
 	return alive >= minimum
 }
 
-// Serving follows caller policy and requires the exact Active load voter.
-// Prepared learners and stale handles never serve application reads or writes.
+// Serving follows caller policy and requires the exact Active replica and role.
+// Approved learners serve local reads and forward mutations through Raft.
+// Prepared replicas and stale handles remain ineligible until Active authorizes them.
 func (a *application) localServing(ctx context.Context, id string) (*localReplica, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -82,10 +83,15 @@ func (a *application) localServing(ctx context.Context, id string) (*localReplic
 	if !found || native != local.group {
 		return nil, fault.ErrReplicaNotReady
 	}
+	conf := native.Status().ConfState
 	eligible := slices.ContainsFunc(group.Replicas, func(r topology.Replica) bool {
-		return r.NodeName == identity.NodeName && r.ReplicaID == native.ReplicaID() && r.Role == topology.ReplicaVoter
+		if r.NodeName != identity.NodeName || r.ReplicaID != native.ReplicaID() {
+			return false
+		}
+		return r.Role == topology.ReplicaVoter && slices.Contains(conf.Voters, r.ReplicaID) ||
+			r.Role == topology.ReplicaLearner && slices.Contains(conf.Learners, r.ReplicaID)
 	})
-	if !eligible || !slices.Contains(native.Status().ConfState.Voters, native.ReplicaID()) {
+	if !eligible {
 		return nil, fault.ErrReplicaNotReady
 	}
 	return local, nil
@@ -449,6 +455,58 @@ func (a *application) routes() http.Handler {
 		result, err := a.cluster.SetGroupPlacement(r.Context(), r.PathValue("id"), body.Placement, opts)
 		mutationResponse(w, result, err)
 	})
+	mux.HandleFunc("PUT /api/groups/{id}/voter-policy", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Policy   topology.VoterPolicy    `json:"policy"`
+			Mutation gquorum.MutationOptions `json:"mutation"`
+		}
+		if err := requestBody(w, r, &body); err != nil {
+			httpError(w, err)
+			return
+		}
+		opts, err := mutationOptions(r, body.Mutation)
+		if err != nil {
+			httpError(w, err)
+			return
+		}
+		result, err := a.cluster.SetGroupVoterPolicy(r.Context(), r.PathValue("id"), body.Policy, opts)
+		mutationResponse(w, result, err)
+	})
+	mux.HandleFunc("PUT /api/groups/{id}/hosting", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Hosting  topology.HostingRule    `json:"hosting"`
+			Mutation gquorum.MutationOptions `json:"mutation"`
+		}
+		if err := requestBody(w, r, &body); err != nil {
+			httpError(w, err)
+			return
+		}
+		opts, err := mutationOptions(r, body.Mutation)
+		if err != nil {
+			httpError(w, err)
+			return
+		}
+		result, err := a.cluster.SetGroupHosting(r.Context(), r.PathValue("id"), body.Hosting, opts)
+		mutationResponse(w, result, err)
+	})
+	mux.HandleFunc("PUT /api/groups/{id}/pinned-learner", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Replica  topology.ReplicaKey     `json:"replica"`
+			Pinned   bool                    `json:"pinned"`
+			Mutation gquorum.MutationOptions `json:"mutation"`
+		}
+		if err := requestBody(w, r, &body); err != nil {
+			httpError(w, err)
+			return
+		}
+		opts, err := mutationOptions(r, body.Mutation)
+		if err != nil {
+			httpError(w, err)
+			return
+		}
+		result, err := a.cluster.SetReplicaPinnedLearner(r.Context(), r.PathValue("id"), body.Replica, body.Pinned, opts)
+		mutationResponse(w, result, err)
+	})
 	mux.HandleFunc("POST /api/groups/{id}/leader/{name}", func(w http.ResponseWriter, r *http.Request) {
 		if err := a.cluster.TransferLeader(r.Context(), r.PathValue("id"), r.PathValue("name")); err != nil {
 			httpError(w, err)
@@ -529,7 +587,7 @@ func (a *application) readyHTTP(w http.ResponseWriter, r *http.Request) {
 	var groups []string
 	for _, group := range active.LoadGroups() {
 		for _, replica := range group.Replicas {
-			if replica.NodeName == a.cfg.NodeName && replica.Role == topology.ReplicaVoter {
+			if replica.NodeName == a.cfg.NodeName {
 				if _, err := a.localServing(r.Context(), group.ID); err != nil {
 					httpError(w, err)
 					return

@@ -114,6 +114,9 @@ func validateRestoredState(st smState, rules topology.Rules) error {
 	if (st.AppliedIndex == 0) != (st.AppliedTerm == 0) {
 		return fault.New(fault.Unreadable, "invalid applied index/term", nil)
 	}
+	if err := validateVoterSwitches(st); err != nil {
+		return err
+	}
 	if len(st.History) > historyRetention {
 		return fault.New(fault.Unreadable, "history exceeds retention", nil)
 	}

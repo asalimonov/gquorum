@@ -2,6 +2,7 @@ package gquorum
 
 import (
 	"context"
+	"github.com/asalimonov/gquorum/metrics"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -12,6 +13,8 @@ type Cluster interface {
 	IsLeader() bool
 	Status(context.Context) (topology.ClusterStatus, error)
 	HealthObservation() topology.HealthObservation
+	Metrics() metrics.ClusterSnapshot
+	MetricsHistory(metrics.HistoryQuery) (metrics.HistoryPage, error)
 	ParkedJoins(context.Context) ([]topology.ParkedJoin, error)
 	Latest(context.Context) (topology.Document, error)
 	Target(context.Context) (topology.Document, error)
@@ -33,6 +36,9 @@ type Cluster interface {
 	ForceRetireNode(context.Context, string, RetireOptions) (MutationResult, error)
 	SetPlacement(context.Context, topology.PlacementRule, MutationOptions) (MutationResult, error)
 	SetGroupPlacement(context.Context, string, topology.PlacementRule, MutationOptions) (MutationResult, error)
+	SetGroupVoterPolicy(context.Context, string, topology.VoterPolicy, MutationOptions) (MutationResult, error)
+	SetGroupHosting(context.Context, string, topology.HostingRule, MutationOptions) (MutationResult, error)
+	SetReplicaPinnedLearner(context.Context, string, topology.ReplicaKey, bool, MutationOptions) (MutationResult, error)
 	CreateGroup(context.Context, GroupSpec, MutationOptions) (MutationResult, error)
 	DeleteGroup(context.Context, string, MutationOptions) (MutationResult, error)
 	ChangeReplica(context.Context, string, string, topology.ReplicaRole, MutationOptions) (MutationResult, error)

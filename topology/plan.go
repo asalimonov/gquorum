@@ -33,10 +33,19 @@ func ValidatePlanShape(active, desired Document, plan Plan) error {
 		}
 		old := exactPlanReplica(active, current)
 		next := exactPlanReplica(desired, current)
+		if current.TransferNodeName != "" || current.TransferReplicaID != 0 {
+			guard := exactPlanReplica(desired, Step{GroupID: current.GroupID, NodeName: current.TransferNodeName, ReplicaID: current.TransferReplicaID})
+			if current.Kind != StepDemoteVoter || guard == nil || guard.Role != ReplicaVoter || guard.PinnedLearner || guard.ReplicaID == current.ReplicaID {
+				return fmt.Errorf("step %d has an invalid exact demotion transfer guard", current.Seq)
+			}
+		}
 		switch current.Kind {
 		case StepPrepareReplica, StepAddLearner, StepWaitCaughtUp, StepPromoteVoter:
 			if next == nil {
 				return fmt.Errorf("step %d does not name a desired replica", current.Seq)
+			}
+			if current.Kind == StepPromoteVoter && (next.Role != ReplicaVoter || next.PinnedLearner) {
+				return fmt.Errorf("step %d promotes an intentional learner", current.Seq)
 			}
 		case StepDemoteVoter:
 			if old == nil || next == nil || next.Role != ReplicaLearner {

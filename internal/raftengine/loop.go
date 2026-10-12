@@ -34,6 +34,9 @@ func (g *Group) run() {
 	}()
 	ticker := time.NewTicker(g.opts.Timing.TickInterval)
 	defer ticker.Stop()
+	g.sampleRaftMetrics(time.Now())
+	metricsTicker := time.NewTicker(g.opts.Metrics.SampleInterval)
+	defer metricsTicker.Stop()
 	var lastEntriesWrite time.Time
 	var readyTimer *time.Timer
 	defer func() {
@@ -77,6 +80,9 @@ func (g *Group) run() {
 			return
 		case <-ticker.C:
 			g.rn.Tick()
+			g.retryDroppedProposals(time.Now())
+		case now := <-metricsTicker.C:
+			g.sampleRaftMetrics(now)
 		case <-readyC:
 			readyTimer.Stop()
 			readyTimer = nil
@@ -108,7 +114,11 @@ func (g *Group) run() {
 				answer(req, Result{}, req.ctx.Err())
 				continue
 			}
-			answer(req, Result{}, g.rn.Step(*req.message))
+			err := g.stepRemote(*req.message)
+			if err == nil {
+				g.recordPeerAck(time.Now(), *req.message)
+			}
+			answer(req, Result{}, err)
 		case req := <-controlC:
 			g.handleControl(req)
 		case req := <-snapshotC:
@@ -123,16 +133,23 @@ func (g *Group) run() {
 	}
 }
 func (g *Group) handleProposal(req *request) {
+	refuse := func(err error) { delete(g.props, req.correlation); answer(req, Result{}, err) }
 	if err := req.ctx.Err(); err != nil {
-		answer(req, Result{}, err)
+		refuse(err)
 		return
 	}
-	if g.rn.BasicStatus().RaftState != raft.StateLeader {
-		answer(req, Result{}, fault.ErrNotLeader)
+	if g.opts.GroupID == topology.MetaGroupID && g.rn.BasicStatus().RaftState != raft.StateLeader {
+		refuse(fault.ErrNotLeader)
 		return
 	}
-	if g.WALStall() > time.Second || len(g.props) >= g.opts.MaxPendingProposals {
-		answer(req, Result{}, fault.ErrOverloaded)
+	select {
+	case <-g.ready:
+	default:
+		refuse(fault.ErrReplicaNotReady)
+		return
+	}
+	if g.WALStall() > time.Second || g.props[req.correlation] == nil && len(g.props) >= g.opts.MaxPendingProposals {
+		refuse(fault.ErrOverloaded)
 		return
 	}
 	requestID := req.proposal.RequestID
@@ -147,7 +164,16 @@ func (g *Group) handleProposal(req *request) {
 		err = g.rn.Propose(data)
 	}
 	if err != nil {
-		answer(req, Result{}, err)
+		if errors.Is(err, raft.ErrProposalDropped) && g.opts.GroupID != topology.MetaGroupID && !req.retried {
+			req.retried = true
+			req.retryAt = time.Now().Add(g.opts.Timing.TickInterval)
+			g.props[req.correlation] = req
+			return
+		}
+		if errors.Is(err, raft.ErrProposalDropped) {
+			err = fault.New(fault.Unavailable, "Raft did not accept proposal", err)
+		}
+		refuse(err)
 		return
 	}
 	g.props[req.correlation] = req
@@ -231,6 +257,12 @@ func (g *Group) beginReady() error {
 		rd.Messages[i] = owned
 	}
 	if !raft.IsEmptySnap(rd.Snapshot) {
+		if g.opts.GroupID != topology.MetaGroupID {
+			for id, req := range g.props {
+				delete(g.props, id)
+				answer(req, Result{}, fault.New(fault.Unavailable, "snapshot may cover proposal result; outcome unknown", nil))
+			}
+		}
 		rd.Snapshot.Data = bytes.Clone(rd.Snapshot.Data)
 		rd.Snapshot.Metadata.ConfState = copyConf(rd.Snapshot.Metadata.ConfState)
 		if err := g.ms.ApplySnapshot(rd.Snapshot); err != nil {
@@ -275,7 +307,10 @@ func (g *Group) finishWrite(kind writeKind) error {
 		g.durableHS = rd.HardState
 	}
 	if !raft.IsEmptySnap(rd.Snapshot) {
-		if err := g.opts.Machine.Restore(g.ctx, bytes.Clone(rd.Snapshot.Data)); err != nil {
+		g.restoring.Store(true)
+		err := g.opts.Machine.Restore(g.ctx, bytes.Clone(rd.Snapshot.Data))
+		g.restoring.Store(false)
+		if err != nil {
 			return fault.New(fault.Unreadable, "restore received snapshot", err)
 		}
 		g.applied, g.snapshotIndex = rd.Snapshot.Metadata.Index, rd.Snapshot.Metadata.Index
@@ -321,7 +356,9 @@ func (g *Group) apply(entry raftpb.Entry) error {
 		if err := json.Unmarshal(entry.Data, &e); err != nil || e.Schema != 1 || e.Correlation == "" {
 			return fault.New(fault.Unreadable, "invalid load command envelope", err)
 		}
+		started := time.Now()
 		result, err := g.opts.Machine.Apply(g.ctx, Command{Index: entry.Index, Term: entry.Term, RequestID: e.RequestID, Data: bytes.Clone(e.Data)})
+		g.meter.ObserveApply(time.Since(started))
 		if err != nil {
 			return fault.New(fault.Unavailable, "load machine apply failed", err)
 		}
@@ -478,9 +515,11 @@ func (g *Group) refresh() {
 		g.emit(events.Event{Type: events.LeaderChange, OldLeader: fmt.Sprint(old.Lead), NewLeader: fmt.Sprint(status.Lead), Term: status.Term})
 	}
 	if old.RaftState == raft.StateLeader && status.RaftState != raft.StateLeader {
-		for id, req := range g.props {
-			answer(req, Result{}, fault.ErrNotLeader)
-			delete(g.props, id)
+		if g.opts.GroupID == topology.MetaGroupID {
+			for id, req := range g.props {
+				answer(req, Result{}, fault.ErrNotLeader)
+				delete(g.props, id)
+			}
 		}
 		for id, req := range g.changes {
 			answer(req, Result{}, fault.ErrNotLeader)

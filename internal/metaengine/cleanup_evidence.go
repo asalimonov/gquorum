@@ -142,6 +142,7 @@ func (sm *topologySM) nextHistoryLocked(doc topology.Document) ([]topology.Docum
 }
 
 func (sm *topologySM) pruneOperatorsLocked() {
+	defer sm.pruneVoterSwitchesLocked()
 	proofs := sm.cleanupProofsLocked()
 	versions := map[uint64]bool{sm.active.Version: true, sm.target.Version: true}
 	for _, doc := range sm.history {

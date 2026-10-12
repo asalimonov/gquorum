@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -12,8 +13,10 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	internalmetrics "github.com/asalimonov/gquorum/internal/metrics"
 	"github.com/asalimonov/gquorum/internal/raftlog"
 	"github.com/asalimonov/gquorum/membership"
+	"github.com/asalimonov/gquorum/metrics"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3"
@@ -34,6 +37,8 @@ type request struct {
 	transfer    uint64
 	snapshot    bool
 	reply       chan response
+	retried     bool
+	retryAt     time.Time
 }
 type snapshotReport struct {
 	id     uint64
@@ -46,38 +51,47 @@ type envelope struct {
 	Data        []byte `json:"data"`
 }
 type Group struct {
-	opts                                    Options
-	rn                                      *raft.RawNode
-	ms                                      *raft.MemoryStorage
-	cs                                      raftpb.ConfState
-	applied, snapshotIndex, recoveryCommit  uint64
-	durableHS                               raftpb.HardState
-	mu                                      sync.RWMutex
-	cached                                  raft.Status
-	cachedPending                           int
-	err                                     error
-	started, stopped                        bool
-	ctx                                     context.Context
-	cancel                                  context.CancelFunc
-	done, ready                             chan struct{}
-	readyOnce                               sync.Once
-	wg                                      sync.WaitGroup
-	proposals, inbound, controls, snapshots chan *request
-	slots                                   chan struct{}
-	unreachable                             chan uint64
-	reports                                 chan snapshotReport
-	sendC                                   chan []raftpb.Message
-	sendWorkers                             atomic.Int64
-	writeC                                  chan writeJob
-	writeDone                               chan writeResult
-	pending                                 *writeJob
-	props, changes                          map[string]*request
-	confNotify                              []*request
-	retirementMessages                      []raftpb.Message
-	membershipChanged                       bool
-	nonce                                   string
-	sequence                                atomic.Uint64
-	stallSince                              atomic.Int64
+	opts                                      Options
+	rn                                        *raft.RawNode
+	ms                                        *raft.MemoryStorage
+	cs                                        raftpb.ConfState
+	applied, snapshotIndex, recoveryCommit    uint64
+	durableHS                                 raftpb.HardState
+	mu                                        sync.RWMutex
+	cached                                    raft.Status
+	cachedPending                             int
+	err                                       error
+	started, stopped                          bool
+	ctx                                       context.Context
+	cancel                                    context.CancelFunc
+	done, ready                               chan struct{}
+	readyOnce                                 sync.Once
+	wg                                        sync.WaitGroup
+	proposals, inbound, controls, snapshots   chan *request
+	slots                                     chan struct{}
+	unreachable                               chan uint64
+	reports                                   chan snapshotReport
+	sendC                                     chan []raftpb.Message
+	sendWorkers                               atomic.Int64
+	writeC                                    chan writeJob
+	writeDone                                 chan writeResult
+	pending                                   *writeJob
+	props, changes                            map[string]*request
+	confNotify                                []*request
+	retirementMessages                        []raftpb.Message
+	membershipChanged                         bool
+	nonce                                     string
+	sequence                                  atomic.Uint64
+	stallSince                                atomic.Int64
+	meter                                     *internalmetrics.Meter
+	metricsMu                                 sync.RWMutex
+	raftSample                                metrics.ReplicaSample
+	raftSampleAt, writerSampleAt, writerSince time.Time
+	writerSequence                            uint64
+	writerFailed                              bool
+	peerAcks                                  map[uint64]peerAck
+	restoring                                 atomic.Bool
+	outboundPending                           atomic.Int64
 }
 
 func New(opts Options) (*Group, error) { return NewContext(context.Background(), opts) }
@@ -103,6 +117,11 @@ func newGroup(parent context.Context, opts Options, meta bool) (*Group, error) {
 		peers[i] = raft.Peer{ID: p.ID, Context: bytes.Clone(p.Context)}
 	}
 	opts.Peers = peers
+	learners := make([]raft.Peer, len(opts.FoundingLearners))
+	for i, p := range opts.FoundingLearners {
+		learners[i] = raft.Peer{ID: p.ID, Context: bytes.Clone(p.Context)}
+	}
+	opts.FoundingLearners = learners
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 	id := storage.Identity{NodeName: opts.NodeName, ClusterID: opts.ClusterID, GroupID: opts.GroupID, ReplicaID: opts.ReplicaID}
@@ -144,7 +163,11 @@ func newGroup(parent context.Context, opts Options, meta bool) (*Group, error) {
 		for _, peer := range peers {
 			cs.Voters = append(cs.Voters, peer.ID)
 		}
+		for _, peer := range learners {
+			cs.Learners = append(cs.Learners, peer.ID)
+		}
 		slices.Sort(cs.Voters)
+		slices.Sort(cs.Learners)
 		ss := raftpb.Snapshot{Data: bytes.Clone(data), Metadata: raftpb.SnapshotMetadata{Index: 1, Term: 1, ConfState: cs}}
 		if err := opts.Store.SaveSnapshot(ctx, opts.GroupID, ss); err != nil {
 			return nil, err
@@ -173,6 +196,11 @@ func newGroup(parent context.Context, opts Options, meta bool) (*Group, error) {
 		return nil, err
 	}
 	g := &Group{opts: opts, rn: rn, ms: ms, cs: copyConf(recovery.Snapshot.Metadata.ConfState), applied: recovery.Snapshot.Metadata.Index, snapshotIndex: recovery.Snapshot.Metadata.Index, recoveryCommit: recovery.HardState.Commit, durableHS: recovery.HardState, done: make(chan struct{}), ready: make(chan struct{}), proposals: make(chan *request, 256), inbound: make(chan *request, 1024), controls: make(chan *request, 16), snapshots: make(chan *request, 16), slots: make(chan struct{}, opts.MaxPendingProposals), unreachable: make(chan uint64, 256), reports: make(chan snapshotReport, 64), sendC: make(chan []raftpb.Message, 256), writeC: make(chan writeJob, 1), writeDone: make(chan writeResult, 1), props: make(map[string]*request), changes: make(map[string]*request), nonce: hex.EncodeToString(seed[:])}
+	g.peerAcks = make(map[uint64]peerAck)
+	g.meter, err = internalmetrics.NewMeter(metrics.ReplicaIdentity{ClusterID: opts.ClusterID, GroupID: opts.GroupID, NodeName: opts.NodeName, ReplicaID: opts.ReplicaID, InstanceID: opts.InstanceID, RunID: g.nonce}, opts.Metrics)
+	if err != nil {
+		return nil, err
+	}
 	g.refresh()
 	return g, nil
 }
@@ -188,10 +216,11 @@ func (g *Group) Start(parent context.Context) error {
 	}
 	g.started = true
 	g.ctx, g.cancel = context.WithCancel(parent)
-	g.wg.Add(3)
+	g.wg.Add(4)
 	go g.run()
 	go g.writer()
 	go g.sender()
+	go g.sampleMetrics()
 	go func() { g.wg.Wait(); close(g.done) }()
 	return nil
 }
@@ -200,6 +229,7 @@ func (g *Group) Stop(ctx context.Context) error {
 	if !g.started && !g.stopped {
 		g.stopped = true
 		g.err = fault.ErrStopped
+		g.meter.Stop()
 		close(g.done)
 	}
 	if g.cancel != nil {
@@ -252,7 +282,28 @@ func (g *Group) WALStall() time.Duration {
 // uncertain outcome: a submitted command may still commit. RequestID is passed
 // to Machine for application-owned durable deduplication; it does not deduplicate
 // commands in the runtime. Use one running Group per local group/replica identity.
-func (g *Group) Propose(ctx context.Context, p Proposal) (Result, error) {
+func (g *Group) Propose(ctx context.Context, p Proposal) (result Result, err error) {
+	if g.opts.GroupID != topology.MetaGroupID {
+		bounded, cancel := context.WithTimeout(ctx, g.opts.ProposalTimeout)
+		defer cancel()
+		ctx = bounded
+	}
+	started := time.Now()
+	g.meter.ObserveProposal()
+	defer func() {
+		outcome := internalmetrics.Applied
+		switch {
+		case errors.Is(err, context.DeadlineExceeded):
+			outcome = internalmetrics.TimedOut
+		case errors.Is(err, context.Canceled):
+			outcome = internalmetrics.Canceled
+		case errors.Is(err, fault.ErrOverloaded):
+			outcome = internalmetrics.Overloaded
+		case err != nil:
+			outcome = internalmetrics.Unavailable
+		}
+		g.meter.ObserveResult(time.Since(started), outcome)
+	}()
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
@@ -314,8 +365,13 @@ func (g *Group) submit(ctx context.Context, queue chan *request, req *request) (
 }
 func (g *Group) Step(ctx context.Context, msg raftpb.Message) error {
 	_, known := raftpb.MessageType_name[int32(msg.Type)]
-	if !known || raft.IsLocalMsg(msg.Type) || msg.Type == raftpb.MsgProp || msg.From == 0 || msg.From == g.opts.ReplicaID || msg.To != g.opts.ReplicaID {
+	if !known || raft.IsLocalMsg(msg.Type) || msg.From == 0 || msg.From == g.opts.ReplicaID || msg.To != g.opts.ReplicaID {
 		return fault.New(fault.Invalid, "not a remote message for this replica", nil)
+	}
+	if msg.Type == raftpb.MsgProp {
+		if err := validateForwardedProposal(g.opts, msg); err != nil {
+			return err
+		}
 	}
 	if msg.Type == raftpb.MsgSnap {
 		if msg.Snapshot == nil {

@@ -384,6 +384,8 @@ func (t *Transport) CallAddress(ctx context.Context, address, method string, dat
 		return client.IdentityPing(callCtx, req)
 	case "MetaStatus":
 		return client.MetaStatus(callCtx, req)
+	case "MetaReplicaMetrics":
+		return client.MetaReplicaMetrics(callCtx, req)
 	case "MetaControl":
 		return client.MetaControl(callCtx, req)
 	case "ProposeMeta":

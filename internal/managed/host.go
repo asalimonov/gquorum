@@ -16,6 +16,8 @@ import (
 	"github.com/asalimonov/gquorum/internal/loadhandle"
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metastore"
+	internalmetrics "github.com/asalimonov/gquorum/internal/metrics"
+	"github.com/asalimonov/gquorum/internal/observe"
 	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/membership"
@@ -48,6 +50,7 @@ type Config struct {
 	ValidatePeer                                     func(context.Context, load.Peer) error
 	ValidateNode                                     func(context.Context, topology.Identity) error
 	Engine                                           load.EngineOptions
+	Metrics                                          internalmetrics.Settings
 	EffectTimeout, CallbackTimeout, RecoveryInterval time.Duration
 	Events                                           *events.Bus
 	Logger                                           *slog.Logger
@@ -70,6 +73,10 @@ type Host struct {
 	started, quiescing, stopped bool
 	slots                       map[string]*replica
 	holds                       map[storage.Identity]bool
+	metricsPeers                map[storage.Identity]load.Peer
+	observationPool             *observe.ReadPool
+	observationCursor           int
+	observationGroups           map[string]*groupOperation
 	parked                      map[string]ParkedReplica
 	stopGate                    chan struct{}
 	deliverySeq                 uint64
@@ -111,14 +118,23 @@ func New(cfg Config) (*Host, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	var err error
+	if cfg.Metrics, err = cfg.Metrics.Resolve(); err != nil {
+		return nil, err
+	}
 	h := &Host{cfg: cfg, slots: make(map[string]*replica), holds: make(map[storage.Identity]bool), parked: make(map[string]ParkedReplica), stopGate: make(chan struct{}, 1), wake: make(chan struct{}, 1)}
 	h.operations, h.operationsDone = make(map[string]*groupOperation), make(chan struct{})
+	h.observationGroups = make(map[string]*groupOperation)
 	close(h.operationsDone)
 	h.membership, h.retentionGate = membership.NewCoordinator(), make(chan struct{}, 1)
 	h.readmissionGate = make(chan struct{}, 1)
 	// Validate engine settings without opening storage or invoking application code.
 	check := h.engineOptions(&replica{identity: storage.Identity{NodeName: "validation", ClusterID: "validation", GroupID: "validation", ReplicaID: 1}}, load.Application{}, raftengine.Joining, nil)
 	if err := check.Validate(); err != nil {
+		return nil, err
+	}
+	h.observationPool, err = observe.NewReadPool(cfg.Metrics.MaxParallelReads)
+	if err != nil {
 		return nil, err
 	}
 	return h, nil
@@ -161,6 +177,12 @@ func (h *Host) Quiesce(ctx context.Context) error {
 		h.workCancel()
 	}
 	h.mu.Unlock()
+	// Native status calls have their own bounded pool so a stuck status adapter
+	// cannot consume the independent temporal collector's permits. Join even
+	// callbacks whose observation caller already returned with partial results.
+	if err := h.observationPool.Stop(ctx); err != nil {
+		return err
+	}
 	for _, wait := range []<-chan struct{}{done, operations} {
 		if wait == nil {
 			continue

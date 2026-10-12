@@ -204,6 +204,10 @@ func (s *server) MetaStatus(ctx context.Context, req *metapb.MetaRequest) (*meta
 	return s.call(ctx, "MetaStatus", req)
 }
 
+func (s *server) MetaReplicaMetrics(ctx context.Context, req *metapb.MetaRequest) (*metapb.Reply, error) {
+	return s.call(ctx, "MetaReplicaMetrics", req)
+}
+
 func (s *server) MetaControl(ctx context.Context, req *metapb.MetaRequest) (*metapb.Reply, error) {
 	return s.call(ctx, "MetaControl", req)
 }

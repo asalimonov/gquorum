@@ -7,6 +7,7 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/loadhandle"
 	"github.com/asalimonov/gquorum/internal/raftengine"
+	"github.com/asalimonov/gquorum/metrics"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -79,3 +80,21 @@ func (g *Group) Error() error {
 	return core.Error()
 }
 func (g *Group) Running() bool { core := g.core(); return core != nil && core.Running() }
+
+// Metrics is an owned local observation, with explicit source ages. Reading it
+// performs no I/O and cannot turn cached samples into fresh evidence.
+func (g *Group) Metrics() metrics.ReplicaObservation {
+	if core := g.core(); core != nil {
+		return core.Metrics()
+	}
+	return (metrics.ReplicaObservation{State: metrics.Unknown, Reachability: "unknown"}).Clone()
+}
+
+// MetricsHistory reads bounded memory belonging to this exact engine run. A
+// stopped handle never redirects into a successor's history.
+func (g *Group) MetricsHistory(q metrics.HistoryQuery) (metrics.HistoryPage, error) {
+	if core := g.core(); core != nil {
+		return core.MetricsHistory(q)
+	}
+	return metrics.HistoryPage{}, fault.ErrInvalid
+}

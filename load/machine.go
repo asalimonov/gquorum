@@ -41,6 +41,7 @@ type Timing struct {
 }
 type EngineOptions struct {
 	Timing                                  Timing
+	ProposalTimeout                         time.Duration // default 30s; caller's shorter deadline wins
 	SnapshotThreshold                       uint64
 	MaxPendingProposals                     int
 	MaxUncommittedBytes, MaxApplyBatchBytes uint64

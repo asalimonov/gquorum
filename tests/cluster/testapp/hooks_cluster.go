@@ -166,6 +166,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			handler(w, r)
 		}
 	}
+	mux.HandleFunc("GET /internal/test/metrics", protect(func(w http.ResponseWriter, r *http.Request) { jsonResponse(w, http.StatusOK, a.cluster.Metrics()) }))
 	a.registerRuntimeRoutes(mux, protect)
 	a.registerResourceRoutes(mux, protect)
 	a.registerWALRoutes(mux, protect)
@@ -294,7 +295,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			httpError(w, err)
 			return
 		}
-		if !slices.Contains([]topology.StepKind{topology.StepCreateFoundingGroup, topology.StepPrepareReplica, topology.StepPromoteVoter, topology.StepStopReplica, topology.StepCleanupReplicaState, topology.StepDeleteGroupState}, kind) {
+		if !slices.Contains([]topology.StepKind{topology.StepCreateFoundingGroup, topology.StepPrepareReplica, topology.StepAddLearner, topology.StepPromoteVoter, topology.StepDemoteVoter, topology.StepTransferLeader, topology.StepStopReplica, topology.StepCleanupReplicaState, topology.StepDeleteGroupState}, kind) {
 			httpError(w, fault.ErrInvalid)
 			return
 		}

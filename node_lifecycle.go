@@ -42,6 +42,8 @@ func (n *node) Start(parent context.Context) error {
 	if n.opts.Loads.Factory != nil {
 		meta.LoadGroups = nodeEffects{node: n}
 		meta.HeldLoads = n.heldLoads
+		meta.LoadMetricsReads = n.loadMetricsReads
+		meta.LocalLoadMetrics = n.localLoadMetrics
 	}
 	m, err := metaservice.New(meta)
 	if err != nil {

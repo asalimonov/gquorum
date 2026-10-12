@@ -17,6 +17,7 @@ service Meta {
  rpc KeepAlive(MetaRequest) returns (Reply);
  rpc IdentityPing(MetaRequest) returns (Reply);
  rpc MetaStatus(MetaRequest) returns (Reply);
+ rpc MetaReplicaMetrics(MetaRequest) returns (Reply);
  rpc MetaControl(MetaRequest) returns (Reply);
  rpc ProposeMeta(MetaRequest) returns (Reply);
  rpc ApplyVersion(MetaRequest) returns (Reply);

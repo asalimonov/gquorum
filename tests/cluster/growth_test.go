@@ -13,7 +13,13 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func stageActivation(t *testing.T, ctx context.Context, c *Cluster, name string) (gquorum.MutationResult, topology.Plan) {
+func voterPolicy(target int) *topology.VoterPolicy {
+	p := topology.DefaultVoterPolicy()
+	p.TargetVoters = target
+	return &p
+}
+
+func stageVoterActivation(t *testing.T, ctx context.Context, c *Cluster, name string) (gquorum.MutationResult, topology.Plan) {
 	t.Helper()
 	base, err := c.Document(ctx, "node1", "latest")
 	if err != nil {
@@ -25,6 +31,18 @@ func stageActivation(t *testing.T, ctx context.Context, c *Cluster, name string)
 	}
 	var staged gquorum.MutationResult
 	if err := response.Decode(&staged); err != nil {
+		t.Fatal(err)
+	}
+	// Ordinary activation adds a stable learner. This regression explicitly
+	// approves a voter so it can exercise the full interrupted promotion plan.
+	desired := staged.Document.Clone()
+	for i := range desired.Group("work").Replicas {
+		if desired.Group("work").Replicas[i].NodeName == name {
+			desired.Group("work").Replicas[i].Role = topology.ReplicaVoter
+		}
+	}
+	staged, err = c.Stage(ctx, "node2", desired)
+	if err != nil {
 		t.Fatal(err)
 	}
 	// Acknowledgement on node2 does not imply node1 has applied the document.
@@ -114,7 +132,7 @@ func TestRuntimeGrowthExposesLearnerBeforePromotionAndSurvivesRestart(t *testing
 			t.Fatal(err)
 		}
 	}
-	staged, plan := stageActivation(t, ctx, c, "node3")
+	staged, plan := stageVoterActivation(t, ctx, c, "node3")
 	fresh := replicaID(staged.Document, "work", "node3")
 	if fresh <= replicaID(created.Document, "work", "node3") {
 		t.Fatal("activation reused a removed identity", fresh)
@@ -236,8 +254,8 @@ func TestCompactedLearnerCatchesUpFromFullSnapshot(t *testing.T) {
 		if err != nil || !local.Found || len(local.Values) != 1100 {
 			return false, err
 		}
-		if local.ReplicaID != fresh || local.ReceivedSnapshots <= before.ReceivedSnapshots || local.Storage.SnapshotIndex < leader.Storage.SnapshotIndex || !slices.Contains(local.Status.ConfState.Voters, fresh) {
-			return false, fmt.Errorf("joining voter lacks the compacted snapshot: %+v", local.Storage)
+		if local.ReplicaID != fresh || local.ReceivedSnapshots <= before.ReceivedSnapshots || local.Storage.SnapshotIndex < leader.Storage.SnapshotIndex || !slices.Contains(local.Status.ConfState.Learners, fresh) || slices.Contains(local.Status.ConfState.Voters, fresh) {
+			return false, fmt.Errorf("joining learner lacks the compacted snapshot: %+v", local.Storage)
 		}
 		for i := range 1100 {
 			key := fmt.Sprintf("compact-%04d", i)
@@ -250,7 +268,7 @@ func TestCompactedLearnerCatchesUpFromFullSnapshot(t *testing.T) {
 		t.Fatal("compacted learner did not recover exact full state", err)
 	}
 	if err := c.Put(ctx, "node3", "work", "after-snapshot", "after-snapshot", "acknowledged"); err != nil {
-		t.Fatal("recovered voter cannot accept traffic", err)
+		t.Fatal("recovered learner cannot forward traffic", err)
 	}
 	for _, node := range c.Nodes() {
 		if err := c.WaitValue(ctx, node.Spec.Name, "work", "after-snapshot", "acknowledged"); err != nil {

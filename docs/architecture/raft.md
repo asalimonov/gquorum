@@ -45,11 +45,24 @@ approved intent, and `Active` is fully converged topology. A committed edit to
 Latest alone does not authorize startup or retirement. An approved operator
 drives the effects before Active advances.
 
-For application groups, `load.Group.Propose` succeeds after its command has
-committed and the local leader's state machine has applied it. It does not wait
-for every follower to apply. The managed handle accepts proposals only on its
-local leader; it does not transparently forward application writes. Applications
-route requests and handle `fault.ErrNotLeader` themselves.
+For application groups, `load.Group.Propose` may be called on a ready local
+leader, follower or learner. A follower or learner forwards the command through
+native Raft messages to the group's leader. The command must first commit through
+the group's voter quorum. The call then returns its result after the exact
+replica where it was submitted has applied the committed command; other replicas
+may still be catching up. Learners do not contribute votes toward commitment.
+
+Topology edits and approvals require commitment through the `_meta` voter quorum.
+Adding, promoting, demoting or removing a replica also requires a configuration
+change to commit in the affected Raft group. Its leader submits that change;
+leader-only processing does not allow topology or membership to change without
+quorum. Initiating leadership transfer does not append a membership change, but
+the successor still needs the group's election quorum to become leader.
+
+A timeout or cancellation can leave the caller uncertain whether its command
+committed; applications must handle retries with that possibility in mind.
+When a node has no local replica of the requested load group, the application
+must route the request to a node that hosts one.
 
 This command ordering does not make `Cluster.Status`, document reads,
 `LockHolder`, or raw replica status linearizable. There is no public ReadIndex
@@ -148,10 +161,13 @@ and lease checks do not replace Raft's quorum rules.
 
 ## 5. From an application proposal to an applied result
 
-1. The application calls `Propose` on the local leader's `load.Group`, supplying
+1. The application calls `Propose` on a ready local `load.Group`, supplying
    command bytes and an application request ID when retries need deduplication.
 2. The engine bounds admission, copies the command into an envelope and submits
    it to RawNode. The group run loop serializes access to Raft and the machine.
+   A follower or learner forwards an ordinary MsgProp through the authenticated
+   load transport. Only the current leader accepts a normal command envelope
+   from a native member; configuration entries and raw meta proposals are refused.
 3. RawNode produces a `Ready` batch. Entries, hard state and any received
    snapshot are persisted before that batch's outgoing messages are released.
 4. Followers receive and persist replication work. Their Raft responses allow
@@ -177,6 +193,12 @@ commands. Applications preserve IDs across retries and include durable
 deduplication state in snapshots and replay. `Apply` errors halt the replica;
 deterministic business rejections should return `Result.Code`. External side
 effects and outboxes remain application responsibilities.
+
+`load.EngineOptions.ProposalTimeout` defaults to 30 seconds; a shorter caller
+deadline takes precedence. A definitive local `ErrProposalDropped` gets at most
+one retry on the owned Raft loop, retaining the same correlation and request ID.
+Ambiguous transport outcomes are not automatically retried. Installing a snapshot
+that may subsume a pending result returns unavailable with an uncertain outcome.
 
 Replicas must implement deterministic application decisions for the same command
 stream. Inputs such as business timestamps or random choices that affect state

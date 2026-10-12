@@ -19,6 +19,11 @@ func TestRepairCommandRejectsEditsOutsideOneActiveVoter(t *testing.T) {
 		edit func(*topology.Document)
 	}{
 		{"placement", func(d *topology.Document) { d.Placement.MaxReplicas++ }},
+		{"voter policy", func(d *topology.Document) { p := topology.DefaultVoterPolicy(); d.Group("shard0").VoterPolicy = &p }},
+		{"hosting", func(d *topology.Document) {
+			d.Group("shard0").Hosting = &topology.HostingRule{Mode: topology.HostingAllEligible}
+		}},
+		{"learner pin", func(d *topology.Document) { d.Group("shard0").Replicas[0].PinnedLearner = true }},
 		{"group cardinality", func(d *topology.Document) { d.Groups = append(d.Groups, topology.Group{ID: "extra"}) }},
 		{"role", func(d *topology.Document) { d.Group("shard0").Replicas[0].Role = topology.ReplicaLearner }},
 		{"node state", func(d *topology.Document) { d.Node("n1").State = topology.NodeDraining }},

@@ -49,6 +49,12 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 	// Raising the desired bound does not exceed Limits or invent another cap.
 	placement := created.Document.Clone()
 	placement.Placement.MaxReplicas = 4
+	if transferDuringLearner {
+		// Exercise an explicitly requested four-voter admission, including the
+		// existing promotion recovery barrier. Default admission stays learner.
+		placement.MetaGroup().VoterPolicy.TargetVoters = 4
+		placement.Group("work").VoterPolicy.TargetVoters = 4
+	}
 	staged, err := c.Stage(ctx, "node2", placement)
 	if err != nil {
 		t.Fatal(err)
@@ -60,21 +66,49 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	barrierKind := topology.StepAddLearner
+	barrierQuery := "?after=true"
+	if transferDuringLearner {
+		barrierKind, barrierQuery = topology.StepPromoteVoter, ""
+	}
 	for _, seed := range c.Spec.Nodes {
-		if err := c.SetBarrier(ctx, seed.Name, "work", topology.StepPromoteVoter, true); err != nil {
+		response, err := c.Request(ctx, seed.Name, "PUT", "/internal/test/barriers/work/"+string(barrierKind)+barrierQuery, nil, 0)
+		if err := requireStatus(response, err, 200); err != nil {
 			t.Fatal(err)
 		}
 	}
 	response, err := c.Request(ctx, "node2", "POST", "/api/nodes", map[string]any{
-		"node": joiningNode(node.Spec), "mutation": gquorum.MutationOptions{Actor: "cluster-test", Approve: true},
+		"node": joiningNode(node.Spec), "mutation": gquorum.MutationOptions{Actor: "cluster-test"},
 	}, staged.Document.Version)
-	if err := requireStatus(response, err, 202); err != nil {
+	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
 	}
 	var admitted gquorum.MutationResult
-	if err := response.Decode(&admitted); err != nil || admitted.OperatorID == "" {
-		t.Fatal("admission did not start an exact execution", admitted, err)
+	if err := response.Decode(&admitted); err != nil {
+		t.Fatal(err)
 	}
+	for _, group := range admitted.Document.Groups {
+		for _, replica := range group.Replicas {
+			if replica.NodeName == "node4" && replica.Role != topology.ReplicaLearner {
+				t.Fatal("new admission did not default to a stable learner", group.ID, replica)
+			}
+		}
+	}
+	if transferDuringLearner {
+		desired := admitted.Document.Clone()
+		for gi := range desired.Groups {
+			for ri := range desired.Groups[gi].Replicas {
+				if desired.Groups[gi].Replicas[ri].NodeName == "node4" {
+					desired.Groups[gi].Replicas[ri].Role = topology.ReplicaVoter
+				}
+			}
+		}
+		admitted, err = c.Stage(ctx, "node2", desired)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	admitted.OperatorID = startApply(t, ctx, c, "node2", admitted.Document.Version)
 	member := admitted.Document.MemberID("node4")
 	loadID := replicaID(admitted.Document, "work", "node4")
 	if member == 0 || loadID == 0 {
@@ -188,7 +222,7 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 		t.Fatal("joining learner served application state", err)
 	}
 	for _, seed := range c.Spec.Nodes {
-		if err := c.SetBarrier(ctx, seed.Name, "work", topology.StepPromoteVoter, false); err != nil {
+		if err := c.SetBarrier(ctx, seed.Name, "work", barrierKind, false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -225,7 +259,7 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 		t.Fatal(err)
 	}
 	local, err = c.Local(ctx, "node4", "work")
-	if err != nil || !local.Found || local.Identity.InstanceID == instance || local.Identity.MemberID != member || local.ReplicaID != loadID || !slices.Contains(local.Status.ConfState.Voters, loadID) || local.Values["before-join"] != "retained" || local.Values["after-join"] != "acknowledged" {
+	if err != nil || !local.Found || local.Identity.InstanceID == instance || local.Identity.MemberID != member || local.ReplicaID != loadID || slices.Contains(local.Status.ConfState.Voters, loadID) != transferDuringLearner || slices.Contains(local.Status.ConfState.Learners, loadID) == transferDuringLearner || local.Values["before-join"] != "retained" || local.Values["after-join"] != "acknowledged" {
 		t.Fatal("same-store joining restart lost its exact state/identity", local, err)
 	}
 	for _, current := range c.Nodes() {
@@ -234,8 +268,12 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 			t.Fatal("retained restart churned the admission document", current.Spec.Name, latest, err)
 		}
 		status, err := groupStatus(ctx, c, current.Spec.Name, topology.MetaGroupID)
-		if err != nil || len(status.ConfState.Voters) != 4 || slices.Contains(status.ConfState.Learners, member) {
-			t.Fatal(fmt.Sprintf("%s meta member did not retain promotion", current.Spec.Name), status, err)
+		wantVoters := 3
+		if transferDuringLearner {
+			wantVoters = 4
+		}
+		if err != nil || len(status.ConfState.Voters) != wantVoters || slices.Contains(status.ConfState.Learners, member) == transferDuringLearner || slices.Contains(status.ConfState.Voters, member) != transferDuringLearner {
+			t.Fatal(fmt.Sprintf("%s meta member did not retain its approved role", current.Spec.Name), status, err)
 		}
 	}
 }

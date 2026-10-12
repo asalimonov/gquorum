@@ -138,7 +138,7 @@ func (sm *topologySM) applyBindAdmission(p BindAdmissionProposal) (ApplyResult, 
 		record.State = AdmissionCompleted
 	} else {
 		if operator.State.Terminal() || operator.Version != sm.target.Version ||
-			!hasAdmissionSequence(operator.Steps, record.NodeName, record.MemberID) {
+			!hasAdmissionSequence(operator.Steps, sm.target, record.NodeName, record.MemberID) {
 			return rejectProposal(p.ProposalID, proposalAuthorization,
 				"admission is not backed by an exact current _meta learner-first sequence"), false
 		}
@@ -192,7 +192,7 @@ func (sm *topologySM) applyCommitReadmission(p CommitReadmissionProposal) (Apply
 		return rejectProposal(p.ProposalID, proposalAuthorization,
 			"readmission document does not contain the exact fresh identities"), false
 	}
-	if p.Plan.Version != doc.Version || !hasAdmissionSequence(p.Plan.Steps, p.Admission.NodeName, p.Admission.MemberID) {
+	if p.Plan.Version != doc.Version || !hasAdmissionSequence(p.Plan.Steps, doc, p.Admission.NodeName, p.Admission.MemberID) {
 		return rejectProposal(p.ProposalID, proposalAuthorization,
 			"readmission plan does not contain the exact _meta learner-first sequence"), false
 	}
@@ -248,7 +248,7 @@ func (sm *topologySM) applyReadyAdmission(p ReadyAdmissionProposal) (ApplyResult
 	}
 	operator, ok := sm.operators[record.OperatorID]
 	if !ok || operator.State.Terminal() || sm.target.Version != operator.Version ||
-		!hasAdmissionSequence(operator.Steps, record.NodeName, record.MemberID) {
+		!hasAdmissionSequence(operator.Steps, sm.target, record.NodeName, record.MemberID) {
 		return rejectProposal(p.ProposalID, proposalSuperseded,
 			"admission execution is no longer current"), false
 	}
@@ -297,23 +297,12 @@ func (sm *topologySM) admissionSnapshotLocked() []AdmissionRecord {
 	return out
 }
 
-func hasAdmissionSequence(steps []topology.Step, nodeName string, memberID uint64) bool {
-	want := []topology.StepKind{
-		topology.StepPrepareReplica, topology.StepAddLearner,
-		topology.StepWaitCaughtUp, topology.StepPromoteVoter,
-	}
-	for i := 0; i+len(want) <= len(steps); i++ {
-		matched := true
-		for j, kind := range want {
-			step := steps[i+j]
-			if step.Kind != kind || step.GroupID != topology.MetaGroupID ||
-				step.NodeName != nodeName || step.ReplicaID != memberID {
-				matched = false
-				break
+func hasAdmissionSequence(steps []topology.Step, desired topology.Document, nodeName string, memberID uint64) bool {
+	if meta := desired.MetaGroup(); meta != nil {
+		for _, r := range meta.Replicas {
+			if r.NodeName == nodeName && r.ReplicaID == memberID {
+				return topology.ValidAdmissionSequence(steps, nodeName, memberID, r.Role)
 			}
-		}
-		if matched {
-			return true
 		}
 	}
 	return false

@@ -37,21 +37,22 @@ type diskAdmission struct {
 	State       AdmissionState      `json:"state"`
 }
 type metaDiskState struct {
-	SchemaVersion uint32              `json:"schema_version"`
-	Rules         topology.Rules      `json:"rules"`
-	RetiredGroups []retiredGroup      `json:"retired_groups"`
-	Allocations   []allocationRecord  `json:"allocations"`
-	Latest        topology.Document   `json:"latest"`
-	Target        topology.Document   `json:"target"`
-	Active        topology.Document   `json:"active"`
-	History       []topology.Document `json:"history"`
-	Executions    []diskOperator      `json:"executions"`
-	Admissions    []diskAdmission     `json:"admissions,omitempty"`
-	Sessions      []sessionState      `json:"sessions"`
-	Locks         []lockEntry         `json:"locks"`
-	Activated     []string            `json:"activated,omitempty"` // sorted node names that ever activated
-	AppliedIndex  uint64              `json:"applied_index"`
-	AppliedTerm   uint64              `json:"applied_term"`
+	SchemaVersion uint32                      `json:"schema_version"`
+	Rules         topology.Rules              `json:"rules"`
+	RetiredGroups []retiredGroup              `json:"retired_groups"`
+	Allocations   []allocationRecord          `json:"allocations"`
+	Latest        topology.Document           `json:"latest"`
+	Target        topology.Document           `json:"target"`
+	Active        topology.Document           `json:"active"`
+	History       []topology.Document         `json:"history"`
+	Executions    []diskOperator              `json:"executions"`
+	Admissions    []diskAdmission             `json:"admissions,omitempty"`
+	Sessions      []sessionState              `json:"sessions"`
+	Locks         []lockEntry                 `json:"locks"`
+	Activated     []string                    `json:"activated,omitempty"` // sorted node names that ever activated
+	VoterSwitches []topology.VoterSwitchState `json:"voter_switches,omitempty"`
+	AppliedIndex  uint64                      `json:"applied_index"`
+	AppliedTerm   uint64                      `json:"applied_term"`
 }
 type diskApplyResult struct {
 	ProposalID     string
@@ -98,6 +99,7 @@ func (t diskOperatorTransition) public() topology.OperatorTransition {
 
 func (s smState) MarshalJSON() ([]byte, error) {
 	d := metaDiskState{SchemaVersion: s.SchemaVersion, Rules: s.Rules, RetiredGroups: s.RetiredGroups, Allocations: s.Allocations, Latest: s.Latest, Target: s.Target, Active: s.Active, History: s.History, Sessions: s.Sessions, Locks: s.Locks, Activated: s.Activated, AppliedIndex: s.AppliedIndex, AppliedTerm: s.AppliedTerm}
+	d.VoterSwitches = s.VoterSwitches
 	if s.Operators != nil {
 		d.Executions = make([]diskOperator, len(s.Operators))
 		for i, v := range s.Operators {
@@ -118,6 +120,7 @@ func (s *smState) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	out := smState{SchemaVersion: d.SchemaVersion, Rules: d.Rules, RetiredGroups: d.RetiredGroups, Allocations: d.Allocations, Latest: d.Latest, Target: d.Target, Active: d.Active, History: d.History, Sessions: d.Sessions, Locks: d.Locks, Activated: d.Activated, AppliedIndex: d.AppliedIndex, AppliedTerm: d.AppliedTerm}
+	out.VoterSwitches = d.VoterSwitches
 	if d.Executions != nil {
 		out.Operators = make([]topology.Operator, len(d.Executions))
 		for i, v := range d.Executions {

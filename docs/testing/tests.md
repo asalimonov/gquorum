@@ -29,7 +29,7 @@ does not depend on `testing.Short()` or per-test skip guards. Lightweight value
 stubs and callbacks testing a single local component are units; fixtures modeling
 interacting services are functional.
 
-There are **192 unit tests**, **316 functional tests**, **59 Docker cluster
+There are **226 unit tests**, **347 functional tests**, **65 Docker cluster
 tests** (including three performance cases) and **one Compose example test**.
 These are top-level test functions, excluding table cases and subtests. The
 unit suite also contains one executable documentation example and two benchmarks.
@@ -145,8 +145,14 @@ retained component assertions. Single-node functional fixtures cannot accept
 a cluster-size argument.
 
 Ordinary cluster and quorum scenarios use three nodes; larger node-count
-matrices are omitted. Only four-node admission/promotion and durable admission-pin
-restart regressions require a fourth admitted member.
+matrices are omitted. Four-node admission/promotion, durable admission-pin restart
+and interrupted voter-swap, guarded leadership transfer and replication-lag
+regressions require a fourth member for three voters plus one learner. The five-node automatic-promotion acceptance case needs two
+standbys to prove that exactly one is promoted and the other retains its learner
+role; it also checks retained return and a second failure during cooldown.
+The seven-host capacity regression proves atomic rejection at the default five
+load replicas and complete all-host placement after explicitly raising the cap.
+Larger cases do not repeat the ordinary fault matrix.
 
 Cluster cases and independent admission-phase subtests call `t.Parallel()` before setup.
 `CLUSTER_PARALLEL` defaults to eight for both cluster targets. Pool capacity and

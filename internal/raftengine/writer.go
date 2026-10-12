@@ -36,6 +36,9 @@ func (g *Group) writer() {
 	defer g.wg.Done()
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
+	metricsTicker := time.NewTicker(g.opts.Metrics.SampleInterval)
+	defer metricsTicker.Stop()
+	g.sampleWriter(time.Now())
 	var hint uint64
 	var cs raftpb.ConfState
 	dirty := false
@@ -44,8 +47,12 @@ func (g *Group) writer() {
 			return
 		}
 		ctx, cancel := context.WithTimeout(g.ctx, 5*time.Second)
+		started := time.Now()
+		g.beginWriteMetric(started)
 		g.stallSince.Store(time.Now().UnixNano())
 		err := g.opts.Store.SaveApplied(ctx, g.opts.GroupID, hint, cs)
+		g.meter.ObservePersistence(time.Since(started), err != nil)
+		g.finishWriteMetric(time.Now(), err)
 		g.stallSince.Store(0)
 		cancel()
 		if err == nil {
@@ -58,6 +65,8 @@ func (g *Group) writer() {
 			return
 		case <-ticker.C:
 			flush()
+		case now := <-metricsTicker.C:
+			g.sampleWriter(now)
 		case job := <-g.writeC:
 			var err error
 			if job.kind == writeApplied {
@@ -91,7 +100,9 @@ func (g *Group) writer() {
 		}
 	}
 }
-func (g *Group) retry(write func(context.Context) error) error {
+func (g *Group) retry(write func(context.Context) error) (result error) {
+	g.beginWriteMetric(time.Now())
+	defer func() { g.finishWriteMetric(time.Now(), result) }()
 	g.stallSince.Store(time.Now().UnixNano())
 	defer g.stallSince.Store(0)
 	backoff := 200 * time.Millisecond
@@ -100,12 +111,15 @@ func (g *Group) retry(write func(context.Context) error) error {
 			return err
 		}
 		ctx, cancel := context.WithTimeout(g.ctx, 5*time.Second)
+		started := time.Now()
 		err := write(ctx)
 		cancel()
+		fatal := errors.Is(err, fault.ErrInvalid) || errors.Is(err, fault.ErrIdentityMismatch) || errors.Is(err, fault.ErrUnreadable) || errors.Is(err, fault.ErrUnsupported) || errors.Is(err, fault.ErrStopped)
+		g.meter.ObservePersistence(time.Since(started), err != nil && !fatal && g.ctx.Err() == nil)
 		if err == nil {
 			return nil
 		}
-		if errors.Is(err, fault.ErrInvalid) || errors.Is(err, fault.ErrIdentityMismatch) || errors.Is(err, fault.ErrUnreadable) || errors.Is(err, fault.ErrUnsupported) || errors.Is(err, fault.ErrStopped) {
+		if fatal {
 			return err
 		}
 		timer := time.NewTimer(backoff)

@@ -42,6 +42,7 @@ type Group struct {
 	controller           *operator.Controller
 	scheduler            *scheduling.Driver
 	observer             *observe.Watch
+	collector            *observe.MetricsCollector
 	recorderMu           sync.Mutex
 	lastOperator         *topology.OperatorStatus
 	lastDrained          map[string]bool
@@ -115,6 +116,11 @@ func New(input Options) (*Group, error) {
 	if !opts.Join && !exists && len(opts.Founders) == 0 {
 		return nil, fault.New(fault.Invalid, "fresh meta storage requires founding members", nil)
 	}
+	if !exists && !opts.Join {
+		if err := opts.freshVoterPolicy().Validate(1, opts.Limits.MaxNodes); err != nil {
+			return nil, err
+		}
+	}
 	g := &Group{opts: opts, rules: topology.Rules{SchemaVersion: 1, Limits: opts.Limits}, identity: opts.Identity, lifecycle: "constructed", coordinator: membership.NewCoordinator(), leases: newSessionManager(opts.SessionTTL), addresses: make(map[string]string), joinMembers: make(map[uint64]string), admissionToken: make(chan struct{}, 1), ready: make(chan struct{}), stopped: make(chan struct{}), quiesced: make(chan struct{}), removalSignal: make(chan struct{}, 1), sessionToken: make(chan struct{}, 1)}
 	g.firstBootstrap = !exists && !opts.Join
 	g.lastLoadStatus = make(map[string]topology.GroupStatus)
@@ -129,6 +135,10 @@ func New(input Options) (*Group, error) {
 		return nil, err
 	}
 	g.observer, err = observe.New(observe.Config{Source: observationSource{g}, Settings: opts.Observation, Logger: opts.Logger, OnGroupTransition: g.recordGroupHealth, OnNodeTransition: g.recordNodeHealth})
+	if err != nil {
+		return nil, err
+	}
+	g.collector, err = observe.NewMetricsCollector(observe.MetricsConfig{Source: &metricsSource{g: g, pins: map[topology.ReplicaKey]topology.Identity{}}, Settings: opts.Metrics, Local: g.localMetrics, Identity: g.currentIdentity, Switches: func() []topology.VoterSwitchState { return g.state().VoterSwitches() }, Enabled: g.scheduler.Enabled, WakeScheduler: g.scheduler.Wake})
 	if err != nil {
 		return nil, err
 	}
@@ -156,8 +166,11 @@ func New(input Options) (*Group, error) {
 		var peers []raft.Peer
 		if !exists && !opts.Join {
 			mode = raftengine.Founding
+			roles := opts.foundingRoles()
 			for _, founder := range opts.Founders {
-				peers = append(peers, raft.Peer{ID: founder.MemberID})
+				if roles[founder.Node.Name] == topology.ReplicaVoter {
+					peers = append(peers, raft.Peer{ID: founder.MemberID})
+				}
 			}
 		}
 		if err = g.openEngine(opts.Identity, mode, peers); err != nil {
@@ -218,7 +231,16 @@ func (g *Group) openEngine(identity topology.Identity, mode raftengine.Mode, pee
 			g.opts.OnApplied()
 		}
 	}
-	engine, err := raftengine.NewMeta(raftengine.Options{GroupID: topology.MetaGroupID, NodeName: identity.NodeName, ClusterID: identity.ClusterID, InstanceID: identity.InstanceID, ReplicaID: identity.MemberID, Mode: mode, Peers: peers, Timing: raftengine.Timing{TickInterval: g.opts.Timing.TickInterval, ElectionTicks: g.opts.Timing.ElectionTicks, HeartbeatTicks: g.opts.Timing.HeartbeatTicks}, Store: &metastore.Adapter{Store: store}, Machine: machine, Transport: g.transport, Events: g.opts.Events, Logger: g.opts.Logger, SnapshotThreshold: g.opts.SnapshotThreshold})
+	var learners []raft.Peer
+	if mode == raftengine.Founding {
+		roles := g.opts.foundingRoles()
+		for _, founder := range g.opts.Founders {
+			if roles[founder.Node.Name] == topology.ReplicaLearner {
+				learners = append(learners, raft.Peer{ID: founder.MemberID})
+			}
+		}
+	}
+	engine, err := raftengine.NewMeta(raftengine.Options{GroupID: topology.MetaGroupID, NodeName: identity.NodeName, ClusterID: identity.ClusterID, InstanceID: identity.InstanceID, ReplicaID: identity.MemberID, Mode: mode, Peers: peers, FoundingLearners: learners, Metrics: g.opts.Metrics.Local(), Timing: raftengine.Timing{TickInterval: g.opts.Timing.TickInterval, ElectionTicks: g.opts.Timing.ElectionTicks, HeartbeatTicks: g.opts.Timing.HeartbeatTicks}, Store: &metastore.Adapter{Store: store}, Machine: machine, Transport: g.transport, Events: g.opts.Events, Logger: g.opts.Logger, SnapshotThreshold: g.opts.SnapshotThreshold})
 	if err != nil {
 		store.Close()
 		return err
@@ -269,6 +291,10 @@ func (g *Group) Start(parent context.Context) error {
 		return g.startFailed(err)
 	}
 	if err := g.observer.Start(g.workCtx); err != nil {
+		g.wg.Done()
+		return g.startFailed(err)
+	}
+	if err := g.collector.Start(g.workCtx); err != nil {
 		g.wg.Done()
 		return g.startFailed(err)
 	}

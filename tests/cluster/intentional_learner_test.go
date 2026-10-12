@@ -33,6 +33,7 @@ func TestIntentionalLearnerSurvivesSchedulingUntilApprovedPromotion(t *testing.T
 	for i := range demoted.Group("work").Replicas {
 		if demoted.Group("work").Replicas[i].NodeName == "node3" {
 			demoted.Group("work").Replicas[i].Role = topology.ReplicaLearner
+			demoted.Group("work").Replicas[i].PinnedLearner = true
 		}
 	}
 	staged, err := c.Stage(ctx, "node2", demoted)
@@ -59,7 +60,7 @@ func TestIntentionalLearnerSurvivesSchedulingUntilApprovedPromotion(t *testing.T
 				return false, err
 			}
 			r := status.Scheduling
-			if r.Enabled && r.IsLeader && r.State == topology.SchedulingIdle && r.Reason == "converged" {
+			if r.Enabled && r.IsLeader && r.State == topology.SchedulingWaiting && r.Reason == "pinned_learner" {
 				return true, assertLearner()
 			}
 		}
@@ -93,6 +94,7 @@ observe:
 	for i := range promoted.Group("work").Replicas {
 		if promoted.Group("work").Replicas[i].NodeName == "node3" {
 			promoted.Group("work").Replicas[i].Role = topology.ReplicaVoter
+			promoted.Group("work").Replicas[i].PinnedLearner = false
 		}
 	}
 	staged, err = c.Stage(ctx, "node2", promoted)

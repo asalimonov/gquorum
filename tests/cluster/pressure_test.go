@@ -45,11 +45,14 @@ func pendingPressure(t *testing.T, size int) {
 	t.Helper()
 	spec := matrixSpec(size)
 	spec.SnapshotThreshold = 100000
+	// This case measures a continuous 30-second waiter plateau. Keep its
+	// explicitly configured deadline beyond setup and that measurement window.
+	spec.ProposalTimeout = time.Minute
 	ctx, c := performanceClusterSpec(t, spec)
 	c.http.Timeout = 65 * time.Second
 	transport := c.http.Transport.(*http.Transport)
 	transport.MaxIdleConnsPerHost, transport.MaxIdleConns = 512, 1024
-	work, err := c.CreateGroup(ctx, "node1", gquorum.GroupSpec{ID: "held", Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 1, AllowedNodeTypes: []topology.NodeType{"worker"}}})
+	work, err := c.CreateGroup(ctx, "node1", gquorum.GroupSpec{ID: "held", Nodes: []string{"node1"}, VoterPolicy: voterPolicy(1), Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 1, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

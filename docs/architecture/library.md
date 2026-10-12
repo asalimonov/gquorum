@@ -167,6 +167,12 @@ Successful snapshot delivery and asynchronous failure reports use
 `ReportLoadDelivery` with the issued delivery ID and exact endpoints. Stale
 reports cannot affect a replacement handle. `ApplyAction` is used for local
 and remote destinations; an in-process adapter may forward directly to Node.
+Preserve `membership.SafetyRefusal` details in action errors, including the
+reason and exact group/replica identity. The operator uses those details to
+distinguish transient quorum/health loss from permanent membership refusal.
+An unstructured `fault.UnsafeMembership` cannot supply that distinction.
+`ReadReplica` may run concurrently for metrics and native status collection;
+per-destination send serialization applies to `SendRaft`.
 
 Node validates approvals, identities and membership safety before effects. The
 application implements no create/prepare/membership switch. It must authenticate
@@ -205,18 +211,57 @@ type LifecyclePolicy interface {
 }
 ```
 
-The default scheduler is `policy.RestoreDegraded`. It proposes supported load
-repair from copied topology, status, health and hold observations; the library
-revalidates every decision before approval. It does not approve staged operator
-intent or alter `_meta` membership. Set `Policies.RestoreDegraded` options,
-`Policies.Scheduling` intervals/cooldown, or provide `Policies.Scheduler`.
+The default scheduler is `policy.RestoreDegraded`. Groups with a replicated
+`VoterPolicy` converge toward their desired voter count and replace persistently
+unavailable or replication-lagging voters using stable learners. This includes
+`_meta`; every admitted node still hosts that group. Fresh groups default to
+three voters. Other replicas are promotable standbys unless `PinnedLearner` is
+set. Healthy voter seats remain stable. Groups with a nil policy retain the
+legacy missing-load-voter repair path until explicit adoption.
+
+Use `topology.DefaultVoterPolicy()` and override fields before passing a complete
+policy to `MetaOptions.VoterPolicy`, `GroupSpec.VoterPolicy` or
+`Cluster.SetGroupVoterPolicy`. Defaults are 30 seconds of failure, 60 seconds of
+standby stability, and five-minute group/demotion cooldowns. Apply backlog
+blocks promotion but alone does not replace a voter. `MaxSurgeVoters` permits
+zero or one temporary extra voter, subject to hard placement and live-quorum
+checks. Policy updates, hosting rules and learner pins use ordinary explicit
+staging/approval. Automatic role changes use a separate atomic CAS operation
+that cannot approve unrelated staged intent.
+
+A three-voter load group needs `Placement.MaxReplicas >= 4` to use promotion-first
+replacement with `MaxSurgeVoters=1`. Its steady target remains three; the extra
+headroom permits only the approved transition. With a hard maximum of three,
+replacement uses demotion-first when the intermediate live quorum is safe.
+The scheduler waits if neither ordering can satisfy the core checks.
+
+`GroupSpec.Hosting` and `Cluster.SetGroupHosting` select all eligible hosts or a
+durable explicit set. `GroupSpec.Nodes` selects explicit hosting. Total load
+replicas, including learners, must fit `Limits.MaxReplicas`; overflow is rejected
+before staging. Placement minimum/maximum counts retain their voter meaning.
+Founding with fewer eligible nodes reports a target shortfall without lowering
+the configured target. `_meta` hosting remains mandatory on every admitted node.
+
+Set `Policies.RestoreDegraded` options and `Policies.Scheduling` for the legacy
+repair timing, or provide `Policies.Scheduler`. Per-group voter-policy timing is
+replicated; collection cadence and memory bounds use `NodeOptions.Metrics`.
 `Node.SetSchedulingEnabled` controls the local scheduler; `SchedulingStatus`
 reports its observations and decisions. A callback still running after its
 deadline reports `policy_stalled`; it remains owned until it returns. Decisions
-are checked against refreshed topology, health and native membership before
-approval, so a replica recovering during the callback is not replaced from an
-old observation. Scheduler agreement metadata is deferred:
-applications are responsible for choosing consistent startup settings.
+are checked after the callback and after planning against refreshed topology,
+native membership, temporal evidence, pins and cooldowns. A custom policy cannot
+bypass these checks. Arbitrary callback agreement metadata remains deferred;
+applications choose consistent startup policy implementations.
+
+Enablement changes clear temporal evidence under the same scheduler gate as
+ticks. A newly enabled tick cannot reuse the previous failure or standby window;
+metric sampling and retained diagnostic history continue independently.
+
+`Cluster.Metrics()` returns a local owned snapshot, and `MetricsHistory` reads
+bounded process-local history without network I/O. `ScheduleInput.Metrics` and
+`Switches` give custom schedulers copied observations and replicated completed
+role records. Followers expose local replica samples; cluster evidence belongs
+to the current meta-leader observer. Unknown/stale sources remain explicit.
 
 `policy.DefaultLifecycle` supplies local-admission or all-founders startup gates,
 retired-storage retention and stop/diagnostics behavior after mandatory removal

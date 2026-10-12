@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/asalimonov/gquorum/internal/operator"
+	"slices"
 	"sync"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -159,6 +160,17 @@ func (g *Group) metaEffect(ctx context.Context, a topology.AuthorizedStep) error
 		}
 		if err = g.Authorize(ctx, a); err != nil {
 			return err
+		}
+		if a.Kind == topology.StepDemoteVoter && engine.Status().LeaderID == a.ReplicaID && a.TransferReplicaID != 0 {
+			if !live[a.TransferReplicaID] || !slices.Contains(engine.Status().ConfState.Voters, a.TransferReplicaID) {
+				return fault.New(fault.Unavailable, "transfer_target_unavailable", nil)
+			}
+			if err := engine.TransferLeader(ctx, a.TransferReplicaID); err != nil {
+				return err
+			}
+			// The new meta leader resumes this exact demotion step. A transfer
+			// request is a prerequisite, never proof of membership completion.
+			return fault.ErrNotLeader
 		}
 		var change raftpb.ConfChangeV2
 		switch a.Kind {

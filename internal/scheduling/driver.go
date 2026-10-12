@@ -79,6 +79,7 @@ type Driver struct {
 	onTransition     func(topology.SchedulingStatus)
 	now              func() time.Time
 	gate             chan struct{}
+	wake             chan struct{}
 	aliveSince       map[string]time.Time
 	lastRun          time.Time
 	mu               sync.Mutex
@@ -105,7 +106,7 @@ func New(cfg Config) (*Driver, error) {
 	if cfg.CallbackTimeout == 0 {
 		cfg.CallbackTimeout = 10 * time.Second
 	}
-	r := &Driver{host: cfg.Host, settings: cfg.Settings.WithDefaults(), logger: cfg.Logger, onTransition: cfg.OnTransition, now: time.Now, gate: make(chan struct{}, 1), done: make(chan struct{}), aliveSince: make(map[string]time.Time)}
+	r := &Driver{host: cfg.Host, settings: cfg.Settings.WithDefaults(), logger: cfg.Logger, onTransition: cfg.OnTransition, now: time.Now, gate: make(chan struct{}, 1), wake: make(chan struct{}, 1), done: make(chan struct{}), aliveSince: make(map[string]time.Time)}
 	r.policy, r.callbackTimeout, r.held = cfg.Scheduler, cfg.CallbackTimeout, cfg.Held
 	if r.policy == nil {
 		var err error
@@ -144,8 +145,9 @@ func (r *Driver) Start(parent context.Context) error {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				_ = r.Tick(ctx)
+			case <-r.wake:
 			}
+			_ = r.Tick(ctx)
 		}
 	}()
 	return nil
@@ -205,6 +207,7 @@ func (r *Driver) SetEnabled(ctx context.Context, enabled bool) error {
 	if r.enabled.Swap(enabled) == enabled {
 		return nil
 	}
+	r.host.ResetObservations()
 	r.resetAlive()
 	s := r.newStatus(r.host.IsLeader(), topology.SchedulingDisabled, ReconcileReasonConfigDisabled)
 	if enabled {
@@ -277,7 +280,7 @@ func (r *Driver) reconcileOnce(ctx context.Context) {
 		return
 	}
 	if !reflect.DeepEqual(latest, target) || !reflect.DeepEqual(latest, active) {
-		if leader && r.healStagedInternal(ctx, latest, active) {
+		if leader && !hasVoterPolicies(active) && r.healStagedInternal(ctx, latest, active) {
 			return
 		}
 		r.transition(r.blockedStagedStatus(leader, latest.Version), "")
@@ -295,7 +298,7 @@ func (r *Driver) reconcileOnce(ctx context.Context) {
 	}
 	now := r.now()
 	r.sampleAlive(active, health, now)
-	if !r.lastRun.IsZero() && now.Sub(r.lastRun) < r.settings.Cooldown {
+	if !hasVoterPolicies(active) && !r.lastRun.IsZero() && now.Sub(r.lastRun) < r.settings.Cooldown {
 		r.transition(r.newStatus(true, topology.SchedulingWaiting, ReconcileReasonCooldown), "")
 		return
 	}
@@ -308,7 +311,7 @@ func (r *Driver) reconcileOnce(ctx context.Context) {
 	for _, item := range topology.EvaluateDataGroupHealth(active, health) {
 		evaluations[item.GroupID] = item
 	}
-	in := policy.ScheduleInput{Now: now, Latest: latest, Target: target, Active: active, Status: status, Health: evaluations, Alive: r.aliveDurations(now), Held: r.heldIdentities()}
+	in := policy.ScheduleInput{Now: now, Latest: latest, Target: target, Active: active, Status: status, Health: evaluations, Alive: r.aliveDurations(now), Held: r.heldIdentities(), Metrics: r.host.Observations(), Switches: r.host.VoterSwitches()}
 	callbackCtx, cancel := context.WithTimeout(ctx, r.callbackTimeout)
 	r.statusMu.Lock()
 	r.callback, r.callbackStarted = callbackCtx, now
@@ -328,7 +331,9 @@ func (r *Driver) reconcileOnce(ctx context.Context) {
 	if decision.Action == nil {
 		s := r.newStatus(true, topology.SchedulingIdle, decision.Reason)
 		switch decision.Reason {
-		case ReconcileReasonStabilityWindow, "local_stop":
+		case ReconcileReasonStabilityWindow, "local_stop", "unknown_observation", "stale_observation",
+			"failure_window", "standby_window", "replica_cooldown", "group_cooldown",
+			"pinned_learner", "target_shortfall", "insufficient_observation_frequency":
 			s = r.newStatus(true, topology.SchedulingWaiting, decision.Reason)
 		case ReconcileReasonQuorumLost:
 			s = r.newStatus(true, topology.SchedulingBlocked, ReconcileReasonQuorumLost)
@@ -337,6 +342,32 @@ func (r *Driver) reconcileOnce(ctx context.Context) {
 		return
 	}
 	action := *decision.Action
+	if action.Kind == policy.ReconfigureVoters {
+		if action.VoterChange == nil || action.Identity != (storage.Identity{}) {
+			r.transition(r.newStatus(true, topology.SchedulingError, ReconcileReasonPolicyRejected), "invalid voter action union")
+			return
+		}
+		change := action.VoterChange.Clone()
+		id, err := r.commitVoterChange(ctx, in, change)
+		if err != nil {
+			reason := ReconcileReasonPolicyRejected
+			if errors.Is(err, fault.ErrVersionConflict) {
+				reason = ReconcileReasonCASConflict
+			}
+			r.transition(r.newStatus(true, topology.SchedulingWaiting, reason), err.Error())
+			return
+		}
+		r.transition(r.runningOperatorStatus(true, id), "")
+		return
+	}
+	if action.VoterChange != nil {
+		r.transition(r.newStatus(true, topology.SchedulingError, ReconcileReasonPolicyRejected), "mixed action variants")
+		return
+	}
+	if !r.lastRun.IsZero() && now.Sub(r.lastRun) < r.settings.Cooldown {
+		r.transition(r.newStatus(true, topology.SchedulingWaiting, ReconcileReasonCooldown), "")
+		return
+	}
 	if action.Kind != policy.RestoreMissingReplica {
 		r.transition(r.newStatus(true, topology.SchedulingError, ReconcileReasonPolicyRejected), fmt.Sprintf("forbidden action %q", action.Kind))
 		return
@@ -423,7 +454,7 @@ func (r *Driver) commitReplicaRepair(ctx context.Context, latest, active topolog
 	identity := action.Identity
 	group, node := active.Group(identity.GroupID), active.Node(identity.NodeName)
 	observed, ok := status[identity.GroupID]
-	if action.Kind != policy.RestoreMissingReplica || identity.ClusterID != active.ClusterID || group == nil || identity.GroupID == topology.MetaGroupID || node == nil || node.State != topology.NodeActive || !ok || !observed.Found || observed.GroupID != identity.GroupID || slices.Contains(r.heldIdentities(), identity) {
+	if action.Kind != policy.RestoreMissingReplica || identity.ClusterID != active.ClusterID || group == nil || group.VoterPolicy != nil || identity.GroupID == topology.MetaGroupID || node == nil || node.State != topology.NodeActive || !ok || !observed.Found || observed.GroupID != identity.GroupID || slices.Contains(r.heldIdentities(), identity) {
 		return "", fault.ErrOperatorAuthorization
 	}
 	for _, id := range append(append([]uint64(nil), observed.ConfState.Voters...), observed.ConfState.Learners...) {
@@ -539,4 +570,22 @@ func (r *Driver) transition(next topology.SchedulingStatus, detail string) {
 		}
 	}
 	r.logger.Log(context.Background(), level, "topology reconciliation changed", "state", next.State, "reason", next.Reason, "detail", detail)
+}
+
+// Enabled reports the local decision switch without waiting for a callback.
+func (r *Driver) Enabled() bool { return r.enabled.Load() }
+
+func (r *Driver) Wake() {
+	select {
+	case r.wake <- struct{}{}:
+	default:
+	}
+}
+func hasVoterPolicies(doc topology.Document) bool {
+	for _, g := range doc.Groups {
+		if g.VoterPolicy != nil {
+			return true
+		}
+	}
+	return false
 }

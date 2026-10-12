@@ -75,6 +75,46 @@ these are local observations. Canceling a proposal wait cannot undo a committed
 command. State machines must deduplicate application request IDs on uncertain
 retries. `WALStall` and `Error` expose local persistence/engine diagnostics.
 
+`load.Group.Metrics` and `MetricsHistory` return owned local observations for
+that exact engine run. `NodeOptions.Metrics` bounds sampling, source ages and
+history. Raft and writer generations advance only on their respective owners;
+independent aggregation cannot freshen a blocked owner. Raw history is volatile,
+bounded by count and retention age, and never becomes recovery or membership
+authority. A stopped handle cannot read its successor's series.
+
+The meta-leader collector has an independent joined lifecycle. It samples during
+scheduler callbacks, cooldown and approved operator execution. A shared bounded
+read pool spans group destinations, rotates dispatch order and retains slots for
+callbacks that have not returned after cancellation. An undispatched request or
+rejected identity cannot become failure evidence. Source generations, process
+and engine-run identities, term, membership and policy scope fence continuous
+windows; reading cached data never earns extra qualifying time.
+Collector counter exhaustion cannot reuse an observer generation or history
+cursor: it invalidates decision evidence until a fresh collector starts, while
+retaining bounded diagnostic history.
+
+Native load membership reads use a separate Host-owned pool, bounded by the
+same `Metrics.MaxParallelReads` setting across all load groups. Their read
+budget is at most `CollectTimeout` and half the remaining effect/caller budget,
+leaving time for planning or dispatch. Partial replies from an exact leader and
+healthy peers remain usable; missing replies never count as live voters. Caller
+or owner cancellation invalidates the observation. A stuck callback retains its
+permit and exact identity exclusion until return, and Host shutdown joins it.
+Keeping this pool separate prevents native status callers from consuming the
+temporal collector's permits.
+Concurrent native rounds for the same group wait on a separate observation gate,
+so another observer's active read cannot appear as missing peer health. The
+read pool releases an exact-source exclusion before publishing a completed
+result; callbacks that ignore cancellation retain it until they return.
+
+Completed role effects are materialized in replicated metadata. An observer
+measures cooldown from its first observation of each record using monotonic time;
+a new observer epoch conservatively rearms the configured duration. New-failure
+exceptions require a healthy observation after that record followed by qualifying
+failure. Recently demoted replicas keep their own cooldown. Approved operators
+resume their immutable steps independently of these decision delays. Demotion
+preserves replica identity and storage; it does not retire the replica.
+
 The library expands approved cleanup into exact identities, joins the owned
 replica, probes retained storage and verifies its ledger. If application state
 exists outside Raft, `LoadOptions.Retire` must independently verify its complete

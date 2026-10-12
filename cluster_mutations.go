@@ -22,9 +22,11 @@ type MutationResult struct {
 	OperatorID topology.OperatorID `json:"operator_id,omitempty"`
 }
 type GroupSpec struct {
-	ID        string                  `json:"id"`
-	Placement *topology.PlacementRule `json:"placement,omitempty"`
-	Nodes     []string                `json:"nodes,omitempty"`
+	ID          string                  `json:"id"`
+	Placement   *topology.PlacementRule `json:"placement,omitempty"`
+	Nodes       []string                `json:"nodes,omitempty"`
+	VoterPolicy *topology.VoterPolicy   `json:"voter_policy,omitempty"`
+	Hosting     *topology.HostingRule   `json:"hosting,omitempty"`
 }
 type RetireOptions struct {
 	Reason   string          `json:"reason"`
@@ -97,6 +99,37 @@ func (c *clusterView) CreateGroup(ctx context.Context, spec GroupSpec, opts Muta
 	}
 	result, err := m.CreateLoadGroup(ctx, metaservice.GroupSpec(spec), opts.internal())
 	return MutationResult(result), err
+}
+
+// SetGroupVoterPolicy stages replicated voter intent. Approval authorizes later
+// scheduler convergence; changing the policy does not itself change any roles.
+func (c *clusterView) SetGroupVoterPolicy(ctx context.Context, id string, p topology.VoterPolicy, opts MutationOptions) (MutationResult, error) {
+	m, err := c.node.service(ctx, true)
+	if err != nil {
+		return MutationResult{}, err
+	}
+	r, err := m.SetGroupVoterPolicy(ctx, id, p, opts.internal())
+	return MutationResult(r), err
+}
+
+func (c *clusterView) SetGroupHosting(ctx context.Context, id string, h topology.HostingRule, opts MutationOptions) (MutationResult, error) {
+	m, err := c.node.service(ctx, true)
+	if err != nil {
+		return MutationResult{}, err
+	}
+	r, err := m.SetGroupHosting(ctx, id, h, opts.internal())
+	return MutationResult(r), err
+}
+
+// SetReplicaPinnedLearner pins an exact replica against automatic promotion.
+// Pinning a voter requests guarded demotion; unpinning changes only eligibility.
+func (c *clusterView) SetReplicaPinnedLearner(ctx context.Context, id string, replica topology.ReplicaKey, pinned bool, opts MutationOptions) (MutationResult, error) {
+	m, err := c.node.service(ctx, true)
+	if err != nil {
+		return MutationResult{}, err
+	}
+	r, err := m.SetReplicaPinnedLearner(ctx, id, replica, pinned, opts.internal())
+	return MutationResult(r), err
 }
 func (c *clusterView) DeleteGroup(ctx context.Context, id string, opts MutationOptions) (MutationResult, error) {
 	m, err := c.node.service(ctx, true)
