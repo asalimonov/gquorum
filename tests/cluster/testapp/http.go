@@ -112,13 +112,13 @@ func httpError(w http.ResponseWriter, err error) {
 	switch code {
 	case fault.Invalid, fault.Unsupported:
 		status = http.StatusBadRequest
-	case fault.VersionConflict, fault.GroupRetired, fault.IdentityMismatch, fault.OperatorAuthorization:
+	case fault.VersionConflict, fault.GroupRetired, fault.IdentityMismatch, fault.OperatorAuthorization, fault.AuthorityFenced, fault.ReplanRequired:
 		status = http.StatusConflict
 	case fault.UnsafeMembership:
 		status = http.StatusUnprocessableEntity
 	case fault.HistoryUnavailable:
 		status = http.StatusNotFound
-	case fault.NotLeader, fault.ReplicaNotReady, fault.Unavailable, fault.Stopped, fault.Overloaded, fault.NoController:
+	case fault.NotLeader, fault.ReplicaNotReady, fault.Unavailable, fault.Stopped, fault.Overloaded, fault.NoController, fault.AuthorityPending:
 		status = http.StatusServiceUnavailable
 	}
 	body := map[string]any{"code": code, "error": err.Error()}
@@ -225,7 +225,7 @@ func mutationResponse(w http.ResponseWriter, result gquorum.MutationResult, err 
 func (a *application) routes() http.Handler {
 	mux := http.NewServeMux()
 	a.registerClusterRoutes(mux)
-	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) {
 		jsonResponse(w, http.StatusOK, map[string]any{"node": a.cfg.NodeName})
 	})
 	mux.HandleFunc("GET /health/ready", a.readyHTTP)
@@ -545,6 +545,7 @@ func (a *application) routes() http.Handler {
 	})
 	mux.HandleFunc("PUT /api/load/{id}/keys/{key}", a.putHTTP)
 	mux.HandleFunc("GET /api/load/{id}/keys/{key}", a.getHTTP)
+	mux.HandleFunc("GET /api/load/{id}/read/{key}", a.readHTTP)
 	mux.HandleFunc("GET /api/events", a.eventsHTTP)
 	mux.HandleFunc("GET /api/events/watch", a.watchHTTP)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -703,6 +704,42 @@ func (a *application) getHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	jsonResponse(w, status, map[string]any{"key": r.PathValue("key"), "value": value, "found": found, "applied_index": index, "consistency": "local", "node": a.cfg.NodeName})
 }
+func (a *application) readHTTP(w http.ResponseWriter, r *http.Request) {
+	if err := topology.ValidateLoadID(r.PathValue("id")); err != nil {
+		httpError(w, err)
+		return
+	}
+	local, err := a.localServing(r.Context(), r.PathValue("id"))
+	if err != nil {
+		httpError(w, err)
+		return
+	}
+	query, err := json.Marshal(getQuery{Key: r.PathValue("key")})
+	if err != nil {
+		httpError(w, err)
+		return
+	}
+	result, err := local.group.Read(r.Context(), query)
+	if err != nil {
+		httpError(w, err)
+		return
+	}
+	if result.Code != "ok" {
+		httpError(w, fault.New(fault.Code(result.Code), "load query refused", nil))
+		return
+	}
+	var value getResult
+	if err := decodeJSON(result.Data, &value); err != nil {
+		httpError(w, err)
+		return
+	}
+	status := http.StatusOK
+	if !value.Found {
+		status = http.StatusNotFound
+	}
+	jsonResponse(w, status, map[string]any{"key": value.Key, "value": value.Value, "found": value.Found, "applied_index": value.AppliedIndex, "consistency": "linearizable", "node": a.cfg.NodeName})
+}
+
 func eventQuery(r *http.Request) (events.Query, error) {
 	q := events.Query{Limit: 100, Filter: events.Filter{GroupID: r.URL.Query().Get("group")}}
 	var err error

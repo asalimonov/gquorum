@@ -27,15 +27,16 @@ func TestMetaAdmissionUsesLearnerBeforeServingAndRetainsIdentityOnRestart(t *tes
 	testMetaAdmission(t, false)
 }
 
-func TestAdmissionOperatorResumesAfterMetaLeaderTransferWithoutNewAttempt(t *testing.T) {
+func TestAdmissionOperatorResumesAfterMetaLeaderElectionWithoutNewAttempt(t *testing.T) {
 	t.Parallel()
 	testMetaAdmission(t, true)
 }
 
-func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
+func testMetaAdmission(t *testing.T, electionDuringLearner bool) {
 	t.Helper()
 	spec := matrixSpec(3)
 	spec.Limits.MaxNodes, spec.Limits.MaxReplicas = 4, 4
+	spec.MetaFaultProxy = electionDuringLearner
 	c := acquire(t, spec).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 105*time.Second)
 	defer cancel()
@@ -49,7 +50,7 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 	// Raising the desired bound does not exceed Limits or invent another cap.
 	placement := created.Document.Clone()
 	placement.Placement.MaxReplicas = 4
-	if transferDuringLearner {
+	if electionDuringLearner {
 		// Exercise an explicitly requested four-voter admission, including the
 		// existing promotion recovery barrier. Default admission stays learner.
 		placement.MetaGroup().VoterPolicy.TargetVoters = 4
@@ -68,7 +69,7 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 	}
 	barrierKind := topology.StepAddLearner
 	barrierQuery := "?after=true"
-	if transferDuringLearner {
+	if electionDuringLearner {
 		barrierKind, barrierQuery = topology.StepPromoteVoter, ""
 	}
 	for _, seed := range c.Spec.Nodes {
@@ -94,7 +95,7 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 			}
 		}
 	}
-	if transferDuringLearner {
+	if electionDuringLearner {
 		desired := admitted.Document.Clone()
 		for gi := range desired.Groups {
 			for ri := range desired.Groups[gi].Replicas {
@@ -118,26 +119,56 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 	go func() { started <- node.Start(ctx) }()
 	defer func() { cancel(); <-started }()
 	learnerSeen := false
-	transferred := false
+	elected := false
 	var replacementMember uint64
+	observer := "node1"
+	var healController func()
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		status, err := c.Status(ctx, "node1")
+		status, err := c.Status(ctx, observer)
 		if err == nil {
+			if status.Operator != nil && status.Operator.ID == admitted.OperatorID && status.Operator.State.Terminal() && status.Operator.State != topology.OperatorSucceeded {
+				t.Fatalf("meta admission terminated before load growth: %+v", status.Operator)
+			}
 			for _, group := range status.Groups {
 				if group.GroupID == topology.MetaGroupID && slices.Contains(group.ConfState.Learners, member) {
 					learnerSeen = true
-					if transferDuringLearner && !transferred {
-						target := "node1"
-						if admitted.Document.MemberID(target) == status.MetaLeaderID {
-							target = "node2"
+					if electionDuringLearner && !elected {
+						oldLeader := ""
+						for _, r := range admitted.Document.MetaGroup().Replicas {
+							if r.ReplicaID == status.MetaLeaderID {
+								oldLeader = r.NodeName
+								break
+							}
 						}
-						replacementMember = admitted.Document.MemberID(target)
-						if err := transferMeta(ctx, c, "node3", target, replacementMember); err != nil {
-							t.Fatal("transfer during admitted meta learner execution", err)
+						if oldLeader == "" {
+							t.Fatal("cannot map exact metadata leader during admission", status)
 						}
-						transferred = true
+						if observer == oldLeader {
+							observer = "node2"
+						}
+						local, err := c.Local(ctx, oldLeader, topology.MetaGroupID)
+						if err != nil {
+							t.Fatal(err)
+						}
+						// Pending topology owns administration. Use a real election
+						// while preserving the former controller's process and loads.
+						healController = holdMetaRaft(t, ctx, c, oldLeader, local.Identity)
+						if err := Poll(ctx, func() (bool, error) {
+							changed, err := c.Status(ctx, observer)
+							if err != nil || changed.MetaLeaderID == 0 || changed.MetaLeaderID == local.Identity.MemberID {
+								return false, err
+							}
+							if changed.Operator == nil || changed.Operator.ID != admitted.OperatorID || changed.Operator.Attempt != 1 {
+								return true, fmt.Errorf("election changed exact admission execution: %+v", changed.Operator)
+							}
+							replacementMember = changed.MetaLeaderID
+							return true, nil
+						}); err != nil {
+							t.Fatal("election during admitted learner execution", err)
+						}
+						elected = true
 					}
 				}
 			}
@@ -151,8 +182,11 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 		case <-ticker.C:
 		}
 	}
-	if transferDuringLearner && !transferred {
-		t.Fatal("execution never transferred while the new meta member was a learner")
+	if healController != nil {
+		healController()
+	}
+	if electionDuringLearner && !elected {
+		t.Fatal("execution never replaced its leader while the new meta member was a learner")
 	}
 	if !learnerSeen {
 		t.Fatal("new meta member was never observed as a learner")
@@ -177,19 +211,19 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 		t.Fatal("joining process owns another meta identity", local.Identity, err)
 	}
 	instance := local.Identity.InstanceID
-	if transferDuringLearner {
-		operator, err := c.Operator(ctx, "node2", admitted.OperatorID)
+	if electionDuringLearner {
+		operator, err := c.Operator(ctx, observer, admitted.OperatorID)
 		if err != nil || operator.ID != admitted.OperatorID || operator.Attempt != 1 || operator.Version != admitted.Document.Version || operator.State.Terminal() {
 			t.Fatal("leader replacement changed or finished the paused execution", operator, err)
 		}
-		status, err := c.Status(ctx, "node2")
+		status, err := c.Status(ctx, observer)
 		if err != nil || status.MetaLeaderID != replacementMember {
 			t.Fatal("replacement meta leader did not retain the ongoing execution", status.MetaLeaderID, err)
 		}
 		// The stored execution's current exact step is exposed by the authorized
 		// receiver, even if planning against already changed membership differs.
 		if err := Poll(ctx, func() (bool, error) {
-			current, err := c.Operator(ctx, "node2", admitted.OperatorID)
+			current, err := c.Operator(ctx, observer, admitted.OperatorID)
 			if err != nil {
 				return false, err
 			}
@@ -229,7 +263,7 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 	if err := c.WaitOperator(ctx, "node2", admitted.OperatorID); err != nil {
 		t.Fatal(err)
 	}
-	if transferDuringLearner {
+	if electionDuringLearner {
 		operator, err := c.Operator(ctx, "node2", admitted.OperatorID)
 		if err != nil || operator.Attempt != 1 || operator.ID != admitted.OperatorID || operator.State != topology.OperatorSucceeded {
 			t.Fatal("resumed admission created another attempt", operator, err)
@@ -259,7 +293,7 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 		t.Fatal(err)
 	}
 	local, err = c.Local(ctx, "node4", "work")
-	if err != nil || !local.Found || local.Identity.InstanceID == instance || local.Identity.MemberID != member || local.ReplicaID != loadID || slices.Contains(local.Status.ConfState.Voters, loadID) != transferDuringLearner || slices.Contains(local.Status.ConfState.Learners, loadID) == transferDuringLearner || local.Values["before-join"] != "retained" || local.Values["after-join"] != "acknowledged" {
+	if err != nil || !local.Found || local.Identity.InstanceID == instance || local.Identity.MemberID != member || local.ReplicaID != loadID || slices.Contains(local.Status.ConfState.Voters, loadID) != electionDuringLearner || slices.Contains(local.Status.ConfState.Learners, loadID) == electionDuringLearner || local.Values["before-join"] != "retained" || local.Values["after-join"] != "acknowledged" {
 		t.Fatal("same-store joining restart lost its exact state/identity", local, err)
 	}
 	for _, current := range c.Nodes() {
@@ -269,10 +303,10 @@ func testMetaAdmission(t *testing.T, transferDuringLearner bool) {
 		}
 		status, err := groupStatus(ctx, c, current.Spec.Name, topology.MetaGroupID)
 		wantVoters := 3
-		if transferDuringLearner {
+		if electionDuringLearner {
 			wantVoters = 4
 		}
-		if err != nil || len(status.ConfState.Voters) != wantVoters || slices.Contains(status.ConfState.Learners, member) == transferDuringLearner || slices.Contains(status.ConfState.Voters, member) != transferDuringLearner {
+		if err != nil || len(status.ConfState.Voters) != wantVoters || slices.Contains(status.ConfState.Learners, member) == electionDuringLearner || slices.Contains(status.ConfState.Voters, member) != electionDuringLearner {
 			t.Fatal(fmt.Sprintf("%s meta member did not retain its approved role", current.Spec.Name), status, err)
 		}
 	}
@@ -307,6 +341,8 @@ func TestMetaPinnedAdmissionRestartsBeforeAndAfterReadyWithoutAllocatingIDs(t *t
 				t.Fatal(err)
 			}
 			if err := node.Start(ctx); err != nil {
+				op, readErr := c.Operator(ctx, "node1", admission.OperatorID)
+				t.Logf("approved pin-driver admission: %+v (read error: %v)", op, readErr)
 				t.Fatal(err)
 			}
 			response, err = c.Request(ctx, "node4", "GET", "/internal/test/admission-pin", nil, 0)
@@ -314,16 +350,21 @@ func TestMetaPinnedAdmissionRestartsBeforeAndAfterReadyWithoutAllocatingIDs(t *t
 				t.Fatal(err)
 			}
 			var pin struct {
-				Identity topology.Identity `json:"identity"`
-				Found    bool              `json:"found"`
-				Instance string            `json:"instance_id"`
-				Phase    string            `json:"phase"`
+				Identity          topology.Identity `json:"identity"`
+				AuthorityIdentity topology.Identity `json:"authority_identity"`
+				MetadataAcquired  bool              `json:"metadata_acquired"`
+				Found             bool              `json:"found"`
+				Instance          string            `json:"instance_id"`
+				Phase             string            `json:"phase"`
 			}
 			if err := response.Decode(&pin); err != nil {
 				t.Fatal(err)
 			}
 			if !pin.Found || pin.Identity.MemberID != admission.Document.MemberID("node4") || pin.Identity.ClusterID != c.ID || pin.Identity.NodeName != "node4" || pin.Instance == "" || pin.Phase != phase {
 				t.Fatal("pending grant was not durably pinned", pin)
+			}
+			if pin.MetadataAcquired || pin.AuthorityIdentity.ClusterID != pin.Identity.ClusterID || pin.AuthorityIdentity.NodeName != pin.Identity.NodeName || pin.AuthorityIdentity.MemberID != pin.Identity.MemberID || pin.AuthorityIdentity.InstanceID != pin.Instance {
+				t.Fatal("pin driver did not retain the independent unacquired authority boundary", pin)
 			}
 			if err := node.Kill(ctx); err != nil {
 				t.Fatal(err)

@@ -37,6 +37,7 @@ const (
 // RetirementRequest authorizes cleanup of one exact application's retained
 // replica resources. Topology and readmission proofs are deliberately distinct.
 type RetirementRequest struct {
+	Grant                             topology.AuthorityGrant
 	Identity                          storage.Identity
 	Reason                            RetirementReason
 	Authorization                     *topology.AuthorizedStep
@@ -48,6 +49,7 @@ type RetirementRequest struct {
 // only after the callback has verified its own durable application identity.
 // Idempotent verification must also succeed after already-completed cleanup.
 type RetirementResult struct {
+	Grant                             topology.AuthorityGrant
 	Identity                          storage.Identity
 	Reason                            RetirementReason
 	Authorization                     *topology.AuthorizedStep

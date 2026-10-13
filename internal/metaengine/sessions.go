@@ -116,13 +116,6 @@ func (sm *topologySM) Sessions() []sessionState {
 	return sm.sessionSnapshotLocked()
 }
 
-func (sm *topologySM) hasSession(sessionID string) bool {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	_, ok := sm.sessions[sessionID]
-	return ok
-}
-
 func (sm *topologySM) session(sessionID string) (sessionState, bool) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()

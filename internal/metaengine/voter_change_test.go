@@ -159,6 +159,7 @@ func TestVoterRoleRecordsResumeWithoutCooldownReset(t *testing.T) {
 			for _, s := range p.Plan.Steps {
 				applyAdmissionTransition(t, sm, index, result.OperatorID, p.Plan, s.Seq, topology.OperatorRunning, p.At)
 				index++
+				index = consumeTestStep(t, sm, result.OperatorID, index)
 				data, err := sm.Snapshot()
 				if err != nil {
 					t.Fatal(err)

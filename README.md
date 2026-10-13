@@ -36,6 +36,13 @@ cross-group transactions require application coordination.
 - **Replica-local proposal results:** ready load followers and learners forward
   ordinary writes to their leader and return results after local application,
   with bounded waits and application request IDs preserved across forwarding.
+- **Consistent reads:** ready voters, followers and learners confirm reads with
+  ReadIndex and local apply waiting; optional application queries run serialized
+  with Apply/Restore. Authoritative topology and lock reads have explicit APIs.
+- **Resource-fenced administration:** immutable grants bind exact effects and
+  identities. Supersession requests revocation; durable group/host fencing and
+  receipts establish completion, with pending state when required resources
+  cannot be reached or lack quorum.
 - **Durable recovery:** bbolt-backed metadata, an included etcd WAL backend for
   load groups, full state-machine snapshots, committed-tail replay, compaction
   and snapshot catch-up.
@@ -80,16 +87,22 @@ responsibilities.
 
 `gquorum.Node` owns one participant, its private topology service and its local
 load replicas. `node.Cluster()` provides a stable administration view. Approved
-topology plans drive replica startup, membership changes and retirement.
+topology plans drive replica startup, membership changes and retirement. Supply
+an explicit `NodeOptions.StorageDir` for the fixed `_meta.bolt` and
+`_authority.bolt` system files. Retain this directory alongside the node identity
+and keep it outside application/load retirement roots. Configure application
+load storage separately through `Loads.Storage`.
 
 | API | Responsibility |
 | --- | --- |
 | `gquorum.Node` | Start, readiness, shutdown, local replicas, sessions and typed load-protocol receivers. |
+| `util.NewInstanceID()` | Generate a fresh process identity for `Identity.InstanceID` on every start, including retained restarts. |
 | `gquorum.Cluster` | Read and edit topology, preview and approve plans, follow operators, manage membership and acquire locks. |
-| `*load.Group` | Propose application commands, observe leadership and status, request snapshots and inspect proposal pressure for one local replica. |
+| `*load.Group` | Propose commands, confirm reads with `ReadBarrier`/`Read`, observe status and request snapshots for one exact local replica. |
 | `gquorum.GroupFactory` / `load.Application` | Open application resources for an exact approved replica and transfer their release to Node. |
 | `load.StateMachine` | Apply commands and implement complete `Snapshot` and `Restore` operations. |
-| `load.Transport` | Implement `SendRaft`, `ReadReplica` and `ApplyAction` in the application's authenticated protocol. |
+| `load.QueryMachine` | Optionally execute application queries serialized with `Apply` and `Restore`; write-only machines can omit it. |
+| `load.Transport` | Implement `SendRaft`, `ReadReplica`, `InstallFence` and `ApplyAction` in the application's authenticated protocol. |
 | `storage.Store` / `storage.RetirementStore` | Persist Raft state and collect verified retired storage; `storage/walstore` supplies the included implementation. |
 | `policy.Scheduler` / `policy.LifecyclePolicy` | Supply repair and lifecycle decisions while the library enforces authorization and membership safety. |
 
@@ -108,9 +121,12 @@ See the [Raft overview](docs/architecture/raft.md) for consensus domains,
 elections, heartbeat protocols and durability. See the
 [cluster-building guide](docs/architecture/library.md) for integration
 contracts and the [ownership and recovery guide](docs/architecture/runtime.md)
-for lifecycle details. Document and status reads are observations, not
-linearizable read barriers. Forced recovery after permanent majority loss is
-not currently implemented.
+for lifecycle details. `Latest`, `Target`, `Active`, status and ordinary lock-holder
+reads are local observations. Use `Cluster.ReadTopology`, `ReadLockHolder` or
+`ReadAuthority` for authoritative metadata reads, and `Group.ReadBarrier` or
+`Group.Read` for quorum-confirmed application reads. `Read` requires the optional
+`load.QueryMachine` and runs its query serialized with application and restore.
+Forced recovery after permanent majority loss is not currently implemented.
 
 Nodes have readable string names (`Identity.NodeName`). Status reports the
 leader's name as `meta_leader_node_name` and `groups[].leader_node_name`,
@@ -154,7 +170,7 @@ compatibility impact.
 
    ```sh
    make test       # Compile all three modules and run fast, uncached units
-   make lint       # go vet in all three modules
+   make lint       # vet, dead-code and unused-code checks across modules
    make test-race  # Fast unit checks under the race detector
    ```
 

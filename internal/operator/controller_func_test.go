@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/storage"
+	"github.com/asalimonov/gquorum/topology"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/raft/v3/raftpb"
@@ -41,7 +44,7 @@ func (s *controllerStore) Active(context.Context) (Document, error) {
 	defer s.mu.Unlock()
 	return s.active.Clone(), nil
 }
-func (s *controllerStore) History(context.Context, int, int) ([]Document, error) { return nil, nil }
+func (_ *controllerStore) History(context.Context, int, int) ([]Document, error) { return nil, nil }
 func (s *controllerStore) Get(_ context.Context, version uint64) (Document, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -50,10 +53,10 @@ func (s *controllerStore) Get(_ context.Context, version uint64) (Document, erro
 	}
 	return s.latest.Clone(), nil
 }
-func (s *controllerStore) Propose(context.Context, Document, uint64) (Document, error) {
+func (_ *controllerStore) Propose(context.Context, Document, uint64) (Document, error) {
 	return Document{}, ErrNotImplemented
 }
-func (s *controllerStore) Watch(context.Context) (<-chan Document, error) {
+func (_ *controllerStore) Watch(context.Context) (<-chan Document, error) {
 	ch := make(chan Document)
 	close(ch)
 	return ch, nil
@@ -61,7 +64,7 @@ func (s *controllerStore) Watch(context.Context) (<-chan Document, error) {
 func (s *controllerStore) WatchActive(ctx context.Context) (<-chan Document, error) {
 	return s.Watch(ctx)
 }
-func (s *controllerStore) Close() error { return nil }
+func (_ *controllerStore) Close() error { return nil }
 
 func (s *controllerStore) activate() error {
 	s.mu.Lock()
@@ -82,6 +85,11 @@ type controllerCoordinator struct {
 	hasOperator   bool
 	transitionErr error
 	transitions   []OperatorTransition
+	grants        map[AuthorizedStep]topology.AuthorityGrant
+	receipts      map[topology.AuthorityKey][]topology.EffectReceipt
+	reconcileErr  error
+	receiptErr    error
+	beginErr      error
 }
 
 func (c *controllerCoordinator) IsMetaLeader() bool {
@@ -109,7 +117,7 @@ func (c *controllerCoordinator) BeginOperator(_ context.Context, version uint64,
 	c.store.mu.Unlock()
 	return c.operator.ID, nil
 }
-func (c *controllerCoordinator) CommitRepairOperator(context.Context, Document, uint64, Plan) (Document, OperatorID, error) {
+func (_ *controllerCoordinator) CommitRepairOperator(context.Context, Document, uint64, Plan) (Document, OperatorID, error) {
 	return Document{}, "", ErrNotImplemented
 }
 func (c *controllerCoordinator) Operator(_ context.Context, id OperatorID) (OperatorStatus, bool) {
@@ -191,9 +199,14 @@ func (g *controllerGroups) Status(_ context.Context, groupID string) (GroupStatu
 	status.ConfState.Learners = append([]uint64(nil), status.ConfState.Learners...)
 	return status, nil
 }
-func (g *controllerGroups) CreateGroup(ctx context.Context, cmd AuthorizedStep) error {
+func (g *controllerGroups) ReadNative(ctx context.Context, groupID string, _ ...storage.Identity) (topology.NativeState, error) {
+	status, err := g.Status(ctx, groupID)
+	return topology.NativeState{GroupID: groupID, ReplicaID: 1, Applied: 1, ConfState: status.ConfState}, err
+}
+func (g *controllerGroups) CreateGroup(ctx context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+	cmd := *grant.Action
 	if err := g.beforeCall(ctx, cmd); err != nil {
-		return err
+		return nil, err
 	}
 	g.record(cmd.Kind)
 	target, _ := g.store.Target(context.Background())
@@ -206,19 +219,21 @@ func (g *controllerGroups) CreateGroup(ctx context.Context, cmd AuthorizedStep) 
 	}
 	g.setStatus(cmd.GroupID, status)
 	g.afterCall(cmd)
-	return nil
+	return controllerReceipts(grant), nil
 }
-func (g *controllerGroups) PrepareReplica(ctx context.Context, cmd AuthorizedStep) error {
+func (g *controllerGroups) PrepareReplica(ctx context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+	cmd := *grant.Action
 	if err := g.beforeCall(ctx, cmd); err != nil {
-		return err
+		return nil, err
 	}
 	g.record(cmd.Kind)
 	g.afterCall(cmd)
-	return nil
+	return controllerReceipts(grant), nil
 }
-func (g *controllerGroups) ApplyMembership(ctx context.Context, cmd AuthorizedStep) error {
+func (g *controllerGroups) ApplyMembership(ctx context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+	cmd := *grant.Action
 	if err := g.beforeCall(ctx, cmd); err != nil {
-		return err
+		return nil, err
 	}
 	g.record(cmd.Kind)
 	g.mu.Lock()
@@ -239,11 +254,12 @@ func (g *controllerGroups) ApplyMembership(ctx context.Context, cmd AuthorizedSt
 	g.statuses[cmd.GroupID] = status
 	g.mu.Unlock()
 	g.afterCall(cmd)
-	return nil
+	return controllerReceipts(grant), nil
 }
-func (g *controllerGroups) TransferLeader(ctx context.Context, cmd AuthorizedStep) error {
+func (g *controllerGroups) TransferLeader(ctx context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+	cmd := *grant.Action
 	if err := g.beforeCall(ctx, cmd); err != nil {
-		return err
+		return nil, err
 	}
 	g.record(cmd.Kind)
 	g.mu.Lock()
@@ -252,32 +268,35 @@ func (g *controllerGroups) TransferLeader(ctx context.Context, cmd AuthorizedSte
 	g.statuses[cmd.GroupID] = status
 	g.mu.Unlock()
 	g.afterCall(cmd)
-	return nil
+	return controllerReceipts(grant), nil
 }
-func (g *controllerGroups) StopReplica(ctx context.Context, cmd AuthorizedStep) error {
+func (g *controllerGroups) StopReplica(ctx context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+	cmd := *grant.Action
 	if err := g.beforeCall(ctx, cmd); err != nil {
-		return err
+		return nil, err
 	}
 	g.record(cmd.Kind)
 	g.afterCall(cmd)
-	return nil
+	return controllerReceipts(grant), nil
 }
-func (g *controllerGroups) CleanupReplicaState(ctx context.Context, cmd AuthorizedStep) error {
+func (g *controllerGroups) CleanupReplicaState(ctx context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+	cmd := *grant.Action
 	if err := g.beforeCall(ctx, cmd); err != nil {
-		return err
+		return nil, err
 	}
 	g.record(cmd.Kind)
 	g.afterCall(cmd)
-	return nil
+	return controllerReceipts(grant), nil
 }
-func (g *controllerGroups) DeleteGroupState(ctx context.Context, cmd AuthorizedStep) error {
+func (g *controllerGroups) DeleteGroupState(ctx context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+	cmd := *grant.Action
 	if err := g.beforeCall(ctx, cmd); err != nil {
-		return err
+		return nil, err
 	}
 	g.record(cmd.Kind)
 	g.setStatus(cmd.GroupID, GroupStatus{GroupID: cmd.GroupID})
 	g.afterCall(cmd)
-	return nil
+	return controllerReceipts(grant), nil
 }
 func (g *controllerGroups) beforeCall(ctx context.Context, cmd AuthorizedStep) error {
 	g.mu.Lock()
@@ -490,7 +509,7 @@ func TestController_FinalValidatorFailureLeavesActiveUnchanged(t *testing.T) {
 	}
 }
 
-func TestController_ForcedRetirementWaivesOnlyDeadNodeTeardown(t *testing.T) {
+func TestController_ForcedRetirementRequiresHostReceipts(t *testing.T) {
 	t.Parallel()
 	active := threeNodeDoc()
 	target := active.Clone()
@@ -507,15 +526,18 @@ func TestController_ForcedRetirementWaivesOnlyDeadNodeTeardown(t *testing.T) {
 	}
 	f := newControllerFixture(active, target, steps, 2, OperatorRunning)
 	f.groups.statuses["shard0"] = statusFor("shard0", []uint64{1, 2}, nil, 1)
+	attempts := 0
+	f.groups.before = func(context.Context, AuthorizedStep) error { attempts++; return fault.ErrUnavailable }
 	f.engine.Tick(context.Background())
 	f.engine.Tick(context.Background())
 	ex, _ := f.coord.CurrentOperator(context.Background())
-	if ex.State != OperatorSucceeded {
-		t.Fatalf("forced execution state = %q, want succeeded", ex.State)
+	if ex.State.Terminal() || ex.CurrentStep != 2 {
+		t.Fatalf("unreachable host advanced without receipts: %+v", ex)
 	}
-	if len(f.groups.calls) != 0 {
-		t.Fatalf("unreachable target teardown was called: %v", f.groups.calls)
+	if attempts != 2 || len(f.groups.calls) != 0 {
+		t.Fatalf("host retries = %d, completed effects = %v", attempts, f.groups.calls)
 	}
+
 }
 
 func TestController_DestructiveAndLifecycleSteps(t *testing.T) {
@@ -759,7 +781,7 @@ func TestController_WaitFailureOwnershipAndCancellation(t *testing.T) {
 		assert.Equal(t, OperatorPending, ex.State)
 		assert.Zero(t, ex.CurrentStep)
 	})
-	t.Run("idempotent replay advances without side effect", func(t *testing.T) {
+	t.Run("already satisfied membership still obtains receipt", func(t *testing.T) {
 		add := Step{Seq: 1, Kind: StepAddLearner, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}
 		wait := Step{Seq: 2, Kind: StepWaitCaughtUp, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}
 		f := newControllerFixture(active, target, []Step{add, wait}, 0, OperatorPending)
@@ -767,7 +789,7 @@ func TestController_WaitFailureOwnershipAndCancellation(t *testing.T) {
 		f.engine.Tick(context.Background())
 		ex, _ := f.coord.CurrentOperator(context.Background())
 		assert.Equal(t, 2, ex.CurrentStep)
-		assert.Empty(t, f.groups.calls)
+		assert.Equal(t, []StepKind{StepAddLearner}, f.groups.calls)
 	})
 	t.Run("cleanup without exact remove and stop fails", func(t *testing.T) {
 		cleanup := Step{Seq: 1, Kind: StepCleanupReplicaState, GroupID: "shard0", NodeName: "n1", ReplicaID: 1}
@@ -803,10 +825,6 @@ func TestController_EmptyPlanAndActivationFailure(t *testing.T) {
 	assert.Equal(t, uint64(1), got.Version, "Active must not advance when activation fails")
 }
 
-type countingSignal struct{ calls int }
-
-func (s *countingSignal) Signal() { s.calls++ }
-
 func TestController_FailoverResumesExactStep(t *testing.T) {
 	t.Parallel()
 	active, target, replica := growDocuments()
@@ -818,12 +836,12 @@ func TestController_FailoverResumesExactStep(t *testing.T) {
 		wantStep  int
 	}{
 		{
-			name: "prepare is replayed idempotently",
+			name: "prepare receipt survives failover",
 			steps: []Step{
 				{Seq: 1, Kind: StepPrepareReplica, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID},
 				{Seq: 2, Kind: StepAddLearner, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID},
 			},
-			wantCalls: 2, wantState: OperatorRunning, wantStep: 2,
+			wantCalls: 1, wantState: OperatorRunning, wantStep: 2,
 		},
 		{
 			name: "learner addition is observed live",
@@ -1238,6 +1256,14 @@ func TestController_TickSurvivesLostProposal(t *testing.T) {
 }
 
 func mustController(cfg Config) *Controller {
+	if cfg.Authority == nil {
+		cfg.Authority = cfg.Coordinator.(AuthorityCoordinator)
+	}
+	if cfg.PlanValidator == nil {
+		// These protocol doubles intentionally exercise individual steps. Full
+		// remaining-plan validation has its own tests and service integration.
+		cfg.PlanValidator = func(context.Context, Record) error { return nil }
+	}
 	c, err := New(cfg)
 	if err != nil {
 		panic(err)

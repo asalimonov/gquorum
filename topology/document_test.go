@@ -149,10 +149,10 @@ func testDocumentPointer() *Document { d := testDocument(); return &d }
 func TestLimitsCapacityAndExcludedTombstones(t *testing.T) {
 	t.Parallel()
 	l := (Limits{}).WithDefaults()
-	if l.MaxNodes != 3 || l.MaxReplicas != 5 {
+	if l.MaxNodes != 3 || l.MaxReplicas != 5 || l.MaxPendingAuthorityRecords != 1024 {
 		t.Fatal(l)
 	}
-	for _, v := range []Limits{{MaxNodes: -1, MaxReplicas: 1}, {MaxNodes: 1, MaxReplicas: -1}, {}} {
+	for _, v := range []Limits{{MaxNodes: 1, MaxReplicas: 1, MaxPendingAuthorityRecords: -1}, {MaxNodes: -1, MaxReplicas: 1}, {MaxNodes: 1, MaxReplicas: -1}, {}} {
 		if v.Validate() == nil {
 			t.Fatal("invalid limits", v)
 		}

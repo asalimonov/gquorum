@@ -10,6 +10,7 @@ import (
 	"io"
 	"maps"
 	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
@@ -18,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -269,14 +271,15 @@ func assertRetiredMetaPin(t *testing.T, ctx context.Context, c *Cluster, old top
 		t.Fatal("readmission did not quarantine one exact old meta store", paths)
 	}
 	for _, remote := range paths {
-		if !regexp.MustCompile(`^/data/meta\.bolt\.retired-[0-9]+-[0-9a-f]{16}$`).MatchString(remote) {
+		if !regexp.MustCompile(`^/data/_meta\.bolt\.retired-[0-9]+-[0-9a-f]{16}$`).MatchString(remote) {
 			t.Fatal("unexpected retired meta path", remote)
 		}
 		source, err := c.Node(old.NodeName).Container.CopyFileFromContainer(ctx, remote)
 		if err != nil {
 			t.Fatal(err)
 		}
-		file, err := os.CreateTemp(t.TempDir(), "retired-*.bolt")
+		storageDir := t.TempDir()
+		file, err := os.Create(filepath.Join(storageDir, "_meta.bolt"))
 		if err != nil {
 			_ = source.Close()
 			t.Fatal(err)
@@ -286,7 +289,7 @@ func assertRetiredMetaPin(t *testing.T, ctx context.Context, c *Cluster, old top
 		if err != nil {
 			t.Fatal(err)
 		}
-		pin, found, err := gquorum.LoadStoredIdentity(file.Name())
+		pin, found, err := gquorum.LoadStoredIdentity(storageDir)
 		if err != nil || !found || pin.NodeName != old.NodeName || pin.ClusterID != old.ClusterID || pin.MemberID != old.MemberID {
 			t.Fatal("quarantined a foreign/successor meta pin", pin, old, err)
 		}
@@ -360,10 +363,24 @@ func excludedSameDiskRejoin(t *testing.T, size int) {
 	if err != nil || parkedIdentity.Identity.MemberID != previous.Identity.MemberID || parkedIdentity.Identity.InstanceID == previous.Identity.InstanceID {
 		t.Fatal("parked restart replaced pin or reused process", parkedIdentity, err)
 	}
-	// Keep the excluded process alive and nonserving while every observer reads
-	// its exact typed refusal. The same parked process must later resume.
+	// Keep the excluded process alive and nonserving while both surviving
+	// participants read its exact typed refusal. The same parked process must
+	// later resume; control-only startup must not reopen ordinary metadata reads.
+	refused, err := c.Request(ctx, "node3", "GET", "/api/cluster/parked", nil, 0)
+	if err := requireStatus(refused, err, 503); err != nil {
+		t.Fatal("parked member admitted an ordinary metadata read", err)
+	}
+	var refusal struct {
+		Code fault.Code `json:"code"`
+	}
+	if err := refused.Decode(&refusal); err != nil || refusal.Code != fault.Stopped {
+		t.Fatal("parked member lost its participation refusal", refusal, err)
+	}
 	if err := Poll(ctx, func() (bool, error) {
 		for _, node := range c.Spec.Nodes {
+			if node.Name == victim.Spec.Name {
+				continue
+			}
 			reply, err := c.Request(ctx, node.Name, "GET", "/api/cluster/parked", nil, 0)
 			if err := requireStatus(reply, err, 200); err != nil {
 				return false, err

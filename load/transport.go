@@ -23,6 +23,7 @@ type Transport interface {
 	SendRaft(context.Context, RaftBatch) error
 	ReadReplica(context.Context, ReplicaQuery) (ReplicaStatus, error)
 	ApplyAction(context.Context, ActionRequest) (ActionResult, error)
+	InstallFence(context.Context, FenceRequest) (FenceResult, error)
 }
 type Peer struct {
 	Node    topology.Identity
@@ -36,10 +37,16 @@ type RaftBatch struct {
 type ReplicaQuery struct {
 	From topology.Identity
 	To   Peer
+	// Native requests quorum-confirmed applied membership, independently of the
+	// diagnostic Status below. Transports must preserve this flag and the reply.
+	Native bool
 }
 type ReplicaStatus struct {
 	Peer  Peer
 	Found bool
+	// Native is present only for a successful Native query on a ready replica.
+	// Absence (including Found=false) never proves that a group does not exist.
+	Native *topology.NativeState `json:"native,omitempty"`
 	// Status is a raw replica observation. LeaderNodeName is not authoritative;
 	// cluster status and scheduler inputs resolve it through their Active view.
 	Status     topology.GroupStatus
@@ -47,16 +54,32 @@ type ReplicaStatus struct {
 	Metrics    *metrics.ReplicaSample `json:"metrics,omitempty"`
 }
 type ActionRequest struct {
+	Grant         topology.AuthorityGrant
 	From          topology.Identity
 	To            Peer
 	Authorization topology.AuthorizedStep
-	LocalTarget   storage.Identity
+	// LocalTarget identifies a host effect. For founding, an empty target asks
+	// the running group to persist its separate native membership receipt.
+	LocalTarget storage.Identity
 }
 type ActionResult struct {
+	Receipts      []topology.EffectReceipt
 	From          Peer
 	Authorization topology.AuthorizedStep
 	LocalTarget   storage.Identity
-	Verified      bool
+}
+
+type FenceRequest struct {
+	From      topology.Identity          `json:"from"`
+	To        topology.Identity          `json:"to"`
+	ReplicaID uint64                     `json:"replica_id,omitempty"`
+	Resource  topology.AuthorityResource `json:"resource"`
+	Grant     topology.AuthorityGrant    `json:"grant"`
+}
+
+type FenceResult struct {
+	From     topology.Identity      `json:"from"`
+	Evidence topology.FenceEvidence `json:"evidence"`
 }
 type DeliveryKind string
 

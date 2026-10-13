@@ -3,6 +3,7 @@ package metaengine
 import (
 	"cmp"
 	"context"
+	"maps"
 	"slices"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -10,59 +11,8 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// LoadActionTargets expands a current approval into exact effect targets. A
-// deletion includes retained approved preparation lineage, never staged intent.
-// Returning owned values under the authorization read boundary prevents callers
-// from assembling a mixed catalog out of independently read documents.
-func (sm *topologySM) LoadActionTargets(ctx context.Context, a topology.AuthorizedStep) ([]storage.Identity, error) {
-	if err := topology.ValidateLoadID(a.GroupID); err != nil {
-		return nil, err
-	}
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	if err := sm.authorizeLocked(ctx, a); err != nil {
-		return nil, err
-	}
-	ids := make(map[storage.Identity]bool)
-	add := func(name string, id uint64) {
-		if name != "" && id != 0 {
-			ids[storage.Identity{ClusterID: sm.target.ClusterID, NodeName: name, GroupID: a.GroupID, ReplicaID: id}] = true
-		}
-	}
-	addGroup := func(doc topology.Document, votersOnly bool) {
-		if group := doc.Group(a.GroupID); group != nil {
-			for _, r := range group.Replicas {
-				if !votersOnly || r.Role == topology.ReplicaVoter {
-					add(r.NodeName, r.ReplicaID)
-				}
-			}
-		}
-	}
-	switch a.Kind {
-	case topology.StepCreateFoundingGroup:
-		addGroup(sm.target, true)
-	case topology.StepDeleteGroupState:
-		if sm.target.Group(a.GroupID) != nil {
-			return nil, fault.ErrOperatorAuthorization
-		}
-		ids, err := sm.deletionCatalogLocked(a.GroupID)
-		if err != nil {
-			return nil, err
-		}
-		return orderedIdentities(ids), nil
-	case topology.StepPrepareReplica, topology.StepAddLearner, topology.StepPromoteVoter, topology.StepDemoteVoter, topology.StepRemoveReplica, topology.StepTransferLeader, topology.StepStopReplica, topology.StepCleanupReplicaState:
-		add(a.NodeName, a.ReplicaID)
-	default:
-		return nil, fault.ErrUnsupported
-	}
-	if len(ids) == 0 {
-		return nil, fault.ErrHistoryUnavailable
-	}
-	return orderedIdentities(ids), nil
-}
-
 // LoadCatalog describes current approved routing/observation candidates. It does
-// not grant an external effect; those require LoadActionTargets and Authorize.
+// not grant an external effect; effects require immutable committed grants.
 func (sm *topologySM) LoadCatalog(ctx context.Context, group string) ([]storage.Identity, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -97,7 +47,8 @@ func orderedIdentities(ids map[storage.Identity]bool) []storage.Identity {
 	return out
 }
 
-// DeletionBase supplies approved historical identities only for removed groups.
+// DeletionBase supplies approved historical identities for planning cleanup,
+// including interrupted preparations in surviving groups.
 // It is private planning input, never a replacement for the public Active view.
 func (sm *topologySM) DeletionBase(ctx context.Context, desired topology.Document) (topology.Document, error) {
 	if err := ctx.Err(); err != nil {
@@ -106,6 +57,43 @@ func (sm *topologySM) DeletionBase(ctx context.Context, desired topology.Documen
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.deletionBaseLocked(desired)
+}
+
+// OperatorBase preserves the exact retired identities named by an immutable
+// retry even when earlier consumption removed them from new planning input.
+func (sm *topologySM) OperatorBase(ctx context.Context, id topology.OperatorID) (topology.Document, error) {
+	if err := ctx.Err(); err != nil {
+		return topology.Document{}, err
+	}
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	op := sm.operators[id]
+	if op == nil || op.Version != sm.target.Version {
+		return topology.Document{}, fault.ErrOperatorAuthorization
+	}
+	return sm.operatorBaseLocked(op)
+}
+
+func (sm *topologySM) operatorBaseLocked(op *operatorRecord) (topology.Document, error) {
+	base, err := sm.deletionBaseLocked(sm.target)
+	if err != nil {
+		return topology.Document{}, err
+	}
+	for _, step := range op.Steps {
+		if step.Kind != topology.StepRemoveReplica && step.Kind != topology.StepStopReplica && step.Kind != topology.StepCleanupReplicaState {
+			continue
+		}
+		group := base.Group(step.GroupID)
+		if group == nil {
+			base.Groups = append(base.Groups, topology.Group{ID: step.GroupID})
+			group = &base.Groups[len(base.Groups)-1]
+		}
+		if !slices.ContainsFunc(group.Replicas, func(r topology.Replica) bool { return r.ReplicaID == step.ReplicaID && r.NodeName == step.NodeName }) {
+			group.Replicas = append(group.Replicas, topology.Replica{NodeName: step.NodeName, ReplicaID: step.ReplicaID, Role: topology.ReplicaVoter})
+		}
+	}
+	canonicalizeDocument(&base)
+	return base, nil
 }
 
 func (sm *topologySM) deletionBaseLocked(desired topology.Document) (topology.Document, error) {
@@ -119,26 +107,76 @@ func (sm *topologySM) deletionBaseLocked(desired topology.Document) (topology.Do
 			groups[step.GroupID] = true
 		}
 	}
+	for _, record := range sm.authority.records {
+		groups[record.Grant.Key.GroupID] = true
+	}
+	proofs := sm.cleanupProofsLocked()
 	for group := range groups {
-		if group == topology.MetaGroupID || desired.Group(group) != nil {
-			continue
-		}
 		// A deletion already incorporated into Active needs no new operator.
-		if base.Group(group) == nil && sm.retired[group] != 0 && sm.active.Version >= sm.retired[group] {
+		if desired.Group(group) == nil && base.Group(group) == nil && sm.retired[group] != 0 && sm.active.Version >= sm.retired[group] {
 			continue
 		}
 		ids, err := sm.deletionCatalogLocked(group)
 		if err != nil {
 			return topology.Document{}, err
 		}
+		if desired.Group(group) != nil {
+			// Readmission retires host resources before their old native members
+			// are removed. Preserve their routing identities while the replacement
+			// is not yet Active; its gated preparation covers host retirement.
+			for id := range proofs.readmitted {
+				if id.GroupID == group && desired.MemberID(id.NodeName) != 0 && desired.MemberID(id.NodeName) != sm.active.MemberID(id.NodeName) {
+					ids[id] = true
+				}
+			}
+		}
 		g := base.Group(group)
+		if desired.Group(group) != nil {
+			// Desired-only identities do not establish a previously absent group.
+			// Retain an historical owner only when it still requires retirement.
+			for id := range ids {
+				if r := documentReplica(desired, group, id.ReplicaID); r != nil && r.NodeName == id.NodeName {
+					delete(ids, id)
+				}
+			}
+			if g == nil && len(ids) == 0 {
+				continue
+			}
+			if g != nil {
+				for _, r := range g.Replicas {
+					if wanted := documentReplica(desired, group, r.ReplicaID); wanted != nil && wanted.NodeName == r.NodeName {
+						ids[sm.loadIdentity(group, r.NodeName, r.ReplicaID)] = true
+					}
+				}
+			}
+		}
 		if g == nil {
 			base.Groups = append(base.Groups, topology.Group{ID: group})
 			g = &base.Groups[len(base.Groups)-1]
 		}
+		previous := g.Replicas
 		g.Replicas = nil
 		for _, id := range orderedIdentities(ids) {
-			g.Replicas = append(g.Replicas, topology.Replica{NodeName: id.NodeName, ReplicaID: id.ReplicaID, Role: topology.ReplicaVoter})
+			r := topology.Replica{NodeName: id.NodeName, ReplicaID: id.ReplicaID, Role: topology.ReplicaVoter}
+			for _, old := range previous {
+				if old.NodeName == id.NodeName && old.ReplicaID == id.ReplicaID {
+					r = old
+					break
+				}
+			}
+			g.Replicas = append(g.Replicas, r)
+			if group == topology.MetaGroupID && base.Node(id.NodeName) == nil {
+				// An admitted member may enter native membership before Active.
+				// Keep its approved node attributes for drain/health planning too.
+				for _, doc := range sm.authorityDocumentsLocked() {
+					if node := doc.Node(id.NodeName); node != nil {
+						owned := *node
+						owned.Labels = maps.Clone(node.Labels)
+						base.Nodes = append(base.Nodes, owned)
+						break
+					}
+				}
+			}
 		}
 	}
 	canonicalizeDocument(&base)
@@ -179,6 +217,15 @@ func (sm *topologySM) deletionCatalogLocked(group string) (map[storage.Identity]
 			if step.NodeName != "" && step.ReplicaID != 0 {
 				ids[sm.loadIdentity(group, step.NodeName, step.ReplicaID)] = true
 			}
+		}
+	}
+	for _, record := range sm.authority.records {
+		if record.Grant.Key.GroupID != group {
+			continue
+		}
+		known = true
+		for _, target := range record.Grant.Targets {
+			ids[sm.loadIdentity(group, target.NodeName, target.ReplicaID)] = true
 		}
 	}
 	if !known {

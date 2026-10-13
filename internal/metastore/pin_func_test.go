@@ -117,7 +117,7 @@ func TestMetaSchemaProbeRefusesIncompleteAndUnversionedStores(t *testing.T) {
 	}{
 		{"missing format", func(tx *bolt.Tx) error { return tx.DeleteBucket(bucketFormat) }, fault.ErrUnsupported},
 		{"missing bucket", func(tx *bolt.Tx) error { return tx.DeleteBucket(bucketIdentity) }, fault.ErrUnreadable},
-		{"bad version", func(tx *bolt.Tx) error { return tx.Bucket(bucketFormat).Put(keySchemaVersion, []byte("2")) }, fault.ErrUnsupported},
+		{"bad version", func(tx *bolt.Tx) error { return tx.Bucket(bucketFormat).Put(keySchemaVersion, []byte("99")) }, fault.ErrUnsupported},
 		{"unknown format field", func(tx *bolt.Tx) error { return tx.Bucket(bucketFormat).Put([]byte("unknown"), []byte("data")) }, fault.ErrUnreadable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

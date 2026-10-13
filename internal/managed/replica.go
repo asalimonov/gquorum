@@ -32,6 +32,9 @@ const (
 )
 
 type replica struct {
+	authorityKey      topology.AuthorityKey
+	startGrant        *topology.AuthorityGrant
+	startSequence     uint64
 	identity          storage.Identity
 	node              topology.Identity
 	ctx               context.Context
@@ -102,6 +105,10 @@ func (h *Host) acceptGuardedStart(ctx context.Context, ref load.ReplicaRef, why 
 	if h.quiescing || h.stopped || h.ctx.Err() != nil {
 		return nil, fault.ErrStopped
 	}
+	grant, err := h.startAuthority(ctx, id, node)
+	if err != nil {
+		return nil, err
+	}
 	slot := h.slots[id.GroupID]
 	if slot != nil && !slot.released && (slot.identity != id || slot.node != node) {
 		return nil, fault.ErrIdentityMismatch
@@ -122,6 +129,9 @@ func (h *Host) acceptGuardedStart(ctx context.Context, ref load.ReplicaRef, why 
 	}
 	owned, cancel := context.WithCancel(h.ctx)
 	slot = &replica{identity: id, node: node, ctx: owned, cancel: cancel, startDone: make(chan struct{}), state: "starting", deliveries: make(map[uint64]delivery)}
+	if grant != nil {
+		slot.authorityKey, slot.startGrant = grant.Key, grant
+	}
 	slot.startGuard = guard
 	h.slots[id.GroupID] = slot
 	go h.startReplica(slot)
@@ -156,15 +166,21 @@ func (h *Host) startReplica(slot *replica) {
 	err := h.openReplica(slot)
 	if err == nil {
 		h.mu.Lock()
-		if slot.ctx.Err() == nil && slot.state == "starting" {
-			slot.handle, slot.state = loadhandle.New(slot.core, slot.identity), "ready"
-			delete(h.parked, slot.identity.GroupID)
-			close(slot.startDone)
-			h.mu.Unlock()
-			return
+		if slot.ctx.Err() == nil && slot.state == "starting" && h.checkStartupFloor(slot) == nil {
+			if finishErr := h.finishStartupEffect(slot); finishErr != nil {
+				err = finishErr
+			} else {
+				slot.handle, slot.state = loadhandle.New(slot.core, slot.identity), "ready"
+				delete(h.parked, slot.identity.GroupID)
+				close(slot.startDone)
+				h.mu.Unlock()
+				return
+			}
 		}
 		h.mu.Unlock()
-		err = fault.ErrStopped
+		if err == nil {
+			err = fault.ErrStopped
+		}
 	}
 	slot.cancel()
 	releaseErr := h.releaseResources(slot)
@@ -183,14 +199,23 @@ func (h *Host) startReplica(slot *replica) {
 
 func (h *Host) openReplica(slot *replica) error {
 	ctx := slot.ctx
+	if err := h.checkStartupFloor(slot); err != nil {
+		return err
+	}
 	scope, boot, probe, err := h.preflight(ctx, slot)
 	if err != nil {
+		return err
+	}
+	if err := h.checkStartupFloor(slot); err != nil {
 		return err
 	}
 	if slot.startGuard != nil {
 		if err := slot.startGuard(ctx); err != nil {
 			return err
 		}
+	}
+	if err := h.beginStartupEffect(slot, probe.Exists); err != nil {
+		return err
 	}
 	spec := load.ReplicaSpec{Identity: slot.identity, Node: slot.node, Group: (topology.Document{Groups: []topology.Group{scope.Group}}).Clone().Groups[0], ApprovedVersion: scope.Version}
 	call, cancel := context.WithTimeout(ctx, h.cfg.CallbackTimeout)
@@ -222,6 +247,9 @@ func (h *Host) openReplica(slot *replica) error {
 	if current.Version != scope.Version {
 		return fault.ErrVersionConflict
 	}
+	if err := h.checkStartupFloor(slot); err != nil {
+		return err
+	}
 	if slot.startGuard != nil {
 		if err := slot.startGuard(ctx); err != nil {
 			return err
@@ -247,6 +275,9 @@ func (h *Host) openReplica(slot *replica) error {
 	if _, err := h.startScope(ctx, slot.node, slot.identity); err != nil {
 		return err
 	}
+	if err := h.checkStartupFloor(slot); err != nil {
+		return err
+	}
 	if slot.startGuard != nil {
 		if err := slot.startGuard(ctx); err != nil {
 			return err
@@ -265,15 +296,23 @@ func (h *Host) openReplica(slot *replica) error {
 	if err == nil && slot.startGuard != nil {
 		err = slot.startGuard(ctx)
 	}
+	if err == nil {
+		err = h.checkStartupFloor(slot)
+	}
 	return err
 }
 
 func (h *Host) engineOptions(slot *replica, app load.Application, mode raftengine.Mode, peers []raft.Peer) raftengine.Options {
-	return raftengine.Options{NodeName: slot.identity.NodeName, ClusterID: slot.identity.ClusterID, GroupID: slot.identity.GroupID, ReplicaID: slot.identity.ReplicaID,
+	options := raftengine.Options{NodeName: slot.identity.NodeName, ClusterID: slot.identity.ClusterID, GroupID: slot.identity.GroupID, ReplicaID: slot.identity.ReplicaID,
 		InstanceID: slot.node.InstanceID, Mode: mode, Peers: peers, Metrics: h.cfg.Metrics.Local(), Store: h.cfg.Store, Machine: machineAdapter{app.StateMachine}, Transport: engineTransport{h, slot},
 		Timing: raftengine.Timing(h.cfg.Engine.Timing), SnapshotThreshold: h.cfg.Engine.SnapshotThreshold, MaxPendingProposals: h.cfg.Engine.MaxPendingProposals,
-		ProposalTimeout:     h.cfg.Engine.ProposalTimeout,
+		ProposalTimeout: h.cfg.Engine.ProposalTimeout, Reads: raftengine.ReadOptions(h.cfg.Engine.Reads),
 		MaxUncommittedBytes: h.cfg.Engine.MaxUncommittedBytes, MaxApplyBatchBytes: h.cfg.Engine.MaxApplyBatchBytes, Events: h.cfg.Events, Logger: h.cfg.Logger}
+	options.ManagedAuthority, options.MemberID = true, slot.node.MemberID
+	if mode == raftengine.Founding {
+		options.InitialAuthority = slot.startGrant
+	}
+	return options
 }
 
 type machineAdapter struct{ load.StateMachine }
@@ -406,4 +445,17 @@ func (h *Host) releaseResources(slot *replica) error {
 	slot.handle = nil
 	h.mu.Unlock()
 	return nil
+}
+
+func (m machineAdapter) SupportsQuery() bool {
+	_, ok := m.StateMachine.(load.QueryMachine)
+	return ok
+}
+func (m machineAdapter) Query(ctx context.Context, query []byte) (raftengine.Result, error) {
+	machine, ok := m.StateMachine.(load.QueryMachine)
+	if !ok {
+		return raftengine.Result{}, fault.ErrUnsupported
+	}
+	result, err := machine.Query(ctx, query)
+	return raftengine.Result(result), err
 }

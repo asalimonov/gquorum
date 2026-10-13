@@ -3,7 +3,6 @@
 package metaengine
 
 import (
-	"context"
 	"fmt"
 	"slices"
 	"testing"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
+	"go.etcd.io/raft/v3/raftpb"
 )
 
 func TestInterruptedLoadCleanupSurvivesHistoryAndSnapshot(t *testing.T) {
@@ -50,7 +50,9 @@ func TestInterruptedLoadCleanupSurvivesHistoryAndSnapshot(t *testing.T) {
 			accepted(ProposeDocument{Doc: prepared, ExpectedVersion: 1})
 			old := accepted(BeginOperatorProposal{Version: 2, Plan: topology.Plan{Version: 2, Steps: steps}, At: at}).OperatorID
 			accepted(TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: old, Version: 2, Attempt: 1, StepSeq: 1, State: topology.OperatorRunning, GroupID: "shard0", NodeName: steps[0].NodeName, At: at}})
-			// The effect can exist even though its acknowledgement was lost.
+			// A committed grant reached its owner, but the effect acknowledgement was lost.
+			first := steps[0]
+			accepted(BeginEffectProposal{Action: topology.AuthorizedStep{OperatorID: old, Version: 2, Attempt: 1, StepSeq: 1, Kind: first.Kind, GroupID: first.GroupID, NodeName: first.NodeName, ReplicaID: first.ReplicaID}})
 			desired := sm.latest.Clone()
 			desired.Groups = desired.Groups[:1]
 			accepted(ProposeDocument{Doc: desired, ExpectedVersion: 2})
@@ -79,6 +81,19 @@ func TestInterruptedLoadCleanupSurvivesHistoryAndSnapshot(t *testing.T) {
 				t.Fatal("approval silently omitted an authorized group's cleanup")
 			}
 			deletion := accepted(BeginOperatorProposal{Version: 3, Plan: plan, At: at.Add(time.Second)}).OperatorID
+			// The replacement cannot start until each affected resource fences the old grant.
+			obligations := sm.authority.revocations[old].Obligations
+			for _, obligation := range obligations {
+				grant := sm.authority.records[obligation.Key].Grant
+				target := grant.Targets[0]
+				proof := topology.FenceEvidence{Key: grant.Key, Resource: obligation.Resource, Receiver: topology.Identity{ClusterID: grant.Key.ClusterID, NodeName: target.NodeName, MemberID: target.MemberID, InstanceID: "fixture"}}
+				if obligation.Resource.Kind == topology.AuthorityHost {
+					proof.LocalSequence = grant.Key.Revision * 10
+				} else {
+					proof.ReplicaID, proof.AppliedIndex, proof.AppliedTerm = target.ReplicaID, grant.Key.Revision*10, 1
+				}
+				accepted(RecordFenceProposal{Evidence: proof})
+			}
 			for sm.latest.Version < historyRetention+20 {
 				accepted(ProposeDocument{Doc: sm.latest, ExpectedVersion: sm.latest.Version})
 			}
@@ -94,6 +109,9 @@ func TestInterruptedLoadCleanupSurvivesHistoryAndSnapshot(t *testing.T) {
 			}
 			for _, step := range plan.Steps {
 				accepted(TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: deletion, Version: 3, Attempt: 1, StepSeq: step.Seq, State: topology.OperatorRunning, GroupID: step.GroupID, NodeName: step.NodeName, At: at.Add(time.Duration(step.Seq+1) * time.Second)}})
+				if step.Kind != topology.StepDeleteGroupState {
+					index = consumeTestStep(t, sm, deletion, index+1) - 1
+				}
 			}
 			snapshot, err := sm.Snapshot()
 			if err != nil {
@@ -104,13 +122,20 @@ func TestInterruptedLoadCleanupSurvivesHistoryAndSnapshot(t *testing.T) {
 				t.Fatal(err)
 			}
 			a := topology.AuthorizedStep{OperatorID: deletion, Version: 3, Attempt: 1, StepSeq: len(plan.Steps), GroupID: "shard0", Kind: topology.StepDeleteGroupState}
-			ids, err := restored.LoadActionTargets(context.Background(), a)
+			granted := apply(t, restored, index+1, BeginEffectProposal{Action: a})
+			if !granted.Accepted || granted.Grant == nil {
+				t.Fatal("recovered cleanup could not issue exact grant", granted)
+			}
+			var ids []storage.Identity
+			for _, target := range granted.Grant.Targets {
+				ids = append(ids, restored.loadIdentity(a.GroupID, target.NodeName, target.ReplicaID))
+			}
 			want := []storage.Identity{{ClusterID: base.ClusterID, NodeName: "n1", GroupID: "shard0", ReplicaID: 1}}
 			if !founding {
 				want = append(want, storage.Identity{ClusterID: base.ClusterID, NodeName: "n1", GroupID: "shard0", ReplicaID: 2})
 			}
-			if err != nil || !slices.Equal(ids, want) {
-				t.Fatal("incomplete recovered deletion catalog", ids, err)
+			if !slices.Equal(ids, want) {
+				t.Fatal("incomplete recovered deletion grant", ids)
 			}
 			catalog, err := restored.RecoveryCatalog(t.Context())
 			if err != nil {
@@ -130,6 +155,7 @@ func TestInterruptedLoadCleanupSurvivesHistoryAndSnapshot(t *testing.T) {
 			if sm.active.Group("shard0") != nil && founding {
 				t.Fatal("planning rewrote Active")
 			}
+			index = consumeTestStep(t, sm, deletion, index+1) - 1
 			accepted(TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: deletion, Version: 3, Attempt: 1, StepSeq: len(plan.Steps), State: topology.OperatorSucceeded, GroupID: "shard0", At: at.Add(time.Hour)}})
 			accepted(ActivateTargetProposal{OperatorID: deletion, Version: 3, Attempt: 1})
 			// Move materialized views beyond the cleanup, then age out ordinary
@@ -221,6 +247,7 @@ func TestDeletionApprovalRetryAfterCleanup(t *testing.T) {
 	id := accepted(proposal).OperatorID
 	for _, step := range plan.Steps {
 		accepted(TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: id, Version: 2, Attempt: 1, State: topology.OperatorRunning, StepSeq: step.Seq, GroupID: step.GroupID, NodeName: step.NodeName, At: at}})
+		index = consumeTestStep(t, sm, id, index+1) - 1
 	}
 	accepted(TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: id, Version: 2, Attempt: 1, State: topology.OperatorSucceeded, StepSeq: 2, GroupID: "shard0", At: at}})
 	if got := accepted(proposal).OperatorID; got != id {
@@ -234,5 +261,72 @@ func TestDeletionApprovalRetryAfterCleanup(t *testing.T) {
 	proposal.Plan.Steps = nil
 	if apply(t, sm, index, proposal).Accepted {
 		t.Fatal("retry changed the exact approved plan")
+	}
+}
+
+func TestSurvivingGroupPlanningRetainsInterruptedPreparation(t *testing.T) {
+	t.Parallel()
+	sm := newTopologySM(nil, testRules())
+	base := baseDoc()
+	base.Version = 1
+	base.Nodes = append(base.Nodes, topology.Node{Name: "n2", Type: "worker", State: topology.NodeActive})
+	base.MetaGroup().Replicas = append(base.MetaGroup().Replicas, topology.Replica{NodeName: "n2", ReplicaID: 2, Role: topology.ReplicaLearner})
+	base.MetaGroup().NextReplicaID = 3
+	sm.latest, sm.target, sm.active = base.Clone(), base.Clone(), base.Clone()
+	sm.history = []topology.Document{base.Clone()}
+	sm.rememberAllocations(base)
+	at := time.Now().UTC()
+	next := base.Clone()
+	next.Group("shard0").Replicas = append(next.Group("shard0").Replicas, topology.Replica{NodeName: "n2", ReplicaID: 2, Role: topology.ReplicaLearner})
+	next.Group("shard0").NextReplicaID = 3
+	if r := apply(t, sm, 1, ProposeDocument{Doc: next, ExpectedVersion: 1}); !r.Accepted {
+		t.Fatal(r)
+	}
+	plan := topology.Plan{Version: 2, Steps: []topology.Step{{Seq: 1, GroupID: "shard0", Kind: topology.StepPrepareReplica, NodeName: "n2", ReplicaID: 2}, {Seq: 2, GroupID: "shard0", Kind: topology.StepAddLearner, NodeName: "n2", ReplicaID: 2}}}
+	old := apply(t, sm, 2, BeginOperatorProposal{Version: 2, Plan: plan, At: at})
+	if !old.Accepted {
+		t.Fatal(old)
+	}
+	if r := apply(t, sm, 3, TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: old.OperatorID, Version: 2, Attempt: 1, StepSeq: 1, GroupID: "shard0", NodeName: "n2", State: topology.OperatorRunning, At: at}}); !r.Accepted {
+		t.Fatal(r)
+	}
+	if r := apply(t, sm, 4, BeginEffectProposal{Action: topology.AuthorizedStep{OperatorID: old.OperatorID, Version: 2, Attempt: 1, StepSeq: 1, GroupID: "shard0", NodeName: "n2", ReplicaID: 2, Kind: topology.StepPrepareReplica}}); !r.Accepted {
+		t.Fatal(r)
+	}
+	// Revert desired membership while old preparation can still finish. Native
+	// membership never included replica 2, but its host resource remains possible.
+	desired := base.Clone()
+	desired.Group("shard0").NextReplicaID = 3
+	if r := apply(t, sm, 5, ProposeDocument{Doc: desired, ExpectedVersion: 2}); !r.Accepted {
+		t.Fatal(r)
+	}
+	planning, err := sm.DeletionBase(t.Context(), sm.latest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(planning.Group("shard0").Replicas) != 2 {
+		t.Fatal("lost interrupted host", planning)
+	}
+	observed := map[string]topology.GroupStatus{}
+	for _, g := range planning.Groups {
+		observed[g.ID] = topology.GroupStatus{GroupID: g.ID, Found: true, LeaderID: 1, ConfState: raftpb.ConfState{Voters: []uint64{1}}}
+	}
+	meta := observed[topology.MetaGroupID]
+	meta.ConfState.Learners = []uint64{2}
+	observed[topology.MetaGroupID] = meta
+	cleanup, err := topology.BuildPlan(planning, sm.latest, observed, testRules())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cleanup.Steps) != 3 || cleanup.Steps[0].Kind != topology.StepRemoveReplica || cleanup.Steps[1].Kind != topology.StepStopReplica || cleanup.Steps[2].Kind != topology.StepCleanupReplicaState {
+		t.Fatal(cleanup)
+	}
+	for _, s := range cleanup.Steps {
+		if s.ReplicaID != 2 || s.NodeName != "n2" {
+			t.Fatal("cleanup targeted successor", s)
+		}
+	}
+	if r := apply(t, sm, 6, BeginOperatorProposal{Version: 3, Plan: cleanup, At: at}); !r.Accepted {
+		t.Fatal(r)
 	}
 }

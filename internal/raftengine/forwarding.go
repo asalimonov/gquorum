@@ -1,8 +1,8 @@
 package raftengine
 
 import (
-	"encoding/json"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/raftstate"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"
@@ -37,9 +37,9 @@ func validateForwardedProposal(o Options, msg raftpb.Message) error {
 	if uint64(len(e.Data)) > o.MaxUncommittedBytes {
 		return fault.ErrOverloaded
 	}
-	var value envelope
-	if err := json.Unmarshal(e.Data, &value); err != nil || value.Schema != 1 || value.Correlation == "" || value.RequestID == "" {
-		return fault.New(fault.Invalid, "invalid forwarded command envelope", err)
+	value, err := raftstate.DecodeEntry(e.Data)
+	if err != nil || value.Kind != raftstate.Application {
+		return fault.New(fault.Invalid, "forwarded entry is not an application command", err)
 	}
 	return nil
 }
@@ -47,6 +47,15 @@ func validateForwardedProposal(o Options, msg raftpb.Message) error {
 // stepRemote runs on the RawNode loop. Checking leadership here prevents a
 // stale leader from forwarding under somebody else's authenticated sender ID.
 func (g *Group) stepRemote(msg raftpb.Message) error {
+	g.resetReadRounds()
+	if msg.Type == raftpb.MsgReadIndex {
+		return g.validateRemoteRead(msg)
+	}
+	if msg.Type == raftpb.MsgReadIndexResp {
+		if err := g.validateReadIndexResponse(msg); err != nil {
+			return err
+		}
+	}
 	if msg.Type == raftpb.MsgProp {
 		if g.rn.BasicStatus().RaftState != raft.StateLeader {
 			return fault.ErrNotLeader

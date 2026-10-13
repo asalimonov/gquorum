@@ -168,20 +168,27 @@ func (h *Host) ReadReplica(ctx context.Context, query load.ReplicaQuery) (load.R
 	if err := h.cfg.ValidateNode(ctx, query.From); err != nil {
 		return load.ReplicaStatus{}, err
 	}
-	if err := h.cfg.ValidatePeer(ctx, query.To); err != nil {
-		return load.ReplicaStatus{}, err
+	if !query.Native {
+		if err := h.cfg.ValidatePeer(ctx, query.To); err != nil {
+			return load.ReplicaStatus{}, err
+		}
 	}
+	// A native read can address an older, still-owned ready replica retained in
+	// an approved plan after it leaves current topology. The exact local peer
+	// and authenticated current caller are checked independently. This read-only
+	// path does not relax sender admission for Raft traffic or grant any effect.
 	result := load.ReplicaStatus{Peer: query.To}
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	slot := h.slots[query.To.Replica.GroupID]
 	if slot == nil {
+		h.mu.Unlock()
 		return result, nil
 	}
 	if localPeer(slot) != query.To {
 		// The query's exact identity was authorized above. During reseating,
 		// Active and Target may name different local replicas; absence of this
 		// one must not expose or misidentify the other handle.
+		h.mu.Unlock()
 		return result, nil
 	}
 	result.LocalState = slot.state
@@ -193,6 +200,25 @@ func (h *Host) ReadReplica(ctx context.Context, query load.ReplicaQuery) (load.R
 		result.Found, result.Status = true, slot.core.Status()
 		sample := slot.core.Metrics().Sample
 		result.Metrics = &sample
+	}
+	core := slot.core
+	h.mu.Unlock()
+	if query.Native && result.Found {
+		state, err := core.ReadNative(ctx)
+		if err != nil {
+			return load.ReplicaStatus{}, err
+		}
+		// Never hold the host lock across a quorum wait. Recheck the publication
+		// reservation afterwards; a stopped/replaced handle cannot certify its
+		// successor's membership, even when the durable identity was reused.
+		h.mu.Lock()
+		current := h.slots[query.To.Replica.GroupID]
+		valid := current == slot && slot.core == core && slot.state == "ready" && !slot.released && core.Running()
+		h.mu.Unlock()
+		if !valid {
+			return load.ReplicaStatus{}, fault.ErrStopped
+		}
+		result.Native = &state
 	}
 	return result, nil
 }

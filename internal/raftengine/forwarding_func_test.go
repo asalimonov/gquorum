@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/raftstate"
 	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"
 	"io"
@@ -71,7 +72,7 @@ func TestLearnerForwardsAndWaitsForLocalAppliedResult(t *testing.T) {
 	if forward.From != 2 || forward.To != 1 || forward.Type != raftpb.MsgProp {
 		t.Fatal(forward)
 	}
-	var command envelope
+	var command raftstate.Entry
 	must(t, json.Unmarshal(forward.Entries[0].Data, &command))
 	if command.RequestID != "stable-request" || command.Correlation == "" {
 		t.Fatal(command)
@@ -145,6 +146,9 @@ func TestForwardingSnapshotReturnsUncertainOutcome(t *testing.T) {
 	}()
 	_ = capturedProposal(t, c)
 	ss := raftpb.Snapshot{Data: []byte(`{"commands":["from snapshot"]}`), Metadata: raftpb.SnapshotMetadata{Index: 4, Term: 2, ConfState: raftpb.ConfState{Voters: []uint64{1}, Learners: []uint64{2}}}}
+	wrapped, err := encodeSnapshot(g.opts, ss.Data, g.authority)
+	must(t, err)
+	ss.Data = wrapped
 	must(t, g.Step(testContext(t), raftpb.Message{Type: raftpb.MsgSnap, From: 1, To: 2, Term: 2, Snapshot: &ss}))
 	select {
 	case err := <-done:
@@ -164,7 +168,7 @@ func TestStaleDestinationDoesNotRelayAnotherSender(t *testing.T) {
 	t.Parallel()
 	g, _, c := learnerForwardingFixture(t, time.Second)
 	setForwardingLeader(t, g)
-	data, _ := json.Marshal(envelope{Schema: 1, Correlation: "peer", RequestID: "request", Data: []byte("x")})
+	data, _ := raftstate.EncodeEntry(raftstate.Entry{Schema: raftstate.Schema, Kind: raftstate.Application, Correlation: "peer", RequestID: "request", Data: []byte("x")})
 	err := g.Step(testContext(t), raftpb.Message{Type: raftpb.MsgProp, From: 1, To: 2, Entries: []raftpb.Entry{{Type: raftpb.EntryNormal, Data: data}}})
 	if !errors.Is(err, fault.ErrNotLeader) {
 		t.Fatal(err)
@@ -180,7 +184,7 @@ func TestLeaderAcceptsOrdinaryProposalOnlyFromNativeMember(t *testing.T) {
 	t.Parallel()
 	g, m := singleton(t, openStore(t, t.TempDir(), "1"))
 	must(t, g.ProposeConfChange(testContext(t), raftpb.ConfChangeV2{Changes: []raftpb.ConfChangeSingle{{Type: raftpb.ConfChangeAddLearnerNode, NodeID: 2}}}))
-	data, _ := json.Marshal(envelope{Schema: 1, Correlation: "peer-1", RequestID: "application-request", Data: []byte("forwarded")})
+	data, _ := raftstate.EncodeEntry(raftstate.Entry{Schema: raftstate.Schema, Kind: raftstate.Application, Correlation: "peer-1", RequestID: "application-request", Data: []byte("forwarded")})
 	msg := raftpb.Message{Type: raftpb.MsgProp, From: 3, To: 1, Entries: []raftpb.Entry{{Type: raftpb.EntryNormal, Data: data}}}
 	if err := g.Step(testContext(t), msg); !errors.Is(err, fault.ErrIdentityMismatch) {
 		t.Fatal("unknown native sender accepted", err)

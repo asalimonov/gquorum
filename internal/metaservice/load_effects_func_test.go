@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -35,12 +36,19 @@ func (c *verifiedLoadController) leader() *Group {
 	}
 	return nil
 }
-func (c *verifiedLoadController) authorized(ctx context.Context, a topology.AuthorizedStep) (*Group, error) {
+func (c *verifiedLoadController) authorized(ctx context.Context, grant topology.AuthorityGrant) (*Group, error) {
 	g := c.leader()
 	if g == nil {
 		return nil, fault.ErrUnavailable
 	}
-	return g, g.Authorize(ctx, a)
+	return g, g.ValidateGrant(ctx, grant)
+}
+func (c *verifiedLoadController) ReadNative(ctx context.Context, id string, _ ...storage.Identity) (topology.NativeState, error) {
+	status, err := c.Status(ctx, id)
+	if err == nil && !status.Found {
+		err = fault.ErrUnavailable
+	}
+	return topology.NativeState{GroupID: id, ReplicaID: 1, Applied: 1, ConfState: status.ConfState}, err
 }
 func (c *verifiedLoadController) Status(ctx context.Context, id string) (topology.GroupStatus, error) {
 	if err := ctx.Err(); err != nil {
@@ -68,24 +76,25 @@ func (c *verifiedLoadController) Status(ctx context.Context, id string) (topolog
 	}
 	return status, nil
 }
-func (c *verifiedLoadController) CreateGroup(ctx context.Context, a topology.AuthorizedStep) error {
-	g, err := c.authorized(ctx, a)
+func (c *verifiedLoadController) CreateGroup(ctx context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+	a := *grant.Action
+	g, err := c.authorized(ctx, grant)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	target := g.state().Target()
 	wanted := target.Group(a.GroupID)
 	if wanted == nil || a.Kind != topology.StepCreateFoundingGroup || a.ReplicaID != 0 || a.NodeName != "" {
-		return fault.ErrIdentityMismatch
+		return nil, fault.ErrIdentityMismatch
 	}
 	c.mu.Lock()
 	existing, exists := c.groups[a.GroupID]
 	if exists {
 		c.mu.Unlock()
 		if !reflect.DeepEqual(existing, *wanted) {
-			return fault.ErrIdentityMismatch
+			return nil, fault.ErrIdentityMismatch
 		}
-		return nil
+		return protocolEffectReceipts(grant), nil
 	}
 	c.groups[a.GroupID] = *wanted
 	c.hosts[a.GroupID] = map[string]uint64{}
@@ -101,55 +110,57 @@ func (c *verifiedLoadController) CreateGroup(ctx context.Context, a topology.Aut
 		close(first)
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil, ctx.Err()
 		case <-release:
-			return fault.ErrUnavailable
+			return nil, fault.ErrUnavailable
 		}
 	}
-	return nil
+	return protocolEffectReceipts(grant), nil
 }
-func (c *verifiedLoadController) PrepareReplica(context.Context, topology.AuthorizedStep) error {
-	return fault.ErrUnsupported
+func (_ *verifiedLoadController) PrepareReplica(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+	return nil, fault.ErrUnsupported
 }
-func (c *verifiedLoadController) ApplyMembership(context.Context, topology.AuthorizedStep) error {
-	return fault.ErrUnsupported
+func (_ *verifiedLoadController) ApplyMembership(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+	return nil, fault.ErrUnsupported
 }
-func (c *verifiedLoadController) TransferLeader(context.Context, topology.AuthorizedStep) error {
-	return fault.ErrUnsupported
+func (_ *verifiedLoadController) TransferLeader(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+	return nil, fault.ErrUnsupported
 }
-func (c *verifiedLoadController) CleanupReplicaState(context.Context, topology.AuthorizedStep) error {
-	return fault.ErrUnsupported
+func (_ *verifiedLoadController) CleanupReplicaState(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+	return nil, fault.ErrUnsupported
 }
-func (c *verifiedLoadController) StopReplica(ctx context.Context, a topology.AuthorizedStep) error {
-	if _, err := c.authorized(ctx, a); err != nil {
-		return err
+func (c *verifiedLoadController) StopReplica(ctx context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+	a := *grant.Action
+	if _, err := c.authorized(ctx, grant); err != nil {
+		return nil, err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if a.Kind != topology.StepStopReplica {
-		return fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperatorAuthorization
 	}
 	if existing := c.hosts[a.GroupID][a.NodeName]; existing != 0 && existing != a.ReplicaID {
-		return fault.ErrIdentityMismatch
+		return nil, fault.ErrIdentityMismatch
 	}
 	delete(c.hosts[a.GroupID], a.NodeName)
-	return nil
+	return protocolEffectReceipts(grant), nil
 }
-func (c *verifiedLoadController) DeleteGroupState(ctx context.Context, a topology.AuthorizedStep) error {
-	if _, err := c.authorized(ctx, a); err != nil {
-		return err
+func (c *verifiedLoadController) DeleteGroupState(ctx context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+	a := *grant.Action
+	if _, err := c.authorized(ctx, grant); err != nil {
+		return nil, err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if a.Kind != topology.StepDeleteGroupState || a.NodeName != "" || a.ReplicaID != 0 {
-		return fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperatorAuthorization
 	}
 	if len(c.hosts[a.GroupID]) > 0 {
-		return fault.ErrReplicaNotReady
+		return nil, fault.ErrReplicaNotReady
 	}
 	delete(c.groups, a.GroupID)
 	delete(c.hosts, a.GroupID)
-	return nil
+	return protocolEffectReceipts(grant), nil
 }
 
 func TestMetaDeletesInterruptedFoundingBeforeActive(t *testing.T) {
@@ -157,7 +168,7 @@ func TestMetaDeletesInterruptedFoundingBeforeActive(t *testing.T) {
 	release := make(chan struct{})
 	controller := &verifiedLoadController{groups: map[string]topology.Group{}, hosts: map[string]map[string]uint64{}, firstEffect: make(chan struct{}), firstRelease: release}
 	effect := controller.firstEffect
-	groups := singleMetaFixtureWith(t, func(o *Options) { o.LoadGroups = controller })
+	groups := singleMetaFixtureWith(t, func(o *Options) { o.LoadGroups = controller; o.InstallLocalFence = controller.installFence })
 	leader := readyPublic(t, groups)
 	controller.mu.Lock()
 	controller.meta = groups

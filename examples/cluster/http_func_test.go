@@ -24,7 +24,7 @@ type httpNode struct {
 
 func (n httpNode) Cluster() gquorum.Cluster { return n.cluster }
 
-func (n httpNode) Identity() topology.Identity { return topology.Identity{NodeName: "node1"} }
+func (_ httpNode) Identity() topology.Identity { return topology.Identity{NodeName: "node1"} }
 
 func (n httpNode) Status() gquorum.NodeStatus { return n.status }
 
@@ -208,7 +208,7 @@ func TestMutationResponseRetainsStatusAndVersionHeaders(t *testing.T) {
 func TestHealthcheckReportsReadinessStatus(t *testing.T) {
 	t.Parallel()
 	for _, status := range []int{http.StatusOK, http.StatusServiceUnavailable} {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(status) }))
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) }))
 		err := (&healthcheckCommand{URL: server.URL, Timeout: time.Second}).Run()
 		server.Close()
 		if (err == nil) != (status == http.StatusOK) {

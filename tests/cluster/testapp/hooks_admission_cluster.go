@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/authoritystore"
 	"github.com/asalimonov/gquorum/internal/metapb"
 	"github.com/asalimonov/gquorum/internal/metastore"
 	"github.com/asalimonov/gquorum/internal/metatransport"
@@ -28,6 +30,18 @@ func (c config) prepareAdmissionPin() error {
 	}
 	if !c.Join || len(c.Peers) == 0 {
 		return fault.ErrInvalid
+	}
+	fresh, err := metastore.StoreIsFresh(filepath.Join(c.DataDir, "_meta.bolt"))
+	if err != nil {
+		return err
+	}
+	if !fresh {
+		return fault.New(fault.Unreadable, "pin driver requires fresh metadata", nil)
+	}
+	if _, err := os.Stat(filepath.Join(c.DataDir, "_authority.bolt")); err == nil {
+		return fault.New(fault.Unreadable, "pin driver cannot replace retained authority evidence", nil)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -52,10 +66,12 @@ func (c config) prepareAdmissionPin() error {
 		}
 		if err := metatransport.ReplyError(reply); err != nil {
 			conn.Close()
-			if !errors.Is(err, fault.ErrNotLeader) || reply.LeaderAddress == "" {
+			if !errors.Is(err, fault.ErrNotLeader) && !errors.Is(err, fault.ErrUnavailable) && !errors.Is(err, fault.ErrAuthorityPending) && !errors.Is(err, fault.ErrReplicaNotReady) {
 				return err
 			}
-			address = reply.LeaderAddress
+			if reply.LeaderAddress != "" {
+				address = reply.LeaderAddress
+			}
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -66,18 +82,31 @@ func (c config) prepareAdmissionPin() error {
 		err = func() error {
 			defer conn.Close()
 			var grant struct {
-				MemberID  uint64 `json:"member_id"`
-				Admission struct {
+				MemberID   uint64 `json:"member_id"`
+				Readmitted bool   `json:"readmitted"`
+				Admission  struct {
 					OperatorID topology.OperatorID `json:"execution_id"`
 				} `json:"admission"`
 			}
 			if err := json.Unmarshal(reply.Data, &grant); err != nil {
 				return err
 			}
-			if grant.MemberID == 0 || grant.Admission.OperatorID == "" {
+			if grant.Readmitted || grant.MemberID == 0 || grant.Admission.OperatorID == "" {
 				return fmt.Errorf("join returned no exact pending grant")
 			}
-			store, err := metastore.Open(filepath.Join(c.DataDir, "meta.bolt"))
+			granted := identity
+			granted.MemberID = grant.MemberID
+			// Match the real acquisition boundary: independent authority binds
+			// the exact accepted member before the metadata pin can be created.
+			// MetadataAcquired stays false because this driver never opens Raft.
+			authority, err := authoritystore.Open(filepath.Join(c.DataDir, "_authority.bolt"), granted, true)
+			if err != nil {
+				return err
+			}
+			if err := authority.Close(); err != nil {
+				return err
+			}
+			store, err := metastore.Open(filepath.Join(c.DataDir, "_meta.bolt"))
 			if err != nil {
 				return err
 			}
@@ -88,11 +117,21 @@ func (c config) prepareAdmissionPin() error {
 			if c.AdmissionPinPhase == "ready" {
 				header.MemberId = grant.MemberID
 				ready, _ := json.Marshal(map[string]any{"NodeName": c.NodeName, "InstanceID": c.InstanceID, "Address": c.MetaAddress, "MemberID": grant.MemberID, "ExecutionID": grant.Admission.OperatorID})
-				reply, err := rpc.JoinReady(ctx, &metapb.MetaRequest{Header: header, Data: ready})
-				if err != nil {
-					return err
+				for {
+					reply, err := rpc.JoinReady(ctx, &metapb.MetaRequest{Header: header, Data: ready})
+					if err != nil {
+						return err
+					}
+					err = metatransport.ReplyError(reply)
+					if !errors.Is(err, fault.ErrUnavailable) && !errors.Is(err, fault.ErrAuthorityPending) {
+						return err
+					}
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case <-time.After(20 * time.Millisecond):
+					}
 				}
-				return metatransport.ReplyError(reply)
 			}
 			return nil
 		}()

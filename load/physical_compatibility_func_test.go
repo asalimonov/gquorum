@@ -5,11 +5,12 @@ package load_test
 import (
 	"bytes"
 	"context"
+	"errors"
+	"github.com/asalimonov/gquorum/fault"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 	"time"
 
@@ -18,7 +19,7 @@ import (
 	"github.com/asalimonov/gquorum/storage/walstore"
 )
 
-func TestBaselinePhysicalWALSnapshotAndCommittedTailRecovery(t *testing.T) {
+func TestBaselinePhysicalWALSnapshotIsRejected(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Second)
 	defer cancel()
@@ -40,32 +41,16 @@ func TestBaselinePhysicalWALSnapshotAndCommittedTailRecovery(t *testing.T) {
 	}
 	m := &deduplicatingMachine{}
 	owner, err := load.NewStandalone(load.StandaloneOptions{Identity: id, InstanceID: "new-process", Mode: load.Joining, Store: store, StateMachine: m, Transport: transport{}, Logger: logger, Engine: load.EngineOptions{Timing: load.Timing{TickInterval: 10 * time.Millisecond}}})
-	require(t, err)
-	defer owner.Stop(context.Background())
-	recovery, err := store.Load(ctx, "work")
-	require(t, err)
-	if recovery.Snapshot.Metadata.Index != 3 || recovery.HardState.Commit != 4 || !bytes.Equal(recovery.Snapshot.Data, []byte(`{"one":"first"}`)) {
-		t.Fatal("fixture must include full snapshot and a committed tail", recovery)
+	if err == nil {
+		owner.Stop(context.Background())
+		t.Fatal("legacy raw application snapshot accepted")
 	}
-	require(t, owner.Start(ctx))
-	require(t, owner.Group().WaitReady(ctx))
-	if m.count() != 2 || owner.Group().Identity() != id || !slices.Equal(owner.Group().Status().ConfState.Voters, []uint64{7}) {
-		t.Fatal("recovery changed identities or lost snapshot/tail", owner.Group().Status(), m.count())
+	if !errors.Is(err, fault.ErrUnreadable) {
+		t.Fatal(err)
 	}
-	waitLeader(t, ctx, owner.Group())
-	for request, data := range map[string]string{"one": "first", "two": "tail"} {
-		result, err := owner.Group().Propose(ctx, load.Proposal{RequestID: request, Data: []byte(data)})
-		require(t, err)
-		if result.Code != "ok" || string(result.Data) != data || m.count() != 2 {
-			t.Fatal("dedup lost across baseline recovery", result)
-		}
+	if m.count() != 0 {
+		t.Fatal("rejected snapshot reached application machine")
 	}
-	result, err := owner.Group().Propose(ctx, load.Proposal{RequestID: "two", Data: []byte("different")})
-	require(t, err)
-	if result.Code != "conflict" || m.count() != 2 {
-		t.Fatal("recovered request identity overwritten", result)
-	}
-	require(t, owner.Stop(ctx))
 	require(t, store.Close())
 	after, err := os.ReadFile(identityPath)
 	require(t, err)

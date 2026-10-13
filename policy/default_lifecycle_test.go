@@ -143,7 +143,7 @@ func TestExternalSchedulerContract(t *testing.T) {
 
 type retainApplicationReplicas struct{ *policy.DefaultLifecycle }
 
-func (p retainApplicationReplicas) Retention(ctx context.Context, in policy.RetentionInput) (policy.RetentionDecision, error) {
+func (_ retainApplicationReplicas) Retention(ctx context.Context, _ policy.RetentionInput) (policy.RetentionDecision, error) {
 	if err := ctx.Err(); err != nil {
 		return policy.RetentionDecision{}, err
 	}

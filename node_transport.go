@@ -20,7 +20,7 @@ func (n *node) ReadLoadReplica(ctx context.Context, query load.ReplicaQuery) (lo
 	return h.ReadReplica(ctx, query)
 }
 func (n *node) ApplyLoadAction(ctx context.Context, request load.ActionRequest) (load.ActionResult, error) {
-	h, err := n.loadHost(ctx)
+	h, err := n.authorityHost(ctx)
 	if err != nil {
 		return load.ActionResult{}, err
 	}
@@ -32,4 +32,15 @@ func (n *node) ReportLoadDelivery(ctx context.Context, report load.DeliveryRepor
 		return err
 	}
 	return h.ReportDelivery(ctx, report)
+}
+
+func (n *node) InstallLoadFence(ctx context.Context, request load.FenceRequest) (load.FenceResult, error) {
+	if n.needsReadmissionFence(request) {
+		return n.installReadmissionFence(ctx, request)
+	}
+	h, err := n.authorityHost(ctx)
+	if err != nil {
+		return load.FenceResult{}, err
+	}
+	return h.InstallFence(ctx, request)
 }

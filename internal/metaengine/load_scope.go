@@ -1,10 +1,64 @@
 package metaengine
 
 import (
+	"context"
+	"slices"
+
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
+
+// WithGrantedLoadCleanup keeps approved assignments stable through an exact
+// local ledger mutation. The resource owner has already admitted this work at
+// its installed floor; a closed retained grant is still valid proof of identity.
+// fn must be bounded and must not call back into this machine.
+func (m *Machine) WithGrantedLoadCleanup(ctx context.Context, grant topology.AuthorityGrant, target topology.AuthorityTarget, fn func() error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := topology.ValidateLoadID(grant.Key.GroupID); err != nil {
+		return err
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if err := m.grantedLoadCleanupLocked(grant, target); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return fn()
+}
+
+func (sm *topologySM) grantedLoadCleanupLocked(grant topology.AuthorityGrant, target topology.AuthorityTarget) error {
+	record := sm.authority.records[grant.Key]
+	if record == nil {
+		// The courier can deliver a committed grant before this returning
+		// participant applies it. Keep the ledger intact and let the controller
+		// retry after catch-up; absence at an already applied index is a refusal.
+		if grant.Validate() == nil && grant.Key.ClusterID == sm.target.ClusterID && grant.Key.Revision > sm.appliedIndex {
+			return fault.New(fault.Unavailable, "receiver has not applied required cleanup grant", nil)
+		}
+		return fault.ErrOperatorAuthorization
+	}
+	if !record.Grant.Equal(grant) || grant.Action == nil || !slices.Contains(grant.Targets, target) ||
+		!slices.Contains(grant.Resources, topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: grant.Key.GroupID, NodeName: target.NodeName}) {
+		return fault.ErrOperatorAuthorization
+	}
+	a := grant.Action
+	if a.Kind != topology.StepDeleteGroupState && (a.Kind != topology.StepCleanupReplicaState || a.NodeName != target.NodeName || a.ReplicaID != target.ReplicaID) {
+		return fault.ErrOperatorAuthorization
+	}
+	if group := sm.target.Group(grant.Key.GroupID); group != nil {
+		for _, replica := range group.Replicas {
+			if replica.NodeName == target.NodeName && replica.ReplicaID == target.ReplicaID {
+				return fault.ErrIdentityMismatch
+			}
+		}
+	}
+	return nil
+}
 
 // LoadScope is an owned view of an approved local load replica. Started is
 // durable evidence that this identity has already been created or prepared.

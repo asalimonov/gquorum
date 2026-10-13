@@ -22,7 +22,7 @@ type SafetyRefusal struct {
 	HealthKnown bool
 }
 
-func (e *SafetyRefusal) Unwrap() error { return fault.ErrUnsafeMembership }
+func (_ *SafetyRefusal) Unwrap() error { return fault.ErrUnsafeMembership }
 
 func (e *SafetyRefusal) Error() string {
 	live := "unknown"

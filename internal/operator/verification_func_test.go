@@ -22,10 +22,14 @@ func TestControllerAcknowledgedMembershipRequiresObservedExactResult(t *testing.
 		t.Fatal("advanced on unverified acknowledgement", ex)
 	}
 	f.groups.after = nil
+	f.groups.setStatus("shard0", statusFor("shard0", []uint64{1}, []uint64{replica.ReplicaID}, 1))
 	f.engine.Tick(context.Background())
 	ex, _ = f.coord.CurrentOperator(context.Background())
 	if ex.CurrentStep != 2 || ex.State != OperatorRunning {
 		t.Fatal("verified retry did not advance", ex)
+	}
+	if len(f.groups.calls) != 1 {
+		t.Fatal("consumed membership was repeated", f.groups.calls)
 	}
 }
 

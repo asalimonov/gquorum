@@ -59,6 +59,12 @@ func (g *Group) sampleRaftMetrics(now time.Time) {
 	}
 	slices.Sort(learners)
 	next := metrics.ReplicaSample{Raft: metrics.Stamp{Sequence: seq, State: metrics.Current}, LeaderID: s.Lead, Term: s.Term, Commit: s.Commit, Applied: g.applied, Voters: voters, Learners: learners, MembershipDigest: digest, Pending: len(g.props), Queued: len(g.proposals), ProposalLimit: cap(g.slots)}
+	read := &g.readState
+	next.ReadQueue = metrics.ReadQueue{Limit: cap(g.readSlots), InFlight: len(g.readSlots), Queued: len(g.reads), AwaitingQuorum: len(read.next), AwaitingApply: len(read.applying), RemoteRounds: len(read.remote)}
+	if read.active != nil {
+		next.ReadQueue.LocalRounds = 1
+		next.ReadQueue.AwaitingQuorum += len(read.active.requests)
+	}
 	for id, p := range s.Progress {
 		ack := g.peerAcks[id]
 		next.Progress = append(next.Progress, metrics.PeerProgress{ReplicaID: id, Match: p.Match, RecentActive: p.RecentActive, AckSequence: ack.sequence, AckAge: internalmetrics.Age(now, ack.at), AckKnown: !ack.at.IsZero()})

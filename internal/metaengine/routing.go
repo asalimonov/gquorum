@@ -8,6 +8,10 @@ import "github.com/asalimonov/gquorum/topology"
 func (m *Machine) ProcessIdentity(name string) (topology.Identity, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	return m.processIdentityLocked(name)
+}
+
+func (m *Machine) processIdentityLocked(name string) (topology.Identity, bool) {
 	member := m.target.MemberID(name)
 	if member == 0 {
 		member = m.active.MemberID(name)

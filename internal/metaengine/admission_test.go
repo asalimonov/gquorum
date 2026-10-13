@@ -88,6 +88,7 @@ func TestAdmissionStableLearnerCompletesAndSurvivesSnapshot(t *testing.T) {
 	for _, step := range plan.Steps {
 		applyAdmissionTransition(t, sm, index, admission.OperatorID, plan, step.Seq, topology.OperatorRunning, at)
 		index++
+		index = consumeTestStep(t, sm, admission.OperatorID, index)
 	}
 	applyAdmissionTransition(t, sm, index, admission.OperatorID, plan, 2, topology.OperatorSucceeded, at)
 	index++
@@ -200,10 +201,13 @@ func TestAdmission_SameInstanceRetryAcrossPhasesAndSnapshot(t *testing.T) {
 
 	applyAdmissionTransition(t, sm, index, admission.OperatorID, plan, 1, topology.OperatorRunning, at.Add(4*time.Second))
 	index++
+	index = consumeTestStep(t, sm, admission.OperatorID, index)
 	applyAdmissionTransition(t, sm, index, admission.OperatorID, plan, 2, topology.OperatorRunning, at.Add(5*time.Second))
 	index++
+	index = consumeTestStep(t, sm, admission.OperatorID, index)
 	applyAdmissionTransition(t, sm, index, admission.OperatorID, plan, 3, topology.OperatorRunning, at.Add(6*time.Second))
 	index++
+	index = consumeTestStep(t, sm, admission.OperatorID, index)
 	requireAdmissionState(t, sm, admission.InstanceID, AdmissionLearner)
 	bind.ProposalID = "bind-retry-learner"
 	if res := apply(t, sm, index, bind); !res.Accepted || res.Admission.State != AdmissionLearner {
@@ -218,6 +222,7 @@ func TestAdmission_SameInstanceRetryAcrossPhasesAndSnapshot(t *testing.T) {
 
 	applyAdmissionTransition(t, sm, index, admission.OperatorID, plan, 4, topology.OperatorRunning, at.Add(7*time.Second))
 	index++
+	index = consumeTestStep(t, sm, admission.OperatorID, index)
 	applyAdmissionTransition(t, sm, index, admission.OperatorID, plan, 4, topology.OperatorSucceeded, at.Add(8*time.Second))
 	index++
 	requireAdmissionState(t, sm, admission.InstanceID, AdmissionPromoted)
@@ -267,6 +272,7 @@ func TestAdmission_SupersededInstanceCannotBeResurrected(t *testing.T) {
 		state := topology.OperatorRunning
 		applyAdmissionTransition(t, sm, index, oldAdmission.OperatorID, plan, seq, state, at.Add(time.Duration(4+seq)*time.Second))
 		index++
+		index = consumeTestStep(t, sm, oldAdmission.OperatorID, index)
 	}
 	applyAdmissionTransition(t, sm, index, oldAdmission.OperatorID, plan, len(plan.Steps), topology.OperatorSucceeded, at.Add(10*time.Second))
 	index++

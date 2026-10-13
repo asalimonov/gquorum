@@ -63,8 +63,9 @@ Ordinary quorum, fault, API and performance tests use three nodes. Generic five-
 and seven-node repetitions are omitted. The only four-node membership cases are:
 
 - `TestMetaAdmissionUsesLearnerBeforeServingAndRetainsIdentityOnRestart`: learner-first admission, early-serving refusal and retained promotion.
-- `TestAdmissionOperatorResumesAfterMetaLeaderTransferWithoutNewAttempt`: leadership changes during admission must retain the exact operator attempt.
+- `TestAdmissionOperatorResumesAfterMetaLeaderElectionWithoutNewAttempt`: leadership changes during admission must retain the exact operator attempt.
 - `TestMetaPinnedAdmissionRestartsBeforeAndAfterReadyWithoutAllocatingIDs`, with `pending` and `ready` cases: a crash after durable pinning must preserve the member ID and admission attempt.
+- `TestAuthoritySupersessionRetiresIntermediateMetaLearnerFourNodes`: three established voters plus an admitted learner prove removal of a native member that never reached Active, including prepared load cleanup and stale-action refusal.
 
 A new larger-cluster case must explain the specific failure requiring the extra
 member. Ordinary checks must not grow a node-count matrix.
@@ -83,7 +84,8 @@ own identity, membership and values. Compacted catch-up verifies a received full
 snapshot and all 1,100 acknowledged commands. Dynamic admission starts a genuine
 joining process, observes its meta learner phase, refuses early application
 serving and verifies retained identities across process replacement.
-Admission also transfers meta leadership during the learner phase and requires
+Admission also isolates the meta leader's Raft traffic during the learner phase,
+elects its replacement through the healthy majority and requires
 the same execution ID, attempt and exact authorized promotion to finish. A real
 one-second repair interval preserves intentional learners through several ticks;
 a staged promotion remains inert until approval. Whole-group deletion waits for
@@ -235,3 +237,40 @@ Removal policies verify mandatory fencing inside the callback. A retry mode
 refuses the first response and retains diagnostics after the second; the process
 test stops the participant and then inspects its closed bbolt store for durable
 exclusion, membership history and applied-index ordering.
+
+The consistent-read cases use three-node pool leases and the fixture's safe read
+route. `TestConsistentReadWaitsForFollowerApplyAfterConfirmationThreeNodes` drops
+appends while allowing a real ReadIndex reply, then verifies waiting and local
+catch-up. `TestConsistentLearnerReadLostRepliesKeepRoundsBoundedThreeNodes` uses
+two voters and one learner, drops replies and floods canceled reads before
+checking fresh-context recovery and queue bounds. `TestConsistentReadRejectsIsolatedFormerLeaderThreeNodes`
+isolates the naturally elected load leader, verifies majority writes and stale
+leader read refusal, then heals and verifies local recovery. These cases retain
+exact member/replica/process scopes and do not require larger clusters.
+
+`TestAuthorityRevocationBoundaryAndLostFenceReplyThreeNodes` holds an old demotion
+with separate metadata and application leaders. Its two isolated cases verify
+permitted delivery before the resource fence, refused replay after it, pending
+revocation while a durable fence reply is withheld, and required replanning after
+a permitted effect invalidates an immutable successor plan. Both native
+membership and retained application/storage identities are asserted. These cases
+enable the fixture metadata proxy so the barriers intercept real revocation RPCs.
+
+The resource-boundary cases also withhold metadata replication to the load leader
+and assert its retained older Target. The lost-reply case forces a metadata
+leader election while keeping the former courier process alive and revocation
+pending. Both cases later transfer application leadership and verify the old
+grant/action remains fenced at the new leader with membership and data intact.
+
+`TestAuthorityHostRevocationWaitsForExactRetainedProcessReturnThreeNodes` holds an
+old stop delivery, terminates its host, and supersedes the deletion. It verifies
+completed group evidence cannot discharge the unreachable host obligation or
+permit successor effects. A retained restart completes fencing and cleanup;
+replaying the old grant/action remains refused after physical data removal.
+
+`TestAuthorityEarlierLearnerActionCannotUndoSameOperatorPromotionThreeNodes`
+reseats a replica with a fresh ID, observes actual learner installation, then
+advances the same approved operator to promotion. Replaying its earlier action
+before and after promotion cannot toggle the voter back to a learner. A changed
+target set using the same revision is also refused; retained values and storage
+pins are checked alongside membership.

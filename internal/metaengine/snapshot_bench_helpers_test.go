@@ -104,11 +104,19 @@ func snapshotMatrix(tb testing.TB, size int) *Machine {
 			submit(TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: begun.OperatorID, Version: version, Attempt: 1, State: topology.OperatorSucceeded, At: now.Add(time.Second)}})
 		} else {
 			for i, step := range plan.Steps {
-				state := topology.OperatorRunning
-				if i == len(plan.Steps)-1 {
-					state = topology.OperatorSucceeded
+				transition := topology.OperatorTransition{OperatorID: begun.OperatorID, Version: version, Attempt: 1, StepSeq: step.Seq, GroupID: step.GroupID, NodeName: step.NodeName, State: topology.OperatorRunning, At: now.Add(time.Duration(i+1) * time.Second)}
+				submit(TransitionOperatorProposal{Transition: transition})
+				if step.Kind != topology.StepWaitCaughtUp {
+					action := topology.AuthorizedStep{OperatorID: begun.OperatorID, Version: version, Attempt: 1, StepSeq: step.Seq, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID, Kind: step.Kind, TransferNodeName: step.TransferNodeName, TransferReplicaID: step.TransferReplicaID}
+					grant := submit(BeginEffectProposal{Action: action}).Grant
+					for _, receipt := range fixtureEffectReceipts(*grant) {
+						submit(RecordEffectProposal{Receipt: receipt})
+					}
 				}
-				submit(TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: begun.OperatorID, Version: version, Attempt: 1, StepSeq: step.Seq, GroupID: step.GroupID, NodeName: step.NodeName, State: state, At: now.Add(time.Duration(i+1) * time.Second)}})
+				if i == len(plan.Steps)-1 {
+					transition.State = topology.OperatorSucceeded
+					submit(TransitionOperatorProposal{Transition: transition})
+				}
 			}
 		}
 		submit(ActivateTargetProposal{OperatorID: begun.OperatorID, Version: version, Attempt: 1, ProposalID: fmt.Sprintf("activate-%d", version)})

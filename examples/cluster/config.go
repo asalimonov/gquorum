@@ -10,7 +10,7 @@ import (
 type config struct {
 	Node       string       `env:"GQUORUM_NODE" required:"" help:"This participant's name in the peer manifest."`
 	Cluster    string       `env:"GQUORUM_CLUSTER" default:"example" help:"Cluster identity."`
-	Data       string       `env:"GQUORUM_DATA" default:"/data" type:"path" help:"Durable metadata directory."`
+	Data       string       `env:"GQUORUM_DATA" default:"/data" type:"path" help:"Durable node directory for _meta.bolt and _authority.bolt."`
 	MetaListen string       `env:"GQUORUM_META_LISTEN" default:":9000" help:"Meta protocol listen address."`
 	HTTPListen string       `env:"GQUORUM_HTTP_LISTEN" default:":8080" help:"HTTP API listen address."`
 	Credential string       `env:"GQUORUM_CREDENTIAL" required:"" help:"Shared meta protocol credential."`

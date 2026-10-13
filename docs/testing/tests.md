@@ -29,7 +29,7 @@ does not depend on `testing.Short()` or per-test skip guards. Lightweight value
 stubs and callbacks testing a single local component are units; fixtures modeling
 interacting services are functional.
 
-There are **226 unit tests**, **347 functional tests**, **65 Docker cluster
+There are **227 unit tests**, **347 functional tests**, **65 Docker cluster
 tests** (including three performance cases) and **one Compose example test**.
 These are top-level test functions, excluding table cases and subtests. The
 unit suite also contains one executable documentation example and two benchmarks.
@@ -59,9 +59,9 @@ The three modules are still run in sequence.
 | `make test-function-race` | Functional tests under the race detector |
 | `make test-example` | Actual small Compose demo REST e2e |
 | `make test-cluster` | Build the image, then run Docker process tests with `-tags=clustertest` |
-| `make test-perf` | Nine measured Docker cases, each under two minutes |
+| `make test-perf` | Three measured Docker cases, each under two minutes |
 | `make bench` | Planner and complete meta FSM snapshot matrices |
-| `make lint` | Vet unit and functional builds of the library, example and fixture |
+| `make lint` | Vet all module/build variants; pinned revive dead-code rules and merged Staticcheck unused declarations |
 | `make proto-check` | Regenerate pinned protocol code and require no diff |
 
 `make test-functional` and `make test-functional-race` remain aliases for the
@@ -69,6 +69,20 @@ The three modules are still run in sequence.
 non-Docker regression. `FUNCTIONAL_TIMEOUT` defaults to eight minutes per package.
 Use functional race checks for changes to ownership and concurrency. Keep the
 full Docker suite for the end of a related set of changes.
+
+`make lint` installs versioned binaries under the ignored `.tools/lint/` directory:
+revive v1.17.1 and Staticcheck v0.8.2. The checked-in [revive configuration](../../revive.toml)
+enables `unreachable-code`, `unused-parameter` and `unused-receiver`; these
+[revive rules](https://github.com/revive-lint/revive/blob/v1.17.1/RULES_DESCRIPTIONS.md)
+do not detect unused declarations. Staticcheck supplies `U1000`, with a
+[merged build matrix](https://staticcheck.dev/docs/running-staticcheck/cli/build-tags/)
+so helpers used only in functional or process tests remain live. The runner vets
+unit/functional builds in every module and clustertest/example builds in the test
+module, then passes every selected source file to revive because its CLI has no
+build-tag flag. Generated files retain their generated-code exclusion. Lint
+compiles and analyzes tests without executing them or starting Docker. Build
+failures and findings return nonzero status; there are no blanket unused-code
+suppressions.
 
 ## Test reports
 

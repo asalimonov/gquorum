@@ -65,10 +65,10 @@ func TestReadmitNodeRefusesUnverifiedAndPendingIdentities(t *testing.T) {
 			f.g.opts.Health = mutationHealth{}
 			return "n3", preview(), t.Context()
 		}},
-		{"unknown_node", fault.ErrInvalid, func(t *testing.T, f *mutationFixture) (string, MutationOptions, context.Context) {
+		{"unknown_node", fault.ErrInvalid, func(t *testing.T, _ *mutationFixture) (string, MutationOptions, context.Context) {
 			return "missing", preview(), t.Context()
 		}},
-		{"stale_version", fault.ErrVersionConflict, func(t *testing.T, f *mutationFixture) (string, MutationOptions, context.Context) {
+		{"stale_version", fault.ErrVersionConflict, func(t *testing.T, _ *mutationFixture) (string, MutationOptions, context.Context) {
 			return "n3", MutationOptions{ExpectedVersion: 2, Preview: true}, t.Context()
 		}},
 		{"pending_topology", fault.ErrOperatorAuthorization, func(t *testing.T, f *mutationFixture) (string, MutationOptions, context.Context) {
@@ -77,7 +77,7 @@ func TestReadmitNodeRefusesUnverifiedAndPendingIdentities(t *testing.T) {
 			f.commit(t, next, false)
 			return "n3", preview(), t.Context()
 		}},
-		{"cancelled", context.Canceled, func(t *testing.T, f *mutationFixture) (string, MutationOptions, context.Context) {
+		{"cancelled", context.Canceled, func(t *testing.T, _ *mutationFixture) (string, MutationOptions, context.Context) {
 			ctx, cancel := context.WithCancel(t.Context())
 			cancel()
 			return "n3", preview(), ctx

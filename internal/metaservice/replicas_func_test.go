@@ -139,8 +139,8 @@ func TestPublicLoadLedgerReadinessCancellationAndQuiescedRead(t *testing.T) {
 	}
 }
 
-func TestPublicLoadLedgerCleanupRequiresExactAuthorization(t *testing.T) {
-	t.Parallel()
+func cleanupLedgerFixture(t *testing.T) (*mutationFixture, topology.AuthorizedStep) {
+	t.Helper()
 	f := replicaFixture(t)
 	ctx := context.Background()
 	if err := f.g.RecordLoadReplica(ctx, "work", ReplicaRecord{ReplicaID: 1}, 0); err != nil {
@@ -155,20 +155,36 @@ func TestPublicLoadLedgerCleanupRequiresExactAuthorization(t *testing.T) {
 	for _, step := range steps {
 		at = at.Add(time.Millisecond)
 		f.command(t, metaengine.TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: b.OperatorID, Version: 2, Attempt: 1, StepSeq: step.Seq, State: topology.OperatorRunning, GroupID: step.GroupID, NodeName: step.NodeName, At: at}})
+		if step.Kind != topology.StepDeleteGroupState {
+			f.consumeStep(t, topology.AuthorizedStep{OperatorID: b.OperatorID, Version: 2, Attempt: 1, StepSeq: step.Seq, Kind: step.Kind, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID})
+		}
 	}
 	a := topology.AuthorizedStep{OperatorID: b.OperatorID, Version: 2, Attempt: 1, StepSeq: 4, Kind: topology.StepDeleteGroupState, GroupID: "work"}
-	wrong := a
-	wrong.Attempt++
-	if err := f.g.ForgetLoadReplica(ctx, wrong, 1); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	return f, a
+}
+
+func TestGrantedLoadLedgerCleanupRequiresExactAuthorization(t *testing.T) {
+	t.Parallel()
+	f, a := cleanupLedgerFixture(t)
+	grant := f.command(t, metaengine.BeginEffectProposal{Action: a}).Grant
+	if grant == nil {
+		t.Fatal("missing cleanup grant")
+	}
+	ctx := t.Context()
+	wrong := grant.Clone()
+	wrong.Action.Attempt++
+	wrong.OperatorID = topology.MakeOperatorID(wrong.Action.Version, wrong.Action.Attempt)
+	wrong.Action.OperatorID = wrong.OperatorID
+	if err := f.g.ForgetGrantedLoadReplica(ctx, wrong, 1); !errors.Is(err, fault.ErrIdentityMismatch) {
 		t.Fatal("stale cleanup accepted", err)
 	}
-	if err := f.g.ForgetLoadReplica(ctx, a, 2); !errors.Is(err, fault.ErrIdentityMismatch) {
+	if err := f.g.ForgetGrantedLoadReplica(ctx, *grant, 2); !errors.Is(err, fault.ErrOperatorAuthorization) {
 		t.Fatal("wrong ledger ID erased", err)
 	}
-	if err := f.g.ForgetLoadReplica(ctx, a, 1); err != nil {
+	if err := f.g.ForgetGrantedLoadReplica(ctx, *grant, 1); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.g.ForgetLoadReplica(ctx, a, 1); err != nil {
+	if err := f.g.ForgetGrantedLoadReplica(ctx, *grant, 1); err != nil {
 		t.Fatal("cleanup repeat not idempotent", err)
 	}
 	if _, found, err := f.g.LookupLoadReplica(ctx, "work"); err != nil || found {
@@ -176,5 +192,52 @@ func TestPublicLoadLedgerCleanupRequiresExactAuthorization(t *testing.T) {
 	}
 	if _, err := f.g.LoadReplicaScope(ctx, fixtureLoadIdentity()); !errors.Is(err, fault.ErrGroupRetired) {
 		t.Fatal(err)
+	}
+}
+
+func TestGrantedLoadLedgerCleanupAfterSupersessionPreservesSuccessors(t *testing.T) {
+	for _, mode := range []string{"closed_grant", "successor_replica", "successor_member", "different_grant"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			f, action := cleanupLedgerFixture(t)
+			grant := f.command(t, metaengine.BeginEffectProposal{Action: action}).Grant
+			if grant == nil {
+				t.Fatal("missing cleanup grant")
+			}
+			f.command(t, metaengine.TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: action.OperatorID, Version: action.Version, Attempt: action.Attempt, StepSeq: action.StepSeq, GroupID: action.GroupID, State: topology.OperatorSuperseded, At: time.Now().UTC().Add(time.Minute)}})
+			if err := f.g.Authorize(t.Context(), action); err == nil {
+				t.Fatal("cleanup still has current operator authority")
+			}
+			if mode == "successor_replica" {
+				if err := f.g.store.RecordReplicaCAS("work", ReplicaRecord{NodeName: "n1", ClusterID: "cluster", ReplicaID: 4}, 1); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mode == "successor_member" {
+				f.g.identity.MemberID = 4
+			}
+			if mode == "different_grant" {
+				grant.Action.Attempt++
+			}
+			err := f.g.ForgetGrantedLoadReplica(t.Context(), *grant, 1)
+			if mode == "closed_grant" {
+				if err != nil {
+					t.Fatal("owned old cleanup could not finish before its new resource fence", err)
+				}
+				if err := f.g.ForgetGrantedLoadReplica(t.Context(), *grant, 1); err != nil {
+					t.Fatal("exact retry was not idempotent", err)
+				}
+				if _, found, err := f.g.LookupLoadReplica(t.Context(), "work"); err != nil || found {
+					t.Fatal(found, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("mismatched authority erased the ledger")
+			}
+			if record, found, err := f.g.LookupLoadReplica(t.Context(), "work"); err != nil || !found || mode == "successor_replica" && record.ReplicaID != 4 {
+				t.Fatal("successor evidence was lost", record, found, err)
+			}
+		})
 	}
 }

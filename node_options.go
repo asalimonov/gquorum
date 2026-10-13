@@ -23,18 +23,22 @@ import (
 // Paths and networking are supplied by the application. Custom dependencies
 // must remain stable for the Node lifetime; the event bus is borrowed.
 type NodeOptions struct {
-	Identity  topology.Identity
-	Node      topology.Node
-	Bootstrap BootstrapOptions
-	Limits    topology.Limits
-	Placement topology.PlacementRule
-	Meta      MetaOptions
-	Loads     LoadOptions
-	Policies  PolicyOptions
-	Metrics   MetricsOptions
-	Health    topology.HealthSource
-	Events    *events.Bus
-	Logger    *slog.Logger
+	// StorageDir contains the library-owned _meta.bolt and _authority.bolt files.
+	// Retain it across restarts and readmission, outside all load retirement roots.
+	// Applications select load storage separately through Loads.Storage.
+	StorageDir string
+	Identity   topology.Identity
+	Node       topology.Node
+	Bootstrap  BootstrapOptions
+	Limits     topology.Limits
+	Placement  topology.PlacementRule
+	Meta       MetaOptions
+	Loads      LoadOptions
+	Policies   PolicyOptions
+	Metrics    MetricsOptions
+	Health     topology.HealthSource
+	Events     *events.Bus
+	Logger     *slog.Logger
 }
 
 type BootstrapOptions struct {
@@ -52,8 +56,8 @@ type MetaOptions struct {
 	// VoterPolicy applies only to fresh founding; nil selects the default.
 	// Retained topology is changed through Cluster.SetGroupVoterPolicy.
 	VoterPolicy       *topology.VoterPolicy
-	DBPath            string
 	Network           MetaNetworkOptions
+	Reads             load.ReadOptions
 	Timing            MetaTiming
 	SessionTTL        time.Duration
 	SnapshotThreshold uint64
@@ -134,6 +138,9 @@ func (o NodeOptions) Validate() error {
 
 func resolveNodeOptions(input NodeOptions) (NodeOptions, metaservice.Options, error) {
 	o := input
+	if err := validateStorageDir(o); err != nil {
+		return NodeOptions{}, metaservice.Options{}, err
+	}
 	invalid := func(message string) (NodeOptions, metaservice.Options, error) {
 		return NodeOptions{}, metaservice.Options{}, fault.New(fault.Invalid, message, nil)
 	}
@@ -190,11 +197,11 @@ func resolveNodeOptions(input NodeOptions) (NodeOptions, metaservice.Options, er
 		}
 	}
 	m := metaservice.Options{
-		Identity: o.Identity, Node: o.Node, DBPath: o.Meta.DBPath,
+		Identity: o.Identity, Node: o.Node, DBPath: o.metaDBPath(),
 		Join: o.Bootstrap.Join, JoinSeeds: o.Bootstrap.JoinSeeds,
 		Limits: o.Limits, Placement: o.Placement,
-		VoterPolicy: o.Meta.VoterPolicy,
-		Timing:      metaservice.Timing(o.Meta.Timing), SessionTTL: o.Meta.SessionTTL,
+		VoterPolicy: o.Meta.VoterPolicy, Reads: raftengine.ReadOptions(o.Meta.Reads),
+		Timing: metaservice.Timing(o.Meta.Timing), SessionTTL: o.Meta.SessionTTL,
 		SnapshotThreshold: o.Meta.SnapshotThreshold, MaxWatchers: o.Meta.MaxWatchers,
 		Network:     metaservice.NetworkOptions(o.Meta.Network),
 		Observation: metaservice.ObservationOptions(o.Meta.Observation),
@@ -249,5 +256,5 @@ func validateLoadOptions(o LoadOptions) error {
 	} else if o.Storage.Store == nil || o.Storage.Retirement == nil {
 		return invalid("borrowed load storage requires both Store and Retirement")
 	}
-	return (raftengine.Options{Timing: raftengine.Timing(o.Engine.Timing), MaxPendingProposals: o.Engine.MaxPendingProposals, ProposalTimeout: o.Engine.ProposalTimeout}).ValidateSettings()
+	return (raftengine.Options{Reads: raftengine.ReadOptions(o.Engine.Reads), Timing: raftengine.Timing(o.Engine.Timing), MaxPendingProposals: o.Engine.MaxPendingProposals, ProposalTimeout: o.Engine.ProposalTimeout}).ValidateSettings()
 }

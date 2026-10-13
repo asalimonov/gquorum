@@ -3,13 +3,10 @@
 package metaengine
 
 import (
-	"context"
-	"errors"
 	"slices"
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -33,7 +30,8 @@ func TestDeletionCatalogIncludesApprovedPreparationAndExcludesStagedIntent(t *te
 	current.State, current.CurrentStep = topology.OperatorRunning, 1
 	sm.operators[old.ID], sm.operators[current.ID] = &old, &current
 	a := topology.AuthorizedStep{OperatorID: current.ID, Version: 4, Attempt: 1, StepSeq: 1, GroupID: "work", Kind: topology.StepDeleteGroupState}
-	ids, err := sm.LoadActionTargets(context.Background(), a)
+	catalogIDs, err := sm.deletionCatalogLocked(a.GroupID)
+	ids := orderedIdentities(catalogIDs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,13 +51,14 @@ func TestDeletionCatalogIncludesApprovedPreparationAndExcludesStagedIntent(t *te
 		t.Fatal("recovery catalog aliases FSM state", catalog, err)
 	}
 	ids[0].ReplicaID = 99
-	again, err := sm.LoadActionTargets(context.Background(), a)
+	catalogIDs, err = sm.deletionCatalogLocked(a.GroupID)
+	again := orderedIdentities(catalogIDs)
 	if err != nil || !slices.Equal(again, want) {
 		t.Fatal("catalog returned mutable FSM data", again, err)
 	}
 	a.Version++
-	if _, err := sm.LoadActionTargets(context.Background(), a); !errors.Is(err, fault.ErrOperatorAuthorization) {
-		t.Fatal("unknown future approval treated as authenticated lag", err)
+	if result := apply(t, sm, 10, BeginEffectProposal{Action: a}); result.Accepted || result.Code != proposalAuthorization {
+		t.Fatal("unknown future approval issued a grant", result)
 	}
 }
 
@@ -85,10 +84,24 @@ func TestDeletionCatalogUsesDurablyCompletedCleanup(t *testing.T) {
 	current.State, current.CurrentStep = topology.OperatorRunning, 2
 	sm.operators[created.ID], sm.operators[cleanup.ID], sm.operators[current.ID] = &created, &cleanup, &current
 	a := topology.AuthorizedStep{OperatorID: current.ID, Version: 4, Attempt: 1, StepSeq: 2, GroupID: "work", Kind: topology.StepDeleteGroupState}
-	ids, err := sm.LoadActionTargets(context.Background(), a)
+	catalogIDs, err := sm.deletionCatalogLocked(a.GroupID)
+	ids := orderedIdentities(catalogIDs)
 	if err != nil || len(ids) != 1 || ids[0].ReplicaID != 1 {
 		t.Fatal("completed cleanup required contacting former replica again", ids, err)
 	}
+	meta := topology.Group{ID: topology.MetaGroupID, Replicas: []topology.Replica{r1, r2}}
+	sm.active.Groups = append(sm.active.Groups, meta)
+	oldAction := topology.AuthorizedStep{OperatorID: created.ID, Version: 1, Attempt: 1, StepSeq: 1, Kind: topology.StepCreateFoundingGroup, GroupID: "work"}
+	oldGrant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: "work", Revision: 10}, Purpose: topology.AuthorityEffect, OperatorID: created.ID, Action: &oldAction,
+		Resources: []topology.AuthorityResource{{Kind: topology.AuthorityGroup, GroupID: "work"}, {Kind: topology.AuthorityHost, GroupID: "work", NodeName: "n1"}, {Kind: topology.AuthorityHost, GroupID: "work", NodeName: "n2"}},
+		Targets:   []topology.AuthorityTarget{{NodeName: "n1", MemberID: 1, ReplicaID: 1}, {NodeName: "n2", MemberID: 2, ReplicaID: 2}}}
+	sm.insertGrantLocked(oldGrant)
+	resources, targets, err := sm.grantResourcesLocked(a)
+	if err != nil || len(resources) != 1 || len(targets) != 1 || targets[0].NodeName != "n1" {
+		t.Fatal("historical grant resurrected retired host", resources, targets, err)
+	}
+	deletion := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: "work", Revision: 20}, Purpose: topology.AuthorityEffect, OperatorID: current.ID, Action: &a, Resources: resources, Targets: targets}
+	sm.insertGrantLocked(deletion)
 	// The first attempt completed deletion but another group's step then failed.
 	// Retrying the version may reuse that durable completion proof.
 	current.State = topology.OperatorFailed
@@ -98,8 +111,13 @@ func TestDeletionCatalogUsesDurablyCompletedCleanup(t *testing.T) {
 	retry.State, retry.CurrentStep = topology.OperatorRunning, 2
 	sm.operators[retry.ID] = &retry
 	a.OperatorID, a.Attempt = retry.ID, 2
-	ids, err = sm.LoadActionTargets(context.Background(), a)
+	catalogIDs, err = sm.deletionCatalogLocked(a.GroupID)
+	ids = orderedIdentities(catalogIDs)
 	if err != nil || len(ids) != 0 {
 		t.Fatal("verified whole-group deletion was repeated", ids, err)
+	}
+	resources, targets, err = sm.grantResourcesLocked(a)
+	if err != nil || len(resources) != 1 || !slices.Equal(targets, deletion.Targets) {
+		t.Fatal("retry did not preserve exact prior deletion targets", resources, targets, err)
 	}
 }

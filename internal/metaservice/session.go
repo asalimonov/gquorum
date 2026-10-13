@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/asalimonov/gquorum/topology"
-	"math"
 	"strings"
 	"time"
 
@@ -36,10 +35,7 @@ func (g *Group) takeSessionToken(ctx context.Context) error {
 }
 func (g *Group) releaseSessionToken() { <-g.sessionToken }
 func sessionFromRecord(s metaengine.SessionRecord) (topology.Session, error) {
-	if s.SessionID == "" || s.NodeName == "" || s.InstanceID == "" || s.TTLSeconds <= 0 || int64(s.TTLSeconds) > math.MaxInt64/int64(time.Second) {
-		return topology.Session{}, fault.New(fault.Unreadable, "invalid replicated session identity or TTL", nil)
-	}
-	return topology.Session{ID: s.SessionID, NodeName: s.NodeName, InstanceID: s.InstanceID, TTL: time.Duration(s.TTLSeconds) * time.Second}, nil
+	return metaengine.SessionValue(s)
 }
 func (g *Group) ownedSession(id string) (topology.Session, error) {
 	if id == "" {

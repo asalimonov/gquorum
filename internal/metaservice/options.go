@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/asalimonov/gquorum/internal/operator"
+	"github.com/asalimonov/gquorum/internal/raftengine"
 	"log/slog"
 	"math"
 	"net"
@@ -20,6 +21,7 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/observe"
 	"github.com/asalimonov/gquorum/internal/scheduling"
+	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/metrics"
 	"github.com/asalimonov/gquorum/policy"
 	"github.com/asalimonov/gquorum/storage"
@@ -51,39 +53,50 @@ type Options struct {
 	Identity topology.Identity
 	// Node is the caller-defined local admission document. Founders may instead
 	// supply it in the matching FoundingMember; joiners must supply its type here.
-	Node              topology.Node
-	DBPath            string
-	Founders          []FoundingMember
-	JoinSeeds         []string
-	Join              bool
-	Limits            topology.Limits
-	Placement         topology.PlacementRule
-	VoterPolicy       *topology.VoterPolicy
-	Timing            Timing
-	SessionTTL        time.Duration
-	SnapshotThreshold uint64
-	MaxWatchers       int
-	Network           NetworkOptions
-	LoadGroups        operator.GroupEffects
-	LoadMetricsReads  func(context.Context, topology.Document) []observe.ReplicaRead
-	LocalLoadMetrics  func() []metrics.ReplicaObservation
-	Health            topology.HealthSource
-	Scheduling        SchedulingOptions
-	Scheduler         policy.Scheduler
-	CallbackTimeout   time.Duration
-	HeldLoads         func() []storage.Identity
-	Observation       ObservationOptions
-	Metrics           observe.MetricsSettings
-	Events            *events.Bus
-	Logger            *slog.Logger
+	Node                 topology.Node
+	DBPath               string
+	Founders             []FoundingMember
+	JoinSeeds            []string
+	Join                 bool
+	Limits               topology.Limits
+	Placement            topology.PlacementRule
+	VoterPolicy          *topology.VoterPolicy
+	Reads                raftengine.ReadOptions
+	Timing               Timing
+	SessionTTL           time.Duration
+	SnapshotThreshold    uint64
+	MaxWatchers          int
+	Network              NetworkOptions
+	LoadGroups           operator.GroupEffects
+	InstallLocalFence    func(context.Context, load.FenceRequest) (load.FenceResult, error)
+	ApplyLocalMetaAction func(context.Context, load.ActionRequest) (load.ActionResult, error)
+	LoadMetricsReads     func(context.Context, topology.Document) []observe.ReplicaRead
+	LocalLoadMetrics     func() []metrics.ReplicaObservation
+	Health               topology.HealthSource
+	Scheduling           SchedulingOptions
+	Scheduler            policy.Scheduler
+	CallbackTimeout      time.Duration
+	HeldLoads            func() []storage.Identity
+	Observation          ObservationOptions
+	Metrics              observe.MetricsSettings
+	Events               *events.Bus
+	Logger               *slog.Logger
 	// OnSelfRemoved is invoked asynchronously after durable approved removal.
 	// It must honor cancellation and return before Stop/Quiesce can join it.
 	// Use Group.RequestStop to schedule teardown instead of waiting on this
 	// same group's Stop/Quiesce inside the callback. Callbacks are idempotent
 	// across crashes/restarts and must verify the reason's exact local identity.
-	OnSelfRemoved func(context.Context, string) error
-	OnReadmission func(context.Context, Readmission) error
+	OnSelfRemoved       func(context.Context, string) error
+	OnReadmission       func(context.Context, Readmission) error
+	ReadmissionIdentity func() topology.Identity
+	ReadmissionReceipts func(context.Context, Readmission) ([]topology.EffectReceipt, error)
 	// Node owns final closure after managed application resources have joined.
+	// BeforeOpenEngine acquires Node-owned authority under the exact accepted
+	// identity, before creating a metadata pin. It is an internal owner hook.
+	BeforeOpenEngine func(topology.Identity) error
+	// AfterOpenEngine records acquisition after the pin is durable, before
+	// publication or participation. Failure closes the store without starting Raft.
+	AfterOpenEngine  func(topology.Identity) error
 	RequestOwnerStop func()
 	OnApplied        func()
 }
@@ -98,19 +111,20 @@ type SchedulingOptions = scheduling.Settings
 // interval and 2s timeout. Document application also wakes the sampler.
 type ObservationOptions = observe.Settings
 type Readmission struct {
-	Previous       topology.Identity `json:"previous"`
-	Granted        topology.Identity `json:"granted"`
-	AdmissionID    string            `json:"admission_id"`
-	MetaDBPath     string            `json:"meta_db_path"`
-	PreviousGroups []topology.Group  `json:"previous_groups"`
-	GrantedGroups  []topology.Group  `json:"granted_groups"`
+	Previous       topology.Identity         `json:"previous"`
+	Granted        topology.Identity         `json:"granted"`
+	AdmissionID    string                    `json:"admission_id"`
+	MetaDBPath     string                    `json:"meta_db_path"`
+	PreviousGroups []topology.Group          `json:"previous_groups"`
+	GrantedGroups  []topology.Group          `json:"granted_groups"`
+	Grants         []topology.AuthorityGrant `json:"grants"`
 }
 type ReadmissionRequiredError struct{ Readmission Readmission }
 
 func (e *ReadmissionRequiredError) Error() string {
 	return fmt.Sprintf("readmission requires local orchestration for %s: member %d to %d", e.Readmission.Granted.NodeName, e.Readmission.Previous.MemberID, e.Readmission.Granted.MemberID)
 }
-func (e *ReadmissionRequiredError) Unwrap() error { return fault.ErrReadmissionRequired }
+func (_ *ReadmissionRequiredError) Unwrap() error { return fault.ErrReadmissionRequired }
 func DefaultTiming() Timing {
 	return Timing{TickInterval: 100 * time.Millisecond, ElectionTicks: 10, HeartbeatTicks: 1, DialTimeout: 500 * time.Millisecond, SendTimeout: 500 * time.Millisecond, PeerRetryInitial: 100 * time.Millisecond, PeerRetryMax: 5 * time.Second}
 }
@@ -203,6 +217,9 @@ func (o Options) defaults() Options {
 	return o
 }
 func (o Options) Validate() error {
+	if err := o.Reads.Validate(); err != nil {
+		return err
+	}
 	if _, err := o.Metrics.Resolve(); err != nil {
 		return err
 	}

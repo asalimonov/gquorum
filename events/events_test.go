@@ -280,7 +280,7 @@ func TestBus_BoundedIngressAndSubscriberLoss(t *testing.T) {
 	ch, err := b.Subscribe(deadline(t), Filter{}, 1)
 	must(t, err)
 	entered, release, finished := make(chan struct{}), make(chan struct{}), make(chan error, 1)
-	go func() { finished <- j.db.Update(func(tx *bolt.Tx) error { close(entered); <-release; return nil }) }()
+	go func() { finished <- j.db.Update(func(_ *bolt.Tx) error { close(entered); <-release; return nil }) }()
 	<-entered
 	b.Publish(Event{Type: NodeAlive})
 	ctx := deadline(t)

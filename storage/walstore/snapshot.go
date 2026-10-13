@@ -28,7 +28,7 @@ func newSnapshotter(dir string) *snap.Snapshotter {
 	return snap.New(zap.NewNop(), filepath.Join(dir, SnapDir))
 }
 
-func selectSnapshot(ss *snap.Snapshotter, wdir, dir string) (*raftpb.Snapshot, error) {
+func selectSnapshot(ss *snap.Snapshotter, wdir string) (*raftpb.Snapshot, error) {
 	markers, err := wal.ValidSnapshotEntries(zap.NewNop(), wdir)
 	if err != nil {
 		return nil, unreadable("read snapshot markers", err)
@@ -186,7 +186,7 @@ func (s *Store) Compact(ctx context.Context, id string, index uint64) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	latest, err := selectSnapshot(g.ss, filepath.Join(g.dir, WALDir), g.dir)
+	latest, err := selectSnapshot(g.ss, filepath.Join(g.dir, WALDir))
 	if err != nil {
 		return err
 	}

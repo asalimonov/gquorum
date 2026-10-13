@@ -25,14 +25,13 @@ import (
 )
 
 type fixture struct {
-	mu       sync.Mutex
-	node     topology.Identity
-	scopes   map[string]metaengine.LoadScope
-	records  map[string]metastore.ReplicaRecord
-	store    *walstore.Store
-	cfg      Config
-	approval topology.AuthorizedStep
-	targets  []storage.Identity
+	mu      sync.Mutex
+	node    topology.Identity
+	scopes  map[string]metaengine.LoadScope
+	floors  map[string]topology.AuthorityGrant
+	records map[string]metastore.ReplicaRecord
+	store   *walstore.Store
+	cfg     Config
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -46,7 +45,7 @@ func newFixtureAt(t *testing.T, name string, member uint64) *fixture {
 	s, err := walstore.Open(walstore.Options{RootDir: t.TempDir(), NodeName: name, ClusterID: "cluster", SegmentBytes: 32 << 10, Prewrite: &prewrite, Logger: logger})
 	must(t, err)
 	t.Cleanup(func() { must(t, s.Close()) })
-	f := &fixture{node: topology.Identity{NodeName: name, ClusterID: "cluster", MemberID: member, InstanceID: "process-" + name}, scopes: make(map[string]metaengine.LoadScope), records: make(map[string]metastore.ReplicaRecord), store: s}
+	f := &fixture{node: topology.Identity{NodeName: name, ClusterID: "cluster", MemberID: member, InstanceID: "process-" + name}, scopes: make(map[string]metaengine.LoadScope), floors: make(map[string]topology.AuthorityGrant), records: make(map[string]metastore.ReplicaRecord), store: s}
 	f.setScope("work", 1, true, false)
 	f.setScope("other", 1, true, false)
 	f.cfg = Config{Identity: func() topology.Identity { return f.node }, Store: s, Logger: logger, Transport: discardTransport{},
@@ -113,22 +112,6 @@ func newFixtureAt(t *testing.T, name string, member uint64) *fixture {
 	lifecycle, err := policy.NewDefaultLifecycle(policy.DefaultLifecycleOptions{})
 	must(t, err)
 	f.cfg.Retirement, f.cfg.Retention = s, lifecycle.Retention
-	f.cfg.Authorize = func(ctx context.Context, a topology.AuthorizedStep) error {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		if a != f.approval || a.Version == 0 {
-			return fault.ErrOperatorAuthorization
-		}
-		return ctx.Err()
-	}
-	f.cfg.ActionTargets = func(ctx context.Context, a topology.AuthorizedStep) ([]storage.Identity, error) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		if a != f.approval || a.Version == 0 {
-			return nil, fault.ErrOperatorAuthorization
-		}
-		return slices.Clone(f.targets), ctx.Err()
-	}
 	f.cfg.Catalog = func(ctx context.Context, group string) ([]storage.Identity, error) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -149,20 +132,32 @@ func newFixtureAt(t *testing.T, name string, member uint64) *fixture {
 		}
 		return doc.Clone(), ctx.Err()
 	}
-	f.cfg.ForgetReplica = func(ctx context.Context, a topology.AuthorizedStep, expected uint64) error {
+	f.cfg.ForgetGrantedReplica = func(ctx context.Context, grant topology.AuthorityGrant, expected uint64) error {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if a != f.approval {
+		if grant.Validate() != nil || grant.Action == nil ||
+			!slices.Contains(grant.Targets, topology.AuthorityTarget{NodeName: f.node.NodeName, MemberID: f.node.MemberID, ReplicaID: expected}) {
 			return fault.ErrOperatorAuthorization
 		}
+		a := *grant.Action
 		if record, found := f.records[a.GroupID]; found && record.ReplicaID != expected {
 			return fault.ErrIdentityMismatch
 		}
 		delete(f.records, a.GroupID)
 		return nil
+	}
+	fixtureAuthority(t, f)
+	f.cfg.AuthorityFloors = func(ctx context.Context) ([]topology.AuthorityGrant, error) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		var grants []topology.AuthorityGrant
+		for _, grant := range f.floors {
+			grants = append(grants, grant.Clone())
+		}
+		return grants, ctx.Err()
 	}
 	return f
 }
@@ -172,6 +167,21 @@ func (f *fixture) setScope(group string, id uint64, founding, established bool) 
 	defer f.mu.Unlock()
 	r := topology.Replica{NodeName: f.node.NodeName, ReplicaID: id, Role: topology.ReplicaVoter}
 	f.scopes[group] = metaengine.LoadScope{Version: 1, Group: topology.Group{ID: group, Replicas: []topology.Replica{r}}, Replica: r, Founding: founding, Started: established, Established: established}
+	old := f.floors[group]
+	if old.Key.Revision != 0 && old.Targets[0].ReplicaID == id {
+		return
+	}
+	kind := topology.StepPrepareReplica
+	if founding {
+		kind = topology.StepCreateFoundingGroup
+	}
+	a := f.approve(kind, storage.Identity{NodeName: f.node.NodeName, ReplicaID: id})
+	a.GroupID = group
+	resources := []topology.AuthorityResource{{Kind: topology.AuthorityHost, GroupID: group, NodeName: f.node.NodeName}}
+	if founding {
+		resources = append([]topology.AuthorityResource{{Kind: topology.AuthorityGroup, GroupID: group}}, resources...)
+	}
+	f.floors[group] = topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: f.node.ClusterID, GroupID: group, Revision: max(10, old.Key.Revision+1)}, Purpose: topology.AuthorityEffect, OperatorID: a.OperatorID, Action: &a, Resources: resources, Targets: []topology.AuthorityTarget{{NodeName: f.node.NodeName, MemberID: f.node.MemberID, ReplicaID: id}}}
 }
 
 func (f *fixture) host(t *testing.T) *Host {
@@ -297,7 +307,7 @@ func TestExplicitHoldRequiresAnAuthorizedExplicitRestart(t *testing.T) {
 	if _, err := h.StartReplica(deadline(t), ref, StartRecovery); !errors.Is(err, fault.ErrReplicaNotReady) {
 		t.Fatal(err)
 	}
-	if _, err := h.StartReplica(deadline(t), load.ReplicaRef{GroupID: "work", ReplicaID: 2}, StartExplicit); !errors.Is(err, fault.ErrIdentityMismatch) {
+	if _, err := h.StartReplica(deadline(t), load.ReplicaRef{GroupID: "work", ReplicaID: 2}, StartExplicit); !errors.Is(err, fault.ErrAuthorityFenced) {
 		t.Fatal(err)
 	}
 	if _, err := h.StartReplica(deadline(t), ref, StartOperator); !errors.Is(err, fault.ErrReplicaNotReady) {
@@ -357,9 +367,8 @@ func TestCloseFailureRetainsOwnershipAndRetriesSerially(t *testing.T) {
 	if _, err := h.StartReplica(deadline(t), ref, StartExplicit); !errors.Is(err, fault.ErrReplicaNotReady) {
 		t.Fatal("Close failure lost ownership", err)
 	}
-	f.setScope("work", 2, false, false)
 	replacement := load.ReplicaRef{GroupID: "work", ReplicaID: 2}
-	if _, err := h.StartReplica(deadline(t), replacement, StartExplicit); !errors.Is(err, fault.ErrIdentityMismatch) {
+	if _, err := h.StartReplica(deadline(t), replacement, StartOperator); !errors.Is(err, fault.ErrAuthorityFenced) {
 		t.Fatal("successor overlapped failed Close", err)
 	}
 	results := make(chan error, 2)
@@ -386,6 +395,7 @@ func TestCloseFailureRetainsOwnershipAndRetriesSerially(t *testing.T) {
 	if _, err := f.store.Quarantine(deadline(t), "work", 1); err != nil {
 		t.Fatal(err)
 	}
+	f.setScope("work", 2, false, false)
 	newHandle, err := h.StartReplica(deadline(t), replacement, StartExplicit)
 	must(t, err)
 	if newHandle.Identity().ReplicaID != 2 || old.Core().Running() {
@@ -525,4 +535,14 @@ func (t *loopbackTransport) ApplyAction(ctx context.Context, request load.Action
 		return load.ActionResult{}, fault.ErrUnavailable
 	}
 	return t.host.ApplyAction(ctx, request)
+}
+
+func (discardTransport) InstallFence(context.Context, load.FenceRequest) (load.FenceResult, error) {
+	return load.FenceResult{}, fault.ErrUnavailable
+}
+func (t *loopbackTransport) InstallFence(ctx context.Context, request load.FenceRequest) (load.FenceResult, error) {
+	if request.To != t.host.cfg.Identity() {
+		return load.FenceResult{}, fault.ErrUnavailable
+	}
+	return t.host.InstallFence(ctx, request)
 }

@@ -43,11 +43,15 @@ const (
 )
 
 type Limits struct {
-	MaxNodes    int `json:"max_nodes"`
-	MaxReplicas int `json:"max_replicas"`
+	MaxPendingAuthorityRecords int `json:"max_pending_authority_records,omitempty"`
+	MaxNodes                   int `json:"max_nodes"`
+	MaxReplicas                int `json:"max_replicas"`
 }
 
 func (l Limits) WithDefaults() Limits {
+	if l.MaxPendingAuthorityRecords == 0 {
+		l.MaxPendingAuthorityRecords = 1024
+	}
 	if l.MaxNodes == 0 {
 		l.MaxNodes = 3
 	}
@@ -58,7 +62,7 @@ func (l Limits) WithDefaults() Limits {
 }
 
 func (l Limits) Validate() error {
-	if l.MaxNodes < 1 || l.MaxReplicas < 1 {
+	if l.MaxNodes < 1 || l.MaxReplicas < 1 || l.MaxPendingAuthorityRecords < 0 {
 		return invalid("limits must be positive")
 	}
 	return nil

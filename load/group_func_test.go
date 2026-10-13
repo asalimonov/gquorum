@@ -62,6 +62,12 @@ func TestStandaloneRecoveryAndMembershipOwnership(t *testing.T) {
 		}
 	}
 	propose(g, "one", "first")
+	require(t, g.ReadBarrier(ctx))
+	read, err := g.Read(ctx, []byte("one"))
+	require(t, err)
+	if string(read.Data) != "first" {
+		t.Fatal(read)
+	}
 	require(t, g.Snapshot(ctx))
 	propose(g, "two", "tail")
 	require(t, owner.Stop(ctx))
@@ -107,6 +113,11 @@ func (m *deduplicatingMachine) Apply(_ context.Context, cmd load.Command) (load.
 	return load.Result{Code: "ok", Data: cmd.Data}, nil
 }
 
+func (m *deduplicatingMachine) Query(_ context.Context, key []byte) (load.Result, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return load.Result{Data: []byte(m.requests[string(key)])}, nil
+}
 func (m *deduplicatingMachine) Snapshot(context.Context) ([]byte, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

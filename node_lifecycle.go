@@ -34,11 +34,23 @@ func (n *node) Start(parent context.Context) error {
 	go func() { defer n.wg.Done(); <-n.ctx.Done(); n.RequestStop() }()
 	n.mu.Unlock()
 
+	if err := n.checkAuthorityPath(); err != nil {
+		return n.fail(err)
+	}
+	if err := n.inspectAuthority(); err != nil {
+		return n.fail(err)
+	}
 	meta := n.metaOpts
+	meta.BeforeOpenEngine = n.acquireMetaAuthority
+	meta.AfterOpenEngine = n.markMetaAcquired
 	meta.RequestOwnerStop = n.metaRequestedStop
 	meta.OnApplied = n.signal
 	meta.OnSelfRemoved = n.onRemoved
 	meta.OnReadmission = n.readmit
+	meta.ReadmissionIdentity = n.readmissionIdentity
+	meta.ReadmissionReceipts = n.collectReadmissionReceipts
+	meta.InstallLocalFence = n.installAuthorityFence
+	meta.ApplyLocalMetaAction = n.applyMetaHostAction
 	if n.opts.Loads.Factory != nil {
 		meta.LoadGroups = nodeEffects{node: n}
 		meta.HeldLoads = n.heldLoads
@@ -82,9 +94,6 @@ func (n *node) Start(parent context.Context) error {
 	// database ahead of managed replicas. The joined teardown calls Quiesce first.
 	n.wg.Add(1)
 	go n.removalLoop()
-	if err := m.Start(context.WithoutCancel(n.ctx)); err != nil {
-		return n.fail(err)
-	}
 	n.mu.RLock()
 	h := n.host
 	n.mu.RUnlock()
@@ -92,6 +101,11 @@ func (n *node) Start(parent context.Context) error {
 		if err := h.Start(n.ctx); err != nil {
 			return n.fail(err)
 		}
+	}
+	// Start the owner before exposing metadata control ingress. An immediate
+	// readmission fence may otherwise retire a Host whose Start is still pending.
+	if err := m.Start(context.WithoutCancel(n.ctx)); err != nil {
+		return n.fail(err)
 	}
 	n.wg.Add(1)
 	go n.monitor()
@@ -254,29 +268,43 @@ func (n *node) removalLoop() {
 func (n *node) handleRemoval(m *metaservice.Group, removal topology.SelfRemovalStatus) bool {
 	n.mu.RLock()
 	h := n.host
+	current := n.meta == m && n.pending == nil && !n.stopping
 	n.mu.RUnlock()
+	id := m.Identity()
+	if !current || id.MemberID != removal.MemberID {
+		return false
+	}
 	// Policies cannot keep a removed Raft participant running. Complete the
 	// mandatory fence first; failures retain ownership and retry on the monitor.
-	if err := m.Quiesce(n.ctx); err != nil {
+	if err := m.FenceParticipation(n.ctx); err != nil {
 		n.recordError(err)
 		return false
 	}
 	if h != nil {
-		if err := h.Stop(n.ctx); err != nil {
+		if err := h.FenceParticipation(n.ctx); err != nil {
 			n.recordError(err)
 			return false
 		}
 	}
-	decision, err := n.policies.Removal(n.ctx, policy.RemovalInput{Identity: m.Identity(), Removal: removal, Fenced: true})
+	if err := n.confirmMetaStop(n.ctx, m); err != nil {
+		n.recordError(err)
+		return false
+	}
+	decision, err := n.policies.Removal(n.ctx, policy.RemovalInput{Identity: id, Removal: removal, Fenced: true})
 	if err != nil {
 		n.recordError(err)
 		return false
 	}
 	n.mu.Lock()
+	defer n.mu.Unlock()
+	// Readmission may have acquired ownership while the proof read or policy
+	// callback waited. An old-member decision cannot stop a replacement.
+	if n.pending != nil || n.meta != m || m.Identity() != id || n.stopping {
+		return false
+	}
 	n.lastError = nil
-	n.mu.Unlock()
 	if decision.Action == policy.StopNode {
-		n.RequestStop()
+		n.requestStopLocked(false)
 	}
 	return true
 }
@@ -307,6 +335,10 @@ func (n *node) RequestStop() { n.requestStop(false) }
 func (n *node) requestStop(retry bool) *nodeStopAttempt {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	return n.requestStopLocked(retry)
+}
+
+func (n *node) requestStopLocked(retry bool) *nodeStopAttempt {
 	if !n.stopping {
 		n.stopping = true
 		if n.terminal == nil {
@@ -396,9 +428,11 @@ func (n *node) teardownResources() error {
 		}
 	}
 	if m != nil {
-		return m.Stop(ctx)
+		if err := m.Stop(ctx); err != nil {
+			return err
+		}
 	}
-	return nil
+	return n.closeAuthority()
 }
 
 var _ Node = (*node)(nil)

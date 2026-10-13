@@ -20,6 +20,16 @@ type putCommand struct {
 	Key       string `json:"key"`
 	Value     string `json:"value"`
 }
+type getQuery struct {
+	Key string `json:"key"`
+}
+type getResult struct {
+	Key          string `json:"key"`
+	Value        string `json:"value"`
+	Found        bool   `json:"found"`
+	AppliedIndex uint64 `json:"applied_index"`
+}
+
 type machineState struct {
 	SchemaVersion int               `json:"schema_version"`
 	Values        map[string]string `json:"values"`
@@ -56,6 +66,27 @@ func (m *kvMachine) Apply(ctx context.Context, cmd load.Command) (load.Result, e
 	m.state.Values[put.Key], m.state.Requests[put.RequestID] = put.Value, fingerprint
 	return load.Result{Code: "ok"}, nil
 }
+
+// Query executes on the library's machine owner after quorum confirmation and
+// local application. get remains the explicit local diagnostic accessor.
+func (m *kvMachine) Query(ctx context.Context, data []byte) (load.Result, error) {
+	if err := ctx.Err(); err != nil {
+		return load.Result{}, err
+	}
+	var query getQuery
+	if err := decodeJSON(data, &query); err != nil {
+		return load.Result{}, err
+	}
+	if query.Key == "" || len(query.Key) > 256 {
+		return load.Result{}, fault.ErrInvalid
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	value, found := m.state.Values[query.Key]
+	encoded, err := json.Marshal(getResult{Key: query.Key, Value: value, Found: found, AppliedIndex: m.state.AppliedIndex})
+	return load.Result{Code: "ok", Data: encoded}, err
+}
+
 func (m *kvMachine) Snapshot(ctx context.Context) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

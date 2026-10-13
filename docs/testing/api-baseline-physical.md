@@ -13,8 +13,8 @@ old codec before persisting its physical meta database.
 
 | Fixture | Evidence |
 | --- | --- |
-| `internal/metaengine/testdata/api-baseline/meta.bolt` | Baseline schema/buckets, exact identity and membership-seen pins, term/commit/snapshot/applied membership, materialized topology/operator/admission/session/lock state, local serve override and complete load ledger record. Current engine recovery checks all records remain byte-for-byte unchanged. |
-| `load/testdata/api-baseline/work/` | A running baseline engine's etcd WAL, snapshots, applied-state bbolt and identity.json. Current standalone recovery restores the snapshot and committed tail, preserves request deduplication and native voter IDs, and leaves the durable identity bytes intact. |
+| `internal/metaengine/testdata/api-baseline/meta.bolt` | Baseline schema/buckets, exact identity and membership-seen pins, term/commit/snapshot/applied membership, materialized topology/operator/admission/session/lock state, local serve override and complete load ledger record. Current recovery rejects the legacy encoding and verifies that all records remain byte-for-byte unchanged. |
+| `load/testdata/api-baseline/work/` | A running baseline engine's etcd WAL, snapshots, applied-state bbolt and identity.json. The authority/read implementation rejects its legacy snapshot/log format as unreadable while preserving the fixture and durable identity bytes. |
 | `events/testdata/legacy-events.bolt` | Baseline event rows with legacy names and native bbolt sequence. Current journal filtering, append and reopen preserve original records while exposing public operator/scheduling names. |
 
 Generation procedure, executed once:
@@ -26,5 +26,10 @@ Generation procedure, executed once:
 
 Tests always use temporary writable copies. Fixture files are read-only inputs;
 no test regenerates an expected format or rewrites a checked-in baseline.
-The load recovery case runs an engine and skips short mode. Meta opening/recovery
-and journal tests do not wait for consensus and run in the parallel short suite.
+The physical meta/load cases live in the functional suite. The authority/read
+implementation deliberately introduced schema-2 complete snapshot/log envelopes
+and metadata snapshots; backward compatibility was not required. Those cases now
+prove rejection of the immutable legacy stores without rewriting their records.
+The event-journal compatibility case remains supported. See the
+[authority/read plan](../plans/20261012-authority-contract-consistent-reads.md)
+for current validation; earlier API-refactor reports retain their historical results.

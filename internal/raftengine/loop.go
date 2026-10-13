@@ -2,13 +2,13 @@ package raftengine
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/raftstate"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"
@@ -26,6 +26,8 @@ func (g *Group) run() {
 		g.cached.Lead = 0
 		g.cached.RaftState = raft.StateFollower
 		g.cachedPending = 0
+		g.drainReadQueue(g.err)
+		g.failReadRounds(g.err)
 		// The loop exclusively owns these maps. Release canceled request data
 		// even when a caller retains the stopped Group for inspection.
 		clear(g.props)
@@ -46,6 +48,8 @@ func (g *Group) run() {
 	}()
 	for {
 		g.pruneWaiters()
+		g.resetReadRounds()
+		g.resumeAuthorizedTransfer()
 		if g.pending == nil && readyTimer == nil && g.rn.HasReady() {
 			// Delay capture, rather than an already frozen Ready: proposals and
 			// inbound entries received during this window join the durable batch.
@@ -62,6 +66,13 @@ func (g *Group) run() {
 		g.refresh()
 		if g.pending == nil && g.applied >= g.recoveryCommit {
 			g.readyOnce.Do(func() { close(g.ready) })
+		}
+		if g.pending == nil && readyTimer == nil {
+			g.completeAppliedReads()
+		}
+		g.issueReadRound(time.Now())
+		if g.pending == nil && readyTimer == nil && g.rn.HasReady() {
+			continue
 		}
 		var snapshotC chan *request
 		if g.pending == nil && readyTimer == nil {
@@ -81,6 +92,8 @@ func (g *Group) run() {
 		case <-ticker.C:
 			g.rn.Tick()
 			g.retryDroppedProposals(time.Now())
+			g.resetReadRounds()
+			g.retryReadRound(time.Now())
 		case now := <-metricsTicker.C:
 			g.sampleRaftMetrics(now)
 		case <-readyC:
@@ -107,6 +120,8 @@ func (g *Group) run() {
 			if entriesWritten {
 				lastEntriesWrite = time.Now()
 			}
+		case req := <-g.reads:
+			g.admitRead(req)
 		case req := <-g.proposals:
 			g.handleProposal(req)
 		case req := <-g.inbound:
@@ -156,7 +171,7 @@ func (g *Group) handleProposal(req *request) {
 	if requestID == "" {
 		requestID = req.correlation
 	}
-	data, err := json.Marshal(envelope{Schema: 1, Correlation: req.correlation, RequestID: requestID, Data: req.proposal.Data})
+	data, err := raftstate.EncodeEntry(raftstate.Entry{Schema: raftstate.Schema, Kind: raftstate.Application, Correlation: req.correlation, RequestID: requestID, Data: req.proposal.Data})
 	if err == nil && uint64(len(data)) > g.opts.MaxUncommittedBytes {
 		err = fault.ErrOverloaded
 	}
@@ -179,6 +194,14 @@ func (g *Group) handleProposal(req *request) {
 	g.props[req.correlation] = req
 }
 func (g *Group) handleControl(req *request) {
+	if req.admin != nil {
+		g.handleAuthority(req)
+		return
+	}
+	if g.opts.ManagedAuthority {
+		answer(req, Result{}, fault.ErrUnsupported)
+		return
+	}
 	if err := req.ctx.Err(); err != nil {
 		answer(req, Result{}, err)
 		return
@@ -193,7 +216,7 @@ func (g *Group) handleControl(req *request) {
 			return
 		}
 		cc := *req.change
-		data, err := json.Marshal(envelope{Schema: 1, Correlation: req.correlation, Data: cc.Context})
+		data, err := raftstate.EncodeEntry(raftstate.Entry{Schema: raftstate.Schema, Kind: raftstate.StandaloneConfiguration, Correlation: req.correlation, Data: cc.Context})
 		if err != nil {
 			answer(req, Result{}, err)
 			return
@@ -247,6 +270,10 @@ func (g *Group) beginReady() error {
 	rd := g.rn.Ready()
 	rd.Entries = copyEntries(rd.Entries)
 	rd.CommittedEntries = copyEntries(rd.CommittedEntries)
+	rd.ReadStates = append([]raft.ReadState(nil), rd.ReadStates...)
+	for i := range rd.ReadStates {
+		rd.ReadStates[i].RequestCtx = bytes.Clone(rd.ReadStates[i].RequestCtx)
+	}
 	messages := rd.Messages
 	rd.Messages = make([]raftpb.Message, len(messages))
 	for i, m := range messages {
@@ -257,6 +284,9 @@ func (g *Group) beginReady() error {
 		rd.Messages[i] = owned
 	}
 	if !raft.IsEmptySnap(rd.Snapshot) {
+		if _, err := g.decodeSnapshot(rd.Snapshot); err != nil {
+			return err
+		}
 		if g.opts.GroupID != topology.MetaGroupID {
 			for id, req := range g.props {
 				delete(g.props, id)
@@ -307,12 +337,18 @@ func (g *Group) finishWrite(kind writeKind) error {
 		g.durableHS = rd.HardState
 	}
 	if !raft.IsEmptySnap(rd.Snapshot) {
+		state, err := g.decodeSnapshot(rd.Snapshot)
+		if err != nil {
+			return err
+		}
 		g.restoring.Store(true)
-		err := g.opts.Machine.Restore(g.ctx, bytes.Clone(rd.Snapshot.Data))
+		err = g.opts.Machine.Restore(g.ctx, bytes.Clone(state.Application))
 		g.restoring.Store(false)
 		if err != nil {
 			return fault.New(fault.Unreadable, "restore received snapshot", err)
 		}
+		g.authority = state.Authority.Clone()
+		g.transferIssuedTerm = 0
 		g.applied, g.snapshotIndex = rd.Snapshot.Metadata.Index, rd.Snapshot.Metadata.Index
 		g.cs = copyConf(rd.Snapshot.Metadata.ConfState)
 		g.durableHS.Commit = max(g.durableHS.Commit, g.applied)
@@ -347,14 +383,20 @@ func (g *Group) finishWrite(kind writeKind) error {
 	return g.advance()
 }
 func (g *Group) apply(entry raftpb.Entry) error {
+	if err := validateEntryMode(g.opts, entry); err != nil {
+		return err
+	}
 	switch entry.Type {
 	case raftpb.EntryNormal:
 		if len(entry.Data) == 0 {
 			return nil
 		}
-		var e envelope
-		if err := json.Unmarshal(entry.Data, &e); err != nil || e.Schema != 1 || e.Correlation == "" {
-			return fault.New(fault.Unreadable, "invalid load command envelope", err)
+		e, err := raftstate.DecodeEntry(entry.Data)
+		if err != nil {
+			return err
+		}
+		if e.Kind != raftstate.Application {
+			return g.applyAuthority(entry, e)
 		}
 		started := time.Now()
 		result, err := g.opts.Machine.Apply(g.ctx, Command{Index: entry.Index, Term: entry.Term, RequestID: e.RequestID, Data: bytes.Clone(e.Data)})
@@ -367,24 +409,24 @@ func (g *Group) apply(entry raftpb.Entry) error {
 			answer(req, result, nil)
 		}
 	case raftpb.EntryConfChangeV2:
-		var cc raftpb.ConfChangeV2
-		if err := cc.Unmarshal(entry.Data); err != nil {
-			return fault.New(fault.Unreadable, "decode membership entry", err)
+		cc, e, err := decodeConfiguration(entry)
+		if err != nil {
+			return err
 		}
-		if cc.Transition != raftpb.ConfChangeTransitionAuto || len(cc.Changes) != 1 || cc.Changes[0].NodeID == 0 {
-			return fault.ErrUnsafeMembership
+		if e.Kind == raftstate.ManagedConfiguration {
+			return g.applyAuthorizedConfChange(entry, cc, e)
+		}
+		if e.Kind != raftstate.StandaloneConfiguration || g.opts.ManagedAuthority {
+			return fault.New(fault.Unsupported, "managed configuration requires authority execution", nil)
 		}
 		if change := cc.Changes[0]; change.Type == raftpb.ConfChangeRemoveNode && change.NodeID != g.opts.ReplicaID {
 			g.queueRetirement(entry, change.NodeID)
 		}
 		g.cs = copyConf(*g.rn.ApplyConfChange(cc))
 		g.membershipChanged = true
-		var e envelope
-		if json.Unmarshal(cc.Context, &e) == nil && e.Schema == 1 {
-			if req := g.changes[e.Correlation]; req != nil {
-				g.confNotify = append(g.confNotify, req)
-				delete(g.changes, e.Correlation)
-			}
+		if req := g.changes[e.Correlation]; req != nil {
+			g.confNotify = append(g.confNotify, req)
+			delete(g.changes, e.Correlation)
 		}
 	default:
 		return fault.New(fault.Unsupported, "only V2 membership entries are supported", nil)
@@ -410,12 +452,18 @@ func (g *Group) advance() error {
 			}
 		}
 	}
+	g.acceptReadStates(rd.ReadStates)
+	g.releaseRemoteReads(rd.Messages)
 	g.rn.Advance(rd)
 	g.pending = nil
 	for _, req := range g.confNotify {
 		answer(req, Result{}, nil)
 	}
 	g.confNotify = nil
+	for _, reply := range g.adminNotify {
+		answer(reply.req, reply.result, reply.err)
+	}
+	g.adminNotify = nil
 	if g.membershipChanged || g.applied-g.snapshotIndex >= g.opts.SnapshotThreshold {
 		if err := g.beginSnapshot(nil); err != nil {
 			g.opts.Logger.Warn("automatic snapshot failed", "group", g.opts.GroupID, "error", err)
@@ -480,6 +528,10 @@ func (g *Group) beginSnapshot(req *request) error {
 	}
 	if len(data) == 0 {
 		return fault.New(fault.Invalid, "machine snapshot must be nonempty", nil)
+	}
+	data, err = encodeSnapshot(g.opts, data, g.authority)
+	if err != nil {
+		return err
 	}
 	cs := copyConf(g.cs)
 	ss, err := g.ms.CreateSnapshot(g.applied, &cs, bytes.Clone(data))

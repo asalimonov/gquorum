@@ -3,9 +3,9 @@
 package raftengine
 
 import (
-	"encoding/json"
 	"errors"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/raftstate"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3/raftpb"
 	"testing"
@@ -13,7 +13,7 @@ import (
 
 func TestForwardedEnvelopeCannotCarryMembershipOrControl(t *testing.T) {
 	t.Parallel()
-	data, _ := json.Marshal(envelope{Schema: 1, Correlation: "origin-1", RequestID: "request", Data: []byte("value")})
+	data, _ := raftstate.EncodeEntry(raftstate.Entry{Schema: raftstate.Schema, Kind: raftstate.Application, Correlation: "origin-1", RequestID: "request", Data: []byte("value")})
 	good := raftpb.Message{Type: raftpb.MsgProp, From: 2, To: 1, Entries: []raftpb.Entry{{Type: raftpb.EntryNormal, Data: data}}}
 	opts := Options{GroupID: "load", MaxUncommittedBytes: 1024}
 	if err := validateForwardedProposal(opts, good); err != nil {

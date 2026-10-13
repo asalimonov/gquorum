@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/authoritystore"
 	"github.com/asalimonov/gquorum/internal/managed"
 	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/load"
@@ -33,6 +34,7 @@ type Node interface {
 	ReceiveLoadRaft(context.Context, load.RaftBatch) error
 	ReadLoadReplica(context.Context, load.ReplicaQuery) (load.ReplicaStatus, error)
 	ApplyLoadAction(context.Context, load.ActionRequest) (load.ActionResult, error)
+	InstallLoadFence(context.Context, load.FenceRequest) (load.FenceResult, error)
 	ReportLoadDelivery(context.Context, load.DeliveryReport) error
 	ActivateSession(context.Context) (topology.Session, error)
 	KeepAlive(context.Context, string) error
@@ -49,6 +51,12 @@ type node struct {
 	metaOpts                metaservice.Options
 	cluster                 *clusterView
 	startGate               sync.Mutex
+	authorityGate           sync.Mutex
+	authority               *authoritystore.Store
+	authorityFresh          bool
+	metaAuthorityWork       *metaAuthorityWork
+	readmissionWork         *readmissionWork
+	readmissionFenceWork    *readmissionFenceWork
 	mu                      sync.RWMutex
 	state                   NodeState
 	terminal                error
@@ -90,8 +98,15 @@ func NewNode(input NodeOptions) (Node, error) {
 func FoundingIDs(clusterID string, names []string) (map[string]uint64, error) {
 	return metaservice.FoundingIDs(clusterID, names)
 }
-func LoadStoredIdentity(path string) (topology.Identity, bool, error) {
-	return metaservice.LoadStoredIdentity(path)
+
+// LoadStoredIdentity reads the _meta.bolt pin in storageDir without creating
+// storage. The returned durable identity excludes the process InstanceID.
+func LoadStoredIdentity(storageDir string) (topology.Identity, bool, error) {
+	o := NodeOptions{StorageDir: storageDir}
+	if err := validateStorageDir(o); err != nil {
+		return topology.Identity{}, false, err
+	}
+	return metaservice.LoadStoredIdentity(o.metaDBPath())
 }
 func (n *node) Cluster() Cluster { return n.cluster }
 func (n *node) Identity() topology.Identity {
@@ -158,4 +173,24 @@ func (n *node) loadHost(ctx context.Context) (*managed.Host, error) {
 		return nil, fault.New(fault.NoController, "node has no load hosting configured", nil)
 	}
 	return h, nil
+}
+
+// Only granted action/fence ingress uses this retained owner. The Host keeps
+// creation and native operations fenced while validating exact cleanup grants.
+func (n *node) authorityHost(ctx context.Context) (*managed.Host, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	if n.stopping || n.terminal != nil || n.ctx == nil || n.ctx.Err() != nil {
+		return nil, fault.ErrStopped
+	}
+	if n.pending != nil || n.meta == nil {
+		return nil, fault.ErrReplicaNotReady
+	}
+	if n.host == nil {
+		return nil, fault.New(fault.NoController, "node has no load hosting configured", nil)
+	}
+	return n.host, nil
 }

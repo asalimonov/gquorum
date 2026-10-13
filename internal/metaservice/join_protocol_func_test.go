@@ -24,14 +24,27 @@ import (
 // actual join/ready/membership path is covered by join_test.go and process tests.
 type joinProtocolHandler struct {
 	*Group
-	mu       sync.Mutex
-	reply    *metapb.Reply
-	requests []joinRequest
+	mu         sync.Mutex
+	reply      *metapb.Reply
+	requests   []joinRequest
+	readies    []readyRequest
+	readyReply *metapb.Reply
 }
 
 func (h *joinProtocolHandler) Call(_ context.Context, method string, header *metapb.Header, data []byte) *metapb.Reply {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if method == "JoinReady" {
+		var req readyRequest
+		if json.Unmarshal(data, &req) != nil || req.NodeName != header.NodeName || req.MemberID != header.MemberId || req.InstanceID != header.InstanceId {
+			return metatransport.Reply(fault.ErrIdentityMismatch)
+		}
+		h.readies = append(h.readies, req)
+		if h.readyReply != nil {
+			return h.readyReply
+		}
+		return &metapb.Reply{}
+	}
 	var req joinRequest
 	if method != "Join" || json.Unmarshal(data, &req) != nil || req.Identity.NodeName != header.NodeName || req.Identity.MemberID != header.MemberId || req.Identity.InstanceID != header.InstanceId || req.Identity.ClusterID != header.ClusterId {
 		return metatransport.Reply(fault.ErrInvalid)
@@ -40,7 +53,7 @@ func (h *joinProtocolHandler) Call(_ context.Context, method string, header *met
 	return h.reply
 }
 
-func joinProtocolServer(t *testing.T, h *joinProtocolHandler, credential []byte) string {
+func joinProtocolServer(t *testing.T, h metatransport.Handler, credential []byte) string {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -70,7 +83,7 @@ func joinProtocolServer(t *testing.T, h *joinProtocolHandler, credential []byte)
 	return l.Addr().String()
 }
 
-func joinProtocolClient(t *testing.T, seeds []string) *Group {
+func joinProtocolClient(t *testing.T, seeds []string, configure ...func(*Options)) *Group {
 	t.Helper()
 	o := optionsForTest(t)
 	o.Identity.MemberID = 0
@@ -79,6 +92,9 @@ func joinProtocolClient(t *testing.T, seeds []string) *Group {
 	o.JoinSeeds = seeds
 	o.Node = topology.Node{Name: o.Identity.NodeName, Type: "worker"}
 	o.DBPath = filepath.Join(t.TempDir(), "unopened.bolt")
+	for _, change := range configure {
+		change(&o)
+	}
 	g, err := New(o)
 	if err != nil {
 		t.Fatal(err)

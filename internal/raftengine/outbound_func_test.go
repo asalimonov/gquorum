@@ -32,7 +32,7 @@ func outboundTestMeter(t *testing.T) *internalmetrics.Meter {
 	return m
 }
 
-func (o *orderedTransport) Send(ctx context.Context, messages []raftpb.Message) error {
+func (o *orderedTransport) Send(_ context.Context, messages []raftpb.Message) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	for _, message := range messages {

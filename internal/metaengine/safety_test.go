@@ -112,7 +112,8 @@ func TestAuthorizeEveryIdentityAndProgressBoundary(t *testing.T) {
 	if err := sm.Authorize(ctx, a); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
-	apply(t, sm, 4, TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: b.OperatorID, Version: 1, Attempt: 1, StepSeq: 1, State: topology.OperatorSucceeded, GroupID: "shard0", NodeName: "n1", At: at.Add(2 * time.Second)}})
+	index := consumeTestStep(t, sm, b.OperatorID, 4)
+	apply(t, sm, index, TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: b.OperatorID, Version: 1, Attempt: 1, StepSeq: 1, State: topology.OperatorSucceeded, GroupID: "shard0", NodeName: "n1", At: at.Add(2 * time.Second)}})
 	if err := sm.Authorize(context.Background(), a); !errors.Is(err, fault.ErrOperatorAuthorization) {
 		t.Fatal("completed effect authorized", err)
 	}

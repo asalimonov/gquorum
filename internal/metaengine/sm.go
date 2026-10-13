@@ -18,6 +18,7 @@ type statePersister interface {
 }
 
 type ApplyResult struct {
+	Grants         []topology.AuthorityGrant `json:"grants,omitempty"`
 	ProposalID     string
 	CurrentVersion uint64
 	Accepted       bool
@@ -26,16 +27,20 @@ type ApplyResult struct {
 	Dropped        bool
 	Doc            topology.Document
 	OperatorID     topology.OperatorID
+	Grant          *topology.AuthorityGrant `json:"grant,omitempty"`
 	Admission      AdmissionRecord
 }
 
 type proposalErrorCode string
 
 const (
-	proposalVersionConflict proposalErrorCode = "version_conflict"
-	proposalAuthorization   proposalErrorCode = "authorization"
-	proposalSuperseded      proposalErrorCode = "superseded"
-	proposalGuardrail       proposalErrorCode = "guardrail"
+	proposalVersionConflict  proposalErrorCode = "version_conflict"
+	proposalAuthorization    proposalErrorCode = "authorization"
+	proposalSuperseded       proposalErrorCode = "superseded"
+	proposalGuardrail        proposalErrorCode = "guardrail"
+	proposalOverloaded       proposalErrorCode = "overloaded"
+	proposalAuthorityPending proposalErrorCode = "authority_pending"
+	proposalAuthorityFenced  proposalErrorCode = "authority_fenced"
 )
 
 type operatorRecord struct {
@@ -75,6 +80,9 @@ type topologySM struct {
 	allocations map[string]uint64
 	activated   map[string]struct{} // node name → has activated at least once
 
+	authority  authorityCatalog
+	metaOwners map[uint64]string // rebuilt on mutation/restore; no per-frame catalog scans
+
 	appliedIndex uint64
 	appliedTerm  uint64
 }
@@ -82,6 +90,7 @@ type topologySM struct {
 func newTopologySM(persister statePersister, rules topology.Rules) *topologySM {
 	return &topologySM{
 		persister:     persister,
+		authority:     newAuthorityCatalog(),
 		rules:         rules,
 		retired:       make(map[string]uint64),
 		allocations:   make(map[string]uint64),
@@ -95,22 +104,25 @@ func newTopologySM(persister statePersister, rules topology.Rules) *topologySM {
 }
 
 type smState struct {
-	SchemaVersion uint32                      `json:"schema_version"`
-	Rules         topology.Rules              `json:"rules"`
-	RetiredGroups []retiredGroup              `json:"retired_groups"`
-	Allocations   []allocationRecord          `json:"allocations"`
-	Latest        topology.Document           `json:"latest"`
-	Target        topology.Document           `json:"target"`
-	Active        topology.Document           `json:"active"`
-	History       []topology.Document         `json:"history"`
-	Operators     []topology.Operator         `json:"executions"`
-	Admissions    []AdmissionRecord           `json:"admissions,omitempty"`
-	Sessions      []sessionState              `json:"sessions"`
-	Locks         []lockEntry                 `json:"locks"`
-	Activated     []string                    `json:"activated,omitempty"` // sorted node names that ever activated
-	VoterSwitches []topology.VoterSwitchState `json:"voter_switches,omitempty"`
-	AppliedIndex  uint64                      `json:"applied_index"`
-	AppliedTerm   uint64                      `json:"applied_term"`
+	AuthorityRecords []authorityRecord           `json:"authority_records,omitempty"`
+	AuthorityFloors  []resourceFloor             `json:"authority_floors,omitempty"`
+	Revocations      []revocationRecord          `json:"revocations,omitempty"`
+	SchemaVersion    uint32                      `json:"schema_version"`
+	Rules            topology.Rules              `json:"rules"`
+	RetiredGroups    []retiredGroup              `json:"retired_groups"`
+	Allocations      []allocationRecord          `json:"allocations"`
+	Latest           topology.Document           `json:"latest"`
+	Target           topology.Document           `json:"target"`
+	Active           topology.Document           `json:"active"`
+	History          []topology.Document         `json:"history"`
+	Operators        []topology.Operator         `json:"executions"`
+	Admissions       []AdmissionRecord           `json:"admissions,omitempty"`
+	Sessions         []sessionState              `json:"sessions"`
+	Locks            []lockEntry                 `json:"locks"`
+	Activated        []string                    `json:"activated,omitempty"` // sorted node names that ever activated
+	VoterSwitches    []topology.VoterSwitchState `json:"voter_switches,omitempty"`
+	AppliedIndex     uint64                      `json:"applied_index"`
+	AppliedTerm      uint64                      `json:"applied_term"`
 }
 
 func (sm *topologySM) Apply(index, term uint64, data []byte) (ApplyResult, error) {
@@ -131,6 +143,42 @@ func (sm *topologySM) Apply(index, term uint64, data []byte) (ApplyResult, error
 		changed bool
 	)
 	switch kind {
+	case KindRecordReadmissionReceipts:
+		var p RecordReadmissionReceiptsProposal
+		if err := json.Unmarshal(body, &p); err != nil {
+			return ApplyResult{}, err
+		}
+		res, changed = sm.applyRecordReadmissionReceipts(p)
+	case KindBeginReadmissionAuthority:
+		var p BeginReadmissionAuthority
+		if err := json.Unmarshal(body, &p); err != nil {
+			return ApplyResult{}, err
+		}
+		res, changed = sm.applyBeginReadmissionAuthority(index, p)
+	case KindGrantTransfer:
+		var p GrantTransferProposal
+		if err := json.Unmarshal(body, &p); err != nil {
+			return ApplyResult{}, err
+		}
+		res, changed = sm.applyGrantTransfer(index, p)
+	case KindRecordFence:
+		var p RecordFenceProposal
+		if err := json.Unmarshal(body, &p); err != nil {
+			return ApplyResult{}, err
+		}
+		res, changed = sm.applyRecordFence(p)
+	case KindRecordEffect:
+		var p RecordEffectProposal
+		if err := json.Unmarshal(body, &p); err != nil {
+			return ApplyResult{}, err
+		}
+		res, changed = sm.applyRecordEffect(p)
+	case KindBeginEffect:
+		var p BeginEffectProposal
+		if err := json.Unmarshal(body, &p); err != nil {
+			return ApplyResult{}, err
+		}
+		res, changed = sm.applyBeginEffect(index, p)
 	case KindProposeDocument:
 		var p ProposeDocument
 		if err := json.Unmarshal(body, &p); err != nil {
@@ -148,13 +196,13 @@ func (sm *topologySM) Apply(index, term uint64, data []byte) (ApplyResult, error
 		if err := json.Unmarshal(body, &p); err != nil {
 			return ApplyResult{}, fmt.Errorf("meta: unmarshal begin_execution: %w", err)
 		}
-		res, changed = sm.applyBeginOperator(p)
+		res, changed = sm.applyBeginOperator(index, p)
 	case KindCommitRepairOperator:
 		var p CommitRepairOperatorProposal
 		if err := json.Unmarshal(body, &p); err != nil {
 			return ApplyResult{}, fmt.Errorf("meta: unmarshal commit_repair_execution: %w", err)
 		}
-		res, changed = sm.applyCommitRepairOperator(p)
+		res, changed = sm.applyCommitRepairOperator(index, p)
 	case KindTransitionOperator:
 		var p TransitionOperatorProposal
 		if err := json.Unmarshal(body, &p); err != nil {
@@ -166,7 +214,7 @@ func (sm *topologySM) Apply(index, term uint64, data []byte) (ApplyResult, error
 		if err := json.Unmarshal(body, &p); err != nil {
 			return ApplyResult{}, fmt.Errorf("meta: unmarshal commit_voter_change: %w", err)
 		}
-		res, changed = sm.applyCommitVoterChange(p)
+		res, changed = sm.applyCommitVoterChange(index, p)
 	case KindActivateTarget:
 		var p ActivateTargetProposal
 		if err := json.Unmarshal(body, &p); err != nil {
@@ -184,7 +232,7 @@ func (sm *topologySM) Apply(index, term uint64, data []byte) (ApplyResult, error
 		if err := json.Unmarshal(body, &p); err != nil {
 			return ApplyResult{}, fmt.Errorf("meta: unmarshal commit_readmission: %w", err)
 		}
-		res, changed = sm.applyCommitReadmission(p)
+		res, changed = sm.applyCommitReadmission(index, p)
 	case KindReadyAdmission:
 		var p ReadyAdmissionProposal
 		if err := json.Unmarshal(body, &p); err != nil {
@@ -217,6 +265,7 @@ func (sm *topologySM) Apply(index, term uint64, data []byte) (ApplyResult, error
 	sm.appliedIndex = index
 	sm.appliedTerm = term
 	if changed {
+		sm.metaOwners = sm.metaMemberOwnersLocked()
 		if err := sm.persistLocked(); err != nil {
 			return ApplyResult{}, fmt.Errorf("%w: %w", errDurablePersist, err)
 		}
@@ -350,8 +399,10 @@ func (sm *topologySM) marshalLocked() ([]byte, error) {
 		activated = append(activated, name)
 	}
 	sort.Strings(activated)
+	recordsAuthority, floors, revocations := sm.authority.snapshot()
 	return json.Marshal(smState{
-		SchemaVersion: 1, Rules: sm.rules, RetiredGroups: sm.retiredSnapshot(), Allocations: sm.allocationSnapshot(),
+		AuthorityRecords: recordsAuthority, AuthorityFloors: floors, Revocations: revocations,
+		SchemaVersion: 2, Rules: sm.rules, RetiredGroups: sm.retiredSnapshot(), Allocations: sm.allocationSnapshot(),
 		Latest:        sm.latest,
 		Target:        sm.target,
 		Active:        sm.active,
@@ -381,8 +432,13 @@ func (sm *topologySM) Restore(data []byte) error {
 	if err := validateRestoredState(st, sm.rules); err != nil {
 		return err
 	}
+	authority, err := restoreAuthority(st)
+	if err != nil {
+		return err
+	}
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
+	sm.authority = authority
 	sm.retired = make(map[string]uint64, len(st.RetiredGroups))
 	for _, r := range st.RetiredGroups {
 		sm.retired[r.ID] = r.Version
@@ -424,6 +480,7 @@ func (sm *topologySM) Restore(data []byte) error {
 	}
 	sm.appliedIndex = st.AppliedIndex
 	sm.appliedTerm = st.AppliedTerm
+	sm.metaOwners = sm.metaMemberOwnersLocked()
 	return nil
 }
 

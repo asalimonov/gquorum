@@ -27,6 +27,28 @@ func Run(t *testing.T, open Opener) {
 		must(t, s.BindReplica(ctx, storage.Identity{NodeName: node, ClusterID: "test-cluster", GroupID: "group", ReplicaID: 7}))
 		return s
 	}
+	t.Run("StoreWideEvidence", func(t *testing.T) {
+		s := open(t, "a")
+		retained, err := s.HasState(ctx)
+		must(t, err)
+		if retained {
+			t.Fatal("fresh store reports retained state")
+		}
+		must(t, s.BindReplica(ctx, storage.Identity{NodeName: "a", ClusterID: "test-cluster", GroupID: "group", ReplicaID: 7}))
+		must(t, s.Ensure(ctx, "group"))
+		retained, err = s.HasState(ctx)
+		must(t, err)
+		if !retained {
+			t.Fatal("durable identity omitted from inventory")
+		}
+		_, err = s.Quarantine(ctx, "group", 7)
+		must(t, err)
+		retained, err = s.HasState(ctx)
+		must(t, err)
+		if !retained {
+			t.Fatal("quarantined evidence mistaken for fresh storage")
+		}
+	})
 	t.Run("SaveLoadRoundTrip", func(t *testing.T) {
 		s := prepare(t, "a")
 		write := storage.ReadyWrite{Entries: Entries(1, 3, 2), HardState: raftpb.HardState{Term: 2, Vote: 7, Commit: 3}}

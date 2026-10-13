@@ -1,5 +1,11 @@
 # Public API refactor validation
 
+This is the historical API-refactor validation record. The later
+[authority/read implementation](../plans/20261012-authority-contract-consistent-reads.md)
+deliberately changes snapshot/log formats and rejects immutable legacy meta/load
+fixtures without rewriting them; the results below remain those actually run at
+the recorded source revision.
+
 Status: **complete**, validated October 11, 2026. The corrected-image complete
 process run and all other required gates pass. The
 [requirement audit](api-refactor-audit.md) covers the accepted target, algorithm

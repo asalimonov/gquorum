@@ -2,6 +2,7 @@ package metaservice
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -14,13 +15,6 @@ import (
 // ReplicaRecord is a node-local boot ledger entry, never replicated through meta.
 type ReplicaRecord = metastore.ReplicaRecord
 type LoadReplicaScope = metaengine.LoadScope
-
-func (g *Group) LoadActionTargets(ctx context.Context, a topology.AuthorizedStep) ([]storage.Identity, error) {
-	if err := g.ensureRunning(ctx); err != nil {
-		return nil, err
-	}
-	return g.state().LoadActionTargets(ctx, a)
-}
 
 func (g *Group) LoadCatalog(ctx context.Context, group string) ([]storage.Identity, error) {
 	if err := g.ensureRunning(ctx); err != nil {
@@ -46,8 +40,8 @@ func (g *Group) LookupLoadReplica(ctx context.Context, group string) (ReplicaRec
 }
 
 // LoadReplicaScope verifies approved Target identity, rather than staged Latest
-// intent. Effect receivers must additionally Authorize the complete callback
-// identity before invoking runtime operations.
+// intent. Effect receivers additionally require the exact committed grant and
+// installed resource fence before invoking managed operations.
 func (g *Group) LoadReplicaScope(ctx context.Context, id storage.Identity) (scope LoadReplicaScope, err error) {
 	if err = g.ensureRunning(ctx); err != nil {
 		return
@@ -101,38 +95,61 @@ func (g *Group) RecordLoadReplica(ctx context.Context, group string, record Repl
 	})
 }
 
-// ForgetLoadReplica erases only an exact, authorized cleanup identity after
-// caller-owned durable storage cleanup. Whole-group deletion takes the old
-// local ID explicitly because its authorized step has no single replica ID.
-// Stopping or parking a handle must not erase its boot ledger.
-func (g *Group) ForgetLoadReplica(ctx context.Context, a topology.AuthorizedStep, expected uint64) error {
+// ForgetGrantedLoadReplica is called only by the owner of an admitted local
+// cleanup. It validates retained authority instead of a newer operator cursor;
+// the managed host keeps its resource gate until the receipt is durable.
+func (g *Group) ForgetGrantedLoadReplica(ctx context.Context, grant topology.AuthorityGrant, expected uint64) error {
 	if expected == 0 {
 		return fault.ErrInvalid
 	}
-	if err := g.ensureRunning(ctx); err != nil {
+	ctx, release, err := g.beginRPC(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := g.ValidateGrant(ctx, grant); err != nil {
 		return err
 	}
 	g.mu.RLock()
-	defer g.mu.RUnlock()
-	if err := g.ensureRuntimeLocked(false); err != nil {
+	id := g.identity
+	target := topology.AuthorityTarget{NodeName: id.NodeName, MemberID: id.MemberID, ReplicaID: expected}
+	if !g.quiescing && g.selfRemoval == nil {
+		defer g.mu.RUnlock()
+		if err := g.ensureRuntimeLocked(false); err != nil {
+			return err
+		}
+		if g.store == nil {
+			return fault.ErrReplicaNotReady
+		}
+		return g.machine.WithGrantedLoadCleanup(ctx, grant, target, func() error {
+			return g.store.ForgetReplica(grant.Key.GroupID, expected)
+		})
+	}
+	g.mu.RUnlock()
+	// The fenced catalog may precede this grant and still assign the old
+	// replica. Obtain the exact cleanup decision from the live metadata quorum.
+	// The Host retains its resource gate until the final receipt; successor
+	// resource fencing must join this owner before admitting newer effects.
+	proof, err := g.readAuthorityProof(ctx, grant.Key, "")
+	if err != nil {
 		return err
+	}
+	if proof.Grant == nil || !proof.Grant.Equal(grant) || !slices.Contains(proof.CleanupTargets, target) {
+		return fault.ErrOperatorAuthorization
+	}
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if g.identity != id || g.rpcClosed {
+		return fault.ErrIdentityMismatch
 	}
 	if g.store == nil {
 		return fault.ErrReplicaNotReady
 	}
-	if a.Kind != topology.StepDeleteGroupState && (a.Kind != topology.StepCleanupReplicaState || a.NodeName != g.identity.NodeName || a.ReplicaID != expected) {
-		return fault.ErrOperatorAuthorization
-	}
-	if err := g.machine.Authorize(ctx, a); err != nil {
+	if err := g.store.VerifyIdentity(metastore.Identity{NodeName: id.NodeName, ClusterID: id.ClusterID, MemberID: id.MemberID}); err != nil {
 		return err
 	}
-	target := g.machine.Target()
-	if group := target.Group(a.GroupID); group != nil {
-		for _, replica := range group.Replicas {
-			if replica.NodeName == g.identity.NodeName && replica.ReplicaID == expected {
-				return fault.ErrIdentityMismatch
-			}
-		}
-	}
-	return g.store.ForgetReplica(a.GroupID, expected)
+	return g.store.ForgetReplica(grant.Key.GroupID, expected)
 }

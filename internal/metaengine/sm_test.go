@@ -548,7 +548,8 @@ func TestSM_ExactOperatorTransitions(t *testing.T) {
 		OperatorID: id, Version: 1, Attempt: 1, StepSeq: 1, State: topology.OperatorRunning,
 		GroupID: "shard0", NodeName: "n1", At: at.Add(time.Second),
 	}, ProposalID: "s1"})
-	apply(t, sm, 4, TransitionOperatorProposal{Transition: topology.OperatorTransition{
+	index := consumeTestStep(t, sm, id, 4)
+	apply(t, sm, index, TransitionOperatorProposal{Transition: topology.OperatorTransition{
 		OperatorID: id, Version: 1, Attempt: 1, StepSeq: 2, State: topology.OperatorRunning,
 		GroupID: "shard0", NodeName: "n1", At: at.Add(2 * time.Second),
 	}, ProposalID: "s2"})
@@ -562,7 +563,7 @@ func TestSM_ExactOperatorTransitions(t *testing.T) {
 	}
 
 	// A stale lower-sequence transition is rejected and cannot rewind progress.
-	stale := apply(t, sm, 5, TransitionOperatorProposal{Transition: topology.OperatorTransition{
+	stale := apply(t, sm, index+1, TransitionOperatorProposal{Transition: topology.OperatorTransition{
 		OperatorID: id, Version: 1, Attempt: 1, StepSeq: 1, State: topology.OperatorRunning,
 		GroupID: "shard0", NodeName: "n1", At: at.Add(3 * time.Second),
 	}, ProposalID: "s1replay"})
@@ -573,7 +574,8 @@ func TestSM_ExactOperatorTransitions(t *testing.T) {
 		t.Fatalf("CurrentStep rewound to %d after stale replay, want 2", st.CurrentStep)
 	}
 
-	apply(t, sm, 6, TransitionOperatorProposal{Transition: topology.OperatorTransition{
+	index = consumeTestStep(t, sm, id, index+2)
+	apply(t, sm, index, TransitionOperatorProposal{Transition: topology.OperatorTransition{
 		OperatorID: id, Version: 1, Attempt: 1, StepSeq: 3, State: topology.OperatorFailed,
 		GroupID: "shard0", NodeName: "n1", Error: "conf change timeout", At: at.Add(4 * time.Second),
 	}, ProposalID: "s3"})
@@ -581,7 +583,7 @@ func TestSM_ExactOperatorTransitions(t *testing.T) {
 	if st.State != topology.OperatorFailed || st.Error != "conf change timeout" || st.CurrentStep != 3 {
 		t.Fatalf("failed execution = %+v", st)
 	}
-	terminalReplay := apply(t, sm, 7, TransitionOperatorProposal{Transition: topology.OperatorTransition{
+	terminalReplay := apply(t, sm, index+1, TransitionOperatorProposal{Transition: topology.OperatorTransition{
 		OperatorID: id, Version: 1, Attempt: 1, StepSeq: 3, State: topology.OperatorRunning,
 		GroupID: "shard0", NodeName: "n1", At: at.Add(5 * time.Second),
 	}, ProposalID: "terminal-rewind"})
@@ -691,12 +693,12 @@ func TestSM_OperatorBeginRetryAndSupersession(t *testing.T) {
 		OperatorID: firstID, Version: 1, Attempt: 1, StepSeq: 1, State: topology.OperatorFailed,
 		GroupID: "shard0", NodeName: "n1", Error: "injected", At: at.Add(3 * time.Second),
 	}, ProposalID: "fail-a1"})
-	retry := apply(t, sm, 6, beginProposal(1, 0, "retry", at.Add(4*time.Second)))
+	retry := apply(t, sm, 6, beginProposal(1, 1, "retry", at.Add(4*time.Second)))
 	retryID := topology.MakeOperatorID(1, 2)
 	if !retry.Accepted || retry.OperatorID != retryID {
 		t.Fatalf("retry = %+v, want %q", retry, retryID)
 	}
-	if replayRetry := apply(t, sm, 7, beginProposal(1, 0, "retry-replay", at.Add(5*time.Second))); !replayRetry.Accepted || replayRetry.OperatorID != retryID || len(sm.operators) != 2 {
+	if replayRetry := apply(t, sm, 7, beginProposal(1, 1, "retry-replay", at.Add(5*time.Second))); !replayRetry.Accepted || replayRetry.OperatorID != retryID || len(sm.operators) != 2 {
 		t.Fatalf("retry replay = %+v, executions=%d", replayRetry, len(sm.operators))
 	}
 

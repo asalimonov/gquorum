@@ -14,17 +14,6 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func (h *Host) Retire(parent context.Context, request load.RetirementRequest) (load.RetirementResult, error) {
-	ctx, cancel := context.WithTimeout(parent, h.cfg.EffectTimeout)
-	defer cancel()
-	ctx, done, err := h.beginOperation(ctx, request.Identity.GroupID)
-	if err != nil {
-		return load.RetirementResult{}, err
-	}
-	defer done()
-	return h.retire(ctx, request)
-}
-
 func (h *Host) retirementAuthority(ctx context.Context, req load.RetirementRequest) error {
 	if req.Reason != load.RetirementTopology {
 		return fault.ErrUnsupported
@@ -36,14 +25,14 @@ func (h *Host) retirementAuthority(ctx context.Context, req load.RetirementReque
 	if a.Kind != topology.StepCleanupReplicaState && a.Kind != topology.StepDeleteGroupState {
 		return fault.ErrOperatorAuthorization
 	}
-	if err := h.cfg.Authorize(ctx, a); err != nil {
+	if err := h.checkRetirementAuthority(ctx, req); err != nil {
 		return err
 	}
 	own := h.cfg.Identity()
 	if req.Identity.NodeName != own.NodeName || req.Identity.ClusterID != own.ClusterID || req.Identity.GroupID != a.GroupID || req.Identity.ReplicaID == 0 {
 		return fault.ErrIdentityMismatch
 	}
-	targets, err := h.cfg.ActionTargets(ctx, a)
+	targets, err := actionTargets(ctx, a, req.Grant)
 	if err != nil {
 		return err
 	}
@@ -53,12 +42,12 @@ func (h *Host) retirementAuthority(ctx context.Context, req load.RetirementReque
 	return ctx.Err()
 }
 
-func (h *Host) otherIdentityAllowed(ctx context.Context, a topology.AuthorizedStep, wanted, other storage.Identity) error {
+func (h *Host) otherIdentityAllowed(ctx context.Context, a topology.AuthorizedStep, wanted, other storage.Identity, grant topology.AuthorityGrant) error {
 	if wanted.NodeName != other.NodeName || wanted.ClusterID != other.ClusterID || wanted.GroupID != other.GroupID || other.ReplicaID == 0 {
 		return fault.ErrIdentityMismatch
 	}
 	if a.Kind == topology.StepDeleteGroupState {
-		targets, err := h.cfg.ActionTargets(ctx, a)
+		targets, err := actionTargets(ctx, a, grant)
 		if err != nil {
 			return err
 		}
@@ -71,7 +60,7 @@ func (h *Host) otherIdentityAllowed(ctx context.Context, a topology.AuthorizedSt
 	return err
 }
 
-func (h *Host) stopRetiringIdentity(ctx context.Context, id storage.Identity, a topology.AuthorizedStep) error {
+func (h *Host) stopRetiringIdentity(ctx context.Context, id storage.Identity, a topology.AuthorizedStep, grant topology.AuthorityGrant) error {
 	h.mu.Lock()
 	slot := h.slots[id.GroupID]
 	released := slot != nil && slot.released
@@ -80,7 +69,7 @@ func (h *Host) stopRetiringIdentity(ctx context.Context, id storage.Identity, a 
 		return nil
 	}
 	if slot.identity != id {
-		return h.otherIdentityAllowed(ctx, a, id, slot.identity)
+		return h.otherIdentityAllowed(ctx, a, id, slot.identity, grant)
 	}
 	return h.stopReplica(ctx, load.ReplicaRef{GroupID: id.GroupID, ReplicaID: id.ReplicaID}, StopOperator)
 }
@@ -91,7 +80,7 @@ func (h *Host) checkedRetirementProbe(ctx context.Context, req load.RetirementRe
 		return probe, err
 	}
 	if probe.Exists && probe.Identity != req.Identity {
-		err = h.otherIdentityAllowed(ctx, *req.Authorization, req.Identity, probe.Identity)
+		err = h.otherIdentityAllowed(ctx, *req.Authorization, req.Identity, probe.Identity, req.Grant)
 	}
 	return probe, err
 }
@@ -102,7 +91,7 @@ func (h *Host) retire(ctx context.Context, req load.RetirementRequest) (load.Ret
 	if err := h.retirementAuthority(ctx, req); err != nil {
 		return load.RetirementResult{}, err
 	}
-	if err := h.stopRetiringIdentity(ctx, req.Identity, *req.Authorization); err != nil {
+	if err := h.stopRetiringIdentity(ctx, req.Identity, *req.Authorization, req.Grant); err != nil {
 		return load.RetirementResult{}, err
 	}
 	if err := h.retirementAuthority(ctx, req); err != nil {
@@ -165,15 +154,16 @@ func (h *Host) checkRetirementLedger(ctx context.Context, req load.RetirementReq
 	}
 	id := storage.Identity{NodeName: record.NodeName, ClusterID: record.ClusterID, GroupID: req.Identity.GroupID, ReplicaID: record.ReplicaID}
 	if id != req.Identity {
-		return h.otherIdentityAllowed(ctx, *req.Authorization, req.Identity, id)
+		return h.otherIdentityAllowed(ctx, *req.Authorization, req.Identity, id, req.Grant)
 	}
 	if forget {
-		return h.cfg.ForgetReplica(ctx, *req.Authorization, id.ReplicaID)
+		return h.cfg.ForgetGrantedReplica(ctx, req.Grant, id.ReplicaID)
 	}
 	return nil
 }
 
 func cloneRetirement(req load.RetirementRequest) load.RetirementRequest {
+	req.Grant = req.Grant.Clone()
 	if req.Authorization != nil {
 		proof := *req.Authorization
 		req.Authorization = &proof
@@ -182,10 +172,10 @@ func cloneRetirement(req load.RetirementRequest) load.RetirementRequest {
 }
 func retirementProof(req load.RetirementRequest) load.RetirementResult {
 	owned := cloneRetirement(req)
-	return load.RetirementResult{Identity: owned.Identity, Reason: owned.Reason, Authorization: owned.Authorization, AdmissionID: owned.AdmissionID, PreviousMemberID: owned.PreviousMemberID, GrantedMemberID: owned.GrantedMemberID, Verified: true}
+	return load.RetirementResult{Grant: owned.Grant, Identity: owned.Identity, Reason: owned.Reason, Authorization: owned.Authorization, AdmissionID: owned.AdmissionID, PreviousMemberID: owned.PreviousMemberID, GrantedMemberID: owned.GrantedMemberID, Verified: true}
 }
 func matchingRetirement(req load.RetirementRequest, result load.RetirementResult) bool {
-	if !result.Verified || result.Identity != req.Identity || result.Reason != req.Reason || result.AdmissionID != req.AdmissionID || result.PreviousMemberID != req.PreviousMemberID || result.GrantedMemberID != req.GrantedMemberID {
+	if !result.Grant.Equal(req.Grant) || !result.Verified || result.Identity != req.Identity || result.Reason != req.Reason || result.AdmissionID != req.AdmissionID || result.PreviousMemberID != req.PreviousMemberID || result.GrantedMemberID != req.GrantedMemberID {
 		return false
 	}
 	if req.Authorization == nil || result.Authorization == nil {

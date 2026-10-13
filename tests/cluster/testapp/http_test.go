@@ -32,7 +32,7 @@ func TestHTTPFaultsHaveStableStatusAndCASVersions(t *testing.T) {
 	for _, tc := range []struct {
 		err    error
 		status int
-	}{{fault.ErrInvalid, 400}, {fault.ErrGroupRetired, 409}, {fault.ErrUnsafeMembership, 422}, {fault.ErrUnavailable, 503}, {&fault.Error{Code: fault.VersionConflict, ExpectedVersion: 3, CurrentVersion: 4}, 409}} {
+	}{{fault.ErrInvalid, 400}, {fault.ErrGroupRetired, 409}, {fault.ErrUnsafeMembership, 422}, {fault.ErrUnavailable, 503}, {fault.ErrAuthorityPending, 503}, {fault.ErrAuthorityFenced, 409}, {fault.ErrReplanRequired, 409}, {&fault.Error{Code: fault.VersionConflict, ExpectedVersion: 3, CurrentVersion: 4}, 409}} {
 		w := httptest.NewRecorder()
 		httpError(w, tc.err)
 		if w.Code != tc.status {

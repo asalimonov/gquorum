@@ -11,6 +11,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/membership"
+	"github.com/asalimonov/gquorum/topology"
 )
 
 const (
@@ -79,6 +80,7 @@ type Controller struct {
 	store           Store
 	rules           Rules
 	coordinator     OperatorCoordinator
+	authority       AuthorityCoordinator
 	groups          GroupEffects
 	membership      MembershipCoordinator
 	ownsGroup       func(groupID string) bool
@@ -87,6 +89,7 @@ type Controller struct {
 	proposalTimeout time.Duration
 	clock           controllerClock
 	finalValidator  func(context.Context, Document, Document) error
+	planValidator   func(context.Context, Record) error
 
 	mu     sync.Mutex
 	run    *controllerRun
@@ -98,6 +101,7 @@ type Config struct {
 	Store            Store
 	Rules            Rules
 	Coordinator      OperatorCoordinator
+	Authority        AuthorityCoordinator
 	Groups           GroupEffects
 	Membership       MembershipCoordinator
 	OwnsGroup        func(groupID string) bool
@@ -108,6 +112,9 @@ type Config struct {
 	// deadline rationale on ControllerEngine.transition.
 	ProposalTimeout time.Duration
 	FinalValidator  func(context.Context, Document, Document) error
+	// PlanValidator checks the immutable suffix and retained cleanup identities
+	// against confirmed state after revocation, before any effect or activation.
+	PlanValidator func(context.Context, Record) error
 
 	clock controllerClock
 }
@@ -116,11 +123,14 @@ func New(cfg Config) (*Controller, error) {
 	if err := cfg.Rules.Limits.Validate(); err != nil || cfg.Rules.SchemaVersion != 1 {
 		return nil, fault.New(fault.Invalid, "operator requires explicit valid cluster rules", err)
 	}
-	if cfg.Store == nil || cfg.Coordinator == nil || cfg.Groups == nil {
-		return nil, fault.New(fault.Invalid, "operator requires store, coordinator and group effects", nil)
+	if cfg.Store == nil || cfg.Coordinator == nil || cfg.Groups == nil || cfg.Authority == nil {
+		return nil, fault.New(fault.Invalid, "operator requires store, operator/authority coordinators and group effects", nil)
 	}
 	if cfg.OwnsGroup == nil {
 		return nil, fault.New(fault.Invalid, "operator requires an immutable owns-group predicate", nil)
+	}
+	if cfg.PlanValidator == nil {
+		return nil, fault.New(fault.Invalid, "operator requires a post-fence plan validator", nil)
 	}
 	if cfg.Interval < 0 || cfg.MaxRetryInterval < 0 || cfg.ProposalTimeout < 0 {
 		return nil, fault.New(fault.Invalid, "negative operator timing", nil)
@@ -144,11 +154,12 @@ func New(cfg Config) (*Controller, error) {
 		cfg.Membership = NewFixedMembershipCoordinator(cfg.Groups)
 	}
 	return &Controller{
-		store: cfg.Store, rules: cfg.Rules, coordinator: cfg.Coordinator, groups: cfg.Groups,
+		store: cfg.Store, rules: cfg.Rules, coordinator: cfg.Coordinator, groups: cfg.Groups, authority: cfg.Authority,
 		membership: cfg.Membership, ownsGroup: cfg.OwnsGroup,
 		interval: cfg.Interval, maxRetry: cfg.MaxRetryInterval,
 		proposalTimeout: cfg.ProposalTimeout, clock: cfg.clock,
 		finalValidator: cfg.FinalValidator,
+		planValidator:  cfg.PlanValidator,
 		wake:           make(chan struct{}, 1),
 	}, nil
 }
@@ -272,6 +283,9 @@ func (e *Controller) tick(ctx context.Context) controllerOutcome {
 	if ctx.Err() != nil || !e.coordinator.IsMetaLeader() {
 		return controllerIdle
 	}
+	if err := e.authority.ReconcileFences(ctx); err != nil {
+		return controllerWaiting
+	}
 	operator, ok := e.coordinator.CurrentOperator(ctx)
 	if !ok {
 		return controllerIdle
@@ -292,6 +306,17 @@ func (e *Controller) tick(ctx context.Context) controllerOutcome {
 	active, err := e.store.Active(ctx)
 	if err != nil {
 		return controllerWaiting
+	}
+	if err := e.planValidator(ctx, operator); err != nil {
+		step := Step{}
+		if len(operator.Steps) != 0 {
+			seq := max(operator.CurrentStep, 1)
+			if seq > len(operator.Steps) {
+				return controllerIdle
+			}
+			step = operator.Steps[seq-1]
+		}
+		return e.recordError(ctx, operator, step, err)
 	}
 	if len(operator.Steps) == 0 {
 		return e.finish(ctx, operator, target, nil)
@@ -339,7 +364,7 @@ func (e *Controller) tick(ctx context.Context) controllerOutcome {
 	if err := e.ensureRunning(ctx, operator, step); err != nil {
 		return controllerIdle
 	}
-	if e.effectSatisfied(step, target, status) {
+	if step.Kind == StepWaitCaughtUp && e.effectSatisfied(step, target, status) {
 		return e.advance(ctx, operator, target, step)
 	}
 	if err := e.revalidateExact(ctx, operator, step); err != nil {
@@ -427,6 +452,16 @@ func (e *Controller) finish(ctx context.Context, ex Record, target Document, las
 			return e.recordError(ctx, ex, transitionStep(ex, last),
 				fmt.Errorf("%w: group %q does not match Target after final step", ErrReplicaNotReady, groupID))
 		}
+		if target.Group(groupID) != nil {
+			native, err := e.groups.ReadNative(ctx, groupID)
+			if err != nil {
+				return e.recordError(ctx, ex, transitionStep(ex, last), err)
+			}
+			if native.GroupID != groupID || !groupMatchesTarget(target.Group(groupID), GroupStatus{GroupID: groupID, Found: true, ConfState: native.ConfState}) {
+				return e.recordError(ctx, ex, transitionStep(ex, last),
+					fmt.Errorf("%w: group %q applied membership does not match Target after final step", ErrReplicaNotReady, groupID))
+			}
+		}
 	}
 	active, err := e.store.Active(ctx)
 	if err != nil {
@@ -466,31 +501,80 @@ func (e *Controller) runStep(ctx context.Context, step Step, status GroupStatus)
 	if cmd.OperatorID == "" {
 		return fmt.Errorf("%w: current execution changed before side effect", ErrOperatorAuthorization)
 	}
-	switch step.Kind {
-	case StepCreateFoundingGroup:
-		return e.groups.CreateGroup(ctx, cmd)
-	case StepPrepareReplica:
-		return e.groups.PrepareReplica(ctx, cmd)
-	case StepAddLearner, StepPromoteVoter, StepDemoteVoter, StepRemoveReplica:
-		return e.membership.Apply(ctx, cmd)
-	case StepWaitCaughtUp:
-		// Surface WHY the learner is not ready (e.g. "learner is not recently
-		// active") instead of a fixed constant — the observability half of §0b.
+	if step.Kind == StepWaitCaughtUp {
 		reason := "learner has not reached the fixed catch-up threshold"
 		if _, why := caughtUpStatus(status, step.ReplicaID); why != "" {
 			reason = why
 		}
 		return fmt.Errorf("%w: %s", ErrReplicaNotReady, reason)
+	}
+	grant, err := e.authority.BeginEffect(ctx, cmd)
+	if err != nil {
+		return err
+	}
+	if grant.Validate() != nil || grant.Action == nil || *grant.Action != cmd {
+		return ErrOperatorAuthorization
+	}
+	recorded, err := e.authority.EffectReceipts(ctx, grant)
+	if err != nil {
+		return err
+	}
+	complete, err := receiptSetComplete(grant, recorded)
+	if err != nil {
+		return err
+	}
+	if complete && (step.Kind != StepTransferLeader || status.LeaderID == step.ReplicaID) {
+		return nil
+	}
+	if authorizedStepForCurrent(e.coordinator, ctx, step) != cmd {
+		return ErrOperatorAuthorization
+	}
+	receipts, effectErr := e.dispatchEffect(ctx, step, grant)
+	for _, receipt := range receipts {
+		if receipt.Validate(grant) != nil {
+			return ErrOperatorAuthorization
+		}
+		if err := e.authority.RecordEffect(ctx, receipt); err != nil {
+			return err
+		}
+	}
+	if effectErr != nil {
+		return effectErr
+	}
+	// The replicated catalog owns receipt accumulation across partial attempts
+	// and leader changes. A successful RPC alone cannot authorize progress.
+	recorded, err = e.authority.EffectReceipts(ctx, grant)
+	if err != nil {
+		return err
+	}
+	complete, err = receiptSetComplete(grant, recorded)
+	if err != nil {
+		return err
+	}
+	if !complete {
+		return fault.ErrAuthorityPending
+	}
+	return nil
+}
+
+func (e *Controller) dispatchEffect(ctx context.Context, step Step, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+	switch step.Kind {
+	case StepCreateFoundingGroup:
+		return e.groups.CreateGroup(ctx, grant)
+	case StepPrepareReplica:
+		return e.groups.PrepareReplica(ctx, grant)
+	case StepAddLearner, StepPromoteVoter, StepDemoteVoter, StepRemoveReplica:
+		return e.membership.Apply(ctx, grant)
 	case StepTransferLeader:
-		return e.groups.TransferLeader(ctx, cmd)
+		return e.groups.TransferLeader(ctx, grant)
 	case StepStopReplica:
-		return e.groups.StopReplica(ctx, cmd)
+		return e.groups.StopReplica(ctx, grant)
 	case StepCleanupReplicaState:
-		return e.groups.CleanupReplicaState(ctx, cmd)
+		return e.groups.CleanupReplicaState(ctx, grant)
 	case StepDeleteGroupState:
-		return e.groups.DeleteGroupState(ctx, cmd)
+		return e.groups.DeleteGroupState(ctx, grant)
 	default:
-		return fmt.Errorf("%w: unknown step kind %q", ErrOperatorAuthorization, step.Kind)
+		return nil, fmt.Errorf("%w: unknown step kind %q", ErrOperatorAuthorization, step.Kind)
 	}
 }
 
@@ -587,6 +671,9 @@ func (e *Controller) supersede(ctx context.Context, ex Record) controllerOutcome
 
 func (e *Controller) operatorIsCurrent(ctx context.Context, expected Record, step Step) bool {
 	current, ok := e.coordinator.CurrentOperator(ctx)
+	if len(expected.Steps) == 0 && step.Seq == 0 {
+		return ok && current.ID == expected.ID && current.Version == expected.Version && current.Attempt == expected.Attempt && !current.State.Terminal() && current.CurrentStep == 0 && len(current.Steps) == 0
+	}
 	cursorMatches := current.CurrentStep == step.Seq || current.CurrentStep == 0 && step.Seq == 1
 	return ok && current.ID == expected.ID && current.Version == expected.Version && current.Attempt == expected.Attempt &&
 		!current.State.Terminal() && cursorMatches && step.Seq >= 1 && step.Seq <= len(current.Steps) &&
@@ -600,7 +687,7 @@ func classifyStepError(step Step, err error) (OperatorState, string, bool) {
 		}
 		return OperatorWaitingReplica, err.Error(), true
 	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.Is(err, ErrGroupUnavailable) || errors.Is(err, ErrNoQuorum) || errors.Is(err, ErrNotMetaLeader) {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || errors.Is(err, ErrGroupUnavailable) || errors.Is(err, ErrNoQuorum) || errors.Is(err, ErrNotMetaLeader) || errors.Is(err, fault.ErrAuthorityPending) || errors.Is(err, fault.ErrOverloaded) {
 		if step.Kind == StepPrepareReplica {
 			return OperatorWaitingReplica, err.Error(), true
 		}
@@ -637,7 +724,7 @@ func NewFixedMembershipCoordinator(groups GroupEffects) MembershipCoordinator {
 	return &fixedMembershipCoordinator{groups: groups}
 }
 
-func (c *fixedMembershipCoordinator) Apply(ctx context.Context, cmd AuthorizedStep) error {
+func (c *fixedMembershipCoordinator) Apply(ctx context.Context, cmd topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
 	return c.groups.ApplyMembership(ctx, cmd)
 }
 

@@ -213,9 +213,13 @@ func forceRetireDeadNode(t *testing.T, size int) {
 	}); err != nil {
 		t.Fatal("surviving load majority did not elect after abrupt loss", err)
 	}
-	retired, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/force-retire", gquorum.RetireOptions{Reason: "disk destroyed", Mutation: gquorum.MutationOptions{Actor: "operator", Approve: true}})
-	if err != nil {
-		t.Fatal("forced retirement did not complete against healthy majority", retired, err)
+	response, err := c.Request(ctx, "node2", "POST", "/api/nodes/node3/force-retire", gquorum.RetireOptions{Reason: "disk destroyed", Mutation: gquorum.MutationOptions{Actor: "operator", Approve: true}}, created.Document.Version)
+	if err := requireStatus(response, err, 202); err != nil {
+		t.Fatal("forced retirement was not durably accepted by healthy majority", err)
+	}
+	var retired gquorum.MutationResult
+	if err := response.Decode(&retired); err != nil {
+		t.Fatal(err)
 	}
 	audit := retired.Document.Audit
 	if audit == nil || !audit.Forced || audit.Operation != topology.AuditOperationForceRetireNode || audit.TargetNode != "node3" || audit.Reason != "disk destroyed" || audit.StagedBy != "operator" || audit.StagedAt.IsZero() {
@@ -223,6 +227,30 @@ func forceRetireDeadNode(t *testing.T, size int) {
 	}
 	if retired.Document.Node("node3").State != topology.NodeExcluded || retired.Document.MemberID("node3") != 0 || replicaID(retired.Document, "work", "node3") != 0 {
 		t.Fatal("retired identities remain declared", retired.Document)
+	}
+	if err := Poll(ctx, func() (bool, error) {
+		status, err := groupStatus(ctx, c, "node1", topology.MetaGroupID)
+		return err == nil && !slices.Contains(status.ConfState.Voters, oldMember), err
+	}); err != nil {
+		t.Fatal("forced retirement did not remove the dead metadata voter", err)
+	}
+	op, err := c.Operator(ctx, "node1", retired.OperatorID)
+	active, activeErr := c.Document(ctx, "node1", "active")
+	if err != nil || activeErr != nil || op.State.Terminal() || active.Version != created.Document.Version {
+		t.Fatal("unreachable required host was falsely acknowledged", op, active, err, activeErr)
+	}
+	// Forced intent does not fabricate resource receipts. Returning the retained
+	// process supplies exact host fencing/cleanup before Active can advance.
+	if err := victim.Start(ctx); err != nil {
+		t.Fatal("retained host could not return for required retirement", err)
+	}
+	waitCtx, cancelWait := context.WithTimeout(ctx, 30*time.Second)
+	err = c.WaitOperator(waitCtx, "node1", retired.OperatorID)
+	cancelWait()
+	if err != nil {
+		operator, operatorErr := c.Operator(ctx, "node1", retired.OperatorID)
+		runtime, runtimeErr := c.runtime(ctx, "node3")
+		t.Fatal("returning host could not complete exact forced retirement", err, operator, operatorErr, runtime, runtimeErr)
 	}
 	for _, n := range c.Nodes() {
 		if n.Spec.Name == "node3" {
@@ -235,9 +263,6 @@ func forceRetireDeadNode(t *testing.T, size int) {
 	}
 	if err := exactOwnedValues(ctx, c, retired.Document, "work", expected); err != nil {
 		t.Fatal(err)
-	}
-	if err := victim.Start(ctx); err != nil {
-		t.Fatal("stale return failed before its identity could be inspected", err)
 	}
 	// Probe repeatedly across real session/health ticks; a single early 503 would
 	// allow a stale process to become ready after the assertion had finished.
@@ -262,7 +287,7 @@ func forceRetireDeadNode(t *testing.T, size int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := c.Request(ctx, "node2", "POST", "/api/nodes", map[string]any{"node": joiningNode(victim.Spec), "mutation": gquorum.MutationOptions{Actor: "operator"}}, current.Version)
+	response, err = c.Request(ctx, "node2", "POST", "/api/nodes", map[string]any{"node": joiningNode(victim.Spec), "mutation": gquorum.MutationOptions{Actor: "operator"}}, current.Version)
 	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +298,7 @@ func forceRetireDeadNode(t *testing.T, size int) {
 	if replacement.OperatorID != "" || replacement.Document.MemberID("node3") <= oldMember || replicaID(replacement.Document, "work", "node3") <= oldReplica {
 		t.Fatal("staged replacement reused retired identities or self-approved", replacement)
 	}
-	active, err := c.Document(ctx, "node1", "active")
+	active, err = c.Document(ctx, "node1", "active")
 	if err != nil || active.Version != retired.Document.Version || active.MemberID("node3") != 0 {
 		t.Fatal("replacement declaration changed approved membership", active, err)
 	}

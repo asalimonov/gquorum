@@ -19,8 +19,12 @@ make stop-example
 
 HTTP endpoints are `http://localhost:18081`, `:18082` and `:18083`. The manifest
 supplies two `worker` nodes and one `observer`; all three vote in `_meta`.
-The example passes identities, peer addresses, credentials and each node's
-`/data/meta.bolt` path to the library. It uses the default `topology.Limits`:
+The example passes identities, peer addresses, credentials and a single
+`StorageDir: "/data"` to the library. It uses `util.NewInstanceID()` for a fresh
+process identity on every start. The library owns the fixed `/data/_meta.bolt`
+and independent `/data/_authority.bolt` files; neither filename is configurable.
+Retain the directory with the node identity. Old system filenames are refused
+rather than silently treated as an empty directory; no migration is performed. It uses the default `topology.Limits`:
 three nodes and five replicas per load group. Compose owns the three durable
 volumes named `meta-node1`, `meta-node2` and `meta-node3`. These isolate the
 small demo from volumes created by an earlier application. Stopping preserves

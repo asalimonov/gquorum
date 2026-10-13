@@ -140,9 +140,26 @@ func TestVoterSwapResumesAfterCommittedEffectAndMetaLeaderCrashFourNodes(t *test
 				if op.ID != id || op.Attempt != 1 || op.Version != staged.Document.Version || op.State.Terminal() {
 					return true, fmt.Errorf("lost exact interrupted operator: %+v", op)
 				}
-				// The new controller may verify the first native effect without
-				// waiting for its lost RPC acknowledgement. Hold the second effect
-				// separately to inspect the exact resumed authorization and order.
+				return true, assertIntermediate()
+			}); err != nil {
+				t.Fatal("replacement meta leader did not retain approved execution", err)
+			}
+			// The first effect's receipt is durable at its native resource, but
+			// role observations alone cannot complete the step. Let a same-grant
+			// retry return that exact receipt to the replacement controller.
+			for _, name := range []string{"node1", "node2", "node4"} {
+				if err := c.SetBarrier(ctx, name, "swap", firstKind, false); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := Poll(ctx, func() (bool, error) {
+				op, err := c.Operator(ctx, "node2", id)
+				if err != nil {
+					return false, err
+				}
+				if op.ID != id || op.Attempt != 1 || op.Version != staged.Document.Version || op.State.Terminal() {
+					return true, fmt.Errorf("receipt recovery changed interrupted operator: %+v", op)
+				}
 				for _, name := range []string{"node1", "node2", "node4"} {
 					controls, err := c.Controls(ctx, name)
 					if err != nil {
@@ -156,14 +173,11 @@ func TestVoterSwapResumesAfterCommittedEffectAndMetaLeaderCrashFourNodes(t *test
 				}
 				return false, nil
 			}); err != nil {
-				t.Fatal("replacement meta leader did not retain approved execution", err)
+				t.Fatal("replacement meta leader did not recover exact native receipt", err)
 			}
 			for _, node := range c.Nodes() {
 				if node.Spec.Name == "node3" {
 					continue
-				}
-				if err := c.SetBarrier(ctx, node.Spec.Name, "swap", firstKind, false); err != nil {
-					t.Fatal(err)
 				}
 				if err := c.SetBarrier(ctx, node.Spec.Name, "swap", roles[1].Kind, false); err != nil {
 					t.Fatal(err)
@@ -269,16 +283,25 @@ func TestVoterDemotionRepeatsExactTransferAfterLeaderRegainFourNodes(t *testing.
 	if demotion.TransferNodeName != "node1" || demotion.TransferReplicaID != replicaID(created.Document, "swap", "node1") {
 		t.Fatal("wrong exact transfer guard", demotion)
 	}
-	transfer("node3")
-	if err := c.Node("node1").Kill(ctx); err != nil {
-		t.Fatal(err)
+	// Pending topology owns transfer authority. Make node3 regain leadership
+	// through a genuine election: isolate the old load leader and withhold only
+	// competing vote requests at node3. Votes/responses for node3 still flow.
+	armGroupReadFault(t, ctx, c, "node3", "swap", ReadFaults{DropVoteRequestsFrom: []uint64{replicaID(created.Document, "swap", "node2"), replicaID(created.Document, "swap", "node4")}})
+	isolate := armGroupReadFault(t, ctx, c, "node1", "swap", ReadFaults{DropRaft: true})
+	if err := Poll(ctx, func() (bool, error) {
+		local, err := c.Local(ctx, "node3", "swap")
+		return local.Status.LeaderID == demotion.ReplicaID, err
+	}); err != nil {
+		t.Fatal("demotion target did not regain leadership through quorum election", err)
 	}
-	for _, name := range []string{"node2", "node3", "node4"} {
+	for _, name := range []string{"node1", "node2", "node3", "node4"} {
 		if err := c.SetBarrier(ctx, name, "swap", topology.StepDemoteVoter, false); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := Poll(ctx, func() (bool, error) {
+	waitGuard, cancelGuard := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelGuard()
+	if err := Poll(waitGuard, func() (bool, error) {
 		op, err := c.Operator(ctx, "node2", id)
 		if err != nil {
 			return false, err
@@ -286,19 +309,27 @@ func TestVoterDemotionRepeatsExactTransferAfterLeaderRegainFourNodes(t *testing.
 		if op.State.Terminal() {
 			return true, fmt.Errorf("guarded demotion terminated with unavailable transfer target: %+v", op)
 		}
-		if !op.State.Waiting() || !strings.Contains(op.WaitingReason, "transfer_target_unavailable") {
+		if !op.State.Waiting() || !strings.Contains(op.WaitingReason, "demotion transfer target is unavailable") {
 			return false, nil
 		}
 		local, err := c.Local(ctx, "node3", "swap")
 		return op.CurrentStep == demotion.StepSeq && op.Attempt == demotion.Attempt && local.Status.LeaderID == demotion.ReplicaID && len(local.Status.ConfState.Voters) == 4 && len(local.Status.ConfState.Learners) == 0, err
 	}); err != nil {
-		t.Fatal("demotion did not preserve its approved guard", err)
+		operator, operatorErr := c.Operator(ctx, "node2", id)
+		local, localErr := c.Local(ctx, "node3", "swap")
+		t.Fatal("demotion did not preserve its approved guard", err, operator, operatorErr, local, localErr)
 	}
-	if err := c.Node("node1").Start(ctx); err != nil {
+	if _, err := c.SetReadFaults(ctx, "node1", "swap", isolate.ReplicaID, "DELETE", ReadFaults{Identity: isolate.Identity}); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WaitOperator(ctx, "node2", id); err != nil {
-		t.Fatal(err)
+	healCtx, cancelHeal := context.WithTimeout(ctx, 30*time.Second)
+	err = c.WaitOperator(healCtx, "node2", id)
+	cancelHeal()
+	if err != nil {
+		operator, operatorErr := c.Operator(ctx, "node2", id)
+		target, targetErr := c.Local(ctx, "node1", "swap")
+		demoted, demotedErr := c.Local(ctx, "node3", "swap")
+		t.Fatal("guarded demotion did not resume after healing", err, operator, operatorErr, target, targetErr, demoted, demotedErr)
 	}
 	if err := c.WaitActive(ctx, staged.Document.Version); err != nil {
 		t.Fatal(err)

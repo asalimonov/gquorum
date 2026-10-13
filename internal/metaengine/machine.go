@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -115,29 +116,18 @@ func ReadmissionDocument(base topology.Document, name string, at time.Time) (top
 func (m *Machine) MemberOwner(id uint64) (string, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	for _, doc := range []*topology.Document{&m.target, &m.active} {
-		if group := doc.MetaGroup(); group != nil {
-			for _, r := range group.Replicas {
-				if r.ReplicaID == id {
-					return r.NodeName, m.target.Version > 0
-				}
-			}
-		}
+	if m.metaOwners == nil {
+		return m.metaMemberOwnersLocked()[id], m.target.Version > 0
 	}
-	return "", m.target.Version > 0
+	return m.metaOwners[id], m.target.Version > 0
 }
 func (m *Machine) MemberOwners() (map[uint64]string, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	owners := map[uint64]string{}
-	for _, doc := range []*topology.Document{&m.active, &m.target} {
-		if group := doc.MetaGroup(); group != nil {
-			for _, r := range group.Replicas {
-				owners[r.ReplicaID] = r.NodeName
-			}
-		}
+	if m.metaOwners == nil {
+		return m.metaMemberOwnersLocked(), m.target.Version > 0
 	}
-	return owners, m.target.Version > 0
+	return maps.Clone(m.metaOwners), m.target.Version > 0
 }
 func (m *Machine) ActiveMemberID(name string) uint64 {
 	m.mu.RLock()

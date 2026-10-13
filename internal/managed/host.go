@@ -13,6 +13,7 @@ import (
 
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/authoritystore"
 	"github.com/asalimonov/gquorum/internal/loadhandle"
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metastore"
@@ -20,24 +21,29 @@ import (
 	"github.com/asalimonov/gquorum/internal/observe"
 	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/load"
-	"github.com/asalimonov/gquorum/membership"
 	"github.com/asalimonov/gquorum/policy"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
 type Config struct {
+	// Authority becomes available once a fresh join receives its member identity.
+	// The Node owns this store beyond all Host work and callbacks.
+	Authority                                        func() *authoritystore.Store
+	ValidateGrant                                    func(context.Context, topology.AuthorityGrant) error
+	ValidateCourier                                  func(context.Context, topology.AuthorityGrant, topology.Identity) error
+	ResolveAuthorityPeer                             func(context.Context, topology.AuthorityGrant, topology.AuthorityTarget) (load.Peer, error)
+	RecordFence                                      func(context.Context, topology.FenceEvidence) error
+	AuthorityFloors                                  func(context.Context) ([]topology.AuthorityGrant, error)
+	ForgetGrantedReplica                             func(context.Context, topology.AuthorityGrant, uint64) error
 	Identity                                         func() topology.Identity
 	MetaDBPath                                       string
 	AuthorizeReadmission                             func(context.Context, Readmission) error
 	Scope                                            func(context.Context, storage.Identity) (metaengine.LoadScope, error)
 	LookupRecord                                     func(context.Context, string) (metastore.ReplicaRecord, bool, error)
 	RecordReplica                                    func(context.Context, string, metastore.ReplicaRecord, uint64) error
-	Authorize                                        func(context.Context, topology.AuthorizedStep) error
-	ActionTargets                                    func(context.Context, topology.AuthorizedStep) ([]storage.Identity, error)
 	Catalog                                          func(context.Context, string) ([]storage.Identity, error)
 	Active                                           func(context.Context) (topology.Document, error)
-	ForgetReplica                                    func(context.Context, topology.AuthorizedStep, uint64) error
 	RetireApplication                                func(context.Context, load.RetirementRequest) (load.RetirementResult, error)
 	Retirement                                       storage.RetirementStore
 	Retention                                        func(context.Context, policy.RetentionInput) (policy.RetentionDecision, error)
@@ -64,6 +70,8 @@ type ReplicaStatus struct {
 }
 
 type Host struct {
+	actionWorks                 map[string]*actionWork
+	fenceWorks                  map[string]*fenceWork
 	cfg                         Config
 	mu                          sync.Mutex
 	ctx                         context.Context
@@ -84,8 +92,12 @@ type Host struct {
 	operationCount              int
 	operationsDone              chan struct{}
 	operationContext            context.Context
+	authorityContext            context.Context
+	authorityCancel             context.CancelFunc
+	authorityCount              int
+	authorityDone               chan struct{}
+	authorityClosed             bool
 	workWG                      sync.WaitGroup
-	membership                  *membership.Coordinator
 	retentionGate               chan struct{}
 	readmissionGate             chan struct{}
 	readmissionCancel           context.CancelFunc
@@ -94,10 +106,13 @@ type Host struct {
 }
 
 func New(cfg Config) (*Host, error) {
+	if cfg.Authority == nil || cfg.ValidateGrant == nil || cfg.ValidateCourier == nil || cfg.AuthorityFloors == nil {
+		return nil, fault.New(fault.Invalid, "managed authority dependencies are required", nil)
+	}
 	if cfg.Identity == nil || cfg.Scope == nil || cfg.LookupRecord == nil || cfg.RecordReplica == nil || cfg.Factory == nil || cfg.Store == nil || cfg.Transport == nil || cfg.ResolvePeer == nil || cfg.ValidatePeer == nil || cfg.ValidateNode == nil {
 		return nil, fault.New(fault.Invalid, "managed host dependencies are required", nil)
 	}
-	if cfg.Authorize == nil || cfg.ActionTargets == nil || cfg.Catalog == nil || cfg.Active == nil || cfg.ForgetReplica == nil || cfg.Retirement == nil || cfg.Retention == nil {
+	if cfg.Catalog == nil || cfg.Active == nil || cfg.ForgetGrantedReplica == nil || cfg.Retirement == nil || cfg.Retention == nil {
 		return nil, fault.New(fault.Invalid, "managed approval and retirement dependencies are required", nil)
 	}
 	if cfg.EffectTimeout < 0 || cfg.CallbackTimeout < 0 || cfg.RecoveryInterval < 0 || cfg.RetirementInterval < 0 {
@@ -126,10 +141,12 @@ func New(cfg Config) (*Host, error) {
 	h.operations, h.operationsDone = make(map[string]*groupOperation), make(chan struct{})
 	h.observationGroups = make(map[string]*groupOperation)
 	close(h.operationsDone)
-	h.membership, h.retentionGate = membership.NewCoordinator(), make(chan struct{}, 1)
+	h.authorityDone = make(chan struct{})
+	close(h.authorityDone)
+	h.retentionGate = make(chan struct{}, 1)
 	h.readmissionGate = make(chan struct{}, 1)
 	// Validate engine settings without opening storage or invoking application code.
-	check := h.engineOptions(&replica{identity: storage.Identity{NodeName: "validation", ClusterID: "validation", GroupID: "validation", ReplicaID: 1}}, load.Application{}, raftengine.Joining, nil)
+	check := h.engineOptions(&replica{identity: storage.Identity{NodeName: "validation", ClusterID: "validation", GroupID: "validation", ReplicaID: 1}, node: topology.Identity{MemberID: 1, InstanceID: "validation"}}, load.Application{}, raftengine.Joining, nil)
 	if err := check.Validate(); err != nil {
 		return nil, err
 	}
@@ -159,6 +176,7 @@ func (h *Host) Start(ctx context.Context) error {
 	work, cancel := context.WithCancel(ctx)
 	h.workCancel, h.workDone = cancel, make(chan struct{})
 	h.operationContext = work
+	h.authorityContext, h.authorityCancel = context.WithCancel(ctx)
 	h.workWG.Add(2)
 	go func() { defer h.workWG.Done(); h.maintain(work) }()
 	go func() { defer h.workWG.Done(); h.collectLoop(work) }()
@@ -196,8 +214,9 @@ func (h *Host) Quiesce(ctx context.Context) error {
 	return nil
 }
 
-// Fence immediately cancels replica participation and refuses new operations.
-// Joining and application Close remain owned by Stop, after effects quiesce.
+// Fence immediately cancels replica participation and refuses ordinary operations.
+// Granted host cleanup and fencing retain their separate administrative lifetime.
+// Joining and application Close remain owned by FenceParticipation or Stop.
 // Removal cannot wait for a noncooperative policy before stopping Raft work.
 func (h *Host) Fence() {
 	h.mu.Lock()
@@ -218,6 +237,10 @@ func (h *Host) Stop(ctx context.Context) error {
 		h.readmissionCancel()
 	}
 	h.mu.Unlock()
+	h.Fence()
+	if err := h.closeAuthority(ctx); err != nil {
+		return err
+	}
 	if err := h.Quiesce(ctx); err != nil {
 		return err
 	}
@@ -228,6 +251,51 @@ func (h *Host) Stop(ctx context.Context) error {
 		return fault.New(fault.ShutdownTimeout, "readmission work has not joined", ctx.Err())
 	}
 	return h.stopReplicas(ctx)
+}
+
+// FenceParticipation joins replicas while retaining exact granted host cleanup
+// and fence requests. Full Stop or Readmit closes that remaining lifetime.
+func (h *Host) FenceParticipation(ctx context.Context) error {
+	h.Fence()
+	return h.stopReplicas(ctx)
+}
+
+// FenceReadmission joins the retired owner's remaining callbacks without closing
+// its ability to reconcile a later approved readmission. Node owns this call
+// outside normal administration, whose admission Readmit has already closed.
+func (h *Host) FenceReadmission(ctx context.Context) error {
+	h.mu.Lock()
+	if h.readmissionCancel != nil {
+		h.readmissionCancel()
+	}
+	h.mu.Unlock()
+	h.Fence()
+	if err := h.closeAuthority(ctx); err != nil {
+		return err
+	}
+	select {
+	case h.readmissionGate <- struct{}{}:
+		defer func() { <-h.readmissionGate }()
+	case <-ctx.Done():
+		return fault.New(fault.ShutdownTimeout, "readmission callbacks have not joined", ctx.Err())
+	}
+	return h.stopReplicas(ctx)
+}
+
+func (h *Host) closeAuthority(ctx context.Context) error {
+	h.mu.Lock()
+	h.authorityClosed = true
+	if h.authorityCancel != nil {
+		h.authorityCancel()
+	}
+	done := h.authorityDone
+	h.mu.Unlock()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return fault.New(fault.ShutdownTimeout, "managed authority work has not joined", ctx.Err())
+	}
 }
 
 func (h *Host) stopReplicas(ctx context.Context) error {

@@ -22,7 +22,7 @@ func TestManagedHandleHasNoOwnerEscapeHatch(t *testing.T) {
 	for i := 0; i < typ.NumMethod(); i++ {
 		methods = append(methods, typ.Method(i).Name)
 	}
-	want := []string{"Error", "GroupID", "Identity", "IsLeader", "Metrics", "MetricsHistory", "ProposalStats", "Propose", "ReplicaID", "Running", "Snapshot", "Status", "WALStall", "WaitReady"}
+	want := []string{"Error", "GroupID", "Identity", "IsLeader", "Metrics", "MetricsHistory", "ProposalStats", "Propose", "Read", "ReadBarrier", "ReplicaID", "Running", "Snapshot", "Status", "WALStall", "WaitReady"}
 	if !slices.Equal(methods, want) {
 		t.Fatalf("managed handle method set: %v", methods)
 	}
@@ -40,7 +40,8 @@ func TestUninitializedHandlesRejectOperations(t *testing.T) {
 			t.Fatal("zero handle appears usable")
 		}
 		_, err := g.Propose(t.Context(), load.Proposal{Data: []byte("x")})
-		for _, err := range []error{err, g.WaitReady(t.Context()), g.Snapshot(t.Context())} {
+		_, readErr := g.Read(t.Context(), nil)
+		for _, err := range []error{err, readErr, g.ReadBarrier(t.Context()), g.WaitReady(t.Context()), g.Snapshot(t.Context())} {
 			if !errors.Is(err, fault.ErrInvalid) {
 				t.Fatal(err)
 			}

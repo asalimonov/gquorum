@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/raftstate"
+	"github.com/asalimonov/gquorum/topology"
 	bolt "go.etcd.io/bbolt"
 	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"
@@ -124,6 +126,17 @@ func (s *Store) InstallSnapshot(snap raftpb.Snapshot, hs raftpb.HardState) error
 				return nil // stale, keep the newer durable snapshot
 			}
 		}
+		id, found, err := readIdentityChecked(tx)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fault.ErrIdentityMismatch
+		}
+		state, err := raftstate.DecodeRaftSnapshot(snap, id.ClusterID, topology.MetaGroupID)
+		if err != nil {
+			return err
+		}
 		snapBytes, err := snap.Marshal()
 		if err != nil {
 			return fmt.Errorf("marshal snapshot: %w", err)
@@ -132,7 +145,7 @@ func (s *Store) InstallSnapshot(snap raftpb.Snapshot, hs raftpb.HardState) error
 			return err
 		}
 		if len(snap.Data) > 0 {
-			if err := tx.Bucket(bucketState).Put(keyState, snap.Data); err != nil {
+			if err := tx.Bucket(bucketState).Put(keyState, state.Application); err != nil {
 				return err
 			}
 		}

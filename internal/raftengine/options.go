@@ -66,12 +66,18 @@ type Options struct {
 	InstanceID string
 	Metrics    internalmetrics.Options
 	ReplicaID  uint64
-	Mode       Mode
-	Peers      []raft.Peer
+	// ManagedAuthority requires grants for administrative effects. MemberID binds
+	// group evidence to the host's durable metadata identity.
+	ManagedAuthority bool
+	MemberID         uint64
+	InitialAuthority *topology.AuthorityGrant
+	Mode             Mode
+	Peers            []raft.Peer
 	// FoundingLearners are seeded alongside Peers, which remain the voters.
 	// Only fresh founding uses these sets; retained recovery uses durable state.
 	FoundingLearners                        []raft.Peer
 	Timing                                  Timing
+	Reads                                   ReadOptions
 	Store                                   storage.Store
 	Machine                                 Machine
 	Transport                               Transport
@@ -98,6 +104,9 @@ func (o Options) validate(meta bool) error {
 	}
 	if o.NodeName == "" || o.ClusterID == "" || o.ReplicaID == 0 || o.Store == nil || o.Machine == nil || o.Transport == nil {
 		return fault.New(fault.Invalid, "load identity, store, machine and transport are required", nil)
+	}
+	if err := validateAuthorityOptions(o); err != nil {
+		return err
 	}
 	if o.Mode != Founding && o.Mode != Joining {
 		return fault.New(fault.Invalid, "explicit founding or joining mode required", nil)
@@ -136,6 +145,9 @@ func (o Options) validate(meta bool) error {
 // ValidateSettings checks tuning without requiring an open store or a machine.
 // Node uses this same validation before acquiring any per-replica resources.
 func (o Options) ValidateSettings() error {
+	if err := o.Reads.Validate(); err != nil {
+		return err
+	}
 	if _, err := o.Metrics.Resolve(); err != nil {
 		return err
 	}
@@ -152,6 +164,7 @@ func (o Options) ValidateSettings() error {
 	return nil
 }
 func (o Options) defaults() Options {
+	o.Reads = o.Reads.withDefaults()
 	o.Metrics, _ = o.Metrics.Resolve()
 	if o.Timing.TickInterval == 0 {
 		o.Timing.TickInterval = 100 * time.Millisecond

@@ -146,7 +146,7 @@ func validateVoterChangePlan(base, next topology.Document, change topology.Voter
 	return nil
 }
 
-func (sm *topologySM) applyCommitVoterChange(p CommitVoterChangeProposal) (ApplyResult, bool) {
+func (sm *topologySM) applyCommitVoterChange(index uint64, p CommitVoterChangeProposal) (ApplyResult, bool) {
 	if p.ExpectedVersion != sm.latest.Version {
 		return rejectProposal(p.ProposalID, proposalVersionConflict, "expected Latest %d, current Latest %d", p.ExpectedVersion, sm.latest.Version), false
 	}
@@ -169,7 +169,12 @@ func (sm *topologySM) applyCommitVoterChange(p CommitVoterChangeProposal) (Apply
 	if err := sm.validateDocument(doc); err != nil {
 		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
 	}
+	oldAuthority := sm.authority
+	if err := sm.revokeAuthorityLocked(index, nil, topology.MakeOperatorID(doc.Version, 1)); err != nil {
+		return rejectProposal(p.ProposalID, proposalOverloaded, "cannot reserve revocation: %v", err), false
+	}
 	if err := sm.commitLatestLocked(&doc); err != nil {
+		sm.authority = oldAuthority
 		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
 	}
 	sm.target = doc.Clone()

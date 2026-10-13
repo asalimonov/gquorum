@@ -2,6 +2,8 @@ package metaservice
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"reflect"
@@ -571,8 +573,8 @@ func (g *Group) ReseatReplica(ctx context.Context, id, name string, o MutationOp
 	return result, err
 }
 
-// TransferLeader uses the exact locally applied Active identity without creating
-// a document version. Load transport/effects remain caller-owned.
+// TransferLeader commits resource authority for the exact Active identity without
+// creating a document version, then records its durable initiation receipt.
 func (g *Group) TransferLeader(ctx context.Context, id, name string) error {
 	if err := g.ensureRunning(ctx); err != nil {
 		return err
@@ -607,10 +609,32 @@ func (g *Group) TransferLeader(ctx context.Context, id, name string) error {
 			return fault.New(fault.UnsafeMembership, "leadership target is not alive", nil)
 		}
 	}
-	a := topology.AuthorizedStep{Version: doc.Version, Kind: topology.StepTransferLeader, GroupID: id, NodeName: name, ReplicaID: member}
-	if id == topology.MetaGroupID && !g.IsLeader() {
-		_, err := g.callLeader(ctx, "MetaControl", toWireAuthorization(a))
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
 		return err
 	}
-	return (groupControllers{g}).TransferLeader(ctx, a)
+	result, err := g.propose(ctx, metaengine.GrantTransferProposal{ExpectedActiveVersion: doc.Version, GroupID: id, NodeName: name, ReplicaID: member, RequestID: hex.EncodeToString(nonce[:])})
+	if err != nil {
+		return err
+	}
+	action := topology.AuthorizedStep{Version: doc.Version, Kind: topology.StepTransferLeader, GroupID: id, NodeName: name, ReplicaID: member}
+	if result.Grant == nil || result.Grant.Action == nil || *result.Grant.Action != action || result.Grant.Validate() != nil {
+		return fault.ErrUnreadable
+	}
+	receipts, err := (groupControllers{g}).TransferLeader(ctx, *result.Grant)
+	for _, receipt := range receipts {
+		if receipt.Validate(*result.Grant) != nil {
+			return fault.ErrOperatorAuthorization
+		}
+		if recordErr := g.RecordEffect(ctx, receipt); recordErr != nil {
+			return recordErr
+		}
+	}
+	if err != nil {
+		return err
+	}
+	if len(receipts) != 1 {
+		return fault.ErrAuthorityPending
+	}
+	return nil
 }

@@ -21,6 +21,9 @@ func ValidAdmissionSequence(steps []Step, nodeName string, replicaID uint64, rol
 			// that identity. Full plan validation enforces other shape rules.
 			for j, s := range steps {
 				if (j < i || j >= i+len(want)) && s.GroupID == MetaGroupID && s.NodeName == nodeName && s.ReplicaID == replicaID {
+					if role == ReplicaVoter && s.Kind == StepTransferLeader {
+						continue
+					}
 					return false
 				}
 			}

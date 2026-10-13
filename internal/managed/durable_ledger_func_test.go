@@ -20,6 +20,11 @@ import (
 func TestDurableLedgerSurvivesParkedRestartAndExactRetirement(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
+	_, initial := fixtureAuthority(t, f)
+	initial.Targets[0].ReplicaID = 7
+	f.cfg.AuthorityFloors = func(ctx context.Context) ([]topology.AuthorityGrant, error) {
+		return []topology.AuthorityGrant{initial.Clone()}, ctx.Err()
+	}
 	path := filepath.Join(t.TempDir(), "meta.bolt")
 	db, err := metastore.Open(path)
 	must(t, err)
@@ -28,14 +33,14 @@ func TestDurableLedgerSurvivesParkedRestartAndExactRetirement(t *testing.T) {
 	record := metastore.ReplicaRecord{NodeName: f.node.NodeName, ClusterID: f.node.ClusterID, ReplicaID: 7, Origin: "fresh", CreatedAt: time.Unix(100, 0).UTC()}
 	must(t, db.RecordReplica("work", record))
 	f.setScope("work", 7, false, true)
-	f.cfg.LookupRecord = func(ctx context.Context, group string) (metastore.ReplicaRecord, bool, error) {
+	f.cfg.LookupRecord = func(_ context.Context, group string) (metastore.ReplicaRecord, bool, error) {
 		return db.LookupReplica(group)
 	}
-	f.cfg.ForgetReplica = func(ctx context.Context, a topology.AuthorizedStep, id uint64) error {
-		if err := f.cfg.Authorize(ctx, a); err != nil {
+	f.cfg.ForgetGrantedReplica = func(ctx context.Context, grant topology.AuthorityGrant, id uint64) error {
+		if err := f.cfg.ValidateGrant(ctx, grant); err != nil {
 			return err
 		}
-		return db.ForgetReplica(a.GroupID, id)
+		return db.ForgetReplica(grant.Key.GroupID, id)
 	}
 	var host *Host
 	for range 2 {
@@ -59,12 +64,11 @@ func TestDurableLedgerSurvivesParkedRestartAndExactRetirement(t *testing.T) {
 	f.cfg.Transport = discardTransport{}
 	host = f.host(t)
 	old := f.localID(7)
-	approval := f.approve(topology.StepCleanupReplicaState, old)
 	f.setScope("work", 8, false, false)
-	request := load.RetirementRequest{Identity: old, Reason: load.RetirementTopology, Authorization: &approval}
-	result, err := host.Retire(t.Context(), request)
+	request := installFixtureHostAction(t, f, host, initial, topology.StepCleanupReplicaState, old, 11)
+	result, err := host.ApplyAction(t.Context(), request)
 	must(t, err)
-	if !result.Verified {
+	if len(result.Receipts) != 1 {
 		t.Fatal(result)
 	}
 	if _, found, err := db.LookupReplica("work"); err != nil || found {

@@ -51,7 +51,7 @@ type IdentityMismatchError struct{ Stored, Resolved Identity }
 func (e *IdentityMismatchError) Error() string {
 	return fmt.Sprintf("meta identity mismatch: stored %+v, resolved %+v", e.Stored, e.Resolved)
 }
-func (e *IdentityMismatchError) Unwrap() error { return fault.ErrIdentityMismatch }
+func (_ *IdentityMismatchError) Unwrap() error { return fault.ErrIdentityMismatch }
 
 type Store struct {
 	db        *bolt.DB
@@ -80,7 +80,7 @@ func Open(path string) (*Store, error) {
 				return err
 			}
 		}
-		return tx.Bucket(bucketFormat).Put(keySchemaVersion, []byte("1"))
+		return tx.Bucket(bucketFormat).Put(keySchemaVersion, []byte("2"))
 	}); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -152,7 +152,7 @@ func validateDiskSchema(tx *bolt.Tx) error {
 		}
 		return nil
 	}
-	if string(b.Get(keySchemaVersion)) != "1" {
+	if string(b.Get(keySchemaVersion)) != "2" {
 		return fault.New(fault.Unsupported, "unsupported meta storage schema", nil)
 	}
 	if err := b.ForEach(func(key, value []byte) error {

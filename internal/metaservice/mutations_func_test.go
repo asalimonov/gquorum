@@ -86,6 +86,7 @@ func (f *mutationFixture) commit(t *testing.T, doc topology.Document, activate b
 	for _, step := range plan.Steps {
 		transition.StepSeq, transition.GroupID, transition.NodeName, transition.State = step.Seq, step.GroupID, step.NodeName, topology.OperatorRunning
 		f.command(t, metaengine.TransitionOperatorProposal{Transition: transition})
+		f.consumeStep(t, topology.AuthorizedStep{OperatorID: begin.OperatorID, Version: version, Attempt: 1, StepSeq: step.Seq, Kind: step.Kind, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID})
 	}
 	transition.State = topology.OperatorSucceeded
 	f.command(t, metaengine.TransitionOperatorProposal{Transition: transition})

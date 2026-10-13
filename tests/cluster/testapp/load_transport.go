@@ -26,6 +26,7 @@ type loadErrorDetails struct {
 
 type loadClient struct {
 	address string
+	member  uint64
 	conn    *grpc.ClientConn
 	client  loadpb.LoadClient
 }
@@ -34,8 +35,26 @@ func (a *application) header() *loadpb.Header {
 	id := a.node.Identity()
 	return &loadpb.Header{ClusterId: id.ClusterID, NodeName: id.NodeName, InstanceId: id.InstanceID, MemberId: id.MemberID}
 }
-func (a *application) client(ctx context.Context, name string) (*loadClient, error) {
+func (a *application) client(ctx context.Context, name string, member uint64) (*loadClient, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	address, err := a.address(ctx, name, loadAddressLabel)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if errors.Is(err, fault.ErrUnavailable) && member != 0 {
+		// Cleanup can outlive both current documents. A cached exact endpoint
+		// remains a route, not authority; ingress still checks the complete To.
+		a.mu.RLock()
+		if old := a.clients[name]; old != nil && old.member == member {
+			address, err = old.address, nil
+		}
+		a.mu.RUnlock()
+		if err != nil {
+			address, err = a.historicalControlAddress(ctx, name, member)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -43,6 +62,9 @@ func (a *application) client(ctx context.Context, name string) (*loadClient, err
 	defer a.mu.Unlock()
 	if old := a.clients[name]; old != nil {
 		if old.address == address {
+			if member != 0 {
+				old.member = member
+			}
 			return old, nil
 		}
 		_ = old.conn.Close()
@@ -54,9 +76,31 @@ func (a *application) client(ctx context.Context, name string) (*loadClient, err
 	if err != nil {
 		return nil, fault.New(fault.Unavailable, "open example load connection", err)
 	}
-	client := &loadClient{address: address, conn: conn, client: loadpb.NewLoadClient(conn)}
+	client := &loadClient{address: address, member: member, conn: conn, client: loadpb.NewLoadClient(conn)}
 	a.clients[name] = client
 	return client, nil
+}
+
+func (a *application) historicalControlAddress(ctx context.Context, name string, member uint64) (string, error) {
+	if a.cluster == nil {
+		return "", fault.ErrUnavailable
+	}
+	history, err := a.cluster.History(ctx, topology.Page{})
+	if err != nil {
+		return "", err
+	}
+	for _, doc := range history.Documents {
+		node := doc.Node(name)
+		if node == nil || doc.MemberID(name) != member || node.Labels[loadAddressLabel] == "" {
+			continue
+		}
+		id := topology.MakeOperatorID(doc.Version, 1)
+		op, err := a.cluster.Operator(ctx, id)
+		if err == nil && op.ID == id && op.Version == doc.Version {
+			return node.Labels[loadAddressLabel], nil
+		}
+	}
+	return "", fault.New(fault.Unavailable, "no retained approved load endpoint", nil)
 }
 func (a *application) auth(ctx context.Context) error {
 	md, _ := metadata.FromIncomingContext(ctx)
@@ -150,7 +194,16 @@ func (a *application) callNode(ctx context.Context, name, method, group string, 
 	if name == a.cfg.NodeName {
 		reply, err = a.receiveCall(ctx, request)
 	} else {
-		client, openErr := a.client(ctx, name)
+		var member uint64
+		switch payload := data.(type) {
+		case load.ActionRequest:
+			member = payload.To.Node.MemberID
+		case load.ReplicaQuery:
+			member = payload.To.Node.MemberID
+		case load.FenceRequest:
+			member = payload.To.MemberID
+		}
+		client, openErr := a.client(ctx, name, member)
 		if openErr != nil {
 			return nil, openErr
 		}
@@ -188,6 +241,26 @@ func (a *application) receiveCall(ctx context.Context, request *loadpb.Request) 
 		return domainReply(err), nil
 	}
 	switch request.Method {
+	case "Fence":
+		var fence load.FenceRequest
+		if err := decodeJSON(request.Data, &fence); err != nil {
+			return domainReply(err), nil
+		}
+		if headerIdentity(request.Header) != fence.From || fence.Resource.GroupID != request.GroupId || fence.ReplicaID != request.ReplicaId {
+			return domainReply(fault.ErrIdentityMismatch), nil
+		}
+		if err := a.waitAuthorityFence(ctx, fence, false); err != nil {
+			return domainReply(err), nil
+		}
+		result, err := a.node.InstallLoadFence(ctx, fence)
+		if err != nil {
+			return domainReply(err), nil
+		}
+		a.captureAuthorityFence(result)
+		if err := a.waitAuthorityFence(ctx, fence, true); err != nil {
+			return domainReply(err), nil
+		}
+		return dataReply(result, request.ReplicaId)
 	case "ReadReplica":
 		var query load.ReplicaQuery
 		if err := decodeJSON(request.Data, &query); err != nil {
@@ -209,6 +282,7 @@ func (a *application) receiveCall(ctx context.Context, request *loadpb.Request) 
 		if headerIdentity(request.Header) != action.From || action.To.Replica.GroupID != request.GroupId || action.To.Replica.ReplicaID != request.ReplicaId {
 			return domainReply(fault.ErrIdentityMismatch), nil
 		}
+		a.captureAuthorityAction(action)
 		// Fault injection delays/refuses delivery. Node still validates the complete
 		// authorization immediately before performing any local effect.
 		if err := a.beforeClusterEffect(ctx, action.Authorization); err != nil {
@@ -217,6 +291,7 @@ func (a *application) receiveCall(ctx context.Context, request *loadpb.Request) 
 		result, err := a.node.ApplyLoadAction(ctx, action)
 		a.afterClusterEffect(action.Authorization, err)
 		if err == nil {
+			a.captureAuthorityReceipt(result)
 			err = a.waitAfterClusterEffect(ctx, action.Authorization)
 		}
 		if err != nil {
@@ -301,9 +376,20 @@ func (a *application) Deliver(ctx context.Context, frame *loadpb.Frame) (*loadpb
 	if headerIdentity(frame.Header) != batch.From.Node || frame.GroupId != batch.To.Replica.GroupID || frame.ToReplicaId != batch.To.Replica.ReplicaID {
 		return domainReply(fault.ErrIdentityMismatch), nil
 	}
+	if len(batch.Messages) == 0 {
+		return domainReply(fault.ErrInvalid), nil
+	}
+	batch, err := a.filterReadRaft(batch)
+	if err != nil {
+		return domainReply(err), nil
+	}
+	if len(batch.Messages) == 0 {
+		return &loadpb.Reply{}, nil // authenticated fault drop; no effect acknowledgement
+	}
 	if err := a.node.ReceiveLoadRaft(ctx, batch); err != nil {
 		return domainReply(err), nil
 	}
+	a.recordReadReceive(batch)
 	for _, message := range batch.Messages {
 		if message.Type == raftpb.MsgSnap {
 			a.receivedClusterSnapshot(frame.GroupId)
@@ -315,7 +401,8 @@ func (a *application) Deliver(ctx context.Context, frame *loadpb.Frame) (*loadpb
 type loadTransport struct{ app *application }
 
 func (t loadTransport) SendRaft(ctx context.Context, batch load.RaftBatch) error {
-	client, err := t.app.client(ctx, batch.To.Node.NodeName)
+	t.app.recordReadSend(batch)
+	client, err := t.app.client(ctx, batch.To.Node.NodeName, batch.To.Node.MemberID)
 	if err != nil {
 		return err
 	}
@@ -351,6 +438,15 @@ func (t loadTransport) ReadReplica(ctx context.Context, query load.ReplicaQuery)
 func (t loadTransport) ApplyAction(ctx context.Context, action load.ActionRequest) (load.ActionResult, error) {
 	var result load.ActionResult
 	reply, err := t.app.callNode(ctx, action.To.Node.NodeName, "Action", action.To.Replica.GroupID, action.To.Replica.ReplicaID, action)
+	if err == nil {
+		err = decodeJSON(reply.Data, &result)
+	}
+	return result, err
+}
+
+func (t loadTransport) InstallFence(ctx context.Context, request load.FenceRequest) (load.FenceResult, error) {
+	var result load.FenceResult
+	reply, err := t.app.callNode(ctx, request.To.NodeName, "Fence", request.Resource.GroupID, request.ReplicaID, request)
 	if err == nil {
 		err = decodeJSON(reply.Data, &result)
 	}

@@ -37,6 +37,7 @@ func TestMetaAdapterSnapshotTailAndExactScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot := raftpb.Snapshot{Data: []byte("complete state"), Metadata: raftpb.SnapshotMetadata{Index: 1, Term: 1, ConfState: raftpb.ConfState{Voters: []uint64{7}, Learners: []uint64{8}}}}
+	snapshot = completeSnapshot(t, store, snapshot)
 	if err = adapter.SaveSnapshot(ctx, topology.MetaGroupID, snapshot); err != nil {
 		t.Fatal(err)
 	}

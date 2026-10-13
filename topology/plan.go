@@ -1,6 +1,23 @@
 package topology
 
-import "fmt"
+import (
+	"cmp"
+	"fmt"
+)
+
+// Metadata admission establishes host ownership before load effects run.
+func comparePlanGroups(a, b string) int {
+	if a == b {
+		return 0
+	}
+	if a == MetaGroupID {
+		return -1
+	}
+	if b == MetaGroupID {
+		return 1
+	}
+	return cmp.Compare(a, b)
+}
 
 func ValidatePlanShape(active, desired Document, plan Plan) error {
 	if plan.Version != desired.Version {
@@ -17,7 +34,7 @@ func ValidatePlanShape(active, desired Document, plan Plan) error {
 			return fmt.Errorf("step %d has no group", current.Seq)
 		}
 		if current.GroupID != lastGroup {
-			if seenGroups[current.GroupID] || (lastGroup != "" && current.GroupID < lastGroup) {
+			if seenGroups[current.GroupID] || (lastGroup != "" && comparePlanGroups(current.GroupID, lastGroup) < 0) {
 				return fmt.Errorf("group %q appears out of deterministic order", current.GroupID)
 			}
 			seenGroups[current.GroupID] = true
@@ -78,7 +95,7 @@ func ValidatePlanShape(active, desired Document, plan Plan) error {
 				return fmt.Errorf("wait %s/%d is not immediately followed by promotion", current.GroupID, current.ReplicaID)
 			}
 		case StepRemoveReplica:
-			if !nextPlanStepMatches(plan.Steps, i, StepStopReplica, current) {
+			if !nextPlanStepMatches(plan.Steps, i, StepStopReplica, current) && !ReadmissionCovers(active, desired, plan, current.NodeName) {
 				return fmt.Errorf("remove %s/%d is not immediately followed by stop", current.GroupID, current.ReplicaID)
 			}
 		case StepDemoteVoter, StepTransferLeader:
@@ -104,7 +121,7 @@ func ValidatePlanShape(active, desired Document, plan Plan) error {
 		case StepDeleteGroupState:
 			if previous := active.Group(current.GroupID); previous != nil {
 				for _, replica := range previous.Replicas {
-					if !stopped[current.GroupID][replica.ReplicaID] {
+					if !stopped[current.GroupID][replica.ReplicaID] && !ReadmissionCovers(active, desired, plan, replica.NodeName) {
 						return fmt.Errorf("delete group %q lacks stop for replica %d", current.GroupID, replica.ReplicaID)
 					}
 				}

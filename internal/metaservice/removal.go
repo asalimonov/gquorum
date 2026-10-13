@@ -19,7 +19,7 @@ func removalReason(id topology.Identity, target topology.Document, seen bool, cs
 	}
 	node := target.Node(id.NodeName)
 	if node == nil {
-		return ""
+		return fmt.Sprintf("node %q member %d removed from _meta at applied index %d by approved node deletion v%d", id.NodeName, id.MemberID, index, target.Version)
 	}
 	switch {
 	case node.State == topology.NodeExcluded:

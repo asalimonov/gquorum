@@ -29,6 +29,7 @@ func configureReadmission(t *testing.T, f *fixture, ids ...uint64) Readmission {
 	}
 	grant.PreviousGroups = []topology.Group{prior}
 	grant.GrantedGroups = []topology.Group{{ID: "work", Replicas: []topology.Replica{{NodeName: f.node.NodeName, ReplicaID: 9}}}}
+	grant.Grants = readmissionTestGrants(grant)
 	expected := grant.Clone()
 	f.cfg.AuthorizeReadmission = func(ctx context.Context, got Readmission) error {
 		if !reflect.DeepEqual(got, expected) {
@@ -136,15 +137,15 @@ func TestReadmissionRetriesActualPreparedIdentityAfterQuarantineMove(t *testing.
 	}
 	must(t, h.Readmit(t.Context(), grant))
 	must(t, h.Readmit(t.Context(), grant)) // matching backup + absent original
-	if !reflect.DeepEqual(calls, []uint64{1, 2, 1, 2, 1, 2}) {
-		t.Fatal("retry skipped application verification", calls)
+	if !reflect.DeepEqual(calls, []uint64{1, 2, 2}) {
+		t.Fatal("retry repeated completed retirement or skipped uncertain identity", calls)
 	}
 	// A new live pin must never be quarantined by the older cached grant.
 	writeMeta(t, grant.MetaDBPath, grant.Granted, 9)
 	if err := h.Readmit(t.Context(), grant); !errors.Is(err, fault.ErrIdentityMismatch) {
 		t.Fatal("retired the replacement pin", err)
 	}
-	if len(calls) != 6 {
+	if len(calls) != 3 {
 		t.Fatal("called application retirement before checking replacement pin")
 	}
 	pin, _, err := metastore.LoadIdentity(grant.MetaDBPath)
@@ -321,4 +322,17 @@ func TestReadmissionVerifiesActualRetainedIDWithinEntirePreviousCatalog(t *testi
 			}
 		})
 	}
+}
+
+func readmissionTestGrants(grant Readmission) []topology.AuthorityGrant {
+	groups := append([]topology.Group{{ID: topology.MetaGroupID, Replicas: []topology.Replica{{NodeName: grant.Previous.NodeName, ReplicaID: grant.Previous.MemberID}}}}, grant.PreviousGroups...)
+	var grants []topology.AuthorityGrant
+	for _, group := range groups {
+		g := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: grant.Previous.ClusterID, GroupID: group.ID, Revision: 1000}, Purpose: topology.AuthorityReadmit, AdmissionID: grant.AdmissionID, Resources: []topology.AuthorityResource{{Kind: topology.AuthorityHost, GroupID: group.ID, NodeName: grant.Previous.NodeName}}}
+		for _, replica := range group.Replicas {
+			g.Targets = append(g.Targets, topology.AuthorityTarget{NodeName: replica.NodeName, ReplicaID: replica.ReplicaID, MemberID: grant.Previous.MemberID})
+		}
+		grants = append(grants, g)
+	}
+	return grants
 }

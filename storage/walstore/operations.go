@@ -46,7 +46,7 @@ func (s *Store) SaveReady(ctx context.Context, id string, write storage.ReadyWri
 			if write.Entries[len(write.Entries)-1].Index < g.hs.Commit {
 				return fault.New(fault.Invalid, "WAL write truncates committed tail", nil)
 			}
-			selected, err := selectSnapshot(g.ss, filepath.Join(g.dir, WALDir), g.dir)
+			selected, err := selectSnapshot(g.ss, filepath.Join(g.dir, WALDir))
 			if err != nil {
 				return err
 			}
@@ -182,7 +182,7 @@ func (s *Store) Load(ctx context.Context, id string) (storage.Recovery, error) {
 	if !wal.Exist(wdir) {
 		return storage.Recovery{}, unreadable("identity pin exists without WAL", nil)
 	}
-	selected, err := selectSnapshot(newSnapshotter(dir), wdir, dir)
+	selected, err := selectSnapshot(newSnapshotter(dir), wdir)
 	if err != nil {
 		return storage.Recovery{}, err
 	}

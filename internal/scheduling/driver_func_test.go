@@ -341,12 +341,16 @@ func TestDriverCommitsExactLearnerFirstRepair(t *testing.T) {
 		t.Fatalf("wrong repair %+v", latest)
 	}
 	ex, _ := h.machine.CurrentOperator()
-	want := []topology.StepKind{topology.StepPrepareReplica, topology.StepAddLearner, topology.StepWaitCaughtUp, topology.StepPromoteVoter}
+	want := []topology.StepKind{topology.StepPrepareReplica, topology.StepAddLearner, topology.StepWaitCaughtUp, topology.StepPromoteVoter, topology.StepRemoveReplica, topology.StepStopReplica, topology.StepCleanupReplicaState}
 	if len(ex.Plan.Steps) != len(want) {
 		t.Fatal(ex.Plan)
 	}
 	for i, k := range want {
-		if ex.Plan.Steps[i].Kind != k || ex.Plan.Steps[i].ReplicaID != 4 {
+		wantID := uint64(4)
+		if i >= 4 {
+			wantID = 3
+		}
+		if ex.Plan.Steps[i].Kind != k || ex.Plan.Steps[i].ReplicaID != wantID {
 			t.Fatal(ex.Plan)
 		}
 	}
@@ -656,7 +660,7 @@ func (h *testHost) CommitVoterChange(ctx context.Context, change topology.VoterC
 	return result.OperatorID, err
 }
 
-func (h *testHost) RefreshObservations(ctx context.Context) error { return ctx.Err() }
+func (_ *testHost) RefreshObservations(ctx context.Context) error { return ctx.Err() }
 
 func (h *testHost) ResetObservations() {
 	h.observations.CollectorRunID += "/reset"

@@ -13,6 +13,7 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/observe"
+	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3/raftpb"
 )
@@ -144,6 +145,12 @@ type statusController struct {
 
 func (s *statusController) Status(context.Context, string) (topology.GroupStatus, error) {
 	return s.value, s.err
+}
+func (s *statusController) ReadNative(context.Context, string, ...storage.Identity) (topology.NativeState, error) {
+	if s.err == nil && !s.value.Found {
+		return topology.NativeState{}, fault.ErrUnavailable
+	}
+	return topology.NativeState{GroupID: s.value.GroupID, ReplicaID: 1, Applied: 1, ConfState: s.value.ConfState}, s.err
 }
 func TestClusterStatusReportsLeaders(t *testing.T) {
 	t.Parallel()

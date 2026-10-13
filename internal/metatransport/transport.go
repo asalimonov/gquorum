@@ -17,9 +17,11 @@ import (
 	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -346,7 +348,7 @@ func (t *Transport) sendMessage(ctx context.Context, client metapb.MetaClient, m
 
 // CallAddress invokes a control RPC with a caller-owned deadline. The temporary
 // connection is always closed, including cancellation and authentication errors.
-func (t *Transport) CallAddress(ctx context.Context, address, method string, data []byte) (*metapb.Reply, error) {
+func (t *Transport) CallAddress(ctx context.Context, address, method string, data []byte) (reply *metapb.Reply, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -361,6 +363,27 @@ func (t *Transport) CallAddress(ctx context.Context, address, method string, dat
 		return nil, fault.ErrStopped
 	}
 	defer t.wg.Done()
+	defer func() {
+		if err == nil {
+			return
+		}
+		if ctx.Err() != nil {
+			err = ctx.Err()
+			return
+		}
+		if parent.Err() != nil {
+			err = fault.ErrStopped
+			return
+		}
+		// A not-yet-running admitted host can fail DNS or connection setup.
+		// Preserve that retry boundary for native authority callers; raw gRPC
+		// errors otherwise look like terminal operator/business refusals.
+		// Authentication, invalid requests and domain replies remain distinct.
+		switch status.Code(err) {
+		case codes.Unavailable, codes.Canceled, codes.DeadlineExceeded:
+			err = fault.New(fault.Unavailable, "metadata control RPC unavailable", err)
+		}
+	}()
 	callCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stop := context.AfterFunc(parent, cancel)
@@ -388,6 +411,10 @@ func (t *Transport) CallAddress(ctx context.Context, address, method string, dat
 		return client.MetaReplicaMetrics(callCtx, req)
 	case "MetaControl":
 		return client.MetaControl(callCtx, req)
+	case "AuthorityRead":
+		return client.AuthorityRead(callCtx, req)
+	case "InstallFence":
+		return client.InstallFence(callCtx, req)
 	case "ProposeMeta":
 		return client.ProposeMeta(callCtx, req)
 	case "ApplyVersion":

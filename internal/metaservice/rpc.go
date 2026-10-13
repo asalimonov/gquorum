@@ -11,6 +11,8 @@ import (
 	"github.com/asalimonov/gquorum/internal/metapb"
 	"github.com/asalimonov/gquorum/internal/metatransport"
 	"github.com/asalimonov/gquorum/internal/raftengine"
+	"github.com/asalimonov/gquorum/internal/raftstate"
+	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3/raftpb"
 )
@@ -34,8 +36,12 @@ func (g *Group) Step(ctx context.Context, header *metapb.Header, msg raftpb.Mess
 		if msg.Snapshot == nil {
 			return fault.ErrInvalid
 		}
+		state, err := raftstate.DecodeRaftSnapshot(*msg.Snapshot, identity.ClusterID, topology.MetaGroupID)
+		if err != nil {
+			return err
+		}
 		check := metaengine.NewMachine(g.rules, nil)
-		if err := check.Restore(ctx, msg.Snapshot.Data); err != nil {
+		if err := check.Restore(ctx, state.Application); err != nil {
 			return err
 		}
 		latest := check.Latest()
@@ -69,7 +75,7 @@ func (g *Group) Call(ctx context.Context, method string, header *metapb.Header, 
 		return metatransport.Reply(err)
 	}
 	defer done()
-	if method != "IdentityPing" && method != "MetaStatus" && method != "ParkedRead" {
+	if method != "IdentityPing" && method != "MetaStatus" && method != "ParkedRead" && method != "InstallFence" && method != "MetaControl" {
 		if err := g.ensureRunning(ctx); err != nil {
 			return metatransport.Reply(err)
 		}
@@ -80,6 +86,9 @@ func (g *Group) Call(ctx context.Context, method string, header *metapb.Header, 
 	}
 	if method == "Join" {
 		return g.handleJoin(ctx, header, data)
+	}
+	if method == "IdentityPing" && len(data) > 0 {
+		return g.authorityIdentityReply(ctx, header, data)
 	}
 	if method == "IdentityPing" {
 		if engine := g.engine.Load(); engine == nil || !engine.Running() {
@@ -120,8 +129,47 @@ func (g *Group) Call(ctx context.Context, method string, header *metapb.Header, 
 		}
 		return &metapb.Reply{Data: encoded, LeaderId: engine.RaftStatus().Lead}
 	}
-	if header.MemberId == 0 || g.memberNode(header.MemberId) != header.NodeName {
+	if method == "AuthorityRead" {
+		return g.authorityReadReply(ctx, header, data)
+	}
+	if method != "InstallFence" && method != "MetaControl" && (header.MemberId == 0 || g.memberNode(header.MemberId) != header.NodeName) {
 		return metatransport.Reply(fault.ErrIdentityMismatch)
+	}
+	if method == "InstallFence" {
+		var request load.FenceRequest
+		if err := json.Unmarshal(data, &request); err != nil {
+			return metatransport.Reply(err)
+		}
+		if request.From != (topology.Identity{ClusterID: header.ClusterId, NodeName: header.NodeName, MemberID: header.MemberId, InstanceID: header.InstanceId}) {
+			return metatransport.Reply(fault.ErrIdentityMismatch)
+		}
+		result, err := g.InstallFence(ctx, request)
+		if err != nil {
+			return metatransport.Reply(err)
+		}
+		encoded, err := json.Marshal(result)
+		if err != nil {
+			return metatransport.Reply(err)
+		}
+		return &metapb.Reply{Data: encoded}
+	}
+	if method == "MetaControl" {
+		var request load.ActionRequest
+		if json.Unmarshal(data, &request) != nil {
+			return metatransport.Reply(fault.ErrInvalid)
+		}
+		if request.From != (topology.Identity{ClusterID: header.ClusterId, NodeName: header.NodeName, MemberID: header.MemberId, InstanceID: header.InstanceId}) {
+			return metatransport.Reply(fault.ErrIdentityMismatch)
+		}
+		result, err := g.ApplyMetaAction(ctx, request)
+		if err != nil {
+			return g.leaderReply(err)
+		}
+		encoded, err := json.Marshal(result)
+		if err != nil {
+			return metatransport.Reply(err)
+		}
+		return &metapb.Reply{Data: encoded}
 	}
 	if method == "MetaReplicaMetrics" {
 		if len(data) != 0 {
@@ -148,12 +196,6 @@ func (g *Group) Call(ctx context.Context, method string, header *metapb.Header, 
 		}
 		encoded, _ := json.Marshal(id)
 		return &metapb.Reply{Data: encoded}
-	case "MetaControl":
-		var a wireAuthorization
-		if json.Unmarshal(data, &a) != nil {
-			return metatransport.Reply(fault.ErrInvalid)
-		}
-		return metatransport.Reply(g.metaEffect(ctx, a.public()))
 	case "ProposeMeta":
 		proposal, err := metaengine.DecodeProposal(data)
 		if err != nil {
@@ -232,7 +274,7 @@ func (g *Group) submitProposal(ctx context.Context, proposal any, shutdown bool)
 		return metaengine.ApplyResult{}, fault.New(fault.Invalid, "invalid meta proposal", err)
 	}
 	var encoded []byte
-	if g.IsLeader() {
+	if g.IsLeader() || shutdown && g.engine.Load() != nil && g.engine.Load().IsLeader() {
 		result, err := g.engine.Load().Propose(ctx, raftengine.Proposal{Data: data})
 		if err != nil {
 			return metaengine.ApplyResult{}, err
@@ -265,6 +307,12 @@ func (g *Group) submitProposal(ctx context.Context, proposal any, shutdown bool)
 		switch string(result.Code) {
 		case "version_conflict":
 			code = fault.VersionConflict
+		case "overloaded":
+			code = fault.Overloaded
+		case "authority_pending":
+			code = fault.AuthorityPending
+		case "authority_fenced":
+			code = fault.AuthorityFenced
 		case "authorization", "superseded":
 			code = fault.OperatorAuthorization
 		}

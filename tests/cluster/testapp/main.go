@@ -4,8 +4,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -18,6 +16,7 @@ import (
 	"github.com/asalimonov/gquorum"
 
 	"github.com/asalimonov/gquorum/topology"
+	"github.com/asalimonov/gquorum/util"
 )
 
 type peer struct {
@@ -47,6 +46,7 @@ type config struct {
 	Scheduling                                           gquorum.SchedulingOptions
 	AdmissionPinPhase                                    string
 	CallerScheduler, RetryRemoval                        bool
+	MetaFaultProxy                                       bool
 }
 
 func envOr(name, fallback string) string {
@@ -88,6 +88,7 @@ func main() {
 	flag.DurationVar(&c.Scheduling.Timeout, "reconciliation-timeout", 0, "automatic repair observation timeout; zero selects the library default")
 	flag.BoolVar(&c.CallerScheduler, "caller-scheduler", false, "fixture: node-specific caller scheduler")
 	flag.BoolVar(&c.RetryRemoval, "retry-removal", false, "fixture: retry removal once and retain diagnostics")
+	flag.BoolVar(&c.MetaFaultProxy, "meta-fault-proxy", false, "fixture: proxy metadata traffic through authenticated fault barriers")
 	flag.StringVar(&c.AdmissionPinPhase, "admission-pin-phase", "", "fixture: stop joining after pending or ready identity pin")
 	flag.Parse()
 	if healthcheck != "" {
@@ -107,12 +108,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	var nonce [16]byte
-	if _, err := rand.Read(nonce[:]); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	c.InstanceID = hex.EncodeToString(nonce[:])
+	c.InstanceID = util.NewInstanceID()
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	app, err := newApplication(c, slog.Default(), nil)

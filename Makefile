@@ -31,13 +31,19 @@ test: test-unit ## Compile all three modules and run fast, uncached unit tests
 
 test-race: test-unit-race ## Run fast unit tests with the race detector
 
-lint: ## Run go vet for unit and functional builds in all three modules
-	go vet ./...
-	go -C examples/cluster vet ./...
-	go -C tests/cluster vet ./testapp/...
-	go vet -tags=functional ./...
-	go -C examples/cluster vet -tags=functional ./...
-	go -C tests/cluster vet -tags=functional ./testapp/...
+REVIVE := .tools/lint/revive-v1.17.1/revive
+STATICCHECK := .tools/lint/staticcheck-v0.8.2/staticcheck
+
+$(REVIVE):
+	mkdir -p "$(dir $(REVIVE))"
+	GOBIN="$(CURDIR)/$(dir $(REVIVE))" go install github.com/mgechev/revive@v1.17.1
+
+$(STATICCHECK):
+	mkdir -p "$(dir $(STATICCHECK))"
+	GOBIN="$(CURDIR)/$(dir $(STATICCHECK))" go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
+
+lint: $(REVIVE) $(STATICCHECK) ## Vet all build variants; check unreachable and unused code with pinned analyzers
+	python3 scripts/lint.py --revive "$(REVIVE)" --staticcheck "$(STATICCHECK)"
 
 test-function: ## Run isolated functional, protocol and storage tests
 	@python3 scripts/test_report.py function --reports-dir "$(TEST_REPORTS_DIR)" --parallel=$(FUNCTIONAL_PARALLEL) --packages=$(FUNCTIONAL_PACKAGES) --timeout=$(FUNCTIONAL_TIMEOUT) -- $(FUNCTIONAL_ARGS)

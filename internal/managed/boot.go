@@ -11,6 +11,7 @@ import (
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metastore"
 	"github.com/asalimonov/gquorum/storage"
+	"github.com/asalimonov/gquorum/topology"
 )
 
 type ParkReason string
@@ -35,7 +36,7 @@ func (e *ParkedError) Error() string {
 	return fmt.Sprintf("load group %s replica %d parked: %s", e.Identity.GroupID, e.Identity.ReplicaID, e.Reason)
 }
 func (e *ParkedError) Unwrap() error     { return e.Cause }
-func (e *ParkedError) Is(err error) bool { return errors.Is(fault.ErrReplicaNotReady, err) }
+func (_ *ParkedError) Is(err error) bool { return errors.Is(fault.ErrReplicaNotReady, err) }
 
 type bootResult struct {
 	origin   string
@@ -91,6 +92,9 @@ func (h *Host) preflight(parent context.Context, slot *replica) (metaengine.Load
 	boot, reason := decideLoadBoot(slot.identity, record, recorded, probe, scope)
 	if reason != "" {
 		return scope, boot, probe, h.park(slot, reason, nil)
+	}
+	if (!probe.Exists || !probe.HasLog && scope.Founding) && (!creationGrant(slot) || scope.Founding && slot.startGrant.Action.Kind != topology.StepCreateFoundingGroup) {
+		return scope, boot, probe, fault.ErrAuthorityFenced
 	}
 	return scope, boot, probe, nil
 }

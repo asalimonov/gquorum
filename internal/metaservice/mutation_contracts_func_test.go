@@ -5,11 +5,13 @@ package metaservice
 import (
 	"context"
 	"errors"
-	"github.com/asalimonov/gquorum/internal/operator"
+	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/operator"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3/raftpb"
 )
@@ -81,9 +83,9 @@ type transferRecorder struct {
 	err   error
 }
 
-func (r *transferRecorder) TransferLeader(_ context.Context, a topology.AuthorizedStep) error {
-	r.calls = append(r.calls, a)
-	return r.err
+func (r *transferRecorder) TransferLeader(_ context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+	r.calls = append(r.calls, *grant.Action)
+	return protocolEffectReceipts(grant), r.err
 }
 
 func TestTransferLeaderUsesExactActiveScopeAndRefusesIneligibleTargets(t *testing.T) {
@@ -94,8 +96,6 @@ func TestTransferLeaderUsesExactActiveScopeAndRefusesIneligibleTargets(t *testin
 		health            mutationHealth
 		err               error
 	}{
-		{name: "unknown_health", group: "work", node: "n2"},
-		{name: "alive", group: "work", node: "n2", health: mutationHealth{"n2": topology.HealthAlive}},
 		{name: "dead", group: "work", node: "n2", health: mutationHealth{"n2": topology.HealthDead}, err: fault.ErrUnsafeMembership},
 		{name: "unknown_group", group: "missing", node: "n2", err: fault.ErrInvalid},
 		{name: "unknown_node", group: "work", node: "missing", err: fault.ErrInvalid},
@@ -131,16 +131,10 @@ func TestTransferLeaderUsesExactActiveScopeAndRefusesIneligibleTargets(t *testin
 			if !errors.Is(err, tc.err) {
 				t.Fatal(err)
 			}
-			if tc.err != nil {
-				if len(controller.calls) != 0 {
-					t.Fatal("refused transfer reached caller", controller.calls)
-				}
-			} else {
-				want := topology.AuthorizedStep{Version: before.Version, Kind: topology.StepTransferLeader, GroupID: "work", NodeName: "n2", ReplicaID: 2}
-				if len(controller.calls) != 1 || controller.calls[0] != want {
-					t.Fatal("lost exact Active scope", controller.calls)
-				}
+			if len(controller.calls) != 0 {
+				t.Fatal("refused transfer reached caller", controller.calls)
 			}
+
 			if !reflect.DeepEqual(f.g.state().Active(), before) || !reflect.DeepEqual(f.g.state().Latest(), latest) {
 				t.Fatal("transfer changed document")
 			}
@@ -298,5 +292,63 @@ func TestOperatorMalformedIDsDoNotAliasRetainedAttempt(t *testing.T) {
 	status, err := f.g.Operator(t.Context(), id)
 	if err != nil || status.ID != id || status.Version != 1 || status.Attempt != 1 || status.State != topology.OperatorSucceeded {
 		t.Fatal("valid retained execution did not resolve", status, err)
+	}
+}
+
+func TestTransferLeaderCommitsGrantForActiveScope(t *testing.T) {
+	t.Parallel()
+	for _, known := range []bool{false, true} {
+		t.Run(fmt.Sprint(known), func(t *testing.T) {
+			t.Parallel()
+			owner := &verifiedLoadController{groups: map[string]topology.Group{}, hosts: map[string]map[string]uint64{}}
+			recorder := &transferRecorder{GroupEffects: owner}
+			groups := singleMetaFixtureWith(t, func(o *Options) {
+				o.LoadGroups = recorder
+				if known {
+					o.Health = mutationHealth{"n1": topology.HealthAlive}
+				}
+			})
+			g := readyPublic(t, groups)
+			owner.mu.Lock()
+			owner.meta = groups
+			owner.mu.Unlock()
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			doc, err := g.Stage(ctx, loadDocument(t, g), 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			id, err := g.Apply(ctx, doc.Version)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = g.WaitOperator(ctx, id); err != nil {
+				t.Fatal(err)
+			}
+			for g.state().Active().Version != doc.Version {
+				select {
+				case <-ctx.Done():
+					t.Fatal("target was not activated", ctx.Err())
+				case <-time.After(time.Millisecond):
+				}
+			}
+			before := g.state().Active()
+			staged := before.Clone()
+			staged.Node("n1").Labels = map[string]string{"staged": "intent"}
+			latest, err := g.Stage(ctx, staged, before.Version)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = g.TransferLeader(ctx, "load-one", "n1"); err != nil {
+				t.Fatal(err)
+			}
+			want := topology.AuthorizedStep{Version: before.Version, Kind: topology.StepTransferLeader, GroupID: "load-one", NodeName: "n1", ReplicaID: 1}
+			if len(recorder.calls) != 1 || recorder.calls[0] != want {
+				t.Fatal("lost Active scope", recorder.calls)
+			}
+			if !reflect.DeepEqual(g.state().Active(), before) || !reflect.DeepEqual(g.state().Latest(), latest) {
+				t.Fatal("transfer changed topology")
+			}
+		})
 	}
 }

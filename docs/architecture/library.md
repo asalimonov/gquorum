@@ -45,7 +45,8 @@ loader or built-in storage root:
 | `Bootstrap BootstrapOptions` | Founders for a new cluster, or `Join` with `JoinSeeds` for admission. Retained nodes recover their durable identity. |
 | `Limits topology.Limits` | Sole capacity bounds: defaults are three nodes and five replicas per load group. Larger values are supplied here. |
 | `Placement topology.PlacementRule` | Default load replica count and eligible node types. Individual groups can override it. |
-| `Meta MetaOptions` | Explicit bbolt path, network, timing, session, observation, snapshot and watcher settings. |
+| `StorageDir string` | Explicit system-storage directory containing fixed `_meta.bolt` and `_authority.bolt` files; outside all load retirement roots. |
+| `Meta MetaOptions` | Network, timing, reads, session, observation, snapshot and watcher settings. |
 | `Loads LoadOptions` | Optional managed load integration; leave empty for a meta-only participant. |
 | `Policies PolicyOptions` | Built-in policy options or caller implementations, scheduling controls and callback timeout. |
 | `Health`, `Events`, `Logger` | Optional application health observations, borrowed local event bus and logger. |
@@ -58,8 +59,11 @@ remain usable until their owner joins them.
 
 Each founder supplies `FoundingMember{Node, MemberID, Address}` with a unique
 positive member ID. `FoundingIDs(clusterID, names)` derives a stable founding map.
-`LoadStoredIdentity(path)` reads a closed meta database's validated durable pin
-without creating it; it returns no process incarnation. See the executable
+`LoadStoredIdentity(storageDir)` reads the fixed `_meta.bolt` file's validated
+durable pin without creating storage; it returns no process incarnation.
+Use `util.NewInstanceID()` once per process start for `Identity.InstanceID`,
+including retained restarts. This helper is only for process identities; request
+IDs and durable member/replica IDs have separate contracts. See the executable
 [node construction](../../examples/cluster/cluster.go) and
 [process wiring](../../examples/cluster/main.go) for founding, retained restart,
 listener creation and shutdown.
@@ -80,11 +84,25 @@ membership. Exclusion and readmission use the approved membership workflow.
 | `Active` | Fully converged topology. |
 
 `Get`, paginated `History`, and `Watch` expose versioned documents and updates.
-Reads are owned local observations, not linearizable barriers or quorum proofs.
+These reads, together with `Latest`, `Target`, `Active` and status, return owned
+local observations. `ReadTopology` returns all three documents atomically after a
+safe quorum-confirmed read barrier and local application. `ReadLockHolder`
+returns committed lock ownership and configured TTL, without estimating remaining
+lease time. `ReadAuthority` returns the durable revocation state; `WaitRevoked`
+waits for a requested revocation to be complete. A plain `ReadBarrier` confirms
+quorum and local application without returning a query result. Ready followers
+and learners can use these APIs through leader-confirmed ReadIndex; learners
+contribute no votes.
 `Stage(ctx, document, expectedVersion)` uses compare-and-swap. `Plan` previews a
 staged version; `PlanFor` validates/plans an uncommitted document without staging.
 `Approve(ctx, version)` commits a concrete plan and returns an `OperatorID`.
 `Operator` and `WaitOperator` expose approved progress, attempts and failures.
+After inherited revocations finish, the controller checks the immutable remaining
+plan against quorum-confirmed native membership and retained host cleanup
+identities. Unavailable confirmation leaves the operator waiting. An unreachable
+plan fails with `replan_required` and leaves Active unchanged; stage and approve
+a new version to change its actions. Retrying a failed version preserves its
+original plan and creates a new attempt.
 
 Typed mutation helpers share `MutationOptions{ExpectedVersion, Preview, Approve,
 Actor, Comment}`. Preview and approval cannot be combined. A staged document is
@@ -110,6 +128,25 @@ The full mutation surface includes `AddNode`, `ReadmitNode`, `DrainNode`,
 reused. Fresh-ID readmission and replica reseating preserve the distinction
 between old state and its authorized replacement. Force-new recovery after
 permanent majority loss remains deferred.
+
+`TransferLeader` commits a grant for the exact Active target. Canceling its wait
+can leave that grant unconsumed. A retry with the same Active version, group, node
+and replica resumes the original open grant, including after metadata recovery.
+Conflicting targets remain pending. Once consumption is recorded, a later new
+request receives a new grant; the original grant and its receipt stay immutable.
+Timeout does not undo an initiated election or prove that leadership stayed put.
+
+Administrative effects carry committed authority grants to their group or host.
+Managed action ingress always requires a grant; raw approval dispatch and raw
+membership/transfer handlers have been removed. `load.ActionResult` echoes the
+exact receiver, action and local target and carries durable receipts. It has no
+`Verified` flag, and an echoed tuple without receipts cannot complete an effect.
+The controller records exact resource receipts before advancing an operator, and
+the metadata FSM checks those receipts independently. A new controller can reuse
+committed consumption evidence; observed membership alone cannot complete an
+effect. Forced retirement still requires affected host receipts. An unreachable
+host therefore keeps its teardown pending. Metadata host preparation/removal also persist host receipts; readmission and
+cleanup after whole-node fencing remain integration work.
 
 `Cluster.Status(ctx)` collects cluster/load observations. `HealthObservation`,
 `Rules`, `IsLeader` and `ParkedJoins` provide diagnostics. `Node.Status()` is a
@@ -154,25 +191,56 @@ Supply the following through `LoadOptions`:
 | --- | --- |
 | `Factory GroupFactory` | Receives owned `load.ReplicaSpec`: exact storage identity, node/process identity, approved group and version. Returns `load.Application`. |
 | `Application.StateMachine` | Implements `Apply(ctx, load.Command) (load.Result, error)`, `Snapshot(ctx) ([]byte, error)` and `Restore(ctx, []byte) error`. Recovery restores the full snapshot and committed tail. |
+| `load.QueryMachine` | Optional `Query(ctx, []byte) (load.Result, error)` for `Group.Read`; serialized with Apply/Restore. Write-only machines can omit it and still use ReadBarrier. |
 | `Application.Close` | Optional application-resource release. A successful factory transfers this responsibility to Node, even if its caller subsequently cancels. A failed factory releases its own partial acquisitions. |
-| `Storage LoadStorageOptions` | Choose Node-owned `WAL: &WALOptions{RootDir: ...}`, or a borrowed `storage.Store` and explicit `storage.RetirementStore`. |
-| `Transport load.Transport` | Caller-defined protocol adapter implementing `SendRaft`, `ReadReplica` and `ApplyAction`. No load wire schema is imposed. |
+| `Storage LoadStorageOptions` | Choose Node-owned `WAL: &WALOptions{RootDir: ...}`, or a borrowed `storage.Store` and explicit `storage.RetirementStore`. `Store.HasState` reports all retained evidence for fresh-start validation. |
+| `Transport load.Transport` | Caller-defined authenticated protocol adapter implementing `SendRaft`, `ReadReplica`, `InstallFence` and `ApplyAction`. No load wire schema is imposed. |
 | `Retire RetireReplicaFunc` | Optional callback for application state outside the Raft store; verifies exact identity and authorization, performs idempotent cleanup and echoes the complete verified proof. |
-| `Engine load.EngineOptions` | Timing, snapshot threshold and bounded proposal/application batch settings. |
+| `Engine load.EngineOptions` | Timing, snapshot threshold, bounded proposal/application batches and read settings. `MetaOptions.Reads` configures metadata reads separately. |
 
 Transport values contain exact node/process/member and load replica identities.
 The receiver authenticates its application protocol, decodes the typed request,
-then calls `Node.ReceiveLoadRaft`, `ReadLoadReplica` or `ApplyLoadAction`.
+then calls `Node.ReceiveLoadRaft`, `ReadLoadReplica`, `InstallLoadFence` or `ApplyLoadAction`.
 Successful snapshot delivery and asynchronous failure reports use
 `ReportLoadDelivery` with the issued delivery ID and exact endpoints. Stale
 reports cannot affect a replacement handle. `ApplyAction` is used for local
 and remote destinations; an in-process adapter may forward directly to Node.
+Retain exact endpoints for outstanding granted cleanup even if the host disappears
+from current Target/Active. Historical or cached routes remain transport evidence;
+the receiver still verifies the full grant, courier and destination identity.
 Preserve `membership.SafetyRefusal` details in action errors, including the
 reason and exact group/replica identity. The operator uses those details to
 distinguish transient quorum/health loss from permanent membership refusal.
 An unstructured `fault.UnsafeMembership` cannot supply that distinction.
 `ReadReplica` may run concurrently for metrics and native status collection;
 per-destination send serialization applies to `SendRaft`.
+Read admission and protocol-round bounds are observable in
+`metrics.ReplicaSample.ReadQueue`. The Raft owner samples the configured limit,
+request slots/queue, quorum/application waiters and local/remote protocol rounds.
+The enclosing Raft stamp supplies generation, age and validity; blocked Apply or
+Query freezes that sample. These counters cannot substitute for a read barrier.
+
+`load.ReadOptions` configures `Timeout`, `MaxPending`, `MaxRequestBytes` and
+`MaxResultBytes` through load engine or metadata options. Zero selects defaults;
+negative settings refuse construction. Overload or oversized queries/results
+return classified errors. Cancellation ends the caller's wait, while an executing
+Query remains owned and serialized until it returns. Query must be read-only,
+honor cancellation and avoid waiting on its own engine or shutdown. Stopped
+handles refuse reads rather than following a replacement replica.
+
+The adapter must preserve `ReplicaQuery.Native` and `ReplicaStatus.Native`.
+When requested, the receiver obtains a fresh ReadIndex confirmation, waits for
+local apply and captures `topology.NativeState` on the Raft owner. This works on
+a ready follower or learner without an application `Query` implementation.
+Diagnostic `Status` remains an observation even in that reply. A missing native
+result never proves group absence. The controller requires the confirmed native
+membership to match Target before completing affected surviving groups.
+Native reads may address exact ready replicas retained by an approved historical
+plan, even after current placement changes. The receiver still checks the exact
+local process/replica and authenticated current caller. This read path does not
+broaden admission of Raft traffic or authorize effects. Internal metadata control
+queries share the read queue and timeout, with byte limits at least the library
+defaults so small public read limits cannot prevent convergence or fencing.
 
 Node validates approvals, identities and membership safety before effects. The
 application implements no create/prepare/membership switch. It must authenticate
@@ -306,6 +374,7 @@ readmission, removal fencing and resource order.
 | `internal/managed/`, `internal/loadhandle/` | Exact replica ownership, recovery, approved actions, retirement and opaque group representation. |
 | `internal/metaservice/` | Private topology service, admission, documents, local ledger and protocol integration. |
 | `internal/metaengine/`, `internal/metastore/` | Meta FSM and bbolt durable state. |
+| `internal/authoritystore/` | Independent node-bound durable host floors, effect receipts and readmission rebind evidence. |
 | `internal/metatransport/`, `internal/metapb/` | Included meta transport, protocol and generated code. |
 | `internal/operator/`, `internal/scheduling/`, `internal/observe/` | Approved plan execution, scheduling driver and health observations. |
 | `internal/raftengine/`, `internal/raftlog/` | Shared Raft loop, replay, persistence, queues, pressure and logging. |

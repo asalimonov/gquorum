@@ -24,7 +24,7 @@ type processResources struct {
 }
 
 func (a *application) registerResourceRoutes(mux *http.ServeMux, protect func(http.HandlerFunc) http.HandlerFunc) {
-	mux.HandleFunc("GET /internal/test/resources", protect(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /internal/test/resources", protect(func(w http.ResponseWriter, _ *http.Request) {
 		if runtime.GOOS != "linux" {
 			httpError(w, fault.ErrUnsupported)
 			return

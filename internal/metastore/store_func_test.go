@@ -47,7 +47,7 @@ func TestOpenUsesExactCallerPathAndSchema(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.db.Update(func(tx *bolt.Tx) error { return tx.Bucket(bucketFormat).Put(keySchemaVersion, []byte("2")) }); err != nil {
+	if err := s.db.Update(func(tx *bolt.Tx) error { return tx.Bucket(bucketFormat).Put(keySchemaVersion, []byte("99")) }); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {

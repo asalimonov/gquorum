@@ -140,6 +140,7 @@ func (g *Group) applyLocal(ctx context.Context, version uint64) (topology.Operat
 	if latest.Version != version {
 		return "", &fault.Error{Code: fault.VersionConflict, ExpectedVersion: version, CurrentVersion: latest.Version, Message: "only current Latest can be approved"}
 	}
+	var plan topology.Plan
 	if ex, ok := machine.CurrentOperator(); ok && ex.Status.Version == version {
 		if ex.Status.State == topology.OperatorSucceeded || !ex.Status.State.Terminal() {
 			g.controller.Signal()
@@ -148,10 +149,14 @@ func (g *Group) applyLocal(ctx context.Context, version uint64) (topology.Operat
 		if ex.Status.State == topology.OperatorSuperseded {
 			return "", fault.ErrVersionConflict
 		}
+		plan = ex.Plan
 	}
-	plan, err := g.PlanFor(ctx, latest)
-	if err != nil {
-		return "", err
+	if plan.Version == 0 {
+		var err error
+		plan, err = g.PlanFor(ctx, latest)
+		if err != nil {
+			return "", err
+		}
 	}
 	result, err := g.propose(ctx, metaengine.BeginOperatorProposal{Version: version, Plan: plan, Actor: g.currentIdentity().NodeName, Origin: latest.Origin, At: time.Now().UTC()})
 	if err != nil {
@@ -208,7 +213,11 @@ type operatorCoordinator struct{ g *Group }
 type operatorStore struct{ *Group }
 
 func (s operatorStore) Active(ctx context.Context) (topology.Document, error) {
-	return s.state().DeletionBase(ctx, s.state().Target())
+	machine := s.state()
+	if ex, ok := machine.CurrentOperator(); ok {
+		return machine.OperatorBase(ctx, ex.Status.ID)
+	}
+	return machine.DeletionBase(ctx, machine.Target())
 }
 
 func (c operatorCoordinator) IsMetaLeader() bool { return c.g.IsLeader() }

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
@@ -31,9 +32,29 @@ func groupStatus(ctx context.Context, c *Cluster, node, group string) (topology.
 	return topology.GroupStatus{}, fmt.Errorf("group %q absent from %s status", group, node)
 }
 
+// Native leadership hints can precede current-term readiness. Retry only the
+// classified transient refusals; callers still verify the exact leader below.
+func requestLeaderTransfer(ctx context.Context, c *Cluster, ingress, group, target string) error {
+	return Poll(ctx, func() (bool, error) {
+		response, err := c.Request(ctx, ingress, "POST", "/api/groups/"+group+"/leader/"+target, nil, 0)
+		if err != nil {
+			return false, err
+		}
+		if response.Status == 200 {
+			return true, nil
+		}
+		var refusal struct {
+			Code fault.Code `json:"code"`
+		}
+		if response.Decode(&refusal) == nil && response.Status == 503 && slices.Contains([]fault.Code{fault.AuthorityPending, fault.Unavailable, fault.NotLeader, fault.ReplicaNotReady}, refusal.Code) {
+			return false, requireStatus(response, nil, 200)
+		}
+		return true, requireStatus(response, nil, 200)
+	})
+}
+
 func transferMeta(ctx context.Context, c *Cluster, ingress, target string, memberID uint64) error {
-	response, err := c.Request(ctx, ingress, "POST", "/api/groups/_meta/leader/"+target, nil, 0)
-	if err := requireStatus(response, err, 200); err != nil {
+	if err := requestLeaderTransfer(ctx, c, ingress, topology.MetaGroupID, target); err != nil {
 		return err
 	}
 	return Poll(ctx, func() (bool, error) {
@@ -92,8 +113,7 @@ func TestRemoteApplyFromNonHostMetaLeader(t *testing.T) {
 		t.Fatal("non-host unexpectedly served a local FSM", err)
 	}
 	loadTarget := staged.Document.Group("remote").Replicas[0]
-	response, err = c.Request(ctx, metaHost, "POST", "/api/groups/remote/leader/"+loadTarget.NodeName, nil, 0)
-	if err := requireStatus(response, err, 200); err != nil {
+	if err := requestLeaderTransfer(ctx, c, metaHost, "remote", loadTarget.NodeName); err != nil {
 		t.Fatal("remote transfer", err)
 	}
 	if err := Poll(ctx, func() (bool, error) {

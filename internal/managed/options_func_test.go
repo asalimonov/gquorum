@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/authoritystore"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
@@ -23,6 +24,10 @@ func TestConstructorValidatesWithoutAcquiringDependencies(t *testing.T) {
 	f := newFixture(t)
 	cfg := f.cfg
 	cfg.Store = unopenedStore{}
+	cfg.Authority = func() *authoritystore.Store {
+		t.Error("constructor acquired authority store")
+		return nil
+	}
 	cfg.Identity = func() topology.Identity { t.Error("constructor resolved service identity"); return topology.Identity{} }
 	cfg.Factory = func(context.Context, load.ReplicaSpec) (load.Application, error) {
 		t.Error("constructor called factory")
@@ -35,6 +40,11 @@ func TestConstructorValidatesWithoutAcquiringDependencies(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, change := range []func(*Config){
+		func(c *Config) { c.Authority = nil },
+		func(c *Config) { c.AuthorityFloors = nil },
+		func(c *Config) { c.ValidateGrant = nil },
+		func(c *Config) { c.ValidateCourier = nil },
+		func(c *Config) { c.ForgetGrantedReplica = nil },
 		func(c *Config) { c.Factory = nil },
 		func(c *Config) { c.Transport = nil },
 		func(c *Config) { c.RecordReplica = nil },

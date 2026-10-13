@@ -116,4 +116,4 @@ func (e *LoadParkedError) Error() string {
 	return fmt.Sprintf("load group %s replica %d parked: %s", e.Identity.GroupID, e.Identity.ReplicaID, e.Reason)
 }
 func (e *LoadParkedError) Unwrap() error     { return e.Cause }
-func (e *LoadParkedError) Is(err error) bool { return errors.Is(fault.ErrReplicaNotReady, err) }
+func (_ *LoadParkedError) Is(err error) bool { return errors.Is(fault.ErrReplicaNotReady, err) }

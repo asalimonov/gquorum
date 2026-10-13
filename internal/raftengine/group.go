@@ -15,6 +15,7 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	internalmetrics "github.com/asalimonov/gquorum/internal/metrics"
 	"github.com/asalimonov/gquorum/internal/raftlog"
+	"github.com/asalimonov/gquorum/internal/raftstate"
 	"github.com/asalimonov/gquorum/membership"
 	"github.com/asalimonov/gquorum/metrics"
 	"github.com/asalimonov/gquorum/storage"
@@ -34,6 +35,8 @@ type request struct {
 	proposal    Proposal
 	message     *raftpb.Message
 	change      *raftpb.ConfChangeV2
+	admin       *raftstate.Entry
+	expected    *raftpb.ConfState
 	transfer    uint64
 	snapshot    bool
 	reply       chan response
@@ -43,12 +46,6 @@ type request struct {
 type snapshotReport struct {
 	id     uint64
 	status raft.SnapshotStatus
-}
-type envelope struct {
-	Schema      int    `json:"schema_version"`
-	Correlation string `json:"correlation"`
-	RequestID   string `json:"request_id"`
-	Data        []byte `json:"data"`
 }
 type Group struct {
 	opts                                      Options
@@ -69,6 +66,12 @@ type Group struct {
 	wg                                        sync.WaitGroup
 	proposals, inbound, controls, snapshots   chan *request
 	slots                                     chan struct{}
+	reads                                     chan *readRequest
+	readSlots                                 chan struct{}
+	readState                                 readState
+	authority                                 raftstate.AuthorityState
+	adminNotify                               []adminReply
+	transferIssuedTerm                        uint64
 	unreachable                               chan uint64
 	reports                                   chan snapshotReport
 	sendC                                     chan []raftpb.Message
@@ -112,6 +115,10 @@ func newGroup(parent context.Context, opts Options, meta bool) (*Group, error) {
 		return nil, err
 	}
 	opts = opts.defaults()
+	if opts.InitialAuthority != nil {
+		grant := opts.InitialAuthority.Clone()
+		opts.InitialAuthority = &grant
+	}
 	peers := make([]raft.Peer, len(opts.Peers))
 	for i, p := range opts.Peers {
 		peers[i] = raft.Peer{ID: p.ID, Context: bytes.Clone(p.Context)}
@@ -145,7 +152,17 @@ func newGroup(parent context.Context, opts Options, meta bool) (*Group, error) {
 	if err := validateRecovery(recovery); err != nil {
 		return nil, err
 	}
-	if err := opts.Machine.Restore(ctx, bytes.Clone(recovery.Snapshot.Data)); err != nil {
+	var restored raftstate.Snapshot
+	if !raft.IsEmptySnap(recovery.Snapshot) {
+		restored, err = raftstate.DecodeRaftSnapshot(recovery.Snapshot, opts.ClusterID, opts.GroupID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := validateAuthorityRecovery(opts, recovery, restored); err != nil {
+		return nil, err
+	}
+	if err := opts.Machine.Restore(ctx, bytes.Clone(restored.Application)); err != nil {
 		return nil, fault.New(fault.Unreadable, "restore load machine", err)
 	}
 	if err := ctx.Err(); err != nil {
@@ -168,7 +185,14 @@ func newGroup(parent context.Context, opts Options, meta bool) (*Group, error) {
 		}
 		slices.Sort(cs.Voters)
 		slices.Sort(cs.Learners)
-		ss := raftpb.Snapshot{Data: bytes.Clone(data), Metadata: raftpb.SnapshotMetadata{Index: 1, Term: 1, ConfState: cs}}
+		if opts.InitialAuthority != nil {
+			restored.Authority = raftstate.AuthorityState{Grant: opts.InitialAuthority, InstallIndex: 1, InstallTerm: 1}
+		}
+		data, err = encodeSnapshot(opts, data, restored.Authority)
+		if err != nil {
+			return nil, err
+		}
+		ss := raftpb.Snapshot{Data: data, Metadata: raftpb.SnapshotMetadata{Index: 1, Term: 1, ConfState: cs}}
 		if err := opts.Store.SaveSnapshot(ctx, opts.GroupID, ss); err != nil {
 			return nil, err
 		}
@@ -187,7 +211,7 @@ func newGroup(parent context.Context, opts Options, meta bool) (*Group, error) {
 	if err := ms.SetHardState(recovery.HardState); err != nil {
 		return nil, err
 	}
-	rn, err := raft.NewRawNode(&raft.Config{ID: opts.ReplicaID, ElectionTick: opts.Timing.ElectionTicks, HeartbeatTick: opts.Timing.HeartbeatTicks, Storage: ms, Applied: recovery.Snapshot.Metadata.Index, MaxSizePerMsg: 64 << 10, MaxInflightMsgs: 256, MaxCommittedSizePerReady: opts.MaxApplyBatchBytes, MaxUncommittedEntriesSize: opts.MaxUncommittedBytes, PreVote: true, CheckQuorum: true, Logger: raftlog.Logger{Log: opts.Logger}})
+	rn, err := raft.NewRawNode(&raft.Config{ID: opts.ReplicaID, ElectionTick: opts.Timing.ElectionTicks, HeartbeatTick: opts.Timing.HeartbeatTicks, Storage: ms, Applied: recovery.Snapshot.Metadata.Index, MaxSizePerMsg: 64 << 10, MaxInflightMsgs: 256, MaxCommittedSizePerReady: opts.MaxApplyBatchBytes, MaxUncommittedEntriesSize: opts.MaxUncommittedBytes, PreVote: true, CheckQuorum: true, ReadOnlyOption: raft.ReadOnlySafe, Logger: raftlog.Logger{Log: opts.Logger}})
 	if err != nil {
 		return nil, err
 	}
@@ -196,6 +220,9 @@ func newGroup(parent context.Context, opts Options, meta bool) (*Group, error) {
 		return nil, err
 	}
 	g := &Group{opts: opts, rn: rn, ms: ms, cs: copyConf(recovery.Snapshot.Metadata.ConfState), applied: recovery.Snapshot.Metadata.Index, snapshotIndex: recovery.Snapshot.Metadata.Index, recoveryCommit: recovery.HardState.Commit, durableHS: recovery.HardState, done: make(chan struct{}), ready: make(chan struct{}), proposals: make(chan *request, 256), inbound: make(chan *request, 1024), controls: make(chan *request, 16), snapshots: make(chan *request, 16), slots: make(chan struct{}, opts.MaxPendingProposals), unreachable: make(chan uint64, 256), reports: make(chan snapshotReport, 64), sendC: make(chan []raftpb.Message, 256), writeC: make(chan writeJob, 1), writeDone: make(chan writeResult, 1), props: make(map[string]*request), changes: make(map[string]*request), nonce: hex.EncodeToString(seed[:])}
+	g.authority = restored.Authority.Clone()
+	g.reads = make(chan *readRequest, opts.Reads.MaxPending)
+	g.readSlots = make(chan struct{}, opts.Reads.MaxPending)
 	g.peerAcks = make(map[uint64]peerAck)
 	g.meter, err = internalmetrics.NewMeter(metrics.ReplicaIdentity{ClusterID: opts.ClusterID, GroupID: opts.GroupID, NodeName: opts.NodeName, ReplicaID: opts.ReplicaID, InstanceID: opts.InstanceID, RunID: g.nonce}, opts.Metrics)
 	if err != nil {
@@ -364,9 +391,17 @@ func (g *Group) submit(ctx context.Context, queue chan *request, req *request) (
 	}
 }
 func (g *Group) Step(ctx context.Context, msg raftpb.Message) error {
+	if g.opts.ManagedAuthority && msg.Type == raftpb.MsgTransferLeader {
+		return fault.ErrUnsupported
+	}
 	_, known := raftpb.MessageType_name[int32(msg.Type)]
 	if !known || raft.IsLocalMsg(msg.Type) || msg.From == 0 || msg.From == g.opts.ReplicaID || msg.To != g.opts.ReplicaID {
 		return fault.New(fault.Invalid, "not a remote message for this replica", nil)
+	}
+	if msg.Type == raftpb.MsgReadIndex || msg.Type == raftpb.MsgReadIndexResp {
+		if _, ok := readMessageContext(msg); !ok {
+			return fault.ErrInvalid
+		}
 	}
 	if msg.Type == raftpb.MsgProp {
 		if err := validateForwardedProposal(g.opts, msg); err != nil {
@@ -380,11 +415,21 @@ func (g *Group) Step(ctx context.Context, msg raftpb.Message) error {
 		if err := validateSnapshot(*msg.Snapshot); err != nil {
 			return err
 		}
+		state, err := raftstate.DecodeRaftSnapshot(*msg.Snapshot, g.opts.ClusterID, g.opts.GroupID)
+		if err != nil {
+			return err
+		}
+		if err := validateAuthoritySnapshot(g.opts, state); err != nil {
+			return err
+		}
 	}
 	if msg.Type == raftpb.MsgApp {
 		for i, e := range msg.Entries {
 			if e.Index != msg.Index+uint64(i)+1 || e.Term == 0 || e.Term > msg.Term || e.Type != raftpb.EntryNormal && e.Type != raftpb.EntryConfChangeV2 {
 				return fault.New(fault.Invalid, "invalid append message entries", nil)
+			}
+			if err := validateEntryMode(g.opts, e); err != nil {
+				return err
 			}
 		}
 	}
@@ -396,6 +441,9 @@ func (g *Group) Step(ctx context.Context, msg raftpb.Message) error {
 	return err
 }
 func (g *Group) ProposeConfChange(ctx context.Context, cc raftpb.ConfChangeV2) error {
+	if g.opts.ManagedAuthority {
+		return fault.ErrUnsupported
+	}
 	if cc.Transition != raftpb.ConfChangeTransitionAuto || len(cc.Changes) != 1 || cc.Changes[0].NodeID == 0 {
 		return fault.ErrUnsafeMembership
 	}
@@ -408,6 +456,9 @@ func (g *Group) ProposeConfChange(ctx context.Context, cc raftpb.ConfChangeV2) e
 	return err
 }
 func (g *Group) TransferLeader(ctx context.Context, target uint64) error {
+	if g.opts.ManagedAuthority {
+		return fault.ErrUnsupported
+	}
 	if target == 0 {
 		return fault.ErrInvalid
 	}

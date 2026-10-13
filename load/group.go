@@ -32,6 +32,27 @@ func (g *Group) Propose(ctx context.Context, p Proposal) (Result, error) {
 	result, err := core.Propose(ctx, raftengine.Proposal(p))
 	return Result(result), err
 }
+
+// ReadBarrier confirms a quorum after invocation and waits for local application.
+// It does not serialize subsequent caller access to the state machine; use Read
+// for a query serialized with Apply and Restore.
+func (g *Group) ReadBarrier(ctx context.Context) error {
+	if core := g.core(); core != nil {
+		return core.ReadBarrier(ctx)
+	}
+	return fault.ErrInvalid
+}
+
+// Read runs optional Query after a safe quorum read and local application, on
+// any ready local replica, including followers and learners. Query errors do
+// not halt the replica. Cancellation ends the wait but retains callback ownership.
+func (g *Group) Read(ctx context.Context, query []byte) (Result, error) {
+	if core := g.core(); core != nil {
+		r, err := core.Read(ctx, query)
+		return Result(r), err
+	}
+	return Result{}, fault.ErrInvalid
+}
 func (g *Group) WaitReady(ctx context.Context) error {
 	core := g.core()
 	if core == nil {

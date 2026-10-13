@@ -47,7 +47,7 @@ type IdentityMismatchError struct{ Stored, Resolved storage.Identity }
 func (e *IdentityMismatchError) Error() string {
 	return fmt.Sprintf("WAL identity mismatch: stored %+v, resolved %+v", e.Stored, e.Resolved)
 }
-func (e *IdentityMismatchError) Unwrap() error { return fault.ErrIdentityMismatch }
+func (_ *IdentityMismatchError) Unwrap() error { return fault.ErrIdentityMismatch }
 
 type group struct {
 	mu         sync.Mutex
@@ -147,6 +147,26 @@ func (s *Store) BindReplica(ctx context.Context, id storage.Identity) error {
 	return nil
 }
 
+func (s *Store) HasState(ctx context.Context) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false, fault.ErrStopped
+	}
+	if len(s.bindings) != 0 || len(s.groups) != 0 {
+		return true, nil
+	}
+	entries, err := os.ReadDir(s.opts.RootDir)
+	if err != nil {
+		return false, err
+	}
+	// Unknown/partial directories are evidence too; do not silently filter them.
+	return len(entries) != 0, ctx.Err()
+}
+
 func (s *Store) openGroup(id string) (*group, error) {
 	if err := topology.ValidateLoadID(id); err != nil {
 		return nil, err
@@ -214,7 +234,7 @@ func (s *Store) openGroup(id string) (*group, error) {
 			return nil, err
 		}
 	} else {
-		selected, err := selectSnapshot(g.ss, wdir, dir)
+		selected, err := selectSnapshot(g.ss, wdir)
 		if err != nil {
 			return nil, err
 		}

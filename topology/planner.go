@@ -3,6 +3,7 @@ package topology
 import (
 	"fmt"
 	"github.com/asalimonov/gquorum/fault"
+	"slices"
 	"sort"
 )
 
@@ -85,6 +86,7 @@ func buildPlan(active, desired Document, observed map[string]GroupStatus, rules 
 	for i := range plan.Steps {
 		plan.Steps[i].Seq = i + 1
 	}
+	plan = bindReadmissionRetirement(active, desired, plan)
 	if err := bindDemotionGuards(&plan, desired, observed, preferredMetaTransfer); err != nil {
 		return Plan{}, err
 	}
@@ -117,6 +119,9 @@ func replicaNode(group *Group, id uint64) string {
 }
 
 func planDeletedGroup(groupID string, previous *Group, emit func(string, StepKind, string, uint64)) {
+	if previous != nil && len(previous.Replicas) == 0 {
+		return
+	}
 	if previous != nil {
 		for _, replica := range sortedReplicas(previous.Replicas) {
 			emit(groupID, StepStopReplica, replica.NodeName, replica.ReplicaID)
@@ -177,6 +182,19 @@ func planEstablishedGroup(
 				return planUnsafef("group %q cannot map live learner %d to a node", target.ID, id)
 			}
 			removals = append(removals, replica)
+		}
+	}
+	// A former host may have prepared durable application state without ever
+	// joining native membership. Its exact remove/stop/cleanup sequence is still
+	// needed; the remove obtains an already-satisfied receipt under the new grant.
+	if previous != nil {
+		for _, replica := range previous.Replicas {
+			_, wanted := want[replica.ReplicaID]
+			_, voter := haveVoters[replica.ReplicaID]
+			_, learner := haveLearners[replica.ReplicaID]
+			if !wanted && !voter && !learner {
+				removals = append(removals, replica)
+			}
 		}
 	}
 	sort.Slice(removals, func(i, j int) bool { return removals[i].ReplicaID < removals[j].ReplicaID })
@@ -317,7 +335,7 @@ func validatePlannedSteps(active, desired Document, observed map[string]GroupSta
 			return planUnsafef("step position %d has sequence %d", i+1, step.Seq)
 		}
 		if step.GroupID != lastGroup {
-			if seenGroups[step.GroupID] || (lastGroup != "" && step.GroupID < lastGroup) {
+			if seenGroups[step.GroupID] || (lastGroup != "" && comparePlanGroups(step.GroupID, lastGroup) < 0) {
 				return planUnsafef("group %q appears out of deterministic order", step.GroupID)
 			}
 			seenGroups[step.GroupID] = true
@@ -343,14 +361,20 @@ func validatePlannedSteps(active, desired Document, observed map[string]GroupSta
 			if !adjacentPlanStep(plan.Steps, i, StepPrepareReplica, step) || !state.prepared[step.ReplicaID] {
 				return planUnsafef("add learner %s/%d has no prior prepare acknowledgement", step.GroupID, step.ReplicaID)
 			}
-			state.learners[step.ReplicaID] = struct{}{}
+			if _, voter := state.voters[step.ReplicaID]; !voter {
+				state.learners[step.ReplicaID] = struct{}{}
+			}
 		case StepWaitCaughtUp:
 			if _, ok := state.learners[step.ReplicaID]; !ok {
-				return planUnsafef("wait %s/%d does not name a learner", step.GroupID, step.ReplicaID)
+				if _, voter := state.voters[step.ReplicaID]; !voter {
+					return planUnsafef("wait %s/%d does not name a learner or voter", step.GroupID, step.ReplicaID)
+				}
 			}
 			state.waited[step.ReplicaID] = true
 		case StepPromoteVoter:
-			if _, ok := state.learners[step.ReplicaID]; !ok || !state.waited[step.ReplicaID] ||
+			_, learner := state.learners[step.ReplicaID]
+			_, voter := state.voters[step.ReplicaID]
+			if (!learner && !voter) || !state.waited[step.ReplicaID] ||
 				!adjacentPlanStep(plan.Steps, i, StepWaitCaughtUp, step) {
 				return planUnsafef("promotion %s/%d lacks learner presence and catch-up wait", step.GroupID, step.ReplicaID)
 			}
@@ -370,7 +394,9 @@ func validatePlannedSteps(active, desired Document, observed map[string]GroupSta
 		case StepRemoveReplica:
 			if _, voter := state.voters[step.ReplicaID]; !voter {
 				if _, learner := state.learners[step.ReplicaID]; !learner {
-					return planUnsafef("remove %s/%d does not name a live member", step.GroupID, step.ReplicaID)
+					if exactPlanReplica(active, step) == nil {
+						return planUnsafef("remove %s/%d has no retained owner", step.GroupID, step.ReplicaID)
+					}
 				}
 			}
 			delete(state.voters, step.ReplicaID)
@@ -387,7 +413,7 @@ func validatePlannedSteps(active, desired Document, observed map[string]GroupSta
 		case StepDeleteGroupState:
 			if previous := active.Group(step.GroupID); previous != nil {
 				for _, replica := range previous.Replicas {
-					if !state.stopped[replica.ReplicaID] {
+					if !state.stopped[replica.ReplicaID] && !ReadmissionCovers(active, desired, plan, replica.NodeName) {
 						return planUnsafef("delete group %q lacks stop for replica %d", step.GroupID, replica.ReplicaID)
 					}
 				}
@@ -463,7 +489,7 @@ func unionGroupIDs(active, desired Document, observed map[string]GroupStatus) []
 	for id := range observed {
 		add(id)
 	}
-	sort.Strings(ids)
+	slices.SortFunc(ids, comparePlanGroups)
 	return ids
 }
 

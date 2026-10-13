@@ -241,7 +241,7 @@ func (s *Store) Stats(ctx context.Context, id string) (storage.Stats, error) {
 	dir := filepath.Join(s.opts.RootDir, id)
 	var result storage.Stats
 	for _, part := range []string{WALDir, SnapDir} {
-		err := filepath.WalkDir(filepath.Join(dir, part), func(path string, d fs.DirEntry, walkErr error) error {
+		err := filepath.WalkDir(filepath.Join(dir, part), func(_ string, d fs.DirEntry, walkErr error) error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -270,7 +270,7 @@ func (s *Store) Stats(ctx context.Context, id string) (storage.Stats, error) {
 		}
 	}
 	if wal.Exist(filepath.Join(dir, WALDir)) {
-		selected, err := selectSnapshot(newSnapshotter(dir), filepath.Join(dir, WALDir), dir)
+		selected, err := selectSnapshot(newSnapshotter(dir), filepath.Join(dir, WALDir))
 		if err != nil {
 			return result, err
 		}

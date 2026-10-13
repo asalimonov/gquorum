@@ -15,6 +15,9 @@ const (
 	NoController          Code = "no_controller"
 	UnsafeMembership      Code = "unsafe_membership"
 	OperatorAuthorization Code = "execution_authorization"
+	AuthorityFenced       Code = "authority_fenced"
+	AuthorityPending      Code = "authority_pending"
+	ReplanRequired        Code = "replan_required"
 	IdentityMismatch      Code = "identity_mismatch"
 	Unreadable            Code = "unreadable"
 	GroupRetired          Code = "group_retired"
@@ -58,6 +61,9 @@ var (
 	ErrNoController          = New(NoController, "", nil)
 	ErrUnsafeMembership      = New(UnsafeMembership, "", nil)
 	ErrOperatorAuthorization = New(OperatorAuthorization, "", nil)
+	ErrAuthorityFenced       = New(AuthorityFenced, "", nil)
+	ErrAuthorityPending      = New(AuthorityPending, "", nil)
+	ErrReplanRequired        = New(ReplanRequired, "", nil)
 	ErrIdentityMismatch      = New(IdentityMismatch, "", nil)
 	ErrUnreadable            = New(Unreadable, "", nil)
 	ErrGroupRetired          = New(GroupRetired, "", nil)

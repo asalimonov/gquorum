@@ -229,3 +229,11 @@ type errorDetails struct {
 	CurrentVersion  uint64                    `json:"current_version,omitempty"`
 	Membership      *membership.SafetyRefusal `json:"membership,omitempty"`
 }
+
+func (s *server) InstallFence(ctx context.Context, req *metapb.MetaRequest) (*metapb.Reply, error) {
+	return s.call(ctx, "InstallFence", req)
+}
+
+func (s *server) AuthorityRead(ctx context.Context, req *metapb.MetaRequest) (*metapb.Reply, error) {
+	return s.call(ctx, "AuthorityRead", req)
+}

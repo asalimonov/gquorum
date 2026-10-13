@@ -39,7 +39,7 @@ func ownDurableFiles(ctx context.Context, c *Cluster, node, group string) error 
 	}{
 		{root, true}, {path.Join(root, walstore.StateFile), false},
 		{path.Join(root, walstore.IdentityFile), false}, {path.Join(root, walstore.WALDir), true},
-		{path.Join(root, walstore.SnapDir), true}, {"/data/meta.bolt", false}, {"/data/events.bolt", false},
+		{path.Join(root, walstore.SnapDir), true}, {"/data/_meta.bolt", false}, {"/data/events.bolt", false},
 	} {
 		result, err := c.docker.ContainerStatPath(ctx, c.Node(node).Container.GetContainerID(), docker.ContainerStatPathOptions{Path: item.name})
 		if err != nil {

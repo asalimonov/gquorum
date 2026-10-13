@@ -17,6 +17,7 @@ import (
 	gquorum "github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/metrics"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -42,17 +43,23 @@ type effectBarrier struct {
 	after   bool
 }
 type clusterHooks struct {
-	runtime     runtimeHooks
-	mu          sync.Mutex
-	barriers    map[effectKey]*effectBarrier
-	receipts    []topology.AuthorizedStep
-	snapshots   map[string]uint64
-	wals        map[walKey]*walControl
-	projections map[walKey]*projectionControl
+	runtime           runtimeHooks
+	mu                sync.Mutex
+	barriers          map[effectKey]*effectBarrier
+	receipts          []topology.AuthorizedStep
+	snapshots         map[string]uint64
+	wals              map[walKey]*walControl
+	projections       map[walKey]*projectionControl
+	reads             map[walKey]*readControl
+	fenceBarriers     map[fenceControlKey]*fenceControl
+	authorityActions  []load.ActionRequest
+	authorityReceipts []load.ActionResult
+	authorityFences   []load.FenceResult
+	metaRaft          metaRaftControl
 }
 
 func newClusterHooks() *clusterHooks {
-	return &clusterHooks{runtime: runtimeHooks{stopped: map[load.ReplicaRef]*load.Group{}}, barriers: map[effectKey]*effectBarrier{}, snapshots: map[string]uint64{}, wals: map[walKey]*walControl{}, projections: map[walKey]*projectionControl{}}
+	return &clusterHooks{runtime: runtimeHooks{stopped: map[load.ReplicaRef]*load.Group{}}, barriers: map[effectKey]*effectBarrier{}, snapshots: map[string]uint64{}, wals: map[walKey]*walControl{}, projections: map[walKey]*projectionControl{}, reads: map[walKey]*readControl{}, fenceBarriers: map[fenceControlKey]*fenceControl{}}
 }
 func (a *application) beforeClusterEffect(ctx context.Context, approved topology.AuthorizedStep) error {
 	if a.clusterHooks == nil {
@@ -147,6 +154,9 @@ type localObservation struct {
 	ReceivedSnapshots uint64               `json:"received_snapshots"`
 	WAL               walCounters          `json:"wal"`
 	WALStallNS        int64                `json:"wal_stall_ns"`
+	ReadQueue         metrics.ReadQueue    `json:"read_queue"`
+	ReadQueueStamp    metrics.Stamp        `json:"read_queue_stamp"`
+	Reads             readCounters         `json:"reads"`
 	Proposals         load.ProposalStats   `json:"proposals"`
 	Parked            *gquorum.ParkedLoad  `json:"parked,omitempty"`
 	StorageIdentity   *storage.Identity    `json:"storage_identity,omitempty"`
@@ -166,13 +176,15 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			handler(w, r)
 		}
 	}
-	mux.HandleFunc("GET /internal/test/metrics", protect(func(w http.ResponseWriter, r *http.Request) { jsonResponse(w, http.StatusOK, a.cluster.Metrics()) }))
+	mux.HandleFunc("GET /internal/test/metrics", protect(func(w http.ResponseWriter, _ *http.Request) { jsonResponse(w, http.StatusOK, a.cluster.Metrics()) }))
 	a.registerRuntimeRoutes(mux, protect)
 	a.registerResourceRoutes(mux, protect)
 	a.registerWALRoutes(mux, protect)
+	a.registerReadRoutes(mux, protect)
+	a.registerAuthorityRoutes(mux, protect)
 	a.registerProjectionRoutes(mux, protect)
-	mux.HandleFunc("GET /internal/test/meta-backups", protect(func(w http.ResponseWriter, r *http.Request) {
-		paths, err := filepath.Glob(filepath.Join(a.cfg.DataDir, "meta.bolt.retired-*"))
+	mux.HandleFunc("GET /internal/test/meta-backups", protect(func(w http.ResponseWriter, _ *http.Request) {
+		paths, err := filepath.Glob(filepath.Join(a.cfg.DataDir, "_meta.bolt.retired-*"))
 		if err != nil {
 			httpError(w, err)
 			return
@@ -212,12 +224,12 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 		}
 		// An open bbolt descriptor survives rename. The next process sees no Raft
 		// store and must obtain an approved fresh identity from the healthy majority.
-		lost := filepath.Join(a.cfg.DataDir, "meta.bolt.lost")
+		lost := filepath.Join(a.cfg.DataDir, "_meta.bolt.lost")
 		if _, err := os.Lstat(lost); !errors.Is(err, os.ErrNotExist) {
 			httpError(w, fault.ErrIdentityMismatch)
 			return
 		}
-		if err := os.Rename(filepath.Join(a.cfg.DataDir, "meta.bolt"), lost); err != nil {
+		if err := os.Rename(filepath.Join(a.cfg.DataDir, "_meta.bolt"), lost); err != nil {
 			httpError(w, err)
 			return
 		}
@@ -334,7 +346,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 		delete(h.barriers, key)
 		jsonResponse(w, http.StatusOK, map[string]bool{"released": true})
 	}))
-	mux.HandleFunc("GET /internal/test/controls", protect(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /internal/test/controls", protect(func(w http.ResponseWriter, _ *http.Request) {
 		h := a.clusterHooks
 		h.mu.Lock()
 		barriers := make([]barrierObservation, 0, len(h.barriers))
@@ -374,6 +386,9 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			observation.Found, observation.ReplicaID = true, local.group.ReplicaID()
 			observation.Status = local.group.Status()
 			observation.Proposals = local.group.ProposalStats()
+			observation.Reads = a.clusterHooks.readMetrics(walKey{group, local.group.ReplicaID()})
+			sample := local.group.Metrics().Sample
+			observation.ReadQueue, observation.ReadQueueStamp = sample.ReadQueue, sample.Raft
 			observation.Values = local.machine.values()
 			observation.WAL = a.clusterHooks.walMetrics(walKey{group, local.group.ReplicaID()})
 			observation.WALStallNS = int64(local.group.WALStall())

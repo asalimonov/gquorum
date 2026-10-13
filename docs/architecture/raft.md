@@ -64,12 +64,16 @@ committed; applications must handle retries with that possibility in mind.
 When a node has no local replica of the requested load group, the application
 must route the request to a node that hosts one.
 
-This command ordering does not make `Cluster.Status`, document reads,
-`LockHolder`, or raw replica status linearizable. There is no public ReadIndex
-barrier API. A business operation needing an authoritative decision should put
-that decision in a replicated command rather than treating a cached read as
-proof. There is also no transaction across `_meta` and a load group, or across
-two load groups.
+This command ordering does not make `Cluster.Status`, ordinary document reads,
+`LockHolder`, or raw replica status linearizable. `ReadBarrier` confirms a fresh
+ReadIndex and waits for local apply; `load.Group.Read` then runs the optional
+application query serialized with Apply and Restore. `ReadTopology` and
+`ReadLockHolder` provide authoritative metadata reads. The private native read
+captures applied membership on the same Raft owner after the barrier, without
+using an application's query or the diagnostic status cache. These are
+point-in-time reads, not permission for later effects or an atomic read-modify-
+write operation. There is no transaction across `_meta` and a load group, or
+across two load groups.
 
 ## 3. High-level architecture
 
@@ -79,9 +83,11 @@ flowchart TD
     Node --> Cluster[Cluster: administration view]
     Cluster --> Meta[Meta state machine and Raft group]
     Meta --> MetaStore[Per-node bbolt metadata store]
+    Node --> AuthorityStore[Independent durable host authority store]
     Meta --> Operator[Approved operator execution]
     Operator --> Managed[Managed local replicas]
     Node --> Managed
+    AuthorityStore --> Managed
     Managed --> Loads[load.Group handles and application state machines]
     Loads --> LoadStore[WAL backend or application storage.Store]
     Meta <--> MetaNet[Included authenticated gRPC meta transport]

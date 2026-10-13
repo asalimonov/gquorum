@@ -59,7 +59,7 @@ func NewStandalone(opts StandaloneOptions) (*Standalone, error) {
 		InstanceID: opts.InstanceID, Mode: raftengine.Mode(opts.Mode), Peers: opts.Peers, Timing: raftengine.Timing(opts.Engine.Timing),
 		Store: opts.Store, Machine: machineAdapter{opts.StateMachine}, Transport: opts.Transport, Events: opts.Events, Logger: opts.Logger,
 		SnapshotThreshold: opts.Engine.SnapshotThreshold, MaxPendingProposals: opts.Engine.MaxPendingProposals,
-		ProposalTimeout:     opts.Engine.ProposalTimeout,
+		ProposalTimeout: opts.Engine.ProposalTimeout, Reads: raftengine.ReadOptions(opts.Engine.Reads),
 		MaxUncommittedBytes: opts.Engine.MaxUncommittedBytes, MaxApplyBatchBytes: opts.Engine.MaxApplyBatchBytes,
 	})
 	if err != nil {
@@ -118,5 +118,18 @@ type machineAdapter struct{ StateMachine }
 
 func (m machineAdapter) Apply(ctx context.Context, c raftengine.Command) (raftengine.Result, error) {
 	result, err := m.StateMachine.Apply(ctx, Command(c))
+	return raftengine.Result(result), err
+}
+
+func (m machineAdapter) SupportsQuery() bool {
+	_, ok := m.StateMachine.(QueryMachine)
+	return ok
+}
+func (m machineAdapter) Query(ctx context.Context, query []byte) (raftengine.Result, error) {
+	machine, ok := m.StateMachine.(QueryMachine)
+	if !ok {
+		return raftengine.Result{}, fault.ErrUnsupported
+	}
+	result, err := machine.Query(ctx, query)
 	return raftengine.Result(result), err
 }

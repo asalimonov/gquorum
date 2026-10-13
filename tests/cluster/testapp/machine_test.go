@@ -72,3 +72,42 @@ func TestInvalidLoadCommandsAreBusinessResults(t *testing.T) {
 		t.Fatal("invalid command mutated values")
 	}
 }
+
+func TestQueryReturnsRestoredStateWithoutMutatingIt(t *testing.T) {
+	t.Parallel()
+	m := newMachine()
+	data, _ := json.Marshal(putCommand{RequestID: "one", Key: "key", Value: "value"})
+	if result, err := m.Apply(t.Context(), load.Command{RequestID: "one", Index: 7, Data: data}); err != nil || result.Code != "ok" {
+		t.Fatal(result, err)
+	}
+	snapshot, err := m.Snapshot(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m = newMachine()
+	if err := m.Restore(t.Context(), snapshot); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"key", "missing"} {
+		query, _ := json.Marshal(getQuery{Key: key})
+		result, err := m.Query(t.Context(), query)
+		var got getResult
+		if err != nil || result.Code != "ok" || decodeJSON(result.Data, &got) != nil || got.Key != key || got.AppliedIndex != 7 || got.Found != (key == "key") || key == "key" && got.Value != "value" {
+			t.Fatal(result, got, err)
+		}
+	}
+	for _, query := range []string{`null`, `{}`, `{"key":"key","unknown":1}`, `{"key":"key"} {}`} {
+		if _, err := m.Query(t.Context(), []byte(query)); !errors.Is(err, fault.ErrInvalid) {
+			t.Fatal(query, err)
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := m.Query(ctx, []byte(`{"key":"key"}`)); !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	after, err := m.Snapshot(t.Context())
+	if err != nil || !bytes.Equal(after, snapshot) {
+		t.Fatal("read or rejected query changed application state", err)
+	}
+}

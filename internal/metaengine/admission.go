@@ -28,6 +28,10 @@ type AdmissionRecord struct {
 	MemberID   uint64              `json:"member_id"`
 	OperatorID topology.OperatorID `json:"execution_id"`
 	State      AdmissionState      `json:"state"`
+	// ReadmissionInstanceID retains the original retirement proof when a pending
+	// admission changes process without changing its durable member or operator.
+	// Empty means this record is the original. Only the FSM may assign it.
+	ReadmissionInstanceID string `json:"readmission_instance_id,omitempty"`
 }
 
 func admissionKey(nodeName, instanceID string) string {
@@ -101,6 +105,9 @@ func (sm *topologySM) applyBindAdmission(p BindAdmissionProposal) (ApplyResult, 
 	if p.At.IsZero() {
 		return rejectProposal(p.ProposalID, proposalAuthorization, "admission timestamp is required"), false
 	}
+	if record.ReadmissionInstanceID != "" {
+		return rejectProposal(p.ProposalID, proposalAuthorization, "readmission origin is assigned by admission binding"), false
+	}
 	key := admissionKey(record.NodeName, record.InstanceID)
 	if existing, ok := sm.admissions[key]; ok {
 		if existing.MemberID == record.MemberID && existing.OperatorID == record.OperatorID {
@@ -118,6 +125,12 @@ func (sm *topologySM) applyBindAdmission(p BindAdmissionProposal) (ApplyResult, 
 			return rejectProposal(p.ProposalID, proposalAuthorization,
 				"instance %q admission is already %s; replace it through a fresh-ID repair",
 				conflict.InstanceID, conflict.State), false
+		}
+		if conflict.MemberID == record.MemberID && conflict.OperatorID == record.OperatorID {
+			record.ReadmissionInstanceID = conflict.ReadmissionInstanceID
+			if record.ReadmissionInstanceID == "" {
+				record.ReadmissionInstanceID = conflict.InstanceID
+			}
 		}
 	}
 	if sm.target.MemberID(record.NodeName) != record.MemberID {
@@ -149,12 +162,15 @@ func (sm *topologySM) applyBindAdmission(p BindAdmissionProposal) (ApplyResult, 
 	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, Admission: cloneAdmission(record)}, true
 }
 
-func (sm *topologySM) applyCommitReadmission(p CommitReadmissionProposal) (ApplyResult, bool) {
+func (sm *topologySM) applyCommitReadmission(index uint64, p CommitReadmissionProposal) (ApplyResult, bool) {
 	if err := validateAdmissionIdentity(p.Admission); err != nil {
 		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
 	}
 	if p.At.IsZero() {
 		return rejectProposal(p.ProposalID, proposalAuthorization, "readmission timestamp is required"), false
+	}
+	if p.Admission.ReadmissionInstanceID != "" {
+		return rejectProposal(p.ProposalID, proposalAuthorization, "new readmission cannot select an earlier proof"), false
 	}
 	key := admissionKey(p.Admission.NodeName, p.Admission.InstanceID)
 	if existing, ok := sm.admissions[key]; ok {
@@ -216,7 +232,12 @@ func (sm *topologySM) applyCommitReadmission(p CommitReadmissionProposal) (Apply
 		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
 	}
 
+	oldAuthority := sm.authority
+	if err := sm.revokeAuthorityLocked(index, nil, topology.MakeOperatorID(doc.Version, 1)); err != nil {
+		return rejectProposal(p.ProposalID, proposalOverloaded, "cannot reserve revocation: %v", err), false
+	}
 	if err := sm.commitLatestLocked(&doc); err != nil {
+		sm.authority = oldAuthority
 		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
 	}
 	sm.target = doc.Clone()
@@ -252,16 +273,22 @@ func (sm *topologySM) applyReadyAdmission(p ReadyAdmissionProposal) (ApplyResult
 		return rejectProposal(p.ProposalID, proposalSuperseded,
 			"admission execution is no longer current"), false
 	}
+	if !sm.readmissionConsumedLocked(topology.AuthorizedStep{GroupID: topology.MetaGroupID, Kind: topology.StepPrepareReplica, OperatorID: record.OperatorID, NodeName: record.NodeName, ReplicaID: record.MemberID}) {
+		return rejectProposal(p.ProposalID, proposalAuthorityPending, "readmission retirement receipts are pending"), false
+	}
 	record.State = AdmissionReady
 	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, Admission: cloneAdmission(*record)}, true
 }
 
 func validateAdmissionIdentity(record AdmissionRecord) error {
-	if strings.ContainsRune(record.NodeName, 0) || strings.ContainsRune(record.InstanceID, 0) {
+	if strings.ContainsRune(record.NodeName, 0) || strings.ContainsRune(record.InstanceID, 0) || strings.ContainsRune(record.ReadmissionInstanceID, 0) {
 		return fmt.Errorf("admission identity contains a separator")
 	}
 	if record.NodeName == "" || record.InstanceID == "" || record.MemberID == 0 {
 		return fmt.Errorf("admission requires node, instance, and non-zero member identity")
+	}
+	if record.ReadmissionInstanceID == record.InstanceID {
+		return fmt.Errorf("readmission origin must name a previous process")
 	}
 	return nil
 }

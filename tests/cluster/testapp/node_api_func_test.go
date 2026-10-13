@@ -145,9 +145,10 @@ func newSingleNodeFixture(t *testing.T, loads bool, configure func(int, *quorum.
 		name := founders[i].Node.Name
 		root := t.TempDir()
 		opts := quorum.NodeOptions{
-			Identity: topology.Identity{NodeName: name, ClusterID: "api-cluster", InstanceID: "process-" + name}, Node: founders[i].Node,
+			StorageDir: root,
+			Identity:   topology.Identity{NodeName: name, ClusterID: "api-cluster", InstanceID: "process-" + name}, Node: founders[i].Node,
 			Bootstrap: quorum.BootstrapOptions{Founders: founders}, Limits: topology.Limits{MaxNodes: max(3, size), MaxReplicas: max(5, size)},
-			Meta:   quorum.MetaOptions{DBPath: filepath.Join(root, "meta.bolt"), SessionTTL: 3 * time.Second, Timing: quorum.MetaTiming{TickInterval: 20 * time.Millisecond, ElectionTicks: 8}, Observation: quorum.ObservationOptions{Interval: 100 * time.Millisecond, Timeout: 60 * time.Millisecond}, Network: quorum.MetaNetworkOptions{Listener: listeners[i], AdvertiseAddress: listeners[i].Addr().String(), AllowPlaintext: true, ClusterCredential: []byte("api-fixture")}},
+			Meta:   quorum.MetaOptions{SessionTTL: 3 * time.Second, Timing: quorum.MetaTiming{TickInterval: 20 * time.Millisecond, ElectionTicks: 8}, Observation: quorum.ObservationOptions{Interval: 100 * time.Millisecond, Timeout: 60 * time.Millisecond}, Network: quorum.MetaNetworkOptions{Listener: listeners[i], AdvertiseAddress: listeners[i].Addr().String(), AllowPlaintext: true, ClusterCredential: []byte("api-fixture")}},
 			Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		}
 		opts.Policies.Scheduling.Disabled = true
@@ -207,20 +208,6 @@ func (c *apiCluster) startAll(t *testing.T) {
 		}
 	}
 }
-func (c *apiCluster) leader(t *testing.T) quorum.Node {
-	t.Helper()
-	var leader quorum.Node
-	apiEventually(t, func() bool {
-		for _, n := range c.nodes {
-			if n.Cluster().IsLeader() {
-				leader = n
-				return true
-			}
-		}
-		return false
-	})
-	return leader
-}
 func apiEventually(t *testing.T, ready func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
@@ -241,4 +228,12 @@ func (c *apiCluster) value(name, group string) uint64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.value
+}
+
+func (n *apiNetwork) InstallFence(ctx context.Context, request load.FenceRequest) (load.FenceResult, error) {
+	target := n.lookup(request.To.NodeName)
+	if target == nil {
+		return load.FenceResult{}, fault.ErrUnavailable
+	}
+	return target.InstallLoadFence(ctx, request)
 }

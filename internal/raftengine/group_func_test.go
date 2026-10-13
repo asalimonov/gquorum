@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/asalimonov/gquorum/internal/raftstate"
 	"io"
 	"log/slog"
 	"reflect"
@@ -27,7 +28,7 @@ type machine struct {
 	commands []string
 }
 
-func (m *machine) Apply(ctx context.Context, c Command) (Result, error) {
+func (m *machine) Apply(_ context.Context, c Command) (Result, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if string(c.Data) == "fatal" {
@@ -48,7 +49,7 @@ func (m *machine) Snapshot(context.Context) ([]byte, error) {
 	}{m.commands})
 }
 
-func (m *machine) Restore(ctx context.Context, data []byte) error {
+func (m *machine) Restore(_ context.Context, data []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.commands = nil
@@ -354,7 +355,7 @@ func TestRecover_UncommittedTailIsNotAppliedAtReady(t *testing.T) {
 	must(t, g.Stop(testContext(t)))
 	var entries []raftpb.Entry
 	for i, value := range []string{"a", "b", "uncommitted"} {
-		data, err := json.Marshal(envelope{Schema: 1, Correlation: value, RequestID: value, Data: []byte(value)})
+		data, err := raftstate.EncodeEntry(raftstate.Entry{Schema: raftstate.Schema, Kind: raftstate.Application, Correlation: value, RequestID: value, Data: []byte(value)})
 		must(t, err)
 		entries = append(entries, raftpb.Entry{Index: uint64(i + 2), Term: 2, Data: data})
 	}
@@ -388,7 +389,7 @@ func (s *snapshotGate) SaveSnapshot(ctx context.Context, id string, ss raftpb.Sn
 
 type captureTransport struct{ count atomic.Int32 }
 
-func (c *captureTransport) Send(ctx context.Context, m []raftpb.Message) error {
+func (c *captureTransport) Send(_ context.Context, m []raftpb.Message) error {
 	for _, msg := range m {
 		if msg.Type == raftpb.MsgAppResp {
 			c.count.Add(1)
@@ -411,6 +412,8 @@ func TestWAL_ReceivedSnapshotIsPersistedBeforeRestoreAndAck(t *testing.T) {
 	data, err := json.Marshal(struct {
 		Commands []string `json:"commands"`
 	}{[]string{"restored"}})
+	must(t, err)
+	data, err = encodeSnapshot(g.opts, data, g.authority)
 	must(t, err)
 	ss := raftpb.Snapshot{Data: data, Metadata: raftpb.SnapshotMetadata{Index: 9, Term: 1, ConfState: raftpb.ConfState{Voters: []uint64{1}, Learners: []uint64{2}}}}
 	must(t, g.Step(testContext(t), raftpb.Message{Type: raftpb.MsgSnap, From: 1, To: 2, Term: 2, Snapshot: &ss}))
@@ -578,6 +581,7 @@ func TestRecoveredUnappliedConfigurationBlocksSecondChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	cc := raftpb.ConfChangeV2{Changes: []raftpb.ConfChangeSingle{{Type: raftpb.ConfChangeAddLearnerNode, NodeID: 2}}}
+	cc.Context, _ = raftstate.EncodeEntry(raftstate.Entry{Schema: raftstate.Schema, Kind: raftstate.StandaloneConfiguration, Correlation: "recovered-change"})
 	data, err := cc.Marshal()
 	if err != nil {
 		t.Fatal(err)

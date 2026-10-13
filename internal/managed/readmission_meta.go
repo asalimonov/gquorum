@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/authoritystore"
 	"github.com/asalimonov/gquorum/internal/metastore"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -139,7 +140,7 @@ func retireReadmissionMeta(ctx context.Context, grant Readmission, allowMissing 
 
 // ReadmitMeta is the same verified metadata retirement for a meta-only Node.
 // It refuses a grant with former load resources, which require a managed host.
-func ReadmitMeta(ctx context.Context, own topology.Identity, path string, grant Readmission, authorize func(context.Context, Readmission) error) error {
+func ReadmitMeta(ctx context.Context, own topology.Identity, path string, grant Readmission, authorityStore *authoritystore.Store, authorize func(context.Context, Readmission) error) error {
 	grant = grant.Clone()
 	if err := grant.Validate(own, path); err != nil {
 		return err
@@ -148,6 +149,13 @@ func ReadmitMeta(ctx context.Context, own topology.Identity, path string, grant 
 		return fault.ErrUnsupported
 	}
 	if err := authorize(ctx, grant.Clone()); err != nil {
+		return err
+	}
+	authority, err := beginReadmissionAuthority(ctx, authorityStore, grant)
+	if err != nil {
+		return err
+	}
+	if err := authority.joined(ctx); err != nil {
 		return err
 	}
 	for _, group := range grant.PreviousGroups {
@@ -165,5 +173,5 @@ func ReadmitMeta(ctx context.Context, own topology.Identity, path string, grant 
 	if err := authorize(ctx, grant.Clone()); err != nil {
 		return err
 	}
-	return retireReadmissionMeta(ctx, grant, own.MemberID == 0)
+	return authority.retireMeta(ctx, grant, own.MemberID == 0)
 }

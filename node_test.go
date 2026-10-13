@@ -23,7 +23,7 @@ func TestNodeConstructionAndStopBeforeStartAcquireNothing(t *testing.T) {
 	if n.Status().State != NodeNew || n.Cluster() != n.Cluster() {
 		t.Fatal("invalid new node or unstable cluster facade")
 	}
-	if _, err := os.Stat(o.Meta.DBPath); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(o.metaDBPath()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("constructor opened storage", err)
 	}
 	if _, err := n.StartLoadGroup(context.Background(), load.ReplicaRef{GroupID: "x", ReplicaID: 1}); !errors.Is(err, fault.ErrReplicaNotReady) {

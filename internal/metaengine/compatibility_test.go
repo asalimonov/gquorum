@@ -6,13 +6,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"reflect"
+	"errors"
+	"github.com/asalimonov/gquorum/fault"
 	"testing"
 
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func TestBaselineProposalAndResultBytes(t *testing.T) {
+func TestBaselineProposalsRejectedAndResultBytesPreserved(t *testing.T) {
 	t.Parallel()
 	var proposals []json.RawMessage
 	if err := json.Unmarshal(baselineBytes(t, "proposals.json"), &proposals); err != nil {
@@ -22,13 +23,8 @@ func TestBaselineProposalAndResultBytes(t *testing.T) {
 		t.Fatalf("incomplete baseline: %d commands", len(proposals))
 	}
 	for _, raw := range proposals {
-		p, err := DecodeProposal(raw)
-		if err != nil {
-			t.Fatal(err)
-		}
-		got, err := Encode(reflect.ValueOf(p).Elem().Interface())
-		if err != nil || !bytes.Equal(got, raw) {
-			t.Fatalf("proposal encoding changed:\n%s\n%s\n%v", raw, got, err)
+		if _, err := DecodeProposal(raw); !errors.Is(err, fault.ErrUnsupported) {
+			t.Fatal("legacy proposal accepted", err)
 		}
 	}
 	raw := baselineBytes(t, "apply-result.json")
@@ -45,31 +41,14 @@ func TestBaselineProposalAndResultBytes(t *testing.T) {
 	}
 }
 
-func TestBaselineSnapshotRestoresCompleteState(t *testing.T) {
+func TestBaselineSnapshotIsRejectedWithoutMutation(t *testing.T) {
 	t.Parallel()
-	raw := baselineBytes(t, "snapshot.json")
-	m := NewMachine(topology.Rules{SchemaVersion: 1, Limits: (topology.Limits{}).WithDefaults()}, nil)
-	if err := m.Restore(context.Background(), raw); err != nil {
+	m := NewMachine(topology.Rules{SchemaVersion: 1, Limits: topology.Limits{}.WithDefaults()}, nil)
+	if err := m.Restore(context.Background(), baselineBytes(t, "snapshot.json")); !errors.Is(err, fault.ErrUnsupported) {
 		t.Fatal(err)
 	}
 	latest, target, active := m.Views()
-	if latest.Version != 1 || target.Version != 1 || active.Version != 1 || len(active.Nodes) != 3 || active.ClusterID != "compat-cluster" {
-		t.Fatal("lost document state", latest, target, active)
-	}
-	ex, ok := m.CurrentOperator()
-	if !ok || ex.Status.ID != "exec-v1-a1" || ex.Status.State != topology.OperatorSucceeded {
-		t.Fatalf("lost operator: %+v", ex)
-	}
-	a, ok := m.Admission("n1", "process-1")
-	if !ok || a.MemberID != 1 || a.State != AdmissionCompleted {
-		t.Fatalf("lost admission: %+v", a)
-	}
-	s, ok := m.LockSession("node/n1")
-	if !ok || s.SessionID != "session-1" || s.InstanceID != "process-1" || s.TTLSeconds != 30 {
-		t.Fatalf("lost session/lock: %+v", s)
-	}
-	got, err := m.Snapshot(context.Background())
-	if err != nil || !bytes.Equal(got, raw) {
-		t.Fatalf("snapshot encoding changed:\n%s\n%s\n%v", raw, got, err)
+	if latest.Version != 0 || target.Version != 0 || active.Version != 0 {
+		t.Fatal("rejected old snapshot mutated state")
 	}
 }

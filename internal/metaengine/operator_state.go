@@ -8,7 +8,7 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func (sm *topologySM) applyBeginOperator(p BeginOperatorProposal) (ApplyResult, bool) {
+func (sm *topologySM) applyBeginOperator(index uint64, p BeginOperatorProposal) (ApplyResult, bool) {
 	if p.Version != sm.latest.Version {
 		return rejectProposal(p.ProposalID, proposalSuperseded,
 			"version %d is not Latest %d", p.Version, sm.latest.Version), false
@@ -31,39 +31,48 @@ func (sm *topologySM) applyBeginOperator(p BeginOperatorProposal) (ApplyResult, 
 
 	previous, found := sm.latestAttemptLocked(p.Version)
 	if found {
-		switch {
-		case !previous.State.Terminal(), previous.State == topology.OperatorSucceeded:
-			if exactStepsEqual(previous.Steps, p.Plan.Steps) {
-				return ApplyResult{ProposalID: p.ProposalID, Accepted: true, OperatorID: previous.ID}, false
-			}
-			return rejectProposal(p.ProposalID, proposalAuthorization,
-				"version %d already has a different exact plan", p.Version), false
-		case previous.State == topology.OperatorSuperseded:
-			return rejectProposal(p.ProposalID, proposalSuperseded,
-				"execution %q is superseded", previous.ID), false
+		if previous.State == topology.OperatorSuperseded {
+			return rejectProposal(p.ProposalID, proposalSuperseded, "execution %q is superseded", previous.ID), false
+		}
+		if !exactStepsEqual(previous.Steps, p.Plan.Steps) {
+			return rejectProposal(p.ProposalID, proposalAuthorization, "version %d already has a different exact plan; stage a new version to replan", p.Version), false
+		}
+		if !previous.State.Terminal() || previous.State == topology.OperatorSucceeded {
+			return ApplyResult{ProposalID: p.ProposalID, Accepted: true, OperatorID: previous.ID}, false
 		}
 	}
 
-	// Retry the immutable accepted plan before consulting its evolving cleanup
-	// observations. Completed effects may have removed all former identities.
-	base, err := sm.deletionBaseLocked(sm.latest)
-	if err != nil {
-		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
-	}
-	if err := topology.ValidatePlanShape(base, sm.latest, p.Plan); err != nil {
-		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
-	}
-	for _, group := range base.Groups {
-		if group.ID == topology.MetaGroupID || sm.latest.Group(group.ID) != nil {
-			continue
+	// An accepted plan remains immutable across attempts. Cleanup proofs can
+	// remove its old identities from the current planning base; validate shape
+	// only on first approval, then validate reachability after inherited fences.
+	if !found {
+		base, err := sm.deletionBaseLocked(sm.latest)
+		if err != nil {
+			return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
 		}
-		deleted := false
-		for _, step := range p.Plan.Steps {
-			deleted = deleted || step.GroupID == group.ID && step.Kind == topology.StepDeleteGroupState
+		if err := topology.ValidatePlanShape(base, sm.latest, p.Plan); err != nil {
+			return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
 		}
-		if !deleted {
-			return rejectProposal(p.ProposalID, proposalAuthorization, "plan omits cleanup of approved group %q", group.ID), false
+		for _, group := range base.Groups {
+			if group.ID == topology.MetaGroupID || sm.latest.Group(group.ID) != nil {
+				continue
+			}
+			covered := true
+			for _, replica := range group.Replicas {
+				covered = covered && topology.ReadmissionCovers(base, sm.latest, p.Plan, replica.NodeName)
+			}
+			if covered {
+				continue
+			}
+			deleted := false
+			for _, step := range p.Plan.Steps {
+				deleted = deleted || step.GroupID == group.ID && step.Kind == topology.StepDeleteGroupState
+			}
+			if !deleted {
+				return rejectProposal(p.ProposalID, proposalAuthorization, "plan omits cleanup of approved group %q", group.ID), false
+			}
 		}
+
 	}
 
 	attempt := uint32(1)
@@ -76,6 +85,15 @@ func (sm *topologySM) applyBeginOperator(p BeginOperatorProposal) (ApplyResult, 
 	if err := sm.validateCleanupCapacity(p.Plan); err != nil {
 		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
 	}
+	var revoked []topology.OperatorID
+	for _, old := range sm.operators {
+		if old.Version < p.Version && !old.State.Terminal() || found && old.ID == previous.ID {
+			revoked = append(revoked, old.ID)
+		}
+	}
+	if err := sm.revokeAuthorityLocked(index, revoked, topology.MakeOperatorID(p.Version, attempt)); err != nil {
+		return rejectProposal(p.ProposalID, proposalOverloaded, "cannot reserve revocation: %v", err), false
+	}
 	sm.supersedeOlderLocked(p.Version, p.At)
 	sm.retireRemovedGroups(sm.latest)
 	sm.target = sm.latest.Clone()
@@ -84,7 +102,7 @@ func (sm *topologySM) applyBeginOperator(p BeginOperatorProposal) (ApplyResult, 
 	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, OperatorID: rec.ID}, true
 }
 
-func (sm *topologySM) applyCommitRepairOperator(p CommitRepairOperatorProposal) (ApplyResult, bool) {
+func (sm *topologySM) applyCommitRepairOperator(index uint64, p CommitRepairOperatorProposal) (ApplyResult, bool) {
 	if p.ExpectedVersion != sm.latest.Version {
 		return rejectProposal(p.ProposalID, proposalVersionConflict,
 			"expected Latest %d, current Latest %d", p.ExpectedVersion, sm.latest.Version), false
@@ -127,7 +145,12 @@ func (sm *topologySM) applyCommitRepairOperator(p CommitRepairOperatorProposal) 
 		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
 	}
 
+	oldAuthority := sm.authority
+	if err := sm.revokeAuthorityLocked(index, nil, topology.MakeOperatorID(doc.Version, 1)); err != nil {
+		return rejectProposal(p.ProposalID, proposalOverloaded, "cannot reserve revocation: %v", err), false
+	}
 	if err := sm.commitLatestLocked(&doc); err != nil {
+		sm.authority = oldAuthority
 		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
 	}
 	sm.retireRemovedGroups(doc)
@@ -172,6 +195,26 @@ func (sm *topologySM) applyTransitionOperator(index uint64, p TransitionOperator
 	if err := validateTransition(*ex, t); err != nil {
 		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
 	}
+	if t.State != topology.OperatorSuperseded && (t.StepSeq > ex.CurrentStep || t.State == topology.OperatorSucceeded) && ex.CurrentStep > 0 {
+		if !sm.stepConsumedLocked(ex, ex.Steps[ex.CurrentStep-1]) {
+			return rejectProposal(p.ProposalID, proposalAuthorityPending, "exact step consumption receipts are incomplete"), false
+		}
+	}
+	if t.State == topology.OperatorSucceeded {
+		if len(ex.Steps) > 0 && !sm.stepConsumedLocked(ex, ex.Steps[len(ex.Steps)-1]) {
+			return rejectProposal(p.ProposalID, proposalAuthorityPending, "final step consumption receipts are incomplete"), false
+		}
+		for _, revocation := range sm.authority.revocations {
+			if !revokedComplete(revocation) {
+				return rejectProposal(p.ProposalID, proposalAuthorityPending, "predecessor revocation is pending"), false
+			}
+		}
+	}
+	if t.State == topology.OperatorSuperseded {
+		if err := sm.revokeAuthorityLocked(index, []topology.OperatorID{ex.ID}, ""); err != nil {
+			return rejectProposal(p.ProposalID, proposalOverloaded, "cannot reserve revocation: %v", err), false
+		}
+	}
 	if t.State == topology.OperatorSuperseded {
 		for _, admission := range sm.admissions {
 			if admission.OperatorID == ex.ID && !admission.State.terminal() {
@@ -192,6 +235,27 @@ func (sm *topologySM) applyTransitionOperator(index uint64, p TransitionOperator
 	ex.Error = t.Error
 	ex.UpdatedAt = t.At
 	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, OperatorID: ex.ID}, true
+}
+
+func (sm *topologySM) stepConsumedLocked(ex *operatorRecord, step topology.Step) bool {
+	if step.Kind == topology.StepWaitCaughtUp {
+		return true
+	}
+	return sm.authority.stepConsumed(ex, step, true)
+}
+
+func (catalog authorityCatalog) stepConsumed(ex *operatorRecord, step topology.Step, requireOpen bool) bool {
+	action := topology.AuthorizedStep{OperatorID: ex.ID, Version: ex.Version, Attempt: ex.Attempt, StepSeq: step.Seq, Kind: step.Kind, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID, TransferNodeName: step.TransferNodeName, TransferReplicaID: step.TransferReplicaID}
+	record := catalog.records[catalog.actions[action]]
+	if record == nil || requireOpen && record.Closed {
+		return false
+	}
+	for _, resource := range record.Grant.Resources {
+		if !resourceConsumed(record, resource) {
+			return false
+		}
+	}
+	return true
 }
 
 func (sm *topologySM) applyActivateTarget(p ActivateTargetProposal) (ApplyResult, bool) {

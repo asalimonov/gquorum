@@ -13,8 +13,9 @@ import (
 // document history. It must outlive a superseded attempt: an RPC may have
 // created application state before the leader recorded its acknowledgement.
 type cleanupProofs struct {
-	replicas map[storage.Identity]topology.OperatorID
-	groups   map[string]topology.OperatorID
+	replicas   map[storage.Identity]topology.OperatorID
+	groups     map[string]topology.OperatorID
+	readmitted map[storage.Identity]topology.OperatorID
 }
 
 func completedStep(op *operatorRecord, step topology.Step) bool {
@@ -26,13 +27,20 @@ func (sm *topologySM) loadIdentity(group, node string, replica uint64) storage.I
 }
 
 func (sm *topologySM) cleanupProofsLocked() cleanupProofs {
-	p := cleanupProofs{replicas: make(map[storage.Identity]topology.OperatorID), groups: make(map[string]topology.OperatorID)}
+	p := cleanupProofs{replicas: make(map[storage.Identity]topology.OperatorID), groups: make(map[string]topology.OperatorID), readmitted: make(map[storage.Identity]topology.OperatorID)}
 	for _, op := range sm.operators {
 		for _, step := range op.Steps {
 			if !completedStep(op, step) {
 				continue
 			}
 			switch step.Kind {
+			case topology.StepStopReplica:
+				if step.GroupID == topology.MetaGroupID {
+					id := sm.loadIdentity(step.GroupID, step.NodeName, step.ReplicaID)
+					if old := p.replicas[id]; old == "" || op.ID < old {
+						p.replicas[id] = op.ID
+					}
+				}
 			case topology.StepCleanupReplicaState:
 				id := sm.loadIdentity(step.GroupID, step.NodeName, step.ReplicaID)
 				if old := p.replicas[id]; old == "" || op.ID < old {
@@ -42,6 +50,48 @@ func (sm *topologySM) cleanupProofsLocked() cleanupProofs {
 				if old := p.groups[step.GroupID]; old == "" || op.ID < old {
 					p.groups[step.GroupID] = op.ID
 				}
+			}
+		}
+	}
+	for _, record := range sm.authority.records {
+		grant := record.Grant
+		if grant.Action != nil && (grant.Action.Kind == topology.StepCleanupReplicaState || grant.Action.Kind == topology.StepDeleteGroupState ||
+			grant.Key.GroupID == topology.MetaGroupID && grant.Action.Kind == topology.StepStopReplica) {
+			for _, receipt := range record.Effects {
+				if receipt.Resource.Kind != topology.AuthorityHost {
+					continue
+				}
+				id := sm.loadIdentity(grant.Key.GroupID, receipt.Target.NodeName, receipt.Target.ReplicaID)
+				if old := p.replicas[id]; old == "" || record.Grant.OperatorID < old {
+					p.replicas[id] = record.Grant.OperatorID
+				}
+			}
+			if grant.Action.Kind == topology.StepDeleteGroupState && len(grant.Resources) > 0 && !slices.ContainsFunc(grant.Resources, func(resource topology.AuthorityResource) bool {
+				return !resourceConsumed(record, resource)
+			}) {
+				if old := p.groups[grant.Key.GroupID]; old == "" || grant.OperatorID < old {
+					p.groups[grant.Key.GroupID] = grant.OperatorID
+				}
+			}
+		}
+		if record.Grant.Purpose != topology.AuthorityReadmit {
+			continue
+		}
+		var owner topology.OperatorID
+		for _, admission := range sm.admissions {
+			if ReadmissionID(*admission) == record.Grant.AdmissionID {
+				owner = admission.OperatorID
+				break
+			}
+		}
+		if owner == "" {
+			continue
+		}
+		for _, receipt := range record.Effects {
+			id := sm.loadIdentity(record.Grant.Key.GroupID, receipt.Target.NodeName, receipt.Target.ReplicaID)
+			p.readmitted[id] = owner
+			if old := p.replicas[id]; old == "" || owner < old {
+				p.replicas[id] = owner
 			}
 		}
 	}
@@ -71,7 +121,11 @@ func (sm *topologySM) activeContains(id storage.Identity) bool {
 	return r != nil && r.NodeName == id.NodeName
 }
 
-func (sm *topologySM) foundingNeedsDocument(op *operatorRecord, step topology.Step, proofs cleanupProofs) bool {
+func (sm *topologySM) ownershipNeedsDocument(op *operatorRecord, step topology.Step, proofs cleanupProofs) bool {
+	if step.Kind == topology.StepPrepareReplica && step.GroupID == topology.MetaGroupID {
+		id := sm.loadIdentity(step.GroupID, step.NodeName, step.ReplicaID)
+		return !sm.activeContains(id) && !proofs.covers(id)
+	}
 	if step.Kind != topology.StepCreateFoundingGroup || step.GroupID == topology.MetaGroupID || proofs.groups[step.GroupID] != "" {
 		return false
 	}
@@ -88,11 +142,11 @@ func (sm *topologySM) foundingNeedsDocument(op *operatorRecord, step topology.St
 	return false
 }
 
-func (sm *topologySM) pinnedFoundingDocuments(proofs cleanupProofs) map[uint64]bool {
+func (sm *topologySM) pinnedOwnershipDocuments(proofs cleanupProofs) map[uint64]bool {
 	pins := make(map[uint64]bool)
 	for _, op := range sm.operators {
 		for _, step := range op.Steps {
-			if sm.foundingNeedsDocument(op, step, proofs) {
+			if sm.ownershipNeedsDocument(op, step, proofs) {
 				pins[op.Version] = true
 			}
 		}
@@ -101,25 +155,25 @@ func (sm *topologySM) pinnedFoundingDocuments(proofs cleanupProofs) map[uint64]b
 }
 
 // Reserve one history slot for further edits, including a cleanup approval.
-// Backpressure applies only to unresolved founding documents, not cluster size
-// or load-group count; one document can establish arbitrarily many groups.
+// Backpressure applies to unresolved founding or metadata-preparation documents,
+// not cluster size or load-group count; reserve space for a cleanup approval.
 func (sm *topologySM) validateCleanupCapacity(plan topology.Plan) error {
-	pins := sm.pinnedFoundingDocuments(sm.cleanupProofsLocked())
-	introducesFounding := false
+	pins := sm.pinnedOwnershipDocuments(sm.cleanupProofsLocked())
+	introducesOwnership := false
 	for _, step := range plan.Steps {
-		if step.Kind == topology.StepCreateFoundingGroup && step.GroupID != topology.MetaGroupID {
+		if step.Kind == topology.StepCreateFoundingGroup && step.GroupID != topology.MetaGroupID || step.Kind == topology.StepPrepareReplica && step.GroupID == topology.MetaGroupID {
 			pins[plan.Version] = true
-			introducesFounding = true
+			introducesOwnership = true
 		}
 	}
-	if introducesFounding && len(pins) >= historyRetention {
-		return fmt.Errorf("unresolved founding cleanup fills document history; complete or delete an earlier founding group first")
+	if introducesOwnership && len(pins) >= historyRetention {
+		return fmt.Errorf("unresolved ownership fills document history; complete an earlier retirement first")
 	}
 	return nil
 }
 
 func (sm *topologySM) nextHistoryLocked(doc topology.Document) ([]topology.Document, error) {
-	pins := sm.pinnedFoundingDocuments(sm.cleanupProofsLocked())
+	pins := sm.pinnedOwnershipDocuments(sm.cleanupProofsLocked())
 	history := append([]topology.Document(nil), sm.history...)
 	for version := range pins {
 		if slices.ContainsFunc(history, func(d topology.Document) bool { return d.Version == version }) {
@@ -152,15 +206,25 @@ func (sm *topologySM) pruneOperatorsLocked() {
 	for _, op := range sm.operators {
 		keep[op.ID] = versions[op.Version] || !op.State.Terminal()
 		for _, step := range op.Steps {
-			if sm.foundingNeedsDocument(op, step, proofs) {
+			if sm.ownershipNeedsDocument(op, step, proofs) {
 				keep[op.ID] = true
 			}
-			if step.GroupID != topology.MetaGroupID && step.Kind == topology.StepPrepareReplica {
+			if step.Kind == topology.StepPrepareReplica {
 				id := sm.loadIdentity(step.GroupID, step.NodeName, step.ReplicaID)
 				if !sm.activeContains(id) && !proofs.covers(id) {
 					keep[op.ID] = true
 				}
 			}
+		}
+	}
+	for _, record := range sm.authority.records {
+		if !sm.authority.recordSettled(record) && record.Grant.OperatorID != "" {
+			keep[record.Grant.OperatorID] = true
+		}
+	}
+	for id, revocation := range sm.authority.revocations {
+		if !revokedComplete(revocation) && sm.operators[id] != nil {
+			keep[id] = true
 		}
 	}
 	// Keep cleanup acknowledgements while an older retained source could otherwise
@@ -192,6 +256,10 @@ func (sm *topologySM) pruneOperatorsLocked() {
 	for len(pending) > 0 {
 		op := sm.operators[pending[0]]
 		pending = pending[1:]
+		if op == nil {
+			// Retained readmission receipts can outlive their operator.
+			continue
+		}
 		for _, step := range op.Steps {
 			keepProof(sm.loadIdentity(step.GroupID, step.NodeName, step.ReplicaID))
 		}

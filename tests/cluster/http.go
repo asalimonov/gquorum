@@ -214,6 +214,16 @@ func (c *Cluster) Get(ctx context.Context, node, group, key string) (Value, erro
 	}
 	return value, response.Decode(&value)
 }
+
+// Read queries any ready hosting replica through Group.Read's safe read path.
+func (c *Cluster) Read(ctx context.Context, node, group, key string) (Value, error) {
+	var value Value
+	response, err := c.Request(ctx, node, "GET", "/api/load/"+group+"/read/"+key, nil, 0)
+	if err := requireStatus(response, err, 200); err != nil {
+		return value, err
+	}
+	return value, response.Decode(&value)
+}
 func (c *Cluster) WaitValue(ctx context.Context, node, group, key, expected string) error {
 	return Poll(ctx, func() (bool, error) {
 		value, err := c.Get(ctx, node, group, key)

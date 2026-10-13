@@ -32,6 +32,12 @@ type Recovery struct {
 
 // Store persists Raft state; application recovery always restores the full snapshot and committed tail.
 type Store interface {
+	// HasState reports any retained replica, pin, partial acquisition, or retired
+	// resource in this store, including groups absent from the metadata catalog.
+	// Return an error when absence cannot be established. This is read-only and
+	// must not create, repair or discard evidence. Owners exclude concurrent use
+	// while deciding whether it is safe to initialize a fresh authority database.
+	HasState(context.Context) (bool, error)
 	BindReplica(context.Context, Identity) error
 	Probe(context.Context, string) (Probe, error)
 	Ensure(context.Context, string) error

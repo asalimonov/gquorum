@@ -19,11 +19,16 @@ type Readmission struct {
 	Previous, Granted             topology.Identity
 	AdmissionID, MetaDBPath       string
 	PreviousGroups, GrantedGroups []topology.Group
+	Grants                        []topology.AuthorityGrant
 }
 
 func (g Readmission) Clone() Readmission {
 	g.PreviousGroups = (topology.Document{Groups: g.PreviousGroups}).Clone().Groups
 	g.GrantedGroups = (topology.Document{Groups: g.GrantedGroups}).Clone().Groups
+	g.Grants = slices.Clone(g.Grants)
+	for i := range g.Grants {
+		g.Grants[i] = g.Grants[i].Clone()
+	}
 	return g
 }
 
@@ -34,7 +39,7 @@ func (g Readmission) Validate(own topology.Identity, path string) error {
 	if own.NodeName != g.Previous.NodeName || own.ClusterID != g.Previous.ClusterID || own.InstanceID != g.Previous.InstanceID || own.MemberID != 0 && own.MemberID != g.Previous.MemberID {
 		return fault.ErrIdentityMismatch
 	}
-	if g.Granted.NodeName != g.Previous.NodeName || g.Granted.ClusterID != g.Previous.ClusterID || g.Granted.InstanceID != g.Previous.InstanceID || g.Granted.MemberID == g.Previous.MemberID {
+	if g.Granted.NodeName != g.Previous.NodeName || g.Granted.ClusterID != g.Previous.ClusterID || g.Granted.InstanceID != g.Previous.InstanceID || g.Granted.MemberID <= g.Previous.MemberID {
 		return fault.ErrIdentityMismatch
 	}
 	prior, err := readmissionIDs(g.PreviousGroups, g.Previous)
@@ -114,7 +119,22 @@ func (h *Host) Readmit(parent context.Context, grant Readmission) error {
 	}
 	h.mu.Unlock()
 	defer func() { h.mu.Lock(); h.readmissionCancel = nil; h.mu.Unlock() }()
+	s, err := h.authorityStore()
+	if err != nil {
+		return err
+	}
+	authority, err := beginReadmissionAuthority(ctx, s, grant)
+	if err != nil {
+		return err
+	}
+	h.Fence()
+	if err := h.closeAuthority(ctx); err != nil {
+		return err
+	}
 	if err := h.stopReplicas(ctx); err != nil {
+		return err
+	}
+	if err := authority.joined(ctx); err != nil {
 		return err
 	}
 	prior, _ := readmissionIDs(grant.PreviousGroups, grant.Previous)
@@ -169,17 +189,27 @@ func (h *Host) Readmit(parent context.Context, grant Readmission) error {
 			return err
 		}
 		req := load.RetirementRequest{Identity: id, Reason: load.RetirementReadmission, AdmissionID: grant.AdmissionID, PreviousMemberID: grant.Previous.MemberID, GrantedMemberID: grant.Granted.MemberID}
+		req.Grant = authority.grants[id.GroupID].Clone()
 		call, done := context.WithTimeout(ctx, h.cfg.EffectTimeout)
-		err := h.retireReadmissionReplica(call, req, prior, check)
+		err := authority.effect(call, id.GroupID, id.ReplicaID, func() error {
+			return h.retireReadmissionReplica(call, req, prior, check)
+		})
 		done()
 		if err != nil {
 			return err
+		}
+		probe, err := h.cfg.Store.Probe(ctx, id.GroupID)
+		if err != nil {
+			return err
+		}
+		if probe.Exists && probe.Identity == id {
+			return fault.New(fault.IdentityMismatch, "completed readmission still has live replica storage", nil)
 		}
 	}
 	if err := check(); err != nil {
 		return err
 	}
-	return retireReadmissionMeta(ctx, grant, h.cfg.Identity().MemberID == 0)
+	return authority.retireMeta(ctx, grant, h.cfg.Identity().MemberID == 0)
 }
 
 func compareReadmissionIdentity(a, b storage.Identity) int {

@@ -35,9 +35,10 @@ type unopenedLifecycle struct{ policy.LifecyclePolicy }
 func nodeOptionsForTest(t *testing.T) NodeOptions {
 	t.Helper()
 	return NodeOptions{
-		Identity:  topology.Identity{NodeName: "n1", ClusterID: "cluster", InstanceID: "process"},
-		Bootstrap: BootstrapOptions{Founders: []FoundingMember{{Node: topology.Node{Name: "n1", Type: "worker", Labels: map[string]string{"zone": "a"}}, MemberID: 1, Address: "127.0.0.1:10001"}}},
-		Meta: MetaOptions{DBPath: filepath.Join(t.TempDir(), "unopened", "meta.bolt"), Network: MetaNetworkOptions{
+		StorageDir: filepath.Join(t.TempDir(), "unopened"),
+		Identity:   topology.Identity{NodeName: "n1", ClusterID: "cluster", InstanceID: "process"},
+		Bootstrap:  BootstrapOptions{Founders: []FoundingMember{{Node: topology.Node{Name: "n1", Type: "worker", Labels: map[string]string{"zone": "a"}}, MemberID: 1, Address: "127.0.0.1:10001"}}},
+		Meta: MetaOptions{Network: MetaNetworkOptions{
 			Listener: unopenedListener{}, AdvertiseAddress: "127.0.0.1:10001", AllowPlaintext: true, ClusterCredential: []byte("credential"),
 		}},
 		Health: unopenedHealth{},
@@ -70,7 +71,7 @@ func TestNodeOptionsPureDefaultsAndStorageSelection(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if d.Identity.MemberID != 1 || d.Node.Type != "worker" || d.Limits != (topology.Limits{MaxNodes: 3, MaxReplicas: 5}) || d.Meta.Timing != DefaultMetaTiming() || d.Meta.SessionTTL != 15*time.Second || d.Meta.MaxWatchers != 256 || d.Meta.SnapshotThreshold != 512 || d.Meta.Network.MaxSnapshotBytes != 64<<20 {
+			if d.Identity.MemberID != 1 || d.Node.Type != "worker" || d.Limits != (topology.Limits{MaxNodes: 3, MaxReplicas: 5, MaxPendingAuthorityRecords: 1024}) || d.Meta.Timing != DefaultMetaTiming() || d.Meta.SessionTTL != 15*time.Second || d.Meta.MaxWatchers != 256 || d.Meta.SnapshotThreshold != 512 || d.Meta.Network.MaxSnapshotBytes != 64<<20 {
 				t.Fatal("incorrect node defaults", d)
 			}
 			if d.Meta.Observation != (ObservationOptions{Interval: 5 * time.Second, Timeout: 2 * time.Second}) || d.Policies.Scheduling != (SchedulingOptions{Interval: 30 * time.Second, Timeout: 20 * time.Second, Cooldown: 5 * time.Minute}) || d.Policies.CallbackTimeout != 10*time.Second {
@@ -88,8 +89,11 @@ func TestNodeOptionsPureDefaultsAndStorageSelection(t *testing.T) {
 			if mode != "meta_only" && (d.Loads.EffectTimeout != 10*time.Second || d.Loads.RecoveryInterval != 250*time.Millisecond || d.Loads.RetirementInterval != time.Minute) {
 				t.Fatal("incorrect load defaults", d.Loads)
 			}
-			if _, err := os.Stat(filepath.Dir(o.Meta.DBPath)); !errors.Is(err, os.ErrNotExist) {
+			if _, err := os.Stat(filepath.Dir(o.metaDBPath())); !errors.Is(err, os.ErrNotExist) {
 				t.Fatal("validation acquired meta storage", err)
+			}
+			if _, err := os.Stat(o.StorageDir); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("validation acquired authority storage", err)
 			}
 			if o.Loads.Storage.WAL != nil {
 				if _, err := os.Stat(o.Loads.Storage.WAL.RootDir); !errors.Is(err, os.ErrNotExist) {
@@ -103,6 +107,9 @@ func TestNodeOptionsPureDefaultsAndStorageSelection(t *testing.T) {
 func TestNodeOptionsRejectAmbiguousOrUnsafeSettings(t *testing.T) {
 	t.Parallel()
 	cases := map[string]func(*NodeOptions){
+		"missing storage directory":                     func(o *NodeOptions) { o.StorageDir = "" },
+		"NUL storage directory":                         func(o *NodeOptions) { o.StorageDir = "invalid\x00path" },
+		"storage directory within load retirement root": func(o *NodeOptions) { o.StorageDir = filepath.Join(o.Loads.Storage.WAL.RootDir, "system") },
 		"custom scheduler with built-in config": func(o *NodeOptions) {
 			o.Policies.Scheduler = unopenedScheduler{}
 			o.Policies.RestoreDegraded.StableFor = time.Second
@@ -200,5 +207,25 @@ func TestNodeOptionsOnlyLimitsBoundClusterSize(t *testing.T) {
 	o.Limits = topology.Limits{MaxNodes: 7, MaxReplicas: 7}
 	if err := o.Validate(); err != nil {
 		t.Fatal("additional hard-coded cluster limit", err)
+	}
+}
+
+func TestConsistentReadOptionsValidationAndWiring(t *testing.T) {
+	t.Parallel()
+	o := nodeOptionsForTest(t)
+	o.Meta.Reads = load.ReadOptions{Timeout: time.Second, MaxPending: 2, MaxRequestBytes: 128, MaxResultBytes: 4096}
+	_, meta, err := resolveNodeOptions(o)
+	if err != nil || load.ReadOptions(meta.Reads) != o.Meta.Reads {
+		t.Fatal(meta.Reads, err)
+	}
+	o.Meta.Reads.MaxPending = -1
+	if _, _, err := resolveNodeOptions(o); !errors.Is(err, fault.ErrInvalid) {
+		t.Fatal(err)
+	}
+	o = nodeOptionsForTest(t)
+	o.Loads = loadOptionsForTest(t)
+	o.Loads.Engine.Reads.MaxResultBytes = -1
+	if _, _, err := resolveNodeOptions(o); !errors.Is(err, fault.ErrInvalid) {
+		t.Fatal(err)
 	}
 }

@@ -41,7 +41,7 @@ func (g *Group) beginEffect(parent context.Context) (context.Context, func(), er
 		return nil, nil, err
 	}
 	g.mu.Lock()
-	if !g.started || g.quiescing || g.selfRemoval != nil || g.ctx.Err() != nil {
+	if !g.started || g.controlOnly || g.quiescing || g.selfRemoval != nil || g.ctx.Err() != nil {
 		g.mu.Unlock()
 		return nil, nil, fault.ErrStopped
 	}
@@ -53,7 +53,7 @@ func (g *Group) beginEffect(parent context.Context) (context.Context, func(), er
 }
 
 // Quiesce refuses new mutations, cancels and joins topology/effect workers,
-// attempts bounded deactivation, then stops networking and Raft. It keeps the
+// attempts bounded deactivation, then stops Raft and networking. It keeps the
 // meta database open so callers can stop their load runtimes before final Stop.
 // Repeated calls wait for the same work. Timeout preserves resource ownership.
 func (g *Group) Quiesce(ctx context.Context) error {
@@ -67,6 +67,27 @@ func (g *Group) Quiesce(ctx context.Context) error {
 }
 func (g *Group) requestQuiesce() {
 	g.quiesceOnce.Do(func() {
+		g.requestParticipationFence()
+		go g.finishQuiesce()
+	})
+}
+
+// FenceParticipation joins Raft and ordinary work while retaining the owned
+// protocol transport and database. This allows the resource owner to finish
+// authority acknowledgements after fencing participation. It never restarts the
+// engine; Quiesce/Stop subsequently join the remaining protocol lifetime.
+func (g *Group) FenceParticipation(ctx context.Context) error {
+	g.requestParticipationFence()
+	select {
+	case <-g.participationFenced:
+		return nil
+	case <-ctx.Done():
+		return fault.New(fault.ShutdownTimeout, "meta participation fencing has not completed", ctx.Err())
+	}
+}
+
+func (g *Group) requestParticipationFence() {
+	g.participationOnce.Do(func() {
 		g.mu.Lock()
 		g.quiescing = true
 		if g.terminal == nil {
@@ -76,10 +97,10 @@ func (g *Group) requestQuiesce() {
 			g.workCancel()
 		}
 		g.mu.Unlock()
-		go g.finishQuiesce()
+		go g.finishParticipationFence()
 	})
 }
-func (g *Group) finishQuiesce() {
+func (g *Group) finishParticipationFence() {
 	// Serialize component startup and shutdown. No Add/Start can occur after any
 	// component has been joined, even when Close races with the first Start.
 	g.startGate.Lock()
@@ -102,6 +123,16 @@ func (g *Group) finishQuiesce() {
 	g.effectWG.Wait()
 	g.wg.Wait()
 	g.deactivateForShutdown()
+	if engine := g.engine.Load(); engine != nil {
+		_ = engine.Stop(context.Background())
+	}
+	close(g.participationFenced)
+}
+
+func (g *Group) finishQuiesce() {
+	<-g.participationFenced
+	g.startGate.Lock()
+	defer g.startGate.Unlock()
 	g.mu.Lock()
 	g.rpcClosed = true
 	if g.cancel != nil {
@@ -112,9 +143,6 @@ func (g *Group) finishQuiesce() {
 		_ = g.transport.Stop(context.Background())
 	}
 	g.rpcWG.Wait()
-	if engine := g.engine.Load(); engine != nil {
-		_ = engine.Stop(context.Background())
-	}
 	g.removalWG.Wait()
 	g.mu.Lock()
 	if g.terminal == nil {

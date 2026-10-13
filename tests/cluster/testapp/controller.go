@@ -37,7 +37,7 @@ func (a *application) newReplica(ctx context.Context, spec load.ReplicaSpec) (lo
 		a.clusterHooks.runtime.factories.Add(1)
 	}
 	a.mu.Unlock()
-	return load.Application{StateMachine: machine, Close: func(ctx context.Context) error {
+	return load.Application{StateMachine: a.clusterMachine(machine, walKey{ref.GroupID, ref.ReplicaID}), Close: func(ctx context.Context) error {
 		if err := a.joinProjection(ctx, walKey{ref.GroupID, ref.ReplicaID}); err != nil {
 			return err
 		}
@@ -47,6 +47,7 @@ func (a *application) newReplica(ctx context.Context, spec load.ReplicaSpec) (lo
 			return fault.ErrIdentityMismatch
 		}
 		delete(a.machines, ref)
+		a.forgetReadControl(walKey{ref.GroupID, ref.ReplicaID})
 		return nil
 	}}, nil
 }
@@ -230,5 +231,5 @@ func (a *application) retireReplica(ctx context.Context, req load.RetirementRequ
 	} else if !os.IsNotExist(err) {
 		return load.RetirementResult{}, err
 	}
-	return load.RetirementResult{Identity: req.Identity, Reason: req.Reason, Authorization: req.Authorization, AdmissionID: req.AdmissionID, PreviousMemberID: req.PreviousMemberID, GrantedMemberID: req.GrantedMemberID, Verified: true}, nil
+	return load.RetirementResult{Grant: req.Grant.Clone(), Identity: req.Identity, Reason: req.Reason, Authorization: req.Authorization, AdmissionID: req.AdmissionID, PreviousMemberID: req.PreviousMemberID, GrantedMemberID: req.GrantedMemberID, Verified: true}, nil
 }

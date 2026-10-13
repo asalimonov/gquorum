@@ -50,6 +50,22 @@ func TestSelfRemoval_OtherMemberRemovedDoesNotFire(t *testing.T) {
 	refuteRemoval(t, g)
 }
 
+func TestSelfRemoval_ApprovedNodeDeletionFencesSeenLearner(t *testing.T) {
+	t.Parallel()
+	g, fired := removalFixture(t, nil)
+	doc := removalDocument(topology.NodeExcluded, 2)
+	doc.Nodes = doc.Nodes[:1]
+	g.observeRemoval(g.identity, doc, raftpb.ConfState{Voters: []uint64{1}, Learners: []uint64{2}}, 41)
+	refuteRemoval(t, g)
+	g.observeRemoval(g.identity, doc, raftpb.ConfState{Voters: []uint64{1}}, 42)
+	if reason := awaitRemoval(t, fired); !strings.Contains(reason, "approved node deletion v4") {
+		t.Fatal(reason)
+	}
+	if err := g.ensureRunning(t.Context()); !errors.Is(err, fault.ErrStopped) {
+		t.Fatal("deleted learner retained ordinary participation", err)
+	}
+}
+
 func TestSelfRemoval_DemotionToLearnerDoesNotFire(t *testing.T) {
 	t.Parallel()
 	g, _ := removalFixture(t, nil)

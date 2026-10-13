@@ -21,16 +21,16 @@ type slowEffectController struct {
 	once                                 sync.Once
 }
 
-func (c *slowEffectController) CreateGroup(ctx context.Context, a topology.AuthorizedStep) error {
-	if _, err := c.authorized(ctx, a); err != nil {
-		return err
+func (c *slowEffectController) CreateGroup(ctx context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+	if _, err := c.authorized(ctx, grant); err != nil {
+		return nil, err
 	}
 	c.once.Do(func() { close(c.entered) })
 	<-ctx.Done()
 	close(c.canceled)
 	<-c.release
 	close(c.returned)
-	return ctx.Err()
+	return nil, ctx.Err()
 }
 func TestMetaQuiesceJoinsEffectBeforeReturningAndKeepsOwnedState(t *testing.T) {
 	t.Parallel()

@@ -36,7 +36,8 @@ func TestExactFutureProgressIsRetryableButNeverAuthorized(t *testing.T) {
 	if err := sm.Authorize(context.Background(), bad); !errors.Is(err, fault.ErrOperatorAuthorization) {
 		t.Fatal("wrong future operation", err)
 	}
-	transition(4, 2, topology.OperatorRunning)
+	index := consumeTestStep(t, sm, begin.OperatorID, 4)
+	transition(index, 2, topology.OperatorRunning)
 	if err := sm.Authorize(context.Background(), a); err != nil {
 		t.Fatal("applied exact progress still unavailable", err)
 	}
@@ -45,7 +46,8 @@ func TestExactFutureProgressIsRetryableButNeverAuthorized(t *testing.T) {
 	if err := sm.Authorize(context.Background(), stale); !errors.Is(err, fault.ErrOperatorAuthorization) {
 		t.Fatal("old step accepted", err)
 	}
-	transition(5, 2, topology.OperatorSucceeded)
+	index = consumeTestStep(t, sm, begin.OperatorID, index+1)
+	transition(index, 2, topology.OperatorSucceeded)
 	if err := sm.Authorize(context.Background(), a); !errors.Is(err, fault.ErrOperatorAuthorization) {
 		t.Fatal("terminal effect accepted", err)
 	}

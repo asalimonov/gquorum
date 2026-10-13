@@ -16,6 +16,7 @@ func removalFixture(t *testing.T, callback func(context.Context, string) error) 
 	g := &Group{identity: topology.Identity{NodeName: "n2", ClusterID: "cluster", InstanceID: "instance", MemberID: 2}, memberSeen: true, started: true, ctx: root, workCtx: work, workCancel: stop, removalSignal: make(chan struct{}, 1)}
 	g.cancel = cancel
 	g.quiesced, g.stopped = make(chan struct{}), make(chan struct{})
+	g.participationFenced = make(chan struct{})
 	g.opts.OnSelfRemoved = func(ctx context.Context, reason string) error {
 		fired <- reason
 		if callback != nil {

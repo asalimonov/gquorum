@@ -153,8 +153,8 @@ func TestPublicNodeApprovedLoadParksLostWALRecoversAndRetires(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := load.ReplicaRef{GroupID: "work", ReplicaID: staged.Document.Group("work").Replicas[0].ReplicaID}
-	if _, err := n.StartLoadGroup(ctx, ref); !errors.Is(err, fault.ErrIdentityMismatch) {
-		t.Fatal("Latest started unapproved group", err)
+	if _, err := n.StartLoadGroup(ctx, ref); !errors.Is(err, fault.ErrAuthorityPending) {
+		t.Fatal("staged group did not wait for committed authority", err)
 	}
 	if probe, err := store.Probe(ctx, "work"); err != nil || probe.Exists {
 		t.Fatal("staged refusal mutated store", probe, err)
@@ -268,7 +268,7 @@ func TestPublicNodeStopJoinsEffectsBeforeDatabase(t *testing.T) {
 	if len(n.Status().Loads) != 1 {
 		t.Fatal("shutdown forgot replica before effect joined", n.Status())
 	}
-	path := c.options[0].Meta.DBPath
+	path := filepath.Join(c.options[0].StorageDir, "_meta.bolt")
 	if db, err := bolt.Open(path, 0o600, &bolt.Options{Timeout: 30 * time.Millisecond}); !errors.Is(err, bolt.ErrTimeout) {
 		if db != nil {
 			_ = db.Close()

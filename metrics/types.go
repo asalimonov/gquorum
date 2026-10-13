@@ -57,7 +57,21 @@ type PeerProgress struct {
 	AckAge       time.Duration `json:"ack_age_ns"`
 	AckKnown     bool          `json:"ack_known"`
 }
+
+// ReadQueue describes one owner-loop sample of bounded read work. It has the
+// enclosing Raft stamp's age and validity; it is never a read barrier.
+type ReadQueue struct {
+	Limit          int `json:"limit"`
+	InFlight       int `json:"in_flight"`
+	Queued         int `json:"queued"`
+	AwaitingQuorum int `json:"awaiting_quorum"`
+	AwaitingApply  int `json:"awaiting_apply"`
+	LocalRounds    int `json:"local_rounds"`
+	RemoteRounds   int `json:"remote_rounds"`
+}
+
 type ReplicaSample struct {
+	ReadQueue          ReadQueue       `json:"read_queue"`
 	Identity           ReplicaIdentity `json:"identity"`
 	At                 time.Time       `json:"at"`
 	Meter              Stamp           `json:"meter"`

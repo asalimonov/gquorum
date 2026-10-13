@@ -39,7 +39,22 @@ type Timing struct {
 	ElectionTicks, HeartbeatTicks int
 	WALWriteWait                  time.Duration
 }
+type ReadOptions struct {
+	Timeout         time.Duration
+	MaxPending      int
+	MaxRequestBytes int
+	MaxResultBytes  int
+}
+
+// QueryMachine is an optional read-only extension. Query is serialized with
+// Apply, Snapshot and Restore, must honor cancellation, and must not wait for
+// its own engine or shutdown. Query errors fail only the read.
+type QueryMachine interface {
+	Query(context.Context, []byte) (Result, error)
+}
+
 type EngineOptions struct {
+	Reads                                   ReadOptions
 	Timing                                  Timing
 	ProposalTimeout                         time.Duration // default 30s; caller's shorter deadline wins
 	SnapshotThreshold                       uint64

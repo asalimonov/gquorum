@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -95,11 +96,13 @@ func TestPublicNodeCloseErrorKeepsOwnershipUntilExplicitRetry(t *testing.T) {
 	if n.Status().State != quorum.NodeStopping || closes.Load() != 1 || len(n.Status().Loads) != 1 {
 		t.Fatal("incomplete release forgotten", n.Status(), closes.Load())
 	}
-	if db, err := bolt.Open(c.options[0].Meta.DBPath, 0o600, &bolt.Options{Timeout: 30 * time.Millisecond}); !errors.Is(err, bolt.ErrTimeout) {
-		if db != nil {
-			_ = db.Close()
+	for _, path := range []string{filepath.Join(c.options[0].StorageDir, "_meta.bolt"), filepath.Join(c.options[0].StorageDir, "_authority.bolt")} {
+		if db, err := bolt.Open(path, 0o600, &bolt.Options{Timeout: 30 * time.Millisecond}); !errors.Is(err, bolt.ErrTimeout) {
+			if db != nil {
+				_ = db.Close()
+			}
+			t.Fatal("owned database closed ahead of incomplete application release", path, err)
 		}
-		t.Fatal("meta database closed ahead of incomplete application release", err)
 	}
 	if err = n.Start(ctx); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal("failed release reused node", err)
@@ -110,11 +113,13 @@ func TestPublicNodeCloseErrorKeepsOwnershipUntilExplicitRetry(t *testing.T) {
 	if n.Status().State != quorum.NodeStopped || closes.Load() != 2 || len(n.Status().Loads) != 0 {
 		t.Fatal("retry did not release original ownership", n.Status(), closes.Load())
 	}
-	db, err := bolt.Open(c.options[0].Meta.DBPath, 0o600, &bolt.Options{Timeout: 30 * time.Millisecond})
-	if err != nil {
-		t.Fatal("completed Stop retained meta database", err)
+	for _, path := range []string{filepath.Join(c.options[0].StorageDir, "_meta.bolt"), filepath.Join(c.options[0].StorageDir, "_authority.bolt")} {
+		db, err := bolt.Open(path, 0o600, &bolt.Options{Timeout: 30 * time.Millisecond})
+		if err != nil {
+			t.Fatal("completed Stop retained owned database", path, err)
+		}
+		_ = db.Close()
 	}
-	_ = db.Close()
 }
 
 func TestPublicNodeCanceledFactoryRemainsOwnedThroughLateReturn(t *testing.T) {

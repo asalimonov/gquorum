@@ -32,6 +32,7 @@ type Group struct {
 	terminal             error
 	closeErr             error
 	firstBootstrap       bool
+	controlOnly          bool
 	lastLoadStatus       map[string]topology.GroupStatus
 	identity             topology.Identity
 	machine              *metaengine.Machine
@@ -57,6 +58,7 @@ type Group struct {
 	readmissionGrant     *Readmission
 	joinDone, joinReady  bool
 	joinAdmission        metaengine.AdmissionRecord
+	joinReceipts         []topology.EffectReceipt
 	joinLeader           string
 	admissionToken       chan struct{}
 	ctx                  context.Context
@@ -66,6 +68,8 @@ type Group struct {
 	quiescing, rpcClosed bool
 	quiesced             chan struct{}
 	quiesceOnce          sync.Once
+	participationFenced  chan struct{}
+	participationOnce    sync.Once
 	effectWG, rpcWG      sync.WaitGroup
 	memberSeen           bool
 	selfRemoval          *topology.SelfRemovalStatus
@@ -121,7 +125,7 @@ func New(input Options) (*Group, error) {
 			return nil, err
 		}
 	}
-	g := &Group{opts: opts, rules: topology.Rules{SchemaVersion: 1, Limits: opts.Limits}, identity: opts.Identity, lifecycle: "constructed", coordinator: membership.NewCoordinator(), leases: newSessionManager(opts.SessionTTL), addresses: make(map[string]string), joinMembers: make(map[uint64]string), admissionToken: make(chan struct{}, 1), ready: make(chan struct{}), stopped: make(chan struct{}), quiesced: make(chan struct{}), removalSignal: make(chan struct{}, 1), sessionToken: make(chan struct{}, 1)}
+	g := &Group{opts: opts, rules: topology.Rules{SchemaVersion: 1, Limits: opts.Limits}, identity: opts.Identity, lifecycle: "constructed", coordinator: membership.NewCoordinator(), leases: newSessionManager(opts.SessionTTL), addresses: make(map[string]string), joinMembers: make(map[uint64]string), admissionToken: make(chan struct{}, 1), ready: make(chan struct{}), stopped: make(chan struct{}), quiesced: make(chan struct{}), participationFenced: make(chan struct{}), removalSignal: make(chan struct{}, 1), sessionToken: make(chan struct{}, 1)}
 	g.firstBootstrap = !exists && !opts.Join
 	g.lastLoadStatus = make(map[string]topology.GroupStatus)
 	for _, founder := range opts.Founders {
@@ -142,7 +146,7 @@ func New(input Options) (*Group, error) {
 	if err != nil {
 		return nil, err
 	}
-	g.controller, err = operator.New(operator.Config{Store: operatorStore{g}, Rules: g.rules, Coordinator: operatorCoordinator{g}, Groups: groupControllers{g}, OwnsGroup: func(string) bool { return true }, Interval: g.opts.Timing.TickInterval, MaxRetryInterval: time.Second, FinalValidator: g.finalTarget})
+	g.controller, err = operator.New(operator.Config{Store: operatorStore{g}, Rules: g.rules, Coordinator: operatorCoordinator{g}, Authority: g, Groups: groupControllers{g}, OwnsGroup: func(string) bool { return true }, Interval: g.opts.Timing.TickInterval, MaxRetryInterval: time.Second, FinalValidator: g.finalTarget, PlanValidator: g.validateRemainingPlan})
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +177,14 @@ func New(input Options) (*Group, error) {
 				}
 			}
 		}
-		if err = g.openEngine(opts.Identity, mode, peers); err != nil {
+		err = g.authorizeEngine(opts.Identity)
+		if errors.Is(err, fault.ErrAuthorityFenced) && exists && opts.Join {
+			err = g.openControlStore(opts.Identity)
+		} else if err == nil {
+			err = g.openAuthorizedEngine(opts.Identity, mode, peers)
+		}
+		if err != nil {
+			_ = g.transport.Stop(context.Background())
 			return nil, err
 		}
 	}
@@ -181,6 +192,20 @@ func New(input Options) (*Group, error) {
 	return g, nil
 }
 func (g *Group) openEngine(identity topology.Identity, mode raftengine.Mode, peers []raft.Peer) error {
+	if err := g.authorizeEngine(identity); err != nil {
+		return err
+	}
+	return g.openAuthorizedEngine(identity, mode, peers)
+}
+
+func (g *Group) authorizeEngine(identity topology.Identity) error {
+	if g.opts.BeforeOpenEngine != nil {
+		return g.opts.BeforeOpenEngine(identity)
+	}
+	return nil
+}
+
+func (g *Group) openAuthorizedEngine(identity topology.Identity, mode raftengine.Mode, peers []raft.Peer) error {
 	store, err := metastore.Open(g.opts.DBPath)
 	if err != nil {
 		return err
@@ -240,10 +265,17 @@ func (g *Group) openEngine(identity topology.Identity, mode raftengine.Mode, pee
 			}
 		}
 	}
-	engine, err := raftengine.NewMeta(raftengine.Options{GroupID: topology.MetaGroupID, NodeName: identity.NodeName, ClusterID: identity.ClusterID, InstanceID: identity.InstanceID, ReplicaID: identity.MemberID, Mode: mode, Peers: peers, FoundingLearners: learners, Metrics: g.opts.Metrics.Local(), Timing: raftengine.Timing{TickInterval: g.opts.Timing.TickInterval, ElectionTicks: g.opts.Timing.ElectionTicks, HeartbeatTicks: g.opts.Timing.HeartbeatTicks}, Store: &metastore.Adapter{Store: store}, Machine: machine, Transport: g.transport, Events: g.opts.Events, Logger: g.opts.Logger, SnapshotThreshold: g.opts.SnapshotThreshold})
+	engine, err := raftengine.NewMeta(raftengine.Options{GroupID: topology.MetaGroupID, NodeName: identity.NodeName, ClusterID: identity.ClusterID, InstanceID: identity.InstanceID, ReplicaID: identity.MemberID, MemberID: identity.MemberID, ManagedAuthority: true, Mode: mode, Peers: peers, FoundingLearners: learners, Reads: g.opts.Reads, Metrics: g.opts.Metrics.Local(), Timing: raftengine.Timing{TickInterval: g.opts.Timing.TickInterval, ElectionTicks: g.opts.Timing.ElectionTicks, HeartbeatTicks: g.opts.Timing.HeartbeatTicks}, Store: &metastore.Adapter{Store: store}, Machine: machine, Transport: g.transport, Events: g.opts.Events, Logger: g.opts.Logger, SnapshotThreshold: g.opts.SnapshotThreshold})
 	if err != nil {
 		store.Close()
 		return err
+	}
+	if g.opts.AfterOpenEngine != nil {
+		if err := g.opts.AfterOpenEngine(identity); err != nil {
+			// NewMeta owns no workers; nothing can use this borrowed store yet.
+			store.Close()
+			return err
+		}
 	}
 	g.mu.Lock()
 	g.store = store
@@ -251,6 +283,7 @@ func (g *Group) openEngine(identity topology.Identity, mode raftengine.Mode, pee
 	g.recoveryGroups, g.recoveryVersion = recoveryGroups, recoveryVersion
 	g.machine = machine
 	g.identity = identity
+	g.controlOnly = false
 	g.memberSeen = seen || containsMember(engine.Status().ConfState, identity.MemberID)
 	g.selfRemoval = nil
 	g.mu.Unlock()
@@ -346,13 +379,13 @@ func (g *Group) WaitReady(ctx context.Context) error {
 func (g *Group) Rules() topology.Rules { return g.rules }
 func (g *Group) IsLeader() bool {
 	g.mu.RLock()
-	running := g.started && g.selfRemoval == nil && g.ctx != nil && g.ctx.Err() == nil
+	running := g.started && !g.controlOnly && !g.quiescing && g.selfRemoval == nil && g.ctx != nil && g.ctx.Err() == nil
 	g.mu.RUnlock()
 	if !running {
 		return false
 	}
 	engine := g.engine.Load()
-	return engine != nil && engine.Error() == nil && engine.IsLeader()
+	return engine != nil && engine.Running() && engine.Error() == nil && engine.IsLeader()
 }
 func (g *Group) state() *metaengine.Machine { g.mu.RLock(); defer g.mu.RUnlock(); return g.machine }
 func (g *Group) currentIdentity() topology.Identity {
@@ -436,7 +469,7 @@ func (g *Group) ensureRuntimeLocked(shutdown bool) error {
 	if g.terminal != nil {
 		return g.terminal
 	}
-	if !g.started || g.ctx == nil || g.ctx.Err() != nil || (g.quiescing || g.selfRemoval != nil) && !shutdown {
+	if !g.started || g.ctx == nil || g.ctx.Err() != nil || g.controlOnly || (g.quiescing || g.selfRemoval != nil) && !shutdown {
 		return fault.ErrStopped
 	}
 	return nil

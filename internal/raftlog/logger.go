@@ -16,7 +16,7 @@ func (l Logger) Warning(v ...any)            { l.Log.Warn(fmt.Sprint(v...)) }
 func (l Logger) Warningf(f string, v ...any) { l.Log.Warn(fmt.Sprintf(f, v...)) }
 func (l Logger) Error(v ...any)              { l.Log.Error(fmt.Sprint(v...)) }
 func (l Logger) Errorf(f string, v ...any)   { l.Log.Error(fmt.Sprintf(f, v...)) }
-func (l Logger) Fatal(v ...any)              { panic(fmt.Sprint(v...)) }
-func (l Logger) Fatalf(f string, v ...any)   { panic(fmt.Sprintf(f, v...)) }
-func (l Logger) Panic(v ...any)              { panic(fmt.Sprint(v...)) }
-func (l Logger) Panicf(f string, v ...any)   { panic(fmt.Sprintf(f, v...)) }
+func (_ Logger) Fatal(v ...any)              { panic(fmt.Sprint(v...)) }
+func (_ Logger) Fatalf(f string, v ...any)   { panic(fmt.Sprintf(f, v...)) }
+func (_ Logger) Panic(v ...any)              { panic(fmt.Sprint(v...)) }
+func (_ Logger) Panicf(f string, v ...any)   { panic(fmt.Sprintf(f, v...)) }

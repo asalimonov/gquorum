@@ -19,6 +19,18 @@ type Adapter struct {
 	identity storage.Identity
 }
 
+func (a *Adapter) HasState(ctx context.Context) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	var retained bool
+	err := a.Store.db.View(func(tx *bolt.Tx) error {
+		retained = !storeIsFresh(tx)
+		return ctx.Err()
+	})
+	return retained, err
+}
+
 func (a *Adapter) BindReplica(ctx context.Context, id storage.Identity) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -124,7 +136,7 @@ func (a *Adapter) Compact(ctx context.Context, id string, index uint64) error {
 	}
 	return a.Store.CompactEntries(index)
 }
-func (a *Adapter) Quarantine(ctx context.Context, id string, expected uint64) (string, error) {
+func (a *Adapter) Quarantine(ctx context.Context, id string, _ uint64) (string, error) {
 	if err := a.check(ctx, id); err != nil {
 		return "", err
 	}

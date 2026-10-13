@@ -68,6 +68,7 @@ func TestMemberSeenSnapshotAndApplicationRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	snap := raftpb.Snapshot{Data: []byte("snapshot"), Metadata: raftpb.SnapshotMetadata{Index: 4, Term: 1, ConfState: cs}}
+	snap = completeSnapshot(t, s, snap)
 	if err := s.InstallSnapshot(snap, raftpb.HardState{Term: 1, Commit: 4}); !errors.Is(err, fault.ErrInvalid) {
 		t.Fatal(err)
 	}
@@ -80,7 +81,7 @@ func TestMemberSeenSnapshotAndApplicationRollback(t *testing.T) {
 	if seen, err := s.MemberSeen(); err != nil || !seen {
 		t.Fatal("installed membership not recorded", seen, err)
 	}
-	if err := s.InstallSnapshot(raftpb.Snapshot{Metadata: raftpb.SnapshotMetadata{Index: 5, Term: 2, ConfState: raftpb.ConfState{Voters: []uint64{1}}}}, raftpb.HardState{Term: 2, Commit: 5}); err != nil {
+	if err := s.InstallSnapshot(completeSnapshot(t, s, raftpb.Snapshot{Metadata: raftpb.SnapshotMetadata{Index: 5, Term: 2, ConfState: raftpb.ConfState{Voters: []uint64{1}}}}), raftpb.HardState{Term: 2, Commit: 5}); err != nil {
 		t.Fatal(err)
 	}
 	if seen, err := s.MemberSeen(); err != nil || !seen {

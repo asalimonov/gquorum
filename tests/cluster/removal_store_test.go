@@ -20,7 +20,7 @@ import (
 // preserves the former private runtime assertion without a second live owner.
 func assertDurableSelfRemoval(t *testing.T, ctx context.Context, c *Cluster, status gquorum.NodeStatus) {
 	t.Helper()
-	source, err := c.Node(status.Identity.NodeName).Container.CopyFileFromContainer(ctx, "/data/meta.bolt")
+	source, err := c.Node(status.Identity.NodeName).Container.CopyFileFromContainer(ctx, "/data/_meta.bolt")
 	if err != nil {
 		t.Fatal(err)
 	}

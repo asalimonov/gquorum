@@ -32,12 +32,72 @@ default. The control's HTTP deadline is one minute and ordinary application
 requests keep their ten-second deadline. Request cancellation participates in the
 application's owned effect lifetime and engine waiter cleanup.
 
+`GET /api/load/{id}/read/{key}` queries `Group.Read`: any ready local hosting
+replica, including a follower or learner, obtains leader-confirmed ReadIndex,
+waits for its own application state and runs the optional KV Query on the machine
+owner. Successful replies identify `consistency: linearizable`; missing keys
+return 404 after the same barrier. Query errors do not halt the replica. The
+existing `GET /api/load/{id}/keys/{key}` remains an explicit local observation
+with `consistency: local`. Both routes apply the caller's serving gate; neither
+redirects a stopped local handle. The process-test `Cluster.Read` helper uses the
+consistent route. No internal authority data appears in application query payloads.
+
+The typed load transport preserves `ReplicaQuery.Native` and `ReplicaStatus.Native`
+through its authenticated ReadReplica route, including exact applied indexes and
+member/replica identities. Diagnostic replies do not supply native proof. Node
+performs the authority and identity checks after the protocol validates its header
+and route. Pending authority maps to HTTP 503; a fenced grant or replan-required
+result maps to HTTP 409.
+
 Approved load learners can serve local observations and forward writes through
 their Raft leader. The serving gate requires the exact Active assignment and
 matching native role, so prepared replicas cannot serve early. Bootstrap gives
 the `workers` group an explicit two-voter target and places learners on remaining
 eligible hosts. Group administration also exposes `voter-policy`, `hosting` and
 `pinned-learner` mutations through the fixture's public API adapter.
+
+`PUT /internal/test/fences/{group}/{host|group}` arms a resource fence delivery
+barrier. Its body requires the current node/member/process `identity`; group
+barriers also bind the exact local `replica_id` (zero selects the current one).
+`purpose` defaults to revocation `fence`, `min_revision` selects newer grants,
+and `after: true` holds response delivery after Node durably installs the fence.
+The default holds delivery before installation. Cancellation ends an individual
+wait while the barrier remains armed for retries; authenticated `DELETE` releases
+it. A former-member or replaced group-replica control cannot hold its successor.
+
+`GET /internal/test/authority/{group}` returns bounded owned captures of delivered
+actions, successful receiver receipts, installed fence evidence and armed fence
+barriers. Captures keep exact uint64 revisions and clone immutable grant/proof
+fields. They are diagnostic and do not authorize an effect. Authenticated
+`POST /internal/test/authority/{group}/action` replays a supplied action through
+Node's ordinary ingress with the original courier/grant/target; refusals do not
+produce completion receipts. `GET /internal/test/revocation/{operator}` uses the
+public safe `Cluster.ReadAuthority` API to observe pending/completed obligations.
+These controls let process tests distinguish approval, local fencing and receipt
+acknowledgement, including a lost fence reply.
+
+`PUT /internal/test/reads/{group}/{replica}` arms exact local read faults using
+an `identity` equal to the current node/member/process. Flags can drop append and
+snapshot traffic (`drop_append`), drop all incoming load Raft (`drop_raft`), drop
+only ReadIndex replies (`drop_read_response`), or hold the actual machine owner
+in Apply/Query (`hold_apply`, `hold_query`). `DELETE` with the same identity clears
+that exact control. All routes require the test credential. Other groups and
+successor replica IDs remain independent. A dropped snapshot reports failure
+instead of manufacturing snapshot delivery success.
+
+Local inspection includes callback attempts, active/completed callbacks, actual
+applied indexes, dropped-message counts, accepted ReadIndex reply indexes and
+sent request/context counts. It retains one diagnostic read context per owned
+replica, so retransmission does not grow the observation store. Controls are
+volatile and disappear only after Node joins the machine and application Close.
+Canceling a Query wait releases its callback without halting the replica; stopping
+a replica cancels and joins even an armed machine barrier.
+
+`read_queue` and `read_queue_stamp` expose the engine's existing metrics sample:
+request limit, in-flight/queued requests, quorum/apply waits and local/remote
+round counts. They share the Raft owner's generation and age; blocked callbacks
+freeze the sample and status reads cannot freshen it. These fields are diagnostics
+for queue-bound assertions, never read or authority evidence.
 
 `hooks_wal_cluster.go` wraps the actual load store with cancelable write stalls
 and bounded transient-failure injection, keyed by group and exact replica ID.
@@ -77,3 +137,17 @@ and `internal/managed`, together with exact retirement
 and readmission tests. Process tests still prove missing-store parking, persisted
 identity, fresh-ID reseating, verified cleanup and recovery from actual WAL data;
 its inspection endpoint reads the caller-supplied store rather than meta internals.
+
+`-meta-fault-proxy=true` opts into a caller-owned metadata listener proxy for
+resource-fencing scenarios. It forwards authenticated unary and client-streaming
+protocol frames to the real library service and applies the existing fence
+barriers to actual metadata `InstallFence` delivery or replies. Captured evidence
+comes from successful real receiver replies. The proxy owns and joins its
+listener, handlers and outgoing connection; normal process and performance cases
+leave it disabled. No test-only hook was added to the library.
+
+The proxy's authenticated `/internal/test/meta` control can withhold Raft message
+and snapshot delivery to one exact metadata process/member while continuing to
+forward control/proof RPCs. Its dropped-frame counter and the receiver's local
+Target show metadata staleness. Snapshot drops return a transport refusal, and
+controls cannot affect a successor identity.

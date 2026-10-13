@@ -307,14 +307,27 @@ func TestConcurrentAuthorizedCleanupRetriesAreIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := load.ActionRequest{From: local.Identity, To: load.Peer{Node: local.Identity, Replica: load.ReplicaRef{GroupID: approved.GroupID, ReplicaID: approved.ReplicaID}}, Authorization: approved, LocalTarget: storage.Identity{NodeName: "node3", ClusterID: c.ID, GroupID: approved.GroupID, ReplicaID: approved.ReplicaID}}
+	view, err := c.Authority(ctx, "node3", approved.GroupID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req load.ActionRequest
+	for _, action := range view.Actions {
+		if action.Authorization == approved {
+			req = action
+			break
+		}
+	}
+	if req.Grant.Validate() != nil || req.To.Node != local.Identity || req.Grant.Action == nil || *req.Grant.Action != approved {
+		t.Fatal("cleanup retry did not capture the complete immutable grant", req)
+	}
 	var workers sync.WaitGroup
 	start := make(chan struct{})
 	results := make(chan error, 32)
 	for range 32 {
 		workers.Go(func() {
 			<-start
-			response, err := c.Request(ctx, "node3", "POST", "/internal/test/action", req, 0)
+			response, err := c.ReplayAction(ctx, "node3", local.Identity, req)
 			results <- requireStatus(response, err, 200)
 		})
 	}

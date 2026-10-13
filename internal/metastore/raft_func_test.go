@@ -25,12 +25,6 @@ func ent(index, term uint64, data string) raftpb.Entry {
 	return raftpb.Entry{Index: index, Term: term, Type: raftpb.EntryNormal, Data: []byte(data)}
 }
 
-func (s *Store) setAppliedIndexOnly(idx uint64) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket(bucketApplied).Put(keyApplied, itob(idx))
-	})
-}
-
 func TestStoreIsFresh(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "meta.bolt")
@@ -418,6 +412,9 @@ func TestBoltStore_IdentityPinning(t *testing.T) {
 func TestInstallSnapshot_AtomicAndCommitClamped(t *testing.T) {
 	t.Parallel()
 	s := openTestStore(t)
+	if err := s.EnsureIdentity("node", "test-cluster", 1); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := s.SaveReady([]raftpb.Entry{ent(8, 2, "a"), ent(9, 2, "b"), ent(10, 2, "c")},
 		raftpb.HardState{Term: 2, Vote: 1, Commit: 4}); err != nil {
@@ -432,6 +429,7 @@ func TestInstallSnapshot_AtomicAndCommitClamped(t *testing.T) {
 			ConfState: raftpb.ConfState{Voters: []uint64{1}},
 		},
 	}
+	snap = completeSnapshot(t, s, snap)
 	if err := s.InstallSnapshot(snap, raftpb.HardState{Term: 3, Vote: 1, Commit: 4}); err != nil {
 		t.Fatalf("InstallSnapshot: %v", err)
 	}
@@ -468,6 +466,7 @@ func TestInstallSnapshot_IgnoresStale(t *testing.T) {
 		Data:     []byte("v2"),
 		Metadata: raftpb.SnapshotMetadata{Index: 20, Term: 4, ConfState: raftpb.ConfState{Voters: []uint64{1}}},
 	}
+	newer = completeSnapshot(t, s, newer)
 	if err := s.InstallSnapshot(newer, raftpb.HardState{Term: 4, Commit: 20}); err != nil {
 		t.Fatalf("InstallSnapshot newer: %v", err)
 	}
@@ -475,6 +474,7 @@ func TestInstallSnapshot_IgnoresStale(t *testing.T) {
 		Data:     []byte("v1"),
 		Metadata: raftpb.SnapshotMetadata{Index: 10, Term: 2, ConfState: raftpb.ConfState{Voters: []uint64{1}}},
 	}
+	stale = completeSnapshot(t, s, stale)
 	if err := s.InstallSnapshot(stale, raftpb.HardState{Term: 2, Commit: 10}); err != nil {
 		t.Fatalf("InstallSnapshot stale: %v", err)
 	}

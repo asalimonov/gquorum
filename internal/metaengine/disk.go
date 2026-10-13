@@ -30,31 +30,37 @@ type diskOperator struct {
 	UpdatedAt time.Time          `json:"updated_at"`
 }
 type diskAdmission struct {
-	NodeName    string              `json:"node_name"`
-	InstanceID  string              `json:"instance_id"`
-	MemberID    uint64              `json:"member_id"`
-	ExecutionID topology.OperatorID `json:"execution_id"`
-	State       AdmissionState      `json:"state"`
+	NodeName              string              `json:"node_name"`
+	InstanceID            string              `json:"instance_id"`
+	MemberID              uint64              `json:"member_id"`
+	ExecutionID           topology.OperatorID `json:"execution_id"`
+	State                 AdmissionState      `json:"state"`
+	ReadmissionInstanceID string              `json:"readmission_instance_id,omitempty"`
 }
 type metaDiskState struct {
-	SchemaVersion uint32                      `json:"schema_version"`
-	Rules         topology.Rules              `json:"rules"`
-	RetiredGroups []retiredGroup              `json:"retired_groups"`
-	Allocations   []allocationRecord          `json:"allocations"`
-	Latest        topology.Document           `json:"latest"`
-	Target        topology.Document           `json:"target"`
-	Active        topology.Document           `json:"active"`
-	History       []topology.Document         `json:"history"`
-	Executions    []diskOperator              `json:"executions"`
-	Admissions    []diskAdmission             `json:"admissions,omitempty"`
-	Sessions      []sessionState              `json:"sessions"`
-	Locks         []lockEntry                 `json:"locks"`
-	Activated     []string                    `json:"activated,omitempty"` // sorted node names that ever activated
-	VoterSwitches []topology.VoterSwitchState `json:"voter_switches,omitempty"`
-	AppliedIndex  uint64                      `json:"applied_index"`
-	AppliedTerm   uint64                      `json:"applied_term"`
+	AuthorityRecords []authorityRecord           `json:"authority_records,omitempty"`
+	AuthorityFloors  []resourceFloor             `json:"authority_floors,omitempty"`
+	Revocations      []revocationRecord          `json:"revocations,omitempty"`
+	SchemaVersion    uint32                      `json:"schema_version"`
+	Rules            topology.Rules              `json:"rules"`
+	RetiredGroups    []retiredGroup              `json:"retired_groups"`
+	Allocations      []allocationRecord          `json:"allocations"`
+	Latest           topology.Document           `json:"latest"`
+	Target           topology.Document           `json:"target"`
+	Active           topology.Document           `json:"active"`
+	History          []topology.Document         `json:"history"`
+	Executions       []diskOperator              `json:"executions"`
+	Admissions       []diskAdmission             `json:"admissions,omitempty"`
+	Sessions         []sessionState              `json:"sessions"`
+	Locks            []lockEntry                 `json:"locks"`
+	Activated        []string                    `json:"activated,omitempty"` // sorted node names that ever activated
+	VoterSwitches    []topology.VoterSwitchState `json:"voter_switches,omitempty"`
+	AppliedIndex     uint64                      `json:"applied_index"`
+	AppliedTerm      uint64                      `json:"applied_term"`
 }
 type diskApplyResult struct {
+	Grants         []topology.AuthorityGrant `json:"grants,omitempty"`
+	Grant          *topology.AuthorityGrant  `json:"grant,omitempty"`
 	ProposalID     string
 	CurrentVersion uint64
 	Accepted       bool
@@ -85,10 +91,10 @@ func (d diskOperator) public() topology.Operator {
 	return topology.Operator{Status: topology.OperatorStatus(d.Status), Plan: d.Plan, Actor: d.Actor, Origin: d.Origin, StartedAt: d.StartedAt, UpdatedAt: d.UpdatedAt}
 }
 func toDiskAdmission(a AdmissionRecord) diskAdmission {
-	return diskAdmission{NodeName: a.NodeName, InstanceID: a.InstanceID, MemberID: a.MemberID, ExecutionID: a.OperatorID, State: a.State}
+	return diskAdmission{NodeName: a.NodeName, InstanceID: a.InstanceID, MemberID: a.MemberID, ExecutionID: a.OperatorID, State: a.State, ReadmissionInstanceID: a.ReadmissionInstanceID}
 }
 func (a diskAdmission) public() AdmissionRecord {
-	return AdmissionRecord{NodeName: a.NodeName, InstanceID: a.InstanceID, MemberID: a.MemberID, OperatorID: a.ExecutionID, State: a.State}
+	return AdmissionRecord{NodeName: a.NodeName, InstanceID: a.InstanceID, MemberID: a.MemberID, OperatorID: a.ExecutionID, State: a.State, ReadmissionInstanceID: a.ReadmissionInstanceID}
 }
 func toDiskTransition(t topology.OperatorTransition) diskOperatorTransition {
 	return diskOperatorTransition{ExecutionID: t.OperatorID, Version: t.Version, Attempt: t.Attempt, StepSeq: t.StepSeq, State: t.State, GroupID: t.GroupID, NodeName: t.NodeName, WaitingReason: t.WaitingReason, Error: t.Error, At: t.At}
@@ -99,6 +105,7 @@ func (t diskOperatorTransition) public() topology.OperatorTransition {
 
 func (s smState) MarshalJSON() ([]byte, error) {
 	d := metaDiskState{SchemaVersion: s.SchemaVersion, Rules: s.Rules, RetiredGroups: s.RetiredGroups, Allocations: s.Allocations, Latest: s.Latest, Target: s.Target, Active: s.Active, History: s.History, Sessions: s.Sessions, Locks: s.Locks, Activated: s.Activated, AppliedIndex: s.AppliedIndex, AppliedTerm: s.AppliedTerm}
+	d.AuthorityRecords, d.AuthorityFloors, d.Revocations = s.AuthorityRecords, s.AuthorityFloors, s.Revocations
 	d.VoterSwitches = s.VoterSwitches
 	if s.Operators != nil {
 		d.Executions = make([]diskOperator, len(s.Operators))
@@ -120,6 +127,7 @@ func (s *smState) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	out := smState{SchemaVersion: d.SchemaVersion, Rules: d.Rules, RetiredGroups: d.RetiredGroups, Allocations: d.Allocations, Latest: d.Latest, Target: d.Target, Active: d.Active, History: d.History, Sessions: d.Sessions, Locks: d.Locks, Activated: d.Activated, AppliedIndex: d.AppliedIndex, AppliedTerm: d.AppliedTerm}
+	out.AuthorityRecords, out.AuthorityFloors, out.Revocations = d.AuthorityRecords, d.AuthorityFloors, d.Revocations
 	out.VoterSwitches = d.VoterSwitches
 	if d.Executions != nil {
 		out.Operators = make([]topology.Operator, len(d.Executions))
@@ -137,14 +145,14 @@ func (s *smState) UnmarshalJSON(data []byte) error {
 	return nil
 }
 func (r ApplyResult) MarshalJSON() ([]byte, error) {
-	return json.Marshal(diskApplyResult{ProposalID: r.ProposalID, CurrentVersion: r.CurrentVersion, Accepted: r.Accepted, Reason: r.Reason, Code: r.Code, Dropped: r.Dropped, Doc: r.Doc, ExecutionID: r.OperatorID, Admission: toDiskAdmission(r.Admission)})
+	return json.Marshal(diskApplyResult{Grants: r.Grants, Grant: r.Grant, ProposalID: r.ProposalID, CurrentVersion: r.CurrentVersion, Accepted: r.Accepted, Reason: r.Reason, Code: r.Code, Dropped: r.Dropped, Doc: r.Doc, ExecutionID: r.OperatorID, Admission: toDiskAdmission(r.Admission)})
 }
 func (r *ApplyResult) UnmarshalJSON(data []byte) error {
 	var d diskApplyResult
 	if err := json.Unmarshal(data, &d); err != nil {
 		return err
 	}
-	*r = ApplyResult{ProposalID: d.ProposalID, CurrentVersion: d.CurrentVersion, Accepted: d.Accepted, Reason: d.Reason, Code: d.Code, Dropped: d.Dropped, Doc: d.Doc, OperatorID: d.ExecutionID, Admission: d.Admission.public()}
+	*r = ApplyResult{Grants: d.Grants, Grant: d.Grant, ProposalID: d.ProposalID, CurrentVersion: d.CurrentVersion, Accepted: d.Accepted, Reason: d.Reason, Code: d.Code, Dropped: d.Dropped, Doc: d.Doc, OperatorID: d.ExecutionID, Admission: d.Admission.public()}
 	return nil
 }
 func (p TransitionOperatorProposal) MarshalJSON() ([]byte, error) {

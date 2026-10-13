@@ -40,6 +40,8 @@ func (cmd *healthcheckCommand) Run() error {
 }
 
 func serveHTTP(ctx context.Context, address string, handler http.Handler) error {
+	// HTTP is application-owned. On process cancellation, allow requests to
+	// drain with a bounded shutdown wait and join the serving goroutine.
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		return err
@@ -235,7 +237,9 @@ func decodeJSON(data []byte, out any) error {
 func routes(node gquorum.Node) http.Handler {
 	cluster := node.Cluster()
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health/live", endpoint(func(r *http.Request) (response, error) {
+	// Liveness reports that this process is reachable; readiness additionally
+	// requires the node's admission, session and Active topology checks.
+	mux.HandleFunc("GET /health/live", endpoint(func(_ *http.Request) (response, error) {
 		return response{body: map[string]string{"node": node.Identity().NodeName}}, nil
 	}))
 	mux.HandleFunc("GET /health/ready", endpoint(func(r *http.Request) (response, error) {
@@ -246,6 +250,8 @@ func routes(node gquorum.Node) http.Handler {
 		status, err := cluster.Status(r.Context())
 		return response{body: status}, err
 	}))
+	// These administrative views are local observations. Latest includes staged
+	// intent, Target is approved intent, and Active is fully converged topology.
 	for path, read := range map[string]func(context.Context) (topology.Document, error){
 		"GET /api/topology/latest": cluster.Latest,
 		"GET /api/topology/target": cluster.Target,
@@ -259,6 +265,8 @@ func routes(node gquorum.Node) http.Handler {
 			return response{headers: http.Header{"ETag": {fmt.Sprintf("\"%d\"", document.Version)}}, body: document}, nil
 		}))
 	}
+	// Mutations require the caller's expected version (If-Match). Staging and
+	// approval are distinct; the response preserves a staged version on failure.
 	mutate := func(change func(context.Context, string, gquorum.MutationOptions) (gquorum.MutationResult, error)) http.HandlerFunc {
 		return endpoint(func(r *http.Request) (response, error) {
 			var options gquorum.MutationOptions
@@ -285,10 +293,14 @@ func routes(node gquorum.Node) http.Handler {
 		id, err := cluster.Approve(r.Context(), version)
 		return response{status: http.StatusAccepted, body: map[string]any{"operator_id": id}}, err
 	}))
+	// An accepted approval executes asynchronously. Clients follow its operator
+	// until completion before assuming the desired topology is active.
 	mux.HandleFunc("GET /api/operators/{id}", endpoint(func(r *http.Request) (response, error) {
 		operator, err := cluster.Operator(r.Context(), topology.OperatorID(r.PathValue("id")))
 		return response{body: operator}, err
 	}))
+	// Bound request waiting and body size without canceling Node's lifetime or
+	// rolling back work that has already committed through Raft.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()

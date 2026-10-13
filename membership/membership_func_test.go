@@ -44,7 +44,7 @@ func (f *fakeGroup) ProposeConfChangeV2(_ context.Context, cc raftpb.ConfChangeV
 	return f.proposeErr
 }
 
-func (f *fakeGroup) TransferLeader(context.Context, uint64) error { return nil }
+func (_ *fakeGroup) TransferLeader(context.Context, uint64) error { return nil }
 
 func (f *fakeGroup) proposalCount() int {
 	f.mu.Lock()

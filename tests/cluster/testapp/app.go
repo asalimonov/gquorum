@@ -47,6 +47,7 @@ type application struct {
 	httpListener, loadListener   net.Listener
 	httpServer                   *http.Server
 	loadServer                   *grpc.Server
+	metaProxy                    *metaFaultProxy
 	mu                           sync.RWMutex
 	machines                     map[load.ReplicaRef]*kvMachine
 	startupMissing               string
@@ -83,7 +84,7 @@ func (c config) nodeForPeer(p peer) topology.Node {
 // Retained stores resume their pin; missing stores on established nodes join.
 // Malformed or foreign markers fail closed; this is fixture startup policy.
 func (c *config) recoverBootMode() (bool, error) {
-	pin, found, err := gquorum.LoadStoredIdentity(filepath.Join(c.DataDir, "meta.bolt"))
+	pin, found, err := gquorum.LoadStoredIdentity(c.DataDir)
 	if err != nil {
 		return false, err
 	}
@@ -114,6 +115,14 @@ func (c *config) recoverBootMode() (bool, error) {
 }
 func (a *application) markEstablished() {
 	if err := a.node.WaitReady(a.workCtx); err != nil {
+		status := a.node.Status()
+		if errors.Is(err, fault.ErrStopped) && status.State == gquorum.NodeFenced && status.SelfRemoval != nil && status.SelfRemoval.Fenced &&
+			status.SelfRemoval.MemberID == status.Identity.MemberID && status.SelfRemoval.Version != 0 && status.SelfRemoval.AppliedIndex != 0 {
+			// An admission can be superseded before serving. Keep authenticated
+			// control available until the library finishes required retirement
+			// and invokes the configured removal policy.
+			return
+		}
 		select {
 		case <-a.closing:
 		default:
@@ -279,12 +288,19 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 		a.callerScheduler = &fixtureScheduler{reason: "caller-policy-" + cfg.NodeName}
 		scheduler = a.callerScheduler
 	}
+	if cfg.MetaFaultProxy {
+		ls.meta, err = a.newMetaFaultProxy(ls.meta)
+		if err != nil {
+			return nil, err
+		}
+	}
 	a.node, err = gquorum.NewNode(gquorum.NodeOptions{
-		Identity:  topology.Identity{NodeName: cfg.NodeName, ClusterID: cfg.ClusterID, InstanceID: cfg.InstanceID, MemberID: member},
-		Node:      cfg.nodeForPeer(peer{Name: cfg.NodeName, Type: cfg.NodeType, MetaAddress: cfg.MetaAddress, LoadAddress: cfg.LoadAddress, HTTPAddress: cfg.HTTPAddress}),
-		Bootstrap: gquorum.BootstrapOptions{Founders: founders, Join: cfg.Join, JoinSeeds: seeds},
-		Limits:    cfg.Limits, Placement: placement, Events: a.bus, Logger: logger,
-		Meta: gquorum.MetaOptions{DBPath: filepath.Join(cfg.DataDir, "meta.bolt"), SessionTTL: cfg.SessionTTL,
+		StorageDir: cfg.DataDir,
+		Identity:   topology.Identity{NodeName: cfg.NodeName, ClusterID: cfg.ClusterID, InstanceID: cfg.InstanceID, MemberID: member},
+		Node:       cfg.nodeForPeer(peer{Name: cfg.NodeName, Type: cfg.NodeType, MetaAddress: cfg.MetaAddress, LoadAddress: cfg.LoadAddress, HTTPAddress: cfg.HTTPAddress}),
+		Bootstrap:  gquorum.BootstrapOptions{Founders: founders, Join: cfg.Join, JoinSeeds: seeds},
+		Limits:     cfg.Limits, Placement: placement, Events: a.bus, Logger: logger,
+		Meta: gquorum.MetaOptions{SessionTTL: cfg.SessionTTL,
 			Timing:  gquorum.MetaTiming{TickInterval: cfg.TickInterval, ElectionTicks: 10},
 			Network: gquorum.MetaNetworkOptions{Listener: ls.meta, AdvertiseAddress: cfg.MetaAddress, AllowPlaintext: true, ClusterCredential: []byte(cfg.Credential), Resolver: metaResolver{a}}},
 		Loads: gquorum.LoadOptions{Factory: a.newReplica, Retire: a.retireReplica, Transport: loadTransport{app: a},
@@ -334,6 +350,14 @@ func (a *application) Start(parent context.Context) error {
 	})
 	if a.cfg.AdmissionPinPhase != "" {
 		return nil
+	}
+	if a.metaProxy != nil {
+		a.serveWG.Go(func() {
+			if err := a.metaProxy.server.Serve(a.metaProxy.listener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+				a.logger.Error("metadata proxy stopped", "error", err)
+				a.RequestClose()
+			}
+		})
 	}
 	if err := a.node.Start(a.lifeCtx); err != nil {
 		a.RequestClose()
@@ -387,6 +411,12 @@ func (a *application) finishClose() {
 	a.effectWG.Wait()
 	if a.node != nil {
 		remember(a.node.Stop(context.Background()))
+	}
+	if a.metaProxy != nil {
+		a.metaProxy.server.Stop()
+		_ = a.metaProxy.listener.Close()
+		_ = a.metaProxy.internal.Close()
+		remember(a.metaProxy.conn.Close())
 	}
 	a.stopLife()
 	if a.loadServer != nil {

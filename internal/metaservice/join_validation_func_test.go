@@ -6,10 +6,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"go.etcd.io/raft/v3/raftpb"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
@@ -28,11 +30,23 @@ func TestReadmissionReplyCarriesApprovedFormerReplicasWithoutLocalMetaDisk(t *te
 		}
 		doc.Groups[i].NextReplicaID = 5
 	}
-	f.commit(t, doc, true)
+	proposed := f.command(t, metaengine.ProposeDocument{Doc: doc, ExpectedVersion: 1})
+	observed := map[string]topology.GroupStatus{}
+	for _, group := range f.g.machine.Active().Groups {
+		observed[group.ID] = topology.GroupStatus{GroupID: group.ID, Found: true, LeaderID: 2, Commit: 1, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}}
+	}
+	plan, err := topology.BuildPlan(f.g.machine.Active(), proposed.Doc, observed, f.g.rules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := f.command(t, metaengine.BeginOperatorProposal{Version: 2, Plan: plan, At: time.Now().UTC()}).OperatorID
+	admission := metaengine.AdmissionRecord{NodeName: "n1", InstanceID: "fresh-process", MemberID: 4, OperatorID: op}
+	f.command(t, metaengine.BindAdmissionProposal{Admission: admission, At: time.Now().UTC()})
+	f.command(t, metaengine.BeginReadmissionAuthority{NodeName: admission.NodeName, InstanceID: admission.InstanceID, MemberID: admission.MemberID, PreviousMemberID: 1, OperatorID: op})
 	staged := f.g.machine.Latest()
 	staged.Groups = append(staged.Groups, topology.Group{ID: "unapproved", NextReplicaID: 2, Replicas: []topology.Replica{{NodeName: "n1", ReplicaID: 1, Role: topology.ReplicaVoter}}})
 	f.commit(t, staged, false)
-	reply := f.g.joinReply(t.Context(), metaengine.AdmissionRecord{NodeName: "n1", InstanceID: "fresh-process", MemberID: 4, OperatorID: topology.MakeOperatorID(2, 1)}, true)
+	reply := f.g.joinReply(t.Context(), admission, 1)
 	if reply.ErrorCode != "" {
 		t.Fatal(reply)
 	}

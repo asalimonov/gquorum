@@ -5,25 +5,32 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
 )
 
 type ProposalKind string
 
 const (
-	KindProposeDocument      ProposalKind = "propose_document"
-	KindAdmitNode            ProposalKind = "admit_node"
-	KindBeginOperator        ProposalKind = "begin_execution"
-	KindCommitRepairOperator ProposalKind = "commit_repair_execution"
-	KindCommitVoterChange    ProposalKind = "commit_voter_change"
-	KindTransitionOperator   ProposalKind = "transition_execution"
-	KindActivateTarget       ProposalKind = "activate_target"
-	KindBindAdmission        ProposalKind = "bind_admission"
-	KindCommitReadmission    ProposalKind = "commit_readmission"
-	KindReadyAdmission       ProposalKind = "ready_admission"
-	KindGrantSession         ProposalKind = "grant_session"
-	KindRevokeSession        ProposalKind = "revoke_session"
-	KindAcquireLock          ProposalKind = "acquire_lock"
+	KindRecordReadmissionReceipts ProposalKind = "record_readmission_receipts"
+	KindBeginReadmissionAuthority ProposalKind = "begin_readmission_authority"
+	KindGrantTransfer             ProposalKind = "grant_transfer"
+	KindBeginEffect               ProposalKind = "begin_effect"
+	KindRecordFence               ProposalKind = "record_fence"
+	KindRecordEffect              ProposalKind = "record_effect"
+	KindProposeDocument           ProposalKind = "propose_document"
+	KindAdmitNode                 ProposalKind = "admit_node"
+	KindBeginOperator             ProposalKind = "begin_execution"
+	KindCommitRepairOperator      ProposalKind = "commit_repair_execution"
+	KindCommitVoterChange         ProposalKind = "commit_voter_change"
+	KindTransitionOperator        ProposalKind = "transition_execution"
+	KindActivateTarget            ProposalKind = "activate_target"
+	KindBindAdmission             ProposalKind = "bind_admission"
+	KindCommitReadmission         ProposalKind = "commit_readmission"
+	KindReadyAdmission            ProposalKind = "ready_admission"
+	KindGrantSession              ProposalKind = "grant_session"
+	KindRevokeSession             ProposalKind = "revoke_session"
+	KindAcquireLock               ProposalKind = "acquire_lock"
 )
 
 type envelope struct {
@@ -132,6 +139,18 @@ type AcquireLock struct {
 func Encode(proposal any) ([]byte, error) {
 	var kind ProposalKind
 	switch proposal.(type) {
+	case RecordReadmissionReceiptsProposal:
+		kind = KindRecordReadmissionReceipts
+	case BeginReadmissionAuthority:
+		kind = KindBeginReadmissionAuthority
+	case GrantTransferProposal:
+		kind = KindGrantTransfer
+	case RecordFenceProposal:
+		kind = KindRecordFence
+	case RecordEffectProposal:
+		kind = KindRecordEffect
+	case BeginEffectProposal:
+		kind = KindBeginEffect
 	case ProposeDocument:
 		kind = KindProposeDocument
 	case AdmitNode:
@@ -165,7 +184,7 @@ func Encode(proposal any) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("meta: marshal %s body: %w", kind, err)
 	}
-	data, err := json.Marshal(envelope{SchemaVersion: 1, Kind: kind, Body: body})
+	data, err := json.Marshal(envelope{SchemaVersion: 2, Kind: kind, Body: body})
 	if err != nil {
 		return nil, fmt.Errorf("meta: marshal envelope: %w", err)
 	}
@@ -177,8 +196,8 @@ func decodeEnvelope(data []byte) (ProposalKind, json.RawMessage, error) {
 	if err := json.Unmarshal(data, &e); err != nil {
 		return "", nil, fmt.Errorf("meta: unmarshal envelope: %w", err)
 	}
-	if e.SchemaVersion != 1 {
-		return "", nil, fmt.Errorf("meta: unsupported envelope version %d", e.SchemaVersion)
+	if e.SchemaVersion != 2 {
+		return "", nil, fault.New(fault.Unsupported, fmt.Sprintf("unsupported meta envelope version %d", e.SchemaVersion), nil)
 	}
 	if e.Kind == "" || len(e.Body) == 0 {
 		return "", nil, fmt.Errorf("meta: missing command kind or body")
@@ -195,6 +214,18 @@ func DecodeProposal(data []byte) (any, error) {
 	}
 	var proposal any
 	switch kind {
+	case KindRecordReadmissionReceipts:
+		proposal = &RecordReadmissionReceiptsProposal{}
+	case KindBeginReadmissionAuthority:
+		proposal = &BeginReadmissionAuthority{}
+	case KindGrantTransfer:
+		proposal = &GrantTransferProposal{}
+	case KindRecordFence:
+		proposal = &RecordFenceProposal{}
+	case KindRecordEffect:
+		proposal = &RecordEffectProposal{}
+	case KindBeginEffect:
+		proposal = &BeginEffectProposal{}
 	case KindProposeDocument:
 		proposal = &ProposeDocument{}
 	case KindAdmitNode:

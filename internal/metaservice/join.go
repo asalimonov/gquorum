@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -23,10 +24,11 @@ import (
 )
 
 type joinRequest struct {
-	Identity       topology.Identity `json:"identity"`
-	Node           topology.Node     `json:"node"`
-	Address        string            `json:"address"`
-	LastDocVersion uint64            `json:"last_doc_version"`
+	Identity          topology.Identity `json:"identity"`
+	Node              topology.Node     `json:"node"`
+	Address           string            `json:"address"`
+	AuthorityMemberID uint64            `json:"authority_member_id"`
+	LastDocVersion    uint64            `json:"last_doc_version"`
 }
 type joinMember struct {
 	Name, Address string
@@ -41,12 +43,15 @@ type joinResponse struct {
 	LeaderAddress     string                     `json:"leader_address"`
 	Readmitted        bool                       `json:"readmitted"`
 	Previous, Granted topology.Document
-	PreviousGroups    []topology.Group `json:"previous_groups,omitempty"`
+	PreviousGroups    []topology.Group          `json:"previous_groups,omitempty"`
+	PreviousMemberID  uint64                    `json:"previous_member_id,omitempty"`
+	Grants            []topology.AuthorityGrant `json:"grants,omitempty"`
 }
 type readyRequest struct {
 	NodeName, InstanceID, Address string
 	MemberID                      uint64
-	OperatorID                    topology.OperatorID `json:"ExecutionID"`
+	OperatorID                    topology.OperatorID      `json:"ExecutionID"`
+	Receipts                      []topology.EffectReceipt `json:"receipts,omitempty"`
 }
 
 func (g *Group) primeAddress(name, address string) {
@@ -66,7 +71,7 @@ func (g *Group) primeAddress(name, address string) {
 }
 func (g *Group) handleJoin(ctx context.Context, h *metapb.Header, data []byte) (reply *metapb.Reply) {
 	var req joinRequest
-	if json.Unmarshal(data, &req) != nil || strings.TrimSpace(req.Identity.NodeName) == "" || strings.ContainsRune(req.Identity.NodeName, 0) || strings.ContainsRune(req.Identity.InstanceID, 0) || req.Identity.NodeName != h.NodeName || req.Identity.ClusterID != h.ClusterId || req.Identity.InstanceID == "" || req.Identity.MemberID != h.MemberId || req.Node.Name != h.NodeName || req.Node.Type == "" {
+	if json.Unmarshal(data, &req) != nil || strings.TrimSpace(req.Identity.NodeName) == "" || strings.ContainsRune(req.Identity.NodeName, 0) || strings.ContainsRune(req.Identity.InstanceID, 0) || req.Identity.NodeName != h.NodeName || req.Identity.ClusterID != h.ClusterId || req.Identity.InstanceID == "" || req.Identity.MemberID != h.MemberId || req.Identity.InstanceID != h.InstanceId || req.Identity.MemberID != 0 && req.AuthorityMemberID < req.Identity.MemberID || req.Node.Name != h.NodeName || req.Node.Type == "" {
 		return metatransport.Reply(fault.ErrInvalid)
 	}
 	if _, _, err := net.SplitHostPort(req.Address); err != nil {
@@ -134,12 +139,16 @@ func (g *Group) handleJoin(ctx context.Context, h *metapb.Header, data []byte) (
 		if admission.State == metaengine.AdmissionSuperseded || admission.State == metaengine.AdmissionRetired {
 			return refuse(parkedSuperseded, fault.New(fault.OperatorAuthorization, "process admission was superseded or retired", nil))
 		}
-		return g.joinReply(ctx, admission, false)
+		// The exact admitted process may need predecessor host fences before
+		// retirement grants can be issued. Its control endpoint must be reachable
+		// even when joinReply returns AuthorityPending.
+		g.primeAddress(req.Identity.NodeName, req.Address)
+		return g.joinReply(ctx, admission, req.AuthorityMemberID)
 	}
 	member := target.MemberID(req.Node.Name)
 	var replace bool
 	if other, ok := machine.LiveAdmission(req.Node.Name, req.Identity.InstanceID); ok {
-		if g.probeMember(ctx, other.NodeName, other.MemberID, other.InstanceID) {
+		if g.probeAdmission(ctx, other) {
 			return refuse(parkedNameConflict, fault.New(fault.IdentityMismatch, "node name has another live admission", nil))
 		}
 		// An unprepared crash needs a new process-bound ready acknowledgement;
@@ -167,7 +176,8 @@ func (g *Group) handleJoin(ctx context.Context, h *metapb.Header, data []byte) (
 		if err != nil {
 			return g.leaderReply(err)
 		}
-		return g.joinReply(ctx, result.Admission, false)
+		g.primeAddress(req.Identity.NodeName, req.Address)
+		return g.joinReply(ctx, result.Admission, req.AuthorityMemberID)
 	}
 	if machine.HasActivated(req.Node.Name) && reflect.DeepEqual(latest, target) && reflect.DeepEqual(target, active) {
 		at := time.Now().UTC()
@@ -184,7 +194,8 @@ func (g *Group) handleJoin(ctx context.Context, h *metapb.Header, data []byte) (
 			return g.leaderReply(err)
 		}
 		g.controller.Signal()
-		return g.joinReply(ctx, result.Admission, true)
+		g.primeAddress(req.Identity.NodeName, req.Address)
+		return g.joinReply(ctx, result.Admission, req.AuthorityMemberID)
 	}
 	if !machine.HasActivated(req.Node.Name) && reflect.DeepEqual(target, active) && target.Origin == topology.OriginFounding && containsMember(g.engine.Load().Status().ConfState, member) {
 		ex, ok := machine.CurrentOperator()
@@ -195,7 +206,8 @@ func (g *Group) handleJoin(ctx context.Context, h *metapb.Header, data []byte) (
 		if err != nil {
 			return g.leaderReply(err)
 		}
-		return g.joinReply(ctx, result.Admission, false)
+		g.primeAddress(req.Identity.NodeName, req.Address)
+		return g.joinReply(ctx, result.Admission, req.AuthorityMemberID)
 	}
 	return refuse(parkedUnapproved, fault.New(fault.OperatorAuthorization, "node has no current approved learner-first admission", nil))
 }
@@ -238,32 +250,38 @@ func (g *Group) membershipReply(ctx context.Context) joinResponse {
 	sort.Slice(response.Members, func(i, j int) bool { return response.Members[i].MemberID < response.Members[j].MemberID })
 	return response
 }
-func (g *Group) joinReply(ctx context.Context, a metaengine.AdmissionRecord, readmitted bool) *metapb.Reply {
+func (g *Group) joinReply(ctx context.Context, a metaengine.AdmissionRecord, former uint64) *metapb.Reply {
 	response := g.membershipReply(ctx)
 	response.Admission = a
 	response.MemberID = a.MemberID
-	response.Readmitted = readmitted
-	if ex, ok := g.state().OperatorRecord(a.OperatorID); ok {
-		for _, step := range ex.Plan.Steps {
-			if step.Kind == topology.StepRemoveReplica && step.GroupID == topology.MetaGroupID && step.NodeName == a.NodeName && step.ReplicaID != a.MemberID {
-				response.Readmitted = true
-				if old, ok := g.state().Get(ex.Status.Version - 1); ok {
-					response.Previous = old
-				}
-				break
-			}
-		}
+	grants, err := g.state().ReadmissionGrants(ctx, a)
+	if err != nil {
+		return metatransport.Reply(err)
 	}
-	if response.Readmitted {
+	if former != a.MemberID && (former != 0 || g.state().ReadmissionRequired(a.NodeName, a.MemberID)) {
+		if former == 0 {
+			return metatransport.Reply(fault.New(fault.ReadmissionRequired, "returning node lacks retained authority identity", nil))
+		}
+		if len(grants) == 0 {
+			result, err := g.propose(ctx, metaengine.BeginReadmissionAuthority{NodeName: a.NodeName, InstanceID: a.InstanceID, MemberID: a.MemberID, PreviousMemberID: former, OperatorID: a.OperatorID})
+			if err != nil {
+				return g.leaderReply(err)
+			}
+			grants = result.Grants
+		}
+		if len(grants) == 0 || grants[0].Targets[0].MemberID != former {
+			return metatransport.Reply(fault.ErrIdentityMismatch)
+		}
+		response.Readmitted = true
+	}
+	if len(grants) != 0 {
+		response.Grants = grants
+		response.PreviousMemberID = grants[0].Targets[0].MemberID
 		catalog, err := g.state().RecoveryCatalog(ctx)
 		if err != nil {
 			return metatransport.Reply(err)
 		}
-		for _, group := range previousNodeGroups([]topology.Document{{Groups: catalog}}, response.Granted, a.NodeName) {
-			if group.ID != topology.MetaGroupID {
-				response.PreviousGroups = append(response.PreviousGroups, group)
-			}
-		}
+		response.PreviousGroups = readmissionGroups(grants, catalog)
 	}
 	encoded, err := json.Marshal(response)
 	if err != nil {
@@ -271,13 +289,20 @@ func (g *Group) joinReply(ctx context.Context, a metaengine.AdmissionRecord, rea
 	}
 	return &metapb.Reply{Data: encoded}
 }
+
 func (g *Group) handleReady(ctx context.Context, h *metapb.Header, data []byte) *metapb.Reply {
 	var request readyRequest
-	if json.Unmarshal(data, &request) != nil || request.NodeName != h.NodeName || request.MemberID != h.MemberId || request.InstanceID == "" || request.OperatorID == "" {
+	if json.Unmarshal(data, &request) != nil || request.NodeName != h.NodeName || request.MemberID != h.MemberId || request.InstanceID == "" || request.InstanceID != h.InstanceId || request.OperatorID == "" {
 		return metatransport.Reply(fault.ErrInvalid)
 	}
 	if _, _, err := net.SplitHostPort(request.Address); err != nil {
 		return metatransport.Reply(fault.ErrInvalid)
+	}
+	if len(request.Receipts) != 0 {
+		_, err := g.propose(ctx, metaengine.RecordReadmissionReceiptsProposal{Admission: metaengine.AdmissionRecord{NodeName: request.NodeName, InstanceID: request.InstanceID, MemberID: request.MemberID, OperatorID: request.OperatorID}, Receipts: request.Receipts})
+		if err != nil {
+			return g.leaderReply(err)
+		}
 	}
 	_, err := g.propose(ctx, metaengine.ReadyAdmissionProposal{NodeName: request.NodeName, InstanceID: request.InstanceID, MemberID: request.MemberID, OperatorID: request.OperatorID})
 	if err == nil {
@@ -293,7 +318,33 @@ func (g *Group) tryJoin(ctx context.Context) error {
 	g.mu.RLock()
 	lastVersion = max(lastVersion, g.recoveryVersion)
 	g.mu.RUnlock()
-	data, _ := json.Marshal(joinRequest{Identity: identity, Node: g.opts.Node, Address: g.opts.Network.AdvertiseAddress, LastDocVersion: lastVersion})
+	authorityMember := identity.MemberID
+	validationIdentity := identity
+	if g.opts.ReadmissionIdentity != nil {
+		retained := g.opts.ReadmissionIdentity()
+		if retained.ClusterID != identity.ClusterID || retained.NodeName != identity.NodeName || retained.InstanceID != identity.InstanceID {
+			return &fatalAdmissionError{fault.ErrIdentityMismatch}
+		}
+		if identity.MemberID != 0 && retained.MemberID != identity.MemberID {
+			// Retirement/rebind may finish just before the request deadline.
+			// Only this still-owned exact grant can explain the temporary split;
+			// no old engine or live metadata pin may remain.
+			g.mu.RLock()
+			pending := g.readmissionGrant
+			resume := pending != nil && pending.Previous == identity && pending.Granted == retained && g.store == nil
+			g.mu.RUnlock()
+			fresh, err := metastore.StoreIsFresh(g.opts.DBPath)
+			if err != nil {
+				return err
+			}
+			if !resume || !fresh || g.engine.Load() != nil {
+				return &fatalAdmissionError{fault.ErrIdentityMismatch}
+			}
+			validationIdentity.MemberID = 0
+		}
+		authorityMember = retained.MemberID
+	}
+	data, _ := json.Marshal(joinRequest{Identity: identity, AuthorityMemberID: authorityMember, Node: g.opts.Node, Address: g.opts.Network.AdvertiseAddress, LastDocVersion: lastVersion})
 	addresses := append([]string(nil), g.opts.JoinSeeds...)
 	if g.joinLeader != "" {
 		addresses = append([]string{g.joinLeader}, addresses...)
@@ -338,7 +389,10 @@ func (g *Group) tryJoin(ctx context.Context) error {
 		if err = json.Unmarshal(reply.Data, &result); err != nil {
 			return &fatalAdmissionError{fault.New(fault.Unreadable, "invalid admission response", err)}
 		}
-		if err = validateJoinGrant(identity, g.rules, result); err != nil {
+		if result.Readmitted && result.PreviousMemberID != authorityMember || authorityMember != 0 && authorityMember != result.MemberID && !result.Readmitted {
+			return &fatalAdmissionError{fault.ErrIdentityMismatch}
+		}
+		if err = validateJoinGrant(validationIdentity, g.rules, result); err != nil {
 			return &fatalAdmissionError{err}
 		}
 		for _, member := range result.Members {
@@ -353,13 +407,33 @@ func (g *Group) tryJoin(ctx context.Context) error {
 		// A retry already pinned to the granted identity resumes that store. Its
 		// admission may still describe the earlier readmission, but quarantining
 		// the replacement itself would destroy the lineage we just authorized.
-		if identity.MemberID != result.MemberID && (result.Readmitted || identity.MemberID != 0) {
+		if result.Readmitted {
 			if err = g.prepareReadmission(ctx, identity, result); err != nil {
 				return err
 			}
 		}
+		if len(result.Grants) != 0 {
+			if g.opts.ReadmissionReceipts == nil {
+				return fault.ErrUnsupported
+			}
+			payload := g.readmissionPayload(identity, result, nil)
+			receipts, err := g.opts.ReadmissionReceipts(ctx, payload)
+			if err != nil {
+				return err
+			}
+			if err := validateReadmissionReceipts(result.Grants, receipts); err != nil {
+				return err
+			}
+			g.joinReceipts = receipts
+		}
 		granted := identity
 		granted.MemberID = result.MemberID
+		g.mu.RLock()
+		stoppedMember := g.controlOnly && granted.MemberID == g.identity.MemberID
+		g.mu.RUnlock()
+		if stoppedMember {
+			return fault.ErrAuthorityPending // only a fresh approved member may participate
+		}
 		if g.engine.Load() == nil {
 			if err = ctx.Err(); err != nil {
 				return err
@@ -415,15 +489,7 @@ func (g *Group) prepareReadmission(ctx context.Context, previous topology.Identi
 		}
 		g.mu.Unlock()
 	}
-	granted := previous
-	granted.MemberID = result.MemberID
-	if previous.MemberID == 0 {
-		previous.MemberID = result.Previous.MemberID(previous.NodeName)
-	}
-	g.mu.RLock()
-	oldDocuments := []topology.Document{result.Previous, {Groups: result.PreviousGroups}, {Groups: g.recoveryGroups}, {Groups: appliedCatalog}}
-	g.mu.RUnlock()
-	payload := Readmission{Previous: previous, Granted: granted, AdmissionID: string(result.Admission.OperatorID) + "/" + result.Admission.InstanceID, MetaDBPath: g.opts.DBPath, PreviousGroups: previousNodeGroups(oldDocuments, result.Granted, previous.NodeName), GrantedGroups: nodeGroups(result.Granted, previous.NodeName)}
+	payload := g.readmissionPayload(previous, result, appliedCatalog)
 	owned := cloneReadmission(payload)
 	g.mu.Lock()
 	g.readmissionGrant = &owned
@@ -434,7 +500,7 @@ func (g *Group) prepareReadmission(ctx context.Context, previous topology.Identi
 	// Node's managed host owns resource retirement. Keep the old database closed
 	// and retain the authenticated grant across retries until the new pin opens.
 	if err := g.opts.OnReadmission(ctx, cloneReadmission(payload)); err != nil {
-		return fault.New(fault.ReadmissionRequired, "caller readmission hook failed", err)
+		return err // owned retirement failures may resume the same durable intent
 	}
 	if fresh, err := metastore.StoreIsFresh(g.opts.DBPath); err != nil || !fresh {
 		return fault.New(fault.ReadmissionRequired, "caller readmission hook did not quarantine the previous meta lineage", err)
@@ -445,6 +511,10 @@ func (g *Group) prepareReadmission(ctx context.Context, previous topology.Identi
 func cloneReadmission(in Readmission) Readmission {
 	in.PreviousGroups = (topology.Document{Groups: in.PreviousGroups}).Clone().Groups
 	in.GrantedGroups = (topology.Document{Groups: in.GrantedGroups}).Clone().Groups
+	in.Grants = slices.Clone(in.Grants)
+	for i := range in.Grants {
+		in.Grants[i] = in.Grants[i].Clone()
+	}
 	return in
 }
 
@@ -528,7 +598,7 @@ func (g *Group) acknowledgeJoin(ctx context.Context) error {
 		return err
 	}
 	a := g.joinAdmission
-	data, _ := json.Marshal(readyRequest{NodeName: a.NodeName, InstanceID: a.InstanceID, MemberID: a.MemberID, OperatorID: a.OperatorID, Address: g.opts.Network.AdvertiseAddress})
+	data, _ := json.Marshal(readyRequest{NodeName: a.NodeName, InstanceID: a.InstanceID, MemberID: a.MemberID, OperatorID: a.OperatorID, Address: g.opts.Network.AdvertiseAddress, Receipts: g.joinReceipts})
 	addresses := append([]string{g.joinLeader}, g.opts.JoinSeeds...)
 	if leader := engine.RaftStatus().Lead; leader != 0 {
 		if address, err := g.resolveMember(ctx, leader); err == nil {
@@ -634,6 +704,12 @@ func validateJoinGrant(identity topology.Identity, rules topology.Rules, result 
 	}
 	if !result.Existing && (result.Admission.NodeName != identity.NodeName || result.Admission.InstanceID != identity.InstanceID || result.Admission.MemberID != result.MemberID || result.Admission.OperatorID == "") {
 		return fault.ErrIdentityMismatch
+	}
+	if result.Admission.ReadmissionInstanceID != "" && (result.Admission.ReadmissionInstanceID == result.Admission.InstanceID || strings.ContainsRune(result.Admission.ReadmissionInstanceID, 0)) {
+		return fault.ErrIdentityMismatch
+	}
+	if err := validateReadmissionResponse(identity, result); err != nil {
+		return err
 	}
 	if result.Previous.Version > 0 {
 		if result.Previous.ClusterID != identity.ClusterID {

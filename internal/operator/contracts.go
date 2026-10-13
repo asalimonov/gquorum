@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 	"time"
 )
@@ -23,18 +24,19 @@ type GroupStatus = topology.GroupStatus
 type ReplicaProgress = topology.ReplicaProgress
 
 // GroupEffects implements idempotent effects on the exact authorized load identities.
-// Receivers must revalidate authorization and verify existing results before succeeding.
+// Receivers validate the retained grant and return exact durable receipts.
 type GroupEffects interface {
 	Status(context.Context, string) (GroupStatus, error)
+	ReadNative(context.Context, string, ...storage.Identity) (topology.NativeState, error)
 	// CreateGroup seeds only the approved founding voters. Intentional learners
 	// are prepared and admitted by later exact steps.
-	CreateGroup(context.Context, AuthorizedStep) error
-	PrepareReplica(context.Context, AuthorizedStep) error
-	ApplyMembership(context.Context, AuthorizedStep) error
-	TransferLeader(context.Context, AuthorizedStep) error
-	StopReplica(context.Context, AuthorizedStep) error
-	CleanupReplicaState(context.Context, AuthorizedStep) error
-	DeleteGroupState(context.Context, AuthorizedStep) error
+	CreateGroup(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error)
+	PrepareReplica(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error)
+	ApplyMembership(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error)
+	TransferLeader(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error)
+	StopReplica(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error)
+	CleanupReplicaState(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error)
+	DeleteGroupState(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error)
 }
 
 type Group = topology.Group
@@ -97,8 +99,14 @@ type OperatorCoordinator interface {
 	CurrentOperator(context.Context) (Record, bool)
 	RecordOperatorTransition(context.Context, OperatorTransition) error
 }
+type AuthorityCoordinator interface {
+	BeginEffect(context.Context, topology.AuthorizedStep) (topology.AuthorityGrant, error)
+	ReconcileFences(context.Context) error
+	EffectReceipts(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error)
+	RecordEffect(context.Context, topology.EffectReceipt) error
+}
 type MembershipCoordinator interface {
-	Apply(context.Context, AuthorizedStep) error
+	Apply(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error)
 	CaughtUp(GroupStatus, uint64) bool
 }
 type Record struct {

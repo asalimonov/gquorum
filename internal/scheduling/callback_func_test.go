@@ -28,7 +28,7 @@ func TestCustomSchedulerInputIsOwnedAndForeignActionRefused(t *testing.T) {
 	t.Parallel()
 	h := newTestHost(t, 1, 2)
 	r := newTestDriver(t, h, Settings{})
-	r.policy = schedulerFunc(func(ctx context.Context, in policy.ScheduleInput) (policy.ScheduleDecision, error) {
+	r.policy = schedulerFunc(func(_ context.Context, in policy.ScheduleInput) (policy.ScheduleDecision, error) {
 		in.Active.ClusterID = "foreign"
 		in.Active.Nodes[0].Name = "changed"
 		in.Status["shard0"].ConfState.Voters[0] = 99

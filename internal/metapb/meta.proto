@@ -19,6 +19,8 @@ service Meta {
  rpc MetaStatus(MetaRequest) returns (Reply);
  rpc MetaReplicaMetrics(MetaRequest) returns (Reply);
  rpc MetaControl(MetaRequest) returns (Reply);
+ rpc AuthorityRead(MetaRequest) returns (Reply);
+ rpc InstallFence(MetaRequest) returns (Reply);
  rpc ProposeMeta(MetaRequest) returns (Reply);
  rpc ApplyVersion(MetaRequest) returns (Reply);
  rpc ParkedRead(MetaRequest) returns (Reply);

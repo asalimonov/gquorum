@@ -1,0 +1,89 @@
+//go:build functional
+
+package metaservice
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/metaengine"
+	"github.com/asalimonov/gquorum/topology"
+)
+
+func TestAuthorityServiceReadsRetainedGrantAndRequestedRevocation(t *testing.T) {
+	t.Parallel()
+	g := readyPublic(t, singleMetaFixture(t))
+	g.controller.Stop()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	doc := g.state().Latest()
+	staged, err := g.Stage(ctx, doc, doc.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := topology.Step{Seq: 1, GroupID: topology.MetaGroupID, NodeName: "n1", ReplicaID: 1, Kind: topology.StepTransferLeader}
+	at := time.Now().UTC()
+	begin, err := g.propose(ctx, metaengine.BeginOperatorProposal{Version: staged.Version, Plan: topology.Plan{Version: staged.Version, Steps: []topology.Step{step}}, At: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	action := topology.AuthorizedStep{OperatorID: begin.OperatorID, Version: staged.Version, Attempt: 1, StepSeq: step.Seq, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID, Kind: step.Kind}
+	transition := topology.OperatorTransition{OperatorID: begin.OperatorID, Version: staged.Version, Attempt: 1, StepSeq: step.Seq, GroupID: step.GroupID, NodeName: step.NodeName, State: topology.OperatorRunning, At: at.Add(time.Millisecond)}
+	if _, err := g.propose(ctx, metaengine.TransitionOperatorProposal{Transition: transition}); err != nil {
+		t.Fatal(err)
+	}
+	grant, err := g.BeginEffect(ctx, action)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.ValidateGrant(ctx, grant); err != nil {
+		t.Fatal(err)
+	}
+	if got, found, err := g.ReadGrant(ctx, grant.Key); err != nil || !found || !got.Equal(grant) {
+		t.Fatal(got, found, err)
+	}
+	altered := grant.Clone()
+	altered.Targets[0].MemberID++
+	if err := g.ValidateGrant(ctx, altered); !errors.Is(err, fault.ErrIdentityMismatch) {
+		t.Fatal("changed full grant reused cached key", err)
+	}
+	future := grant.Clone()
+	future.Key.Revision += 1000
+	if err := g.ValidateGrant(ctx, future); !errors.Is(err, fault.ErrOperatorAuthorization) {
+		t.Fatal("unknown grant inferred from current approval", err)
+	}
+	status, err := g.ReadAuthority(ctx, begin.OperatorID)
+	if err != nil || status.RevocationRequested {
+		t.Fatal(status, err)
+	}
+	wait, stop := context.WithTimeout(ctx, 30*time.Millisecond)
+	defer stop()
+	if _, err := g.WaitRevoked(wait, begin.OperatorID); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("unrequested revocation reported complete", err)
+	}
+	transition.State, transition.At = topology.OperatorSuperseded, at.Add(2*time.Millisecond)
+	if _, err := g.propose(ctx, metaengine.TransitionOperatorProposal{Transition: transition}); err != nil {
+		t.Fatal(err)
+	}
+	status, err = g.ReadAuthority(ctx, begin.OperatorID)
+	if err != nil || !status.RevocationRequested || status.RevocationComplete || len(status.Obligations) != 1 {
+		t.Fatal(status, err)
+	}
+	if err := g.ValidateGrant(ctx, grant); err != nil {
+		t.Fatal("revocation invalidated retained proof instead of resource execution", err)
+	}
+	if peer, err := g.ResolveAuthorityPeer(ctx, grant, grant.Targets[0]); err != nil || peer.Node != g.Identity() || peer.Replica.ReplicaID != grant.Targets[0].ReplicaID {
+		t.Fatal("retained grant did not resolve its exact process", peer, err)
+	}
+	foreign := grant.Targets[0]
+	foreign.MemberID++
+	if _, err := g.ResolveAuthorityPeer(ctx, grant, foreign); !errors.Is(err, fault.ErrOperatorAuthorization) {
+		t.Fatal("authority resolution redirected to another member", err)
+	}
+	if floors, err := g.ReadAuthorityFloors(ctx, "n1"); err != nil || len(floors) != 0 {
+		t.Fatal("group-only transfer invented a host obligation", floors, err)
+	}
+}

@@ -66,6 +66,11 @@ func (sm *topologySM) RecoveryCatalog(ctx context.Context) ([]topology.Group, er
 			add(step.GroupID, topology.Replica{NodeName: step.NodeName, ReplicaID: step.ReplicaID})
 		}
 	}
+	for _, record := range sm.authority.records {
+		for _, target := range record.Grant.Targets {
+			add(record.Grant.Key.GroupID, topology.Replica{NodeName: target.NodeName, ReplicaID: target.ReplicaID})
+		}
+	}
 	result := make([]topology.Group, 0, len(groups))
 	for _, group := range groups {
 		slices.SortFunc(group.Replicas, func(a, b topology.Replica) int {

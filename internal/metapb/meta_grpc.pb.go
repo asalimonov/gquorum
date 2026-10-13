@@ -28,6 +28,8 @@ const (
 	Meta_MetaStatus_FullMethodName         = "/gquorum.meta.v1.Meta/MetaStatus"
 	Meta_MetaReplicaMetrics_FullMethodName = "/gquorum.meta.v1.Meta/MetaReplicaMetrics"
 	Meta_MetaControl_FullMethodName        = "/gquorum.meta.v1.Meta/MetaControl"
+	Meta_AuthorityRead_FullMethodName      = "/gquorum.meta.v1.Meta/AuthorityRead"
+	Meta_InstallFence_FullMethodName       = "/gquorum.meta.v1.Meta/InstallFence"
 	Meta_ProposeMeta_FullMethodName        = "/gquorum.meta.v1.Meta/ProposeMeta"
 	Meta_ApplyVersion_FullMethodName       = "/gquorum.meta.v1.Meta/ApplyVersion"
 	Meta_ParkedRead_FullMethodName         = "/gquorum.meta.v1.Meta/ParkedRead"
@@ -46,6 +48,8 @@ type MetaClient interface {
 	MetaStatus(ctx context.Context, in *MetaRequest, opts ...grpc.CallOption) (*Reply, error)
 	MetaReplicaMetrics(ctx context.Context, in *MetaRequest, opts ...grpc.CallOption) (*Reply, error)
 	MetaControl(ctx context.Context, in *MetaRequest, opts ...grpc.CallOption) (*Reply, error)
+	AuthorityRead(ctx context.Context, in *MetaRequest, opts ...grpc.CallOption) (*Reply, error)
+	InstallFence(ctx context.Context, in *MetaRequest, opts ...grpc.CallOption) (*Reply, error)
 	ProposeMeta(ctx context.Context, in *MetaRequest, opts ...grpc.CallOption) (*Reply, error)
 	ApplyVersion(ctx context.Context, in *MetaRequest, opts ...grpc.CallOption) (*Reply, error)
 	ParkedRead(ctx context.Context, in *MetaRequest, opts ...grpc.CallOption) (*Reply, error)
@@ -155,6 +159,26 @@ func (c *metaClient) MetaControl(ctx context.Context, in *MetaRequest, opts ...g
 	return out, nil
 }
 
+func (c *metaClient) AuthorityRead(ctx context.Context, in *MetaRequest, opts ...grpc.CallOption) (*Reply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Reply)
+	err := c.cc.Invoke(ctx, Meta_AuthorityRead_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *metaClient) InstallFence(ctx context.Context, in *MetaRequest, opts ...grpc.CallOption) (*Reply, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Reply)
+	err := c.cc.Invoke(ctx, Meta_InstallFence_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *metaClient) ProposeMeta(ctx context.Context, in *MetaRequest, opts ...grpc.CallOption) (*Reply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Reply)
@@ -198,6 +222,8 @@ type MetaServer interface {
 	MetaStatus(context.Context, *MetaRequest) (*Reply, error)
 	MetaReplicaMetrics(context.Context, *MetaRequest) (*Reply, error)
 	MetaControl(context.Context, *MetaRequest) (*Reply, error)
+	AuthorityRead(context.Context, *MetaRequest) (*Reply, error)
+	InstallFence(context.Context, *MetaRequest) (*Reply, error)
 	ProposeMeta(context.Context, *MetaRequest) (*Reply, error)
 	ApplyVersion(context.Context, *MetaRequest) (*Reply, error)
 	ParkedRead(context.Context, *MetaRequest) (*Reply, error)
@@ -237,6 +263,12 @@ func (UnimplementedMetaServer) MetaReplicaMetrics(context.Context, *MetaRequest)
 }
 func (UnimplementedMetaServer) MetaControl(context.Context, *MetaRequest) (*Reply, error) {
 	return nil, status.Error(codes.Unimplemented, "method MetaControl not implemented")
+}
+func (UnimplementedMetaServer) AuthorityRead(context.Context, *MetaRequest) (*Reply, error) {
+	return nil, status.Error(codes.Unimplemented, "method AuthorityRead not implemented")
+}
+func (UnimplementedMetaServer) InstallFence(context.Context, *MetaRequest) (*Reply, error) {
+	return nil, status.Error(codes.Unimplemented, "method InstallFence not implemented")
 }
 func (UnimplementedMetaServer) ProposeMeta(context.Context, *MetaRequest) (*Reply, error) {
 	return nil, status.Error(codes.Unimplemented, "method ProposeMeta not implemented")
@@ -408,6 +440,42 @@ func _Meta_MetaControl_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Meta_AuthorityRead_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MetaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MetaServer).AuthorityRead(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Meta_AuthorityRead_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MetaServer).AuthorityRead(ctx, req.(*MetaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Meta_InstallFence_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MetaRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MetaServer).InstallFence(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Meta_InstallFence_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MetaServer).InstallFence(ctx, req.(*MetaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Meta_ProposeMeta_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(MetaRequest)
 	if err := dec(in); err != nil {
@@ -496,6 +564,14 @@ var Meta_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MetaControl",
 			Handler:    _Meta_MetaControl_Handler,
+		},
+		{
+			MethodName: "AuthorityRead",
+			Handler:    _Meta_AuthorityRead_Handler,
+		},
+		{
+			MethodName: "InstallFence",
+			Handler:    _Meta_InstallFence_Handler,
 		},
 		{
 			MethodName: "ProposeMeta",

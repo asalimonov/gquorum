@@ -65,7 +65,7 @@ func TestMetricsPartialRoundKeepsUnknownUndispatchedAndOwnsLateRead(t *testing.T
 		}
 	}()
 	reads := []ReplicaRead{
-		{Identity: metrics.ReplicaIdentity{ReplicaID: 1}, Read: func(ctx context.Context, a *ReadAttempt) (Probe, error) { a.Dispatch(); <-release; return Probe{}, nil }},
+		{Identity: metrics.ReplicaIdentity{ReplicaID: 1}, Read: func(_ context.Context, a *ReadAttempt) (Probe, error) { a.Dispatch(); <-release; return Probe{}, nil }},
 		{Identity: metrics.ReplicaIdentity{ReplicaID: 2}, Read: func(context.Context, *ReadAttempt) (Probe, error) {
 			t.Error("undispatched source was invoked")
 			return Probe{}, nil

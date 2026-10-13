@@ -97,7 +97,7 @@ func operatorFromView(v topology.Operator) operatorRecord {
 	return operatorRecord{ID: s.ID, Version: s.Version, Attempt: s.Attempt, State: s.State, Steps: append([]topology.Step(nil), v.Plan.Steps...), CurrentStep: s.CurrentStep, GroupID: s.GroupID, NodeName: s.NodeName, WaitingReason: s.WaitingReason, Error: s.Error, Origin: v.Origin, Actor: v.Actor, StartedAt: v.StartedAt, UpdatedAt: v.UpdatedAt}
 }
 func validateRestoredState(st smState, rules topology.Rules) error {
-	if st.SchemaVersion != 1 {
+	if st.SchemaVersion != 2 {
 		return fault.New(fault.Unsupported, "unsupported meta state schema", nil)
 	}
 	if !reflect.DeepEqual(st.Rules, rules) || rules.SchemaVersion != 1 || rules.Limits.Validate() != nil {
@@ -115,6 +115,9 @@ func validateRestoredState(st smState, rules topology.Rules) error {
 		return fault.New(fault.Unreadable, "invalid applied index/term", nil)
 	}
 	if err := validateVoterSwitches(st); err != nil {
+		return err
+	}
+	if _, err := restoreAuthority(st); err != nil {
 		return err
 	}
 	if len(st.History) > historyRetention {
@@ -155,11 +158,16 @@ func validateRestoredState(st smState, rules topology.Rules) error {
 		}
 	}
 	seen := make(map[topology.OperatorID]bool)
+	plans := make(map[uint64][]topology.Step)
 	for _, v := range st.Operators {
 		r := operatorFromView(v)
 		if r.Version == 0 || r.Version > st.Latest.Version || r.Attempt == 0 || r.ID != topology.MakeOperatorID(r.Version, r.Attempt) || seen[r.ID] || v.Plan.Version != r.Version || validateExactPlan(v.Plan) != nil || r.CurrentStep < 0 || r.CurrentStep > len(r.Steps) || !r.State.Valid() || v.Status.TotalSteps != len(r.Steps) || r.StartedAt.IsZero() || r.UpdatedAt.Before(r.StartedAt) {
 			return fault.New(fault.Unreadable, "invalid execution record", nil)
 		}
+		if steps, exists := plans[r.Version]; exists && !exactStepsEqual(steps, r.Steps) {
+			return fault.New(fault.Unreadable, "execution attempts disagree on their immutable plan", nil)
+		}
+		plans[r.Version] = r.Steps
 		if r.State == topology.OperatorPending {
 			if r.CurrentStep != 0 || r.GroupID != "" || r.NodeName != "" || r.Error != "" || r.WaitingReason != "" {
 				return fault.New(fault.Unreadable, "pending execution has progress", nil)
@@ -186,14 +194,14 @@ func validateRestoredState(st smState, rules topology.Rules) error {
 		}
 		locks[l.Key] = true
 	}
-	admissions := make(map[string]bool)
+	admissions := make(map[string]AdmissionRecord)
 	liveAdmissions := make(map[string]bool)
 	for _, a := range st.Admissions {
 		key := admissionKey(a.NodeName, a.InstanceID)
-		if validateAdmissionIdentity(a) != nil || admissions[key] {
+		if _, exists := admissions[key]; validateAdmissionIdentity(a) != nil || exists {
 			return fault.New(fault.Unreadable, "invalid admission record", nil)
 		}
-		admissions[key] = true
+		admissions[key] = a
 		if !a.State.valid() {
 			return fault.New(fault.Unreadable, "unknown admission state", nil)
 		}
@@ -202,6 +210,15 @@ func validateRestoredState(st smState, rules topology.Rules) error {
 				return fault.New(fault.Unreadable, "invalid live admission execution", nil)
 			}
 			liveAdmissions[a.NodeName] = true
+		}
+	}
+	for _, a := range st.Admissions {
+		if a.ReadmissionInstanceID == "" {
+			continue
+		}
+		original, found := admissions[admissionKey(a.NodeName, a.ReadmissionInstanceID)]
+		if !found || original.ReadmissionInstanceID != "" || original.MemberID != a.MemberID || original.OperatorID != a.OperatorID || original.State != AdmissionSuperseded {
+			return fault.New(fault.Unreadable, "readmission origin does not name the exact superseded admission", nil)
 		}
 	}
 	return nil

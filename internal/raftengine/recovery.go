@@ -40,6 +40,9 @@ func validateRecovery(r storage.Recovery) error {
 		if e.Index != last+1 || e.Term == 0 || e.Term > r.HardState.Term {
 			return fault.New(fault.Unreadable, "invalid recovered log prefix", nil)
 		}
+		if err := validateEntryFormat(e); err != nil {
+			return err
+		}
 		last = e.Index
 	}
 	if r.HardState.Commit < r.Snapshot.Metadata.Index || r.HardState.Commit > last || r.HardState.Term < r.Snapshot.Metadata.Term || r.AppliedHint > r.HardState.Commit {

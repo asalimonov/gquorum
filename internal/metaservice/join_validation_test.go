@@ -25,7 +25,7 @@ func TestReadmissionHookMustReleaseAndQuarantineOldMetaIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	g := &Group{store: store, opts: Options{DBPath: path}}
-	g.opts.OnReadmission = func(ctx context.Context, r Readmission) error {
+	g.opts.OnReadmission = func(_ context.Context, r Readmission) error {
 		// This read takes an independent file lock; it succeeds only after Close.
 		pin, found, err := metastore.LoadIdentity(path)
 		if err != nil || !found || pin.MemberID != 1 {

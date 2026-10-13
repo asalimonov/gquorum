@@ -15,6 +15,7 @@ import (
 	"github.com/asalimonov/gquorum/internal/metapb"
 	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -26,7 +27,7 @@ type testHandler struct {
 	stepHook func(context.Context, raftpb.Message) error
 }
 
-func (h *testHandler) Step(ctx context.Context, header *metapb.Header, msg raftpb.Message) error {
+func (h *testHandler) Step(ctx context.Context, _ *metapb.Header, msg raftpb.Message) error {
 	if h.stepHook != nil {
 		return h.stepHook(ctx, msg)
 	}
@@ -92,7 +93,7 @@ func TestMetaTransportPruneDrainsFinalAdmittedCommit(t *testing.T) {
 		t.Fatal("retiring worker outlived Stop", err)
 	}
 }
-func (h *testHandler) Call(ctx context.Context, method string, header *metapb.Header, data []byte) *metapb.Reply {
+func (h *testHandler) Call(ctx context.Context, method string, _ *metapb.Header, data []byte) *metapb.Reply {
 	if h.calls != nil {
 		select {
 		case h.calls <- method:
@@ -278,14 +279,56 @@ func TestMetaTransportStopCancelsAndJoinsControlCall(t *testing.T) {
 	}
 	select {
 	case err := <-done:
-		if err == nil {
-			t.Fatal("blocked call succeeded")
+		if !errors.Is(err, fault.ErrStopped) {
+			t.Fatal("joined call lost transport stop classification", err)
 		}
-	default:
-		t.Fatal("Stop returned before control call finished")
+	case <-ctx.Done():
+		t.Fatal("stopped control call did not return", ctx.Err())
 	}
 	if err := local.Send(ctx, nil); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal(err)
+	}
+}
+
+type controlErrorServer struct {
+	metapb.UnimplementedMetaServer
+	code codes.Code
+}
+
+func (s *controlErrorServer) IdentityPing(context.Context, *metapb.MetaRequest) (*metapb.Reply, error) {
+	return nil, status.Error(s.code, "peer control failure")
+}
+
+func TestMetaControlTransportErrorsPreserveRetryAndRefusalBoundaries(t *testing.T) {
+	for _, code := range []codes.Code{codes.Unavailable, codes.Canceled, codes.DeadlineExceeded, codes.Unauthenticated, codes.InvalidArgument} {
+		t.Run(code.String(), func(t *testing.T) {
+			t.Parallel()
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := grpc.NewServer(grpc.WaitForHandlers(true))
+			metapb.RegisterMetaServer(server, &controlErrorServer{code: code})
+			joined := make(chan struct{})
+			go func() { defer close(joined); _ = server.Serve(listener) }()
+			t.Cleanup(func() { server.Stop(); _ = listener.Close(); <-joined })
+			local := testTransport(t, 1, &testHandler{}, nowhere, nil)
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			reply, err := local.CallAddress(ctx, listener.Addr().String(), "IdentityPing", nil)
+			if reply != nil || err == nil || status.Code(err) != code {
+				t.Fatal("transport manufactured a reply or lost the original cause", reply, err)
+			}
+			retry := code == codes.Unavailable || code == codes.Canceled || code == codes.DeadlineExceeded
+			if errors.Is(err, fault.ErrUnavailable) != retry {
+				t.Fatal("network availability and authentication/business refusal share a retry classification", code, err)
+			}
+			canceled, stop := context.WithCancel(ctx)
+			stop()
+			if _, err := local.CallAddress(canceled, listener.Addr().String(), "IdentityPing", nil); !errors.Is(err, context.Canceled) {
+				t.Fatal("caller cancellation became a remote availability failure", err)
+			}
+		})
 	}
 }
 func TestMetaTransportRefusesMissingSnapshotFinalAndWrongMessageDomain(t *testing.T) {
@@ -336,5 +379,36 @@ func TestMetaTransportRefusesMissingSnapshotFinalAndWrongMessageDomain(t *testin
 	case <-h.received:
 		t.Fatal("invalid framing delivered")
 	default:
+	}
+}
+
+func TestAuthorityRPCPreservesPayloadAndRequiresAuthentication(t *testing.T) {
+	t.Parallel()
+	for _, route := range []string{"InstallFence", "AuthorityRead"} {
+		t.Run(route, func(t *testing.T) {
+			t.Parallel()
+			receiver := &testHandler{calls: make(chan string, 1)}
+			remote := testTransport(t, 2, receiver, nowhere, nil)
+			local := testTransport(t, 1, &testHandler{}, nowhere, nil)
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			payload := []byte(`{"grant":{"key":{"revision":9007199254740993}},"resource":{"kind":"host","group_id":"work","node_name":"node"}}`)
+			reply, err := local.CallAddress(ctx, remote.opts.Listener.Addr().String(), route, payload)
+			if err != nil || ReplyError(reply) != nil || !bytes.Equal(reply.Data, payload) {
+				t.Fatal(reply, err)
+			}
+			if method := <-receiver.calls; method != route {
+				t.Fatal("fence RPC reached another route", method)
+			}
+			bad := testTransport(t, 3, &testHandler{}, nowhere, func(o *Options) { o.Credential = []byte("wrong") })
+			if _, err := bad.CallAddress(ctx, remote.opts.Listener.Addr().String(), route, payload); status.Code(err) != codes.Unauthenticated {
+				t.Fatal("fence RPC bypassed transport credentials", err)
+			}
+			select {
+			case method := <-receiver.calls:
+				t.Fatal("unauthenticated fence reached handler", method)
+			default:
+			}
+		})
 	}
 }
