@@ -75,14 +75,6 @@ non-Docker regression. `FUNCTIONAL_TIMEOUT` defaults to eight minutes per packag
 Use functional race checks for changes to ownership and concurrency. Keep the
 full Docker suite for the end of a related set of changes.
 
-The production pass uses golangci-lint v2.14.0 with [.golangci.yml](../../.golangci.yml),
-copied from TiDB's `.golangci.yml`. The requested adjustments set revive's
-cyclomatic limit to 10, set both line-length limits to 120 and disable the
-placeholder file-header rule. Test files
-are excluded from this pass, as is the Docker test module. Distinct production
-build variants are checked once each, with issue reporting limits disabled.
-The existing vet, standalone revive and merged unused-code checks retain their
-test coverage.
 
 `make lint` installs versioned binaries under the ignored `.tools/lint/` directory:
 revive v1.17.1 and Staticcheck v0.8.2. The checked-in [revive configuration](../../revive.toml)
@@ -100,6 +92,17 @@ generated-code exclusion. Lint compiles and analyzes tests without executing the
 failures and findings return nonzero status; there are no blanket unused-code
 suppressions. The wrapper's regression check is available with
 `cd scripts/revive && go test ./...`.
+
+Enable the pre-commit hook once after cloning with `make install-hooks`.
+The hook runs `make lint-staged`'s checks against a temporary copy of the Git
+index, so partially staged files use the contents being committed. It vets
+affected packages and runs the same production, revive and merged unused-code
+checks, reporting lint findings only in staged Go files. Compilation failures
+still block the commit. Renames and deletions include the affected packages;
+lint configuration changes check every module, and staged `go.mod`/`go.sum`
+changes check their entire module. Documentation-only commits skip lint.
+Pinned tools are installed automatically when needed. The checks never run tests
+or change staged files. Run `make lint-staged` to invoke them manually.
 
 ## Test reports
 

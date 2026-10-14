@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help test test-unit test-unit-race test-race test-function test-function-race test-functional test-functional-race test-example test-cluster test-cluster-build test-cluster-run test-perf test-perf-run bench run-example stop-example clean-example lint proto proto-check generate
+.PHONY: help test test-unit test-unit-race test-race test-function test-function-race test-functional test-functional-race test-example test-cluster test-cluster-build test-cluster-run test-perf test-perf-run bench run-example stop-example clean-example lint lint-tools lint-staged install-hooks proto proto-check generate
 
 # Bound concurrent filesystem fixtures while running independent unit cases.
 UNIT_PARALLEL ?= 8
@@ -53,6 +53,14 @@ $(REVIVE_PACKAGES): scripts/revive/main.go scripts/revive/go.mod scripts/revive/
 
 lint: $(REVIVE) $(REVIVE_PACKAGES) $(STATICCHECK) $(GOLANGCI) ## Vet all variants; apply TiDB golangci rules to production and revive/unused checks to all sources
 	python3 scripts/lint.py --revive "$(REVIVE_PACKAGES)" --staticcheck "$(STATICCHECK)" --golangci "$(GOLANGCI)"
+
+lint-tools: $(REVIVE) $(REVIVE_PACKAGES) $(STATICCHECK) $(GOLANGCI) ## Install the pinned lint tools
+
+lint-staged: ## Lint staged Go files using their exact index contents
+	@python3 scripts/lint_staged.py
+
+install-hooks: ## Enable the repository's pre-commit lint hook
+	git config --local core.hooksPath .githooks
 
 test-function: ## Run isolated functional, protocol and storage tests
 	@python3 scripts/test_report.py function --reports-dir "$(TEST_REPORTS_DIR)" --parallel=$(FUNCTIONAL_PARALLEL) --packages=$(FUNCTIONAL_PACKAGES) --timeout=$(FUNCTIONAL_TIMEOUT) -- $(FUNCTIONAL_ARGS)

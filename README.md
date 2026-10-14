@@ -184,6 +184,8 @@ compatibility impact.
    map, ownership rules and safety invariants.
 2. Make a focused change with regression coverage appropriate to the behavior.
    Keep documentation and examples aligned with public API changes.
+   Run `make install-hooks` once to enable lint checks for staged files before
+   each commit. Use `make lint-staged` to run those checks manually.
 3. Run all tests before sending of a request:
 
    ```sh
