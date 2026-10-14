@@ -5,11 +5,11 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"github.com/asalimonov/gquorum"
 	"reflect"
 	"slices"
 	"testing"
 
+	"github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -19,7 +19,7 @@ func TestDocumentStatusPreviewGuardsAndHistoryThreeNodes(t *testing.T) {
 	documentAPIContracts(t, 3)
 }
 
-func assertAPIViews(t *testing.T, ctx context.Context, c *Cluster, doc topology.Document) {
+func assertAPIViews(ctx context.Context, t *testing.T, c *Cluster, doc topology.Document) {
 	t.Helper()
 	voters, learners := []uint64{}, []uint64{}
 	for _, replica := range doc.MetaGroup().Replicas {
@@ -95,7 +95,7 @@ func documentAPIContracts(t *testing.T, size int) {
 			t.Fatal("status did not expose declared topology and both observed leaders", node.Spec.Name, err)
 		}
 	}
-	assertAPIViews(t, ctx, c, base)
+	assertAPIViews(ctx, t, c, base)
 	if groups := base.LoadGroups(); len(groups) != 1 || groups[0].ID != "work" {
 		t.Fatal("meta appeared in load document helpers", groups)
 	}
@@ -121,7 +121,7 @@ func documentAPIContracts(t *testing.T, size int) {
 	if err := response.Decode(&conflict); err != nil || conflict.Code != string(fault.VersionConflict) || conflict.Expected != base.Version-1 || conflict.Current != base.Version {
 		t.Fatal("CAS refusal lost exact versions", conflict, err)
 	}
-	assertAPIViews(t, ctx, c, base)
+	assertAPIViews(ctx, t, c, base)
 	receipts := map[string]Controls{}
 	for _, node := range c.Nodes() {
 		observed, err := c.Controls(ctx, node.Spec.Name)
@@ -154,7 +154,7 @@ func documentAPIContracts(t *testing.T, size int) {
 	if err := requireStatus(response, err, 409); err != nil {
 		t.Fatal("preview accepted foreign cluster", err)
 	}
-	assertAPIViews(t, ctx, c, base)
+	assertAPIViews(ctx, t, c, base)
 	for _, node := range c.Nodes() {
 		observed, err := c.Controls(ctx, node.Spec.Name)
 		if err != nil || !reflect.DeepEqual(observed, receipts[node.Spec.Name]) {
@@ -226,7 +226,7 @@ func documentAPIContracts(t *testing.T, size int) {
 	if err := requireStatus(response, err, 404); err != nil {
 		t.Fatal("uncommitted history was fabricated", err)
 	}
-	assertAPIViews(t, ctx, c, second.Document)
+	assertAPIViews(ctx, t, c, second.Document)
 }
 
 func TestNodeLifecyclePlacementAndLeaderTransferThreeNodes(t *testing.T) {
@@ -234,7 +234,7 @@ func TestNodeLifecyclePlacementAndLeaderTransferThreeNodes(t *testing.T) {
 	lifecyclePlacementContracts(t, 3)
 }
 
-func assertActualAPIMembership(t *testing.T, ctx context.Context, c *Cluster, doc topology.Document, loadVoters int) {
+func assertActualAPIMembership(ctx context.Context, t *testing.T, c *Cluster, doc topology.Document, loadVoters int) {
 	t.Helper()
 	want := make([]uint64, 0, loadVoters)
 	wantLearners := []uint64{}
@@ -284,14 +284,14 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 	if err := c.Put(ctx, "node2", "work", "before-lifecycle", "before-lifecycle", "retained"); err != nil {
 		t.Fatal(err)
 	}
-	assertActualAPIMembership(t, ctx, c, base, 3)
+	assertActualAPIMembership(ctx, t, c, base, 3)
 	for _, bad := range []topology.PlacementRule{{MinReplicas: 1, MaxReplicas: 2}, {MinReplicas: 1}} {
 		response, err := c.Request(ctx, "node2", "PUT", "/api/placement", globalPlacementBody(bad, gquorum.MutationOptions{Actor: "cluster-test"}), base.Version)
 		if err := requireStatus(response, err, 400); err != nil {
 			t.Fatal("invalid implicit shrink/half rule accepted", err)
 		}
 	}
-	assertAPIViews(t, ctx, c, base)
+	assertAPIViews(ctx, t, c, base)
 	stagePlan := func(ingress, method, path string, body any, version uint64) (gquorum.MutationResult, topology.Plan) {
 		t.Helper()
 		response, err := c.Request(ctx, ingress, method, path, body, version)
@@ -324,12 +324,12 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 	}) {
 		t.Fatal("staged drain lacks exact removal", drainPlan)
 	}
-	assertActualAPIMembership(t, ctx, c, base, 3)
+	assertActualAPIMembership(ctx, t, c, base, 3)
 	drained.OperatorID, err = c.Approve(ctx, c.Spec.Nodes[size-1].Name, drained.Document.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertActualAPIMembership(t, ctx, c, drained.Document, 2)
+	assertActualAPIMembership(ctx, t, c, drained.Document, 2)
 	for _, node := range c.Nodes() {
 		if err := Poll(ctx, func() (bool, error) {
 			status, err := c.Status(ctx, node.Spec.Name)
@@ -371,7 +371,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 	}); err != nil {
 		t.Fatal("drained voter did not resume its retained lineage", err)
 	}
-	assertAPIViews(t, ctx, c, drained.Document)
+	assertAPIViews(ctx, t, c, drained.Document)
 	for _, node := range c.Nodes() {
 		response, err := c.Request(ctx, node.Spec.Name, "GET", "/api/cluster/parked", nil, 0)
 		if err := requireStatus(response, err, 200); err != nil {
@@ -387,8 +387,8 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 		t.Fatal("meta restart silently activated the drained application", err)
 	}
 	capRule := topology.PlacementRule{MinReplicas: 1, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}}
-	if _, err := c.Mutate(ctx, "node2", "PUT", "/api/groups/work/voter-policy", map[string]any{
-		"policy": voterPolicy(2), "mutation": gquorum.MutationOptions{Approve: true, Actor: "operator"},
+	if _, err := c.Mutate(ctx, "node2", "PUT", "/api/groups/work/voter-config", map[string]any{
+		"voter_config": voterConfig(2), "mutation": gquorum.MutationOptions{Approve: true, Actor: "operator"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -398,9 +398,9 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 	}
 	activated, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/node3/activate", gquorum.MutationOptions{Approve: true, Actor: "operator"})
 	if err != nil || activated.Document.Node("node3").State != topology.NodeActive || activated.Document.MemberID("node3") != base.MemberID("node3") || !reflect.DeepEqual(activated.Document.Placement, capped.Document.Placement) {
-		t.Fatal("activation failed or changed its policy/meta pin", activated, err)
+		t.Fatal("activation failed or changed its configuration/meta pin", activated, err)
 	}
-	assertActualAPIMembership(t, ctx, c, activated.Document, 2)
+	assertActualAPIMembership(ctx, t, c, activated.Document, 2)
 	// Voter bounds no longer cap hosting: the third eligible host returns as a
 	// learner and can serve its recovered state without increasing quorum.
 	if len(activated.Document.Group("work").Replicas) != 3 {
@@ -416,7 +416,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 		t.Fatal("placement bound alone changed roles", growPlan)
 	}
 	desired := grown.Document.Clone()
-	desired.Group("work").VoterPolicy.TargetVoters = 3
+	desired.Group("work").VoterConfig.TargetVoters = 3
 	for i := range desired.Group("work").Replicas {
 		if desired.Group("work").Replicas[i].NodeName == "node3" {
 			desired.Group("work").Replicas[i].Role = topology.ReplicaVoter
@@ -425,7 +425,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 	grown, growPlan = stagePlan("node2", "PUT", "/api/topology", desired, grown.Document.Version)
 	fresh := replicaID(grown.Document, "work", "node3")
 	if fresh <= replicaID(base, "work", "node3") {
-		t.Fatal("policy growth reused a retired identity", grown)
+		t.Fatal("voter target growth reused a retired identity", grown)
 	}
 	if fresh != replicaID(activated.Document, "work", "node3") {
 		t.Fatal("promotion changed an existing learner identity")
@@ -437,12 +437,12 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 			t.Fatal("restore lacks exact learner-first plan", kind, growPlan)
 		}
 	}
-	assertActualAPIMembership(t, ctx, c, activated.Document, 2)
+	assertActualAPIMembership(ctx, t, c, activated.Document, 2)
 	grown.OperatorID, err = c.Approve(ctx, "node2", grown.Document.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertActualAPIMembership(t, ctx, c, grown.Document, 3)
+	assertActualAPIMembership(ctx, t, c, grown.Document, 3)
 	if err := exactOwnedValues(ctx, c, grown.Document, "work", map[string]string{"before-lifecycle": "retained"}); err != nil {
 		t.Fatal("regrowth lost acknowledged data", err)
 	}
@@ -460,8 +460,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 	if target.ReplicaID == 0 {
 		t.Fatal("load group has no alternate voter")
 	}
-	response, err = c.Request(ctx, c.Spec.Nodes[size-1].Name, "POST", "/api/groups/work/leader/"+target.NodeName, nil, 0)
-	if err := requireStatus(response, err, 200); err != nil {
+	if err := requestLeaderTransfer(ctx, c, c.Spec.Nodes[size-1].Name, "work", target.NodeName); err != nil {
 		t.Fatal(err)
 	}
 	if err := Poll(ctx, func() (bool, error) {
@@ -470,7 +469,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 	}); err != nil {
 		t.Fatal("accepted transfer did not move actual leadership", err)
 	}
-	assertAPIViews(t, ctx, c, grown.Document)
+	assertAPIViews(ctx, t, c, grown.Document)
 	response, err = c.Request(ctx, "node2", "POST", "/api/groups/undeclared/leader/"+target.NodeName, nil, 0)
 	if err := requireStatus(response, err, 400); err != nil {
 		t.Fatal("undeclared transfer accepted", err)
@@ -485,7 +484,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 	if err := requireStatus(response, err, 400); err != nil {
 		t.Fatal("declared type changed without fresh admission", err)
 	}
-	assertAPIViews(t, ctx, c, grown.Document)
+	assertAPIViews(ctx, t, c, grown.Document)
 	// Declare then cancel a never-started admission. The unused ID stays burned;
 	// only Latest moves before approval, and no real meta/load voter is allocated.
 	response, err = c.Request(ctx, "node2", "POST", "/api/nodes", map[string]any{"node": topology.Node{Name: "staged-only", Type: "worker"}, "mutation": gquorum.MutationOptions{Actor: "operator"}}, grown.Document.Version)
@@ -513,16 +512,16 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 			t.Fatal("staged admission changed an approved view", view, doc, err)
 		}
 	}
-	assertActualAPIMembership(t, ctx, c, grown.Document, 3)
+	assertActualAPIMembership(ctx, t, c, grown.Document, 3)
 	excluded, err := c.Mutate(ctx, "node2", "POST", "/api/nodes/staged-only/exclude", gquorum.MutationOptions{Approve: true, Actor: "operator"})
 	if err != nil || excluded.Document.Node("staged-only") == nil || excluded.Document.Node("staged-only").State != topology.NodeExcluded || excluded.Document.MemberID("staged-only") != 0 || excluded.Document.MetaGroup().NextReplicaID != added.Document.MetaGroup().NextReplicaID {
 		t.Fatal("cancellation lost tombstone/allocation floor", excluded, err)
 	}
-	assertActualAPIMembership(t, ctx, c, excluded.Document, 3)
+	assertActualAPIMembership(ctx, t, c, excluded.Document, 3)
 	if excluded.Document.Node("never-declared") != nil {
 		t.Fatal("document fabricated an unknown node")
 	}
-	assertAPIViews(t, ctx, c, excluded.Document)
+	assertAPIViews(ctx, t, c, excluded.Document)
 	if err := c.WaitReady(ctx); err != nil {
 		t.Fatal(err)
 	}

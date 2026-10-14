@@ -10,8 +10,10 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func (g *Group) ReadBarrier(ctx context.Context) error {
-	ctx, release, err := g.beginEffect(ctx)
+// ReadBarrier confirms a meta quorum round and waits for local application.
+func (g *Group) ReadBarrier(parent context.Context) error {
+	ctxHandle, err := g.acquireEffectContext(parent)
+	ctx, release := ctxHandle.Context, ctxHandle.Release
 	if err != nil {
 		return err
 	}
@@ -22,14 +24,25 @@ func (g *Group) ReadBarrier(ctx context.Context) error {
 	}
 	return engine.ReadBarrier(ctx)
 }
+
+type queryMode uint8
+
+const (
+	applicationQuery queryMode = iota
+	controlQuery
+)
+
 func (g *Group) read(ctx context.Context, q metaengine.QueryRequest, result any) error {
-	return g.readQuery(ctx, q, result, false)
+	return g.readQuery(ctx, q, result, applicationQuery)
 }
+
 func (g *Group) readControl(ctx context.Context, q metaengine.QueryRequest, result any) error {
-	return g.readQuery(ctx, q, result, true)
+	return g.readQuery(ctx, q, result, controlQuery)
 }
-func (g *Group) readQuery(ctx context.Context, q metaengine.QueryRequest, result any, control bool) error {
-	ctx, release, err := g.beginEffect(ctx)
+
+func (g *Group) readQuery(parent context.Context, q metaengine.QueryRequest, result any, mode queryMode) error {
+	ctxHandle, err := g.acquireEffectContext(parent)
+	ctx, release := ctxHandle.Context, ctxHandle.Release
 	if err != nil {
 		return err
 	}
@@ -45,7 +58,7 @@ func (g *Group) readQuery(ctx context.Context, q metaengine.QueryRequest, result
 	// Capture the engine once. Readmission cannot redirect a barrier into a
 	// successor's machine between quorum confirmation and query execution.
 	var r raftengine.Result
-	if control {
+	if mode == controlQuery {
 		r, err = engine.ReadControl(ctx, data)
 	} else {
 		r, err = engine.Read(ctx, data)
@@ -58,16 +71,22 @@ func (g *Group) readQuery(ctx context.Context, q metaengine.QueryRequest, result
 	}
 	return nil
 }
+
+// ReadTopology returns topology views from a quorum-confirmed serialized
+// machine query.
 func (g *Group) ReadTopology(ctx context.Context) (topology.ReadView, error) {
 	var result topology.ReadView
 	err := g.read(ctx, metaengine.QueryRequest{Kind: "topology"}, &result)
 	return result, err
 }
-func (g *Group) ReadLockHolder(ctx context.Context, key string) (topology.Session, bool, error) {
+
+// ReadLockHolder confirms current lock ownership through a serialized meta
+// query.
+func (g *Group) ReadLockHolder(ctx context.Context, key string) (topology.LockHolder, error) {
 	if key == "" {
-		return topology.Session{}, false, fault.ErrInvalid
+		return topology.LockHolder{}, fault.ErrInvalid
 	}
 	var result metaengine.LockRead
 	err := g.read(ctx, metaengine.QueryRequest{Kind: "lock_holder", Key: key}, &result)
-	return result.Session, result.Held, err
+	return topology.LockHolder(result), err
 }

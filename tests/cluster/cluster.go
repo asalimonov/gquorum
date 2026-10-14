@@ -27,11 +27,14 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
+// NodeSpec declares a process fixture's name, type and optional admission pin control.
 type NodeSpec struct {
 	Name              string
 	Type              topology.NodeType
 	AdmissionPinPhase string
 }
+
+// Spec configures an isolated Docker cluster and its startup, fault and scheduling controls.
 type Spec struct {
 	Nodes                                 []NodeSpec
 	Limits                                topology.Limits
@@ -127,6 +130,8 @@ type peer struct {
 	LoadAddress string            `json:"load_address"`
 	HTTPAddress string            `json:"http_address"`
 }
+
+// Node represents one process container and its retained private volume within a cluster lease.
 type Node struct {
 	Spec      NodeSpec
 	Container testcontainers.Container
@@ -137,7 +142,10 @@ type Node struct {
 	cluster   *Cluster
 }
 
+// Endpoint returns the container's current published HTTP address.
 func (n *Node) Endpoint() string { n.mu.RLock(); defer n.mu.RUnlock(); return n.endpoint }
+
+// Start starts the retained process container and refreshes its HTTP endpoint.
 func (n *Node) Start(ctx context.Context) error {
 	owned, cancel, err := n.cluster.operation(ctx)
 	if err != nil {
@@ -157,6 +165,8 @@ func (n *Node) Start(ctx context.Context) error {
 	n.running.Store(true)
 	return nil
 }
+
+// Stop requests graceful container shutdown with a five-second grace period.
 func (n *Node) Stop(ctx context.Context) error {
 	timeout := 5 * time.Second
 	err := n.Container.Stop(ctx, &timeout)
@@ -165,6 +175,8 @@ func (n *Node) Stop(ctx context.Context) error {
 	}
 	return err
 }
+
+// Kill sends SIGKILL to the process container while retaining its private storage.
 func (n *Node) Kill(ctx context.Context) error {
 	_, err := n.cluster.docker.ContainerKill(ctx, n.Container.GetContainerID(), docker.ContainerKillOptions{Signal: "SIGKILL"})
 	if err == nil {
@@ -206,6 +218,8 @@ func (n *Node) StartJoining(ctx context.Context) error {
 	}
 	return n.Start(ctx)
 }
+
+// Logs reads the process container's captured output.
 func (n *Node) Logs(ctx context.Context) (string, error) {
 	reader, err := n.Container.Logs(ctx)
 	if err != nil {
@@ -216,6 +230,7 @@ func (n *Node) Logs(ctx context.Context) (string, error) {
 	return string(data), err
 }
 
+// Cluster owns the isolated nodes, credentials and Docker resources borrowed through a pool lease.
 type Cluster struct {
 	ID, Credential, Network, RunID string
 	UnitID                         int
@@ -243,7 +258,10 @@ func (c *Cluster) operation(ctx context.Context) (context.Context, context.Cance
 	return owned, cancel, nil
 }
 
+// Nodes returns a copied list of the cluster's process handles.
 func (c *Cluster) Nodes() []*Node { c.mu.RLock(); defer c.mu.RUnlock(); return slices.Clone(c.nodes) }
+
+// Node finds a process handle by logical node name.
 func (c *Cluster) Node(name string) *Node {
 	for _, node := range c.Nodes() {
 		if node.Spec.Name == name {
@@ -410,6 +428,8 @@ func (c *Cluster) PrepareNameClaimingNode(ctx context.Context, host NodeSpec, cl
 	}
 	return c.createNodeClaiming(ctx, c.image, host, peers, true, claim)
 }
+
+// WaitReady waits for every nondeferred process to report HTTP readiness.
 func (c *Cluster) WaitReady(ctx context.Context) error {
 	ticker := time.NewTicker(60 * time.Millisecond)
 	defer ticker.Stop()

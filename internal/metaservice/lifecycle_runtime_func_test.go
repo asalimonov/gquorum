@@ -124,8 +124,8 @@ func TestMetaQuiesceAcknowledgesOwnSessionRevocation(t *testing.T) {
 	if _, exists := g.state().Session(s.ID); exists {
 		t.Fatal("quiescence did not commit graceful revoke")
 	}
-	if _, held, err := g.LockHolder(context.Background(), "application"); err != nil || held {
-		t.Fatal(held, err)
+	if held, err := g.LockHolder(context.Background(), "application"); err != nil || held.Held {
+		t.Fatal(held.Held, err)
 	}
 	if err = g.Stop(context.Background()); err != nil {
 		t.Fatal(err)

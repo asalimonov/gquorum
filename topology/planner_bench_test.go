@@ -34,6 +34,8 @@ func plannerMatrix(size int) (Document, Document, map[string]GroupStatus, Rules)
 		group.NextReplicaID = 5
 		status := observed[group.ID]
 		status.LeaderID = 3 // The departing voter must transfer before removal.
+		status.HealthKnown = true
+		status.LiveVoters = map[uint64]bool{1: true, 2: true, 3: true}
 		observed[group.ID] = status
 	}
 	return active, desired, observed, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: size, MaxReplicas: 5}}
@@ -55,19 +57,19 @@ func TestPlannerMatrixDeterministicSafeAndWithinDeadline(t *testing.T) {
 			if elapsed := time.Since(start); elapsed >= 200*time.Millisecond {
 				t.Fatal("planner exceeded the matrix's operation deadline", elapsed)
 			}
-			if plan.Version != desired.Version || len(plan.Steps) != 15*8 {
-				t.Fatal("planner skipped part of the fifteen-group replacement", plan)
+			if plan.Version != desired.Version || len(plan.Steps) != 15*9 {
+				t.Fatalf("planner skipped part of the fifteen-group replacement: %d steps", len(plan.Steps))
 			}
-			kinds := []StepKind{StepTransferLeader, StepRemoveReplica, StepStopReplica, StepCleanupReplicaState, StepPrepareReplica, StepAddLearner, StepWaitCaughtUp, StepPromoteVoter}
+			kinds := []StepKind{StepPrepareReplica, StepAddLearner, StepWaitCaughtUp, StepTransferLeader, StepRemoveReplica, StepStopReplica, StepCleanupReplicaState, StepWaitCaughtUp, StepPromoteVoter}
 			for i := range 15 {
 				for offset, kind := range kinds {
 					seq := i*len(kinds) + offset
 					step := plan.Steps[seq]
-					node, id := "node3", uint64(3)
+					node, id := "node3", uint64(4)
 					if kind == StepTransferLeader {
 						node, id = "node1", 1
-					} else if offset >= 4 {
-						id = 4
+					} else if offset >= 4 && offset <= 6 {
+						id = 3
 					}
 					if step.Seq != seq+1 || step.GroupID != fmt.Sprintf("work-%02d", i) || step.Kind != kind || step.NodeName != node || step.ReplicaID != id {
 						t.Fatal("replacement lacks its exact safe transfer/cleanup/learner ordering", step)
@@ -91,7 +93,7 @@ func BenchmarkPlannerFifteenGroupReplacement(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
 				plan, err := BuildPlan(active, desired, observed, rules)
-				if err != nil || len(plan.Steps) != 120 {
+				if err != nil || len(plan.Steps) != 135 {
 					b.Fatal("invalid benchmark workload", err)
 				}
 			}

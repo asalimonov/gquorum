@@ -6,6 +6,7 @@ import (
 
 	"github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/collection"
 	"github.com/asalimonov/gquorum/topology"
 	"github.com/asalimonov/gquorum/util"
 )
@@ -22,14 +23,21 @@ func (a addresses) Resolve(ctx context.Context, name string) (string, error) {
 	return "", fault.ErrIdentityMismatch
 }
 
+type nodeResources struct {
+	node     gquorum.Node
+	listener net.Listener
+}
+
 // newNode creates the application listener and validates a Node. The caller
 // joins Node before closing the listener; Start transfers it to the library.
-func newNode(cfg config) (gquorum.Node, net.Listener, error) {
-	// A restart keeps its durable member identity but gets a new process identity.
+func newNode(cfg config) (nodeResources, error) {
+	// A restart keeps its durable member identity but gets a new process
+	// identity.
 	identity := topology.Identity{NodeName: cfg.Node, ClusterID: cfg.Cluster, InstanceID: util.NewInstanceID()}
 	// The manifest describes the founding voters and how to reach each peer.
-	// Every node uses the same manifest; this loop also finds our local node type.
-	var founders []gquorum.FoundingMember
+	// Every node uses the same manifest; this loop also finds our local node
+	// type.
+	founders := collection.Slice[gquorum.FoundingMember](len(cfg.Peers.Members))
 	var local topology.Node
 	resolve := addresses{}
 	for _, p := range cfg.Peers.Members {
@@ -41,22 +49,25 @@ func newNode(cfg config) (gquorum.Node, net.Listener, error) {
 			identity.MemberID = p.MemberID
 		}
 	}
-	// The application binds the address. Node takes ownership when Start acquires
+	// The application binds the address. Node takes ownership when Start
+	// acquires
 	// the metadata service; construction errors leave cleanup with this caller.
 	listener, err := net.Listen("tcp", cfg.MetaListen)
 	if err != nil {
-		return nil, nil, err
+		return nodeResources{}, err
 	}
 	node, err := gquorum.NewNode(gquorum.NodeOptions{
-		// The library owns _meta.bolt and _authority.bolt inside this directory.
+		// The library owns _meta.bolt and _authority.bolt inside this
+		// directory.
 		// This example is meta-only, so it needs no application load storage.
 		StorageDir: cfg.Data,
 		Identity:   identity,
 		Node:       local,
 		Bootstrap:  gquorum.BootstrapOptions{Founders: founders},
 		Meta: gquorum.MetaOptions{
-			// The resolver maps readable node names to protocol addresses. All peers
-			// use the same credential to authenticate metadata traffic in this demo.
+			// The resolver maps readable node names to protocol addresses. All
+			// peers use the same credential to authenticate metadata traffic in
+			// this demo.
 			Network: gquorum.MetaNetworkOptions{
 				Listener: listener, AdvertiseAddress: resolve[cfg.Node], Resolver: resolve,
 				AllowPlaintext: true, ClusterCredential: []byte(cfg.Credential),
@@ -65,9 +76,9 @@ func newNode(cfg config) (gquorum.Node, net.Listener, error) {
 	})
 	if err != nil {
 		_ = listener.Close()
-		return nil, nil, err
+		return nodeResources{}, err
 	}
-	return node, listener, nil
+	return nodeResources{node: node, listener: listener}, nil
 }
 
 type readiness struct {
@@ -77,8 +88,9 @@ type readiness struct {
 }
 
 func readReadiness(ctx context.Context, node gquorum.Node) (readiness, error) {
-	// Startup returns before quorum readiness. Serve ready only after admission,
-	// a live session and approved Active topology agree that this node may serve.
+	// Startup returns before quorum readiness. Serve ready only after
+	// admission, a live session and approved Active topology agree that this
+	// node may serve.
 	status := node.Status()
 	if !status.Ready || !status.SessionLive {
 		return readiness{}, fault.ErrReplicaNotReady

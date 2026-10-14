@@ -14,164 +14,59 @@ import (
 	"go.etcd.io/raft/v3/raftpb"
 )
 
+const readyBatchRecencyWindow = 10 * time.Millisecond
+
 func (g *Group) run() {
 	defer g.wg.Done()
-	defer func() {
-		g.cancel()
-		g.mu.Lock()
-		g.stopped = true
-		if g.err == nil {
-			g.err = fault.ErrStopped
-		}
-		g.cached.Lead = 0
-		g.cached.RaftState = raft.StateFollower
-		g.cachedPending = 0
-		g.drainReadQueue(g.err)
-		g.failReadRounds(g.err)
-		// The loop exclusively owns these maps. Release canceled request data
-		// even when a caller retains the stopped Group for inspection.
-		clear(g.props)
-		clear(g.changes)
-		g.mu.Unlock()
-	}()
+	defer g.finishRun()
 	ticker := time.NewTicker(g.opts.Timing.TickInterval)
 	defer ticker.Stop()
 	g.sampleRaftMetrics(time.Now())
 	metricsTicker := time.NewTicker(g.opts.Metrics.SampleInterval)
 	defer metricsTicker.Stop()
-	var lastEntriesWrite time.Time
-	var readyTimer *time.Timer
-	defer func() {
-		if readyTimer != nil {
-			readyTimer.Stop()
-		}
-	}()
+	state := loopState{ticks: ticker.C, metrics: metricsTicker.C}
+	defer state.stopReadyTimer()
 	for {
 		g.pruneWaiters()
 		g.resetReadRounds()
 		g.resumeAuthorizedTransfer()
-		if g.pending == nil && readyTimer == nil && g.rn.HasReady() {
-			// Delay capture, rather than an already frozen Ready: proposals and
-			// inbound entries received during this window join the durable batch.
-			// The loop keeps handling ticks, cancellation and network traffic.
-			if wait := g.opts.Timing.WALWriteWait; wait > 0 && !lastEntriesWrite.IsZero() && time.Since(lastEntriesWrite) < 10*time.Millisecond {
-				readyTimer = time.NewTimer(wait)
-			} else {
-				if err := g.beginReady(); err != nil {
-					g.halt(err)
-					return
-				}
-			}
+		if err := g.prepareReady(&state); err != nil {
+			g.halt(err)
+			return
 		}
-		g.refresh()
 		if g.pending == nil && g.applied >= g.recoveryCommit {
 			g.readyOnce.Do(func() { close(g.ready) })
 		}
-		if g.pending == nil && readyTimer == nil {
+		g.refresh()
+		if g.pending == nil && state.readyTimer == nil {
 			g.completeAppliedReads()
 		}
 		g.issueReadRound(time.Now())
-		if g.pending == nil && readyTimer == nil && g.rn.HasReady() {
+		if g.pending == nil && state.readyTimer == nil && g.rn.HasReady() {
 			continue
 		}
-		var snapshotC chan *request
-		if g.pending == nil && readyTimer == nil {
-			snapshotC = g.snapshots
-		}
-		var readyC <-chan time.Time
-		controlC := g.controls
-		if readyTimer != nil {
-			readyC = readyTimer.C
-			// Capture any incoming configuration entries before validating a
-			// subsequent control against the local log and membership state.
-			controlC = nil
-		}
-		select {
-		case <-g.ctx.Done():
+		if !g.receiveLoopEvent(&state) {
 			return
-		case <-ticker.C:
-			g.rn.Tick()
-			g.retryDroppedProposals(time.Now())
-			g.resetReadRounds()
-			g.retryReadRound(time.Now())
-		case now := <-metricsTicker.C:
-			g.sampleRaftMetrics(now)
-		case <-readyC:
-			readyTimer.Stop()
-			readyTimer = nil
-			if g.rn.HasReady() {
-				if err := g.beginReady(); err != nil {
-					g.halt(err)
-					return
-				}
-			}
-		case result := <-g.writeDone:
-			if result.err != nil {
-				if g.ctx.Err() == nil {
-					g.halt(result.err)
-				}
-				return
-			}
-			entriesWritten := result.kind == writeReady && g.pending != nil && len(g.pending.rd.Entries) > 0
-			if err := g.finishWrite(result.kind); err != nil {
-				g.halt(err)
-				return
-			}
-			if entriesWritten {
-				lastEntriesWrite = time.Now()
-			}
-		case req := <-g.reads:
-			g.admitRead(req)
-		case req := <-g.proposals:
-			g.handleProposal(req)
-		case req := <-g.inbound:
-			if req.ctx.Err() != nil {
-				answer(req, Result{}, req.ctx.Err())
-				continue
-			}
-			err := g.stepRemote(*req.message)
-			if err == nil {
-				g.recordPeerAck(time.Now(), *req.message)
-			}
-			answer(req, Result{}, err)
-		case req := <-controlC:
-			g.handleControl(req)
-		case req := <-snapshotC:
-			if err := g.beginSnapshot(req); err != nil {
-				answer(req, Result{}, err)
-			}
-		case id := <-g.unreachable:
-			g.rn.ReportUnreachable(id)
-		case report := <-g.reports:
-			g.rn.ReportSnapshot(report.id, report.status)
 		}
 	}
 }
 func (g *Group) handleProposal(req *request) {
 	refuse := func(err error) { delete(g.props, req.correlation); answer(req, Result{}, err) }
-	if err := req.ctx.Err(); err != nil {
+	if err := g.proposalAdmission(req); err != nil {
 		refuse(err)
-		return
-	}
-	if g.opts.GroupID == topology.MetaGroupID && g.rn.BasicStatus().RaftState != raft.StateLeader {
-		refuse(fault.ErrNotLeader)
-		return
-	}
-	select {
-	case <-g.ready:
-	default:
-		refuse(fault.ErrReplicaNotReady)
-		return
-	}
-	if g.WALStall() > time.Second || g.props[req.correlation] == nil && len(g.props) >= g.opts.MaxPendingProposals {
-		refuse(fault.ErrOverloaded)
 		return
 	}
 	requestID := req.proposal.RequestID
 	if requestID == "" {
 		requestID = req.correlation
 	}
-	data, err := raftstate.EncodeEntry(raftstate.Entry{Schema: raftstate.Schema, Kind: raftstate.Application, Correlation: req.correlation, RequestID: requestID, Data: req.proposal.Data})
+	data, err := raftstate.EncodeEntry(raftstate.Entry{
+		Schema:      raftstate.Schema,
+		Kind:        raftstate.Application,
+		Correlation: req.correlation,
+		RequestID:   requestID,
+		Data:        req.proposal.Data,
+	})
 	if err == nil && uint64(len(data)) > g.opts.MaxUncommittedBytes {
 		err = fault.ErrOverloaded
 	}
@@ -179,7 +74,7 @@ func (g *Group) handleProposal(req *request) {
 		err = g.rn.Propose(data)
 	}
 	if err != nil {
-		if errors.Is(err, raft.ErrProposalDropped) && g.opts.GroupID != topology.MetaGroupID && !req.retried {
+		if g.opts.GroupID != topology.MetaGroupID && !req.retried && errors.Is(err, raft.ErrProposalDropped) {
 			req.retried = true
 			req.retryAt = time.Now().Add(g.opts.Timing.TickInterval)
 			g.props[req.correlation] = req
@@ -216,7 +111,12 @@ func (g *Group) handleControl(req *request) {
 			return
 		}
 		cc := *req.change
-		data, err := raftstate.EncodeEntry(raftstate.Entry{Schema: raftstate.Schema, Kind: raftstate.StandaloneConfiguration, Correlation: req.correlation, Data: cc.Context})
+		data, err := raftstate.EncodeEntry(raftstate.Entry{
+			Schema:      raftstate.Schema,
+			Kind:        raftstate.StandaloneConfiguration,
+			Correlation: req.correlation,
+			Data:        cc.Context,
+		})
 		if err != nil {
 			answer(req, Result{}, err)
 			return
@@ -264,40 +164,17 @@ func (g *Group) pruneWaiters() {
 		}
 	}
 	// A canceled membership caller does not free the outstanding transition.
-	// Keep its slot until apply/Advance so another change cannot be silently dropped.
+	// Keep its slot until apply/Advance so another change cannot be silently
+	// dropped.
 }
 func (g *Group) beginReady() error {
 	rd := g.rn.Ready()
-	rd.Entries = copyEntries(rd.Entries)
-	rd.CommittedEntries = copyEntries(rd.CommittedEntries)
-	rd.ReadStates = append([]raft.ReadState(nil), rd.ReadStates...)
-	for i := range rd.ReadStates {
-		rd.ReadStates[i].RequestCtx = bytes.Clone(rd.ReadStates[i].RequestCtx)
+	rd, err := ownReady(rd)
+	if err != nil {
+		return err
 	}
-	messages := rd.Messages
-	rd.Messages = make([]raftpb.Message, len(messages))
-	for i, m := range messages {
-		owned, err := copyMessage(m)
-		if err != nil {
-			return err
-		}
-		rd.Messages[i] = owned
-	}
-	if !raft.IsEmptySnap(rd.Snapshot) {
-		if _, err := g.decodeSnapshot(rd.Snapshot); err != nil {
-			return err
-		}
-		if g.opts.GroupID != topology.MetaGroupID {
-			for id, req := range g.props {
-				delete(g.props, id)
-				answer(req, Result{}, fault.New(fault.Unavailable, "snapshot may cover proposal result; outcome unknown", nil))
-			}
-		}
-		rd.Snapshot.Data = bytes.Clone(rd.Snapshot.Data)
-		rd.Snapshot.Metadata.ConfState = copyConf(rd.Snapshot.Metadata.ConfState)
-		if err := g.ms.ApplySnapshot(rd.Snapshot); err != nil {
-			return err
-		}
+	if err := g.stageReadySnapshot(&rd); err != nil {
+		return err
 	}
 	if err := g.ms.Append(rd.Entries); err != nil {
 		return err
@@ -309,7 +186,7 @@ func (g *Group) beginReady() error {
 	}
 	job := writeJob{kind: writeReady, rd: rd}
 	g.pending = &job
-	if raft.IsEmptySnap(rd.Snapshot) && len(rd.Entries) == 0 && raft.IsEmptyHardState(rd.HardState) {
+	if len(rd.Entries) == 0 && raft.IsEmptySnap(rd.Snapshot) && raft.IsEmptyHardState(rd.HardState) {
 		return g.finishWrite(writeReady)
 	}
 	g.writeC <- job
@@ -317,7 +194,7 @@ func (g *Group) beginReady() error {
 }
 func (g *Group) finishWrite(kind writeKind) error {
 	if g.pending == nil || g.pending.kind != kind {
-		return fmt.Errorf("unexpected persistence completion")
+		return errors.New("unexpected persistence completion")
 	}
 	job := g.pending
 	if kind == writeSnapshot {
@@ -329,56 +206,18 @@ func (g *Group) finishWrite(kind writeKind) error {
 		answer(job.request, Result{}, nil)
 		return nil
 	}
-	if kind == writeApplied {
-		return g.advance()
-	}
 	rd := job.rd
 	if !raft.IsEmptyHardState(rd.HardState) {
 		g.durableHS = rd.HardState
 	}
-	if !raft.IsEmptySnap(rd.Snapshot) {
-		state, err := g.decodeSnapshot(rd.Snapshot)
-		if err != nil {
-			return err
-		}
-		g.restoring.Store(true)
-		err = g.opts.Machine.Restore(g.ctx, bytes.Clone(state.Application))
-		g.restoring.Store(false)
-		if err != nil {
-			return fault.New(fault.Unreadable, "restore received snapshot", err)
-		}
-		g.authority = state.Authority.Clone()
-		g.transferIssuedTerm = 0
-		g.applied, g.snapshotIndex = rd.Snapshot.Metadata.Index, rd.Snapshot.Metadata.Index
-		g.cs = copyConf(rd.Snapshot.Metadata.ConfState)
-		g.durableHS.Commit = max(g.durableHS.Commit, g.applied)
+	if err := g.restoreReadySnapshot(rd.Snapshot); err != nil {
+		return err
 	}
-	for _, entry := range rd.CommittedEntries {
-		if entry.Index <= g.applied {
-			continue
-		}
-		if entry.Index != g.applied+1 {
-			return fault.New(fault.Unreadable, "committed application replay gap", nil)
-		}
-		if err := g.apply(entry); err != nil {
-			return err
-		}
-		g.applied = entry.Index
+	if err := g.applyCommittedEntries(rd.CommittedEntries); err != nil {
+		return err
 	}
-	if len(rd.CommittedEntries) > 0 || !raft.IsEmptySnap(rd.Snapshot) {
-		if observer, ok := g.opts.Machine.(AppliedObserver); ok {
-			term, err := g.ms.Term(g.applied)
-			if err != nil {
-				return err
-			}
-			if err := observer.AfterApply(g.ctx, g.applied, term, copyConf(g.cs)); err != nil {
-				return err
-			}
-		}
-		next := writeJob{kind: writeApplied, rd: rd, applied: g.applied, conf: copyConf(g.cs)}
-		g.pending = &next
-		g.writeC <- next
-		return nil
+	if err := g.observeAppliedReady(rd); err != nil {
+		return err
 	}
 	return g.advance()
 }
@@ -388,54 +227,17 @@ func (g *Group) apply(entry raftpb.Entry) error {
 	}
 	switch entry.Type {
 	case raftpb.EntryNormal:
-		if len(entry.Data) == 0 {
-			return nil
-		}
-		e, err := raftstate.DecodeEntry(entry.Data)
-		if err != nil {
-			return err
-		}
-		if e.Kind != raftstate.Application {
-			return g.applyAuthority(entry, e)
-		}
-		started := time.Now()
-		result, err := g.opts.Machine.Apply(g.ctx, Command{Index: entry.Index, Term: entry.Term, RequestID: e.RequestID, Data: bytes.Clone(e.Data)})
-		g.meter.ObserveApply(time.Since(started))
-		if err != nil {
-			return fault.New(fault.Unavailable, "load machine apply failed", err)
-		}
-		if req := g.props[e.Correlation]; req != nil {
-			delete(g.props, e.Correlation)
-			answer(req, result, nil)
-		}
+		return g.applyNormalEntry(entry)
 	case raftpb.EntryConfChangeV2:
-		cc, e, err := decodeConfiguration(entry)
-		if err != nil {
-			return err
-		}
-		if e.Kind == raftstate.ManagedConfiguration {
-			return g.applyAuthorizedConfChange(entry, cc, e)
-		}
-		if e.Kind != raftstate.StandaloneConfiguration || g.opts.ManagedAuthority {
-			return fault.New(fault.Unsupported, "managed configuration requires authority execution", nil)
-		}
-		if change := cc.Changes[0]; change.Type == raftpb.ConfChangeRemoveNode && change.NodeID != g.opts.ReplicaID {
-			g.queueRetirement(entry, change.NodeID)
-		}
-		g.cs = copyConf(*g.rn.ApplyConfChange(cc))
-		g.membershipChanged = true
-		if req := g.changes[e.Correlation]; req != nil {
-			g.confNotify = append(g.confNotify, req)
-			delete(g.changes, e.Correlation)
-		}
+		return g.applyConfigurationEntry(entry)
 	default:
 		return fault.New(fault.Unsupported, "only V2 membership entries are supported", nil)
 	}
-	return nil
 }
 func (g *Group) advance() error {
 	// Publish applied membership before the sender routes this Ready. A newly
-	// admitted peer must not be mistaken for a retired destination by stale cache.
+	// admitted peer must not be mistaken for a retired destination by stale
+	// cache.
 	g.refresh()
 	rd := g.pending.rd
 	rd.Messages = append(rd.Messages, g.retirementMessages...)
@@ -500,7 +302,8 @@ func (g *Group) queueRetirement(entry raftpb.Entry, peer uint64) {
 	}
 	if entries[len(entries)-1].Index != entry.Index {
 		// Keep the handoff bounded if the peer is far behind. A prefix match is
-		// still mandatory at the receiver; unavailable old state is not replaced.
+		// still mandatory at the receiver; unavailable old state is not
+		// replaced.
 		base = entry.Index - 1
 		term, err = g.ms.Term(base)
 		if err != nil {
@@ -508,7 +311,16 @@ func (g *Group) queueRetirement(entry raftpb.Entry, peer uint64) {
 		}
 		entries = []raftpb.Entry{entry}
 	}
-	g.retirementMessages = append(g.retirementMessages, raftpb.Message{Type: raftpb.MsgApp, From: g.opts.ReplicaID, To: peer, Term: status.Term, Index: base, LogTerm: term, Entries: copyEntries(entries), Commit: entry.Index})
+	g.retirementMessages = append(g.retirementMessages, raftpb.Message{
+		Type:    raftpb.MsgApp,
+		From:    g.opts.ReplicaID,
+		To:      peer,
+		Term:    status.Term,
+		Index:   base,
+		LogTerm: term,
+		Entries: copyEntries(entries),
+		Commit:  entry.Index,
+	})
 }
 func (g *Group) beginSnapshot(req *request) error {
 	if req != nil && req.ctx.Err() != nil {
@@ -562,9 +374,15 @@ func (g *Group) refresh() {
 	old := g.cached
 	g.cached = status
 	g.cachedPending = len(g.props)
+	g.publishObservationLocked(regularObservation)
 	g.mu.Unlock()
 	if old.Lead != status.Lead {
-		g.emit(events.Event{Type: events.LeaderChange, OldLeader: fmt.Sprint(old.Lead), NewLeader: fmt.Sprint(status.Lead), Term: status.Term})
+		g.emit(events.Event{
+			Type:      events.LeaderChange,
+			OldLeader: fmt.Sprint(old.Lead),
+			NewLeader: fmt.Sprint(status.Lead),
+			Term:      status.Term,
+		})
 	}
 	if old.RaftState == raft.StateLeader && status.RaftState != raft.StateLeader {
 		if g.opts.GroupID == topology.MetaGroupID {
@@ -597,7 +415,11 @@ func (g *Group) halt(err error) {
 		return
 	}
 	g.mu.Lock()
-	g.err = err
+	if g.err == nil {
+		g.err = err
+	}
+	g.stopping = true
+	g.publishObservationLocked(regularObservation)
 	g.mu.Unlock()
 	g.emit(events.Event{Type: events.RuntimeError, Code: "raft_halted"})
 	g.opts.Logger.Error("Raft group halted", "group", g.opts.GroupID, "error", err)

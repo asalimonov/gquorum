@@ -14,34 +14,34 @@ import (
 
 	quorum "github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/lifecycle"
 	"github.com/asalimonov/gquorum/load"
-	"github.com/asalimonov/gquorum/policy"
 	"github.com/asalimonov/gquorum/topology"
 	bolt "go.etcd.io/bbolt"
 )
 
 type blockingReadiness struct {
-	*policy.DefaultLifecycle
+	*lifecycle.DefaultHooks
 	entered chan struct{}
 	release chan struct{}
 	once    atomic.Bool
 }
 
-func (p *blockingReadiness) Readiness(context.Context, policy.ReadinessInput) (policy.ReadinessDecision, error) {
+func (p *blockingReadiness) Readiness(context.Context, lifecycle.ReadinessInput) (lifecycle.ReadinessDecision, error) {
 	if p.once.CompareAndSwap(false, true) {
 		close(p.entered)
 	}
 	<-p.release
-	return policy.ReadinessDecision{State: policy.Ready}, nil
+	return lifecycle.ReadinessDecision{State: lifecycle.Ready}, nil
 }
 
-func TestPublicNodeStopJoinsNoncooperativePolicy(t *testing.T) {
+func TestPublicNodeStopJoinsNoncooperativeHooks(t *testing.T) {
 	t.Parallel()
-	builtin, _ := policy.NewDefaultLifecycle(policy.DefaultLifecycleOptions{})
-	p := &blockingReadiness{DefaultLifecycle: builtin, entered: make(chan struct{}), release: make(chan struct{})}
+	builtin, _ := lifecycle.NewDefaultHooks(lifecycle.DefaultOptions{})
+	p := &blockingReadiness{DefaultHooks: builtin, entered: make(chan struct{}), release: make(chan struct{})}
 	c := newSingleNodeFixture(t, false, func(_ int, o *quorum.NodeOptions) {
-		o.Policies.Lifecycle = p
-		o.Policies.CallbackTimeout = 30 * time.Millisecond
+		o.Lifecycle.Hooks = p
+		o.CallbackTimeout = 30 * time.Millisecond
 	})
 	defer close(p.release)
 	n := c.nodes[0]
@@ -51,12 +51,12 @@ func TestPublicNodeStopJoinsNoncooperativePolicy(t *testing.T) {
 	select {
 	case <-p.entered:
 	case <-time.After(5 * time.Second):
-		t.Fatal("readiness policy not invoked")
+		t.Fatal("readiness hooks not invoked")
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, 60*time.Millisecond)
 	defer cancel()
 	if err := n.Stop(ctx); !errors.Is(err, fault.ErrShutdownTimeout) {
-		t.Fatal("forgot noncooperative policy", err)
+		t.Fatal("forgot noncooperative hooks", err)
 	}
 	if n.Status().Ready || n.Status().State != quorum.NodeStopping {
 		t.Fatal(n.Status())

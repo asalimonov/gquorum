@@ -35,9 +35,9 @@ func TestMetadataAcquisitionFailureRetainsPinWithoutPublishingEngine(t *testing.
 	if g.engine.Load() != nil || g.store != nil || g.Identity().MemberID != 0 {
 		t.Fatal("failed acquisition published metadata ownership")
 	}
-	pin, found, err := metastore.LoadIdentity(g.opts.DBPath)
-	if err != nil || !found || pin.MemberID != 2 {
-		t.Fatal("acquisition callback ran before durable metadata pin", pin, found, err)
+	pin, err := metastore.LoadIdentity(g.opts.DBPath)
+	if err != nil || !pin.Found || pin.Identity.MemberID != 2 {
+		t.Fatal("acquisition callback ran before durable metadata pin", pin.Identity, pin.Found, err)
 	}
 	if err := g.openEngine(id, raftengine.Joining, nil); err != nil {
 		t.Fatal(err)

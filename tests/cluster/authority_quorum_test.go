@@ -36,7 +36,7 @@ func TestAuthorityGroupRevocationRemainsPendingWithoutLoadQuorumThreeNodes(t *te
 	})
 	demoted := original.Clone()
 	group := demoted.Group("work")
-	group.VoterPolicy.TargetVoters = 2
+	group.VoterConfig.TargetVoters = 2
 	group.Placement.MinReplicas = 2
 	for i := range group.Replicas {
 		if group.Replicas[i].NodeName == "node3" {
@@ -47,7 +47,7 @@ func TestAuthorityGroupRevocationRemainsPendingWithoutLoadQuorumThreeNodes(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := startApply(t, ctx, c, "node2", staged.Document.Version)
+	old := startApply(ctx, t, c, "node2", staged.Document.Version)
 	var delayed load.ActionRequest
 	if err := Poll(ctx, func() (bool, error) {
 		view, err := c.Authority(ctx, "node1", "work")
@@ -81,7 +81,7 @@ func TestAuthorityGroupRevocationRemainsPendingWithoutLoadQuorumThreeNodes(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	newOp := startApply(t, ctx, c, "node2", newStage.Document.Version)
+	newOp := startApply(ctx, t, c, "node2", newStage.Document.Version)
 	if err := Poll(ctx, func() (bool, error) {
 		view, err := c.Authority(ctx, "node1", "work")
 		for _, barrier := range view.Barriers {
@@ -97,7 +97,7 @@ func TestAuthorityGroupRevocationRemainsPendingWithoutLoadQuorumThreeNodes(t *te
 	// metadata participants and their authority RPCs remain reachable.
 	blocked := map[string]LocalObservation{}
 	for _, node := range []string{"node2", "node3"} {
-		blocked[node] = armReadFault(t, ctx, c, node, ReadFaults{DropRaft: true})
+		blocked[node] = armReadFault(ctx, t, c, node, ReadFaults{DropRaft: true})
 	}
 	short, cancel := context.WithTimeout(ctx, time.Second)
 	_, err = c.Read(short, "node1", "work", "key")
@@ -139,7 +139,7 @@ func TestAuthorityGroupRevocationRemainsPendingWithoutLoadQuorumThreeNodes(t *te
 		}
 	}
 	for node, local := range blocked {
-		clearReadFault(t, ctx, c, node, local)
+		clearReadFault(ctx, t, c, node, local)
 	}
 	if err := c.WaitOperator(ctx, "node2", newOp); err != nil {
 		t.Fatal("restored load quorum did not complete the real resource fence", err)
@@ -171,8 +171,8 @@ func TestAuthorityGroupRevocationRemainsPendingWithoutLoadQuorumThreeNodes(t *te
 		t.Fatal(err)
 	}
 	delayed.To = load.Peer{Node: current.Identity, Replica: load.ReplicaRef{GroupID: "work", ReplicaID: current.ReplicaID}}
-	requireFencedReplay(t, ctx, c, current, delayed)
-	waitAuthorityMembership(t, ctx, c, original, false)
+	requireFencedReplay(ctx, t, c, current, delayed)
+	waitAuthorityMembership(ctx, t, c, original, false)
 	value, err := c.Read(ctx, leader, "work", "key")
 	requireReadValue(t, value, err, leader, "before")
 }

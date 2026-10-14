@@ -20,6 +20,19 @@ func (_ *fixture) approve(kind topology.StepKind, targets ...storage.Identity) t
 	if kind != topology.StepCreateFoundingGroup && kind != topology.StepDeleteGroupState {
 		a.NodeName, a.ReplicaID = targets[0].NodeName, targets[0].ReplicaID
 	}
+	switch kind {
+	case topology.StepCreateFoundingGroup:
+		a.ExpectedVotersDigest = topology.VoterSetDigest(nil)
+		ids := make([]uint64, 0, len(targets))
+		for _, target := range targets {
+			ids = append(ids, target.ReplicaID)
+		}
+		a.ResultVotersDigest = topology.VoterSetDigest(ids)
+	case topology.StepAddLearner:
+		a.ExpectedVotersDigest, a.ResultVotersDigest = topology.VoterSetDigest([]uint64{1}), topology.VoterSetDigest([]uint64{1})
+	case topology.StepPromoteVoter:
+		a.ExpectedVotersDigest, a.ResultVotersDigest = topology.VoterSetDigest([]uint64{1}), topology.VoterSetDigest([]uint64{1, a.ReplicaID})
+	}
 	return a
 }
 
@@ -32,7 +45,7 @@ func TestMembershipTargetsTheLearnerThroughADifferentLeaderReceiver(t *testing.T
 	must(t, err)
 	g, err := h.StartReplica(deadline(t), load.ReplicaRef{GroupID: "work", ReplicaID: 1}, StartOperator)
 	must(t, err)
-	await(t, deadline(t), g.Core().IsLeader)
+	await(deadline(t), t, g.Core().IsLeader)
 	target := storage.Identity{NodeName: "b", ClusterID: "cluster", GroupID: "work", ReplicaID: 2}
 	a := f.approve(topology.StepAddLearner, target)
 	req := f.request(a, f.localID(1))
@@ -42,7 +55,7 @@ func TestMembershipTargetsTheLearnerThroughADifferentLeaderReceiver(t *testing.T
 	grant.Action, grant.Resources = &a, grant.Resources[:1]
 	grant.Targets = append(grant.Targets, topology.AuthorityTarget{NodeName: "b", MemberID: 2, ReplicaID: 2})
 	req.Grant = grant
-	await(t, deadline(t), func() bool {
+	await(deadline(t), t, func() bool {
 		_, err = g.Core().InstallAuthority(deadline(t), grant)
 		if errors.Is(err, fault.ErrAuthorityPending) {
 			return false
@@ -51,7 +64,7 @@ func TestMembershipTargetsTheLearnerThroughADifferentLeaderReceiver(t *testing.T
 		return true
 	})
 	var result load.ActionResult
-	await(t, deadline(t), func() bool {
+	await(deadline(t), t, func() bool {
 		result, err = h.ApplyAction(deadline(t), req)
 		if errors.Is(err, fault.ErrAuthorityPending) {
 			return false
@@ -67,7 +80,7 @@ func TestMembershipTargetsTheLearnerThroughADifferentLeaderReceiver(t *testing.T
 	grant.Key.Revision++
 	grant.Action = &a
 	req.Grant = grant
-	await(t, deadline(t), func() bool {
+	await(deadline(t), t, func() bool {
 		_, err = g.Core().InstallAuthority(deadline(t), grant)
 		if errors.Is(err, fault.ErrAuthorityPending) {
 			return false
@@ -75,7 +88,7 @@ func TestMembershipTargetsTheLearnerThroughADifferentLeaderReceiver(t *testing.T
 		must(t, err)
 		return true
 	})
-	await(t, deadline(t), func() bool {
+	await(deadline(t), t, func() bool {
 		_, err := h.ApplyAction(deadline(t), req)
 		if errors.Is(err, fault.ErrAuthorityPending) {
 			return false
@@ -137,7 +150,7 @@ func TestGrantedCreationAndRefusedIdentities(t *testing.T) {
 	// the fixture's one-second effect deadline. The factory-once assertion below
 	// still requires retries to share the accepted operation.
 	ctx := deadline(t)
-	await(t, ctx, func() bool {
+	await(ctx, t, func() bool {
 		_, err := h.DispatchGrant(ctx, grant)
 		if errors.Is(err, fault.ErrUnavailable) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, fault.ErrReplicaNotReady) || errors.Is(err, fault.ErrAuthorityPending) || errors.Is(err, fault.ErrNotLeader) {
 			return false

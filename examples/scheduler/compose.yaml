@@ -1,0 +1,47 @@
+name: gquorum-scheduler
+x-node: &node
+  image: ${SCHEDULER_IMAGE:-gquorum-scheduler:local}
+  build:
+    context: ../..
+    dockerfile: examples/scheduler/Dockerfile
+  stop_grace_period: 30s
+  networks: [scheduler]
+  secrets:
+    - credential
+x-env: &env
+  GQUORUM_CLUSTER: scheduler-example
+  GQUORUM_PEERS: node1,node2,node3
+  GQUORUM_DATA: /data
+  GQUORUM_CREDENTIAL_FILE: /run/secrets/credential
+  GQUORUM_ALLOW_PLAINTEXT: "true"
+services:
+  node1:
+    <<: *node
+    environment:
+      <<: *env
+      GQUORUM_NODE: node1
+    ports: ["127.0.0.1:${SCHEDULER_NODE1_PORT:-19081}:8080"]
+    volumes: ["scheduler-node1:/data"]
+  node2:
+    <<: *node
+    environment:
+      <<: *env
+      GQUORUM_NODE: node2
+    ports: ["127.0.0.1:${SCHEDULER_NODE2_PORT:-19082}:8080"]
+    volumes: ["scheduler-node2:/data"]
+  node3:
+    <<: *node
+    environment:
+      <<: *env
+      GQUORUM_NODE: node3
+    ports: ["127.0.0.1:${SCHEDULER_NODE3_PORT:-19083}:8080"]
+    volumes: ["scheduler-node3:/data"]
+secrets:
+  credential:
+    file: ./demo-credential.txt
+networks:
+  scheduler:
+volumes:
+  scheduler-node1:
+  scheduler-node2:
+  scheduler-node3:

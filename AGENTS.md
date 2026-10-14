@@ -22,7 +22,7 @@ The public API refactor established these boundaries:
 - `*load.Group` represents one exact local replica and exposes application
   consensus. It has no independent start/stop or raw membership controls.
 - `GroupFactory`, `load.StateMachine`, `load.Transport`, storage interfaces and
-  `policy` interfaces are application extension points.
+  `scheduling.RepairPolicy` and `lifecycle.Hooks` are application extension points.
 - The former public `Runtime`, `OpenMeta` and `OpenLoad` APIs were removed.
   Keep orchestration in the library and applications on public APIs.
   `load.NewStandalone` is the explicit low-level alternative with a separate owner.
@@ -57,8 +57,8 @@ cleanup evidence and shutdown release ownership.
 | `node*.go`, `cluster*.go`, `doc.go` | Public API, validation, lifecycle composition and administration. |
 | `topology/` | Documents, identities, placement, planning, operators, status and validation. |
 | `load/` | State-machine and transport contracts, replica handles and standalone owner. |
-| `policy/`, `policy/policytest/` | Built-in and replaceable decisions; policy contract helpers. |
-| `storage/`, `storage/walstore/`, `storage/storagetest/` | Persistence/retirement contracts, WAL backend and conformance helpers. |
+| `scheduling/`, `lifecycle/` and their test-helper packages | Repair policies, local lifecycle hooks and caller contract helpers. |
+| `storage/`, `storage/walstore/`, `storage/memstore/`, `storage/storagetest/` | Persistence/retirement contracts, WAL backend, in-memory store and conformance helpers. |
 | `events/`, `fault/`, `membership/` | Local events/journal, classified errors and membership safety. |
 | `internal/managed/`, `internal/loadhandle/` | Exact replica ownership, recovery, approved effects and retirement. |
 | `internal/metaservice/` | Topology service, admission, documents, sessions and protocol integration. |
@@ -120,7 +120,9 @@ cleanup evidence and shutdown release ownership.
   before installing the exact granted replacement identity.
 - Applied, durably authorized self-removal fences participation before optional
   lifecycle decisions. Drain or an unapproved removal does not provide that proof.
-- Preserve persisted encodings across public API renames. Legacy names in
+- The approved alpha policy-naming refactor changes voter configuration and
+  scheduling-status JSON names without migration or mixed-version support.
+  Preserve unrelated persisted encodings across public API renames. Legacy names in
   events, metadata and wire values can be compatibility requirements. Never
   regenerate baseline files in `events/testdata`, `load/testdata/api-baseline`
   or `internal/metaengine/testdata/api-baseline` with current code to make tests pass.
@@ -145,7 +147,8 @@ cleanup evidence and shutdown release ownership.
   retain ownership for serialized retries. Never overlap replacements with
   unresolved owners or close meta storage before managed work and callbacks join.
 - Injected stores, transports, event buses and journals are borrowed. WAL storage
-  selected through `LoadStorageOptions.WAL` is Node-owned. The meta listener
+  selected through `LoadStorageOptions.WAL` and the in-memory store used by
+  `topology.StorageMemory` groups are Node-owned. The meta listener
   transfers when startup acquires the service.
 - Serialize scheduler calls per node; readiness, retention and removal share a
   separate serialized lifecycle runner. Inputs are owned copies. Overdue
@@ -158,12 +161,15 @@ cleanup evidence and shutdown release ownership.
 
 ### Policy scope and application boundaries
 
-The built-in scheduler restores missing required load voters. It does not alter
-meta membership, approve staged operator intent, promote intentional learners or
-balance healthy groups. Custom schedulers select supported repair actions;
-the driver rechecks topology, health, native membership and leadership after
-callbacks and guards approval with replicated CAS. Startup policy consistency
-is caller-owned; replicated policy agreement is deferred.
+The built-in repair policy converges replicated voter configuration, including
+`_meta`, by selecting guarded promotions, demotions and stable-learner
+replacements. Groups without voter configuration retain missing-load-voter
+repair. It preserves pinned learners and healthy seats, never approves unrelated
+staged operator intent and does not balance healthy groups. The internal scheduler
+rechecks topology, health, native membership and leadership after callbacks and
+guards approval with replicated CAS. Local readiness, retention and removal
+callbacks belong to `lifecycle.Hooks`. Repair implementation consistency remains
+caller-owned; replicated implementation agreement is deferred.
 
 Applications build autoscaling controllers with membership and placement APIs.
 Infrastructure provisioning, workload scheduling and stream ingestion stay in
@@ -237,8 +243,8 @@ ordinary and race runs, bounding concurrent I/O across functional packages.
 Use three nodes for ordinary cluster, quorum, fault and performance coverage.
 Do not repeat these scenarios at five or seven nodes. A larger cluster test must
 name a specific regression that cannot be exercised at three nodes; currently
-only four-node admission/promotion and durable admission-pin restart cases need
-that capacity.
+four-node admission/promotion, durable admission-pin restart and the strict
+three-AZ voter replacement with a same-AZ standby need that capacity.
 
 Process cases call `t.Parallel()` before acquiring isolated resources. Independent
 admission-phase subtests also run in parallel; subtests sharing

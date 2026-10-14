@@ -192,7 +192,7 @@ func rejoinWorkload(t *testing.T, size int) (context.Context, *Cluster, topology
 	return ctx, c, created.Document, before, values
 }
 
-func assertRejoinedIdentities(t *testing.T, ctx context.Context, c *Cluster, before, after topology.Document, previous LocalObservation, expectedProcess string, values map[string]string) {
+func assertRejoinedIdentities(ctx context.Context, t *testing.T, c *Cluster, before, after topology.Document, previous LocalObservation, expectedProcess string, values map[string]string) {
 	t.Helper()
 	if after.MemberID("node3") <= before.MetaGroup().NextReplicaID-1 || replicaID(after, "work", "node3") <= before.Group("work").NextReplicaID-1 || len(after.MetaGroup().Replicas) != len(c.Spec.Nodes) {
 		t.Fatal("readmission reused a retired identity or lost membership", before, after)
@@ -253,11 +253,11 @@ func assertRejoinedIdentities(t *testing.T, ctx context.Context, c *Cluster, bef
 	if err := exactOwnedValues(ctx, c, after, "work", values); err != nil {
 		t.Fatal(err)
 	}
-	assertRetiredMetaPin(t, ctx, c, previous.Identity)
+	assertRetiredMetaPin(ctx, t, c, previous.Identity)
 }
 
 // Inspect the actual quarantined bbolt file, not just a successful callback log.
-func assertRetiredMetaPin(t *testing.T, ctx context.Context, c *Cluster, old topology.Identity) {
+func assertRetiredMetaPin(ctx context.Context, t *testing.T, c *Cluster, old topology.Identity) {
 	t.Helper()
 	response, err := c.Request(ctx, old.NodeName, "GET", "/internal/test/meta-backups", nil, 0)
 	if err := requireStatus(response, err, 200); err != nil {
@@ -289,9 +289,9 @@ func assertRetiredMetaPin(t *testing.T, ctx context.Context, c *Cluster, old top
 		if err != nil {
 			t.Fatal(err)
 		}
-		pin, found, err := gquorum.LoadStoredIdentity(storageDir)
-		if err != nil || !found || pin.NodeName != old.NodeName || pin.ClusterID != old.ClusterID || pin.MemberID != old.MemberID {
-			t.Fatal("quarantined a foreign/successor meta pin", pin, old, err)
+		pin, err := gquorum.LoadStoredIdentity(storageDir)
+		if err != nil || !pin.Found || pin.Identity.NodeName != old.NodeName || pin.Identity.ClusterID != old.ClusterID || pin.Identity.MemberID != old.MemberID {
+			t.Fatal("quarantined a foreign/successor meta pin", pin.Identity, old, err)
 		}
 	}
 }
@@ -440,7 +440,7 @@ func excludedSameDiskRejoin(t *testing.T, size int) {
 	if err := c.WaitOperator(ctx, "node1", admitted.OperatorID); err != nil {
 		t.Fatal(err)
 	}
-	assertRejoinedIdentities(t, ctx, c, before, admitted.Document, previous, parkedIdentity.Identity.InstanceID, values)
+	assertRejoinedIdentities(ctx, t, c, before, admitted.Document, previous, parkedIdentity.Identity.InstanceID, values)
 }
 
 func rotatedDownNodeRejoin(t *testing.T, size int) {
@@ -526,12 +526,18 @@ func rotatedDownNodeRejoin(t *testing.T, size int) {
 	if victim.Volume != volume {
 		t.Fatal("rotated return wiped its disk")
 	}
-	returned, err := c.Local(ctx, "node3", topology.MetaGroupID)
+	// The returning process binds its _meta observation while it joins.
+	var returned LocalObservation
+	err = Poll(ctx, func() (bool, error) {
+		var err error
+		returned, err = c.Local(ctx, "node3", topology.MetaGroupID)
+		return err == nil, err
+	})
 	if err != nil || returned.Identity.InstanceID == previous.Identity.InstanceID {
 		t.Fatal("returning process identity missing", returned, err)
 	}
 	if err := c.WaitOperator(ctx, "node1", rotated.OperatorID); err != nil {
 		t.Fatal(err)
 	}
-	assertRejoinedIdentities(t, ctx, c, before, rotated.Document, previous, returned.Identity.InstanceID, values)
+	assertRejoinedIdentities(ctx, t, c, before, rotated.Document, previous, returned.Identity.InstanceID, values)
 }

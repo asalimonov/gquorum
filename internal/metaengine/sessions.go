@@ -2,7 +2,7 @@ package metaengine
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 )
 
 type sessionState struct {
@@ -14,10 +14,12 @@ type sessionState struct {
 
 func (sm *topologySM) applyGrantSession(p GrantSession) (ApplyResult, bool) {
 	if p.SessionID == "" || p.NodeName == "" || p.InstanceID == "" || p.TTLSeconds <= 0 {
-		return rejectProposal(p.ProposalID, proposalGuardrail, "session requires exact identity and positive TTL"), false
+		return rejectProposal(p.ProposalID, proposalGuardrail,
+			"session requires exact identity and positive TTL"), false
 	}
 	if existing, exists := sm.sessions[p.SessionID]; exists {
-		if existing.NodeName != p.NodeName || existing.InstanceID != p.InstanceID || existing.TTLSeconds != p.TTLSeconds {
+		if existing.NodeName != p.NodeName || existing.InstanceID != p.InstanceID ||
+			existing.TTLSeconds != p.TTLSeconds {
 			return rejectProposal(p.ProposalID, proposalAuthorization, "session identity differs"), false
 		}
 		return ApplyResult{ProposalID: p.ProposalID, Accepted: true}, false
@@ -84,7 +86,7 @@ func (sm *topologySM) sessionSnapshotLocked() []sessionState {
 	for id := range sm.sessions {
 		ids = append(ids, id)
 	}
-	sort.Strings(ids)
+	slices.Sort(ids)
 	out := make([]sessionState, 0, len(ids))
 	for _, id := range ids {
 		out = append(out, *sm.sessions[id])
@@ -102,7 +104,7 @@ func (sm *topologySM) lockSnapshotLocked() []lockEntry {
 	for k := range sm.locks {
 		keys = append(keys, k)
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	out := make([]lockEntry, 0, len(keys))
 	for _, k := range keys {
 		out = append(out, lockEntry{Key: k, SessionID: sm.locks[k]})
@@ -126,17 +128,17 @@ func (sm *topologySM) session(sessionID string) (sessionState, bool) {
 	return *s, true
 }
 
-func (sm *topologySM) lockHolderSession(key string) (string, sessionState, bool) {
+func (sm *topologySM) lockHolderSession(key string) (sessionState, bool) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	sid, held := sm.locks[key]
 	if !held {
-		return "", sessionState{}, false
+		return sessionState{}, false
 	}
 	if s, ok := sm.sessions[sid]; ok {
-		return sid, *s, true
+		return *s, true
 	}
-	return sid, sessionState{}, true
+	return sessionState{}, true
 }
 
 func (sm *topologySM) LockHolder(key string) (string, bool) {

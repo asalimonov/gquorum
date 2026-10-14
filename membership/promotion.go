@@ -6,36 +6,47 @@ import (
 	"go.etcd.io/raft/v3"
 )
 
+// PromotionLagLimit bounds the committed-entry lag allowed when promoting a
+// learner.
 const PromotionLagLimit uint64 = 1000
 
+// CaughtUp reports whether the local leader observes an eligible, sufficiently
+// caught-up learner.
 func CaughtUp(g RaftGroup, replicaID uint64) bool {
-	ok, _, _ := catchUpStatus(g, g.Status(), replicaID)
-	return ok
+	status := catchUpStatus(g, g.Status(), replicaID)
+	return status.caughtUp
 }
 
-func catchUpStatus(g RaftGroup, st raft.Status, replicaID uint64) (bool, uint64, string) {
+type catchUpResult struct {
+	caughtUp bool
+	lag      uint64
+	reason   string
+}
+
+func catchUpStatus(g RaftGroup, st raft.Status, replicaID uint64) catchUpResult {
 	if !g.IsLeader() {
-		return false, 0, "local replica is not the group leader"
+		return catchUpResult{caughtUp: false, lag: 0, reason: "local replica is not the group leader"}
 	}
 	if _, ok := st.Config.Learners[replicaID]; !ok {
-		return false, 0, "replica is not a current learner"
+		return catchUpResult{caughtUp: false, lag: 0, reason: "replica is not a current learner"}
 	}
 	if st.Commit == 0 {
-		return false, 0, "group commit index is zero"
+		return catchUpResult{caughtUp: false, lag: 0, reason: "group commit index is zero"}
 	}
 	pr, ok := st.Progress[replicaID]
 	if !ok {
-		return false, 0, "learner progress is unavailable"
+		return catchUpResult{caughtUp: false, lag: 0, reason: "learner progress is unavailable"}
 	}
 	lag := uint64(0)
 	if st.Commit > pr.Match {
 		lag = st.Commit - pr.Match
 	}
 	if !pr.RecentActive && lag > 0 {
-		return false, lag, "learner is not recently active"
+		return catchUpResult{caughtUp: false, lag: lag, reason: "learner is not recently active"}
 	}
 	if lag > PromotionLagLimit {
-		return false, lag, fmt.Sprintf("learner lag exceeds %d", PromotionLagLimit)
+		return catchUpResult{caughtUp: false, lag: lag, reason: fmt.Sprintf("learner lag exceeds %d",
+			PromotionLagLimit)}
 	}
-	return true, lag, ""
+	return catchUpResult{caughtUp: true, lag: lag, reason: ""}
 }

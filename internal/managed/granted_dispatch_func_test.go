@@ -45,7 +45,7 @@ func TestGrantedDispatcherCollectsDurableFoundingAndMembershipReceipts(t *testin
 	transport.host = h
 	var receipts []topology.EffectReceipt
 	dispatchCtx := deadline(t)
-	await(t, dispatchCtx, func() bool {
+	await(dispatchCtx, t, func() bool {
 		var err error
 		receipts, err = h.DispatchGrant(dispatchCtx, founding)
 		// Each dispatch has its own EffectTimeout. Initial election and durable
@@ -66,11 +66,11 @@ func TestGrantedDispatcherCollectsDurableFoundingAndMembershipReceipts(t *testin
 	for _, receipt := range receipts {
 		must(t, receipt.Validate(founding))
 	}
-	if proof, found, err := s.Receipt(t.Context(), founding, founding.Targets[0]); err != nil || !found || !reflect.DeepEqual(proof, receipts[1]) {
-		t.Fatal(proof, found, err)
+	if proof, err := s.Receipt(t.Context(), founding, founding.Targets[0]); err != nil || !proof.Found || !reflect.DeepEqual(proof.Receipt, receipts[1]) {
+		t.Fatal(proof.Receipt, proof.Found, err)
 	}
 	var again []topology.EffectReceipt
-	await(t, deadline(t), func() bool {
+	await(deadline(t), t, func() bool {
 		var err error
 		again, err = h.DispatchGrant(deadline(t), founding)
 		if errors.Is(err, fault.ErrAuthorityPending) {
@@ -87,7 +87,7 @@ func TestGrantedDispatcherCollectsDurableFoundingAndMembershipReceipts(t *testin
 	a := f.approve(topology.StepAddLearner, storage.Identity{ClusterID: "cluster", GroupID: "work", NodeName: "b", ReplicaID: 2})
 	membership.Action, membership.Resources = &a, membership.Resources[:1]
 	membership.Targets = append(membership.Targets, topology.AuthorityTarget{NodeName: "b", MemberID: 2, ReplicaID: 2})
-	await(t, deadline(t), func() bool {
+	await(deadline(t), t, func() bool {
 		var err error
 		receipts, err = h.DispatchGrant(deadline(t), membership)
 		if errors.Is(err, fault.ErrAuthorityPending) {
@@ -100,7 +100,7 @@ func TestGrantedDispatcherCollectsDurableFoundingAndMembershipReceipts(t *testin
 		t.Fatal(receipts)
 	}
 	must(t, receipts[0].Validate(membership))
-	await(t, deadline(t), func() bool {
+	await(deadline(t), t, func() bool {
 		_, err := h.DispatchGrant(deadline(t), founding)
 		if errors.Is(err, fault.ErrAuthorityPending) {
 			return false

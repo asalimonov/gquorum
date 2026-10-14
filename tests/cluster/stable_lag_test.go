@@ -23,16 +23,15 @@ func TestStableLearnerReplacesReplicationLagWhileNodeStaysAliveFourNodes(t *test
 	c := acquire(t, spec).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Second)
 	defer cancel()
-	p := topology.DefaultVoterPolicy()
+	p := topology.DefaultVoterConfig()
 	p.FailureWindow, p.StandbyWindow = 5*time.Second, 5*time.Second
 	p.FailureLagEntries, p.StandbyLagEntries = 10, 1
 	p.ReplaceNoProgress = false
-	created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "lag", VoterPolicy: &p})
+	created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "lag", VoterConfig: &p})
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := c.Request(ctx, "node2", "POST", "/api/groups/lag/leader/node1", nil, 0)
-	if err := requireStatus(response, err, 200); err != nil {
+	if err := requestLeaderTransfer(ctx, c, "node2", "lag", "node1"); err != nil {
 		t.Fatal(err)
 	}
 	for _, node := range c.Nodes() {

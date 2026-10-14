@@ -25,6 +25,12 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+const (
+	peerQueueCapacity = 128
+)
+
+// Options supplies meta identity, authenticated networking, bounded sends and
+// failure callbacks.
 type Options struct {
 	Header                                               *metapb.Header
 	Listener                                             net.Listener
@@ -38,6 +44,9 @@ type Options struct {
 	OnUnreachable                                        func(uint64)
 	OnSnapshot                                           func(uint64, raft.SnapshotStatus)
 }
+
+// Transport owns a meta gRPC server and independent bounded destination
+// workers.
 type Transport struct {
 	opts             Options
 	mu               sync.Mutex
@@ -59,18 +68,23 @@ type peer struct {
 	until  atomic.Int64
 }
 
+// New validates and copies transport settings and constructs an inactive gRPC
+// server.
 func New(o Options) (*Transport, error) {
-	if o.Header == nil || o.Header.ClusterId == "" || o.Header.NodeName == "" || o.Listener == nil || o.Handler == nil || o.Resolve == nil || len(o.Credential) == 0 {
-		return nil, fault.New(fault.Invalid, "meta transport requires identity, listener, handler, resolver and credential", nil)
+	if o.Header == nil || o.Header.ClusterId == "" || o.Header.NodeName == "" || o.Listener == nil ||
+		o.Handler == nil || o.Resolve == nil || len(o.Credential) == 0 {
+		return nil, fault.New(fault.Invalid,
+			"meta transport requires identity, listener, handler, resolver and credential", nil)
 	}
 	if o.TLS == nil && !o.AllowPlaintext || o.ClientTLS == nil && !o.AllowPlaintext {
 		return nil, fault.New(fault.Invalid, "plaintext transport must be explicit", nil)
 	}
-	if o.SendTimeout <= 0 || o.SnapshotTimeout <= 0 || o.RetryInitial <= 0 || o.RetryMax < o.RetryInitial || o.MaxSnapshotBytes <= 0 {
+	if o.SendTimeout <= 0 || o.SnapshotTimeout <= 0 || o.RetryInitial <= 0 || o.RetryMax < o.RetryInitial ||
+		o.MaxSnapshotBytes <= 0 {
 		return nil, fault.ErrInvalid
 	}
 	o.Credential = bytes.Clone(o.Credential)
-	o.Header = proto.Clone(o.Header).(*metapb.Header)
+	o.Header = proto.CloneOf(o.Header)
 	if o.TLS != nil {
 		o.TLS = o.TLS.Clone()
 	}
@@ -82,9 +96,12 @@ func New(o Options) (*Transport, error) {
 		options = append(options, grpc.Creds(credentials.NewTLS(o.TLS)))
 	}
 	srv := grpc.NewServer(options...)
-	metapb.RegisterMetaServer(srv, &server{handler: o.Handler, clusterID: o.Header.ClusterId, credential: o.Credential, maxSnapshot: o.MaxSnapshotBytes})
+	metapb.RegisterMetaServer(srv, &server{handler: o.Handler, clusterID: o.Header.ClusterId, credential: o.Credential,
+		maxSnapshot: o.MaxSnapshotBytes})
 	return &Transport{opts: o, server: srv, peers: make(map[uint64]*peer), done: make(chan struct{})}, nil
 }
+
+// Start acquires server execution under the supplied lifetime context.
 func (t *Transport) Start(parent context.Context) error {
 	if err := parent.Err(); err != nil {
 		return err
@@ -108,6 +125,8 @@ func (t *Transport) Start(parent context.Context) error {
 	}()
 	return nil
 }
+
+// Stop closes the listener, cancels destinations and joins all network workers.
 func (t *Transport) Stop(ctx context.Context) error {
 	t.mu.Lock()
 	if !t.stopped {
@@ -117,7 +136,8 @@ func (t *Transport) Stop(ctx context.Context) error {
 		}
 		t.server.Stop()
 		_ = t.opts.Listener.Close()
-		// All Add calls hold this mutex; no worker can be added after Wait starts.
+		// All Add calls hold this mutex; no worker can be added after Wait
+		// starts.
 		go func() { t.wg.Wait(); close(t.done) }()
 	}
 	t.mu.Unlock()
@@ -128,17 +148,22 @@ func (t *Transport) Stop(ctx context.Context) error {
 		return fault.New(fault.ShutdownTimeout, "meta network workers have not stopped", ctx.Err())
 	}
 }
+
 func (t *Transport) Error() error { t.mu.Lock(); defer t.mu.Unlock(); return t.serveErr }
+
+// SetMemberID updates the numeric member identity used by outgoing headers.
 func (t *Transport) SetMemberID(id uint64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.opts.Header.MemberId = id
 }
+
+// Header returns an owned copy of the current outgoing identity header.
 func (t *Transport) Header() *metapb.Header {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	h := t.opts.Header
-	return proto.Clone(h).(*metapb.Header)
+	return proto.CloneOf(h)
 }
 
 // Prune retires removed peers after their already admitted messages drain. It
@@ -154,6 +179,9 @@ func (t *Transport) Prune(ids map[uint64]bool) {
 		}
 	}
 }
+
+// Send validates message identities and queues bounded work independently for
+// each destination.
 func (t *Transport) Send(ctx context.Context, messages []raftpb.Message) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -170,12 +198,14 @@ func (t *Transport) Send(ctx context.Context, messages []raftpb.Message) error {
 		p := t.peers[msg.To]
 		if p == nil {
 			peerCtx, cancel := context.WithCancel(t.ctx)
-			p = &peer{id: msg.To, ctx: peerCtx, cancel: cancel, queue: make(chan raftpb.Message, 128), retire: make(chan struct{})}
+			p = &peer{id: msg.To, ctx: peerCtx, cancel: cancel, queue: make(chan raftpb.Message, peerQueueCapacity),
+				retire: make(chan struct{})}
 			t.peers[msg.To] = p
 			t.wg.Add(1)
 			go t.runPeer(p)
 		}
-		// The engine has already transferred ownership of these messages to Send.
+		// The engine has already transferred ownership of these messages to
+		// Send.
 		if time.Now().UnixNano() < p.until.Load() {
 			t.fail(msg)
 			continue
@@ -203,28 +233,31 @@ func (t *Transport) connection(address string) (*grpc.ClientConn, error) {
 	} else {
 		credential = insecure.NewCredentials()
 	}
-	return grpc.NewClient(address, grpc.WithTransportCredentials(credential), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(4<<20)))
+	return grpc.NewClient(address, grpc.WithTransportCredentials(
+		credential), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(4<<20)))
 }
 func (t *Transport) authenticated(ctx context.Context) context.Context {
 	return metadata.AppendToOutgoingContext(ctx, credentialKey, hex.EncodeToString(t.opts.Credential))
 }
+
+type peerConnection struct {
+	conn    *grpc.ClientConn
+	address string
+}
+
+func (c *peerConnection) close() {
+	if c.conn != nil {
+		_ = c.conn.Close()
+	}
+}
+
 func (t *Transport) runPeer(p *peer) {
 	defer t.wg.Done()
 	defer p.cancel()
-	var conn *grpc.ClientConn
-	var address string
+	var connection peerConnection
 	defer func() {
-		if conn != nil {
-			_ = conn.Close()
-		}
-		for {
-			select {
-			case msg := <-p.queue:
-				t.fail(msg)
-			default:
-				return
-			}
-		}
+		connection.close()
+		t.failQueued(p.queue)
 	}()
 	backoff := t.opts.RetryInitial
 	retire := p.retire
@@ -240,50 +273,19 @@ func (t *Transport) runPeer(p *peer) {
 			retiring, retire = true, nil
 			continue
 		case msg := <-p.queue:
-			timeout := t.opts.SendTimeout
-			if msg.Type == raftpb.MsgSnap {
-				timeout = t.opts.SnapshotTimeout
-			}
-			ctx, cancel := context.WithTimeout(p.ctx, timeout)
-			resolved, err := t.opts.Resolve(ctx, p.id)
-			if err == nil && (conn == nil || address != resolved) {
-				if conn != nil {
-					_ = conn.Close()
-				}
-				conn, err = t.connection(resolved)
-				address = resolved
-			}
-			if err == nil {
-				err = t.sendMessage(t.authenticated(ctx), metapb.NewMetaClient(conn), msg)
-			}
-			cancel()
-			if err == nil {
+			if err := t.sendPeerMessage(p, &connection, msg); err == nil {
 				backoff = t.opts.RetryInitial
-				if msg.Type == raftpb.MsgSnap && t.opts.OnSnapshot != nil {
-					t.opts.OnSnapshot(msg.To, raft.SnapshotFinish)
-				}
+				t.finishSnapshot(msg)
 				continue
 			}
-			jitterLimit := min(backoff/4, t.opts.RetryMax-backoff)
-			delay := backoff + time.Duration(rand.Int64N(max(1, int64(jitterLimit))))
+			delay := t.peerRetryDelay(backoff)
 			p.until.Store(time.Now().Add(delay).UnixNano())
 			t.fail(msg)
-			// Failed and buffered messages are discarded; a later Raft tick sends fresh traffic.
-			for {
-				select {
-				case queued := <-p.queue:
-					t.fail(queued)
-				default:
-					goto drained
-				}
-			}
-		drained:
-			timer := time.NewTimer(delay)
-			select {
-			case <-p.ctx.Done():
-				timer.Stop()
+			// Failed and buffered messages are discarded; a later Raft tick
+			// sends fresh traffic.
+			t.failQueued(p.queue)
+			if !waitPeerRetry(p.ctx, delay) {
 				return
-			case <-timer.C:
 			}
 			if backoff >= t.opts.RetryMax/2 {
 				backoff = t.opts.RetryMax
@@ -293,25 +295,64 @@ func (t *Transport) runPeer(p *peer) {
 		}
 	}
 }
+
+func (t *Transport) sendPeerMessage(p *peer, connection *peerConnection, msg raftpb.Message) error {
+	timeout := t.opts.SendTimeout
+	if msg.Type == raftpb.MsgSnap {
+		timeout = t.opts.SnapshotTimeout
+	}
+	ctx, cancel := context.WithTimeout(p.ctx, timeout)
+	resolved, err := t.opts.Resolve(ctx, p.id)
+	if err == nil && (connection.conn == nil || connection.address != resolved) {
+		connection.close()
+		connection.conn, err = t.connection(resolved)
+		connection.address = resolved
+	}
+	if err == nil {
+		err = t.sendMessage(t.authenticated(ctx), metapb.NewMetaClient(connection.conn), msg)
+	}
+	cancel()
+	return err
+}
+
+func (t *Transport) finishSnapshot(msg raftpb.Message) {
+	if msg.Type == raftpb.MsgSnap && t.opts.OnSnapshot != nil {
+		t.opts.OnSnapshot(msg.To, raft.SnapshotFinish)
+	}
+}
+
+func (t *Transport) failQueued(queue <-chan raftpb.Message) {
+	for {
+		select {
+		case msg := <-queue:
+			t.fail(msg)
+		default:
+			return
+		}
+	}
+}
+
+func (t *Transport) peerRetryDelay(backoff time.Duration) time.Duration {
+	jitterLimit := min(backoff/4, t.opts.RetryMax-backoff)
+	//nolint:gosec // Jitter only spreads retries; it does not make a security decision.
+	return backoff + time.Duration(rand.Int64N(max(1, int64(jitterLimit))))
+}
+
+func waitPeerRetry(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	select {
+	case <-ctx.Done():
+		timer.Stop()
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
 func (t *Transport) sendMessage(ctx context.Context, client metapb.MetaClient, msg raftpb.Message) error {
 	h := t.Header()
 	if msg.Type != raftpb.MsgSnap {
-		data, err := msg.Marshal()
-		if err != nil {
-			return err
-		}
-		stream, err := client.StreamMessages(ctx)
-		if err != nil {
-			return err
-		}
-		if err = stream.Send(&metapb.RaftMessage{Header: h, ToMemberId: msg.To, RaftMessage: data}); err != nil {
-			return err
-		}
-		reply, err := stream.CloseAndRecv()
-		if err != nil {
-			return err
-		}
-		return ReplyError(reply)
+		return sendRaftFrame(ctx, client, h, msg)
 	}
 	if msg.Snapshot == nil || len(msg.Snapshot.Data) == 0 || len(msg.Snapshot.Data) > t.opts.MaxSnapshotBytes {
 		return fault.ErrInvalid
@@ -346,9 +387,30 @@ func (t *Transport) sendMessage(ctx context.Context, client metapb.MetaClient, m
 	return ReplyError(reply)
 }
 
+func sendRaftFrame(ctx context.Context, client metapb.MetaClient, h *metapb.Header, msg raftpb.Message) error {
+	data, err := msg.Marshal()
+	if err != nil {
+		return err
+	}
+	stream, err := client.StreamMessages(ctx)
+	if err != nil {
+		return err
+	}
+	if err = stream.Send(&metapb.RaftMessage{Header: h, ToMemberId: msg.To, RaftMessage: data}); err != nil {
+		return err
+	}
+	reply, err := stream.CloseAndRecv()
+	if err != nil {
+		return err
+	}
+	return ReplyError(reply)
+}
+
 // CallAddress invokes a control RPC with a caller-owned deadline. The temporary
-// connection is always closed, including cancellation and authentication errors.
-func (t *Transport) CallAddress(ctx context.Context, address, method string, data []byte) (reply *metapb.Reply, err error) {
+// connection is always closed, including cancellation and authentication
+// errors.
+func (t *Transport) CallAddress(ctx context.Context, address, method string,
+	data []byte) (reply *metapb.Reply, err error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -364,25 +426,7 @@ func (t *Transport) CallAddress(ctx context.Context, address, method string, dat
 	}
 	defer t.wg.Done()
 	defer func() {
-		if err == nil {
-			return
-		}
-		if ctx.Err() != nil {
-			err = ctx.Err()
-			return
-		}
-		if parent.Err() != nil {
-			err = fault.ErrStopped
-			return
-		}
-		// A not-yet-running admitted host can fail DNS or connection setup.
-		// Preserve that retry boundary for native authority callers; raw gRPC
-		// errors otherwise look like terminal operator/business refusals.
-		// Authentication, invalid requests and domain replies remain distinct.
-		switch status.Code(err) {
-		case codes.Unavailable, codes.Canceled, codes.DeadlineExceeded:
-			err = fault.New(fault.Unavailable, "metadata control RPC unavailable", err)
-		}
+		err = controlRPCError(ctx, parent, err)
 	}()
 	callCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -426,13 +470,36 @@ func (t *Transport) CallAddress(ctx context.Context, address, method string, dat
 	}
 }
 
+func controlRPCError(ctx, parent context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if parent.Err() != nil {
+		return fault.ErrStopped
+	}
+	// A not-yet-running admitted host can fail DNS or connection setup.
+	// Preserve that retry boundary for native authority callers; raw gRPC
+	// errors otherwise look like terminal operator/business refusals.
+	// Authentication, invalid requests and domain replies remain distinct.
+	switch status.Code(err) {
+	case codes.Unavailable, codes.Canceled, codes.DeadlineExceeded:
+		return fault.New(fault.Unavailable, "metadata control RPC unavailable", err)
+	default: // Preserve other RPC errors.
+	}
+	return err
+}
+
+// SetPeerAddresses copies peer endpoints into the outgoing identity header.
 func (t *Transport) SetPeerAddresses(peers []*metapb.PeerAddress) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	header := proto.Clone(t.opts.Header).(*metapb.Header)
+	header := proto.CloneOf(t.opts.Header)
 	header.Peers = nil
 	for _, p := range peers {
-		header.Peers = append(header.Peers, proto.Clone(p).(*metapb.PeerAddress))
+		header.Peers = append(header.Peers, proto.CloneOf(p))
 	}
 	t.opts.Header = header
 }

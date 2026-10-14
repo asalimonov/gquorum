@@ -18,6 +18,13 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
+const (
+	serverReadHeaderTimeout = 3 * time.Second
+	serverIdleTimeout       = 30 * time.Second
+	versionNumberBase       = 10
+	versionNumberBits       = 64
+)
+
 type healthcheckCommand struct {
 	URL     string        `arg:"" help:"Readiness URL to probe."`
 	Timeout time.Duration `default:"2s" help:"Probe timeout."`
@@ -25,7 +32,7 @@ type healthcheckCommand struct {
 
 func (cmd *healthcheckCommand) Run() error {
 	if cmd.Timeout <= 0 {
-		return fmt.Errorf("healthcheck timeout must be positive")
+		return errors.New("healthcheck timeout must be positive")
 	}
 	client := http.Client{Timeout: cmd.Timeout}
 	response, err := client.Get(cmd.URL)
@@ -47,7 +54,12 @@ func serveHTTP(ctx context.Context, address string, handler http.Handler) error 
 		return err
 	}
 	defer listener.Close()
-	server := &http.Server{Handler: handler, ReadHeaderTimeout: 3 * time.Second, IdleTimeout: 30 * time.Second, BaseContext: func(net.Listener) context.Context { return ctx }}
+	server := &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: serverReadHeaderTimeout,
+		IdleTimeout:       serverIdleTimeout,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
+	}
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- server.Serve(listener) }()
 	slog.Info("example listening", "http", listener.Addr())
@@ -114,14 +126,23 @@ func httpError(w http.ResponseWriter, err error) {
 	switch code {
 	case fault.Invalid, fault.Unsupported:
 		status = http.StatusBadRequest
-	case fault.VersionConflict, fault.GroupRetired, fault.IdentityMismatch, fault.OperatorAuthorization:
+	case fault.VersionConflict,
+		fault.GroupRetired,
+		fault.IdentityMismatch,
+		fault.OperatorAuthorization:
 		status = http.StatusConflict
 	case fault.UnsafeMembership:
 		status = http.StatusUnprocessableEntity
 	case fault.HistoryUnavailable:
 		status = http.StatusNotFound
-	case fault.NotLeader, fault.ReplicaNotReady, fault.Unavailable, fault.Stopped, fault.Overloaded, fault.NoController:
+	case fault.NotLeader,
+		fault.ReplicaNotReady,
+		fault.Unavailable,
+		fault.Stopped,
+		fault.Overloaded,
+		fault.NoController:
 		status = http.StatusServiceUnavailable
+	default: // Keep the internal-server-error status for other faults.
 	}
 	body := map[string]any{"code": code, "error": err.Error()}
 	if typed != nil && code == fault.VersionConflict {
@@ -144,7 +165,7 @@ func positiveNumber(value string) (uint64, error) {
 			return 0, fault.New(fault.Invalid, "positive decimal version required", nil)
 		}
 	}
-	n, err := strconv.ParseUint(value, 10, 64)
+	n, err := strconv.ParseUint(value, versionNumberBase, versionNumberBits)
 	if err != nil || n == 0 {
 		return 0, fault.New(fault.Invalid, "positive version required", err)
 	}
@@ -207,7 +228,7 @@ func mutationResponse(result gquorum.MutationResult, err error) (response, error
 	if err != nil {
 		headers := http.Header{}
 		if result.Document.Version != 0 {
-			headers.Set("X-Staged-Version", strconv.FormatUint(result.Document.Version, 10))
+			headers.Set("X-Staged-Version", strconv.FormatUint(result.Document.Version, versionNumberBase))
 		}
 		return response{headers: headers}, err
 	}
@@ -215,15 +236,16 @@ func mutationResponse(result gquorum.MutationResult, err error) (response, error
 	if result.OperatorID != "" {
 		status = http.StatusAccepted
 	}
-	return response{status: status, headers: http.Header{"ETag": {fmt.Sprintf("\"%d\"", result.Document.Version)}}, body: result}, nil
+	return response{status: status, headers: http.Header{"ETag": {fmt.Sprintf("\"%d\"",
+		result.Document.Version)}}, body: result}, nil
 }
 
 func decodeJSON(data []byte, out any) error {
-	data = bytes.TrimSpace(data)
-	if len(data) == 0 || data[0] != '{' {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return fault.New(fault.Invalid, "JSON object required", nil)
 	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(out); err != nil {
 		return fault.New(fault.Invalid, "invalid JSON", err)
@@ -251,7 +273,8 @@ func routes(node gquorum.Node) http.Handler {
 		return response{body: status}, err
 	}))
 	// These administrative views are local observations. Latest includes staged
-	// intent, Target is approved intent, and Active is fully converged topology.
+	// intent, Target is approved intent, and Active is fully converged
+	// topology.
 	for path, read := range map[string]func(context.Context) (topology.Document, error){
 		"GET /api/topology/latest": cluster.Latest,
 		"GET /api/topology/target": cluster.Target,
@@ -262,12 +285,15 @@ func routes(node gquorum.Node) http.Handler {
 			if err != nil {
 				return response{}, err
 			}
-			return response{headers: http.Header{"ETag": {fmt.Sprintf("\"%d\"", document.Version)}}, body: document}, nil
+			return response{headers: http.Header{"ETag": {fmt.Sprintf("\"%d\"",
+				document.Version)}}, body: document}, nil
 		}))
 	}
 	// Mutations require the caller's expected version (If-Match). Staging and
-	// approval are distinct; the response preserves a staged version on failure.
-	mutate := func(change func(context.Context, string, gquorum.MutationOptions) (gquorum.MutationResult, error)) http.HandlerFunc {
+	// approval are distinct; the response preserves a staged version on
+	// failure.
+	mutate := func(change func(context.Context, string,
+		gquorum.MutationOptions) (gquorum.MutationResult, error)) http.HandlerFunc {
 		return endpoint(func(r *http.Request) (response, error) {
 			var options gquorum.MutationOptions
 			if err := requestBody(r, &options); err != nil {

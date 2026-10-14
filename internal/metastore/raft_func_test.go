@@ -115,21 +115,21 @@ func TestBoltStore_Roundtrip(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = s2.Close() })
 
-	gotHS, gotEntries, gotSnap, err := s2.LoadAll()
+	gotHS, err := s2.LoadAll()
 	if err != nil {
 		t.Fatalf("LoadAll: %v", err)
 	}
-	if gotHS.Term != 2 || gotHS.Vote != 7 || gotHS.Commit != 3 {
-		t.Fatalf("hardstate roundtrip: got %+v", gotHS)
+	if gotHS.HardState.Term != 2 || gotHS.HardState.Vote != 7 || gotHS.HardState.Commit != 3 {
+		t.Fatalf("hardstate roundtrip: got %+v", gotHS.HardState)
 	}
-	if len(gotEntries) != 0 {
-		t.Fatalf("expected entries <= snapshot index filtered out, got %d", len(gotEntries))
+	if len(gotHS.Entries) != 0 {
+		t.Fatalf("expected entries <= snapshot index filtered out, got %d", len(gotHS.Entries))
 	}
-	if gotSnap.Metadata.Index != 3 || string(gotSnap.Data) != "sm-state" {
-		t.Fatalf("snapshot roundtrip: got %+v", gotSnap.Metadata)
+	if gotHS.Snapshot.Metadata.Index != 3 || string(gotHS.Snapshot.Data) != "sm-state" {
+		t.Fatalf("snapshot roundtrip: got %+v", gotHS.Snapshot.Metadata)
 	}
-	if len(gotSnap.Metadata.ConfState.Voters) != 3 {
-		t.Fatalf("confstate not preserved in snapshot: %+v", gotSnap.Metadata.ConfState)
+	if len(gotHS.Snapshot.Metadata.ConfState.Voters) != 3 {
+		t.Fatalf("confstate not preserved in snapshot: %+v", gotHS.Snapshot.Metadata.ConfState)
 	}
 	if applied, err := s2.AppliedIndex(); err != nil || applied != 3 {
 		t.Fatalf("AppliedIndex: got %d err %v", applied, err)
@@ -143,17 +143,17 @@ func TestBoltStore_LoadAllWithoutSnapshot(t *testing.T) {
 	if err := s.SaveReady(entries, raftpb.HardState{Term: 1, Commit: 3}); err != nil {
 		t.Fatalf("SaveReady: %v", err)
 	}
-	_, got, snap, err := s.LoadAll()
+	got, err := s.LoadAll()
 	if err != nil {
 		t.Fatalf("LoadAll: %v", err)
 	}
-	if snap.Metadata.Index != 0 {
-		t.Fatalf("expected empty snapshot, got index %d", snap.Metadata.Index)
+	if got.Snapshot.Metadata.Index != 0 {
+		t.Fatalf("expected empty snapshot, got index %d", got.Snapshot.Metadata.Index)
 	}
-	if len(got) != 3 {
-		t.Fatalf("expected 3 entries, got %d", len(got))
+	if len(got.Entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(got.Entries))
 	}
-	for i, e := range got {
+	for i, e := range got.Entries {
 		if e.Index != uint64(i+1) {
 			t.Fatalf("entry %d out of order: index %d", i, e.Index)
 		}
@@ -169,12 +169,12 @@ func TestBoltStore_EmptyHardStateNotClobbered(t *testing.T) {
 	if err := s.SaveReady([]raftpb.Entry{ent(2, 1, "b")}, raftpb.HardState{}); err != nil {
 		t.Fatalf("SaveReady 2: %v", err)
 	}
-	hs, _, _, err := s.LoadAll()
+	hs, err := s.LoadAll()
 	if err != nil {
 		t.Fatalf("LoadAll: %v", err)
 	}
-	if hs.Term != 5 || hs.Vote != 2 || hs.Commit != 1 {
-		t.Fatalf("empty hardstate clobbered prior state: %+v", hs)
+	if hs.HardState.Term != 5 || hs.HardState.Vote != 2 || hs.HardState.Commit != 1 {
+		t.Fatalf("empty hardstate clobbered prior state: %+v", hs.HardState)
 	}
 }
 
@@ -187,15 +187,15 @@ func TestBoltStore_LeaderOverwriteTruncatesTail(t *testing.T) {
 	if err := s.SaveReady([]raftpb.Entry{ent(2, 2, "b2")}, raftpb.HardState{Term: 2, Commit: 1}); err != nil {
 		t.Fatalf("SaveReady 2: %v", err)
 	}
-	_, got, _, err := s.LoadAll()
+	got, err := s.LoadAll()
 	if err != nil {
 		t.Fatalf("LoadAll: %v", err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("expected 2 entries after truncating tail, got %d: %+v", len(got), got)
+	if len(got.Entries) != 2 {
+		t.Fatalf("expected 2 entries after truncating tail, got %d: %+v", len(got.Entries), got.Entries)
 	}
-	if got[1].Index != 2 || got[1].Term != 2 || string(got[1].Data) != "b2" {
-		t.Fatalf("overwrite did not replace index 2: %+v", got[1])
+	if got.Entries[1].Index != 2 || got.Entries[1].Term != 2 || string(got.Entries[1].Data) != "b2" {
+		t.Fatalf("overwrite did not replace index 2: %+v", got.Entries[1])
 	}
 }
 
@@ -216,15 +216,15 @@ func TestBoltStore_Compaction(t *testing.T) {
 	if err := s.CompactEntries(5); err != nil {
 		t.Fatalf("CompactEntries: %v", err)
 	}
-	_, got, _, err := s.LoadAll()
+	got, err := s.LoadAll()
 	if err != nil {
 		t.Fatalf("LoadAll: %v", err)
 	}
-	if len(got) != 5 {
-		t.Fatalf("expected entries 6..10 after compaction, got %d", len(got))
+	if len(got.Entries) != 5 {
+		t.Fatalf("expected entries 6..10 after compaction, got %d", len(got.Entries))
 	}
-	if got[0].Index != 6 || got[4].Index != 10 {
-		t.Fatalf("compaction boundary wrong: first %d last %d", got[0].Index, got[4].Index)
+	if got.Entries[0].Index != 6 || got.Entries[4].Index != 10 {
+		t.Fatalf("compaction boundary wrong: first %d last %d", got.Entries[0].Index, got.Entries[4].Index)
 	}
 	if err := s.db.View(func(tx *bolt.Tx) error {
 		if v := tx.Bucket(bucketEntries).Get(itob(5)); v != nil {
@@ -281,31 +281,31 @@ func TestBoltStore_SetAppliedPersistsConfState(t *testing.T) {
 	t.Parallel()
 	s := openTestStore(t)
 
-	if _, found, err := s.AppliedConfState(); err != nil || found {
-		t.Fatalf("AppliedConfState on a fresh store = (found=%v, %v), want (false, nil)", found, err)
+	if found, err := s.AppliedConfState(); err != nil || found.Found {
+		t.Fatalf("AppliedConfState on a fresh store = (found=%v, %v), want (false, nil)", found.Found, err)
 	}
 
 	newCS := raftpb.ConfState{Voters: []uint64{1, 2, 3}}
 	if err := s.SetApplied(10, newCS); err != nil {
 		t.Fatalf("SetApplied 10: %v", err)
 	}
-	got, found, err := s.AppliedConfState()
-	if err != nil || !found {
-		t.Fatalf("AppliedConfState = (found=%v, %v), want (true, nil)", found, err)
+	got, err := s.AppliedConfState()
+	if err != nil || !got.Found {
+		t.Fatalf("AppliedConfState = (found=%v, %v), want (true, nil)", got.Found, err)
 	}
-	if len(got.Voters) != 3 {
-		t.Fatalf("ConfState not durable with the applied index: got %+v, want voters {1,2,3}", got)
+	if len(got.ConfState.Voters) != 3 {
+		t.Fatalf("ConfState not durable with the applied index: got %+v, want voters {1,2,3}", got.ConfState)
 	}
 
 	if err := s.SetApplied(5, raftpb.ConfState{Voters: []uint64{9}}); err != nil {
 		t.Fatalf("SetApplied 5: %v", err)
 	}
-	got, _, err = s.AppliedConfState()
+	got, err = s.AppliedConfState()
 	if err != nil {
 		t.Fatalf("AppliedConfState: %v", err)
 	}
-	if len(got.Voters) != 3 {
-		t.Fatalf("stale SetApplied rewound the ConfState: got %+v, want voters {1,2,3}", got)
+	if len(got.ConfState.Voters) != 3 {
+		t.Fatalf("stale SetApplied rewound the ConfState: got %+v, want voters {1,2,3}", got.ConfState)
 	}
 }
 
@@ -343,15 +343,15 @@ func TestBoltStore_ReopenAfterPartialWrite(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = s2.Close() })
 
-	hs, got, _, err := s2.LoadAll()
+	hs, err := s2.LoadAll()
 	if err != nil {
 		t.Fatalf("LoadAll: %v", err)
 	}
-	if len(got) != 1 || got[0].Index != 1 || string(got[0].Data) != "committed" {
-		t.Fatalf("torn write leaked into durable state: %+v", got)
+	if len(hs.Entries) != 1 || hs.Entries[0].Index != 1 || string(hs.Entries[0].Data) != "committed" {
+		t.Fatalf("torn write leaked into durable state: %+v", hs.Entries)
 	}
-	if hs.Term != 1 || hs.Commit != 1 {
-		t.Fatalf("torn hardstate leaked: %+v", hs)
+	if hs.HardState.Term != 1 || hs.HardState.Commit != 1 {
+		t.Fatalf("torn hardstate leaked: %+v", hs.HardState)
 	}
 }
 
@@ -403,9 +403,9 @@ func TestBoltStore_IdentityPinning(t *testing.T) {
 	if err := s2.Close(); err != nil {
 		t.Fatalf("close before identity probe: %v", err)
 	}
-	identity, found, err := LoadIdentity(dir)
-	if err != nil || !found || identity != (Identity{NodeName: "node1", ClusterID: "cluster-A", MemberID: 11}) {
-		t.Fatalf("LoadIdentity = (%+v, %t, %v)", identity, found, err)
+	identity, err := LoadIdentity(dir)
+	if err != nil || !identity.Found || identity.Identity != (Identity{NodeName: "node1", ClusterID: "cluster-A", MemberID: 11}) {
+		t.Fatalf("LoadIdentity = (%+v, %t, %v)", identity.Identity, identity.Found, err)
 	}
 }
 
@@ -434,22 +434,22 @@ func TestInstallSnapshot_AtomicAndCommitClamped(t *testing.T) {
 		t.Fatalf("InstallSnapshot: %v", err)
 	}
 
-	hs, entries, gotSnap, err := s.LoadAll()
+	hs, err := s.LoadAll()
 	if err != nil {
 		t.Fatalf("LoadAll: %v", err)
 	}
-	if gotSnap.Metadata.Index != 10 {
-		t.Fatalf("snapshot index: got %d, want 10", gotSnap.Metadata.Index)
+	if hs.Snapshot.Metadata.Index != 10 {
+		t.Fatalf("snapshot index: got %d, want 10", hs.Snapshot.Metadata.Index)
 	}
-	if hs.Commit < gotSnap.Metadata.Index {
+	if hs.HardState.Commit < hs.Snapshot.Metadata.Index {
 		t.Fatalf("hardstate commit %d < snapshot index %d — would panic loadState on boot",
-			hs.Commit, gotSnap.Metadata.Index)
+			hs.HardState.Commit, hs.Snapshot.Metadata.Index)
 	}
-	if hs.Term != 3 { // provided HardState's term/vote preserved, only Commit clamped
-		t.Fatalf("hardstate term: got %d, want 3", hs.Term)
+	if hs.HardState.Term != 3 { // provided HardState's term/vote preserved, only Commit clamped
+		t.Fatalf("hardstate term: got %d, want 3", hs.HardState.Term)
 	}
-	if len(entries) != 0 {
-		t.Fatalf("log not compacted to snapshot index: %d entries remain", len(entries))
+	if len(hs.Entries) != 0 {
+		t.Fatalf("log not compacted to snapshot index: %d entries remain", len(hs.Entries))
 	}
 	if st, err := s.LoadState(); err != nil || string(st) != "sm-bytes" {
 		t.Fatalf("SM state not persisted atomically: %q err=%v", st, err)
@@ -490,8 +490,8 @@ func TestInstallSnapshot_IgnoresStale(t *testing.T) {
 func TestPeekLocalLineage(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "meta.bolt")
-	if v, m, err := PeekLocalLineage(dir); err != nil || v != 0 || m != 0 {
-		t.Fatalf("PeekLocalLineage(absent) = (%d, %d, %v), want (0, 0, nil)", v, m, err)
+	if v, err := PeekLocalLineage(dir); err != nil || v.Version != 0 || v.MemberID != 0 {
+		t.Fatalf("PeekLocalLineage(absent) = (%d, %d, %v), want (0, 0, nil)", v.Version, v.MemberID, err)
 	}
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("PeekLocalLineage created the meta store; the probe must be side-effect-free")
@@ -511,14 +511,14 @@ func TestPeekLocalLineage(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	v, m, err := PeekLocalLineage(dir)
+	v, err := PeekLocalLineage(dir)
 	if err != nil {
 		t.Fatalf("PeekLocalLineage: %v", err)
 	}
-	if m != 7 {
-		t.Fatalf("member ID = %d, want 7", m)
+	if v.MemberID != 7 {
+		t.Fatalf("member ID = %d, want 7", v.MemberID)
 	}
-	if v != 9 {
-		t.Fatalf("doc version = %d, want 9 (highest cursor)", v)
+	if v.Version != 9 {
+		t.Fatalf("doc version = %d, want 9 (highest cursor)", v.Version)
 	}
 }

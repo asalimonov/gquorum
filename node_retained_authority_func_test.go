@@ -17,8 +17,8 @@ import (
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metapb"
 	"github.com/asalimonov/gquorum/internal/metatransport"
+	"github.com/asalimonov/gquorum/lifecycle"
 	"github.com/asalimonov/gquorum/load"
-	"github.com/asalimonov/gquorum/policy"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3/raftpb"
@@ -30,19 +30,19 @@ type retainedProofPeer struct {
 	proof atomic.Pointer[metaengine.AuthorityProof]
 }
 
-type retainedRemovalPolicy struct {
-	policy.LifecyclePolicy
+type retainedRemovalHooks struct {
+	lifecycle.Hooks
 	block            atomic.Bool
 	entered, release chan struct{}
 }
 
-func (p *retainedRemovalPolicy) Removal(context.Context, policy.RemovalInput) (policy.RemovalDecision, error) {
+func (p *retainedRemovalHooks) Removal(context.Context, lifecycle.RemovalInput) (lifecycle.RemovalDecision, error) {
 	if p.block.Load() {
 		close(p.entered)
 		<-p.release
-		return policy.RemovalDecision{Action: policy.StopNode}, nil
+		return lifecycle.RemovalDecision{Action: lifecycle.StopNode}, nil
 	}
-	return policy.RemovalDecision{Action: policy.KeepDiagnostics}, nil
+	return lifecycle.RemovalDecision{Action: lifecycle.KeepDiagnostics}, nil
 }
 
 func (*retainedProofPeer) Step(context.Context, *metapb.Header, raftpb.Message) error {
@@ -67,12 +67,12 @@ func TestNodeRetainsGrantedIngressAfterWholeNodeFence(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	o := authorityNodeOptions(t, root, "process")
-	defaults, err := policy.NewDefaultLifecycle(policy.DefaultLifecycleOptions{})
+	defaults, err := lifecycle.NewDefaultHooks(lifecycle.DefaultOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	lifecycle := &retainedRemovalPolicy{LifecyclePolicy: defaults, entered: make(chan struct{}), release: make(chan struct{})}
-	o.Policies.Lifecycle = lifecycle
+	hooks := &retainedRemovalHooks{Hooks: defaults, entered: make(chan struct{}), release: make(chan struct{})}
+	o.Lifecycle.Hooks = hooks
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -112,7 +112,7 @@ func TestNodeRetainsGrantedIngressAfterWholeNodeFence(t *testing.T) {
 	n := public.(*node)
 	t.Cleanup(func() { stopAuthorityNode(t, n) })
 	var releaseOnce sync.Once
-	t.Cleanup(func() { releaseOnce.Do(func() { close(lifecycle.release) }) })
+	t.Cleanup(func() { releaseOnce.Do(func() { close(hooks.release) }) })
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	if err = n.Start(t.Context()); err != nil {
@@ -162,7 +162,7 @@ func TestNodeRetainsGrantedIngressAfterWholeNodeFence(t *testing.T) {
 	peer.proof.Store(&proof)
 	removal := topology.SelfRemovalStatus{Fenced: true, MemberID: id.MemberID, Version: 2, AppliedIndex: 100, Reason: "verified test removal"}
 	if n.handleRemoval(n.meta, removal) {
-		t.Fatal("metadata stop receipt alone released removal policy")
+		t.Fatal("metadata stop receipt alone released removal hooks")
 	}
 	// A newer floor must not erase the completed stop needed for release.
 	fence := stop.Clone()
@@ -175,26 +175,26 @@ func TestNodeRetainsGrantedIngressAfterWholeNodeFence(t *testing.T) {
 	released.ReleasedHosts = stop.Targets
 	peer.proof.Store(&released)
 	if !n.handleRemoval(n.meta, removal) {
-		t.Fatal("settled host obligations did not release removal policy")
+		t.Fatal("settled host obligations did not release removal hooks")
 	}
-	lifecycle.block.Store(true)
+	hooks.block.Store(true)
 	decided := make(chan bool, 1)
 	go func() { decided <- n.handleRemoval(n.meta, removal) }()
 	select {
-	case <-lifecycle.entered:
+	case <-hooks.entered:
 	case <-ctx.Done():
-		t.Fatal("removal policy did not enter")
+		t.Fatal("removal hooks did not enter")
 	}
 	// Model the exact ownership reservation made by an authorized readmission.
-	// The old policy result must be rejected before it can request teardown.
+	// The old hooks result must be rejected before it can request teardown.
 	replacement := id
 	replacement.MemberID++
 	n.mu.Lock()
 	n.pending = &replacement
 	n.mu.Unlock()
-	releaseOnce.Do(func() { close(lifecycle.release) })
+	releaseOnce.Do(func() { close(hooks.release) })
 	if <-decided {
-		t.Fatal("old removal policy accepted after readmission reservation")
+		t.Fatal("old removal hooks accepted after readmission reservation")
 	}
 	n.mu.RLock()
 	stopping := n.stopping

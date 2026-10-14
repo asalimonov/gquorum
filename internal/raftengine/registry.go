@@ -7,12 +7,16 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 )
 
+// Registry indexes exact local engines by group under synchronized ownership.
 type Registry struct {
 	mu     sync.RWMutex
 	groups map[string]*Group
 }
 
+// NewRegistry creates an empty synchronized engine registry.
 func NewRegistry() *Registry { return &Registry{groups: make(map[string]*Group)} }
+
+// Add registers one engine and refuses an already occupied group.
 func (r *Registry) Add(g *Group) error {
 	if g == nil {
 		return fault.ErrInvalid
@@ -28,6 +32,8 @@ func (r *Registry) Add(g *Group) error {
 	r.groups[g.opts.GroupID] = g
 	return nil
 }
+
+// Get returns the registered engine for a group, if present.
 func (r *Registry) Get(id string) (*Group, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -54,6 +60,8 @@ func (r *Registry) Remove(id string, expectedReplicaID uint64) error {
 	delete(r.groups, id)
 	return nil
 }
+
+// IDs returns registered group names in sorted order.
 func (r *Registry) IDs() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

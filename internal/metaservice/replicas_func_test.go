@@ -82,16 +82,16 @@ func TestPublicLoadLedgerIdempotenceAndApprovedReseat(t *testing.T) {
 	if err := f.g.RecordLoadReplica(ctx, "work", record, 0); err != nil {
 		t.Fatal(err)
 	}
-	before, found, err := f.g.LookupLoadReplica(ctx, "work")
-	if err != nil || !found || before.NodeName != "n1" || before.ClusterID != "cluster" || before.CreatedAt.IsZero() {
-		t.Fatal(before, found, err)
+	before, err := f.g.LookupLoadReplica(ctx, "work")
+	if err != nil || !before.Found || before.Record.NodeName != "n1" || before.Record.ClusterID != "cluster" || before.Record.CreatedAt.IsZero() {
+		t.Fatal(before.Record, before.Found, err)
 	}
 	record.Origin = "resume"
 	if err := f.g.RecordLoadReplica(ctx, "work", record, 0); err != nil {
 		t.Fatal(err)
 	}
-	if got, _, _ := f.g.LookupLoadReplica(ctx, "work"); got != before {
-		t.Fatal("repeat rewrote audit", got)
+	if got, _ := f.g.LookupLoadReplica(ctx, "work"); got.Record != before.Record {
+		t.Fatal("repeat rewrote audit", got.Record)
 	}
 	doc := f.g.machine.Latest()
 	doc.Group("work").Replicas[0].ReplicaID = 4
@@ -107,8 +107,8 @@ func TestPublicLoadLedgerIdempotenceAndApprovedReseat(t *testing.T) {
 	if err := f.g.RecordLoadReplica(ctx, "work", record, 1); err != nil {
 		t.Fatal(err)
 	}
-	if got, _, err := f.g.LookupLoadReplica(ctx, "work"); err != nil || got.ReplicaID != 4 {
-		t.Fatal(got, err)
+	if got, err := f.g.LookupLoadReplica(ctx, "work"); err != nil || got.Record.ReplicaID != 4 {
+		t.Fatal(got.Record, err)
 	}
 	record.NodeName = "n2"
 	if err := f.g.RecordLoadReplica(ctx, "work", record, 1); !errors.Is(err, fault.ErrIdentityMismatch) {
@@ -121,20 +121,20 @@ func TestPublicLoadLedgerReadinessCancellationAndQuiescedRead(t *testing.T) {
 	f := replicaFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, err := f.g.LookupLoadReplica(ctx, "work"); !errors.Is(err, context.Canceled) {
+	if _, err := f.g.LookupLoadReplica(ctx, "work"); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 	if err := f.g.RecordLoadReplica(ctx, "work", ReplicaRecord{ReplicaID: 1}, 0); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 	f.g.quiescing = true
-	if _, _, err := f.g.LookupLoadReplica(context.Background(), "work"); err != nil {
+	if _, err := f.g.LookupLoadReplica(context.Background(), "work"); err != nil {
 		t.Fatal("quiesce closed read ledger", err)
 	}
 	if err := f.g.RecordLoadReplica(context.Background(), "work", ReplicaRecord{ReplicaID: 1}, 0); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal(err)
 	}
-	if _, _, err := (&Group{}).LookupLoadReplica(context.Background(), "work"); !errors.Is(err, fault.ErrReplicaNotReady) {
+	if _, err := (&Group{}).LookupLoadReplica(context.Background(), "work"); !errors.Is(err, fault.ErrReplicaNotReady) {
 		t.Fatal(err)
 	}
 }
@@ -187,8 +187,8 @@ func TestGrantedLoadLedgerCleanupRequiresExactAuthorization(t *testing.T) {
 	if err := f.g.ForgetGrantedLoadReplica(ctx, *grant, 1); err != nil {
 		t.Fatal("cleanup repeat not idempotent", err)
 	}
-	if _, found, err := f.g.LookupLoadReplica(ctx, "work"); err != nil || found {
-		t.Fatal(found, err)
+	if found, err := f.g.LookupLoadReplica(ctx, "work"); err != nil || found.Found {
+		t.Fatal(found.Found, err)
 	}
 	if _, err := f.g.LoadReplicaScope(ctx, fixtureLoadIdentity()); !errors.Is(err, fault.ErrGroupRetired) {
 		t.Fatal(err)
@@ -227,16 +227,16 @@ func TestGrantedLoadLedgerCleanupAfterSupersessionPreservesSuccessors(t *testing
 				if err := f.g.ForgetGrantedLoadReplica(t.Context(), *grant, 1); err != nil {
 					t.Fatal("exact retry was not idempotent", err)
 				}
-				if _, found, err := f.g.LookupLoadReplica(t.Context(), "work"); err != nil || found {
-					t.Fatal(found, err)
+				if found, err := f.g.LookupLoadReplica(t.Context(), "work"); err != nil || found.Found {
+					t.Fatal(found.Found, err)
 				}
 				return
 			}
 			if err == nil {
 				t.Fatal("mismatched authority erased the ledger")
 			}
-			if record, found, err := f.g.LookupLoadReplica(t.Context(), "work"); err != nil || !found || mode == "successor_replica" && record.ReplicaID != 4 {
-				t.Fatal("successor evidence was lost", record, found, err)
+			if record, err := f.g.LookupLoadReplica(t.Context(), "work"); err != nil || !record.Found || mode == "successor_replica" && record.Record.ReplicaID != 4 {
+				t.Fatal("successor evidence was lost", record.Record, record.Found, err)
 			}
 		})
 	}

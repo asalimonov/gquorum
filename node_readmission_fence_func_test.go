@@ -53,7 +53,7 @@ func testNodeReadmissionFence(t *testing.T, group string) {
 	o := authorityNodeOptions(t, root, "returning")
 	previousID := o.Identity
 	previousID.MemberID = 1
-	authority, err := authoritystore.Open(o.authorityDBPath(), previousID, true)
+	authority, err := authoritystore.Open(o.authorityDBPath(), previousID, authoritystore.FreshEvidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,9 +179,9 @@ func testNodeReadmissionFence(t *testing.T, group string) {
 	case <-ctx.Done():
 		t.Fatal("newer fence did not cancel retirement")
 	}
-	floor, ok, err := n.localAuthority().Current(ctx, group)
-	if err != nil || !ok || floor.Complete || floor.Grant.Key != fence.Key {
-		t.Fatal("canceled callback before persisting pending boundary", floor, ok, err)
+	floor, err := n.localAuthority().Current(ctx, group)
+	if err != nil || !floor.Found || floor.Record.Complete || floor.Record.Grant.Key != fence.Key {
+		t.Fatal("canceled callback before persisting pending boundary", floor.Record, floor.Found, err)
 	}
 	// Cancel only after the durable boundary is observable. A short wall-clock
 	// timeout could expire before authorization dispatched the fence at all.
@@ -220,8 +220,8 @@ func testNodeReadmissionFence(t *testing.T, group string) {
 	if group == "work" {
 		old = grants[1]
 	}
-	if _, found, err := n.localAuthority().Receipt(ctx, old, old.Targets[0]); err != nil || found {
-		t.Fatal("fencing fabricated retirement completion", found, err)
+	if found, err := n.localAuthority().Receipt(ctx, old, old.Targets[0]); err != nil || found.Found {
+		t.Fatal("fencing fabricated retirement completion", found.Found, err)
 	}
 	if n.readmissionIdentity().MemberID != 1 || calls.Load() != 1 {
 		t.Fatal("revoked retirement rebound or repeated", n.readmissionIdentity(), calls.Load())
@@ -240,8 +240,8 @@ func testNodeReadmissionFence(t *testing.T, group string) {
 		t.Fatal("successor retirement callbacks", calls.Load())
 	}
 	for _, grant := range newGrants {
-		if receipt, found, err := n.localAuthority().Receipt(ctx, grant, grant.Targets[0]); err != nil || !found || receipt.Validate(grant) != nil {
-			t.Fatal(receipt, found, err)
+		if receipt, err := n.localAuthority().Receipt(ctx, grant, grant.Targets[0]); err != nil || !receipt.Found || receipt.Receipt.Validate(grant) != nil {
+			t.Fatal(receipt.Receipt, receipt.Found, err)
 		}
 	}
 }

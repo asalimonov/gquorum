@@ -11,8 +11,8 @@ import (
 
 	"github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/lifecycle"
 	"github.com/asalimonov/gquorum/load"
-	"github.com/asalimonov/gquorum/policy"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -66,36 +66,36 @@ func (a *application) local(id string) *localReplica {
 	return &localReplica{group: group, machine: machine}
 }
 
-// Embedding the default policy lets this application decide only its process
+// Embedding the default hooks lets this application decide only its process
 // response after Node has completed mandatory removal fencing.
 type fixtureLifecycle struct {
-	*policy.DefaultLifecycle
+	*lifecycle.DefaultHooks
 	app *application
 }
 
-func (p *fixtureLifecycle) Removal(ctx context.Context, input policy.RemovalInput) (policy.RemovalDecision, error) {
-	decision, err := p.DefaultLifecycle.Removal(ctx, input)
+func (p *fixtureLifecycle) Removal(ctx context.Context, input lifecycle.RemovalInput) (lifecycle.RemovalDecision, error) {
+	decision, err := p.DefaultHooks.Removal(ctx, input)
 	if err != nil {
 		return decision, err
 	}
 	if input.Identity != p.app.node.Identity() {
-		return policy.RemovalDecision{}, fault.ErrIdentityMismatch
+		return lifecycle.RemovalDecision{}, fault.ErrIdentityMismatch
 	}
 	status := p.app.node.Status()
 	if status.State != gquorum.NodeFenced || status.Ready || status.SessionLive || status.Meta.Found {
-		return policy.RemovalDecision{}, fault.New(fault.Invalid, "removal policy ran before mandatory fence", nil)
+		return lifecycle.RemovalDecision{}, fault.New(fault.Invalid, "removal hooks ran before mandatory fence", nil)
 	}
 	for _, replica := range status.Loads {
 		if replica.State == "ready" || replica.State == "starting" {
-			return policy.RemovalDecision{}, fault.New(fault.Invalid, "load owner remains during removal", nil)
+			return lifecycle.RemovalDecision{}, fault.New(fault.Invalid, "load owner remains during removal", nil)
 		}
 	}
 	calls := p.app.clusterHooks.runtime.removalCalls.Add(1)
 	if p.app.cfg.RetryRemoval {
 		if calls == 1 {
-			return policy.RemovalDecision{}, fmt.Errorf("fixture: retry removal response")
+			return lifecycle.RemovalDecision{}, fmt.Errorf("fixture: retry removal response")
 		}
-		return policy.RemovalDecision{Action: policy.KeepDiagnostics}, nil
+		return lifecycle.RemovalDecision{Action: lifecycle.KeepDiagnostics}, nil
 	}
 	p.app.logger.Info("self-removal identity verified", "node", input.Identity.NodeName, "member_id", input.Identity.MemberID, "instance_id", input.Identity.InstanceID, "reason", input.Removal.Reason)
 	p.app.RequestClose()
@@ -137,8 +137,8 @@ func (a *application) groupStatus(ctx context.Context, id string) (topology.Grou
 	return topology.GroupStatus{GroupID: id}, fault.ErrUnavailable
 }
 
-func (p *fixtureLifecycle) Readiness(ctx context.Context, input policy.ReadinessInput) (policy.ReadinessDecision, error) {
-	decision, err := p.DefaultLifecycle.Readiness(ctx, input)
+func (p *fixtureLifecycle) Readiness(ctx context.Context, input lifecycle.ReadinessInput) (lifecycle.ReadinessDecision, error) {
+	decision, err := p.DefaultHooks.Readiness(ctx, input)
 	if err != nil {
 		return decision, err
 	}
@@ -152,10 +152,10 @@ func (p *fixtureLifecycle) Readiness(ctx context.Context, input policy.Readiness
 	p.app.startupMissing = names
 	p.app.startupObserved = true
 	p.app.mu.Unlock()
-	if p.app.cfg.GateFounders && decision.State == policy.Waiting && input.FirstBootstrap && names != previous {
+	if p.app.cfg.GateFounders && decision.State == lifecycle.Waiting && input.FirstBootstrap && names != previous {
 		p.app.logger.Info("waiting for configured cluster members to activate", "missing", names)
 	}
-	if decision.State == policy.Failed {
+	if decision.State == lifecycle.Failed {
 		decision.Reason = fmt.Sprintf("greenfield founding timed out after %s; missing: %s", p.app.cfg.FoundingTimeout, names)
 	}
 	return decision, nil
@@ -165,7 +165,7 @@ func (a *application) foundingMessage() string {
 	defer a.mu.RUnlock()
 	missing := a.startupMissing
 	if !a.startupObserved {
-		// HTTP starts independently of the first policy observation. Until it
+		// HTTP starts independently of the first hooks observation. Until it
 		// arrives, every configured founder is still unverified by this caller.
 		names := make([]string, len(a.cfg.Peers))
 		for i, peer := range a.cfg.Peers {

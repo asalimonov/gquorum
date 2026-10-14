@@ -48,11 +48,15 @@ type deploymentUnit struct {
 	cluster    *Cluster
 	generation uint64
 }
+
+// PoolOptions bounds Docker deployment capacity, concurrent startup and resource operation timeouts.
 type PoolOptions struct {
 	Image                            string
 	Size, CookParallel               int
 	OperationTimeout, CleanupTimeout time.Duration
 }
+
+// Pool owns bounded isolated Docker deployment units and their cleanup workers.
 type Pool struct {
 	opts      PoolOptions
 	runID     string
@@ -71,6 +75,8 @@ type Pool struct {
 	errorsMu  sync.Mutex
 	failures  []error
 }
+
+// Lease borrows one generation-checked isolated cluster until resource release completes.
 type Lease struct {
 	Cluster     *Cluster
 	pool        *Pool
@@ -81,6 +87,7 @@ type Lease struct {
 	releaseErr  error
 }
 
+// NewPool validates capacity and timeouts and constructs an inactive deployment pool.
 func NewPool(opts PoolOptions) (*Pool, error) {
 	if opts.Image == "" || opts.Size < 1 || opts.CookParallel < 1 || opts.CookParallel > opts.Size {
 		return nil, errors.New("pool requires image and positive bounded unit/cook counts")
@@ -114,6 +121,8 @@ func (p *Pool) failureResult() error {
 	defer p.errorsMu.Unlock()
 	return errors.Join(p.failures...)
 }
+
+// Start initializes deployment-unit ownership and bounded startup work.
 func (p *Pool) Start(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -149,6 +158,8 @@ func (p *Pool) Start(ctx context.Context) error {
 		}
 	}
 }
+
+// Acquire waits for an isolated deployment unit and returns a generation-checked cluster lease.
 func (p *Pool) Acquire(ctx context.Context, spec Spec) (*Lease, error) {
 	spec = spec.normalized()
 	if err := spec.validate(); err != nil {
@@ -370,6 +381,8 @@ func (p *Pool) resetUnit(u *deploymentUnit) error {
 	u.cluster = nil
 	return nil
 }
+
+// Release begins lease cleanup once and waits without abandoning ownership on cancellation.
 func (l *Lease) Release(ctx context.Context) error {
 	l.releaseOnce.Do(func() {
 		go func() {
@@ -398,6 +411,8 @@ func (l *Lease) Release(ctx context.Context) error {
 		return ctx.Err()
 	}
 }
+
+// RequestClose prevents further acquisitions and begins owned resource teardown.
 func (p *Pool) RequestClose() {
 	p.closeOnce.Do(func() {
 		p.startMu.Lock()
@@ -409,6 +424,8 @@ func (p *Pool) RequestClose() {
 		p.startMu.Unlock()
 	})
 }
+
+// Close requests teardown and joins cleanup, retaining ownership when its wait expires.
 func (p *Pool) Close(ctx context.Context) error {
 	p.RequestClose()
 	select {

@@ -27,7 +27,9 @@ func validateSnapshot(ss raftpb.Snapshot) error {
 	return nil
 }
 func validateRecovery(r storage.Recovery) error {
-	if raft.IsEmptySnap(r.Snapshot) && (len(r.Snapshot.Data) != 0 || r.Snapshot.Metadata.Term != 0 || len(r.Snapshot.Metadata.ConfState.Voters) != 0 || len(r.Snapshot.Metadata.ConfState.Learners) != 0) {
+	if (len(r.Snapshot.Data) != 0 || r.Snapshot.Metadata.Term != 0 ||
+		len(r.Snapshot.Metadata.ConfState.Voters) != 0 || len(r.Snapshot.Metadata.ConfState.Learners) != 0) &&
+		raft.IsEmptySnap(r.Snapshot) {
 		return fault.New(fault.Unreadable, "snapshot state has no recovery index", nil)
 	}
 	if !raft.IsEmptySnap(r.Snapshot) {
@@ -45,7 +47,8 @@ func validateRecovery(r storage.Recovery) error {
 		}
 		last = e.Index
 	}
-	if r.HardState.Commit < r.Snapshot.Metadata.Index || r.HardState.Commit > last || r.HardState.Term < r.Snapshot.Metadata.Term || r.AppliedHint > r.HardState.Commit {
+	if r.HardState.Commit < r.Snapshot.Metadata.Index || r.HardState.Commit > last ||
+		r.HardState.Term < r.Snapshot.Metadata.Term || r.AppliedHint > r.HardState.Commit {
 		return fault.New(fault.Unreadable, "hard state outside recovery boundary", nil)
 	}
 	return nil

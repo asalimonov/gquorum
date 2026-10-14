@@ -47,6 +47,30 @@ class LintTest(unittest.TestCase):
                 self.assertEqual(options["input"], "unit: \nfunctional: -tags=functional\nclustertest: -tags=clustertest\nexample: -tags=example\n")
                 self.assertTrue(all(options["cwd"] == Path("/root/tests/cluster") for _, options in commands))
 
+    def test_golangci_uses_production_sources_and_propagates_failures(self):
+        for module in (".", "tests/cluster"):
+            with self.subTest(module=module):
+                commands = []
+
+                def run(command, **kwargs):
+                    commands.append(command)
+                    output = json.dumps({"Dir": "/module/p", "GoFiles": ["p.go"],
+                                         "TestGoFiles": ["variant_test.go"]})
+                    return subprocess.CompletedProcess(command, int(command[0] == "golangci"), output)
+
+                with patch.object(lint.subprocess, "run", side_effect=run), contextlib.redirect_stdout(io.StringIO()):
+                    failed = lint.lint_module(Path("/root"), module, ("unit", "functional"),
+                                              "revive", "staticcheck", "golangci")
+                checks = [command for command in commands if command[0] == "golangci"]
+                self.assertEqual(failed, module == ".")
+                if module == ".":
+                    self.assertEqual(len(checks), 1)
+                    self.assertIn("--tests=false", checks[0])
+                    self.assertIn("/root/.golangci.yml", checks[0])
+                    self.assertIn("--max-issues-per-linter=0", checks[0])
+                else:
+                    self.assertEqual(checks, [])
+
     def test_build_failure_is_not_reported_as_clean_lint(self):
         with patch.object(lint.subprocess, "run", side_effect=subprocess.CalledProcessError(1, ["go", "vet"])), contextlib.redirect_stdout(io.StringIO()):
             with self.assertRaises(subprocess.CalledProcessError):

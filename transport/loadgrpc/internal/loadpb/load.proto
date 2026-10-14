@@ -1,0 +1,33 @@
+syntax = "proto3";
+package gquorum.load.v1;
+option go_package = "github.com/asalimonov/gquorum/transport/loadgrpc/internal/loadpb";
+
+// Public load values use a versioned JSON encoding inside a typed RPC surface.
+message Envelope {
+  uint32 version = 1;
+  bytes body = 2;
+}
+message Reply {
+  bytes body = 1;
+  string error_code = 2;
+  string error_message = 3;
+  bytes safety_refusal = 4;
+  uint64 expected_version = 5;
+  uint64 current_version = 6;
+}
+// StreamRefusal reports one streamed Raft batch that the recipient refused.
+// Accepted batches get no reply.
+message StreamRefusal {
+  uint64 delivery_id = 1;
+  string error_code = 2;
+  string error_message = 3;
+}
+service Load {
+  rpc SendRaft(Envelope) returns (Reply);
+  // StreamRaft carries ordered Raft batches from one sender replica to one
+  // recipient replica without waiting for each batch to be stepped.
+  rpc StreamRaft(stream Envelope) returns (stream StreamRefusal);
+  rpc ReadReplica(Envelope) returns (Reply);
+  rpc ApplyAction(Envelope) returns (Reply);
+  rpc InstallFence(Envelope) returns (Reply);
+}

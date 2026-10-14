@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum"
-
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -53,8 +52,8 @@ func testMetaAdmission(t *testing.T, electionDuringLearner bool) {
 	if electionDuringLearner {
 		// Exercise an explicitly requested four-voter admission, including the
 		// existing promotion recovery barrier. Default admission stays learner.
-		placement.MetaGroup().VoterPolicy.TargetVoters = 4
-		placement.Group("work").VoterPolicy.TargetVoters = 4
+		placement.MetaGroup().VoterConfig.TargetVoters = 4
+		placement.Group("work").VoterConfig.TargetVoters = 4
 	}
 	staged, err := c.Stage(ctx, "node2", placement)
 	if err != nil {
@@ -109,7 +108,7 @@ func testMetaAdmission(t *testing.T, electionDuringLearner bool) {
 			t.Fatal(err)
 		}
 	}
-	admitted.OperatorID = startApply(t, ctx, c, "node2", admitted.Document.Version)
+	admitted.OperatorID = startApply(ctx, t, c, "node2", admitted.Document.Version)
 	member := admitted.Document.MemberID("node4")
 	loadID := replicaID(admitted.Document, "work", "node4")
 	if member == 0 || loadID == 0 {
@@ -154,7 +153,7 @@ func testMetaAdmission(t *testing.T, electionDuringLearner bool) {
 						}
 						// Pending topology owns administration. Use a real election
 						// while preserving the former controller's process and loads.
-						healController = holdMetaRaft(t, ctx, c, oldLeader, local.Identity)
+						healController = holdMetaRaft(ctx, t, c, oldLeader, local.Identity)
 						if err := Poll(ctx, func() (bool, error) {
 							changed, err := c.Status(ctx, observer)
 							if err != nil || changed.MetaLeaderID == 0 || changed.MetaLeaderID == local.Identity.MemberID {

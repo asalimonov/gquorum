@@ -30,6 +30,17 @@ func TestObservedEffectsAndTransferIntentSurviveRestart(t *testing.T) {
 	if observed.Outcome != topology.EffectAlreadySatisfied {
 		t.Fatal(observed)
 	}
+	native, err := g.ReadNative(testContext(t))
+	must(t, err)
+	if native.Grant == nil || !native.Grant.Equal(initial) || native.Receipt == nil || native.Receipt.Validate(initial) != nil {
+		t.Fatalf("native read lost exact durable founding evidence: %+v", native)
+	}
+	native.Grant.Action.ResultVotersDigest = "altered"
+	againNative, err := g.ReadNative(testContext(t))
+	must(t, err)
+	if !againNative.Grant.Equal(initial) {
+		t.Fatal("native read aliased owner authority")
+	}
 	grant := learnerAuthority(20, 2)
 	installTestAuthority(t, g, grant)
 	if _, err := g.ObserveAuthorizedEffect(testContext(t), grant); !errors.Is(err, fault.ErrUnavailable) {
@@ -39,6 +50,9 @@ func TestObservedEffectsAndTransferIntentSurviveRestart(t *testing.T) {
 	_, err = g.ProposeAuthorizedConfChange(testContext(t), grant, cc, g.Status().ConfState)
 	must(t, err)
 	grant.Key.Revision++
+	// An already-applied exact effect is judged by its result, even if its
+	// historical predecessor is no longer the native configuration.
+	grant.Action.ExpectedVotersDigest = topology.VoterSetDigest([]uint64{99})
 	installTestAuthority(t, g, grant)
 	// A fresh grant observing existing membership consumes an ordinary entry.
 	observed, err = g.ProposeAuthorizedConfChange(testContext(t), grant, cc, g.Status().ConfState)
@@ -50,12 +64,13 @@ func TestObservedEffectsAndTransferIntentSurviveRestart(t *testing.T) {
 	transfer.Key.Revision = 30
 	transfer.Resources = transfer.Resources[:1]
 	transfer.Action.Kind, transfer.Action.NodeName, transfer.Action.ReplicaID = topology.StepTransferLeader, "1", 1
+	transfer.Action.ExpectedVotersDigest, transfer.Action.ResultVotersDigest = "", ""
 	installTestAuthority(t, g, transfer)
 	must(t, g.TransferAuthorized(testContext(t), transfer))
-	receipt, found, err := g.AuthorityReceipt(testContext(t), transfer.Key)
+	receipt, err := g.AuthorityReceipt(testContext(t), transfer.Key)
 	must(t, err)
-	if !found || receipt.Outcome != topology.EffectTransferStarted {
-		t.Fatal(receipt, found)
+	if !receipt.Found || receipt.Receipt.Outcome != topology.EffectTransferStarted {
+		t.Fatal(receipt.Receipt, receipt.Found)
 	}
 	must(t, g.Snapshot(testContext(t)))
 	must(t, g.Stop(testContext(t)))
@@ -64,10 +79,10 @@ func TestObservedEffectsAndTransferIntentSurviveRestart(t *testing.T) {
 	must(t, restarted.WaitReady(testContext(t)))
 	installTestAuthority(t, restarted, transfer)
 	must(t, restarted.TransferAuthorized(testContext(t), transfer))
-	again, found, err := restarted.AuthorityReceipt(testContext(t), transfer.Key)
+	again, err := restarted.AuthorityReceipt(testContext(t), transfer.Key)
 	must(t, err)
-	if !found || !reflect.DeepEqual(again, receipt) {
-		t.Fatal("retry repeated intent", again, receipt)
+	if !again.Found || !reflect.DeepEqual(again.Receipt, receipt.Receipt) {
+		t.Fatal("retry repeated intent", again.Receipt, receipt.Receipt)
 	}
 	fence := transfer.Clone()
 	fence.Key.Revision++
@@ -101,6 +116,7 @@ func testTransferResumption(t *testing.T, demotion bool) {
 	must(t, err)
 	grant := learnerAuthority(20, 2)
 	grant.Action.Kind = topology.StepTransferLeader
+	grant.Action.ExpectedVotersDigest, grant.Action.ResultVotersDigest = "", ""
 	ready := make(chan struct{})
 	close(ready)
 	g := &Group{rn: rn, ms: ms, cs: cs, applied: 1, ready: ready, opts: Options{ManagedAuthority: true, ReplicaID: 1, GroupID: "load", ClusterID: "cluster"}, changes: make(map[string]*request)}
@@ -109,6 +125,7 @@ func testTransferResumption(t *testing.T, demotion bool) {
 	if demotion {
 		grant.Action.Kind, grant.Action.NodeName, grant.Action.ReplicaID = topology.StepDemoteVoter, "1", 1
 		grant.Action.TransferNodeName, grant.Action.TransferReplicaID = "other", 2
+		grant.Action.ExpectedVotersDigest, grant.Action.ResultVotersDigest = topology.VoterSetDigest([]uint64{1, 2}), topology.VoterSetDigest([]uint64{2})
 	} else {
 		receipt, err = g.effectReceipt(raftpb.Entry{Index: 1, Term: 1}, grant, topology.EffectTransferStarted)
 		must(t, err)
@@ -244,6 +261,7 @@ func TestDemotionTransferIsDurablePrerequisiteNotCompletion(t *testing.T) {
 	grant := learnerAuthority(20, 2)
 	grant.Action.Kind, grant.Action.NodeName, grant.Action.ReplicaID = topology.StepDemoteVoter, "1", 1
 	grant.Action.TransferNodeName, grant.Action.TransferReplicaID = "other", 2
+	grant.Action.ExpectedVotersDigest, grant.Action.ResultVotersDigest = topology.VoterSetDigest([]uint64{1, 2}), topology.VoterSetDigest([]uint64{2})
 	ready := make(chan struct{})
 	close(ready)
 	g := &Group{rn: rn, ms: ms, cs: cs, applied: 1, ready: ready, opts: Options{ManagedAuthority: true, ReplicaID: 1, GroupID: "load", ClusterID: "cluster"}, changes: make(map[string]*request), authority: raftstate.AuthorityState{Grant: &grant, InstallIndex: 1, InstallTerm: 1}}

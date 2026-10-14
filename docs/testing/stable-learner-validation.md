@@ -1,5 +1,9 @@
 # Stable learner implementation and validation
 
+API naming note (2026-10-14): current code uses `VoterConfig`,
+`scheduling.RepairPolicy` and `lifecycle.Hooks`. The recorded validation below
+predates that rename; it is not a new test run.
+
 Scope: [target architecture](../brainstorms/20261012-stable-learner-replicas-target.md),
 on baseline `84ffa43`. Validation date: 2026-10-12. This record describes the
 implementation and observed checks; the brainstorm remains the design record.
@@ -8,7 +12,7 @@ implementation and observed checks; the brainstorm remains the design record.
 
 | Target contract | Implementation | Evidence |
 | --- | --- | --- |
-| Per-group voter targets, default three, stable and pinned learners; preserve legacy nil-policy documents | `topology/voter_policy.go`, `document.go`, `validate.go`; typed Cluster mutations in `cluster_mutations.go` and `internal/metaservice/voter_mutations.go` | Policy/clone/legacy validation units; functional policy adoption preserves intentional learner pins and host intent |
+| Per-group voter targets, default three, stable and pinned learners; preserve legacy nil-policy documents | `topology/voter_config.go`, `document.go`, `validate.go`; typed Cluster mutations in `cluster_mutations.go` and `internal/metaservice/voter_mutations.go` | Policy/clone/legacy validation units; functional policy adoption preserves intentional learner pins and host intent |
 | All eligible load hosts, explicit durable host selection, total replica capacity, small founding and target shortfall | `topology/hosting.go`, metaservice hosting materialization and founding | `TestAllEligibleHostingAndCapacity`, `TestFoundingVotersSmallAndPinned`, `TestPolicyTargetShortfallAndUnsafeReduction`, functional atomic overflow and explicit-host admission; seven-host Docker capacity regression |
 | Every admitted node hosts meta; learner-first admission, readiness and retained restart | Shared admission sequence validation; meta bootstrap/join/session and recovery integration | Admission validation units; learner-before-serving and admission-pin Docker cases; five-node retained-return acceptance |
 | Optional surge, immutable ordering, exact guarded transfer and quorum safety | `topology/voter_plan.go`, guarded authorization/wire encodings, managed and meta membership receivers | Ordering/forged-guard units; four-node process crash after committed promotion/demotion for both surge settings; leader-regain test waits for the exact unavailable transfer target, then resumes the same attempt |

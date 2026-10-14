@@ -43,7 +43,7 @@ func TestRetainedFoundingStateBypassesAbsentPeerGateThreeNodes(t *testing.T) {
 // Port the source full topology/history/observed-leadership assertions. Caller
 // groups replace the SQL-backed source group, and all user node types vote in
 // meta while the workers group uses its caller-defined eligibility rule.
-func assertFoundedTopology(t *testing.T, ctx context.Context, c *Cluster) topology.Document {
+func assertFoundedTopology(ctx context.Context, t *testing.T, c *Cluster) topology.Document {
 	t.Helper()
 	var founded topology.Document
 	if err := Poll(ctx, func() (bool, error) {
@@ -64,7 +64,7 @@ func assertFoundedTopology(t *testing.T, ctx context.Context, c *Cluster) topolo
 					eligibleWorkers++
 				}
 			}
-			if doc.Placement.MinReplicas != 2 || doc.Placement.MaxReplicas != 3 || len(doc.Group("demo").Replicas) != 3 || len(doc.Group("workers").Replicas) != eligibleWorkers || doc.Group("workers").VoterPolicy == nil || doc.Group("workers").VoterPolicy.TargetVoters != 2 {
+			if doc.Placement.MinReplicas != 2 || doc.Placement.MaxReplicas != 3 || len(doc.Group("demo").Replicas) != 3 || len(doc.Group("workers").Replicas) != eligibleWorkers || doc.Group("workers").VoterConfig == nil || doc.Group("workers").VoterConfig.TargetVoters != 2 {
 				return true, fmt.Errorf("caller founding placement changed: %+v", doc)
 			}
 			for _, declared := range c.Spec.Nodes {
@@ -141,7 +141,7 @@ func assertFoundedTopology(t *testing.T, ctx context.Context, c *Cluster) topolo
 func foundingFullTopology(t *testing.T, size int) {
 	t.Helper()
 	ctx, c := performanceClusterSpec(t, foundingSpec(size))
-	doc := assertFoundedTopology(t, ctx, c)
+	doc := assertFoundedTopology(ctx, t, c)
 	if err := c.Put(ctx, c.Spec.Nodes[size-1].Name, "demo", "founded", "founded", "committed"); err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func foundingFullTopology(t *testing.T, size int) {
 	}
 }
 
-func assertFoundingGate(t *testing.T, ctx context.Context, c *Cluster, missing string) map[string]string {
+func assertFoundingGate(ctx context.Context, t *testing.T, c *Cluster, missing string) map[string]string {
 	t.Helper()
 	instances := map[string]string{}
 	// Hold the already-running majority for two seconds: this is an actual gate
@@ -209,7 +209,7 @@ func foundingDelayedMember(t *testing.T, size int) {
 	missing := spec.Nodes[size-1].Name
 	spec.Deferred, spec.SkipReady = []string{missing}, true
 	ctx, c := performanceClusterSpec(t, spec)
-	instances := assertFoundingGate(t, ctx, c, missing)
+	instances := assertFoundingGate(ctx, t, c, missing)
 	if err := c.Node(missing).Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func foundingDelayedMember(t *testing.T, size int) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	assertFoundedTopology(t, ctx, c)
+	assertFoundedTopology(ctx, t, c)
 	for name, before := range instances {
 		local, err := c.Local(ctx, name, topology.MetaGroupID)
 		if err != nil || local.Identity.InstanceID != before {
@@ -240,7 +240,7 @@ func foundingTimeoutExit(t *testing.T, size int) {
 	missing := spec.Nodes[size-1].Name
 	spec.Deferred, spec.SkipReady, spec.FoundingTimeout = []string{missing}, true, 8*time.Second
 	ctx, c := performanceClusterSpec(t, spec)
-	assertFoundingGate(t, ctx, c, missing)
+	assertFoundingGate(ctx, t, c, missing)
 	for _, node := range c.Nodes() {
 		if !node.running.Load() {
 			continue
@@ -283,7 +283,7 @@ func foundingTimeoutExit(t *testing.T, size int) {
 func retainedFoundingState(t *testing.T, size int) {
 	t.Helper()
 	ctx, c := performanceClusterSpec(t, foundingSpec(size))
-	before := assertFoundedTopology(t, ctx, c)
+	before := assertFoundedTopology(ctx, t, c)
 	expected := map[string]string{"retained": "survives-absent-peer"}
 	if err := c.Put(ctx, "node2", "demo", "retained", "retained", expected["retained"]); err != nil {
 		t.Fatal(err)
@@ -330,7 +330,7 @@ func retainedFoundingState(t *testing.T, size int) {
 	}); err != nil {
 		t.Fatal("retained startup gated on absent peers", err)
 	}
-	after := assertFoundedTopology(t, ctx, c)
+	after := assertFoundedTopology(ctx, t, c)
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal("retained boot changed topology", before, after)
 	}

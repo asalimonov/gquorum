@@ -107,6 +107,14 @@ func TestTransferLeaderUsesExactActiveScopeAndRefusesIneligibleTargets(t *testin
 		{name: "draining", group: "work", node: "n2", err: fault.ErrInvalid, setup: func(f *mutationFixture) {
 			doc := f.g.state().Latest()
 			doc.Node("n2").State = topology.NodeDraining
+			// A complete drain declaration also removes the load replica.
+			group := doc.Group("work")
+			for i, replica := range group.Replicas {
+				if replica.NodeName == "n2" {
+					group.Replicas = append(group.Replicas[:i], group.Replicas[i+1:]...)
+					break
+				}
+			}
 			f.commit(t, doc, true)
 		}},
 	} {
@@ -190,7 +198,7 @@ func TestChangeReplicaPromoteIsDeclarativeAndPlansCatchUpBeforePromotion(t *test
 	active.Group("work").Replicas[2].Role = topology.ReplicaLearner
 	f.commit(t, active, true)
 	active = f.g.state().Active()
-	r, err := f.g.ChangeReplica(t.Context(), "work", "n3", topology.ReplicaVoter, preview())
+	r, err := f.g.ChangeReplica(t.Context(), "work", topology.ReplicaRoleChange{NodeName: "n3", Role: topology.ReplicaVoter}, preview())
 	desired := mutationDoc(t, r, err)
 	if desired.Group("work").Replicas[2].ReplicaID != 3 || desired.Group("work").Replicas[2].Role != topology.ReplicaVoter || !reflect.DeepEqual(f.g.state().Active(), active) {
 		t.Fatal("promotion changed approved membership or identity")
@@ -218,7 +226,7 @@ func TestChangeReplicaPromoteIsDeclarativeAndPlansCatchUpBeforePromotion(t *test
 		}
 	}
 	f.commit(t, desired, false)
-	r, err = f.g.ChangeReplica(t.Context(), "work", "n3", topology.ReplicaVoter, preview())
+	r, err = f.g.ChangeReplica(t.Context(), "work", topology.ReplicaRoleChange{NodeName: "n3", Role: topology.ReplicaVoter}, preview())
 	if got := mutationDoc(t, r, err); !reflect.DeepEqual(got.Group("work"), desired.Group("work")) {
 		t.Fatal("repeat promotion changed item state")
 	}
@@ -237,7 +245,7 @@ func TestChangeReplicaErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newMutationFixture(t)
 			before := f.g.state().Latest()
-			if _, err := f.g.ChangeReplica(t.Context(), tc.group, tc.node, tc.role, preview()); !errors.Is(err, fault.ErrInvalid) {
+			if _, err := f.g.ChangeReplica(t.Context(), tc.group, topology.ReplicaRoleChange{NodeName: tc.node, Role: tc.role}, preview()); !errors.Is(err, fault.ErrInvalid) {
 				t.Fatal(err)
 			}
 			if !reflect.DeepEqual(f.g.state().Latest(), before) {

@@ -46,8 +46,10 @@ func TestReconcileFencesPersistsPartialProgressAfterOperatorTerminates(t *testin
 		t.Fatal(err)
 	}
 	step := topology.Step{Seq: 1, GroupID: "load-one", Kind: topology.StepCreateFoundingGroup}
+	plan := guardedFixturePlan(doc.Version, step.GroupID, nil, []uint64{1}, step)
+	step = plan.Steps[0]
 	at := time.Now().UTC()
-	begin, err := g.propose(ctx, metaengine.BeginOperatorProposal{Version: doc.Version, Plan: topology.Plan{Version: doc.Version, Steps: []topology.Step{step}}, At: at})
+	begin, err := g.propose(ctx, metaengine.BeginOperatorProposal{Version: doc.Version, Plan: plan, At: at})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +57,7 @@ func TestReconcileFencesPersistsPartialProgressAfterOperatorTerminates(t *testin
 	if _, err := g.propose(ctx, metaengine.TransitionOperatorProposal{Transition: transition}); err != nil {
 		t.Fatal(err)
 	}
-	action := topology.AuthorizedStep{OperatorID: begin.OperatorID, Version: doc.Version, Attempt: 1, StepSeq: 1, GroupID: step.GroupID, Kind: step.Kind}
+	action := topology.AuthorizedStep{OperatorID: begin.OperatorID, Version: doc.Version, Attempt: 1, StepSeq: 1, GroupID: step.GroupID, Kind: step.Kind, ExpectedVotersDigest: step.ExpectedVotersDigest, ResultVotersDigest: step.ResultVotersDigest}
 	if _, err := g.BeginEffect(ctx, action); err != nil {
 		t.Fatal(err)
 	}

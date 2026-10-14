@@ -151,7 +151,7 @@ func newSingleNodeFixture(t *testing.T, loads bool, configure func(int, *quorum.
 			Meta:   quorum.MetaOptions{SessionTTL: 3 * time.Second, Timing: quorum.MetaTiming{TickInterval: 20 * time.Millisecond, ElectionTicks: 8}, Observation: quorum.ObservationOptions{Interval: 100 * time.Millisecond, Timeout: 60 * time.Millisecond}, Network: quorum.MetaNetworkOptions{Listener: listeners[i], AdvertiseAddress: listeners[i].Addr().String(), AllowPlaintext: true, ClusterCredential: []byte("api-fixture")}},
 			Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		}
-		opts.Policies.Scheduling.Disabled = true
+		opts.Scheduling.Disabled = true
 		if loads {
 			prewrite := false
 			opts.Loads = quorum.LoadOptions{Transport: c.network, Storage: quorum.LoadStorageOptions{WAL: &quorum.WALOptions{RootDir: filepath.Join(root, "loads"), SegmentBytes: 1 << 20, Prewrite: &prewrite}}, Engine: load.EngineOptions{Timing: load.Timing{TickInterval: 20 * time.Millisecond, ElectionTicks: 8}, SnapshotThreshold: 100}, RecoveryInterval: 40 * time.Millisecond}

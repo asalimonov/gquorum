@@ -92,14 +92,14 @@ func TestNodeMetaHostPrepareStopAndRetainedReceipt(t *testing.T) {
 	if err = n.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
-	store, err := authoritystore.Open(options.authorityDBPath(), id, false)
+	store, err := authoritystore.Open(options.authorityDBPath(), id, authoritystore.RetainedEvidence)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	receipt, found, err := store.Receipt(ctx, stopped, stopped.Targets[0])
-	if err != nil || !found || !reflect.DeepEqual(receipt, result.Receipts[0]) {
-		t.Fatal("stop receipt did not survive owner teardown", receipt, found, err)
+	receipt, err := store.Receipt(ctx, stopped, stopped.Targets[0])
+	if err != nil || !receipt.Found || !reflect.DeepEqual(receipt.Receipt, result.Receipts[0]) {
+		t.Fatal("stop receipt did not survive owner teardown", receipt.Receipt, receipt.Found, err)
 	}
 	if _, err = n.applyMetaHostAction(ctx, metaHostRequest(id, stopped)); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal("stopped node reopened authority callback", err)

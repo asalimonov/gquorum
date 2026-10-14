@@ -3,8 +3,8 @@
 `gquorum.Node` owns one participant, its private `_meta` service and all managed
 load replicas. `NewNode` performs pure validation. `Start` acquires storage and
 networking and begins recovery without waiting for quorum. `WaitReady` observes
-mandatory admission/recovery/session requirements plus `policy.LifecyclePolicy`.
-The default gate is local admission; `policy.AllFounders` can require every
+mandatory admission/recovery/session requirements plus `lifecycle.Hooks`.
+The default gate is local admission; `lifecycle.AllFounders` can require every
 configured founder on the first bootstrap. Retained recovery does not repeat
 that initial gate. Node never loads application configuration.
 
@@ -61,7 +61,7 @@ replica wait for that startup and share its handle; other groups proceed
 independently. Canceling a waiter does not cancel the owned startup. Factory
 inputs are copies. A successful factory transfers `Application.Close` to Node,
 including when cancellation occurs before its late return. Factory failure leaves
-partial acquisitions with the factory. Node joins replay and engine work before
+partial acquisitions with the factory. Node joins replay, engine work and optional Application.Run before
 Close. Failed Close retains ownership and blocks replacement until a serial retry
 succeeds. Publication occurs only after local replay readiness.
 
@@ -72,6 +72,36 @@ holds. Retirement can still join and remove a held identity. A stopped handle
 never becomes a view of its successor. `ParkedLoads` and `Node.Status` return
 owned observations. `LoadParkedError` matches `fault.ErrReplicaNotReady` while
 preserving its cause. Successful startup clears the matching parked observation.
+
+### In-memory load groups
+
+A group's approved `Storage` class selects its store at preflight: the default
+class uses the configured WAL or borrowed store, and `topology.StorageMemory`
+uses an in-memory `storage/memstore` that Node creates whenever loads are
+configured and closes after the managed host joins. Paths that can run after a
+group left approved topology (cleanup, retirement, readmission and collection)
+probe both stores, and retired records are collected through the store that
+listed them. State for a group in the store of the other class, or in both
+stores, parks as `identity_mismatch`. The startup authority check still reads
+only the default store; the memory store is always empty at startup.
+
+The decision table above is unchanged. A memory replica that restarts finds no
+state, so an established identity parks as `store_missing` with its ledger
+preserved. For an established voter, the host then reseats its own replica: it
+calls the ordinary `ReseatReplica` for its node, with `ExpectedVersion` pinned to
+the Active version in which it observed the parked identity, so a completed
+repair is never repeated on the successor. Refusals while topology is
+unconverged or an operator runs are retried with backoff up to 5 seconds. The
+approved plan prepares a fresh learner, catches it up from the leader, promotes
+it and cleans up the old identity. The loop ends once the old identity is in
+neither Active nor Target, and host shutdown joins it.
+
+Learners and replicas that restart before becoming established are not reseated;
+they stay parked with a `NotImplemented` warning. If a majority of a memory
+group's voters restart together, its committed state is lost: the group cannot
+elect a leader or complete a reseat, and it stays unavailable until it is deleted
+and recreated under a new ID. All nodes must run a release that understands the
+storage class before memory groups are created.
 
 ## Approved actions, transport and retirement
 
@@ -111,7 +141,7 @@ scheduler callbacks, cooldown and approved operator execution. A shared bounded
 read pool spans group destinations, rotates dispatch order and retains slots for
 callbacks that have not returned after cancellation. An undispatched request or
 rejected identity cannot become failure evidence. Source generations, process
-and engine-run identities, term, membership and policy scope fence continuous
+and engine-run identities, term, membership and voter-configuration scope fence continuous
 windows; reading cached data never earns extra qualifying time.
 Collector counter exhaustion cannot reuse an observer generation or history
 cursor: it invalidates decision evidence until a fresh collector starts, while
@@ -144,8 +174,10 @@ in the immutable grant and its installed durable host fence. There is no
 approval-only retirement entry point or ungranted ledger-forget callback. The
 library joins the owned replica, probes retained storage and verifies its ledger. If application state
 exists outside Raft, `LoadOptions.Retire` must independently verify its complete
-identity and request proof, perform idempotent cleanup, and return the entire
-matching `RetirementResult` with `Verified=true`. Absence on retry still requires
+identity and request proof (`RetirementRequest.Verify` checks the identity,
+grant resources, target and reason-specific tuple), perform idempotent cleanup,
+and return the entire matching `RetirementResult` with `Verified=true`
+(`RetirementRequest.Result`). Absence on retry still requires
 verification. A foreign or successor resource must be preserved. Only then may
 the library quarantine the exact Raft state and forget its matching ledger.
 Application transactions and outboxes remain caller-owned.
@@ -257,7 +289,7 @@ may use it to choose retained restart versus joining. Configuration and any appl
 affiliation marker remain outside the library.
 
 After applied, durably authorized self-removal, Node immediately fences meta and
-load participation. `LifecyclePolicy.Removal` chooses stop or retained diagnostics
+load participation. `lifecycle.Hooks.Removal` chooses stop or retained diagnostics
 only after mandatory fencing/joining. A failed or delayed callback cannot undo
 the fence. Removal proof includes exact process/member and approved version/index;
 staged edits, drain, demotion, outgoing joint membership or another member's
@@ -269,11 +301,11 @@ availability and pending/excluded admission can remain parked. A leader's volati
 exact-process name-conflict diagnostic never displaces the live holder's route or
 allocates membership. `Cluster.ParkedJoins` exposes these observations.
 
-## Shutdown, reads and policy callbacks
+## Shutdown, reads and decision callbacks
 
 `RequestStop` schedules teardown; callbacks may invoke it and return. `Stop(ctx)`
 joins the same owned teardown, retaining ownership on timeout. Node cancels its
-lifetime, quiesces meta producers, joins admitted effects, policy callbacks and
+lifetime, quiesces meta producers, joins admitted effects, decision callbacks and
 managed replicas, closes owned load storage, then closes meta storage. Callback
 or Close errors remain observable; unsuccessful release requires a serial retry.
 No new replica can overlap an unresolved owner. A callback must not wait for its
@@ -317,15 +349,25 @@ retention and removal callbacks together. Deadlines bound accepted results; a
 noncooperative callback stays owned until actual return, with no overlapping
 replacement invocation. Policy decisions cannot bypass core authorization,
 persistence, identity or membership checks. Scheduling status reports
-`policy_stalled` while a canceled callback has not returned. The driver refreshes
+`policy_stalled` while a canceled callback has not returned. The scheduler refreshes
 topology, health and native membership after the callback, then uses the ordinary
 replicated CAS to guard approval against concurrent document changes.
 
+Repair candidates are rechecked against the approved node selector,
+reservation, learner-only marker and strict voter domains after callback
+results. Retained startup uses the replicated approved labels and exact
+identity; changed local `NodeOptions.Node.Labels` cannot override them. A
+reserved approved replica may restart, while a successor ID still needs an
+eligible host. [Placement](placement.md) describes these rules and their
+diagnostic reports.
+
 `Node.Status()` reads local owned snapshots without probes. `Cluster.Status(ctx)`
-collects observations; neither proves quorum or linearizability. Compare leader
-and term when assessing continuity. Follower approvals make at most one control
-hop to the observed leader. Domain errors preserve exact expected/current CAS
-versions; empty success replies cannot identify an operator and are refused.
+collects observations and separate static placement reports for Active and
+Target; neither proves quorum, physical failure isolation or linearizability.
+Compare leader and term when assessing continuity. Follower approvals make at
+most one control hop to the observed leader. Domain errors preserve exact
+expected/current CAS versions; empty success replies cannot identify an operator
+and are refused.
 
 Status adds `MetaLeaderNodeName` and `LeaderNodeName` to the existing numeric
 Raft observations. Names resolve through the local Active topology. Unknown or
@@ -383,7 +425,7 @@ routing can survive session deactivation without claiming that stopped Raft is
 healthy. Ordinary identity probes continue to require a running engine. Node-owned meta host callbacks now serialize durable host floors and effect
 receipts under a bounded owned worker. Prepare verifies the acquired pin and
 replay-ready engine; stop joins metadata participation and local load work before
-persisting its receipt. Courier cancellation ends only its wait. Removal policy
+persisting its receipt. Courier cancellation ends only its wait. Removal hooks
 waits until one quorum read confirms the exact stop receipt, convergence of
 approved Target into Active, and settlement of this member's retained host
 authority. Convergence covers later plan steps whose grants have not yet been
@@ -411,7 +453,7 @@ collected resources. Native removal alone preserves unfinished host retirement.
 Deleting the node row in approved Target is also self-removal when its previously
 seen member disappears from applied native membership. A caller whose startup
 wait returns stopped for that proven removal should keep administrative control
-available until required retirement finishes and its removal policy decides the
+available until required retirement finishes and its removal hooks decide the
 process lifetime; pre-readiness removal does not establish application readiness.
 
 A retained metadata stop intent (running, completed or fenced with uncertain
@@ -425,7 +467,32 @@ retained proof and administrative work available. A same-member join response
 remains pending. Non-joining restarts still fail closed. Fresh-member grant,
 retirement receipts and the exact durable rebind precede replacement participation.
 
-Removal policy captures the exact metadata owner and rechecks it after quorum
+Removal hooks capture the exact metadata owner and recheck it after quorum
 reads and callback waits. Readmission reservation and accepting a stop decision
 share Node's admission mutex. An old-member decision cannot stop a pending or
 installed replacement, and a stopped Node cannot accept a new reservation.
+
+## Application background work
+
+An optional `load.Application.Run` starts only after the exact handle is ready,
+authorized and published. Its reservation is part of publication so a concurrent
+stop cannot miss the callback. The callback inherits engine lifetime cancellation,
+including failure, and must join its own children. Leadership loss does not stop
+Run; `Group.RunWhileLeader` supplies a separately canceled leadership scope.
+
+A callback returning nil is not restarted. A cancellation error matching its
+canceled context is ordinary teardown. Any other error fails the exact engine,
+emits `application_run_failed`, and installs a local hold. Status retains the
+failure after resources release; an explicit StartLoadGroup clears the matching
+hold and may create a fresh run only after the old owner has released resources.
+Other replicas continue normally.
+
+Engine and Run cancellation precede their joins. A stop timeout or ignored
+callback cancellation retains ownership and prevents Close or a replacement.
+Close follows both engine and callback joins. Local Node/Group watches coalesce
+owned state snapshots and close with a terminal snapshot after shutdown; watch
+cancellation never stops the owner itself. A Group observation carries the run's
+local `AppliedIndex`, republished after each applied batch or snapshot restore;
+it is a wake-up hint for reading committed state, not a quorum barrier.
+`Leadership.Replicas` reads the leader's cached Raft progress under the engine
+lock and resolves peer names through the managed catalog outside that lock.

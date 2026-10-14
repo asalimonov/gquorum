@@ -19,7 +19,7 @@ import (
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/metrics"
-	"github.com/asalimonov/gquorum/policy"
+	schedulingapi "github.com/asalimonov/gquorum/scheduling"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3/raftpb"
@@ -71,6 +71,31 @@ func newTestHost(t *testing.T, voters ...uint64) *testHost {
 	h.mustApply(metaengine.ActivateTargetProposal{OperatorID: ex.OperatorID, Version: 1, Attempt: 1})
 	return h
 }
+
+func TestCustomLegacyRepairCannotAllocateOnReservedNode(t *testing.T) {
+	t.Parallel()
+	h := newTestHost(t, 1, 2)
+	doc := h.machine.Latest()
+	doc.Node("n3").Labels = map[string]string{topology.LabelReserved: "true"}
+	staged := h.mustApply(metaengine.ProposeDocument{Doc: doc, ExpectedVersion: doc.Version})
+	at := time.Now().UTC()
+	op := h.mustApply(metaengine.BeginOperatorProposal{Version: staged.Doc.Version, Plan: topology.Plan{Version: staged.Doc.Version}, Origin: topology.OriginOperator, At: at})
+	h.mustApply(metaengine.TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: op.OperatorID, Version: staged.Doc.Version, Attempt: 1, State: topology.OperatorSucceeded, At: at}})
+	h.mustApply(metaengine.ActivateTargetProposal{OperatorID: op.OperatorID, Version: staged.Doc.Version, Attempt: 1})
+	r, err := New(Config{Host: h, Policy: schedulerFunc(func(context.Context, schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error) {
+		return schedulingapi.ScheduleDecision{Action: &schedulingapi.ScheduleAction{Kind: schedulingapi.RestoreMissingReplica,
+			Identity: storage.Identity{ClusterID: doc.ClusterID, GroupID: "shard0", NodeName: "n3", ReplicaID: 3}}}, nil
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Tick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if h.approvals != 0 || h.commits != 0 || h.machine.Target().Version != staged.Doc.Version {
+		t.Fatal("custom repair bypassed reserved admission", r.Status())
+	}
+}
 func (h *testHost) apply(ctx context.Context, proposal any) (metaengine.ApplyResult, error) {
 	data, err := metaengine.Encode(proposal)
 	if err != nil {
@@ -102,20 +127,19 @@ func (h *testHost) mustApply(p any) metaengine.ApplyResult {
 	}
 	return out
 }
-func (h *testHost) Views(ctx context.Context) (topology.Document, topology.Document, topology.Document, error) {
+func (h *testHost) Views(ctx context.Context) (topology.ReadView, error) {
 	if h.blockViews {
 		<-ctx.Done()
-		return topology.Document{}, topology.Document{}, topology.Document{}, ctx.Err()
+		return topology.ReadView{}, ctx.Err()
 	}
-	a, b, c := h.machine.Views()
-	return a, b, c, h.viewErr
+	return h.machine.Views(), h.viewErr
 }
-func (h *testHost) CurrentOperator(context.Context) (topology.Operator, bool, error) {
+func (h *testHost) CurrentOperator(context.Context) (topology.OperatorLookup, error) {
 	if h.operatorOverride != nil {
-		return *h.operatorOverride, true, h.operatorErr
+		return topology.OperatorLookup{Operator: *h.operatorOverride, Found: true}, h.operatorErr
 	}
 	ex, ok := h.machine.CurrentOperator()
-	return ex, ok, h.operatorErr
+	return topology.OperatorLookup{Operator: ex, Found: ok}, h.operatorErr
 }
 func (h *testHost) IsLeader() bool { return h.leader }
 func (h *testHost) Health(context.Context) (map[string]topology.Health, error) {
@@ -152,7 +176,8 @@ func (h *testHost) Approve(ctx context.Context, version uint64) (topology.Operat
 	}
 	return res.OperatorID, err
 }
-func (h *testHost) CommitRepair(ctx context.Context, doc topology.Document, expected uint64, plan topology.Plan) (topology.OperatorID, error) {
+func (h *testHost) CommitRepair(ctx context.Context, commit RepairCommit) (topology.OperatorID, error) {
+	doc, expected, plan := commit.Document, commit.ExpectedVersion, commit.Plan
 	if h.beforeCommit != nil {
 		h.beforeCommit()
 	}
@@ -171,7 +196,7 @@ func (h *testHost) stage(origin topology.Origin, parent uint64) topology.Documen
 	doc.Comment = "staged intent"
 	return h.mustApply(metaengine.ProposeDocument{Doc: doc, ExpectedVersion: doc.Version - 1}).Doc
 }
-func newTestDriver(t *testing.T, h *testHost, settings Settings) *Driver {
+func newTestScheduler(t *testing.T, h *testHost, settings Settings) *Scheduler {
 	t.Helper()
 	r, err := New(Config{Host: h, Settings: settings})
 	if err != nil {
@@ -184,13 +209,13 @@ func newTestDriver(t *testing.T, h *testHost, settings Settings) *Driver {
 	}
 	return r
 }
-func tick(t *testing.T, r *Driver) {
+func tick(t *testing.T, r *Scheduler) {
 	t.Helper()
 	if err := r.Tick(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 }
-func assertStatus(t *testing.T, r *Driver, state topology.SchedulingState, reason string) {
+func assertStatus(t *testing.T, r *Scheduler, state topology.SchedulingState, reason string) {
 	t.Helper()
 	s := r.Status()
 	if s.State != state || s.Reason != reason {
@@ -198,17 +223,17 @@ func assertStatus(t *testing.T, r *Driver, state topology.SchedulingState, reaso
 	}
 }
 
-func TestDriverStartStopLifecycle(t *testing.T) {
+func TestSchedulerStartStopLifecycle(t *testing.T) {
 	t.Parallel()
 	h := newTestHost(t, 1, 2, 3)
-	r := newTestDriver(t, h, Settings{})
+	r := newTestScheduler(t, h, Settings{})
 	if err := r.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Start(context.Background()); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal(err)
 	}
-	r = newTestDriver(t, h, Settings{})
+	r = newTestScheduler(t, h, Settings{})
 	if err := r.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +246,7 @@ func TestDriverStartStopLifecycle(t *testing.T) {
 		}
 	}
 }
-func TestDriverGatesLeaderHealthAndDisabled(t *testing.T) {
+func TestSchedulerGatesLeaderHealthAndDisabled(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []string{"follower", "unknown", "disabled"} {
 		t.Run(mode, func(t *testing.T) {
@@ -233,7 +258,7 @@ func TestDriverGatesLeaderHealthAndDisabled(t *testing.T) {
 			if mode == "unknown" {
 				h.health = nil
 			}
-			r := newTestDriver(t, h, settings)
+			r := newTestScheduler(t, h, settings)
 			tick(t, r)
 			if h.commits != 0 || h.statusCalls != 0 {
 				t.Fatal("gate allowed repair observations")
@@ -242,11 +267,11 @@ func TestDriverGatesLeaderHealthAndDisabled(t *testing.T) {
 	}
 }
 
-func TestDriverLocalKillSwitchResetsStability(t *testing.T) {
+func TestSchedulerLocalKillSwitchResetsStability(t *testing.T) {
 	t.Parallel()
 	h := newTestHost(t, 1, 2)
-	r := newTestDriver(t, h, Settings{})
-	if err := r.SetEnabled(context.Background(), false); err != nil {
+	r := newTestScheduler(t, h, Settings{})
+	if err := r.SetEnabled(context.Background(), Enablement{Enabled: false}); err != nil {
 		t.Fatal(err)
 	}
 	tick(t, r)
@@ -254,7 +279,7 @@ func TestDriverLocalKillSwitchResetsStability(t *testing.T) {
 	if len(r.aliveSince) != 0 || h.commits != 0 {
 		t.Fatal("disabled worker retained observations or repaired")
 	}
-	if err := r.SetEnabled(context.Background(), true); err != nil {
+	if err := r.SetEnabled(context.Background(), Enablement{Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	assertStatus(t, r, topology.SchedulingWaiting, ReconcileReasonStarting)
@@ -265,7 +290,7 @@ func TestDriverLocalKillSwitchResetsStability(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := r.SetEnabled(ctx, false); !errors.Is(err, context.Canceled) {
+	if err := r.SetEnabled(ctx, Enablement{Enabled: false}); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 	if !r.Status().Enabled {
@@ -274,14 +299,14 @@ func TestDriverLocalKillSwitchResetsStability(t *testing.T) {
 	if err := r.Stop(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.SetEnabled(context.Background(), false); !errors.Is(err, fault.ErrStopped) {
+	if err := r.SetEnabled(context.Background(), Enablement{Enabled: false}); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal(err)
 	}
 	if err := r.Tick(context.Background()); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal(err)
 	}
 }
-func TestDriverResumesApprovedOperatorBeforeHealthGate(t *testing.T) {
+func TestSchedulerResumesApprovedOperatorBeforeHealthGate(t *testing.T) {
 	t.Parallel()
 	for _, state := range []topology.OperatorState{topology.OperatorPending, topology.OperatorRunning, topology.OperatorWaitingForCatchUp, topology.OperatorSucceeded} {
 		t.Run(string(state), func(t *testing.T) {
@@ -292,7 +317,7 @@ func TestDriverResumesApprovedOperatorBeforeHealthGate(t *testing.T) {
 				h.stage(topology.OriginOperator, 1)
 				h.mustApply(metaengine.BeginOperatorProposal{Version: 2, Plan: topology.Plan{Version: 2}, At: time.Now().UTC()})
 				h.operatorOverride = &topology.Operator{Status: topology.OperatorStatus{ID: "exec-v2-a1", Version: 2, State: state}}
-				r := newTestDriver(t, h, Settings{})
+				r := newTestScheduler(t, h, Settings{})
 				tick(t, r)
 				assertStatus(t, r, topology.SchedulingRunning, ReconcileReasonApprovedOperator)
 				want := 0
@@ -306,7 +331,7 @@ func TestDriverResumesApprovedOperatorBeforeHealthGate(t *testing.T) {
 		})
 	}
 }
-func TestDriverDoesNotMergeStagedOrFailedOperatorIntent(t *testing.T) {
+func TestSchedulerDoesNotMergeStagedOrFailedOperatorIntent(t *testing.T) {
 	t.Parallel()
 	for _, failed := range []bool{true, false} {
 		t.Run(fmt.Sprint(failed), func(t *testing.T) {
@@ -315,7 +340,7 @@ func TestDriverDoesNotMergeStagedOrFailedOperatorIntent(t *testing.T) {
 			if failed {
 				h.operatorOverride = &topology.Operator{Status: topology.OperatorStatus{ID: "exec-v2-a1", Version: 2, State: topology.OperatorFailed}}
 			}
-			r := newTestDriver(t, h, Settings{})
+			r := newTestScheduler(t, h, Settings{})
 			tick(t, r)
 			want := ReconcileReasonStagedLatest
 			if failed {
@@ -328,12 +353,13 @@ func TestDriverDoesNotMergeStagedOrFailedOperatorIntent(t *testing.T) {
 		})
 	}
 }
-func TestDriverCommitsExactLearnerFirstRepair(t *testing.T) {
+func TestSchedulerCommitsExactLearnerFirstRepair(t *testing.T) {
 	t.Parallel()
 	h := newTestHost(t, 1, 2)
-	r := newTestDriver(t, h, Settings{})
+	r := newTestScheduler(t, h, Settings{})
 	tick(t, r)
-	latest, target, active := h.machine.Views()
+	views := h.machine.Views()
+	latest, target, active := views.Latest, views.Target, views.Active
 	if latest.Version != 2 || target.Version != 2 || active.Version != 1 || h.commits != 1 || h.wakes != 1 {
 		t.Fatal("repair was not atomic", latest.Version, target.Version, active.Version, h.commits)
 	}
@@ -341,14 +367,16 @@ func TestDriverCommitsExactLearnerFirstRepair(t *testing.T) {
 		t.Fatalf("wrong repair %+v", latest)
 	}
 	ex, _ := h.machine.CurrentOperator()
-	want := []topology.StepKind{topology.StepPrepareReplica, topology.StepAddLearner, topology.StepWaitCaughtUp, topology.StepPromoteVoter, topology.StepRemoveReplica, topology.StepStopReplica, topology.StepCleanupReplicaState}
+	// A fresh replacement on the same host cannot be prepared until the old
+	// exact identity is removed and cleaned; the capacity bound forbids surge.
+	want := []topology.StepKind{topology.StepRemoveReplica, topology.StepStopReplica, topology.StepCleanupReplicaState, topology.StepPrepareReplica, topology.StepAddLearner, topology.StepWaitCaughtUp, topology.StepPromoteVoter}
 	if len(ex.Plan.Steps) != len(want) {
 		t.Fatal(ex.Plan)
 	}
 	for i, k := range want {
-		wantID := uint64(4)
-		if i >= 4 {
-			wantID = 3
+		wantID := uint64(3)
+		if i >= 3 {
+			wantID = 4
 		}
 		if ex.Plan.Steps[i].Kind != k || ex.Plan.Steps[i].ReplicaID != wantID {
 			t.Fatal(ex.Plan)
@@ -356,10 +384,10 @@ func TestDriverCommitsExactLearnerFirstRepair(t *testing.T) {
 	}
 	assertStatus(t, r, topology.SchedulingRunning, ReconcileReasonApprovedOperator)
 }
-func TestDriverCASRaceLeavesOperatorVersionStaged(t *testing.T) {
+func TestSchedulerCASRaceLeavesOperatorVersionStaged(t *testing.T) {
 	t.Parallel()
 	h := newTestHost(t, 1, 2)
-	r := newTestDriver(t, h, Settings{})
+	r := newTestScheduler(t, h, Settings{})
 	h.beforeCommit = func() { h.stage(topology.OriginOperator, 1) }
 	tick(t, r)
 	assertStatus(t, r, topology.SchedulingError, ReconcileReasonCASConflict)
@@ -368,16 +396,18 @@ func TestDriverCASRaceLeavesOperatorVersionStaged(t *testing.T) {
 	}
 }
 
-type stubPolicy struct{ decision policy.ScheduleDecision }
+type stubPolicy struct {
+	decision schedulingapi.ScheduleDecision
+}
 
-func (p *stubPolicy) Schedule(context.Context, policy.ScheduleInput) (policy.ScheduleDecision, error) {
+func (p *stubPolicy) Schedule(context.Context, schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error) {
 	return p.decision, nil
 }
-func TestDriverRejectsPolicyActionsOutsideAllowList(t *testing.T) {
+func TestSchedulerRejectsPolicyActionsOutsideAllowList(t *testing.T) {
 	t.Parallel()
 	h := newTestHost(t, 1, 2, 3)
-	r := newTestDriver(t, h, Settings{})
-	r.policy = &stubPolicy{policy.ScheduleDecision{Action: &policy.ScheduleAction{Kind: "remove_voter", Identity: storage.Identity{GroupID: "shard0", ReplicaID: 3}}}}
+	r := newTestScheduler(t, h, Settings{})
+	r.policy = &stubPolicy{schedulingapi.ScheduleDecision{Action: &schedulingapi.ScheduleAction{Kind: "remove_voter", Identity: storage.Identity{GroupID: "shard0", ReplicaID: 3}}}}
 	tick(t, r)
 	assertStatus(t, r, topology.SchedulingError, ReconcileReasonPolicyRejected)
 	if h.commits != 0 || h.wakes != 0 {
@@ -405,7 +435,7 @@ func TestHealableMatrix(t *testing.T) {
 							parent = 99
 						}
 						latest := h.stage(origin, parent)
-						r := newTestDriver(t, h, Settings{})
+						r := newTestScheduler(t, h, Settings{})
 						got, err := r.healable(context.Background(), latest, h.machine.Active())
 						want := origin == topology.OriginInternal && parentOK && empty && known
 						if err != nil || got != want {
@@ -417,11 +447,11 @@ func TestHealableMatrix(t *testing.T) {
 		}
 	}
 }
-func TestDriverHealsStagedInternal(t *testing.T) {
+func TestSchedulerHealsStagedInternal(t *testing.T) {
 	t.Parallel()
 	h := newTestHost(t, 1, 2, 3)
 	h.stage(topology.OriginInternal, 1)
-	r := newTestDriver(t, h, Settings{})
+	r := newTestScheduler(t, h, Settings{})
 	r.lastRun = r.now()
 	tick(t, r)
 	assertStatus(t, r, topology.SchedulingRunning, ReconcileReasonApprovedOperator)
@@ -429,7 +459,7 @@ func TestDriverHealsStagedInternal(t *testing.T) {
 		t.Fatal("internal heal blocked by cooldown")
 	}
 }
-func TestDriverHealRefusals(t *testing.T) {
+func TestSchedulerHealRefusals(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []string{"operator", "laundered", "follower", "plan-error", "apply-error", "nonempty", "unknown"} {
 		t.Run(mode, func(t *testing.T) {
@@ -454,7 +484,7 @@ func TestDriverHealRefusals(t *testing.T) {
 				h.health = nil
 			}
 			h.stage(origin, parent)
-			r := newTestDriver(t, h, Settings{})
+			r := newTestScheduler(t, h, Settings{})
 			tick(t, r)
 			if mode == "plan-error" {
 				assertStatus(t, r, topology.SchedulingError, ReconcileReasonStatusUnavailable)
@@ -471,7 +501,7 @@ func TestReconcileTickIsBoundedAndCancelable(t *testing.T) {
 	t.Parallel()
 	h := newTestHost(t, 1, 2, 3)
 	h.blockViews = true
-	r := newTestDriver(t, h, Settings{Interval: 100 * time.Millisecond, TickTimeout: 20 * time.Millisecond})
+	r := newTestScheduler(t, h, Settings{Interval: 100 * time.Millisecond, TickTimeout: 20 * time.Millisecond})
 	start := time.Now()
 	err := r.Tick(context.Background())
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > time.Second {
@@ -480,7 +510,7 @@ func TestReconcileTickIsBoundedAndCancelable(t *testing.T) {
 	assertStatus(t, r, topology.SchedulingError, ReconcileReasonStatusUnavailable)
 	// Stop must cancel a read already inside the automatic worker, rather than
 	// waiting for the configured tick timeout.
-	r = newTestDriver(t, h, Settings{Interval: 100 * time.Millisecond, TickTimeout: 90 * time.Millisecond})
+	r = newTestScheduler(t, h, Settings{Interval: 100 * time.Millisecond, TickTimeout: 90 * time.Millisecond})
 	if err := r.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -491,12 +521,12 @@ func TestReconcileTickIsBoundedAndCancelable(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-func TestDriverFollowerResetsStabilityObservations(t *testing.T) {
+func TestSchedulerFollowerResetsStabilityObservations(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []string{"standby", "staged", "failed", "approved"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newTestHost(t, 1, 2)
-			r := newTestDriver(t, h, Settings{})
+			r := newTestScheduler(t, h, Settings{})
 			h.leader = false
 			if mode != "standby" {
 				h.stage(topology.OriginOperator, 1)
@@ -520,12 +550,12 @@ func TestDriverFollowerResetsStabilityObservations(t *testing.T) {
 		})
 	}
 }
-func TestDriverStatusGatesAndStableSince(t *testing.T) {
+func TestSchedulerStatusGatesAndStableSince(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []string{"converged", "stability", "quorum", "cooldown", "status-error", "read-error", "execution-error"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newTestHost(t, 1, 2)
-			r := newTestDriver(t, h, Settings{})
+			r := newTestScheduler(t, h, Settings{})
 			state, reason := topology.SchedulingIdle, ReconcileReasonConverged
 			switch mode {
 			case "converged":
@@ -563,10 +593,10 @@ func TestDriverStatusGatesAndStableSince(t *testing.T) {
 		})
 	}
 }
-func TestDriverStatusTransitionsAreOwnedAndLoggedOnce(t *testing.T) {
+func TestSchedulerStatusTransitionsAreOwnedAndLoggedOnce(t *testing.T) {
 	t.Parallel()
 	h := newTestHost(t, 1, 2, 3)
-	r := newTestDriver(t, h, Settings{})
+	r := newTestScheduler(t, h, Settings{})
 	var buf bytes.Buffer
 	r.logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	changes := 0
@@ -604,10 +634,10 @@ func TestDriverStatusTransitionsAreOwnedAndLoggedOnce(t *testing.T) {
 		t.Fatal("action alias")
 	}
 }
-func TestDriverStatusErrorWarnsOnce(t *testing.T) {
+func TestSchedulerStatusErrorWarnsOnce(t *testing.T) {
 	t.Parallel()
 	h := newTestHost(t, 1, 2, 3)
-	r := newTestDriver(t, h, Settings{})
+	r := newTestScheduler(t, h, Settings{})
 	var buf bytes.Buffer
 	r.logger = slog.New(slog.NewTextHandler(&buf, nil))
 	h.viewErr = errors.New("raw error detail")
@@ -618,10 +648,10 @@ func TestDriverStatusErrorWarnsOnce(t *testing.T) {
 		t.Fatal(buf.String(), r.Status())
 	}
 }
-func TestDriverStatusConcurrentAccess(t *testing.T) {
+func TestSchedulerStatusConcurrentAccess(t *testing.T) {
 	t.Parallel()
 	h := newTestHost(t, 1, 2, 3)
-	r := newTestDriver(t, h, Settings{})
+	r := newTestScheduler(t, h, Settings{})
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Go(func() {
@@ -635,7 +665,7 @@ func TestDriverStatusConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 }
-func TestDriverSettingsValidation(t *testing.T) {
+func TestSchedulerSettingsValidation(t *testing.T) {
 	t.Parallel()
 	for _, s := range []Settings{{Interval: -1}, {TickTimeout: -1}, {StabilityWindow: -1}, {Cooldown: -1}, {Interval: time.Second, TickTimeout: time.Second}} {
 		if _, err := New(Config{Host: newTestHost(t, 1, 2, 3), Settings: s}); !errors.Is(err, fault.ErrInvalid) {
@@ -649,7 +679,9 @@ func TestDriverSettingsValidation(t *testing.T) {
 
 func (h *testHost) Observations() metrics.ClusterSnapshot      { return h.observations.Clone() }
 func (h *testHost) VoterSwitches() []topology.VoterSwitchState { return h.machine.VoterSwitches() }
-func (h *testHost) CommitVoterChange(ctx context.Context, change topology.VoterChange, doc topology.Document, expected uint64, plan topology.Plan) (topology.OperatorID, error) {
+func (h *testHost) CommitVoterChange(ctx context.Context, change topology.VoterChange,
+	commit RepairCommit) (topology.OperatorID, error) {
+	doc, expected, plan := commit.Document, commit.ExpectedVersion, commit.Plan
 	if h.beforeCommit != nil {
 		h.beforeCommit()
 	}

@@ -86,7 +86,8 @@ func snapshotMatrix(tb testing.TB, size int) *Machine {
 		if version == historyRetention+3 {
 			preferred = 2
 		}
-		plan, err := topology.BuildPlanPreferred(active, desired, observed, rules, preferred)
+		plan, err := topology.BuildPlanPreferred(active, desired, observed,
+			topology.PlanOptions{Rules: rules, PreferredMetaTransfer: preferred})
 		if err != nil {
 			tb.Fatal("fixture plan", version, err)
 		}
@@ -107,7 +108,7 @@ func snapshotMatrix(tb testing.TB, size int) *Machine {
 				transition := topology.OperatorTransition{OperatorID: begun.OperatorID, Version: version, Attempt: 1, StepSeq: step.Seq, GroupID: step.GroupID, NodeName: step.NodeName, State: topology.OperatorRunning, At: now.Add(time.Duration(i+1) * time.Second)}
 				submit(TransitionOperatorProposal{Transition: transition})
 				if step.Kind != topology.StepWaitCaughtUp {
-					action := topology.AuthorizedStep{OperatorID: begun.OperatorID, Version: version, Attempt: 1, StepSeq: step.Seq, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID, Kind: step.Kind, TransferNodeName: step.TransferNodeName, TransferReplicaID: step.TransferReplicaID}
+					action := topology.AuthorizedStep{OperatorID: begun.OperatorID, Version: version, Attempt: 1, StepSeq: step.Seq, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID, Kind: step.Kind, TransferNodeName: step.TransferNodeName, TransferReplicaID: step.TransferReplicaID, ExpectedVotersDigest: step.ExpectedVotersDigest, ResultVotersDigest: step.ResultVotersDigest}
 					grant := submit(BeginEffectProposal{Action: action}).Grant
 					for _, receipt := range fixtureEffectReceipts(*grant) {
 						submit(RecordEffectProposal{Receipt: receipt})

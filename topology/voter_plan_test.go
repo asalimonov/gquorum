@@ -18,17 +18,17 @@ func TestVoterReplacementOrderingAndGuard(t *testing.T) {
 		first          StepKind
 	}{
 		{name: "surge", surge: 1, hardMax: 5, first: StepWaitCaughtUp},
-		{name: "no surge", surge: 0, hardMax: 5, first: StepDemoteVoter},
-		{name: "hard maximum", surge: 1, hardMax: 3, first: StepDemoteVoter},
+		{name: "no surge", surge: 0, hardMax: 5, first: StepWaitCaughtUp},
+		{name: "hard maximum", surge: 1, hardMax: 3, first: StepWaitCaughtUp},
 		{name: "unknown", surge: 1, hardMax: 5, unknown: true},
 		{name: "quorum lost", surge: 1, hardMax: 5, lost: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			active := planDoc(1, tc.hardMax, []string{"n1", "n2", "n3", "n4"}, shardOf("work", rep("n1", 1), rep("n2", 2), rep("n3", 3), learner("n4", 4)))
-			p := DefaultVoterPolicy()
+			p := DefaultVoterConfig()
 			p.MaxSurgeVoters = tc.surge
-			active.Group("work").VoterPolicy = &p
+			active.Group("work").VoterConfig = &p
 			active.Group("work").Hosting = &HostingRule{Mode: HostingAllEligible}
 			desired := active.Clone()
 			desired.Version++
@@ -82,6 +82,9 @@ func TestDemotionGuardIsPartOfExactApproval(t *testing.T) {
 	desired.Version++
 	desired.Group("work").Replicas[2].Role = ReplicaLearner
 	plan := Plan{Version: desired.Version, Steps: []Step{step}}
+	if err := bindVoterGuards(&plan, map[string]GroupStatus{"work": groupStatus("work", 1, []uint64{1, 2, 3}, nil)}, desired); err != nil {
+		t.Fatal(err)
+	}
 	if err := ValidatePlanShape(active, desired, plan); err != nil {
 		t.Fatal(err)
 	}

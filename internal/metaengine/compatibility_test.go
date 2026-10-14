@@ -47,7 +47,8 @@ func TestBaselineSnapshotIsRejectedWithoutMutation(t *testing.T) {
 	if err := m.Restore(context.Background(), baselineBytes(t, "snapshot.json")); !errors.Is(err, fault.ErrUnsupported) {
 		t.Fatal(err)
 	}
-	latest, target, active := m.Views()
+	views := m.Views()
+	latest, target, active := views.Latest, views.Target, views.Active
 	if latest.Version != 0 || target.Version != 0 || active.Version != 0 {
 		t.Fatal("rejected old snapshot mutated state")
 	}

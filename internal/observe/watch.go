@@ -10,37 +10,29 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-type Source interface {
-	Active(context.Context) (topology.Document, error)
-	Health(context.Context, topology.Document) (map[string]topology.Health, error)
-}
-type Settings struct{ Interval, Timeout time.Duration }
+const (
+	defaultObservationInterval = 5 * time.Second
+)
 
+// WithDefaults fills absent health-sampling intervals and timeouts.
 func (s Settings) WithDefaults() Settings {
 	if s.Interval == 0 {
-		s.Interval = 5 * time.Second
+		s.Interval = defaultObservationInterval
 	}
 	if s.Timeout == 0 {
 		s.Timeout = min(2*time.Second, s.Interval-s.Interval/3)
 	}
 	return s
 }
+
+// Validate requires positive observation durations and a timeout below the
+// interval.
 func (s Settings) Validate() error {
-	s = s.WithDefaults()
-	if s.Interval <= 0 || s.Timeout <= 0 || s.Timeout >= s.Interval {
+	resolved := s.WithDefaults()
+	if resolved.Interval <= 0 || resolved.Timeout <= 0 || resolved.Timeout >= resolved.Interval {
 		return fault.New(fault.Invalid, "observation durations must be positive and timeout below interval", nil)
 	}
 	return nil
-}
-
-type Config struct {
-	Source   Source
-	Settings Settings
-	Logger   *slog.Logger
-	// Transition hooks run synchronously on the sampler; they must be bounded
-	// and must not call Refresh or Stop on this watcher.
-	OnGroupTransition func(topology.GroupHealth, topology.GroupHealthEvaluation)
-	OnNodeTransition  func(string, topology.Health, topology.Health)
 }
 
 // Watch samples Active-declared groups uniformly, without a process-global
@@ -61,6 +53,8 @@ type Watch struct {
 	snapshot         topology.HealthObservation
 }
 
+// New validates health observation dependencies and creates an inactive
+// watcher.
 func New(cfg Config) (*Watch, error) {
 	if cfg.Source == nil {
 		return nil, fault.New(fault.Invalid, "health observation source is required", nil)
@@ -69,8 +63,19 @@ func New(cfg Config) (*Watch, error) {
 		return nil, err
 	}
 	cfg.Settings = cfg.Settings.WithDefaults()
-	return &Watch{cfg: cfg, now: time.Now, wake: make(chan struct{}, 1), gate: make(chan struct{}, 1), done: make(chan struct{}), previous: map[string]topology.GroupHealth{}, everKnown: map[string]bool{}, nodes: map[string]topology.Health{}}, nil
+	return &Watch{
+		cfg:       cfg,
+		now:       time.Now,
+		wake:      make(chan struct{}, 1),
+		gate:      make(chan struct{}, 1),
+		done:      make(chan struct{}),
+		previous:  map[string]topology.GroupHealth{},
+		everKnown: map[string]bool{},
+		nodes:     map[string]topology.Health{},
+	}, nil
 }
+
+// Start begins periodic sampling under the supplied lifetime context.
 func (w *Watch) Start(parent context.Context) error {
 	if err := parent.Err(); err != nil {
 		return err
@@ -100,12 +105,16 @@ func (w *Watch) Start(parent context.Context) error {
 	}()
 	return nil
 }
+
+// Wake coalesces a request for another health sample.
 func (w *Watch) Wake() {
 	select {
 	case w.wake <- struct{}{}:
 	default:
 	}
 }
+
+// Stop cancels sampling and waits for the observation worker to return.
 func (w *Watch) Stop(ctx context.Context) error {
 	w.mu.Lock()
 	if !w.stopped {
@@ -125,11 +134,16 @@ func (w *Watch) Stop(ctx context.Context) error {
 		return fault.New(fault.ShutdownTimeout, "health observation worker has not stopped", ctx.Err())
 	}
 }
+
+// Snapshot returns an owned copy of the latest health observation.
 func (w *Watch) Snapshot() topology.HealthObservation {
 	w.snapshotMu.RLock()
 	defer w.snapshotMu.RUnlock()
 	return w.snapshot.Clone()
 }
+
+// Refresh serializes one bounded health sample and publishes unknown health on
+// observation failure.
 func (w *Watch) Refresh(parent context.Context) error {
 	ctx, cancel := context.WithTimeout(parent, w.cfg.Settings.Timeout)
 	defer cancel()
@@ -167,8 +181,14 @@ func (w *Watch) Refresh(parent context.Context) error {
 	w.recompute(doc, health)
 	return healthErr
 }
+
 func (w *Watch) recompute(doc topology.Document, health map[string]topology.Health) {
-	s := topology.HealthObservation{Version: doc.Version, At: w.now().UTC(), Nodes: map[string]topology.Health{}, Groups: topology.EvaluateAllGroupHealth(doc, health)}
+	s := topology.HealthObservation{
+		Version: doc.Version,
+		At:      w.now().UTC(),
+		Nodes:   map[string]topology.Health{},
+		Groups:  topology.EvaluateAllGroupHealth(doc, health),
+	}
 	for _, node := range doc.Nodes {
 		observed := health[node.Name]
 		if node.State == topology.NodeExcluded || observed != topology.HealthAlive && observed != topology.HealthDead {
@@ -179,29 +199,7 @@ func (w *Watch) recompute(doc topology.Document, health map[string]topology.Heal
 	w.snapshotMu.Lock()
 	w.snapshot = s.Clone()
 	w.snapshotMu.Unlock()
-	seen := map[string]bool{}
-	for _, e := range s.Groups {
-		seen[e.GroupID] = true
-		old, exists := w.previous[e.GroupID]
-		if !exists {
-			old = topology.GroupUnknown
-		}
-		next := e.ObservedHealth.State
-		w.previous[e.GroupID] = next
-		if exists && old == next {
-			continue
-		}
-		if w.cfg.OnGroupTransition != nil {
-			w.cfg.OnGroupTransition(old, e.Clone())
-		}
-		w.logTransition(old, e)
-	}
-	for id := range w.previous {
-		if !seen[id] {
-			delete(w.previous, id)
-			delete(w.everKnown, id)
-		}
-	}
+	w.publishGroupTransitions(s.Groups)
 	for name, observed := range s.Nodes {
 		old, exists := w.nodes[name]
 		if !exists {
@@ -213,6 +211,7 @@ func (w *Watch) recompute(doc topology.Document, health map[string]topology.Heal
 	}
 	w.nodes = s.Nodes
 }
+
 func (w *Watch) logTransition(old topology.GroupHealth, e topology.GroupHealthEvaluation) {
 	next := e.ObservedHealth.State
 	known := w.everKnown[e.GroupID]
@@ -237,6 +236,34 @@ func (w *Watch) logTransition(old topology.GroupHealth, e topology.GroupHealthEv
 			return
 		}
 		level = slog.LevelWarn
+	default: // Keep the default log level for other health states.
 	}
-	w.cfg.Logger.Log(context.Background(), level, "group health changed", "group", e.GroupID, "old", old, "state", next, "voters", e.Voters, "quorum", e.Quorum)
+	w.cfg.Logger.Log(context.Background(), level, "group health changed", "group", e.GroupID, "old", old, "state", next,
+		"voters", e.Voters, "quorum", e.Quorum)
+}
+
+func (w *Watch) publishGroupTransitions(groups []topology.GroupHealthEvaluation) {
+	seen := map[string]bool{}
+	for _, e := range groups {
+		seen[e.GroupID] = true
+		old, exists := w.previous[e.GroupID]
+		if !exists {
+			old = topology.GroupUnknown
+		}
+		next := e.ObservedHealth.State
+		w.previous[e.GroupID] = next
+		if exists && old == next {
+			continue
+		}
+		if w.cfg.OnGroupTransition != nil {
+			w.cfg.OnGroupTransition(old, e.Clone())
+		}
+		w.logTransition(old, e)
+	}
+	for id := range w.previous {
+		if !seen[id] {
+			delete(w.previous, id)
+			delete(w.everKnown, id)
+		}
+	}
 }

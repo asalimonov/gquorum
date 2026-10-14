@@ -8,59 +8,86 @@ import (
 
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/lifecycle"
 	"github.com/asalimonov/gquorum/load"
-	"github.com/asalimonov/gquorum/policy"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
 func (h *Host) retirementAuthority(ctx context.Context, req load.RetirementRequest) error {
-	if req.Reason != load.RetirementTopology {
-		return fault.ErrUnsupported
-	} // Readmission uses its separate authenticated grant path.
-	if req.Authorization == nil || req.AdmissionID != "" || req.PreviousMemberID != 0 || req.GrantedMemberID != 0 {
-		return fault.ErrOperatorAuthorization
-	}
-	a := *req.Authorization
-	if a.Kind != topology.StepCleanupReplicaState && a.Kind != topology.StepDeleteGroupState {
-		return fault.ErrOperatorAuthorization
+	a, err := retirementAction(req)
+	if err != nil {
+		return err
 	}
 	if err := h.checkRetirementAuthority(ctx, req); err != nil {
 		return err
 	}
 	own := h.cfg.Identity()
-	if req.Identity.NodeName != own.NodeName || req.Identity.ClusterID != own.ClusterID || req.Identity.GroupID != a.GroupID || req.Identity.ReplicaID == 0 {
+	if req.Identity.NodeName != own.NodeName || req.Identity.ClusterID != own.ClusterID ||
+		req.Identity.GroupID != a.GroupID || req.Identity.ReplicaID == 0 {
 		return fault.ErrIdentityMismatch
 	}
-	targets, err := actionTargets(ctx, a, req.Grant)
+	return retirementTarget(ctx, a, req.Identity, req.Grant)
+}
+
+func retirementAction(req load.RetirementRequest) (topology.AuthorizedStep, error) {
+	if req.Reason != load.RetirementTopology {
+		return topology.AuthorizedStep{}, fault.ErrUnsupported
+	} // Readmission uses its separate authenticated grant path.
+	if req.Authorization == nil || req.AdmissionID != "" || req.PreviousMemberID != 0 || req.GrantedMemberID != 0 {
+		return topology.AuthorizedStep{}, fault.ErrOperatorAuthorization
+	}
+	a := *req.Authorization
+	if a.Kind != topology.StepCleanupReplicaState && a.Kind != topology.StepDeleteGroupState {
+		return topology.AuthorizedStep{}, fault.ErrOperatorAuthorization
+	}
+	return a, nil
+}
+
+func retirementTarget(ctx context.Context, a topology.AuthorizedStep, identity storage.Identity,
+	grant topology.AuthorityGrant) error {
+	targets, err := actionTargets(ctx, a, grant)
 	if err != nil {
 		return err
 	}
-	if !slices.Contains(targets, req.Identity) {
+	if !slices.Contains(targets, identity) {
 		return fault.ErrOperatorAuthorization
 	}
 	return ctx.Err()
 }
 
-func (h *Host) otherIdentityAllowed(ctx context.Context, a topology.AuthorizedStep, wanted, other storage.Identity, grant topology.AuthorityGrant) error {
-	if wanted.NodeName != other.NodeName || wanted.ClusterID != other.ClusterID || wanted.GroupID != other.GroupID || other.ReplicaID == 0 {
+type retirementIdentities struct {
+	wanted, other storage.Identity
+}
+
+func (h *Host) otherIdentityAllowed(ctx context.Context, a topology.AuthorizedStep, identities retirementIdentities,
+	grant topology.AuthorityGrant) error {
+	wanted, other := identities.wanted, identities.other
+	if wanted.NodeName != other.NodeName || wanted.ClusterID != other.ClusterID || wanted.GroupID != other.GroupID ||
+		other.ReplicaID == 0 {
 		return fault.ErrIdentityMismatch
 	}
 	if a.Kind == topology.StepDeleteGroupState {
-		targets, err := actionTargets(ctx, a, grant)
-		if err != nil {
-			return err
-		}
-		if !slices.Contains(targets, other) {
-			return fault.ErrIdentityMismatch
-		}
-		return nil
+		return deleteIdentityAllowed(ctx, a, other, grant)
 	}
 	_, err := h.cfg.Scope(ctx, other)
 	return err
 }
 
-func (h *Host) stopRetiringIdentity(ctx context.Context, id storage.Identity, a topology.AuthorizedStep, grant topology.AuthorityGrant) error {
+func deleteIdentityAllowed(ctx context.Context, a topology.AuthorizedStep, other storage.Identity,
+	grant topology.AuthorityGrant) error {
+	targets, err := actionTargets(ctx, a, grant)
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(targets, other) {
+		return fault.ErrIdentityMismatch
+	}
+	return nil
+}
+
+func (h *Host) stopRetiringIdentity(ctx context.Context, id storage.Identity, a topology.AuthorizedStep,
+	grant topology.AuthorityGrant) error {
 	h.mu.Lock()
 	slot := h.slots[id.GroupID]
 	released := slot != nil && slot.released
@@ -69,69 +96,108 @@ func (h *Host) stopRetiringIdentity(ctx context.Context, id storage.Identity, a 
 		return nil
 	}
 	if slot.identity != id {
-		return h.otherIdentityAllowed(ctx, a, id, slot.identity, grant)
+		return h.otherIdentityAllowed(ctx, a, retirementIdentities{id, slot.identity}, grant)
 	}
-	return h.stopReplica(ctx, load.ReplicaRef{GroupID: id.GroupID, ReplicaID: id.ReplicaID}, StopOperator)
+	return h.stopOwnedReplica(ctx, load.ReplicaRef{GroupID: id.GroupID, ReplicaID: id.ReplicaID}, StopOperator)
 }
 
-func (h *Host) checkedRetirementProbe(ctx context.Context, req load.RetirementRequest) (storage.Probe, error) {
-	probe, err := h.cfg.Store.Probe(ctx, req.Identity.GroupID)
+type retirementProbe struct {
+	store storage.Store
+	probe storage.Probe
+}
+
+func (h *Host) checkedRetirementProbe(ctx context.Context, req load.RetirementRequest) (retirementProbe, error) {
+	located, err := h.locate(ctx, req.Identity.GroupID)
+	store, probe := located.Store, located.Probe
 	if err != nil {
-		return probe, err
+		return retirementProbe{store: store, probe: probe}, err
 	}
 	if probe.Exists && probe.Identity != req.Identity {
-		err = h.otherIdentityAllowed(ctx, *req.Authorization, req.Identity, probe.Identity, req.Grant)
+		identities := retirementIdentities{req.Identity, probe.Identity}
+		err = h.otherIdentityAllowed(ctx, *req.Authorization, identities, req.Grant)
 	}
-	return probe, err
+	return retirementProbe{store: store, probe: probe}, err
 }
 
 func (h *Host) retire(ctx context.Context, req load.RetirementRequest) (load.RetirementResult, error) {
 	// Own the proof pointer before handing a distinct copy to application code.
-	req = cloneRetirement(req)
-	if err := h.retirementAuthority(ctx, req); err != nil {
+	cloned := cloneRetirement(req)
+	if err := h.prepareRetirement(ctx, cloned); err != nil {
 		return load.RetirementResult{}, err
+	}
+	if err := h.checkRetirementResources(ctx, cloned); err != nil {
+		return load.RetirementResult{}, err
+	}
+	if err := h.retireApplicationVerified(ctx, cloned); err != nil {
+		return load.RetirementResult{}, err
+	}
+	if err := h.finishRetirement(ctx, cloned); err != nil {
+		return load.RetirementResult{}, err
+	}
+	return retirementProof(cloned), nil
+}
+
+func (h *Host) prepareRetirement(ctx context.Context, req load.RetirementRequest) error {
+	if err := h.retirementAuthority(ctx, req); err != nil {
+		return err
 	}
 	if err := h.stopRetiringIdentity(ctx, req.Identity, *req.Authorization, req.Grant); err != nil {
-		return load.RetirementResult{}, err
+		return err
 	}
-	if err := h.retirementAuthority(ctx, req); err != nil {
-		return load.RetirementResult{}, err
-	}
+	return h.retirementAuthority(ctx, req)
+}
+
+func (h *Host) checkRetirementResources(ctx context.Context, req load.RetirementRequest) error {
 	if _, err := h.checkedRetirementProbe(ctx, req); err != nil {
-		return load.RetirementResult{}, err
+		return err
 	}
 	// A ledger is evidence, never permission to clean a different local identity.
-	if err := h.checkRetirementLedger(ctx, req, false); err != nil {
-		return load.RetirementResult{}, err
-	}
+	return h.checkRetirementLedger(ctx, req)
+}
+
+func (h *Host) retireApplicationVerified(ctx context.Context, req load.RetirementRequest) error {
 	result, err := h.callRetireApplication(ctx, req)
 	if err != nil {
-		return load.RetirementResult{}, err
+		return err
 	}
 	if !matchingRetirement(req, result) {
-		return load.RetirementResult{}, fault.ErrOperatorAuthorization
+		return fault.ErrOperatorAuthorization
 	}
+	return nil
+}
+
+func (h *Host) finishRetirement(ctx context.Context, req load.RetirementRequest) error {
 	if err := h.retirementAuthority(ctx, req); err != nil {
-		return load.RetirementResult{}, err
+		return err
 	}
-	probe, err := h.checkedRetirementProbe(ctx, req)
+	if err := h.quarantineRetirement(ctx, req); err != nil {
+		return err
+	}
+	if err := h.forgetRetirementLedger(ctx, req); err != nil {
+		return err
+	}
+	h.clearRetirementPark(req.Identity)
+	return nil
+}
+
+func (h *Host) quarantineRetirement(ctx context.Context, req load.RetirementRequest) error {
+	located, err := h.checkedRetirementProbe(ctx, req)
 	if err != nil {
-		return load.RetirementResult{}, err
+		return err
 	}
-	if probe.Exists && probe.Identity == req.Identity {
-		if _, err := h.cfg.Store.Quarantine(ctx, req.Identity.GroupID, req.Identity.ReplicaID); err != nil {
-			return load.RetirementResult{}, err
-		}
+	if located.probe.Exists && located.probe.Identity == req.Identity {
+		_, err = located.store.Quarantine(ctx, req.Identity.GroupID, req.Identity.ReplicaID)
+		return err
 	}
-	if err := h.checkRetirementLedger(ctx, req, true); err != nil {
-		return load.RetirementResult{}, err
-	}
+	return nil
+}
+
+func (h *Host) clearRetirementPark(identity storage.Identity) {
 	h.mu.Lock()
-	if parked, found := h.parked[req.Identity.GroupID]; found && parked.Identity == req.Identity {
-		delete(h.parked, req.Identity.GroupID)
+	if parked, found := h.parked[identity.GroupID]; found && parked.Identity == identity {
+		delete(h.parked, identity.GroupID)
 	}
 	h.mu.Unlock()
-	return retirementProof(req), nil
 }
 
 func (h *Host) callRetireApplication(ctx context.Context, req load.RetirementRequest) (load.RetirementResult, error) {
@@ -147,19 +213,32 @@ func (h *Host) callRetireApplication(ctx context.Context, req load.RetirementReq
 	return result, err
 }
 
-func (h *Host) checkRetirementLedger(ctx context.Context, req load.RetirementRequest, forget bool) error {
-	record, found, err := h.cfg.LookupRecord(ctx, req.Identity.GroupID)
-	if err != nil || !found {
+func (h *Host) checkRetirementLedger(ctx context.Context, req load.RetirementRequest) error {
+	_, err := h.retirementLedgerMatches(ctx, req)
+	return err
+}
+
+func (h *Host) forgetRetirementLedger(ctx context.Context, req load.RetirementRequest) error {
+	matches, err := h.retirementLedgerMatches(ctx, req)
+	if err != nil || !matches {
 		return err
 	}
-	id := storage.Identity{NodeName: record.NodeName, ClusterID: record.ClusterID, GroupID: req.Identity.GroupID, ReplicaID: record.ReplicaID}
+	return h.cfg.ForgetGrantedReplica(ctx, req.Grant, req.Identity.ReplicaID)
+}
+
+func (h *Host) retirementLedgerMatches(ctx context.Context, req load.RetirementRequest) (bool, error) {
+	record, err := h.cfg.LookupRecord(ctx, req.Identity.GroupID)
+	if err != nil || !record.Found {
+		return false, err
+	}
+	id := storage.Identity{
+		NodeName: record.Record.NodeName, ClusterID: record.Record.ClusterID,
+		GroupID: req.Identity.GroupID, ReplicaID: record.Record.ReplicaID,
+	}
 	if id != req.Identity {
-		return h.otherIdentityAllowed(ctx, *req.Authorization, req.Identity, id, req.Grant)
+		return false, h.otherIdentityAllowed(ctx, *req.Authorization, retirementIdentities{req.Identity, id}, req.Grant)
 	}
-	if forget {
-		return h.cfg.ForgetGrantedReplica(ctx, req.Grant, id.ReplicaID)
-	}
-	return nil
+	return true, nil
 }
 
 func cloneRetirement(req load.RetirementRequest) load.RetirementRequest {
@@ -170,18 +249,26 @@ func cloneRetirement(req load.RetirementRequest) load.RetirementRequest {
 	}
 	return req
 }
+
 func retirementProof(req load.RetirementRequest) load.RetirementResult {
-	owned := cloneRetirement(req)
-	return load.RetirementResult{Grant: owned.Grant, Identity: owned.Identity, Reason: owned.Reason, Authorization: owned.Authorization, AdmissionID: owned.AdmissionID, PreviousMemberID: owned.PreviousMemberID, GrantedMemberID: owned.GrantedMemberID, Verified: true}
+	return req.Result()
 }
+
 func matchingRetirement(req load.RetirementRequest, result load.RetirementResult) bool {
-	if !result.Grant.Equal(req.Grant) || !result.Verified || result.Identity != req.Identity || result.Reason != req.Reason || result.AdmissionID != req.AdmissionID || result.PreviousMemberID != req.PreviousMemberID || result.GrantedMemberID != req.GrantedMemberID {
+	grantMatches := result.Grant.Equal(req.Grant)
+	if !grantMatches || !result.Verified || result.Identity != req.Identity ||
+		result.Reason != req.Reason || result.AdmissionID != req.AdmissionID ||
+		result.PreviousMemberID != req.PreviousMemberID || result.GrantedMemberID != req.GrantedMemberID {
 		return false
 	}
-	if req.Authorization == nil || result.Authorization == nil {
-		return req.Authorization == nil && result.Authorization == nil
+	return matchingRetirementAuthorization(req.Authorization, result.Authorization)
+}
+
+func matchingRetirementAuthorization(requested, returned *topology.AuthorizedStep) bool {
+	if requested == nil || returned == nil {
+		return requested == nil && returned == nil
 	}
-	return *req.Authorization == *result.Authorization
+	return *requested == *returned
 }
 
 func (h *Host) collectLoop(ctx context.Context) {
@@ -199,19 +286,43 @@ func (h *Host) collectLoop(ctx context.Context) {
 	}
 }
 
-func (h *Host) CollectRetired(ctx context.Context) error {
-	ctx, done, err := h.beginWork(ctx)
+// CollectRetired checks local retirement records and collects those permitted
+// by verified retention decisions.
+func (h *Host) CollectRetired(parent context.Context) error {
+	ctxHandle, err := h.beginWork(parent)
+	ctx, done := ctxHandle.Context, ctxHandle.Release
 	if err != nil {
 		return err
 	}
 	defer done()
-	probe, cancel := context.WithTimeout(ctx, h.cfg.EffectTimeout)
-	records, err := h.cfg.Retirement.Retired(probe)
-	cancel()
-	if err != nil {
-		return err
-	}
+	return h.collectRetiredStores(ctx)
+}
+
+func (h *Host) collectRetiredStores(ctx context.Context) error {
 	var failures []error
+	// Each record is collected through the store that enumerated it.
+	for _, retirement := range h.retirementStores() {
+		records, err := h.retiredRecords(ctx, retirement)
+		if err != nil {
+			return err
+		}
+		if err := h.collectRetiredRecords(ctx, retirement, records, &failures); err != nil {
+			return err
+		}
+	}
+	return errors.Join(failures...)
+}
+
+func (h *Host) retiredRecords(ctx context.Context,
+	retirement storage.RetirementStore) ([]storage.RetiredReplica, error) {
+	probe, cancel := context.WithTimeout(ctx, h.cfg.EffectTimeout)
+	records, err := retirement.Retired(probe)
+	cancel()
+	return records, err
+}
+
+func (h *Host) collectRetiredRecords(ctx context.Context, retirement storage.RetirementStore,
+	records []storage.RetiredReplica, failures *[]error) error {
 	for _, record := range records {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -220,62 +331,106 @@ func (h *Host) CollectRetired(ctx context.Context) error {
 		if record.Identity.NodeName != own.NodeName || record.Identity.ClusterID != own.ClusterID {
 			continue
 		}
-		if err := h.collectOne(ctx, record); err != nil {
-			failures = append(failures, err)
-			if h.cfg.Events != nil {
-				h.cfg.Events.Publish(events.Event{Type: events.RuntimeError, NodeName: own.NodeName, ClusterID: own.ClusterID, InstanceID: own.InstanceID, GroupID: record.Identity.GroupID, ReplicaID: record.Identity.ReplicaID, Code: "retention_failed"})
-			}
+		if err := h.collectOne(ctx, retirement, record); err != nil {
+			*failures = append(*failures, err)
+			h.publishRetentionFailure(own, record)
 		}
 	}
-	return errors.Join(failures...)
+	return nil
 }
 
-func (h *Host) collectOne(parent context.Context, record storage.RetiredReplica) error {
+func (h *Host) publishRetentionFailure(own topology.Identity, record storage.RetiredReplica) {
+	if h.cfg.Events != nil {
+		h.cfg.Events.Publish(events.Event{
+			Type: events.RuntimeError, NodeName: own.NodeName, ClusterID: own.ClusterID,
+			InstanceID: own.InstanceID, GroupID: record.Identity.GroupID, ReplicaID: record.Identity.ReplicaID,
+			Code: "retention_failed",
+		})
+	}
+}
+
+func (h *Host) collectOne(parent context.Context, retirement storage.RetirementStore,
+	record storage.RetiredReplica) error {
 	ctx, cancel := context.WithTimeout(parent, h.cfg.EffectTimeout)
 	defer cancel()
-	ctx, done, err := h.beginOperation(ctx, record.Identity.GroupID)
+	ctxHandle, err := h.beginOperation(ctx, record.Identity.GroupID)
+	ctx, done := ctxHandle.Context, ctxHandle.Release
 	if err != nil {
 		return err
 	}
 	defer done()
-	select {
-	case h.retentionGate <- struct{}{}:
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	call, stop := context.WithTimeout(ctx, h.cfg.CallbackTimeout)
-	decision, err := h.cfg.Retention(call, policy.RetentionInput{Now: time.Now().UTC(), Retired: record})
-	if err == nil {
-		err = call.Err()
-	}
-	stop()
-	<-h.retentionGate
+	return h.collectRetiredReplica(ctx, retirement, record)
+}
+
+func (h *Host) collectRetiredReplica(ctx context.Context, retirement storage.RetirementStore,
+	record storage.RetiredReplica) error {
+	decision, err := h.retentionDecision(ctx, record)
 	if err != nil {
 		return err
 	}
 	if !decision.Collect || time.Now().Before(decision.NotBefore) {
 		return nil
 	}
+	if err := h.checkRetiredCollection(ctx, record.Identity); err != nil {
+		return err
+	}
+	return retirement.Collect(ctx, record)
+}
+
+func (h *Host) retentionDecision(ctx context.Context,
+	record storage.RetiredReplica) (lifecycle.RetentionDecision, error) {
+	select {
+	case h.retentionGate <- struct{}{}:
+	case <-ctx.Done():
+		return lifecycle.RetentionDecision{}, ctx.Err()
+	}
+	call, stop := context.WithTimeout(ctx, h.cfg.CallbackTimeout)
+	decision, err := h.cfg.Retention(call, lifecycle.RetentionInput{Now: time.Now().UTC(), Retired: record})
+	if err == nil {
+		err = call.Err()
+	}
+	stop()
+	<-h.retentionGate
+	return decision, err
+}
+
+func (h *Host) checkRetiredCollection(ctx context.Context, identity storage.Identity) error {
+	if h.retiredReplicaLive(identity) {
+		return fault.ErrReplicaNotReady
+	}
+	if err := h.checkCollectionLedger(ctx, identity); err != nil {
+		return err
+	}
+	return h.checkCollectionStorage(ctx, identity)
+}
+
+func (h *Host) retiredReplicaLive(identity storage.Identity) bool {
 	h.mu.Lock()
-	slot := h.slots[record.Identity.GroupID]
-	live := slot != nil && slot.identity == record.Identity && !slot.released
+	slot := h.slots[identity.GroupID]
+	live := slot != nil && slot.identity == identity && !slot.released
 	h.mu.Unlock()
-	if live {
-		return fault.ErrReplicaNotReady
-	}
-	ledger, found, err := h.cfg.LookupRecord(ctx, record.Identity.GroupID)
+	return live
+}
+
+func (h *Host) checkCollectionLedger(ctx context.Context, identity storage.Identity) error {
+	ledger, err := h.cfg.LookupRecord(ctx, identity.GroupID)
 	if err != nil {
 		return err
 	}
-	if found && ledger.ReplicaID == record.Identity.ReplicaID {
+	if ledger.Found && ledger.Record.ReplicaID == identity.ReplicaID {
 		return fault.ErrReplicaNotReady
 	}
-	probe, err := h.cfg.Store.Probe(ctx, record.Identity.GroupID)
+	return nil
+}
+
+func (h *Host) checkCollectionStorage(ctx context.Context, identity storage.Identity) error {
+	located, err := h.locate(ctx, identity.GroupID)
+	probe := located.Probe
 	if err != nil {
 		return err
 	}
-	if probe.Exists && probe.Identity == record.Identity {
+	if probe.Exists && probe.Identity == identity {
 		return fault.ErrReplicaNotReady
 	}
-	return h.cfg.Retirement.Collect(ctx, record)
+	return nil
 }

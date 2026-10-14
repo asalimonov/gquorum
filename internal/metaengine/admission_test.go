@@ -318,77 +318,48 @@ func TestAdmission_DifferentInstanceCannotReusePreparedMemberID(t *testing.T) {
 	requireAdmissionState(t, sm, admission.InstanceID, AdmissionReady)
 }
 
-func TestBuildReadmissionPlan_ShrinksBeforeLearnerFirstReplacementAtMaximum(t *testing.T) {
+func TestBuildReadmissionPlanReleasesOldSeatAtNativeLimit(t *testing.T) {
 	t.Parallel()
-	for _, count := range []int{3, 5, 7} {
-		t.Run(fmt.Sprint(count), func(t *testing.T) {
-			rules := topology.Rules{SchemaVersion: 1, Limits: topology.Limits{MaxNodes: count, MaxReplicas: 5}}
-
-			nodes := make([]topology.Node, 0, rules.Limits.MaxNodes)
-			metaReplicas := make([]topology.Replica, 0, rules.Limits.MaxNodes)
-			for i := 1; i <= rules.Limits.MaxNodes; i++ {
-				name := fmt.Sprintf("n%d", i)
-				nodes = append(nodes, topology.Node{Name: name, Type: "worker", State: topology.NodeActive})
-				metaReplicas = append(metaReplicas, topology.Replica{NodeName: name, ReplicaID: uint64(i), Role: topology.ReplicaVoter})
+	active := convergedAuthorityFixture(t).active
+	desired, err := buildReadmissionDocument(active, "n3", time.Date(2026, 7, 16, 13, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := topology.Rules{SchemaVersion: 1, Limits: topology.Limits{MaxNodes: 3, MaxReplicas: 5}}
+	plan, err := topology.BuildPlan(active, desired, assumedReadmissionStatuses(active, "n3"), rules)
+	if err != nil {
+		t.Fatal("safe same-host readmission at native capacity was refused", err)
+	}
+	for _, groupID := range []string{topology.MetaGroupID} {
+		var removed, prepared int
+		for _, step := range plan.Steps {
+			if step.GroupID != groupID {
+				continue
 			}
-			active := topology.Document{
-				Version: 9, ClusterID: "cluster-max", ChangedBy: "operator",
-				Placement: topology.PlacementRule{MinReplicas: 1, MaxReplicas: 3}, Nodes: nodes,
-				Groups: []topology.Group{
-					{ID: topology.MetaGroupID, NextReplicaID: uint64(rules.Limits.MaxNodes + 1), Replicas: metaReplicas},
-					{ID: "shard0", NextReplicaID: 4, Replicas: []topology.Replica{
-						{NodeName: "n1", ReplicaID: 1, Role: topology.ReplicaVoter},
-						{NodeName: "n2", ReplicaID: 2, Role: topology.ReplicaVoter},
-						{NodeName: "n3", ReplicaID: 3, Role: topology.ReplicaVoter},
-					}},
-				},
+			if step.Kind == topology.StepRemoveReplica && step.NodeName == "n3" {
+				removed = step.Seq
 			}
-			desired, err := buildReadmissionDocument(active, "n3", time.Date(2026, 7, 16, 13, 0, 0, 0, time.UTC))
-			if err != nil {
-				t.Fatalf("buildReadmissionDocument: %v", err)
+			if step.Kind == topology.StepPrepareReplica && step.NodeName == "n3" {
+				prepared = step.Seq
 			}
-			plan, err := topology.BuildPlan(active, desired, assumedReadmissionStatuses(active, "n3"), rules)
-			if err != nil {
-				t.Fatalf("BuildPlan: %v", err)
-			}
-			for _, groupID := range []string{topology.MetaGroupID, "shard0"} {
-				oldID := active.Group(groupID).Replicas[2].ReplicaID
-				newID := desired.Group(groupID).Replicas[2].ReplicaID
-				indices := map[topology.StepKind]int{}
-				for i, step := range plan.Steps {
-					if step.GroupID != groupID {
-						continue
-					}
-					if step.ReplicaID == oldID && step.Kind == topology.StepRemoveReplica {
-						indices[step.Kind] = i
-					}
-					if step.ReplicaID == newID {
-						switch step.Kind {
-						case topology.StepPrepareReplica, topology.StepAddLearner, topology.StepPromoteVoter:
-							indices[step.Kind] = i
-						}
-					}
-				}
-				if indices[topology.StepRemoveReplica] >= indices[topology.StepPrepareReplica] ||
-					indices[topology.StepPrepareReplica] >= indices[topology.StepAddLearner] ||
-					indices[topology.StepAddLearner] >= indices[topology.StepPromoteVoter] {
-					t.Fatalf("group %s replacement is not shrink-first then learner-first: %+v (plan=%+v)", groupID, indices, plan.Steps)
-				}
-			}
-		})
+		}
+		if removed == 0 || prepared <= removed {
+			t.Fatalf("%s reused a full native seat before removing its old identity: %+v", groupID, plan)
+		}
 	}
 }
 
 func assumedReadmissionStatuses(active topology.Document, returningNode string) map[string]topology.GroupStatus {
 	statuses := make(map[string]topology.GroupStatus, len(active.Groups))
 	for _, group := range active.Groups {
-		status := topology.GroupStatus{GroupID: group.ID, Found: true, Commit: 1}
+		status := topology.GroupStatus{GroupID: group.ID, Found: true, Commit: 1, HealthKnown: true, LiveVoters: make(map[uint64]bool)}
 		for _, replica := range group.Replicas {
 			switch replica.Role {
 			case topology.ReplicaLearner:
 				status.ConfState.Learners = append(status.ConfState.Learners, replica.ReplicaID)
 			case topology.ReplicaVoter:
 				status.ConfState.Voters = append(status.ConfState.Voters, replica.ReplicaID)
+				status.LiveVoters[replica.ReplicaID] = replica.NodeName != returningNode
 				if status.LeaderID == 0 && replica.NodeName != returningNode {
 					status.LeaderID = replica.ReplicaID
 				}

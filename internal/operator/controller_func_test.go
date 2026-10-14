@@ -84,7 +84,7 @@ type controllerCoordinator struct {
 	operator      Record
 	hasOperator   bool
 	transitionErr error
-	transitions   []OperatorTransition
+	transitions   []Transition
 	grants        map[AuthorizedStep]topology.AuthorityGrant
 	receipts      map[topology.AuthorityKey][]topology.EffectReceipt
 	reconcileErr  error
@@ -97,7 +97,7 @@ func (c *controllerCoordinator) IsMetaLeader() bool {
 	defer c.mu.Unlock()
 	return c.leader
 }
-func (c *controllerCoordinator) BeginOperator(_ context.Context, version uint64, plan Plan) (OperatorID, error) {
+func (c *controllerCoordinator) BeginOperator(_ context.Context, version uint64, plan Plan) (ID, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.hasOperator && c.operator.Version == version && !c.operator.State.Terminal() {
@@ -108,7 +108,7 @@ func (c *controllerCoordinator) BeginOperator(_ context.Context, version uint64,
 		attempt = c.operator.Attempt + 1
 	}
 	c.operator = Record{
-		ID: OperatorIDFor(version, attempt), Version: version, Attempt: attempt,
+		ID: IDFor(version, attempt), Version: version, Attempt: attempt,
 		State: OperatorPending, Steps: append([]Step(nil), plan.Steps...),
 	}
 	c.hasOperator = true
@@ -117,14 +117,14 @@ func (c *controllerCoordinator) BeginOperator(_ context.Context, version uint64,
 	c.store.mu.Unlock()
 	return c.operator.ID, nil
 }
-func (_ *controllerCoordinator) CommitRepairOperator(context.Context, Document, uint64, Plan) (Document, OperatorID, error) {
+func (_ *controllerCoordinator) CommitRepairOperator(context.Context, Document, uint64, Plan) (Document, ID, error) {
 	return Document{}, "", ErrNotImplemented
 }
-func (c *controllerCoordinator) Operator(_ context.Context, id OperatorID) (OperatorStatus, bool) {
+func (c *controllerCoordinator) Operator(_ context.Context, id ID) (Status, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.hasOperator || c.operator.ID != id {
-		return OperatorStatus{}, false
+		return Status{}, false
 	}
 	return operatorStatusFromRecord(c.operator), true
 }
@@ -133,7 +133,7 @@ func (c *controllerCoordinator) CurrentOperator(context.Context) (Record, bool) 
 	defer c.mu.Unlock()
 	return cloneOperator(c.operator), c.hasOperator
 }
-func (c *controllerCoordinator) RecordOperatorTransition(_ context.Context, transition OperatorTransition) error {
+func (c *controllerCoordinator) RecordOperatorTransition(_ context.Context, transition Transition) error {
 	c.mu.Lock()
 	if c.transitionErr != nil {
 		err := c.transitionErr
@@ -170,8 +170,8 @@ func cloneOperator(in Record) Record {
 	return in
 }
 
-func operatorStatusFromRecord(in Record) OperatorStatus {
-	return OperatorStatus{
+func operatorStatusFromRecord(in Record) Status {
+	return Status{
 		ID: in.ID, Version: in.Version, Attempt: in.Attempt, State: in.State,
 		CurrentStep: in.CurrentStep, TotalSteps: len(in.Steps),
 		GroupID: in.GroupID, NodeName: in.NodeName, WaitingReason: in.WaitingReason, Error: in.Error,
@@ -421,11 +421,11 @@ func (t *fakeControllerTimer) snapshot() ([]time.Duration, bool) {
 	return append([]time.Duration(nil), t.resets...), t.stopped
 }
 
-func newControllerFixture(active, target Document, steps []Step, current int, state OperatorState) *controllerFixture {
+func newControllerFixture(active, target Document, steps []Step, current int, state State) *controllerFixture {
 	store := &controllerStore{latest: target.Clone(), target: target.Clone(), active: active.Clone()}
 	coord := &controllerCoordinator{leader: true, store: store, hasOperator: true}
 	coord.operator = Record{
-		ID: OperatorIDFor(target.Version, 1), Version: target.Version, Attempt: 1,
+		ID: IDFor(target.Version, 1), Version: target.Version, Attempt: 1,
 		State: state, Steps: append([]Step(nil), steps...), CurrentStep: current,
 	}
 	groups := &controllerGroups{store: store, statuses: map[string]GroupStatus{}, errs: map[string]error{}}
@@ -458,7 +458,7 @@ func TestController_LearnerFirstSteps(t *testing.T) {
 		name    string
 		steps   []Step
 		current int
-		state   OperatorState
+		state   State
 		status  GroupStatus
 		want    StepKind
 		wantSeq int
@@ -832,7 +832,7 @@ func TestController_FailoverResumesExactStep(t *testing.T) {
 		name      string
 		steps     []Step
 		wantCalls int
-		wantState OperatorState
+		wantState State
 		wantStep  int
 	}{
 		{
@@ -935,7 +935,7 @@ func TestController_SupersedesOnlyAtStepBoundary(t *testing.T) {
 		f.store.mu.Unlock()
 		f.coord.mu.Lock()
 		f.coord.operator = Record{
-			ID: OperatorIDFor(3, 1), Version: 3, Attempt: 1, State: OperatorPending,
+			ID: IDFor(3, 1), Version: 3, Attempt: 1, State: OperatorPending,
 			Steps: []Step{{Seq: 1, Kind: StepWaitCaughtUp, GroupID: "shard0", NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}},
 		}
 		f.coord.mu.Unlock()
@@ -943,7 +943,7 @@ func TestController_SupersedesOnlyAtStepBoundary(t *testing.T) {
 		<-done
 
 		ex, _ := f.coord.CurrentOperator(context.Background())
-		assert.Equal(t, OperatorIDFor(3, 1), ex.ID)
+		assert.Equal(t, IDFor(3, 1), ex.ID)
 		assert.Equal(t, OperatorPending, ex.State)
 		assert.Zero(t, ex.CurrentStep)
 		assert.Equal(t, []StepKind{StepAddLearner}, f.groups.calls)
@@ -978,6 +978,39 @@ func TestController_ResumePreservesDurableWaiting(t *testing.T) {
 	ex, _ = f.coord.CurrentOperator(context.Background())
 	assert.Equal(t, OperatorRunning, ex.State)
 	assert.Equal(t, 2, ex.CurrentStep)
+}
+
+func TestControllerRechecksPreparatoryLearnerBeforeDestruction(t *testing.T) {
+	t.Parallel()
+	active := clusterDoc(1, 3, []string{"n1", "n2", "n3"}, []string{"shard0"})
+	active.Group("shard0").Replicas[1].Role = ReplicaLearner
+	target := active.Clone()
+	target.Version = 2
+	target.Group("shard0").Replicas[1].Role = ReplicaVoter
+	target.Group("shard0").Replicas = target.Group("shard0").Replicas[:2]
+	steps := []Step{
+		{Seq: 1, Kind: StepWaitCaughtUp, GroupID: "shard0", NodeName: "n2", ReplicaID: 2},
+		{Seq: 2, Kind: StepRemoveReplica, GroupID: "shard0", NodeName: "n3", ReplicaID: 3},
+		{Seq: 3, Kind: StepStopReplica, GroupID: "shard0", NodeName: "n3", ReplicaID: 3},
+		{Seq: 4, Kind: StepCleanupReplicaState, GroupID: "shard0", NodeName: "n3", ReplicaID: 3},
+		{Seq: 5, Kind: StepWaitCaughtUp, GroupID: "shard0", NodeName: "n2", ReplicaID: 2},
+		{Seq: 6, Kind: StepPromoteVoter, GroupID: "shard0", NodeName: "n2", ReplicaID: 2},
+	}
+	f := newControllerFixture(active, target, steps, 2, OperatorRunning)
+	status := statusFor("shard0", []uint64{1, 3}, []uint64{2}, 1)
+	status.Progress[2] = ReplicaProgress{Match: 1, RecentActive: false}
+	if err := f.engine.validateStep(t.Context(), f.coord.operator, stepValidationInput{active, target, steps[1], status}); !errors.Is(err, ErrReplicaNotReady) {
+		t.Fatalf("stale preparatory wait authorized destruction: %v", err)
+	}
+	status.Progress[2] = ReplicaProgress{Match: status.Commit, RecentActive: true}
+	if err := f.engine.validateStep(t.Context(), f.coord.operator, stepValidationInput{active, target, steps[1], status}); err != nil {
+		t.Fatalf("freshly caught-up learner blocked destruction: %v", err)
+	}
+	status.ConfState.Voters = []uint64{1} // exact already-applied removal does not need an old prerequisite
+	status.Progress[2] = ReplicaProgress{Match: 1, RecentActive: false}
+	if err := f.engine.validateStep(t.Context(), f.coord.operator, stepValidationInput{active, target, steps[1], status}); err != nil {
+		t.Fatalf("completed removal demanded obsolete readiness: %v", err)
+	}
 }
 
 func TestController_ResumeMixedPlaneOwnership(t *testing.T) {
@@ -1177,7 +1210,7 @@ type blockingControllerCoordinator struct {
 	sawErr  chan error
 }
 
-func (c *blockingControllerCoordinator) RecordOperatorTransition(ctx context.Context, _ OperatorTransition) error {
+func (c *blockingControllerCoordinator) RecordOperatorTransition(ctx context.Context, _ Transition) error {
 	select {
 	case c.entered <- struct{}{}:
 	default:

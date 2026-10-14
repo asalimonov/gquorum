@@ -6,11 +6,14 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
+// AuthorityFloorsForNode returns sorted owned grants for a node's current
+// host-resource floors.
 func (m *Machine) AuthorityFloorsForNode(node string) []topology.AuthorityGrant {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.authorityFloorsLocked(node)
 }
+
 func (sm *topologySM) authorityFloorsLocked(node string) []topology.AuthorityGrant {
 	var grants []topology.AuthorityGrant
 	for resource, key := range sm.authority.floors {
@@ -30,7 +33,8 @@ type AuthorityProof struct {
 	Receipts []topology.EffectReceipt `json:"receipts,omitempty"`
 	// CleanupTargets have exact retained cleanup authority and are absent from
 	// approved Target in the same safe query. The receiver still owns its local
-	// resource gate and must compare the durable ledger identity before deletion.
+	// resource gate and must compare the durable ledger identity before
+	// deletion.
 	CleanupTargets []topology.AuthorityTarget `json:"cleanup_targets,omitempty"`
 	ReleasedHosts  []topology.AuthorityTarget `json:"released_hosts,omitempty"`
 }
@@ -40,28 +44,42 @@ type AuthorityProof struct {
 // inherited revocations and nonoperator authority outside that operator cursor.
 func (sm *topologySM) hostReleasedLocked(record *authorityRecord, target topology.AuthorityTarget) bool {
 	grant := record.Grant
-	if grant.Key.GroupID != topology.MetaGroupID || grant.Action == nil || grant.Action.Kind != topology.StepStopReplica || target.ReplicaID != target.MemberID ||
-		sm.active.Version == 0 || sm.active.Version != sm.target.Version || sm.target.MemberID(target.NodeName) == target.MemberID || sm.active.MemberID(target.NodeName) == target.MemberID {
+	if grant.Key.GroupID != topology.MetaGroupID || grant.Action == nil ||
+		grant.Action.Kind != topology.StepStopReplica || target.ReplicaID != target.MemberID ||
+		sm.active.Version == 0 || sm.active.Version != sm.target.Version ||
+		sm.target.MemberID(target.NodeName) == target.MemberID ||
+		sm.active.MemberID(target.NodeName) == target.MemberID {
 		return false
 	}
-	host := topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: topology.MetaGroupID, NodeName: target.NodeName}
-	if !slices.ContainsFunc(record.Effects, func(receipt topology.EffectReceipt) bool { return receipt.Resource == host && receipt.Target == target }) {
+	host := topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: topology.MetaGroupID,
+		NodeName: target.NodeName}
+	if !slices.ContainsFunc(record.Effects,
+		func(receipt topology.EffectReceipt) bool { return receipt.Resource == host && receipt.Target == target }) {
 		return false
 	}
-	for _, candidate := range sm.authority.records {
+	return sm.authority.hostResourcesSettled(target)
+}
+
+func (a authorityCatalog) hostResourcesSettled(target topology.AuthorityTarget) bool {
+	for _, candidate := range a.records {
 		if !slices.ContainsFunc(candidate.Grant.Targets, func(t topology.AuthorityTarget) bool {
 			return t.NodeName == target.NodeName && t.MemberID == target.MemberID
 		}) {
 			continue
 		}
-		resource := topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: candidate.Grant.Key.GroupID, NodeName: target.NodeName}
+		resource := topology.AuthorityResource{
+			Kind:     topology.AuthorityHost,
+			GroupID:  candidate.Grant.Key.GroupID,
+			NodeName: target.NodeName,
+		}
 		if !slices.Contains(candidate.Grant.Resources, resource) {
 			continue
 		}
-		if candidate.Grant.Purpose == topology.AuthorityFence && sm.authority.fenceConsumed(candidate.Grant.Key, resource) {
+		if candidate.Grant.Purpose == topology.AuthorityFence &&
+			a.fenceConsumed(candidate.Grant.Key, resource) {
 			continue
 		}
-		if !sm.authority.resourceSettled(candidate, resource) {
+		if !a.resourceSettled(candidate, resource) {
 			return false
 		}
 	}

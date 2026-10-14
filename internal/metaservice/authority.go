@@ -11,13 +11,31 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
+// BeginEffect requests immutable replicated authority for an exact approved
+// step.
 func (g *Group) BeginEffect(ctx context.Context, action topology.AuthorizedStep) (topology.AuthorityGrant, error) {
 	result, err := g.propose(ctx, metaengine.BeginEffectProposal{Action: action})
 	if err != nil {
 		return topology.AuthorityGrant{}, err
 	}
-	if result.Grant == nil || result.Grant.Action == nil || *result.Grant.Action != action || result.Grant.Validate() != nil {
+	if result.Grant == nil || result.Grant.Action == nil || *result.Grant.Action != action ||
+		result.Grant.Validate() != nil {
 		return topology.AuthorityGrant{}, fault.ErrUnreadable
+	}
+	// Election can precede activation after a retained restart. Wait until the
+	// replicated routing identity names this process before sending effects:
+	// receivers must reject a courier still bound to the former instance. The
+	// grant remains durable and the same operator step can safely retry it.
+	id := g.Identity()
+	proof, err := g.readAuthorityProof(ctx, result.Grant.Key, id.NodeName)
+	if err != nil {
+		return topology.AuthorityGrant{}, err
+	}
+	if proof.Grant == nil || !proof.Grant.Equal(*result.Grant) {
+		return topology.AuthorityGrant{}, fault.ErrOperatorAuthorization
+	}
+	if proof.Courier != id {
+		return topology.AuthorityGrant{}, fault.ErrReplicaNotReady
 	}
 	return result.Grant.Clone(), nil
 }
@@ -25,11 +43,12 @@ func (g *Group) BeginEffect(ctx context.Context, action topology.AuthorizedStep)
 // ValidateGrant accepts retained committed records, including closed grants.
 // Resource owners decide whether execution is still allowed at their installed
 // fence. A local miss takes a safe read; missing/future grants never authorize.
-func (g *Group) ValidateGrant(ctx context.Context, grant topology.AuthorityGrant) error {
+func (g *Group) ValidateGrant(parent context.Context, grant topology.AuthorityGrant) error {
 	if err := grant.Validate(); err != nil {
 		return err
 	}
-	ctx, release, err := g.beginRPC(ctx)
+	ctxHandle, err := g.beginRPC(parent)
+	ctx, release := ctxHandle.Context, ctxHandle.Release
 	if err != nil {
 		return err
 	}
@@ -53,27 +72,34 @@ func (g *Group) ValidateGrant(ctx context.Context, grant topology.AuthorityGrant
 	return nil
 }
 
-func (g *Group) ReadGrant(ctx context.Context, key topology.AuthorityKey) (topology.AuthorityGrant, bool, error) {
+// ReadGrant confirms and validates a retained grant for an exact authority key.
+func (g *Group) ReadGrant(ctx context.Context, key topology.AuthorityKey) (topology.AuthorityGrantLookup, error) {
 	var grant *topology.AuthorityGrant
 	err := g.readControl(ctx, metaengine.QueryRequest{Kind: "authority_grant", AuthorityKey: &key}, &grant)
 	if err != nil || grant == nil {
-		return topology.AuthorityGrant{}, false, err
+		return topology.AuthorityGrantLookup{}, err
 	}
 	if grant.Key != key || grant.Validate() != nil {
-		return topology.AuthorityGrant{}, false, fault.ErrUnreadable
+		return topology.AuthorityGrantLookup{}, fault.ErrUnreadable
 	}
-	return grant.Clone(), true, nil
+	return topology.AuthorityGrantLookup{Grant: grant.Clone(), Found: true}, nil
 }
 
+// RecordFence proposes durable resource fence installation evidence to meta
+// consensus.
 func (g *Group) RecordFence(ctx context.Context, evidence topology.FenceEvidence) error {
 	_, err := g.propose(ctx, metaengine.RecordFenceProposal{Evidence: evidence})
 	return err
 }
+
+// RecordEffect proposes exact durable effect consumption evidence to meta
+// consensus.
 func (g *Group) RecordEffect(ctx context.Context, receipt topology.EffectReceipt) error {
 	_, err := g.propose(ctx, metaengine.RecordEffectProposal{Receipt: receipt.Clone()})
 	return err
 }
 
+// EffectReceipts reads retained completion receipts for an exact grant.
 func (g *Group) EffectReceipts(ctx context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
 	if err := g.ensureRunning(ctx); err != nil {
 		return nil, err
@@ -84,7 +110,8 @@ func (g *Group) EffectReceipts(ctx context.Context, grant topology.AuthorityGran
 // ResolveAuthorityPeer uses the retained grant as durable identity evidence.
 // Cleanup can outlive the current topology catalog, but may never be redirected
 // to a successor member sharing the old node name.
-func (g *Group) ResolveAuthorityPeer(ctx context.Context, grant topology.AuthorityGrant, target topology.AuthorityTarget) (load.Peer, error) {
+func (g *Group) ResolveAuthorityPeer(ctx context.Context, grant topology.AuthorityGrant,
+	target topology.AuthorityTarget) (load.Peer, error) {
 	if err := g.ValidateGrant(ctx, grant); err != nil {
 		return load.Peer{}, err
 	}
@@ -99,23 +126,31 @@ func (g *Group) ResolveAuthorityPeer(ctx context.Context, grant topology.Authori
 			return load.Peer{}, err
 		}
 	}
-	if id.ClusterID != grant.Key.ClusterID || id.NodeName != target.NodeName || id.MemberID != target.MemberID || id.InstanceID == "" {
+	if id.ClusterID != grant.Key.ClusterID || id.NodeName != target.NodeName || id.MemberID != target.MemberID ||
+		id.InstanceID == "" {
 		return load.Peer{}, fault.ErrIdentityMismatch
 	}
 	return load.Peer{Node: id, Replica: load.ReplicaRef{GroupID: grant.Key.GroupID, ReplicaID: target.ReplicaID}}, nil
 }
+
+// ReadAuthorityFloors reads current host-resource grant floors for a named
+// node.
 func (g *Group) ReadAuthorityFloors(ctx context.Context, node string) ([]topology.AuthorityGrant, error) {
 	var floors []topology.AuthorityGrant
 	err := g.readControl(ctx, metaengine.QueryRequest{Kind: "authority_floors", Key: node}, &floors)
 	return floors, err
 }
+
+// ReadAuthority performs a confirmed query of an operator's revocation
+// obligations.
 func (g *Group) ReadAuthority(ctx context.Context, id topology.OperatorID) (topology.AuthorityStatus, error) {
 	var result topology.AuthorityStatus
 	err := g.read(ctx, metaengine.QueryRequest{Kind: "authority", OperatorID: id}, &result)
 	return result, err
 }
 
-// WaitRevoked returns only a durably completed requested revocation. A currently
+// WaitRevoked returns only a durably completed requested revocation. A
+// currently
 // empty prerequisite list is not proof that revocation was ever requested.
 func (g *Group) WaitRevoked(ctx context.Context, id topology.OperatorID) (topology.AuthorityStatus, error) {
 	tick := time.NewTicker(20 * time.Millisecond)
@@ -136,10 +171,12 @@ func (g *Group) WaitRevoked(ctx context.Context, id topology.OperatorID) (topolo
 	}
 }
 
-// InstallFence is also the generic meta-protocol receiver. Host requests need no
+// InstallFence is also the generic meta-protocol receiver. Host requests need
+// no
 // running load handle; group requests still name one exact local replica.
-func (g *Group) InstallFence(ctx context.Context, request load.FenceRequest) (load.FenceResult, error) {
-	ctx, release, err := g.beginRPC(ctx)
+func (g *Group) InstallFence(parent context.Context, request load.FenceRequest) (load.FenceResult, error) {
+	ctxHandle, err := g.beginRPC(parent)
+	ctx, release := ctxHandle.Context, ctxHandle.Release
 	if err != nil {
 		return load.FenceResult{}, err
 	}
@@ -152,36 +189,43 @@ func (g *Group) InstallFence(ctx context.Context, request load.FenceRequest) (lo
 			return load.FenceResult{}, err
 		}
 	}
-	if request.To != id || request.From.ClusterID != request.To.ClusterID || request.Grant.Key.ClusterID != request.To.ClusterID {
+	if request.To != id || request.From.ClusterID != request.To.ClusterID ||
+		request.Grant.Key.ClusterID != request.To.ClusterID {
 		return load.FenceResult{}, fault.ErrIdentityMismatch
 	}
 	if err := g.ValidateAuthorityCourier(ctx, request.Grant, request.From); err != nil {
 		return load.FenceResult{}, err
 	}
-	if !slices.Contains(request.Grant.Resources, request.Resource) || request.Resource.GroupID != request.Grant.Key.GroupID {
+	if request.Resource.GroupID != request.Grant.Key.GroupID ||
+		!slices.Contains(request.Grant.Resources, request.Resource) {
 		return load.FenceResult{}, fault.ErrOperatorAuthorization
 	}
 	if request.Resource.Kind == topology.AuthorityGroup && request.Resource.GroupID == topology.MetaGroupID {
-		if request.ReplicaID != request.To.MemberID {
-			return load.FenceResult{}, fault.ErrIdentityMismatch
-		}
-		ctx, done, err := g.beginEffect(ctx)
-		if err != nil {
-			return load.FenceResult{}, err
-		}
-		defer done()
-		engine := g.engine.Load()
-		if engine == nil {
-			return load.FenceResult{}, fault.ErrReplicaNotReady
-		}
-		evidence, err := engine.InstallAuthority(ctx, request.Grant)
-		if err != nil {
-			return load.FenceResult{}, err
-		}
-		return load.FenceResult{From: request.To, Evidence: evidence}, nil
+		return g.installMetaFence(ctx, request)
 	}
 	if g.opts.InstallLocalFence == nil {
 		return load.FenceResult{}, fault.ErrNoController
 	}
 	return g.opts.InstallLocalFence(ctx, request)
+}
+
+func (g *Group) installMetaFence(parent context.Context, request load.FenceRequest) (load.FenceResult, error) {
+	if request.ReplicaID != request.To.MemberID {
+		return load.FenceResult{}, fault.ErrIdentityMismatch
+	}
+	ctxHandle, err := g.acquireEffectContext(parent)
+	ctx, done := ctxHandle.Context, ctxHandle.Release
+	if err != nil {
+		return load.FenceResult{}, err
+	}
+	defer done()
+	engine := g.engine.Load()
+	if engine == nil {
+		return load.FenceResult{}, fault.ErrReplicaNotReady
+	}
+	evidence, err := engine.InstallAuthority(ctx, request.Grant)
+	if err != nil {
+		return load.FenceResult{}, err
+	}
+	return load.FenceResult{From: request.To, Evidence: evidence}, nil
 }

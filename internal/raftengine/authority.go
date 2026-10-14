@@ -19,7 +19,8 @@ type adminReply struct {
 }
 
 // InstallAuthority requires its caller to verify the retained committed grant.
-// Only this group's durable application establishes the resource fence boundary.
+// Only this group's durable application establishes the resource fence
+// boundary.
 func (g *Group) InstallAuthority(ctx context.Context, grant topology.AuthorityGrant) (topology.FenceEvidence, error) {
 	var evidence topology.FenceEvidence
 	if err := g.validateAuthorityRequest(grant); err != nil {
@@ -29,7 +30,7 @@ func (g *Group) InstallAuthority(ctx context.Context, grant topology.AuthorityGr
 	if !slices.Contains(grant.Targets, local) {
 		return evidence, fault.ErrIdentityMismatch
 	}
-	result, err := g.submitAuthority(ctx, raftstate.InstallAuthority, grant, nil, nil)
+	result, err := g.submitAuthority(ctx, authoritySubmission{kind: raftstate.InstallAuthority, grant: grant})
 	if err == nil {
 		err = json.Unmarshal(result.Data, &evidence)
 	}
@@ -37,13 +38,15 @@ func (g *Group) InstallAuthority(ctx context.Context, grant topology.AuthorityGr
 }
 
 // AuthorityReceipt reads the exact installed grant's consumption after a safe
-// read barrier on this replica. Advancing the floor never substitutes a receipt.
-func (g *Group) AuthorityReceipt(parent context.Context, key topology.AuthorityKey) (topology.EffectReceipt, bool, error) {
+// read barrier on this replica. Advancing the floor never substitutes a
+// receipt.
+func (g *Group) AuthorityReceipt(parent context.Context,
+	key topology.AuthorityKey) (topology.EffectReceiptLookup, error) {
 	if !g.opts.ManagedAuthority {
-		return topology.EffectReceipt{}, false, fault.ErrUnsupported
+		return topology.EffectReceiptLookup{}, fault.ErrUnsupported
 	}
 	if key.ClusterID != g.opts.ClusterID || key.GroupID != g.opts.GroupID || key.Revision == 0 {
-		return topology.EffectReceipt{}, false, fault.ErrInvalid
+		return topology.EffectReceiptLookup{}, fault.ErrInvalid
 	}
 	ctx, cancel := context.WithTimeout(parent, g.opts.Reads.Timeout)
 	defer cancel()
@@ -53,9 +56,9 @@ func (g *Group) AuthorityReceipt(parent context.Context, key topology.AuthorityK
 		err = json.Unmarshal(result.Data, &receipt)
 	}
 	if receipt == nil || err != nil {
-		return topology.EffectReceipt{}, false, err
+		return topology.EffectReceiptLookup{}, err
 	}
-	return receipt.Clone(), true, nil
+	return topology.EffectReceiptLookup{Receipt: receipt.Clone(), Found: true}, nil
 }
 
 func (g *Group) readAuthorityReceipt(key topology.AuthorityKey) (Result, error) {
@@ -74,15 +77,30 @@ func (g *Group) validateAuthorityRequest(grant topology.AuthorityGrant) error {
 	}
 	return validateGroupGrant(g.opts, grant)
 }
-func (g *Group) submitAuthority(parent context.Context, kind raftstate.EntryKind, grant topology.AuthorityGrant, cc *raftpb.ConfChangeV2, expected *raftpb.ConfState) (Result, error) {
+
+type authoritySubmission struct {
+	kind     raftstate.EntryKind
+	grant    topology.AuthorityGrant
+	change   *raftpb.ConfChangeV2
+	expected *raftpb.ConfState
+}
+
+func (g *Group) submitAuthority(parent context.Context, submission authoritySubmission) (Result, error) {
 	ctx, cancel := context.WithTimeout(parent, g.opts.ProposalTimeout)
 	defer cancel()
-	grant = grant.Clone()
-	e := &raftstate.Entry{Schema: raftstate.Schema, Kind: kind, Correlation: g.newID(), Grant: &grant}
-	if kind != raftstate.InstallAuthority {
-		e.Action = grant.Action
+	cloned := submission.grant.Clone()
+	e := &raftstate.Entry{Schema: raftstate.Schema, Kind: submission.kind, Correlation: g.newID(), Grant: &cloned}
+	if submission.kind != raftstate.InstallAuthority {
+		e.Action = cloned.Action
 	}
-	return g.submit(ctx, g.controls, &request{ctx: ctx, correlation: e.Correlation, admin: e, change: cc, expected: expected, reply: make(chan response, 1)})
+	return g.submit(ctx, g.controls, &request{
+		ctx:         ctx,
+		correlation: e.Correlation,
+		admin:       e,
+		change:      submission.change,
+		expected:    submission.expected,
+		reply:       make(chan response, 1),
+	})
 }
 func (g *Group) authorityReady() error {
 	if !g.opts.ManagedAuthority {
@@ -127,6 +145,11 @@ func (g *Group) handleAuthority(req *request) {
 		answer(req, Result{}, fault.ErrUnsupported)
 		return
 	}
+	g.handleAuthorityInstall(req)
+}
+
+func (g *Group) handleAuthorityInstall(req *request) {
+	e := req.admin
 	if old := g.authority.Grant; old != nil {
 		if e.Grant.Key.Revision < old.Key.Revision || e.Grant.Key == old.Key && !e.Grant.Equal(*old) {
 			answer(req, Result{}, fault.ErrAuthorityFenced)
@@ -143,8 +166,9 @@ func (g *Group) handleAuthority(req *request) {
 		return
 	}
 	// Raft drops proposals during native leader transfer. Stop that transient
-	// attempt so a verified newer floor can enter the log; the old durable intent
-	// remains installed until this entry applies. Pending admin work prevents its
+	// attempt so a verified newer floor can enter the log; the old durable
+	// intent remains installed until this entry applies. Pending admin work
+	// prevents its
 	// resumption while the new floor commits.
 	if g.activeTransferTarget() != 0 && g.rn.BasicStatus().LeadTransferee != 0 {
 		g.rn.TransferLeader(g.opts.ReplicaID)
@@ -192,7 +216,19 @@ func (g *Group) pendingAdministrativeEntry() bool {
 }
 
 func (g *Group) fenceEvidence() topology.FenceEvidence {
-	return topology.FenceEvidence{Key: g.authority.Grant.Key, Resource: topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: g.opts.GroupID}, Receiver: topology.Identity{ClusterID: g.opts.ClusterID, NodeName: g.opts.NodeName, MemberID: g.opts.MemberID, InstanceID: g.opts.InstanceID}, ReplicaID: g.opts.ReplicaID, AppliedIndex: g.authority.InstallIndex, AppliedTerm: g.authority.InstallTerm}
+	return topology.FenceEvidence{
+		Key:      g.authority.Grant.Key,
+		Resource: topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: g.opts.GroupID},
+		Receiver: topology.Identity{
+			ClusterID:  g.opts.ClusterID,
+			NodeName:   g.opts.NodeName,
+			MemberID:   g.opts.MemberID,
+			InstanceID: g.opts.InstanceID,
+		},
+		ReplicaID:    g.opts.ReplicaID,
+		AppliedIndex: g.authority.InstallIndex,
+		AppliedTerm:  g.authority.InstallTerm,
+	}
 }
 func (g *Group) notifyAuthority(e raftstate.Entry, value any, err error) {
 	req := g.changes[e.Correlation]
@@ -201,11 +237,13 @@ func (g *Group) notifyAuthority(e raftstate.Entry, value any, err error) {
 	}
 	delete(g.changes, e.Correlation)
 	var result Result
-	if err == nil {
-		result, err = authorityResult(value)
+	failure := err
+	if failure == nil {
+		result, failure = authorityResult(value)
 	}
-	g.adminNotify = append(g.adminNotify, adminReply{req: req, result: result, err: err})
+	g.adminNotify = append(g.adminNotify, adminReply{req: req, result: result, err: failure})
 }
+
 func (g *Group) applyAuthority(entry raftpb.Entry, e raftstate.Entry) error {
 	if err := g.validateAuthorityRequest(*e.Grant); err != nil {
 		return err

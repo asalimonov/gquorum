@@ -20,7 +20,7 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// Control replies isolate admission-client policy from election timing. The
+// Control replies isolate admission-client decisions from election timing. The
 // actual join/ready/membership path is covered by join_test.go and process tests.
 type joinProtocolHandler struct {
 	*Group
@@ -231,8 +231,8 @@ func TestJoinClientSkipsColdSeedsAndFollowsLeaderHintToExactGrant(t *testing.T) 
 	if err := g.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
-	pin, found, err := LoadStoredIdentity(g.opts.DBPath)
-	if err != nil || !found || pin.MemberID != 1 || pin.NodeName != "n1" || pin.ClusterID != "cluster" {
-		t.Fatal("grant was not durably pinned", pin, found, err)
+	pin, err := LoadStoredIdentity(g.opts.DBPath)
+	if err != nil || !pin.Found || pin.Identity.MemberID != 1 || pin.Identity.NodeName != "n1" || pin.Identity.ClusterID != "cluster" {
+		t.Fatal("grant was not durably pinned", pin.Identity, pin.Found, err)
 	}
 }

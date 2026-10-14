@@ -13,6 +13,7 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metapb"
 	"github.com/asalimonov/gquorum/membership"
+	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3/raftpb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -23,7 +24,8 @@ import (
 const credentialKey = "gquorum-cluster-credential"
 const snapshotChunkBytes = 256 << 10
 
-// Handler validates cluster and exact peer identities independently of credentials.
+// Handler validates cluster and exact peer identities independently of
+// credentials.
 type Handler interface {
 	Step(context.Context, *metapb.Header, raftpb.Message) error
 	Call(context.Context, string, *metapb.Header, []byte) *metapb.Reply
@@ -50,6 +52,9 @@ func (s *server) header(h *metapb.Header) error {
 	}
 	return nil
 }
+
+// Reply encodes classified errors and retained refusal details in a meta
+// protocol reply.
 func Reply(err error) *metapb.Reply {
 	if err == nil {
 		return &metapb.Reply{}
@@ -68,9 +73,18 @@ func Reply(err error) *metapb.Reply {
 		code = fault.UnsafeMembership
 		details.Membership = safety
 	}
+	var placement *topology.PlacementError
+	if errors.As(err, &placement) {
+		code = placement.Code
+		report := placement.Report.Clone()
+		details.Placement = &report
+	}
 	data, _ := json.Marshal(details)
 	return &metapb.Reply{ErrorCode: string(code), Message: err.Error(), Data: data}
 }
+
+// ReplyError reconstructs classified errors and membership or placement details
+// from a reply.
 func ReplyError(r *metapb.Reply) error {
 	if r == nil {
 		return fault.ErrUnavailable
@@ -84,6 +98,9 @@ func ReplyError(r *metapb.Reply) error {
 			return fault.New(fault.Unreadable, "invalid refusal metadata", err)
 		}
 	}
+	if details.Placement != nil {
+		return &topology.PlacementError{Code: fault.Code(r.ErrorCode), Report: details.Placement.Clone()}
+	}
 	result := fault.New(fault.Code(r.ErrorCode), r.Message, nil)
 	if result.Code == fault.VersionConflict {
 		result.ExpectedVersion, result.CurrentVersion = details.ExpectedVersion, details.CurrentVersion
@@ -93,6 +110,7 @@ func ReplyError(r *metapb.Reply) error {
 	}
 	return result
 }
+
 func (s *server) StreamMessages(stream grpc.ClientStreamingServer[metapb.RaftMessage, metapb.Reply]) error {
 	if err := s.auth(stream.Context()); err != nil {
 		return err
@@ -120,14 +138,12 @@ func (s *server) StreamMessages(stream grpc.ClientStreamingServer[metapb.RaftMes
 		}
 	}
 }
+
 func (s *server) SendSnapshot(stream grpc.ClientStreamingServer[metapb.SnapshotChunk, metapb.Reply]) error {
 	if err := s.auth(stream.Context()); err != nil {
 		return err
 	}
-	var header *metapb.Header
-	var msg raftpb.Message
-	var data []byte
-	frames := 0
+	var assembled snapshotAssembly
 	for {
 		frame, err := stream.Recv()
 		if err != nil {
@@ -139,41 +155,65 @@ func (s *server) SendSnapshot(stream grpc.ClientStreamingServer[metapb.SnapshotC
 		if err = s.header(frame.Header); err != nil {
 			return stream.SendAndClose(Reply(err))
 		}
-		if len(frame.Data) > snapshotChunkBytes || len(data) > s.maxSnapshot-len(frame.Data) {
-			return stream.SendAndClose(Reply(fault.New(fault.Overloaded, "snapshot exceeds transport bound", nil)))
+		if err := assembled.appendFrame(frame, s.maxSnapshot); err != nil {
+			return stream.SendAndClose(Reply(err))
 		}
-		if frames == 0 {
-			header = frame.Header
-			if err = msg.Unmarshal(frame.RaftMessage); err != nil {
-				return stream.SendAndClose(Reply(fault.ErrInvalid))
-			}
-			if msg.Type != raftpb.MsgSnap || msg.Snapshot == nil || len(msg.Snapshot.Data) != 0 || msg.From != header.MemberId || msg.To != frame.ToMemberId {
-				return stream.SendAndClose(Reply(fault.ErrIdentityMismatch))
-			}
-		} else if len(frame.RaftMessage) != 0 || frame.Header.ClusterId != header.ClusterId || frame.Header.MemberId != header.MemberId || frame.Header.NodeName != header.NodeName || frame.ToMemberId != msg.To {
-			return stream.SendAndClose(Reply(fault.ErrIdentityMismatch))
-		}
-		frames++
-		if len(frame.Data) == 0 || frames > s.maxSnapshot/snapshotChunkBytes+2 {
-			return stream.SendAndClose(Reply(fault.New(fault.Invalid, "invalid snapshot chunk framing", nil)))
-		}
-		data = append(data, frame.Data...)
 		if frame.Final {
-			if len(data) == 0 {
-				return stream.SendAndClose(Reply(fault.ErrInvalid))
-			}
-			// A final frame must also terminate the client stream.
-			if _, err = stream.Recv(); err != io.EOF {
-				if err != nil {
-					return err
-				}
-				return stream.SendAndClose(Reply(fault.ErrInvalid))
-			}
-			msg.Snapshot.Data = bytes.Clone(data)
-			return stream.SendAndClose(Reply(s.handler.Step(stream.Context(), header, msg)))
+			return s.finishSnapshotStream(stream, assembled)
 		}
 	}
 }
+
+type snapshotAssembly struct {
+	header *metapb.Header
+	msg    raftpb.Message
+	data   []byte
+	frames int
+}
+
+func (a *snapshotAssembly) appendFrame(frame *metapb.SnapshotChunk, maxSnapshot int) error {
+	if len(frame.Data) > snapshotChunkBytes || len(a.data) > maxSnapshot-len(frame.Data) {
+		return fault.New(fault.Overloaded, "snapshot exceeds transport bound", nil)
+	}
+	if a.frames == 0 {
+		a.header = frame.Header
+		if err := a.msg.Unmarshal(frame.RaftMessage); err != nil {
+			return fault.ErrInvalid
+		}
+		if a.msg.Type != raftpb.MsgSnap || a.msg.Snapshot == nil || len(a.msg.Snapshot.Data) != 0 ||
+			a.msg.From != a.header.MemberId ||
+			a.msg.To != frame.ToMemberId {
+			return fault.ErrIdentityMismatch
+		}
+	} else if len(frame.RaftMessage) != 0 || frame.Header.ClusterId != a.header.ClusterId ||
+		frame.Header.MemberId != a.header.MemberId || frame.Header.NodeName != a.header.NodeName ||
+		frame.ToMemberId != a.msg.To {
+		return fault.ErrIdentityMismatch
+	}
+	a.frames++
+	if len(frame.Data) == 0 || a.frames > maxSnapshot/snapshotChunkBytes+2 {
+		return fault.New(fault.Invalid, "invalid snapshot chunk framing", nil)
+	}
+	a.data = append(a.data, frame.Data...)
+	return nil
+}
+
+func (s *server) finishSnapshotStream(stream grpc.ClientStreamingServer[metapb.SnapshotChunk, metapb.Reply],
+	a snapshotAssembly) error {
+	if len(a.data) == 0 {
+		return stream.SendAndClose(Reply(fault.ErrInvalid))
+	}
+	// A final frame must also terminate the client stream.
+	if _, err := stream.Recv(); err != io.EOF {
+		if err != nil {
+			return err
+		}
+		return stream.SendAndClose(Reply(fault.ErrInvalid))
+	}
+	a.msg.Snapshot.Data = bytes.Clone(a.data)
+	return stream.SendAndClose(Reply(s.handler.Step(stream.Context(), a.header, a.msg)))
+}
+
 func (s *server) call(ctx context.Context, method string, req *metapb.MetaRequest) (*metapb.Reply, error) {
 	if err := s.auth(ctx); err != nil {
 		return nil, err
@@ -228,6 +268,7 @@ type errorDetails struct {
 	ExpectedVersion uint64                    `json:"expected_version,omitempty"`
 	CurrentVersion  uint64                    `json:"current_version,omitempty"`
 	Membership      *membership.SafetyRefusal `json:"membership,omitempty"`
+	Placement       *topology.PlacementReport `json:"placement,omitempty"`
 }
 
 func (s *server) InstallFence(ctx context.Context, req *metapb.MetaRequest) (*metapb.Reply, error) {

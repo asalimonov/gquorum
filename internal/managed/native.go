@@ -11,13 +11,16 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// ReadNative asks an exact ready replica for a fresh quorum-confirmed membership
+// ReadNative asks an exact ready replica for a fresh quorum-confirmed
+// membership
 // read. It deliberately bypasses observation caches and partial status results.
 // Any ready voter, follower or learner can obtain the leader's confirmation.
-func (h *Host) ReadNative(parent context.Context, group string, candidates ...storage.Identity) (topology.NativeState, error) {
+func (h *Host) ReadNative(parent context.Context, group string,
+	candidates ...storage.Identity) (topology.NativeState, error) {
 	ctx, cancel := context.WithTimeout(parent, h.cfg.EffectTimeout)
 	defer cancel()
-	ctx, done, err := h.beginWork(ctx)
+	ctxHandle, err := h.beginWork(ctx)
+	ctx, done := ctxHandle.Context, ctxHandle.Release
 	if err != nil {
 		return topology.NativeState{}, err
 	}
@@ -45,7 +48,7 @@ func (h *Host) ReadNative(parent context.Context, group string, candidates ...st
 		}
 		deadline, _ := ctx.Deadline()
 		attempt, stop := context.WithTimeout(ctx, time.Until(deadline)/time.Duration(len(unique)-i))
-		state, err := h.readNative(attempt, id)
+		state, err := h.readNativeState(attempt, id)
 		stop()
 		if err == nil {
 			return state, nil
@@ -58,7 +61,7 @@ func (h *Host) ReadNative(parent context.Context, group string, candidates ...st
 	return topology.NativeState{}, fault.New(fault.Unavailable, "no ready replica confirmed native membership", last)
 }
 
-func (h *Host) readNative(ctx context.Context, id storage.Identity) (topology.NativeState, error) {
+func (h *Host) readNativeState(ctx context.Context, id storage.Identity) (topology.NativeState, error) {
 	peer, err := h.peerFor(ctx, id)
 	if err != nil {
 		return topology.NativeState{}, err
@@ -84,7 +87,8 @@ func (h *Host) readNative(ctx context.Context, id storage.Identity) (topology.Na
 	}
 	state := *reply.Native
 	if state.GroupID != id.GroupID || state.ReplicaID != id.ReplicaID || state.Applied == 0 {
-		return topology.NativeState{}, fault.New(fault.Unreadable, "native read returned a different replica or no applied index", nil)
+		return topology.NativeState{}, fault.New(fault.Unreadable,
+			"native read returned a different replica or no applied index", nil)
 	}
 	return state.Clone(), nil
 }

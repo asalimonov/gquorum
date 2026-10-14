@@ -40,11 +40,24 @@ func (sm *topologySM) recordRoleEffectLocked(index uint64, ex *operatorRecord, s
 	}
 	state := sm.voterSwitches[step.GroupID]
 	for _, previous := range state.Replicas {
-		if previous.OperatorID == ex.ID && previous.Version == ex.Version && previous.Attempt == ex.Attempt && previous.StepSeq == step.Seq {
+		if previous.OperatorID == ex.ID && previous.Version == ex.Version && previous.Attempt == ex.Attempt &&
+			previous.StepSeq == step.Seq {
 			return
 		}
 	}
-	r := topology.RoleChangeRecord{OperatorID: ex.ID, Version: ex.Version, Attempt: ex.Attempt, StepSeq: step.Seq, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID, From: from, To: to, At: at, Index: index}
+	r := topology.RoleChangeRecord{
+		OperatorID: ex.ID,
+		Version:    ex.Version,
+		Attempt:    ex.Attempt,
+		StepSeq:    step.Seq,
+		GroupID:    step.GroupID,
+		NodeName:   step.NodeName,
+		ReplicaID:  step.ReplicaID,
+		From:       from,
+		To:         to,
+		At:         at,
+		Index:      index,
+	}
 	state.GroupID, state.Last = step.GroupID, r
 	found := false
 	for i, old := range state.Replicas {
@@ -57,7 +70,9 @@ func (sm *topologySM) recordRoleEffectLocked(index uint64, ex *operatorRecord, s
 	if !found {
 		state.Replicas = append(state.Replicas, r)
 	}
-	slices.SortFunc(state.Replicas, func(a, b topology.RoleChangeRecord) int { return cmp.Compare(a.ReplicaID, b.ReplicaID) })
+	slices.SortFunc(state.Replicas, func(a, b topology.RoleChangeRecord) int {
+		return cmp.Compare(a.ReplicaID, b.ReplicaID)
+	})
 	sm.voterSwitches[step.GroupID] = state
 }
 
@@ -88,11 +103,16 @@ func (sm *topologySM) pruneVoterSwitchesLocked() {
 			delete(sm.voterSwitches, id)
 			continue
 		}
-		state.Replicas = slices.DeleteFunc(state.Replicas, func(r topology.RoleChangeRecord) bool {
-			// Last also supplies the surviving group's cooldown after removal
-			// of its former role holder, and occupies at most one extra slot.
-			return r != state.Last && !protected[id][topology.ReplicaKey{NodeName: r.NodeName, ReplicaID: r.ReplicaID}]
-		})
+		state.Replicas = slices.DeleteFunc(
+			state.Replicas,
+			func(r topology.RoleChangeRecord) bool {
+				// Last also supplies the surviving group's cooldown after
+				// removal of its former role holder, and occupies at most one
+				// extra slot.
+				return r != state.Last &&
+					!protected[id][topology.ReplicaKey{NodeName: r.NodeName, ReplicaID: r.ReplicaID}]
+			},
+		)
 		sm.voterSwitches[id] = state
 	}
 }
@@ -101,110 +121,169 @@ func validateVoterSwitches(st smState) error {
 	if len(st.VoterSwitches) == 0 {
 		return nil
 	}
-	bad := func() error { return fault.New(fault.Unreadable, "invalid voter switch record", nil) }
-	allocations := make(map[string]uint64, len(st.Allocations))
+	check := voterSwitchValidation{state: st, allocations: make(map[string]uint64, len(st.Allocations)),
+		names: map[voterSwitchKey]string{}, protected: map[voterSwitchKey]bool{}, groups: map[string]bool{},
+		seenGroups: map[string]bool{}, seenIndexes: map[uint64]bool{}}
 	for _, a := range st.Allocations {
-		allocations[a.GroupID] = a.NextReplicaID
+		check.allocations[a.GroupID] = a.NextReplicaID
 	}
-	type replicaKey struct {
-		group string
-		id    uint64
+	if err := check.rememberCurrent(); err != nil {
+		return err
 	}
-	names := map[replicaKey]string{}
-	protected := map[replicaKey]bool{}
-	groups := map[string]bool{}
-	remember := func(group, name string, id uint64, keep bool) bool {
-		if name == "" || id == 0 {
-			return true
+	if err := check.rememberHistory(); err != nil {
+		return err
+	}
+	if err := check.rememberOperators(); err != nil {
+		return err
+	}
+	for _, state := range st.VoterSwitches {
+		if err := check.groupState(state); err != nil {
+			return err
 		}
-		key := replicaKey{group, id}
-		if previous := names[key]; previous != "" && previous != name {
-			return false
-		}
-		names[key] = name
-		if keep {
-			protected[key], groups[group] = true, true
-		}
+	}
+	return nil
+}
+
+type voterSwitchKey struct {
+	group string
+	id    uint64
+}
+
+type switchRetention uint8
+
+const (
+	archiveSwitchIdentity switchRetention = iota
+	retainSwitchIdentity
+)
+
+type voterSwitchValidation struct {
+	state              smState
+	allocations        map[string]uint64
+	names              map[voterSwitchKey]string
+	protected          map[voterSwitchKey]bool
+	groups, seenGroups map[string]bool
+	seenIndexes        map[uint64]bool
+}
+
+func invalidVoterSwitch() error {
+	return fault.New(fault.Unreadable, "invalid voter switch record", nil)
+}
+
+func (check *voterSwitchValidation) remember(group, name string, id uint64, retention switchRetention) bool {
+	if name == "" || id == 0 {
 		return true
 	}
-	for _, doc := range []topology.Document{st.Latest, st.Target, st.Active} {
+	key := voterSwitchKey{group, id}
+	if previous := check.names[key]; previous != "" && previous != name {
+		return false
+	}
+	check.names[key] = name
+	if retention == retainSwitchIdentity {
+		check.protected[key], check.groups[group] = true, true
+	}
+	return true
+}
+
+func (check *voterSwitchValidation) rememberCurrent() error {
+	for _, doc := range []topology.Document{check.state.Latest, check.state.Target, check.state.Active} {
 		for _, g := range doc.Groups {
 			for _, r := range g.Replicas {
-				if !remember(g.ID, r.NodeName, r.ReplicaID, true) {
-					return bad()
+				if !check.remember(g.ID, r.NodeName, r.ReplicaID, retainSwitchIdentity) {
+					return invalidVoterSwitch()
 				}
 			}
 		}
 	}
-	for _, doc := range st.History {
+	return nil
+}
+
+func (check *voterSwitchValidation) rememberHistory() error {
+	for _, doc := range check.state.History {
 		for _, g := range doc.Groups {
 			for _, r := range g.Replicas {
-				if !remember(g.ID, r.NodeName, r.ReplicaID, false) {
-					return bad()
+				if !check.remember(g.ID, r.NodeName, r.ReplicaID, archiveSwitchIdentity) {
+					return invalidVoterSwitch()
 				}
 			}
 		}
 	}
-	for _, op := range st.Operators {
+	return nil
+}
+
+func (check *voterSwitchValidation) rememberOperators() error {
+	for _, op := range check.state.Operators {
 		for _, step := range op.Plan.Steps {
-			if !remember(step.GroupID, step.NodeName, step.ReplicaID, true) {
-				return bad()
+			if !check.remember(step.GroupID, step.NodeName, step.ReplicaID, retainSwitchIdentity) {
+				return invalidVoterSwitch()
 			}
 		}
 	}
-	valid := func(r topology.RoleChangeRecord, group string) bool {
-		knownName := names[replicaKey{group, r.ReplicaID}]
-		return r.GroupID == group && topology.ValidateID(group) == nil && r.NodeName != "" && !strings.ContainsRune(r.NodeName, 0) && r.ReplicaID != 0 && r.ReplicaID < allocations[group] && (knownName == "" || knownName == r.NodeName) &&
-			r.Version != 0 && r.Version <= st.Target.Version && r.Attempt != 0 && r.OperatorID == topology.MakeOperatorID(r.Version, r.Attempt) && r.StepSeq > 0 &&
-			r.Index != 0 && r.Index <= st.AppliedIndex && !r.At.IsZero() &&
-			(r.From == topology.ReplicaVoter && r.To == topology.ReplicaLearner || r.From == topology.ReplicaLearner && r.To == topology.ReplicaVoter)
+	return nil
+}
+
+func (check *voterSwitchValidation) valid(r topology.RoleChangeRecord, group string) bool {
+	knownName := check.names[voterSwitchKey{group, r.ReplicaID}]
+	return r.GroupID == group && r.NodeName != "" && r.ReplicaID != 0 && r.ReplicaID < check.allocations[group] &&
+		(knownName == "" || knownName == r.NodeName) && r.Version != 0 && r.Version <= check.state.Target.Version &&
+		r.Attempt != 0 && r.StepSeq > 0 && r.Index != 0 && r.Index <= check.state.AppliedIndex &&
+		(r.From == topology.ReplicaVoter && r.To == topology.ReplicaLearner ||
+			r.From == topology.ReplicaLearner && r.To == topology.ReplicaVoter) &&
+		topology.ValidateID(group) == nil && !strings.ContainsRune(r.NodeName, 0) &&
+		r.OperatorID == topology.MakeOperatorID(r.Version, r.Attempt) && !r.At.IsZero()
+}
+
+func (check *voterSwitchValidation) groupState(state topology.VoterSwitchState) error {
+	if check.seenGroups[state.GroupID] || !check.groups[state.GroupID] || !check.valid(state.Last, state.GroupID) {
+		return invalidVoterSwitch()
 	}
-	seenGroups := make(map[string]bool)
-	seenIndexes := make(map[uint64]bool)
-	for _, state := range st.VoterSwitches {
-		if seenGroups[state.GroupID] || !groups[state.GroupID] || !valid(state.Last, state.GroupID) {
-			return bad()
+	check.seenGroups[state.GroupID] = true
+	var previous uint64
+	lastFound := false
+	for _, r := range state.Replicas {
+		if r.ReplicaID <= previous || r.Index > state.Last.Index || check.seenIndexes[r.Index] ||
+			!check.valid(r, state.GroupID) {
+			return invalidVoterSwitch()
 		}
-		seenGroups[state.GroupID] = true
-		var previous uint64
-		lastFound := false
-		for _, r := range state.Replicas {
-			if !valid(r, state.GroupID) || r.ReplicaID <= previous || r.Index > state.Last.Index || seenIndexes[r.Index] {
-				return bad()
-			}
-			// The group's latest effect is retained as its bounded cooldown
-			// anchor even if that replica was removed. Other historical rows
-			// require a current assignment or retained execution obligation.
-			if r != state.Last && !protected[replicaKey{state.GroupID, r.ReplicaID}] {
-				return bad()
-			}
-			previous = r.ReplicaID
-			seenIndexes[r.Index] = true
-			if r == state.Last {
-				lastFound = true
-			}
-			// When the exact operator is retained, its completed effect must
-			// agree. Old current-identity records may outlive that operator.
-			for _, op := range st.Operators {
-				if op.Status.ID != r.OperatorID {
-					continue
-				}
-				if r.StepSeq > len(op.Plan.Steps) {
-					return bad()
-				}
-				s := op.Plan.Steps[r.StepSeq-1]
-				kind := topology.StepPromoteVoter
-				if r.To == topology.ReplicaLearner {
-					kind = topology.StepDemoteVoter
-				}
-				record := operatorFromView(op)
-				if s.Kind != kind || s.GroupID != r.GroupID || s.NodeName != r.NodeName || s.ReplicaID != r.ReplicaID || !completedStep(&record, s) {
-					return bad()
-				}
-			}
+		// The group's latest effect is retained as its bounded cooldown
+		// anchor even if that replica was removed. Other historical rows
+		// require a current assignment or retained execution obligation.
+		if r != state.Last && !check.protected[voterSwitchKey{state.GroupID, r.ReplicaID}] {
+			return invalidVoterSwitch()
 		}
-		if !lastFound {
-			return fmt.Errorf("%w: voter switch last effect is absent", fault.ErrUnreadable)
+		previous = r.ReplicaID
+		check.seenIndexes[r.Index] = true
+		if r == state.Last {
+			lastFound = true
+		}
+		if err := check.retainedEffect(r); err != nil {
+			return err
+		}
+	}
+	if !lastFound {
+		return fmt.Errorf("%w: voter switch last effect is absent", fault.ErrUnreadable)
+	}
+	return nil
+}
+
+func (check *voterSwitchValidation) retainedEffect(r topology.RoleChangeRecord) error {
+	// When the exact operator is retained, its completed effect must
+	// agree. Old current-identity records may outlive that operator.
+	for _, op := range check.state.Operators {
+		if op.Status.ID != r.OperatorID {
+			continue
+		}
+		if r.StepSeq > len(op.Plan.Steps) {
+			return invalidVoterSwitch()
+		}
+		s := op.Plan.Steps[r.StepSeq-1]
+		kind := topology.StepPromoteVoter
+		if r.To == topology.ReplicaLearner {
+			kind = topology.StepDemoteVoter
+		}
+		record := operatorFromView(op)
+		if s.Kind != kind || s.GroupID != r.GroupID || s.NodeName != r.NodeName || s.ReplicaID != r.ReplicaID ||
+			!completedStep(&record, s) {
+			return invalidVoterSwitch()
 		}
 	}
 	return nil

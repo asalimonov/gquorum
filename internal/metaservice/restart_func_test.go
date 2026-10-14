@@ -67,6 +67,8 @@ func TestPublicMetaRestartUsesPinReplaysTailAndRefusesChangedRules(t *testing.T)
 	}
 	opts := restartOptions(t, old)
 	opts.Founders = nil
+	// Retained topology, not the caller's changed local options, owns labels.
+	opts.Node.Labels = map[string]string{"disk": "caller-override"}
 	restarted, err := New(opts)
 	if err != nil {
 		t.Fatal(err)
@@ -86,6 +88,9 @@ func TestPublicMetaRestartUsesPinReplaysTailAndRefusesChangedRules(t *testing.T)
 	if latest.Version != 2 || active.Version != 1 || latest.Nodes[0].Labels["disk"] != "retained" {
 		t.Fatal("restart skipped committed tail", latest, active)
 	}
+	if active.Nodes[0].Labels["disk"] == "caller-override" {
+		t.Fatal("local restart labels overrode replicated active placement", active)
+	}
 }
 
 func TestRetainedSingletonDoesNotAcquireFreshVoterDefault(t *testing.T) {
@@ -101,10 +106,10 @@ func TestRetainedSingletonDoesNotAcquireFreshVoterDefault(t *testing.T) {
 	}
 	mustStop(old)
 	opts := restartOptions(t, old)
-	opts.VoterPolicy = nil
+	opts.VoterConfig = nil
 	opts.Founders = nil
 	// MaxNodes is one. Only fresh default founding would require target three;
-	// retained topology remains the authority when no constructor policy is set.
+	// retained topology remains the authority when no constructor voter configuration is set.
 	restarted, err := New(opts)
 	if err != nil {
 		t.Fatal(err)
@@ -119,7 +124,7 @@ func TestRetainedSingletonDoesNotAcquireFreshVoterDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	active, err := restarted.Active(ctx)
-	if err != nil || active.MetaGroup().VoterPolicy.TargetVoters != 1 {
+	if err != nil || active.MetaGroup().VoterConfig.TargetVoters != 1 {
 		t.Fatal(active, err)
 	}
 }

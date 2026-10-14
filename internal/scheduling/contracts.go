@@ -2,10 +2,12 @@ package scheduling
 
 import (
 	"context"
+
 	"github.com/asalimonov/gquorum/metrics"
 	"github.com/asalimonov/gquorum/topology"
 )
 
+// Repair reason codes identify local scheduling gates and diagnostic decisions.
 const (
 	ReconcileReasonConfigDisabled    = "config_disabled"
 	ReconcileReasonNotLeader         = "not_leader"
@@ -25,21 +27,33 @@ const (
 	ReconcileReasonPolicyRejected    = "policy_rejected"
 )
 
+// RepairCommit binds the desired document and plan to its observed CAS version.
+type RepairCommit struct {
+	Document        topology.Document
+	ExpectedVersion uint64
+	Plan            topology.Plan
+}
+
+// Host supplies trusted topology, observations, planning and replicated repair
+// approval.
 type Host interface {
-	Views(context.Context) (topology.Document, topology.Document, topology.Document, error)
-	CurrentOperator(context.Context) (topology.Operator, bool, error)
+	Views(context.Context) (topology.ReadView, error)
+	CurrentOperator(context.Context) (topology.OperatorLookup, error)
 	IsLeader() bool
 	Health(context.Context) (map[string]topology.Health, error)
 	GlobalStatus(context.Context, topology.Document) (map[string]topology.GroupStatus, error)
 	PlanFor(context.Context, topology.Document) (topology.Plan, error)
 	Approve(context.Context, uint64) (topology.OperatorID, error)
-	CommitRepair(context.Context, topology.Document, uint64, topology.Plan) (topology.OperatorID, error)
+	CommitRepair(context.Context, RepairCommit) (topology.OperatorID, error)
 	RefreshObservations(context.Context) error
 	// ResetObservations is an internal, in-memory reset invoked under the
 	// scheduler gate before another enabled tick can reuse temporal evidence.
 	ResetObservations()
 	Observations() metrics.ClusterSnapshot
 	VoterSwitches() []topology.VoterSwitchState
-	CommitVoterChange(context.Context, topology.VoterChange, topology.Document, uint64, topology.Plan) (topology.OperatorID, error)
+	CommitVoterChange(context.Context, topology.VoterChange, RepairCommit) (topology.OperatorID, error)
 	WakeOperator()
 }
+
+// Enablement controls whether this node may originate automatic repairs.
+type Enablement struct{ Enabled bool }

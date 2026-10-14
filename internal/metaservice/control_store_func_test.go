@@ -3,10 +3,12 @@
 package metaservice
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"net"
+	"os"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -16,7 +18,43 @@ import (
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metapb"
 	"github.com/asalimonov/gquorum/topology"
+	bolt "go.etcd.io/bbolt"
 )
+
+func TestControlStoreRejectsOldMetadataFormatWithoutRewrite(t *testing.T) {
+	t.Parallel()
+	g := readyPublic(t, singleMetaFixture(t))
+	opts := g.opts
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if err := g.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	db, err := bolt.Open(opts.DBPath, 0o600, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket([]byte("format")).Put([]byte("schema_version"), []byte("2"))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(opts.DBPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := &Group{opts: opts, rules: g.rules}
+	if err := control.openControlStore(opts.Identity); !errors.Is(err, fault.ErrUnsupported) {
+		t.Fatal("control-only open accepted old format", err)
+	}
+	after, err := os.ReadFile(opts.DBPath)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("control-only rejection changed retained evidence", err)
+	}
+}
 
 func TestStoppedRetainedJoinUsesControlStoreWithoutReopeningRaft(t *testing.T) {
 	t.Parallel()
@@ -62,7 +100,7 @@ func TestStoppedRetainedJoinUsesControlStoreWithoutReopeningRaft(t *testing.T) {
 	if retained.engine.Load() != nil || !retained.controlOnly || retained.store == nil {
 		t.Fatal("stopped member acquired participation")
 	}
-	before, entries, snapshot, err := retained.store.LoadAll()
+	before, err := retained.store.LoadAll()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,8 +132,8 @@ func TestStoppedRetainedJoinUsesControlStoreWithoutReopeningRaft(t *testing.T) {
 	if err = retained.ValidateGrant(ctx, *issued.Grant); err != nil {
 		t.Fatal("retained immutable proof unavailable", err)
 	}
-	after, nextEntries, nextSnapshot, err := retained.store.LoadAll()
-	if err != nil || !reflect.DeepEqual(before, after) || !reflect.DeepEqual(entries, nextEntries) || !reflect.DeepEqual(snapshot, nextSnapshot) {
+	after, err := retained.store.LoadAll()
+	if err != nil || !reflect.DeepEqual(before.HardState, after.HardState) || !reflect.DeepEqual(before.Entries, after.Entries) || !reflect.DeepEqual(before.Snapshot, after.Snapshot) {
 		t.Fatal("control-only join mutated retained Raft evidence", err)
 	}
 	if retained.Identity().MemberID != 1 || retained.Identity().InstanceID != opts.Identity.InstanceID {

@@ -2,6 +2,7 @@ package gquorum
 
 import (
 	"context"
+
 	"github.com/asalimonov/gquorum/load"
 )
 
@@ -12,6 +13,7 @@ func (n *node) ReceiveLoadRaft(ctx context.Context, batch load.RaftBatch) error 
 	}
 	return h.ReceiveRaft(ctx, batch)
 }
+
 func (n *node) ReadLoadReplica(ctx context.Context, query load.ReplicaQuery) (load.ReplicaStatus, error) {
 	h, err := n.loadHost(ctx)
 	if err != nil {
@@ -19,6 +21,7 @@ func (n *node) ReadLoadReplica(ctx context.Context, query load.ReplicaQuery) (lo
 	}
 	return h.ReadReplica(ctx, query)
 }
+
 func (n *node) ApplyLoadAction(ctx context.Context, request load.ActionRequest) (load.ActionResult, error) {
 	h, err := n.authorityHost(ctx)
 	if err != nil {
@@ -26,6 +29,7 @@ func (n *node) ApplyLoadAction(ctx context.Context, request load.ActionRequest) 
 	}
 	return h.ApplyAction(ctx, request)
 }
+
 func (n *node) ReportLoadDelivery(ctx context.Context, report load.DeliveryReport) error {
 	h, err := n.loadHost(ctx)
 	if err != nil {

@@ -1,18 +1,20 @@
 package raftengine
 
 import (
+	"slices"
+	"time"
+
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/raftstate"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"
-	"slices"
-	"time"
 )
 
 // Ordinary proposal forwarding follows Meridian's handleProposalRG: use
 // RawNode.Propose on the local replica and await that replica's local apply.
-// Retries stay on the owner loop; ambiguous transport outcomes are never retried.
+// Retries stay on the owner loop; ambiguous transport outcomes are never
+// retried.
 func (g *Group) retryDroppedProposals(now time.Time) {
 	for _, req := range g.props {
 		if req.retryAt.IsZero() || now.Before(req.retryAt) {
@@ -27,7 +29,8 @@ func validateForwardedProposal(o Options, msg raftpb.Message) error {
 	if o.GroupID == topology.MetaGroupID || msg.Term != 0 || len(msg.Entries) != 1 {
 		return fault.New(fault.Invalid, "only one ordinary load proposal can be forwarded", nil)
 	}
-	if msg.LogTerm != 0 || msg.Index != 0 || msg.Commit != 0 || msg.Vote != 0 || msg.Reject || msg.RejectHint != 0 || len(msg.Context) != 0 || len(msg.Responses) != 0 || msg.Snapshot != nil {
+	if msg.LogTerm != 0 || msg.Index != 0 || msg.Commit != 0 || msg.Vote != 0 || msg.Reject || msg.RejectHint != 0 ||
+		len(msg.Context) != 0 || len(msg.Responses) != 0 || msg.Snapshot != nil {
 		return fault.New(fault.Invalid, "forwarded proposal contains consensus-control fields", nil)
 	}
 	e := msg.Entries[0]

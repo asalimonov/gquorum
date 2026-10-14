@@ -19,18 +19,21 @@ type Adapter struct {
 	identity storage.Identity
 }
 
+// HasState reports whether the meta database contains retained identity or
+// consensus evidence.
 func (a *Adapter) HasState(ctx context.Context) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
 	var retained bool
 	err := a.Store.db.View(func(tx *bolt.Tx) error {
-		retained = !storeIsFresh(tx)
+		retained = !diskIsFresh(tx)
 		return ctx.Err()
 	})
 	return retained, err
 }
 
+// BindReplica verifies and binds the exact meta storage identity.
 func (a *Adapter) BindReplica(ctx context.Context, id storage.Identity) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -62,6 +65,7 @@ func (a *Adapter) check(ctx context.Context, id string) error {
 	return nil
 }
 
+// Probe reports the bound meta identity and retained Raft log evidence.
 func (a *Adapter) Probe(ctx context.Context, id string) (storage.Probe, error) {
 	if err := a.check(ctx, id); err != nil {
 		return storage.Probe{}, err
@@ -69,7 +73,8 @@ func (a *Adapter) Probe(ctx context.Context, id string) (storage.Probe, error) {
 	var hasLog bool
 	err := a.Store.db.View(func(tx *bolt.Tx) error {
 		first, _ := tx.Bucket(bucketEntries).Cursor().First()
-		hasLog = first != nil || len(tx.Bucket(bucketHardState).Get(keyHardState)) > 0 || len(tx.Bucket(bucketSnapshot).Get(keySnapshot)) > 0
+		hasLog = first != nil || len(tx.Bucket(bucketHardState).Get(keyHardState)) > 0 ||
+			len(tx.Bucket(bucketSnapshot).Get(keySnapshot)) > 0
 		return nil
 	})
 	a.mu.RLock()
@@ -77,13 +82,22 @@ func (a *Adapter) Probe(ctx context.Context, id string) (storage.Probe, error) {
 	a.mu.RUnlock()
 	return storage.Probe{Exists: true, HasLog: hasLog, Identity: identity}, err
 }
-func (a *Adapter) Ensure(ctx context.Context, id string) error { return a.check(ctx, id) }
+
+// Ensure verifies that the requested group is the bound meta replica.
+func (a *Adapter) Ensure(ctx context.Context, id string) error {
+	return a.check(ctx, id)
+}
+
+// SaveReady persists a Ready batch after verifying the meta binding.
 func (a *Adapter) SaveReady(ctx context.Context, id string, w storage.ReadyWrite) error {
 	if err := a.check(ctx, id); err != nil {
 		return err
 	}
 	return a.Store.SaveReady(w.Entries, w.HardState)
 }
+
+// SaveApplied records application progress within the durable meta commit
+// boundary.
 func (a *Adapter) SaveApplied(ctx context.Context, id string, index uint64, cs raftpb.ConfState) error {
 	if err := a.check(ctx, id); err != nil {
 		return err
@@ -97,6 +111,9 @@ func (a *Adapter) SaveApplied(ctx context.Context, id string, index uint64, cs r
 	}
 	return a.Store.SetApplied(index, cs)
 }
+
+// SaveSnapshot installs complete meta snapshot state with an advancing
+// hard-state boundary.
 func (a *Adapter) SaveSnapshot(ctx context.Context, id string, ss raftpb.Snapshot) error {
 	if err := a.check(ctx, id); err != nil {
 		return err
@@ -115,33 +132,43 @@ func (a *Adapter) SaveSnapshot(ctx context.Context, id string, ss raftpb.Snapsho
 	hs.Commit = max(hs.Commit, ss.Metadata.Index)
 	return a.Store.InstallSnapshot(ss, hs)
 }
+
+// Load returns the full retained meta Raft state and applied hints.
 func (a *Adapter) Load(ctx context.Context, id string) (storage.Recovery, error) {
 	if err := a.check(ctx, id); err != nil {
 		return storage.Recovery{}, err
 	}
-	hs, entries, ss, err := a.Store.LoadAll()
+	recovery, err := a.Store.LoadAll()
 	if err != nil {
 		return storage.Recovery{}, err
 	}
-	index, err := a.Store.AppliedIndex()
+	recovery.AppliedHint, err = a.Store.AppliedIndex()
 	if err != nil {
 		return storage.Recovery{}, err
 	}
-	cs, _, err := a.Store.AppliedConfState()
-	return storage.Recovery{HardState: hs, Entries: entries, Snapshot: ss, AppliedHint: index, AppliedConfState: cs}, err
+	membership, err := a.Store.AppliedConfState()
+	recovery.AppliedConfState = membership.ConfState
+	return recovery, err
 }
+
+// Compact removes entries covered by a durable meta snapshot.
 func (a *Adapter) Compact(ctx context.Context, id string, index uint64) error {
 	if err := a.check(ctx, id); err != nil {
 		return err
 	}
 	return a.Store.CompactEntries(index)
 }
+
+// Quarantine refuses meta retirement because readmission requires coordinated
+// ownership teardown.
 func (a *Adapter) Quarantine(ctx context.Context, id string, _ uint64) (string, error) {
 	if err := a.check(ctx, id); err != nil {
 		return "", err
 	}
 	return "", fault.New(fault.Unsupported, "meta readmission requires coordinated shutdown and caller hook", nil)
 }
+
+// Close releases the underlying meta database.
 func (a *Adapter) Close() error { return a.Store.Close() }
 
 var _ storage.Store = (*Adapter)(nil)

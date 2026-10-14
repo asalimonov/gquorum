@@ -2,26 +2,27 @@ package gquorum
 
 import (
 	"context"
+
 	"github.com/asalimonov/gquorum/topology"
-	"time"
 )
 
 func (c *clusterView) Rules() topology.Rules {
 	return topology.Rules{SchemaVersion: 1, Limits: c.node.opts.Limits}
 }
 func (c *clusterView) IsLeader() bool {
-	m, err := c.node.service(context.Background(), true)
+	m, err := c.node.service(context.Background(), workService)
 	return err == nil && m.IsLeader()
 }
 func (c *clusterView) HealthObservation() topology.HealthObservation {
-	m, err := c.node.service(context.Background(), false)
+	m, err := c.node.service(context.Background(), readService)
 	if err != nil {
 		return topology.HealthObservation{}
 	}
 	return m.HealthObservation()
 }
+
 func (c *clusterView) Status(parent context.Context) (topology.ClusterStatus, error) {
-	m, err := c.node.service(parent, false)
+	m, err := c.node.service(parent, readService)
 	if err != nil {
 		return topology.ClusterStatus{}, err
 	}
@@ -34,7 +35,7 @@ func (c *clusterView) Status(parent context.Context) (topology.ClusterStatus, er
 	}
 	timeout := n.opts.Loads.EffectTimeout
 	if timeout == 0 {
-		timeout = 10 * time.Second
+		timeout = defaultEffectTimeout
 	}
 	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()

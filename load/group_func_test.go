@@ -52,7 +52,7 @@ func TestStandaloneRecoveryAndMembershipOwnership(t *testing.T) {
 	}
 	require(t, owner.Start(ctx))
 	require(t, g.WaitReady(ctx))
-	waitLeader(t, ctx, g)
+	waitLeader(ctx, t, g)
 	propose := func(group *load.Group, id, data string) {
 		t.Helper()
 		result, err := group.Propose(ctx, load.Proposal{RequestID: id, Data: []byte(data)})
@@ -81,7 +81,7 @@ func TestStandaloneRecoveryAndMembershipOwnership(t *testing.T) {
 	defer func() { require(t, next.Stop(context.Background())) }()
 	require(t, next.Start(ctx))
 	require(t, next.Group().WaitReady(ctx))
-	waitLeader(t, ctx, next.Group())
+	waitLeader(ctx, t, next.Group())
 	propose(next.Group(), "one", "first")
 	propose(next.Group(), "two", "tail")
 	result, err := next.Group().Propose(ctx, load.Proposal{RequestID: "two", Data: []byte("different")})
@@ -136,7 +136,7 @@ func (m *deduplicatingMachine) Restore(_ context.Context, data []byte) error {
 
 func (m *deduplicatingMachine) count() int { m.mu.Lock(); defer m.mu.Unlock(); return len(m.requests) }
 
-func waitLeader(t *testing.T, ctx context.Context, g *load.Group) {
+func waitLeader(ctx context.Context, t *testing.T, g *load.Group) {
 	t.Helper()
 	tick := time.NewTicker(5 * time.Millisecond)
 	defer tick.Stop()

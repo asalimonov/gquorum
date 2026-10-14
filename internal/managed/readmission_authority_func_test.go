@@ -31,8 +31,8 @@ func TestReadmissionAuthorityRetriesIntentAndRetainsReceiptsThroughRebind(t *tes
 		if !closed.Load() || !req.Grant.Equal(grant.Grants[1]) {
 			return load.RetirementResult{}, errors.New("retirement preceded close or omitted authority")
 		}
-		floor, found, err := s.Current(ctx, "work")
-		if err != nil || !found || !floor.Complete || !floor.Grant.Equal(req.Grant) {
+		floor, err := s.Current(ctx, "work")
+		if err != nil || !floor.Found || !floor.Record.Complete || !floor.Record.Grant.Equal(req.Grant) {
 			return load.RetirementResult{}, errors.New("retirement preceded durable fence")
 		}
 		running, err := s.Running(ctx, "work")
@@ -53,12 +53,12 @@ func TestReadmissionAuthorityRetriesIntentAndRetainsReceiptsThroughRebind(t *tes
 		t.Fatal("failed retirement did not retain its failure", err)
 	}
 	for _, g := range grant.Grants {
-		if _, found, err := s.Receipt(t.Context(), g, g.Targets[0]); err != nil || found {
-			t.Fatal("incomplete retirement produced a receipt", found, err)
+		if found, err := s.Receipt(t.Context(), g, g.Targets[0]); err != nil || found.Found {
+			t.Fatal("incomplete retirement produced a receipt", found.Found, err)
 		}
 	}
-	if _, found, err := metastore.LoadIdentity(grant.MetaDBPath); err != nil || !found {
-		t.Fatal("incomplete load retirement moved metadata", found, err)
+	if found, err := metastore.LoadIdentity(grant.MetaDBPath); err != nil || !found.Found {
+		t.Fatal("incomplete load retirement moved metadata", found.Found, err)
 	}
 	must(t, h.Readmit(deadline(t), grant))
 	must(t, h.Readmit(deadline(t), grant))
@@ -77,13 +77,13 @@ func TestReadmissionAuthorityRetriesIntentAndRetainsReceiptsThroughRebind(t *tes
 	must(t, err)
 	must(t, s.Rebind(t.Context(), grant.Previous, grant.Granted, grant.AdmissionID))
 	for _, g := range grant.Grants {
-		r, found, err := s.Receipt(t.Context(), g, g.Targets[0])
-		if err != nil || !found || r.Validate(g) != nil {
-			t.Fatal("rebind lost exact retirement receipt", r, found, err)
+		r, err := s.Receipt(t.Context(), g, g.Targets[0])
+		if err != nil || !r.Found || r.Receipt.Validate(g) != nil {
+			t.Fatal("rebind lost exact retirement receipt", r.Receipt, r.Found, err)
 		}
 	}
-	if _, found, err := metastore.LoadIdentity(readmissionBackup(grant)); err != nil || !found {
-		t.Fatal("readmission lost old metadata evidence", found, err)
+	if found, err := metastore.LoadIdentity(readmissionBackup(grant)); err != nil || !found.Found {
+		t.Fatal("readmission lost old metadata evidence", found.Found, err)
 	}
 }
 
@@ -115,15 +115,15 @@ func TestReadmissionAuthorityValidatesWholeScopeBeforeFencing(t *testing.T) {
 				t.Fatal("invalid scope admitted")
 			}
 			for _, group := range []string{topology.MetaGroupID, "work"} {
-				if _, found, err := s.Current(t.Context(), group); err != nil || found {
-					t.Fatal("invalid batch partially changed authority", group, found, err)
+				if found, err := s.Current(t.Context(), group); err != nil || found.Found {
+					t.Fatal("invalid batch partially changed authority", group, found.Found, err)
 				}
 			}
 			if calls.Load() != 0 {
 				t.Fatal("invalid batch invoked retirement")
 			}
-			if _, found, err := metastore.LoadIdentity(grant.MetaDBPath); err != nil || !found {
-				t.Fatal("invalid batch lost retained evidence", found, err)
+			if found, err := metastore.LoadIdentity(grant.MetaDBPath); err != nil || !found.Found {
+				t.Fatal("invalid batch lost retained evidence", found.Found, err)
 			}
 		})
 	}
@@ -133,7 +133,7 @@ func TestMetaOnlyReadmissionPersistsIntentAndReceipt(t *testing.T) {
 	t.Parallel()
 	id := topology.Identity{ClusterID: "cluster", NodeName: "one", MemberID: 1, InstanceID: "process"}
 	path := filepath.Join(t.TempDir(), "authority.bolt")
-	s, err := authoritystore.Open(path, id, true)
+	s, err := authoritystore.Open(path, id, authoritystore.FreshEvidence)
 	must(t, err)
 	t.Cleanup(func() { must(t, s.Close()) })
 	grant := Readmission{Previous: id, Granted: id, AdmissionID: "approved", MetaDBPath: filepath.Join(t.TempDir(), "meta.bolt")}
@@ -141,32 +141,35 @@ func TestMetaOnlyReadmissionPersistsIntentAndReceipt(t *testing.T) {
 	grant.Grants = readmissionTestGrants(grant)
 	writeMeta(t, grant.MetaDBPath, id, 0)
 	authorize := func(ctx context.Context, _ Readmission) error { return ctx.Err() }
-	must(t, ReadmitMeta(t.Context(), id, grant.MetaDBPath, grant, s, authorize))
-	must(t, ReadmitMeta(t.Context(), id, grant.MetaDBPath, grant, s, authorize))
+	must(t, ReadmitMeta(t.Context(), grant, MetaReadmissionOptions{Identity: id, Path: grant.MetaDBPath,
+		Authority: s, Authorize: authorize}))
+	must(t, ReadmitMeta(t.Context(), grant, MetaReadmissionOptions{Identity: id, Path: grant.MetaDBPath,
+		Authority: s, Authorize: authorize}))
 	g := grant.Grants[0]
-	r, found, err := s.Receipt(t.Context(), g, g.Targets[0])
+	r, err := s.Receipt(t.Context(), g, g.Targets[0])
 	must(t, err)
-	if !found || r.Validate(g) != nil {
-		t.Fatal("metadata retirement lacks exact receipt", r, found)
+	if !r.Found || r.Receipt.Validate(g) != nil {
+		t.Fatal("metadata retirement lacks exact receipt", r.Receipt, r.Found)
 	}
 	must(t, os.Rename(readmissionBackup(grant), grant.MetaDBPath))
-	if err = ReadmitMeta(t.Context(), id, grant.MetaDBPath, grant, s, authorize); !errors.Is(err, fault.ErrIdentityMismatch) {
+	if err = ReadmitMeta(t.Context(), grant, MetaReadmissionOptions{Identity: id, Path: grant.MetaDBPath,
+		Authority: s, Authorize: authorize}); !errors.Is(err, fault.ErrIdentityMismatch) {
 		t.Fatal("cached metadata receipt hid a reappeared former pin", err)
 	}
-	if pin, found, err := metastore.LoadIdentity(grant.MetaDBPath); err != nil || !found || pin.MemberID != id.MemberID {
-		t.Fatal("receipt retry changed contradictory metadata", pin, found, err)
+	if pin, err := metastore.LoadIdentity(grant.MetaDBPath); err != nil || !pin.Found || pin.Identity.MemberID != id.MemberID {
+		t.Fatal("receipt retry changed contradictory metadata", pin.Identity, pin.Found, err)
 	}
 	must(t, os.Rename(grant.MetaDBPath, readmissionBackup(grant)))
 	must(t, s.Rebind(t.Context(), grant.Previous, grant.Granted, grant.AdmissionID))
 	must(t, s.Close())
 	restarted := grant.Granted
 	restarted.InstanceID = "new-process"
-	s, err = authoritystore.Open(path, restarted, false)
+	s, err = authoritystore.Open(path, restarted, authoritystore.RetainedEvidence)
 	must(t, err)
 	if s.Identity() != restarted {
 		t.Fatal("rebound identity did not survive restart", s.Identity())
 	}
-	if got, found, err := s.Receipt(t.Context(), g, g.Targets[0]); err != nil || !found || got != r {
-		t.Fatal("restart lost receipt for the former identity", got, found, err)
+	if got, err := s.Receipt(t.Context(), g, g.Targets[0]); err != nil || !got.Found || got.Receipt != r.Receipt {
+		t.Fatal("restart lost receipt for the former identity", got.Receipt, got.Found, err)
 	}
 }

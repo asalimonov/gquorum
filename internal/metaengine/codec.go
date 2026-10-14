@@ -2,6 +2,7 @@ package metaengine
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -9,8 +10,13 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
+const metaEnvelopeSchemaVersion = 3
+
+// ProposalKind identifies a versioned replicated metadata operation.
 type ProposalKind string
 
+// Metadata proposal kinds identify authority, topology, admission, session and
+// lock operations.
 const (
 	KindRecordReadmissionReceipts ProposalKind = "record_readmission_receipts"
 	KindBeginReadmissionAuthority ProposalKind = "begin_readmission_authority"
@@ -39,12 +45,16 @@ type envelope struct {
 	Body          json.RawMessage `json:"body"`
 }
 
+// ProposeDocument stages a topology document under expected-version
+// compare-and-swap.
 type ProposeDocument struct {
 	Doc             topology.Document `json:"doc"`
 	ExpectedVersion uint64            `json:"expected_version"`
 	ProposalID      string            `json:"proposal_id"`
 }
 
+// AdmitNode supplies a node declaration and optional replacement identity for
+// admission.
 type AdmitNode struct {
 	Node            topology.Node `json:"node"`
 	MemberID        uint64        `json:"member_id,omitempty"`
@@ -53,89 +63,8 @@ type AdmitNode struct {
 	ProposalID      string        `json:"proposal_id"`
 }
 
-type BeginOperatorProposal struct {
-	Version    uint64          `json:"version"`
-	Plan       topology.Plan   `json:"plan"`
-	Actor      string          `json:"actor"`
-	Origin     topology.Origin `json:"origin"`
-	At         time.Time       `json:"at"`
-	ProposalID string          `json:"proposal_id"`
-}
-
-type CommitRepairOperatorProposal struct {
-	Doc             topology.Document `json:"doc"`
-	ExpectedVersion uint64            `json:"expected_version"`
-	Plan            topology.Plan     `json:"plan"`
-	At              time.Time         `json:"at"`
-	ProposalID      string            `json:"proposal_id"`
-}
-
-type CommitVoterChangeProposal struct {
-	Change          topology.VoterChange `json:"change"`
-	Doc             topology.Document    `json:"doc"`
-	ExpectedVersion uint64               `json:"expected_version"`
-	Plan            topology.Plan        `json:"plan"`
-	At              time.Time            `json:"at"`
-	ProposalID      string               `json:"proposal_id"`
-}
-
-type TransitionOperatorProposal struct {
-	Transition topology.OperatorTransition `json:"transition"`
-	ProposalID string                      `json:"proposal_id"`
-}
-
-type ActivateTargetProposal struct {
-	OperatorID topology.OperatorID `json:"execution_id"`
-	Version    uint64              `json:"version"`
-	Attempt    uint32              `json:"attempt"`
-	ProposalID string              `json:"proposal_id"`
-}
-
-type BindAdmissionProposal struct {
-	Admission       AdmissionRecord `json:"admission"`
-	Founding        bool            `json:"founding,omitempty"`
-	ReplaceInstance bool            `json:"replace_instance,omitempty"`
-	At              time.Time       `json:"at"`
-	ProposalID      string          `json:"proposal_id"`
-}
-
-type CommitReadmissionProposal struct {
-	Admission       AdmissionRecord   `json:"admission"`
-	Doc             topology.Document `json:"doc"`
-	ExpectedVersion uint64            `json:"expected_version"`
-	Plan            topology.Plan     `json:"plan"`
-	At              time.Time         `json:"at"`
-	ProposalID      string            `json:"proposal_id"`
-}
-
-type ReadyAdmissionProposal struct {
-	NodeName   string              `json:"node_name"`
-	InstanceID string              `json:"instance_id"`
-	MemberID   uint64              `json:"member_id"`
-	OperatorID topology.OperatorID `json:"execution_id"`
-	ProposalID string              `json:"proposal_id"`
-}
-
-type GrantSession struct {
-	SessionID  string `json:"session_id"`
-	NodeName   string `json:"node_name"`
-	InstanceID string `json:"instance_id"`
-	TTLSeconds int    `json:"ttl_seconds"`
-	ProposalID string `json:"proposal_id"`
-}
-
-type RevokeSession struct {
-	SessionID  string `json:"session_id"`
-	Reason     string `json:"reason,omitempty"`
-	ProposalID string `json:"proposal_id"`
-}
-
-type AcquireLock struct {
-	Key        string `json:"key"`
-	SessionID  string `json:"session_id"`
-	ProposalID string `json:"proposal_id"`
-}
-
+// Encode wraps a supported metadata proposal in the versioned replicated
+// envelope.
 func Encode(proposal any) ([]byte, error) {
 	var kind ProposalKind
 	switch proposal.(type) {
@@ -184,31 +113,33 @@ func Encode(proposal any) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("meta: marshal %s body: %w", kind, err)
 	}
-	data, err := json.Marshal(envelope{SchemaVersion: 2, Kind: kind, Body: body})
+	data, err := json.Marshal(envelope{SchemaVersion: metaEnvelopeSchemaVersion, Kind: kind, Body: body})
 	if err != nil {
 		return nil, fmt.Errorf("meta: marshal envelope: %w", err)
 	}
 	return data, nil
 }
 
-func decodeEnvelope(data []byte) (ProposalKind, json.RawMessage, error) {
+func decodeEnvelope(data []byte) (envelope, error) {
 	var e envelope
 	if err := json.Unmarshal(data, &e); err != nil {
-		return "", nil, fmt.Errorf("meta: unmarshal envelope: %w", err)
+		return envelope{}, fmt.Errorf("meta: unmarshal envelope: %w", err)
 	}
-	if e.SchemaVersion != 2 {
-		return "", nil, fault.New(fault.Unsupported, fmt.Sprintf("unsupported meta envelope version %d", e.SchemaVersion), nil)
+	if e.SchemaVersion != metaEnvelopeSchemaVersion {
+		return envelope{}, fault.New(fault.Unsupported, fmt.Sprintf("unsupported meta envelope version %d",
+			e.SchemaVersion), nil)
 	}
 	if e.Kind == "" || len(e.Body) == 0 {
-		return "", nil, fmt.Errorf("meta: missing command kind or body")
+		return envelope{}, errors.New("meta: missing command kind or body")
 	}
-	return e.Kind, e.Body, nil
+	return e, nil
 }
 
 // DecodeProposal permits only the versioned meta command set. The transport
 // validates caller scope before submitting the decoded command to Raft.
 func DecodeProposal(data []byte) (any, error) {
-	kind, body, err := decodeEnvelope(data)
+	decoded, err := decodeEnvelope(data)
+	kind, body := decoded.Kind, decoded.Body
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +187,7 @@ func DecodeProposal(data []byte) (any, error) {
 		return nil, fmt.Errorf("meta: unknown proposal kind %q", kind)
 	}
 	if string(body) == "null" {
-		return nil, fmt.Errorf("meta: null command body")
+		return nil, errors.New("meta: null command body")
 	}
 	if err = json.Unmarshal(body, proposal); err != nil {
 		return nil, err

@@ -13,10 +13,13 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
+const fenceReconcileWorkers = 8
+
 // ReconcileFences is independent of the current execution cursor. Failed,
 // superseded and empty operators can all leave durable revocation obligations.
 func (g *Group) ReconcileFences(parent context.Context) error {
-	ctx, release, err := g.beginEffect(parent)
+	ctxHandle, err := g.acquireEffectContext(parent)
+	ctx, release := ctxHandle.Context, ctxHandle.Release
 	if err != nil {
 		return err
 	}
@@ -33,11 +36,12 @@ func (g *Group) ReconcileFences(parent context.Context) error {
 	var workers sync.WaitGroup
 	var mu sync.Mutex
 	var failures []error
-	for range min(8, len(pending)) {
+	for range min(fenceReconcileWorkers, len(pending)) {
 		workers.Go(func() {
 			for obligation := range jobs {
-				// An unreachable resource must not prevent independent resources
-				// from completing. Receiver-owned work survives this bounded wait.
+				// An unreachable resource must not prevent independent
+				// resources from completing. Receiver-owned work survives this
+				// bounded wait.
 				attempt, cancel := context.WithTimeout(ctx, g.opts.Timing.DialTimeout)
 				err := g.reconcileFence(attempt, obligation)
 				cancel()
@@ -90,20 +94,30 @@ func (g *Group) reconcileFence(ctx context.Context, obligation topology.FenceObl
 	if obligation.Resource.Kind == topology.AuthorityHost {
 		replica = 0
 	}
-	request := load.FenceRequest{From: g.Identity(), To: peer.Node, ReplicaID: replica, Resource: obligation.Resource, Grant: grant}
+	request := load.FenceRequest{
+		From:      g.Identity(),
+		To:        peer.Node,
+		ReplicaID: replica,
+		Resource:  obligation.Resource,
+		Grant:     grant,
+	}
 	result, err := g.sendFence(ctx, request)
 	if err != nil {
 		return err
 	}
-	if result.From != request.To || result.Evidence.Receiver != request.To || result.Evidence.Resource != request.Resource || result.Evidence.ReplicaID != request.ReplicaID || result.Evidence.Validate(grant) != nil {
+	if result.From != request.To || result.Evidence.Receiver != request.To ||
+		result.Evidence.Resource != request.Resource || result.Evidence.ReplicaID != request.ReplicaID ||
+		result.Evidence.Validate(grant) != nil {
 		return fault.ErrOperatorAuthorization
 	}
-	// Recording a valid older boundary is safe if leadership or approval changed
-	// during the call. The replicated catalog checks it against all newer proofs.
+	// Recording a valid older boundary is safe if leadership or approval
+	// changed during the call. The replicated catalog checks it against all
+	// newer proofs.
 	return g.RecordFence(ctx, result.Evidence)
 }
 
-func (g *Group) fenceReceiver(ctx context.Context, grant topology.AuthorityGrant, resource topology.AuthorityResource) (load.Peer, error) {
+func (g *Group) fenceReceiver(ctx context.Context, grant topology.AuthorityGrant,
+	resource topology.AuthorityResource) (load.Peer, error) {
 	var replica uint64
 	if resource.Kind == topology.AuthorityGroup {
 		status, err := (groupControllers{g}).Status(ctx, resource.GroupID)
@@ -117,7 +131,8 @@ func (g *Group) fenceReceiver(ctx context.Context, grant topology.AuthorityGrant
 	}
 	err := error(fault.ErrReplicaNotReady)
 	for _, target := range grant.Targets {
-		if resource.Kind == topology.AuthorityHost && target.NodeName != resource.NodeName || resource.Kind == topology.AuthorityGroup && target.ReplicaID != replica {
+		if resource.Kind == topology.AuthorityHost && target.NodeName != resource.NodeName ||
+			resource.Kind == topology.AuthorityGroup && target.ReplicaID != replica {
 			continue
 		}
 		var peer load.Peer

@@ -1,4 +1,5 @@
-// Package topology defines replicated cluster declarations and exact approved effects.
+// Package topology defines replicated cluster declarations and exact approved
+// effects.
 package topology
 
 import (
@@ -10,11 +11,17 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 )
 
+const (
+	defaultPendingAuthorityRecords = 1024
+	defaultMaxNodes                = 3
+	defaultMaxReplicas             = 5
+)
+
+// MetaGroupID names the reserved Raft group that replicates cluster topology.
 const MetaGroupID = "_meta"
 
-type NodeType string
-type NodeState string
-
+// NodeActive and the following values describe placement eligibility, drain and
+// exclusion.
 const (
 	NodeActive   NodeState = "active"
 	NodeDraining NodeState = "draining"
@@ -22,17 +29,20 @@ const (
 	NodeExcluded NodeState = "excluded"
 )
 
+// Places reports whether the state retains placement participation rather than
+// exclusion.
 func (s NodeState) Places() bool { return s == NodeActive || s == NodeDraining || s == NodeDrained }
 
-type ReplicaRole string
-
+// ReplicaVoter and ReplicaLearner identify desired Raft membership roles.
 const (
 	ReplicaVoter   ReplicaRole = "voter"
 	ReplicaLearner ReplicaRole = "learner"
 )
 
+// Origin records the source of a topology edit.
 type Origin string
 
+// OriginAPI and the following values classify topology-edit provenance.
 const (
 	OriginAPI        Origin = "api"
 	OriginReconciler Origin = "reconciler"
@@ -42,25 +52,22 @@ const (
 	OriginInternal   Origin = "internal"
 )
 
-type Limits struct {
-	MaxPendingAuthorityRecords int `json:"max_pending_authority_records,omitempty"`
-	MaxNodes                   int `json:"max_nodes"`
-	MaxReplicas                int `json:"max_replicas"`
-}
-
+// WithDefaults fills absent capacity limits with the library defaults.
 func (l Limits) WithDefaults() Limits {
 	if l.MaxPendingAuthorityRecords == 0 {
-		l.MaxPendingAuthorityRecords = 1024
+		l.MaxPendingAuthorityRecords = defaultPendingAuthorityRecords
 	}
 	if l.MaxNodes == 0 {
-		l.MaxNodes = 3
+		l.MaxNodes = defaultMaxNodes
 	}
 	if l.MaxReplicas == 0 {
-		l.MaxReplicas = 5
+		l.MaxReplicas = defaultMaxReplicas
 	}
 	return l
 }
 
+// Validate checks positive node and replica capacities and a nonnegative
+// authority limit.
 func (l Limits) Validate() error {
 	if l.MaxNodes < 1 || l.MaxReplicas < 1 || l.MaxPendingAuthorityRecords < 0 {
 		return invalid("limits must be positive")
@@ -68,77 +75,49 @@ func (l Limits) Validate() error {
 	return nil
 }
 
-type Rules struct {
-	SchemaVersion uint32 `json:"schema_version"`
-	Limits        Limits `json:"limits"`
-}
-
-type PlacementRule struct {
-	// MinReplicas and MaxReplicas bound voters, not hosted learners.
-	// Limits.MaxReplicas bounds the total replicas of a load group.
-	MinReplicas      int        `json:"min_replicas"`
-	MaxReplicas      int        `json:"max_replicas"`
-	AllowedNodeTypes []NodeType `json:"allowed_node_types,omitempty"`
-}
-
+// Allows reports whether the node type passes the rule's type restriction.
 func (p PlacementRule) Allows(t NodeType) bool {
 	return len(p.AllowedNodeTypes) == 0 || slices.Contains(p.AllowedNodeTypes, t)
 }
 
-type Node struct {
-	Name      string            `json:"name"`
-	Type      NodeType          `json:"type"`
-	State     NodeState         `json:"state"`
-	Region    string            `json:"region,omitempty"`
-	Labels    map[string]string `json:"labels,omitempty"`
-	CreatedAt time.Time         `json:"created_at"`
-	UpdatedAt time.Time         `json:"updated_at"`
-}
-
-type Replica struct {
-	NodeName      string      `json:"node_name"`
-	ReplicaID     uint64      `json:"replica_id"`
-	Role          ReplicaRole `json:"role"`
-	PinnedLearner bool        `json:"pinned_learner,omitempty"`
-	CreatedAt     time.Time   `json:"created_at"`
-	UpdatedAt     time.Time   `json:"updated_at"`
-}
-
-type Group struct {
-	ID            string         `json:"id"`
-	Replicas      []Replica      `json:"replicas"`
-	NextReplicaID uint64         `json:"next_replica_id"`
-	Placement     *PlacementRule `json:"placement,omitempty"`
-	VoterPolicy   *VoterPolicy   `json:"voter_policy,omitempty"`
-	Hosting       *HostingRule   `json:"hosting,omitempty"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
-}
-
+// ChangeAudit records operator justification for an audited topology edit,
+// including the explicit proof fields required by forced retirement.
 type ChangeAudit struct {
-	Operation  string    `json:"operation"`
-	TargetNode string    `json:"target_node,omitempty"`
-	Forced     bool      `json:"forced"`
-	Reason     string    `json:"reason"`
-	StagedBy   string    `json:"staged_by"`
-	StagedAt   time.Time `json:"staged_at"`
+	// Operation and TargetNode identify the audited action and subject.
+	Operation  string `json:"operation"`
+	TargetNode string `json:"target_node,omitempty"`
+	// Forced, Reason and the staging identity/time record operator intent.
+	Forced   bool      `json:"forced"`
+	Reason   string    `json:"reason"`
+	StagedBy string    `json:"staged_by"`
+	StagedAt time.Time `json:"staged_at"`
 }
 
+// AuditOperationForceRetireNode identifies the audited forced-retirement
+// operation.
 const AuditOperationForceRetireNode = "force_retire_node"
 
+// Document is one versioned cluster-topology declaration. Latest may be
+// unapproved intent, Target is approved intent, and Active is fully converged;
+// those views carry the same value type but have different authority.
 type Document struct {
-	Version       uint64        `json:"version"`
-	ClusterID     string        `json:"cluster_id"`
-	Placement     PlacementRule `json:"placement"`
-	Nodes         []Node        `json:"nodes"`
-	Groups        []Group       `json:"groups"`
-	ChangedBy     string        `json:"changed_by"`
-	Origin        Origin        `json:"origin"`
-	Comment       string        `json:"comment,omitempty"`
-	CreatedAt     time.Time     `json:"created_at"`
-	ParentVersion uint64        `json:"parent_version"`
-	Audit         *ChangeAudit  `json:"audit,omitempty"`
+	// Version and ClusterID identify this declaration within one cluster.
+	Version   uint64 `json:"version"`
+	ClusterID string `json:"cluster_id"`
+	// Cluster-wide placement and the declared nodes and Raft groups.
+	Placement PlacementRule `json:"placement"`
+	Nodes     []Node        `json:"nodes"`
+	Groups    []Group       `json:"groups"`
+	// Edit provenance and its previous version.
+	ChangedBy     string       `json:"changed_by"`
+	Origin        Origin       `json:"origin"`
+	Comment       string       `json:"comment,omitempty"`
+	CreatedAt     time.Time    `json:"created_at"`
+	ParentVersion uint64       `json:"parent_version"`
+	Audit         *ChangeAudit `json:"audit,omitempty"`
 }
+
+// Document lookups return aliases into the receiver; edit an owned clone.
 
 // Group returns an alias into the document; mutate only an owned clone.
 func (d *Document) Group(id string) *Group {
@@ -150,6 +129,7 @@ func (d *Document) Group(id string) *Group {
 	return nil
 }
 
+// Node returns the named node as an alias into the document.
 func (d *Document) Node(name string) *Node {
 	for i := range d.Nodes {
 		if d.Nodes[i].Name == name {
@@ -159,7 +139,10 @@ func (d *Document) Node(name string) *Node {
 	return nil
 }
 
+// MetaGroup returns the reserved _meta group, if present.
 func (d *Document) MetaGroup() *Group { return d.Group(MetaGroupID) }
+
+// LoadGroups lists the non-_meta group values in document order.
 func (d *Document) LoadGroups() []Group {
 	var groups []Group
 	for _, g := range d.Groups {
@@ -170,6 +153,7 @@ func (d *Document) LoadGroups() []Group {
 	return groups
 }
 
+// MemberID resolves a node name to its _meta ReplicaID, or zero if absent.
 func (d *Document) MemberID(name string) uint64 {
 	if g := d.MetaGroup(); g != nil {
 		for _, r := range g.Replicas {
@@ -181,6 +165,9 @@ func (d *Document) MemberID(name string) uint64 {
 	return 0
 }
 
+// Replica and _meta member IDs are allocated from each group's high-water mark.
+
+// AllocateReplicaID advances the group's allocation cursor without reusing IDs.
 func (g *Group) AllocateReplicaID() (uint64, error) {
 	next := g.NextReplicaID
 	for _, r := range g.Replicas {
@@ -201,6 +188,7 @@ func (g *Group) AllocateReplicaID() (uint64, error) {
 	return next, nil
 }
 
+// AllocateMemberID allocates the next _meta replica ID.
 func (d *Document) AllocateMemberID() (uint64, error) {
 	g := d.MetaGroup()
 	if g == nil {
@@ -209,9 +197,10 @@ func (d *Document) AllocateMemberID() (uint64, error) {
 	return g.AllocateReplicaID()
 }
 
+// SetMemberID assigns a numeric _meta identity to a declared node.
 func (d *Document) SetMemberID(name string, id uint64, at time.Time) error {
 	g := d.MetaGroup()
-	if g == nil || d.Node(name) == nil || id == 0 || id == math.MaxUint64 {
+	if g == nil || id == 0 || id == math.MaxUint64 || d.Node(name) == nil {
 		return invalid("invalid meta identity")
 	}
 	for _, r := range g.Replicas {
@@ -230,13 +219,14 @@ func (d *Document) SetMemberID(name string, id uint64, at time.Time) error {
 		}
 	}
 	role := ReplicaVoter
-	if g.VoterPolicy != nil {
+	if g.VoterConfig != nil {
 		role = ReplicaLearner
 	}
 	g.Replicas = append(g.Replicas, Replica{NodeName: name, ReplicaID: id, Role: role, CreatedAt: at, UpdatedAt: at})
 	return nil
 }
 
+// VotersOf lists desired voter replicas for a group in document order.
 func (d *Document) VotersOf(id string) []Replica {
 	var out []Replica
 	if g := d.Group(id); g != nil {
@@ -249,8 +239,12 @@ func (d *Document) VotersOf(id string) []Replica {
 	return out
 }
 
+// QuorumOf returns the majority required for the supplied voter count.
 func QuorumOf(voters int) int { return voters/2 + 1 }
 
+// Placement queries use a group's complete override when present.
+
+// GroupPlacement returns the effective rule for a group.
 func (d *Document) GroupPlacement(id string) PlacementRule {
 	if g := d.Group(id); g != nil && g.Placement != nil {
 		return *g.Placement
@@ -258,11 +252,14 @@ func (d *Document) GroupPlacement(id string) PlacementRule {
 	return d.Placement
 }
 
-func (d *Document) GroupBounds(id string) (int, int) {
+// GroupBounds returns the effective minimum and maximum voter counts.
+func (d *Document) GroupBounds(id string) (minimum, maximum int) {
 	p := d.GroupPlacement(id)
 	return p.MinReplicas, p.MaxReplicas
 }
 
+// EffectiveNodeState reports a draining node as drained once its active load
+// assignments are gone.
 func EffectiveNodeState(active Document, name string) NodeState {
 	n := active.Node(name)
 	if n == nil {
@@ -284,6 +281,7 @@ func EffectiveNodeState(active Document, name string) NodeState {
 	return NodeDrained
 }
 
+// Clone returns an owned copy of the document and nested mutable values.
 func (d Document) Clone() Document {
 	out := d
 	if d.Audit != nil {
@@ -291,6 +289,7 @@ func (d Document) Clone() Document {
 		out.Audit = &a
 	}
 	out.Placement.AllowedNodeTypes = slices.Clone(d.Placement.AllowedNodeTypes)
+	out.Placement.NodeSelector = maps.Clone(d.Placement.NodeSelector)
 	out.Nodes = slices.Clone(d.Nodes)
 	for i := range out.Nodes {
 		out.Nodes[i].Labels = maps.Clone(d.Nodes[i].Labels)
@@ -298,9 +297,10 @@ func (d Document) Clone() Document {
 	out.Groups = slices.Clone(d.Groups)
 	for i := range out.Groups {
 		out.Groups[i].Replicas = slices.Clone(d.Groups[i].Replicas)
-		if d.Groups[i].VoterPolicy != nil {
-			p := *d.Groups[i].VoterPolicy
-			out.Groups[i].VoterPolicy = &p
+		out.Groups[i].Labels = maps.Clone(d.Groups[i].Labels)
+		if d.Groups[i].VoterConfig != nil {
+			p := *d.Groups[i].VoterConfig
+			out.Groups[i].VoterConfig = &p
 		}
 		if d.Groups[i].Hosting != nil {
 			h := *d.Groups[i].Hosting
@@ -310,10 +310,13 @@ func (d Document) Clone() Document {
 		if d.Groups[i].Placement != nil {
 			p := *d.Groups[i].Placement
 			p.AllowedNodeTypes = slices.Clone(p.AllowedNodeTypes)
+			p.NodeSelector = maps.Clone(p.NodeSelector)
 			out.Groups[i].Placement = &p
 		}
 	}
 	return out
 }
 
-func invalid(message string) error { return fault.New(fault.Invalid, message, nil) }
+func invalid(message string) error {
+	return fault.New(fault.Invalid, message, nil)
+}

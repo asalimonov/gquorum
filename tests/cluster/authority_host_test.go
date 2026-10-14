@@ -48,7 +48,7 @@ func TestAuthorityHostRevocationWaitsForExactRetainedProcessReturnThreeNodes(t *
 	if err := response.Decode(&deleted); err != nil {
 		t.Fatal(err)
 	}
-	old := startApply(t, ctx, c, "node2", deleted.Document.Version)
+	old := startApply(ctx, t, c, "node2", deleted.Document.Version)
 	var delayed load.ActionRequest
 	if err := Poll(ctx, func() (bool, error) {
 		view, err := c.Authority(ctx, "node1", "work")
@@ -80,7 +80,7 @@ func TestAuthorityHostRevocationWaitsForExactRetainedProcessReturnThreeNodes(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	newOp := startApply(t, ctx, c, "node2", newStage.Document.Version)
+	newOp := startApply(ctx, t, c, "node2", newStage.Document.Version)
 	for _, node := range []string{"node2", "node3"} {
 		if err := Poll(ctx, func() (bool, error) {
 			status, err := c.Revocation(ctx, node, old)

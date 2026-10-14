@@ -12,7 +12,8 @@ import (
 )
 
 // Admission ownership lasts through metadata retirement and replacement. A
-// process probe establishes only that the exact admitted process is still alive;
+// process probe establishes only that the exact admitted process is still
+// alive;
 // it cannot prove readiness, member ownership or consumption of any effect.
 type processIdentityRequest struct {
 	NodeName   string `json:"node_name"`
@@ -22,7 +23,8 @@ type processIdentityRequest struct {
 // Call has already authenticated the cluster and acquired protocol lifetime.
 func (g *Group) processIdentityReply(request processIdentityRequest) *metapb.Reply {
 	id := g.Identity()
-	if request.NodeName == "" || request.InstanceID == "" || request.NodeName != id.NodeName || request.InstanceID != id.InstanceID {
+	if request.NodeName == "" || request.InstanceID == "" || request.NodeName != id.NodeName ||
+		request.InstanceID != id.InstanceID {
 		return metatransport.Reply(fault.ErrIdentityMismatch)
 	}
 	data, err := json.Marshal(id)
@@ -39,7 +41,8 @@ func (g *Group) probeAdmission(parent context.Context, admission metaengine.Admi
 	if err != nil {
 		return false
 	}
-	data, err := json.Marshal(authorityIdentityRequest{Process: &processIdentityRequest{NodeName: admission.NodeName, InstanceID: admission.InstanceID}})
+	data, err := json.Marshal(authorityIdentityRequest{Process: &processIdentityRequest{NodeName: admission.NodeName,
+		InstanceID: admission.InstanceID}})
 	if err != nil {
 		return false
 	}
@@ -51,5 +54,7 @@ func (g *Group) probeAdmission(parent context.Context, admission metaengine.Admi
 	if json.Unmarshal(reply.Data, &id) != nil {
 		return false
 	}
-	return id.ClusterID == g.Identity().ClusterID && id.NodeName == admission.NodeName && id.InstanceID == admission.InstanceID
+	identity := g.Identity()
+	return id.ClusterID == identity.ClusterID && id.NodeName == admission.NodeName &&
+		id.InstanceID == admission.InstanceID
 }

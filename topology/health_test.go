@@ -16,7 +16,7 @@ func healthDocument() Document {
 }
 
 // Ports the source's declared-voter health cases, including independence of
-// placement policy and nullable observations before health is known.
+// placement rules and nullable observations before health is known.
 func TestEvaluateGroupHealth(t *testing.T) {
 	t.Parallel()
 	for alive := 0; alive <= 3; alive++ {

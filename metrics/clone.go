@@ -1,7 +1,9 @@
 package metrics
 
 // cloneSlice always returns an array-shaped slice, including for absent input.
-func cloneSlice[T any](in []T) []T { return append(make([]T, 0, len(in)), in...) }
+func cloneSlice[T any](in []T) []T {
+	return append(make([]T, 0, len(in)), in...)
+}
 
 func validity(v Validity) Validity {
 	if v == "" {
@@ -10,6 +12,7 @@ func validity(v Validity) Validity {
 	return v
 }
 
+// Clone copies sample slices and normalizes absent validity states.
 func (s ReplicaSample) Clone() ReplicaSample {
 	s.Meter.State = validity(s.Meter.State)
 	s.Raft.State = validity(s.Raft.State)
@@ -23,6 +26,8 @@ func (s ReplicaSample) Clone() ReplicaSample {
 	s.Progress = cloneSlice(s.Progress)
 	return s
 }
+
+// Clone owns the sample and evidence slices and normalizes unknown states.
 func (s ReplicaObservation) Clone() ReplicaObservation {
 	s.State = validity(s.State)
 	s.ReplicationLag.State = validity(s.ReplicationLag.State)
@@ -38,6 +43,8 @@ func (s ReplicaObservation) Clone() ReplicaObservation {
 	s.Evidence.Reasons = cloneSlice(s.Evidence.Reasons)
 	return s
 }
+
+// Clone copies all replica observations and normalizes group validity.
 func (s GroupObservation) Clone() GroupObservation {
 	s.State = validity(s.State)
 	s.Replicas = cloneSlice(s.Replicas)
@@ -46,6 +53,8 @@ func (s GroupObservation) Clone() GroupObservation {
 	}
 	return s
 }
+
+// Clone copies every local and group observation into owned slices.
 func (s ClusterSnapshot) Clone() ClusterSnapshot {
 	s.Local = cloneSlice(s.Local)
 	for i := range s.Local {
@@ -57,6 +66,8 @@ func (s ClusterSnapshot) Clone() ClusterSnapshot {
 	}
 	return s
 }
+
+// Clone copies the page and its nested observation data.
 func (s HistoryPage) Clone() HistoryPage {
 	s.Points = cloneSlice(s.Points)
 	for i := range s.Points {

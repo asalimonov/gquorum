@@ -14,15 +14,26 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	internalmetrics "github.com/asalimonov/gquorum/internal/metrics"
-	"github.com/asalimonov/gquorum/internal/raftlog"
 	"github.com/asalimonov/gquorum/internal/raftstate"
+	"github.com/asalimonov/gquorum/internal/replicastate"
+	"github.com/asalimonov/gquorum/internal/watchstate"
 	"github.com/asalimonov/gquorum/membership"
 	"github.com/asalimonov/gquorum/metrics"
-	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"
 	"go.etcd.io/raft/v3/tracker"
+)
+
+const (
+	proposalQueueCapacity       = 256
+	inboundQueueCapacity        = 1024
+	controlQueueCapacity        = 16
+	snapshotQueueCapacity       = 16
+	unreachableQueueCapacity    = 256
+	snapshotReportQueueCapacity = 64
+	outboundBatchQueueCapacity  = 256
+	engineWorkerCount           = 4 // Raft loop, writer, sender and metrics sampler.
 )
 
 type response struct {
@@ -30,24 +41,34 @@ type response struct {
 	err    error
 }
 type request struct {
-	ctx         context.Context
-	correlation string
-	proposal    Proposal
-	message     *raftpb.Message
-	change      *raftpb.ConfChangeV2
-	admin       *raftstate.Entry
-	expected    *raftpb.ConfState
-	transfer    uint64
-	snapshot    bool
-	reply       chan response
-	retried     bool
-	retryAt     time.Time
+	expectedTerm uint64
+	ctx          context.Context
+	correlation  string
+	proposal     Proposal
+	messages     []raftpb.Message
+	change       *raftpb.ConfChangeV2
+	admin        *raftstate.Entry
+	expected     *raftpb.ConfState
+	transfer     uint64
+	snapshot     bool
+	reply        chan response
+	retried      bool
+	retryAt      time.Time
 }
 type snapshotReport struct {
 	id     uint64
 	status raft.SnapshotStatus
 }
+
+// Group owns one exact persistence-ordered Raft replica and its serialized
+// application work.
 type Group struct {
+	observations                              *watchstate.Latest[replicastate.Observation]
+	observation                               replicastate.Observation
+	leadership                                LeadershipEpoch
+	cancelLeadership                          context.CancelFunc
+	leadershipChanged                         chan struct{}
+	supervised, stopping                      bool
 	opts                                      Options
 	rn                                        *raft.RawNode
 	ms                                        *raft.MemoryStorage
@@ -78,6 +99,7 @@ type Group struct {
 	sendWorkers                               atomic.Int64
 	writeC                                    chan writeJob
 	writeDone                                 chan writeResult
+	hint                                      appliedHint
 	pending                                   *writeJob
 	props, changes                            map[string]*request
 	confNotify                                []*request
@@ -97,121 +119,41 @@ type Group struct {
 	outboundPending                           atomic.Int64
 }
 
-func New(opts Options) (*Group, error) { return NewContext(context.Background(), opts) }
+// New validates a load replica and restores its retained consensus state before
+// workers start.
+func New(opts Options) (*Group, error) {
+	return NewContext(context.Background(), opts)
+}
 
 // NewContext binds storage and restores the machine under its owner's startup
 // context. It starts no workers and never closes borrowed dependencies.
 func NewContext(ctx context.Context, opts Options) (*Group, error) {
-	return newGroup(ctx, opts, false)
+	return newGroup(ctx, opts, loadEngine)
 }
 
 // NewMeta is restricted to the library's internal topology runtime.
-func NewMeta(opts Options) (*Group, error) { return newGroup(context.Background(), opts, true) }
-func newGroup(parent context.Context, opts Options, meta bool) (*Group, error) {
+func NewMeta(opts Options) (*Group, error) {
+	return newGroup(context.Background(), opts, metaEngine)
+}
+func newGroup(parent context.Context, opts Options, mode engineMode) (*Group, error) {
 	if err := parent.Err(); err != nil {
 		return nil, err
 	}
-	if err := opts.validate(meta); err != nil {
+	if err := opts.validateMode(mode); err != nil {
 		return nil, err
 	}
-	opts = opts.defaults()
-	if opts.InitialAuthority != nil {
-		grant := opts.InitialAuthority.Clone()
-		opts.InitialAuthority = &grant
-	}
-	peers := make([]raft.Peer, len(opts.Peers))
-	for i, p := range opts.Peers {
-		peers[i] = raft.Peer{ID: p.ID, Context: bytes.Clone(p.Context)}
-	}
-	opts.Peers = peers
-	learners := make([]raft.Peer, len(opts.FoundingLearners))
-	for i, p := range opts.FoundingLearners {
-		learners[i] = raft.Peer{ID: p.ID, Context: bytes.Clone(p.Context)}
-	}
-	opts.FoundingLearners = learners
+	options := ownGroupOptions(opts.defaults())
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
-	id := storage.Identity{NodeName: opts.NodeName, ClusterID: opts.ClusterID, GroupID: opts.GroupID, ReplicaID: opts.ReplicaID}
-	if err := opts.Store.BindReplica(ctx, id); err != nil {
-		return nil, err
-	}
-	probe, err := opts.Store.Probe(ctx, opts.GroupID)
+	state, err := loadGroupRecovery(ctx, options)
 	if err != nil {
 		return nil, err
 	}
-	if probe.Exists && probe.Identity != id {
-		return nil, fault.ErrIdentityMismatch
-	}
-	if err := opts.Store.Ensure(ctx, opts.GroupID); err != nil {
+	if err := initializeFounding(ctx, options, &state); err != nil {
 		return nil, err
 	}
-	recovery, err := opts.Store.Load(ctx, opts.GroupID)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateRecovery(recovery); err != nil {
-		return nil, err
-	}
-	var restored raftstate.Snapshot
-	if !raft.IsEmptySnap(recovery.Snapshot) {
-		restored, err = raftstate.DecodeRaftSnapshot(recovery.Snapshot, opts.ClusterID, opts.GroupID)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if err := validateAuthorityRecovery(opts, recovery, restored); err != nil {
-		return nil, err
-	}
-	if err := opts.Machine.Restore(ctx, bytes.Clone(restored.Application)); err != nil {
-		return nil, fault.New(fault.Unreadable, "restore load machine", err)
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if raft.IsEmptyHardState(recovery.HardState) && raft.IsEmptySnap(recovery.Snapshot) && len(recovery.Entries) == 0 && opts.Mode == Founding {
-		data, err := opts.Machine.Snapshot(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if len(data) == 0 {
-			return nil, fault.New(fault.Invalid, "empty founding machine snapshot", nil)
-		}
-		cs := raftpb.ConfState{}
-		for _, peer := range peers {
-			cs.Voters = append(cs.Voters, peer.ID)
-		}
-		for _, peer := range learners {
-			cs.Learners = append(cs.Learners, peer.ID)
-		}
-		slices.Sort(cs.Voters)
-		slices.Sort(cs.Learners)
-		if opts.InitialAuthority != nil {
-			restored.Authority = raftstate.AuthorityState{Grant: opts.InitialAuthority, InstallIndex: 1, InstallTerm: 1}
-		}
-		data, err = encodeSnapshot(opts, data, restored.Authority)
-		if err != nil {
-			return nil, err
-		}
-		ss := raftpb.Snapshot{Data: data, Metadata: raftpb.SnapshotMetadata{Index: 1, Term: 1, ConfState: cs}}
-		if err := opts.Store.SaveSnapshot(ctx, opts.GroupID, ss); err != nil {
-			return nil, err
-		}
-		recovery.Snapshot = ss
-		recovery.HardState = raftpb.HardState{Term: 1, Commit: 1}
-	}
-	ms := raft.NewMemoryStorage()
-	if !raft.IsEmptySnap(recovery.Snapshot) {
-		if err := ms.ApplySnapshot(recovery.Snapshot); err != nil {
-			return nil, err
-		}
-	}
-	if err := ms.Append(recovery.Entries); err != nil {
-		return nil, err
-	}
-	if err := ms.SetHardState(recovery.HardState); err != nil {
-		return nil, err
-	}
-	rn, err := raft.NewRawNode(&raft.Config{ID: opts.ReplicaID, ElectionTick: opts.Timing.ElectionTicks, HeartbeatTick: opts.Timing.HeartbeatTicks, Storage: ms, Applied: recovery.Snapshot.Metadata.Index, MaxSizePerMsg: 64 << 10, MaxInflightMsgs: 256, MaxCommittedSizePerReady: opts.MaxApplyBatchBytes, MaxUncommittedEntriesSize: opts.MaxUncommittedBytes, PreVote: true, CheckQuorum: true, ReadOnlyOption: raft.ReadOnlySafe, Logger: raftlog.Logger{Log: opts.Logger}})
+	recovery, restored := state.recovery, state.restored
+	initialized, err := initializeRaft(options, recovery)
 	if err != nil {
 		return nil, err
 	}
@@ -219,12 +161,46 @@ func newGroup(parent context.Context, opts Options, meta bool) (*Group, error) {
 	if _, err := rand.Read(seed[:]); err != nil {
 		return nil, err
 	}
-	g := &Group{opts: opts, rn: rn, ms: ms, cs: copyConf(recovery.Snapshot.Metadata.ConfState), applied: recovery.Snapshot.Metadata.Index, snapshotIndex: recovery.Snapshot.Metadata.Index, recoveryCommit: recovery.HardState.Commit, durableHS: recovery.HardState, done: make(chan struct{}), ready: make(chan struct{}), proposals: make(chan *request, 256), inbound: make(chan *request, 1024), controls: make(chan *request, 16), snapshots: make(chan *request, 16), slots: make(chan struct{}, opts.MaxPendingProposals), unreachable: make(chan uint64, 256), reports: make(chan snapshotReport, 64), sendC: make(chan []raftpb.Message, 256), writeC: make(chan writeJob, 1), writeDone: make(chan writeResult, 1), props: make(map[string]*request), changes: make(map[string]*request), nonce: hex.EncodeToString(seed[:])}
+	g := &Group{
+		opts:           options,
+		rn:             initialized.raw,
+		ms:             initialized.memory,
+		cs:             copyConf(recovery.Snapshot.Metadata.ConfState),
+		applied:        recovery.Snapshot.Metadata.Index,
+		snapshotIndex:  recovery.Snapshot.Metadata.Index,
+		recoveryCommit: recovery.HardState.Commit,
+		durableHS:      recovery.HardState,
+		done:           make(chan struct{}),
+		ready:          make(chan struct{}),
+		proposals:      make(chan *request, proposalQueueCapacity),
+		inbound:        make(chan *request, inboundQueueCapacity),
+		controls:       make(chan *request, controlQueueCapacity),
+		snapshots:      make(chan *request, snapshotQueueCapacity),
+		slots:          make(chan struct{}, options.MaxPendingProposals),
+		unreachable:    make(chan uint64, unreachableQueueCapacity),
+		reports:        make(chan snapshotReport, snapshotReportQueueCapacity),
+		sendC:          make(chan []raftpb.Message, outboundBatchQueueCapacity),
+		writeC:         make(chan writeJob, 1),
+		writeDone:      make(chan writeResult, 1),
+		props:          make(map[string]*request),
+		changes:        make(map[string]*request),
+		nonce:          hex.EncodeToString(seed[:]),
+	}
+	g.observations = watchstate.New(options.MaxWatchers, replicastate.Observation{},
+		func(o replicastate.Observation) replicastate.Observation { return o })
+	g.leadershipChanged = make(chan struct{})
 	g.authority = restored.Authority.Clone()
-	g.reads = make(chan *readRequest, opts.Reads.MaxPending)
-	g.readSlots = make(chan struct{}, opts.Reads.MaxPending)
+	g.reads = make(chan *readRequest, options.Reads.MaxPending)
+	g.readSlots = make(chan struct{}, options.Reads.MaxPending)
 	g.peerAcks = make(map[uint64]peerAck)
-	g.meter, err = internalmetrics.NewMeter(metrics.ReplicaIdentity{ClusterID: opts.ClusterID, GroupID: opts.GroupID, NodeName: opts.NodeName, ReplicaID: opts.ReplicaID, InstanceID: opts.InstanceID, RunID: g.nonce}, opts.Metrics)
+	g.meter, err = internalmetrics.NewMeter(metrics.ReplicaIdentity{
+		ClusterID:  options.ClusterID,
+		GroupID:    options.GroupID,
+		NodeName:   options.NodeName,
+		ReplicaID:  options.ReplicaID,
+		InstanceID: options.InstanceID,
+		RunID:      g.nonce,
+	}, options.Metrics)
 	if err != nil {
 		return nil, err
 	}
@@ -232,6 +208,7 @@ func newGroup(parent context.Context, opts Options, meta bool) (*Group, error) {
 	return g, nil
 }
 
+// Start begins engine work under the supplied lifetime context.
 func (g *Group) Start(parent context.Context) error {
 	if err := parent.Err(); err != nil {
 		return err
@@ -243,26 +220,53 @@ func (g *Group) Start(parent context.Context) error {
 	}
 	g.started = true
 	g.ctx, g.cancel = context.WithCancel(parent)
-	g.wg.Add(4)
+	g.wg.Add(engineWorkerCount)
 	go g.run()
 	go g.writer()
 	go g.sender()
 	go g.sampleMetrics()
-	go func() { g.wg.Wait(); close(g.done) }()
+	go func() { g.wg.Wait(); g.finishObservations(); close(g.done) }()
 	return nil
 }
-func (g *Group) Stop(ctx context.Context) error {
+
+// RequestStop cancels engine participation without waiting for owned workers.
+func (g *Group) RequestStop() {
 	g.mu.Lock()
-	if !g.started && !g.stopped {
+	finish := !g.started && !g.stopped
+	g.stopping = true
+	if finish {
 		g.stopped = true
-		g.err = fault.ErrStopped
+		if g.err == nil {
+			g.err = fault.ErrStopped
+		}
 		g.meter.Stop()
-		close(g.done)
 	}
 	if g.cancel != nil {
 		g.cancel()
 	}
+	g.publishObservationLocked(regularObservation)
 	g.mu.Unlock()
+	if finish {
+		go func() { g.finishObservations(); close(g.done) }()
+	}
+}
+
+// Fail preserves an external owner's failure and begins the same joined stop.
+func (g *Group) Fail(err error) {
+	if err == nil {
+		return
+	}
+	g.mu.Lock()
+	if g.err == nil {
+		g.err = err
+	}
+	g.mu.Unlock()
+	g.RequestStop()
+}
+
+// Stop requests engine teardown and waits for all engine-owned work to join.
+func (g *Group) Stop(ctx context.Context) error {
+	g.RequestStop()
 	select {
 	case <-g.done:
 		return nil
@@ -270,6 +274,9 @@ func (g *Group) Stop(ctx context.Context) error {
 		return fault.New(fault.ShutdownTimeout, "load group workers have not stopped", ctx.Err())
 	}
 }
+
+// WaitReady waits for replay readiness or engine failure without canceling its
+// lifetime.
 func (g *Group) WaitReady(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
@@ -293,10 +300,27 @@ func (g *Group) exitError() error {
 	}
 	return fault.ErrStopped
 }
-func (g *Group) Error() error      { g.mu.RLock(); defer g.mu.RUnlock(); return g.err }
-func (g *Group) GroupID() string   { return g.opts.GroupID }
+
+// RunContext belongs to the engine lifetime after Start. Managed callbacks
+// inherit it so engine failure cancels them before resource release can join.
+func (g *Group) RunContext() context.Context { g.mu.RLock(); defer g.mu.RUnlock(); return g.ctx }
+
+// RunID returns this exact engine incarnation's local observation-series
+// identity.
+func (g *Group) RunID() string { return g.nonce }
+
+func (g *Group) Error() error { g.mu.RLock(); defer g.mu.RUnlock(); return g.err }
+
+// GroupID returns the configured Raft group name.
+func (g *Group) GroupID() string { return g.opts.GroupID }
+
+// ReplicaID returns the exact numeric Raft replica identity.
 func (g *Group) ReplicaID() uint64 { return g.opts.ReplicaID }
-func (g *Group) IsLeader() bool    { return g.RaftStatus().RaftState == raft.StateLeader }
+
+// IsLeader reports leadership from the cached local Raft observation.
+func (g *Group) IsLeader() bool { return g.RaftStatus().RaftState == raft.StateLeader }
+
+// WALStall returns the elapsed duration of an outstanding persistence stall.
 func (g *Group) WALStall() time.Duration {
 	n := g.stallSince.Load()
 	if n == 0 {
@@ -307,9 +331,15 @@ func (g *Group) WALStall() time.Duration {
 
 // Propose waits for local committed application. Cancellation can leave an
 // uncertain outcome: a submitted command may still commit. RequestID is passed
-// to Machine for application-owned durable deduplication; it does not deduplicate
-// commands in the runtime. Use one running Group per local group/replica identity.
-func (g *Group) Propose(ctx context.Context, p Proposal) (result Result, err error) {
+// to Machine for application-owned durable deduplication; it does not
+// deduplicate commands in the runtime. Use one running Group per local
+// group/replica identity.
+func (g *Group) Propose(ctx context.Context, p Proposal) (Result, error) {
+	return g.submitProposal(ctx, p, 0)
+}
+
+func (g *Group) submitProposal(parent context.Context, p Proposal, expectedTerm uint64) (result Result, err error) {
+	ctx := parent
 	if g.opts.GroupID != topology.MetaGroupID {
 		bounded, cancel := context.WithTimeout(ctx, g.opts.ProposalTimeout)
 		defer cancel()
@@ -328,6 +358,7 @@ func (g *Group) Propose(ctx context.Context, p Proposal) (result Result, err err
 			outcome = internalmetrics.Overloaded
 		case err != nil:
 			outcome = internalmetrics.Unavailable
+		default: // Keep the applied outcome when no error applies.
 		}
 		g.meter.ObserveResult(time.Since(started), outcome)
 	}()
@@ -343,7 +374,13 @@ func (g *Group) Propose(ctx context.Context, p Proposal) (result Result, err err
 	default:
 		return Result{}, fault.ErrOverloaded
 	}
-	req := &request{ctx: ctx, correlation: g.newID(), proposal: Proposal{RequestID: p.RequestID, Data: bytes.Clone(p.Data)}, reply: make(chan response, 1)}
+	req := &request{
+		ctx:          ctx,
+		expectedTerm: expectedTerm,
+		correlation:  g.newID(),
+		proposal:     Proposal{RequestID: p.RequestID, Data: bytes.Clone(p.Data)},
+		reply:        make(chan response, 1),
+	}
 	return g.submit(ctx, g.proposals, req)
 }
 
@@ -355,19 +392,27 @@ type ProposalStats struct {
 	Limit, InFlight, Queued, AwaitingCommit int
 }
 
+// ProposalStats reports bounded local proposal occupancy and commit waits.
 func (g *Group) ProposalStats() ProposalStats {
 	g.mu.RLock()
 	pending := g.cachedPending
 	g.mu.RUnlock()
-	return ProposalStats{Limit: cap(g.slots), InFlight: len(g.slots), Queued: len(g.proposals), AwaitingCommit: pending}
+	return ProposalStats{
+		Limit:          cap(g.slots),
+		InFlight:       len(g.slots),
+		Queued:         len(g.proposals),
+		AwaitingCommit: pending,
+	}
 }
+
 func (g *Group) newID() string { return fmt.Sprintf("%s-%d", g.nonce, g.sequence.Add(1)) }
+
 func (g *Group) submit(ctx context.Context, queue chan *request, req *request) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
 	g.mu.RLock()
-	started, stopped := g.started, g.stopped
+	started, stopped := g.started, g.stopped || g.stopping || g.started && g.ctx.Err() != nil
 	g.mu.RUnlock()
 	if !started || stopped {
 		return Result{}, g.exitError()
@@ -390,56 +435,51 @@ func (g *Group) submit(ctx context.Context, queue chan *request, req *request) (
 		return Result{}, g.exitError()
 	}
 }
+
+// Step delivers one owned Raft message through the bounded ingress path.
 func (g *Group) Step(ctx context.Context, msg raftpb.Message) error {
-	if g.opts.ManagedAuthority && msg.Type == raftpb.MsgTransferLeader {
-		return fault.ErrUnsupported
-	}
-	_, known := raftpb.MessageType_name[int32(msg.Type)]
-	if !known || raft.IsLocalMsg(msg.Type) || msg.From == 0 || msg.From == g.opts.ReplicaID || msg.To != g.opts.ReplicaID {
-		return fault.New(fault.Invalid, "not a remote message for this replica", nil)
-	}
-	if msg.Type == raftpb.MsgReadIndex || msg.Type == raftpb.MsgReadIndexResp {
-		if _, ok := readMessageContext(msg); !ok {
-			return fault.ErrInvalid
-		}
-	}
-	if msg.Type == raftpb.MsgProp {
-		if err := validateForwardedProposal(g.opts, msg); err != nil {
-			return err
-		}
-	}
-	if msg.Type == raftpb.MsgSnap {
-		if msg.Snapshot == nil {
-			return fault.New(fault.Invalid, "snapshot message has no state", nil)
-		}
-		if err := validateSnapshot(*msg.Snapshot); err != nil {
-			return err
-		}
-		state, err := raftstate.DecodeRaftSnapshot(*msg.Snapshot, g.opts.ClusterID, g.opts.GroupID)
+	return g.StepBatch(ctx, []raftpb.Message{msg})
+}
+
+// StepBatch validates and copies every message, then steps them in order in one
+// loop turn. It stops at the first refused message; earlier ones stay stepped.
+func (g *Group) StepBatch(ctx context.Context, msgs []raftpb.Message) error {
+	owned := make([]raftpb.Message, 0, len(msgs))
+	for _, msg := range msgs {
+		copied, err := g.validateRemote(msg)
 		if err != nil {
+			if len(owned) > 0 {
+				_, submitErr := g.submit(ctx, g.inbound,
+					&request{ctx: ctx, messages: owned, reply: make(chan response, 1)})
+				if submitErr != nil {
+					return submitErr
+				}
+			}
 			return err
 		}
-		if err := validateAuthoritySnapshot(g.opts, state); err != nil {
-			return err
-		}
+		owned = append(owned, copied)
 	}
-	if msg.Type == raftpb.MsgApp {
-		for i, e := range msg.Entries {
-			if e.Index != msg.Index+uint64(i)+1 || e.Term == 0 || e.Term > msg.Term || e.Type != raftpb.EntryNormal && e.Type != raftpb.EntryConfChangeV2 {
-				return fault.New(fault.Invalid, "invalid append message entries", nil)
-			}
-			if err := validateEntryMode(g.opts, e); err != nil {
-				return err
-			}
-		}
-	}
-	owned, err := copyMessage(msg)
-	if err != nil {
-		return err
-	}
-	_, err = g.submit(ctx, g.inbound, &request{ctx: ctx, message: &owned, reply: make(chan response, 1)})
+	_, err := g.submit(ctx, g.inbound, &request{ctx: ctx, messages: owned, reply: make(chan response, 1)})
 	return err
 }
+
+func (g *Group) validateRemote(msg raftpb.Message) (raftpb.Message, error) {
+	if g.opts.ManagedAuthority && msg.Type == raftpb.MsgTransferLeader {
+		return raftpb.Message{}, fault.ErrUnsupported
+	}
+	_, known := raftpb.MessageType_name[int32(msg.Type)]
+	if !known || msg.From == 0 || msg.From == g.opts.ReplicaID || msg.To != g.opts.ReplicaID ||
+		raft.IsLocalMsg(msg.Type) {
+		return raftpb.Message{}, fault.New(fault.Invalid, "not a remote message for this replica", nil)
+	}
+	if err := g.validateRemotePayload(msg); err != nil {
+		return raftpb.Message{}, err
+	}
+	return copyMessage(msg)
+}
+
+// ProposeConfChange submits a single automatic standalone membership change;
+// managed replicas require grants.
 func (g *Group) ProposeConfChange(ctx context.Context, cc raftpb.ConfChangeV2) error {
 	if g.opts.ManagedAuthority {
 		return fault.ErrUnsupported
@@ -447,14 +487,19 @@ func (g *Group) ProposeConfChange(ctx context.Context, cc raftpb.ConfChangeV2) e
 	if cc.Transition != raftpb.ConfChangeTransitionAuto || len(cc.Changes) != 1 || cc.Changes[0].NodeID == 0 {
 		return fault.ErrUnsafeMembership
 	}
-	if typ := cc.Changes[0].Type; typ != raftpb.ConfChangeAddNode && typ != raftpb.ConfChangeAddLearnerNode && typ != raftpb.ConfChangeRemoveNode {
+	if typ := cc.Changes[0].Type; typ != raftpb.ConfChangeAddNode && typ != raftpb.ConfChangeAddLearnerNode &&
+		typ != raftpb.ConfChangeRemoveNode {
 		return fault.ErrUnsafeMembership
 	}
 	cc.Changes = slices.Clone(cc.Changes)
 	cc.Context = bytes.Clone(cc.Context)
-	_, err := g.submit(ctx, g.controls, &request{ctx: ctx, correlation: g.newID(), change: &cc, reply: make(chan response, 1)})
+	_, err := g.submit(ctx, g.controls, &request{ctx: ctx, correlation: g.newID(), change: &cc, reply: make(
+		chan response, 1)})
 	return err
 }
+
+// TransferLeader requests standalone leadership transfer; managed replicas
+// require granted transfer.
 func (g *Group) TransferLeader(ctx context.Context, target uint64) error {
 	if g.opts.ManagedAuthority {
 		return fault.ErrUnsupported
@@ -465,18 +510,24 @@ func (g *Group) TransferLeader(ctx context.Context, target uint64) error {
 	_, err := g.submit(ctx, g.controls, &request{ctx: ctx, transfer: target, reply: make(chan response, 1)})
 	return err
 }
+
+// Snapshot requests a complete application snapshot under a bounded wait.
 func (g *Group) Snapshot(ctx context.Context) error {
 	bounded, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	_, err := g.submit(bounded, g.snapshots, &request{ctx: bounded, snapshot: true, reply: make(chan response, 1)})
 	return err
 }
+
+// ReportUnreachable queues a destination failure observation without blocking.
 func (g *Group) ReportUnreachable(id uint64) {
 	select {
 	case g.unreachable <- id:
 	default:
 	}
 }
+
+// ReportSnapshot queues a completed snapshot-transfer outcome without blocking.
 func (g *Group) ReportSnapshot(id uint64, status raft.SnapshotStatus) {
 	select {
 	case g.reports <- snapshotReport{id, status}:
@@ -505,6 +556,8 @@ func answer(req *request, result Result, err error) {
 	}
 }
 
+// RaftStatus returns an owned copy of cached local Raft membership and
+// progress.
 func (g *Group) RaftStatus() raft.Status {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -520,10 +573,22 @@ func (g *Group) RaftStatus() raft.Status {
 	}
 	return s
 }
+
+// Status adapts cached Raft state to a local topology group observation.
 func (g *Group) Status() topology.GroupStatus {
 	s := g.RaftStatus()
 	pt := tracker.ProgressTracker{Config: s.Config}
-	result := topology.GroupStatus{GroupID: g.opts.GroupID, HostNode: g.opts.NodeName, Found: true, LeaderID: s.Lead, Term: s.Term, Commit: s.Commit, Applied: s.Applied, ConfState: pt.ConfState(), Progress: make(map[uint64]topology.ReplicaProgress)}
+	result := topology.GroupStatus{
+		GroupID:   g.opts.GroupID,
+		HostNode:  g.opts.NodeName,
+		Found:     true,
+		LeaderID:  s.Lead,
+		Term:      s.Term,
+		Commit:    s.Commit,
+		Applied:   s.Applied,
+		ConfState: pt.ConfState(),
+		Progress:  make(map[uint64]topology.ReplicaProgress),
+	}
 	for id, p := range s.Progress {
 		result.Progress[id] = topology.ReplicaProgress{Match: p.Match, RecentActive: p.RecentActive}
 	}
@@ -540,12 +605,17 @@ type membershipView struct{ group *Group }
 func (v membershipView) GroupID() string     { return v.group.GroupID() }
 func (v membershipView) IsLeader() bool      { return v.group.IsLeader() }
 func (v membershipView) Status() raft.Status { return v.group.RaftStatus() }
+
 func (v membershipView) ProposeConfChangeV2(ctx context.Context, cc raftpb.ConfChangeV2) error {
 	return v.group.ProposeConfChange(ctx, cc)
 }
+
 func (v membershipView) TransferLeader(ctx context.Context, target uint64) error {
 	return v.group.TransferLeader(ctx, target)
 }
+
+// Membership returns the standalone membership-control view used by safety
+// coordination.
 func (g *Group) Membership() membership.RaftGroup { return membershipView{g} }
 
 // Running reports worker lifetime independently of leader/readiness state.

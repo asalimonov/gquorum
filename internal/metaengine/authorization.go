@@ -26,20 +26,14 @@ func (sm *topologySM) authorizeLocked(ctx context.Context, a topology.Authorized
 		return fault.New(fault.OperatorAuthorization, "effect does not match current approval", nil)
 	}
 	if a.StepSeq == 0 {
-		if a.OperatorID != "" || a.Attempt != 0 || a.Version == 0 || a.Version != sm.active.Version || a.Kind != topology.StepTransferLeader || a.TransferNodeName != "" || a.TransferReplicaID != 0 {
-			return refuse()
-		}
-		r := documentReplica(sm.active, a.GroupID, a.ReplicaID)
-		if r == nil || r.NodeName != a.NodeName || r.Role != topology.ReplicaVoter {
-			return refuse()
-		}
-		return nil
+		return sm.authorizeDirectTransferLocked(a)
 	}
 	if a.Version > sm.target.Version {
 		return refuse()
 	}
 	ex, ok := sm.operators[a.OperatorID]
-	if !ok || ex.Version != sm.target.Version || ex.State.Terminal() || a.StepSeq < 1 || a.StepSeq > len(ex.Steps) || ex.CurrentStep > len(ex.Steps) {
+	if !ok || ex.Version != sm.target.Version || a.StepSeq < 1 || a.StepSeq > len(ex.Steps) ||
+		ex.CurrentStep > len(ex.Steps) || ex.State.Terminal() {
 		return refuse()
 	}
 	latest, found := sm.latestAttemptLocked(ex.Version)
@@ -55,6 +49,18 @@ func (sm *topologySM) authorizeLocked(ctx context.Context, a topology.Authorized
 	}
 	if ex.CurrentStep != a.StepSeq {
 		return refuse()
+	}
+	return nil
+}
+
+func (sm *topologySM) authorizeDirectTransferLocked(a topology.AuthorizedStep) error {
+	if a.OperatorID != "" || a.Attempt != 0 || a.Version == 0 || a.Version != sm.active.Version ||
+		a.Kind != topology.StepTransferLeader || a.TransferNodeName != "" || a.TransferReplicaID != 0 {
+		return fault.New(fault.OperatorAuthorization, "effect does not match current approval", nil)
+	}
+	r := documentReplica(sm.active, a.GroupID, a.ReplicaID)
+	if r == nil || r.NodeName != a.NodeName || r.Role != topology.ReplicaVoter {
+		return fault.New(fault.OperatorAuthorization, "effect does not match current approval", nil)
 	}
 	return nil
 }

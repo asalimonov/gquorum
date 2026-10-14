@@ -14,7 +14,7 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/authoritystore"
 	"github.com/asalimonov/gquorum/load"
-	"github.com/asalimonov/gquorum/policy"
+	"github.com/asalimonov/gquorum/scheduling"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -25,12 +25,12 @@ type fixtureScheduler struct {
 	calls  atomic.Uint64
 }
 
-func (s *fixtureScheduler) Schedule(ctx context.Context, _ policy.ScheduleInput) (policy.ScheduleDecision, error) {
+func (s *fixtureScheduler) Schedule(ctx context.Context, _ scheduling.ScheduleInput) (scheduling.ScheduleDecision, error) {
 	if err := ctx.Err(); err != nil {
-		return policy.ScheduleDecision{}, err
+		return scheduling.ScheduleDecision{}, err
 	}
 	s.calls.Add(1)
-	return policy.ScheduleDecision{Reason: s.reason}, nil
+	return scheduling.ScheduleDecision{Reason: s.reason}, nil
 }
 
 type runtimeHooks struct {
@@ -46,20 +46,21 @@ func (a *application) registerRuntimeRoutes(mux *http.ServeMux, protect func(htt
 			httpError(w, fault.ErrInvalid)
 			return
 		}
-		pin, found, err := gquorum.LoadStoredIdentity(a.cfg.DataDir)
+		pin, err := gquorum.LoadStoredIdentity(a.cfg.DataDir)
 		if err != nil {
 			httpError(w, err)
 			return
 		}
 		id := a.node.Identity()
-		if !found || pin.NodeName != id.NodeName || pin.ClusterID != id.ClusterID {
+		if !pin.Found || pin.Identity.NodeName != id.NodeName || pin.Identity.ClusterID != id.ClusterID {
 			httpError(w, fault.ErrIdentityMismatch)
 			return
 		}
 		// The pin driver never starts Node; its constructed identity still has
 		// member zero. Read the actual accepted disk member with this process ID.
-		id.MemberID = pin.MemberID
-		authority, err := authoritystore.Open(filepath.Join(a.cfg.DataDir, "_authority.bolt"), id, false)
+		id.MemberID = pin.Identity.MemberID
+		authority, err := authoritystore.Open(filepath.Join(a.cfg.DataDir, "_authority.bolt"), id,
+			authoritystore.RetainedEvidence)
 		if err != nil {
 			httpError(w, err)
 			return
@@ -70,7 +71,7 @@ func (a *application) registerRuntimeRoutes(mux *http.ServeMux, protect func(htt
 			httpError(w, err)
 			return
 		}
-		jsonResponse(w, 200, map[string]any{"identity": pin, "found": found, "instance_id": a.cfg.InstanceID, "phase": a.cfg.AdmissionPinPhase, "authority_identity": identity, "metadata_acquired": acquired})
+		jsonResponse(w, 200, map[string]any{"identity": pin.Identity, "found": pin.Found, "instance_id": a.cfg.InstanceID, "phase": a.cfg.AdmissionPinPhase, "authority_identity": identity, "metadata_acquired": acquired})
 	}))
 	mux.HandleFunc("GET /internal/test/runtime", protect(func(w http.ResponseWriter, _ *http.Request) {
 		calls := uint64(0)
@@ -114,10 +115,9 @@ func (a *application) registerRuntimeRoutes(mux *http.ServeMux, protect func(htt
 		case "acquire":
 			err = a.cluster.AcquireLock(r.Context(), body.Key, body.ID)
 		case "holder":
-			var session topology.Session
-			var found bool
-			session, found, err = a.cluster.LockHolder(r.Context(), body.Key)
-			value = map[string]any{"session": session, "found": found}
+			holder, readErr := a.cluster.LockHolder(r.Context(), body.Key)
+			err = readErr
+			value = map[string]any{"session": holder.Session, "found": holder.Held}
 		default:
 			err = fault.ErrInvalid
 		}

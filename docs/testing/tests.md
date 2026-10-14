@@ -8,8 +8,8 @@ the original packages beside the code they test. Multi-node consensus and
 application scenarios live in `tests/cluster` and use real Docker processes
 through the bounded pool.
 
-`make test` compiles the library, the separate `examples/cluster` module and the
-caller application fixture, then runs their uncached units with `-count=1`.
+`make test` compiles the library, the separate `examples/cluster`,
+`examples/scheduler` and `examples/inmemory-cache` modules and the caller application fixture, then runs their uncached units with `-count=1`.
 Go build constraints select the suites at the file level:
 
 | File | Build constraint | Contents |
@@ -22,17 +22,19 @@ Put each build constraint at the top of the file, followed by a blank line befor
 `package`. Shared helper-only files may retain their existing names, such as
 `fixtures_test.go`. Unit helpers used only by units stay with their unit files.
 
-`make test-function` uses `go test -tags=functional` in all three modules, so it
+`make test-function` uses `go test -tags=functional` in all four modules, so it
 runs only functional tests. The `!functional` constraint excludes unit tests
 from that command; default `go test` excludes functional files. Classification
 does not depend on `testing.Short()` or per-test skip guards. Lightweight value
 stubs and callbacks testing a single local component are units; fixtures modeling
 interacting services are functional.
 
-There are **227 unit tests**, **347 functional tests**, **65 Docker cluster
-tests** (including three performance cases) and **one Compose example test**.
-These are top-level test functions, excluding table cases and subtests. The
-unit suite also contains one executable documentation example and two benchmarks.
+Suite reports count parent tests and subtests separately. Use the latest report
+for executed counts; source-level test inventories do not include table cases.
+
+The scheduler Compose suite runs separately from the small metadata example:
+`make test-scheduler-example` builds an isolated image and tests transfer,
+executor/leader failure, retained recovery, quorum loss, and a live partition.
 
 Independent units call `t.Parallel()`. The defaults run four packages and eight
 cases per package concurrently; `UNIT_PACKAGES` and `UNIT_PARALLEL` override them.
@@ -49,10 +51,13 @@ Functional runs default to four packages and eight cases per package, controlled
 by `FUNCTIONAL_PACKAGES` and `FUNCTIONAL_PARALLEL`. The same limits apply to race
 runs. This bounds disk and network contention while isolated components
 progress concurrently. Functional fixtures must not start a multi-node cluster.
-The three modules are still run in sequence.
+The five modules are run in sequence, including `examples/scheduler` and
+`examples/inmemory-cache`.
 
 | Command | Coverage |
 | --- | --- |
+| `make test-cache-example` | Isolated cache Compose recovery after one-node and full process restarts |
+| `make test-scheduler-example` | Isolated three-process scheduler Compose lifecycle, recovery and partition checks |
 | `make test` / `make test-unit` | Compile the library, example and fixture; run uncached parallel units |
 | `make test-race` / `make test-unit-race` | The same units under the race detector |
 | `make test-function` | Non-Docker functional tests in `*_func_test.go` files |
@@ -61,7 +66,7 @@ The three modules are still run in sequence.
 | `make test-cluster` | Build the image, then run Docker process tests with `-tags=clustertest` |
 | `make test-perf` | Three measured Docker cases, each under two minutes |
 | `make bench` | Planner and complete meta FSM snapshot matrices |
-| `make lint` | Vet all module/build variants; pinned revive dead-code rules and merged Staticcheck unused declarations |
+| `make lint` | Vet all module/build variants; TiDB revive style rules and merged Staticcheck unused declarations |
 | `make proto-check` | Regenerate pinned protocol code and require no diff |
 
 `make test-functional` and `make test-functional-race` remain aliases for the
@@ -70,19 +75,31 @@ non-Docker regression. `FUNCTIONAL_TIMEOUT` defaults to eight minutes per packag
 Use functional race checks for changes to ownership and concurrency. Keep the
 full Docker suite for the end of a related set of changes.
 
+The production pass uses golangci-lint v2.14.0 with [.golangci.yml](../../.golangci.yml),
+copied from TiDB's `.golangci.yml`. The requested adjustments set revive's
+cyclomatic limit to 10, set both line-length limits to 120 and disable the
+placeholder file-header rule. Test files
+are excluded from this pass, as is the Docker test module. Distinct production
+build variants are checked once each, with issue reporting limits disabled.
+The existing vet, standalone revive and merged unused-code checks retain their
+test coverage.
+
 `make lint` installs versioned binaries under the ignored `.tools/lint/` directory:
 revive v1.17.1 and Staticcheck v0.8.2. The checked-in [revive configuration](../../revive.toml)
-enables `unreachable-code`, `unused-parameter` and `unused-receiver`; these
+copies `tools/check/revive.toml` from the local TiDB checkout, including its 16
+enabled style rules, confidence threshold and severity. These
 [revive rules](https://github.com/revive-lint/revive/blob/v1.17.1/RULES_DESCRIPTIONS.md)
 do not detect unused declarations. Staticcheck supplies `U1000`, with a
 [merged build matrix](https://staticcheck.dev/docs/running-staticcheck/cli/build-tags/)
 so helpers used only in functional or process tests remain live. The runner vets
-unit/functional builds in every module and clustertest/example builds in the test
-module, then passes every selected source file to revive because its CLI has no
-build-tag flag. Generated files retain their generated-code exclusion. Lint
-compiles and analyzes tests without executing them or starting Docker. Build
+unit/functional builds in all five application modules, clustertest/example builds
+in the test module and the lint wrapper's unit build. It passes every selected
+source file to a small wrapper around the pinned revive library. The wrapper groups files by directory to preserve package comments
+and cross-file type information while including all selected build tags. Generated files retain their
+generated-code exclusion. Lint compiles and analyzes tests without executing them or starting Docker. Build
 failures and findings return nonzero status; there are no blanket unused-code
-suppressions.
+suppressions. The wrapper's regression check is available with
+`cd scripts/revive && go test ./...`.
 
 ## Test reports
 
@@ -161,7 +178,9 @@ a cluster-size argument.
 Ordinary cluster and quorum scenarios use three nodes; larger node-count
 matrices are omitted. Four-node admission/promotion, durable admission-pin restart
 and interrupted voter-swap, guarded leadership transfer and replication-lag
-regressions require a fourth member for three voters plus one learner. The five-node automatic-promotion acceptance case needs two
+regressions require a fourth member for three voters plus one learner. Strict
+three-AZ placement uses the fourth member as a same-AZ standby to verify its
+guarded voter switch and refusal after a survivor loss. The five-node automatic-promotion acceptance case needs two
 standbys to prove that exactly one is promoted and the other retains its learner
 role; it also checks retained return and a second failure during cooldown.
 The seven-host capacity regression proves atomic rejection at the default five
@@ -188,3 +207,28 @@ See [the source inventory](../brainstorms/20261010-raft-library-test-port.md),
 [measured performance gates](performance.md). Milestone validation and earlier
 timings are retained in the [implementation log](../plans/20261010-implementation.md)
 and repository history.
+
+The scheduler module has unit validation (CAS transitions, codec, revocation
+rules, executor choice, configuration) and functional SQLite/FSM, snapshot,
+schema-reset, retirement and single-replica recovery coverage under the same
+tags as the library. `make test` and `make test-function` include it, and
+`make lint` checks both variants. The public load gRPC adapter has
+protocol-double tests under its owning package's `functional` tag. Process
+failover acceptance is the separate `make test-scheduler-example` Compose
+scenario.
+
+In-memory load storage is covered at every layer. `storage/memstore` units run
+the shared `storagetest.Run` conformance suite plus snapshot, retirement and
+ownership cases without touching disk. `internal/managed` functional tests check
+store selection by storage class, conflicting state, retirement through the
+memory store and the own-reseat loop (memory voters only, pinned to the observed
+Active version, joined on Stop). A root functional test creates a memory group
+with `EnsureGroup`. `TestMemoryGroupReseatsARestartedReplicaThreeNodes` in
+`tests/cluster` restarts a node and verifies that its memory replica is reseated
+without an operator while its persistent replica keeps its identity. The
+in-memory cache example's functional test closes and reopens a WAL store with
+`DisableFSync` enabled, rebuilding a fresh cache machine from snapshots and log.
+`make test-cache-example` runs the actual three-node cache Compose application
+with private volumes, ports and an image tag. It kills/restarts one process and
+then all three, verifying retained values, unchanged replica IDs and new writes.
+It exercises process failure with the OS running, not host/VM power loss.

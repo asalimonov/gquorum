@@ -17,12 +17,19 @@ import (
 // floor/effect records. Courier cancellation only ends the caller's wait.
 type metaAuthorityWork struct {
 	grant   topology.AuthorityGrant
-	action  bool
+	mode    metaAuthorityMode
 	done    chan struct{}
 	fence   topology.FenceEvidence
 	receipt topology.EffectReceipt
 	err     error
 }
+
+type metaAuthorityMode uint8
+
+const (
+	prepareMetaAuthority metaAuthorityMode = iota
+	applyMetaAuthority
+)
 
 func (n *node) installAuthorityFence(ctx context.Context, request load.FenceRequest) (load.FenceResult, error) {
 	if n.needsReadmissionFence(request) {
@@ -31,52 +38,80 @@ func (n *node) installAuthorityFence(ctx context.Context, request load.FenceRequ
 	if request.Resource.GroupID != topology.MetaGroupID {
 		return n.InstallLoadFence(ctx, request)
 	}
-	if request.Resource != (topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: topology.MetaGroupID, NodeName: request.To.NodeName}) || request.ReplicaID != 0 {
+	if request.Resource != (topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: topology.MetaGroupID,
+		NodeName: request.To.NodeName}) ||
+		request.ReplicaID != 0 {
 		return load.FenceResult{}, fault.ErrIdentityMismatch
 	}
-	work, err := n.runMetaAuthority(ctx, request.Grant, request.To, false)
+	work, err := n.runMetaAuthority(ctx, request.Grant, request.To, prepareMetaAuthority)
 	if err != nil {
 		return load.FenceResult{}, err
 	}
 	return load.FenceResult{From: request.To, Evidence: work.fence}, nil
 }
+
 func (n *node) applyMetaHostAction(ctx context.Context, request load.ActionRequest) (load.ActionResult, error) {
 	id := request.To.Node
-	if request.Grant.Action == nil || *request.Grant.Action != request.Authorization || request.To.Replica != (load.ReplicaRef{GroupID: topology.MetaGroupID, ReplicaID: id.MemberID}) || request.LocalTarget != (storage.Identity{ClusterID: id.ClusterID, NodeName: id.NodeName, GroupID: topology.MetaGroupID, ReplicaID: id.MemberID}) {
+	if request.Grant.Action == nil || *request.Grant.Action != request.Authorization ||
+		request.To.Replica != (load.ReplicaRef{GroupID: topology.MetaGroupID, ReplicaID: id.MemberID}) ||
+		request.LocalTarget != (storage.Identity{ClusterID: id.ClusterID, NodeName: id.NodeName,
+			GroupID:   topology.MetaGroupID,
+			ReplicaID: id.MemberID}) {
 		return load.ActionResult{}, fault.ErrIdentityMismatch
 	}
-	if request.Authorization.Kind != topology.StepPrepareReplica && request.Authorization.Kind != topology.StepStopReplica {
+	if request.Authorization.Kind != topology.StepPrepareReplica &&
+		request.Authorization.Kind != topology.StepStopReplica {
 		return load.ActionResult{}, fault.ErrOperatorAuthorization
 	}
-	work, err := n.runMetaAuthority(ctx, request.Grant, id, true)
+	work, err := n.runMetaAuthority(ctx, request.Grant, id, applyMetaAuthority)
 	if err != nil {
 		return load.ActionResult{}, err
 	}
-	return load.ActionResult{From: request.To, Authorization: request.Authorization, LocalTarget: request.LocalTarget, Receipts: []topology.EffectReceipt{work.receipt.Clone()}}, nil
+	return load.ActionResult{
+		From:          request.To,
+		Authorization: request.Authorization,
+		LocalTarget:   request.LocalTarget,
+		Receipts:      []topology.EffectReceipt{work.receipt.Clone()},
+	}, nil
 }
-func (n *node) runMetaAuthority(ctx context.Context, grant topology.AuthorityGrant, id topology.Identity, action bool) (*metaAuthorityWork, error) {
+
+func (n *node) runMetaAuthority(ctx context.Context, grant topology.AuthorityGrant, id topology.Identity,
+	mode metaAuthorityMode) (*metaAuthorityWork, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if grant.Validate() != nil || grant.Key.GroupID != topology.MetaGroupID || grant.Key.ClusterID != id.ClusterID || !slices.Contains(grant.Targets, topology.AuthorityTarget{NodeName: id.NodeName, MemberID: id.MemberID, ReplicaID: id.MemberID}) {
+	if grant.Key.GroupID != topology.MetaGroupID || grant.Key.ClusterID != id.ClusterID || grant.Validate() != nil ||
+		!slices.Contains(grant.Targets, topology.AuthorityTarget{NodeName: id.NodeName, MemberID: id.MemberID,
+			ReplicaID: id.MemberID}) {
 		return nil, fault.ErrOperatorAuthorization
 	}
+	work, err := n.reserveMetaAuthority(grant, id, mode)
+	if err != nil {
+		return nil, err
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-work.done:
+		return work, work.err
+	}
+}
+
+func (n *node) reserveMetaAuthority(grant topology.AuthorityGrant, id topology.Identity,
+	mode metaAuthorityMode) (*metaAuthorityWork, error) {
 	n.mu.Lock()
+	defer n.mu.Unlock()
 	if n.stopping || n.ctx == nil || n.ctx.Err() != nil {
-		n.mu.Unlock()
 		return nil, fault.ErrStopped
 	}
 	if n.pending != nil {
-		n.mu.Unlock()
 		return nil, fault.ErrAuthorityPending
 	}
 	m, s := n.meta, n.authority
 	if m == nil || s == nil {
-		n.mu.Unlock()
 		return nil, fault.ErrReplicaNotReady
 	}
 	if m.Identity() != id || s.Identity() != id {
-		n.mu.Unlock()
 		return nil, fault.ErrIdentityMismatch
 	}
 	work := n.metaAuthorityWork
@@ -87,55 +122,23 @@ func (n *node) runMetaAuthority(ctx context.Context, grant topology.AuthorityGra
 		default:
 		}
 	}
-	if work != nil && (work.action != action || !work.grant.Equal(grant)) {
-		n.mu.Unlock()
+	if work != nil && (work.mode != mode || !work.grant.Equal(grant)) {
 		return nil, fault.ErrAuthorityPending
 	}
 	if work == nil {
-		work = &metaAuthorityWork{grant: grant.Clone(), action: action, done: make(chan struct{})}
+		work = &metaAuthorityWork{grant: grant.Clone(), mode: mode, done: make(chan struct{})}
 		n.metaAuthorityWork = work
 		n.wg.Add(1)
 		go func() { defer n.wg.Done(); defer close(work.done); n.executeMetaAuthority(m, s, id, work) }()
 	}
-	n.mu.Unlock()
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-work.done:
-		return work, work.err
-	}
+	return work, nil
 }
-func (n *node) executeMetaAuthority(m *metaservice.Group, s *authoritystore.Store, id topology.Identity, work *metaAuthorityWork) {
+
+func (n *node) executeMetaAuthority(m *metaservice.Group, s *authoritystore.Store, id topology.Identity,
+	work *metaAuthorityWork) {
 	ctx := n.ctx
-	if !work.action {
-		floor, _, err := s.Fence(ctx, work.grant)
-		if err != nil {
-			work.err = err
-			return
-		}
-		running, err := s.Running(ctx, topology.MetaGroupID)
-		if err != nil {
-			work.err = err
-			return
-		}
-		for _, old := range running {
-			if old.Grant.Key.Revision >= work.grant.Key.Revision {
-				continue
-			}
-			if old.Grant.Action != nil && old.Grant.Action.Kind == topology.StepStopReplica {
-				if err = n.joinMetaHost(ctx, m); err != nil {
-					work.err = err
-					return
-				}
-			}
-			// Preparation only verifies an acquired engine; no callback owner can
-			// survive this serialized worker (or acquisition in a fresh process).
-			if err = s.FenceEffect(ctx, old, work.grant.Key); err != nil {
-				work.err = err
-				return
-			}
-		}
-		work.fence, work.err = s.CompleteFence(ctx, work.grant.Key, floor.Sequence)
+	if work.mode == prepareMetaAuthority {
+		work.fence, work.err = n.prepareMetaHostAuthority(m, s, work)
 		return
 	}
 	target := topology.AuthorityTarget{NodeName: id.NodeName, MemberID: id.MemberID, ReplicaID: id.MemberID}
@@ -148,7 +151,8 @@ func (n *node) executeMetaAuthority(m *metaservice.Group, s *authoritystore.Stor
 		work.err = err
 		return
 	}
-	// A prior process or failed attempt may have persisted intent before finishing.
+	// A prior process or failed attempt may have persisted intent before
+	// finishing.
 	running, err := s.Running(ctx, topology.MetaGroupID)
 	if err != nil {
 		work.err = err
@@ -166,7 +170,7 @@ func (n *node) executeMetaAuthority(m *metaservice.Group, s *authoritystore.Stor
 	}
 	switch work.grant.Action.Kind {
 	case topology.StepPrepareReplica:
-		attempt, cancel := context.WithTimeout(ctx, n.opts.Policies.CallbackTimeout)
+		attempt, cancel := context.WithTimeout(ctx, n.opts.CallbackTimeout)
 		err = m.VerifyPreparedMeta(attempt, id)
 		cancel()
 	case topology.StepStopReplica:
@@ -178,9 +182,47 @@ func (n *node) executeMetaAuthority(m *metaservice.Group, s *authoritystore.Stor
 		work.err = err
 		return
 	}
-	work.receipt = topology.EffectReceipt{Key: work.grant.Key, Resource: topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: topology.MetaGroupID, NodeName: id.NodeName}, Action: work.grant.Action, Target: target, Outcome: topology.EffectApplied, LocalSequence: sequence}
+	work.receipt = topology.EffectReceipt{
+		Key: work.grant.Key,
+		Resource: topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: topology.MetaGroupID,
+			NodeName: id.NodeName},
+		Action:        work.grant.Action,
+		Target:        target,
+		Outcome:       topology.EffectApplied,
+		LocalSequence: sequence,
+	}
 	work.err = s.FinishEffect(ctx, work.receipt)
 }
+func (n *node) prepareMetaHostAuthority(m *metaservice.Group, s *authoritystore.Store,
+	work *metaAuthorityWork) (topology.FenceEvidence, error) {
+	ctx := n.ctx
+	floor, err := s.Fence(ctx, work.grant)
+	if err != nil {
+		return topology.FenceEvidence{}, err
+	}
+	running, err := s.Running(ctx, topology.MetaGroupID)
+	if err != nil {
+		return topology.FenceEvidence{}, err
+	}
+	for _, old := range running {
+		if old.Grant.Key.Revision >= work.grant.Key.Revision {
+			continue
+		}
+		if old.Grant.Action != nil && old.Grant.Action.Kind == topology.StepStopReplica {
+			if err = n.joinMetaHost(ctx, m); err != nil {
+				return topology.FenceEvidence{}, err
+			}
+		}
+		// Preparation only verifies an acquired engine; no callback owner
+		// can survive this serialized worker (or acquisition in a fresh
+		// process).
+		if err = s.FenceEffect(ctx, old, work.grant.Key); err != nil {
+			return topology.FenceEvidence{}, err
+		}
+	}
+	return s.CompleteFence(ctx, work.grant.Key, floor.Record.Sequence)
+}
+
 func (n *node) joinMetaHost(ctx context.Context, m *metaservice.Group) error {
 	if err := m.FenceParticipation(ctx); err != nil {
 		return err
@@ -193,21 +235,23 @@ func (n *node) joinMetaHost(ctx context.Context, m *metaservice.Group) error {
 	}
 	return nil
 }
+
 func (n *node) confirmMetaStop(ctx context.Context, m *metaservice.Group) error {
 	s := n.localAuthority()
 	if s == nil {
 		return fault.ErrReplicaNotReady
 	}
-	completed, found, err := s.CompletedMetaStop(ctx)
+	completed, err := s.CompletedMetaStop(ctx)
 	if err != nil {
 		return err
 	}
-	if !found || completed.Receipt == nil {
+	if !completed.Found || completed.Record.Receipt == nil {
 		return fault.ErrAuthorityPending
 	}
 	id := m.Identity()
-	if s.Identity() != id || completed.Target != (topology.AuthorityTarget{NodeName: id.NodeName, MemberID: id.MemberID, ReplicaID: id.MemberID}) {
+	if completed.Record.Target != (topology.AuthorityTarget{NodeName: id.NodeName, MemberID: id.MemberID,
+		ReplicaID: id.MemberID}) || s.Identity() != id {
 		return fault.ErrIdentityMismatch
 	}
-	return m.ConfirmHostRelease(ctx, completed.Grant, *completed.Receipt)
+	return m.ConfirmHostRelease(ctx, completed.Record.Grant, *completed.Record.Receipt)
 }

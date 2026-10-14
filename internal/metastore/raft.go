@@ -1,4 +1,5 @@
-// Package metastore persists synchronous meta consensus state and local identity records.
+// Package metastore persists synchronous meta consensus state and local
+// identity records.
 package metastore
 
 import (
@@ -10,12 +11,15 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/raftstate"
+	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 	bolt "go.etcd.io/bbolt"
 	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"
 )
 
+// SaveReady validates and atomically persists entries and monotonic meta hard
+// state.
 func (s *Store) SaveReady(entries []raftpb.Entry, hs raftpb.HardState) error {
 	for i, e := range entries {
 		if e.Index == 0 || e.Term == 0 || i > 0 && e.Index != entries[i-1].Index+1 {
@@ -23,68 +27,12 @@ func (s *Store) SaveReady(entries []raftpb.Entry, hs raftpb.HardState) error {
 		}
 	}
 	return s.db.Update(func(tx *bolt.Tx) error {
-		var oldHS raftpb.HardState
-		if err := oldHS.Unmarshal(tx.Bucket(bucketHardState).Get(keyHardState)); err != nil {
-			return err
-		}
-		if err := validateHardState(oldHS, hs); err != nil {
-			return err
-		}
-		if len(entries) > 0 {
-			eb := tx.Bucket(bucketEntries)
-			if entries[0].Index <= oldHS.Commit {
-				if entries[len(entries)-1].Index < oldHS.Commit {
-					return fault.New(fault.Invalid, "cannot truncate committed entries", nil)
-				}
-				for _, e := range entries {
-					if e.Index > oldHS.Commit {
-						break
-					}
-					raw, err := e.Marshal()
-					if err != nil {
-						return err
-					}
-					if !bytes.Equal(eb.Get(itob(e.Index)), raw) {
-						return fault.New(fault.Invalid, "cannot replace committed entry", nil)
-					}
-				}
-			}
-			from := itob(entries[0].Index)
-			var stale [][]byte
-			c := eb.Cursor()
-			for k, _ := c.Seek(from); k != nil; k, _ = c.Next() {
-				kc := make([]byte, len(k))
-				copy(kc, k)
-				stale = append(stale, kc)
-			}
-			for _, k := range stale {
-				if err := eb.Delete(k); err != nil {
-					return err
-				}
-			}
-			for i := range entries {
-				data, err := entries[i].Marshal()
-				if err != nil {
-					return fmt.Errorf("marshal entry %d: %w", entries[i].Index, err)
-				}
-				if err := eb.Put(itob(entries[i].Index), data); err != nil {
-					return err
-				}
-			}
-		}
-		if !raft.IsEmptyHardState(hs) {
-			data, err := hs.Marshal()
-			if err != nil {
-				return fmt.Errorf("marshal hardstate: %w", err)
-			}
-			if err := tx.Bucket(bucketHardState).Put(keyHardState, data); err != nil {
-				return err
-			}
-		}
-		return nil
+		return saveReadyTx(tx, entries, hs)
 	})
 }
 
+// SaveSnapshot retains a Raft snapshot without replacing a newer durable
+// snapshot.
 func (s *Store) SaveSnapshot(snap raftpb.Snapshot) error {
 	if raft.IsEmptySnap(snap) {
 		return nil
@@ -108,111 +56,18 @@ func (s *Store) SaveSnapshot(snap raftpb.Snapshot) error {
 	})
 }
 
+// InstallSnapshot validates retained identity and atomically installs snapshot
+// and recovery state.
 func (s *Store) InstallSnapshot(snap raftpb.Snapshot, hs raftpb.HardState) error {
 	if raft.IsEmptySnap(snap) {
 		return nil
 	}
 	return s.db.Update(func(tx *bolt.Tx) error {
-		if btoi(tx.Bucket(bucketApplied).Get(keyApplied)) > snap.Metadata.Index {
-			return nil
-		}
-		sb := tx.Bucket(bucketSnapshot)
-		if cur := sb.Get(keySnapshot); cur != nil {
-			var existing raftpb.Snapshot
-			if err := existing.Unmarshal(cur); err != nil {
-				return fmt.Errorf("unmarshal stored snapshot: %w", err)
-			}
-			if snap.Metadata.Index < existing.Metadata.Index {
-				return nil // stale, keep the newer durable snapshot
-			}
-		}
-		id, found, err := readIdentityChecked(tx)
-		if err != nil {
-			return err
-		}
-		if !found {
-			return fault.ErrIdentityMismatch
-		}
-		state, err := raftstate.DecodeRaftSnapshot(snap, id.ClusterID, topology.MetaGroupID)
-		if err != nil {
-			return err
-		}
-		snapBytes, err := snap.Marshal()
-		if err != nil {
-			return fmt.Errorf("marshal snapshot: %w", err)
-		}
-		if err := sb.Put(keySnapshot, snapBytes); err != nil {
-			return err
-		}
-		if len(snap.Data) > 0 {
-			if err := tx.Bucket(bucketState).Put(keyState, state.Application); err != nil {
-				return err
-			}
-		}
-		if err := recordMemberSeen(tx, snap.Metadata.ConfState); err != nil {
-			return err
-		}
-		ab := tx.Bucket(bucketApplied)
-		if v := ab.Get(keyApplied); len(v) != 8 || btoi(v) < snap.Metadata.Index {
-			if err := ab.Put(keyApplied, itob(snap.Metadata.Index)); err != nil {
-				return err
-			}
-			csBytes, err := snap.Metadata.ConfState.Marshal()
-			if err != nil {
-				return fmt.Errorf("marshal confstate: %w", err)
-			}
-			if err := ab.Put(keyConfState, csBytes); err != nil {
-				return err
-			}
-		}
-		hb := tx.Bucket(bucketHardState)
-		effHS := hs
-		if raft.IsEmptyHardState(effHS) {
-			if cur := hb.Get(keyHardState); cur != nil {
-				if err := effHS.Unmarshal(cur); err != nil {
-					return fmt.Errorf("unmarshal stored hardstate: %w", err)
-				}
-			}
-		}
-		if effHS.Commit < snap.Metadata.Index {
-			effHS.Commit = snap.Metadata.Index
-		}
-		var previousHS raftpb.HardState
-		if err := previousHS.Unmarshal(hb.Get(keyHardState)); err != nil {
-			return err
-		}
-		if err := validateHardState(previousHS, effHS); err != nil {
-			return err
-		}
-		if !raft.IsEmptyHardState(effHS) {
-			hd, err := effHS.Marshal()
-			if err != nil {
-				return fmt.Errorf("marshal hardstate: %w", err)
-			}
-			if err := hb.Put(keyHardState, hd); err != nil {
-				return err
-			}
-		}
-		eb := tx.Bucket(bucketEntries)
-		var doomed [][]byte
-		c := eb.Cursor()
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
-			if btoi(k) > snap.Metadata.Index {
-				break // keys are ordered; nothing beyond here to compact
-			}
-			kc := make([]byte, len(k))
-			copy(kc, k)
-			doomed = append(doomed, kc)
-		}
-		for _, k := range doomed {
-			if err := eb.Delete(k); err != nil {
-				return err
-			}
-		}
-		return nil
+		return installSnapshotTx(tx, snap, hs)
 	})
 }
 
+// Snapshot reads the retained Raft snapshot.
 func (s *Store) Snapshot() (raftpb.Snapshot, error) {
 	var snap raftpb.Snapshot
 	err := s.db.View(func(tx *bolt.Tx) error {
@@ -225,6 +80,8 @@ func (s *Store) Snapshot() (raftpb.Snapshot, error) {
 	return snap, err
 }
 
+// CompactEntries deletes entries through an index covered by the durable
+// snapshot.
 func (s *Store) CompactEntries(upTo uint64) error {
 	return s.db.Update(func(tx *bolt.Tx) error {
 		var snapshot raftpb.Snapshot
@@ -254,6 +111,7 @@ func (s *Store) CompactEntries(upTo uint64) error {
 	})
 }
 
+// AppliedIndex reads the persisted application progress hint.
 func (s *Store) AppliedIndex() (uint64, error) {
 	var applied uint64
 	err := s.db.View(func(tx *bolt.Tx) error {
@@ -266,6 +124,8 @@ func (s *Store) AppliedIndex() (uint64, error) {
 	return applied, err
 }
 
+// SetApplied advances the applied index and membership together and records
+// member participation.
 func (s *Store) SetApplied(idx uint64, cs raftpb.ConfState) error {
 	csBytes, err := cs.Marshal()
 	if err != nil {
@@ -286,7 +146,9 @@ func (s *Store) SetApplied(idx uint64, cs raftpb.ConfState) error {
 	})
 }
 
-func (s *Store) AppliedConfState() (raftpb.ConfState, bool, error) {
+// AppliedConfState reads the persisted applied membership and reports whether
+// it exists.
+func (s *Store) AppliedConfState() (AppliedMembership, error) {
 	var (
 		cs    raftpb.ConfState
 		found bool
@@ -302,9 +164,11 @@ func (s *Store) AppliedConfState() (raftpb.ConfState, bool, error) {
 		found = true
 		return nil
 	})
-	return cs, found, err
+	return AppliedMembership{ConfState: cs, Found: found}, err
 }
 
+// SaveOverride stores the local serve override, clearing it for nonpositive
+// values.
 func (s *Store) SaveOverride(value int) error {
 	return s.db.Update(func(tx *bolt.Tx) error {
 		ob := tx.Bucket(bucketOverride)
@@ -315,24 +179,31 @@ func (s *Store) SaveOverride(value int) error {
 	})
 }
 
+// LoadOverride reads the local serve override, returning zero when absent.
 func (s *Store) LoadOverride() (int, error) {
 	var v int
 	err := s.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketOverride).Get(keyOverride)
 		if len(b) == 8 {
-			v = int(btoi(b)) //nolint:gosec // bit-pattern roundtrip with itob(uint64(value)) above; int is 64-bit on all supported platforms
+			raw := btoi(b)
+			if raw > uint64(^uint(0)>>1) {
+				return fault.ErrInvalid
+			}
+			v = int(raw)
 		}
 		return nil
 	})
 	return v, err
 }
 
+// SaveState persists materialized metadata state.
 func (s *Store) SaveState(data []byte) error {
 	return s.db.Update(func(tx *bolt.Tx) error {
 		return tx.Bucket(bucketState).Put(keyState, data)
 	})
 }
 
+// LoadState returns an owned copy of materialized metadata state.
 func (s *Store) LoadState() ([]byte, error) {
 	var out []byte
 	err := s.db.View(func(tx *bolt.Tx) error {
@@ -345,78 +216,295 @@ func (s *Store) LoadState() ([]byte, error) {
 	return out, err
 }
 
-func (s *Store) LoadAll() (raftpb.HardState, []raftpb.Entry, raftpb.Snapshot, error) {
-	var (
-		hs      raftpb.HardState
-		snap    raftpb.Snapshot
-		entries []raftpb.Entry
-	)
-	err := s.db.View(func(tx *bolt.Tx) error {
-		if v := tx.Bucket(bucketHardState).Get(keyHardState); v != nil {
-			if err := hs.Unmarshal(v); err != nil {
-				return fmt.Errorf("unmarshal hardstate: %w", err)
-			}
-		}
-		if v := tx.Bucket(bucketSnapshot).Get(keySnapshot); v != nil {
-			if err := snap.Unmarshal(v); err != nil {
-				return fmt.Errorf("unmarshal snapshot: %w", err)
-			}
-		}
-		floor := snap.Metadata.Index
-		return tx.Bucket(bucketEntries).ForEach(func(k, v []byte) error {
-			if btoi(k) <= floor {
-				return nil
-			}
-			var e raftpb.Entry
-			if err := e.Unmarshal(v); err != nil {
-				return fmt.Errorf("unmarshal entry %d: %w", btoi(k), err)
-			}
-			entries = append(entries, e)
-			return nil
-		})
-	})
-	return hs, entries, snap, err
+// LoadAll reads hard state, retained entries and the snapshot in one
+// transaction.
+func (s *Store) LoadAll() (storage.Recovery, error) {
+	var result storage.Recovery
+	err := s.db.View(func(tx *bolt.Tx) error { return loadAllTx(tx, &result) })
+	return result, err
 }
 
+// EnsureIdentity creates an allowed fresh pin or verifies the retained exact
+// meta identity.
 func (s *Store) EnsureIdentity(nodeName, clusterID string, memberID uint64) error {
-	if strings.TrimSpace(nodeName) == "" || strings.TrimSpace(clusterID) == "" || strings.ContainsRune(nodeName, '\x00') || strings.ContainsRune(clusterID, '\x00') || memberID == 0 || memberID == math.MaxUint64 {
+	if memberID == 0 || memberID == math.MaxUint64 || strings.TrimSpace(nodeName) == "" ||
+		strings.TrimSpace(clusterID) == "" || strings.ContainsRune(nodeName, '\x00') ||
+		strings.ContainsRune(clusterID, '\x00') {
 		return fault.New(fault.Invalid, "meta identity must be complete", nil)
 	}
 	return s.db.Update(func(tx *bolt.Tx) error {
-		ib := tx.Bucket(bucketIdentity)
-		stored, pinned, err := readIdentityChecked(tx)
-		if err != nil {
-			return err
-		}
-		if !pinned {
-			if !storeIsFresh(tx) {
-				return fault.New(fault.Unreadable, "unpinned retained meta state cannot be rebound", nil)
-			}
-			if err := ib.Put(keyNodeName, []byte(nodeName)); err != nil {
-				return err
-			}
-			if err := ib.Put(keyClusterID, []byte(clusterID)); err != nil {
-				return err
-			}
-			return ib.Put(keyMemberID, itob(memberID))
-		}
-		resolved := Identity{NodeName: nodeName, ClusterID: clusterID, MemberID: memberID}
-		if stored != resolved {
-			return &IdentityMismatchError{Stored: stored, Resolved: resolved}
-		}
-		return nil
+		return ensureIdentityTx(tx, Identity{NodeName: nodeName, ClusterID: clusterID, MemberID: memberID})
 	})
 }
 
 func itob(v uint64) []byte {
-	b := make([]byte, 8)
+	b := make([]byte, uint64ByteCount)
 	binary.BigEndian.PutUint64(b, v)
 	return b
 }
 
 func btoi(b []byte) uint64 {
-	if len(b) != 8 {
+	if len(b) != uint64ByteCount {
 		return 0
 	}
 	return binary.BigEndian.Uint64(b)
+}
+
+func saveReadyTx(tx *bolt.Tx, entries []raftpb.Entry, hs raftpb.HardState) error {
+	var oldHS raftpb.HardState
+	if err := oldHS.Unmarshal(tx.Bucket(bucketHardState).Get(keyHardState)); err != nil {
+		return err
+	}
+	if err := validateHardState(oldHS, hs); err != nil {
+		return err
+	}
+	if err := replaceReadyEntries(tx.Bucket(bucketEntries), entries, oldHS.Commit); err != nil {
+		return err
+	}
+	return saveHardStateTx(tx, hs)
+}
+
+func replaceReadyEntries(eb *bolt.Bucket, entries []raftpb.Entry, commit uint64) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	if entries[0].Index <= commit {
+		if err := verifyCommittedEntries(eb, entries, commit); err != nil {
+			return err
+		}
+	}
+	from := itob(entries[0].Index)
+	var stale [][]byte
+	c := eb.Cursor()
+	for k, _ := c.Seek(from); k != nil; k, _ = c.Next() {
+		kc := make([]byte, len(k))
+		copy(kc, k)
+		stale = append(stale, kc)
+	}
+	for _, k := range stale {
+		if err := eb.Delete(k); err != nil {
+			return err
+		}
+	}
+	for i := range entries {
+		data, err := entries[i].Marshal()
+		if err != nil {
+			return fmt.Errorf("marshal entry %d: %w", entries[i].Index, err)
+		}
+		if err := eb.Put(itob(entries[i].Index), data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func verifyCommittedEntries(eb *bolt.Bucket, entries []raftpb.Entry, commit uint64) error {
+	if entries[len(entries)-1].Index < commit {
+		return fault.New(fault.Invalid, "cannot truncate committed entries", nil)
+	}
+	for _, e := range entries {
+		if e.Index > commit {
+			break
+		}
+		raw, err := e.Marshal()
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(eb.Get(itob(e.Index)), raw) {
+			return fault.New(fault.Invalid, "cannot replace committed entry", nil)
+		}
+	}
+	return nil
+}
+
+func saveHardStateTx(tx *bolt.Tx, hs raftpb.HardState) error {
+	if !raft.IsEmptyHardState(hs) {
+		data, err := hs.Marshal()
+		if err != nil {
+			return fmt.Errorf("marshal hardstate: %w", err)
+		}
+		if err := tx.Bucket(bucketHardState).Put(keyHardState, data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func installSnapshotTx(tx *bolt.Tx, snap raftpb.Snapshot, hs raftpb.HardState) error {
+	stale, err := snapshotIsStale(tx, snap)
+	if err != nil || stale {
+		return err
+	}
+	if err := installSnapshotData(tx, snap); err != nil {
+		return err
+	}
+	if err := installSnapshotApplied(tx, snap); err != nil {
+		return err
+	}
+	if err := installSnapshotHardState(tx, snap, hs); err != nil {
+		return err
+	}
+	return compactSnapshotEntries(tx, snap.Metadata.Index)
+}
+
+func snapshotIsStale(tx *bolt.Tx, snap raftpb.Snapshot) (bool, error) {
+	if btoi(tx.Bucket(bucketApplied).Get(keyApplied)) > snap.Metadata.Index {
+		return true, nil
+	}
+	sb := tx.Bucket(bucketSnapshot)
+	if cur := sb.Get(keySnapshot); cur != nil {
+		var existing raftpb.Snapshot
+		if err := existing.Unmarshal(cur); err != nil {
+			return false, fmt.Errorf("unmarshal stored snapshot: %w", err)
+		}
+		if snap.Metadata.Index < existing.Metadata.Index {
+			return true, nil // stale, keep the newer durable snapshot
+		}
+	}
+	return false, nil
+}
+
+func installSnapshotData(tx *bolt.Tx, snap raftpb.Snapshot) error {
+	id, err := readIdentityChecked(tx)
+	if err != nil {
+		return err
+	}
+	if !id.Found {
+		return fault.ErrIdentityMismatch
+	}
+	state, err := raftstate.DecodeRaftSnapshot(snap, id.Identity.ClusterID, topology.MetaGroupID)
+	if err != nil {
+		return err
+	}
+	snapBytes, err := snap.Marshal()
+	if err != nil {
+		return fmt.Errorf("marshal snapshot: %w", err)
+	}
+	if err := tx.Bucket(bucketSnapshot).Put(keySnapshot, snapBytes); err != nil {
+		return err
+	}
+	if len(snap.Data) > 0 {
+		if err := tx.Bucket(bucketState).Put(keyState, state.Application); err != nil {
+			return err
+		}
+	}
+	return recordMemberSeen(tx, snap.Metadata.ConfState)
+}
+
+func installSnapshotApplied(tx *bolt.Tx, snap raftpb.Snapshot) error {
+	ab := tx.Bucket(bucketApplied)
+	if v := ab.Get(keyApplied); len(v) != uint64ByteCount || btoi(v) < snap.Metadata.Index {
+		if err := ab.Put(keyApplied, itob(snap.Metadata.Index)); err != nil {
+			return err
+		}
+		csBytes, err := snap.Metadata.ConfState.Marshal()
+		if err != nil {
+			return fmt.Errorf("marshal confstate: %w", err)
+		}
+		if err := ab.Put(keyConfState, csBytes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func installSnapshotHardState(tx *bolt.Tx, snap raftpb.Snapshot, hs raftpb.HardState) error {
+	hb := tx.Bucket(bucketHardState)
+	effHS := hs
+	if raft.IsEmptyHardState(effHS) {
+		if cur := hb.Get(keyHardState); cur != nil {
+			if err := effHS.Unmarshal(cur); err != nil {
+				return fmt.Errorf("unmarshal stored hardstate: %w", err)
+			}
+		}
+	}
+	if effHS.Commit < snap.Metadata.Index {
+		effHS.Commit = snap.Metadata.Index
+	}
+	var previousHS raftpb.HardState
+	if err := previousHS.Unmarshal(hb.Get(keyHardState)); err != nil {
+		return err
+	}
+	if err := validateHardState(previousHS, effHS); err != nil {
+		return err
+	}
+	if !raft.IsEmptyHardState(effHS) {
+		hd, err := effHS.Marshal()
+		if err != nil {
+			return fmt.Errorf("marshal hardstate: %w", err)
+		}
+		if err := hb.Put(keyHardState, hd); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func compactSnapshotEntries(tx *bolt.Tx, index uint64) error {
+	eb := tx.Bucket(bucketEntries)
+	var doomed [][]byte
+	c := eb.Cursor()
+	for k, _ := c.First(); k != nil; k, _ = c.Next() {
+		if btoi(k) > index {
+			break // keys are ordered; nothing beyond here to compact
+		}
+		kc := make([]byte, len(k))
+		copy(kc, k)
+		doomed = append(doomed, kc)
+	}
+	for _, k := range doomed {
+		if err := eb.Delete(k); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func loadAllTx(tx *bolt.Tx, result *storage.Recovery) error {
+	if v := tx.Bucket(bucketHardState).Get(keyHardState); v != nil {
+		if err := result.HardState.Unmarshal(v); err != nil {
+			return fmt.Errorf("unmarshal hardstate: %w", err)
+		}
+	}
+	if v := tx.Bucket(bucketSnapshot).Get(keySnapshot); v != nil {
+		if err := result.Snapshot.Unmarshal(v); err != nil {
+			return fmt.Errorf("unmarshal snapshot: %w", err)
+		}
+	}
+	floor := result.Snapshot.Metadata.Index
+	return tx.Bucket(bucketEntries).ForEach(func(k, v []byte) error {
+		if btoi(k) <= floor {
+			return nil
+		}
+		var e raftpb.Entry
+		if err := e.Unmarshal(v); err != nil {
+			return fmt.Errorf("unmarshal entry %d: %w", btoi(k), err)
+		}
+		result.Entries = append(result.Entries, e)
+		return nil
+	})
+}
+
+func ensureIdentityTx(tx *bolt.Tx, resolved Identity) error {
+	ib := tx.Bucket(bucketIdentity)
+	stored, err := readIdentityChecked(tx)
+	if err != nil {
+		return err
+	}
+	if !stored.Found {
+		if !diskIsFresh(tx) {
+			return fault.New(fault.Unreadable, "unpinned retained meta state cannot be rebound", nil)
+		}
+		if err := ib.Put(keyNodeName, []byte(resolved.NodeName)); err != nil {
+			return err
+		}
+		if err := ib.Put(keyClusterID, []byte(resolved.ClusterID)); err != nil {
+			return err
+		}
+		return ib.Put(keyMemberID, itob(resolved.MemberID))
+	}
+	if stored.Identity != resolved {
+		return &IdentityMismatchError{Stored: stored.Identity, Resolved: resolved}
+	}
+	return nil
 }

@@ -20,12 +20,12 @@ func TestOperatorTransitionDoesNotRegressWallClock(t *testing.T) {
 
 func TestPermanentPromotionRefusalDoesNotWaitForever(t *testing.T) {
 	t.Parallel()
-	state, _, retry := classifyStepError(Step{Kind: StepPromoteVoter}, &membership.SafetyRefusal{Reason: "replica is not a current learner; add it as a learner first"})
-	if retry || state != OperatorFailed {
+	classification := classifyStepError(Step{Kind: StepPromoteVoter}, &membership.SafetyRefusal{Reason: "replica is not a current learner; add it as a learner first"})
+	if classification.retry || classification.state != OperatorFailed {
 		t.Fatal("permanent promotion refusal treated as waiting")
 	}
-	state, _, retry = classifyStepError(Step{Kind: StepRemoveReplica}, &membership.SafetyRefusal{Reason: "post-change live voter quorum would be unavailable"})
-	if !retry || state != OperatorWaitingReplica {
+	classification = classifyStepError(Step{Kind: StepRemoveReplica}, &membership.SafetyRefusal{Reason: "post-change live voter quorum would be unavailable"})
+	if !classification.retry || classification.state != OperatorWaitingReplica {
 		t.Fatal("transient liveness refusal treated as terminal")
 	}
 }

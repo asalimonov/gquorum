@@ -3,6 +3,7 @@
 package metastore
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -61,6 +62,37 @@ func TestOpenUsesExactCallerPathAndSchema(t *testing.T) {
 	}
 }
 
+func TestOldMetadataFormatIsRejectedWithoutRewrite(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "meta.bolt")
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket(bucketFormat).Put(keySchemaVersion, []byte("2"))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopened, err := Open(path); !errors.Is(err, fault.ErrUnsupported) {
+		if reopened != nil {
+			_ = reopened.Close()
+		}
+		t.Fatalf("old format was not rejected: %v", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("rejected format was changed: %v", err)
+	}
+}
+
 func TestSaveApplicationAtomicDurableState(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "meta.bolt")
@@ -91,9 +123,9 @@ func TestSaveApplicationAtomicDurableState(t *testing.T) {
 	if err != nil || a != 2 {
 		t.Fatal(a, err)
 	}
-	actual, found, err := s.AppliedConfState()
-	if err != nil || !found || !reflect.DeepEqual(cs, actual) {
-		t.Fatal(actual, found, err)
+	actual, err := s.AppliedConfState()
+	if err != nil || !actual.Found || !reflect.DeepEqual(cs, actual.ConfState) {
+		t.Fatal(actual.ConfState, actual.Found, err)
 	}
 	state, err := s.LoadState()
 	if err != nil || string(state) != `{"latest":{"version":2}}` {
@@ -137,9 +169,9 @@ func TestHardStateAndCommittedTailNeverRegress(t *testing.T) {
 	if err := s.SaveReady([]raftpb.Entry{ent(2, 3, "replacement")}, raftpb.HardState{Term: 3, Commit: 2}); !errors.Is(err, fault.ErrInvalid) {
 		t.Fatal("committed entry replaced", err)
 	}
-	actualHS, actualEntries, _, err := s.LoadAll()
-	if err != nil || actualHS != hs || !reflect.DeepEqual(actualEntries, entries) {
-		t.Fatal("failed transaction mutated state", actualHS, actualEntries, err)
+	actualHS, err := s.LoadAll()
+	if err != nil || actualHS.HardState != hs || !reflect.DeepEqual(actualHS.Entries, entries) {
+		t.Fatal("failed transaction mutated state", actualHS.HardState, actualHS.Entries, err)
 	}
 	if err := s.CompactEntries(2); !errors.Is(err, fault.ErrInvalid) {
 		t.Fatal("compacted without covering snapshot", err)
@@ -167,15 +199,15 @@ func TestReplicaLedgerExactIdentityAndReplacementProtection(t *testing.T) {
 	if err := s.ForgetReplica("load", 8); !errors.Is(err, fault.ErrIdentityMismatch) {
 		t.Fatal(err)
 	}
-	actual, found, err := s.LookupReplica("load")
-	if err != nil || !found || actual != record {
-		t.Fatal(actual, found, err)
+	actual, err := s.LookupReplica("load")
+	if err != nil || !actual.Found || actual.Record != record {
+		t.Fatal(actual.Record, actual.Found, err)
 	}
 	if err := s.ForgetReplica("load", 7); err != nil {
 		t.Fatal(err)
 	}
-	if _, found, err := s.LookupReplica("load"); err != nil || found {
-		t.Fatal(found, err)
+	if found, err := s.LookupReplica("load"); err != nil || found.Found {
+		t.Fatal(found.Found, err)
 	}
 	if err := s.RecordReplica("_meta", record); !errors.Is(err, fault.ErrInvalid) {
 		t.Fatal(err)

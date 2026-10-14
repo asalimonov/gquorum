@@ -53,7 +53,7 @@ Approved load learners can serve local observations and forward writes through
 their Raft leader. The serving gate requires the exact Active assignment and
 matching native role, so prepared replicas cannot serve early. Bootstrap gives
 the `workers` group an explicit two-voter target and places learners on remaining
-eligible hosts. Group administration also exposes `voter-policy`, `hosting` and
+eligible hosts. Group administration also exposes `voter-config`, `hosting` and
 `pinned-learner` mutations through the fixture's public API adapter.
 
 `PUT /internal/test/fences/{group}/{host|group}` arms a resource fence delivery

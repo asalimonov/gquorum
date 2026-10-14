@@ -35,9 +35,9 @@ func singleMetaFixtureWith(t *testing.T, modify func(*Options)) []*Group {
 		opts := Options{Identity: topology.Identity{NodeName: founders[i].Node.Name, ClusterID: "cluster", InstanceID: fmt.Sprintf("instance-%d", i), MemberID: founders[i].MemberID}, DBPath: filepath.Join(t.TempDir(), "meta.bolt"), Founders: founders, Limits: topology.Limits{MaxNodes: count}, Timing: Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 50}, SessionTTL: 3 * time.Second, Network: NetworkOptions{Listener: listeners[i], AdvertiseAddress: founders[i].Address, AllowPlaintext: true, ClusterCredential: []byte("test-cluster-credential")}}
 		// This fixture deliberately caps total membership at one. The voter
 		// target must respect that explicit hard bound.
-		policy := topology.DefaultVoterPolicy()
-		policy.TargetVoters = count
-		opts.VoterPolicy = &policy
+		voterConfig := topology.DefaultVoterConfig()
+		voterConfig.TargetVoters = count
+		opts.VoterConfig = &voterConfig
 		if modify != nil {
 			modify(&opts)
 		}

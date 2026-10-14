@@ -2,7 +2,6 @@ package scheduling
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"reflect"
@@ -13,9 +12,13 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
-	"github.com/asalimonov/gquorum/policy"
+	schedulingapi "github.com/asalimonov/gquorum/scheduling"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
+)
+
+const (
+	defaultCallbackTimeout = 10 * time.Second
 )
 
 const (
@@ -32,6 +35,8 @@ type Settings struct {
 	Interval, TickTimeout, StabilityWindow, Cooldown time.Duration
 }
 
+// WithDefaults fills absent repair intervals, callback budgets and stability
+// windows.
 func (s Settings) WithDefaults() Settings {
 	if s.Interval == 0 {
 		s.Interval = defaultInterval
@@ -47,19 +52,26 @@ func (s Settings) WithDefaults() Settings {
 	}
 	return s
 }
+
+// Validate requires positive repair durations and a tick timeout below the
+// interval.
 func (s Settings) Validate() error {
-	s = s.WithDefaults()
-	if s.Interval <= 0 || s.TickTimeout <= 0 || s.TickTimeout >= s.Interval || s.StabilityWindow <= 0 || s.Cooldown <= 0 {
-		return fault.New(fault.Invalid, "repair durations must be positive and tick timeout must be below interval", nil)
+	resolved := s.WithDefaults()
+	if resolved.Interval <= 0 || resolved.TickTimeout <= 0 || resolved.TickTimeout >= resolved.Interval ||
+		resolved.StabilityWindow <= 0 || resolved.Cooldown <= 0 {
+		return fault.New(fault.Invalid, "repair durations must be positive and tick timeout must be below interval",
+			nil)
 	}
 	return nil
 }
 
+// Config supplies the repair host, policy, timing, exact holds and transition
+// callback.
 type Config struct {
 	Host            Host
 	Settings        Settings
 	Logger          *slog.Logger
-	Scheduler       policy.Scheduler
+	Policy          schedulingapi.RepairPolicy
 	CallbackTimeout time.Duration
 	Held            func() []storage.Identity
 	// OnTransition receives owned diagnostic snapshots, once per state change.
@@ -67,12 +79,13 @@ type Config struct {
 	OnTransition func(topology.SchedulingStatus)
 }
 
-// Driver invokes the selected scheduler only after leader/staging/health gates.
-// It owns validation and concrete repair proposals; callbacks cannot bypass them.
-type Driver struct {
+// Scheduler invokes the selected scheduler only after leader/staging/health
+// gates. It owns validation and concrete repair proposals; callbacks cannot
+// bypass them.
+type Scheduler struct {
 	host             Host
 	settings         Settings
-	policy           policy.Scheduler
+	policy           schedulingapi.RepairPolicy
 	callbackTimeout  time.Duration
 	held             func() []storage.Identity
 	logger           *slog.Logger
@@ -93,7 +106,9 @@ type Driver struct {
 	enabled          atomic.Bool
 }
 
-func New(cfg Config) (*Driver, error) {
+// New validates repair dependencies and constructs an inactive serialized
+// scheduler.
+func New(cfg Config) (*Scheduler, error) {
 	if cfg.Host == nil {
 		return nil, fault.New(fault.Invalid, "repair host is required", nil)
 	}
@@ -104,13 +119,24 @@ func New(cfg Config) (*Driver, error) {
 		return nil, fault.ErrInvalid
 	}
 	if cfg.CallbackTimeout == 0 {
-		cfg.CallbackTimeout = 10 * time.Second
+		cfg.CallbackTimeout = defaultCallbackTimeout
 	}
-	r := &Driver{host: cfg.Host, settings: cfg.Settings.WithDefaults(), logger: cfg.Logger, onTransition: cfg.OnTransition, now: time.Now, gate: make(chan struct{}, 1), wake: make(chan struct{}, 1), done: make(chan struct{}), aliveSince: make(map[string]time.Time)}
-	r.policy, r.callbackTimeout, r.held = cfg.Scheduler, cfg.CallbackTimeout, cfg.Held
+	r := &Scheduler{
+		host:         cfg.Host,
+		settings:     cfg.Settings.WithDefaults(),
+		logger:       cfg.Logger,
+		onTransition: cfg.OnTransition,
+		now:          time.Now,
+		gate:         make(chan struct{}, 1),
+		wake:         make(chan struct{}, 1),
+		done:         make(chan struct{}),
+		aliveSince:   make(map[string]time.Time),
+	}
+	r.policy, r.callbackTimeout, r.held = cfg.Policy, cfg.CallbackTimeout, cfg.Held
 	if r.policy == nil {
 		var err error
-		r.policy, err = policy.NewRestoreDegraded(policy.RestoreDegradedOptions{StableFor: r.settings.StabilityWindow})
+		r.policy, err = schedulingapi.NewDefaultRepairPolicy(schedulingapi.DefaultRepairOptions{
+			StableFor: r.settings.StabilityWindow})
 		if err != nil {
 			return nil, err
 		}
@@ -124,7 +150,8 @@ func New(cfg Config) (*Driver, error) {
 	return r, nil
 }
 
-func (r *Driver) Start(parent context.Context) error {
+// Start begins periodic repair evaluation under the supplied lifetime context.
+func (r *Scheduler) Start(parent context.Context) error {
 	if err := parent.Err(); err != nil {
 		return err
 	}
@@ -155,7 +182,7 @@ func (r *Driver) Start(parent context.Context) error {
 
 // Stop cancels the current bounded tick and joins the owned worker. Calling it
 // before Start permanently closes the lifecycle, without starting a goroutine.
-func (r *Driver) Stop(ctx context.Context) error {
+func (r *Scheduler) Stop(ctx context.Context) error {
 	r.mu.Lock()
 	if !r.stopped {
 		r.stopped = true
@@ -175,7 +202,8 @@ func (r *Driver) Stop(ctx context.Context) error {
 	}
 }
 
-func (r *Driver) Status() topology.SchedulingStatus {
+// Status returns an owned diagnostic snapshot of current scheduling activity.
+func (r *Scheduler) Status() topology.SchedulingStatus {
 	r.statusMu.RLock()
 	defer r.statusMu.RUnlock()
 	status := r.status.Clone()
@@ -188,7 +216,7 @@ func (r *Driver) Status() topology.SchedulingStatus {
 // SetEnabled serializes the local kill switch with the current tick. Once
 // disabling returns successfully, no originating repair remains in flight.
 // Previously approved convergence remains independent of this switch.
-func (r *Driver) SetEnabled(ctx context.Context, enabled bool) error {
+func (r *Scheduler) SetEnabled(ctx context.Context, setting Enablement) error {
 	select {
 	case r.gate <- struct{}{}:
 		defer func() { <-r.gate }()
@@ -204,13 +232,13 @@ func (r *Driver) SetEnabled(ctx context.Context, enabled bool) error {
 	if stopped {
 		return fault.ErrStopped
 	}
-	if r.enabled.Swap(enabled) == enabled {
+	if r.enabled.Swap(setting.Enabled) == setting.Enabled {
 		return nil
 	}
 	r.host.ResetObservations()
 	r.resetAlive()
 	s := r.newStatus(r.host.IsLeader(), topology.SchedulingDisabled, ReconcileReasonConfigDisabled)
-	if enabled {
+	if setting.Enabled {
 		s = r.newStatus(r.host.IsLeader(), topology.SchedulingWaiting, ReconcileReasonStarting)
 	}
 	r.transition(s, "")
@@ -219,7 +247,7 @@ func (r *Driver) SetEnabled(ctx context.Context, enabled bool) error {
 
 // Tick serializes observations and bounds reads and proposals. It is an
 // internal testing/maintenance seam, not an alternative authorization path.
-func (r *Driver) Tick(parent context.Context) error {
+func (r *Scheduler) Tick(parent context.Context) error {
 	ctx, cancel := context.WithTimeout(parent, r.settings.TickTimeout)
 	defer cancel()
 	select {
@@ -241,9 +269,10 @@ func (r *Driver) Tick(parent context.Context) error {
 	return ctx.Err()
 }
 
-func (r *Driver) reconcileOnce(ctx context.Context) {
+func (r *Scheduler) reconcileOnce(ctx context.Context) {
 	leader := r.host.IsLeader()
-	latest, target, active, err := r.host.Views(ctx)
+	views, err := r.host.Views(ctx)
+	latest, target, active := views.Latest, views.Target, views.Active
 	if err != nil {
 		r.resetAlive()
 		r.transition(r.newStatus(leader, topology.SchedulingError, ReconcileReasonStatusUnavailable), err.Error())
@@ -253,41 +282,12 @@ func (r *Driver) reconcileOnce(ctx context.Context) {
 	if !leader {
 		r.resetAlive()
 	}
-	operator, exists, err := r.host.CurrentOperator(ctx)
+	operator, err := r.host.CurrentOperator(ctx)
 	if err != nil {
 		r.transition(r.newStatus(leader, topology.SchedulingError, ReconcileReasonStatusUnavailable), err.Error())
 		return
 	}
-	if !r.enabled.Load() {
-		r.resetAlive()
-		if leader && resumable(operator, exists, active, target) {
-			r.host.WakeOperator()
-		}
-		r.transition(r.newStatus(leader, topology.SchedulingDisabled, ReconcileReasonConfigDisabled), "")
-		return
-	}
-	if resumable(operator, exists, active, target) {
-		if leader {
-			r.host.WakeOperator()
-		}
-		r.transition(r.runningOperatorStatus(leader, operator.Status.ID), "")
-		return
-	}
-	if exists && operator.Status.State == topology.OperatorFailed && operator.Status.Version == latest.Version {
-		s := r.newStatus(leader, topology.SchedulingBlocked, ReconcileReasonFailedOperator)
-		s.BlockingVersion, s.CurrentOperatorID = &operator.Status.Version, &operator.Status.ID
-		r.transition(s, "")
-		return
-	}
-	if !reflect.DeepEqual(latest, target) || !reflect.DeepEqual(latest, active) {
-		if leader && !hasVoterPolicies(active) && r.healStagedInternal(ctx, latest, active) {
-			return
-		}
-		r.transition(r.blockedStagedStatus(leader, latest.Version), "")
-		return
-	}
-	if !leader {
-		r.transition(r.newStatus(false, topology.SchedulingStandby, ReconcileReasonNotLeader), "")
+	if r.reconcileApproval(ctx, schedulingApproval{views: views, operator: operator, leader: leader}) {
 		return
 	}
 	health, err := r.host.Health(ctx)
@@ -298,7 +298,7 @@ func (r *Driver) reconcileOnce(ctx context.Context) {
 	}
 	now := r.now()
 	r.sampleAlive(active, health, now)
-	if !hasVoterPolicies(active) && !r.lastRun.IsZero() && now.Sub(r.lastRun) < r.settings.Cooldown {
+	if !hasVoterConfigs(active) && !r.lastRun.IsZero() && now.Sub(r.lastRun) < r.settings.Cooldown {
 		r.transition(r.newStatus(true, topology.SchedulingWaiting, ReconcileReasonCooldown), "")
 		return
 	}
@@ -311,88 +311,27 @@ func (r *Driver) reconcileOnce(ctx context.Context) {
 	for _, item := range topology.EvaluateDataGroupHealth(active, health) {
 		evaluations[item.GroupID] = item
 	}
-	in := policy.ScheduleInput{Now: now, Latest: latest, Target: target, Active: active, Status: status, Health: evaluations, Alive: r.aliveDurations(now), Held: r.heldIdentities(), Metrics: r.host.Observations(), Switches: r.host.VoterSwitches()}
-	callbackCtx, cancel := context.WithTimeout(ctx, r.callbackTimeout)
-	r.statusMu.Lock()
-	r.callback, r.callbackStarted = callbackCtx, now
-	r.statusMu.Unlock()
-	decision, err := r.policy.Schedule(callbackCtx, in.Clone())
-	r.statusMu.Lock()
-	r.callback = nil
-	r.statusMu.Unlock()
-	if err == nil {
-		err = callbackCtx.Err()
+	in := schedulingapi.ScheduleInput{
+		Now:      now,
+		Latest:   latest,
+		Target:   target,
+		Active:   active,
+		Status:   status,
+		Health:   evaluations,
+		Alive:    r.aliveDurations(now),
+		Held:     r.heldIdentities(),
+		Metrics:  r.host.Observations(),
+		Switches: r.host.VoterSwitches(),
 	}
-	cancel()
-	if err != nil {
-		r.transition(r.newStatus(true, topology.SchedulingError, ReconcileReasonPolicyRejected), err.Error())
-		return
-	}
-	if decision.Action == nil {
-		s := r.newStatus(true, topology.SchedulingIdle, decision.Reason)
-		switch decision.Reason {
-		case ReconcileReasonStabilityWindow, "local_stop", "unknown_observation", "stale_observation",
-			"failure_window", "standby_window", "replica_cooldown", "group_cooldown",
-			"pinned_learner", "target_shortfall", "insufficient_observation_frequency":
-			s = r.newStatus(true, topology.SchedulingWaiting, decision.Reason)
-		case ReconcileReasonQuorumLost:
-			s = r.newStatus(true, topology.SchedulingBlocked, ReconcileReasonQuorumLost)
-		}
-		r.transition(s, "")
-		return
-	}
-	action := *decision.Action
-	if action.Kind == policy.ReconfigureVoters {
-		if action.VoterChange == nil || action.Identity != (storage.Identity{}) {
-			r.transition(r.newStatus(true, topology.SchedulingError, ReconcileReasonPolicyRejected), "invalid voter action union")
-			return
-		}
-		change := action.VoterChange.Clone()
-		id, err := r.commitVoterChange(ctx, in, change)
-		if err != nil {
-			reason := ReconcileReasonPolicyRejected
-			if errors.Is(err, fault.ErrVersionConflict) {
-				reason = ReconcileReasonCASConflict
-			}
-			r.transition(r.newStatus(true, topology.SchedulingWaiting, reason), err.Error())
-			return
-		}
-		r.transition(r.runningOperatorStatus(true, id), "")
-		return
-	}
-	if action.VoterChange != nil {
-		r.transition(r.newStatus(true, topology.SchedulingError, ReconcileReasonPolicyRejected), "mixed action variants")
-		return
-	}
-	if !r.lastRun.IsZero() && now.Sub(r.lastRun) < r.settings.Cooldown {
-		r.transition(r.newStatus(true, topology.SchedulingWaiting, ReconcileReasonCooldown), "")
-		return
-	}
-	if action.Kind != policy.RestoreMissingReplica {
-		r.transition(r.newStatus(true, topology.SchedulingError, ReconcileReasonPolicyRejected), fmt.Sprintf("forbidden action %q", action.Kind))
-		return
-	}
-	s := r.newStatus(true, topology.SchedulingRunning, ReconcileReasonMissingReplica)
-	s.CurrentAction = &topology.SchedulingActionStatus{Kind: string(action.Kind), GroupID: action.Identity.GroupID, NodeName: action.Identity.NodeName, ReplicaID: action.Identity.ReplicaID}
-	r.transition(s, "")
-	id, err := r.commitReplicaRepair(ctx, latest, active, action, now)
-	r.lastRun = now
-	if err != nil {
-		reason := ReconcileReasonPolicyRejected
-		if errors.Is(err, fault.ErrVersionConflict) {
-			reason = ReconcileReasonCASConflict
-		}
-		r.transition(r.newStatus(true, topology.SchedulingError, reason), err.Error())
-		return
-	}
-	r.transition(r.runningOperatorStatus(true, id), "")
+	r.evaluatePolicy(ctx, in)
 }
 
 func resumable(ex topology.Operator, exists bool, active, target topology.Document) bool {
-	return exists && (!ex.Status.State.Terminal() || ex.Status.State == topology.OperatorSucceeded && !reflect.DeepEqual(active, target))
+	return exists && (!ex.Status.State.Terminal() || ex.Status.State == topology.OperatorSucceeded &&
+		!reflect.DeepEqual(active, target))
 }
 
-func (r *Driver) healable(ctx context.Context, latest, active topology.Document) (bool, error) {
+func (r *Scheduler) healable(ctx context.Context, latest, active topology.Document) (bool, error) {
 	if latest.Origin != topology.OriginInternal || latest.ParentVersion != active.Version {
 		return false, nil
 	}
@@ -403,7 +342,8 @@ func (r *Driver) healable(ctx context.Context, latest, active topology.Document)
 	plan, err := r.host.PlanFor(ctx, latest)
 	return err == nil && plan.IsEmpty(), err
 }
-func (r *Driver) healStagedInternal(ctx context.Context, latest, active topology.Document) bool {
+
+func (r *Scheduler) healStagedInternal(ctx context.Context, latest, active topology.Document) bool {
 	ok, err := r.healable(ctx, latest, active)
 	if err != nil {
 		s := r.newStatus(true, topology.SchedulingError, ReconcileReasonStatusUnavailable)
@@ -423,15 +363,25 @@ func (r *Driver) healStagedInternal(ctx context.Context, latest, active topology
 	return true
 }
 
-func (r *Driver) commitReplicaRepair(ctx context.Context, latest, active topology.Document, action policy.ScheduleAction, at time.Time) (topology.OperatorID, error) {
+type replicaRepair struct {
+	Latest, Active topology.Document
+	Action         schedulingapi.ScheduleAction
+	At             time.Time
+}
+
+func (r *Scheduler) commitReplicaRepair(ctx context.Context, repairRequest replicaRepair) (topology.OperatorID, error) {
+	latest, active, action, at := repairRequest.Latest, repairRequest.Active, repairRequest.Action, repairRequest.At
 	// Caller code may have waited while topology or native membership changed.
-	// Recheck the decision boundary using fresh owned observations. The replicated
+	// Recheck the decision boundary using fresh owned observations. The
+	// replicated
 	// CAS still protects changes occurring after this local validation.
-	currentLatest, currentTarget, currentActive, err := r.host.Views(ctx)
+	views, err := r.host.Views(ctx)
+	currentLatest, currentTarget, currentActive := views.Latest, views.Target, views.Active
 	if err != nil {
 		return "", err
 	}
-	if !reflect.DeepEqual(currentLatest, latest) || !reflect.DeepEqual(currentTarget, latest) || !reflect.DeepEqual(currentActive, active) {
+	if !reflect.DeepEqual(currentLatest, latest) || !reflect.DeepEqual(currentTarget, latest) ||
+		!reflect.DeepEqual(currentActive, active) {
 		return "", fault.ErrVersionConflict
 	}
 	if !r.host.IsLeader() {
@@ -451,21 +401,17 @@ func (r *Driver) commitReplicaRepair(ctx context.Context, latest, active topolog
 	if err != nil {
 		return "", err
 	}
+	if err := r.validateReplicaRepair(active, action, status); err != nil {
+		return "", err
+	}
 	identity := action.Identity
-	group, node := active.Group(identity.GroupID), active.Node(identity.NodeName)
-	observed, ok := status[identity.GroupID]
-	if action.Kind != policy.RestoreMissingReplica || identity.ClusterID != active.ClusterID || group == nil || group.VoterPolicy != nil || identity.GroupID == topology.MetaGroupID || node == nil || node.State != topology.NodeActive || !ok || !observed.Found || observed.GroupID != identity.GroupID || slices.Contains(r.heldIdentities(), identity) {
-		return "", fault.ErrOperatorAuthorization
-	}
-	for _, id := range append(append([]uint64(nil), observed.ConfState.Voters...), observed.ConfState.Learners...) {
-		if id == identity.ReplicaID {
-			return "", fault.New(fault.OperatorAuthorization, "repair identity is already a member", nil)
-		}
-	}
-	repair, _, err := metaengine.ReplicaRepairDocument(active, latest, identity.GroupID, identity.NodeName, identity.ReplicaID, at, topology.OriginReconciler, "auto-repair")
+	options := metaengine.ReplicaRepairOptions{GroupID: identity.GroupID, NodeName: identity.NodeName,
+		ReplicaID: identity.ReplicaID, At: at, Origin: topology.OriginReconciler, Actor: "auto-repair"}
+	repaired, err := metaengine.ReplicaRepairDocument(active, latest, options)
 	if err != nil {
 		return "", err
 	}
+	repair := repaired.Doc
 	plan, err := r.host.PlanFor(ctx, repair)
 	if err != nil {
 		return "", err
@@ -476,14 +422,14 @@ func (r *Driver) commitReplicaRepair(ctx context.Context, latest, active topolog
 	if !r.host.IsLeader() {
 		return "", fault.ErrNotLeader
 	}
-	id, err := r.host.CommitRepair(ctx, repair, latest.Version, plan)
+	id, err := r.host.CommitRepair(ctx, RepairCommit{Document: repair, ExpectedVersion: latest.Version, Plan: plan})
 	if err == nil {
 		r.host.WakeOperator()
 	}
 	return id, err
 }
 
-func (r *Driver) sampleAlive(doc topology.Document, health map[string]topology.Health, now time.Time) {
+func (r *Scheduler) sampleAlive(doc topology.Document, health map[string]topology.Health, now time.Time) {
 	declared := make(map[string]bool, len(doc.Nodes))
 	for _, node := range doc.Nodes {
 		declared[node.Name] = true
@@ -505,45 +451,55 @@ func knownHealth(doc topology.Document, health map[string]topology.Health) bool 
 		return false
 	}
 	for _, n := range doc.Nodes {
-		if n.State != topology.NodeExcluded && health[n.Name] != topology.HealthAlive && health[n.Name] != topology.HealthDead {
+		if n.State != topology.NodeExcluded && health[n.Name] != topology.HealthAlive &&
+			health[n.Name] != topology.HealthDead {
 			return false
 		}
 	}
 	return true
 }
-func (r *Driver) resetAlive() { clear(r.aliveSince) }
-func (r *Driver) aliveDurations(now time.Time) map[string]time.Duration {
+func (r *Scheduler) resetAlive() { clear(r.aliveSince) }
+func (r *Scheduler) aliveDurations(now time.Time) map[string]time.Duration {
 	out := make(map[string]time.Duration, len(r.aliveSince))
 	for name, since := range r.aliveSince {
 		out[name] = max(0, now.Sub(since))
 	}
 	return out
 }
-func (r *Driver) newStatus(leader bool, state topology.SchedulingState, reason string) topology.SchedulingStatus {
+
+func (r *Scheduler) newStatus(leader bool, state topology.SchedulingState, reason string) topology.SchedulingStatus {
 	name := fmt.Sprintf("%T", r.policy)
-	if _, builtIn := r.policy.(*policy.RestoreDegraded); builtIn {
-		name = "restore-required-replica"
+	if _, builtIn := r.policy.(*schedulingapi.DefaultRepairPolicy); builtIn {
+		name = "default-repair"
 	}
-	return topology.SchedulingStatus{Enabled: r.enabled.Load(), IsLeader: leader, State: state, Reason: reason, Policy: name}
+	return topology.SchedulingStatus{
+		Enabled:      r.enabled.Load(),
+		IsLeader:     leader,
+		State:        state,
+		Reason:       reason,
+		RepairPolicy: name,
+	}
 }
 
-func (r *Driver) heldIdentities() []storage.Identity {
+func (r *Scheduler) heldIdentities() []storage.Identity {
 	if r.held == nil {
 		return nil
 	}
 	return slices.Clone(r.held())
 }
-func (r *Driver) runningOperatorStatus(leader bool, id topology.OperatorID) topology.SchedulingStatus {
+
+func (r *Scheduler) runningOperatorStatus(leader bool, id topology.OperatorID) topology.SchedulingStatus {
 	s := r.newStatus(leader, topology.SchedulingRunning, ReconcileReasonApprovedOperator)
 	s.CurrentOperatorID = &id
 	return s
 }
-func (r *Driver) blockedStagedStatus(leader bool, version uint64) topology.SchedulingStatus {
+
+func (r *Scheduler) blockedStagedStatus(leader bool, version uint64) topology.SchedulingStatus {
 	s := r.newStatus(leader, topology.SchedulingBlocked, ReconcileReasonStagedLatest)
 	s.BlockingVersion = &version
 	return s
 }
-func (r *Driver) transition(next topology.SchedulingStatus, detail string) {
+func (r *Scheduler) transition(next topology.SchedulingStatus, detail string) {
 	r.statusMu.Lock()
 	previous := r.status
 	a, b := previous.Clone(), next.Clone()
@@ -569,21 +525,23 @@ func (r *Driver) transition(next topology.SchedulingStatus, detail string) {
 			level = slog.LevelInfo
 		}
 	}
-	r.logger.Log(context.Background(), level, "topology reconciliation changed", "state", next.State, "reason", next.Reason, "detail", detail)
+	r.logger.Log(context.Background(), level, "topology reconciliation changed", "state", next.State, "reason",
+		next.Reason, "detail", detail)
 }
 
 // Enabled reports the local decision switch without waiting for a callback.
-func (r *Driver) Enabled() bool { return r.enabled.Load() }
+func (r *Scheduler) Enabled() bool { return r.enabled.Load() }
 
-func (r *Driver) Wake() {
+// Wake coalesces a request for another repair evaluation.
+func (r *Scheduler) Wake() {
 	select {
 	case r.wake <- struct{}{}:
 	default:
 	}
 }
-func hasVoterPolicies(doc topology.Document) bool {
+func hasVoterConfigs(doc topology.Document) bool {
 	for _, g := range doc.Groups {
-		if g.VoterPolicy != nil {
+		if g.VoterConfig != nil {
 			return true
 		}
 	}

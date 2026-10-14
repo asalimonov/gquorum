@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/lifecycle"
 	"github.com/asalimonov/gquorum/load"
-	"github.com/asalimonov/gquorum/policy"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -34,8 +34,8 @@ func TestRetirementRetryAfterMoveStillVerifiesApplicationBeforeForgettingLedger(
 	f := newFixture(t)
 	_, initial := fixtureAuthority(t, f)
 	f.cfg.Store = &interruptedQuarantine{Store: f.store}
-	f.cfg.Retention = func(context.Context, policy.RetentionInput) (policy.RetentionDecision, error) {
-		return policy.RetentionDecision{Collect: true}, nil
+	f.cfg.Retention = func(context.Context, lifecycle.RetentionInput) (lifecycle.RetentionDecision, error) {
+		return lifecycle.RetentionDecision{Collect: true}, nil
 	}
 	var callbacks atomic.Int32
 	f.cfg.RetireApplication = func(_ context.Context, req load.RetirementRequest) (load.RetirementResult, error) {
@@ -53,8 +53,8 @@ func TestRetirementRetryAfterMoveStillVerifiesApplicationBeforeForgettingLedger(
 	if _, err := h.ApplyAction(deadline(t), req); err == nil {
 		t.Fatal("injected post-move failure disappeared")
 	}
-	if _, found, err := f.cfg.LookupRecord(deadline(t), "work"); err != nil || !found {
-		t.Fatal("uncertain move lost ledger", found, err)
+	if found, err := f.cfg.LookupRecord(deadline(t), "work"); err != nil || !found.Found {
+		t.Fatal("uncertain move lost ledger", found.Found, err)
 	}
 	probe, err := f.store.Probe(deadline(t), "work")
 	must(t, err)
@@ -69,8 +69,8 @@ func TestRetirementRetryAfterMoveStillVerifiesApplicationBeforeForgettingLedger(
 	if len(result.Receipts) != 1 || callbacks.Load() != 2 {
 		t.Fatal("absent Raft directory skipped application verification", result, callbacks.Load())
 	}
-	if _, found, err := f.cfg.LookupRecord(deadline(t), "work"); err != nil || found {
-		t.Fatal("verified retirement retained ledger", found, err)
+	if found, err := f.cfg.LookupRecord(deadline(t), "work"); err != nil || found.Found {
+		t.Fatal("verified retirement retained ledger", found.Found, err)
 	}
 	must(t, h.CollectRetired(deadline(t)))
 	retired, err := f.store.Retired(deadline(t))
@@ -112,8 +112,8 @@ func TestMismatchedRetirementProofPreservesRaftAndLedger(t *testing.T) {
 		if !probe.Exists || probe.Identity != id {
 			t.Fatal("unverified retirement mutated Raft state", probe)
 		}
-		if record, found, err := f.cfg.LookupRecord(deadline(t), "work"); err != nil || !found || record.ReplicaID != 1 {
-			t.Fatal(record, found, err)
+		if record, err := f.cfg.LookupRecord(deadline(t), "work"); err != nil || !record.Found || record.Record.ReplicaID != 1 {
+			t.Fatal(record.Record, record.Found, err)
 		}
 	}
 }
@@ -152,8 +152,8 @@ func TestRetirementCannotStopOrEraseAnApprovedSuccessor(t *testing.T) {
 	if probe.Identity != f.localID(2) {
 		t.Fatal(probe)
 	}
-	if record, found, err := f.cfg.LookupRecord(deadline(t), "work"); err != nil || !found || record.ReplicaID != 2 {
-		t.Fatal(record, found, err)
+	if record, err := f.cfg.LookupRecord(deadline(t), "work"); err != nil || !record.Found || record.Record.ReplicaID != 2 {
+		t.Fatal(record.Record, record.Found, err)
 	}
 }
 

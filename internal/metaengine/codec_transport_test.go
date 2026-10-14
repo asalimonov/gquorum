@@ -5,11 +5,13 @@ package metaengine
 import (
 	"reflect"
 	"testing"
+
+	"github.com/asalimonov/gquorum/topology"
 )
 
 func TestDecodeProposalWhitelistsCompleteCommandSet(t *testing.T) {
 	t.Parallel()
-	for _, want := range []any{RecordReadmissionReceiptsProposal{ProposalID: "receipts"}, BeginEffectProposal{ProposalID: "effect"}, RecordFenceProposal{ProposalID: "fence"}, RecordEffectProposal{ProposalID: "receipt"}, GrantTransferProposal{RequestID: "transfer", ExpectedActiveVersion: 1}, BeginReadmissionAuthority{PreviousMemberID: 1, NodeName: "n1", InstanceID: "replacement", MemberID: 4, OperatorID: "exec-v2-a1"}, ProposeDocument{ExpectedVersion: 9}, AdmitNode{MemberID: 8}, BeginOperatorProposal{Version: 7}, CommitRepairOperatorProposal{ExpectedVersion: 6}, TransitionOperatorProposal{ProposalID: "transition"}, ActivateTargetProposal{Version: 5}, BindAdmissionProposal{Founding: true}, CommitReadmissionProposal{ExpectedVersion: 4}, ReadyAdmissionProposal{MemberID: 3}, GrantSession{SessionID: "session", TTLSeconds: 30}, RevokeSession{Reason: "expired"}, AcquireLock{Key: "node/n1"}} {
+	for _, want := range []any{RecordReadmissionReceiptsProposal{ProposalID: "receipts"}, BeginEffectProposal{ProposalID: "effect"}, RecordFenceProposal{ProposalID: "fence"}, RecordEffectProposal{ProposalID: "receipt"}, GrantTransferProposal{RequestID: "transfer", ExpectedActiveVersion: 1}, BeginReadmissionAuthority{PreviousMemberID: 1, NodeName: "n1", InstanceID: "replacement", MemberID: 4, OperatorID: "exec-v2-a1"}, ProposeDocument{ExpectedVersion: 9}, AdmitNode{MemberID: 8}, BeginOperatorProposal{Version: 7, Plan: topology.Plan{Version: 7, Steps: []topology.Step{{Seq: 1, Kind: topology.StepPromoteVoter, GroupID: "work", NodeName: "n2", ReplicaID: 2, ExpectedVotersDigest: "before", ResultVotersDigest: "after"}}, VoterBases: []topology.PlanVoterBase{{GroupID: "work", Voters: []uint64{1}}}}}, CommitRepairOperatorProposal{ExpectedVersion: 6}, TransitionOperatorProposal{ProposalID: "transition"}, ActivateTargetProposal{Version: 5}, BindAdmissionProposal{Founding: true}, CommitReadmissionProposal{ExpectedVersion: 4}, ReadyAdmissionProposal{MemberID: 3}, GrantSession{SessionID: "session", TTLSeconds: 30}, RevokeSession{Reason: "expired"}, AcquireLock{Key: "node/n1"}} {
 		data, err := Encode(want)
 		if err != nil {
 			t.Fatal(err)
@@ -22,7 +24,7 @@ func TestDecodeProposalWhitelistsCompleteCommandSet(t *testing.T) {
 			t.Fatalf("lost command fields: got %+v want %+v", got, want)
 		}
 	}
-	for _, data := range []string{`{`, `{}`, `{"schema_version":3,"kind":"grant_session","body":{}}`, `{"schema_version":2,"kind":"arbitrary","body":{}}`, `{"schema_version":2,"kind":"grant_session","body":null}`, `{"schema_version":2,"kind":"grant_session","body":[]}`, `{"schema_version":2,"kind":"grant_session","body":{"ttl_seconds":"bad"}}`} {
+	for _, data := range []string{`{`, `{}`, `{"schema_version":2,"kind":"grant_session","body":{}}`, `{"schema_version":3,"kind":"arbitrary","body":{}}`, `{"schema_version":3,"kind":"grant_session","body":null}`, `{"schema_version":3,"kind":"grant_session","body":[]}`, `{"schema_version":3,"kind":"grant_session","body":{"ttl_seconds":"bad"}}`} {
 		if _, err := DecodeProposal([]byte(data)); err == nil {
 			t.Errorf("accepted invalid envelope %s", data)
 		}

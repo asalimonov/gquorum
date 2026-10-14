@@ -48,9 +48,9 @@ func TestReplicaLedgerReplacementCASPreservesNewIdentity(t *testing.T) {
 	if err := s.ForgetReplica("load", 0); !errors.Is(err, fault.ErrInvalid) {
 		t.Fatal(err)
 	}
-	got, found, err := s.LookupReplica("load")
-	if err != nil || !found || got != newRecord {
-		t.Fatal(got, found, err)
+	got, err := s.LookupReplica("load")
+	if err != nil || !got.Found || got.Record != newRecord {
+		t.Fatal(got.Record, got.Found, err)
 	}
 }
 
@@ -64,8 +64,8 @@ func TestReplicaLedgerRejectsCorruptAndForeignLocalRecords(t *testing.T) {
 		if err := s.db.Update(func(tx *bolt.Tx) error { return tx.Bucket(bucketLoadReplicas).Put([]byte("load"), []byte(raw)) }); err != nil {
 			t.Fatal(err)
 		}
-		if _, found, err := s.LookupReplica("load"); found || !errors.Is(err, fault.ErrIdentityMismatch) {
-			t.Fatal(found, err)
+		if found, err := s.LookupReplica("load"); found.Found || !errors.Is(err, fault.ErrIdentityMismatch) {
+			t.Fatal(found.Found, err)
 		}
 		if err := s.RecordReplicaCAS("load", ReplicaRecord{NodeName: "a", ClusterID: "cluster", ReplicaID: 8}, 7); !errors.Is(err, fault.ErrIdentityMismatch) {
 			t.Fatal(err)

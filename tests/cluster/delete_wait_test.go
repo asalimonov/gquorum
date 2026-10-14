@@ -54,7 +54,7 @@ func TestDeletionWaitsForUnreachableFormerHostBeforeDeletingState(t *testing.T) 
 	if err := response.Decode(&staged); err != nil {
 		t.Fatal(err)
 	}
-	operatorID := startApply(t, ctx, c, ingress, staged.Document.Version)
+	operatorID := startApply(ctx, t, c, ingress, staged.Document.Version)
 	if err := Poll(ctx, func() (bool, error) {
 		operator, err := c.Operator(ctx, ingress, operatorID)
 		if err != nil {

@@ -14,8 +14,9 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/lifecycle"
 	"github.com/asalimonov/gquorum/load"
-	"github.com/asalimonov/gquorum/policy"
+	"github.com/asalimonov/gquorum/scheduling"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -29,8 +30,8 @@ type unopenedStorage struct {
 	storage.RetirementStore
 }
 type unopenedHealth struct{ topology.HealthSource }
-type unopenedScheduler struct{ policy.Scheduler }
-type unopenedLifecycle struct{ policy.LifecyclePolicy }
+type unopenedScheduler struct{ scheduling.RepairPolicy }
+type unopenedLifecycle struct{ lifecycle.Hooks }
 
 func nodeOptionsForTest(t *testing.T) NodeOptions {
 	t.Helper()
@@ -67,23 +68,24 @@ func TestNodeOptionsPureDefaultsAndStorageSelection(t *testing.T) {
 			if mode == "borrowed_store" {
 				o.Loads.Storage = LoadStorageOptions{Store: unopenedStorage{}, Retirement: unopenedStorage{}}
 			}
-			d, meta, err := resolveNodeOptions(o)
+			resolved, err := resolveNodeOptions(o)
+			d, meta := resolved.node, resolved.meta
 			if err != nil {
 				t.Fatal(err)
 			}
 			if d.Identity.MemberID != 1 || d.Node.Type != "worker" || d.Limits != (topology.Limits{MaxNodes: 3, MaxReplicas: 5, MaxPendingAuthorityRecords: 1024}) || d.Meta.Timing != DefaultMetaTiming() || d.Meta.SessionTTL != 15*time.Second || d.Meta.MaxWatchers != 256 || d.Meta.SnapshotThreshold != 512 || d.Meta.Network.MaxSnapshotBytes != 64<<20 {
 				t.Fatal("incorrect node defaults", d)
 			}
-			if d.Meta.Observation != (ObservationOptions{Interval: 5 * time.Second, Timeout: 2 * time.Second}) || d.Policies.Scheduling != (SchedulingOptions{Interval: 30 * time.Second, Timeout: 20 * time.Second, Cooldown: 5 * time.Minute}) || d.Policies.CallbackTimeout != 10*time.Second {
-				t.Fatal("incorrect observation or policy defaults", d)
+			if d.Meta.Observation != (ObservationOptions{Interval: 5 * time.Second, Timeout: 2 * time.Second}) || (d.Scheduling.Disabled || d.Scheduling.Interval != 30*time.Second || d.Scheduling.Timeout != 20*time.Second || d.Scheduling.Cooldown != 5*time.Minute) || d.CallbackTimeout != 10*time.Second {
+				t.Fatal("incorrect observation or callback defaults", d)
 			}
-			if _, ok := d.Policies.Scheduler.(*policy.RestoreDegraded); !ok {
+			if _, ok := d.Scheduling.Policy.(*scheduling.DefaultRepairPolicy); !ok {
 				t.Fatal("missing built-in scheduler")
 			}
-			if _, ok := d.Policies.Lifecycle.(*policy.DefaultLifecycle); !ok {
+			if _, ok := d.Lifecycle.Hooks.(*lifecycle.DefaultHooks); !ok {
 				t.Fatal("missing built-in lifecycle")
 			}
-			if meta.Scheduler != d.Policies.Scheduler || meta.CallbackTimeout != d.Policies.CallbackTimeout {
+			if meta.RepairPolicy != d.Scheduling.Policy || meta.CallbackTimeout != d.CallbackTimeout {
 				t.Fatal("meta lost selected policy")
 			}
 			if mode != "meta_only" && (d.Loads.EffectTimeout != 10*time.Second || d.Loads.RecoveryInterval != 250*time.Millisecond || d.Loads.RetirementInterval != time.Minute) {
@@ -111,21 +113,22 @@ func TestNodeOptionsRejectAmbiguousOrUnsafeSettings(t *testing.T) {
 		"NUL storage directory":                         func(o *NodeOptions) { o.StorageDir = "invalid\x00path" },
 		"storage directory within load retirement root": func(o *NodeOptions) { o.StorageDir = filepath.Join(o.Loads.Storage.WAL.RootDir, "system") },
 		"custom scheduler with built-in config": func(o *NodeOptions) {
-			o.Policies.Scheduler = unopenedScheduler{}
-			o.Policies.RestoreDegraded.StableFor = time.Second
+			o.Scheduling.Policy = unopenedScheduler{}
+			o.Scheduling.DefaultRepair.StableFor = time.Second
 		},
 		"custom lifecycle with built-in config": func(o *NodeOptions) {
-			o.Policies.Lifecycle = unopenedLifecycle{}
-			o.Policies.DefaultLifecycle.RetainForever = true
+			o.Lifecycle.Hooks = unopenedLifecycle{}
+			o.Lifecycle.Default.RetainForever = true
 		},
-		"negative scheduler window":  func(o *NodeOptions) { o.Policies.RestoreDegraded.StableFor = -1 },
-		"negative policy timeout":    func(o *NodeOptions) { o.Policies.CallbackTimeout = -1 },
-		"negative removal retention": func(o *NodeOptions) { o.Policies.DefaultLifecycle.Retention = -1 },
+		"negative node watchers":     func(o *NodeOptions) { o.MaxWatchers = -1 },
+		"negative scheduler window":  func(o *NodeOptions) { o.Scheduling.DefaultRepair.StableFor = -1 },
+		"negative callback timeout":  func(o *NodeOptions) { o.CallbackTimeout = -1 },
+		"negative removal retention": func(o *NodeOptions) { o.Lifecycle.Default.Retention = -1 },
 		"ambiguous retention": func(o *NodeOptions) {
-			o.Policies.DefaultLifecycle.RetainForever = true
-			o.Policies.DefaultLifecycle.Retention = time.Hour
+			o.Lifecycle.Default.RetainForever = true
+			o.Lifecycle.Default.Retention = time.Hour
 		},
-		"disabled invalid scheduler":       func(o *NodeOptions) { o.Policies.Scheduling.Disabled = true; o.Policies.Scheduling.Timeout = -1 },
+		"disabled invalid scheduler":       func(o *NodeOptions) { o.Scheduling.Disabled = true; o.Scheduling.Timeout = -1 },
 		"invalid observation":              func(o *NodeOptions) { o.Meta.Observation.Timeout = -1 },
 		"TTL election relation":            func(o *NodeOptions) { o.Meta.SessionTTL = 2 * time.Second },
 		"load without factory":             func(o *NodeOptions) { o.Loads.Factory = nil },
@@ -143,6 +146,7 @@ func TestNodeOptionsRejectAmbiguousOrUnsafeSettings(t *testing.T) {
 		"load timing overflow":             func(o *NodeOptions) { o.Loads.Engine.Timing.TickInterval = math.MaxInt64 },
 		"load negative tick":               func(o *NodeOptions) { o.Loads.Engine.Timing.TickInterval = -1 },
 		"load heartbeat election relation": func(o *NodeOptions) { o.Loads.Engine.Timing.HeartbeatTicks = 10 },
+		"load negative watchers":           func(o *NodeOptions) { o.Loads.Engine.MaxWatchers = -1 },
 		"load negative pending":            func(o *NodeOptions) { o.Loads.Engine.MaxPendingProposals = -1 },
 		"load excessive write wait":        func(o *NodeOptions) { o.Loads.Engine.Timing.WALWriteWait = time.Second },
 		"implicit load configuration":      func(o *NodeOptions) { o.Loads = LoadOptions{EffectTimeout: time.Second} },
@@ -160,22 +164,29 @@ func TestNodeOptionsRejectAmbiguousOrUnsafeSettings(t *testing.T) {
 	}
 }
 
-func TestNodeOptionsOwnMutableSettingsAndPreserveCustomPolicies(t *testing.T) {
+func TestNodeOptionsOwnMutableSettingsAndPreserveCustomDecisions(t *testing.T) {
 	t.Parallel()
 	o := nodeOptionsForTest(t)
 	o.Loads = loadOptionsForTest(t)
 	enabled := false
 	o.Loads.Storage.WAL.Prewrite = &enabled
+	o.Loads.Storage.WAL.DisableFSync = true
 	o.Placement.AllowedNodeTypes = []topology.NodeType{"worker"}
-	o.Policies.Scheduler, o.Policies.Lifecycle = &unopenedScheduler{}, &unopenedLifecycle{}
+	o.Scheduling.Policy, o.Lifecycle.Hooks = &unopenedScheduler{}, &unopenedLifecycle{}
+	o.CallbackTimeout = 750 * time.Millisecond
+	o.Scheduling.Interval, o.Scheduling.Timeout, o.Scheduling.Cooldown = 3*time.Second, time.Second, 7*time.Second
 	o.Meta.Network.TLS = &tls.Config{NextProtos: []string{"h2"}, CipherSuites: []uint16{tls.TLS_AES_128_GCM_SHA256}, Certificates: []tls.Certificate{{Certificate: [][]byte{[]byte("certificate")}}}}
 	o.Meta.Network.ClientTLS = o.Meta.Network.TLS
-	d, _, err := resolveNodeOptions(o)
+	resolved, err := resolveNodeOptions(o)
+	d, meta := resolved.node, resolved.meta
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Policies.Scheduler != o.Policies.Scheduler || d.Policies.Lifecycle != o.Policies.Lifecycle || d.Policies.RestoreDegraded != (policy.RestoreDegradedOptions{}) || d.Policies.DefaultLifecycle != (policy.DefaultLifecycleOptions{}) {
-		t.Fatal("custom policies changed or unused built-in settings manufactured")
+	if d.Scheduling.Policy != o.Scheduling.Policy || d.Lifecycle.Hooks != o.Lifecycle.Hooks || d.Scheduling.DefaultRepair != (scheduling.DefaultRepairOptions{}) || d.Lifecycle.Default != (lifecycle.DefaultOptions{}) {
+		t.Fatal("custom decisions changed or unused built-in settings manufactured")
+	}
+	if d.Scheduling != o.Scheduling || d.CallbackTimeout != o.CallbackTimeout || meta.CallbackTimeout != o.CallbackTimeout || meta.RepairPolicy != o.Scheduling.Policy || meta.Scheduling.Interval != o.Scheduling.Interval || meta.Scheduling.TickTimeout != o.Scheduling.Timeout || meta.Scheduling.Cooldown != o.Scheduling.Cooldown {
+		t.Fatal("custom decision settings were lost during composition", d.Scheduling, meta.Scheduling)
 	}
 	o.Bootstrap.Founders[0].Node.Labels["zone"] = "changed"
 	o.Placement.AllowedNodeTypes[0] = "changed"
@@ -184,8 +195,9 @@ func TestNodeOptionsOwnMutableSettingsAndPreserveCustomPolicies(t *testing.T) {
 	o.Meta.Network.TLS.CipherSuites[0] = 0
 	o.Meta.Network.TLS.Certificates[0].Certificate[0][0] = 'X'
 	o.Loads.Storage.WAL.RootDir = "changed"
+	o.Loads.Storage.WAL.DisableFSync = false
 	enabled = true
-	if d.Node.Labels["zone"] != "a" || d.Bootstrap.Founders[0].Node.Labels["zone"] != "a" || d.Placement.AllowedNodeTypes[0] != "worker" || string(d.Meta.Network.ClusterCredential) != "credential" || d.Loads.Storage.WAL.RootDir == "changed" || *d.Loads.Storage.WAL.Prewrite {
+	if d.Node.Labels["zone"] != "a" || d.Bootstrap.Founders[0].Node.Labels["zone"] != "a" || d.Placement.AllowedNodeTypes[0] != "worker" || string(d.Meta.Network.ClusterCredential) != "credential" || d.Loads.Storage.WAL.RootDir == "changed" || *d.Loads.Storage.WAL.Prewrite || !d.Loads.Storage.WAL.DisableFSync {
 		t.Fatal("mutable caller settings retained")
 	}
 	for _, cfg := range []*tls.Config{d.Meta.Network.TLS, d.Meta.Network.ClientTLS} {
@@ -214,18 +226,19 @@ func TestConsistentReadOptionsValidationAndWiring(t *testing.T) {
 	t.Parallel()
 	o := nodeOptionsForTest(t)
 	o.Meta.Reads = load.ReadOptions{Timeout: time.Second, MaxPending: 2, MaxRequestBytes: 128, MaxResultBytes: 4096}
-	_, meta, err := resolveNodeOptions(o)
+	resolved, err := resolveNodeOptions(o)
+	meta := resolved.meta
 	if err != nil || load.ReadOptions(meta.Reads) != o.Meta.Reads {
 		t.Fatal(meta.Reads, err)
 	}
 	o.Meta.Reads.MaxPending = -1
-	if _, _, err := resolveNodeOptions(o); !errors.Is(err, fault.ErrInvalid) {
+	if _, err := resolveNodeOptions(o); !errors.Is(err, fault.ErrInvalid) {
 		t.Fatal(err)
 	}
 	o = nodeOptionsForTest(t)
 	o.Loads = loadOptionsForTest(t)
 	o.Loads.Engine.Reads.MaxResultBytes = -1
-	if _, _, err := resolveNodeOptions(o); !errors.Is(err, fault.ErrInvalid) {
+	if _, err := resolveNodeOptions(o); !errors.Is(err, fault.ErrInvalid) {
 		t.Fatal(err)
 	}
 }

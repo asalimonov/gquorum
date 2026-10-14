@@ -19,19 +19,24 @@ type fenceWork struct {
 	err      error
 }
 
-func (h *Host) InstallFence(ctx context.Context, req load.FenceRequest) (load.FenceResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, h.cfg.EffectTimeout)
+// InstallFence validates an authenticated request and installs its exact group
+// or host fence.
+func (h *Host) InstallFence(parent context.Context, req load.FenceRequest) (load.FenceResult, error) {
+	ctx, cancel := context.WithTimeout(parent, h.cfg.EffectTimeout)
 	defer cancel()
-	ctx, release, err := h.beginAuthorityWork(ctx)
+	ctxHandle, err := h.beginAuthorityWork(ctx)
+	ctx, release := ctxHandle.Context, ctxHandle.Release
 	if err != nil {
 		return load.FenceResult{}, err
 	}
 	defer release()
 	req.Grant = req.Grant.Clone()
-	if !completeIdentity(req.From) || req.To != h.cfg.Identity() || req.From.ClusterID != req.To.ClusterID || req.Grant.Key.ClusterID != req.To.ClusterID {
+	recipientMatches := completeIdentity(req.From) && req.To == h.cfg.Identity()
+	if !recipientMatches || req.From.ClusterID != req.To.ClusterID ||
+		req.Grant.Key.ClusterID != req.To.ClusterID {
 		return load.FenceResult{}, fault.ErrIdentityMismatch
 	}
-	if !slices.Contains(req.Grant.Resources, req.Resource) || req.Resource.GroupID != req.Grant.Key.GroupID {
+	if req.Resource.GroupID != req.Grant.Key.GroupID || !slices.Contains(req.Grant.Resources, req.Resource) {
 		return load.FenceResult{}, fault.ErrOperatorAuthorization
 	}
 	if err := h.cfg.ValidateCourier(ctx, req.Grant, req.From); err != nil {
@@ -48,18 +53,7 @@ func (h *Host) InstallFence(ctx context.Context, req load.FenceRequest) (load.Fe
 		if req.ReplicaID == 0 {
 			return load.FenceResult{}, fault.ErrIdentityMismatch
 		}
-		// Native group work belongs to the participation lifetime. Only host
-		// fences may complete after the replica has been fenced and joined.
-		participating, done, workErr := h.beginWork(ctx)
-		if workErr != nil {
-			return load.FenceResult{}, workErr
-		}
-		defer done()
-		core, coreErr := h.actionCore(load.ActionRequest{To: load.Peer{Node: req.To, Replica: load.ReplicaRef{GroupID: req.Resource.GroupID, ReplicaID: req.ReplicaID}}})
-		if coreErr != nil {
-			return load.FenceResult{}, coreErr
-		}
-		evidence, err = core.InstallAuthority(participating, req.Grant)
+		evidence, err = h.installGroupFence(ctx, req)
 	default:
 		return load.FenceResult{}, fault.ErrInvalid
 	}
@@ -80,7 +74,8 @@ func (h *Host) authorityStore() (*authoritystore.Store, error) {
 // InstallHostFence persists admission blocking before it joins older owners.
 // Cancellation only ends the caller's wait; completion belongs to the Host.
 func (h *Host) InstallHostFence(parent context.Context, grant topology.AuthorityGrant) (topology.FenceEvidence, error) {
-	ctx, release, err := h.beginAuthorityWork(parent)
+	ctxHandle, err := h.beginAuthorityWork(parent)
+	ctx, release := ctxHandle.Context, ctxHandle.Release
 	if err != nil {
 		return topology.FenceEvidence{}, err
 	}
@@ -88,20 +83,20 @@ func (h *Host) InstallHostFence(parent context.Context, grant topology.Authority
 	if err := topology.ValidateLoadID(grant.Key.GroupID); err != nil {
 		return topology.FenceEvidence{}, err
 	}
-	grant = grant.Clone()
-	if err := h.cfg.ValidateGrant(ctx, grant); err != nil {
+	cloned := grant.Clone()
+	if err := h.cfg.ValidateGrant(ctx, cloned); err != nil {
 		return topology.FenceEvidence{}, err
 	}
 	s, err := h.authorityStore()
 	if err != nil {
 		return topology.FenceEvidence{}, err
 	}
-	floor, _, err := s.Fence(ctx, grant)
+	floor, err := s.Fence(ctx, cloned)
 	if err != nil {
 		return topology.FenceEvidence{}, err
 	}
-	if floor.Complete {
-		return s.CompleteFence(ctx, floor.Grant.Key, floor.Sequence)
+	if floor.Record.Complete {
+		return s.CompleteFence(ctx, floor.Record.Grant.Key, floor.Record.Sequence)
 	}
 	h.mu.Lock()
 	if h.authorityClosed || h.shutdownRequested || h.authorityContext.Err() != nil {
@@ -111,15 +106,15 @@ func (h *Host) InstallHostFence(parent context.Context, grant topology.Authority
 	if h.fenceWorks == nil {
 		h.fenceWorks = make(map[string]*fenceWork)
 	}
-	work := h.fenceWorks[grant.Key.GroupID]
+	work := h.fenceWorks[cloned.Key.GroupID]
 	if work == nil {
-		work = &fenceWork{done: make(chan struct{}), revision: grant.Key.Revision}
-		h.fenceWorks[grant.Key.GroupID] = work
+		work = &fenceWork{done: make(chan struct{}), revision: cloned.Key.Revision}
+		h.fenceWorks[cloned.Key.GroupID] = work
 		// The courier already owns authority work, so authorityDone is open.
 		h.authorityCount++
-		go h.completeHostFence(h.authorityContext, s, grant.Key.GroupID, work)
+		go h.completeHostFence(h.authorityContext, s, cloned.Key.GroupID, work)
 	} else {
-		work.revision = max(work.revision, grant.Key.Revision)
+		work.revision = max(work.revision, cloned.Key.Revision)
 	}
 	h.mu.Unlock()
 	select {
@@ -129,7 +124,7 @@ func (h *Host) InstallHostFence(parent context.Context, grant topology.Authority
 		if work.err != nil {
 			return topology.FenceEvidence{}, work.err
 		}
-		if work.evidence.Key != grant.Key {
+		if work.evidence.Key != cloned.Key {
 			return topology.FenceEvidence{}, fault.ErrAuthorityFenced
 		}
 		return work.evidence, nil
@@ -138,39 +133,44 @@ func (h *Host) InstallHostFence(parent context.Context, grant topology.Authority
 
 func (h *Host) completeHostFence(ctx context.Context, s *authoritystore.Store, group string, work *fenceWork) {
 	for {
-		floor, found, err := s.Current(ctx, group)
-		if err == nil && !found {
+		floor, err := s.Current(ctx, group)
+		if err == nil && !floor.Found {
 			err = fault.ErrUnreadable
 		}
 		var evidence topology.FenceEvidence
 		if err == nil {
-			evidence, err = h.joinHostFence(ctx, s, floor)
+			evidence, err = h.joinHostFence(ctx, s, floor.Record)
 		}
 		h.mu.Lock()
-		if ctx.Err() == nil && (errors.Is(err, fault.ErrAuthorityFenced) || err == nil && work.revision > evidence.Key.Revision) {
+		active := ctx.Err() == nil
+		fenced := active && errors.Is(err, fault.ErrAuthorityFenced)
+		if active && (fenced || err == nil && work.revision > evidence.Key.Revision) {
 			h.mu.Unlock()
 			continue // a later request raised the floor while older work joined
 		}
 		work.evidence, work.err = evidence, err
 		delete(h.fenceWorks, group)
 		close(work.done)
-		h.releaseWorkLocked(true)
+		h.releaseWorkLocked(authorityWork)
 		h.mu.Unlock()
 		return
 	}
 }
 
-func (h *Host) joinHostFence(ctx context.Context, s *authoritystore.Store, floor authoritystore.FenceRecord) (topology.FenceEvidence, error) {
+func (h *Host) joinHostFence(ctx context.Context, s *authoritystore.Store,
+	floor authoritystore.FenceRecord) (topology.FenceEvidence, error) {
 	group := floor.Grant.Key.GroupID
 	// Cancel a startup before waiting on the action gate: its caller may still
 	// own that gate while waiting for a factory which honors this cancellation.
 	h.mu.Lock()
 	var attempt *releaseAttempt
-	if slot := h.slots[group]; slot != nil && !slot.released && slot.authorityKey.Revision < floor.Grant.Key.Revision && slot.state != "ready" {
+	if slot := h.slots[group]; slot != nil && !slot.released && slot.authorityKey.Revision < floor.Grant.Key.Revision &&
+		slot.state != "ready" {
 		attempt = h.beginStopLocked(slot)
 	}
 	h.mu.Unlock()
-	owned, release, err := h.beginAuthorityOperation(ctx, group)
+	ownedHandle, err := h.beginAuthorityOperation(ctx, group)
+	owned, release := ownedHandle.Context, ownedHandle.Release
 	if err != nil {
 		return topology.FenceEvidence{}, err
 	}
@@ -179,7 +179,8 @@ func (h *Host) joinHostFence(ctx context.Context, s *authoritystore.Store, floor
 	// left a still-owned Close behind when its caller timed out. Inspect again
 	// under the gate before treating the group as joined.
 	h.mu.Lock()
-	if slot := h.slots[group]; slot != nil && !slot.released && slot.authorityKey.Revision < floor.Grant.Key.Revision && slot.state != "ready" {
+	if slot := h.slots[group]; slot != nil && !slot.released && slot.authorityKey.Revision < floor.Grant.Key.Revision &&
+		slot.state != "ready" {
 		attempt = h.beginStopLocked(slot)
 	}
 	h.mu.Unlock()
@@ -189,7 +190,8 @@ func (h *Host) joinHostFence(ctx context.Context, s *authoritystore.Store, floor
 		}
 	}
 	// The action gate and startup join prove that no older callback can produce
-	// a later effect. Keep uncertain outcomes as fenced records, without inventing
+	// a later effect. Keep uncertain outcomes as fenced records, without
+	// inventing
 	// success receipts or deleting any partial storage/application evidence.
 	running, err := s.Running(owned, group)
 	if err != nil {
@@ -208,7 +210,8 @@ func (h *Host) joinHostFence(ctx context.Context, s *authoritystore.Store, floor
 
 // Called while holding Host.mu so floor inspection and startup reservation are
 // ordered against the fence worker's join of earlier reservations.
-func (h *Host) startAuthority(ctx context.Context, id storage.Identity, node topology.Identity) (*topology.AuthorityGrant, error) {
+func (h *Host) startAuthority(ctx context.Context, id storage.Identity,
+	node topology.Identity) (*topology.AuthorityGrant, error) {
 	s, err := h.authorityStore()
 	if err != nil {
 		return nil, err
@@ -216,28 +219,31 @@ func (h *Host) startAuthority(ctx context.Context, id storage.Identity, node top
 	if s.Identity() != node {
 		return nil, fault.ErrIdentityMismatch
 	}
-	floor, found, err := s.Current(ctx, id.GroupID)
+	floor, err := s.Current(ctx, id.GroupID)
 	if err != nil {
 		return nil, err
 	}
-	if !found || !floor.Complete {
+	if !floor.Found || !floor.Record.Complete {
 		return nil, fault.ErrAuthorityPending
 	}
-	g := floor.Grant
-	if !slices.Contains(g.Targets, topology.AuthorityTarget{NodeName: id.NodeName, MemberID: node.MemberID, ReplicaID: id.ReplicaID}) {
+	g := floor.Record.Grant
+	if !slices.Contains(g.Targets, topology.AuthorityTarget{NodeName: id.NodeName, MemberID: node.MemberID,
+		ReplicaID: id.ReplicaID}) {
 		return nil, fault.ErrAuthorityFenced
 	}
 	return &g, nil
 }
 
 // Recovery reads current metadata floors before acquiring the group gate: a
-// fence may need that gate to join an earlier reservation. Healthy/accepted local
+// fence may need that gate to join an earlier reservation. Healthy/accepted
+// local
 // owners continue independently of metadata quorum. Fresh creation is checked
 // separately against the exact effect grant during storage preflight.
 func (h *Host) reconcileStartupAuthority(ctx context.Context, ref load.ReplicaRef) error {
 	h.mu.Lock()
 	slot := h.slots[ref.GroupID]
-	accepted := slot != nil && !slot.released && slot.identity.ReplicaID == ref.ReplicaID && (slot.state == "starting" || slot.state == "ready")
+	accepted := slot != nil && !slot.released && slot.identity.ReplicaID == ref.ReplicaID &&
+		(slot.state == "starting" || slot.state == "ready")
 	h.mu.Unlock()
 	if accepted {
 		return nil
@@ -258,7 +264,8 @@ func (h *Host) reconcileStartupAuthority(ctx context.Context, ref load.ReplicaRe
 func creationGrant(slot *replica) bool {
 	g := slot.startGrant
 	return g != nil && g.Action != nil && (g.Action.Kind == topology.StepCreateFoundingGroup ||
-		g.Action.Kind == topology.StepPrepareReplica && g.Action.NodeName == slot.identity.NodeName && g.Action.ReplicaID == slot.identity.ReplicaID)
+		g.Action.Kind == topology.StepPrepareReplica && g.Action.NodeName == slot.identity.NodeName &&
+			g.Action.ReplicaID == slot.identity.ReplicaID)
 }
 
 func (h *Host) checkStartupFloor(slot *replica) error {
@@ -266,12 +273,33 @@ func (h *Host) checkStartupFloor(slot *replica) error {
 	if err != nil {
 		return err
 	}
-	floor, found, err := s.Current(slot.ctx, slot.identity.GroupID)
+	floor, err := s.Current(slot.ctx, slot.identity.GroupID)
 	if err != nil {
 		return err
 	}
-	if !found || !floor.Complete || floor.Grant.Key != slot.authorityKey || slot.startGrant == nil || !floor.Grant.Equal(*slot.startGrant) {
+	if !floor.Found || !floor.Record.Complete || floor.Record.Grant.Key != slot.authorityKey ||
+		slot.startGrant == nil ||
+		!floor.Record.Grant.Equal(*slot.startGrant) {
 		return fault.ErrAuthorityFenced
 	}
 	return nil
+}
+
+func (h *Host) installGroupFence(ctx context.Context, req load.FenceRequest) (topology.FenceEvidence, error) {
+	// Native group work belongs to the participation lifetime. Only host
+	// fences may complete after the replica has been fenced and joined.
+	participatingHandle, workErr := h.beginWork(ctx)
+	participating, done := participatingHandle.Context, participatingHandle.Release
+	if workErr != nil {
+		return topology.FenceEvidence{}, workErr
+	}
+	defer done()
+	core, coreErr := h.actionCore(load.ActionRequest{
+		To: load.Peer{Node: req.To, Replica: load.ReplicaRef{GroupID: req.Resource.GroupID,
+			ReplicaID: req.ReplicaID}},
+	})
+	if coreErr != nil {
+		return topology.FenceEvidence{}, coreErr
+	}
+	return core.InstallAuthority(participating, req.Grant)
 }

@@ -61,9 +61,9 @@ func TestMetaAdapterSnapshotTailAndExactScope(t *testing.T) {
 	if err != nil || string(data) != "complete state" {
 		t.Fatal("snapshot was not materialized atomically", err)
 	}
-	cs, found, err := store.AppliedConfState()
-	if err != nil || !found || len(cs.Learners) != 1 || cs.Learners[0] != 8 {
-		t.Fatal(cs, err)
+	cs, err := store.AppliedConfState()
+	if err != nil || !cs.Found || len(cs.ConfState.Learners) != 1 || cs.ConfState.Learners[0] != 8 {
+		t.Fatal(cs.ConfState, err)
 	}
 	if _, err = adapter.Quarantine(ctx, topology.MetaGroupID, 7); !errors.Is(err, fault.ErrUnsupported) {
 		t.Fatal("uncoordinated meta quarantine accepted", err)

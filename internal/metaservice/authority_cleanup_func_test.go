@@ -101,9 +101,9 @@ func TestFencedCleanupUsesRemoteGrantAndPreservesSuccessorEvidence(t *testing.T)
 				}
 				return
 			}
-			record, found, err := client.LookupLoadReplica(t.Context(), "work")
-			if err != nil || found != (mode != "cleanup") || found && record.ReplicaID != replica {
-				t.Fatal("ledger evidence changed unexpectedly", record, found, err)
+			record, err := client.LookupLoadReplica(t.Context(), "work")
+			if err != nil || record.Found != (mode != "cleanup") || record.Found && record.Record.ReplicaID != replica {
+				t.Fatal("ledger evidence changed unexpectedly", record.Record, record.Found, err)
 			}
 		})
 	}

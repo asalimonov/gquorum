@@ -11,6 +11,11 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 )
 
+const (
+	defaultBusBuffer = 1024
+)
+
+// BusOptions configures the publication buffer, optional journal and logger.
 type BusOptions struct {
 	Journal *Journal
 	Buffer  int
@@ -21,6 +26,8 @@ type subscriber struct {
 	ch     chan Delivery
 	lost   uint64
 }
+
+// Bus dispatches local events to bounded subscriptions and an optional journal.
 type Bus struct {
 	mu                 sync.Mutex
 	opts               BusOptions
@@ -32,30 +39,39 @@ type Bus struct {
 	wg                 sync.WaitGroup
 }
 
+// NewBus validates options and starts the event dispatch workers.
 func NewBus(opts BusOptions) (*Bus, error) {
 	if opts.Buffer < 0 {
 		return nil, fault.ErrInvalid
 	}
 	if opts.Buffer == 0 {
-		opts.Buffer = 1024
+		opts.Buffer = defaultBusBuffer
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
-	b := &Bus{opts: opts, in: make(chan Event, opts.Buffer), subs: make(map[*subscriber]struct{}), dispatchDone: make(chan struct{}), done: make(chan struct{})}
+	b := &Bus{
+		opts:         opts,
+		in:           make(chan Event, opts.Buffer),
+		subs:         make(map[*subscriber]struct{}),
+		dispatchDone: make(chan struct{}),
+		done:         make(chan struct{}),
+	}
 	b.wg.Add(1)
 	go b.dispatch()
 	go func() { b.wg.Wait(); close(b.done) }()
 	return b, nil
 }
+
+// Publish queues an owned event copy and reports whether it was accepted.
 func (b *Bus) Publish(e Event) bool {
 	if b == nil {
 		return false
 	}
-	e = clone(e)
-	e.Seq = 0
-	if e.At.IsZero() {
-		e.At = time.Now().UTC()
+	event := clone(e)
+	event.Seq = 0
+	if event.At.IsZero() {
+		event.At = time.Now().UTC()
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -63,7 +79,7 @@ func (b *Bus) Publish(e Event) bool {
 		return false
 	}
 	select {
-	case b.in <- e:
+	case b.in <- event:
 		return true
 	default:
 		b.dropped.Add(1)
@@ -73,6 +89,9 @@ func (b *Bus) Publish(e Event) bool {
 		return false
 	}
 }
+
+// Subscribe creates a filtered delivery stream that closes when its context or
+// the bus stops.
 func (b *Bus) Subscribe(ctx context.Context, f Filter, capacity int) (<-chan Delivery, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -131,6 +150,8 @@ func (b *Bus) dispatch() {
 		b.mu.Unlock()
 	}
 }
+
+// Dropped returns the number of publications rejected by a full input buffer.
 func (b *Bus) Dropped() uint64 {
 	if b == nil {
 		return 0
@@ -138,7 +159,8 @@ func (b *Bus) Dropped() uint64 {
 	return b.dropped.Load()
 }
 
-// Close drains accepted events and joins dispatch/subscription workers. The caller owns Journal.Close.
+// Close drains accepted events and joins dispatch/subscription workers. The
+// caller owns Journal.Close.
 func (b *Bus) Close(ctx context.Context) error {
 	if b == nil {
 		return nil

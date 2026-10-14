@@ -53,6 +53,9 @@ func TestClusterStatusWithHealth(t *testing.T) {
 	f := newMutationFixture(t)
 	sampleStatusHealth(t, f.g, statusHealth{"n1": topology.HealthAlive, "n2": topology.HealthAlive, "n3": topology.HealthDead})
 	s := readStatus(t, f.g)
+	if len(s.Placement) != 1 || s.Placement[0].Version != 1 || len(s.Placement[0].Groups) != 2 {
+		t.Fatal("converged status needs one static placement snapshot", s.Placement)
+	}
 	if s.Observation.Version != 1 || s.Observation.At.IsZero() || len(s.Observation.Groups) != 2 {
 		t.Fatal(s)
 	}
@@ -99,7 +102,7 @@ func TestClusterStatusEffectiveState(t *testing.T) {
 	active := f.g.machine.Latest()
 	active.Node("n2").State = topology.NodeDraining
 	active.Node("n3").State = topology.NodeDraining
-	active.Group("work").Replicas = []topology.Replica{{NodeName: "n1", ReplicaID: 1, Role: topology.ReplicaVoter}, {NodeName: "n3", ReplicaID: 3, Role: topology.ReplicaVoter}}
+	active.Group("work").Replicas = []topology.Replica{{NodeName: "n1", ReplicaID: 1, Role: topology.ReplicaVoter}}
 	f.commit(t, active, true)
 	latest := f.g.machine.Latest()
 	latest.Nodes = append(latest.Nodes, topology.Node{Name: "n4", Type: "worker", State: topology.NodeActive})
@@ -107,7 +110,7 @@ func TestClusterStatusEffectiveState(t *testing.T) {
 	latest.MetaGroup().NextReplicaID = 5
 	f.commit(t, latest, false)
 	s := readStatus(t, f.g)
-	want := []topology.NodeState{topology.NodeActive, topology.NodeDrained, topology.NodeDraining, topology.NodeActive}
+	want := []topology.NodeState{topology.NodeActive, topology.NodeDrained, topology.NodeDrained, topology.NodeActive}
 	if len(s.Nodes) != len(want) {
 		t.Fatal(s.Nodes)
 	}
@@ -124,6 +127,7 @@ func TestClusterStatusReportsAllViewVersionsAndUsesActiveGroups(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
 	target := f.g.machine.Latest()
+	target.Node("n3").Labels = map[string]string{topology.LabelReserved: "true"}
 	target.Groups = append(target.Groups, topology.Group{ID: "target-work", NextReplicaID: 2, Replicas: []topology.Replica{{NodeName: "n1", ReplicaID: 1, Role: topology.ReplicaVoter}}})
 	f.commit(t, target, false)
 	f.command(t, metaengine.BeginOperatorProposal{Version: 2, Plan: topology.Plan{Version: 2}, Actor: "test", Origin: topology.OriginFounding, At: time.Now().UTC()})
@@ -133,6 +137,33 @@ func TestClusterStatusReportsAllViewVersionsAndUsesActiveGroups(t *testing.T) {
 	s := readStatus(t, f.g)
 	if s.LatestVersion != 3 || s.TargetVersion != 2 || s.ActiveVersion != 1 || len(s.Groups) != 2 || s.Groups[1].GroupID != "work" {
 		t.Fatal(s)
+	}
+	if len(s.Placement) != 2 || s.Placement[0].Version != 1 || s.Placement[1].Version != 2 ||
+		len(s.Placement[0].Groups) != 2 || len(s.Placement[1].Groups) != 3 {
+		t.Fatal("status omitted captured Active/Target placement", s.Placement)
+	}
+	for _, group := range s.Placement[1].Groups {
+		if group.GroupID != "work" {
+			continue
+		}
+		if len(group.Issues) != 0 {
+			t.Fatal("grandfathered reservation was reported as group failure", group)
+		}
+		found := false
+		for _, candidate := range group.Candidates {
+			if candidate.NodeName == "n3" {
+				for _, reason := range candidate.Reasons {
+					found = found || reason.Code == "node_reserved"
+				}
+			}
+		}
+		if !found {
+			t.Fatal("status lost excluded-candidate reason", group)
+		}
+	}
+	s.Placement[0].Groups[0].Candidates[0].NodeName = "tampered"
+	if fresh := readStatus(t, f.g); fresh.Placement[0].Groups[0].Candidates[0].NodeName == "tampered" {
+		t.Fatal("placement status aliases prior response")
 	}
 }
 

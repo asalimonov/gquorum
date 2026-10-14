@@ -101,10 +101,10 @@ func TestRetirementSurvivesRestartAndPreservesSuccessor(t *testing.T) {
 	check(t, writeIdentity(live, successor))
 	check(t, s.Collect(context.Background(), original))
 	check(t, s.Collect(context.Background(), original))
-	owner, found, err := readIdentity(live)
+	owner, err := readIdentity(live)
 	check(t, err)
-	if !found || owner != successor {
-		t.Fatalf("successor changed: %+v", owner)
+	if !owner.Found || owner.Identity != successor {
+		t.Fatalf("successor changed: %+v", owner.Identity)
 	}
 	records, err = s.Retired(context.Background())
 	check(t, err)

@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/asalimonov/gquorum"
-	"github.com/asalimonov/gquorum/policy"
+	"github.com/asalimonov/gquorum/lifecycle"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -20,7 +20,7 @@ func (unreadyFoundingNode) Status() gquorum.NodeStatus {
 	return gquorum.NodeStatus{State: gquorum.NodeStarting}
 }
 
-func TestFoundingHTTPNamesUnverifiedPeersBeforeFirstPolicyObservation(t *testing.T) {
+func TestFoundingHTTPNamesUnverifiedPeersBeforeFirstHooksObservation(t *testing.T) {
 	t.Parallel()
 	a := &application{
 		cfg:  config{GateFounders: true, Peers: []peer{{Name: "node1"}, {Name: "node2"}, {Name: "node3"}}},
@@ -37,15 +37,15 @@ func TestFoundingHTTPNamesUnverifiedPeersBeforeFirstPolicyObservation(t *testing
 		return response.Body.String()
 	}
 	check()
-	defaults, err := policy.NewDefaultLifecycle(policy.DefaultLifecycleOptions{Startup: policy.AllFounders})
+	defaults, err := lifecycle.NewDefaultHooks(lifecycle.DefaultOptions{Startup: lifecycle.AllFounders})
 	if err != nil {
 		t.Fatal(err)
 	}
-	lifecycle := &fixtureLifecycle{DefaultLifecycle: defaults, app: a}
-	if _, err := lifecycle.Readiness(t.Context(), policy.ReadinessInput{FirstBootstrap: true, MissingFounders: []topology.Identity{{NodeName: "node3"}}}); err != nil {
+	hooks := &fixtureLifecycle{DefaultHooks: defaults, app: a}
+	if _, err := hooks.Readiness(t.Context(), lifecycle.ReadinessInput{FirstBootstrap: true, MissingFounders: []topology.Identity{{NodeName: "node3"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if body := check(); strings.Contains(body, "node1") || strings.Contains(body, "node2") {
-		t.Fatal("founding gate ignored the newer policy observation", body)
+		t.Fatal("founding gate ignored the newer hooks observation", body)
 	}
 }

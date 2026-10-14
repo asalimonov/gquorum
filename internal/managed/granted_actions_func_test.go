@@ -52,7 +52,7 @@ func TestGrantedStartupSurvivesCanceledWaiterAndReturnsExactReceipt(t *testing.T
 	once.Do(func() { close(release) })
 	var result load.ActionResult
 	retryCtx := deadline(t)
-	await(t, retryCtx, func() bool {
+	await(retryCtx, t, func() bool {
 		result, err = h.ApplyAction(retryCtx, req)
 		// A per-effect timeout may expire while the accepted startup remains
 		// owned. Retry the exact grant within the overall test deadline.
@@ -67,7 +67,7 @@ func TestGrantedStartupSurvivesCanceledWaiterAndReturnsExactReceipt(t *testing.T
 	}
 	must(t, result.Receipts[0].Validate(grant))
 	var again load.ActionResult
-	await(t, deadline(t), func() bool {
+	await(deadline(t), t, func() bool {
 		again, err = h.ApplyAction(deadline(t), req)
 		if errors.Is(err, fault.ErrAuthorityPending) {
 			return false
@@ -79,10 +79,10 @@ func TestGrantedStartupSurvivesCanceledWaiterAndReturnsExactReceipt(t *testing.T
 		t.Fatal("retry repeated effect", again, calls.Load())
 	}
 	result.Receipts[0].Action.NodeName = "mutated"
-	cached, found, err := s.Receipt(t.Context(), grant, actionTarget(req))
+	cached, err := s.Receipt(t.Context(), grant, actionTarget(req))
 	must(t, err)
-	if !found || cached.Action.NodeName != grant.Action.NodeName {
-		t.Fatal("receipt alias escaped", cached)
+	if !cached.Found || cached.Receipt.Action.NodeName != grant.Action.NodeName {
+		t.Fatal("receipt alias escaped", cached.Receipt)
 	}
 	fence := grant.Clone()
 	fence.Key.Revision++
@@ -147,10 +147,10 @@ func TestGrantedRetirementFinishesWhileNewFenceJoinsCallback(t *testing.T) {
 	fence.Purpose, fence.Action = topology.AuthorityFence, nil
 	fenced := make(chan error, 1)
 	go func() { _, err := h.InstallHostFence(deadline(t), fence); fenced <- err }()
-	await(t, deadline(t), func() bool {
-		floor, _, err := s.Current(t.Context(), "work")
+	await(deadline(t), t, func() bool {
+		floor, err := s.Current(t.Context(), "work")
 		must(t, err)
-		return floor.Grant.Key == fence.Key && !floor.Complete
+		return floor.Record.Grant.Key == fence.Key && !floor.Record.Complete
 	})
 	// Approval changed before callback return. The owned exact old grant may
 	// still finish; the new host fence must wait for its durable receipt.
@@ -169,8 +169,8 @@ func TestGrantedRetirementFinishesWhileNewFenceJoinsCallback(t *testing.T) {
 	if probe, err := f.store.Probe(t.Context(), "work"); err != nil || probe.Exists {
 		t.Fatal(probe, err)
 	}
-	if cached, found, err := s.Receipt(t.Context(), grant, actionTarget(req)); err != nil || !found || !reflect.DeepEqual(cached, got.Receipts[0]) {
-		t.Fatal(cached, found, err)
+	if cached, err := s.Receipt(t.Context(), grant, actionTarget(req)); err != nil || !cached.Found || !reflect.DeepEqual(cached.Receipt, got.Receipts[0]) {
+		t.Fatal(cached.Receipt, cached.Found, err)
 	}
 }
 
@@ -183,7 +183,7 @@ func TestGrantedMembershipUsesInstalledGroupAuthority(t *testing.T) {
 	must(t, err)
 	handle, err := h.StartReplica(deadline(t), load.ReplicaRef{GroupID: "work", ReplicaID: 1}, StartOperator)
 	must(t, err)
-	await(t, deadline(t), handle.Core().IsLeader)
+	await(deadline(t), t, handle.Core().IsLeader)
 	must(t, handle.Core().ReadBarrier(deadline(t)))
 	a := f.approve(topology.StepAddLearner, storage.Identity{ClusterID: f.node.ClusterID, NodeName: "b", GroupID: "work", ReplicaID: 2})
 	grant := initial.Clone()
@@ -210,7 +210,7 @@ func TestGrantedMembershipUsesInstalledGroupAuthority(t *testing.T) {
 	}
 	must(t, result.Receipts[0].Validate(grant))
 	var again load.ActionResult
-	await(t, deadline(t), func() bool {
+	await(deadline(t), t, func() bool {
 		again, err = h.ApplyAction(deadline(t), req)
 		if errors.Is(err, fault.ErrAuthorityPending) {
 			return false
@@ -228,7 +228,7 @@ func TestGrantedMembershipUsesInstalledGroupAuthority(t *testing.T) {
 	}
 	fr.Grant.Key.Revision++
 	fr.Grant.Action, fr.Grant.Purpose = nil, topology.AuthorityFence
-	await(t, deadline(t), func() bool {
+	await(deadline(t), t, func() bool {
 		_, err = h.InstallFence(deadline(t), fr)
 		if errors.Is(err, fault.ErrAuthorityPending) {
 			return false
@@ -266,8 +266,8 @@ func TestGrantedRetirementRejectsIncompleteCallbackProofAndKeepsEvidence(t *test
 	if result, err := h.ApplyAction(deadline(t), req); !errors.Is(err, fault.ErrOperatorAuthorization) || len(result.Receipts) != 0 {
 		t.Fatal("incomplete callback proof counted as success", result, err)
 	}
-	if _, found, err := s.Receipt(t.Context(), grant, actionTarget(req)); err != nil || found {
-		t.Fatal("refused cleanup produced a receipt", found, err)
+	if found, err := s.Receipt(t.Context(), grant, actionTarget(req)); err != nil || found.Found {
+		t.Fatal("refused cleanup produced a receipt", found.Found, err)
 	}
 	fence := grant.Clone()
 	fence.Key.Revision++

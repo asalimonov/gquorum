@@ -21,7 +21,7 @@ func TestProbeGenerationExhaustionInvalidatesWindowsWithoutWrapping(t *testing.T
 	tracker.sequence = math.MaxUint64 - 1
 	round, local := evidenceRound(doc, 1)
 	now := time.Unix(100, 0)
-	tracker.apply(now, doc, round, local, nil)
+	tracker.apply(now, doc, round, evidenceInput{local: local})
 	if tracker.sequence != math.MaxUint64 || len(tracker.snapshot(now)) == 0 {
 		t.Fatal("last valid probe generation was not observed")
 	}
@@ -30,7 +30,7 @@ func TestProbeGenerationExhaustionInvalidatesWindowsWithoutWrapping(t *testing.T
 			tracker.reset("another-epoch")
 		}
 		round, local = evidenceRound(doc, uint64(i+2))
-		tracker.apply(now.Add(time.Second), doc, round, local, nil)
+		tracker.apply(now.Add(time.Second), doc, round, evidenceInput{local: local})
 		if tracker.sequence != math.MaxUint64 || len(tracker.snapshot(now.Add(time.Second))) != 0 {
 			t.Fatal("exhausted probe generation became actionable")
 		}
@@ -58,7 +58,7 @@ func TestEvidenceReplacementAndStandbyWindows(t *testing.T) {
 	// Begin from an exact ready identity, then independently accumulate failure
 	// and stability. Node reachability is not used as replication progress.
 	round, local := evidenceRound(doc, 1)
-	tracker.apply(start.Add(-time.Second), doc, round, local, nil)
+	tracker.apply(start.Add(-time.Second), doc, round, evidenceInput{local: local})
 	for i := 0; i <= 60; i++ {
 		round, local = evidenceRound(doc, uint64(i+2))
 		group := round.Groups[topology.MetaGroupID]
@@ -66,7 +66,7 @@ func TestEvidenceReplacementAndStandbyWindows(t *testing.T) {
 		group.Probes[2].Observation = metrics.ReplicaObservation{}
 		round.Groups[topology.MetaGroupID] = group
 		now := start.Add(time.Duration(i) * time.Second)
-		tracker.apply(now, doc, round, local, nil)
+		tracker.apply(now, doc, round, evidenceInput{local: local})
 		victim := observedReplica(t, tracker, now, 3)
 		if got := qualifies(victim.Evidence.UnavailableFor, 30*time.Second); got != (i >= 30) {
 			t.Fatalf("at %ds victim evidence %+v", i, victim.Evidence)
@@ -90,7 +90,7 @@ func TestEvidenceReplacementAndStandbyWindows(t *testing.T) {
 func TestEvidenceLagThresholdsAndApplyOnlyBlocksPromotion(t *testing.T) {
 	t.Parallel()
 	doc, settings := evidenceFixture()
-	doc.Groups[0].VoterPolicy.ReplaceNoProgress = false
+	doc.Groups[0].VoterConfig.ReplaceNoProgress = false
 	tracker := newEvidenceTracker(settings)
 	tracker.reset("epoch")
 	start := time.Unix(100, 0)
@@ -105,7 +105,7 @@ func TestEvidenceLagThresholdsAndApplyOnlyBlocksPromotion(t *testing.T) {
 		g.Probes[3].Observation.Sample.Applied = 1899
 		round.Groups[topology.MetaGroupID] = g
 		now := start.Add(time.Duration(i) * time.Second)
-		tracker.apply(now, doc, round, local, nil)
+		tracker.apply(now, doc, round, evidenceInput{local: local})
 	}
 	now := start.Add(60 * time.Second)
 	if !qualifies(observedReplica(t, tracker, now, 2).Evidence.ReplicationLagFor, 30*time.Second) {
@@ -136,7 +136,7 @@ func TestEvidenceNoProgressRequiresPositiveLagAndResetsOnMatch(t *testing.T) {
 		}
 		round.Groups[topology.MetaGroupID] = g
 		now := start.Add(time.Duration(i) * time.Second)
-		tracker.apply(now, doc, round, local, nil)
+		tracker.apply(now, doc, round, evidenceInput{local: local})
 		got := qualifies(observedReplica(t, tracker, now, 2).Evidence.NoProgressFor, 30*time.Second)
 		if got != (i == 30 || i >= 61) {
 			t.Fatalf("at %d no-progress=%v", i, got)
@@ -174,7 +174,7 @@ func TestEvidenceDuplicateMissingAndStaleSourcesCannotEarnTime(t *testing.T) {
 				}
 				round.Groups[topology.MetaGroupID] = g
 				now := start.Add(time.Duration(i) * time.Second)
-				tracker.apply(now, doc, round, local, nil)
+				tracker.apply(now, doc, round, evidenceInput{local: local})
 				if qualifies(observedReplica(t, tracker, now, 4).Evidence.StandbyReadyFor, 60*time.Second) {
 					t.Fatalf("%s earned stability", mode)
 				}
@@ -199,7 +199,7 @@ func TestEvidenceCooldownNewFailureAndObserverFailover(t *testing.T) {
 		}
 		round.Groups[topology.MetaGroupID] = g
 		now := start.Add(time.Duration(i) * time.Second)
-		tracker.apply(now, doc, round, local, records)
+		tracker.apply(now, doc, round, evidenceInput{local: local, switches: records})
 	}
 	now := start.Add(40 * time.Second)
 	if !slices.Contains(observedReplica(t, tracker, now, 3).Evidence.Reasons, "new_failure") {
@@ -218,7 +218,7 @@ func TestEvidenceCooldownNewFailureAndObserverFailover(t *testing.T) {
 		g.Probes[2].Reachability = "unreachable"
 		g.Probes[2].Observation = metrics.ReplicaObservation{}
 		round.Groups[topology.MetaGroupID] = g
-		tracker.apply(now.Add(time.Duration(i)*time.Second), doc, round, local, records)
+		tracker.apply(now.Add(time.Duration(i)*time.Second), doc, round, evidenceInput{local: local, switches: records})
 	}
 	later := now.Add(40 * time.Second)
 	if slices.Contains(observedReplica(t, tracker, later, 3).Evidence.Reasons, "new_failure") {

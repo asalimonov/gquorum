@@ -15,18 +15,21 @@ func TestBuildReplicaRepairSameMutationForBothOrigins(t *testing.T) {
 	active := baseDoc()
 	active.Version = 1
 	at := time.Now().UTC()
-	auto, id, err := ReplicaRepairDocument(active, active, "shard0", "n1", 1, at, topology.OriginReconciler, "reconciler")
+	options := ReplicaRepairOptions{GroupID: "shard0", NodeName: "n1", ReplicaID: 1,
+		At: at, Origin: topology.OriginReconciler, Actor: "reconciler"}
+	auto, err := ReplicaRepairDocument(active, active, options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	operator, other, err := ReplicaRepairDocument(active, active, "shard0", "n1", 1, at, topology.OriginOperator, "operator")
+	options.Origin, options.Actor = topology.OriginOperator, "operator"
+	operator, err := ReplicaRepairDocument(active, active, options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if id != other || id != 2 {
-		t.Fatal("authorities allocated different identity", id, other)
+	if auto.ReplicaID != operator.ReplicaID || auto.ReplicaID != 2 {
+		t.Fatal("authorities allocated different identity", auto.ReplicaID, operator.ReplicaID)
 	}
-	auto.Origin, auto.ChangedBy = operator.Origin, operator.ChangedBy
+	auto.Doc.Origin, auto.Doc.ChangedBy = operator.Doc.Origin, operator.Doc.ChangedBy
 	if !reflect.DeepEqual(auto, operator) {
 		t.Fatal("repair differs beyond authority")
 	}
@@ -37,7 +40,8 @@ func TestBuildReplicaRepairSameMutationForBothOrigins(t *testing.T) {
 		group, node string
 		id          uint64
 	}{{topology.MetaGroupID, "n1", 1}, {"missing", "n1", 1}, {"shard0", "other", 1}, {"shard0", "n1", 99}} {
-		if _, _, err = ReplicaRepairDocument(active, active, tuple.group, tuple.node, tuple.id, at, topology.OriginOperator, "operator"); err == nil {
+		options.GroupID, options.NodeName, options.ReplicaID = tuple.group, tuple.node, tuple.id
+		if _, err = ReplicaRepairDocument(active, active, options); err == nil {
 			t.Fatal("inexact repair accepted", tuple)
 		}
 	}

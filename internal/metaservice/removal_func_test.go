@@ -18,7 +18,7 @@ func TestRetiredOutboundRouteDoesNotRestoreIncomingMembership(t *testing.T) {
 	f := newMutationFixture(t)
 	doc := f.g.machine.Latest()
 	doc.Node("n2").State = topology.NodeExcluded
-	removeNodeReplicas(&doc, "n2", true)
+	removeNodeReplicas(&doc, "n2", allReplicaRemoval)
 	f.commit(t, doc, true)
 	f.g.addresses = map[string]string{"n2": "127.0.0.1:2002"}
 	if owner := f.g.memberNode(2); owner != "" {
@@ -57,7 +57,7 @@ func TestSelfRemoval_ApplyEntryDoesNotDeliverBeforeDurable(t *testing.T) {
 	f := newMutationFixture(t)
 	doc := f.g.machine.Latest()
 	doc.Node("n2").State = topology.NodeExcluded
-	removeNodeReplicas(&doc, "n2", true)
+	removeNodeReplicas(&doc, "n2", allReplicaRemoval)
 	f.commit(t, doc, true)
 	data, err := f.g.machine.Snapshot(context.Background())
 	if err != nil {

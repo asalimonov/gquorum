@@ -13,17 +13,24 @@ func receiptSetComplete(grant topology.AuthorityGrant, receipts []topology.Effec
 		}
 	}
 	for _, resource := range grant.Resources {
-		if resource.Kind == topology.AuthorityGroup {
-			if !slices.ContainsFunc(receipts, func(r topology.EffectReceipt) bool { return r.Resource == resource }) {
-				return false, nil
-			}
-			continue
-		}
-		for _, target := range grant.Targets {
-			if target.NodeName == resource.NodeName && !slices.ContainsFunc(receipts, func(r topology.EffectReceipt) bool { return r.Resource == resource && r.Target == target }) {
-				return false, nil
-			}
+		if !resourceReceiptsComplete(resource, grant.Targets, receipts) {
+			return false, nil
 		}
 	}
 	return true, nil
+}
+
+func resourceReceiptsComplete(resource topology.AuthorityResource, targets []topology.AuthorityTarget,
+	receipts []topology.EffectReceipt) bool {
+	if resource.Kind == topology.AuthorityGroup {
+		return slices.ContainsFunc(receipts, func(r topology.EffectReceipt) bool { return r.Resource == resource })
+	}
+	for _, target := range targets {
+		if target.NodeName == resource.NodeName &&
+			!slices.ContainsFunc(receipts,
+				func(r topology.EffectReceipt) bool { return r.Resource == resource && r.Target == target }) {
+			return false
+		}
+	}
+	return true
 }

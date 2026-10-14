@@ -18,23 +18,24 @@ func TestLockHolderUsesOwnedLocallyAppliedSession(t *testing.T) {
 	f := newMutationFixture(t)
 	f.command(t, metaengine.GrantSession{SessionID: "one", NodeName: "n1", InstanceID: "process", TTLSeconds: 3})
 	f.command(t, metaengine.AcquireLock{SessionID: "one", Key: "application"})
-	got, held, err := f.g.LockHolder(context.Background(), "application")
-	if err != nil || !held || got.ID != "one" || got.NodeName != "n1" || got.InstanceID != "process" || got.TTL != 3*time.Second {
-		t.Fatal(got, held, err)
+	got, err := f.g.LockHolder(context.Background(), "application")
+	if err != nil || !got.Held || got.Session.ID != "one" || got.Session.NodeName != "n1" ||
+		got.Session.InstanceID != "process" || got.Session.TTL != 3*time.Second {
+		t.Fatal(got, err)
 	}
-	got.ID = "changed"
-	if got, _, _ := f.g.LockHolder(context.Background(), "application"); got.ID != "one" {
+	got.Session.ID = "changed"
+	if got, _ := f.g.LockHolder(context.Background(), "application"); got.Session.ID != "one" {
 		t.Fatal("aliased read")
 	}
-	if _, held, err = f.g.LockHolder(context.Background(), "missing"); err != nil || held {
-		t.Fatal(held, err)
+	if got, err = f.g.LockHolder(context.Background(), "missing"); err != nil || got.Held {
+		t.Fatal(got.Held, err)
 	}
-	if _, _, err = f.g.LockHolder(context.Background(), ""); !errors.Is(err, fault.ErrInvalid) {
+	if _, err = f.g.LockHolder(context.Background(), ""); !errors.Is(err, fault.ErrInvalid) {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, err = f.g.LockHolder(ctx, "application"); !errors.Is(err, context.Canceled) {
+	if _, err = f.g.LockHolder(ctx, "application"); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 }

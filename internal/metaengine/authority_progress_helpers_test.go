@@ -16,7 +16,7 @@ func consumeTestStep(t *testing.T, sm *topologySM, id topology.OperatorID, index
 	if step.Kind == topology.StepWaitCaughtUp {
 		return index
 	}
-	action := topology.AuthorizedStep{OperatorID: id, Version: ex.Version, Attempt: ex.Attempt, StepSeq: step.Seq, Kind: step.Kind, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID, TransferNodeName: step.TransferNodeName, TransferReplicaID: step.TransferReplicaID}
+	action := topology.AuthorizedStep{OperatorID: id, Version: ex.Version, Attempt: ex.Attempt, StepSeq: step.Seq, Kind: step.Kind, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID, TransferNodeName: step.TransferNodeName, TransferReplicaID: step.TransferReplicaID, ExpectedVotersDigest: step.ExpectedVotersDigest, ResultVotersDigest: step.ResultVotersDigest}
 	result := apply(t, sm, index, BeginEffectProposal{Action: action})
 	index++
 	if !result.Accepted || result.Grant == nil {

@@ -11,38 +11,59 @@ import (
 	"go.etcd.io/raft/v3/raftpb"
 )
 
+type removalObservation struct {
+	MemberSeen bool
+	ConfState  raftpb.ConfState
+	Index      uint64
+}
+
 // removalReason uses approved intent, not an unapproved staged edit. The local
-// pin's sticky seen marker handles a crash after persistence before notification.
-func removalReason(id topology.Identity, target topology.Document, seen bool, cs raftpb.ConfState, index uint64) string {
-	if id.MemberID == 0 || !seen || containsMember(cs, id.MemberID) || target.Version == 0 || index == 0 {
+// pin's sticky seen marker handles a crash after persistence before
+// notification.
+func removalReason(id topology.Identity, target topology.Document, observation removalObservation) string {
+	if id.MemberID == 0 || !observation.MemberSeen || target.Version == 0 || observation.Index == 0 ||
+		containsMember(observation.ConfState, id.MemberID) {
 		return ""
 	}
 	node := target.Node(id.NodeName)
 	if node == nil {
-		return fmt.Sprintf("node %q member %d removed from _meta at applied index %d by approved node deletion v%d", id.NodeName, id.MemberID, index, target.Version)
+		return fmt.Sprintf("node %q member %d removed from _meta at applied index %d by approved node deletion v%d",
+			id.NodeName, id.MemberID, observation.Index, target.Version)
 	}
 	switch {
 	case node.State == topology.NodeExcluded:
-		return fmt.Sprintf("node %q member %d removed from _meta at applied index %d by approved exclusion v%d", id.NodeName, id.MemberID, index, target.Version)
+		return fmt.Sprintf("node %q member %d removed from _meta at applied index %d by approved exclusion v%d",
+			id.NodeName, id.MemberID, observation.Index, target.Version)
 	case target.MemberID(id.NodeName) != 0 && target.MemberID(id.NodeName) != id.MemberID:
-		return fmt.Sprintf("node %q member %d removed from _meta at applied index %d by approved replacement with member %d v%d", id.NodeName, id.MemberID, index, target.MemberID(id.NodeName), target.Version)
+		return fmt.Sprintf(
+			"node %q member %d removed from _meta at applied index %d by approved replacement with member %d v%d",
+			id.NodeName, id.MemberID, observation.Index, target.MemberID(id.NodeName), target.Version)
 	default:
 		return ""
 	}
 }
-func (g *Group) observeRemoval(identity topology.Identity, target topology.Document, cs raftpb.ConfState, index uint64) {
+
+func (g *Group) observeRemoval(identity topology.Identity, target topology.Document, cs raftpb.ConfState,
+	index uint64) {
 	g.mu.Lock()
 	if g.identity != identity || g.selfRemoval != nil || g.quiescing {
 		g.mu.Unlock()
 		return
 	}
 	g.memberSeen = g.memberSeen || containsMember(cs, identity.MemberID)
-	reason := removalReason(identity, target, g.memberSeen, cs, index)
+	reason := removalReason(identity, target,
+		removalObservation{MemberSeen: g.memberSeen, ConfState: cs, Index: index})
 	if reason == "" {
 		g.mu.Unlock()
 		return
 	}
-	g.selfRemoval = &topology.SelfRemovalStatus{Fenced: true, MemberID: identity.MemberID, Version: target.Version, AppliedIndex: index, Reason: reason}
+	g.selfRemoval = &topology.SelfRemovalStatus{
+		Fenced:       true,
+		MemberID:     identity.MemberID,
+		Version:      target.Version,
+		AppliedIndex: index,
+		Reason:       reason,
+	}
 	g.lifecycle = "removed"
 	if g.workCancel != nil {
 		g.workCancel()
@@ -87,7 +108,8 @@ func (g *Group) notifyRemoval(ctx context.Context) {
 	reason := g.selfRemoval.Reason
 	g.selfRemoval.Notified = true
 	g.mu.Unlock()
-	// Callers schedule teardown with RequestStop and return. A callback must not
+	// Callers schedule teardown with RequestStop and return. A callback must
+	// not
 	// wait on the Stop/Quiesce that must join this callback itself.
 	err := g.opts.OnSelfRemoved(ctx, reason)
 	if err == nil || ctx.Err() != nil && errors.Is(err, ctx.Err()) {

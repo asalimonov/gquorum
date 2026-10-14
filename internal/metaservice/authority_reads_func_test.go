@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -17,6 +18,30 @@ import (
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
+
+func guardedFixturePlan(version uint64, group string, base, founding []uint64, steps ...topology.Step) topology.Plan {
+	plan := topology.Plan{Version: version, Steps: steps, VoterBases: []topology.PlanVoterBase{{GroupID: group, Voters: append([]uint64(nil), base...)}}}
+	current := append([]uint64(nil), base...)
+	for i := range plan.Steps {
+		step := &plan.Steps[i]
+		switch step.Kind {
+		case topology.StepCreateFoundingGroup, topology.StepAddLearner, topology.StepPromoteVoter, topology.StepDemoteVoter, topology.StepRemoveReplica:
+		default:
+			continue
+		}
+		step.ExpectedVotersDigest = topology.VoterSetDigest(current)
+		switch step.Kind {
+		case topology.StepCreateFoundingGroup:
+			current = append([]uint64(nil), founding...)
+		case topology.StepPromoteVoter:
+			current = append(current, step.ReplicaID)
+		case topology.StepDemoteVoter, topology.StepRemoveReplica:
+			current = slices.DeleteFunc(current, func(id uint64) bool { return id == step.ReplicaID })
+		}
+		step.ResultVotersDigest = topology.VoterSetDigest(current)
+	}
+	return plan
+}
 
 func TestAuthorityReadUsesLeaderForBlankAndFencedProtocolOwner(t *testing.T) {
 	t.Parallel()
@@ -137,10 +162,11 @@ func TestAuthorityProofRoutesFromRetainedCatalogWithoutLeaderHintOrSeeds(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = g.propose(ctx, metaengine.BeginOperatorProposal{Version: doc.Version, Plan: topology.Plan{Version: doc.Version, Steps: []topology.Step{
-		{Seq: 1, GroupID: topology.MetaGroupID, NodeName: "n2", ReplicaID: 2, Kind: topology.StepPrepareReplica},
-		{Seq: 2, GroupID: topology.MetaGroupID, NodeName: "n2", ReplicaID: 2, Kind: topology.StepAddLearner},
-	}}, At: time.Now().UTC()})
+	plan := guardedFixturePlan(doc.Version, topology.MetaGroupID, []uint64{1}, nil,
+		topology.Step{Seq: 1, GroupID: topology.MetaGroupID, NodeName: "n2", ReplicaID: 2, Kind: topology.StepPrepareReplica},
+		topology.Step{Seq: 2, GroupID: topology.MetaGroupID, NodeName: "n2", ReplicaID: 2, Kind: topology.StepAddLearner},
+	)
+	_, err = g.propose(ctx, metaengine.BeginOperatorProposal{Version: doc.Version, Plan: plan, At: time.Now().UTC()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +219,9 @@ func TestMetaHostControlSurvivesParticipationFence(t *testing.T) {
 	}
 	step := topology.Step{Seq: 1, GroupID: topology.MetaGroupID, NodeName: "n1", ReplicaID: 1, Kind: topology.StepPrepareReplica}
 	at := time.Now().UTC()
-	started, err := g.propose(ctx, metaengine.BeginOperatorProposal{Version: doc.Version, Plan: topology.Plan{Version: doc.Version, Steps: []topology.Step{step, {Seq: 2, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID, Kind: topology.StepAddLearner}}}, At: at})
+	plan := guardedFixturePlan(doc.Version, topology.MetaGroupID, []uint64{1}, nil, step, topology.Step{Seq: 2, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID, Kind: topology.StepAddLearner})
+	step = plan.Steps[0]
+	started, err := g.propose(ctx, metaengine.BeginOperatorProposal{Version: doc.Version, Plan: plan, At: at})
 	if err != nil {
 		t.Fatal(err)
 	}

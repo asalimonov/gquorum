@@ -52,8 +52,8 @@ func TestReadmissionRetryRetainsUncataloguedOwnedIdentity(t *testing.T) {
 		if err := h.Readmit(deadline(t), grant); !errors.Is(err, fault.ErrIdentityMismatch) {
 			t.Fatal("retry forgot uncatalogued ownership after closing its handle", attempt, err)
 		}
-		if _, found, err := metastore.LoadIdentity(grant.MetaDBPath); err != nil || !found {
-			t.Fatal("refusal lost metadata evidence", attempt, found, err)
+		if found, err := metastore.LoadIdentity(grant.MetaDBPath); err != nil || !found.Found {
+			t.Fatal("refusal lost metadata evidence", attempt, found.Found, err)
 		}
 	}
 	probe, err := f.store.Probe(t.Context(), "other")
@@ -96,10 +96,10 @@ func TestReadmissionJoinsMachineBeforeRetirementAndPreservesMetaBackup(t *testin
 	if probe.Exists {
 		t.Fatal("old Raft namespace remains live")
 	}
-	pin, found, err := metastore.LoadIdentity(readmissionBackup(grant))
+	pin, err := metastore.LoadIdentity(readmissionBackup(grant))
 	must(t, err)
-	if !found || pin.MemberID != 1 {
-		t.Fatal("old pin was not retained", pin)
+	if !pin.Found || pin.Identity.MemberID != 1 {
+		t.Fatal("old pin was not retained", pin.Identity)
 	}
 	records, err := metastore.LoadReplicaRecords(readmissionBackup(grant))
 	must(t, err)
@@ -127,8 +127,8 @@ func TestReadmissionRetriesActualPreparedIdentityAfterQuarantineMove(t *testing.
 	if err := h.Readmit(t.Context(), grant); err == nil {
 		t.Fatal("lost quarantine acknowledgement was ignored")
 	}
-	if _, found, err := metastore.LoadIdentity(grant.MetaDBPath); err != nil || !found {
-		t.Fatal("uncertain move retired meta evidence", found, err)
+	if found, err := metastore.LoadIdentity(grant.MetaDBPath); err != nil || !found.Found {
+		t.Fatal("uncertain move retired meta evidence", found.Found, err)
 	}
 	probe, err := f.store.Probe(t.Context(), "work")
 	must(t, err)
@@ -148,10 +148,10 @@ func TestReadmissionRetriesActualPreparedIdentityAfterQuarantineMove(t *testing.
 	if len(calls) != 3 {
 		t.Fatal("called application retirement before checking replacement pin")
 	}
-	pin, _, err := metastore.LoadIdentity(grant.MetaDBPath)
+	pin, err := metastore.LoadIdentity(grant.MetaDBPath)
 	must(t, err)
-	if pin.MemberID != 9 {
-		t.Fatal("replacement pin changed", pin)
+	if pin.Identity.MemberID != 9 {
+		t.Fatal("replacement pin changed", pin.Identity)
 	}
 }
 
@@ -280,8 +280,8 @@ func TestStopCancelsAndJoinsReadmissionCallback(t *testing.T) {
 	if !probe.Exists {
 		t.Fatal("canceled callback retired live state")
 	}
-	if _, found, err := metastore.LoadIdentity(grant.MetaDBPath); err != nil || !found {
-		t.Fatal("canceled callback retired meta evidence", found, err)
+	if found, err := metastore.LoadIdentity(grant.MetaDBPath); err != nil || !found.Found {
+		t.Fatal("canceled callback retired meta evidence", found.Found, err)
 	}
 }
 
@@ -307,8 +307,8 @@ func TestReadmissionVerifiesActualRetainedIDWithinEntirePreviousCatalog(t *testi
 				if !errors.Is(err, fault.ErrIdentityMismatch) || !probe.Exists || probe.Identity.ReplicaID != 20 {
 					t.Fatal("foreign state was changed", err, probe)
 				}
-				if _, found, err := metastore.LoadIdentity(grant.MetaDBPath); err != nil || !found {
-					t.Fatal("refusal moved meta pin", found, err)
+				if found, err := metastore.LoadIdentity(grant.MetaDBPath); err != nil || !found.Found {
+					t.Fatal("refusal moved meta pin", found.Found, err)
 				}
 				return
 			}

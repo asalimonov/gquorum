@@ -55,7 +55,7 @@ func TestAdmissionPinObservationReadsActualUnacquiredMemberWithoutStartingNode(t
 	id := topology.Identity{NodeName: "one", ClusterID: "cluster", InstanceID: "process", MemberID: 4}
 	cfg := config{DataDir: t.TempDir(), Credential: "credential", InstanceID: id.InstanceID, AdmissionPinPhase: "pending"}
 	path := filepath.Join(cfg.DataDir, "_authority.bolt")
-	authority, err := authoritystore.Open(path, id, true)
+	authority, err := authoritystore.Open(path, id, authoritystore.FreshEvidence)
 	if err != nil {
 		t.Fatal(err)
 	}

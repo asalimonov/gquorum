@@ -95,10 +95,10 @@ func TestFencedHostRetainsGrantedCleanupUntilFullStop(t *testing.T) {
 			if _, err := h.ApplyAction(deadline(t), req); !errors.Is(err, fault.ErrStopped) {
 				t.Fatal("fully stopped host accepted cleanup", err)
 			}
-			cached, found, err := s.Receipt(t.Context(), grant, actionTarget(req))
+			cached, err := s.Receipt(t.Context(), grant, actionTarget(req))
 			must(t, err)
-			if !found || !reflect.DeepEqual(cached, result.Receipts[0]) {
-				t.Fatal("stop lost durable cleanup proof", cached, found)
+			if !cached.Found || !reflect.DeepEqual(cached.Receipt, result.Receipts[0]) {
+				t.Fatal("stop lost durable cleanup proof", cached.Receipt, cached.Found)
 			}
 		})
 	}
@@ -141,8 +141,8 @@ func TestFullStopJoinsCleanupAfterParticipationFence(t *testing.T) {
 	if _, err := h.InstallHostFence(deadline(t), grant); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal("shutdown reopened authority admission", err)
 	}
-	if _, found, err := s.Receipt(t.Context(), grant, actionTarget(req)); err != nil || found {
-		t.Fatal("unjoined callback has a success receipt", found, err)
+	if found, err := s.Receipt(t.Context(), grant, actionTarget(req)); err != nil || found.Found {
+		t.Fatal("unjoined callback has a success receipt", found.Found, err)
 	}
 	once.Do(func() { close(release) })
 	if err := <-waited; !errors.Is(err, context.Canceled) {
@@ -188,18 +188,18 @@ func TestReadmissionJoinsRetainedAuthorityBeforeRetiringMetadata(t *testing.T) {
 	defer cancel()
 	readmitting := make(chan error, 1)
 	go func() { readmitting <- h.Readmit(ctx, readmission) }()
-	await(t, deadline(t), func() bool { h.mu.Lock(); defer h.mu.Unlock(); return h.authorityClosed })
-	floor, found, err := s.Current(t.Context(), "work")
+	await(deadline(t), t, func() bool { h.mu.Lock(); defer h.mu.Unlock(); return h.authorityClosed })
+	floor, err := s.Current(t.Context(), "work")
 	must(t, err)
-	if !found || floor.Complete || !floor.Grant.Equal(readmission.Grants[1]) {
-		t.Fatal("readmission did not persist pending admission before joining", floor, found)
+	if !floor.Found || floor.Record.Complete || !floor.Record.Grant.Equal(readmission.Grants[1]) {
+		t.Fatal("readmission did not persist pending admission before joining", floor.Record, floor.Found)
 	}
 	cancel()
 	if err := <-readmitting; !errors.Is(err, fault.ErrShutdownTimeout) {
 		t.Fatal("readmission passed an unjoined authority callback", err)
 	}
-	if _, found, err := metastore.LoadIdentity(readmission.MetaDBPath); err != nil || !found || readmissionCalls.Load() != 0 {
-		t.Fatal("readmission retired metadata before authority work joined", found, err, readmissionCalls.Load())
+	if found, err := metastore.LoadIdentity(readmission.MetaDBPath); err != nil || !found.Found || readmissionCalls.Load() != 0 {
+		t.Fatal("readmission retired metadata before authority work joined", found.Found, err, readmissionCalls.Load())
 	}
 	if _, err := h.InstallHostFence(deadline(t), grant); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal("readmission reopened old authority admission", err)

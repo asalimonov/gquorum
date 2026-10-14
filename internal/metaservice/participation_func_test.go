@@ -18,13 +18,15 @@ func TestParticipationFenceJoinsEffectsAndRaftBeforeProtocolShutdown(t *testing.
 	g := readyPublic(t, singleMetaFixture(t))
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	effectCtx, releaseEffect, err := g.beginEffect(ctx)
+	effectCtxHandle, err := g.acquireEffectContext(ctx)
+	effectCtx, releaseEffect := effectCtxHandle.Context, effectCtxHandle.Release
 	if err != nil {
 		t.Fatal(err)
 	}
 	var effectOnce sync.Once
 	defer effectOnce.Do(releaseEffect)
-	rpcCtx, releaseRPC, err := g.beginRPC(ctx)
+	rpcCtxHandle, err := g.beginRPC(ctx)
+	rpcCtx, releaseRPC := rpcCtxHandle.Context, rpcCtxHandle.Release
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +56,7 @@ func TestParticipationFenceJoinsEffectsAndRaftBeforeProtocolShutdown(t *testing.
 	if _, err := g.ReadTopology(ctx); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal("fenced participant served an authoritative data read", err)
 	}
-	if _, _, err := g.beginEffect(ctx); !errors.Is(err, fault.ErrStopped) {
+	if _, err := g.acquireEffectContext(ctx); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal("fenced participant admitted ordinary work", err)
 	}
 	if _, err := g.store.LoadState(); err != nil {

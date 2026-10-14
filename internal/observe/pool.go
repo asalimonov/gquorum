@@ -2,8 +2,9 @@ package observe
 
 import (
 	"context"
-	"github.com/asalimonov/gquorum/fault"
 	"sync"
+
+	"github.com/asalimonov/gquorum/fault"
 )
 
 // ReadPool retains ownership and its permit until a callback actually returns,
@@ -20,6 +21,7 @@ type ReadPool struct {
 	joined   chan struct{}
 }
 
+// NewReadPool creates a bounded callback pool with exact-source exclusion.
 func NewReadPool(limit int) (*ReadPool, error) {
 	if limit <= 0 {
 		return nil, fault.ErrInvalid
@@ -27,11 +29,23 @@ func NewReadPool(limit int) (*ReadPool, error) {
 	joined := make(chan struct{})
 	close(joined)
 	ctx, cancel := context.WithCancel(context.Background())
-	return &ReadPool{ctx: ctx, cancel: cancel, slots: make(chan struct{}, limit), inflight: map[string]bool{}, joined: joined}, nil
+	return &ReadPool{
+		ctx:      ctx,
+		cancel:   cancel,
+		slots:    make(chan struct{}, limit),
+		inflight: map[string]bool{},
+		joined:   joined,
+	}, nil
 }
+
+// Do runs a read under a pool permit that remains owned until the callback
+// returns.
 func (p *ReadPool) Do(ctx context.Context, read func(context.Context) error) error {
 	return p.DoKey(ctx, "", read)
 }
+
+// DoKey runs a bounded read and prevents overlap for a nonempty exact-source
+// key.
 func (p *ReadPool) DoKey(ctx context.Context, key string, read func(context.Context) error) error {
 	if read == nil {
 		return fault.ErrInvalid
@@ -72,22 +86,7 @@ func (p *ReadPool) DoKey(ctx context.Context, key string, read func(context.Cont
 	work, cancel := context.WithCancel(ctx)
 	stopCancel := context.AfterFunc(p.ctx, cancel)
 	done := make(chan error, 1)
-	go func() {
-		err := read(work)
-		stopCancel()
-		cancel()
-		<-p.slots
-		p.mu.Lock()
-		delete(p.inflight, key)
-		p.count--
-		if p.count == 0 {
-			close(p.joined)
-		}
-		p.mu.Unlock()
-		// A completed call must release its exact-source exclusion before its
-		// caller can begin the next round. Timed-out callbacks still own it.
-		done <- err
-	}()
+	go p.runRead(work, key, poolCallback{read: read, cancel: cancel, stopCancel: stopCancel, done: done})
 	select {
 	case err := <-done:
 		return err
@@ -95,6 +94,8 @@ func (p *ReadPool) DoKey(ctx context.Context, key string, read func(context.Cont
 		return ctx.Err()
 	}
 }
+
+// Stop cancels callbacks and waits for their actual return.
 func (p *ReadPool) Stop(ctx context.Context) error {
 	p.mu.Lock()
 	p.stopped = true
@@ -107,4 +108,28 @@ func (p *ReadPool) Stop(ctx context.Context) error {
 	case <-ctx.Done():
 		return fault.New(fault.ShutdownTimeout, "metrics reads have not returned", ctx.Err())
 	}
+}
+
+type poolCallback struct {
+	read       func(context.Context) error
+	cancel     context.CancelFunc
+	stopCancel func() bool
+	done       chan error
+}
+
+func (p *ReadPool) runRead(work context.Context, key string, callback poolCallback) {
+	err := callback.read(work)
+	callback.stopCancel()
+	callback.cancel()
+	<-p.slots
+	p.mu.Lock()
+	delete(p.inflight, key)
+	p.count--
+	if p.count == 0 {
+		close(p.joined)
+	}
+	p.mu.Unlock()
+	// A completed call must release its exact-source exclusion before its
+	// caller can begin the next round. Timed-out callbacks still own it.
+	callback.done <- err
 }

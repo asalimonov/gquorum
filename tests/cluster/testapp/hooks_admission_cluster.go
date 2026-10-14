@@ -99,7 +99,8 @@ func (c config) prepareAdmissionPin() error {
 			// Match the real acquisition boundary: independent authority binds
 			// the exact accepted member before the metadata pin can be created.
 			// MetadataAcquired stays false because this driver never opens Raft.
-			authority, err := authoritystore.Open(filepath.Join(c.DataDir, "_authority.bolt"), granted, true)
+			authority, err := authoritystore.Open(filepath.Join(c.DataDir, "_authority.bolt"), granted,
+				authoritystore.FreshEvidence)
 			if err != nil {
 				return err
 			}

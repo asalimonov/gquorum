@@ -16,6 +16,10 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
+const (
+	runSequenceFormat = "%s/%d"
+)
+
 type seriesKey struct {
 	cluster, group, node string
 	replica              uint64
@@ -60,6 +64,8 @@ type MetricsCollector struct {
 	generationExhausted bool
 }
 
+// NewMetricsCollector validates dependencies and creates bounded observation
+// history and read ownership.
 func NewMetricsCollector(cfg MetricsConfig) (*MetricsCollector, error) {
 	if cfg.Source == nil {
 		return nil, fault.New(fault.Invalid, "metrics source is required", nil)
@@ -78,12 +84,29 @@ func NewMetricsCollector(cfg MetricsConfig) (*MetricsCollector, error) {
 	}
 	// Generation randomness is local construction data, with no I/O or worker.
 	var nonce [16]byte
-	rand.Read(nonce[:])
+	_, _ = rand.Read(nonce[:])
 	ctx, cancel := context.WithCancel(context.Background())
-	c := &MetricsCollector{cfg: cfg, pool: pool, now: cfg.Now, runID: hex.EncodeToString(nonce[:]), gate: make(chan struct{}, 1), ctx: ctx, cancel: cancel, done: make(chan struct{}), tracker: newEvidenceTracker(settings), series: map[seriesKey]*seriesPair{}}
-	c.snapshot = metrics.ClusterSnapshot{CollectorRunID: c.runID, Local: []metrics.ReplicaObservation{}, Groups: []metrics.GroupObservation{}}
+	c := &MetricsCollector{
+		cfg:     cfg,
+		pool:    pool,
+		now:     cfg.Now,
+		runID:   hex.EncodeToString(nonce[:]),
+		gate:    make(chan struct{}, 1),
+		ctx:     ctx,
+		cancel:  cancel,
+		done:    make(chan struct{}),
+		tracker: newEvidenceTracker(settings),
+		series:  map[seriesKey]*seriesPair{},
+	}
+	c.snapshot = metrics.ClusterSnapshot{
+		CollectorRunID: c.runID,
+		Local:          []metrics.ReplicaObservation{},
+		Groups:         []metrics.GroupObservation{},
+	}
 	return c, nil
 }
+
+// Start begins periodic metrics collection under the supplied lifetime context.
 func (c *MetricsCollector) Start(parent context.Context) error {
 	if err := parent.Err(); err != nil {
 		return err
@@ -112,6 +135,8 @@ func (c *MetricsCollector) Start(parent context.Context) error {
 	}()
 	return nil
 }
+
+// Stop cancels collection and joins the worker and outstanding read callbacks.
 func (c *MetricsCollector) Stop(ctx context.Context) error {
 	c.mu.Lock()
 	if !c.stopped {
@@ -145,12 +170,27 @@ func (c *MetricsCollector) Stop(ctx context.Context) error {
 	c.stateMu.Unlock()
 	return nil
 }
-func (c *MetricsCollector) Refresh(parent context.Context) error { return c.refresh(parent, true) }
+
+// Refresh collects current metrics and wakes scheduling when the round is
+// published.
+func (c *MetricsCollector) Refresh(parent context.Context) error {
+	return c.collectMetrics(parent, wakeScheduler)
+}
 
 // Revalidate collects fresh source identities for a pending voter approval
 // without waking the same driver recursively on a refused candidate.
-func (c *MetricsCollector) Revalidate(parent context.Context) error { return c.refresh(parent, false) }
-func (c *MetricsCollector) refresh(parent context.Context, wake bool) error {
+func (c *MetricsCollector) Revalidate(parent context.Context) error {
+	return c.collectMetrics(parent, noSchedulerWake)
+}
+
+type metricsWakeMode uint8
+
+const (
+	noSchedulerWake metricsWakeMode = iota
+	wakeScheduler
+)
+
+func (c *MetricsCollector) collectMetrics(parent context.Context, wakeMode metricsWakeMode) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	stopCancel := context.AfterFunc(c.ctx, cancel)
@@ -179,25 +219,8 @@ func (c *MetricsCollector) refresh(parent context.Context, wake bool) error {
 		bounded, finish := context.WithTimeout(ctx, c.cfg.Settings.CollectTimeout)
 		round, err = c.cfg.Source.Collect(bounded, doc, c.pool)
 		finish()
-		// Per-round deadline can publish dispatched partial outcomes. Ownership or
-		// leadership loss invalidates the whole round, including apparent failures.
-		if ctx.Err() != nil {
-			c.invalidate()
-			return ctx.Err()
-		}
-		after, isLeader := c.cfg.Source.Epoch()
-		if !isLeader || after != epoch {
-			c.invalidate()
-			return fault.ErrNotLeader
-		}
-		current, readErr := c.cfg.Source.Active(ctx)
-		if readErr != nil {
-			c.invalidate()
-			return readErr
-		}
-		if !reflect.DeepEqual(current, doc) || round.ActiveVersion != doc.Version || round.Epoch != epoch {
-			c.invalidate()
-			return fault.ErrVersionConflict
+		if validationErr := c.validateCollectedRound(ctx, doc, epoch, round); validationErr != nil {
+			return validationErr
 		}
 	}
 	local := c.local()
@@ -206,57 +229,9 @@ func (c *MetricsCollector) refresh(parent context.Context, wake bool) error {
 		switches = c.cfg.Switches()
 	}
 	now := c.now()
-	c.stateMu.Lock()
-	if c.epoch != epoch || c.leader != leader || c.enabled != enabled {
-		c.advanceEpoch()
-		c.tracker.reset(fmt.Sprintf("%s/%d", c.runID, c.epochSequence))
-	}
-	c.epoch, c.leader, c.enabled = epoch, leader, enabled
-	c.snapshot = metrics.ClusterSnapshot{CollectorRunID: c.epochID(), At: now.UTC(), ActiveVersion: doc.Version, IsCollectorLeader: leader && !c.generationExhausted, Local: local, Groups: []metrics.GroupObservation{}}
-	if c.cfg.Identity != nil {
-		id := c.cfg.Identity()
-		c.snapshot.ObserverNodeName = id.NodeName
-		c.snapshot.ObserverInstanceID = id.InstanceID
-	}
-	// Collection remains active while disabled, but disabled time cannot earn a
-	// future eligibility window. A fresh enabling epoch rearms durable cooldowns.
-	if leader && !c.generationExhausted {
-		if !enabled {
-			c.tracker.reset(fmt.Sprintf("%s/disabled/%d", c.runID, c.epochSequence))
-		}
-		c.tracker.apply(now, doc, round, local, switches)
-		c.snapshot.Groups = c.tracker.snapshot(now)
-	}
-	retained := map[seriesKey]bool{}
-	for _, group := range doc.Groups {
-		for _, r := range group.Replicas {
-			retained[seriesKey{doc.ClusterID, group.ID, r.NodeName, r.ReplicaID}] = true
-		}
-	}
-	for i := range c.snapshot.Groups {
-		for j := range c.snapshot.Groups[i].Replicas {
-			o := &c.snapshot.Groups[i].Replicas[j]
-			c.remember(now, o)
-		}
-	}
-	for i := range c.snapshot.Local {
-		o := &c.snapshot.Local[i]
-		retained[keyOf(o.Sample.Identity)] = true
-		c.remember(now, o)
-	}
-	for key := range c.series {
-		if !retained[key] {
-			delete(c.series, key)
-		}
-	}
-	if c.generationExhausted {
-		c.tracker.reset("")
-		c.snapshot.IsCollectorLeader = false
-		c.snapshot.Groups = []metrics.GroupObservation{}
-	}
-	actionable := leader && enabled && !c.generationExhausted
-	c.stateMu.Unlock()
-	if wake && c.cfg.WakeScheduler != nil && actionable {
+	actionable := c.publishCollected(collectedMetrics{doc: doc, epoch: epoch, leader: leader, enabled: enabled,
+		round: round, local: local, switches: switches, at: now})
+	if wakeMode == wakeScheduler && c.cfg.WakeScheduler != nil && actionable {
 		c.cfg.WakeScheduler()
 	}
 	return err
@@ -280,9 +255,11 @@ func (c *MetricsCollector) invalidate() {
 	c.snapshot.IsCollectorLeader = false
 	c.snapshot.Groups = []metrics.GroupObservation{}
 }
+
 func (c *MetricsCollector) remember(now time.Time, o *metrics.ReplicaObservation) {
 	identity := o.Sample.Identity
-	if identity.RunID == "" || identity.InstanceID == "" || identity.ClusterID == "" || identity.GroupID == "" || identity.NodeName == "" || identity.ReplicaID == 0 {
+	if identity.RunID == "" || identity.InstanceID == "" || identity.ClusterID == "" || identity.GroupID == "" ||
+		identity.NodeName == "" || identity.ReplicaID == 0 {
 		return
 	}
 	key := keyOf(identity)
@@ -291,31 +268,19 @@ func (c *MetricsCollector) remember(now time.Time, o *metrics.ReplicaObservation
 		pair = &seriesPair{}
 		c.series[key] = pair
 	}
-	if pair.current == nil || pair.current.identity != identity || pair.current.epoch != c.epochID() {
-		// A late old-run reply must never displace the new current series.
-		if pair.current != nil && pair.current.identity != identity && pair.retired != nil && pair.retired.identity == identity {
-			o.State = metrics.Unknown
-			return
-		}
-		if c.nextSeries == math.MaxUint64 {
-			c.generationExhausted = true
-			o.State = metrics.Unknown
-			return
-		}
-		ring, _ := internalmetrics.NewRing(c.cfg.Settings.MaxHistoryPoints, c.cfg.Settings.HistoryRetention, func(v metrics.ReplicaObservation) metrics.ReplicaObservation { return v.Clone() })
-		c.nextSeries++
-		pair.retired = pair.current
-		pair.current = &observedSeries{id: fmt.Sprintf("%s/%d", c.runID, c.nextSeries), identity: identity, ring: ring, epoch: c.epochID()}
+	s := c.prepareSeries(pair, o)
+	if s == nil {
+		return
 	}
-	s := pair.current
 	o.SeriesID = s.id
 	sample, old := o.Sample, s.latest.Sample
-	if sample.Meter.Sequence < old.Meter.Sequence || sample.Raft.Sequence < old.Raft.Sequence || sample.Writer.Sequence < old.Writer.Sequence {
+	if sample.Meter.Sequence < old.Meter.Sequence || sample.Raft.Sequence < old.Raft.Sequence ||
+		sample.Writer.Sequence < old.Writer.Sequence {
 		o.State = metrics.Unknown
 		o.Sequence = s.sequence
 		return
 	}
-	if s.sequence > 0 && sample.Meter.Sequence == old.Meter.Sequence && sample.Raft.Sequence == old.Raft.Sequence && sample.Writer.Sequence == old.Writer.Sequence && o.Reachability == s.latest.Reachability && (o.Reachability != "unreachable" || o.Evidence.UnavailableFor == s.latest.Evidence.UnavailableFor) && (o.ReplicationLag.State != metrics.Current || o.ReplicationLag == s.latest.ReplicationLag) {
+	if sameSeriesObservation(s, o) {
 		o.Sequence = s.sequence
 		return
 	}
@@ -330,8 +295,12 @@ func (c *MetricsCollector) remember(now time.Time, o *metrics.ReplicaObservation
 	s.at = now
 	s.ring.Roll(now, *o)
 }
+
+// Snapshot returns owned local and collected observations with their current
+// ages.
 func (c *MetricsCollector) Snapshot() metrics.ClusterSnapshot {
-	// Exact local reads stay available on follower nodes and while an independent
+	// Exact local reads stay available on follower nodes and while an
+	// independent
 	// remote round is waiting. These callbacks only copy published meter state.
 	local := c.local()
 	epoch, leader := c.cfg.Source.Epoch()
@@ -339,7 +308,7 @@ func (c *MetricsCollector) Snapshot() metrics.ClusterSnapshot {
 	defer c.stateMu.Unlock()
 	out := c.snapshot.Clone()
 	now := c.now()
-	if !c.leader || !leader || epoch != c.epoch || c.ctx.Err() != nil || c.generationExhausted {
+	if !c.leader || !leader || epoch != c.epoch || c.generationExhausted || c.ctx.Err() != nil {
 		out.IsCollectorLeader = false
 		out.Groups = []metrics.GroupObservation{}
 	} else {
@@ -359,11 +328,15 @@ func (c *MetricsCollector) Snapshot() metrics.ClusterSnapshot {
 func (c *MetricsCollector) assignCursor(o *metrics.ReplicaObservation) {
 	o.SeriesID = ""
 	o.Sequence = 0
-	if pair := c.series[keyOf(o.Sample.Identity)]; pair != nil && pair.current != nil && pair.current.identity == o.Sample.Identity {
+	if pair := c.series[keyOf(o.Sample.Identity)]; pair != nil && pair.current != nil &&
+		pair.current.identity == o.Sample.Identity {
 		o.SeriesID = pair.current.id
 		o.Sequence = pair.current.sequence
 	}
 }
+
+// History returns a bounded page for a retained exact replica observation
+// series.
 func (c *MetricsCollector) History(q metrics.HistoryQuery) (metrics.HistoryPage, error) {
 	if q.Limit < 0 || q.Limit > c.cfg.Settings.MaxHistoryPoints {
 		return metrics.HistoryPage{}, fault.ErrInvalid
@@ -375,13 +348,7 @@ func (c *MetricsCollector) History(q metrics.HistoryQuery) (metrics.HistoryPage,
 			if series == nil || series.id != q.SeriesID {
 				continue
 			}
-			points, next, truncated := series.ring.Snapshot(c.now(), q.After, q.Limit)
-			if series == pair.retired || c.ctx.Err() != nil {
-				for i := range points {
-					points[i].State = metrics.Stale
-				}
-			}
-			return metrics.HistoryPage{SeriesID: q.SeriesID, Points: points, Next: next, Truncated: truncated}, nil
+			return c.historyPage(q, series, pair), nil
 		}
 	}
 	return metrics.HistoryPage{}, fault.ErrHistoryUnavailable
@@ -393,7 +360,7 @@ func (c *MetricsCollector) ResetDecisions() {
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
 	c.advanceEpoch()
-	c.tracker.reset(fmt.Sprintf("%s/%d", c.runID, c.epochSequence))
+	c.tracker.reset(fmt.Sprintf(runSequenceFormat, c.runID, c.epochSequence))
 	c.snapshot.Groups = []metrics.GroupObservation{}
 }
 
@@ -407,4 +374,159 @@ func (c *MetricsCollector) advanceEpoch() {
 	c.epochSequence++
 }
 
-func (c *MetricsCollector) epochID() string { return fmt.Sprintf("%s/%d", c.runID, c.epochSequence) }
+func (c *MetricsCollector) epochID() string {
+	return fmt.Sprintf(runSequenceFormat, c.runID, c.epochSequence)
+}
+
+func (c *MetricsCollector) validateCollectedRound(ctx context.Context,
+	doc topology.Document, epoch LeaderEpoch, round Round) error {
+	// Per-round deadline can publish dispatched partial outcomes. Ownership
+	// or leadership loss invalidates the whole round, including apparent
+	// failures.
+	if ctx.Err() != nil {
+		c.invalidate()
+		return ctx.Err()
+	}
+	after, isLeader := c.cfg.Source.Epoch()
+	if !isLeader || after != epoch {
+		c.invalidate()
+		return fault.ErrNotLeader
+	}
+	current, readErr := c.cfg.Source.Active(ctx)
+	if readErr != nil {
+		c.invalidate()
+		return readErr
+	}
+	if round.ActiveVersion != doc.Version || round.Epoch != epoch || !reflect.DeepEqual(current, doc) {
+		c.invalidate()
+		return fault.ErrVersionConflict
+	}
+	return nil
+}
+
+type collectedMetrics struct {
+	doc             topology.Document
+	epoch           LeaderEpoch
+	leader, enabled bool
+	round           Round
+	local           []metrics.ReplicaObservation
+	switches        []topology.VoterSwitchState
+	at              time.Time
+}
+
+func (c *MetricsCollector) publishCollected(input collectedMetrics) bool {
+	doc, epoch, leader, enabled, round := input.doc, input.epoch, input.leader, input.enabled, input.round
+	local, switches, now := input.local, input.switches, input.at
+	c.stateMu.Lock()
+	if c.epoch != epoch || c.leader != leader || c.enabled != enabled {
+		c.advanceEpoch()
+		c.tracker.reset(fmt.Sprintf(runSequenceFormat, c.runID, c.epochSequence))
+	}
+	c.epoch, c.leader, c.enabled = epoch, leader, enabled
+	c.snapshot = metrics.ClusterSnapshot{
+		CollectorRunID:    c.epochID(),
+		At:                now.UTC(),
+		ActiveVersion:     doc.Version,
+		IsCollectorLeader: leader && !c.generationExhausted,
+		Local:             local,
+		Groups:            []metrics.GroupObservation{},
+	}
+	if c.cfg.Identity != nil {
+		id := c.cfg.Identity()
+		c.snapshot.ObserverNodeName = id.NodeName
+		c.snapshot.ObserverInstanceID = id.InstanceID
+	}
+	// Collection remains active while disabled, but disabled time cannot earn a
+	// future eligibility window. A fresh enabling epoch rearms durable
+	// cooldowns.
+	if leader && !c.generationExhausted {
+		if !enabled {
+			c.tracker.reset(fmt.Sprintf("%s/disabled/%d", c.runID, c.epochSequence))
+		}
+		c.tracker.apply(now, doc, round, evidenceInput{local: local, switches: switches})
+		c.snapshot.Groups = c.tracker.snapshot(now)
+	}
+	c.rememberCollected(now, doc)
+	if c.generationExhausted {
+		c.tracker.reset("")
+		c.snapshot.IsCollectorLeader = false
+		c.snapshot.Groups = []metrics.GroupObservation{}
+	}
+	actionable := leader && enabled && !c.generationExhausted
+	c.stateMu.Unlock()
+	return actionable
+}
+
+func (c *MetricsCollector) rememberCollected(now time.Time, doc topology.Document) {
+	retained := map[seriesKey]bool{}
+	for _, group := range doc.Groups {
+		for _, r := range group.Replicas {
+			retained[seriesKey{doc.ClusterID, group.ID, r.NodeName, r.ReplicaID}] = true
+		}
+	}
+	for i := range c.snapshot.Groups {
+		for j := range c.snapshot.Groups[i].Replicas {
+			o := &c.snapshot.Groups[i].Replicas[j]
+			c.remember(now, o)
+		}
+	}
+	for i := range c.snapshot.Local {
+		o := &c.snapshot.Local[i]
+		retained[keyOf(o.Sample.Identity)] = true
+		c.remember(now, o)
+	}
+	for key := range c.series {
+		if !retained[key] {
+			delete(c.series, key)
+		}
+	}
+}
+
+func (c *MetricsCollector) prepareSeries(pair *seriesPair, o *metrics.ReplicaObservation) *observedSeries {
+	identity := o.Sample.Identity
+	if pair.current == nil || pair.current.identity != identity || pair.current.epoch != c.epochID() {
+		// A late old-run reply must never displace the new current series.
+		if pair.current != nil && pair.current.identity != identity && pair.retired != nil &&
+			pair.retired.identity == identity {
+			o.State = metrics.Unknown
+			return nil
+		}
+		if c.nextSeries == math.MaxUint64 {
+			c.generationExhausted = true
+			o.State = metrics.Unknown
+			return nil
+		}
+		ring, _ := internalmetrics.NewRing(c.cfg.Settings.MaxHistoryPoints, c.cfg.Settings.HistoryRetention,
+			func(v metrics.ReplicaObservation) metrics.ReplicaObservation { return v.Clone() })
+		c.nextSeries++
+		pair.retired = pair.current
+		pair.current = &observedSeries{
+			id:       fmt.Sprintf(runSequenceFormat, c.runID, c.nextSeries),
+			identity: identity,
+			ring:     ring,
+			epoch:    c.epochID(),
+		}
+	}
+	return pair.current
+}
+
+func sameSeriesObservation(s *observedSeries, o *metrics.ReplicaObservation) bool {
+	sample, old := o.Sample, s.latest.Sample
+	return s.sequence > 0 && sample.Meter.Sequence == old.Meter.Sequence && sample.Raft.Sequence == old.Raft.Sequence &&
+		sample.Writer.Sequence == old.Writer.Sequence && o.Reachability == s.latest.Reachability &&
+		(o.Reachability != "unreachable" || o.Evidence.UnavailableFor == s.latest.Evidence.UnavailableFor) &&
+		(o.ReplicationLag.State != metrics.Current || o.ReplicationLag == s.latest.ReplicationLag)
+}
+
+func (c *MetricsCollector) historyPage(q metrics.HistoryQuery,
+	series *observedSeries, pair *seriesPair) metrics.HistoryPage {
+	batch := series.ring.Snapshot(c.now(), q.After, q.Limit)
+	points := batch.Points
+	if series == pair.retired || c.ctx.Err() != nil {
+		for i := range points {
+			points[i].State = metrics.Stale
+		}
+	}
+	return metrics.HistoryPage{SeriesID: q.SeriesID, Points: points, Next: batch.Next,
+		Truncated: batch.Truncated}
+}

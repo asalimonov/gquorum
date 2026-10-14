@@ -2,34 +2,24 @@ package topology
 
 import (
 	"fmt"
+
 	"github.com/asalimonov/gquorum/fault"
 )
 
-// validateMetaDrainSafety evaluates the actual _meta voter set, never the
+// MetaDrainInput supplies actual metadata membership, observed health and the
+// final-convergence phase for a drain safety check.
+type MetaDrainInput struct {
+	Status GroupStatus
+	Health map[string]Health
+	Final  bool
+}
+
+// ValidateMetaDrainSafety evaluates the actual _meta voter set, never the
 // declared target quorum. It returns a known-alive retained voter to use for a
 // leadership transfer when the current leader is departing.
-func ValidateMetaDrainSafety(active, target Document, status GroupStatus, health map[string]Health, final bool) (uint64, error) {
-	departing := make(map[string]struct{})
-	for _, node := range active.Nodes {
-		next := target.Node(node.Name)
-		if next == nil {
-			continue
-		}
-		if node.State == NodeActive && next.State != NodeActive {
-			departing[node.Name] = struct{}{}
-		}
-	}
-	activeMeta := active.MetaGroup()
-	targetMeta := target.MetaGroup()
-	if activeMeta != nil {
-		for _, replica := range activeMeta.Replicas {
-			nextNode := target.Node(replica.NodeName)
-			if (targetMeta == nil || target.MemberID(replica.NodeName) != replica.ReplicaID) &&
-				(nextNode == nil || nextNode.State != NodeActive) {
-				departing[replica.NodeName] = struct{}{}
-			}
-		}
-	}
+func ValidateMetaDrainSafety(active, target Document, input MetaDrainInput) (uint64, error) {
+	status, health := input.Status, input.Health
+	departing := departingMetaNodes(active, target)
 	if len(departing) == 0 {
 		return 0, nil
 	}
@@ -42,7 +32,8 @@ func ValidateMetaDrainSafety(active, target Document, status GroupStatus, health
 	if !status.Found || len(status.ConfState.Voters) == 0 {
 		return 0, drainRefusal("cannot change _meta membership: actual voter ConfState is unavailable")
 	}
-	if status.ConfState.AutoLeave || len(status.ConfState.VotersOutgoing) != 0 || len(status.ConfState.LearnersNext) != 0 {
+	if status.ConfState.AutoLeave || len(status.ConfState.VotersOutgoing) != 0 ||
+		len(status.ConfState.LearnersNext) != 0 {
 		return 0, drainRefusal("cannot change _meta membership while a joint configuration is active")
 	}
 
@@ -51,38 +42,17 @@ func ValidateMetaDrainSafety(active, target Document, status GroupStatus, health
 		return 0, err
 	}
 
-	aliveRetained := make([]uint64, 0, len(status.ConfState.Voters))
-	for _, voterID := range status.ConfState.Voters {
-		owner, ok := owners[voterID]
-		if !ok {
-			return 0, drainRefusal("cannot resolve actual _meta voter %d through Active or Target", voterID)
-		}
-		if _, leaves := departing[owner]; leaves {
-			continue
-		}
-		node := active.Node(owner)
-		if node != nil && node.State == NodeActive && health[owner] == HealthAlive {
-			aliveRetained = append(aliveRetained, voterID)
-		}
+	aliveRetained, err := retainedMetaVoters(active, input, owners, departing)
+	if err != nil {
+		return 0, err
 	}
 	required := QuorumOf(len(status.ConfState.Voters))
 	if len(aliveRetained) < required {
-		return 0, drainRefusal("cannot change _meta membership: %d known-alive retained voters, need quorum %d of %d actual voters", len(aliveRetained), required, len(status.ConfState.Voters))
+		return 0, drainRefusal(
+			"cannot change _meta membership: %d known-alive retained voters, need quorum %d of %d actual voters",
+			len(aliveRetained), required, len(status.ConfState.Voters))
 	}
-	leaderOwner, ok := owners[status.LeaderID]
-	if status.LeaderID == 0 || !ok {
-		return 0, drainRefusal("cannot change _meta membership: actual leader is unknown or unresolved")
-	}
-	if _, leaves := departing[leaderOwner]; leaves {
-		if final {
-			return 0, drainRefusal("cannot activate drain target: _meta leader %d is still on departing node %q", status.LeaderID, leaderOwner)
-		}
-		return aliveRetained[0], nil
-	}
-	if health[leaderOwner] != HealthAlive {
-		return 0, drainRefusal("cannot change _meta membership: leader node %q is not known alive", leaderOwner)
-	}
-	return 0, nil
+	return validateDrainLeader(input, owners, departing, aliveRetained)
 }
 
 // metaMemberOwners maps every _meta raft member ID to the node that owns it,
@@ -99,7 +69,8 @@ func metaMemberOwners(docs ...Document) (map[uint64]string, error) {
 		}
 		for _, replica := range meta.Replicas {
 			if owner, exists := owners[replica.ReplicaID]; exists && owner != replica.NodeName {
-				return nil, drainRefusal("cannot resolve _meta voter %d: mapped to both %q and %q", replica.ReplicaID, owner, replica.NodeName)
+				return nil, drainRefusal("cannot resolve _meta voter %d: mapped to both %q and %q", replica.ReplicaID,
+					owner, replica.NodeName)
 			}
 			owners[replica.ReplicaID] = replica.NodeName
 		}
@@ -117,4 +88,69 @@ func forcedRetirementOf(target Document, departing map[string]struct{}) bool {
 }
 func drainRefusal(format string, args ...any) error {
 	return fault.New(fault.UnsafeMembership, fmt.Sprintf(format, args...), nil)
+}
+
+func departingMetaNodes(active, target Document) map[string]struct{} {
+	departing := make(map[string]struct{})
+	for _, node := range active.Nodes {
+		next := target.Node(node.Name)
+		if next == nil {
+			continue
+		}
+		if node.State == NodeActive && next.State != NodeActive {
+			departing[node.Name] = struct{}{}
+		}
+	}
+	activeMeta := active.MetaGroup()
+	targetMeta := target.MetaGroup()
+	if activeMeta != nil {
+		for _, replica := range activeMeta.Replicas {
+			nextNode := target.Node(replica.NodeName)
+			if (nextNode == nil || nextNode.State != NodeActive) &&
+				(targetMeta == nil || target.MemberID(replica.NodeName) != replica.ReplicaID) {
+				departing[replica.NodeName] = struct{}{}
+			}
+		}
+	}
+
+	return departing
+}
+
+func retainedMetaVoters(active Document, input MetaDrainInput, owners map[uint64]string,
+	departing map[string]struct{}) ([]uint64, error) {
+	aliveRetained := make([]uint64, 0, len(input.Status.ConfState.Voters))
+	for _, voterID := range input.Status.ConfState.Voters {
+		owner, ok := owners[voterID]
+		if !ok {
+			return nil, drainRefusal("cannot resolve actual _meta voter %d through Active or Target", voterID)
+		}
+		if _, leaves := departing[owner]; leaves {
+			continue
+		}
+		node := active.Node(owner)
+		if node != nil && node.State == NodeActive && input.Health[owner] == HealthAlive {
+			aliveRetained = append(aliveRetained, voterID)
+		}
+	}
+
+	return aliveRetained, nil
+}
+
+func validateDrainLeader(input MetaDrainInput, owners map[uint64]string, departing map[string]struct{},
+	aliveRetained []uint64) (uint64, error) {
+	leaderOwner, ok := owners[input.Status.LeaderID]
+	if input.Status.LeaderID == 0 || !ok {
+		return 0, drainRefusal("cannot change _meta membership: actual leader is unknown or unresolved")
+	}
+	if _, leaves := departing[leaderOwner]; leaves {
+		if input.Final {
+			return 0, drainRefusal("cannot activate drain target: _meta leader %d is still on departing node %q",
+				input.Status.LeaderID, leaderOwner)
+		}
+		return aliveRetained[0], nil
+	}
+	if input.Health[leaderOwner] != HealthAlive {
+		return 0, drainRefusal("cannot change _meta membership: leader node %q is not known alive", leaderOwner)
+	}
+	return 0, nil
 }

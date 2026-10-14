@@ -25,6 +25,16 @@ func TestMetaControlKeepsLegacyAuthorizationTuple(t *testing.T) {
 	if read.public() != a || !read.public().Matches(a.OperatorID, a.Attempt, a.Version, topology.Step{Seq: a.StepSeq, Kind: a.Kind, GroupID: a.GroupID, NodeName: a.NodeName, ReplicaID: a.ReplicaID}) {
 		t.Fatal("wire conversion lost exact authorization scope")
 	}
+	guarded := a
+	guarded.ExpectedVotersDigest = topology.VoterSetDigest([]uint64{1})
+	guarded.ResultVotersDigest = topology.VoterSetDigest([]uint64{1})
+	encoded, err := json.Marshal(toWireAuthorization(guarded))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(encoded, &read); err != nil || read.public() != guarded {
+		t.Fatalf("wire conversion lost voter proof: %s %v", encoded, err)
+	}
 	public, err := json.Marshal(a)
 	if err != nil || !bytes.Contains(public, []byte(`"operator_id"`)) || bytes.Contains(public, []byte(`"execution_id"`)) {
 		t.Fatalf("public authorization leaked stored vocabulary: %s/%v", public, err)

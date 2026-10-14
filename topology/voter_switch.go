@@ -21,12 +21,15 @@ type RoleChangeRecord struct {
 	Index      uint64      `json:"index"`
 }
 
+// VoterSwitchState summarizes verified role changes for a group and its exact
+// replicas.
 type VoterSwitchState struct {
 	GroupID  string             `json:"group_id"`
 	Last     RoleChangeRecord   `json:"last"`
 	Replicas []RoleChangeRecord `json:"replicas"`
 }
 
+// Clone copies the per-replica role-change records.
 func (s VoterSwitchState) Clone() VoterSwitchState {
 	s.Replicas = slices.Clone(s.Replicas)
 	return s

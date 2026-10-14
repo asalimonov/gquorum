@@ -19,7 +19,7 @@ func TestRepairCommandRejectsEditsOutsideOneActiveVoter(t *testing.T) {
 		edit func(*topology.Document)
 	}{
 		{"placement", func(d *topology.Document) { d.Placement.MaxReplicas++ }},
-		{"voter policy", func(d *topology.Document) { p := topology.DefaultVoterPolicy(); d.Group("shard0").VoterPolicy = &p }},
+		{"voter configuration", func(d *topology.Document) { p := topology.DefaultVoterConfig(); d.Group("shard0").VoterConfig = &p }},
 		{"hosting", func(d *topology.Document) {
 			d.Group("shard0").Hosting = &topology.HostingRule{Mode: topology.HostingAllEligible}
 		}},
@@ -45,10 +45,13 @@ func TestRepairCommandRejectsEditsOutsideOneActiveVoter(t *testing.T) {
 			ex := apply(t, sm, 2, BeginOperatorProposal{Version: 1, Plan: topology.Plan{Version: 1}, At: at})
 			apply(t, sm, 3, TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: ex.OperatorID, Version: 1, Attempt: 1, State: topology.OperatorSucceeded, At: at}})
 			apply(t, sm, 4, ActivateTargetProposal{OperatorID: ex.OperatorID, Version: 1, Attempt: 1})
-			repair, _, err := ReplicaRepairDocument(active, active, "shard0", "n1", 1, at, topology.OriginReconciler, "auto-repair")
+			options := ReplicaRepairOptions{GroupID: "shard0", NodeName: "n1", ReplicaID: 1,
+				At: at, Origin: topology.OriginReconciler, Actor: "auto-repair"}
+			repaired, err := ReplicaRepairDocument(active, active, options)
 			if err != nil {
 				t.Fatal(err)
 			}
+			repair := repaired.Doc
 			tc.edit(&repair)
 			plan := topology.Plan{Version: 2, Steps: []topology.Step{{Seq: 1, Kind: topology.StepPrepareReplica, GroupID: "shard0", NodeName: "n1", ReplicaID: 2}, {Seq: 2, Kind: topology.StepAddLearner, GroupID: "shard0", NodeName: "n1", ReplicaID: 2}, {Seq: 3, Kind: topology.StepWaitCaughtUp, GroupID: "shard0", NodeName: "n1", ReplicaID: 2}, {Seq: 4, Kind: topology.StepPromoteVoter, GroupID: "shard0", NodeName: "n1", ReplicaID: 2}}}
 			result := apply(t, sm, 5, CommitRepairOperatorProposal{Doc: repair, ExpectedVersion: 1, Plan: plan, At: at})

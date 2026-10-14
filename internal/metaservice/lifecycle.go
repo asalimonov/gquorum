@@ -21,35 +21,42 @@ func joinContext(parent, owner context.Context) (context.Context, func()) {
 		cancel()
 	}
 }
-func (g *Group) beginRPC(parent context.Context) (context.Context, func(), error) {
+
+type callContext struct {
+	Context context.Context
+	Release func()
+}
+
+func (g *Group) beginRPC(parent context.Context) (callContext, error) {
 	if err := parent.Err(); err != nil {
-		return nil, nil, err
+		return callContext{}, err
 	}
 	g.mu.Lock()
 	if !g.started || g.rpcClosed || g.ctx.Err() != nil {
 		g.mu.Unlock()
-		return nil, nil, fault.ErrStopped
+		return callContext{}, fault.ErrStopped
 	}
 	g.rpcWG.Add(1)
 	owner := g.ctx
 	g.mu.Unlock()
 	ctx, cleanup := joinContext(parent, owner)
-	return ctx, func() { cleanup(); g.rpcWG.Done() }, nil
+	return callContext{Context: ctx, Release: func() { cleanup(); g.rpcWG.Done() }}, nil
 }
-func (g *Group) beginEffect(parent context.Context) (context.Context, func(), error) {
+
+func (g *Group) acquireEffectContext(parent context.Context) (callContext, error) {
 	if err := parent.Err(); err != nil {
-		return nil, nil, err
+		return callContext{}, err
 	}
 	g.mu.Lock()
 	if !g.started || g.controlOnly || g.quiescing || g.selfRemoval != nil || g.ctx.Err() != nil {
 		g.mu.Unlock()
-		return nil, nil, fault.ErrStopped
+		return callContext{}, fault.ErrStopped
 	}
 	g.effectWG.Add(1)
 	owner := g.workCtx
 	g.mu.Unlock()
 	ctx, cleanup := joinContext(parent, owner)
-	return ctx, func() { cleanup(); g.effectWG.Done() }, nil
+	return callContext{Context: ctx, Release: func() { cleanup(); g.effectWG.Done() }}, nil
 }
 
 // Quiesce refuses new mutations, cancels and joins topology/effect workers,
@@ -101,7 +108,8 @@ func (g *Group) requestParticipationFence() {
 	})
 }
 func (g *Group) finishParticipationFence() {
-	// Serialize component startup and shutdown. No Add/Start can occur after any
+	// Serialize component startup and shutdown. No Add/Start can occur after
+	// any
 	// component has been joined, even when Close races with the first Start.
 	g.startGate.Lock()
 	defer g.startGate.Unlock()
@@ -167,11 +175,13 @@ func (g *Group) deactivateForShutdown() {
 	if id == "" || !running {
 		return
 	}
-	// Best effort: quorum loss cannot prevent safe local quiescence, and it does
+	// Best effort: quorum loss cannot prevent safe local quiescence, and it
+	// does
 	// not authorize a fabricated revoke. Expiry handles an uncommitted revoke.
 	ctx, cancel := context.WithTimeout(g.ctx, 2*time.Second)
 	defer cancel()
-	if _, err := g.submitProposal(ctx, metaengine.RevokeSession{SessionID: id}, true); err != nil && g.opts.Logger != nil {
+	if _, err := g.submitProposal(ctx, metaengine.RevokeSession{SessionID: id}, shutdownRuntime); err != nil &&
+		g.opts.Logger != nil {
 		g.opts.Logger.Debug("meta shutdown deactivation was not acknowledged", "error", err)
 	}
 }

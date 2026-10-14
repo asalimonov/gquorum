@@ -13,6 +13,8 @@ type VoterChange struct {
 	Demote  *ReplicaKey `json:"demote,omitempty"`
 }
 
+// Clone copies the optional promotion and demotion targets in a voter-change
+// request.
 func (c VoterChange) Clone() VoterChange {
 	if c.Promote != nil {
 		key := *c.Promote

@@ -42,8 +42,26 @@ func TestAuthorityServiceReadsRetainedGrantAndRequestedRevocation(t *testing.T) 
 	if err := g.ValidateGrant(ctx, grant); err != nil {
 		t.Fatal(err)
 	}
-	if got, found, err := g.ReadGrant(ctx, grant.Key); err != nil || !found || !got.Equal(grant) {
-		t.Fatal(got, found, err)
+	// A Raft leader without its current process registration may retain the
+	// grant, but must wait instead of dispatching an unregistered courier.
+	session, err := g.Activate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.Deactivate(ctx, session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.BeginEffect(ctx, action); !errors.Is(err, fault.ErrReplicaNotReady) {
+		t.Fatal("unregistered courier did not wait", err)
+	}
+	if _, err := g.Activate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if retried, err := g.BeginEffect(ctx, action); err != nil || !retried.Equal(grant) {
+		t.Fatal("activation did not resume the same grant", retried, err)
+	}
+	if got, err := g.ReadGrant(ctx, grant.Key); err != nil || !got.Found || !got.Grant.Equal(grant) {
+		t.Fatal(got.Grant, got.Found, err)
 	}
 	altered := grant.Clone()
 	altered.Targets[0].MemberID++

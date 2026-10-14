@@ -3,18 +3,26 @@ package metaservice
 import (
 	"context"
 	"encoding/json"
-	"github.com/asalimonov/gquorum/topology"
 	"time"
+
+	"github.com/asalimonov/gquorum/topology"
 
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metatransport"
 )
 
-func (g *Group) seedLeases(now time.Time, reset bool) {
+type leaseSeedMode uint8
+
+const (
+	preserveLeases leaseSeedMode = iota
+	resetLeases
+)
+
+func (g *Group) seedLeases(now time.Time, mode leaseSeedMode) {
 	sessions := g.state().Sessions()
 	g.leases.mu.Lock()
 	defer g.leases.mu.Unlock()
-	if reset {
+	if mode == resetLeases {
 		g.leases.deadlines = make(map[string]time.Time, len(sessions))
 	}
 	for _, session := range sessions {
@@ -24,7 +32,7 @@ func (g *Group) seedLeases(now time.Time, reset bool) {
 	}
 }
 func (g *Group) expireSessions(ctx context.Context, now time.Time) error {
-	g.seedLeases(now, false)
+	g.seedLeases(now, preserveLeases)
 	for _, id := range g.leases.expired(now) {
 		if !g.IsLeader() {
 			return nil
@@ -55,6 +63,7 @@ func (g *Group) expireSessions(ctx context.Context, now time.Time) error {
 	}
 	return nil
 }
+
 func (g *Group) probeSession(parent context.Context, session metaengine.SessionRecord) bool {
 	identity := g.currentIdentity()
 	if session.NodeName == identity.NodeName {
@@ -74,5 +83,6 @@ func (g *Group) probeSession(parent context.Context, session metaengine.SessionR
 	if err = json.Unmarshal(reply.Data, &observed); err != nil {
 		return false
 	}
-	return observed.ClusterID == identity.ClusterID && observed.NodeName == session.NodeName && observed.InstanceID == session.InstanceID && observed.MemberID == g.activeMemberID(session.NodeName)
+	return observed.ClusterID == identity.ClusterID && observed.NodeName == session.NodeName &&
+		observed.InstanceID == session.InstanceID && observed.MemberID == g.activeMemberID(session.NodeName)
 }

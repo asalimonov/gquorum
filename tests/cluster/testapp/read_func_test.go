@@ -62,9 +62,9 @@ func TestApplicationReadUsesManagedQueryAndStopsWithExactReplica(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	voters := topology.DefaultVoterPolicy()
+	voters := topology.DefaultVoterConfig()
 	voters.TargetVoters = 1
-	created, err := a.cluster.CreateGroup(ctx, gquorum.GroupSpec{ID: "work", VoterPolicy: &voters}, gquorum.MutationOptions{ExpectedVersion: latest.Version, Actor: cfg.NodeName, Approve: true})
+	created, err := a.cluster.CreateGroup(ctx, gquorum.GroupSpec{ID: "work", VoterConfig: &voters}, gquorum.MutationOptions{ExpectedVersion: latest.Version, Actor: cfg.NodeName, Approve: true})
 	if err != nil {
 		t.Fatal(err)
 	}

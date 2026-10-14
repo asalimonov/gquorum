@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/authoritystore"
+	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/membership"
 	"github.com/asalimonov/gquorum/storage"
@@ -21,7 +23,14 @@ type actionWork struct {
 	err     error
 }
 
-func (h *Host) beginStartupEffect(slot *replica, retained bool) error {
+type replicaStorageState uint8
+
+const (
+	freshReplicaStorage replicaStorageState = iota
+	retainedReplicaStorage
+)
+
+func (h *Host) beginStartupEffect(slot *replica, storageState replicaStorageState) error {
 	if !creationGrant(slot) {
 		return nil
 	}
@@ -29,10 +38,11 @@ func (h *Host) beginStartupEffect(slot *replica, retained bool) error {
 	if err != nil {
 		return err
 	}
-	target := topology.AuthorityTarget{NodeName: slot.node.NodeName, MemberID: slot.node.MemberID, ReplicaID: slot.identity.ReplicaID}
+	target := topology.AuthorityTarget{NodeName: slot.node.NodeName, MemberID: slot.node.MemberID,
+		ReplicaID: slot.identity.ReplicaID}
 	receipt, err := s.BeginEffect(slot.ctx, *slot.startGrant, target)
 	if err == nil && receipt != nil {
-		if !retained {
+		if storageState == freshReplicaStorage {
 			return h.park(slot, ParkStoreMissing, fault.ErrUnreadable)
 		}
 		return nil // ordinary retained recovery, not repeated creation
@@ -45,7 +55,7 @@ func (h *Host) beginStartupEffect(slot *replica, retained bool) error {
 		return err
 	}
 	for _, record := range records {
-		if record.Grant.Equal(*slot.startGrant) && record.Target == target {
+		if record.Target == target && record.Grant.Equal(*slot.startGrant) {
 			slot.startSequence = record.Sequence
 			return nil
 		}
@@ -64,33 +74,50 @@ func (h *Host) finishStartupEffect(slot *replica) error {
 		return err
 	}
 	return s.FinishEffect(h.operationContext, topology.EffectReceipt{Key: slot.authorityKey,
-		Resource: topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: slot.identity.GroupID, NodeName: slot.node.NodeName},
-		Action:   slot.startGrant.Action, Target: topology.AuthorityTarget{NodeName: slot.node.NodeName, MemberID: slot.node.MemberID, ReplicaID: slot.identity.ReplicaID}, Outcome: topology.EffectApplied, LocalSequence: slot.startSequence})
+		Resource: topology.AuthorityResource{
+			Kind:     topology.AuthorityHost,
+			GroupID:  slot.identity.GroupID,
+			NodeName: slot.node.NodeName,
+		},
+		Action: slot.startGrant.Action, Target: topology.AuthorityTarget{NodeName: slot.node.NodeName,
+			MemberID:  slot.node.MemberID,
+			ReplicaID: slot.identity.ReplicaID}, Outcome: topology.EffectApplied, LocalSequence: slot.startSequence})
 }
 
-func actionTargets(ctx context.Context, a topology.AuthorizedStep, grant topology.AuthorityGrant) ([]storage.Identity, error) {
+func actionTargets(ctx context.Context, a topology.AuthorizedStep,
+	grant topology.AuthorityGrant) ([]storage.Identity, error) {
 	if grant.Action == nil || *grant.Action != a || grant.Validate() != nil {
 		return nil, fault.ErrOperatorAuthorization
 	}
 	var targets []storage.Identity
 	for _, t := range grant.Targets {
-		targets = append(targets, storage.Identity{ClusterID: grant.Key.ClusterID, GroupID: grant.Key.GroupID, NodeName: t.NodeName, ReplicaID: t.ReplicaID})
+		targets = append(targets,
+			storage.Identity{ClusterID: grant.Key.ClusterID, GroupID: grant.Key.GroupID, NodeName: t.NodeName,
+				ReplicaID: t.ReplicaID})
 	}
 	return targets, ctx.Err()
 }
 
 func (h *Host) validateGrantedAction(ctx context.Context, req load.ActionRequest) error {
-	if !completeIdentity(req.From) || !completePeer(req.To) || req.Grant.Validate() != nil || req.Grant.Action == nil || *req.Grant.Action != req.Authorization {
+	if req.Grant.Action == nil || *req.Grant.Action != req.Authorization || !completeIdentity(req.From) ||
+		!completePeer(req.To) || req.Grant.Validate() != nil {
 		return fault.ErrOperatorAuthorization
 	}
-	if req.To.Node != h.cfg.Identity() || req.From.ClusterID != req.To.Node.ClusterID || req.To.Replica.GroupID != req.Grant.Key.GroupID || req.To.Node.ClusterID != req.Grant.Key.ClusterID {
+	identity := h.cfg.Identity()
+	if req.To.Node != identity || req.From.ClusterID != req.To.Node.ClusterID ||
+		req.To.Replica.GroupID != req.Grant.Key.GroupID || req.To.Node.ClusterID != req.Grant.Key.ClusterID {
 		return fault.ErrIdentityMismatch
 	}
 	if err := h.cfg.ValidateCourier(ctx, req.Grant, req.From); err != nil {
 		return err
 	}
 	if localAction(req.Authorization.Kind) && !foundingConfirmation(req) {
-		want := storage.Identity{NodeName: req.To.Node.NodeName, ClusterID: req.To.Node.ClusterID, GroupID: req.To.Replica.GroupID, ReplicaID: req.To.Replica.ReplicaID}
+		want := storage.Identity{
+			NodeName:  req.To.Node.NodeName,
+			ClusterID: req.To.Node.ClusterID,
+			GroupID:   req.To.Replica.GroupID,
+			ReplicaID: req.To.Replica.ReplicaID,
+		}
 		if req.LocalTarget != want || !slices.Contains(req.Grant.Targets, actionTarget(req)) {
 			return fault.ErrOperatorAuthorization
 		}
@@ -103,7 +130,11 @@ func (h *Host) validateGrantedAction(ctx context.Context, req load.ActionRequest
 }
 
 func actionTarget(req load.ActionRequest) topology.AuthorityTarget {
-	return topology.AuthorityTarget{NodeName: req.LocalTarget.NodeName, MemberID: req.To.Node.MemberID, ReplicaID: req.LocalTarget.ReplicaID}
+	return topology.AuthorityTarget{
+		NodeName:  req.LocalTarget.NodeName,
+		MemberID:  req.To.Node.MemberID,
+		ReplicaID: req.LocalTarget.ReplicaID,
+	}
 }
 
 func (h *Host) checkInstalledGrant(ctx context.Context, grant topology.AuthorityGrant) error {
@@ -111,14 +142,14 @@ func (h *Host) checkInstalledGrant(ctx context.Context, grant topology.Authority
 	if err != nil {
 		return err
 	}
-	floor, found, err := s.Current(ctx, grant.Key.GroupID)
+	floor, err := s.Current(ctx, grant.Key.GroupID)
 	if err != nil {
 		return err
 	}
-	if !found || !floor.Grant.Equal(grant) {
+	if !floor.Found || !floor.Record.Grant.Equal(grant) {
 		return fault.ErrAuthorityFenced
 	}
-	if !floor.Complete {
+	if !floor.Record.Complete {
 		return fault.ErrAuthorityPending
 	}
 	return nil
@@ -137,14 +168,16 @@ func (h *Host) checkRetirementAuthority(ctx context.Context, req load.Retirement
 	if err != nil {
 		return err
 	}
-	floor, found, err := s.Current(ctx, req.Identity.GroupID)
+	floor, err := s.Current(ctx, req.Identity.GroupID)
 	if err != nil {
 		return err
 	}
-	if !found || floor.Grant.Key.Revision < req.Grant.Key.Revision || floor.Grant.Key != req.Grant.Key && floor.Complete {
+	if !floor.Found || floor.Record.Grant.Key.Revision < req.Grant.Key.Revision ||
+		floor.Record.Grant.Key != req.Grant.Key &&
+			floor.Record.Complete {
 		return fault.ErrAuthorityFenced
 	}
-	if floor.Grant.Key == req.Grant.Key && (!floor.Complete || !floor.Grant.Equal(req.Grant)) {
+	if floor.Record.Grant.Key == req.Grant.Key && (!floor.Record.Complete || !floor.Record.Grant.Equal(req.Grant)) {
 		return fault.ErrAuthorityPending
 	}
 	records, err := s.Running(ctx, req.Identity.GroupID)
@@ -152,7 +185,10 @@ func (h *Host) checkRetirementAuthority(ctx context.Context, req load.Retirement
 		return err
 	}
 	for _, record := range records {
-		if record.Grant.Equal(req.Grant) && record.Target == (topology.AuthorityTarget{NodeName: req.Identity.NodeName, MemberID: h.cfg.Identity().MemberID, ReplicaID: req.Identity.ReplicaID}) {
+		if record.Grant.Equal(req.Grant) &&
+			record.Target == (topology.AuthorityTarget{NodeName: req.Identity.NodeName,
+				MemberID:  h.cfg.Identity().MemberID,
+				ReplicaID: req.Identity.ReplicaID}) {
 			return nil
 		}
 	}
@@ -162,7 +198,8 @@ func (h *Host) checkRetirementAuthority(ctx context.Context, req load.Retirement
 func (h *Host) applyGrantedAction(parent context.Context, req load.ActionRequest) (load.ActionResult, error) {
 	ctx, cancel := context.WithTimeout(parent, h.cfg.EffectTimeout)
 	defer cancel()
-	ctx, release, err := h.beginAuthorityWork(ctx)
+	ctxHandle, err := h.beginAuthorityWork(ctx)
+	ctx, release := ctxHandle.Context, ctxHandle.Release
 	if err != nil {
 		return load.ActionResult{}, err
 	}
@@ -178,7 +215,7 @@ func (h *Host) applyGrantedAction(parent context.Context, req load.ActionRequest
 		return load.ActionResult{}, err
 	}
 	h.mu.Lock()
-	if (h.quiescing || h.stopped) && !retainedHostAction(req.Authorization.Kind) {
+	if (h.quiescing || h.stopped) && hostActionLifetime(req.Authorization.Kind) != authorityWork {
 		h.mu.Unlock()
 		return load.ActionResult{}, fault.ErrStopped
 	}
@@ -187,14 +224,15 @@ func (h *Host) applyGrantedAction(parent context.Context, req load.ActionRequest
 	}
 	work := h.actionWorks[req.Grant.Key.GroupID]
 	if work == nil {
-		if _, err := h.admitWorkLocked(true); err != nil {
+		if _, err := h.admitWorkLocked(authorityWork); err != nil {
 			h.mu.Unlock()
 			return load.ActionResult{}, err
 		}
 		work = &actionWork{request: req, done: make(chan struct{})}
 		h.actionWorks[req.Grant.Key.GroupID] = work
 		go h.runGrantedAction(work)
-	} else if !work.request.Grant.Equal(req.Grant) || work.request.To != req.To || work.request.LocalTarget != req.LocalTarget {
+	} else if work.request.To != req.To || work.request.LocalTarget != req.LocalTarget ||
+		!work.request.Grant.Equal(req.Grant) {
 		h.mu.Unlock()
 		return load.ActionResult{}, fault.ErrAuthorityPending
 	}
@@ -203,11 +241,7 @@ func (h *Host) applyGrantedAction(parent context.Context, req load.ActionRequest
 	case <-ctx.Done():
 		return load.ActionResult{}, ctx.Err()
 	case <-work.done:
-		result := work.result
-		result.Receipts = slices.Clone(result.Receipts)
-		for i := range result.Receipts {
-			result.Receipts[i] = result.Receipts[i].Clone()
-		}
+		result := cloneActionResult(work.result)
 		return result, work.err
 	}
 }
@@ -220,12 +254,14 @@ func (h *Host) runGrantedAction(work *actionWork) {
 	work.result, work.err = result, err
 	delete(h.actionWorks, work.request.Grant.Key.GroupID)
 	close(work.done)
-	h.releaseWorkLocked(true)
+	h.releaseWorkLocked(authorityWork)
 	h.mu.Unlock()
 }
 
-func (h *Host) executeGrantedLocal(ctx context.Context, req load.ActionRequest) (load.ActionResult, error) {
-	ctx, release, err := h.beginOwnedOperation(ctx, req.Grant.Key.GroupID, retainedHostAction(req.Authorization.Kind))
+func (h *Host) executeGrantedLocal(parent context.Context, req load.ActionRequest) (load.ActionResult, error) {
+	ctxHandle, err := h.beginOwnedOperation(parent, req.Grant.Key.GroupID,
+		hostActionLifetime(req.Authorization.Kind))
+	ctx, release := ctxHandle.Context, ctxHandle.Release
 	if err != nil {
 		return load.ActionResult{}, err
 	}
@@ -240,30 +276,122 @@ func (h *Host) executeGrantedLocal(ctx context.Context, req load.ActionRequest) 
 	if err != nil {
 		return load.ActionResult{}, err
 	}
+	intent, err := h.beginLocalEffect(ctx, req, s)
+	if err != nil {
+		return load.ActionResult{}, err
+	}
+	if intent.receipt != nil {
+		return grantedResult(req, *intent.receipt), nil
+	}
+	if err := h.runLocalAction(ctx, req); err != nil {
+		return load.ActionResult{}, err
+	}
+	if err := h.verifyLocalEffect(ctx, req); err != nil {
+		return load.ActionResult{}, err
+	}
+	proof := topology.EffectReceipt{
+		Key: req.Grant.Key,
+		Resource: topology.AuthorityResource{
+			Kind:     topology.AuthorityHost,
+			GroupID:  req.Grant.Key.GroupID,
+			NodeName: req.To.Node.NodeName,
+		},
+		Action:        req.Grant.Action,
+		Target:        actionTarget(req),
+		Outcome:       topology.EffectApplied,
+		LocalSequence: intent.sequence,
+	}
+	if err := s.FinishEffect(h.authorityContext, proof); err != nil {
+		return load.ActionResult{}, err
+	}
+	return grantedResult(req, proof), nil
+}
+
+func hostActionLifetime(kind topology.StepKind) workLifetime {
+	switch kind {
+	case topology.StepStopReplica, topology.StepCleanupReplicaState, topology.StepDeleteGroupState:
+		return authorityWork
+	default:
+		return ordinaryWork
+	}
+}
+
+func grantedResult(req load.ActionRequest, receipt topology.EffectReceipt) load.ActionResult {
+	return load.ActionResult{
+		From:          req.To,
+		Authorization: req.Authorization,
+		LocalTarget:   req.LocalTarget,
+		Receipts:      []topology.EffectReceipt{receipt.Clone()},
+	}
+}
+
+// Founding has two distinct resources: host creation names LocalTarget, while
+// an empty LocalTarget asks the exact running group to persist its native
+// proof.
+func foundingConfirmation(req load.ActionRequest) bool {
+	return req.Authorization.Kind == topology.StepCreateFoundingGroup && req.LocalTarget == (storage.Identity{})
+}
+
+func (h *Host) applyGrantedConsensus(parent context.Context, req load.ActionRequest) (load.ActionResult, error) {
+	ctxHandle, err := h.beginOperation(parent, req.Grant.Key.GroupID)
+	ctx, release := ctxHandle.Context, ctxHandle.Release
+	if err != nil {
+		return load.ActionResult{}, err
+	}
+	defer release()
+	if err := h.validateGrantedAction(ctx, req); err != nil {
+		return load.ActionResult{}, err
+	}
+	core, err := h.actionCore(req)
+	if err != nil {
+		return load.ActionResult{}, err
+	}
+	receipt, err := performConsensusAction(ctx, req, core)
+	if err != nil {
+		return load.ActionResult{}, err
+	}
+	return grantedResult(req, receipt), nil
+}
+
+func cloneActionResult(result load.ActionResult) load.ActionResult {
+	result.Receipts = slices.Clone(result.Receipts)
+	for i := range result.Receipts {
+		result.Receipts[i] = result.Receipts[i].Clone()
+	}
+	return result
+}
+
+type localEffectIntent struct {
+	receipt  *topology.EffectReceipt
+	sequence uint64
+}
+
+func (h *Host) beginLocalEffect(ctx context.Context, req load.ActionRequest,
+	s *authoritystore.Store) (localEffectIntent, error) {
 	receipt, err := s.BeginEffect(ctx, req.Grant, actionTarget(req))
 	if err == nil && receipt != nil {
-		return grantedResult(req, *receipt), nil
+		return localEffectIntent{receipt: receipt}, nil
 	}
 	if err != nil {
 		if !errors.Is(err, fault.ErrAuthorityPending) {
-			return load.ActionResult{}, err
+			return localEffectIntent{}, err
 		}
 		// An earlier waiter may have left while its startup/Close was still
 		// owned. Reconcile the same identity through its reservation and the
 		// documented idempotent retirement callback, never a new identity.
 		if err := h.checkInstalledGrant(ctx, req.Grant); err != nil {
-			return load.ActionResult{}, err
+			return localEffectIntent{}, err
 		}
 	}
-	floor, _, err := s.Current(ctx, req.Grant.Key.GroupID)
+	floor, err := s.Current(ctx, req.Grant.Key.GroupID)
 	if err != nil {
-		return load.ActionResult{}, err
+		return localEffectIntent{}, err
 	}
 	// The sequence belongs to the original running intent, even when a new
 	// pending fence arrives during the callback.
 	records, err := s.Running(ctx, req.Grant.Key.GroupID)
 	if err != nil {
-		return load.ActionResult{}, err
+		return localEffectIntent{}, err
 	}
 	sequence := uint64(0)
 	for _, record := range records {
@@ -271,9 +399,14 @@ func (h *Host) executeGrantedLocal(ctx context.Context, req load.ActionRequest) 
 			sequence = record.Sequence
 		}
 	}
-	if sequence == 0 || floor.Grant.Key.Revision < req.Grant.Key.Revision {
-		return load.ActionResult{}, fault.ErrUnreadable
+	if sequence == 0 || floor.Record.Grant.Key.Revision < req.Grant.Key.Revision {
+		return localEffectIntent{}, fault.ErrUnreadable
 	}
+	return localEffectIntent{sequence: sequence}, nil
+}
+
+func (h *Host) runLocalAction(ctx context.Context, req load.ActionRequest) error {
+	var err error
 	switch req.Authorization.Kind {
 	case topology.StepCreateFoundingGroup, topology.StepPrepareReplica:
 		var slot *replica
@@ -287,76 +420,35 @@ func (h *Host) executeGrantedLocal(ctx context.Context, req load.ActionRequest) 
 		err = h.stopRetiringIdentity(ctx, req.LocalTarget, req.Authorization, req.Grant)
 	case topology.StepCleanupReplicaState, topology.StepDeleteGroupState:
 		a := req.Authorization
-		_, err = h.retire(ctx, load.RetirementRequest{Grant: req.Grant, Identity: req.LocalTarget, Reason: load.RetirementTopology, Authorization: &a})
+		_, err = h.retire(ctx, load.RetirementRequest{
+			Grant:         req.Grant,
+			Identity:      req.LocalTarget,
+			Reason:        load.RetirementTopology,
+			Authorization: &a,
+		})
+	default: // Other actions require only the effect verification below.
 	}
 	if err != nil {
-		return load.ActionResult{}, err
+		return err
 	}
-	if err := h.verifyLocalEffect(ctx, req); err != nil {
-		return load.ActionResult{}, err
-	}
-	proof := topology.EffectReceipt{Key: req.Grant.Key, Resource: topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: req.Grant.Key.GroupID, NodeName: req.To.Node.NodeName}, Action: req.Grant.Action, Target: actionTarget(req), Outcome: topology.EffectApplied, LocalSequence: sequence}
-	if err := s.FinishEffect(h.authorityContext, proof); err != nil {
-		return load.ActionResult{}, err
-	}
-	return grantedResult(req, proof), nil
+	return nil
 }
 
-func retainedHostAction(kind topology.StepKind) bool {
-	return kind == topology.StepStopReplica || kind == topology.StepCleanupReplicaState || kind == topology.StepDeleteGroupState
-}
-
-func grantedResult(req load.ActionRequest, receipt topology.EffectReceipt) load.ActionResult {
-	return load.ActionResult{From: req.To, Authorization: req.Authorization, LocalTarget: req.LocalTarget, Receipts: []topology.EffectReceipt{receipt.Clone()}}
-}
-
-// Founding has two distinct resources: host creation names LocalTarget, while
-// an empty LocalTarget asks the exact running group to persist its native proof.
-func foundingConfirmation(req load.ActionRequest) bool {
-	return req.Authorization.Kind == topology.StepCreateFoundingGroup && req.LocalTarget == (storage.Identity{})
-}
-
-func (h *Host) applyGrantedConsensus(ctx context.Context, req load.ActionRequest) (load.ActionResult, error) {
-	ctx, release, err := h.beginOperation(ctx, req.Grant.Key.GroupID)
-	if err != nil {
-		return load.ActionResult{}, err
-	}
-	defer release()
-	if err := h.validateGrantedAction(ctx, req); err != nil {
-		return load.ActionResult{}, err
-	}
-	core, err := h.actionCore(req)
-	if err != nil {
-		return load.ActionResult{}, err
-	}
+func performConsensusAction(ctx context.Context, req load.ActionRequest,
+	core *raftengine.Group) (topology.EffectReceipt, error) {
+	var err error
 	var receipt topology.EffectReceipt
 	a := req.Authorization
 	if a.Kind == topology.StepCreateFoundingGroup {
 		receipt, err = core.ObserveAuthorizedEffect(ctx, req.Grant)
 		if err != nil {
-			return load.ActionResult{}, err
+			return topology.EffectReceipt{}, err
 		}
 	} else if a.Kind == topology.StepTransferLeader {
 		if err := core.TransferAuthorized(ctx, req.Grant); err != nil {
-			return load.ActionResult{}, err
+			return topology.EffectReceipt{}, err
 		}
-		tick := time.NewTicker(10 * time.Millisecond)
-		defer tick.Stop()
-		for {
-			var found bool
-			receipt, found, err = core.AuthorityReceipt(ctx, req.Grant.Key)
-			if err != nil {
-				return load.ActionResult{}, err
-			}
-			if found && consensusEffectPresent(core.Status(), a) {
-				break
-			}
-			select {
-			case <-ctx.Done():
-				return load.ActionResult{}, ctx.Err()
-			case <-tick.C:
-			}
-		}
+		return waitTransferReceipt(ctx, req, core)
 	} else {
 		var change raftpb.ConfChangeV2
 		switch a.Kind {
@@ -369,12 +461,33 @@ func (h *Host) applyGrantedConsensus(ctx context.Context, req load.ActionRequest
 		case topology.StepRemoveReplica:
 			change = membership.RemoveReplica(a.ReplicaID)
 		default:
-			return load.ActionResult{}, fault.ErrUnsupported
+			return topology.EffectReceipt{}, fault.ErrUnsupported
 		}
 		receipt, err = core.ProposeAuthorizedConfChange(ctx, req.Grant, change, core.Status().ConfState)
 		if err != nil {
-			return load.ActionResult{}, err
+			return topology.EffectReceipt{}, err
 		}
 	}
-	return grantedResult(req, receipt), nil
+	return receipt, nil
+}
+
+func waitTransferReceipt(ctx context.Context, req load.ActionRequest,
+	core *raftengine.Group) (topology.EffectReceipt, error) {
+	a := req.Authorization
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		lookup, err := core.AuthorityReceipt(ctx, req.Grant.Key)
+		if err != nil {
+			return topology.EffectReceipt{}, err
+		}
+		if lookup.Found && consensusEffectPresent(core.Status(), a) {
+			return lookup.Receipt, nil
+		}
+		select {
+		case <-ctx.Done():
+			return topology.EffectReceipt{}, ctx.Err()
+		case <-tick.C:
+		}
+	}
 }

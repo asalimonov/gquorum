@@ -3,10 +3,13 @@ package topology
 import (
 	"maps"
 	"time"
+
+	"github.com/asalimonov/gquorum/internal/collection"
 )
 
 // ObservedGroupHealth evaluates the declared Active voters against one node
-// health snapshot. Unknown observations remain nullable rather than measured zero.
+// health snapshot. Unknown observations remain nullable rather than measured
+// zero.
 type ObservedGroupHealth struct {
 	State            GroupHealth `json:"state"`
 	Source           string      `json:"source"`
@@ -14,6 +17,9 @@ type ObservedGroupHealth struct {
 	FailureTolerance *int        `json:"failure_tolerance"`
 	BelowMinReplicas *bool       `json:"below_min_replicas"`
 }
+
+// GroupHealthEvaluation compares declared voter count and quorum with observed
+// node health.
 type GroupHealthEvaluation struct {
 	GroupID        string              `json:"group_id"`
 	Voters         int                 `json:"voters"`
@@ -21,6 +27,7 @@ type GroupHealthEvaluation struct {
 	ObservedHealth ObservedGroupHealth `json:"observed_health"`
 }
 
+// Clone copies optional health measurements into owned values.
 func (e GroupHealthEvaluation) Clone() GroupHealthEvaluation {
 	if e.ObservedHealth.HealthyVoters != nil {
 		e.ObservedHealth.HealthyVoters = valuePtr(*e.ObservedHealth.HealthyVoters)
@@ -44,6 +51,7 @@ type HealthObservation struct {
 	Groups  []GroupHealthEvaluation `json:"groups"`
 }
 
+// Clone copies the node health map and all nested group measurements.
 func (s HealthObservation) Clone() HealthObservation {
 	s.Nodes = maps.Clone(s.Nodes)
 	if s.Groups != nil {
@@ -56,11 +64,20 @@ func (s HealthObservation) Clone() HealthObservation {
 	return s
 }
 
+// QuorumLost reports an observed loss of voter majority.
 func (h GroupHealth) QuorumLost() bool { return h == GroupQuorumLost }
 func valuePtr[T any](v T) *T           { return &v }
+
+// EvaluateGroupHealth evaluates declared voters against a node-health snapshot,
+// preserving unknowns.
 func EvaluateGroupHealth(doc Document, id string, health map[string]Health) GroupHealthEvaluation {
 	voters := doc.VotersOf(id)
-	out := GroupHealthEvaluation{GroupID: id, Voters: len(voters), Quorum: QuorumOf(len(voters)), ObservedHealth: ObservedGroupHealth{State: GroupUnknown, Source: "none"}}
+	out := GroupHealthEvaluation{
+		GroupID:        id,
+		Voters:         len(voters),
+		Quorum:         QuorumOf(len(voters)),
+		ObservedHealth: ObservedGroupHealth{State: GroupUnknown, Source: "none"},
+	}
 	if health == nil {
 		return out
 	}
@@ -91,13 +108,20 @@ func EvaluateGroupHealth(doc Document, id string, health map[string]Health) Grou
 	}
 	return out
 }
+
+// EvaluateDataGroupHealth evaluates all declared application groups in document
+// order.
 func EvaluateDataGroupHealth(doc Document, health map[string]Health) []GroupHealthEvaluation {
-	var out []GroupHealthEvaluation
-	for _, group := range doc.LoadGroups() {
+	groups := doc.LoadGroups()
+	out := collection.Slice[GroupHealthEvaluation](len(groups))
+	for _, group := range groups {
 		out = append(out, EvaluateGroupHealth(doc, group.ID, health))
 	}
 	return out
 }
+
+// EvaluateAllGroupHealth evaluates meta, when present, followed by all
+// application groups.
 func EvaluateAllGroupHealth(doc Document, health map[string]Health) []GroupHealthEvaluation {
 	var out []GroupHealthEvaluation
 	if doc.MetaGroup() != nil {

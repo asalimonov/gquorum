@@ -25,17 +25,30 @@ func TestVoterSwapResumesAfterCommittedEffectAndMetaLeaderCrashFourNodes(t *test
 			c := acquire(t, matrixSpec(4)).Cluster
 			ctx, cancel := context.WithTimeout(t.Context(), 100*time.Second)
 			defer cancel()
-			p := voterPolicy(3)
+			p := voterConfig(3)
 			p.MaxSurgeVoters = surge
-			created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "swap", VoterPolicy: p, Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 4}})
+			if surge == 0 {
+				// Same-AZ standby: strict placement forces the guarded
+				// 3 -> 2 -> 3 path across the lost acknowledgement.
+				placementEdit(ctx, t, c, func(doc *topology.Document) {
+					for i, name := range []string{"node1", "node2", "node3", "node4"} {
+						labels := doc.Node(name).GetLabels()
+						labels["az"] = []string{"a", "b", "c", "c"}[i]
+						if err := doc.Node(name).SetLabels(labels); err != nil {
+							t.Fatal(err)
+						}
+					}
+				})
+				p.DistinctVoterLabel = "az"
+			}
+			created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "swap", VoterConfig: p, Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 4}})
 			if err != nil {
 				t.Fatal(err)
 			}
 			if err := c.Put(ctx, "node4", "swap", "retained", "retained", "through-learner"); err != nil {
 				t.Fatal(err)
 			}
-			response, err := c.Request(ctx, "node2", "POST", "/api/groups/swap/leader/node1", nil, 0)
-			if err := requireStatus(response, err, 200); err != nil {
+			if err := requestLeaderTransfer(ctx, c, "node2", "swap", "node1"); err != nil {
 				t.Fatal(err)
 			}
 			if err := Poll(ctx, func() (bool, error) {
@@ -63,7 +76,7 @@ func TestVoterSwapResumesAfterCommittedEffectAndMetaLeaderCrashFourNodes(t *test
 			if err != nil {
 				t.Fatal(err)
 			}
-			response, err = c.Request(ctx, "node3", "POST", fmt.Sprintf("/api/topology/%d/plan", staged.Document.Version), nil, 0)
+			response, err := c.Request(ctx, "node3", "POST", fmt.Sprintf("/api/topology/%d/plan", staged.Document.Version), nil, 0)
 			if err := requireStatus(response, err, 200); err != nil {
 				t.Fatal(err)
 			}
@@ -94,7 +107,7 @@ func TestVoterSwapResumesAfterCommittedEffectAndMetaLeaderCrashFourNodes(t *test
 					t.Fatal(err)
 				}
 			}
-			id := startApply(t, ctx, c, "node3", staged.Document.Version)
+			id := startApply(ctx, t, c, "node3", staged.Document.Version)
 			if err := Poll(ctx, func() (bool, error) {
 				controls, err := c.Controls(ctx, "node1")
 				if err != nil {
@@ -232,8 +245,7 @@ func TestVoterDemotionRepeatsExactTransferAfterLeaderRegainFourNodes(t *testing.
 	}
 	transfer := func(target string) {
 		t.Helper()
-		response, err := c.Request(ctx, "node2", "POST", "/api/groups/swap/leader/"+target, nil, 0)
-		if err := requireStatus(response, err, 200); err != nil {
+		if err := requestLeaderTransfer(ctx, c, "node2", "swap", target); err != nil {
 			t.Fatal(err)
 		}
 		if err := Poll(ctx, func() (bool, error) {
@@ -263,7 +275,7 @@ func TestVoterDemotionRepeatsExactTransferAfterLeaderRegainFourNodes(t *testing.
 			t.Fatal(err)
 		}
 	}
-	id := startApply(t, ctx, c, "node2", staged.Document.Version)
+	id := startApply(ctx, t, c, "node2", staged.Document.Version)
 	var demotion topology.AuthorizedStep
 	if err := Poll(ctx, func() (bool, error) {
 		controls, err := c.Controls(ctx, "node1")
@@ -286,8 +298,8 @@ func TestVoterDemotionRepeatsExactTransferAfterLeaderRegainFourNodes(t *testing.
 	// Pending topology owns transfer authority. Make node3 regain leadership
 	// through a genuine election: isolate the old load leader and withhold only
 	// competing vote requests at node3. Votes/responses for node3 still flow.
-	armGroupReadFault(t, ctx, c, "node3", "swap", ReadFaults{DropVoteRequestsFrom: []uint64{replicaID(created.Document, "swap", "node2"), replicaID(created.Document, "swap", "node4")}})
-	isolate := armGroupReadFault(t, ctx, c, "node1", "swap", ReadFaults{DropRaft: true})
+	armGroupReadFault(ctx, t, c, "node3", "swap", ReadFaults{DropVoteRequestsFrom: []uint64{replicaID(created.Document, "swap", "node2"), replicaID(created.Document, "swap", "node4")}})
+	isolate := armGroupReadFault(ctx, t, c, "node1", "swap", ReadFaults{DropRaft: true})
 	if err := Poll(ctx, func() (bool, error) {
 		local, err := c.Local(ctx, "node3", "swap")
 		return local.Status.LeaderID == demotion.ReplicaID, err

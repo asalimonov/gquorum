@@ -57,7 +57,7 @@ func testReadmissionRestart(t *testing.T, phase string) {
 		retirementCalls := 0
 		g = joinProtocolClient(t, []string{address}, func(o *Options) {
 			o.DBPath = metaPath
-			o.Limits, o.VoterPolicy = old.opts.Limits, old.opts.VoterPolicy
+			o.Limits, o.VoterConfig = old.opts.Limits, old.opts.VoterConfig
 			o.Identity.InstanceID = admission.InstanceID
 			if attempt == 1 {
 				o.Identity.InstanceID = "restarted-readmission"
@@ -65,14 +65,18 @@ func testReadmissionRestart(t *testing.T, phase string) {
 			id := o.Identity
 			id.MemberID = 1
 			if attempt == 1 {
-				pin, found, err := authoritystore.LoadIdentity(authorityPath)
-				if err != nil || !found {
-					t.Fatal(pin, found, err)
+				pin, err := authoritystore.LoadIdentity(authorityPath)
+				if err != nil || !pin.Found {
+					t.Fatal(pin.Identity, pin.Found, err)
 				}
-				id.MemberID = pin.MemberID
+				id.MemberID = pin.Identity.MemberID
 			}
 			var err error
-			authority, err = authoritystore.Open(authorityPath, id, attempt == 0)
+			freshness := authoritystore.RetainedEvidence
+			if attempt == 0 {
+				freshness = authoritystore.FreshEvidence
+			}
+			authority, err = authoritystore.Open(authorityPath, id, freshness)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -95,9 +99,10 @@ func testReadmissionRestart(t *testing.T, phase string) {
 			}
 			o.OnReadmission = func(ctx context.Context, proof Readmission) error {
 				retirementCalls++
-				err := managed.ReadmitMeta(ctx, g.Identity(), metaPath, managed.Readmission(proof), authority, func(ctx context.Context, proof managed.Readmission) error {
-					return g.AuthorizeReadmission(ctx, Readmission(proof))
-				})
+				err := managed.ReadmitMeta(ctx, managed.Readmission(proof), managed.MetaReadmissionOptions{Identity: g.Identity(), Path: metaPath,
+					Authority: authority, Authorize: func(ctx context.Context, proof managed.Readmission) error {
+						return g.AuthorizeReadmission(ctx, Readmission(proof))
+					}})
 				if err != nil {
 					return err
 				}
@@ -113,11 +118,11 @@ func testReadmissionRestart(t *testing.T, phase string) {
 				if err := authority.VerifyRebind(ctx, proof.Previous, proof.Granted, proof.AdmissionID); err != nil {
 					return nil, err
 				}
-				r, found, err := authority.Receipt(ctx, grant, grant.Targets[0])
-				if err != nil || !found {
+				r, err := authority.Receipt(ctx, grant, grant.Targets[0])
+				if err != nil || !r.Found {
 					return nil, fault.ErrAuthorityPending
 				}
-				return []topology.EffectReceipt{r}, nil
+				return []topology.EffectReceipt{r.Receipt}, nil
 			}
 		})
 		g.ctx = t.Context()
@@ -147,10 +152,10 @@ func testReadmissionRestart(t *testing.T, phase string) {
 			if retirementCalls != 1 {
 				t.Fatal("initial retirement missing", retirementCalls)
 			}
-			var found bool
-			firstReceipt, found, err = authority.Receipt(ctx, grant, grant.Targets[0])
-			if err != nil || !found {
-				t.Fatal(firstReceipt, found, err)
+			lookup, readErr := authority.Receipt(ctx, grant, grant.Targets[0])
+			firstReceipt, err = lookup.Receipt, readErr
+			if err != nil || !lookup.Found {
+				t.Fatal(firstReceipt, lookup.Found, err)
 			}
 		} else {
 			wantCalls := 0
@@ -182,9 +187,9 @@ func testReadmissionRestart(t *testing.T, phase string) {
 	if len(peer.readies) != 1 || peer.readies[0].InstanceID != "restarted-readmission" || len(peer.readies[0].Receipts) != 1 || !reflect.DeepEqual(peer.readies[0].Receipts[0], firstReceipt) {
 		t.Fatal("ready proof lost new process or original receipt", peer.readies)
 	}
-	pin, found, err := metastore.LoadIdentity(metaPath)
-	if err != nil || !found || pin.MemberID != 2 {
-		t.Fatal(pin, found, err)
+	pin, err := metastore.LoadIdentity(metaPath)
+	if err != nil || !pin.Found || pin.Identity.MemberID != 2 {
+		t.Fatal(pin.Identity, pin.Found, err)
 	}
 	backups, err := filepath.Glob(metaPath + ".retired-*")
 	if err != nil || len(backups) != 1 {

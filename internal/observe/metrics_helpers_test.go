@@ -2,13 +2,14 @@ package observe
 
 import (
 	"fmt"
+
 	"github.com/asalimonov/gquorum/metrics"
 	"github.com/asalimonov/gquorum/topology"
 )
 
 func evidenceFixture() (topology.Document, MetricsSettings) {
-	p := topology.DefaultVoterPolicy()
-	d := topology.Document{ClusterID: "cluster", Version: 1, Groups: []topology.Group{{ID: topology.MetaGroupID, VoterPolicy: &p}}}
+	p := topology.DefaultVoterConfig()
+	d := topology.Document{ClusterID: "cluster", Version: 1, Groups: []topology.Group{{ID: topology.MetaGroupID, VoterConfig: &p}}}
 	for i := uint64(1); i <= 5; i++ {
 		role := topology.ReplicaVoter
 		if i > 3 {

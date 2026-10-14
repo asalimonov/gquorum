@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -14,12 +15,33 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+const (
+	defaultRetention        = 30 * 24 * time.Hour
+	defaultMaxLiveBytes     = 64 << 20
+	directoryMode           = 0o700
+	fileMode                = 0o600
+	liveStatsRefreshDivisor = 16
+	defaultQueryLimit       = 100
+	maximumQueryLimit       = 500
+	uint64ByteCount         = 8
+)
+
+// JournalOptions configures the journal path, retention, size limit and logger.
 type JournalOptions struct {
 	Path         string
 	Retention    time.Duration
 	MaxLiveBytes int64
 	Logger       *slog.Logger
 }
+
+type rotationMode uint8
+
+const (
+	periodicRotation rotationMode = iota
+	fullAgeRotation
+)
+
+// Journal stores node-local events in a bounded bbolt database.
 type Journal struct {
 	db                                *bolt.DB
 	opts                              JournalOptions
@@ -34,24 +56,25 @@ type Journal struct {
 var bucketEvents = []byte("events")
 var bucketMeta = []byte("meta")
 
+// OpenJournal opens or creates a journal and validates its schema.
 func OpenJournal(opts JournalOptions) (*Journal, error) {
 	if opts.Path == "" || opts.Retention < 0 || opts.MaxLiveBytes < 0 {
 		return nil, fault.New(fault.Invalid, "explicit journal path and nonnegative retention/size required", nil)
 	}
 	if opts.Retention == 0 {
-		opts.Retention = 30 * 24 * time.Hour
+		opts.Retention = defaultRetention
 	}
 	if opts.MaxLiveBytes == 0 {
-		opts.MaxLiveBytes = 64 << 20
+		opts.MaxLiveBytes = defaultMaxLiveBytes
 	}
-	if err := os.MkdirAll(filepath.Dir(opts.Path), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(opts.Path), directoryMode); err != nil {
 		return nil, err
 	}
-	db, err := bolt.Open(opts.Path, 0o600, &bolt.Options{Timeout: 5 * time.Second, NoSync: true})
+	db, err := bolt.Open(opts.Path, fileMode, &bolt.Options{Timeout: 5 * time.Second, NoSync: true})
 	if err != nil {
 		return nil, err
 	}
-	if err := db.Update(func(tx *bolt.Tx) error {
+	updateErr := db.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists(bucketMeta)
 		if err != nil {
 			return err
@@ -64,26 +87,29 @@ func OpenJournal(opts JournalOptions) (*Journal, error) {
 		}
 		_, err = tx.CreateBucketIfNotExists(bucketEvents)
 		return err
-	}); err != nil {
+	})
+	if updateErr != nil {
 		_ = db.Close()
-		return nil, err
+		return nil, updateErr
 	}
 	return &Journal{db: db, opts: opts, now: time.Now}, nil
 }
 
+// Append stores an event with a journal-assigned sequence and applies retention
+// limits.
 func (j *Journal) Append(e Event) (Event, error) {
-	e = clone(e)
-	e.Seq = 0
+	event := clone(e)
+	event.Seq = 0
 	if j == nil {
-		if e.At.IsZero() {
-			e.At = time.Now().UTC()
+		if event.At.IsZero() {
+			event.At = time.Now().UTC()
 		}
-		return e, nil
+		return event, nil
 	}
-	if e.At.IsZero() {
-		e.At = j.now().UTC()
+	if event.At.IsZero() {
+		event.At = j.now().UTC()
 	} else {
-		e.At = e.At.UTC()
+		event.At = event.At.UTC()
 	}
 	err := j.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketEvents)
@@ -91,8 +117,8 @@ func (j *Journal) Append(e Event) (Event, error) {
 		if err != nil {
 			return err
 		}
-		e.Seq = seq
-		data, err := encodeEvent(e)
+		event.Seq = seq
+		data, err := encodeEvent(event)
 		if err != nil {
 			return err
 		}
@@ -103,33 +129,23 @@ func (j *Journal) Append(e Event) (Event, error) {
 		j.sinceRotate++
 		if j.sinceRotate >= 64 {
 			j.sinceRotate = 0
-			return j.rotate(tx, false)
+			return j.rotate(tx, periodicRotation)
 		}
 		return nil
 	})
 	if err != nil {
-		e.Seq = 0
-		return e, err
+		event.Seq = 0
+		return event, err
 	}
-	return e, nil
+	return event, nil
 }
 
-func (j *Journal) rotate(tx *bolt.Tx, fullAgeScan bool) error {
+func (j *Journal) rotate(tx *bolt.Tx, mode rotationMode) error {
 	b := tx.Bucket(bucketEvents)
 	cutoff := j.now().Add(-j.opts.Retention)
-	var doomed [][]byte
 	c := b.Cursor()
-	for k, v := c.First(); k != nil; k, v = c.Next() {
-		e, err := decodeEvent(v)
-		// Periodic rotation prunes the head with bounded amortized work. Explicit
-		// Prune also finds expired entries after an observer clock moved backwards.
-		if err != nil || !e.At.After(cutoff) {
-			doomed = append(doomed, bytes.Clone(k))
-		} else if !fullAgeScan {
-			break
-		}
-	}
-	if j.liveSize != nil || j.lastLiveBytes > j.opts.MaxLiveBytes-j.opts.MaxLiveBytes/16 || j.appendedSinceStats > j.opts.MaxLiveBytes/16 {
+	doomed := expiredKeys(c, cutoff, mode)
+	if j.refreshSizeStats() {
 		stats := b.Stats()
 		measured := int64(stats.BranchInuse + stats.LeafInuse)
 		if j.liveSize != nil {
@@ -138,17 +154,7 @@ func (j *Journal) rotate(tx *bolt.Tx, fullAgeScan bool) error {
 		j.lastLiveBytes = measured
 		j.appendedSinceStats = 0
 		if measured > j.opts.MaxLiveBytes {
-			n := max(1, stats.KeyN/10)
-			seen := make(map[string]bool, len(doomed))
-			for _, k := range doomed {
-				seen[string(k)] = true
-			}
-			for k, _ := c.First(); k != nil && n > 0; k, _ = c.Next() {
-				if !seen[string(k)] {
-					doomed = append(doomed, bytes.Clone(k))
-					n--
-				}
-			}
+			doomed = appendOversizedKeys(c, doomed, stats.KeyN)
 		}
 	}
 	for _, k := range doomed {
@@ -159,6 +165,44 @@ func (j *Journal) rotate(tx *bolt.Tx, fullAgeScan bool) error {
 	return nil
 }
 
+func expiredKeys(c *bolt.Cursor, cutoff time.Time, mode rotationMode) [][]byte {
+	var doomed [][]byte
+	for k, v := c.First(); k != nil; k, v = c.Next() {
+		e, err := decodeEvent(v)
+		// Periodic rotation prunes the head with bounded amortized work.
+		// Explicit Prune also finds expired entries after an observer clock
+		// moved backwards.
+		if err != nil || !e.At.After(cutoff) {
+			doomed = append(doomed, bytes.Clone(k))
+		} else if mode == periodicRotation {
+			break
+		}
+	}
+	return doomed
+}
+
+func (j *Journal) refreshSizeStats() bool {
+	return j.liveSize != nil || j.lastLiveBytes > j.opts.MaxLiveBytes-j.opts.MaxLiveBytes/liveStatsRefreshDivisor ||
+		j.appendedSinceStats > j.opts.MaxLiveBytes/liveStatsRefreshDivisor
+}
+
+func appendOversizedKeys(c *bolt.Cursor, doomed [][]byte, keyCount int) [][]byte {
+	keys := slices.Clone(doomed)
+	n := max(1, keyCount/10)
+	seen := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		seen[string(k)] = true
+	}
+	for k, _ := c.First(); k != nil && n > 0; k, _ = c.Next() {
+		if !seen[string(k)] {
+			keys = append(keys, bytes.Clone(k))
+			n--
+		}
+	}
+	return keys
+}
+
+// List returns matching events in sequence order after the requested cursor.
 func (j *Journal) List(ctx context.Context, q Query) ([]Event, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -167,34 +211,39 @@ func (j *Journal) List(ctx context.Context, q Query) ([]Event, error) {
 		return nil, nil
 	}
 	if q.Limit == 0 {
-		q.Limit = 100
+		q.Limit = defaultQueryLimit
 	}
 	if q.Limit < 0 {
 		return nil, fault.ErrInvalid
 	}
-	q.Limit = min(q.Limit, 500)
+	q.Limit = min(q.Limit, maximumQueryLimit)
 	var result []Event
 	err := j.db.View(func(tx *bolt.Tx) error {
-		c := tx.Bucket(bucketEvents).Cursor()
-		for k, v := c.Seek(be(q.AfterSeq)); k != nil && len(result) < q.Limit; k, v = c.Next() {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if binary.BigEndian.Uint64(k) <= q.AfterSeq {
-				continue
-			}
-			e, err := decodeEvent(v)
-			if err != nil {
-				return fault.New(fault.Unreadable, "decode journal event", err)
-			}
-			if q.Filter.matches(e) {
-				result = append(result, e)
-			}
-		}
-		return nil
+		return listEvents(ctx, tx.Bucket(bucketEvents).Cursor(), q, &result)
 	})
 	return result, err
 }
+
+func listEvents(ctx context.Context, c *bolt.Cursor, q Query, result *[]Event) error {
+	for k, v := c.Seek(be(q.AfterSeq)); k != nil && len(*result) < q.Limit; k, v = c.Next() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if binary.BigEndian.Uint64(k) <= q.AfterSeq {
+			continue
+		}
+		e, err := decodeEvent(v)
+		if err != nil {
+			return fault.New(fault.Unreadable, "decode journal event", err)
+		}
+		if q.Filter.matches(e) {
+			*result = append(*result, e)
+		}
+	}
+	return nil
+}
+
+// Prune applies the journal retention and size limits.
 func (j *Journal) Prune(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -206,9 +255,11 @@ func (j *Journal) Prune(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		return j.rotate(tx, true)
+		return j.rotate(tx, fullAgeRotation)
 	})
 }
+
+// Close releases the database once and preserves its close result.
 func (j *Journal) Close() error {
 	if j == nil {
 		return nil
@@ -216,4 +267,9 @@ func (j *Journal) Close() error {
 	j.closeOnce.Do(func() { j.closeErr = j.db.Close() })
 	return j.closeErr
 }
-func be(n uint64) []byte { data := make([]byte, 8); binary.BigEndian.PutUint64(data, n); return data }
+
+func be(n uint64) []byte {
+	data := make([]byte, uint64ByteCount)
+	binary.BigEndian.PutUint64(data, n)
+	return data
+}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"github.com/asalimonov/gquorum/fault"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,7 +88,15 @@ func requirePlan(t *testing.T, got Plan, version uint64, want []Step) {
 	if len(want) == 0 && len(got.Steps) == 0 {
 		return
 	}
-	if !reflect.DeepEqual(got.Steps, want) {
+	withoutProof := append([]Step(nil), got.Steps...)
+	for i := range withoutProof {
+		if isMembershipStep(withoutProof[i].Kind) && (withoutProof[i].ExpectedVotersDigest == "" || withoutProof[i].ResultVotersDigest == "") {
+			t.Fatalf("membership step %d lacks voter proof: %+v", i+1, withoutProof[i])
+		}
+		withoutProof[i].ExpectedVotersDigest = ""
+		withoutProof[i].ResultVotersDigest = ""
+	}
+	if !reflect.DeepEqual(withoutProof, want) {
 		t.Fatalf("steps mismatch:\n got: %+v\nwant: %+v", got.Steps, want)
 	}
 }
@@ -194,6 +203,10 @@ func TestBuildPlanDemotesVoterAndTransfersLeader(t *testing.T) {
 	desired.Group("shard0").Replicas[1].Role = ReplicaLearner
 	statuses := statusForDocument(active)
 	statuses["shard0"] = groupStatus("shard0", 2, []uint64{1, 2, 3}, nil)
+	status := statuses["shard0"]
+	status.HealthKnown = true
+	status.LiveVoters = map[uint64]bool{1: true, 2: true, 3: true}
+	statuses["shard0"] = status
 
 	plan, err := BuildPlan(active, desired, statuses, plannerRules())
 	if err != nil {
@@ -226,9 +239,9 @@ func TestBuildPlanIncludesMetaLearnerThenVoterChange(t *testing.T) {
 	})
 }
 
-func TestBuildPlanReplacementAtMaxShrinksFirst(t *testing.T) {
+func TestBuildPlanReplacementAtMaxUsesSafeDemotionFirst(t *testing.T) {
 	t.Parallel()
-	active := planDoc(1, 4, []string{"n1", "n2", "n3", "n4"}, shardOf("shard0", rep("n1", 1), rep("n2", 2), rep("n3", 3)))
+	active := planDoc(1, 3, []string{"n1", "n2", "n3", "n4"}, shardOf("shard0", rep("n1", 1), rep("n2", 2), rep("n3", 3)))
 	active.Group("shard0").Placement = &PlacementRule{MinReplicas: 1, MaxReplicas: 3}
 	desired := active.Clone()
 	desired.Version++
@@ -236,21 +249,35 @@ func TestBuildPlanReplacementAtMaxShrinksFirst(t *testing.T) {
 	desired.Group("shard0").NextReplicaID = 5
 	statuses := statusForDocument(active)
 	statuses["shard0"] = groupStatus("shard0", 2, []uint64{1, 2, 3}, nil)
+	status := statuses["shard0"]
+	status.HealthKnown = true
+	status.LiveVoters = map[uint64]bool{1: true, 2: true, 3: true}
+	statuses["shard0"] = status
 
-	plan, err := BuildPlan(active, desired, statuses, plannerRules())
+	plan, err := BuildPlan(active, desired, statuses, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 4, MaxReplicas: 3}})
 	if err != nil {
-		t.Fatalf("BuildPlan: %v", err)
+		t.Fatal("safe at-capacity replacement was refused", err)
 	}
-	requirePlan(t, plan, desired.Version, []Step{
-		step("shard0", StepTransferLeader, "n1", 1),
-		step("shard0", StepRemoveReplica, "n2", 2),
-		step("shard0", StepStopReplica, "n2", 2),
-		step("shard0", StepCleanupReplicaState, "n2", 2),
-		step("shard0", StepPrepareReplica, "n4", 4),
-		step("shard0", StepAddLearner, "n4", 4),
-		step("shard0", StepWaitCaughtUp, "n4", 4),
-		step("shard0", StepPromoteVoter, "n4", 4),
-	})
+	var oldRemoved, newPrepared int
+	for _, step := range plan.Steps {
+		if step.GroupID != "shard0" {
+			continue
+		}
+		if step.Kind == StepRemoveReplica && step.ReplicaID == 2 {
+			oldRemoved = step.Seq
+		}
+		if step.Kind == StepPrepareReplica && step.ReplicaID == 4 {
+			newPrepared = step.Seq
+		}
+	}
+	if oldRemoved == 0 || newPrepared <= oldRemoved {
+		t.Fatal("replacement did not release the old seat before preparing the learner", plan)
+	}
+	status.LiveVoters[3] = false
+	statuses["shard0"] = status
+	if plan, err := BuildPlan(active, desired, statuses, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 4, MaxReplicas: 3}}); !errors.Is(err, fault.ErrUnsafeMembership) || !strings.Contains(err.Error(), "live quorum") {
+		t.Fatalf("replacement lost a survivor but was not refused: %+v, %v", plan, err)
+	}
 }
 
 func TestBuildPlanWholeGroupDeletionStopsEveryFormerHost(t *testing.T) {
@@ -272,7 +299,7 @@ func TestBuildPlanWholeGroupDeletionStopsEveryFormerHost(t *testing.T) {
 	})
 }
 
-func TestBuildPlanRefusesUnsafeDisjointReplacement(t *testing.T) {
+func TestBuildPlanPairsMultipleDisjointReplacements(t *testing.T) {
 	t.Parallel()
 	active := planDoc(1, 5, []string{"n1", "n2", "n3", "n4", "n5"}, shardOf("shard0", rep("n1", 1), rep("n2", 2), rep("n3", 3)))
 	active.Group("shard0").Placement = &PlacementRule{MinReplicas: 1, MaxReplicas: 3}
@@ -281,10 +308,27 @@ func TestBuildPlanRefusesUnsafeDisjointReplacement(t *testing.T) {
 	desired.Group("shard0").Replicas = []Replica{rep("n3", 3), rep("n4", 4), rep("n5", 5)}
 	desired.Group("shard0").NextReplicaID = 6
 	statuses := statusForDocument(active)
+	for id, status := range statuses {
+		status.HealthKnown = true
+		status.LiveVoters = map[uint64]bool{1: true, 2: true, 3: true}
+		statuses[id] = status
+	}
 
-	_, err := BuildPlan(active, desired, statuses, plannerRules())
-	if !errors.Is(err, fault.ErrUnsafeMembership) {
-		t.Fatalf("BuildPlan error = %v, want fault.ErrUnsafeMembership", err)
+	plan, err := BuildPlan(active, desired, statuses, plannerRules())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var promotions, removals int
+	for _, step := range plan.Steps {
+		switch step.Kind {
+		case StepPromoteVoter:
+			promotions++
+		case StepRemoveReplica:
+			removals++
+		}
+	}
+	if promotions != 2 || removals != 2 {
+		t.Fatalf("replacement did not complete both pairs: promotions=%d removals=%d", promotions, removals)
 	}
 }
 

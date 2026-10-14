@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vet all builds and lint unused code across each module's merged build matrix."""
+"""Vet all builds and lint style and unused code across merged build matrices."""
 
 import argparse
 import json
@@ -11,7 +11,10 @@ ROOT = Path(__file__).resolve().parents[1]
 MODULES = (
     (".", ("unit", "functional")),
     ("examples/cluster", ("unit", "functional")),
+    ("examples/scheduler", ("unit", "functional")),
+    ("examples/inmemory-cache", ("unit", "functional")),
     ("tests/cluster", ("unit", "functional", "clustertest", "example")),
+    ("scripts/revive", ("unit",)),
 )
 
 
@@ -19,23 +22,27 @@ def build_flags(variant):
     return [] if variant == "unit" else ["-tags=" + variant]
 
 
-def source_files(output):
+def source_files(output, include_tests=True):
     """Read Go's concatenated package JSON, including both kinds of tests."""
     decoder = json.JSONDecoder()
     files = set()
     while output.strip():
         package, end = decoder.raw_decode(output.lstrip())
         output = output.lstrip()[end:]
-        for key in ("GoFiles", "CgoFiles", "TestGoFiles", "XTestGoFiles"):
+        keys = ("GoFiles", "CgoFiles")
+        if include_tests:
+            keys += ("TestGoFiles", "XTestGoFiles")
+        for key in keys:
             for name in package.get(key, ()):
                 files.add(str(Path(package["Dir"]) / name))
     return files
 
 
-def lint_module(root, module, variants, revive, staticcheck):
+def lint_module(root, module, variants, revive, staticcheck, golangci=None):
     directory = root / module
     files = set()
     failed = False
+    production_variants = set()
     for variant in variants:
         flags = build_flags(variant)
         print(f"Lint {module}: vet {variant}", flush=True)
@@ -45,12 +52,23 @@ def lint_module(root, module, variants, revive, staticcheck):
             check=True, stdout=subprocess.PIPE, text=True,
         )
         files.update(source_files(packages.stdout))
-    # Revive's CLI does not expose build tags. Explicit source paths bypass its
-    # default go/build selection; these AST-only rules see every compiled variant.
+        production = frozenset(source_files(packages.stdout, include_tests=False))
+        if golangci and module != "tests/cluster" and production not in production_variants:
+            production_variants.add(production)
+            print(f"Lint {module}: golangci production {variant}", flush=True)
+            tags = [] if variant == "unit" else ["--build-tags=" + variant]
+            result = subprocess.run(
+                [golangci, "run", "--config", str(root / ".golangci.yml"),
+                 "--tests=false", "--timeout=5m", "--max-issues-per-linter=0",
+                 "--max-same-issues=0", "--uniq-by-line=false", *tags, "./..."],
+                cwd=directory,
+            )
+            failed |= result.returncode != 0
+    # The package-aware revive wrapper accepts explicit files, preserving package
+    # comments and cross-file type information across all compiled variants.
     print(f"Lint {module}: revive all selected source files", flush=True)
     result = subprocess.run(
-        [revive, "-config", str(root / "revive.toml"), "-set_exit_status",
-         "-formatter", "friendly", *sorted(files)], cwd=directory,
+        [revive, "-config", str(root / "revive.toml"), *sorted(files)], cwd=directory,
     )
     failed |= result.returncode != 0
     # U1000 merges variants so a shared helper used only by a functional or Docker
@@ -68,11 +86,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--revive", required=True)
     parser.add_argument("--staticcheck", required=True)
+    parser.add_argument("--golangci", required=True)
     args = parser.parse_args()
     revive, staticcheck = str(Path(args.revive).resolve()), str(Path(args.staticcheck).resolve())
+    golangci = str(Path(args.golangci).resolve())
     failed = False
     for module, variants in MODULES:
-        failed |= lint_module(ROOT, module, variants, revive, staticcheck)
+        failed |= lint_module(ROOT, module, variants, revive, staticcheck, golangci)
     return int(failed)
 
 

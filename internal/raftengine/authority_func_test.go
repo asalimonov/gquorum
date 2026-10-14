@@ -20,7 +20,8 @@ import (
 )
 
 func foundingAuthority() topology.AuthorityGrant {
-	a := topology.AuthorizedStep{OperatorID: topology.MakeOperatorID(1, 1), Version: 1, Attempt: 1, StepSeq: 1, GroupID: "load", Kind: topology.StepCreateFoundingGroup}
+	a := topology.AuthorizedStep{OperatorID: topology.MakeOperatorID(1, 1), Version: 1, Attempt: 1, StepSeq: 1, GroupID: "load", Kind: topology.StepCreateFoundingGroup,
+		ExpectedVotersDigest: topology.VoterSetDigest(nil), ResultVotersDigest: topology.VoterSetDigest([]uint64{1})}
 	return topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: "load", Revision: 10}, Purpose: topology.AuthorityEffect, OperatorID: a.OperatorID, Action: &a, Resources: []topology.AuthorityResource{{Kind: topology.AuthorityGroup, GroupID: "load"}, {Kind: topology.AuthorityHost, GroupID: "load", NodeName: "1"}}, Targets: []topology.AuthorityTarget{{NodeName: "1", MemberID: 7, ReplicaID: 1}}}
 }
 
@@ -28,9 +29,59 @@ func learnerAuthority(revision, replica uint64) topology.AuthorityGrant {
 	g := foundingAuthority()
 	g.Key.Revision = revision
 	g.Action.Kind, g.Action.NodeName, g.Action.ReplicaID = topology.StepAddLearner, "other", replica
+	g.Action.ExpectedVotersDigest, g.Action.ResultVotersDigest = topology.VoterSetDigest([]uint64{1}), topology.VoterSetDigest([]uint64{1})
 	g.Resources = g.Resources[:1]
 	g.Targets = append(g.Targets, topology.AuthorityTarget{NodeName: "other", MemberID: 8, ReplicaID: replica})
 	return g
+}
+
+func TestFoundingPeersMatchApprovedVoterProof(t *testing.T) {
+	t.Parallel()
+	initial := foundingAuthority()
+	opts := Options{GroupID: "load", NodeName: "1", ClusterID: "cluster", ReplicaID: 1, MemberID: 7,
+		InstanceID: "process", ManagedAuthority: true, Mode: Founding,
+		Peers: []raft.Peer{{ID: 1}}, InitialAuthority: &initial}
+	if err := validateAuthorityOptions(opts); err != nil {
+		t.Fatal(err)
+	}
+	forged := initial.Clone()
+	forged.Action.ResultVotersDigest = topology.VoterSetDigest([]uint64{2})
+	opts.InitialAuthority = &forged
+	if err := validateAuthorityOptions(opts); !errors.Is(err, fault.ErrInvalid) {
+		t.Fatalf("forged founding result accepted: %v", err)
+	}
+	opts.InitialAuthority = &initial
+	opts.Peers = []raft.Peer{{ID: 2}}
+	if err := validateAuthorityOptions(opts); !errors.Is(err, fault.ErrInvalid) {
+		t.Fatalf("unapproved founding peer accepted: %v", err)
+	}
+}
+
+func TestManagedMembershipRejectsNativeVoterProofDrift(t *testing.T) {
+	t.Parallel()
+	s := openStore(t, t.TempDir(), "1")
+	n := &network{nodes: make(map[uint64]*Group), disconnected: make(map[uint64]bool)}
+	initial := foundingAuthority()
+	g := newManagedTestGroup(t, s, &machine{}, n, &initial)
+	must(t, g.Start(t.Context()))
+	must(t, g.WaitReady(testContext(t)))
+	cc := raftpb.ConfChangeV2{Changes: []raftpb.ConfChangeSingle{{Type: raftpb.ConfChangeAddLearnerNode, NodeID: 2}}}
+	grant := learnerAuthority(20, 2)
+	grant.Action.ExpectedVotersDigest = topology.VoterSetDigest([]uint64{99})
+	installTestAuthority(t, g, grant)
+	if _, err := g.ProposeAuthorizedConfChange(testContext(t), grant, cc, g.Status().ConfState); !errors.Is(err, fault.ErrUnsafeMembership) {
+		t.Fatalf("forged predecessor reached Raft: %v", err)
+	}
+	grant.Key.Revision++
+	grant.Action.ExpectedVotersDigest = topology.VoterSetDigest([]uint64{1})
+	grant.Action.ResultVotersDigest = topology.VoterSetDigest([]uint64{1, 2})
+	installTestAuthority(t, g, grant)
+	if _, err := g.ProposeAuthorizedConfChange(testContext(t), grant, cc, g.Status().ConfState); !errors.Is(err, fault.ErrUnsafeMembership) {
+		t.Fatalf("forged result projection reached Raft: %v", err)
+	}
+	if slices.Contains(g.Status().ConfState.Learners, 2) {
+		t.Fatal("rejected proof changed native membership")
+	}
 }
 
 // A recovered stale ConfChangeV2 must be skipped without wedging the next valid
@@ -70,8 +121,8 @@ func TestRejectedManagedConfigurationAllowsLaterChange(t *testing.T) {
 			if got := slices.Contains(g.Status().ConfState.Learners, uint64(2)); got != consumed {
 				t.Fatal("stale entry changed membership", g.Status())
 			}
-			if _, found, err := g.AuthorityReceipt(testContext(t), installed.Key); err != nil || found != consumed {
-				t.Fatal(found, err)
+			if found, err := g.AuthorityReceipt(testContext(t), installed.Key); err != nil || found.Found != consumed {
+				t.Fatal(found.Found, err)
 			}
 			next := learnerAuthority(20, 3)
 			installTestAuthority(t, g, next)
@@ -90,10 +141,10 @@ func TestRejectedManagedConfigurationAllowsLaterChange(t *testing.T) {
 			if !slices.Contains(g.Status().ConfState.Learners, uint64(3)) {
 				t.Fatal("valid change was silently dropped")
 			}
-			again, found, err := g.AuthorityReceipt(testContext(t), next.Key)
+			again, err := g.AuthorityReceipt(testContext(t), next.Key)
 			must(t, err)
-			if !found || !reflect.DeepEqual(again, receipt) {
-				t.Fatal(again, receipt)
+			if !again.Found || !reflect.DeepEqual(again.Receipt, receipt) {
+				t.Fatal(again.Receipt, receipt)
 			}
 			must(t, g.Snapshot(testContext(t)))
 			must(t, g.Stop(testContext(t)))
@@ -101,10 +152,10 @@ func TestRejectedManagedConfigurationAllowsLaterChange(t *testing.T) {
 			must(t, restarted.Start(t.Context()))
 			must(t, restarted.WaitReady(testContext(t)))
 			eventually(t, restarted.IsLeader)
-			again, found, err = restarted.AuthorityReceipt(testContext(t), next.Key)
+			again, err = restarted.AuthorityReceipt(testContext(t), next.Key)
 			must(t, err)
-			if !found || !reflect.DeepEqual(again, receipt) {
-				t.Fatal("receipt lost on restart", again, receipt)
+			if !again.Found || !reflect.DeepEqual(again.Receipt, receipt) {
+				t.Fatal("receipt lost on restart", again.Receipt, receipt)
 			}
 		})
 	}
@@ -175,8 +226,8 @@ func TestManagedAuthorityDurableFloorAndRestart(t *testing.T) {
 	if _, err := g.InstallAuthority(testContext(t), changed); !errors.Is(err, fault.ErrAuthorityFenced) {
 		t.Fatal(err)
 	}
-	if _, found, err := g.AuthorityReceipt(testContext(t), fence.Key); err != nil || found {
-		t.Fatal(found, err)
+	if found, err := g.AuthorityReceipt(testContext(t), fence.Key); err != nil || found.Found {
+		t.Fatal(found.Found, err)
 	}
 	must(t, g.Snapshot(testContext(t)))
 	must(t, g.Stop(testContext(t)))
@@ -215,6 +266,7 @@ func TestManagedMembershipRechecksNativeSafety(t *testing.T) {
 	promote := grant.Clone()
 	promote.Key.Revision++
 	promote.Action.Kind = topology.StepPromoteVoter
+	promote.Action.ExpectedVotersDigest, promote.Action.ResultVotersDigest = topology.VoterSetDigest([]uint64{1}), topology.VoterSetDigest([]uint64{1, 2})
 	installTestAuthority(t, g, promote)
 	if _, err := g.ProposeAuthorizedConfChange(testContext(t), promote, wrong, g.Status().ConfState); !errors.Is(err, fault.ErrUnsafeMembership) {
 		t.Fatal("uncaught learner promoted", err)
@@ -222,6 +274,7 @@ func TestManagedMembershipRechecksNativeSafety(t *testing.T) {
 	remove := promote.Clone()
 	remove.Key.Revision++
 	remove.Action.Kind, remove.Action.NodeName, remove.Action.ReplicaID = topology.StepRemoveReplica, "1", 1
+	remove.Action.ExpectedVotersDigest, remove.Action.ResultVotersDigest = topology.VoterSetDigest([]uint64{1}), topology.VoterSetDigest(nil)
 	installTestAuthority(t, g, remove)
 	cc.Changes = []raftpb.ConfChangeSingle{{Type: raftpb.ConfChangeRemoveNode, NodeID: 1}}
 	if _, err := g.ProposeAuthorizedConfChange(testContext(t), remove, cc, g.Status().ConfState); !errors.Is(err, fault.ErrUnsafeMembership) {

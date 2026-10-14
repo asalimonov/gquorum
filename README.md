@@ -9,25 +9,49 @@ One replicated `_meta` group coordinates the cluster. Independent application
 Raft groups, called **load groups**, replicate your application commands and
 state. Each group has its own membership, leader, log and snapshots.
 
-## What you can build
+## Purpose of the library
 
-- **Long-running transaction processing systems:** replicate workflow state and
-  progress so processing can resume after a process restart or leader change.
-- **Data storage clusters:** distribute application-defined stores across
-  replicated groups with configurable placement and membership.
-- **Data stream processing systems:** replicate processing state and checkpoints
-  while your application supplies stream ingestion and processing logic.
-- **Durable storage services:** recover application state from full snapshots
-  and committed log entries using the included WAL backend or your own store.
-- **Distributed schedulers and locks:** coordinate workers through replicated
-  sessions and locks, and implement durable job state in application groups.
-- **Clusters with autoscaling features:** build controllers around node
-  admission, drain, removal and replica-placement APIs. Your application supplies
-  capacity decisions and infrastructure provisioning.
+The library was created for a service which has the following requirements:
 
-Application transaction boundaries, external side effects, outboxes and request
-deduplication remain application responsibilities. Consensus is per group;
-cross-group transactions require application coordination.
+- Strict consistency between nodes due to high number of parallel operations with
+  single budget and overspending is forbidden
+- Reduce issues with locks in OLTP database
+- Minimze risks of loosing user's requests
+- Horizonal scaling with keeping low latency for R/RW operations despite on
+  its architecture as single rank application cluster
+- Application should work with high SLI on a hardware without enterprise-grade
+  lossless network
+- Handle long lived transactions up to 30 minutes
+
+Use cases where the library shines:
+
+- Need to run a cluster without external coordinators and prevent split-brain
+  issues
+- You want to create/use durable queue with quorum commit w/o heavy dependencies
+- You need to implement `Strong Read-After-Write Consistency` for a storage
+- The application should guarantee QoS for resource heavy operations and support
+  scaling via partitioning of sharding
+- Need to create a distributed scheduler with at-least once gurantee of execution
+  of tasks
+- You have high volume of tansactions which tighly bind with each other and
+  regular SQL database cannot handle due to frequent locks on rows.
+- You need to implement automatic restoraion of nodes and automate update software,
+  maintenance and decomission of nodes without loosing of user's requests
+- You want to implement business transactions in native way with natural handling
+  of inperfections of real-world hardnware, software and operation processes
+
+Where the library can help with clustering but Raft is not suitale protocol
+for payaload: low latency caches, fire-and-forget queues, cheap broadcasts,
+RDMA-storages.
+
+Where it is not recommended: [AP systems](https://www.researchgate.net/publication/392020831_Architectural_Tradeoffs_in_CP_vs_AP_Systems_for_Global-Scale_Applications),
+pure in-memory cache, stateless applications and ephemeral disks.
+
+Performance of a single thread worker with single Raft group on 3-node cluster:
+
+- under 400us for a quorum write
+- under 450us for a quorum read (from any node)
+- above 2000 RPS
 
 ## Features
 
@@ -46,6 +70,11 @@ cross-group transactions require application coordination.
 - **Durable recovery:** bbolt-backed metadata, an included etcd WAL backend for
   load groups, full state-machine snapshots, committed-tail replay, compaction
   and snapshot catch-up.
+- **In-memory groups:** create a load group with
+  `GroupSpec{Storage: topology.StorageMemory}` to keep its Raft state in memory.
+  Writes still commit on a quorum. Memory cache has persist on a disk for
+  durability, but it easily achieves for a single Raft group 4000 RPS
+  and under 1mks for operation on mediocre hardware.
 - **Versioned topology administration:** compare-and-swap edits, previews,
   explicit approval, observable operator progress, document history, watches and
   rollback planning. `Latest`, `Target` and `Active` distinguish staged,
@@ -53,18 +82,22 @@ cross-group transactions require application coordination.
 - **Dynamic membership and placement:** founding and joining, caller-defined
   node types, cluster-wide and per-group placement rules, learner-first growth,
   guarded promotion, leadership transfer, drain, activation and exclusion.
+- **Label-aware placement:** exact node selectors, reservation of nodes from new
+  load replicas, learner-only nodes, and strict voter separation by a caller
+  label such as `az`. Placement reports explain excluded hosts and unsatisfied
+  groups before approval and in status.
 - **Identity-aware recovery and cleanup:** retained restarts, fresh-ID
   readmission and replica reseating, parking of missing or foreign storage,
   verified retirement, quarantine and configurable retention. Deleted group IDs
   are permanently retired.
-- **Stable learners and voter policies:** new groups default to three voters;
+- **Stable learners and voter configurations:** new groups default to three voters;
   additional eligible hosts hold promotable learners. Per-group replicated
-  policies control voter targets, failure/stability windows and switch cooldowns.
+  configuration controls voter targets, failure/stability windows and switch cooldowns.
   The default scheduler replaces persistently unhealthy voters with qualified
   learners, with independent authorization and live-quorum checks.
-- **Replaceable policies:** customize supported repair decisions through
-  `policy.Scheduler`, and startup readiness, retired-storage retention and
-  removal behavior through `policy.LifecyclePolicy`.
+- **Repair policies and lifecycle hooks:** customize supported repair decisions through
+  `scheduling.RepairPolicy`, and startup readiness, retired-storage retention and
+  removal behavior through `lifecycle.Hooks`.
 - **Sessions and distributed locks:** activate and renew process sessions,
   acquire application locks and inspect their locally observed holders.
 - **Bounded work and diagnostics:** proposal limits, bounded per-destination
@@ -75,62 +108,17 @@ cross-group transactions require application coordination.
   TLS configuration and cluster credentials.
 
 The default scheduler preserves healthy voter seats. Existing groups without a
-voter policy retain their legacy repair behavior until explicit policy adoption.
+voter configuration retain their legacy repair behavior until explicit
+configuration adoption.
 `topology.Limits` controls capacity and defaults to three nodes and five total
 replicas per load group. Seven-node all-host deployments explicitly configure
 both limits to at least seven. All admitted node types participate in `_meta`;
-placement rules select load hosts, and voter policy selects their voting roles.
+placement rules select load hosts, and voter configuration selects their voting roles.
 Infrastructure provisioning and automatic data partitioning remain application
-responsibilities.
-
-## Architecture and key interfaces
-
-`gquorum.Node` owns one participant, its private topology service and its local
-load replicas. `node.Cluster()` provides a stable administration view. Approved
-topology plans drive replica startup, membership changes and retirement. Supply
-an explicit `NodeOptions.StorageDir` for the fixed `_meta.bolt` and
-`_authority.bolt` system files. Retain this directory alongside the node identity
-and keep it outside application/load retirement roots. Configure application
-load storage separately through `Loads.Storage`.
-
-| API | Responsibility |
-| --- | --- |
-| `gquorum.Node` | Start, readiness, shutdown, local replicas, sessions and typed load-protocol receivers. |
-| `util.NewInstanceID()` | Generate a fresh process identity for `Identity.InstanceID` on every start, including retained restarts. |
-| `gquorum.Cluster` | Read and edit topology, preview and approve plans, follow operators, manage membership and acquire locks. |
-| `*load.Group` | Propose commands, confirm reads with `ReadBarrier`/`Read`, observe status and request snapshots for one exact local replica. |
-| `gquorum.GroupFactory` / `load.Application` | Open application resources for an exact approved replica and transfer their release to Node. |
-| `load.StateMachine` | Apply commands and implement complete `Snapshot` and `Restore` operations. |
-| `load.QueryMachine` | Optionally execute application queries serialized with `Apply` and `Restore`; write-only machines can omit it. |
-| `load.Transport` | Implement `SendRaft`, `ReadReplica`, `InstallFence` and `ApplyAction` in the application's authenticated protocol. |
-| `storage.Store` / `storage.RetirementStore` | Persist Raft state and collect verified retired storage; `storage/walstore` supplies the included implementation. |
-| `policy.Scheduler` / `policy.LifecyclePolicy` | Supply repair and lifecycle decisions while the library enforces authorization and membership safety. |
-
-`NewNode(NodeOptions)` validates settings without opening storage. `Start(ctx)`
-acquires resources and begins admission and recovery; `WaitReady(ctx)` waits for
-readiness. The context passed to `Start` owns the node lifetime. `Stop(ctx)` joins
-shutdown, including managed replicas and application callbacks.
-
-Applications provide identities, paths and listeners directly. For managed loads,
-they also provide a factory, transport and storage selection. Node owns replica
-orchestration; the application authenticates its protocol and implements its
-business state machine. `load.NewStandalone` is available for independent
-consensus with caller-owned lifecycle and authorization.
-
-See the [Raft overview](docs/architecture/raft.md) for consensus domains,
-elections, heartbeat protocols and durability. See the
-[cluster-building guide](docs/architecture/library.md) for integration
-contracts and the [ownership and recovery guide](docs/architecture/runtime.md)
-for lifecycle details. `Latest`, `Target`, `Active`, status and ordinary lock-holder
-reads are local observations. Use `Cluster.ReadTopology`, `ReadLockHolder` or
-`ReadAuthority` for authoritative metadata reads, and `Group.ReadBarrier` or
-`Group.Read` for quorum-confirmed application reads. `Read` requires the optional
-`load.QueryMachine` and runs its query serialized with application and restore.
-Forced recovery after permanent majority loss is not currently implemented.
-
-Nodes have readable string names (`Identity.NodeName`). Status reports the
-leader's name as `meta_leader_node_name` and `groups[].leader_node_name`,
-alongside the numeric Raft IDs `meta_leader_id` and `leader_id`.
+responsibilities. Resource measurement and resource-based placement decisions
+also belong to the application. See [labels and placement](docs/architecture/placement.md)
+for `GetLabels`/`SetLabels`, selector inheritance, safe relocation and the
+staging/approval workflow.
 
 ## Getting started
 
@@ -155,6 +143,36 @@ read the [test application](tests/cluster/testapp/README.md), which implements a
 key/value state machine, typed transport and application retirement using the
 public `Node` and `Cluster` APIs.
 
+The [replicated scheduler example](examples/scheduler/README.md) demonstrates a
+complete application: a leader schedules tasks, followers pull their committed
+assignments and execute them, and a SQLite/XORM state machine commits
+assignments and results through consensus. It uses `Cluster.EnsureGroup`,
+`StaticPeers`, managed application callbacks, leadership scopes with
+`Leadership.Replicas`, applied-index watches, `load.ProposeRetry`, and the
+reusable [load gRPC adapter](transport/loadgrpc/README.md); it has no
+application RPC.
+
+```sh
+make run-scheduler-example
+make test-scheduler-example
+make stop-scheduler-example
+```
+
+The [replicated in-memory cache example](examples/inmemory-cache/README.md)
+serves a subset of the Redis protocol from three nodes. Its state machine is an
+in-memory map bounded to 512 keys with deterministic eviction, and its group
+uses disk-backed Raft logs and snapshots: a restarted process replays its state
+under the same replica ID. The Compose demo skips load WAL/applied-state fsync
+for speed; host crashes or power loss can lose acknowledged writes. A separate load generator
+writes through one random node and reads from another with several workers.
+
+```sh
+make run-cache-example
+make test-cache-example
+docker compose -f examples/inmemory-cache/compose.yaml logs -f loadgen
+make clean-cache-example
+```
+
 ## Contributing
 
 Issues and pull requests are welcome. Describe the behavior you want to change
@@ -166,35 +184,19 @@ compatibility impact.
    map, ownership rules and safety invariants.
 2. Make a focused change with regression coverage appropriate to the behavior.
    Keep documentation and examples aligned with public API changes.
-3. Run the relevant checks and include their results in your pull request:
+3. Run all tests before sending of a request:
 
    ```sh
-   make test       # Compile all three modules and run fast, uncached units
-   make lint       # vet, dead-code and unused-code checks across modules
-   make test-race  # Fast unit checks under the race detector
+   make test          # Compile all four modules and run fast, uncached units
+   make lint          # vet, revive style and unused-code checks across modules
+   make test-race     # Fast unit checks under the race detector
+   make test-function # Isolated non-Docker functional and storage tests
+   make test-cluster  # Cluster tests
    ```
-
-Use `make test-function` for isolated non-Docker functional and storage tests,
-`make test-example` for the actual Compose demo and `make test-cluster` for Docker
-process tests. `make test-unit` and `make test-unit-race` are aliases for the fast
-checks. Functional tests stay beside their packages in `*_func_test.go` files
-with the `functional` build tag. Unit files use `!functional`, so the commands
-run separate suites. `make test-functional` remains an alias for `make test-function`.
-Multi-node scenarios run through the bounded Docker pool under `make test-cluster`;
-functional fixtures start at most one local participant. The process suite covers
-three-node quorum, faults, recovery and multiple load groups, targeted
-four-node admission and voter-swap regressions, five-node automatic learner
-promotion with retained return and cooldown, and seven-host capacity validation.
-Docker is required for the example and process suites. Protocol
-changes use `make generate` and `make proto-check`, which require `protoc` and
-install pinned Go generators.
 
 The [testing guide](docs/testing/tests.md) describes test boundaries and commands.
 Test targets require Python 3.9+ and save detailed results and Markdown Gantt
 timelines under `test-reports/<suite>/latest/`. Each run keeps its own directory.
 The [API validation record](docs/testing/api-refactor-validation.md) records the
 completed public API refactor checks. The [stable learner validation record](docs/testing/stable-learner-validation.md)
-maps voter policies, metrics, forwarding and recovery to their implementation and tests. Separate `examples/cluster` and
-`tests/cluster` Go modules keep CLI and Docker dependencies outside the library
-dependency graph. The example uses Kong for configuration and `net/http` for its
-HTTP adapter; see its README for module-local build and run commands.
+maps voter configurations, metrics, forwarding and recovery to their implementation and tests.

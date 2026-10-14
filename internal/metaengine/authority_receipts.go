@@ -29,25 +29,31 @@ func (m *Machine) EffectReceipts(ctx context.Context, grant topology.AuthorityGr
 	return result, nil
 }
 
+// RecordFenceProposal records exact resource fence installation evidence.
 type RecordFenceProposal struct {
 	Evidence   topology.FenceEvidence `json:"evidence"`
 	ProposalID string                 `json:"proposal_id"`
 }
+
+// RecordEffectProposal records durable consumption of an exact granted effect.
 type RecordEffectProposal struct {
 	Receipt    topology.EffectReceipt `json:"receipt"`
 	ProposalID string                 `json:"proposal_id"`
 }
 
 func sameFenceBoundary(a, b topology.FenceEvidence) bool {
-	if a.Key != b.Key || a.Resource != b.Resource || a.AppliedIndex != b.AppliedIndex || a.AppliedTerm != b.AppliedTerm || a.LocalSequence != b.LocalSequence {
+	if a.Key != b.Key || a.Resource != b.Resource || a.AppliedIndex != b.AppliedIndex ||
+		a.AppliedTerm != b.AppliedTerm || a.LocalSequence != b.LocalSequence {
 		return false
 	}
 	return a.Resource.Kind == topology.AuthorityGroup || a.Receiver.MemberID == b.Receiver.MemberID
 }
+
 func (sm *topologySM) applyRecordFence(p RecordFenceProposal) (ApplyResult, bool) {
 	r := sm.authority.records[p.Evidence.Key]
 	if r == nil || p.Evidence.Validate(r.Grant) != nil {
-		return rejectProposal(p.ProposalID, proposalAuthorization, "fence evidence does not identify its retained grant"), false
+		return rejectProposal(p.ProposalID, proposalAuthorization,
+			"fence evidence does not identify its retained grant"), false
 	}
 	for _, old := range r.Fences {
 		if old.Resource == p.Evidence.Resource {
@@ -57,42 +63,48 @@ func (sm *topologySM) applyRecordFence(p RecordFenceProposal) (ApplyResult, bool
 			return ApplyResult{ProposalID: p.ProposalID, Accepted: true}, false
 		}
 	}
-	for _, record := range sm.authority.records {
-		for _, old := range record.Fences {
-			if !orderedFenceBoundaries(old, p.Evidence) {
-				return rejectProposal(p.ProposalID, proposalAuthorization, "regressing fence boundary"), false
-			}
-		}
-		for _, receipt := range record.Effects {
-			if !receiptFitsFence(receipt, p.Evidence) {
-				return rejectProposal(p.ProposalID, proposalAuthorization, "fence contradicts recorded effect"), false
-			}
-		}
+	if reason := sm.authority.fenceEvidenceConflict(p.Evidence); reason != "" {
+		return rejectProposal(p.ProposalID, proposalAuthorization, "%s", reason), false
 	}
 	r.Fences = append(r.Fences, p.Evidence)
 	slices.SortFunc(r.Fences, func(a, b topology.FenceEvidence) int { return a.Resource.Compare(b.Resource) })
 	sm.authority.refreshRevocations()
 	return ApplyResult{ProposalID: p.ProposalID, Accepted: true}, true
 }
+
+func (a authorityCatalog) fenceEvidenceConflict(evidence topology.FenceEvidence) string {
+	for _, record := range a.records {
+		for _, old := range record.Fences {
+			if !orderedFenceBoundaries(old, evidence) {
+				return "regressing fence boundary"
+			}
+		}
+		for _, receipt := range record.Effects {
+			if !receiptFitsFence(receipt, evidence) {
+				return "fence contradicts recorded effect"
+			}
+		}
+	}
+	return ""
+}
+
 func (sm *topologySM) applyRecordEffect(p RecordEffectProposal) (ApplyResult, bool) {
 	r := sm.authority.records[p.Receipt.Key]
 	if r == nil || p.Receipt.Validate(r.Grant) != nil {
-		return rejectProposal(p.ProposalID, proposalAuthorization, "effect receipt does not identify its retained grant"), false
+		return rejectProposal(p.ProposalID, proposalAuthorization,
+			"effect receipt does not identify its retained grant"), false
 	}
 	for _, old := range r.Effects {
-		if old.Resource == p.Receipt.Resource && (old.Target == p.Receipt.Target || old.Resource.Kind == topology.AuthorityGroup) {
+		if old.Resource == p.Receipt.Resource && (old.Target == p.Receipt.Target ||
+			old.Resource.Kind == topology.AuthorityGroup) {
 			if !reflect.DeepEqual(old, p.Receipt) {
 				return rejectProposal(p.ProposalID, proposalAuthorization, "contradictory effect receipt"), false
 			}
 			return ApplyResult{ProposalID: p.ProposalID, Accepted: true}, false
 		}
 	}
-	for _, record := range sm.authority.records {
-		for _, fence := range record.Fences {
-			if !receiptFitsFence(p.Receipt, fence) {
-				return rejectProposal(p.ProposalID, proposalAuthorization, "effect contradicts installed authority"), false
-			}
-		}
+	if !sm.authority.receiptFitsInstalledFences(p.Receipt) {
+		return rejectProposal(p.ProposalID, proposalAuthorization, "effect contradicts installed authority"), false
 	}
 	r.Effects = append(r.Effects, p.Receipt.Clone())
 	slices.SortFunc(r.Effects, func(a, b topology.EffectReceipt) int {
@@ -105,6 +117,19 @@ func (sm *topologySM) applyRecordEffect(p RecordEffectProposal) (ApplyResult, bo
 	return ApplyResult{ProposalID: p.ProposalID, Accepted: true}, true
 }
 
+func (a authorityCatalog) receiptFitsInstalledFences(receipt topology.EffectReceipt) bool {
+	for _, record := range a.records {
+		for _, fence := range record.Fences {
+			if !receiptFitsFence(receipt, fence) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// PendingFences returns outstanding resource fence obligations from retained
+// revocations.
 func (m *Machine) PendingFences() []topology.FenceObligation {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -118,11 +143,14 @@ func (m *Machine) PendingFences() []topology.FenceObligation {
 	}
 	return pending
 }
+
+// AuthorityStatus reports retained revocation progress for an operator.
 func (m *Machine) AuthorityStatus(id topology.OperatorID) (topology.AuthorityStatus, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.authorityStatusLocked(id)
 }
+
 func (sm *topologySM) authorityStatusLocked(id topology.OperatorID) (topology.AuthorityStatus, error) {
 	r := sm.authority.revocations[id]
 	if r == nil {
@@ -131,5 +159,7 @@ func (sm *topologySM) authorityStatusLocked(id topology.OperatorID) (topology.Au
 		}
 		return topology.AuthorityStatus{OperatorID: id}, nil
 	}
-	return (topology.AuthorityStatus{OperatorID: id, RevocationRequested: r.Requested, RevocationComplete: r.Requested && revokedComplete(r), Obligations: r.Obligations}).Clone(), nil
+	return (topology.AuthorityStatus{OperatorID: id, RevocationRequested: r.Requested,
+		RevocationComplete: r.Requested &&
+			revokedComplete(r), Obligations: r.Obligations}).Clone(), nil
 }

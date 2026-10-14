@@ -96,11 +96,11 @@ func TestDeletionCatalogUsesDurablyCompletedCleanup(t *testing.T) {
 		Resources: []topology.AuthorityResource{{Kind: topology.AuthorityGroup, GroupID: "work"}, {Kind: topology.AuthorityHost, GroupID: "work", NodeName: "n1"}, {Kind: topology.AuthorityHost, GroupID: "work", NodeName: "n2"}},
 		Targets:   []topology.AuthorityTarget{{NodeName: "n1", MemberID: 1, ReplicaID: 1}, {NodeName: "n2", MemberID: 2, ReplicaID: 2}}}
 	sm.insertGrantLocked(oldGrant)
-	resources, targets, err := sm.grantResourcesLocked(a)
-	if err != nil || len(resources) != 1 || len(targets) != 1 || targets[0].NodeName != "n1" {
-		t.Fatal("historical grant resurrected retired host", resources, targets, err)
+	resources, err := sm.grantResourcesLocked(a)
+	if err != nil || len(resources.Resources) != 1 || len(resources.Targets) != 1 || resources.Targets[0].NodeName != "n1" {
+		t.Fatal("historical grant resurrected retired host", resources.Resources, resources.Targets, err)
 	}
-	deletion := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: "work", Revision: 20}, Purpose: topology.AuthorityEffect, OperatorID: current.ID, Action: &a, Resources: resources, Targets: targets}
+	deletion := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: "work", Revision: 20}, Purpose: topology.AuthorityEffect, OperatorID: current.ID, Action: &a, Resources: resources.Resources, Targets: resources.Targets}
 	sm.insertGrantLocked(deletion)
 	// The first attempt completed deletion but another group's step then failed.
 	// Retrying the version may reuse that durable completion proof.
@@ -116,8 +116,8 @@ func TestDeletionCatalogUsesDurablyCompletedCleanup(t *testing.T) {
 	if err != nil || len(ids) != 0 {
 		t.Fatal("verified whole-group deletion was repeated", ids, err)
 	}
-	resources, targets, err = sm.grantResourcesLocked(a)
-	if err != nil || len(resources) != 1 || !slices.Equal(targets, deletion.Targets) {
-		t.Fatal("retry did not preserve exact prior deletion targets", resources, targets, err)
+	resources, err = sm.grantResourcesLocked(a)
+	if err != nil || len(resources.Resources) != 1 || !slices.Equal(resources.Targets, deletion.Targets) {
+		t.Fatal("retry did not preserve exact prior deletion targets", resources.Resources, resources.Targets, err)
 	}
 }

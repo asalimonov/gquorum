@@ -12,7 +12,7 @@ import (
 
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/metrics"
-	"github.com/asalimonov/gquorum/policy"
+	schedulingapi "github.com/asalimonov/gquorum/scheduling"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3/raftpb"
 )
@@ -39,7 +39,7 @@ func TestEnablementHoldsSchedulerGateUntilVoterEvidenceReset(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	var release sync.Once
-	go func() { done <- r.SetEnabled(t.Context(), true) }()
+	go func() { done <- r.SetEnabled(t.Context(), Enablement{Enabled: true}) }()
 	defer func() { release.Do(func() { close(gate.release) }); <-done }()
 	select {
 	case <-gate.entered:
@@ -69,19 +69,26 @@ func TestEnablementHoldsSchedulerGateUntilVoterEvidenceReset(t *testing.T) {
 	}
 }
 
-func voterHostFixture(t *testing.T) (*testHost, *Driver) {
+func voterHostFixture(t *testing.T) (*testHost, *Scheduler) {
+	return voterHostFixtureWith(t, nil)
+}
+
+func voterHostFixtureWith(t *testing.T, configure func(*topology.Document)) (*testHost, *Scheduler) {
 	t.Helper()
 	limits := topology.Limits{MaxNodes: 5, MaxReplicas: 5}
 	h := &testHost{t: t, leader: true, limits: limits, machine: metaengine.NewMachine(topology.Rules{SchemaVersion: 1, Limits: limits}, nil), health: map[string]topology.Health{}, status: map[string]topology.GroupStatus{}}
 	doc := clusterDocument(false)
-	p := topology.DefaultVoterPolicy()
+	p := topology.DefaultVoterConfig()
 	g := doc.MetaGroup()
-	g.VoterPolicy = &p
+	g.VoterConfig = &p
 	g.NextReplicaID = 6
 	for i := 4; i <= 5; i++ {
 		name := fmt.Sprintf("n%d", i)
 		doc.Nodes = append(doc.Nodes, topology.Node{Name: name, Type: "worker", State: topology.NodeActive})
 		g.Replicas = append(g.Replicas, topology.Replica{NodeName: name, ReplicaID: uint64(i), Role: topology.ReplicaLearner})
+	}
+	if configure != nil {
+		configure(&doc)
 	}
 	observed := metrics.GroupObservation{GroupID: topology.MetaGroupID, LeaderID: 1, Term: 2, MembershipDigest: "membership", State: metrics.Current, TargetVoters: 3, NativeVoters: 3, EligibleStandbys: 2}
 	status := topology.GroupStatus{GroupID: topology.MetaGroupID, Found: true, LeaderID: 1, Term: 2, Commit: 10, Applied: 10, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}, Learners: []uint64{4, 5}}, HealthKnown: true, LiveVoters: map[uint64]bool{}, Progress: map[uint64]topology.ReplicaProgress{}}
@@ -112,7 +119,38 @@ func voterHostFixture(t *testing.T) (*testHost, *Driver) {
 	}
 	return h, driver
 }
-func TestDriverApprovesExactStableLearnerReplacement(t *testing.T) {
+
+func TestSchedulerSkipsSameAZCandidateAndRejectsCustomBypass(t *testing.T) {
+	t.Parallel()
+	configure := func(doc *topology.Document) {
+		doc.MetaGroup().VoterConfig.DistinctVoterLabel = "az"
+		for i, zone := range []string{"a", "b", "c", "b", "c"} {
+			doc.Nodes[i].Labels = map[string]string{"az": zone}
+		}
+	}
+	h, r := voterHostFixtureWith(t, configure)
+	if err := r.Tick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	target := h.machine.Target()
+	if h.commits != 1 || target.MetaGroup().Replicas[3].Role != topology.ReplicaLearner || target.MetaGroup().Replicas[4].Role != topology.ReplicaVoter {
+		t.Fatal("driver selected same-AZ learner or refused valid alternative", h.commits, target.MetaGroup().Replicas, r.Status())
+	}
+	h, r = voterHostFixtureWith(t, configure)
+	r.policy = schedulerFunc(func(context.Context, schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error) {
+		promote := topology.ReplicaKey{NodeName: "n4", ReplicaID: 4}
+		demote := topology.ReplicaKey{NodeName: "n3", ReplicaID: 3}
+		return schedulingapi.ScheduleDecision{Action: &schedulingapi.ScheduleAction{Kind: schedulingapi.ReconfigureVoters,
+			VoterChange: &topology.VoterChange{GroupID: topology.MetaGroupID, Promote: &promote, Demote: &demote}}}, nil
+	})
+	if err := r.Tick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if h.commits != 0 || h.machine.Target().Version != 1 {
+		t.Fatal("custom scheduler bypassed AZ placement", h.commits, r.Status())
+	}
+}
+func TestSchedulerApprovesExactStableLearnerReplacement(t *testing.T) {
 	t.Parallel()
 	h, r := voterHostFixture(t)
 	if err := r.Tick(t.Context()); err != nil {
@@ -121,7 +159,8 @@ func TestDriverApprovesExactStableLearnerReplacement(t *testing.T) {
 	if h.commits != 1 || h.approvals != 0 {
 		t.Fatalf("commits=%d approvals=%d status=%+v", h.commits, h.approvals, r.Status())
 	}
-	latest, target, active := h.machine.Views()
+	views := h.machine.Views()
+	latest, target, active := views.Latest, views.Target, views.Active
 	if latest.Version != 2 || target.Version != 2 || active.Version != 1 {
 		t.Fatalf("approval did not preserve convergence boundary: %d/%d/%d", latest.Version, target.Version, active.Version)
 	}
@@ -136,13 +175,13 @@ func TestDriverApprovesExactStableLearnerReplacement(t *testing.T) {
 		t.Fatal("approval fabricated completed switch record")
 	}
 }
-func TestDriverRevalidatesVoterEvidenceAndScopedCAS(t *testing.T) {
+func TestSchedulerRevalidatesVoterEvidenceAndScopedCAS(t *testing.T) {
 	t.Parallel()
 	for _, scenario := range []string{"callback staged intent", "callback stale learner", "callback lost quorum", "callback changed observer", "approval CAS race", "custom healthy rotation"} {
 		t.Run(scenario, func(t *testing.T) {
 			t.Parallel()
 			h, r := voterHostFixture(t)
-			builtin, _ := policy.NewRestoreDegraded(policy.RestoreDegradedOptions{})
+			builtin, _ := schedulingapi.NewDefaultRepairPolicy(schedulingapi.DefaultRepairOptions{})
 			stage := func() {
 				doc := h.machine.Latest()
 				version := doc.Version
@@ -151,7 +190,7 @@ func TestDriverRevalidatesVoterEvidenceAndScopedCAS(t *testing.T) {
 				doc.ChangedBy = "operator"
 				h.mustApply(metaengine.ProposeDocument{Doc: doc, ExpectedVersion: version})
 			}
-			r.policy = schedulerFunc(func(ctx context.Context, in policy.ScheduleInput) (policy.ScheduleDecision, error) {
+			r.policy = schedulerFunc(func(ctx context.Context, in schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error) {
 				decision, err := builtin.Schedule(ctx, in)
 				if err != nil {
 					return decision, err

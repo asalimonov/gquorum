@@ -8,7 +8,7 @@ import (
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
-	"github.com/asalimonov/gquorum/internal/scheduling"
+	internalscheduling "github.com/asalimonov/gquorum/internal/scheduling"
 	"github.com/asalimonov/gquorum/metrics"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -28,7 +28,7 @@ func (g *Group) SetSchedulingEnabled(ctx context.Context, enabled bool) error {
 	if err := g.ensureRunning(ctx); err != nil {
 		return err
 	}
-	return g.scheduler.SetEnabled(ctx, enabled)
+	return g.scheduler.SetEnabled(ctx, internalscheduling.Enablement{Enabled: enabled})
 }
 
 func (g *Group) recordScheduling(status topology.SchedulingStatus) {
@@ -36,28 +36,39 @@ func (g *Group) recordScheduling(status topology.SchedulingStatus) {
 		return
 	}
 	id := g.currentIdentity()
-	g.opts.Events.Publish(events.Event{At: status.Since, Type: events.SchedulingChanged, NodeName: id.NodeName, InstanceID: id.InstanceID, MemberID: id.MemberID, ClusterID: id.ClusterID, GroupID: topology.MetaGroupID, Code: status.Reason, State: string(status.State)})
+	g.opts.Events.Publish(events.Event{
+		At:         status.Since,
+		Type:       events.SchedulingChanged,
+		NodeName:   id.NodeName,
+		InstanceID: id.InstanceID,
+		MemberID:   id.MemberID,
+		ClusterID:  id.ClusterID,
+		GroupID:    topology.MetaGroupID,
+		Code:       status.Reason,
+		State:      string(status.State),
+	})
 }
 
 type schedulingHost struct{ g *Group }
 
-var _ scheduling.Host = schedulingHost{}
+var _ internalscheduling.Host = schedulingHost{}
 
-func (h schedulingHost) Views(ctx context.Context) (topology.Document, topology.Document, topology.Document, error) {
+func (h schedulingHost) Views(ctx context.Context) (topology.ReadView, error) {
 	if err := h.g.ensureRunning(ctx); err != nil {
-		return topology.Document{}, topology.Document{}, topology.Document{}, err
+		return topology.ReadView{}, err
 	}
-	latest, target, active := h.g.state().Views()
-	return latest, target, active, nil
+	return h.g.state().Views(), nil
 }
-func (h schedulingHost) CurrentOperator(ctx context.Context) (topology.Operator, bool, error) {
+
+func (h schedulingHost) CurrentOperator(ctx context.Context) (topology.OperatorLookup, error) {
 	if err := ctx.Err(); err != nil {
-		return topology.Operator{}, false, err
+		return topology.OperatorLookup{}, err
 	}
 	ex, exists := h.g.state().CurrentOperator()
-	return ex, exists, nil
+	return topology.OperatorLookup{Operator: ex, Found: exists}, nil
 }
 func (h schedulingHost) IsLeader() bool { return h.g.IsLeader() }
+
 func (h schedulingHost) Health(ctx context.Context) (map[string]topology.Health, error) {
 	if h.g.opts.Health != nil {
 		observed, err := h.g.opts.Health.Snapshot(ctx)
@@ -85,7 +96,9 @@ func (h schedulingHost) Health(ctx context.Context) (map[string]topology.Health,
 	}
 	return health, nil
 }
-func (h schedulingHost) GlobalStatus(ctx context.Context, active topology.Document) (map[string]topology.GroupStatus, error) {
+
+func (h schedulingHost) GlobalStatus(ctx context.Context,
+	active topology.Document) (map[string]topology.GroupStatus, error) {
 	observed, err := h.g.observeGroups(ctx, active, active)
 	if err != nil {
 		return nil, err
@@ -95,17 +108,27 @@ func (h schedulingHost) GlobalStatus(ctx context.Context, active topology.Docume
 	}
 	return observed, nil
 }
+
 func (h schedulingHost) PlanFor(ctx context.Context, doc topology.Document) (topology.Plan, error) {
 	return h.g.PlanFor(ctx, doc)
 }
+
 func (h schedulingHost) Approve(ctx context.Context, version uint64) (topology.OperatorID, error) {
 	return h.g.Apply(ctx, version)
 }
-func (h schedulingHost) CommitRepair(ctx context.Context, doc topology.Document, expected uint64, plan topology.Plan) (topology.OperatorID, error) {
+
+func (h schedulingHost) CommitRepair(ctx context.Context,
+	commit internalscheduling.RepairCommit) (topology.OperatorID, error) {
+	doc, expected, plan := commit.Document, commit.ExpectedVersion, commit.Plan
 	if !h.g.IsLeader() {
 		return "", fault.ErrNotLeader
 	}
-	result, err := h.g.propose(ctx, metaengine.CommitRepairOperatorProposal{Doc: doc, ExpectedVersion: expected, Plan: plan, At: time.Now().UTC()})
+	result, err := h.g.propose(ctx, metaengine.CommitRepairOperatorProposal{
+		Doc:             doc,
+		ExpectedVersion: expected,
+		Plan:            plan,
+		At:              time.Now().UTC(),
+	})
 	return result.OperatorID, err
 }
 func (h schedulingHost) WakeOperator() { h.g.controller.Signal() }
@@ -114,7 +137,10 @@ func (h schedulingHost) Observations() metrics.ClusterSnapshot { return h.g.Metr
 func (h schedulingHost) VoterSwitches() []topology.VoterSwitchState {
 	return h.g.state().VoterSwitches()
 }
-func (h schedulingHost) CommitVoterChange(ctx context.Context, change topology.VoterChange, doc topology.Document, expected uint64, plan topology.Plan) (topology.OperatorID, error) {
+
+func (h schedulingHost) CommitVoterChange(ctx context.Context, change topology.VoterChange,
+	commit internalscheduling.RepairCommit) (topology.OperatorID, error) {
+	doc, expected, plan := commit.Document, commit.ExpectedVersion, commit.Plan
 	if !h.g.IsLeader() {
 		return "", fault.ErrNotLeader
 	}
@@ -122,7 +148,13 @@ func (h schedulingHost) CommitVoterChange(ctx context.Context, change topology.V
 	if group == nil {
 		return "", fault.ErrInvalid
 	}
-	result, err := h.g.propose(ctx, metaengine.CommitVoterChangeProposal{Change: change.Clone(), Doc: doc, ExpectedVersion: expected, Plan: plan, At: group.UpdatedAt})
+	result, err := h.g.propose(ctx, metaengine.CommitVoterChangeProposal{
+		Change:          change.Clone(),
+		Doc:             doc,
+		ExpectedVersion: expected,
+		Plan:            plan,
+		At:              group.UpdatedAt,
+	})
 	return result.OperatorID, err
 }
 

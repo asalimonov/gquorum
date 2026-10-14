@@ -40,7 +40,7 @@ func TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn(t *testing.T)
 	}
 	for _, id := range []string{topology.MetaGroupID, "work"} {
 		g := created.Document.Group(id)
-		if g == nil || len(g.Replicas) != 5 || len(created.Document.VotersOf(id)) != 3 || g.VoterPolicy == nil {
+		if g == nil || len(g.Replicas) != 5 || len(created.Document.VotersOf(id)) != 3 || g.VoterConfig == nil {
 			t.Fatalf("wrong default %s: %+v", id, g)
 		}
 	}
@@ -149,7 +149,7 @@ func TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn(t *testing.T)
 		t.Fatal("automatic replacement did not converge", err)
 	}
 	// The collector exposes cooldowns derived from verified replicated role
-	// records, never from merely proposed policy changes.
+	// records, never from merely proposed voter configuration changes.
 
 	if err := Poll(ctx, func() (bool, error) {
 		snapshot, err := clusterMetrics(ctx, c, collector)
@@ -196,8 +196,7 @@ func TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn(t *testing.T)
 	// Align leaders before rebuilding the remaining standby's window. This lets
 	// the same observer see a healthy voter after the first durable switch and
 	// then its new failure, without an observer failover rearming all evidence.
-	response, err = c.Request(ctx, collector, "POST", "/api/groups/work/leader/"+collector, nil, 0)
-	if err := requireStatus(response, err, 200); err != nil {
+	if err := requestLeaderTransfer(ctx, c, collector, "work", collector); err != nil {
 		t.Fatal(err)
 	}
 	standbys := map[string]topology.ReplicaKey{}
@@ -224,7 +223,7 @@ func TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn(t *testing.T)
 			qualified, suppressed := false, false
 			for _, r := range group.Replicas {
 				if r.Sample.Identity.NodeName == candidate.NodeName && r.Sample.Identity.ReplicaID == candidate.ReplicaID {
-					qualified = r.Evidence.StandbyReadyFor.State == metrics.Current && r.Evidence.StandbyReadyFor.Value >= converged.Group(group.GroupID).VoterPolicy.StandbyWindow
+					qualified = r.Evidence.StandbyReadyFor.State == metrics.Current && r.Evidence.StandbyReadyFor.Value >= converged.Group(group.GroupID).VoterConfig.StandbyWindow
 				}
 				if r.Sample.Identity.NodeName == victim {
 					suppressed = r.Evidence.DemotionCooldownRemaining > 0

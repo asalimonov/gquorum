@@ -33,7 +33,7 @@ func TestDurableLedgerSurvivesParkedRestartAndExactRetirement(t *testing.T) {
 	record := metastore.ReplicaRecord{NodeName: f.node.NodeName, ClusterID: f.node.ClusterID, ReplicaID: 7, Origin: "fresh", CreatedAt: time.Unix(100, 0).UTC()}
 	must(t, db.RecordReplica("work", record))
 	f.setScope("work", 7, false, true)
-	f.cfg.LookupRecord = func(_ context.Context, group string) (metastore.ReplicaRecord, bool, error) {
+	f.cfg.LookupRecord = func(_ context.Context, group string) (metastore.ReplicaLookup, error) {
 		return db.LookupReplica(group)
 	}
 	f.cfg.ForgetGrantedReplica = func(ctx context.Context, grant topology.AuthorityGrant, id uint64) error {
@@ -51,9 +51,9 @@ func TestDurableLedgerSurvivesParkedRestartAndExactRetirement(t *testing.T) {
 		if !errors.As(err, &parked) || parked.Reason != ParkStoreMissing {
 			t.Fatal(err)
 		}
-		got, found, err := db.LookupReplica("work")
-		if err != nil || !found || got != record {
-			t.Fatal("parking rewrote full durable evidence", got, found, err)
+		got, err := db.LookupReplica("work")
+		if err != nil || !got.Found || got.Record != record {
+			t.Fatal("parking rewrote full durable evidence", got.Record, got.Found, err)
 		}
 		must(t, host.Stop(t.Context()))
 		must(t, db.Close())
@@ -71,8 +71,8 @@ func TestDurableLedgerSurvivesParkedRestartAndExactRetirement(t *testing.T) {
 	if len(result.Receipts) != 1 {
 		t.Fatal(result)
 	}
-	if _, found, err := db.LookupReplica("work"); err != nil || found {
-		t.Fatal("retirement retained ledger", found, err)
+	if found, err := db.LookupReplica("work"); err != nil || found.Found {
+		t.Fatal("retirement retained ledger", found.Found, err)
 	}
 	successor := record
 	successor.ReplicaID = 8
@@ -81,9 +81,9 @@ func TestDurableLedgerSurvivesParkedRestartAndExactRetirement(t *testing.T) {
 	if err := db.ForgetReplica("work", 7); !errors.Is(err, fault.ErrIdentityMismatch) {
 		t.Fatal("old cleanup forgot successor", err)
 	}
-	got, found, err := db.LookupReplica("work")
-	if err != nil || !found || got != successor {
-		t.Fatal(got, found, err)
+	got, err := db.LookupReplica("work")
+	if err != nil || !got.Found || got.Record != successor {
+		t.Fatal(got.Record, got.Found, err)
 	}
 	must(t, host.Stop(t.Context()))
 }

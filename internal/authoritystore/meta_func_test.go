@@ -40,7 +40,7 @@ func TestMetadataAcquisitionSurvivesRestartAndExactRebindRetry(t *testing.T) {
 	}
 	granted.InstanceID = "restarted"
 	var err error
-	s, err = Open(path, granted, false)
+	s, err = Open(path, granted, RetainedEvidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestMetadataAcquisitionSurvivesRestartAndExactRebindRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	granted.InstanceID = "restarted-again"
-	s, err = Open(path, granted, false)
+	s, err = Open(path, granted, RetainedEvidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestMetadataAcquisitionRejectsForeignMarkerOnOpen(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if reopened, err := Open(path, localIdentity(), false); !errors.Is(err, fault.ErrUnreadable) {
+	if reopened, err := Open(path, localIdentity(), RetainedEvidence); !errors.Is(err, fault.ErrUnreadable) {
 		if reopened != nil {
 			reopened.Close()
 		}

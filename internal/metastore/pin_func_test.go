@@ -58,10 +58,10 @@ func TestIdentityPinRejectsEveryPartialOrMalformedFieldWithoutRepair(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, _, err := LoadIdentity(s.path); !errors.Is(err, fault.ErrUnreadable) {
+			if _, err := LoadIdentity(s.path); !errors.Is(err, fault.ErrUnreadable) {
 				t.Fatal("corrupt pin loaded", err)
 			}
-			if _, _, err := PeekLocalLineage(s.path); !errors.Is(err, fault.ErrUnreadable) {
+			if _, err := PeekLocalLineage(s.path); !errors.Is(err, fault.ErrUnreadable) {
 				t.Fatal("corrupt lineage accepted", err)
 			}
 			after, err := os.ReadFile(s.path)
@@ -129,7 +129,7 @@ func TestMetaSchemaProbeRefusesIncompleteAndUnversionedStores(t *testing.T) {
 			if err := s.Close(); err != nil {
 				t.Fatal(err)
 			}
-			if _, _, err := LoadIdentity(s.path); !errors.Is(err, tc.want) {
+			if _, err := LoadIdentity(s.path); !errors.Is(err, tc.want) {
 				t.Fatal(err)
 			}
 			if fresh, err := StoreIsFresh(s.path); fresh || !errors.Is(err, tc.want) {

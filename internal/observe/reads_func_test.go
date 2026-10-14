@@ -44,7 +44,7 @@ func TestMetricsReadOutcomesRequireActualDispatch(t *testing.T) {
 			return Probe{}, tc.err
 		}}
 	}
-	probes, _ := CollectReads(t.Context(), pool, reads, 0, 2, time.Second)
+	probes, _ := CollectReads(t.Context(), pool, reads, ReadOptions{Parallel: 2, MaxAge: time.Second})
 	for i, probe := range probes {
 		if probe.Reachability != cases[i].want || probe.Dispatched != cases[i].dispatch {
 			t.Fatalf("%s: %+v", cases[i].name, probe)
@@ -73,7 +73,7 @@ func TestMetricsPartialRoundKeepsUnknownUndispatchedAndOwnsLateRead(t *testing.T
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
-	probes, next := CollectReads(ctx, pool, reads, 0, 1, time.Second)
+	probes, next := CollectReads(ctx, pool, reads, ReadOptions{Parallel: 1, MaxAge: time.Second})
 	if probes[0].Reachability != "unreachable" || !probes[0].Dispatched || probes[1].Reachability != "unknown" || probes[1].Dispatched || next != 1 {
 		t.Fatalf("partial round %v cursor %d", probes, next)
 	}

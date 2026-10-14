@@ -12,13 +12,18 @@ import (
 
 func localAction(kind topology.StepKind) bool {
 	switch kind {
-	case topology.StepCreateFoundingGroup, topology.StepPrepareReplica, topology.StepStopReplica, topology.StepCleanupReplicaState, topology.StepDeleteGroupState:
+	case topology.StepCreateFoundingGroup,
+		topology.StepPrepareReplica,
+		topology.StepStopReplica,
+		topology.StepCleanupReplicaState,
+		topology.StepDeleteGroupState:
 		return true
 	default:
 		return false
 	}
 }
 
+// ApplyAction validates and dispatches an exact granted load effect.
 func (h *Host) ApplyAction(ctx context.Context, req load.ActionRequest) (load.ActionResult, error) {
 	return h.applyGrantedAction(ctx, req)
 }
@@ -59,56 +64,12 @@ func consensusEffectPresent(status topology.GroupStatus, a topology.AuthorizedSt
 func (h *Host) verifyLocalEffect(ctx context.Context, req load.ActionRequest) error {
 	a := req.Authorization
 	switch a.Kind {
-	case topology.StepStopReplica, topology.StepCleanupReplicaState, topology.StepDeleteGroupState:
-		h.mu.Lock()
-		slot := h.slots[a.GroupID]
-		live := slot != nil && !slot.released
-		h.mu.Unlock()
-		if live {
-			if slot.identity == req.LocalTarget {
-				return fault.ErrReplicaNotReady
-			}
-			if err := h.otherIdentityAllowed(ctx, a, req.LocalTarget, slot.identity, req.Grant); err != nil {
-				return err
-			}
-		}
-		if a.Kind == topology.StepStopReplica {
-			return nil
-		}
-		probe, err := h.cfg.Store.Probe(ctx, a.GroupID)
-		if err != nil {
-			return err
-		}
-		if probe.Exists {
-			if probe.Identity == req.LocalTarget {
-				return fault.ErrReplicaNotReady
-			}
-			if err := h.otherIdentityAllowed(ctx, a, req.LocalTarget, probe.Identity, req.Grant); err != nil {
-				return err
-			}
-		}
-		return nil
+	case topology.StepStopReplica,
+		topology.StepCleanupReplicaState,
+		topology.StepDeleteGroupState:
+		return h.verifyRetiredEffect(ctx, req)
 	case topology.StepCreateFoundingGroup:
-		core, err := h.actionCore(req)
-		if err != nil {
-			return err
-		}
-		targets, err := actionTargets(ctx, a, req.Grant)
-		if err != nil {
-			return err
-		}
-		want := make([]uint64, 0, len(targets))
-		for _, id := range targets {
-			want = append(want, id.ReplicaID)
-		}
-		slices.Sort(want)
-		cs := core.Status().ConfState
-		got := slices.Clone(cs.Voters)
-		slices.Sort(got)
-		if !slices.Equal(got, want) || len(cs.Learners)+len(cs.VotersOutgoing)+len(cs.LearnersNext) != 0 || cs.AutoLeave {
-			return fault.ErrIdentityMismatch
-		}
-		return nil
+		return h.verifyFoundingEffect(ctx, req)
 	case topology.StepPrepareReplica:
 		_, err := h.actionCore(req)
 		return err
@@ -122,4 +83,64 @@ func (h *Host) verifyLocalEffect(ctx context.Context, req load.ActionRequest) er
 		}
 		return nil
 	}
+}
+
+func (h *Host) verifyRetiredEffect(ctx context.Context, req load.ActionRequest) error {
+	a := req.Authorization
+	h.mu.Lock()
+	slot := h.slots[a.GroupID]
+	live := slot != nil && !slot.released
+	h.mu.Unlock()
+	if live {
+		if slot.identity == req.LocalTarget {
+			return fault.ErrReplicaNotReady
+		}
+		identities := retirementIdentities{req.LocalTarget, slot.identity}
+		if err := h.otherIdentityAllowed(ctx, a, identities, req.Grant); err != nil {
+			return err
+		}
+	}
+	if a.Kind == topology.StepStopReplica {
+		return nil
+	}
+	located, err := h.locate(ctx, a.GroupID)
+	probe := located.Probe
+	if err != nil {
+		return err
+	}
+	if probe.Exists {
+		if probe.Identity == req.LocalTarget {
+			return fault.ErrReplicaNotReady
+		}
+		identities := retirementIdentities{req.LocalTarget, probe.Identity}
+		if err := h.otherIdentityAllowed(ctx, a, identities, req.Grant); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (h *Host) verifyFoundingEffect(ctx context.Context, req load.ActionRequest) error {
+	a := req.Authorization
+	core, err := h.actionCore(req)
+	if err != nil {
+		return err
+	}
+	targets, err := actionTargets(ctx, a, req.Grant)
+	if err != nil {
+		return err
+	}
+	want := make([]uint64, 0, len(targets))
+	for _, id := range targets {
+		want = append(want, id.ReplicaID)
+	}
+	slices.Sort(want)
+	cs := core.Status().ConfState
+	got := slices.Clone(cs.Voters)
+	slices.Sort(got)
+	if len(cs.Learners)+len(cs.VotersOutgoing)+len(cs.LearnersNext) != 0 || cs.AutoLeave ||
+		!slices.Equal(got, want) {
+		return fault.ErrIdentityMismatch
+	}
+	return nil
 }

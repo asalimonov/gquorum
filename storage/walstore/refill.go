@@ -29,7 +29,8 @@ func (s *Store) refill(wdir string, groupStop <-chan struct{}) {
 		for _, n := range []int{0, 1} {
 			if _, err := os.Stat(filepath.Join(wdir, fmt.Sprintf("%d.tmp", n))); errors.Is(err, os.ErrNotExist) {
 				if err := prewriteTmp(wdir, n); err != nil {
-					s.logger.Warn("WAL prewrite failed", "path", filepath.Join(wdir, fmt.Sprintf("%d.tmp", n)), "error", err)
+					s.logger.Warn("WAL prewrite failed", "path", filepath.Join(wdir,
+						fmt.Sprintf("%d.tmp", n)), "error", err)
 				}
 			}
 		}

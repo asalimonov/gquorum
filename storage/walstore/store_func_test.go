@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -18,7 +19,10 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/storage/storagetest"
+	"go.etcd.io/etcd/server/v3/storage/wal"
+	"go.etcd.io/etcd/server/v3/storage/wal/walpb"
 	"go.etcd.io/raft/v3/raftpb"
+	"go.uber.org/zap"
 )
 
 const testSegmentBytes = 32 << 10
@@ -535,4 +539,70 @@ func TestWalStore_ConcurrentWriters(t *testing.T) {
 	if r := loadTest(t, s); !reflect.DeepEqual(r.Entries, write.Entries) {
 		t.Fatalf("concurrent idempotent writes: %+v", r.Entries)
 	}
+}
+
+// Snapshot and Compact use the in-memory marker cache instead of rescanning the
+// WAL. Across many cycles and segment cuts the cache must keep agreeing with a
+// fresh scan, old segments must go, and a reopened store must recover the
+// newest snapshot and keep working from markers rebuilt at open.
+func TestWalStore_SnapshotMarkerCacheAcrossCyclesAndReopen(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	root := t.TempDir()
+	wdir := filepath.Join(root, "group", WALDir)
+	var index uint64
+	cycle := func(s *Store) raftpb.Snapshot {
+		t.Helper()
+		for range 10 {
+			var entries []raftpb.Entry
+			for range 20 {
+				index++
+				entries = append(entries, raftpb.Entry{Index: index, Term: 1, Data: make([]byte, 500)})
+			}
+			check(t, s.SaveReady(ctx, "group", storage.ReadyWrite{Entries: entries, HardState: raftpb.HardState{Term: 1, Vote: 7, Commit: index}}))
+		}
+		ss := storagetest.Snapshot(index, 1)
+		check(t, s.SaveSnapshot(ctx, "group", ss))
+		check(t, s.Compact(ctx, "group", index))
+		onDisk, err := wal.ValidSnapshotEntries(zap.NewNop(), wdir)
+		check(t, err)
+		g := s.groups["group"]
+		g.mu.Lock()
+		cached := slices.Clone(g.markers)
+		g.mu.Unlock()
+		for _, m := range cached {
+			if !slices.ContainsFunc(onDisk, func(d walpb.Snapshot) bool { return d.Index == m.Index && d.Term == m.Term }) {
+				t.Fatalf("cached marker %d is not durable on disk", m.Index)
+			}
+		}
+		if len(cached) == 0 || cached[len(cached)-1].Index != index {
+			t.Fatalf("newest marker missing from cache: %+v", cached)
+		}
+		return ss
+	}
+	s := boundTest(t, root, false)
+	var last raftpb.Snapshot
+	for range 12 {
+		last = cycle(s)
+	}
+	segments, err := segmentNames(wdir)
+	check(t, err)
+	snaps, err := snapshotNames(filepath.Join(root, "group", SnapDir))
+	check(t, err)
+	if len(segments) > 6 || len(snaps) != 2 {
+		t.Fatalf("retention not bounded: %d segments, %d snapshots after %d entries", len(segments), len(snaps), index)
+	}
+	check(t, s.Close())
+	s = boundTest(t, root, false)
+	r := loadTest(t, s)
+	if !reflect.DeepEqual(r.Snapshot, last) || len(r.Entries) != 0 || r.HardState.Commit != index {
+		t.Fatalf("recovery: snapshot=%+v entries=%d hs=%+v", r.Snapshot.Metadata, len(r.Entries), r.HardState)
+	}
+	last = cycle(s)
+	check(t, s.Close())
+	s = boundTest(t, root, false)
+	if r := loadTest(t, s); !reflect.DeepEqual(r.Snapshot, last) {
+		t.Fatalf("snapshot after reopen not recovered: %+v", r.Snapshot.Metadata)
+	}
+	check(t, s.Close())
 }

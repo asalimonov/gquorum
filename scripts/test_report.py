@@ -204,7 +204,8 @@ class Run:
     def package(self, module, name, now):
         key = (module, name)
         if key not in self.packages:
-            prefix = MODULE if module == "library" else MODULE + "/" + module.replace("-", "/")
+            # Report labels are "<dir>-<module>"; only the first hyphen separates them.
+            prefix = MODULE if module == "library" else MODULE + "/" + module.replace("-", "/", 1)
             short = name.removeprefix(prefix).strip("/") or "root"
             slug = re.sub(r"[^a-zA-Z0-9_.-]+", "-", short).strip("-") or "root"
             stem = module + "-" + slug
@@ -433,6 +434,8 @@ def commands(options, extra):
         return [("tests-cluster", ["go", "-C", "tests/cluster", "test", *flags, *extra, "."])]
     return [("library", ["go", "test", *flags, *extra, "./..."]),
             ("examples-cluster", ["go", "-C", "examples/cluster", "test", *flags, *extra, "./..."]),
+            ("examples-scheduler", ["go", "-C", "examples/scheduler", "test", *flags, *extra, "./..."]),
+            ("examples-inmemory-cache", ["go", "-C", "examples/inmemory-cache", "test", *flags, *extra, "./..."]),
             ("tests-cluster", ["go", "-C", "tests/cluster", "test", *flags, *extra, "./testapp/..."])]
 
 
