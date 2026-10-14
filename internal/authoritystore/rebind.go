@@ -15,10 +15,11 @@ type rebindRecord struct {
 	AdmissionID string      `json:"admission_id"`
 }
 
-// VerifyRebind checks retained transition proof without mutating either identity
-// or acquisition evidence. Receipts alone do not prove which successor was bound.
+// VerifyRebind checks retained transition proof without mutating either
+// identity or acquisition evidence. Receipts alone do not prove which successor
+// was bound.
 func (s *Store) VerifyRebind(ctx context.Context, previous, granted topology.Identity, admissionID string) error {
-	return s.transaction(ctx, false, func(tx *bolt.Tx) error {
+	return s.readTransaction(ctx, func(tx *bolt.Tx) error {
 		if granted != s.identity {
 			return fault.ErrIdentityMismatch
 		}
@@ -43,7 +44,9 @@ func (s *Store) Rebind(ctx context.Context, previous, granted topology.Identity,
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if !validIdentity(previous) || !validIdentity(granted) || previous.ClusterID != granted.ClusterID || previous.NodeName != granted.NodeName || granted.MemberID <= previous.MemberID || strings.TrimSpace(admissionID) == "" {
+	if previous.ClusterID != granted.ClusterID || previous.NodeName != granted.NodeName ||
+		granted.MemberID <= previous.MemberID || !validIdentity(previous) || !validIdentity(granted) ||
+		strings.TrimSpace(admissionID) == "" {
 		return fault.ErrInvalid
 	}
 	s.mu.Lock()
@@ -53,37 +56,41 @@ func (s *Store) Rebind(ctx context.Context, previous, granted topology.Identity,
 	}
 	proof := rebindRecord{pin(previous), pin(granted), admissionID}
 	err := s.db.Update(func(tx *bolt.Tx) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		b := tx.Bucket([]byte("identity"))
-		var current identityPin
-		if err := decode(b.Get([]byte("current")), &current); err != nil {
-			return err
-		}
-		if current == pin(granted) {
-			var recorded rebindRecord
-			if err := decode(b.Get([]byte("readmission")), &recorded); err != nil {
-				return err
-			}
-			if recorded != proof {
-				return fault.ErrIdentityMismatch
-			}
-			return nil
-		}
-		if current != pin(previous) {
-			return fault.ErrIdentityMismatch
-		}
-		if err := put(b, []byte("readmission"), proof); err != nil {
-			return err
-		}
-		if err := b.Delete([]byte("metadata_acquired")); err != nil {
-			return err
-		}
-		return put(b, []byte("current"), pin(granted))
+		return rebindIdentity(ctx, tx, proof)
 	})
 	if err == nil {
 		s.identity = granted
 	}
 	return err
+}
+
+func rebindIdentity(ctx context.Context, tx *bolt.Tx, proof rebindRecord) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	b := tx.Bucket([]byte("identity"))
+	var current identityPin
+	if err := decode(b.Get([]byte("current")), &current); err != nil {
+		return err
+	}
+	if current == proof.Granted {
+		var recorded rebindRecord
+		if err := decode(b.Get([]byte("readmission")), &recorded); err != nil {
+			return err
+		}
+		if recorded != proof {
+			return fault.ErrIdentityMismatch
+		}
+		return nil
+	}
+	if current != proof.Previous {
+		return fault.ErrIdentityMismatch
+	}
+	if err := put(b, []byte("readmission"), proof); err != nil {
+		return err
+	}
+	if err := b.Delete([]byte("metadata_acquired")); err != nil {
+		return err
+	}
+	return put(b, []byte("current"), proof.Granted)
 }

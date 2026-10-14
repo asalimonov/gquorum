@@ -16,7 +16,7 @@ import (
 	"github.com/moby/moby/client"
 )
 
-func assertDrained(t *testing.T, ctx context.Context, c *Cluster, name, group string, version uint64) {
+func assertDrained(ctx context.Context, t *testing.T, c *Cluster, name, group string, version uint64) {
 	t.Helper()
 	for _, node := range c.Nodes() {
 		doc, err := c.Document(ctx, node.Spec.Name, "active")
@@ -69,7 +69,7 @@ func TestDrainViaNonLeaderPreservesMetaMembership(t *testing.T) {
 	if err != nil || drained.OperatorID == "" {
 		t.Fatal("follower did not forward both stage and apply", drained, err)
 	}
-	assertDrained(t, ctx, c, "node3", "work", drained.Document.Version)
+	assertDrained(ctx, t, c, "node3", "work", drained.Document.Version)
 	status, err := c.Status(ctx, "node3")
 	if err != nil || status.MetaLeaderID != created.Document.MemberID("node1") {
 		t.Fatal("issuer became leader instead of forwarding", status, err)
@@ -176,7 +176,7 @@ func TestDrainApprovalChecksObservedActualMetaQuorum(t *testing.T) {
 	if _, err := c.Approve(ctx, "node2", staged.Document.Version); err != nil {
 		t.Fatal("safe retained-voter recovery could not apply original staged version", err)
 	}
-	assertDrained(t, ctx, c, "node2", "work", staged.Document.Version)
+	assertDrained(ctx, t, c, "node2", "work", staged.Document.Version)
 }
 
 func TestForceRetireDeadNodePreservesSafetyThreeNodes(t *testing.T) {

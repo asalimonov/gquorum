@@ -12,14 +12,14 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func TestPolicyAdoptionPreservesIntentAndExactPins(t *testing.T) {
+func TestVoterConfigAdoptionPreservesIntentAndExactPins(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
 	old := f.g.state().Latest()
 	old.Group("work").Replicas[2].Role = topology.ReplicaLearner
 	f.commit(t, old, true)
-	p := topology.DefaultVoterPolicy()
-	r, err := f.g.SetGroupVoterPolicy(t.Context(), "work", p, preview())
+	p := topology.DefaultVoterConfig()
+	r, err := f.g.SetGroupVoterConfig(t.Context(), "work", p, preview())
 	d := mutationDoc(t, r, err)
 	g := d.Group("work")
 	if !g.Replicas[2].PinnedLearner || g.Replicas[2].Role != topology.ReplicaLearner || len(d.VotersOf("work")) != 2 || g.Hosting.Mode != topology.HostingExplicit || !slices.Equal(g.Hosting.Nodes, []string{"n1", "n2", "n3"}) {
@@ -27,10 +27,10 @@ func TestPolicyAdoptionPreservesIntentAndExactPins(t *testing.T) {
 	}
 	f.commit(t, d, true)
 	before := f.g.state().Latest()
-	if _, err := f.g.SetReplicaPinnedLearner(t.Context(), "work", topology.ReplicaKey{NodeName: "n3", ReplicaID: 99}, false, preview()); !errors.Is(err, fault.ErrIdentityMismatch) {
+	if _, err := f.g.SetReplicaPinnedLearner(t.Context(), "work", topology.LearnerPin{Replica: topology.ReplicaKey{NodeName: "n3", ReplicaID: 99}}, preview()); !errors.Is(err, fault.ErrIdentityMismatch) {
 		t.Fatal("successor pin accepted", err)
 	}
-	r, err = f.g.SetReplicaPinnedLearner(t.Context(), "work", topology.ReplicaKey{NodeName: "n3", ReplicaID: 3}, false, preview())
+	r, err = f.g.SetReplicaPinnedLearner(t.Context(), "work", topology.LearnerPin{Replica: topology.ReplicaKey{NodeName: "n3", ReplicaID: 3}}, preview())
 	d = mutationDoc(t, r, err)
 	if d.Group("work").Replicas[2].PinnedLearner || d.Group("work").Replicas[2].Role != topology.ReplicaLearner {
 		t.Fatal("unpin promoted learner")
@@ -39,18 +39,18 @@ func TestPolicyAdoptionPreservesIntentAndExactPins(t *testing.T) {
 		t.Fatal("preview staged intent")
 	}
 	f.commit(t, d, true)
-	r, err = f.g.ChangeReplica(t.Context(), "work", "n3", topology.ReplicaLearner, preview())
+	r, err = f.g.ChangeReplica(t.Context(), "work", topology.ReplicaRoleChange{NodeName: "n3", Role: topology.ReplicaLearner}, preview())
 	d = mutationDoc(t, r, err)
 	if !d.Group("work").Replicas[2].PinnedLearner {
 		t.Fatal("manual learner not pinned")
 	}
 }
 
-func TestPolicyAdmissionAddsLearnersWithoutExpandingExplicitHosts(t *testing.T) {
+func TestVoterConfigAdmissionAddsLearnersWithoutExpandingExplicitHosts(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
-	p := topology.DefaultVoterPolicy()
-	r, err := f.g.SetGroupVoterPolicy(t.Context(), topology.MetaGroupID, p, preview())
+	p := topology.DefaultVoterConfig()
+	r, err := f.g.SetGroupVoterConfig(t.Context(), topology.MetaGroupID, p, preview())
 	f.commit(t, mutationDoc(t, r, err), true)
 	r, err = f.g.CreateLoadGroup(t.Context(), GroupSpec{ID: "all"}, preview())
 	f.commit(t, mutationDoc(t, r, err), true)

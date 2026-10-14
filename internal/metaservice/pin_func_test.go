@@ -87,8 +87,8 @@ func TestMetaConstructorAllowsAnEmptyVersionedStore(t *testing.T) {
 	if err = g.Stop(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	id, found, err := metastore.LoadIdentity(opts.DBPath)
-	if err != nil || !found || id.MemberID != 1 || id.NodeName != opts.Identity.NodeName {
-		t.Fatal(id, found, err)
+	id, err := metastore.LoadIdentity(opts.DBPath)
+	if err != nil || !id.Found || id.Identity.MemberID != 1 || id.Identity.NodeName != opts.Identity.NodeName {
+		t.Fatal(id.Identity, id.Found, err)
 	}
 }

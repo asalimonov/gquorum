@@ -38,7 +38,7 @@ func TestStableLearnerSevenHostsRequireExplicitReplicaCapacity(t *testing.T) {
 				if err := requireStatus(response, err, 400); err != nil {
 					t.Fatal("default capacity silently omitted load hosts", err)
 				}
-				assertAPIViews(t, ctx, c, before)
+				assertAPIViews(ctx, t, c, before)
 				for _, node := range c.Nodes() {
 					local, err := c.Local(ctx, node.Spec.Name, "all")
 					if err != nil || local.Found {

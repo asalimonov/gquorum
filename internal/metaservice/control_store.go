@@ -23,7 +23,9 @@ func (g *Group) openControlStore(identity topology.Identity) error {
 			_ = store.Close()
 		}
 	}()
-	if err = store.VerifyIdentity(metastore.Identity{NodeName: identity.NodeName, ClusterID: identity.ClusterID, MemberID: identity.MemberID}); err != nil {
+	err = store.VerifyIdentity(metastore.Identity{NodeName: identity.NodeName, ClusterID: identity.ClusterID,
+		MemberID: identity.MemberID})
+	if err != nil {
 		return err
 	}
 	materialized, err := store.LoadState()

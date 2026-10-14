@@ -27,8 +27,8 @@ func TestReadmissionHookMustReleaseAndQuarantineOldMetaIdentity(t *testing.T) {
 	g := &Group{store: store, opts: Options{DBPath: path}}
 	g.opts.OnReadmission = func(_ context.Context, r Readmission) error {
 		// This read takes an independent file lock; it succeeds only after Close.
-		pin, found, err := metastore.LoadIdentity(path)
-		if err != nil || !found || pin.MemberID != 1 {
+		pin, err := metastore.LoadIdentity(path)
+		if err != nil || !pin.Found || pin.Identity.MemberID != 1 {
 			t.Fatalf("old handle was not released: %v", err)
 		}
 		if r.Previous.MemberID != 1 || r.Granted.MemberID != 2 {
@@ -41,9 +41,9 @@ func TestReadmissionHookMustReleaseAndQuarantineOldMetaIdentity(t *testing.T) {
 	if !errors.Is(err, fault.ErrReadmissionRequired) {
 		t.Fatal("unquarantined lineage accepted", err)
 	}
-	pin, found, err := metastore.LoadIdentity(path)
-	if err != nil || !found || pin.MemberID != 1 {
-		t.Fatal("library rebound old storage", pin, err)
+	pin, err := metastore.LoadIdentity(path)
+	if err != nil || !pin.Found || pin.Identity.MemberID != 1 {
+		t.Fatal("library rebound old storage", pin.Identity, err)
 	}
 }
 

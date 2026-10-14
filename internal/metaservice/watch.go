@@ -44,7 +44,8 @@ func (g *Group) Watch(ctx context.Context, view topology.View) (<-chan topology.
 		return nil, fault.ErrStopped
 	}
 	return g.watches.watch(ctx, view, func() topology.Document {
-		latest, target, active := g.state().Views()
+		views := g.state().Views()
+		latest, target, active := views.Latest, views.Target, views.Active
 		switch view {
 		case topology.Target:
 			return target
@@ -55,7 +56,9 @@ func (g *Group) Watch(ctx context.Context, view topology.View) (<-chan topology.
 		}
 	})
 }
-func (r *watchRegistry) watch(ctx context.Context, view topology.View, current func() topology.Document) (<-chan topology.Update, error) {
+
+func (r *watchRegistry) watch(ctx context.Context, view topology.View,
+	current func() topology.Document) (<-chan topology.Update, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -69,7 +72,8 @@ func (r *watchRegistry) watch(ctx context.Context, view topology.View, current f
 	}
 	w := &documentWatcher{view: view, ch: make(chan topology.Update, 1)}
 	// Seed and install under the publication lock. A callback that captured an
-	// earlier FSM view cannot repeat/regress this seed when it obtains the lock.
+	// earlier FSM view cannot repeat/regress this seed when it obtains the
+	// lock.
 	doc := current()
 	if doc.Version > 0 {
 		w.version = doc.Version
@@ -105,6 +109,7 @@ func (r *watchRegistry) publish(latest, target, active topology.Document) {
 			doc = target
 		case topology.Active:
 			doc = active
+		default: // Use Latest for other view values.
 		}
 		if doc.Version <= w.version {
 			continue

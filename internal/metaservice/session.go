@@ -3,9 +3,10 @@ package metaservice
 import (
 	"context"
 	"encoding/json"
-	"github.com/asalimonov/gquorum/topology"
 	"strings"
 	"time"
+
+	"github.com/asalimonov/gquorum/topology"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
@@ -51,6 +52,7 @@ func (g *Group) ownedSession(id string) (topology.Session, error) {
 	}
 	return sessionFromRecord(s)
 }
+
 func (g *Group) renewSession(ctx context.Context, id, instance string, ttl time.Duration) (time.Time, error) {
 	if err := g.ensureRunning(ctx); err != nil {
 		return time.Time{}, err
@@ -62,36 +64,16 @@ func (g *Group) renewSession(ctx context.Context, id, instance string, ttl time.
 	if err != nil {
 		return time.Time{}, err
 	}
-	var replyData []byte
 	started := time.Now()
-	if g.IsLeader() {
-		reply := g.Call(ctx, "KeepAlive", g.transport.Header(), data)
-		if err := metatransport.ReplyError(reply); err != nil {
-			return time.Time{}, err
-		}
-		replyData = reply.Data
-	} else {
-		engine := g.engine.Load()
-		if engine == nil || engine.RaftStatus().Lead == 0 {
-			return time.Time{}, fault.ErrUnavailable
-		}
-		address, err := g.resolveMember(ctx, engine.RaftStatus().Lead)
-		if err != nil {
-			return time.Time{}, err
-		}
-		reply, err := g.transport.CallAddress(ctx, address, "KeepAlive", data)
-		if err != nil {
-			return time.Time{}, err
-		}
-		if err = metatransport.ReplyError(reply); err != nil {
-			return time.Time{}, err
-		}
-		replyData = reply.Data
+	replyData, err := g.sendSessionRenewal(ctx, data)
+	if err != nil {
+		return time.Time{}, err
 	}
 	var response struct {
 		ExpiresIn int `json:"expires_in"`
 	}
-	if err := json.Unmarshal(replyData, &response); err != nil || response.ExpiresIn <= 0 || int64(response.ExpiresIn) > int64(ttl/time.Second) {
+	if err := json.Unmarshal(replyData, &response); err != nil || response.ExpiresIn <= 0 ||
+		int64(response.ExpiresIn) > int64(ttl/time.Second) {
 		return time.Time{}, fault.ErrUnavailable
 	}
 	// Use the request start to avoid extending the acknowledged lease by the
@@ -165,7 +147,8 @@ func (g *Group) Deactivate(ctx context.Context, id string) error {
 		g.sessionMu.Lock()
 		g.sessionPaused = true
 		g.ownDeadline = time.Time{}
-		// Fence this ID before submitting: a canceled proposal may still commit.
+		// Fence this ID before submitting: a canceled proposal may still
+		// commit.
 		g.ownSession = ""
 		g.lastDeactivated = id
 		g.sessionMu.Unlock()
@@ -207,19 +190,19 @@ func (g *Group) AcquireLock(ctx context.Context, key, id string) error {
 
 // LockHolder returns the owned, locally applied session holding key.
 // It is not a linearizable or liveness-confirming read.
-func (g *Group) LockHolder(ctx context.Context, key string) (topology.Session, bool, error) {
+func (g *Group) LockHolder(ctx context.Context, key string) (topology.LockHolder, error) {
 	if err := ctx.Err(); err != nil {
-		return topology.Session{}, false, err
+		return topology.LockHolder{}, err
 	}
 	if key == "" {
-		return topology.Session{}, false, fault.ErrInvalid
+		return topology.LockHolder{}, fault.ErrInvalid
 	}
 	s, exists := g.state().LockSession(key)
 	if !exists {
-		return topology.Session{}, false, nil
+		return topology.LockHolder{}, nil
 	}
 	result, err := sessionFromRecord(s)
-	return result, err == nil, err
+	return topology.LockHolder{Session: result, Held: err == nil}, err
 }
 
 // ServeOverride returns the persisted local operator input (zero means auto).
@@ -227,7 +210,8 @@ func (g *Group) LockHolder(ctx context.Context, key string) (topology.Session, b
 func (g *Group) ServeOverride() int { g.mu.RLock(); defer g.mu.RUnlock(); return g.serveOverride }
 
 // SetServeOverride changes only this handle's pinned local store. It remains
-// available without a Raft leader and takes effect after successful persistence.
+// available without a Raft leader and takes effect after successful
+// persistence.
 func (g *Group) SetServeOverride(ctx context.Context, value int) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -248,4 +232,33 @@ func (g *Group) SetServeOverride(ctx context.Context, value int) error {
 	}
 	g.serveOverride = value
 	return nil
+}
+
+func (g *Group) sendSessionRenewal(ctx context.Context, data []byte) ([]byte, error) {
+	var replyData []byte
+	if g.IsLeader() {
+		reply := g.Call(ctx, "KeepAlive", g.transport.Header(), data)
+		if err := metatransport.ReplyError(reply); err != nil {
+			return nil, err
+		}
+		replyData = reply.Data
+	} else {
+		engine := g.engine.Load()
+		if engine == nil || engine.RaftStatus().Lead == 0 {
+			return nil, fault.ErrUnavailable
+		}
+		address, err := g.resolveMember(ctx, engine.RaftStatus().Lead)
+		if err != nil {
+			return nil, err
+		}
+		reply, err := g.transport.CallAddress(ctx, address, "KeepAlive", data)
+		if err != nil {
+			return nil, err
+		}
+		if err = metatransport.ReplyError(reply); err != nil {
+			return nil, err
+		}
+		replyData = reply.Data
+	}
+	return replyData, nil
 }

@@ -1,13 +1,15 @@
 package metaservice
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/collection"
 	"github.com/asalimonov/gquorum/internal/metatransport"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -49,15 +51,7 @@ func (r *parkedRegistry) record(req joinRequest, kind, reason string) {
 	now := time.Now().UTC()
 	if !found {
 		if len(r.entries) >= parkedJoinCap {
-			var oldest parkedKey
-			var at time.Time
-			for k, p := range r.entries {
-				if at.IsZero() || p.LastSeen.Before(at) || p.LastSeen.Equal(at) && (k.name < oldest.name || k.name == oldest.name && k.instance < oldest.instance) {
-					oldest = k
-					at = p.LastSeen
-				}
-			}
-			delete(r.entries, oldest)
+			r.evictOldest()
 		}
 		entry = topology.ParkedJoin{Name: req.Identity.NodeName, InstanceID: req.Identity.InstanceID, FirstSeen: now}
 	}
@@ -99,18 +93,13 @@ func (r *parkedRegistry) snapshot() []topology.ParkedJoin {
 	r.sweep(time.Now().UTC())
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	var out []topology.ParkedJoin
+	out := collection.Slice[topology.ParkedJoin](len(r.entries))
 	for _, p := range r.entries {
 		out = append(out, p)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if !out[i].LastSeen.Equal(out[j].LastSeen) {
-			return out[i].LastSeen.After(out[j].LastSeen)
-		}
-		if out[i].Name != out[j].Name {
-			return out[i].Name < out[j].Name
-		}
-		return out[i].InstanceID < out[j].InstanceID
+	slices.SortFunc(out, func(a, b topology.ParkedJoin) int {
+		return cmp.Or(b.LastSeen.Compare(a.LastSeen), cmp.Compare(a.Name, b.Name), cmp.Compare(a.InstanceID,
+			b.InstanceID))
 	})
 	return out
 }
@@ -141,12 +130,7 @@ func (g *Group) ParkedJoins(ctx context.Context) ([]topology.ParkedJoin, error) 
 	if g.IsLeader() {
 		return g.parked.snapshot(), nil
 	}
-	addresses := append([]string(nil), g.opts.JoinSeeds...)
-	if engine := g.engine.Load(); engine != nil && engine.RaftStatus().Lead != 0 {
-		if address, err := g.resolveMember(ctx, engine.RaftStatus().Lead); err == nil {
-			addresses = append([]string{address}, addresses...)
-		}
-	}
+	addresses := g.parkedReadAddresses(ctx)
 	seen := map[string]bool{}
 	var last error = fault.ErrUnavailable
 	for i := 0; i < len(addresses); i++ {
@@ -176,4 +160,29 @@ func (g *Group) ParkedJoins(ctx context.Context) ([]topology.ParkedJoin, error) 
 		return records, nil
 	}
 	return nil, last
+}
+
+// evictOldest is called while the registry lock is held.
+func (r *parkedRegistry) evictOldest() {
+	var oldest parkedKey
+	var at time.Time
+	for k, p := range r.entries {
+		if at.IsZero() || p.LastSeen.Before(at) ||
+			(k.name < oldest.name || k.name == oldest.name &&
+				k.instance < oldest.instance) && p.LastSeen.Equal(at) {
+			oldest = k
+			at = p.LastSeen
+		}
+	}
+	delete(r.entries, oldest)
+}
+
+func (g *Group) parkedReadAddresses(ctx context.Context) []string {
+	addresses := append([]string(nil), g.opts.JoinSeeds...)
+	if engine := g.engine.Load(); engine != nil && engine.RaftStatus().Lead != 0 {
+		if address, err := g.resolveMember(ctx, engine.RaftStatus().Lead); err == nil {
+			addresses = append([]string{address}, addresses...)
+		}
+	}
+	return addresses
 }

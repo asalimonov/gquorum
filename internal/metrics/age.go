@@ -1,36 +1,39 @@
 package metrics
 
 import (
-	api "github.com/asalimonov/gquorum/metrics"
 	"time"
+
+	api "github.com/asalimonov/gquorum/metrics"
 )
 
 // AgeObservation advances conservative source ages without manufacturing a
 // producer generation or extending a confirmed predicate duration. Callers pass
 // elapsed monotonic request/cache time, never a remote wall-clock difference.
 func AgeObservation(s api.ReplicaObservation, elapsed, bound time.Duration) api.ReplicaObservation {
-	s = s.Clone()
-	s.Sample.Meter = ageStamp(s.Sample.Meter, elapsed, bound)
-	s.Sample.Raft = ageStamp(s.Sample.Raft, elapsed, bound)
-	s.Sample.Writer = ageStamp(s.Sample.Writer, elapsed, bound)
-	if s.Sample.WALStall > 0 {
-		s.Sample.WALStall = AddDuration(s.Sample.WALStall, elapsed)
+	aged := s.Clone()
+	aged.Sample.Meter = ageStamp(aged.Sample.Meter, elapsed, bound)
+	aged.Sample.Raft = ageStamp(aged.Sample.Raft, elapsed, bound)
+	aged.Sample.Writer = ageStamp(aged.Sample.Writer, elapsed, bound)
+	if aged.Sample.WALStall > 0 {
+		aged.Sample.WALStall = AddDuration(aged.Sample.WALStall, elapsed)
 	}
-	for _, latency := range []*api.Latency{&s.Sample.ResultLatency, &s.Sample.PersistenceLatency, &s.Sample.ApplyLatency} {
+	for _, latency := range []*api.Latency{&aged.Sample.ResultLatency, &aged.Sample.PersistenceLatency,
+		&aged.Sample.ApplyLatency} {
 		latency.LastAge = AddDuration(latency.LastAge, elapsed)
 		*latency = staleLatency(*latency, bound)
 	}
-	for i := range s.Sample.Progress {
-		s.Sample.Progress[i].AckAge = AddDuration(s.Sample.Progress[i].AckAge, elapsed)
+	for i := range aged.Sample.Progress {
+		aged.Sample.Progress[i].AckAge = AddDuration(aged.Sample.Progress[i].AckAge, elapsed)
 	}
-	if s.Sample.Meter.State != api.Current && s.Sample.Rates.State == api.Current {
-		s.Sample.Rates.State = api.Stale
+	if aged.Sample.Meter.State != api.Current && aged.Sample.Rates.State == api.Current {
+		aged.Sample.Rates.State = api.Stale
 	}
-	if s.Sample.Raft.State != api.Current {
-		s.ApplyBacklog.State = s.Sample.Raft.State
+	if aged.Sample.Raft.State != api.Current {
+		aged.ApplyBacklog.State = aged.Sample.Raft.State
 	}
-	if s.Sample.Meter.State == api.Stale || s.Sample.Raft.State == api.Stale || s.Sample.Writer.State == api.Stale {
-		s.State = api.Stale
+	if aged.Sample.Meter.State == api.Stale || aged.Sample.Raft.State == api.Stale ||
+		aged.Sample.Writer.State == api.Stale {
+		aged.State = api.Stale
 	}
-	return s
+	return aged
 }

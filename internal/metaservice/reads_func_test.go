@@ -35,9 +35,9 @@ func TestConsistentMetadataReadsAndStop(t *testing.T) {
 	if _, err := g.propose(ctx, metaengine.AcquireLock{Key: "read-key", SessionID: "read-session"}); err != nil {
 		t.Fatal(err)
 	}
-	session, held, err := g.ReadLockHolder(ctx, "read-key")
-	if err != nil || !held || session.ID != "read-session" || session.TTL != 3*time.Second {
-		t.Fatal(session, held, err)
+	session, err := g.ReadLockHolder(ctx, "read-key")
+	if err != nil || !session.Held || session.Session.ID != "read-session" || session.Session.TTL != 3*time.Second {
+		t.Fatal(session.Session, session.Held, err)
 	}
 	if err := g.ReadBarrier(ctx); err != nil {
 		t.Fatal(err)
@@ -45,8 +45,8 @@ func TestConsistentMetadataReadsAndStop(t *testing.T) {
 	if _, err := g.propose(ctx, metaengine.RevokeSession{SessionID: "read-session"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, held, err := g.ReadLockHolder(ctx, "read-key"); err != nil || held {
-		t.Fatal(held, err)
+	if held, err := g.ReadLockHolder(ctx, "read-key"); err != nil || held.Held {
+		t.Fatal(held.Held, err)
 	}
 	if err := g.Stop(ctx); err != nil {
 		t.Fatal(err)
@@ -76,8 +76,8 @@ func TestMetaReadOptionsReachEngine(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := topology.AuthorityKey{ClusterID: g.Identity().ClusterID, GroupID: topology.MetaGroupID, Revision: 999999}
-	if _, found, err := g.ReadGrant(ctx, key); err != nil || found {
-		t.Fatal(found, err)
+	if found, err := g.ReadGrant(ctx, key); err != nil || found.Found {
+		t.Fatal(found.Found, err)
 	}
 	if proof, err := g.readAuthorityProof(ctx, key, ""); err != nil || proof.Grant != nil {
 		t.Fatal(proof, err)

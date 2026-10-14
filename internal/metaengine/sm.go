@@ -1,10 +1,11 @@
 package metaengine
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
@@ -17,6 +18,8 @@ type statePersister interface {
 	SaveState(data []byte) error
 }
 
+// ApplyResult carries the deterministic acceptance, refusal and evidence from a
+// metadata proposal.
 type ApplyResult struct {
 	Grants         []topology.AuthorityGrant `json:"grants,omitempty"`
 	ProposalID     string
@@ -29,7 +32,13 @@ type ApplyResult struct {
 	OperatorID     topology.OperatorID
 	Grant          *topology.AuthorityGrant `json:"grant,omitempty"`
 	Admission      AdmissionRecord
+	Placement      *topology.PlacementReport `json:"placement,omitempty"`
 }
+
+const (
+	errorFormat            = "%v"
+	metaStateSchemaVersion = 3
+)
 
 type proposalErrorCode string
 
@@ -44,20 +53,21 @@ const (
 )
 
 type operatorRecord struct {
-	ID            topology.OperatorID    `json:"id,omitempty"`
-	Version       uint64                 `json:"version"`
-	Attempt       uint32                 `json:"attempt,omitempty"`
-	State         topology.OperatorState `json:"state"`
-	Steps         []topology.Step        `json:"steps,omitempty"`
-	CurrentStep   int                    `json:"current_step,omitempty"`
-	GroupID       string                 `json:"group_id,omitempty"`
-	NodeName      string                 `json:"node_name,omitempty"`
-	WaitingReason string                 `json:"waiting_reason,omitempty"`
-	Error         string                 `json:"error,omitempty"`
-	Origin        topology.Origin        `json:"origin,omitempty"`
-	Actor         string                 `json:"actor,omitempty"`
-	StartedAt     time.Time              `json:"started_at,omitempty"`
-	UpdatedAt     time.Time              `json:"updated_at,omitempty"`
+	ID            topology.OperatorID      `json:"id,omitempty"`
+	Version       uint64                   `json:"version"`
+	Attempt       uint32                   `json:"attempt,omitempty"`
+	State         topology.OperatorState   `json:"state"`
+	Steps         []topology.Step          `json:"steps,omitempty"`
+	VoterBases    []topology.PlanVoterBase `json:"voter_bases,omitempty"`
+	CurrentStep   int                      `json:"current_step,omitempty"`
+	GroupID       string                   `json:"group_id,omitempty"`
+	NodeName      string                   `json:"node_name,omitempty"`
+	WaitingReason string                   `json:"waiting_reason,omitempty"`
+	Error         string                   `json:"error,omitempty"`
+	Origin        topology.Origin          `json:"origin,omitempty"`
+	Actor         string                   `json:"actor,omitempty"`
+	StartedAt     time.Time                `json:"started_at,omitempty"`
+	UpdatedAt     time.Time                `json:"updated_at,omitempty"`
 }
 
 type topologySM struct {
@@ -126,7 +136,8 @@ type smState struct {
 }
 
 func (sm *topologySM) Apply(index, term uint64, data []byte) (ApplyResult, error) {
-	kind, body, err := decodeEnvelope(data)
+	decoded, err := decodeEnvelope(data)
+	kind, body := decoded.Kind, decoded.Body
 	if err != nil {
 		return ApplyResult{}, err
 	}
@@ -138,128 +149,11 @@ func (sm *topologySM) Apply(index, term uint64, data []byte) (ApplyResult, error
 		return ApplyResult{}, nil
 	}
 
-	var (
-		res     ApplyResult
-		changed bool
-	)
-	switch kind {
-	case KindRecordReadmissionReceipts:
-		var p RecordReadmissionReceiptsProposal
-		if err := json.Unmarshal(body, &p); err != nil {
-			return ApplyResult{}, err
-		}
-		res, changed = sm.applyRecordReadmissionReceipts(p)
-	case KindBeginReadmissionAuthority:
-		var p BeginReadmissionAuthority
-		if err := json.Unmarshal(body, &p); err != nil {
-			return ApplyResult{}, err
-		}
-		res, changed = sm.applyBeginReadmissionAuthority(index, p)
-	case KindGrantTransfer:
-		var p GrantTransferProposal
-		if err := json.Unmarshal(body, &p); err != nil {
-			return ApplyResult{}, err
-		}
-		res, changed = sm.applyGrantTransfer(index, p)
-	case KindRecordFence:
-		var p RecordFenceProposal
-		if err := json.Unmarshal(body, &p); err != nil {
-			return ApplyResult{}, err
-		}
-		res, changed = sm.applyRecordFence(p)
-	case KindRecordEffect:
-		var p RecordEffectProposal
-		if err := json.Unmarshal(body, &p); err != nil {
-			return ApplyResult{}, err
-		}
-		res, changed = sm.applyRecordEffect(p)
-	case KindBeginEffect:
-		var p BeginEffectProposal
-		if err := json.Unmarshal(body, &p); err != nil {
-			return ApplyResult{}, err
-		}
-		res, changed = sm.applyBeginEffect(index, p)
-	case KindProposeDocument:
-		var p ProposeDocument
-		if err := json.Unmarshal(body, &p); err != nil {
-			return ApplyResult{}, fmt.Errorf("meta: unmarshal propose_document: %w", err)
-		}
-		res, changed = sm.applyProposeDocument(p)
-	case KindAdmitNode:
-		var p AdmitNode
-		if err := json.Unmarshal(body, &p); err != nil {
-			return ApplyResult{}, fmt.Errorf("meta: unmarshal admit_node: %w", err)
-		}
-		res, changed = sm.applyAdmitNode(p)
-	case KindBeginOperator:
-		var p BeginOperatorProposal
-		if err := json.Unmarshal(body, &p); err != nil {
-			return ApplyResult{}, fmt.Errorf("meta: unmarshal begin_execution: %w", err)
-		}
-		res, changed = sm.applyBeginOperator(index, p)
-	case KindCommitRepairOperator:
-		var p CommitRepairOperatorProposal
-		if err := json.Unmarshal(body, &p); err != nil {
-			return ApplyResult{}, fmt.Errorf("meta: unmarshal commit_repair_execution: %w", err)
-		}
-		res, changed = sm.applyCommitRepairOperator(index, p)
-	case KindTransitionOperator:
-		var p TransitionOperatorProposal
-		if err := json.Unmarshal(body, &p); err != nil {
-			return ApplyResult{}, fmt.Errorf("meta: unmarshal transition_execution: %w", err)
-		}
-		res, changed = sm.applyTransitionOperator(index, p)
-	case KindCommitVoterChange:
-		var p CommitVoterChangeProposal
-		if err := json.Unmarshal(body, &p); err != nil {
-			return ApplyResult{}, fmt.Errorf("meta: unmarshal commit_voter_change: %w", err)
-		}
-		res, changed = sm.applyCommitVoterChange(index, p)
-	case KindActivateTarget:
-		var p ActivateTargetProposal
-		if err := json.Unmarshal(body, &p); err != nil {
-			return ApplyResult{}, fmt.Errorf("meta: unmarshal activate_target: %w", err)
-		}
-		res, changed = sm.applyActivateTarget(p)
-	case KindBindAdmission:
-		var p BindAdmissionProposal
-		if err := json.Unmarshal(body, &p); err != nil {
-			return ApplyResult{}, fmt.Errorf("meta: unmarshal bind_admission: %w", err)
-		}
-		res, changed = sm.applyBindAdmission(p)
-	case KindCommitReadmission:
-		var p CommitReadmissionProposal
-		if err := json.Unmarshal(body, &p); err != nil {
-			return ApplyResult{}, fmt.Errorf("meta: unmarshal commit_readmission: %w", err)
-		}
-		res, changed = sm.applyCommitReadmission(index, p)
-	case KindReadyAdmission:
-		var p ReadyAdmissionProposal
-		if err := json.Unmarshal(body, &p); err != nil {
-			return ApplyResult{}, fmt.Errorf("meta: unmarshal ready_admission: %w", err)
-		}
-		res, changed = sm.applyReadyAdmission(p)
-	case KindGrantSession:
-		var p GrantSession
-		if err := json.Unmarshal(body, &p); err != nil {
-			return ApplyResult{}, fmt.Errorf("meta: unmarshal grant_session: %w", err)
-		}
-		res, changed = sm.applyGrantSession(p)
-	case KindRevokeSession:
-		var p RevokeSession
-		if err := json.Unmarshal(body, &p); err != nil {
-			return ApplyResult{}, fmt.Errorf("meta: unmarshal revoke_session: %w", err)
-		}
-		res, changed = sm.applyRevokeSession(p)
-	case KindAcquireLock:
-		var p AcquireLock
-		if err := json.Unmarshal(body, &p); err != nil {
-			return ApplyResult{}, fmt.Errorf("meta: unmarshal acquire_lock: %w", err)
-		}
-		res, changed = sm.applyAcquireLock(p)
-	default:
-		return ApplyResult{}, fmt.Errorf("meta: unknown proposal kind %q", kind)
+	outcome, err := sm.applyProposal(index, kind, body)
+	if err != nil {
+		return ApplyResult{}, err
 	}
+	res, changed := outcome.result, outcome.changed
 
 	res.CurrentVersion = sm.latest.Version
 	sm.appliedIndex = index
@@ -278,20 +172,23 @@ func (sm *topologySM) applyProposeDocument(p ProposeDocument) (ApplyResult, bool
 		return ApplyResult{
 			ProposalID: p.ProposalID,
 			Accepted:   false,
-			Reason: fmt.Sprintf("version conflict: expected %d, latest %d",
-				p.ExpectedVersion, sm.latest.Version),
-			Code: proposalVersionConflict,
+			Reason:     fmt.Sprintf("version conflict: expected %d, latest %d", p.ExpectedVersion, sm.latest.Version),
+			Code:       proposalVersionConflict,
 		}, false
 	}
 	doc := p.Doc.Clone()
 	doc.Version = sm.latest.Version + 1
 	if err := sm.validateDocument(doc); err != nil {
-		return ApplyResult{ProposalID: p.ProposalID, Accepted: false, Reason: err.Error(), Code: proposalGuardrail}, false
+		return rejectProposalError(p.ProposalID, proposalGuardrail, err), false
+	}
+	report, err := placementResult(sm.target, doc, topology.AffectedPlacementGroups(sm.latest, doc))
+	if err != nil {
+		return rejectProposalError(p.ProposalID, proposalGuardrail, err), false
 	}
 	if err := sm.commitLatestLocked(&doc); err != nil {
-		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
+		return rejectProposal(p.ProposalID, proposalGuardrail, errorFormat, err), false
 	}
-	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, Doc: doc.Clone()}, true
+	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, Doc: doc.Clone(), Placement: report}, true
 }
 
 func (sm *topologySM) applyAdmitNode(p AdmitNode) (ApplyResult, bool) {
@@ -299,35 +196,7 @@ func (sm *topologySM) applyAdmitNode(p AdmitNode) (ApplyResult, bool) {
 		if !p.ReplaceExisting {
 			return ApplyResult{ProposalID: p.ProposalID, Accepted: true, Doc: sm.latest.Clone()}, false
 		}
-		doc := sm.latest.Clone()
-		node := doc.Node(p.Node.Name)
-		node.State = topology.NodeActive
-		node.UpdatedAt = p.At
-		for i := range doc.Groups {
-			changed := false
-			for j := range doc.Groups[i].Replicas {
-				if doc.Groups[i].Replicas[j].NodeName == p.Node.Name {
-					id, err := doc.Groups[i].AllocateReplicaID()
-					if err != nil {
-						return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
-					}
-					doc.Groups[i].Replicas[j].ReplicaID = id
-					doc.Groups[i].Replicas[j].UpdatedAt = p.At
-					changed = true
-				}
-			}
-			if changed {
-				doc.Groups[i].UpdatedAt = p.At
-			}
-		}
-		doc.Version = sm.latest.Version + 1
-		if err := sm.validateDocument(doc); err != nil {
-			return ApplyResult{ProposalID: p.ProposalID, Accepted: false, Reason: err.Error()}, false
-		}
-		if err := sm.commitLatestLocked(&doc); err != nil {
-			return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
-		}
-		return ApplyResult{ProposalID: p.ProposalID, Accepted: true, Doc: doc.Clone()}, true
+		return sm.replaceAdmittedNode(p)
 	}
 	doc := sm.latest.Clone()
 	node := p.Node
@@ -338,17 +207,17 @@ func (sm *topologySM) applyAdmitNode(p AdmitNode) (ApplyResult, bool) {
 	node.UpdatedAt = p.At
 	doc.Nodes = append(doc.Nodes, node)
 	if err := doc.SetMemberID(node.Name, p.MemberID, p.At); err != nil {
-		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
+		return rejectProposal(p.ProposalID, proposalGuardrail, errorFormat, err), false
 	}
 	if mg := doc.MetaGroup(); mg != nil {
 		mg.UpdatedAt = p.At
 	}
 	doc.Version = sm.latest.Version + 1
 	if err := sm.validateDocument(doc); err != nil {
-		return ApplyResult{ProposalID: p.ProposalID, Accepted: false, Reason: err.Error()}, false
+		return rejectProposalError(p.ProposalID, proposalGuardrail, err), false
 	}
 	if err := sm.commitLatestLocked(&doc); err != nil {
-		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
+		return rejectProposal(p.ProposalID, proposalGuardrail, errorFormat, err), false
 	}
 	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, Doc: doc.Clone()}, true
 }
@@ -384,11 +253,8 @@ func (sm *topologySM) marshalLocked() ([]byte, error) {
 	for _, ex := range sm.operators {
 		records = append(records, cloneOperatorRecord(*ex))
 	}
-	sort.Slice(records, func(i, j int) bool {
-		if records[i].Version != records[j].Version {
-			return records[i].Version < records[j].Version
-		}
-		return records[i].Attempt < records[j].Attempt
+	slices.SortFunc(records, func(a, b operatorRecord) int {
+		return cmp.Or(cmp.Compare(a.Version, b.Version), cmp.Compare(a.Attempt, b.Attempt))
 	})
 	execs := make([]topology.Operator, 0, len(records))
 	for _, rec := range records {
@@ -398,11 +264,12 @@ func (sm *topologySM) marshalLocked() ([]byte, error) {
 	for name := range sm.activated {
 		activated = append(activated, name)
 	}
-	sort.Strings(activated)
-	recordsAuthority, floors, revocations := sm.authority.snapshot()
+	slices.Sort(activated)
+	authority := sm.authority.snapshot()
 	return json.Marshal(smState{
-		AuthorityRecords: recordsAuthority, AuthorityFloors: floors, Revocations: revocations,
-		SchemaVersion: 2, Rules: sm.rules, RetiredGroups: sm.retiredSnapshot(), Allocations: sm.allocationSnapshot(),
+		AuthorityRecords: authority.records, AuthorityFloors: authority.floors, Revocations: authority.revocations,
+		SchemaVersion: metaStateSchemaVersion, Rules: sm.rules,
+		RetiredGroups: sm.retiredSnapshot(), Allocations: sm.allocationSnapshot(),
 		Latest:        sm.latest,
 		Target:        sm.target,
 		Active:        sm.active,
@@ -465,19 +332,7 @@ func (sm *topologySM) Restore(data []byte) error {
 		record := st.Admissions[i]
 		sm.admissions[admissionKey(record.NodeName, record.InstanceID)] = &record
 	}
-	sm.sessions = make(map[string]*sessionState, len(st.Sessions))
-	for i := range st.Sessions {
-		s := st.Sessions[i]
-		sm.sessions[s.SessionID] = &s
-	}
-	sm.locks = make(map[string]string, len(st.Locks))
-	for _, l := range st.Locks {
-		sm.locks[l.Key] = l.SessionID
-	}
-	sm.activated = make(map[string]struct{}, len(st.Activated))
-	for _, name := range st.Activated {
-		sm.activated[name] = struct{}{}
-	}
+	sm.restoreSessionsLocked(st)
 	sm.appliedIndex = st.AppliedIndex
 	sm.appliedTerm = st.AppliedTerm
 	sm.metaOwners = sm.metaMemberOwnersLocked()
@@ -516,10 +371,8 @@ func (sm *topologySM) Active() topology.Document {
 func (sm *topologySM) History(offset, limit int) []topology.Document {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	if offset < 0 {
-		offset = 0
-	}
-	n := len(sm.history) - offset
+	position := max(offset, 0)
+	n := len(sm.history) - position
 	if n <= 0 {
 		return nil
 	}
@@ -528,7 +381,7 @@ func (sm *topologySM) History(offset, limit int) []topology.Document {
 	}
 	out := make([]topology.Document, 0, n)
 	for i := range n {
-		out = append(out, sm.history[len(sm.history)-1-offset-i].Clone())
+		out = append(out, sm.history[len(sm.history)-1-position-i].Clone())
 	}
 	return out
 }
@@ -588,8 +441,8 @@ func (sm *topologySM) CurrentOperator() (topology.Operator, bool) {
 	defer sm.mu.RUnlock()
 	var current *operatorRecord
 	for _, ex := range sm.operators {
-		if current == nil || ex.Version > current.Version ||
-			(ex.Version == current.Version && ex.Attempt > current.Attempt) {
+		if current == nil || ex.Version > current.Version || (ex.Version == current.Version &&
+			ex.Attempt > current.Attempt) {
 			current = ex
 		}
 	}
@@ -603,4 +456,59 @@ func (sm *topologySM) AppliedState() (index, term uint64) {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
 	return sm.appliedIndex, sm.appliedTerm
+}
+
+func (sm *topologySM) replaceAdmittedNode(p AdmitNode) (ApplyResult, bool) {
+	doc := sm.latest.Clone()
+	node := doc.Node(p.Node.Name)
+	node.State = topology.NodeActive
+	node.UpdatedAt = p.At
+	if err := reseatNodeReplicas(&doc, p); err != nil {
+		return rejectProposal(p.ProposalID, proposalGuardrail, errorFormat, err), false
+	}
+	doc.Version = sm.latest.Version + 1
+	if err := sm.validateDocument(doc); err != nil {
+		return rejectProposalError(p.ProposalID, proposalGuardrail, err), false
+	}
+	if err := sm.commitLatestLocked(&doc); err != nil {
+		return rejectProposal(p.ProposalID, proposalGuardrail, errorFormat, err), false
+	}
+	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, Doc: doc.Clone()}, true
+}
+
+func reseatNodeReplicas(doc *topology.Document, p AdmitNode) error {
+	for i := range doc.Groups {
+		changed := false
+		for j := range doc.Groups[i].Replicas {
+			if doc.Groups[i].Replicas[j].NodeName == p.Node.Name {
+				id, err := doc.Groups[i].AllocateReplicaID()
+				if err != nil {
+					return err
+				}
+				doc.Groups[i].Replicas[j].ReplicaID = id
+				doc.Groups[i].Replicas[j].UpdatedAt = p.At
+				changed = true
+			}
+		}
+		if changed {
+			doc.Groups[i].UpdatedAt = p.At
+		}
+	}
+	return nil
+}
+
+func (sm *topologySM) restoreSessionsLocked(st smState) {
+	sm.sessions = make(map[string]*sessionState, len(st.Sessions))
+	for i := range st.Sessions {
+		s := st.Sessions[i]
+		sm.sessions[s.SessionID] = &s
+	}
+	sm.locks = make(map[string]string, len(st.Locks))
+	for _, l := range st.Locks {
+		sm.locks[l.Key] = l.SessionID
+	}
+	sm.activated = make(map[string]struct{}, len(st.Activated))
+	for _, name := range st.Activated {
+		sm.activated[name] = struct{}{}
+	}
 }

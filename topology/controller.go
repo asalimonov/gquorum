@@ -1,23 +1,26 @@
 package topology
 
 import (
-	"context"
 	"maps"
 	"slices"
-
-	"go.etcd.io/raft/v3/raftpb"
 )
 
+// Health classifies an observed node's reachability.
 type Health string
 
+// HealthUnknown and the following values distinguish unknown, alive and dead
+// node observations.
 const (
 	HealthUnknown Health = "unknown"
 	HealthAlive   Health = "alive"
 	HealthDead    Health = "dead"
 )
 
+// GroupHealth classifies the observed availability of a group's voters.
 type GroupHealth string
 
+// GroupUnknown and the following values distinguish unknown health, degradation
+// and quorum loss.
 const (
 	GroupUnknown    GroupHealth = "unknown"
 	GroupHealthy    GroupHealth = "healthy"
@@ -25,30 +28,14 @@ const (
 	GroupQuorumLost GroupHealth = "quorum_lost"
 )
 
+// ReplicaProgress reports an observed replication match index and recent
+// activity.
 type ReplicaProgress struct {
 	Match        uint64 `json:"match"`
 	RecentActive bool   `json:"recent_active"`
 }
-type GroupStatus struct {
-	GroupID     string                     `json:"group_id"`
-	HostNode    string                     `json:"host_node"`
-	Found       bool                       `json:"found"`
-	LeaderID    uint64                     `json:"leader_id"`
-	Term        uint64                     `json:"term"`
-	Commit      uint64                     `json:"commit"`
-	Applied     uint64                     `json:"applied"`
-	ConfState   raftpb.ConfState           `json:"conf_state"`
-	Progress    map[uint64]ReplicaProgress `json:"progress,omitempty"`
-	LiveVoters  map[uint64]bool            `json:"live_voters,omitempty"`
-	HealthKnown bool                       `json:"health_known"`
-	ErrorCode   string                     `json:"error_code,omitempty"`
-	// LeaderNodeName is resolved from LeaderID through the captured Active view
-	// in cluster status, local meta status and scheduler inputs. In those views,
-	// empty means leadership is unknown or the replica is absent from Active.
-	// Raw replica status does not resolve node names; use LeaderID there.
-	LeaderNodeName string `json:"leader_node_name"`
-}
 
+// Clone copies all membership slices and progress and liveness maps.
 func (s GroupStatus) Clone() GroupStatus {
 	s.ConfState.Voters = slices.Clone(s.ConfState.Voters)
 	s.ConfState.Learners = slices.Clone(s.ConfState.Learners)
@@ -57,38 +44,4 @@ func (s GroupStatus) Clone() GroupStatus {
 	s.Progress = maps.Clone(s.Progress)
 	s.LiveVoters = maps.Clone(s.LiveVoters)
 	return s
-}
-
-type NodeStatus struct {
-	Node           Node      `json:"node"`
-	EffectiveState NodeState `json:"effective_state"`
-	Health         Health    `json:"health"`
-	Address        string    `json:"address,omitempty"`
-}
-type ClusterStatus struct {
-	Lifecycle     string        `json:"lifecycle"`
-	ErrorCode     string        `json:"error_code,omitempty"`
-	LatestVersion uint64        `json:"latest_version"`
-	TargetVersion uint64        `json:"target_version"`
-	ActiveVersion uint64        `json:"active_version"`
-	Nodes         []NodeStatus  `json:"nodes"`
-	Groups        []GroupStatus `json:"groups"`
-	MetaLeaderID  uint64        `json:"meta_leader_id"`
-	// MetaLeaderNodeName is resolved from the numeric MetaLeaderID through Active.
-	// Empty means leadership is unknown or that member is absent from Active.
-	MetaLeaderNodeName string             `json:"meta_leader_node_name"`
-	SessionLive        bool               `json:"session_live"`
-	Operator           *OperatorStatus    `json:"operator,omitempty"`
-	Scheduling         SchedulingStatus   `json:"scheduling"`
-	Observation        HealthObservation  `json:"observation"`
-	SelfRemoval        *SelfRemovalStatus `json:"self_removal,omitempty"`
-}
-
-type AddressResolver interface {
-	Resolve(context.Context, string) (string, error)
-}
-type HealthSource interface {
-	// Snapshot returns an owned, coherent node observation. Nil means globally
-	// unknown; a missing node or HealthUnknown remains unknown, never dead.
-	Snapshot(context.Context) (map[string]Health, error)
 }

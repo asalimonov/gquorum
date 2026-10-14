@@ -3,9 +3,9 @@
 package cluster
 
 import (
-	"github.com/asalimonov/gquorum"
 	"testing"
 
+	"github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -114,7 +114,7 @@ func identityServing(t *testing.T, size int) {
 		}
 		return !ready.SessionLive && ready.Override == 1, nil
 	}); err != nil {
-		t.Fatal("local override did not relax only serving policy", err)
+		t.Fatal("local override did not relax only serving readiness", err)
 	}
 	candidate := created.Document.Clone()
 	candidate.Node("node1").Labels["minority-mutation"] = "forbidden"
@@ -137,8 +137,14 @@ func identityServing(t *testing.T, size int) {
 	if err := c.Node("node1").Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := c.Local(ctx, "node1", topology.MetaGroupID)
-	if err != nil || restarted.ServeOverride != 1 || restarted.Identity.MemberID != own.Identity.MemberID || restarted.Identity.InstanceID == own.Identity.InstanceID {
+	var restarted LocalObservation
+	if err := Poll(ctx, func() (bool, error) {
+		observation, err := c.Local(ctx, "node1", topology.MetaGroupID)
+		restarted = observation
+		return err == nil && observation.Found && observation.ServeOverride == 1 &&
+			observation.Identity.MemberID == own.Identity.MemberID &&
+			observation.Identity.InstanceID != own.Identity.InstanceID, nil
+	}); err != nil {
 		t.Fatal("retained override lost pin or process identity", restarted, err)
 	}
 	// Restoring the majority recovers activation and keeps acknowledged values.

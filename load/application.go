@@ -7,10 +7,14 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
+// ReplicaRef identifies a replica within a load group.
 type ReplicaRef struct {
 	GroupID   string
 	ReplicaID uint64
 }
+
+// ReplicaSpec supplies an application factory with the exact approved replica
+// and node identity.
 type ReplicaSpec struct {
 	Identity        storage.Identity
 	Node            topology.Identity
@@ -20,40 +24,21 @@ type ReplicaSpec struct {
 
 // Application transfers machine lifetime ownership from a successful factory
 // to Node. Close is idempotent, bounded by its context, and runs after engine
-// work has joined. A failed Close retains ownership and prevents a successor.
+// and Run work has joined. A failed Close retains ownership and prevents a
+// successor.
 // Callbacks may read status or RequestStop; they must not wait for their own
 // group's lifecycle or a Stop that has to join them.
 type Application struct {
 	StateMachine StateMachine
-	Close        func(context.Context) error
-}
-type RetirementReason string
-
-const (
-	RetirementTopology    RetirementReason = "topology"
-	RetirementReadmission RetirementReason = "readmission"
-)
-
-// RetirementRequest authorizes cleanup of one exact application's retained
-// replica resources. Topology and readmission proofs are deliberately distinct.
-type RetirementRequest struct {
-	Grant                             topology.AuthorityGrant
-	Identity                          storage.Identity
-	Reason                            RetirementReason
-	Authorization                     *topology.AuthorizedStep
-	AdmissionID                       string
-	PreviousMemberID, GrantedMemberID uint64
-}
-
-// RetirementResult echoes the entire verified tuple. Verified is meaningful
-// only after the callback has verified its own durable application identity.
-// Idempotent verification must also succeed after already-completed cleanup.
-type RetirementResult struct {
-	Grant                             topology.AuthorityGrant
-	Identity                          storage.Identity
-	Reason                            RetirementReason
-	Authorization                     *topology.AuthorizedStep
-	AdmissionID                       string
-	PreviousMemberID, GrantedMemberID uint64
-	Verified                          bool
+	// Run is optional background work for this exact managed replica. Node
+	// invokes it after replay, startup authorization and handle publication.
+	// Its context ends on replica stop, failure, fencing or Node shutdown, not
+	// leadership loss. Run must join its children before returning and must not
+	// wait for teardown
+	// that joins itself. Node joins Run and the engine before calling Close.
+	// A nil return completes the work without restarting it. An unexpected
+	// error
+	// fails and holds this replica until an explicit StartLoadGroup retries it.
+	Run   func(context.Context, *Group) error
+	Close func(context.Context) error
 }

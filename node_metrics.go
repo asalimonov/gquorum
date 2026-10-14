@@ -2,6 +2,7 @@ package gquorum
 
 import (
 	"context"
+
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/observe"
 	"github.com/asalimonov/gquorum/metrics"
@@ -17,6 +18,7 @@ func (n *node) localLoadMetrics() []metrics.ReplicaObservation {
 	}
 	return h.LocalMetrics()
 }
+
 func (n *node) loadMetricsReads(ctx context.Context, doc topology.Document) []observe.ReplicaRead {
 	n.mu.RLock()
 	h := n.host
@@ -35,6 +37,7 @@ func (c *clusterView) Metrics() metrics.ClusterSnapshot {
 	}
 	return m.Metrics()
 }
+
 func (c *clusterView) MetricsHistory(q metrics.HistoryQuery) (metrics.HistoryPage, error) {
 	c.node.mu.RLock()
 	m := c.node.meta

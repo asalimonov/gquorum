@@ -7,14 +7,23 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/lifecycle"
 	"github.com/asalimonov/gquorum/load"
-	"github.com/asalimonov/gquorum/policy"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
+// LifecycleObservation reports local readiness and applied self-removal evidence.
+type LifecycleObservation struct {
+	Ready   bool
+	Removal *topology.SelfRemovalStatus
+}
+
 // Lifecycle is a local copied observation for Node's owner. It performs no I/O.
-func (g *Group) Lifecycle() (ready bool, terminal error, removal *topology.SelfRemovalStatus) {
+func (g *Group) Lifecycle() (LifecycleObservation, error) {
+	var ready bool
+	var removal *topology.SelfRemovalStatus
+	var terminal error
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	select {
@@ -25,42 +34,60 @@ func (g *Group) Lifecycle() (ready bool, terminal error, removal *topology.SelfR
 	terminal = g.terminal
 	if core := g.engine.Load(); terminal == nil && core != nil && !g.quiescing {
 		// Readmission deliberately joins the former engine before replacing its
-		// pointer. Normal stop is not an asynchronous failure of the new lifetime.
+		// pointer. Normal stop is not an asynchronous failure of the new
+		// lifetime.
 		if err := core.Error(); !errors.Is(err, fault.ErrStopped) {
 			terminal = err
 		}
 	}
 	if g.selfRemoval != nil {
-		copy := *g.selfRemoval
-		removal = &copy
+		removalCopy := *g.selfRemoval
+		removal = &removalCopy
 	}
-	return ready && terminal == nil && removal == nil && !g.quiescing, terminal, removal
+	return LifecycleObservation{Ready: ready && terminal == nil && removal == nil && !g.quiescing,
+		Removal: removal}, terminal
 }
 
-func (g *Group) Readiness(started time.Time) policy.ReadinessInput {
-	ready, _, _ := g.Lifecycle()
-	in := policy.ReadinessInput{Now: time.Now().UTC(), StartedAt: started, Identity: g.Identity(), FirstBootstrap: g.firstBootstrap, Admitted: ready, Recovered: ready, SessionLive: g.OwnSessionLive()}
+// Readiness assembles owned local admission and founder observations for
+// lifecycle hooks.
+func (g *Group) Readiness(started time.Time) lifecycle.ReadinessInput {
+	observed, _ := g.Lifecycle()
+	in := lifecycle.ReadinessInput{
+		Now:            time.Now().UTC(),
+		StartedAt:      started,
+		Identity:       g.Identity(),
+		FirstBootstrap: g.firstBootstrap,
+		Admitted:       observed.Ready,
+		Recovered:      observed.Ready,
+		SessionLive:    g.OwnSessionLive(),
+	}
 	if !in.FirstBootstrap {
 		return in
 	}
 	active := g.state().Active()
 	observation := g.HealthObservation()
-	fresh := active.Version != 0 && observation.Version == active.Version && !observation.At.IsZero() && in.Now.Sub(observation.At) <= g.opts.SessionTTL
+	fresh := active.Version != 0 && observation.Version == active.Version && !observation.At.IsZero() &&
+		in.Now.Sub(observation.At) <= g.opts.SessionTTL
 	for _, founder := range g.opts.Founders {
-		if !fresh || active.MemberID(founder.Node.Name) != founder.MemberID || observation.Nodes[founder.Node.Name] != topology.HealthAlive {
-			in.MissingFounders = append(in.MissingFounders, topology.Identity{ClusterID: in.Identity.ClusterID, NodeName: founder.Node.Name, MemberID: founder.MemberID})
+		if !fresh || observation.Nodes[founder.Node.Name] != topology.HealthAlive ||
+			active.MemberID(founder.Node.Name) != founder.MemberID {
+			in.MissingFounders = append(in.MissingFounders,
+				topology.Identity{ClusterID: in.Identity.ClusterID, NodeName: founder.Node.Name,
+					MemberID: founder.MemberID})
 		}
 	}
 	return in
 }
 
+// LoadAssignments returns approved local load assignments for the exact
+// admitted member.
 func (g *Group) LoadAssignments(ctx context.Context) ([]load.ReplicaRef, error) {
 	if err := g.ensureRunning(ctx); err != nil {
 		return nil, err
 	}
 	own := g.Identity()
 	target := g.state().Target()
-	if target.MemberID(own.NodeName) != own.MemberID || own.MemberID == 0 {
+	if own.MemberID == 0 || target.MemberID(own.NodeName) != own.MemberID {
 		return nil, fault.ErrReplicaNotReady
 	}
 	var refs []load.ReplicaRef
@@ -74,11 +101,14 @@ func (g *Group) LoadAssignments(ctx context.Context) ([]load.ReplicaRef, error) 
 	return refs, nil
 }
 
+// ValidateLoadNode verifies an exact current node incarnation before load
+// dispatch.
 func (g *Group) ValidateLoadNode(ctx context.Context, id topology.Identity) error {
 	if err := g.ensureRunning(ctx); err != nil {
 		return err
 	}
-	if id == g.Identity() && id.MemberID != 0 {
+	identity := g.Identity()
+	if id == identity && id.MemberID != 0 {
 		return nil
 	}
 	current, found := g.state().ProcessIdentity(id.NodeName)
@@ -91,6 +121,8 @@ func (g *Group) ValidateLoadNode(ctx context.Context, id topology.Identity) erro
 	return nil
 }
 
+// ValidateLoadPeer verifies current process identity and an exact admitted load
+// catalog entry.
 func (g *Group) ValidateLoadPeer(ctx context.Context, peer load.Peer) error {
 	if err := g.ValidateLoadNode(ctx, peer.Node); err != nil {
 		return err
@@ -99,7 +131,12 @@ func (g *Group) ValidateLoadPeer(ctx context.Context, peer load.Peer) error {
 	if err != nil {
 		return err
 	}
-	id := storage.Identity{ClusterID: peer.Node.ClusterID, NodeName: peer.Node.NodeName, GroupID: peer.Replica.GroupID, ReplicaID: peer.Replica.ReplicaID}
+	id := storage.Identity{
+		ClusterID: peer.Node.ClusterID,
+		NodeName:  peer.Node.NodeName,
+		GroupID:   peer.Replica.GroupID,
+		ReplicaID: peer.Replica.ReplicaID,
+	}
 	if !slices.Contains(catalog, id) {
 		// A current sender can observe an approval before this receiver applies
 		// it. Refuse the unrecognized replica without turning observation lag
@@ -109,8 +146,9 @@ func (g *Group) ValidateLoadPeer(ctx context.Context, peer load.Peer) error {
 	return nil
 }
 
-// Resolution can route old approved cleanup identities. Incoming Raft uses the
-// stricter current catalog above; cleanup still requires an exact approved step.
+// ResolveLoadPeer can route old approved cleanup identities. Incoming Raft uses
+// the stricter current catalog above; cleanup still requires an exact approved
+// step.
 func (g *Group) ResolveLoadPeer(ctx context.Context, ref load.ReplicaRef) (load.Peer, error) {
 	catalog, err := g.LoadCatalog(ctx, ref.GroupID)
 	if err != nil {
@@ -128,15 +166,7 @@ func (g *Group) ResolveLoadPeer(ctx context.Context, ref load.ReplicaRef) (load.
 		if err != nil {
 			return load.Peer{}, err
 		}
-		for _, group := range groups {
-			if group.ID == ref.GroupID {
-				for _, replica := range group.Replicas {
-					if replica.ReplicaID == ref.ReplicaID {
-						name = replica.NodeName
-					}
-				}
-			}
-		}
+		name = recoveryLoadPeerName(groups, ref)
 	}
 	if name == "" || ref.ReplicaID == 0 {
 		return load.Peer{}, fault.ErrIdentityMismatch
@@ -150,4 +180,18 @@ func (g *Group) ResolveLoadPeer(ctx context.Context, ref load.ReplicaRef) (load.
 		}
 	}
 	return load.Peer{Node: id, Replica: ref}, nil
+}
+
+func recoveryLoadPeerName(groups []topology.Group, ref load.ReplicaRef) string {
+	name := ""
+	for _, group := range groups {
+		if group.ID == ref.GroupID {
+			for _, replica := range group.Replicas {
+				if replica.ReplicaID == ref.ReplicaID {
+					name = replica.NodeName
+				}
+			}
+		}
+	}
+	return name
 }

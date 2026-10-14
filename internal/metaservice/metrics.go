@@ -3,13 +3,14 @@ package metaservice
 import (
 	"context"
 	"encoding/json"
+	"slices"
+
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metapb"
 	"github.com/asalimonov/gquorum/internal/metatransport"
 	"github.com/asalimonov/gquorum/internal/observe"
 	"github.com/asalimonov/gquorum/metrics"
 	"github.com/asalimonov/gquorum/topology"
-	"slices"
 )
 
 // localReplicaMetrics is intentionally served by voters and stable learners.
@@ -19,7 +20,12 @@ func (g *Group) localReplicaMetrics(ctx context.Context, header *metapb.Header) 
 	if header == nil {
 		return metatransport.Reply(fault.ErrInvalid)
 	}
-	peer := topology.Identity{ClusterID: header.ClusterId, NodeName: header.NodeName, MemberID: header.MemberId, InstanceID: header.InstanceId}
+	peer := topology.Identity{
+		ClusterID:  header.ClusterId,
+		NodeName:   header.NodeName,
+		MemberID:   header.MemberId,
+		InstanceID: header.InstanceId,
+	}
 	if err := g.ValidateLoadNode(ctx, peer); err != nil {
 		return metatransport.Reply(err)
 	}
@@ -57,12 +63,15 @@ func (g *Group) localReplicaMetrics(ctx context.Context, header *metapb.Header) 
 	return &metapb.Reply{Data: encoded}
 }
 
+// Metrics returns an owned local and collected metrics snapshot.
 func (g *Group) Metrics() metrics.ClusterSnapshot {
 	if g == nil || g.collector == nil {
 		return (metrics.ClusterSnapshot{}).Clone()
 	}
 	return g.collector.Snapshot()
 }
+
+// MetricsHistory reads a bounded page of retained replica observation history.
 func (g *Group) MetricsHistory(q metrics.HistoryQuery) (metrics.HistoryPage, error) {
 	if g == nil || g.collector == nil {
 		return metrics.HistoryPage{}, fault.ErrHistoryUnavailable
@@ -71,29 +80,39 @@ func (g *Group) MetricsHistory(q metrics.HistoryQuery) (metrics.HistoryPage, err
 }
 func (g *Group) localMetrics() []metrics.ReplicaObservation {
 	out := []metrics.ReplicaObservation{}
-	engine := g.engine.Load()
-	if engine != nil && engine.Running() {
-		id := g.currentIdentity()
-		doc := g.state().Active()
-		if group := doc.MetaGroup(); group != nil {
-			for _, r := range group.Replicas {
-				if r.NodeName == id.NodeName && r.ReplicaID == id.MemberID {
-					sample := engine.Metrics()
-					select {
-					case <-g.ready:
-					default:
-						sample.Sample.Ready = false
-					}
-					out = append(out, sample)
-					break
-				}
-			}
-		}
+	if sample, found := g.localMetaMetrics(); found {
+		out = append(out, sample)
 	}
 	if g.opts.LocalLoadMetrics != nil {
 		out = append(out, g.opts.LocalLoadMetrics()...)
 	}
 	return out
+}
+
+func (g *Group) localMetaMetrics() (metrics.ReplicaObservation, bool) {
+	engine := g.engine.Load()
+	if engine == nil || !engine.Running() {
+		return metrics.ReplicaObservation{}, false
+	}
+	id := g.currentIdentity()
+	doc := g.state().Active()
+	group := doc.MetaGroup()
+	if group == nil {
+		return metrics.ReplicaObservation{}, false
+	}
+	for _, r := range group.Replicas {
+		if r.NodeName != id.NodeName || r.ReplicaID != id.MemberID {
+			continue
+		}
+		sample := engine.Metrics()
+		select {
+		case <-g.ready:
+		default:
+			sample.Sample.Ready = false
+		}
+		return sample, true
+	}
+	return metrics.ReplicaObservation{}, false
 }
 
 type metricsSource struct {
@@ -114,9 +133,16 @@ func (s *metricsSource) Epoch() (observe.LeaderEpoch, bool) {
 	}
 	status := engine.Status()
 	own := s.g.currentIdentity()
-	return observe.LeaderEpoch{InstanceID: own.InstanceID, Term: status.Term, LeaderID: status.LeaderID}, engine.Running() && status.LeaderID == own.MemberID && status.Term != 0 && s.g.IsLeader()
+	running := engine.Running()
+	return observe.LeaderEpoch{
+		InstanceID: own.InstanceID,
+		Term:       status.Term,
+		LeaderID:   status.LeaderID,
+	}, running && status.LeaderID == own.MemberID && status.Term != 0 && s.g.IsLeader()
 }
-func (s *metricsSource) Collect(ctx context.Context, doc topology.Document, pool *observe.ReadPool) (observe.Round, error) {
+
+func (s *metricsSource) Collect(ctx context.Context, doc topology.Document,
+	pool *observe.ReadPool) (observe.Round, error) {
 	epoch, _ := s.Epoch()
 	round := observe.Round{ActiveVersion: doc.Version, Epoch: epoch, Groups: map[string]observe.GroupSamples{}}
 	reads := []observe.ReplicaRead{}
@@ -125,67 +151,7 @@ func (s *metricsSource) Collect(ctx context.Context, doc topology.Document, pool
 		for _, r := range group.Replicas {
 			key := topology.ReplicaKey{NodeName: r.NodeName, ReplicaID: r.ReplicaID}
 			kept[key] = true
-			own := s.g.currentIdentity()
-			pin, found := s.g.state().ProcessIdentity(r.NodeName)
-			if r.NodeName == own.NodeName {
-				pin, found = own, true
-			}
-			if pin.MemberID != r.ReplicaID || pin.ClusterID != doc.ClusterID {
-				delete(s.pins, key)
-				found = false
-			} else if found {
-				s.pins[key] = pin
-			} else {
-				pin, found = s.pins[key]
-			}
-			id := metrics.ReplicaIdentity{ClusterID: doc.ClusterID, GroupID: topology.MetaGroupID, NodeName: r.NodeName, ReplicaID: r.ReplicaID}
-			read := observe.ReplicaRead{Identity: id, Error: fault.ErrReplicaNotReady}
-			if found {
-				id.InstanceID = pin.InstanceID
-				read.Identity = id
-				read.Error = nil
-				read.Read = func(ctx context.Context, attempt *observe.ReadAttempt) (observe.Probe, error) {
-					var observation metrics.ReplicaObservation
-					if pin == s.g.currentIdentity() {
-						attempt.Dispatch()
-						for _, local := range s.g.localMetrics() {
-							if local.Sample.Identity.GroupID == topology.MetaGroupID {
-								observation = local
-								break
-							}
-						}
-					} else {
-						address, err := s.g.resolveMember(ctx, r.ReplicaID)
-						if err != nil {
-							return observe.Probe{}, err
-						}
-						// A newly known process must never inherit this old process's probe.
-						current, known := s.g.state().ProcessIdentity(r.NodeName)
-						if known && current != pin {
-							return observe.Probe{}, fault.ErrIdentityMismatch
-						}
-						attempt.Dispatch()
-						reply, err := s.g.transport.CallAddress(ctx, address, "MetaReplicaMetrics", nil)
-						if err != nil {
-							return observe.Probe{}, err
-						}
-						if err := metatransport.ReplyError(reply); err != nil {
-							return observe.Probe{}, err
-						}
-						var sample metrics.ReplicaSample
-						if err := json.Unmarshal(reply.Data, &sample); err != nil {
-							return observe.Probe{}, fault.New(fault.Unreadable, "invalid meta metrics", err)
-						}
-						observation = metrics.ReplicaObservation{State: metrics.Current, Sample: sample, Reachability: "alive"}
-					}
-					got := observation.Sample.Identity
-					if got.ClusterID != id.ClusterID || got.GroupID != id.GroupID || got.NodeName != id.NodeName || got.ReplicaID != id.ReplicaID || got.InstanceID != id.InstanceID || got.RunID == "" {
-						return observe.Probe{}, fault.ErrIdentityMismatch
-					}
-					return observe.Probe{Reachability: "alive", Observation: observation}, nil
-				}
-			}
-			reads = append(reads, read)
+			reads = append(reads, s.metaMetricsRead(doc, r))
 		}
 	}
 	for key := range s.pins {
@@ -196,7 +162,9 @@ func (s *metricsSource) Collect(ctx context.Context, doc topology.Document, pool
 	if s.g.opts.LoadMetricsReads != nil {
 		reads = append(reads, s.g.opts.LoadMetricsReads(ctx, doc)...)
 	}
-	probes, next := observe.CollectReads(ctx, pool, reads, s.cursor, s.g.opts.Metrics.MaxParallelReads, s.g.opts.Metrics.MaxSampleAge)
+	options := observe.ReadOptions{Start: s.cursor, Parallel: s.g.opts.Metrics.MaxParallelReads,
+		MaxAge: s.g.opts.Metrics.MaxSampleAge}
+	probes, next := observe.CollectReads(ctx, pool, reads, options)
 	s.cursor = next
 	for _, probe := range probes {
 		id := probe.Identity.GroupID
@@ -206,4 +174,91 @@ func (s *metricsSource) Collect(ctx context.Context, doc topology.Document, pool
 		round.Groups[id] = group
 	}
 	return round, nil
+}
+
+func (s *metricsSource) metricsPin(doc topology.Document, r topology.Replica) (topology.Identity, bool) {
+	key := topology.ReplicaKey{NodeName: r.NodeName, ReplicaID: r.ReplicaID}
+	own := s.g.currentIdentity()
+	pin, found := s.g.state().ProcessIdentity(r.NodeName)
+	if r.NodeName == own.NodeName {
+		pin, found = own, true
+	}
+	if pin.MemberID != r.ReplicaID || pin.ClusterID != doc.ClusterID {
+		delete(s.pins, key)
+		return pin, false
+	}
+	if found {
+		s.pins[key] = pin
+	} else {
+		pin, found = s.pins[key]
+	}
+	return pin, found
+}
+
+func (s *metricsSource) metaMetricsRead(doc topology.Document, r topology.Replica) observe.ReplicaRead {
+	pin, found := s.metricsPin(doc, r)
+	id := metrics.ReplicaIdentity{
+		ClusterID: doc.ClusterID, GroupID: topology.MetaGroupID, NodeName: r.NodeName, ReplicaID: r.ReplicaID,
+	}
+	if !found {
+		return observe.ReplicaRead{Identity: id, Error: fault.ErrReplicaNotReady}
+	}
+	id.InstanceID = pin.InstanceID
+	return observe.ReplicaRead{Identity: id,
+		Read: func(ctx context.Context, attempt *observe.ReadAttempt) (observe.Probe, error) {
+			return s.readMetaMetrics(ctx, attempt, pin, id)
+		},
+	}
+}
+
+func (s *metricsSource) readMetaMetrics(ctx context.Context, attempt *observe.ReadAttempt,
+	pin topology.Identity, id metrics.ReplicaIdentity) (observe.Probe, error) {
+	var observation metrics.ReplicaObservation
+	if pin == s.g.currentIdentity() {
+		attempt.Dispatch()
+		for _, local := range s.g.localMetrics() {
+			if local.Sample.Identity.GroupID == topology.MetaGroupID {
+				observation = local
+				break
+			}
+		}
+	} else {
+		var err error
+		observation, err = s.remoteMetaMetrics(ctx, attempt, pin, id)
+		if err != nil {
+			return observe.Probe{}, err
+		}
+	}
+	got := observation.Sample.Identity
+	if got.ClusterID != id.ClusterID || got.GroupID != id.GroupID || got.NodeName != id.NodeName ||
+		got.ReplicaID != id.ReplicaID || got.InstanceID != id.InstanceID || got.RunID == "" {
+		return observe.Probe{}, fault.ErrIdentityMismatch
+	}
+	return observe.Probe{Reachability: "alive", Observation: observation}, nil
+}
+
+func (s *metricsSource) remoteMetaMetrics(ctx context.Context, attempt *observe.ReadAttempt,
+	pin topology.Identity, id metrics.ReplicaIdentity) (metrics.ReplicaObservation, error) {
+	address, err := s.g.resolveMember(ctx, id.ReplicaID)
+	if err != nil {
+		return metrics.ReplicaObservation{}, err
+	}
+	// A newly known process must never inherit this old process's probe.
+	current, known := s.g.state().ProcessIdentity(id.NodeName)
+	if known && current != pin {
+		return metrics.ReplicaObservation{}, fault.ErrIdentityMismatch
+	}
+	attempt.Dispatch()
+	reply, err := s.g.transport.CallAddress(ctx, address, "MetaReplicaMetrics", nil)
+	if err != nil {
+		return metrics.ReplicaObservation{}, err
+	}
+	if err := metatransport.ReplyError(reply); err != nil {
+		return metrics.ReplicaObservation{}, err
+	}
+	var sample metrics.ReplicaSample
+	if err := json.Unmarshal(reply.Data, &sample); err != nil {
+		return metrics.ReplicaObservation{}, fault.New(fault.Unreadable, "invalid meta metrics", err)
+	}
+	return metrics.ReplicaObservation{State: metrics.Current, Sample: sample, Reachability: "alive"}, nil
 }

@@ -17,8 +17,8 @@ import (
 	"github.com/asalimonov/gquorum/internal/loadhandle"
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metastore"
+	"github.com/asalimonov/gquorum/lifecycle"
 	"github.com/asalimonov/gquorum/load"
-	"github.com/asalimonov/gquorum/policy"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/storage/walstore"
 	"github.com/asalimonov/gquorum/topology"
@@ -63,11 +63,11 @@ func newFixtureAt(t *testing.T, name string, member uint64) *fixture {
 			}
 			return scope, ctx.Err()
 		},
-		LookupRecord: func(ctx context.Context, id string) (metastore.ReplicaRecord, bool, error) {
+		LookupRecord: func(ctx context.Context, id string) (metastore.ReplicaLookup, error) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
 			r, ok := f.records[id]
-			return r, ok, ctx.Err()
+			return metastore.ReplicaLookup{Record: r, Found: ok}, ctx.Err()
 		},
 		RecordReplica: func(ctx context.Context, group string, record metastore.ReplicaRecord, previous uint64) error {
 			f.mu.Lock()
@@ -109,9 +109,9 @@ func newFixtureAt(t *testing.T, name string, member uint64) *fixture {
 			return ctx.Err()
 		},
 	}
-	lifecycle, err := policy.NewDefaultLifecycle(policy.DefaultLifecycleOptions{})
+	hooks, err := lifecycle.NewDefaultHooks(lifecycle.DefaultOptions{})
 	must(t, err)
-	f.cfg.Retirement, f.cfg.Retention = s, lifecycle.Retention
+	f.cfg.Retirement, f.cfg.Retention = s, hooks.Retention
 	f.cfg.Catalog = func(ctx context.Context, group string) ([]storage.Identity, error) {
 		f.mu.Lock()
 		defer f.mu.Unlock()

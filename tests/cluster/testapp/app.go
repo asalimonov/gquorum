@@ -16,8 +16,9 @@ import (
 	"github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/lifecycle"
 	"github.com/asalimonov/gquorum/load"
-	"github.com/asalimonov/gquorum/policy"
+	"github.com/asalimonov/gquorum/scheduling"
 	"github.com/asalimonov/gquorum/storage/walstore"
 	"github.com/asalimonov/gquorum/tests/cluster/testapp/loadpb"
 	"github.com/asalimonov/gquorum/topology"
@@ -82,14 +83,14 @@ func (c config) nodeForPeer(p peer) topology.Node {
 
 // The caller retains a cluster-affiliation marker separately from Raft storage.
 // Retained stores resume their pin; missing stores on established nodes join.
-// Malformed or foreign markers fail closed; this is fixture startup policy.
+// Malformed or foreign markers fail closed; this is fixture startup lifecycle.
 func (c *config) recoverBootMode() (bool, error) {
-	pin, found, err := gquorum.LoadStoredIdentity(c.DataDir)
+	pin, err := gquorum.LoadStoredIdentity(c.DataDir)
 	if err != nil {
 		return false, err
 	}
-	if found {
-		if pin.ClusterID != c.ClusterID || pin.NodeName != c.NodeName {
+	if pin.Found {
+		if pin.Identity.ClusterID != c.ClusterID || pin.Identity.NodeName != c.NodeName {
 			return false, fault.ErrIdentityMismatch
 		}
 		// Resume directly, without founding declarations that could conflict with a
@@ -120,7 +121,7 @@ func (a *application) markEstablished() {
 			status.SelfRemoval.MemberID == status.Identity.MemberID && status.SelfRemoval.Version != 0 && status.SelfRemoval.AppliedIndex != 0 {
 			// An admission can be superseded before serving. Keep authenticated
 			// control available until the library finishes required retirement
-			// and invokes the configured removal policy.
+			// and invokes the configured removal lifecycle.
 			return
 		}
 		select {
@@ -274,16 +275,16 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 	if placement.MinReplicas == 0 {
 		placement = topology.PlacementRule{MinReplicas: 1, MaxReplicas: 3}
 	}
-	lifecycleOptions := policy.DefaultLifecycleOptions{}
+	lifecycleOptions := lifecycle.DefaultOptions{}
 	if cfg.GateFounders {
-		lifecycleOptions.Startup = policy.AllFounders
+		lifecycleOptions.Startup = lifecycle.AllFounders
 		lifecycleOptions.FoundersTimeout = cfg.FoundingTimeout
 	}
-	defaults, err := policy.NewDefaultLifecycle(lifecycleOptions)
+	defaults, err := lifecycle.NewDefaultHooks(lifecycleOptions)
 	if err != nil {
 		return nil, err
 	}
-	var scheduler policy.Scheduler
+	var scheduler scheduling.RepairPolicy
 	if cfg.CallerScheduler {
 		a.callerScheduler = &fixtureScheduler{reason: "caller-policy-" + cfg.NodeName}
 		scheduler = a.callerScheduler
@@ -294,6 +295,8 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 			return nil, err
 		}
 	}
+	scheduleOptions := cfg.Scheduling
+	scheduleOptions.Policy = scheduler
 	a.node, err = gquorum.NewNode(gquorum.NodeOptions{
 		StorageDir: cfg.DataDir,
 		Identity:   topology.Identity{NodeName: cfg.NodeName, ClusterID: cfg.ClusterID, InstanceID: cfg.InstanceID, MemberID: member},
@@ -306,7 +309,8 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 		Loads: gquorum.LoadOptions{Factory: a.newReplica, Retire: a.retireReplica, Transport: loadTransport{app: a},
 			Storage: gquorum.LoadStorageOptions{Store: &fixtureStore{Store: a.store, app: a}, Retirement: a.store},
 			Engine:  load.EngineOptions{Timing: load.Timing{TickInterval: cfg.TickInterval, ElectionTicks: 10, WALWriteWait: cfg.WALWriteWait}, SnapshotThreshold: cfg.SnapshotThreshold, ProposalTimeout: cfg.ProposalTimeout}},
-		Policies: gquorum.PolicyOptions{Scheduler: scheduler, Scheduling: cfg.Scheduling, Lifecycle: &fixtureLifecycle{DefaultLifecycle: defaults, app: a}},
+		Scheduling: scheduleOptions,
+		Lifecycle:  lifecycle.Options{Hooks: &fixtureLifecycle{DefaultHooks: defaults, app: a}},
 	})
 	if err != nil {
 		return nil, err
@@ -539,9 +543,9 @@ func (a *application) bootstrap() {
 	}
 }
 func (a *application) bootstrapOnce(ctx context.Context) (bool, error) {
-	workersPolicy := topology.DefaultVoterPolicy()
-	workersPolicy.TargetVoters = 2
-	for _, spec := range []gquorum.GroupSpec{{ID: "demo"}, {ID: "workers", VoterPolicy: &workersPolicy, Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}}}} {
+	workersConfig := topology.DefaultVoterConfig()
+	workersConfig.TargetVoters = 2
+	for _, spec := range []gquorum.GroupSpec{{ID: "demo"}, {ID: "workers", VoterConfig: &workersConfig, Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}}}} {
 		latest, err := a.cluster.Latest(ctx)
 		if err != nil {
 			return false, err

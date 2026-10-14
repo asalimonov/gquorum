@@ -55,8 +55,13 @@ func loadIngressAndAccounting(t *testing.T, size int) {
 	}
 	for i, group := range groups {
 		leader := c.Spec.Nodes[i].Name
-		response, err := c.Request(ctx, c.Spec.Nodes[size-1].Name, "POST", "/api/groups/"+group+"/leader/"+leader, nil, 0)
-		if err := requireStatus(response, err, 200); err != nil {
+		if err := Poll(ctx, func() (bool, error) {
+			response, err := c.Request(ctx, c.Spec.Nodes[size-1].Name, "POST", "/api/groups/"+group+"/leader/"+leader, nil, 0)
+			if err != nil || response.Status == 503 {
+				return false, err
+			}
+			return true, requireStatus(response, nil, 200)
+		}); err != nil {
 			t.Fatal(err)
 		}
 		if err := Poll(ctx, func() (bool, error) {
@@ -148,8 +153,7 @@ func loadIngressAndAccounting(t *testing.T, size int) {
 	// earlier acknowledged values must survive and remain in their own group.
 	for i, group := range groups {
 		leader := c.Spec.Nodes[1-i].Name
-		response, err := c.Request(ctx, "node3", "POST", "/api/groups/"+group+"/leader/"+leader, nil, 0)
-		if err := requireStatus(response, err, 200); err != nil {
+		if err := requestLeaderTransfer(ctx, c, "node3", group, leader); err != nil {
 			t.Fatal(err)
 		}
 		if err := Poll(ctx, func() (bool, error) {

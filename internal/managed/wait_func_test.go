@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func await(t *testing.T, ctx context.Context, condition func() bool) {
+func await(ctx context.Context, t *testing.T, condition func() bool) {
 	t.Helper()
 	tick := time.NewTicker(5 * time.Millisecond)
 	defer tick.Stop()

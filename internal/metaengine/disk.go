@@ -2,8 +2,9 @@ package metaengine
 
 import (
 	"encoding/json"
-	"github.com/asalimonov/gquorum/topology"
 	"time"
+
+	"github.com/asalimonov/gquorum/topology"
 )
 
 // These schema-1 records deliberately retain their legacy JSON vocabulary.
@@ -70,6 +71,7 @@ type diskApplyResult struct {
 	Doc            topology.Document
 	ExecutionID    topology.OperatorID
 	Admission      diskAdmission
+	Placement      *topology.PlacementReport `json:"placement,omitempty"`
 }
 type diskOperatorTransition struct {
 	ExecutionID   topology.OperatorID    `json:"execution_id"`
@@ -85,26 +87,90 @@ type diskOperatorTransition struct {
 }
 
 func toDiskOperator(v topology.Operator) diskOperator {
-	return diskOperator{Status: diskOperatorStatus(v.Status), Plan: v.Plan, Actor: v.Actor, Origin: v.Origin, StartedAt: v.StartedAt, UpdatedAt: v.UpdatedAt}
+	return diskOperator{
+		Status:    diskOperatorStatus(v.Status),
+		Plan:      v.Plan,
+		Actor:     v.Actor,
+		Origin:    v.Origin,
+		StartedAt: v.StartedAt,
+		UpdatedAt: v.UpdatedAt,
+	}
 }
 func (d diskOperator) public() topology.Operator {
-	return topology.Operator{Status: topology.OperatorStatus(d.Status), Plan: d.Plan, Actor: d.Actor, Origin: d.Origin, StartedAt: d.StartedAt, UpdatedAt: d.UpdatedAt}
+	return topology.Operator{
+		Status:    topology.OperatorStatus(d.Status),
+		Plan:      d.Plan,
+		Actor:     d.Actor,
+		Origin:    d.Origin,
+		StartedAt: d.StartedAt,
+		UpdatedAt: d.UpdatedAt,
+	}
 }
 func toDiskAdmission(a AdmissionRecord) diskAdmission {
-	return diskAdmission{NodeName: a.NodeName, InstanceID: a.InstanceID, MemberID: a.MemberID, ExecutionID: a.OperatorID, State: a.State, ReadmissionInstanceID: a.ReadmissionInstanceID}
+	return diskAdmission{
+		NodeName:              a.NodeName,
+		InstanceID:            a.InstanceID,
+		MemberID:              a.MemberID,
+		ExecutionID:           a.OperatorID,
+		State:                 a.State,
+		ReadmissionInstanceID: a.ReadmissionInstanceID,
+	}
 }
 func (a diskAdmission) public() AdmissionRecord {
-	return AdmissionRecord{NodeName: a.NodeName, InstanceID: a.InstanceID, MemberID: a.MemberID, OperatorID: a.ExecutionID, State: a.State, ReadmissionInstanceID: a.ReadmissionInstanceID}
+	return AdmissionRecord{
+		NodeName:              a.NodeName,
+		InstanceID:            a.InstanceID,
+		MemberID:              a.MemberID,
+		OperatorID:            a.ExecutionID,
+		State:                 a.State,
+		ReadmissionInstanceID: a.ReadmissionInstanceID,
+	}
 }
 func toDiskTransition(t topology.OperatorTransition) diskOperatorTransition {
-	return diskOperatorTransition{ExecutionID: t.OperatorID, Version: t.Version, Attempt: t.Attempt, StepSeq: t.StepSeq, State: t.State, GroupID: t.GroupID, NodeName: t.NodeName, WaitingReason: t.WaitingReason, Error: t.Error, At: t.At}
+	return diskOperatorTransition{
+		ExecutionID:   t.OperatorID,
+		Version:       t.Version,
+		Attempt:       t.Attempt,
+		StepSeq:       t.StepSeq,
+		State:         t.State,
+		GroupID:       t.GroupID,
+		NodeName:      t.NodeName,
+		WaitingReason: t.WaitingReason,
+		Error:         t.Error,
+		At:            t.At,
+	}
 }
 func (t diskOperatorTransition) public() topology.OperatorTransition {
-	return topology.OperatorTransition{OperatorID: t.ExecutionID, Version: t.Version, Attempt: t.Attempt, StepSeq: t.StepSeq, State: t.State, GroupID: t.GroupID, NodeName: t.NodeName, WaitingReason: t.WaitingReason, Error: t.Error, At: t.At}
+	return topology.OperatorTransition{
+		OperatorID:    t.ExecutionID,
+		Version:       t.Version,
+		Attempt:       t.Attempt,
+		StepSeq:       t.StepSeq,
+		State:         t.State,
+		GroupID:       t.GroupID,
+		NodeName:      t.NodeName,
+		WaitingReason: t.WaitingReason,
+		Error:         t.Error,
+		At:            t.At,
+	}
 }
 
 func (s smState) MarshalJSON() ([]byte, error) {
-	d := metaDiskState{SchemaVersion: s.SchemaVersion, Rules: s.Rules, RetiredGroups: s.RetiredGroups, Allocations: s.Allocations, Latest: s.Latest, Target: s.Target, Active: s.Active, History: s.History, Sessions: s.Sessions, Locks: s.Locks, Activated: s.Activated, AppliedIndex: s.AppliedIndex, AppliedTerm: s.AppliedTerm}
+	d := metaDiskState{
+		SchemaVersion: s.SchemaVersion,
+		Rules:         s.Rules,
+		RetiredGroups: s.RetiredGroups,
+		Allocations:   s.Allocations,
+		Latest:        s.Latest,
+		Target:        s.Target,
+		Active:        s.Active,
+		History:       s.History,
+		Sessions:      s.Sessions,
+		Locks:         s.Locks,
+		Activated:     s.Activated,
+		AppliedIndex:  s.AppliedIndex,
+		AppliedTerm:   s.AppliedTerm,
+	}
 	d.AuthorityRecords, d.AuthorityFloors, d.Revocations = s.AuthorityRecords, s.AuthorityFloors, s.Revocations
 	d.VoterSwitches = s.VoterSwitches
 	if s.Operators != nil {
@@ -126,7 +192,21 @@ func (s *smState) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &d); err != nil {
 		return err
 	}
-	out := smState{SchemaVersion: d.SchemaVersion, Rules: d.Rules, RetiredGroups: d.RetiredGroups, Allocations: d.Allocations, Latest: d.Latest, Target: d.Target, Active: d.Active, History: d.History, Sessions: d.Sessions, Locks: d.Locks, Activated: d.Activated, AppliedIndex: d.AppliedIndex, AppliedTerm: d.AppliedTerm}
+	out := smState{
+		SchemaVersion: d.SchemaVersion,
+		Rules:         d.Rules,
+		RetiredGroups: d.RetiredGroups,
+		Allocations:   d.Allocations,
+		Latest:        d.Latest,
+		Target:        d.Target,
+		Active:        d.Active,
+		History:       d.History,
+		Sessions:      d.Sessions,
+		Locks:         d.Locks,
+		Activated:     d.Activated,
+		AppliedIndex:  d.AppliedIndex,
+		AppliedTerm:   d.AppliedTerm,
+	}
 	out.AuthorityRecords, out.AuthorityFloors, out.Revocations = d.AuthorityRecords, d.AuthorityFloors, d.Revocations
 	out.VoterSwitches = d.VoterSwitches
 	if d.Executions != nil {
@@ -144,23 +224,60 @@ func (s *smState) UnmarshalJSON(data []byte) error {
 	*s = out
 	return nil
 }
+
+// MarshalJSON preserves the retained result encoding and legacy execution field
+// names.
 func (r ApplyResult) MarshalJSON() ([]byte, error) {
-	return json.Marshal(diskApplyResult{Grants: r.Grants, Grant: r.Grant, ProposalID: r.ProposalID, CurrentVersion: r.CurrentVersion, Accepted: r.Accepted, Reason: r.Reason, Code: r.Code, Dropped: r.Dropped, Doc: r.Doc, ExecutionID: r.OperatorID, Admission: toDiskAdmission(r.Admission)})
+	return json.Marshal(diskApplyResult{
+		Grants:         r.Grants,
+		Grant:          r.Grant,
+		ProposalID:     r.ProposalID,
+		CurrentVersion: r.CurrentVersion,
+		Accepted:       r.Accepted,
+		Reason:         r.Reason,
+		Code:           r.Code,
+		Dropped:        r.Dropped,
+		Doc:            r.Doc,
+		ExecutionID:    r.OperatorID,
+		Admission:      toDiskAdmission(r.Admission),
+		Placement:      r.Placement,
+	})
 }
+
+// UnmarshalJSON restores result fields from the retained compatibility
+// encoding.
 func (r *ApplyResult) UnmarshalJSON(data []byte) error {
 	var d diskApplyResult
 	if err := json.Unmarshal(data, &d); err != nil {
 		return err
 	}
-	*r = ApplyResult{Grants: d.Grants, Grant: d.Grant, ProposalID: d.ProposalID, CurrentVersion: d.CurrentVersion, Accepted: d.Accepted, Reason: d.Reason, Code: d.Code, Dropped: d.Dropped, Doc: d.Doc, OperatorID: d.ExecutionID, Admission: d.Admission.public()}
+	*r = ApplyResult{
+		Grants:         d.Grants,
+		Grant:          d.Grant,
+		ProposalID:     d.ProposalID,
+		CurrentVersion: d.CurrentVersion,
+		Accepted:       d.Accepted,
+		Reason:         d.Reason,
+		Code:           d.Code,
+		Dropped:        d.Dropped,
+		Doc:            d.Doc,
+		OperatorID:     d.ExecutionID,
+		Admission:      d.Admission.public(),
+		Placement:      d.Placement,
+	}
 	return nil
 }
+
+// MarshalJSON encodes transitions with retained execution-protocol field names.
 func (p TransitionOperatorProposal) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Transition diskOperatorTransition `json:"transition"`
 		ProposalID string                 `json:"proposal_id"`
 	}{toDiskTransition(p.Transition), p.ProposalID})
 }
+
+// UnmarshalJSON restores a transition from its retained execution-protocol
+// encoding.
 func (p *TransitionOperatorProposal) UnmarshalJSON(data []byte) error {
 	var d struct {
 		Transition diskOperatorTransition `json:"transition"`
@@ -180,15 +297,21 @@ type diskActivateTarget struct {
 	ProposalID  string              `json:"proposal_id"`
 }
 
+// MarshalJSON preserves the execution ID field in activation proposals.
 func (p ActivateTargetProposal) MarshalJSON() ([]byte, error) {
-	return json.Marshal(diskActivateTarget{ExecutionID: p.OperatorID, Version: p.Version, Attempt: p.Attempt, ProposalID: p.ProposalID})
+	return json.Marshal(diskActivateTarget{ExecutionID: p.OperatorID, Version: p.Version, Attempt: p.Attempt,
+		ProposalID: p.ProposalID})
 }
+
+// UnmarshalJSON restores activation proposals from the retained execution ID
+// field.
 func (p *ActivateTargetProposal) UnmarshalJSON(data []byte) error {
 	var d diskActivateTarget
 	if err := json.Unmarshal(data, &d); err != nil {
 		return err
 	}
-	*p = ActivateTargetProposal{OperatorID: d.ExecutionID, Version: d.Version, Attempt: d.Attempt, ProposalID: d.ProposalID}
+	*p = ActivateTargetProposal{OperatorID: d.ExecutionID, Version: d.Version, Attempt: d.Attempt,
+		ProposalID: d.ProposalID}
 	return nil
 }
 
@@ -200,14 +323,30 @@ type diskReadyAdmission struct {
 	ProposalID  string              `json:"proposal_id"`
 }
 
+// MarshalJSON preserves the execution ID field in admission acknowledgements.
 func (p ReadyAdmissionProposal) MarshalJSON() ([]byte, error) {
-	return json.Marshal(diskReadyAdmission{NodeName: p.NodeName, InstanceID: p.InstanceID, MemberID: p.MemberID, ExecutionID: p.OperatorID, ProposalID: p.ProposalID})
+	return json.Marshal(diskReadyAdmission{
+		NodeName:    p.NodeName,
+		InstanceID:  p.InstanceID,
+		MemberID:    p.MemberID,
+		ExecutionID: p.OperatorID,
+		ProposalID:  p.ProposalID,
+	})
 }
+
+// UnmarshalJSON restores admission acknowledgements from their retained
+// encoding.
 func (p *ReadyAdmissionProposal) UnmarshalJSON(data []byte) error {
 	var d diskReadyAdmission
 	if err := json.Unmarshal(data, &d); err != nil {
 		return err
 	}
-	*p = ReadyAdmissionProposal{NodeName: d.NodeName, InstanceID: d.InstanceID, MemberID: d.MemberID, OperatorID: d.ExecutionID, ProposalID: d.ProposalID}
+	*p = ReadyAdmissionProposal{
+		NodeName:   d.NodeName,
+		InstanceID: d.InstanceID,
+		MemberID:   d.MemberID,
+		OperatorID: d.ExecutionID,
+		ProposalID: d.ProposalID,
+	}
 	return nil
 }

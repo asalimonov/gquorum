@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help test test-unit test-unit-race test-race test-function test-function-race test-functional test-functional-race test-example test-cluster test-cluster-build test-cluster-run test-perf test-perf-run bench run-example stop-example clean-example lint proto proto-check generate
+.PHONY: help test test-unit test-unit-race test-race test-function test-function-race test-functional test-functional-race test-example test-cluster test-cluster-build test-cluster-run test-perf test-perf-run bench run-example stop-example clean-example lint lint-tools lint-staged install-hooks proto proto-check generate
 
 # Bound concurrent filesystem fixtures while running independent unit cases.
 UNIT_PARALLEL ?= 8
@@ -21,29 +21,46 @@ UNIT_ARGS ?=
 help: ## List available targets and their descriptions
 	@awk 'BEGIN { FS = ":.*## "; print "Usage: make <target>\n\nTargets:" } /^[a-zA-Z0-9_-]+:.*## / { printf "  %-20s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
-test-unit: ## Run uncached unit tests in all three modules
+test-unit: ## Run uncached unit tests in all five modules
 	@python3 scripts/test_report.py unit --reports-dir "$(TEST_REPORTS_DIR)" --parallel=$(UNIT_PARALLEL) --packages=$(UNIT_PACKAGES) -- $(UNIT_ARGS)
 
 test-unit-race: ## Run unit tests with the race detector
 	@python3 scripts/test_report.py unit --race --reports-dir "$(TEST_REPORTS_DIR)" --parallel=$(UNIT_PARALLEL) --packages=$(UNIT_PACKAGES) -- $(UNIT_ARGS)
 
-test: test-unit ## Compile all three modules and run fast, uncached unit tests
+test: test-unit ## Compile all five modules and run fast, uncached unit tests
 
 test-race: test-unit-race ## Run fast unit tests with the race detector
 
 REVIVE := .tools/lint/revive-v1.17.1/revive
+REVIVE_PACKAGES := .tools/lint/revive-v1.17.1/revive-packages
+GOLANGCI := .tools/lint/golangci-v2.14.0/golangci-lint
 STATICCHECK := .tools/lint/staticcheck-v0.8.2/staticcheck
 
 $(REVIVE):
 	mkdir -p "$(dir $(REVIVE))"
 	GOBIN="$(CURDIR)/$(dir $(REVIVE))" go install github.com/mgechev/revive@v1.17.1
 
+$(GOLANGCI):
+	mkdir -p "$(dir $(GOLANGCI))"
+	GOBIN="$(CURDIR)/$(dir $(GOLANGCI))" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+
 $(STATICCHECK):
 	mkdir -p "$(dir $(STATICCHECK))"
 	GOBIN="$(CURDIR)/$(dir $(STATICCHECK))" go install honnef.co/go/tools/cmd/staticcheck@v0.8.2
 
-lint: $(REVIVE) $(STATICCHECK) ## Vet all build variants; check unreachable and unused code with pinned analyzers
-	python3 scripts/lint.py --revive "$(REVIVE)" --staticcheck "$(STATICCHECK)"
+$(REVIVE_PACKAGES): scripts/revive/main.go scripts/revive/go.mod scripts/revive/go.sum
+	cd scripts/revive && go build -o "$(CURDIR)/$(REVIVE_PACKAGES)" .
+
+lint: $(REVIVE) $(REVIVE_PACKAGES) $(STATICCHECK) $(GOLANGCI) ## Vet all variants; apply TiDB golangci rules to production and revive/unused checks to all sources
+	python3 scripts/lint.py --revive "$(REVIVE_PACKAGES)" --staticcheck "$(STATICCHECK)" --golangci "$(GOLANGCI)"
+
+lint-tools: $(REVIVE) $(REVIVE_PACKAGES) $(STATICCHECK) $(GOLANGCI) ## Install the pinned lint tools
+
+lint-staged: ## Lint staged Go files using their exact index contents
+	@python3 scripts/lint_staged.py
+
+install-hooks: ## Enable the repository's pre-commit lint hook
+	git config --local core.hooksPath .githooks
 
 test-function: ## Run isolated functional, protocol and storage tests
 	@python3 scripts/test_report.py function --reports-dir "$(TEST_REPORTS_DIR)" --parallel=$(FUNCTIONAL_PARALLEL) --packages=$(FUNCTIONAL_PACKAGES) --timeout=$(FUNCTIONAL_TIMEOUT) -- $(FUNCTIONAL_ARGS)
@@ -92,12 +109,39 @@ clean-example: ## Stop the Compose example and delete its data volumes
 generate: proto ## Generate protocol code with pinned Go generators
 
 # protoc is a development prerequisite; generators match the checked-in pins.
-proto: ## Generate meta and test-application protobuf code (requires protoc)
+proto: ## Generate meta, load adapter and test-application protocols (requires protoc)
 	mkdir -p .tools
 	GOBIN="$(CURDIR)/.tools" go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.10
 	GOBIN="$(CURDIR)/.tools" go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.1
 	PATH="$(CURDIR)/.tools:$$PATH" protoc --go_out=. --go_opt=module=github.com/asalimonov/gquorum --go-grpc_out=. --go-grpc_opt=module=github.com/asalimonov/gquorum internal/metapb/meta.proto
+	PATH="$(CURDIR)/.tools:$$PATH" protoc --go_out=. --go_opt=module=github.com/asalimonov/gquorum --go-grpc_out=. --go-grpc_opt=module=github.com/asalimonov/gquorum transport/loadgrpc/internal/loadpb/load.proto
 	PATH="$(CURDIR)/.tools:$$PATH" protoc --go_out=tests/cluster --go_opt=module=github.com/asalimonov/gquorum/tests/cluster --go-grpc_out=tests/cluster --go-grpc_opt=module=github.com/asalimonov/gquorum/tests/cluster tests/cluster/testapp/load.proto
 
 proto-check: proto ## Regenerate protocol code and verify it has no diff
-	git diff --exit-code -- internal/metapb tests/cluster/testapp/loadpb
+	git diff --exit-code -- internal/metapb transport/loadgrpc/internal/loadpb tests/cluster/testapp/loadpb
+
+.PHONY: run-scheduler-example stop-scheduler-example clean-scheduler-example test-scheduler-example
+run-scheduler-example: ## Build and run the three-node durable task scheduler
+	docker compose -f examples/scheduler/compose.yaml up --build -d --wait --wait-timeout 120
+
+stop-scheduler-example: ## Stop the scheduler example and preserve its data
+	docker compose -f examples/scheduler/compose.yaml down
+
+clean-scheduler-example: ## Stop the scheduler example and delete its own data volumes
+	docker compose -f examples/scheduler/compose.yaml down --volumes
+
+.PHONY: run-cache-example stop-cache-example clean-cache-example test-cache-example
+run-cache-example: ## Build and run the replicated in-memory cache with its load generator
+	docker compose -f examples/inmemory-cache/compose.yaml up --build -d --wait --wait-timeout 120
+
+stop-cache-example: ## Stop the cache example and preserve its Raft and topology volumes
+	docker compose -f examples/inmemory-cache/compose.yaml down
+
+clean-cache-example: ## Stop the cache example and delete its own volumes
+	docker compose -f examples/inmemory-cache/compose.yaml down --volumes
+
+test-scheduler-example: ## Verify scheduler execution, transfer, crashes and quorum recovery in Docker
+	@python3 scripts/test_report.py example --reports-dir "$(TEST_REPORTS_DIR)" --timeout=6m -- -run=^TestSchedulerExample
+
+test-cache-example: ## Verify cache recovery across one-node and full process restarts
+	@python3 scripts/test_report.py example --reports-dir "$(TEST_REPORTS_DIR)" --timeout=5m -- -run=^TestCacheExample

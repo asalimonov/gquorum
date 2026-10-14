@@ -18,13 +18,17 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
+// Response contains a fixture HTTP status, owned headers and bounded response body.
 type Response struct {
 	Status int
 	Header http.Header
 	Data   []byte
 }
 
+// Decode unmarshals the response body into the supplied target.
 func (r Response) Decode(target any) error { return json.Unmarshal(r.Data, target) }
+
+// Request calls a process endpoint with fixture authentication and an optional expected-version header.
 func (c *Cluster) Request(ctx context.Context, name, method, path string, body any, expected uint64) (Response, error) {
 	var response Response
 	node := c.Node(name)
@@ -68,6 +72,8 @@ func requireStatus(response Response, err error, status int) error {
 	}
 	return nil
 }
+
+// Document reads a named process's locally applied topology view.
 func (c *Cluster) Document(ctx context.Context, node, view string) (topology.Document, error) {
 	response, err := c.Request(ctx, node, "GET", "/api/topology/"+view, nil, 0)
 	var doc topology.Document
@@ -76,6 +82,8 @@ func (c *Cluster) Document(ctx context.Context, node, view string) (topology.Doc
 	}
 	return doc, response.Decode(&doc)
 }
+
+// Status reads cluster observations from a process endpoint.
 func (c *Cluster) Status(ctx context.Context, node string) (topology.ClusterStatus, error) {
 	response, err := c.Request(ctx, node, "GET", "/api/cluster/status", nil, 0)
 	var status topology.ClusterStatus
@@ -84,6 +92,8 @@ func (c *Cluster) Status(ctx context.Context, node string) (topology.ClusterStat
 	}
 	return status, response.Decode(&status)
 }
+
+// Operator reads an exact operator's observed execution status.
 func (c *Cluster) Operator(ctx context.Context, node string, id topology.OperatorID) (topology.OperatorStatus, error) {
 	response, err := c.Request(ctx, node, "GET", "/api/operators/"+string(id), nil, 0)
 	var status topology.OperatorStatus
@@ -92,6 +102,8 @@ func (c *Cluster) Operator(ctx context.Context, node string, id topology.Operato
 	}
 	return status, response.Decode(&status)
 }
+
+// Poll retries a condition until completion or cancellation, retaining the last observation error.
 func Poll(ctx context.Context, check func() (bool, error)) error {
 	ticker := time.NewTicker(60 * time.Millisecond)
 	defer ticker.Stop()
@@ -111,6 +123,8 @@ func Poll(ctx context.Context, check func() (bool, error)) error {
 		}
 	}
 }
+
+// WaitOperator waits for successful execution and rejects other terminal outcomes.
 func (c *Cluster) WaitOperator(ctx context.Context, node string, id topology.OperatorID) error {
 	return Poll(ctx, func() (bool, error) {
 		status, err := c.Operator(ctx, node, id)
@@ -123,6 +137,8 @@ func (c *Cluster) WaitOperator(ctx context.Context, node string, id topology.Ope
 		return status.State == topology.OperatorSucceeded, nil
 	})
 }
+
+// Mutate pins Latest, submits a mutation and waits for operator success and active convergence.
 func (c *Cluster) Mutate(ctx context.Context, node, method, path string, body any) (gquorum.MutationResult, error) {
 	var result gquorum.MutationResult
 	doc, err := c.Document(ctx, node, "latest")
@@ -143,6 +159,7 @@ func (c *Cluster) Mutate(ctx context.Context, node, method, path string, body an
 	return result, err
 }
 
+// WaitActive waits for every running process to observe the exact active version.
 func (c *Cluster) WaitActive(ctx context.Context, version uint64) error {
 	return Poll(ctx, func() (bool, error) {
 		for _, n := range c.Nodes() {
@@ -161,6 +178,7 @@ func (c *Cluster) WaitActive(ctx context.Context, version uint64) error {
 	})
 }
 
+// Stage submits a document to the fixture staging endpoint.
 func (c *Cluster) Stage(ctx context.Context, node string, doc topology.Document) (gquorum.MutationResult, error) {
 	var result gquorum.MutationResult
 	response, err := c.Request(ctx, node, "PUT", "/api/topology", doc, doc.Version)
@@ -170,6 +188,7 @@ func (c *Cluster) Stage(ctx context.Context, node string, doc topology.Document)
 	return result, response.Decode(&result)
 }
 
+// Approve approves a staged version and returns its operator ID.
 func (c *Cluster) Approve(ctx context.Context, node string, version uint64) (topology.OperatorID, error) {
 	var result struct {
 		OperatorID topology.OperatorID `json:"operator_id"`
@@ -190,14 +209,18 @@ func (c *Cluster) Approve(ctx context.Context, node string, version uint64) (top
 	return result.OperatorID, c.WaitActive(ctx, version)
 }
 
+// CreateGroup creates and converges a load group through the public fixture API.
 func (c *Cluster) CreateGroup(ctx context.Context, node string, spec gquorum.GroupSpec) (gquorum.MutationResult, error) {
 	return c.Mutate(ctx, node, "POST", "/api/groups", map[string]any{"group": spec, "mutation": gquorum.MutationOptions{Approve: true, Actor: "cluster-test"}})
 }
+
+// Put proposes an identified key-value write through a process's application endpoint.
 func (c *Cluster) Put(ctx context.Context, node, group, key, id, value string) error {
 	response, err := c.Request(ctx, node, "PUT", "/api/load/"+group+"/keys/"+key, map[string]string{"request_id": id, "value": value}, 0)
 	return requireStatus(response, err, 200)
 }
 
+// Value reports an application key, local applied index and read consistency.
 type Value struct {
 	Value       string `json:"value"`
 	Found       bool   `json:"found"`
@@ -206,6 +229,7 @@ type Value struct {
 	Consistency string `json:"consistency"`
 }
 
+// Get reads a process-local application value through the fixture endpoint.
 func (c *Cluster) Get(ctx context.Context, node, group, key string) (Value, error) {
 	var value Value
 	response, err := c.Request(ctx, node, "GET", "/api/load/"+group+"/keys/"+key, nil, 0)
@@ -224,6 +248,8 @@ func (c *Cluster) Read(ctx context.Context, node, group, key string) (Value, err
 	}
 	return value, response.Decode(&value)
 }
+
+// WaitValue waits for an exact local process to expose the expected applied value.
 func (c *Cluster) WaitValue(ctx context.Context, node, group, key, expected string) error {
 	return Poll(ctx, func() (bool, error) {
 		value, err := c.Get(ctx, node, group, key)

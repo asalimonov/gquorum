@@ -16,11 +16,11 @@ func voterChangeFixture(t *testing.T, groupID string, surge int) (*topologySM, C
 	t.Helper()
 	rules := topology.Rules{SchemaVersion: 1, Limits: topology.Limits{MaxNodes: 5, MaxReplicas: 5}}
 	sm := newTopologySM(nil, rules)
-	p := topology.DefaultVoterPolicy()
+	p := topology.DefaultVoterConfig()
 	p.MaxSurgeVoters = surge
 	doc := topology.Document{ClusterID: "cluster", Placement: topology.PlacementRule{MinReplicas: 1, MaxReplicas: 5}, Groups: []topology.Group{
-		{ID: topology.MetaGroupID, NextReplicaID: 6, VoterPolicy: &p},
-		{ID: "work", NextReplicaID: 6, VoterPolicy: &p, Hosting: &topology.HostingRule{Mode: topology.HostingAllEligible}},
+		{ID: topology.MetaGroupID, NextReplicaID: 6, VoterConfig: &p},
+		{ID: "work", NextReplicaID: 6, VoterConfig: &p, Hosting: &topology.HostingRule{Mode: topology.HostingAllEligible}},
 	}}
 	for i := 1; i <= 5; i++ {
 		name := fmt.Sprintf("n%d", i)
@@ -102,7 +102,7 @@ func TestVoterChangeScopedCASAndCodec(t *testing.T) {
 func TestVoterChangeRefusesUnrelatedIntentAndPlanEdits(t *testing.T) {
 	t.Parallel()
 	for name, mutate := range map[string]func(*CommitVoterChangeProposal){
-		"policy": func(p *CommitVoterChangeProposal) { p.Doc.Group("work").VoterPolicy.FailureWindow++ },
+		"voter configuration": func(p *CommitVoterChangeProposal) { p.Doc.Group("work").VoterConfig.FailureWindow++ },
 		"hosting": func(p *CommitVoterChangeProposal) {
 			p.Doc.Group("work").Hosting = &topology.HostingRule{Mode: topology.HostingExplicit, Nodes: []string{"n1"}}
 		},

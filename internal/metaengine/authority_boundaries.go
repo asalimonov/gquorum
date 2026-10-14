@@ -6,14 +6,16 @@ func orderedFenceBoundaries(a, b topology.FenceEvidence) bool {
 	if a.Resource != b.Resource || a.Key == b.Key {
 		return true
 	}
-	if a.Key.Revision > b.Key.Revision {
-		a, b = b, a
+	earlier, later := a, b
+	if earlier.Key.Revision > later.Key.Revision {
+		earlier, later = later, earlier
 	}
-	if a.Resource.Kind == topology.AuthorityGroup {
-		return a.AppliedIndex < b.AppliedIndex && a.AppliedTerm <= b.AppliedTerm
+	if earlier.Resource.Kind == topology.AuthorityGroup {
+		return earlier.AppliedIndex < later.AppliedIndex && earlier.AppliedTerm <= later.AppliedTerm
 	}
-	return a.LocalSequence < b.LocalSequence
+	return earlier.LocalSequence < later.LocalSequence
 }
+
 func receiptFitsFence(receipt topology.EffectReceipt, fence topology.FenceEvidence) bool {
 	if receipt.Resource != fence.Resource {
 		return true

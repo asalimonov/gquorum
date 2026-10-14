@@ -3,6 +3,7 @@
 package load_test
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"slices"
@@ -22,7 +23,7 @@ func TestManagedHandleHasNoOwnerEscapeHatch(t *testing.T) {
 	for i := 0; i < typ.NumMethod(); i++ {
 		methods = append(methods, typ.Method(i).Name)
 	}
-	want := []string{"Error", "GroupID", "Identity", "IsLeader", "Metrics", "MetricsHistory", "ProposalStats", "Propose", "Read", "ReadBarrier", "ReplicaID", "Running", "Snapshot", "Status", "WALStall", "WaitReady"}
+	want := []string{"Error", "GroupID", "Identity", "IsLeader", "Metrics", "MetricsHistory", "ProposalStats", "Propose", "Read", "ReadBarrier", "ReplicaID", "RunWhileLeader", "Running", "Snapshot", "Status", "WALStall", "WaitReady", "Watch"}
 	if !slices.Equal(methods, want) {
 		t.Fatalf("managed handle method set: %v", methods)
 	}
@@ -41,7 +42,9 @@ func TestUninitializedHandlesRejectOperations(t *testing.T) {
 		}
 		_, err := g.Propose(t.Context(), load.Proposal{Data: []byte("x")})
 		_, readErr := g.Read(t.Context(), nil)
-		for _, err := range []error{err, readErr, g.ReadBarrier(t.Context()), g.WaitReady(t.Context()), g.Snapshot(t.Context())} {
+		_, watchErr := g.Watch(t.Context())
+		leaderErr := g.RunWhileLeader(t.Context(), func(context.Context, *load.Leadership) error { return nil })
+		for _, err := range []error{err, readErr, watchErr, leaderErr, g.ReadBarrier(t.Context()), g.WaitReady(t.Context()), g.Snapshot(t.Context())} {
 			if !errors.Is(err, fault.ErrInvalid) {
 				t.Fatal(err)
 			}
@@ -55,5 +58,17 @@ func TestUninitializedHandlesRejectOperations(t *testing.T) {
 		}
 		owner.ReportUnreachable(1)
 		owner.ReportSnapshot(1, raft.SnapshotFailure)
+	}
+}
+
+func TestUninitializedLeadershipRejectsProposals(t *testing.T) {
+	t.Parallel()
+	for _, leader := range []*load.Leadership{nil, {}} {
+		if leader.Term() != 0 {
+			t.Fatal("zero handle has a term")
+		}
+		if _, err := leader.Propose(t.Context(), load.Proposal{}); !errors.Is(err, fault.ErrInvalid) {
+			t.Fatal(err)
+		}
 	}
 }

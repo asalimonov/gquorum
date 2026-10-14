@@ -20,33 +20,10 @@ func (sm *topologySM) RecoveryCatalog(ctx context.Context) ([]topology.Group, er
 	}
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	groups := make(map[string]*topology.Group)
-	seen := make(map[storage.Identity]bool)
-	add := func(group string, r topology.Replica) {
-		if r.NodeName == "" || r.ReplicaID == 0 {
-			return
-		}
-		id := sm.loadIdentity(group, r.NodeName, r.ReplicaID)
-		if seen[id] {
-			return
-		}
-		seen[id] = true
-		g := groups[group]
-		if g == nil {
-			g = &topology.Group{ID: group}
-			groups[group] = g
-		}
-		g.Replicas = append(g.Replicas, r)
-	}
-	addDoc := func(doc topology.Document) {
-		for _, g := range doc.Groups {
-			for _, r := range g.Replicas {
-				add(g.ID, r)
-			}
-		}
-	}
-	addDoc(sm.target)
-	addDoc(sm.active)
+	catalog := recoveryCatalog{sm: sm, groups: make(map[string]*topology.Group),
+		seen: make(map[storage.Identity]bool)}
+	catalog.addDocument(sm.target)
+	catalog.addDocument(sm.active)
 	var records []*operatorRecord
 	for _, op := range sm.operators {
 		records = append(records, op)
@@ -54,25 +31,69 @@ func (sm *topologySM) RecoveryCatalog(ctx context.Context) ([]topology.Group, er
 	slices.SortFunc(records, func(a, b *operatorRecord) int { return cmp.Compare(a.ID, b.ID) })
 	proofs := sm.cleanupProofsLocked()
 	for _, op := range records {
-		doc, found := sm.documentLocked(op.Version)
-		if found {
-			addDoc(doc)
-		}
-		for _, step := range op.Steps {
-			if step.Kind == topology.StepCreateFoundingGroup && step.GroupID != topology.MetaGroupID &&
-				sm.active.Version < op.Version && proofs.groups[step.GroupID] == "" && (!found || doc.Group(step.GroupID) == nil) {
-				return nil, fault.ErrHistoryUnavailable
-			}
-			add(step.GroupID, topology.Replica{NodeName: step.NodeName, ReplicaID: step.ReplicaID})
+		if err := catalog.addOperator(op, proofs); err != nil {
+			return nil, err
 		}
 	}
 	for _, record := range sm.authority.records {
 		for _, target := range record.Grant.Targets {
-			add(record.Grant.Key.GroupID, topology.Replica{NodeName: target.NodeName, ReplicaID: target.ReplicaID})
+			catalog.add(record.Grant.Key.GroupID,
+				topology.Replica{NodeName: target.NodeName, ReplicaID: target.ReplicaID})
 		}
 	}
-	result := make([]topology.Group, 0, len(groups))
-	for _, group := range groups {
+	return catalog.sorted(), nil
+}
+
+type recoveryCatalog struct {
+	sm     *topologySM
+	groups map[string]*topology.Group
+	seen   map[storage.Identity]bool
+}
+
+func (catalog *recoveryCatalog) add(group string, r topology.Replica) {
+	if r.NodeName == "" || r.ReplicaID == 0 {
+		return
+	}
+	id := catalog.sm.loadIdentity(group, r.NodeName, r.ReplicaID)
+	if catalog.seen[id] {
+		return
+	}
+	catalog.seen[id] = true
+	g := catalog.groups[group]
+	if g == nil {
+		g = &topology.Group{ID: group}
+		catalog.groups[group] = g
+	}
+	g.Replicas = append(g.Replicas, r)
+}
+
+func (catalog *recoveryCatalog) addDocument(doc topology.Document) {
+	for _, g := range doc.Groups {
+		for _, r := range g.Replicas {
+			catalog.add(g.ID, r)
+		}
+	}
+}
+
+func (catalog *recoveryCatalog) addOperator(op *operatorRecord, proofs cleanupProofs) error {
+	doc, found := catalog.sm.documentLocked(op.Version)
+	if found {
+		catalog.addDocument(doc)
+	}
+	for _, step := range op.Steps {
+		if step.Kind == topology.StepCreateFoundingGroup && step.GroupID != topology.MetaGroupID &&
+			catalog.sm.active.Version < op.Version && proofs.groups[step.GroupID] == "" && (!found ||
+			doc.Group(step.GroupID) == nil) {
+			return fault.ErrHistoryUnavailable
+		}
+		catalog.add(step.GroupID, topology.Replica{NodeName: step.NodeName, ReplicaID: step.ReplicaID})
+	}
+	return nil
+}
+
+func (catalog *recoveryCatalog) sorted() []topology.Group {
+	result := make([]topology.Group, 0, len(catalog.groups))
+	for _, group := range catalog.groups {
 		slices.SortFunc(group.Replicas, func(a, b topology.Replica) int {
 			if order := cmp.Compare(a.NodeName, b.NodeName); order != 0 {
 				return order
@@ -82,5 +103,5 @@ func (sm *topologySM) RecoveryCatalog(ctx context.Context) ([]topology.Group, er
 		result = append(result, *group)
 	}
 	slices.SortFunc(result, func(a, b topology.Group) int { return cmp.Compare(a.ID, b.ID) })
-	return result, nil
+	return result
 }

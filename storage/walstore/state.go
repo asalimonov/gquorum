@@ -14,6 +14,10 @@ import (
 	"go.etcd.io/raft/v3/raftpb"
 )
 
+const (
+	uint64ByteCount = 8
+)
+
 var (
 	bucketMeta   = []byte("meta")
 	keyApplied   = []byte("applied")
@@ -27,15 +31,20 @@ type diskIdentity struct {
 	storage.Identity
 }
 
-func openState(path string) (*bolt.DB, error) {
-	db, err := bolt.Open(path, fileMode, &bolt.Options{Timeout: time.Second, NoFreelistSync: true, FreelistType: bolt.FreelistMapType})
+func openState(path string, disableFSync bool) (*bolt.DB, error) {
+	db, err := bolt.Open(path, fileMode, &bolt.Options{
+		NoSync:         disableFSync,
+		Timeout:        time.Second,
+		NoFreelistSync: true,
+		FreelistType:   bolt.FreelistMapType,
+	})
 	if err != nil {
 		if !errors.Is(err, bolt.ErrTimeout) {
 			return nil, unreadable("open WAL state", err)
 		}
 		return nil, err
 	}
-	if err := db.Update(func(tx *bolt.Tx) error {
+	updateErr := db.Update(func(tx *bolt.Tx) error {
 		if old := tx.Bucket(bucketMeta); old != nil && old.Get([]byte("schema_version")) == nil {
 			return fault.New(fault.Unsupported, "unversioned WAL state", nil)
 		}
@@ -50,15 +59,16 @@ func openState(path string) (*bolt.DB, error) {
 			return err
 		}
 		return b.Put([]byte("schema_version"), []byte("1"))
-	}); err != nil {
+	})
+	if updateErr != nil {
 		_ = db.Close()
-		return nil, err
+		return nil, updateErr
 	}
 	return db, nil
 }
 
 func putU64(b *bolt.Bucket, key []byte, n uint64) error {
-	data := make([]byte, 8)
+	data := make([]byte, uint64ByteCount)
 	binary.BigEndian.PutUint64(data, n)
 	return b.Put(key, data)
 }
@@ -67,32 +77,38 @@ func getU64(b *bolt.Bucket, key []byte) uint64 {
 		return 0
 	}
 	raw := b.Get(key)
-	if len(raw) != 8 {
+	if len(raw) != uint64ByteCount {
 		return 0
 	}
 	return binary.BigEndian.Uint64(raw)
 }
 
-func readIdentity(dir string) (storage.Identity, bool, error) {
+type identityLookup struct {
+	Identity storage.Identity
+	Found    bool
+}
+
+func readIdentity(dir string) (identityLookup, error) {
 	data, err := os.ReadFile(filepath.Join(dir, IdentityFile))
 	if errors.Is(err, os.ErrNotExist) {
-		return storage.Identity{}, false, nil
+		return identityLookup{}, nil
 	}
 	if err != nil {
-		return storage.Identity{}, false, err
+		return identityLookup{}, err
 	}
 	var pin diskIdentity
 	if err := json.Unmarshal(data, &pin); err != nil {
-		return pin.Identity, false, unreadable("invalid identity pin", err)
+		return identityLookup{Identity: pin.Identity}, unreadable("invalid identity pin", err)
 	}
 	if pin.SchemaVersion != 1 {
-		return pin.Identity, false, fault.New(fault.Unsupported, "unsupported WAL identity schema", nil)
+		return identityLookup{Identity: pin.Identity}, fault.New(fault.Unsupported,
+			"unsupported WAL identity schema", nil)
 	}
 	id := pin.Identity
 	if id.NodeName == "" || id.ClusterID == "" || id.GroupID == "" || id.ReplicaID == 0 {
-		return id, false, unreadable("incomplete identity pin", nil)
+		return identityLookup{Identity: id}, unreadable("incomplete identity pin", nil)
 	}
-	return id, true, nil
+	return identityLookup{Identity: id, Found: true}, nil
 }
 
 func writeIdentity(dir string, id storage.Identity) error {
@@ -135,7 +151,12 @@ func syncDir(dir string) error {
 	return f.Sync()
 }
 
-func readApplied(db *bolt.DB) (uint64, raftpb.ConfState, error) {
+type appliedState struct {
+	Index     uint64
+	ConfState raftpb.ConfState
+}
+
+func readApplied(db *bolt.DB) (appliedState, error) {
 	var index uint64
 	var cs raftpb.ConfState
 	err := db.View(func(tx *bolt.Tx) error {
@@ -143,7 +164,7 @@ func readApplied(db *bolt.DB) (uint64, raftpb.ConfState, error) {
 		if b == nil || string(b.Get([]byte("schema_version"))) != "1" {
 			return fault.New(fault.Unsupported, "unsupported WAL state schema", nil)
 		}
-		if raw := b.Get(keyApplied); len(raw) != 0 && len(raw) != 8 {
+		if raw := b.Get(keyApplied); len(raw) != 0 && len(raw) != uint64ByteCount {
 			return unreadable("invalid applied marker", nil)
 		}
 		index = getU64(b, keyApplied)
@@ -152,5 +173,5 @@ func readApplied(db *bolt.DB) (uint64, raftpb.ConfState, error) {
 		}
 		return cs.Unmarshal(b.Get(keyConfState))
 	})
-	return index, cs, err
+	return appliedState{Index: index, ConfState: cs}, err
 }

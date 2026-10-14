@@ -14,13 +14,12 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum"
-
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// Caller policy may relax serving readiness using the persisted local override.
+// Caller readiness logic may relax serving readiness using the persisted local override.
 // Fresh health and exact Active identity remain required. Consensus writes keep
 // their ordinary Raft quorum requirements regardless of this local decision.
 func (a *application) canServe(ctx context.Context) bool {
@@ -48,7 +47,7 @@ func (a *application) canServe(ctx context.Context) bool {
 	return alive >= minimum
 }
 
-// Serving follows caller policy and requires the exact Active replica and role.
+// Serving follows caller readiness logic and requires the exact Active replica and role.
 // Approved learners serve local reads and forward mutations through Raft.
 // Prepared replicas and stale handles remain ineligible until Active authorizes them.
 func (a *application) localServing(ctx context.Context, id string) (*localReplica, error) {
@@ -455,10 +454,10 @@ func (a *application) routes() http.Handler {
 		result, err := a.cluster.SetGroupPlacement(r.Context(), r.PathValue("id"), body.Placement, opts)
 		mutationResponse(w, result, err)
 	})
-	mux.HandleFunc("PUT /api/groups/{id}/voter-policy", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("PUT /api/groups/{id}/voter-config", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Policy   topology.VoterPolicy    `json:"policy"`
-			Mutation gquorum.MutationOptions `json:"mutation"`
+			VoterConfig topology.VoterConfig    `json:"voter_config"`
+			Mutation    gquorum.MutationOptions `json:"mutation"`
 		}
 		if err := requestBody(w, r, &body); err != nil {
 			httpError(w, err)
@@ -469,7 +468,7 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		result, err := a.cluster.SetGroupVoterPolicy(r.Context(), r.PathValue("id"), body.Policy, opts)
+		result, err := a.cluster.SetGroupVoterConfig(r.Context(), r.PathValue("id"), body.VoterConfig, opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("PUT /api/groups/{id}/hosting", func(w http.ResponseWriter, r *http.Request) {
@@ -504,7 +503,8 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		result, err := a.cluster.SetReplicaPinnedLearner(r.Context(), r.PathValue("id"), body.Replica, body.Pinned, opts)
+		pin := topology.LearnerPin{Replica: body.Replica, Pinned: body.Pinned}
+		result, err := a.cluster.SetReplicaPinnedLearner(r.Context(), r.PathValue("id"), pin, opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("POST /api/groups/{id}/leader/{name}", func(w http.ResponseWriter, r *http.Request) {

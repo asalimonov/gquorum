@@ -72,21 +72,8 @@ func (n *node) checkAuthorityPath() error {
 	if err != nil {
 		return err
 	}
-	if info, err := os.Stat(dir); err == nil {
-		if !info.IsDir() {
-			return fault.New(fault.Invalid, "StorageDir is not a directory", nil)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
+	if err := n.checkSystemDirectory(dir); err != nil {
 		return err
-	}
-	// A directory with former system filenames is retained evidence, never a
-	// fresh node. There is no implicit migration or permission to reset its pins.
-	for _, name := range []string{"meta.bolt", "authority.bolt"} {
-		if _, err := os.Lstat(filepath.Join(n.opts.StorageDir, name)); err == nil {
-			return fault.New(fault.Unreadable, "StorageDir contains unsupported system filename "+name, nil)
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
 	}
 	path, err := resolveStoragePath(n.opts.authorityDBPath())
 	if err != nil {
@@ -99,6 +86,43 @@ func (n *node) checkAuthorityPath() error {
 	if path == meta {
 		return fault.New(fault.Invalid, "authority and meta databases resolve to the same path", nil)
 	}
+	if err := checkSystemFiles(path, meta); err != nil {
+		return err
+	}
+	if wal := n.opts.Loads.Storage.WAL; wal != nil {
+		root, err := resolveStoragePath(wal.RootDir)
+		if err != nil {
+			return err
+		}
+		if pathWithin(dir, root) || pathWithin(path, root) || pathWithin(meta, root) {
+			return fault.New(fault.Invalid, "system storage resolves inside the load WAL retirement root", nil)
+		}
+	}
+	return nil
+}
+
+func (n *node) checkSystemDirectory(dir string) error {
+	if info, err := os.Stat(dir); err == nil {
+		if !info.IsDir() {
+			return fault.New(fault.Invalid, "StorageDir is not a directory", nil)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	// A directory with former system filenames is retained evidence, never a
+	// fresh node. There is no implicit migration or permission to reset its
+	// pins.
+	for _, name := range []string{"meta.bolt", "authority.bolt"} {
+		if _, err := os.Lstat(filepath.Join(n.opts.StorageDir, name)); err == nil {
+			return fault.New(fault.Unreadable, "StorageDir contains unsupported system filename "+name, nil)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkSystemFiles(path, meta string) error {
 	a, aerr := os.Stat(path)
 	m, merr := os.Stat(meta)
 	if aerr != nil && !errors.Is(aerr, os.ErrNotExist) {
@@ -112,15 +136,6 @@ func (n *node) checkAuthorityPath() error {
 	}
 	if aerr == nil && (!a.Mode().IsRegular() || merr == nil && os.SameFile(a, m)) {
 		return fault.New(fault.Invalid, "authority database is not an independent regular file", nil)
-	}
-	if wal := n.opts.Loads.Storage.WAL; wal != nil {
-		root, err := resolveStoragePath(wal.RootDir)
-		if err != nil {
-			return err
-		}
-		if pathWithin(dir, root) || pathWithin(path, root) || pathWithin(meta, root) {
-			return fault.New(fault.Invalid, "system storage resolves inside the load WAL retirement root", nil)
-		}
 	}
 	return nil
 }

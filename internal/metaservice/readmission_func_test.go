@@ -53,12 +53,12 @@ func testReadmissionJoin(t *testing.T, retained bool) {
 	g = joinProtocolClient(t, []string{address}, func(o *Options) {
 		if retained {
 			o.DBPath = metaPath
-			o.Limits, o.VoterPolicy = retainedOptions.Limits, retainedOptions.VoterPolicy
+			o.Limits, o.VoterConfig = retainedOptions.Limits, retainedOptions.VoterConfig
 		}
 		former := o.Identity
 		former.MemberID = 1
 		var err error
-		authority, err = authoritystore.Open(filepath.Join(t.TempDir(), "authority.bolt"), former, true)
+		authority, err = authoritystore.Open(filepath.Join(t.TempDir(), "authority.bolt"), former, authoritystore.FreshEvidence)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -73,9 +73,10 @@ func testReadmissionJoin(t *testing.T, retained bool) {
 			if err := g.AuthorizeReadmission(ctx, grant); err != nil {
 				return err
 			}
-			err := managed.ReadmitMeta(ctx, g.Identity(), o.DBPath, managed.Readmission(grant), authority, func(ctx context.Context, got managed.Readmission) error {
-				return g.AuthorizeReadmission(ctx, Readmission(got))
-			})
+			err := managed.ReadmitMeta(ctx, managed.Readmission(grant), managed.MetaReadmissionOptions{Identity: g.Identity(), Path: o.DBPath,
+				Authority: authority, Authorize: func(ctx context.Context, got managed.Readmission) error {
+					return g.AuthorizeReadmission(ctx, Readmission(got))
+				}})
 			if err != nil {
 				return err
 			}
@@ -89,16 +90,16 @@ func testReadmissionJoin(t *testing.T, retained bool) {
 			if id != authority.Identity() || id.MemberID != 2 {
 				return fault.ErrIdentityMismatch
 			}
-			floor, found, err := authority.Current(t.Context(), topology.MetaGroupID)
+			floor, err := authority.Current(t.Context(), topology.MetaGroupID)
 			if err != nil {
 				return err
 			}
-			if !found {
+			if !floor.Found {
 				return fault.ErrAuthorityPending
 			}
-			if _, found, err := authority.Receipt(t.Context(), floor.Grant, floor.Grant.Targets[0]); err != nil {
+			if found, err := authority.Receipt(t.Context(), floor.Record.Grant, floor.Record.Grant.Targets[0]); err != nil {
 				return err
-			} else if !found {
+			} else if !found.Found {
 				return fault.ErrAuthorityPending
 			}
 			return nil
@@ -113,14 +114,14 @@ func testReadmissionJoin(t *testing.T, retained bool) {
 			var receipts []topology.EffectReceipt
 			for _, g := range grant.Grants {
 				for _, target := range g.Targets {
-					r, found, err := authority.Receipt(ctx, g, target)
+					r, err := authority.Receipt(ctx, g, target)
 					if err != nil {
 						return nil, err
 					}
-					if !found {
+					if !r.Found {
 						return nil, fault.ErrAuthorityPending
 					}
-					receipts = append(receipts, r)
+					receipts = append(receipts, r.Receipt)
 				}
 			}
 			return receipts, nil
@@ -193,8 +194,8 @@ func testReadmissionJoin(t *testing.T, retained bool) {
 	if err = g.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
-	pin, found, err := metastore.LoadIdentity(g.opts.DBPath)
-	if err != nil || !found || pin.MemberID != 2 {
-		t.Fatal("replacement metadata pin missing", pin, found, err)
+	pin, err := metastore.LoadIdentity(g.opts.DBPath)
+	if err != nil || !pin.Found || pin.Identity.MemberID != 2 {
+		t.Fatal("replacement metadata pin missing", pin.Identity, pin.Found, err)
 	}
 }

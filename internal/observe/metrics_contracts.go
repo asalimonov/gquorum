@@ -1,13 +1,12 @@
 package observe
 
 import (
-	"context"
-	"time"
-
 	"github.com/asalimonov/gquorum/metrics"
 	"github.com/asalimonov/gquorum/topology"
 )
 
+// LeaderEpoch identifies a metrics collector's process incarnation and Raft
+// leadership term.
 type LeaderEpoch struct {
 	InstanceID string
 	Term       uint64
@@ -27,31 +26,11 @@ type Probe struct {
 	Error        error
 }
 
+// GroupSamples combines native group status, replica observations and transport
+// probes.
 type GroupSamples struct {
 	Status   topology.GroupStatus
 	Replicas []metrics.ReplicaObservation
 	Probes   []Probe
 	Error    error
-}
-type Round struct {
-	ActiveVersion uint64
-	Epoch         LeaderEpoch
-	Groups        map[string]GroupSamples
-}
-type MetricsSource interface {
-	Active(context.Context) (topology.Document, error)
-	Epoch() (LeaderEpoch, bool)
-	Collect(context.Context, topology.Document, *ReadPool) (Round, error)
-}
-type MetricsConfig struct {
-	Source        MetricsSource
-	Settings      MetricsSettings
-	WakeScheduler func()
-	Now           func() time.Time
-	// Local and Switches are owned, in-memory reads; they must not perform I/O
-	// or invoke application callbacks. Local includes only published owners.
-	Local    func() []metrics.ReplicaObservation
-	Identity func() topology.Identity
-	Switches func() []topology.VoterSwitchState
-	Enabled  func() bool
 }

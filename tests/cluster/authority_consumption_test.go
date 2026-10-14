@@ -24,7 +24,7 @@ func TestAuthorityEarlierLearnerActionCannotUndoSameOperatorPromotionThreeNodes(
 	group := shrunk.Group("work")
 	group.Replicas = slices.DeleteFunc(group.Replicas, func(r topology.Replica) bool { return r.NodeName == "node3" })
 	group.Placement.MinReplicas, group.Placement.MaxReplicas = 2, 2
-	group.VoterPolicy.TargetVoters = 2
+	group.VoterConfig.TargetVoters = 2
 	staged, err := c.Stage(ctx, "node2", shrunk)
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +45,7 @@ func TestAuthorityEarlierLearnerActionCannotUndoSameOperatorPromotionThreeNodes(
 	now := time.Now().UTC()
 	group.Replicas = append(group.Replicas, topology.Replica{NodeName: "node3", ReplicaID: newReplica, Role: topology.ReplicaVoter, CreatedAt: now, UpdatedAt: now})
 	group.Placement.MinReplicas, group.Placement.MaxReplicas = 3, 3
-	group.VoterPolicy.TargetVoters = 3
+	group.VoterConfig.TargetVoters = 3
 	response, err := c.Request(ctx, "node1", "PUT", "/internal/test/barriers/work/add_learner?after=true", nil, 0)
 	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
@@ -72,7 +72,7 @@ func TestAuthorityEarlierLearnerActionCannotUndoSameOperatorPromotionThreeNodes(
 	if err != nil {
 		t.Fatal(err)
 	}
-	op := startApply(t, ctx, c, "node2", growStage.Document.Version)
+	op := startApply(ctx, t, c, "node2", growStage.Document.Version)
 	if err := Poll(ctx, func() (bool, error) {
 		view, err := c.Controls(ctx, "node1")
 		for _, barrier := range view.Barriers {
@@ -121,7 +121,7 @@ func TestAuthorityEarlierLearnerActionCannotUndoSameOperatorPromotionThreeNodes(
 	if earlier.Grant.Key.Revision == 0 || later.Grant.Key.Revision <= earlier.Grant.Key.Revision || earlier.Authorization.Version != later.Authorization.Version || earlier.Authorization.Attempt != later.Authorization.Attempt || later.Authorization.StepSeq <= earlier.Authorization.StepSeq || earlier.Authorization.ReplicaID != newReplica || later.Authorization.ReplicaID != newReplica {
 		t.Fatal("operator changed its exact attempt/action issuance boundaries", earlier, later)
 	}
-	requireFencedReplay(t, ctx, c, owner, earlier)
+	requireFencedReplay(ctx, t, c, owner, earlier)
 	// Matching a key is insufficient: a structurally valid altered target set
 	// must fail full equality against the retained immutable grant.
 	altered := earlier
@@ -160,8 +160,8 @@ func TestAuthorityEarlierLearnerActionCannotUndoSameOperatorPromotionThreeNodes(
 		t.Fatal("promotion changed approved execution identity", finished, err)
 	}
 	// The earlier add-learner action must not demote the freshly promoted voter.
-	requireFencedReplay(t, ctx, c, owner, earlier)
-	waitAuthorityMembership(t, ctx, c, growStage.Document, false)
+	requireFencedReplay(ctx, t, c, owner, earlier)
+	waitAuthorityMembership(ctx, t, c, growStage.Document, false)
 	value, err := c.Read(ctx, "node3", "work", "key")
 	requireReadValue(t, value, err, "node3", "before")
 }

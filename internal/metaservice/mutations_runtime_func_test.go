@@ -22,7 +22,8 @@ func TestMutationApprovalFailureReturnsDurablyStagedDocument(t *testing.T) {
 	if !errors.Is(err, fault.ErrNoController) || result.Document.Version != 2 || result.OperatorID != "" {
 		t.Fatal("lost staged document on approval failure", result, err)
 	}
-	latest, target, active := leader.state().Views()
+	views := leader.state().Views()
+	latest, target, active := views.Latest, views.Target, views.Active
 	if latest.Version != 2 || target.Version != 1 || active.Version != 1 {
 		t.Fatal("failed approval changed Target", latest.Version, target.Version, active.Version)
 	}

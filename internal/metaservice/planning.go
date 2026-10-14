@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -15,6 +15,8 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
+// Plan previews safe convergence to a retained topology version without
+// authorizing effects.
 func (g *Group) Plan(ctx context.Context, version uint64) (topology.Plan, error) {
 	doc, err := g.Get(ctx, version)
 	if err != nil {
@@ -22,6 +24,9 @@ func (g *Group) Plan(ctx context.Context, version uint64) (topology.Plan, error)
 	}
 	return g.PlanFor(ctx, doc)
 }
+
+// PlanFor validates desired topology and builds a plan against observed native
+// group state.
 func (g *Group) PlanFor(ctx context.Context, doc topology.Document) (topology.Plan, error) {
 	if err := g.ensureRunning(ctx); err != nil {
 		return topology.Plan{}, err
@@ -36,18 +41,27 @@ func (g *Group) PlanFor(ctx context.Context, doc topology.Document) (topology.Pl
 	if err != nil {
 		return topology.Plan{}, err
 	}
+	approved := g.state().Target()
+	if err := topology.ValidatePlacementTransition(approved, active, doc); err != nil {
+		return topology.Plan{}, err
+	}
 	observed, err := g.observeGroups(ctx, active, doc)
 	if err != nil {
 		return topology.Plan{}, err
 	}
 	health := healthFromMeta(active, doc, observed[topology.MetaGroupID])
-	preferred, err := topology.ValidateMetaDrainSafety(active, doc, observed[topology.MetaGroupID], health, false)
+	input := topology.MetaDrainInput{Status: observed[topology.MetaGroupID], Health: health}
+	preferred, err := topology.ValidateMetaDrainSafety(active, doc, input)
 	if err != nil {
 		return topology.Plan{}, err
 	}
-	return topology.BuildPlanPreferred(active, doc, observed, g.rules, preferred)
+	plan, err := topology.BuildPlanPreferred(active, doc, observed,
+		topology.PlanOptions{Rules: g.rules, PreferredMetaTransfer: preferred})
+	return plan, explainUnsafePlacementPlan(approved, active, doc, err)
 }
-func (g *Group) observeGroups(ctx context.Context, active, desired topology.Document) (map[string]topology.GroupStatus, error) {
+
+func (g *Group) observeGroups(ctx context.Context,
+	active, desired topology.Document) (map[string]topology.GroupStatus, error) {
 	ids := map[string]bool{}
 	for _, doc := range []topology.Document{active, desired} {
 		for _, group := range doc.Groups {
@@ -58,25 +72,26 @@ func (g *Group) observeGroups(ctx context.Context, active, desired topology.Docu
 	for id := range ids {
 		sorted = append(sorted, id)
 	}
-	sort.Strings(sorted)
+	slices.Sort(sorted)
 	observed := make(map[string]topology.GroupStatus, len(ids))
 	controllers := groupControllers{g}
 	for _, id := range sorted {
 		status, err := controllers.Status(ctx, id)
 		if err != nil {
-			if errors.Is(err, fault.ErrUnavailable) && active.Group(id) != nil && desired.Group(id) == nil {
-				status = topology.GroupStatus{GroupID: id, Found: true}
-			} else {
+			if !errors.Is(err, fault.ErrUnavailable) || active.Group(id) == nil || desired.Group(id) != nil {
 				return nil, err
 			}
+			status = topology.GroupStatus{GroupID: id, Found: true}
 		}
 		if status.GroupID != id {
-			return nil, fault.New(fault.IdentityMismatch, fmt.Sprintf("status for %q belongs to %q", id, status.GroupID), nil)
+			return nil, fault.New(fault.IdentityMismatch, fmt.Sprintf("status for %q belongs to %q", id,
+				status.GroupID), nil)
 		}
 		observed[id] = status
 	}
 	return observed, nil
 }
+
 func healthFromMeta(active, target topology.Document, status topology.GroupStatus) map[string]topology.Health {
 	if !status.HealthKnown {
 		return nil
@@ -95,14 +110,19 @@ func healthFromMeta(active, target topology.Document, status topology.GroupStatu
 	}
 	return result
 }
+
 func (g *Group) finalTarget(ctx context.Context, active, target topology.Document) error {
 	status, err := (groupControllers{g}).Status(ctx, topology.MetaGroupID)
 	if err != nil {
 		return err
 	}
-	_, err = topology.ValidateMetaDrainSafety(active, target, status, healthFromMeta(active, target, status), true)
+	input := topology.MetaDrainInput{Status: status,
+		Health: healthFromMeta(active, target, status), Final: true}
+	_, err = topology.ValidateMetaDrainSafety(active, target, input)
 	return err
 }
+
+// Apply approves a topology version with its guarded immutable execution plan.
 func (g *Group) Apply(ctx context.Context, version uint64) (topology.OperatorID, error) {
 	if err := g.ensureRunning(ctx); err != nil {
 		return "", err
@@ -138,7 +158,12 @@ func (g *Group) applyLocal(ctx context.Context, version uint64) (topology.Operat
 	machine := g.state()
 	latest := machine.Latest()
 	if latest.Version != version {
-		return "", &fault.Error{Code: fault.VersionConflict, ExpectedVersion: version, CurrentVersion: latest.Version, Message: "only current Latest can be approved"}
+		return "", &fault.Error{
+			Code:            fault.VersionConflict,
+			ExpectedVersion: version,
+			CurrentVersion:  latest.Version,
+			Message:         "only current Latest can be approved",
+		}
 	}
 	var plan topology.Plan
 	if ex, ok := machine.CurrentOperator(); ok && ex.Status.Version == version {
@@ -158,13 +183,22 @@ func (g *Group) applyLocal(ctx context.Context, version uint64) (topology.Operat
 			return "", err
 		}
 	}
-	result, err := g.propose(ctx, metaengine.BeginOperatorProposal{Version: version, Plan: plan, Actor: g.currentIdentity().NodeName, Origin: latest.Origin, At: time.Now().UTC()})
+	result, err := g.propose(ctx, metaengine.BeginOperatorProposal{
+		Version: version,
+		Plan:    plan,
+		Actor:   g.currentIdentity().NodeName,
+		Origin:  latest.Origin,
+		At:      time.Now().UTC(),
+	})
 	if err != nil {
 		return "", err
 	}
 	g.controller.Signal()
 	return result.OperatorID, nil
 }
+
+// WaitOperator waits for a retained operator to reach any terminal execution
+// state.
 func (g *Group) WaitOperator(ctx context.Context, id topology.OperatorID) (topology.OperatorStatus, error) {
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
@@ -185,6 +219,7 @@ func (g *Group) WaitOperator(ctx context.Context, id topology.OperatorID) (topol
 		}
 	}
 }
+
 func (g *Group) callLeader(ctx context.Context, method string, request any) ([]byte, error) {
 	engine := g.engine.Load()
 	if engine == nil || engine.RaftStatus().Lead == 0 {
@@ -221,6 +256,7 @@ func (s operatorStore) Active(ctx context.Context) (topology.Document, error) {
 }
 
 func (c operatorCoordinator) IsMetaLeader() bool { return c.g.IsLeader() }
+
 func (c operatorCoordinator) CurrentOperator(ctx context.Context) (operator.Record, bool) {
 	if ctx.Err() != nil {
 		return operator.Record{}, false
@@ -228,6 +264,7 @@ func (c operatorCoordinator) CurrentOperator(ctx context.Context) (operator.Reco
 	record, ok := c.g.state().CurrentOperator()
 	return operator.FromPublic(record), ok
 }
+
 func (c operatorCoordinator) RecordOperatorTransition(ctx context.Context, t topology.OperatorTransition) error {
 	if !c.g.IsLeader() {
 		return fault.ErrNotLeader
@@ -245,13 +282,15 @@ func (g *Group) activateCompleted(ctx context.Context) error {
 	if !ok || ex.Status.State != topology.OperatorSucceeded {
 		return nil
 	}
-	_, target, active := g.state().Views()
+	views := g.state().Views()
+	target, active := views.Target, views.Active
 	if target.Version != ex.Status.Version || active.Version >= target.Version {
 		return nil
 	}
 	if err := g.finalTarget(ctx, active, target); err != nil {
 		return err
 	}
-	_, err := g.propose(ctx, metaengine.ActivateTargetProposal{OperatorID: ex.Status.ID, Version: ex.Status.Version, Attempt: ex.Status.Attempt})
+	_, err := g.propose(ctx, metaengine.ActivateTargetProposal{OperatorID: ex.Status.ID, Version: ex.Status.Version,
+		Attempt: ex.Status.Attempt})
 	return err
 }

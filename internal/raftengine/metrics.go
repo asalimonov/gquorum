@@ -4,13 +4,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"math"
+	"slices"
+	"time"
+
 	internalmetrics "github.com/asalimonov/gquorum/internal/metrics"
 	"github.com/asalimonov/gquorum/metrics"
 	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"
-	"math"
-	"slices"
-	"time"
 )
 
 type peerAck struct {
@@ -44,30 +45,44 @@ func (g *Group) sampleRaftMetrics(now time.Time) {
 		return
 	}
 	seq++
-	voters := append([]uint64{}, cs.Voters...)
-	for _, id := range cs.VotersOutgoing {
-		if !slices.Contains(voters, id) {
-			voters = append(voters, id)
-		}
+	voters := combinedMembers(cs.Voters, cs.VotersOutgoing)
+	learners := combinedMembers(cs.Learners, cs.LearnersNext)
+	next := metrics.ReplicaSample{
+		Raft:             metrics.Stamp{Sequence: seq, State: metrics.Current},
+		LeaderID:         s.Lead,
+		Term:             s.Term,
+		Commit:           s.Commit,
+		Applied:          g.applied,
+		Voters:           voters,
+		Learners:         learners,
+		MembershipDigest: digest,
+		Pending:          len(g.props),
+		Queued:           len(g.proposals),
+		ProposalLimit:    cap(g.slots),
 	}
-	slices.Sort(voters)
-	learners := append([]uint64{}, cs.Learners...)
-	for _, id := range cs.LearnersNext {
-		if !slices.Contains(learners, id) {
-			learners = append(learners, id)
-		}
-	}
-	slices.Sort(learners)
-	next := metrics.ReplicaSample{Raft: metrics.Stamp{Sequence: seq, State: metrics.Current}, LeaderID: s.Lead, Term: s.Term, Commit: s.Commit, Applied: g.applied, Voters: voters, Learners: learners, MembershipDigest: digest, Pending: len(g.props), Queued: len(g.proposals), ProposalLimit: cap(g.slots)}
 	read := &g.readState
-	next.ReadQueue = metrics.ReadQueue{Limit: cap(g.readSlots), InFlight: len(g.readSlots), Queued: len(g.reads), AwaitingQuorum: len(read.next), AwaitingApply: len(read.applying), RemoteRounds: len(read.remote)}
+	next.ReadQueue = metrics.ReadQueue{
+		Limit:          cap(g.readSlots),
+		InFlight:       len(g.readSlots),
+		Queued:         len(g.reads),
+		AwaitingQuorum: len(read.next),
+		AwaitingApply:  len(read.applying),
+		RemoteRounds:   len(read.remote),
+	}
 	if read.active != nil {
 		next.ReadQueue.LocalRounds = 1
 		next.ReadQueue.AwaitingQuorum += len(read.active.requests)
 	}
 	for id, p := range s.Progress {
 		ack := g.peerAcks[id]
-		next.Progress = append(next.Progress, metrics.PeerProgress{ReplicaID: id, Match: p.Match, RecentActive: p.RecentActive, AckSequence: ack.sequence, AckAge: internalmetrics.Age(now, ack.at), AckKnown: !ack.at.IsZero()})
+		next.Progress = append(next.Progress, metrics.PeerProgress{
+			ReplicaID:    id,
+			Match:        p.Match,
+			RecentActive: p.RecentActive,
+			AckSequence:  ack.sequence,
+			AckAge:       internalmetrics.Age(now, ack.at),
+			AckKnown:     !ack.at.IsZero(),
+		})
 	}
 	slices.SortFunc(next.Progress, func(a, b metrics.PeerProgress) int {
 		if a.ReplicaID < b.ReplicaID {
@@ -82,8 +97,9 @@ func (g *Group) sampleRaftMetrics(now time.Time) {
 	g.raftSampleAt = now
 }
 
-// recordPeerAck runs after successful Step. Rejects and old-term messages cannot
-// provide standby catch-up proof. Heartbeats keep healthy idle peers observable.
+// recordPeerAck runs after successful Step. Rejects and old-term messages
+// cannot provide standby catch-up proof. Heartbeats keep healthy idle peers
+// observable.
 func (g *Group) recordPeerAck(now time.Time, msg raftpb.Message) {
 	if msg.Reject || msg.Type != raftpb.MsgAppResp && msg.Type != raftpb.MsgHeartbeatResp {
 		return
@@ -92,7 +108,8 @@ func (g *Group) recordPeerAck(now time.Time, msg raftpb.Message) {
 	if s.RaftState != raft.StateLeader || msg.Term != s.Term || msg.From == g.opts.ReplicaID {
 		return
 	}
-	if !slices.Contains(g.cs.Voters, msg.From) && !slices.Contains(g.cs.Learners, msg.From) && !slices.Contains(g.cs.VotersOutgoing, msg.From) && !slices.Contains(g.cs.LearnersNext, msg.From) {
+	if !slices.Contains(g.cs.Voters, msg.From) && !slices.Contains(g.cs.Learners, msg.From) &&
+		!slices.Contains(g.cs.VotersOutgoing, msg.From) && !slices.Contains(g.cs.LearnersNext, msg.From) {
 		return
 	}
 	g.metricsMu.Lock()
@@ -140,7 +157,8 @@ func (g *Group) metricsSample(now time.Time) metrics.ReplicaSample {
 	} else if s.Raft.Age > g.opts.Metrics.MaxSampleAge {
 		s.Raft.State = metrics.Stale
 	}
-	s.Writer = metrics.Stamp{Sequence: g.writerSequence, Age: internalmetrics.Age(now, g.writerSampleAt), State: metrics.Current}
+	s.Writer = metrics.Stamp{Sequence: g.writerSequence, Age: internalmetrics.Age(now,
+		g.writerSampleAt), State: metrics.Current}
 	if s.Writer.Sequence == 0 || g.writerFailed {
 		s.Writer.State = metrics.Unknown
 	} else if s.Writer.Age > g.opts.Metrics.MaxSampleAge {
@@ -150,7 +168,8 @@ func (g *Group) metricsSample(now time.Time) metrics.ReplicaSample {
 		s.WALStall = internalmetrics.Age(now, g.writerSince)
 	}
 	for i := range s.Progress {
-		s.Progress[i].AckAge = internalmetrics.AddDuration(s.Progress[i].AckAge, internalmetrics.Age(now, g.raftSampleAt))
+		s.Progress[i].AckAge = internalmetrics.AddDuration(s.Progress[i].AckAge, internalmetrics.Age(now,
+			g.raftSampleAt))
 	}
 	g.metricsMu.RUnlock()
 	s.Running = g.Running()
@@ -179,9 +198,23 @@ func (g *Group) sampleMetrics() {
 	}
 }
 
+// Metrics returns an owned aged observation of this exact engine run.
 func (g *Group) Metrics() metrics.ReplicaObservation {
 	return g.meter.Snapshot(time.Now())
 }
+
+// MetricsHistory reads bounded retained observations for this engine run.
 func (g *Group) MetricsHistory(q metrics.HistoryQuery) (metrics.HistoryPage, error) {
 	return g.meter.History(time.Now(), q)
+}
+
+func combinedMembers(current, next []uint64) []uint64 {
+	members := append([]uint64{}, current...)
+	for _, id := range next {
+		if !slices.Contains(members, id) {
+			members = append(members, id)
+		}
+	}
+	slices.Sort(members)
+	return members
 }

@@ -26,6 +26,15 @@ func (g *Group) ReadNative(parent context.Context) (topology.NativeState, error)
 func (g *Group) nativeState() topology.NativeState {
 	status := g.rn.Status()
 	pt := tracker.ProgressTracker{Config: status.Config}
-	return topology.NativeState{GroupID: g.opts.GroupID, ReplicaID: g.opts.ReplicaID,
-		Applied: g.applied, ConfState: pt.ConfState()}
+	state := topology.NativeState{GroupID: g.opts.GroupID, ReplicaID: g.opts.ReplicaID, Applied: g.applied,
+		ConfState: pt.ConfState()}
+	if g.authority.Grant != nil {
+		grant := g.authority.Grant.Clone()
+		state.Grant = &grant
+	}
+	if g.authority.Receipt != nil {
+		receipt := g.authority.Receipt.Clone()
+		state.Receipt = &receipt
+	}
+	return state
 }

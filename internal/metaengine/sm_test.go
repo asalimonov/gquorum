@@ -39,7 +39,8 @@ func TestCodec_Roundtrip(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			data := mustEncode(t, tc.want)
-			kind, body, err := decodeEnvelope(data)
+			decoded, err := decodeEnvelope(data)
+			kind, body := decoded.Kind, decoded.Body
 			if err != nil {
 				t.Fatalf("decodeEnvelope: %v", err)
 			}
@@ -436,19 +437,24 @@ func TestSM_ExclusionVersion(t *testing.T) {
 	withNode := func(state topology.NodeState) topology.Document {
 		d := baseDoc()
 		d.Nodes = append(d.Nodes, topology.Node{Name: "n2", Type: "worker", State: state})
-		if err := d.SetMemberID("n2", 2, time.Time{}); err != nil {
-			t.Fatal(err)
+		if state != topology.NodeExcluded {
+			if err := d.SetMemberID("n2", 2, time.Time{}); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			d.MetaGroup().NextReplicaID = 3 // Retain the removed member's allocation high water.
 		}
 		return d
 	}
 	sm := newTopologySM(nil, testRules())
-	apply(t, sm, 1, ProposeDocument{Doc: withNode(topology.NodeActive), ExpectedVersion: 0, ProposalID: "p1"})
-	apply(t, sm, 2, ProposeDocument{Doc: withNode(topology.NodeDrained), ExpectedVersion: 1, ProposalID: "p2"})
-	apply(t, sm, 3, ProposeDocument{Doc: withNode(topology.NodeExcluded), ExpectedVersion: 2, ProposalID: "p3"})
+	for i, state := range []topology.NodeState{topology.NodeActive, topology.NodeDrained, topology.NodeExcluded, topology.NodeExcluded, topology.NodeExcluded} {
+		result := apply(t, sm, uint64(i+1), ProposeDocument{Doc: withNode(state), ExpectedVersion: uint64(i), ProposalID: fmt.Sprintf("p%d", i+1)})
+		if !result.Accepted {
+			t.Fatalf("stage %d: %s", i+1, result.Reason)
+		}
+	}
 	// Two more documents that keep n2 excluded: the answer must not drift forward
 	// with them, which is exactly what stamping the active version would do.
-	apply(t, sm, 4, ProposeDocument{Doc: withNode(topology.NodeExcluded), ExpectedVersion: 3, ProposalID: "p4"})
-	apply(t, sm, 5, ProposeDocument{Doc: withNode(topology.NodeExcluded), ExpectedVersion: 4, ProposalID: "p5"})
 
 	if got := sm.ExclusionVersion("n2"); got != 3 {
 		t.Fatalf("ExclusionVersion(n2) = %d, want 3 (where the exclusion landed)", got)
@@ -614,6 +620,7 @@ func TestSM_ForcedRetirementRecordsApplyingActor(t *testing.T) {
 		{Seq: 1, Kind: topology.StepRemoveReplica, GroupID: topology.MetaGroupID, NodeName: "node3", ReplicaID: 3},
 		{Seq: 2, Kind: topology.StepStopReplica, GroupID: topology.MetaGroupID, NodeName: "node3", ReplicaID: 3},
 	}}
+	plan = withTestVoterProof(active, target, plan)
 	sm := newTopologySM(nil, testRules())
 	sm.active = active.Clone()
 	sm.latest = target.Clone()
@@ -776,6 +783,7 @@ func TestSM_CommitRepairOperatorGuardrails(t *testing.T) {
 		{Seq: 3, GroupID: "shard0", Kind: topology.StepWaitCaughtUp, NodeName: "n1", ReplicaID: 2},
 		{Seq: 4, GroupID: "shard0", Kind: topology.StepPromoteVoter, NodeName: "n1", ReplicaID: 2},
 	}}
+	repairPlan = withTestVoterProof(sm.Active(), repair, repairPlan)
 	badOrigin := repair.Clone()
 	badOrigin.Origin = topology.OriginAPI
 	if res := apply(t, sm, 5, CommitRepairOperatorProposal{
@@ -796,13 +804,13 @@ func TestSM_CommitRepairOperatorGuardrails(t *testing.T) {
 	}); res.Accepted || res.Code != proposalAuthorization {
 		t.Fatalf("dangerous repair plan = %+v", res)
 	}
-	accepted := apply(t, sm, 8, CommitRepairOperatorProposal{
+	unsafe := apply(t, sm, 8, CommitRepairOperatorProposal{
 		Doc: repair, ExpectedVersion: 1, Plan: repairPlan, At: at.Add(4 * time.Second), ProposalID: "repair",
 	})
-	if !accepted.Accepted || accepted.Doc.Version != 2 || accepted.OperatorID != topology.MakeOperatorID(2, 1) {
-		t.Fatalf("repair = %+v", accepted)
+	if unsafe.Accepted {
+		t.Fatalf("single-voter identity replacement crossed an unsafe boundary: %+v", unsafe)
 	}
-	if sm.Latest().Version != 2 || sm.Target().Version != 2 || sm.Active().Version != 1 {
+	if sm.Latest().Version != 1 || sm.Target().Version != 1 || sm.Active().Version != 1 {
 		t.Fatalf("repair views = Latest v%d Target v%d Active v%d", sm.Latest().Version, sm.Target().Version, sm.Active().Version)
 	}
 }

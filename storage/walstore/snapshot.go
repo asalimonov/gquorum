@@ -33,6 +33,11 @@ func selectSnapshot(ss *snap.Snapshotter, wdir string) (*raftpb.Snapshot, error)
 	if err != nil {
 		return nil, unreadable("read snapshot markers", err)
 	}
+	return selectSnapshotFrom(ss, markers)
+}
+
+// selectSnapshotFrom loads the newest snapshot file matching a durable marker.
+func selectSnapshotFrom(ss *snap.Snapshotter, markers []walpb.Snapshot) (*raftpb.Snapshot, error) {
 	selected, err := ss.LoadNewestAvailable(markers)
 	if !errors.Is(err, snap.ErrNoSnapshot) {
 		if err != nil {
@@ -65,11 +70,7 @@ func snapshotNames(dir string) ([]string, error) {
 
 // Retention counts complete, committed snapshots only. Orphan files left by an
 // interrupted save cannot displace a usable fallback snapshot.
-func retainedSnapshotNames(dir, wdir string) ([]string, error) {
-	markers, err := wal.ValidSnapshotEntries(zap.NewNop(), wdir)
-	if err != nil {
-		return nil, err
-	}
+func retainedSnapshotNames(dir string, markers []walpb.Snapshot) ([]string, error) {
 	names, err := snapshotNames(dir)
 	if err != nil {
 		return nil, err
@@ -90,6 +91,8 @@ func retainedSnapshotNames(dir, wdir string) ([]string, error) {
 	return valid, nil
 }
 
+// SaveSnapshot persists a complete application snapshot and its durable WAL
+// marker.
 func (s *Store) SaveSnapshot(ctx context.Context, id string, snapshot raftpb.Snapshot) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -113,63 +116,40 @@ func (s *Store) SaveSnapshot(ctx context.Context, id string, snapshot raftpb.Sna
 		return err
 	}
 	var snapshotIndex uint64
-	if err := g.state.View(func(tx *bolt.Tx) error { snapshotIndex = getU64(tx.Bucket(bucketMeta), keySnapmark); return nil }); err != nil {
-		return err
+	viewErr := g.state.View(func(tx *bolt.Tx) error {
+		snapshotIndex = getU64(tx.Bucket(bucketMeta), keySnapmark)
+		return nil
+	})
+	if viewErr != nil {
+		return viewErr
 	}
 	if snapshot.Metadata.Index <= snapshotIndex {
 		return nil
 	}
 	if snapshot.Metadata.Index < g.hs.Commit {
-		// A local compaction snapshot may lag commit, but cannot change the Raft term.
+		// A local compaction snapshot may lag commit, but cannot change the
+		// Raft term.
 		if snapshot.Metadata.Term > g.hs.Term {
 			return fault.New(fault.Invalid, "snapshot term exceeds current term", nil)
 		}
 	}
-	if err := g.ss.SaveSnap(snapshot); err != nil {
+	if err := persistSnapshotFile(g, snapshot); err != nil {
 		return err
 	}
-	name := fmt.Sprintf("%016x-%016x.snap", snapshot.Metadata.Term, snapshot.Metadata.Index)
-	if err := os.Chmod(filepath.Join(g.dir, SnapDir, name), fileMode); err != nil {
+	if err := persistSnapshotCommit(g, snapshot); err != nil {
 		return err
 	}
-	if err := syncDir(filepath.Join(g.dir, SnapDir)); err != nil {
-		return err
+	updateErr := g.state.Update(func(tx *bolt.Tx) error {
+		return putU64(tx.Bucket(bucketMeta), keySnapmark, snapshot.Metadata.Index)
+	})
+	if updateErr != nil {
+		return updateErr
 	}
-	cs := snapshot.Metadata.ConfState
-	if err := g.w.SaveSnapshot(walpb.Snapshot{Index: snapshot.Metadata.Index, Term: snapshot.Metadata.Term, ConfState: &cs}); err != nil {
-		return err
-	}
-	next := g.hs
-	if next.Term < snapshot.Metadata.Term {
-		next.Term, next.Vote = snapshot.Metadata.Term, 0
-	}
-	next.Commit = max(next.Commit, snapshot.Metadata.Index)
-	if err := g.w.Save(next, nil); err != nil {
-		return err
-	}
-	// SaveSnapshot flushed the marker before this HardState was encoded. The
-	// snapshot's recovery commit must also be durable before publishing it.
-	if err := g.w.Sync(); err != nil {
-		return err
-	}
-	g.hs = next
-	g.last = max(g.last, snapshot.Metadata.Index)
-	if err := g.state.Update(func(tx *bolt.Tx) error { return putU64(tx.Bucket(bucketMeta), keySnapmark, snapshot.Metadata.Index) }); err != nil {
-		return err
-	}
-	names, err := retainedSnapshotNames(filepath.Join(g.dir, SnapDir), filepath.Join(g.dir, WALDir))
-	if err != nil {
-		return err
-	}
-	for len(names) > 2 {
-		if err := os.Remove(filepath.Join(g.dir, SnapDir, names[0])); err != nil {
-			return err
-		}
-		names = names[1:]
-	}
-	return syncDir(filepath.Join(g.dir, SnapDir))
+	return pruneSnapshots(g)
 }
 
+// Compact releases WAL segments covered by durable snapshots while retaining
+// recovery fallbacks.
 func (s *Store) Compact(ctx context.Context, id string, index uint64) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -186,14 +166,14 @@ func (s *Store) Compact(ctx context.Context, id string, index uint64) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	latest, err := selectSnapshot(g.ss, filepath.Join(g.dir, WALDir))
+	latest, err := selectSnapshotFrom(g.ss, g.markers)
 	if err != nil {
 		return err
 	}
 	if latest == nil || index > latest.Metadata.Index {
 		return fault.New(fault.Invalid, "compaction requires durable full snapshot", nil)
 	}
-	names, err := retainedSnapshotNames(filepath.Join(g.dir, SnapDir), filepath.Join(g.dir, WALDir))
+	names, err := retainedSnapshotNames(filepath.Join(g.dir, SnapDir), g.markers)
 	if err != nil {
 		return err
 	}
@@ -205,14 +185,15 @@ func (s *Store) Compact(ctx context.Context, id string, index uint64) error {
 		}
 		limit = min(limit, ss.Metadata.Index)
 	}
-	if err := g.state.Update(func(tx *bolt.Tx) error {
+	nextUpdateErr := g.state.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketMeta)
 		if getU64(b, keyFloor) < index {
 			return putU64(b, keyFloor, index)
 		}
 		return nil
-	}); err != nil {
-		return err
+	})
+	if nextUpdateErr != nil {
+		return nextUpdateErr
 	}
 	if err := g.w.ReleaseLockTo(limit); err != nil {
 		return err
@@ -220,5 +201,61 @@ func (s *Store) Compact(ctx context.Context, id string, index uint64) error {
 	if err := unlinkSegmentsBelow(filepath.Join(g.dir, WALDir), limit); err != nil {
 		return err
 	}
+	// Markers below the oldest retained snapshot name only deleted files.
+	g.markers = slices.DeleteFunc(g.markers, func(m walpb.Snapshot) bool { return m.Index < limit })
 	return syncDir(filepath.Join(g.dir, WALDir))
+}
+
+func persistSnapshotFile(g *group, snapshot raftpb.Snapshot) error {
+	if err := g.ss.SaveSnap(snapshot); err != nil {
+		return err
+	}
+	name := fmt.Sprintf("%016x-%016x.snap", snapshot.Metadata.Term, snapshot.Metadata.Index)
+	if err := os.Chmod(filepath.Join(g.dir, SnapDir, name), fileMode); err != nil {
+		return err
+	}
+	return syncDir(filepath.Join(g.dir, SnapDir))
+}
+
+func persistSnapshotCommit(g *group, snapshot raftpb.Snapshot) error {
+	cs := snapshot.Metadata.ConfState
+	saveSnapshotErr := g.w.SaveSnapshot(
+		walpb.Snapshot{Index: snapshot.Metadata.Index, Term: snapshot.Metadata.Term, ConfState: &cs})
+	if saveSnapshotErr != nil {
+		return saveSnapshotErr
+	}
+	next := g.hs
+	if next.Term < snapshot.Metadata.Term {
+		next.Term, next.Vote = snapshot.Metadata.Term, 0
+	}
+	next.Commit = max(next.Commit, snapshot.Metadata.Index)
+	if err := g.w.Save(next, nil); err != nil {
+		return err
+	}
+	// SaveSnapshot flushed the marker before this HardState was encoded. The
+	// snapshot's recovery commit must also be durable before publishing it.
+	if err := g.w.Sync(); err != nil {
+		return err
+	}
+	g.hs = next
+	g.last = max(g.last, snapshot.Metadata.Index)
+	// The marker and a HardState committing it are durable: it is now exactly
+	// what wal.ValidSnapshotEntries would report.
+	g.markers = append(g.markers, walpb.Snapshot{Index: snapshot.Metadata.Index, Term: snapshot.Metadata.Term,
+		ConfState: &cs})
+	return nil
+}
+
+func pruneSnapshots(g *group) error {
+	names, err := retainedSnapshotNames(filepath.Join(g.dir, SnapDir), g.markers)
+	if err != nil {
+		return err
+	}
+	for len(names) > 2 {
+		if err := os.Remove(filepath.Join(g.dir, SnapDir, names[0])); err != nil {
+			return err
+		}
+		names = names[1:]
+	}
+	return syncDir(filepath.Join(g.dir, SnapDir))
 }

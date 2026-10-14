@@ -13,14 +13,18 @@ type groupLock struct {
 	users int
 }
 
-// Coordinator serializes one change per group and rechecks safety before proposing.
+// Coordinator serializes one change per group and rechecks safety before
+// proposing.
 type Coordinator struct {
 	mu    sync.Mutex
 	locks map[string]*groupLock
 }
 
+// NewCoordinator constructs a coordinator with independent per-group change
+// serialization.
 func NewCoordinator() *Coordinator { return &Coordinator{locks: make(map[string]*groupLock)} }
 
+// Apply serializes a group change, rechecks safety and proposes it to Raft.
 func (c *Coordinator) Apply(ctx context.Context, g RaftGroup, live HealthSource, cc raftpb.ConfChangeV2) error {
 	if err := ctx.Err(); err != nil {
 		return err

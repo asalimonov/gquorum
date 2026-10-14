@@ -28,7 +28,7 @@ type topologyStream struct {
 	done    chan struct{}
 }
 
-func watchTopology(t *testing.T, ctx context.Context, c *Cluster, node string, view topology.View) *topologyStream {
+func watchTopology(ctx context.Context, t *testing.T, c *Cluster, node string, view topology.View) *topologyStream {
 	t.Helper()
 	owned, cancel := context.WithCancel(ctx)
 	req, err := http.NewRequestWithContext(owned, "GET", c.Node(node).Endpoint()+"/internal/test/watch/"+string(view), nil)
@@ -98,7 +98,7 @@ func TestMetaWatchFanoutIsOwnedAndDurablyAppliedOnFollowersThreeNodes(t *testing
 	for _, node := range c.Nodes() {
 		streams[node.Spec.Name] = map[topology.View]*topologyStream{}
 		for _, view := range views {
-			stream := watchTopology(t, ctx, c, node.Spec.Name, view)
+			stream := watchTopology(ctx, t, c, node.Spec.Name, view)
 			stream.next(t, view, 1)
 			streams[node.Spec.Name][view] = stream
 		}
@@ -270,8 +270,7 @@ func TestFixtureLeaderEventIsJournaledBeforeStreamDelivery(t *testing.T) {
 		}{Err: scanner.Err()}
 	}()
 	defer func() { cancel(); response.Body.Close(); <-done }()
-	changed, err := c.Request(ctx, "node2", "POST", "/api/groups/events/leader/"+target, nil, 0)
-	if err := requireStatus(changed, err, 200); err != nil {
+	if err := requestLeaderTransfer(ctx, c, "node2", "events", target); err != nil {
 		t.Fatal(err)
 	}
 	var event events.Event

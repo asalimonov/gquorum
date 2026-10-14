@@ -12,27 +12,27 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/policy"
+	schedulingapi "github.com/asalimonov/gquorum/scheduling"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3/raftpb"
 )
 
-type schedulerFunc func(context.Context, policy.ScheduleInput) (policy.ScheduleDecision, error)
+type schedulerFunc func(context.Context, schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error)
 
-func (f schedulerFunc) Schedule(ctx context.Context, in policy.ScheduleInput) (policy.ScheduleDecision, error) {
+func (f schedulerFunc) Schedule(ctx context.Context, in schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error) {
 	return f(ctx, in)
 }
 
 func TestCustomSchedulerInputIsOwnedAndForeignActionRefused(t *testing.T) {
 	t.Parallel()
 	h := newTestHost(t, 1, 2)
-	r := newTestDriver(t, h, Settings{})
-	r.policy = schedulerFunc(func(_ context.Context, in policy.ScheduleInput) (policy.ScheduleDecision, error) {
+	r := newTestScheduler(t, h, Settings{})
+	r.policy = schedulerFunc(func(_ context.Context, in schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error) {
 		in.Active.ClusterID = "foreign"
 		in.Active.Nodes[0].Name = "changed"
 		in.Status["shard0"].ConfState.Voters[0] = 99
-		return policy.ScheduleDecision{Action: &policy.ScheduleAction{Kind: policy.RestoreMissingReplica, Identity: storage.Identity{ClusterID: "foreign", GroupID: "shard0", NodeName: "n3", ReplicaID: 3}}}, nil
+		return schedulingapi.ScheduleDecision{Action: &schedulingapi.ScheduleAction{Kind: schedulingapi.RestoreMissingReplica, Identity: storage.Identity{ClusterID: "foreign", GroupID: "shard0", NodeName: "n3", ReplicaID: 3}}}, nil
 	})
 	tick(t, r)
 	assertStatus(t, r, topology.SchedulingError, ReconcileReasonPolicyRejected)
@@ -44,11 +44,11 @@ func TestCustomSchedulerInputIsOwnedAndForeignActionRefused(t *testing.T) {
 func TestCustomSchedulerDeadlineDoesNotApproveLateResult(t *testing.T) {
 	t.Parallel()
 	h := newTestHost(t, 1, 2)
-	r := newTestDriver(t, h, Settings{})
+	r := newTestScheduler(t, h, Settings{})
 	r.callbackTimeout = time.Millisecond
-	r.policy = schedulerFunc(func(ctx context.Context, in policy.ScheduleInput) (policy.ScheduleDecision, error) {
+	r.policy = schedulerFunc(func(ctx context.Context, in schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error) {
 		<-ctx.Done()
-		return policy.ScheduleDecision{Action: &policy.ScheduleAction{Kind: policy.RestoreMissingReplica, Identity: storage.Identity{ClusterID: in.Active.ClusterID, GroupID: "shard0", NodeName: "n3", ReplicaID: 3}}}, nil
+		return schedulingapi.ScheduleDecision{Action: &schedulingapi.ScheduleAction{Kind: schedulingapi.RestoreMissingReplica, Identity: storage.Identity{ClusterID: in.Active.ClusterID, GroupID: "shard0", NodeName: "n3", ReplicaID: 3}}}, nil
 	})
 	tick(t, r)
 	assertStatus(t, r, topology.SchedulingError, ReconcileReasonPolicyRejected)
@@ -60,10 +60,10 @@ func TestCustomSchedulerDeadlineDoesNotApproveLateResult(t *testing.T) {
 func TestCustomSchedulerCannotOverrideLocalHold(t *testing.T) {
 	t.Parallel()
 	h := newTestHost(t, 1, 2)
-	r := newTestDriver(t, h, Settings{})
+	r := newTestScheduler(t, h, Settings{})
 	id := storage.Identity{ClusterID: "repair-test", GroupID: "shard0", NodeName: "n3", ReplicaID: 3}
 	r.held = func() []storage.Identity { return []storage.Identity{id} }
-	r.policy = &stubPolicy{decision: policy.ScheduleDecision{Action: &policy.ScheduleAction{Kind: policy.RestoreMissingReplica, Identity: id}}}
+	r.policy = &stubPolicy{decision: schedulingapi.ScheduleDecision{Action: &schedulingapi.ScheduleAction{Kind: schedulingapi.RestoreMissingReplica, Identity: id}}}
 	tick(t, r)
 	assertStatus(t, r, topology.SchedulingError, ReconcileReasonPolicyRejected)
 	if h.commits != 0 {
@@ -74,15 +74,15 @@ func TestCustomSchedulerCannotOverrideLocalHold(t *testing.T) {
 func TestCustomSchedulerCannotReplaceReplicaRecoveredDuringCallback(t *testing.T) {
 	t.Parallel()
 	h := newTestHost(t, 1, 2)
-	r := newTestDriver(t, h, Settings{})
-	r.policy = schedulerFunc(func(_ context.Context, in policy.ScheduleInput) (policy.ScheduleDecision, error) {
+	r := newTestScheduler(t, h, Settings{})
+	r.policy = schedulerFunc(func(_ context.Context, in schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error) {
 		// A fresh observation appears while caller code is running. Keep the
 		// previously collected map intact, as the real service returns copies.
 		h.status = maps.Clone(h.status)
 		observed := h.status["shard0"]
 		observed.ConfState = raftpb.ConfState{Voters: []uint64{1, 2, 3}}
 		h.status["shard0"] = observed
-		return policy.ScheduleDecision{Action: &policy.ScheduleAction{Kind: policy.RestoreMissingReplica, Identity: storage.Identity{ClusterID: in.Active.ClusterID, GroupID: "shard0", NodeName: "n3", ReplicaID: 3}}}, nil
+		return schedulingapi.ScheduleDecision{Action: &schedulingapi.ScheduleAction{Kind: schedulingapi.RestoreMissingReplica, Identity: storage.Identity{ClusterID: in.Active.ClusterID, GroupID: "shard0", NodeName: "n3", ReplicaID: 3}}}, nil
 	})
 	tick(t, r)
 	if h.commits != 0 || h.machine.Latest().Version != 1 {
@@ -108,10 +108,10 @@ func TestCustomSchedulerRechecksApprovalBoundaryAfterCallback(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			h := newTestHost(t, 1, 2)
-			r := newTestDriver(t, h, Settings{})
-			r.policy = schedulerFunc(func(_ context.Context, in policy.ScheduleInput) (policy.ScheduleDecision, error) {
+			r := newTestScheduler(t, h, Settings{})
+			r.policy = schedulerFunc(func(_ context.Context, in schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error) {
 				tc.change(h)
-				return policy.ScheduleDecision{Action: &policy.ScheduleAction{Kind: policy.RestoreMissingReplica, Identity: storage.Identity{ClusterID: in.Active.ClusterID, GroupID: "shard0", NodeName: "n3", ReplicaID: 3}}}, nil
+				return schedulingapi.ScheduleDecision{Action: &schedulingapi.ScheduleAction{Kind: schedulingapi.RestoreMissingReplica, Identity: storage.Identity{ClusterID: in.Active.ClusterID, GroupID: "shard0", NodeName: "n3", ReplicaID: 3}}}, nil
 			})
 			tick(t, r)
 			assertStatus(t, r, topology.SchedulingError, tc.reason)
@@ -125,17 +125,17 @@ func TestCustomSchedulerRechecksApprovalBoundaryAfterCallback(t *testing.T) {
 func TestCustomSchedulerStallRemainsVisibleAndOwnedUntilReturn(t *testing.T) {
 	t.Parallel()
 	h := newTestHost(t, 1, 2)
-	r := newTestDriver(t, h, Settings{Interval: 10 * time.Millisecond, TickTimeout: 5 * time.Millisecond})
+	r := newTestScheduler(t, h, Settings{Interval: 10 * time.Millisecond, TickTimeout: 5 * time.Millisecond})
 	r.callbackTimeout = time.Millisecond
 	stalled, release := make(chan struct{}), make(chan struct{})
 	var calls atomic.Int32
 	var once sync.Once
-	r.policy = schedulerFunc(func(ctx context.Context, _ policy.ScheduleInput) (policy.ScheduleDecision, error) {
+	r.policy = schedulerFunc(func(ctx context.Context, _ schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error) {
 		calls.Add(1)
 		<-ctx.Done()
 		close(stalled)
 		<-release
-		return policy.ScheduleDecision{}, nil
+		return schedulingapi.ScheduleDecision{}, nil
 	})
 	t.Cleanup(func() {
 		once.Do(func() { close(release) })
@@ -177,10 +177,10 @@ func TestDisabledSchedulerStillWakesApprovedOperator(t *testing.T) {
 	t.Parallel()
 	h := newTestHost(t, 1, 2)
 	h.operatorOverride = &topology.Operator{Status: topology.OperatorStatus{ID: "approved", Version: 1, State: topology.OperatorRunning}}
-	r := newTestDriver(t, h, Settings{Disabled: true})
-	r.policy = schedulerFunc(func(context.Context, policy.ScheduleInput) (policy.ScheduleDecision, error) {
+	r := newTestScheduler(t, h, Settings{Disabled: true})
+	r.policy = schedulerFunc(func(context.Context, schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error) {
 		t.Error("disabled scheduler called")
-		return policy.ScheduleDecision{}, nil
+		return schedulingapi.ScheduleDecision{}, nil
 	})
 	tick(t, r)
 	assertStatus(t, r, topology.SchedulingDisabled, ReconcileReasonConfigDisabled)

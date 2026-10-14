@@ -13,7 +13,7 @@ import (
 // missing metadata cannot authorize creating the same member again.
 func (s *Store) MetadataAcquired(ctx context.Context) (bool, error) {
 	var acquired bool
-	err := s.transaction(ctx, false, func(tx *bolt.Tx) error {
+	err := s.readTransaction(ctx, func(tx *bolt.Tx) error {
 		data := tx.Bucket([]byte("identity")).Get([]byte("metadata_acquired"))
 		if data == nil {
 			return nil
@@ -32,9 +32,10 @@ func (s *Store) MetadataAcquired(ctx context.Context) (bool, error) {
 }
 
 // MarkMetadataAcquired runs after the exact metadata pin is durable and before
-// its engine is published or started. It is idempotent across retained restarts.
+// its engine is published or started. It is idempotent across retained
+// restarts.
 func (s *Store) MarkMetadataAcquired(ctx context.Context, identity topology.Identity) error {
-	return s.transaction(ctx, true, func(tx *bolt.Tx) error {
+	return s.writeTransaction(ctx, func(tx *bolt.Tx) error {
 		if identity != s.identity {
 			return fault.ErrIdentityMismatch
 		}

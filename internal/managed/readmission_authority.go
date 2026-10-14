@@ -12,7 +12,8 @@ import (
 )
 
 // A readmission owns the entire former host after its admission reservation.
-// Persist every scope's floor before joining callbacks; only then may retirement
+// Persist every scope's floor before joining callbacks; only then may
+// retirement
 // start. The caller must also join Node's metadata authority worker.
 type readmissionAuthority struct {
 	store  *authoritystore.Store
@@ -20,15 +21,18 @@ type readmissionAuthority struct {
 	floors []authoritystore.FenceRecord
 }
 
-func beginReadmissionAuthority(ctx context.Context, s *authoritystore.Store, grant Readmission) (*readmissionAuthority, error) {
-	if s == nil || s.Identity() != grant.Previous || len(grant.Grants) == 0 {
+func beginReadmissionAuthority(ctx context.Context, s *authoritystore.Store,
+	grant Readmission) (*readmissionAuthority, error) {
+	if s == nil || len(grant.Grants) == 0 || s.Identity() != grant.Previous {
 		return nil, fault.ErrOperatorAuthorization
 	}
 	prior, err := readmissionIDs(grant.PreviousGroups, grant.Previous)
 	if err != nil {
 		return nil, err
 	}
-	prior[storage.Identity{ClusterID: grant.Previous.ClusterID, NodeName: grant.Previous.NodeName, GroupID: topology.MetaGroupID, ReplicaID: grant.Previous.MemberID}] = true
+	prior[storage.Identity{ClusterID: grant.Previous.ClusterID, NodeName: grant.Previous.NodeName,
+		GroupID:   topology.MetaGroupID,
+		ReplicaID: grant.Previous.MemberID}] = true
 	granted, err := readmissionIDs(grant.GrantedGroups, grant.Granted)
 	if err != nil {
 		return nil, err
@@ -36,31 +40,33 @@ func beginReadmissionAuthority(ctx context.Context, s *authoritystore.Store, gra
 	a := &readmissionAuthority{store: s, grants: make(map[string]topology.AuthorityGrant)}
 	var revision uint64
 	for _, g := range grant.Grants {
-		want := topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: g.Key.GroupID, NodeName: grant.Previous.NodeName}
-		if g.Validate() != nil || g.Purpose != topology.AuthorityReadmit || g.AdmissionID != grant.AdmissionID || g.Key.ClusterID != grant.Previous.ClusterID || len(g.Resources) != 1 || g.Resources[0] != want || a.grants[g.Key.GroupID].Key.Revision != 0 || revision != 0 && revision != g.Key.Revision {
+		want := topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: g.Key.GroupID,
+			NodeName: grant.Previous.NodeName}
+		if g.Purpose != topology.AuthorityReadmit || g.AdmissionID != grant.AdmissionID ||
+			g.Key.ClusterID != grant.Previous.ClusterID || len(g.Resources) != 1 || g.Resources[0] != want ||
+			a.grants[g.Key.GroupID].Key.Revision != 0 || revision != 0 &&
+			revision != g.Key.Revision || g.Validate() != nil {
 			return nil, fault.ErrOperatorAuthorization
 		}
 		revision = g.Key.Revision
-		for _, target := range g.Targets {
-			id := storage.Identity{ClusterID: g.Key.ClusterID, NodeName: target.NodeName, GroupID: g.Key.GroupID, ReplicaID: target.ReplicaID}
-			if target.MemberID != grant.Previous.MemberID || target.NodeName != grant.Previous.NodeName || !prior[id] || granted[id] || g.Key.GroupID == topology.MetaGroupID && target.ReplicaID != grant.Previous.MemberID {
-				return nil, fault.ErrIdentityMismatch
-			}
-			delete(prior, id)
+		scope := readmissionTargetScope{previous: grant.Previous, prior: prior, granted: granted}
+		if err := validateReadmissionTargets(g, scope); err != nil {
+			return nil, err
 		}
 		a.grants[g.Key.GroupID] = g.Clone()
 	}
 	if len(prior) != 0 {
 		return nil, fault.ErrOperatorAuthorization
 	}
-	// Complete validation precedes the first durable write. Partial installation
-	// after an I/O failure remains pending and is safe to resume with this grant.
+	// Complete validation precedes the first durable write. Partial
+	// installation after an I/O failure remains pending and is safe to resume
+	// with this grant.
 	for _, g := range grant.Grants {
-		floor, _, err := s.Fence(ctx, g)
+		floor, err := s.Fence(ctx, g)
 		if err != nil {
 			return nil, err
 		}
-		a.floors = append(a.floors, floor)
+		a.floors = append(a.floors, floor.Record)
 	}
 	return a, nil
 }
@@ -91,7 +97,8 @@ func (a *readmissionAuthority) effect(ctx context.Context, group string, replica
 	if !ok {
 		return fault.ErrOperatorAuthorization
 	}
-	target := topology.AuthorityTarget{NodeName: a.store.Identity().NodeName, MemberID: a.store.Identity().MemberID, ReplicaID: replica}
+	target := topology.AuthorityTarget{NodeName: a.store.Identity().NodeName, MemberID: a.store.Identity().MemberID,
+		ReplicaID: replica}
 	receipt, err := a.store.BeginEffect(ctx, grant, target)
 	if err == nil && receipt != nil {
 		return nil
@@ -105,7 +112,7 @@ func (a *readmissionAuthority) effect(ctx context.Context, group string, replica
 	}
 	var sequence uint64
 	for _, r := range running {
-		if r.Grant.Equal(grant) && r.Target == target {
+		if r.Target == target && r.Grant.Equal(grant) {
 			sequence = r.Sequence
 		}
 	}
@@ -115,16 +122,25 @@ func (a *readmissionAuthority) effect(ctx context.Context, group string, replica
 	if err := run(); err != nil {
 		return err
 	}
-	return a.store.FinishEffect(ctx, topology.EffectReceipt{Key: grant.Key, Resource: grant.Resources[0], AdmissionID: grant.AdmissionID, Target: target, Outcome: topology.EffectApplied, LocalSequence: sequence})
+	return a.store.FinishEffect(ctx, topology.EffectReceipt{
+		Key:           grant.Key,
+		Resource:      grant.Resources[0],
+		AdmissionID:   grant.AdmissionID,
+		Target:        target,
+		Outcome:       topology.EffectApplied,
+		LocalSequence: sequence,
+	})
 }
 
-func (a *readmissionAuthority) retireMeta(ctx context.Context, grant Readmission, allowMissing bool) error {
-	if err := a.effect(ctx, topology.MetaGroupID, grant.Previous.MemberID, func() error {
-		return retireReadmissionMeta(ctx, grant, allowMissing)
-	}); err != nil {
-		return err
+func (a *readmissionAuthority) retireMeta(ctx context.Context, grant Readmission, mode readmissionMetaMode) error {
+	effectErr := a.effect(ctx, topology.MetaGroupID, grant.Previous.MemberID, func() error {
+		return retireReadmissionMeta(ctx, grant, mode)
+	})
+	if effectErr != nil {
+		return effectErr
 	}
-	// A historical receipt cannot hide storage restored into the live namespace.
+	// A historical receipt cannot hide storage restored into the live
+	// namespace.
 	fresh, err := metastore.StoreIsFresh(grant.MetaDBPath)
 	if err != nil {
 		return err
@@ -133,4 +149,27 @@ func (a *readmissionAuthority) retireMeta(ctx context.Context, grant Readmission
 		return fault.ErrIdentityMismatch
 	}
 	return ctx.Err()
+}
+
+type readmissionTargetScope struct {
+	previous       topology.Identity
+	prior, granted map[storage.Identity]bool
+}
+
+func validateReadmissionTargets(g topology.AuthorityGrant, scope readmissionTargetScope) error {
+	for _, target := range g.Targets {
+		id := storage.Identity{
+			ClusterID: g.Key.ClusterID,
+			NodeName:  target.NodeName,
+			GroupID:   g.Key.GroupID,
+			ReplicaID: target.ReplicaID,
+		}
+		if target.MemberID != scope.previous.MemberID || target.NodeName != scope.previous.NodeName ||
+			!scope.prior[id] || scope.granted[id] ||
+			g.Key.GroupID == topology.MetaGroupID && target.ReplicaID != scope.previous.MemberID {
+			return fault.ErrIdentityMismatch
+		}
+		delete(scope.prior, id)
+	}
+	return nil
 }

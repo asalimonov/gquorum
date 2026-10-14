@@ -8,6 +8,8 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
+// GrantTransferProposal requests authority for an exact direct
+// leadership-transfer request.
 type GrantTransferProposal struct {
 	ExpectedActiveVersion uint64 `json:"expected_active_version"`
 	GroupID               string `json:"group_id"`
@@ -24,24 +26,20 @@ func (sm *topologySM) applyGrantTransfer(index uint64, p GrantTransferProposal) 
 	if strings.TrimSpace(p.RequestID) == "" {
 		return refuse(proposalAuthorization, "transfer requires a request identity")
 	}
-	a := topology.AuthorizedStep{Version: p.ExpectedActiveVersion, GroupID: p.GroupID, NodeName: p.NodeName, ReplicaID: p.ReplicaID, Kind: topology.StepTransferLeader}
-	for _, r := range sm.authority.records {
-		if r.Grant.Purpose != topology.AuthorityTransfer || r.Grant.RequestID != p.RequestID {
-			continue
-		}
-		if r.Grant.Action == nil || *r.Grant.Action != a {
-			return refuse(proposalAuthorization, "transfer retry changed exact action")
-		}
-		if r.Closed {
-			return refuse(proposalAuthorityFenced, "transfer authority was revoked")
-		}
-		grant := r.Grant.Clone()
-		return ApplyResult{ProposalID: p.ProposalID, Accepted: true, Grant: &grant}, false
+	a := topology.AuthorizedStep{
+		Version:   p.ExpectedActiveVersion,
+		GroupID:   p.GroupID,
+		NodeName:  p.NodeName,
+		ReplicaID: p.ReplicaID,
+		Kind:      topology.StepTransferLeader,
+	}
+	if prior := sm.authority.retainedTransferRequest(p, a); prior != nil {
+		return *prior, false
 	}
 	if err := sm.authorizeLocked(context.Background(), a); err != nil {
 		return refuse(proposalAuthorization, err.Error())
 	}
-	if sm.hasNonterminalOperatorLocked() || sm.target.Version != sm.active.Version {
+	if sm.target.Version != sm.active.Version || sm.hasNonterminalOperatorLocked() {
 		return refuse(proposalAuthorityPending, "topology execution owns administrative authority")
 	}
 	for _, r := range sm.authority.revocations {
@@ -49,30 +47,71 @@ func (sm *topologySM) applyGrantTransfer(index uint64, p GrantTransferProposal) 
 			return refuse(proposalAuthorityPending, "revocation is pending")
 		}
 	}
-	resources, targets, err := sm.grantResourcesLocked(a)
+	resources, err := sm.grantResourcesLocked(a)
 	if err != nil {
 		return refuse(proposalAuthorization, err.Error())
 	}
-	for _, resource := range resources {
-		if old := sm.authority.records[sm.authority.floors[resource]]; old != nil && !resourceConsumed(old, resource) && !sm.authority.fenceSettled(old) {
-			// Public callers do not retain the internal request ID when a wait
-			// is canceled. Join the exact still-unconsumed transfer at the current
-			// floor; retain its original request identity and durable receipt.
-			if !old.Closed && old.Grant.Purpose == topology.AuthorityTransfer && old.Grant.Action != nil && *old.Grant.Action == a {
-				grant := old.Grant.Clone()
-				return ApplyResult{ProposalID: p.ProposalID, Accepted: true, Grant: &grant}, false
-			}
-			return refuse(proposalAuthorityPending, "resource has an unfinished effect")
-		}
+	if prior, blocked := sm.authority.unfinishedTransfer(resources.Resources, a); blocked {
+		return refuse(proposalAuthorityPending, "resource has an unfinished effect")
+	} else if prior != nil {
+		return ApplyResult{ProposalID: p.ProposalID, Accepted: true, Grant: prior}, false
 	}
-	if sm.authority.pendingCost()+3 > sm.rules.Limits.WithDefaults().MaxPendingAuthorityRecords {
+	if sm.authority.pendingCost()+newAuthorityGrantCost > sm.rules.Limits.WithDefaults().MaxPendingAuthorityRecords {
 		return refuse(proposalOverloaded, fault.ErrOverloaded.Error())
 	}
-	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: sm.active.ClusterID, GroupID: p.GroupID, Revision: index}, Purpose: topology.AuthorityTransfer, Action: &a, RequestID: p.RequestID, Resources: resources, Targets: targets}
+	grant := topology.AuthorityGrant{
+		Key:       topology.AuthorityKey{ClusterID: sm.active.ClusterID, GroupID: p.GroupID, Revision: index},
+		Purpose:   topology.AuthorityTransfer,
+		Action:    &a,
+		RequestID: p.RequestID,
+		Resources: resources.Resources,
+		Targets:   resources.Targets,
+	}
 	if err := grant.Validate(); err != nil {
 		return refuse(proposalAuthorization, err.Error())
 	}
 	sm.insertGrantLocked(grant)
 	owned := grant.Clone()
 	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, Grant: &owned}, true
+}
+
+func (a authorityCatalog) retainedTransferRequest(p GrantTransferProposal,
+	action topology.AuthorizedStep) *ApplyResult {
+	for _, r := range a.records {
+		if r.Grant.Purpose != topology.AuthorityTransfer || r.Grant.RequestID != p.RequestID {
+			continue
+		}
+		if r.Grant.Action == nil || *r.Grant.Action != action {
+			result := rejectProposal(p.ProposalID, proposalAuthorization, "%s", "transfer retry changed exact action")
+			return &result
+		}
+		if r.Closed {
+			result := rejectProposal(p.ProposalID, proposalAuthorityFenced, "%s", "transfer authority was revoked")
+			return &result
+		}
+		grant := r.Grant.Clone()
+		result := ApplyResult{ProposalID: p.ProposalID, Accepted: true, Grant: &grant}
+		return &result
+	}
+	return nil
+}
+
+func (a authorityCatalog) unfinishedTransfer(resources []topology.AuthorityResource,
+	action topology.AuthorizedStep) (*topology.AuthorityGrant, bool) {
+	for _, resource := range resources {
+		if old := a.records[a.floors[resource]]; old != nil && !resourceConsumed(old, resource) &&
+			!a.fenceSettled(old) {
+			// Public callers do not retain the internal request ID when a wait
+			// is canceled. Join the exact still-unconsumed transfer at the
+			// current
+			// floor; retain its original request identity and durable receipt.
+			if !old.Closed && old.Grant.Purpose == topology.AuthorityTransfer && old.Grant.Action != nil &&
+				*old.Grant.Action == action {
+				grant := old.Grant.Clone()
+				return &grant, false
+			}
+			return nil, true
+		}
+	}
+	return nil, false
 }

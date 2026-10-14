@@ -8,8 +8,12 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
+// EntryKind distinguishes application commands from engine-owned administrative
+// records.
 type EntryKind string
 
+// Entry kinds separate application, authority, effect, transfer and membership
+// payloads.
 const (
 	Application             EntryKind = "application"
 	InstallAuthority        EntryKind = "install_authority"
@@ -19,6 +23,8 @@ const (
 	StandaloneConfiguration EntryKind = "standalone_configuration"
 )
 
+// Entry is the versioned Raft payload for one application or administrative
+// command.
 type Entry struct {
 	Schema      uint32                   `json:"schema"`
 	Kind        EntryKind                `json:"kind"`
@@ -29,12 +35,16 @@ type Entry struct {
 	Action      *topology.AuthorizedStep `json:"action,omitempty"`
 }
 
+// EncodeEntry validates the payload shape and encodes an engine log record.
 func EncodeEntry(e Entry) ([]byte, error) {
 	if err := e.Validate(); err != nil {
 		return nil, err
 	}
 	return json.Marshal(e)
 }
+
+// DecodeEntry decodes one engine log record and validates its schema and
+// payload shape.
 func DecodeEntry(data []byte) (Entry, error) {
 	var e Entry
 	if err := decode(data, &e); err != nil {
@@ -57,7 +67,7 @@ func (e Entry) Validate() error {
 	}
 	switch e.Kind {
 	case Application:
-		if !validText(e.RequestID) || e.Grant != nil || e.Action != nil {
+		if e.Grant != nil || e.Action != nil || !validText(e.RequestID) {
 			return fault.New(fault.Unreadable, "application entry contains invalid authority or request ID", nil)
 		}
 		return nil
@@ -70,6 +80,10 @@ func (e Entry) Validate() error {
 	default:
 		return fault.New(fault.Unsupported, "unknown engine entry kind", nil)
 	}
+	return e.validateAdministrative()
+}
+
+func (e Entry) validateAdministrative() error {
 	if e.RequestID != "" || len(e.Data) != 0 || e.Grant == nil {
 		return fault.New(fault.Unreadable, "administrative entry lacks exclusive grant payload", nil)
 	}
@@ -89,17 +103,26 @@ func (e Entry) Validate() error {
 	if e.Action == nil || e.Grant.Action == nil || *e.Action != *e.Grant.Action {
 		return fault.New(fault.Unreadable, "administrative entry action differs from grant", nil)
 	}
+	return e.validateActionKind()
+}
+
+func (e Entry) validateActionKind() error {
 	switch e.Kind {
 	case TransferIntent:
-		if e.Action.Kind != topology.StepTransferLeader && (e.Action.Kind != topology.StepDemoteVoter || e.Action.TransferReplicaID == 0 || e.Action.TransferReplicaID == e.Action.ReplicaID) {
+		if e.Action.Kind != topology.StepTransferLeader && (e.Action.Kind != topology.StepDemoteVoter ||
+			e.Action.TransferReplicaID == 0 || e.Action.TransferReplicaID == e.Action.ReplicaID) {
 			return fault.New(fault.Unreadable, "non-transfer intent", nil)
 		}
 	case ManagedConfiguration:
 		switch e.Action.Kind {
-		case topology.StepAddLearner, topology.StepPromoteVoter, topology.StepDemoteVoter, topology.StepRemoveReplica:
+		case topology.StepAddLearner,
+			topology.StepPromoteVoter,
+			topology.StepDemoteVoter,
+			topology.StepRemoveReplica:
 		default:
 			return fault.New(fault.Unreadable, "non-membership configuration context", nil)
 		}
+	default: // Other entry kinds need no action-specific checks.
 	}
 	return nil
 }

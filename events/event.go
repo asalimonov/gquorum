@@ -1,10 +1,13 @@
-// Package events provides bounded live subscriptions and an independent local journal.
+// Package events provides bounded live subscriptions and an independent local
+// journal.
 package events
 
 import "time"
 
+// Type identifies a local event kind.
 type Type string
 
+// Event kinds describe local leadership, health and lifecycle observations.
 const (
 	LeaderChange       Type = "leader_change"
 	QuorumLost         Type = "quorum_lost"
@@ -19,6 +22,8 @@ const (
 	SelfRemoved        Type = "self_removed"
 )
 
+// Event records a node-local observation with optional group and operator
+// identity.
 type Event struct {
 	Seq         uint64    `json:"seq"`
 	At          time.Time `json:"at"`
@@ -45,18 +50,11 @@ type Event struct {
 	StepSeq       int    `json:"step_seq,omitempty"`
 	ReplicaID     uint64 `json:"replica_id,omitempty"`
 }
-type Filter struct {
-	GroupID string
-	Types   []Type
-}
+
+// Delivery pairs an event with the number of lost deliveries preceding it.
 type Delivery struct {
 	Event      Event
 	LostBefore uint64
-}
-type Query struct {
-	AfterSeq uint64
-	Limit    int
-	Filter   Filter
 }
 
 func (f Filter) matches(e Event) bool {

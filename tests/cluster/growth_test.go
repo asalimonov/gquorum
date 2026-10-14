@@ -5,21 +5,21 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"github.com/asalimonov/gquorum"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func voterPolicy(target int) *topology.VoterPolicy {
-	p := topology.DefaultVoterPolicy()
+func voterConfig(target int) *topology.VoterConfig {
+	p := topology.DefaultVoterConfig()
 	p.TargetVoters = target
 	return &p
 }
 
-func stageVoterActivation(t *testing.T, ctx context.Context, c *Cluster, name string) (gquorum.MutationResult, topology.Plan) {
+func stageVoterActivation(ctx context.Context, t *testing.T, c *Cluster, name string) (gquorum.MutationResult, topology.Plan) {
 	t.Helper()
 	base, err := c.Document(ctx, "node1", "latest")
 	if err != nil {
@@ -69,7 +69,7 @@ func stageVoterActivation(t *testing.T, ctx context.Context, c *Cluster, name st
 	}
 	return staged, plan
 }
-func startApply(t *testing.T, ctx context.Context, c *Cluster, node string, version uint64) topology.OperatorID {
+func startApply(ctx context.Context, t *testing.T, c *Cluster, node string, version uint64) topology.OperatorID {
 	t.Helper()
 	var id topology.OperatorID
 	// A follower loss can interrupt leader observation after the intent was
@@ -132,7 +132,7 @@ func TestRuntimeGrowthExposesLearnerBeforePromotionAndSurvivesRestart(t *testing
 			t.Fatal(err)
 		}
 	}
-	staged, plan := stageVoterActivation(t, ctx, c, "node3")
+	staged, plan := stageVoterActivation(ctx, t, c, "node3")
 	fresh := replicaID(staged.Document, "work", "node3")
 	if fresh <= replicaID(created.Document, "work", "node3") {
 		t.Fatal("activation reused a removed identity", fresh)
@@ -149,7 +149,7 @@ func TestRuntimeGrowthExposesLearnerBeforePromotionAndSurvivesRestart(t *testing
 			promotion = plan.Steps[index]
 		}
 	}
-	id := startApply(t, ctx, c, "node2", staged.Document.Version)
+	id := startApply(ctx, t, c, "node2", staged.Document.Version)
 	if err := Poll(ctx, func() (bool, error) {
 		for _, node := range c.Nodes() {
 			controls, err := c.Controls(ctx, node.Spec.Name)

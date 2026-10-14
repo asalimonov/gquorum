@@ -18,84 +18,36 @@ import (
 func (h *Host) DispatchGrant(parent context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
 	ctx, cancel := context.WithTimeout(parent, h.cfg.EffectTimeout)
 	defer cancel()
-	ctx, release, err := h.beginWork(ctx)
+	ctxHandle, err := h.beginWork(ctx)
+	ctx, release := ctxHandle.Context, ctxHandle.Release
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	grant = grant.Clone()
-	if err := topology.ValidateLoadID(grant.Key.GroupID); err != nil {
+	cloned := grant.Clone()
+	if err := topology.ValidateLoadID(cloned.Key.GroupID); err != nil {
 		return nil, err
 	}
-	if grant.Action == nil || grant.Validate() != nil {
+	if cloned.Action == nil || cloned.Validate() != nil {
 		return nil, fault.ErrOperatorAuthorization
 	}
 	if h.cfg.ResolveAuthorityPeer == nil || h.cfg.RecordFence == nil {
 		return nil, fault.ErrUnsupported
 	}
-	if err := h.cfg.ValidateGrant(ctx, grant); err != nil {
+	if err := h.cfg.ValidateGrant(ctx, cloned); err != nil {
 		return nil, err
 	}
 	var receipts []topology.EffectReceipt
-	if localAction(grant.Action.Kind) {
-		var failures []error
-		var mu sync.Mutex
-		var workers sync.WaitGroup
-		for _, resource := range grant.Resources {
-			if resource.Kind != topology.AuthorityHost {
-				continue
-			}
-			// Different hosts progress independently. Historical replicas on the
-			// same host share a group gate and must be reconciled in order.
-			workers.Go(func() {
-				got, err := h.dispatchGrantedHost(ctx, grant, resource)
-				mu.Lock()
-				receipts = append(receipts, got...)
-				if err != nil {
-					failures = append(failures, err)
-				}
-				mu.Unlock()
-			})
-		}
-		workers.Wait()
-		sortReceipts(receipts)
-		if err := errors.Join(failures...); err != nil {
+	if localAction(cloned.Action.Kind) {
+		receipts, err = h.dispatchGrantHosts(ctx, cloned)
+		if err != nil {
 			return receipts, err
 		}
-		if grant.Action.Kind != topology.StepCreateFoundingGroup {
+		if cloned.Action.Kind != topology.StepCreateFoundingGroup {
 			return receipts, nil
 		}
 	}
-	// Status locates a possible leader; only an applied group receipt proves
-	// the effect. Founding reaches this point after all host creation receipts.
-	status, err := h.ObserveGroup(ctx, grant.Key.GroupID)
-	if err != nil {
-		return receipts, err
-	}
-	if status.LeaderID == 0 {
-		return receipts, fault.ErrReplicaNotReady
-	}
-	var peer load.Peer
-	for _, target := range grant.Targets {
-		if target.ReplicaID != status.LeaderID {
-			continue
-		}
-		peer, err = h.grantedPeer(ctx, grant, target)
-		if err == nil {
-			break
-		}
-	}
-	if err != nil {
-		return receipts, err
-	}
-	if !completePeer(peer) {
-		return receipts, fault.ErrIdentityMismatch
-	}
-	resource := topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: grant.Key.GroupID}
-	if err := h.installGrantedFence(ctx, grant, resource, peer); err != nil {
-		return receipts, err
-	}
-	receipt, err := h.sendGrantedAction(ctx, load.ActionRequest{From: h.cfg.Identity(), To: peer, Grant: grant, Authorization: *grant.Action})
+	receipt, err := h.dispatchGrantGroup(ctx, cloned)
 	if err == nil {
 		receipts = append(receipts, receipt)
 		sortReceipts(receipts)
@@ -112,19 +64,23 @@ func sortReceipts(receipts []topology.EffectReceipt) {
 	})
 }
 
-func (h *Host) grantedPeer(ctx context.Context, grant topology.AuthorityGrant, target topology.AuthorityTarget) (load.Peer, error) {
+func (h *Host) grantedPeer(ctx context.Context, grant topology.AuthorityGrant,
+	target topology.AuthorityTarget) (load.Peer, error) {
 	peer, err := h.cfg.ResolveAuthorityPeer(ctx, grant, target)
 	if err != nil {
 		return load.Peer{}, err
 	}
-	if !completePeer(peer) || peer.Node.ClusterID != grant.Key.ClusterID || peer.Node.NodeName != target.NodeName || peer.Node.MemberID != target.MemberID ||
-		peer.Replica != (load.ReplicaRef{GroupID: grant.Key.GroupID, ReplicaID: target.ReplicaID}) {
+	if peer.Node.ClusterID != grant.Key.ClusterID || peer.Node.NodeName != target.NodeName ||
+		peer.Node.MemberID != target.MemberID ||
+		peer.Replica != (load.ReplicaRef{GroupID: grant.Key.GroupID, ReplicaID: target.ReplicaID}) ||
+		!completePeer(peer) {
 		return load.Peer{}, fault.ErrIdentityMismatch
 	}
 	return peer, nil
 }
 
-func (h *Host) dispatchGrantedHost(ctx context.Context, grant topology.AuthorityGrant, resource topology.AuthorityResource) ([]topology.EffectReceipt, error) {
+func (h *Host) dispatchGrantedHost(ctx context.Context, grant topology.AuthorityGrant,
+	resource topology.AuthorityResource) ([]topology.EffectReceipt, error) {
 	var receipts []topology.EffectReceipt
 	for _, target := range grant.Targets {
 		if target.NodeName != resource.NodeName {
@@ -137,8 +93,19 @@ func (h *Host) dispatchGrantedHost(ctx context.Context, grant topology.Authority
 		if err := h.installGrantedFence(ctx, grant, resource, peer); err != nil {
 			return receipts, err
 		}
-		local := storage.Identity{ClusterID: grant.Key.ClusterID, GroupID: grant.Key.GroupID, NodeName: target.NodeName, ReplicaID: target.ReplicaID}
-		receipt, err := h.sendGrantedAction(ctx, load.ActionRequest{From: h.cfg.Identity(), To: peer, Grant: grant, Authorization: *grant.Action, LocalTarget: local})
+		local := storage.Identity{
+			ClusterID: grant.Key.ClusterID,
+			GroupID:   grant.Key.GroupID,
+			NodeName:  target.NodeName,
+			ReplicaID: target.ReplicaID,
+		}
+		receipt, err := h.sendGrantedAction(ctx, load.ActionRequest{
+			From:          h.cfg.Identity(),
+			To:            peer,
+			Grant:         grant,
+			Authorization: *grant.Action,
+			LocalTarget:   local,
+		})
 		if err != nil {
 			return receipts, err
 		}
@@ -147,7 +114,8 @@ func (h *Host) dispatchGrantedHost(ctx context.Context, grant topology.Authority
 	return receipts, nil
 }
 
-func (h *Host) installGrantedFence(ctx context.Context, grant topology.AuthorityGrant, resource topology.AuthorityResource, peer load.Peer) error {
+func (h *Host) installGrantedFence(ctx context.Context, grant topology.AuthorityGrant,
+	resource topology.AuthorityResource, peer load.Peer) error {
 	if !slices.Contains(grant.Resources, resource) {
 		return fault.ErrOperatorAuthorization
 	}
@@ -155,12 +123,19 @@ func (h *Host) installGrantedFence(ctx context.Context, grant topology.Authority
 	if resource.Kind == topology.AuthorityHost {
 		replicaID = 0
 	}
-	request := load.FenceRequest{From: h.cfg.Identity(), To: peer.Node, ReplicaID: replicaID, Resource: resource, Grant: grant.Clone()}
+	request := load.FenceRequest{
+		From:      h.cfg.Identity(),
+		To:        peer.Node,
+		ReplicaID: replicaID,
+		Resource:  resource,
+		Grant:     grant.Clone(),
+	}
 	result, err := h.cfg.Transport.InstallFence(ctx, request)
 	if err != nil {
 		return err
 	}
-	if result.From != request.To || result.Evidence.Receiver != request.To || result.Evidence.Resource != resource || result.Evidence.ReplicaID != replicaID || result.Evidence.Validate(grant) != nil {
+	if result.From != request.To || result.Evidence.Receiver != request.To || result.Evidence.Resource != resource ||
+		result.Evidence.ReplicaID != replicaID || result.Evidence.Validate(grant) != nil {
 		return fault.ErrOperatorAuthorization
 	}
 	return h.cfg.RecordFence(ctx, result.Evidence)
@@ -171,7 +146,8 @@ func (h *Host) sendGrantedAction(ctx context.Context, request load.ActionRequest
 	if err != nil {
 		return topology.EffectReceipt{}, err
 	}
-	if result.From != request.To || result.Authorization != request.Authorization || result.LocalTarget != request.LocalTarget || len(result.Receipts) != 1 {
+	if result.From != request.To || result.Authorization != request.Authorization ||
+		result.LocalTarget != request.LocalTarget || len(result.Receipts) != 1 {
 		return topology.EffectReceipt{}, fault.ErrOperatorAuthorization
 	}
 	receipt := result.Receipts[0]
@@ -189,4 +165,69 @@ func (h *Host) sendGrantedAction(ctx context.Context, request load.ActionRequest
 		return topology.EffectReceipt{}, fault.ErrOperatorAuthorization
 	}
 	return receipt.Clone(), nil
+}
+
+func (h *Host) dispatchGrantHosts(ctx context.Context,
+	grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+	var receipts []topology.EffectReceipt
+	var failures []error
+	var mu sync.Mutex
+	var workers sync.WaitGroup
+	for _, resource := range grant.Resources {
+		if resource.Kind != topology.AuthorityHost {
+			continue
+		}
+		// Different hosts progress independently. Historical replicas on
+		// the
+		// same host share a group gate and must be reconciled in order.
+		workers.Go(func() {
+			got, err := h.dispatchGrantedHost(ctx, grant, resource)
+			mu.Lock()
+			receipts = append(receipts, got...)
+			if err != nil {
+				failures = append(failures, err)
+			}
+			mu.Unlock()
+		})
+	}
+	workers.Wait()
+	sortReceipts(receipts)
+	if err := errors.Join(failures...); err != nil {
+		return receipts, err
+	}
+	return receipts, nil
+}
+
+func (h *Host) dispatchGrantGroup(ctx context.Context, grant topology.AuthorityGrant) (topology.EffectReceipt, error) {
+	// Status locates a possible leader; only an applied group receipt proves
+	// the effect. Founding reaches this point after all host creation receipts.
+	status, err := h.ObserveGroup(ctx, grant.Key.GroupID)
+	if err != nil {
+		return topology.EffectReceipt{}, err
+	}
+	if status.LeaderID == 0 {
+		return topology.EffectReceipt{}, fault.ErrReplicaNotReady
+	}
+	var peer load.Peer
+	for _, target := range grant.Targets {
+		if target.ReplicaID != status.LeaderID {
+			continue
+		}
+		peer, err = h.grantedPeer(ctx, grant, target)
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		return topology.EffectReceipt{}, err
+	}
+	if !completePeer(peer) {
+		return topology.EffectReceipt{}, fault.ErrIdentityMismatch
+	}
+	resource := topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: grant.Key.GroupID}
+	if err := h.installGrantedFence(ctx, grant, resource, peer); err != nil {
+		return topology.EffectReceipt{}, err
+	}
+	return h.sendGrantedAction(ctx,
+		load.ActionRequest{From: h.cfg.Identity(), To: peer, Grant: grant, Authorization: *grant.Action})
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"math"
 	"reflect"
 	"slices"
@@ -27,69 +28,117 @@ type MutationOptions struct {
 	Apply           bool   `json:"apply"`
 	Preview         bool   `json:"preview"`
 }
+
+// MutationResult preserves a staged document, optional operator and placement
+// diagnostics.
 type MutationResult struct {
-	Document   topology.Document   `json:"document"`
-	OperatorID topology.OperatorID `json:"operator_id,omitempty"`
+	Document   topology.Document         `json:"document"`
+	OperatorID topology.OperatorID       `json:"operator_id,omitempty"`
+	Placement  *topology.PlacementReport `json:"placement,omitempty"`
 }
+
+// GroupSpec describes initial load group placement, storage, hosting and voter
+// configuration.
 type GroupSpec struct {
 	ID          string                  `json:"id"`
+	Labels      map[string]string       `json:"labels,omitempty"`
 	Placement   *topology.PlacementRule `json:"placement,omitempty"`
 	Nodes       []string                `json:"nodes,omitempty"`
-	VoterPolicy *topology.VoterPolicy   `json:"voter_policy,omitempty"`
+	VoterConfig *topology.VoterConfig   `json:"voter_config,omitempty"`
 	Hosting     *topology.HostingRule   `json:"hosting,omitempty"`
-}
-type RetireOptions struct {
-	Reason   string          `json:"reason"`
-	Mutation MutationOptions `json:"mutation"`
+	Storage     topology.StorageClass   `json:"storage,omitempty"`
 }
 
 type documentEdit func(*topology.Document, time.Time) error
 
-func (g *Group) mutation(ctx context.Context, o MutationOptions, comment string, checkHealth bool, edit documentEdit) (MutationResult, error) {
-	base, next, err := g.computeMutation(ctx, o, comment, checkHealth, edit)
+type mutationPolicy struct {
+	Comment     string
+	CheckHealth bool
+}
+
+type mutationDocuments struct {
+	Base, Next topology.Document
+}
+
+// preparePlacementEdit completes a declarative edit against the approved
+// reservation reference. The caller captures before from the same owned Latest
+// document it is editing; Stage/Approve still revalidate replicated state.
+func (g *Group) preparePlacementEdit(before topology.Document, doc *topology.Document, now time.Time) error {
+	views := g.state().Views()
+	target, active := views.Target, views.Active
+	if doc.ChangedBy == "" {
+		doc.ChangedBy = g.currentIdentity().NodeName
+	}
+	preparation, err := topology.PreparePlacement(topology.ReadView{Latest: before, Target: target,
+		Active: active}, *doc, g.rules, now)
+	prepared := preparation.Document
 	if err != nil {
-		return MutationResult{}, err
+		return err
+	}
+	*doc = prepared
+	return nil
+}
+
+func (g *Group) mutation(ctx context.Context, o MutationOptions, policy mutationPolicy,
+	edit documentEdit) (MutationResult, error) {
+	documents, err := g.computeMutation(ctx, o, policy, edit)
+	base, next := documents.Base, documents.Next
+	if err != nil {
+		return MutationResult{Placement: reportFromError(err)}, err
+	}
+	report, err := placementReportFor(g.state().Target(), next, topology.AffectedPlacementGroups(base, next))
+	if err != nil {
+		return MutationResult{Placement: reportFromError(err)}, err
 	}
 	if o.Preview {
-		return MutationResult{Document: next}, nil
+		return MutationResult{Document: next, Placement: report}, nil
 	}
 	if err := g.ensureRunning(ctx); err != nil {
 		return MutationResult{}, err
 	}
 	doc, err := g.Stage(ctx, next, base.Version)
-	result := MutationResult{Document: doc}
+	result := MutationResult{Document: doc, Placement: report}
+	if failure := reportFromError(err); failure != nil {
+		result.Placement = failure
+	}
 	if err != nil || !o.Apply {
 		return result, err
 	}
 	result.OperatorID, err = g.Apply(ctx, doc.Version)
+	if failure := reportFromError(err); failure != nil {
+		result.Placement = failure
+	}
 	return result, err
 }
-func (g *Group) computeMutation(ctx context.Context, o MutationOptions, comment string, checkHealth bool, edit documentEdit) (topology.Document, topology.Document, error) {
+
+func (g *Group) computeMutation(ctx context.Context, o MutationOptions, policy mutationPolicy,
+	edit documentEdit) (mutationDocuments, error) {
 	if err := ctx.Err(); err != nil {
-		return topology.Document{}, topology.Document{}, err
+		return mutationDocuments{}, err
 	}
 	if o.Apply && o.Preview {
-		return topology.Document{}, topology.Document{}, fault.New(fault.Invalid, "preview cannot approve a mutation", nil)
+		return mutationDocuments{}, fault.New(fault.Invalid, "preview cannot approve a mutation",
+			nil)
 	}
 	base := g.state().Latest()
 	if base.Version == 0 || base.Version == math.MaxUint64 {
-		return base, topology.Document{}, fault.ErrUnavailable
+		return mutationDocuments{Base: base}, fault.ErrUnavailable
 	}
 	if o.ExpectedVersion != 0 && o.ExpectedVersion != base.Version {
-		return base, topology.Document{}, &fault.Error{Code: fault.VersionConflict, ExpectedVersion: o.ExpectedVersion, CurrentVersion: base.Version}
+		return mutationDocuments{Base: base}, &fault.Error{
+			Code:            fault.VersionConflict,
+			ExpectedVersion: o.ExpectedVersion,
+			CurrentVersion:  base.Version,
+		}
 	}
 	next := base.Clone()
 	next.Audit = nil
 	now := time.Now().UTC()
 	if err := edit(&next, now); err != nil {
-		return base, topology.Document{}, err
+		return mutationDocuments{Base: base}, err
 	}
-	for i := range next.Groups {
-		group := &next.Groups[i]
-		if old := base.Group(group.ID); old != nil && (!reflect.DeepEqual(old.Replicas, group.Replicas) || !reflect.DeepEqual(old.Placement, group.Placement) || !reflect.DeepEqual(old.VoterPolicy, group.VoterPolicy) || !reflect.DeepEqual(old.Hosting, group.Hosting) || old.NextReplicaID != group.NextReplicaID) {
-			group.UpdatedAt = now
-		}
-	}
+	stampMutationGroups(base, &next, now)
+
 	next.Version = base.Version + 1
 	next.ParentVersion = base.Version
 	next.Origin = topology.OriginOperator
@@ -99,35 +148,37 @@ func (g *Group) computeMutation(ctx context.Context, o MutationOptions, comment 
 	}
 	next.Comment = o.Comment
 	if next.Comment == "" {
-		next.Comment = comment
+		next.Comment = policy.Comment
 	}
 	next.CreatedAt = now
 	if err := next.Validate(g.rules); err != nil {
-		return base, topology.Document{}, err
+		return mutationDocuments{Base: base}, err
 	}
 	if err := checkLoadBounds(next); err != nil {
-		return base, topology.Document{}, err
+		return mutationDocuments{Base: base}, err
 	}
 	if err := g.state().ValidateDesired(next); err != nil {
-		return base, topology.Document{}, err
+		return mutationDocuments{Base: base}, err
 	}
-	if checkHealth {
+	if policy.CheckHealth {
 		if err := g.checkMutationHealth(ctx, base, next); err != nil {
-			return base, topology.Document{}, err
+			return mutationDocuments{Base: base}, err
 		}
 	}
-	return base, next, nil
+	return mutationDocuments{Base: base, Next: next}, nil
 }
 func checkLoadBounds(doc topology.Document) error {
 	for _, group := range doc.LoadGroups() {
 		lo, hi := doc.GroupBounds(group.ID)
 		count := len(doc.VotersOf(group.ID))
 		if count < lo || count > hi {
-			return fault.New(fault.Invalid, fmt.Sprintf("group %q would have %d voters outside [%d,%d]", group.ID, count, lo, hi), nil)
+			return fault.New(fault.Invalid,
+				fmt.Sprintf("group %q would have %d voters outside [%d,%d]", group.ID, count, lo, hi), nil)
 		}
 	}
 	return nil
 }
+
 func (g *Group) checkMutationHealth(ctx context.Context, before, after topology.Document) error {
 	if g.opts.Health == nil {
 		return nil
@@ -143,7 +194,10 @@ func (g *Group) checkMutationHealth(ctx context.Context, before, after topology.
 		a, b := before.VotersOf(group.ID), after.VotersOf(group.ID)
 		unchanged := len(a) == len(b)
 		for _, r := range a {
-			unchanged = unchanged && slices.ContainsFunc(b, func(next topology.Replica) bool { return next.ReplicaID == r.ReplicaID && next.NodeName == r.NodeName })
+			unchanged = unchanged &&
+				slices.ContainsFunc(b, func(next topology.Replica) bool {
+					return next.ReplicaID == r.ReplicaID && next.NodeName == r.NodeName
+				})
 		}
 		if unchanged {
 			continue
@@ -155,49 +209,24 @@ func (g *Group) checkMutationHealth(ctx context.Context, before, after topology.
 			}
 		}
 		if alive < topology.QuorumOf(len(b)) {
-			return fault.New(fault.UnsafeMembership, fmt.Sprintf("group %q would retain %d live voters of %d", group.ID, alive, len(b)), nil)
+			return fault.New(fault.UnsafeMembership, fmt.Sprintf("group %q would retain %d live voters of %d", group.ID,
+				alive, len(b)), nil)
 		}
 	}
 	return nil
 }
-func (g *Group) enforcePlacement(doc *topology.Document, now time.Time) error {
-	if err := topology.ValidateHostingCapacity(*doc, g.rules); err != nil {
-		return err
-	}
+
+type replicaRemovalScope uint8
+
+const (
+	loadReplicaRemoval replicaRemovalScope = iota
+	allReplicaRemoval
+)
+
+func removeNodeReplicas(doc *topology.Document, name string, scope replicaRemovalScope) {
 	for i := range doc.Groups {
 		group := &doc.Groups[i]
-		if group.ID == topology.MetaGroupID {
-			continue
-		}
-		if group.VoterPolicy != nil {
-			if err := materializeHosting(doc, group, now); err != nil {
-				return err
-			}
-			continue
-		}
-		rule := doc.GroupPlacement(group.ID)
-		voters := len(doc.VotersOf(group.ID))
-		for _, node := range doc.Nodes {
-			if voters >= rule.MaxReplicas || len(group.Replicas) >= g.rules.Limits.MaxReplicas {
-				break
-			}
-			if node.State != topology.NodeActive || !rule.Allows(node.Type) || slices.ContainsFunc(group.Replicas, func(r topology.Replica) bool { return r.NodeName == node.Name }) {
-				continue
-			}
-			id, err := group.AllocateReplicaID()
-			if err != nil {
-				return err
-			}
-			group.Replicas = append(group.Replicas, topology.Replica{NodeName: node.Name, ReplicaID: id, Role: topology.ReplicaVoter, CreatedAt: now, UpdatedAt: now})
-			voters++
-		}
-	}
-	return nil
-}
-func removeNodeReplicas(doc *topology.Document, name string, includeMeta bool) {
-	for i := range doc.Groups {
-		group := &doc.Groups[i]
-		if group.ID == topology.MetaGroupID && !includeMeta {
+		if group.ID == topology.MetaGroupID && scope != allReplicaRemoval {
 			continue
 		}
 		group.Replicas = slices.DeleteFunc(group.Replicas, func(r topology.Replica) bool { return r.NodeName == name })
@@ -211,33 +240,39 @@ func unknownGroup(id string) error {
 }
 
 // AddNode admits a caller-defined type. Every admitted node joins _meta;
-// placement eligibility controls only its load groups. Excluded names get fresh IDs.
+// placement eligibility controls only its load groups. Excluded names get fresh
+// IDs.
 func (g *Group) AddNode(ctx context.Context, node topology.Node, o MutationOptions) (MutationResult, error) {
-	return g.mutation(ctx, o, fmt.Sprintf("add node %q", node.Name), false, func(doc *topology.Document, now time.Time) error {
-		if strings.TrimSpace(node.Name) == "" || strings.TrimSpace(string(node.Type)) == "" {
-			return fault.ErrInvalid
-		}
-		next := topology.Document{Nodes: []topology.Node{node}}.Clone().Nodes[0]
-		next.State = topology.NodeActive
-		next.CreatedAt = now
-		next.UpdatedAt = now
-		if existing := doc.Node(node.Name); existing != nil {
-			if existing.State != topology.NodeExcluded {
-				return fault.New(fault.Invalid, "node already admitted", nil)
+	return g.mutation(ctx, o, mutationPolicy{Comment: fmt.Sprintf("add node %q", node.Name)},
+		func(doc *topology.Document, now time.Time) error {
+			before := doc.Clone()
+			if strings.TrimSpace(node.Name) == "" || strings.TrimSpace(string(node.Type)) == "" {
+				return fault.ErrInvalid
 			}
-			*existing = next
-		} else {
-			doc.Nodes = append(doc.Nodes, next)
-		}
-		id, err := doc.AllocateMemberID()
-		if err != nil {
-			return err
-		}
-		if err = doc.SetMemberID(node.Name, id, now); err != nil {
-			return err
-		}
-		return g.enforcePlacement(doc, now)
-	})
+			next := topology.Document{Nodes: []topology.Node{node}}.Clone().Nodes[0]
+			next.State = topology.NodeActive
+			next.CreatedAt = now
+			next.UpdatedAt = now
+			if existing := doc.Node(node.Name); existing != nil {
+				if existing.State != topology.NodeExcluded {
+					return fault.New(fault.Invalid, "node already admitted", nil)
+				}
+				*existing = next
+			} else {
+				doc.Nodes = append(doc.Nodes, next)
+			}
+			id, err := doc.AllocateMemberID()
+			if err != nil {
+				return err
+			}
+			if err = doc.SetMemberID(node.Name, id, now); err != nil {
+				return err
+			}
+			if topology.NodeLearnerOnly(next) {
+				setMetaLearner(doc, node.Name)
+			}
+			return g.preparePlacementEdit(before, doc, now)
+		})
 }
 
 // ReadmitNode rotates the meta and load identities of a declared active node
@@ -246,273 +281,298 @@ func (g *Group) AddNode(ctx context.Context, node topology.Node, o MutationOptio
 // learner-first execution that can wait for the returning process. The caller
 // restarts that process with Join and an exact OnReadmission quarantine hook.
 func (g *Group) ReadmitNode(ctx context.Context, name string, o MutationOptions) (MutationResult, error) {
-	return g.mutation(ctx, o, fmt.Sprintf("readmit node %q", name), false, func(doc *topology.Document, now time.Time) error {
-		node := doc.Node(name)
-		if node == nil {
-			return unknownNode(name)
-		}
-		if node.State != topology.NodeActive || doc.MemberID(name) == 0 {
-			return fault.New(fault.Invalid, "readmission requires an admitted active node", nil)
-		}
-		_, target, active := g.state().Views()
-		if doc.Version != target.Version || doc.Version != active.Version {
-			return fault.New(fault.OperatorAuthorization, "readmission requires converged topology; apply or restore pending intent first", nil)
-		}
-		health, err := (observationSource{g}).Health(ctx, active)
-		if err != nil {
-			return err
-		}
-		switch health[name] {
-		case topology.HealthDead:
-		case topology.HealthAlive:
-			return fault.New(fault.UnsafeMembership, "cannot readmit a live node", nil)
-		default:
-			return fault.New(fault.Unavailable, "readmission requires known dead node health", nil)
-		}
-		fresh, err := metaengine.ReadmissionDocument(*doc, name, now)
-		if err != nil {
-			return err
-		}
-		*doc = fresh
-		return nil
-	})
-}
-func (g *Group) DrainNode(ctx context.Context, name string, o MutationOptions) (MutationResult, error) {
-	return g.mutation(ctx, o, fmt.Sprintf("drain node %q", name), false, func(doc *topology.Document, now time.Time) error {
-		node := doc.Node(name)
-		if node == nil {
-			return unknownNode(name)
-		}
-		if node.State != topology.NodeActive {
-			active := g.state().Active()
-			n := active.Node(name)
-			if (node.State == topology.NodeDraining || node.State == topology.NodeDrained) && doc.Version > active.Version && (n == nil || n.State == topology.NodeActive) {
-				return fault.New(fault.Invalid, fmt.Sprintf("drain of %q already staged as v%d; apply it or activate the node to undo", name, doc.Version), nil)
+	return g.mutation(ctx, o, mutationPolicy{Comment: fmt.Sprintf("readmit node %q", name)},
+		func(doc *topology.Document, now time.Time) error {
+			node := doc.Node(name)
+			if node == nil {
+				return unknownNode(name)
 			}
-			return fault.New(fault.Invalid, fmt.Sprintf("node %q is %s; activate to return it to service or exclude to retire it", name, node.State), nil)
-		}
-		node.State = topology.NodeDraining
-		node.UpdatedAt = now
-		removeNodeReplicas(doc, name, false)
-		return nil
-	})
-}
-func (g *Group) ActivateNode(ctx context.Context, name string, o MutationOptions) (MutationResult, error) {
-	return g.mutation(ctx, o, fmt.Sprintf("activate node %q", name), false, func(doc *topology.Document, now time.Time) error {
-		node := doc.Node(name)
-		if node == nil {
-			return unknownNode(name)
-		}
-		if node.State == topology.NodeActive {
+			if node.State != topology.NodeActive || doc.MemberID(name) == 0 {
+				return fault.New(fault.Invalid, "readmission requires an admitted active node", nil)
+			}
+			views := g.state().Views()
+			target, active := views.Target, views.Active
+			if doc.Version != target.Version || doc.Version != active.Version {
+				return fault.New(fault.OperatorAuthorization,
+					"readmission requires converged topology; apply or restore pending intent first", nil)
+			}
+			health, err := (observationSource{g}).Health(ctx, active)
+			if err != nil {
+				return err
+			}
+			switch health[name] {
+			case topology.HealthDead:
+			case topology.HealthAlive:
+				return fault.New(fault.UnsafeMembership, "cannot readmit a live node", nil)
+			default:
+				return fault.New(fault.Unavailable, "readmission requires known dead node health", nil)
+			}
+			fresh, err := metaengine.ReadmissionDocument(*doc, name, now)
+			if err != nil {
+				return err
+			}
+			*doc = fresh
 			return nil
-		}
-		if node.State != topology.NodeDraining && node.State != topology.NodeDrained {
-			return fault.New(fault.Invalid, "excluded node needs fresh admission", nil)
-		}
-		node.State = topology.NodeActive
-		node.UpdatedAt = now
-		return g.enforcePlacement(doc, now)
-	})
+		})
 }
-func (g *Group) ExcludeNode(ctx context.Context, name string, o MutationOptions) (MutationResult, error) {
-	return g.mutation(ctx, o, fmt.Sprintf("exclude node %q", name), true, func(doc *topology.Document, now time.Time) error {
-		node := doc.Node(name)
-		if node == nil {
-			return unknownNode(name)
-		}
-		active := g.state().Active()
-		old := active.Node(name)
-		if old != nil && old.State != topology.NodeDraining && old.State != topology.NodeDrained {
-			return fault.New(fault.Invalid, "node must have a converged drain before retirement", nil)
-		}
-		if old == nil {
-			target := g.state().Target()
-			if admitted := target.Node(name); admitted != nil && admitted.State.Places() {
-				return fault.New(fault.Invalid, "approved admission must converge before normal retirement", nil)
+
+// DrainNode stages a node drain through guarded topology mutation.
+func (g *Group) DrainNode(ctx context.Context, name string, o MutationOptions) (MutationResult, error) {
+	return g.mutation(ctx, o, mutationPolicy{Comment: fmt.Sprintf("drain node %q", name)},
+		func(doc *topology.Document, now time.Time) error {
+			before := doc.Clone()
+			node := doc.Node(name)
+			if node == nil {
+				return unknownNode(name)
 			}
-			removeNodeReplicas(doc, name, false)
-		} else if node.State != topology.NodeDraining && node.State != topology.NodeDrained {
-			return fault.ErrInvalid
-		}
-		if node.State == topology.NodeExcluded {
-			return fault.New(fault.Invalid, "node already excluded", nil)
-		}
-		for _, group := range doc.LoadGroups() {
-			for _, r := range group.Replicas {
-				if r.NodeName == name {
-					return fault.New(fault.Invalid, "node still holds a load replica", nil)
+			if node.State != topology.NodeActive {
+				active := g.state().Active()
+				n := active.Node(name)
+				if (node.State == topology.NodeDraining || node.State == topology.NodeDrained) &&
+					doc.Version > active.Version && (n == nil || n.State == topology.NodeActive) {
+					return fault.New(fault.Invalid,
+						fmt.Sprintf("drain of %q already staged as v%d; apply it or activate the node to undo", name,
+							doc.Version), nil)
 				}
+				return fault.New(fault.Invalid,
+					fmt.Sprintf("node %q is %s; activate to return it to service or exclude to retire it", name,
+						node.State), nil)
 			}
-		}
-		node.State = topology.NodeExcluded
-		node.UpdatedAt = now
-		removeNodeReplicas(doc, name, true)
-		return nil
-	})
+			node.State = topology.NodeDraining
+			node.UpdatedAt = now
+			return g.preparePlacementEdit(before, doc, now)
+		})
 }
+
+// ActivateNode stages reactivation of an eligible declared node.
+func (g *Group) ActivateNode(ctx context.Context, name string, o MutationOptions) (MutationResult, error) {
+	return g.mutation(ctx, o, mutationPolicy{Comment: fmt.Sprintf("activate node %q", name)},
+		func(doc *topology.Document, now time.Time) error {
+			before := doc.Clone()
+			node := doc.Node(name)
+			if node == nil {
+				return unknownNode(name)
+			}
+			if node.State == topology.NodeActive {
+				return nil
+			}
+			if node.State != topology.NodeDraining && node.State != topology.NodeDrained {
+				return fault.New(fault.Invalid, "excluded node needs fresh admission", nil)
+			}
+			node.State = topology.NodeActive
+			node.UpdatedAt = now
+			return g.preparePlacementEdit(before, doc, now)
+		})
+}
+
+// ExcludeNode stages removal of a node from placement under topology safety
+// checks.
+func (g *Group) ExcludeNode(ctx context.Context, name string, o MutationOptions) (MutationResult, error) {
+	return g.mutation(ctx, o, mutationPolicy{Comment: fmt.Sprintf("exclude node %q", name), CheckHealth: true},
+		func(doc *topology.Document, now time.Time) error {
+			node := doc.Node(name)
+			if node == nil {
+				return unknownNode(name)
+			}
+			if err := g.prepareNormalRetirement(doc, node, name); err != nil {
+				return err
+			}
+			if node.State == topology.NodeExcluded {
+				return fault.New(fault.Invalid, "node already excluded", nil)
+			}
+			if hasNodeLoadReplica(*doc, name) {
+				return fault.New(fault.Invalid, "node still holds a load replica", nil)
+			}
+			node.State = topology.NodeExcluded
+			node.UpdatedAt = now
+			removeNodeReplicas(doc, name, allReplicaRemoval)
+			return nil
+		})
+}
+
+// ForceRetireNode stages explicit audited retirement with mandatory membership
+// and placement checks.
 func (g *Group) ForceRetireNode(ctx context.Context, name string, o RetireOptions) (MutationResult, error) {
 	if strings.TrimSpace(o.Reason) == "" || strings.TrimSpace(o.Mutation.Actor) == "" {
 		return MutationResult{}, fault.New(fault.Invalid, "forced retirement requires reason and actor", nil)
 	}
-	return g.mutation(ctx, o.Mutation, fmt.Sprintf("force retire node %q", name), false, func(doc *topology.Document, now time.Time) error {
-		node := doc.Node(name)
-		if node == nil {
-			return unknownNode(name)
-		}
-		if node.State == topology.NodeExcluded {
-			return fault.ErrInvalid
-		}
-		node.State = topology.NodeExcluded
-		node.UpdatedAt = now
-		removeNodeReplicas(doc, name, true)
-		if err := g.enforcePlacement(doc, now); err != nil {
-			return err
-		}
-		doc.Audit = &topology.ChangeAudit{Operation: topology.AuditOperationForceRetireNode, TargetNode: name, Forced: true, Reason: strings.TrimSpace(o.Reason), StagedBy: o.Mutation.Actor, StagedAt: now}
-		return nil
-	})
-}
-func (g *Group) SetPlacement(ctx context.Context, rule topology.PlacementRule, o MutationOptions) (MutationResult, error) {
-	return g.mutation(ctx, o, "set placement", true, func(doc *topology.Document, now time.Time) error {
-		doc.Placement = rule
-		doc.Placement.AllowedNodeTypes = slices.Clone(rule.AllowedNodeTypes)
-		return g.enforcePlacement(doc, now)
-	})
+	return g.mutation(ctx, o.Mutation, mutationPolicy{Comment: fmt.Sprintf("force retire node %q", name)},
+		func(doc *topology.Document, now time.Time) error {
+			before := doc.Clone()
+			node := doc.Node(name)
+			if node == nil {
+				return unknownNode(name)
+			}
+			if node.State == topology.NodeExcluded {
+				return fault.ErrInvalid
+			}
+			// Prepare the load relocation while _meta still contains the
+			// departing
+			// member. Its removal is the exact expert membership edit below.
+			node.State = topology.NodeDraining
+			node.UpdatedAt = now
+			if err := g.preparePlacementEdit(before, doc, now); err != nil {
+				return err
+			}
+			doc.Node(name).State = topology.NodeExcluded
+			removeNodeReplicas(doc, name, allReplicaRemoval)
+			doc.Audit = &topology.ChangeAudit{
+				Operation:  topology.AuditOperationForceRetireNode,
+				TargetNode: name,
+				Forced:     true,
+				Reason:     strings.TrimSpace(o.Reason),
+				StagedBy:   o.Mutation.Actor,
+				StagedAt:   now,
+			}
+			return nil
+		},
+	)
 }
 
-// SetGroupPlacement edits one load group's policy and desired replicas in one
+// SetPlacement stages cluster or group placement intent under compare-and-swap.
+func (g *Group) SetPlacement(ctx context.Context, rule topology.PlacementRule,
+	o MutationOptions) (MutationResult, error) {
+	return g.mutation(ctx, o, mutationPolicy{Comment: "set placement", CheckHealth: true},
+		func(doc *topology.Document, now time.Time) error {
+			before := doc.Clone()
+			for _, group := range before.LoadGroups() {
+				if group.Placement == nil && group.VoterConfig == nil &&
+					len(before.VotersOf(group.ID)) > rule.MaxReplicas {
+					return fault.New(fault.Invalid, "placement cannot silently shrink legacy voters", nil)
+				}
+			}
+			doc.Placement = rule
+			doc.Placement.AllowedNodeTypes = slices.Clone(rule.AllowedNodeTypes)
+			doc.Placement.NodeSelector = maps.Clone(rule.NodeSelector)
+			return g.preparePlacementEdit(before, doc, now)
+		})
+}
+
+// SetGroupPlacement edits one load group's placement rule and desired replicas
+// in one
 // CAS document. Eligible existing identities are retained; new hosts get fresh
 // identities. Approval still checks actual membership and live-majority safety.
-func (g *Group) SetGroupPlacement(ctx context.Context, id string, rule topology.PlacementRule, o MutationOptions) (MutationResult, error) {
+func (g *Group) SetGroupPlacement(ctx context.Context, id string, rule topology.PlacementRule,
+	o MutationOptions) (MutationResult, error) {
 	if err := topology.ValidateLoadID(id); err != nil {
 		return MutationResult{}, err
 	}
-	return g.mutation(ctx, o, fmt.Sprintf("set placement of group %q", id), true, func(doc *topology.Document, now time.Time) error {
-		group := doc.Group(id)
-		if group == nil {
-			return unknownGroup(id)
-		}
-		if rule.MinReplicas < 1 || rule.MaxReplicas < rule.MinReplicas || rule.MaxReplicas > g.rules.Limits.MaxReplicas {
-			return fault.ErrInvalid
-		}
-		policy := rule
-		policy.AllowedNodeTypes = slices.Clone(rule.AllowedNodeTypes)
-		group.Placement = &policy
-		if group.VoterPolicy != nil {
-			return g.enforcePlacement(doc, now)
-		}
-		voters := 0
-		group.Replicas = slices.DeleteFunc(group.Replicas, func(replica topology.Replica) bool {
-			node := doc.Node(replica.NodeName)
-			if node == nil || node.State != topology.NodeActive || !policy.Allows(node.Type) {
-				return true
+	return g.mutation(ctx, o, mutationPolicy{Comment: fmt.Sprintf("set placement of group %q", id), CheckHealth: true},
+		func(doc *topology.Document, now time.Time) error {
+			before := doc.Clone()
+			group := doc.Group(id)
+			if group == nil {
+				return unknownGroup(id)
 			}
-			if replica.Role == topology.ReplicaVoter {
-				if voters >= policy.MaxReplicas {
-					return true
-				}
-				voters++
+			if rule.MinReplicas < 1 || rule.MaxReplicas < rule.MinReplicas ||
+				rule.MaxReplicas > g.rules.Limits.MaxReplicas {
+				return fault.ErrInvalid
 			}
-			return false
+			placement := rule
+			placement.AllowedNodeTypes = slices.Clone(rule.AllowedNodeTypes)
+			placement.NodeSelector = maps.Clone(rule.NodeSelector)
+			group.Placement = &placement
+			return g.preparePlacementEdit(before, doc, now)
 		})
-		for _, node := range doc.Nodes {
-			if voters >= policy.MaxReplicas || len(group.Replicas) >= g.rules.Limits.MaxReplicas {
-				break
-			}
-			if node.State != topology.NodeActive || !policy.Allows(node.Type) || slices.ContainsFunc(group.Replicas, func(r topology.Replica) bool { return r.NodeName == node.Name }) {
-				continue
-			}
-			fresh, err := group.AllocateReplicaID()
-			if err != nil {
-				return err
-			}
-			group.Replicas = append(group.Replicas, topology.Replica{NodeName: node.Name, ReplicaID: fresh, Role: topology.ReplicaVoter, CreatedAt: now, UpdatedAt: now})
-			voters++
-		}
-		if voters < policy.MinReplicas {
-			return fault.New(fault.UnsafeMembership, "too few eligible active voters for group placement", nil)
-		}
-		return nil
-	})
 }
+
+// CreateLoadGroup stages a fresh load group with validated placement and
+// monotonic identity allocation.
 func (g *Group) CreateLoadGroup(ctx context.Context, spec GroupSpec, o MutationOptions) (MutationResult, error) {
 	if err := topology.ValidateLoadID(spec.ID); err != nil {
 		return MutationResult{}, err
 	}
-	return g.mutation(ctx, o, fmt.Sprintf("create group %q", spec.ID), true, func(doc *topology.Document, now time.Time) error {
-		return g.createLoadGroup(doc, spec, now)
-	})
+	return g.mutation(ctx, o, mutationPolicy{Comment: fmt.Sprintf("create group %q", spec.ID), CheckHealth: true},
+		func(doc *topology.Document, now time.Time) error {
+			before := doc.Clone()
+			if err := createLoadGroup(doc, spec, now); err != nil {
+				return err
+			}
+			return g.preparePlacementEdit(before, doc, now)
+		})
 }
+
+// DeleteLoadGroup stages group deletion with retained cleanup authorization.
 func (g *Group) DeleteLoadGroup(ctx context.Context, id string, o MutationOptions) (MutationResult, error) {
 	if err := topology.ValidateLoadID(id); err != nil {
 		return MutationResult{}, err
 	}
-	return g.mutation(ctx, o, fmt.Sprintf("delete group %q", id), false, func(doc *topology.Document, _ time.Time) error {
-		if doc.Group(id) == nil {
-			return unknownGroup(id)
-		}
-		doc.Groups = slices.DeleteFunc(doc.Groups, func(group topology.Group) bool { return group.ID == id })
-		return nil
-	})
+	return g.mutation(ctx, o, mutationPolicy{Comment: fmt.Sprintf("delete group %q", id)},
+		func(doc *topology.Document, _ time.Time) error {
+			if doc.Group(id) == nil {
+				return unknownGroup(id)
+			}
+			doc.Groups = slices.DeleteFunc(doc.Groups, func(group topology.Group) bool { return group.ID == id })
+			return nil
+		})
 }
-func (g *Group) ChangeReplica(ctx context.Context, id, name string, role topology.ReplicaRole, o MutationOptions) (MutationResult, error) {
+
+// ChangeReplica stages a guarded exact replica role change.
+func (g *Group) ChangeReplica(ctx context.Context, id string, change topology.ReplicaRoleChange,
+	o MutationOptions) (MutationResult, error) {
+	name, role := change.NodeName, change.Role
 	if role != topology.ReplicaVoter && role != topology.ReplicaLearner {
 		return MutationResult{}, fault.ErrInvalid
 	}
-	return g.mutation(ctx, o, "change replica role", true, func(doc *topology.Document, now time.Time) error {
-		group := doc.Group(id)
-		if group == nil {
-			return unknownGroup(id)
-		}
-		for i := range group.Replicas {
-			r := &group.Replicas[i]
-			if r.NodeName == name {
-				pin := group.VoterPolicy != nil && role == topology.ReplicaLearner
-				if r.Role != role || r.PinnedLearner != pin {
-					r.Role = role
-					r.PinnedLearner = pin
-					r.UpdatedAt = now
-				}
-				return nil
+	return g.mutation(ctx, o, mutationPolicy{Comment: "change replica role", CheckHealth: true},
+		func(doc *topology.Document, now time.Time) error {
+			group := doc.Group(id)
+			if group == nil {
+				return unknownGroup(id)
 			}
-		}
-		return unknownNode(name)
-	})
+			for i := range group.Replicas {
+				r := &group.Replicas[i]
+				if r.NodeName == name {
+					pin := group.VoterConfig != nil && role == topology.ReplicaLearner
+					if r.Role != role || r.PinnedLearner != pin {
+						r.Role = role
+						r.PinnedLearner = pin
+						r.UpdatedAt = now
+					}
+					return nil
+				}
+			}
+			return unknownNode(name)
+		})
 }
+
+// RollbackTo stages a retained version's intent as a new validated topology
+// version.
 func (g *Group) RollbackTo(ctx context.Context, version uint64, o MutationOptions) (MutationResult, error) {
 	old, err := g.Get(ctx, version)
 	if err != nil {
 		return MutationResult{}, err
 	}
-	base, next, err := g.computeMutation(ctx, o, fmt.Sprintf("rollback to version %d", version), true, func(doc *topology.Document, _ time.Time) error {
-		if doc.Version == version {
-			return fault.New(fault.Invalid, "version is already current", nil)
-		}
-		floors := g.state().AllocationFloors()
-		for i := range old.Groups {
-			old.Groups[i].NextReplicaID = max(old.Groups[i].NextReplicaID, floors[old.Groups[i].ID])
-		}
-		for i := range old.Groups {
-			if group := doc.Group(old.Groups[i].ID); group != nil {
-				old.Groups[i].NextReplicaID = max(old.Groups[i].NextReplicaID, group.NextReplicaID)
-			}
-		}
-		*doc = old.Clone()
-		return nil
-	})
+	policy := mutationPolicy{Comment: fmt.Sprintf("rollback to version %d", version), CheckHealth: true}
+	documents, err := g.computeMutation(ctx, o, policy,
+		func(doc *topology.Document, now time.Time) error {
+			return g.prepareRollback(doc, old, version, now)
+		},
+	)
+	base, next := documents.Base, documents.Next
 	if err != nil {
-		return MutationResult{}, err
+		return MutationResult{Placement: reportFromError(err)}, err
 	}
 	next.ParentVersion = version
+	report, err := placementReportFor(g.state().Target(), next, topology.AffectedPlacementGroups(base, next))
+	if err != nil {
+		return MutationResult{Placement: reportFromError(err)}, err
+	}
 	if o.Preview {
-		return MutationResult{Document: next}, nil
+		return MutationResult{Document: next, Placement: report}, nil
 	}
 	doc, err := g.Stage(ctx, next, base.Version)
-	result := MutationResult{Document: doc}
+	result := MutationResult{Document: doc, Placement: report}
+	if failure := reportFromError(err); failure != nil {
+		result.Placement = failure
+	}
 	if err != nil || !o.Apply {
 		return result, err
 	}
 	result.OperatorID, err = g.Apply(ctx, doc.Version)
+	if failure := reportFromError(err); failure != nil {
+		result.Placement = failure
+	}
 	return result, err
 }
 
@@ -523,102 +583,90 @@ func (g *Group) ReseatReplica(ctx context.Context, id, name string, o MutationOp
 	if err := topology.ValidateLoadID(id); err != nil {
 		return MutationResult{}, err
 	}
-	latest, target, active := g.state().Views()
+	views := g.state().Views()
+	latest, target, active := views.Latest, views.Target, views.Active
 	if !reflect.DeepEqual(latest, target) || !reflect.DeepEqual(target, active) {
-		return MutationResult{}, fault.New(fault.OperatorAuthorization, "reseat requires equal Latest, Target and Active", nil)
+		return MutationResult{}, fault.New(fault.OperatorAuthorization,
+			"reseat requires equal Latest, Target and Active", nil)
 	}
 	if ex, ok := g.state().CurrentOperator(); ok && !ex.Status.State.Terminal() {
 		return MutationResult{}, fault.New(fault.OperatorAuthorization, "reseat requires no running execution", nil)
 	}
-	base, next, err := g.computeMutation(ctx, o, "reseat replica", false, func(doc *topology.Document, now time.Time) error {
-		group := doc.Group(id)
-		if group == nil {
-			return unknownGroup(id)
-		}
-		for _, r := range group.Replicas {
-			if r.NodeName != name {
-				continue
-			}
-			actor := o.Actor
-			if actor == "" {
-				actor = g.currentIdentity().NodeName
-			}
-			repair, _, err := metaengine.ReplicaRepairDocument(active, latest, id, name, r.ReplicaID, now, topology.OriginOperator, actor)
-			if err != nil {
-				return err
-			}
-			*doc = repair
-			return nil
-		}
-		return unknownNode(name)
-	})
+	documents, err := g.computeMutation(ctx, o, mutationPolicy{Comment: "reseat replica"},
+		func(doc *topology.Document, now time.Time) error {
+			options := metaengine.ReplicaRepairOptions{GroupID: id, NodeName: name, At: now,
+				Origin: topology.OriginOperator, Actor: o.Actor}
+			return g.reseatDocument(doc, views, options)
+		})
+	base, next := documents.Base, documents.Next
 	if err != nil {
-		return MutationResult{}, err
+		return MutationResult{Placement: reportFromError(err)}, err
+	}
+	report, err := placementReportFor(g.state().Target(), next, topology.AffectedPlacementGroups(base, next))
+	if err != nil {
+		return MutationResult{Placement: reportFromError(err)}, err
 	}
 	if o.Preview {
-		return MutationResult{Document: next}, nil
+		return MutationResult{Document: next, Placement: report}, nil
 	}
 	plan, err := g.PlanFor(ctx, next)
 	if err != nil {
-		return MutationResult{}, err
+		return MutationResult{Placement: reportFromError(err)}, err
 	}
 	if plan.IsEmpty() {
 		return MutationResult{}, fault.ErrOperatorAuthorization
 	}
-	committed, err := g.propose(ctx, metaengine.CommitRepairOperatorProposal{Doc: next, ExpectedVersion: base.Version, Plan: plan, At: time.Now().UTC()})
-	result := MutationResult{Document: committed.Doc, OperatorID: committed.OperatorID}
+	committed, err := g.propose(ctx, metaengine.CommitRepairOperatorProposal{
+		Doc:             next,
+		ExpectedVersion: base.Version,
+		Plan:            plan,
+		At:              time.Now().UTC(),
+	})
+	result := MutationResult{Document: committed.Doc, OperatorID: committed.OperatorID, Placement: report}
+	if failure := reportFromError(err); failure != nil {
+		result.Placement = failure
+	}
 	if err == nil {
 		g.controller.Signal()
 	}
 	return result, err
 }
 
-// TransferLeader commits resource authority for the exact Active identity without
+// TransferLeader commits resource authority for the exact Active identity
+// without
 // creating a document version, then records its durable initiation receipt.
 func (g *Group) TransferLeader(ctx context.Context, id, name string) error {
 	if err := g.ensureRunning(ctx); err != nil {
 		return err
 	}
 	doc := g.state().Active()
-	group := doc.Group(id)
-	if group == nil {
-		return unknownGroup(id)
-	}
-	node := doc.Node(name)
-	if node == nil {
-		return unknownNode(name)
-	}
-	if node.State != topology.NodeActive {
-		return fault.New(fault.Invalid, "leadership target must be active", nil)
-	}
-	var member uint64
-	for _, r := range group.Replicas {
-		if r.NodeName == name && r.Role == topology.ReplicaVoter {
-			member = r.ReplicaID
-		}
-	}
-	if member == 0 {
-		return fault.New(fault.Invalid, "leadership target must be a declared voter", nil)
-	}
-	if g.opts.Health != nil {
-		health, err := g.opts.Health.Snapshot(ctx)
-		if err != nil {
-			return err
-		}
-		if health != nil && health[name] != topology.HealthAlive {
-			return fault.New(fault.UnsafeMembership, "leadership target is not alive", nil)
-		}
+	member, err := g.leaderTransferTarget(ctx, doc, id, name)
+	if err != nil {
+		return err
 	}
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return err
 	}
-	result, err := g.propose(ctx, metaengine.GrantTransferProposal{ExpectedActiveVersion: doc.Version, GroupID: id, NodeName: name, ReplicaID: member, RequestID: hex.EncodeToString(nonce[:])})
+	result, err := g.propose(ctx, metaengine.GrantTransferProposal{
+		ExpectedActiveVersion: doc.Version,
+		GroupID:               id,
+		NodeName:              name,
+		ReplicaID:             member,
+		RequestID:             hex.EncodeToString(nonce[:]),
+	})
 	if err != nil {
 		return err
 	}
-	action := topology.AuthorizedStep{Version: doc.Version, Kind: topology.StepTransferLeader, GroupID: id, NodeName: name, ReplicaID: member}
-	if result.Grant == nil || result.Grant.Action == nil || *result.Grant.Action != action || result.Grant.Validate() != nil {
+	action := topology.AuthorizedStep{
+		Version:   doc.Version,
+		Kind:      topology.StepTransferLeader,
+		GroupID:   id,
+		NodeName:  name,
+		ReplicaID: member,
+	}
+	if result.Grant == nil || result.Grant.Action == nil || *result.Grant.Action != action ||
+		result.Grant.Validate() != nil {
 		return fault.ErrUnreadable
 	}
 	receipts, err := (groupControllers{g}).TransferLeader(ctx, *result.Grant)

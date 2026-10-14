@@ -19,7 +19,9 @@ func TestOperatorProgressRequiresEveryResourceReceipt(t *testing.T) {
 	apply(t, sm, 1, ProposeDocument{Doc: baseDoc()})
 	at := time.Unix(100, 0).UTC()
 	step := topology.Step{Seq: 1, Kind: topology.StepCreateFoundingGroup, GroupID: "shard0"}
-	begin := apply(t, sm, 2, BeginOperatorProposal{Version: 1, Plan: topology.Plan{Version: 1, Steps: []topology.Step{step}}, At: at})
+	plan := withTestVoterProof(sm.Active(), sm.Latest(), topology.Plan{Version: 1, Steps: []topology.Step{step}})
+	step = plan.Steps[0]
+	begin := apply(t, sm, 2, BeginOperatorProposal{Version: 1, Plan: plan, At: at})
 	if !begin.Accepted {
 		t.Fatal(begin)
 	}
@@ -40,7 +42,7 @@ func TestOperatorProgressRequiresEveryResourceReceipt(t *testing.T) {
 	}
 	transition.State = topology.OperatorSucceeded
 	pending()
-	a := topology.AuthorizedStep{OperatorID: begin.OperatorID, Version: 1, Attempt: 1, StepSeq: 1, Kind: step.Kind, GroupID: step.GroupID}
+	a := topology.AuthorizedStep{OperatorID: begin.OperatorID, Version: 1, Attempt: 1, StepSeq: 1, Kind: step.Kind, GroupID: step.GroupID, ExpectedVotersDigest: step.ExpectedVotersDigest, ResultVotersDigest: step.ResultVotersDigest}
 	granted := command(BeginEffectProposal{Action: a})
 	if !granted.Accepted || granted.Grant == nil {
 		t.Fatal(granted)
@@ -63,6 +65,18 @@ func TestOperatorProgressRequiresEveryResourceReceipt(t *testing.T) {
 		if i < len(receipts)-1 {
 			pending()
 		}
+	}
+	query, err := json.Marshal(QueryRequest{Kind: "plan_validation", OperatorID: begin.OperatorID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, err := m.Query(t.Context(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var view PlanRead
+	if err := json.Unmarshal(read.Data, &view); err != nil || len(view.Grants) != 1 || !view.Grants[0].Equal(grant) || len(view.Receipts) != len(receipts) {
+		t.Fatalf("plan validation lost exact receipt evidence: %+v %v", view, err)
 	}
 	if r := command(TransitionOperatorProposal{Transition: transition}); !r.Accepted {
 		t.Fatal(r)

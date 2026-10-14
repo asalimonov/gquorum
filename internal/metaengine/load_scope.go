@@ -11,9 +11,11 @@ import (
 
 // WithGrantedLoadCleanup keeps approved assignments stable through an exact
 // local ledger mutation. The resource owner has already admitted this work at
-// its installed floor; a closed retained grant is still valid proof of identity.
+// its installed floor; a closed retained grant is still valid proof of
+// identity.
 // fn must be bounded and must not call back into this machine.
-func (m *Machine) WithGrantedLoadCleanup(ctx context.Context, grant topology.AuthorityGrant, target topology.AuthorityTarget, fn func() error) error {
+func (m *Machine) WithGrantedLoadCleanup(ctx context.Context, grant topology.AuthorityGrant,
+	target topology.AuthorityTarget, fn func() error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -36,18 +38,23 @@ func (sm *topologySM) grantedLoadCleanupLocked(grant topology.AuthorityGrant, ta
 	if record == nil {
 		// The courier can deliver a committed grant before this returning
 		// participant applies it. Keep the ledger intact and let the controller
-		// retry after catch-up; absence at an already applied index is a refusal.
-		if grant.Validate() == nil && grant.Key.ClusterID == sm.target.ClusterID && grant.Key.Revision > sm.appliedIndex {
+		// retry after catch-up; absence at an already applied index is a
+		// refusal.
+		if grant.Key.ClusterID == sm.target.ClusterID && grant.Key.Revision > sm.appliedIndex &&
+			grant.Validate() == nil {
 			return fault.New(fault.Unavailable, "receiver has not applied required cleanup grant", nil)
 		}
 		return fault.ErrOperatorAuthorization
 	}
-	if !record.Grant.Equal(grant) || grant.Action == nil || !slices.Contains(grant.Targets, target) ||
-		!slices.Contains(grant.Resources, topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: grant.Key.GroupID, NodeName: target.NodeName}) {
+	if grant.Action == nil || !record.Grant.Equal(grant) || !slices.Contains(grant.Targets, target) ||
+		!slices.Contains(grant.Resources,
+			topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: grant.Key.GroupID,
+				NodeName: target.NodeName}) {
 		return fault.ErrOperatorAuthorization
 	}
 	a := grant.Action
-	if a.Kind != topology.StepDeleteGroupState && (a.Kind != topology.StepCleanupReplicaState || a.NodeName != target.NodeName || a.ReplicaID != target.ReplicaID) {
+	if a.Kind != topology.StepDeleteGroupState && (a.Kind != topology.StepCleanupReplicaState ||
+		a.NodeName != target.NodeName || a.ReplicaID != target.ReplicaID) {
 		return fault.ErrOperatorAuthorization
 	}
 	if group := sm.target.Group(grant.Key.GroupID); group != nil {
@@ -79,17 +86,27 @@ func (m *Machine) WithLoadScope(id storage.Identity, member uint64, fn func(Load
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if m.retired[id.GroupID] != 0 {
-		return fault.ErrGroupRetired
+	scope, err := m.approvedLoadScopeLocked(id, member)
+	if err != nil {
+		return err
 	}
-	if member == 0 || id.ReplicaID == 0 || id.ClusterID != m.target.ClusterID || m.target.MemberID(id.NodeName) != member {
-		return fault.New(fault.IdentityMismatch, "load owner differs from approved meta identity", nil)
+	m.populateLoadScopeLocked(&scope, id)
+	return fn(scope)
+}
+
+func (sm *topologySM) approvedLoadScopeLocked(id storage.Identity, member uint64) (LoadScope, error) {
+	if sm.retired[id.GroupID] != 0 {
+		return LoadScope{}, fault.ErrGroupRetired
 	}
-	group := m.target.Group(id.GroupID)
+	if member == 0 || id.ReplicaID == 0 || id.ClusterID != sm.target.ClusterID ||
+		sm.target.MemberID(id.NodeName) != member {
+		return LoadScope{}, fault.New(fault.IdentityMismatch, "load owner differs from approved meta identity", nil)
+	}
+	group := sm.target.Group(id.GroupID)
 	if group == nil {
-		return fault.New(fault.IdentityMismatch, "load group is not approved", nil)
+		return LoadScope{}, fault.New(fault.IdentityMismatch, "load group is not approved", nil)
 	}
-	scope := LoadScope{Version: m.target.Version}
+	scope := LoadScope{Version: sm.target.Version}
 	for _, replica := range group.Replicas {
 		if replica.NodeName == id.NodeName && replica.ReplicaID == id.ReplicaID {
 			scope.Replica = replica
@@ -97,47 +114,70 @@ func (m *Machine) WithLoadScope(id storage.Identity, member uint64, fn func(Load
 		}
 	}
 	if scope.Replica.ReplicaID == 0 {
-		return fault.New(fault.IdentityMismatch, "load replica is not approved", nil)
+		return LoadScope{}, fault.New(fault.IdentityMismatch, "load replica is not approved", nil)
 	}
 	owned := (topology.Document{Groups: []topology.Group{*group}}).Clone()
 	scope.Group = owned.Groups[0]
-	if active := m.active.Group(id.GroupID); active != nil {
+	return scope, nil
+}
+
+func (sm *topologySM) populateLoadScopeLocked(scope *LoadScope, id storage.Identity) {
+	if active := sm.active.Group(id.GroupID); active != nil {
 		for _, replica := range active.Replicas {
 			if replica.NodeName == id.NodeName && replica.ReplicaID == id.ReplicaID {
 				scope.Started, scope.Established = true, true
 			}
 		}
 	}
-	for _, ex := range m.operators {
-		for _, step := range ex.Steps {
-			if ex.Version == m.target.Version && step.GroupID == id.GroupID && step.Kind == topology.StepCreateFoundingGroup && scope.Replica.Role == topology.ReplicaVoter {
-				scope.Founding = true
-			}
-			completed := step.Seq < ex.CurrentStep || ex.State == topology.OperatorSucceeded && step.Seq == ex.CurrentStep
-			if !completed || step.GroupID != id.GroupID {
-				continue
-			}
-			if step.Kind == topology.StepPrepareReplica && step.NodeName == id.NodeName && step.ReplicaID == id.ReplicaID {
-				scope.Started = true
-			}
-			if (step.Kind == topology.StepAddLearner || step.Kind == topology.StepPromoteVoter) && step.NodeName == id.NodeName && step.ReplicaID == id.ReplicaID {
-				scope.Started, scope.Established = true, true
-			}
-			if step.Kind == topology.StepCreateFoundingGroup {
-				for _, doc := range m.history {
-					if doc.Version != ex.Version {
-						continue
-					}
-					if old := doc.Group(id.GroupID); old != nil {
-						for _, replica := range old.Replicas {
-							if replica.NodeName == id.NodeName && replica.ReplicaID == id.ReplicaID && replica.Role == topology.ReplicaVoter {
-								scope.Started, scope.Established = true, true
-							}
-						}
-					}
+	for _, ex := range sm.operators {
+		scope.observeOperator(sm, ex, id)
+	}
+}
+
+func (scope *LoadScope) observeOperator(sm *topologySM, ex *operatorRecord, id storage.Identity) {
+	for _, step := range ex.Steps {
+		scope.observeStep(sm, ex, step, id)
+	}
+}
+
+func (scope *LoadScope) observeStep(sm *topologySM, ex *operatorRecord, step topology.Step, id storage.Identity) {
+	if ex.Version == sm.target.Version && step.GroupID == id.GroupID &&
+		step.Kind == topology.StepCreateFoundingGroup && scope.Replica.Role == topology.ReplicaVoter {
+		scope.Founding = true
+	}
+	completed := completedStep(ex, step)
+	if !completed || step.GroupID != id.GroupID {
+		return
+	}
+	if step.Kind == topology.StepPrepareReplica && step.NodeName == id.NodeName &&
+		step.ReplicaID == id.ReplicaID {
+		scope.Started = true
+	}
+	if (step.Kind == topology.StepAddLearner || step.Kind == topology.StepPromoteVoter) &&
+		step.NodeName == id.NodeName && step.ReplicaID == id.ReplicaID {
+		scope.Started, scope.Established = true, true
+	}
+	if step.Kind == topology.StepCreateFoundingGroup {
+		if sm.historicalFoundingVoterLocked(ex.Version, id) {
+			scope.Started, scope.Established = true, true
+		}
+	}
+}
+
+func (sm *topologySM) historicalFoundingVoterLocked(version uint64, id storage.Identity) bool {
+	found := false
+	for _, doc := range sm.history {
+		if doc.Version != version {
+			continue
+		}
+		if old := doc.Group(id.GroupID); old != nil {
+			for _, replica := range old.Replicas {
+				if replica.NodeName == id.NodeName && replica.ReplicaID == id.ReplicaID &&
+					replica.Role == topology.ReplicaVoter {
+					found = true
 				}
 			}
 		}
 	}
-	return fn(scope)
+	return found
 }

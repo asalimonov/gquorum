@@ -37,7 +37,7 @@ func TestCallerProjectionStallCatchesUpFullStateAndJoins(t *testing.T) {
 	t.Cleanup(func() { cancel(); a.workWG.Wait() })
 	deadline, stop := context.WithTimeout(t.Context(), 2*time.Second)
 	defer stop()
-	projectionPoll(t, deadline, func() bool {
+	projectionPoll(deadline, t, func() bool {
 		view, err := a.projectionView(key)
 		return err == nil && view.Active == 1 && view.Attempts == 1
 	})
@@ -50,7 +50,7 @@ func TestCallerProjectionStallCatchesUpFullStateAndJoins(t *testing.T) {
 	control.release = nil
 	control.metrics.Blocked = false
 	a.clusterHooks.mu.Unlock()
-	projectionPoll(t, deadline, func() bool {
+	projectionPoll(deadline, t, func() bool {
 		view, err := a.projectionView(key)
 		return err == nil && view.Writes >= 2 && view.State.AppliedIndex == 2 && len(view.State.Requests) == 2 && maps.Equal(view.State.Values, map[string]string{"before": "before", "during": "during"})
 	})
@@ -85,13 +85,13 @@ func blockedProjectionStops(t *testing.T, retirement bool) {
 	t.Cleanup(func() { cancel(); a.workWG.Wait() })
 	deadline, stop := context.WithTimeout(t.Context(), 2*time.Second)
 	defer stop()
-	projectionPoll(t, deadline, func() bool { view, err := a.projectionView(key); return err == nil && view.Active == 1 })
+	projectionPoll(deadline, t, func() bool { view, err := a.projectionView(key); return err == nil && view.Active == 1 })
 	if retirement {
 		running.Store(false)
 	} else {
 		cancel()
 	}
-	projectionPoll(t, deadline, func() bool {
+	projectionPoll(deadline, t, func() bool {
 		view, err := a.projectionView(key)
 		return err == nil && view.Stopped && view.Active == 0 && view.Failures == 1 && view.Writes == 0
 	})
@@ -101,7 +101,7 @@ func blockedProjectionStops(t *testing.T, retirement bool) {
 	}
 }
 
-func projectionPoll(t *testing.T, ctx context.Context, ready func() bool) {
+func projectionPoll(ctx context.Context, t *testing.T, ready func() bool) {
 	t.Helper()
 	ticker := time.NewTicker(time.Millisecond)
 	defer ticker.Stop()

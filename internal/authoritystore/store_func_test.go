@@ -26,7 +26,7 @@ func localGrant(revision uint64) topology.AuthorityGrant {
 func openLocal(t *testing.T) (*Store, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "private", "authority.bolt")
-	s, err := Open(path, localIdentity(), true)
+	s, err := Open(path, localIdentity(), FreshEvidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,15 +39,15 @@ func openLocal(t *testing.T) (*Store, string) {
 }
 func completeLocal(t *testing.T, s *Store, g topology.AuthorityGrant) FenceRecord {
 	t.Helper()
-	r, _, err := s.Fence(t.Context(), g)
+	r, err := s.Fence(t.Context(), g)
 	if err != nil {
 		t.Fatal(err)
 	}
-	e, err := s.CompleteFence(t.Context(), g.Key, r.Sequence)
+	e, err := s.CompleteFence(t.Context(), g.Key, r.Record.Sequence)
 	if err != nil || e.Validate(g) != nil {
 		t.Fatal(e, err)
 	}
-	return r
+	return r.Record
 }
 func receiptFor(g topology.AuthorityGrant, sequence uint64) topology.EffectReceipt {
 	return topology.EffectReceipt{Key: g.Key, Resource: g.Resources[0], Action: g.Action, Target: g.Targets[0], Outcome: topology.EffectApplied, LocalSequence: sequence}
@@ -57,9 +57,9 @@ func TestPendingFenceAndRunningEffectSurviveRestart(t *testing.T) {
 	t.Parallel()
 	s, path := openLocal(t)
 	g := localGrant(10)
-	r, same, err := s.Fence(t.Context(), g)
-	if err != nil || same || r.Complete || r.Sequence != 1 {
-		t.Fatal(r, same, err)
+	r, err := s.Fence(t.Context(), g)
+	if err != nil || r.Same || r.Record.Complete || r.Record.Sequence != 1 {
+		t.Fatal(r.Record, r.Same, err)
 	}
 	if _, err := s.BeginEffect(t.Context(), g, g.Targets[0]); !errors.Is(err, fault.ErrAuthorityPending) {
 		t.Fatal(err)
@@ -69,16 +69,16 @@ func TestPendingFenceAndRunningEffectSurviveRestart(t *testing.T) {
 	}
 	nextID := localIdentity()
 	nextID.InstanceID = "restart"
-	s, err = Open(path, nextID, false)
+	s, err = Open(path, nextID, RetainedEvidence)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	r, same, err = s.Fence(t.Context(), g)
-	if err != nil || !same || r.Sequence != 1 || r.Complete {
-		t.Fatal(r, same, err)
+	r, err = s.Fence(t.Context(), g)
+	if err != nil || !r.Same || r.Record.Sequence != 1 || r.Record.Complete {
+		t.Fatal(r.Record, r.Same, err)
 	}
-	e, err := s.CompleteFence(t.Context(), g.Key, r.Sequence)
+	e, err := s.CompleteFence(t.Context(), g.Key, r.Record.Sequence)
 	if err != nil || e.Receiver.InstanceID != "restart" {
 		t.Fatal(e, err)
 	}
@@ -91,7 +91,7 @@ func TestPendingFenceAndRunningEffectSurviveRestart(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err = Open(path, nextID, false)
+	s, err = Open(path, nextID, RetainedEvidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,14 +129,14 @@ func TestNewFenceRejectsOldAdmissionAndJoinsOldConsumption(t *testing.T) {
 	}
 	next := localGrant(11)
 	next.Purpose, next.Action = topology.AuthorityFence, nil
-	r, _, err := s.Fence(t.Context(), next)
-	if err != nil || r.Sequence != 2 {
-		t.Fatal(r, err)
+	r, err := s.Fence(t.Context(), next)
+	if err != nil || r.Record.Sequence != 2 {
+		t.Fatal(r.Record, err)
 	}
 	if _, err := s.BeginEffect(t.Context(), old, old.Targets[0]); !errors.Is(err, fault.ErrAuthorityFenced) {
 		t.Fatal(err)
 	}
-	if _, _, err := s.Fence(t.Context(), old); !errors.Is(err, fault.ErrAuthorityFenced) {
+	if _, err := s.Fence(t.Context(), old); !errors.Is(err, fault.ErrAuthorityFenced) {
 		t.Fatal(err)
 	}
 	if _, err := s.CompleteFence(t.Context(), old.Key, 1); !errors.Is(err, fault.ErrAuthorityFenced) {
@@ -144,7 +144,7 @@ func TestNewFenceRejectsOldAdmissionAndJoinsOldConsumption(t *testing.T) {
 	}
 	wrong := next.Clone()
 	wrong.OperatorID = "changed"
-	if _, _, err := s.Fence(t.Context(), wrong); !errors.Is(err, fault.ErrIdentityMismatch) {
+	if _, err := s.Fence(t.Context(), wrong); !errors.Is(err, fault.ErrIdentityMismatch) {
 		t.Fatal(err)
 	}
 	bad := receiptFor(old, 2)
@@ -154,7 +154,7 @@ func TestNewFenceRejectsOldAdmissionAndJoinsOldConsumption(t *testing.T) {
 	if err := s.FinishEffect(t.Context(), receiptFor(old, 1)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CompleteFence(t.Context(), next.Key, r.Sequence); err != nil {
+	if _, err := s.CompleteFence(t.Context(), next.Key, r.Record.Sequence); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.BeginEffect(t.Context(), next, next.Targets[0]); err == nil {
@@ -180,29 +180,29 @@ func TestAuthorityPinsMissingFilesAndExactRebind(t *testing.T) {
 	if err := s.Rebind(t.Context(), previous, granted, "other"); !errors.Is(err, fault.ErrIdentityMismatch) {
 		t.Fatal(err)
 	}
-	if _, _, err := s.Fence(t.Context(), g); !errors.Is(err, fault.ErrIdentityMismatch) {
+	if _, err := s.Fence(t.Context(), g); !errors.Is(err, fault.ErrIdentityMismatch) {
 		t.Fatal("old member admitted after rebind", err)
 	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if foreign, err := Open(path, previous, false); !errors.Is(err, fault.ErrIdentityMismatch) {
+	if foreign, err := Open(path, previous, RetainedEvidence); !errors.Is(err, fault.ErrIdentityMismatch) {
 		if foreign != nil {
 			foreign.Close()
 		}
 		t.Fatal(err)
 	}
-	s, err := Open(path, granted, false)
+	s, err := Open(path, granted, RetainedEvidence)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	r, ok, err := s.Current(t.Context(), "work")
-	if err != nil || !ok || !r.Grant.Equal(g) || !r.Complete {
-		t.Fatal(r, ok, err)
+	r, err := s.Current(t.Context(), "work")
+	if err != nil || !r.Found || !r.Record.Grant.Equal(g) || !r.Record.Complete {
+		t.Fatal(r.Record, r.Found, err)
 	}
 	missing := filepath.Join(t.TempDir(), "missing.bolt")
-	if _, err := Open(missing, previous, false); !errors.Is(err, fault.ErrUnreadable) {
+	if _, err := Open(missing, previous, RetainedEvidence); !errors.Is(err, fault.ErrUnreadable) {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(missing); !errors.Is(err, os.ErrNotExist) {
@@ -239,7 +239,11 @@ func TestAuthorityStoreRejectsCorruptStateAndSequenceOverflow(t *testing.T) {
 					g.Key.ClusterID = "foreign"
 					return put(tx.Bucket([]byte("fences")), []byte("work"), FenceRecord{Grant: g, Sequence: 1, Complete: true})
 				case "effect_sequence":
-					return put(tx.Bucket([]byte("effects")), effectKey(g.Key, g.Targets[0]), EffectRecord{Grant: g, Target: g.Targets[0], Sequence: 3, State: "running"})
+					key, err := effectKey(g.Key, g.Targets[0])
+					if err != nil {
+						return err
+					}
+					return put(tx.Bucket([]byte("effects")), key, EffectRecord{Grant: g, Target: g.Targets[0], Sequence: 3, State: "running"})
 				case "overflow":
 					return put(tx.Bucket([]byte("fences")), []byte("work"), FenceRecord{Grant: g, Sequence: math.MaxUint64, Complete: true})
 				}
@@ -250,7 +254,7 @@ func TestAuthorityStoreRejectsCorruptStateAndSequenceOverflow(t *testing.T) {
 			}
 			if mode == "overflow" {
 				g.Key.Revision++
-				if _, _, err := s.Fence(t.Context(), g); !errors.Is(err, fault.ErrUnavailable) {
+				if _, err := s.Fence(t.Context(), g); !errors.Is(err, fault.ErrUnavailable) {
 					t.Fatal(err)
 				}
 				return
@@ -258,7 +262,7 @@ func TestAuthorityStoreRejectsCorruptStateAndSequenceOverflow(t *testing.T) {
 			if err := s.Close(); err != nil {
 				t.Fatal(err)
 			}
-			if reopened, err := Open(path, localIdentity(), false); err == nil {
+			if reopened, err := Open(path, localIdentity(), RetainedEvidence); err == nil {
 				reopened.Close()
 				t.Fatal("corruption accepted")
 			}
@@ -271,16 +275,16 @@ func TestAuthorityStoreCanceledAndClosedOperations(t *testing.T) {
 	s, _ := openLocal(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, _, err := s.Fence(ctx, localGrant(1)); !errors.Is(err, context.Canceled) {
+	if _, err := s.Fence(ctx, localGrant(1)); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
-	if _, ok, err := s.Current(t.Context(), "work"); err != nil || ok {
-		t.Fatal(ok, err)
+	if ok, err := s.Current(t.Context(), "work"); err != nil || ok.Found {
+		t.Fatal(ok.Found, err)
 	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.Current(t.Context(), "work"); !errors.Is(err, fault.ErrStopped) {
+	if _, err := s.Current(t.Context(), "work"); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal(err)
 	}
 }
@@ -288,8 +292,8 @@ func TestAuthorityStoreCanceledAndClosedOperations(t *testing.T) {
 func TestReadOnlyIdentityInspection(t *testing.T) {
 	t.Parallel()
 	missing := filepath.Join(t.TempDir(), "missing")
-	if _, found, err := LoadIdentity(missing); err != nil || found {
-		t.Fatal(found, err)
+	if found, err := LoadIdentity(missing); err != nil || found.Found {
+		t.Fatal(found.Found, err)
 	}
 	s, path := openLocal(t)
 	if err := s.Close(); err != nil {
@@ -299,11 +303,11 @@ func TestReadOnlyIdentityInspection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, found, err := LoadIdentity(path)
+	id, err := LoadIdentity(path)
 	want := localIdentity()
 	want.InstanceID = ""
-	if err != nil || !found || id != want {
-		t.Fatal(id, found, err)
+	if err != nil || !id.Found || id.Identity != want {
+		t.Fatal(id.Identity, id.Found, err)
 	}
 	after, err := os.ReadFile(path)
 	if err != nil || !bytes.Equal(before, after) {
@@ -320,8 +324,8 @@ func TestCompletedReadmissionReceiptRemainsReadableAfterRebind(t *testing.T) {
 	if _, err := s.BeginEffect(t.Context(), g, g.Targets[0]); err != nil {
 		t.Fatal(err)
 	}
-	if _, found, err := s.Receipt(t.Context(), g, g.Targets[0]); err != nil || found {
-		t.Fatal("running intent became completion proof", found, err)
+	if found, err := s.Receipt(t.Context(), g, g.Targets[0]); err != nil || found.Found {
+		t.Fatal("running intent became completion proof", found.Found, err)
 	}
 	proof := receiptFor(g, floor.Sequence)
 	proof.AdmissionID = g.AdmissionID
@@ -342,18 +346,18 @@ func TestCompletedReadmissionReceiptRemainsReadableAfterRebind(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err := Open(path, granted, false)
+	s, err := Open(path, granted, RetainedEvidence)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	got, found, err := s.Receipt(t.Context(), g, g.Targets[0])
-	if err != nil || !found || got != proof {
-		t.Fatal(got, found, err)
+	got, err := s.Receipt(t.Context(), g, g.Targets[0])
+	if err != nil || !got.Found || got.Receipt != proof {
+		t.Fatal(got.Receipt, got.Found, err)
 	}
 	bad := g.Clone()
 	bad.AdmissionID = "unrelated"
-	if _, _, err := s.Receipt(t.Context(), bad, bad.Targets[0]); !errors.Is(err, fault.ErrIdentityMismatch) {
+	if _, err := s.Receipt(t.Context(), bad, bad.Targets[0]); !errors.Is(err, fault.ErrIdentityMismatch) {
 		t.Fatal("changed grant reused receipt", err)
 	}
 }
@@ -376,11 +380,11 @@ func TestFenceRetainsUncertainEffectWithoutSuccessReceipt(t *testing.T) {
 	}
 	next := localGrant(11)
 	next.Purpose, next.Action = topology.AuthorityFence, nil
-	floor, _, err := s.Fence(t.Context(), next)
+	floor, err := s.Fence(t.Context(), next)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CompleteFence(t.Context(), next.Key, floor.Sequence); !errors.Is(err, fault.ErrAuthorityPending) {
+	if _, err := s.CompleteFence(t.Context(), next.Key, floor.Record.Sequence); !errors.Is(err, fault.ErrAuthorityPending) {
 		t.Fatal("unjoined running intent allowed completion", err)
 	}
 	altered := record
@@ -391,7 +395,7 @@ func TestFenceRetainsUncertainEffectWithoutSuccessReceipt(t *testing.T) {
 	if err := s.FenceEffect(t.Context(), record, next.Key); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CompleteFence(t.Context(), next.Key, floor.Sequence); err != nil {
+	if _, err := s.CompleteFence(t.Context(), next.Key, floor.Record.Sequence); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.FenceEffect(t.Context(), record, next.Key); err != nil {
@@ -400,7 +404,7 @@ func TestFenceRetainsUncertainEffectWithoutSuccessReceipt(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err = Open(path, localIdentity(), false)
+	s, err = Open(path, localIdentity(), RetainedEvidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,8 +412,8 @@ func TestFenceRetainsUncertainEffectWithoutSuccessReceipt(t *testing.T) {
 	if got, err := s.Running(t.Context(), "work"); err != nil || len(got) != 0 {
 		t.Fatal(got, err)
 	}
-	if _, found, err := s.Receipt(t.Context(), old, old.Targets[0]); err != nil || found {
-		t.Fatal("uncertain outcome became completion proof", found, err)
+	if found, err := s.Receipt(t.Context(), old, old.Targets[0]); err != nil || found.Found {
+		t.Fatal("uncertain outcome became completion proof", found.Found, err)
 	}
 	if err := s.FinishEffect(t.Context(), receiptFor(old, record.Sequence)); !errors.Is(err, fault.ErrAuthorityFenced) {
 		t.Fatal("late completion crossed the fence", err)
@@ -451,14 +455,14 @@ func TestMetaStopIntentFencesParticipationUntilMemberReplacement(t *testing.T) {
 				next := grant.Clone()
 				next.Key.Revision++
 				next.Purpose, next.Action = topology.AuthorityFence, nil
-				floor, _, err := s.Fence(t.Context(), next)
+				floor, err := s.Fence(t.Context(), next)
 				if err != nil {
 					t.Fatal(err)
 				}
 				if err = s.FenceEffect(t.Context(), running[0], next.Key); err != nil {
 					t.Fatal(err)
 				}
-				if _, err = s.CompleteFence(t.Context(), next.Key, floor.Sequence); err != nil {
+				if _, err = s.CompleteFence(t.Context(), next.Key, floor.Record.Sequence); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -467,7 +471,7 @@ func TestMetaStopIntentFencesParticipationUntilMemberReplacement(t *testing.T) {
 			}
 			id := localIdentity()
 			id.InstanceID = "restart"
-			reopened, err := Open(path, id, false)
+			reopened, err := Open(path, id, RetainedEvidence)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -481,9 +485,9 @@ func TestMetaStopIntentFencesParticipationUntilMemberReplacement(t *testing.T) {
 				next.Purpose, next.Action = topology.AuthorityFence, nil
 				completeLocal(t, reopened, next)
 			}
-			completed, found, err := reopened.CompletedMetaStop(t.Context())
-			if err != nil || found != (state == "complete") || found && (!completed.Grant.Equal(grant) || completed.Receipt == nil) {
-				t.Fatal("historical completed stop lookup", completed, found, err)
+			completed, err := reopened.CompletedMetaStop(t.Context())
+			if err != nil || completed.Found != (state == "complete") || completed.Found && (!completed.Record.Grant.Equal(grant) || completed.Record.Receipt == nil) {
+				t.Fatal("historical completed stop lookup", completed.Record, completed.Found, err)
 			}
 			successor := id
 			successor.MemberID++
@@ -493,8 +497,8 @@ func TestMetaStopIntentFencesParticipationUntilMemberReplacement(t *testing.T) {
 			if stopped, err := reopened.MetaParticipationStopped(t.Context()); err != nil || stopped {
 				t.Fatal("old stop fenced new member", stopped, err)
 			}
-			if _, found, err := reopened.CompletedMetaStop(t.Context()); err != nil || found {
-				t.Fatal("former member stop authorized successor release", found, err)
+			if found, err := reopened.CompletedMetaStop(t.Context()); err != nil || found.Found {
+				t.Fatal("former member stop authorized successor release", found.Found, err)
 			}
 		})
 	}

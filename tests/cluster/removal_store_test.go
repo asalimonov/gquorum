@@ -18,7 +18,7 @@ import (
 
 // Read only after the actual participant has stopped and released bbolt. This
 // preserves the former private runtime assertion without a second live owner.
-func assertDurableSelfRemoval(t *testing.T, ctx context.Context, c *Cluster, status gquorum.NodeStatus) {
+func assertDurableSelfRemoval(ctx context.Context, t *testing.T, c *Cluster, status gquorum.NodeStatus) {
 	t.Helper()
 	source, err := c.Node(status.Identity.NodeName).Container.CopyFileFromContainer(ctx, "/data/_meta.bolt")
 	if err != nil {
@@ -42,9 +42,9 @@ func assertDurableSelfRemoval(t *testing.T, ctx context.Context, c *Cluster, sta
 			t.Error(err)
 		}
 	}()
-	conf, found, err := store.AppliedConfState()
-	if err != nil || !found || slices.Contains(conf.Voters, status.Identity.MemberID) || slices.Contains(conf.VotersOutgoing, status.Identity.MemberID) || slices.Contains(conf.Learners, status.Identity.MemberID) || slices.Contains(conf.LearnersNext, status.Identity.MemberID) {
-		t.Fatal("removal membership was not durable", conf, err)
+	conf, err := store.AppliedConfState()
+	if err != nil || !conf.Found || slices.Contains(conf.ConfState.Voters, status.Identity.MemberID) || slices.Contains(conf.ConfState.VotersOutgoing, status.Identity.MemberID) || slices.Contains(conf.ConfState.Learners, status.Identity.MemberID) || slices.Contains(conf.ConfState.LearnersNext, status.Identity.MemberID) {
+		t.Fatal("removal membership was not durable", conf.ConfState, err)
 	}
 	seen, err := store.MemberSeen()
 	if err != nil || !seen {

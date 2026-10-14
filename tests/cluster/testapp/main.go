@@ -13,8 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/asalimonov/gquorum"
-
+	"github.com/asalimonov/gquorum/scheduling"
 	"github.com/asalimonov/gquorum/topology"
 	"github.com/asalimonov/gquorum/util"
 )
@@ -43,7 +42,7 @@ type config struct {
 	Bootstrap                                            bool
 	GateFounders                                         bool
 	FoundingTimeout                                      time.Duration
-	Scheduling                                           gquorum.SchedulingOptions
+	Scheduling                                           scheduling.Options
 	AdmissionPinPhase                                    string
 	CallerScheduler, RetryRemoval                        bool
 	MetaFaultProxy                                       bool
@@ -74,7 +73,7 @@ func main() {
 	flag.BoolVar(&c.AddressFree, "address-free", false, "resolve all locations from the caller manifest without topology labels")
 	flag.BoolVar(&c.Join, "join", false, "join through supplied peers instead of founding")
 	flag.BoolVar(&c.Bootstrap, "bootstrap", true, "declare the demo groups after founding")
-	flag.BoolVar(&c.GateFounders, "gate-founders", false, "caller startup policy: require every configured founder before serving")
+	flag.BoolVar(&c.GateFounders, "gate-founders", false, "caller startup gate: require every configured founder before serving")
 	flag.DurationVar(&c.FoundingTimeout, "founding-timeout", 0, "caller founding wait deadline; zero waits until cancellation")
 	flag.IntVar(&c.Limits.MaxNodes, "max-nodes", c.Limits.MaxNodes, "Limits.MaxNodes")
 	flag.IntVar(&c.Limits.MaxReplicas, "max-replicas", c.Limits.MaxReplicas, "Limits.MaxReplicas")

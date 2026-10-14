@@ -19,87 +19,131 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
+const (
+	directoryMode = 0o700
+	fileMode      = 0o600
+)
+
 type identityPin struct {
 	ClusterID string `json:"cluster_id"`
 	NodeName  string `json:"node_name"`
 	MemberID  uint64 `json:"member_id"`
 }
 
+// Freshness records whether the caller authorized creating new retained evidence.
+type Freshness uint8
+
+// RetainedEvidence requires existing evidence; FreshEvidence permits initial creation.
+const (
+	RetainedEvidence Freshness = iota
+	FreshEvidence
+)
+
 func pin(id topology.Identity) identityPin {
 	return identityPin{id.ClusterID, id.NodeName, id.MemberID}
 }
 func validIdentity(id topology.Identity) bool {
-	return strings.TrimSpace(id.ClusterID) != "" && !strings.ContainsRune(id.ClusterID, 0) && strings.TrimSpace(id.NodeName) != "" && !strings.ContainsRune(id.NodeName, 0) && id.MemberID != 0 && strings.TrimSpace(id.InstanceID) != ""
+	return id.MemberID != 0 && strings.TrimSpace(id.ClusterID) != "" && !strings.ContainsRune(id.ClusterID, 0) &&
+		strings.TrimSpace(id.NodeName) != "" && !strings.ContainsRune(id.NodeName, 0) &&
+		strings.TrimSpace(id.InstanceID) != ""
 }
 
+// Store owns the node-local durable identity, fence and host-effect evidence
+// database.
 type Store struct {
 	mu       sync.RWMutex
 	db       *bolt.DB
 	identity topology.Identity
 }
 
-// Open never recreates absent retained evidence. The caller must establish fresh
-// from all meta pins, load ledgers and retained resources before setting it true.
-func Open(path string, identity topology.Identity, fresh bool) (*Store, error) {
-	if strings.TrimSpace(path) == "" || !validIdentity(identity) {
+// Open never recreates absent retained evidence. FreshEvidence requires the
+// caller to establish freshness from meta pins, load ledgers and retained state.
+func Open(path string, identity topology.Identity, freshness Freshness) (*Store, error) {
+	if freshness > FreshEvidence || strings.TrimSpace(path) == "" || !validIdentity(identity) {
 		return nil, fault.ErrInvalid
 	}
-	created := false
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		if !fresh {
-			return nil, fault.New(fault.Unreadable, "retained authority database is missing", err)
-		}
-		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-			return nil, err
-		}
-		f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
-		if err != nil {
-			return nil, err
-		}
-		created = true
-		if err := f.Close(); err != nil {
-			return nil, err
-		}
-	} else if err != nil {
+	status, err := prepareAuthorityFile(path, freshness)
+	if err != nil {
 		return nil, err
 	}
-	db, err := bolt.Open(path, 0600, &bolt.Options{Timeout: time.Second})
+	return openAuthorityDatabase(path, identity, status)
+}
+
+type databaseStatus uint8
+
+const (
+	retainedDatabase databaseStatus = iota
+	createdDatabase
+)
+
+func openAuthorityDatabase(path string, identity topology.Identity, status databaseStatus) (*Store, error) {
+	db, err := bolt.Open(path, fileMode, &bolt.Options{Timeout: time.Second})
 	if err != nil {
 		return nil, fault.New(fault.Unreadable, "open authority database", err)
 	}
 	s := &Store{db: db, identity: identity}
-	if created {
-		err = db.Update(func(tx *bolt.Tx) error {
-			for _, name := range []string{"format", "identity", "fences", "effects"} {
-				if _, err := tx.CreateBucket([]byte(name)); err != nil {
-					return err
-				}
-			}
-			if err := tx.Bucket([]byte("format")).Put([]byte("schema_version"), []byte("1")); err != nil {
-				return err
-			}
-			return put(tx.Bucket([]byte("identity")), []byte("current"), pin(identity))
-		})
+	if status == createdDatabase {
+		err = initializeAuthorityDatabase(db, identity)
 	}
 	if err == nil {
 		err = db.View(func(tx *bolt.Tx) error { return s.validate(tx) })
 	}
-	if err == nil && created {
-		var dir *os.File
-		dir, err = os.Open(filepath.Dir(path))
-		if err == nil {
-			err = dir.Sync()
-			closeErr := dir.Close()
-			if err == nil {
-				err = closeErr
-			}
-		}
+	if err == nil && status == createdDatabase {
+		err = syncAuthorityDirectory(path)
 	}
 	if err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return s, nil
+}
+
+func initializeAuthorityDatabase(db *bolt.DB, identity topology.Identity) error {
+	return db.Update(func(tx *bolt.Tx) error {
+		for _, name := range []string{"format", "identity", "fences", "effects"} {
+			if _, err := tx.CreateBucket([]byte(name)); err != nil {
+				return err
+			}
+		}
+		if err := tx.Bucket([]byte("format")).Put([]byte("schema_version"), []byte("1")); err != nil {
+			return err
+		}
+		return put(tx.Bucket([]byte("identity")), []byte("current"), pin(identity))
+	})
+}
+
+func prepareAuthorityFile(path string, freshness Freshness) (databaseStatus, error) {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		if freshness != FreshEvidence {
+			return retainedDatabase, fault.New(fault.Unreadable, "retained authority database is missing", err)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), directoryMode); err != nil {
+			return retainedDatabase, err
+		}
+		f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, fileMode)
+		if err != nil {
+			return retainedDatabase, err
+		}
+		if err := f.Close(); err != nil {
+			return retainedDatabase, err
+		}
+		return createdDatabase, nil
+	} else if err != nil {
+		return retainedDatabase, err
+	}
+	return retainedDatabase, nil
+}
+
+func syncAuthorityDirectory(path string) error {
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	if err := dir.Sync(); err != nil {
+		_ = dir.Close()
+		return err
+	}
+	return dir.Close()
 }
 func decode(data []byte, value any) error {
 	d := json.NewDecoder(bytes.NewReader(data))
@@ -119,7 +163,9 @@ func put(b *bolt.Bucket, key []byte, value any) error {
 	}
 	return b.Put(key, data)
 }
-func (s *Store) transaction(ctx context.Context, write bool, fn func(*bolt.Tx) error) error {
+
+func (s *Store) transaction(ctx context.Context, run func(*bolt.DB, func(*bolt.Tx) error) error,
+	fn func(*bolt.Tx) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -134,11 +180,22 @@ func (s *Store) transaction(ctx context.Context, write bool, fn func(*bolt.Tx) e
 		}
 		return fn(tx)
 	}
-	if write {
-		return s.db.Update(call)
-	}
-	return s.db.View(call)
+	return run(s.db, call)
 }
+
+func (s *Store) readTransaction(ctx context.Context, fn func(*bolt.Tx) error) error {
+	return s.transaction(ctx, func(db *bolt.DB, call func(*bolt.Tx) error) error {
+		return db.View(call)
+	}, fn)
+}
+
+func (s *Store) writeTransaction(ctx context.Context, fn func(*bolt.Tx) error) error {
+	return s.transaction(ctx, func(db *bolt.DB, call func(*bolt.Tx) error) error {
+		return db.Update(call)
+	}, fn)
+}
+
+// Close releases the authority database under serialized store ownership.
 func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -153,6 +210,19 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) validate(tx *bolt.Tx) error {
+	if err := validateBuckets(tx); err != nil {
+		return err
+	}
+	if err := s.validateIdentity(tx); err != nil {
+		return err
+	}
+	if err := s.validateFences(tx); err != nil {
+		return err
+	}
+	return s.validateEffects(tx)
+}
+
+func validateBuckets(tx *bolt.Tx) error {
 	for _, name := range []string{"format", "identity", "fences", "effects"} {
 		if tx.Bucket([]byte(name)) == nil {
 			return fault.ErrUnreadable
@@ -161,6 +231,10 @@ func (s *Store) validate(tx *bolt.Tx) error {
 	if !bytes.Equal(tx.Bucket([]byte("format")).Get([]byte("schema_version")), []byte("1")) {
 		return fault.ErrUnsupported
 	}
+	return nil
+}
+
+func (s *Store) validateIdentity(tx *bolt.Tx) error {
 	var id identityPin
 	if err := decode(tx.Bucket([]byte("identity")).Get([]byte("current")), &id); err != nil {
 		return err
@@ -182,42 +256,63 @@ func (s *Store) validate(tx *bolt.Tx) error {
 		if err := decode(data, &proof); err != nil {
 			return err
 		}
-		if proof.Granted != id || proof.Previous.ClusterID != id.ClusterID || proof.Previous.NodeName != id.NodeName || proof.Previous.MemberID == 0 || proof.Previous.MemberID >= id.MemberID || strings.TrimSpace(proof.AdmissionID) == "" {
+		if proof.Granted != id || proof.Previous.ClusterID != id.ClusterID || proof.Previous.NodeName != id.NodeName ||
+			proof.Previous.MemberID == 0 || proof.Previous.MemberID >= id.MemberID ||
+			strings.TrimSpace(proof.AdmissionID) == "" {
 			return fault.ErrUnreadable
 		}
 	}
-	if err := tx.Bucket([]byte("fences")).ForEach(func(k, v []byte) error {
+	return nil
+}
+
+func (s *Store) validateFences(tx *bolt.Tx) error {
+	forEachErr := tx.Bucket([]byte("fences")).ForEach(func(k, v []byte) error {
 		var r FenceRecord
 		if err := decode(v, &r); err != nil {
 			return err
 		}
-		if r.Grant.Key.GroupID != string(k) || r.Sequence == 0 || s.hostGrant(r.Grant, false) != nil {
-			return fault.ErrUnreadable
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	return tx.Bucket([]byte("effects")).ForEach(func(k, v []byte) error {
-		var r EffectRecord
-		if err := decode(v, &r); err != nil {
-			return err
-		}
-		if !bytes.Equal(k, effectKey(r.Grant.Key, r.Target)) || s.validateEffect(r) != nil {
-			return fault.ErrUnreadable
-		}
-		floor, ok, err := current(tx, r.Grant.Key.GroupID)
-		if err != nil {
-			return err
-		}
-		if !ok || floor.Grant.Key.Revision < r.Grant.Key.Revision || floor.Sequence < r.Sequence ||
-			floor.Grant.Key == r.Grant.Key && (!floor.Grant.Equal(r.Grant) || floor.Sequence != r.Sequence || !floor.Complete) {
-			return fault.ErrUnreadable
-		}
-		if r.State == "fenced" && floor.Grant.Key.Revision <= r.Grant.Key.Revision ||
-			r.State == "running" && floor.Complete && floor.Grant.Key.Revision > r.Grant.Key.Revision {
+		if r.Sequence == 0 || r.Grant.Key.GroupID != string(k) || s.hostGrant(r.Grant) != nil {
 			return fault.ErrUnreadable
 		}
 		return nil
 	})
+	if forEachErr != nil {
+		return forEachErr
+	}
+	return nil
+}
+
+func (s *Store) validateEffects(tx *bolt.Tx) error {
+	return tx.Bucket([]byte("effects")).ForEach(func(k, v []byte) error {
+		return s.validateStoredEffect(tx, k, v)
+	})
+}
+
+func (s *Store) validateStoredEffect(tx *bolt.Tx, k, v []byte) error {
+	var r EffectRecord
+	if err := decode(v, &r); err != nil {
+		return err
+	}
+	key, err := effectKey(r.Grant.Key, r.Target)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(k, key) || s.validateEffect(r) != nil {
+		return fault.ErrUnreadable
+	}
+	floor, err := current(tx, r.Grant.Key.GroupID)
+	if err != nil {
+		return err
+	}
+	if !floor.Found || floor.Record.Grant.Key.Revision < r.Grant.Key.Revision ||
+		floor.Record.Sequence < r.Sequence ||
+		floor.Record.Grant.Key == r.Grant.Key && (floor.Record.Sequence != r.Sequence || !floor.Record.Complete ||
+			!floor.Record.Grant.Equal(r.Grant)) {
+		return fault.ErrUnreadable
+	}
+	if r.State == effectFenced && floor.Record.Grant.Key.Revision <= r.Grant.Key.Revision || r.State == effectRunning &&
+		floor.Record.Complete && floor.Record.Grant.Key.Revision > r.Grant.Key.Revision {
+		return fault.ErrUnreadable
+	}
+	return nil
 }

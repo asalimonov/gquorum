@@ -34,6 +34,7 @@ func TestRetirementReceiptsPreventResurrectionAfterOperatorPruning(t *testing.T)
 		{Seq: 2, GroupID: "shard0", NodeName: "n3", ReplicaID: 3, Kind: topology.StepStopReplica},
 		{Seq: 3, GroupID: "shard0", NodeName: "n3", ReplicaID: 3, Kind: topology.StepCleanupReplicaState},
 	}}
+	plan = withTestVoterProof(m.Active(), desired, plan)
 	old := command(BeginOperatorProposal{Version: desired.Version, Plan: plan, At: at}).OperatorID
 	for _, step := range plan.Steps {
 		applyAdmissionTransition(t, m.topologySM, index, old, plan, step.Seq, topology.OperatorRunning, at)

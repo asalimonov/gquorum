@@ -31,7 +31,7 @@ func TestGroupPlacementRefusesIneligibleMinimumWithoutChangingState(t *testing.T
 	t.Parallel()
 	f := newMutationFixture(t)
 	before := f.g.machine.Latest()
-	if _, err := f.g.SetGroupPlacement(t.Context(), "work", topology.PlacementRule{MinReplicas: 1, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"observer"}}, preview()); !errors.Is(err, fault.ErrUnsafeMembership) {
+	if _, err := f.g.SetGroupPlacement(t.Context(), "work", topology.PlacementRule{MinReplicas: 1, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"observer"}}, preview()); !errors.Is(err, fault.ErrInvalid) {
 		t.Fatal(err)
 	}
 	after := f.g.machine.Latest()

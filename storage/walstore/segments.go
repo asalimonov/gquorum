@@ -1,11 +1,12 @@
 package walstore
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -31,7 +32,7 @@ func segmentNames(dir string) ([]segment, error) {
 		}
 		out = append(out, segment{name: e.Name(), seq: seq, index: index})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].seq < out[j].seq })
+	slices.SortFunc(out, func(a, b segment) int { return cmp.Compare(a.seq, b.seq) })
 	return out, nil
 }
 

@@ -3,6 +3,7 @@ package raftengine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -13,7 +14,10 @@ import (
 	"go.etcd.io/raft/v3/raftpb"
 )
 
-func (g *Group) ProposeAuthorizedConfChange(ctx context.Context, grant topology.AuthorityGrant, cc raftpb.ConfChangeV2, expected raftpb.ConfState) (topology.EffectReceipt, error) {
+// ProposeAuthorizedConfChange applies an exact granted membership operation
+// against expected native state.
+func (g *Group) ProposeAuthorizedConfChange(ctx context.Context, grant topology.AuthorityGrant, cc raftpb.ConfChangeV2,
+	expected raftpb.ConfState) (topology.EffectReceipt, error) {
 	var receipt topology.EffectReceipt
 	if err := g.validateAuthorityRequest(grant); err != nil {
 		return receipt, err
@@ -22,8 +26,10 @@ func (g *Group) ProposeAuthorizedConfChange(ctx context.Context, grant topology.
 		return receipt, err
 	}
 	cc.Changes, cc.Context = slices.Clone(cc.Changes), nil
-	expected = copyConf(expected)
-	result, err := g.submitAuthority(ctx, raftstate.ManagedConfiguration, grant, &cc, &expected)
+	cloned := copyConf(expected)
+	submission := authoritySubmission{kind: raftstate.ManagedConfiguration, grant: grant, change: &cc,
+		expected: &cloned}
+	result, err := g.submitAuthority(ctx, submission)
 	if err == nil {
 		err = json.Unmarshal(result.Data, &receipt)
 	}
@@ -31,7 +37,8 @@ func (g *Group) ProposeAuthorizedConfChange(ctx context.Context, grant topology.
 }
 
 func exactConfiguration(cc raftpb.ConfChangeV2, a *topology.AuthorizedStep) error {
-	if a == nil || cc.Transition != raftpb.ConfChangeTransitionAuto || len(cc.Changes) != 1 || cc.Changes[0].NodeID != a.ReplicaID || a.ReplicaID == 0 {
+	if a == nil || cc.Transition != raftpb.ConfChangeTransitionAuto || len(cc.Changes) != 1 ||
+		cc.Changes[0].NodeID != a.ReplicaID || a.ReplicaID == 0 {
 		return fault.ErrUnsafeMembership
 	}
 	var typ raftpb.ConfChangeType
@@ -55,7 +62,8 @@ func sameConfiguration(a, b raftpb.ConfState) bool {
 	if a.AutoLeave != b.AutoLeave {
 		return false
 	}
-	for _, pair := range [][2][]uint64{{a.Voters, b.Voters}, {a.Learners, b.Learners}, {a.VotersOutgoing, b.VotersOutgoing}, {a.LearnersNext, b.LearnersNext}} {
+	for _, pair := range [][2][]uint64{{a.Voters, b.Voters}, {a.Learners, b.Learners},
+		{a.VotersOutgoing, b.VotersOutgoing}, {a.LearnersNext, b.LearnersNext}} {
 		x, y := slices.Clone(pair[0]), slices.Clone(pair[1])
 		slices.Sort(x)
 		slices.Sort(y)
@@ -64,6 +72,49 @@ func sameConfiguration(a, b raftpb.ConfState) bool {
 		}
 	}
 	return true
+}
+
+type voterSetPhase uint8
+
+const (
+	approvedVoterSet voterSetPhase = iota
+	resultingVoterSet
+)
+
+// validateAuthorizedVoterSet binds a granted membership action to the native
+// voter set. Receipt reuse happens before this check: a completed effect need
+// not reconstruct a predecessor that no longer exists.
+func validateAuthorizedVoterSet(a *topology.AuthorizedStep, voters []uint64, phase voterSetPhase) error {
+	if a == nil {
+		return fault.ErrOperatorAuthorization
+	}
+	want := a.ExpectedVotersDigest
+	if phase == resultingVoterSet {
+		want = a.ResultVotersDigest
+	}
+	if want == "" || topology.VoterSetDigest(voters) != want {
+		return fault.New(fault.UnsafeMembership, "native voter set differs from approved proof; replan_required", nil)
+	}
+	if phase == resultingVoterSet {
+		return nil
+	}
+	projected := slices.Clone(voters)
+	switch a.Kind {
+	case topology.StepAddLearner:
+	case topology.StepPromoteVoter:
+		if !slices.Contains(projected, a.ReplicaID) {
+			projected = append(projected, a.ReplicaID)
+		}
+	case topology.StepDemoteVoter, topology.StepRemoveReplica:
+		projected = slices.DeleteFunc(projected, func(id uint64) bool { return id == a.ReplicaID })
+	default:
+		return fault.ErrOperatorAuthorization
+	}
+	if a.ResultVotersDigest == "" || topology.VoterSetDigest(projected) != a.ResultVotersDigest {
+		return fault.New(fault.UnsafeMembership, fmt.Sprintf("approved %s has an invalid voter-set projection",
+			a.Kind), nil)
+	}
+	return nil
 }
 
 // currentEffect is owner-loop-only. A receipt may be reused only for its exact
@@ -93,18 +144,32 @@ func (g *Group) handleAuthorizedConfiguration(req *request) {
 		answer(req, Result{}, fault.ErrUnavailable)
 		return
 	}
+	phase := approvedVoterSet
+	if g.effectSatisfied(*req.admin.Grant) {
+		phase = resultingVoterSet
+	}
+	if err := validateAuthorizedVoterSet(req.admin.Action, g.cs.Voters, phase); err != nil {
+		answer(req, Result{}, err)
+		return
+	}
 	if g.pendingAdministrativeEntry() {
 		answer(req, Result{}, fault.ErrAuthorityPending)
 		return
 	}
-	if g.effectSatisfied(*req.admin.Grant) {
+	if phase == resultingVoterSet {
 		req.admin.Kind = raftstate.ObserveEffect
 		g.handleAuthorizedEffect(req)
 		return
 	}
+	g.proposeAuthorizedConfiguration(req)
+}
+
+func (g *Group) proposeAuthorizedConfiguration(req *request) {
 	a := req.admin.Action
 	// Add and demote use the same Raft opcode, but never authorize each other.
-	if a.Kind == topology.StepAddLearner && slices.Contains(g.cs.Voters, a.ReplicaID) || a.Kind == topology.StepDemoteVoter && !slices.Contains(g.cs.Voters, a.ReplicaID) {
+	if a.Kind == topology.StepAddLearner &&
+		slices.Contains(g.cs.Voters, a.ReplicaID) || a.Kind == topology.StepDemoteVoter &&
+		!slices.Contains(g.cs.Voters, a.ReplicaID) {
 		answer(req, Result{}, fault.ErrUnsafeMembership)
 		return
 	}
@@ -117,28 +182,18 @@ func (g *Group) handleAuthorizedConfiguration(req *request) {
 			live[id] = true
 		}
 	}
-	if a.Kind == topology.StepDemoteVoter && a.ReplicaID == g.opts.ReplicaID && a.TransferReplicaID != 0 {
-		if a.TransferReplicaID == a.ReplicaID || !slices.Contains(g.cs.Voters, a.TransferReplicaID) || !live[a.TransferReplicaID] {
-			answer(req, Result{}, fault.New(fault.Unavailable, "demotion transfer target is unavailable", nil))
-			return
-		}
-		if g.authority.DemotionTransferIndex != 0 {
-			if g.rn.BasicStatus().LeadTransferee == 0 {
-				g.transferIssuedTerm = 0
-			}
-			answer(req, Result{}, fault.ErrNotLeader)
-			return // the retained prerequisite resumes on the owner loop
-		}
-		req.admin.Kind = raftstate.TransferIntent
-		g.handleAuthorizedEffect(req)
+	if g.prepareDemotionTransfer(req, live) {
 		return
 	}
-	if err := (membership.SafetyRules{}).Check(nativeMembershipView{membershipView{g}, status}, live, *req.change); err != nil {
-		answer(req, Result{}, err)
+	checkErr := (membership.SafetyRules{}).Check(nativeMembershipView{membershipView{
+		g}, status}, live, *req.change)
+	if checkErr != nil {
+		answer(req, Result{}, checkErr)
 		return
 	}
 	cc := *req.change
-	cc.Context, err = raftstate.EncodeEntry(*req.admin)
+	encoded, err := raftstate.EncodeEntry(*req.admin)
+	cc.Context = encoded
 	if err == nil {
 		err = g.rn.ProposeConfChange(cc)
 	}
@@ -155,14 +210,23 @@ type nativeMembershipView struct {
 }
 
 func (v nativeMembershipView) Status() raft.Status { return v.status }
-func (v nativeMembershipView) IsLeader() bool      { return v.status.RaftState == raft.StateLeader }
+
+func (v nativeMembershipView) IsLeader() bool { return v.status.RaftState == raft.StateLeader }
 
 type nativeLive map[uint64]bool
 
 func (v nativeLive) Live(string) (map[uint64]bool, bool) { return v, true }
 
-func (g *Group) effectReceipt(entry raftpb.Entry, grant topology.AuthorityGrant, outcome topology.EffectOutcome) (topology.EffectReceipt, error) {
-	receipt := topology.EffectReceipt{Key: grant.Key, Resource: topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: g.opts.GroupID}, Action: grant.Action, Outcome: outcome, AppliedIndex: entry.Index, AppliedTerm: entry.Term}
+func (g *Group) effectReceipt(entry raftpb.Entry, grant topology.AuthorityGrant,
+	outcome topology.EffectOutcome) (topology.EffectReceipt, error) {
+	receipt := topology.EffectReceipt{
+		Key:          grant.Key,
+		Resource:     topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: g.opts.GroupID},
+		Action:       grant.Action,
+		Outcome:      outcome,
+		AppliedIndex: entry.Index,
+		AppliedTerm:  entry.Term,
+	}
 	if grant.Action != nil && grant.Action.ReplicaID != 0 {
 		for _, target := range grant.Targets {
 			if target.NodeName == grant.Action.NodeName && target.ReplicaID == grant.Action.ReplicaID {
@@ -182,6 +246,13 @@ func (g *Group) applyAuthorizedConfChange(entry raftpb.Entry, cc raftpb.ConfChan
 	if err := exactConfiguration(cc, e.Action); err != nil {
 		return fault.New(fault.Unreadable, "committed membership differs from its approved action", err)
 	}
+	phase := approvedVoterSet
+	if g.effectSatisfied(*e.Grant) {
+		phase = resultingVoterSet
+	}
+	if err := validateAuthorizedVoterSet(e.Action, g.cs.Voters, phase); err != nil {
+		return fault.New(fault.Unreadable, "committed membership has an invalid voter predecessor", err)
+	}
 	receipt, err := g.effectReceipt(entry, *e.Grant, topology.EffectApplied)
 	if err != nil {
 		return err
@@ -190,8 +261,33 @@ func (g *Group) applyAuthorizedConfChange(entry raftpb.Entry, cc raftpb.ConfChan
 		g.queueRetirement(entry, change.NodeID)
 	}
 	g.cs = copyConf(*g.rn.ApplyConfChange(cc))
+	if err := validateAuthorizedVoterSet(e.Action, g.cs.Voters, resultingVoterSet); err != nil {
+		return fault.New(fault.Unreadable, "committed membership has an invalid voter result", err)
+	}
 	g.membershipChanged = true
 	g.authority.Receipt = &receipt
 	g.notifyAuthority(e, receipt, nil)
 	return nil
+}
+
+func (g *Group) prepareDemotionTransfer(req *request, live nativeLive) bool {
+	a := req.admin.Action
+	if a.Kind == topology.StepDemoteVoter && a.ReplicaID == g.opts.ReplicaID && a.TransferReplicaID != 0 {
+		if a.TransferReplicaID == a.ReplicaID || !live[a.TransferReplicaID] ||
+			!slices.Contains(g.cs.Voters, a.TransferReplicaID) {
+			answer(req, Result{}, fault.New(fault.Unavailable, "demotion transfer target is unavailable", nil))
+			return true
+		}
+		if g.authority.DemotionTransferIndex != 0 {
+			if g.rn.BasicStatus().LeadTransferee == 0 {
+				g.transferIssuedTerm = 0
+			}
+			answer(req, Result{}, fault.ErrNotLeader)
+			return true // the retained prerequisite resumes on the owner loop
+		}
+		req.admin.Kind = raftstate.TransferIntent
+		g.handleAuthorizedEffect(req)
+		return true
+	}
+	return false
 }

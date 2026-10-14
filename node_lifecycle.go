@@ -6,7 +6,8 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaservice"
-	"github.com/asalimonov/gquorum/policy"
+	"github.com/asalimonov/gquorum/lifecycle"
+	"github.com/asalimonov/gquorum/storage/memstore"
 	"github.com/asalimonov/gquorum/storage/walstore"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -14,25 +15,11 @@ import (
 func (n *node) Start(parent context.Context) error {
 	n.startGate.Lock()
 	defer n.startGate.Unlock()
-	n.mu.Lock()
-	if n.stopping || n.terminal != nil {
-		n.mu.Unlock()
-		return fault.ErrStopped
-	}
-	if n.state != NodeNew {
-		n.mu.Unlock()
-		return nil
-	}
-	if err := parent.Err(); err != nil {
-		n.mu.Unlock()
+	accepted, err := n.acceptNodeStart(parent)
+	if err != nil || !accepted {
 		return err
 	}
-	n.ctx, n.cancel = context.WithCancel(parent)
-	n.state, n.startedAt = NodeStarting, time.Now().UTC()
-	n.policies = newLifecycleRunner(n.ctx, n.opts.Policies.Lifecycle, n.opts.Policies.CallbackTimeout)
-	n.wg.Add(1)
-	go func() { defer n.wg.Done(); <-n.ctx.Done(); n.RequestStop() }()
-	n.mu.Unlock()
+	n.publishObservation()
 
 	if err := n.checkAuthorityPath(); err != nil {
 		return n.fail(err)
@@ -40,6 +27,65 @@ func (n *node) Start(parent context.Context) error {
 	if err := n.inspectAuthority(); err != nil {
 		return n.fail(err)
 	}
+	m, err := metaservice.New(n.runtimeMetaOptions())
+	if err != nil {
+		return n.fail(err)
+	}
+	n.mu.Lock()
+	n.meta = m
+	n.mu.Unlock()
+	if err := n.ctx.Err(); err != nil {
+		return n.fail(err)
+	}
+	if err := n.openLoadResources(m); err != nil {
+		return n.fail(err)
+	}
+	// Meta has a separate serving context so owner cancellation cannot close
+	// its database ahead of managed replicas. The joined teardown calls Quiesce
+	// first.
+	n.wg.Add(1)
+	go n.removalLoop()
+	n.mu.RLock()
+	h := n.host
+	n.mu.RUnlock()
+	if h != nil {
+		if err := h.Start(n.ctx); err != nil {
+			return n.fail(err)
+		}
+	}
+	// Start the owner before exposing metadata control ingress. An immediate
+	// readmission fence may otherwise retire a Host whose Start is still
+	// pending.
+	if err := m.Start(context.WithoutCancel(n.ctx)); err != nil {
+		return n.fail(err)
+	}
+	n.wg.Add(1)
+	go n.monitor()
+	return nil
+}
+
+func (n *node) acceptNodeStart(parent context.Context) (bool, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.stopping || n.terminal != nil {
+		return false, fault.ErrStopped
+	}
+	if n.state != NodeNew {
+		return false, nil
+	}
+	if err := parent.Err(); err != nil {
+		return false, err
+	}
+	n.ctx, n.cancel = context.WithCancel(parent)
+	n.state, n.startedAt = NodeStarting, time.Now().UTC()
+	n.lifecycle = newLifecycleRunner(n.ctx, n.opts.Lifecycle.Hooks, n.opts.CallbackTimeout)
+	n.wg.Add(1)
+	go func() { defer n.wg.Done(); <-n.ctx.Done(); n.RequestStop() }()
+	return true, nil
+}
+
+// runtimeMetaOptions binds metadata callbacks to this exact Node owner.
+func (n *node) runtimeMetaOptions() metaservice.Options {
 	meta := n.metaOpts
 	meta.BeforeOpenEngine = n.acquireMetaAuthority
 	meta.AfterOpenEngine = n.markMetaAcquired
@@ -57,58 +103,49 @@ func (n *node) Start(parent context.Context) error {
 		meta.LoadMetricsReads = n.loadMetricsReads
 		meta.LocalLoadMetrics = n.localLoadMetrics
 	}
-	m, err := metaservice.New(meta)
+	return meta
+}
+
+func (n *node) openLoadResources(m *metaservice.Group) error {
+	if n.opts.Loads.Factory == nil {
+		return nil
+	}
+	store, retirement := n.opts.Loads.Storage.Store, n.opts.Loads.Storage.Retirement
+	if o := n.opts.Loads.Storage.WAL; o != nil {
+		owned, err := walstore.Open(walstore.Options{
+			RootDir:      o.RootDir,
+			NodeName:     m.Identity().NodeName,
+			ClusterID:    m.Identity().ClusterID,
+			SegmentBytes: o.SegmentBytes,
+			Prewrite:     o.Prewrite,
+			DisableFSync: o.DisableFSync,
+			Logger:       n.opts.Logger,
+		})
+		if err != nil {
+			return err
+		}
+		n.mu.Lock()
+		n.ownedWAL = owned
+		n.mu.Unlock()
+		store, retirement = owned, owned
+	}
+	// Groups created with topology.StorageMemory keep their Raft state
+	// here.
+	memory, err := memstore.New(memstore.Options{NodeName: m.Identity().NodeName,
+		ClusterID: m.Identity().ClusterID})
 	if err != nil {
-		return n.fail(err)
+		return err
 	}
 	n.mu.Lock()
-	n.meta = m
+	n.store, n.retirement, n.ownedMemory = store, retirement, memory
 	n.mu.Unlock()
-	if err := n.ctx.Err(); err != nil {
-		return n.fail(err)
+	h, err := n.newHost(m)
+	if err != nil {
+		return err
 	}
-	if n.opts.Loads.Factory != nil {
-		store, retirement := n.opts.Loads.Storage.Store, n.opts.Loads.Storage.Retirement
-		if o := n.opts.Loads.Storage.WAL; o != nil {
-			owned, err := walstore.Open(walstore.Options{RootDir: o.RootDir, NodeName: m.Identity().NodeName, ClusterID: m.Identity().ClusterID, SegmentBytes: o.SegmentBytes, Prewrite: o.Prewrite, Logger: n.opts.Logger})
-			if err != nil {
-				return n.fail(err)
-			}
-			n.mu.Lock()
-			n.ownedWAL = owned
-			n.mu.Unlock()
-			store, retirement = owned, owned
-		}
-		n.mu.Lock()
-		n.store, n.retirement = store, retirement
-		n.mu.Unlock()
-		h, err := n.newHost(m)
-		if err != nil {
-			return n.fail(err)
-		}
-		n.mu.Lock()
-		n.host = h
-		n.mu.Unlock()
-	}
-	// Meta has a separate serving context so owner cancellation cannot close its
-	// database ahead of managed replicas. The joined teardown calls Quiesce first.
-	n.wg.Add(1)
-	go n.removalLoop()
-	n.mu.RLock()
-	h := n.host
-	n.mu.RUnlock()
-	if h != nil {
-		if err := h.Start(n.ctx); err != nil {
-			return n.fail(err)
-		}
-	}
-	// Start the owner before exposing metadata control ingress. An immediate
-	// readmission fence may otherwise retire a Host whose Start is still pending.
-	if err := m.Start(context.WithoutCancel(n.ctx)); err != nil {
-		return n.fail(err)
-	}
-	n.wg.Add(1)
-	go n.monitor()
+	n.mu.Lock()
+	n.host = h
+	n.mu.Unlock()
 	return nil
 }
 
@@ -120,6 +157,7 @@ func (n *node) fail(err error) error {
 	n.state = NodeFailed
 	n.mu.Unlock()
 	n.readyOnce.Do(func() { close(n.readySignal) })
+	n.publishObservation()
 	n.RequestStop()
 	return err
 }
@@ -141,7 +179,8 @@ func (n *node) WaitReady(ctx context.Context) error {
 		return fault.ErrStopped
 	}
 	if m != nil {
-		_, err, removal := m.Lifecycle()
+		observed, err := m.Lifecycle()
+		removal := observed.Removal
 		if err != nil {
 			return err
 		}
@@ -166,49 +205,68 @@ func (n *node) monitor() {
 		n.mu.RLock()
 		m, ready := n.meta, n.ready
 		n.mu.RUnlock()
-		_, terminal, removal := m.Lifecycle()
+		observed, terminal := m.Lifecycle()
+		removal := observed.Removal
 		if terminal != nil {
-			n.fail(terminal)
+			_ = n.fail(terminal)
 			return
 		}
 		if removal == nil {
-			if err := n.replaceReadmittedHost(m); err != nil {
-				n.recordError(err)
-			}
-			if !ready {
-				in := m.Readiness(n.startedAt)
-				decision, err := n.policies.Readiness(n.ctx, in)
-				if err != nil {
-					n.recordError(err)
-				} else {
-					switch decision.State {
-					case policy.Failed:
-						n.fail(fault.New(fault.Unavailable, "startup policy failed: "+decision.Reason, nil))
-						return
-					case policy.Ready:
-						// Recheck mandatory state after caller code, outside any lock.
-						current := m.Readiness(n.startedAt)
-						if current.Identity == in.Identity && current.Admitted && current.Recovered && current.SessionLive {
-							n.mu.Lock()
-							if !n.stopping && !n.fenced && n.pending == nil {
-								n.ready, n.state, n.lastError = true, NodeReady, nil
-							}
-							completed := n.ready
-							n.mu.Unlock()
-							if completed {
-								n.readyOnce.Do(func() { close(n.readySignal) })
-							}
-						}
-					}
-				}
+			n.updateReadmittedHost(m)
+		}
+		if removal == nil && !ready {
+			if err := n.checkReadiness(m); err != nil {
+				_ = n.fail(err)
+				return
 			}
 		}
+		n.publishObservation()
 		select {
 		case <-n.ctx.Done():
 			return
 		case <-n.wake:
 		case <-tick.C:
 		}
+	}
+}
+
+func (n *node) updateReadmittedHost(m *metaservice.Group) {
+	if err := n.replaceReadmittedHost(m); err != nil {
+		n.recordError(err)
+	}
+}
+
+func (n *node) checkReadiness(m *metaservice.Group) error {
+	in := m.Readiness(n.startedAt)
+	decision, err := n.lifecycle.Readiness(n.ctx, in)
+	if err != nil {
+		n.recordError(err)
+		return nil
+	}
+	switch decision.State {
+	case lifecycle.Failed:
+		return fault.New(fault.Unavailable, "startup readiness failed: "+decision.Reason, nil)
+	case lifecycle.Ready:
+		n.completeReadiness(m, in.Identity)
+	default: // Keep waiting for other readiness states.
+	}
+	return nil
+}
+
+func (n *node) completeReadiness(m *metaservice.Group, expected topology.Identity) {
+	// Recheck mandatory state after caller code, outside any lock.
+	current := m.Readiness(n.startedAt)
+	if current.Identity != expected || !current.Admitted || !current.Recovered || !current.SessionLive {
+		return
+	}
+	n.mu.Lock()
+	if !n.stopping && !n.fenced && n.pending == nil {
+		n.ready, n.state, n.lastError = true, NodeReady, nil
+	}
+	completed := n.ready
+	n.mu.Unlock()
+	if completed {
+		n.readyOnce.Do(func() { close(n.readySignal) })
 	}
 }
 
@@ -253,7 +311,8 @@ func (n *node) removalLoop() {
 		n.mu.RLock()
 		m := n.meta
 		n.mu.RUnlock()
-		_, _, removal := m.Lifecycle()
+		observed, _ := m.Lifecycle()
+		removal := observed.Removal
 		if removal != nil && n.handleRemoval(m, *removal) {
 			return
 		}
@@ -274,8 +333,9 @@ func (n *node) handleRemoval(m *metaservice.Group, removal topology.SelfRemovalS
 	if !current || id.MemberID != removal.MemberID {
 		return false
 	}
-	// Policies cannot keep a removed Raft participant running. Complete the
-	// mandatory fence first; failures retain ownership and retry on the monitor.
+	// Lifecycle hooks cannot keep a removed Raft participant running. Complete
+	// the mandatory fence first; failures retain ownership and retry on the
+	// monitor.
 	if err := m.FenceParticipation(n.ctx); err != nil {
 		n.recordError(err)
 		return false
@@ -290,21 +350,22 @@ func (n *node) handleRemoval(m *metaservice.Group, removal topology.SelfRemovalS
 		n.recordError(err)
 		return false
 	}
-	decision, err := n.policies.Removal(n.ctx, policy.RemovalInput{Identity: id, Removal: removal, Fenced: true})
+	decision, err := n.lifecycle.Removal(n.ctx, lifecycle.RemovalInput{Identity: id, Removal: removal, Fenced: true})
 	if err != nil {
 		n.recordError(err)
 		return false
 	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	// Readmission may have acquired ownership while the proof read or policy
+	// Readmission may have acquired ownership while the proof read or hooks
 	// callback waited. An old-member decision cannot stop a replacement.
-	if n.pending != nil || n.meta != m || m.Identity() != id || n.stopping {
+	sameOwner := n.pending == nil && n.meta == m && m.Identity() == id
+	if !sameOwner || n.stopping {
 		return false
 	}
 	n.lastError = nil
-	if decision.Action == policy.StopNode {
-		n.requestStopLocked(false)
+	if decision.Action == lifecycle.StopNode {
+		n.requestStopLocked(stopOnce)
 	}
 	return true
 }
@@ -314,9 +375,9 @@ func (n *node) metaRequestedStop() {
 	m := n.meta
 	n.mu.RUnlock()
 	if m != nil {
-		_, err, _ := m.Lifecycle()
+		_, err := m.Lifecycle()
 		if err != nil {
-			n.fail(err)
+			_ = n.fail(err)
 			return
 		}
 	}
@@ -328,17 +389,24 @@ type nodeStopAttempt struct {
 	err  error
 }
 
+type stopRequestMode uint8
+
+const (
+	stopOnce stopRequestMode = iota
+	retryStop
+)
+
 // RequestStop is safe inside callbacks: it closes admission and returns without
 // waiting for the same callback to be joined by the teardown coordinator.
-func (n *node) RequestStop() { n.requestStop(false) }
+func (n *node) RequestStop() { n.beginStop(stopOnce) }
 
-func (n *node) requestStop(retry bool) *nodeStopAttempt {
+func (n *node) beginStop(mode stopRequestMode) *nodeStopAttempt {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	return n.requestStopLocked(retry)
+	return n.requestStopLocked(mode)
 }
 
-func (n *node) requestStopLocked(retry bool) *nodeStopAttempt {
+func (n *node) requestStopLocked(mode stopRequestMode) *nodeStopAttempt {
 	if !n.stopping {
 		n.stopping = true
 		if n.terminal == nil {
@@ -350,7 +418,7 @@ func (n *node) requestStopLocked(retry bool) *nodeStopAttempt {
 		n.stopAttempt = &nodeStopAttempt{done: make(chan struct{})}
 		n.readyOnce.Do(func() { close(n.readySignal) })
 		go n.teardown(n.stopAttempt)
-	} else if retry {
+	} else if mode == retryStop {
 		select {
 		case <-n.stopAttempt.done:
 			if n.stopAttempt.err != nil {
@@ -364,7 +432,7 @@ func (n *node) requestStopLocked(retry bool) *nodeStopAttempt {
 }
 
 func (n *node) Stop(ctx context.Context) error {
-	attempt := n.requestStop(true)
+	attempt := n.beginStop(retryStop)
 	select {
 	case <-attempt.done:
 		return attempt.err
@@ -373,7 +441,9 @@ func (n *node) Stop(ctx context.Context) error {
 	}
 }
 
-func (n *node) teardown(attempt *nodeStopAttempt) {
+func (n *node) teardown(initialAttempt *nodeStopAttempt) {
+	n.publishObservation()
+	attempt := initialAttempt
 	for {
 		err := n.teardownResources()
 		n.mu.Lock()
@@ -387,6 +457,13 @@ func (n *node) teardown(attempt *nodeStopAttempt) {
 			}
 			close(n.stopped)
 		}
+		n.mu.Unlock()
+		if err == nil {
+			n.finishObservations()
+		} else {
+			n.publishObservation()
+		}
+		n.mu.Lock()
 		close(attempt.done)
 		n.mu.Unlock()
 		if err == nil {
@@ -399,7 +476,7 @@ func (n *node) teardown(attempt *nodeStopAttempt) {
 func (n *node) teardownResources() error {
 	n.startGate.Lock()
 	n.mu.RLock()
-	m, p := n.meta, n.policies
+	m, p := n.meta, n.lifecycle
 	n.mu.RUnlock()
 	n.startGate.Unlock()
 	ctx := context.Background()
@@ -415,10 +492,27 @@ func (n *node) teardownResources() error {
 	}
 	n.wg.Wait()
 	n.mu.RLock()
-	h, owned := n.host, n.ownedWAL
+	h, owned, memory := n.host, n.ownedWAL, n.ownedMemory
 	n.mu.RUnlock()
 	if h != nil {
 		if err := h.Stop(ctx); err != nil {
+			return err
+		}
+	}
+	if err := closeLoadStores(memory, owned); err != nil {
+		return err
+	}
+	if m != nil {
+		if err := m.Stop(ctx); err != nil {
+			return err
+		}
+	}
+	return n.closeAuthority()
+}
+
+func closeLoadStores(memory *memstore.Store, owned *walstore.Store) error {
+	if memory != nil {
+		if err := memory.Close(); err != nil {
 			return err
 		}
 	}
@@ -427,12 +521,7 @@ func (n *node) teardownResources() error {
 			return err
 		}
 	}
-	if m != nil {
-		if err := m.Stop(ctx); err != nil {
-			return err
-		}
-	}
-	return n.closeAuthority()
+	return nil
 }
 
 var _ Node = (*node)(nil)

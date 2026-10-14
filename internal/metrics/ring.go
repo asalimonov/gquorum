@@ -1,10 +1,15 @@
 package metrics
 
 import (
-	"github.com/asalimonov/gquorum/fault"
 	"math"
 	"sync"
 	"time"
+
+	"github.com/asalimonov/gquorum/fault"
+)
+
+const (
+	defaultHistoryPageSize = 100
 )
 
 type bucket[T any] struct {
@@ -25,6 +30,7 @@ type Ring[T any] struct {
 	sequence   uint64
 }
 
+// NewRing validates bounded history settings and the value-copy function.
 func NewRing[T any](capacity int, retention time.Duration, clone func(T) T) (*Ring[T], error) {
 	if capacity <= 0 || retention <= 0 || clone == nil {
 		return nil, fault.ErrInvalid
@@ -39,6 +45,9 @@ func (r *Ring[T]) expire(now time.Time) {
 		r.size--
 	}
 }
+
+// Roll expires old points and appends an owned value under a fresh history
+// cursor.
 func (r *Ring[T]) Roll(now time.Time, value T) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -54,7 +63,7 @@ func (r *Ring[T]) Roll(now time.Time, value T) {
 			n = r.capacity
 		}
 		grown := make([]bucket[T], n)
-		for i := 0; i < r.size; i++ {
+		for i := range r.size {
 			grown[i] = r.slots[(r.head+i)%len(r.slots)]
 		}
 		r.slots, r.head = grown, 0
@@ -67,27 +76,38 @@ func (r *Ring[T]) Roll(now time.Time, value T) {
 	r.slots[(r.head+r.size)%len(r.slots)] = bucket[T]{now, r.sequence, r.clone(value)}
 	r.size++
 }
-func (r *Ring[T]) Snapshot(now time.Time, after uint64, limit int) ([]T, uint64, bool) {
+
+// HistoryBatch contains an owned page and its cursor continuity information.
+type HistoryBatch[T any] struct {
+	Points    []T
+	Next      uint64
+	Truncated bool
+}
+
+// Snapshot copies a bounded page after a cursor and reports whether earlier
+// points were lost.
+func (r *Ring[T]) Snapshot(now time.Time, after uint64, limit int) HistoryBatch[T] {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.expire(now)
-	if limit <= 0 {
-		limit = min(100, r.capacity)
+	pageSize := limit
+	if pageSize <= 0 {
+		pageSize = min(defaultHistoryPageSize, r.capacity)
 	}
-	limit = min(limit, r.capacity)
-	out := make([]T, 0, min(limit, r.size))
+	pageSize = min(pageSize, r.capacity)
+	out := make([]T, 0, min(pageSize, r.size))
 	next, truncated := after, false
 	if r.size == 0 {
-		return out, max(after, r.sequence), after < r.sequence
+		return HistoryBatch[T]{Points: out, Next: max(after, r.sequence), Truncated: after < r.sequence}
 	}
 	oldest := r.slots[r.head].seq
 	truncated = after < oldest-1
-	for i := 0; i < r.size && len(out) < limit; i++ {
+	for i := 0; i < r.size && len(out) < pageSize; i++ {
 		b := r.slots[(r.head+i)%len(r.slots)]
 		if b.seq > after {
 			out = append(out, r.clone(b.value))
 			next = b.seq
 		}
 	}
-	return out, next, truncated
+	return HistoryBatch[T]{Points: out, Next: next, Truncated: truncated}
 }

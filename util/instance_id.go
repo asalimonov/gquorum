@@ -1,4 +1,6 @@
 // Package util provides application helpers for constructing gquorum nodes.
+//
+//revive:disable-next-line:package-naming Preserve the established public helper package.
 package util
 
 import (
@@ -12,6 +14,6 @@ import (
 func NewInstanceID() string {
 	var id [16]byte
 	// crypto/rand.Read fills the buffer or terminates the process on failure.
-	rand.Read(id[:])
+	_, _ = rand.Read(id[:])
 	return hex.EncodeToString(id[:])
 }

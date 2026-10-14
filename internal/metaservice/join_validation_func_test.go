@@ -33,7 +33,7 @@ func TestReadmissionReplyCarriesApprovedFormerReplicasWithoutLocalMetaDisk(t *te
 	proposed := f.command(t, metaengine.ProposeDocument{Doc: doc, ExpectedVersion: 1})
 	observed := map[string]topology.GroupStatus{}
 	for _, group := range f.g.machine.Active().Groups {
-		observed[group.ID] = topology.GroupStatus{GroupID: group.ID, Found: true, LeaderID: 2, Commit: 1, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}}
+		observed[group.ID] = topology.GroupStatus{GroupID: group.ID, Found: true, LeaderID: 2, Commit: 1, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}, HealthKnown: true, LiveVoters: map[uint64]bool{2: true, 3: true}}
 	}
 	plan, err := topology.BuildPlan(f.g.machine.Active(), proposed.Doc, observed, f.g.rules)
 	if err != nil {

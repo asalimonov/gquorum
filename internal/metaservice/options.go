@@ -3,56 +3,53 @@ package metaservice
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
-	"crypto/tls"
 	"encoding/binary"
 	"fmt"
-	"github.com/asalimonov/gquorum/internal/operator"
-	"github.com/asalimonov/gquorum/internal/raftengine"
 	"log/slog"
+	"maps"
 	"math"
 	"net"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/observe"
-	"github.com/asalimonov/gquorum/internal/scheduling"
+	"github.com/asalimonov/gquorum/internal/operator"
+	"github.com/asalimonov/gquorum/internal/raftengine"
+	internalscheduling "github.com/asalimonov/gquorum/internal/scheduling"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/metrics"
-	"github.com/asalimonov/gquorum/policy"
+	"github.com/asalimonov/gquorum/scheduling"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
-type FoundingMember struct {
-	Node          topology.Node
-	MemberID      uint64
-	Address       string
-	PinnedLearner bool
-}
-type Timing struct {
-	TickInterval                   time.Duration
-	ElectionTicks, HeartbeatTicks  int
-	DialTimeout, SendTimeout       time.Duration
-	PeerRetryInitial, PeerRetryMax time.Duration
-}
-type NetworkOptions struct {
-	Listener          net.Listener
-	AdvertiseAddress  string
-	Resolver          topology.AddressResolver
-	TLS, ClientTLS    *tls.Config
-	AllowPlaintext    bool
-	ClusterCredential []byte
-	MaxSnapshotBytes  int
-}
+const (
+	defaultTickInterval      = 100 * time.Millisecond
+	defaultElectionTicks     = 10
+	defaultDialTimeout       = 500 * time.Millisecond
+	defaultSendTimeout       = 500 * time.Millisecond
+	defaultPeerRetryInitial  = 100 * time.Millisecond
+	defaultPeerRetryMax      = 5 * time.Second
+	defaultSessionTTL        = 15 * time.Second
+	defaultSnapshotThreshold = 512
+	defaultMaxWatchers       = 256
+	defaultMaxSnapshotBytes  = 64 << 20
+	minimumTickInterval      = 10 * time.Millisecond
+)
+
+// Options supplies private meta identity, storage, networking and orchestration
+// dependencies.
 type Options struct {
 	Identity topology.Identity
 	// Node is the caller-defined local admission document. Founders may instead
-	// supply it in the matching FoundingMember; joiners must supply its type here.
+	// supply it in the matching FoundingMember; joiners must supply its type
+	// here.
 	Node                 topology.Node
 	DBPath               string
 	Founders             []FoundingMember
@@ -60,7 +57,7 @@ type Options struct {
 	Join                 bool
 	Limits               topology.Limits
 	Placement            topology.PlacementRule
-	VoterPolicy          *topology.VoterPolicy
+	VoterConfig          *topology.VoterConfig
 	Reads                raftengine.ReadOptions
 	Timing               Timing
 	SessionTTL           time.Duration
@@ -74,7 +71,7 @@ type Options struct {
 	LocalLoadMetrics     func() []metrics.ReplicaObservation
 	Health               topology.HealthSource
 	Scheduling           SchedulingOptions
-	Scheduler            policy.Scheduler
+	RepairPolicy         scheduling.RepairPolicy
 	CallbackTimeout      time.Duration
 	HeldLoads            func() []storage.Identity
 	Observation          ObservationOptions
@@ -85,7 +82,8 @@ type Options struct {
 	// It must honor cancellation and return before Stop/Quiesce can join it.
 	// Use Group.RequestStop to schedule teardown instead of waiting on this
 	// same group's Stop/Quiesce inside the callback. Callbacks are idempotent
-	// across crashes/restarts and must verify the reason's exact local identity.
+	// across crashes/restarts and must verify the reason's exact local
+	// identity.
 	OnSelfRemoved       func(context.Context, string) error
 	OnReadmission       func(context.Context, Readmission) error
 	ReadmissionIdentity func() topology.Identity
@@ -95,7 +93,8 @@ type Options struct {
 	// identity, before creating a metadata pin. It is an internal owner hook.
 	BeforeOpenEngine func(topology.Identity) error
 	// AfterOpenEngine records acquisition after the pin is durable, before
-	// publication or participation. Failure closes the store without starting Raft.
+	// publication or participation. Failure closes the store without starting
+	// Raft.
 	AfterOpenEngine  func(topology.Identity) error
 	RequestOwnerStop func()
 	OnApplied        func()
@@ -103,30 +102,33 @@ type Options struct {
 
 // SchedulingOptions controls local automatic load-replica repair. Disabled
 // is an explicit opt-out. Zero timings use a 30s interval, 20s tick timeout,
-// 60s stable-node window and 5m action cooldown. It never repairs _meta members
-// or approves staged operator intent.
-type SchedulingOptions = scheduling.Settings
+// 60s legacy stable-node window and 5m action cooldown. Configured groups,
+// including _meta, support guarded voter changes; unrelated staged intent
+// is never approved by the scheduler.
+type SchedulingOptions = internalscheduling.Settings
 
 // ObservationOptions controls node/group health sampling. Defaults are a 5s
 // interval and 2s timeout. Document application also wakes the sampler.
 type ObservationOptions = observe.Settings
-type Readmission struct {
-	Previous       topology.Identity         `json:"previous"`
-	Granted        topology.Identity         `json:"granted"`
-	AdmissionID    string                    `json:"admission_id"`
-	MetaDBPath     string                    `json:"meta_db_path"`
-	PreviousGroups []topology.Group          `json:"previous_groups"`
-	GrantedGroups  []topology.Group          `json:"granted_groups"`
-	Grants         []topology.AuthorityGrant `json:"grants"`
-}
-type ReadmissionRequiredError struct{ Readmission Readmission }
 
 func (e *ReadmissionRequiredError) Error() string {
-	return fmt.Sprintf("readmission requires local orchestration for %s: member %d to %d", e.Readmission.Granted.NodeName, e.Readmission.Previous.MemberID, e.Readmission.Granted.MemberID)
+	return fmt.Sprintf("readmission requires local orchestration for %s: member %d to %d",
+		e.Readmission.Granted.NodeName, e.Readmission.Previous.MemberID, e.Readmission.Granted.MemberID)
 }
-func (_ *ReadmissionRequiredError) Unwrap() error { return fault.ErrReadmissionRequired }
+
+func (*ReadmissionRequiredError) Unwrap() error { return fault.ErrReadmissionRequired }
+
+// DefaultTiming returns the library's default meta Raft and transport timings.
 func DefaultTiming() Timing {
-	return Timing{TickInterval: 100 * time.Millisecond, ElectionTicks: 10, HeartbeatTicks: 1, DialTimeout: 500 * time.Millisecond, SendTimeout: 500 * time.Millisecond, PeerRetryInitial: 100 * time.Millisecond, PeerRetryMax: 5 * time.Second}
+	return Timing{
+		TickInterval:     defaultTickInterval,
+		ElectionTicks:    defaultElectionTicks,
+		HeartbeatTicks:   1,
+		DialTimeout:      defaultDialTimeout,
+		SendTimeout:      defaultSendTimeout,
+		PeerRetryInitial: defaultPeerRetryInitial,
+		PeerRetryMax:     defaultPeerRetryMax,
+	}
 }
 
 // WithDefaults returns owned settings without acquiring resources or invoking
@@ -138,43 +140,22 @@ func (o Options) defaults() Options {
 	o.Limits = o.Limits.WithDefaults()
 	o.Scheduling = o.Scheduling.WithDefaults()
 	o.Observation = o.Observation.WithDefaults()
-	if o.VoterPolicy != nil {
-		policy := *o.VoterPolicy
-		o.VoterPolicy = &policy
+	if o.VoterConfig != nil {
+		voterConfig := *o.VoterConfig
+		o.VoterConfig = &voterConfig
 	}
-	d := DefaultTiming()
-	if o.Timing.TickInterval == 0 {
-		o.Timing.TickInterval = d.TickInterval
-	}
-	if o.Timing.ElectionTicks == 0 {
-		o.Timing.ElectionTicks = d.ElectionTicks
-	}
-	if o.Timing.HeartbeatTicks == 0 {
-		o.Timing.HeartbeatTicks = d.HeartbeatTicks
-	}
-	if o.Timing.DialTimeout == 0 {
-		o.Timing.DialTimeout = d.DialTimeout
-	}
-	if o.Timing.SendTimeout == 0 {
-		o.Timing.SendTimeout = d.SendTimeout
-	}
-	if o.Timing.PeerRetryInitial == 0 {
-		o.Timing.PeerRetryInitial = d.PeerRetryInitial
-	}
-	if o.Timing.PeerRetryMax == 0 {
-		o.Timing.PeerRetryMax = d.PeerRetryMax
-	}
+	o.Timing = o.Timing.withDefaults()
 	if o.SessionTTL == 0 {
-		o.SessionTTL = 15 * time.Second
+		o.SessionTTL = defaultSessionTTL
 	}
 	if o.SnapshotThreshold == 0 {
-		o.SnapshotThreshold = 512
+		o.SnapshotThreshold = defaultSnapshotThreshold
 	}
 	if o.MaxWatchers == 0 {
-		o.MaxWatchers = 256
+		o.MaxWatchers = defaultMaxWatchers
 	}
 	if o.Network.MaxSnapshotBytes == 0 {
-		o.Network.MaxSnapshotBytes = 64 << 20
+		o.Network.MaxSnapshotBytes = defaultMaxSnapshotBytes
 	}
 	if o.Placement.MinReplicas == 0 && o.Placement.MaxReplicas == 0 {
 		o.Placement.MinReplicas = 1
@@ -183,6 +164,37 @@ func (o Options) defaults() Options {
 	if o.Logger == nil {
 		o.Logger = slog.Default()
 	}
+	o = o.ownedDeclarations()
+	return o
+}
+
+func (t Timing) withDefaults() Timing {
+	d := DefaultTiming()
+	if t.TickInterval == 0 {
+		t.TickInterval = d.TickInterval
+	}
+	if t.ElectionTicks == 0 {
+		t.ElectionTicks = d.ElectionTicks
+	}
+	if t.HeartbeatTicks == 0 {
+		t.HeartbeatTicks = d.HeartbeatTicks
+	}
+	if t.DialTimeout == 0 {
+		t.DialTimeout = d.DialTimeout
+	}
+	if t.SendTimeout == 0 {
+		t.SendTimeout = d.SendTimeout
+	}
+	if t.PeerRetryInitial == 0 {
+		t.PeerRetryInitial = d.PeerRetryInitial
+	}
+	if t.PeerRetryMax == 0 {
+		t.PeerRetryMax = d.PeerRetryMax
+	}
+	return t
+}
+
+func (o Options) ownedDeclarations() Options {
 	o.Founders = append([]FoundingMember(nil), o.Founders...)
 	for i := range o.Founders {
 		member := &o.Founders[i]
@@ -210,22 +222,44 @@ func (o Options) defaults() Options {
 	}
 	o.JoinSeeds = append([]string(nil), o.JoinSeeds...)
 	o.Placement.AllowedNodeTypes = append([]topology.NodeType(nil), o.Placement.AllowedNodeTypes...)
+	o.Placement.NodeSelector = maps.Clone(o.Placement.NodeSelector)
 	o.Network.ClusterCredential = bytes.Clone(o.Network.ClusterCredential)
 	o.Network.TLS = cloneTLS(o.Network.TLS)
 	o.Network.ClientTLS = cloneTLS(o.Network.ClientTLS)
-	sort.Slice(o.Founders, func(i, j int) bool { return o.Founders[i].Node.Name < o.Founders[j].Node.Name })
+	slices.SortFunc(o.Founders, func(a, b FoundingMember) int { return cmp.Compare(a.Node.Name, b.Node.Name) })
 	return o
 }
+
+// Validate checks meta identity, startup declarations, durations and
+// dependencies without acquisition.
 func (o Options) Validate() error {
+	if err := o.validateSuppliedSettings(); err != nil {
+		return err
+	}
+	resolved := o.defaults()
+	if err := resolved.validateDeclaration(); err != nil {
+		return err
+	}
+	if err := resolved.validateTiming(); err != nil {
+		return err
+	}
+	if err := resolved.validateNetwork(); err != nil {
+		return err
+	}
+	return resolved.validateFounders()
+}
+
+func invalidMetaOptions(message string) error { return fault.New(fault.Invalid, message, nil) }
+
+func (o Options) validateSuppliedSettings() error {
 	if err := o.Reads.Validate(); err != nil {
 		return err
 	}
 	if _, err := o.Metrics.Resolve(); err != nil {
 		return err
 	}
-	invalid := func(message string) error { return fault.New(fault.Invalid, message, nil) }
 	if o.CallbackTimeout < 0 {
-		return invalid("negative policy callback timeout")
+		return invalidMetaOptions("negative repair callback timeout")
 	}
 	if err := o.Scheduling.Validate(); err != nil {
 		return err
@@ -233,64 +267,110 @@ func (o Options) Validate() error {
 	if err := o.Observation.Validate(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(o.Identity.NodeName) == "" || strings.TrimSpace(o.Identity.ClusterID) == "" || strings.TrimSpace(o.Identity.InstanceID) == "" || strings.ContainsRune(o.Identity.NodeName, 0) || strings.ContainsRune(o.Identity.ClusterID, 0) || strings.ContainsRune(o.Identity.InstanceID, 0) || strings.TrimSpace(o.DBPath) == "" {
-		return invalid("meta identity and caller database path are required")
+	return o.validateIdentityAndBounds()
+}
+
+func (o Options) validateIdentityAndBounds() error {
+	if strings.TrimSpace(o.Identity.NodeName) == "" || strings.TrimSpace(o.Identity.ClusterID) == "" ||
+		strings.TrimSpace(o.Identity.InstanceID) == "" || strings.ContainsRune(o.Identity.NodeName, 0) ||
+		strings.ContainsRune(o.Identity.ClusterID, 0) || strings.ContainsRune(o.Identity.InstanceID, 0) ||
+		strings.TrimSpace(o.DBPath) == "" {
+		return invalidMetaOptions("meta identity and caller database path are required")
 	}
-	if o.Timing.TickInterval < 0 || o.Timing.ElectionTicks < 0 || o.Timing.HeartbeatTicks < 0 || o.Timing.DialTimeout < 0 || o.Timing.SendTimeout < 0 || o.Timing.PeerRetryInitial < 0 || o.Timing.PeerRetryMax < 0 || o.SessionTTL < 0 || o.MaxWatchers < 0 || o.Network.MaxSnapshotBytes < 0 {
-		return invalid("negative meta timing or bound")
+	if o.Timing.TickInterval < 0 || o.Timing.ElectionTicks < 0 || o.Timing.HeartbeatTicks < 0 ||
+		o.Timing.DialTimeout < 0 || o.Timing.SendTimeout < 0 || o.Timing.PeerRetryInitial < 0 ||
+		o.Timing.PeerRetryMax < 0 || o.SessionTTL < 0 || o.MaxWatchers < 0 || o.Network.MaxSnapshotBytes < 0 {
+		return invalidMetaOptions("negative meta timing or bound")
 	}
-	o = o.defaults()
+	return nil
+}
+
+func (o Options) validateDeclaration() error {
 	if err := o.Limits.Validate(); err != nil {
 		return err
 	}
-	if o.VoterPolicy != nil {
-		if err := o.VoterPolicy.Validate(1, o.Limits.MaxNodes); err != nil {
+	if o.VoterConfig != nil {
+		if err := o.VoterConfig.Validate(1, o.Limits.MaxNodes); err != nil {
 			return err
 		}
 	}
-	if o.Node.Name != o.Identity.NodeName || strings.TrimSpace(string(o.Node.Type)) == "" || o.Node.State != topology.NodeActive {
-		return invalid("local admission requires matching node name, user-defined type and active state")
+	if o.Node.Name != o.Identity.NodeName || o.Node.State != topology.NodeActive ||
+		strings.TrimSpace(string(o.Node.Type)) == "" {
+		return invalidMetaOptions("local admission requires matching node name, user-defined type and active state")
 	}
-	policy := topology.Document{Version: 1, ClusterID: o.Identity.ClusterID, Placement: o.Placement, Nodes: []topology.Node{o.Node}, Groups: []topology.Group{{ID: topology.MetaGroupID, NextReplicaID: 2, Replicas: []topology.Replica{{NodeName: o.Node.Name, ReplicaID: 1, Role: topology.ReplicaVoter}}}}}
-	if err := policy.Validate(topology.Rules{SchemaVersion: 1, Limits: o.Limits}); err != nil {
-		return err
+	declaration := topology.Document{
+		Version:   1,
+		ClusterID: o.Identity.ClusterID,
+		Placement: o.Placement,
+		Nodes:     []topology.Node{o.Node},
+		Groups: []topology.Group{
+			{
+				ID:            topology.MetaGroupID,
+				NextReplicaID: 2,
+				Replicas: []topology.Replica{{NodeName: o.Node.Name,
+					ReplicaID: 1, Role: topology.ReplicaVoter}},
+			},
+		},
 	}
-	if o.Timing.TickInterval < 10*time.Millisecond || o.Timing.ElectionTicks < 2 || o.Timing.HeartbeatTicks >= o.Timing.ElectionTicks || int64(o.Timing.ElectionTicks) > math.MaxInt64/int64(o.Timing.TickInterval) || o.Timing.PeerRetryMax < o.Timing.PeerRetryInitial {
-		return invalid("invalid meta Raft timing")
+	return declaration.Validate(topology.Rules{SchemaVersion: 1, Limits: o.Limits})
+}
+
+func (o Options) validateTiming() error {
+	if o.Timing.TickInterval < minimumTickInterval || o.Timing.ElectionTicks < 2 ||
+		o.Timing.HeartbeatTicks >= o.Timing.ElectionTicks ||
+		o.Timing.PeerRetryMax < o.Timing.PeerRetryInitial ||
+		int64(o.Timing.ElectionTicks) > math.MaxInt64/int64(o.Timing.TickInterval) {
+		return invalidMetaOptions("invalid meta Raft timing")
 	}
-	if o.SessionTTL < time.Second || o.SessionTTL%time.Second != 0 || o.SessionTTL/2 <= o.Timing.TickInterval*time.Duration(o.Timing.ElectionTicks) {
-		return invalid("session TTL must be whole seconds and exceed two election intervals")
+	if o.SessionTTL < time.Second || o.SessionTTL%time.Second != 0 ||
+		o.SessionTTL/2 <= o.Timing.TickInterval*time.Duration(o.Timing.ElectionTicks) {
+		return invalidMetaOptions("session TTL must be whole seconds and exceed two election intervals")
 	}
-	if o.Network.Listener == nil || o.Network.AdvertiseAddress == "" || len(o.Network.ClusterCredential) == 0 {
-		return invalid("meta listener, advertised address and cluster credential are required")
+	return nil
+}
+
+func (o Options) validateNetwork() error {
+	if o.Network.Listener == nil || o.Network.AdvertiseAddress == "" ||
+		len(o.Network.ClusterCredential) == 0 {
+		return invalidMetaOptions("meta listener, advertised address and cluster credential are required")
 	}
 	if !o.Network.AllowPlaintext && (o.Network.TLS == nil || o.Network.ClientTLS == nil) {
-		return invalid("plaintext meta networking must be explicitly enabled")
+		return invalidMetaOptions("plaintext meta networking must be explicitly enabled")
 	}
 	if _, _, err := net.SplitHostPort(o.Network.AdvertiseAddress); err != nil {
-		return invalid("invalid advertised meta address")
+		return invalidMetaOptions("invalid advertised meta address")
 	}
 	if o.Join && len(o.JoinSeeds) == 0 {
-		return invalid("joining requires seed addresses")
+		return invalidMetaOptions("joining requires seed addresses")
 	}
 	for _, seed := range o.JoinSeeds {
 		if _, _, err := net.SplitHostPort(seed); err != nil {
-			return invalid("invalid join seed address")
+			return invalidMetaOptions("invalid join seed address")
 		}
 	}
 	if o.Join && len(o.Founders) > 0 {
-		return invalid("joining cannot declare founding voters")
+		return invalidMetaOptions("joining cannot declare founding voters")
 	}
+	return nil
+}
+
+func (o Options) validateFounders() error {
 	names := make(map[string]bool)
 	ids := make(map[uint64]bool)
-	doc := topology.Document{Version: 1, ClusterID: o.Identity.ClusterID, Placement: o.Placement, Groups: []topology.Group{{ID: topology.MetaGroupID, NextReplicaID: 1, VoterPolicy: o.VoterPolicy}}}
-	roles := o.foundingRoles()
+	doc := topology.Document{
+		Version:   1,
+		ClusterID: o.Identity.ClusterID,
+		Placement: o.Placement,
+		Groups:    []topology.Group{{ID: topology.MetaGroupID, NextReplicaID: 1, VoterConfig: o.VoterConfig}},
+	}
+	roles := o.legacyFoundingRoles()
 	for _, founder := range o.Founders {
-		if names[founder.Node.Name] || ids[founder.MemberID] || founder.MemberID == 0 || founder.MemberID == math.MaxUint64 || founder.Node.State != topology.NodeActive {
-			return invalid("founder names and positive member IDs must be unique")
+		if names[founder.Node.Name] || ids[founder.MemberID] || founder.MemberID == 0 ||
+			founder.MemberID == math.MaxUint64 || founder.Node.State != topology.NodeActive {
+			return invalidMetaOptions("founder names and positive member IDs must be unique")
 		}
 		if _, _, err := net.SplitHostPort(founder.Address); err != nil {
-			return invalid("invalid founder meta address")
+			return invalidMetaOptions("invalid founder meta address")
 		}
 		names[founder.Node.Name] = true
 		ids[founder.MemberID] = true
@@ -300,49 +380,76 @@ func (o Options) Validate() error {
 		}
 		replica := &doc.MetaGroup().Replicas[len(doc.MetaGroup().Replicas)-1]
 		replica.Role, replica.PinnedLearner = roles[founder.Node.Name], founder.PinnedLearner
-		if founder.Node.Name == o.Identity.NodeName && founder.MemberID != o.Identity.MemberID {
-			return invalid("local identity differs from founder declaration")
-		}
-		if founder.Node.Name == o.Identity.NodeName && founder.Node.Type != o.Node.Type {
-			return invalid("local node type differs from founder declaration")
+		if err := o.validateLocalFounder(founder); err != nil {
+			return err
 		}
 	}
 	if len(o.Founders) > 0 {
 		if !names[o.Identity.NodeName] {
-			return invalid("local node is absent from founders")
+			return invalidMetaOptions("local node is absent from founders")
 		}
 		if err := doc.Validate(topology.Rules{SchemaVersion: 1, Limits: o.Limits}); err != nil {
 			return err
 		}
 	}
-	// A restart may omit founders: New verifies the existing pinned store before
-	// constructing an engine, and refuses an empty store without founding peers.
+	// A restart may omit founders: New verifies the existing pinned store
+	// before constructing an engine, and refuses an empty store without
+	// founding peers.
 	return nil
 }
 
-// foundingRoles is shared by the durable engine seed and initial topology.
-func (o Options) foundingRoles() map[string]topology.ReplicaRole {
+func (o Options) validateLocalFounder(founder FoundingMember) error {
+	if founder.Node.Name == o.Identity.NodeName && founder.MemberID != o.Identity.MemberID {
+		return invalidMetaOptions("local identity differs from founder declaration")
+	}
+	if founder.Node.Name == o.Identity.NodeName && founder.Node.Type != o.Node.Type {
+		return invalidMetaOptions("local node type differs from founder declaration")
+	}
+	return nil
+}
+
+// legacyFoundingRoles supplies only structural validation before retained
+// storage tells us whether this is a fresh founding or a restart.
+func (o Options) legacyFoundingRoles() map[string]topology.ReplicaRole {
 	names := make([]string, 0, len(o.Founders))
 	pinned := make(map[string]bool, len(o.Founders))
 	for _, f := range o.Founders {
 		names = append(names, f.Node.Name)
 		pinned[f.Node.Name] = f.PinnedLearner
 	}
-	return topology.FoundingRoles(names, pinned, o.freshVoterPolicy().TargetVoters)
+	return topology.FoundingRoles(names, pinned, o.freshVoterConfig().TargetVoters)
+}
+
+// selectFoundingRoles applies the same document-aware placement decision to
+// fresh meta peers and the initial desired topology.
+func (o Options) selectFoundingRoles() (map[string]topology.ReplicaRole, error) {
+	voterConfig := o.freshVoterConfig()
+	doc := topology.Document{
+		Version:   1,
+		ClusterID: o.Identity.ClusterID,
+		Placement: o.Placement,
+		Groups:    []topology.Group{{ID: topology.MetaGroupID, NextReplicaID: 1, VoterConfig: &voterConfig}},
+	}
+	pinned := make(map[string]bool, len(o.Founders))
+	for _, founder := range o.Founders {
+		doc.Nodes = append(doc.Nodes, founder.Node)
+		pinned[founder.Node.Name] = founder.PinnedLearner
+	}
+	return topology.SelectFoundingRoles(doc, topology.MetaGroupID, pinned)
 }
 
 // A constructor default is fresh-founding intent, never a reinterpretation of
 // retained topology. Validate it only after storage has proven fresh founding.
-func (o Options) freshVoterPolicy() topology.VoterPolicy {
-	if o.VoterPolicy != nil {
-		return *o.VoterPolicy
+func (o Options) freshVoterConfig() topology.VoterConfig {
+	if o.VoterConfig != nil {
+		return *o.VoterConfig
 	}
-	return topology.DefaultVoterPolicy()
+	return topology.DefaultVoterConfig()
 }
 
 // FoundingIDs derives stable positive IDs independently of peer ordering.
 func FoundingIDs(clusterID string, names []string) (map[string]uint64, error) {
-	if strings.TrimSpace(clusterID) == "" || len(names) == 0 {
+	if len(names) == 0 || strings.TrimSpace(clusterID) == "" {
 		return nil, fault.ErrInvalid
 	}
 	result := make(map[string]uint64, len(names))

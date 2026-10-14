@@ -18,7 +18,8 @@ func DecodeRaftSnapshot(ss raftpb.Snapshot, cluster, group string) (Snapshot, er
 	if err := ValidateAuthority(s.Authority, ss.Metadata.Index); err != nil {
 		return Snapshot{}, err
 	}
-	if s.Authority.InstallTerm > ss.Metadata.Term || s.Authority.DemotionTransferTerm > ss.Metadata.Term || s.Authority.Receipt != nil && s.Authority.Receipt.AppliedTerm > ss.Metadata.Term {
+	if s.Authority.InstallTerm > ss.Metadata.Term || s.Authority.DemotionTransferTerm > ss.Metadata.Term ||
+		s.Authority.Receipt != nil && s.Authority.Receipt.AppliedTerm > ss.Metadata.Term {
 		return Snapshot{}, fault.New(fault.Unreadable, "authority exceeds snapshot term", nil)
 	}
 	return s, nil

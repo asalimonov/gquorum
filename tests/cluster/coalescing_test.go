@@ -58,8 +58,7 @@ func walCoalescing(t *testing.T, size int) {
 				t.Fatal(err)
 			}
 			// Keep the durability owner and ingress pattern identical in both arms.
-			response, err := c.Request(ctx, "node2", "POST", "/api/groups/work/leader/node1", nil, 0)
-			if err := requireStatus(response, err, 200); err != nil {
+			if err := requestLeaderTransfer(ctx, c, "node2", "work", "node1"); err != nil {
 				t.Fatal(err)
 			}
 			if err := Poll(ctx, func() (bool, error) {

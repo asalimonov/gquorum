@@ -19,20 +19,28 @@ type readRequest struct {
 	maxResultBytes int
 }
 
+type readMode uint8
+
+const (
+	queryRead readMode = iota
+	barrierRead
+)
+
 // ReadBarrier confirms a fresh safe index and waits for this exact machine's
 // application. It is not a reusable lease or an atomic read-modify-write guard.
 func (g *Group) ReadBarrier(ctx context.Context) error {
-	_, err := g.submitRead(ctx, nil, true)
+	_, err := g.submitRead(ctx, nil, barrierRead)
 	return err
 }
 
 // Read executes the optional read-only Query callback on the serialized machine
 // owner after quorum confirmation and local application.
 func (g *Group) Read(ctx context.Context, query []byte) (Result, error) {
-	return g.submitRead(ctx, query, false)
+	return g.submitRead(ctx, query, queryRead)
 }
-func (g *Group) submitRead(parent context.Context, query []byte, barrier bool) (Result, error) {
-	return g.submitQuery(parent, query, barrier, g.opts.Reads)
+
+func (g *Group) submitRead(parent context.Context, query []byte, mode readMode) (Result, error) {
+	return g.submitQuery(parent, query, mode, g.opts.Reads)
 }
 
 // ReadControl uses the same bounded queue, timeout and serialized Query owner,
@@ -43,17 +51,17 @@ func (g *Group) ReadControl(parent context.Context, query []byte) (Result, error
 	limits.Timeout = g.opts.Reads.Timeout
 	limits.MaxRequestBytes = max(limits.MaxRequestBytes, g.opts.Reads.MaxRequestBytes)
 	limits.MaxResultBytes = max(limits.MaxResultBytes, g.opts.Reads.MaxResultBytes)
-	return g.submitQuery(parent, query, false, limits)
+	return g.submitQuery(parent, query, queryRead, limits)
 }
 
-func (g *Group) submitQuery(parent context.Context, query []byte, barrier bool, limits ReadOptions) (Result, error) {
+func (g *Group) submitQuery(parent context.Context, query []byte, mode readMode, limits ReadOptions) (Result, error) {
 	if err := parent.Err(); err != nil {
 		return Result{}, err
 	}
 	if len(query) > limits.MaxRequestBytes {
 		return Result{}, fault.ErrOverloaded
 	}
-	if !barrier {
+	if mode == queryRead {
 		machine, ok := g.opts.Machine.(QueryMachine)
 		if !ok || !machine.SupportsQuery() {
 			return Result{}, fault.ErrUnsupported
@@ -61,7 +69,13 @@ func (g *Group) submitQuery(parent context.Context, query []byte, barrier bool, 
 	}
 	ctx, cancel := context.WithTimeout(parent, g.opts.Reads.Timeout)
 	defer cancel()
-	req := &readRequest{ctx: ctx, barrier: barrier, data: query, reply: make(chan response, 1), maxResultBytes: limits.MaxResultBytes}
+	req := &readRequest{
+		ctx:            ctx,
+		barrier:        mode == barrierRead,
+		data:           query,
+		reply:          make(chan response, 1),
+		maxResultBytes: limits.MaxResultBytes,
+	}
 	return g.waitRead(req)
 }
 
@@ -81,8 +95,9 @@ func (g *Group) waitRead(req *readRequest) (Result, error) {
 }
 
 func (g *Group) enqueueRead(req *readRequest) error {
-	// Serialize the admission/ownership handoff against the run-loop exit drain.
-	// The bounded queue has a place for every acquired slot; never wait under mu.
+	// Serialize the admission/ownership handoff against the run-loop exit
+	// drain. The bounded queue has a place for every acquired slot; never wait
+	// under mu.
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	if !g.started || g.stopped {
@@ -120,15 +135,16 @@ func (g *Group) finishRead(req *readRequest, result Result, err error) {
 	if req == nil {
 		return
 	}
-	if err == nil {
-		err = req.ctx.Err()
+	completed, failure := result, err
+	if failure == nil {
+		failure = req.ctx.Err()
 	}
-	if err != nil {
-		result = Result{}
+	if failure != nil {
+		completed = Result{}
 	} else {
-		result.Data = bytes.Clone(result.Data)
+		completed.Data = bytes.Clone(completed.Data)
 	}
-	req.reply <- response{result: result, err: err} // private one-result buffer
+	req.reply <- response{result: completed, err: failure} // private one-result buffer
 	req.data = nil
 	<-g.readSlots
 }

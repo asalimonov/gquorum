@@ -19,118 +19,61 @@ func comparePlanGroups(a, b string) int {
 	return cmp.Compare(a, b)
 }
 
+// ValidatePlanShape checks step ordering and exact identities against active
+// and desired topology.
 func ValidatePlanShape(active, desired Document, plan Plan) error {
 	if plan.Version != desired.Version {
 		return fmt.Errorf("plan version %d does not match desired version %d", plan.Version, desired.Version)
 	}
-	seenGroups := make(map[string]bool)
-	lastGroup := ""
-	stopped := make(map[string]map[uint64]bool)
+	v := planShapeValidator{active: active, desired: desired, plan: plan,
+		seenGroups: make(map[string]bool), stopped: make(map[string]map[uint64]bool)}
 	for i, current := range plan.Steps {
-		if current.Seq != i+1 {
-			return fmt.Errorf("step position %d has sequence %d", i+1, current.Seq)
+		if err := v.validatePosition(i, current); err != nil {
+			return err
 		}
-		if current.GroupID == "" {
-			return fmt.Errorf("step %d has no group", current.Seq)
+		if err := validateStepIdentity(current); err != nil {
+			return err
 		}
-		if current.GroupID != lastGroup {
-			if seenGroups[current.GroupID] || (lastGroup != "" && comparePlanGroups(current.GroupID, lastGroup) < 0) {
-				return fmt.Errorf("group %q appears out of deterministic order", current.GroupID)
-			}
-			seenGroups[current.GroupID] = true
-			lastGroup = current.GroupID
+		if err := v.validateReplicaRole(current); err != nil {
+			return err
 		}
-		wholeGroup := current.Kind == StepCreateFoundingGroup || current.Kind == StepDeleteGroupState
-		if wholeGroup {
-			if current.NodeName != "" || current.ReplicaID != 0 {
-				return fmt.Errorf("whole-group step %d carries replica identity", current.Seq)
-			}
-		} else if current.NodeName == "" || current.ReplicaID == 0 {
-			return fmt.Errorf("replica step %d lacks exact node/replica identity", current.Seq)
-		}
-		old := exactPlanReplica(active, current)
-		next := exactPlanReplica(desired, current)
-		if current.TransferNodeName != "" || current.TransferReplicaID != 0 {
-			guard := exactPlanReplica(desired, Step{GroupID: current.GroupID, NodeName: current.TransferNodeName, ReplicaID: current.TransferReplicaID})
-			if current.Kind != StepDemoteVoter || guard == nil || guard.Role != ReplicaVoter || guard.PinnedLearner || guard.ReplicaID == current.ReplicaID {
-				return fmt.Errorf("step %d has an invalid exact demotion transfer guard", current.Seq)
-			}
-		}
-		switch current.Kind {
-		case StepPrepareReplica, StepAddLearner, StepWaitCaughtUp, StepPromoteVoter:
-			if next == nil {
-				return fmt.Errorf("step %d does not name a desired replica", current.Seq)
-			}
-			if current.Kind == StepPromoteVoter && (next.Role != ReplicaVoter || next.PinnedLearner) {
-				return fmt.Errorf("step %d promotes an intentional learner", current.Seq)
-			}
-		case StepDemoteVoter:
-			if old == nil || next == nil || next.Role != ReplicaLearner {
-				return fmt.Errorf("step %d does not authorize a retained learner", current.Seq)
-			}
-		case StepRemoveReplica, StepStopReplica, StepCleanupReplicaState:
-			if old == nil || next != nil {
-				return fmt.Errorf("step %d does not name a removed replica", current.Seq)
-			}
-		case StepTransferLeader:
-			if (old == nil || old.Role != ReplicaVoter) && (next == nil || next.Role != ReplicaVoter) {
-				return fmt.Errorf("step %d does not name an authorized voter", current.Seq)
-			}
-		case StepDeleteGroupState:
-			if current.GroupID == MetaGroupID || active.Group(current.GroupID) == nil || desired.Group(current.GroupID) != nil {
-				return fmt.Errorf("step %d does not name a deleted load group", current.Seq)
-			}
-		}
-		switch current.Kind {
-		case StepCreateFoundingGroup:
-			if active.Group(current.GroupID) != nil || desired.Group(current.GroupID) == nil {
-				return fmt.Errorf("create founding group %q is not fresh", current.GroupID)
-			}
-		case StepPrepareReplica:
-			if !nextPlanStepMatches(plan.Steps, i, StepAddLearner, current) {
-				return fmt.Errorf("prepare %s/%d is not immediately followed by add learner", current.GroupID, current.ReplicaID)
-			}
-		case StepWaitCaughtUp:
-			if !nextPlanStepMatches(plan.Steps, i, StepPromoteVoter, current) {
-				return fmt.Errorf("wait %s/%d is not immediately followed by promotion", current.GroupID, current.ReplicaID)
-			}
-		case StepRemoveReplica:
-			if !nextPlanStepMatches(plan.Steps, i, StepStopReplica, current) && !ReadmissionCovers(active, desired, plan, current.NodeName) {
-				return fmt.Errorf("remove %s/%d is not immediately followed by stop", current.GroupID, current.ReplicaID)
-			}
-		case StepDemoteVoter, StepTransferLeader:
-		case StepAddLearner:
-			if !adjacentPlanStep(plan.Steps, i, StepPrepareReplica, current) {
-				return fmt.Errorf("add learner %s/%d is not immediately preceded by prepare", current.GroupID, current.ReplicaID)
-			}
-		case StepPromoteVoter:
-			if !adjacentPlanStep(plan.Steps, i, StepWaitCaughtUp, current) {
-				return fmt.Errorf("promote voter %s/%d is not immediately preceded by wait", current.GroupID, current.ReplicaID)
-			}
-		case StepStopReplica:
-			if stopped[current.GroupID] == nil {
-				stopped[current.GroupID] = make(map[uint64]bool)
-			}
-			stopped[current.GroupID][current.ReplicaID] = true
-		case StepCleanupReplicaState:
-			if current.GroupID == MetaGroupID ||
-				!adjacentPlanStep(plan.Steps, i, StepStopReplica, current) ||
-				!adjacentPlanStep(plan.Steps, i-1, StepRemoveReplica, current) {
-				return fmt.Errorf("cleanup %s/%d lacks adjacent remove and stop", current.GroupID, current.ReplicaID)
-			}
-		case StepDeleteGroupState:
-			if previous := active.Group(current.GroupID); previous != nil {
-				for _, replica := range previous.Replicas {
-					if !stopped[current.GroupID][replica.ReplicaID] && !ReadmissionCovers(active, desired, plan, replica.NodeName) {
-						return fmt.Errorf("delete group %q lacks stop for replica %d", current.GroupID, replica.ReplicaID)
-					}
-				}
-			}
-		default:
-			return fmt.Errorf("step %d has unknown kind %q", current.Seq, current.Kind)
+		if err := v.validateStepOrder(i, current); err != nil {
+			return err
 		}
 	}
-	return nil
+
+	return validatePlanVoterProof(active, desired, plan)
+}
+
+func preparatoryWaitPair(steps []Step, index int, incoming Step) bool {
+	i := index + 1
+	if i < len(steps) && steps[i].Kind == StepTransferLeader && steps[i].GroupID == incoming.GroupID {
+		i++
+	}
+	if i >= len(steps) || steps[i].GroupID != incoming.GroupID || steps[i].ReplicaID == incoming.ReplicaID {
+		return false
+	}
+	departing := steps[i]
+	switch departing.Kind {
+	case StepDemoteVoter:
+		i++
+	case StepRemoveReplica:
+		i++
+		if i < len(steps) && steps[i].Kind == StepStopReplica && samePlanIdentity(steps[i], departing) {
+			i++
+			if i < len(steps) && steps[i].Kind == StepCleanupReplicaState && samePlanIdentity(steps[i], departing) {
+				i++
+			}
+		}
+	default:
+		return false
+	}
+	return i < len(steps) && steps[i].Kind == StepWaitCaughtUp && samePlanIdentity(steps[i], incoming) &&
+		nextPlanStepMatches(steps, i, StepPromoteVoter, incoming)
+}
+
+func samePlanIdentity(a, b Step) bool {
+	return a.GroupID == b.GroupID && a.NodeName == b.NodeName && a.ReplicaID == b.ReplicaID
 }
 
 func exactPlanReplica(d Document, s Step) *Replica {
@@ -149,8 +92,8 @@ func adjacentPlanStep(steps []Step, current int, kind StepKind, target Step) boo
 		return false
 	}
 	previous := steps[current-1]
-	return previous.Kind == kind && previous.GroupID == target.GroupID &&
-		previous.NodeName == target.NodeName && previous.ReplicaID == target.ReplicaID
+	return previous.Kind == kind && previous.GroupID == target.GroupID && previous.NodeName == target.NodeName &&
+		previous.ReplicaID == target.ReplicaID
 }
 
 func nextPlanStepMatches(steps []Step, current int, kind StepKind, target Step) bool {
@@ -158,6 +101,192 @@ func nextPlanStepMatches(steps []Step, current int, kind StepKind, target Step) 
 		return false
 	}
 	next := steps[current+1]
-	return next.Kind == kind && next.GroupID == target.GroupID &&
-		next.NodeName == target.NodeName && next.ReplicaID == target.ReplicaID
+	return next.Kind == kind && next.GroupID == target.GroupID && next.NodeName == target.NodeName &&
+		next.ReplicaID == target.ReplicaID
+}
+
+type planShapeValidator struct {
+	active     Document
+	desired    Document
+	plan       Plan
+	seenGroups map[string]bool
+	lastGroup  string
+	stopped    map[string]map[uint64]bool
+}
+
+func (v *planShapeValidator) validatePosition(i int, current Step) error {
+	if current.Seq != i+1 {
+		return fmt.Errorf("step position %d has sequence %d", i+1, current.Seq)
+	}
+	if current.GroupID == "" {
+		return fmt.Errorf("step %d has no group", current.Seq)
+	}
+	if current.GroupID != v.lastGroup {
+		if v.seenGroups[current.GroupID] || (v.lastGroup != "" && comparePlanGroups(current.GroupID, v.lastGroup) < 0) {
+			return fmt.Errorf("group %q appears out of deterministic order", current.GroupID)
+		}
+		v.seenGroups[current.GroupID] = true
+		v.lastGroup = current.GroupID
+	}
+	return nil
+}
+
+func validateStepIdentity(current Step) error {
+	wholeGroup := current.Kind == StepCreateFoundingGroup || current.Kind == StepDeleteGroupState
+	if wholeGroup {
+		if current.NodeName != "" || current.ReplicaID != 0 {
+			return fmt.Errorf("whole-group step %d carries replica identity", current.Seq)
+		}
+	} else if current.NodeName == "" || current.ReplicaID == 0 {
+		return fmt.Errorf("replica step %d lacks exact node/replica identity", current.Seq)
+	}
+	return nil
+}
+
+func (v *planShapeValidator) validateReplicaRole(current Step) error {
+	old := exactPlanReplica(v.active, current)
+	next := exactPlanReplica(v.desired, current)
+	if err := v.validateTransferGuard(current); err != nil {
+		return err
+	}
+	switch current.Kind {
+	case StepPrepareReplica,
+		StepAddLearner,
+		StepWaitCaughtUp,
+		StepPromoteVoter:
+		return validateDesiredStepReplica(current, next)
+	case StepDemoteVoter:
+		if old == nil || next == nil || next.Role != ReplicaLearner {
+			return fmt.Errorf("step %d does not authorize a retained learner", current.Seq)
+		}
+	case StepRemoveReplica, StepStopReplica, StepCleanupReplicaState:
+		if old == nil || next != nil {
+			return fmt.Errorf("step %d does not name a removed replica", current.Seq)
+		}
+	case StepTransferLeader:
+		if (old == nil || old.Role != ReplicaVoter) && (next == nil || next.Role != ReplicaVoter) {
+			return fmt.Errorf("step %d does not name an authorized voter", current.Seq)
+		}
+	case StepDeleteGroupState:
+		return v.validateDeletedGroup(current)
+	default: // Other step kinds need no replica-role checks.
+	}
+	return nil
+}
+
+func (v *planShapeValidator) validateTransferGuard(current Step) error {
+	if current.TransferNodeName != "" || current.TransferReplicaID != 0 {
+		guard := exactPlanReplica(v.desired, Step{GroupID: current.GroupID, NodeName: current.TransferNodeName,
+			ReplicaID: current.TransferReplicaID})
+		if current.Kind != StepDemoteVoter || guard == nil || guard.Role != ReplicaVoter || guard.PinnedLearner ||
+			guard.ReplicaID == current.ReplicaID {
+			return fmt.Errorf("step %d has an invalid exact demotion transfer guard", current.Seq)
+		}
+	}
+	return nil
+}
+
+func (v *planShapeValidator) validateStepOrder(i int, current Step) error {
+	switch current.Kind {
+	case StepCreateFoundingGroup:
+		if v.active.Group(current.GroupID) != nil || v.desired.Group(current.GroupID) == nil {
+			return fmt.Errorf("create founding group %q is not fresh", current.GroupID)
+		}
+	case StepPrepareReplica:
+		if !nextPlanStepMatches(v.plan.Steps, i, StepAddLearner, current) {
+			return fmt.Errorf("prepare %s/%d is not immediately followed by add learner", current.GroupID,
+				current.ReplicaID)
+		}
+	case StepWaitCaughtUp:
+		if !nextPlanStepMatches(v.plan.Steps, i, StepPromoteVoter, current) &&
+			!preparatoryWaitPair(v.plan.Steps, i, current) {
+			return fmt.Errorf("wait %s/%d is not immediately followed by promotion", current.GroupID,
+				current.ReplicaID)
+		}
+	case StepRemoveReplica:
+		return v.validateRemovalOrder(i, current)
+	case StepDemoteVoter, StepTransferLeader:
+	case StepAddLearner:
+		if !adjacentPlanStep(v.plan.Steps, i, StepPrepareReplica, current) {
+			return fmt.Errorf("add learner %s/%d is not immediately preceded by prepare", current.GroupID,
+				current.ReplicaID)
+		}
+	case StepPromoteVoter:
+		if !adjacentPlanStep(v.plan.Steps, i, StepWaitCaughtUp, current) {
+			return fmt.Errorf("promote voter %s/%d is not immediately preceded by wait", current.GroupID,
+				current.ReplicaID)
+		}
+	case StepStopReplica:
+		return v.validateStopOrder(i, current)
+	case StepCleanupReplicaState:
+		if current.GroupID == MetaGroupID || !adjacentPlanStep(v.plan.Steps, i, StepStopReplica, current) ||
+			!adjacentPlanStep(v.plan.Steps, i-1, StepRemoveReplica, current) {
+			return fmt.Errorf("cleanup %s/%d lacks adjacent remove and stop", current.GroupID, current.ReplicaID)
+		}
+	case StepDeleteGroupState:
+		return v.validateDeletionOrder(current)
+	default:
+		return fmt.Errorf("step %d has unknown kind %q", current.Seq, current.Kind)
+	}
+	return nil
+}
+
+func (v *planShapeValidator) validateRemovalOrder(i int, current Step) error {
+	stoppedNext := nextPlanStepMatches(v.plan.Steps, i, StepStopReplica, current)
+	if !stoppedNext && !ReadmissionCovers(v.active, v.desired, v.plan, current.NodeName) {
+		return fmt.Errorf("remove %s/%d is not immediately followed by stop", current.GroupID,
+			current.ReplicaID)
+	}
+	if stoppedNext && current.GroupID != MetaGroupID &&
+		!nextPlanStepMatches(v.plan.Steps, i+1, StepCleanupReplicaState, current) {
+		return fmt.Errorf("remove %s/%d lacks ordered cleanup", current.GroupID, current.ReplicaID)
+	}
+
+	return nil
+}
+
+func (v *planShapeValidator) validateStopOrder(i int, current Step) error {
+	if v.desired.Group(current.GroupID) != nil && !adjacentPlanStep(v.plan.Steps, i, StepRemoveReplica, current) {
+		return fmt.Errorf("stop %s/%d lacks adjacent removal", current.GroupID, current.ReplicaID)
+	}
+	if v.stopped[current.GroupID] == nil {
+		v.stopped[current.GroupID] = make(map[uint64]bool)
+	}
+	v.stopped[current.GroupID][current.ReplicaID] = true
+
+	return nil
+}
+
+func (v *planShapeValidator) validateDeletionOrder(current Step) error {
+	if previous := v.active.Group(current.GroupID); previous != nil {
+		for _, replica := range previous.Replicas {
+			if !v.stopped[current.GroupID][replica.ReplicaID] &&
+				!ReadmissionCovers(v.active, v.desired, v.plan, replica.NodeName) {
+				return fmt.Errorf("delete group %q lacks stop for replica %d", current.GroupID,
+					replica.ReplicaID)
+			}
+		}
+	}
+
+	return nil
+}
+
+func validateDesiredStepReplica(current Step, next *Replica) error {
+	if next == nil {
+		return fmt.Errorf("step %d does not name a desired replica", current.Seq)
+	}
+	if current.Kind == StepPromoteVoter && (next.Role != ReplicaVoter || next.PinnedLearner) {
+		return fmt.Errorf("step %d promotes an intentional learner", current.Seq)
+	}
+
+	return nil
+}
+
+func (v *planShapeValidator) validateDeletedGroup(current Step) error {
+	if current.GroupID == MetaGroupID || v.active.Group(current.GroupID) == nil ||
+		v.desired.Group(current.GroupID) != nil {
+		return fmt.Errorf("step %d does not name a deleted load group", current.Seq)
+	}
+
+	return nil
 }

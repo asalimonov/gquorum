@@ -30,6 +30,14 @@ func TestReadmissionPlanUsesPreparationAsHostRetirementBoundary(t *testing.T) {
 				desired.Groups = desired.Groups[:1]
 			}
 			statuses := statusForDocument(active)
+			for id, status := range statuses {
+				status.HealthKnown = true
+				status.LiveVoters = make(map[uint64]bool)
+				for _, voter := range status.ConfState.Voters {
+					status.LiveVoters[voter] = true
+				}
+				statuses[id] = status
+			}
 			meta := statuses[MetaGroupID]
 			meta.LeaderID = 2
 			if mode == "already learner" || mode == "already voter" {
@@ -38,10 +46,11 @@ func TestReadmissionPlanUsesPreparationAsHostRetirementBoundary(t *testing.T) {
 					meta.ConfState.Learners = []uint64{4}
 				} else {
 					meta.ConfState.Voters = append(meta.ConfState.Voters, 4)
+					meta.LiveVoters[4] = true
 				}
 			}
 			statuses[MetaGroupID] = meta
-			plan, err := BuildPlan(active, desired, statuses, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 3, MaxReplicas: 5}})
+			plan, err := BuildPlan(active, desired, statuses, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 4, MaxReplicas: 5}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -69,5 +78,40 @@ func TestReadmissionPlanUsesPreparationAsHostRetirementBoundary(t *testing.T) {
 				t.Fatal("incomplete admission satisfied retirement")
 			}
 		})
+	}
+}
+
+func TestStrictMetaReadmissionPreservesDestructionFirstPair(t *testing.T) {
+	t.Parallel()
+	active := planDoc(1, 3, []string{"a", "b", "c"})
+	for i, zone := range []string{"az-a", "az-b", "az-c"} {
+		active.Nodes[i].Labels = map[string]string{"az": zone}
+	}
+	voterConfig := DefaultVoterConfig()
+	voterConfig.DistinctVoterLabel = "az"
+	active.MetaGroup().VoterConfig = &voterConfig
+	desired := active.Clone()
+	desired.Version++
+	desired.MetaGroup().Replicas[2].ReplicaID = 4
+	desired.MetaGroup().NextReplicaID = 5
+	status := statusForDocument(active)
+	meta := status[MetaGroupID]
+	meta.HealthKnown = true
+	meta.LiveVoters = map[uint64]bool{1: true, 2: true}
+	status[MetaGroupID] = meta
+	plan, err := BuildPlan(active, desired, status, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 4, MaxReplicas: 5}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ValidAdmissionSequence(plan.Steps, "c", 4, ReplicaVoter) || !ReadmissionCovers(active, desired, plan, "c") {
+		t.Fatal("paired strict readmission lost exact admission authority", plan)
+	}
+	var kinds []StepKind
+	for _, step := range plan.Steps {
+		kinds = append(kinds, step.Kind)
+	}
+	want := []StepKind{StepPrepareReplica, StepAddLearner, StepWaitCaughtUp, StepRemoveReplica, StepWaitCaughtUp, StepPromoteVoter}
+	if !slices.Equal(kinds, want) {
+		t.Fatalf("readmission changed safe 3->2->3 ordering: %v", kinds)
 	}
 }

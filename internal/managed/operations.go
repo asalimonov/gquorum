@@ -14,24 +14,36 @@ type groupOperation struct {
 	users int
 }
 
-// Outbound work is joined without taking a local group gate: a local transport
-// shortcut may dispatch back to ApplyAction, which owns that gate itself.
-func (h *Host) beginWork(parent context.Context) (context.Context, func(), error) {
-	return h.beginOwnedWork(parent, false)
+type ownedWork struct {
+	Context context.Context
+	Release func()
 }
 
-func (h *Host) beginAuthorityWork(parent context.Context) (context.Context, func(), error) {
-	return h.beginOwnedWork(parent, true)
+type workLifetime uint8
+
+const (
+	ordinaryWork workLifetime = iota
+	authorityWork
+)
+
+// Outbound work is joined without taking a local group gate: a local transport
+// shortcut may dispatch back to ApplyAction, which owns that gate itself.
+func (h *Host) beginWork(parent context.Context) (ownedWork, error) {
+	return h.beginOwnedWork(parent, ordinaryWork)
+}
+
+func (h *Host) beginAuthorityWork(parent context.Context) (ownedWork, error) {
+	return h.beginOwnedWork(parent, authorityWork)
 }
 
 // Host.mu protects admission and the matching join channel, including owned
 // workers which outlive their requesting courier. Both lifetimes share group
 // gates, but participation fencing cancels only ordinary work.
-func (h *Host) admitWorkLocked(authority bool) (context.Context, error) {
+func (h *Host) admitWorkLocked(lifetime workLifetime) (context.Context, error) {
 	if !h.started || h.shutdownRequested || h.ctx.Err() != nil {
 		return nil, fault.ErrStopped
 	}
-	if authority {
+	if lifetime == authorityWork {
 		if h.authorityClosed || h.authorityContext.Err() != nil {
 			return nil, fault.ErrStopped
 		}
@@ -51,8 +63,8 @@ func (h *Host) admitWorkLocked(authority bool) (context.Context, error) {
 	return h.operationContext, nil
 }
 
-func (h *Host) releaseWorkLocked(authority bool) {
-	if authority {
+func (h *Host) releaseWorkLocked(lifetime workLifetime) {
+	if lifetime == authorityWork {
 		h.authorityCount--
 		if h.authorityCount == 0 {
 			close(h.authorityDone)
@@ -65,51 +77,52 @@ func (h *Host) releaseWorkLocked(authority bool) {
 	}
 }
 
-func (h *Host) beginOwnedWork(parent context.Context, authority bool) (context.Context, func(), error) {
+func (h *Host) beginOwnedWork(parent context.Context, lifetime workLifetime) (ownedWork, error) {
 	if err := parent.Err(); err != nil {
-		return nil, nil, err
+		return ownedWork{}, err
 	}
 	h.mu.Lock()
-	lifetime, err := h.admitWorkLocked(authority)
+	ctxLifetime, err := h.admitWorkLocked(lifetime)
 	if err != nil {
 		h.mu.Unlock()
-		return nil, nil, err
+		return ownedWork{}, err
 	}
 	h.mu.Unlock()
 	ctx, cancel := context.WithCancel(parent)
-	stop := context.AfterFunc(lifetime, cancel)
-	return ctx, func() {
+	stop := context.AfterFunc(ctxLifetime, cancel)
+	return ownedWork{Context: ctx, Release: func() {
 		stop()
 		cancel()
 		h.mu.Lock()
-		h.releaseWorkLocked(authority)
+		h.releaseWorkLocked(lifetime)
 		h.mu.Unlock()
-	}, nil
+	}}, nil
 }
 
 // beginOperation serializes an entire local effect with start/stop admission.
 // Registered waiters and callbacks are canceled and joined by Quiesce. The
 // registry mutex is never held while waiting or calling application code.
-func (h *Host) beginOperation(parent context.Context, group string) (context.Context, func(), error) {
-	return h.beginOwnedOperation(parent, group, false)
+func (h *Host) beginOperation(parent context.Context, group string) (ownedWork, error) {
+	return h.beginOwnedOperation(parent, group, ordinaryWork)
 }
 
-func (h *Host) beginAuthorityOperation(parent context.Context, group string) (context.Context, func(), error) {
-	return h.beginOwnedOperation(parent, group, true)
+func (h *Host) beginAuthorityOperation(parent context.Context, group string) (ownedWork, error) {
+	return h.beginOwnedOperation(parent, group, authorityWork)
 }
 
-func (h *Host) beginOwnedOperation(parent context.Context, group string, authority bool) (context.Context, func(), error) {
+func (h *Host) beginOwnedOperation(parent context.Context, group string,
+	lifetime workLifetime) (ownedWork, error) {
 	if err := parent.Err(); err != nil {
-		return nil, nil, err
+		return ownedWork{}, err
 	}
 	if err := topology.ValidateLoadID(group); err != nil {
-		return nil, nil, err
+		return ownedWork{}, err
 	}
 	h.mu.Lock()
-	lifetime, err := h.admitWorkLocked(authority)
+	ctxLifetime, err := h.admitWorkLocked(lifetime)
 	if err != nil {
 		h.mu.Unlock()
-		return nil, nil, err
+		return ownedWork{}, err
 	}
 	gate := h.operations[group]
 	if gate == nil {
@@ -119,7 +132,7 @@ func (h *Host) beginOwnedOperation(parent context.Context, group string, authori
 	gate.users++
 	h.mu.Unlock()
 	ctx, cancel := context.WithCancel(parent)
-	stop := context.AfterFunc(lifetime, cancel)
+	stop := context.AfterFunc(ctxLifetime, cancel)
 	acquired := false
 	release := func() {
 		stop()
@@ -132,7 +145,7 @@ func (h *Host) beginOwnedOperation(parent context.Context, group string, authori
 		if gate.users == 0 {
 			delete(h.operations, group)
 		}
-		h.releaseWorkLocked(authority)
+		h.releaseWorkLocked(lifetime)
 		h.mu.Unlock()
 	}
 	select {
@@ -140,16 +153,16 @@ func (h *Host) beginOwnedOperation(parent context.Context, group string, authori
 		acquired = true
 	case <-ctx.Done():
 		release()
-		return nil, nil, ctx.Err()
+		return ownedWork{}, ctx.Err()
 	}
 	if err := ctx.Err(); err != nil {
 		release()
-		return nil, nil, err
+		return ownedWork{}, err
 	}
-	return ctx, release, nil
+	return ownedWork{Context: ctx, Release: release}, nil
 }
 
-func (h *Host) reserveStart(ctx context.Context, ref load.ReplicaRef, why StartReason) (*replica, error) {
+func (h *Host) reserveStart(parent context.Context, ref load.ReplicaRef, why StartReason) (*replica, error) {
 	if err := topology.ValidateLoadID(ref.GroupID); err != nil {
 		return nil, err
 	}
@@ -157,7 +170,7 @@ func (h *Host) reserveStart(ctx context.Context, ref load.ReplicaRef, why StartR
 		return nil, fault.ErrInvalid
 	}
 	if why != StartOperator {
-		if err := h.reconcileStartupAuthority(ctx, ref); err != nil {
+		if err := h.reconcileStartupAuthority(parent, ref); err != nil {
 			return nil, err
 		}
 	}
@@ -170,13 +183,16 @@ func (h *Host) reserveStart(ctx context.Context, ref load.ReplicaRef, why StartR
 	if !h.started || h.quiescing || h.stopped || h.shutdownRequested || h.ctx.Err() != nil {
 		err = fault.ErrStopped
 	} else {
-		_, err = h.startAuthority(ctx, storage.Identity{NodeName: node.NodeName, ClusterID: node.ClusterID, GroupID: ref.GroupID, ReplicaID: ref.ReplicaID}, node)
+		_, err = h.startAuthority(parent,
+			storage.Identity{NodeName: node.NodeName, ClusterID: node.ClusterID, GroupID: ref.GroupID,
+				ReplicaID: ref.ReplicaID}, node)
 	}
 	h.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
-	ctx, done, err := h.beginOperation(ctx, ref.GroupID)
+	ctxHandle, err := h.beginOperation(parent, ref.GroupID)
+	ctx, done := ctxHandle.Context, ctxHandle.Release
 	if err != nil {
 		return nil, err
 	}

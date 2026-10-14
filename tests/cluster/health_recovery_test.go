@@ -4,23 +4,23 @@ package cluster
 
 import (
 	"fmt"
-	"github.com/asalimonov/gquorum"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func TestStoppedFollowerHealthUsesActivePolicyAndRetainsStagingThreeNodes(t *testing.T) {
+func TestStoppedFollowerHealthUsesActivePlacementAndRetainsStagingThreeNodes(t *testing.T) {
 	t.Parallel()
-	stoppedFollowerPolicy(t, 3)
+	stoppedFollowerPlacement(t, 3)
 }
 
-// Source stopped-follower health/readiness, including its staged-policy blocker
+// Source stopped-follower health/readiness, including its staged-placement blocker
 // and normal survivor restart under Latest/Active drift. Meta health covers every
 // admitted type; the data plane remains a caller-defined three-worker subset.
-func stoppedFollowerPolicy(t *testing.T, size int) {
+func stoppedFollowerPlacement(t *testing.T, size int) {
 	spec := matrixSpec(size)
 	spec.Scheduling = true
 	spec.SchedulingInterval, spec.SchedulingTimeout = 200*time.Millisecond, 150*time.Millisecond
@@ -33,8 +33,7 @@ func stoppedFollowerPolicy(t *testing.T, size int) {
 	if err := transferMeta(ctx, c, "node2", "node1", base.MemberID("node1")); err != nil {
 		t.Fatal(err)
 	}
-	response, err := c.Request(ctx, "node2", "POST", "/api/groups/work/leader/node1", nil, 0)
-	if err := requireStatus(response, err, 200); err != nil {
+	if err := requestLeaderTransfer(ctx, c, "node2", "work", "node1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := Poll(ctx, func() (bool, error) {
@@ -48,7 +47,7 @@ func stoppedFollowerPolicy(t *testing.T, size int) {
 	}
 	rule := base.Placement
 	rule.MinReplicas, rule.MaxReplicas = 3, 3
-	response, err = c.Request(ctx, "node2", "PUT", "/api/placement", globalPlacementBody(rule, gquorum.MutationOptions{Actor: "operator"}), base.Version)
+	response, err := c.Request(ctx, "node2", "PUT", "/api/placement", globalPlacementBody(rule, gquorum.MutationOptions{Actor: "operator"}), base.Version)
 	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
 	}
@@ -66,15 +65,15 @@ func stoppedFollowerPolicy(t *testing.T, size int) {
 				status, err := c.Status(ctx, node.Spec.Name)
 				return status.LatestVersion == staged.Document.Version && status.TargetVersion == base.Version && status.ActiveVersion == base.Version && status.Scheduling.State == topology.SchedulingBlocked && status.Scheduling.Reason == "staged_latest", err
 			}); err != nil {
-				t.Fatal("durable staged policy did not block repair", node.Spec.Name, err)
+				t.Fatal("durable staged placement did not block repair", node.Spec.Name, err)
 			}
 			latest, err := c.Document(ctx, node.Spec.Name, "latest")
 			if err != nil || !reflect.DeepEqual(latest, staged.Document) {
-				t.Fatal("staged policy changed", node.Spec.Name, latest, err)
+				t.Fatal("staged placement changed", node.Spec.Name, latest, err)
 			}
 			active, err := c.Document(ctx, node.Spec.Name, "active")
 			if err != nil || !reflect.DeepEqual(active, base) {
-				t.Fatal("unapproved policy changed Active", active, err)
+				t.Fatal("unapproved placement changed Active", active, err)
 			}
 		}
 	}
@@ -129,7 +128,7 @@ func stoppedFollowerPolicy(t *testing.T, size int) {
 						return false, nil
 					}
 					if group.GroupID == topology.MetaGroupID && h.BelowMinReplicas != nil {
-						return true, fmt.Errorf("meta acquired load placement policy")
+						return true, fmt.Errorf("meta acquired load placement rules")
 					}
 					if group.GroupID == "work" && (h.BelowMinReplicas == nil || *h.BelowMinReplicas) {
 						return true, fmt.Errorf("health used staged minimum instead of Active minimum %d", base.Placement.MinReplicas)
@@ -163,7 +162,7 @@ func stoppedFollowerPolicy(t *testing.T, size int) {
 		t.Fatal("returning follower lost acknowledged commands", err)
 	}
 	// Restart the original survivor/leader with a retained store and unapplied
-	// staged policy. Neither founding nor reconciliation may overwrite its views.
+	// staged lifecycle. Neither founding nor reconciliation may overwrite its views.
 	if err := c.Node("node1").Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -178,5 +177,5 @@ func stoppedFollowerPolicy(t *testing.T, size int) {
 	if err := exactOwnedValues(ctx, c, base, "work", expected); err != nil {
 		t.Fatal(err)
 	}
-	assertActualAPIMembership(t, ctx, c, base, 3)
+	assertActualAPIMembership(ctx, t, c, base, 3)
 }

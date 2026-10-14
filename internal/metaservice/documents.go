@@ -4,13 +4,15 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"slices"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/collection"
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// Document reads return owned locally applied state. WaitReady is the startup
+// Latest returns owned locally applied staged intent. WaitReady is the startup
 // gate; reads do not promise a linearizable view of an unreachable leader.
 func (g *Group) Latest(ctx context.Context) (topology.Document, error) {
 	if err := ctx.Err(); err != nil {
@@ -18,18 +20,25 @@ func (g *Group) Latest(ctx context.Context) (topology.Document, error) {
 	}
 	return g.state().Latest(), nil
 }
+
+// Target returns an owned locally applied approved topology document.
 func (g *Group) Target(ctx context.Context) (topology.Document, error) {
 	if err := ctx.Err(); err != nil {
 		return topology.Document{}, err
 	}
 	return g.state().Target(), nil
 }
+
+// Active returns an owned locally applied converged topology document.
 func (g *Group) Active(ctx context.Context) (topology.Document, error) {
 	if err := ctx.Err(); err != nil {
 		return topology.Document{}, err
 	}
 	return g.state().Active(), nil
 }
+
+// Get returns an owned retained topology version or a history-unavailable
+// error.
 func (g *Group) Get(ctx context.Context, version uint64) (topology.Document, error) {
 	if err := ctx.Err(); err != nil {
 		return topology.Document{}, err
@@ -40,6 +49,8 @@ func (g *Group) Get(ctx context.Context, version uint64) (topology.Document, err
 	}
 	return doc, nil
 }
+
+// History returns a bounded descending page and the oldest retained version.
 func (g *Group) History(ctx context.Context, page topology.Page) (topology.HistoryResult, error) {
 	if err := ctx.Err(); err != nil {
 		return topology.HistoryResult{}, err
@@ -62,19 +73,33 @@ func (g *Group) History(ctx context.Context, page topology.Page) (topology.Histo
 	}
 	return result, nil
 }
+
+// Stage proposes an owned document under replicated expected-version
+// compare-and-swap.
 func (g *Group) Stage(ctx context.Context, doc topology.Document, expected uint64) (topology.Document, error) {
 	result, err := g.propose(ctx, metaengine.ProposeDocument{Doc: doc.Clone(), ExpectedVersion: expected})
 	if errors.Is(err, fault.ErrVersionConflict) {
-		return topology.Document{}, &fault.Error{Code: fault.VersionConflict, Message: result.Reason, ExpectedVersion: expected, CurrentVersion: result.CurrentVersion}
+		return topology.Document{}, &fault.Error{
+			Code:            fault.VersionConflict,
+			Message:         result.Reason,
+			ExpectedVersion: expected,
+			CurrentVersion:  result.CurrentVersion,
+		}
 	}
 	return result.Doc, err
 }
+
+// Authorize checks an exact step against locally applied approved execution
+// state.
 func (g *Group) Authorize(ctx context.Context, a topology.AuthorizedStep) error {
 	if err := g.ensureRunning(ctx); err != nil {
 		return err
 	}
 	return g.state().Authorize(ctx, a)
 }
+
+// Operator returns retained locally applied execution status for an exact
+// operator ID.
 func (g *Group) Operator(ctx context.Context, id topology.OperatorID) (topology.OperatorStatus, error) {
 	if err := ctx.Err(); err != nil {
 		return topology.OperatorStatus{}, err
@@ -86,14 +111,17 @@ func (g *Group) Operator(ctx context.Context, id topology.OperatorID) (topology.
 	return status, nil
 }
 
-// LocalStatus returns owned, locally observed meta Raft state. It does not probe
+// LocalStatus returns owned, locally observed meta Raft state. It does not
+// probe
 // peers or invoke caller load controllers. Found is false before engine startup
-// and after shutdown; an observation is not a linearizable read or quorum proof.
+// and after shutdown; an observation is not a linearizable read or quorum
+// proof.
 func (g *Group) LocalStatus() topology.GroupStatus {
 	if engine := g.engine.Load(); engine != nil {
 		return withLeaderNodeName(engine.Status(), g.state().Active())
 	}
-	return topology.GroupStatus{GroupID: topology.MetaGroupID, HostNode: g.Identity().NodeName, ErrorCode: string(fault.Unavailable)}
+	return topology.GroupStatus{GroupID: topology.MetaGroupID, HostNode: g.Identity().NodeName, ErrorCode: string(
+		fault.Unavailable)}
 }
 
 // Status combines owned local document/runtime state with caller load-group
@@ -101,24 +129,80 @@ func (g *Group) LocalStatus() topology.GroupStatus {
 // the observer; a mismatched Active version is reported as unsampled unknown
 // with a zero observation timestamp until a current sample becomes available.
 func (g *Group) Status(ctx context.Context) (topology.ClusterStatus, error) {
-	return g.status(ctx, true)
+	return g.readClusterStatus(ctx, true)
 }
 
 // CachedStatus remains available after fencing without starting peer probes.
 func (g *Group) CachedStatus(ctx context.Context) (topology.ClusterStatus, error) {
-	return g.status(ctx, false)
+	return g.readClusterStatus(ctx, false)
 }
 
-func (g *Group) status(ctx context.Context, live bool) (topology.ClusterStatus, error) {
+func (g *Group) readClusterStatus(ctx context.Context, live bool) (topology.ClusterStatus, error) {
 	if err := ctx.Err(); err != nil {
 		return topology.ClusterStatus{}, err
 	}
 	machine := g.state()
-	latest, target, active := machine.Views()
+	views := machine.Views()
+	latest, target, active := views.Latest, views.Target, views.Active
+	local := g.clusterStatusSnapshot(live)
+	result := topology.ClusterStatus{
+		Lifecycle:     local.lifecycle,
+		ErrorCode:     g.terminalCode(),
+		LatestVersion: latest.Version,
+		TargetVersion: target.Version,
+		ActiveVersion: active.Version,
+		SelfRemoval:   local.removal,
+	}
+	placement, err := statusPlacement(active, target)
+	if err != nil {
+		return topology.ClusterStatus{}, err
+	}
+	result.Placement = placement
+	result.SessionLive = g.OwnSessionLive()
+	if g.scheduler != nil {
+		result.Scheduling = g.scheduler.Status()
+	}
+	result.Observation = g.HealthObservation()
+	if result.Observation.Version != active.Version {
+		result.Observation = topology.HealthObservation{Version: active.Version,
+			Groups: topology.EvaluateAllGroupHealth(
+				active, nil)}
+	}
+	result.Nodes = statusNodes(latest, active, result.Observation, local.addresses)
+	if engine := g.engine.Load(); engine != nil {
+		status := withLeaderNodeName(engine.Status(), active)
+		result.Groups = append(result.Groups, status)
+		result.MetaLeaderID = status.LeaderID
+		result.MetaLeaderNodeName = status.LeaderNodeName
+	} else if active.MetaGroup() != nil {
+		result.Groups = append(result.Groups, topology.GroupStatus{GroupID: topology.MetaGroupID, ErrorCode: string(
+			fault.Unavailable)})
+	}
+	loads, err := g.statusLoadGroups(ctx, active, loadStatusRead{live: local.includeLive, cached: local.cached})
+	if err != nil {
+		return topology.ClusterStatus{}, err
+	}
+	result.Groups = append(result.Groups, loads...)
+	if operator, ok := machine.CurrentOperator(); ok {
+		status := operator.Status
+		result.Operator = &status
+	}
+	return result, nil
+}
+
+type localClusterStatus struct {
+	lifecycle   string
+	addresses   map[string]string
+	includeLive bool
+	cached      map[string]topology.GroupStatus
+	removal     *topology.SelfRemovalStatus
+}
+
+func (g *Group) clusterStatusSnapshot(live bool) localClusterStatus {
 	g.mu.RLock()
 	lifecycle := g.lifecycle
 	addresses := maps.Clone(g.addresses)
-	live = live && !g.quiescing && g.selfRemoval == nil
+	includeLive := live && !g.quiescing && g.selfRemoval == nil
 	cached := maps.Clone(g.lastLoadStatus)
 	var removal *topology.SelfRemovalStatus
 	if g.selfRemoval != nil {
@@ -126,67 +210,80 @@ func (g *Group) status(ctx context.Context, live bool) (topology.ClusterStatus, 
 		removal = &owned
 	}
 	g.mu.RUnlock()
-	result := topology.ClusterStatus{Lifecycle: lifecycle, ErrorCode: g.terminalCode(), LatestVersion: latest.Version, TargetVersion: target.Version, ActiveVersion: active.Version, SelfRemoval: removal}
-	result.SessionLive = g.OwnSessionLive()
-	if g.scheduler != nil {
-		result.Scheduling = g.scheduler.Status()
+	return localClusterStatus{lifecycle: lifecycle, addresses: addresses,
+		includeLive: includeLive, cached: cached, removal: removal}
+}
+
+func statusPlacement(active, target topology.Document) ([]topology.PlacementReport, error) {
+	var reports []topology.PlacementReport
+	for _, doc := range []topology.Document{active, target} {
+		if doc.Version == 0 || len(reports) > 0 &&
+			reports[len(reports)-1].Version == doc.Version {
+			continue
+		}
+		ids := make([]string, 0, len(doc.Groups))
+		for _, group := range doc.Groups {
+			ids = append(ids, group.ID)
+		}
+		slices.Sort(ids)
+		report, err := placementReportFor(doc, doc, ids)
+		if err != nil {
+			return nil, err
+		}
+		if report != nil {
+			report.AffectedGroups = nil // status is a snapshot, not an edit
+			reports = append(reports, *report)
+		}
 	}
-	result.Observation = g.HealthObservation()
-	if result.Observation.Version != active.Version {
-		result.Observation = topology.HealthObservation{Version: active.Version, Groups: topology.EvaluateAllGroupHealth(active, nil)}
-	}
+	return reports, nil
+}
+
+func statusNodes(latest, active topology.Document, observation topology.HealthObservation,
+	addresses map[string]string) []topology.NodeStatus {
+	out := collection.Slice[topology.NodeStatus](len(latest.Nodes))
 	for _, node := range latest.Nodes {
 		effective := topology.EffectiveNodeState(active, node.Name)
 		if effective == "" {
 			effective = node.State
 		}
 		health := topology.HealthUnknown
-		if result.Observation.Version == active.Version {
-			if observed, exists := result.Observation.Nodes[node.Name]; exists {
+		if observation.Version == active.Version {
+			if observed, exists := observation.Nodes[node.Name]; exists {
 				health = observed
 			}
 		}
-		result.Nodes = append(result.Nodes, topology.NodeStatus{Node: node, EffectiveState: effective, Health: health, Address: addresses[node.Name]})
+		out = append(out, topology.NodeStatus{
+			Node:           node,
+			EffectiveState: effective,
+			Health:         health,
+			Address:        addresses[node.Name],
+		})
 	}
-	if engine := g.engine.Load(); engine != nil {
-		status := withLeaderNodeName(engine.Status(), active)
-		result.Groups = append(result.Groups, status)
-		result.MetaLeaderID = status.LeaderID
-		result.MetaLeaderNodeName = status.LeaderNodeName
-	} else if active.MetaGroup() != nil {
-		result.Groups = append(result.Groups, topology.GroupStatus{GroupID: topology.MetaGroupID, ErrorCode: string(fault.Unavailable)})
-	}
+	return out
+}
+
+type loadStatusRead struct {
+	live   bool
+	cached map[string]topology.GroupStatus
+}
+
+func (g *Group) statusLoadGroups(ctx context.Context, active topology.Document,
+	read loadStatusRead) ([]topology.GroupStatus, error) {
+	var out []topology.GroupStatus
 	for _, group := range active.LoadGroups() {
-		if !live {
-			observed, found := cached[group.ID]
+		if !read.live {
+			observed, found := read.cached[group.ID]
 			if !found {
 				observed = topology.GroupStatus{GroupID: group.ID, ErrorCode: string(fault.Unavailable)}
 			}
-			result.Groups = append(result.Groups, withLeaderNodeName(observed.Clone(), active))
+			out = append(out, withLeaderNodeName(observed.Clone(), active))
 			continue
 		}
-		observed := topology.GroupStatus{GroupID: group.ID}
-		var err error
-		if g.opts.LoadGroups == nil {
-			err = fault.ErrNoController
-		} else {
-			observed, err = g.opts.LoadGroups.Status(ctx, group.ID)
-		}
-		if err == nil && observed.GroupID != group.ID {
-			err = fault.ErrIdentityMismatch
-		}
-		if err != nil {
-			code := fault.Unavailable
-			var typed *fault.Error
-			if errors.As(err, &typed) {
-				code = typed.Code
-			}
-			observed = topology.GroupStatus{GroupID: group.ID, ErrorCode: string(code)}
-		}
+		observed := g.liveLoadStatus(ctx, group.ID)
 		if err := ctx.Err(); err != nil {
-			return topology.ClusterStatus{}, err
+			return nil, err
 		}
-		result.Groups = append(result.Groups, withLeaderNodeName(observed.Clone(), active))
+		out = append(out, withLeaderNodeName(observed.Clone(), active))
 		g.mu.Lock()
 		if g.lastLoadStatus == nil {
 			g.lastLoadStatus = make(map[string]topology.GroupStatus)
@@ -194,11 +291,29 @@ func (g *Group) status(ctx context.Context, live bool) (topology.ClusterStatus, 
 		g.lastLoadStatus[group.ID] = observed.Clone()
 		g.mu.Unlock()
 	}
-	if operator, ok := machine.CurrentOperator(); ok {
-		status := operator.Status
-		result.Operator = &status
+	return out, nil
+}
+
+func (g *Group) liveLoadStatus(ctx context.Context, id string) topology.GroupStatus {
+	observed := topology.GroupStatus{GroupID: id}
+	var err error
+	if g.opts.LoadGroups == nil {
+		err = fault.ErrNoController
+	} else {
+		observed, err = g.opts.LoadGroups.Status(ctx, id)
 	}
-	return result, nil
+	if err == nil && observed.GroupID != id {
+		err = fault.ErrIdentityMismatch
+	}
+	if err != nil {
+		code := fault.Unavailable
+		var typed *fault.Error
+		if errors.As(err, &typed) {
+			code = typed.Code
+		}
+		observed = topology.GroupStatus{GroupID: id, ErrorCode: string(code)}
+	}
+	return observed
 }
 
 // Resolve names from the same Active snapshot used by the status response.

@@ -3,22 +3,21 @@ package metaservice
 import (
 	"context"
 	"encoding/json"
-	"strings"
-	"time"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metapb"
 	"github.com/asalimonov/gquorum/internal/metatransport"
 	"github.com/asalimonov/gquorum/internal/raftengine"
-	"github.com/asalimonov/gquorum/internal/raftstate"
-	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3/raftpb"
 )
 
-func (g *Group) Step(ctx context.Context, header *metapb.Header, msg raftpb.Message) error {
-	ctx, done, err := g.beginRPC(ctx)
+// Step validates the sender header and admits one Raft message under RPC
+// ownership.
+func (g *Group) Step(parent context.Context, header *metapb.Header, msg raftpb.Message) error {
+	ctxHandle, err := g.beginRPC(parent)
+	ctx, done := ctxHandle.Context, ctxHandle.Release
 	if err != nil {
 		return err
 	}
@@ -28,36 +27,15 @@ func (g *Group) Step(ctx context.Context, header *metapb.Header, msg raftpb.Mess
 	if engine == nil {
 		return fault.ErrUnavailable
 	}
-	if header == nil || header.ClusterId != identity.ClusterID || header.MemberId != msg.From || msg.To != identity.MemberID {
+	if header == nil || header.ClusterId != identity.ClusterID || header.MemberId != msg.From ||
+		msg.To != identity.MemberID {
 		return fault.ErrIdentityMismatch
 	}
 	name := g.memberNode(msg.From)
 	if msg.Type == raftpb.MsgSnap {
-		if msg.Snapshot == nil {
-			return fault.ErrInvalid
-		}
-		state, err := raftstate.DecodeRaftSnapshot(*msg.Snapshot, identity.ClusterID, topology.MetaGroupID)
+		name, err = g.snapshotSender(ctx, msg, identity, name)
 		if err != nil {
 			return err
-		}
-		check := metaengine.NewMachine(g.rules, nil)
-		if err := check.Restore(ctx, state.Application); err != nil {
-			return err
-		}
-		latest := check.Latest()
-		if latest.Version > 0 && latest.ClusterID != identity.ClusterID {
-			return fault.ErrIdentityMismatch
-		}
-		if name == "" {
-			for _, doc := range []topology.Document{check.Target(), check.Active()} {
-				if meta := doc.MetaGroup(); meta != nil {
-					for _, replica := range meta.Replicas {
-						if replica.ReplicaID == msg.From {
-							name = replica.NodeName
-						}
-					}
-				}
-			}
 		}
 	}
 	if name == "" || name != header.NodeName {
@@ -69,13 +47,16 @@ func (g *Group) Step(ctx context.Context, header *metapb.Header, msg raftpb.Mess
 	}
 	return err
 }
-func (g *Group) Call(ctx context.Context, method string, header *metapb.Header, data []byte) *metapb.Reply {
-	ctx, done, err := g.beginRPC(ctx)
+
+// Call validates and dispatches a private authenticated meta protocol request.
+func (g *Group) Call(parent context.Context, method string, header *metapb.Header, data []byte) *metapb.Reply {
+	owned, err := g.beginRPC(parent)
 	if err != nil {
 		return metatransport.Reply(err)
 	}
-	defer done()
-	if method != "IdentityPing" && method != "MetaStatus" && method != "ParkedRead" && method != "InstallFence" && method != "MetaControl" {
+	defer owned.Release()
+	ctx := owned.Context
+	if !retainedProtocolMethod(method) {
 		if err := g.ensureRunning(ctx); err != nil {
 			return metatransport.Reply(err)
 		}
@@ -84,172 +65,21 @@ func (g *Group) Call(ctx context.Context, method string, header *metapb.Header, 
 	if header == nil || header.ClusterId != identity.ClusterID {
 		return metatransport.Reply(fault.ErrIdentityMismatch)
 	}
-	if method == "Join" {
-		return g.handleJoin(ctx, header, data)
+	call := metaCall{Method: method, Header: header, Data: data, Identity: identity}
+	if reply := g.readProtocolCall(ctx, call); reply != nil {
+		return reply
 	}
-	if method == "IdentityPing" && len(data) > 0 {
-		return g.authorityIdentityReply(ctx, header, data)
-	}
-	if method == "IdentityPing" {
-		if engine := g.engine.Load(); engine == nil || !engine.Running() {
-			return metatransport.Reply(fault.ErrUnavailable)
-		}
-		// The caller verifies the returned exact process identity before revoking a lease.
-		encoded, err := json.Marshal(identity)
-		if err != nil {
-			return metatransport.Reply(err)
-		}
-		return &metapb.Reply{Data: encoded}
-	}
-	if method == "ParkedRead" {
-		if !g.IsLeader() {
-			return g.leaderReply(fault.ErrNotLeader)
-		}
-		encoded, err := json.Marshal(g.parked.snapshot())
-		if err != nil {
-			return metatransport.Reply(err)
-		}
-		return &metapb.Reply{Data: encoded}
-	}
-	if method == "MetaStatus" {
-		if !g.IsLeader() {
-			return g.leaderReply(fault.ErrNotLeader)
-		}
-		engine := g.engine.Load()
-		if engine == nil {
-			return metatransport.Reply(fault.ErrUnavailable)
-		}
-		status, err := (groupControllers{g}).Status(ctx, topology.MetaGroupID)
-		if err != nil {
-			return g.leaderReply(err)
-		}
-		encoded, err := json.Marshal(status)
-		if err != nil {
-			return metatransport.Reply(err)
-		}
-		return &metapb.Reply{Data: encoded, LeaderId: engine.RaftStatus().Lead}
-	}
-	if method == "AuthorityRead" {
-		return g.authorityReadReply(ctx, header, data)
-	}
-	if method != "InstallFence" && method != "MetaControl" && (header.MemberId == 0 || g.memberNode(header.MemberId) != header.NodeName) {
+	if method != "InstallFence" && method != "MetaControl" && (header.MemberId == 0 ||
+		g.memberNode(header.MemberId) != header.NodeName) {
 		return metatransport.Reply(fault.ErrIdentityMismatch)
 	}
-	if method == "InstallFence" {
-		var request load.FenceRequest
-		if err := json.Unmarshal(data, &request); err != nil {
-			return metatransport.Reply(err)
-		}
-		if request.From != (topology.Identity{ClusterID: header.ClusterId, NodeName: header.NodeName, MemberID: header.MemberId, InstanceID: header.InstanceId}) {
-			return metatransport.Reply(fault.ErrIdentityMismatch)
-		}
-		result, err := g.InstallFence(ctx, request)
-		if err != nil {
-			return metatransport.Reply(err)
-		}
-		encoded, err := json.Marshal(result)
-		if err != nil {
-			return metatransport.Reply(err)
-		}
-		return &metapb.Reply{Data: encoded}
-	}
-	if method == "MetaControl" {
-		var request load.ActionRequest
-		if json.Unmarshal(data, &request) != nil {
-			return metatransport.Reply(fault.ErrInvalid)
-		}
-		if request.From != (topology.Identity{ClusterID: header.ClusterId, NodeName: header.NodeName, MemberID: header.MemberId, InstanceID: header.InstanceId}) {
-			return metatransport.Reply(fault.ErrIdentityMismatch)
-		}
-		result, err := g.ApplyMetaAction(ctx, request)
-		if err != nil {
-			return g.leaderReply(err)
-		}
-		encoded, err := json.Marshal(result)
-		if err != nil {
-			return metatransport.Reply(err)
-		}
-		return &metapb.Reply{Data: encoded}
-	}
-	if method == "MetaReplicaMetrics" {
-		if len(data) != 0 {
-			return metatransport.Reply(fault.ErrInvalid)
-		}
-		return g.localReplicaMetrics(ctx, header)
+	if reply := g.controlProtocolCall(ctx, call); reply != nil {
+		return reply
 	}
 	if !g.IsLeader() {
 		return g.leaderReply(fault.ErrNotLeader)
 	}
-	switch method {
-	case "JoinReady":
-		return g.handleReady(ctx, header, data)
-	case "ApplyVersion":
-		var request struct {
-			Version uint64 `json:"version"`
-		}
-		if json.Unmarshal(data, &request) != nil {
-			return metatransport.Reply(fault.ErrInvalid)
-		}
-		id, err := g.applyLocal(ctx, request.Version)
-		if err != nil {
-			return g.leaderReply(err)
-		}
-		encoded, _ := json.Marshal(id)
-		return &metapb.Reply{Data: encoded}
-	case "ProposeMeta":
-		proposal, err := metaengine.DecodeProposal(data)
-		if err != nil {
-			return metatransport.Reply(fault.New(fault.Invalid, "invalid meta command envelope", err))
-		}
-		switch p := proposal.(type) {
-		case *metaengine.BindAdmissionProposal:
-			if p.Admission.NodeName != header.NodeName || p.Admission.MemberID != header.MemberId {
-				return metatransport.Reply(fault.ErrIdentityMismatch)
-			}
-		case *metaengine.GrantSession:
-			if p.NodeName != header.NodeName || p.InstanceID == "" || p.InstanceID != header.InstanceId || g.activeMemberID(p.NodeName) != header.MemberId {
-				return metatransport.Reply(fault.ErrIdentityMismatch)
-			}
-		case *metaengine.AcquireLock:
-			session, ok := g.state().Session(p.SessionID)
-			if !ok || session.NodeName != header.NodeName || session.InstanceID != header.InstanceId || strings.HasPrefix(p.Key, "node/") && p.Key != "node/"+header.NodeName {
-				return metatransport.Reply(fault.ErrIdentityMismatch)
-			}
-		case *metaengine.RevokeSession:
-			session, ok := g.state().Session(p.SessionID)
-			if ok && (session.NodeName != header.NodeName || session.InstanceID != header.InstanceId) {
-				return metatransport.Reply(fault.ErrIdentityMismatch)
-			}
-		}
-		engine := g.engine.Load()
-		result, err := engine.Propose(ctx, raftengine.Proposal{Data: data})
-		if err != nil {
-			return g.leaderReply(err)
-		}
-		return &metapb.Reply{Data: result.Data}
-	case "KeepAlive":
-		var request struct {
-			SessionID  string `json:"session_id"`
-			InstanceID string `json:"instance_id"`
-		}
-		if err := json.Unmarshal(data, &request); err != nil {
-			return metatransport.Reply(fault.ErrInvalid)
-		}
-		g.leaseGate.Lock()
-		defer g.leaseGate.Unlock()
-		session, ok := g.state().Session(request.SessionID)
-		if !ok || session.NodeName != header.NodeName || session.InstanceID != request.InstanceID || session.InstanceID != header.InstanceId || g.activeMemberID(header.NodeName) != header.MemberId {
-			return metatransport.Reply(fault.ErrIdentityMismatch)
-		}
-		now := time.Now()
-		g.leases.refreshTTL(request.SessionID, now, time.Duration(session.TTLSeconds)*time.Second)
-		encoded, _ := json.Marshal(struct {
-			ExpiresIn int `json:"expires_in"`
-		}{g.leases.remaining(request.SessionID, now)})
-		return &metapb.Reply{Data: encoded}
-	default:
-		return metatransport.Reply(fault.ErrUnsupported)
-	}
+	return g.leaderProtocolCall(ctx, call)
 }
 func (g *Group) leaderReply(err error) *metapb.Reply {
 	reply := metatransport.Reply(err)
@@ -262,11 +92,14 @@ func (g *Group) leaderReply(err error) *metapb.Reply {
 	}
 	return reply
 }
+
 func (g *Group) propose(ctx context.Context, proposal any) (metaengine.ApplyResult, error) {
-	return g.submitProposal(ctx, proposal, false)
+	return g.submitProposal(ctx, proposal, ordinaryRuntime)
 }
-func (g *Group) submitProposal(ctx context.Context, proposal any, shutdown bool) (metaengine.ApplyResult, error) {
-	if err := g.ensureRuntime(ctx, shutdown); err != nil {
+
+func (g *Group) submitProposal(ctx context.Context, proposal any,
+	access runtimeAccess) (metaengine.ApplyResult, error) {
+	if err := g.ensureRuntime(ctx, access); err != nil {
 		return metaengine.ApplyResult{}, err
 	}
 	data, err := metaengine.Encode(proposal)
@@ -274,29 +107,18 @@ func (g *Group) submitProposal(ctx context.Context, proposal any, shutdown bool)
 		return metaengine.ApplyResult{}, fault.New(fault.Invalid, "invalid meta proposal", err)
 	}
 	var encoded []byte
-	if g.IsLeader() || shutdown && g.engine.Load() != nil && g.engine.Load().IsLeader() {
-		result, err := g.engine.Load().Propose(ctx, raftengine.Proposal{Data: data})
+	if g.IsLeader() || access == shutdownRuntime && g.engine.Load() != nil && g.engine.Load().IsLeader() {
+		result, err := g.engine.Load().
+			Propose(ctx, raftengine.Proposal{Data: data})
 		if err != nil {
 			return metaengine.ApplyResult{}, err
 		}
 		encoded = result.Data
 	} else {
-		engine := g.engine.Load()
-		if engine == nil || engine.RaftStatus().Lead == 0 {
-			return metaengine.ApplyResult{}, fault.ErrUnavailable
-		}
-		address, err := g.resolveMember(ctx, engine.RaftStatus().Lead)
+		encoded, err = g.forwardProposal(ctx, data)
 		if err != nil {
 			return metaengine.ApplyResult{}, err
 		}
-		reply, err := g.transport.CallAddress(ctx, address, "ProposeMeta", data)
-		if err != nil {
-			return metaengine.ApplyResult{}, err
-		}
-		if err = metatransport.ReplyError(reply); err != nil {
-			return metaengine.ApplyResult{}, err
-		}
-		encoded = reply.Data
 	}
 	var result metaengine.ApplyResult
 	if err = json.Unmarshal(encoded, &result); err != nil {
@@ -315,8 +137,31 @@ func (g *Group) submitProposal(ctx context.Context, proposal any, shutdown bool)
 			code = fault.AuthorityFenced
 		case "authorization", "superseded":
 			code = fault.OperatorAuthorization
+		default: // Keep the default fault classification for other result codes.
+		}
+		if result.Placement != nil {
+			return result, &topology.PlacementError{Code: code, Report: result.Placement.Clone()}
 		}
 		return result, fault.New(code, result.Reason, nil)
 	}
 	return result, nil
+}
+
+func (g *Group) forwardProposal(ctx context.Context, data []byte) ([]byte, error) {
+	engine := g.engine.Load()
+	if engine == nil || engine.RaftStatus().Lead == 0 {
+		return nil, fault.ErrUnavailable
+	}
+	address, err := g.resolveMember(ctx, engine.RaftStatus().Lead)
+	if err != nil {
+		return nil, err
+	}
+	reply, err := g.transport.CallAddress(ctx, address, "ProposeMeta", data)
+	if err != nil {
+		return nil, err
+	}
+	if err = metatransport.ReplyError(reply); err != nil {
+		return nil, err
+	}
+	return reply.Data, nil
 }

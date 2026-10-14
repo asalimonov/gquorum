@@ -13,8 +13,9 @@ import (
 // VerifyPreparedMeta checks replay readiness and the durable acquired pin for
 // this exact engine. It does not wait for admission/cluster readiness, which
 // itself requires the prepare receipt before learner addition.
-func (g *Group) VerifyPreparedMeta(ctx context.Context, id topology.Identity) error {
-	ctx, done, err := g.beginEffect(ctx)
+func (g *Group) VerifyPreparedMeta(parent context.Context, id topology.Identity) error {
+	ctxHandle, err := g.acquireEffectContext(parent)
+	ctx, done := ctxHandle.Context, ctxHandle.Release
 	if err != nil {
 		return err
 	}
@@ -37,12 +38,14 @@ func (g *Group) VerifyPreparedMeta(ctx context.Context, id topology.Identity) er
 	if g.store == nil {
 		return fault.ErrReplicaNotReady
 	}
-	return g.store.VerifyIdentity(metastore.Identity{ClusterID: id.ClusterID, NodeName: id.NodeName, MemberID: id.MemberID})
+	return g.store.VerifyIdentity(metastore.Identity{ClusterID: id.ClusterID, NodeName: id.NodeName,
+		MemberID: id.MemberID})
 }
 
 // ConfirmHostRelease requires the exact metadata stop receipt and completion of
 // the approved topology and retained host obligations in one safe query.
-func (g *Group) ConfirmHostRelease(ctx context.Context, grant topology.AuthorityGrant, receipt topology.EffectReceipt) error {
+func (g *Group) ConfirmHostRelease(ctx context.Context, grant topology.AuthorityGrant,
+	receipt topology.EffectReceipt) error {
 	if receipt.Validate(grant) != nil {
 		return fault.ErrOperatorAuthorization
 	}

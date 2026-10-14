@@ -25,16 +25,19 @@ func TestRingBoundedOwnedCursorAndExpiry(t *testing.T) {
 		r.Roll(now.Add(time.Duration(i)*time.Second), v)
 		v[0] = -1
 	}
-	points, next, truncated := r.Snapshot(now.Add(5*time.Second), 0, 2)
+	batch := r.Snapshot(now.Add(5*time.Second), 0, 2)
+	points, next, truncated := batch.Points, batch.Next, batch.Truncated
 	if !reflect.DeepEqual(points, [][]int{{2}, {3}}) || next != 4 || !truncated {
 		t.Fatal(points, next, truncated)
 	}
 	points[0][0] = 99
-	points, next, truncated = r.Snapshot(now.Add(5*time.Second), next, 2)
+	batch = r.Snapshot(now.Add(5*time.Second), next, 2)
+	points, next, truncated = batch.Points, batch.Next, batch.Truncated
 	if !reflect.DeepEqual(points, [][]int{{4}}) || next != 5 || truncated {
 		t.Fatal(points, next, truncated)
 	}
-	points, next, truncated = r.Snapshot(now.Add(14*time.Second), 0, 3)
+	batch = r.Snapshot(now.Add(14*time.Second), 0, 3)
+	points, next, truncated = batch.Points, batch.Next, batch.Truncated
 	if len(points) != 0 || next != 5 || !truncated || r.size != 0 {
 		t.Fatal(points, next, truncated)
 	}
@@ -44,11 +47,13 @@ func TestRingBoundedOwnedCursorAndExpiry(t *testing.T) {
 		}
 	}
 	r.Roll(now.Add(15*time.Second), []int{5})
-	points, next, truncated = r.Snapshot(now.Add(15*time.Second), 5, 1)
+	batch = r.Snapshot(now.Add(15*time.Second), 5, 1)
+	points, next, truncated = batch.Points, batch.Next, batch.Truncated
 	if !reflect.DeepEqual(points, [][]int{{5}}) || next != 6 || truncated {
 		t.Fatal(points, next, truncated)
 	}
-	points, next, _ = r.Snapshot(now.Add(15*time.Second), 99, 1)
+	batch = r.Snapshot(now.Add(15*time.Second), 99, 1)
+	points, next = batch.Points, batch.Next
 	if len(points) != 0 || next != 99 {
 		t.Fatal("future cursor moved backwards")
 	}

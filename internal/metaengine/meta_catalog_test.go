@@ -37,8 +37,9 @@ func TestIntermediateMetaOwnerSurvivesSupersessionPruningAndRetiresExactly(t *te
 		{Seq: 1, GroupID: topology.MetaGroupID, NodeName: "n4", ReplicaID: 4, Kind: topology.StepPrepareReplica},
 		{Seq: 2, GroupID: topology.MetaGroupID, NodeName: "n4", ReplicaID: 4, Kind: topology.StepAddLearner},
 	}
-	op := command(BeginOperatorProposal{Version: joining.Version, Plan: topology.Plan{Version: joining.Version, Steps: steps}, At: at}).OperatorID
-	applyAdmissionTransition(t, m.topologySM, index, op, topology.Plan{Version: joining.Version, Steps: steps}, 1, topology.OperatorRunning, at)
+	plan := withTestVoterProof(original, joining, topology.Plan{Version: joining.Version, Steps: steps})
+	op := command(BeginOperatorProposal{Version: joining.Version, Plan: plan, At: at}).OperatorID
+	applyAdmissionTransition(t, m.topologySM, index, op, plan, 1, topology.OperatorRunning, at)
 	index++
 	index = consumeTestStep(t, m.topologySM, op, index)
 	// Model a durably prepared host that may have entered native membership
@@ -67,7 +68,7 @@ func TestIntermediateMetaOwnerSurvivesSupersessionPruningAndRetiresExactly(t *te
 	meta := statuses[topology.MetaGroupID]
 	meta.ConfState.Learners = []uint64{4}
 	statuses[topology.MetaGroupID] = meta
-	plan, err := topology.BuildPlan(base, desired, statuses, m.rules)
+	plan, err = topology.BuildPlan(base, desired, statuses, m.rules)
 	if err != nil || len(plan.Steps) != 2 || plan.Steps[0].Kind != topology.StepRemoveReplica || plan.Steps[1].Kind != topology.StepStopReplica || plan.Steps[0].NodeName != "n4" || plan.Steps[0].ReplicaID != 4 {
 		t.Fatal("cannot reconcile historical native metadata learner", plan, err)
 	}

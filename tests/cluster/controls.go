@@ -14,6 +14,7 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
+// ReadCounters reports exact fixture read, apply and Raft fault activity.
 type ReadCounters struct {
 	DropVoteRequestsFrom  []uint64 `json:"drop_vote_requests_from,omitempty"`
 	VoteRequestsDropped   uint64   `json:"vote_requests_dropped"`
@@ -37,6 +38,8 @@ type ReadCounters struct {
 	ReadResponsesDropped  uint64   `json:"read_responses_dropped"`
 	ReadResponseIndex     uint64   `json:"read_response_index"`
 }
+
+// ReadFaults targets read and Raft fault controls at an exact process incarnation.
 type ReadFaults struct {
 	Identity             topology.Identity `json:"identity"`
 	DropAppend           bool              `json:"drop_append"`
@@ -47,6 +50,7 @@ type ReadFaults struct {
 	HoldQuery            bool              `json:"hold_query"`
 }
 
+// SetReadFaults changes or reads authenticated fault controls for an exact replica.
 func (c *Cluster) SetReadFaults(ctx context.Context, node, group string, replica uint64, method string, faults ReadFaults) (ReadCounters, error) {
 	var result ReadCounters
 	response, err := c.Request(ctx, node, method, "/internal/test/reads/"+group+"/"+strconv.FormatUint(replica, 10), faults, 0)
@@ -56,6 +60,7 @@ func (c *Cluster) SetReadFaults(ctx context.Context, node, group string, replica
 	return result, response.Decode(&result)
 }
 
+// LocalObservation combines exact local process, replica, application and persistence observations.
 type LocalObservation struct {
 	Reads             ReadCounters         `json:"reads"`
 	ReadQueue         metrics.ReadQueue    `json:"read_queue"`
@@ -75,6 +80,7 @@ type LocalObservation struct {
 	ServeOverride     int                  `json:"serve_override"`
 }
 
+// ProjectionObservation reports external projection progress and its exact replica identity.
 type ProjectionObservation struct {
 	Node                               string `json:"node"`
 	Group                              string `json:"group"`
@@ -89,6 +95,7 @@ type ProjectionObservation struct {
 	} `json:"state"`
 }
 
+// Projection reads or stalls projection work and verifies the returned exact replica identity.
 func (c *Cluster) Projection(ctx context.Context, node, group string, replica uint64, method string, stall bool) (ProjectionObservation, error) {
 	var view ProjectionObservation
 	var body any
@@ -108,6 +115,7 @@ func (c *Cluster) Projection(ctx context.Context, node, group string, replica ui
 	return view, nil
 }
 
+// BarrierObservation records hits and refusals for a selected approved topology step.
 type BarrierObservation struct {
 	Group  string                  `json:"group"`
 	Kind   topology.StepKind       `json:"kind"`
@@ -115,11 +123,14 @@ type BarrierObservation struct {
 	Last   topology.AuthorizedStep `json:"last"`
 	Refuse bool                    `json:"refuse"`
 }
+
+// Controls contains fixture step barriers and acknowledged authorization tuples.
 type Controls struct {
 	Barriers []BarrierObservation      `json:"barriers"`
 	Receipts []topology.AuthorizedStep `json:"receipts"`
 }
 
+// Local reads fixture observations and validates the returned node and group identity.
 func (c *Cluster) Local(ctx context.Context, node, group string) (LocalObservation, error) {
 	var result LocalObservation
 	response, err := c.Request(ctx, node, "GET", "/internal/test/local/"+group, nil, 0)
@@ -134,6 +145,8 @@ func (c *Cluster) Local(ctx context.Context, node, group string) (LocalObservati
 	}
 	return result, nil
 }
+
+// Controls reads authenticated step barriers and acknowledged actions from a process.
 func (c *Cluster) Controls(ctx context.Context, node string) (Controls, error) {
 	var result Controls
 	response, err := c.Request(ctx, node, "GET", "/internal/test/controls", nil, 0)
@@ -142,6 +155,8 @@ func (c *Cluster) Controls(ctx context.Context, node string) (Controls, error) {
 	}
 	return result, response.Decode(&result)
 }
+
+// SetBarrier enables or clears refusal of a selected group's topology step.
 func (c *Cluster) SetBarrier(ctx context.Context, node, group string, kind topology.StepKind, enabled bool) error {
 	method := "DELETE"
 	if enabled {
@@ -150,11 +165,14 @@ func (c *Cluster) SetBarrier(ctx context.Context, node, group string, kind topol
 	response, err := c.Request(ctx, node, method, "/internal/test/barriers/"+group+"/"+string(kind), nil, 0)
 	return requireStatus(response, err, 200)
 }
+
+// Snapshot requests a local fixture replica snapshot through the authenticated control endpoint.
 func (c *Cluster) Snapshot(ctx context.Context, node, group string) error {
 	response, err := c.Request(ctx, node, "POST", "/internal/test/local/"+group+"/snapshot", nil, 0)
 	return requireStatus(response, err, 200)
 }
 
+// WALCounters reports persistence attempts, blocked writes and injected failures.
 type WALCounters struct {
 	Attempts          uint64 `json:"attempts"`
 	EntryAttempts     uint64 `json:"entry_attempts"`
@@ -166,6 +184,7 @@ type WALCounters struct {
 	RemainingFailures uint64 `json:"remaining_failures"`
 }
 
+// WALFault configures or releases write stalls and failures for an exact replica.
 func (c *Cluster) WALFault(ctx context.Context, node, group string, replica uint64, stall bool, failNext uint64, release bool) error {
 	method := "PUT"
 	if release {
@@ -175,6 +194,7 @@ func (c *Cluster) WALFault(ctx context.Context, node, group string, replica uint
 	return requireStatus(response, err, 200)
 }
 
+// FenceFault selects an exact process, replica and authority revision for a fence barrier.
 type FenceFault struct {
 	Identity    topology.Identity         `json:"identity"`
 	ReplicaID   uint64                    `json:"replica_id,omitempty"`
@@ -183,12 +203,14 @@ type FenceFault struct {
 	After       bool                      `json:"after"`
 }
 
+// MetaFaultObservation reports meta Raft frame drops for an exact process incarnation.
 type MetaFaultObservation struct {
 	Identity      topology.Identity `json:"identity"`
 	DropRaft      bool              `json:"drop_raft"`
 	FramesDropped uint64            `json:"frames_dropped"`
 }
 
+// MetaFault changes or reads authenticated meta Raft drop controls.
 func (c *Cluster) MetaFault(ctx context.Context, node, method string, identity topology.Identity, drop bool) (MetaFaultObservation, error) {
 	var view MetaFaultObservation
 	response, err := c.Request(ctx, node, method, "/internal/test/meta", map[string]any{"identity": identity, "drop_raft": drop}, 0)
@@ -198,6 +220,7 @@ func (c *Cluster) MetaFault(ctx context.Context, node, method string, identity t
 	return view, response.Decode(&view)
 }
 
+// FenceFaultObservation reports barrier hits and the exact last fence request.
 type FenceFaultObservation struct {
 	FenceFault
 	Group string                         `json:"group"`
@@ -205,6 +228,8 @@ type FenceFaultObservation struct {
 	Hits  uint64                         `json:"hits"`
 	Last  load.FenceRequest              `json:"last"`
 }
+
+// AuthorityObservation records granted actions, durable receipts, fences and barrier observations.
 type AuthorityObservation struct {
 	Actions  []load.ActionRequest    `json:"actions"`
 	Receipts []load.ActionResult     `json:"receipts"`
@@ -212,10 +237,13 @@ type AuthorityObservation struct {
 	Barriers []FenceFaultObservation `json:"barriers"`
 }
 
+// SetFenceFault changes authenticated fence barriers for a selected resource.
 func (c *Cluster) SetFenceFault(ctx context.Context, node, group string, kind topology.AuthorityResourceKind, method string, fault FenceFault) error {
 	response, err := c.Request(ctx, node, method, "/internal/test/fences/"+group+"/"+string(kind), fault, 0)
 	return requireStatus(response, err, 200)
 }
+
+// Authority reads recorded fixture authority effects and fences for a group.
 func (c *Cluster) Authority(ctx context.Context, node, group string) (AuthorityObservation, error) {
 	var view AuthorityObservation
 	response, err := c.Request(ctx, node, "GET", "/internal/test/authority/"+group, nil, 0)
@@ -224,6 +252,8 @@ func (c *Cluster) Authority(ctx context.Context, node, group string) (AuthorityO
 	}
 	return view, response.Decode(&view)
 }
+
+// Revocation reads retained operator fence obligations through the fixture endpoint.
 func (c *Cluster) Revocation(ctx context.Context, node string, operator topology.OperatorID) (topology.AuthorityStatus, error) {
 	var status topology.AuthorityStatus
 	response, err := c.Request(ctx, node, "GET", "/internal/test/revocation/"+string(operator), nil, 0)
@@ -232,6 +262,8 @@ func (c *Cluster) Revocation(ctx context.Context, node string, operator topology
 	}
 	return status, response.Decode(&status)
 }
+
+// ReplayAction submits an exact prior grant and action through the authenticated replay control.
 func (c *Cluster) ReplayAction(ctx context.Context, node string, identity topology.Identity, action load.ActionRequest) (Response, error) {
 	return c.Request(ctx, node, "POST", "/internal/test/authority/"+action.Grant.Key.GroupID+"/action", map[string]any{"identity": identity, "action": action}, 0)
 }

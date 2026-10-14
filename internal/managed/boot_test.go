@@ -43,7 +43,9 @@ func TestLoadBootCurrentFormatMatrix(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, reason := decideLoadBoot(id, metastore.ReplicaRecord{ReplicaID: tc.record}, tc.record != 0, tc.probe, tc.scope)
+			evidence := bootEvidence{record: metastore.ReplicaRecord{ReplicaID: tc.record}, recorded: tc.record != 0,
+				probe: tc.probe, scope: tc.scope}
+			got, reason := decideLoadBoot(id, evidence)
 			if reason != tc.reason || reason == "" && (got.origin != tc.origin || got.previous != tc.previous) {
 				t.Fatal(got, reason)
 			}

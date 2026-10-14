@@ -60,6 +60,7 @@ func encodeEvent(e Event) ([]byte, error) {
 		d.Type = "execution_changed"
 	case SchedulingChanged:
 		d.Type = "reconciliation_changed"
+	default: // Retain the event type when no legacy encoding applies.
 	}
 	return json.Marshal(d)
 }
@@ -97,6 +98,7 @@ func decodeEvent(data []byte) (Event, error) {
 		e.Type = OperatorChanged
 	case "reconciliation_changed":
 		e.Type = SchedulingChanged
+	default: // Retain event types without a legacy alias.
 	}
 	return e, nil
 }

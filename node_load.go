@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/authoritystore"
 	"github.com/asalimonov/gquorum/internal/managed"
 	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/internal/metastore"
@@ -16,9 +17,10 @@ import (
 
 func (n *node) newHost(m *metaservice.Group) (*managed.Host, error) {
 	n.mu.RLock()
-	store, retirement, runner := n.store, n.retirement, n.policies
+	store, retirement, memory, runner := n.store, n.retirement, n.ownedMemory, n.lifecycle
 	n.mu.RUnlock()
-	return managed.New(managed.Config{
+	cfg := managed.Config{
+		OnChange:  n.wakeObservation,
 		Authority: n.localAuthority, ValidateGrant: m.ValidateGrant, ValidateCourier: m.ValidateAuthorityCourier,
 		ResolveAuthorityPeer: m.ResolveAuthorityPeer, RecordFence: m.RecordFence,
 		ForgetGrantedReplica: m.ForgetGrantedLoadReplica,
@@ -35,10 +37,25 @@ func (n *node) newHost(m *metaservice.Group) (*managed.Host, error) {
 		Retirement:        retirement, Retention: runner.Retention, RetirementInterval: n.opts.Loads.RetirementInterval,
 		Assignments: m.LoadAssignments, Factory: n.opts.Loads.Factory, Store: store, Transport: n.opts.Loads.Transport,
 		ResolvePeer: m.ResolveLoadPeer, ValidatePeer: m.ValidateLoadPeer, ValidateNode: m.ValidateLoadNode,
-		Engine: n.opts.Loads.Engine, EffectTimeout: n.opts.Loads.EffectTimeout, CallbackTimeout: n.opts.Policies.CallbackTimeout,
+		Engine: n.opts.Loads.Engine, EffectTimeout: n.opts.Loads.EffectTimeout, CallbackTimeout: n.opts.CallbackTimeout,
 		Metrics:          internalmetrics.Settings(n.opts.Metrics),
 		RecoveryInterval: n.opts.Loads.RecoveryInterval, Events: n.opts.Events, Logger: n.opts.Logger,
-	})
+		// A memory replica restarted without its state replaces itself through
+		// the ordinary reseat, pinned to the Active version the host observed.
+		ReseatOwn: func(ctx context.Context, group string, version uint64) error {
+			own := m.Identity().NodeName
+			_, err := m.ReseatReplica(ctx, group, own, metaservice.MutationOptions{
+				ExpectedVersion: version,
+				Actor:           own,
+				Comment:         "reseat in-memory replica after restart",
+			})
+			return err
+		},
+	}
+	if memory != nil {
+		cfg.MemoryStore, cfg.MemoryRetirement = memory, memory
+	}
+	return managed.New(cfg)
 }
 
 func (n *node) heldLoads() []storage.Identity {
@@ -59,7 +76,10 @@ func (n *node) StartLoadGroup(ctx context.Context, ref load.ReplicaRef) (*load.G
 	handle, err := h.StartReplica(ctx, ref, managed.StartExplicit)
 	var parked *managed.ParkedError
 	if errors.As(err, &parked) {
-		err = &LoadParkedError{ParkedLoad: ParkedLoad{Identity: parked.Identity, Reason: ParkReason(parked.Reason), Since: parked.Since}, Cause: parked.Cause}
+		err = &LoadParkedError{
+			ParkedLoad: ParkedLoad{Identity: parked.Identity, Reason: ParkReason(parked.Reason), Since: parked.Since},
+			Cause:      parked.Cause,
+		}
 	}
 	return (*load.Group)(handle), err
 }
@@ -102,7 +122,7 @@ func (n *node) ParkedLoads() map[string]ParkedLoad {
 	return result
 }
 
-func (n *node) readmit(ctx context.Context, grant metaservice.Readmission) error {
+func (n *node) readmit(parent context.Context, grant metaservice.Readmission) error {
 	n.mu.RLock()
 	m := n.meta
 	stopped := n.stopping
@@ -110,46 +130,33 @@ func (n *node) readmit(ctx context.Context, grant metaservice.Readmission) error
 	if stopped {
 		return fault.ErrStopped
 	}
-	if err := m.AuthorizeReadmission(ctx, grant); err != nil {
+	if err := m.AuthorizeReadmission(parent, grant); err != nil {
 		return err
 	}
-	n.mu.Lock()
-	if n.stopping || n.meta != m {
-		n.mu.Unlock()
-		return fault.ErrStopped
+	owner, err := n.reserveReadmission(parent, m, grant)
+	if err != nil {
+		return err
 	}
-	if n.readmissionWork != nil && workPending(n.readmissionWork.done) || n.readmissionFenceWork != nil && workPending(n.readmissionFenceWork.done) || n.metaAuthorityWork != nil && workPending(n.metaAuthorityWork.done) {
-		n.mu.Unlock()
-		return fault.ErrAuthorityPending
-	}
-	if n.authority == nil || len(grant.Grants) == 0 {
-		n.mu.Unlock()
-		return fault.ErrOperatorAuthorization
-	}
-	ctx, cancel := context.WithCancel(ctx)
-	retirement := &readmissionWork{cancel: cancel, done: make(chan struct{}), revision: grant.Grants[0].Key.Revision}
-	n.readmissionWork = retirement
-	defer func() { cancel(); close(retirement.done) }()
-	granted := grant.Granted
-	n.pending = &granted
-	n.ready = false
-	authority, h := n.authority, n.host
-	n.mu.Unlock()
+	ctx, retirement := owner.ctx, owner.retirement
+	defer func() { retirement.cancel(); close(retirement.done) }()
+	authority, h := owner.authority, owner.host
 	// A successful retirement/rebind can precede a failed metadata acquisition.
-	// Resume only that exact durable proof; never retire the successor on retry.
+	// Resume only that exact durable proof; never retire the successor on
+	// retry.
 	if authority.Identity() == grant.Granted {
 		if err := n.readmissionReceipts(ctx, grant); err != nil {
 			return err
 		}
 		return authority.Rebind(ctx, grant.Previous, grant.Granted, grant.AdmissionID)
 	}
-	var err error
 	if h != nil {
 		err = h.Readmit(ctx, managed.Readmission(grant))
 	} else {
-		err = managed.ReadmitMeta(ctx, m.Identity(), n.opts.metaDBPath(), managed.Readmission(grant), authority, func(ctx context.Context, g managed.Readmission) error {
-			return m.AuthorizeReadmission(ctx, metaservice.Readmission(g))
-		})
+		err = managed.ReadmitMeta(ctx, managed.Readmission(grant), managed.MetaReadmissionOptions{
+			Identity: m.Identity(), Path: n.opts.metaDBPath(),
+			Authority: authority, Authorize: func(ctx context.Context, g managed.Readmission) error {
+				return m.AuthorizeReadmission(ctx, metaservice.Readmission(g))
+			}})
 	}
 	if err == nil {
 		err = n.readmissionReceipts(ctx, grant)
@@ -164,6 +171,38 @@ func (n *node) readmit(ctx context.Context, grant metaservice.Readmission) error
 	return err
 }
 
+type readmissionOwner struct {
+	ctx        context.Context
+	retirement *readmissionWork
+	authority  *authoritystore.Store
+	host       *managed.Host
+}
+
+func (n *node) reserveReadmission(parent context.Context, m *metaservice.Group,
+	grant metaservice.Readmission) (readmissionOwner, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.stopping || n.meta != m {
+		return readmissionOwner{}, fault.ErrStopped
+	}
+	if n.readmissionWork != nil && workPending(n.readmissionWork.done) || n.readmissionFenceWork != nil &&
+		workPending(n.readmissionFenceWork.done) || n.metaAuthorityWork != nil &&
+		workPending(n.metaAuthorityWork.done) {
+		return readmissionOwner{}, fault.ErrAuthorityPending
+	}
+	if n.authority == nil || len(grant.Grants) == 0 {
+		return readmissionOwner{}, fault.ErrOperatorAuthorization
+	}
+	ctx, cancel := context.WithCancel(parent)
+	retirement := &readmissionWork{cancel: cancel, done: make(chan struct{}), revision: grant.Grants[0].Key.Revision}
+	n.readmissionWork = retirement
+	granted := grant.Granted
+	n.pending = &granted
+	n.ready = false
+	authority, h := n.authority, n.host
+	return readmissionOwner{ctx: ctx, retirement: retirement, authority: authority, host: h}, nil
+}
+
 func (n *node) readmissionReceipts(ctx context.Context, grant metaservice.Readmission) error {
 	if fresh, err := metastore.StoreIsFresh(grant.MetaDBPath); err != nil {
 		return err
@@ -176,9 +215,9 @@ func (n *node) readmissionReceipts(ctx context.Context, grant metaservice.Readmi
 	}
 	for _, g := range grant.Grants {
 		for _, target := range g.Targets {
-			if _, found, err := s.Receipt(ctx, g, target); err != nil {
+			if found, err := s.Receipt(ctx, g, target); err != nil {
 				return err
-			} else if !found {
+			} else if !found.Found {
 				return fault.ErrAuthorityPending
 			}
 		}
@@ -194,8 +233,9 @@ func (n *node) replaceReadmittedHost(m *metaservice.Group) error {
 	if pending == nil || stopped || m.Identity() != *pending {
 		return nil
 	}
-	// The service installed the exact granted pin only after successful Readmit.
-	// The previous host is permanently stopped; its lifetime cannot be restarted.
+	// The service installed the exact granted pin only after successful
+	// Readmit. The previous host is permanently stopped; its lifetime cannot be
+	// restarted.
 	var h *managed.Host
 	if n.opts.Loads.Factory != nil {
 		var err error
@@ -217,7 +257,8 @@ func (n *node) replaceReadmittedHost(m *metaservice.Group) error {
 // service never keeps an adapter bound to a retired host.
 type nodeEffects struct{ node *node }
 
-func (e nodeEffects) ReadNative(ctx context.Context, id string, candidates ...storage.Identity) (topology.NativeState, error) {
+func (e nodeEffects) ReadNative(ctx context.Context, id string,
+	candidates ...storage.Identity) (topology.NativeState, error) {
 	h, err := e.node.loadHost(ctx)
 	if err != nil {
 		return topology.NativeState{}, err
@@ -232,6 +273,7 @@ func (e nodeEffects) Status(ctx context.Context, id string) (topology.GroupStatu
 	}
 	return h.ObserveGroup(ctx, id)
 }
+
 func (e nodeEffects) dispatch(ctx context.Context, a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
 	h, err := e.node.loadHost(ctx)
 	if err != nil {
@@ -239,25 +281,34 @@ func (e nodeEffects) dispatch(ctx context.Context, a topology.AuthorityGrant) ([
 	}
 	return h.DispatchGrant(ctx, a)
 }
+
 func (e nodeEffects) CreateGroup(ctx context.Context, a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
 	return e.dispatch(ctx, a)
 }
+
 func (e nodeEffects) PrepareReplica(ctx context.Context, a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
 	return e.dispatch(ctx, a)
 }
+
 func (e nodeEffects) ApplyMembership(ctx context.Context, a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
 	return e.dispatch(ctx, a)
 }
+
 func (e nodeEffects) TransferLeader(ctx context.Context, a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
 	return e.dispatch(ctx, a)
 }
+
 func (e nodeEffects) StopReplica(ctx context.Context, a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
 	return e.dispatch(ctx, a)
 }
-func (e nodeEffects) CleanupReplicaState(ctx context.Context, a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+
+func (e nodeEffects) CleanupReplicaState(ctx context.Context,
+	a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
 	return e.dispatch(ctx, a)
 }
-func (e nodeEffects) DeleteGroupState(ctx context.Context, a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+
+func (e nodeEffects) DeleteGroupState(ctx context.Context,
+	a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
 	return e.dispatch(ctx, a)
 }
 
@@ -270,7 +321,8 @@ func (n *node) readmissionIdentity() topology.Identity {
 	return id
 }
 
-func (n *node) collectReadmissionReceipts(ctx context.Context, grant metaservice.Readmission) ([]topology.EffectReceipt, error) {
+func (n *node) collectReadmissionReceipts(ctx context.Context,
+	grant metaservice.Readmission) ([]topology.EffectReceipt, error) {
 	s := n.localAuthority()
 	if s == nil || s.Identity() != grant.Granted {
 		return nil, fault.ErrIdentityMismatch
@@ -281,14 +333,14 @@ func (n *node) collectReadmissionReceipts(ctx context.Context, grant metaservice
 	var receipts []topology.EffectReceipt
 	for _, g := range grant.Grants {
 		for _, target := range g.Targets {
-			receipt, found, err := s.Receipt(ctx, g, target)
+			receipt, err := s.Receipt(ctx, g, target)
 			if err != nil {
 				return nil, err
 			}
-			if !found {
+			if !receipt.Found {
 				return nil, fault.ErrAuthorityPending
 			}
-			receipts = append(receipts, receipt)
+			receipts = append(receipts, receipt.Receipt)
 		}
 	}
 	return receipts, nil

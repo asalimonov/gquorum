@@ -39,10 +39,10 @@ func TestLifecycleCallGatesRefuseQuiescentBeforeWait(t *testing.T) {
 	parent, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	g := &Group{started: true, ctx: parent, workCtx: parent, quiescing: true, rpcClosed: true}
-	if _, _, err := g.beginEffect(parent); !errors.Is(err, fault.ErrStopped) {
+	if _, err := g.acquireEffectContext(parent); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal(err)
 	}
-	if _, _, err := g.beginRPC(parent); !errors.Is(err, fault.ErrStopped) {
+	if _, err := g.beginRPC(parent); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal(err)
 	}
 	if err := g.Authorize(parent, topology.AuthorizedStep{}); !errors.Is(err, fault.ErrStopped) {

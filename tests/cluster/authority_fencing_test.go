@@ -47,9 +47,9 @@ func TestAuthorityRevocationBoundaryAndLostFenceReplyThreeNodes(t *testing.T) {
 				}
 			})
 			demoted := original.Clone()
-			policy := topology.DefaultVoterPolicy()
-			policy.TargetVoters = 2
-			demoted.Group("work").VoterPolicy = &policy
+			voterConfig := topology.DefaultVoterConfig()
+			voterConfig.TargetVoters = 2
+			demoted.Group("work").VoterConfig = &voterConfig
 			demoted.Group("work").Placement.MinReplicas = 2
 			for i := range demoted.Group("work").Replicas {
 				r := &demoted.Group("work").Replicas[i]
@@ -61,7 +61,7 @@ func TestAuthorityRevocationBoundaryAndLostFenceReplyThreeNodes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			old := startApply(t, ctx, c, "node2", staged.Document.Version)
+			old := startApply(ctx, t, c, "node2", staged.Document.Version)
 			var delayed load.ActionRequest
 			if err := Poll(ctx, func() (bool, error) {
 				view, err := c.Authority(ctx, "node1", "work")
@@ -86,7 +86,7 @@ func TestAuthorityRevocationBoundaryAndLostFenceReplyThreeNodes(t *testing.T) {
 			}
 			// Keep application Raft and proof/control RPCs live while withholding
 			// this receiver's metadata replication, including snapshot catch-up.
-			healReceiver := holdMetaRaft(t, ctx, c, "node1", owner.Identity)
+			healReceiver := holdMetaRaft(ctx, t, c, "node1", owner.Identity)
 			boundary := FenceFault{Identity: owner.Identity, ReplicaID: owner.ReplicaID, Purpose: topology.AuthorityFence, MinRevision: delayed.Grant.Key.Revision + 1, After: after}
 			if err := c.SetFenceFault(ctx, "node1", "work", topology.AuthorityGroup, "PUT", boundary); err != nil {
 				t.Fatal(err)
@@ -121,7 +121,7 @@ func TestAuthorityRevocationBoundaryAndLostFenceReplyThreeNodes(t *testing.T) {
 			if !plan.IsEmpty() {
 				t.Fatal("successor setup must capture the pre-delivery native state", plan)
 			}
-			newOp := startApply(t, ctx, c, "node2", newStage.Document.Version)
+			newOp := startApply(ctx, t, c, "node2", newStage.Document.Version)
 			var fence load.FenceRequest
 			if err := Poll(ctx, func() (bool, error) {
 				view, err := c.Authority(ctx, "node1", "work")
@@ -157,7 +157,7 @@ func TestAuthorityRevocationBoundaryAndLostFenceReplyThreeNodes(t *testing.T) {
 				}) {
 					t.Fatal("reply fault preceded durable resource fencing", view, err)
 				}
-				requireFencedReplay(t, ctx, c, owner, delayed)
+				requireFencedReplay(ctx, t, c, owner, delayed)
 				// Preserve the former controller process/courier identity while
 				// forcing ordinary Raft election. Direct transfer is deliberately
 				// inadmissible while the topology revocation is pending.
@@ -166,7 +166,7 @@ func TestAuthorityRevocationBoundaryAndLostFenceReplyThreeNodes(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				healController = holdMetaRaft(t, ctx, c, "node2", controller.Identity)
+				healController = holdMetaRaft(ctx, t, c, "node2", controller.Identity)
 				if err := Poll(ctx, func() (bool, error) {
 					one, err := c.Status(ctx, "node1")
 					if err != nil {
@@ -190,7 +190,7 @@ func TestAuthorityRevocationBoundaryAndLostFenceReplyThreeNodes(t *testing.T) {
 				if err := response.Decode(&result); err != nil || len(result.Receipts) != 1 || result.Receipts[0].Validate(delayed.Grant) != nil {
 					t.Fatal("permitted old action returned no exact receipt", result, err)
 				}
-				waitAuthorityMembership(t, ctx, c, original, true)
+				waitAuthorityMembership(ctx, t, c, original, true)
 			}
 			if err := c.SetFenceFault(ctx, "node1", "work", topology.AuthorityGroup, "DELETE", boundary); err != nil {
 				t.Fatal(err)
@@ -206,7 +206,7 @@ func TestAuthorityRevocationBoundaryAndLostFenceReplyThreeNodes(t *testing.T) {
 			if healController != nil {
 				healController()
 			}
-			requireFencedReplay(t, ctx, c, owner, delayed)
+			requireFencedReplay(ctx, t, c, owner, delayed)
 			if after {
 				if err := c.WaitOperator(ctx, "node2", newOp); err != nil {
 					t.Fatal("lost acknowledgement could not resume the same empty plan", err)
@@ -242,23 +242,23 @@ func TestAuthorityRevocationBoundaryAndLostFenceReplyThreeNodes(t *testing.T) {
 				if _, err := c.Approve(ctx, "node2", replanned.Document.Version); err != nil {
 					t.Fatal("fresh approved plan could not reconcile the permitted old effect", err)
 				}
-				requireFencedReplay(t, ctx, c, owner, delayed)
+				requireFencedReplay(ctx, t, c, owner, delayed)
 			}
-			waitAuthorityMembership(t, ctx, c, original, false)
+			waitAuthorityMembership(ctx, t, c, original, false)
 			// The replicated resource floor must outlive both leadership changes.
-			forceReadLeader(t, ctx, c, original, "node3")
+			forceReadLeader(ctx, t, c, original, "node3")
 			newOwner, err := c.Local(ctx, "node3", "work")
 			if err != nil {
 				t.Fatal(err)
 			}
 			delayed.To = load.Peer{Node: newOwner.Identity, Replica: load.ReplicaRef{GroupID: "work", ReplicaID: newOwner.ReplicaID}}
-			requireFencedReplay(t, ctx, c, newOwner, delayed)
-			waitAuthorityMembership(t, ctx, c, original, false)
+			requireFencedReplay(ctx, t, c, newOwner, delayed)
+			waitAuthorityMembership(ctx, t, c, original, false)
 		})
 	}
 }
 
-func requireFencedReplay(t *testing.T, ctx context.Context, c *Cluster, owner LocalObservation, request load.ActionRequest) {
+func requireFencedReplay(ctx context.Context, t *testing.T, c *Cluster, owner LocalObservation, request load.ActionRequest) {
 	t.Helper()
 	node := owner.Identity.NodeName
 	before, err := c.Local(ctx, node, "work")
@@ -281,7 +281,7 @@ func requireFencedReplay(t *testing.T, ctx context.Context, c *Cluster, owner Lo
 	}
 }
 
-func holdMetaRaft(t *testing.T, ctx context.Context, c *Cluster, node string, identity topology.Identity) func() {
+func holdMetaRaft(ctx context.Context, t *testing.T, c *Cluster, node string, identity topology.Identity) func() {
 	t.Helper()
 	if _, err := c.MetaFault(ctx, node, "PUT", identity, true); err != nil {
 		t.Fatal(err)
@@ -303,7 +303,7 @@ func holdMetaRaft(t *testing.T, ctx context.Context, c *Cluster, node string, id
 	return heal
 }
 
-func waitAuthorityMembership(t *testing.T, ctx context.Context, c *Cluster, doc topology.Document, learner bool) {
+func waitAuthorityMembership(ctx context.Context, t *testing.T, c *Cluster, doc topology.Document, learner bool) {
 	t.Helper()
 	if err := Poll(ctx, func() (bool, error) {
 		for _, node := range c.Nodes() {

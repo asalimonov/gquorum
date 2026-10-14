@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/asalimonov/gquorum"
 	"maps"
 	"net"
 	"slices"
@@ -14,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/topology"
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
@@ -68,7 +68,7 @@ func TestStagedTopologyDoesNotChangeApprovedMembershipOrStartGroups(t *testing.T
 	}
 	role := base.Clone()
 	role.Group("work").Replicas[2].Role = topology.ReplicaLearner
-	role.Group("work").VoterPolicy.TargetVoters = 2
+	role.Group("work").VoterConfig.TargetVoters = 2
 	staged, err := c.Stage(ctx, "node2", role)
 	if err != nil {
 		t.Fatal(err)

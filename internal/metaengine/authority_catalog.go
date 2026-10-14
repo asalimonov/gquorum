@@ -6,8 +6,12 @@ import (
 	"slices"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/collection"
 	"github.com/asalimonov/gquorum/topology"
 )
+
+// newAuthorityGrantCost matches the open, non-fence record cost in pendingCost.
+const newAuthorityGrantCost = 3
 
 type authorityRecord struct {
 	Grant   topology.AuthorityGrant  `json:"grant"`
@@ -32,38 +36,69 @@ type authorityCatalog struct {
 }
 
 func newAuthorityCatalog() authorityCatalog {
-	return authorityCatalog{records: make(map[topology.AuthorityKey]*authorityRecord), floors: make(map[topology.AuthorityResource]topology.AuthorityKey), actions: make(map[topology.AuthorizedStep]topology.AuthorityKey), revocations: make(map[topology.OperatorID]*revocationRecord)}
+	return authorityCatalog{
+		records:     make(map[topology.AuthorityKey]*authorityRecord),
+		floors:      make(map[topology.AuthorityResource]topology.AuthorityKey),
+		actions:     make(map[topology.AuthorizedStep]topology.AuthorityKey),
+		revocations: make(map[topology.OperatorID]*revocationRecord),
+	}
 }
 func compareAuthorityKey(a, b topology.AuthorityKey) int {
-	return cmp.Or(cmp.Compare(a.ClusterID, b.ClusterID), cmp.Compare(a.GroupID, b.GroupID), cmp.Compare(a.Revision, b.Revision))
+	return cmp.Or(cmp.Compare(a.ClusterID, b.ClusterID), cmp.Compare(a.GroupID, b.GroupID),
+		cmp.Compare(a.Revision, b.Revision))
 }
-func (a authorityCatalog) snapshot() ([]authorityRecord, []resourceFloor, []revocationRecord) {
-	var records []authorityRecord
+
+type authoritySnapshot struct {
+	records     []authorityRecord
+	floors      []resourceFloor
+	revocations []revocationRecord
+}
+
+func (a authorityCatalog) snapshot() authoritySnapshot {
+	return authoritySnapshot{records: a.snapshotRecords(), floors: a.snapshotFloors(),
+		revocations: a.snapshotRevocations()}
+}
+
+func (a authorityCatalog) snapshotRecords() []authorityRecord {
+	records := collection.Slice[authorityRecord](len(a.records))
 	for _, record := range a.records {
 		records = append(records, *record)
 	}
 	slices.SortFunc(records, func(a, b authorityRecord) int { return compareAuthorityKey(a.Grant.Key, b.Grant.Key) })
-	var floors []resourceFloor
+	return records
+}
+
+func (a authorityCatalog) snapshotFloors() []resourceFloor {
+	floors := collection.Slice[resourceFloor](len(a.floors))
 	for resource, key := range a.floors {
 		floors = append(floors, resourceFloor{resource, key})
 	}
 	slices.SortFunc(floors, func(a, b resourceFloor) int { return a.Resource.Compare(b.Resource) })
-	var revoked []revocationRecord
+	return floors
+}
+
+func (a authorityCatalog) snapshotRevocations() []revocationRecord {
+	revoked := collection.Slice[revocationRecord](len(a.revocations))
 	for _, r := range a.revocations {
 		revoked = append(revoked, *r)
 	}
 	slices.SortFunc(revoked, func(a, b revocationRecord) int { return cmp.Compare(a.OperatorID, b.OperatorID) })
-	return records, floors, revoked
+	return revoked
 }
+
 func resourceConsumed(record *authorityRecord, resource topology.AuthorityResource) bool {
 	if record.Grant.Purpose == topology.AuthorityFence {
 		return slices.ContainsFunc(record.Fences, func(e topology.FenceEvidence) bool { return e.Resource == resource })
 	}
 	if resource.Kind == topology.AuthorityGroup {
-		return slices.ContainsFunc(record.Effects, func(e topology.EffectReceipt) bool { return e.Resource == resource })
+		return slices.ContainsFunc(record.Effects, func(e topology.EffectReceipt) bool {
+			return e.Resource == resource
+		})
 	}
 	for _, target := range record.Grant.Targets {
-		if target.NodeName == resource.NodeName && !slices.ContainsFunc(record.Effects, func(e topology.EffectReceipt) bool { return e.Resource == resource && e.Target == target }) {
+		if target.NodeName == resource.NodeName &&
+			!slices.ContainsFunc(record.Effects,
+				func(e topology.EffectReceipt) bool { return e.Resource == resource && e.Target == target }) {
 			return false
 		}
 	}
@@ -98,6 +133,8 @@ func (a authorityCatalog) pendingCost() int {
 	}
 	return cost
 }
+
+// AuthorityGrant returns an owned retained grant for an exact authority key.
 func (m *Machine) AuthorityGrant(key topology.AuthorityKey) (topology.AuthorityGrant, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -109,7 +146,8 @@ func (m *Machine) AuthorityGrant(key topology.AuthorityKey) (topology.AuthorityG
 }
 
 // ValidateGrant checks committed immutable identity, not current approval. A
-// closed grant remains verifiable: resource fencing decides its execution limit.
+// closed grant remains verifiable: resource fencing decides its execution
+// limit.
 func (m *Machine) ValidateGrant(ctx context.Context, grant topology.AuthorityGrant) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -126,125 +164,212 @@ func (m *Machine) ValidateGrant(ctx context.Context, grant topology.AuthorityGra
 	return nil
 }
 func restoreAuthority(st smState) (authorityCatalog, error) {
-	a := newAuthorityCatalog()
-	invalid := func() (authorityCatalog, error) {
-		return authorityCatalog{}, fault.New(fault.Unreadable, "invalid authority catalog", nil)
-	}
-	operators := make(map[topology.OperatorID]topology.Operator, len(st.Operators))
+	restore := authorityRestore{state: st, catalog: newAuthorityCatalog(),
+		operators: make(map[topology.OperatorID]topology.Operator, len(st.Operators)),
+		requests:  map[string]bool{}, readmissionRevisions: map[string]uint64{},
+		readmissionMembers: map[string]uint64{}, readmissionMeta: map[string]bool{}}
 	for _, op := range st.Operators {
-		operators[op.Status.ID] = op
+		restore.operators[op.Status.ID] = op
 	}
-	requests := map[string]bool{}
-	readmissionRevisions := map[string]uint64{}
-	readmissionMembers := map[string]uint64{}
-	readmissionMeta := map[string]bool{}
-	for _, r := range st.AuthorityRecords {
-		if r.Grant.Validate() != nil || r.Grant.Key.ClusterID != st.Latest.ClusterID || r.Grant.Key.Revision > st.AppliedIndex || a.records[r.Grant.Key] != nil {
-			return invalid()
+	for _, record := range st.AuthorityRecords {
+		if err := restore.restoreRecord(record); err != nil {
+			return authorityCatalog{}, err
 		}
-		if r.Grant.Purpose == topology.AuthorityReadmit {
-			var admission *AdmissionRecord
-			for _, candidate := range st.Admissions {
-				if candidate.ReadmissionInstanceID == "" && ReadmissionID(candidate) == r.Grant.AdmissionID {
-					if admission != nil {
-						return invalid()
-					}
-					copy := candidate
-					admission = &copy
-				}
-			}
-			if admission == nil || len(r.Grant.Resources) != 1 || r.Grant.Resources[0].NodeName != admission.NodeName {
-				return invalid()
-			}
-			for _, target := range r.Grant.Targets {
-				if target.NodeName != admission.NodeName || target.MemberID >= admission.MemberID {
-					return invalid()
-				}
-				if previous, ok := readmissionMembers[r.Grant.AdmissionID]; ok && previous != target.MemberID {
-					return invalid()
-				}
-				readmissionMembers[r.Grant.AdmissionID] = target.MemberID
-			}
-			if r.Grant.Key.GroupID == topology.MetaGroupID {
-				if len(r.Grant.Targets) != 1 || r.Grant.Targets[0].ReplicaID != r.Grant.Targets[0].MemberID {
-					return invalid()
-				}
-				readmissionMeta[r.Grant.AdmissionID] = true
-			}
-			if revision, ok := readmissionRevisions[r.Grant.AdmissionID]; ok && revision != r.Grant.Key.Revision {
-				return invalid()
-			}
-			readmissionRevisions[r.Grant.AdmissionID] = r.Grant.Key.Revision
+	}
+	if err := restore.validateRetainedOwners(); err != nil {
+		return authorityCatalog{}, err
+	}
+	if err := restore.restoreFloors(); err != nil {
+		return authorityCatalog{}, err
+	}
+	if err := restore.catalog.validateFencePredecessors(); err != nil {
+		return authorityCatalog{}, err
+	}
+	for _, record := range st.Revocations {
+		if err := restore.catalog.restoreRevocation(record); err != nil {
+			return authorityCatalog{}, err
 		}
-		if r.Grant.Purpose == topology.AuthorityTransfer {
-			if requests[r.Grant.RequestID] {
-				return invalid()
-			}
-			requests[r.Grant.RequestID] = true
+	}
+	if err := restore.validateOperatorCompletion(); err != nil {
+		return authorityCatalog{}, err
+	}
+	if !validAuthorityBoundaries(restore.catalog) ||
+		restore.catalog.pendingCost() > st.Rules.Limits.WithDefaults().MaxPendingAuthorityRecords {
+		return authorityCatalog{}, invalidAuthorityCatalog()
+	}
+	return restore.catalog, nil
+}
+
+type authorityRestore struct {
+	state                                    smState
+	catalog                                  authorityCatalog
+	operators                                map[topology.OperatorID]topology.Operator
+	requests                                 map[string]bool
+	readmissionRevisions, readmissionMembers map[string]uint64
+	readmissionMeta                          map[string]bool
+}
+
+func invalidAuthorityCatalog() error {
+	return fault.New(fault.Unreadable, "invalid authority catalog", nil)
+}
+
+func (restore *authorityRestore) restoreRecord(r authorityRecord) error {
+	a, st, requests := restore.catalog, restore.state, restore.requests
+	if r.Grant.Key.ClusterID != st.Latest.ClusterID || r.Grant.Key.Revision > st.AppliedIndex ||
+		a.records[r.Grant.Key] != nil || r.Grant.Validate() != nil {
+		return invalidAuthorityCatalog()
+	}
+	if r.Grant.Purpose == topology.AuthorityReadmit {
+		if err := restore.restoreReadmissionGrant(r.Grant); err != nil {
+			return err
 		}
-		if r.Grant.Purpose == topology.AuthorityEffect {
-			action := *r.Grant.Action
-			if op, exists := operators[action.OperatorID]; exists {
-				if action.StepSeq > len(op.Plan.Steps) || !action.Matches(op.Status.ID, op.Status.Attempt, op.Status.Version, op.Plan.Steps[action.StepSeq-1]) {
-					return invalid()
-				}
-			}
+	}
+	if r.Grant.Purpose == topology.AuthorityTransfer {
+		if requests[r.Grant.RequestID] {
+			return invalidAuthorityCatalog()
 		}
-		if r.Grant.Purpose == topology.AuthorityEffect {
-			if _, duplicate := a.actions[*r.Grant.Action]; duplicate {
-				return invalid()
-			}
-			a.actions[*r.Grant.Action] = r.Grant.Key
+		requests[r.Grant.RequestID] = true
+	}
+	if r.Grant.Purpose == topology.AuthorityEffect {
+		if err := restore.restoreEffectAction(r.Grant); err != nil {
+			return err
 		}
-		seenFences := map[topology.AuthorityResource]bool{}
-		for _, e := range r.Fences {
-			if e.Validate(r.Grant) != nil || seenFences[e.Resource] {
-				return invalid()
-			}
-			seenFences[e.Resource] = true
+	}
+	if err := validateRestoredReceipts(r); err != nil {
+		return err
+	}
+	a.records[r.Grant.Key] = &r
+	return nil
+}
+
+func (restore *authorityRestore) restoreEffectAction(grant topology.AuthorityGrant) error {
+	a, operators := restore.catalog, restore.operators
+	action := *grant.Action
+	if op, exists := operators[action.OperatorID]; exists {
+		if action.StepSeq > len(op.Plan.Steps) ||
+			!action.Matches(op.Status.ID, op.Status.Attempt, op.Status.Version,
+				op.Plan.Steps[action.StepSeq-1]) {
+			return invalidAuthorityCatalog()
 		}
-		seenEffects := map[struct {
+	}
+	if _, duplicate := a.actions[*grant.Action]; duplicate {
+		return invalidAuthorityCatalog()
+	}
+	a.actions[*grant.Action] = grant.Key
+	return nil
+}
+
+func (restore *authorityRestore) readmissionAdmission(id string) (*AdmissionRecord, error) {
+	st := restore.state
+	var admission *AdmissionRecord
+	for _, candidate := range st.Admissions {
+		if candidate.ReadmissionInstanceID == "" && ReadmissionID(candidate) == id {
+			if admission != nil {
+				return nil, invalidAuthorityCatalog()
+			}
+			admissionCopy := candidate
+			admission = &admissionCopy
+		}
+	}
+	return admission, nil
+}
+
+func (restore *authorityRestore) restoreReadmissionGrant(grant topology.AuthorityGrant) error {
+	readmissionMembers, readmissionRevisions, readmissionMeta :=
+		restore.readmissionMembers, restore.readmissionRevisions, restore.readmissionMeta
+	admission, err := restore.readmissionAdmission(grant.AdmissionID)
+	if err != nil {
+		return err
+	}
+	if admission == nil || len(grant.Resources) != 1 || grant.Resources[0].NodeName != admission.NodeName {
+		return invalidAuthorityCatalog()
+	}
+	for _, target := range grant.Targets {
+		if target.NodeName != admission.NodeName || target.MemberID >= admission.MemberID {
+			return invalidAuthorityCatalog()
+		}
+		if previous, ok := readmissionMembers[grant.AdmissionID]; ok && previous != target.MemberID {
+			return invalidAuthorityCatalog()
+		}
+		readmissionMembers[grant.AdmissionID] = target.MemberID
+	}
+	if grant.Key.GroupID == topology.MetaGroupID {
+		if len(grant.Targets) != 1 || grant.Targets[0].ReplicaID != grant.Targets[0].MemberID {
+			return invalidAuthorityCatalog()
+		}
+		readmissionMeta[grant.AdmissionID] = true
+	}
+	if revision, ok := readmissionRevisions[grant.AdmissionID]; ok && revision != grant.Key.Revision {
+		return invalidAuthorityCatalog()
+	}
+	readmissionRevisions[grant.AdmissionID] = grant.Key.Revision
+	return nil
+}
+
+func validateRestoredReceipts(r authorityRecord) error {
+	seenFences := map[topology.AuthorityResource]bool{}
+	for _, e := range r.Fences {
+		if seenFences[e.Resource] || e.Validate(r.Grant) != nil {
+			return invalidAuthorityCatalog()
+		}
+		seenFences[e.Resource] = true
+	}
+	seenEffects := map[struct {
+		resource topology.AuthorityResource
+		target   topology.AuthorityTarget
+	}]bool{}
+	for _, e := range r.Effects {
+		key := struct {
 			resource topology.AuthorityResource
 			target   topology.AuthorityTarget
-		}]bool{}
-		for _, e := range r.Effects {
-			key := struct {
-				resource topology.AuthorityResource
-				target   topology.AuthorityTarget
-			}{e.Resource, e.Target}
-			if e.Validate(r.Grant) != nil || seenEffects[key] {
-				return invalid()
-			}
-			seenEffects[key] = true
+		}{e.Resource, e.Target}
+		if seenEffects[key] || e.Validate(r.Grant) != nil {
+			return invalidAuthorityCatalog()
 		}
-		a.records[r.Grant.Key] = &r
+		seenEffects[key] = true
 	}
+	return nil
+}
+
+func (restore *authorityRestore) validateRetainedOwners() error {
+	a, operators := restore.catalog, restore.operators
+	readmissionMembers, readmissionMeta := restore.readmissionMembers, restore.readmissionMeta
 	for id := range readmissionMembers {
 		if !readmissionMeta[id] {
-			return invalid()
+			return invalidAuthorityCatalog()
 		}
 	}
 	for _, r := range a.records {
 		if r.Grant.Purpose == topology.AuthorityEffect {
 			if _, exists := operators[r.Grant.OperatorID]; !exists && !a.recordSettled(r) {
-				return invalid()
+				return invalidAuthorityCatalog()
 			}
 		}
 	}
+	return nil
+}
+
+func (restore *authorityRestore) restoreFloors() error {
+	a, st := restore.catalog, restore.state
 	for _, f := range st.AuthorityFloors {
 		r := a.records[f.Key]
-		if _, duplicate := a.floors[f.Resource]; duplicate || r == nil || !slices.Contains(r.Grant.Resources, f.Resource) {
-			return invalid()
+		if _, duplicate := a.floors[f.Resource]; duplicate || r == nil ||
+			!slices.Contains(r.Grant.Resources, f.Resource) {
+			return invalidAuthorityCatalog()
 		}
 		a.floors[f.Resource] = f.Key
 	}
 	for _, r := range a.records {
 		for _, resource := range r.Grant.Resources {
 			if floor, ok := a.floors[resource]; !ok || floor.Revision < r.Grant.Key.Revision {
-				return invalid()
+				return invalidAuthorityCatalog()
 			}
 		}
 	}
+	return nil
+}
+
+func (a authorityCatalog) validateFencePredecessors() error {
 	for _, record := range a.records {
 		if record.Grant.Purpose != topology.AuthorityFence {
 			continue
@@ -253,59 +378,78 @@ func restoreAuthority(st smState) (authorityCatalog, error) {
 			if resourceConsumed(record, resource) {
 				continue
 			}
-			predecessor := false
-			for _, older := range a.records {
-				if older.Grant.Key.GroupID == record.Grant.Key.GroupID && older.Grant.Key.Revision < record.Grant.Key.Revision && older.Grant.Purpose != topology.AuthorityFence && slices.Contains(older.Grant.Resources, resource) {
-					predecessor = true
-				}
-			}
-			if !predecessor {
-				return invalid()
+			if !a.hasFencePredecessor(record, resource) {
+				return invalidAuthorityCatalog()
 			}
 		}
 	}
-	for _, r := range st.Revocations {
-		if r.OperatorID == "" || a.revocations[r.OperatorID] != nil {
-			return invalid()
+	return nil
+}
+
+func (a authorityCatalog) hasFencePredecessor(record *authorityRecord, resource topology.AuthorityResource) bool {
+	predecessor := false
+	for _, older := range a.records {
+		if older.Grant.Key.GroupID == record.Grant.Key.GroupID &&
+			older.Grant.Key.Revision < record.Grant.Key.Revision &&
+			older.Grant.Purpose != topology.AuthorityFence && slices.Contains(older.Grant.Resources, resource) {
+			predecessor = true
 		}
-		seen := map[resourceFloor]bool{}
-		for _, ob := range r.Obligations {
-			key := resourceFloor{ob.Resource, ob.Key}
-			g := a.records[ob.Key]
-			if g == nil || g.Grant.Purpose != topology.AuthorityFence || seen[key] || !slices.Contains(g.Grant.Resources, ob.Resource) {
-				return invalid()
-			}
-			seen[key] = true
-			if ob.Evidence == nil && a.fenceConsumed(ob.Key, ob.Resource) {
-				return invalid()
-			}
-			if ob.Evidence != nil {
-				e := ob.Evidence
-				proof := a.records[e.Key]
-				if proof == nil || e.Resource != ob.Resource || e.Key.Revision < ob.Key.Revision || e.Validate(proof.Grant) != nil || !slices.Contains(proof.Fences, *e) {
-					return invalid()
-				}
-			}
-		}
-		a.revocations[r.OperatorID] = &r
 	}
+	return predecessor
+}
+
+func (a authorityCatalog) restoreRevocation(r revocationRecord) error {
+	if r.OperatorID == "" || a.revocations[r.OperatorID] != nil {
+		return invalidAuthorityCatalog()
+	}
+	seen := map[resourceFloor]bool{}
+	for _, ob := range r.Obligations {
+		key := resourceFloor{ob.Resource, ob.Key}
+		g := a.records[ob.Key]
+		if g == nil || g.Grant.Purpose != topology.AuthorityFence || seen[key] ||
+			!slices.Contains(g.Grant.Resources, ob.Resource) {
+			return invalidAuthorityCatalog()
+		}
+		seen[key] = true
+		if ob.Evidence == nil && a.fenceConsumed(ob.Key, ob.Resource) {
+			return invalidAuthorityCatalog()
+		}
+		if ob.Evidence != nil {
+			e := ob.Evidence
+			proof := a.records[e.Key]
+			if proof == nil || e.Resource != ob.Resource || e.Key.Revision < ob.Key.Revision ||
+				e.Validate(proof.Grant) != nil ||
+				!slices.Contains(proof.Fences, *e) {
+				return invalidAuthorityCatalog()
+			}
+		}
+	}
+	a.revocations[r.OperatorID] = &r
+	return nil
+}
+
+func (restore *authorityRestore) validateOperatorCompletion() error {
+	a, st := restore.catalog, restore.state
 	for _, view := range st.Operators {
 		ex := operatorFromView(view)
 		consumed := ex.CurrentStep - 1
 		if ex.State == topology.OperatorSucceeded {
 			consumed = len(ex.Steps)
 		}
-		for i := 0; i < consumed; i++ {
-			if ex.Steps[i].Kind != topology.StepWaitCaughtUp && !a.stepConsumed(&ex, ex.Steps[i], false) {
-				return invalid()
+		for i := range consumed {
+			if ex.Steps[i].Kind != topology.StepWaitCaughtUp && !a.stepConsumed(&ex, ex.Steps[i], retainedCompletion) {
+				return invalidAuthorityCatalog()
 			}
 		}
 	}
-	if !validAuthorityBoundaries(a) {
-		return invalid()
+	return nil
+}
+
+func (a authorityCatalog) hasPendingRevocations() bool {
+	for _, r := range a.revocations {
+		if !revokedComplete(r) {
+			return true
+		}
 	}
-	if a.pendingCost() > st.Rules.Limits.WithDefaults().MaxPendingAuthorityRecords {
-		return invalid()
-	}
-	return a, nil
+	return false
 }

@@ -23,7 +23,7 @@ func TestNativeReadLocalIngressAndStoppedReplica(t *testing.T) {
 	ref := load.ReplicaRef{GroupID: "work", ReplicaID: 1}
 	handle, err := h.StartReplica(deadline(t), ref, StartExplicit)
 	must(t, err)
-	await(t, deadline(t), handle.Core().IsLeader)
+	await(deadline(t), t, handle.Core().IsLeader)
 	state, err := h.ReadNative(deadline(t), "work")
 	must(t, err)
 	if state.GroupID != "work" || state.ReplicaID != 1 || state.Applied == 0 || !reflect.DeepEqual(state.ConfState.Voters, []uint64{1}) {
@@ -129,7 +129,7 @@ func TestNativeReadUsesRetainedCandidateWithoutRelaxingOrdinaryPeerAdmission(t *
 	ref := load.ReplicaRef{GroupID: "work", ReplicaID: 1}
 	handle, err := h.StartReplica(deadline(t), ref, StartExplicit)
 	must(t, err)
-	await(t, deadline(t), handle.Core().IsLeader)
+	await(deadline(t), t, handle.Core().IsLeader)
 	if _, err := h.ReadNative(deadline(t), "work"); !errors.Is(err, fault.ErrUnavailable) {
 		t.Fatal("empty current catalog unexpectedly found an owner", err)
 	}

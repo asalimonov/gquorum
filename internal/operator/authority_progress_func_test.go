@@ -70,24 +70,24 @@ func TestControllerRequiresRecordedExactReceipts(t *testing.T) {
 
 func TestControllerReconcilesFencesBeforeOperatorSelection(t *testing.T) {
 	t.Parallel()
-	for _, state := range []OperatorState{OperatorPending, OperatorSucceeded} {
+	for _, state := range []State{OperatorPending, OperatorSucceeded} {
 		t.Run(string(state), func(t *testing.T) {
 			t.Parallel()
 			active, target, _ := growDocuments()
 			f := newControllerFixture(active, target, nil, 0, state)
 			f.coord.reconcileErr = fault.ErrAuthorityPending
-			if got := f.engine.tick(t.Context()); got != controllerWaiting {
+			if got := f.engine.runTick(t.Context()); got != controllerWaiting {
 				t.Fatal("pending fence skipped", got)
 			}
 			if f.store.activationRuns != 0 || len(f.coord.transitions) != 0 {
 				t.Fatal("pending revocation allowed progress")
 			}
 			f.coord.hasOperator = false
-			if got := f.engine.tick(t.Context()); got != controllerWaiting {
+			if got := f.engine.runTick(t.Context()); got != controllerWaiting {
 				t.Fatal("revocation lost with absent operator", got)
 			}
 			f.coord.reconcileErr = nil
-			if got := f.engine.tick(t.Context()); got != controllerIdle {
+			if got := f.engine.runTick(t.Context()); got != controllerIdle {
 				t.Fatal(got)
 			}
 		})

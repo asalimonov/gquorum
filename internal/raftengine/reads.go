@@ -150,47 +150,52 @@ func (g *Group) completeAppliedReads() {
 			s.applying = append(s.applying, req)
 			continue
 		}
-		if err := req.ctx.Err(); err != nil {
-			g.finishRead(req, Result{}, err)
-			continue
-		}
-		if err := g.ctx.Err(); err != nil {
-			g.finishRead(req, Result{}, fault.ErrStopped)
-			continue
-		}
-		if req.native {
-			result, err := authorityResult(g.nativeState())
-			g.finishRead(req, result, err)
-			continue
-		}
-		if req.authorityKey != nil {
-			result, err := g.readAuthorityReceipt(*req.authorityKey)
-			g.finishRead(req, result, err)
-			continue
-		}
-		if req.barrier {
-			g.finishRead(req, Result{}, nil)
-			continue
-		}
-		machine, ok := g.opts.Machine.(QueryMachine)
-		if !ok || !machine.SupportsQuery() {
-			g.finishRead(req, Result{}, fault.ErrUnsupported)
-			continue
-		}
-		ctx, cancel := context.WithCancel(req.ctx)
-		stop := context.AfterFunc(g.ctx, cancel)
-		result, err := machine.Query(ctx, bytes.Clone(req.data))
-		if err == nil {
-			err = ctx.Err()
-		}
-		if len(result.Data) > req.maxResultBytes {
-			err = fault.ErrOverloaded
-		}
-		// Copy before releasing callback ownership or allowing another machine call.
-		g.finishRead(req, result, err)
-		stop()
-		cancel()
+		g.completeRead(req)
 	}
+}
+
+func (g *Group) completeRead(req *readRequest) {
+	if err := req.ctx.Err(); err != nil {
+		g.finishRead(req, Result{}, err)
+		return
+	}
+	if err := g.ctx.Err(); err != nil {
+		g.finishRead(req, Result{}, fault.ErrStopped)
+		return
+	}
+	if req.native {
+		result, err := authorityResult(g.nativeState())
+		g.finishRead(req, result, err)
+		return
+	}
+	if req.authorityKey != nil {
+		result, err := g.readAuthorityReceipt(*req.authorityKey)
+		g.finishRead(req, result, err)
+		return
+	}
+	if req.barrier {
+		g.finishRead(req, Result{}, nil)
+		return
+	}
+	machine, ok := g.opts.Machine.(QueryMachine)
+	if !ok || !machine.SupportsQuery() {
+		g.finishRead(req, Result{}, fault.ErrUnsupported)
+		return
+	}
+	ctx, cancel := context.WithCancel(req.ctx)
+	stop := context.AfterFunc(g.ctx, cancel)
+	result, err := machine.Query(ctx, bytes.Clone(req.data))
+	if err == nil {
+		err = ctx.Err()
+	}
+	if len(result.Data) > req.maxResultBytes {
+		err = fault.ErrOverloaded
+	}
+	// Copy before releasing callback ownership or allowing another machine
+	// call.
+	g.finishRead(req, result, err)
+	stop()
+	cancel()
 }
 
 func readMessageContext(msg raftpb.Message) ([]byte, bool) {
@@ -199,11 +204,14 @@ func readMessageContext(msg raftpb.Message) ([]byte, bool) {
 	}
 	entry := msg.Entries[0]
 	token := entry.Data
-	if entry.Type != raftpb.EntryNormal || entry.Index != 0 || entry.Term != 0 || len(token) != readContextSize || token[0] != 1 ||
+	if entry.Type != raftpb.EntryNormal || entry.Index != 0 || entry.Term != 0 || len(token) != readContextSize ||
+		token[0] != 1 ||
 		binary.BigEndian.Uint64(token[17:25]) == 0 || binary.BigEndian.Uint64(token[25:33]) == 0 {
 		return nil, false
 	}
-	if msg.LogTerm != 0 || msg.Commit != 0 || msg.Vote != 0 || msg.Reject || msg.RejectHint != 0 || len(msg.Context) != 0 || len(msg.Responses) != 0 || msg.Snapshot != nil {
+	if msg.LogTerm != 0 || msg.Commit != 0 || msg.Vote != 0 || msg.Reject || msg.RejectHint != 0 ||
+		len(msg.Context) != 0 ||
+		len(msg.Responses) != 0 || msg.Snapshot != nil {
 		return nil, false
 	}
 	return token, true
@@ -236,7 +244,8 @@ func (g *Group) validateRemoteRead(msg raftpb.Message) error {
 	if s.remote == nil {
 		s.remote = make(map[uint64]*remoteReadRound)
 	}
-	// Step owns a deep message copy; retain that owned copy until response/reset.
+	// Step owns a deep message copy; retain that owned copy until
+	// response/reset.
 	s.remote[msg.From] = &remoteReadRound{message: msg}
 	g.issueReadRound(time.Now())
 	return nil
@@ -247,7 +256,8 @@ func (g *Group) validateReadIndexResponse(msg raftpb.Message) error {
 	if !ok || msg.Index == 0 || binary.BigEndian.Uint64(token[25:33]) != g.opts.ReplicaID {
 		return fault.ErrInvalid
 	}
-	if status.RaftState != raft.StateFollower || status.Lead == 0 || msg.From != status.Lead || msg.Term != status.Term {
+	if status.RaftState != raft.StateFollower || status.Lead == 0 || msg.From != status.Lead ||
+		msg.Term != status.Term {
 		return fault.ErrUnavailable
 	}
 	if g.readState.active == nil || !bytes.Equal(g.readState.active.context, token) {

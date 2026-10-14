@@ -19,7 +19,7 @@ type removedStartupNode struct {
 func (*removedStartupNode) WaitReady(context.Context) error { return fault.ErrStopped }
 func (n *removedStartupNode) Status() gquorum.NodeStatus    { return n.status }
 
-func TestSupersededAdmissionReadinessKeepsControlUntilRemovalPolicy(t *testing.T) {
+func TestSupersededAdmissionReadinessKeepsControlUntilRemovalHooks(t *testing.T) {
 	t.Parallel()
 	id := topology.Identity{ClusterID: "cluster", NodeName: "n4", MemberID: 4, InstanceID: "process"}
 	node := &removedStartupNode{status: gquorum.NodeStatus{Identity: id, State: gquorum.NodeFenced,

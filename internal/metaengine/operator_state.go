@@ -1,6 +1,7 @@
 package metaengine
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"time"
@@ -9,87 +10,41 @@ import (
 )
 
 func (sm *topologySM) applyBeginOperator(index uint64, p BeginOperatorProposal) (ApplyResult, bool) {
-	if p.Version != sm.latest.Version {
-		return rejectProposal(p.ProposalID, proposalSuperseded,
-			"version %d is not Latest %d", p.Version, sm.latest.Version), false
-	}
-	if p.Plan.Version != p.Version {
-		return rejectProposal(p.ProposalID, proposalAuthorization,
-			"plan version %d does not match execution version %d", p.Plan.Version, p.Version), false
-	}
-	if err := validateExactPlan(p.Plan); err != nil {
-		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
-	}
-	if audit := sm.latest.Audit; audit != nil && audit.Forced &&
-		(audit.Operation != topology.AuditOperationForceRetireNode || p.Actor == "" || p.Origin == "") {
-		return rejectProposal(p.ProposalID, proposalAuthorization,
-			"forced retirement execution provenance is required"), false
-	}
-	if p.At.IsZero() {
-		return rejectProposal(p.ProposalID, proposalAuthorization, "execution timestamp is required"), false
+	if result := sm.validateBeginOperator(p); !result.Accepted {
+		return result, false
 	}
 
 	previous, found := sm.latestAttemptLocked(p.Version)
 	if found {
-		if previous.State == topology.OperatorSuperseded {
-			return rejectProposal(p.ProposalID, proposalSuperseded, "execution %q is superseded", previous.ID), false
+		if result := validateOperatorRetry(previous, p); !result.Accepted {
+			return result, false
 		}
-		if !exactStepsEqual(previous.Steps, p.Plan.Steps) {
-			return rejectProposal(p.ProposalID, proposalAuthorization, "version %d already has a different exact plan; stage a new version to replan", p.Version), false
-		}
-		if !previous.State.Terminal() || previous.State == topology.OperatorSucceeded {
+		if previous.State == topology.OperatorSucceeded || !previous.State.Terminal() {
 			return ApplyResult{ProposalID: p.ProposalID, Accepted: true, OperatorID: previous.ID}, false
 		}
 	}
 
 	// An accepted plan remains immutable across attempts. Cleanup proofs can
 	// remove its old identities from the current planning base; validate shape
-	// only on first approval, then validate reachability after inherited fences.
+	// only on first approval, then validate reachability after inherited
+	// fences.
 	if !found {
-		base, err := sm.deletionBaseLocked(sm.latest)
-		if err != nil {
-			return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
+		if result := sm.validateFirstOperatorPlan(p); !result.Accepted {
+			return result, false
 		}
-		if err := topology.ValidatePlanShape(base, sm.latest, p.Plan); err != nil {
-			return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
-		}
-		for _, group := range base.Groups {
-			if group.ID == topology.MetaGroupID || sm.latest.Group(group.ID) != nil {
-				continue
-			}
-			covered := true
-			for _, replica := range group.Replicas {
-				covered = covered && topology.ReadmissionCovers(base, sm.latest, p.Plan, replica.NodeName)
-			}
-			if covered {
-				continue
-			}
-			deleted := false
-			for _, step := range p.Plan.Steps {
-				deleted = deleted || step.GroupID == group.ID && step.Kind == topology.StepDeleteGroupState
-			}
-			if !deleted {
-				return rejectProposal(p.ProposalID, proposalAuthorization, "plan omits cleanup of approved group %q", group.ID), false
-			}
-		}
-
 	}
 
-	attempt := uint32(1)
-	if found {
-		if previous.Attempt == ^uint32(0) {
-			return rejectProposal(p.ProposalID, proposalGuardrail, "execution attempt exhausted"), false
-		}
-		attempt = previous.Attempt + 1
+	attempt, err := nextOperatorAttempt(previous)
+	if err != nil {
+		return rejectProposal(p.ProposalID, proposalGuardrail, errorFormat, err), false
 	}
 	if err := sm.validateCleanupCapacity(p.Plan); err != nil {
-		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
+		return rejectProposal(p.ProposalID, proposalGuardrail, errorFormat, err), false
 	}
-	var revoked []topology.OperatorID
-	for _, old := range sm.operators {
-		if old.Version < p.Version && !old.State.Terminal() || found && old.ID == previous.ID {
-			revoked = append(revoked, old.ID)
-		}
+	revoked := sm.operatorsToRevokeLocked(previous, p.Version)
+	report, err := placementResult(sm.target, sm.latest, topology.AffectedPlacementGroups(sm.target, sm.latest))
+	if err != nil {
+		return rejectProposalError(p.ProposalID, proposalGuardrail, err), false
 	}
 	if err := sm.revokeAuthorityLocked(index, revoked, topology.MakeOperatorID(p.Version, attempt)); err != nil {
 		return rejectProposal(p.ProposalID, proposalOverloaded, "cannot reserve revocation: %v", err), false
@@ -97,15 +52,15 @@ func (sm *topologySM) applyBeginOperator(index uint64, p BeginOperatorProposal) 
 	sm.supersedeOlderLocked(p.Version, p.At)
 	sm.retireRemovedGroups(sm.latest)
 	sm.target = sm.latest.Clone()
-	rec := newOperatorRecord(p.Version, attempt, p.Plan.Steps, p.Actor, p.Origin, p.At)
+	rec := newOperatorRecordWithPlan(p.Plan, attempt, operatorAudit{p.Actor, p.Origin, p.At})
 	sm.operators[rec.ID] = &rec
-	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, OperatorID: rec.ID}, true
+	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, OperatorID: rec.ID, Placement: report}, true
 }
 
 func (sm *topologySM) applyCommitRepairOperator(index uint64, p CommitRepairOperatorProposal) (ApplyResult, bool) {
 	if p.ExpectedVersion != sm.latest.Version {
-		return rejectProposal(p.ProposalID, proposalVersionConflict,
-			"expected Latest %d, current Latest %d", p.ExpectedVersion, sm.latest.Version), false
+		return rejectProposal(p.ProposalID, proposalVersionConflict, "expected Latest %d, current Latest %d",
+			p.ExpectedVersion, sm.latest.Version), false
 	}
 	if !reflect.DeepEqual(sm.latest, sm.target) || !reflect.DeepEqual(sm.latest, sm.active) {
 		return rejectProposal(p.ProposalID, proposalAuthorization,
@@ -126,23 +81,23 @@ func (sm *topologySM) applyCommitRepairOperator(index uint64, p CommitRepairOper
 	doc := p.Doc.Clone()
 	doc.Version = sm.latest.Version + 1
 	if p.Plan.Version != doc.Version {
-		return rejectProposal(p.ProposalID, proposalAuthorization,
-			"repair plan version %d must equal %d", p.Plan.Version, doc.Version), false
+		return rejectProposal(p.ProposalID, proposalAuthorization, "repair plan version %d must equal %d",
+			p.Plan.Version, doc.Version), false
 	}
 	if err := validateExactPlan(p.Plan); err != nil {
-		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
+		return rejectProposal(p.ProposalID, proposalAuthorization, errorFormat, err), false
 	}
 	if err := topology.ValidatePlanShape(sm.active, doc, p.Plan); err != nil {
-		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
+		return rejectProposal(p.ProposalID, proposalAuthorization, errorFormat, err), false
 	}
 	if err := validateSingleReplicaRepair(sm.active, doc); err != nil {
-		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
+		return rejectProposal(p.ProposalID, proposalAuthorization, errorFormat, err), false
 	}
 	if err := validateRepairPlan(sm.active, doc, p.Plan); err != nil {
-		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
+		return rejectProposal(p.ProposalID, proposalAuthorization, errorFormat, err), false
 	}
 	if err := sm.validateDocument(doc); err != nil {
-		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
+		return rejectProposalError(p.ProposalID, proposalGuardrail, err), false
 	}
 
 	oldAuthority := sm.authority
@@ -151,81 +106,45 @@ func (sm *topologySM) applyCommitRepairOperator(index uint64, p CommitRepairOper
 	}
 	if err := sm.commitLatestLocked(&doc); err != nil {
 		sm.authority = oldAuthority
-		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
+		return rejectProposal(p.ProposalID, proposalGuardrail, errorFormat, err), false
 	}
 	sm.retireRemovedGroups(doc)
 	sm.target = doc.Clone()
-	rec := newOperatorRecord(doc.Version, 1, p.Plan.Steps, doc.ChangedBy, doc.Origin, p.At)
+	rec := newOperatorRecordWithPlan(p.Plan, 1, operatorAudit{doc.ChangedBy, doc.Origin, p.At})
 	sm.operators[rec.ID] = &rec
-	return ApplyResult{
-		ProposalID: p.ProposalID,
-		Accepted:   true,
-		Doc:        doc.Clone(),
-		OperatorID: rec.ID,
-	}, true
+	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, Doc: doc.Clone(), OperatorID: rec.ID}, true
 }
 
 func (sm *topologySM) applyTransitionOperator(index uint64, p TransitionOperatorProposal) (ApplyResult, bool) {
 	t := p.Transition
 	ex, ok := sm.operators[t.OperatorID]
 	if !ok {
-		return rejectProposal(p.ProposalID, proposalAuthorization,
-			"execution %q does not exist", t.OperatorID), false
+		return rejectProposal(p.ProposalID, proposalAuthorization, "execution %q does not exist", t.OperatorID), false
 	}
 	if t.Version != ex.Version || t.Attempt != ex.Attempt ||
 		t.OperatorID != topology.MakeOperatorID(t.Version, t.Attempt) {
-		return rejectProposal(p.ProposalID, proposalAuthorization,
-			"transition identity does not match execution %q", ex.ID), false
+		return rejectProposal(p.ProposalID, proposalAuthorization, "transition identity does not match execution %q",
+			ex.ID), false
 	}
 	if t.At.IsZero() || t.At.Before(ex.UpdatedAt) {
 		return rejectProposal(p.ProposalID, proposalAuthorization,
 			"transition timestamp is missing or older than current state"), false
 	}
 	if ex.State.Terminal() {
-		if transitionMatchesRecord(t, *ex) {
-			return ApplyResult{ProposalID: p.ProposalID, Accepted: true, OperatorID: ex.ID}, false
-		}
-		code := proposalAuthorization
-		if ex.State == topology.OperatorSuperseded {
-			code = proposalSuperseded
-		}
-		return rejectProposal(p.ProposalID, code,
-			"terminal execution %q cannot transition from %q", ex.ID, ex.State), false
+		return terminalOperatorTransition(ex, p)
 	}
 	if err := validateTransition(*ex, t); err != nil {
-		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
+		return rejectProposal(p.ProposalID, proposalAuthorization, errorFormat, err), false
 	}
-	if t.State != topology.OperatorSuperseded && (t.StepSeq > ex.CurrentStep || t.State == topology.OperatorSucceeded) && ex.CurrentStep > 0 {
-		if !sm.stepConsumedLocked(ex, ex.Steps[ex.CurrentStep-1]) {
-			return rejectProposal(p.ProposalID, proposalAuthorityPending, "exact step consumption receipts are incomplete"), false
-		}
-	}
-	if t.State == topology.OperatorSucceeded {
-		if len(ex.Steps) > 0 && !sm.stepConsumedLocked(ex, ex.Steps[len(ex.Steps)-1]) {
-			return rejectProposal(p.ProposalID, proposalAuthorityPending, "final step consumption receipts are incomplete"), false
-		}
-		for _, revocation := range sm.authority.revocations {
-			if !revokedComplete(revocation) {
-				return rejectProposal(p.ProposalID, proposalAuthorityPending, "predecessor revocation is pending"), false
-			}
-		}
+	if err := sm.validateTransitionConsumptionLocked(ex, t); err != nil {
+		return rejectProposal(p.ProposalID, proposalAuthorityPending, errorFormat, err), false
 	}
 	if t.State == topology.OperatorSuperseded {
 		if err := sm.revokeAuthorityLocked(index, []topology.OperatorID{ex.ID}, ""); err != nil {
 			return rejectProposal(p.ProposalID, proposalOverloaded, "cannot reserve revocation: %v", err), false
 		}
 	}
-	if t.State == topology.OperatorSuperseded {
-		for _, admission := range sm.admissions {
-			if admission.OperatorID == ex.ID && !admission.State.terminal() {
-				admission.State = AdmissionSuperseded
-			}
-		}
-	} else if ex.CurrentStep > 0 && ex.CurrentStep <= len(ex.Steps) &&
-		(t.StepSeq > ex.CurrentStep || t.State == topology.OperatorSucceeded) {
-		sm.updateAdmissionForCompletedStepLocked(ex, ex.Steps[ex.CurrentStep-1])
-		sm.recordRoleEffectLocked(index, ex, ex.Steps[ex.CurrentStep-1], t.At)
-	}
+	sm.recordOperatorTransitionEffectsLocked(index, ex, t)
 
 	ex.State = t.State
 	ex.CurrentStep = t.StepSeq
@@ -241,13 +160,33 @@ func (sm *topologySM) stepConsumedLocked(ex *operatorRecord, step topology.Step)
 	if step.Kind == topology.StepWaitCaughtUp {
 		return true
 	}
-	return sm.authority.stepConsumed(ex, step, true)
+	return sm.authority.stepConsumed(ex, step, openCompletion)
 }
 
-func (catalog authorityCatalog) stepConsumed(ex *operatorRecord, step topology.Step, requireOpen bool) bool {
-	action := topology.AuthorizedStep{OperatorID: ex.ID, Version: ex.Version, Attempt: ex.Attempt, StepSeq: step.Seq, Kind: step.Kind, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID, TransferNodeName: step.TransferNodeName, TransferReplicaID: step.TransferReplicaID}
+type completionScope uint8
+
+const (
+	openCompletion completionScope = iota
+	retainedCompletion
+)
+
+func (catalog authorityCatalog) stepConsumed(ex *operatorRecord, step topology.Step, scope completionScope) bool {
+	action := topology.AuthorizedStep{
+		OperatorID:           ex.ID,
+		Version:              ex.Version,
+		Attempt:              ex.Attempt,
+		StepSeq:              step.Seq,
+		Kind:                 step.Kind,
+		GroupID:              step.GroupID,
+		NodeName:             step.NodeName,
+		ReplicaID:            step.ReplicaID,
+		TransferNodeName:     step.TransferNodeName,
+		TransferReplicaID:    step.TransferReplicaID,
+		ExpectedVotersDigest: step.ExpectedVotersDigest,
+		ResultVotersDigest:   step.ResultVotersDigest,
+	}
 	record := catalog.records[catalog.actions[action]]
-	if record == nil || requireOpen && record.Closed {
+	if record == nil || scope == openCompletion && record.Closed {
 		return false
 	}
 	for _, resource := range record.Grant.Resources {
@@ -265,12 +204,11 @@ func (sm *topologySM) applyActivateTarget(p ActivateTargetProposal) (ApplyResult
 			"activation does not identify an exact execution"), false
 	}
 	if ex.State != topology.OperatorSucceeded {
-		return rejectProposal(p.ProposalID, proposalAuthorization,
-			"execution %q has not succeeded", ex.ID), false
+		return rejectProposal(p.ProposalID, proposalAuthorization, "execution %q has not succeeded", ex.ID), false
 	}
 	if sm.target.Version != ex.Version {
-		return rejectProposal(p.ProposalID, proposalSuperseded,
-			"execution %q no longer owns Target version %d", ex.ID, sm.target.Version), false
+		return rejectProposal(p.ProposalID, proposalSuperseded, "execution %q no longer owns Target version %d", ex.ID,
+			sm.target.Version), false
 	}
 	changed := sm.completeAdmissionsLocked(ex.ID)
 	if !reflect.DeepEqual(sm.active, sm.target) {
@@ -282,17 +220,14 @@ func (sm *topologySM) applyActivateTarget(p ActivateTargetProposal) (ApplyResult
 }
 
 func validateExactPlan(plan topology.Plan) error {
+	if err := topology.ValidatePlanGuardChain(plan); err != nil {
+		return err
+	}
 	seenGroups := make(map[string]bool)
 	lastGroup := ""
 	for i, step := range plan.Steps {
-		if step.Seq != i+1 {
-			return fmt.Errorf("plan steps must be contiguous from 1: position %d has seq %d", i+1, step.Seq)
-		}
-		if step.GroupID == "" {
-			return fmt.Errorf("plan step %d has no group", step.Seq)
-		}
-		if !validStepKind(step.Kind) {
-			return fmt.Errorf("plan step %d has unknown kind %q", step.Seq, step.Kind)
+		if err := validatePlanStepPosition(step, i); err != nil {
+			return err
 		}
 		if step.GroupID != lastGroup {
 			if seenGroups[step.GroupID] {
@@ -301,14 +236,8 @@ func validateExactPlan(plan topology.Plan) error {
 			seenGroups[step.GroupID] = true
 			lastGroup = step.GroupID
 		}
-		wholeGroup := step.Kind == topology.StepCreateFoundingGroup || step.Kind == topology.StepDeleteGroupState
-		if step.TransferNodeName != "" || step.TransferReplicaID != 0 {
-			if step.Kind != topology.StepDemoteVoter || step.TransferNodeName == "" || step.TransferReplicaID == 0 || step.TransferReplicaID == step.ReplicaID {
-				return fmt.Errorf("step %d has invalid demotion transfer identity", step.Seq)
-			}
-		}
-		if wholeGroup && (step.NodeName != "" || step.ReplicaID != 0) {
-			return fmt.Errorf("whole-group step %d carries replica identity", step.Seq)
+		if err := validatePlanStepScope(step); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -329,39 +258,29 @@ func validStepKind(kind topology.StepKind) bool {
 }
 
 func validateTransition(ex operatorRecord, t topology.OperatorTransition) error {
-	if !t.State.Valid() || t.State == topology.OperatorPending {
+	if t.State == topology.OperatorPending || !t.State.Valid() {
 		return fmt.Errorf("invalid requested execution state %q", t.State)
 	}
 	if t.StepSeq < ex.CurrentStep || t.StepSeq > ex.CurrentStep+1 {
 		return fmt.Errorf("step %d cannot follow current step %d", t.StepSeq, ex.CurrentStep)
 	}
-	if len(ex.Steps) == 0 {
-		if t.StepSeq != 0 || t.GroupID != "" || t.NodeName != "" {
-			return fmt.Errorf("empty plan transition must name step 0 without group or node")
-		}
-	} else {
-		if t.StepSeq < 1 || t.StepSeq > len(ex.Steps) {
-			return fmt.Errorf("step %d is outside exact plan", t.StepSeq)
-		}
-		step := ex.Steps[t.StepSeq-1]
-		if t.GroupID != step.GroupID || t.NodeName != step.NodeName {
-			return fmt.Errorf("transition scope does not match exact step %d", t.StepSeq)
-		}
+	if err := validateTransitionScope(ex, t); err != nil {
+		return err
 	}
 
 	if t.State.Waiting() {
 		if t.WaitingReason == "" || t.Error != "" {
-			return fmt.Errorf("waiting transition requires a reason and no terminal error")
+			return errors.New("waiting transition requires a reason and no terminal error")
 		}
 	} else if t.WaitingReason != "" {
-		return fmt.Errorf("non-waiting transition carries a waiting reason")
+		return errors.New("non-waiting transition carries a waiting reason")
 	}
 	if t.State == topology.OperatorFailed {
 		if t.Error == "" {
-			return fmt.Errorf("failed transition requires an error")
+			return errors.New("failed transition requires an error")
 		}
 	} else if t.Error != "" {
-		return fmt.Errorf("non-failed transition carries an error")
+		return errors.New("non-failed transition carries an error")
 	}
 	if t.State == topology.OperatorSucceeded && t.StepSeq != len(ex.Steps) {
 		return fmt.Errorf("success at step %d before exact plan length %d", t.StepSeq, len(ex.Steps))
@@ -372,10 +291,10 @@ func validateTransition(ex operatorRecord, t topology.OperatorTransition) error 
 func validateRepairDocument(active, repair topology.Document) error {
 	if active.ClusterID != repair.ClusterID || !reflect.DeepEqual(active.Placement, repair.Placement) ||
 		!reflect.DeepEqual(active.Audit, repair.Audit) {
-		return fmt.Errorf("repair changes cluster policy or forced audit")
+		return errors.New("repair changes cluster placement or forced audit")
 	}
 	if len(active.Nodes) != len(repair.Nodes) || len(active.Groups) != len(repair.Groups) {
-		return fmt.Errorf("repair changes node or group cardinality")
+		return errors.New("repair changes node or group cardinality")
 	}
 	for i := range active.Nodes {
 		a, b := active.Nodes[i], repair.Nodes[i]
@@ -385,27 +304,8 @@ func validateRepairDocument(active, repair topology.Document) error {
 		}
 	}
 	for i := range active.Groups {
-		a, b := active.Groups[i], repair.Groups[i]
-		if a.ID != b.ID ||
-			!reflect.DeepEqual(a.Placement, b.Placement) ||
-			!reflect.DeepEqual(a.VoterPolicy, b.VoterPolicy) ||
-			!reflect.DeepEqual(a.Hosting, b.Hosting) ||
-			!a.CreatedAt.Equal(b.CreatedAt) || len(a.Replicas) != len(b.Replicas) ||
-			b.NextReplicaID < a.NextReplicaID {
-			return fmt.Errorf("repair changes group %q outside identity repair", a.ID)
-		}
-		for j := range a.Replicas {
-			ra, rb := a.Replicas[j], b.Replicas[j]
-			if ra.NodeName != rb.NodeName || ra.Role != rb.Role || ra.PinnedLearner != rb.PinnedLearner ||
-				!ra.CreatedAt.Equal(rb.CreatedAt) {
-				return fmt.Errorf("repair changes replica placement or role in group %q", a.ID)
-			}
-			if ra.ReplicaID != rb.ReplicaID && rb.ReplicaID < a.NextReplicaID {
-				return fmt.Errorf("repair reuses replica ID %d in group %q", rb.ReplicaID, a.ID)
-			}
-			if rb.ReplicaID >= b.NextReplicaID {
-				return fmt.Errorf("repair replica ID %d exceeds allocator in group %q", rb.ReplicaID, a.ID)
-			}
+		if err := validateRepairGroup(active.Groups[i], repair.Groups[i]); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -419,7 +319,7 @@ func validateSingleReplicaRepair(active, repair topology.Document) error {
 		return err
 	}
 	if repair.ParentVersion != active.Version {
-		return fmt.Errorf("repair parent is not Active")
+		return errors.New("repair parent is not Active")
 	}
 	expected := active.Clone()
 	expected.Version, expected.ParentVersion = repair.Version, repair.ParentVersion
@@ -437,8 +337,10 @@ func validateSingleReplicaRepair(active, repair topology.Document) error {
 				continue
 			}
 			node := active.Node(old.NodeName)
-			if group.ID == topology.MetaGroupID || old.Role != topology.ReplicaVoter || node == nil || node.State != topology.NodeActive || next.ReplicaID != group.NextReplicaID || next.ReplicaID == ^uint64(0) {
-				return fmt.Errorf("repair must replace one exact Active load voter with its allocator identity")
+			if group.ID == topology.MetaGroupID || old.Role != topology.ReplicaVoter || node == nil ||
+				node.State != topology.NodeActive || next.ReplicaID != group.NextReplicaID ||
+				next.ReplicaID == ^uint64(0) {
+				return errors.New("repair must replace one exact Active load voter with its allocator identity")
 			}
 			changed++
 			expected.Groups[i].Replicas[j].ReplicaID = next.ReplicaID
@@ -449,7 +351,7 @@ func validateSingleReplicaRepair(active, repair topology.Document) error {
 		}
 	}
 	if changed != 1 || !reflect.DeepEqual(expected, repair) {
-		return fmt.Errorf("repair changes fields outside one exact Active load voter")
+		return errors.New("repair changes fields outside one exact Active load voter")
 	}
 	return nil
 }
@@ -464,10 +366,12 @@ func validateRepairPlan(active, repair topology.Document, plan topology.Plan) er
 				activeReplica(active, step.GroupID, step.ReplicaID) != nil {
 				return fmt.Errorf("repair step %d does not target a fresh declared replica", step.Seq)
 			}
-		case topology.StepRemoveReplica, topology.StepStopReplica, topology.StepCleanupReplicaState:
+		case topology.StepRemoveReplica,
+			topology.StepStopReplica,
+			topology.StepCleanupReplicaState:
 			old := activeReplica(active, step.GroupID, step.ReplicaID)
-			if old == nil || repairReplica(repair, step.GroupID, step.ReplicaID) != nil ||
-				(step.NodeName != "" && old.NodeName != step.NodeName) {
+			if old == nil || (step.NodeName != "" && old.NodeName != step.NodeName) ||
+				repairReplica(repair, step.GroupID, step.ReplicaID) != nil {
 				return fmt.Errorf("repair step %d does not target a replaced replica", step.Seq)
 			}
 		case topology.StepTransferLeader:
@@ -505,12 +409,20 @@ func documentReplica(doc topology.Document, groupID string, replicaID uint64) *t
 	return nil
 }
 
-func newOperatorRecord(version uint64, attempt uint32, steps []topology.Step, actor string, origin topology.Origin, at time.Time) operatorRecord {
+type operatorAudit struct {
+	actor  string
+	origin topology.Origin
+	at     time.Time
+}
+
+func newOperatorRecordWithPlan(plan topology.Plan, attempt uint32, audit operatorAudit) operatorRecord {
+	owned := plan.Clone()
+	version := owned.Version
 	id := topology.MakeOperatorID(version, attempt)
 	return operatorRecord{
 		ID: id, Version: version, Attempt: attempt, State: topology.OperatorPending,
-		Steps: append([]topology.Step(nil), steps...), Actor: actor, Origin: origin,
-		StartedAt: at, UpdatedAt: at,
+		Steps: owned.Steps, VoterBases: owned.VoterBases, Actor: audit.actor, Origin: audit.origin,
+		StartedAt: audit.at, UpdatedAt: audit.at,
 	}
 }
 
@@ -551,12 +463,24 @@ func (sm *topologySM) hasNonterminalOperatorLocked() bool {
 
 func cloneOperatorRecord(in operatorRecord) operatorRecord {
 	out := in
-	out.Steps = append([]topology.Step(nil), in.Steps...)
+	plan := operatorRecordPlan(in).Clone()
+	out.Steps, out.VoterBases = plan.Steps, plan.VoterBases
 	return out
 }
 
+func operatorRecordPlan(in operatorRecord) topology.Plan {
+	return topology.Plan{Version: in.Version, Steps: in.Steps, VoterBases: in.VoterBases}
+}
+
 func operatorRecordView(in operatorRecord) topology.Operator {
-	return topology.Operator{Status: operatorStatus(in), Plan: topology.Plan{Version: in.Version, Steps: append([]topology.Step(nil), in.Steps...)}, Origin: in.Origin, Actor: in.Actor, StartedAt: in.StartedAt, UpdatedAt: in.UpdatedAt}
+	return topology.Operator{
+		Status:    operatorStatus(in),
+		Plan:      operatorRecordPlan(in).Clone(),
+		Origin:    in.Origin,
+		Actor:     in.Actor,
+		StartedAt: in.StartedAt,
+		UpdatedAt: in.UpdatedAt,
+	}
 }
 
 func operatorStatus(in operatorRecord) topology.OperatorStatus {
@@ -567,24 +491,232 @@ func operatorStatus(in operatorRecord) topology.OperatorStatus {
 	}
 }
 
-func exactStepsEqual(a, b []topology.Step) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if !a[i].Equal(b[i]) {
-			return false
-		}
-	}
-	return true
-}
-
 func transitionMatchesRecord(t topology.OperatorTransition, ex operatorRecord) bool {
-	return t.OperatorID == ex.ID && t.Version == ex.Version && t.Attempt == ex.Attempt &&
-		t.StepSeq == ex.CurrentStep && t.State == ex.State && t.GroupID == ex.GroupID &&
-		t.NodeName == ex.NodeName && t.WaitingReason == ex.WaitingReason && t.Error == ex.Error
+	return t.OperatorID == ex.ID && t.Version == ex.Version && t.Attempt == ex.Attempt && t.StepSeq == ex.CurrentStep &&
+		t.State == ex.State && t.GroupID == ex.GroupID && t.NodeName == ex.NodeName &&
+		t.WaitingReason == ex.WaitingReason && t.Error == ex.Error
 }
 
 func rejectProposal(id string, code proposalErrorCode, format string, args ...any) ApplyResult {
 	return ApplyResult{ProposalID: id, Accepted: false, Code: code, Reason: fmt.Sprintf(format, args...)}
+}
+
+func rejectProposalError(id string, code proposalErrorCode, err error) ApplyResult {
+	result := rejectProposal(id, code, errorFormat, err)
+	var placement *topology.PlacementError
+	if errors.As(err, &placement) {
+		report := placement.Report.Clone()
+		result.Placement = &report
+	}
+	return result
+}
+
+func validatePlanStepPosition(step topology.Step, i int) error {
+	if step.Seq != i+1 {
+		return fmt.Errorf("plan steps must be contiguous from 1: position %d has seq %d", i+1, step.Seq)
+	}
+	if step.GroupID == "" {
+		return fmt.Errorf("plan step %d has no group", step.Seq)
+	}
+	if !validStepKind(step.Kind) {
+		return fmt.Errorf("plan step %d has unknown kind %q", step.Seq, step.Kind)
+	}
+	return nil
+}
+
+func validatePlanStepScope(step topology.Step) error {
+	wholeGroup := step.Kind == topology.StepCreateFoundingGroup || step.Kind == topology.StepDeleteGroupState
+	if step.TransferNodeName != "" || step.TransferReplicaID != 0 {
+		if step.Kind != topology.StepDemoteVoter || step.TransferNodeName == "" || step.TransferReplicaID == 0 ||
+			step.TransferReplicaID == step.ReplicaID {
+			return fmt.Errorf("step %d has invalid demotion transfer identity", step.Seq)
+		}
+	}
+	if wholeGroup && (step.NodeName != "" || step.ReplicaID != 0) {
+		return fmt.Errorf("whole-group step %d carries replica identity", step.Seq)
+	}
+	return nil
+}
+
+func validateTransitionScope(ex operatorRecord, t topology.OperatorTransition) error {
+	if len(ex.Steps) == 0 {
+		if t.StepSeq != 0 || t.GroupID != "" || t.NodeName != "" {
+			return errors.New("empty plan transition must name step 0 without group or node")
+		}
+	} else {
+		if t.StepSeq < 1 || t.StepSeq > len(ex.Steps) {
+			return fmt.Errorf("step %d is outside exact plan", t.StepSeq)
+		}
+		step := ex.Steps[t.StepSeq-1]
+		if t.GroupID != step.GroupID || t.NodeName != step.NodeName {
+			return fmt.Errorf("transition scope does not match exact step %d", t.StepSeq)
+		}
+	}
+
+	return nil
+}
+
+func validateRepairGroup(a, b topology.Group) error {
+	if a.ID != b.ID || a.Storage != b.Storage || len(a.Replicas) != len(b.Replicas) ||
+		b.NextReplicaID < a.NextReplicaID || !reflect.DeepEqual(a.Placement, b.Placement) ||
+		!reflect.DeepEqual(a.VoterConfig, b.VoterConfig) || !reflect.DeepEqual(a.Hosting, b.Hosting) ||
+		!a.CreatedAt.Equal(b.CreatedAt) {
+		return fmt.Errorf("repair changes group %q outside identity repair", a.ID)
+	}
+	for j := range a.Replicas {
+		ra, rb := a.Replicas[j], b.Replicas[j]
+		if ra.NodeName != rb.NodeName || ra.Role != rb.Role || ra.PinnedLearner != rb.PinnedLearner ||
+			!ra.CreatedAt.Equal(rb.CreatedAt) {
+			return fmt.Errorf("repair changes replica placement or role in group %q", a.ID)
+		}
+		if ra.ReplicaID != rb.ReplicaID && rb.ReplicaID < a.NextReplicaID {
+			return fmt.Errorf("repair reuses replica ID %d in group %q", rb.ReplicaID, a.ID)
+		}
+		if rb.ReplicaID >= b.NextReplicaID {
+			return fmt.Errorf("repair replica ID %d exceeds allocator in group %q", rb.ReplicaID, a.ID)
+		}
+	}
+	return nil
+}
+
+func (sm *topologySM) validateBeginOperator(p BeginOperatorProposal) ApplyResult {
+	if p.Version != sm.latest.Version {
+		return rejectProposal(p.ProposalID, proposalSuperseded, "version %d is not Latest %d", p.Version,
+			sm.latest.Version)
+	}
+	if p.Plan.Version != p.Version {
+		return rejectProposal(p.ProposalID, proposalAuthorization,
+			"plan version %d does not match execution version %d",
+			p.Plan.Version, p.Version)
+	}
+	if err := validateExactPlan(p.Plan); err != nil {
+		return rejectProposal(p.ProposalID, proposalAuthorization, errorFormat, err)
+	}
+	if audit := sm.latest.Audit; audit != nil && audit.Forced &&
+		(audit.Operation != topology.AuditOperationForceRetireNode || p.Actor == "" || p.Origin == "") {
+		return rejectProposal(p.ProposalID, proposalAuthorization,
+			"forced retirement execution provenance is required")
+	}
+	if p.At.IsZero() {
+		return rejectProposal(p.ProposalID, proposalAuthorization, "execution timestamp is required")
+	}
+
+	return ApplyResult{Accepted: true}
+}
+
+func validateOperatorRetry(previous *operatorRecord, p BeginOperatorProposal) ApplyResult {
+	if previous.State == topology.OperatorSuperseded {
+		return rejectProposal(p.ProposalID, proposalSuperseded, "execution %q is superseded", previous.ID)
+	}
+	if !operatorRecordPlan(*previous).Equal(p.Plan) {
+		return rejectProposal(p.ProposalID, proposalAuthorization,
+			"version %d already has a different exact plan; stage a new version to replan", p.Version)
+	}
+	return ApplyResult{Accepted: true}
+}
+
+func (sm *topologySM) validateFirstOperatorPlan(p BeginOperatorProposal) ApplyResult {
+	base, err := sm.deletionBaseLocked(sm.latest)
+	if err != nil {
+		return rejectProposal(p.ProposalID, proposalAuthorization, errorFormat, err)
+	}
+	if err := sm.validatePlacementLocked(sm.latest); err != nil {
+		return rejectProposalError(p.ProposalID, proposalGuardrail, err)
+	}
+	if err := topology.ValidatePlanShape(base, sm.latest, p.Plan); err != nil {
+		return rejectProposal(p.ProposalID, proposalAuthorization, errorFormat, err)
+	}
+	return validatePlanCleanupCoverage(base, sm.latest, p)
+}
+
+func validatePlanCleanupCoverage(base, desired topology.Document, p BeginOperatorProposal) ApplyResult {
+	for _, group := range base.Groups {
+		if group.ID == topology.MetaGroupID || desired.Group(group.ID) != nil {
+			continue
+		}
+		covered := true
+		for _, replica := range group.Replicas {
+			covered = covered && topology.ReadmissionCovers(base, desired, p.Plan, replica.NodeName)
+		}
+		if covered {
+			continue
+		}
+		deleted := false
+		for _, step := range p.Plan.Steps {
+			deleted = deleted || step.GroupID == group.ID && step.Kind == topology.StepDeleteGroupState
+		}
+		if !deleted {
+			return rejectProposal(p.ProposalID, proposalAuthorization, "plan omits cleanup of approved group %q",
+				group.ID)
+		}
+	}
+	return ApplyResult{Accepted: true}
+}
+
+func terminalOperatorTransition(ex *operatorRecord, p TransitionOperatorProposal) (ApplyResult, bool) {
+	t := p.Transition
+	if transitionMatchesRecord(t, *ex) {
+		return ApplyResult{ProposalID: p.ProposalID, Accepted: true, OperatorID: ex.ID}, false
+	}
+	code := proposalAuthorization
+	if ex.State == topology.OperatorSuperseded {
+		code = proposalSuperseded
+	}
+	return rejectProposal(p.ProposalID, code, "terminal execution %q cannot transition from %q", ex.ID,
+		ex.State), false
+}
+
+func (sm *topologySM) validateTransitionConsumptionLocked(ex *operatorRecord, t topology.OperatorTransition) error {
+	if t.State != topology.OperatorSuperseded && (t.StepSeq > ex.CurrentStep ||
+		t.State == topology.OperatorSucceeded) && ex.CurrentStep > 0 {
+		if !sm.stepConsumedLocked(ex, ex.Steps[ex.CurrentStep-1]) {
+			return errors.New("exact step consumption receipts are incomplete")
+		}
+	}
+	if t.State == topology.OperatorSucceeded {
+		if len(ex.Steps) > 0 && !sm.stepConsumedLocked(ex, ex.Steps[len(ex.Steps)-1]) {
+			return errors.New("final step consumption receipts are incomplete")
+		}
+		for _, revocation := range sm.authority.revocations {
+			if !revokedComplete(revocation) {
+				return errors.New("predecessor revocation is pending")
+			}
+		}
+	}
+	return nil
+}
+
+func (sm *topologySM) operatorsToRevokeLocked(previous *operatorRecord, version uint64) []topology.OperatorID {
+	var revoked []topology.OperatorID
+	for _, old := range sm.operators {
+		if previous != nil && old.ID == previous.ID || old.Version < version && !old.State.Terminal() {
+			revoked = append(revoked, old.ID)
+		}
+	}
+	return revoked
+}
+
+func nextOperatorAttempt(previous *operatorRecord) (uint32, error) {
+	if previous == nil {
+		return 1, nil
+	}
+	if previous.Attempt == ^uint32(0) {
+		return 0, errors.New("execution attempt exhausted")
+	}
+	return previous.Attempt + 1, nil
+}
+
+func (sm *topologySM) recordOperatorTransitionEffectsLocked(index uint64, ex *operatorRecord,
+	t topology.OperatorTransition) {
+	if t.State == topology.OperatorSuperseded {
+		for _, admission := range sm.admissions {
+			if admission.OperatorID == ex.ID && !admission.State.terminal() {
+				admission.State = AdmissionSuperseded
+			}
+		}
+	} else if ex.CurrentStep > 0 && ex.CurrentStep <= len(ex.Steps) && (t.StepSeq > ex.CurrentStep ||
+		t.State == topology.OperatorSucceeded) {
+		sm.updateAdmissionForCompletedStepLocked(ex, ex.Steps[ex.CurrentStep-1])
+		sm.recordRoleEffectLocked(index, ex, ex.Steps[ex.CurrentStep-1], t.At)
+	}
 }

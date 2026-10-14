@@ -2,12 +2,17 @@ package topology
 
 import (
 	"fmt"
-	"time"
+	"slices"
 )
 
+// OperatorID identifies an execution attempt for an approved topology version.
 type OperatorID string
+
+// OperatorState describes the current execution state of an approved plan.
 type OperatorState string
 
+// OperatorPending and the following states describe execution, waits and
+// terminal outcomes.
 const (
 	OperatorPending           OperatorState = "pending"
 	OperatorRunning           OperatorState = "running"
@@ -19,16 +24,18 @@ const (
 	OperatorSuperseded        OperatorState = "superseded"
 )
 
+// Terminal reports whether execution succeeded, failed or was superseded.
 func (s OperatorState) Terminal() bool {
 	return s == OperatorSucceeded || s == OperatorFailed || s == OperatorSuperseded
 }
 
+// Waiting reports whether execution awaits a replica, catch-up or leadership.
 func (s OperatorState) Waiting() bool {
 	return s == OperatorWaitingForReplica || s == OperatorWaitingForCatchUp || s == OperatorWaitingForLeader
 }
 
-type StepKind string
-
+// StepCreateFoundingGroup and the following kinds identify replica, membership
+// and cleanup steps.
 const (
 	StepCreateFoundingGroup StepKind = "create_founding_group"
 	StepPrepareReplica      StepKind = "prepare_replica"
@@ -43,42 +50,47 @@ const (
 	StepDeleteGroupState    StepKind = "delete_group_state"
 )
 
-type Step struct {
-	Seq               int      `json:"seq"`
-	Kind              StepKind `json:"kind"`
-	GroupID           string   `json:"group_id"`
-	NodeName          string   `json:"node_name,omitempty"`
-	ReplicaID         uint64   `json:"replica_id,omitempty"`
-	TransferNodeName  string   `json:"transfer_node_name,omitempty"`
-	TransferReplicaID uint64   `json:"transfer_replica_id,omitempty"`
-}
-
+// Equal compares every operation and identity field of two steps.
 func (s Step) Equal(other Step) bool { return s == other }
 
-type Plan struct {
-	Version uint64 `json:"version"`
-	Steps   []Step `json:"steps"`
+// Clone copies plan steps, voter bases and their nested voter slices.
+func (p Plan) Clone() Plan {
+	p.Steps = slices.Clone(p.Steps)
+	p.VoterBases = slices.Clone(p.VoterBases)
+	for i := range p.VoterBases {
+		p.VoterBases[i].Voters = slices.Clone(p.VoterBases[i].Voters)
+	}
+	return p
 }
 
+// Equal compares the version, ordered steps and exact ordered voter bases.
+func (p Plan) Equal(other Plan) bool {
+	if p.Version != other.Version || len(p.VoterBases) != len(other.VoterBases) || !slices.Equal(p.Steps, other.Steps) {
+		return false
+	}
+	for i, base := range p.VoterBases {
+		if base.GroupID != other.VoterBases[i].GroupID || !slices.Equal(base.Voters, other.VoterBases[i].Voters) {
+			return false
+		}
+	}
+	return true
+}
+
+// IsEmpty reports whether the plan has no execution steps.
 func (p Plan) IsEmpty() bool { return len(p.Steps) == 0 }
 
-type AuthorizedStep struct {
-	OperatorID        OperatorID `json:"operator_id"`
-	Version           uint64     `json:"version"`
-	Attempt           uint32     `json:"attempt"`
-	StepSeq           int        `json:"step_seq"`
-	Kind              StepKind   `json:"kind"`
-	GroupID           string     `json:"group_id"`
-	NodeName          string     `json:"node_name,omitempty"`
-	ReplicaID         uint64     `json:"replica_id,omitempty"`
-	TransferNodeName  string     `json:"transfer_node_name,omitempty"`
-	TransferReplicaID uint64     `json:"transfer_replica_id,omitempty"`
-}
-
+// Matches compares the complete authorization tuple with an expected operator
+// step.
 func (a AuthorizedStep) Matches(id OperatorID, attempt uint32, version uint64, step Step) bool {
-	return a.OperatorID == id && a.Attempt == attempt && a.Version == version && a.StepSeq == step.Seq && a.Kind == step.Kind && a.GroupID == step.GroupID && a.NodeName == step.NodeName && a.ReplicaID == step.ReplicaID && a.TransferNodeName == step.TransferNodeName && a.TransferReplicaID == step.TransferReplicaID
+	return a.OperatorID == id && a.Attempt == attempt && a.Version == version && a.StepSeq == step.Seq &&
+		a.Kind == step.Kind && a.GroupID == step.GroupID && a.NodeName == step.NodeName &&
+		a.ReplicaID == step.ReplicaID && a.TransferNodeName == step.TransferNodeName &&
+		a.TransferReplicaID == step.TransferReplicaID && a.ExpectedVotersDigest == step.ExpectedVotersDigest &&
+		a.ResultVotersDigest == step.ResultVotersDigest
 }
 
+// OperatorStatus reports execution progress, current subject and diagnostic
+// failure or wait.
 type OperatorStatus struct {
 	ID            OperatorID    `json:"id"`
 	Version       uint64        `json:"version"`
@@ -93,30 +105,10 @@ type OperatorStatus struct {
 	Error         string        `json:"error,omitempty"`
 }
 
-type Operator struct {
-	Status    OperatorStatus `json:"status"`
-	Plan      Plan           `json:"plan"`
-	Actor     string         `json:"actor"`
-	Origin    Origin         `json:"origin"`
-	StartedAt time.Time      `json:"started_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
-}
-
+// MakeOperatorID derives an execution identifier from a version and attempt
+// number.
 func MakeOperatorID(version uint64, attempt uint32) OperatorID {
 	return OperatorID(fmt.Sprintf("exec-v%d-a%d", version, attempt))
-}
-
-type OperatorTransition struct {
-	OperatorID    OperatorID    `json:"operator_id"`
-	Version       uint64        `json:"version"`
-	Attempt       uint32        `json:"attempt"`
-	StepSeq       int           `json:"step_seq"`
-	State         OperatorState `json:"state"`
-	GroupID       string        `json:"group_id,omitempty"`
-	NodeName      string        `json:"node_name,omitempty"`
-	WaitingReason string        `json:"waiting_reason,omitempty"`
-	Error         string        `json:"error,omitempty"`
-	At            time.Time     `json:"at"`
 }
 
 // Valid reports whether a state is part of the execution protocol.

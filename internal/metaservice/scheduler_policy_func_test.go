@@ -9,14 +9,14 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/policy"
+	"github.com/asalimonov/gquorum/scheduling"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
-type schedulerFunc func(context.Context, policy.ScheduleInput) (policy.ScheduleDecision, error)
+type schedulerFunc func(context.Context, scheduling.ScheduleInput) (scheduling.ScheduleDecision, error)
 
-func (f schedulerFunc) Schedule(ctx context.Context, in policy.ScheduleInput) (policy.ScheduleDecision, error) {
+func (f schedulerFunc) Schedule(ctx context.Context, in scheduling.ScheduleInput) (scheduling.ScheduleDecision, error) {
 	return f(ctx, in)
 }
 
@@ -69,7 +69,7 @@ func TestSchedulingStatusLeaderNamesUseCapturedActive(t *testing.T) {
 func TestMetaUsesSelectedSchedulerWithOwnedHoldsAndCallbackDeadline(t *testing.T) {
 	t.Parallel()
 	type observation struct {
-		input    policy.ScheduleInput
+		input    scheduling.ScheduleInput
 		duration time.Duration
 	}
 	seen := make(chan observation, 1)
@@ -78,7 +78,7 @@ func TestMetaUsesSelectedSchedulerWithOwnedHoldsAndCallbackDeadline(t *testing.T
 		o.Scheduling = SchedulingOptions{Interval: 100 * time.Millisecond, TickTimeout: 80 * time.Millisecond}
 		o.CallbackTimeout = 25 * time.Millisecond
 		o.HeldLoads = func() []storage.Identity { return held }
-		o.Scheduler = schedulerFunc(func(ctx context.Context, in policy.ScheduleInput) (policy.ScheduleDecision, error) {
+		o.RepairPolicy = schedulerFunc(func(ctx context.Context, in scheduling.ScheduleInput) (scheduling.ScheduleDecision, error) {
 			deadline, _ := ctx.Deadline()
 			select {
 			case seen <- observation{input: in.Clone(), duration: time.Until(deadline)}:
@@ -87,7 +87,7 @@ func TestMetaUsesSelectedSchedulerWithOwnedHoldsAndCallbackDeadline(t *testing.T
 			// Callback snapshots are application-owned scratch values.
 			in.Held[0].ReplicaID = 100
 			in.Active.Nodes[0].Name = "changed"
-			return policy.ScheduleDecision{Reason: "application_scheduler"}, nil
+			return scheduling.ScheduleDecision{Reason: "application_scheduler"}, nil
 		})
 	})
 	leader := readyPublic(t, groups)

@@ -89,7 +89,7 @@ flowchart TD
     Node --> Managed
     AuthorityStore --> Managed
     Managed --> Loads[load.Group handles and application state machines]
-    Loads --> LoadStore[WAL backend or application storage.Store]
+    Loads --> LoadStore[WAL backend, in-memory store or application storage.Store]
     Meta <--> MetaNet[Included authenticated gRPC meta transport]
     Loads <--> LoadNet[Application load.Transport]
     MetaNet <--> Peers[Peer nodes]
@@ -111,6 +111,14 @@ is per group, so one possible three-node layout is:
 | node1 | Leader | Follower | Follower |
 | node2 | Follower | Leader | Follower |
 | node3 | Follower | Follower | Leader |
+
+Node labels can restrict load hosting through exact selectors. A reserved node
+keeps its approved exact load replicas but takes no new ones; a learner-only
+node still hosts `_meta` while being barred from voting there and in load
+groups. A group's distinct-voter label can require one voter per nonempty AZ
+value. Approved plans guard both the final assignment and intermediate native
+voter sets; infeasible transitions report why they cannot proceed. See
+[labels and placement](placement.md).
 
 Additional groups can distribute leadership and independent workloads. The
 library does not automatically shard business data or balance healthy groups,
@@ -155,7 +163,9 @@ message sent back through another call. There is no dedicated Heartbeat RPC.
 
 Load groups send the same Raft message types through `load.Transport.SendRaft`
 and receive them through `Node.ReceiveLoadRaft`. The application chooses the wire
-schema and authenticates senders. The test application's `Load.Deliver` RPC is
+schema and authenticates senders. The included `loadgrpc` adapter streams
+non-snapshot batches per replica pair without waiting for each to be stepped,
+and keeps snapshots on unary calls with explicit completion reports. The test application's `Load.Deliver` RPC is
 an example protocol, not a library requirement.
 
 The default node-health sampler runs every five seconds. It uses the configured
@@ -213,14 +223,38 @@ each replica. Raft orders bytes; it cannot correct divergent application logic.
 
 ## 6. Persistence, snapshots and recovery
 
-Each local replica has durable Raft state: entries, term/vote/commit hard state,
-a snapshot and membership information. `_meta` uses its dedicated bbolt store;
+Each local replica has Raft state: entries, term/vote/commit hard state, a
+snapshot and membership information. `_meta` uses its dedicated bbolt store;
 managed load groups use the included etcd WAL backend or a caller-supplied store.
 The snapshot contains the complete machine state, not merely its last position.
+Every group, `_meta` included, runs its own engine instance: one Raft run loop,
+one writer that persists that group's Ready batches to that group's store, and
+its own destination send workers. A slow store therefore delays only the groups
+that use it.
+
+The WAL backend synchronizes writes by default. Explicit
+`WALOptions.DisableFSync` skips load WAL and applied-state fsync, retaining
+userspace-buffer flushing to the OS. Process restart and host/power-loss recovery
+are different guarantees: this opt-out can lose acknowledged writes or corrupt
+state after host failure. Snapshot/identity/directory synchronization and `_meta`
+remain unchanged. Recovery validation still rejects inconsistent retained state.
+
+A load group created with `GroupSpec{Storage: topology.StorageMemory}` keeps its
+Raft state in the Node-owned [`storage/memstore`](../../storage/memstore/store.go)
+instead. The class is replicated in `topology.Group.Storage` and cannot change.
+An entry still commits only once a quorum holds it, but in memory: acknowledged
+writes survive while a quorum of the group's replicas keeps running. A restarted
+replica has no state, so it cannot resume its old Raft identity (an amnesiac
+voter could vote twice). It parks as `store_missing`, as a voter with a lost WAL
+would, and its node then reseats its own replica under a fresh ID; see
+[node ownership and recovery](runtime.md#in-memory-load-groups).
 
 Startup verifies durable identity and recovery evidence, restores the snapshot,
 and replays the full committed tail. An applied hint is not permission to skip
-application reconstruction. Missing, foreign or contradictory retained state is
+application reconstruction; recovery only checks that it does not exceed the
+durable commit. The engine therefore persists the applied hint and its
+configuration on a 250 ms timer rather than after every Ready, so each write
+batch costs one durable WAL sync instead of two. Missing, foreign or contradictory retained state is
 preserved and refused or parked, rather than silently treated as a new replica.
 Approved assignment, local ledgers and actual storage must agree before a
 managed handle is published.
@@ -229,7 +263,11 @@ Snapshots are requested explicitly through `load.Group.Snapshot` and generated
 automatically after membership changes or the applied-index threshold, which
 defaults to 10,000 entries since the last snapshot. The snapshot is persisted
 before compaction removes its covered log prefix. A peer behind that prefix can
-catch up by snapshot transfer. Managed load transports must report the exact
+catch up by snapshot transfer. The WAL backend keeps the newest two complete
+snapshots and deletes every WAL segment wholly below the older one, so disk use
+is bounded by about two segments plus their preallocated successors. It reads
+the WAL's snapshot markers once when a group opens and maintains them in memory
+afterwards; saving a snapshot or compacting never rescans the log. Managed load transports must report the exact
 snapshot delivery's completion or failure through `Node.ReportLoadDelivery`;
 accepting a send is not proof of completed snapshot installation.
 
@@ -257,7 +295,8 @@ the exact authorization and identity before releasing or collecting storage.
 | Health observer and scheduler | Observe degradation and propose supported repairs, with authorization and safety rechecked by the core. |
 
 The default scheduler restores missing required load voters. It does not rebalance
-healthy groups, change meta membership or provision machines. Policies choose
+healthy groups or provision machines. Configured groups, including `_meta`,
+support guarded voter-role changes. Repair policies choose
 supported decisions; they cannot bypass quorum or ownership constraints.
 
 ## 8. Performance and bounded work
@@ -292,6 +331,7 @@ or latency target is guaranteed by the default settings.
 | Apply failure or invalid recovery evidence | The replica halts or startup is refused/parked, retaining evidence for diagnosis. |
 | Overload or slow/unreachable peers | Admission and queues are bounded; delivery failures feed Raft's retry/catch-up behavior. |
 | Permanent majority loss | Force-new recovery is not implemented; reassigning names or deleting retained state is not a safe substitute. |
+| A majority of an in-memory group's replicas restarts | Their state is gone; the group cannot commit or reseat. Delete it and create a group under a new ID. |
 
 Status is an observation. `MetaLeaderID` and `LeaderID` are numeric Raft IDs;
 their readable node names are resolved through the captured Active view in
@@ -309,7 +349,7 @@ leader.
 | [Load contracts](../../load/machine.go), [transport](../../load/transport.go), [group handle](../../load/group.go) | Application integration and replica-facing API. |
 | [Meta protobuf](../../internal/metapb/meta.proto), [transport](../../internal/metatransport/transport.go) | Included meta RPCs and serialized Raft message delivery. |
 | [Meta service](../../internal/metaservice/group.go), [session renewal](../../internal/metaservice/session.go), [expiry](../../internal/metaservice/expiry.go) | Node coordination and session maintenance. |
-| [Storage contract](../../storage/storage.go), [meta adapter](../../internal/metastore/adapter.go), [WAL writes](../../storage/walstore/operations.go) | Durable identity and consensus persistence. |
+| [Storage contract](../../storage/storage.go), [meta adapter](../../internal/metastore/adapter.go), [WAL writes](../../storage/walstore/operations.go), [in-memory store](../../storage/memstore/store.go) | Identity and consensus persistence. |
 | [Membership safety](../../membership/safety.go), [managed ownership](../../internal/managed/host.go) | Safe group changes and exact replica lifetimes. |
 
 See the [testing guide](../testing/tests.md) for unit, functional, race and

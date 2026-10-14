@@ -3,7 +3,8 @@
 `gquorum` owns a node's topology quorum and its local application replicas.
 Applications supply settings, listeners, identities, paths, load state machines
 and load transport. The library contains the `_meta` protocol, its bbolt store,
-the Raft engines, recovery and an etcd WAL backend for load groups.
+the Raft engines, recovery, an etcd WAL backend for load groups and an
+in-memory store for groups that do not need to survive a full restart.
 
 Three handles describe the public API:
 
@@ -23,7 +24,8 @@ flowchart TD
     Controller --> Host
     Host --> Group[load.Group and Raft engine]
     Host --> Integration[Application factory, transport and retirement]
-    Node --> Policies[Scheduler and LifecyclePolicy]
+    Node --> Scheduler[Internal scheduler and scheduling.RepairPolicy]
+    Node --> Lifecycle[lifecycle.Hooks]
 ```
 
 ## Construct and start a node
@@ -48,7 +50,9 @@ loader or built-in storage root:
 | `StorageDir string` | Explicit system-storage directory containing fixed `_meta.bolt` and `_authority.bolt` files; outside all load retirement roots. |
 | `Meta MetaOptions` | Network, timing, reads, session, observation, snapshot and watcher settings. |
 | `Loads LoadOptions` | Optional managed load integration; leave empty for a meta-only participant. |
-| `Policies PolicyOptions` | Built-in policy options or caller implementations, scheduling controls and callback timeout. |
+| `Scheduling scheduling.Options` | Repair policy selection and local reconciliation timing. |
+| `Lifecycle lifecycle.Options` | Local readiness, retirement-retention and removal hooks. |
+| `CallbackTimeout time.Duration` | Shared deadline for finite application and decision callbacks; zero selects ten seconds. |
 | `Health`, `Events`, `Logger` | Optional application health observations, borrowed local event bus and logger. |
 
 `MetaNetworkOptions` takes a caller-created listener, advertised address and
@@ -59,8 +63,16 @@ remain usable until their owner joins them.
 
 Each founder supplies `FoundingMember{Node, MemberID, Address}` with a unique
 positive member ID. `FoundingIDs(clusterID, names)` derives a stable founding map.
+For a fixed roster, `StaticPeers` (node name to `StaticPeer{MetaAddress,
+LoadAddress}`) implements the meta `Resolver`, provides `ResolveLoad` for
+`loadgrpc.Options.Resolve`, and builds sorted founders with
+`Founders(clusterID, nodeType)` using `FoundingIDs`. A route is never proof of
+admission. Dynamic service discovery is not provided; it can implement the
+same resolver shapes.
 `LoadStoredIdentity(storageDir)` reads the fixed `_meta.bolt` file's validated
-durable pin without creating storage; it returns no process incarnation.
+durable pin without creating storage; it returns `topology.IdentityLookup`.
+On success, `Found` reports pin presence and `Identity` contains the durable pin
+without a process incarnation.
 Use `util.NewInstanceID()` once per process start for `Identity.InstanceID`,
 including retained restarts. This helper is only for process identities; request
 IDs and durable member/replica IDs have separate contracts. See the executable
@@ -77,11 +89,47 @@ monotonic replica ID within its group. Node states include active, draining and
 excluded. Drain changes eligibility and load placement while preserving `_meta`
 membership. Exclusion and readmission use the approved membership workflow.
 
+`topology.BuildPlan(active, desired, observed, rules)` constructs a plan from
+observed membership. `BuildPlanPreferred` takes the same first three arguments
+and a `topology.PlanOptions` value containing `Rules` and
+`PreferredMetaTransfer`. The preference names an eligible `_meta` member ID;
+zero retains ordinary transfer selection, and a preference never bypasses
+membership or placement safety checks.
+
+`ValidateVoterSetTransition` groups before/after member IDs in `topology.VoterSets`.
+`ValidateMetaDrainSafety` takes Active, Target and a `topology.MetaDrainInput`
+containing the supplied membership status, health observations and final-phase
+flag. These structs group caller inputs; they do not acquire fresh observations
+or bypass the existing identity, placement and quorum checks.
+
+`Cluster.SetReplicaPinnedLearner` takes the group ID, a `topology.LearnerPin`
+containing the exact `Replica` key and desired `Pinned` value, and mutation options. `topology.ValidateLabels` selects `topology.NodeLabels`
+or `topology.GroupLabels` to apply the corresponding restriction-key rules.
+The setting changes learner eligibility through the existing guarded topology workflow.
+
+Node and group values expose `GetLabels`/`SetLabels`; replacement copies and
+validates the complete map, while persistent edits still require topology CAS
+and approval. Load selectors match exact node-label values, and a per-group
+placement rule overrides the whole inherited document rule. Group labels are
+descriptive only. `gquorum.io/reserved` blocks fresh load identities but keeps
+approved exact replicas; `gquorum.io/learner-only` forbids voting in `_meta` and
+load groups. `VoterConfig.DistinctVoterLabel` enforces different nonempty voter
+domains, with an explicit unsatisfied-placement report when the target cannot
+be met. See [labels and placement](placement.md) for the full contract.
+
 | View | Meaning |
 | --- | --- |
 | `Latest` | Most recently staged document, possibly unapproved. |
 | `Target` | Approved desired topology. |
 | `Active` | Fully converged topology. |
+
+`EnsureGroup(ctx, spec, EnsureOptions{Actor})` is the idempotent provisioning
+path for applications: it returns the Active group when every field set in the
+spec matches, waits while an approved matching group converges, approves only
+its own staged creation (same `ChangedBy` actor, parent Target, and no other
+change), and otherwise stages the group with expected-version CAS and approval.
+A different existing group or foreign unapproved intent returns
+`fault.ErrConflict`; EnsureGroup never approves another actor's staging.
 
 `Get`, paginated `History`, and `Watch` expose versioned documents and updates.
 These reads, together with `Latest`, `Target`, `Active` and status, return owned
@@ -129,6 +177,9 @@ reused. Fresh-ID readmission and replica reseating preserve the distinction
 between old state and its authorized replacement. Force-new recovery after
 permanent majority loss remains deferred.
 
+`ChangeReplica` takes the group ID, `topology.ReplicaRoleChange{NodeName, Role}`,
+and mutation options.
+
 `TransferLeader` commits a grant for the exact Active target. Canceling its wait
 can leave that grant unconsumed. A retry with the same Active version, group, node
 and replica resumes the original open grant, including after metadata recovery.
@@ -162,7 +213,7 @@ Numeric `MemberID` and `ReplicaID` are Raft identities, not node names.
 Status exposes numeric `MetaLeaderID` / `meta_leader_id` and `LeaderID` /
 `leader_id` fields. It additionally exposes `MetaLeaderNodeName` /
 `meta_leader_node_name` and group `LeaderNodeName` / `leader_node_name`.
-Cluster status, local meta status and `policy.ScheduleInput.Status` resolve names
+Cluster status, local meta status and `scheduling.ScheduleInput.Status` resolve names
 by exact group/replica ID through their captured Active view, including cached
 cluster reads. Empty names mean unknown or unmapped;
 numeric observations remain available. `HostNode` names the reporting host,
@@ -170,9 +221,11 @@ which may be a follower. Raw load-group status does not resolve topology names;
 use `Cluster.Status(ctx)` for the enriched group view.
 
 `Node.ActivateSession`, `KeepAlive` and `DeactivateSession` support caller-owned
-sessions. `Cluster.AcquireLock` and `LockHolder` use session IDs. Node's own
+sessions. `Cluster.AcquireLock` and `LockHolder` use session IDs.
+`LockHolder` and `ReadLockHolder` return `topology.LockHolder`, whose `Session`
+is an owned value and whose `Held` field reports whether a holder exists. Node's own
 activation is separate and observable through `OwnSessionLive`. A local
-`SetServeOverride` changes readiness policy input without changing Raft quorum
+`SetServeOverride` changes readiness input without changing Raft quorum
 or membership safety.
 
 ## Managed load integration
@@ -192,11 +245,37 @@ Supply the following through `LoadOptions`:
 | `Factory GroupFactory` | Receives owned `load.ReplicaSpec`: exact storage identity, node/process identity, approved group and version. Returns `load.Application`. |
 | `Application.StateMachine` | Implements `Apply(ctx, load.Command) (load.Result, error)`, `Snapshot(ctx) ([]byte, error)` and `Restore(ctx, []byte) error`. Recovery restores the full snapshot and committed tail. |
 | `load.QueryMachine` | Optional `Query(ctx, []byte) (load.Result, error)` for `Group.Read`; serialized with Apply/Restore. Write-only machines can omit it and still use ReadBarrier. |
+| `Application.Run` | Optional exact-replica background work started after authorized publication. Node cancels and joins it before Close; use Group.RunWhileLeader for leadership-scoped work. |
 | `Application.Close` | Optional application-resource release. A successful factory transfers this responsibility to Node, even if its caller subsequently cancels. A failed factory releases its own partial acquisitions. |
-| `Storage LoadStorageOptions` | Choose Node-owned `WAL: &WALOptions{RootDir: ...}`, or a borrowed `storage.Store` and explicit `storage.RetirementStore`. `Store.HasState` reports all retained evidence for fresh-start validation. |
-| `Transport load.Transport` | Caller-defined authenticated protocol adapter implementing `SendRaft`, `ReadReplica`, `InstallFence` and `ApplyAction`. No load wire schema is imposed. |
-| `Retire RetireReplicaFunc` | Optional callback for application state outside the Raft store; verifies exact identity and authorization, performs idempotent cleanup and echoes the complete verified proof. |
+| `Storage LoadStorageOptions` | Choose Node-owned `WAL: &WALOptions{RootDir: ...}`, or a borrowed `storage.Store` and explicit `storage.RetirementStore`, for groups of the default storage class. `Store.HasState` reports all retained evidence for fresh-start validation. Node also owns an in-memory store for groups created with `topology.StorageMemory`; it needs no option. |
+| `Transport load.Transport` | Application-selected authenticated adapter implementing `SendRaft`, `ReadReplica`, `InstallFence` and `ApplyAction`. Use the optional public `transport/loadgrpc` adapter or supply another protocol. |
+| `Retire RetireReplicaFunc` | Optional callback for application state outside the Raft store; verifies exact identity and authorization (`RetirementRequest.Verify`), performs idempotent cleanup and echoes the complete verified proof (`RetirementRequest.Result`). Leave nil when the application keeps no state outside Raft. |
 | `Engine load.EngineOptions` | Timing, snapshot threshold, bounded proposal/application batches and read settings. `MetaOptions.Reads` configures metadata reads separately. |
+
+`WALOptions.DisableFSync` (also `walstore.Options.DisableFSync`) is an explicit
+local opt-out from fsync on load WAL and applied-state writes. Its default is
+false. The encoder still flushes to the OS before acknowledgement; snapshot
+files, identity pins and directory synchronization are unchanged, as are `_meta`
+and authority persistence. This setting is for disposable/test data: host crashes
+can lose acknowledged writes or leave inconsistent state. It does not authorize
+reseating, resetting a group or ignoring recovery validation. The cache Compose
+demo enables it through `STORAGE_DISABLE_FSYNC=true`; production callers should retain
+the synchronous default.
+
+The optional [`transport/loadgrpc`](../../transport/loadgrpc/README.md) adapter
+shares peer connections across groups and routes batches by exact replica identity;
+see [load transport multiplexing](load-transport-multiplexing.md) for the protocol
+and routing flow. It owns bounded client connections, authenticated load ingress,
+structured wire errors and exact delivery reporting. The caller supplies address resolution,
+authentication policy, dial credentials and the gRPC server. It carries only
+library load traffic: gquorum provides no application RPC channel, and
+applications hand work between replicas through replicated state. Construct it before
+Node, pass it through `Loads.Transport`, bind Node exactly once, and register the
+service before serving. Node still authorizes membership and effects. Stop Node
+before closing the adapter and server; adapter Close cancels and joins accepted
+calls and retains ownership across a caller timeout. Shared-token authentication
+is provided for trusted members; certificate-to-node authentication is caller
+policy. Neither listener creation nor configuration loading moves into Node.
 
 Transport values contain exact node/process/member and load replica identities.
 The receiver authenticates its application protocol, decodes the typed request,
@@ -213,7 +292,11 @@ reason and exact group/replica identity. The operator uses those details to
 distinguish transient quorum/health loss from permanent membership refusal.
 An unstructured `fault.UnsafeMembership` cannot supply that distinction.
 `ReadReplica` may run concurrently for metrics and native status collection;
-per-destination send serialization applies to `SendRaft`.
+per-destination send serialization applies to `SendRaft`. Node calls it from
+one worker per destination and coalesces batches queued behind a send into
+one ordered call, and steps each received batch in one loop turn. An adapter
+may return before the recipient steps a batch and report refusals
+asynchronously; `loadgrpc` streams non-snapshot batches this way.
 Read admission and protocol-round bounds are observable in
 `metrics.ReplicaSample.ReadQueue`. The Raft owner samples the configured limit,
 request slots/queue, quorum/application waiters and local/remote protocol rounds.
@@ -257,51 +340,105 @@ must be honored; read-only status and `RequestStop` are safe, while waiting for
 shutdown that must join the same callback would deadlock.
 
 `load.Group` exposes `Propose`, `WaitReady`, `Snapshot`, `Status`, `IsLeader`,
-`Running`, `Identity`, `GroupID`, `ReplicaID`, `WALStall`, `Error` and `ProposalStats`. It exposes no independent
+`Running`, `Identity`, `GroupID`, `ReplicaID`, `WALStall`, `Error`, `ProposalStats`,
+`Watch` and `RunWhileLeader`. It exposes no independent
 start/stop, raw membership mutation or raw Raft transport. For independent
 low-level consensus without `_meta`, use `load.NewStandalone` and its separate
 `Standalone` owner, which also provides stepping, delivery reporting and safe
 membership/leader operations. The caller then owns authorization and recovery
 policy as well as transport and borrowed resources.
 
-## Replaceable policies
+## Voter configuration, repair policies and lifecycle hooks
 
-There are two public decision interfaces, both in `policy`:
+The `Policy` naming family is reserved for algorithms choosing replica repairs
+and voter-role changes. `internal/scheduling.Scheduler` runs the selected
+`scheduling.RepairPolicy`, revalidates its decision and submits approved work.
+The replicated `VoterConfig` expresses group requirements; `lifecycle.Hooks`
+returns local readiness, retention and post-removal decisions. Hooks are distinct
+from observation channels and replica-ready background callbacks.
+
+Configure the decision-related fields alongside the required identity, listener
+and storage settings:
 
 ```go
-type Scheduler interface {
+opts.Scheduling = scheduling.Options{
+    DefaultRepair: scheduling.DefaultRepairOptions{StableFor: time.Minute},
+    Interval: 30 * time.Second,
+    Timeout: 20 * time.Second,
+    Cooldown: 5 * time.Minute,
+}
+opts.Lifecycle = lifecycle.Options{
+    Default: lifecycle.DefaultOptions{Startup: lifecycle.LocalAdmission},
+}
+opts.CallbackTimeout = 10 * time.Second
+```
+
+`CallbackTimeout` also reaches finite application factory, close and retirement
+callbacks and authority-related callbacks. It does not bound `Application.Run`
+or the lifetime of leadership-scoped background work. Cancellation retains
+ownership until callbacks return.
+
+This alpha rename removes the old package/API names and changes topology JSON
+from `voter_policy` to `voter_config` and scheduling status from `policy` to
+`repair_policy` (built-in value `default-repair`). Old alpha storage and mixed
+binaries are unsupported; use fresh development state for this transition.
+There are no migration adapters or automatic data resets. Same-version retained
+restarts, identity checks and full snapshot/tail replay remain supported.
+
+`topology.VoterConfig` is replicated configuration data. The two local decision
+interfaces live in separate packages:
+
+```go
+// Package scheduling
+type RepairPolicy interface {
     Schedule(context.Context, ScheduleInput) (ScheduleDecision, error)
 }
-type LifecyclePolicy interface {
+// Package lifecycle
+type Hooks interface {
     Readiness(context.Context, ReadinessInput) (ReadinessDecision, error)
     Retention(context.Context, RetentionInput) (RetentionDecision, error)
     Removal(context.Context, RemovalInput) (RemovalDecision, error)
 }
 ```
 
-The default scheduler is `policy.RestoreDegraded`. Groups with a replicated
-`VoterPolicy` converge toward their desired voter count and replace persistently
+The default repair policy is `scheduling.DefaultRepairPolicy`. Groups with a replicated
+`VoterConfig` converge toward their desired voter count and replace persistently
 unavailable or replication-lagging voters using stable learners. This includes
 `_meta`; every admitted node still hosts that group. Fresh groups default to
 three voters. Other replicas are promotable standbys unless `PinnedLearner` is
-set. Healthy voter seats remain stable. Groups with a nil policy retain the
+set. Healthy voter seats remain stable. Groups with nil voter configuration retain the
 legacy missing-load-voter repair path until explicit adoption.
 
-Use `topology.DefaultVoterPolicy()` and override fields before passing a complete
-policy to `MetaOptions.VoterPolicy`, `GroupSpec.VoterPolicy` or
-`Cluster.SetGroupVoterPolicy`. Defaults are 30 seconds of failure, 60 seconds of
+Use `topology.DefaultVoterConfig()` and override fields before passing a complete
+configuration to `MetaOptions.VoterConfig`, `GroupSpec.VoterConfig` or
+`Cluster.SetGroupVoterConfig`. Defaults are 30 seconds of failure, 60 seconds of
 standby stability, and five-minute group/demotion cooldowns. Apply backlog
 blocks promotion but alone does not replace a voter. `MaxSurgeVoters` permits
 zero or one temporary extra voter, subject to hard placement and live-quorum
-checks. Policy updates, hosting rules and learner pins use ordinary explicit
+checks. Configuration updates, hosting rules and learner pins use ordinary explicit
 staging/approval. Automatic role changes use a separate atomic CAS operation
 that cannot approve unrelated staged intent.
+
+The scheduler skips ineligible placement candidates and never balances healthy
+groups merely because labels changed. The planner checks every intermediate
+voter set; at a hard replica limit it may remove an old exact identity before
+preparing its replacement only when the observed live quorum remains safe.
 
 A three-voter load group needs `Placement.MaxReplicas >= 4` to use promotion-first
 replacement with `MaxSurgeVoters=1`. Its steady target remains three; the extra
 headroom permits only the approved transition. With a hard maximum of three,
 replacement uses demotion-first when the intermediate live quorum is safe.
 The scheduler waits if neither ordering can satisfy the core checks.
+
+`GroupSpec.Storage` selects where a group's replicas keep their Raft state. The
+default (`topology.StorageDefault`) uses the configured load storage;
+`topology.StorageMemory` uses the Node-owned
+[`storage/memstore`](../../storage/memstore/store.go). The class is recorded in
+`topology.Group.Storage`, cannot change after creation, and `EnsureGroup`
+always compares it. A memory group's acknowledged writes survive while a quorum
+of its replicas keeps running; a restarted node reseats its own replica under a
+fresh ID ([recovery](runtime.md#in-memory-load-groups)). `storage/memstore` also
+works with `load.NewStandalone`, whose owner then handles recovery.
 
 `GroupSpec.Hosting` and `Cluster.SetGroupHosting` select all eligible hosts or a
 durable explicit set. `GroupSpec.Nodes` selects explicit hosting. Total load
@@ -310,8 +447,9 @@ before staging. Placement minimum/maximum counts retain their voter meaning.
 Founding with fewer eligible nodes reports a target shortfall without lowering
 the configured target. `_meta` hosting remains mandatory on every admitted node.
 
-Set `Policies.RestoreDegraded` options and `Policies.Scheduling` for the legacy
-repair timing, or provide `Policies.Scheduler`. Per-group voter-policy timing is
+Set `NodeOptions.Scheduling.DefaultRepair` for legacy repair stability and
+`Scheduling.Interval`, `Timeout` and `Cooldown` for local reconciliation timing,
+or provide `Scheduling.Policy`. Per-group voter-config timing is
 replicated; collection cadence and memory bounds use `NodeOptions.Metrics`.
 `Node.SetSchedulingEnabled` controls the local scheduler; `SchedulingStatus`
 reports its observations and decisions. A callback still running after its
@@ -319,7 +457,7 @@ deadline reports `policy_stalled`; it remains owned until it returns. Decisions
 are checked after the callback and after planning against refreshed topology,
 native membership, temporal evidence, pins and cooldowns. A custom policy cannot
 bypass these checks. Arbitrary callback agreement metadata remains deferred;
-applications choose consistent startup policy implementations.
+applications choose consistent repair-policy implementations.
 
 Enablement changes clear temporal evidence under the same scheduler gate as
 ticks. A newly enabled tick cannot reuse the previous failure or standby window;
@@ -331,17 +469,18 @@ bounded process-local history without network I/O. `ScheduleInput.Metrics` and
 role records. Followers expose local replica samples; cluster evidence belongs
 to the current meta-leader observer. Unknown/stale sources remain explicit.
 
-`policy.DefaultLifecycle` supplies local-admission or all-founders startup gates,
+`lifecycle.DefaultHooks` supplies local-admission or all-founders startup gates,
 retired-storage retention and stop/diagnostics behavior after mandatory removal
-fencing. Configure `Policies.DefaultLifecycle` or supply `Policies.Lifecycle`.
-Embed `*policy.DefaultLifecycle` to override only selected decisions. Supplying a
-custom policy and built-in options for that same policy is rejected as ambiguous.
+fencing. Configure `Lifecycle.Default` or supply `Lifecycle.Hooks`.
+Embed `*lifecycle.DefaultHooks` to override only selected decisions. Supplying
+custom hooks and built-in options for those hooks is rejected as ambiguous.
+The same restriction applies to custom repair policies and default-repair options.
 
 Callbacks are serialized per node and receive owned inputs with deadlines.
 Timeouts do not discard a still-running callback or permit overlapping replacement
 calls. No policy can waive exact identity, admission, recovery, authorization or
-membership safety checks. `policy/policytest` and `storage/storagetest` provide
-optional reusable contract helpers for caller implementations.
+membership safety checks. `scheduling/schedulingtest`, `lifecycle/lifecycletest` and
+`storage/storagetest` provide optional reusable contract helpers for caller implementations.
 
 ## Events, shutdown and repository layout
 
@@ -368,8 +507,9 @@ readmission, removal fencing and resource order.
 | `node*.go`, `cluster*.go` | Public handles, settings, methods and lifecycle composition. |
 | `topology/` | Documents, identities, placement, plans, operators, session/status values and validation. |
 | `load/` | Explicit application types, Group, typed transport and Standalone owner. |
-| `policy/`, `policy/policytest/` | Replaceable decisions, built-ins and caller contract helpers. |
-| `storage/`, `storage/walstore/`, `storage/storagetest/` | Raft persistence/retirement contracts, etcd WAL backend and conformance helpers. |
+| `transport/loadgrpc/` | Optional public load gRPC adapter, bounded connections, authentication and internal wire protocol. |
+| `scheduling/`, `lifecycle/` and their test-helper packages | Repair policies, lifecycle hooks, built-ins and caller contract helpers. |
+| `storage/`, `storage/walstore/`, `storage/memstore/`, `storage/storagetest/` | Raft persistence/retirement contracts, etcd WAL backend, in-memory store and conformance helpers. |
 | `events/`, `fault/`, `membership/` | Local events/journal, classified faults and advanced fixed safety helpers. |
 | `internal/managed/`, `internal/loadhandle/` | Exact replica ownership, recovery, approved actions, retirement and opaque group representation. |
 | `internal/metaservice/` | Private topology service, admission, documents, local ledger and protocol integration. |
@@ -387,3 +527,50 @@ readmission, removal fencing and resource order.
 Start with the [small demo](../../examples/cluster/README.md). Use the
 [full test application](../../tests/cluster/testapp/README.md) for load integration
 examples and the [testing guide](../testing/tests.md) for validation commands.
+
+## Managed application work and local watches
+
+Return optional `Application.Run(ctx, group)` from a successful factory to run
+background business work after replay, startup authorization and publication of
+that exact replica. The context belongs to the replica lifetime. A nil return
+completes the optional work; an unexpected error fails and holds that replica
+until an explicit start retries it. Node joins Run's children through Run before
+closing application resources. Callbacks may request stop but must not wait for
+teardown that joins themselves.
+
+`group.RunWhileLeader(ctx, callback)` owns one leadership supervisor per exact
+handle. Its callback receives `*load.Leadership` and a context canceled directly
+when that leadership is lost. It joins the callback before a later term starts.
+`Leadership.Propose` checks the captured term on the Raft loop, including retries,
+and never forwards through a follower. Cancellation cannot undo an accepted
+proposal; application request deduplication and task-attempt fencing still apply.
+Because every leadership entry carries its own term and a new leader commits an
+entry of its term before serving `Group.Read`, compare-and-swap commands proposed
+this way need no separate replicated scheduler epoch. A nil callback result
+completes that term's work without restarting it.
+`Leadership.Replicas(ctx)` returns the leader's cached progress for every
+configured replica (`ReplicaID`, `NodeName`, `Voter`, `Self`, `Match`,
+`RecentActive`, sorted by ID). `RecentActive` is Raft's CheckQuorum activity
+flag; names resolve through the topology catalog for managed replicas. After the
+term ends it returns `fault.ErrNotLeader`. It is an observation, not a barrier.
+
+`fault.Retryable` classifies transient errors (not leader, not ready,
+unavailable, overloaded, no controller and attempt deadlines; not caller
+cancellation). `fault.Retry[T]` repeats a call with per-attempt timeouts and
+bounded backoff, and `load.ProposeRetry` resubmits the exact proposal bytes and
+RequestID through `Group.Propose` or `Leadership.Propose`. A timed-out attempt can
+still commit, so retried commands must be idempotent or CAS-guarded.
+
+`Node.Watch` and `Group.Watch` seed current local state and coalesce changes into
+one buffered snapshot per subscriber. Revision gaps identify coalescing. They
+close on subscription cancellation or terminal owner state, retaining the final
+snapshot on normal terminal closure. Node watches can observe successor runs;
+an existing Group watch stays bound to its original run. `InstanceID` identifies
+the process and `RunID` distinguishes repeated opens of the same durable replica.
+`Observation.AppliedIndex` reports the local applied index of that run; each
+applied batch or snapshot publishes it, so pull-based workers can wake on new
+commits and then read committed state.
+`NodeOptions.MaxWatchers` and `load.EngineOptions.MaxWatchers` default to 128;
+excess subscriptions return `fault.ErrOverloaded`. These are observations, not
+quorum barriers or a durable cluster-wide event stream. Existing Cluster.Watch
+continues to cover topology and events.Bus continues to cover local diagnostics.

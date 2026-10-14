@@ -1,15 +1,17 @@
 package metrics
 
 import (
-	"github.com/asalimonov/gquorum/fault"
-	api "github.com/asalimonov/gquorum/metrics"
 	"math"
 	"sync"
 	"time"
+
+	"github.com/asalimonov/gquorum/fault"
+	api "github.com/asalimonov/gquorum/metrics"
 )
 
 // EWMA ports Meridian's duration-gated delta rule. A short mutex keeps sum and
-// count coherent (independent atomic reads can observe only half an observation).
+// count coherent (independent atomic reads can observe only half an
+// observation).
 // The supplied clock preserves monotonic elapsed time; Update owns the cadence.
 type EWMA struct {
 	mu                  sync.Mutex
@@ -23,27 +25,35 @@ type EWMA struct {
 	now                 func() time.Time
 }
 
+// NewEWMA validates the weight and minimum accumulated sample duration.
 func NewEWMA(weight float64, minSamples time.Duration) (*EWMA, error) {
-	if math.IsNaN(weight) || weight <= 0 || weight > 1 || minSamples < 0 {
+	if weight <= 0 || weight > 1 || minSamples < 0 || math.IsNaN(weight) {
 		return nil, fault.ErrInvalid
 	}
 	return &EWMA{weight: weight, minimum: minSamples, now: time.Now}, nil
 }
+
+// Observe accumulates a nonnegative duration and invalidates the average on
+// overflow.
 func (e *EWMA) Observe(d time.Duration) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	d = max(d, 0)
-	if e.count == math.MaxUint64 || e.pendingCount == math.MaxUint64 || e.sum > time.Duration(math.MaxInt64)-d || e.pending > time.Duration(math.MaxInt64)-d {
+	duration := max(d, 0)
+	if e.count == math.MaxUint64 || e.pendingCount == math.MaxUint64 || e.sum > time.Duration(math.MaxInt64)-duration ||
+		e.pending > time.Duration(math.MaxInt64)-duration {
 		e.overflow = true
 		e.seeded = false
 		return
 	}
 	e.count++
 	e.pendingCount++
-	e.sum += d
-	e.pending += d
+	e.sum += duration
+	e.pending += duration
 	e.last = e.now()
 }
+
+// Update advances the moving average once pending samples reach the minimum
+// duration.
 func (e *EWMA) Update(_ time.Time) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -63,6 +73,9 @@ func (e *EWMA) Update(_ time.Time) bool {
 	e.pending, e.pendingCount = 0, 0
 	return true
 }
+
+// Snapshot reports cumulative latency, the current average and age at the
+// supplied time.
 func (e *EWMA) Snapshot(now time.Time) api.Latency {
 	e.mu.Lock()
 	defer e.mu.Unlock()

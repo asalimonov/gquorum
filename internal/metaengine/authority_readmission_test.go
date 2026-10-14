@@ -364,7 +364,7 @@ func TestReadmissionReceiptsSettleSupersededAdmissionWithoutReadiness(t *testing
 	}
 	index++
 	old := m.operators[a.OperatorID]
-	plan := topology.Plan{Version: 3, Steps: slices.Clone(old.Steps)}
+	plan := topology.Plan{Version: 3, Steps: slices.Clone(old.Steps), VoterBases: old.VoterBases}
 	if r := apply(t, m.topologySM, index, BeginOperatorProposal{Version: 3, Plan: plan, At: time.Unix(300, 0).UTC()}); !r.Accepted {
 		t.Fatal(r)
 	}

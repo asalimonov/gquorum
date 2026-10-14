@@ -9,6 +9,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/membership"
+	"github.com/asalimonov/gquorum/topology"
 )
 
 func TestReplyPreservesVersionConflictAndSafetyIdentity(t *testing.T) {
@@ -22,5 +23,15 @@ func TestReplyPreservesVersionConflictAndSafetyIdentity(t *testing.T) {
 	var decoded *membership.SafetyRefusal
 	if err := ReplyError(Reply(fmt.Errorf("control: %w", safety))); !errors.As(err, &decoded) || *decoded != *safety {
 		t.Fatal("lost exact safety refusal", decoded, err)
+	}
+}
+
+func TestReplyPreservesPlacementReport(t *testing.T) {
+	t.Parallel()
+	report := topology.PlacementReport{Version: 7, ApprovedVersion: 6, Groups: []topology.GroupPlacementReport{{GroupID: "billing", Issues: []topology.PlacementIssue{{Code: "insufficient_distinct_zones", GroupID: "billing", Message: "only two zones"}}}}}
+	err := &topology.PlacementError{Code: fault.Invalid, Report: report}
+	var decoded *topology.PlacementError
+	if failure := ReplyError(Reply(fmt.Errorf("forwarded: %w", err))); !errors.As(failure, &decoded) || decoded.Code != fault.Invalid || decoded.Report.Version != 7 || decoded.Report.Groups[0].Issues[0].Code != "insufficient_distinct_zones" {
+		t.Fatal("transport dropped placement details", decoded, failure)
 	}
 }

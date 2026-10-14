@@ -19,7 +19,7 @@ import (
 func fixtureAuthority(t *testing.T, f *fixture) (*authoritystore.Store, topology.AuthorityGrant) {
 	t.Helper()
 	if f.cfg.Authority == nil {
-		s, err := authoritystore.Open(filepath.Join(t.TempDir(), "authority.bolt"), f.node, true)
+		s, err := authoritystore.Open(filepath.Join(t.TempDir(), "authority.bolt"), f.node, authoritystore.FreshEvidence)
 		must(t, err)
 		t.Cleanup(func() { must(t, s.Close()) })
 		f.cfg.Authority = func() *authoritystore.Store { return s }
@@ -79,10 +79,10 @@ func TestHostFenceOwnsCanceledFactoryAndCloseUntilCompletion(t *testing.T) {
 	defer cancel()
 	waited := make(chan error, 1)
 	go func() { _, err := h.InstallHostFence(waitCtx, fence); waited <- err }()
-	await(t, deadline(t), func() bool {
-		r, ok, err := s.Current(t.Context(), "work")
+	await(deadline(t), t, func() bool {
+		r, err := s.Current(t.Context(), "work")
 		must(t, err)
-		return ok && r.Grant.Key == fence.Key && !r.Complete
+		return r.Found && r.Record.Grant.Key == fence.Key && !r.Record.Complete
 	})
 	cancel()
 	if err := <-waited; !errors.Is(err, context.Canceled) {
@@ -96,10 +96,10 @@ func TestHostFenceOwnsCanceledFactoryAndCloseUntilCompletion(t *testing.T) {
 	completed := make(chan topology.FenceEvidence, 1)
 	failed := make(chan error, 1)
 	go func() { e, err := h.InstallHostFence(deadline(t), newer); completed <- e; failed <- err }()
-	await(t, deadline(t), func() bool {
-		r, _, err := s.Current(t.Context(), "work")
+	await(deadline(t), t, func() bool {
+		r, err := s.Current(t.Context(), "work")
 		must(t, err)
-		return r.Grant.Key == newer.Key
+		return r.Record.Grant.Key == newer.Key
 	})
 	factoryOnce.Do(func() { close(release) })
 	select {
@@ -107,9 +107,9 @@ func TestHostFenceOwnsCanceledFactoryAndCloseUntilCompletion(t *testing.T) {
 	case <-deadline(t).Done():
 		t.Fatal("late application was not released")
 	}
-	r, _, err := s.Current(t.Context(), "work")
+	r, err := s.Current(t.Context(), "work")
 	must(t, err)
-	if r.Complete {
+	if r.Record.Complete {
 		t.Fatal("fence completed while Close was owned")
 	}
 	closeOnce.Do(func() { close(releaseClose) })
@@ -160,7 +160,7 @@ func TestHostFenceReconcilesInterruptedIntentAndKeepsReadyReplica(t *testing.T) 
 	fence.Key.Revision++
 	fence.Purpose, fence.Action = topology.AuthorityFence, nil
 	// Simulate a retained pending fence without a worker in this process.
-	_, _, err = s.Fence(t.Context(), fence)
+	_, err = s.Fence(t.Context(), fence)
 	must(t, err)
 	proof, err := h.InstallHostFence(deadline(t), fence)
 	must(t, err)
@@ -171,8 +171,8 @@ func TestHostFenceReconcilesInterruptedIntentAndKeepsReadyReplica(t *testing.T) 
 	if records, err := s.Running(t.Context(), "work"); err != nil || len(records) != 0 {
 		t.Fatal(records, err)
 	}
-	if _, found, err := s.Receipt(t.Context(), uncertain, uncertain.Targets[0]); err != nil || found {
-		t.Fatal("uncertain old effect became a success receipt", found, err)
+	if found, err := s.Receipt(t.Context(), uncertain, uncertain.Targets[0]); err != nil || found.Found {
+		t.Fatal("uncertain old effect became a success receipt", found.Found, err)
 	}
 }
 
@@ -209,8 +209,8 @@ func TestStartupImportsCurrentFloorAndRequiresQuorumOnlyForNewOwner(t *testing.T
 	unavailable.Store(false)
 	handle, err := h.StartReplica(deadline(t), ref, StartExplicit)
 	must(t, err)
-	if receipt, found, err := s.Receipt(t.Context(), initial, initial.Targets[0]); err != nil || !found || receipt.Validate(initial) != nil {
-		t.Fatal("startup published before persisting its creation receipt", receipt, found, err)
+	if receipt, err := s.Receipt(t.Context(), initial, initial.Targets[0]); err != nil || !receipt.Found || receipt.Receipt.Validate(initial) != nil {
+		t.Fatal("startup published before persisting its creation receipt", receipt.Receipt, receipt.Found, err)
 	}
 	unavailable.Store(true)
 	before := reads.Load()
@@ -231,10 +231,10 @@ func TestStartupImportsCurrentFloorAndRequiresQuorumOnlyForNewOwner(t *testing.T
 	if factories.Load() != 2 {
 		t.Fatal("retained replica was not resumed", factories.Load())
 	}
-	floor, _, err := s.Current(t.Context(), "work")
+	floor, err := s.Current(t.Context(), "work")
 	must(t, err)
-	if !floor.Complete || floor.Grant.Key.Revision != initial.Key.Revision+1 {
-		t.Fatal("recovery did not import new floor", floor)
+	if !floor.Record.Complete || floor.Record.Grant.Key.Revision != initial.Key.Revision+1 {
+		t.Fatal("recovery did not import new floor", floor.Record)
 	}
 }
 

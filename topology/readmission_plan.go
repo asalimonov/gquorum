@@ -35,60 +35,105 @@ func bindReadmissionRetirement(active, desired Document, plan Plan) Plan {
 	if len(replacements) == 0 {
 		return plan
 	}
-	replacement := func(node string) *Replica {
-		for i := range replacements {
-			if replacements[i].NodeName == node {
-				return &replacements[i]
-			}
-		}
-		return nil
-	}
-	var steps []Step
-	emitted := make(map[string]bool)
-	emit := func(r Replica) {
-		if emitted[r.NodeName] {
-			return
-		}
-		emitted[r.NodeName] = true
-		kinds := []StepKind{StepPrepareReplica, StepAddLearner}
-		if r.Role == ReplicaVoter {
-			kinds = append(kinds, StepWaitCaughtUp, StepPromoteVoter)
-		}
-		for _, kind := range kinds {
-			steps = append(steps, Step{GroupID: MetaGroupID, NodeName: r.NodeName, ReplicaID: r.ReplicaID, Kind: kind})
-		}
-	}
-	flush := func() {
-		for _, r := range replacements {
-			emit(r)
-		}
-	}
+	builder := readmissionPlanBuilder{active: active, desired: desired, replacements: replacements,
+		plannedPreparation: readmissionPreparations(plan, replacements), emitted: make(map[string]bool)}
 	for _, step := range plan.Steps {
-		if step.GroupID != MetaGroupID {
-			flush()
-		}
-		r := replacement(step.NodeName)
-		if step.GroupID == MetaGroupID && r != nil && step.ReplicaID == r.ReplicaID {
-			emit(*r)
-			if slices.Contains([]StepKind{StepPrepareReplica, StepAddLearner, StepWaitCaughtUp, StepPromoteVoter}, step.Kind) {
-				continue
-			}
-		}
-		if r != nil && (step.Kind == StepStopReplica || step.Kind == StepCleanupReplicaState) && exactPlanReplica(desired, step) == nil {
+		builder.appendStep(step)
+	}
+	builder.flush()
+	for i := range builder.steps {
+		builder.steps[i].Seq = i + 1
+	}
+	plan.Steps = builder.steps
+	return plan
+}
+
+func readmissionPreparations(plan Plan, replacements []Replica) map[string]bool {
+	plannedPreparation := make(map[string]bool, len(replacements))
+	for _, step := range plan.Steps {
+		if step.GroupID != MetaGroupID || step.Kind != StepPrepareReplica {
 			continue
 		}
-		if step.Kind == StepDeleteGroupState {
-			old := active.Group(step.GroupID)
-			if old != nil && !slices.ContainsFunc(old.Replicas, func(r Replica) bool { return replacement(r.NodeName) == nil }) {
-				continue
+		for _, replacement := range replacements {
+			if replacement.NodeName == step.NodeName && replacement.ReplicaID == step.ReplicaID {
+				plannedPreparation[step.NodeName] = true
 			}
 		}
-		steps = append(steps, step)
 	}
-	flush()
-	for i := range steps {
-		steps[i].Seq = i + 1
+	return plannedPreparation
+}
+
+type readmissionPlanBuilder struct {
+	active             Document
+	desired            Document
+	replacements       []Replica
+	plannedPreparation map[string]bool
+	emitted            map[string]bool
+	steps              []Step
+}
+
+func (p *readmissionPlanBuilder) replacement(node string) *Replica {
+	for i := range p.replacements {
+		if p.replacements[i].NodeName == node {
+			return &p.replacements[i]
+		}
 	}
-	plan.Steps = steps
-	return plan
+	return nil
+}
+
+func (p *readmissionPlanBuilder) emit(r Replica) {
+	if p.emitted[r.NodeName] {
+		return
+	}
+	p.emitted[r.NodeName] = true
+	if p.plannedPreparation[r.NodeName] {
+		return // preserve the planner's paired waits and destructive ordering
+	}
+	kinds := []StepKind{StepPrepareReplica, StepAddLearner}
+	if r.Role == ReplicaVoter {
+		kinds = append(kinds, StepWaitCaughtUp, StepPromoteVoter)
+	}
+	for _, kind := range kinds {
+		p.steps = append(p.steps, Step{GroupID: MetaGroupID, NodeName: r.NodeName, ReplicaID: r.ReplicaID, Kind: kind})
+	}
+}
+
+func (p *readmissionPlanBuilder) flush() {
+	for _, r := range p.replacements {
+		p.emit(r)
+	}
+}
+
+func (p *readmissionPlanBuilder) appendStep(step Step) {
+	if step.GroupID != MetaGroupID {
+		p.flush()
+	}
+	r := p.replacement(step.NodeName)
+	if step.GroupID == MetaGroupID && r != nil && step.ReplicaID == r.ReplicaID {
+		p.emit(*r)
+		if !p.plannedPreparation[r.NodeName] &&
+			slices.Contains([]StepKind{StepPrepareReplica, StepAddLearner, StepWaitCaughtUp,
+				StepPromoteVoter}, step.Kind) {
+			return
+		}
+	}
+	if r != nil && (step.Kind == StepStopReplica || step.Kind == StepCleanupReplicaState) &&
+		exactPlanReplica(p.desired, step) == nil {
+		return
+	}
+	if step.Kind == StepDeleteGroupState && !p.requiresDeletion(step) {
+		return
+	}
+	p.steps = append(p.steps, step)
+}
+
+func (p *readmissionPlanBuilder) requiresDeletion(step Step) bool {
+	if step.Kind == StepDeleteGroupState {
+		old := p.active.Group(step.GroupID)
+		if old != nil &&
+			!slices.ContainsFunc(old.Replicas, func(r Replica) bool { return p.replacement(r.NodeName) == nil }) {
+			return false
+		}
+	}
+	return true
 }

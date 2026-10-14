@@ -13,7 +13,7 @@ import (
 func parseCLI(t *testing.T, argv ...string) (cli, error) {
 	t.Helper()
 	var args cli
-	parser, err := kong.New(&args, kong.Writers(io.Discard, io.Discard))
+	parser, err := kong.New(&args, cliHelp(), kong.Writers(io.Discard, io.Discard))
 	if err != nil {
 		t.Fatal(err)
 	}

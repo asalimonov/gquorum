@@ -41,7 +41,7 @@ func (c *Cluster) runtime(ctx context.Context, node string) (runtimeObservation,
 	}
 	return result, response.Decode(&result)
 }
-func runtimeCall(t *testing.T, ctx context.Context, c *Cluster, node, path string, body any, want int) Response {
+func runtimeCall(ctx context.Context, t *testing.T, c *Cluster, node, path string, body any, want int) Response {
 	t.Helper()
 	response, err := c.Request(ctx, node, "POST", "/internal/test/"+path, body, 0)
 	if err := requireStatus(response, err, want); err != nil {
@@ -74,7 +74,7 @@ func TestActivateDeactivateReleasesLocksAndFencesDelayedRevoke(t *testing.T) {
 	activate := func(node string) topology.Session {
 		t.Helper()
 		var s topology.Session
-		if err := runtimeCall(t, ctx, c, node, "session/activate", map[string]string{}, 200).Decode(&s); err != nil {
+		if err := runtimeCall(ctx, t, c, node, "session/activate", map[string]string{}, 200).Decode(&s); err != nil {
 			t.Fatal(err)
 		}
 		if s.ID == "" || s.NodeName != node {
@@ -85,7 +85,7 @@ func TestActivateDeactivateReleasesLocksAndFencesDelayedRevoke(t *testing.T) {
 	session := activate(follower)
 	call := func(node, action, id, key string, want int) {
 		t.Helper()
-		runtimeCall(t, ctx, c, node, "session/"+action, map[string]string{"id": id, "key": key}, want)
+		runtimeCall(ctx, t, c, node, "session/"+action, map[string]string{"id": id, "key": key}, want)
 	}
 	call(follower, "keepalive", session.ID, "", 200)
 	call(leader, "keepalive", session.ID, "", 409)
@@ -202,7 +202,7 @@ func TestPublicNodeSequentialStartManagedHoldsAndRecovery(t *testing.T) {
 		held = "node2"
 	}
 	ref := load.ReplicaRef{GroupID: "counter", ReplicaID: replicaID(created.Document, "counter", held)}
-	runtimeCall(t, ctx, c, held, "replica/stop", ref, 200)
+	runtimeCall(ctx, t, c, held, "replica/stop", ref, 200)
 	// Observe across recovery ticks rather than checking only the immediate stop.
 	until := time.Now().Add(300 * time.Millisecond)
 	for time.Now().Before(until) {
@@ -216,7 +216,7 @@ func TestPublicNodeSequentialStartManagedHoldsAndRecovery(t *testing.T) {
 		case <-time.After(60 * time.Millisecond):
 		}
 	}
-	runtimeCall(t, ctx, c, held, "replica/start", ref, 200) // Also verifies old handle remains stopped.
+	runtimeCall(ctx, t, c, held, "replica/start", ref, 200) // Also verifies old handle remains stopped.
 	if err := c.WaitValue(ctx, held, "counter", "one", "seven"); err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +265,7 @@ func TestConcurrentAuthorizedCleanupRetriesAreIdempotent(t *testing.T) {
 	ctx, c := performanceClusterSpec(t, spec)
 	// Bootstrap creates both declared application groups asynchronously; wait
 	// for their convergence before taking the CAS version used for deletion.
-	assertFoundedTopology(t, ctx, c)
+	assertFoundedTopology(ctx, t, c)
 	if err := c.SetBarrier(ctx, "node3", "demo", topology.StepCleanupReplicaState, true); err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +283,7 @@ func TestConcurrentAuthorizedCleanupRetriesAreIdempotent(t *testing.T) {
 	if err := response.Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	result.OperatorID = startApply(t, ctx, c, "node1", result.Document.Version)
+	result.OperatorID = startApply(ctx, t, c, "node1", result.Document.Version)
 	var approved topology.AuthorizedStep
 	if err := Poll(ctx, func() (bool, error) {
 		controls, err := c.Controls(ctx, "node3")
@@ -417,7 +417,7 @@ func TestPublicNodeCallerSchedulersFollowLeadershipWithoutAgreementGate(t *testi
 	}
 }
 
-func TestPublicNodeRemovalFencesBeforeReplaceablePolicy(t *testing.T) {
+func TestPublicNodeRemovalFencesBeforeLifecycleHooks(t *testing.T) {
 	t.Parallel()
 	spec := matrixSpec(3)
 	spec.RetryRemoval = true
@@ -457,7 +457,7 @@ func TestPublicNodeRemovalFencesBeforeReplaceablePolicy(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// The fixture checks the mandatory fence inside both policy invocations,
+	// The fixture checks the mandatory fence inside both hook invocations,
 	// refuses the first, and keeps the real process alive for diagnostics.
 	if err := Poll(ctx, func() (bool, error) {
 		view, err := c.runtime(ctx, "node3")
@@ -468,7 +468,7 @@ func TestPublicNodeRemovalFencesBeforeReplaceablePolicy(t *testing.T) {
 	}); err != nil {
 		t.Fatal("mandatory fencing/removal retry", err)
 	}
-	runtimeCall(t, ctx, c, "node3", "session/activate", map[string]string{}, 503)
+	runtimeCall(ctx, t, c, "node3", "session/activate", map[string]string{}, 503)
 	view, err := c.runtime(ctx, "node3")
 	if err != nil {
 		t.Fatal(err)
@@ -476,7 +476,7 @@ func TestPublicNodeRemovalFencesBeforeReplaceablePolicy(t *testing.T) {
 	if err := c.Node("node3").Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
-	assertDurableSelfRemoval(t, ctx, c, view.Status)
+	assertDurableSelfRemoval(ctx, t, c, view.Status)
 
 }
 
@@ -487,8 +487,7 @@ func TestSlowDestinationCannotDelayHealthyMajorityAndStopJoinsSenders(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := c.Request(ctx, "node2", "POST", "/api/groups/stalled/leader/node1", nil, 0)
-	if err := requireStatus(response, err, 200); err != nil {
+	if err := requestLeaderTransfer(ctx, c, "node2", "stalled", "node1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := Poll(ctx, func() (bool, error) {
@@ -586,7 +585,7 @@ func TestMetaCallerEffectCompletionLostAcrossLeaderReplacement(t *testing.T) {
 	}
 	// Stage on the transferred leader, then retry only this exact version's
 	// approval through the follower while its leader observation catches up.
-	response, err = c.Request(ctx, "node1", "POST", "/api/groups", map[string]any{"group": gquorum.GroupSpec{ID: "lost-ack", Nodes: []string{"node2", "node3"}, VoterPolicy: voterPolicy(2), Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 2}}, "mutation": gquorum.MutationOptions{}}, base.Version)
+	response, err = c.Request(ctx, "node1", "POST", "/api/groups", map[string]any{"group": gquorum.GroupSpec{ID: "lost-ack", Nodes: []string{"node2", "node3"}, VoterConfig: voterConfig(2), Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 2}}, "mutation": gquorum.MutationOptions{}}, base.Version)
 	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
 	}
@@ -594,7 +593,7 @@ func TestMetaCallerEffectCompletionLostAcrossLeaderReplacement(t *testing.T) {
 	if err := response.Decode(&created); err != nil {
 		t.Fatal(err)
 	}
-	created.OperatorID = startApply(t, ctx, c, "node2", created.Document.Version)
+	created.OperatorID = startApply(ctx, t, c, "node2", created.Document.Version)
 	var approved topology.AuthorizedStep
 	if err := Poll(ctx, func() (bool, error) {
 		controls, err := c.Controls(ctx, "node3")
@@ -656,7 +655,7 @@ func TestMetaCallerEffectCompletionLostAcrossLeaderReplacement(t *testing.T) {
 	}
 	replica := replicaID(created.Document, "lost-ack", "node3")
 	stale := load.ActionRequest{From: own.Identity, To: load.Peer{Node: own.Identity, Replica: load.ReplicaRef{GroupID: "lost-ack", ReplicaID: replica}}, Authorization: approved, LocalTarget: storage.Identity{NodeName: "node3", ClusterID: c.ID, GroupID: "lost-ack", ReplicaID: replica}}
-	refused := runtimeCall(t, ctx, c, "node3", "action", stale, 409)
+	refused := runtimeCall(ctx, t, c, "node3", "action", stale, 409)
 	var refusal struct {
 		Code fault.Code `json:"code"`
 	}

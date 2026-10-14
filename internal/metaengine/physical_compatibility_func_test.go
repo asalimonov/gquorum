@@ -47,7 +47,7 @@ func TestBaselinePhysicalMetaStoreRejectedWithoutRewritingRecords(t *testing.T) 
 	if err := os.WriteFile(path, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := metastore.LoadIdentity(path); !errors.Is(err, fault.ErrUnsupported) {
+	if _, err := metastore.LoadIdentity(path); !errors.Is(err, fault.ErrUnsupported) {
 		t.Fatal("legacy pin acquired", err)
 	}
 	if db, err := metastore.Open(path); !errors.Is(err, fault.ErrUnsupported) {

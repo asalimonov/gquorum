@@ -52,7 +52,8 @@ func TestNodeAuthorityLifecycleAndMissingRetainedEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	stopAuthorityNode(t, n)
-	check, err := authoritystore.Open(o.authorityDBPath(), topology.Identity{ClusterID: "cluster", NodeName: "n1", MemberID: 1, InstanceID: "inspect"}, false)
+	check, err := authoritystore.Open(o.authorityDBPath(), topology.Identity{ClusterID: "cluster", NodeName: "n1", MemberID: 1,
+		InstanceID: "inspect"}, authoritystore.RetainedEvidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,9 +64,9 @@ func TestNodeAuthorityLifecycleAndMissingRetainedEvidence(t *testing.T) {
 	if err := check.Close(); err != nil {
 		t.Fatal(err)
 	}
-	id, found, err := authoritystore.LoadIdentity(o.authorityDBPath())
-	if err != nil || !found || id.MemberID != 1 || id.InstanceID != "" {
-		t.Fatal(id, found, err)
+	id, err := authoritystore.LoadIdentity(o.authorityDBPath())
+	if err != nil || !id.Found || id.Identity.MemberID != 1 || id.Identity.InstanceID != "" {
+		t.Fatal(id.Identity, id.Found, err)
 	}
 	second := authorityNodeOptions(t, root, "second")
 	n, err = NewNode(second)
@@ -110,7 +111,7 @@ func TestNodeReboundMetadataAcquisitionCrashBoundaries(t *testing.T) {
 			granted := previous
 			granted.MemberID, granted.InstanceID = 2, "replacement"
 			path := filepath.Join(root, "_authority.bolt")
-			s, err := authoritystore.Open(path, previous, true)
+			s, err := authoritystore.Open(path, previous, authoritystore.FreshEvidence)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -149,7 +150,7 @@ func TestNodeReboundMetadataAcquisitionCrashBoundaries(t *testing.T) {
 				t.Fatal(err)
 			}
 			granted.InstanceID = "restarted"
-			s, err = authoritystore.Open(path, granted, false)
+			s, err = authoritystore.Open(path, granted, authoritystore.RetainedEvidence)
 			if err != nil {
 				t.Fatal(err)
 			}

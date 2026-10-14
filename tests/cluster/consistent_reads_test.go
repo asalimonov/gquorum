@@ -35,9 +35,9 @@ func readProcessClusterSpec(t *testing.T, leader string, spec Spec) (context.Con
 		t.Fatal("read scenario requires three exact replicas", created.Document)
 	}
 	if leader != "" {
-		forceReadLeader(t, ctx, c, created.Document, leader)
+		forceReadLeader(ctx, t, c, created.Document, leader)
 	} else {
-		waitReadBarrier(t, ctx, c, "node1")
+		waitReadBarrier(ctx, t, c, "node1")
 	}
 	if err := c.Put(ctx, "node1", "work", "key", "before-read-fault", "before"); err != nil {
 		t.Fatal(err)
@@ -49,7 +49,7 @@ func readProcessClusterSpec(t *testing.T, leader string, spec Spec) (context.Con
 	}
 	return ctx, c, created.Document
 }
-func forceReadLeader(t *testing.T, ctx context.Context, c *Cluster, doc topology.Document, node string) {
+func forceReadLeader(ctx context.Context, t *testing.T, c *Cluster, doc topology.Document, node string) {
 	t.Helper()
 	if err := Poll(ctx, func() (bool, error) {
 		response, err := c.Request(ctx, "node2", "POST", "/api/groups/work/leader/"+node, nil, 0)
@@ -80,9 +80,9 @@ func forceReadLeader(t *testing.T, ctx context.Context, c *Cluster, doc topology
 	}); err != nil {
 		t.Fatal(err)
 	}
-	waitReadBarrier(t, ctx, c, node)
+	waitReadBarrier(ctx, t, c, node)
 }
-func waitReadBarrier(t *testing.T, ctx context.Context, c *Cluster, node string) {
+func waitReadBarrier(ctx context.Context, t *testing.T, c *Cluster, node string) {
 	t.Helper()
 	// A leader hint may precede a committed entry in its new term. Confirm a
 	// fresh application barrier before the setup mutation or fault injection.
@@ -98,10 +98,10 @@ func waitReadBarrier(t *testing.T, ctx context.Context, c *Cluster, node string)
 		t.Fatal("new leader did not confirm its current-term read barrier", err)
 	}
 }
-func armReadFault(t *testing.T, ctx context.Context, c *Cluster, node string, faults ReadFaults) LocalObservation {
-	return armGroupReadFault(t, ctx, c, node, "work", faults)
+func armReadFault(ctx context.Context, t *testing.T, c *Cluster, node string, faults ReadFaults) LocalObservation {
+	return armGroupReadFault(ctx, t, c, node, "work", faults)
 }
-func armGroupReadFault(t *testing.T, ctx context.Context, c *Cluster, node, group string, faults ReadFaults) LocalObservation {
+func armGroupReadFault(ctx context.Context, t *testing.T, c *Cluster, node, group string, faults ReadFaults) LocalObservation {
 	t.Helper()
 	local, err := c.Local(ctx, node, group)
 	if err != nil || !local.Found {
@@ -120,7 +120,7 @@ func armGroupReadFault(t *testing.T, ctx context.Context, c *Cluster, node, grou
 	})
 	return local
 }
-func clearReadFault(t *testing.T, ctx context.Context, c *Cluster, node string, local LocalObservation) {
+func clearReadFault(ctx context.Context, t *testing.T, c *Cluster, node string, local LocalObservation) {
 	t.Helper()
 	if _, err := c.SetReadFaults(ctx, node, "work", local.ReplicaID, "DELETE", ReadFaults{Identity: local.Identity}); err != nil {
 		t.Fatal(err)
@@ -138,7 +138,7 @@ func TestConsistentReadWaitsForFollowerApplyAfterConfirmationThreeNodes(t *testi
 	ctx, c, _ := readProcessCluster(t, "node1")
 	value, err := c.Read(ctx, "node2", "work", "key")
 	requireReadValue(t, value, err, "node2", "before")
-	before := armReadFault(t, ctx, c, "node2", ReadFaults{DropAppend: true})
+	before := armReadFault(ctx, t, c, "node2", ReadFaults{DropAppend: true})
 	if err := c.Put(ctx, "node1", "work", "key", "after-follower-lag", "after"); err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestConsistentReadWaitsForFollowerApplyAfterConfirmationThreeNodes(t *testi
 		t.Fatal("read finished before applying its confirmed index", answer)
 	default:
 	}
-	clearReadFault(t, ctx, c, "node2", before)
+	clearReadFault(ctx, t, c, "node2", before)
 	answerValue := <-joined
 	requireReadValue(t, answerValue.value, answerValue.err, "node2", "after")
 	if answerValue.value.Index <= value.Index {
@@ -184,9 +184,9 @@ func TestConsistentLearnerReadLostRepliesKeepRoundsBoundedThreeNodes(t *testing.
 	t.Parallel()
 	ctx, c, doc := readProcessCluster(t, "node1")
 	learner := doc.Clone()
-	policy := topology.DefaultVoterPolicy()
-	policy.TargetVoters = 2
-	learner.Group("work").VoterPolicy = &policy
+	voterConfig := topology.DefaultVoterConfig()
+	voterConfig.TargetVoters = 2
+	learner.Group("work").VoterConfig = &voterConfig
 	learner.Group("work").Placement.MinReplicas = 2
 	for i := range learner.Group("work").Replicas {
 		if learner.Group("work").Replicas[i].NodeName == "node3" {
@@ -203,7 +203,7 @@ func TestConsistentLearnerReadLostRepliesKeepRoundsBoundedThreeNodes(t *testing.
 	}
 	value, err := c.Read(ctx, "node3", "work", "key")
 	requireReadValue(t, value, err, "node3", "before")
-	before := armReadFault(t, ctx, c, "node3", ReadFaults{DropReadResponse: true})
+	before := armReadFault(ctx, t, c, "node3", ReadFaults{DropReadResponse: true})
 	short, stop := context.WithTimeout(ctx, 600*time.Millisecond)
 	_, err = c.Read(short, "node3", "work", "key")
 	stop()
@@ -262,7 +262,7 @@ func TestConsistentLearnerReadLostRepliesKeepRoundsBoundedThreeNodes(t *testing.
 	if err := c.Put(ctx, "node1", "work", "key", "after-canceled-reads", "after"); err != nil {
 		t.Fatal(err)
 	}
-	clearReadFault(t, ctx, c, "node3", before)
+	clearReadFault(ctx, t, c, "node3", before)
 	value, err = c.Read(ctx, "node3", "work", "key")
 	requireReadValue(t, value, err, "node3", "after")
 	local, err = c.Local(ctx, "node3", "work")
@@ -291,7 +291,7 @@ func TestConsistentReadRejectsIsolatedFormerLeaderThreeNodes(t *testing.T) {
 	if oldNode == "" || len(healthy) != 2 {
 		t.Fatal("no exact leader in approved native membership", observed)
 	}
-	before := armReadFault(t, ctx, c, oldNode, ReadFaults{DropRaft: true})
+	before := armReadFault(ctx, t, c, oldNode, ReadFaults{DropRaft: true})
 	if err := Poll(ctx, func() (bool, error) {
 		var elected uint64
 		for _, node := range healthy {
@@ -308,7 +308,7 @@ func TestConsistentReadRejectsIsolatedFormerLeaderThreeNodes(t *testing.T) {
 	}); err != nil {
 		t.Fatal("healthy majority did not replace the isolated load leader", err)
 	}
-	waitReadBarrier(t, ctx, c, healthy[0])
+	waitReadBarrier(ctx, t, c, healthy[0])
 	if err := c.Put(ctx, healthy[0], "work", "key", "majority-after-partition", "after"); err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +326,7 @@ func TestConsistentReadRejectsIsolatedFormerLeaderThreeNodes(t *testing.T) {
 	if err != nil || local.Values["key"] != "before" || local.Reads.RaftDropped == before.Reads.RaftDropped {
 		t.Fatal("fault did not isolate the exact old replica", local, err)
 	}
-	clearReadFault(t, ctx, c, oldNode, before)
+	clearReadFault(ctx, t, c, oldNode, before)
 	if err := c.WaitValue(ctx, oldNode, "work", "key", "after"); err != nil {
 		t.Fatal(err)
 	}

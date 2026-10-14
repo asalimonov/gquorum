@@ -65,7 +65,7 @@ func TestAuthoritySupersessionRetiresIntermediateMetaLearnerFourNodes(t *testing
 	if err := response.Decode(&admitted); err != nil {
 		t.Fatal(err)
 	}
-	old := startApply(t, ctx, c, "node2", admitted.Document.Version)
+	old := startApply(ctx, t, c, "node2", admitted.Document.Version)
 	if err := joining.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestAuthoritySupersessionRetiresIntermediateMetaLearnerFourNodes(t *testing
 	}) {
 		t.Fatal("successor omitted the intermediate native member", plan, err)
 	}
-	next := startApply(t, ctx, c, "node2", staged.Document.Version)
+	next := startApply(ctx, t, c, "node2", staged.Document.Version)
 	waitCtx, cancelWait := context.WithTimeout(ctx, 30*time.Second)
 	err = c.WaitOperator(waitCtx, "node2", next)
 	cancelWait()
@@ -137,7 +137,7 @@ func TestAuthoritySupersessionRetiresIntermediateMetaLearnerFourNodes(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireFencedReplay(t, ctx, c, owner, delayed)
+	requireFencedReplay(ctx, t, c, owner, delayed)
 	if _, err := c.docker.ContainerStatPath(ctx, joining.Container.GetContainerID(), docker.ContainerStatPathOptions{Path: "/data/load/work"}); !errdefs.IsNotFound(err) {
 		t.Fatal("prepared intermediate load state survived retirement", err)
 	}

@@ -3,9 +3,11 @@ package managed
 import (
 	"context"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3"
@@ -31,10 +33,12 @@ func completeIdentity(id topology.Identity) bool {
 	return id.NodeName != "" && id.ClusterID != "" && id.MemberID != 0 && id.InstanceID != ""
 }
 func completePeer(peer load.Peer) bool {
-	return completeIdentity(peer.Node) && peer.Replica.ReplicaID != 0 && topology.ValidateLoadID(peer.Replica.GroupID) == nil
+	return peer.Replica.ReplicaID != 0 && completeIdentity(peer.Node) &&
+		topology.ValidateLoadID(peer.Replica.GroupID) == nil
 }
 func localPeer(slot *replica) load.Peer {
-	return load.Peer{Node: slot.node, Replica: load.ReplicaRef{GroupID: slot.identity.GroupID, ReplicaID: slot.identity.ReplicaID}}
+	return load.Peer{Node: slot.node, Replica: load.ReplicaRef{GroupID: slot.identity.GroupID,
+		ReplicaID: slot.identity.ReplicaID}}
 }
 
 func (t engineTransport) Send(parent context.Context, messages []raftpb.Message) error {
@@ -53,7 +57,7 @@ func (t engineTransport) Send(parent context.Context, messages []raftpb.Message)
 	if err != nil {
 		return err
 	}
-	if !completePeer(to) || to.Replica != ref || to.Node.ClusterID != from.Node.ClusterID {
+	if to.Replica != ref || to.Node.ClusterID != from.Node.ClusterID || !completePeer(to) {
 		return fault.ErrIdentityMismatch
 	}
 	if err := h.cfg.ValidatePeer(ctx, to); err != nil {
@@ -66,32 +70,10 @@ func (t engineTransport) Send(parent context.Context, messages []raftpb.Message)
 		}
 		snapshot = snapshot || msg.Type == raftpb.MsgSnap
 	}
-	h.mu.Lock()
-	if h.slots[slot.identity.GroupID] != slot || slot.ctx.Err() != nil {
-		h.mu.Unlock()
-		return fault.ErrStopped
+	id, err := h.registerDelivery(slot, delivery{from: from, to: to, snapshot: snapshot})
+	if err != nil {
+		return err
 	}
-	if len(slot.deliveries) >= deliveryWindow {
-		oldest := uint64(math.MaxUint64)
-		for id, d := range slot.deliveries {
-			if !d.snapshot && id < oldest {
-				oldest = id
-			}
-		}
-		if oldest == math.MaxUint64 {
-			h.mu.Unlock()
-			return fault.ErrOverloaded
-		}
-		delete(slot.deliveries, oldest)
-	}
-	if h.deliverySeq == math.MaxUint64 {
-		h.mu.Unlock()
-		return fault.ErrOverloaded
-	}
-	h.deliverySeq++
-	id := h.deliverySeq
-	slot.deliveries[id] = delivery{from: from, to: to, snapshot: snapshot, deadline: time.Now().Add(h.cfg.EffectTimeout)}
-	h.mu.Unlock()
 	// The engine gave us owned copies; transport owns them after this call.
 	err = h.cfg.Transport.SendRaft(ctx, load.RaftBatch{From: from, To: to, DeliveryID: id, Messages: messages})
 	if err == nil {
@@ -106,55 +88,21 @@ func (t engineTransport) Send(parent context.Context, messages []raftpb.Message)
 	return err
 }
 
+// ReceiveRaft validates exact peer identities before delivering owned Raft
+// messages.
 func (h *Host) ReceiveRaft(ctx context.Context, batch load.RaftBatch) error {
-	if err := ctx.Err(); err != nil {
+	if err := h.validateReceivedBatch(ctx, batch); err != nil {
 		return err
 	}
-	if !completePeer(batch.From) || !completePeer(batch.To) || batch.DeliveryID == 0 || len(batch.Messages) == 0 {
-		return fault.ErrInvalid
-	}
-	if batch.To.Node != h.cfg.Identity() || batch.From.Node.ClusterID != batch.To.Node.ClusterID || batch.From.Replica.GroupID != batch.To.Replica.GroupID {
-		return fault.ErrIdentityMismatch
-	}
-	for _, msg := range batch.Messages {
-		if msg.From != batch.From.Replica.ReplicaID || msg.To != batch.To.Replica.ReplicaID {
-			return fault.ErrIdentityMismatch
-		}
-	}
-	if err := h.cfg.ValidatePeer(ctx, batch.From); err != nil {
+	receiver, err := h.receivedReplica(batch.To)
+	if err != nil {
 		return err
 	}
-	if err := h.cfg.ValidatePeer(ctx, batch.To); err != nil {
-		return err
-	}
-	h.mu.Lock()
-	slot := h.slots[batch.To.Replica.GroupID]
-	if slot == nil {
-		h.mu.Unlock()
-		return fault.ErrReplicaNotReady
-	}
-	if localPeer(slot) != batch.To {
-		h.mu.Unlock()
-		return fault.ErrIdentityMismatch
-	}
-	core := slot.core
-	stopping := slot.state == "stopping" || slot.released
-	published := slot.state == "ready" && slot.handle != nil && !slot.released
-	h.mu.Unlock()
-	if core == nil || stopping || !core.Running() {
-		return fault.ErrReplicaNotReady
-	}
-	for _, msg := range batch.Messages {
-		if msg.Type == raftpb.MsgProp && !published {
-			return fault.ErrReplicaNotReady
-		}
-		if err := core.Step(ctx, msg); err != nil {
-			return err
-		}
-	}
-	return nil
+	return stepReceivedRaft(ctx, receiver, batch.Messages)
 }
 
+// ReadReplica validates exact peers and returns diagnostic or confirmed native
+// membership state.
 func (h *Host) ReadReplica(ctx context.Context, query load.ReplicaQuery) (load.ReplicaStatus, error) {
 	if err := ctx.Err(); err != nil {
 		return load.ReplicaStatus{}, err
@@ -162,7 +110,8 @@ func (h *Host) ReadReplica(ctx context.Context, query load.ReplicaQuery) (load.R
 	if !completeIdentity(query.From) || !completePeer(query.To) {
 		return load.ReplicaStatus{}, fault.ErrInvalid
 	}
-	if query.To.Node != h.cfg.Identity() || query.From.ClusterID != query.To.Node.ClusterID {
+	identity := h.cfg.Identity()
+	if query.To.Node != identity || query.From.ClusterID != query.To.Node.ClusterID {
 		return load.ReplicaStatus{}, fault.ErrIdentityMismatch
 	}
 	if err := h.cfg.ValidateNode(ctx, query.From); err != nil {
@@ -175,8 +124,9 @@ func (h *Host) ReadReplica(ctx context.Context, query load.ReplicaQuery) (load.R
 	}
 	// A native read can address an older, still-owned ready replica retained in
 	// an approved plan after it leaves current topology. The exact local peer
-	// and authenticated current caller are checked independently. This read-only
-	// path does not relax sender admission for Raft traffic or grant any effect.
+	// and authenticated current caller are checked independently. This
+	// read-only path does not relax sender admission for Raft traffic or grant
+	// any effect.
 	result := load.ReplicaStatus{Peer: query.To}
 	h.mu.Lock()
 	slot := h.slots[query.To.Replica.GroupID]
@@ -195,7 +145,8 @@ func (h *Host) ReadReplica(ctx context.Context, query load.ReplicaQuery) (load.R
 	// Only a published replica can attest to a completed topology effect.
 	// During startup the engine already exchanges Raft traffic, but replay and
 	// the final authorization check still belong to the startup reservation.
-	// Advertising it early could advance its operator and invalidate that check.
+	// Advertising it early could advance its operator and invalidate that
+	// check.
 	if slot.state == "ready" && slot.handle != nil && slot.core != nil && !slot.released && slot.core.Running() {
 		result.Found, result.Status = true, slot.core.Status()
 		sample := slot.core.Metrics().Sample
@@ -204,25 +155,13 @@ func (h *Host) ReadReplica(ctx context.Context, query load.ReplicaQuery) (load.R
 	core := slot.core
 	h.mu.Unlock()
 	if query.Native && result.Found {
-		state, err := core.ReadNative(ctx)
-		if err != nil {
-			return load.ReplicaStatus{}, err
-		}
-		// Never hold the host lock across a quorum wait. Recheck the publication
-		// reservation afterwards; a stopped/replaced handle cannot certify its
-		// successor's membership, even when the durable identity was reused.
-		h.mu.Lock()
-		current := h.slots[query.To.Replica.GroupID]
-		valid := current == slot && slot.core == core && slot.state == "ready" && !slot.released && core.Running()
-		h.mu.Unlock()
-		if !valid {
-			return load.ReplicaStatus{}, fault.ErrStopped
-		}
-		result.Native = &state
+		return h.readNativeReplica(ctx, slot, core, result)
 	}
 	return result, nil
 }
 
+// ReportDelivery applies a transport outcome only to its matching engine and
+// delivery token.
 func (h *Host) ReportDelivery(ctx context.Context, report load.DeliveryReport) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -230,7 +169,8 @@ func (h *Host) ReportDelivery(ctx context.Context, report load.DeliveryReport) e
 	if report.DeliveryID == 0 || !completePeer(report.From) || !completePeer(report.To) {
 		return fault.ErrInvalid
 	}
-	if report.Kind != load.DeliveryUnreachable && report.Kind != load.DeliverySnapshotSucceeded && report.Kind != load.DeliverySnapshotFailed {
+	if report.Kind != load.DeliveryUnreachable && report.Kind != load.DeliverySnapshotSucceeded &&
+		report.Kind != load.DeliverySnapshotFailed {
 		return fault.ErrInvalid
 	}
 	h.mu.Lock()
@@ -250,27 +190,7 @@ func (h *Host) ReportDelivery(ctx context.Context, report load.DeliveryReport) e
 		return fault.ErrInvalid
 	}
 	delete(slot.deliveries, report.DeliveryID)
-	if slot.core == nil || !slot.core.Running() {
-		return nil
-	}
-	if !time.Now().Before(d.deadline) {
-		if d.snapshot {
-			slot.core.ReportSnapshot(d.to.Replica.ReplicaID, raft.SnapshotFailure)
-		}
-		return nil
-	}
-	switch report.Kind {
-	case load.DeliveryUnreachable:
-		slot.core.ReportUnreachable(d.to.Replica.ReplicaID)
-		if d.snapshot {
-			slot.core.ReportSnapshot(d.to.Replica.ReplicaID, raft.SnapshotFailure)
-		}
-	case load.DeliverySnapshotSucceeded:
-		slot.core.ReportSnapshot(d.to.Replica.ReplicaID, raft.SnapshotFinish)
-	case load.DeliverySnapshotFailed:
-		slot.core.ReportSnapshot(d.to.Replica.ReplicaID, raft.SnapshotFailure)
-	}
-	return nil
+	return applyDeliveryReport(slot.core, d, report.Kind)
 }
 
 func (h *Host) expireDeliveries(now time.Time) {
@@ -287,4 +207,144 @@ func (h *Host) expireDeliveries(now time.Time) {
 			}
 		}
 	}
+}
+
+func (h *Host) registerDelivery(slot *replica, d delivery) (uint64, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.slots[slot.identity.GroupID] != slot || slot.ctx.Err() != nil {
+		return 0, fault.ErrStopped
+	}
+	if len(slot.deliveries) >= deliveryWindow {
+		oldest := uint64(math.MaxUint64)
+		for id, d := range slot.deliveries {
+			if !d.snapshot && id < oldest {
+				oldest = id
+			}
+		}
+		if oldest == math.MaxUint64 {
+			return 0, fault.ErrOverloaded
+		}
+		delete(slot.deliveries, oldest)
+	}
+	if h.deliverySeq == math.MaxUint64 {
+		return 0, fault.ErrOverloaded
+	}
+	h.deliverySeq++
+	id := h.deliverySeq
+	d.deadline = time.Now().Add(h.cfg.EffectTimeout)
+	slot.deliveries[id] = d
+	return id, nil
+}
+
+type receivedReplica struct {
+	core      *raftengine.Group
+	published bool
+}
+
+func (h *Host) validateReceivedBatch(ctx context.Context, batch load.RaftBatch) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if batch.DeliveryID == 0 || len(batch.Messages) == 0 || !completePeer(batch.From) || !completePeer(batch.To) {
+		return fault.ErrInvalid
+	}
+	identity := h.cfg.Identity()
+	if batch.To.Node != identity || batch.From.Node.ClusterID != batch.To.Node.ClusterID ||
+		batch.From.Replica.GroupID != batch.To.Replica.GroupID {
+		return fault.ErrIdentityMismatch
+	}
+	for _, msg := range batch.Messages {
+		if msg.From != batch.From.Replica.ReplicaID || msg.To != batch.To.Replica.ReplicaID {
+			return fault.ErrIdentityMismatch
+		}
+	}
+	if err := h.cfg.ValidatePeer(ctx, batch.From); err != nil {
+		return err
+	}
+	return h.cfg.ValidatePeer(ctx, batch.To)
+}
+
+func (h *Host) receivedReplica(to load.Peer) (receivedReplica, error) {
+	h.mu.Lock()
+	slot := h.slots[to.Replica.GroupID]
+	if slot == nil {
+		h.mu.Unlock()
+		return receivedReplica{}, fault.ErrReplicaNotReady
+	}
+	if localPeer(slot) != to {
+		h.mu.Unlock()
+		return receivedReplica{}, fault.ErrIdentityMismatch
+	}
+	core := slot.core
+	stopping := slot.state == "stopping" || slot.released
+	published := slot.state == "ready" && slot.handle != nil && !slot.released
+	h.mu.Unlock()
+	if core == nil || stopping || !core.Running() {
+		return receivedReplica{}, fault.ErrReplicaNotReady
+	}
+	return receivedReplica{core: core, published: published}, nil
+}
+
+func stepReceivedRaft(ctx context.Context, receiver receivedReplica, messages []raftpb.Message) error {
+	core, published := receiver.core, receiver.published
+	// An unpublished replica refuses forwarded proposals; messages before the
+	// first one are still stepped, as when each message was delivered alone.
+	if !published {
+		if i := slices.IndexFunc(messages, func(m raftpb.Message) bool { return m.Type == raftpb.MsgProp }); i >= 0 {
+			if i > 0 {
+				if err := core.StepBatch(ctx, messages[:i]); err != nil {
+					return err
+				}
+			}
+			return fault.ErrReplicaNotReady
+		}
+	}
+	return core.StepBatch(ctx, messages)
+}
+
+func (h *Host) readNativeReplica(ctx context.Context, slot *replica,
+	core *raftengine.Group, result load.ReplicaStatus) (load.ReplicaStatus, error) {
+	state, err := core.ReadNative(ctx)
+	if err != nil {
+		return load.ReplicaStatus{}, err
+	}
+	// Never hold the host lock across a quorum wait. Recheck the
+	// publication
+	// reservation afterwards; a stopped/replaced handle cannot certify its
+	// successor's membership, even when the durable identity was reused.
+	h.mu.Lock()
+	current := h.slots[result.Peer.Replica.GroupID]
+	valid := current == slot && slot.core == core && slot.state == "ready" && !slot.released && core.Running()
+	h.mu.Unlock()
+	if !valid {
+		return load.ReplicaStatus{}, fault.ErrStopped
+	}
+	result.Native = &state
+	return result, nil
+}
+
+func applyDeliveryReport(core *raftengine.Group, d delivery, kind load.DeliveryKind) error {
+	if core == nil || !core.Running() {
+		return nil
+	}
+	if !time.Now().Before(d.deadline) {
+		if d.snapshot {
+			core.ReportSnapshot(d.to.Replica.ReplicaID, raft.SnapshotFailure)
+		}
+		return nil
+	}
+	switch kind {
+	case load.DeliveryUnreachable:
+		core.ReportUnreachable(d.to.Replica.ReplicaID)
+		if d.snapshot {
+			core.ReportSnapshot(d.to.Replica.ReplicaID, raft.SnapshotFailure)
+		}
+	case load.DeliverySnapshotSucceeded:
+		core.ReportSnapshot(d.to.Replica.ReplicaID, raft.SnapshotFinish)
+	case load.DeliverySnapshotFailed:
+		core.ReportSnapshot(d.to.Replica.ReplicaID, raft.SnapshotFailure)
+	default: // Other delivery reports do not update Raft progress.
+	}
+	return nil
 }

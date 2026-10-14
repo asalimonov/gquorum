@@ -69,8 +69,7 @@ func deadPeerLeadership(t *testing.T, size int) {
 	}
 	for i, id := range groups {
 		name := fmt.Sprintf("node%d", i+1)
-		response, err := c.Request(ctx, "node3", "POST", "/api/groups/"+id+"/leader/"+name, nil, 0)
-		if err := requireStatus(response, err, 200); err != nil {
+		if err := requestLeaderTransfer(ctx, c, "node3", id, name); err != nil {
 			t.Fatal(err)
 		}
 	}

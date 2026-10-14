@@ -1,0 +1,71 @@
+name: gquorum-cache
+x-node: &node
+  image: ${CACHE_IMAGE:-gquorum-cache:local}
+  build:
+    context: ../..
+    dockerfile: examples/inmemory-cache/Dockerfile
+  stop_grace_period: 30s
+  networks: [cache]
+  secrets:
+    - credential
+  healthcheck:
+    test: ["CMD", "/cache-server", "healthcheck", "127.0.0.1:6379"]
+    interval: 2s
+    timeout: 3s
+    start_period: 10s
+    retries: 40
+x-env: &env
+  GQUORUM_CLUSTER: cache-example
+  GQUORUM_PEERS: node1,node2,node3
+  GQUORUM_DATA: /data
+  GQUORUM_CREDENTIAL_FILE: /run/secrets/credential
+  GQUORUM_ALLOW_PLAINTEXT: "true"
+  STORAGE_DISABLE_FSYNC: ${STORAGE_DISABLE_FSYNC:-true}
+services:
+  node1:
+    <<: *node
+    environment:
+      <<: *env
+      GQUORUM_NODE: node1
+    ports: ["127.0.0.1:${CACHE_NODE1_PORT:-16381}:6379"]
+    volumes: ["cache-node1:/data"]
+  node2:
+    <<: *node
+    environment:
+      <<: *env
+      GQUORUM_NODE: node2
+    ports: ["127.0.0.1:${CACHE_NODE2_PORT:-16382}:6379"]
+    volumes: ["cache-node2:/data"]
+  node3:
+    <<: *node
+    environment:
+      <<: *env
+      GQUORUM_NODE: node3
+    ports: ["127.0.0.1:${CACHE_NODE3_PORT:-16383}:6379"]
+    volumes: ["cache-node3:/data"]
+  # Stresses the cache from several workers; runs until stopped unless
+  # CACHE_DURATION is set. `docker compose logs -f loadgen` shows progress.
+  loadgen:
+    image: ${CACHE_IMAGE:-gquorum-cache:local}
+    entrypoint: ["/cache-loadgen"]
+    networks: [cache]
+    restart: "no"
+    environment:
+      CACHE_NODES: node1:6379,node2:6379,node3:6379
+      CACHE_WORKERS: ${CACHE_WORKERS:-8}
+      CACHE_KEYS: "1024"
+      CACHE_DURATION: ${CACHE_DURATION:-0s}
+      CACHE_REPORT: 5s
+    depends_on:
+      node1: {condition: service_healthy}
+      node2: {condition: service_healthy}
+      node3: {condition: service_healthy}
+secrets:
+  credential:
+    file: ./demo-credential.txt
+networks:
+  cache:
+volumes:
+  cache-node1:
+  cache-node2:
+  cache-node3:

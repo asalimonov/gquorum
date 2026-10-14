@@ -219,7 +219,7 @@ func TestRemoveNodeCancelsStagedOnlyAdmission(t *testing.T) {
 func TestChangeReplicaDemote(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
-	r, err := f.g.ChangeReplica(context.Background(), "work", "n3", topology.ReplicaLearner, preview())
+	r, err := f.g.ChangeReplica(context.Background(), "work", topology.ReplicaRoleChange{NodeName: "n3", Role: topology.ReplicaLearner}, preview())
 	doc := mutationDoc(t, r, err)
 	if doc.Group("work").Replicas[2].Role != topology.ReplicaLearner || doc.Group("work").Replicas[2].ReplicaID != 3 || doc.Group("work").UpdatedAt.IsZero() {
 		t.Fatal(doc)
@@ -233,7 +233,7 @@ func TestChangeReplicaDemoteQuorumSafety(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
 	f.g.opts.Health = mutationHealth{"n1": topology.HealthAlive, "n2": topology.HealthDead, "n3": topology.HealthAlive}
-	if _, err := f.g.ChangeReplica(context.Background(), "work", "n3", topology.ReplicaLearner, preview()); !errors.Is(err, fault.ErrUnsafeMembership) {
+	if _, err := f.g.ChangeReplica(context.Background(), "work", topology.ReplicaRoleChange{NodeName: "n3", Role: topology.ReplicaLearner}, preview()); !errors.Is(err, fault.ErrUnsafeMembership) {
 		t.Fatal("post-demotion majority lost", err)
 	}
 }
@@ -459,7 +459,7 @@ func TestRollbackApprovedGroupDeletionIsPermanentlyRetired(t *testing.T) {
 func TestMutationConcurrentCommitReturnsTypedCASConflict(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
-	_, _, err := f.g.computeMutation(context.Background(), preview(), "edit", false, func(_ *topology.Document, _ time.Time) error {
+	_, err := f.g.computeMutation(context.Background(), preview(), mutationPolicy{Comment: "edit"}, func(_ *topology.Document, _ time.Time) error {
 		concurrent := f.g.machine.Latest()
 		concurrent.Comment = "concurrent edit"
 		f.commit(t, concurrent, false)

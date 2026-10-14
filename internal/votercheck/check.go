@@ -11,6 +11,13 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
+const (
+	reasonPolicyRejected     = "policy_rejected"
+	reasonUnknownObservation = "unknown_observation"
+)
+
+// Input supplies active topology, collected metrics, native observations and
+// exact local holds.
 type Input struct {
 	Active  topology.Document
 	Metrics metrics.ClusterSnapshot
@@ -18,13 +25,15 @@ type Input struct {
 	Held    []storage.Identity
 }
 
+// Group checks coherent current group evidence and returns a refusal reason
+// when unavailable.
 func Group(in Input, id string) (metrics.GroupObservation, string) {
 	group := in.Active.Group(id)
-	if group == nil || group.VoterPolicy == nil {
-		return metrics.GroupObservation{}, "policy_rejected"
+	if group == nil || group.VoterConfig == nil {
+		return metrics.GroupObservation{}, reasonPolicyRejected
 	}
 	if !in.Metrics.IsCollectorLeader || in.Metrics.ActiveVersion != in.Active.Version {
-		return metrics.GroupObservation{}, "unknown_observation"
+		return metrics.GroupObservation{}, reasonUnknownObservation
 	}
 	var observed metrics.GroupObservation
 	for _, g := range in.Metrics.Groups {
@@ -37,11 +46,16 @@ func Group(in Input, id string) (metrics.GroupObservation, string) {
 		return observed, "stale_observation"
 	}
 	status, ok := in.Status[id]
-	if !ok || !status.Found || !status.HealthKnown || status.LeaderID == 0 || status.Term != observed.Term || status.LeaderID != observed.LeaderID {
-		return observed, "unknown_observation"
+	if !ok || !status.Found || !status.HealthKnown || status.LeaderID == 0 || status.Term != observed.Term ||
+		status.LeaderID != observed.LeaderID {
+		return observed, reasonUnknownObservation
 	}
+	return observed, nativeMembership(group, status, observed)
+}
+
+func nativeMembership(group *topology.Group, status topology.GroupStatus, observed metrics.GroupObservation) string {
 	if len(status.ConfState.VotersOutgoing) != 0 || len(status.ConfState.LearnersNext) != 0 {
-		return observed, "approved_execution"
+		return "approved_execution"
 	}
 	voters, learners := []uint64{}, []uint64{}
 	for _, r := range group.Replicas {
@@ -51,14 +65,9 @@ func Group(in Input, id string) (metrics.GroupObservation, string) {
 			learners = append(learners, r.ReplicaID)
 		}
 	}
-	same := func(a, b []uint64) bool {
-		a, b = slices.Clone(a), slices.Clone(b)
-		slices.Sort(a)
-		slices.Sort(b)
-		return slices.Equal(a, b)
-	}
-	if !same(voters, status.ConfState.Voters) || !same(learners, status.ConfState.Learners) || observed.NativeVoters != len(voters) {
-		return observed, "approved_execution"
+	if observed.NativeVoters != len(voters) ||
+		!sameMembers(voters, status.ConfState.Voters) || !sameMembers(learners, status.ConfState.Learners) {
+		return "approved_execution"
 	}
 	live := 0
 	for _, id := range voters {
@@ -67,20 +76,33 @@ func Group(in Input, id string) (metrics.GroupObservation, string) {
 		}
 	}
 	if live < topology.QuorumOf(len(voters)) {
-		return observed, "quorum_lost"
+		return "quorum_lost"
 	}
-	leaderFound := false
+	if !leaderObservation(observed, voters, learners) {
+		return reasonUnknownObservation
+	}
+	return ""
+}
+
+func sameMembers(a, b []uint64) bool {
+	left, right := slices.Clone(a), slices.Clone(b)
+	slices.Sort(left)
+	slices.Sort(right)
+	return slices.Equal(left, right)
+}
+
+func leaderObservation(observed metrics.GroupObservation, voters, learners []uint64) bool {
 	for _, r := range observed.Replicas {
 		s := r.Sample
-		if s.Identity.ReplicaID == observed.LeaderID && s.LeaderID == observed.LeaderID && s.Term == observed.Term && s.MembershipDigest == observed.MembershipDigest && s.Meter.State == metrics.Current && s.Raft.State == metrics.Current && same(voters, s.Voters) && same(learners, s.Learners) {
-			leaderFound = true
+		if s.Identity.ReplicaID == observed.LeaderID && s.LeaderID == observed.LeaderID && s.Term == observed.Term &&
+			s.MembershipDigest == observed.MembershipDigest && s.Meter.State == metrics.Current &&
+			s.Raft.State == metrics.Current && sameMembers(voters, s.Voters) && sameMembers(learners, s.Learners) {
+			return true
 		}
 	}
-	if !leaderFound {
-		return observed, "unknown_observation"
-	}
-	return observed, ""
+	return false
 }
+
 func findReplica(group *topology.Group, key topology.ReplicaKey) (topology.Replica, bool) {
 	for _, r := range group.Replicas {
 		if r.ReplicaID == key.ReplicaID && r.NodeName == key.NodeName {
@@ -89,10 +111,13 @@ func findReplica(group *topology.Group, key topology.ReplicaKey) (topology.Repli
 	}
 	return topology.Replica{}, false
 }
-func observation(g metrics.GroupObservation, key topology.ReplicaKey, cluster string) (metrics.ReplicaObservation, bool) {
+
+func observation(g metrics.GroupObservation, key topology.ReplicaKey,
+	cluster string) (metrics.ReplicaObservation, bool) {
 	for _, r := range g.Replicas {
 		id := r.Sample.Identity
-		if id.ClusterID == cluster && id.GroupID == g.GroupID && id.NodeName == key.NodeName && id.ReplicaID == key.ReplicaID {
+		if id.ClusterID == cluster && id.GroupID == g.GroupID && id.NodeName == key.NodeName &&
+			id.ReplicaID == key.ReplicaID {
 			return r, true
 		}
 	}
@@ -101,66 +126,168 @@ func observation(g metrics.GroupObservation, key topology.ReplicaKey, cluster st
 func duration(v metrics.DurationValue, w time.Duration) bool {
 	return v.State == metrics.Current && v.Value >= w
 }
-func ReplacementFailure(p topology.VoterPolicy, e metrics.Evidence) bool {
-	return duration(e.UnavailableFor, p.FailureWindow) || duration(e.ReplicationLagFor, p.FailureWindow) || p.ReplaceNoProgress && duration(e.NoProgressFor, p.NoProgressWindow)
+
+// ReplacementFailure reports whether known failure windows permit voter
+// replacement.
+func ReplacementFailure(p topology.VoterConfig, e metrics.Evidence) bool {
+	return duration(e.UnavailableFor, p.FailureWindow) || duration(e.ReplicationLagFor, p.FailureWindow) ||
+		p.ReplaceNoProgress && duration(e.NoProgressFor, p.NoProgressWindow)
 }
+
+// Check returns an empty reason only when a requested voter change passes
+// mandatory eligibility checks.
 func Check(in Input, change topology.VoterChange) string {
 	observed, reason := Group(in, change.GroupID)
 	if reason != "" {
 		return reason
 	}
 	group := in.Active.Group(change.GroupID)
-	p := *group.VoterPolicy
-	if change.Promote == nil && change.Demote == nil {
-		return "policy_rejected"
-	}
-	if change.Promote != nil && change.Demote != nil {
-		if *change.Promote == *change.Demote || observed.NativeVoters != p.TargetVoters {
-			return "policy_rejected"
-		}
-	} else if change.Promote != nil && observed.NativeVoters >= p.TargetVoters || change.Demote != nil && change.Promote == nil && observed.NativeVoters <= p.TargetVoters {
-		return "policy_rejected"
+	p := *group.VoterConfig
+	if !validChangeShape(change, observed.NativeVoters, p.TargetVoters) {
+		return reasonPolicyRejected
 	}
 	if change.Promote != nil {
-		r, found := findReplica(group, *change.Promote)
-		o, known := observation(observed, *change.Promote, in.Active.ClusterID)
-		node := in.Active.Node(change.Promote.NodeName)
-		if !found || r.Role != topology.ReplicaLearner || node == nil || node.State != topology.NodeActive {
-			return "policy_rejected"
-		}
-		if r.PinnedLearner {
-			return "pinned_learner"
-		}
-		if slices.Contains(in.Held, storage.Identity{ClusterID: in.Active.ClusterID, GroupID: group.ID, NodeName: r.NodeName, ReplicaID: r.ReplicaID}) {
-			return "local_stop"
-		}
-		if !known || o.State != metrics.Current || o.Reachability != "alive" || o.Sample.Identity.RunID == "" || o.Sample.Identity.InstanceID == "" || !o.Sample.Ready || !o.Sample.Running || o.Sample.Restoring || o.Sample.WALStall > time.Second || o.Sample.Raft.State != metrics.Current || o.Sample.Writer.State != metrics.Current || o.Sample.Meter.State != metrics.Current {
-			return "unknown_observation"
-		}
-		if o.Evidence.DemotionCooldownRemaining > 0 {
-			return "replica_cooldown"
-		}
-		if o.Sample.Term != observed.Term || o.Sample.LeaderID != observed.LeaderID || o.Sample.MembershipDigest != observed.MembershipDigest || !slices.Contains(o.Sample.Learners, r.ReplicaID) || o.ReplicationLag.State != metrics.Current || o.ReplicationLag.Value > p.StandbyLagEntries || o.ApplyBacklog.State != metrics.Current || o.ApplyBacklog.Value > p.StandbyApplyBacklogEntries || !duration(o.Evidence.StandbyReadyFor, p.StandbyWindow) {
-			return "standby_window"
-		}
-		if !in.Status[group.ID].LiveVoters[r.ReplicaID] {
-			return "unknown_observation"
+		if reason := promotionEligibility(in, group, observed, *change.Promote); reason != "" {
+			return reason
 		}
 	}
 	if change.Demote != nil {
-		r, found := findReplica(group, *change.Demote)
-		if !found || r.Role != topology.ReplicaVoter || r.PinnedLearner {
-			return "policy_rejected"
+		if reason := demotionEligibility(in, group, observed, change); reason != "" {
+			return reason
 		}
-		if change.Promote != nil {
-			o, known := observation(observed, *change.Demote, in.Active.ClusterID)
-			if !known || !ReplacementFailure(p, o.Evidence) {
-				return "failure_window"
-			}
-			if observed.CooldownRemaining > 0 && (!p.AllowNewFailureDuringCooldown || !slices.Contains(o.Evidence.Reasons, "new_failure")) {
-				return "group_cooldown"
-			}
+	}
+	return projectedPlacement(in.Active, change)
+}
+
+func validChangeShape(change topology.VoterChange, current, target int) bool {
+	switch {
+	case change.Promote == nil && change.Demote == nil:
+		return false
+	case change.Promote != nil && change.Demote != nil:
+		return *change.Promote != *change.Demote && current == target
+	case change.Promote != nil:
+		return current < target
+	default:
+		return current > target
+	}
+}
+
+func promotionEligibility(in Input, group *topology.Group, observed metrics.GroupObservation,
+	key topology.ReplicaKey) string {
+	p := *group.VoterConfig
+	r, found := findReplica(group, key)
+	o, known := observation(observed, key, in.Active.ClusterID)
+	node := in.Active.Node(key.NodeName)
+	if !found || r.Role != topology.ReplicaLearner || node == nil || node.State != topology.NodeActive {
+		return reasonPolicyRejected
+	}
+	if r.PinnedLearner {
+		return "pinned_learner"
+	}
+	if slices.Contains(in.Held,
+		storage.Identity{ClusterID: in.Active.ClusterID, GroupID: group.ID, NodeName: r.NodeName,
+			ReplicaID: r.ReplicaID}) {
+		return "local_stop"
+	}
+	if !known || !currentReplicaObservation(o) {
+		return reasonUnknownObservation
+	}
+	if o.Evidence.DemotionCooldownRemaining > 0 {
+		return "replica_cooldown"
+	}
+	if o.Sample.Term != observed.Term || o.Sample.LeaderID != observed.LeaderID ||
+		o.Sample.MembershipDigest != observed.MembershipDigest ||
+		o.ReplicationLag.State != metrics.Current || o.ReplicationLag.Value > p.StandbyLagEntries ||
+		o.ApplyBacklog.State != metrics.Current || o.ApplyBacklog.Value > p.StandbyApplyBacklogEntries ||
+		!slices.Contains(o.Sample.Learners, r.ReplicaID) ||
+		!duration(o.Evidence.StandbyReadyFor, p.StandbyWindow) {
+		return "standby_window"
+	}
+	if !in.Status[group.ID].LiveVoters[r.ReplicaID] {
+		return reasonUnknownObservation
+	}
+	return ""
+}
+
+func currentReplicaObservation(o metrics.ReplicaObservation) bool {
+	return o.State == metrics.Current && o.Reachability == "alive" && o.Sample.Identity.RunID != "" &&
+		o.Sample.Identity.InstanceID != "" && o.Sample.Ready && o.Sample.Running && !o.Sample.Restoring &&
+		o.Sample.WALStall <= time.Second && o.Sample.Raft.State == metrics.Current &&
+		o.Sample.Writer.State == metrics.Current && o.Sample.Meter.State == metrics.Current
+}
+
+func demotionEligibility(in Input, group *topology.Group, observed metrics.GroupObservation,
+	change topology.VoterChange) string {
+	p := *group.VoterConfig
+	r, found := findReplica(group, *change.Demote)
+	if !found || r.Role != topology.ReplicaVoter || r.PinnedLearner {
+		return reasonPolicyRejected
+	}
+	if change.Promote != nil {
+		o, known := observation(observed, *change.Demote, in.Active.ClusterID)
+		if !known || !ReplacementFailure(p, o.Evidence) {
+			return "failure_window"
+		}
+		if observed.CooldownRemaining > 0 && (!p.AllowNewFailureDuringCooldown ||
+			!slices.Contains(o.Evidence.Reasons, "new_failure")) {
+			return "group_cooldown"
 		}
 	}
 	return ""
+}
+
+func projectedPlacement(active topology.Document, change topology.VoterChange) string {
+	group := active.Group(change.GroupID)
+	if group == nil {
+		return reasonPolicyRejected
+	}
+	keys := make([]topology.ReplicaKey, 0, len(group.Replicas))
+	for _, replica := range group.Replicas {
+		if replica.Role == topology.ReplicaVoter && (change.Demote == nil ||
+			replica.NodeName != change.Demote.NodeName || replica.ReplicaID != change.Demote.ReplicaID) {
+			keys = append(keys, topology.ReplicaKey{NodeName: replica.NodeName, ReplicaID: replica.ReplicaID})
+		}
+	}
+	if change.Promote != nil {
+		if reason := promotionPlacement(active, change); reason != "" {
+			return reason
+		}
+		keys = append(keys, *change.Promote)
+	}
+	if err := topology.ValidateVoterPlacement(active, change.GroupID, keys); err != nil {
+		if group.VoterConfig != nil && group.VoterConfig.DistinctVoterLabel != "" {
+			return "voter_domain_conflict"
+		}
+		return "placement_unsatisfied"
+	}
+	return ""
+}
+
+func promotionPlacement(active topology.Document, change topology.VoterChange) string {
+	report, err := topology.EvaluatePlacement(topology.PlacementInput{Approved: active, Desired: active,
+		GroupID: change.GroupID})
+	if err != nil {
+		return "placement_unsatisfied"
+	}
+	for _, candidate := range report.Candidates {
+		if candidate.NodeName != change.Promote.NodeName {
+			continue
+		}
+		if !candidate.CanVote {
+			return candidateRefusal(candidate)
+		}
+		break
+	}
+	return ""
+}
+
+func candidateRefusal(candidate topology.PlacementCandidate) string {
+	for _, reason := range candidate.Reasons {
+		if reason.Code == "node_learner_only" || reason.Code == "voter_domain_missing" ||
+			reason.Code == "selector_key_missing" || reason.Code == "selector_value_mismatch" ||
+			reason.Code == "node_reserved" {
+			return reason.Code
+		}
+	}
+	return "placement_unsatisfied"
 }

@@ -22,6 +22,10 @@ func TestInterruptedLoadCleanupSurvivesHistoryAndSnapshot(t *testing.T) {
 			base.Version = 1
 			if founding {
 				base.Groups = base.Groups[:1]
+			} else {
+				base.Nodes = append(base.Nodes, topology.Node{Name: "n2", Type: "worker", State: topology.NodeActive})
+				base.MetaGroup().Replicas = append(base.MetaGroup().Replicas, topology.Replica{NodeName: "n2", ReplicaID: 2, Role: topology.ReplicaLearner})
+				base.MetaGroup().NextReplicaID = 3
 			}
 			sm.latest, sm.target, sm.active = base.Clone(), base.Clone(), base.Clone()
 			sm.history = []topology.Document{base.Clone()}
@@ -37,22 +41,27 @@ func TestInterruptedLoadCleanupSurvivesHistoryAndSnapshot(t *testing.T) {
 				}
 				return r
 			}
-			prepared := baseDoc()
+			prepared := base.Clone()
 			steps := []topology.Step{{Seq: 1, Kind: topology.StepCreateFoundingGroup, GroupID: "shard0"}}
-			if !founding {
+			if founding {
+				prepared = baseDoc()
+			} else {
 				g := prepared.Group("shard0")
-				g.Replicas[0].ReplicaID, g.NextReplicaID = 2, 3
+				g.Replicas = append(g.Replicas, topology.Replica{NodeName: "n2", ReplicaID: 2, Role: topology.ReplicaLearner})
+				g.NextReplicaID = 3
 				steps = []topology.Step{
-					{Seq: 1, Kind: topology.StepPrepareReplica, GroupID: "shard0", NodeName: "n1", ReplicaID: 2},
-					{Seq: 2, Kind: topology.StepAddLearner, GroupID: "shard0", NodeName: "n1", ReplicaID: 2},
+					{Seq: 1, Kind: topology.StepPrepareReplica, GroupID: "shard0", NodeName: "n2", ReplicaID: 2},
+					{Seq: 2, Kind: topology.StepAddLearner, GroupID: "shard0", NodeName: "n2", ReplicaID: 2},
 				}
 			}
 			accepted(ProposeDocument{Doc: prepared, ExpectedVersion: 1})
-			old := accepted(BeginOperatorProposal{Version: 2, Plan: topology.Plan{Version: 2, Steps: steps}, At: at}).OperatorID
+			oldPlan := withTestVoterProof(base, sm.latest, topology.Plan{Version: 2, Steps: steps})
+			steps = oldPlan.Steps
+			old := accepted(BeginOperatorProposal{Version: 2, Plan: oldPlan, At: at}).OperatorID
 			accepted(TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: old, Version: 2, Attempt: 1, StepSeq: 1, State: topology.OperatorRunning, GroupID: "shard0", NodeName: steps[0].NodeName, At: at}})
 			// A committed grant reached its owner, but the effect acknowledgement was lost.
 			first := steps[0]
-			accepted(BeginEffectProposal{Action: topology.AuthorizedStep{OperatorID: old, Version: 2, Attempt: 1, StepSeq: 1, Kind: first.Kind, GroupID: first.GroupID, NodeName: first.NodeName, ReplicaID: first.ReplicaID}})
+			accepted(BeginEffectProposal{Action: topology.AuthorizedStep{OperatorID: old, Version: 2, Attempt: 1, StepSeq: 1, Kind: first.Kind, GroupID: first.GroupID, NodeName: first.NodeName, ReplicaID: first.ReplicaID, ExpectedVotersDigest: first.ExpectedVotersDigest, ResultVotersDigest: first.ResultVotersDigest}})
 			desired := sm.latest.Clone()
 			desired.Groups = desired.Groups[:1]
 			accepted(ProposeDocument{Doc: desired, ExpectedVersion: 2})
@@ -67,6 +76,9 @@ func TestInterruptedLoadCleanupSurvivesHistoryAndSnapshot(t *testing.T) {
 			// _meta is established. The removed load group may have no quorum.
 			meta := observed[topology.MetaGroupID]
 			meta.Found, meta.LeaderID, meta.ConfState.Voters = true, 1, []uint64{1}
+			if !founding {
+				meta.ConfState.Learners = []uint64{2}
+			}
 			observed[topology.MetaGroupID] = meta
 			plan, err := topology.BuildPlan(planning, sm.latest, observed, testRules())
 			if err != nil {
@@ -132,7 +144,7 @@ func TestInterruptedLoadCleanupSurvivesHistoryAndSnapshot(t *testing.T) {
 			}
 			want := []storage.Identity{{ClusterID: base.ClusterID, NodeName: "n1", GroupID: "shard0", ReplicaID: 1}}
 			if !founding {
-				want = append(want, storage.Identity{ClusterID: base.ClusterID, NodeName: "n1", GroupID: "shard0", ReplicaID: 2})
+				want = append(want, storage.Identity{ClusterID: base.ClusterID, NodeName: "n2", GroupID: "shard0", ReplicaID: 2})
 			}
 			if !slices.Equal(ids, want) {
 				t.Fatal("incomplete recovered deletion grant", ids)
@@ -283,6 +295,7 @@ func TestSurvivingGroupPlanningRetainsInterruptedPreparation(t *testing.T) {
 		t.Fatal(r)
 	}
 	plan := topology.Plan{Version: 2, Steps: []topology.Step{{Seq: 1, GroupID: "shard0", Kind: topology.StepPrepareReplica, NodeName: "n2", ReplicaID: 2}, {Seq: 2, GroupID: "shard0", Kind: topology.StepAddLearner, NodeName: "n2", ReplicaID: 2}}}
+	plan = withTestVoterProof(base, sm.latest, plan)
 	old := apply(t, sm, 2, BeginOperatorProposal{Version: 2, Plan: plan, At: at})
 	if !old.Accepted {
 		t.Fatal(old)

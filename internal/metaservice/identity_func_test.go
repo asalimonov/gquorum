@@ -11,8 +11,8 @@ import (
 func TestLoadStoredIdentityIsReadOnlyAndOmitsProcessID(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "absent.bolt")
-	if _, found, err := LoadStoredIdentity(path); err != nil || found {
-		t.Fatal(found, err)
+	if found, err := LoadStoredIdentity(path); err != nil || found.Found {
+		t.Fatal(found.Found, err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatal("identity reader created database", err)
@@ -29,9 +29,9 @@ func TestLoadStoredIdentityIsReadOnlyAndOmitsProcessID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, found, err := LoadStoredIdentity(opts.DBPath)
-	if err != nil || !found || id.NodeName != opts.Identity.NodeName || id.ClusterID != opts.Identity.ClusterID || id.MemberID != opts.Identity.MemberID || id.InstanceID != "" {
-		t.Fatal(id, found, err)
+	id, err := LoadStoredIdentity(opts.DBPath)
+	if err != nil || !id.Found || id.Identity.NodeName != opts.Identity.NodeName || id.Identity.ClusterID != opts.Identity.ClusterID || id.Identity.MemberID != opts.Identity.MemberID || id.Identity.InstanceID != "" {
+		t.Fatal(id.Identity, id.Found, err)
 	}
 	after, err := os.ReadFile(opts.DBPath)
 	if err != nil || string(before) != string(after) {

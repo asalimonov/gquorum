@@ -1,56 +1,5 @@
 package topology
 
-// replacementOrderSafe simulates every intermediate voter set. Live observations
-// select a feasible plan; receivers independently recheck safety before effects.
-func replacementOrderSafe(status GroupStatus, additions, demotions, removals []Replica, shrinkFirst bool, maximum int) bool {
-	voters := idSet(status.ConfState.Voters)
-	quorum := func() bool {
-		alive := 0
-		for id := range voters {
-			if status.LiveVoters[id] {
-				alive++
-			}
-		}
-		return len(voters) > 0 && alive >= QuorumOf(len(voters))
-	}
-	if !quorum() {
-		return false
-	}
-	shrink := func() bool {
-		for _, list := range [][]Replica{demotions, removals} {
-			for _, r := range list {
-				if _, voter := voters[r.ReplicaID]; !voter {
-					continue
-				}
-				if validateDestructiveBoundary(status.GroupID, len(voters)) != nil {
-					return false
-				}
-				delete(voters, r.ReplicaID)
-				if !quorum() {
-					return false
-				}
-			}
-		}
-		return true
-	}
-	grow := func() bool {
-		for _, r := range additions {
-			if r.Role != ReplicaVoter {
-				continue
-			}
-			voters[r.ReplicaID] = struct{}{}
-			if len(voters) > maximum || !quorum() {
-				return false
-			}
-		}
-		return true
-	}
-	if shrinkFirst {
-		return shrink() && grow()
-	}
-	return grow() && shrink()
-}
-
 func liveTransferVoters(voters map[uint64]struct{}, status GroupStatus) map[uint64]struct{} {
 	if !status.HealthKnown {
 		return voters
@@ -90,7 +39,8 @@ func bindDemotionGuards(plan *Plan, desired Document, observed map[string]GroupS
 			if s.GroupID == MetaGroupID {
 				preferred = preferredMeta
 			}
-			r, ok := transferTarget(desired.Group(s.GroupID), liveTransferVoters(members, observed[s.GroupID]), s.ReplicaID, preferred)
+			r, ok := transferTarget(desired.Group(s.GroupID), liveTransferVoters(members, observed[s.GroupID]),
+				s.ReplicaID, preferred)
 			if !ok {
 				return planUnsafef("group %q has no retained voter for the demotion guard", s.GroupID)
 			}
@@ -98,6 +48,7 @@ func bindDemotionGuards(plan *Plan, desired Document, observed map[string]GroupS
 			delete(members, s.ReplicaID)
 		case StepRemoveReplica:
 			delete(members, s.ReplicaID)
+		default: // Other steps leave voters and transfer guards unchanged.
 		}
 	}
 	return nil

@@ -25,14 +25,35 @@ func validateAuthorityOptions(o Options) error {
 		return nil
 	}
 	g := *o.InitialAuthority
-	if o.Mode != Founding || o.GroupID == topology.MetaGroupID || g.Action == nil || g.Action.Kind != topology.StepCreateFoundingGroup {
+	if o.Mode != Founding || o.GroupID == topology.MetaGroupID || g.Action == nil ||
+		g.Action.Kind != topology.StepCreateFoundingGroup {
 		return fault.New(fault.Invalid, "initial authority is restricted to approved load founding", nil)
 	}
 	if err := validateGroupGrant(o, g); err != nil {
 		return err
 	}
-	if !slices.Contains(g.Targets, topology.AuthorityTarget{NodeName: o.NodeName, MemberID: o.MemberID, ReplicaID: o.ReplicaID}) {
+	if !slices.Contains(g.Targets, topology.AuthorityTarget{NodeName: o.NodeName, MemberID: o.MemberID,
+		ReplicaID: o.ReplicaID}) {
 		return fault.ErrIdentityMismatch
+	}
+	return validateFoundingAuthority(o, g)
+}
+
+func validateFoundingAuthority(o Options, g topology.AuthorityGrant) error {
+	if len(o.FoundingLearners) != 0 || g.Action.ExpectedVotersDigest != topology.VoterSetDigest(nil) {
+		return fault.New(fault.Invalid, "founding peers differ from approved voter base", nil)
+	}
+	peers := make([]uint64, 0, len(o.Peers))
+	for _, peer := range o.Peers {
+		peers = append(peers, peer.ID)
+	}
+	if len(peers) != len(g.Targets) || topology.VoterSetDigest(peers) != g.Action.ResultVotersDigest {
+		return fault.New(fault.Invalid, "founding peers differ from approved voter result", nil)
+	}
+	for _, target := range g.Targets {
+		if !slices.Contains(peers, target.ReplicaID) {
+			return fault.New(fault.Invalid, "founding peer is absent from approved targets", nil)
+		}
 	}
 	return nil
 }
@@ -61,11 +82,12 @@ func validateAuthoritySnapshot(o Options, s raftstate.Snapshot) error {
 }
 
 func validateAuthorityRecovery(o Options, r storage.Recovery, s raftstate.Snapshot) error {
-	fresh := raft.IsEmptySnap(r.Snapshot) && raft.IsEmptyHardState(r.HardState) && len(r.Entries) == 0
+	fresh := len(r.Entries) == 0 && raft.IsEmptySnap(r.Snapshot) && raft.IsEmptyHardState(r.HardState)
 	if o.InitialAuthority != nil && !fresh {
 		return fault.New(fault.Invalid, "initial authority cannot override retained state", nil)
 	}
-	if fresh && o.ManagedAuthority && o.GroupID != topology.MetaGroupID && o.Mode == Founding && o.InitialAuthority == nil {
+	if fresh && o.ManagedAuthority && o.GroupID != topology.MetaGroupID && o.Mode == Founding &&
+		o.InitialAuthority == nil {
 		return fault.New(fault.Invalid, "managed load founding requires approved authority", nil)
 	}
 	if !raft.IsEmptySnap(r.Snapshot) {
@@ -90,7 +112,8 @@ func validateEntryMode(o Options, entry raftpb.Entry) error {
 	}
 	var e raftstate.Entry
 	if entry.Type == raftpb.EntryConfChangeV2 {
-		_, e, _ = decodeConfiguration(entry)
+		decoded, _ := decodeConfiguration(entry)
+		e = decoded.Context
 	} else {
 		e, _ = raftstate.DecodeEntry(entry.Data)
 	}
