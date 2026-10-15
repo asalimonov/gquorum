@@ -597,3 +597,19 @@ Verified
 - Focused planning/bootstrap/readmission/rollback/founding functional checks passed (2.967s), /tmp/gquorum-task24-functional.log. Entire scheduling functional suite passed (0.424s), /tmp/gquorum-task24-scheduling.log.
 - Final make test: 1216/1216, 6.141s; test-reports/unit/20261015T213824.840957Z-kulsmngb/report.md. Exact staged lint passes at /tmp/gquorum-task24-lint.log. Diff checks pass; 456 changed handwritten Go lines, below 550. Pure signature/construction conversion adds no concurrency; no new race/Docker run.
 - Task 25 now derives affected scopes; unchanged groups still participate in this intermediate planner. Next regular review is commit 35. Live scoped-format activation remains Task 68.
+
+
+## Task 25 — Derive semantic declaration and placement scopes
+Date: 2026-10-16. Commit: this entry's commit (implementation/correction commit 35).
+
+Implemented
+- Added expert topology.AffectedGroups(approved, desired), reusing AffectedPlacementGroups/EvaluatePlacement. It combines exact declaration/allocation changes, effective placement and candidate eligibility/domain dependencies; node-only edits add _meta. No new Node/Cluster method, runtime owner or dependency registry.
+- Exact member changes affect assigned hosts and eligible repair candidates. An unassigned ineligible node does not become a group's identity dependency. Descriptive node fields remain metadata-only; inherited placement changes do not affect a group with an unchanged override. Results are deterministic and owned, and invalid dependency evaluation conservatively conflicts.
+- Before coding, split former Task 25 into semantic derivation (25), scoped planner/collection (26), and replicated scope/CAS/independence validation (27). Later tasks shift by two: 80 total, shared new-ownership check 29, scoped service wiring 58, activation 70, final audit 80. Updated source removal references; historical progress numbering stays unchanged.
+- Recorded the transition safety requirement: affected-only plans must not enter legacy whole-document completion. Prepare and test isolated scoped helpers until complete block/approval/persistence wiring; no runtime mode flag, compatibility API or fabricated convergence. This commit's helper is not yet a live scope gate; wiring remains the following tasks and activation.
+
+Verified
+- Scope/placement units cover disjoint labels/allocation/roles/deletion/creation, inherited and overridden rules, node selector/type/drain/reservation changes, domain reads, participant reseats, ineligible predecessor ownership, provenance/order neutrality, copies and conservative failure.
+- Final make test: 1236/1236, 11.312s; test-reports/unit/20261015T214333.022723Z-vl83stzn/report.md. Staged lint passes at /tmp/gquorum-task25-lint.log; full checkpoint make lint passes at /tmp/gquorum-checkpoint35-lint.log. Extracted candidate identity comparison to meet cognitive-complexity 16; reran final lint and units after the change. Diff checks pass; 239 changed handwritten Go lines, below 550. Pure derivation adds no I/O/concurrency; no new functional/race/Docker run.
+- Commit-35 dead-code audit: production convergedPlanInput and legacyPlanningObservations are deleted in this batch; only explicit test fixtures retain the former name. No checkPlanShape or validatePlanCleanupCoverage remains. observeGroups still serves legacy scheduling, DeletionBase serves legacy placement/drain/controller reads, and OperatorBase serves the old controller store; retain until their named conversion/removal tasks (activation 70). Reused the group-ID union rather than duplicating it. Full unused lint passes.
+- Five-commit review range is 0583913..HEAD: Correction 10 and Tasks 22–25. Request peer review immediately after this commit and evaluate findings before another implementation commit. Full target remains unfinished.
