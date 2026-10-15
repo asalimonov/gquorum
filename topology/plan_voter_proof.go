@@ -52,12 +52,12 @@ func (p *planVoterProof) validateBase(entry PlanVoterBase) (map[uint64]struct{},
 		if id == 0 {
 			return nil, planUnsafef("group %q voter base contains zero ID", entry.GroupID)
 		}
-		if _, ok := replicaIdentity(p.base.provenGroup(entry.GroupID), p.desired.Group(entry.GroupID), id); !ok {
+		if _, ok := p.base.planReplicaKey(entry.GroupID, p.desired.Group(entry.GroupID), id); !ok {
 			return nil, planUnsafef("group %q voter base has unknown replica %d", entry.GroupID, id)
 		}
 		set[id] = struct{}{}
 	}
-	if p.base.provenGroup(entry.GroupID) == nil {
+	if p.base.foundingGroup(entry.GroupID) {
 		if len(set) != 0 {
 			return nil, planUnsafef("founding group %q has a nonempty voter base", entry.GroupID)
 		}

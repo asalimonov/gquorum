@@ -53,6 +53,9 @@ func validatePlanHeader(input PlanInput, desired Document, plan Plan) error {
 	if plan.Version != desired.Version {
 		return fmt.Errorf("plan version %d does not match desired version %d", plan.Version, desired.Version)
 	}
+	if err := validateRetainedInput(input, desired); err != nil {
+		return err
+	}
 	if err := validatePlanMembers(input, desired); err != nil {
 		return err
 	}

@@ -472,3 +472,18 @@ Verified
 - Focused topology/operator units and metaservice TestRollback functional checks passed. Both old/new regression probes passed during review; Claude independently reproduced them in archived commits.
 - make test: 1151/1151, 11.653s; test-reports/unit/20261015T200834.762307Z-_mvxmue6/report.md. Exact staged lint passed at /tmp/gquorum-correction9-lint.log; diff checks passed. 106 changed handwritten Go lines, below 550.
 - No new concurrency or persistence implementation; no additional race/Docker run. Full lint passed at commit 25 and focused staged lint covers this follow-up. Review has no remaining disagreement or user decision. Next regular peer/dead-code checkpoint is commit 30.
+
+
+## Task 18 — Retained planner identities and possible founding evidence
+Date: 2026-10-16. Commit: this entry's commit (implementation/correction commit 27).
+
+Implemented
+- Added the exact expert PlanInput.Retained and RetainedGroup/RetainedReplica/RetainedProgress values with Hosted/Cleanup/Stopped semantics. They carry identities and host obligations, never replica roles, convergence or effect authority.
+- Observation and shape entry checks reject zero/unnamed/duplicate IDs, desired overlap, contradictory declared hosts, unknown progress and IDs beyond available current allocation counters. Exact older-convergence overlap and multiple historical IDs on one host remain representable.
+- Clarified target §7.2: an older converged allocation counter cannot cap later issued identities. Current approved/desired bounds are checked here; when both omit a deleted group, the FSM collector must check full history. No synthetic declaration is introduced.
+- Voter identity/proof helpers now resolve retained ReplicaKeys. Possible founding grants or any retained host state prevent refounding even without a converged declaration or remaining founding identities. Unknown versus tombstone and separate approved placement remain intact. Retirement move generation/shape/simulation coverage follows Task 19; public planner conversion remains Tasks 21–22.
+
+Verified
+- Focused topology/operator tests passed. Added twice-superseded native/prepared identity, malformed input, exact host overlap, retained/all-desired founding, proof without convergence, old-domain/pinned-learner protection, encoding and caller-copy regressions.
+- make test: 1175/1175, 8.993s; test-reports/unit/20261015T201221.794267Z-tf905nhu/report.md. Staged lint passed at /tmp/gquorum-task18-lint.log after fixing one line wrap and constant-block documentation; these final edits do not change behavior.
+- Diff checks pass; 334 changed handwritten Go lines, below 550. No new resource acquisition/concurrency, so no additional functional/race/Docker run. No ordinary API method, public overload or temporary test-only export. Next regular review remains commit 30.

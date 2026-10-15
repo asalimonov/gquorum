@@ -9,6 +9,7 @@ type PlanInput struct {
 	Groups   map[string]GroupProgress
 	Nodes    map[string]NodeProgress
 	Native   map[string]NativeState
+	Retained map[string]RetainedGroup
 }
 
 func (in PlanInput) provenGroup(id string) *Group { return in.Groups[id].Converged }
@@ -46,7 +47,9 @@ func (in PlanInput) provenReplica(step Step) *Replica {
 
 func (in PlanInput) foundingGroup(id string) bool {
 	row := in.Groups[id]
-	return row.Converged == nil && row.ConvergedVersion == 0
+	retained := in.Retained[id]
+	return row.Converged == nil && row.ConvergedVersion == 0 &&
+		!retained.FoundingIssued && len(retained.Replicas) == 0
 }
 
 // Load ownership follows the node checkpoint until every affected load group

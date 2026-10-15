@@ -12,9 +12,9 @@ func voterKeys(s voterPlanState) []ReplicaKey {
 func voterKeysForSet(s voterPlanState, voters map[uint64]struct{}) []ReplicaKey {
 	keys := make([]ReplicaKey, 0, len(voters))
 	for id := range voters {
-		replica, ok := replicaIdentity(s.base.provenGroup(s.groupID), s.desired.Group(s.groupID), id)
+		replica, ok := s.base.planReplicaKey(s.groupID, s.desired.Group(s.groupID), id)
 		if ok {
-			keys = append(keys, ReplicaKey{NodeName: replica.NodeName, ReplicaID: id})
+			keys = append(keys, replica)
 		}
 	}
 	slices.SortFunc(keys, func(a, b ReplicaKey) int {

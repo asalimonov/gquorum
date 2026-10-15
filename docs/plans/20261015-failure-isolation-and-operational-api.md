@@ -342,14 +342,14 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `topology/plan_input.go`, new retained value/validation helpers, voter identity/proof helpers and nearby unit tests. **Target:** [T] §5.1, §7.2 FI_PLAN_EVIDENCE; contract C12. **Depends on:** 16–17, Correction 8. **Budget:** estimated 350–500 changed Go lines, ceiling 550.
 
-- [ ] Add the exact RetainedGroup/RetainedReplica/RetainedProgress values and PlanInput.Retained. Separate possible founding, hosted state, cleanup ownership and proven stop from declaration/role/convergence/authority.
-- [ ] Validate exact nonzero unique replica IDs, host bindings, progress values, Desired disjointness and available identity floors; reject contradictions without mutating inputs. Reuse ReplicaKey for retained lookup; route voter identity/proof lookups through the retained input without inventing replica roles. The FSM collector checks the full historical allocation floor.
-- [ ] A retained founding grant or possible retained host prevents refounding, even when all founding identities remain Desired or no converged declaration exists. Preserve unknown-versus-tombstone semantics and independent Approved placement rules.
-- [ ] Test twice-superseded native identities, conflicting bindings, retained/fresh/tombstoned founding, input immutability and unknown native refusal. Preserve guarded old/new domains and pinned-learner safety. Preserve the named removal comments updated in Correction 9: public planner conversion 22, cutover 66.
+- [x] Add the exact RetainedGroup/RetainedReplica/RetainedProgress values and PlanInput.Retained. Separate possible founding, hosted state, cleanup ownership and proven stop from declaration/role/convergence/authority.
+- [x] Validate exact nonzero unique replica IDs, host bindings, progress values, Desired disjointness and available identity floors; reject contradictions without mutating inputs. Reuse ReplicaKey for retained lookup; route voter identity/proof lookups through the retained input without inventing replica roles. The FSM collector checks the full historical allocation floor.
+- [x] A retained founding grant or possible retained host prevents refounding, even when all founding identities remain Desired or no converged declaration exists. Preserve unknown-versus-tombstone semantics and independent Approved placement rules.
+- [x] Test twice-superseded native identities, conflicting bindings, retained/fresh/tombstoned founding, input immutability and unknown native refusal. Preserve guarded old/new domains and pinned-learner safety. Preserve the named removal comments updated in Correction 9: public planner conversion 22, cutover 66.
 
 **Verification**
 
-- [ ] Run focused retained/voter/founding/shape units, staged lint and `make test`. No new public planner overload or synthetic Document is permitted.
+- [x] Run focused retained/voter/founding/shape units, staged lint and `make test`. No new public planner overload or synthetic Document is permitted.
 
 ### Task 19: Plan and validate retirement from exact retained progress
 
