@@ -30,6 +30,8 @@ type RepairPolicy interface {
 type ScheduleInput struct {
 	Now                    time.Time
 	Latest, Target, Active topology.Document
+	// Groups contains approved and proven declarations; Desired is omitted from callbacks.
+	Groups map[string]topology.GroupProgress
 	// Status contains group observations with leader names resolved through
 	// this input's Active view, not a peer-supplied name or a newer document.
 	Status   map[string]topology.GroupStatus
@@ -43,6 +45,11 @@ type ScheduleInput struct {
 // Clone creates an independent callback input, including nested observations.
 func (in ScheduleInput) Clone() ScheduleInput {
 	in.Latest, in.Target, in.Active = in.Latest.Clone(), in.Target.Clone(), in.Active.Clone()
+	in.Groups = maps.Clone(in.Groups)
+	for id, progress := range in.Groups {
+		progress.Desired = nil
+		in.Groups[id] = progress.Clone()
+	}
 	in.Status = maps.Clone(in.Status)
 	for id, status := range in.Status {
 		in.Status[id] = status.Clone()

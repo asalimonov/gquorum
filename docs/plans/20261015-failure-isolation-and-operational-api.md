@@ -109,13 +109,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `topology/document_rules.go`, `scheduling/scheduler.go`, `metrics/observation.go`. **Target:** [T] §5.4, §6.4; contracts C7/C9. **Depends on:** 3. **Budget:** ≤550.
 
-- [ ] Add final Limits fields MaxNodes, MaxReplicas, MaxConcurrentGroups and MaxConcurrentCleanup; normalize to 3/5/4/2, reject negative worker counts. Remove the old pending-authority cap only with its consumers in Tasks 14–15 and 54.
-- [ ] Establish ScheduleInput's exact C7 shape and owned Clone; Groups carry approved/proven state, never Desired into a policy callback. Prepare metrics TargetVersion and per-group SourceVersion fields.
-- [ ] Test normalization, JSON fields and callback-copy isolation. Do not make a worker count a limit on retained durable evidence. Policy behavior and collector invalidation are implemented in Tasks 44–46.
+- [x] Add final Limits fields MaxNodes, MaxReplicas, MaxConcurrentGroups and MaxConcurrentCleanup; normalize to 3/5/4/2, reject negative worker counts. Remove the old pending-authority cap only with its consumers in Tasks 14–15 and 54.
+- [x] Establish ScheduleInput's exact C7 shape and owned Clone; Groups carry approved/proven state, never Desired into a policy callback. Prepare metrics TargetVersion and per-group SourceVersion fields.
+- [x] Test normalization, JSON fields and callback-copy isolation. Do not make a worker count a limit on retained durable evidence. Policy behavior and collector invalidation are implemented in Tasks 44–46.
 
 **Verification**
 
-- [ ] Run limits/scheduling/metrics units and `make test`.
+- [x] Run limits/scheduling/metrics units and `make test`.
 
 ### Task 6: Define specialized collection contracts
 

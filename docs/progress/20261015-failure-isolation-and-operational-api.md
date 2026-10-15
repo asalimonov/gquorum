@@ -79,3 +79,21 @@ Verified:
 Findings:
 - ApplyResult has a custom disk.go JSON codec: adding struct fields alone lost forwarded conflicts. The new round-trip regression caught this; both codec directions are now updated. Task 8 explicitly includes this file for its forthcoming schema work. Existing zero-valued optional fields preserve unrelated physical fixtures.
 - First peer/dead-code review is due after the next implementation commit.
+
+## Task 5 — Execution capacity and scoped policy input
+
+Date: 2026-10-15. Implementation commit 5 (the commit containing this entry).
+
+Implemented:
+- Limits adds group/cleanup worker counts with defaults 4/2, explicit-value preservation and negative rejection; node/replica defaults remain 3/5. No execution count is used as a durable-proof cap.
+- ScheduleInput.Groups owns approved/proven progress and strips Desired from callback copies. Metrics gains document TargetVersion and exact per-group SourceVersion.
+- Tests cover normalization, JSON field names, provenance preservation and callback isolation. Updated the Node defaults regression for the two new defaults.
+
+Verified:
+- `go test -count=1 ./topology ./scheduling ./metrics` passed.
+- `make test`: 869/869 cases passed in 4.979s; `test-reports/unit/20261015T154724.132535Z-ogu0rmip/report.md`.
+- `make lint-staged` passed, including merged unused declarations.
+
+Transition inventory and review checkpoint:
+- MaxPendingAuthorityRecords stays live until scoped authority admission replaces its consumers in Tasks 14–15/54. ScheduleInput.Latest/Active stays until Tasks 44/51/54, and metrics.ActiveVersion until Task 46/54. None is a final compatibility promise.
+- This is the first five-commit peer/dead-code checkpoint. The batch starts after bbbe148. A dedicated peer thread will review these contracts and actual behavior; justified fixes precede Task 6.

@@ -26,3 +26,19 @@ func TestSnapshotClonesEveryNestedSlice(t *testing.T) {
 		t.Fatal(string(b), err)
 	}
 }
+
+func TestSnapshotPreservesScopedVersionContext(t *testing.T) {
+	t.Parallel()
+	original := ClusterSnapshot{TargetVersion: 12, Groups: []GroupObservation{{GroupID: "g", SourceVersion: 7}}}
+	data, err := json.Marshal(original.Clone())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded ClusterSnapshot
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.TargetVersion != 12 || decoded.Groups[0].SourceVersion != 7 || !strings.Contains(string(data), `"target_version":12`) || !strings.Contains(string(data), `"source_version":7`) {
+		t.Fatalf("lost per-group context: %s", data)
+	}
+}

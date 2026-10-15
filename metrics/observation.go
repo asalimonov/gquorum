@@ -20,6 +20,7 @@ type ReplicaObservation struct {
 // group.
 type GroupObservation struct {
 	GroupID           string               `json:"group_id"`
+	SourceVersion     uint64               `json:"source_version"`
 	LeaderID          uint64               `json:"leader_id"`
 	Term              uint64               `json:"term"`
 	MembershipDigest  string               `json:"membership_digest"`
@@ -39,6 +40,7 @@ type ClusterSnapshot struct {
 	CollectorRunID     string               `json:"collector_run_id"`
 	At                 time.Time            `json:"at"`
 	ActiveVersion      uint64               `json:"active_version"`
+	TargetVersion      uint64               `json:"target_version"`
 	IsCollectorLeader  bool                 `json:"is_collector_leader"`
 	Local              []ReplicaObservation `json:"local"`
 	Groups             []GroupObservation   `json:"groups"`
