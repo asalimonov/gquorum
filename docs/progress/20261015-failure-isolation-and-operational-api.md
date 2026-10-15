@@ -25,3 +25,21 @@ Transition inventory:
 - fault.OperatorAuthorization and fault.ErrOperatorAuthorization are temporary compile aliases, removed with remaining callers by Task 54. No compatibility promise or public adapter documentation was added.
 - Aggregate calculation/tests moved to Task 16 (documented in plan) so there is no unused production helper or extra public aggregation API. No final target behavior changed.
 - Dead-code review is due with implementation commit 5.
+
+## Task 2 — Immutable group blocks and barriers
+
+Date: 2026-10-15. Implementation commit 2 (the commit containing this entry).
+
+Implemented:
+- Plan blocks/dependencies with exact JSON fields, deep Clone/Equal, and nonempty zero-step declaration semantics. Moved Plan values out of the legacy operator files.
+- Partition validation rejects missing/duplicate ownership, invalid sequence/group/source references, native effects disguised as cleanup and non-admission/removal edges. Cycle detection includes required within-block order.
+- Regressions cover malformed partitions, both legal barriers, cycles, zero-step blocks and every new mutable/equality field.
+
+Verified:
+- `go test -count=1 ./topology ./internal/metaengine` passed, including unchanged voter-proof regressions.
+- `make test`: 857/857 cases passed in 7.878s; `test-reports/unit/20261015T153141.355129Z-mi8mclzo/report.md`.
+- Staged lint passed after correcting revive's operand-order finding; focused tests reran after that correction.
+
+Notes:
+- The old planner still emits flat plans. ValidatePlanShape validates any supplied blocks/dependencies; its explicit temporary absent-block guard must disappear when Task 12/54 converts all producers. The strict block helper already rejects missing partitions. Dynamic receipt/evacuation checks remain in the planned FSM/barrier tasks.
+- The user added peer review at every five implementation commits. The plan now requires dead-code review, paseo-peer findings, reasoned disposition and corrective commits; first review is due after implementation commit 5.

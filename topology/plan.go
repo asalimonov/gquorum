@@ -25,6 +25,13 @@ func ValidatePlanShape(active, desired Document, plan Plan) error {
 	if plan.Version != desired.Version {
 		return fmt.Errorf("plan version %d does not match desired version %d", plan.Version, desired.Version)
 	}
+	// The current planner emits flat plans until its scoped-input conversion.
+	// Remove this transitional guard when all producers supply block partitions.
+	if len(plan.Blocks) != 0 || len(plan.Dependencies) != 0 {
+		if err := validatePlanBlocks(plan); err != nil {
+			return err
+		}
+	}
 	v := planShapeValidator{active: active, desired: desired, plan: plan,
 		seenGroups: make(map[string]bool), stopped: make(map[string]map[uint64]bool)}
 	for i, current := range plan.Steps {

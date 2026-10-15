@@ -34,7 +34,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 - `make lint` runs the repository's vet, revive, staticcheck and golangci configuration; it is not merely `go vet`. Use the current Makefile and [test guide](../testing/tests.md).
 - There is no `project.txt`, `architecture/`, or nested documentation Git repository here. Work in the existing root branch. `docs/plans/` is ignored; stage this plan explicitly without staging unrelated `docs/review/` files.
 - Each numbered task has a **hard ceiling of 550 changed handwritten Go lines, including tests**. Estimate its diff before editing. If a task would exceed that ceiling, split it into consecutive numbered tasks with their own verification, update subsequent references, and continue within the same approved design. Do not hide a repository-wide rename inside a final audit. Generated output and documentation are reviewed separately, not an excuse to combine unrelated code changes.
-- After each five implementation commits, inspect newly obsolete code with references and unused-code lint, delete safe dead code in that fifth task commit, and record retained transition scaffolding with its removal task. Documentation/planning commits do not count.
+- After each five implementation commits, inspect newly obsolete code with references and unused-code lint, delete safe dead code, and request a paseo-peer review of that batch. Evaluate findings against the target and actual code, implement justified corrections as explicit bounded correction tasks/commits, and record accepted/rejected findings with evidence before continuing. Retained transition scaffolding needs a named removal task. Count all implementation/correction commits toward subsequent five-commit review boundaries; documentation/planning commits do not count.
 - Tasks execute in numbered order. A dependency list names additional semantic prerequisites, not permission to skip earlier tasks. At every checkpoint all modules compile and `make test` passes. Run focused tests named in each task, and focused functional/race checks when ownership or persistence changes. Fix failures encountered, including unrelated failures, and record unrelated fixes under NOT PLANNED CHANGES.
 - First introduce contracts and pure helpers, then state-machine behavior, stores and execution, then public composition. Temporary compile scaffolding is allowed only for an intermediate commit: record its exact symbol/file and removal task in the progress log. Do not introduce public V2 APIs or promise compatibility. Existing old symbols may remain until their consumers are converted; new paths must fail closed until their real implementation is connected. Remove all scaffolding by Task 54. Never synthesize an authoritative composite Document to make old code compile.
 - A signature change and all callers needed for that commit to compile belong together. Partition broad naming changes across the component tasks below; if a bridge is unavoidable, keep it private wherever possible and remove it before final cutover. No production flag chooses between old/new authority models. Change a reachable behavior only when its safety prerequisites are implemented; test new helpers directly before wiring them. A temporary stub must return a classified unsupported error, never fabricated progress or success.
@@ -73,13 +73,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `topology/operator_plan.go`, `topology/plan.go`, nearby tests. **Target:** [T] §3.3, §12 “Retry derives state”; contract C3. **Depends on:** 1. **Budget:** ≤550.
 
-- [ ] Implement Plan{Version, Steps, VoterBases, Blocks, Dependencies}, PlanBlock{GroupID, SourceVersion, Steps, Cleanup} and StepDependency{StepSeq, Requires}; Clone/Equal include every field, with immutable global Step.Seq values.
-- [ ] Validate unique deterministic block keys, one owner for every step, disjoint required/cleanup membership, valid references and acyclic edges. Allow only admission/removal barrier shapes; do not create a general dependency API.
-- [ ] Test zero-step declarations, malformed partitions, duplicate/missing steps, forbidden edge shapes, cycles and equality changes in each immutable component. Preserve the existing voter-proof checks.
+- [x] Implement Plan{Version, Steps, VoterBases, Blocks, Dependencies}, PlanBlock{GroupID, SourceVersion, Steps, Cleanup} and StepDependency{StepSeq, Requires}; Clone/Equal include every field, with immutable global Step.Seq values.
+- [x] Validate unique deterministic block keys, one owner for every step, disjoint required/cleanup membership, valid references and acyclic edges. Allow only admission/removal barrier shapes; do not create a general dependency API.
+- [x] Test zero-step declarations, malformed partitions, duplicate/missing steps, forbidden edge shapes, cycles and equality changes in each immutable component. Preserve the existing voter-proof checks.
 
 **Verification**
 
-- [ ] Run focused plan/authority units and `make test`.
+- [x] Run focused plan/authority units and `make test`.
 
 ### Task 3: Add bounded progress and freshness value types
 

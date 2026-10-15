@@ -2,7 +2,6 @@ package topology
 
 import (
 	"fmt"
-	"slices"
 )
 
 // OperatorID identifies an execution attempt for an approved topology version.
@@ -52,32 +51,6 @@ const (
 
 // Equal compares every operation and identity field of two steps.
 func (s Step) Equal(other Step) bool { return s == other }
-
-// Clone copies plan steps, voter bases and their nested voter slices.
-func (p Plan) Clone() Plan {
-	p.Steps = slices.Clone(p.Steps)
-	p.VoterBases = slices.Clone(p.VoterBases)
-	for i := range p.VoterBases {
-		p.VoterBases[i].Voters = slices.Clone(p.VoterBases[i].Voters)
-	}
-	return p
-}
-
-// Equal compares the version, ordered steps and exact ordered voter bases.
-func (p Plan) Equal(other Plan) bool {
-	if p.Version != other.Version || len(p.VoterBases) != len(other.VoterBases) || !slices.Equal(p.Steps, other.Steps) {
-		return false
-	}
-	for i, base := range p.VoterBases {
-		if base.GroupID != other.VoterBases[i].GroupID || !slices.Equal(base.Voters, other.VoterBases[i].Voters) {
-			return false
-		}
-	}
-	return true
-}
-
-// IsEmpty reports whether the plan has no execution steps.
-func (p Plan) IsEmpty() bool { return len(p.Steps) == 0 }
 
 // Matches compares the complete authorization tuple with an expected operator
 // step.
