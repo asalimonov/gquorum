@@ -59,8 +59,7 @@ func (sm *topologySM) applyBeginOperator(index uint64, p BeginOperatorProposal) 
 
 func (sm *topologySM) applyCommitRepairOperator(index uint64, p CommitRepairOperatorProposal) (ApplyResult, bool) {
 	if p.ExpectedVersion != sm.latest.Version {
-		return rejectProposal(p.ProposalID, proposalVersionConflict, "expected Latest %d, current Latest %d",
-			p.ExpectedVersion, sm.latest.Version), false
+		return rejectVersionConflict(p.ProposalID, p.ExpectedVersion, sm.latest.Version), false
 	}
 	if !reflect.DeepEqual(sm.latest, sm.target) || !reflect.DeepEqual(sm.latest, sm.active) {
 		return rejectProposal(p.ProposalID, proposalAuthorization,
@@ -495,6 +494,12 @@ func transitionMatchesRecord(t topology.OperatorTransition, ex operatorRecord) b
 	return t.OperatorID == ex.ID && t.Version == ex.Version && t.Attempt == ex.Attempt && t.StepSeq == ex.CurrentStep &&
 		t.State == ex.State && t.GroupID == ex.GroupID && t.NodeName == ex.NodeName &&
 		t.WaitingReason == ex.WaitingReason && t.Error == ex.Error
+}
+
+func rejectVersionConflict(id string, expected, current uint64) ApplyResult {
+	result := rejectProposal(id, proposalVersionConflict, "expected Latest %d, current Latest %d", expected, current)
+	result.ExpectedVersion, result.CurrentVersion = expected, current
+	return result
 }
 
 func rejectProposal(id string, code proposalErrorCode, format string, args ...any) ApplyResult {

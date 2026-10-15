@@ -78,14 +78,6 @@ func (g *Group) History(ctx context.Context, page topology.Page) (topology.Histo
 // compare-and-swap.
 func (g *Group) Stage(ctx context.Context, doc topology.Document, expected uint64) (topology.Document, error) {
 	result, err := g.propose(ctx, metaengine.ProposeDocument{Doc: doc.Clone(), ExpectedVersion: expected})
-	if errors.Is(err, fault.ErrVersionConflict) {
-		return topology.Document{}, &fault.Error{
-			Code:            fault.VersionConflict,
-			Message:         result.Reason,
-			ExpectedVersion: expected,
-			CurrentVersion:  result.CurrentVersion,
-		}
-	}
 	return result.Doc, err
 }
 

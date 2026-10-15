@@ -19,9 +19,11 @@ type MutationOptions struct {
 
 // MutationResult preserves the staged Document if subsequent approval fails.
 type MutationResult struct {
-	Document   topology.Document         `json:"document"`
-	OperatorID topology.OperatorID       `json:"operator_id,omitempty"`
-	Placement  *topology.PlacementReport `json:"placement,omitempty"`
+	OperationID topology.OperationID      `json:"operation_id,omitempty"`
+	RebasedTo   uint64                    `json:"rebased_to,omitempty"`
+	Document    topology.Document         `json:"document"`
+	OperatorID  topology.OperatorID       `json:"operator_id,omitempty"`
+	Placement   *topology.PlacementReport `json:"placement,omitempty"`
 }
 
 // GroupSpec describes a load group and its initial placement, hosting and voter

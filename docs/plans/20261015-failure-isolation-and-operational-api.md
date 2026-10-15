@@ -97,13 +97,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `cluster_mutations.go`, `fault/fault.go`, private error encoding/decoding in `internal/metaservice`. **Target:** [T] §3.1, §3.4, §8.2; contracts C1/C4. **Depends on:** 1. **Budget:** ≤550.
 
-- [ ] Establish MutationResult{Document, OperationID, RebasedTo, Placement}; preserve MutationOptions and its Preview/Approve exclusion. Add ExpectedVersion, CurrentVersion and RebasedTo to the existing fault.Error.
-- [ ] Carry structured conflict fields through ApplyResult/private leader forwarding and public errors without flattening them. Preserve an accepted staged Document when optional approval fails.
-- [ ] Test conflict round trips, errors.Is/Unwrap behavior, partial staging results and preview remaining write-free. Defer semantic replay to Tasks 23–24; do not silently refresh caller CAS.
+- [x] Establish MutationResult{Document, OperationID, RebasedTo, Placement}; preserve MutationOptions and its Preview/Approve exclusion. Add ExpectedVersion, CurrentVersion and RebasedTo to the existing fault.Error.
+- [x] Carry structured conflict fields through ApplyResult/private leader forwarding and public errors without flattening them. Preserve an accepted staged Document when optional approval fails.
+- [x] Test conflict round trips, errors.Is/Unwrap behavior, partial staging results and preview remaining write-free. Defer semantic replay to Tasks 23–24; do not silently refresh caller CAS.
 
 **Verification**
 
-- [ ] Run focused fault/codec units and applicable mutation functional regressions; run `make test`.
+- [x] Run focused fault/codec units and applicable mutation functional regressions; run `make test`.
 
 ### Task 5: Define execution capacity and scoped policy inputs
 
@@ -143,7 +143,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 ### Task 8: Implement v4 metadata models and deterministic serialization
 
-**Files:** `internal/metaengine/sm.go`, snapshot helpers, new `progress.go`/`cleanup.go`. **Target:** [T] §4.1, §6.2; contracts C5/C8. **Depends on:** 1–7. **Budget:** ≤550.
+**Files:** `internal/metaengine/sm.go`, `disk.go` (custom JSON codecs), snapshot helpers, new `progress.go`/`cleanup.go`. **Target:** [T] §4.1, §6.2; contracts C5/C8. **Depends on:** 1–7. **Budget:** ≤550.
 
 - [ ] Implement exact smState v4 fields and group/node convergence, intent, cleanup, authority Class and scoped revocation records. Document gains RebasedFrom; no Active field or CollectionAcks in the final format.
 - [ ] Serialize deterministic sorted unique arrays and preserve existing unrelated state/bucket encodings. Define operation records around the immutable Plan and separate block statuses; preserve all current session/lock/admission/allocation data.

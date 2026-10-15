@@ -9,7 +9,6 @@ import (
 	"github.com/asalimonov/gquorum/internal/metapb"
 	"github.com/asalimonov/gquorum/internal/metatransport"
 	"github.com/asalimonov/gquorum/internal/raftengine"
-	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3/raftpb"
 )
 
@@ -124,27 +123,7 @@ func (g *Group) submitProposal(ctx context.Context, proposal any,
 	if err = json.Unmarshal(encoded, &result); err != nil {
 		return result, fault.New(fault.Unreadable, "invalid committed meta result", err)
 	}
-	if !result.Accepted {
-		code := fault.Invalid
-		switch string(result.Code) {
-		case "version_conflict":
-			code = fault.VersionConflict
-		case "overloaded":
-			code = fault.Overloaded
-		case "authority_pending":
-			code = fault.AuthorityPending
-		case "authority_fenced":
-			code = fault.AuthorityFenced
-		case "authorization", "superseded":
-			code = fault.OperatorAuthorization
-		default: // Keep the default fault classification for other result codes.
-		}
-		if result.Placement != nil {
-			return result, &topology.PlacementError{Code: code, Report: result.Placement.Clone()}
-		}
-		return result, fault.New(code, result.Reason, nil)
-	}
-	return result, nil
+	return result, applyResultError(result)
 }
 
 func (g *Group) forwardProposal(ctx context.Context, data []byte) ([]byte, error) {

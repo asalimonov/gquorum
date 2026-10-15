@@ -60,3 +60,22 @@ Verified:
 - Mutation tests verify cloned group/node maps, replica slices, hosting/placement values, cached observation maps/identity, blockers and every cleanup timestamp cannot alter retained inputs.
 
 Review cadence: two implementation commits remain before the first peer/dead-code review.
+
+## Task 4 — Mutation outcomes and structured conflicts
+
+Date: 2026-10-15. Implementation commit 4 (the commit containing this entry).
+
+Implemented:
+- MutationResult gains OperationID and RebasedTo; staged documents survive optional approval failure. Existing OperatorID remains only until the API cutover in Task 54.
+- Expected/current/rebased versions survive FSM results, their custom JSON codec, private forwarding and classified errors. CAS producers now supply expected/current values; Stage no longer replaces forwarded details with an empty result.
+- Centralized result classification and mutation outcome propagation, with round-trip and partial-success regressions.
+
+Verified:
+- Focused fault/metaengine/metaservice/metatransport units passed.
+- Functional mutation regressions for approval failure, exact expected-version/preview semantics and concurrent typed CAS passed.
+- `make test`: 861/861 cases passed in 7.408s; `test-reports/unit/20261015T154451.357454Z-edwpqcmz/report.md`.
+- `make lint-staged` passed; two initial style findings corrected without reversing the dependent errors.As/nil check.
+
+Findings:
+- ApplyResult has a custom disk.go JSON codec: adding struct fields alone lost forwarded conflicts. The new round-trip regression caught this; both codec directions are now updated. Task 8 explicitly includes this file for its forthcoming schema work. Existing zero-valued optional fields preserve unrelated physical fixtures.
+- First peer/dead-code review is due after the next implementation commit.

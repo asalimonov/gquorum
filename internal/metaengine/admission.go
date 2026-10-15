@@ -221,8 +221,7 @@ func (sm *topologySM) applyCommitReadmission(index uint64, p CommitReadmissionPr
 		}, false
 	}
 	if p.ExpectedVersion != sm.latest.Version {
-		return rejectProposal(p.ProposalID, proposalVersionConflict, "expected Latest %d, current Latest %d",
-			p.ExpectedVersion, sm.latest.Version), false
+		return rejectVersionConflict(p.ProposalID, p.ExpectedVersion, sm.latest.Version), false
 	}
 	if !reflect.DeepEqual(sm.latest, sm.target) || !reflect.DeepEqual(sm.latest, sm.active) {
 		return rejectProposal(p.ProposalID, proposalAuthorization,

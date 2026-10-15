@@ -19,7 +19,8 @@ func TestMutationApprovalFailureReturnsDurablyStagedDocument(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	result, err := leader.CreateLoadGroup(ctx, GroupSpec{ID: "work"}, MutationOptions{ExpectedVersion: 1, Actor: "operator", Apply: true})
-	if !errors.Is(err, fault.ErrNoController) || result.Document.Version != 2 || result.OperatorID != "" {
+	if !errors.Is(err, fault.ErrNoController) || result.Document.Version != 2 || result.OperatorID != "" ||
+		result.OperationID != "" || result.RebasedTo != 0 {
 		t.Fatal("lost staged document on approval failure", result, err)
 	}
 	views := leader.state().Views()

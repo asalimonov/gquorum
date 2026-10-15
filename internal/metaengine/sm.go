@@ -21,18 +21,20 @@ type statePersister interface {
 // ApplyResult carries the deterministic acceptance, refusal and evidence from a
 // metadata proposal.
 type ApplyResult struct {
-	Grants         []topology.AuthorityGrant `json:"grants,omitempty"`
-	ProposalID     string
-	CurrentVersion uint64
-	Accepted       bool
-	Reason         string
-	Code           proposalErrorCode
-	Dropped        bool
-	Doc            topology.Document
-	OperatorID     topology.OperatorID
-	Grant          *topology.AuthorityGrant `json:"grant,omitempty"`
-	Admission      AdmissionRecord
-	Placement      *topology.PlacementReport `json:"placement,omitempty"`
+	ExpectedVersion uint64                    `json:"expected_version,omitempty"`
+	RebasedTo       uint64                    `json:"rebased_to,omitempty"`
+	Grants          []topology.AuthorityGrant `json:"grants,omitempty"`
+	ProposalID      string
+	CurrentVersion  uint64
+	Accepted        bool
+	Reason          string
+	Code            proposalErrorCode
+	Dropped         bool
+	Doc             topology.Document
+	OperatorID      topology.OperatorID
+	Grant           *topology.AuthorityGrant `json:"grant,omitempty"`
+	Admission       AdmissionRecord
+	Placement       *topology.PlacementReport `json:"placement,omitempty"`
 }
 
 const (
@@ -169,12 +171,7 @@ func (sm *topologySM) Apply(index, term uint64, data []byte) (ApplyResult, error
 
 func (sm *topologySM) applyProposeDocument(p ProposeDocument) (ApplyResult, bool) {
 	if p.ExpectedVersion != sm.latest.Version {
-		return ApplyResult{
-			ProposalID: p.ProposalID,
-			Accepted:   false,
-			Reason:     fmt.Sprintf("version conflict: expected %d, latest %d", p.ExpectedVersion, sm.latest.Version),
-			Code:       proposalVersionConflict,
-		}, false
+		return rejectVersionConflict(p.ProposalID, p.ExpectedVersion, sm.latest.Version), false
 	}
 	doc := p.Doc.Clone()
 	doc.Version = sm.latest.Version + 1

@@ -32,9 +32,11 @@ type MutationOptions struct {
 // MutationResult preserves a staged document, optional operator and placement
 // diagnostics.
 type MutationResult struct {
-	Document   topology.Document         `json:"document"`
-	OperatorID topology.OperatorID       `json:"operator_id,omitempty"`
-	Placement  *topology.PlacementReport `json:"placement,omitempty"`
+	OperationID topology.OperationID      `json:"operation_id,omitempty"`
+	RebasedTo   uint64                    `json:"rebased_to,omitempty"`
+	Document    topology.Document         `json:"document"`
+	OperatorID  topology.OperatorID       `json:"operator_id,omitempty"`
+	Placement   *topology.PlacementReport `json:"placement,omitempty"`
 }
 
 // GroupSpec describes initial load group placement, storage, hosting and voter
@@ -98,17 +100,11 @@ func (g *Group) mutation(ctx context.Context, o MutationOptions, policy mutation
 	}
 	doc, err := g.Stage(ctx, next, base.Version)
 	result := MutationResult{Document: doc, Placement: report}
-	if failure := reportFromError(err); failure != nil {
-		result.Placement = failure
-	}
 	if err != nil || !o.Apply {
-		return result, err
+		return result.outcome(err)
 	}
 	result.OperatorID, err = g.Apply(ctx, doc.Version)
-	if failure := reportFromError(err); failure != nil {
-		result.Placement = failure
-	}
-	return result, err
+	return result.outcome(err)
 }
 
 func (g *Group) computeMutation(ctx context.Context, o MutationOptions, policy mutationPolicy,
@@ -563,17 +559,11 @@ func (g *Group) RollbackTo(ctx context.Context, version uint64, o MutationOption
 	}
 	doc, err := g.Stage(ctx, next, base.Version)
 	result := MutationResult{Document: doc, Placement: report}
-	if failure := reportFromError(err); failure != nil {
-		result.Placement = failure
-	}
 	if err != nil || !o.Apply {
-		return result, err
+		return result.outcome(err)
 	}
 	result.OperatorID, err = g.Apply(ctx, doc.Version)
-	if failure := reportFromError(err); failure != nil {
-		result.Placement = failure
-	}
-	return result, err
+	return result.outcome(err)
 }
 
 // ReseatReplica atomically commits and approves a fresh-ID repair against equal
@@ -623,13 +613,10 @@ func (g *Group) ReseatReplica(ctx context.Context, id, name string, o MutationOp
 		At:              time.Now().UTC(),
 	})
 	result := MutationResult{Document: committed.Doc, OperatorID: committed.OperatorID, Placement: report}
-	if failure := reportFromError(err); failure != nil {
-		result.Placement = failure
-	}
 	if err == nil {
 		g.controller.Signal()
 	}
-	return result, err
+	return result.outcome(err)
 }
 
 // TransferLeader commits resource authority for the exact Active identity

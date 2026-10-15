@@ -67,6 +67,7 @@ func Reply(err error) *metapb.Reply {
 	details := errorDetails{}
 	if typed != nil {
 		details.ExpectedVersion, details.CurrentVersion = typed.ExpectedVersion, typed.CurrentVersion
+		details.RebasedTo = typed.RebasedTo
 	}
 	var safety *membership.SafetyRefusal
 	if errors.As(err, &safety) {
@@ -104,6 +105,7 @@ func ReplyError(r *metapb.Reply) error {
 	result := fault.New(fault.Code(r.ErrorCode), r.Message, nil)
 	if result.Code == fault.VersionConflict {
 		result.ExpectedVersion, result.CurrentVersion = details.ExpectedVersion, details.CurrentVersion
+		result.RebasedTo = details.RebasedTo
 	}
 	if result.Code == fault.UnsafeMembership && details.Membership != nil {
 		result.Cause = details.Membership
@@ -265,6 +267,7 @@ func (s *server) ParkedRead(ctx context.Context, req *metapb.MetaRequest) (*meta
 }
 
 type errorDetails struct {
+	RebasedTo       uint64                    `json:"rebased_to,omitempty"`
 	ExpectedVersion uint64                    `json:"expected_version,omitempty"`
 	CurrentVersion  uint64                    `json:"current_version,omitempty"`
 	Membership      *membership.SafetyRefusal `json:"membership,omitempty"`

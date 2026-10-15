@@ -45,6 +45,7 @@ type Error struct {
 	Cause           error
 	ExpectedVersion uint64
 	CurrentVersion  uint64
+	RebasedTo       uint64
 }
 
 func (e *Error) Error() string {

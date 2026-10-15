@@ -218,8 +218,7 @@ func (check *voterPlanCheck) transfer(s topology.Step) error {
 
 func (sm *topologySM) applyCommitVoterChange(index uint64, p CommitVoterChangeProposal) (ApplyResult, bool) {
 	if p.ExpectedVersion != sm.latest.Version {
-		return rejectProposal(p.ProposalID, proposalVersionConflict, "expected Latest %d, current Latest %d",
-			p.ExpectedVersion, sm.latest.Version), false
+		return rejectVersionConflict(p.ProposalID, p.ExpectedVersion, sm.latest.Version), false
 	}
 	if !reflect.DeepEqual(sm.latest, sm.target) || !reflect.DeepEqual(sm.target, sm.active) ||
 		sm.hasNonterminalOperatorLocked() {

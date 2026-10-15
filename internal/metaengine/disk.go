@@ -60,18 +60,20 @@ type metaDiskState struct {
 	AppliedTerm      uint64                      `json:"applied_term"`
 }
 type diskApplyResult struct {
-	Grants         []topology.AuthorityGrant `json:"grants,omitempty"`
-	Grant          *topology.AuthorityGrant  `json:"grant,omitempty"`
-	ProposalID     string
-	CurrentVersion uint64
-	Accepted       bool
-	Reason         string
-	Code           proposalErrorCode
-	Dropped        bool
-	Doc            topology.Document
-	ExecutionID    topology.OperatorID
-	Admission      diskAdmission
-	Placement      *topology.PlacementReport `json:"placement,omitempty"`
+	ExpectedVersion uint64                    `json:"expected_version,omitempty"`
+	RebasedTo       uint64                    `json:"rebased_to,omitempty"`
+	Grants          []topology.AuthorityGrant `json:"grants,omitempty"`
+	Grant           *topology.AuthorityGrant  `json:"grant,omitempty"`
+	ProposalID      string
+	CurrentVersion  uint64
+	Accepted        bool
+	Reason          string
+	Code            proposalErrorCode
+	Dropped         bool
+	Doc             topology.Document
+	ExecutionID     topology.OperatorID
+	Admission       diskAdmission
+	Placement       *topology.PlacementReport `json:"placement,omitempty"`
 }
 type diskOperatorTransition struct {
 	ExecutionID   topology.OperatorID    `json:"execution_id"`
@@ -229,18 +231,20 @@ func (s *smState) UnmarshalJSON(data []byte) error {
 // names.
 func (r ApplyResult) MarshalJSON() ([]byte, error) {
 	return json.Marshal(diskApplyResult{
-		Grants:         r.Grants,
-		Grant:          r.Grant,
-		ProposalID:     r.ProposalID,
-		CurrentVersion: r.CurrentVersion,
-		Accepted:       r.Accepted,
-		Reason:         r.Reason,
-		Code:           r.Code,
-		Dropped:        r.Dropped,
-		Doc:            r.Doc,
-		ExecutionID:    r.OperatorID,
-		Admission:      toDiskAdmission(r.Admission),
-		Placement:      r.Placement,
+		ExpectedVersion: r.ExpectedVersion,
+		RebasedTo:       r.RebasedTo,
+		Grants:          r.Grants,
+		Grant:           r.Grant,
+		ProposalID:      r.ProposalID,
+		CurrentVersion:  r.CurrentVersion,
+		Accepted:        r.Accepted,
+		Reason:          r.Reason,
+		Code:            r.Code,
+		Dropped:         r.Dropped,
+		Doc:             r.Doc,
+		ExecutionID:     r.OperatorID,
+		Admission:       toDiskAdmission(r.Admission),
+		Placement:       r.Placement,
 	})
 }
 
@@ -252,18 +256,20 @@ func (r *ApplyResult) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*r = ApplyResult{
-		Grants:         d.Grants,
-		Grant:          d.Grant,
-		ProposalID:     d.ProposalID,
-		CurrentVersion: d.CurrentVersion,
-		Accepted:       d.Accepted,
-		Reason:         d.Reason,
-		Code:           d.Code,
-		Dropped:        d.Dropped,
-		Doc:            d.Doc,
-		OperatorID:     d.ExecutionID,
-		Admission:      d.Admission.public(),
-		Placement:      d.Placement,
+		ExpectedVersion: d.ExpectedVersion,
+		RebasedTo:       d.RebasedTo,
+		Grants:          d.Grants,
+		Grant:           d.Grant,
+		ProposalID:      d.ProposalID,
+		CurrentVersion:  d.CurrentVersion,
+		Accepted:        d.Accepted,
+		Reason:          d.Reason,
+		Code:            d.Code,
+		Dropped:         d.Dropped,
+		Doc:             d.Doc,
+		OperatorID:      d.ExecutionID,
+		Admission:       d.Admission.public(),
+		Placement:       d.Placement,
 	}
 	return nil
 }
