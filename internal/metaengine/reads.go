@@ -11,16 +11,20 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/raftengine"
+	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
 // QueryRequest is the private protocol between the meta service and its
 // machine.
 type QueryRequest struct {
-	AuthorityKey *topology.AuthorityKey `json:"authority_key,omitempty"`
-	OperatorID   topology.OperatorID    `json:"operator_id,omitempty"`
-	Kind         string                 `json:"kind"`
-	Key          string                 `json:"key,omitempty"`
+	Progress           *topology.ProgressQuery `json:"progress,omitempty"`
+	CollectionIdentity *storage.Identity       `json:"collection_identity,omitempty"`
+	OperationID        topology.OperationID    `json:"operation_id,omitempty"`
+	AuthorityKey       *topology.AuthorityKey  `json:"authority_key,omitempty"`
+	OperatorID         topology.OperatorID     `json:"operator_id,omitempty"`
+	Kind               string                  `json:"kind"`
+	Key                string                  `json:"key,omitempty"`
 }
 
 // LockRead returns a lock-holder session and whether the lock is held.
@@ -54,6 +58,9 @@ func (m *Machine) Query(ctx context.Context, data []byte) (raftengine.Result, er
 	}
 	if d.Decode(new(any)) != io.EOF {
 		return raftengine.Result{}, fault.ErrInvalid
+	}
+	if err := q.validateScopedFields(); err != nil {
+		return raftengine.Result{}, err
 	}
 	if q.AuthorityKey != nil && q.Kind != "authority_grant" && q.Kind != "authority_proof" {
 		return raftengine.Result{}, fault.ErrInvalid

@@ -150,3 +150,26 @@ Verified:
 Remaining consumers: journal methods in Task 30, marker semantics in Tasks 31–32, host execution/reporting in Tasks 33–35/41 and Node callback wiring in Task 48; complete format activation in Task 54. These contract declarations do not yet enable collection reporting.
 
 Peer notice update: the round 2 pointer was delivered to Claude and verified in his live terminal despite the helper reporting unconfirmed; the queued round 1 notice was a duplicate already processed. Follow-up is still pending. Next five-commit checkpoint remains implementation/correction commit 10.
+
+## Task 7 — Replicated operation and private query payloads
+
+Date: 2026-10-15. Implementation/correction commit 8 (the commit containing this entry).
+
+Implemented:
+- Exact internal BeginOperation/RetryOperation/TransitionOperation/CommitRepairOperation, collection receipt/status and cleanup-effect payloads. Retry cannot supply a Plan; no payload can select an authority Class. Shared strict JSON shape decoding rejects unknown fields, absent/null required payloads and blank correlation IDs. Replicated identity/time/CAS validation remains with the respective handler tasks.
+- ScopeExpectation and the single intentRecord definition support later persistence and typed mutations. ProposeDocument carries optional Intent; voter change adds ExpectedTarget/Scopes. Existing handlers explicitly refuse these fields until scoped persistence is active, preserving correlation and Unsupported through result/transport classification.
+- QueryRequest adds OperationID, Progress and exact CollectionIdentity; incompatible query selectors reject instead of silently producing an unrelated view. CollectionCheck contains only Untracked/AppliedIndex. New query and mutation kinds remain unsupported, with no fabricated response or completion.
+
+Verified:
+- Focused metaengine/metaservice units passed. Payload round trips preserve exact receipt/courier/readmission linkage and operation tuples; negative tests cover unsupported fields, required payloads, cleanup authority classes, injected retry plans and unimplemented dispatch. Existing handler tests prove new provenance cannot be silently discarded.
+- make test: 907/907 cases passed in 7.950s; test-reports/unit/20261015T162455.806884Z-e14nf9lr/report.md.
+- make lint-staged and git diff --check passed after two formatting corrections. No protobuf change: existing MetaRequest/Reply bytes carry the private discriminated JSON payloads.
+
+Transition inventory:
+- Live Encode/DecodeProposal retain schema 3 and reject new proposal types; the new types decode only their own isolated JSON payloads. Enable complete kinds/handlers/envelopes together in Task 54, removing the Intent/scoped-voter/OperationID guards and old ActivateTarget/OperatorID consumers then. Existing voter optional tags avoid activating new fields on the legacy path; final required-field validation is part of cutover.
+- ScopeExpectation/intentRecord are reused by Task 8; strict shape checks do not replace handler authority checks in Tasks 13–29. Query producers remain Tasks 29/36–37.
+
+Checkpoint follow-up:
+- Claude round 3 agrees and withdraws the requested worker-setting decision as a blocker. Thread 2 is closed with a recorded outcome. The user was told the immutable-limit tradeoff.
+- Tasks 39–40 explicitly prohibit allocation proportional to arbitrary configured counts; they cap actual ready work. Task 37 shares complete declaration/observation semantics between Status and ReadProgress while preserving their different read guarantees. Task 44 uses only Status for policy observations and clears Groups.Observation at the callback boundary. No new public tuning API or sparse status-row type is introduced.
+- Next peer/dead-code checkpoint remains implementation/correction commit 10.

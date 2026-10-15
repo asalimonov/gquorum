@@ -143,13 +143,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaengine/operator_proposals.go`, `repair_proposals.go`, `codec.go`, `reads.go`, `proposal_dispatch.go`. **Target:** [T] §7.1–7.3; contract C10. **Depends on:** 1–6. **Budget:** ≤550.
 
-- [ ] Add exact BeginOperation, RetryOperation (no Plan), TransitionOperation, CommitRepairOperation and RecordCollection payloads; add ExpectedTarget/Scopes to voter-change proposals and optional Intent to document proposals. Define the C5 intentRecord dependency here; Task 8 reuses it rather than creating another type.
-- [ ] Add BeginCleanupEffect/RecordCleanupStatus and progress/collection_check query shapes. The latter returns only CollectionCheck{Untracked, AppliedIndex}; authenticated Courier and optional ReadmissionKey travel with retained receipt acceptance.
-- [ ] Test strict payload decoding, required fields, correlation IDs, structured errors and rejection of client-selected authority classes. Keep new mutation dispatch unavailable until its handler is ready; remove ActivateTarget in Task 54, not by mapping it to fake completion.
+- [x] Add exact BeginOperation, RetryOperation (no Plan), TransitionOperation, CommitRepairOperation and RecordCollection payloads; add ExpectedTarget/Scopes to voter-change proposals and optional Intent to document proposals. Define the C5 intentRecord dependency here; Task 8 reuses it rather than creating another type.
+- [x] Add BeginCleanupEffect/RecordCleanupStatus and progress/collection_check query shapes. The latter returns only CollectionCheck{Untracked, AppliedIndex}; authenticated Courier and optional ReadmissionKey travel with retained receipt acceptance.
+- [x] Test strict payload decoding, required fields, correlation IDs, structured errors and rejection of client-selected authority classes. Keep new mutation dispatch unavailable until its handler is ready; remove ActivateTarget in Task 54, not by mapping it to fake completion.
 
 **Verification**
 
-- [ ] Run codec/proposal units and `make test`; confirm no protobuf change is needed for existing private JSON envelopes.
+- [x] Run codec/proposal units and `make test`; confirm no protobuf change is needed for existing private JSON envelopes.
 
 ### Task 8: Implement v4 metadata models and deterministic serialization
 
@@ -504,7 +504,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** `internal/metaservice/progress.go`, `documents.go`, root `cluster_progress.go`/`cluster_reads.go`. **Target:** [T] §3.1–3.2, §8.3; contracts C1/C2. **Depends on:** 36. **Budget:** ≤550.
 
 - [ ] Implement ReadProgress through the existing quorum/apply query path, then decorate only returned rows from matching cached observations. Preserve reporter, received time and per-group source; nil means unknown. Never fan out for this API.
-- [ ] Implement final ReadTopology pair/marker and bounded Status operation headers (100), explicit truncation and CleanupSummary. Convert ClusterStatus.Groups to existing GroupProgress values, keeping raw GroupStatus only in Observation; adapt affected consumers together. Operation lookup retains the complete block view and remains local diagnosis without a quorum claim.
+- [ ] Implement final ReadTopology pair/marker and bounded Status operation headers (100), explicit truncation and CleanupSummary. Convert ClusterStatus.Groups to existing GroupProgress values, keeping raw GroupStatus only in Observation; adapt affected consumers together. Use the same complete declaration row builder and exact observation attachment rule for Status and ReadProgress; nil must never mean an omitted projection. Status and operation lookup remain local diagnosis without a quorum claim.
 - [ ] Test quorum loss/read cancellation, metadata-page coherence, stale successor samples, preserved timestamps, bounded projection and no remote read calls. Keep full lookup separate from page-limited projection.
 
 **Verification**
@@ -527,7 +527,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/operator/controller.go`, dispatch helpers/tests. **Target:** [T] §6.1, §6.4, §12 “Controller dispatch”. **Depends on:** 5, 15–17, 27, 38. **Budget:** ≤550.
 
-- [ ] Implement round-robin ready selection, MaxConcurrentGroups, exact inflight (AuthorityKey, AuthorityTarget) and shared host/group admission. One worker executes one bounded check/effect; release RPC slots on timeout without releasing remote ownership.
+- [ ] Implement round-robin ready selection, MaxConcurrentGroups, exact inflight (AuthorityKey, AuthorityTarget) and shared host/group admission. Counts cap actual ready work; never preallocate pools, channels or per-slot state from the configured count. One worker executes one bounded check/effect; release RPC slots on timeout without releasing remote ownership.
 - [ ] Retain bounded per-host/group backoff, skip busy work and prune idle entries with settled work. Revalidate full action/owner/resource tuple after waits; retain late evidence without advancing superseded work.
 - [ ] Close dispatch admission under the dispatch mutex before joining workers; eliminate WaitGroup.Add versus zero-count Wait races. Test one hung target with healthy progress, leadership loss and concurrent Stop/new scheduling under race detection.
 
@@ -539,7 +539,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/operator` cleanup dispatch, metaservice cleanup adapters, existing whole-group dispatch. **Target:** [T] §6.2, §6.4, §9 TiKV lifecycle/worker adaptations. **Depends on:** 19, 35, 39. **Budget:** ≤550.
 
-- [ ] Discover durable cleanup in bounded pages; use MaxConcurrentCleanup with the same host/group gate registry and bounded backoff as ordinary work. Remove the controller's global fence-error short circuit.
+- [ ] Discover durable cleanup in bounded pages; use MaxConcurrentCleanup with the same host/group gate registry and bounded backoff as ordinary work. Allocate only for actual admitted work, not MaxConcurrentCleanup slots. Remove the controller's global fence-error short circuit.
 - [ ] Dispatch/record each exact whole-group target independently; one unreachable former host cannot suppress another receipt. Retain required deletion stops in execution rather than disguising them as optional cleanup.
 - [ ] Test ordinary execution survives failed cleanup, shared-resource conflicts remain serialized, repeated grants are reused and fairness resumes on returning hosts. Reference TiKV's retry lifecycle while preserving errors/proof rather than consuming failed deletion.
 
@@ -588,7 +588,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** `scheduling/scheduler.go`, `default_repair*.go`, voter policy helpers, `scheduling/schedulingtest`. **Target:** [T] §5.4, §6.4; contract C7. **Depends on:** 5, 22, 37. **Budget:** ≤550.
 
 - [ ] Finish final ScheduleInput and remove Latest/Active policy fields after caller adaptation. Built-in policy evaluates approved/proven declarations and rotates eligible groups; a blocked/busy first candidate must not monopolize ticks.
-- [ ] Preserve voter configuration, pinned learners, healthy seats, domain rules and legacy missing-voter repair for groups without voter configuration. Keep callbacks serialized and clone all maps/slices.
+- [ ] Preserve voter configuration, pinned learners, healthy seats, domain rules and legacy missing-voter repair for groups without voter configuration. Keep callbacks serialized and clone all maps/slices. Supply observations only in Status; clear Groups[g].Observation as well as Desired at the callback boundary, preserving faithful Clone semantics.
 - [ ] Test A blocked with B eligible, unchanged B cooldown/history, custom-policy busy-group refusal and no approval of unrelated staged intent. Do not add healthy balancing, priorities or public timing knobs.
 
 **Verification**

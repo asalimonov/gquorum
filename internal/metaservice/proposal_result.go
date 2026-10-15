@@ -26,6 +26,8 @@ func proposalFaultCode(code string) fault.Code {
 		return fault.VersionConflict
 	case "history_unavailable":
 		return fault.HistoryUnavailable
+	case "unsupported":
+		return fault.Unsupported
 	case "overloaded":
 		return fault.Overloaded
 	case "authority_pending":

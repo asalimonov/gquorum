@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -52,6 +53,7 @@ const (
 	proposalOverloaded       proposalErrorCode = "overloaded"
 	proposalAuthorityPending proposalErrorCode = "authority_pending"
 	proposalAuthorityFenced  proposalErrorCode = "authority_fenced"
+	proposalUnsupported      proposalErrorCode = "unsupported"
 )
 
 type operatorRecord struct {
@@ -170,6 +172,10 @@ func (sm *topologySM) Apply(index, term uint64, data []byte) (ApplyResult, error
 }
 
 func (sm *topologySM) applyProposeDocument(p ProposeDocument) (ApplyResult, bool) {
+	// Remove at Task 54: the current format cannot retain typed intent provenance.
+	if p.Intent != nil {
+		return rejectProposalError(p.ProposalID, proposalUnsupported, fault.ErrUnsupported), false
+	}
 	if p.ExpectedVersion != sm.latest.Version {
 		return rejectVersionConflict(p.ProposalID, p.ExpectedVersion, sm.latest.Version), false
 	}

@@ -50,6 +50,7 @@ type envelope struct {
 type ProposeDocument struct {
 	Doc             topology.Document `json:"doc"`
 	ExpectedVersion uint64            `json:"expected_version"`
+	Intent          *intentRecord     `json:"intent,omitempty"`
 	ProposalID      string            `json:"proposal_id"`
 }
 
@@ -107,7 +108,7 @@ func Encode(proposal any) ([]byte, error) {
 	case AcquireLock:
 		kind = KindAcquireLock
 	default:
-		return nil, fmt.Errorf("meta: cannot encode proposal of type %T", proposal)
+		return nil, fault.New(fault.Unsupported, fmt.Sprintf("meta: cannot encode proposal of type %T", proposal), nil)
 	}
 	body, err := json.Marshal(proposal)
 	if err != nil {

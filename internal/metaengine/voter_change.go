@@ -220,6 +220,10 @@ func (check *voterPlanCheck) transfer(s topology.Step) error {
 }
 
 func (sm *topologySM) applyCommitVoterChange(index uint64, p CommitVoterChangeProposal) (ApplyResult, bool) {
+	// Remove at Task 54 with complete scoped persistence and dispatch activation.
+	if p.ExpectedTarget != 0 || p.Scopes != nil {
+		return rejectProposalError(p.ProposalID, proposalUnsupported, fault.ErrUnsupported), false
+	}
 	if p.ExpectedVersion != sm.latest.Version {
 		return rejectVersionConflict(p.ProposalID, p.ExpectedVersion, sm.latest.Version), false
 	}

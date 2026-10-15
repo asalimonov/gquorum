@@ -3,6 +3,8 @@ package metaengine
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/asalimonov/gquorum/fault"
 )
 
 type proposalApplication struct {
@@ -65,7 +67,8 @@ func (sm *topologySM) applyProposal(index uint64, kind ProposalKind,
 	case KindAcquireLock:
 		return applyJSONProposal(body, "acquire_lock", sm.applyAcquireLock)
 	default:
-		return proposalApplication{}, fmt.Errorf("meta: unknown proposal kind %q", kind)
+		err := fault.New(fault.Unsupported, fmt.Sprintf("meta: unknown proposal kind %q", kind), nil)
+		return proposalApplication{}, err
 	}
 }
 

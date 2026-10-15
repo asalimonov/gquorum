@@ -59,3 +59,14 @@ func TestMutationOutcomeKeepsStageOnApprovalConflict(t *testing.T) {
 		t.Fatal("unrelated approval error erased the retained successor")
 	}
 }
+
+func TestUnsupportedProposalKeepsClassification(t *testing.T) {
+	t.Parallel()
+	var result metaengine.ApplyResult
+	if err := json.Unmarshal([]byte(`{"ProposalID":"scope","Code":"unsupported","Reason":"scoped persistence unavailable"}`), &result); err != nil {
+		t.Fatal(err)
+	}
+	if err := metatransport.ReplyError(metatransport.Reply(applyResultError(result))); !errors.Is(err, fault.ErrUnsupported) {
+		t.Fatal("lost unsupported classification", err)
+	}
+}
