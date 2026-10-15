@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -158,6 +159,12 @@ func (t diskOperatorTransition) public() topology.OperatorTransition {
 }
 
 func (s smState) MarshalJSON() ([]byte, error) {
+	if s.SchemaVersion == scopedStateSchemaVersion && s.Scoped != nil {
+		return json.Marshal(s.Scoped)
+	}
+	if s.Scoped != nil || s.SchemaVersion == scopedStateSchemaVersion {
+		return nil, fault.ErrUnreadable
+	}
 	d := metaDiskState{
 		SchemaVersion: s.SchemaVersion,
 		Rules:         s.Rules,
@@ -190,6 +197,20 @@ func (s smState) MarshalJSON() ([]byte, error) {
 	return json.Marshal(d)
 }
 func (s *smState) UnmarshalJSON(data []byte) error {
+	var header struct {
+		SchemaVersion uint32 `json:"schema_version"`
+	}
+	if err := json.Unmarshal(data, &header); err != nil {
+		return err
+	}
+	if header.SchemaVersion == scopedStateSchemaVersion {
+		var scoped scopedState
+		if err := json.Unmarshal(data, &scoped); err != nil {
+			return err
+		}
+		*s = smState{SchemaVersion: header.SchemaVersion, Scoped: &scoped}
+		return nil
+	}
 	var d metaDiskState
 	if err := json.Unmarshal(data, &d); err != nil {
 		return err

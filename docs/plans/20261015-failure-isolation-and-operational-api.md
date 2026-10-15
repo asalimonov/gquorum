@@ -155,13 +155,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaengine/sm.go`, `disk.go` (custom JSON codecs), snapshot helpers, new `progress.go`/`cleanup.go`. **Target:** [T] §4.1, §6.2; contracts C5/C8. **Depends on:** 1–7. **Budget:** ≤550.
 
-- [ ] Implement exact smState v4 fields and group/node convergence, intent, cleanup, authority Class and scoped revocation records. Document gains RebasedFrom; no Active field or CollectionAcks in the final format.
-- [ ] Serialize deterministic sorted unique arrays and preserve existing unrelated state/bucket encodings. Define operation records around the immutable Plan and separate block statuses; preserve all current session/lock/admission/allocation data.
-- [ ] Test deterministic round trips and nil tombstone versus never-converged records. Keep this codec isolated from persistent writes until restore validation and state installation are ready; record the activation point in Task 54.
+- [x] Implement exact smState v4 fields and group/node convergence, intent, cleanup, authority Class and scoped revocation records. Document gains RebasedFrom; no Active field or CollectionAcks in the final format.
+- [x] Serialize deterministic sorted unique arrays and preserve existing unrelated state/bucket encodings. Define operation records around the immutable Plan and separate block statuses; preserve all current session/lock/admission/allocation data.
+- [x] Test deterministic round trips and nil tombstone versus never-converged records. Keep this codec isolated from persistent writes until restore validation and state installation are ready; record the activation point in Task 54.
 
 **Verification**
 
-- [ ] Run pure codec/snapshot units and `make test`; inspect the complete v4 shape against C5.
+- [x] Run pure codec/snapshot units and `make test`; inspect the complete v4 shape against C5.
 
 ### Task 9: Rebuild and validate scoped indexes on restore
 

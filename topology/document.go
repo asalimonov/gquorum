@@ -124,6 +124,7 @@ type Document struct {
 	Comment       string       `json:"comment,omitempty"`
 	CreatedAt     time.Time    `json:"created_at"`
 	ParentVersion uint64       `json:"parent_version"`
+	RebasedFrom   uint64       `json:"rebased_from,omitempty"` // prior staged edit, not approval
 	Audit         *ChangeAudit `json:"audit,omitempty"`
 }
 

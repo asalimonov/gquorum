@@ -173,3 +173,24 @@ Checkpoint follow-up:
 - Claude round 3 agrees and withdraws the requested worker-setting decision as a blocker. Thread 2 is closed with a recorded outcome. The user was told the immutable-limit tradeoff.
 - Tasks 39–40 explicitly prohibit allocation proportional to arbitrary configured counts; they cap actual ready work. Task 37 shares complete declaration/observation semantics between Status and ReadProgress while preserving their different read guarantees. Task 44 uses only Status for policy observations and clears Groups.Observation at the callback boundary. No new public tuning API or sparse status-row type is introduced.
 - Next peer/dead-code checkpoint remains implementation/correction commit 10.
+
+## Task 8 — v4 metadata models and deterministic serialization
+
+Date: 2026-10-15. Implementation/correction commit 9 (the commit containing this entry).
+
+Implemented:
+- Complete v4 outer schema, group/node convergence, exact cleanup records, shared intent provenance, authority Class and per-operation/group revocations. Operation snapshots retain the immutable Plan and separate complete block statuses. No Active, executions or CollectionAcks field exists in the v4 shape.
+- Document.RebasedFrom preserves staged-edit provenance through cloning/JSON; the legacy staging path refuses caller-supplied values until the real FSM rebase producer exists.
+- Snapshot arrays sort owned slice copies and reject duplicate keys. Unchanged session/lock/admission/allocation/resource-floor records retain their encodings. A failed decode never replaces the destination. Nil declarations retain source/timestamp evidence distinguishing tombstones from never-converged rows.
+
+Verified:
+- Focused topology/metaengine units passed, including every top-level indexed array's duplicate rejection, canonical round trips, the complete C5 field list, flattened authority records, memory debt without a collection fact and live restore refusal without mutation.
+- make test: 927/927 cases passed in 7.187s; test-reports/unit/20261015T163615.340972Z-bz589v_2/report.md.
+- Staged lint passed after wrapping long comparisons. Physical baseline metadata rejection test passed; immutable fixtures were not edited. git diff --check passed.
+
+Activation inventory:
+- scopedState/scopedAuthorityRecord/scopedRevocationRecord are private isolated wire records, reached through smState.Scoped only when decoding/explicitly constructing v4 codec fixtures. No producer changes schema versions or writes v4 state. Live Restore still rejects v4 before installation.
+- At Task 54 replace the legacy smState/disk codec with scopedState, flatten the existing authority record plus Class, replace legacy revocation records and remove the temporary smState.Scoped wrapper. This is a format transition scaffold, not another application API or a selectable runtime authority model.
+- Complete graph, owner, identity-floor and retirement-proof validation belongs to Task 9; schema round trips alone are not restore authorization. Existing authority inner Operator naming and related consumers retain their assigned conversion tasks before cutover.
+
+Next checkpoint: implementation/correction commit 10, after the next bounded task, triggers peer and dead-code review of commits 6–10.
