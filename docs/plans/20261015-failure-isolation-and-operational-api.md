@@ -188,13 +188,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** scoped restore helpers/tests, existing topology plan validators. **Target:** [T] §4.1–4.3, §8.4, §12 retry algorithm. **Depends on:** 9. **Budget:** ≤550.
 
-- [ ] Validate rules, document/rebase/applied-index boundaries and retained operation source documents without a hard history cap. Preserve the distinction between historical FullyConverged and current group progress.
-- [ ] Validate complete operation/block status, immutable plans and restricted dependency graphs. Reject Previous cycles, skipped/forked retries, altered plans and lost terminal sibling proof. Reuse existing document-independent guard validation; exact approval/scope and authority checks remain in their owning tasks.
-- [ ] Test failed attempts with successful siblings, missing sources, malformed plans/attempts, historical markers and validation without candidate mutation. Keep these pure helpers isolated from live installation until Task 57.
+- [x] Validate rules, document/rebase/applied-index boundaries and retained operation source documents without a hard history cap. Preserve the distinction between historical FullyConverged and current group progress.
+- [x] Validate complete operation/block status, immutable plans and restricted dependency graphs. Reject Previous cycles, skipped/forked retries, altered plans and lost terminal sibling proof. Reuse existing document-independent guard validation; exact approval/scope and authority checks remain in their owning tasks.
+- [x] Test failed attempts with successful siblings, missing sources, malformed plans/attempts, historical markers and validation without candidate mutation. Keep these pure helpers isolated from live installation until Task 57.
 
 **Verification**
 
-- [ ] Run focused scoped graph/restore and topology units, staged lint and `make test`; check the Go diff budget.
+- [x] Run focused scoped graph/restore and topology units, staged lint and `make test`; check the Go diff budget.
 
 ### Task 11: Validate convergence, identity floors and retained provenance
 

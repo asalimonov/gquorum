@@ -16,16 +16,27 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// This is codec data, not a valid restore graph; Tasks 10–12 validate graph/proof semantics.
+// Documents/attempts are valid; convergence and authority proof validation follows in Tasks 11–12.
 func scopedCodecFixture() scopedState {
 	at := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
 	id := storage.Identity{ClusterID: "c", GroupID: "a", NodeName: "n", ReplicaID: 7}
 	key := topology.AuthorityKey{ClusterID: "c", GroupID: "a", Revision: 8}
+	base := baseDoc()
+	base.ClusterID, base.Version = "c", 1
+	base.Nodes[0].Name = "n"
+	for i := range base.Groups {
+		base.Groups[i].Replicas[0].NodeName = "n"
+	}
+	base.Groups[1].ID = "a"
+	original, target, latest := base.Clone(), base.Clone(), base.Clone()
+	original.Version, original.ParentVersion = 2, 1
+	target.Version, target.ParentVersion = 3, 2
+	latest.Version, latest.ParentVersion, latest.RebasedFrom = 4, 3, 2
 	return scopedState{
 		SchemaVersion: scopedStateSchemaVersion, Rules: testRules(), AppliedIndex: 30, AppliedTerm: 4,
-		Latest: topology.Document{Version: 4, ParentVersion: 3, RebasedFrom: 2}, Target: topology.Document{Version: 3},
-		History:          []topology.Document{{Version: 2}, {Version: 1}},
-		Operations:       []topology.Operation{{Status: topology.OperationStatus{ID: "exec-v3-a1", Version: 3, Attempt: 1, State: topology.OperationFailed, Blocks: []topology.BlockStatus{{GroupID: "a", State: topology.OperationFailed}}}, Plan: topology.Plan{Version: 3, Blocks: []topology.PlanBlock{{GroupID: "a", SourceVersion: 1}}}}, {Status: topology.OperationStatus{ID: "exec-v1-a1", Version: 1, Attempt: 1, State: topology.OperationSucceeded}, Plan: topology.Plan{Version: 1}}},
+		Latest: latest, Target: target,
+		History:          []topology.Document{original, base},
+		Operations:       []topology.Operation{{Status: topology.OperationStatus{ID: "exec-v3-a1", Version: 3, Attempt: 1, State: topology.OperationFailed, TotalBlocks: 1, Blocks: []topology.BlockStatus{{GroupID: "a", State: topology.OperationFailed}}}, Plan: topology.Plan{Version: 3, Blocks: []topology.PlanBlock{{GroupID: "a", SourceVersion: 1}}}, StartedAt: at, UpdatedAt: at}, {Status: topology.OperationStatus{ID: "exec-v1-a1", Version: 1, Attempt: 1, State: topology.OperationSucceeded}, Plan: topology.Plan{Version: 1}, StartedAt: at, UpdatedAt: at}},
 		Groups:           []groupConvergence{{GroupID: "live", SourceVersion: 1, Declaration: &topology.Group{ID: "live"}, CompletedAt: at}, {GroupID: "never"}, {GroupID: "tombstone", SourceVersion: 2, CompletedAt: at}},
 		Nodes:            []nodeConvergence{{NodeName: "b", SourceVersion: 2, MemberID: 2, CompletedAt: at}, {NodeName: "a", Declaration: &topology.Node{Name: "a"}, SourceVersion: 1, MemberID: 1, CompletedAt: at}},
 		Cleanup:          []cleanupRecord{{Identity: id, MemberID: 2, Storage: topology.StorageDefault, OperationID: "exec-v3-a1", Retired: &topology.EffectReceipt{Key: key}, RetiredAt: &at, Collection: &authoritystore.CollectionReceipt{Identity: id, MemberID: 2, RetirementKey: key, Token: "opaque", LocalSequence: 9, CollectedAt: at}, CreatedAt: at, UpdatedAt: at}, {Identity: storage.Identity{ClusterID: "c", GroupID: "b", NodeName: "n", ReplicaID: 8}, Storage: topology.StorageMemory, RetiredAt: &at}},

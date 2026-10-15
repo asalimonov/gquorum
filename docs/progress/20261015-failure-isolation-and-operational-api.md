@@ -234,3 +234,19 @@ Verified
 - Exact staged lint passed: unit/functional vet, production golangci, selected revive and merged unused declarations; /tmp/gquorum-correction2-staged-lint.log. Original-approval checking was extracted to satisfy the complexity limit without suppressions.
 - Regression cases cover unnecessary undelivered fence after late consumption, older authority settled by a newer fence, leadership transfer, 2500 independent retained debts, immutable document copying, missing original attempt and exact cleanup payload identity.
 - No stores, network or goroutines are acquired by these changes; process/race gates remain in their scheduled ownership/final tasks. No dead declaration is safe to remove beyond replacing the narrower obligation helper. Next review checkpoint is implementation/correction commit 15.
+
+## Task 10 — Validate scoped documents and immutable operation attempts
+Date: 2026-10-15. Commit: this entry's commit (implementation/correction commit 12).
+
+Implemented
+- The isolated v4 decoder validates its document/operation graph before installing owned state and derived indexes. It checks rule/schema identity, document/parent/rebase/applied boundaries, historical FullyConverged evidence, complete aligned block status, exact attempt IDs and retained planning/approved sources.
+- Existing ValidatePlanGuardChain now also validates scoped partitions/barriers; no new public API or synthetic Active document. Exact step shapes and voter guards remain mandatory. Required-step cursors exclude detached cleanup; terminal aggregate precedence retains failure/supersession.
+- Previous links require an immediately preceding failed attempt with identical immutable plan/provenance. Retries preserve every successful/superseded sibling row. Missing/cyclic/skipped predecessors and altered plans refuse atomically.
+- History has no hard version-count cap; retained operation sources remain pinned until their verification dependency can be released. FullyConverged remains historical rather than equal to current Target/progress.
+- Codec fixtures now have valid document/attempt graphs. Convergence/identity validation is Task 11, authority proof preparation Task 12; live Machine restoration/writes remain schema 3 until Task 57. New helpers are reached by decoding, not unused test-only scaffolding.
+
+Verified
+- Focused scoped graph and topology block/barrier tests passed. Corruption tests verify both pure candidate non-mutation and decoder refusal preserving prior bytes/index ownership.
+- make test: 977/977, 7.330s; test-reports/unit/20261015T171116.388366Z-ak7ti4lg/report.md.
+- Exact staged lint passed (unit/functional vet, production golangci, selected revive, merged unused); /tmp/gquorum-task10-lint.log. Extracted document/step/block checks to satisfy complexity and line limits without suppressions.
+- No storage/network acquisition or concurrency change. Existing live v4 refusal regression remains green. Changed Go is below the 550-line task ceiling; next review checkpoint remains commit 15.

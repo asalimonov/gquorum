@@ -59,7 +59,6 @@ func TestScopedObligationsMatchIssuerAndRevocationSettlement(t *testing.T) {
 func TestScopedDocumentIndexIsImmutableAndFirstMeansOriginal(t *testing.T) {
 	t.Parallel()
 	fixture := indexedCodecFixture()
-	fixture.Target.Nodes = []topology.Node{{Name: "original"}}
 	data, err := json.Marshal(fixture)
 	if err != nil {
 		t.Fatal(err)
@@ -68,11 +67,11 @@ func TestScopedDocumentIndexIsImmutableAndFirstMeansOriginal(t *testing.T) {
 	if err := json.Unmarshal(data, &restored); err != nil {
 		t.Fatal(err)
 	}
-	restored.Target.Nodes[0].Name = "changed nested value"
-	if restored.indexes.documents[restored.Target.Version].Nodes[0].Name != "original" {
+	restored.Target.Nodes[0].Type = "changed nested value"
+	if restored.indexes.documents[restored.Target.Version].Nodes[0].Type != "worker" {
 		t.Fatal("document index aliases nested mutable data")
 	}
-	restored.Target.Nodes[0].Name = "original"
+	restored.Target.Nodes[0].Type = "worker"
 	version := restored.Latest.Version
 	restored.Latest.Comment = "changed state slot"
 	if restored.indexes.documents[version].Comment != fixture.Latest.Comment {

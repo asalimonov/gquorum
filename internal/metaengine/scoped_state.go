@@ -79,7 +79,7 @@ func (s *scopedState) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
-	owned.indexes, err = owned.buildIndexes()
+	owned.indexes, err = prepareScopedGraph(&owned, owned.Rules)
 	if err != nil {
 		return err
 	}

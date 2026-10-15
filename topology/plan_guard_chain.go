@@ -9,11 +9,16 @@ const (
 	voterDigestHexLength = 64
 )
 
-// ValidatePlanGuardChain checks the durable, document-independent part of voter
-// proofs. Approval also calls ValidatePlanShape with the exact desired
-// document;
-// restored historical operators may outlive that document's native base.
+// ValidatePlanGuardChain checks document-independent voter proofs and, when
+// present, scoped partitions and admission/removal barriers. Approval also
+// validates exact topology identities with ValidatePlanShape; this check alone
+// does not authorize effects.
 func ValidatePlanGuardChain(plan Plan) error {
+	if len(plan.Blocks) != 0 || len(plan.Dependencies) != 0 {
+		if err := validatePlanBlocks(plan); err != nil {
+			return err
+		}
+	}
 	required := make(map[string]bool)
 	for _, step := range plan.Steps {
 		if isMembershipStep(step.Kind) {

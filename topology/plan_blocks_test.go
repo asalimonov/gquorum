@@ -71,6 +71,9 @@ func TestPlanBarrierCycleIncludesWithinBlockOrder(t *testing.T) {
 	if err := validatePlanBlocks(plan); err == nil || !strings.Contains(err.Error(), "cycle") {
 		t.Fatal("cyclic admission/removal ordering accepted", err)
 	}
+	if err := ValidatePlanGuardChain(plan); err == nil || !strings.Contains(err.Error(), "cycle") {
+		t.Fatal("document-independent restore validator accepted the cycle", err)
+	}
 }
 
 func TestPlanBlocksCloneAndEquality(t *testing.T) {
