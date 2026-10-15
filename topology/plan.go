@@ -21,6 +21,8 @@ func comparePlanGroups(a, b string) int {
 
 // ValidatePlanShape checks immutable step ordering and exact identities against
 // approved intent, proven declarations and separately retained host evidence.
+// It also validates existing plans after effects complete; new effect ownership
+// must be checked separately at approval against retained grants and cleanup.
 func ValidatePlanShape(input PlanInput, desired Document, plan Plan) error {
 	if err := validatePlanHeader(input, desired, plan); err != nil {
 		return err

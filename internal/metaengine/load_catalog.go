@@ -51,7 +51,7 @@ func orderedIdentities(ids map[storage.Identity]bool) []storage.Identity {
 
 // DeletionBase supplies approved historical identities for planning cleanup,
 // including interrupted preparations in surviving groups.
-// Legacy composite adapter; remove remaining nonplanner consumers at Task 66.
+// Legacy composite adapter; remove remaining nonplanner consumers at Task 68.
 // New planners use PlanningInput for actual convergence plus separate evidence.
 func (sm *topologySM) DeletionBase(ctx context.Context, desired topology.Document) (topology.Document, error) {
 	if err := ctx.Err(); err != nil {
@@ -64,7 +64,7 @@ func (sm *topologySM) DeletionBase(ctx context.Context, desired topology.Documen
 
 // OperatorBase preserves the exact retired identities named by an immutable
 // retry even when earlier consumption removed them from new planning input.
-// Remove this legacy composite adapter at Task 66.
+// Remove this legacy composite adapter at Task 68.
 func (sm *topologySM) OperatorBase(ctx context.Context, id topology.OperatorID) (topology.Document, error) {
 	if err := ctx.Err(); err != nil {
 		return topology.Document{}, err
@@ -104,7 +104,11 @@ func (sm *topologySM) operatorBaseLocked(op *operatorRecord) (topology.Document,
 }
 
 func (sm *topologySM) deletionBaseLocked(desired topology.Document) (topology.Document, error) {
-	b := deletionBaseBuilder{sm: sm, desired: desired, base: sm.active.Clone()}
+	input, err := sm.planningInputLocked(desired, nil)
+	if err != nil {
+		return topology.Document{}, err
+	}
+	b := deletionBaseBuilder{sm: sm, desired: desired, base: sm.active.Clone(), input: input}
 	groups := make(map[string]bool)
 	for _, g := range b.base.Groups {
 		groups[g.ID] = true
@@ -131,6 +135,7 @@ type deletionBaseBuilder struct {
 	sm            *topologySM
 	desired, base topology.Document
 	proofs        cleanupProofs
+	input         topology.PlanInput
 }
 
 func (b *deletionBaseBuilder) addGroup(group string) error {
@@ -146,15 +151,16 @@ func (b *deletionBaseBuilder) addGroup(group string) error {
 	if b.desired.Group(group) != nil {
 		b.addReadmittedTargets(group, ids)
 	}
+	b.retainPossibleTargets(group, ids)
 	g := b.base.Group(group)
 	if b.desired.Group(group) != nil {
 		b.removeDesiredTargets(group, ids)
-		if g == nil && len(ids) == 0 {
-			return nil
-		}
 		if g != nil {
 			b.addRetainedDesiredTargets(g, ids)
 		}
+	}
+	if g == nil && len(ids) == 0 {
+		return nil
 	}
 	if g == nil {
 		b.base.Groups = append(b.base.Groups, topology.Group{ID: group})
@@ -170,6 +176,24 @@ func (b *deletionBaseBuilder) addGroup(group string) error {
 		}
 	}
 	return nil
+}
+
+// The legacy document carrier remains until Task 24 converts construction.
+// Restrict its new work to the same factual owners used by approval validation;
+// an unissued approved action cannot establish a resource. OperatorBase separately
+// preserves original steps for immutable retry attribution.
+func (b *deletionBaseBuilder) retainPossibleTargets(group string, ids map[storage.Identity]bool) {
+	for id := range ids {
+		if b.sm.activeContains(id) {
+			continue
+		}
+		known := slices.ContainsFunc(b.input.Retained[group].Replicas, func(r topology.RetainedReplica) bool {
+			return r.NodeName == id.NodeName && r.ReplicaID == id.ReplicaID
+		})
+		if !known {
+			delete(ids, id)
+		}
+	}
 }
 
 func (b *deletionBaseBuilder) addReadmittedTargets(group string, ids map[storage.Identity]bool) {

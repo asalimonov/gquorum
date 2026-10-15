@@ -534,3 +534,19 @@ Verified
 - Focused topology/metaengine/operator units passed. Metaservice functional Test(Plan|Rollback|ReadmissionJoin) passed (1.867s); no new process or concurrency behavior, so no additional race/Docker run here.
 - make test: 1195/1195, 8.921s; test-reports/unit/20261015T203346.941216Z-tv8p_lsh/report.md. Exact staged lint passed at /tmp/gquorum-task21-lint.log after two line-wrap fixes; full checkpoint make lint passed at /tmp/gquorum-checkpoint30-lint.log. Diff checks pass; 187 changed handwritten Go lines, below 550.
 - This is implementation/correction commit 30. Review range is c17ae5f..HEAD (Correction 9 and Tasks 18–21). Request the five-commit peer review and evaluate/correct its findings before another implementation commit. Task 22 needs a fresh size estimate for the coupled public/native/remaining-plan conversion. Full target remains unfinished; live schema 3 still rejects 4 until Task 66.
+
+
+## Correction 10 — Keep unissued intent out of new retirement plans
+Date: 2026-10-16. Commit: this entry's commit (implementation/correction commit 31).
+
+Implemented
+- Reproduced both thread-8 live approval failures through the real FSM: abandoning an unfounded group and dropping an unprepared replacement. Both previously failed with "step 1 does not name a removed replica".
+- The existing legacy DeletionBase builder now filters candidate work using actual converged/issued retained evidence from PlanningInput under the same lock. Unissued approved intent creates no host work; established owners and issued-but-unacknowledged effects remain. No new composite-to-convergence adapter. Grant attribution catalogs and immutable OperatorBase identity preservation remain unchanged.
+- Collector identity/allocation errors now also fail planning/execution reads closed; approval already enforced those invariants. All actual native/public construction callers are still converted in the planned Tasks 22–24.
+- Closed thread 8 after peer verification. Finding 2 was withdrawn as a current defect: immutable shape validation must survive completed cleanup. Made a shared private FSM ownership check explicit for every new scoped approval handler in Task 27, with exact removal/readmission evidence and duplicate-submission versus immutable-retry tests. Target §7.2 and function documentation clarify that distinction. No new public mode or enum.
+- Pre-coding estimate split former Task 22 into Tasks 22–24; 78 tasks total, scoped collection 56, activation 68, audit 78. Updated source removal references; historical progress numbering is preserved.
+
+Verified
+- make test: 1195/1195, 9.657s; test-reports/unit/20261015T204728.355858Z-k5fq9so1/report.md. Exact staged lint passes at /tmp/gquorum-correction10-lint.log after consolidating an empty-catalog check to keep cognitive complexity within 16. Diff checks pass; 150 changed handwritten Go lines including tests/comments, below 550.
+- Focused topology/metaengine/operator units passed, including interrupted issued-effect cleanup and immutable retry attribution. Focused abandonment/rollback/controller-retry functional cases passed (1.571s); after the lint simplification re-ran the affected metadata units and abandonment cases successfully. Additional readmission/restart/fenced/granted-ledger/deletion functional cases passed (2.444s), /tmp/gquorum-correction10-functional.log.
+- Peer independently ran both live regressions and an issued-but-unacknowledged founding probe against the staged copy. No new concurrency/process behavior; no additional race/Docker run. Next task 22; next regular five-commit review at commit 35.
