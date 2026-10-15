@@ -303,3 +303,17 @@ Date: 2026-10-15. Reviewed batch begins after f8c7712.
 - References and full unused-code lint identify no safely removable declaration. New graph/proof helpers are reached by isolated v4 decoding. validateLegacyPlan still protects live schema-3 approvals/voter changes; pendingCost/newAuthorityGrantCost still protect existing issue/revocation/readmission/transfer/restore. Old cleanupProofsLocked still serves recovery, catalogs and pruning. Removing these before replacing consumers would weaken the live path.
 - Scoped authority settlement reuses existing predicates and obligation validation rather than adding parallel implementations. Transition codec/guards and residual legacy consumers are explicitly removed in Tasks 58–59; scoped revocation removes the old debt cap in Task 19.
 - Request peer review of Correction 2 plus Tasks 10–13 before the next implementation commit. Admission/voter/completed-effect validation is explicitly unfinished Task 14, and no live format has changed. Next regular checkpoint is commit 20, counting corrections.
+
+## Correction 3 — Approved rebase provenance and compacted checkpoints
+Date: 2026-10-15. Commit: this entry's commit (implementation/correction commit 16).
+
+Implemented
+- Addressed review thread 4 findings 2 and 5: rebase S must be exactly L+2 with repair parent L+1, retain L, and reject any approval, convergence, plan-source or effect/cleanup-action authority at L. Corrected the codec fixture: approved versions 1/2/3, unapproved L=4, repair R=5 with parent 3, successor S=6.
+- Compacted live group/node checkpoints now require identical declaration/member context from approved evidence. Staged-only Latest cannot supply that proof. The common approval-witness helper includes node sources and is shared with cleanup declaration checks.
+- Refined one proposed review condition: R.Parent cannot always equal L.Parent because several staged edits can accumulate above Target. R.Parent cannot be later than L.Parent; when L.Parent is independently approved it must equal R.Parent. Regression retains multiple staged edits without granting them approval. This distinction is sent back for peer confirmation.
+- Prepared Task 14 is preserved in stash 1f3bf69fa03898a85cefbd1ad7d8c7bef324d476, including its pre-coding task split; no shared review files were stashed. Planned three bounded review corrections before resuming that prepared work. No live format activation or public API addition.
+
+Verified
+- Focused scoped regressions passed, including every forbidden rebase approval/action witness and staged-only compaction context. make test: 1066/1066, 8.792s; test-reports/unit/20261015T182207.078737Z-5_j_tmb0/report.md.
+- Extracted compacted-group checking to meet complexity limits; focused tests rerun afterward. Exact staged lint and diff checks passed; /tmp/gquorum-correction3-lint.log. Changed handwritten Go remains below 550 lines. Pure restore validation adds no resource acquisition or concurrency.
+- Review follow-up still covers pending cleanup/retry and normalization corrections. Next regular peer/dead-code checkpoint remains commit 20.

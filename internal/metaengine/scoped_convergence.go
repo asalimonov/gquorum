@@ -35,7 +35,8 @@ func ownsScopedGroup(operation *topology.Operation, group string, source uint64)
 	return false
 }
 
-func validateGroupCheckpoint(row groupConvergence, index *scopedIndexes, retired map[string]uint64) error {
+func validateGroupCheckpoint(state *scopedState, row groupConvergence,
+	index *scopedIndexes, retired map[string]uint64) error {
 	if row.SourceVersion == 0 {
 		if row.Declaration != nil {
 			return invalidScopedState("unproven group carries a declaration")
@@ -61,10 +62,14 @@ func validateGroupCheckpoint(row groupConvergence, index *scopedIndexes, retired
 	if _, found := index.documents[row.SourceVersion]; found {
 		return nil
 	}
-	// A compacted source is safe when another validated retained document supplies
+	return validateCompactedGroup(state, index, row)
+}
+
+func validateCompactedGroup(state *scopedState, index *scopedIndexes, row groupConvergence) error {
+	// A compacted source is safe when another approved retained document supplies
 	// the identical declaration. Otherwise keep the original verification context.
 	for _, doc := range index.documents {
-		if reflect.DeepEqual(doc.Group(row.GroupID), row.Declaration) {
+		if scopedApprovedVersion(state, doc.Version) && reflect.DeepEqual(doc.Group(row.GroupID), row.Declaration) {
 			return nil
 		}
 	}
@@ -81,7 +86,7 @@ func validateNodeCheckpoints(state *scopedState, index *scopedIndexes) error {
 			row.Declaration == nil && row.MemberID != 0 {
 			return invalidScopedState("node checkpoint lacks exact proven membership")
 		}
-		if err := validateNodeDeclaration(row, index); err != nil {
+		if err := validateNodeDeclaration(state, row, index); err != nil {
 			return err
 		}
 		if err := validateNodeOwner(row, index); err != nil {
@@ -91,7 +96,7 @@ func validateNodeCheckpoints(state *scopedState, index *scopedIndexes) error {
 	return nil
 }
 
-func validateNodeDeclaration(row nodeConvergence, index *scopedIndexes) error {
+func validateNodeDeclaration(state *scopedState, row nodeConvergence, index *scopedIndexes) error {
 	if row.SourceVersion == 0 {
 		return nil
 	}
@@ -107,7 +112,8 @@ func validateNodeDeclaration(row nodeConvergence, index *scopedIndexes) error {
 		return nil
 	}
 	for _, doc := range index.documents {
-		if doc.MemberID(row.NodeName) == row.MemberID && reflect.DeepEqual(doc.Node(row.NodeName), row.Declaration) {
+		if doc.MemberID(row.NodeName) == row.MemberID && scopedApprovedVersion(state, doc.Version) &&
+			reflect.DeepEqual(doc.Node(row.NodeName), row.Declaration) {
 			return nil
 		}
 	}
@@ -143,7 +149,7 @@ func validateScopedGroupRow(state *scopedState, index *scopedIndexes,
 		!row.Deleting && row.Declaration != nil && state.Target.Group(row.GroupID) == nil {
 		return invalidScopedState("deletion state contradicts current approved presence")
 	}
-	if err := validateGroupCheckpoint(row, index, retired); err != nil {
+	if err := validateGroupCheckpoint(state, row, index, retired); err != nil {
 		return err
 	}
 	if row.Owner != "" {

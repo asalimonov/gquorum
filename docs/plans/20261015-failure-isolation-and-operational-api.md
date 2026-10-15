@@ -232,6 +232,30 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [x] Run cleanup/restore units, staged lint and `make test`; maintain the 550-line ceiling.
 
+### Correction 3: Require approved provenance for rebases and compacted checkpoints
+
+**Files:** scoped document/convergence validators and fixtures. **Target:** [T] §4.1–4.3, §5.3; review thread 4 findings 2/5. **Budget:** estimated 250–400 changed Go lines, ceiling 550.
+
+- [x] Prove the atomic L/R/S ancestry and that rebased L has no approval/convergence/action authority. Use only independently approved context for compacted checkpoints.
+- [x] Correct fixture provenance and cover each contradictory witness, missing repair ancestry and staged-only declaration.
+- [x] Run focused regressions, make test and staged lint before committing.
+
+### Correction 4: Preserve exact cleanup progress and retry lineage
+
+**Files:** scoped cleanup/authority validation and fixtures. **Target:** [T] §4.1–4.3, §6.1–6.2; review thread 4 findings 1/3/7. **Budget:** estimated 400–550 changed Go lines, ceiling 550.
+
+- [ ] Require two-way receipt/milestone agreement, the stop-before-retirement boundary and honest unfinished deletion ownership. Pin the originating operation and its source context until debt pruning.
+- [ ] Resolve exact successor-attempt actions without relabeling consumed predecessor receipts; test retry and unrelated-progress restoration. Remove obsolete archived-cleanup branches and duplicate validation.
+- [ ] Run focused regressions, make test and staged lint before committing.
+
+### Correction 5: Normalize generated rebase provenance on ordinary edits
+
+**Files:** FSM document installation, mutation derivation, regressions and retention notes. **Target:** [T] §3.4, §4.3, §5.3; review thread 4 findings 4/6. **Budget:** estimated 100–200 changed Go lines, ceiling 550.
+
+- [ ] Clear caller/inherited RebasedFrom on non-rebase installs and typed previews; test continued staging after a rebase. Replace the earlier rejection contract with normalization.
+- [ ] Document atomic retry-chain pruning and distinguish incomplete index-input tests from valid restored state. Clarify zero member IDs and collection clock/sequence scope.
+- [ ] Run focused regressions, make test and staged lint before committing.
+
 ### Task 14: Validate admission and completed-effect proof before restore installation
 
 **Files:** scoped admission/voter/completion validation and restore tests. **Target:** [T] §4.1–4.3, §6.2–6.3, §8.4. **Depends on:** 13. **Budget:** ≤550.

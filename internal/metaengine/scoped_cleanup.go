@@ -32,31 +32,13 @@ func (check scopedCleanupValidation) declaration(debt cleanupRecord) bool {
 		return false
 	}
 	for _, doc := range check.index.documents {
-		if !check.approvedVersion(doc.Version) || doc.MemberID(debt.Identity.NodeName) != debt.MemberID {
+		if !scopedApprovedVersion(check.state, doc.Version) || doc.MemberID(debt.Identity.NodeName) != debt.MemberID {
 			continue
 		}
 		group := doc.Group(debt.Identity.GroupID)
 		replica := documentReplica(doc, debt.Identity.GroupID, debt.Identity.ReplicaID)
 		if group != nil && replica != nil && replica.NodeName == debt.Identity.NodeName &&
 			group.Storage == debt.Storage {
-			return true
-		}
-	}
-	return false
-}
-
-func (check scopedCleanupValidation) approvedVersion(version uint64) bool {
-	if version == check.state.Target.Version || version == check.state.FullyConverged.Version {
-		return true
-	}
-	for _, row := range check.state.Groups {
-		if row.SourceVersion == version {
-			return true
-		}
-	}
-	for _, operation := range check.state.Operations {
-		if operation.Status.Version == version || slices.ContainsFunc(operation.Plan.Blocks,
-			func(block topology.PlanBlock) bool { return block.SourceVersion == version }) {
 			return true
 		}
 	}

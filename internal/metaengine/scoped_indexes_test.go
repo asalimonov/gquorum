@@ -48,7 +48,7 @@ func TestScopedIndexesRebuildExactOwnedLookups(t *testing.T) {
 	if !reflect.DeepEqual(before, index) {
 		t.Fatal("restored lookups differ")
 	}
-	if index.first[3] != "exec-v3-a1" || index.latest[3] != "exec-v3-a2" || index.retries["exec-v3-a1"] != "exec-v3-a2" || index.rebases[2] != 4 {
+	if index.first[3] != "exec-v3-a1" || index.latest[3] != "exec-v3-a2" || index.retries["exec-v3-a1"] != "exec-v3-a2" || index.rebases[4] != 6 {
 		t.Fatal("lost attempt/rebase provenance", index)
 	}
 	if index.groups["a"].Owner != "exec-v3-a2" || index.nodes["b"].MemberID != 0 || index.intents[intentKey{1, "set_group_placement", strings.Repeat("0", 64)}].Version != 2 {
@@ -90,7 +90,7 @@ func TestScopedIndexesRejectAmbiguousKeysAtomically(t *testing.T) {
 			retry.Status.ID, retry.Status.Attempt = "exec-v3-a3", 3
 			s.Operations = append(s.Operations, retry)
 		},
-		"rebase fork": func(s *scopedState) { s.History = append(s.History, topology.Document{Version: 5, RebasedFrom: 2}) },
+		"rebase fork": func(s *scopedState) { s.History = append(s.History, topology.Document{Version: 7, RebasedFrom: 4}) },
 		"self rebase": func(s *scopedState) { s.Latest.RebasedFrom = s.Latest.Version; s.History = s.History[:2] },
 		"document version": func(s *scopedState) {
 			conflict := s.Target.Clone()

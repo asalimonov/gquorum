@@ -39,16 +39,19 @@ func scopedCodecFixture() scopedState {
 	successor := base.Clone()
 	successor.Groups = successor.Groups[:len(successor.Groups)-1]
 	successor.Group("a").Replicas[0].ReplicaID, successor.Group("a").NextReplicaID = 8, 9
-	original, target, latest := successor.Clone(), successor.Clone(), successor.Clone()
+	original, approved, staged := successor.Clone(), successor.Clone(), successor.Clone()
+	target, latest := successor.Clone(), successor.Clone()
 	original.Version, original.ParentVersion = 2, 1
-	target.Version, target.ParentVersion = 3, 2
-	latest.Version, latest.ParentVersion, latest.RebasedFrom = 4, 3, 2
+	approved.Version, approved.ParentVersion = 3, 2
+	staged.Version, staged.ParentVersion = 4, 3
+	target.Version, target.ParentVersion = 5, 3
+	latest.Version, latest.ParentVersion, latest.RebasedFrom = 6, 5, 4
 	latest.MetaGroup().NextReplicaID = 4
 	latest.Group("a").NextReplicaID = 9
 	state := scopedState{
 		SchemaVersion: scopedStateSchemaVersion, Rules: testRules(), AppliedIndex: 30, AppliedTerm: 4,
 		Latest: latest, Target: target,
-		History:        []topology.Document{original, base},
+		History:        []topology.Document{original, base, approved, staged},
 		Operations:     []topology.Operation{{Status: topology.OperationStatus{ID: "exec-v3-a1", Version: 3, Attempt: 1, State: topology.OperationFailed, TotalBlocks: 1, Blocks: []topology.BlockStatus{{GroupID: "a", State: topology.OperationFailed, CurrentStep: 1, TotalSteps: 1}}}, Plan: topology.Plan{Version: 3, Steps: []topology.Step{{Seq: 1, Kind: topology.StepTransferLeader, GroupID: "a", NodeName: "n", ReplicaID: 8}}, Blocks: []topology.PlanBlock{{GroupID: "a", SourceVersion: 1, Steps: []int{1}}}}, StartedAt: at, UpdatedAt: at}, {Status: topology.OperationStatus{ID: "exec-v1-a1", Version: 1, Attempt: 1, State: topology.OperationSucceeded}, Plan: topology.Plan{Version: 1}, StartedAt: at, UpdatedAt: at}},
 		Groups:         []groupConvergence{{GroupID: "live", SourceVersion: 1, Declaration: base.Group("live"), CompletedAt: at}, {GroupID: "never"}, {GroupID: "a", SourceVersion: 1, Declaration: base.Group("a"), CompletedAt: at}, {GroupID: "tombstone", SourceVersion: 2, CompletedAt: at}, {GroupID: topology.MetaGroupID, SourceVersion: 1, Declaration: base.MetaGroup(), CompletedAt: at}},
 		Nodes:          []nodeConvergence{{NodeName: "b", SourceVersion: 2, MemberID: 0, CompletedAt: at}, {NodeName: "n", Declaration: base.Node("n"), SourceVersion: 1, MemberID: 1, CompletedAt: at}},
@@ -154,7 +157,7 @@ func TestScopedStateTombstonesAndActivationBoundary(t *testing.T) {
 			t.Fatal("nil declarations lost their distinct proof", group)
 		}
 	}
-	if got.Scoped.Latest.RebasedFrom != 2 || got.Scoped.Cleanup[1].Collection != nil {
+	if got.Scoped.Latest.RebasedFrom != 4 || got.Scoped.Cleanup[1].Collection != nil {
 		t.Fatal("lost rebase provenance or fabricated memory collection")
 	}
 	m := convergedAuthorityFixture(t)
