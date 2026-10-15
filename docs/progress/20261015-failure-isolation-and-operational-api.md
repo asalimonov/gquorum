@@ -503,3 +503,18 @@ Verified
 - Focused topology/operator tests passed, including native/prepared retirement, stopped native boundaries, cleanup-owned stop carryover, native contradictions, immutable old-plan identity, unknown-convergence deletion, every-host stop and partial/full readmission regressions.
 - Final make test: 1183/1183, 9.034s; test-reports/unit/20261015T201908.856062Z-e12ose55/report.md. Exact staged lint passed at /tmp/gquorum-task19-lint.log after line-wrap/operand-order/switch-style fixes. Diff checks pass; 433 changed handwritten Go lines, below 550.
 - Pure planning changes have no resource acquisition or new concurrency; no new functional/race/Docker run. Live schema/public planner adapters remain unchanged until their planned conversion. Next regular review is commit 30.
+
+
+## Task 20 — Metadata-derived retained planning evidence
+Date: 2026-10-16. Commit: this entry's commit (implementation/correction commit 29).
+
+Implemented
+- Added internal PlanningInput with an owned snapshot of actual Active declarations/tombstones, approved intent and caller-supplied NativeState clones. Shared pure collection uses approved historical documents, issued grants, complete readmission batches, cleanup rows and allocation history. No DeletionBase/OperatorBase composite becomes convergence.
+- Possible host state comes from issued Prepare/CreateFoundingGroup grants or actual native membership, never approval alone. FoundingIssued survives desired subtraction. Exact group/node/member/replica bindings and historical allocation floors are checked; unknown/foreign native identities refuse. Native reporters are checked independently from membership.
+- Consumed removal retains Cleanup ownership; exact stop/retirement or complete readmission retains Stopped. Readmission-created debt stays actionless after a later native-removal receipt; collection does not mutate durable records. A native observation behind a removal receipt is Unavailable; sufficiently recent contradictory membership is UnsafeMembership. Native Stopped requires complete exact readmission provenance.
+- Current schema-3 adapter supplies genuine Active and retained authority evidence. The same collector accepts validated scoped cleanup sources; scoped adapters/apply revalidation remain Tasks 25/54, activation 66. Documented legacy composite adapter removal at Task 66. Public planner/validator callers still await Tasks 21–22; no new ordinary Node/Cluster API.
+
+Verified
+- Focused metadata collector tests passed: unknown/closed/consumed issuance, multiple supersessions, all-desired founding, no host state from intent alone, native host discovery, allocation/host/member contradictions, late removal/readmission proof, stale native state, completed deletion and owned results.
+- Final make test: 1194/1194, 7.442s; test-reports/unit/20261015T202927.809964Z-wc_6l2tz/report.md. Exact staged lint passed at /tmp/gquorum-task20-lint.log after extracting per-owner receipt interpretation and style fixes. Diff checks pass; 528 changed handwritten Go lines, below 550.
+- Pure metadata reads/collection introduce no acquired storage or background work; no additional functional/race/Docker run. Next task is public shape validation; its commit 30 triggers full lint/dead-code and peer review before further implementation.

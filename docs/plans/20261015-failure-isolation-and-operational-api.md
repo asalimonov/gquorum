@@ -368,15 +368,15 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaengine/load_catalog.go`, cleanup/authority evidence helpers, internal Machine planning read and unit tests. **Target:** [T] §4.3, §5.2, §7.2 FI_PLAN_EVIDENCE; contract C12. **Depends on:** 18–19. **Budget:** estimated 400–550 changed Go lines, ceiling 550.
 
-- [ ] Reuse existing retained operation/document/grant identity sources to produce PlanInput metadata with owned values. Issued Prepare and CreateFoundingGroup grants count with any outcome; approved intent alone does not create host state. Keep FoundingIssued before subtracting Desired.
-- [ ] Derive Hosted/Cleanup/Stopped from exact cleanup/readmission evidence, historical MemberID and allocation bounds. Preserve the original actionless readmission debt and removal-origin receipts. Retained native contradictions require applied-index comparison: stale reads are retryable unavailability; sufficiently recent contradictions refuse.
-- [ ] Share one pure retained-evidence collector between read-side production and later scoped apply revalidation. Give current schema-3 boundaries actual Active declarations and exact separately retained evidence; never decompose the synthetic DeletionBase into alleged convergence. Scoped-state adapters and authoritative approval wiring follow in Tasks 25 and 54/66.
-- [ ] Expose only the needed internal Machine planning read, with a real implementation. Keep legacy DeletionBase/OperatorBase only while old nonplanner consumers still need them; record their exact removal task. No public Node/Cluster surface or exported test-only workaround.
-- [ ] Test consumed/refused/unknown preparation/founding, successful cleanup, same-name readmission, lagging native evidence, identity conflicts, source ownership and multiple supersessions. Pinning writer changes remain Task 40; do not assume pruning can erase founding evidence meanwhile.
+- [x] Reuse existing retained operation/document/grant identity sources to produce PlanInput metadata with owned values. Issued Prepare and CreateFoundingGroup grants count with any outcome; approved intent alone does not create host state. Keep FoundingIssued before subtracting Desired.
+- [x] Derive Hosted/Cleanup/Stopped from exact cleanup/readmission evidence, historical MemberID and allocation bounds. Preserve the original actionless readmission debt and removal-origin receipts. Retained native contradictions require applied-index comparison: stale reads are retryable unavailability; sufficiently recent contradictions refuse.
+- [x] Share one pure retained-evidence collector between read-side production and later scoped apply revalidation. Give current schema-3 boundaries actual Active declarations and exact separately retained evidence; never decompose the synthetic DeletionBase into alleged convergence. Scoped-state adapters and authoritative approval wiring follow in Tasks 25 and 54/66.
+- [x] Expose only the needed internal Machine planning read, with a real implementation. Keep legacy DeletionBase/OperatorBase only while old nonplanner consumers still need them; record their exact removal task. No public Node/Cluster surface or exported test-only workaround.
+- [x] Test consumed/refused/unknown preparation/founding, successful cleanup, same-name readmission, lagging native evidence, identity conflicts, source ownership and multiple supersessions. Pinning writer changes remain Task 40; do not assume pruning can erase founding evidence meanwhile.
 
 **Verification**
 
-- [ ] Run focused metadata catalog/cleanup/readmission units, staged lint and `make test`; use functional tests only if acquiring storage or a replica.
+- [x] Run focused metadata catalog/cleanup/readmission units, staged lint and `make test`; use functional tests only if acquiring storage or a replica.
 
 ### Task 21: Convert public plan validation and its immediate callers
 

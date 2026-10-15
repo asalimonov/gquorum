@@ -51,7 +51,8 @@ func orderedIdentities(ids map[storage.Identity]bool) []storage.Identity {
 
 // DeletionBase supplies approved historical identities for planning cleanup,
 // including interrupted preparations in surviving groups.
-// It is private planning input, never a replacement for the public Active view.
+// Legacy composite adapter; remove remaining nonplanner consumers at Task 66.
+// New planners use PlanningInput for actual convergence plus separate evidence.
 func (sm *topologySM) DeletionBase(ctx context.Context, desired topology.Document) (topology.Document, error) {
 	if err := ctx.Err(); err != nil {
 		return topology.Document{}, err
@@ -63,6 +64,7 @@ func (sm *topologySM) DeletionBase(ctx context.Context, desired topology.Documen
 
 // OperatorBase preserves the exact retired identities named by an immutable
 // retry even when earlier consumption removed them from new planning input.
+// Remove this legacy composite adapter at Task 66.
 func (sm *topologySM) OperatorBase(ctx context.Context, id topology.OperatorID) (topology.Document, error) {
 	if err := ctx.Err(); err != nil {
 		return topology.Document{}, err
