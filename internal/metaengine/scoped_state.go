@@ -9,7 +9,7 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// This codec is isolated from live state installation until Task 56. At cutover
+// This codec is isolated from live state installation until Task 57. At cutover
 // it replaces smState and the legacy disk codec, rather than becoming a V2 API.
 const scopedStateSchemaVersion = 4
 

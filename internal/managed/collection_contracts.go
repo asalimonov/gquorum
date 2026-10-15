@@ -13,5 +13,15 @@ import (
 // and diagnosis. They do not authorize retirement or transfer host ownership.
 type CollectionCallbacks struct {
 	Report func(context.Context, authoritystore.CollectionReceipt) (authoritystore.CollectionResult, error)
-	Status func(context.Context, storage.Identity, *time.Time, *topology.BlockedReason) error
+	Status func(context.Context, CleanupStatus) error
+}
+
+// CleanupStatus retains the historical host/proof binding even after readmission.
+// Diagnostic updates never rebind this evidence to the current process identity.
+type CleanupStatus struct {
+	Identity      storage.Identity
+	MemberID      uint64
+	RetirementKey topology.AuthorityKey
+	NotBefore     *time.Time
+	Blocked       *topology.BlockedReason
 }

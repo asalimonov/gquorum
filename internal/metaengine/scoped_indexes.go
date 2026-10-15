@@ -21,7 +21,7 @@ type scopedIndexes struct {
 	retries     map[topology.OperationID]topology.OperationID
 	cleanup     map[storage.Identity]*cleanupRecord
 	intents     map[intentKey]*intentRecord
-	documents   map[uint64]*topology.Document
+	documents   map[uint64]topology.Document
 	rebases     map[uint64]uint64
 	grants      map[topology.AuthorityKey]*scopedAuthorityRecord
 	obligations map[topology.AuthorityResource][]topology.AuthorityKey
@@ -37,7 +37,7 @@ func (s *scopedState) buildIndexes() (*scopedIndexes, error) {
 	index := &scopedIndexes{
 		first: map[uint64]topology.OperationID{}, latest: map[uint64]topology.OperationID{},
 		retries:   map[topology.OperationID]topology.OperationID{},
-		documents: map[uint64]*topology.Document{}, rebases: map[uint64]uint64{},
+		documents: map[uint64]topology.Document{}, rebases: map[uint64]uint64{},
 	}
 	err := errors.Join(
 		indexRows(s.Groups, &index.groups, func(r *groupConvergence) string { return r.GroupID }),
@@ -82,9 +82,8 @@ func indexRows[T any, K comparable](rows []T, into *map[K]*T, key func(*T) K) er
 func (index *scopedIndexes) indexAttempts(operations []topology.Operation) error {
 	for _, operation := range operations {
 		status := operation.Status
-		first := index.operations[index.first[status.Version]]
-		if first == nil || first.Status.Attempt > status.Attempt {
-			index.first[status.Version] = status.ID
+		if err := index.indexOriginal(operation); err != nil {
+			return err
 		}
 		latest := index.operations[index.latest[status.Version]]
 		if latest == nil || latest.Status.Attempt < status.Attempt {
@@ -101,29 +100,45 @@ func (index *scopedIndexes) indexAttempts(operations []topology.Operation) error
 	return nil
 }
 
+func (index *scopedIndexes) indexOriginal(operation topology.Operation) error {
+	status := operation.Status
+	if status.Version == 0 || status.Attempt == 0 ||
+		status.ID != topology.MakeOperationID(status.Version, status.Attempt) {
+		return fault.New(fault.Unreadable, "invalid operation index identity", nil)
+	}
+	if operation.Previous == "" {
+		if status.Attempt != 1 || index.first[status.Version] != "" {
+			return fault.New(fault.Unreadable, "ambiguous original approval", nil)
+		}
+		index.first[status.Version] = status.ID
+	}
+	return nil
+}
+
 func (index *scopedIndexes) indexDocuments(state *scopedState) error {
-	if err := index.indexDocument(&state.Latest); err != nil {
+	if err := index.indexDocument(state.Latest); err != nil {
 		return err
 	}
-	if err := index.indexDocument(&state.Target); err != nil {
+	if err := index.indexDocument(state.Target); err != nil {
 		return err
 	}
 	for i := range state.History {
-		if err := index.indexDocument(&state.History[i]); err != nil {
+		if err := index.indexDocument(state.History[i]); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (index *scopedIndexes) indexDocument(doc *topology.Document) error {
+func (index *scopedIndexes) indexDocument(doc topology.Document) error {
 	if doc.Version == 0 {
 		return nil // Empty founding views have no durable version key.
 	}
-	if existing := index.documents[doc.Version]; existing != nil && !reflect.DeepEqual(existing, doc) {
+	if existing, found := index.documents[doc.Version]; found && !reflect.DeepEqual(existing, doc) {
 		return fault.New(fault.Unreadable, "conflicting declarations for one document version", nil)
 	}
-	index.documents[doc.Version] = doc
+	// Documents are immutable values, independent of a subsequently copied state.
+	index.documents[doc.Version] = doc.Clone()
 	if doc.RebasedFrom == 0 {
 		return nil
 	}

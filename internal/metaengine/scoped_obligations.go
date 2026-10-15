@@ -6,9 +6,14 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// Execution and cleanup share resource floors and therefore one prerequisite
-// index. Closed/consumed grants do not block; missing revocation evidence does.
+// Execution and cleanup use the issuer's current-floor and revocation rules.
+// Old non-floor grants remain evidence, not independent issuance gates.
 func scopedResourceObligations(state *scopedState) map[topology.AuthorityResource][]topology.AuthorityKey {
+	catalog := newAuthorityCatalog()
+	for i := range state.AuthorityRecords {
+		r := &state.AuthorityRecords[i].authorityRecord
+		catalog.records[r.Grant.Key] = r
+	}
 	sets := map[topology.AuthorityResource]map[topology.AuthorityKey]struct{}{}
 	add := func(resource topology.AuthorityResource, key topology.AuthorityKey) {
 		if sets[resource] == nil {
@@ -16,16 +21,26 @@ func scopedResourceObligations(state *scopedState) map[topology.AuthorityResourc
 		}
 		sets[resource][key] = struct{}{}
 	}
-	for i := range state.AuthorityRecords {
-		addUnconsumedResources(&state.AuthorityRecords[i], add)
+	for _, floor := range state.AuthorityFloors {
+		r := catalog.records[floor.Key]
+		if r != nil && !resourceConsumed(r, floor.Resource) && !catalog.fenceSettled(r) {
+			add(floor.Resource, floor.Key)
+		}
 	}
 	for _, revocation := range state.Revocations {
-		for _, obligation := range revocation.Obligations {
-			if obligation.Evidence == nil {
-				add(obligation.Resource, obligation.Key)
+		for _, ob := range revocation.Obligations {
+			ob = catalog.obligationWithEvidence(ob)
+			if ob.Evidence == nil && !catalog.fenceConsumed(ob.Key, ob.Resource) {
+				add(ob.Resource, ob.Key)
 			}
 		}
 	}
+	return sortedScopedObligations(sets)
+}
+
+func sortedScopedObligations(
+	sets map[topology.AuthorityResource]map[topology.AuthorityKey]struct{},
+) map[topology.AuthorityResource][]topology.AuthorityKey {
 	indexed := make(map[topology.AuthorityResource][]topology.AuthorityKey, len(sets))
 	for resource, set := range sets {
 		keys := make([]topology.AuthorityKey, 0, len(set))
@@ -36,16 +51,4 @@ func scopedResourceObligations(state *scopedState) map[topology.AuthorityResourc
 		indexed[resource] = keys
 	}
 	return indexed
-}
-
-func addUnconsumedResources(record *scopedAuthorityRecord,
-	add func(topology.AuthorityResource, topology.AuthorityKey)) {
-	if record.Closed {
-		return
-	}
-	for _, resource := range record.Grant.Resources {
-		if !resourceConsumed(&record.authorityRecord, resource) {
-			add(resource, record.Grant.Key)
-		}
-	}
 }

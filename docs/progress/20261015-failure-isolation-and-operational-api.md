@@ -218,3 +218,19 @@ Five-commit checkpoint 2 / dead-code review:
 - No additional safe deletion found. toDiskOperator/metaDiskState remain called by the live schema-3 codec; validateLegacyPlan still guards live approval and voter paths; pendingCost/newAuthorityGrantCost remain used by live issue/revocation/readmission/transfer/restore. Removing them before the scoped consumers replace them would weaken current guards. Their removal is assigned to Tasks 16–17/55–56. The broad legacy-name search still reaches 144 Go files; these are live conversion work, not unused code.
 - New internal collection callbacks/contracts get their concrete producers in Tasks 32–37/43/50; the v4 codec/indexes are called by isolated decoding and retain no independent storage. Task 56 removes the temporary codec wrapper and guards. Full unused-code lint found no newly unreachable declaration.
 - Request peer review before the next implementation commit; assess findings and commit justified corrections as required. Next regular checkpoint is commit 15, counting any corrections.
+
+## Correction 2 — Second five-commit review
+Date: 2026-10-15. Commit: this entry's commit (implementation/correction commit 11).
+
+Implemented
+- Accepted all six thread 3 findings after inspecting the live issuer/settlement predicates. Scoped obligations now use current floors plus unresolved revocations, reusing resourceConsumed, fenceSettled, obligationWithEvidence and fenceConsumed. Older non-floor grants remain proof. Transfer receipts permit ordinary next actions but do not erase resumable intent during revocation.
+- Raw staging permanently rejects caller RebasedFrom separately from the temporary Intent guard. BeginCleanupEffect carries the full expected AuthorizedStep; managed.CleanupStatus carries the historical MemberID and RetirementKey. Updated target §§7.1/7.2 and matching plan excerpts; no ordinary public API added.
+- Document index entries are owned immutable values, including nested declarations. Original approval means attempt 1 without Previous; a retained retry cannot become the original, and index IDs must match version/attempt.
+- Recorded future obligations: strict complete status, no duplicate intent on rebase, shared authority naming before v4 fixtures, exact sorted revocations/Class derivation, and an internal cross-package intent construction boundary.
+- Split prior Task 10 before implementation into current Tasks 10/11; proof validation is Task 12 and activation Task 57 (67 tasks total). Task 10 preparation remains uncommitted and was excluded from staged verification.
+
+Verified
+- Focused scoped/plan regressions passed; exact staged snapshot make test: 941/941, 6.992s. Report: /private/var/folders/yx/srxx8n_s1hlgyr9t9504zy6h0000gn/T/gquorum-correction2-61605seq/test-reports/unit/20261015T170401.342272Z-6w640aaf/report.md.
+- Exact staged lint passed: unit/functional vet, production golangci, selected revive and merged unused declarations; /tmp/gquorum-correction2-staged-lint.log. Original-approval checking was extracted to satisfy the complexity limit without suppressions.
+- Regression cases cover unnecessary undelivered fence after late consumption, older authority settled by a newer fence, leadership transfer, 2500 independent retained debts, immutable document copying, missing original attempt and exact cleanup payload identity.
+- No stores, network or goroutines are acquired by these changes; process/race gates remain in their scheduled ownership/final tasks. No dead declaration is safe to remove beyond replacing the narrower obligation helper. Next review checkpoint is implementation/correction commit 15.

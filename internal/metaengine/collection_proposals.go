@@ -20,9 +20,9 @@ type RecordCollectionProposal struct {
 
 // BeginCleanupEffectProposal selects existing debt, never fresh retirement intent.
 type BeginCleanupEffectProposal struct {
-	Identity   storage.Identity `json:"identity"`
-	StepSeq    int              `json:"step_seq"`
-	ProposalID string           `json:"proposal_id"`
+	Identity   storage.Identity        `json:"identity"`
+	Action     topology.AuthorizedStep `json:"action"`
+	ProposalID string                  `json:"proposal_id"`
 }
 
 // RecordCleanupStatusProposal diagnoses deferral without changing proof milestones.
@@ -51,7 +51,7 @@ func (p *RecordCollectionProposal) UnmarshalJSON(data []byte) error {
 func (p *BeginCleanupEffectProposal) UnmarshalJSON(data []byte) error {
 	type payload BeginCleanupEffectProposal
 	var decoded payload
-	if err := decodeScopedPayload(data, &decoded, "identity", "step_seq"); err != nil {
+	if err := decodeScopedPayload(data, &decoded, "identity", "action"); err != nil {
 		return err
 	}
 	*p = BeginCleanupEffectProposal(decoded)

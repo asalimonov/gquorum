@@ -16,7 +16,7 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// This is codec data, not a valid restore graph; Tasks 10–11 validate graph/proof semantics.
+// This is codec data, not a valid restore graph; Tasks 10–12 validate graph/proof semantics.
 func scopedCodecFixture() scopedState {
 	at := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
 	id := storage.Identity{ClusterID: "c", GroupID: "a", NodeName: "n", ReplicaID: 7}
@@ -152,7 +152,7 @@ func TestScopedStateTombstonesAndActivationBoundary(t *testing.T) {
 	doc := m.latest.Clone()
 	doc.RebasedFrom = fixture.Latest.RebasedFrom
 	result := apply(t, m.topologySM, 6, ProposeDocument{Doc: doc, ExpectedVersion: m.latest.Version})
-	if result.Accepted || result.Code != proposalUnsupported || m.latest.RebasedFrom != 0 {
+	if result.Accepted || result.Code != proposalGuardrail || m.latest.RebasedFrom != 0 {
 		t.Fatal("legacy staging accepted caller-selected rebase provenance", result)
 	}
 }

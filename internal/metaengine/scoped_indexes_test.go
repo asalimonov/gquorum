@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -123,35 +124,38 @@ func TestScopedObligationsShareResourcesAndIgnoreDebtCapacity(t *testing.T) {
 	s := scopedState{SchemaVersion: scopedStateSchemaVersion, Rules: testRules()}
 	s.Rules.Limits.MaxPendingAuthorityRecords = 1
 	s.Rules.Limits.MaxConcurrentGroups, s.Rules.Limits.MaxConcurrentCleanup = 1, 1
-	host := topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: "work", NodeName: "n"}
-	native := topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: "work"}
 	const debtCount = 2500
 	for i := range debtCount {
-		key := topology.AuthorityKey{ClusterID: "c", GroupID: "work", Revision: uint64(i + 1)}
-		target := topology.AuthorityTarget{NodeName: "n", MemberID: 1, ReplicaID: uint64(i + 1)}
-		r := scopedAuthorityRecord{Class: "execution", authorityRecord: authorityRecord{
-			Grant:   topology.AuthorityGrant{Key: key, Purpose: topology.AuthorityEffect, Resources: []topology.AuthorityResource{host, native}, Targets: []topology.AuthorityTarget{target}},
-			Effects: []topology.EffectReceipt{{Key: key, Resource: native, Target: target}},
+		group := fmt.Sprintf("work-%04d", i)
+		host := topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: group, NodeName: "n"}
+		oldKey := topology.AuthorityKey{ClusterID: "c", GroupID: group, Revision: 1}
+		key := topology.AuthorityKey{ClusterID: "c", GroupID: group, Revision: 2}
+		target := topology.AuthorityTarget{NodeName: "n", MemberID: 1, ReplicaID: 1}
+		old := scopedAuthorityRecord{Class: "execution", authorityRecord: authorityRecord{
+			Grant: topology.AuthorityGrant{Key: oldKey, Purpose: topology.AuthorityEffect,
+				Resources: []topology.AuthorityResource{host}, Targets: []topology.AuthorityTarget{target}}, Closed: true,
 		}}
 		if i%2 == 0 {
-			r.Class = "cleanup"
+			old.Class = "cleanup"
 		}
-		s.AuthorityRecords = append(s.AuthorityRecords, r)
-		s.Revocations = append(s.Revocations, scopedRevocationRecord{Requested: true, OperationID: topology.MakeOperationID(uint64(i+1), 1), GroupID: "work", Obligations: []topology.FenceObligation{{Key: key, Resource: host}}})
+		if i == debtCount-1 {
+			old.Effects = []topology.EffectReceipt{{Key: oldKey, Resource: host, Target: target}}
+		}
+		s.AuthorityRecords = append(s.AuthorityRecords, old, scopedAuthorityRecord{Class: "execution",
+			authorityRecord: authorityRecord{Grant: topology.AuthorityGrant{Key: key, Purpose: topology.AuthorityFence,
+				Resources: []topology.AuthorityResource{host}}}})
+		s.AuthorityFloors = append(s.AuthorityFloors, resourceFloor{Resource: host, Key: key})
+		s.Revocations = append(s.Revocations, scopedRevocationRecord{Requested: true,
+			OperationID: topology.MakeOperationID(uint64(i+1), 1), GroupID: group,
+			Obligations: []topology.FenceObligation{{Key: key, Resource: host}}})
 	}
-	// A closed grant cannot erase its independently outstanding revocation.
-	s.AuthorityRecords[0].Closed = true
-	// Evidence for the final host satisfies both its grant and revocation.
-	last := &s.AuthorityRecords[debtCount-1]
-	last.Effects = append(last.Effects, topology.EffectReceipt{Key: last.Grant.Key, Resource: host, Target: last.Grant.Targets[0]})
-	s.Revocations[debtCount-1].Obligations[0].Evidence = &topology.FenceEvidence{Key: last.Grant.Key, Resource: host}
 	index, err := s.buildIndexes()
-	if err != nil || len(index.obligations[host]) != debtCount-1 || len(index.obligations[native]) != 0 {
+	if err != nil || len(index.obligations) != debtCount-1 {
 		t.Fatal("wrong shared-resource prerequisites or debt cap", err)
 	}
-	for i, key := range index.obligations[host] {
-		if key.Revision != uint64(i+1) {
-			t.Fatal("duplicate or unsorted obligation", key)
+	for resource, keys := range index.obligations {
+		if len(keys) != 1 || keys[0].Revision != 2 || keys[0].GroupID != resource.GroupID {
+			t.Fatal("lost or duplicated exact resource obligation", resource, keys)
 		}
 	}
 }

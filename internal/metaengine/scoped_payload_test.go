@@ -27,7 +27,7 @@ func TestScopedProposalPayloads(t *testing.T) {
 		TransitionOperationProposal{Transition: topology.OperationTransition{OperationID: "exec-v4-a2", Version: 4, Attempt: 2, GroupID: "work", StepSeq: 3, State: topology.OperationFailed, At: at}, ProposalID: "transition"},
 		CommitRepairOperationProposal{Doc: topology.Document{Version: 5}, ExpectedVersion: 4, ExpectedTarget: 3, Scopes: scopes, Plan: topology.Plan{Version: 5}, At: at, ProposalID: "repair"},
 		RecordCollectionProposal{Receipt: authoritystore.CollectionReceipt{Identity: id, MemberID: 2, RetirementKey: key, Token: "opaque", LocalSequence: 8, CollectedAt: at}, Courier: topology.Identity{ClusterID: "c", NodeName: "n", MemberID: 3, InstanceID: "next"}, ReadmissionKey: &key, At: at, ProposalID: "receipt"},
-		BeginCleanupEffectProposal{Identity: id, StepSeq: 3, ProposalID: "cleanup"},
+		BeginCleanupEffectProposal{Identity: id, Action: topology.AuthorizedStep{OperatorID: "exec-v4-a2", Version: 4, Attempt: 2, StepSeq: 3, GroupID: "work", NodeName: "n", ReplicaID: 7, Kind: topology.StepCleanupReplicaState}, ProposalID: "cleanup"},
 		RecordCleanupStatusProposal{Identity: id, MemberID: 2, RetirementKey: key, NotBefore: &at, Blocked: &topology.BlockedReason{Code: "retention"}, At: at, ProposalID: "status"},
 	} {
 		t.Run(reflect.TypeOf(want).Name(), func(t *testing.T) {
