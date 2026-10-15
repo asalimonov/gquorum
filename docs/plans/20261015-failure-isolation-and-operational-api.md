@@ -416,14 +416,14 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaservice/planning.go`, `bootstrap.go`, planning helpers and functional tests. **Target:** [T] §5.1, §7.2 FI_PLAN_EVIDENCE. **Depends on:** 20–22. **Budget:** estimated 350–500 changed Go lines, ceiling 550.
 
-- [ ] Collect owned PlanInput through metadata PlanningInput and real controller ReadNative calls, including retained observation candidates. Recollect metadata against returned native evidence; preserve exact reporter/group/applied identity and stale/removal rejection.
-- [ ] Keep GroupProgress observations for liveness/leadership only. While the old BuildPlan signature remains until Task 24, its membership observations must derive from actual NativeState, never manufacture NativeState from cached GroupStatus. Document the exact temporary call adaptation and remove it in Task 24; no new composite document or authority mode.
-- [ ] Preserve actual founding metadata bootstrap, unknown/possibly-founded refusal and host-only deletion without a live quorum requirement. Scope-only collection remains Task 25; schema-3 actual convergence changes to scoped collection in Tasks 56/68.
-- [ ] Test cached/native disagreement, missing or foreign native evidence, retained candidates, actual founding and quorum safety through existing single-participant/protocol-double fixtures.
+- [x] Collect owned PlanInput through metadata PlanningInput and real controller ReadNative calls, including retained observation candidates. Recollect metadata against returned native evidence; preserve exact reporter/group/applied identity and stale/removal rejection.
+- [x] Keep GroupProgress observations for liveness/leadership only. While the old BuildPlan signature remains until Task 24, its membership observations must derive from actual NativeState, never manufacture NativeState from cached GroupStatus. Document the exact temporary call adaptation and remove it in Task 24; no new composite document or authority mode.
+- [x] Preserve actual founding metadata bootstrap, unknown/possibly-founded refusal and host-only deletion without a live quorum requirement. Scope-only collection remains Task 25; schema-3 actual convergence changes to scoped collection in Tasks 56/68.
+- [x] Test cached/native disagreement, missing or foreign native evidence, retained candidates, actual founding and quorum safety through existing single-participant/protocol-double fixtures.
 
 **Verification**
 
-- [ ] Run planning/bootstrap functional regressions, relevant units, staged lint and `make test` across all five application modules.
+- [x] Run planning/bootstrap functional regressions, relevant units, staged lint and `make test` across all five application modules.
 
 ### Task 24: Convert public construction signatures and remove old adapters
 

@@ -566,3 +566,19 @@ Verified
 - Functional planning/abandonment/readmission/fenced-cleanup checks passed (2.828s), /tmp/gquorum-task22-functional.log. After tightening the tombstone founding exception, controller retry/readmission cases passed again (2.661s).
 - make test: 1209/1209, 9.742s; test-reports/unit/20261015T205535.715763Z-ucy72pcc/report.md. Exact staged lint passes at /tmp/gquorum-task22-lint.log. Diff checks pass; 387 changed handwritten Go lines including tests, below 550. No resource or concurrency changes; no new race/Docker run.
 - Only construction still uses convergedPlanInput in production; its removal is Task 24. Actual new-plan native collection follows in Task 23. Next regular review remains commit 35.
+
+
+## Task 23 — Actual native reads for new planning and founding
+Date: 2026-10-16. Commit: this entry's commit (implementation/correction commit 33).
+
+Implemented
+- New-plan collection calls real ReadNative for desired groups using exact retained/proven/desired candidates, then recollects metadata against those native samples. An approval-version change refuses; the collector checks exact identities, allocations and consumed-removal contradictions. Native reads are owned copies.
+- GroupProgress.Observation retains cached health/leadership separately. Existing PlanFor and founding bootstrap now derive membership exclusively from NativeState. legacyPlanningObservations temporarily adapts this to the old construction signature and is removed in Task 24; it never manufactures native proof from status.
+- Only a genuinely fresh group can continue after unavailable/not-ready native state. Proven, retained, possibly-founded and deletion-checkpoint groups refuse refounding. Deleted groups do not need a native read: their host-only obligations remain in metadata. Actual founding seed handling passes its existing single-participant tests.
+- The old observeGroups helper still serves the legacy scheduler's GlobalStatus; retained it after the compiler identified that remaining consumer. It no longer supplies planner membership and is converted with scheduler/observation wiring in Tasks 59–60. No new public API.
+
+Verified
+- New functional tests deliberately disagree cached and actual membership, reject foreign group/unknown reporter/zero applied index, verify owned samples, distinguish fresh from possibly-founded/retained/deleted state, and verify deletion without quorum reads.
+- Focused planning/bootstrap/readmission/founding/deletion functional suite passed (4.931s), /tmp/gquorum-task23-functional.log. Final new native-collection cases passed under race (3.593s), /tmp/gquorum-task23-race.log.
+- Final make test: 1209/1209, 6.897s; test-reports/unit/20261015T210210.279081Z-diwlhuwx/report.md. Exact staged lint passed at /tmp/gquorum-task23-lint.log after replacing three return values with a private paired read result. Diff checks pass; 238 changed handwritten Go lines including tests, below 550. No Docker run.
+- Next Task 24 switches construction signatures and deletes their final adapter. Regular five-commit review remains commit 35.

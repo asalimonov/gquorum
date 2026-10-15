@@ -51,7 +51,11 @@ func (g *Group) bootstrap(ctx context.Context) error {
 	}
 	_, ok := machine.CurrentOperator()
 	if !ok {
-		observed := map[string]topology.GroupStatus{topology.MetaGroupID: g.engine.Load().Status()}
+		input, err := g.planningInput(ctx, latest)
+		if err != nil {
+			return err
+		}
+		observed := legacyPlanningObservations(input)
 		plan, err := topology.BuildPlan(machine.Active(), latest, observed, g.rules)
 		if err != nil {
 			return err

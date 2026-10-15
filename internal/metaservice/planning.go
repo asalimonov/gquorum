@@ -45,10 +45,11 @@ func (g *Group) PlanFor(ctx context.Context, doc topology.Document) (topology.Pl
 	if err := topology.ValidatePlacementTransition(approved, active, doc); err != nil {
 		return topology.Plan{}, err
 	}
-	observed, err := g.observeGroups(ctx, active, doc)
+	planning, err := g.planningInput(ctx, doc)
 	if err != nil {
 		return topology.Plan{}, err
 	}
+	observed := legacyPlanningObservations(planning)
 	health := healthFromMeta(active, doc, observed[topology.MetaGroupID])
 	input := topology.MetaDrainInput{Status: observed[topology.MetaGroupID], Health: health}
 	preferred, err := topology.ValidateMetaDrainSafety(active, doc, input)
