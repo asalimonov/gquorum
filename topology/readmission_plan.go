@@ -10,11 +10,7 @@ import (
 // ReadmissionCovers reports whether the plan's exact replacement metadata
 // preparation is the retirement boundary for this former host. The metadata FSM
 // must require all readmission receipts before granting that preparation.
-func ReadmissionCovers(active, desired Document, plan Plan, node string) bool {
-	return hasReadmissionBoundary(convergedPlanInput(active), desired, plan, node)
-}
-
-func hasReadmissionBoundary(input PlanInput, desired Document, plan Plan, node string) bool {
+func ReadmissionCovers(input PlanInput, desired Document, plan Plan, node string) bool {
 	member := desired.MemberID(node)
 	previous, known := input.loadOwnerMember(node)
 	metaMember := input.convergedMetaMember(node)

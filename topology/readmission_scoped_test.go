@@ -29,19 +29,19 @@ func TestReadmissionReplanAfterMetaConvergence(t *testing.T) {
 	t.Parallel()
 	input, desired, loadPlan := scopedReadmissionPlanFixture()
 	original := bindReadmissionRetirement(input, desired, loadPlan)
-	if !hasReadmissionBoundary(input, desired, original, "a") {
+	if !ReadmissionCovers(input, desired, original, "a") {
 		t.Fatal("original admission did not cover its historical load owner")
 	}
 	input.Groups[MetaGroupID] = GroupProgress{GroupID: MetaGroupID, ConvergedVersion: desired.Version,
 		Converged: desired.MetaGroup()}
-	if !hasReadmissionBoundary(input, desired, original, "a") {
+	if !ReadmissionCovers(input, desired, original, "a") {
 		t.Fatal("meta convergence invalidated the immutable admission boundary")
 	}
 	replanned := bindReadmissionRetirement(input, desired, loadPlan)
 	if !slices.Equal(replanned.Steps, loadPlan.Steps[:1]) {
 		t.Fatal("load replan repeated metadata admission or dispatched to the retired host", replanned)
 	}
-	if !hasReadmissionBoundary(input, desired, replanned, "a") {
+	if !ReadmissionCovers(input, desired, replanned, "a") {
 		t.Fatal("load-only replan lost the completed admission boundary")
 	}
 	if len(loadPlan.Steps) != 3 || loadPlan.Steps[1].Kind != StepStopReplica {
@@ -121,7 +121,7 @@ func TestReadmissionBoundaryRequiresProvenReplacement(t *testing.T) {
 				meta.MetaGroup().Replicas[0].ReplicaID = 5
 			}
 			input.Nodes["a"] = node
-			if hasReadmissionBoundary(input, desired, plan, "a") {
+			if ReadmissionCovers(input, desired, plan, "a") {
 				t.Fatal("unproven or non-replacement owner supplied retirement coverage")
 			}
 		})

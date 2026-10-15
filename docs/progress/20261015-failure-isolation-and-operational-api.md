@@ -550,3 +550,19 @@ Verified
 - make test: 1195/1195, 9.657s; test-reports/unit/20261015T204728.355858Z-k5fq9so1/report.md. Exact staged lint passes at /tmp/gquorum-correction10-lint.log after consolidating an empty-catalog check to keep cognitive complexity within 16. Diff checks pass; 150 changed handwritten Go lines including tests/comments, below 550.
 - Focused topology/metaengine/operator units passed, including interrupted issued-effect cleanup and immutable retry attribution. Focused abandonment/rollback/controller-retry functional cases passed (1.571s); after the lint simplification re-ran the affected metadata units and abandonment cases successfully. Additional readmission/restart/fenced/granted-ledger/deletion functional cases passed (2.444s), /tmp/gquorum-correction10-functional.log.
 - Peer independently ran both live regressions and an issued-but-unacknowledged founding probe against the staged copy. No new concurrency/process behavior; no additional race/Docker run. Next task 22; next regular five-commit review at commit 35.
+
+
+## Task 22 — Explicit evidence for immutable remaining-plan validation
+Date: 2026-10-16. Commit: this entry's commit (implementation/correction commit 32).
+
+Implemented
+- ReadmissionCovers and ValidateVoterSetTransition now accept PlanInput directly; converted all callers. Removed the private hasReadmissionBoundary wrapper. Existing scoped ownership/domain tests now exercise the public validator. No additional public mode or compatibility signature.
+- PlanRead and RemainingPlanView carry actual converged and separately retained inputs, replacing their composite Base. The safe query collects owned metadata under the same lock; immutable original steps and grant/receipt evidence stay separate. The remaining OperatorBase consumer is the legacy controller store, removed at cutover.
+- Native reads include exact proven, desired and retained candidates without duplicate identities. Immutable founding retry remains allowed only for an unknown, never-converged group and its actual founding step; a completed-deletion checkpoint cannot supply that exception.
+- Remaining host checks distinguish Hosted, Cleanup and Stopped: require outstanding host work, preserve same-host/deletion stops, and leave detached retirement with existing debt. Old steps remain valid after host cleanup; no roles or convergence are reconstructed from plan steps. Target signature notes now include these auxiliary validators.
+
+Verified
+- Focused topology/metaengine/operator/metaservice units pass. Added exact retained voter transition, cleanup-owned prerequisite, candidate identity and cleaned-identity immutable-query/copy regressions.
+- Functional planning/abandonment/readmission/fenced-cleanup checks passed (2.828s), /tmp/gquorum-task22-functional.log. After tightening the tombstone founding exception, controller retry/readmission cases passed again (2.661s).
+- make test: 1209/1209, 9.742s; test-reports/unit/20261015T205535.715763Z-ucy72pcc/report.md. Exact staged lint passes at /tmp/gquorum-task22-lint.log. Diff checks pass; 387 changed handwritten Go lines including tests, below 550. No resource or concurrency changes; no new race/Docker run.
+- Only construction still uses convergedPlanInput in production; its removal is Task 24. Actual new-plan native collection follows in Task 23. Next regular review remains commit 35.

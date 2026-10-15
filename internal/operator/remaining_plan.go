@@ -11,7 +11,7 @@ import (
 
 // ValidateRemainingPlan simulates the immutable suffix against confirmed
 // applied membership. It never manufactures an effect receipt or changes the plan.
-// Base includes retained host identities still requiring cleanup.
+// Input separates proven declarations from retained exact host obligations.
 func ValidateRemainingPlan(view RemainingPlanView, ex Record, native map[string]topology.NativeState,
 	rules Rules) error {
 	first := max(ex.CurrentStep, 1)
@@ -32,7 +32,8 @@ func ValidateRemainingPlan(view RemainingPlanView, ex Record, native map[string]
 
 // RemainingPlanView pairs retained resources with the approved target document.
 type RemainingPlanView struct {
-	Base, Target Document
+	Input  topology.PlanInput
+	Target Document
 }
 
 func remainingPlanError(format string, args ...any) error {
@@ -47,56 +48,70 @@ func remainingPlanHas(ex Record, kind StepKind, group string, replica topology.R
 }
 
 func validateRetainedPlan(view RemainingPlanView, ex Record) error {
-	// Host resources can exist without native membership. Earlier steps are
-	// durable progress; the full approved plan must cover other retained identities.
-	for _, group := range view.Base.Groups {
-		if err := validateRetainedGroup(view, ex, group); err != nil {
-			return err
+	groups := make(map[string]bool)
+	for id := range view.Input.Groups {
+		groups[id] = true
+	}
+	for id := range view.Input.Retained {
+		groups[id] = true
+	}
+	for id := range groups {
+		for _, replica := range remainingOwners(view.Input, id) {
+			if err := validateRetainedReplica(view, ex, id, replica); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-type retainedPlanGroup struct {
-	group   Group
-	desired *Group
-}
-
-func validateRetainedGroup(view RemainingPlanView, ex Record, group Group) error {
-	desired := view.Target.Group(group.ID)
-	retiredByReadmission := true
-	for _, r := range group.Replicas {
-		retiredByReadmission = retiredByReadmission &&
-			topology.ReadmissionCovers(view.Base, view.Target, ex.Plan(), r.NodeName)
-	}
-	if desired == nil && !retiredByReadmission &&
-		!remainingPlanHas(ex, StepDeleteGroupState, group.ID, topology.ReplicaKey{}) {
-		return remainingPlanError("plan omits deletion of retained group %q", group.ID)
-	}
-	for _, replica := range group.Replicas {
-		if err := validateRetainedReplica(view, ex, retainedPlanGroup{group, desired}, replica); err != nil {
-			return err
+func remainingOwners(input topology.PlanInput, group string) map[uint64]topology.RetainedReplica {
+	owners := make(map[uint64]topology.RetainedReplica)
+	if proven := input.Groups[group].Converged; proven != nil {
+		for _, r := range proven.Replicas {
+			owners[r.ReplicaID] = topology.RetainedReplica{ReplicaKey: topology.ReplicaKey{
+				NodeName: r.NodeName, ReplicaID: r.ReplicaID}, Progress: topology.RetainedHosted}
 		}
 	}
-	return nil
+	for _, replica := range input.Retained[group].Replicas {
+		owners[replica.ReplicaID] = replica
+	}
+	return owners
 }
 
-func validateRetainedReplica(view RemainingPlanView, ex Record, group retainedPlanGroup, replica Replica) error {
-	if next := documentReplicaByID(view.Target, group.group.ID, replica.ReplicaID); next != nil &&
+func validateRetainedReplica(view RemainingPlanView, ex Record, group string,
+	replica topology.RetainedReplica) error {
+	if next := documentReplicaByID(view.Target, group, replica.ReplicaID); next != nil &&
 		next.NodeName == replica.NodeName {
 		return nil
 	}
-	if topology.ReadmissionCovers(view.Base, view.Target, ex.Plan(), replica.NodeName) {
+	if replica.Progress == topology.RetainedStopped ||
+		topology.ReadmissionCovers(view.Input, view.Target, ex.Plan(), replica.NodeName) {
 		return nil
 	}
-	key := topology.ReplicaKey{NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}
-	if !remainingPlanHas(ex, StepStopReplica, group.group.ID, key) {
-		return remainingPlanError("plan omits stop for retained replica %s/%s/%d", group.group.ID,
+	desired := view.Target.Group(group)
+	if replica.Progress == topology.RetainedCleanup && desired != nil &&
+		!slices.ContainsFunc(desired.Replicas, func(r Replica) bool { return r.NodeName == replica.NodeName }) {
+		return nil // Detached debt owns this host; no new prerequisite is needed.
+	}
+	if !remainingPlanHas(ex, StepStopReplica, group, replica.ReplicaKey) {
+		return remainingPlanError("plan omits stop for retained replica %s/%s/%d", group,
 			replica.NodeName, replica.ReplicaID)
 	}
-	if group.group.ID != MetaGroupID && group.desired != nil &&
-		!remainingPlanHas(ex, StepCleanupReplicaState, group.group.ID, key) {
-		return remainingPlanError("plan omits cleanup for retained replica %s/%s/%d", group.group.ID,
+	return validateRetainedRetirement(view, ex, group, replica)
+}
+
+func validateRetainedRetirement(view RemainingPlanView, ex Record, group string,
+	replica topology.RetainedReplica) error {
+	if replica.Progress != topology.RetainedHosted {
+		return nil
+	}
+	if view.Target.Group(group) == nil && !remainingPlanHas(ex, StepDeleteGroupState, group, topology.ReplicaKey{}) {
+		return remainingPlanError("plan omits deletion of retained group %q", group)
+	}
+	if group != MetaGroupID && view.Target.Group(group) != nil &&
+		!remainingPlanHas(ex, StepCleanupReplicaState, group, replica.ReplicaKey) {
+		return remainingPlanError("plan omits cleanup for retained replica %s/%s/%d", group,
 			replica.NodeName, replica.ReplicaID)
 	}
 	return nil
@@ -313,9 +328,9 @@ func (v remainingPlanValidation) validateStepResult(s *remainingGroupSimulation,
 		if v.ex.ID != "" && topology.VoterSetDigest(after) != step.ResultVotersDigest {
 			return remainingPlanError("step %d cannot produce its approved voter result", step.Seq)
 		}
-		if len(v.view.Base.Nodes) != 0 || len(v.view.Target.Nodes) != 0 {
+		if len(v.view.Input.Nodes) != 0 || len(v.view.Target.Nodes) != 0 {
 			sets := topology.VoterSets{Before: before, After: after}
-			if err := topology.ValidateVoterSetTransition(v.view.Base, v.view.Target, s.group.ID, sets); err != nil {
+			if err := topology.ValidateVoterSetTransition(v.view.Input, v.view.Target, s.group.ID, sets); err != nil {
 				return remainingPlanError("step %d violates retained placement: %v", step.Seq, err)
 			}
 		}

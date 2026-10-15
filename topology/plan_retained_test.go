@@ -224,3 +224,16 @@ func TestRetainedPlannerKeepsDomainAndRoleGuards(t *testing.T) {
 		t.Fatal("retained evidence weakened pinned learner protection")
 	}
 }
+
+func TestVoterTransitionUsesExplicitRetainedIdentity(t *testing.T) {
+	t.Parallel()
+	input, desired := retainedPlanFixture()
+	sets := VoterSets{Before: []uint64{1, 2, 4}, After: []uint64{1, 2}}
+	if err := ValidateVoterSetTransition(input, desired, "work", sets); err != nil {
+		t.Fatal("valid retained voter could not leave", err)
+	}
+	delete(input.Retained, "work")
+	if err := ValidateVoterSetTransition(input, desired, "work", sets); err == nil {
+		t.Fatal("unknown voter silently acquired an identity")
+	}
+}

@@ -83,7 +83,7 @@ func requireCleanupOwnerStop(view voterPlanTopology, plan Plan, incoming Step, s
 			replica.ReplicaID == incoming.ReplicaID || stopped[replica.ReplicaID] {
 			continue
 		}
-		if !hasReadmissionBoundary(view.base, view.desired, plan, replica.NodeName) {
+		if !ReadmissionCovers(view.base, view.desired, plan, replica.NodeName) {
 			return planUnsafef("prepare %s/%d lacks required stop for former owner %d", incoming.GroupID,
 				incoming.ReplicaID, replica.ReplicaID)
 		}
@@ -114,7 +114,7 @@ func (v *planShapeValidator) validateDeletionCoverage() error {
 
 func (v *planShapeValidator) validateDeletionRetirement(group string) error {
 	for _, owner := range v.input.formerReplicas(group) {
-		if owner.Progress != RetainedHosted || hasReadmissionBoundary(v.input, v.desired, v.plan, owner.NodeName) {
+		if owner.Progress != RetainedHosted || ReadmissionCovers(v.input, v.desired, v.plan, owner.NodeName) {
 			continue
 		}
 		retirement := slices.ContainsFunc(v.plan.Steps, func(s Step) bool {

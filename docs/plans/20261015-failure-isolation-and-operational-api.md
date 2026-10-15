@@ -403,14 +403,14 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `topology/readmission_plan.go`, `voter_transition.go`, `internal/operator/remaining_plan.go`, `internal/metaengine/reads.go`, `internal/metaservice/plan_validation.go`, matching tests. **Target:** [T] §5.1–5.2, §7.2 FI_PLAN_EVIDENCE. **Depends on:** 18–21. **Budget:** estimated 400–530 changed Go lines, ceiling 550.
 
-- [ ] Change ReadmissionCovers and ValidateVoterSetTransition to accept PlanInput, converting every caller atomically. Preserve exact retained identities, frozen voter bases, historical member ownership and proven placement rules.
-- [ ] Replace RemainingPlanView/PlanRead's composite Base with actual planning evidence from the metadata collector. Preserve immutable original steps and retained grant/receipt provenance after cleanup; never reconstruct convergence or replica roles from an operation's steps.
-- [ ] Use proven/retained/desired identities as native-read candidates; keep exact founding retry authorization and current applied/native guards. Remaining retirement checks distinguish Hosted/Cleanup/Stopped without duplicating a debt's actions or weakening required stops.
-- [ ] Convert owning tests, add explicit retained/context and completed-cleanup retry coverage, and remove obsolete validation adapters. The remaining construction adapter is removed in Task 24.
+- [x] Change ReadmissionCovers and ValidateVoterSetTransition to accept PlanInput, converting every caller atomically. Preserve exact retained identities, frozen voter bases, historical member ownership and proven placement rules.
+- [x] Replace RemainingPlanView/PlanRead's composite Base with actual planning evidence from the metadata collector. Preserve immutable original steps and retained grant/receipt provenance after cleanup; never reconstruct convergence or replica roles from an operation's steps.
+- [x] Use proven/retained/desired identities as native-read candidates; keep exact founding retry authorization and current applied/native guards. Remaining retirement checks distinguish Hosted/Cleanup/Stopped without duplicating a debt's actions or weakening required stops.
+- [x] Convert owning tests, add explicit retained/context and completed-cleanup retry coverage, and remove obsolete validation adapters. The remaining construction adapter is removed in Task 24.
 
 **Verification**
 
-- [ ] Run remaining-plan/readmission/voter/metadata units, focused immutable-plan functional regressions, staged lint and `make test`.
+- [x] Run remaining-plan/readmission/voter/metadata units, focused immutable-plan functional regressions, staged lint and `make test`.
 
 ### Task 23: Collect actual native state for new-plan callers
 

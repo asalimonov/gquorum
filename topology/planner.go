@@ -513,7 +513,7 @@ func (v *plannedStepValidator) applyCleanupReplicaState(i int, step Step, state 
 func (v *plannedStepValidator) applyDeleteGroupState(step Step, state *validationGroup) error {
 	for _, replica := range v.input.formerReplicas(step.GroupID) {
 		if replica.Progress != RetainedStopped && !state.stopped[replica.ReplicaID] &&
-			!hasReadmissionBoundary(v.input, v.desired, v.plan, replica.NodeName) {
+			!ReadmissionCovers(v.input, v.desired, v.plan, replica.NodeName) {
 			return planUnsafef("delete group %q lacks stop for replica %d", step.GroupID, replica.ReplicaID)
 		}
 	}

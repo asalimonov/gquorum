@@ -263,7 +263,7 @@ func (v *planShapeValidator) validateStepOrder(i int, current Step) error {
 
 func (v *planShapeValidator) validateRemovalOrder(i int, current Step) error {
 	stoppedNext := nextPlanStepMatches(v.plan.Steps, i, StepStopReplica, current)
-	if !stoppedNext && !hasReadmissionBoundary(v.input, v.desired, v.plan, current.NodeName) {
+	if !stoppedNext && !ReadmissionCovers(v.input, v.desired, v.plan, current.NodeName) {
 		return fmt.Errorf("remove %s/%d is not immediately followed by stop", current.GroupID,
 			current.ReplicaID)
 	}
@@ -294,7 +294,7 @@ func (v *planShapeValidator) validateStopOrder(i int, current Step) error {
 func (v *planShapeValidator) validateDeletionOrder(current Step) error {
 	for _, replica := range v.input.formerReplicas(current.GroupID) {
 		if replica.Progress != RetainedStopped && !v.stopped[current.GroupID][replica.ReplicaID] &&
-			!hasReadmissionBoundary(v.input, v.desired, v.plan, replica.NodeName) {
+			!ReadmissionCovers(v.input, v.desired, v.plan, replica.NodeName) {
 			return fmt.Errorf("delete group %q lacks stop for replica %d", current.GroupID, replica.ReplicaID)
 		}
 	}

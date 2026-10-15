@@ -95,7 +95,7 @@ func TestScopedReadmissionUsesExactProvenMember(t *testing.T) {
 	}
 	input := convergedPlanInput(base)
 	input.Approved = desired.Clone()
-	if !hasReadmissionBoundary(input, desired, plan, "a") {
+	if !ReadmissionCovers(input, desired, plan, "a") {
 		t.Fatal("new approved member hid the proven predecessor")
 	}
 	if err := ValidatePlanShape(input, desired, plan); err != nil {
@@ -104,23 +104,23 @@ func TestScopedReadmissionUsesExactProvenMember(t *testing.T) {
 	previousMeta := input.Groups[MetaGroupID]
 	input.Groups[MetaGroupID] = GroupProgress{GroupID: MetaGroupID, ConvergedVersion: desired.Version,
 		Converged: desired.MetaGroup()}
-	if !hasReadmissionBoundary(input, desired, plan, "a") {
+	if !ReadmissionCovers(input, desired, plan, "a") {
 		t.Fatal("converged metadata erased the historical load-owner retirement boundary")
 	}
 	input.Groups[MetaGroupID] = previousMeta
 	row := input.Nodes["a"]
 	row.MemberID = 4
 	input.Nodes["a"] = row
-	if hasReadmissionBoundary(input, desired, plan, "a") {
+	if ReadmissionCovers(input, desired, plan, "a") {
 		t.Fatal("same member became a replacement boundary")
 	}
 	row.MemberID, row.ConvergedVersion = 1, 0
 	input.Nodes["a"] = row
-	if !hasReadmissionBoundary(input, desired, plan, "a") {
+	if !ReadmissionCovers(input, desired, plan, "a") {
 		t.Fatal("unconverged node hid its exact converged meta member")
 	}
 	input.Groups[MetaGroupID] = GroupProgress{GroupID: MetaGroupID}
-	if hasReadmissionBoundary(input, desired, plan, "a") {
+	if ReadmissionCovers(input, desired, plan, "a") {
 		t.Fatal("unknown node checkpoint supplied retirement proof")
 	}
 }

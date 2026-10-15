@@ -35,17 +35,19 @@ type VoterSets struct {
 }
 
 // ValidateVoterSetTransition checks one native voter-set change against the
-// frozen Active/base and Target label interpretations used by the planner.
-func ValidateVoterSetTransition(base, desired Document, groupID string, sets VoterSets) error {
+// proven and desired label interpretations and exact retained identities.
+func ValidateVoterSetTransition(input PlanInput, desired Document, groupID string, sets VoterSets) error {
+	if err := validateRetainedInput(input, desired); err != nil {
+		return err
+	}
 	before, after := sets.Before, sets.After
 	for _, ids := range [][]uint64{before, after} {
 		for _, id := range ids {
-			if _, ok := replicaIdentity(base.Group(groupID), desired.Group(groupID), id); !ok {
+			if _, ok := input.planReplicaKey(groupID, desired.Group(groupID), id); !ok {
 				return planUnsafef("group %q has unknown voter identity %d", groupID, id)
 			}
 		}
 	}
-	input := convergedPlanInput(base)
 	state := voterPlanState{base: input, desired: desired, groupID: groupID}
 	return validateVoterTransition(voterPlanTopology{base: input, desired: desired, groupID: groupID},
 		voterKeysForSet(state, idSet(before)), voterKeysForSet(state, idSet(after)), state)

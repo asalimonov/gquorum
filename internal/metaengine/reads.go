@@ -34,7 +34,7 @@ type LockRead = topology.LockHolder
 // evidence.
 type PlanRead struct {
 	Operator topology.Operator         `json:"operator"`
-	Base     topology.Document         `json:"base"`
+	Input    topology.PlanInput        `json:"input"`
 	Target   topology.Document         `json:"target"`
 	Grants   []topology.AuthorityGrant `json:"grants,omitempty"`
 	Receipts []topology.EffectReceipt  `json:"receipts,omitempty"`
@@ -145,11 +145,11 @@ func (m *Machine) queryPlanLocked(q QueryRequest) (PlanRead, error) {
 			return PlanRead{}, fault.ErrAuthorityPending
 		}
 	}
-	base, err := m.operatorBaseLocked(op)
+	input, err := m.planningInputLocked(m.target, nil)
 	if err != nil {
 		return PlanRead{}, err
 	}
-	read := PlanRead{Operator: operatorRecordView(*op), Base: base, Target: m.target}
+	read := PlanRead{Operator: operatorRecordView(*op), Input: input, Target: m.target}
 	if err := m.collectPlanEvidenceLocked(op, &read); err != nil {
 		return PlanRead{}, err
 	}

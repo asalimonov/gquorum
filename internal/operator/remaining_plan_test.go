@@ -61,20 +61,20 @@ func TestRemainingPlanRetainsHostOnlyCleanupObligations(t *testing.T) {
 	base.Groups[0].Replicas = append(base.Groups[0].Replicas, Replica{NodeName: "b", ReplicaID: 2, Role: topology.ReplicaLearner})
 	native := map[string]topology.NativeState{"work": {GroupID: "work", ReplicaID: 1, Applied: 10, ConfState: raftpb.ConfState{Voters: []uint64{1}}}}
 	ex := Record{}
-	if err := ValidateRemainingPlan(RemainingPlanView{Base: base, Target: target}, ex, native, Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}); !errors.Is(err, fault.ErrReplanRequired) {
+	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}); !errors.Is(err, fault.ErrReplanRequired) {
 		t.Fatal(err)
 	}
 	ex.Steps = []Step{{Seq: 1, GroupID: "work", Kind: StepRemoveReplica, NodeName: "b", ReplicaID: 2}, {Seq: 2, GroupID: "work", Kind: StepStopReplica, NodeName: "b", ReplicaID: 2}, {Seq: 3, GroupID: "work", Kind: StepCleanupReplicaState, NodeName: "b", ReplicaID: 2}}
-	if err := ValidateRemainingPlan(RemainingPlanView{Base: base, Target: target}, ex, native, Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}); err != nil {
+	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}); err != nil {
 		t.Fatal(err)
 	}
 	// Proven progress in this immutable plan can satisfy its earlier host steps.
 	ex.CurrentStep = 3
-	if err := ValidateRemainingPlan(RemainingPlanView{Base: base, Target: target}, ex, native, Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}); err != nil {
+	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}); err != nil {
 		t.Fatal(err)
 	}
 	ex.Steps[2].NodeName = "different-owner"
-	if err := ValidateRemainingPlan(RemainingPlanView{Base: base, Target: target}, ex, native, Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}); !errors.Is(err, fault.ErrReplanRequired) {
+	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}); !errors.Is(err, fault.ErrReplanRequired) {
 		t.Fatal(err)
 	}
 }
@@ -98,11 +98,11 @@ func TestRemainingPlanRequiresCompleteReadmissionBoundary(t *testing.T) {
 	}}
 	native := map[string]topology.NativeState{MetaGroupID: {GroupID: MetaGroupID, ReplicaID: 2, Applied: 10, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}}}
 	rules := Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}
-	if err := ValidateRemainingPlan(RemainingPlanView{Base: base, Target: target}, ex, native, rules); err != nil {
+	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, rules); err != nil {
 		t.Fatal(err)
 	}
 	ex.Steps[1].Kind = StepWaitCaughtUp
-	if err := ValidateRemainingPlan(RemainingPlanView{Base: base, Target: target}, ex, native, rules); !errors.Is(err, fault.ErrReplanRequired) {
+	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, rules); !errors.Is(err, fault.ErrReplanRequired) {
 		t.Fatal("incomplete preparation hid retained hosts", err)
 	}
 }
@@ -122,12 +122,12 @@ func TestRemainingPlanRequiresExactReceiptForAppliedVoterChange(t *testing.T) {
 	rules := Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}
 	native := map[string]topology.NativeState{"work": {GroupID: "work", ReplicaID: 1, Applied: 10,
 		ConfState: raftpb.ConfState{Voters: []uint64{1}, Learners: []uint64{2}}}}
-	if err := ValidateRemainingPlan(RemainingPlanView{Base: base, Target: target}, ex, native, rules); err != nil {
+	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, rules); err != nil {
 		t.Fatalf("matching predecessor cannot reach target: %v", err)
 	}
 	native["work"] = topology.NativeState{GroupID: "work", ReplicaID: 1, Applied: 11,
 		ConfState: raftpb.ConfState{Voters: []uint64{1, 2}}}
-	if err := ValidateRemainingPlan(RemainingPlanView{Base: base, Target: target}, ex, native, rules); !errors.Is(err, fault.ErrReplanRequired) {
+	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, rules); !errors.Is(err, fault.ErrReplanRequired) {
 		t.Fatalf("unexplained native promotion was reused: %v", err)
 	}
 	action := topology.AuthorizedStep{OperatorID: id, Version: 2, Attempt: 1, StepSeq: 2,
@@ -144,24 +144,24 @@ func TestRemainingPlanRequiresExactReceiptForAppliedVoterChange(t *testing.T) {
 	nativeState := native["work"]
 	nativeState.Grant, nativeState.Receipt = &grant, &receipt
 	native["work"] = nativeState
-	if err := ValidateRemainingPlan(RemainingPlanView{Base: base, Target: target}, ex, native, rules); err != nil {
+	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, rules); err != nil {
 		t.Fatalf("exact native receipt did not bridge metadata recording: %v", err)
 	}
 	stale := grant.Clone()
 	stale.Key.Revision--
 	nativeState.Grant = &stale
 	native["work"] = nativeState
-	if err := ValidateRemainingPlan(RemainingPlanView{Base: base, Target: target}, ex, native, rules); !errors.Is(err, fault.ErrReplanRequired) {
+	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, rules); !errors.Is(err, fault.ErrReplanRequired) {
 		t.Fatalf("stale native grant supplied completion proof: %v", err)
 	}
 	nativeState.Grant, nativeState.Receipt = nil, nil
 	native["work"] = nativeState
 	ex.Receipts = []topology.EffectReceipt{receipt}
-	if err := ValidateRemainingPlan(RemainingPlanView{Base: base, Target: target}, ex, native, rules); err != nil {
+	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, rules); err != nil {
 		t.Fatalf("recorded metadata receipt was ignored: %v", err)
 	}
 	ex.Receipts[0].Action = nil
-	if err := ValidateRemainingPlan(RemainingPlanView{Base: base, Target: target}, ex, native, rules); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, rules); !errors.Is(err, fault.ErrOperatorAuthorization) {
 		t.Fatalf("stale or malformed receipt was accepted: %v", err)
 	}
 }
@@ -192,4 +192,21 @@ func TestRemainingPlanAcceptsExactApprovedFoundingSeedBeforeReceipt(t *testing.T
 	if err := ValidateRemainingPlan(RemainingPlanView{Target: target}, ex, native, rules); !errors.Is(err, fault.ErrReplanRequired) {
 		t.Fatalf("unapproved founding seed was reused: %v", err)
 	}
+}
+
+// Fixtures describe genuine whole-document convergence, without intermediate identities.
+func remainingInput(doc Document) topology.PlanInput {
+	input := topology.PlanInput{Approved: doc, Groups: make(map[string]topology.GroupProgress),
+		Nodes: make(map[string]topology.NodeProgress)}
+	for i := range doc.Groups {
+		group := &doc.Groups[i]
+		input.Groups[group.ID] = topology.GroupProgress{GroupID: group.ID, Converged: group,
+			ConvergedVersion: doc.Version}
+	}
+	for i := range doc.Nodes {
+		node := &doc.Nodes[i]
+		input.Nodes[node.Name] = topology.NodeProgress{NodeName: node.Name, Converged: node,
+			ConvergedVersion: doc.Version, MemberID: doc.MemberID(node.Name)}
+	}
+	return input
 }
