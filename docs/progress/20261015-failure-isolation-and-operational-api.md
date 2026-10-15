@@ -487,3 +487,19 @@ Verified
 - Focused topology/operator tests passed. Added twice-superseded native/prepared identity, malformed input, exact host overlap, retained/all-desired founding, proof without convergence, old-domain/pinned-learner protection, encoding and caller-copy regressions.
 - make test: 1175/1175, 8.993s; test-reports/unit/20261015T201221.794267Z-tf905nhu/report.md. Staged lint passed at /tmp/gquorum-task18-lint.log after fixing one line wrap and constant-block documentation; these final edits do not change behavior.
 - Diff checks pass; 334 changed handwritten Go lines, below 550. No new resource acquisition/concurrency, so no additional functional/race/Docker run. No ordinary API method, public overload or temporary test-only export. Next regular review remains commit 30.
+
+
+## Task 19 — Retirement planning from exact retained progress
+Date: 2026-10-16. Commit: this entry's commit (implementation/correction commit 28).
+
+Implemented
+- Former-owner enumeration combines actual converged assignments and retained exact identities, with explicit cleanup progress taking precedence. Outgoing native voter/learner operations now use ReplicaKey instead of manufacturing replica roles.
+- Native/prepared Hosted owners get guarded or no-op removal plus host retirement. Stopped native owners get removal only, with exact readmission boundary validation; non-native Stopped owners get no host work. Native Cleanup contradicts removal debt and refuses; applied-index classification is the metadata collector's Task 20 obligation.
+- Non-native Cleanup carries only a required stop for a same-host incoming owner or whole deletion; no second removal/retirement action. Shape and simulation enforce stop-before-prepare and every deletion stop, including debt-only plans without DeleteGroupState. Existing immutable plans remain attributable after host cleanup.
+- Whole deletion uses retained identities without inventing convergence or requiring live quorum. Readmission elides only covered hosts; other retained owners still require stop and retirement. Kept the established readmission pair order after an initial unnecessary same-host ordering change broke its regression; reverted that change before final verification.
+- Task 23 explicitly retains scope filtering for deletion checks: unrelated old debt cannot gate an independent group. Scoped partitions and required-stop action rebinding remain Tasks 24–25.
+
+Verified
+- Focused topology/operator tests passed, including native/prepared retirement, stopped native boundaries, cleanup-owned stop carryover, native contradictions, immutable old-plan identity, unknown-convergence deletion, every-host stop and partial/full readmission regressions.
+- Final make test: 1183/1183, 9.034s; test-reports/unit/20261015T201908.856062Z-e12ose55/report.md. Exact staged lint passed at /tmp/gquorum-task19-lint.log after line-wrap/operand-order/switch-style fixes. Diff checks pass; 433 changed handwritten Go lines, below 550.
+- Pure planning changes have no resource acquisition or new concurrency; no new functional/race/Docker run. Live schema/public planner adapters remain unchanged until their planned conversion. Next regular review is commit 30.

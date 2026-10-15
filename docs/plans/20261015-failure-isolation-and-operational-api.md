@@ -355,14 +355,14 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** topology planner, voter moves, shape/simulation, deletion and readmission helpers; retained retirement tests. **Target:** [T] §6.2, §7.2 FI_PLAN_EVIDENCE, §12 deletion algorithms. **Depends on:** 18. **Budget:** estimated 400–550 changed Go lines, ceiling 550.
 
-- [ ] Enumerate former owners from Converged plus Retained. Native hosted identities receive guarded removal; non-native hosted identities receive exact no-op removal and host retirement. Native readmission-stopped identities receive removal only. Cleanup-owned identities never receive duplicate removal/retirement actions.
-- [ ] Carry only required stops for cleanup-owned non-native identities: same-host incoming assignments and every whole-deletion owner. Preserve detached debt ownership; partition/action rebinding follows in Tasks 24–25. Reject unproven stop elision and malformed adjacency without blanket live/native requirements on host-only deletion.
-- [ ] Update role/shape/native simulation and whole-group deletion checks together. Never infer roles from retained identity alone. Keep readmission exact-member boundaries and ordinary promotion behavior; retain old immutable-plan identities even after successful host cleanup when validating an existing plan.
-- [ ] Test native/prepared former owners missing from all current documents, stopped versus cleanup-owned debt, required same-host stops, full/partial deletion and no second retirement action. A possibly-founded deleted group remains attributable without a fabricated converged declaration.
+- [x] Enumerate former owners from Converged plus Retained. Native hosted identities receive guarded removal; non-native hosted identities receive exact no-op removal and host retirement. Native readmission-stopped identities receive removal only. Cleanup-owned identities never receive duplicate removal/retirement actions.
+- [x] Carry only required stops for cleanup-owned non-native identities: same-host incoming assignments and every whole-deletion owner. Preserve detached debt ownership; partition/action rebinding follows in Tasks 24–25. Reject unproven stop elision and malformed adjacency without blanket live/native requirements on host-only deletion.
+- [x] Update role/shape/native simulation and whole-group deletion checks together. Never infer roles from retained identity alone. Keep readmission exact-member boundaries and ordinary promotion behavior; retain old immutable-plan identities even after successful host cleanup when validating an existing plan.
+- [x] Test native/prepared former owners missing from all current documents, stopped versus cleanup-owned debt, required same-host stops, full/partial deletion and no second retirement action. A possibly-founded deleted group remains attributable without a fabricated converged declaration.
 
 **Verification**
 
-- [ ] Run focused planner/readmission/retirement/voter units, staged lint and `make test`.
+- [x] Run focused planner/readmission/retirement/voter units, staged lint and `make test`.
 
 ### Task 20: Build retained planning evidence from metadata records
 
@@ -409,7 +409,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** topology planning helpers and `internal/metaengine` approval validation. **Target:** [T] §5.1–5.3, §12 “Scoped authorization and completion”. **Depends on:** 22. **Budget:** ≤550.
 
 - [ ] Derive semantic read/write sets for group edits, node changes, effective placement/eligibility, membership, identity allocation and deletion. Cluster/node placement changes include every affected group; node-only edits include a `_meta` declaration block.
-- [ ] Restrict BuildPlan native requirements and service native collection to derived affected/dependent scopes. An unchanged unhealthy group must not become a global planning/approval gate; test B approval with A unavailable and preserve exact guards for every affected group.
+- [ ] Restrict BuildPlan native requirements and service native collection to derived affected/dependent scopes. An unchanged unhealthy group must not become a global planning/approval gate; test B approval with A unavailable and preserve exact guards for every affected group. Unrelated retained deletion debt must not enter B's whole-deletion stop checks; scope the input/validator work to affected and dependent groups.
 - [ ] Make FSM derivation authoritative; a service-supplied scope list is checked evidence, not trusted scope selection. Conservatively refuse independence when dependencies cannot be proved.
 - [ ] Test disjoint group edits versus shared eligibility/rules, node label changes, zero-runtime edits and exact allocation conflicts. Avoid falsely treating every unrelated node field as a repair dependency.
 

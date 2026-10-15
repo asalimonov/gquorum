@@ -157,9 +157,10 @@ func (p *readmissionPlanBuilder) appendStep(step Step) {
 
 func (p *readmissionPlanBuilder) requiresDeletion(step Step) bool {
 	if step.Kind == StepDeleteGroupState {
-		old := p.input.provenGroup(step.GroupID)
-		if old != nil &&
-			!slices.ContainsFunc(old.Replicas, func(r Replica) bool { return p.replacement(r.NodeName) == nil }) {
+		owners := p.input.formerReplicas(step.GroupID)
+		if len(owners) != 0 && !slices.ContainsFunc(owners, func(r RetainedReplica) bool {
+			return r.Progress == RetainedHosted && p.replacement(r.NodeName) == nil
+		}) {
 			return false
 		}
 	}

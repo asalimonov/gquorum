@@ -60,6 +60,9 @@ func planVoterMoves(view voterPlanTopology, status GroupStatus, options PlanOpti
 }
 
 func (s *voterPlanState) checkInitial() error {
+	if err := s.validateNativeRetirement(); err != nil {
+		return err
+	}
 	if len(s.voters) == 0 {
 		return planUnsafef("group %q has no observed voters", s.groupID)
 	}
@@ -129,7 +132,7 @@ func (s *voterPlanState) promote(replica Replica) error {
 	return nil
 }
 
-func (s *voterPlanState) canDestroyAfterPromotion(departing, arrival Replica) bool {
+func (s *voterPlanState) canDestroyAfterPromotion(departing ReplicaKey, arrival Replica) bool {
 	clone := *s
 	clone.voters = cloneIDSet(s.voters)
 	clone.learners = cloneIDSet(s.learners)
@@ -143,7 +146,7 @@ func (s *voterPlanState) canDestroyAfterPromotion(departing, arrival Replica) bo
 	return clone.canDestroy(departing) == nil
 }
 
-func (s *voterPlanState) canDestroy(replica Replica) error {
+func (s *voterPlanState) canDestroy(replica ReplicaKey) error {
 	if !s.healthKnown {
 		return planUnsafef("group %q replacement needs live membership observations", s.groupID)
 	}
@@ -162,7 +165,7 @@ func (s *voterPlanState) canDestroy(replica Replica) error {
 	return validateVoterTransition(view, voterKeys(*s), voterKeysForSet(*s, after), *s)
 }
 
-func (s *voterPlanState) destroy(replica Replica) error {
+func (s *voterPlanState) destroy(replica ReplicaKey) error {
 	if err := s.canDestroy(replica); err != nil {
 		return err
 	}
@@ -175,27 +178,21 @@ func (s *voterPlanState) destroy(replica Replica) error {
 		s.leader = transfer.ReplicaID
 	}
 	if wanted := s.desired.Group(s.groupID); targetReplicaByID(wanted, replica.ReplicaID) != nil {
-		s.emit(StepDemoteVoter, replica)
+		s.emitRetirement(StepDemoteVoter, replica)
 		delete(s.voters, replica.ReplicaID)
 		s.learners[replica.ReplicaID] = struct{}{}
 	} else {
-		s.emit(StepRemoveReplica, replica)
+		s.emitRetirement(StepRemoveReplica, replica)
 		delete(s.voters, replica.ReplicaID)
-		s.emit(StepStopReplica, replica)
-		if s.groupID != MetaGroupID {
-			s.emit(StepCleanupReplicaState, replica)
-		}
+		s.retireHost(replica)
 	}
 	return nil
 }
 
-func (s *voterPlanState) remove(replica Replica) {
-	s.emit(StepRemoveReplica, replica)
+func (s *voterPlanState) remove(replica ReplicaKey) {
+	s.emitRetirement(StepRemoveReplica, replica)
 	delete(s.learners, replica.ReplicaID)
-	s.emit(StepStopReplica, replica)
-	if s.groupID != MetaGroupID {
-		s.emit(StepCleanupReplicaState, replica)
-	}
+	s.retireHost(replica)
 }
 
 func (s *voterPlanState) transferTarget(exclude uint64) (Replica, bool) {
@@ -219,7 +216,7 @@ func (s *voterPlanState) liveCount(voters map[uint64]struct{}) int {
 	return count
 }
 
-func compareReplicaIdentity(a, b Replica) int {
+func compareReplicaIdentity(a, b ReplicaKey) int {
 	if a.ReplicaID < b.ReplicaID {
 		return -1
 	}
@@ -229,7 +226,7 @@ func compareReplicaIdentity(a, b Replica) int {
 	return compareNames(a.NodeName, b.NodeName)
 }
 
-func pairIncomingIndex(view voterPlanTopology, departing Replica, incoming []Replica) int {
+func pairIncomingIndex(view voterPlanTopology, departing ReplicaKey, incoming []Replica) int {
 	base, desired, groupID := view.base, view.desired, view.groupID
 	group := desired.Group(groupID)
 	if group.VoterConfig == nil || group.VoterConfig.DistinctVoterLabel == "" {
@@ -263,13 +260,15 @@ func sameVoterIDs(actual map[uint64]struct{}, wanted []Replica) bool {
 }
 
 type voterMoves struct {
-	want                              map[uint64]Replica
-	incoming, outgoing, staleLearners []Replica
+	want                    map[uint64]Replica
+	incoming                []Replica
+	outgoing, staleLearners []ReplicaKey
 }
 
 func (s *voterPlanState) classifyMoves(group *Group) voterMoves {
 	want := make(map[uint64]Replica, len(group.Replicas))
-	var incoming, outgoing, staleLearners []Replica
+	var incoming []Replica
+	var outgoing, staleLearners []ReplicaKey
 	for _, replica := range sortedReplicas(group.Replicas) {
 		want[replica.ReplicaID] = replica
 		if replica.Role == ReplicaVoter {
@@ -280,13 +279,13 @@ func (s *voterPlanState) classifyMoves(group *Group) voterMoves {
 	}
 	for id := range s.voters {
 		if replica, keep := want[id]; !keep || replica.Role != ReplicaVoter {
-			old, _ := replicaIdentity(s.base.provenGroup(s.groupID), group, id)
+			old, _ := s.base.planReplicaKey(s.groupID, group, id)
 			outgoing = append(outgoing, old)
 		}
 	}
 	for id := range s.learners {
 		if _, keep := want[id]; !keep {
-			old, _ := replicaIdentity(s.base.provenGroup(s.groupID), group, id)
+			old, _ := s.base.planReplicaKey(s.groupID, group, id)
 			staleLearners = append(staleLearners, old)
 		}
 	}
@@ -305,14 +304,20 @@ func (s *voterPlanState) retireStale(moves voterMoves, status GroupStatus) {
 	for _, replica := range moves.staleLearners {
 		s.remove(replica)
 	}
-	if previous := s.base.provenGroup(s.groupID); previous != nil {
-		for _, replica := range sortedReplicas(previous.Replicas) {
-			if _, kept := moves.want[replica.ReplicaID]; kept {
-				continue
+	for _, replica := range s.base.formerReplicas(s.groupID) {
+		_, kept := moves.want[replica.ReplicaID]
+		_, native := initialNative[replica.ReplicaID]
+		if kept || native {
+			continue
+		}
+		switch replica.Progress {
+		case RetainedHosted:
+			s.remove(replica.ReplicaKey) // prepared state still needs an exact no-op removal receipt
+		case RetainedCleanup:
+			if requiredRetainedStop(s.desired.Group(s.groupID), replica.ReplicaKey) {
+				s.emitRetirement(StepStopReplica, replica.ReplicaKey)
 			}
-			if _, native := initialNative[replica.ReplicaID]; !native {
-				s.remove(replica) // prepared durable state still needs an exact receipt
-			}
+		default: // Validated RetainedStopped: existing debt owns any remaining retirement.
 		}
 	}
 }
@@ -372,7 +377,7 @@ func (s *voterPlanState) validateFinal() error {
 	return nil
 }
 
-func (s *voterPlanState) replacePair(group *Group, departing, arrival Replica) error {
+func (s *voterPlanState) replacePair(group *Group, departing ReplicaKey, arrival Replica) error {
 	if _, alreadyLearner := s.learners[arrival.ReplicaID]; !alreadyLearner &&
 		len(s.voters)+len(s.learners) >= s.maximum &&
 		targetReplicaByID(group, departing.ReplicaID) == nil {

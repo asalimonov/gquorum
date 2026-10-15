@@ -80,16 +80,17 @@ func replicaNode(group *Group, id uint64) string {
 	return ""
 }
 
-func planDeletedGroup(groupID string, previous *Group, emit func(string, StepKind, string, uint64)) {
-	if previous != nil && len(previous.Replicas) == 0 {
-		return
-	}
-	if previous != nil {
-		for _, replica := range sortedReplicas(previous.Replicas) {
-			emit(groupID, StepStopReplica, replica.NodeName, replica.ReplicaID)
+func (b *topologyPlanBuilder) planDeletedGroup(groupID string) {
+	retire := false
+	for _, replica := range b.input.formerReplicas(groupID) {
+		if replica.Progress != RetainedStopped {
+			b.emit(groupID, StepStopReplica, replica.NodeName, replica.ReplicaID)
 		}
+		retire = retire || replica.Progress == RetainedHosted
 	}
-	emit(groupID, StepDeleteGroupState, "", 0)
+	if retire {
+		b.emit(groupID, StepDeleteGroupState, "", 0)
+	}
 }
 
 func validateDestructiveBoundary(groupID string, before int) error {
@@ -120,6 +121,13 @@ func validatePlannedSteps(input PlanInput, desired Document, observed map[string
 		}
 		if err := v.applyStep(i, step, v.groupState(step.GroupID)); err != nil {
 			return err
+		}
+	}
+	for id := range input.Retained {
+		if desired.Group(id) == nil {
+			if err := v.applyDeleteGroupState(Step{GroupID: id}, v.groupState(id)); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -274,10 +282,10 @@ func (b *topologyPlanBuilder) planGroup(groupID string) error {
 	}
 
 	if target == nil {
-		if previous == nil && status.Found {
+		if status.Found && len(b.input.formerReplicas(groupID)) == 0 {
 			return planUnsafef("observed group %q has no proven identities for safe stop", groupID)
 		}
-		planDeletedGroup(groupID, previous, b.emit)
+		b.planDeletedGroup(groupID)
 		return nil
 	}
 	lo, hi := planGroupBounds(&b.desired, groupID, b.options.Rules)
@@ -372,6 +380,10 @@ func (v *plannedStepValidator) applyStep(i int, step Step, state *validationGrou
 	case StepCreateFoundingGroup:
 		return v.applyCreateFoundingGroup(step, state)
 	case StepPrepareReplica:
+		view := voterPlanTopology{base: v.input, desired: v.desired, groupID: step.GroupID}
+		if err := requireCleanupOwnerStop(view, v.plan, step, state.stopped); err != nil {
+			return err
+		}
 		return state.applyPrepareReplica(step)
 	case StepAddLearner:
 		return v.applyAddLearner(i, step, state)
@@ -470,7 +482,7 @@ func (state *validationGroup) applyDemoteVoter(step Step) error {
 func (v *plannedStepValidator) applyRemoveReplica(step Step, state *validationGroup) error {
 	if _, voter := state.voters[step.ReplicaID]; !voter {
 		if _, learner := state.learners[step.ReplicaID]; !learner {
-			if v.input.provenReplica(step) == nil {
+			if !v.input.formerReplica(step) {
 				return planUnsafef("remove %s/%d has no retained owner", step.GroupID, step.ReplicaID)
 			}
 		}
@@ -499,12 +511,10 @@ func (v *plannedStepValidator) applyCleanupReplicaState(i int, step Step, state 
 }
 
 func (v *plannedStepValidator) applyDeleteGroupState(step Step, state *validationGroup) error {
-	if previous := v.input.provenGroup(step.GroupID); previous != nil {
-		for _, replica := range previous.Replicas {
-			if !state.stopped[replica.ReplicaID] &&
-				!hasReadmissionBoundary(v.input, v.desired, v.plan, replica.NodeName) {
-				return planUnsafef("delete group %q lacks stop for replica %d", step.GroupID, replica.ReplicaID)
-			}
+	for _, replica := range v.input.formerReplicas(step.GroupID) {
+		if replica.Progress != RetainedStopped && !state.stopped[replica.ReplicaID] &&
+			!hasReadmissionBoundary(v.input, v.desired, v.plan, replica.NodeName) {
+			return planUnsafef("delete group %q lacks stop for replica %d", step.GroupID, replica.ReplicaID)
 		}
 	}
 
