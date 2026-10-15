@@ -6,8 +6,13 @@ import "slices"
 // preparation is the retirement boundary for this former host. The metadata FSM
 // must require all readmission receipts before granting that preparation.
 func ReadmissionCovers(active, desired Document, plan Plan, node string) bool {
+	return hasReadmissionBoundary(convergedPlanInput(active), desired, plan, node)
+}
+
+func hasReadmissionBoundary(input PlanInput, desired Document, plan Plan, node string) bool {
 	member := desired.MemberID(node)
-	if active.Version == 0 || member == 0 || member <= active.MemberID(node) {
+	previous, known := input.provenMember(node)
+	if !known || member == 0 || member <= previous {
 		return false
 	}
 	replica := exactPlanReplica(desired, Step{GroupID: MetaGroupID, NodeName: node, ReplicaID: member})
@@ -18,24 +23,22 @@ func ReadmissionCovers(active, desired Document, plan Plan, node string) bool {
 // metadata owner retires its predecessor through the independently granted
 // readmission protocol before PrepareReplica can be consumed. Later host calls
 // to the retired member would be both redundant and unroutable.
-func bindReadmissionRetirement(active, desired Document, plan Plan) Plan {
-	if active.Version == 0 {
-		return plan
-	}
+func bindReadmissionRetirement(input PlanInput, desired Document, plan Plan) Plan {
 	meta := desired.MetaGroup()
 	if meta == nil {
 		return plan
 	}
 	var replacements []Replica
 	for _, r := range sortedReplicas(meta.Replicas) {
-		if r.ReplicaID > active.MemberID(r.NodeName) {
+		previous, known := input.provenMember(r.NodeName)
+		if known && r.ReplicaID > previous {
 			replacements = append(replacements, r)
 		}
 	}
 	if len(replacements) == 0 {
 		return plan
 	}
-	builder := readmissionPlanBuilder{active: active, desired: desired, replacements: replacements,
+	builder := readmissionPlanBuilder{input: input, desired: desired, replacements: replacements,
 		plannedPreparation: readmissionPreparations(plan, replacements), emitted: make(map[string]bool)}
 	for _, step := range plan.Steps {
 		builder.appendStep(step)
@@ -64,7 +67,7 @@ func readmissionPreparations(plan Plan, replacements []Replica) map[string]bool 
 }
 
 type readmissionPlanBuilder struct {
-	active             Document
+	input              PlanInput
 	desired            Document
 	replacements       []Replica
 	plannedPreparation map[string]bool
@@ -129,7 +132,7 @@ func (p *readmissionPlanBuilder) appendStep(step Step) {
 
 func (p *readmissionPlanBuilder) requiresDeletion(step Step) bool {
 	if step.Kind == StepDeleteGroupState {
-		old := p.active.Group(step.GroupID)
+		old := p.input.provenGroup(step.GroupID)
 		if old != nil &&
 			!slices.ContainsFunc(old.Replicas, func(r Replica) bool { return p.replacement(r.NodeName) == nil }) {
 			return false

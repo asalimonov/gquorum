@@ -32,3 +32,36 @@ func convergedPlanInput(doc Document) PlanInput {
 	}
 	return in
 }
+
+func (in PlanInput) provenReplica(step Step) *Replica {
+	replica := targetReplicaByID(in.provenGroup(step.GroupID), step.ReplicaID)
+	if replica == nil || replica.NodeName != step.NodeName {
+		return nil
+	}
+	return replica
+}
+
+func (in PlanInput) foundingGroup(id string) bool {
+	row := in.Groups[id]
+	return row.Converged == nil && row.ConvergedVersion == 0
+}
+
+func (in PlanInput) provenMember(name string) (uint64, bool) {
+	node := in.Nodes[name]
+	member, known := uint64(0), node.ConvergedVersion != 0
+	if known {
+		member = node.MemberID
+	}
+	meta := in.Groups[MetaGroupID]
+	if meta.ConvergedVersion == 0 || meta.Converged == nil {
+		return member, known
+	}
+	// Meta membership may converge while a load dependency still holds the node
+	// checkpoint back. Retained member IDs advance monotonically for this name.
+	for _, replica := range meta.Converged.Replicas {
+		if replica.NodeName == name {
+			return max(member, replica.ReplicaID), true
+		}
+	}
+	return member, known
+}

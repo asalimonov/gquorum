@@ -22,6 +22,10 @@ func comparePlanGroups(a, b string) int {
 // ValidatePlanShape checks step ordering and exact identities against active
 // and desired topology.
 func ValidatePlanShape(active, desired Document, plan Plan) error {
+	return checkPlanShape(convergedPlanInput(active), desired, plan)
+}
+
+func checkPlanShape(input PlanInput, desired Document, plan Plan) error {
 	if plan.Version != desired.Version {
 		return fmt.Errorf("plan version %d does not match desired version %d", plan.Version, desired.Version)
 	}
@@ -35,7 +39,7 @@ func ValidatePlanShape(active, desired Document, plan Plan) error {
 			return err
 		}
 	}
-	v := planShapeValidator{active: active, desired: desired, plan: plan,
+	v := planShapeValidator{input: input, desired: desired, plan: plan,
 		seenGroups: make(map[string]bool), stopped: make(map[string]map[uint64]bool)}
 	for i, current := range plan.Steps {
 		if err := v.validatePosition(i, current); err != nil {
@@ -52,7 +56,7 @@ func ValidatePlanShape(active, desired Document, plan Plan) error {
 		}
 	}
 
-	return validatePlanVoterProof(convergedPlanInput(active), desired, plan)
+	return validatePlanVoterProof(input, desired, plan)
 }
 
 func preparatoryWaitPair(steps []Step, index int, incoming Step) bool {
@@ -116,7 +120,7 @@ func nextPlanStepMatches(steps []Step, current int, kind StepKind, target Step) 
 }
 
 type planShapeValidator struct {
-	active     Document
+	input      PlanInput
 	desired    Document
 	plan       Plan
 	seenGroups map[string]bool
@@ -154,7 +158,7 @@ func validateStepIdentity(current Step) error {
 }
 
 func (v *planShapeValidator) validateReplicaRole(current Step) error {
-	old := exactPlanReplica(v.active, current)
+	old := v.input.provenReplica(current)
 	next := exactPlanReplica(v.desired, current)
 	if err := v.validateTransferGuard(current); err != nil {
 		return err
@@ -199,7 +203,7 @@ func (v *planShapeValidator) validateTransferGuard(current Step) error {
 func (v *planShapeValidator) validateStepOrder(i int, current Step) error {
 	switch current.Kind {
 	case StepCreateFoundingGroup:
-		if v.active.Group(current.GroupID) != nil || v.desired.Group(current.GroupID) == nil {
+		if !v.input.foundingGroup(current.GroupID) || v.desired.Group(current.GroupID) == nil {
 			return fmt.Errorf("create founding group %q is not fresh", current.GroupID)
 		}
 	case StepPrepareReplica:
@@ -243,7 +247,7 @@ func (v *planShapeValidator) validateStepOrder(i int, current Step) error {
 
 func (v *planShapeValidator) validateRemovalOrder(i int, current Step) error {
 	stoppedNext := nextPlanStepMatches(v.plan.Steps, i, StepStopReplica, current)
-	if !stoppedNext && !ReadmissionCovers(v.active, v.desired, v.plan, current.NodeName) {
+	if !stoppedNext && !hasReadmissionBoundary(v.input, v.desired, v.plan, current.NodeName) {
 		return fmt.Errorf("remove %s/%d is not immediately followed by stop", current.GroupID,
 			current.ReplicaID)
 	}
@@ -268,10 +272,10 @@ func (v *planShapeValidator) validateStopOrder(i int, current Step) error {
 }
 
 func (v *planShapeValidator) validateDeletionOrder(current Step) error {
-	if previous := v.active.Group(current.GroupID); previous != nil {
+	if previous := v.input.provenGroup(current.GroupID); previous != nil {
 		for _, replica := range previous.Replicas {
 			if !v.stopped[current.GroupID][replica.ReplicaID] &&
-				!ReadmissionCovers(v.active, v.desired, v.plan, replica.NodeName) {
+				!hasReadmissionBoundary(v.input, v.desired, v.plan, replica.NodeName) {
 				return fmt.Errorf("delete group %q lacks stop for replica %d", current.GroupID,
 					replica.ReplicaID)
 			}
@@ -293,7 +297,7 @@ func validateDesiredStepReplica(current Step, next *Replica) error {
 }
 
 func (v *planShapeValidator) validateDeletedGroup(current Step) error {
-	if current.GroupID == MetaGroupID || v.active.Group(current.GroupID) == nil ||
+	if current.GroupID == MetaGroupID || v.input.provenGroup(current.GroupID) == nil ||
 		v.desired.Group(current.GroupID) != nil {
 		return fmt.Errorf("step %d does not name a deleted load group", current.Seq)
 	}

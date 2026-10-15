@@ -426,3 +426,18 @@ Verified
 - Focused planner/voter/readmission units passed. make test: 1136/1136, 9.907s; test-reports/unit/20261015T192031.516222Z-yb62xg02/report.md.
 - Exact staged lint passed at /tmp/gquorum-task16-lint.log after wrapping one signature. Diff check and 72-task dependency audit passed; 222 changed handwritten Go lines, below 550.
 - Pure planning/value refactor has no acquired resources or new concurrency, so no additional functional/race/Docker run here. Task 18 includes focused service planning checks when public callers change. Next regular peer/dead-code checkpoint remains commit 25.
+
+## Task 17 — Scope shape, membership simulation and readmission proof
+Date: 2026-10-16. Commit: this entry's commit (implementation/correction commit 24).
+
+Implemented
+- Private plan shape, simulated native membership, founding/deletion and readmission binding now take PlanInput. Exact former-owner lookups use supplied proven declarations; approval cannot erase required deletion stops. A nonzero converged deletion checkpoint refuses refounding; an initial unknown checkpoint cannot override observed established native membership.
+- Readmission uses exact proven member identity from node and meta checkpoints, keeping the greater retained monotonic member ID. Meta membership may be proven before a whole-node checkpoint advances; it must not wait for unrelated load convergence. A fully unknown identity supplies no retirement boundary. Existing independent readmission grant/receipt authorization remains mandatory.
+- Removed obsolete topologyPlanBuilder.active. Kept private whole-document adapters only at current public entry points pending Task 18/cutover. New helper names satisfy the linter's capitalization rule; no public signature added beyond Task 16's planned value.
+- Added approval/proof disagreement, every-former-host deletion, unknown/tombstone founding, observed native contradiction, exact-member replacement and meta-before-node proof regressions. Existing operator remaining-plan readmission test exposed the necessary meta-identity fallback and passes with it.
+- Task 18 now explicitly includes an input representability check: successive failed approvals can leave a native/prepared replica absent from Approved/Converged/Desired. A single NativeState grant/receipt may not enumerate all such identities. This is a final public-planner prerequisite, not a reason to invent convergence or silently discard old effects. Consult peer on the smallest explicit retained-identity input before public wiring; target C12 has not been changed speculatively.
+
+Verified
+- Focused topology and operator suites passed. Final make test: 1139/1139, 8.859s; test-reports/unit/20261015T192822.774996Z-kb5vpob5/report.md.
+- Exact staged lint passed at /tmp/gquorum-task17-lint.log. Diff checks passed; 224 changed handwritten Go lines, below 550. Earlier failed runs identified incomplete new test observations and the meta-identity fallback; the final run covers all fixes.
+- Pure planning changes introduce no acquired resources/concurrency; no new functional/race/Docker run here. Public caller/service coverage remains Task 18. Next regular five-commit checkpoint is commit 25; an early design consultation does not replace that review.

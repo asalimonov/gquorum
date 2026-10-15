@@ -31,7 +31,7 @@ func constructPlan(active, desired Document, observed map[string]GroupStatus, op
 	if err := observedVoterIdentities(input, desired, observed); err != nil {
 		return Plan{}, err
 	}
-	builder := topologyPlanBuilder{active: active, input: input, desired: desired, observed: observed,
+	builder := topologyPlanBuilder{input: input, desired: desired, observed: observed,
 		options: options, plan: Plan{Version: desired.Version}}
 	for _, groupID := range unionGroupIDs(active, desired, observed) {
 		if err := builder.planGroup(groupID); err != nil {
@@ -42,17 +42,17 @@ func constructPlan(active, desired Document, observed map[string]GroupStatus, op
 	for i := range plan.Steps {
 		plan.Steps[i].Seq = i + 1
 	}
-	plan = bindReadmissionRetirement(active, desired, plan)
+	plan = bindReadmissionRetirement(input, desired, plan)
 	if err := bindDemotionGuards(&plan, desired, observed, preferredMetaTransfer); err != nil {
 		return Plan{}, err
 	}
 	if err := bindVoterGuards(&plan, observed, desired); err != nil {
 		return Plan{}, err
 	}
-	if err := ValidatePlanShape(active, desired, plan); err != nil {
+	if err := checkPlanShape(input, desired, plan); err != nil {
 		return Plan{}, planUnsafef("%v", err)
 	}
-	if err := validatePlannedSteps(active, desired, observed, plan); err != nil {
+	if err := validatePlannedSteps(input, desired, observed, plan); err != nil {
 		return Plan{}, err
 	}
 	return plan, nil
@@ -105,8 +105,8 @@ func planGroupBounds(doc *Document, groupID string, rules Rules) (minimum, maxim
 	return doc.GroupBounds(groupID)
 }
 
-func validatePlannedSteps(active, desired Document, observed map[string]GroupStatus, plan Plan) error {
-	v := plannedStepValidator{active: active, desired: desired, plan: plan,
+func validatePlannedSteps(input PlanInput, desired Document, observed map[string]GroupStatus, plan Plan) error {
+	v := plannedStepValidator{input: input, desired: desired, plan: plan,
 		seenGroups: make(map[string]bool), states: make(map[string]*validationGroup, len(observed))}
 	for id, status := range observed {
 		v.states[id] = newValidationGroup(status)
@@ -235,7 +235,6 @@ func BuildPlanPreferred(active, desired Document, observed map[string]GroupStatu
 }
 
 type topologyPlanBuilder struct {
-	active   Document
 	input    PlanInput
 	desired  Document
 	observed map[string]GroupStatus
@@ -265,7 +264,7 @@ func (b *topologyPlanBuilder) observedStatus(groupID string) (GroupStatus, error
 
 func (b *topologyPlanBuilder) planGroup(groupID string) error {
 	target := b.desired.Group(groupID)
-	previous := b.active.Group(groupID)
+	previous := b.input.provenGroup(groupID)
 	status, err := b.observedStatus(groupID)
 	if err != nil {
 		return err
@@ -273,7 +272,7 @@ func (b *topologyPlanBuilder) planGroup(groupID string) error {
 
 	if target == nil {
 		if previous == nil && status.Found {
-			return planUnsafef("observed group %q has no Active identities for safe stop", groupID)
+			return planUnsafef("observed group %q has no proven identities for safe stop", groupID)
 		}
 		planDeletedGroup(groupID, previous, b.emit)
 		return nil
@@ -296,7 +295,7 @@ func (b *topologyPlanBuilder) planGroup(groupID string) error {
 }
 
 func (b *topologyPlanBuilder) planFoundingGroup(groupID string, previous, target *Group) error {
-	if previous != nil {
+	if previous != nil || !b.input.foundingGroup(groupID) {
 		return fmt.Errorf("%w: established group %q has no observable host", fault.ErrUnavailable,
 			groupID)
 	}
@@ -328,7 +327,7 @@ func (b *topologyPlanBuilder) planMetaTransfer(groupID string, status GroupStatu
 }
 
 type plannedStepValidator struct {
-	active     Document
+	input      PlanInput
 	desired    Document
 	plan       Plan
 	seenGroups map[string]bool
@@ -395,7 +394,7 @@ func (v *plannedStepValidator) applyStep(i int, step Step, state *validationGrou
 }
 
 func (v *plannedStepValidator) applyCreateFoundingGroup(step Step, state *validationGroup) error {
-	if state.found || v.active.Group(step.GroupID) != nil || v.desired.Group(step.GroupID) == nil {
+	if state.found || !v.input.foundingGroup(step.GroupID) || v.desired.Group(step.GroupID) == nil {
 		return planUnsafef("create founding group %q is not a fresh-group operation", step.GroupID)
 	}
 	state.found = true
@@ -468,7 +467,7 @@ func (state *validationGroup) applyDemoteVoter(step Step) error {
 func (v *plannedStepValidator) applyRemoveReplica(step Step, state *validationGroup) error {
 	if _, voter := state.voters[step.ReplicaID]; !voter {
 		if _, learner := state.learners[step.ReplicaID]; !learner {
-			if exactPlanReplica(v.active, step) == nil {
+			if v.input.provenReplica(step) == nil {
 				return planUnsafef("remove %s/%d has no retained owner", step.GroupID, step.ReplicaID)
 			}
 		}
@@ -497,10 +496,10 @@ func (v *plannedStepValidator) applyCleanupReplicaState(i int, step Step, state 
 }
 
 func (v *plannedStepValidator) applyDeleteGroupState(step Step, state *validationGroup) error {
-	if previous := v.active.Group(step.GroupID); previous != nil {
+	if previous := v.input.provenGroup(step.GroupID); previous != nil {
 		for _, replica := range previous.Replicas {
 			if !state.stopped[replica.ReplicaID] &&
-				!ReadmissionCovers(v.active, v.desired, v.plan, replica.NodeName) {
+				!hasReadmissionBoundary(v.input, v.desired, v.plan, replica.NodeName) {
 				return planUnsafef("delete group %q lacks stop for replica %d", step.GroupID, replica.ReplicaID)
 			}
 		}

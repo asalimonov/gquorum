@@ -312,19 +312,20 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `topology/plan.go`, `planner.go`, `readmission_plan.go`, nearby tests. **Target:** [T] §5.1, §6.2, §7.2; contract C12. **Depends on:** 16. **Budget:** estimated 350–500 Go lines, ceiling 550.
 
-- [ ] Convert private shape, simulated membership, founding/deletion and readmission helpers to PlanInput, distinguishing approved intent from exact converged group/node declarations and member IDs.
-- [ ] Preserve stop-before-retirement, whole-group former-owner coverage, guarded role ordering and exact replacement preparation. Carry prior consumed/prepared identities through existing internal planning evidence; no reconstructed cluster document.
-- [ ] Test unknown initial convergence versus tombstone, retained former identities and approval/proof disagreement; keep old public entry adapters until Task 18. Required-stop takeover planning is completed with block/dependency derivation in Task 20.
+- [x] Convert private shape, simulated membership, founding/deletion and readmission helpers to PlanInput, distinguishing approved intent from exact converged group/node declarations and member IDs.
+- [x] Preserve stop-before-retirement, whole-group former-owner coverage, guarded role ordering and exact replacement preparation. Retain exact former-owner lookup from supplied proven declarations; no reconstructed cluster document. Task 18 must additionally carry intermediate identities from retained effects when they are absent from both current approval and convergence.
+- [x] Test unknown initial convergence versus tombstone, retained former identities and approval/proof disagreement; keep old public entry adapters until Task 18. Required-stop takeover planning is completed with block/dependency derivation in Task 20.
 
 **Verification**
 
-- [ ] Run shape/destructive-boundary/readmission/voter units, staged lint and `make test`.
+- [x] Run shape/destructive-boundary/readmission/voter units, staged lint and `make test`.
 
 ### Task 18: Replace public planner signatures and all immediate callers
 
 **Files:** `topology/planner.go`, `plan.go`, public planning callers and fixture helpers/tests. **Target:** [T] §5.1, §7.2; contract C12. **Depends on:** 16–17. **Budget:** estimated 400–550 Go lines, ceiling 550; split further before editing if measured scope exceeds it.
 
 - [ ] Use BuildPlan(PlanInput, Document, Rules), BuildPlanPreferred(PlanInput, Document, PlanOptions), and ValidatePlanShape(PlanInput, Document, Plan). Update all immediate production/test callers in the same commit; no public old-signature aliases or synthetic Active.
+- [ ] Resolve intermediate native/prepared identities from retained exact effects/old approvals, including a twice-superseded learner absent from Approved/Converged/Desired. Verify the C12 input can carry this evidence without mislabeling it as convergence; settle any necessary narrow input refinement before public wiring.
 - [ ] Bind native membership from NativeState, preserving exact group/reporter/identity checks and separate observed liveness/leadership from GroupProgress observations. Validate inconsistent input; unknown convergence cannot authorize refounding an established native identity.
 - [ ] Build inputs from the existing retained planning base at live schema-3 boundaries; document their replacement by actual scoped progress at Tasks 50 and 62. Test independently converged groups, approved/proven/native disagreement and no weakening of live-quorum/pinned-learner safety. Remove transitional planner adapters made obsolete by this task.
 
