@@ -450,6 +450,15 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [x] Run scope/placement units, staged lint and `make test`; record the commit-35 dead-code audit and request peer review.
 
+### Correction 11: Separate operation ownership from repair candidate reads
+
+**Files:** topology scope helper/tests; target §5.1 clarification. **Target:** [T] §5.1–5.3; review thread 9. **Budget:** estimated 200–350 changed Go lines, ceiling 550.
+
+- [x] Keep AffectedGroups as write/ownership scope: changed declarations/effective rules, assigned-host eligibility/state/member changes and `_meta` node declarations. Adding/removing an unassigned node must not seize unchanged load groups or require their native quorum.
+- [x] Preserve genuinely materialized load changes and assigned predecessor/readmission boundaries. Keep candidate eligibility/member read dependencies separate in Task 27; ignore unassigned candidates ineligible in both compared versions. No new public read-set type or API.
+- [x] Reproduce eligible/ineligible node addition and removal, assigned/unassigned identity and placement changes, and actual new load assignments. Keep conservative invalid-input handling, deterministic ordering and existing scope/copy regressions.
+- [x] Run focused topology units, exact staged lint and make test; record peer disposition before the next implementation commit.
+
 ### Task 26: Restrict planning work to affected scopes
 
 **Files:** `topology/planner.go`, shape/deletion helpers, `internal/metaservice/planning_input.go`, focused tests. **Target:** [T] §5.1–5.2, §7.2. **Depends on:** 25. **Budget:** estimated 400–550 changed Go lines, ceiling 550.
@@ -466,7 +475,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaengine` scope/approval helpers and owning-package tests. **Target:** [T] §5.1–5.3, §12 “validateApprovalScopes” and repair rebase. **Depends on:** 25–26. **Budget:** estimated 300–500 changed Go lines, ceiling 550.
 
-- [ ] Derive semantic read/write conflicts from trusted approved/candidate declarations and exact allocation evidence. Service scope lists are checked evidence, never trusted scope selection. Keep the common derivation used by planning and replicated validation.
+- [ ] Derive semantic read/write conflicts from trusted approved/candidate declarations and exact allocation evidence. AffectedGroups supplies ownership scopes only; separately compare repair candidate eligibility/domain/member reads with existing placement evaluation. Ignore unassigned candidates that are ineligible in both versions; do not merge candidate reads into operation ownership or native collection. Service scope lists are checked evidence, never trusted scope selection. Keep the common derivation used by planning and replicated validation.
 - [ ] Check captured group source versions/current owners and required affected group sets under the FSM lock. Prepare dependent-closure input for Task 29; its final closure and atomic installation remain there. Unknown dependencies refuse independence.
 - [ ] Test omitted/extra/duplicate scopes, stale source/owner expectations, disjoint edits versus shared eligibility/rules, node-only edits and allocation conflicts. Repair must not read every unrelated node field; same-group edits and exact host/member changes remain conflicts.
 

@@ -613,3 +613,18 @@ Verified
 - Final make test: 1236/1236, 11.312s; test-reports/unit/20261015T214333.022723Z-vl83stzn/report.md. Staged lint passes at /tmp/gquorum-task25-lint.log; full checkpoint make lint passes at /tmp/gquorum-checkpoint35-lint.log. Extracted candidate identity comparison to meet cognitive-complexity 16; reran final lint and units after the change. Diff checks pass; 239 changed handwritten Go lines, below 550. Pure derivation adds no I/O/concurrency; no new functional/race/Docker run.
 - Commit-35 dead-code audit: production convergedPlanInput and legacyPlanningObservations are deleted in this batch; only explicit test fixtures retain the former name. No checkPlanShape or validatePlanCleanupCoverage remains. observeGroups still serves legacy scheduling, DeletionBase serves legacy placement/drain/controller reads, and OperatorBase serves the old controller store; retain until their named conversion/removal tasks (activation 70). Reused the group-ID union rather than duplicating it. Full unused lint passes.
 - Five-commit review range is 0583913..HEAD: Correction 10 and Tasks 22–25. Request peer review immediately after this commit and evaluate findings before another implementation commit. Full target remains unfinished.
+
+
+## Correction 11 — Separate ownership from repair candidate reads
+Date: 2026-10-16. Commit: this entry's commit (implementation/correction commit 36).
+
+Implemented
+- Independently reproduced thread-9 finding 1: adding either an eligible worker or an ineligible metadata node returned every load group in AffectedGroups. The helper is not yet a live ownership gate, but wiring it would capture unrelated groups and require their quorum during admission.
+- AffectedGroups now includes changed declarations/effective rules and assigned-host eligibility/state/member changes. It reuses EvaluatePlacement but filters unassigned candidates from ownership. New candidate admission/removal, identity or selector/type/domain changes no longer seize load groups; actual materialized assignments still do. Removed the overbroad candidateIdentityChanged/placementIdentityChanged helpers.
+- Clarified target §5.1 FI_SCOPE_READS and made separate candidate read comparisons explicit in Task 27, including ineligible-in-both filtering. No extra public read-set API. The existing placement-report helper stays unchanged for its materialization callers. Retained-host/admission closure remains a separate exact FSM obligation.
+- Closed thread 9 with accepted finding and agreed transition constraint: scoped liveness activates with complete scoped completion/persistence, never by feeding a partial plan into legacy Active=Target. No user decision or remaining disagreement.
+
+Verified
+- Focused topology units pass, including new admission/removal/materialized-assignment and unassigned selector/type/drain/reservation/domain regressions. Existing assigned-host, effective-rule, allocation, deterministic-order/copy and invalid-dependency tests pass.
+- make test: 1245/1245, 10.079s; test-reports/unit/20261015T215259.721387Z-q1kcljmb/report.md. Exact staged lint passes at /tmp/gquorum-correction11-lint.log. Diff checks pass; 145 changed handwritten Go lines, below 550. Pure scope derivation changes no I/O/concurrency/live apply path; no additional functional/race/Docker run.
+- Next task 26. Next regular five-commit review is commit 40. Full architecture remains unfinished; schema 3 still rejects scoped v4 until Task 70.

@@ -38,15 +38,15 @@ func TestAffectedGroupsDerivesDeclarationsAndDependencies(t *testing.T) {
 		{"group rule", func(d *Document) { d.Group("b").Placement.MaxReplicas++ }, []string{"b"}},
 		{"region", func(d *Document) { d.Node("n1").Region = "elsewhere" }, []string{MetaGroupID}},
 		{"unused label", func(d *Document) { d.Node("n1").Labels["owner"] = "jobs" }, []string{MetaGroupID}},
-		{"selector", func(d *Document) { d.Node("n1").Labels["tier"] = "cold" }, []string{MetaGroupID, "b"}},
-		{"type", func(d *Document) { d.Node("n1").Type = "other" }, []string{MetaGroupID, "a", "b"}},
-		{"drain", func(d *Document) { d.Node("n1").State = NodeDraining }, []string{MetaGroupID, "a", "b"}},
-		{"reservation", func(d *Document) { d.Node("n1").Labels[LabelReserved] = "true" }, []string{MetaGroupID, "a", "b"}},
+		{"selector", func(d *Document) { d.Node("n2").Labels["tier"] = "cold" }, []string{MetaGroupID, "b"}},
+		{"type", func(d *Document) { d.Node("n1").Type = "other" }, []string{MetaGroupID, "a"}},
+		{"drain", func(d *Document) { d.Node("n1").State = NodeDraining }, []string{MetaGroupID, "a"}},
+		{"reservation", func(d *Document) { d.Node("n1").Labels[LabelReserved] = "true" }, []string{MetaGroupID, "a"}},
 		{"member allocation", func(d *Document) { d.MetaGroup().NextReplicaID++ }, []string{MetaGroupID}},
 		{"member reseat", func(d *Document) {
 			d.MetaGroup().Replicas[2].ReplicaID = 4
 			d.MetaGroup().NextReplicaID = 5
-		}, []string{MetaGroupID, "a", "b"}},
+		}, []string{MetaGroupID}},
 		{"document provenance", func(d *Document) { d.Version++; d.Comment = "audit" }, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -68,13 +68,14 @@ func TestAffectedGroupsKeepsExactHostAndDomainReads(t *testing.T) {
 	after := before.Clone()
 	after.MetaGroup().Replicas[2].ReplicaID = 4
 	after.MetaGroup().NextReplicaID = 5
-	if got := AffectedGroups(before, after); !slices.Equal(got, []string{MetaGroupID, "a"}) {
-		t.Fatal("unassigned ineligible node became a repair dependency", got)
+	if got := AffectedGroups(before, after); !slices.Equal(got, []string{MetaGroupID}) {
+		t.Fatal("unassigned node became an ownership dependency", got)
 	}
 	// An assigned host remains an exact dependency even when it is ineligible.
 	before.Group("b").Replicas = append(before.Group("b").Replicas, learner("n3", 2))
 	after.Group("b").Replicas = slices.Clone(before.Group("b").Replicas)
-	if got := AffectedGroups(before, after); !slices.Equal(got, []string{MetaGroupID, "a", "b"}) {
+	before.Group("b").NextReplicaID, after.Group("b").NextReplicaID = 3, 3
+	if got := AffectedGroups(before, after); !slices.Equal(got, []string{MetaGroupID, "b"}) {
 		t.Fatal("ineligible predecessor lost its exact ownership dependency", got)
 	}
 	before = scopeDocument()
