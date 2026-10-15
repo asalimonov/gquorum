@@ -85,11 +85,11 @@ func TestDemotionGuardIsPartOfExactApproval(t *testing.T) {
 	if err := bindVoterGuards(&plan, map[string]GroupStatus{"work": groupStatus("work", 1, []uint64{1, 2, 3}, nil)}, desired); err != nil {
 		t.Fatal(err)
 	}
-	if err := ValidatePlanShape(active, desired, plan); err != nil {
+	if err := ValidatePlanShape(convergedPlanInput(active), desired, plan); err != nil {
 		t.Fatal(err)
 	}
 	plan.Steps[0].TransferReplicaID = 3
-	if err := ValidatePlanShape(active, desired, plan); err == nil {
+	if err := ValidatePlanShape(convergedPlanInput(active), desired, plan); err == nil {
 		t.Fatal("guard accepted learner or mismatched identity")
 	}
 	_, err := BuildPlan(active, desired, map[string]GroupStatus{}, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 3, MaxReplicas: 5}})

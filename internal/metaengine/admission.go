@@ -290,7 +290,7 @@ func (sm *topologySM) readmissionDocumentLocked(p CommitReadmissionProposal) (to
 		result := rejectProposal(p.ProposalID, proposalAuthorization, errorFormat, err)
 		return topology.Document{}, &result
 	}
-	if err := topology.ValidatePlanShape(sm.active, doc, p.Plan); err != nil {
+	if err := sm.validatePlanShapeLocked(doc, p.Plan); err != nil {
 		result := rejectProposal(p.ProposalID, proposalAuthorization, errorFormat, err)
 		return topology.Document{}, &result
 	}

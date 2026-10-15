@@ -59,3 +59,11 @@ type planningEvidence struct {
 	admissions  []AdmissionRecord
 	cleanup     []cleanupRecord
 }
+
+func (sm *topologySM) validatePlanShapeLocked(desired topology.Document, plan topology.Plan) error {
+	input, err := sm.planningInputLocked(desired, nil)
+	if err != nil {
+		return err
+	}
+	return topology.ValidatePlanShape(input, desired, plan)
+}

@@ -22,11 +22,11 @@ func TestScopedPlanShapeDistinguishesUnknownAndDeletedGroup(t *testing.T) {
 	input := convergedPlanInput(base)
 	input.Approved = desired.Clone()
 	input.Groups["work"] = GroupProgress{GroupID: "work"}
-	if err := checkPlanShape(input, desired, plan); err != nil {
+	if err := ValidatePlanShape(input, desired, plan); err != nil {
 		t.Fatal("initial unknown group cannot be founded", err)
 	}
 	input.Groups["work"] = GroupProgress{GroupID: "work", ConvergedVersion: 2}
-	if err := checkPlanShape(input, desired, plan); err == nil {
+	if err := ValidatePlanShape(input, desired, plan); err == nil {
 		t.Fatal("tombstoned group was refounded")
 	}
 	if err := validatePlannedSteps(input, desired, observed, plan); err == nil {
@@ -52,7 +52,7 @@ func TestScopedDeletionKeepsEveryFormerOwnerAfterApproval(t *testing.T) {
 	}
 	input := convergedPlanInput(base)
 	input.Approved = desired.Clone()
-	if err := checkPlanShape(input, desired, plan); err != nil {
+	if err := ValidatePlanShape(input, desired, plan); err != nil {
 		t.Fatal("new approval erased the retained former owners", err)
 	}
 	if err := validatePlannedSteps(input, desired, observed, plan); err != nil {
@@ -65,7 +65,7 @@ func TestScopedDeletionKeepsEveryFormerOwnerAfterApproval(t *testing.T) {
 	for i := range incomplete.Steps {
 		incomplete.Steps[i].Seq = i + 1
 	}
-	if err := checkPlanShape(input, desired, incomplete); err == nil {
+	if err := ValidatePlanShape(input, desired, incomplete); err == nil {
 		t.Fatal("deletion shape omitted a former host stop")
 	}
 	if err := validatePlannedSteps(input, desired, observed, incomplete); err == nil {
@@ -98,7 +98,7 @@ func TestScopedReadmissionUsesExactProvenMember(t *testing.T) {
 	if !hasReadmissionBoundary(input, desired, plan, "a") {
 		t.Fatal("new approved member hid the proven predecessor")
 	}
-	if err := checkPlanShape(input, desired, plan); err != nil {
+	if err := ValidatePlanShape(input, desired, plan); err != nil {
 		t.Fatal("exact readmission lost its original host boundary", err)
 	}
 	previousMeta := input.Groups[MetaGroupID]

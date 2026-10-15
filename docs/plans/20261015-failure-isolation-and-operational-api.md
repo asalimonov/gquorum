@@ -382,20 +382,20 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `topology/plan.go`, related validator/readmission entries, `internal/metaengine` approval/admission/repair validation and tests. **Target:** [T] §5.1, §7.2; contract C12. **Depends on:** 18–20. **Budget:** estimated 300–500 changed Go lines, ceiling 550.
 
-- [ ] Change ValidatePlanShape to (PlanInput, Document, Plan) and all immediate callers atomically. Reuse the internal planning collector for metadata validation. Convert related public validator/readmission base parameters when necessary to preserve exact retained proof; update their target signature notes. No public old-signature aliases.
-- [ ] Keep existing immutable-plan validation separate from new-plan omission of settled identities: retain exact old steps/voter bases and readmission provenance through the operation's pinned records. Do not fabricate declarations to satisfy shape checks.
-- [ ] Adapt pure fixture helpers to the actual owned base and explicit retained evidence; preserve behavioral assertions. Keep the existing BuildPlan/BuildPlanPreferred entry signatures until Task 22, so the remaining caller/native conversion is a bounded atomic commit.
-- [ ] Test independent proven groups, newer Approved versus older sources, intermediate identity shape, retry after prior cleanup, and stale/member/domain rejection. Remove any private adapters made obsolete by this conversion; remaining legacy adapters have Task 22/66 removal obligations.
+- [x] Change ValidatePlanShape to (PlanInput, Document, Plan) and all immediate callers atomically. Reuse the internal planning collector for metadata validation. Keep ReadmissionCovers/ValidateVoterSetTransition with the RemainingPlanView/PlanRead native-context conversion in Task 22; those are not immediate shape callers. Their later conversion must preserve exact retained proof and update target signature notes. No public old-signature aliases.
+- [x] Keep existing immutable-plan validation separate from new-plan omission of settled identities: retain exact old steps/voter bases and readmission provenance through the operation's pinned records. Do not fabricate declarations to satisfy shape checks.
+- [x] Adapt pure fixture helpers to the actual owned base and explicit retained evidence; preserve behavioral assertions. Keep the existing BuildPlan/BuildPlanPreferred entry signatures until Task 22, so the remaining caller/native conversion is a bounded atomic commit.
+- [x] Test independent proven groups, newer Approved versus older sources, intermediate identity shape, retry after prior cleanup, and stale/member/domain rejection. Remove any private adapters made obsolete by this conversion; remaining legacy adapters have Task 22/66 removal obligations.
 
 **Verification**
 
-- [ ] Run shape/voter/readmission/metadata units and relevant focused planning functional tests, staged lint and `make test`.
+- [x] Run shape/voter/readmission/metadata units and relevant focused planning functional tests, staged lint and `make test`.
 
 ### Task 22: Convert public plan construction and native-input callers
 
 **Files:** `topology/planner.go`, native/observation helpers, `internal/metaservice` planning/bootstrap, production/test planner callers. **Target:** [T] §5.1, §7.2; contract C12. **Depends on:** 18–21. **Budget:** estimated 400–550 changed Go lines, ceiling 550; re-estimate before editing and split again if necessary.
 
-- [ ] Use BuildPlan(PlanInput, Document, Rules) and BuildPlanPreferred(PlanInput, Document, PlanOptions); update every immediate production/test caller in the same commit. Delete obsolete document-to-input planner adapters, without a parallel public planner or synthetic Active.
+- [ ] Use BuildPlan(PlanInput, Document, Rules) and BuildPlanPreferred(PlanInput, Document, PlanOptions); update every immediate production/test caller in the same commit. Convert ReadmissionCovers/ValidateVoterSetTransition with RemainingPlanView/PlanRead and their actual retained/native producers, without a composite-to-convergence adapter. Delete obsolete document-to-input planner adapters, without a parallel public planner or synthetic Active.
 - [ ] Bind membership exclusively from actual NativeState, checking exact group/reporter/identity and applied evidence; use GroupProgress observations only for separate liveness/leadership. Never manufacture quorum-confirmed NativeState from cached GroupStatus in production. Keep exact founding seed handling and host-only deletion behavior.
 - [ ] Build current inputs through the real metadata collector and native read facilities, including retained observation candidates. Preserve independent Approved/proven declarations at schema-3 boundaries; scoped progress collection replaces them in Tasks 54/66. Scope-only collection is completed in Task 23.
 - [ ] Test approved/proven/native disagreement, independent convergence, unknown/missing native refusal, actual founding bootstrap, live-quorum and pinned-learner safety. Keep public API learning cost low; no optional legacy mode or public compatibility wrapper.
@@ -1132,6 +1132,8 @@ git diff --check
 Do not run broad process performance/chaos campaigns by default; the focused debt benchmark and requested failure scenarios above supply this target's explicit scope. If Docker or another prerequisite is unavailable, record exactly what remains unverified and keep its checkbox open.
 
 ## NOT PLANNED CHANGES
+
+- Task 21: `internal/metaengine/sm_test.go` forced-retirement fixture installed documents directly without their allocation counters. Added `sm.rememberAllocations(target)` so it models valid retained metadata; kept the new allocation guard strict. Focused metadata tests and make test pass.
 
 - Retained-planner pre-coding audit after thread 6: the input/identity helpers, native/prepared retirement and shape rules, shared metadata evidence collector, validator callers and native/public planner conversion cannot fit one 550-line task. Replace former Task 18 with Tasks 18–22, preserving every obligation. Former Tasks 19–72 shift by four: 76 tasks, scoped collection 54, activation 66, final audit 76. Private transitional adapters retain explicit removal tasks; no implementation commit is made before the commit-25 peer findings are evaluated.
 

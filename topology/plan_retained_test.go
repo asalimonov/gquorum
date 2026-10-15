@@ -60,7 +60,7 @@ func TestRetainedPlannerRejectsContradictoryEvidence(t *testing.T) {
 			if err := validateRetainedInput(input, desired); !errors.Is(err, fault.ErrUnsafeMembership) {
 				t.Fatal("accepted contradictory retained evidence", err)
 			}
-			if err := checkPlanShape(input, desired, Plan{Version: desired.Version}); err == nil {
+			if err := ValidatePlanShape(input, desired, Plan{Version: desired.Version}); err == nil {
 				t.Fatal("shape validation bypassed retained evidence checks")
 			}
 		})

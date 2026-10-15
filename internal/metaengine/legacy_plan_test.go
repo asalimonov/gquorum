@@ -28,7 +28,7 @@ func TestLegacyApprovalRejectsScopedPlanWithoutLosingEvidence(t *testing.T) {
 	if err := validateExactPlan(plan); err == nil {
 		t.Fatal("legacy exact-plan validator accepted dependencies")
 	}
-	if err := validateVoterChangePlan(topology.Document{}, topology.Document{}, topology.VoterChange{}, plan); err == nil {
+	if err := newTopologySM(nil, testRules()).validateVoterChangePlan(topology.Document{}, topology.VoterChange{}, plan); err == nil {
 		t.Fatal("voter path bypassed the legacy guard")
 	}
 }

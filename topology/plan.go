@@ -19,13 +19,9 @@ func comparePlanGroups(a, b string) int {
 	return cmp.Compare(a, b)
 }
 
-// ValidatePlanShape checks step ordering and exact identities against active
-// and desired topology.
-func ValidatePlanShape(active, desired Document, plan Plan) error {
-	return checkPlanShape(convergedPlanInput(active), desired, plan)
-}
-
-func checkPlanShape(input PlanInput, desired Document, plan Plan) error {
+// ValidatePlanShape checks immutable step ordering and exact identities against
+// approved intent, proven declarations and separately retained host evidence.
+func ValidatePlanShape(input PlanInput, desired Document, plan Plan) error {
 	if err := validatePlanHeader(input, desired, plan); err != nil {
 		return err
 	}
@@ -46,12 +42,8 @@ func checkPlanShape(input PlanInput, desired Document, plan Plan) error {
 		}
 	}
 
-	for id := range input.Retained {
-		if desired.Group(id) == nil {
-			if err := v.validateDeletionOrder(Step{GroupID: id}); err != nil {
-				return err
-			}
-		}
+	if err := v.validateDeletionCoverage(); err != nil {
+		return err
 	}
 	return validatePlanVoterProof(input, desired, plan)
 }

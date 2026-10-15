@@ -86,7 +86,7 @@ func (sm *topologySM) applyCommitRepairOperator(index uint64, p CommitRepairOper
 	if err := validateExactPlan(p.Plan); err != nil {
 		return rejectProposal(p.ProposalID, proposalAuthorization, errorFormat, err), false
 	}
-	if err := topology.ValidatePlanShape(sm.active, doc, p.Plan); err != nil {
+	if err := sm.validatePlanShapeLocked(doc, p.Plan); err != nil {
 		return rejectProposal(p.ProposalID, proposalAuthorization, errorFormat, err), false
 	}
 	if err := validateSingleReplicaRepair(sm.active, doc); err != nil {
@@ -635,39 +635,11 @@ func validateOperatorRetry(previous *operatorRecord, p BeginOperatorProposal) Ap
 }
 
 func (sm *topologySM) validateFirstOperatorPlan(p BeginOperatorProposal) ApplyResult {
-	base, err := sm.deletionBaseLocked(sm.latest)
-	if err != nil {
-		return rejectProposal(p.ProposalID, proposalAuthorization, errorFormat, err)
-	}
 	if err := sm.validatePlacementLocked(sm.latest); err != nil {
 		return rejectProposalError(p.ProposalID, proposalGuardrail, err)
 	}
-	if err := topology.ValidatePlanShape(base, sm.latest, p.Plan); err != nil {
+	if err := sm.validatePlanShapeLocked(sm.latest, p.Plan); err != nil {
 		return rejectProposal(p.ProposalID, proposalAuthorization, errorFormat, err)
-	}
-	return validatePlanCleanupCoverage(base, sm.latest, p)
-}
-
-func validatePlanCleanupCoverage(base, desired topology.Document, p BeginOperatorProposal) ApplyResult {
-	for _, group := range base.Groups {
-		if group.ID == topology.MetaGroupID || desired.Group(group.ID) != nil {
-			continue
-		}
-		covered := true
-		for _, replica := range group.Replicas {
-			covered = covered && topology.ReadmissionCovers(base, desired, p.Plan, replica.NodeName)
-		}
-		if covered {
-			continue
-		}
-		deleted := false
-		for _, step := range p.Plan.Steps {
-			deleted = deleted || step.GroupID == group.ID && step.Kind == topology.StepDeleteGroupState
-		}
-		if !deleted {
-			return rejectProposal(p.ProposalID, proposalAuthorization, "plan omits cleanup of approved group %q",
-				group.ID)
-		}
 	}
 	return ApplyResult{Accepted: true}
 }

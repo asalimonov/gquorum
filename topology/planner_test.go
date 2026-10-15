@@ -408,7 +408,7 @@ func TestValidatePlanShapeRejectsMissingAcknowledgementAdjacency(t *testing.T) {
 			for i := range tc.steps {
 				tc.steps[i].Seq = i + 1
 			}
-			if err := ValidatePlanShape(active, desired, Plan{Version: desired.Version, Steps: tc.steps}); err == nil {
+			if err := ValidatePlanShape(convergedPlanInput(active), desired, Plan{Version: desired.Version, Steps: tc.steps}); err == nil {
 				t.Fatalf("ValidatePlanShape accepted %+v", tc.steps)
 			}
 		})

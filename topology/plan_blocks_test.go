@@ -109,7 +109,7 @@ func TestPlanBlocksKeepDeletionAndReplacementStopsRequired(t *testing.T) {
 			plan.Steps = append(plan.Steps, Step{Seq: 2, GroupID: "work", NodeName: "n1", ReplicaID: 2, Kind: StepPrepareReplica})
 			plan.Blocks[0].Steps = []int{2}
 		}
-		if err := ValidatePlanShape(Document{}, desired, plan); err == nil || !strings.Contains(err.Error(), "requires") {
+		if err := ValidatePlanShape(PlanInput{}, desired, plan); err == nil || !strings.Contains(err.Error(), "requires") {
 			t.Fatalf("replacement=%v accepted detached required stop: %v", replacement, err)
 		}
 		plan.Blocks[0].Cleanup = nil
@@ -128,7 +128,7 @@ func TestFoundingBarrierNamesAnActualFounder(t *testing.T) {
 	}, Blocks: []PlanBlock{{GroupID: MetaGroupID, SourceVersion: 1, Steps: []int{1}}, {GroupID: "work", Steps: []int{2}}},
 		Dependencies: []StepDependency{{StepSeq: 2, Requires: []int{1}}}}
 	desired := Document{Version: 2, Groups: []Group{{ID: "work", Replicas: []Replica{{NodeName: "n2", ReplicaID: 2}}}}}
-	if err := ValidatePlanShape(Document{}, desired, plan); err == nil || !strings.Contains(err.Error(), "outside") {
+	if err := ValidatePlanShape(PlanInput{}, desired, plan); err == nil || !strings.Contains(err.Error(), "outside") {
 		t.Fatal("unrelated admission became a founding prerequisite", err)
 	}
 	desired.Groups[0].Replicas[0].NodeName = "n1"

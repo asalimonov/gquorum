@@ -518,3 +518,19 @@ Verified
 - Focused metadata collector tests passed: unknown/closed/consumed issuance, multiple supersessions, all-desired founding, no host state from intent alone, native host discovery, allocation/host/member contradictions, late removal/readmission proof, stale native state, completed deletion and owned results.
 - Final make test: 1194/1194, 7.442s; test-reports/unit/20261015T202927.809964Z-wc_6l2tz/report.md. Exact staged lint passed at /tmp/gquorum-task20-lint.log after extracting per-owner receipt interpretation and style fixes. Diff checks pass; 528 changed handwritten Go lines, below 550.
 - Pure metadata reads/collection introduce no acquired storage or background work; no additional functional/race/Docker run. Next task is public shape validation; its commit 30 triggers full lint/dead-code and peer review before further implementation.
+
+
+## Task 21 — Public scoped shape validation and immediate approval callers
+Date: 2026-10-16. Commit: this entry's commit (implementation/correction commit 30).
+
+Implemented
+- ValidatePlanShape now accepts PlanInput directly. Converted its immediate production/test callers atomically; metadata approval, repair, readmission and voter-change paths collect actual retained metadata under the FSM lock. No old-signature alias or composite-to-convergence adapter is added.
+- Removed the obsolete private checkPlanShape wrapper and metadata validatePlanCleanupCoverage. Public shape validation now requires every proven/retained deletion stop and the Hosted owner's retirement action, even for empty/stop-only plans. Existing Stopped debt needs no duplicate action. Existing immutable retirement-plan tests now exercise the public input directly after cleanup.
+- ReadmissionCovers/ValidateVoterSetTransition are not immediate shape callers. Kept their conversion together with RemainingPlanView/PlanRead and actual native producers in Task 22; recorded this dependency explicitly instead of inventing another document adapter. No design obligation removed.
+- Corrected one direct-state forced-retirement fixture to retain its actual allocation counters; the collector guard stays strict. New public deletion-coverage regression supplements the existing independent approved/proven, retained identity, stale member, domain, copy and immutable-plan assertions.
+- Commit-30 dead-code audit: removed checkPlanShape and validatePlanCleanupCoverage; former free planDeletedGroup is replaced by the retained-aware builder method. No unused code remains according to full lint. convergedPlanInput still has three production entry users (construction, readmission, voter transition), assigned to Task 22; legacy DeletionBase/OperatorBase retain Task 66 removal obligations for remaining consumers.
+
+Verified
+- Focused topology/metaengine/operator units passed. Metaservice functional Test(Plan|Rollback|ReadmissionJoin) passed (1.867s); no new process or concurrency behavior, so no additional race/Docker run here.
+- make test: 1195/1195, 8.921s; test-reports/unit/20261015T203346.941216Z-tv8p_lsh/report.md. Exact staged lint passed at /tmp/gquorum-task21-lint.log after two line-wrap fixes; full checkpoint make lint passed at /tmp/gquorum-checkpoint30-lint.log. Diff checks pass; 187 changed handwritten Go lines, below 550.
+- This is implementation/correction commit 30. Review range is c17ae5f..HEAD (Correction 9 and Tasks 18–21). Request the five-commit peer review and evaluate/correct its findings before another implementation commit. Task 22 needs a fresh size estimate for the coupled public/native/remaining-plan conversion. Full target remains unfinished; live schema 3 still rejects 4 until Task 66.

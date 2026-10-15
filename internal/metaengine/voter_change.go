@@ -107,16 +107,17 @@ func validateVoterChangeDocument(base, next topology.Document, change topology.V
 	return nil
 }
 
-func validateVoterChangePlan(base, next topology.Document, change topology.VoterChange, plan topology.Plan) error {
+func (sm *topologySM) validateVoterChangePlan(next topology.Document, change topology.VoterChange,
+	plan topology.Plan) error {
 	if err := validateLegacyPlan(plan); err != nil {
 		return err
 	}
-	if err := topology.ValidatePlanShape(base, next, plan); err != nil {
+	if err := sm.validatePlanShapeLocked(next, plan); err != nil {
 		return err
 	}
 	check := voterPlanCheck{next: next, change: change, plan: plan,
 		voters: make(map[uint64]bool), policy: next.Group(change.GroupID).VoterConfig}
-	for _, r := range base.VotersOf(change.GroupID) {
+	for _, r := range sm.active.VotersOf(change.GroupID) {
 		check.voters[r.ReplicaID] = true
 	}
 	for _, step := range plan.Steps {
@@ -242,7 +243,7 @@ func (sm *topologySM) applyCommitVoterChange(index uint64, p CommitVoterChangePr
 	if !doc.Group(p.Change.GroupID).UpdatedAt.Equal(p.At) {
 		return rejectProposal(p.ProposalID, proposalAuthorization, "voter change timestamp differs"), false
 	}
-	if err := validateVoterChangePlan(sm.active, doc, p.Change, p.Plan); err != nil {
+	if err := sm.validateVoterChangePlan(doc, p.Change, p.Plan); err != nil {
 		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
 	}
 	if err := sm.validateDocument(doc); err != nil {

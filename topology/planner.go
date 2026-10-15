@@ -52,7 +52,7 @@ func constructPlan(active, desired Document, observed map[string]GroupStatus, op
 	if err := bindVoterGuards(&plan, observed, desired); err != nil {
 		return Plan{}, err
 	}
-	if err := checkPlanShape(input, desired, plan); err != nil {
+	if err := ValidatePlanShape(input, desired, plan); err != nil {
 		return Plan{}, planUnsafef("%v", err)
 	}
 	if err := validatePlannedSteps(input, desired, observed, plan); err != nil {

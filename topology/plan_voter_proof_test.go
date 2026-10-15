@@ -11,7 +11,7 @@ func TestValidatePlanShapeRequiresExactVoterProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ValidatePlanShape(active, desired, valid); err != nil {
+	if err := ValidatePlanShape(convergedPlanInput(active), desired, valid); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
@@ -31,7 +31,7 @@ func TestValidatePlanShapeRequiresExactVoterProof(t *testing.T) {
 			t.Parallel()
 			plan := valid.Clone()
 			tc.change(&plan)
-			if err := ValidatePlanShape(active, desired, plan); err == nil {
+			if err := ValidatePlanShape(convergedPlanInput(active), desired, plan); err == nil {
 				t.Fatalf("accepted altered voter proof: %+v", plan)
 			}
 		})
@@ -50,7 +50,7 @@ func TestValidatePlanShapeRejectsSecondDestructionInOnePair(t *testing.T) {
 	for i := range plan.Steps {
 		plan.Steps[i].Seq = i + 1
 	}
-	if err := ValidatePlanShape(active, desired, plan); err == nil {
+	if err := ValidatePlanShape(convergedPlanInput(active), desired, plan); err == nil {
 		t.Fatal("preparatory wait covered two destructive actions")
 	}
 }
@@ -64,12 +64,12 @@ func TestValidatePlanShapeBindsApprovedLabelViews(t *testing.T) {
 	}
 	changedTarget := desired.Clone()
 	changedTarget.Node("d").Labels["az"] = "az-a"
-	if err := ValidatePlanShape(active, changedTarget, plan); err == nil {
+	if err := ValidatePlanShape(convergedPlanInput(active), changedTarget, plan); err == nil {
 		t.Fatal("approved plan was reinterpreted against a conflicting Target AZ")
 	}
 	changedBase := active.Clone()
 	changedBase.Node("b").Labels["az"] = "az-a"
-	if err := ValidatePlanShape(changedBase, desired, plan); err == nil {
+	if err := ValidatePlanShape(convergedPlanInput(changedBase), desired, plan); err == nil {
 		t.Fatal("approved plan accepted a different Active AZ baseline")
 	}
 }

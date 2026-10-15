@@ -625,6 +625,7 @@ func TestSM_ForcedRetirementRecordsApplyingActor(t *testing.T) {
 	sm.active = active.Clone()
 	sm.latest = target.Clone()
 	sm.target = active.Clone()
+	sm.rememberAllocations(target)
 	at := time.Now().UTC()
 	missing := apply(t, sm, 1, BeginOperatorProposal{Version: 2, Plan: plan, Origin: topology.OriginAPI, At: at, ProposalID: "missing"})
 	if missing.Accepted {

@@ -90,3 +90,40 @@ func requireCleanupOwnerStop(view voterPlanTopology, plan Plan, incoming Step, s
 	}
 	return nil
 }
+
+func (v *planShapeValidator) validateDeletionCoverage() error {
+	groups := make(map[string]bool)
+	for id := range v.input.Groups {
+		groups[id] = true
+	}
+	for id := range v.input.Retained {
+		groups[id] = true
+	}
+	for id := range groups {
+		if v.desired.Group(id) == nil {
+			if err := v.validateDeletionOrder(Step{GroupID: id}); err != nil {
+				return err
+			}
+			if err := v.validateDeletionRetirement(id); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (v *planShapeValidator) validateDeletionRetirement(group string) error {
+	for _, owner := range v.input.formerReplicas(group) {
+		if owner.Progress != RetainedHosted || hasReadmissionBoundary(v.input, v.desired, v.plan, owner.NodeName) {
+			continue
+		}
+		retirement := slices.ContainsFunc(v.plan.Steps, func(s Step) bool {
+			return s.GroupID == group && s.Kind == StepDeleteGroupState
+		})
+		if !retirement {
+			return planUnsafef("plan omits cleanup of proven or retained group %q", group)
+		}
+		break
+	}
+	return nil
+}
