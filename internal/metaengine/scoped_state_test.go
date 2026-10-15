@@ -16,7 +16,7 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// Documents/attempts are valid; convergence and authority proof validation follows in Tasks 11–13.
+// Documents/attempts are valid; convergence and authority proof validation follows in Tasks 11–14.
 func scopedCodecFixture() scopedState {
 	at := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
 	id := storage.Identity{ClusterID: "c", GroupID: "a", NodeName: "n", ReplicaID: 7}

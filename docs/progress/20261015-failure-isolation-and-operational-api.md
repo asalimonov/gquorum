@@ -281,3 +281,25 @@ Verified
 - make test: 1024/1024, 8.668s; test-reports/unit/20261015T175040.148142Z-ws9s3ure/report.md.
 - Exact staged lint passed (unit/functional vet, production golangci, selected revive and merged unused); /tmp/gquorum-task12-lint.log. Extracted checks for complexity/line limits without suppressions. Changed handwritten Go remains below 550 lines. Pure validation adds no acquired resources or concurrency; no functional/race run required here.
 - Next commit is checkpoint 15, followed by full dead-code inspection and peer review before subsequent implementation.
+
+## Task 13 — Validate exact cleanup and collection proof
+Date: 2026-10-15. Commit: this entry’s commit (implementation/correction commit 15).
+
+Implemented
+- Isolated v4 restoration binds cleanup storage/member/replica identity to retained approved or proven declaration context. A staged-only declaration is insufficient. Exact stop/retirement actions remain bound to their immutable operation when retained, or to independently retained debt after operation pruning.
+- Native removal, required stop and retirement milestones bind to identical catalog receipts, exact targets/resources/actions and metadata timestamp ordering. Whole-group deletion has no invented RemovedAt and may retain unfinished required stops. Complete retained readmission batches provide the separate action-free proof path.
+- Collection requires exact identity, former member, retirement key, nonempty opaque token, its own nonzero journal sequence and host timestamp. Memory storage rejects collection. Collection sequence comes from a separate bucket and its host clock differs from metadata timestamps; neither is falsely ordered against retirement evidence counters/clocks.
+- Tests retain prior state/indexes on malformed proof; codec fixtures now include real stop/removal evidence. Successor key separation remains a pure index test: a copied predecessor receipt is no longer presented as valid successor restore proof.
+- Before editing, split the remaining proof task into cleanup (13) and admission/voter/completed-step proof (14). Plan now has 69 tasks; activation is 59. Live Machine restore/writes still reject v4. Fixture admission/voter data and successful-step evidence remain pending Task 14, rather than implied complete by this checkpoint.
+
+Verified
+- Focused scoped tests passed; make test: 1048/1048, 9.127s, test-reports/unit/20261015T175807.673416Z-a2qvvsjx/report.md.
+- Staged lint and full make lint passed, including all module vet variants, production golangci, revive and merged unused checks. Logs: /tmp/gquorum-task13-lint.log and /tmp/gquorum-checkpoint15-lint.log. No lint suppressions; 391 changed handwritten Go lines; dependency/header audit confirms 69 consecutive tasks and backward dependencies.
+- Pure validation introduces no store/network acquisition or concurrency; functional/race/process checks remain assigned to ownership and final validation tasks. Live format rejection regression passed with the scoped suite.
+
+## Five-commit checkpoint 3 — Commits 11–15
+Date: 2026-10-15. Reviewed batch begins after f8c7712.
+
+- References and full unused-code lint identify no safely removable declaration. New graph/proof helpers are reached by isolated v4 decoding. validateLegacyPlan still protects live schema-3 approvals/voter changes; pendingCost/newAuthorityGrantCost still protect existing issue/revocation/readmission/transfer/restore. Old cleanupProofsLocked still serves recovery, catalogs and pruning. Removing these before replacing consumers would weaken the live path.
+- Scoped authority settlement reuses existing predicates and obligation validation rather than adding parallel implementations. Transition codec/guards and residual legacy consumers are explicitly removed in Tasks 58–59; scoped revocation removes the old debt cap in Task 19.
+- Request peer review of Correction 2 plus Tasks 10–13 before the next implementation commit. Admission/voter/completed-effect validation is explicitly unfinished Task 14, and no live format has changed. Next regular checkpoint is commit 20, counting corrections.

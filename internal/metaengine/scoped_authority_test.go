@@ -78,7 +78,7 @@ func TestScopedAuthorityRetainsDetachedUnresolvedDebtBeyondOldCap(t *testing.T) 
 	t.Parallel()
 	state := scopedCodecFixture()
 	state.Rules.Limits.MaxPendingAuthorityRecords = 1
-	for i := range state.AuthorityRecords {
+	for i := range state.Cleanup {
 		state.AuthorityRecords[i].Effects = nil
 		state.Cleanup[i].Retired, state.Cleanup[i].RetiredAt, state.Cleanup[i].Collection = nil, nil, nil
 	}

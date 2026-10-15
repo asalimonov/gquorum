@@ -26,9 +26,6 @@ func indexedCodecFixture() scopedState {
 	s.Operations[len(s.Operations)-1].Status.Blocks[0].State = topology.OperationPending
 	s.Groups[2].Owner = retry.Status.ID
 	s.History = append(s.History, s.Latest.Clone()) // Duplicate views of the same version are legitimate.
-	successor := s.Cleanup[0]
-	successor.Identity.ReplicaID++
-	s.Cleanup = append(s.Cleanup, successor)
 	return s
 }
 
@@ -59,8 +56,17 @@ func TestScopedIndexesRebuildExactOwnedLookups(t *testing.T) {
 	}
 	id := storage.Identity{ClusterID: "c", GroupID: "a", NodeName: "n", ReplicaID: 7}
 	old := index.cleanup[id]
+	// Index keys must distinguish successor identities independently of their
+	// proof validation; a copied predecessor receipt is not restorable proof.
+	successor := *old
+	successor.Identity.ReplicaID++
+	restored.Cleanup = append(restored.Cleanup, successor)
+	identityIndex, err := restored.buildIndexes()
+	if err != nil {
+		t.Fatal(err)
+	}
 	id.ReplicaID++
-	if old == nil || index.cleanup[id] == nil || old == index.cleanup[id] || old.Identity.ReplicaID != 7 {
+	if identityIndex.cleanup[id] == nil || identityIndex.cleanup[id].Identity == old.Identity || old.Identity.ReplicaID != 7 {
 		t.Fatal("successor identity collapsed into predecessor")
 	}
 	index.groups["a"].Owner = "owned scratch"
