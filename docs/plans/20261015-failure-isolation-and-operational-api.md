@@ -34,7 +34,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 - `make lint` runs the repository's vet, revive, staticcheck and golangci configuration; it is not merely `go vet`. Use the current Makefile and [test guide](../testing/tests.md).
 - There is no `project.txt`, `architecture/`, or nested documentation Git repository here. Work in the existing root branch. `docs/plans/` is ignored; stage this plan explicitly without staging unrelated `docs/review/` files.
 - Each numbered task has a **hard ceiling of 550 changed handwritten Go lines, including tests**. Estimate its diff before editing. If a task would exceed that ceiling, split it into consecutive numbered tasks with their own verification, update subsequent references, and continue within the same approved design. Do not hide a repository-wide rename inside a final audit. Generated output and documentation are reviewed separately, not an excuse to combine unrelated code changes.
-- After each five implementation commits, inspect newly obsolete code with references and unused-code lint, delete safe dead code, and request a paseo-peer review of that batch. Evaluate findings against the target and actual code, implement justified corrections as explicit bounded correction tasks/commits, and record accepted/rejected findings with evidence before continuing. Retained transition scaffolding needs a named removal task. Count all implementation/correction commits toward subsequent five-commit review boundaries; documentation/planning commits do not count.
+- After each five implementation commits, inspect newly obsolete code with references and unused-code lint, delete safe dead code, and request a paseo-peer review of that batch. Evaluate findings against the target and actual code, implement justified corrections as explicit bounded correction tasks/commits, and record accepted/rejected findings with evidence before the next implementation commit. Independent preparation may continue while the peer reviews the immutable committed range. Retained transition scaffolding needs a named removal task. Count all implementation/correction commits toward subsequent five-commit review boundaries; documentation/planning commits do not count.
 - Tasks execute in numbered order. A dependency list names additional semantic prerequisites, not permission to skip earlier tasks. At every checkpoint all modules compile and `make test` passes. Run focused tests named in each task, and focused functional/race checks when ownership or persistence changes. Fix failures encountered, including unrelated failures, and record unrelated fixes under NOT PLANNED CHANGES.
 - First introduce contracts and pure helpers, then state-machine behavior, stores and execution, then public composition. Temporary compile scaffolding is allowed only for an intermediate commit: record its exact symbol/file and removal task in the progress log. Do not introduce public V2 APIs or promise compatibility. Existing old symbols may remain until their consumers are converted; new paths must fail closed until their real implementation is connected. Remove all scaffolding by Task 54. Never synthesize an authoritative composite Document to make old code compile.
 - A signature change and all callers needed for that commit to compile belong together. Partition broad naming changes across the component tasks below; if a bridge is unavoidable, keep it private wherever possible and remove it before final cutover. No production flag chooses between old/new authority models. Change a reachable behavior only when its safety prerequisites are implemented; test new helpers directly before wiring them. A temporary stub must return a classified unsupported error, never fabricated progress or success.
@@ -86,7 +86,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** new `topology/progress.go`, `topology/read.go`, `status.go`, `views.go`. **Target:** [T] §3.2, §8.3; contract C2. **Depends on:** 1–2. **Budget:** ≤550.
 
 - [x] Add the full C2 progress structs, BlockedReason codes, FullyConverged, CleanupSummary, Validate and Clone methods. Preserve nil versus present timestamps/declarations and all JSON names.
-- [x] Prepare final ReadView{AppliedIndex, Latest, Target, FullyConverged}; GroupStatus adds Reporter, ReceivedAt and SourceVersion. ClusterStatus has bounded Operations with explicit truncation and per-group convergence/owner fields. Remove old fields only after consumers are converted in Tasks 37 and 49–53.
+- [x] Prepare final ReadView{AppliedIndex, Latest, Target, FullyConverged}; GroupStatus adds Reporter, ReporterReplicaID, ReceivedAt and SourceVersion only. ClusterStatus prepares bounded Operations with explicit truncation; its Groups conversion to GroupProgress and per-group convergence/owner projection belongs to Task 37. Remove old fields only after consumers are converted in Tasks 37 and 49–53.
 - [x] Test copy isolation, query limit normalization (100 default, 1000 maximum), invalid negative/oversized limits and exact freshness identity fields. Paging algorithm belongs to Task 36.
 
 **Verification**
@@ -116,6 +116,16 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Verification**
 
 - [x] Run limits/scheduling/metrics units and `make test`.
+
+### Correction 1: Close the first five-commit review
+
+**Files:** plan/block validation, legacy FSM entry guards, scheduling copies/boundaries, status values and matching tests. **Target:** §3.2–3.3, §5.4, §6.4; review thread 2. **Budget:** ≤550 Go lines.
+
+- [x] Reject detached required deletion/replacement stops and unrelated founding prerequisites; source versions precede their plan version.
+- [x] Refuse scoped plans in all legacy FSM entry/restore paths until complete Task 54 activation; retain full classified errors.
+- [x] Keep ScheduleInput.Clone faithful, strip Desired at callback/conformance boundaries, and use explicit no-effect checks at old IsEmpty callers.
+- [x] Keep raw observations free of convergence ownership; add explicit reporter replica identity, document immutable Limits and record remaining producer/removal tasks. Reuse the existing placement clone.
+- [x] Run focused regressions, staged lint and make test; record accepted/rejected review arguments and dead-code evidence.
 
 ### Task 6: Define specialized collection contracts
 
@@ -494,7 +504,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** `internal/metaservice/progress.go`, `documents.go`, root `cluster_progress.go`/`cluster_reads.go`. **Target:** [T] §3.1–3.2, §8.3; contracts C1/C2. **Depends on:** 36. **Budget:** ≤550.
 
 - [ ] Implement ReadProgress through the existing quorum/apply query path, then decorate only returned rows from matching cached observations. Preserve reporter, received time and per-group source; nil means unknown. Never fan out for this API.
-- [ ] Implement final ReadTopology pair/marker and bounded Status operation headers (100), explicit truncation and CleanupSummary. Operation lookup retains the complete block view and remains local diagnosis without a quorum claim.
+- [ ] Implement final ReadTopology pair/marker and bounded Status operation headers (100), explicit truncation and CleanupSummary. Convert ClusterStatus.Groups to existing GroupProgress values, keeping raw GroupStatus only in Observation; adapt affected consumers together. Operation lookup retains the complete block view and remains local diagnosis without a quorum claim.
 - [ ] Test quorum loss/read cancellation, metadata-page coherence, stale successor samples, preserved timestamps, bounded projection and no remote read calls. Keep full lookup separate from page-limited projection.
 
 **Verification**
@@ -884,6 +894,8 @@ git diff --check
 Do not run broad process performance/chaos campaigns by default; the focused debt benchmark and requested failure scenarios above supply this target's explicit scope. If Docker or another prerequisite is unavailable, record exactly what remains unverified and keep its checkbox open.
 
 ## NOT PLANNED CHANGES
+
+- Review checkpoint 1: bounded Correction 1 addresses confirmed transition/validation/copy defects. Target §3.2 is clarified to keep raw GroupStatus observation-only, add ReporterReplicaID, and reuse GroupProgress in ClusterStatus at Task 37. §6.4 now explicitly documents the already-chosen immutable replicated Limits semantics; no local tuning API is added. Independent preparation may run during peer review, but fixes/disposition precede the next implementation commit.
 
 - Task 1: aggregate calculation/tests move to Task 16, where the FSM consumes them; introducing an unused helper or additional public aggregation method now would conflict with the small API and unused-code lint. Task 1 tests that cloned/paged values preserve the supplied full aggregate. No target behavior is deferred beyond its implementation task.
 

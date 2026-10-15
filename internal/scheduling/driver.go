@@ -340,7 +340,7 @@ func (r *Scheduler) healable(ctx context.Context, latest, active topology.Docume
 		return false, nil
 	}
 	plan, err := r.host.PlanFor(ctx, latest)
-	return err == nil && plan.IsEmpty(), err
+	return err == nil && len(plan.Steps) == 0, err
 }
 
 func (r *Scheduler) healStagedInternal(ctx context.Context, latest, active topology.Document) bool {
@@ -416,7 +416,7 @@ func (r *Scheduler) commitReplicaRepair(ctx context.Context, repairRequest repli
 	if err != nil {
 		return "", err
 	}
-	if plan.IsEmpty() {
+	if len(plan.Steps) == 0 {
 		return "", fault.New(fault.OperatorAuthorization, "fresh identity repair cannot have an empty plan", nil)
 	}
 	if !r.host.IsLeader() {

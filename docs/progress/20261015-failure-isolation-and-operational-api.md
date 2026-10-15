@@ -97,3 +97,38 @@ Verified:
 Transition inventory and review checkpoint:
 - MaxPendingAuthorityRecords stays live until scoped authority admission replaces its consumers in Tasks 14–15/54. ScheduleInput.Latest/Active stays until Tasks 44/51/54, and metrics.ActiveVersion until Task 46/54. None is a final compatibility promise.
 - This is the first five-commit peer/dead-code checkpoint. The batch starts after bbbe148. A dedicated peer thread will review these contracts and actual behavior; justified fixes precede Task 6.
+
+## Checkpoint 1 / Correction 1 — Peer review and transition safety
+
+Date: 2026-10-15. Implementation/correction commit 6 (the commit containing this entry).
+Review: docs/review/feat_failure-isolation-and-api.md, thread 2, rounds 1–2. Range reviewed: bbbe148..bab8b91.
+
+Disposition and corrections:
+- Accepted required-stop validation: deletion and same-host replacement stops cannot be detached cleanup. Founding prerequisites must name actual founders; block source versions strictly precede their plan version. Added regressions.
+- Accepted fail-closed transition guard: the live legacy FSM and restore cannot accept Blocks/Dependencies that their records discard. Shared validateLegacyPlan covers ordinary approval, repair, readmission, voter changes and restored exact plans. Remove this temporary guard at Task 54's complete format/dispatch activation, not merely when a new record type exists.
+- Accepted faithful Clone: policy filtering belongs at the driver/conformance callback boundary. Added copy/filter and conformance mutation regressions; a custom policy can use its owned input as scratch without changing its test case.
+- Accepted no-effect caller correction: the four repair/healing guards now inspect len(plan.Steps), since declarations can have blocks without effects.
+- Accepted observation/progress separation: raw GroupStatus no longer carries ConvergedVersion/OperationID; explicit ReporterReplicaID joins Reporter/ReceivedAt/SourceVersion. Target §3.2 and Task 37 now reuse GroupProgress for ClusterStatus.Groups rather than adding another public header entity. Native observations stay nested and untrusted for convergence.
+- Did not adopt peer's local worker-setting proposal: target §6.4/C9 explicitly chooses replicated Limits, consistent with the repository's sole-capacity-setting rule. Worker values therefore require agreement and are immutable on retained restart/join, just like other Limits. Documented this tradeoff in target and Go docs; runtime tuning and a new local API are outside this approved target. The peer proposed treating this as a user decision; Codex retains the already-approved design unless the user changes it.
+- Peer follow-up is in round 2. Notification was refused because the terminal was asking its user about worker settings; no draft/input was overwritten. No claim of peer agreement on that optional redesign.
+
+Dead-code review:
+- Full make lint (all modules/variants and merged unused declarations) passed at bab8b91; staged lint passed the correction. No newly unreachable declaration was found.
+- Removed duplicate placement cloning by reusing PlacementRule.Clone. Retained live aliases/fields are not dead: fault aliases still occur in 80 Go files, the pending cap in 10, and ActiveVersion in 32. Their conversion/removal remains assigned, not a compatibility promise. Broad mechanical renames and new public Group/Node clone APIs were not introduced.
+
+Exact producer/removal inventory:
+- ReadView.FullyConverged, ClusterStatus.FullyConverged/Operations/OperationsTruncated/Cleanup and group progress: Task 37, final live activation Task 54.
+- GroupStatus.Reporter/ReporterReplicaID/ReceivedAt/SourceVersion: exact cache/source producers and invalidation in Tasks 37/46/49; never relabel a predecessor sample.
+- ScheduleInput.Groups and omission of old Latest/Active: Task 44/51; callback filtering is already enforced if Groups is supplied.
+- Metrics.TargetVersion/GroupObservation.SourceVersion: Task 46; remove ActiveVersion then/by Task 54.
+- Limits worker consumption: Tasks 39–40. Remove old durable-proof cap via Tasks 14–15/54.
+- MutationResult.OperatorID and fault.Operator aliases: Tasks 53–54. history_unavailable result classification gets its FSM producer in Task 24.
+- These value contracts remain intermediate scaffolding until their producer tasks; current zero fields are not evidence of scoped completion. Final ordinary API/adapter conversions and docs remain Tasks 50–54/61–62.
+
+Verified:
+- Focused topology, metaengine, public/internal scheduling and conformance units passed; functional exact-CAS/preview/partial-approval regressions passed.
+- To exclude uncommitted independent Task 6 preparation, exported the exact staged index and ran make test there: 875/875 cases passed in 8.726s. Report: /private/tmp/gquorum-correction1.SbYvwJ/test-reports/unit/20261015T161039.763195Z-hq17l3nq/report.md.
+- Working-tree make test including Task 6 preparation also passed 896/896 cases; test-reports/unit/20261015T160906.692182Z-84vggl29/report.md.
+- The physical baseline meta-store rejection regression passed; immutable fixture paths have no diff. Staged lint and git diff --check passed after extracting the replacement predicate to meet cognitive-complexity limits.
+
+Cadence: correction counts as commit 6; the next peer/dead-code review is due at implementation/correction commit 10. Independent preparation may continue while an immutable range is reviewed, but accepted corrections precede the next implementation commit.

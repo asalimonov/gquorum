@@ -9,23 +9,22 @@ import (
 // GroupStatus records observed Raft membership, leadership, progress and voter
 // liveness.
 type GroupStatus struct {
-	Reporter         Identity                   `json:"reporter"`
-	ReceivedAt       time.Time                  `json:"received_at"`
-	SourceVersion    uint64                     `json:"source_version"`
-	ConvergedVersion uint64                     `json:"converged_version"`
-	OperationID      OperationID                `json:"operation_id,omitempty"`
-	GroupID          string                     `json:"group_id"`
-	HostNode         string                     `json:"host_node"`
-	Found            bool                       `json:"found"`
-	LeaderID         uint64                     `json:"leader_id"`
-	Term             uint64                     `json:"term"`
-	Commit           uint64                     `json:"commit"`
-	Applied          uint64                     `json:"applied"`
-	ConfState        raftpb.ConfState           `json:"conf_state"`
-	Progress         map[uint64]ReplicaProgress `json:"progress,omitempty"`
-	LiveVoters       map[uint64]bool            `json:"live_voters,omitempty"`
-	HealthKnown      bool                       `json:"health_known"`
-	ErrorCode        string                     `json:"error_code,omitempty"`
+	ReporterReplicaID uint64                     `json:"reporter_replica_id"`
+	Reporter          Identity                   `json:"reporter"`
+	ReceivedAt        time.Time                  `json:"received_at"`
+	SourceVersion     uint64                     `json:"source_version"`
+	GroupID           string                     `json:"group_id"`
+	HostNode          string                     `json:"host_node"`
+	Found             bool                       `json:"found"`
+	LeaderID          uint64                     `json:"leader_id"`
+	Term              uint64                     `json:"term"`
+	Commit            uint64                     `json:"commit"`
+	Applied           uint64                     `json:"applied"`
+	ConfState         raftpb.ConfState           `json:"conf_state"`
+	Progress          map[uint64]ReplicaProgress `json:"progress,omitempty"`
+	LiveVoters        map[uint64]bool            `json:"live_voters,omitempty"`
+	HealthKnown       bool                       `json:"health_known"`
+	ErrorCode         string                     `json:"error_code,omitempty"`
 	// LeaderNodeName is resolved from LeaderID through the captured Active view
 	// in cluster status, local meta status and scheduler inputs. In those
 	// views,

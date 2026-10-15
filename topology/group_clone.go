@@ -19,9 +19,7 @@ func cloneGroup(group Group) Group {
 		owned.Hosting = &hosting
 	}
 	if group.Placement != nil {
-		placement := *group.Placement
-		placement.AllowedNodeTypes = slices.Clone(placement.AllowedNodeTypes)
-		placement.NodeSelector = maps.Clone(placement.NodeSelector)
+		placement := group.Placement.Clone()
 		owned.Placement = &placement
 	}
 	return owned

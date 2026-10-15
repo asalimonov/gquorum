@@ -29,7 +29,12 @@ func CheckRepairPolicy(t *testing.T, factory func() scheduling.RepairPolicy, cas
 	for _, tc := range cases {
 		t.Run(tc.Name, func(t *testing.T) {
 			before := tc.Input.Clone()
-			got, err := factory().Schedule(context.Background(), tc.Input.Clone())
+			input := tc.Input.Clone()
+			for id, progress := range input.Groups {
+				progress.Desired = nil
+				input.Groups[id] = progress
+			}
+			got, err := factory().Schedule(context.Background(), input)
 			check(t, got, err, expectedResult{Value: tc.Want, ErrorCode: tc.ErrorCode})
 			if !reflect.DeepEqual(tc.Input, before) {
 				t.Fatal("scheduler modified the original case through its owned input")

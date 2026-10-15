@@ -219,6 +219,9 @@ func (sm *topologySM) applyActivateTarget(p ActivateTargetProposal) (ApplyResult
 }
 
 func validateExactPlan(plan topology.Plan) error {
+	if err := validateLegacyPlan(plan); err != nil {
+		return err
+	}
 	if err := topology.ValidatePlanGuardChain(plan); err != nil {
 		return err
 	}

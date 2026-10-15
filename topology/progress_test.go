@@ -39,7 +39,7 @@ func TestProgressCloneOwnsEveryRow(t *testing.T) {
 	page := ProgressPage{AppliedIndex: 4, ReadAt: at,
 		Groups: []GroupProgress{{GroupID: "work", Desired: &group, Approved: &group, Converged: &group,
 			Blocked: blocked, Observation: &GroupStatus{Reporter: Identity{MemberID: 1, InstanceID: "instance"},
-				ReceivedAt: at, SourceVersion: 2, LiveVoters: map[uint64]bool{1: true}}}},
+				ReporterReplicaID: 7, ReceivedAt: at, SourceVersion: 2, LiveVoters: map[uint64]bool{1: true}}}},
 		Nodes:      []NodeProgress{{NodeName: "n", Desired: &node, Approved: &node, Converged: &node, Blocked: blocked}},
 		Operations: []OperationStatus{{Blocks: []BlockStatus{{Blocked: blocked}}}},
 		Cleanup: []CleanupProgress{{RemovedAt: &at, StoppedAt: &at, RetiredAt: &at, CollectedAt: &at,
@@ -60,6 +60,7 @@ func TestProgressCloneOwnsEveryRow(t *testing.T) {
 	}
 	owned.Groups[0].Observation.LiveVoters[1] = false
 	owned.Groups[0].Observation.Reporter.MemberID++
+	owned.Groups[0].Observation.ReporterReplicaID++
 	for _, reason := range []*BlockedReason{owned.Groups[0].Blocked, owned.Nodes[0].Blocked,
 		owned.Operations[0].Blocks[0].Blocked, owned.Cleanup[0].Blocked} {
 		reason.Code = BlockedUnconfirmed

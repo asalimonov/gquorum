@@ -47,7 +47,6 @@ func (in ScheduleInput) Clone() ScheduleInput {
 	in.Latest, in.Target, in.Active = in.Latest.Clone(), in.Target.Clone(), in.Active.Clone()
 	in.Groups = maps.Clone(in.Groups)
 	for id, progress := range in.Groups {
-		progress.Desired = nil
 		in.Groups[id] = progress.Clone()
 	}
 	in.Status = maps.Clone(in.Status)

@@ -7,7 +7,7 @@ import "fmt"
 func validatePlanBlocks(plan Plan) error {
 	required := make(map[int]bool, len(plan.Steps))
 	for i, block := range plan.Blocks {
-		if block.SourceVersion > plan.Version || ValidateID(block.GroupID) != nil ||
+		if block.SourceVersion >= plan.Version || ValidateID(block.GroupID) != nil ||
 			i > 0 && comparePlanGroups(plan.Blocks[i-1].GroupID, block.GroupID) >= 0 {
 			return invalid("plan blocks require sorted unique groups and a valid source version")
 		}
@@ -59,7 +59,7 @@ func validatePlanDependencies(plan Plan, required map[int]bool) error {
 				return invalid("barrier prerequisites must be ordered unique required steps")
 			}
 			if !validBarrierShape(step, plan.Steps[seq-1]) {
-				return fmt.Errorf("step %d has an unsupported admission/removal barrier on %d", step.Seq, seq)
+				return invalid(fmt.Sprintf("step %d has an unsupported admission/removal barrier on %d", step.Seq, seq))
 			}
 		}
 	}

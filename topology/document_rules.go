@@ -1,6 +1,8 @@
 package topology
 
 // Limits bounds admitted nodes, load replicas and concurrent execution work.
+// Limits are immutable replicated cluster settings: participants must agree, and
+// changing them rejects retained-state startup or admission.
 type Limits struct {
 	MaxPendingAuthorityRecords int `json:"max_pending_authority_records,omitempty"`
 	MaxNodes                   int `json:"max_nodes"`

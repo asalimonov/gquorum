@@ -63,7 +63,7 @@ func (r *Scheduler) evaluatePolicy(ctx context.Context, in schedulingapi.Schedul
 	r.statusMu.Lock()
 	r.callback, r.callbackStarted = callbackCtx, in.Now
 	r.statusMu.Unlock()
-	decision, err := r.policy.Schedule(callbackCtx, in.Clone())
+	decision, err := r.policy.Schedule(callbackCtx, policyInput(in))
 	r.statusMu.Lock()
 	r.callback = nil
 	r.statusMu.Unlock()

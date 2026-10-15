@@ -31,6 +31,9 @@ func ValidatePlanShape(active, desired Document, plan Plan) error {
 		if err := validatePlanBlocks(plan); err != nil {
 			return err
 		}
+		if err := validateBlockSafety(desired, plan); err != nil {
+			return err
+		}
 	}
 	v := planShapeValidator{active: active, desired: desired, plan: plan,
 		seenGroups: make(map[string]bool), stopped: make(map[string]map[uint64]bool)}

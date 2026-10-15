@@ -94,3 +94,46 @@ func TestPlanBlocksCloneAndEquality(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanBlocksKeepDeletionAndReplacementStopsRequired(t *testing.T) {
+	t.Parallel()
+	for _, replacement := range []bool{false, true} {
+		plan := Plan{Version: 2, Steps: []Step{{Seq: 1, GroupID: "work", NodeName: "n1", ReplicaID: 1, Kind: StepStopReplica}},
+			Blocks: []PlanBlock{{GroupID: "work", SourceVersion: 1, Cleanup: []int{1}}}}
+		desired := Document{Version: 2}
+		if replacement {
+			desired.Groups = []Group{{ID: "work", Replicas: []Replica{{NodeName: "n1", ReplicaID: 2}}}}
+			plan.Steps = append(plan.Steps, Step{Seq: 2, GroupID: "work", NodeName: "n1", ReplicaID: 2, Kind: StepPrepareReplica})
+			plan.Blocks[0].Steps = []int{2}
+		}
+		if err := ValidatePlanShape(Document{}, desired, plan); err == nil || !strings.Contains(err.Error(), "requires") {
+			t.Fatalf("replacement=%v accepted detached required stop: %v", replacement, err)
+		}
+		plan.Blocks[0].Cleanup = nil
+		plan.Blocks[0].Steps = append([]int{1}, plan.Blocks[0].Steps...)
+		if err := validateBlockSafety(desired, plan); err != nil {
+			t.Fatal("required stop refused", err)
+		}
+	}
+}
+
+func TestFoundingBarrierNamesAnActualFounder(t *testing.T) {
+	t.Parallel()
+	plan := Plan{Version: 2, Steps: []Step{
+		{Seq: 1, GroupID: MetaGroupID, Kind: StepPrepareReplica, NodeName: "n1", ReplicaID: 1},
+		{Seq: 2, GroupID: "work", Kind: StepCreateFoundingGroup},
+	}, Blocks: []PlanBlock{{GroupID: MetaGroupID, SourceVersion: 1, Steps: []int{1}}, {GroupID: "work", Steps: []int{2}}},
+		Dependencies: []StepDependency{{StepSeq: 2, Requires: []int{1}}}}
+	desired := Document{Version: 2, Groups: []Group{{ID: "work", Replicas: []Replica{{NodeName: "n2", ReplicaID: 2}}}}}
+	if err := ValidatePlanShape(Document{}, desired, plan); err == nil || !strings.Contains(err.Error(), "outside") {
+		t.Fatal("unrelated admission became a founding prerequisite", err)
+	}
+	desired.Groups[0].Replicas[0].NodeName = "n1"
+	if err := validateBlockSafety(desired, plan); err != nil {
+		t.Fatal("actual founder refused", err)
+	}
+	plan.Blocks[0].SourceVersion = plan.Version
+	if err := validatePlanBlocks(plan); err == nil {
+		t.Fatal("block claimed its own output as source")
+	}
+}

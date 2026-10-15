@@ -108,6 +108,9 @@ func validateVoterChangeDocument(base, next topology.Document, change topology.V
 }
 
 func validateVoterChangePlan(base, next topology.Document, change topology.VoterChange, plan topology.Plan) error {
+	if err := validateLegacyPlan(plan); err != nil {
+		return err
+	}
 	if err := topology.ValidatePlanShape(base, next, plan); err != nil {
 		return err
 	}

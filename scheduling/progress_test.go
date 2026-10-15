@@ -3,13 +3,14 @@
 package scheduling
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func TestScheduleInputOwnsProgressWithoutStagedIntent(t *testing.T) {
+func TestScheduleInputCloneOwnsAndPreservesProgress(t *testing.T) {
 	t.Parallel()
 	group := &topology.Group{ID: "g", Replicas: []topology.Replica{{NodeName: "n", ReplicaID: 4}}}
 	at := time.Unix(10, 0)
@@ -21,12 +22,13 @@ func TestScheduleInputOwnsProgressWithoutStagedIntent(t *testing.T) {
 	}}}
 	owned := in.Clone()
 	progress := owned.Groups["g"]
-	if progress.Desired != nil || in.Groups["g"].Desired != group {
-		t.Fatal("policy received staged intent or clone altered the input")
+	if !reflect.DeepEqual(in, owned) || in.Groups["g"].Desired != group {
+		t.Fatal("clone changed its input")
 	}
 	if progress.ConvergedVersion != 7 || progress.OperationID != "exec-v8-a1" || progress.Observation.SourceVersion != 7 || !progress.Observation.ReceivedAt.Equal(at) {
 		t.Fatalf("scope provenance changed: %+v", progress)
 	}
+	progress.Desired.Replicas[0].ReplicaID = 98
 	progress.Approved.Replicas[0].ReplicaID = 99
 	progress.Converged.Replicas[0].NodeName = "changed"
 	progress.Blocked.Code = "changed"

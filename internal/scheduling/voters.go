@@ -28,7 +28,7 @@ func (r *Scheduler) commitVoterChange(ctx context.Context, in schedulingapi.Sche
 	if err != nil {
 		return "", err
 	}
-	if plan.IsEmpty() {
+	if len(plan.Steps) == 0 {
 		return "", fault.ErrOperatorAuthorization
 	}
 	if _, err := r.recheckVoterChange(ctx, in, change); err != nil {

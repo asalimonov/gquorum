@@ -603,7 +603,7 @@ func (g *Group) ReseatReplica(ctx context.Context, id, name string, o MutationOp
 	if err != nil {
 		return MutationResult{Placement: reportFromError(err)}, err
 	}
-	if plan.IsEmpty() {
+	if len(plan.Steps) == 0 {
 		return MutationResult{}, fault.ErrOperatorAuthorization
 	}
 	committed, err := g.propose(ctx, metaengine.CommitRepairOperatorProposal{
