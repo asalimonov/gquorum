@@ -101,6 +101,13 @@ func TestScopedReadmissionUsesExactProvenMember(t *testing.T) {
 	if err := checkPlanShape(input, desired, plan); err != nil {
 		t.Fatal("exact readmission lost its original host boundary", err)
 	}
+	previousMeta := input.Groups[MetaGroupID]
+	input.Groups[MetaGroupID] = GroupProgress{GroupID: MetaGroupID, ConvergedVersion: desired.Version,
+		Converged: desired.MetaGroup()}
+	if !hasReadmissionBoundary(input, desired, plan, "a") {
+		t.Fatal("converged metadata erased the historical load-owner retirement boundary")
+	}
+	input.Groups[MetaGroupID] = previousMeta
 	row := input.Nodes["a"]
 	row.MemberID = 4
 	input.Nodes["a"] = row

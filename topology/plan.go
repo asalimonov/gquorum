@@ -26,18 +26,8 @@ func ValidatePlanShape(active, desired Document, plan Plan) error {
 }
 
 func checkPlanShape(input PlanInput, desired Document, plan Plan) error {
-	if plan.Version != desired.Version {
-		return fmt.Errorf("plan version %d does not match desired version %d", plan.Version, desired.Version)
-	}
-	// The current planner emits flat plans until its scoped-input conversion.
-	// Remove this transitional guard when all producers supply block partitions.
-	if len(plan.Blocks) != 0 || len(plan.Dependencies) != 0 {
-		if err := validatePlanBlocks(plan); err != nil {
-			return err
-		}
-		if err := validateBlockSafety(desired, plan); err != nil {
-			return err
-		}
+	if err := validatePlanHeader(input, desired, plan); err != nil {
+		return err
 	}
 	v := planShapeValidator{input: input, desired: desired, plan: plan,
 		seenGroups: make(map[string]bool), stopped: make(map[string]map[uint64]bool)}
@@ -57,6 +47,26 @@ func checkPlanShape(input PlanInput, desired Document, plan Plan) error {
 	}
 
 	return validatePlanVoterProof(input, desired, plan)
+}
+
+func validatePlanHeader(input PlanInput, desired Document, plan Plan) error {
+	if plan.Version != desired.Version {
+		return fmt.Errorf("plan version %d does not match desired version %d", plan.Version, desired.Version)
+	}
+	if err := validatePlanMembers(input, desired); err != nil {
+		return err
+	}
+	// The current planner emits flat plans until its scoped-input conversion.
+	// Remove this transitional guard when all producers supply block partitions.
+	if len(plan.Blocks) != 0 || len(plan.Dependencies) != 0 {
+		if err := validatePlanBlocks(plan); err != nil {
+			return err
+		}
+		if err := validateBlockSafety(desired, plan); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func preparatoryWaitPair(steps []Step, index int, incoming Step) bool {

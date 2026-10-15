@@ -28,6 +28,9 @@ func constructPlan(active, desired Document, observed map[string]GroupStatus, op
 		return Plan{}, err
 	}
 	input := convergedPlanInput(active)
+	if err := validatePlanMembers(input, desired); err != nil {
+		return Plan{}, err
+	}
 	if err := observedVoterIdentities(input, desired, observed); err != nil {
 		return Plan{}, err
 	}

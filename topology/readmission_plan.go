@@ -1,6 +1,11 @@
 package topology
 
-import "slices"
+import (
+	"fmt"
+	"slices"
+
+	"github.com/asalimonov/gquorum/fault"
+)
 
 // ReadmissionCovers reports whether the plan's exact replacement metadata
 // preparation is the retirement boundary for this former host. The metadata FSM
@@ -11,12 +16,31 @@ func ReadmissionCovers(active, desired Document, plan Plan, node string) bool {
 
 func hasReadmissionBoundary(input PlanInput, desired Document, plan Plan, node string) bool {
 	member := desired.MemberID(node)
-	previous, known := input.provenMember(node)
-	if !known || member == 0 || member <= previous {
+	previous, known := input.loadOwnerMember(node)
+	metaMember := input.convergedMetaMember(node)
+	if !known || member == 0 || member <= previous || metaMember > member {
 		return false
+	}
+	if metaMember == member {
+		return true // Exact convergence includes the receipt-gated admission.
 	}
 	replica := exactPlanReplica(desired, Step{GroupID: MetaGroupID, NodeName: node, ReplicaID: member})
 	return replica != nil && ValidAdmissionSequence(plan.Steps, node, member, replica.Role)
+}
+
+func validatePlanMembers(input PlanInput, desired Document) error {
+	meta := input.Groups[MetaGroupID]
+	if meta.ConvergedVersion == 0 || meta.Converged == nil {
+		return nil
+	}
+	for _, replica := range meta.Converged.Replicas {
+		member := desired.MemberID(replica.NodeName)
+		if member != 0 && member < replica.ReplicaID {
+			return fmt.Errorf("%w: desired member %s/%d precedes converged member %d", fault.ErrReplanRequired,
+				replica.NodeName, member, replica.ReplicaID)
+		}
+	}
+	return nil
 }
 
 // bindReadmissionRetirement constructs the final plan before approval. A fresh
@@ -30,7 +54,7 @@ func bindReadmissionRetirement(input PlanInput, desired Document, plan Plan) Pla
 	}
 	var replacements []Replica
 	for _, r := range sortedReplicas(meta.Replicas) {
-		previous, known := input.provenMember(r.NodeName)
+		previous, known := input.loadOwnerMember(r.NodeName)
 		if known && r.ReplicaID > previous {
 			replacements = append(replacements, r)
 		}
@@ -89,7 +113,7 @@ func (p *readmissionPlanBuilder) emit(r Replica) {
 		return
 	}
 	p.emitted[r.NodeName] = true
-	if p.plannedPreparation[r.NodeName] {
+	if p.plannedPreparation[r.NodeName] || p.input.convergedMetaMember(r.NodeName) == r.ReplicaID {
 		return // preserve the planner's paired waits and destructive ordering
 	}
 	kinds := []StepKind{StepPrepareReplica, StepAddLearner}
@@ -114,7 +138,7 @@ func (p *readmissionPlanBuilder) appendStep(step Step) {
 	r := p.replacement(step.NodeName)
 	if step.GroupID == MetaGroupID && r != nil && step.ReplicaID == r.ReplicaID {
 		p.emit(*r)
-		if !p.plannedPreparation[r.NodeName] &&
+		if !p.plannedPreparation[r.NodeName] && p.input.convergedMetaMember(r.NodeName) != r.ReplicaID &&
 			slices.Contains([]StepKind{StepPrepareReplica, StepAddLearner, StepWaitCaughtUp,
 				StepPromoteVoter}, step.Kind) {
 			return

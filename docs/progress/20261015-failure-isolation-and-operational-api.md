@@ -441,3 +441,20 @@ Verified
 - Focused topology and operator suites passed. Final make test: 1139/1139, 8.859s; test-reports/unit/20261015T192822.774996Z-kb5vpob5/report.md.
 - Exact staged lint passed at /tmp/gquorum-task17-lint.log. Diff checks passed; 224 changed handwritten Go lines, below 550. Earlier failed runs identified incomplete new test observations and the meta-identity fallback; the final run covers all fixes.
 - Pure planning changes introduce no acquired resources/concurrency; no new functional/race/Docker run here. Public caller/service coverage remains Task 18. Next regular five-commit checkpoint is commit 25; an early design consultation does not replace that review.
+
+
+## Correction 8 — Preserve historical load ownership after metadata convergence
+Date: 2026-10-16. Commit: this entry's commit (implementation/correction commit 25).
+
+Implemented
+- Verified thread 6's boundary defect with a failing regression, then replaced max(node/meta member) with known nonzero node ownership and exact converged-meta fallback. The existing remaining-plan case with no node declaration still passes.
+- Completed metadata convergence preserves the load retirement boundary without injecting another Prepare/Add/Wait/Promote sequence. Ordinary metadata role changes remain in the plan. Stale desired member IDs return ReplanRequired; a newer requested readmission is not confused with stale intent. Incomplete/unknown identities provide no boundary.
+- Added regressions for immutable admission-boundary lookup after meta convergence, load-only replanning, input ownership, ordinary learner promotion, exact partial/complete deletion coverage, unknown/zero/same-member checkpoints and newer metadata identity. Full retained identity/immutable-plan shape wiring remains Task 18; no claim of completed public conversion.
+- Closed thread 6 with no user decision. Target §5.2/§7.2 and plan C12 now specify expert RetainedGroup/RetainedReplica/RetainedProgress, explicit FoundingIssued, exact readmission coverage and retained founding proof. Chose Hosted/Cleanup/Stopped names to avoid implying consumed native removal or application retirement. Ordinary Node/Cluster API stays unchanged. Task 18 must be split before coding; Tasks 26/36 carry the coupled debt/retention obligations.
+- Dead-code audit for commits 21–25: removed the obsolete provenMember/max lookup. Earlier batch changes removed redundant readmissionBatchConsumedLocked, the exact-admission fast path and topologyPlanBuilder.active. Shared authority lookups remain used by live and scoped validation. convergedPlanInput still has current public entry callers (planner, shape, voter transition, readmission) and retains explicit Task 18/62 removal obligations. Full unused lint passes; no further safe dead-code deletion found.
+
+Verified
+- Focused readmission/operator units pass. Final make test: 1151/1151, 9.003s; test-reports/unit/20261015T195128.893025Z-78lfa_1a/report.md.
+- Exact staged lint passed: /tmp/gquorum-correction8-lint.log. Full checkpoint make lint passed: /tmp/gquorum-checkpoint25-lint.log. Extracted plan header validation after the first staged lint reported cognitive complexity 17; reran focused/all units and both lint gates successfully.
+- Diff/fence/72-task sequence checks pass; 259 changed handwritten Go lines, below 550. This remains pure planning/validation with no acquired resources or new concurrency; no additional functional/race/Docker run. Live schema 3 still rejects v4 until Task 62.
+- Commit 25 completes this five-commit batch. Next action is peer review of 9ce0454..HEAD, then evaluate/correct findings before the next implementation commit. The full architecture remains unfinished and the goal remains active.

@@ -320,12 +320,21 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [x] Run shape/destructive-boundary/readmission/voter units, staged lint and `make test`.
 
+### Correction 8: Preserve load-owner readmission proof after metadata convergence
+
+**Files:** `topology/plan_input.go`, `readmission_plan.go`, scoped readmission tests. **Target:** [T] §5.1–5.2, §6.2; review thread 6. **Budget:** estimated 150–300 changed Go lines, ceiling 550.
+
+- [x] Prefer the known historical node member for former load ownership; fall back to the converged meta member only when that node member is unknown or zero. Keep meta admission identity independent of delayed load convergence; remove the max-member helper.
+- [x] Preserve an immutable plan's exact readmission boundary after meta convergence. Settle and implement load-only replanning without repeating a completed metadata admission, retaining exact readmission authorization at apply time.
+- [x] Test meta-first convergence, unchanged/fresh/unknown identities, load stop elision and incomplete-boundary refusal. Keep the existing remaining-plan case with no node declaration passing.
+- [x] Run focused units, `make test`, staged lint and the commit-25 full lint/dead-code checkpoint; record the correction. This is commit 25 and triggers the regular peer review before the next implementation commit.
+
 ### Task 18: Replace public planner signatures and all immediate callers
 
 **Files:** `topology/planner.go`, `plan.go`, public planning callers and fixture helpers/tests. **Target:** [T] §5.1, §7.2; contract C12. **Depends on:** 16–17. **Budget:** estimated 400–550 Go lines, ceiling 550; split further before editing if measured scope exceeds it.
 
 - [ ] Use BuildPlan(PlanInput, Document, Rules), BuildPlanPreferred(PlanInput, Document, PlanOptions), and ValidatePlanShape(PlanInput, Document, Plan). Update all immediate production/test callers in the same commit; no public old-signature aliases or synthetic Active.
-- [ ] Resolve intermediate native/prepared identities from retained exact effects/old approvals, including a twice-superseded learner absent from Approved/Converged/Desired. Verify the C12 input can carry this evidence without mislabeling it as convergence; settle any necessary narrow input refinement before public wiring.
+- [ ] Implement C12 Retained input and shared exact collector per target §7.2 FI_PLAN_EVIDENCE; resolve twice-superseded native/prepared identities without inventing convergence. Include issued Prepare/founding effects, desired-relative cleanup progress and a founding-issued bit that survives Desired subtraction. Preserve ordinary cleanup versus readmission provenance and refuse stale/contradictory native evidence. Estimate and split this task before coding: retained helpers, planner/shape retirement, collector and public caller conversion exceed one 550-line commit.
 - [ ] Bind native membership from NativeState, preserving exact group/reporter/identity checks and separate observed liveness/leadership from GroupProgress observations. Validate inconsistent input; unknown convergence cannot authorize refounding an established native identity.
 - [ ] Build inputs from the existing retained planning base at live schema-3 boundaries; document their replacement by actual scoped progress at Tasks 50 and 62. Test independently converged groups, approved/proven/native disagreement and no weakening of live-quorum/pinned-learner safety. Remove transitional planner adapters made obsolete by this task.
 
@@ -338,6 +347,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** topology planning helpers and `internal/metaengine` approval validation. **Target:** [T] §5.1–5.3, §12 “Scoped authorization and completion”. **Depends on:** 18. **Budget:** ≤550.
 
 - [ ] Derive semantic read/write sets for group edits, node changes, effective placement/eligibility, membership, identity allocation and deletion. Cluster/node placement changes include every affected group; node-only edits include a `_meta` declaration block.
+- [ ] Restrict BuildPlan native requirements and service native collection to derived affected/dependent scopes. An unchanged unhealthy group must not become a global planning/approval gate; test B approval with A unavailable and preserve exact guards for every affected group.
 - [ ] Make FSM derivation authoritative; a service-supplied scope list is checked evidence, not trusted scope selection. Conservatively refuse independence when dependencies cannot be proved.
 - [ ] Test disjoint group edits versus shared eligibility/rules, node label changes, zero-runtime edits and exact allocation conflicts. Avoid falsely treating every unrelated node field as a repair dependency.
 
@@ -425,6 +435,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** `internal/metaengine/cleanup.go`, `cleanup_evidence.go`, effect consumption. **Target:** [T] §4.1, §6.2, §12 “upsertCleanupLocked”; contract C5. **Depends on:** 24–25. **Budget:** ≤550.
 
 - [ ] Implement upsertCleanupLocked/detachCleanupLocked and bounded CleanupPage. Native removal creates debt in the same Apply before progress publication; whole deletion uses its former assignments without fabricating RemovedAt. Finish completeGroupLocked by atomically installing validated group/debt/node/marker drafts from Tasks 24–25.
+- [ ] Keep readmission-created debt actionless and unchanged when its old native identity is subsequently removed; retain that exact removal receipt as execution evidence. Verify exact readmission target coverage for every omitted host effect. Preserve historical MemberID and original removal-origin receipts.
 - [ ] Preserve immutable original Storage and compatible stop/retire/readmission proof, monotonic milestones and exact historical MemberID. Repeated removal cannot overwrite collected debt or resurrect it. StorageMemory completes at Retired with nil CollectedAt.
 - [ ] Test conflicting proof/storage, repeat consumed effects, deletion attribution and complete application-retirement/quarantine/ledger prerequisites. Add A-failed/B-completed, duplicate completion and no partial mutation regressions; keep opaque tokens out of ordinary progress.
 
@@ -559,6 +570,8 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 - [ ] Derive independently required proof closure before pruning; avoid a cleanup/grant self-retention cycle or map-order dependence. Pin marker/current docs, each debt origin and complete retry chain/block sources, and any distinct readmission admission operation and full batch; compact only after minimal retained evidence suffices for every verification path.
 - [ ] Account for the full pinned operation: each retained required completion keeps its exact consumed grants/receipts through Previous, including unrelated successful blocks and their source documents. A single unresolved cleanup can pin all of these; retention estimates and growth metrics must count this closure, without imposing an approval cap.
 - [ ] Test failed-attempt references prevent pruning, complete orphaned records can prune, repeated removal cannot recreate debt, settled grants remain references when otherwise required and soft history caps do not reject unrelated approvals.
+
+- [ ] Retain every never-converged founding grant (any outcome) until convergence or completed deletion with a permanent retired-group marker; pruning must not erase the planner's FoundingIssued evidence and authorize refounding.
 
 **Verification**
 
@@ -1565,7 +1578,22 @@ type PlanInput struct {
     Groups   map[string]GroupProgress
     Nodes    map[string]NodeProgress
     Native   map[string]NativeState
+    Retained map[string]RetainedGroup
 }
+type RetainedGroup struct {
+    FoundingIssued bool              `json:"founding_issued"`
+    Replicas       []RetainedReplica `json:"replicas,omitempty"`
+}
+type RetainedReplica struct {
+    ReplicaKey
+    Progress RetainedProgress `json:"progress"`
+}
+type RetainedProgress string
+const (
+    RetainedHosted  RetainedProgress = "hosted"
+    RetainedCleanup RetainedProgress = "cleanup"
+    RetainedStopped RetainedProgress = "stopped"
+)
 func BuildPlan(PlanInput, Document, Rules) (Plan, error)
 func BuildPlanPreferred(PlanInput, Document, PlanOptions) (Plan, error)
 func ValidatePlanShape(PlanInput, Document, Plan) error
