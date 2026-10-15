@@ -36,7 +36,8 @@ func validatePlanMembers(input PlanInput, desired Document) error {
 	for _, replica := range meta.Converged.Replicas {
 		member := desired.MemberID(replica.NodeName)
 		if member != 0 && member < replica.ReplicaID {
-			return fmt.Errorf("%w: desired member %s/%d precedes converged member %d", fault.ErrReplanRequired,
+			return fmt.Errorf("%w: desired member %s/%d precedes converged member %d; stage fresh intent",
+				fault.ErrVersionConflict,
 				replica.NodeName, member, replica.ReplicaID)
 		}
 	}

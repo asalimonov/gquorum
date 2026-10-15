@@ -16,8 +16,11 @@ func (in PlanInput) provenGroup(id string) *Group { return in.Groups[id].Converg
 func (in PlanInput) provenNode(name string) *Node { return in.Nodes[name].Converged }
 
 // Transitional adapter for existing whole-document entry points. Remove planner
-// callers in Task 18 and remaining legacy API adapters at cutover Task 62.
-// It decomposes an actual caller-supplied base; it never synthesizes a Document.
+// callers in Task 22 and remaining legacy API adapters at cutover Task 66.
+// Some callers supply DeletionBase/OperatorBase composites with several retained
+// members per host. These are not genuine convergence proof: member ordering
+// relies on the metadata identity non-reuse guard until Tasks 18–22 provide
+// separate retained evidence and actual converged declarations.
 func convergedPlanInput(doc Document) PlanInput {
 	in := PlanInput{Approved: doc, Groups: make(map[string]GroupProgress, len(doc.Groups)),
 		Nodes: make(map[string]NodeProgress, len(doc.Nodes))}

@@ -135,10 +135,10 @@ func TestReadmissionPlanningRefusesStaleMemberIntent(t *testing.T) {
 	meta.MetaGroup().Replicas[0].ReplicaID, meta.MetaGroup().NextReplicaID = 5, 6
 	input.Groups[MetaGroupID] = GroupProgress{GroupID: MetaGroupID, ConvergedVersion: desired.Version,
 		Converged: meta.MetaGroup()}
-	if err := checkPlanShape(input, desired, plan); !errors.Is(err, fault.ErrReplanRequired) {
+	if err := checkPlanShape(input, desired, plan); !errors.Is(err, fault.ErrVersionConflict) {
 		t.Fatal("shape accepted a metadata identity older than convergence", err)
 	}
-	if _, err := BuildPlan(meta, desired, statusForDocument(meta), plannerRules()); !errors.Is(err, fault.ErrReplanRequired) {
+	if _, err := BuildPlan(meta, desired, statusForDocument(meta), plannerRules()); !errors.Is(err, fault.ErrVersionConflict) {
 		t.Fatal("planning accepted a metadata identity older than convergence", err)
 	}
 	desired.MetaGroup().Replicas[0].ReplicaID, desired.MetaGroup().NextReplicaID = 6, 7

@@ -458,3 +458,17 @@ Verified
 - Exact staged lint passed: /tmp/gquorum-correction8-lint.log. Full checkpoint make lint passed: /tmp/gquorum-checkpoint25-lint.log. Extracted plan header validation after the first staged lint reported cognitive complexity 17; reran focused/all units and both lint gates successfully.
 - Diff/fence/72-task sequence checks pass; 259 changed handwritten Go lines, below 550. This remains pure planning/validation with no acquired resources or new concurrency; no additional functional/race/Docker run. Live schema 3 still rejects v4 until Task 62.
 - Commit 25 completes this five-commit batch. Next action is peer review of 9ce0454..HEAD, then evaluate/correct findings before the next implementation commit. The full architecture remains unfinished and the goal remains active.
+
+
+## Correction 9 — Close commit-25 review and clarify stale member intent
+Date: 2026-10-16. Commit: this entry's commit (implementation/correction commit 26).
+
+Implemented
+- Thread 7 closed after three rounds. Both reviewers ran the real service/FSM regression on c17ae5f and d6e09a3: unfinished readmission rollback and raw staging reject retired identity reuse at the allocation guard, before planning. The purported live regression was withdrawn; no duplicate-host exception is needed. Retained this regression to pin the contract.
+- Stale desired metadata membership now returns VersionConflict with fresh-intent guidance. Replanning the same identity cannot repair it. Updated existing assertions and target §5.2 wording; refusal semantics stay intact. The legacy input adapter now names DeletionBase/OperatorBase and its dependence on metadata identity non-reuse until genuine scoped inputs replace it.
+- Pre-coding footprint split: former Task 18 becomes Tasks 18–22 (retained values, retirement rules, metadata collector, validators, public planner/native callers). Current plan has 76 tasks; activation 66, final audit 76. Updated code removal comments. No obligation deferred outside the target; no synthetic convergence or new ordinary API.
+
+Verified
+- Focused topology/operator units and metaservice TestRollback functional checks passed. Both old/new regression probes passed during review; Claude independently reproduced them in archived commits.
+- make test: 1151/1151, 11.653s; test-reports/unit/20261015T200834.762307Z-_mvxmue6/report.md. Exact staged lint passed at /tmp/gquorum-correction9-lint.log; diff checks passed. 106 changed handwritten Go lines, below 550.
+- No new concurrency or persistence implementation; no additional race/Docker run. Full lint passed at commit 25 and focused staged lint covers this follow-up. Review has no remaining disagreement or user decision. Next regular peer/dead-code checkpoint is commit 30.
