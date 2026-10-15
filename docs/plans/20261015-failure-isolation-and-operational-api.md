@@ -131,13 +131,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `storage/retirement.go`, new `internal/authoritystore/collection.go`, `internal/managed` configuration. **Target:** [T] §4.2, §7.2; contracts C6/C11. **Budget:** ≤550.
 
-- [ ] Define CollectionRecord, CollectionReceipt, CollectionResult and concrete managed CollectionCallbacks exactly as C6/C11. Keep receipts internal and reuse storage.Identity/RetiredReplica; avoid import cycles.
-- [ ] Prepare the final RetirementStore method set Retired/Collect/ForgetCollection and document exact deletion proof versus proof release. Coordinate interface activation with the complete walstore implementation in Task 32; no successful placeholder ForgetCollection.
-- [ ] Specify prepared/collected validation and key encoding helpers: length-prefixed group/node plus big-endian replica ID, cluster checked against the journal pin. Add pure shape/key tests, including malformed tokens/receipt state.
+- [x] Define CollectionRecord, CollectionReceipt, CollectionResult and concrete managed CollectionCallbacks exactly as C6/C11. Keep receipts internal and reuse storage.Identity/RetiredReplica; avoid import cycles.
+- [x] Prepare the final RetirementStore method set Retired/Collect/ForgetCollection and document exact deletion proof versus proof release. Coordinate interface activation with the complete walstore implementation in Task 32; no successful placeholder ForgetCollection.
+- [x] Specify prepared/collected validation and key encoding helpers: length-prefixed group/node plus big-endian replica ID, cluster checked against the journal pin. Add pure shape/key tests, including malformed tokens/receipt state.
 
 **Verification**
 
-- [ ] Compile contract users, run focused authoritystore units and `make test`.
+- [x] Compile contract users, run focused authoritystore units and `make test`.
 
 ### Task 7: Define replicated operation and private query payloads
 

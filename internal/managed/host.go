@@ -56,6 +56,7 @@ type Config struct {
 	Catalog              func(context.Context, string) ([]storage.Identity, error)
 	Active               func(context.Context) (topology.Document, error)
 	RetireApplication    func(context.Context, load.RetirementRequest) (load.RetirementResult, error)
+	Collection           CollectionCallbacks
 	Retirement           storage.RetirementStore
 	Retention            func(context.Context, lifecycle.RetentionInput) (lifecycle.RetentionDecision, error)
 	RetirementInterval   time.Duration

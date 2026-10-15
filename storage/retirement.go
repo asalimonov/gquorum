@@ -16,6 +16,7 @@ type RetiredReplica struct {
 // RetirementStore separates explicit physical collection from consensus writes.
 // Collect revalidates the exact token and identity and is idempotent if absent.
 // Retention decisions belong to the node's lifecycle hooks, not this store.
+// An absent Retired entry alone is not proof of successful collection.
 type RetirementStore interface {
 	Retired(context.Context) ([]RetiredReplica, error)
 	Collect(context.Context, RetiredReplica) error

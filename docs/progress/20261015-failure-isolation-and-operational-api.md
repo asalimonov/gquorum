@@ -132,3 +132,21 @@ Verified:
 - The physical baseline meta-store rejection regression passed; immutable fixture paths have no diff. Staged lint and git diff --check passed after extracting the replacement predicate to meet cognitive-complexity limits.
 
 Cadence: correction counts as commit 6; the next peer/dead-code review is due at implementation/correction commit 10. Independent preparation may continue while an immutable range is reviewed, but accepted corrections precede the next implementation commit.
+
+## Task 6 — Specialized collection contracts
+
+Date: 2026-10-15. Implementation/correction commit 7 (the commit containing this entry).
+
+Implemented:
+- Internal CollectionRecord, CollectionReceipt and CollectionResult match C6/C11, with owned proof copies and concrete managed CollectionCallbacks. No additional application-facing owner or interface.
+- Exact journal keys use length-prefixed group/node and a big-endian replica ID. Validation checks the host pin, retirement target/resource/grant, opaque token, sequence and prepared/collected timestamps. Historical member proof survives a legitimate pin rebind.
+- The final Retired/Collect/ForgetCollection contract is specified in target §4.2 and C6. Interface activation and removal of the current absent-is-success behavior remain coordinated with the real marker backend in Task 32, as this task requires; no success placeholder was added. Storage documentation now states that missing enumeration is not collection proof.
+
+Verified:
+- Focused authoritystore and managed units passed, including malformed proof/state/key cases and collected-record JSON/copy isolation.
+- make test: 896/896 cases passed in 8.918s; test-reports/unit/20261015T161234.998162Z-1vf78n1i/report.md.
+- make lint-staged and git diff --check passed. Handwritten Go diff: 314 lines.
+
+Remaining consumers: journal methods in Task 30, marker semantics in Tasks 31–32, host execution/reporting in Tasks 33–35/41 and Node callback wiring in Task 48; complete format activation in Task 54. These contract declarations do not yet enable collection reporting.
+
+Peer notice update: the round 2 pointer was delivered to Claude and verified in his live terminal despite the helper reporting unconfirmed; the queued round 1 notice was a duplicate already processed. Follow-up is still pending. Next five-commit checkpoint remains implementation/correction commit 10.
