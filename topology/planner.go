@@ -27,10 +27,11 @@ func constructPlan(active, desired Document, observed map[string]GroupStatus, op
 	if err := desired.Validate(rules); err != nil {
 		return Plan{}, err
 	}
-	if err := observedVoterIdentities(active, desired, observed); err != nil {
+	input := convergedPlanInput(active)
+	if err := observedVoterIdentities(input, desired, observed); err != nil {
 		return Plan{}, err
 	}
-	builder := topologyPlanBuilder{active: active, desired: desired, observed: observed,
+	builder := topologyPlanBuilder{active: active, input: input, desired: desired, observed: observed,
 		options: options, plan: Plan{Version: desired.Version}}
 	for _, groupID := range unionGroupIDs(active, desired, observed) {
 		if err := builder.planGroup(groupID); err != nil {
@@ -235,6 +236,7 @@ func BuildPlanPreferred(active, desired Document, observed map[string]GroupStatu
 
 type topologyPlanBuilder struct {
 	active   Document
+	input    PlanInput
 	desired  Document
 	observed map[string]GroupStatus
 	options  PlanOptions
@@ -284,7 +286,7 @@ func (b *topologyPlanBuilder) planGroup(groupID string) error {
 		return b.planFoundingGroup(groupID, previous, target)
 	}
 	preferred := b.planMetaTransfer(groupID, status, target)
-	moves, err := planVoterMoves(voterPlanTopology{base: b.active, desired: b.desired, groupID: groupID}, status,
+	moves, err := planVoterMoves(voterPlanTopology{base: b.input, desired: b.desired, groupID: groupID}, status,
 		PlanOptions{Rules: b.options.Rules, PreferredMetaTransfer: preferred})
 	if err != nil {
 		return err

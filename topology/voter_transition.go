@@ -12,7 +12,7 @@ func voterKeys(s voterPlanState) []ReplicaKey {
 func voterKeysForSet(s voterPlanState, voters map[uint64]struct{}) []ReplicaKey {
 	keys := make([]ReplicaKey, 0, len(voters))
 	for id := range voters {
-		replica, ok := replicaIdentity(s.base.Group(s.groupID), s.desired.Group(s.groupID), id)
+		replica, ok := replicaIdentity(s.base.provenGroup(s.groupID), s.desired.Group(s.groupID), id)
 		if ok {
 			keys = append(keys, ReplicaKey{NodeName: replica.NodeName, ReplicaID: id})
 		}
@@ -45,8 +45,9 @@ func ValidateVoterSetTransition(base, desired Document, groupID string, sets Vot
 			}
 		}
 	}
-	state := voterPlanState{base: base, desired: desired, groupID: groupID}
-	return validateVoterTransition(voterPlanTopology{base: base, desired: desired, groupID: groupID},
+	input := convergedPlanInput(base)
+	state := voterPlanState{base: input, desired: desired, groupID: groupID}
+	return validateVoterTransition(voterPlanTopology{base: input, desired: desired, groupID: groupID},
 		voterKeysForSet(state, idSet(before)), voterKeysForSet(state, idSet(after)), state)
 }
 
@@ -77,15 +78,15 @@ func validateVoterTransition(view voterPlanTopology, before, after []ReplicaKey,
 	return nil
 }
 
-func validateOldDomains(base, desired Document, groupID string, voters []ReplicaKey) error {
-	group := base.Group(groupID)
+func validateOldDomains(base PlanInput, desired Document, groupID string, voters []ReplicaKey) error {
+	group := base.provenGroup(groupID)
 	if group == nil || group.VoterConfig == nil || group.VoterConfig.DistinctVoterLabel == "" {
 		return nil
 	}
 	key := group.VoterConfig.DistinctVoterLabel
 	seen := make(map[string]uint64, len(voters))
 	for _, voter := range voters {
-		node := base.Node(voter.NodeName)
+		node := base.provenNode(voter.NodeName)
 		if node == nil {
 			node = desired.Node(voter.NodeName)
 		}
@@ -101,8 +102,9 @@ func validateOldDomains(base, desired Document, groupID string, voters []Replica
 	return nil
 }
 
-func targetVoterViolations(base, desired Document, groupID string, voters []ReplicaKey) (map[string]bool, error) {
-	report, err := EvaluatePlacement(PlacementInput{Approved: base, Desired: desired, GroupID: groupID})
+func targetVoterViolations(base PlanInput, desired Document,
+	groupID string, voters []ReplicaKey) (map[string]bool, error) {
+	report, err := EvaluatePlacement(PlacementInput{Approved: base.Approved, Desired: desired, GroupID: groupID})
 	if err != nil {
 		return nil, err
 	}

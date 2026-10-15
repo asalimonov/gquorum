@@ -5,7 +5,8 @@ import "slices"
 // voterPlanState is symbolic: a wait makes a future voter conditionally ready,
 // but never changes an observation or proves the member live at execution time.
 type voterPlanState struct {
-	base, desired     Document
+	base              PlanInput
+	desired           Document
 	groupID           string
 	voters, learners  map[uint64]struct{}
 	observedLive      map[uint64]bool
@@ -17,8 +18,9 @@ type voterPlanState struct {
 }
 
 type voterPlanTopology struct {
-	base, desired Document
-	groupID       string
+	base    PlanInput
+	desired Document
+	groupID string
 }
 
 func planVoterMoves(view voterPlanTopology, status GroupStatus, options PlanOptions) ([]Step, error) {
@@ -236,7 +238,7 @@ func pairIncomingIndex(view voterPlanTopology, departing Replica, incoming []Rep
 	key := group.VoterConfig.DistinctVoterLabel
 	old := desired.Node(departing.NodeName)
 	if old == nil {
-		old = base.Node(departing.NodeName)
+		old = base.provenNode(departing.NodeName)
 	}
 	if old != nil {
 		for i, arrival := range incoming {
@@ -278,13 +280,13 @@ func (s *voterPlanState) classifyMoves(group *Group) voterMoves {
 	}
 	for id := range s.voters {
 		if replica, keep := want[id]; !keep || replica.Role != ReplicaVoter {
-			old, _ := replicaIdentity(s.base.Group(s.groupID), group, id)
+			old, _ := replicaIdentity(s.base.provenGroup(s.groupID), group, id)
 			outgoing = append(outgoing, old)
 		}
 	}
 	for id := range s.learners {
 		if _, keep := want[id]; !keep {
-			old, _ := replicaIdentity(s.base.Group(s.groupID), group, id)
+			old, _ := replicaIdentity(s.base.provenGroup(s.groupID), group, id)
 			staleLearners = append(staleLearners, old)
 		}
 	}
@@ -303,7 +305,7 @@ func (s *voterPlanState) retireStale(moves voterMoves, status GroupStatus) {
 	for _, replica := range moves.staleLearners {
 		s.remove(replica)
 	}
-	if previous := s.base.Group(s.groupID); previous != nil {
+	if previous := s.base.provenGroup(s.groupID); previous != nil {
 		for _, replica := range sortedReplicas(previous.Replicas) {
 			if _, kept := moves.want[replica.ReplicaID]; kept {
 				continue

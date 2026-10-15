@@ -52,7 +52,7 @@ func ValidatePlanShape(active, desired Document, plan Plan) error {
 		}
 	}
 
-	return validatePlanVoterProof(active, desired, plan)
+	return validatePlanVoterProof(convergedPlanInput(active), desired, plan)
 }
 
 func preparatoryWaitPair(steps []Step, index int, incoming Step) bool {

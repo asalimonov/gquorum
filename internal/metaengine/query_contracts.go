@@ -13,7 +13,7 @@ type CollectionCheck struct {
 
 func (q QueryRequest) validateScopedFields() error {
 	if q.OperationID != "" {
-		// Remove with the old OperatorID query consumers at Task 60.
+		// Remove with the old OperatorID query consumers at Task 62.
 		return fault.ErrUnsupported
 	}
 	if q.Progress != nil || q.Kind == "progress" {

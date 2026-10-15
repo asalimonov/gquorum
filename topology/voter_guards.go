@@ -15,7 +15,7 @@ func isMembershipStep(kind StepKind) bool {
 	}
 }
 
-func observedVoterIdentities(base, desired Document, observed map[string]GroupStatus) error {
+func observedVoterIdentities(base PlanInput, desired Document, observed map[string]GroupStatus) error {
 	for groupID, status := range observed {
 		if !status.Found {
 			continue
@@ -25,7 +25,7 @@ func observedVoterIdentities(base, desired Document, observed map[string]GroupSt
 		}
 		for _, ids := range [][]uint64{status.ConfState.Voters, status.ConfState.Learners} {
 			for _, id := range ids {
-				if _, ok := replicaIdentity(base.Group(groupID), desired.Group(groupID), id); !ok {
+				if _, ok := replicaIdentity(base.provenGroup(groupID), desired.Group(groupID), id); !ok {
 					return planUnsafef("group %q has unknown observed replica identity %d", groupID, id)
 				}
 			}

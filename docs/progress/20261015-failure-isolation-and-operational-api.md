@@ -412,3 +412,17 @@ Verified
 - Focused Scoped/VoterSwitch/ReplacementPrepare units passed. make test: 1132/1132, 8.060s; test-reports/unit/20261015T191353.626918Z-s7t2gcac/report.md.
 - Exact staged lint passed at /tmp/gquorum-task15-lint.log after splitting provenance lookup and wrapping one signature. Diff checks passed; 418 changed handwritten Go lines, below 550.
 - No acquired storage, new concurrency or process behavior in this task; no new functional/race/Docker run. Next task 16 needs a pre-coding size audit of planner/helper/caller conversion. Next regular peer/dead-code checkpoint is commit 25.
+
+## Task 16 — Separate voter planning approval and proven declarations
+Date: 2026-10-16. Commit: this entry's commit (implementation/correction commit 23).
+
+Implemented
+- Pre-coding scope audit found 71 public planner/shape references plus dependent voter/readmission/simulation helpers. Split the original planner task into Tasks 16–18, preserving all obligations. The plan now has 72 tasks: scopes 19, blocks 20, activation 62 and final audit 72. Updated dependent references and existing Go removal comments; preserved historical split notes. Numbered headers and backward dependencies audited.
+- Added the exact C12 PlanInput value. Private voter-state, domain, identity and voter-proof helpers now read proven group/node declarations independently of Approved placement intent. No composite Document is assembled and no parallel public planner API added.
+- Current whole-document entry points decompose their actual base through private convergedPlanInput. Its production references: constructPlan/topologyPlanBuilder, ValidatePlanShape and ValidateVoterSetTransition; direct voter test references also use it. Planner/shape callers move in Tasks 17–18; any remaining legacy entry adapter is removed at cutover 62. Live schema remains 3.
+- Tests cover old-domain labels after approved changes, reservation eligibility based on exact approved membership, native former identities after approved removal, unknown/tombstoned convergence refusing invented identities, unchanged guarded same-domain ordering, caller input immutability and live-quorum refusal.
+
+Verified
+- Focused planner/voter/readmission units passed. make test: 1136/1136, 9.907s; test-reports/unit/20261015T192031.516222Z-yb62xg02/report.md.
+- Exact staged lint passed at /tmp/gquorum-task16-lint.log after wrapping one signature. Diff check and 72-task dependency audit passed; 222 changed handwritten Go lines, below 550.
+- Pure planning/value refactor has no acquired resources or new concurrency, so no additional functional/race/Docker run here. Task 18 includes focused service planning checks when public callers change. Next regular peer/dead-code checkpoint remains commit 25.
