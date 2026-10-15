@@ -80,7 +80,7 @@ func TestInterruptedLoadCleanupSurvivesHistoryAndSnapshot(t *testing.T) {
 				meta.ConfState.Learners = []uint64{2}
 			}
 			observed[topology.MetaGroupID] = meta
-			plan, err := topology.BuildPlan(planning, sm.latest, observed, testRules())
+			plan, err := topology.BuildPlan(testPlanningInput(t, sm, sm.latest, observed), sm.latest, testRules())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -327,7 +327,7 @@ func TestSurvivingGroupPlanningRetainsInterruptedPreparation(t *testing.T) {
 	meta := observed[topology.MetaGroupID]
 	meta.ConfState.Learners = []uint64{2}
 	observed[topology.MetaGroupID] = meta
-	cleanup, err := topology.BuildPlan(planning, sm.latest, observed, testRules())
+	cleanup, err := topology.BuildPlan(testPlanningInput(t, sm, sm.latest, observed), sm.latest, testRules())
 	if err != nil {
 		t.Fatal(err)
 	}

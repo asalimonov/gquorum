@@ -50,7 +50,7 @@ func TestPlannerMatrixDeterministicSafeAndWithinDeadline(t *testing.T) {
 				t.Fatal(err)
 			}
 			start := time.Now()
-			plan, err := BuildPlan(active, desired, observed, rules)
+			plan, err := BuildPlan(testPlanInput(active, observed), desired, rules)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -77,7 +77,7 @@ func TestPlannerMatrixDeterministicSafeAndWithinDeadline(t *testing.T) {
 				}
 			}
 			for repeat := range 32 {
-				next, err := BuildPlan(active, desired, observed, rules)
+				next, err := BuildPlan(testPlanInput(active, observed), desired, rules)
 				if err != nil || !reflect.DeepEqual(plan, next) {
 					t.Fatal("planner changed its exact ordered result", repeat, err)
 				}
@@ -92,7 +92,7 @@ func BenchmarkPlannerFifteenGroupReplacement(b *testing.B) {
 			active, desired, observed, rules := plannerMatrix(size)
 			b.ReportAllocs()
 			for b.Loop() {
-				plan, err := BuildPlan(active, desired, observed, rules)
+				plan, err := BuildPlan(testPlanInput(active, observed), desired, rules)
 				if err != nil || len(plan.Steps) != 135 {
 					b.Fatal("invalid benchmark workload", err)
 				}

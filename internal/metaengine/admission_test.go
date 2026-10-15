@@ -54,7 +54,7 @@ func admissionOperatorForRole(t *testing.T, role topology.ReplicaRole) (*topolog
 		t.Fatalf("propose target: %s", res.Reason)
 	}
 	target := sm.Current()
-	plan, err := topology.BuildPlan(sm.Active(), target, assumedReadmissionStatuses(sm.Active(), ""), testRules())
+	plan, err := topology.BuildPlan(testPlanningInput(t, sm, target, assumedReadmissionStatuses(sm.Active(), "")), target, testRules())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,13 +320,14 @@ func TestAdmission_DifferentInstanceCannotReusePreparedMemberID(t *testing.T) {
 
 func TestBuildReadmissionPlanReleasesOldSeatAtNativeLimit(t *testing.T) {
 	t.Parallel()
-	active := convergedAuthorityFixture(t).active
+	sm := convergedAuthorityFixture(t)
+	active := sm.active
 	desired, err := buildReadmissionDocument(active, "n3", time.Date(2026, 7, 16, 13, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
 	rules := topology.Rules{SchemaVersion: 1, Limits: topology.Limits{MaxNodes: 3, MaxReplicas: 5}}
-	plan, err := topology.BuildPlan(active, desired, assumedReadmissionStatuses(active, "n3"), rules)
+	plan, err := topology.BuildPlan(testPlanningInput(t, sm, desired, assumedReadmissionStatuses(active, "n3")), desired, rules)
 	if err != nil {
 		t.Fatal("safe same-host readmission at native capacity was refused", err)
 	}

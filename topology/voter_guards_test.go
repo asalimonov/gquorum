@@ -20,7 +20,7 @@ func TestBuildPlanBindsCanonicalVoterProof(t *testing.T) {
 	work.HealthKnown = true
 	work.LiveVoters = map[uint64]bool{1: true, 2: true}
 	statuses["work"] = work
-	plan, err := BuildPlan(active, desired, statuses, plannerRules())
+	plan, err := BuildPlan(testPlanInput(active, statuses), desired, plannerRules())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestBuildPlanBindsEmptyFoundingBase(t *testing.T) {
 	desired.Groups = append(desired.Groups, shardOf("new", rep("n1", 1)))
 	statuses := statusForDocument(active)
 	statuses["new"] = GroupStatus{GroupID: "new"}
-	plan, err := BuildPlan(active, desired, statuses, plannerRules())
+	plan, err := BuildPlan(testPlanInput(active, statuses), desired, plannerRules())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestBuildPlanRejectsUnknownObservedIdentity(t *testing.T) {
 	work := statuses["work"]
 	work.ConfState.Learners = []uint64{999}
 	statuses["work"] = work
-	if plan, err := BuildPlan(active, desired, statuses, plannerRules()); err == nil {
+	if plan, err := BuildPlan(testPlanInput(active, statuses), desired, plannerRules()); err == nil {
 		t.Fatalf("accepted unknown native identity: %+v", plan)
 	}
 }

@@ -7,7 +7,7 @@ import "testing"
 func TestValidatePlanShapeRequiresExactVoterProof(t *testing.T) {
 	t.Parallel()
 	active, desired, status, rules := strictReplacementFixture()
-	valid, err := BuildPlan(active, desired, status, rules)
+	valid, err := BuildPlan(testPlanInput(active, status), desired, rules)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestValidatePlanShapeRequiresExactVoterProof(t *testing.T) {
 func TestValidatePlanShapeRejectsSecondDestructionInOnePair(t *testing.T) {
 	t.Parallel()
 	active, desired, status, rules := strictReplacementFixture()
-	plan, err := BuildPlan(active, desired, status, rules)
+	plan, err := BuildPlan(testPlanInput(active, status), desired, rules)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestValidatePlanShapeRejectsSecondDestructionInOnePair(t *testing.T) {
 func TestValidatePlanShapeBindsApprovedLabelViews(t *testing.T) {
 	t.Parallel()
 	active, desired, status, rules := strictReplacementFixture()
-	plan, err := BuildPlan(active, desired, status, rules)
+	plan, err := BuildPlan(testPlanInput(active, status), desired, rules)
 	if err != nil {
 		t.Fatal(err)
 	}

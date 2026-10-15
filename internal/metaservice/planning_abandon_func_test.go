@@ -85,7 +85,7 @@ func abandonedIntentPlan(t *testing.T, f *mutationFixture, active topology.Docum
 			ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}, HealthKnown: true,
 			LiveVoters: map[uint64]bool{1: true, 2: true, 3: true}}
 	}
-	plan, err := topology.BuildPlan(base, desired, observed, f.g.rules)
+	plan, err := topology.BuildPlan(testPlanningInput(t, f.g.machine, desired, observed), desired, f.g.rules)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -50,7 +50,7 @@ func TestReadmissionPlanUsesPreparationAsHostRetirementBoundary(t *testing.T) {
 				}
 			}
 			statuses[MetaGroupID] = meta
-			plan, err := BuildPlan(active, desired, statuses, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 4, MaxReplicas: 5}})
+			plan, err := BuildPlan(testPlanInput(active, statuses), desired, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 4, MaxReplicas: 5}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -99,7 +99,7 @@ func TestStrictMetaReadmissionPreservesDestructionFirstPair(t *testing.T) {
 	meta.HealthKnown = true
 	meta.LiveVoters = map[uint64]bool{1: true, 2: true}
 	status[MetaGroupID] = meta
-	plan, err := BuildPlan(active, desired, status, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 4, MaxReplicas: 5}})
+	plan, err := BuildPlan(testPlanInput(active, status), desired, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 4, MaxReplicas: 5}})
 	if err != nil {
 		t.Fatal(err)
 	}

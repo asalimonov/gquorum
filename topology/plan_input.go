@@ -16,24 +16,6 @@ func (in PlanInput) provenGroup(id string) *Group { return in.Groups[id].Converg
 
 func (in PlanInput) provenNode(name string) *Node { return in.Nodes[name].Converged }
 
-// Transitional adapter for construction; remove production callers in Task 24.
-// The legacy service still supplies DeletionBase, whose convergence-only member
-// checks rely on metadata identity non-reuse until that caller is converted.
-func convergedPlanInput(doc Document) PlanInput {
-	in := PlanInput{Approved: doc, Groups: make(map[string]GroupProgress, len(doc.Groups)),
-		Nodes: make(map[string]NodeProgress, len(doc.Nodes))}
-	for i := range doc.Groups {
-		group := &doc.Groups[i]
-		in.Groups[group.ID] = GroupProgress{GroupID: group.ID, ConvergedVersion: doc.Version, Converged: group}
-	}
-	for i := range doc.Nodes {
-		node := &doc.Nodes[i]
-		in.Nodes[node.Name] = NodeProgress{NodeName: node.Name, ConvergedVersion: doc.Version,
-			Converged: node, MemberID: doc.MemberID(node.Name)}
-	}
-	return in
-}
-
 func (in PlanInput) provenReplica(step Step) *Replica {
 	replica := targetReplicaByID(in.provenGroup(step.GroupID), step.ReplicaID)
 	if replica == nil || replica.NodeName != step.NodeName {

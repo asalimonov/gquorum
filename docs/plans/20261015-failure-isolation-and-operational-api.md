@@ -429,14 +429,14 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `topology/planner.go`, native/observation helpers, all immediate production/test planner callers. **Target:** [T] §5.1, §7.2; contract C12. **Depends on:** 18–23. **Budget:** estimated 400–550 changed Go lines, ceiling 550; re-estimate before editing.
 
-- [ ] Use BuildPlan(PlanInput, Document, Rules) and BuildPlanPreferred(PlanInput, Document, PlanOptions); update every immediate caller in the same commit. Consume the real inputs already collected in Task 23 and remove the temporary old-call adaptation.
-- [ ] Bind membership exclusively from actual NativeState, checking exact group/reporter/identity and applied evidence; use GroupProgress observations only for separate liveness/leadership. Keep exact founding seed handling and host-only deletion behavior.
-- [ ] Delete obsolete document-to-input production adapters without a parallel public planner or synthetic Active. Tests may decompose genuine fixture documents and explicit membership; production may not label composite documents as convergence.
-- [ ] Test approved/proven/native disagreement, independent convergence, unknown/missing native refusal, live quorum and pinned-learner safety. Keep all original conversion obligations; semantic scopes follow in Task 25.
+- [x] Use BuildPlan(PlanInput, Document, Rules) and BuildPlanPreferred(PlanInput, Document, PlanOptions); update every immediate caller in the same commit. Consume the real inputs already collected in Task 23 and remove the temporary old-call adaptation.
+- [x] Bind membership exclusively from actual NativeState, checking exact group/reporter/identity and applied evidence; use GroupProgress observations only for separate liveness/leadership. Keep exact founding seed handling and host-only deletion behavior.
+- [x] Delete obsolete document-to-input production adapters without a parallel public planner or synthetic Active. Tests may decompose genuine fixture documents and explicit membership; production may not label composite documents as convergence.
+- [x] Test approved/proven/native disagreement, independent convergence, unknown/missing native refusal, live quorum and pinned-learner safety. Keep all original conversion obligations; semantic scopes follow in Task 25.
 
 **Verification**
 
-- [ ] Run planner/readmission/voter units, focused planning/bootstrap functional regressions, staged lint and `make test` across all five application modules.
+- [x] Run planner/readmission/voter units, focused planning/bootstrap functional regressions, staged lint and `make test` across all five application modules.
 
 ### Task 25: Derive semantic scopes and independence
 

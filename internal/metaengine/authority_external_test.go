@@ -109,7 +109,7 @@ func TestApprovedReadmissionGetsDistinctHostAuthorityAndIsRevocable(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := topology.BuildPlan(m.active, doc, assumedReadmissionStatuses(m.active, "n1"), m.rules)
+	plan, err := topology.BuildPlan(testPlanningInput(t, m, doc, assumedReadmissionStatuses(m.active, "n1")), doc, m.rules)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestReadmissionAuthorityWaitsForConflictingTransferRevocation(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := topology.BuildPlan(m.active, doc, assumedReadmissionStatuses(m.active, "n1"), m.rules)
+	plan, err := topology.BuildPlan(testPlanningInput(t, m, doc, assumedReadmissionStatuses(m.active, "n1")), doc, m.rules)
 	if err != nil {
 		t.Fatal(err)
 	}

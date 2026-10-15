@@ -68,7 +68,7 @@ func TestIntermediateMetaOwnerSurvivesSupersessionPruningAndRetiresExactly(t *te
 	meta := statuses[topology.MetaGroupID]
 	meta.ConfState.Learners = []uint64{4}
 	statuses[topology.MetaGroupID] = meta
-	plan, err = topology.BuildPlan(base, desired, statuses, m.rules)
+	plan, err = topology.BuildPlan(testPlanningInput(t, m, desired, statuses), desired, m.rules)
 	if err != nil || len(plan.Steps) != 2 || plan.Steps[0].Kind != topology.StepRemoveReplica || plan.Steps[1].Kind != topology.StepStopReplica || plan.Steps[0].NodeName != "n4" || plan.Steps[0].ReplicaID != 4 {
 		t.Fatal("cannot reconcile historical native metadata learner", plan, err)
 	}

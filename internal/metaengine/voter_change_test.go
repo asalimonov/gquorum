@@ -59,7 +59,7 @@ func voterChangeFixture(t *testing.T, groupID string, surge int) (*topologySM, C
 		st.LiveVoters = map[uint64]bool{1: true, 2: true, 3: false, 4: true, 5: true}
 		statuses[id] = st
 	}
-	plan, err := topology.BuildPlan(active, desired, statuses, rules)
+	plan, err := topology.BuildPlan(testPlanningInput(t, sm, desired, statuses), desired, rules)
 	if err != nil {
 		t.Fatal(err)
 	}

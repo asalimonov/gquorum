@@ -21,7 +21,7 @@ func readmissionAuthorityFixture(t *testing.T) (*Machine, BeginReadmissionAuthor
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := topology.BuildPlan(m.active, doc, assumedReadmissionStatuses(m.active, "n1"), m.rules)
+	plan, err := topology.BuildPlan(testPlanningInput(t, m, doc, assumedReadmissionStatuses(m.active, "n1")), doc, m.rules)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestReadmissionAuthorityAfterCompletedExclusion(t *testing.T) {
 		excluded.Groups[i].Replicas = slices.DeleteFunc(excluded.Groups[i].Replicas, func(r topology.Replica) bool { return r.NodeName == "n1" })
 	}
 	command(ProposeDocument{Doc: excluded, ExpectedVersion: 1})
-	plan, err := topology.BuildPlan(m.active, m.latest, assumedReadmissionStatuses(m.active, "n1"), m.rules)
+	plan, err := topology.BuildPlan(testPlanningInput(t, m, m.latest, assumedReadmissionStatuses(m.active, "n1")), m.latest, m.rules)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestReadmissionAuthorityAfterCompletedExclusion(t *testing.T) {
 		group.Replicas = append(group.Replicas, topology.Replica{NodeName: "n1", ReplicaID: id, Role: topology.ReplicaVoter})
 	}
 	command(ProposeDocument{Doc: returning, ExpectedVersion: 2})
-	plan, err = topology.BuildPlan(m.active, m.latest, assumedReadmissionStatuses(m.active, "n1"), m.rules)
+	plan, err = topology.BuildPlan(testPlanningInput(t, m, m.latest, assumedReadmissionStatuses(m.active, "n1")), m.latest, m.rules)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestReadmissionAuthoritySeparatesNodesWithSameInstanceID(t *testing.T) {
 		}
 	}
 	command(ProposeDocument{Doc: desired, ExpectedVersion: 1})
-	plan, err := topology.BuildPlan(m.active, m.latest, assumedReadmissionStatuses(m.active, "n1"), m.rules)
+	plan, err := topology.BuildPlan(testPlanningInput(t, m, m.latest, assumedReadmissionStatuses(m.active, "n1")), m.latest, m.rules)
 	if err != nil {
 		t.Fatal(err)
 	}

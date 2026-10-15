@@ -582,3 +582,18 @@ Verified
 - Focused planning/bootstrap/readmission/founding/deletion functional suite passed (4.931s), /tmp/gquorum-task23-functional.log. Final new native-collection cases passed under race (3.593s), /tmp/gquorum-task23-race.log.
 - Final make test: 1209/1209, 6.897s; test-reports/unit/20261015T210210.279081Z-diwlhuwx/report.md. Exact staged lint passed at /tmp/gquorum-task23-lint.log after replacing three return values with a private paired read result. Diff checks pass; 238 changed handwritten Go lines including tests, below 550. No Docker run.
 - Next Task 24 switches construction signatures and deletes their final adapter. Regular five-commit review remains commit 35.
+
+
+## Task 24 — Public construction consumes explicit planning evidence
+Date: 2026-10-16. Commit: this entry's commit (implementation/correction commit 34).
+
+Implemented
+- BuildPlan and BuildPlanPreferred now take PlanInput directly. Converted all immediate callers, including founding bootstrap, PlanFor and fixture/benchmark builders. Deleted production convergedPlanInput and legacyPlanningObservations; no compatibility signature or synthetic convergence remains in construction.
+- NativeState exclusively supplies membership and presence. Exact group, nonzero reporter/applied index and known reporter identity are mandatory; cached observations retain separate health/leadership information. Missing native state cannot refound established or possibly-founded groups. Deletion remains host-only.
+- Pure fixtures explicitly supply native membership; metadata/service fixtures collect actual converged and retained evidence through PlanningInput. Added public construction regressions for different approved/proven/native membership, independent convergence versions, retained owners, input ownership and invalid/missing native evidence. Existing live-quorum and pinned-learner regressions remain green.
+
+Verified
+- Focused topology/metaengine/metaservice/operator units passed. New native tests initially omitted the fixture schema rule, correctly failed validation, and pass after supplying SchemaVersion 1; no production guard was relaxed.
+- Focused planning/bootstrap/readmission/rollback/founding functional checks passed (2.967s), /tmp/gquorum-task24-functional.log. Entire scheduling functional suite passed (0.424s), /tmp/gquorum-task24-scheduling.log.
+- Final make test: 1216/1216, 6.141s; test-reports/unit/20261015T213824.840957Z-kulsmngb/report.md. Exact staged lint passes at /tmp/gquorum-task24-lint.log. Diff checks pass; 456 changed handwritten Go lines, below 550. Pure signature/construction conversion adds no concurrency; no new race/Docker run.
+- Task 25 now derives affected scopes; unchanged groups still participate in this intermediate planner. Next regular review is commit 35. Live scoped-format activation remains Task 68.

@@ -76,24 +76,3 @@ func freshPlanningGroup(input topology.PlanInput, id string) bool {
 	return row.Converged == nil && row.ConvergedVersion == 0 &&
 		!retained.FoundingIssued && len(retained.Replicas) == 0
 }
-
-// Remove this old-signature adaptation at Task 24. Only actual native reads
-// supply membership; retained/deleted groups need a status entry but no quorum.
-func legacyPlanningObservations(input topology.PlanInput) map[string]topology.GroupStatus {
-	observed := make(map[string]topology.GroupStatus)
-	for id, row := range input.Groups {
-		status := topology.GroupStatus{GroupID: id}
-		if row.Observation != nil {
-			status = row.Observation.Clone()
-		}
-		state, exists := input.Native[id]
-		status.Found, status.ConfState = exists, state.Clone().ConfState
-		observed[id] = status
-	}
-	for id := range input.Retained {
-		if _, exists := observed[id]; !exists {
-			observed[id] = topology.GroupStatus{GroupID: id}
-		}
-	}
-	return observed
-}

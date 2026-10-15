@@ -45,7 +45,7 @@ func TestReadmissionPlanConvergesWithoutCallingRetiredMember(t *testing.T) {
 				if !slices.ContainsFunc(base.Group("shard0").Replicas, func(r topology.Replica) bool { return r.NodeName == "n1" && r.ReplicaID == 1 }) {
 					t.Fatal("retirement proof hid old native membership", base)
 				}
-				plan, err := topology.BuildPlan(base, m.latest, assumedReadmissionStatuses(m.active, "n1"), m.rules)
+				plan, err := topology.BuildPlan(testPlanningInput(t, m, m.latest, assumedReadmissionStatuses(m.active, "n1")), m.latest, m.rules)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -109,7 +109,7 @@ func TestReadmissionReceiptsExcludeOnlyRetiredHostsFromDeletion(t *testing.T) {
 	}
 	desired.Groups = slices.DeleteFunc(desired.Groups, func(g topology.Group) bool { return g.ID == "shard0" })
 	command(ProposeDocument{Doc: desired, ExpectedVersion: 1})
-	plan, err := topology.BuildPlan(m.active, m.latest, assumedReadmissionStatuses(m.active, "n1"), m.rules)
+	plan, err := topology.BuildPlan(testPlanningInput(t, m, m.latest, assumedReadmissionStatuses(m.active, "n1")), m.latest, m.rules)
 	if err != nil {
 		t.Fatal(err)
 	}

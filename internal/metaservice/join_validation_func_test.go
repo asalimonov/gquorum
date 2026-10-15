@@ -35,7 +35,7 @@ func TestReadmissionReplyCarriesApprovedFormerReplicasWithoutLocalMetaDisk(t *te
 	for _, group := range f.g.machine.Active().Groups {
 		observed[group.ID] = topology.GroupStatus{GroupID: group.ID, Found: true, LeaderID: 2, Commit: 1, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}, HealthKnown: true, LiveVoters: map[uint64]bool{2: true, 3: true}}
 	}
-	plan, err := topology.BuildPlan(f.g.machine.Active(), proposed.Doc, observed, f.g.rules)
+	plan, err := topology.BuildPlan(testPlanningInput(t, f.g.machine, proposed.Doc, observed), proposed.Doc, f.g.rules)
 	if err != nil {
 		t.Fatal(err)
 	}

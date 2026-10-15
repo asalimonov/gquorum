@@ -15,7 +15,7 @@ func TestScopedPlanShapeDistinguishesUnknownAndDeletedGroup(t *testing.T) {
 	desired.Groups = append(desired.Groups, shardOf("work", rep("n1", 1)))
 	observed := statusForDocument(base)
 	observed["work"] = GroupStatus{GroupID: "work"}
-	plan, err := BuildPlan(base, desired, observed, plannerRules())
+	plan, err := BuildPlan(testPlanInput(base, observed), desired, plannerRules())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestScopedDeletionKeepsEveryFormerOwnerAfterApproval(t *testing.T) {
 	desired.Version++
 	desired.Groups = desired.Groups[:1]
 	observed := statusForDocument(base)
-	plan, err := BuildPlan(base, desired, observed, plannerRules())
+	plan, err := BuildPlan(testPlanInput(base, observed), desired, plannerRules())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestScopedReadmissionUsesExactProvenMember(t *testing.T) {
 		}
 		observed[id] = status
 	}
-	plan, err := BuildPlan(base, desired, observed, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 4, MaxReplicas: 5}})
+	plan, err := BuildPlan(testPlanInput(base, observed), desired, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 4, MaxReplicas: 5}})
 	if err != nil {
 		t.Fatal(err)
 	}

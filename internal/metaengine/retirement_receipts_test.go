@@ -70,7 +70,7 @@ func TestRetirementReceiptsPreventResurrectionAfterOperatorPruning(t *testing.T)
 		topology.MetaGroupID: {GroupID: topology.MetaGroupID, Found: true, LeaderID: 1, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}},
 		"shard0":             {GroupID: "shard0", Found: true, LeaderID: 1, ConfState: raftpb.ConfState{Voters: []uint64{1, 2}}},
 	}
-	plan, err = topology.BuildPlan(base, m.Latest(), statuses, m.rules)
+	plan, err = topology.BuildPlan(testPlanningInput(t, m, m.Latest(), statuses), m.Latest(), m.rules)
 	if err != nil || !plan.IsEmpty() {
 		t.Fatal("settled topology requires repeated historical cleanup", plan, err)
 	}

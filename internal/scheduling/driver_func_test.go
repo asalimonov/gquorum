@@ -150,7 +150,7 @@ func (h *testHost) GlobalStatus(context.Context, topology.Document) (map[string]
 	h.statusCalls++
 	return h.status, h.statusErr
 }
-func (h *testHost) PlanFor(_ context.Context, doc topology.Document) (topology.Plan, error) {
+func (h *testHost) PlanFor(ctx context.Context, doc topology.Document) (topology.Plan, error) {
 	if h.planErr != nil {
 		return topology.Plan{}, h.planErr
 	}
@@ -159,7 +159,24 @@ func (h *testHost) PlanFor(_ context.Context, doc topology.Document) (topology.P
 		p.Version = doc.Version
 		return p, nil
 	}
-	return topology.BuildPlan(h.machine.Active(), doc, h.status, topology.Rules{SchemaVersion: 1, Limits: h.limits.WithDefaults()})
+	native := make(map[string]topology.NativeState)
+	for id, status := range h.status {
+		if status.Found {
+			native[id] = topology.NativeState{GroupID: id, ReplicaID: status.ConfState.Voters[0], Applied: 1,
+				ConfState: status.Clone().ConfState}
+		}
+	}
+	input, err := h.machine.PlanningInput(ctx, doc, native)
+	if err != nil {
+		return topology.Plan{}, err
+	}
+	for id, status := range h.status {
+		row := input.Groups[id]
+		owned := status.Clone()
+		row.Observation = &owned
+		input.Groups[id] = row
+	}
+	return topology.BuildPlan(input, doc, topology.Rules{SchemaVersion: 1, Limits: h.limits.WithDefaults()})
 }
 func (h *testHost) Approve(ctx context.Context, version uint64) (topology.OperatorID, error) {
 	if h.approveErr != nil {

@@ -216,7 +216,7 @@ func TestChangeReplicaPromoteIsDeclarativeAndPlansCatchUpBeforePromotion(t *test
 		}
 		observed[group.ID] = s
 	}
-	plan, err := topology.BuildPlan(active, desired, observed, f.g.rules)
+	plan, err := topology.BuildPlan(testPlanningInput(t, f.g.machine, desired, observed), desired, f.g.rules)
 	if err != nil || len(plan.Steps) != 2 || plan.Steps[0].Kind != topology.StepWaitCaughtUp || plan.Steps[1].Kind != topology.StepPromoteVoter {
 		t.Fatal(plan, err)
 	}

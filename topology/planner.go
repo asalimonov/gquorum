@@ -15,19 +15,21 @@ type PlanOptions struct {
 	PreferredMetaTransfer uint64
 }
 
-// BuildPlan diffs desired against the fully converged Active document and
-// global Raft group observations. Active supplies established identities that
-// desired may have removed; observed supplies the live membership truth.
-func BuildPlan(active, desired Document, observed map[string]GroupStatus, rules Rules) (Plan, error) {
-	return constructPlan(active, desired, observed, PlanOptions{Rules: rules})
+// BuildPlan derives safe desired work from approved intent, proven declarations,
+// retained effects and confirmed native membership. It does not authorize effects.
+func BuildPlan(input PlanInput, desired Document, rules Rules) (Plan, error) {
+	return constructPlan(input, desired, PlanOptions{Rules: rules})
 }
 
-func constructPlan(active, desired Document, observed map[string]GroupStatus, options PlanOptions) (Plan, error) {
+func constructPlan(input PlanInput, desired Document, options PlanOptions) (Plan, error) {
 	rules, preferredMetaTransfer := options.Rules, options.PreferredMetaTransfer
 	if err := desired.Validate(rules); err != nil {
 		return Plan{}, err
 	}
-	input := convergedPlanInput(active)
+	observed, err := plannerObservations(input, desired)
+	if err != nil {
+		return Plan{}, err
+	}
 	if err := validatePlanMembers(input, desired); err != nil {
 		return Plan{}, err
 	}
@@ -36,7 +38,7 @@ func constructPlan(active, desired Document, observed map[string]GroupStatus, op
 	}
 	builder := topologyPlanBuilder{input: input, desired: desired, observed: observed,
 		options: options, plan: Plan{Version: desired.Version}}
-	for _, groupID := range unionGroupIDs(active, desired, observed) {
+	for _, groupID := range unionGroupIDs(input, desired) {
 		if err := builder.planGroup(groupID); err != nil {
 			return Plan{}, err
 		}
@@ -170,9 +172,9 @@ func replicaIdentity(previous, target *Group, id uint64) (Replica, bool) {
 	return Replica{}, false
 }
 
-func unionGroupIDs(active, desired Document, observed map[string]GroupStatus) []string {
-	seen := make(map[string]struct{}, len(active.Groups)+len(desired.Groups)+len(observed))
-	ids := make([]string, 0, len(active.Groups)+len(desired.Groups)+len(observed))
+func unionGroupIDs(input PlanInput, desired Document) []string {
+	seen := make(map[string]struct{})
+	var ids []string
 	add := func(id string) {
 		if _, ok := seen[id]; ok {
 			return
@@ -180,13 +182,16 @@ func unionGroupIDs(active, desired Document, observed map[string]GroupStatus) []
 		seen[id] = struct{}{}
 		ids = append(ids, id)
 	}
-	for _, group := range active.Groups {
-		add(group.ID)
+	for id := range input.Groups {
+		add(id)
 	}
 	for _, group := range desired.Groups {
 		add(group.ID)
 	}
-	for id := range observed {
+	for id := range input.Native {
+		add(id)
+	}
+	for id := range input.Retained {
 		add(id)
 	}
 	slices.SortFunc(ids, comparePlanGroups)
@@ -241,8 +246,8 @@ func validateObservedMembership(status GroupStatus) error {
 
 // BuildPlanPreferred uses the same rules while preferring an eligible meta
 // leadership destination (for example, when draining the current leader).
-func BuildPlanPreferred(active, desired Document, observed map[string]GroupStatus, options PlanOptions) (Plan, error) {
-	return constructPlan(active, desired, observed, options)
+func BuildPlanPreferred(input PlanInput, desired Document, options PlanOptions) (Plan, error) {
+	return constructPlan(input, desired, options)
 }
 
 type topologyPlanBuilder struct {

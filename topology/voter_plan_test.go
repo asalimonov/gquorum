@@ -40,7 +40,7 @@ func TestVoterReplacementOrderingAndGuard(t *testing.T) {
 			st.LiveVoters = map[uint64]bool{1: true, 2: !tc.lost, 3: false, 4: true}
 			statuses["work"] = st
 			rules := Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 5, MaxReplicas: 5}}
-			plan, err := BuildPlan(active, desired, statuses, rules)
+			plan, err := BuildPlan(testPlanInput(active, statuses), desired, rules)
 			if tc.unknown || tc.lost {
 				if err == nil {
 					t.Fatal("unsafe replacement accepted", plan)
@@ -92,7 +92,7 @@ func TestDemotionGuardIsPartOfExactApproval(t *testing.T) {
 	if err := ValidatePlanShape(convergedPlanInput(active), desired, plan); err == nil {
 		t.Fatal("guard accepted learner or mismatched identity")
 	}
-	_, err := BuildPlan(active, desired, map[string]GroupStatus{}, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 3, MaxReplicas: 5}})
+	_, err := BuildPlan(testPlanInput(active, map[string]GroupStatus{}), desired, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 3, MaxReplicas: 5}})
 	if !errors.Is(err, fault.ErrUnavailable) {
 		t.Fatal(err)
 	}

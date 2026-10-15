@@ -121,7 +121,7 @@ func TestOperatorPlanProofSurvivesSnapshotAndRetry(t *testing.T) {
 	if result := apply(t, sm, 1, ProposeDocument{Doc: next, ExpectedVersion: 1}); !result.Accepted {
 		t.Fatal(result)
 	}
-	plan, err := topology.BuildPlan(base, sm.Latest(), assumedReadmissionStatuses(base, ""), testRules())
+	plan, err := topology.BuildPlan(testPlanningInput(t, sm, sm.Latest(), assumedReadmissionStatuses(base, "")), sm.Latest(), testRules())
 	if err != nil || len(plan.VoterBases) != 1 || len(plan.VoterBases[0].Voters) != 1 {
 		t.Fatal("failed to build guarded learner plan", plan, err)
 	}

@@ -34,7 +34,7 @@ func TestRollbackUnfinishedReadmissionRefusesRetiredIdentity(t *testing.T) {
 			LiveVoters: map[uint64]bool{1: true, 2: true, 3: true}}
 	}
 	desired := f.g.machine.Latest()
-	plan, err := topology.BuildPlan(active, desired, observed, f.g.rules)
+	plan, err := topology.BuildPlan(testPlanningInput(t, f.g.machine, desired, observed), desired, f.g.rules)
 	if err != nil {
 		t.Fatal(err)
 	}

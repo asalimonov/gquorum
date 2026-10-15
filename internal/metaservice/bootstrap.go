@@ -55,8 +55,7 @@ func (g *Group) bootstrap(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		observed := legacyPlanningObservations(input)
-		plan, err := topology.BuildPlan(machine.Active(), latest, observed, g.rules)
+		plan, err := topology.BuildPlan(input, latest, g.rules)
 		if err != nil {
 			return err
 		}
