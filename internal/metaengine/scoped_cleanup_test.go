@@ -71,11 +71,7 @@ func TestScopedCleanupKeepsIndependentCollectionClockAndSequence(t *testing.T) {
 	if debt.Collection.LocalSequence >= debt.Retired.LocalSequence || !debt.Collection.CollectedAt.Before(*debt.RetiredAt) {
 		t.Fatal("fixture must exercise independent bucket sequences and host clock")
 	}
-	// An approved deletion can retain debt before any required host stop returns.
-	state.Cleanup[1].Stopped, state.Cleanup[1].StoppedAt, state.Cleanup[1].Retired, state.Cleanup[1].RetiredAt = nil, nil, nil, nil
-	if _, err := prepareScopedGraph(&state, state.Rules); err != nil {
-		t.Fatal("unconfirmed deletion lost evidence", err)
-	}
+
 }
 
 func TestScopedCleanupRequiresApprovedDeclarationContext(t *testing.T) {

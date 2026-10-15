@@ -19,7 +19,7 @@ func populateScopedCodecAuthority(state *scopedState, id storage.Identity, key t
 			id.GroupID, id.ReplicaID, key.GroupID, key.Revision = "b", 8, "b", 9
 			kind, storageClass = topology.StepDeleteGroupState, topology.StorageMemory
 		}
-		action := topology.AuthorizedStep{OperatorID: "exec-v2-a1", Version: 2, Attempt: 1, StepSeq: 3 + i*3,
+		action := topology.AuthorizedStep{OperatorID: "exec-v2-a1", Version: 2, Attempt: 1, StepSeq: 3 + i*2,
 			Kind: kind, GroupID: id.GroupID, NodeName: id.NodeName, ReplicaID: id.ReplicaID}
 		if kind == topology.StepDeleteGroupState {
 			action.NodeName, action.ReplicaID = "", 0
@@ -48,6 +48,8 @@ func populateScopedCodecAuthority(state *scopedState, id storage.Identity, key t
 				Token: "opaque", LocalSequence: 1, CollectedAt: at.Add(-time.Minute)}
 			remove := stop
 			remove.Kind, remove.StepSeq = topology.StepRemoveReplica, stop.StepSeq-1
+			remove.ExpectedVotersDigest = topology.VoterSetDigest([]uint64{7, 8})
+			remove.ResultVotersDigest = topology.VoterSetDigest([]uint64{8})
 			removeGrant := stopGrant.Clone()
 			removeGrant.Key.Revision--
 			removeGrant.Action, removeGrant.Resources = &remove, []topology.AuthorityResource{{Kind: topology.AuthorityGroup, GroupID: id.GroupID}}
@@ -60,4 +62,27 @@ func populateScopedCodecAuthority(state *scopedState, id storage.Identity, key t
 		state.Cleanup = append(state.Cleanup, debt)
 	}
 	state.AuthorityRecords = append(state.AuthorityRecords, prerequisites...)
+}
+
+func retainScopedCleanupOrigin(state *scopedState, at time.Time) {
+	plan := topology.Plan{Version: 2, Steps: make([]topology.Step, 5),
+		VoterBases: []topology.PlanVoterBase{{GroupID: "a", Voters: []uint64{7, 8}}},
+		Blocks: []topology.PlanBlock{
+			{GroupID: "a", SourceVersion: 1, Steps: []int{1, 2}, Cleanup: []int{3}},
+			{GroupID: "b", SourceVersion: 1, Steps: []int{4}, Cleanup: []int{5}},
+		}}
+	for _, record := range state.AuthorityRecords {
+		action := record.Grant.Action
+		plan.Steps[action.StepSeq-1] = topology.Step{Seq: action.StepSeq, Kind: action.Kind, GroupID: action.GroupID,
+			NodeName: action.NodeName, ReplicaID: action.ReplicaID,
+			ExpectedVotersDigest: action.ExpectedVotersDigest, ResultVotersDigest: action.ResultVotersDigest}
+	}
+	state.Operations = append(state.Operations, topology.Operation{Plan: plan,
+		Status: topology.OperationStatus{ID: "exec-v2-a1", Version: 2, Attempt: 1,
+			State: topology.OperationFailed, TotalBlocks: 2, Blocks: []topology.BlockStatus{
+				{GroupID: "a", State: topology.OperationFailed, CurrentStep: 2, TotalSteps: 2},
+				{GroupID: "b", State: topology.OperationFailed, CurrentStep: 4, TotalSteps: 1},
+			}}, StartedAt: at, UpdatedAt: at})
+	state.Groups = append(state.Groups, groupConvergence{GroupID: "b", SourceVersion: 1,
+		Declaration: state.History[1].Group("b"), Deleting: true, CompletedAt: at})
 }

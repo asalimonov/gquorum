@@ -317,3 +317,19 @@ Verified
 - Focused scoped regressions passed, including every forbidden rebase approval/action witness and staged-only compaction context. make test: 1066/1066, 8.792s; test-reports/unit/20261015T182207.078737Z-5_j_tmb0/report.md.
 - Extracted compacted-group checking to meet complexity limits; focused tests rerun afterward. Exact staged lint and diff checks passed; /tmp/gquorum-correction3-lint.log. Changed handwritten Go remains below 550 lines. Pure restore validation adds no resource acquisition or concurrency.
 - Review follow-up still covers pending cleanup/retry and normalization corrections. Next regular peer/dead-code checkpoint remains commit 20.
+
+## Correction 4 — Exact cleanup progress, pending stops and retry lineage
+Date: 2026-10-15. Commit: this entry's commit (implementation/correction commit 17).
+
+Implemented
+- Addressed thread 4 findings 1/3/7 for the ordinary action path. Every debt pins its originating operation and source/approved context. Removed archived-cleanup authority and optional-origin branches; the codec fixture now retains a real guarded removal/deletion plan.
+- Required pending stops bind to the exact chain tip, whose group must either be nonterminal with its exact owner or failed without an owner awaiting retry. Deletion keeps its former declaration and Deleting row; no premature tombstone or supersession. Consumed stops retain their attempt identity. Detached actions and retirement remain bound to the original approval.
+- Added reverse grant-to-milestone agreement and retirement issuance boundary checks with one grant traversal and exact debt lookups. Late predecessor-attempt receipts remain historical evidence. A combined meta stop/retire action may issue before its own completion but its consumed receipt supplies both milestones.
+- Applied the peer's final ancestry correction: walk retained staged parents to reject any skipped approved/action-bearing ancestor. Explicit decreasing-parent checks prevent malformed map iteration order from causing an infinite walk. Compaction gaps retain the documented verification limit.
+- Reused a single fence-obligation comparator and removed the redundant retry block-count comparison. Before coding, split readmission-origin preservation into Correction 5 (250–400 estimated Go lines); normalization is Correction 6. Updated target §4.1/4.3/6.2 with agreed exact proof and retention rules. No API addition or live v4 activation.
+
+Verified
+- Scoped regressions cover failed/retried deletion, late predecessor consumption, successor stop receipts, origin loss, premature retirement/tombstones, supersession, wrong retry binding, combined stop/retire proof and unrelated convergence with pinned cleanup context.
+- make test: 1078/1078, 6.993s; test-reports/unit/20261015T183722.591921Z-lsmdye09/report.md. Exact staged lint and diff checks passed; /tmp/gquorum-correction4-lint.log. Changed handwritten Go remains under 550 lines; no resources/concurrency added.
+- Existing authorityCatalog still rejects duplicate grants for one action. Recorded the mandatory coordinated change in the later cleanup issuance task: multiple reconciled revisions must retain compatible late receipts without rewriting milestones. Do not loosen one validator while leaving the other incompatible.
+- Next correction preserves original cleanup actions through complete later readmission; this pending path is not implied finished here. Next regular review/dead-code checkpoint is commit 20.

@@ -86,7 +86,7 @@ func TestScopedIndexesRejectAmbiguousKeysAtomically(t *testing.T) {
 			s.Intents[1].ExpectedVersion, s.Intents[1].Kind, s.Intents[1].Digest = s.Intents[0].ExpectedVersion, s.Intents[0].Kind, s.Intents[0].Digest
 		},
 		"retry fork": func(s *scopedState) {
-			retry := s.Operations[2].Clone()
+			retry := s.Operations[len(s.Operations)-1].Clone()
 			retry.Status.ID, retry.Status.Attempt = "exec-v3-a3", 3
 			s.Operations = append(s.Operations, retry)
 		},

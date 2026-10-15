@@ -40,12 +40,7 @@ func appendObligation(existing []topology.FenceObligation, ob topology.FenceObli
 	}) {
 		list = append(list, ob)
 	}
-	slices.SortFunc(list, func(a, b topology.FenceObligation) int {
-		if c := a.Resource.Compare(b.Resource); c != 0 {
-			return c
-		}
-		return compareAuthorityKey(a.Key, b.Key)
-	})
+	slices.SortFunc(list, compareFenceObligations)
 	return list
 }
 
@@ -302,4 +297,11 @@ func (a authorityCatalog) recordSettled(r *authorityRecord) bool {
 		}
 	}
 	return true
+}
+
+func compareFenceObligations(a, b topology.FenceObligation) int {
+	if order := a.Resource.Compare(b.Resource); order != 0 {
+		return order
+	}
+	return compareAuthorityKey(a.Key, b.Key)
 }

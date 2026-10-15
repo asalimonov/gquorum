@@ -59,9 +59,6 @@ func validateScopedGrant(record scopedAuthorityRecord, index *scopedIndexes, cat
 	if operation != nil {
 		return validateRetainedScopedGrant(record, operation, index)
 	}
-	if record.Class == "cleanup" {
-		return validateCleanupGrantDebt(grant, index)
-	}
 	// An archived execution grant supplies historical evidence only after settlement.
 	// Unfinished execution still requires its immutable operation/plan.
 	if record.Class != "execution" || !catalog.recordSettled(&record.authorityRecord) {
@@ -103,7 +100,7 @@ func validateCleanupGrantDebt(grant topology.AuthorityGrant, index *scopedIndexe
 			NodeName: target.NodeName, ReplicaID: target.ReplicaID}
 		debt := index.cleanup[id]
 		if debt == nil || debt.MemberID != target.MemberID || !cleanupRetainsAction(debt, *grant.Action) {
-			return invalidScopedState("archived cleanup authority lost exact retained debt")
+			return invalidScopedState("cleanup authority lost exact retained debt")
 		}
 	}
 	return nil
@@ -129,16 +126,9 @@ func validateScopedRevocation(record scopedRevocationRecord, index *scopedIndexe
 	}
 	for i, obligation := range record.Obligations {
 		if obligation.Key.GroupID != record.GroupID || obligation.Resource.GroupID != record.GroupID ||
-			i > 0 && compareScopedObligations(record.Obligations[i-1], obligation) >= 0 {
+			i > 0 && compareFenceObligations(record.Obligations[i-1], obligation) >= 0 {
 			return invalidScopedState("revocation obligations require sorted unique exact group resources")
 		}
 	}
 	return catalog.validateRestoredObligations(record.Obligations)
-}
-
-func compareScopedObligations(a, b topology.FenceObligation) int {
-	if order := a.Resource.Compare(b.Resource); order != 0 {
-		return order
-	}
-	return compareAuthorityKey(a.Key, b.Key)
 }

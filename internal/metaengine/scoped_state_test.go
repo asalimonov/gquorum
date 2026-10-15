@@ -66,6 +66,7 @@ func scopedCodecFixture() scopedState {
 		VoterSwitches: []topology.VoterSwitchState{{GroupID: "b"}, {GroupID: "a"}},
 	}
 	populateScopedCodecAuthority(&state, id, key, at)
+	retainScopedCleanupOrigin(&state, at)
 	return state
 }
 

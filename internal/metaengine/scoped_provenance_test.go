@@ -87,3 +87,24 @@ func TestScopedCheckpointCompactionRequiresApprovedContext(t *testing.T) {
 		})
 	}
 }
+
+func TestScopedRebaseCannotSkipApprovedAncestorBehindStagedEdits(t *testing.T) {
+	t.Parallel()
+	s := scopedCodecFixture()
+	staged := s.History[3].Clone()
+	staged.Version, staged.ParentVersion = 5, 4
+	s.History = append(s.History, staged)
+	s.Target.Version, s.Target.ParentVersion = 6, 3
+	s.Latest.Version, s.Latest.ParentVersion, s.Latest.RebasedFrom = 7, 6, 5
+	if _, err := prepareScopedGraph(&s, s.Rules); err != nil {
+		t.Fatal("valid approved ancestor refused", err)
+	}
+	s.Target.ParentVersion = 2
+	if _, err := prepareScopedGraph(&s, s.Rules); !errors.Is(err, fault.ErrUnreadable) {
+		t.Fatal("repair skipped approved ancestor behind staged edits", err)
+	}
+	s.History[3].ParentVersion = 4
+	if _, err := prepareScopedGraph(&s, s.Rules); !errors.Is(err, fault.ErrUnreadable) {
+		t.Fatal("nondecreasing staged ancestry accepted", err)
+	}
+}

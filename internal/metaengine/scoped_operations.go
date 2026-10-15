@@ -123,7 +123,7 @@ func validateScopedRetry(operation topology.Operation, index *scopedIndexes) err
 	if previous.Status.State != topology.OperationFailed ||
 		previous.Status.Version != operation.Status.Version || previous.Status.Attempt >= operation.Status.Attempt ||
 		operation.Status.Attempt-previous.Status.Attempt != 1 ||
-		len(previous.Status.Blocks) != len(operation.Status.Blocks) || operation.Actor != previous.Actor ||
+		operation.Actor != previous.Actor ||
 		operation.Origin != previous.Origin || operation.StartedAt.Before(previous.UpdatedAt) ||
 		!previous.Plan.Equal(operation.Plan) {
 		return invalidScopedState("invalid immutable retry predecessor")

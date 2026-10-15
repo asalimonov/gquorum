@@ -78,7 +78,9 @@ func TestScopedDocumentIndexIsImmutableAndFirstMeansOriginal(t *testing.T) {
 		t.Fatal("immutable document index aliases a mutable state slot")
 	}
 	restored.Latest.Comment = fixture.Latest.Comment
-	restored.Operations = []topology.Operation{restored.Operations[2]}
+	// Incomplete index input is not restorable: full graph validation requires
+	// complete retry chains, which retention must prune atomically.
+	restored.Operations = []topology.Operation{restored.Operations[len(restored.Operations)-1]}
 	index, err := restored.buildIndexes()
 	if err != nil || index.first[3] != "" || index.latest[3] != "exec-v3-a2" {
 		t.Fatal("pruned original approval was replaced by a retry", err)

@@ -244,11 +244,19 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** scoped cleanup/authority validation and fixtures. **Target:** [T] §4.1–4.3, §6.1–6.2; review thread 4 findings 1/3/7. **Budget:** estimated 400–550 changed Go lines, ceiling 550.
 
-- [ ] Require two-way receipt/milestone agreement, the stop-before-retirement boundary and honest unfinished deletion ownership. Pin the originating operation and its source context until debt pruning.
-- [ ] Resolve exact successor-attempt actions without relabeling consumed predecessor receipts; test retry and unrelated-progress restoration. Remove obsolete archived-cleanup branches and duplicate validation.
-- [ ] Run focused regressions, make test and staged lint before committing.
+- [x] Require two-way receipt/milestone agreement, the stop-before-retirement boundary and honest unfinished deletion ownership. Pin the originating operation and its source context until debt pruning.
+- [x] Resolve exact successor-attempt actions without relabeling consumed predecessor receipts; test retry and unrelated-progress restoration. Remove obsolete archived-cleanup branches and duplicate validation. Apply the final peer ancestry-walk correction and test an approved ancestor behind multiple staged edits.
+- [x] Run focused regressions, make test and staged lint before committing.
 
-### Correction 5: Normalize generated rebase provenance on ordinary edits
+### Correction 5: Preserve cleanup origin through complete readmission
+
+**Files:** scoped cleanup/readmission validators and regressions. **Target:** [T] §4.1–4.3, §6.2; review thread 4 round 3. **Budget:** estimated 250–400 changed Go lines, ceiling 550. Split from Correction 4 before coding because exact readmission/milestone preservation expands the necessary fixtures and checks.
+
+- [ ] Separate readmission-created debt from removal debt later covered by readmission. Preserve original operation/actions and consumed stop/native receipts; independently validate exact admission and complete batch coverage.
+- [ ] Keep older action grants bound until settled/fenced; require readmission receipt only for milestones it actually supplies. Correct the fixture that deleted a retained cleanup grant.
+- [ ] Run readmission/cleanup regressions, make test and staged lint.
+
+### Correction 6: Normalize generated rebase provenance on ordinary edits
 
 **Files:** FSM document installation, mutation derivation, regressions and retention notes. **Target:** [T] §3.4, §4.3, §5.3; review thread 4 findings 4/6. **Budget:** estimated 100–200 changed Go lines, ceiling 550.
 
@@ -380,6 +388,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** `internal/metaengine/cleanup.go`, authority issue/resource helpers, `internal/metaservice/cleanup.go`. **Target:** [T] §6.2–6.3, §7.1–7.2. **Depends on:** 20, 23. **Budget:** ≤550.
 
 - [ ] Implement BeginCleanupEffect and RecordCleanupStatus handlers. Derive execution/cleanup Class from exact retained debt; permit only the approved deferred stop/retirement action after operation termination.
+- [ ] When permitting multiple cleanup grant revisions for one action, replace authorityCatalog's current duplicate-action rejection and adjust reverse milestone checks together: one retained exact receipt supplies a milestone; compatible late receipts from other fenced/reconciled revisions remain historical evidence. Test late old/new revision receipt order without rewriting consumed milestones.
 - [ ] Reuse a matching grant; reconcile a newer same-resource floor before reissuing a revision. Never revive native/preparation authority or affect successor ownership. Authenticate original host/readmission proof for NotBefore/blocker changes.
 - [ ] Test terminal-operation cleanup, forged cleanup classification, same-host conflict, repeated polling causing no durable writes and preserved milestones on deferral/failure updates.
 

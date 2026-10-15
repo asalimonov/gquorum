@@ -22,11 +22,12 @@ func validateScopedCleanup(state *scopedState, index *scopedIndexes, catalog aut
 			return invalidScopedState("cleanup lacks exact declaration, action or milestone proof")
 		}
 	}
-	return nil
+	return validateScopedCleanupEffects(index, catalog)
 }
 
 func (check scopedCleanupValidation) declaration(debt cleanupRecord) bool {
-	if debt.Identity.ClusterID != check.state.Target.ClusterID || debt.MemberID == 0 || debt.OperationID == "" ||
+	if debt.Identity.ClusterID != check.state.Target.ClusterID || debt.MemberID == 0 ||
+		check.index.operations[debt.OperationID] == nil ||
 		topology.ValidateStorageClass(debt.Storage) != nil || debt.CreatedAt.IsZero() ||
 		debt.UpdatedAt.Before(debt.CreatedAt) || debt.NotBefore != nil && debt.NotBefore.IsZero() {
 		return false
@@ -57,7 +58,7 @@ func (check scopedCleanupValidation) actions(debt cleanupRecord) bool {
 		!(kind == topology.StepStopReplica && debt.Identity.GroupID == topology.MetaGroupID) {
 		return false
 	}
-	return check.action(debt, *debt.StopAction) && check.action(debt, *debt.RetireAction)
+	return check.stopAction(debt) && check.action(debt, *debt.RetireAction)
 }
 
 func (check scopedCleanupValidation) action(debt cleanupRecord, action topology.AuthorizedStep) bool {
@@ -65,7 +66,6 @@ func (check scopedCleanupValidation) action(debt cleanupRecord, action topology.
 		action.Attempt == 0 || action.StepSeq < 1 ||
 		action.TransferNodeName != "" || action.TransferReplicaID != 0 || action.Kind != topology.StepRemoveReplica &&
 		(action.ExpectedVotersDigest != "" || action.ResultVotersDigest != "") ||
-		topology.OperationID(action.OperatorID) != debt.OperationID ||
 		action.OperatorID != topology.MakeOperatorID(action.Version, action.Attempt) {
 		return false
 	}
@@ -76,8 +76,11 @@ func (check scopedCleanupValidation) action(debt cleanupRecord, action topology.
 	} else if action.NodeName != debt.Identity.NodeName || action.ReplicaID != debt.Identity.ReplicaID {
 		return false
 	}
-	operation := check.index.operations[debt.OperationID]
-	return operation == nil || action.StepSeq <= len(operation.Plan.Steps) &&
+	operation := check.index.operations[topology.OperationID(action.OperatorID)]
+	if operation == nil {
+		return false
+	}
+	return action.StepSeq <= len(operation.Plan.Steps) && topology.OperationID(action.OperatorID) == debt.OperationID &&
 		action.Matches(topology.OperatorID(operation.Status.ID), operation.Status.Attempt,
 			operation.Status.Version, operation.Plan.Steps[action.StepSeq-1])
 }

@@ -131,9 +131,8 @@ func validateScopedRebase(state *scopedState, index *scopedIndexes, doc topology
 		return invalidScopedState("rebase lacks exact staged source and repair ancestry")
 	}
 	if repair, found := index.documents[doc.ParentVersion]; found {
-		if repair.ParentVersion > source.ParentVersion ||
-			repair.ParentVersion != source.ParentVersion && scopedApprovedVersion(state, source.ParentVersion) {
-			return invalidScopedState("repair parent contradicts the original approved base")
+		if err := validateScopedRebaseBase(state, index, source, repair); err != nil {
+			return err
 		}
 	}
 	if scopedApprovedVersion(state, source.Version) || scopedActionVersion(state, source.Version) {
@@ -160,4 +159,25 @@ func scopedActionVersion(state *scopedState, version uint64) bool {
 		}
 	}
 	return false
+}
+
+func validateScopedRebaseBase(state *scopedState, index *scopedIndexes, source, repair topology.Document) error {
+	version := source.ParentVersion
+	for version > repair.ParentVersion {
+		if scopedApprovedVersion(state, version) || scopedActionVersion(state, version) {
+			return invalidScopedState("repair parent skips an approved staged ancestor")
+		}
+		doc, found := index.documents[version]
+		if !found {
+			return nil // Compaction retained no evidence contradicting this parent.
+		}
+		if doc.ParentVersion >= version {
+			return invalidScopedState("staged ancestry does not decrease")
+		}
+		version = doc.ParentVersion
+	}
+	if version != repair.ParentVersion {
+		return invalidScopedState("repair parent is not an ancestor of the staged source")
+	}
+	return nil
 }
