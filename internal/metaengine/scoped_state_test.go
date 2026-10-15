@@ -16,7 +16,7 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// Deterministic scoped graph and authority fixture; voter history validation follows in Task 15.
+// Deterministic scoped graph with retained authority and archived cooldown proof.
 func scopedCodecFixture() scopedState {
 	at := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
 	id := storage.Identity{ClusterID: "c", GroupID: "a", NodeName: "n", ReplicaID: 7}
@@ -63,7 +63,7 @@ func scopedCodecFixture() scopedState {
 		Admissions:     []AdmissionRecord{{NodeName: "n", InstanceID: "i1", MemberID: 1, OperatorID: "exec-v1-a1", State: AdmissionCompleted}, {NodeName: "n", InstanceID: "i2", MemberID: 1, OperatorID: "exec-v1-a1", State: AdmissionSuperseded}},
 		Sessions:       []sessionState{{SessionID: "b", NodeName: "b", InstanceID: "i", TTLSeconds: 30}, {SessionID: "a", NodeName: "a", InstanceID: "i", TTLSeconds: 30}},
 		Locks:          []lockEntry{{Key: "b", SessionID: "b"}, {Key: "a", SessionID: "a"}}, Activated: []string{"b", "a"},
-		VoterSwitches: []topology.VoterSwitchState{{GroupID: "b"}, {GroupID: "a"}},
+		VoterSwitches: scopedArchivedVoterFixture(at),
 	}
 	populateScopedCodecAuthority(&state, id, key, at)
 	retainScopedCleanupOrigin(&state, at)

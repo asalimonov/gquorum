@@ -49,6 +49,9 @@ func prepareScopedGraph(state *scopedState, rules topology.Rules) (*scopedIndexe
 	if err := validateScopedCompletion(state, index, catalog); err != nil {
 		return nil, err
 	}
+	if err := validateScopedVoterSwitches(state, index, catalog); err != nil {
+		return nil, err
+	}
 	return index, nil
 }
 
@@ -148,6 +151,9 @@ func validateScopedRebase(state *scopedState, index *scopedIndexes, doc topology
 }
 
 func scopedActionVersion(state *scopedState, version uint64) bool {
+	if scopedVoterVersion(state, version) {
+		return true
+	}
 	for _, record := range state.AuthorityRecords {
 		if record.Grant.Action != nil && record.Grant.Action.Version == version {
 			return true

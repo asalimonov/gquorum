@@ -397,3 +397,18 @@ Verified
 - Focused retry/admission/readmission preparation regressions passed. make test: 1110/1110, 8.541s; test-reports/unit/20261015T190625.967877Z-6t0peo43/report.md.
 - Exact staged lint passed: /tmp/gquorum-correction7-lint.log. Diff checks passed; changed handwritten Go remains below 550. This change shares pure validation without new resource/concurrency behavior; no full race/functional/Docker run needed here.
 - All thread 5 findings accepted with current fix or explicit downstream transition/restore obligations; no remaining disagreement or user decision. Next task 15; next peer/dead-code checkpoint commit 25.
+
+## Task 15 — Validate retained voter history before restore installation
+Date: 2026-10-16. Commit: this entry's commit (implementation/correction commit 22).
+
+Implemented
+- Completed isolated v4 restore preparation with voter-switch validation. Reuses existing identity, allocation, role/index ordering and bounded cooldown-summary checks; supplies actual scoped declarations, operations, cleanup, admissions and grant identities without legacy operators or synthetic Active.
+- Retained records match an exact consumed promotion/demotion action and completed progress in its validated attempt chain. A successor may acknowledge predecessor consumption but cannot relabel the record to an unconsumed attempt or reset cooldown. Completion application indexes must follow grant issuance. Entirely pruned operation chains leave valid bounded cooldown anchors; a missing attempt within a retained chain fails closed.
+- Included role-effect provenance in staged-rebase refusal. Replaced the formerly pending dummy codec voter fields with valid archived records. The ancestry regression now explicitly omits v5 role effects because that case repurposes v5 as staged intent; a dedicated test rejects staged role provenance.
+- Regression coverage: successful/closed-grant restore, retry lookup, original receipt with later completion, promotion/demotion, operation pruning, one removed last-holder anchor, unreferenced non-last rejection, malformed identities/versions/indexes/roles/summaries, relabeled retries, fence-only proof and atomic decoder refusal retaining prior bytes/index pointers.
+- Shared the exact plan-step authority lookup with the existing live consumption helper. Target retention notes and Task 22 explicitly carry the no-reset/original-effect rule into the later transition writer. No public API change; live Machine/schema-3 behavior stays unchanged and refuses v4 until Task 60.
+
+Verified
+- Focused Scoped/VoterSwitch/ReplacementPrepare units passed. make test: 1132/1132, 8.060s; test-reports/unit/20261015T191353.626918Z-s7t2gcac/report.md.
+- Exact staged lint passed at /tmp/gquorum-task15-lint.log after splitting provenance lookup and wrapping one signature. Diff checks passed; 418 changed handwritten Go lines, below 550.
+- No acquired storage, new concurrency or process behavior in this task; no new functional/race/Docker run. Next task 16 needs a pre-coding size audit of planner/helper/caller conversion. Next regular peer/dead-code checkpoint is commit 25.

@@ -91,6 +91,7 @@ func TestScopedCheckpointCompactionRequiresApprovedContext(t *testing.T) {
 func TestScopedRebaseCannotSkipApprovedAncestorBehindStagedEdits(t *testing.T) {
 	t.Parallel()
 	s := scopedCodecFixture()
+	s.VoterSwitches = nil // This scenario uses v5 as staged intent, with no approved role effect.
 	staged := s.History[3].Clone()
 	staged.Version, staged.ParentVersion = 5, 4
 	s.History = append(s.History, staged)

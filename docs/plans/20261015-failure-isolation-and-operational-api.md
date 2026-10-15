@@ -287,14 +287,14 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 ### Task 15: Validate retained voter history before restore installation
 
-**Files:** scoped voter validation and restore tests. **Target:** [T] §4.1–4.3, §8.4. **Depends on:** 14. **Budget:** ≤550.
+**Files:** scoped voter validation and restore tests. **Target:** [T] §4.1–4.3, §8.4. **Depends on:** 14. **Budget:** estimated 350–500 changed handwritten Go lines, ceiling 550.
 
-- [ ] Validate voter-switch identities, allocation/index bounds, cooldown retention and completed effects using scoped block/Previous proof. Reuse unchanged shape checks without global completion or synthetic Active.
-- [ ] Complete owned state/index/proof preparation before candidate replacement. Test malformed retained voter proof and atomic refusal, equivalent successful restored lookup and valid history after operation pruning. Live Machine/format installation remains Task 60, where handlers and persistence activate together.
+- [x] Validate voter-switch identities, allocation/index bounds, cooldown retention and completed effects using scoped block/Previous proof. Reuse unchanged shape checks without global completion or synthetic Active.
+- [x] Complete owned state/index/proof preparation before candidate replacement. Test malformed retained voter proof and atomic refusal, equivalent successful restored lookup and valid history after operation pruning. Live Machine/format installation remains Task 60, where handlers and persistence activate together.
 
 **Verification**
 
-- [ ] Run voter/proof/restore units, focused persistence checks if a store is acquired, staged lint and `make test`; verify live format rejection remains intact.
+- [x] Run voter/proof/restore units, focused persistence checks if a store is acquired, staged lint and `make test`; verify live format rejection remains intact.
 
 ### Task 16: Replace the planner's Active input contract
 
@@ -375,6 +375,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** `internal/metaengine/operator_state.go`, `progress.go`. **Target:** [T] §6.1, §7.2, §12 “completeGroupLocked”. **Depends on:** 19–21. **Budget:** ≤550.
 
 - [ ] Implement noncompletion applyTransitionOperation/validateScopedTransition and the validation/preparation portion of completeGroupLocked. Require exact required receipts and relevant barriers; aggregate full operation state independently of projected pages. Add inherited retry lookup when Task 26 installs Previous-chain behavior.
+- [ ] Record role-change cooldown under the exact consumed grant/action attempt, once; inherited retry consumption must not relabel the effect or reset an existing cooldown. Completion may first be recorded by a later attempt in the validated Previous chain. Preserve the original role tuple and use a completion application index after grant issuance.
 - [ ] Prepare the group's declaration from that operation's pinned approved version. Defer successful completion installation until Task 24 supplies the node/marker/debt preparations; do not publish a partially completed group in this intermediate task.
 - [ ] Test independent block cursors/failure, original declaration provenance after newer Target and stale tuple/final-validation refusal. Add the aggregate-precedence calculation/tests moved from Task 1: any runnable/waiting sibling keeps the operation nonterminal; once all terminate, failed dominates superseded, then succeeded. Task 24 adds successful atomic completion and duplicate-completion regressions once every prepared component exists.
 

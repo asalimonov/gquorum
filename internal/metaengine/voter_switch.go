@@ -121,12 +121,7 @@ func validateVoterSwitches(st smState) error {
 	if len(st.VoterSwitches) == 0 {
 		return nil
 	}
-	check := voterSwitchValidation{state: st, allocations: make(map[string]uint64, len(st.Allocations)),
-		names: map[voterSwitchKey]string{}, protected: map[voterSwitchKey]bool{}, groups: map[string]bool{},
-		seenGroups: map[string]bool{}, seenIndexes: map[uint64]bool{}}
-	for _, a := range st.Allocations {
-		check.allocations[a.GroupID] = a.NextReplicaID
-	}
+	check := newVoterSwitchValidation(st)
 	if err := check.rememberCurrent(); err != nil {
 		return err
 	}
@@ -142,6 +137,16 @@ func validateVoterSwitches(st smState) error {
 		}
 	}
 	return nil
+}
+
+func newVoterSwitchValidation(st smState) voterSwitchValidation {
+	check := voterSwitchValidation{state: st, allocations: make(map[string]uint64, len(st.Allocations)),
+		names: map[voterSwitchKey]string{}, protected: map[voterSwitchKey]bool{}, groups: map[string]bool{},
+		seenGroups: map[string]bool{}, seenIndexes: map[uint64]bool{}}
+	for _, a := range st.Allocations {
+		check.allocations[a.GroupID] = a.NextReplicaID
+	}
+	return check
 }
 
 type voterSwitchKey struct {

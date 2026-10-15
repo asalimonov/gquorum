@@ -176,6 +176,20 @@ func (catalog authorityCatalog) stepConsumed(ex *operatorRecord, step topology.S
 
 func (catalog authorityCatalog) planStepConsumed(status topology.OperationStatus,
 	step topology.Step, scope completionScope) bool {
+	record := catalog.planStepAuthority(status, step)
+	if record == nil || scope == openCompletion && record.Closed {
+		return false
+	}
+	for _, resource := range record.Grant.Resources {
+		if !resourceConsumed(record, resource) {
+			return false
+		}
+	}
+	return true
+}
+
+func (catalog authorityCatalog) planStepAuthority(status topology.OperationStatus,
+	step topology.Step) *authorityRecord {
 	action := topology.AuthorizedStep{
 		OperatorID:           topology.OperatorID(status.ID),
 		Version:              status.Version,
@@ -190,16 +204,7 @@ func (catalog authorityCatalog) planStepConsumed(status topology.OperationStatus
 		ExpectedVotersDigest: step.ExpectedVotersDigest,
 		ResultVotersDigest:   step.ResultVotersDigest,
 	}
-	record := catalog.records[catalog.actions[action]]
-	if record == nil || scope == openCompletion && record.Closed {
-		return false
-	}
-	for _, resource := range record.Grant.Resources {
-		if !resourceConsumed(record, resource) {
-			return false
-		}
-	}
-	return true
+	return catalog.records[catalog.actions[action]]
 }
 
 func (sm *topologySM) applyActivateTarget(p ActivateTargetProposal) (ApplyResult, bool) {
