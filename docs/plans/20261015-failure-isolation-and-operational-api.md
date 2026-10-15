@@ -180,7 +180,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** scoped indexes/obligations, collection payloads/callbacks, permanent staging guard and regressions. **Target:** §4.1–4.3, §6.2–6.3, §7.1–7.3; review thread 3. **Budget:** ≤550 Go lines.
 
 - [x] Reuse current-floor issuance and revocation settlement predicates, including late consumption, newer fences and resumable leadership transfer. Keep older non-floor records as proof, not independent issuance gates.
-- [x] Keep raw caller RebasedFrom permanently forbidden; carry the entire expected cleanup Action and historical member/retirement proof through internal callbacks. Correct the contradictory target signatures.
+- [x] Reject raw caller RebasedFrom (superseded by Correction 6 normalization); carry the entire expected cleanup Action and historical member/retirement proof through internal callbacks. Correct the contradictory target signatures.
 - [x] Store immutable document index values and identify original approval only by attempt 1 with no Previous. Reject mismatched lookup identities and never substitute a retained retry for a missing original.
 - [x] Run focused regressions, exact staged lint and `make test`; record all review dispositions and downstream proof/rename obligations.
 
@@ -260,9 +260,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** FSM document installation, mutation derivation, regressions and retention notes. **Target:** [T] §3.4, §4.3, §5.3; review thread 4 findings 4/6. **Budget:** estimated 100–200 changed Go lines, ceiling 550.
 
-- [ ] Clear caller/inherited RebasedFrom on non-rebase installs and typed previews; test continued staging after a rebase. Replace the earlier rejection contract with normalization.
-- [ ] Document atomic retry-chain pruning and distinguish incomplete index-input tests from valid restored state. Clarify zero member IDs and collection clock/sequence scope.
-- [ ] Run focused regressions, make test and staged lint before committing.
+- [x] Clear caller/inherited RebasedFrom on non-rebase installs and typed previews; test continued staging after a rebase. Replace the earlier rejection contract with normalization.
+- [x] Document atomic retry-chain pruning and distinguish incomplete index-input tests from valid restored state. Clarify zero member IDs and collection clock/sequence scope.
+- [x] Run focused regressions, make test and staged lint before committing.
 
 ### Task 14: Validate admission and completed-effect proof before restore installation
 
@@ -415,7 +415,8 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** new `internal/metaengine/rebase.go`, existing repair document helpers. **Target:** [T] §5.3, §12 “Replicated repair and rebase”. **Depends on:** 16–18. **Budget:** ≤550.
 
 - [ ] Implement rebaseStaged(base, staged, repair) with semantic read/write conflict checks. Preserve staged caller attribution/audit, exact requested identities and all intended edits while applying a disjoint repair.
-- [ ] Prepare R at Latest+1 with parent old Target; when staged delta exists prepare S at Latest+2, parent R and RebasedFrom old Latest. Validate both before installation, preserve monotonic floors and deterministic supplied timestamps.
+- [ ] Prepare R at Latest+1 with parent old Target; use the atomic installer to retain S.RebasedFrom (ordinary commitLatestLocked clears it); when staged delta exists prepare S at Latest+2, parent R and RebasedFrom old Latest. Validate both before installation, preserve monotonic floors and deterministic supplied timestamps.
+- [ ] After an actual rebase, verify both a typed mutation and raw read-modify-Stage succeed with RebasedFrom cleared; retain original S provenance unchanged.
 - [ ] Test overlapping placement/eligibility changes, identity conflicts, multi-edit staging, no-staging case, version exhaustion and no accidental approval of the preserved edit.
 
 **Verification**
@@ -455,7 +456,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** `internal/metaengine` document apply/index code, `internal/metaservice/documents.go`, `planning.go`. **Target:** [T] §3.4, §4.1, §7.1, §12 “Approve”. **Depends on:** 14, 25–28. **Budget:** ≤550.
 
 - [ ] Store one intent record per accepted typed version; FSM validates known kind/digest encoding, parent CAS, document validity, allocation floor and replacement diff tuple without duplicating typed mutation logic.
-- [ ] Approve(version) returns its first recorded attempt regardless of terminal state; RetryOperation is the only retry path. Rebased unapproved versions return structured RebasedTo; missing retained proof returns conflict/HistoryUnavailable without writing.
+- [ ] Approve(version) returns its first recorded attempt regardless of terminal state; RetryOperation is the only retry path. Rebased unapproved versions return structured RebasedTo; missing retained proof returns conflict/HistoryUnavailable without writing. Missing original approval means the whole atomically pruned attempt chain is absent.
 - [ ] Test optional approval failure preserves Document/RebasedTo, identical replay allocates nothing, first approval versus latest attempt, pruning and forwarding of structured results.
 
 - [ ] Original approval lookup never falls back to a later retained retry; absent original evidence returns HistoryUnavailable.
@@ -820,7 +821,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 - [ ] Add intentionally sourced v4/v2 fixtures with provenance; retain old changed-format fixtures for explicit rejection and immutable unrelated physical baseline hashes for unchanged-format checks. Preserve current-index/term/confstate/pins and unchanged buckets.
 - [ ] Exercise fresh startup and current-format retained restart through real composition. Confirm all new proposals/queries/dispatch/report callbacks are reachable, with no production dual-model switch or unsupported stub left on an accepted path.
 
-- [ ] Keep the permanent raw-Stage RebasedFrom rejection after removing temporary intent guards, and test it through the public entry point. Shared AuthorityGrant/AuthorizedStep operation vocabulary and JSON tags must be converted before freezing v4 fixtures; AdmissionRecord execution_id stays unchanged.
+- [ ] Keep raw-Stage RebasedFrom normalization after removing temporary intent guards, and test that a supplied value is never persisted through the public entry point. Shared AuthorityGrant/AuthorizedStep operation vocabulary and JSON tags must be converted before freezing v4 fixtures; AdmissionRecord execution_id stays unchanged.
 
 **Verification**
 

@@ -137,6 +137,7 @@ func (g *Group) computeMutation(ctx context.Context, o MutationOptions, policy m
 
 	next.Version = base.Version + 1
 	next.ParentVersion = base.Version
+	next.RebasedFrom = 0
 	next.Origin = topology.OriginOperator
 	next.ChangedBy = o.Actor
 	if next.ChangedBy == "" {

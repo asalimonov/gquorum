@@ -18,10 +18,11 @@ type groupConvergence struct {
 }
 
 type nodeConvergence struct {
-	NodeName      string               `json:"node_name"`
-	Declaration   *topology.Node       `json:"declaration,omitempty"`
-	SourceVersion uint64               `json:"source_version"`
-	MemberID      uint64               `json:"member_id"` // exact source membership; zero for proven absence
-	Owner         topology.OperationID `json:"owner,omitempty"`
-	CompletedAt   time.Time            `json:"completed_at"`
+	NodeName      string         `json:"node_name"`
+	Declaration   *topology.Node `json:"declaration,omitempty"`
+	SourceVersion uint64         `json:"source_version"`
+	// Exact source _meta membership; zero also permits a declared excluded node.
+	MemberID    uint64               `json:"member_id"`
+	Owner       topology.OperationID `json:"owner,omitempty"`
+	CompletedAt time.Time            `json:"completed_at"`
 }

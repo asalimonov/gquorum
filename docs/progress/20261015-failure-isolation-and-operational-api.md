@@ -347,3 +347,17 @@ Verified
 - Focused scoped regressions passed. make test: 1088/1088, 9.761s; test-reports/unit/20261015T184127.867404Z-ha0rcqwp/report.md.
 - Exact staged lint and diff checks passed; /tmp/gquorum-correction5-lint.log. 235 changed handwritten Go lines, below 550. No public API addition, live v4 activation or new acquired/concurrent resource.
 - Next: normalize generated rebase provenance and finish review/retention notes, then restore prepared Task 14. Regular checkpoint remains commit 20.
+
+## Correction 6 — Normalize generated provenance on ordinary edits
+Date: 2026-10-15. Commit: this entry's commit (implementation/correction commit 19).
+
+Implemented
+- Replaced raw RebasedFrom rejection with normalization in the common ordinary FSM document installer. Clone-derived admission edits and raw read/modify staging both clear the generated field. Typed mutation preparation clears it after edits, so previews are consistent too.
+- Atomic rebase remains the only path allowed to set provenance; the later repair task explicitly uses its atomic installer and tests real post-rebase raw/typed edits. The current live format cannot yet generate a real rebase, so focused tests seed the generated field or supply it through an edit and verify installation/history/preview normalization.
+- Clarified atomic retry-chain pruning and missing-original HistoryUnavailable semantics in retention/lookup tasks. Updated target comments for excluded declared nodes with no source membership and independent collection-bucket sequence/host time. Historical Correction 2 now points to this replacement contract; public-entry cutover testing expects normalization.
+- Thread 4 is resolved without a user decision. Corrections 3–6 incorporate the final ancestry walk, honest failed deletion state, exact successor required-stop identity and distinct readmission origin rules. The prepared Task 14 remains preserved for restoration after this commit.
+
+Verified
+- Focused scoped/ordinary-derivation units passed. Focused functional TestMutationNormalizesGeneratedProvenance passed in internal/metaservice, using its existing deterministic FSM fixture.
+- make test: 1091/1091, 8.081s; test-reports/unit/20261015T184502.996408Z-nbimk3_b/report.md. Exact staged lint and diff checks passed; /tmp/gquorum-correction6-lint.log. 87 changed handwritten Go lines, below 550; no new concurrency or acquired runtime resources.
+- Full functional/race/Docker suites have not been rerun for these pure validation/derivation corrections; cross-process behavior remains assigned to final integration validation. Next commit is checkpoint 20.

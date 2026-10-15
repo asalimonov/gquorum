@@ -179,8 +179,8 @@ func TestScopedStateTombstonesAndActivationBoundary(t *testing.T) {
 	doc := m.latest.Clone()
 	doc.RebasedFrom = fixture.Latest.RebasedFrom
 	result := apply(t, m.topologySM, 6, ProposeDocument{Doc: doc, ExpectedVersion: m.latest.Version})
-	if result.Accepted || result.Code != proposalGuardrail || m.latest.RebasedFrom != 0 {
-		t.Fatal("legacy staging accepted caller-selected rebase provenance", result)
+	if !result.Accepted || result.Doc.RebasedFrom != 0 || m.latest.RebasedFrom != 0 {
+		t.Fatal("ordinary staging failed to normalize generated rebase provenance", result)
 	}
 }
 

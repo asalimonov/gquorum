@@ -173,10 +173,6 @@ func (sm *topologySM) Apply(index, term uint64, data []byte) (ApplyResult, error
 }
 
 func (sm *topologySM) applyProposeDocument(p ProposeDocument) (ApplyResult, bool) {
-	// Rebase provenance is always FSM-derived; raw staging cannot assert it.
-	if p.Doc.RebasedFrom != 0 {
-		return rejectProposalError(p.ProposalID, proposalGuardrail, fault.ErrInvalid), false
-	}
 	// Remove at Task 59: the current format cannot retain typed intent provenance.
 	if p.Intent != nil {
 		return rejectProposalError(p.ProposalID, proposalUnsupported, fault.ErrUnsupported), false
@@ -233,6 +229,8 @@ func (sm *topologySM) applyAdmitNode(p AdmitNode) (ApplyResult, bool) {
 const historyRetention = 128
 
 func (sm *topologySM) commitLatestLocked(doc *topology.Document) error {
+	// Ordinary installs cannot inherit or assert the FSM's atomic rebase provenance.
+	doc.RebasedFrom = 0
 	canonicalizeDocument(doc)
 	history, err := sm.nextHistoryLocked(*doc)
 	if err != nil {
