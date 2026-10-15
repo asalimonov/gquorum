@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -21,7 +22,9 @@ func indexedCodecFixture() scopedState {
 	retry.Previous = retry.Status.ID
 	retry.Status.ID, retry.Status.Attempt = "exec-v3-a2", 2
 	s.Operations = append(s.Operations, retry)
-	s.Groups[0].Owner, s.Nodes[0].Owner = retry.Status.ID, retry.Status.ID
+	s.Operations[len(s.Operations)-1].Status.State = topology.OperationPending
+	s.Operations[len(s.Operations)-1].Status.Blocks[0].State = topology.OperationPending
+	s.Groups[2].Owner = retry.Status.ID
 	s.History = append(s.History, s.Latest.Clone()) // Duplicate views of the same version are legitimate.
 	successor := s.Cleanup[0]
 	successor.Identity.ReplicaID++
@@ -51,7 +54,7 @@ func TestScopedIndexesRebuildExactOwnedLookups(t *testing.T) {
 	if index.first[3] != "exec-v3-a1" || index.latest[3] != "exec-v3-a2" || index.retries["exec-v3-a1"] != "exec-v3-a2" || index.rebases[2] != 4 {
 		t.Fatal("lost attempt/rebase provenance", index)
 	}
-	if index.groups["live"].Owner != "exec-v3-a2" || index.nodes["b"].Owner != "exec-v3-a2" || index.intents[intentKey{3, "add_node", "digest"}].Version != 4 {
+	if index.groups["a"].Owner != "exec-v3-a2" || index.nodes["b"].MemberID != 0 || index.intents[intentKey{1, "set_group_placement", strings.Repeat("0", 64)}].Version != 2 {
 		t.Fatal("lost owners or normalized intent lookup")
 	}
 	id := storage.Identity{ClusterID: "c", GroupID: "a", NodeName: "n", ReplicaID: 7}
@@ -60,8 +63,8 @@ func TestScopedIndexesRebuildExactOwnedLookups(t *testing.T) {
 	if old == nil || index.cleanup[id] == nil || old == index.cleanup[id] || old.Identity.ReplicaID != 7 {
 		t.Fatal("successor identity collapsed into predecessor")
 	}
-	index.groups["live"].Owner = "owned scratch"
-	if s.Groups[0].Owner != "exec-v3-a2" || restored.Groups[0].Owner != "owned scratch" {
+	index.groups["a"].Owner = "owned scratch"
+	if s.Groups[2].Owner != "exec-v3-a2" || restored.Groups[1].Owner != "owned scratch" {
 		t.Fatal("index aliases original input or an unrelated row copy")
 	}
 	if bytes.Contains(data, []byte(`"indexes"`)) || bytes.Contains(data, []byte(`"obligations_index"`)) {

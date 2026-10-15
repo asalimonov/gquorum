@@ -200,13 +200,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** scoped convergence/identity restore helpers/tests. **Target:** [T] §4.1–4.3, §8.4. **Depends on:** 10. **Budget:** ≤550.
 
-- [ ] Validate group/node declarations, independent source versions, exact owners and tombstones. Reject dangling or duplicate nonterminal owners; do not synthesize a composite Active document. Retain self-contained checkpoints when obsolete whole documents can safely be pruned.
-- [ ] Validate intent/rebase provenance, monotonic allocations/retired IDs and unchanged session/lock records using existing checks where valid. Admission/readmission and voter-switch proof checks belong to Task 12 with authority validation.
-- [ ] Test tombstones, conflicting declarations, stale/missing owners, decreasing floors and rejection without replacing prior state. Do not impose hard history/debt caps or omit original restore obligations.
+- [x] Validate group/node declarations, independent source versions, exact owners and tombstones. Reject dangling or duplicate nonterminal owners; do not synthesize a composite Active document. Retain self-contained checkpoints when obsolete whole documents can safely be pruned.
+- [x] Validate intent/rebase provenance, monotonic allocations/retired IDs and unchanged session/lock records using existing checks where valid. Admission/readmission and voter-switch proof checks belong to Task 12 with authority validation.
+- [x] Test tombstones, conflicting declarations, stale/missing owners, decreasing floors and rejection without replacing prior state. Do not impose hard history/debt caps or omit original restore obligations.
 
 **Verification**
 
-- [ ] Run focused convergence/identity units and `make test`; run relevant persistence checks only if this task acquires a store.
+- [x] Run focused convergence/identity units and `make test`; run relevant persistence checks only if this task acquires a store.
 
 ### Task 12: Validate scoped authority and cleanup proof before restore installation
 
@@ -386,7 +386,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** root mutation helpers, `internal/metaservice/mutations.go`, document mutation helpers. **Target:** [T] §3.4, §12 “Stage / typed mutation replay”. **Depends on:** 4, 7. **Budget:** ≤550.
 
-- [ ] Implement known-kind, validated canonical intent fingerprints: include Actor/Comment/Origin/audit and requested semantic identities, normalize set order, preserve meaningful sequence order, exclude generated version/time/allocation fields.
+- [ ] Reuse metaengine knownIntentKind through the internal construction boundary; implement validated canonical intent fingerprints: include Actor/Comment/Origin/audit and requested semantic identities, normalize set order, preserve meaningful sequence order, exclude generated version/time/allocation fields.
 - [ ] Capture zero ExpectedVersion once per call; for nonzero stale CAS look for retained exact intent before allocating IDs. Raw Stage uses canonical full accepted document content, not a generic request key.
 - [ ] Test equivalent ordering, distinct audit purpose, explicit identity mismatches, unknown history and response loss. Never recompute a write with a fresh expected version or claim an arbitrary replay expiry.
 

@@ -26,6 +26,15 @@ func prepareScopedGraph(state *scopedState, rules topology.Rules) (*scopedIndexe
 	if err := validateScopedOperations(state, index); err != nil {
 		return nil, err
 	}
+	if err := validateScopedConvergence(state, index); err != nil {
+		return nil, err
+	}
+	if err := validateScopedIdentities(state, index); err != nil {
+		return nil, err
+	}
+	if err := validateScopedIntents(state, index); err != nil {
+		return nil, err
+	}
 	return index, nil
 }
 

@@ -21,7 +21,7 @@ type nodeConvergence struct {
 	NodeName      string               `json:"node_name"`
 	Declaration   *topology.Node       `json:"declaration,omitempty"`
 	SourceVersion uint64               `json:"source_version"`
-	MemberID      uint64               `json:"member_id"`
+	MemberID      uint64               `json:"member_id"` // exact source membership; zero for proven absence
 	Owner         topology.OperationID `json:"owner,omitempty"`
 	CompletedAt   time.Time            `json:"completed_at"`
 }

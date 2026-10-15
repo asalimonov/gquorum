@@ -250,3 +250,19 @@ Verified
 - make test: 977/977, 7.330s; test-reports/unit/20261015T171116.388366Z-ak7ti4lg/report.md.
 - Exact staged lint passed (unit/functional vet, production golangci, selected revive, merged unused); /tmp/gquorum-task10-lint.log. Extracted document/step/block checks to satisfy complexity and line limits without suppressions.
 - No storage/network acquisition or concurrency change. Existing live v4 refusal regression remains green. Changed Go is below the 550-line task ceiling; next review checkpoint remains commit 15.
+
+## Task 11 — Validate convergence, identity floors and retained provenance
+Date: 2026-10-15. Commit: this entry's commit (implementation/correction commit 13).
+
+Implemented
+- v4 decoding now checks approved group/node coverage, exact live block ownership in both directions, block/source agreement, successful-block checkpoints, source timestamps/declarations, deletion state and permanent group tombstones. Failed/terminal blocks cannot own live execution; independent nonterminal siblings retain their owners.
+- A pruned source document is accepted only when another validated retained document supplies the identical live declaration/member context; otherwise verification evidence must stay pinned. Completed tombstones remain independent of operation history. No composite Active or history/debt cap was added.
+- Node member IDs describe exact source-document membership; proven absence uses zero, distinguished from never converged by SourceVersion/CompletedAt. Historical effects/retirement records keep their former identities. Clarified the internal field and target §4.1 comment; live replica authorization is unchanged.
+- Identity checks bind all retained documents/checkpoints/operation step IDs to monotonic allocation floors and consistent host names. Latest allocation counters cannot regress. Retired IDs cannot reappear in Latest/Target, and retirement cannot be newer than approved Target. Reused unchanged session/lock/retirement validators with only their relevant fields, without synthesizing Active.
+- Intent records require accepted parent/document linkage, known kinds, lowercase SHA-256 shape, original-only rebase provenance, ordered replacement IDs and an exact accepted successor assignment. Typed method construction/acceptance in Tasks 26–27 reuses the known-kind seam; admission/readmission and authority/effect proofs remain Task 12.
+
+Verified
+- Focused scoped units passed. Corruption cases cover missing/terminal/duplicate owners, lost successful checkpoints, false deletion, source/member mismatches, allocator loss/regression, unapproved retirement, orphan locks, malformed intent and foreign successor IDs. Decoder refusal preserves prior bytes and index identity.
+- Positive tests retain completed group/node tombstones and safely compacted checkpoint sources. Codec/index fixtures were updated to satisfy these graph contracts; their authority/cleanup proof data remains explicitly pending Task 12 validation.
+- make test: 1007/1007, 7.422s; test-reports/unit/20261015T172723.660513Z-hmpx_f1i/report.md.
+- Exact staged lint and diff checks passed; /tmp/gquorum-task11-lint.log. No network/store acquisition or new concurrency, so functional/race work remains in its scheduled owning tasks. No suppressions or public API additions. Next peer/dead-code checkpoint is commit 15.
