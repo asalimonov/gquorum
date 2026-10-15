@@ -118,7 +118,7 @@ func newTopologySM(persister statePersister, rules topology.Rules) *topologySM {
 }
 
 type smState struct {
-	Scoped           *scopedState                `json:"-"` // isolated v4 codec; replaces this wrapper at Task 57
+	Scoped           *scopedState                `json:"-"` // isolated v4 codec; replaces this wrapper at Task 58
 	AuthorityRecords []authorityRecord           `json:"authority_records,omitempty"`
 	AuthorityFloors  []resourceFloor             `json:"authority_floors,omitempty"`
 	Revocations      []revocationRecord          `json:"revocations,omitempty"`
@@ -177,7 +177,7 @@ func (sm *topologySM) applyProposeDocument(p ProposeDocument) (ApplyResult, bool
 	if p.Doc.RebasedFrom != 0 {
 		return rejectProposalError(p.ProposalID, proposalGuardrail, fault.ErrInvalid), false
 	}
-	// Remove at Task 57: the current format cannot retain typed intent provenance.
+	// Remove at Task 58: the current format cannot retain typed intent provenance.
 	if p.Intent != nil {
 		return rejectProposalError(p.ProposalID, proposalUnsupported, fault.ErrUnsupported), false
 	}

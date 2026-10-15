@@ -266,3 +266,18 @@ Verified
 - Positive tests retain completed group/node tombstones and safely compacted checkpoint sources. Codec/index fixtures were updated to satisfy these graph contracts; their authority/cleanup proof data remains explicitly pending Task 12 validation.
 - make test: 1007/1007, 7.422s; test-reports/unit/20261015T172723.660513Z-hmpx_f1i/report.md.
 - Exact staged lint and diff checks passed; /tmp/gquorum-task11-lint.log. No network/store acquisition or new concurrency, so functional/race work remains in its scheduled owning tasks. No suppressions or public API additions. Next peer/dead-code checkpoint is commit 15.
+
+## Task 12 — Validate scoped authority actions and revocations
+Date: 2026-10-15. Commit: this entry’s commit (implementation/correction commit 14).
+
+Implemented
+- Isolated v4 decoding now restores exact authority records/floors, validates receipt and fence boundaries, readmission-grant linkage, immutable action tuples and scoped revocations before publishing candidate indexes. Reuses existing catalog predicates without Active, global completion or the obsolete debt cap.
+- Class is derived from retained required/cleanup partitions. Archived unfinished cleanup requires its exact debt/action/host/member; unfinished execution cannot lose its plan. Settled historical execution grants may remain proof after operation pruning.
+- Grant targets respect replica/member allocation floors and stable host names. Revocation obligations are sorted, unique and scoped; inherited obligations can legitimately have Requested=false, as in existing successor revocation behavior.
+- Split the former proof task before coding into catalog validation (12) and remaining cleanup/admission/completion proof (13). Activation is Task 58. Current fixture cleanup milestones, admission rows and voter evidence await that next stage; live v4 installation remains refused.
+
+Verified
+- Focused scoped/catalog units passed. Cases reject forged class/action, missing/decreasing floors, contradictory or refused receipts, invalid fence proof and scope; detached unresolved debt remains accepted above the old cap.
+- make test: 1024/1024, 8.668s; test-reports/unit/20261015T175040.148142Z-ws9s3ure/report.md.
+- Exact staged lint passed (unit/functional vet, production golangci, selected revive and merged unused); /tmp/gquorum-task12-lint.log. Extracted checks for complexity/line limits without suppressions. Changed handwritten Go remains below 550 lines. Pure validation adds no acquired resources or concurrency; no functional/race run required here.
+- Next commit is checkpoint 15, followed by full dead-code inspection and peer review before subsequent implementation.

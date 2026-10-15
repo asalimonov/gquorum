@@ -26,19 +26,30 @@ func validateScopedIdentities(state *scopedState, index *scopedIndexes) error {
 	if err := check.declarations(state, index); err != nil {
 		return err
 	}
-	for _, row := range state.Nodes {
-		if row.MemberID != 0 {
-			if err := check.replica(topology.MetaGroupID, row.NodeName, row.MemberID); err != nil {
-				return err
-			}
-		}
+	if err := check.nodes(state.Nodes); err != nil {
+		return err
 	}
-	return check.operations(state.Operations)
+	if err := check.operations(state.Operations); err != nil {
+		return err
+	}
+	return check.grants(state.AuthorityRecords)
 }
 
 type scopedIdentityValidation struct {
 	floors map[string]uint64
 	names  map[voterSwitchKey]string
+}
+
+func (check *scopedIdentityValidation) nodes(nodes []nodeConvergence) error {
+	for _, row := range nodes {
+		if row.MemberID == 0 {
+			continue
+		}
+		if err := check.replica(topology.MetaGroupID, row.NodeName, row.MemberID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (check *scopedIdentityValidation) group(group topology.Group) error {
@@ -100,6 +111,20 @@ func (check *scopedIdentityValidation) step(step topology.Step) error {
 	if step.TransferReplicaID != 0 {
 		if err := check.replica(step.GroupID, step.TransferNodeName, step.TransferReplicaID); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func (check *scopedIdentityValidation) grants(records []scopedAuthorityRecord) error {
+	for _, record := range records {
+		for _, target := range record.Grant.Targets {
+			if err := check.replica(record.Grant.Key.GroupID, target.NodeName, target.ReplicaID); err != nil {
+				return err
+			}
+			if err := check.replica(topology.MetaGroupID, target.NodeName, target.MemberID); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

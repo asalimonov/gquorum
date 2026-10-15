@@ -402,8 +402,16 @@ func (a authorityCatalog) restoreRevocation(r revocationRecord) error {
 	if r.OperatorID == "" || a.revocations[r.OperatorID] != nil {
 		return invalidAuthorityCatalog()
 	}
+	if err := a.validateRestoredObligations(r.Obligations); err != nil {
+		return err
+	}
+	a.revocations[r.OperatorID] = &r
+	return nil
+}
+
+func (a authorityCatalog) validateRestoredObligations(obligations []topology.FenceObligation) error {
 	seen := map[resourceFloor]bool{}
-	for _, ob := range r.Obligations {
+	for _, ob := range obligations {
 		key := resourceFloor{ob.Resource, ob.Key}
 		g := a.records[ob.Key]
 		if g == nil || g.Grant.Purpose != topology.AuthorityFence || seen[key] ||
@@ -424,7 +432,6 @@ func (a authorityCatalog) restoreRevocation(r revocationRecord) error {
 			}
 		}
 	}
-	a.revocations[r.OperatorID] = &r
 	return nil
 }
 

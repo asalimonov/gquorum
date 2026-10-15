@@ -12,12 +12,11 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/internal/authoritystore"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// Documents/attempts are valid; convergence and authority proof validation follows in Tasks 11–12.
+// Documents/attempts are valid; convergence and authority proof validation follows in Tasks 11–13.
 func scopedCodecFixture() scopedState {
 	at := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
 	id := storage.Identity{ClusterID: "c", GroupID: "a", NodeName: "n", ReplicaID: 7}
@@ -29,35 +28,42 @@ func scopedCodecFixture() scopedState {
 		base.Groups[i].Replicas[0].NodeName = "n"
 	}
 	base.Groups[1].ID = "a"
-	live := base.Groups[1]
-	live.ID = "live"
+	base.Groups[1].Replicas[0].ReplicaID, base.Groups[1].NextReplicaID = 7, 8
+	live := base.Clone().Groups[1]
+	live.ID, live.NextReplicaID, live.Replicas[0].ReplicaID = "live", 2, 1
 	base.Groups = append(base.Groups, live)
-	original, target, latest := base.Clone(), base.Clone(), base.Clone()
+	removed := base.Clone().Groups[1]
+	removed.ID, removed.NextReplicaID, removed.Replicas[0].ReplicaID = "b", 9, 8
+	removed.Storage = topology.StorageMemory
+	base.Groups = append(base.Groups, removed)
+	successor := base.Clone()
+	successor.Groups = successor.Groups[:len(successor.Groups)-1]
+	successor.Group("a").Replicas[0].ReplicaID, successor.Group("a").NextReplicaID = 8, 9
+	original, target, latest := successor.Clone(), successor.Clone(), successor.Clone()
 	original.Version, original.ParentVersion = 2, 1
 	target.Version, target.ParentVersion = 3, 2
 	latest.Version, latest.ParentVersion, latest.RebasedFrom = 4, 3, 2
 	latest.MetaGroup().NextReplicaID = 4
 	latest.Group("a").NextReplicaID = 9
-	return scopedState{
+	state := scopedState{
 		SchemaVersion: scopedStateSchemaVersion, Rules: testRules(), AppliedIndex: 30, AppliedTerm: 4,
 		Latest: latest, Target: target,
-		History:          []topology.Document{original, base},
-		Operations:       []topology.Operation{{Status: topology.OperationStatus{ID: "exec-v3-a1", Version: 3, Attempt: 1, State: topology.OperationFailed, TotalBlocks: 1, Blocks: []topology.BlockStatus{{GroupID: "a", State: topology.OperationFailed, CurrentStep: 1, TotalSteps: 1}}}, Plan: topology.Plan{Version: 3, Steps: []topology.Step{{Seq: 1, Kind: topology.StepTransferLeader, GroupID: "a", NodeName: "n", ReplicaID: 1}}, Blocks: []topology.PlanBlock{{GroupID: "a", SourceVersion: 1, Steps: []int{1}}}}, StartedAt: at, UpdatedAt: at}, {Status: topology.OperationStatus{ID: "exec-v1-a1", Version: 1, Attempt: 1, State: topology.OperationSucceeded}, Plan: topology.Plan{Version: 1}, StartedAt: at, UpdatedAt: at}},
-		Groups:           []groupConvergence{{GroupID: "live", SourceVersion: 1, Declaration: base.Group("live"), CompletedAt: at}, {GroupID: "never"}, {GroupID: "a", SourceVersion: 1, Declaration: base.Group("a"), CompletedAt: at}, {GroupID: "tombstone", SourceVersion: 2, CompletedAt: at}, {GroupID: topology.MetaGroupID, SourceVersion: 1, Declaration: base.MetaGroup(), CompletedAt: at}},
-		Nodes:            []nodeConvergence{{NodeName: "b", SourceVersion: 2, MemberID: 0, CompletedAt: at}, {NodeName: "n", Declaration: base.Node("n"), SourceVersion: 1, MemberID: 1, CompletedAt: at}},
-		Cleanup:          []cleanupRecord{{Identity: id, MemberID: 2, Storage: topology.StorageDefault, OperationID: "exec-v3-a1", Retired: &topology.EffectReceipt{Key: key}, RetiredAt: &at, Collection: &authoritystore.CollectionReceipt{Identity: id, MemberID: 2, RetirementKey: key, Token: "opaque", LocalSequence: 9, CollectedAt: at}, CreatedAt: at, UpdatedAt: at}, {Identity: storage.Identity{ClusterID: "c", GroupID: "b", NodeName: "n", ReplicaID: 8}, Storage: topology.StorageMemory, RetiredAt: &at}},
-		Intents:          []intentRecord{{Version: 3, ExpectedVersion: 2, Kind: "delete_group", Digest: strings.Repeat("0", 64), GroupID: "b"}, {Version: 2, ExpectedVersion: 1, Kind: "set_group_placement", Digest: strings.Repeat("0", 64), GroupID: "a"}},
-		FullyConverged:   topology.FullyConverged{Version: 1, At: at},
-		AuthorityRecords: []scopedAuthorityRecord{{authorityRecord: authorityRecord{Grant: topology.AuthorityGrant{Key: key}, Closed: true}, Class: "cleanup"}, {authorityRecord: authorityRecord{Grant: topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "c", GroupID: "b", Revision: 9}}}, Class: "execution"}},
-		AuthorityFloors:  []resourceFloor{{Resource: topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: "a", NodeName: "n"}, Key: key}, {Resource: topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: "a"}, Key: key}},
-		Revocations:      []scopedRevocationRecord{{Requested: true, OperationID: "exec-v3-a1", GroupID: "b"}, {Requested: true, OperationID: "exec-v3-a1", GroupID: "a"}},
-		RetiredGroups:    []retiredGroup{{ID: "b", Version: 2}, {ID: "tombstone", Version: 2}},
-		Allocations:      []allocationRecord{{GroupID: "b", NextReplicaID: 9}, {GroupID: "a", NextReplicaID: 9}, {GroupID: "live", NextReplicaID: 2}, {GroupID: topology.MetaGroupID, NextReplicaID: 4}},
-		Admissions:       []AdmissionRecord{{NodeName: "b", InstanceID: "i", MemberID: 2, OperatorID: "exec-v3-a1"}, {NodeName: "a", InstanceID: "i", MemberID: 1}},
-		Sessions:         []sessionState{{SessionID: "b", NodeName: "b", InstanceID: "i", TTLSeconds: 30}, {SessionID: "a", NodeName: "a", InstanceID: "i", TTLSeconds: 30}},
-		Locks:            []lockEntry{{Key: "b", SessionID: "b"}, {Key: "a", SessionID: "a"}}, Activated: []string{"b", "a"},
+		History:        []topology.Document{original, base},
+		Operations:     []topology.Operation{{Status: topology.OperationStatus{ID: "exec-v3-a1", Version: 3, Attempt: 1, State: topology.OperationFailed, TotalBlocks: 1, Blocks: []topology.BlockStatus{{GroupID: "a", State: topology.OperationFailed, CurrentStep: 1, TotalSteps: 1}}}, Plan: topology.Plan{Version: 3, Steps: []topology.Step{{Seq: 1, Kind: topology.StepTransferLeader, GroupID: "a", NodeName: "n", ReplicaID: 8}}, Blocks: []topology.PlanBlock{{GroupID: "a", SourceVersion: 1, Steps: []int{1}}}}, StartedAt: at, UpdatedAt: at}, {Status: topology.OperationStatus{ID: "exec-v1-a1", Version: 1, Attempt: 1, State: topology.OperationSucceeded}, Plan: topology.Plan{Version: 1}, StartedAt: at, UpdatedAt: at}},
+		Groups:         []groupConvergence{{GroupID: "live", SourceVersion: 1, Declaration: base.Group("live"), CompletedAt: at}, {GroupID: "never"}, {GroupID: "a", SourceVersion: 1, Declaration: base.Group("a"), CompletedAt: at}, {GroupID: "tombstone", SourceVersion: 2, CompletedAt: at}, {GroupID: topology.MetaGroupID, SourceVersion: 1, Declaration: base.MetaGroup(), CompletedAt: at}},
+		Nodes:          []nodeConvergence{{NodeName: "b", SourceVersion: 2, MemberID: 0, CompletedAt: at}, {NodeName: "n", Declaration: base.Node("n"), SourceVersion: 1, MemberID: 1, CompletedAt: at}},
+		Intents:        []intentRecord{{Version: 3, ExpectedVersion: 2, Kind: "delete_group", Digest: strings.Repeat("0", 64), GroupID: "b"}, {Version: 2, ExpectedVersion: 1, Kind: "set_group_placement", Digest: strings.Repeat("0", 64), GroupID: "a"}},
+		FullyConverged: topology.FullyConverged{Version: 1, At: at},
+		Revocations:    []scopedRevocationRecord{{Requested: true, OperationID: "exec-v3-a1", GroupID: "a"}},
+		RetiredGroups:  []retiredGroup{{ID: "b", Version: 2}, {ID: "tombstone", Version: 2}},
+		Allocations:    []allocationRecord{{GroupID: "b", NextReplicaID: 9}, {GroupID: "a", NextReplicaID: 9}, {GroupID: "live", NextReplicaID: 2}, {GroupID: topology.MetaGroupID, NextReplicaID: 4}},
+		Admissions:     []AdmissionRecord{{NodeName: "b", InstanceID: "i", MemberID: 2, OperatorID: "exec-v3-a1"}, {NodeName: "a", InstanceID: "i", MemberID: 1}},
+		Sessions:       []sessionState{{SessionID: "b", NodeName: "b", InstanceID: "i", TTLSeconds: 30}, {SessionID: "a", NodeName: "a", InstanceID: "i", TTLSeconds: 30}},
+		Locks:          []lockEntry{{Key: "b", SessionID: "b"}, {Key: "a", SessionID: "a"}}, Activated: []string{"b", "a"},
 		VoterSwitches: []topology.VoterSwitchState{{GroupID: "b"}, {GroupID: "a"}},
 	}
+	populateScopedCodecAuthority(&state, id, key, at)
+	return state
 }
 
 func TestScopedStateCanonicalRoundTripAndExactShape(t *testing.T) {
