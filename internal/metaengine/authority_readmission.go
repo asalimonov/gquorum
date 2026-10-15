@@ -220,24 +220,20 @@ func (sm *topologySM) readmissionConsumedLocked(action topology.AuthorizedStep) 
 	if !sm.readmissionRequiredLocked(action.NodeName, action.ReplicaID) {
 		return true
 	}
-	admission, ok := sm.admissionForStepLocked(action.OperatorID, action.NodeName, action.ReplicaID)
-	if ok && sm.readmissionBatchConsumedLocked(ReadmissionID(*admission)) {
-		return true
-	}
 	// Completed retirement is an enduring fact about this exact granted member.
 	// A successor operator may need to prepare that same already rebound owner;
 	// closing the old grant does not undo its actual resource receipts.
 	for _, previous := range sm.admissions {
-		if previous.NodeName == action.NodeName && previous.MemberID == action.ReplicaID &&
-			sm.readmissionBatchConsumedLocked(ReadmissionID(*previous)) {
+		if sm.authority.admissionRetirementConsumed(*previous, action.NodeName, action.ReplicaID) {
 			return true
 		}
 	}
 	return false
 }
 
-func (sm *topologySM) readmissionBatchConsumedLocked(id string) bool {
-	return sm.authority.readmissionBatchConsumed(id)
+func (a authorityCatalog) admissionRetirementConsumed(admission AdmissionRecord, node string, member uint64) bool {
+	return admission.NodeName == node && admission.MemberID == member &&
+		a.readmissionBatchConsumed(ReadmissionID(admission))
 }
 
 func (a authorityCatalog) readmissionBatchConsumed(id string) bool {

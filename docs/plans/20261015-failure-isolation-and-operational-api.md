@@ -276,6 +276,15 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [x] Run admission/completion/restore units, staged lint and `make test`; preserve live format rejection and the 550-line ceiling.
 
+### Correction 7: Preserve consumed retirement across admission successors
+
+**Files:** `internal/metaengine/authority_readmission.go`, scoped admission validation and regressions; target/plan clarification. **Target:** [T] §4.3, §5.2, §6.2, §12 retry/admission; review thread 5 round 1. **Budget:** estimated 150–250 changed Go lines, ceiling 550.
+
+- [x] Share exact node/member consumed-readmission evidence between live preparation and scoped admission restore; preserve the original batch tuple across attempts/processes. Remove the redundant batch forwarder.
+- [x] Test retry readiness and decoder atomic refusal for incomplete or mismatched prior retirement; retain learner/promotion effect checks.
+- [x] Record newer-approval required-stop takeover, retry admission rebinding and full pinned-operation proof costs in their implementation tasks. Keep future scoped approval disabled until takeover validation and transitions are implemented together.
+- [x] Run focused regressions, make test and staged lint before committing.
+
 ### Task 15: Validate retained voter history before restore installation
 
 **Files:** scoped voter validation and restore tests. **Target:** [T] §4.1–4.3, §8.4. **Depends on:** 14. **Budget:** ≤550.
@@ -316,6 +325,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** `topology/planner.go`, `plan.go`, readmission/voter plan helpers. **Target:** [T] §3.3, §5.2, §6.2. **Depends on:** 16–17. **Budget:** ≤550.
 
 - [ ] Partition steps by exact group and source version; classify only safe detached stop/retirement actions as Cleanup. Whole-group deletion stops and same-host replacement prerequisites stay required.
+- [ ] Carry unfinished required stops for exact removed-but-unstopped identities when a newer approval takes over a failed or superseded group; derive them from retained debt, even when convergence or current native membership omits that identity. Keep the old origin/retirement action and consumed milestones.
 - [ ] Emit exact admission preparation edges and state-based removal barriers. Retain immutable global sequence numbers and deterministic within-block ordering. Zero-step declaration blocks still have provenance.
 - [ ] Test all-step coverage, no cleanup prerequisite masquerading as independent work, readmission coverage, former-owner deletion catalog and restricted edge forms. Adapt current adjacency validators to execution/cleanup separation without weakening their safety predicates.
 
@@ -329,6 +339,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Implement applyBeginOperation with exact Latest/plan/source/owner expectations and independent FSM scope derivation. Required block set equals changed scopes plus invalidated unconsumed admission-dependent closure.
 - [ ] Prepare scoped supersession, owners, Target, zero-step completion and required revocations before any state installation. Explicit approval supersedes only affected user scopes; repair cannot seize them. Preserve consumed admission prerequisites and unrelated blocks.
+- [ ] Atomically rebind each unconsumed required cleanup StopAction to the new owner's exact required step, including across approval versions. Extend restore stop/action validation in the same task: current owner step or failed ownerless chain tip; preserve old action receipts and pin both operation chains. Refuse missing/wrong-host/wrong-replica steps. Never let a newer approval bypass a whole-group deletion stop or resurrect a retired group ID.
 - [ ] Test omitted/extra/duplicate blocks, unchanged-but-required dependent blocks, late CAS refusal and no partial in-memory mutation. Arrange revocation through the scoped implementation in Task 20 before activating this path.
 
 **Verification**
@@ -416,6 +427,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Derive the new attempt from Previous inside the FSM; preserve the entire immutable Plan byte-for-byte. Reopen only failed blocks at the first unconsumed required step; terminal siblings retain their state/proof and superseded scopes are never reclaimed.
 - [ ] Require terminal failed aggregate, unchanged approved failed scopes and executable suffix. Prepare scoped predecessor revocations before assigning retry owners; retain original receipt tuples through Previous rather than relabeling them.
+- [ ] Rebind live admission progress to the exact retried `_meta` attempt, preserving the prior admission/batch evidence needed by ReadmissionID. Derive readiness from complete same-node/member retirement; learner/promoted progress still requires exact native effects through Previous. Rebind only unconsumed required StopAction in the same atomic transition. Test retry before/after preparation, AddLearner and promotion, including lost responses and process replacement.
 - [ ] Test duplicate retry returns the same immediate successor even after its failure, concurrent retry deduplication, lost-response replay, missing history, unsafe suffix and failed-block-with-running-sibling refusal.
 
 **Verification**
@@ -519,6 +531,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Implement one identityReferencedLocked predicate covering Latest/Target/history, convergence, every retained attempt/Previous chain, planning/deletion catalogs, admission/readmission and every retained grant including settled grants.
 - [ ] Derive independently required proof closure before pruning; avoid a cleanup/grant self-retention cycle or map-order dependence. Pin marker/current docs, each debt origin and complete retry chain/block sources, and any distinct readmission admission operation and full batch; compact only after minimal retained evidence suffices for every verification path.
+- [ ] Account for the full pinned operation: each retained required completion keeps its exact consumed grants/receipts through Previous, including unrelated successful blocks and their source documents. A single unresolved cleanup can pin all of these; retention estimates and growth metrics must count this closure, without imposing an approval cap.
 - [ ] Test failed-attempt references prevent pruning, complete orphaned records can prune, repeated removal cannot recreate debt, settled grants remain references when otherwise required and soft history caps do not reject unrelated approvals.
 
 **Verification**

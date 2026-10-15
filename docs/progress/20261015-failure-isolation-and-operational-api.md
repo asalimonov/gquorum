@@ -383,3 +383,17 @@ Date: 2026-10-15. Immutable review range begins after 7b1eaa0.
 - Removed optional cleanup-origin and archived-cleanup-grant branches, duplicate obligation comparison and redundant retry block count in Correction 4. Removed the obsolete test fixture wrapper while consolidating exact authority proof. No additional safe dead declaration found by references and full unused lint.
 - Legacy stepConsumed/readmissionBatchConsumedLocked wrappers still serve live schema-3 callers; they now delegate to shared exact predicates. Active-based plan validation, cleanupProofsLocked and pendingCost remain reachable in the live path and must stay until their scheduled conversion/removal in Tasks 59–60. Scoped adapters contain only selected proof fields, never a synthetic Active topology.
 - Request peer review of all four correction commits and admission/completion validation before the next implementation commit. Task 15 voter proof and live behavior remain outside the completed scope. Next regular checkpoint is commit 25, counting further corrections.
+
+## Correction 7 — Preserve retirement across admission successors
+Date: 2026-10-16. Commit: this entry's commit (implementation/correction commit 21).
+
+Implemented
+- Accepted thread 5's confirmed admission restore defect. Live preparation and scoped restore now share exact node/member and complete original-batch consumption checks across retained admissions. Removed redundant readmissionBatchConsumedLocked and exact-admission fast path; retirement receipts retain their original admission/operator tuple.
+- Added a full retry restore regression, atomic rejection of an incomplete predecessor batch independent of cleanup validation, exact identity/batch mismatch checks and rejection of learner progress without its native effect.
+- Recorded required-stop takeover in Tasks 18–19: new approvals must carry removed-but-unstopped identities and atomically rebind required stops, including cross-version/changed sequence cases, together with restore validation. Preserves origin/retirement proof and pins both chains. No global repair freeze; whole deletion still cannot bypass stops. Existing isolated validator fails closed until the coupled implementation.
+- Task 26 now explicitly rebinds retry admissions while retaining original batch evidence. Task 34 counts the entire retained operation's completed grants/receipts and successful siblings. Target §4.3/5.2/6.2/12 clarified with these requirements; no public API change or live v4 activation.
+
+Verified
+- Focused retry/admission/readmission preparation regressions passed. make test: 1110/1110, 8.541s; test-reports/unit/20261015T190625.967877Z-6t0peo43/report.md.
+- Exact staged lint passed: /tmp/gquorum-correction7-lint.log. Diff checks passed; changed handwritten Go remains below 550. This change shares pure validation without new resource/concurrency behavior; no full race/functional/Docker run needed here.
+- All thread 5 findings accepted with current fix or explicit downstream transition/restore obligations; no remaining disagreement or user decision. Next task 15; next peer/dead-code checkpoint commit 25.

@@ -94,5 +94,13 @@ func scopedAdmissionRetirement(admission AdmissionRecord, state *scopedState,
 			required = true
 		}
 	}
-	return !required || catalog.readmissionBatchConsumed(id)
+	if !required {
+		return true
+	}
+	for _, previous := range state.Admissions {
+		if catalog.admissionRetirementConsumed(previous, admission.NodeName, admission.MemberID) {
+			return true
+		}
+	}
+	return false
 }
