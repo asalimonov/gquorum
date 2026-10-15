@@ -14,7 +14,7 @@
 
 **Brainstorm:** [full discussion][B]; [completed peer review][R]
 
-**Status:** planned; no implementation tasks completed and no implementation tests run by this planning session.
+**Status:** implementation in progress; completion and validation are recorded per task below.
 
 [T]: ../brainstorms/20261015-failure-isolation-and-operational-api-target.md
 [B]: ../brainstorms/20261015-failure-isolation-and-operational-api.md
@@ -34,6 +34,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 - `make lint` runs the repository's vet, revive, staticcheck and golangci configuration; it is not merely `go vet`. Use the current Makefile and [test guide](../testing/tests.md).
 - There is no `project.txt`, `architecture/`, or nested documentation Git repository here. Work in the existing root branch. `docs/plans/` is ignored; stage this plan explicitly without staging unrelated `docs/review/` files.
 - Each numbered task has a **hard ceiling of 550 changed handwritten Go lines, including tests**. Estimate its diff before editing. If a task would exceed that ceiling, split it into consecutive numbered tasks with their own verification, update subsequent references, and continue within the same approved design. Do not hide a repository-wide rename inside a final audit. Generated output and documentation are reviewed separately, not an excuse to combine unrelated code changes.
+- After each five implementation commits, inspect newly obsolete code with references and unused-code lint, delete safe dead code in that fifth task commit, and record retained transition scaffolding with its removal task. Documentation/planning commits do not count.
 - Tasks execute in numbered order. A dependency list names additional semantic prerequisites, not permission to skip earlier tasks. At every checkpoint all modules compile and `make test` passes. Run focused tests named in each task, and focused functional/race checks when ownership or persistence changes. Fix failures encountered, including unrelated failures, and record unrelated fixes under NOT PLANNED CHANGES.
 - First introduce contracts and pure helpers, then state-machine behavior, stores and execution, then public composition. Temporary compile scaffolding is allowed only for an intermediate commit: record its exact symbol/file and removal task in the progress log. Do not introduce public V2 APIs or promise compatibility. Existing old symbols may remain until their consumers are converted; new paths must fail closed until their real implementation is connected. Remove all scaffolding by Task 54. Never synthesize an authoritative composite Document to make old code compile.
 - A signature change and all callers needed for that commit to compile belong together. Partition broad naming changes across the component tasks below; if a bridge is unavoidable, keep it private wherever possible and remove it before final cutover. No production flag chooses between old/new authority models. Change a reachable behavior only when its safety prerequisites are implemented; test new helpers directly before wiring them. A temporary stub must return a classified unsupported error, never fabricated progress or success.
@@ -60,13 +61,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `topology/operator*.go` → `operation*.go`, `topology/authority*.go`, `fault/fault.go`. **Target:** [T] §3.3–3.4, §7.2; contract C3. **Budget:** ≤550 Go lines.
 
-- [ ] Add the exact OperationID, OperationState, OperationStatus, BlockStatus, Operation and OperationTransition definitions and state helpers from C3, including the BlockedReason dependency from C2 in this task. Preserve execution ID strings and existing state values; implement deep copies of owned fields.
-- [ ] Inventory all Operator naming consumers and assign their migration to Tasks 7–9, 14–15, 30, 38–43, 47–53. Keep Step comparable; do not put dependency slices in AuthorizedStep. Rename public authorization error vocabulary without changing unrelated Origin/event values.
-- [ ] Add pure tests for ID construction, state validity and aggregate precedence: any runnable/waiting sibling keeps the aggregate nonterminal; after termination failed dominates superseded, then succeeded. Record temporary compile scaffolding explicitly.
+- [x] Add the exact OperationID, OperationState, OperationStatus, BlockStatus, Operation and OperationTransition definitions and state helpers from C3, including the BlockedReason dependency from C2 in this task. Preserve execution ID strings and existing state values; implement deep copies of owned fields.
+- [x] Inventory all Operator naming consumers and assign their migration to Tasks 7–9, 14–15, 30, 38–43, 47–53. Keep Step comparable; do not put dependency slices in AuthorizedStep. Rename public authorization error vocabulary without changing unrelated Origin/event values.
+- [x] Add pure tests for ID construction, state validity, owned copies and preservation of full aggregate state in partial projections. Record temporary compile scaffolding explicitly. Aggregate calculation/tests belong to Task 16 alongside the FSM consumer, avoiding an unused helper or an extra public aggregation API.
 
 **Verification**
 
-- [ ] Run focused topology/fault units and `make test`; check that no new public compatibility API is documented.
+- [x] Run focused topology/fault units and `make test`; check that no new public compatibility API is documented.
 
 ### Task 2: Extend immutable plans with blocks and dependencies
 
@@ -242,7 +243,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Implement noncompletion applyTransitionOperation/validateScopedTransition and the validation/preparation portion of completeGroupLocked. Require exact required receipts and relevant barriers; aggregate full operation state independently of projected pages. Add inherited retry lookup when Task 20 installs Previous-chain behavior.
 - [ ] Prepare the group's declaration from that operation's pinned approved version. Defer successful completion installation until Task 18 supplies the node/marker/debt preparations; do not publish a partially completed group in this intermediate task.
-- [ ] Test independent block cursors/failure, original declaration provenance after newer Target and stale tuple/final-validation refusal. Task 18 adds successful atomic completion and duplicate-completion regressions once every prepared component exists.
+- [ ] Test independent block cursors/failure, original declaration provenance after newer Target and stale tuple/final-validation refusal. Add the aggregate-precedence calculation/tests moved from Task 1: any runnable/waiting sibling keeps the operation nonterminal; once all terminate, failed dominates superseded, then succeeded. Task 18 adds successful atomic completion and duplicate-completion regressions once every prepared component exists.
 
 **Verification**
 
@@ -884,7 +885,9 @@ Do not run broad process performance/chaos campaigns by default; the focused deb
 
 ## NOT PLANNED CHANGES
 
-None at plan creation. During implementation record unexpected edits as `path — reason — related task — validation`. Do not hide changes to the design or unrelated behavior in a mechanical rename.
+- Task 1: aggregate calculation/tests move to Task 16, where the FSM consumes them; introducing an unused helper or additional public aggregation method now would conflict with the small API and unused-code lint. Task 1 tests that cloned/paged values preserve the supplied full aggregate. No target behavior is deferred beyond its implementation task.
+
+During implementation record unexpected edits as `path — reason — related task — validation`. Do not hide changes to the design or unrelated behavior in a mechanical rename.
 
 ## NOT CONSIDERED & TODOs
 
