@@ -296,23 +296,7 @@ func (d Document) Clone() Document {
 	}
 	out.Groups = slices.Clone(d.Groups)
 	for i := range out.Groups {
-		out.Groups[i].Replicas = slices.Clone(d.Groups[i].Replicas)
-		out.Groups[i].Labels = maps.Clone(d.Groups[i].Labels)
-		if d.Groups[i].VoterConfig != nil {
-			p := *d.Groups[i].VoterConfig
-			out.Groups[i].VoterConfig = &p
-		}
-		if d.Groups[i].Hosting != nil {
-			h := *d.Groups[i].Hosting
-			h.Nodes = slices.Clone(h.Nodes)
-			out.Groups[i].Hosting = &h
-		}
-		if d.Groups[i].Placement != nil {
-			p := *d.Groups[i].Placement
-			p.AllowedNodeTypes = slices.Clone(p.AllowedNodeTypes)
-			p.NodeSelector = maps.Clone(p.NodeSelector)
-			out.Groups[i].Placement = &p
-		}
+		out.Groups[i] = cloneGroup(d.Groups[i])
 	}
 	return out
 }

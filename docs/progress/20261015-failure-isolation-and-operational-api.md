@@ -43,3 +43,20 @@ Verified:
 Notes:
 - The old planner still emits flat plans. ValidatePlanShape validates any supplied blocks/dependencies; its explicit temporary absent-block guard must disappear when Task 12/54 converts all producers. The strict block helper already rejects missing partitions. Dynamic receipt/evacuation checks remain in the planned FSM/barrier tasks.
 - The user added peer review at every five implementation commits. The plan now requires dead-code review, paseo-peer findings, reasoned disposition and corrective commits; first review is due after implementation commit 5.
+
+## Task 3 — Progress values and observation provenance
+
+Date: 2026-10-15. Implementation commit 3 (the commit containing this entry).
+
+Implemented:
+- Exact progress query/page/group/node/cleanup types, historical marker, cleanup summary and stable blocker codes. Query validation accepts zero as the 100-row default and rejects invalid limits/filters; actual bounded cursor paging remains Task 36.
+- Owned page/scope clones preserve nil evidence, full operation aggregate, reporter identity and original timestamps. Extracted the existing group clone used by Document rather than maintaining duplicate nested-field copy logic.
+- Added future read/status convergence and observation source fields. Existing Active/Operator fields remain only for consumers converted in Tasks 37/49–54; no synthetic current topology was introduced.
+
+Verified:
+- `go test -count=1 ./topology` passed.
+- `make test`: 859/859 cases passed in 7.978s; `test-reports/unit/20261015T153535.307700Z-zt9wr8vl/report.md`.
+- Staged lint passed after grouping standard-library/third-party imports as required by goimports.
+- Mutation tests verify cloned group/node maps, replica slices, hosting/placement values, cached observation maps/identity, blockers and every cleanup timestamp cannot alter retained inputs.
+
+Review cadence: two implementation commits remain before the first peer/dead-code review.

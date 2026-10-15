@@ -85,13 +85,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** new `topology/progress.go`, `topology/read.go`, `status.go`, `views.go`. **Target:** [T] §3.2, §8.3; contract C2. **Depends on:** 1–2. **Budget:** ≤550.
 
-- [ ] Add the full C2 progress structs, BlockedReason codes, FullyConverged, CleanupSummary, Validate and Clone methods. Preserve nil versus present timestamps/declarations and all JSON names.
-- [ ] Prepare final ReadView{AppliedIndex, Latest, Target, FullyConverged}; GroupStatus adds Reporter, ReceivedAt and SourceVersion. ClusterStatus has bounded Operations with explicit truncation and per-group convergence/owner fields. Remove old fields only after consumers are converted in Tasks 37 and 49–53.
-- [ ] Test copy isolation, query limit normalization (100 default, 1000 maximum), invalid negative/oversized limits and exact freshness identity fields. Paging algorithm belongs to Task 36.
+- [x] Add the full C2 progress structs, BlockedReason codes, FullyConverged, CleanupSummary, Validate and Clone methods. Preserve nil versus present timestamps/declarations and all JSON names.
+- [x] Prepare final ReadView{AppliedIndex, Latest, Target, FullyConverged}; GroupStatus adds Reporter, ReceivedAt and SourceVersion. ClusterStatus has bounded Operations with explicit truncation and per-group convergence/owner fields. Remove old fields only after consumers are converted in Tasks 37 and 49–53.
+- [x] Test copy isolation, query limit normalization (100 default, 1000 maximum), invalid negative/oversized limits and exact freshness identity fields. Paging algorithm belongs to Task 36.
 
 **Verification**
 
-- [ ] Run topology value/validation units and `make test`.
+- [x] Run topology value/validation units and `make test`.
 
 ### Task 4: Define public mutation results and structured conflicts
 
