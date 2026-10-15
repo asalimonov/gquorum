@@ -47,8 +47,11 @@ func (check scopedCleanupValidation) declaration(debt cleanupRecord) bool {
 }
 
 func (check scopedCleanupValidation) actions(debt cleanupRecord) bool {
-	if debt.ReadmissionKey != nil {
-		return check.readmission(debt)
+	if debt.ReadmissionKey != nil && !check.readmission(debt) {
+		return false
+	}
+	if debt.StopAction == nil && debt.RetireAction == nil {
+		return debt.ReadmissionKey != nil && debt.Removed == nil
 	}
 	if debt.StopAction == nil || debt.RetireAction == nil || debt.StopAction.Kind != topology.StepStopReplica {
 		return false
@@ -106,17 +109,11 @@ func (check scopedCleanupValidation) milestones(debt cleanupRecord) bool {
 		!check.receipt(debt, debt.Retired, topology.AuthorityHost) {
 		return false
 	}
-	if debt.ReadmissionKey != nil {
-		return debt.Removed == nil && debt.Stopped != nil && debt.Retired != nil &&
-			debt.Stopped.Key == *debt.ReadmissionKey && reflect.DeepEqual(debt.Stopped, debt.Retired)
-	}
-	if debt.Removed == nil {
-		if debt.RetireAction.Kind != topology.StepDeleteGroupState {
-			return false
-		}
-	} else if debt.Removed.Action == nil || debt.Removed.Action.Kind != topology.StepRemoveReplica ||
-		!check.action(debt, *debt.Removed.Action) {
+	if !check.removal(debt) {
 		return false
+	}
+	if debt.ReadmissionKey != nil {
+		return readmissionMilestones(debt)
 	}
 	return (debt.Retired == nil || debt.Stopped != nil && !debt.RetiredAt.Before(*debt.StoppedAt)) &&
 		(debt.Removed == nil || debt.Stopped == nil || !debt.StoppedAt.Before(*debt.RemovedAt)) &&
@@ -132,31 +129,6 @@ func cleanupTimestamp(receipt *topology.EffectReceipt, at *time.Time, debt clean
 
 func cleanupEffectMatches(receipt *topology.EffectReceipt, action *topology.AuthorizedStep) bool {
 	return receipt == nil || receipt.Action != nil && *receipt.Action == *action
-}
-
-func (check scopedCleanupValidation) readmission(debt cleanupRecord) bool {
-	record := check.catalog.records[*debt.ReadmissionKey]
-	if debt.StopAction != nil || debt.RetireAction != nil || record == nil ||
-		record.Grant.Purpose != topology.AuthorityReadmit {
-		return false
-	}
-	admissionID := record.Grant.AdmissionID
-	if !slices.ContainsFunc(check.state.Admissions, func(admission AdmissionRecord) bool {
-		return ReadmissionID(admission) == admissionID && topology.OperationID(admission.OperatorID) == debt.OperationID
-	}) {
-		return false
-	}
-	meta := false
-	for _, retained := range check.catalog.records {
-		if retained.Grant.Purpose != topology.AuthorityReadmit || retained.Grant.AdmissionID != admissionID {
-			continue
-		}
-		if !resourceConsumed(retained, retained.Grant.Resources[0]) {
-			return false
-		}
-		meta = meta || retained.Grant.Key.GroupID == topology.MetaGroupID
-	}
-	return meta
 }
 
 func validScopedCollection(debt cleanupRecord) bool {

@@ -93,8 +93,9 @@ func TestScopedCleanupRequiresApprovedDeclarationContext(t *testing.T) {
 func scopedReadmissionCleanupFixture() scopedState {
 	s := scopedCodecFixture()
 	admission := AdmissionRecord{NodeName: "n", InstanceID: "replacement", MemberID: 2,
-		OperatorID: "exec-v2-a1", State: AdmissionSuperseded}
+		OperatorID: "exec-v3-a1", State: AdmissionSuperseded}
 	s.Admissions = append(s.Admissions, admission)
+	retainScopedReadmissionOrigin(&s)
 	for _, group := range []string{"a", topology.MetaGroupID} {
 		target := topology.AuthorityTarget{NodeName: "n", MemberID: 1, ReplicaID: 7}
 		if group == topology.MetaGroupID {
@@ -110,15 +111,13 @@ func scopedReadmissionCleanupFixture() scopedState {
 		if group == "a" {
 			s.AuthorityFloors[0].Key = key
 			debt := &s.Cleanup[0]
-			debt.ReadmissionKey, debt.StopAction, debt.RetireAction, debt.Removed, debt.RemovedAt = &key, nil, nil, nil, nil
-			debt.Stopped, debt.Retired, debt.Collection = &receipt, &receipt, nil
+			debt.ReadmissionKey, debt.Retired, debt.Collection = &key, &receipt, nil
+			// The old retirement was issued but has not completed; keep its grant.
+			s.AuthorityRecords[0].Effects = nil
 		} else {
 			s.AuthorityFloors = append(s.AuthorityFloors, resourceFloor{Resource: resource, Key: key})
 		}
 	}
-	// Old settled execution proof is independent; cleanup authority has been
-	// replaced by the exact readmission batch rather than relabeled as execution.
-	s.AuthorityRecords = s.AuthorityRecords[1:]
 	return s
 }
 

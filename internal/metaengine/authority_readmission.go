@@ -237,8 +237,12 @@ func (sm *topologySM) readmissionConsumedLocked(action topology.AuthorizedStep) 
 }
 
 func (sm *topologySM) readmissionBatchConsumedLocked(id string) bool {
+	return sm.authority.readmissionBatchConsumed(id)
+}
+
+func (a authorityCatalog) readmissionBatchConsumed(id string) bool {
 	foundMeta := false
-	for _, record := range sm.authority.records {
+	for _, record := range a.records {
 		if record.Grant.Purpose != topology.AuthorityReadmit || record.Grant.AdmissionID != id {
 			continue
 		}

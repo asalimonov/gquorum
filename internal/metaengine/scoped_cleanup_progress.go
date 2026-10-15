@@ -100,10 +100,10 @@ func cleanupGrantProgress(debt *cleanupRecord, record *authorityRecord, target t
 
 func cleanupActionMilestones(debt *cleanupRecord, action *topology.AuthorizedStep) []*topology.EffectReceipt {
 	var milestones []*topology.EffectReceipt
-	if debt.StopAction != nil && *action == *debt.StopAction {
+	if debt.StopAction != nil && *action == *debt.StopAction && !readmissionMilestone(debt, debt.Stopped) {
 		milestones = append(milestones, debt.Stopped)
 	}
-	if debt.RetireAction != nil && *action == *debt.RetireAction {
+	if debt.RetireAction != nil && *action == *debt.RetireAction && !readmissionMilestone(debt, debt.Retired) {
 		milestones = append(milestones, debt.Retired)
 	}
 	if debt.Removed != nil && reflect.DeepEqual(action, debt.Removed.Action) {

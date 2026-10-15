@@ -86,3 +86,28 @@ func retainScopedCleanupOrigin(state *scopedState, at time.Time) {
 	state.Groups = append(state.Groups, groupConvergence{GroupID: "b", SourceVersion: 1,
 		Declaration: state.History[1].Group("b"), Deleting: true, CompletedAt: at})
 }
+
+func retainScopedReadmissionOrigin(s *scopedState) {
+	// The later admission is approved at v3; removal debt retains origin v2.
+	for _, doc := range []*topology.Document{&s.Target, &s.Latest, &s.History[2], &s.History[3]} {
+		doc.MetaGroup().Replicas[0].ReplicaID, doc.MetaGroup().NextReplicaID = 2, 4
+	}
+	operation := &s.Operations[0]
+	transfer := operation.Plan.Steps[0]
+	transfer.Seq = 4
+	voters, promoted := topology.VoterSetDigest([]uint64{1}), topology.VoterSetDigest([]uint64{1, 2})
+	operation.Plan = topology.Plan{Version: 3, Steps: []topology.Step{
+		{Seq: 1, GroupID: topology.MetaGroupID, Kind: topology.StepPrepareReplica, NodeName: "n", ReplicaID: 2},
+		{Seq: 2, GroupID: topology.MetaGroupID, Kind: topology.StepAddLearner, NodeName: "n", ReplicaID: 2,
+			ExpectedVotersDigest: voters, ResultVotersDigest: voters},
+		{Seq: 3, GroupID: topology.MetaGroupID, Kind: topology.StepPromoteVoter, NodeName: "n", ReplicaID: 2,
+			ExpectedVotersDigest: voters, ResultVotersDigest: promoted}, transfer},
+		VoterBases: []topology.PlanVoterBase{{GroupID: topology.MetaGroupID, Voters: []uint64{1}}},
+		Blocks: []topology.PlanBlock{{GroupID: topology.MetaGroupID, SourceVersion: 1, Steps: []int{1, 2, 3}},
+			{GroupID: "a", SourceVersion: 1, Steps: []int{4}}}}
+	operation.Status.TotalBlocks = 2
+	operation.Status.Blocks = []topology.BlockStatus{
+		{GroupID: topology.MetaGroupID, State: topology.OperationFailed, CurrentStep: 1, TotalSteps: 3},
+		{GroupID: "a", State: topology.OperationFailed, CurrentStep: 4, TotalSteps: 1},
+	}
+}

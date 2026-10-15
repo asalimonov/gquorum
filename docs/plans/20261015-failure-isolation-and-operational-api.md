@@ -252,9 +252,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** scoped cleanup/readmission validators and regressions. **Target:** [T] §4.1–4.3, §6.2; review thread 4 round 3. **Budget:** estimated 250–400 changed Go lines, ceiling 550. Split from Correction 4 before coding because exact readmission/milestone preservation expands the necessary fixtures and checks.
 
-- [ ] Separate readmission-created debt from removal debt later covered by readmission. Preserve original operation/actions and consumed stop/native receipts; independently validate exact admission and complete batch coverage.
-- [ ] Keep older action grants bound until settled/fenced; require readmission receipt only for milestones it actually supplies. Correct the fixture that deleted a retained cleanup grant.
-- [ ] Run readmission/cleanup regressions, make test and staged lint.
+- [x] Separate readmission-created debt from removal debt later covered by readmission. Preserve original operation/actions and consumed stop/native receipts; independently validate exact admission and complete batch coverage.
+- [x] Keep older action grants bound until settled/fenced; require readmission receipt only for milestones it actually supplies. Correct the fixture that deleted a retained cleanup grant.
+- [x] Run readmission/cleanup regressions, make test and staged lint.
 
 ### Correction 6: Normalize generated rebase provenance on ordinary edits
 
@@ -505,7 +505,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** `internal/metaengine/cleanup_evidence.go`, `cleanup.go`, history/snapshot helpers. **Target:** [T] §4.2–4.3, §12 “Collection acceptance versus settlement”. **Depends on:** 23–32. **Budget:** ≤550.
 
 - [ ] Implement one identityReferencedLocked predicate covering Latest/Target/history, convergence, every retained attempt/Previous chain, planning/deletion catalogs, admission/readmission and every retained grant including settled grants.
-- [ ] Derive independently required proof closure before pruning; avoid a cleanup/grant self-retention cycle or map-order dependence. Pin marker/current docs and unresolved obligations; compact only after minimal retained evidence suffices for every verification path.
+- [ ] Derive independently required proof closure before pruning; avoid a cleanup/grant self-retention cycle or map-order dependence. Pin marker/current docs, each debt origin and complete retry chain/block sources, and any distinct readmission admission operation and full batch; compact only after minimal retained evidence suffices for every verification path.
 - [ ] Test failed-attempt references prevent pruning, complete orphaned records can prune, repeated removal cannot recreate debt, settled grants remain references when otherwise required and soft history caps do not reject unrelated approvals.
 
 **Verification**

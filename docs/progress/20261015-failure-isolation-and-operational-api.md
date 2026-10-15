@@ -333,3 +333,17 @@ Verified
 - make test: 1078/1078, 6.993s; test-reports/unit/20261015T183722.591921Z-lsmdye09/report.md. Exact staged lint and diff checks passed; /tmp/gquorum-correction4-lint.log. Changed handwritten Go remains under 550 lines; no resources/concurrency added.
 - Existing authorityCatalog still rejects duplicate grants for one action. Recorded the mandatory coordinated change in the later cleanup issuance task: multiple reconciled revisions must retain compatible late receipts without rewriting milestones. Do not loosen one validator while leaving the other incompatible.
 - Next correction preserves original cleanup actions through complete later readmission; this pending path is not implied finished here. Next regular review/dead-code checkpoint is commit 20.
+
+## Correction 5 — Preserve cleanup origin through complete readmission
+Date: 2026-10-15. Commit: this entry's commit (implementation/correction commit 18).
+
+Implemented
+- Readmission-created debt retains its admission operation as origin and has no invented removal/actions. Older removal debt retains its original operation, Stop/Retire actions and native/consumed-stop receipts; the later readmission is independently linked through its exact batch/admission operation.
+- Validates the historical member/replica against the readmission grant target, not the successor admission's new member ID. Requires the complete consumed batch including _meta and preserves exact readmission retirement proof. Both operation roots remain pinned; updated target/retention notes accordingly.
+- Reuses the existing readmission-batch predicate through authorityCatalog for legacy and scoped validation. Reverse milestone checks distinguish the exact action receipt from a milestone supplied by readmission; late old action receipts remain retained historical proof. Existing cleanup grants retain their action bindings instead of being deleted to make restoration pass.
+- Fixture now represents an approved later admission independent of the original removal, with valid guarded learner-first steps. Added positive tests for retained consumed stop and readmission-supplied stop, plus readmission-created meta debt and invalid origin/member/key/partial-batch cases.
+
+Verified
+- Focused scoped regressions passed. make test: 1088/1088, 9.761s; test-reports/unit/20261015T184127.867404Z-ha0rcqwp/report.md.
+- Exact staged lint and diff checks passed; /tmp/gquorum-correction5-lint.log. 235 changed handwritten Go lines, below 550. No public API addition, live v4 activation or new acquired/concurrent resource.
+- Next: normalize generated rebase provenance and finish review/retention notes, then restore prepared Task 14. Regular checkpoint remains commit 20.
