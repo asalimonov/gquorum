@@ -16,7 +16,7 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// This is codec data, not a valid restore graph; Task 9 validates graph/proof semantics.
+// This is codec data, not a valid restore graph; Tasks 10–11 validate graph/proof semantics.
 func scopedCodecFixture() scopedState {
 	at := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
 	id := storage.Identity{ClusterID: "c", GroupID: "a", NodeName: "n", ReplicaID: 7}

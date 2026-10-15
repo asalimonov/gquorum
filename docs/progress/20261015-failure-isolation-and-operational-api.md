@@ -194,3 +194,27 @@ Activation inventory:
 - Complete graph, owner, identity-floor and retirement-proof validation belongs to Task 9; schema round trips alone are not restore authorization. Existing authority inner Operator naming and related consumers retain their assigned conversion tasks before cutover.
 
 Next checkpoint: implementation/correction commit 10, after the next bounded task, triggers peer and dead-code review of commits 6–10.
+
+## Task 9 — Scoped lookup and unfinished-resource indexes
+
+Date: 2026-10-15. Implementation/correction commit 10 (the commit containing this entry).
+
+Plan refinement before implementation:
+- Original Task 9 combined index construction, operation/convergence graph checks and authority/cleanup proof validation; its combined implementation plus meaningful regressions would exceed the mandatory 550-line ceiling. Split it into consecutive Tasks 9–11 without removing requirements. Original Tasks 10–64 are now Tasks 12–66; activation is Task 56. Updated current plan/code navigation references and verified all 66 task headers and backward prerequisites. Historical progress/review entries retain their original numbering.
+
+Implemented:
+- Decoder-owned indexes for exact groups/nodes/owners, operations, first/latest attempts, immediate retries, cleanup identities, parent/kind/digest intents, retained document versions, rebase successors and authority grants.
+- One resource-obligation index covers unfinished execution and cleanup grants plus missing revocation evidence. It reuses resourceConsumed, deduplicates keys with sets and sorts results. A closed grant cannot erase an independent missing revocation; consumed resources do not block. Work/storage scales with actual retained evidence, without worker-count or legacy debt-cap admission.
+- Conflicting document versions, retry/rebase successors and duplicate composite lookup keys fail before replacing a decoded state or its indexes. Indexes are never encoded or accepted as independent durable evidence. Full semantic graph/proof validation remains explicitly in Tasks 10–11; live installation remains disabled until Task 56.
+
+Verified:
+- Focused metaengine units passed, including pre/post-decode lookup equivalence, owned row references, exact predecessor/successor separation and atomic refusal. A 2,500-obligation test verifies shared-resource deduplication and absence of old capacity gating. These index fixtures intentionally test lookup structure, not authority acceptance.
+- make test: 936/936 cases passed in 5.942s; test-reports/unit/20261015T164649.819386Z-h6lb29s2/report.md.
+- Full make lint passed across all modules/build variants and merged unused declarations; /tmp/gquorum-review-batch2-lint.log. Corrected line lengths and extracted the existing-resource consumption loop to meet complexity limits. Focused regressions and all units passed after the extraction.
+- git diff --check passed; 364 changed handwritten Go lines including tests/navigation comments.
+
+Five-commit checkpoint 2 / dead-code review:
+- Batch is commits 6–10, starting after bab8b91. Correction 1 was already reviewed in thread 2; the new peer request will focus on collection/proposal/state/index contracts and transition safety.
+- No additional safe deletion found. toDiskOperator/metaDiskState remain called by the live schema-3 codec; validateLegacyPlan still guards live approval and voter paths; pendingCost/newAuthorityGrantCost remain used by live issue/revocation/readmission/transfer/restore. Removing them before the scoped consumers replace them would weaken current guards. Their removal is assigned to Tasks 16–17/55–56. The broad legacy-name search still reaches 144 Go files; these are live conversion work, not unused code.
+- New internal collection callbacks/contracts get their concrete producers in Tasks 32–37/43/50; the v4 codec/indexes are called by isolated decoding and retain no independent storage. Task 56 removes the temporary codec wrapper and guards. Full unused-code lint found no newly unreachable declaration.
+- Request peer review before the next implementation commit; assess findings and commit justified corrections as required. Next regular checkpoint is commit 15, counting any corrections.

@@ -1,0 +1,136 @@
+package metaengine
+
+import (
+	"errors"
+	"fmt"
+	"reflect"
+
+	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/storage"
+	"github.com/asalimonov/gquorum/topology"
+)
+
+// Indexes refer only to owned decoded rows. They are rebuilt, never serialized,
+// and confer no authority before the complete restore graph/proof validation.
+type scopedIndexes struct {
+	groups      map[string]*groupConvergence
+	nodes       map[string]*nodeConvergence
+	operations  map[topology.OperationID]*topology.Operation
+	first       map[uint64]topology.OperationID
+	latest      map[uint64]topology.OperationID
+	retries     map[topology.OperationID]topology.OperationID
+	cleanup     map[storage.Identity]*cleanupRecord
+	intents     map[intentKey]*intentRecord
+	documents   map[uint64]*topology.Document
+	rebases     map[uint64]uint64
+	grants      map[topology.AuthorityKey]*scopedAuthorityRecord
+	obligations map[topology.AuthorityResource][]topology.AuthorityKey
+}
+
+type intentKey struct {
+	ExpectedVersion uint64
+	Kind            string
+	Digest          string
+}
+
+func (s *scopedState) buildIndexes() (*scopedIndexes, error) {
+	index := &scopedIndexes{
+		first: map[uint64]topology.OperationID{}, latest: map[uint64]topology.OperationID{},
+		retries:   map[topology.OperationID]topology.OperationID{},
+		documents: map[uint64]*topology.Document{}, rebases: map[uint64]uint64{},
+	}
+	err := errors.Join(
+		indexRows(s.Groups, &index.groups, func(r *groupConvergence) string { return r.GroupID }),
+		indexRows(s.Nodes, &index.nodes, func(r *nodeConvergence) string { return r.NodeName }),
+		indexRows(s.Operations, &index.operations, func(r *topology.Operation) topology.OperationID {
+			return r.Status.ID
+		}),
+		indexRows(s.Cleanup, &index.cleanup, func(r *cleanupRecord) storage.Identity { return r.Identity }),
+		indexRows(s.Intents, &index.intents, func(r *intentRecord) intentKey {
+			return intentKey{r.ExpectedVersion, r.Kind, r.Digest}
+		}),
+		indexRows(s.AuthorityRecords, &index.grants, func(r *scopedAuthorityRecord) topology.AuthorityKey {
+			return r.Grant.Key
+		}),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := index.indexAttempts(s.Operations); err != nil {
+		return nil, err
+	}
+	if err := index.indexDocuments(s); err != nil {
+		return nil, err
+	}
+	index.obligations = scopedResourceObligations(s)
+	return index, nil
+}
+
+func indexRows[T any, K comparable](rows []T, into *map[K]*T, key func(*T) K) error {
+	indexed := make(map[K]*T, len(rows))
+	for i := range rows {
+		k := key(&rows[i])
+		if _, exists := indexed[k]; exists {
+			return fault.New(fault.Unreadable, fmt.Sprintf("duplicate %T lookup key %v", rows[i], k), nil)
+		}
+		indexed[k] = &rows[i]
+	}
+	*into = indexed
+	return nil
+}
+
+func (index *scopedIndexes) indexAttempts(operations []topology.Operation) error {
+	for _, operation := range operations {
+		status := operation.Status
+		first := index.operations[index.first[status.Version]]
+		if first == nil || first.Status.Attempt > status.Attempt {
+			index.first[status.Version] = status.ID
+		}
+		latest := index.operations[index.latest[status.Version]]
+		if latest == nil || latest.Status.Attempt < status.Attempt {
+			index.latest[status.Version] = status.ID
+		}
+		if operation.Previous == "" {
+			continue
+		}
+		if _, exists := index.retries[operation.Previous]; exists {
+			return fault.New(fault.Unreadable, "multiple retries of one operation", nil)
+		}
+		index.retries[operation.Previous] = status.ID
+	}
+	return nil
+}
+
+func (index *scopedIndexes) indexDocuments(state *scopedState) error {
+	if err := index.indexDocument(&state.Latest); err != nil {
+		return err
+	}
+	if err := index.indexDocument(&state.Target); err != nil {
+		return err
+	}
+	for i := range state.History {
+		if err := index.indexDocument(&state.History[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (index *scopedIndexes) indexDocument(doc *topology.Document) error {
+	if doc.Version == 0 {
+		return nil // Empty founding views have no durable version key.
+	}
+	if existing := index.documents[doc.Version]; existing != nil && !reflect.DeepEqual(existing, doc) {
+		return fault.New(fault.Unreadable, "conflicting declarations for one document version", nil)
+	}
+	index.documents[doc.Version] = doc
+	if doc.RebasedFrom == 0 {
+		return nil
+	}
+	if successor := index.rebases[doc.RebasedFrom]; doc.RebasedFrom >= doc.Version ||
+		successor != 0 && successor != doc.Version {
+		return fault.New(fault.Unreadable, "conflicting rebase successor", nil)
+	}
+	index.rebases[doc.RebasedFrom] = doc.Version
+	return nil
+}

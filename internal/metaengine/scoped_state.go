@@ -9,11 +9,13 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// This codec is isolated from live state installation until Task 54. At cutover
+// This codec is isolated from live state installation until Task 56. At cutover
 // it replaces smState and the legacy disk codec, rather than becoming a V2 API.
 const scopedStateSchemaVersion = 4
 
 type scopedState struct {
+	// Derived only; never trusted from a snapshot or independently persisted.
+	indexes          *scopedIndexes
 	SchemaVersion    uint32                      `json:"schema_version"`
 	Rules            topology.Rules              `json:"rules"`
 	Latest           topology.Document           `json:"latest"`
@@ -74,6 +76,10 @@ func (s *scopedState) UnmarshalJSON(data []byte) error {
 		return fault.ErrUnreadable
 	}
 	owned, err := scopedState(decoded).canonical()
+	if err != nil {
+		return err
+	}
+	owned.indexes, err = owned.buildIndexes()
 	if err != nil {
 		return err
 	}
