@@ -170,10 +170,16 @@ const (
 )
 
 func (catalog authorityCatalog) stepConsumed(ex *operatorRecord, step topology.Step, scope completionScope) bool {
+	status := topology.OperationStatus{ID: topology.OperationID(ex.ID), Version: ex.Version, Attempt: ex.Attempt}
+	return catalog.planStepConsumed(status, step, scope)
+}
+
+func (catalog authorityCatalog) planStepConsumed(status topology.OperationStatus,
+	step topology.Step, scope completionScope) bool {
 	action := topology.AuthorizedStep{
-		OperatorID:           ex.ID,
-		Version:              ex.Version,
-		Attempt:              ex.Attempt,
+		OperatorID:           topology.OperatorID(status.ID),
+		Version:              status.Version,
+		Attempt:              status.Attempt,
 		StepSeq:              step.Seq,
 		Kind:                 step.Kind,
 		GroupID:              step.GroupID,

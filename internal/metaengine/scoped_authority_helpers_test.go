@@ -94,20 +94,44 @@ func retainScopedReadmissionOrigin(s *scopedState) {
 	}
 	operation := &s.Operations[0]
 	transfer := operation.Plan.Steps[0]
-	transfer.Seq = 4
+	transfer.Seq = 5
 	voters, promoted := topology.VoterSetDigest([]uint64{1}), topology.VoterSetDigest([]uint64{1, 2})
 	operation.Plan = topology.Plan{Version: 3, Steps: []topology.Step{
 		{Seq: 1, GroupID: topology.MetaGroupID, Kind: topology.StepPrepareReplica, NodeName: "n", ReplicaID: 2},
 		{Seq: 2, GroupID: topology.MetaGroupID, Kind: topology.StepAddLearner, NodeName: "n", ReplicaID: 2,
 			ExpectedVotersDigest: voters, ResultVotersDigest: voters},
-		{Seq: 3, GroupID: topology.MetaGroupID, Kind: topology.StepPromoteVoter, NodeName: "n", ReplicaID: 2,
+		{Seq: 3, GroupID: topology.MetaGroupID, Kind: topology.StepWaitCaughtUp, NodeName: "n", ReplicaID: 2},
+		{Seq: 4, GroupID: topology.MetaGroupID, Kind: topology.StepPromoteVoter, NodeName: "n", ReplicaID: 2,
 			ExpectedVotersDigest: voters, ResultVotersDigest: promoted}, transfer},
 		VoterBases: []topology.PlanVoterBase{{GroupID: topology.MetaGroupID, Voters: []uint64{1}}},
-		Blocks: []topology.PlanBlock{{GroupID: topology.MetaGroupID, SourceVersion: 1, Steps: []int{1, 2, 3}},
-			{GroupID: "a", SourceVersion: 1, Steps: []int{4}}}}
+		Blocks: []topology.PlanBlock{{GroupID: topology.MetaGroupID, SourceVersion: 1, Steps: []int{1, 2, 3, 4}},
+			{GroupID: "a", SourceVersion: 1, Steps: []int{5}}}}
 	operation.Status.TotalBlocks = 2
 	operation.Status.Blocks = []topology.BlockStatus{
-		{GroupID: topology.MetaGroupID, State: topology.OperationFailed, CurrentStep: 1, TotalSteps: 3},
-		{GroupID: "a", State: topology.OperationFailed, CurrentStep: 4, TotalSteps: 1},
+		{GroupID: topology.MetaGroupID, State: topology.OperationFailed, CurrentStep: 1, TotalSteps: 4},
+		{GroupID: "a", State: topology.OperationFailed, CurrentStep: 5, TotalSteps: 1},
 	}
+}
+
+func populateScopedGraphAuthority(state *scopedState) {
+	action := topology.AuthorizedStep{OperatorID: "exec-v2-a1", Version: 2, Attempt: 1, StepSeq: 1,
+		GroupID: topology.MetaGroupID, Kind: topology.StepTransferLeader, NodeName: "n1", ReplicaID: 1}
+	resource := topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: topology.MetaGroupID}
+	key := topology.AuthorityKey{ClusterID: state.Latest.ClusterID, GroupID: topology.MetaGroupID, Revision: 3}
+	grant := topology.AuthorityGrant{Key: key, Purpose: topology.AuthorityEffect, OperatorID: action.OperatorID,
+		Action: &action, Resources: []topology.AuthorityResource{resource},
+		Targets: []topology.AuthorityTarget{{NodeName: "n1", MemberID: 1, ReplicaID: 1}}}
+	receipt := fixtureEffectReceipts(grant)[0]
+	receipt.AppliedIndex = 3
+	state.AuthorityRecords = []scopedAuthorityRecord{{Class: "execution",
+		authorityRecord: authorityRecord{Grant: grant, Effects: []topology.EffectReceipt{receipt}}}}
+	key.Revision = 4
+	fence := topology.FenceEvidence{Key: key, Resource: resource, ReplicaID: 1, AppliedIndex: 4, AppliedTerm: 1,
+		Receiver: topology.Identity{ClusterID: key.ClusterID, NodeName: "n1", MemberID: 1, InstanceID: "instance"}}
+	grant.Key, grant.Purpose, grant.OperatorID, grant.Action = key, topology.AuthorityFence, "", nil
+	state.AuthorityRecords = append(state.AuthorityRecords, scopedAuthorityRecord{Class: "execution",
+		authorityRecord: authorityRecord{Grant: grant, Fences: []topology.FenceEvidence{fence}}})
+	state.AuthorityFloors = []resourceFloor{{Resource: resource, Key: key}}
+	state.Revocations = []scopedRevocationRecord{{Requested: true, OperationID: "exec-v2-a1",
+		GroupID: topology.MetaGroupID, Obligations: []topology.FenceObligation{{Key: key, Resource: resource, Evidence: &fence}}}}
 }

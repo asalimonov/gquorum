@@ -361,3 +361,25 @@ Verified
 - Focused scoped/ordinary-derivation units passed. Focused functional TestMutationNormalizesGeneratedProvenance passed in internal/metaservice, using its existing deterministic FSM fixture.
 - make test: 1091/1091, 8.081s; test-reports/unit/20261015T184502.996408Z-nbimk3_b/report.md. Exact staged lint and diff checks passed; /tmp/gquorum-correction6-lint.log. 87 changed handwritten Go lines, below 550; no new concurrency or acquired runtime resources.
 - Full functional/race/Docker suites have not been rerun for these pure validation/derivation corrections; cross-process behavior remains assigned to final integration validation. Next commit is checkpoint 20.
+
+## Task 14 — Validate admission lineage and completed required effects
+Date: 2026-10-15. Commit: this entry's commit (implementation/correction commit 20).
+
+Implemented
+- Isolated v4 restore now validates exact admission identity/process/original linkage, the operation's pinned approved member and learner-first sequence, and readiness/learner/promotion/completion milestones. Reuses existing admission and authority-consumption validators. Unrelated Target changes do not invalidate an owned admission with the same member; failed attempts retain evidence without current execution authority.
+- Founding admission requires its exact successful _meta block, independently of failed load siblings, aggregate operation state and FullyConverged. Complete old-owner readmission is required where older approved membership or retained batch evidence exists; local readiness can precede its preparation acknowledgement.
+- Completed required steps require exact retained effect consumption from their own attempt or a validated Previous predecessor. Closed historical receipts remain usable; revocation/fencing does not manufacture consumption and old receipts are never relabeled. WaitCaughtUp remains an observational wait under the existing contract. Fresh final native predicates remain mandatory in the later live transition/controller tasks, not invented by restore.
+- Restored prepared work from stash 1f3bf69fa03898a85cefbd1ad7d8c7bef324d476 and reconciled it with Corrections 3–6. Shared approval/readmission predicates already landed in those corrections and were not duplicated. Corrected the later admission fixture's missing wait-before-promotion; the admission guard remains strict. The stash is retained as a recovery copy, not an uncommitted dependency.
+- The pre-coding split is restored: 70 tasks total, admission/completion here and voter history in Task 15; activation 60, final audit 70. All explicit dependencies point backward. Live Machine read/write remains schema 3 with v4 refused until activation; voter history validation is explicitly still pending.
+
+Verified
+- Focused scoped/ordinary-provenance tests passed. Admission corruptions now also verify decoder refusal preserves prior serialized bytes and index ownership. Codec round-trip checks include valid admission and completed-step evidence; retry tests retain successful sibling/prefix receipts and reject fence-only completion.
+- make test: 1107/1107, 6.411s; test-reports/unit/20261015T185015.964421Z-dc4xk1i2/report.md. Exact staged lint passed at /tmp/gquorum-task14-restored-lint.log; full checkpoint make lint passed at /tmp/gquorum-checkpoint20-lint.log, covering module vet variants, production lint and merged unused checks.
+- 480 changed handwritten Go lines, below 550. Pure validation introduces no acquired resource or concurrency; no additional functional/race/process run required here. Diff and task-number/dependency audits passed.
+
+## Five-commit checkpoint 4 — Commits 16–20
+Date: 2026-10-15. Immutable review range begins after 7b1eaa0.
+
+- Removed optional cleanup-origin and archived-cleanup-grant branches, duplicate obligation comparison and redundant retry block count in Correction 4. Removed the obsolete test fixture wrapper while consolidating exact authority proof. No additional safe dead declaration found by references and full unused lint.
+- Legacy stepConsumed/readmissionBatchConsumedLocked wrappers still serve live schema-3 callers; they now delegate to shared exact predicates. Active-based plan validation, cleanupProofsLocked and pendingCost remain reachable in the live path and must stay until their scheduled conversion/removal in Tasks 59–60. Scoped adapters contain only selected proof fields, never a synthetic Active topology.
+- Request peer review of all four correction commits and admission/completion validation before the next implementation commit. Task 15 voter proof and live behavior remain outside the completed scope. Next regular checkpoint is commit 25, counting further corrections.

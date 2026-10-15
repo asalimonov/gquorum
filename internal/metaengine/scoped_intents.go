@@ -29,7 +29,7 @@ func validateScopedIntents(state *scopedState, index *scopedIndexes) error {
 	return nil
 }
 
-// Shared with typed provenance construction/acceptance in Tasks 28–29.
+// Shared with typed provenance construction/acceptance in Tasks 29–30.
 func knownIntentKind(kind string) bool {
 	switch kind {
 	case "add_node", "readmit_node", "drain_node", "activate_node", "exclude_node", "set_placement",

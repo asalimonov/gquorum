@@ -7,37 +7,11 @@ import (
 	"testing"
 
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/topology"
 )
-
-func scopedAuthorityFixture() scopedState {
-	state := scopedGraphFixture()
-	action := topology.AuthorizedStep{OperatorID: "exec-v2-a1", Version: 2, Attempt: 1, StepSeq: 1,
-		GroupID: topology.MetaGroupID, Kind: topology.StepTransferLeader, NodeName: "n1", ReplicaID: 1}
-	resource := topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: topology.MetaGroupID}
-	key := topology.AuthorityKey{ClusterID: state.Latest.ClusterID, GroupID: topology.MetaGroupID, Revision: 3}
-	grant := topology.AuthorityGrant{Key: key, Purpose: topology.AuthorityEffect, OperatorID: action.OperatorID,
-		Action: &action, Resources: []topology.AuthorityResource{resource},
-		Targets: []topology.AuthorityTarget{{NodeName: "n1", MemberID: 1, ReplicaID: 1}}}
-	receipt := fixtureEffectReceipts(grant)[0]
-	receipt.AppliedIndex = 3
-	state.AuthorityRecords = []scopedAuthorityRecord{{Class: "execution",
-		authorityRecord: authorityRecord{Grant: grant, Effects: []topology.EffectReceipt{receipt}}}}
-	key.Revision = 4
-	fence := topology.FenceEvidence{Key: key, Resource: resource, ReplicaID: 1, AppliedIndex: 4, AppliedTerm: 1,
-		Receiver: topology.Identity{ClusterID: key.ClusterID, NodeName: "n1", MemberID: 1, InstanceID: "instance"}}
-	grant.Key, grant.Purpose, grant.OperatorID, grant.Action = key, topology.AuthorityFence, "", nil
-	state.AuthorityRecords = append(state.AuthorityRecords, scopedAuthorityRecord{Class: "execution",
-		authorityRecord: authorityRecord{Grant: grant, Fences: []topology.FenceEvidence{fence}}})
-	state.AuthorityFloors = []resourceFloor{{Resource: resource, Key: key}}
-	state.Revocations = []scopedRevocationRecord{{Requested: true, OperationID: "exec-v2-a1",
-		GroupID: topology.MetaGroupID, Obligations: []topology.FenceObligation{{Key: key, Resource: resource, Evidence: &fence}}}}
-	return state
-}
 
 func TestScopedAuthorityExactCatalogAndRevocationProof(t *testing.T) {
 	t.Parallel()
-	good := scopedAuthorityFixture()
+	good := scopedGraphFixture()
 	if _, err := prepareScopedGraph(&good, testRules()); err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +39,7 @@ func TestScopedAuthorityExactCatalogAndRevocationProof(t *testing.T) {
 	for name, corrupt := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			state := scopedAuthorityFixture()
+			state := scopedGraphFixture()
 			corrupt(&state)
 			if _, err := prepareScopedGraph(&state, testRules()); !errors.Is(err, fault.ErrUnreadable) {
 				t.Fatal("invalid authority proof accepted", err)

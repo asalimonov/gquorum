@@ -173,7 +173,7 @@ func (sm *topologySM) Apply(index, term uint64, data []byte) (ApplyResult, error
 }
 
 func (sm *topologySM) applyProposeDocument(p ProposeDocument) (ApplyResult, bool) {
-	// Remove at Task 59: the current format cannot retain typed intent provenance.
+	// Remove at Task 60: the current format cannot retain typed intent provenance.
 	if p.Intent != nil {
 		return rejectProposalError(p.ProposalID, proposalUnsupported, fault.ErrUnsupported), false
 	}

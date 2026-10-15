@@ -32,6 +32,11 @@ func validateScopedIdentities(state *scopedState, index *scopedIndexes) error {
 	if err := check.operations(state.Operations); err != nil {
 		return err
 	}
+	for _, admission := range state.Admissions {
+		if err := check.replica(topology.MetaGroupID, admission.NodeName, admission.MemberID); err != nil {
+			return err
+		}
+	}
 	return check.grants(state.AuthorityRecords)
 }
 

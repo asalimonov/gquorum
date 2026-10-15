@@ -16,13 +16,13 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// Documents/attempts are valid; convergence and authority proof validation follows in Tasks 11–14.
+// Deterministic scoped graph and authority fixture; voter history validation follows in Task 15.
 func scopedCodecFixture() scopedState {
 	at := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
 	id := storage.Identity{ClusterID: "c", GroupID: "a", NodeName: "n", ReplicaID: 7}
 	key := topology.AuthorityKey{ClusterID: "c", GroupID: "a", Revision: 8}
 	base := baseDoc()
-	base.ClusterID, base.Version = "c", 1
+	base.ClusterID, base.Version, base.Origin = "c", 1, topology.OriginFounding
 	base.Nodes[0].Name = "n"
 	for i := range base.Groups {
 		base.Groups[i].Replicas[0].NodeName = "n"
@@ -52,7 +52,7 @@ func scopedCodecFixture() scopedState {
 		SchemaVersion: scopedStateSchemaVersion, Rules: testRules(), AppliedIndex: 30, AppliedTerm: 4,
 		Latest: latest, Target: target,
 		History:        []topology.Document{original, base, approved, staged},
-		Operations:     []topology.Operation{{Status: topology.OperationStatus{ID: "exec-v3-a1", Version: 3, Attempt: 1, State: topology.OperationFailed, TotalBlocks: 1, Blocks: []topology.BlockStatus{{GroupID: "a", State: topology.OperationFailed, CurrentStep: 1, TotalSteps: 1}}}, Plan: topology.Plan{Version: 3, Steps: []topology.Step{{Seq: 1, Kind: topology.StepTransferLeader, GroupID: "a", NodeName: "n", ReplicaID: 8}}, Blocks: []topology.PlanBlock{{GroupID: "a", SourceVersion: 1, Steps: []int{1}}}}, StartedAt: at, UpdatedAt: at}, {Status: topology.OperationStatus{ID: "exec-v1-a1", Version: 1, Attempt: 1, State: topology.OperationSucceeded}, Plan: topology.Plan{Version: 1}, StartedAt: at, UpdatedAt: at}},
+		Operations:     []topology.Operation{{Status: topology.OperationStatus{ID: "exec-v3-a1", Version: 3, Attempt: 1, State: topology.OperationFailed, TotalBlocks: 1, Blocks: []topology.BlockStatus{{GroupID: "a", State: topology.OperationFailed, CurrentStep: 1, TotalSteps: 1}}}, Plan: topology.Plan{Version: 3, Steps: []topology.Step{{Seq: 1, Kind: topology.StepTransferLeader, GroupID: "a", NodeName: "n", ReplicaID: 8}}, Blocks: []topology.PlanBlock{{GroupID: "a", SourceVersion: 1, Steps: []int{1}}}}, StartedAt: at, UpdatedAt: at}, {Status: topology.OperationStatus{ID: "exec-v1-a1", Version: 1, Attempt: 1, State: topology.OperationSucceeded, TotalBlocks: 1, Blocks: []topology.BlockStatus{{GroupID: topology.MetaGroupID, State: topology.OperationSucceeded}}}, Plan: topology.Plan{Version: 1, Blocks: []topology.PlanBlock{{GroupID: topology.MetaGroupID}}}, StartedAt: at, UpdatedAt: at}},
 		Groups:         []groupConvergence{{GroupID: "live", SourceVersion: 1, Declaration: base.Group("live"), CompletedAt: at}, {GroupID: "never"}, {GroupID: "a", SourceVersion: 1, Declaration: base.Group("a"), CompletedAt: at}, {GroupID: "tombstone", SourceVersion: 2, CompletedAt: at}, {GroupID: topology.MetaGroupID, SourceVersion: 1, Declaration: base.MetaGroup(), CompletedAt: at}},
 		Nodes:          []nodeConvergence{{NodeName: "b", SourceVersion: 2, MemberID: 0, CompletedAt: at}, {NodeName: "n", Declaration: base.Node("n"), SourceVersion: 1, MemberID: 1, CompletedAt: at}},
 		Intents:        []intentRecord{{Version: 3, ExpectedVersion: 2, Kind: "delete_group", Digest: strings.Repeat("0", 64), GroupID: "b"}, {Version: 2, ExpectedVersion: 1, Kind: "set_group_placement", Digest: strings.Repeat("0", 64), GroupID: "a"}},
@@ -60,7 +60,7 @@ func scopedCodecFixture() scopedState {
 		Revocations:    []scopedRevocationRecord{{Requested: true, OperationID: "exec-v3-a1", GroupID: "a"}},
 		RetiredGroups:  []retiredGroup{{ID: "b", Version: 2}, {ID: "tombstone", Version: 2}},
 		Allocations:    []allocationRecord{{GroupID: "b", NextReplicaID: 9}, {GroupID: "a", NextReplicaID: 9}, {GroupID: "live", NextReplicaID: 2}, {GroupID: topology.MetaGroupID, NextReplicaID: 4}},
-		Admissions:     []AdmissionRecord{{NodeName: "b", InstanceID: "i", MemberID: 2, OperatorID: "exec-v3-a1"}, {NodeName: "a", InstanceID: "i", MemberID: 1}},
+		Admissions:     []AdmissionRecord{{NodeName: "n", InstanceID: "i1", MemberID: 1, OperatorID: "exec-v1-a1", State: AdmissionCompleted}, {NodeName: "n", InstanceID: "i2", MemberID: 1, OperatorID: "exec-v1-a1", State: AdmissionSuperseded}},
 		Sessions:       []sessionState{{SessionID: "b", NodeName: "b", InstanceID: "i", TTLSeconds: 30}, {SessionID: "a", NodeName: "a", InstanceID: "i", TTLSeconds: 30}},
 		Locks:          []lockEntry{{Key: "b", SessionID: "b"}, {Key: "a", SessionID: "a"}}, Activated: []string{"b", "a"},
 		VoterSwitches: []topology.VoterSwitchState{{GroupID: "b"}, {GroupID: "a"}},

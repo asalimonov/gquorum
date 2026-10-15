@@ -37,13 +37,15 @@ func scopedGraphFixture() scopedState {
 	retry.Previous = first.Status.ID
 	retry.Status.ID, retry.Status.Attempt, retry.Status.State = topology.MakeOperationID(2, 2), 2, topology.OperationPending
 	retry.Status.Blocks[1].State, retry.Status.Blocks[1].Error = topology.OperationPending, ""
-	return scopedState{SchemaVersion: scopedStateSchemaVersion, Rules: testRules(), Latest: desired, Target: desired,
+	state := scopedState{SchemaVersion: scopedStateSchemaVersion, Rules: testRules(), Latest: desired, Target: desired,
 		History: []topology.Document{base}, Operations: []topology.Operation{first, retry},
 		Groups: []groupConvergence{{GroupID: topology.MetaGroupID, Declaration: desired.MetaGroup(), SourceVersion: 2, CompletedAt: at},
 			{GroupID: "shard0", Declaration: base.Group("shard0"), SourceVersion: 1, Owner: retry.Status.ID, CompletedAt: at}},
 		Nodes:          []nodeConvergence{{NodeName: "n1", Declaration: base.Node("n1"), MemberID: 1, SourceVersion: 1, CompletedAt: at}},
 		Allocations:    []allocationRecord{{GroupID: topology.MetaGroupID, NextReplicaID: 2}, {GroupID: "shard0", NextReplicaID: 2}},
 		FullyConverged: topology.FullyConverged{Version: 1, At: at}, AppliedIndex: 10, AppliedTerm: 1}
+	populateScopedGraphAuthority(&state)
+	return state
 }
 
 func TestScopedGraphPreservesRetrySiblingAndHistoricalMarker(t *testing.T) {
