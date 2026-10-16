@@ -258,6 +258,15 @@ func (n *node) replaceReadmittedHost(m *metaservice.Group) error {
 // service never keeps an adapter bound to a retired host.
 type nodeEffects struct{ node *node }
 
+func (e nodeEffects) DispatchEffect(ctx context.Context, grant topology.AuthorityGrant,
+	resource topology.AuthorityResource, target topology.AuthorityTarget) (topology.EffectReceipt, error) {
+	h, err := e.node.loadHost(ctx)
+	if err != nil {
+		return topology.EffectReceipt{}, err
+	}
+	return h.DispatchEffect(ctx, grant, resource, target)
+}
+
 func (e nodeEffects) ReadNative(ctx context.Context, id string,
 	candidates ...storage.Identity) (topology.NativeState, error) {
 	h, err := e.node.loadHost(ctx)

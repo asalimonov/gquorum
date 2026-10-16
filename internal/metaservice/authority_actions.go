@@ -181,6 +181,6 @@ func (g *Group) applyMetaConsensusAction(parent context.Context,
 		return load.ActionResult{}, err
 	}
 	defer done()
-	receipts, err := g.metaEffect(ctx, request.Grant)
+	receipts, err := g.applyNativeMetaEffect(ctx, request.Grant)
 	return load.ActionResult{From: request.To, Authorization: request.Authorization, Receipts: receipts}, err
 }

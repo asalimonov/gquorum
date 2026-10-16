@@ -563,7 +563,7 @@ coordinators and group effects. Topology alias files preserve domain value ident
 | `LegacyCoordinator` | `IsMetaLeader() bool`; `CurrentOperator(ctx) (Record,bool)`; `RecordOperatorTransition(ctx,Transition) error`; schema3 bridge removed78. |
 | `AuthorityCoordinator` | `BeginEffect(ctx,topology.AuthorizedStep) (topology.AuthorityGrant,error)`; `ReconcileFences(ctx) error`; `EffectReceipts(ctx,topology.AuthorityGrant) ([]topology.EffectReceipt,error)`; `RecordEffect(ctx,topology.EffectReceipt) error` |
 | `MembershipCoordinator` | `Apply(ctx,topology.AuthorityGrant) ([]topology.EffectReceipt,error)`; `CaughtUp(GroupStatus,uint64) bool` |
-| `GroupEffects` | `Status(ctx,string) (GroupStatus,error)`; `ReadNative(ctx,string,...storage.Identity) (topology.NativeState,error)`; each of `CreateGroup`, `PrepareReplica`, `ApplyMembership`, `TransferLeader`, `StopReplica`, `CleanupReplicaState`, `DeleteGroupState` takes `(ctx,topology.AuthorityGrant)` and returns `([]topology.EffectReceipt,error)` |
+| `GroupEffects` | `Status(ctx,string) (GroupStatus,error)`; `ReadNative(ctx,string,...storage.Identity) (topology.NativeState,error)`; `DispatchEffect(ctx,grant,resource,target) (EffectReceipt,error)` sends one exact target without trimming the grant; each of `CreateGroup`, `PrepareReplica`, `ApplyMembership`, `TransferLeader`, `StopReplica`, `CleanupReplicaState`, `DeleteGroupState` takes `(ctx,topology.AuthorityGrant)` and returns `([]topology.EffectReceipt,error)` |
 
 `FI_READY_BLOCKS`: Machine.ReadyBlocks selects exact nonterminal owners under the
 FSM lock, with an exclusive group continuation and wrap. It never reserves work
@@ -574,9 +574,18 @@ revocation diagnostics derive on read, without per-poll writes; native safety an
 reachability remain worker checks. Config requires exactly one coordinator and
 matching scope or legacy validators; no scoped path reads Store.Active. Production
 retains the legacy port until78; scoped selection returns Unsupported on schema3.
-Tasks63–65 complete bounded dispatch/effects,66 the service scope validators.
+Task63 adds bounded joined dispatch;64–65 complete cleanup/effect workers,66 the service scope validators.
 
-Entries: `New`; Controller `{Start,Stop,Signal,Tick,SetFinalValidator}`;
+`FI_DISPATCH_GATE`: each Start owns a dispatcher; close admission and WaitGroup.Add
+share one mutex. Group workers rotate bounded ready pages. Exact RPCs share a
+(host,group) gate across ordinary/cleanup limits; native requests key the grant
+and group resource across leader changes. DispatchEffect routes only the explicit
+observed target; `_meta` native handling refuses rather than forwards on leader
+loss. Full-grant validation repeats after fencing; valid late receipts are recorded
+without advancing stale work. Timeout releases the courier slot, preserving host
+callback/journal ownership. Retry memory is bounded and idle entries expire.
+
+Entries: `New`; Controller `{Start,Stop,Signal,Tick,SetFinalValidator,DispatchEffect}`;
 `FromPublic`, `IDFor`, `NewFixedMembershipCoordinator`, `ValidateRemainingPlan`.
 `KB_RECEIPT`: success requires exact durable receipts plus observed native result;
 nil RPC error or a refusal is not completion. Tick reconciles resource fences,

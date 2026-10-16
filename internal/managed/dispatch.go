@@ -29,6 +29,11 @@ func (h *Host) Effects() operator.GroupEffects { return effects{h} }
 
 type effects struct{ host *Host }
 
+func (e effects) DispatchEffect(ctx context.Context, grant topology.AuthorityGrant,
+	resource topology.AuthorityResource, target topology.AuthorityTarget) (topology.EffectReceipt, error) {
+	return e.host.DispatchEffect(ctx, grant, resource, target)
+}
+
 func (e effects) ReadNative(ctx context.Context, id string,
 	candidates ...storage.Identity) (topology.NativeState, error) {
 	return e.host.ReadNative(ctx, id, candidates...)

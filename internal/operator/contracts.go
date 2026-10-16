@@ -16,6 +16,11 @@ import (
 type GroupEffects interface {
 	Status(context.Context, string) (GroupStatus, error)
 	ReadNative(context.Context, string, ...storage.Identity) (topology.NativeState, error)
+	// DispatchEffect delivers one exact resource/target with the full grant.
+	// Native targets are observed leader candidates; receivers verify leadership
+	// and never reroute behind the controller's host accounting.
+	DispatchEffect(context.Context, topology.AuthorityGrant, topology.AuthorityResource,
+		topology.AuthorityTarget) (topology.EffectReceipt, error)
 	// CreateGroup seeds only the approved founding voters. Intentional learners
 	// are prepared and admitted by later exact steps.
 	CreateGroup(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error)

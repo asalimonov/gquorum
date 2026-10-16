@@ -602,3 +602,26 @@ superseded predecessor cursor. Reuse current grants, and include consumed-step
 advancement and zero-step finalization. Derive dependency/revocation diagnostics
 on read rather than writing per poll. Group-key continuation permits fair rotation;
 workers still validate the full tuple after waits at issuance/transition boundaries.
+
+
+### Exact dispatch accounting (peer thread27, Task63)
+
+GroupEffects.DispatchEffect(ctx, grant, resource, target) returns one EffectReceipt.
+It is internal: keep the full immutable grant and require exact resource/target
+membership. Native calls use an explicit nonzero observed leader candidate, with
+recipient leadership verification and no hidden forwarding. Native inflight keys
+are (AuthorityKey, group resource); host calls additionally key the exact target.
+Both share the actual (host, group) gate across ordinary and cleanup budgets.
+The managed courier revalidates the grant after fence recording; metadata native
+execution refuses lost leadership instead of forwarding behind this accounting.
+
+Each controller run seals admission under its dispatch mutex before joining its
+workers. Allocate maps only for admitted work, never worker-count-sized pools.
+A bounded request releases its RPC slot on return/timeout; durable actionWorks
+and journals retain remote callback ownership. Record valid late receipts before
+reporting lost leadership; only a separately validated FSM transition advances.
+Backoff is bounded by the larger execution budget and expires idle hosts. Group
+selection rotates through ReadyBlocks; no waiting group owns the whole loop.
+Task64 adds cleanup selection and canonical fair target rotation;65 connects the
+exact effect worker and requires recorded founding host receipts before native
+creation. Legacy whole-grant wrappers remain until78 removes their consumers.

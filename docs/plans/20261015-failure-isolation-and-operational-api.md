@@ -992,15 +992,15 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 ### Task 63: Dispatch fair bounded group work with joined shutdown
 
-**Files:** `internal/operator/controller.go`, dispatch helpers/tests. **Target:** [T] §6.1, §6.4, §12 “Controller dispatch”. **Depends on:** 5, 39–41, 51, 62. **Budget:** ≤550.
+**Files:** `internal/operator/controller.go`, dispatch helpers/tests; exact GroupEffects adapters in managed/metaservice and node_load.go. **Target:** [T] §6.1, §6.4, §12 “Controller dispatch”. **Depends on:** 5, 39–41, 51, 62. **Budget:** ≤550.
 
-- [ ] Implement round-robin ready selection, MaxConcurrentGroups, exact inflight (AuthorityKey, AuthorityTarget) and shared host/group admission. Counts cap actual ready work; never preallocate pools, channels or per-slot state from the configured count. One worker executes one bounded check/effect; release RPC slots on timeout without releasing remote ownership.
-- [ ] Retain bounded per-host/group backoff, skip busy work and prune idle entries with settled work. Revalidate full action/owner/resource tuple after waits; retain late evidence without advancing superseded work.
-- [ ] Close dispatch admission under the dispatch mutex before joining workers; eliminate WaitGroup.Add versus zero-count Wait races. Test one hung target with healthy progress, leadership loss and concurrent Stop/new scheduling under race detection.
+- [x] Implement round-robin ready selection, MaxConcurrentGroups, exact host inflight (AuthorityKey, resource, AuthorityTarget), native inflight (AuthorityKey, group resource) and shared host/group admission. Counts cap actual ready work; never preallocate pools, channels or per-slot state from the configured count. One worker executes one bounded check/effect; release RPC slots on timeout without releasing remote ownership.
+- [x] Retain bounded per-host/group backoff, skip busy work and prune idle entries with settled work. Revalidate full action/owner/resource tuple after waits; retain late evidence without advancing superseded work.
+- [x] Close dispatch admission under the dispatch mutex before joining workers; eliminate WaitGroup.Add versus zero-count Wait races. Test one hung target with healthy progress, leadership loss and concurrent Stop/new scheduling under race detection.
 
 **Verification**
 
-- [ ] Run controller dispatch/shutdown functional race regressions and `make test`.
+- [x] Run controller dispatch/shutdown functional race regressions and `make test`.
 
 ### Task 64: Dispatch cleanup with a separate fair request budget
 

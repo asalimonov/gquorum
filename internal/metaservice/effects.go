@@ -177,6 +177,18 @@ func (g *Group) metaEffect(ctx context.Context, grant topology.AuthorityGrant) (
 	if !g.IsLeader() {
 		return g.forwardMetaEffect(ctx, grant)
 	}
+	return g.applyNativeMetaEffect(ctx, grant)
+}
+
+func (g *Group) applyNativeMetaEffect(ctx context.Context,
+	grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+	if !g.IsLeader() {
+		return nil, fault.ErrNotLeader
+	}
+	if err := g.ValidateGrant(ctx, grant); err != nil {
+		return nil, err
+	}
+	a := *grant.Action
 	engine := g.engine.Load()
 	var proof topology.FenceEvidence
 	checkErr := waitMetaAuthority(ctx, func() error {

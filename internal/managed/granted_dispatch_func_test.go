@@ -233,6 +233,9 @@ func TestGrantedDispatcherRejectsIncompleteOrMisdirectedEvidence(t *testing.T) {
 			if got, err := h.DispatchGrant(deadline(t), grant); !errors.Is(err, want) || len(got) != 0 {
 				t.Fatal("incomplete evidence advanced the effect", got, err)
 			}
+			if got, err := h.DispatchEffect(deadline(t), grant, grant.Resources[0], grant.Targets[0]); !errors.Is(err, want) || got.Key != (topology.AuthorityKey{}) {
+				t.Fatal("exact dispatch accepted incomplete evidence", got, err)
+			}
 			if (mode == "wrong_fence" || mode == "fence_not_recorded" || mode == "successor_member") && actions.Load() != 0 {
 				t.Fatal("action ran without its exact recorded fence")
 			}

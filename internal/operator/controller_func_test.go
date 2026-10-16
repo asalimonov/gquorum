@@ -1303,3 +1303,7 @@ func mustController(cfg Config) *Controller {
 	}
 	return c
 }
+
+func (*controllerGroups) DispatchEffect(context.Context, topology.AuthorityGrant, topology.AuthorityResource, topology.AuthorityTarget) (topology.EffectReceipt, error) {
+	panic("legacy fixture used for scoped dispatch")
+}

@@ -26,20 +26,48 @@ func validateCoordinatorConfig(cfg Config) error {
 	return nil
 }
 
-// Task63 replaces serial selection with bounded dispatch; Task65 supplies exact
-// effect execution. This path is isolated from schema3 composition until Task78.
+// Scoped execution is isolated from schema3 composition until Task78.
 func (e *Controller) runScopedTick(ctx context.Context) controllerOutcome {
-	if ctx.Err() != nil || !e.scoped.IsMetaLeader() {
+	e.mu.Lock()
+	run := e.run
+	e.mu.Unlock()
+	if run == nil || run.dispatch == nil {
 		return controllerIdle
 	}
-	work, err := e.scoped.ReadyBlocks(ctx, 1)
+	limit := run.dispatch.available(e.rules.Limits.WithDefaults().MaxConcurrentGroups)
+	if limit == 0 {
+		return controllerIdle
+	}
+	work, err := e.readScopedWork(ctx, limit)
 	if err != nil {
 		return controllerWaiting
 	}
-	if len(work) == 0 || ctx.Err() != nil || !e.scoped.IsMetaLeader() {
-		return controllerIdle
+	for _, item := range work {
+		e.dispatchWork(ctx, run.dispatch, item)
 	}
-	return e.runScopedWork(ctx, work[0])
+	return controllerIdle
+}
+
+func (e *Controller) readScopedWork(ctx context.Context, limit int) ([]WorkItem, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !e.scoped.IsMetaLeader() {
+		return nil, fault.ErrNotLeader
+	}
+	bounded, cancel := context.WithTimeout(ctx, e.proposalTimeout)
+	defer cancel()
+	work, err := e.scoped.ReadyBlocks(bounded, limit)
+	if err != nil {
+		return nil, err
+	}
+	if err := bounded.Err(); err != nil {
+		return nil, err
+	}
+	if !e.scoped.IsMetaLeader() {
+		return nil, fault.ErrNotLeader
+	}
+	return work, nil
 }
 
 func (e *Controller) runScopedWork(ctx context.Context, work WorkItem) controllerOutcome {

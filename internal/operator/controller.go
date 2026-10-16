@@ -62,9 +62,11 @@ func (t *systemControllerTimer) Reset(delay time.Duration) {
 func (t *systemControllerTimer) Stop() { t.timer.Stop() }
 
 type controllerRun struct {
+	ctx      context.Context
 	cancel   context.CancelFunc
 	done     chan struct{}
 	stopping bool
+	dispatch *controllerDispatch
 }
 
 type controllerOutcome uint8
@@ -218,7 +220,10 @@ func (e *Controller) Start(parent context.Context) {
 		return
 	}
 	ctx, cancel := context.WithCancel(parent)
-	run := &controllerRun{cancel: cancel, done: make(chan struct{})}
+	run := &controllerRun{ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	if e.scoped != nil {
+		run.dispatch = &controllerDispatch{}
+	}
 	e.run = run
 	e.mu.Unlock()
 
@@ -239,6 +244,9 @@ func (e *Controller) Stop() {
 	if run == nil {
 		return
 	}
+	if run.dispatch != nil {
+		run.dispatch.close()
+	}
 	run.cancel()
 	<-run.done
 
@@ -251,6 +259,10 @@ func (e *Controller) Stop() {
 
 func (e *Controller) loop(ctx context.Context, run *controllerRun) {
 	defer func() {
+		if run.dispatch != nil {
+			run.dispatch.close()
+			run.dispatch.workers.Wait()
+		}
 		close(run.done)
 		e.mu.Lock()
 		if e.run == run && !run.stopping {
@@ -463,7 +475,7 @@ func (e *Controller) runStep(ctx context.Context, step Step, status GroupStatus)
 }
 
 func (e *Controller) performEffect(ctx context.Context, step Step, grant topology.AuthorityGrant) error {
-	receipts, effectErr := e.dispatchEffect(ctx, step, grant)
+	receipts, effectErr := e.dispatchLegacyEffect(ctx, step, grant)
 	if err := e.recordReceipts(ctx, grant, receipts); err != nil {
 		return err
 	}
@@ -482,7 +494,7 @@ func (e *Controller) performEffect(ctx context.Context, step Step, grant topolog
 	return nil
 }
 
-func (e *Controller) dispatchEffect(ctx context.Context, step Step,
+func (e *Controller) dispatchLegacyEffect(ctx context.Context, step Step,
 	grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
 	switch step.Kind {
 	case StepCreateFoundingGroup:

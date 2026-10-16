@@ -12,40 +12,6 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-type scopedCoordinatorTest struct {
-	leader      bool
-	work        []WorkItem
-	onSelect    func()
-	transitions []topology.OperationTransition
-}
-
-func (c *scopedCoordinatorTest) IsMetaLeader() bool { return c.leader }
-func (c *scopedCoordinatorTest) ReadyBlocks(_ context.Context, limit int) ([]WorkItem, error) {
-	if c.onSelect != nil {
-		c.onSelect()
-	}
-	return c.work[:min(limit, len(c.work))], nil
-}
-func (c *scopedCoordinatorTest) RecordOperationTransition(ctx context.Context, t topology.OperationTransition) error {
-	if _, bounded := ctx.Deadline(); !bounded {
-		return errors.New("unbounded transition")
-	}
-	c.transitions = append(c.transitions, t)
-	return nil
-}
-
-type forbiddenLegacyCoordinator struct{ LegacyCoordinator }
-type forbiddenLegacyStore struct{ Store }
-type forbiddenScopedEffects struct{ GroupEffects }
-type forbiddenScopedAuthority struct{ AuthorityCoordinator }
-
-func scopedControllerConfig(c Coordinator) Config {
-	return Config{Rules: Rules{SchemaVersion: 1, Limits: (Limits{}).WithDefaults()}, Coordinator: c,
-		Groups: forbiddenScopedEffects{}, Authority: forbiddenScopedAuthority{}, OwnsGroup: func(string) bool { return true },
-		ScopedPlanValidator:  func(context.Context, topology.Operation, string) error { return nil },
-		ScopedFinalValidator: func(context.Context, topology.Operation, string) error { return nil }}
-}
-
 func TestScopedControllerRejectsMixedAuthorityComposition(t *testing.T) {
 	t.Parallel()
 	for name, change := range map[string]func(*Config){
@@ -114,7 +80,10 @@ func TestScopedControllerFinalizesOnlySelectedScopeAndRechecksLeadership(t *test
 			if err != nil {
 				t.Fatal(err)
 			}
-			controller.Tick(ctx)
+			work, readErr := controller.readScopedWork(ctx, 1)
+			if readErr == nil && len(work) != 0 {
+				controller.runScopedWork(ctx, work[0])
+			}
 			if loss != "none" {
 				if len(coord.transitions) != 0 {
 					t.Fatal("recorded after leadership/cancellation", coord.transitions)
@@ -152,7 +121,7 @@ func TestScopedControllerRecordsOnlySelectedBlockRefusal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			controller.Tick(t.Context())
+			controller.runScopedWork(t.Context(), coord.work[0])
 			if len(coord.transitions) != 1 {
 				t.Fatal(coord.transitions)
 			}

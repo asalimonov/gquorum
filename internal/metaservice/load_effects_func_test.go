@@ -228,3 +228,7 @@ func loadDocument(t *testing.T, g *Group) topology.Document {
 	doc.Groups = append(doc.Groups, topology.Group{ID: "load-one", NextReplicaID: 2, Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 1}, Replicas: []topology.Replica{{NodeName: "n1", ReplicaID: 1, Role: topology.ReplicaVoter}}})
 	return doc
 }
+
+func (*verifiedLoadController) DispatchEffect(context.Context, topology.AuthorityGrant, topology.AuthorityResource, topology.AuthorityTarget) (topology.EffectReceipt, error) {
+	panic("legacy fixture used for scoped dispatch")
+}
