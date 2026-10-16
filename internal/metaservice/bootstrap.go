@@ -46,22 +46,19 @@ func (g *Group) bootstrap(ctx context.Context) error {
 		}
 	}
 	latest := machine.Latest()
-	if latest.Origin != topology.OriginFounding || latest.Version != 1 || machine.Active().Version != 0 {
+	if latest.Origin != topology.OriginFounding || latest.Version != 1 {
 		return nil
 	}
-	_, ok := machine.CurrentOperator()
-	if !ok {
-		input, err := g.planningInput(ctx, latest)
+	approved, err := machine.Approval(latest.Version)
+	if err != nil {
+		return err
+	}
+	if approved == "" {
+		plan, err := g.foundingPlan(ctx, latest)
 		if err != nil {
 			return err
 		}
-		plan, err := topology.BuildPlan(input, latest, g.rules)
-		if err != nil {
-			return err
-		}
-		if len(plan.Steps) != 0 {
-			return fault.New(fault.OperatorAuthorization, "founding membership differs from durable seed", nil)
-		}
+		// Task 78 replaces this legacy proposal with BeginOperation and scopes.
 		_, err = g.propose(ctx, metaengine.BeginOperatorProposal{
 			Version: latest.Version,
 			Plan:    plan,
@@ -74,6 +71,28 @@ func (g *Group) bootstrap(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// Native seed membership is the only initial evidence. Load declarations do
+// not imply that their replicas exist, and their controllers cannot hold up
+// metadata bootstrap. ReadNative retains the current-term quorum barrier.
+func (g *Group) foundingPlan(ctx context.Context, desired topology.Document) (topology.Plan, error) {
+	seed, err := (groupControllers{g}).ReadNative(ctx, topology.MetaGroupID)
+	if err != nil {
+		return topology.Plan{}, err
+	}
+	input := topology.PlanInput{Native: map[string]topology.NativeState{topology.MetaGroupID: seed}}
+	plan, err := topology.BuildPlan(input, desired, g.rules)
+	if err != nil {
+		return topology.Plan{}, err
+	}
+	for _, step := range plan.Steps {
+		if step.GroupID == topology.MetaGroupID {
+			return topology.Plan{}, fault.New(fault.OperationAuthorization,
+				"founding membership differs from durable seed", nil)
+		}
+	}
+	return plan, nil
 }
 
 // Activate establishes or renews this participant's session under serialized
@@ -228,9 +247,7 @@ func (g *Group) activateLocalForTick(engine *raftengine.Group) {
 		members[id] = true
 	}
 	g.transport.Prune(members)
-	active := g.state().Active()
-	if !members[identity.MemberID] || active.Version == 0 ||
-		active.MemberID(identity.NodeName) != identity.MemberID {
+	if !members[identity.MemberID] {
 		return
 	}
 	ctx, cancel := context.WithTimeout(g.workCtx, 5*time.Second)
@@ -305,21 +322,22 @@ type sessionActivation struct {
 
 func (g *Group) validateSessionTopology(ctx context.Context, state sessionActivation) error {
 	identity, machine := state.identity, state.machine
-	active := machine.Active()
-	node := active.Node(identity.NodeName)
-	if node == nil || !node.State.Places() || active.MemberID(identity.NodeName) != identity.MemberID {
+	founding, ready := machine.AdmissionBasis(identity)
+	if !ready || !containsMember(g.engine.Load().Status().ConfState, identity.MemberID) {
 		return fault.ErrUnavailable
 	}
 	activated := machine.HasActivated(identity.NodeName)
-	if !activated && active.Origin == topology.OriginFounding {
-		operator, ok := machine.CurrentOperator()
-		if !ok || operator.Status.State != topology.OperatorSucceeded {
+	if !activated && founding == "" {
+		admission, exists := machine.Admission(identity.NodeName, identity.InstanceID)
+		if !exists || admission.MemberID != identity.MemberID || admission.State != metaengine.AdmissionCompleted {
 			return fault.ErrUnavailable
 		}
+	}
+	if !activated && founding != "" {
 		_, bindErr := g.propose(ctx,
 			metaengine.BindAdmissionProposal{Admission: metaengine.AdmissionRecord{NodeName: identity.NodeName,
 				InstanceID: identity.InstanceID, MemberID: identity.MemberID,
-				OperatorID: operator.Status.ID}, Founding: true, At: time.Now().UTC()})
+				OperatorID: topology.OperatorID(founding)}, Founding: true, At: time.Now().UTC()})
 		if bindErr != nil {
 			return bindErr
 		}

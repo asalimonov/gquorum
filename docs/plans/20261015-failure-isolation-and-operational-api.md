@@ -827,13 +827,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaservice/bootstrap.go`, `join_admission.go`, `internal/metaengine/admission.go`. **Target:** [T] §5.4, §8.4, §10. **Depends on:** 40–41, 49. **Budget:** ≤550.
 
-- [ ] Build founding plans from empty proven PlanInput and observed seed membership. Replace whole-operation/Active/FullyConverged readiness checks with exact founding `_meta` convergence and native admission evidence.
-- [ ] Preserve member, instance, seed and current-term admission checks; retain founding proof until durable admission records make it unnecessary. Failing founding load work must not prevent metadata readiness.
-- [ ] Add single-participant/protocol-double regressions for a failed load block beside successful founding `_meta`, rejected wrong seed/member and retained restart without refounding.
+- [x] Build founding plans from empty proven PlanInput and observed seed membership. Replace whole-operation/Active/FullyConverged readiness checks with exact founding `_meta` convergence and native admission evidence.
+- [x] Preserve member, instance, seed and current-term admission checks; retain founding proof until durable admission records make it unnecessary. Failing founding load work must not prevent metadata readiness.
+- [x] Add single-participant/protocol-double regressions for a failed load block beside successful founding `_meta`, rejected wrong seed/member and retained restart without refounding.
 
 **Verification**
 
-- [ ] Run focused bootstrap/admission functional tests and `make test`.
+- [x] Run focused bootstrap/admission functional tests and `make test`.
 
 ### Task 51: Fix non-founding admission and state-based barriers
 

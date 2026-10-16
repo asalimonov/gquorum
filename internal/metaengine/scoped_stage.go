@@ -55,10 +55,7 @@ func (s *scopedState) validateStagedDocument(doc topology.Document) error {
 	if err := topology.ValidateTransition(retainedIdentities(s.Latest, s.Target), doc, s.Rules, retired); err != nil {
 		return err
 	}
-	if err := topology.ValidateHostingCapacityFor(s.Target, doc, s.Rules); err != nil {
-		return err
-	}
-	if err := topology.ValidatePlacementTransition(s.Target, s.Target, doc); err != nil {
+	if err := validateScopedPlacement(s.Target, doc, s.Rules); err != nil {
 		return err
 	}
 	if err := s.validateRepairAllocations(doc); err != nil {

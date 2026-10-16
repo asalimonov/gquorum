@@ -308,7 +308,8 @@ func (h *Host) engineOptions(slot *replica, app load.Application, mode raftengin
 type machineAdapter struct{ load.StateMachine }
 
 func (m machineAdapter) Apply(ctx context.Context, command raftengine.Command) (raftengine.Result, error) {
-	result, err := m.StateMachine.Apply(ctx, load.Command(command))
+	result, err := m.StateMachine.Apply(ctx, load.Command{Index: command.Index, Term: command.Term,
+		RequestID: command.RequestID, Data: command.Data})
 	return raftengine.Result(result), err
 }
 

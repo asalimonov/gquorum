@@ -196,20 +196,18 @@ func (g *Group) commitJoinReadmission(ctx context.Context, state joinClassificat
 
 func (g *Group) joinFoundingNode(ctx context.Context, state joinClassification) *metapb.Reply {
 	req, machine, member, replace := state.req, state.machine, state.member, state.replace
-	target, active := state.views.Target, state.views.Active
+	identity := req.Identity
+	identity.MemberID = member
+	founding, ready := machine.AdmissionBasis(identity)
 	activated := machine.HasActivated(req.Node.Name)
-	if !activated && target.Origin == topology.OriginFounding && reflect.DeepEqual(target, active) &&
+	if !activated && ready && founding != "" &&
 		containsMember(g.engine.Load().Status().ConfState, member) {
-		ex, ok := machine.CurrentOperator()
-		if !ok || ex.Status.State != topology.OperatorSucceeded {
-			return metatransport.Reply(fault.ErrUnavailable)
-		}
 		return g.bindJoinAdmission(ctx, req, metaengine.BindAdmissionProposal{
 			Admission: metaengine.AdmissionRecord{
 				NodeName:   req.Node.Name,
 				InstanceID: req.Identity.InstanceID,
 				MemberID:   member,
-				OperatorID: ex.Status.ID,
+				OperatorID: topology.OperatorID(founding),
 			},
 			Founding:        true,
 			ReplaceInstance: replace,

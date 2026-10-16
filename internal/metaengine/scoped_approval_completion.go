@@ -31,7 +31,7 @@ func prepareApprovalCompletion(source, next *scopedState) error {
 		if len(block.Steps) != 0 || next.Target.Group(block.GroupID) == nil {
 			continue
 		}
-		if !zeroStepMembership(source, next.Target, block.GroupID, catalog) {
+		if !approvalMembership(source, next.Target, block.GroupID, catalog) {
 			op.Status.Blocks[i].State = topology.OperationWaitingForReplica
 			op.Status.Blocks[i].Blocked = &topology.BlockedReason{Code: "membership_unproven",
 				Message: "required effects do not prove the approved membership"}
@@ -167,4 +167,9 @@ func applyMembershipProof(a *topology.AuthorizedStep, approved topology.Document
 		delete(members, a.ReplicaID)
 	default: // The caller selects only membership/preparation effect kinds.
 	}
+}
+
+func approvalMembership(source *scopedState, desired topology.Document, group string, catalog authorityCatalog) bool {
+	return group == topology.MetaGroupID && source.initialFounding(desired) ||
+		zeroStepMembership(source, desired, group, catalog)
 }

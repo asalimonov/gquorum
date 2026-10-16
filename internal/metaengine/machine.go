@@ -35,6 +35,8 @@ func (m *Machine) Apply(ctx context.Context, c raftengine.Command) (raftengine.R
 	if err := ctx.Err(); err != nil {
 		return raftengine.Result{}, err
 	}
+	// Task 78 installs c.ConfState for the scoped Apply entry and clears it on
+	// exit. errFoundingSeedMismatch must remain an Apply error, never a Result.
 	result, err := m.topologySM.Apply(c.Index, c.Term, c.Data)
 	if err != nil {
 		return raftengine.Result{}, err

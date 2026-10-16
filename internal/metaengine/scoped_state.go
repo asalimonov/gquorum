@@ -7,6 +7,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
+	"go.etcd.io/raft/v3/raftpb"
 )
 
 // This codec is isolated from live state installation until Task 78. At cutover
@@ -15,7 +16,10 @@ const scopedStateSchemaVersion = 4
 
 type scopedState struct {
 	// Derived only; never trusted from a snapshot or independently persisted.
-	indexes          *scopedIndexes
+	indexes *scopedIndexes
+	// Ephemeral engine-supplied context for one committed application entry.
+	// Convergence persists the resulting proof; snapshots cannot provide this.
+	nativeConf       *raftpb.ConfState
 	SchemaVersion    uint32                      `json:"schema_version"`
 	Rules            topology.Rules              `json:"rules"`
 	Latest           topology.Document           `json:"latest"`

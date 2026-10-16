@@ -22,10 +22,10 @@ func prepareScopedApproval(s *scopedState, desired topology.Document,
 	if err := s.validateApprovalCaptures(desired, p, kind); err != nil {
 		return nil, err
 	}
-	if err := topology.ValidateHostingCapacityFor(s.Target, desired, s.Rules); err != nil {
+	if err := s.validateFoundingApproval(desired, p.Plan); err != nil {
 		return nil, err
 	}
-	if err := topology.ValidatePlacementTransition(s.Target, s.Target, desired); err != nil {
+	if err := validateScopedPlacement(s.Target, desired, s.Rules); err != nil {
 		return nil, err
 	}
 	collector := s.planningCollector()

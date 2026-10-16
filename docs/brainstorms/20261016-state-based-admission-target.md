@@ -438,3 +438,18 @@ Explicit reseat records the same provenance inside its atomic repair proposal.
 Its document ParentVersion is the approved repair source, while ExpectedVersion
 is the captured Latest acceptance CAS. Retained replay returns R and its first
 operation, without allocating another R/S pair or approving staged S.
+
+
+### Founding metadata proof (peer thread 17, Task 50)
+
+`FI_FOUNDING_SEED`: initial v1 approval has empty approved/proven state and no
+retained effect/admission/cleanup evidence. The metadata engine's owned native
+configuration at the application entry must equal the replicated founding
+voters/learners, including any prior configuration entry in the same Ready.
+Divergent local seeds halt with an Apply error; they cannot select different
+refusal or completion results. Only the zero-step `_meta` block completes from
+that assertion. Load blocks retain their own effect requirements. Admission
+uses that retained successful block and the exact current approved member,
+independently of newer Target versions, aggregate failure and load-dependent
+node progress. Native/current-term service checks remain. Snapshot restore uses
+the persisted checkpoint, not a new seed assertion or an AfterApply cache.
