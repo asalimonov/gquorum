@@ -30,18 +30,18 @@ func (c *clusterView) ReadLockHolder(ctx context.Context, key string) (topology.
 	return m.ReadLockHolder(ctx, key)
 }
 
-func (c *clusterView) ReadAuthority(ctx context.Context, id topology.OperatorID) (topology.AuthorityStatus, error) {
+func (c *clusterView) ReadAuthority(ctx context.Context, id topology.OperationID) (topology.AuthorityStatus, error) {
 	m, err := c.node.service(ctx, workService)
 	if err != nil {
 		return topology.AuthorityStatus{}, err
 	}
-	return m.ReadAuthority(ctx, id)
+	return m.ReadAuthority(ctx, topology.OperatorID(id))
 }
 
-func (c *clusterView) WaitRevoked(ctx context.Context, id topology.OperatorID) (topology.AuthorityStatus, error) {
+func (c *clusterView) WaitRevoked(ctx context.Context, id topology.OperationID) (topology.AuthorityStatus, error) {
 	m, err := c.node.service(ctx, workService)
 	if err != nil {
 		return topology.AuthorityStatus{}, err
 	}
-	return m.WaitRevoked(ctx, id)
+	return m.WaitRevoked(ctx, topology.OperatorID(id))
 }

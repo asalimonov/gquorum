@@ -30,7 +30,7 @@ func (a *application) canServe(ctx context.Context) bool {
 	if minimum == 0 || !a.node.Status().Meta.Found {
 		return false
 	}
-	active, err := a.cluster.Active(ctx)
+	active, err := readConvergedTopology(ctx, a.cluster)
 	if err != nil || active.Version == 0 || active.MetaGroup() == nil {
 		return false
 	}
@@ -62,7 +62,7 @@ func (a *application) localServing(ctx context.Context, id string) (*localReplic
 	if !a.canServe(ctx) {
 		return nil, fault.ErrUnavailable
 	}
-	active, err := a.cluster.Active(ctx)
+	active, err := readConvergedTopology(ctx, a.cluster)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +216,7 @@ func mutationResponse(w http.ResponseWriter, result gquorum.MutationResult, err 
 	}
 	w.Header().Set("ETag", fmt.Sprintf("\"%d\"", result.Document.Version))
 	status := http.StatusOK
-	if result.OperatorID != "" {
+	if result.OperationID != "" {
 		status = http.StatusAccepted
 	}
 	jsonResponse(w, status, result)
@@ -271,7 +271,7 @@ func (a *application) routes() http.Handler {
 		case "target":
 			doc, err = a.cluster.Target(r.Context())
 		case "active":
-			doc, err = a.cluster.Active(r.Context())
+			doc, err = readConvergedTopology(r.Context(), a.cluster)
 		default:
 			var version uint64
 			version, err = positiveNumber(r.PathValue("view"))
@@ -361,7 +361,7 @@ func (a *application) routes() http.Handler {
 		jsonResponse(w, http.StatusAccepted, map[string]any{"operator_id": id})
 	})
 	mux.HandleFunc("GET /api/operators/{id}", func(w http.ResponseWriter, r *http.Request) {
-		status, err := a.cluster.Operator(r.Context(), topology.OperatorID(r.PathValue("id")))
+		status, err := a.cluster.Operation(r.Context(), topology.OperationID(r.PathValue("id")))
 		if err != nil {
 			httpError(w, err)
 			return
@@ -578,7 +578,7 @@ func (a *application) readyHTTP(w http.ResponseWriter, r *http.Request) {
 		httpError(w, fault.ErrUnavailable)
 		return
 	}
-	active, err := a.cluster.Active(r.Context())
+	active, err := readConvergedTopology(r.Context(), a.cluster)
 	if err != nil {
 		httpError(w, err)
 		return

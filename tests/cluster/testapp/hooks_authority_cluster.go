@@ -254,7 +254,7 @@ func (a *application) registerAuthorityRoutes(mux *http.ServeMux, protect func(h
 		jsonResponse(w, http.StatusOK, result)
 	}))
 	mux.HandleFunc("GET /internal/test/revocation/{operator}", protect(func(w http.ResponseWriter, r *http.Request) {
-		status, err := a.cluster.ReadAuthority(r.Context(), topology.OperatorID(r.PathValue("operator")))
+		status, err := a.cluster.ReadAuthority(r.Context(), topology.OperationID(r.PathValue("operator")))
 		if err != nil {
 			httpError(w, err)
 			return

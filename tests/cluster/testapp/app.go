@@ -460,12 +460,22 @@ func (a *application) finishClose() {
 	close(a.closed)
 }
 
+// readConvergedTopology is a schema-3 fixture bridge. Task78 replaces callers
+// with scoped progress queries when the Active document leaves ReadView.
+func readConvergedTopology(ctx context.Context, cluster gquorum.Cluster) (topology.Document, error) {
+	view, err := cluster.ReadTopology(ctx)
+	if err != nil {
+		return topology.Document{}, err
+	}
+	return view.Active, nil
+}
+
 func (a *application) documents(ctx context.Context) (topology.Document, topology.Document, error) {
 	target, err := a.cluster.Target(ctx)
 	if err != nil {
 		return target, topology.Document{}, err
 	}
-	active, err := a.cluster.Active(ctx)
+	active, err := readConvergedTopology(ctx, a.cluster)
 	return target, active, err
 }
 func (a *application) address(ctx context.Context, name, label string) (string, error) {
@@ -558,15 +568,15 @@ func (a *application) bootstrapOnce(ctx context.Context) (bool, error) {
 			if err != nil {
 				return false, err
 			}
-			status, err := a.cluster.WaitOperator(ctx, created.OperatorID)
+			status, err := a.cluster.WaitOperation(ctx, created.OperationID)
 			if err != nil {
 				return false, err
 			}
-			if status.State != topology.OperatorSucceeded {
+			if status.State != topology.OperationSucceeded {
 				return false, fault.New(fault.Unavailable, status.Error, nil)
 			}
 		} else {
-			active, err := a.cluster.Active(ctx)
+			active, err := readConvergedTopology(ctx, a.cluster)
 			if err != nil {
 				return false, err
 			}
@@ -575,8 +585,8 @@ func (a *application) bootstrapOnce(ctx context.Context) (bool, error) {
 				if err != nil {
 					return false, err
 				}
-				status, err := a.cluster.WaitOperator(ctx, id)
-				if err != nil || status.State != topology.OperatorSucceeded {
+				status, err := a.cluster.WaitOperation(ctx, id)
+				if err != nil || status.State != topology.OperationSucceeded {
 					return false, err
 				}
 			}

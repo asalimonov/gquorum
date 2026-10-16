@@ -12,7 +12,7 @@ import (
 // This is the existing Cluster mutation surface, narrowed for one call's state.
 type ensureMutations interface {
 	CreateGroup(context.Context, GroupSpec, MutationOptions) (MutationResult, error)
-	Approve(context.Context, uint64) (topology.OperatorID, error)
+	Approve(context.Context, uint64) (topology.OperationID, error)
 }
 
 type ensureRequest struct {

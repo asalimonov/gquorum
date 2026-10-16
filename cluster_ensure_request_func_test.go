@@ -26,9 +26,9 @@ func (p *ensureMutationProbe) CreateGroup(_ context.Context, _ GroupSpec, opts M
 	}
 	return p.result, p.err
 }
-func (p *ensureMutationProbe) Approve(_ context.Context, version uint64) (topology.OperatorID, error) {
+func (p *ensureMutationProbe) Approve(_ context.Context, version uint64) (topology.OperationID, error) {
 	p.approved = append(p.approved, version)
-	return topology.MakeOperatorID(version, 1), p.approveErr
+	return topology.MakeOperationID(version, 1), p.approveErr
 }
 
 func TestEnsureCreationPinsCASAndApprovesOnlyReplayedRebasedHead(t *testing.T) {

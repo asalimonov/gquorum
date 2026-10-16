@@ -15,7 +15,7 @@ import (
 type retainedRouteCluster struct {
 	gquorum.Cluster
 	documents  []topology.Document
-	approved   map[topology.OperatorID]topology.OperatorStatus
+	approved   map[topology.OperationID]topology.OperationStatus
 	historyErr error
 }
 
@@ -28,11 +28,11 @@ func (*retainedRouteCluster) Active(context.Context) (topology.Document, error) 
 func (c *retainedRouteCluster) History(context.Context, topology.Page) (topology.HistoryResult, error) {
 	return topology.HistoryResult{Documents: c.documents}, c.historyErr
 }
-func (c *retainedRouteCluster) Operator(_ context.Context, id topology.OperatorID) (topology.OperatorStatus, error) {
+func (c *retainedRouteCluster) Operation(_ context.Context, id topology.OperationID) (topology.OperationStatus, error) {
 	if op, ok := c.approved[id]; ok {
 		return op, nil
 	}
-	return topology.OperatorStatus{}, fault.ErrHistoryUnavailable
+	return topology.OperationStatus{}, fault.ErrHistoryUnavailable
 }
 
 func TestLoadControlRoutingRetainsExactApprovedEndpointWithoutGrantingAuthority(t *testing.T) {
@@ -45,7 +45,7 @@ func TestLoadControlRoutingRetainsExactApprovedEndpointWithoutGrantingAuthority(
 	}
 	cluster := &retainedRouteCluster{
 		documents: []topology.Document{doc(3, 4, "staged.invalid:9001"), doc(2, 4, "127.0.0.1:19001"), doc(1, 99, "foreign.invalid:9001")},
-		approved:  map[topology.OperatorID]topology.OperatorStatus{"exec-v2-a1": {ID: "exec-v2-a1", Version: 2}},
+		approved:  map[topology.OperationID]topology.OperationStatus{"exec-v2-a1": {ID: "exec-v2-a1", Version: 2}},
 	}
 	a := &application{cluster: cluster, clients: map[string]*loadClient{}}
 	client, err := a.client(t.Context(), "n4", 4)

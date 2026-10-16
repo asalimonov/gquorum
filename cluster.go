@@ -8,7 +8,7 @@ import (
 )
 
 // Cluster is a stable view of a Node's topology service. It owns no separate
-// connection or lifetime. Latest/Target/Active are owned local observations.
+// connection or lifetime. Latest/Target are owned local observations.
 // Explicit Read methods confirm quorum and wait for local application.
 type Cluster interface {
 	// Quorum-confirmed reads. These wait for local application before
@@ -16,16 +16,15 @@ type Cluster interface {
 
 	// ReadBarrier confirms quorum and local application on this participant.
 	ReadBarrier(context.Context) error
-	// ReadTopology captures all three documents atomically after a safe
-	// barrier.
+	// ReadTopology captures the coherent topology view after a safe barrier.
 	ReadTopology(context.Context) (topology.ReadView, error)
 	// ReadProgress confirms metadata and attaches only matching cached observations.
 	ReadProgress(context.Context, topology.ProgressQuery) (topology.ProgressPage, error)
 	// ReadAuthority confirms the current durable revocation obligations.
-	ReadAuthority(context.Context, topology.OperatorID) (topology.AuthorityStatus, error)
+	ReadAuthority(context.Context, topology.OperationID) (topology.AuthorityStatus, error)
 	// WaitRevoked waits for a requested revocation to complete at its
 	// resources.
-	WaitRevoked(context.Context, topology.OperatorID) (topology.AuthorityStatus, error)
+	WaitRevoked(context.Context, topology.OperationID) (topology.AuthorityStatus, error)
 	// ReadLockHolder reports committed ownership; TTL is configured duration,
 	// not remaining lifetime or proof of a currently valid lease.
 	ReadLockHolder(context.Context, string) (topology.LockHolder, error)
@@ -48,14 +47,12 @@ type Cluster interface {
 	ParkedJoins(context.Context) ([]topology.ParkedJoin, error)
 
 	// Document observations. Latest may be unapproved; Target is approved
-	// intent; Active is the last fully converged topology.
+	// intent. Per-group and per-node convergence is available through progress.
 
 	// Latest returns the most recently staged document.
 	Latest(context.Context) (topology.Document, error)
 	// Target returns the approved desired document.
 	Target(context.Context) (topology.Document, error)
-	// Active returns the fully converged document.
-	Active(context.Context) (topology.Document, error)
 	// Get returns a retained document by version.
 	Get(context.Context, uint64) (topology.Document, error)
 	// History pages through retained document versions.
@@ -73,11 +70,13 @@ type Cluster interface {
 	// PlanFor previews execution of an unstaged document.
 	PlanFor(context.Context, topology.Document) (topology.Plan, error)
 	// Approve commits an executable plan for the current staged version.
-	Approve(context.Context, uint64) (topology.OperatorID, error)
-	// Operator reports progress of an approved plan.
-	Operator(context.Context, topology.OperatorID) (topology.OperatorStatus, error)
-	// WaitOperator waits for that plan to reach a terminal state.
-	WaitOperator(context.Context, topology.OperatorID) (topology.OperatorStatus, error)
+	Approve(context.Context, uint64) (topology.OperationID, error)
+	// Operation reports progress of an approved plan.
+	Operation(context.Context, topology.OperationID) (topology.OperationStatus, error)
+	// WaitOperation waits for that plan to reach a terminal state.
+	WaitOperation(context.Context, topology.OperationID) (topology.OperationStatus, error)
+	// RetryOperation retries the exact failed attempt's immutable plan.
+	RetryOperation(context.Context, topology.OperationID) (topology.OperationID, error)
 
 	// Node membership and lifecycle edits. Each uses MutationOptions for CAS,
 	// preview and optional approval.
@@ -111,7 +110,7 @@ type Cluster interface {
 	SetReplicaPinnedLearner(context.Context, string, topology.LearnerPin, MutationOptions) (MutationResult, error)
 	// CreateGroup stages a new managed load group.
 	CreateGroup(context.Context, GroupSpec, MutationOptions) (MutationResult, error)
-	// EnsureGroup idempotently creates and approves a group until it is Active.
+	// EnsureGroup idempotently creates and approves a group until converged.
 	// A different existing group or foreign staged intent returns ErrConflict.
 	EnsureGroup(context.Context, GroupSpec, EnsureOptions) (topology.Group, error)
 	// DeleteGroup stages removal of a managed load group.

@@ -20,14 +20,6 @@ func (c *clusterView) Target(ctx context.Context) (topology.Document, error) {
 	}
 	return m.Target(ctx)
 }
-func (c *clusterView) Active(ctx context.Context) (topology.Document, error) {
-	m, err := c.node.service(ctx, readService)
-	if err != nil {
-		return topology.Document{}, err
-	}
-	return m.Active(ctx)
-}
-
 func (c *clusterView) Get(ctx context.Context, version uint64) (topology.Document, error) {
 	m, err := c.node.service(ctx, readService)
 	if err != nil {
@@ -76,28 +68,37 @@ func (c *clusterView) PlanFor(ctx context.Context, doc topology.Document) (topol
 	return m.PlanFor(ctx, doc)
 }
 
-func (c *clusterView) Operator(ctx context.Context, id topology.OperatorID) (topology.OperatorStatus, error) {
+func (c *clusterView) Operation(ctx context.Context, id topology.OperationID) (topology.OperationStatus, error) {
 	m, err := c.node.service(ctx, readService)
 	if err != nil {
-		return topology.OperatorStatus{}, err
+		return topology.OperationStatus{}, err
 	}
-	return m.Operator(ctx, id)
+	return m.Operation(ctx, id)
 }
 
-func (c *clusterView) WaitOperator(ctx context.Context, id topology.OperatorID) (topology.OperatorStatus, error) {
+func (c *clusterView) WaitOperation(ctx context.Context, id topology.OperationID) (topology.OperationStatus, error) {
 	m, err := c.node.service(ctx, workService)
 	if err != nil {
-		return topology.OperatorStatus{}, err
+		return topology.OperationStatus{}, err
 	}
-	return m.WaitOperator(ctx, id)
+	return m.WaitOperation(ctx, id)
 }
 
-func (c *clusterView) Approve(ctx context.Context, version uint64) (topology.OperatorID, error) {
+func (c *clusterView) RetryOperation(ctx context.Context, previous topology.OperationID) (topology.OperationID, error) {
 	m, err := c.node.service(ctx, workService)
 	if err != nil {
 		return "", err
 	}
-	return m.Apply(ctx, version)
+	return m.RetryOperation(ctx, previous)
+}
+
+func (c *clusterView) Approve(ctx context.Context, version uint64) (topology.OperationID, error) {
+	m, err := c.node.service(ctx, workService)
+	if err != nil {
+		return "", err
+	}
+	id, err := m.Apply(ctx, version)
+	return topology.OperationID(id), err
 }
 
 func (c *clusterView) ParkedJoins(ctx context.Context) ([]topology.ParkedJoin, error) {

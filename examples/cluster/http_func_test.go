@@ -30,11 +30,11 @@ func (n httpNode) Status() gquorum.NodeStatus { return n.status }
 
 type httpCluster struct {
 	gquorum.Cluster
-	calls  int
-	result gquorum.MutationResult
-	err    error
-	active topology.Document
-	status topology.ClusterStatus
+	calls    int
+	result   gquorum.MutationResult
+	err      error
+	progress topology.ProgressPage
+	status   topology.ClusterStatus
 }
 
 func (c *httpCluster) Status(context.Context) (topology.ClusterStatus, error) {
@@ -66,18 +66,18 @@ func TestClusterStatusHTTPIncludesLeaderNodeNames(t *testing.T) {
 	}
 }
 
-func (c *httpCluster) Approve(context.Context, uint64) (topology.OperatorID, error) {
+func (c *httpCluster) Approve(context.Context, uint64) (topology.OperationID, error) {
 	c.calls++
 	return "op1", c.err
+}
+
+func (c *httpCluster) ReadProgress(context.Context, topology.ProgressQuery) (topology.ProgressPage, error) {
+	return c.progress, c.err
 }
 
 func (c *httpCluster) DrainNode(context.Context, string, gquorum.MutationOptions) (gquorum.MutationResult, error) {
 	c.calls++
 	return c.result, c.err
-}
-
-func (c *httpCluster) Active(context.Context) (topology.Document, error) {
-	return c.active, c.err
 }
 
 func TestApprovalValidationBeforeClusterCall(t *testing.T) {
@@ -121,7 +121,7 @@ func TestApprovalValidationBeforeClusterCall(t *testing.T) {
 			if w.Code != tc.want || (cluster.calls == 1) != (tc.want == 202) {
 				t.Fatalf("status %d, calls %d: %s", w.Code, cluster.calls, w.Body.String())
 			}
-			if tc.want == 202 && strings.TrimSpace(w.Body.String()) != `{"operator_id":"op1"}` {
+			if tc.want == 202 && strings.TrimSpace(w.Body.String()) != `{"operation_id":"op1"}` {
 				t.Fatal(w.Body.String())
 			}
 		})
@@ -164,10 +164,10 @@ func TestReadinessRequiresNodeGateAndSession(t *testing.T) {
 	}
 }
 
-func TestReadinessRequiresActiveMember(t *testing.T) {
+func TestReadinessRequiresApprovedActiveMember(t *testing.T) {
 	t.Parallel()
 	for _, state := range []topology.NodeState{topology.NodeActive, topology.NodeDraining, topology.NodeDrained, topology.NodeExcluded} {
-		cluster := &httpCluster{active: topology.Document{Version: 3, Nodes: []topology.Node{{Name: "node1", State: state}}}}
+		cluster := &httpCluster{progress: topology.ProgressPage{TargetVersion: 3, Nodes: []topology.NodeProgress{{NodeName: "node1", Approved: &topology.Node{Name: "node1", State: state}}}}}
 		w := httptest.NewRecorder()
 		routes(httpNode{cluster: cluster, status: gquorum.NodeStatus{Ready: true, SessionLive: true}}).ServeHTTP(w, httptest.NewRequest("GET", "/health/ready", nil))
 		if state != topology.NodeActive {
@@ -177,7 +177,7 @@ func TestReadinessRequiresActiveMember(t *testing.T) {
 			continue
 		}
 		var ready readiness
-		if err := json.Unmarshal(w.Body.Bytes(), &ready); err != nil || w.Code != 200 || ready.Node != "node1" || !ready.SessionLive || ready.ActiveVersion != 3 {
+		if err := json.Unmarshal(w.Body.Bytes(), &ready); err != nil || w.Code != 200 || ready.Node != "node1" || !ready.SessionLive || ready.TargetVersion != 3 {
 			t.Fatal(ready, w.Code, err)
 		}
 	}
@@ -185,18 +185,18 @@ func TestReadinessRequiresActiveMember(t *testing.T) {
 
 func TestMutationResponseRetainsStatusAndVersionHeaders(t *testing.T) {
 	t.Parallel()
-	for _, operator := range []topology.OperatorID{"", "op1"} {
-		cluster := &httpCluster{result: gquorum.MutationResult{Document: topology.Document{Version: 3}, OperatorID: operator}}
+	for _, operation := range []topology.OperationID{"", "op1"} {
+		cluster := &httpCluster{result: gquorum.MutationResult{Document: topology.Document{Version: 3}, OperationID: operation}}
 		r := httptest.NewRequest("POST", "/api/nodes/node1/drain", strings.NewReader(`{}`))
 		r.Header.Set("If-Match", "2")
 		w := httptest.NewRecorder()
 		routes(httpNode{cluster: cluster}).ServeHTTP(w, r)
 		want := http.StatusOK
-		if operator != "" {
+		if operation != "" {
 			want = http.StatusAccepted
 		}
 		var result gquorum.MutationResult
-		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || w.Code != want || w.Header().Get("ETag") != `"3"` || result.OperatorID != operator || result.Document.Version != 3 {
+		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || w.Code != want || w.Header().Get("ETag") != `"3"` || result.OperationID != operation || result.Document.Version != 3 {
 			t.Fatal(w.Code, w.Header(), result, err)
 		}
 	}

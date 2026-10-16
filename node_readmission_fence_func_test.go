@@ -120,7 +120,7 @@ func testNodeReadmissionFence(t *testing.T, group string) {
 		for _, name := range []string{topology.MetaGroupID, "work"} {
 			grants = append(grants, topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: name, Revision: revision}, Purpose: topology.AuthorityReadmit, AdmissionID: metaengine.ReadmissionID(a), Resources: []topology.AuthorityResource{{Kind: topology.AuthorityHost, GroupID: name, NodeName: "n1"}}, Targets: []topology.AuthorityTarget{{NodeName: "n1", MemberID: 1, ReplicaID: 1}}})
 		}
-		data, err := json.Marshal(map[string]any{"rules": topology.Rules{SchemaVersion: 1, Limits: n.metaOpts.Limits}, "member_id": member, "previous_member_id": 1, "readmitted": true, "admission": a, "Previous": previous, "Granted": granted, "previous_groups": previous.Groups[1:], "grants": grants, "leader_address": listener.Addr().String()})
+		data, err := json.Marshal(map[string]any{"rules": topology.Rules{SchemaVersion: 1, Limits: n.metaOpts.Limits}, "member_id": member, "previous_member_id": 1, "readmitted": true, "admission": a, "Granted": granted, "Members": []map[string]any{{"Name": "n1", "MemberID": member, "Address": listener.Addr().String()}}, "previous_groups": previous.Groups[1:], "grants": grants, "leader_address": listener.Addr().String()})
 		if err != nil {
 			t.Fatal(err)
 		}

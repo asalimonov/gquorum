@@ -17,6 +17,7 @@ import (
 	"github.com/asalimonov/gquorum/examples/scheduler/task"
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/topology"
 )
 
 const (
@@ -109,7 +110,7 @@ func (r *runtime) handleStatus(w http.ResponseWriter, request *http.Request) {
 	nodeStatus := r.node.Status()
 	out := map[string]any{"observational": true, "node": nodeStatus}
 	if id := nodeStatus.Scheduling.CurrentOperatorID; id != nil {
-		if operator, err := r.node.Cluster().Operator(request.Context(), *id); err == nil {
+		if operator, err := r.node.Cluster().Operation(request.Context(), topology.OperationID(*id)); err == nil {
 			out["operator"] = operator
 		} else {
 			out["operator_error"] = err.Error()

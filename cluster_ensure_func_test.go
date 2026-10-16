@@ -227,9 +227,9 @@ func TestEnsureGroupReturnsFailedCreationWithoutRetryingOperation(t *testing.T) 
 		if err != nil || view.Latest.Version != 2 || view.Target.Version != 2 {
 			t.Fatal(view, err)
 		}
-		status, err := c.Operator(ctx, topology.MakeOperatorID(2, 1))
-		if err != nil || status.State != topology.OperatorFailed || status.Attempt != 1 {
-			t.Fatal(status, err)
+		status, err := c.Status(ctx)
+		if err != nil || status.Operator == nil || status.Operator.State != topology.OperatorFailed || status.Operator.Attempt != 1 {
+			t.Fatal(status.Operator, err)
 		}
 	}
 }

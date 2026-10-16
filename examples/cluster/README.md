@@ -64,7 +64,7 @@ include this module; the Compose smoke test lives in `tests/cluster`.
 
 This demo creates a `gquorum.Node` from caller-supplied `NodeOptions`, calls
 `Start` once, and uses `node.Cluster()` for topology operations. `Stop` joins
-shutdown. The HTTP adapter checks Node readiness and the Active node state.
+shutdown. The HTTP adapter checks Node readiness and approved node intent through the bounded progress read.
 Load-group FSMs, protocols, application storage, WAL fault controls and cluster
 scenarios live in `tests/cluster/testapp` and `tests/cluster`.
 
@@ -72,26 +72,26 @@ scenarios live in `tests/cluster/testapp` and `tests/cluster`.
 api=http://localhost:18081
 curl -fsS "$api/api/cluster/status" | jq
 curl -fsS "$api/api/cluster/status" | jq -r .meta_leader_node_name
-curl -fsS "$api/api/topology/active" | jq
+curl -fsS "$api/api/progress?group=_meta" | jq
 
 version=$(curl -fsS "$api/api/topology/latest" | jq -r .version)
 result=$(curl -fsS -X POST "$api/api/nodes/node3/drain" \
   -H "If-Match: $version" -H 'Content-Type: application/json' \
   -d '{"actor":"operator","approve":true}')
-operator=$(printf '%s' "$result" | jq -r .operator_id)
-curl -fsS "$api/api/operators/$operator" | jq
+operation=$(printf '%s' "$result" | jq -r .operation_id)
+curl -fsS "$api/api/operations/$operation" | jq
 ```
 
 `meta_leader_id` is the numeric `_meta` Raft member ID.
 `meta_leader_node_name` gives its readable node name, such as `"node2"`.
 Each group similarly reports numeric `leader_id` and string `leader_node_name`;
-`host_node` is the reporting host. Names resolve through the active topology.
+`host_node` is the reporting host. Names resolve through approved or proven identities.
 An empty leader name means unknown or unmapped; the numeric ID can still be
 available as a diagnostic.
 
-Poll the operator until `state` is `succeeded`; `failed` and `superseded` are
-terminal failures. A follower can briefly return 404 before observing the
-operator. HTTP 202 confirms acceptance, so wait for convergence before the next
+Poll the operation until `state` is `succeeded`; `failed` and `superseded` are
+terminal outcomes. A follower can briefly return 404 before observing the
+operation. HTTP 202 confirms acceptance; inspect per-group progress before the next
 edit. The approved node status becomes
 `drained`, and its readiness endpoint returns 503. All three remain meta voters.
 Reactivate it with a separately staged edit and approval:
@@ -102,8 +102,8 @@ staged=$(curl -fsS -X POST "$api/api/nodes/node3/activate" \
   -H "If-Match: $version" -H 'Content-Type: application/json' \
   -d '{"actor":"operator","approve":false}')
 version=$(printf '%s' "$staged" | jq -r .document.version)
-operator=$(curl -fsS -X POST "$api/api/topology/$version/approve" | jq -r .operator_id)
-curl -fsS "$api/api/operators/$operator" | jq
+operation=$(curl -fsS -X POST "$api/api/topology/$version/approve" | jq -r .operation_id)
+curl -fsS "$api/api/operations/$operation" | jq
 ```
 
 Concurrent/stale version edits return 409. Mutations require one positive
@@ -114,8 +114,8 @@ If staging commits but approval fails, `X-Staged-Version` identifies the documen
 to inspect and approve.
 
 Routes: `GET /health/{live,ready}`, `GET /api/cluster/status`,
-`GET /api/topology/{latest,target,active}`, `POST /api/nodes/{name}/{drain,activate}`,
-`POST /api/topology/{version}/approve`, and `GET /api/operators/{id}`.
+`GET /api/topology/{latest,target}`, `POST /api/nodes/{name}/{drain,activate}`,
+`GET /api/progress?group={id}`, `POST /api/topology/{version}/approve`, and `GET /api/operations/{id}`.
 
 `make test-example` runs the actual Compose demo from `tests/cluster/example_test.go`,
 using a unique project/image, random host ports and private temporary volumes.
