@@ -232,6 +232,8 @@ func (sm *topologySM) applyCommitReadmission(index uint64, p CommitReadmissionPr
 	if p.ExpectedVersion != sm.latest.Version {
 		return rejectVersionConflict(p.ProposalID, p.ExpectedVersion, sm.latest.Version), false
 	}
+	// Task78 replaces this schema-3 whole-document barrier with exact scoped
+	// _meta and affected-host prerequisites; do not remove it before apply cutover.
 	if !reflect.DeepEqual(sm.latest, sm.target) || !reflect.DeepEqual(sm.latest, sm.active) {
 		return rejectProposal(p.ProposalID, proposalAuthorization,
 			"readmission requires Latest, Target, and Active to match"), false

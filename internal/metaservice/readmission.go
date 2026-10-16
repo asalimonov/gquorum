@@ -50,11 +50,9 @@ func (g *Group) readmissionPayload(previous topology.Identity, result joinRespon
 	granted.MemberID = result.MemberID
 	if result.PreviousMemberID != 0 {
 		previous.MemberID = result.PreviousMemberID
-	} else if previous.MemberID == 0 {
-		previous.MemberID = result.Previous.MemberID(previous.NodeName)
 	}
 	g.mu.RLock()
-	docs := []topology.Document{result.Previous, {Groups: result.PreviousGroups}, {Groups: g.recoveryGroups},
+	docs := []topology.Document{{Groups: result.PreviousGroups}, {Groups: g.recoveryGroups},
 		{Groups: applied}}
 	g.mu.RUnlock()
 	groups := previousNodeGroups(docs, result.Granted, previous.NodeName)

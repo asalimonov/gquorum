@@ -118,7 +118,9 @@ func (g *Group) Operator(ctx context.Context, id topology.OperatorID) (topology.
 // proof.
 func (g *Group) LocalStatus() topology.GroupStatus {
 	if engine := g.engine.Load(); engine != nil {
-		return withLeaderNodeName(engine.Status(), g.state().Active())
+		status := engine.Status()
+		status.LeaderNodeName, _ = g.state().MemberOwner(status.LeaderID)
+		return status
 	}
 	return topology.GroupStatus{GroupID: topology.MetaGroupID, HostNode: g.Identity().NodeName, ErrorCode: string(
 		fault.Unavailable)}
@@ -126,7 +128,7 @@ func (g *Group) LocalStatus() topology.GroupStatus {
 
 // Status combines owned local document/runtime state with caller load-group
 // status queries. The caller controller must honor ctx. Health is sampled by
-// the observer; a mismatched Active version is reported as unsampled unknown
+// the observer; a mismatched approved version is reported as unsampled unknown
 // with a zero observation timestamp until a current sample becomes available.
 func (g *Group) Status(ctx context.Context) (topology.ClusterStatus, error) {
 	return g.readClusterStatus(ctx, true)
@@ -163,14 +165,15 @@ func (g *Group) readClusterStatus(ctx context.Context, live bool) (topology.Clus
 		result.Scheduling = g.scheduler.Status()
 	}
 	result.Observation = g.HealthObservation()
-	if result.Observation.Version != active.Version {
-		result.Observation = topology.HealthObservation{Version: active.Version,
+	if result.Observation.Version != target.Version {
+		result.Observation = topology.HealthObservation{Version: target.Version,
 			Groups: topology.EvaluateAllGroupHealth(
-				active, nil)}
+				target, nil)}
 	}
-	result.Nodes = statusNodes(latest, active, result.Observation, local.addresses)
+	result.Nodes = statusNodes(views, result.Observation, local.addresses)
 	if engine := g.engine.Load(); engine != nil {
-		status := withLeaderNodeName(engine.Status(), active)
+		status := engine.Status()
+		status.LeaderNodeName, _ = machine.MemberOwner(status.LeaderID)
 		g.cacheProgressObservation(status)
 		result.MetaLeaderID = status.LeaderID
 		result.MetaLeaderNodeName = status.LeaderNodeName
@@ -225,6 +228,12 @@ func statusPlacement(active, target topology.Document) ([]topology.PlacementRepo
 			return nil, err
 		}
 		if report != nil {
+			report.Source = "converged"
+			if doc.Version == target.Version {
+				report.Source = "approved"
+			} else {
+				report.ApprovedVersion = target.Version
+			}
 			report.AffectedGroups = nil // status is a snapshot, not an edit
 			reports = append(reports, *report)
 		}
@@ -232,16 +241,22 @@ func statusPlacement(active, target topology.Document) ([]topology.PlacementRepo
 	return reports, nil
 }
 
-func statusNodes(latest, active topology.Document, observation topology.HealthObservation,
+// statusNodes retains the schema-3 whole-Active effective-state projection
+// until Task78 connects durable per-node progress to the public status.
+func statusNodes(views topology.ReadView, observation topology.HealthObservation,
 	addresses map[string]string) []topology.NodeStatus {
-	out := collection.Slice[topology.NodeStatus](len(latest.Nodes))
-	for _, node := range latest.Nodes {
-		effective := topology.EffectiveNodeState(active, node.Name)
+	out := collection.Slice[topology.NodeStatus](len(views.Latest.Nodes))
+	for _, node := range views.Latest.Nodes {
+		effective := topology.EffectiveNodeState(views.Active, node.Name)
 		if effective == "" {
-			effective = node.State
+			if approved := views.Target.Node(node.Name); approved != nil {
+				effective = approved.State
+			} else {
+				effective = topology.NodeExcluded
+			}
 		}
 		health := topology.HealthUnknown
-		if observation.Version == active.Version {
+		if observation.Version == views.Target.Version {
 			if observed, exists := observation.Nodes[node.Name]; exists {
 				health = observed
 			}
@@ -265,12 +280,6 @@ func (g *Group) statusGroupProgress(ctx context.Context, views topology.ReadView
 	}
 	rows := metaengine.LegacyGroupProgress(views)
 	g.decorateProgress(rows)
-	// Legacy names still resolve only through its captured whole Active.
-	for i := range rows {
-		if observed := rows[i].Observation; observed != nil {
-			observed.LeaderNodeName = withLeaderNodeName(*observed, views.Active).LeaderNodeName
-		}
-	}
 	return rows, nil
 }
 
@@ -307,9 +316,9 @@ func (g *Group) liveLoadStatus(ctx context.Context, id string) topology.GroupSta
 	return observed
 }
 
-// Resolve names from the same Active snapshot used by the status response.
-// Never trust a caller's name or map a retired ID through a staged replacement.
-func withLeaderNodeName(status topology.GroupStatus, active topology.Document) topology.GroupStatus {
+// Legacy scheduler adapter until Task78. Its caller still supplies real schema3
+// Active; status/progress readers use exact approved/proven identities instead.
+func legacyLeaderNodeName(status topology.GroupStatus, active topology.Document) topology.GroupStatus {
 	status.LeaderNodeName = ""
 	if status.LeaderID != 0 {
 		if group := active.Group(status.GroupID); group != nil {

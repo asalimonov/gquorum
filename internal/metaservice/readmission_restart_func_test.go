@@ -126,7 +126,10 @@ func testReadmissionRestart(t *testing.T, phase string) {
 			}
 		})
 		g.ctx = t.Context()
-		response := joinResponse{Rules: g.rules, MemberID: 2, PreviousMemberID: 1, Readmitted: authority.Identity().MemberID == 1, Admission: admission, Previous: previous, Granted: granted, LeaderAddress: address, Grants: []topology.AuthorityGrant{grant}}
+		response := joinResponse{Rules: g.rules, MemberID: 2, PreviousMemberID: 1,
+			Readmitted: authority.Identity().MemberID == 1, Admission: admission, Granted: granted,
+			Members: []joinMember{{Name: "n1", MemberID: 2}}, LeaderAddress: address,
+			Grants: []topology.AuthorityGrant{grant}}
 		if attempt == 1 {
 			response.Admission.InstanceID = g.Identity().InstanceID
 			response.Admission.ReadmissionInstanceID = admission.InstanceID

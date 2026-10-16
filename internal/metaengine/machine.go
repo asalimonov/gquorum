@@ -166,12 +166,18 @@ func (m *Machine) MemberOwners() (map[uint64]string, bool) {
 	return maps.Clone(m.metaOwners), m.target.Version > 0
 }
 
-// ActiveMemberID resolves a node name through the locally applied Active
-// document.
-func (m *Machine) ActiveMemberID(name string) uint64 {
+// EligibleMemberID resolves the member allowed to renew a node session at the
+// current approval boundary. A pending removal remains eligible while its
+// proven metadata membership exists; a replacement in Target fences the old
+// member before whole-document convergence. This schema-3 projection uses the
+// Active _meta declaration as proof until Task78 installs the scoped query.
+func (m *Machine) EligibleMemberID(name string) uint64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.active.MemberID(name)
+	if member := m.target.MemberID(name); member != 0 {
+		return member
+	}
+	return metaMemberID(m.active, name)
 }
 
 // ActiveVersion returns the locally applied converged topology version.

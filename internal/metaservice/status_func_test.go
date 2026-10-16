@@ -53,7 +53,8 @@ func TestClusterStatusWithHealth(t *testing.T) {
 	f := newMutationFixture(t)
 	sampleStatusHealth(t, f.g, statusHealth{"n1": topology.HealthAlive, "n2": topology.HealthAlive, "n3": topology.HealthDead})
 	s := readStatus(t, f.g)
-	if len(s.Placement) != 1 || s.Placement[0].Version != 1 || len(s.Placement[0].Groups) != 2 {
+	if len(s.Placement) != 1 || s.Placement[0].Version != 1 || s.Placement[0].Source != "approved" ||
+		len(s.Placement[0].Groups) != 2 {
 		t.Fatal("converged status needs one static placement snapshot", s.Placement)
 	}
 	if s.Observation.Version != 1 || s.Observation.At.IsZero() || len(s.Observation.Groups) != 2 {
@@ -110,7 +111,7 @@ func TestClusterStatusEffectiveState(t *testing.T) {
 	latest.MetaGroup().NextReplicaID = 5
 	f.commit(t, latest, false)
 	s := readStatus(t, f.g)
-	want := []topology.NodeState{topology.NodeActive, topology.NodeDrained, topology.NodeDrained, topology.NodeActive}
+	want := []topology.NodeState{topology.NodeActive, topology.NodeDrained, topology.NodeDrained, topology.NodeExcluded}
 	if len(s.Nodes) != len(want) {
 		t.Fatal(s.Nodes)
 	}
@@ -141,6 +142,10 @@ func TestClusterStatusReportsAllViewVersionsAndUsesActiveGroups(t *testing.T) {
 	if len(s.Placement) != 2 || s.Placement[0].Version != 1 || s.Placement[1].Version != 2 ||
 		len(s.Placement[0].Groups) != 2 || len(s.Placement[1].Groups) != 3 {
 		t.Fatal("status omitted captured Active/Target placement", s.Placement)
+	}
+	if s.Placement[0].Source != "converged" || s.Placement[0].ApprovedVersion != 2 ||
+		s.Placement[1].Source != "approved" {
+		t.Fatal("placement snapshots lack their source context", s.Placement)
 	}
 	for _, group := range s.Placement[1].Groups {
 		if group.GroupID != "work" {

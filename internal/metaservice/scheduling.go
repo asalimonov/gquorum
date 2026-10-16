@@ -104,7 +104,7 @@ func (h schedulingHost) GlobalStatus(ctx context.Context,
 		return nil, err
 	}
 	for id, status := range observed {
-		observed[id] = withLeaderNodeName(status, active)
+		observed[id] = legacyLeaderNodeName(status, active)
 	}
 	return observed, nil
 }

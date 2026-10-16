@@ -79,7 +79,7 @@ func (g *Group) admitJoin(ctx context.Context, req joinRequest, machine *metaeng
 	if reply := g.classifyLiveAdmission(ctx, &state); reply != nil {
 		return reply
 	}
-	return g.joinWithTopology(ctx, state)
+	return g.joinWithLegacyTopology(ctx, state)
 }
 
 func (g *Group) refuseJoin(req joinRequest, kind string, err error) *metapb.Reply {
@@ -129,7 +129,9 @@ func (g *Group) classifyLiveAdmission(ctx context.Context, state *joinClassifica
 	return nil
 }
 
-func (g *Group) joinWithTopology(ctx context.Context, state joinClassification) *metapb.Reply {
+// joinWithLegacyTopology retains the schema-3 whole-document readmission gate
+// until Task78 installs scoped readmission planning and apply.
+func (g *Group) joinWithLegacyTopology(ctx context.Context, state joinClassification) *metapb.Reply {
 	req, machine, node, member, replace := state.req, state.machine, state.node, state.member, state.replace
 	latest, target, active := state.views.Latest, state.views.Target, state.views.Active
 
@@ -158,12 +160,18 @@ func (g *Group) joinWithTopology(ctx context.Context, state joinClassification) 
 		})
 	}
 	if machine.HasActivated(req.Node.Name) && reflect.DeepEqual(latest, target) && reflect.DeepEqual(target, active) {
-		return g.commitJoinReadmission(ctx, state)
+		return g.commitLegacyReadmission(ctx, state)
+	}
+	if machine.HasActivated(req.Node.Name) {
+		// Until scoped readmission replaces the schema-3 whole-document path,
+		// preserve the admission gate and explain how to unblock the return.
+		return g.refuseJoin(req, parkedUnapproved, fault.New(fault.OperatorAuthorization,
+			"readmission requires converged topology; apply or restore pending intent first", nil))
 	}
 	return g.joinFoundingNode(ctx, state)
 }
 
-func (g *Group) commitJoinReadmission(ctx context.Context, state joinClassification) *metapb.Reply {
+func (g *Group) commitLegacyReadmission(ctx context.Context, state joinClassification) *metapb.Reply {
 	req, latest, active := state.req, state.views.Latest, state.views.Active
 	at := time.Now().UTC()
 	fresh, err := metaengine.ReadmissionDocument(active, req.Node.Name, at)

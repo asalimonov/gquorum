@@ -20,6 +20,9 @@ func validateScopedConvergence(state *scopedState, index *scopedIndexes) error {
 			return err
 		}
 	}
+	if _, err := scopedMetaMemberOwners(state); err != nil {
+		return err
+	}
 	if err := validateScopedOwners(state, index); err != nil {
 		return err
 	}

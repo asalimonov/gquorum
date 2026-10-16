@@ -31,13 +31,13 @@ func TestJoinGrantAllowsBoundedDecommissionMembershipHints(t *testing.T) {
 	granted.MetaGroup().Replicas[2] = topology.Replica{NodeName: "four", ReplicaID: 4, Role: topology.ReplicaLearner}
 	members = append(members, joinMember{Name: "four", MemberID: 4})
 	identity := topology.Identity{ClusterID: "cluster", NodeName: "four", InstanceID: "process"}
-	result := joinResponse{Rules: rules, MemberID: 4, Granted: granted, Previous: previous, Members: members,
+	result := joinResponse{Rules: rules, MemberID: 4, Granted: granted, Members: members,
 		LeaderAddress: "127.0.0.1:1234", Admission: metaengine.AdmissionRecord{
 			NodeName: "four", InstanceID: "process", MemberID: 4, OperatorID: topology.MakeOperatorID(2, 1)}}
 	if err := validateJoinGrant(identity, rules, result); err != nil {
 		t.Fatal("temporary native membership hints were confused with document capacity", err)
 	}
-	result.Members[2].Name = "foreign"
+	result.Members[3].Name = "foreign"
 	if err := validateJoinGrant(identity, rules, result); err == nil {
 		t.Fatal("surge bypassed exact old member identity")
 	}

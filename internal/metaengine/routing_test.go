@@ -19,6 +19,9 @@ func TestProcessRoutingSeparatesReplacementAdmissionFromFormerSession(t *testing
 		t.Fatal(got, ok)
 	}
 	m.target.Groups[0].Replicas[0].ReplicaID = 2
+	if got := m.EligibleMemberID("node"); got != 2 {
+		t.Fatal("approved replacement did not fence the old member", got)
+	}
 	if got, ok := m.ProcessIdentity("node"); ok || got.InstanceID != "" {
 		t.Fatal("old session attached to replacement member", got)
 	}
@@ -40,5 +43,9 @@ func TestProcessRoutingSeparatesReplacementAdmissionFromFormerSession(t *testing
 	m.locks["node/node"] = "new-session"
 	if got, ok := m.ProcessIdentity("node"); !ok || got.MemberID != 2 || got.InstanceID != "new-process" {
 		t.Fatal(got, ok)
+	}
+	m.target.Groups[0].Replicas = nil
+	if got := m.EligibleMemberID("node"); got != 2 {
+		t.Fatal("pending removal must retain the proven member until fenced", got)
 	}
 }

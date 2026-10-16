@@ -135,7 +135,8 @@ func testReadmissionJoin(t *testing.T, retained bool) {
 	granted.MetaGroup().Replicas[0].ReplicaID = 2
 	a := metaengine.AdmissionRecord{NodeName: "n1", InstanceID: g.Identity().InstanceID, MemberID: 2, OperatorID: topology.MakeOperatorID(2, 1), State: metaengine.AdmissionPending}
 	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: topology.MetaGroupID, Revision: 10}, Purpose: topology.AuthorityReadmit, AdmissionID: metaengine.ReadmissionID(a), Resources: []topology.AuthorityResource{{Kind: topology.AuthorityHost, GroupID: topology.MetaGroupID, NodeName: "n1"}}, Targets: []topology.AuthorityTarget{{NodeName: "n1", MemberID: 1, ReplicaID: 1}}}
-	response := joinResponse{Rules: g.rules, MemberID: 2, PreviousMemberID: 1, Readmitted: true, Admission: a, Previous: previous, Granted: granted, LeaderAddress: address, Grants: []topology.AuthorityGrant{grant}}
+	response := joinResponse{Rules: g.rules, MemberID: 2, PreviousMemberID: 1, Readmitted: true, Admission: a,
+		Granted: granted, Members: []joinMember{{Name: "n1", MemberID: 2}}, LeaderAddress: address, Grants: []topology.AuthorityGrant{grant}}
 	data, err := json.Marshal(response)
 	if err != nil {
 		t.Fatal(err)

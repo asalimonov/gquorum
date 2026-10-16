@@ -197,12 +197,12 @@ zero can be meaningful, and decoding never installs defaults into a nil config.
 | --- | --- |
 | `Document`, `Node`, `Group`, `Replica` | Nodes carry type/state/labels; groups carry replicas, allocation cursor, storage class, optional placement/voter/hosting rules and descriptive labels. `Document.{Clone,Node,Group,MetaGroup,LoadGroups,MemberID,VotersOf,GroupPlacement,GroupBounds,Validate}`; `Group.AllocateReplicaID`, `Document.{AllocateMemberID,SetMemberID}`. |
 | `Rules`, `Limits`, `PlacementRule`, `HostingRule` | Hard node/replica/authority capacities; placement voter bounds, allowed types and exact NodeSelector; all-eligible or explicit hosting. `Limits.{WithDefaults,Validate}`, `ValidateTransition`, `ValidateHostingCapacityFor`, `RequiredLoadHostsFor`, `SelectFoundingRoles`. |
-| Placement reports | `PlacementInput`, `PreparedPlacement`, `PlacementReport`, `GroupPlacementReport`, `PlacementCandidate`, `PlacementIssue`, `PlacementError`: proposed hosts/roles, eligibility and actionable refusal detail. `PreparePlacement`, `ExplainPlacement`, `EvaluatePlacement`, `AffectedPlacementGroups`, `ValidatePlacementTransition`, `ValidateVoterPlacement`, `MatchNodeSelector`. |
+| Placement reports | `PlacementInput`, `PreparedPlacement`, `PlacementReport`, `GroupPlacementReport`, `PlacementCandidate`, `PlacementIssue`, `PlacementError`: proposed hosts/roles, eligibility and actionable refusal detail. Status `PlacementReport.Source` is `approved` or `converged`; these static declarations do not prove native availability. `PreparePlacement`, `ExplainPlacement`, `EvaluatePlacement`, `AffectedPlacementGroups`, `ValidatePlacementTransition`, `ValidateVoterPlacement`, `MatchNodeSelector`. |
 | Labels | `Node.{GetLabels,SetLabels}`, `Group.{GetLabels,SetLabels}`, `ValidateLabels`, `ValidateSelector`, `NodeReserved`, `NodeLearnerOnly`. Get owns a non-nil copy; Set validates/copies a full replacement without staging or I/O. |
 | Voters | `VoterConfig`, `VoterChange`, `ReplicaKey`, `LearnerPin`, `VoterSwitchState`, `RoleChangeRecord`, `VoterSets`; `DefaultVoterConfig`, `VoterSetDigest`, `ValidateVoterSetTransition`. Target voter seats are separate from hosted replica count. |
 | Plans/operators | `Plan`, `PlanVoterBase`, `Step`, `AuthorizedStep`, `Operator`, `OperatorStatus`, `OperatorTransition`; `BuildPlan`, `BuildPlanPreferred`, `ValidatePlanShape`, `ValidatePlanGuardChain`, `AuthorizedStep.Matches`, `MakeOperatorID`, `ReadmissionCovers`, `ValidAdmissionSequence`, `ValidateMetaDrainSafety`. |
 | Authority | `AuthorityGrant.{Validate,Clone,Equal}`, `FenceEvidence.Validate`, `EffectReceipt.{Validate,Clone}`, `AuthorityStatus.Clone`; structural verification, immutable copy boundaries and exact evidence matching. |
-| Observations | `ReadView`, `GroupStatus`, `ClusterStatus`, `NodeStatus`, `HealthObservation`, `GroupHealthEvaluation`, `SchedulingStatus`, `Session`, `LockHolder`, `ParkedJoin`, `SelfRemovalStatus`; `EvaluateGroupHealth`, `EvaluateAllGroupHealth`, `EffectiveNodeState`, `QuorumOf`. Health conclusions do not establish consensus. |
+| Observations | `ReadView`, `GroupStatus`, `ClusterStatus`, `NodeStatus`, `HealthObservation`, `GroupHealthEvaluation`, `SchedulingStatus`, `Session`, `LockHolder`, `ParkedJoin`, `SelfRemovalStatus`; `EvaluateGroupHealth`, `EvaluateAllGroupHealth`, `EffectiveNodeState`, `QuorumOf`. HealthObservation is bound to one approved Target version and exact member IDs; it measures declared-voter availability, not native convergence. Health conclusions do not establish consensus. |
 
 Integration interfaces: `AddressResolver.Resolve(ctx,string) (string,error)`;
 `HealthSource.Snapshot(ctx) (map[string]Health,error)`. The latter's string keys
@@ -500,6 +500,15 @@ DeleteGroup map to CreateLoadGroup/DeleteLoadGroup. Additional seams:
 | `Activate`, `KeepAlive`, `Deactivate`, `AcquireLock`, `LockHolder`, `ReadLockHolder` | Replicated sessions/locks plus leader-local renewal/expiry management; TTL returned to callers is configured duration. |
 | `Lifecycle`, `Readiness`, `LocalProgress`, `LocalStatus`, `CachedStatus`, `Watch` | Local lifecycle, cached observations and document subscriptions. |
 
+Join replies carry approved `Granted`, member owners and only grant-derived
+`PreviousMemberID`/`PreviousGroups`; they no longer ship an Active document.
+`validateSessionCourier` requires `AdmissionBasis` for the first session,
+including retained restarts. Renewal/expiry use the Target member or the proven
+`_meta` member with exact process instance checks. `Watch` publishes captured
+Latest/Target pairs only. `joinWithLegacyTopology` and
+`commitLegacyReadmission` still enforce whole-document schema-3 equality until
+Task78 can switch read, Apply and persistence together.
+
 `KB_CONTROL_ONLY`: stopping participation is distinct from final service Stop.
 Authorized self-removal stops consensus/application participation first, but
 retained control routes remain available to finish fences/receipts. Delayed
@@ -525,6 +534,11 @@ Selected entries: `NewMachine`, `Encode`, `DecodeProposal`,
 `ReplicaRepairDocument`, `VoterChangeDocument`, `ReadmissionDocument` construct
 owned candidate edits. Promoted topologySM queries include Latest/Target/Active,
 Get/History, Operator/OperatorRecord/CurrentOperator and RecoveryCatalog/LoadCatalog.
+`scopedMetaMemberOwners` derives inbound `_meta` identities from Target, the
+proven `_meta` checkpoint, its current owner plan and unconsumed grants, then
+subtracts receipt/cleanup-proven removals; it deliberately ignores retained
+history and is wired to the live reader only at Task78. The current reader is the
+explicit schema-3 `MemberOwner(s)` adapter.
 
 Private persistence interfaces: `statePersister.SaveState([]byte) error`;
 optional `applicationPersister.SaveApplication(uint64,raftpb.ConfState,[]byte) error`.

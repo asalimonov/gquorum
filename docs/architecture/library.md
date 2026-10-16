@@ -218,6 +218,10 @@ cleanup after whole-node fencing remain integration work.
 local snapshot without network probes; it separates the startup `Ready` gate
 from current `SessionLive` and includes meta, local replicas, removal and errors.
 Group status exposes leader, term, membership and commit/applied positions.
+HealthObservation is sampled against one captured approved Target and describes
+declared-voter availability; it does not prove native membership or convergence.
+Placement status rows label their static context as `approved` or `converged`;
+they do not report native availability.
 
 `Identity.NodeName`, `Node.Name` and `Replica.NodeName` identify the logical
 node across restarts. `InstanceID` identifies one process run and must be fresh
@@ -227,9 +231,10 @@ Numeric `MemberID` and `ReplicaID` are Raft identities, not node names.
 Status exposes numeric `MetaLeaderID` / `meta_leader_id` and `LeaderID` /
 `leader_id` fields. It additionally exposes `MetaLeaderNodeName` /
 `meta_leader_node_name` and group `LeaderNodeName` / `leader_node_name`.
-Cluster status, local meta status and `scheduling.ScheduleInput.Status` resolve names
-by exact group/replica ID through their captured Active view, including cached
-cluster reads. Empty names mean unknown or unmapped;
+Cluster status and local meta status resolve leader names by exact replica/member
+ID through the proven/approved owner catalog, including cached cluster reads.
+`scheduling.ScheduleInput.Status` retains its named schema-3 Active adapter until
+Task78. Empty names mean unknown or unmapped;
 numeric observations remain available. `HostNode` names the reporting host,
 which may be a follower. Raw load-group status does not resolve topology names;
 use `Cluster.Status(ctx)` for the enriched group view.

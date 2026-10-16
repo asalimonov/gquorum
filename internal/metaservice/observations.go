@@ -22,12 +22,12 @@ func (g *Group) HealthObservation() topology.HealthObservation {
 
 type observationSource struct{ g *Group }
 
-func (s observationSource) Active(ctx context.Context) (topology.Document, error) {
-	return s.g.Active(ctx)
+func (s observationSource) Target(ctx context.Context) (topology.Document, error) {
+	return s.g.Target(ctx)
 }
 
-func (s observationSource) Health(ctx context.Context, active topology.Document) (map[string]topology.Health, error) {
-	if active.Version == 0 {
+func (s observationSource) Health(ctx context.Context, target topology.Document) (map[string]topology.Health, error) {
+	if target.Version == 0 {
 		return nil, nil
 	}
 	if s.g.opts.Health != nil {
@@ -42,10 +42,10 @@ func (s observationSource) Health(ctx context.Context, active topology.Document)
 	if err != nil {
 		return nil, err
 	}
-	health := make(map[string]topology.Health, len(active.Nodes))
-	for _, n := range active.Nodes {
+	health := make(map[string]topology.Health, len(target.Nodes))
+	for _, n := range target.Nodes {
 		health[n.Name] = topology.HealthUnknown
-		id := active.MemberID(n.Name)
+		id := target.MemberID(n.Name)
 		if id != 0 {
 			health[n.Name] = topology.HealthDead
 			if live[id] {
@@ -108,7 +108,9 @@ func (g *Group) recordNodeHealth(name string, _ topology.Health, next topology.H
 	g.opts.Events.Publish(e)
 }
 
-func (g *Group) recordApplied(machine *metaengine.Machine, active topology.Document) {
+// recordLegacyApplied projects drain completion from schema-3 whole-document
+// convergence. Task78 replaces this adapter with per-group progress.
+func (g *Group) recordLegacyApplied(machine *metaengine.Machine, active topology.Document) {
 	g.recorderMu.Lock()
 	defer g.recorderMu.Unlock()
 	g.recordOperatorApplied(machine)

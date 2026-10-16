@@ -274,7 +274,7 @@ func (m *Machine) ReadmissionRequired(node string, member uint64) bool {
 
 func (sm *topologySM) readmissionRequiredLocked(node string, member uint64) bool {
 	_, activated := sm.activated[node]
-	return activated && sm.active.MemberID(node) != member ||
+	return activated && metaMemberID(sm.active, node) != member ||
 		sm.approvedMemberLocked(node, func(old uint64) bool { return old < member })
 }
 

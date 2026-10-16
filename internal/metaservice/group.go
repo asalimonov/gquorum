@@ -470,9 +470,9 @@ func (g *Group) engineMachine(store *metastore.Store, identity topology.Identity
 	machine := metaengine.NewMachine(g.rules, store)
 	machine.OnApplied = func(index uint64, cs raftpb.ConfState) {
 		views := machine.Views()
-		latest, target, active := views.Latest, views.Target, views.Active
-		g.watches.publish(latest, target, active)
-		g.recordApplied(machine, active)
+		target, active := views.Target, views.Active
+		g.watches.publish(views)
+		g.recordLegacyApplied(machine, active)
 		g.observer.Wake()
 		g.observeRemoval(identity, target, cs, index)
 		if g.opts.OnApplied != nil {
@@ -703,12 +703,16 @@ func (g *Group) terminalCode() string {
 	return ""
 }
 
-func (g *Group) activeMemberID(name string) uint64 {
-	return g.state().ActiveMemberID(name)
+func (g *Group) eligibleMemberID(name string) uint64 {
+	return g.state().EligibleMemberID(name)
 }
 
 func (g *Group) sessionLive() bool {
 	if g.ensureRunning(context.Background()) != nil {
+		return false
+	}
+	identity := g.currentIdentity()
+	if g.eligibleMemberID(identity.NodeName) != identity.MemberID {
 		return false
 	}
 	g.sessionMu.Lock()

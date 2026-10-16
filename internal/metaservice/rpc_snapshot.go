@@ -34,17 +34,8 @@ func (g *Group) snapshotSender(ctx context.Context, msg raftpb.Message, identity
 }
 
 func snapshotMemberName(machine *metaengine.Machine, member uint64) string {
-	var name string
-	for _, doc := range []topology.Document{machine.Target(), machine.Active()} {
-		meta := doc.MetaGroup()
-		if meta == nil {
-			continue
-		}
-		for _, replica := range meta.Replicas {
-			if replica.ReplicaID == member {
-				name = replica.NodeName
-			}
-		}
-	}
+	// The exact inbound catalog includes retained intermediate native members
+	// and excludes consumed removals. Staged names never enter that catalog.
+	name, _ := machine.MemberOwner(member)
 	return name
 }

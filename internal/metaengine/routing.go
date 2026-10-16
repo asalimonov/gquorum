@@ -12,10 +12,7 @@ func (m *Machine) ProcessIdentity(name string) (topology.Identity, bool) {
 }
 
 func (m *Machine) processIdentityLocked(name string) (topology.Identity, bool) {
-	member := m.target.MemberID(name)
-	if member == 0 {
-		member = m.active.MemberID(name)
-	}
+	member := m.eligibleMemberIDLocked(name)
 	id := topology.Identity{NodeName: name, ClusterID: m.target.ClusterID, MemberID: member}
 	if member == 0 {
 		return id, false
@@ -24,10 +21,28 @@ func (m *Machine) processIdentityLocked(name string) (topology.Identity, bool) {
 		id.InstanceID = admission.InstanceID
 		return id, id.InstanceID != ""
 	}
-	if m.active.MemberID(name) == member {
+	if metaMemberID(m.active, name) == member {
 		if session := m.sessions[m.locks["node/"+name]]; session != nil && session.NodeName == name {
 			id.InstanceID = session.InstanceID
 		}
 	}
 	return id, id.InstanceID != ""
+}
+
+func (m *Machine) eligibleMemberIDLocked(name string) uint64 {
+	if member := m.target.MemberID(name); member != 0 {
+		return member
+	}
+	return metaMemberID(m.active, name)
+}
+
+func metaMemberID(doc topology.Document, name string) uint64 {
+	if group := doc.MetaGroup(); group != nil {
+		for _, replica := range group.Replicas {
+			if replica.NodeName == name {
+				return replica.ReplicaID
+			}
+		}
+	}
+	return 0
 }

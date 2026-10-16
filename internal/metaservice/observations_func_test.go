@@ -17,7 +17,7 @@ func TestRecordersNilBusNoOp(t *testing.T) {
 	f := newMutationFixture(t)
 	f.g.recordGroupHealth(topology.GroupHealthy, topology.GroupHealthEvaluation{GroupID: "work", ObservedHealth: topology.ObservedGroupHealth{State: topology.GroupQuorumLost}})
 	f.g.recordNodeHealth("n2", topology.HealthAlive, topology.HealthDead)
-	f.g.recordApplied(f.g.machine, f.g.machine.Active())
+	f.g.recordLegacyApplied(f.g.machine, f.g.machine.Active())
 }
 
 func TestHealthRecorderQuorumCrossingsOnly(t *testing.T) {
@@ -118,7 +118,7 @@ func TestAppliedRecorderIsLocalAndDeduplicatesUnchangedOperatorAndDrain(t *testi
 		t.Fatal(err)
 	}
 	for range 10 {
-		f.g.recordApplied(f.g.machine, f.g.machine.Active())
+		f.g.recordLegacyApplied(f.g.machine, f.g.machine.Active())
 	}
 	after, err := f.g.machine.Snapshot(context.Background())
 	if err != nil {

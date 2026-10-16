@@ -3,12 +3,11 @@ package topology
 // View selects an owned, locally applied document observation.
 type View string
 
-// Latest is staged intent, Target is approved intent, and Active is fully
-// converged topology.
+// Latest is staged intent; Target is approved intent. Progress is observed
+// separately, without a synthetic converged document.
 const (
 	Latest View = "latest"
 	Target View = "target"
-	Active View = "active"
 )
 
 // Page selects history entries in descending version order. Zero Limit is

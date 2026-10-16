@@ -32,17 +32,17 @@ type joinMember struct {
 	MemberID      uint64
 }
 type joinResponse struct {
-	Rules             topology.Rules             `json:"rules"`
-	MemberID          uint64                     `json:"member_id"`
-	Existing          bool                       `json:"existing"`
-	Admission         metaengine.AdmissionRecord `json:"admission"`
-	Members           []joinMember               `json:"members"`
-	LeaderAddress     string                     `json:"leader_address"`
-	Readmitted        bool                       `json:"readmitted"`
-	Previous, Granted topology.Document
-	PreviousGroups    []topology.Group          `json:"previous_groups,omitempty"`
-	PreviousMemberID  uint64                    `json:"previous_member_id,omitempty"`
-	Grants            []topology.AuthorityGrant `json:"grants,omitempty"`
+	Rules            topology.Rules             `json:"rules"`
+	MemberID         uint64                     `json:"member_id"`
+	Existing         bool                       `json:"existing"`
+	Admission        metaengine.AdmissionRecord `json:"admission"`
+	Members          []joinMember               `json:"members"`
+	LeaderAddress    string                     `json:"leader_address"`
+	Readmitted       bool                       `json:"readmitted"`
+	Granted          topology.Document
+	PreviousGroups   []topology.Group          `json:"previous_groups,omitempty"`
+	PreviousMemberID uint64                    `json:"previous_member_id,omitempty"`
+	Grants           []topology.AuthorityGrant `json:"grants,omitempty"`
 }
 type readyRequest struct {
 	NodeName, InstanceID, Address string
@@ -113,18 +113,9 @@ func joinClassificationReady(status raft.Status, machine *metaengine.Machine) bo
 
 func (g *Group) membershipReply(ctx context.Context) joinResponse {
 	response := joinResponse{Rules: g.rules, LeaderAddress: g.opts.Network.AdvertiseAddress}
-	views := g.state().Views()
-	target, active := views.Target, views.Active
+	target := g.state().Target()
 	response.Granted = target
-	response.Previous = active
-	owners := map[uint64]string{}
-	for _, doc := range []topology.Document{active, target} {
-		if group := doc.MetaGroup(); group != nil {
-			for _, r := range group.Replicas {
-				owners[r.ReplicaID] = r.NodeName
-			}
-		}
-	}
+	owners, _ := g.state().MemberOwners()
 	for id, name := range owners {
 		address, _ := g.resolveNode(ctx, name)
 		response.Members = append(response.Members, joinMember{Name: name, MemberID: id, Address: address})
@@ -147,7 +138,10 @@ func (g *Group) joinReply(ctx context.Context, a metaengine.AdmissionRecord, for
 	}
 	if len(grants) != 0 {
 		response.Grants = grants
-		response.PreviousMemberID = grants[0].Targets[0].MemberID
+		response.PreviousMemberID = readmissionMemberID(grants, a.NodeName)
+		if response.PreviousMemberID == 0 {
+			return metatransport.Reply(fault.ErrOperatorAuthorization)
+		}
 		catalog, err := g.state().LegacyRecoveryCatalog(ctx)
 		if err != nil {
 			return metatransport.Reply(err)
@@ -159,6 +153,20 @@ func (g *Group) joinReply(ctx context.Context, a metaengine.AdmissionRecord, for
 		return metatransport.Reply(err)
 	}
 	return &metapb.Reply{Data: encoded}
+}
+
+func readmissionMemberID(grants []topology.AuthorityGrant, node string) uint64 {
+	for _, grant := range grants {
+		if grant.Purpose != topology.AuthorityReadmit || grant.Key.GroupID != topology.MetaGroupID {
+			continue
+		}
+		for _, target := range grant.Targets {
+			if target.NodeName == node {
+				return target.MemberID
+			}
+		}
+	}
+	return 0
 }
 
 func (g *Group) handleReady(ctx context.Context, h *metapb.Header, data []byte) *metapb.Reply {

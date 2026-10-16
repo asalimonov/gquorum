@@ -94,7 +94,7 @@ func TestMetaWatchFanoutIsOwnedAndDurablyAppliedOnFollowersThreeNodes(t *testing
 	ctx, cancel := context.WithTimeout(t.Context(), 110*time.Second)
 	defer cancel()
 	streams := map[string]map[topology.View]*topologyStream{}
-	views := []topology.View{topology.Latest, topology.Target, topology.Active}
+	views := []topology.View{topology.Latest, topology.Target}
 	for _, node := range c.Nodes() {
 		streams[node.Spec.Name] = map[topology.View]*topologyStream{}
 		for _, view := range views {
@@ -131,7 +131,7 @@ func TestMetaWatchFanoutIsOwnedAndDurablyAppliedOnFollowersThreeNodes(t *testing
 quiet:
 	for {
 		for _, node := range c.Nodes() {
-			for _, view := range []topology.View{topology.Target, topology.Active} {
+			for _, view := range []topology.View{topology.Target} {
 				select {
 				case update := <-streams[node.Spec.Name][view].updates:
 					t.Fatal("staging notified approved view", update)
@@ -153,7 +153,7 @@ quiet:
 		t.Fatal(err)
 	}
 	for _, node := range c.Nodes() {
-		for _, view := range []topology.View{topology.Target, topology.Active} {
+		for _, view := range []topology.View{topology.Target} {
 			update := streams[node.Spec.Name][view].next(t, view, staged.Document.Version)
 			if update.Document.Nodes[0].Labels["rack"] != "one" {
 				t.Fatal("approved watch lost content", update)

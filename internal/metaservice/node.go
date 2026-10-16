@@ -64,16 +64,18 @@ func (g *Group) Readiness(started time.Time) lifecycle.ReadinessInput {
 	if !in.FirstBootstrap {
 		return in
 	}
-	active := g.state().Active()
+	machine := g.state()
+	target := machine.Target()
 	observation := g.HealthObservation()
-	fresh := active.Version != 0 && observation.Version == active.Version && !observation.At.IsZero() &&
+	fresh := target.Version != 0 && observation.Version == target.Version && !observation.At.IsZero() &&
 		in.Now.Sub(observation.At) <= g.opts.SessionTTL
 	for _, founder := range g.opts.Founders {
+		identity := topology.Identity{ClusterID: in.Identity.ClusterID, NodeName: founder.Node.Name,
+			MemberID: founder.MemberID}
+		_, proven := machine.AdmissionBasis(identity)
 		if !fresh || observation.Nodes[founder.Node.Name] != topology.HealthAlive ||
-			active.MemberID(founder.Node.Name) != founder.MemberID {
-			in.MissingFounders = append(in.MissingFounders,
-				topology.Identity{ClusterID: in.Identity.ClusterID, NodeName: founder.Node.Name,
-					MemberID: founder.MemberID})
+			!proven || target.MemberID(founder.Node.Name) != founder.MemberID {
+			in.MissingFounders = append(in.MissingFounders, identity)
 		}
 	}
 	return in

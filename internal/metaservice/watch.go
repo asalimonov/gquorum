@@ -29,9 +29,9 @@ func newWatchRegistry(limit int) *watchRegistry {
 // Watch returns an owned initial locally applied view and then monotonically
 // increasing versions. Its single-slot buffer coalesces intermediate versions:
 // a slow observer never blocks Raft apply. Execution progress is available via
-// Operator/WaitOperator and the event bus, independently of document versions.
+// Operation/WaitOperation and the event bus, independently of document versions.
 func (g *Group) Watch(ctx context.Context, view topology.View) (<-chan topology.Update, error) {
-	if view != topology.Latest && view != topology.Target && view != topology.Active {
+	if view != topology.Latest && view != topology.Target {
 		return nil, fault.ErrInvalid
 	}
 	if err := ctx.Err(); err != nil {
@@ -45,12 +45,10 @@ func (g *Group) Watch(ctx context.Context, view topology.View) (<-chan topology.
 	}
 	return g.watches.watch(ctx, view, func() topology.Document {
 		views := g.state().Views()
-		latest, target, active := views.Latest, views.Target, views.Active
+		latest, target := views.Latest, views.Target
 		switch view {
 		case topology.Target:
 			return target
-		case topology.Active:
-			return active
 		default:
 			return latest
 		}
@@ -96,19 +94,17 @@ func (r *watchRegistry) watch(ctx context.Context, view topology.View,
 	}()
 	return w.ch, nil
 }
-func (r *watchRegistry) publish(latest, target, active topology.Document) {
+func (r *watchRegistry) publish(views topology.ReadView) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
 		return
 	}
 	for w := range r.subs {
-		doc := latest
+		doc := views.Latest
 		switch w.view {
 		case topology.Target:
-			doc = target
-		case topology.Active:
-			doc = active
+			doc = views.Target
 		default: // Use Latest for other view values.
 		}
 		if doc.Version <= w.version {
