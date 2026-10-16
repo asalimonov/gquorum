@@ -27,6 +27,8 @@ func nativePlanningFixture() (PlanInput, Document) {
 	meta := input.Groups[MetaGroupID]
 	meta.ConvergedVersion = desired.Version
 	input.Groups[MetaGroupID] = meta
+	input.Approved.Version = desired.Version
+	desired.Version++ // A fresh plan's version follows every captured source.
 	return input, desired
 }
 

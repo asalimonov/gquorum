@@ -127,13 +127,17 @@ func TestFoundingBarrierNamesAnActualFounder(t *testing.T) {
 		{Seq: 2, GroupID: "work", Kind: StepCreateFoundingGroup},
 	}, Blocks: []PlanBlock{{GroupID: MetaGroupID, SourceVersion: 1, Steps: []int{1}}, {GroupID: "work", Steps: []int{2}}},
 		Dependencies: []StepDependency{{StepSeq: 2, Requires: []int{1}}}}
-	desired := Document{Version: 2, Groups: []Group{{ID: "work", Replicas: []Replica{{NodeName: "n2", ReplicaID: 2}}}}}
+	desired := Document{Version: 2, Groups: []Group{{ID: "work", Replicas: []Replica{rep("n2", 2)}}}}
 	if err := ValidatePlanShape(PlanInput{}, desired, plan); err == nil || !strings.Contains(err.Error(), "outside") {
 		t.Fatal("unrelated admission became a founding prerequisite", err)
 	}
 	desired.Groups[0].Replicas[0].NodeName = "n1"
 	if err := validateBlockSafety(desired, plan); err != nil {
 		t.Fatal("actual founder refused", err)
+	}
+	desired.Groups[0].Replicas[0].Role = ReplicaLearner
+	if err := validateBlockSafety(desired, plan); err == nil {
+		t.Fatal("learner admission became a founding prerequisite")
 	}
 	plan.Blocks[0].SourceVersion = plan.Version
 	if err := validatePlanBlocks(plan); err == nil {

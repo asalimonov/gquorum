@@ -44,7 +44,7 @@ func validatePlanMembers(input PlanInput, desired Document) error {
 // metadata owner retires its predecessor through the independently granted
 // readmission protocol before PrepareReplica can be consumed. Later host calls
 // to the retired member would be both redundant and unroutable.
-func bindReadmissionRetirement(input PlanInput, desired Document, plan Plan) Plan {
+func bindReadmissionRetirement(input PlanInput, desired Document, plan Plan, groups []string) Plan {
 	meta := desired.MetaGroup()
 	if meta == nil {
 		return plan
@@ -52,7 +52,10 @@ func bindReadmissionRetirement(input PlanInput, desired Document, plan Plan) Pla
 	var replacements []Replica
 	for _, r := range sortedReplicas(meta.Replicas) {
 		previous, known := input.loadOwnerMember(r.NodeName)
-		if known && r.ReplicaID > previous {
+		// Unchanged metadata is another block's responsibility. Only its exact
+		// completed admission can waive old-host work in a load-only plan.
+		if known && r.ReplicaID > previous && (slices.Contains(groups, MetaGroupID) ||
+			input.convergedMetaMember(r.NodeName) == r.ReplicaID) {
 			replacements = append(replacements, r)
 		}
 	}

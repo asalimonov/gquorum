@@ -23,7 +23,9 @@ func BuildPlan(input PlanInput, desired Document, rules Rules) (Plan, error) {
 
 func constructPlan(input PlanInput, desired Document, options PlanOptions) (Plan, error) {
 	// Whole-document completion still consumes this path until Task 70.
-	return constructGroupPlan(input, desired, options, unionGroupIDs(input, desired))
+	plan, err := constructGroupPlan(input, desired, options, unionGroupIDs(input, desired))
+	plan.Blocks, plan.Dependencies = nil, nil
+	return plan, err
 }
 
 // Keep full identity evidence; only execution work and native reads are scoped.
@@ -53,15 +55,14 @@ func constructGroupPlan(input PlanInput, desired Document, options PlanOptions, 
 	for i := range plan.Steps {
 		plan.Steps[i].Seq = i + 1
 	}
-	if slices.Contains(groups, MetaGroupID) {
-		plan = bindReadmissionRetirement(input, desired, plan)
-	}
+	plan = bindReadmissionRetirement(input, desired, plan, groups)
 	if err := bindDemotionGuards(&plan, desired, observed, preferredMetaTransfer); err != nil {
 		return Plan{}, err
 	}
 	if err := bindVoterGuards(&plan, observed, desired); err != nil {
 		return Plan{}, err
 	}
+	bindPlanBlocks(input, desired, &plan, groups)
 	if err := validatePlanShapeFor(input, desired, plan, groups); err != nil {
 		return Plan{}, planUnsafef("%v", err)
 	}

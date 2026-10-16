@@ -675,3 +675,19 @@ Verified
 - make test: pass across all five application modules, 8.180s; test-reports/unit/20261016T050122.723695Z-8szg9plg/report.md.
 - make lint-staged: pass; /tmp/gquorum-task27-lint.log. Fixed operand ordering and line length reported by the first lint pass. git diff --check passes.
 - 357 changed handwritten Go lines, within 550. No concurrency change or Docker run; focused unit tests exercise the new isolated validators. The complete apply/ownership transaction remains Task 29, as scheduled.
+
+## Task 28 — Build required blocks and the two barrier shapes
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 39).
+
+Implemented
+- Construct deterministic per-group partitions from exact source versions after all step rewrites. Global actions, guard digests and adjacent flat safety pairs remain immutable; only the required references run in the future scoped executor. Zero-step declarations retain provenance. Metadata/load stops detach only when neither deletion nor same-host replacement requires them; retirement is deferred.
+- Emit exact same-plan metadata preparation edges for load prepares and founding voters, and load removal/required-stop edges for metadata decommission. Replacement-member readmission does not request successor evacuation. Edges complement the mandatory state predicates implemented in later authorization/dispatch tasks; they do not create additional ownership scopes.
+- Reused existing retained-debt stop construction. Fixed load-only deletion to use already converged metadata readmission without synthesizing another metadata admission. Added a scope argument to the existing readmission binder, preserving full-scope behavior for its old callers.
+- Replaced the overbroad replacesStoppedHost scan: two removed identities on one host are not successors; actual desired same-host ownership still requires the stop even without a new Prepare step. Founding barrier validation excludes learners.
+- Legacy constructPlan explicitly drops generated Blocks/Dependencies while returning its complete flat steps; this private adapter is removed at Task 70 with whole-document execution. No scoped runtime behavior is activated.
+
+Verified
+- Focused topology and metadata units pass; focused service planning functional checks pass (2.348s), /tmp/gquorum-task28-functional.log. New tests cover exact cleanup boundaries, debt-only required stops, immutable actions, admission/removal edges, zero-step provenance and completed readmission in a load-only deletion.
+- make test passes 1289/1289, 9.002s; test-reports/unit/20261016T050931.293167Z-j9zttuf2/report.md. make lint-staged passes, /tmp/gquorum-task28-lint.log; diff checks pass. 318 changed handwritten Go lines, within 550.
+- The existing native fixture had a converged metadata version equal to its proposed new plan version. Advanced Approved/desired consistently so the new plan follows every source, while preserving independent metadata/load versions. Added real health evidence to the metadata-removal fixture; safety checks remain strict. Extracted barrier input indexing after the first lint pass identified excessive complexity.
+- No new concurrency or Docker execution. Next peer/dead-code review is commit 40; next task requires a pre-coding size audit because scoped approval now includes the accepted admission-origin/handover contract.

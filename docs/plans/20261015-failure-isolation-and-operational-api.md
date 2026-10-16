@@ -489,14 +489,14 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `topology/planner.go`, `plan.go`, readmission/voter plan helpers. **Target:** [T] §3.3, §5.2, §6.2. **Depends on:** 22–27. **Budget:** ≤550.
 
-- [ ] Partition steps by exact group and source version; classify only safe detached stop/retirement actions as Cleanup. Whole-group deletion stops and same-host replacement prerequisites stay required.
-- [ ] Carry unfinished required stops for exact removed-but-unstopped identities when a newer approval takes over a failed or superseded group; derive them from retained debt, even when convergence or current native membership omits that identity. Keep the old origin/retirement action and consumed milestones.
-- [ ] Emit restricted admission/removal edges for local ordering; both barriers use mandatory state predicates. Admission proof can come from another operation, without adding its scope. Retain immutable global sequence numbers and deterministic within-block ordering. Zero-step declaration blocks still have provenance.
-- [ ] Test all-step coverage, no cleanup prerequisite masquerading as independent work, readmission coverage, former-owner deletion catalog and restricted edge forms. Adapt current adjacency validators to execution/cleanup separation without weakening their safety predicates.
+- [x] Partition steps by exact group and source version; classify only safe detached stop/retirement actions as Cleanup. Whole-group deletion stops and same-host replacement prerequisites stay required.
+- [x] Carry unfinished required stops for exact removed-but-unstopped identities when a newer approval takes over a failed or superseded group; derive them from retained debt, even when convergence or current native membership omits that identity. Keep the old origin/retirement action and consumed milestones.
+- [x] Emit restricted admission/removal edges for local ordering; both barriers use mandatory state predicates. Admission proof can come from another operation, without adding its scope. Retain immutable global sequence numbers and deterministic within-block ordering. Zero-step declaration blocks still have provenance.
+- [x] Test all-step coverage, no cleanup prerequisite masquerading as independent work, readmission coverage, former-owner deletion catalog and restricted edge forms. Adapt current adjacency validators to execution/cleanup separation without weakening their safety predicates.
 
 **Verification**
 
-- [ ] Run plan shape/destructive boundary/voter tests and `make test`.
+- [x] Run plan shape/destructive boundary/voter tests and `make test`.
 
 ### Task 29: Apply scoped approvals and admission handover atomically
 
