@@ -172,7 +172,10 @@ status, err := node.Cluster().WaitOperator(ctx, result.OperatorID)
 The full mutation surface includes `AddNode`, `ReadmitNode`, `DrainNode`,
 `ActivateNode`, `ExcludeNode`, `ForceRetireNode`, `SetPlacement`,
 `SetGroupPlacement`, `CreateGroup`, `DeleteGroup`, `ChangeReplica`,
-`ReseatReplica`, `RollbackTo` and `TransferLeader`. Deleted group IDs cannot be
+`ReseatReplica`, `RollbackTo` and `TransferLeader`. `ReadmitNode` requires the
+nonzero previous member ID; `ReseatReplica` requires the previous
+`topology.ReplicaKey{NodeName, ReplicaID}`. A changed identity refuses the request;
+a node name alone never authorizes replacing its successor. Deleted group IDs cannot be
 reused. Fresh-ID readmission and replica reseating preserve the distinction
 between old state and its authorized replacement. Force-new recovery after
 permanent majority loss remains deferred.

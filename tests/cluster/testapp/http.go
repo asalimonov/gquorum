@@ -237,17 +237,20 @@ func (a *application) routes() http.Handler {
 		jsonResponse(w, http.StatusOK, parked)
 	})
 	mux.HandleFunc("POST /api/nodes/{name}/readmit", func(w http.ResponseWriter, r *http.Request) {
-		var opts gquorum.MutationOptions
-		if err := requestBody(w, r, &opts); err != nil {
+		var body struct {
+			gquorum.MutationOptions
+			ExpectedMemberID uint64 `json:"expected_member_id"`
+		}
+		if err := requestBody(w, r, &body); err != nil {
 			httpError(w, err)
 			return
 		}
-		opts, err := mutationOptions(r, opts)
+		opts, err := mutationOptions(r, body.MutationOptions)
 		if err != nil {
 			httpError(w, err)
 			return
 		}
-		result, err := a.cluster.ReadmitNode(r.Context(), r.PathValue("name"), opts)
+		result, err := a.cluster.ReadmitNode(r.Context(), r.PathValue("name"), body.ExpectedMemberID, opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("GET /api/cluster/status", func(w http.ResponseWriter, r *http.Request) {
@@ -530,17 +533,20 @@ func (a *application) routes() http.Handler {
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("POST /api/groups/{id}/replicas/{name}/reseat", func(w http.ResponseWriter, r *http.Request) {
-		var opts gquorum.MutationOptions
-		if err := requestBody(w, r, &opts); err != nil {
+		var body struct {
+			gquorum.MutationOptions
+			ReplicaID uint64 `json:"replica_id"`
+		}
+		if err := requestBody(w, r, &body); err != nil {
 			httpError(w, err)
 			return
 		}
-		opts, err := mutationOptions(r, opts)
+		opts, err := mutationOptions(r, body.MutationOptions)
 		if err != nil {
 			httpError(w, err)
 			return
 		}
-		result, err := a.cluster.ReseatReplica(r.Context(), r.PathValue("id"), r.PathValue("name"), opts)
+		result, err := a.cluster.ReseatReplica(r.Context(), r.PathValue("id"), topology.ReplicaKey{NodeName: r.PathValue("name"), ReplicaID: body.ReplicaID}, opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("PUT /api/load/{id}/keys/{key}", a.putHTTP)

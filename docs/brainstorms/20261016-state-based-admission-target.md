@@ -433,3 +433,8 @@ ParentVersion historical-source lineage; its requested source version also stays
 in the fingerprint. Restore must not mistake that lineage for the CAS parent.
 Original approval lookup never substitutes a retained retry when the first
 attempt's evidence is missing. Pruning removes complete attempt chains together.
+
+Explicit reseat records the same provenance inside its atomic repair proposal.
+Its document ParentVersion is the approved repair source, while ExpectedVersion
+is the captured Latest acceptance CAS. Retained replay returns R and its first
+operation, without allocating another R/S pair or approving staged S.

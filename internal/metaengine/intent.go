@@ -16,6 +16,8 @@ type ScopeExpectation struct {
 	Owner         topology.OperationID `json:"owner,omitempty"`
 }
 
+const intentReseatReplica = "reseat_replica"
+
 // Intent is typed-mutation provenance, not a general request registry.
 // The digest is canonical lowercase SHA-256 hex; validation belongs to the FSM.
 type Intent struct {

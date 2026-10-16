@@ -502,9 +502,14 @@ func parkedReplicaReseat(t *testing.T, size int) {
 			t.Fatal("data loss silently reseated a voter", view, doc, err)
 		}
 	}
-	repaired, err := c.Mutate(ctx, "node2", "POST", "/api/groups/work/replicas/node3/reseat", gquorum.MutationOptions{Actor: "operator", Comment: "replace lost voted WAL"})
-	if err != nil {
-		t.Fatal("explicit reseat failed", repaired, err)
+	response, err = c.Request(ctx, "node2", "POST", "/api/groups/work/replicas/node3/reseat",
+		map[string]any{"actor": "operator", "comment": "replace lost voted WAL", "replica_id": oldID}, created.Document.Version)
+	if err := requireStatus(response, err, 202); err != nil {
+		t.Fatal("explicit reseat failed", err)
+	}
+	var repaired gquorum.MutationResult
+	if err := response.Decode(&repaired); err != nil {
+		t.Fatal(err)
 	}
 	freshID := replicaID(repaired.Document, "work", "node3")
 	if repaired.OperatorID == "" || freshID <= largest || repaired.Document.MemberID("node3") != before.Identity.MemberID {

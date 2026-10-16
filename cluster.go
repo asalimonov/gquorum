@@ -82,8 +82,8 @@ type Cluster interface {
 
 	// AddNode stages a new node and its _meta admission.
 	AddNode(context.Context, topology.Node, MutationOptions) (MutationResult, error)
-	// ReadmitNode stages an exact replacement for a previously known node.
-	ReadmitNode(context.Context, string, MutationOptions) (MutationResult, error)
+	// ReadmitNode replaces a node whose current member ID matches the nonzero predecessor.
+	ReadmitNode(context.Context, string, uint64, MutationOptions) (MutationResult, error)
 	// DrainNode moves load replicas off a node through approved topology.
 	DrainNode(context.Context, string, MutationOptions) (MutationResult, error)
 	// ActivateNode returns a drained node to active placement.
@@ -116,8 +116,8 @@ type Cluster interface {
 	DeleteGroup(context.Context, string, MutationOptions) (MutationResult, error)
 	// ChangeReplica changes a named replica's desired voting role.
 	ChangeReplica(context.Context, string, topology.ReplicaRoleChange, MutationOptions) (MutationResult, error)
-	// ReseatReplica allocates a fresh identity for a replica on a named node.
-	ReseatReplica(context.Context, string, string, MutationOptions) (MutationResult, error)
+	// ReseatReplica replaces the exact nonzero replica key with a fresh identity.
+	ReseatReplica(context.Context, string, topology.ReplicaKey, MutationOptions) (MutationResult, error)
 	// RollbackTo stages an earlier document as new desired topology.
 	RollbackTo(context.Context, uint64, MutationOptions) (MutationResult, error)
 

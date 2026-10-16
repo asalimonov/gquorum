@@ -101,11 +101,11 @@ func TestReservedIdentityCannotBeReseatedOrReadmittedInPlace(t *testing.T) {
 	doc.Node("n3").Labels = map[string]string{topology.LabelReserved: "true"}
 	f.commit(t, doc, true)
 	before := f.g.state().Latest()
-	if _, err := f.g.ReseatReplica(t.Context(), "work", "n3", preview()); !errors.Is(err, fault.ErrInvalid) {
+	if _, err := f.g.ReseatReplica(t.Context(), "work", topology.ReplicaKey{NodeName: "n3", ReplicaID: 3}, preview()); !errors.Is(err, fault.ErrInvalid) {
 		t.Fatal("reseat minted a new load identity on reserved node", err)
 	}
 	f.g.opts.Health = mutationHealth{"n3": topology.HealthDead}
-	if _, err := f.g.ReadmitNode(t.Context(), "n3", preview()); !errors.Is(err, fault.ErrInvalid) {
+	if _, err := f.g.ReadmitNode(t.Context(), "n3", 3, preview()); !errors.Is(err, fault.ErrInvalid) {
 		t.Fatal("readmission minted a new load identity on reserved node", err)
 	}
 	after := f.g.state().Latest()

@@ -111,8 +111,10 @@ func (g *Group) reseatDocument(doc *topology.Document, views topology.ReadView,
 		if r.NodeName != name {
 			continue
 		}
+		if r.ReplicaID != options.ReplicaID {
+			return fault.New(fault.VersionConflict, "reseat predecessor no longer matches", nil)
+		}
 		request := options
-		request.ReplicaID = r.ReplicaID
 		if request.Actor == "" {
 			request.Actor = g.currentIdentity().NodeName
 		}

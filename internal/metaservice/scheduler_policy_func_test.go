@@ -69,8 +69,9 @@ func TestSchedulingStatusLeaderNamesUseCapturedActive(t *testing.T) {
 func TestMetaUsesSelectedSchedulerWithOwnedHoldsAndCallbackDeadline(t *testing.T) {
 	t.Parallel()
 	type observation struct {
-		input    scheduling.ScheduleInput
-		duration time.Duration
+		input       scheduling.ScheduleInput
+		duration    time.Duration
+		hasDeadline bool
 	}
 	seen := make(chan observation, 1)
 	held := []storage.Identity{{NodeName: "n1", ClusterID: "cluster", GroupID: "work", ReplicaID: 9}}
@@ -79,9 +80,9 @@ func TestMetaUsesSelectedSchedulerWithOwnedHoldsAndCallbackDeadline(t *testing.T
 		o.CallbackTimeout = 25 * time.Millisecond
 		o.HeldLoads = func() []storage.Identity { return held }
 		o.RepairPolicy = schedulerFunc(func(ctx context.Context, in scheduling.ScheduleInput) (scheduling.ScheduleDecision, error) {
-			deadline, _ := ctx.Deadline()
+			deadline, hasDeadline := ctx.Deadline()
 			select {
-			case seen <- observation{input: in.Clone(), duration: time.Until(deadline)}:
+			case seen <- observation{input: in.Clone(), duration: time.Until(deadline), hasDeadline: hasDeadline}:
 			default:
 			}
 			// Callback snapshots are application-owned scratch values.
@@ -93,7 +94,9 @@ func TestMetaUsesSelectedSchedulerWithOwnedHoldsAndCallbackDeadline(t *testing.T
 	leader := readyPublic(t, groups)
 	select {
 	case got := <-seen:
-		if got.duration <= 0 || got.duration > 25*time.Millisecond || len(got.input.Held) != 1 || got.input.Held[0] != held[0] {
+		// Descheduling may consume the deadline before callback inspection.
+		// Its presence and configured upper bound are the contract.
+		if !got.hasDeadline || got.duration > 25*time.Millisecond || len(got.input.Held) != 1 || got.input.Held[0] != held[0] {
 			t.Fatal("selected scheduler lost deadline or hold", got)
 		}
 		meta := got.input.Status[topology.MetaGroupID]

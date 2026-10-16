@@ -32,6 +32,7 @@ type CommitVoterChangeProposal struct {
 // CommitRepairOperationProposal atomically approves repair and rebases staged intent.
 // The FSM computes the rebase; the caller supplies only the approved repair candidate.
 type CommitRepairOperationProposal struct {
+	Intent          *Intent            `json:"intent,omitempty"`
 	Doc             topology.Document  `json:"doc"`
 	ExpectedVersion uint64             `json:"expected_version"`
 	ExpectedTarget  uint64             `json:"expected_target"`

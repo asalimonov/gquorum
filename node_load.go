@@ -42,9 +42,10 @@ func (n *node) newHost(m *metaservice.Group) (*managed.Host, error) {
 		RecoveryInterval: n.opts.Loads.RecoveryInterval, Events: n.opts.Events, Logger: n.opts.Logger,
 		// A memory replica restarted without its state replaces itself through
 		// the ordinary reseat, pinned to the Active version the host observed.
-		ReseatOwn: func(ctx context.Context, group string, version uint64) error {
+		ReseatOwn: func(ctx context.Context, id storage.Identity, version uint64) error {
 			own := m.Identity().NodeName
-			_, err := m.ReseatReplica(ctx, group, own, metaservice.MutationOptions{
+			key := topology.ReplicaKey{NodeName: id.NodeName, ReplicaID: id.ReplicaID}
+			_, err := m.ReseatReplica(ctx, id.GroupID, key, metaservice.MutationOptions{
 				ExpectedVersion: version,
 				Actor:           own,
 				Comment:         "reseat in-memory replica after restart",

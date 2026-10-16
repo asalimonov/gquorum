@@ -372,7 +372,7 @@ func TestMutationExpectedVersionAndPreviewAreExact(t *testing.T) {
 func TestReseatReplicaAllocatesFreshIDAndRefusesUnstableViews(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
-	r, err := f.g.ReseatReplica(context.Background(), "work", "n2", preview())
+	r, err := f.g.ReseatReplica(context.Background(), "work", topology.ReplicaKey{NodeName: "n2", ReplicaID: 2}, preview())
 	doc := mutationDoc(t, r, err)
 	if doc.Group("work").Replicas[1].ReplicaID != 4 || doc.Group("work").NextReplicaID != 5 || doc.Group("work").Replicas[1].Role != topology.ReplicaVoter {
 		t.Fatal(doc)
@@ -380,7 +380,7 @@ func TestReseatReplicaAllocatesFreshIDAndRefusesUnstableViews(t *testing.T) {
 	r, err = f.g.DrainNode(context.Background(), "n3", preview())
 	doc = mutationDoc(t, r, err)
 	f.commit(t, doc, false)
-	if _, err = f.g.ReseatReplica(context.Background(), "work", "n2", preview()); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if _, err = f.g.ReseatReplica(context.Background(), "work", topology.ReplicaKey{NodeName: "n2", ReplicaID: 2}, preview()); !errors.Is(err, fault.ErrOperatorAuthorization) {
 		t.Fatal("repair extended staged operator intent", err)
 	}
 }
@@ -390,20 +390,20 @@ func TestReseatReplicaRetainsAuditAndRejectsMetaLearnersAndUnknown(t *testing.T)
 	doc := f.g.machine.Latest()
 	doc.Audit = &topology.ChangeAudit{Operation: topology.AuditOperationForceRetireNode, TargetNode: "old", Forced: true, Reason: "lost", StagedBy: "operator", StagedAt: time.Now().UTC()}
 	f.commit(t, doc, true)
-	r, err := f.g.ReseatReplica(context.Background(), "work", "n2", preview())
+	r, err := f.g.ReseatReplica(context.Background(), "work", topology.ReplicaKey{NodeName: "n2", ReplicaID: 2}, preview())
 	repaired := mutationDoc(t, r, err)
 	if !reflect.DeepEqual(doc.Audit, repaired.Audit) {
 		t.Fatal("repair changed prior audit")
 	}
 	for _, pair := range [][2]string{{topology.MetaGroupID, "n2"}, {"missing", "n2"}, {"work", "unknown"}} {
-		if _, err = f.g.ReseatReplica(context.Background(), pair[0], pair[1], preview()); err == nil {
+		if _, err = f.g.ReseatReplica(context.Background(), pair[0], topology.ReplicaKey{NodeName: pair[1], ReplicaID: 2}, preview()); err == nil {
 			t.Fatal("invalid reseat", pair)
 		}
 	}
 	doc = f.g.machine.Latest()
 	doc.Group("work").Replicas[1].Role = topology.ReplicaLearner
 	f.commit(t, doc, true)
-	if _, err = f.g.ReseatReplica(context.Background(), "work", "n2", preview()); err == nil {
+	if _, err = f.g.ReseatReplica(context.Background(), "work", topology.ReplicaKey{NodeName: "n2", ReplicaID: 2}, preview()); err == nil {
 		t.Fatal("learner reseated")
 	}
 }

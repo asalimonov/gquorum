@@ -65,7 +65,7 @@ type Config struct {
 	Store                storage.Store
 	MemoryStore          storage.Store           // optional: groups of topology.StorageMemory
 	MemoryRetirement     storage.RetirementStore // required with MemoryStore
-	ReseatOwn            func(ctx context.Context, groupID string, expectedVersion uint64) error
+	ReseatOwn            func(ctx context.Context, identity storage.Identity, expectedVersion uint64) error
 	Transport            load.Transport
 	ResolvePeer          func(context.Context, load.ReplicaRef) (load.Peer, error)
 	ValidatePeer         func(context.Context, load.Peer) error

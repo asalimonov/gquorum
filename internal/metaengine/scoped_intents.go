@@ -10,8 +10,7 @@ func validateScopedIntents(state *scopedState, index *scopedIndexes) error {
 	for _, intent := range state.Intents {
 		doc, found := index.documents[intent.Version]
 		if !found || intent.Version == 0 || intent.ExpectedVersion != intent.Version-1 ||
-			intent.Kind != "rollback_to" && doc.ParentVersion != intent.ExpectedVersion ||
-			doc.RebasedFrom != 0 || !validIntentFingerprint(intent) {
+			doc.RebasedFrom != 0 || !validIntentParent(intent, doc) || !validIntentFingerprint(intent) {
 			return invalidScopedState("invalid accepted intent provenance")
 		}
 		if err := validateIntentSuccessor(intent, doc); err != nil {
@@ -34,7 +33,7 @@ func knownIntentKind(kind string) bool {
 	switch kind {
 	case "add_node", "readmit_node", "drain_node", "activate_node", "exclude_node", "set_placement",
 		"set_group_placement", "create_group", "set_group_voter_config", "set_group_hosting",
-		"set_replica_pinned_learner", "delete_group", "change_replica", "reseat_replica", "rollback_to",
+		"set_replica_pinned_learner", "delete_group", "change_replica", intentReseatReplica, "rollback_to",
 		"force_retire_node":
 		return true
 	default:
@@ -67,11 +66,20 @@ func validIntentTuple(intent Intent) bool {
 	if intent.Kind == "readmit_node" && intent.GroupID != "" && intent.GroupID != topology.MetaGroupID {
 		return false
 	}
-	if intent.Kind == "reseat_replica" && topology.ValidateLoadID(intent.GroupID) != nil {
+	if intent.Kind == intentReseatReplica && topology.ValidateLoadID(intent.GroupID) != nil {
 		return false
 	}
-	if intent.Kind == "readmit_node" || intent.Kind == "reseat_replica" {
+	if intent.Kind == "readmit_node" || intent.Kind == intentReseatReplica {
 		return intent.PreviousID != 0 && intent.SuccessorID > intent.PreviousID && intent.NodeName != ""
 	}
 	return intent.PreviousID == 0
+}
+
+// Reseat has repair-source ancestry when independent staged intent is rebased;
+// rollback has requested-history ancestry. Their CAS parent stays in the record.
+func validIntentParent(intent Intent, doc topology.Document) bool {
+	if intent.Kind == "rollback_to" || intent.Kind == intentReseatReplica {
+		return doc.ParentVersion <= intent.ExpectedVersion
+	}
+	return doc.ParentVersion == intent.ExpectedVersion
 }

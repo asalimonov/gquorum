@@ -25,7 +25,7 @@ func (s *scopedState) applyProposeDocument(index uint64, p ProposeDocument) (pro
 		return proposalApplication{}, err
 	}
 	if p.Intent != nil {
-		if err := validateProposedIntent(*p.Intent, s.Latest, doc); err != nil {
+		if err := validateProposedIntent(*p.Intent, s.Latest, doc, s.Latest.Version); err != nil {
 			return proposalApplication{}, err
 		}
 	}
@@ -83,20 +83,20 @@ func (s *scopedState) installStagedDocument(doc topology.Document, intent *Inten
 	}
 }
 
-func validateProposedIntent(intent Intent, before, after topology.Document) error {
+func validateProposedIntent(intent Intent, before, after topology.Document, parent uint64) error {
 	if intent.ExpectedVersion != before.Version || intent.Version != after.Version ||
 		!validIntentFingerprint(intent) || !validIntentTuple(intent) {
 		return fault.ErrInvalid
 	}
 	// Rollback's ParentVersion identifies its requested historical source. CAS
 	// ancestry remains explicit in ExpectedVersion, independently of that lineage.
-	if intent.Kind != "rollback_to" && after.ParentVersion != before.Version {
+	if intent.Kind != "rollback_to" && after.ParentVersion != parent {
 		return fault.ErrInvalid
 	}
 	if err := validateIntentSuccessor(intent, after); err != nil {
 		return err
 	}
-	if intent.Kind == "readmit_node" || intent.Kind == "reseat_replica" {
+	if intent.Kind == "readmit_node" || intent.Kind == intentReseatReplica {
 		return validateReplacementIntent(intent, before, after)
 	}
 	if intent.PreviousID != 0 {

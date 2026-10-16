@@ -279,20 +279,28 @@ func (g *Group) AddNode(ctx context.Context, node topology.Node, o MutationOptio
 // Latest, Target and Active must already agree; approval remains an ordinary
 // learner-first execution that can wait for the returning process. The caller
 // restarts that process with Join and an exact OnReadmission quarantine hook.
-func (g *Group) ReadmitNode(ctx context.Context, name string, o MutationOptions) (MutationResult, error) {
+func (g *Group) ReadmitNode(ctx context.Context, name string, expectedMemberID uint64,
+	o MutationOptions) (MutationResult, error) {
+	if expectedMemberID == 0 {
+		return MutationResult{}, fault.ErrInvalid
+	}
 	return g.mutation(ctx, o, mutationPolicy{Kind: "readmit_node",
-		Input:   mutationInput{NodeName: name},
+		Input:   mutationInput{NodeName: name, PreviousID: expectedMemberID},
 		Comment: fmt.Sprintf("readmit node %q", name)},
 		func(doc *topology.Document, now time.Time) error {
 			node := doc.Node(name)
 			if node == nil {
 				return unknownNode(name)
 			}
-			if node.State != topology.NodeActive || doc.MemberID(name) == 0 {
+			if doc.MemberID(name) != expectedMemberID {
+				return fault.New(fault.VersionConflict, "readmission predecessor no longer matches", nil)
+			}
+			if node.State != topology.NodeActive {
 				return fault.New(fault.Invalid, "readmission requires an admitted active node", nil)
 			}
 			views := g.state().Views()
 			target, active := views.Target, views.Active
+			// Task78 removes this schema3 admission guard with the legacy effect/persistence path.
 			if doc.Version != target.Version || doc.Version != active.Version {
 				return fault.New(fault.OperatorAuthorization,
 					"readmission requires converged topology; apply or restore pending intent first", nil)
@@ -601,16 +609,22 @@ func (g *Group) RollbackTo(ctx context.Context, version uint64, o MutationOption
 // ReseatReplica atomically commits and approves a fresh-ID repair against equal
 // Latest/Target/Active views. Preview computes it without approval. Apply is
 // unnecessary for this operation: a real reseat always returns an execution.
-func (g *Group) ReseatReplica(ctx context.Context, id, name string, o MutationOptions) (MutationResult, error) {
+func (g *Group) ReseatReplica(ctx context.Context, id string, key topology.ReplicaKey,
+	o MutationOptions) (MutationResult, error) {
+	if key.ReplicaID == 0 || strings.TrimSpace(key.NodeName) == "" {
+		return MutationResult{}, fault.ErrInvalid
+	}
+	name := key.NodeName
 	if err := topology.ValidateLoadID(id); err != nil {
 		return MutationResult{}, err
 	}
 	documents, err := g.computeMutation(ctx, o, mutationPolicy{Kind: "reseat_replica",
-		Input:   mutationInput{GroupID: id, NodeName: name},
+		Input:   mutationInput{GroupID: id, NodeName: name, PreviousID: key.ReplicaID},
 		Comment: "reseat replica"},
 		func(doc *topology.Document, now time.Time) error {
 			views := g.state().Views()
 			latest, target, active := views.Latest, views.Target, views.Active
+			// Task78 replaces this schema3 repair guard with scoped capture/approval.
 			if !reflect.DeepEqual(latest, target) || !reflect.DeepEqual(target, active) {
 				return fault.New(fault.OperatorAuthorization,
 					"reseat requires equal Latest, Target and Active", nil)
@@ -618,7 +632,7 @@ func (g *Group) ReseatReplica(ctx context.Context, id, name string, o MutationOp
 			if ex, ok := g.state().CurrentOperator(); ok && !ex.Status.State.Terminal() {
 				return fault.New(fault.OperatorAuthorization, "reseat requires no running execution", nil)
 			}
-			options := metaengine.ReplicaRepairOptions{GroupID: id, NodeName: name, At: now,
+			options := metaengine.ReplicaRepairOptions{GroupID: id, NodeName: name, ReplicaID: key.ReplicaID, At: now,
 				Origin: topology.OriginOperator, Actor: o.Actor}
 			return g.reseatDocument(doc, views, options)
 		})

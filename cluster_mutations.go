@@ -57,12 +57,13 @@ func (c *clusterView) AddNode(ctx context.Context, node topology.Node, opts Muta
 	return MutationResult(result), err
 }
 
-func (c *clusterView) ReadmitNode(ctx context.Context, name string, opts MutationOptions) (MutationResult, error) {
+func (c *clusterView) ReadmitNode(ctx context.Context, name string, expectedMemberID uint64,
+	opts MutationOptions) (MutationResult, error) {
 	m, err := c.node.service(ctx, workService)
 	if err != nil {
 		return MutationResult{}, err
 	}
-	result, err := m.ReadmitNode(ctx, name, opts.internal())
+	result, err := m.ReadmitNode(ctx, name, expectedMemberID, opts.internal())
 	return MutationResult(result), err
 }
 
@@ -176,13 +177,13 @@ func (c *clusterView) ChangeReplica(ctx context.Context, id string, change topol
 	return MutationResult(result), err
 }
 
-func (c *clusterView) ReseatReplica(ctx context.Context, id, name string,
+func (c *clusterView) ReseatReplica(ctx context.Context, id string, key topology.ReplicaKey,
 	opts MutationOptions) (MutationResult, error) {
 	m, err := c.node.service(ctx, workService)
 	if err != nil {
 		return MutationResult{}, err
 	}
-	result, err := m.ReseatReplica(ctx, id, name, opts.internal())
+	result, err := m.ReseatReplica(ctx, id, key, opts.internal())
 	return MutationResult(result), err
 }
 

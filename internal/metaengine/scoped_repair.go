@@ -11,6 +11,11 @@ import (
 
 func (s *scopedState) applyCommitRepairOperation(index uint64,
 	p CommitRepairOperationProposal) (proposalApplication, error) {
+	if p.Intent != nil && p.ExpectedVersion != s.Latest.Version {
+		result, err := retainedMutation(ProposeDocument{ExpectedVersion: p.ExpectedVersion,
+			Intent: p.Intent, ProposalID: p.ProposalID}, s.Latest.Version, s.indexes)
+		return proposalApplication{result: result}, err
+	}
 	if p.ExpectedVersion != s.Latest.Version || p.ExpectedTarget != s.Target.Version {
 		return s.repairConflict(p), nil
 	}
@@ -20,6 +25,14 @@ func (s *scopedState) applyCommitRepairOperation(index uint64,
 	}
 	if err := s.validateScopedReplicaRepair(pair.Repair); err != nil {
 		return proposalApplication{}, err
+	}
+	if p.Intent != nil {
+		if p.Intent.Kind != intentReseatReplica || pair.Repair.Origin != topology.OriginOperator {
+			return proposalApplication{}, fault.ErrInvalid
+		}
+		if err := validateProposedIntent(*p.Intent, s.Latest, pair.Repair, s.Target.Version); err != nil {
+			return proposalApplication{}, err
+		}
 	}
 	return s.commitRepairDocuments(index, pair, p)
 }
@@ -80,6 +93,9 @@ func (s *scopedState) commitRepairDocuments(index uint64, pair repairDocuments,
 		return proposalApplication{}, err
 	}
 	next.installRepairDocuments(pair)
+	if p.Intent != nil {
+		next.Intents = append(slices.Clone(next.Intents), *p.Intent)
+	}
 	op := &next.Operations[len(next.Operations)-1]
 	if err := next.revokeAuthorityLocked(index, s.supersededBlocks(op), op.Status.ID); err != nil {
 		return proposalApplication{}, err

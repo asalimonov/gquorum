@@ -12,6 +12,7 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metastore"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -62,8 +63,11 @@ func TestParkedMemoryVoterReseatsItsOwnReplica(t *testing.T) {
 	withMemory(t, f)
 	restartedReplica(t, f, topology.StorageMemory, topology.ReplicaVoter)
 	calls := make(chan reseatCall, 16)
-	f.cfg.ReseatOwn = func(ctx context.Context, group string, version uint64) error {
-		calls <- reseatCall{group, version}
+	f.cfg.ReseatOwn = func(ctx context.Context, id storage.Identity, version uint64) error {
+		if id != f.localID(1) {
+			t.Error("reseat changed predecessor", id)
+		}
+		calls <- reseatCall{id.GroupID, version}
 		// The committed repair approves a fresh identity; once it converges the
 		// parked identity leaves both Target and Active.
 		f.setScope("work", 2, false, false)
@@ -107,7 +111,7 @@ func TestOnlyMemoryVotersAreReseated(t *testing.T) {
 			withMemory(t, f)
 			restartedReplica(t, f, c.class, c.role)
 			var calls atomic.Int32
-			f.cfg.ReseatOwn = func(context.Context, string, uint64) error { calls.Add(1); return nil }
+			f.cfg.ReseatOwn = func(context.Context, storage.Identity, uint64) error { calls.Add(1); return nil }
 			h := f.host(t)
 			startParked(t, h)
 			startParked(t, h)
@@ -125,7 +129,7 @@ func TestDemotedMemoryVoterStopsReseating(t *testing.T) {
 	withMemory(t, f)
 	restartedReplica(t, f, topology.StorageMemory, topology.ReplicaVoter)
 	var calls atomic.Int32
-	f.cfg.ReseatOwn = func(context.Context, string, uint64) error {
+	f.cfg.ReseatOwn = func(context.Context, storage.Identity, uint64) error {
 		if calls.Add(1) == 1 {
 			// The voter configuration demotes the unavailable voter before any reseat commits.
 			f.mu.Lock()
@@ -161,7 +165,7 @@ func TestStopJoinsTheOwnReseatLoop(t *testing.T) {
 	entered := make(chan struct{})
 	var once atomic.Bool
 	var canceled atomic.Bool
-	f.cfg.ReseatOwn = func(ctx context.Context, _ string, _ uint64) error {
+	f.cfg.ReseatOwn = func(ctx context.Context, _ storage.Identity, _ uint64) error {
 		if once.CompareAndSwap(false, true) {
 			close(entered)
 		}

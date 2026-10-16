@@ -447,7 +447,7 @@ func rotatedDownNodeRejoin(t *testing.T, size int) {
 	t.Helper()
 	ctx, c, before, previous, values := rejoinWorkload(t, size)
 	// A healthy node must be refused before any allocation/proposal.
-	response, err := c.Request(ctx, "node2", "POST", "/api/nodes/node3/readmit", gquorum.MutationOptions{Actor: "operator", Approve: true}, before.Version)
+	response, err := c.Request(ctx, "node2", "POST", "/api/nodes/node3/readmit", map[string]any{"actor": "operator", "approve": true, "expected_member_id": before.MemberID("node3")}, before.Version)
 	if err := requireStatus(response, err, 422); err != nil {
 		t.Fatal("readmission rotated a live holder", err)
 	}
@@ -460,7 +460,7 @@ func rotatedDownNodeRejoin(t *testing.T, size int) {
 	}
 	var rotated gquorum.MutationResult
 	if err := Poll(ctx, func() (bool, error) {
-		response, err = c.Request(ctx, "node2", "POST", "/api/nodes/node3/readmit", gquorum.MutationOptions{Actor: "operator", Approve: true}, before.Version)
+		response, err = c.Request(ctx, "node2", "POST", "/api/nodes/node3/readmit", map[string]any{"actor": "operator", "approve": true, "expected_member_id": before.MemberID("node3")}, before.Version)
 		if err != nil {
 			return false, err
 		}

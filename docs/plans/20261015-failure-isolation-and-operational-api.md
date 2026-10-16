@@ -812,16 +812,16 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `cluster_mutations.go`, `internal/metaservice/mutations.go`, `internal/metaengine/admission*.go`, repair helpers. **Target:** [T] §3.1, §5.3, §7.1; contract C1. **Depends on:** 44–48. **Budget:** ≤550.
 
-- [ ] Change ReadmitNode(ctx, name, expectedMemberID, opts) and ReseatReplica(ctx, group, ReplicaKey, opts); update immediate callsites together. Require nonzero exact predecessor and retained replacement evidence before returning an already-accepted result.
-- [ ] Route readmission/reseat approval through the shared new-approval validation and atomic preparation, including rejection of duplicate consumed Remove, cleanup-owned Cleanup/Stop and DeleteGroupState without uncovered Hosted ownership.
-- [ ] Allocate fresh monotonic IDs only after replicated CAS/identity checks. Explicit reseat uses narrow repair/rebase with OriginOperator and refuses an owned group naming its operation; readmission keeps exact grant/fence/join lineage and scoped admission prerequisites.
-- [ ] Test repeated lost responses, arbitrary successor conflict, busy scopes, disjoint staged intent, readmission on a reused node name and no old global Latest=Target=Active admission requirement.
+- [x] Change ReadmitNode(ctx, name, expectedMemberID, opts) and ReseatReplica(ctx, group, ReplicaKey, opts); update immediate callsites together. Require nonzero exact predecessor and retained replacement evidence before returning an already-accepted result.
+- [x] Route readmission/reseat approval through the shared new-approval validation and atomic preparation, including rejection of duplicate consumed Remove, cleanup-owned Cleanup/Stop and DeleteGroupState without uncovered Hosted ownership.
+- [x] Allocate fresh monotonic IDs only after replicated CAS/identity checks. Explicit reseat uses narrow repair/rebase with OriginOperator and refuses an owned group naming its operation; readmission keeps exact grant/fence/join lineage and scoped admission prerequisites.
+- [x] Test repeated lost responses, arbitrary successor conflict, busy scopes, disjoint staged intent, readmission on a reused node name and no old global Latest=Target=Active admission requirement.
 
-- [ ] Scoped issuance uses the exact current approved member and its metadata owner/handover chain, never whole-Target version equality. Verify an unrelated approval after readmission approval still permits issuance, then dependent deletion approval.
+- [x] Scoped issuance uses the exact current approved member and its metadata owner/handover chain, never whole-Target version equality. Verify an unrelated approval after readmission approval still permits issuance, then dependent deletion approval.
 
 **Verification**
 
-- [ ] Run replacement units plus focused readmission/reseat functional cases; run `make test`.
+- [x] Run replacement units plus focused readmission/reseat functional cases; run `make test`.
 
 ### Task 50: Base founding readiness on the exact meta block
 
@@ -1362,6 +1362,8 @@ Do not run broad process performance/chaos campaigns by default; the focused deb
 
 
 ## NOT PLANNED CHANGES
+
+- Task49: scheduler_policy_func_test.go assumed a 25ms callback deadline remained unexpired when inspected. A full parallel functional run disproved that timing assumption. Assert deadline presence/configured upper bound and retain owned-input/status checks; elapsed time after descheduling is not a contract violation.
 
 - Pre-coding audit after Task 35/thread 13: whole-batch deletion completion, dependent-batch cancellation protection, and complete group/node/marker approval assembly exceed 550 changed Go lines with composed tests. Split former Task 36 into 36 (deletion completion/protection) and 37 (complete approval assembly). Former 37–87 shift by one: 88 tasks, revocation 38, activation 78, final audit 88. No work or verification is omitted; helpers compose through approval now and later transition completion.
 

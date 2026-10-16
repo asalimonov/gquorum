@@ -71,7 +71,7 @@ func (h *Host) ownReseatLoop(ctx context.Context, id storage.Identity) {
 			case scopeErr == nil && scope.Replica.Role != topology.ReplicaVoter:
 				return
 			case holdsReplica(active, id):
-				if err = h.cfg.ReseatOwn(ctx, id.GroupID, active.Version); err == nil {
+				if err = h.cfg.ReseatOwn(ctx, id, active.Version); err == nil {
 					backoff = reseatMinBackoff // committed; the approved plan replaces this identity
 				}
 			case scopeErr != nil:

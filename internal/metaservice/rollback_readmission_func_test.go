@@ -22,7 +22,7 @@ func TestRollbackUnfinishedReadmissionRefusesRetiredIdentity(t *testing.T) {
 	f.g.opts.Health = mutationHealth{"n1": topology.HealthAlive, "n2": topology.HealthAlive,
 		"n3": topology.HealthDead}
 	active := f.g.machine.Active()
-	result, err := f.g.ReadmitNode(t.Context(), "n3", preview())
+	result, err := f.g.ReadmitNode(t.Context(), "n3", 3, preview())
 	if err != nil {
 		t.Fatal(err)
 	}

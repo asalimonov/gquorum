@@ -1050,3 +1050,17 @@ Implemented
 Verified
 - Full metaengine/metaservice units and all metaservice functional tests pass (11.827s). Regressions cover atomic malformed-input refusal, both exact replacement kinds, lost responses/restoration, raw Stage after rebase, original failed approval versus latest retry, missing evidence, structured rebase conflict and rollback ancestry. Existing partial-approval/forwarding tests pass.
 - make test: 1656/1656, 6.496s; test-reports/unit/20261016T111448.067399Z-3zbd7wqt/report.md. Staged lint and diff checks pass; functional log /tmp/gquorum-task48-functional-all.log. No race/Docker run claimed for these serialized transformations and reads. No added/split tasks; next Task49, peer/dead-code checkpoint65.
+
+## Task 49 — Exact predecessor replacement APIs
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 64).
+
+Implemented
+- ReadmitNode now requires a nonzero expectedMemberID; ReseatReplica takes the existing exact ReplicaKey. Updated public/service callers and process-fixture payloads. Memory recovery passes the parked storage identity through its existing callback rather than resolving a successor by name. Zero/stale identities refuse before allocation or health/planning work.
+- Atomic scoped reseat persists the same typed intent inside R/operation/S installation and replays it before current-CAS/ownership checks. Repair-source ParentVersion and acceptance ExpectedVersion remain distinct. Both predecessor and successor must match retained acceptance; user OriginOperator reseat uses the existing narrow repair and shared approval guards.
+- Scoped readmission issuance is proven through an actual unrelated approval followed by issuance and dependent deletion approval; no Target-version equality is needed. The shared scoped staging/approval handlers retain duplicate-removal, cleanup-ownership and admission prerequisites already covered by their owning tests.
+- Existing schema3 ReadmitNode/ReseatReplica whole-document guards remain explicitly marked for removal at Task78 with their legacy dispatch/persistence path. Scoped handlers and their restored fixtures already implement independent progress. No new effect path is enabled on an incomplete format; full live activation remains the planned cutover.
+
+Verified
+- make test: 1659/1659, 17.620s; test-reports/unit/20261016T112202.003914Z-cyx75bew/report.md. Focused replacement/managed functional tests, memory-reseat race checks, and cluster-tag compilation pass. Full metaservice functional tests pass with the documented parallelism (14.070s).
+- A broader functional run exposed a pre-existing positive-remaining-time assumption in the scheduler callback test. Fixed the assertion to check deadline presence/bound even after descheduling; ownership/status assertions remain. Recorded under NOT PLANNED CHANGES. Staged lint/diff checks pass; final commit hook rechecks the fixture edit.
+- No Docker scenarios run yet; their fixtures compile and final process runs remain required. No new/split tasks. Next Task50 is commit65 and the peer/dead-code checkpoint.
