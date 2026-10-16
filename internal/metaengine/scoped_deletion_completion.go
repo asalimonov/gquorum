@@ -47,7 +47,9 @@ func (p deletionPreparation) complete(group string, at time.Time) error {
 	for i, debt := range debts {
 		positions[debt.Identity] = i
 	}
-	for key, owner := range p.collector.owners {
+	var pending error
+	for _, key := range p.collector.sortedOwners() {
+		owner := p.collector.owners[key]
 		if key.group != group || owner.progress == "" {
 			continue
 		}
@@ -57,11 +59,15 @@ func (p deletionPreparation) complete(group string, at time.Time) error {
 		debt := cleanupRecord{Identity: id, MemberID: owner.target.MemberID, CreatedAt: at, UpdatedAt: at}
 		if exists {
 			debt = debts[position]
-			if debt.Stopped != nil {
-				continue
-			}
+		}
+		if debt.Stopped != nil {
+			continue
 		}
 		completed, err := p.readmissionDebt(debt, at)
+		if errors.Is(err, fault.ErrUnavailable) {
+			pending = err
+			continue
+		}
 		if err != nil {
 			return err
 		}
@@ -70,6 +76,9 @@ func (p deletionPreparation) complete(group string, at time.Time) error {
 		} else {
 			debts = append(debts, completed)
 		}
+	}
+	if pending != nil {
+		return pending
 	}
 	slices.SortFunc(debts, func(a, b cleanupRecord) int { return compareReplicaIdentity(a.Identity, b.Identity) })
 	p.next.Cleanup = debts
@@ -117,7 +126,8 @@ func (p deletionPreparation) readmissionDebt(debt cleanupRecord, at time.Time) (
 // An immutable pending deletion cannot acquire a new owner after Target omits
 // it. Keep its concrete retirement source usable until consumption is durable.
 func (p deletionPreparation) protectReadmission() error {
-	for key, owner := range p.collector.owners {
+	for _, key := range p.collector.sortedOwners() {
+		owner := p.collector.owners[key]
 		if owner.progress == "" || p.next.Target.MemberID(owner.target.NodeName) ==
 			p.source.Target.MemberID(owner.target.NodeName) || !p.dependsOnReadmission(key, owner.target) {
 			continue

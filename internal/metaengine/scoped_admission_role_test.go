@@ -196,3 +196,29 @@ func TestScopedAdmissionPromotedRetryKeepsImmutableGrammar(t *testing.T) {
 		t.Fatal("retry changed immutable work or lost promotion")
 	}
 }
+
+func TestScopedAdmissionCheckpointWithoutMemberCannotLeaveAdmissionLive(t *testing.T) {
+	t.Parallel()
+	s := scopedAdmissionFixture()
+	admissionPrefixReceipt(&s, 0, 1)
+	admissionPrefixReceipt(&s, 0, 2)
+	s = admissionSuccessorFixture(s, nil)
+	// The exact-member role initializer stays empty, but the newer metadata
+	// checkpoint still proves this admission must have completed or cancelled.
+	s.Groups[0].SourceVersion = 2
+	index, err := s.buildIndexes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := restoreScopedAuthority(&s, index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, valid := scopedAdmissionProgress(s.Admissions[0], &s.Operations[1], index, catalog); valid {
+		t.Fatal("checkpoint excluding the member left its admission live")
+	}
+	s.Admissions[0].State = AdmissionSuperseded
+	if _, valid := scopedAdmissionProgress(s.Admissions[0], &s.Operations[1], index, catalog); !valid {
+		t.Fatal("terminal admission lost its historical prefix")
+	}
+}

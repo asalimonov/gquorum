@@ -2,6 +2,7 @@ package metaengine
 
 import (
 	"cmp"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -19,24 +20,16 @@ type deletionPreparation struct {
 // The caller has already validated scopes and prepared required-stop handover.
 func prepareDeletionDebts(source, next *scopedState, collector planningCollector) error {
 	operation := &next.Operations[len(next.Operations)-1]
-	deleting := make(map[string]topology.PlanBlock)
-	retired := slices.Clone(next.RetiredGroups)
-	for _, block := range operation.Plan.Blocks {
-		if next.Target.Group(block.GroupID) != nil {
-			continue
-		}
-		deleting[block.GroupID] = block
-		if !slices.ContainsFunc(retired, func(row retiredGroup) bool { return row.ID == block.GroupID }) {
-			retired = append(retired, retiredGroup{ID: block.GroupID, Version: operation.Status.Version})
-		}
-	}
+	deleting, retired := next.deletionScopes(operation)
 	debts := slices.Clone(next.Cleanup)
 	existing := make(map[storage.Identity]bool, len(debts))
 	for _, debt := range debts {
 		existing[debt.Identity] = true
 	}
 	preparation := deletionPreparation{source, next, collector}
-	for key, owner := range collector.owners {
+	var pending error
+	for _, key := range collector.sortedOwners() {
+		owner := collector.owners[key]
 		block, deleted := deleting[key.group]
 		id := storage.Identity{ClusterID: next.Target.ClusterID, GroupID: key.group,
 			NodeName: owner.target.NodeName, ReplicaID: key.id}
@@ -44,6 +37,10 @@ func prepareDeletionDebts(source, next *scopedState, collector planningCollector
 			continue
 		}
 		debt, err := preparation.ordinaryDebt(id, block)
+		if errors.Is(err, fault.ErrUnavailable) {
+			pending = err
+			continue
+		}
 		if err != nil {
 			return err
 		}
@@ -51,10 +48,28 @@ func prepareDeletionDebts(source, next *scopedState, collector planningCollector
 			debts = append(debts, debt)
 		}
 	}
+	if pending != nil {
+		return pending
+	}
 	slices.SortFunc(debts, func(a, b cleanupRecord) int { return compareReplicaIdentity(a.Identity, b.Identity) })
 	slices.SortFunc(retired, func(a, b retiredGroup) int { return cmp.Compare(a.ID, b.ID) })
 	next.Cleanup, next.RetiredGroups = debts, retired
 	return nil
+}
+
+func (s *scopedState) deletionScopes(operation *topology.Operation) (map[string]topology.PlanBlock, []retiredGroup) {
+	deleting := make(map[string]topology.PlanBlock)
+	retired := slices.Clone(s.RetiredGroups)
+	for _, block := range operation.Plan.Blocks {
+		if s.Target.Group(block.GroupID) != nil {
+			continue
+		}
+		deleting[block.GroupID] = block
+		if !slices.ContainsFunc(retired, func(row retiredGroup) bool { return row.ID == block.GroupID }) {
+			retired = append(retired, retiredGroup{ID: block.GroupID, Version: operation.Status.Version})
+		}
+	}
+	return deleting, retired
 }
 
 func (p deletionPreparation) ordinaryDebt(id storage.Identity, block topology.PlanBlock) (cleanupRecord, error) {

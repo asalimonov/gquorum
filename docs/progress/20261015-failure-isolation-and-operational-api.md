@@ -875,3 +875,17 @@ Verified
 - Focused metaengine units pass, /tmp/gquorum-task36-focused.log. make test: 1422/1422 pass, 7.583s; test-reports/unit/20261016T073604.937161Z-fl6u27_l/report.md. Staged lint passes, /tmp/gquorum-task36-lint.log; diff checks pass. 519 changed handwritten Go lines including tests/reference updates, within 550. No new race/Docker run claimed.
 - Five-commit dead-code audit: inspected references for moved retirement usability, shared action construction and new deletion preparation/completion/restore helpers. The old retirementUsable method and duplicated action construction are gone; every new helper has a production preparation/restore consumer. Merged unused lint is clean. Existing legacy adapters still have explicit Task 78 removal comments and remain necessary until safe persistence activation.
 - Next is mandatory peer review of commits 46–50 before Task 37. Ask the peer to settle nonzero deletion completion where a new required Stop is consumed but older detached debt retains its original StopAction; Task 40 records that integration boundary. Current completion consumer handles zero-step deletion only. Full approval/node/marker composition and live activation remain unfinished.
+
+## Correction 15 — Deterministic deletion refusal and live admission checkpoints
+Date: 2026-10-16. Commit: this correction commit (implementation/correction commit 51).
+
+Implemented
+- Verified and accepted thread 14 findings. Sorted exact owner keys in fallible deletion preparation and cancellation protection; hard errors now outrank pending proof across all former owners. No debt or retirement milestone is published on refusal. Extracted deletion-scope preparation to keep the linter's complexity bound.
+- Metadata convergence at/after a live admission's origin now refuses even when the checkpoint omits that member. Exact-member matching still controls role initialization. Terminal admission evidence remains valid.
+- Added repeated preparation/serialization regressions for pending plus hard errors, missing issuance plus contradictory identity, stable transient refusal, source/candidate immutability, and the omitted-member checkpoint predicate.
+- Closed thread 14 in consensus. Required→detached and detached→required Stop rebinding replace the proposed parallel proof source. Updated the accepted amendment/target and queued bounded Corrections 16–17 before Task 37; recorded general old-grant settlement, bound-action cleanup authorization and completed-debt pruning closure in their later tasks. No new public retained-input field is needed.
+
+Verified
+- Focused deletion/admission/approval units pass, /tmp/gquorum-correction15-focused.log. make test after the linter refactor: 1425/1425 pass, 8.386s; test-reports/unit/20261016T075553.481078Z-5ew04zoi/report.md.
+- Staged lint passes, /tmp/gquorum-correction15-lint.log. Diff checks pass. 172 changed handwritten Go lines including tests, below 550. No new concurrency/process implementation or race/Docker run claimed.
+- Correction 16 is next, then Correction 17, then Task 37. Next peer/dead-code checkpoint is commit 55. The 88-task goal and final activation remain unfinished.

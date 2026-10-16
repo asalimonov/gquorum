@@ -2,6 +2,7 @@ package metaengine
 
 import (
 	"cmp"
+	"maps"
 	"slices"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -24,6 +25,13 @@ type planningCollector struct {
 	evidence planningEvidence
 	owners   map[planningReplicaKey]*planningReplica
 	founding map[string]bool
+}
+
+// Replicated preparation must choose errors and effects in the same order.
+func (c planningCollector) sortedOwners() []planningReplicaKey {
+	return slices.SortedFunc(maps.Keys(c.owners), func(a, b planningReplicaKey) int {
+		return cmp.Or(cmp.Compare(a.group, b.group), cmp.Compare(a.id, b.id))
+	})
 }
 
 func collectPlanningEvidence(input topology.PlanInput, desired topology.Document,

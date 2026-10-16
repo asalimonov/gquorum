@@ -331,3 +331,42 @@ Scoped readmission/admission issuance checks current exact approved member and
 metadata ownership/handover, not equality with the latest whole Target version.
 An unrelated approval must not prevent a batch from being issued. This preserves
 the approval-time batch prerequisite without adding a provenance entity or API.
+
+## Stop rebinding and complete deletion coverage (`FI_STOP_BINDING`)
+
+Thread 14 consensus supersedes the earlier blanket statement that detached stops
+always remain at their original approval. Original debt OperationID, member,
+storage, Removed and RetireAction remain immutable; an unconsumed StopAction may
+move to an exact successor action when its execution requirement changes.
+
+| Current Stop binding | Successor Stop | Result |
+| --- | --- | --- |
+| Required | Required | Rebind to exact successor |
+| Required | Cleanup, with no same-host reuse or deletion | Rebind as detached |
+| Required | Cleanup while reuse/deletion still requires it | Refuse |
+| Required | Omitted | Refuse unless exact readmission consumption covers it |
+| Detached | Required | Rebind as required |
+| Detached | Cleanup | Refuse duplicate; retain existing detached binding |
+
+For planning, RetainedCleanup plus requiredRetainedStop(Approved.Group, identity)
+and the successor's desired placement identifies the required→detached case.
+There is no new public input field. The FSM independently checks the debt's actual
+binding and the successor's exact partition. Native exclusion/consumed removal
+must already hold; otherwise ordinary guarded removal precedes Stop.
+
+Restore validates the current Stop action in its bound operation, including a
+later approval's Cleanup partition. The original retirement action and Removed
+receipt still validate against the origin. All unconsumed Stop rebindings settle
+or close the old conflicting grant before successor issuance. Late old receipts
+remain historical evidence. Cleanup authorization resolves the current StopAction,
+not an assumed action in debt.OperationID. Deletion completion then uses the one
+bound required Stop receipt as Stopped; no second proof representation is needed.
+
+An existing unstopped debt never excuses an omitted deletion stop. If the current
+deletion block (or ownerless failed tip) has no exact required Stop, the former
+identity needs an issued usable/consumed readmission batch at approval and restore,
+and that batch remains protected against cancellation until consumption. This
+applies equally to debts with detached and required bindings. Pending completion
+cannot hide a hard error on another identity: replicated preparation scans in a
+deterministic order and hard refusal outranks Unavailable. Completed-debt pruning
+must also preserve restore when another root still pins former-host declarations.

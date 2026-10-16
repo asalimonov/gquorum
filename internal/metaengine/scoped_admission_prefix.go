@@ -48,7 +48,8 @@ func scopedAdmissionProgress(a AdmissionRecord, current *topology.Operation,
 		return progress, false
 	}
 	progress.includeCheckpoint(a, index)
-	if progress.checkpoint >= chain[0].Status.Version && !a.State.terminal() {
+	meta := index.groups[topology.MetaGroupID]
+	if meta != nil && meta.SourceVersion >= chain[0].Status.Version && !a.State.terminal() {
 		return admissionProgress{}, false // Metadata completion must complete its live admissions atomically.
 	}
 	var version uint64

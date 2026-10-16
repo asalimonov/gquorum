@@ -626,6 +626,43 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [x] Run focused deletion/readmission/approval/restore units, staged lint and `make test`.
 
+### Correction 15: Make deletion refusal deterministic and close the live-admission invariant
+
+**Source:** peer thread 14 findings 1 and 4, verified against c12eab9. **Budget:** estimated 180–350 changed Go lines including tests, ceiling 550. Complete before Task 37; remaining review findings receive separate bounded corrections.
+
+- [x] Sort exact owner keys wherever deletion preparation can refuse. A hard error outranks pending Unavailable across all owners; no partial debt or milestone is published. Cancellation protection keeps its no-issued-batch semantics with deterministic selection.
+- [x] Reject a live admission covered by a metadata checkpoint at/after its origin even if that checkpoint no longer contains the member; retain exact-member-only role initialization.
+- [x] Test mixed pending/hard errors across repeated preparation runs, immutable source/candidate on refusal, stable transient selection, and missing-member live admissions.
+
+**Verification**
+
+- [x] Run focused deletion/admission units, staged lint, `make test`, and diff checks; record the result and commit separately.
+
+### Correction 16: Require readmission coverage for omitted deletion stops despite existing debt
+
+**Source:** peer thread 14 finding 2 and round-3 consensus. **Budget:** estimated 250–500 changed Go lines including tests, ceiling 550.
+
+- [ ] Classify omission from the actual current deletion block, including an ownerless failed tip. An unstopped existing detached debt without an exact required Stop needs the same issued usable batch as a debt-less former identity.
+- [ ] Apply that predicate to approval, cancellation protection and restore; preserve original debt attribution and pending whole-batch completion.
+- [ ] Test actual approval with detached debt, missing/fenced/pending/consumed batch coverage, protected cancellation and restore refusal/immutability.
+
+**Verification**
+
+- [ ] Run focused deletion/cleanup units, staged lint, `make test`, and diff checks; log and commit separately.
+
+### Correction 17: Rebind stops according to the successor's required or cleanup partition
+
+**Source:** peer thread 14 finding 3 and forward-question consensus. **Budget:** estimated 300–530 changed Go lines including tests, ceiling 550.
+
+- [ ] Use existing Approved/desired same-host placement plus RetainedCleanup to plan an exact standalone Cleanup Stop when a formerly required stop becomes detached. Do not add a public retained-input field. Require native absence/consumed removal, and keep required reuse/deletion stops required.
+- [ ] Rebind required→required, required→detached, and detached→required to the successor's exact approved action. Refuse detached→detached duplicates and omission of a still-required stop unless exact readmission consumption covers it. Preserve origin/member/storage/Removed/RetireAction and consumed receipts.
+- [ ] Validate each action in its own required/Cleanup partition at restore; later-bound cleanup stops may differ from the debt origin. Late old receipts remain historical.
+- [ ] Test handover/restore chain, obsolete host no longer blocking required work, same-host/deletion safety, omission and duplicate refusal. Record every-rebind old-grant settlement in Task 38 and bound-action lookup in Task 43.
+
+**Verification**
+
+- [ ] Run focused planner/approval/cleanup/restore units, staged lint, `make test`, and diff checks; log and commit separately.
+
 ### Task 37: Prepare atomic approvals and zero-step convergence
 
 **Files:** `internal/metaengine` approval/deletion/convergence helpers and tests. **Target:** [T] §5.2, §6.2, §7.1, §12 “Approve”; accepted admission amendment. **Depends on:** 29–36. **Budget:** estimated 350–530 changed Go lines, ceiling 550.
@@ -644,6 +681,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** `internal/metaengine/authority_revocation.go`, `authority_catalog.go`, `cleanup_evidence.go`. **Target:** [T] §6.2, §6.4; contract C8. **Depends on:** 8–15, 34–37. **Budget:** ≤550.
 
 - [ ] Implement revokeAuthorityLocked(index, []blockRef, successor); key revocations by OperationID+GroupID. Close/inherit only affected resources and preserve unrelated and cleanup-class grants unless an actual resource conflict requires fencing. Preserve usable exact readmission retirement for the same granted replacement during admission handover; never revive fenced grants. Refuse cancellation/fencing of a batch still required by pending deletion. Fence issued founding/preparation resources before a deletion Stop so late founding cannot recreate data afterward.
+- [ ] Every unconsumed StopAction rebind (required→required, required→detached or detached→required) settles/closes the old conflicting host grant before successor issuance; late old receipts stay historical.
 - [ ] Remove pendingCost admission and global inherited-obligation/close-all behavior. Prepare the complete catalog update before installation; preserve exact floor/evidence validation and aggregate ReadAuthority/WaitRevoked semantics.
 - [ ] Finish isolated applyBeginOperation by composing Task 37's complete candidate with scoped revocations before one non-fallible installation. Test atomic install/refusal, exact approval replay and late CAS; live production activation remains Task 78.
 - [ ] Test A's pending revocation does not affect B, same-resource obligations cannot be skipped, cleanup grants survive unrelated approval and “not requested” differs from requested-and-complete.
@@ -675,7 +713,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] A zero-step deletion awaiting whole-batch readmission consumption stays blocked with an exact reason; recheck on receipts before atomically completing and retaining debt.
 
-- [ ] Before reusing zero-step deletion completion for nonzero blocks, handle an exact consumed required Stop independently of an older detached debt's unchanged StopAction. Restore/retention must preserve that execution proof without putting detached cleanup back on the required path; settle the precise representation in the commit-50 peer review.
+- [ ] Use Correction 17's rebound required StopAction for ordinary deletion completion, including formerly detached debt. Its exact receipt supplies Stopped; do not add a second parallel proof source or relabel an old receipt.
 
 **Verification**
 
@@ -716,6 +754,8 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 - [ ] Test terminal-operation cleanup, forged cleanup classification, same-host conflict, repeated polling causing no durable writes and preserved milestones on deferral/failure updates.
 
 - [ ] Match BeginCleanupEffect.Action against the complete stored action tuple; a reused StepSeq from another operation is not the expected action. Preserve CleanupStatus historical MemberID/RetirementKey through callbacks and authenticated routing.
+
+- [ ] Resolve cleanup Stop authorization from the debt's current StopAction and its exact bound approval, which may differ from debt.OperationID after required→detached handover. Retirement and Removed keep original attribution.
 
 **Verification**
 
@@ -840,6 +880,8 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 - [ ] Test failed-attempt references prevent pruning, complete orphaned records can prune, repeated removal cannot recreate debt, settled grants remain references when otherwise required and soft history caps do not reject unrelated approvals.
 
 - [ ] Retain every never-converged founding grant (any outcome) until convergence or completed deletion with a permanent retired-group marker; pruning must not erase the planner's FoundingIssued evidence and authorize refounding.
+
+- [ ] Completed-debt pruning must remain restorable when another proof root still pins a declaration naming the former owner. Prune that ownership context together or retain equivalent completion evidence; do not let tombstone validation rediscover an owner after dropping its only proof.
 
 - [ ] Pending deletion pins exact former assignments (including issued never-converged founding/preparation), usable readmission batches and their original admission/operation chains through consumption and cleanup completion.
 
