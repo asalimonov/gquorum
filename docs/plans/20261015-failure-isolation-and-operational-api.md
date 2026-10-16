@@ -744,14 +744,14 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaengine/operator_state.go`, retry/receipt lookup helpers. **Target:** [T] §3.4, §6.1, §12 “Retry derives state”. **Depends on:** 38–43. **Budget:** ≤550.
 
-- [ ] Derive the new attempt from Previous inside the FSM; preserve the entire immutable Plan byte-for-byte. Reopen only failed blocks at the first unconsumed required step; terminal siblings retain their state/proof and superseded scopes are never reclaimed.
-- [ ] Require terminal failed aggregate, unchanged approved failed scopes and executable suffix. Prepare scoped predecessor revocations before assigning retry owners; retain original receipt tuples through Previous rather than relabeling them.
-- [ ] Rebind live admission progress to the exact retried `_meta` attempt, preserving the origin operator/instance and batch evidence needed by ReadmissionID in the same process-keyed record. Reject caller-selected origins and validate persistence/join/restore provenance. Derive readiness from complete same-node/member retirement; learner/promoted progress still requires exact native effects through Previous. Rebind only unconsumed required StopAction in the same atomic transition. Test retry before/after preparation, AddLearner and promotion, including lost responses and process replacement.
-- [ ] Test duplicate retry returns the same immediate successor even after its failure, concurrent retry deduplication, lost-response replay, missing history, unsafe suffix and failed-block-with-running-sibling refusal.
+- [x] Derive the new attempt from Previous inside the FSM; preserve the entire immutable Plan byte-for-byte. Reopen only failed blocks at the first unconsumed required step; terminal siblings retain their state/proof and superseded scopes are never reclaimed.
+- [x] Require terminal failed aggregate, unchanged approved failed scopes and executable suffix. Prepare scoped predecessor revocations before assigning retry owners; retain original receipt tuples through Previous rather than relabeling them.
+- [x] Rebind live admission progress to the exact retried `_meta` attempt, preserving the origin operator/instance and batch evidence needed by ReadmissionID in the same process-keyed record. Reject caller-selected origins and validate persistence/join/restore provenance. Derive readiness from complete same-node/member retirement; learner/promoted progress still requires exact native effects through Previous. Rebind only unconsumed required StopAction in the same atomic transition. Test retry before/after preparation, AddLearner and promotion, including lost responses and process replacement.
+- [x] Test duplicate retry returns the same immediate successor even after its failure, concurrent retry deduplication, lost-response replay, missing history, unsafe suffix and failed-block-with-running-sibling refusal.
 
 **Verification**
 
-- [ ] Run plan retry/authority consumption units and `make test`.
+- [x] Run plan retry/authority consumption units and `make test`.
 
 ### Task 45: Implement deterministic semantic rebase preparation
 

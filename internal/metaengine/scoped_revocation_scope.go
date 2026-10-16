@@ -28,7 +28,7 @@ func (s *scopedState) successorResources(operation *topology.Operation) map[topo
 	if operation == nil {
 		return resources
 	}
-	for _, step := range operation.Plan.Steps {
+	for _, step := range s.successorSteps(operation) {
 		resource := topology.AuthorityResource{GroupID: step.GroupID, NodeName: step.NodeName}
 		switch step.Kind {
 		case topology.StepPrepareReplica, topology.StepStopReplica, topology.StepCleanupReplicaState:

@@ -985,3 +985,16 @@ Implemented
 Verified
 - Full metaengine units pass; make test: 1528/1528, 7.301s, test-reports/unit/20261016T101217.869606Z-rn1sexud/report.md. Staged lint and diff checks pass (/tmp/gquorum-task43-lint.log). Existing service authority functional tests pass, 2.223s (/tmp/gquorum-task43-service.log).
 - Regressions cover terminal operation cleanup, full tuple refusal, pending same-host fence, grant replay without writes, both late revision receipt orders, unreconciled/forged restore, original-host diagnostic proof, stable milestones and required-to-detached rebinding. No race/Docker run claimed for pure FSM changes. No tasks added or split. Next Task44; review/dead-code checkpoint60.
+
+## Task 44 — Exact failed-attempt retry
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 59).
+
+Implemented
+- The FSM derives an immutable-plan successor from a terminal failed attempt; retained Previous edges return the same immediate successor even after that successor fails. Exact failed-scope captures, unchanged approved intent and absence of newer overlapping approvals are required. Missing evidence, unsafe suffixes, clocks and active siblings refuse before installation.
+- Failed blocks reopen at their first unconsumed required step. Catch-up observations only count after recorded progress; a fully consumed suffix remains pending final verification. Succeeded/superseded siblings and original receipt tuples are preserved. Revocation selects failed scopes and unconsumed successor resources, excluding inherited work and detached cleanup.
+- Admission handover reuses existing exact origin/process/batch proof, permits a not-yet-bound process without authorizing preparation, preserves native milestones and refuses fenced batches. Only an unconsumed required Stop rebinds; consumed stop and original retirement remain untouched.
+- Retry acknowledges a consumed current role step when advancing its cursor, preserving original grant/action attribution and cooldown. One retry Apply can acknowledge effects in multiple groups, so scoped role-completion index uniqueness is per group; legacy validation remains unchanged. Updated the former global-uniqueness unit to cover this valid atomic case.
+
+Verified
+- Focused retry tests and full metaengine units pass. make test: 1552/1552, 8.719s; test-reports/unit/20261016T102629.682566Z-mbg_lxbp/report.md. Staged lint and diff checks pass (/tmp/gquorum-task44-lint.log).
+- Tests cover duplicate/concurrent replay, repeated failures, unchanged full plans/siblings, missing/stale scope refusal without mutation, unrelated Target progress, required/consumed Stop bindings, preparation/learner/promotion/catch-up phases, process replacement, missing binding, original cooldown, partial/complete/fenced readmission and batch replay. Pure serialized FSM changes; no new race/Docker run claimed. Next Task45 and then mandatory commit60 peer/dead-code checkpoint; no new tasks.

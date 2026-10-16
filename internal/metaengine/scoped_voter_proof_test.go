@@ -74,11 +74,7 @@ func TestScopedVoterRetainsOneRemovedCooldownAnchor(t *testing.T) {
 func TestScopedVoterRejectsBrokenSummaryAndStagedProvenance(t *testing.T) {
 	t.Parallel()
 	cases := map[string]func(*scopedState){
-		"missing last": func(s *scopedState) { s.VoterSwitches[0].Replicas = nil },
-		"duplicate apply index": func(s *scopedState) {
-			s.VoterSwitches[0].Last.Index = s.VoterSwitches[1].Last.Index
-			s.VoterSwitches[0].Replicas[0] = s.VoterSwitches[0].Last
-		},
+		"missing last":  func(s *scopedState) { s.VoterSwitches[0].Replicas = nil },
 		"unknown group": func(s *scopedState) { s.VoterSwitches[0].GroupID = "absent" },
 		"staged approval": func(s *scopedState) {
 			s.VoterSwitches[0].Last.Version, s.VoterSwitches[0].Last.OperatorID = 4, "exec-v4-a1"
@@ -94,5 +90,17 @@ func TestScopedVoterRejectsBrokenSummaryAndStagedProvenance(t *testing.T) {
 				t.Fatal("invalid role summary accepted", err)
 			}
 		})
+	}
+}
+
+func TestScopedVoterCompletionIndexMayBeSharedAcrossGroups(t *testing.T) {
+	t.Parallel()
+	s := scopedCodecFixture()
+	// An atomic retry may acknowledge previously consumed role changes in
+	// several failed blocks. The exact action/receipt remains group-specific.
+	s.VoterSwitches[0].Last.Index = s.VoterSwitches[1].Last.Index
+	s.VoterSwitches[0].Replicas[0] = s.VoterSwitches[0].Last
+	if _, err := prepareScopedGraph(&s, s.Rules); err != nil {
+		t.Fatal("shared metadata Apply index rejected independent role effects", err)
 	}
 }

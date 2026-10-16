@@ -31,7 +31,9 @@ func validateScopedVoterSwitches(state *scopedState, index *scopedIndexes, catal
 	if !check.rememberScopedDeclarations(state) || !check.rememberScopedEffects(state) {
 		return invalidVoterSwitch()
 	}
+	// One retry Apply may acknowledge one skipped role effect in each failed group.
 	for _, group := range state.VoterSwitches {
+		check.seenIndexes = map[uint64]bool{}
 		if err := check.groupState(group); err != nil {
 			return err
 		}
