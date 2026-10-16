@@ -453,3 +453,14 @@ uses that retained successful block and the exact current approved member,
 independently of newer Target versions, aggregate failure and load-dependent
 node progress. Native/current-term service checks remain. Snapshot restore uses
 the persisted checkpoint, not a new seed assertion or an AfterApply cache.
+
+### First session after a retained restart (peer thread 18, Task 51)
+
+`FI_SESSION_ADMISSION`: completed admission belongs to the exact durable
+(node name, member ID), while session exclusivity belongs to the process lock.
+A retained restart before its first session uses the old process's completed
+admission after checking approved/proven metadata membership. It does not bind
+the seed again. Local pin/startup and authenticated join checks still prohibit
+claiming an established member after disk loss. A late unbound founder may bind
+the retained v1 metadata proof after unrelated approvals; service and FSM must
+apply the same predicate, including during the schema-3 transition.

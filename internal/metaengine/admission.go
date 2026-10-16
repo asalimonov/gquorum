@@ -160,10 +160,9 @@ func (sm *topologySM) applyBindAdmission(p BindAdmissionProposal) (ApplyResult, 
 func (sm *topologySM) assignBoundAdmissionStateLocked(record *AdmissionRecord, operator *operatorRecord,
 	p BindAdmissionProposal) *ApplyResult {
 	if p.Founding {
-		if operator.State != topology.OperatorSucceeded || sm.target.Version != sm.active.Version ||
-			sm.target.Version != operator.Version || sm.target.Origin != topology.OriginFounding {
+		if !sm.validFoundingBinding(*record) {
 			result := rejectProposal(p.ProposalID, proposalAuthorization,
-				"founding admission is not backed by the active founding execution")
+				"founding admission is not backed by exact retained metadata proof")
 			return &result
 		}
 		record.State = AdmissionCompleted
@@ -181,7 +180,12 @@ func (sm *topologySM) assignBoundAdmissionStateLocked(record *AdmissionRecord, o
 
 func (sm *topologySM) admissionInstanceReplacementLocked(p BindAdmissionProposal,
 	record AdmissionRecord) (AdmissionRecord, *ApplyResult) {
-	if conflict := sm.liveAdmissionForNodeLocked(record.NodeName, record.InstanceID); conflict != nil {
+	return admissionInstanceReplacement(p, record, sm.liveAdmissionForNodeLocked(record.NodeName, record.InstanceID))
+}
+
+func admissionInstanceReplacement(p BindAdmissionProposal, record AdmissionRecord,
+	conflict *AdmissionRecord) (AdmissionRecord, *ApplyResult) {
+	if conflict != nil {
 		if !p.ReplaceInstance {
 			result := rejectProposal(p.ProposalID, proposalAuthorization, "node %q is already admitted for instance %q",
 				record.NodeName, conflict.InstanceID)

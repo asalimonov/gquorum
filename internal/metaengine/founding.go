@@ -13,14 +13,32 @@ func (m *Machine) AdmissionBasis(identity topology.Identity) (topology.Operation
 		return "", false
 	}
 	id := topology.MakeOperatorID(1, 1)
-	op := m.operators[id]
-	if op != nil && op.State == topology.OperatorSucceeded {
-		if doc, ok := m.documentLocked(1); ok && doc.Origin == topology.OriginFounding &&
-			doc.MemberID(identity.NodeName) == identity.MemberID {
-			return topology.OperationID(id), true
-		}
+	if m.foundingMemberLocked(identity.NodeName, identity.MemberID) {
+		return topology.OperationID(id), true
 	}
 	return "", true
+}
+
+func (sm *topologySM) foundingMemberLocked(name string, member uint64) bool {
+	op := sm.operators[topology.MakeOperatorID(1, 1)]
+	doc, ok := sm.documentLocked(1)
+	return ok && op != nil && op.State == topology.OperatorSucceeded && doc.Origin == topology.OriginFounding &&
+		doc.MemberID(name) == member
+}
+
+func (sm *topologySM) validFoundingBinding(record AdmissionRecord) bool {
+	identity := topology.Identity{ClusterID: sm.target.ClusterID, NodeName: record.NodeName, MemberID: record.MemberID}
+	if record.OperatorID != topology.MakeOperatorID(1, 1) ||
+		!sm.foundingMemberLocked(record.NodeName, record.MemberID) ||
+		!admissionMemberMatches(sm.target, sm.active.MetaGroup(), identity) {
+		return false
+	}
+	for _, prior := range sm.admissions {
+		if prior.NodeName == record.NodeName && prior.MemberID == record.MemberID {
+			return false // A retained restart uses completed membership proof, not another seed binding.
+		}
+	}
+	return true
 }
 
 func admissionMemberMatches(target topology.Document, proven *topology.Group, identity topology.Identity) bool {

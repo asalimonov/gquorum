@@ -322,27 +322,32 @@ type sessionActivation struct {
 
 func (g *Group) validateSessionTopology(ctx context.Context, state sessionActivation) error {
 	identity, machine := state.identity, state.machine
-	founding, ready := machine.AdmissionBasis(identity)
-	if !ready || !containsMember(g.engine.Load().Status().ConfState, identity.MemberID) {
+	if !containsMember(g.engine.Load().Status().ConfState, identity.MemberID) {
 		return fault.ErrUnavailable
 	}
-	activated := machine.HasActivated(identity.NodeName)
-	if !activated && founding == "" {
-		admission, exists := machine.Admission(identity.NodeName, identity.InstanceID)
-		if !exists || admission.MemberID != identity.MemberID || admission.State != metaengine.AdmissionCompleted {
-			return fault.ErrUnavailable
-		}
+	founding, err := sessionAdmissionBasis(machine, identity)
+	if err != nil || founding == "" {
+		return err
 	}
-	if !activated && founding != "" {
-		_, bindErr := g.propose(ctx,
-			metaengine.BindAdmissionProposal{Admission: metaengine.AdmissionRecord{NodeName: identity.NodeName,
-				InstanceID: identity.InstanceID, MemberID: identity.MemberID,
-				OperatorID: topology.OperatorID(founding)}, Founding: true, At: time.Now().UTC()})
-		if bindErr != nil {
-			return bindErr
-		}
+	_, err = g.propose(ctx,
+		metaengine.BindAdmissionProposal{Admission: metaengine.AdmissionRecord{NodeName: identity.NodeName,
+			InstanceID: identity.InstanceID, MemberID: identity.MemberID,
+			OperatorID: topology.OperatorID(founding)}, Founding: true, At: time.Now().UTC()})
+	return err
+}
+
+func sessionAdmissionBasis(machine *metaengine.Machine, identity topology.Identity) (topology.OperationID, error) {
+	founding, ready := machine.AdmissionBasis(identity)
+	if !ready {
+		return "", fault.ErrUnavailable
 	}
-	return nil
+	if machine.HasActivated(identity.NodeName) || machine.HasCompletedAdmission(identity.NodeName, identity.MemberID) {
+		return "", nil
+	}
+	if founding == "" {
+		return "", fault.ErrUnavailable
+	}
+	return founding, nil
 }
 
 func selectSessionIdentity(state *sessionActivation) error {

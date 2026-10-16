@@ -175,4 +175,15 @@ func TestScopedRetryBeforeProcessBindsAdmission(t *testing.T) {
 		Action: scopedPlanAction(op, op.Plan.Steps[0])}); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("retry approval bypassed actual admission binding", err)
 	}
+	bind := joiningProposal(&s)
+	if _, err := s.applyBindAdmission(s.AppliedIndex+1, bind); !errors.Is(err, fault.ErrOperationAuthorization) {
+		t.Fatal("fresh process selected the failed attempt", err)
+	}
+	bind.Admission.OperatorID = result.result.OperatorID
+	bound := applyAdmissionFixture(t, &s, KindBindAdmission, bind)
+	applyAdmissionFixture(t, &s, KindReadyAdmission, readyProposal(bound.result.Admission))
+	if _, err := s.applyBeginEffect(s.AppliedIndex+1, BeginEffectProposal{
+		Action: scopedPlanAction(op, op.Plan.Steps[0])}); err != nil {
+		t.Fatal("exact retry admission could not prepare", err)
+	}
 }

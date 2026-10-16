@@ -40,6 +40,12 @@ func TestReadmissionReplyCarriesApprovedFormerReplicasWithoutLocalMetaDisk(t *te
 		t.Fatal(err)
 	}
 	op := f.command(t, metaengine.BeginOperatorProposal{Version: 2, Plan: plan, At: time.Now().UTC()}).OperatorID
+	if id, ok := f.g.machine.AdmissionOperation("n1", 4); !ok || id != topology.OperationID(op) {
+		t.Fatal("join could not resolve its pinned admission operation", id, ok)
+	}
+	if _, ok := f.g.machine.AdmissionOperation("n1", 1); ok {
+		t.Fatal("join selected an operation for the former member")
+	}
 	admission := metaengine.AdmissionRecord{NodeName: "n1", InstanceID: "fresh-process", MemberID: 4, OperatorID: op}
 	f.command(t, metaengine.BindAdmissionProposal{Admission: admission, At: time.Now().UTC()})
 	f.command(t, metaengine.BeginReadmissionAuthority{NodeName: admission.NodeName, InstanceID: admission.InstanceID, MemberID: admission.MemberID, PreviousMemberID: 1, OperatorID: op})

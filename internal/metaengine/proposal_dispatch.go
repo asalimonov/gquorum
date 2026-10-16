@@ -84,6 +84,8 @@ func applyScopedProposal(state *scopedState, index uint64, kind ProposalKind,
 		return applyScopedJSONProposal(index, body, state.applyProposeDocument)
 	case KindBindAdmission:
 		return applyScopedJSONProposal(index, body, state.applyBindAdmission)
+	case KindReadyAdmission:
+		return applyScopedJSONProposal(index, body, state.applyReadyAdmission)
 	case "begin_cleanup_effect":
 		return applyScopedJSONProposal(index, body, state.applyBeginCleanupEffect)
 	case "record_cleanup_status":

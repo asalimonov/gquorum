@@ -111,17 +111,6 @@ func joinClassificationReady(status raft.Status, machine *metaengine.Machine) bo
 		status.Applied >= status.Commit && index >= status.Commit && term >= status.Term
 }
 
-func hasAdmissionSteps(plan topology.Plan, desired topology.Document, name string, id uint64) bool {
-	if meta := desired.MetaGroup(); meta != nil {
-		for _, r := range meta.Replicas {
-			if r.NodeName == name && r.ReplicaID == id {
-				return topology.ValidAdmissionSequence(plan.Steps, name, id, r.Role)
-			}
-		}
-	}
-	return false
-}
-
 func (g *Group) membershipReply(ctx context.Context) joinResponse {
 	response := joinResponse{Rules: g.rules, LeaderAddress: g.opts.Network.AdvertiseAddress}
 	views := g.state().Views()

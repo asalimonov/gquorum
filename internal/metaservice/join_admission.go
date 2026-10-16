@@ -145,14 +145,13 @@ func (g *Group) joinWithTopology(ctx context.Context, state joinClassification) 
 		return g.refuseJoin(req, parkedUnapproved,
 			fault.New(fault.OperatorAuthorization, "draining nodes may only restart their retained identity", nil))
 	}
-	if ex, ok := machine.CurrentOperator(); ok && ex.Status.Version == target.Version && !ex.Status.State.Terminal() &&
-		hasAdmissionSteps(ex.Plan, target, req.Node.Name, member) {
+	if id, ok := machine.AdmissionOperation(req.Node.Name, member); ok {
 		return g.bindJoinAdmission(ctx, req, metaengine.BindAdmissionProposal{
 			Admission: metaengine.AdmissionRecord{
 				NodeName:   req.Node.Name,
 				InstanceID: req.Identity.InstanceID,
 				MemberID:   member,
-				OperatorID: ex.Status.ID,
+				OperatorID: topology.OperatorID(id),
 			},
 			ReplaceInstance: replace,
 			At:              time.Now().UTC(),

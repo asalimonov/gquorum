@@ -106,6 +106,19 @@ func TestAdmissionStableLearnerCompletesAndSurvivesSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireAdmissionState(t, restored, admission.InstanceID, AdmissionCompleted)
+	machine := &Machine{topologySM: restored}
+	identity := topology.Identity{ClusterID: restored.Target().ClusterID, NodeName: admission.NodeName,
+		MemberID: admission.MemberID, InstanceID: "retained-restart"}
+	if _, exists := machine.Admission(identity.NodeName, identity.InstanceID); exists ||
+		machine.HasActivated(identity.NodeName) || !machine.HasCompletedAdmission(identity.NodeName, identity.MemberID) {
+		t.Fatal("fresh retained process lost completed durable admission")
+	}
+	if founding, ready := machine.AdmissionBasis(identity); !ready || founding != "" {
+		t.Fatal("non-founding retained admission has no readiness proof", founding, ready)
+	}
+	if machine.HasCompletedAdmission(identity.NodeName, identity.MemberID+1) {
+		t.Fatal("completed admission covered a successor member")
+	}
 	active := restored.Active()
 	if active.MetaGroup().Replicas[1].Role != topology.ReplicaLearner {
 		t.Fatal("learner promoted during restoration")

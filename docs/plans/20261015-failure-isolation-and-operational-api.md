@@ -839,15 +839,15 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaengine/admission.go`, `progress.go`, scope/barrier validation. **Target:** [T] §3.3, §5.2/§5.4, §12 “Admission and evacuation barriers”. **Depends on:** 28–41, 49–50. **Budget:** ≤550.
 
-- [ ] Bind joining identities to the current nonterminal `_meta` block and its own pinned plan, not global Target.Version. Preserve Target identity consistency and exact learner-first member/instance checks after unrelated approvals/rebases.
-- [ ] Share barrierSatisfied semantics among dispatch, grant issuance and execution revalidation. Load preparation and founding voter hosts accept exact metadata convergence or consumed preparation from any valid approved operation, with current binding and full readmission checks. Do not gate evacuation/stop/cleanup. Validate resumed admission prefixes rather than demanding repeated Prepare/Add in an already-native successor. Removal scans current and retained approved/proven/intermediate assignments, preparations, native-removal proof and whole-group required stops; nil initial convergence is unknown.
-- [ ] Test metadata supersession leaves unchanged load blocks waiting/runnable under their original owner, cross-operation dependencies, founding proof, same-process handover/retry, wrong origins and Ready-only refusal. Test load-block supersession does not itself invalidate removal, newly relevant evacuation scopes are checked, detached cleanup alone does not block and same-node readmission replacement uses its own proof path.
+- [x] Bind joining identities to the current nonterminal `_meta` block and its own pinned plan, not global Target.Version. Preserve Target identity consistency and exact learner-first member/instance checks after unrelated approvals/rebases.
+- [x] Share barrierSatisfied semantics among dispatch, grant issuance and execution revalidation. Load preparation and founding voter hosts accept exact metadata convergence or consumed preparation from any valid approved operation, with current binding and full readmission checks. Do not gate evacuation/stop/cleanup. Validate resumed admission prefixes rather than demanding repeated Prepare/Add in an already-native successor. Removal scans current and retained approved/proven/intermediate assignments, preparations, native-removal proof and whole-group required stops; nil initial convergence is unknown.
+- [x] Test metadata supersession leaves unchanged load blocks waiting/runnable under their original owner, cross-operation dependencies, founding proof, same-process handover/retry, wrong origins and Ready-only refusal. Test load-block supersession does not itself invalidate removal, newly relevant evacuation scopes are checked, detached cleanup alone does not block and same-node readmission replacement uses its own proof path.
 
-- [ ] Scoped issuance uses the exact current approved member and its metadata owner/handover chain, never whole-Target version equality. Verify an unrelated approval after readmission approval still permits issuance, then dependent deletion approval.
+- [x] Scoped issuance uses the exact current approved member and its metadata owner/handover chain, never whole-Target version equality. Verify an unrelated approval after readmission approval still permits issuance, then dependent deletion approval.
 
 **Verification**
 
-- [ ] Run barrier/admission units and focused join functional checks; run `make test`.
+- [x] Run barrier/admission units and focused join functional checks; run `make test`.
 
 ### Task 52: Retain proof closure and prune without resurrecting debt
 

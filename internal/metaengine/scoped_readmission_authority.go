@@ -35,10 +35,8 @@ func (s *scopedState) applyBeginReadmissionAuthority(index uint64,
 	if p.PreviousMemberID != want {
 		return proposalApplication{}, fault.ErrOperationAuthorization
 	}
-	op := s.indexes.operations[topology.OperationID(p.OperatorID)]
-	meta := s.indexes.groups[topology.MetaGroupID]
-	if op == nil || meta == nil || meta.Owner != op.Status.ID || op.Status.State.Terminal() {
-		return proposalApplication{}, fault.ErrOperationAuthorization
+	if err := s.validateJoiningAdmission(admission); err != nil {
+		return proposalApplication{}, err
 	}
 	targets := s.scopedReadmissionTargets(p)
 	if len(targets[topology.MetaGroupID]) == 0 {

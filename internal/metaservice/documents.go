@@ -81,7 +81,7 @@ func (g *Group) Stage(ctx context.Context, doc topology.Document, expected uint6
 		return topology.Document{}, err
 	}
 	proposal := metaengine.ProposeDocument{Doc: doc.Clone(), ExpectedVersion: expected}
-	if g.state().Latest().Version != expected {
+	if g.state().Latest().Version > expected {
 		result, err := g.state().ReplayMutation(proposal)
 		return result.Doc, err
 	}

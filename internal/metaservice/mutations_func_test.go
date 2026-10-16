@@ -519,3 +519,14 @@ func TestStageLostResponseReturnsHistoricalDocumentWithoutProposal(t *testing.T)
 		t.Fatal(err)
 	}
 }
+
+func TestStageDoesNotDecideFutureCASFromLocalLag(t *testing.T) {
+	t.Parallel()
+	f := newMutationFixture(t)
+	latest := f.g.machine.Latest()
+	// This fixture has no running engine. Reaching the proposal path returns
+	// Stopped, whereas a local replay check incorrectly returns VersionConflict.
+	if _, err := f.g.Stage(t.Context(), latest, latest.Version+1); !errors.Is(err, fault.ErrStopped) {
+		t.Fatal("future expected version was decided from stale local state", err)
+	}
+}
