@@ -42,7 +42,11 @@ func prepareScopedApproval(s *scopedState, desired topology.Document,
 	if err := validateNewRetirement(collector, input, desired, p.Plan); err != nil {
 		return nil, err
 	}
-	return s.prepareApprovalOwners(desired, p), nil
+	next := s.prepareApprovalOwners(desired, p)
+	if err := prepareAdmissionHandovers(s, next); err != nil {
+		return nil, err
+	}
+	return next, nil
 }
 
 func (s *scopedState) validateApprovalCaptures(desired topology.Document,

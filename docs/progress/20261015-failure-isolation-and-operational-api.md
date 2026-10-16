@@ -782,3 +782,23 @@ Verified
 - make test: 1357/1357 pass, 5.355s; test-reports/unit/20261016T061010.553590Z-0s2swfme/report.md.
 - Staged lint passes, /tmp/gquorum-task32-lint.log; corrected function complexity, operand order, switch default and line length. git diff --check passes. 436 changed handwritten Go lines, including tests, within 550.
 - Pure restore/proof changes; no new concurrency or process execution. The next task prepares the actual same-record handover. Next five-commit review is after Task 33 (commit 45).
+
+## Task 33 — Prepare same-record admission handover
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 45).
+
+Implemented
+- Scoped approval now prepares same-member admission handover on copied rows. The shared helper validates the exact former metadata owner, pinned approved member, successor ordering and immutable retry ancestry, then sets the original operator once and preserves process origin. It never changes member or process identity, duplicates the row, or relabels grants/receipts.
+- Reused Task 32 prefix/suffix proof and derived learner/promotion milestones. A pending replacement process stays Pending even when historical membership is proven; authenticated readiness for the same process survives owner transfer. Successful metadata siblings are untouched by load-only retry.
+- Handover retains usable unfinished retirement under its original complete batch. Closed or displaced unfinished retirement refuses with AuthorityFenced; consumed closed retirement remains an enduring fact. Different-member rows are not handed over; cancellation belongs to Task 35. Atomic installation and required-stop/node/history preparation remain Task 34, scoped revocation protection Task 35; the live dispatcher still refuses partial installation until the complete cutover.
+- Proof preparation reads source checkpoints, never prospective candidate convergence. Tests exercise real scoped approval preparation before/after Prepare/Add, a zero-step already-native successor, restored prepared rows, same-version retries, multiple handovers, interleaved pending process replacement, exact original retirement identity, ongoing/closed/consumed/newer-floor batches, stale owners, changed-member refusal and completed metadata sibling isolation. Source bytes remain unchanged on success/refusal.
+
+Verified
+- go test -count=1 ./internal/metaengine: pass, /tmp/gquorum-task33-focused.log.
+- make test: 1371/1371 pass, 8.268s; test-reports/unit/20261016T061824.386953Z-9gbfz18b/report.md.
+- Staged lint passes, /tmp/gquorum-task33-lint.log; full make lint passes all modules/variants, /tmp/gquorum-commit45-lint.log. Corrected operand ordering and line length. git diff --check passes. 430 changed handwritten Go lines, including tests, within 550.
+- Pure preparation/restore changes; no new concurrency and no new Docker/race run claimed.
+
+Commit-45 dead-code audit
+- Reviewed references for the batch after 50a2006. Task 32 removed scopedAdmissionMilestone when its consumer adopted shared prefix proof. Correction 12 removed the redundant requiresDeletion kind condition. Existing admission sequence/receipt validators remain shared by live admission and scoped restore; the new handover is consumed by approval preparation, with later retry reuse explicitly planned.
+- Flat construction, legacy plan/query adapters, schema-3 dispatch and old whole-document ownership still have active callers. Their removal remains Task 75; no authority-mode flag, extra public API or unused production wrapper was added. Full unused-code lint passes.
+- This closes five implementation/correction commits: Correction 12 and Tasks 30–33. Request Claude review of 50a2006..this commit in peer thread 12, and evaluate findings before the next implementation commit. Thread 11 is already closed; its latest delayed notification adds no new request. Task 34 is the first unchecked task. Overall implementation remains unfinished and the goal active.

@@ -563,13 +563,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaengine` admission/approval helpers and tests. **Target:** accepted admission amendment FI_ADMISSION_ORIGIN; [T] §5.2, §12. **Depends on:** 29–32. **Budget:** estimated 250–450 changed Go lines, ceiling 550.
 
-- [ ] Prepare handover of the one live (node, instance) row to an exact same-member metadata successor. Save the original operator once, retain process origin, and preserve consumed facts and the complete retirement batch. Reject changed members, canceled/revoked proof and wrong owners; grant no replacement identity implicitly.
-- [ ] Use Task 32's original-prefix/successor-suffix proof validation and milestone derivation. Share preparation with later retry and non-founding admission paths; atomic installation is Task 34 and scoped revocation protection is Task 35.
-- [ ] Test same-version retry and different-version supersession before/after preparation and learner membership, interleaved process replacement, stable original retirement identity, rejected stale/changed members or canceled authority, and unchanged source state on any refusal.
+- [x] Prepare handover of the one live (node, instance) row to an exact same-member metadata successor. Save the original operator once, retain process origin, and preserve consumed facts and the complete retirement batch. Reject changed members, canceled/revoked proof and wrong owners; grant no replacement identity implicitly.
+- [x] Use Task 32's original-prefix/successor-suffix proof validation and milestone derivation. Share preparation with later retry and non-founding admission paths; atomic installation is Task 34 and scoped revocation protection is Task 35.
+- [x] Test same-version retry and different-version supersession before/after preparation and learner membership, interleaved process replacement, stable original retirement identity, rejected stale/changed members or canceled authority, and unchanged source state on any refusal.
 
 **Verification**
 
-- [ ] Run admission handover/restore units, staged lint and `make test`.
+- [x] Run admission handover/restore units, staged lint and `make test`.
 
 ### Task 34: Install scoped approvals and required-stop handover atomically
 
