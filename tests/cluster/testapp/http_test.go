@@ -3,12 +3,47 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/topology"
 )
+
+type operationRouteCluster struct {
+	gquorum.Cluster
+	status topology.OperationStatus
+}
+
+func (c operationRouteCluster) Operation(context.Context, topology.OperationID) (topology.OperationStatus, error) {
+	return c.status, nil
+}
+
+func TestOperationHTTPRetainsSuccessfulStepCounts(t *testing.T) {
+	t.Parallel()
+	cluster := operationRouteCluster{status: topology.OperationStatus{ID: "exec-v2-a1", Version: 2,
+		Attempt: 1, State: topology.OperationSucceeded, Blocks: []topology.BlockStatus{
+			{GroupID: "a", State: topology.OperationSucceeded, CurrentStep: 2, TotalSteps: 2},
+			{GroupID: "b", State: topology.OperationSucceeded, CurrentStep: 3, TotalSteps: 3}}, TotalBlocks: 2}}
+	app := &application{cluster: cluster, workCtx: context.Background(), closing: make(chan struct{})}
+	w := httptest.NewRecorder()
+	app.routes().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/operations/exec-v2-a1", nil))
+	if w.Code != http.StatusOK {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var got struct {
+		TotalSteps int    `json:"total_steps"`
+		GroupID    string `json:"group_id"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || got.TotalSteps != 5 || got.GroupID != "b" {
+		t.Fatal(got, err, w.Body.String())
+	}
+}
 
 func TestHTTPVersionRequiresOneExactStrongIdentity(t *testing.T) {
 	t.Parallel()

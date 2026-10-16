@@ -377,32 +377,12 @@ func (a *application) routes() http.Handler {
 		jsonResponse(w, http.StatusAccepted, map[string]any{"operation_id": id})
 	})
 	mux.HandleFunc("GET /api/operations/{id}", func(w http.ResponseWriter, r *http.Request) {
-		status, err := readOperationStatus(r.Context(), a.cluster, topology.OperationID(r.PathValue("id")))
+		status, err := a.cluster.Operation(r.Context(), topology.OperationID(r.PathValue("id")))
 		if err != nil {
 			httpError(w, err)
 			return
 		}
-		// Keep aggregate operation status authoritative; these extra fields let
-		// existing process probes inspect the exact active block during migration.
-		legacy := struct {
-			topology.OperationStatus
-			GroupID       string `json:"group_id,omitempty"`
-			NodeName      string `json:"node_name,omitempty"`
-			CurrentStep   int    `json:"current_step,omitempty"`
-			TotalSteps    int    `json:"total_steps,omitempty"`
-			WaitingReason string `json:"waiting_reason,omitempty"`
-		}{OperationStatus: status}
-		for _, block := range status.Blocks {
-			if block.State.Terminal() && block.State == topology.OperationSucceeded {
-				continue
-			}
-			legacy.GroupID, legacy.CurrentStep, legacy.TotalSteps = block.GroupID, block.CurrentStep, block.TotalSteps
-			if block.Blocked != nil {
-				legacy.NodeName, legacy.WaitingReason = block.Blocked.NodeName, block.Blocked.Message
-			}
-			break
-		}
-		jsonResponse(w, http.StatusOK, legacy)
+		jsonResponse(w, http.StatusOK, projectOperationHTTPStatus(status))
 	})
 	mux.HandleFunc("POST /api/nodes", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -608,6 +588,41 @@ func (a *application) routes() http.Handler {
 		}
 		mux.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// operationHTTPStatus keeps compact process diagnostics beside the canonical
+// operation response while callers migrate to per-block fields.
+type operationHTTPStatus struct {
+	topology.OperationStatus
+	GroupID       string `json:"group_id,omitempty"`
+	NodeName      string `json:"node_name,omitempty"`
+	CurrentStep   int    `json:"current_step,omitempty"`
+	TotalSteps    int    `json:"total_steps,omitempty"`
+	WaitingReason string `json:"waiting_reason,omitempty"`
+}
+
+func projectOperationHTTPStatus(status topology.OperationStatus) operationHTTPStatus {
+	projected := operationHTTPStatus{OperationStatus: status}
+	for _, block := range status.Blocks {
+		projected.TotalSteps += block.TotalSteps
+	}
+	var selected *topology.BlockStatus
+	for i := range status.Blocks {
+		if status.Blocks[i].State != topology.OperationSucceeded {
+			selected = &status.Blocks[i]
+			break
+		}
+	}
+	if selected == nil && len(status.Blocks) != 0 {
+		selected = &status.Blocks[len(status.Blocks)-1]
+	}
+	if selected != nil {
+		projected.GroupID, projected.CurrentStep = selected.GroupID, selected.CurrentStep
+		if selected.Blocked != nil {
+			projected.NodeName, projected.WaitingReason = selected.Blocked.NodeName, selected.Blocked.Message
+		}
+	}
+	return projected
 }
 func (a *application) readyHTTP(w http.ResponseWriter, r *http.Request) {
 	if !a.canServe(r.Context()) {

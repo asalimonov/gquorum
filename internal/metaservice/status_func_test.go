@@ -111,7 +111,7 @@ func TestClusterStatusEffectiveState(t *testing.T) {
 	latest.MetaGroup().NextReplicaID = 5
 	f.commit(t, latest, false)
 	s := readStatus(t, f.g)
-	want := []topology.NodeState{topology.NodeActive, topology.NodeDrained, topology.NodeDrained, topology.NodeExcluded}
+	want := []topology.NodeState{topology.NodeActive, topology.NodeDrained, topology.NodeDrained}
 	if len(s.Nodes) != len(want) {
 		t.Fatal(s.Nodes)
 	}
@@ -122,6 +122,9 @@ func TestClusterStatusEffectiveState(t *testing.T) {
 	}
 	if s.Nodes[1].Node.State != topology.NodeDraining {
 		t.Fatal("lost latest declared intent")
+	}
+	if s.Nodes[len(s.Nodes)-1].Node.Name == "n4" {
+		t.Fatal("staged-only node appeared in effective status", s.Nodes)
 	}
 }
 func TestClusterStatusReportsAllViewVersionsAndUsesActiveGroups(t *testing.T) {

@@ -95,7 +95,7 @@ func (a *application) historicalControlAddress(ctx context.Context, name string,
 			continue
 		}
 		id := topology.MakeOperationID(doc.Version, 1)
-		op, err := readOperationStatus(ctx, a.cluster, id)
+		op, err := a.cluster.Operation(ctx, id)
 		if err == nil && op.ID == id && op.Version == doc.Version {
 			return node.Labels[loadAddressLabel], nil
 		}

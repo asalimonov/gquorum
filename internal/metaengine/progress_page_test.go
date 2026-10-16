@@ -5,13 +5,11 @@ package metaengine
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -201,13 +199,14 @@ func TestProgressContinuationObservesNewIndexWithoutSnapshotLease(t *testing.T) 
 	}
 }
 
-func TestProgressLegacyAdapterRefusesUntilCompleteCutover(t *testing.T) {
+func TestProgressLegacyAdapterServesNewAPIBeforeCutover(t *testing.T) {
 	t.Parallel()
 	m := NewMachine(topology.Rules{}, nil)
-	if _, err := m.Progress(topology.ProgressQuery{}); !errors.Is(err, fault.ErrUnsupported) {
-		t.Fatal(err)
+	if page, err := m.Progress(topology.ProgressQuery{}); err != nil || page.ReadAt.IsZero() ||
+		page.LatestVersion != 0 || len(page.Groups)+len(page.Nodes)+len(page.Operations)+len(page.Cleanup) != 0 {
+		t.Fatal(page, err)
 	}
-	if _, err := m.Query(t.Context(), []byte(`{"kind":"progress","progress":{}}`)); !errors.Is(err, fault.ErrUnsupported) {
-		t.Fatal("live query synthesized scoped progress", err)
+	if _, err := m.Query(t.Context(), []byte(`{"kind":"progress","progress":{}}`)); err != nil {
+		t.Fatal("legacy progress query failed", err)
 	}
 }

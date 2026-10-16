@@ -75,7 +75,9 @@ type Cluster interface {
 	Operation(context.Context, topology.OperationID) (topology.OperationStatus, error)
 	// WaitOperation waits for that plan to reach a terminal state.
 	WaitOperation(context.Context, topology.OperationID) (topology.OperationStatus, error)
-	// RetryOperation retries the exact failed attempt's immutable plan.
+	// RetryOperation retries the exact failed attempt's immutable plan. Until
+	// schema 4 is active, schema-3 nodes return Unsupported because the retained
+	// whole-document format cannot safely retry one operation scope.
 	RetryOperation(context.Context, topology.OperationID) (topology.OperationID, error)
 
 	// Node membership and lifecycle edits. Each uses MutationOptions for CAS,

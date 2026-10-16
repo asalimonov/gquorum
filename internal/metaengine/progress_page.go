@@ -10,12 +10,28 @@ import (
 
 const defaultProgressPageLimit = 100
 
+type progressPageHeader struct {
+	cluster   string
+	query     topology.ProgressQuery
+	applied   uint64
+	latest    uint64
+	target    uint64
+	converged topology.FullyConverged
+}
+
 // Progress captures owned metadata rows under one read lock. It makes no quorum
 // claim; the service uses Query after its quorum/apply barrier.
 func (m *Machine) Progress(q topology.ProgressQuery) (topology.ProgressPage, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return queryScopedProgress(nil, q) // Task 78 installs scoped state with its complete codec.
+	return queryProgress(nil, m, q)
+}
+
+func queryProgress(s *scopedState, m *Machine, q topology.ProgressQuery) (topology.ProgressPage, error) {
+	if s != nil {
+		return queryScopedProgress(s, q)
+	}
+	return legacyProgress(m, q)
 }
 
 func queryScopedProgress(s *scopedState, q topology.ProgressQuery) (topology.ProgressPage, error) {
@@ -31,16 +47,26 @@ func queryScopedProgress(s *scopedState, q topology.ProgressQuery) (topology.Pro
 // The owning Machine holds its read lock through selection and copying. Only
 // selected rows are cloned; operation headers never clone an unbounded block list.
 func (s *scopedState) progressLocked(q topology.ProgressQuery) (topology.ProgressPage, error) {
-	filters := progressFilterHash(s.Latest.ClusterID, q)
-	last, err := decodeProgressCursor(q.After, filters)
+	rows := s.progressRecords(q)
+	return pageProgress(progressPageHeader{cluster: s.Latest.ClusterID, query: q, applied: s.AppliedIndex,
+		latest: s.Latest.Version, target: s.Target.Version, converged: s.FullyConverged}, rows,
+		func(page *topology.ProgressPage, row progressRecord) {
+			s.appendProgress(page, row)
+		})
+}
+
+func pageProgress(header progressPageHeader, rows []progressRecord,
+	appendRow func(*topology.ProgressPage, progressRecord),
+) (topology.ProgressPage, error) {
+	filters := progressFilterHash(header.cluster, header.query)
+	last, err := decodeProgressCursor(header.query.After, filters)
 	if err != nil {
 		return topology.ProgressPage{}, err
 	}
-	limit := q.Limit
+	limit := header.query.Limit
 	if limit == 0 {
 		limit = defaultProgressPageLimit
 	}
-	rows := s.progressRecords(q)
 	slices.SortFunc(rows, func(a, b progressRecord) int { return compareProgressKeys(a.key, b.key) })
 	start, _ := slices.BinarySearchFunc(rows, last, func(row progressRecord, key progressKey) int {
 		return compareProgressKeys(row.key, key)
@@ -49,10 +75,10 @@ func (s *scopedState) progressLocked(q topology.ProgressQuery) (topology.Progres
 		start++
 	}
 	end := start + min(limit, len(rows)-start)
-	page := topology.ProgressPage{AppliedIndex: s.AppliedIndex, ReadAt: time.Now().UTC(),
-		LatestVersion: s.Latest.Version, TargetVersion: s.Target.Version, FullyConverged: s.FullyConverged}
+	page := topology.ProgressPage{AppliedIndex: header.applied, ReadAt: time.Now().UTC(),
+		LatestVersion: header.latest, TargetVersion: header.target, FullyConverged: header.converged}
 	for _, row := range rows[start:end] {
-		s.appendProgress(&page, row)
+		appendRow(&page, row)
 	}
 	for i := range page.Operations {
 		status := &page.Operations[i]

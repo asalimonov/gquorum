@@ -142,6 +142,61 @@ func TestEnsureGroupCreatesApprovesAndRefusesConflicts(t *testing.T) {
 	}
 }
 
+func TestOperationAndProgressReadsWorkOnSchema3Composition(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	o := authorityNodeOptions(t, root, "operation-progress")
+	loopback := &loopbackTransport{}
+	o.Loads = LoadOptions{Transport: loopback, Storage: LoadStorageOptions{WAL: &WALOptions{RootDir: filepath.Join(root, "loads")}},
+		Factory: func(context.Context, load.ReplicaSpec) (load.Application, error) {
+			return load.Application{StateMachine: ensureMachine{}, Close: func(context.Context) error { return nil }}, nil
+		}}
+	n, err := NewNode(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loopback.node = n
+	t.Cleanup(func() { stopAuthorityNode(t, n) })
+	if err := n.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	if err := n.WaitReady(ctx); err != nil {
+		t.Fatal(err)
+	}
+	c := n.Cluster()
+	latest, err := c.Latest(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := c.CreateGroup(ctx, singleReplicaSpec("progress", nil), MutationOptions{
+		ExpectedVersion: latest.Version, Actor: "functional-test", Approve: true})
+	if err != nil || result.OperationID == "" {
+		t.Fatal("approved mutation returned no exact operation", result, err)
+	}
+	status, err := c.WaitOperation(ctx, result.OperationID)
+	if err != nil || status.ID != result.OperationID || status.State != topology.OperationSucceeded ||
+		status.TotalBlocks != 1 || len(status.Blocks) != 1 || status.Blocks[0].TotalSteps == 0 {
+		t.Fatal("operation was not observable through the public API", status, err)
+	}
+	for {
+		page, err := c.ReadProgress(ctx, topology.ProgressQuery{GroupID: "progress", Limit: 10})
+		if err != nil {
+			t.Fatal("progress read failed", page, err)
+		}
+		if len(page.Groups) == 1 && page.Groups[0].GroupID == "progress" && page.Groups[0].Converged != nil &&
+			page.Groups[0].ConvergedVersion == result.Document.Version {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("approved convergence was not observable through the public API", page, ctx.Err())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
 func TestEnsureGroupCreatesAnInMemoryGroup(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

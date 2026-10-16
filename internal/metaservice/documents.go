@@ -245,30 +245,52 @@ func statusPlacement(active, target topology.Document) ([]topology.PlacementRepo
 // until Task78 connects durable per-node progress to the public status.
 func statusNodes(views topology.ReadView, observation topology.HealthObservation,
 	addresses map[string]string) []topology.NodeStatus {
-	out := collection.Slice[topology.NodeStatus](len(views.Latest.Nodes))
-	for _, node := range views.Latest.Nodes {
-		effective := topology.EffectiveNodeState(views.Active, node.Name)
-		if effective == "" {
-			if approved := views.Target.Node(node.Name); approved != nil {
-				effective = approved.State
-			} else {
-				effective = topology.NodeExcluded
-			}
+	names := statusNodeNames(views)
+	out := collection.Slice[topology.NodeStatus](len(names))
+	for _, name := range slices.Sorted(maps.Keys(names)) {
+		if views.Target.Node(name) == nil && views.Active.Node(name) == nil {
+			continue // Staged-only identity is intent, not effective cluster state.
 		}
-		health := topology.HealthUnknown
-		if observation.Version == views.Target.Version {
-			if observed, exists := observation.Nodes[node.Name]; exists {
-				health = observed
-			}
-		}
-		out = append(out, topology.NodeStatus{
-			Node:           node,
-			EffectiveState: effective,
-			Health:         health,
-			Address:        addresses[node.Name],
-		})
+		out = append(out, statusNode(views, observation, addresses[name], name))
 	}
 	return out
+}
+
+func statusNodeNames(views topology.ReadView) map[string]bool {
+	names := make(map[string]bool, len(views.Latest.Nodes)+len(views.Target.Nodes)+len(views.Active.Nodes))
+	for _, doc := range []topology.Document{views.Latest, views.Target, views.Active} {
+		for _, node := range doc.Nodes {
+			names[node.Name] = true
+		}
+	}
+	return names
+}
+
+func statusNode(views topology.ReadView, observation topology.HealthObservation,
+	address, name string,
+) topology.NodeStatus {
+	node := views.Latest.Node(name)
+	if node == nil {
+		node = views.Target.Node(name)
+	}
+	if node == nil {
+		node = views.Active.Node(name)
+	}
+	effective := topology.EffectiveNodeState(views.Active, name)
+	if effective == "" {
+		if approved := views.Target.Node(name); approved != nil {
+			effective = approved.State
+		} else {
+			effective = topology.NodeExcluded
+		}
+	}
+	health := topology.HealthUnknown
+	if observation.Version == views.Target.Version {
+		if observed, exists := observation.Nodes[name]; exists {
+			health = observed
+		}
+	}
+	return topology.NodeStatus{Node: *node, EffectiveState: effective, Health: health, Address: address}
 }
 
 func (g *Group) statusGroupProgress(ctx context.Context, views topology.ReadView,

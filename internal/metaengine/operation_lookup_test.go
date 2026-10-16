@@ -34,7 +34,29 @@ func TestOperationLookupOwnsFullExactAggregate(t *testing.T) {
 			t.Fatal(tc, err)
 		}
 	}
-	if _, err := NewMachine(testRules(), nil).Operation(id); !errors.Is(err, fault.ErrUnsupported) {
-		t.Fatal("schema3 exposed scoped state", err)
+	if _, err := NewMachine(testRules(), nil).Operation(id); !errors.Is(err, fault.ErrHistoryUnavailable) {
+		t.Fatal("unknown legacy operation", err)
+	}
+}
+
+func TestLegacyOperationLookupUsesExactRetainedAttempt(t *testing.T) {
+	t.Parallel()
+	older := &operatorRecord{ID: "exec-v1-a1", Version: 1, Attempt: 1,
+		State: topology.OperatorFailed, CurrentStep: 2, GroupID: "work", NodeName: "n1",
+		WaitingReason: "", Error: "disk unavailable", Steps: []topology.Step{
+			{Seq: 1, GroupID: "meta", NodeName: "n1"}, {Seq: 2, GroupID: "work", NodeName: "n1"}}}
+	newer := &operatorRecord{ID: "exec-v2-a1", Version: 2, Attempt: 1,
+		State: topology.OperatorRunning, CurrentStep: 1, GroupID: "other", Steps: []topology.Step{
+			{Seq: 1, GroupID: "other", NodeName: "n2"}}}
+	records := map[topology.OperatorID]*operatorRecord{older.ID: older, newer.ID: newer}
+	got, err := legacyOperationStatus(records, topology.OperationID(older.ID))
+	if err != nil || got.ID != topology.OperationID(older.ID) || got.State != topology.OperationFailed ||
+		got.Error != "disk unavailable" || len(got.Blocks) != 1 || got.TotalBlocks != 1 ||
+		got.Blocks[0].GroupID != "work" || got.Blocks[0].CurrentStep != 2 || got.Blocks[0].TotalSteps != 2 ||
+		got.Blocks[0].Error != "disk unavailable" {
+		t.Fatal("legacy operation did not preserve exact retained attempt", got, err)
+	}
+	if _, err := legacyOperationStatus(records, "exec-v99-a1"); !errors.Is(err, fault.ErrHistoryUnavailable) {
+		t.Fatal("unknown legacy operation", err)
 	}
 }

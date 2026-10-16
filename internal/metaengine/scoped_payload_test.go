@@ -119,7 +119,7 @@ func TestScopedQueryShapesCannotBeIgnored(t *testing.T) {
 			t.Fatal(input, err)
 		}
 	}
-	for _, input := range []string{`{"kind":"progress","progress":{}}`, `{"kind":"authority","operation_id":"exec-v1-a1"}`, `{"kind":"collection_check","collection_identity":{"cluster_id":"c","group_id":"g","node_name":"n","replica_id":1}}`} {
+	for _, input := range []string{`{"kind":"authority","operation_id":"exec-v1-a1"}`, `{"kind":"collection_check","collection_identity":{"cluster_id":"c","group_id":"g","node_name":"n","replica_id":1}}`} {
 		if _, err := m.Query(t.Context(), []byte(input)); !errors.Is(err, fault.ErrUnsupported) {
 			t.Fatal("unimplemented read returned fabricated progress", input, err)
 		}

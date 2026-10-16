@@ -110,7 +110,7 @@ func (m *Machine) queryValueLocked(q QueryRequest) (any, error) {
 	}
 	switch q.Kind {
 	case "progress":
-		return queryScopedProgress(nil, *q.Progress) // Task 78 installs the active scoped state.
+		return queryProgress(nil, m, *q.Progress)
 	case "collection_check":
 		return queryScopedCollection(nil, q) // Task 78 installs scoped state under this same read lock.
 	case "plan_validation":
