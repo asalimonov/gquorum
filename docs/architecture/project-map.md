@@ -661,6 +661,20 @@ Host interface complete method list:
 `Approve`, `CommitRepair`, `RefreshObservations`, `ResetObservations`,
 `Observations`, `VoterSwitches`, `CommitVoterChange`, `WakeOperator`.
 Exact signatures are in [contracts.go](../../internal/scheduling/contracts.go).
+`FI_REPAIR_CAS`: the prepared [ScopedHost](../../internal/scheduling/scoped_contracts.go)
+replaces Views/CurrentOperator/Approve with `ReadRepair(ctx,group)` and
+`PlanRepair(ctx,capture,desired)`; keeps IsLeader/Health, observation refresh/reset,
+Observations/VoterSwitches, CommitRepair/CommitVoterChange and WakeOperator.
+Empty-group reads capture Latest, Target and group checkpoints in one FSM query;
+named reads recapture around native I/O. New requires exactly one static host port.
+Scoped ticks share callback serialization, probe eligible groups independently,
+recheck source/owner/health/native/collector epoch, and submit both document CAS
+versions plus exact scopes. Unrelated callback-time changes refresh the scheduler
+base; changes during planning retry on a later tick. `staged_conflict` comes from
+shared FSM read/write-set validation; diagnostics name the group and unchanged
+refusals produce no replicated blocker. Attempt cooldowns bind source+replica;
+member replacement resets local alive duration. Replica repair preserves node
+metadata to avoid incidental `_meta` ownership. The legacy port disappears at78.
 `KB_POLICY`: callback return is a proposal for revalidation, not permission;
 overdue calls keep the gate and status becomes policy_stalled. Leadership/enablement
 changes reset relevant observation continuity.
@@ -681,7 +695,7 @@ use exact source versions, never cluster document-version equality. The callback
 boundary strips both Desired and Observation from Groups; Status is the observation
 channel and Clone remains faithful. Internal driver CAS captures retain their own
 ReadView outside the public input. legacyScheduleInput labels real schema3 evidence
-until78 (metrics source projection removed70); global driver guards convert69.
+until78 (metrics source projection removed70); the scoped driver has no global convergence/operation gate.
 
 ### `internal/raftengine`
 

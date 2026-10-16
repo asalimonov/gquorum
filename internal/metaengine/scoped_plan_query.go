@@ -11,11 +11,12 @@ const (
 	operationPlanQuery = "operation_plan"
 	retryPlanQuery     = "retry_plan"
 	transferPlanQuery  = "transfer_plan"
+	repairPlanQuery    = "repair_plan"
 )
 
 func scopedPlanQuery(kind string) bool {
 	return kind == "planning" || kind == "approval_plan" || kind == operationPlanQuery ||
-		kind == retryPlanQuery || kind == transferPlanQuery
+		kind == retryPlanQuery || kind == transferPlanQuery || kind == repairPlanQuery
 }
 
 func (q QueryRequest) validatePlanFields() error {
@@ -31,6 +32,8 @@ func (q QueryRequest) validatePlanFields() error {
 		if q.Version == 0 || q.Desired != nil || q.OperationID != "" || q.Key != "" {
 			return fault.ErrInvalid
 		}
+	case repairPlanQuery:
+		return q.validateRepairPlanFields()
 	case transferPlanQuery:
 		if q.Desired != nil || q.OperationID != "" || q.Version != 0 || topology.ValidateID(q.Key) != nil {
 			return fault.ErrInvalid
@@ -87,6 +90,8 @@ func queryScopedPlan(s *scopedState, q QueryRequest) (PlanRead, error) {
 func (s *scopedState) planReadBase(q QueryRequest) (PlanRead, error) {
 	read := PlanRead{}
 	switch q.Kind {
+	case repairPlanQuery:
+		return s.repairPlanRead(q)
 	case transferPlanQuery:
 		return s.transferPlanRead(q.Key)
 	case "planning":
@@ -183,4 +188,14 @@ func (s *scopedState) transferPlanRead(group string) (PlanRead, error) {
 	}
 	read := PlanRead{Target: s.Target.Clone(), Scopes: s.capturePlanScopes([]string{group})}
 	return read, nil
+}
+
+func (q QueryRequest) validateRepairPlanFields() error {
+	if q.OperationID != "" || q.Version != 0 || q.Desired != nil && q.Key == "" {
+		return fault.ErrInvalid
+	}
+	if q.Key != "" && topology.ValidateID(q.Key) != nil {
+		return fault.ErrInvalid
+	}
+	return nil
 }

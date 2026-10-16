@@ -3,6 +3,7 @@ package scheduling
 import (
 	"context"
 
+	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/metrics"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -31,6 +32,8 @@ const (
 type RepairCommit struct {
 	Document        topology.Document
 	ExpectedVersion uint64
+	ExpectedTarget  uint64
+	Scopes          []metaengine.ScopeExpectation
 	Plan            topology.Plan
 }
 

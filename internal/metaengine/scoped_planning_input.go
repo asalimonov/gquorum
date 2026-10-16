@@ -38,7 +38,8 @@ func (s *scopedState) planningDeclarations() topology.PlanInput {
 		Nodes: make(map[string]topology.NodeProgress)}
 	for _, row := range s.Groups {
 		input.Groups[row.GroupID] = (topology.GroupProgress{GroupID: row.GroupID,
-			ConvergedVersion: row.SourceVersion, Converged: row.Declaration, OperationID: row.Owner}).Clone()
+			ConvergedVersion: row.SourceVersion, Converged: row.Declaration,
+			OperationID: row.Owner, Deleting: row.Deleting}).Clone()
 	}
 	for _, row := range s.Nodes {
 		input.Nodes[row.NodeName] = (topology.NodeProgress{NodeName: row.NodeName, MemberID: row.MemberID,

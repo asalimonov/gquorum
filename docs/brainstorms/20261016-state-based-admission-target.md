@@ -765,3 +765,31 @@ public queue, priority or timing controls. At the callback boundary omit both
 Groups.Desired and Groups.Observation; Status is the sole observation channel.
 Clone remains a faithful owned copy. legacyScheduleInput uses actual schema3
 progress until78; its metric source projection is removed by collector work70.
+
+
+### Scheduler capture and atomic repair (Task69)
+
+`FI_REPAIR_CAS`: reuse PlanRead with Latest and private repair_plan queries.
+Read metadata once for policy input; each eligible group's bounded native/status
+read recaptures its source/owner. One failed group does not erase another's input.
+After the serialized callback, refresh metrics/health/native and compare the exact
+selected scope against the original capture. Unrelated changes may refresh the
+scheduler's Latest/Target CAS before planning; any later CAS change retries on a
+subsequent tick. Confirm native membership/leader epoch after planning while
+allowing applied positions to advance. Ordinary caller mutations still keep their
+original expected version. Shared ValidateRepairIndependence detects staged
+read/write conflicts before proposal; the FSM repeats it atomically.
+
+Reuse the existing repair/voter proposal and document helpers. A load reseat must
+preserve node timestamps: updating a node timestamp would spuriously acquire
+_meta. Required scope is exactly the selected group. Local refusal diagnostics
+name that group, retain staged_conflict/group_busy reasons and do not replicate
+unchanged blockers. Existing legacy-repair attempt cooldown binds exact replica
+and group source, and starts only when submitting a proposal. Node alive duration
+survives unrelated edits but resets when its numeric member identity changes.
+
+The internal constructor requires exactly one of legacy Host or ScopedHost during
+preparation. This is static composition, with shared callback/lifetime ownership;
+Task78 selects scopedSchedulingHost and removes the legacy port/gates. Until then,
+repair_plan is Unsupported in schema3. Task70 supplies per-group collector evidence;
+no synthetic Active or production runtime model switch is introduced.

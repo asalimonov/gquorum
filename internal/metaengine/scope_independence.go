@@ -8,9 +8,10 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
+// ValidateRepairIndependence checks staged/repair read and write sets.
 // Caller supplies trusted approved ancestry. This grants no effect authority;
 // apply must separately check versions, allocation history and current owners.
-func validateIndependentEdits(base, staged, repair topology.Document) error {
+func ValidateRepairIndependence(base, staged, repair topology.Document) error {
 	return validateIndependentRebase(rebaseSemanticDocument(base), rebaseSemanticDocument(staged),
 		rebaseSemanticDocument(repair))
 }

@@ -61,7 +61,7 @@ func TestRepairIndependenceUsesSemanticCandidateReads(t *testing.T) {
 			repair.Group("b").Replicas[0].ReplicaID, repair.Group("b").NextReplicaID = 2, 3
 			tc.stage(&staged)
 			before := []topology.Document{base.Clone(), staged.Clone(), repair.Clone()}
-			err := validateIndependentEdits(base, staged, repair)
+			err := ValidateRepairIndependence(base, staged, repair)
 			if (err != nil) != tc.conflict || err != nil && !errors.Is(err, fault.ErrVersionConflict) {
 				t.Fatal("wrong independence decision", err)
 			}
@@ -81,7 +81,7 @@ func TestRepairIndependenceUsesProposedRulesAndIgnoresIneligibleCandidates(t *te
 	rule.NodeSelector = map[string]string{"tier": "hot"}
 	repair.Group("b").Placement = &rule
 	staged.Node("n3").Labels["tier"] = "cold"
-	if err := validateIndependentEdits(base, staged, repair); !errors.Is(err, fault.ErrVersionConflict) {
+	if err := ValidateRepairIndependence(base, staged, repair); !errors.Is(err, fault.ErrVersionConflict) {
 		t.Fatal("new selector dependency was ignored", err)
 	}
 	// A group override makes the default rule irrelevant to that repair.
@@ -89,7 +89,7 @@ func TestRepairIndependenceUsesProposedRulesAndIgnoresIneligibleCandidates(t *te
 	repair, staged = base.Clone(), base.Clone()
 	repair.Group("b").Replicas[0].ReplicaID, repair.Group("b").NextReplicaID = 2, 3
 	staged.Placement.MaxReplicas = 2
-	if err := validateIndependentEdits(base, staged, repair); err != nil {
+	if err := ValidateRepairIndependence(base, staged, repair); err != nil {
 		t.Fatal("irrelevant default rule blocked repair", err)
 	}
 	base.Node("n3").Type = "metadata"
@@ -97,7 +97,7 @@ func TestRepairIndependenceUsesProposedRulesAndIgnoresIneligibleCandidates(t *te
 	repair.Group("b").Replicas[0].ReplicaID, repair.Group("b").NextReplicaID = 2, 3
 	staged.Node("n3").Labels["tier"] = "cold"
 	staged.MetaGroup().Replicas[2].ReplicaID, staged.MetaGroup().NextReplicaID = 4, 5
-	if err := validateIndependentEdits(base, staged, repair); err != nil {
+	if err := ValidateRepairIndependence(base, staged, repair); err != nil {
 		t.Fatal("unassigned ineligible node became a repair dependency", err)
 	}
 }

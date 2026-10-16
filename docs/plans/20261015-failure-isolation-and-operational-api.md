@@ -1067,13 +1067,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/scheduling/driver.go`, `internal/metaservice/scheduling.go`, voter-change adapters. **Target:** [T] §5.3–5.4, §7.1–7.2. **Depends on:** 46, 51, 68. **Budget:** ≤550.
 
-- [ ] Capture Latest/Target plus group SourceVersion/owner and exact repair inputs, recheck health/native membership/leadership after callbacks, then commit the atomic repair/rebase proposal.
-- [ ] Remove global equality and global busy-operation gates. A scheduler may recompute after CAS conflict; ordinary caller writes may not. Surface scoped staged_conflict/busy causes without writing unchanged blockers every tick.
-- [ ] Test callback serialization/cancellation, decision invalidation only for relevant changes, no mutation from stale native evidence and independent candidate rotation after refusal.
+- [x] Capture Latest/Target plus group SourceVersion/owner and exact repair inputs, recheck health/native membership/leadership after callbacks, then commit the atomic repair/rebase proposal.
+- [x] Remove global equality and global busy-operation gates. A scheduler may recompute after CAS conflict; ordinary caller writes may not. Surface scoped staged_conflict/busy causes without writing unchanged blockers every tick.
+- [x] Test callback serialization/cancellation, decision invalidation only for relevant changes, no mutation from stale native evidence and independent candidate rotation after refusal.
 
 **Verification**
 
-- [ ] Run scheduling/service functional race checks and `make test`.
+- [x] Run scheduling/service functional race checks and `make test`.
 
 ### Task 70: Preserve observation history across unrelated topology changes
 
@@ -1175,7 +1175,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metastore/store.go`, `internal/metaengine/sm.go`/`codec.go`, snapshot/restart tests, remaining composition. **Target:** [T] §4.1–4.3, §7.1, §8.4. **Depends on:** 1–77. **Budget:** ≤550.
 
-- [ ] Activate complete metadata disk/state/envelope schema 4; verify authority schema 2 from Task 54. Remove Active storage/API, Operator/WaitOperator wrappers, old MutationResult fields, ActivateTarget/legacy envelopes and every registered temporary scaffold now that all callers are converted. No fallback, migration, mixed-version acceptance or refounding old evidence. Replace Task67 legacyEnsureProgress/legacyEnsureFailure/legacyTransferPlan with confirmed scoped progress, exact operation-block diagnostics and transfer_plan; remove schema3 replacement guards when connecting scoped replacement commits.
+- [ ] Activate complete metadata disk/state/envelope schema 4; verify authority schema 2 from Task 54. Remove Active storage/API, Operator/WaitOperator wrappers, old MutationResult fields, ActivateTarget/legacy envelopes and every registered temporary scaffold now that all callers are converted. No fallback, migration, mixed-version acceptance or refounding old evidence. Replace Task67 legacyEnsureProgress/legacyEnsureFailure/legacyTransferPlan with confirmed scoped progress, exact operation-block diagnostics and transfer_plan; remove schema3 replacement guards when connecting scoped replacement commits. Select Task69 scopedSchedulingHost and remove the legacy scheduling Host/Config port, legacyScheduleInput and global driver gates.
 - [ ] Add intentionally sourced v4/v2 fixtures with provenance; retain old changed-format fixtures for explicit rejection and immutable unrelated physical baseline hashes for unchanged-format checks. Preserve current-index/term/confstate/pins and unchanged buckets.
 - [ ] Exercise fresh startup and current-format retained restart through real composition. Confirm all new proposals/queries/dispatch/report callbacks are reachable, with no production dual-model switch or unsupported stub left on an accepted path. Cover successful operationCoordinator pages/cursor advancement, leadership changes across reads and native group-fence recipients (peer29 L1); host/Unsupported/NotLeader functional coverage already exists.
 

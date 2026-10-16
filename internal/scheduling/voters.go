@@ -24,7 +24,7 @@ func (r *Scheduler) commitVoterChange(ctx context.Context, in schedulingapi.Sche
 	if err != nil {
 		return "", err
 	}
-	plan, err := r.host.PlanFor(ctx, doc)
+	plan, err := r.legacyHost.PlanFor(ctx, doc)
 	if err != nil {
 		return "", err
 	}
@@ -37,7 +37,7 @@ func (r *Scheduler) commitVoterChange(ctx context.Context, in schedulingapi.Sche
 	if !r.host.IsLeader() {
 		return "", fault.ErrNotLeader
 	}
-	id, err := r.host.CommitVoterChange(ctx, change, RepairCommit{Document: doc,
+	id, err := r.legacyHost.CommitVoterChange(ctx, change, RepairCommit{Document: doc,
 		ExpectedVersion: fresh.Target.Version, Plan: plan})
 	if err == nil {
 		r.host.WakeOperator()
@@ -51,7 +51,7 @@ func (r *Scheduler) recheckVoterChange(ctx context.Context,
 	if err := ctx.Err(); err != nil {
 		return votercheck.Input{}, err
 	}
-	views, err := r.host.Views(ctx)
+	views, err := r.legacyHost.Views(ctx)
 	latest, target, active := views.Latest, views.Target, views.Active
 	if err != nil {
 		return votercheck.Input{}, err
@@ -64,7 +64,7 @@ func (r *Scheduler) recheckVoterChange(ctx context.Context,
 	if !r.host.IsLeader() || !r.enabled.Load() {
 		return votercheck.Input{}, fault.ErrNotLeader
 	}
-	op, err := r.host.CurrentOperator(ctx)
+	op, err := r.legacyHost.CurrentOperator(ctx)
 	if err != nil {
 		return votercheck.Input{}, err
 	}
@@ -76,7 +76,7 @@ func (r *Scheduler) recheckVoterChange(ctx context.Context,
 	if err := r.host.RefreshObservations(ctx); err != nil {
 		return votercheck.Input{}, err
 	}
-	status, err := r.host.GlobalStatus(ctx, active)
+	status, err := r.legacyHost.GlobalStatus(ctx, active)
 	if err != nil {
 		return votercheck.Input{}, err
 	}
@@ -101,10 +101,10 @@ func (r *Scheduler) resolveVoterApproval(ctx context.Context, doc topology.Docum
 	plan topology.Plan, cause error) (topology.OperatorID, error) {
 	// Resolve a committed approval whose response was lost. Never retry a role
 	// mutation by approving arbitrary Latest, or substitute another candidate.
-	views, readErr := r.host.Views(ctx)
+	views, readErr := r.legacyHost.Views(ctx)
 	latest, target := views.Latest, views.Target
 	if readErr == nil && reflect.DeepEqual(latest, doc) && reflect.DeepEqual(target, doc) {
-		op, opErr := r.host.CurrentOperator(ctx)
+		op, opErr := r.legacyHost.CurrentOperator(ctx)
 		if opErr == nil && op.Found && op.Operator.Status.Version == doc.Version &&
 			reflect.DeepEqual(op.Operator.Plan, plan) {
 			r.host.WakeOperator()

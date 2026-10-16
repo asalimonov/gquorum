@@ -60,18 +60,7 @@ func (r *Scheduler) reconcileApproval(ctx context.Context, input schedulingAppro
 }
 
 func (r *Scheduler) evaluatePolicy(ctx context.Context, in schedulingapi.ScheduleInput, views topology.ReadView) {
-	callbackCtx, cancel := context.WithTimeout(ctx, r.callbackTimeout)
-	r.statusMu.Lock()
-	r.callback, r.callbackStarted = callbackCtx, in.Now
-	r.statusMu.Unlock()
-	decision, err := r.policy.Schedule(callbackCtx, policyInput(in))
-	r.statusMu.Lock()
-	r.callback = nil
-	r.statusMu.Unlock()
-	if err == nil {
-		err = callbackCtx.Err()
-	}
-	cancel()
+	decision, err := r.callPolicy(ctx, in)
 	if err != nil {
 		r.transition(r.newStatus(true, topology.SchedulingError, ReconcileReasonPolicyRejected), err.Error())
 		return
@@ -88,10 +77,27 @@ func (r *Scheduler) evaluatePolicy(ctx context.Context, in schedulingapi.Schedul
 	r.applyReplicaDecision(ctx, in, views, action)
 }
 
+func (r *Scheduler) callPolicy(ctx context.Context,
+	in schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error) {
+	callbackCtx, cancel := context.WithTimeout(ctx, r.callbackTimeout)
+	r.statusMu.Lock()
+	r.callback, r.callbackStarted = callbackCtx, in.Now
+	r.statusMu.Unlock()
+	decision, err := r.policy.Schedule(callbackCtx, policyInput(in))
+	r.statusMu.Lock()
+	r.callback = nil
+	r.statusMu.Unlock()
+	if err == nil {
+		err = callbackCtx.Err()
+	}
+	cancel()
+	return decision, err
+}
+
 func (r *Scheduler) reportIdleDecision(reason string) {
 	s := r.newStatus(true, topology.SchedulingIdle, reason)
 	switch reason {
-	case ReconcileReasonStabilityWindow, "local_stop", "unknown_observation",
+	case ReconcileReasonCooldown, ReconcileReasonStabilityWindow, "local_stop", "unknown_observation",
 		"stale_observation", "failure_window", "standby_window",
 		"replica_cooldown", "group_cooldown", "pinned_learner",
 		"target_shortfall", "insufficient_observation_frequency", "placement_unsatisfied",
@@ -193,6 +199,8 @@ func (r *Scheduler) refusePolicyScope(in schedulingapi.ScheduleInput, group stri
 	if reason == "" {
 		return false
 	}
-	r.transition(r.newStatus(true, topology.SchedulingWaiting, reason), string(in.Groups[group].OperationID))
+	status := r.newStatus(true, topology.SchedulingWaiting, reason)
+	status.CurrentAction = &topology.SchedulingActionStatus{GroupID: group}
+	r.transition(status, string(in.Groups[group].OperationID))
 	return true
 }

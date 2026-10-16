@@ -422,7 +422,12 @@ observations are supplied through Status. Clone preserves values and owns nested
 maps/slices. The built-in policy rotates selected eligible groups, skips busy or
 unproven scopes and binds evidence/cooldowns to the exact group source. During the
 scoped-state rollout, named internal adapters still label actual schema3 evidence;
-full failure isolation activates with schema4 at Task78.
+full failure isolation activates with schema4 at Task78. The prepared scoped
+driver rechecks selected-group evidence after callbacks and after planning, then
+submits Latest/Target CAS plus source/owner expectations. Independent staged edits
+remain staged through the FSM's atomic repair rebase. Overlapping intent reports
+`staged_conflict`; callback-time changes outside the selected group can refresh the
+scheduler's capture. This does not change ordinary caller CAS semantics.
 
 The default repair policy is `scheduling.DefaultRepairPolicy`. Groups with a replicated
 `VoterConfig` converge toward their desired voter count and replace persistently

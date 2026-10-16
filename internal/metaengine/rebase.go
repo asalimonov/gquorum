@@ -40,7 +40,7 @@ func rebaseSemanticDocument(doc topology.Document) topology.Document {
 // Reapply the complete staged semantic delta, including additions/deletions.
 // Existing scope/read-set checks prohibit conflicting repair writes first.
 func rebaseStaged(base, staged, repair topology.Document) (topology.Document, error) {
-	if err := validateIndependentEdits(base, staged, repair); err != nil {
+	if err := ValidateRepairIndependence(base, staged, repair); err != nil {
 		return topology.Document{}, err
 	}
 	before, intent := rebaseSemanticDocument(base), rebaseSemanticDocument(staged)

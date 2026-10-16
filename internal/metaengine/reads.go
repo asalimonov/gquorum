@@ -36,6 +36,7 @@ type LockRead = topology.LockHolder
 // PlanRead captures an operator, its topology boundaries and retained authority
 // evidence.
 type PlanRead struct {
+	Latest    topology.Document         `json:"latest"`
 	Operation topology.Operation        `json:"operation"`
 	Previous  []topology.Operation      `json:"previous,omitempty"`
 	Scopes    []ScopeExpectation        `json:"scopes,omitempty"`
