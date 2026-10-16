@@ -1169,3 +1169,17 @@ Verified
 - Full metaengine units1.080s; full managed/authoritystore functional8.498s/6.515s; focused collection/retirement race3.818s/4.656s. make test:1778/1778,8.685s; test-reports/unit/20261016T141617.791000Z-eijmddnk/report.md. Staged lint and diff checks pass. Logs /tmp/gquorum-task57-{meta,functional-final,race,unit-final,lint-clean}.log.
 - Coverage includes missing proof before policy, durable preparation before deletion, deferred NotBefore/reason, callback/status errors, failed prepare/Collect/completion persistence, deletion-before-completion recovery, collected-after-marker-release recovery, ledger reappearance during retention, policy changes after preparation, fenced host resumption and callback ownership through cancellation/Stop. FSM regression issues two cleanup revisions around a fence, delivers either first, retries missing receipt, accepts alternate proof, then prunes/restores/retries; absent cited proof refuses restore. Wrong action/target remains refused. Initial expected error classification and formatting failures were corrected before final validation. No Docker run claimed.
 - Next Task58; routine peer/dead-code checkpoint remains75.
+
+
+## Task 58 — Collection reporting and ordered proof release
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 73).
+
+Implemented
+- reportCollections scans bounded durable pages and continues after individual failures. Per-record authority work reloads exact collected state under the shared group gate, reports the original receipt, requires exact echo/nonzero applied index for accepted or settled replies, releases the store marker, then removes the exact journal row. No volatile reporting queue or deletion retry from collected state.
+- Local readmission reservation is checked without waiting (the readmission owner may be joining the reporter); current-member readmission floors and incomplete superseding fences retain both proofs. Completed historical floors stop blocking after rebind. The gate remains held through both release calls, preventing a new readmission reservation between checks and removal.
+- Moved the one existing collection maintenance loop into the joined authority lifetime. Fencing participation no longer stops periodic deletion/reporting; Stop/readmission cancel and join network/storage callbacks. Status reporting was wired in Task57; restricted service callbacks remain Tasks59/72/78. Updated current runtime docs; no new public API or task.
+
+Verified
+- Full managed functional suite11.260s; final focused collection/retention/reporting race6.820s. make test:1778/1778,9.539s; test-reports/unit/20261016T142336.493346Z-vuupof3l/report.md. Staged lint/diff checks pass. Logs /tmp/gquorum-task58-{functional-final,race-final,unit-final,lint-clean}.log.
+- Tests cover lost replies and exact replay, acceptance versus settlement, every immutable echo field and zero index, store release failure, restart after marker release before journal removal, canceled network wait remaining owned until return, reservation/persisted load/meta readmission references, incomplete then completed superseding fence, historical proof after rebind, periodic work after participation fencing, and 101-row paging with one failed identity while the other page completes. The only preliminary lint issue (parameter reassignment) was corrected. No Docker run claimed.
+- Next Task59; routine peer/dead-code checkpoint remains75.

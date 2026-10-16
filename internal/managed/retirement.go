@@ -296,7 +296,8 @@ func (h *Host) CollectRetired(parent context.Context) error {
 	}
 	defer done()
 	resumed := h.resumeCollections(ctx)
-	return errors.Join(resumed, h.collectRetiredStores(ctx))
+	collected := h.collectRetiredStores(ctx)
+	return errors.Join(resumed, collected, h.reportCollections(ctx))
 }
 
 func (h *Host) collectRetiredStores(ctx context.Context) error {

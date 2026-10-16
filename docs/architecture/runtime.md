@@ -201,7 +201,15 @@ retirement proof before serialized retention; preparation survives later policy
 changes. Accepted attempts use the shared group gate and recheck local resources
 before deleting. Fenced hosts can resume accepted deletion without current
 metadata membership or quorum. Collected rows never repeat deletion. Reporting
-and proof-release composition remain in Tasks 58–59 of the ongoing plan.
+scans bounded pages and verifies the exact receipt echo plus nonzero applied
+index, for both acceptance and read-only settlement. It releases the store marker
+before removing the exact journal row. Lost replies or either failed release
+retain evidence. Local readmission reservation, current-member readmission floors
+and incomplete superseding fences postpone release. Historical completed floors
+cease blocking after member rebind. Collection maintenance uses the authority
+lifetime: participation fencing leaves it running; Stop/readmission cancel and
+join it, including delayed callbacks. The service callback remains unwired until
+the scoped protocol/composition cutover (Tasks 59/72/78).
 
 WAL collection writes and syncs an exact sibling marker before deleting contents,
 keeps the identity pin until those deletions are synced, and finishes with

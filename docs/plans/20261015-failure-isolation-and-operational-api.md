@@ -932,13 +932,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/managed/retirement.go`, existing host lifetime/configuration. **Target:** [T] §6.3, §8.4, §12 “reportCollections”; contract C11. **Depends on:** 54–57. **Budget:** ≤550.
 
-- [ ] Implement bounded reportCollections using durable collected rows and injected Report/Status callbacks. Validate exact echo and accepted/settled result before proof release; defer both removals while local readmission references remain.
-- [ ] Call owningStore.ForgetCollection before exact journal removal. Reporting loss/outage retains durable evidence; do not repeat deletion after marker release. Restrict wakeups to bounded hints, never use a volatile queue as the source of truth.
-- [ ] Test lost reply, duplicate report, wrong echo, Forget failure and crash after Forget before journal removal. Cancel network waits on stop while retaining unsent rows for restart/courier.
+- [x] Implement bounded reportCollections using durable collected rows and injected Report/Status callbacks. Validate exact echo and accepted/settled result before proof release; defer both removals while local readmission references remain.
+- [x] Call owningStore.ForgetCollection before exact journal removal. Reporting loss/outage retains durable evidence; do not repeat deletion after marker release. Restrict wakeups to bounded hints, never use a volatile queue as the source of truth.
+- [x] Test lost reply, duplicate report, wrong echo, Forget failure and crash after Forget before journal removal. Cancel network waits on stop while retaining unsent rows for restart/courier.
 
 **Verification**
 
-- [ ] Run managed reporting functional/race tests and `make test`.
+- [x] Run managed reporting functional/race tests and `make test`.
 
 ### Task 59: Route restricted collection reporting through MetaControl
 

@@ -212,14 +212,14 @@ func (h *Host) Start(ctx context.Context) error {
 	h.workCancel, h.workDone = cancel, make(chan struct{})
 	h.operationContext = work
 	h.authorityContext, h.authorityCancel = context.WithCancel(ctx)
-	h.workWG.Add(2)
+	h.workWG.Add(1)
 	go func() { defer h.workWG.Done(); h.maintain(work) }()
-	go func() { defer h.workWG.Done(); h.collectLoop(work) }()
+	h.startCollectionLoopLocked()
 	go func() { h.workWG.Wait(); close(h.workDone) }()
 	return nil
 }
 
-// Quiesce prevents new starts and joins recovery/report maintenance. Existing
+// Quiesce prevents new starts and joins participation maintenance. Existing
 // replicas are joined by Stop, after upstream effect producers have quiesced.
 func (h *Host) Quiesce(ctx context.Context) error {
 	h.mu.Lock()

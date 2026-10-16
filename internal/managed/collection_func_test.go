@@ -30,7 +30,9 @@ func (s *collectionStore) Collect(ctx context.Context, record storage.RetiredRep
 func retiredHostCollection(t *testing.T, f *fixture) (*Host, storage.RetiredReplica) {
 	t.Helper()
 	_, initial := fixtureAuthority(t, f)
-	f.cfg.RetirementInterval = time.Hour
+	if f.cfg.RetirementInterval == 0 {
+		f.cfg.RetirementInterval = time.Hour
+	}
 	h := f.host(t)
 	_, err := h.InstallHostFence(deadline(t), initial)
 	must(t, err)
