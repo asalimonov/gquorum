@@ -145,7 +145,7 @@ func (s *Store) Collect(ctx context.Context, record storage.RetiredReplica) erro
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(dir); err != nil {
+	if err := removeCollectedDirectory(ctx, dir, record.Identity); err != nil {
 		return err
 	}
 	return syncDir(s.opts.RootDir)

@@ -76,17 +76,14 @@ func (s *Store) prepareCollectionMarker(record storage.RetiredReplica) (bool, er
 	if marker != nil && !sameRetiredRecord(marker.Retired, record) {
 		return false, fault.ErrIdentityMismatch
 	}
-	present, err := retiredDirectoryMatches(dir, record.Identity)
-	if err != nil {
-		return false, err
-	}
 	if marker == nil {
-		if !present {
-			return false, os.ErrNotExist // Absence alone never proves collection.
-		}
-		if err := writeCollectionMarker(dir+collectionSuffix, record); err != nil {
+		if err := startCollection(dir, record); err != nil {
 			return false, err
 		}
+	}
+	present, err := markedDirectoryMatches(dir, record.Identity)
+	if err != nil {
+		return false, err
 	}
 	// Retry a failed root sync even for an existing marker or absent directory.
 	return present, syncDir(s.opts.RootDir)
@@ -154,4 +151,39 @@ func writeCollectionMarker(path string, record storage.RetiredReplica) error {
 	}
 	// Same-volume atomic publication cannot overwrite a conflicting marker.
 	return os.Link(tmp.Name(), path)
+}
+
+func startCollection(dir string, record storage.RetiredReplica) error {
+	present, err := retiredDirectoryMatches(dir, record.Identity)
+	if err != nil {
+		return err
+	}
+	if !present {
+		return os.ErrNotExist // Absence alone never proves collection.
+	}
+	return writeCollectionMarker(dir+collectionSuffix, record)
+}
+
+func markedDirectoryMatches(dir string, want storage.Identity) (bool, error) {
+	owner, err := retirementIdentity(dir)
+	if err != nil {
+		return false, err
+	}
+	if owner.Found {
+		if owner.Identity != want {
+			return false, &IdentityMismatchError{Stored: owner.Identity, Resolved: want}
+		}
+		return true, nil
+	}
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if len(entries) != 0 {
+		return false, unreadable("marked retirement has unpinned contents", nil)
+	}
+	return true, nil // Exact marker plus empty directory is the pin-removal crash boundary.
 }

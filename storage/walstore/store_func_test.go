@@ -606,3 +606,10 @@ func TestWalStore_SnapshotMarkerCacheAcrossCyclesAndReopen(t *testing.T) {
 	}
 	check(t, s.Close())
 }
+
+func TestWalStore_RetirementConformance(t *testing.T) {
+	t.Parallel()
+	storagetest.RunRetirement(t, func(t *testing.T, node string) storage.Store {
+		return openTest(t, t.TempDir(), node, "test-cluster", false)
+	})
+}

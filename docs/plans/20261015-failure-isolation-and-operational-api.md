@@ -908,13 +908,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `storage/walstore/lifecycle.go`, `storage/retirement.go`, `storage/storagetest`, custom/test stores. **Target:** [T] §4.2, §12 collection algorithms; contract C6. **Depends on:** 55. **Budget:** ≤550.
 
-- [ ] Delete contents with the exact pin retained, sync the directory, remove the pin, remove the now-empty directory nonrecursively and sync the root. Recover a missing pin only with an exact marker plus empty directory; absent data without marker returns NotFound.
-- [ ] Implement ForgetCollection as exact marker-only release after retired data is absent; absent marker is repeatable and root sync remains required. Activate the strengthened interface and update actual implementations/conformance helpers together.
-- [ ] Test every deletion boundary, retry after failure, foreign/nonempty unpinned directory refusal and successor survival. Memory storage has no durable physical obligation; do not implement fake persistent proof from an empty retired list.
+- [x] Delete contents with the exact pin retained, sync the directory, remove the pin, remove the now-empty directory nonrecursively and sync the root. Recover a missing pin only with an exact marker plus empty directory; absent data without marker returns NotFound.
+- [x] Implement ForgetCollection as exact marker-only release after retired data is absent; absent marker is repeatable and root sync remains required. Activate the strengthened interface and update actual implementations/conformance helpers together.
+- [x] Test every deletion boundary, retry after failure, foreign/nonempty unpinned directory refusal and successor survival. Memory storage has no durable physical obligation; do not implement fake persistent proof from an empty retired list.
 
 **Verification**
 
-- [ ] Run storage conformance and walstore functional/race regressions; run `make test`.
+- [x] Run storage conformance and walstore functional/race regressions; run `make test`.
 
 ### Task 57: Prepare and resume host-owned collection attempts
 

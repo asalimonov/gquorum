@@ -197,6 +197,15 @@ are bounded owned values; their exclusive cursors survive row removal and rebind
 Schema 1 is refused without migration. The managed collection/reporting wiring
 is implemented separately in the ongoing failure-isolation plan (Tasks 57–59).
 
+WAL collection writes and syncs an exact sibling marker before deleting contents,
+keeps the identity pin until those deletions are synced, and finishes with
+nonrecursive removal of the empty directory. A retry accepts an empty unpinned
+directory only with that marker. Missing data without proof returns an error
+matching fs.ErrNotExist. ForgetCollection releases only an exact marker after
+the retired directory is absent; it syncs the root even on repeated release.
+Memory storage retains equivalent retry evidence only within its lifetime and
+cannot prove collection after process loss.
+
 Planning also retains unfinished preparations in surviving groups. Even an old
 replica absent from native membership needs an exact remove/stop/cleanup sequence;
 the remove can produce an already-satisfied receipt under its new grant. New

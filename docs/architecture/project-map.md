@@ -285,7 +285,7 @@ contradictory or partial evidence. `ReadyWrite` holds entries/HardState;
 | Interface | Complete method set |
 | --- | --- |
 | `Store` | `HasState(ctx) (bool,error)`; `BindReplica(ctx,Identity) error`; `Probe(ctx,string) (Probe,error)`; `Ensure(ctx,string) error`; `SaveReady(ctx,string,ReadyWrite) error`; `SaveApplied(ctx,string,uint64,raftpb.ConfState) error`; `SaveSnapshot(ctx,string,raftpb.Snapshot) error`; `Load(ctx,string) (Recovery,error)`; `Compact(ctx,string,uint64) error`; `Quarantine(ctx,string,uint64) (string,error)`; `Close() error` |
-| `RetirementStore` | `Retired(ctx) ([]RetiredReplica,error)`; `Collect(ctx,RetiredReplica) error` |
+| `RetirementStore` | `Retired(ctx) ([]RetiredReplica,error)`; `Collect(ctx,RetiredReplica) error`; `ForgetCollection(ctx,RetiredReplica) error` |
 
 - [walstore](../../storage/walstore/store.go): `Open(Options)` returns a Store
   implementing both interfaces plus `Stats`; identity pins, etcd WAL segments,
