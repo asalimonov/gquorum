@@ -470,3 +470,29 @@ func TestMutationConcurrentCommitReturnsTypedCASConflict(t *testing.T) {
 		t.Fatal("interleaved edit did not preserve CAS", err)
 	}
 }
+
+func TestTypedMutationPinsZeroVersionAndChecksReplayBeforeEdit(t *testing.T) {
+	t.Parallel()
+	f := newMutationFixture(t)
+	policy := mutationPolicy{Kind: "activate_node", Input: mutationInput{NodeName: "n1"}, Comment: "activate"}
+	docs, err := f.g.computeMutation(t.Context(), MutationOptions{Preview: true}, policy, func(_ *topology.Document, _ time.Time) error { return nil })
+	if err != nil || docs.Intent == nil || docs.Intent.ExpectedVersion != 1 || docs.Intent.Version != 2 {
+		t.Fatal("zero expected was not captured", docs, err)
+	}
+	concurrent := f.g.machine.Latest()
+	concurrent.Comment = "another caller"
+	f.commit(t, concurrent, false)
+	before := f.g.machine.Latest()
+	calls := 0
+	_, err = f.g.computeMutation(t.Context(), MutationOptions{ExpectedVersion: 1}, policy, func(_ *topology.Document, _ time.Time) error { calls++; return nil })
+	if !errors.Is(err, fault.ErrVersionConflict) || calls != 0 || !reflect.DeepEqual(before, f.g.machine.Latest()) {
+		t.Fatal("stale intent invoked allocating edit or changed CAS", calls, err)
+	}
+	// Raw acceptance is still inspectable in the schema3 transition adapter. Typed
+	// provenance is deliberately not enabled until the complete format cutover.
+	accepted := f.g.machine.Latest()
+	replay, err := f.g.machine.ReplayMutation(metaengine.ProposeDocument{ExpectedVersion: 1, Doc: accepted})
+	if err != nil || !replay.Accepted || !reflect.DeepEqual(replay.Doc, accepted) {
+		t.Fatal("lost raw Stage response was not recoverable", replay, err)
+	}
+}

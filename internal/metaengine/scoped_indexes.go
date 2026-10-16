@@ -23,7 +23,7 @@ type scopedIndexes struct {
 	retries      map[topology.OperationID]topology.OperationID
 	cleanup      map[storage.Identity]*cleanupRecord
 	cleanupOrder []*cleanupRecord
-	intents      map[intentKey]*intentRecord
+	intents      map[intentKey]*Intent
 	documents    map[uint64]topology.Document
 	rebases      map[uint64]uint64
 	grants       map[topology.AuthorityKey]*scopedAuthorityRecord
@@ -49,7 +49,7 @@ func (s *scopedState) buildIndexes() (*scopedIndexes, error) {
 			return r.Status.ID
 		}),
 		indexRows(s.Cleanup, &index.cleanup, func(r *cleanupRecord) storage.Identity { return r.Identity }),
-		indexRows(s.Intents, &index.intents, func(r *intentRecord) intentKey {
+		indexRows(s.Intents, &index.intents, func(r *Intent) intentKey {
 			return intentKey{r.ExpectedVersion, r.Kind, r.Digest}
 		}),
 		indexRows(s.AuthorityRecords, &index.grants, func(r *scopedAuthorityRecord) topology.AuthorityKey {

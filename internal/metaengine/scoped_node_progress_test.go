@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -160,4 +161,61 @@ func TestScopedMarkerClockAndSkippedVersions(t *testing.T) {
 		t.Fatal("marker predates one of the checkpoints it proves", s.FullyConverged)
 	}
 	prepareScopedFixture(t, &s)
+}
+
+func TestScopedNodeDrainKeepsDependenciesAcrossUnrelatedMetadataApproval(t *testing.T) {
+	t.Parallel()
+	s, repair := repairCommitFixture(t)
+	s.Latest = s.Target.Clone()
+	s.Latest.Version, s.Latest.ParentVersion = 2, 1
+	s.Latest.Node("n2").State = topology.NodeDraining
+	s.Latest.Group("b").Replicas = slices.DeleteFunc(s.Latest.Group("b").Replicas,
+		func(r topology.Replica) bool { return r.NodeName == "n2" })
+	s.Intents = nil
+	for i := range s.Allocations {
+		s.Allocations[i].NextReplicaID = s.Latest.Group(s.Allocations[i].GroupID).NextReplicaID
+	}
+	prepareScopedFixture(t, &s)
+	plan := repairFixturePlan(t, &s, s.Latest)
+	for i := range plan.Blocks {
+		block := &plan.Blocks[i]
+		for _, seq := range block.Steps {
+			if plan.Steps[seq-1].Kind == topology.StepStopReplica {
+				block.Cleanup = append(block.Cleanup, seq)
+			}
+		}
+		block.Steps = slices.DeleteFunc(block.Steps, func(seq int) bool {
+			return plan.Steps[seq-1].Kind == topology.StepStopReplica
+		})
+		slices.Sort(block.Cleanup)
+	}
+	p := BeginOperationProposal{Version: 2, Plan: plan, Scopes: repair.Scopes, At: repair.At,
+		Actor: "drainer", Origin: topology.OriginOperator}
+	applyScopedApprovalFixture(t, &s, p)
+	old := *s.indexes.nodes["n2"]
+	if old.SourceVersion != 1 || old.Declaration.State != topology.NodeActive || s.indexes.groups["b"].Owner != "exec-v2-a1" {
+		t.Fatal("drain completed before its load evacuation")
+	}
+	s.Latest = s.Target.Clone()
+	s.Latest.Version, s.Latest.ParentVersion = 3, 2
+	s.Latest.Node("n3").Region = "unrelated"
+	prepareScopedFixture(t, &s)
+	p = BeginOperationProposal{Version: 3, At: p.At.Add(time.Second), Actor: "other", Origin: topology.OriginOperator,
+		Plan:   topology.Plan{Version: 3, Blocks: []topology.PlanBlock{{GroupID: topology.MetaGroupID, SourceVersion: 2}}},
+		Scopes: []ScopeExpectation{{GroupID: topology.MetaGroupID, SourceVersion: 2}}}
+	applyScopedApprovalFixture(t, &s, p)
+	if row := s.indexes.nodes["n2"]; row.SourceVersion != 1 || row.Declaration.State != topology.NodeActive ||
+		s.indexes.groups["b"].Owner != "exec-v2-a1" {
+		t.Fatal("unrelated metadata approval waived original drain dependency", row)
+	}
+	// The predicate can release X only after the exact dependent checkpoint.
+	index, err := s.buildIndexes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	group := index.groups["b"]
+	group.Owner, group.SourceVersion, group.Declaration = "", 2, s.Target.Group("b")
+	if _, ready := nodeApprovalProof(*s.indexes.nodes["n2"], &s, index); !ready {
+		t.Fatal("complete evacuation still held the node")
+	}
 }

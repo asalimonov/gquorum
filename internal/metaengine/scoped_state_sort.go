@@ -35,7 +35,7 @@ func (s *scopedState) sortProgress() error {
 		sortStateRows(&s.Cleanup, func(a, b cleanupRecord) int {
 			return compareReplicaIdentity(a.Identity, b.Identity)
 		}),
-		sortStateRows(&s.Intents, func(a, b intentRecord) int { return cmp.Compare(a.Version, b.Version) }),
+		sortStateRows(&s.Intents, func(a, b Intent) int { return cmp.Compare(a.Version, b.Version) }),
 	)
 }
 

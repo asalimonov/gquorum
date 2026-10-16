@@ -14,7 +14,9 @@ import (
 // voter configuration.
 func (g *Group) SetGroupVoterConfig(ctx context.Context, id string, p topology.VoterConfig,
 	o MutationOptions) (MutationResult, error) {
-	return g.mutation(ctx, o, mutationPolicy{Comment: "set group voter configuration"},
+	return g.mutation(ctx, o, mutationPolicy{Kind: "set_group_voter_config",
+		Input:   mutationInput{GroupID: id, Value: p},
+		Comment: "set group voter configuration"},
 		func(doc *topology.Document, now time.Time) error {
 			before := doc.Clone()
 			group := doc.Group(id)
@@ -50,7 +52,9 @@ func (g *Group) SetGroupHosting(ctx context.Context, id string, h topology.Hosti
 	if err := topology.ValidateLoadID(id); err != nil {
 		return MutationResult{}, err
 	}
-	return g.mutation(ctx, o, mutationPolicy{Comment: "set group hosting", CheckHealth: true},
+	return g.mutation(ctx, o, mutationPolicy{Kind: "set_group_hosting",
+		Input:   mutationInput{GroupID: id, Value: h},
+		Comment: "set group hosting", CheckHealth: true},
 		func(doc *topology.Document, now time.Time) error {
 			before := doc.Clone()
 			group := doc.Group(id)
@@ -60,7 +64,9 @@ func (g *Group) SetGroupHosting(ctx context.Context, id string, h topology.Hosti
 			if group.VoterConfig == nil {
 				return fault.New(fault.Invalid, "adopt a voter configuration before changing hosting", nil)
 			}
-			if err := h.Validate(); err != nil {
+			hosting := h
+			hosting.Nodes = slices.Sorted(slices.Values(h.Nodes))
+			if err := hosting.Validate(); err != nil {
 				return err
 			}
 			for _, name := range h.Nodes {
@@ -71,8 +77,6 @@ func (g *Group) SetGroupHosting(ctx context.Context, id string, h topology.Hosti
 					return err
 				}
 			}
-			hosting := h
-			hosting.Nodes = slices.Clone(h.Nodes)
 			group.Hosting = &hosting
 			return g.preparePlacementEdit(before, doc, now)
 		})
@@ -82,7 +86,9 @@ func (g *Group) SetGroupHosting(ctx context.Context, id string, h topology.Hosti
 // replica.
 func (g *Group) SetReplicaPinnedLearner(ctx context.Context, id string, setting topology.LearnerPin,
 	o MutationOptions) (MutationResult, error) {
-	return g.mutation(ctx, o, mutationPolicy{Comment: "set pinned learner", CheckHealth: true},
+	return g.mutation(ctx, o, mutationPolicy{Kind: "set_replica_pinned_learner",
+		Input:   mutationInput{GroupID: id, Value: setting},
+		Comment: "set pinned learner", CheckHealth: true},
 		func(doc *topology.Document, now time.Time) error { return setLearnerPin(doc, id, setting, now) })
 }
 
@@ -139,7 +145,7 @@ func createLoadGroup(doc *topology.Document, spec GroupSpec, now time.Time) erro
 	h := topology.HostingRule{Mode: topology.HostingAllEligible}
 	if spec.Hosting != nil {
 		h = *spec.Hosting
-		h.Nodes = slices.Clone(h.Nodes)
+		h.Nodes = slices.Sorted(slices.Values(h.Nodes))
 	}
 	if len(spec.Nodes) != 0 {
 		h = topology.HostingRule{Mode: topology.HostingExplicit, Nodes: slices.Clone(spec.Nodes)}
@@ -160,7 +166,7 @@ func createLoadGroup(doc *topology.Document, spec GroupSpec, now time.Time) erro
 	}
 	if spec.Placement != nil {
 		placement := *spec.Placement
-		placement.AllowedNodeTypes = slices.Clone(placement.AllowedNodeTypes)
+		placement.AllowedNodeTypes = slices.Sorted(slices.Values(placement.AllowedNodeTypes))
 		placement.NodeSelector = maps.Clone(placement.NodeSelector)
 		group.Placement = &placement
 	}

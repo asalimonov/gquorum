@@ -25,7 +25,7 @@ type scopedState struct {
 	Groups           []groupConvergence          `json:"group_convergence"`
 	Nodes            []nodeConvergence           `json:"node_convergence"`
 	Cleanup          []cleanupRecord             `json:"cleanup"`
-	Intents          []intentRecord              `json:"intents"`
+	Intents          []Intent                    `json:"intents"`
 	FullyConverged   topology.FullyConverged     `json:"fully_converged"`
 	AuthorityRecords []scopedAuthorityRecord     `json:"authority_records,omitempty"`
 	AuthorityFloors  []resourceFloor             `json:"authority_floors,omitempty"`

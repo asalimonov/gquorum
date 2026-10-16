@@ -50,7 +50,7 @@ type envelope struct {
 type ProposeDocument struct {
 	Doc             topology.Document `json:"doc"`
 	ExpectedVersion uint64            `json:"expected_version"`
-	Intent          *intentRecord     `json:"intent,omitempty"`
+	Intent          *Intent           `json:"intent,omitempty"`
 	ProposalID      string            `json:"proposal_id"`
 }
 

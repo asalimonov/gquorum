@@ -784,15 +784,15 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** root mutation helpers, `internal/metaservice/mutations.go`, document mutation helpers. **Target:** [T] §3.4, §12 “Stage / typed mutation replay”. **Depends on:** 4, 7. **Budget:** ≤550.
 
-- [ ] Reuse metaengine knownIntentKind through the internal construction boundary; implement validated canonical intent fingerprints: include Actor/Comment/Origin/audit and requested semantic identities, normalize set order, preserve meaningful sequence order, exclude generated version/time/allocation fields.
-- [ ] Capture zero ExpectedVersion once per call; for nonzero stale CAS look for retained exact intent before allocating IDs. Raw Stage uses canonical full accepted document content, not a generic request key.
-- [ ] Test equivalent ordering, distinct audit purpose, explicit identity mismatches, unknown history and response loss. Never recompute a write with a fresh expected version or claim an arbitrary replay expiry.
+- [x] Reuse metaengine knownIntentKind through the internal construction boundary; implement validated canonical intent fingerprints: include Actor/Comment/Origin/audit and requested semantic identities, normalize set order, preserve meaningful sequence order, exclude generated version/time/allocation fields.
+- [x] Capture zero ExpectedVersion once per call; for nonzero stale CAS look for retained exact intent before allocating IDs. Raw Stage uses canonical full accepted document content, not a generic request key.
+- [x] Test equivalent ordering, distinct audit purpose, explicit identity mismatches, unknown history and response loss. Never recompute a write with a fresh expected version or claim an arbitrary replay expiry.
 
-- [ ] Supply an internal cross-package constructor or exported value for intent provenance; metaservice cannot construct metaengine.intentRecord directly. Do not add an ordinary application request registry.
+- [x] Supply an internal cross-package constructor or exported value for intent provenance; metaservice cannot construct metaengine.intentRecord directly. Do not add an ordinary application request registry.
 
 **Verification**
 
-- [ ] Run pure intent/canonicalization units and `make test`.
+- [x] Run pure intent/canonicalization units and `make test`.
 
 ### Task 48: Persist accepted intent and first-approval provenance
 

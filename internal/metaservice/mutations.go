@@ -54,11 +54,15 @@ type GroupSpec struct {
 type documentEdit func(*topology.Document, time.Time) error
 
 type mutationPolicy struct {
+	Kind        string
+	Input       mutationInput
 	Comment     string
 	CheckHealth bool
 }
 
 type mutationDocuments struct {
+	Replay     *metaengine.ApplyResult
+	Intent     *metaengine.Intent
 	Base, Next topology.Document
 }
 
@@ -88,6 +92,9 @@ func (g *Group) mutation(ctx context.Context, o MutationOptions, policy mutation
 	if err != nil {
 		return MutationResult{Placement: reportFromError(err)}, err
 	}
+	if documents.Replay != nil {
+		return mutationReplayResult(*documents.Replay), nil
+	}
 	report, err := placementReportFor(g.state().Target(), next, topology.AffectedPlacementGroups(base, next))
 	if err != nil {
 		return MutationResult{Placement: reportFromError(err)}, err
@@ -112,21 +119,12 @@ func (g *Group) computeMutation(ctx context.Context, o MutationOptions, policy m
 	if err := ctx.Err(); err != nil {
 		return mutationDocuments{}, err
 	}
-	if o.Apply && o.Preview {
-		return mutationDocuments{}, fault.New(fault.Invalid, "preview cannot approve a mutation",
-			nil)
+	documents, err := g.mutationBase(o, policy)
+	if err != nil || documents.Replay != nil {
+		return documents, err
 	}
-	base := g.state().Latest()
-	if base.Version == 0 || base.Version == math.MaxUint64 {
-		return mutationDocuments{Base: base}, fault.ErrUnavailable
-	}
-	if o.ExpectedVersion != 0 && o.ExpectedVersion != base.Version {
-		return mutationDocuments{Base: base}, &fault.Error{
-			Code:            fault.VersionConflict,
-			ExpectedVersion: o.ExpectedVersion,
-			CurrentVersion:  base.Version,
-		}
-	}
+	base, intent := documents.Base, documents.Intent
+
 	next := base.Clone()
 	next.Audit = nil
 	now := time.Now().UTC()
@@ -162,7 +160,7 @@ func (g *Group) computeMutation(ctx context.Context, o MutationOptions, policy m
 			return mutationDocuments{Base: base}, err
 		}
 	}
-	return mutationDocuments{Base: base, Next: next}, nil
+	return mutationDocuments{Base: base, Next: next, Intent: intent}, nil
 }
 func checkLoadBounds(doc topology.Document) error {
 	for _, group := range doc.LoadGroups() {
@@ -240,7 +238,9 @@ func unknownGroup(id string) error {
 // placement eligibility controls only its load groups. Excluded names get fresh
 // IDs.
 func (g *Group) AddNode(ctx context.Context, node topology.Node, o MutationOptions) (MutationResult, error) {
-	return g.mutation(ctx, o, mutationPolicy{Comment: fmt.Sprintf("add node %q", node.Name)},
+	return g.mutation(ctx, o, mutationPolicy{Kind: "add_node",
+		Input:   mutationInput{Value: node},
+		Comment: fmt.Sprintf("add node %q", node.Name)},
 		func(doc *topology.Document, now time.Time) error {
 			before := doc.Clone()
 			if strings.TrimSpace(node.Name) == "" || strings.TrimSpace(string(node.Type)) == "" {
@@ -278,7 +278,9 @@ func (g *Group) AddNode(ctx context.Context, node topology.Node, o MutationOptio
 // learner-first execution that can wait for the returning process. The caller
 // restarts that process with Join and an exact OnReadmission quarantine hook.
 func (g *Group) ReadmitNode(ctx context.Context, name string, o MutationOptions) (MutationResult, error) {
-	return g.mutation(ctx, o, mutationPolicy{Comment: fmt.Sprintf("readmit node %q", name)},
+	return g.mutation(ctx, o, mutationPolicy{Kind: "readmit_node",
+		Input:   mutationInput{NodeName: name},
+		Comment: fmt.Sprintf("readmit node %q", name)},
 		func(doc *topology.Document, now time.Time) error {
 			node := doc.Node(name)
 			if node == nil {
@@ -315,7 +317,9 @@ func (g *Group) ReadmitNode(ctx context.Context, name string, o MutationOptions)
 
 // DrainNode stages a node drain through guarded topology mutation.
 func (g *Group) DrainNode(ctx context.Context, name string, o MutationOptions) (MutationResult, error) {
-	return g.mutation(ctx, o, mutationPolicy{Comment: fmt.Sprintf("drain node %q", name)},
+	return g.mutation(ctx, o, mutationPolicy{Kind: "drain_node",
+		Input:   mutationInput{NodeName: name},
+		Comment: fmt.Sprintf("drain node %q", name)},
 		func(doc *topology.Document, now time.Time) error {
 			before := doc.Clone()
 			node := doc.Node(name)
@@ -343,7 +347,9 @@ func (g *Group) DrainNode(ctx context.Context, name string, o MutationOptions) (
 
 // ActivateNode stages reactivation of an eligible declared node.
 func (g *Group) ActivateNode(ctx context.Context, name string, o MutationOptions) (MutationResult, error) {
-	return g.mutation(ctx, o, mutationPolicy{Comment: fmt.Sprintf("activate node %q", name)},
+	return g.mutation(ctx, o, mutationPolicy{Kind: "activate_node",
+		Input:   mutationInput{NodeName: name},
+		Comment: fmt.Sprintf("activate node %q", name)},
 		func(doc *topology.Document, now time.Time) error {
 			before := doc.Clone()
 			node := doc.Node(name)
@@ -365,7 +371,9 @@ func (g *Group) ActivateNode(ctx context.Context, name string, o MutationOptions
 // ExcludeNode stages removal of a node from placement under topology safety
 // checks.
 func (g *Group) ExcludeNode(ctx context.Context, name string, o MutationOptions) (MutationResult, error) {
-	return g.mutation(ctx, o, mutationPolicy{Comment: fmt.Sprintf("exclude node %q", name), CheckHealth: true},
+	return g.mutation(ctx, o, mutationPolicy{Kind: "exclude_node",
+		Input:   mutationInput{NodeName: name},
+		Comment: fmt.Sprintf("exclude node %q", name), CheckHealth: true},
 		func(doc *topology.Document, now time.Time) error {
 			node := doc.Node(name)
 			if node == nil {
@@ -393,7 +401,11 @@ func (g *Group) ForceRetireNode(ctx context.Context, name string, o RetireOption
 	if strings.TrimSpace(o.Reason) == "" || strings.TrimSpace(o.Mutation.Actor) == "" {
 		return MutationResult{}, fault.New(fault.Invalid, "forced retirement requires reason and actor", nil)
 	}
-	return g.mutation(ctx, o.Mutation, mutationPolicy{Comment: fmt.Sprintf("force retire node %q", name)},
+	return g.mutation(ctx, o.Mutation, mutationPolicy{Kind: "force_retire_node",
+		Input: mutationInput{NodeName: name, Value: topology.ChangeAudit{
+			Operation: topology.AuditOperationForceRetireNode, TargetNode: name, Forced: true,
+			Reason: o.Reason, StagedBy: o.Mutation.Actor}},
+		Comment: fmt.Sprintf("force retire node %q", name)},
 		func(doc *topology.Document, now time.Time) error {
 			before := doc.Clone()
 			node := doc.Node(name)
@@ -429,7 +441,9 @@ func (g *Group) ForceRetireNode(ctx context.Context, name string, o RetireOption
 // SetPlacement stages cluster or group placement intent under compare-and-swap.
 func (g *Group) SetPlacement(ctx context.Context, rule topology.PlacementRule,
 	o MutationOptions) (MutationResult, error) {
-	return g.mutation(ctx, o, mutationPolicy{Comment: "set placement", CheckHealth: true},
+	return g.mutation(ctx, o, mutationPolicy{Kind: "set_placement",
+		Input:   mutationInput{Value: rule},
+		Comment: "set placement", CheckHealth: true},
 		func(doc *topology.Document, now time.Time) error {
 			before := doc.Clone()
 			for _, group := range before.LoadGroups() {
@@ -439,7 +453,7 @@ func (g *Group) SetPlacement(ctx context.Context, rule topology.PlacementRule,
 				}
 			}
 			doc.Placement = rule
-			doc.Placement.AllowedNodeTypes = slices.Clone(rule.AllowedNodeTypes)
+			doc.Placement.AllowedNodeTypes = slices.Sorted(slices.Values(rule.AllowedNodeTypes))
 			doc.Placement.NodeSelector = maps.Clone(rule.NodeSelector)
 			return g.preparePlacementEdit(before, doc, now)
 		})
@@ -454,7 +468,9 @@ func (g *Group) SetGroupPlacement(ctx context.Context, id string, rule topology.
 	if err := topology.ValidateLoadID(id); err != nil {
 		return MutationResult{}, err
 	}
-	return g.mutation(ctx, o, mutationPolicy{Comment: fmt.Sprintf("set placement of group %q", id), CheckHealth: true},
+	return g.mutation(ctx, o, mutationPolicy{Kind: "set_group_placement",
+		Input:   mutationInput{GroupID: id, Value: rule},
+		Comment: fmt.Sprintf("set placement of group %q", id), CheckHealth: true},
 		func(doc *topology.Document, now time.Time) error {
 			before := doc.Clone()
 			group := doc.Group(id)
@@ -466,7 +482,7 @@ func (g *Group) SetGroupPlacement(ctx context.Context, id string, rule topology.
 				return fault.ErrInvalid
 			}
 			placement := rule
-			placement.AllowedNodeTypes = slices.Clone(rule.AllowedNodeTypes)
+			placement.AllowedNodeTypes = slices.Sorted(slices.Values(rule.AllowedNodeTypes))
 			placement.NodeSelector = maps.Clone(rule.NodeSelector)
 			group.Placement = &placement
 			return g.preparePlacementEdit(before, doc, now)
@@ -479,7 +495,9 @@ func (g *Group) CreateLoadGroup(ctx context.Context, spec GroupSpec, o MutationO
 	if err := topology.ValidateLoadID(spec.ID); err != nil {
 		return MutationResult{}, err
 	}
-	return g.mutation(ctx, o, mutationPolicy{Comment: fmt.Sprintf("create group %q", spec.ID), CheckHealth: true},
+	return g.mutation(ctx, o, mutationPolicy{Kind: "create_group",
+		Input:   mutationInput{Value: spec},
+		Comment: fmt.Sprintf("create group %q", spec.ID), CheckHealth: true},
 		func(doc *topology.Document, now time.Time) error {
 			before := doc.Clone()
 			if err := createLoadGroup(doc, spec, now); err != nil {
@@ -494,7 +512,9 @@ func (g *Group) DeleteLoadGroup(ctx context.Context, id string, o MutationOption
 	if err := topology.ValidateLoadID(id); err != nil {
 		return MutationResult{}, err
 	}
-	return g.mutation(ctx, o, mutationPolicy{Comment: fmt.Sprintf("delete group %q", id)},
+	return g.mutation(ctx, o, mutationPolicy{Kind: "delete_group",
+		Input:   mutationInput{GroupID: id},
+		Comment: fmt.Sprintf("delete group %q", id)},
 		func(doc *topology.Document, _ time.Time) error {
 			if doc.Group(id) == nil {
 				return unknownGroup(id)
@@ -511,7 +531,9 @@ func (g *Group) ChangeReplica(ctx context.Context, id string, change topology.Re
 	if role != topology.ReplicaVoter && role != topology.ReplicaLearner {
 		return MutationResult{}, fault.ErrInvalid
 	}
-	return g.mutation(ctx, o, mutationPolicy{Comment: "change replica role", CheckHealth: true},
+	return g.mutation(ctx, o, mutationPolicy{Kind: "change_replica",
+		Input:   mutationInput{GroupID: id, Value: change},
+		Comment: "change replica role", CheckHealth: true},
 		func(doc *topology.Document, now time.Time) error {
 			group := doc.Group(id)
 			if group == nil {
@@ -536,19 +558,24 @@ func (g *Group) ChangeReplica(ctx context.Context, id string, change topology.Re
 // RollbackTo stages a retained version's intent as a new validated topology
 // version.
 func (g *Group) RollbackTo(ctx context.Context, version uint64, o MutationOptions) (MutationResult, error) {
-	old, err := g.Get(ctx, version)
-	if err != nil {
-		return MutationResult{}, err
-	}
-	policy := mutationPolicy{Comment: fmt.Sprintf("rollback to version %d", version), CheckHealth: true}
+	policy := mutationPolicy{Kind: "rollback_to",
+		Input:   mutationInput{Version: version},
+		Comment: fmt.Sprintf("rollback to version %d", version), CheckHealth: true}
 	documents, err := g.computeMutation(ctx, o, policy,
 		func(doc *topology.Document, now time.Time) error {
+			old, err := g.Get(ctx, version)
+			if err != nil {
+				return err
+			}
 			return g.prepareRollback(doc, old, version, now)
 		},
 	)
 	base, next := documents.Base, documents.Next
 	if err != nil {
 		return MutationResult{Placement: reportFromError(err)}, err
+	}
+	if documents.Replay != nil {
+		return mutationReplayResult(*documents.Replay), nil
 	}
 	next.ParentVersion = version
 	report, err := placementReportFor(g.state().Target(), next, topology.AffectedPlacementGroups(base, next))
@@ -574,17 +601,19 @@ func (g *Group) ReseatReplica(ctx context.Context, id, name string, o MutationOp
 	if err := topology.ValidateLoadID(id); err != nil {
 		return MutationResult{}, err
 	}
-	views := g.state().Views()
-	latest, target, active := views.Latest, views.Target, views.Active
-	if !reflect.DeepEqual(latest, target) || !reflect.DeepEqual(target, active) {
-		return MutationResult{}, fault.New(fault.OperatorAuthorization,
-			"reseat requires equal Latest, Target and Active", nil)
-	}
-	if ex, ok := g.state().CurrentOperator(); ok && !ex.Status.State.Terminal() {
-		return MutationResult{}, fault.New(fault.OperatorAuthorization, "reseat requires no running execution", nil)
-	}
-	documents, err := g.computeMutation(ctx, o, mutationPolicy{Comment: "reseat replica"},
+	documents, err := g.computeMutation(ctx, o, mutationPolicy{Kind: "reseat_replica",
+		Input:   mutationInput{GroupID: id, NodeName: name},
+		Comment: "reseat replica"},
 		func(doc *topology.Document, now time.Time) error {
+			views := g.state().Views()
+			latest, target, active := views.Latest, views.Target, views.Active
+			if !reflect.DeepEqual(latest, target) || !reflect.DeepEqual(target, active) {
+				return fault.New(fault.OperatorAuthorization,
+					"reseat requires equal Latest, Target and Active", nil)
+			}
+			if ex, ok := g.state().CurrentOperator(); ok && !ex.Status.State.Terminal() {
+				return fault.New(fault.OperatorAuthorization, "reseat requires no running execution", nil)
+			}
 			options := metaengine.ReplicaRepairOptions{GroupID: id, NodeName: name, At: now,
 				Origin: topology.OriginOperator, Actor: o.Actor}
 			return g.reseatDocument(doc, views, options)
@@ -592,6 +621,9 @@ func (g *Group) ReseatReplica(ctx context.Context, id, name string, o MutationOp
 	base, next := documents.Base, documents.Next
 	if err != nil {
 		return MutationResult{Placement: reportFromError(err)}, err
+	}
+	if documents.Replay != nil {
+		return mutationReplayResult(*documents.Replay), nil
 	}
 	report, err := placementReportFor(g.state().Target(), next, topology.AffectedPlacementGroups(base, next))
 	if err != nil {
@@ -673,4 +705,37 @@ func (g *Group) TransferLeader(ctx context.Context, id, name string) error {
 		return fault.ErrAuthorityPending
 	}
 	return nil
+}
+
+// Pin zero CAS once, and resolve stale acceptance before invoking an edit.
+func (g *Group) mutationBase(o MutationOptions, policy mutationPolicy) (mutationDocuments, error) {
+	if o.Apply && o.Preview {
+		return mutationDocuments{}, fault.New(fault.Invalid, "preview cannot approve a mutation",
+			nil)
+	}
+	intent, err := g.mutationIntent(o, policy)
+	if err != nil {
+		return mutationDocuments{}, err
+	}
+	base := g.state().Latest()
+	if base.Version == 0 {
+		return mutationDocuments{Base: base}, fault.ErrUnavailable
+	}
+	if o.ExpectedVersion != 0 && o.ExpectedVersion != base.Version {
+		if intent != nil && !o.Preview {
+			replay, err := g.state().ReplayMutation(metaengine.ProposeDocument{
+				ExpectedVersion: o.ExpectedVersion, Intent: intent})
+			return mutationDocuments{Base: base, Next: replay.Doc, Intent: intent, Replay: &replay}, err
+		}
+		return mutationDocuments{Base: base}, &fault.Error{
+			Code: fault.VersionConflict, ExpectedVersion: o.ExpectedVersion, CurrentVersion: base.Version,
+		}
+	}
+	if base.Version == math.MaxUint64 {
+		return mutationDocuments{Base: base}, fault.ErrUnavailable
+	}
+	if intent != nil {
+		intent.ExpectedVersion, intent.Version = base.Version, base.Version+1
+	}
+	return mutationDocuments{Base: base, Intent: intent}, nil
 }

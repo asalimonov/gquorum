@@ -91,7 +91,7 @@ func TestScopedFieldsCannotReachLegacyMutationHandlers(t *testing.T) {
 	m := convergedAuthorityFixture(t)
 	before := m.latest.Clone()
 	for i, proposal := range []any{
-		ProposeDocument{ExpectedVersion: before.Version, Doc: before, Intent: &intentRecord{Kind: "add_node"}, ProposalID: "intent"},
+		ProposeDocument{ExpectedVersion: before.Version, Doc: before, Intent: &Intent{Kind: "add_node"}, ProposalID: "intent"},
 		CommitVoterChangeProposal{ExpectedVersion: before.Version, ExpectedTarget: before.Version, ProposalID: "voter"},
 	} {
 		result := apply(t, m.topologySM, uint64(i+6), proposal)

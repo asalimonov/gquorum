@@ -89,12 +89,11 @@ func TestScopedNodeReplacementWaitsForDependentLoadCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	op := &next.Operations[len(next.Operations)-1]
-	if _, ready := nodeApprovalProof(next.Nodes[0], next, index, op); ready {
+	if _, ready := nodeApprovalProof(next.Nodes[0], next, index); ready {
 		t.Fatal("replacement node ignored its pending former load owner")
 	}
 	next.Groups[1] = groupConvergence{GroupID: "shard0", SourceVersion: 3, CompletedAt: proposal.At}
-	if _, ready := nodeApprovalProof(next.Nodes[0], next, index, op); !ready {
+	if _, ready := nodeApprovalProof(next.Nodes[0], next, index); !ready {
 		t.Fatal("proven load exclusion still blocked the node")
 	}
 }

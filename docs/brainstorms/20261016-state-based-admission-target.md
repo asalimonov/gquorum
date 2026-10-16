@@ -403,3 +403,24 @@ invent Superseded. Closed native grants without receipts leave zero-step members
 explicitly blocked; a fence never proves nonexecution. Abandoned host preparation
 is ignored only in membership reconstruction when its identity is omitted. The
 existing planner still emits a guarded no-op Remove before creating cleanup debt.
+
+### Node and receipt isolation precision (peer thread16)
+
+`FI_NODE_DEPENDENCY`: node convergence depends on exact member changes and the
+node's effective placement/eligibility change for groups naming it in checkpoint
+or Target. Derive this from state, not the latest metadata operation's plan;
+metadata supersession cannot discard an older drain's pending load prerequisite.
+An unrelated descriptive node edit does not wait for unrelated load work.
+
+Zero-step declarations complete at approval only with exact membership/admission
+proof; otherwise they remain waiting (`membership_unproven`, or the applicable
+admission blocker). Zero-step deletion can wait for `readmission_retirement`.
+Host-only preparation omitted from desired membership is not native uncertainty.
+The planner's former load checkpoint boundary and issuance's possibly-hosted
+former-member derivation are distinct checks; neither substitutes a newer meta
+checkpoint for unresolved old load ownership.
+
+Validated receipts trigger opportunistic deletion completion only for touched
+debts or groups of their exact readmission batch. Failure of that completion
+leaves a scoped diagnostic and preserves the receipt facts. Full candidate/restore
+graph validation remains mandatory; this rule does not admit contradictory proof.

@@ -1024,3 +1024,16 @@ Implemented
 Verified
 - Focused repair/voter/rebase tests and full metaengine units pass. make test: 1602/1602, 7.546s; test-reports/unit/20261016T104631.689471Z-g_kzldir/report.md. Staged lint and diff checks pass.
 - Regressions cover atomic refusal, omitted/stale scopes, forged native guard chains, unrelated edits and allocation changes, original audit/intent retention, exact single-version unstaged repair, independent busy scope, busy reseat refusal, deterministic replay from a prior snapshot and lost-response CAS after restored acceptance. No new race/Docker run for these serialized pure FSM changes. Thread16 reviews the immutable prior batch; no tasks added or split.
+
+## Task 47 — Canonical mutation intent and allocation-free replay
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 62).
+
+Implemented
+- Internal metaengine.Intent/NewIntent shares the accepted kind vocabulary with the FSM; JSON remains unchanged. Typed service fingerprints include effective actor/comment/origin, audit purpose and explicit identities, normalize set ordering/defaults, and omit generated clocks/allocations. Actual placement/hosting edits now use the same sorted owned sets.
+- Capture zero expected version once. Stale detection runs before allocating edits, rollback-history lookup, health/planning or reseat gates. Retained lookup returns the original accepted document, first approval and rebase successor without rewriting state or implicitly approving a replay. Raw Stage comparison retains caller timestamps, allocation counters, exact IDs and audit, ignoring only overwritten version/rebase fields.
+- The schema3 Machine.ReplayMutation adapter can inspect raw accepted history and safely refuses unprovable typed replay. Typed provenance installation and service proposal composition are Task48; the adapter is replaced with scoped indexes at the complete Task78 cutover. No incomplete format is enabled.
+- Folded peer thread16 fixes into this task: node dependencies survive unrelated metadata supersession; receipt completion is restricted to exact touched groups/readmission batches; failed opportunistic completion retains a stable group diagnostic while full graph validation remains mandatory. Clarified zero-step blockers and distinct planner/issuance predecessor boundaries in the target and tracked amendment.
+
+Verified
+- Pure intent/replay tests cover ordering, defaults, owned inputs, audit distinctions, exact identities, unknown history, repeated lost response after rebase and unchanged allocation/lineage. Functional service tests cover captured zero CAS, stale rejection before edits, raw response recovery and existing mutation/rollback/reseat paths.
+- make test: 1635/1635, 9.645s; test-reports/unit/20261016T110658.232693Z-iwvg3uik/report.md. Focused functional tests and staged lint pass (/tmp/gquorum-task47-functional.log, /tmp/gquorum-task47-lint.log); diff check passes. No new race/Docker run claimed for these pure transformations/FSM changes. No tasks added or split; next checkpoint65.

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -225,5 +226,53 @@ func TestScopedCompletionRecordsFinalPromotionAndAdmission(t *testing.T) {
 	if s.Admissions[0].State != AdmissionCompleted || len(s.VoterSwitches) != 1 ||
 		s.indexes.groups[topology.MetaGroupID].SourceVersion != 2 {
 		t.Fatal("last promotion lost cooldown, admission or convergence", s.Admissions, s.VoterSwitches)
+	}
+}
+
+func TestScopedReceiptDeletionScopeIncludesWholeExactBatch(t *testing.T) {
+	t.Parallel()
+	s, approval := readmissionDeletionFixture(t)
+	applyScopedApprovalFixture(t, &s, approval)
+	for _, record := range s.AuthorityRecords {
+		if record.Grant.Purpose != topology.AuthorityReadmit {
+			continue
+		}
+		groups := s.receiptDeletionGroups(fixtureEffectReceipts(record.Grant))
+		if !slices.Equal(groups, []string{topology.MetaGroupID, "shard0"}) {
+			t.Fatal("one batch receipt omitted its other deletion scope", groups)
+		}
+	}
+	ordinary := topology.EffectReceipt{Key: topology.AuthorityKey{ClusterID: s.Target.ClusterID, GroupID: "independent", Revision: 99}}
+	if groups := s.receiptDeletionGroups([]topology.EffectReceipt{ordinary}); !slices.Equal(groups, []string{"independent"}) {
+		t.Fatal("unrelated receipt selected global deletion work", groups)
+	}
+	before, _ := json.Marshal(s)
+	s.completeWaitingDeletions(approval.At, s.receiptDeletionGroups([]topology.EffectReceipt{ordinary}))
+	after, _ := json.Marshal(s)
+	if !bytes.Equal(before, after) {
+		t.Fatal("unrelated receipt changed waiting deletion state")
+	}
+}
+
+func TestScopedDeletionCompletionFailureIsStableDiagnostic(t *testing.T) {
+	t.Parallel()
+	s, approval := readmissionDeletionFixture(t)
+	applyScopedApprovalFixture(t, &s, approval)
+	op := s.indexes.operations["exec-v3-a1"]
+	transition := scopedTransitionFor(*op, "shard0", 0)
+	transition.At = op.UpdatedAt.Add(time.Second)
+	beforeEffects := slices.Clone(s.AuthorityRecords)
+	s.blockDeletionCompletion(transition, fault.ErrIdentityMismatch)
+	if op.Status.State != topology.OperationWaitingForReplica || op.Status.Blocks[0].Blocked.Code != "cleanup_failed" ||
+		!reflect.DeepEqual(beforeEffects, s.AuthorityRecords) {
+		t.Fatal("completion failure discarded receipt facts or lost diagnostic")
+	}
+	prepareScopedFixture(t, &s)
+	before, _ := json.Marshal(s)
+	transition.At = transition.At.Add(time.Hour)
+	s.blockDeletionCompletion(transition, fault.ErrIdentityMismatch)
+	after, _ := json.Marshal(s)
+	if !bytes.Equal(before, after) {
+		t.Fatal("same completion failure rewrote its durable clock")
 	}
 }

@@ -1,8 +1,6 @@
 package metaengine
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"strings"
 
 	"github.com/asalimonov/gquorum/topology"
@@ -11,11 +9,8 @@ import (
 func validateScopedIntents(state *scopedState, index *scopedIndexes) error {
 	for _, intent := range state.Intents {
 		doc, found := index.documents[intent.Version]
-		digest, err := hex.DecodeString(intent.Digest)
-		if !found || err != nil || len(digest) != sha256.Size || intent.ExpectedVersion >= intent.Version ||
-			doc.ParentVersion != intent.ExpectedVersion ||
-			doc.RebasedFrom != 0 || !knownIntentKind(intent.Kind) ||
-			hex.EncodeToString(digest) != intent.Digest {
+		if !found || intent.ExpectedVersion >= intent.Version ||
+			doc.ParentVersion != intent.ExpectedVersion || doc.RebasedFrom != 0 || !validIntentFingerprint(intent) {
 			return invalidScopedState("invalid accepted intent provenance")
 		}
 		if err := validateIntentSuccessor(intent, doc); err != nil {
@@ -42,7 +37,7 @@ func knownIntentKind(kind string) bool {
 	}
 }
 
-func validateIntentSuccessor(intent intentRecord, doc topology.Document) error {
+func validateIntentSuccessor(intent Intent, doc topology.Document) error {
 	if intent.GroupID != "" && topology.ValidateID(intent.GroupID) != nil {
 		return invalidScopedState("invalid intent group identity")
 	}

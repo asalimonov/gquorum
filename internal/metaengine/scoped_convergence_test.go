@@ -41,16 +41,16 @@ func TestScopedConvergenceAndIdentityRefuseContradictions(t *testing.T) {
 		"retired current group":      func(s *scopedState) { s.RetiredGroups = []retiredGroup{{ID: "shard0", Version: 2}} },
 		"orphan lock":                func(s *scopedState) { s.Locks = []lockEntry{{Key: "k", SessionID: "missing"}} },
 		"unknown intent": func(s *scopedState) {
-			s.Intents = []intentRecord{{Version: 2, ExpectedVersion: 1, Kind: "unknown", Digest: strings.Repeat("0", 64)}}
+			s.Intents = []Intent{{Version: 2, ExpectedVersion: 1, Kind: "unknown", Digest: strings.Repeat("0", 64)}}
 		},
 		"malformed digest": func(s *scopedState) {
-			s.Intents = []intentRecord{{Version: 2, ExpectedVersion: 1, Kind: "add_node", Digest: strings.Repeat("A", 64)}}
+			s.Intents = []Intent{{Version: 2, ExpectedVersion: 1, Kind: "add_node", Digest: strings.Repeat("A", 64)}}
 		},
 		"foreign successor": func(s *scopedState) {
-			s.Intents = []intentRecord{{Version: 2, ExpectedVersion: 1, Kind: "readmit_node", Digest: strings.Repeat("0", 64), NodeName: "n1", PreviousID: 1, SuccessorID: 3}}
+			s.Intents = []Intent{{Version: 2, ExpectedVersion: 1, Kind: "readmit_node", Digest: strings.Repeat("0", 64), NodeName: "n1", PreviousID: 1, SuccessorID: 3}}
 		},
 		"replacement regression": func(s *scopedState) {
-			s.Intents = []intentRecord{{Version: 2, ExpectedVersion: 1, Kind: "readmit_node", Digest: strings.Repeat("0", 64), NodeName: "n1", PreviousID: 2, SuccessorID: 1}}
+			s.Intents = []Intent{{Version: 2, ExpectedVersion: 1, Kind: "readmit_node", Digest: strings.Repeat("0", 64), NodeName: "n1", PreviousID: 2, SuccessorID: 1}}
 		},
 	}
 	for name, corrupt := range cases {

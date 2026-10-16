@@ -32,7 +32,7 @@ func repairCommitFixture(t *testing.T) (scopedState, CommitRepairOperationPropos
 	for i := range s.Allocations {
 		s.Allocations[i].NextReplicaID = s.Latest.Group(s.Allocations[i].GroupID).NextReplicaID
 	}
-	s.Intents = []intentRecord{{Version: 2, ExpectedVersion: 1, Kind: "set_group_placement", Digest: strings.Repeat("a", 64), GroupID: "shard0"}}
+	s.Intents = []Intent{{Version: 2, ExpectedVersion: 1, Kind: "set_group_placement", Digest: strings.Repeat("a", 64), GroupID: "shard0"}}
 	prepareScopedFixture(t, &s)
 	at := s.Latest.CreatedAt.Add(time.Second)
 	repaired, err := ReplicaRepairDocument(s.Target, s.Latest, ReplicaRepairOptions{GroupID: "b", NodeName: "n2", ReplicaID: 2,

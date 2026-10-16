@@ -1,8 +1,9 @@
 package metaengine
 
 import (
-	"cmp"
 	"errors"
+	"maps"
+	"reflect"
 	"slices"
 	"time"
 
@@ -87,31 +88,66 @@ func (s *scopedState) consumeCleanupReceipts(p RecordReadmissionReceiptsProposal
 	if err != nil {
 		return err
 	}
-	return s.completeWaitingDeletions(p.At)
+	s.completeWaitingDeletions(p.At, s.receiptDeletionGroups(p.Receipts))
+	return nil
 }
 
-func (s *scopedState) completeWaitingDeletions(at time.Time) error {
-	groups := slices.Clone(s.Groups)
-	slices.SortFunc(groups, func(a, b groupConvergence) int { return cmp.Compare(a.GroupID, b.GroupID) })
-	for _, group := range groups {
-		t, ready := s.waitingDeletionTransition(group, at)
+// Only the exact touched debt/batch may trigger opportunistic completion. The
+// final receipt of a readmission batch can unblock deletions in its other groups.
+func (s *scopedState) receiptDeletionGroups(receipts []topology.EffectReceipt) []string {
+	groups, batches := make(map[string]bool), make(map[string]bool)
+	for _, receipt := range receipts {
+		groups[receipt.Key.GroupID] = true
+		if record := s.indexes.grants[receipt.Key]; record != nil && record.Grant.Purpose == topology.AuthorityReadmit {
+			batches[record.Grant.AdmissionID] = true
+		}
+	}
+	for _, record := range s.AuthorityRecords {
+		if record.Grant.Purpose == topology.AuthorityReadmit && batches[record.Grant.AdmissionID] {
+			groups[record.Grant.Key.GroupID] = true
+		}
+	}
+	return slices.Sorted(maps.Keys(groups))
+}
+
+// The receipt is already validated on this owned candidate. A completion error
+// is a scoped diagnostic, not permission to discard that durable fact. The caller
+// still validates the entire resulting graph before it can publish anything.
+func (s *scopedState) completeWaitingDeletions(at time.Time, groups []string) {
+	for _, id := range groups {
+		group := s.indexes.groups[id]
+		if group == nil {
+			continue
+		}
+		t, ready := s.waitingDeletionTransition(*group, at)
 		if !ready {
 			continue
 		}
 		next, err := s.completeGroupLocked(s.AppliedIndex, t)
-		if errors.Is(err, fault.ErrUnavailable) || errors.Is(err, fault.ErrAuthorityPending) {
+		if err == nil {
+			next.indexes, err = next.buildIndexes()
+		}
+		if err != nil {
+			s.blockDeletionCompletion(t, err)
 			continue
-		}
-		if err != nil {
-			return err
-		}
-		next.indexes, err = next.buildIndexes()
-		if err != nil {
-			return err
 		}
 		*s = *next
 	}
-	return nil
+}
+
+func (s *scopedState) blockDeletionCompletion(t topology.OperationTransition, err error) {
+	if errors.Is(err, fault.ErrUnavailable) || errors.Is(err, fault.ErrAuthorityPending) {
+		return
+	}
+	op, position := s.transitionBlock(t)
+	blocked := &topology.BlockedReason{Code: "cleanup_failed", Message: err.Error()}
+	if op.Status.Blocks[position].State == topology.OperationWaitingForReplica &&
+		reflect.DeepEqual(op.Status.Blocks[position].Blocked, blocked) {
+		return
+	}
+	t.State, t.Blocked = topology.OperationWaitingForReplica, blocked
+	op.Status.Blocks[position] = scopedTransitionStatus(op.Status.Blocks[position].TotalSteps, t)
+	op.Status.State, op.UpdatedAt = aggregateBlockStates(op.Status.Blocks), t.At
 }
 
 func (s *scopedState) waitingDeletionTransition(group groupConvergence,

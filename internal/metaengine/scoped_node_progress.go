@@ -32,7 +32,7 @@ func (s *scopedState) advanceNodeProgressLocked(at time.Time) error {
 			continue
 		}
 		row.Owner = pendingNodeOwner(*row, metadata)
-		proofAt, ready := nodeApprovalProof(*row, s, index, metadata)
+		proofAt, ready := nodeApprovalProof(*row, s, index)
 		if !ready {
 			continue
 		}
@@ -71,7 +71,7 @@ func nodeMatchesTarget(row nodeConvergence, target topology.Document) bool {
 }
 
 func nodeApprovalProof(row nodeConvergence, next *scopedState,
-	index *scopedIndexes, operation *topology.Operation) (time.Time, bool) {
+	index *scopedIndexes) (time.Time, bool) {
 	meta := index.groups[topology.MetaGroupID]
 	if meta == nil || meta.Owner != "" || meta.SourceVersion == 0 ||
 		!reflect.DeepEqual(meta.Declaration, next.Target.MetaGroup()) {
@@ -85,9 +85,7 @@ func nodeApprovalProof(row nodeConvergence, next *scopedState,
 			continue
 		}
 		dependent := row.MemberID != next.Target.MemberID(row.NodeName) ||
-			slices.ContainsFunc(operation.Plan.Blocks, func(block topology.PlanBlock) bool {
-				return block.GroupID == group.GroupID
-			})
+			nodePlacementDependency(row, group, next.Target)
 		if dependent {
 			if !nodeGroupReady(group, row.NodeName, next.Target, index) {
 				return time.Time{}, false
@@ -96,6 +94,34 @@ func nodeApprovalProof(row nodeConvergence, next *scopedState,
 		}
 	}
 	return at, true
+}
+
+// FI_NODE_DEPENDENCY: metadata supersession does not erase an older node edit's
+// load prerequisites. Compare the node declarations under the current rule and
+// retain the former assignment only as placement context, never as Active proof.
+func nodePlacementDependency(row nodeConvergence, group groupConvergence, target topology.Document) bool {
+	if row.Declaration == nil || target.Node(row.NodeName) == nil {
+		return true
+	}
+	after := target.Clone()
+	if after.Group(group.GroupID) == nil {
+		if group.Declaration == nil {
+			return false
+		}
+		after.Groups = append(after.Groups, *group.Declaration)
+	}
+	context := after.Group(group.GroupID)
+	if !groupNamesNode(context, row.NodeName) && groupNamesNode(group.Declaration, row.NodeName) {
+		context.Replicas = slices.Clone(context.Replicas)
+		for _, replica := range group.Declaration.Replicas {
+			if replica.NodeName == row.NodeName {
+				context.Replicas = append(context.Replicas, replica)
+			}
+		}
+	}
+	before := after.Clone()
+	*before.Node(row.NodeName) = *row.Declaration
+	return slices.Contains(topology.AffectedGroups(before, after), group.GroupID)
 }
 
 func groupNamesNode(group *topology.Group, name string) bool {
