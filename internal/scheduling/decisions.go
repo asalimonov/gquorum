@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/votercheck"
 	schedulingapi "github.com/asalimonov/gquorum/scheduling"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
@@ -58,7 +59,7 @@ func (r *Scheduler) reconcileApproval(ctx context.Context, input schedulingAppro
 	return false
 }
 
-func (r *Scheduler) evaluatePolicy(ctx context.Context, in schedulingapi.ScheduleInput) {
+func (r *Scheduler) evaluatePolicy(ctx context.Context, in schedulingapi.ScheduleInput, views topology.ReadView) {
 	callbackCtx, cancel := context.WithTimeout(ctx, r.callbackTimeout)
 	r.statusMu.Lock()
 	r.callback, r.callbackStarted = callbackCtx, in.Now
@@ -81,10 +82,10 @@ func (r *Scheduler) evaluatePolicy(ctx context.Context, in schedulingapi.Schedul
 	}
 	action := *decision.Action
 	if action.Kind == schedulingapi.ReconfigureVoters {
-		r.applyVoterDecision(ctx, in, action)
+		r.applyVoterDecision(ctx, in, views, action)
 		return
 	}
-	r.applyReplicaDecision(ctx, in, action)
+	r.applyReplicaDecision(ctx, in, views, action)
 }
 
 func (r *Scheduler) reportIdleDecision(reason string) {
@@ -105,14 +106,17 @@ func (r *Scheduler) reportIdleDecision(reason string) {
 }
 
 func (r *Scheduler) applyVoterDecision(ctx context.Context,
-	in schedulingapi.ScheduleInput, action schedulingapi.ScheduleAction) {
+	in schedulingapi.ScheduleInput, views topology.ReadView, action schedulingapi.ScheduleAction) {
 	if action.VoterChange == nil || action.Identity != (storage.Identity{}) {
 		r.transition(r.newStatus(true, topology.SchedulingError,
 			ReconcileReasonPolicyRejected), "invalid voter action union")
 		return
 	}
+	if r.refusePolicyScope(in, action.VoterChange.GroupID) {
+		return
+	}
 	change := action.VoterChange.Clone()
-	id, err := r.commitVoterChange(ctx, in, change)
+	id, err := r.commitVoterChange(ctx, in, views, change)
 	if err != nil {
 		reason := ReconcileReasonPolicyRejected
 		if errors.Is(err, fault.ErrVersionConflict) {
@@ -125,7 +129,7 @@ func (r *Scheduler) applyVoterDecision(ctx context.Context,
 }
 
 func (r *Scheduler) applyReplicaDecision(ctx context.Context,
-	in schedulingapi.ScheduleInput, action schedulingapi.ScheduleAction) {
+	in schedulingapi.ScheduleInput, views topology.ReadView, action schedulingapi.ScheduleAction) {
 	if action.VoterChange != nil {
 		r.transition(r.newStatus(true, topology.SchedulingError,
 			ReconcileReasonPolicyRejected), "mixed action variants")
@@ -140,6 +144,9 @@ func (r *Scheduler) applyReplicaDecision(ctx context.Context,
 			fmt.Sprintf("forbidden action %q", action.Kind))
 		return
 	}
+	if r.refusePolicyScope(in, action.Identity.GroupID) {
+		return
+	}
 	s := r.newStatus(true, topology.SchedulingRunning, ReconcileReasonMissingReplica)
 	s.CurrentAction = &topology.SchedulingActionStatus{
 		Kind:      string(action.Kind),
@@ -148,7 +155,7 @@ func (r *Scheduler) applyReplicaDecision(ctx context.Context,
 		ReplicaID: action.Identity.ReplicaID,
 	}
 	r.transition(s, "")
-	id, err := r.commitReplicaRepair(ctx, replicaRepair{Latest: in.Latest, Active: in.Active,
+	id, err := r.commitReplicaRepair(ctx, replicaRepair{Latest: views.Latest, Active: views.Active,
 		Action: action, At: in.Now})
 	r.lastRun = in.Now
 	if err != nil {
@@ -179,4 +186,13 @@ func (r *Scheduler) validateReplicaRepair(active topology.Document,
 		}
 	}
 	return nil
+}
+
+func (r *Scheduler) refusePolicyScope(in schedulingapi.ScheduleInput, group string) bool {
+	_, reason := votercheck.ReadyGroup(votercheck.Input{Target: in.Target, Groups: in.Groups}, group)
+	if reason == "" {
+		return false
+	}
+	r.transition(r.newStatus(true, topology.SchedulingWaiting, reason), string(in.Groups[group].OperationID))
+	return true
 }

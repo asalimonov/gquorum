@@ -415,6 +415,15 @@ type Hooks interface {
 }
 ```
 
+`ScheduleInput` exposes `Target` and per-group `Groups` progress, plus `Status`,
+`Health`, `Alive`, `Held`, `Metrics`, `Switches` and `Now`. It no longer exposes
+Latest or Active. Callback inputs omit Groups' Desired and Observation fields;
+observations are supplied through Status. Clone preserves values and owns nested
+maps/slices. The built-in policy rotates selected eligible groups, skips busy or
+unproven scopes and binds evidence/cooldowns to the exact group source. During the
+scoped-state rollout, named internal adapters still label actual schema3 evidence;
+full failure isolation activates with schema4 at Task78.
+
 The default repair policy is `scheduling.DefaultRepairPolicy`. Groups with a replicated
 `VoterConfig` converge toward their desired voter count and replace persistently
 unavailable or replication-lagging voters using stable learners. This includes

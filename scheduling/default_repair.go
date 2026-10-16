@@ -3,9 +3,11 @@ package scheduling
 import (
 	"context"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/votercheck"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -18,7 +20,11 @@ type DefaultRepairOptions struct{ StableFor time.Duration }
 // learners.
 // Legacy groups retain missing-voter repair. Pinned learners and healthy seats
 // are preserved; every action is independently checked by the node.
-type DefaultRepairPolicy struct{ stableFor time.Duration }
+type DefaultRepairPolicy struct {
+	mu        sync.Mutex
+	stableFor time.Duration
+	lastGroup string
+}
 
 // NewDefaultRepairPolicy validates the stability window and applies its
 // one-minute default.
@@ -41,31 +47,66 @@ func (p *DefaultRepairPolicy) Schedule(ctx context.Context, in ScheduleInput) (S
 	if p == nil {
 		return ScheduleDecision{}, fault.ErrInvalid
 	}
-	voterDecision := chooseVoterChange(in)
-	if voterDecision.Action != nil {
-		return voterDecision, nil
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	scan := legacyRepairScan{input: in, stableFor: p.stableFor}
+	if scan.stableFor == 0 {
+		scan.stableFor = time.Minute
 	}
-	stableFor := p.stableFor
-	if stableFor == 0 {
-		stableFor = time.Minute
-	}
-	scan := legacyRepairScan{input: in, stableFor: stableFor}
-	for _, group := range in.Active.Groups {
+	reason := "converged"
+	for _, group := range p.repairGroups(in.Target) {
 		if err := ctx.Err(); err != nil {
 			return ScheduleDecision{}, err
 		}
-		if group.ID == topology.MetaGroupID || group.VoterConfig != nil {
-			continue
+		decision := scan.choose(group)
+		if decision.Action != nil {
+			p.lastGroup = group.ID
+			return decision, nil
 		}
-		status, ok := in.Status[group.ID]
-		if !ok || !status.Found {
-			continue
-		}
-		if action := scan.missingReplica(group, status); action != nil {
-			return ScheduleDecision{Action: action, Reason: "missing_replica"}, nil
+		if reason == "converged" && decision.Reason != "" {
+			reason = decision.Reason
 		}
 	}
-	return ScheduleDecision{Reason: scan.reason(voterDecision.Reason)}, nil
+	return ScheduleDecision{Reason: scan.reason(reason)}, nil
+}
+
+// The cursor records selection, not approval, so a repeatedly refused candidate
+// cannot monopolize policy calls. Shared policy instances serialize this hint.
+func (p *DefaultRepairPolicy) repairGroups(target topology.Document) []topology.Group {
+	groups := slices.Clone(target.Groups)
+	slices.SortFunc(groups, compareRepairGroups)
+	if p.lastGroup == "" {
+		return groups
+	}
+	next := slices.IndexFunc(groups, func(group topology.Group) bool {
+		return compareRepairGroups(group, topology.Group{ID: p.lastGroup}) > 0
+	})
+	if next > 0 {
+		groups = append(slices.Clone(groups[next:]), groups[:next]...)
+	}
+	return groups
+}
+
+func (s *legacyRepairScan) choose(group topology.Group) ScheduleDecision {
+	_, reason := votercheck.ReadyGroup(votercheck.Input{Target: s.input.Target, Groups: s.input.Groups}, group.ID)
+	if reason != "" {
+		return ScheduleDecision{Reason: reason}
+	}
+	if group.VoterConfig != nil {
+		return chooseVoterChange(s.input, group)
+	}
+	if group.ID == topology.MetaGroupID {
+		return ScheduleDecision{}
+	}
+	status, found := s.input.Status[group.ID]
+	if !found || !status.Found || status.GroupID != group.ID ||
+		status.SourceVersion != s.input.Groups[group.ID].ConvergedVersion {
+		return ScheduleDecision{}
+	}
+	if action := s.missingReplica(group, status); action != nil {
+		return ScheduleDecision{Action: action, Reason: "missing_replica"}
+	}
+	return ScheduleDecision{}
 }
 
 type legacyRepairScan struct {
@@ -76,7 +117,7 @@ type legacyRepairScan struct {
 
 func (s *legacyRepairScan) missingReplica(group topology.Group, status topology.GroupStatus) *ScheduleAction {
 	for _, replica := range group.Replicas {
-		node := s.input.Active.Node(replica.NodeName)
+		node := s.input.Target.Node(replica.NodeName)
 		if replica.Role != topology.ReplicaVoter || node == nil || node.State != topology.NodeActive {
 			continue
 		}
@@ -85,7 +126,7 @@ func (s *legacyRepairScan) missingReplica(group topology.Group, status topology.
 			continue
 		}
 		identity := storage.Identity{
-			ClusterID: s.input.Active.ClusterID,
+			ClusterID: s.input.Target.ClusterID,
 			NodeName:  replica.NodeName,
 			GroupID:   group.ID,
 			ReplicaID: replica.ReplicaID,

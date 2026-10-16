@@ -744,3 +744,24 @@ PlanInput. Named legacyEnsureProgress/legacyEnsureFailure/legacyTransferPlan and
 schema3 replacement guards remain only until78. That cutover switches to confirmed
 scoped reads/full exact operation diagnostics and scoped replacement commit paths;
 no synthetic Active document or runtime mode flag is permitted.
+
+
+### Repair policy scope and rotation (Task68)
+
+`FI_POLICY_SOURCE`: ScheduleInput contains Target, Groups and observation/value
+inputs; no Latest or Active. The internal driver retains its own CAS capture.
+ReadyGroup requires nonzero proven convergence, matching approved declaration,
+no deletion and no owner. Voter evidence and native status name that group's
+source; unrelated document versions do not reset or invalidate its cooldown or
+failure window. Keep pins, healthy seats, reserved/learner-only nodes, domain
+rules, live-majority guards and legacy missing-voter eligibility unchanged.
+
+`FI_POLICY_ROTATION`: keep one mutex-protected last-selected-group hint in the
+existing default policy. Rotate the canonical group order across voter-config
+and legacy candidates. Advance when selecting, not only after driver approval,
+so a refused candidate cannot monopolize later calls. The driver also refuses a
+custom policy's busy-scope selection using its original captured input. No new
+public queue, priority or timing controls. At the callback boundary omit both
+Groups.Desired and Groups.Observation; Status is the sole observation channel.
+Clone remains a faithful owned copy. legacyScheduleInput uses actual schema3
+progress until78; its metric source projection is removed by collector work70.

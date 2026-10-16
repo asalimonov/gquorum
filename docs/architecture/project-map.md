@@ -346,7 +346,7 @@ as well as local pending requests before admitting another change.
 
 | Package | Entities, interfaces and entry points |
 | --- | --- |
-| [scheduling](../../scheduling/scheduler.go) | `RepairPolicy.Schedule(ctx,ScheduleInput) (ScheduleDecision,error)`; ScheduleInput owns Active/Latest/Target, health/status/metrics, held identities and timing; `Clone` owns nested values. ScheduleDecision carries optional ScheduleAction and reason. `NewDefaultRepairPolicy(DefaultRepairOptions)` supplies Schedule; Options configures local driver settings. |
+| [scheduling](../../scheduling/scheduler.go) | `RepairPolicy.Schedule(ctx,ScheduleInput) (ScheduleDecision,error)`; ScheduleInput owns Target, per-group progress, health/status/metrics, held identities and timing; `Clone` owns nested values. ScheduleDecision carries optional ScheduleAction and reason. `NewDefaultRepairPolicy(DefaultRepairOptions)` supplies Schedule; Options configures local driver settings. |
 | [lifecycle](../../lifecycle/lifecycle.go) | `Hooks`: `Readiness(ctx,ReadinessInput) (ReadinessDecision,error)`, `Retention(ctx,RetentionInput) (RetentionDecision,error)`, `Removal(ctx,RemovalInput) (RemovalDecision,error)`. Inputs carry startup/health, retired resources or applied self-removal evidence; decisions select readiness, collection or removal handling. `NewDefaultHooks(DefaultOptions)` implements all three; Options selects gates/modes/timing. |
 | [scheduling/schedulingtest](../../scheduling/schedulingtest/contracts.go) | `RepairPolicyCase`, `CheckRepairPolicy(t,factory,cases)`: reusable caller-policy contracts and repeatable owned-input checks. |
 | [lifecycle/lifecycletest](../../lifecycle/lifecycletest/contracts.go) | `HooksCases`, ReadinessCase/RetentionCase/RemovalCase; `CheckHooks(t,factory,cases)` validates application hooks against supplied cases. |
@@ -666,12 +666,22 @@ overdue calls keep the gate and status becomes policy_stalled. Leadership/enable
 changes reset relevant observation continuity.
 
 [internal/votercheck](../../internal/votercheck/check.go) shares pure safety
-predicates between default policy and validating driver: `Input` combines Active,
-metrics, native status and holds; `Group` returns usable observation/blocker,
+predicates between default policy and validating driver: `Input` combines Target,
+group progress, metrics, native status and holds; `ReadyGroup` refuses owned,
+deleting, unproven or approved/checkpoint-divergent groups. `Group` checks source-
+matched metrics/native status and returns usable observation/blocker,
 `ReplacementFailure` interprets configured failure evidence, `Check` returns a
 refusal reason for a proposed VoterChange. It checks exact candidates, freshness,
 pins, placement/domain constraints, catch-up, quorum and cooldown; independent
-engine membership guards remain required.
+engine membership guards remain required. `KB_POLICY_FAIRNESS`: the default policy
+uses a mutex-protected last-selected group hint and rotates the canonical order
+across both voter configuration and legacy repairs. Advance on selection, even if
+the driver later refuses it; skip busy groups. Group/replica evidence and cooldowns
+use exact source versions, never cluster document-version equality. The callback
+boundary strips both Desired and Observation from Groups; Status is the observation
+channel and Clone remains faithful. Internal driver CAS captures retain their own
+ReadView outside the public input. legacyScheduleInput labels real schema3 evidence
+until78 (metrics source projection removed70); global driver guards convert69.
 
 ### `internal/raftengine`
 

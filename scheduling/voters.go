@@ -9,25 +9,15 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func chooseVoterChange(in ScheduleInput) ScheduleDecision {
-	scan := voterRepairScan{input: votercheck.Input{Active: in.Active, Metrics: in.Metrics,
+func chooseVoterChange(in ScheduleInput, group topology.Group) ScheduleDecision {
+	scan := voterRepairScan{input: votercheck.Input{Target: in.Target, Groups: in.Groups, Metrics: in.Metrics,
 		Status: in.Status, Held: in.Held}, reason: "converged"}
-	groups := slices.Clone(in.Active.Groups)
-	slices.SortFunc(groups, compareRepairGroups)
-	for _, group := range groups {
-		if group.VoterConfig == nil {
-			continue
-		}
-		observed, blocker := votercheck.Group(scan.input, group.ID)
-		if blocker != "" {
-			if scan.reason == "converged" {
-				scan.reason = blocker
-			}
-			continue
-		}
-		if decision := scan.chooseGroup(group, observed); decision != nil {
-			return *decision
-		}
+	observed, blocker := votercheck.Group(scan.input, group.ID)
+	if blocker != "" {
+		return ScheduleDecision{Reason: blocker}
+	}
+	if decision := scan.chooseGroup(group, observed); decision != nil {
+		return *decision
 	}
 	return ScheduleDecision{Reason: scan.reason}
 }

@@ -22,10 +22,10 @@ func (p callbackPolicy) Schedule(_ context.Context, in scheduling.ScheduleInput)
 func TestContractOwnsInputAndHidesStagedIntent(t *testing.T) {
 	t.Parallel()
 	group := &topology.Group{ID: "g", Labels: map[string]string{"a": "b"}}
-	in := scheduling.ScheduleInput{Groups: map[string]topology.GroupProgress{"g": {Desired: group, Approved: group}}}
+	in := scheduling.ScheduleInput{Groups: map[string]topology.GroupProgress{"g": {Desired: group, Approved: group, Observation: &topology.GroupStatus{GroupID: "g", LeaderID: 1}}}}
 	factory := func() scheduling.RepairPolicy {
 		return callbackPolicy{call: func(input scheduling.ScheduleInput) {
-			if input.Groups["g"].Desired != nil {
+			if input.Groups["g"].Desired != nil || input.Groups["g"].Observation != nil {
 				t.Fatal("conformance callback received staged intent")
 			}
 			input.Groups["g"].Approved.Labels["a"] = "scratch"

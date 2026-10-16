@@ -18,7 +18,7 @@ import (
 func voterInput() ScheduleInput {
 	p := topology.DefaultVoterConfig()
 	doc := topology.Document{ClusterID: "cluster", Version: 1, Groups: []topology.Group{{ID: topology.MetaGroupID, VoterConfig: &p}}}
-	group := metrics.GroupObservation{GroupID: topology.MetaGroupID, LeaderID: 1, Term: 2, MembershipDigest: "members", State: metrics.Current, TargetVoters: 3, NativeVoters: 3, EligibleStandbys: 2}
+	group := metrics.GroupObservation{SourceVersion: 1, GroupID: topology.MetaGroupID, LeaderID: 1, Term: 2, MembershipDigest: "members", State: metrics.Current, TargetVoters: 3, NativeVoters: 3, EligibleStandbys: 2}
 	for i := uint64(1); i <= 5; i++ {
 		name := fmt.Sprintf("n%d", i)
 		role := topology.ReplicaVoter
@@ -35,7 +35,7 @@ func voterInput() ScheduleInput {
 		}
 		group.Replicas = append(group.Replicas, observation)
 	}
-	return ScheduleInput{Active: doc, Latest: doc.Clone(), Target: doc.Clone(), Metrics: metrics.ClusterSnapshot{ActiveVersion: 1, IsCollectorLeader: true, CollectorRunID: "collector", Groups: []metrics.GroupObservation{group}}, Status: map[string]topology.GroupStatus{topology.MetaGroupID: {GroupID: topology.MetaGroupID, Found: true, LeaderID: 1, Term: 2, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}, Learners: []uint64{4, 5}}, HealthKnown: true, LiveVoters: map[uint64]bool{1: true, 2: true, 3: false, 4: true, 5: true}}}}
+	return ScheduleInput{Target: doc, Groups: provenPolicyGroups(doc), Metrics: metrics.ClusterSnapshot{ActiveVersion: 1, IsCollectorLeader: true, CollectorRunID: "collector", Groups: []metrics.GroupObservation{group}}, Status: map[string]topology.GroupStatus{topology.MetaGroupID: {GroupID: topology.MetaGroupID, SourceVersion: 1, Found: true, LeaderID: 1, Term: 2, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}, Learners: []uint64{4, 5}}, HealthKnown: true, LiveVoters: map[uint64]bool{1: true, 2: true, 3: false, 4: true, 5: true}}}}
 }
 func TestVoterConfigSelectsOneStableLearnerAndPreservesHealthyVoters(t *testing.T) {
 	t.Parallel()
@@ -59,21 +59,21 @@ func TestVoterConfigSelectsOneStableLearnerAndPreservesHealthyVoters(t *testing.
 func TestVoterConfigSkipsSameAZAndLearnerOnlyCandidates(t *testing.T) {
 	t.Parallel()
 	in := voterInput()
-	in.Active.Groups[0].VoterConfig.DistinctVoterLabel = "az"
+	in.Target.Groups[0].VoterConfig.DistinctVoterLabel = "az"
 	for i, zone := range []string{"a", "b", "c", "b", "c"} {
-		in.Active.Nodes[i].Labels = map[string]string{"az": zone}
+		in.Target.Nodes[i].Labels = map[string]string{"az": zone}
 	}
 	p, _ := NewDefaultRepairPolicy(DefaultRepairOptions{})
 	decision, err := p.Schedule(context.Background(), in)
 	if err != nil || decision.Action == nil || decision.Action.VoterChange.Promote.ReplicaID != 5 {
 		t.Fatal("same-AZ learner blocked a valid alternative", decision, err)
 	}
-	in.Active.Nodes[3].Labels[topology.LabelLearnerOnly] = "true"
+	in.Target.Nodes[3].Labels[topology.LabelLearnerOnly] = "true"
 	decision, err = p.Schedule(context.Background(), in)
 	if err != nil || decision.Action == nil || decision.Action.VoterChange.Promote.ReplicaID != 5 {
 		t.Fatal("learner-only node blocked a valid alternative", decision, err)
 	}
-	in.Active.Nodes[4].Labels["az"] = "b"
+	in.Target.Nodes[4].Labels["az"] = "b"
 	decision, err = p.Schedule(context.Background(), in)
 	if err != nil || decision.Action != nil || decision.Reason != "node_learner_only" {
 		t.Fatal("unsatisfied placement was not reported", decision, err)
@@ -84,13 +84,13 @@ func TestLegacyRepairSkipsReservedSuccessor(t *testing.T) {
 	t.Parallel()
 	doc := topology.Document{ClusterID: "cluster", Version: 1, Nodes: []topology.Node{{Name: "n1", Type: "worker", State: topology.NodeActive,
 		Labels: map[string]string{topology.LabelReserved: "true"}}}, Groups: []topology.Group{{ID: "work", Replicas: []topology.Replica{{NodeName: "n1", ReplicaID: 1, Role: topology.ReplicaVoter}}}}}
-	in := ScheduleInput{Active: doc, Status: map[string]topology.GroupStatus{"work": {GroupID: "work", Found: true}}, Alive: map[string]time.Duration{"n1": time.Minute}}
+	in := ScheduleInput{Target: doc, Groups: provenPolicyGroups(doc), Status: map[string]topology.GroupStatus{"work": {GroupID: "work", SourceVersion: 1, Found: true}}, Alive: map[string]time.Duration{"n1": time.Minute}}
 	p, _ := NewDefaultRepairPolicy(DefaultRepairOptions{})
 	decision, err := p.Schedule(context.Background(), in)
 	if err != nil || decision.Action != nil || decision.Reason != "node_reserved" {
 		t.Fatal("reserved successor repair was selected", decision, err)
 	}
-	delete(in.Active.Nodes[0].Labels, topology.LabelReserved)
+	delete(in.Target.Nodes[0].Labels, topology.LabelReserved)
 	decision, err = p.Schedule(context.Background(), in)
 	if err != nil || decision.Action == nil || decision.Action.Identity.ReplicaID != 1 {
 		t.Fatal("unreserved legacy repair was not selected", decision, err)
@@ -100,7 +100,7 @@ func TestVoterConfigMandatoryGuards(t *testing.T) {
 	t.Parallel()
 	cases := map[string]func(*ScheduleInput){
 		"stale group":       func(in *ScheduleInput) { in.Metrics.Groups[0].State = metrics.Stale },
-		"wrong active":      func(in *ScheduleInput) { in.Metrics.ActiveVersion++ },
+		"wrong source":      func(in *ScheduleInput) { in.Metrics.Groups[0].SourceVersion++ },
 		"follower observer": func(in *ScheduleInput) { in.Metrics.IsCollectorLeader = false },
 		"lost quorum":       func(in *ScheduleInput) { in.Status[topology.MetaGroupID].LiveVoters[2] = false },
 		"changed leader": func(in *ScheduleInput) {
@@ -112,8 +112,8 @@ func TestVoterConfigMandatoryGuards(t *testing.T) {
 			in.Metrics.Groups[0].Replicas[2].Evidence.UnavailableFor.Value = 29 * time.Second
 		},
 		"all pinned": func(in *ScheduleInput) {
-			in.Active.Groups[0].Replicas[3].PinnedLearner = true
-			in.Active.Groups[0].Replicas[4].PinnedLearner = true
+			in.Target.Groups[0].Replicas[3].PinnedLearner = true
+			in.Target.Groups[0].Replicas[4].PinnedLearner = true
 		},
 		"both cooling": func(in *ScheduleInput) {
 			for i := 3; i <= 4; i++ {
@@ -156,12 +156,12 @@ func TestVoterConfigCooldownExceptionAndDeficit(t *testing.T) {
 	p, _ := NewDefaultRepairPolicy(DefaultRepairOptions{})
 	in.Metrics.Groups[0].CooldownRemaining = time.Minute
 	in.Metrics.Groups[0].Replicas[2].Evidence.Reasons = []string{"new_failure"}
-	in.Active.Groups[0].Replicas[3].PinnedLearner = true
+	in.Target.Groups[0].Replicas[3].PinnedLearner = true
 	got, err := p.Schedule(context.Background(), in)
 	if err != nil || got.Action == nil || got.Action.VoterChange.Promote.ReplicaID != 5 {
 		t.Fatalf("exception failed %+v %v", got, err)
 	}
-	in.Active.Groups[0].VoterConfig.TargetVoters = 4
+	in.Target.Groups[0].VoterConfig.TargetVoters = 4
 	in.Metrics.Groups[0].TargetVoters = 4
 	in.Metrics.Groups[0].Replicas[2].Evidence.Reasons = nil
 	got, err = p.Schedule(context.Background(), in)

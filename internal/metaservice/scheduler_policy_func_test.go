@@ -87,7 +87,7 @@ func TestMetaUsesSelectedSchedulerWithOwnedHoldsAndCallbackDeadline(t *testing.T
 			}
 			// Callback snapshots are application-owned scratch values.
 			in.Held[0].ReplicaID = 100
-			in.Active.Nodes[0].Name = "changed"
+			in.Target.Nodes[0].Name = "changed"
 			return scheduling.ScheduleDecision{Reason: "application_scheduler"}, nil
 		})
 	})
@@ -100,7 +100,7 @@ func TestMetaUsesSelectedSchedulerWithOwnedHoldsAndCallbackDeadline(t *testing.T
 			t.Fatal("selected scheduler lost deadline or hold", got)
 		}
 		meta := got.input.Status[topology.MetaGroupID]
-		if meta.LeaderID == 0 || meta.LeaderNodeName == "" || got.input.Active.MemberID(meta.LeaderNodeName) != meta.LeaderID {
+		if meta.LeaderID == 0 || meta.LeaderNodeName == "" || got.input.Target.MemberID(meta.LeaderNodeName) != meta.LeaderID {
 			t.Fatal("scheduler meta leader name was not resolved through its Active view", meta)
 		}
 	case <-time.After(5 * time.Second):

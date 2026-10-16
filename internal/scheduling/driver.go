@@ -272,7 +272,7 @@ func (r *Scheduler) Tick(parent context.Context) error {
 func (r *Scheduler) reconcileOnce(ctx context.Context) {
 	leader := r.host.IsLeader()
 	views, err := r.host.Views(ctx)
-	latest, target, active := views.Latest, views.Target, views.Active
+	target, active := views.Target, views.Active
 	if err != nil {
 		r.resetAlive()
 		r.transition(r.newStatus(leader, topology.SchedulingError, ReconcileReasonStatusUnavailable), err.Error())
@@ -313,9 +313,7 @@ func (r *Scheduler) reconcileOnce(ctx context.Context) {
 	}
 	in := schedulingapi.ScheduleInput{
 		Now:      now,
-		Latest:   latest,
 		Target:   target,
-		Active:   active,
 		Status:   status,
 		Health:   evaluations,
 		Alive:    r.aliveDurations(now),
@@ -323,7 +321,7 @@ func (r *Scheduler) reconcileOnce(ctx context.Context) {
 		Metrics:  r.host.Observations(),
 		Switches: r.host.VoterSwitches(),
 	}
-	r.evaluatePolicy(ctx, in)
+	r.evaluatePolicy(ctx, legacyScheduleInput(in, views), views)
 }
 
 func resumable(ex topology.Operator, exists bool, active, target topology.Document) bool {

@@ -31,7 +31,7 @@ func CheckRepairPolicy(t *testing.T, factory func() scheduling.RepairPolicy, cas
 			before := tc.Input.Clone()
 			input := tc.Input.Clone()
 			for id, progress := range input.Groups {
-				progress.Desired = nil
+				progress.Desired, progress.Observation = nil, nil
 				input.Groups[id] = progress
 			}
 			got, err := factory().Schedule(context.Background(), input)

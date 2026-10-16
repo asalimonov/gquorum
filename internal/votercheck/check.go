@@ -3,6 +3,7 @@
 package votercheck
 
 import (
+	"reflect"
 	"slices"
 	"time"
 
@@ -16,23 +17,40 @@ const (
 	reasonUnknownObservation = "unknown_observation"
 )
 
-// Input supplies active topology, collected metrics, native observations and
+// Input supplies approved/proven topology, collected metrics, native observations and
 // exact local holds.
 type Input struct {
-	Active  topology.Document
+	Target  topology.Document
+	Groups  map[string]topology.GroupProgress
 	Metrics metrics.ClusterSnapshot
 	Status  map[string]topology.GroupStatus
 	Held    []storage.Identity
 }
 
+// ReadyGroup selects an exact unowned checkpoint matching current approved intent.
+func ReadyGroup(in Input, id string) (*topology.Group, string) {
+	row := in.Groups[id]
+	if row.OperationID != "" {
+		return nil, "group_busy"
+	}
+	if row.Deleting || row.ConvergedVersion == 0 || row.Converged == nil ||
+		!reflect.DeepEqual(row.Converged, in.Target.Group(id)) {
+		return nil, "approved_execution"
+	}
+	return row.Converged, ""
+}
+
 // Group checks coherent current group evidence and returns a refusal reason
 // when unavailable.
 func Group(in Input, id string) (metrics.GroupObservation, string) {
-	group := in.Active.Group(id)
-	if group == nil || group.VoterConfig == nil {
+	group, reason := ReadyGroup(in, id)
+	if reason != "" {
+		return metrics.GroupObservation{}, reason
+	}
+	if group.VoterConfig == nil {
 		return metrics.GroupObservation{}, reasonPolicyRejected
 	}
-	if !in.Metrics.IsCollectorLeader || in.Metrics.ActiveVersion != in.Active.Version {
+	if !in.Metrics.IsCollectorLeader {
 		return metrics.GroupObservation{}, reasonUnknownObservation
 	}
 	var observed metrics.GroupObservation
@@ -42,11 +60,15 @@ func Group(in Input, id string) (metrics.GroupObservation, string) {
 			break
 		}
 	}
+	if observed.SourceVersion != in.Groups[id].ConvergedVersion {
+		return observed, reasonUnknownObservation
+	}
 	if observed.State != metrics.Current {
 		return observed, "stale_observation"
 	}
 	status, ok := in.Status[id]
 	if !ok || !status.Found || !status.HealthKnown || status.LeaderID == 0 || status.Term != observed.Term ||
+		status.SourceVersion != in.Groups[id].ConvergedVersion ||
 		status.LeaderID != observed.LeaderID {
 		return observed, reasonUnknownObservation
 	}
@@ -141,7 +163,7 @@ func Check(in Input, change topology.VoterChange) string {
 	if reason != "" {
 		return reason
 	}
-	group := in.Active.Group(change.GroupID)
+	group := in.Target.Group(change.GroupID)
 	p := *group.VoterConfig
 	if !validChangeShape(change, observed.NativeVoters, p.TargetVoters) {
 		return reasonPolicyRejected
@@ -156,7 +178,7 @@ func Check(in Input, change topology.VoterChange) string {
 			return reason
 		}
 	}
-	return projectedPlacement(in.Active, change)
+	return projectedPlacement(in.Target, change)
 }
 
 func validChangeShape(change topology.VoterChange, current, target int) bool {
@@ -176,8 +198,8 @@ func promotionEligibility(in Input, group *topology.Group, observed metrics.Grou
 	key topology.ReplicaKey) string {
 	p := *group.VoterConfig
 	r, found := findReplica(group, key)
-	o, known := observation(observed, key, in.Active.ClusterID)
-	node := in.Active.Node(key.NodeName)
+	o, known := observation(observed, key, in.Target.ClusterID)
+	node := in.Target.Node(key.NodeName)
 	if !found || r.Role != topology.ReplicaLearner || node == nil || node.State != topology.NodeActive {
 		return reasonPolicyRejected
 	}
@@ -185,7 +207,7 @@ func promotionEligibility(in Input, group *topology.Group, observed metrics.Grou
 		return "pinned_learner"
 	}
 	if slices.Contains(in.Held,
-		storage.Identity{ClusterID: in.Active.ClusterID, GroupID: group.ID, NodeName: r.NodeName,
+		storage.Identity{ClusterID: in.Target.ClusterID, GroupID: group.ID, NodeName: r.NodeName,
 			ReplicaID: r.ReplicaID}) {
 		return "local_stop"
 	}
@@ -224,7 +246,7 @@ func demotionEligibility(in Input, group *topology.Group, observed metrics.Group
 		return reasonPolicyRejected
 	}
 	if change.Promote != nil {
-		o, known := observation(observed, *change.Demote, in.Active.ClusterID)
+		o, known := observation(observed, *change.Demote, in.Target.ClusterID)
 		if !known || !ReplacementFailure(p, o.Evidence) {
 			return "failure_window"
 		}

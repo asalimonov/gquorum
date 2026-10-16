@@ -15,12 +15,12 @@ import (
 // cached policy decision nor a successful preview authorizes membership
 // effects.
 func (r *Scheduler) commitVoterChange(ctx context.Context, in schedulingapi.ScheduleInput,
-	change topology.VoterChange) (topology.OperatorID, error) {
-	fresh, err := r.recheckVoterChange(ctx, in, change)
+	views topology.ReadView, change topology.VoterChange) (topology.OperatorID, error) {
+	fresh, err := r.recheckVoterChange(ctx, in, views, change)
 	if err != nil {
 		return "", err
 	}
-	doc, err := metaengine.VoterChangeDocument(fresh.Active, change, r.now().UTC(), "auto-voter-config")
+	doc, err := metaengine.VoterChangeDocument(fresh.Target, change, r.now().UTC(), "auto-voter-config")
 	if err != nil {
 		return "", err
 	}
@@ -31,14 +31,14 @@ func (r *Scheduler) commitVoterChange(ctx context.Context, in schedulingapi.Sche
 	if len(plan.Steps) == 0 {
 		return "", fault.ErrOperatorAuthorization
 	}
-	if _, err := r.recheckVoterChange(ctx, in, change); err != nil {
+	if _, err := r.recheckVoterChange(ctx, in, views, change); err != nil {
 		return "", err
 	}
 	if !r.host.IsLeader() {
 		return "", fault.ErrNotLeader
 	}
 	id, err := r.host.CommitVoterChange(ctx, change, RepairCommit{Document: doc,
-		ExpectedVersion: fresh.Active.Version, Plan: plan})
+		ExpectedVersion: fresh.Target.Version, Plan: plan})
 	if err == nil {
 		r.host.WakeOperator()
 		return id, nil
@@ -47,7 +47,7 @@ func (r *Scheduler) commitVoterChange(ctx context.Context, in schedulingapi.Sche
 }
 
 func (r *Scheduler) recheckVoterChange(ctx context.Context,
-	in schedulingapi.ScheduleInput, change topology.VoterChange) (votercheck.Input, error) {
+	in schedulingapi.ScheduleInput, captured topology.ReadView, change topology.VoterChange) (votercheck.Input, error) {
 	if err := ctx.Err(); err != nil {
 		return votercheck.Input{}, err
 	}
@@ -56,7 +56,7 @@ func (r *Scheduler) recheckVoterChange(ctx context.Context,
 	if err != nil {
 		return votercheck.Input{}, err
 	}
-	if !reflect.DeepEqual(latest, in.Latest) || !reflect.DeepEqual(active, in.Active) ||
+	if !reflect.DeepEqual(latest, captured.Latest) || !reflect.DeepEqual(active, captured.Active) ||
 		!reflect.DeepEqual(target, active) ||
 		!reflect.DeepEqual(latest, active) {
 		return votercheck.Input{}, fault.ErrVersionConflict
@@ -80,8 +80,10 @@ func (r *Scheduler) recheckVoterChange(ctx context.Context,
 	if err != nil {
 		return votercheck.Input{}, err
 	}
-	fresh := votercheck.Input{Active: active, Metrics: r.host.Observations(), Status: status,
-		Held: r.heldIdentities()}
+	observed := legacyScheduleInput(schedulingapi.ScheduleInput{Target: target, Metrics: r.host.Observations(),
+		Status: status, Held: r.heldIdentities()}, views)
+	fresh := votercheck.Input{Target: observed.Target, Groups: observed.Groups, Metrics: observed.Metrics,
+		Status: observed.Status, Held: observed.Held}
 	if why := votercheck.Check(fresh, change); why != "" {
 		return votercheck.Input{}, fault.New(fault.OperatorAuthorization, why, nil)
 	}

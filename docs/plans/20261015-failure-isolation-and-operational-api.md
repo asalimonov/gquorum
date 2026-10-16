@@ -1055,13 +1055,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `scheduling/scheduler.go`, `default_repair*.go`, voter policy helpers, `scheduling/schedulingtest`. **Target:** [T] §5.4, §6.4; contract C7. **Depends on:** 5, 46, 61. **Budget:** ≤550.
 
-- [ ] Finish final ScheduleInput and remove Latest/Active policy fields after caller adaptation. Built-in policy evaluates approved/proven declarations and rotates eligible groups; a blocked/busy first candidate must not monopolize ticks.
-- [ ] Preserve voter configuration, pinned learners, healthy seats, domain rules and legacy missing-voter repair for groups without voter configuration. Keep callbacks serialized and clone all maps/slices. Supply observations only in Status; clear Groups[g].Observation as well as Desired at the callback boundary, preserving faithful Clone semantics.
-- [ ] Test A blocked with B eligible, unchanged B cooldown/history, custom-policy busy-group refusal and no approval of unrelated staged intent. Do not add healthy balancing, priorities or public timing knobs.
+- [x] Finish final ScheduleInput and remove Latest/Active policy fields after caller adaptation. Built-in policy evaluates approved/proven declarations and rotates eligible groups; a blocked/busy first candidate must not monopolize ticks.
+- [x] Preserve voter configuration, pinned learners, healthy seats, domain rules and legacy missing-voter repair for groups without voter configuration. Keep callbacks serialized and clone all maps/slices. Supply observations only in Status; clear Groups[g].Observation as well as Desired at the callback boundary, preserving faithful Clone semantics.
+- [x] Test A blocked with B eligible, unchanged B cooldown/history, custom-policy busy-group refusal and no approval of unrelated staged intent. Do not add healthy balancing, priorities or public timing knobs.
 
 **Verification**
 
-- [ ] Run policy/conformance units and `make test`.
+- [x] Run policy/conformance units and `make test`.
 
 ### Task 69: Revalidate scheduler decisions with scoped CAS
 
