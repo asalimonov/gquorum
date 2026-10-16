@@ -1,0 +1,64 @@
+package metaengine
+
+import (
+	"slices"
+
+	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/topology"
+)
+
+// New ownership is stricter than immutable-plan shape validation: completed
+// actions stay in historical plans, but another approval cannot reissue them.
+func validateNewRetirement(c planningCollector, input topology.PlanInput,
+	desired topology.Document, plan topology.Plan) error {
+	c.markConvergedOwners(input.Groups)
+	hosted := make(map[string]bool)
+	for key, owner := range c.owners {
+		if owner.progress == topology.RetainedHosted &&
+			!topology.ReadmissionCovers(input, desired, plan, owner.target.NodeName) {
+			hosted[key.group] = true
+		}
+	}
+	for _, step := range plan.Steps {
+		owner := c.owners[planningReplicaKey{step.GroupID, step.ReplicaID}]
+		if step.Kind == topology.StepDeleteGroupState && !hosted[step.GroupID] ||
+			owner != nil && duplicateRetirement(*owner, desired.Group(step.GroupID), step) {
+			return fault.New(fault.OperationAuthorization, "retirement already belongs to retained cleanup", nil)
+		}
+	}
+	return nil
+}
+
+func (c planningCollector) markConvergedOwners(groups map[string]topology.GroupProgress) {
+	for id, progress := range groups {
+		if progress.Converged == nil {
+			continue
+		}
+		for _, replica := range progress.Converged.Replicas {
+			if owner := c.owners[planningReplicaKey{id, replica.ReplicaID}]; owner != nil {
+				owner.hosted() // A checkpoint supplies possible ownership, never removal.
+			}
+		}
+	}
+}
+
+func duplicateRetirement(owner planningReplica, desired *topology.Group, step topology.Step) bool {
+	switch step.Kind {
+	case topology.StepRemoveReplica:
+		return owner.removed != 0
+	case topology.StepCleanupReplicaState:
+		return owner.progress == topology.RetainedCleanup || owner.progress == topology.RetainedStopped
+	case topology.StepStopReplica:
+		if owner.progress == topology.RetainedStopped {
+			return true
+		}
+		if owner.progress != topology.RetainedCleanup || desired == nil {
+			return false
+		}
+		return !slices.ContainsFunc(desired.Replicas, func(r topology.Replica) bool {
+			return r.NodeName == step.NodeName && r.ReplicaID != step.ReplicaID
+		})
+	default:
+		return false
+	}
+}

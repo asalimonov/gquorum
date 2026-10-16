@@ -24,7 +24,14 @@ func comparePlanGroups(a, b string) int {
 // It also validates existing plans after effects complete; new effect ownership
 // must be checked separately at approval against retained grants and cleanup.
 func ValidatePlanShape(input PlanInput, desired Document, plan Plan) error {
-	return validatePlanShapeFor(input, desired, plan, unionGroupIDs(input, desired))
+	groups := unionGroupIDs(input, desired)
+	if plan.Blocks != nil {
+		groups = make([]string, 0, len(plan.Blocks))
+		for _, block := range plan.Blocks {
+			groups = append(groups, block.GroupID)
+		}
+	}
+	return validatePlanShapeFor(input, desired, plan, groups)
 }
 
 // Scopes select deletion coverage, never identity evidence or original-plan steps.
@@ -282,7 +289,8 @@ func (v *planShapeValidator) validateRemovalOrder(i int, current Step) error {
 
 func (v *planShapeValidator) validateStopOrder(i int, current Step) error {
 	key := ReplicaKey{NodeName: current.NodeName, ReplicaID: current.ReplicaID}
-	debtStop := v.input.retirementProgress(current.GroupID, key) == RetainedCleanup &&
+	progress := v.input.retirementProgress(current.GroupID, key)
+	debtStop := (progress == RetainedCleanup || progress == RetainedStopped) &&
 		requiredRetainedStop(v.desired.Group(current.GroupID), key)
 	if !debtStop && v.desired.Group(current.GroupID) != nil &&
 		!adjacentPlanStep(v.plan.Steps, i, StepRemoveReplica, current) {

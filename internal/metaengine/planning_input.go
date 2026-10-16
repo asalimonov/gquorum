@@ -50,8 +50,8 @@ func (sm *topologySM) planningInputLocked(desired topology.Document,
 	return collectPlanningEvidence(input, desired, evidence)
 }
 
-// The scoped adapter supplies the same validated sources under its FSM lock in
-// Tasks 32/61. Schema-3 reads use actual Active, never DeletionBase/OperatorBase.
+// The scoped approval adapter supplies the same validated sources under its FSM
+// lock. Schema-3 reads use actual Active, never DeletionBase/OperatorBase.
 type planningEvidence struct {
 	documents   []topology.Document
 	authority   authorityCatalog

@@ -67,9 +67,31 @@ func (sm *topologySM) applyProposal(index uint64, kind ProposalKind,
 	case KindAcquireLock:
 		return applyJSONProposal(body, "acquire_lock", sm.applyAcquireLock)
 	default:
-		err := fault.New(fault.Unsupported, fmt.Sprintf("meta: unknown proposal kind %q", kind), nil)
+		// Schema 3 cannot persist scoped mutations. Remove this nil adapter at
+		// Task 73, when the complete scoped state replaces this dispatcher.
+		return applyScopedProposal(nil, index, kind, body)
+	}
+}
+
+func applyScopedProposal(state *scopedState, _ uint64, kind ProposalKind,
+	body json.RawMessage) (proposalApplication, error) {
+	if state == nil || kind != "begin_operation" {
+		err := fault.New(fault.Unsupported, fmt.Sprintf("meta: unavailable proposal %q", kind), nil)
 		return proposalApplication{}, err
 	}
+	var p BeginOperationProposal
+	if err := json.Unmarshal(body, &p); err != nil {
+		return proposalApplication{}, err
+	}
+	if p.Version != state.Latest.Version {
+		return proposalApplication{result: rejectVersionConflict(p.ProposalID, p.Version, state.Latest.Version)}, nil
+	}
+	if _, err := prepareScopedApproval(state, state.Latest, p, explicitApproval); err != nil {
+		return proposalApplication{}, err
+	}
+	// Admission, required-stop handover and revocation must be prepared together
+	// before installation (Tasks 31–33); validation alone grants no authority.
+	return proposalApplication{}, fault.ErrUnsupported
 }
 
 func applyIndexedJSONProposal[P any](index uint64, body json.RawMessage, operation string,

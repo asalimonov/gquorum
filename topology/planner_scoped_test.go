@@ -88,7 +88,12 @@ func TestScopedPlannerLeavesIndependentDeletionDebt(t *testing.T) {
 	if err != nil || len(plan.Steps) != 0 {
 		t.Fatal("independent former ownership entered B's plan", plan, err)
 	}
-	if err := ValidatePlanShape(input, desired, plan); err == nil {
+	if err := ValidatePlanShape(input, desired, plan); err != nil {
+		t.Fatal("scoped validation required independent deletion", err)
+	}
+	legacy := plan.Clone()
+	legacy.Blocks = nil
+	if err := ValidatePlanShape(input, desired, legacy); err == nil {
 		t.Fatal("legacy full-plan validator lost omitted deletion coverage")
 	}
 }

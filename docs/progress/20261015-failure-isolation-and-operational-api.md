@@ -727,3 +727,28 @@ Verified
 - Final make test: 1312/1312 pass, 11.253s; test-reports/unit/20261016T054807.972865Z-aeu87k9e/report.md. Final staged lint passes, /tmp/gquorum-correction12-lint.log; diff checks pass. 357 changed handwritten Go lines including tests, within 550.
 - Focused functional native planning, approved join route and readmission/ready-receipt checks pass (2.817s), /tmp/gquorum-correction12-functional.log. No new race/Docker run claimed; no concurrency implementation changed. Full process replacement coverage remains the final process-test tasks.
 - Task 30 was safely stashed as task30-prepared-awaiting-review11 during this bounded correction. Restore it next, rerun validation against this correction, then commit it as implementation/correction commit 42. The next five-commit checkpoint remains commit 45.
+
+The following preparatory entry was recorded before Correction 12 and is preserved from its stash. Its review-wait status is historical; thread 11 is now closed.
+
+## Task 30 — Prepared; awaiting the commit-40 review gate
+Date: 2026-10-16. Not committed; task checkboxes remain open until the required review disposition and commit.
+
+Prepared
+- Independently derive exact ownership scopes, validate captured source/owner tuples and plan guards, and reject stale Latest in isolated dispatch. User approval prepares scoped supersession; automatic approval cannot seize an owned scope. Unrelated operation records and owners remain unchanged. Target, changed group declarations and operation records are owned copies.
+- Reuse the existing retained-evidence collector with scoped group/node checkpoints. Immutable block IDs select shape/deletion coverage without dropping unrelated identity evidence. Keep legacy nil-block full-plan validation until Task 73; scoped empty coverage is explicit inside approval validation.
+- Reject newly proposed duplicate retirement using exact consumed removal, cleanup/stopped progress and uncovered hosted owners. Keep deletion/same-host debt stops required. A regression exposed shape rejection after an inherited debt stop was consumed; immutable shape now accepts that completed stop while new ownership refuses reissuance.
+- Temporary isolation: applyScopedProposal validates BeginOperation and returns Unsupported without installation. The active schema-3 dispatcher supplies nil; remove this adapter with complete persistence/dispatch activation at Task 73. Tasks 31–33 must add admission, required-stop and revocation preparations before any scoped approval installation. No public validation mode or authority-mode flag was added.
+
+Verification
+- Focused metadata/topology units passed. Final make test: 1324/1324 pass, 7.934s; test-reports/unit/20261016T053530.015426Z-qo82xrce/report.md. Final staged lint passes, /tmp/gquorum-task30-lint.log. Diff checks pass. 518 changed handwritten Go lines including tests, within 550. No concurrency/process behavior activated; no new race or Docker run claimed.
+- Initial focused test caught the immutable stop-shape problem; corrected it and reran all units. Initial lint findings were fixed by extracting checkpoint ownership marking, explicit approval-kind validation, safe nil-check ordering and line wrapping.
+- Thread 11 review of immutable commits 0219449..50a2006 remains open. Existing Claude terminal 0181d458-1a8c-48b3-af11-51adcf7cc301 was verified actively reviewing its archived snapshot at the last check (17m elapsed), with an empty composer. No approval is required from the user. Do not commit this prepared task or start Task 31 until that review is evaluated and justified corrections are committed. All Task-30 changes are staged; docs/review remains untracked.
+
+## Task 30 — Scoped approval validation and ownership preparation complete
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 42).
+
+- Restored the independently prepared task after Correction 12 / a09abea and closed peer thread 11. Preserved both progress entries when their append-only log tails conflicted; no code conflict occurred.
+- Exact Latest/scope/source/owner checks, independently derived affected blocks, owned supersession preparation and new-retirement refusal are now implemented as recorded in the preparatory entry. Immutable debt-stop shape survives consumed receipts; new approval cannot reissue it. Node-only edits keep an unavailable load owner's state and attribution unchanged. Automatic approval cannot seize an owned block.
+- applyScopedProposal remains an isolated Unsupported preparation boundary until Tasks 31–33 supply the other atomic changes. The legacy dispatcher still passes nil and cannot persist scoped state; remove this adapter at Task 73. The early aggregate helper is used for supersession only; Task 35 extends transition/aggregation behavior. Group/node completion and admission/debt/revocation installation are not claimed finished.
+- Final make test after the correction: 1333/1333 pass, 9.597s; test-reports/unit/20261016T054951.980106Z-ftyqdiz7/report.md. Final staged lint and diff checks pass, /tmp/gquorum-task30-lint.log. 518 changed handwritten Go lines, within 550. No race/process run for this pure isolated preparation task.
+- Next task is 31. Re-estimate it before coding: thread-11 added load-only readmission retirement planning and explicit origin-fact validation; split consecutive tasks first if their combined code/tests exceed 550. The goal remains unfinished; next peer/dead-code checkpoint is implementation/correction commit 45.

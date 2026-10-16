@@ -524,14 +524,14 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaengine` approval/scope/operation helpers and tests. **Target:** [T] §5.2, §7.1, §12 “Approve”/“validateApprovalScopes”. **Depends on:** 15, 25–29. **Budget:** estimated 350–500 changed Go lines, ceiling 550.
 
-- [ ] Prepare applyBeginOperation validation with exact Latest/plan/source/owner expectations and independent FSM scope derivation. Required blocks equal semantic ownership scopes; unchanged admission-dependent load blocks keep their owner. Reuse one FSM-side check under the apply lock for new approvals; repair/voter/readmission handlers adopt it in their owning tasks.
-- [ ] Prepare scoped supersession, owner changes and operation state on owned copies. Explicit user approval supersedes affected user scopes only; repair cannot seize them. Preserve unrelated blocks and original attribution. Do not install partial state before Tasks 31–33 supply admission/debt/revocation preparations.
-- [ ] Reject duplicate cleanup-owned retirement at new approval: consumed Remove, Cleanup for Cleanup/Stopped, Stop for Stopped, DeleteGroupState without an uncovered Hosted owner. Allow exact required same-host/deletion debt stops without another Remove. Keep immutable approved-plan validation valid after consumption; no public validation mode.
-- [ ] Test forged omitted/extra/duplicate blocks, stale captures/CAS, unavailable siblings, consumed retirement refusal versus immutable retry acceptance, and unchanged state on refusal. Any provisional handler returns classified Unsupported until atomic preparation is complete.
+- [x] Prepare applyBeginOperation validation with exact Latest/plan/source/owner expectations and independent FSM scope derivation. Required blocks equal semantic ownership scopes; unchanged admission-dependent load blocks keep their owner. Reuse one FSM-side check under the apply lock for new approvals; repair/voter/readmission handlers adopt it in their owning tasks.
+- [x] Prepare scoped supersession, owner changes and operation state on owned copies. Explicit user approval supersedes affected user scopes only; repair cannot seize them. Preserve unrelated blocks and original attribution. Do not install partial state before Tasks 31–33 supply admission/debt/revocation preparations.
+- [x] Reject duplicate cleanup-owned retirement at new approval: consumed Remove, Cleanup for Cleanup/Stopped, Stop for Stopped, DeleteGroupState without an uncovered Hosted owner. Allow exact required same-host/deletion debt stops without another Remove. Keep immutable approved-plan validation valid after consumption; no public validation mode.
+- [x] Test forged omitted/extra/duplicate blocks, stale captures/CAS, unavailable siblings, consumed retirement refusal versus immutable retry acceptance, and unchanged state on refusal. Any provisional handler returns classified Unsupported until atomic preparation is complete.
 
 **Verification**
 
-- [ ] Run scope/approval/retirement/atomicity units, staged lint and `make test`.
+- [x] Run scope/approval/retirement/atomicity units, staged lint and `make test`.
 
 ### Task 31: Prepare same-record admission handover and resumed admission proof
 
