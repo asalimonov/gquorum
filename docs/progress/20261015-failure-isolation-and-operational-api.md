@@ -904,3 +904,17 @@ Verified
 - make test: 1441/1441 pass, 9.452s; test-reports/unit/20261016T081752.340615Z-o7vko_lu/report.md. Final focused metaengine/topology tests pass after lint-only operand ordering and removing redundant fixture history appends; /tmp/gquorum-task37-focused.log.
 - Staged lint passes, /tmp/gquorum-task37-lint.log; diff checks pass. Complexity checks led to small shared validation/checkpoint helpers. No new concurrency/process code; no race/Docker run claimed.
 - Next: Task 38 scoped revocation and isolated atomic installation. Next peer/dead-code checkpoint remains commit 55. Live activation and the overall goal remain unfinished.
+
+## Task 38 — Scoped resource revocation and atomic isolated approval
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 53).
+
+Implemented
+- Approval now prepares scoped revocation, validates the complete candidate, and installs it once. Exact first-approval replay returns the original operation; stale captures/indexes leave topology, ownership, cleanup and authority unchanged. Production still supplies nil scoped state until the Task 78 persistence cutover.
+- Revocation uses operation/group keys and closes affected execution or actually conflicting resources. Unchanged cleanup and exact still-bound readmission batches survive. Rebound stops fence their old host grants; issued preparation/founding resources are fenced before deletion. Existing unfinished resource fences are reused, without global inherited obligations or a durable-proof capacity admission gate in the scoped path.
+- Scoped authority queries aggregate requested blocks and distinguish no request from completed revocation. Readmission cancellation retains its exact admission origin even for a former group absent from that origin's execution plan; restore accepts this only with matching retained batch attribution.
+- Shared obligation settlement replaces duplicated legacy refresh code. Catalog cloning preserves nil receipt slices, keeping untouched records exact. Legacy whole-document methods/gates and result field names remain only for existing live consumers until Task 78; scoped handlers never invoke them. Retry-specific consumed-prefix selection is completed with the immutable retry handler in Task 44.
+
+Verified
+- make test: 1453/1453 pass, 8.288s; test-reports/unit/20261016T083210.000744Z-837z3oi7/report.md. Final focused metaengine tests pass after lint-only helper extraction/preallocation; /tmp/gquorum-task38-focused.log.
+- Staged lint passes, /tmp/gquorum-task38-lint.log. Regressions cover independent progress beside pending fences, detached-to-required host conflict, issued creation/deletion fences, exact readmission preservation beyond the old capacity, original batch attribution, aggregate status, serialization/restore and atomic late refusal. Diff checks pass; no new race/Docker run claimed.
+- Next is Task 39 effect authorization/issuance. Peer/dead-code review remains due after commit 55, two commits from this one. No tasks were added or renumbered.

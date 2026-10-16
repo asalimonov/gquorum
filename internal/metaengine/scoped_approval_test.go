@@ -108,24 +108,29 @@ func TestScopedApprovalRefusesForgedScopesWithoutMutation(t *testing.T) {
 	}
 }
 
-func TestScopedApprovalDispatchRemainsUnavailableUntilAtomicPreparation(t *testing.T) {
+func TestScopedApprovalDispatchInstallsOnceAfterCompletePreparation(t *testing.T) {
 	t.Parallel()
 	s, p := approvalFixture(t, "shard0")
 	body, _ := json.Marshal(p)
-	before, _ := json.Marshal(s)
 	application, err := applyScopedProposal(&s, 11, "begin_operation", body)
-	if !errors.Is(err, fault.ErrUnsupported) || application.changed {
-		t.Fatal("partial preparation authorized a mutation", application, err)
+	if err != nil || !application.changed || !application.result.Accepted ||
+		application.result.OperatorID != "exec-v3-a1" || s.AppliedIndex != 11 || s.Target.Version != 3 {
+		t.Fatal("complete candidate was not installed", application, err)
 	}
-	p.Version--
+	before, _ := json.Marshal(s)
+	application, err = applyScopedProposal(&s, 12, "begin_operation", body)
+	if err != nil || application.changed || !application.result.Accepted || application.result.OperatorID != "exec-v3-a1" {
+		t.Fatal("approval replay created another operation", application, err)
+	}
+	p.Version = 1 // No retained original approval exists for the founding checkpoint.
 	body, _ = json.Marshal(p)
-	application, err = applyScopedProposal(&s, 11, "begin_operation", body)
+	application, err = applyScopedProposal(&s, 13, "begin_operation", body)
 	if err != nil || application.changed || application.result.Code != proposalVersionConflict ||
-		application.result.ExpectedVersion != 2 || application.result.CurrentVersion != 3 {
+		application.result.ExpectedVersion != 1 || application.result.CurrentVersion != 3 {
 		t.Fatal("stale Latest was not refused precisely", application, err)
 	}
 	after, _ := json.Marshal(s)
 	if !bytes.Equal(before, after) {
-		t.Fatal("provisional handler changed durable state")
+		t.Fatal("replay/refusal changed durable state")
 	}
 }

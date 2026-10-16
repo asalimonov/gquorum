@@ -659,15 +659,15 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaengine/authority_revocation.go`, `authority_catalog.go`, `cleanup_evidence.go`. **Target:** [T] §6.2, §6.4; contract C8. **Depends on:** 8–15, 34–37. **Budget:** ≤550.
 
-- [ ] Implement revokeAuthorityLocked(index, []blockRef, successor); key revocations by OperationID+GroupID. Close/inherit only affected resources and preserve unrelated and cleanup-class grants unless an actual resource conflict requires fencing. Preserve usable exact readmission retirement for the same granted replacement during admission handover; never revive fenced grants. Refuse cancellation/fencing of a batch still required by pending deletion. Fence issued founding/preparation resources before a deletion Stop so late founding cannot recreate data afterward.
-- [ ] Every unconsumed StopAction rebind (required→required, required→detached or detached→required) settles/closes the old conflicting host grant before successor issuance; late old receipts stay historical.
-- [ ] Remove pendingCost admission and global inherited-obligation/close-all behavior. Prepare the complete catalog update before installation; preserve exact floor/evidence validation and aggregate ReadAuthority/WaitRevoked semantics.
-- [ ] Finish isolated applyBeginOperation by composing Task 37's complete candidate with scoped revocations before one non-fallible installation. Test atomic install/refusal, exact approval replay and late CAS; live production activation remains Task 78.
-- [ ] Test A's pending revocation does not affect B, same-resource obligations cannot be skipped, cleanup grants survive unrelated approval and “not requested” differs from requested-and-complete.
+- [x] Implement revokeAuthorityLocked(index, []blockRef, successor); key revocations by OperationID+GroupID. Close/inherit only affected resources and preserve unrelated and cleanup-class grants unless an actual resource conflict requires fencing. Preserve usable exact readmission retirement for the same granted replacement during admission handover; never revive fenced grants. Refuse cancellation/fencing of a batch still required by pending deletion. Fence issued founding/preparation resources before a deletion Stop so late founding cannot recreate data afterward.
+- [x] Every unconsumed StopAction rebind (required→required, required→detached or detached→required) settles/closes the old conflicting host grant before successor issuance; late old receipts stay historical.
+- [x] Remove pendingCost admission and global inherited-obligation/close-all behavior. Prepare the complete catalog update before installation; preserve exact floor/evidence validation and aggregate ReadAuthority/WaitRevoked semantics.
+- [x] Finish isolated applyBeginOperation by composing Task 37's complete candidate with scoped revocations before one non-fallible installation. Test atomic install/refusal, exact approval replay and late CAS; live production activation remains Task 78.
+- [x] Test A's pending revocation does not affect B, same-resource obligations cannot be skipped, cleanup grants survive unrelated approval and “not requested” differs from requested-and-complete.
 
 **Verification**
 
-- [ ] Run authority revocation/restore units and `make test`.
+- [x] Run authority revocation/restore units and `make test`.
 
 ### Task 39: Scope effect issuance, authorization and completion prerequisites
 

@@ -39,7 +39,7 @@ func restoreScopedAuthority(state *scopedState, index *scopedIndexes) (authority
 		}
 	}
 	for _, record := range state.Revocations {
-		if err := validateScopedRevocation(record, index, restore.catalog); err != nil {
+		if err := validateScopedRevocation(state, record, index, restore.catalog); err != nil {
 			return authorityCatalog{}, err
 		}
 	}
@@ -121,13 +121,14 @@ func cleanupRetainsAction(debt *cleanupRecord, action topology.AuthorizedStep) b
 		(action.Version < bound.Version || action.Version == bound.Version && action.Attempt < bound.Attempt)
 }
 
-func validateScopedRevocation(record scopedRevocationRecord, index *scopedIndexes, catalog authorityCatalog) error {
+func validateScopedRevocation(state *scopedState, record scopedRevocationRecord,
+	index *scopedIndexes, catalog authorityCatalog) error {
 	if record.OperationID == "" || topology.ValidateID(record.GroupID) != nil {
 		return invalidScopedState("revocation lacks its exact operation/group scope")
 	}
 	containsGroup := func(block topology.PlanBlock) bool { return block.GroupID == record.GroupID }
 	if operation := index.operations[record.OperationID]; operation != nil &&
-		!slices.ContainsFunc(operation.Plan.Blocks, containsGroup) {
+		!slices.ContainsFunc(operation.Plan.Blocks, containsGroup) && !state.readmissionRevocationScope(record) {
 		return invalidScopedState("revocation names a group outside its operation")
 	}
 	for i, obligation := range record.Obligations {
@@ -137,4 +138,11 @@ func validateScopedRevocation(record scopedRevocationRecord, index *scopedIndexe
 		}
 	}
 	return catalog.validateRestoredObligations(record.Obligations)
+}
+
+func (s *scopedState) readmissionRevocationScope(record scopedRevocationRecord) bool {
+	return slices.ContainsFunc(s.AuthorityRecords, func(r scopedAuthorityRecord) bool {
+		return r.Grant.Purpose == topology.AuthorityReadmit && r.Grant.Key.GroupID == record.GroupID &&
+			s.readmissionOwner(r.Grant.AdmissionID) == record.OperationID
+	})
 }

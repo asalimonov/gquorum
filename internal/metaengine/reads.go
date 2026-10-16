@@ -93,6 +93,9 @@ func SessionValue(s SessionRecord) (topology.Session, error) {
 }
 
 func (m *Machine) queryValueLocked(q QueryRequest) (any, error) {
+	if q.OperationID != "" {
+		return queryScopedAuthority(nil, q) // Scoped state replaces this adapter at Task 78.
+	}
 	switch q.Kind {
 	case "plan_validation":
 		return m.queryPlanLocked(q)

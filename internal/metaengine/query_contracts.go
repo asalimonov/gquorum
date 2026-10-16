@@ -13,8 +13,7 @@ type CollectionCheck struct {
 
 func (q QueryRequest) validateScopedFields() error {
 	if q.OperationID != "" {
-		// Remove with the old OperatorID query consumers at Task 78.
-		return fault.ErrUnsupported
+		return q.validateScopedAuthority()
 	}
 	if q.Progress != nil || q.Kind == "progress" {
 		if q.Kind != "progress" || q.Progress == nil || q.CollectionIdentity != nil ||
@@ -30,6 +29,14 @@ func (q QueryRequest) validateScopedFields() error {
 			topology.ValidateID(id.GroupID) != nil {
 			return fault.ErrInvalid
 		}
+	}
+	return nil
+}
+
+func (q QueryRequest) validateScopedAuthority() error {
+	if q.Kind != "authority" || q.OperationID == "" || q.Key != "" || q.OperatorID != "" ||
+		q.AuthorityKey != nil || q.Progress != nil || q.CollectionIdentity != nil {
+		return fault.ErrInvalid
 	}
 	return nil
 }

@@ -13,7 +13,7 @@ func (a authorityCatalog) clone() authorityCatalog {
 		v := *r
 		v.Grant = r.Grant.Clone()
 		v.Fences = slices.Clone(r.Fences)
-		v.Effects = make([]topology.EffectReceipt, len(r.Effects))
+		v.Effects = slices.Clone(r.Effects)
 		for i, e := range r.Effects {
 			v.Effects[i] = e.Clone()
 		}
@@ -226,17 +226,7 @@ func (a authorityCatalog) fenceConsumed(key topology.AuthorityKey, resource topo
 }
 func (a authorityCatalog) refreshRevocations() {
 	for _, r := range a.revocations {
-		var obligations []topology.FenceObligation
-		for _, ob := range r.Obligations {
-			if ob.Evidence == nil {
-				ob = a.obligationWithEvidence(ob)
-			}
-			if ob.Evidence == nil && a.fenceConsumed(ob.Key, ob.Resource) {
-				continue
-			}
-			obligations = append(obligations, ob)
-		}
-		r.Obligations = obligations
+		r.Obligations = a.settledObligations(r.Obligations)
 	}
 }
 func (a authorityCatalog) obligationWithEvidence(ob topology.FenceObligation) topology.FenceObligation {
