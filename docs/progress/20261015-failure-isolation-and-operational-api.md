@@ -628,3 +628,36 @@ Verified
 - Focused topology units pass, including new admission/removal/materialized-assignment and unassigned selector/type/drain/reservation/domain regressions. Existing assigned-host, effective-rule, allocation, deterministic-order/copy and invalid-dependency tests pass.
 - make test: 1245/1245, 10.079s; test-reports/unit/20261015T215259.721387Z-q1kcljmb/report.md. Exact staged lint passes at /tmp/gquorum-correction11-lint.log. Diff checks pass; 145 changed handwritten Go lines, below 550. Pure scope derivation changes no I/O/concurrency/live apply path; no additional functional/race/Docker run.
 - Next task 26. Next regular five-commit review is commit 40. Full architecture remains unfinished; schema 3 still rejects scoped v4 until Task 70.
+
+
+## Design checkpoint — State-based admission consensus
+Date: 2026-10-16. No implementation/correction commit; count remains 36.
+
+- Closed peer thread 10 after three rounds. The current PlanInput cannot express admission-dependent invalidation, and same-plan dependency sequences cannot express a later load-only approval waiting on an older metadata operation. Both reviewers recommend a mandatory exact state-based admission predicate instead of adding DependentGroups.
+- Unchanged load blocks retain ownership and wait for exact current-binding admission proof. Validated metadata convergence, including founding, or exact fully consumed preparation supplies the fact. Missing proof waits; it does not fail the block. Retirement remains executable without admission.
+- Independently verified the same-process handover gap: admission rows are process-keyed, while ReadmissionID embeds the operation. The proposed internal ReadmissionOperatorID preserves origin through retries and metadata supersession, alongside ReadmissionInstanceID. Current binding checks, validated consumed prefixes, immutable receipt attribution and proof retention remain mandatory.
+- Created docs/brainstorms/20261016-state-based-admission-target.md with the concrete contract, snippets, task impact and regression matrix. Main target and plan link to it as pending user review; existing normative task contracts and checkboxes are unchanged. User review is requested because this changes the previously agreed supersession behavior, following their requested consensus/design/review workflow.
+- Validation: checked 24 local documentation links, code-fence balance, new amendment whitespace, completed peer marker/outcome and git diff --check. No Go changes or new runtime test run. Task 26 remains first unchecked; next regular five-commit review remains commit 40. No claim of completed implementation or active persistence changes.
+
+
+## Consensus adopted — Continue the active goal
+Date: 2026-10-16. User authorized consensus decisions without further approval.
+
+- Accepted the thread-10 state-based admission amendment and reconciled scope/barrier, handover, retention and audit task requirements. PlanInput and ordinary APIs gain no new field; the internal admission origin field preserves exact retirement authority. The main target links the accepted detailed amendment.
+- User steering supersedes the preceding pending-review checkpoint. Continue from Task 26, with existing per-task verification/commits and peer review every five implementation/correction commits. The goal is active; implementation/correction count remains 36 until Task 26 lands.
+
+
+## Task 26 — Prepare planning and collection for affected groups
+Date: 2026-10-16. Commit: this entry's commit (implementation/correction commit 37).
+
+Implemented
+- Shared constructGroupPlan, plannerObservations, deletion coverage and membership simulation now accept explicit internal group work selection while retaining full approved/proven/member evidence. AffectedGroups selection plans B without reading unchanged unavailable A or metadata, avoids synthesizing another operation's admission, and preserves exact required deletion stops.
+- Shared readPlanningInput collects native state/observations only for selected existing groups, preserves full metadata evidence, avoids deleted-quorum reads and rejects an approved-version change during collection. Actual founding seed membership and possible-founding refusal remain intact.
+- Legacy public construction and service collection continue selecting full scope until Tasks 58/70. Scoped selections are exercised through test wrappers; lint identified and removed unused production wrappers instead of adding exports. Original-plan shape validation remains independent of a newly empty approval delta. No runtime mode flag or extra public planner/input field.
+- Recorded and adopted the peer-consensus admission amendment under the user's instruction to proceed without approval. Updated normative planning/hand-over/retention tasks and committed the detailed amendment; no admission runtime behavior is activated here.
+
+Verified
+- Focused topology tests pass, including unavailable sibling, affected evidence refusal, declaration-only work, independent deletion debt, original immutable deletion coverage, exact required hosts, unrelated admission and founding seeds.
+- Focused service scoped/native collection functional suite passes (2.130s), /tmp/gquorum-task26-functional.log. Initial fixture used nonexistent Group.Clone, then incorrectly expected proven owners to be duplicated in Retained; fixed the fixture to copy its replica slice and assert exact Converged evidence. Production proof checks were not weakened.
+- make test passes 1254/1254 (10.795s), test-reports/unit/20261016T045048.516751Z-g2n4dppi/report.md. Final staged lint passes at /tmp/gquorum-task26-lint.log; git diff --check passes. 342 changed handwritten Go lines including tests, below 550. No new concurrency or production scoped activation; no additional race/Docker run.
+- Next Task 27 derives replicated scope/CAS and independence checks. Next regular peer/dead-code checkpoint remains implementation/correction commit 40. Full target remains unfinished.

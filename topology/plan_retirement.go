@@ -91,15 +91,8 @@ func requireCleanupOwnerStop(view voterPlanTopology, plan Plan, incoming Step, s
 	return nil
 }
 
-func (v *planShapeValidator) validateDeletionCoverage() error {
-	groups := make(map[string]bool)
-	for id := range v.input.Groups {
-		groups[id] = true
-	}
-	for id := range v.input.Retained {
-		groups[id] = true
-	}
-	for id := range groups {
+func (v *planShapeValidator) validateDeletionCoverage(groups []string) error {
+	for _, id := range groups {
 		if v.desired.Group(id) == nil {
 			if err := v.validateDeletionOrder(Step{GroupID: id}); err != nil {
 				return err

@@ -16,6 +16,8 @@
 
 **Status:** implementation in progress; completion and validation are recorded per task below.
 
+**Accepted design amendment (2026-10-16):** [state-based admission](../brainstorms/20261016-state-based-admission-target.md), from peer thread 10. The user authorized adopting peer consensus without further approval and finishing the goal. The amendment is normative alongside [T]; Task 26 is the first unchecked task.
+
 [T]: ../brainstorms/20261015-failure-isolation-and-operational-api-target.md
 [B]: ../brainstorms/20261015-failure-isolation-and-operational-api.md
 [R]: ../review/feat_failure-isolation-and-api.md
@@ -463,20 +465,20 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `topology/planner.go`, shape/deletion helpers, `internal/metaservice/planning_input.go`, focused tests. **Target:** [T] §5.1–5.2, §7.2. **Depends on:** 25. **Budget:** estimated 400–550 changed Go lines, ceiling 550.
 
-- [ ] Restrict native requirements, observations and service collection to affected/dependent scopes; unchanged unhealthy A must not gate B. Carry unchanged dependent declarations when admission closure requires them. Preserve exact guards for every affected group and actual founding seed handling.
-- [ ] Keep unrelated retained deletion debt outside B's whole-deletion checks without dropping required stops for a deleting/taken-over group. Preserve immutable original-plan validation separately from new-plan scope selection.
-- [ ] Test B planning with A unavailable, affected A refusal, declaration-only work, independent deletion debt and required exact host coverage. Stage these scoped helpers until their block/approval and persistence consumers are ready: never feed a partial scoped plan into legacy whole-document completion. Final activation remains Task 70; no runtime authority-mode flag or compatibility API.
+- [x] Restrict native requirements, observations and service collection to semantic ownership scopes; unchanged unhealthy A must not gate B. Admission uses the mandatory state predicate and never adds unchanged load scopes. Preserve exact guards for every affected group and actual founding seed handling.
+- [x] Keep unrelated retained deletion debt outside B's whole-deletion checks without dropping required stops for a deleting/taken-over group. Preserve immutable original-plan validation separately from new-plan scope selection.
+- [x] Test B planning with A unavailable, affected A refusal, declaration-only work, independent deletion debt and required exact host coverage. Stage these scoped helpers until their block/approval and persistence consumers are ready: never feed a partial scoped plan into legacy whole-document completion. Final activation remains Task 70; no runtime authority-mode flag or compatibility API.
 
 **Verification**
 
-- [ ] Run planner/shape/retirement units and focused service native-collection functional checks; staged lint and `make test`.
+- [x] Run planner/shape/retirement units and focused service native-collection functional checks; staged lint and `make test`.
 
 ### Task 27: Validate semantic scopes and independence in the FSM
 
 **Files:** `internal/metaengine` scope/approval helpers and owning-package tests. **Target:** [T] §5.1–5.3, §12 “validateApprovalScopes” and repair rebase. **Depends on:** 25–26. **Budget:** estimated 300–500 changed Go lines, ceiling 550.
 
 - [ ] Derive semantic read/write conflicts from trusted approved/candidate declarations and exact allocation evidence. AffectedGroups supplies ownership scopes only; separately compare repair candidate eligibility/domain/member reads with existing placement evaluation. Ignore unassigned candidates that are ineligible in both versions; do not merge candidate reads into operation ownership or native collection. Service scope lists are checked evidence, never trusted scope selection. Keep the common derivation used by planning and replicated validation.
-- [ ] Check captured group source versions/current owners and required affected group sets under the FSM lock. Prepare dependent-closure input for Task 29; its final closure and atomic installation remain there. Unknown dependencies refuse independence.
+- [ ] Check captured group source versions/current owners and required affected group sets under the FSM lock. No admission invalidation closure is needed; the final exact ownership set and atomic installation remain Task 29. Unknown dependencies refuse independence.
 - [ ] Test omitted/extra/duplicate scopes, stale source/owner expectations, disjoint edits versus shared eligibility/rules, node-only edits and allocation conflicts. Repair must not read every unrelated node field; same-group edits and exact host/member changes remain conflicts.
 
 **Verification**
@@ -489,22 +491,22 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Partition steps by exact group and source version; classify only safe detached stop/retirement actions as Cleanup. Whole-group deletion stops and same-host replacement prerequisites stay required.
 - [ ] Carry unfinished required stops for exact removed-but-unstopped identities when a newer approval takes over a failed or superseded group; derive them from retained debt, even when convergence or current native membership omits that identity. Keep the old origin/retirement action and consumed milestones.
-- [ ] Emit exact admission preparation edges and state-based removal barriers. Retain immutable global sequence numbers and deterministic within-block ordering. Zero-step declaration blocks still have provenance.
+- [ ] Emit restricted admission/removal edges for local ordering; both barriers use mandatory state predicates. Admission proof can come from another operation, without adding its scope. Retain immutable global sequence numbers and deterministic within-block ordering. Zero-step declaration blocks still have provenance.
 - [ ] Test all-step coverage, no cleanup prerequisite masquerading as independent work, readmission coverage, former-owner deletion catalog and restricted edge forms. Adapt current adjacency validators to execution/cleanup separation without weakening their safety predicates.
 
 **Verification**
 
 - [ ] Run plan shape/destructive boundary/voter tests and `make test`.
 
-### Task 29: Apply scoped approvals and dependent invalidation atomically
+### Task 29: Apply scoped approvals and admission handover atomically
 
 **Files:** `internal/metaengine/operator_state.go`, approval helpers. **Target:** [T] §5.2, §7.1, §12 “Approve”/“validateApprovalScopes”. **Depends on:** 15, 25–28. **Budget:** ≤550.
 
-- [ ] Implement applyBeginOperation with exact Latest/plan/source/owner expectations and independent FSM scope derivation. Required block set equals changed scopes plus invalidated unconsumed admission-dependent closure.
-- [ ] Prepare scoped supersession, owners, Target, zero-step completion and required revocations before any state installation. Explicit approval supersedes only affected user scopes; repair cannot seize them. Preserve consumed admission prerequisites and unrelated blocks.
+- [ ] Implement applyBeginOperation with exact Latest/plan/source/owner expectations and independent FSM scope derivation. Required block set equals semantic ownership scopes. Unchanged admission-dependent load blocks keep their owner and wait for exact proof.
+- [ ] Prepare scoped supersession, owners, Target, zero-step completion and required revocations before any state installation. Explicit approval supersedes only affected user scopes; repair cannot seize them. Preserve consumed admission facts and unrelated blocks. Prepare atomic same-record admission handover with the origin operator/instance contract; resumed admissions validate consumed prefix plus approved suffix.
 - [ ] Atomically rebind each unconsumed required cleanup StopAction to the new owner's exact required step, including across approval versions. Extend restore stop/action validation in the same task: current owner step or failed ownerless chain tip; preserve old action receipts and pin both operation chains. Refuse missing/wrong-host/wrong-replica steps. Never let a newer approval bypass a whole-group deletion stop or resurrect a retired group ID.
 - [ ] Use one FSM-side ownership check under the apply lock for every new-approval handler (operation, repair, voter change and readmission, including scoped equivalents). At new scoped approval, reject new retirement actions already owned by cleanup: no duplicate Remove backed by a consumed removal receipt, Cleanup for Cleanup/Stopped owners, Stop for Stopped owners, or DeleteGroupState without a Hosted uncovered owner. Cleanup-owned stops are allowed only for exact same-host/deletion prerequisites, without a new Remove. Check exact retained proof in the FSM; keep ValidatePlanShape valid for already-approved immutable plans after their effects complete. No new progress enum or public validation mode. Test submitted-plan rejection separately from immutable retry acceptance.
-- [ ] Test omitted/extra/duplicate blocks, unchanged-but-required dependent blocks, late CAS refusal and no partial in-memory mutation. Arrange revocation through the scoped implementation in Task 30 before activating this path.
+- [ ] Test omitted/extra/duplicate blocks, unchanged dependent blocks retaining ownership, late CAS refusal and no partial in-memory mutation. Arrange revocation through the scoped implementation in Task 30 before activating this path.
 
 **Verification**
 
@@ -514,7 +516,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaengine/authority_revocation.go`, `authority_catalog.go`, `cleanup_evidence.go`. **Target:** [T] §6.2, §6.4; contract C8. **Depends on:** 8–15, 29. **Budget:** ≤550.
 
-- [ ] Implement revokeAuthorityLocked(index, []blockRef, successor); key revocations by OperationID+GroupID. Close/inherit only affected resources and preserve unrelated and cleanup-class grants unless an actual resource conflict requires fencing.
+- [ ] Implement revokeAuthorityLocked(index, []blockRef, successor); key revocations by OperationID+GroupID. Close/inherit only affected resources and preserve unrelated and cleanup-class grants unless an actual resource conflict requires fencing. Preserve usable exact readmission retirement for the same granted replacement during admission handover; never revive fenced grants.
 - [ ] Remove pendingCost admission and global inherited-obligation/close-all behavior. Prepare the complete catalog update before installation; preserve exact floor/evidence validation and aggregate ReadAuthority/WaitRevoked semantics.
 - [ ] Test A's pending revocation does not affect B, same-resource obligations cannot be skipped, cleanup grants survive unrelated approval and “not requested” differs from requested-and-complete.
 
@@ -527,7 +529,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** `internal/metaengine/authority_issue.go`, `authorization.go`, `authority_receipts.go`, transfer/readmission authority helpers. **Target:** [T] §2, §6.4, §12 “authorizeLocked”. **Depends on:** 29–30. **Budget:** ≤550.
 
 - [ ] Authorize exact operation/attempt/version/step/action/group/host/replica and current block cursor/owner; use the operation's pinned document. Remove global Target.Version equality and all-revocations-complete requirements.
-- [ ] Check only required native/host floors and relevant unfinished prerequisites, including transfer/readmission paths. Remove remaining pending-record admission gates while retaining exact grant reuse and receiver identity checks.
+- [ ] Check only required native/host floors and relevant unfinished prerequisites, including transfer/readmission paths. Remove remaining pending-record admission gates while retaining exact grant reuse and receiver identity checks. Mandatory load admission checks current approved bindings plus exact metadata convergence or consumed preparation; missing proof waits with Unavailable, including when no dependency edge exists.
 - [ ] Test old B operation remains authorized after A advances Target, stale tuple/floor fails, apply lag remains retryable and B can issue effects with A's pending fences. Catalogue all five target-listed gates as removed/scoped, not just the obvious issuance loop.
 
 **Verification**
@@ -593,7 +595,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Derive the new attempt from Previous inside the FSM; preserve the entire immutable Plan byte-for-byte. Reopen only failed blocks at the first unconsumed required step; terminal siblings retain their state/proof and superseded scopes are never reclaimed.
 - [ ] Require terminal failed aggregate, unchanged approved failed scopes and executable suffix. Prepare scoped predecessor revocations before assigning retry owners; retain original receipt tuples through Previous rather than relabeling them.
-- [ ] Rebind live admission progress to the exact retried `_meta` attempt, preserving the prior admission/batch evidence needed by ReadmissionID. Derive readiness from complete same-node/member retirement; learner/promoted progress still requires exact native effects through Previous. Rebind only unconsumed required StopAction in the same atomic transition. Test retry before/after preparation, AddLearner and promotion, including lost responses and process replacement.
+- [ ] Rebind live admission progress to the exact retried `_meta` attempt, preserving the origin operator/instance and batch evidence needed by ReadmissionID in the same process-keyed record. Reject caller-selected origins and validate persistence/join/restore provenance. Derive readiness from complete same-node/member retirement; learner/promoted progress still requires exact native effects through Previous. Rebind only unconsumed required StopAction in the same atomic transition. Test retry before/after preparation, AddLearner and promotion, including lost responses and process replacement.
 - [ ] Test duplicate retry returns the same immediate successor even after its failure, concurrent retry deduplication, lost-response replay, missing history, unsafe suffix and failed-block-with-running-sibling refusal.
 
 **Verification**
@@ -679,13 +681,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run focused bootstrap/admission functional tests and `make test`.
 
-### Task 43: Fix non-founding admission and state-based evacuation gates
+### Task 43: Fix non-founding admission and state-based barriers
 
 **Files:** `internal/metaengine/admission.go`, `progress.go`, scope/barrier validation. **Target:** [T] §3.3, §5.2/§5.4, §12 “Admission and evacuation barriers”. **Depends on:** 28–33, 41–42. **Budget:** ≤550.
 
 - [ ] Bind joining identities to the current nonterminal `_meta` block and its own pinned plan, not global Target.Version. Preserve Target identity consistency and exact learner-first member/instance checks after unrelated approvals/rebases.
-- [ ] Share barrierSatisfied semantics among dispatch, grant issuance and invalidation. Removal scans current and retained approved/proven/intermediate assignments, preparations, native-removal proof and whole-group required stops; nil initial convergence is unknown.
-- [ ] Test load-block supersession does not itself invalidate removal, newly relevant evacuation scopes are checked, detached cleanup alone does not block and same-node readmission replacement uses its own proof path.
+- [ ] Share barrierSatisfied semantics among dispatch, grant issuance and execution revalidation. Load preparation and founding voter hosts accept exact metadata convergence or consumed preparation from any valid approved operation, with current binding and full readmission checks. Do not gate evacuation/stop/cleanup. Validate resumed admission prefixes rather than demanding repeated Prepare/Add in an already-native successor. Removal scans current and retained approved/proven/intermediate assignments, preparations, native-removal proof and whole-group required stops; nil initial convergence is unknown.
+- [ ] Test metadata supersession leaves unchanged load blocks waiting/runnable under their original owner, cross-operation dependencies, founding proof, same-process handover/retry, wrong origins and Ready-only refusal. Test load-block supersession does not itself invalidate removal, newly relevant evacuation scopes are checked, detached cleanup alone does not block and same-node readmission replacement uses its own proof path.
 
 **Verification**
 
@@ -696,7 +698,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** `internal/metaengine/cleanup_evidence.go`, `cleanup.go`, history/snapshot helpers. **Target:** [T] §4.2–4.3, §12 “Collection acceptance versus settlement”. **Depends on:** 34–43. **Budget:** ≤550.
 
 - [ ] Implement one identityReferencedLocked predicate covering Latest/Target/history, convergence, every retained attempt/Previous chain, planning/deletion catalogs, admission/readmission and every retained grant including settled grants.
-- [ ] Derive independently required proof closure before pruning; avoid a cleanup/grant self-retention cycle or map-order dependence. Pin marker/current docs, each debt origin and complete retry chain/block sources, and any distinct readmission admission operation and full batch; compact only after minimal retained evidence suffices for every verification path.
+- [ ] Derive independently required proof closure before pruning; avoid a cleanup/grant self-retention cycle or map-order dependence. Pin marker/current docs, each debt origin and complete retry chain/block sources, and any distinct readmission admission operation and full batch; compact only after minimal retained evidence suffices for every verification path. Pin consumed admission preparation/provenance for approved members lacking equivalent meta convergence even with no current dependent. Release that barrier root after equivalent convergence, or abandonment without retained load/plan references; other roots still apply.
 - [ ] Account for the full pinned operation: each retained required completion keeps its exact consumed grants/receipts through Previous, including unrelated successful blocks and their source documents. A single unresolved cleanup can pin all of these; retention estimates and growth metrics must count this closure, without imposing an approval cap.
 - [ ] Test failed-attempt references prevent pruning, complete orphaned records can prune, repeated removal cannot recreate debt, settled grants remain references when otherwise required and soft history caps do not reject unrelated approvals.
 
@@ -1134,7 +1136,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Verify public/domain delta: every C1–C4/C7/C9/C12 signature, field/tag, enum, limit and API removal matches [T]; no public aliases or extra ordinary application APIs remain. Verify all five modules and helper packages use the final contract.
 - [ ] Verify metadata delta: exact v4 buckets/state/envelopes, every convergence/debt/intent/operation/index shape, proof validation, deterministic restore, source provenance, marker/document pins and old-format refusal. Confirm no Active or CollectionAcks state survives.
-- [ ] Verify planner/FSM delta: exact block set plus invalidated admission closure, only two barrier shapes, state-based evacuation, first approval, immutable retry/Previous receipts, atomic rebase and all strict CAS/allocation checks. Reconcile each §12 algorithm with actual call order.
+- [ ] Verify planner/FSM delta: exact semantic block set, only two barrier shapes, state-based admission/evacuation, stable admission origin and resumed-prefix validation, first approval, immutable retry/Previous receipts, atomic rebase and all strict CAS/allocation checks. Reconcile each §12 algorithm with actual call order.
 - [ ] Verify authority/controller delta: all five global gates and controller fence short circuit are removed/scoped; one owner per group, exact floors/receipts, independent budgets, grant reuse, fair backoff and joined shutdown remain effective in transfers, readmission and restore.
 - [ ] Verify storage/managed delta: journal v2, exact synced marker, all partial-deletion states, prepared-only Collect, collected-only report/release, Forget-before-journal-removal, immutable storage class, historical courier proof, same-host ownership joins and control-only recovery.
 - [ ] Verify observation/service delta: every [T] §7.3 private route and authenticated discriminator exists; bounded safe-read pages/settlement, no fan-out, no-write settled response, exact freshness and local diagnostic limits. Confirm metrics and repair history survive unrelated changes.

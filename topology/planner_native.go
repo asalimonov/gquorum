@@ -2,9 +2,9 @@ package topology
 
 // Membership comes only from Native. A cached observation may describe another
 // applied position; preserve it solely for liveness/leadership planning.
-func plannerObservations(input PlanInput, desired Document) (map[string]GroupStatus, error) {
+func plannerObservations(input PlanInput, desired Document, groups []string) (map[string]GroupStatus, error) {
 	observed := make(map[string]GroupStatus)
-	for _, id := range unionGroupIDs(input, desired) {
+	for _, id := range groups {
 		status := GroupStatus{GroupID: id}
 		if sample := input.Groups[id].Observation; sample != nil {
 			status = sample.Clone()

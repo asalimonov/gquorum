@@ -15,16 +15,30 @@ func (g *Group) planningInput(ctx context.Context, desired topology.Document) (t
 	if err != nil {
 		return topology.PlanInput{}, err
 	}
-	observed := make(map[string]topology.GroupStatus)
+	groups := make([]string, 0, len(desired.Groups))
 	for _, group := range desired.Groups {
-		read, err := g.readPlanningGroup(ctx, input, desired, group.ID)
+		groups = append(groups, group.ID)
+	}
+	return g.readPlanningInput(ctx, desired, input, groups)
+}
+
+// Callers select native work separately from the full retained identity input.
+// Legacy planningInput keeps all desired groups until activation in Task 70.
+func (g *Group) readPlanningInput(ctx context.Context, desired topology.Document,
+	input topology.PlanInput, groups []string) (topology.PlanInput, error) {
+	observed := make(map[string]topology.GroupStatus)
+	for _, id := range groups {
+		if desired.Group(id) == nil {
+			continue // Deletion requires exact host proof, not the deleted quorum.
+		}
+		read, err := g.readPlanningGroup(ctx, input, desired, id)
 		if err != nil {
 			return topology.PlanInput{}, err
 		}
 		if read.native.Applied != 0 {
-			input.Native[group.ID] = read.native
+			input.Native[id] = read.native
 		}
-		observed[group.ID] = read.observation
+		observed[id] = read.observation
 	}
 	fresh, err := g.state().PlanningInput(ctx, desired, input.Native)
 	if err != nil {

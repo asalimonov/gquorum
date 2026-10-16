@@ -22,11 +22,17 @@ func BuildPlan(input PlanInput, desired Document, rules Rules) (Plan, error) {
 }
 
 func constructPlan(input PlanInput, desired Document, options PlanOptions) (Plan, error) {
+	// Whole-document completion still consumes this path until Task 70.
+	return constructGroupPlan(input, desired, options, unionGroupIDs(input, desired))
+}
+
+// Keep full identity evidence; only execution work and native reads are scoped.
+func constructGroupPlan(input PlanInput, desired Document, options PlanOptions, groups []string) (Plan, error) {
 	rules, preferredMetaTransfer := options.Rules, options.PreferredMetaTransfer
 	if err := desired.Validate(rules); err != nil {
 		return Plan{}, err
 	}
-	observed, err := plannerObservations(input, desired)
+	observed, err := plannerObservations(input, desired, groups)
 	if err != nil {
 		return Plan{}, err
 	}
@@ -38,7 +44,7 @@ func constructPlan(input PlanInput, desired Document, options PlanOptions) (Plan
 	}
 	builder := topologyPlanBuilder{input: input, desired: desired, observed: observed,
 		options: options, plan: Plan{Version: desired.Version}}
-	for _, groupID := range unionGroupIDs(input, desired) {
+	for _, groupID := range groups {
 		if err := builder.planGroup(groupID); err != nil {
 			return Plan{}, err
 		}
@@ -47,17 +53,20 @@ func constructPlan(input PlanInput, desired Document, options PlanOptions) (Plan
 	for i := range plan.Steps {
 		plan.Steps[i].Seq = i + 1
 	}
-	plan = bindReadmissionRetirement(input, desired, plan)
+	if slices.Contains(groups, MetaGroupID) {
+		plan = bindReadmissionRetirement(input, desired, plan)
+	}
 	if err := bindDemotionGuards(&plan, desired, observed, preferredMetaTransfer); err != nil {
 		return Plan{}, err
 	}
 	if err := bindVoterGuards(&plan, observed, desired); err != nil {
 		return Plan{}, err
 	}
-	if err := ValidatePlanShape(input, desired, plan); err != nil {
+	if err := validatePlanShapeFor(input, desired, plan, groups); err != nil {
 		return Plan{}, planUnsafef("%v", err)
 	}
-	if err := validatePlannedSteps(input, desired, observed, plan); err != nil {
+	v := plannedStepValidator{input: input, desired: desired, plan: plan}
+	if err := v.validate(observed, groups); err != nil {
 		return Plan{}, err
 	}
 	return plan, nil
@@ -111,13 +120,12 @@ func planGroupBounds(doc *Document, groupID string, rules Rules) (minimum, maxim
 	return doc.GroupBounds(groupID)
 }
 
-func validatePlannedSteps(input PlanInput, desired Document, observed map[string]GroupStatus, plan Plan) error {
-	v := plannedStepValidator{input: input, desired: desired, plan: plan,
-		seenGroups: make(map[string]bool), states: make(map[string]*validationGroup, len(observed))}
+func (v *plannedStepValidator) validate(observed map[string]GroupStatus, groups []string) error {
+	v.seenGroups, v.states = make(map[string]bool), make(map[string]*validationGroup, len(observed))
 	for id, status := range observed {
 		v.states[id] = newValidationGroup(status)
 	}
-	for i, step := range plan.Steps {
+	for i, step := range v.plan.Steps {
 		if err := v.validateOrder(i, step); err != nil {
 			return err
 		}
@@ -125,8 +133,8 @@ func validatePlannedSteps(input PlanInput, desired Document, observed map[string
 			return err
 		}
 	}
-	for id := range input.Retained {
-		if desired.Group(id) == nil {
+	for _, id := range groups {
+		if v.desired.Group(id) == nil {
 			if err := v.applyDeleteGroupState(Step{GroupID: id}, v.groupState(id)); err != nil {
 				return err
 			}

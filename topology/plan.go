@@ -24,6 +24,11 @@ func comparePlanGroups(a, b string) int {
 // It also validates existing plans after effects complete; new effect ownership
 // must be checked separately at approval against retained grants and cleanup.
 func ValidatePlanShape(input PlanInput, desired Document, plan Plan) error {
+	return validatePlanShapeFor(input, desired, plan, unionGroupIDs(input, desired))
+}
+
+// Scopes select deletion coverage, never identity evidence or original-plan steps.
+func validatePlanShapeFor(input PlanInput, desired Document, plan Plan, groups []string) error {
 	if err := validatePlanHeader(input, desired, plan); err != nil {
 		return err
 	}
@@ -44,7 +49,7 @@ func ValidatePlanShape(input PlanInput, desired Document, plan Plan) error {
 		}
 	}
 
-	if err := v.validateDeletionCoverage(); err != nil {
+	if err := v.validateDeletionCoverage(groups); err != nil {
 		return err
 	}
 	return validatePlanVoterProof(input, desired, plan)
