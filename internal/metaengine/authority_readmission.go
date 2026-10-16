@@ -329,7 +329,7 @@ func (m *Machine) ReadmissionGrants(ctx context.Context, admission AdmissionReco
 	defer m.mu.RUnlock()
 	recorded := m.admissions[admissionKey(admission.NodeName, admission.InstanceID)]
 	if recorded == nil || recorded.MemberID != admission.MemberID || recorded.OperatorID != admission.OperatorID {
-		return nil, fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperationAuthorization
 	}
 	var grants []topology.AuthorityGrant
 	for _, r := range m.authority.records {

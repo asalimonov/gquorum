@@ -22,7 +22,7 @@ func (sm *topologySM) applyBeginEffect(index uint64, p BeginEffectProposal) (App
 		return rejectProposal(p.ProposalID, code, "%v", err), false
 	}
 	if p.Action.StepSeq == 0 {
-		return refuse(proposalAuthorization, fault.ErrOperatorAuthorization)
+		return refuse(proposalAuthorization, fault.ErrOperationAuthorization)
 	}
 	if err := sm.authorizeLocked(context.Background(), p.Action); err != nil {
 		return refuse(proposalAuthorization, err)
@@ -213,7 +213,7 @@ func (b *grantResourceBuilder) foundingGroup() error {
 
 func (b *grantResourceBuilder) deletedGroup() error {
 	if b.sm.target.Group(b.action.GroupID) != nil {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	ids, err := b.sm.deletionCatalogLocked(b.action.GroupID)
 	if err != nil {

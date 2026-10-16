@@ -37,7 +37,7 @@ func (h *Host) InstallFence(parent context.Context, req load.FenceRequest) (load
 		return load.FenceResult{}, fault.ErrIdentityMismatch
 	}
 	if req.Resource.GroupID != req.Grant.Key.GroupID || !slices.Contains(req.Grant.Resources, req.Resource) {
-		return load.FenceResult{}, fault.ErrOperatorAuthorization
+		return load.FenceResult{}, fault.ErrOperationAuthorization
 	}
 	if err := h.cfg.ValidateCourier(ctx, req.Grant, req.From); err != nil {
 		return load.FenceResult{}, err

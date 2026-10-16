@@ -70,7 +70,7 @@ func TestAuthorityServiceReadsRetainedGrantAndRequestedRevocation(t *testing.T) 
 	}
 	future := grant.Clone()
 	future.Key.Revision += 1000
-	if err := g.ValidateGrant(ctx, future); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if err := g.ValidateGrant(ctx, future); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("unknown grant inferred from current approval", err)
 	}
 	status, err := g.ReadAuthority(ctx, begin.OperatorID)
@@ -98,7 +98,7 @@ func TestAuthorityServiceReadsRetainedGrantAndRequestedRevocation(t *testing.T) 
 	}
 	foreign := grant.Targets[0]
 	foreign.MemberID++
-	if _, err := g.ResolveAuthorityPeer(ctx, grant, foreign); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if _, err := g.ResolveAuthorityPeer(ctx, grant, foreign); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("authority resolution redirected to another member", err)
 	}
 	if floors, err := g.ReadAuthorityFloors(ctx, "n1"); err != nil || len(floors) != 0 {

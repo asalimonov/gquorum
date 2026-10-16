@@ -137,7 +137,7 @@ func (c *verifiedLoadController) StopReplica(ctx context.Context, grant topology
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if a.Kind != topology.StepStopReplica {
-		return nil, fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperationAuthorization
 	}
 	if existing := c.hosts[a.GroupID][a.NodeName]; existing != 0 && existing != a.ReplicaID {
 		return nil, fault.ErrIdentityMismatch
@@ -153,7 +153,7 @@ func (c *verifiedLoadController) DeleteGroupState(ctx context.Context, grant top
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if a.Kind != topology.StepDeleteGroupState || a.NodeName != "" || a.ReplicaID != 0 {
-		return nil, fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperationAuthorization
 	}
 	if len(c.hosts[a.GroupID]) > 0 {
 		return nil, fault.ErrReplicaNotReady

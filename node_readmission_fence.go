@@ -58,7 +58,7 @@ func (n *node) installReadmissionFence(ctx context.Context, request load.FenceRe
 		request.Resource != (topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: grant.Key.GroupID,
 			NodeName: request.To.NodeName}) || grant.Validate() != nil ||
 		!slices.Contains(grant.Resources, request.Resource) {
-		return load.FenceResult{}, fault.ErrOperatorAuthorization
+		return load.FenceResult{}, fault.ErrOperationAuthorization
 	}
 	n.mu.RLock()
 	m := n.meta

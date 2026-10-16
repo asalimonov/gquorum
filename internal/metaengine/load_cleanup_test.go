@@ -32,7 +32,7 @@ func TestGrantedCleanupBindsRetainedProofAndProtectsAssignments(t *testing.T) {
 			m.insertGrantLocked(grant)
 			m.appliedIndex = grant.Key.Revision
 			m.authority.records[grant.Key].Closed = true
-			var want error = fault.ErrOperatorAuthorization
+			var want error = fault.ErrOperationAuthorization
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			switch mode {

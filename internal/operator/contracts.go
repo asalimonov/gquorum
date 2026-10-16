@@ -70,15 +70,15 @@ const (
 // Execution errors preserve the shared classifications used by topology and
 // membership checks.
 var (
-	ErrOperatorAuthorization = fault.ErrOperatorAuthorization
-	ErrGroupUnavailable      = fault.ErrUnavailable
-	ErrNotMetaLeader         = fault.ErrNotLeader
-	ErrReplicaNotReady       = fault.ErrReplicaNotReady
-	ErrNoQuorum              = fault.ErrUnavailable
-	ErrSafetyRefused         = fault.ErrUnsafeMembership
-	ErrOperatorSuperseded    = errors.New("execution superseded")
-	ErrVersionUnknown        = fault.ErrHistoryUnavailable
-	ErrNotImplemented        = fault.ErrUnsupported
+	ErrOperationAuthorization = fault.ErrOperationAuthorization
+	ErrGroupUnavailable       = fault.ErrUnavailable
+	ErrNotMetaLeader          = fault.ErrNotLeader
+	ErrReplicaNotReady        = fault.ErrReplicaNotReady
+	ErrNoQuorum               = fault.ErrUnavailable
+	ErrSafetyRefused          = fault.ErrUnsafeMembership
+	ErrOperatorSuperseded     = errors.New("execution superseded")
+	ErrVersionUnknown         = fault.ErrHistoryUnavailable
+	ErrNotImplemented         = fault.ErrUnsupported
 )
 
 // Store supplies locally applied approved and converged topology views.

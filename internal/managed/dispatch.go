@@ -46,7 +46,7 @@ func (e effects) Status(ctx context.Context, id string) (topology.GroupStatus, e
 func (e effects) invoke(ctx context.Context, a topology.AuthorityGrant,
 	kind topology.StepKind) ([]topology.EffectReceipt, error) {
 	if a.Action == nil || a.Action.Kind != kind {
-		return nil, fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperationAuthorization
 	}
 	return e.host.DispatchGrant(ctx, a)
 }
@@ -77,7 +77,7 @@ func (e effects) DeleteGroupState(ctx context.Context, a topology.AuthorityGrant
 
 func (e effects) ApplyMembership(ctx context.Context, a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
 	if a.Action == nil {
-		return nil, fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperationAuthorization
 	}
 	switch a.Action.Kind {
 	case topology.StepAddLearner,
@@ -86,6 +86,6 @@ func (e effects) ApplyMembership(ctx context.Context, a topology.AuthorityGrant)
 		topology.StepRemoveReplica:
 		return e.host.DispatchGrant(ctx, a)
 	default:
-		return nil, fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperationAuthorization
 	}
 }

@@ -71,7 +71,7 @@ func TestReadmitNodeRefusesUnverifiedAndPendingIdentities(t *testing.T) {
 		{"stale_version", fault.ErrVersionConflict, func(t *testing.T, _ *mutationFixture) (string, MutationOptions, context.Context) {
 			return "n3", MutationOptions{ExpectedVersion: 2, Preview: true}, t.Context()
 		}},
-		{"pending_topology", fault.ErrOperatorAuthorization, func(t *testing.T, f *mutationFixture) (string, MutationOptions, context.Context) {
+		{"pending_topology", fault.ErrOperationAuthorization, func(t *testing.T, f *mutationFixture) (string, MutationOptions, context.Context) {
 			next := f.g.machine.Latest()
 			next.Comment = "staged"
 			f.commit(t, next, false)

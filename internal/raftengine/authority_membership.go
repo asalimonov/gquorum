@@ -86,7 +86,7 @@ const (
 // not reconstruct a predecessor that no longer exists.
 func validateAuthorizedVoterSet(a *topology.AuthorizedStep, voters []uint64, phase voterSetPhase) error {
 	if a == nil {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	want := a.ExpectedVotersDigest
 	if phase == resultingVoterSet {
@@ -108,7 +108,7 @@ func validateAuthorizedVoterSet(a *topology.AuthorizedStep, voters []uint64, pha
 	case topology.StepDemoteVoter, topology.StepRemoveReplica:
 		projected = slices.DeleteFunc(projected, func(id uint64) bool { return id == a.ReplicaID })
 	default:
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	if a.ResultVotersDigest == "" || topology.VoterSetDigest(projected) != a.ResultVotersDigest {
 		return fault.New(fault.UnsafeMembership, fmt.Sprintf("approved %s has an invalid voter-set projection",

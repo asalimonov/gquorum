@@ -18,9 +18,9 @@ import (
 //
 // Verify does not prove that the grant was committed through _meta; Node checks
 // that before invoking LoadOptions.Retire. Failures return
-// fault.ErrOperatorAuthorization.
+// fault.ErrOperationAuthorization.
 func (r RetirementRequest) Verify(id storage.Identity) error {
-	denied := fault.ErrOperatorAuthorization
+	denied := fault.ErrOperationAuthorization
 	if r.Identity != id || id.ClusterID == "" || id.GroupID == "" || id.NodeName == "" || id.ReplicaID == 0 {
 		return denied
 	}
@@ -51,7 +51,7 @@ func (r RetirementRequest) Verify(id storage.Identity) error {
 }
 
 func (r RetirementRequest) verifyTopologyRetirement(id storage.Identity) error {
-	denied := fault.ErrOperatorAuthorization
+	denied := fault.ErrOperationAuthorization
 	a := r.Authorization
 	if r.Grant.Purpose != topology.AuthorityEffect || a == nil || r.Grant.Action == nil || *a != *r.Grant.Action ||
 		r.AdmissionID != "" || r.PreviousMemberID != 0 || r.GrantedMemberID != 0 {
@@ -70,7 +70,7 @@ func (r RetirementRequest) verifyTopologyRetirement(id storage.Identity) error {
 }
 
 func (r RetirementRequest) verifyReadmissionRetirement(member uint64) error {
-	denied := fault.ErrOperatorAuthorization
+	denied := fault.ErrOperationAuthorization
 	if r.Grant.Purpose != topology.AuthorityReadmit || r.Authorization != nil || r.AdmissionID == "" ||
 		r.AdmissionID != r.Grant.AdmissionID || r.PreviousMemberID != member ||
 		r.GrantedMemberID <= r.PreviousMemberID {

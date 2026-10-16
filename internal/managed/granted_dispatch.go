@@ -29,7 +29,7 @@ func (h *Host) DispatchGrant(parent context.Context, grant topology.AuthorityGra
 		return nil, err
 	}
 	if cloned.Action == nil || cloned.Validate() != nil {
-		return nil, fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperationAuthorization
 	}
 	if h.cfg.ResolveAuthorityPeer == nil || h.cfg.RecordFence == nil {
 		return nil, fault.ErrUnsupported
@@ -117,7 +117,7 @@ func (h *Host) dispatchGrantedHost(ctx context.Context, grant topology.Authority
 func (h *Host) installGrantedFence(ctx context.Context, grant topology.AuthorityGrant,
 	resource topology.AuthorityResource, peer load.Peer) error {
 	if !slices.Contains(grant.Resources, resource) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	replicaID := peer.Replica.ReplicaID
 	if resource.Kind == topology.AuthorityHost {
@@ -136,7 +136,7 @@ func (h *Host) installGrantedFence(ctx context.Context, grant topology.Authority
 	}
 	if result.From != request.To || result.Evidence.Receiver != request.To || result.Evidence.Resource != resource ||
 		result.Evidence.ReplicaID != replicaID || result.Evidence.Validate(grant) != nil {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	return h.cfg.RecordFence(ctx, result.Evidence)
 }
@@ -148,21 +148,21 @@ func (h *Host) sendGrantedAction(ctx context.Context, request load.ActionRequest
 	}
 	if result.From != request.To || result.Authorization != request.Authorization ||
 		result.LocalTarget != request.LocalTarget || len(result.Receipts) != 1 {
-		return topology.EffectReceipt{}, fault.ErrOperatorAuthorization
+		return topology.EffectReceipt{}, fault.ErrOperationAuthorization
 	}
 	receipt := result.Receipts[0]
 	if receipt.Validate(request.Grant) != nil {
-		return topology.EffectReceipt{}, fault.ErrOperatorAuthorization
+		return topology.EffectReceipt{}, fault.ErrOperationAuthorization
 	}
 	resource := topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: request.Grant.Key.GroupID}
 	if request.LocalTarget != (storage.Identity{}) {
 		resource.Kind, resource.NodeName = topology.AuthorityHost, request.To.Node.NodeName
 		if receipt.Target != actionTarget(request) {
-			return topology.EffectReceipt{}, fault.ErrOperatorAuthorization
+			return topology.EffectReceipt{}, fault.ErrOperationAuthorization
 		}
 	}
 	if receipt.Resource != resource {
-		return topology.EffectReceipt{}, fault.ErrOperatorAuthorization
+		return topology.EffectReceipt{}, fault.ErrOperationAuthorization
 	}
 	return receipt.Clone(), nil
 }

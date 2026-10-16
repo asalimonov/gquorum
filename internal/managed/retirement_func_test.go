@@ -104,7 +104,7 @@ func TestMismatchedRetirementProofPreservesRaftAndLedger(t *testing.T) {
 	req := installFixtureHostAction(t, f, h, initial, topology.StepCleanupReplicaState, id, 11)
 	for i := int32(0); i < 2; i++ {
 		mode.Store(i)
-		if _, err := h.ApplyAction(deadline(t), req); !errors.Is(err, fault.ErrOperatorAuthorization) {
+		if _, err := h.ApplyAction(deadline(t), req); !errors.Is(err, fault.ErrOperationAuthorization) {
 			t.Fatal(err)
 		}
 		probe, err := f.store.Probe(deadline(t), "work")

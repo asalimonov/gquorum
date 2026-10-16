@@ -143,7 +143,7 @@ func (c *controllerCoordinator) RecordOperatorTransition(_ context.Context, tran
 	if !c.hasOperator || transition.OperatorID != c.operator.ID || transition.Version != c.operator.Version ||
 		transition.Attempt != c.operator.Attempt {
 		c.mu.Unlock()
-		return ErrOperatorAuthorization
+		return ErrOperationAuthorization
 	}
 	c.operator.State = transition.State
 	c.operator.CurrentStep = transition.StepSeq

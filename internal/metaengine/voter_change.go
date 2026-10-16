@@ -23,7 +23,7 @@ func VoterChangeDocument(base topology.Document, change topology.VoterChange, at
 	next := base.Clone()
 	g := next.Group(change.GroupID)
 	if g == nil || g.VoterConfig == nil {
-		return topology.Document{}, fault.ErrOperatorAuthorization
+		return topology.Document{}, fault.ErrOperationAuthorization
 	}
 	count := len(base.VotersOf(change.GroupID))
 	if err := validateVoterCountChange(count, g.VoterConfig.TargetVoters, change); err != nil {
@@ -55,15 +55,15 @@ func validateVoterCountChange(count, target int, change topology.VoterChange) er
 	switch {
 	case change.Promote != nil && change.Demote != nil:
 		if *change.Promote == *change.Demote || count != target {
-			return fault.ErrOperatorAuthorization
+			return fault.ErrOperationAuthorization
 		}
 	case change.Promote != nil:
 		if count >= target {
-			return fault.ErrOperatorAuthorization
+			return fault.ErrOperationAuthorization
 		}
 	case change.Demote != nil:
 		if count <= target {
-			return fault.ErrOperatorAuthorization
+			return fault.ErrOperationAuthorization
 		}
 	default: // A change without either role was rejected above.
 	}
@@ -82,11 +82,11 @@ func (editor voterRoleEditor) edit(key *topology.ReplicaKey, from, to topology.R
 	}
 	r := documentReplica(editor.document, editor.group, key.ReplicaID)
 	if r == nil || r.NodeName != key.NodeName || r.Role != from || r.PinnedLearner {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	n := editor.document.Node(r.NodeName)
 	if n == nil || to == topology.ReplicaVoter && n.State != topology.NodeActive || !n.State.Places() {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	r.Role, r.UpdatedAt = to, editor.at
 	return nil
@@ -95,7 +95,7 @@ func (editor voterRoleEditor) edit(key *topology.ReplicaKey, from, to topology.R
 func validateVoterChangeDocument(base, next topology.Document, change topology.VoterChange) error {
 	g := next.Group(change.GroupID)
 	if g == nil {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	want, err := VoterChangeDocument(base, change, g.UpdatedAt, next.ChangedBy)
 	if err != nil {
@@ -176,7 +176,7 @@ func (check *voterPlanCheck) step(s topology.Step) error {
 func (check *voterPlanCheck) waitCaughtUp(s topology.Step) error {
 	if check.promoted || check.waits >= 2 || check.waits == 1 && !check.demoted ||
 		!exactVoterStep(check.change.Promote, s) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	check.waits++
 	return nil
@@ -184,7 +184,7 @@ func (check *voterPlanCheck) waitCaughtUp(s topology.Step) error {
 
 func (check *voterPlanCheck) promote(s topology.Step) error {
 	if check.waits == 0 || check.promoted || check.voters[s.ReplicaID] || !exactVoterStep(check.change.Promote, s) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	if len(check.voters) >= check.policy.TargetVoters &&
 		len(check.voters)-check.policy.TargetVoters >= check.policy.MaxSurgeVoters {
@@ -201,7 +201,7 @@ func (check *voterPlanCheck) promote(s topology.Step) error {
 func (check *voterPlanCheck) demote(s topology.Step) error {
 	if check.demoted || !check.voters[s.ReplicaID] || s.TransferReplicaID == 0 || !check.voters[s.TransferReplicaID] ||
 		!exactVoterStep(check.change.Demote, s) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	if len(check.voters)-1 < topology.QuorumOf(len(check.voters)) {
 		return errors.New("demotion crosses unsupported destructive quorum boundary")
@@ -214,17 +214,17 @@ func (check *voterPlanCheck) demote(s topology.Step) error {
 func (check *voterPlanCheck) transfer(s topology.Step) error {
 	if check.change.Demote == nil || check.demoted || check.transferred || !check.voters[s.ReplicaID] ||
 		s.ReplicaID == check.change.Demote.ReplicaID {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	// An explicit transfer is the prerequisite of this same victim's
 	// guarded demotion, never a second independent control action.
 	if s.Seq >= len(check.plan.Steps) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	nextStep := check.plan.Steps[s.Seq]
 	if nextStep.Kind != topology.StepDemoteVoter || nextStep.TransferReplicaID != s.ReplicaID ||
 		nextStep.TransferNodeName != s.NodeName {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	check.transferred = true
 	return nil

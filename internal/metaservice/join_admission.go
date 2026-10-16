@@ -54,7 +54,7 @@ func (g *Group) admitJoin(ctx context.Context, req joinRequest, machine *metaeng
 			kind = parkedExcluded
 		}
 		return g.refuseJoin(req, kind,
-			fault.New(fault.OperatorAuthorization, "node needs an approved topology admission", nil))
+			fault.New(fault.OperationAuthorization, "node needs an approved topology admission", nil))
 	}
 	if node.Type != req.Node.Type {
 		return metatransport.Reply(fault.New(fault.IdentityMismatch, "node type differs from approved topology", nil))
@@ -64,7 +64,7 @@ func (g *Group) admitJoin(ctx context.Context, req joinRequest, machine *metaeng
 	}
 	if admission, ok := machine.Admission(req.Node.Name, req.Identity.InstanceID); ok {
 		if admission.State == metaengine.AdmissionSuperseded || admission.State == metaengine.AdmissionRetired {
-			return g.refuseJoin(req, parkedSuperseded, fault.New(fault.OperatorAuthorization,
+			return g.refuseJoin(req, parkedSuperseded, fault.New(fault.OperationAuthorization,
 				"process admission was superseded or retired", nil))
 		}
 		// The exact admitted process may need predecessor host fences before
@@ -122,7 +122,7 @@ func (g *Group) classifyLiveAdmission(ctx context.Context, state *joinClassifica
 			!containsMember(g.engine.Load().Status().ConfState, other.MemberID) {
 			state.replace = true
 		} else if req.Identity.MemberID != member {
-			return g.refuseJoin(req, parkedUnapproved, fault.New(fault.OperatorAuthorization,
+			return g.refuseJoin(req, parkedUnapproved, fault.New(fault.OperationAuthorization,
 				"entered admission requires fresh identity repair", nil))
 		}
 	}
@@ -145,7 +145,7 @@ func (g *Group) joinWithLegacyTopology(ctx context.Context, state joinClassifica
 	}
 	if node.State != topology.NodeActive && req.Identity.MemberID != member {
 		return g.refuseJoin(req, parkedUnapproved,
-			fault.New(fault.OperatorAuthorization, "draining nodes may only restart their retained identity", nil))
+			fault.New(fault.OperationAuthorization, "draining nodes may only restart their retained identity", nil))
 	}
 	if id, ok := machine.AdmissionOperation(req.Node.Name, member); ok {
 		return g.bindJoinAdmission(ctx, req, metaengine.BindAdmissionProposal{
@@ -165,7 +165,7 @@ func (g *Group) joinWithLegacyTopology(ctx context.Context, state joinClassifica
 	if machine.HasActivated(req.Node.Name) {
 		// Until scoped readmission replaces the schema-3 whole-document path,
 		// preserve the admission gate and explain how to unblock the return.
-		return g.refuseJoin(req, parkedUnapproved, fault.New(fault.OperatorAuthorization,
+		return g.refuseJoin(req, parkedUnapproved, fault.New(fault.OperationAuthorization,
 			"readmission requires converged topology; apply or restore pending intent first", nil))
 	}
 	return g.joinFoundingNode(ctx, state)
@@ -221,7 +221,7 @@ func (g *Group) joinFoundingNode(ctx context.Context, state joinClassification) 
 			At:              time.Now().UTC(),
 		})
 	}
-	return g.refuseJoin(req, parkedUnapproved, fault.New(fault.OperatorAuthorization,
+	return g.refuseJoin(req, parkedUnapproved, fault.New(fault.OperationAuthorization,
 		"node has no current approved learner-first admission", nil))
 }
 

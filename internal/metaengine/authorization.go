@@ -23,7 +23,7 @@ func (sm *topologySM) authorizeLocked(ctx context.Context, a topology.Authorized
 		return err
 	}
 	refuse := func() error {
-		return fault.New(fault.OperatorAuthorization, "effect does not match current approval", nil)
+		return fault.New(fault.OperationAuthorization, "effect does not match current approval", nil)
 	}
 	if a.StepSeq == 0 {
 		return sm.authorizeDirectTransferLocked(a)
@@ -56,11 +56,11 @@ func (sm *topologySM) authorizeLocked(ctx context.Context, a topology.Authorized
 func (sm *topologySM) authorizeDirectTransferLocked(a topology.AuthorizedStep) error {
 	if a.OperatorID != "" || a.Attempt != 0 || a.Version == 0 || a.Version != sm.active.Version ||
 		a.Kind != topology.StepTransferLeader || a.TransferNodeName != "" || a.TransferReplicaID != 0 {
-		return fault.New(fault.OperatorAuthorization, "effect does not match current approval", nil)
+		return fault.New(fault.OperationAuthorization, "effect does not match current approval", nil)
 	}
 	r := documentReplica(sm.active, a.GroupID, a.ReplicaID)
 	if r == nil || r.NodeName != a.NodeName || r.Role != topology.ReplicaVoter {
-		return fault.New(fault.OperatorAuthorization, "effect does not match current approval", nil)
+		return fault.New(fault.OperationAuthorization, "effect does not match current approval", nil)
 	}
 	return nil
 }

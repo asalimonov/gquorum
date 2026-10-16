@@ -34,7 +34,7 @@ func (g *Group) metaHostEffect(ctx context.Context, grant topology.AuthorityGran
 	}
 	if proof.From != request.To || proof.Evidence.Receiver != request.To || proof.Evidence.Resource != resource ||
 		proof.Evidence.ReplicaID != 0 || proof.Evidence.Validate(grant) != nil {
-		return nil, fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperationAuthorization
 	}
 	if err := g.RecordFence(ctx, proof.Evidence); err != nil {
 		return nil, err
@@ -107,7 +107,7 @@ func (g *Group) sendMetaAction(ctx context.Context, request load.ActionRequest) 
 func metaActionReceipts(request load.ActionRequest, result load.ActionResult) ([]topology.EffectReceipt, error) {
 	if result.From != request.To || result.Authorization != request.Authorization ||
 		result.LocalTarget != request.LocalTarget || len(result.Receipts) != 1 {
-		return nil, fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperationAuthorization
 	}
 	receipt := result.Receipts[0]
 	resource := topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: topology.MetaGroupID}
@@ -116,11 +116,11 @@ func metaActionReceipts(request load.ActionRequest, result load.ActionResult) ([
 		if receipt.Target != (topology.AuthorityTarget{NodeName: request.To.Node.NodeName,
 			MemberID:  request.To.Node.MemberID,
 			ReplicaID: request.LocalTarget.ReplicaID}) {
-			return nil, fault.ErrOperatorAuthorization
+			return nil, fault.ErrOperationAuthorization
 		}
 	}
 	if receipt.Resource != resource || receipt.Validate(request.Grant) != nil {
-		return nil, fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperationAuthorization
 	}
 	return []topology.EffectReceipt{receipt.Clone()}, nil
 }
@@ -145,14 +145,14 @@ func (g *Group) ApplyMetaAction(parent context.Context, request load.ActionReque
 		return load.ActionResult{}, err
 	}
 	if request.Grant.Action == nil || *request.Grant.Action != request.Authorization {
-		return load.ActionResult{}, fault.ErrOperatorAuthorization
+		return load.ActionResult{}, fault.ErrOperationAuthorization
 	}
 	if request.LocalTarget == (storage.Identity{}) {
 		return g.applyMetaConsensusAction(ctx, request)
 	}
 	if request.Authorization.Kind != topology.StepPrepareReplica &&
 		request.Authorization.Kind != topology.StepStopReplica {
-		return load.ActionResult{}, fault.ErrOperatorAuthorization
+		return load.ActionResult{}, fault.ErrOperationAuthorization
 	}
 	want := storage.Identity{ClusterID: id.ClusterID, GroupID: topology.MetaGroupID, NodeName: id.NodeName,
 		ReplicaID: id.MemberID}
@@ -173,7 +173,7 @@ func (g *Group) applyMetaConsensusAction(parent context.Context,
 	}
 	if request.Authorization.Kind == topology.StepPrepareReplica ||
 		request.Authorization.Kind == topology.StepStopReplica {
-		return load.ActionResult{}, fault.ErrOperatorAuthorization
+		return load.ActionResult{}, fault.ErrOperationAuthorization
 	}
 	ctxHandle, err := g.acquireEffectContext(parent)
 	ctx, done := ctxHandle.Context, ctxHandle.Release

@@ -39,7 +39,7 @@ func (r ReplicaRead) key() string {
 func failedReachability(err error) bool {
 	if errors.Is(err, context.Canceled) || errors.Is(err, fault.ErrIdentityMismatch) ||
 		errors.Is(err, fault.ErrInvalid) ||
-		errors.Is(err, fault.ErrOperatorAuthorization) {
+		errors.Is(err, fault.ErrOperationAuthorization) {
 		return false
 	}
 	if errors.Is(err, context.DeadlineExceeded) {

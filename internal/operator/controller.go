@@ -358,7 +358,7 @@ func (e *Controller) runApprovedTick(ctx context.Context, operator Record, targe
 	}
 	if seq < 1 || seq > len(operator.Steps) {
 		e.fail(ctx, operator, Step{Seq: seq},
-			fmt.Errorf("%w: execution cursor is outside its exact plan", ErrOperatorAuthorization))
+			fmt.Errorf("%w: execution cursor is outside its exact plan", ErrOperationAuthorization))
 		return controllerProgressed
 	}
 	step := operator.Steps[seq-1]
@@ -445,7 +445,7 @@ func (e *Controller) runStep(ctx context.Context, step Step, status GroupStatus)
 	}
 	cmd := authorizedStepForCurrent(ctx, e.coordinator, step)
 	if cmd.OperatorID == "" {
-		return fmt.Errorf("%w: current execution changed before side effect", ErrOperatorAuthorization)
+		return fmt.Errorf("%w: current execution changed before side effect", ErrOperationAuthorization)
 	}
 	if step.Kind == StepWaitCaughtUp {
 		reason := "learner has not reached the fixed catch-up threshold"
@@ -459,7 +459,7 @@ func (e *Controller) runStep(ctx context.Context, step Step, status GroupStatus)
 		return err
 	}
 	if grant.Action == nil || *grant.Action != cmd || grant.Validate() != nil {
-		return ErrOperatorAuthorization
+		return ErrOperationAuthorization
 	}
 	complete, err := e.effectComplete(ctx, grant)
 	if err != nil {
@@ -469,7 +469,7 @@ func (e *Controller) runStep(ctx context.Context, step Step, status GroupStatus)
 		return nil
 	}
 	if authorizedStepForCurrent(ctx, e.coordinator, step) != cmd {
-		return ErrOperatorAuthorization
+		return ErrOperationAuthorization
 	}
 	return e.performEffect(ctx, step, grant)
 }
@@ -512,7 +512,7 @@ func (e *Controller) dispatchLegacyEffect(ctx context.Context, step Step,
 	case StepDeleteGroupState:
 		return e.groups.DeleteGroupState(ctx, grant)
 	default:
-		return nil, fmt.Errorf("%w: unknown step kind %q", ErrOperatorAuthorization, step.Kind)
+		return nil, fmt.Errorf("%w: unknown step kind %q", ErrOperationAuthorization, step.Kind)
 	}
 }
 
@@ -539,7 +539,7 @@ func (e *Controller) revalidateExact(ctx context.Context, expected Record, step 
 	if !ok || current.ID != expected.ID || current.Version != expected.Version || current.Attempt != expected.Attempt ||
 		current.CurrentStep != step.Seq || step.Seq > len(current.Steps) || current.State.Terminal() ||
 		!current.Steps[step.Seq-1].Equal(step) || !current.Plan().Equal(expected.Plan()) {
-		return fmt.Errorf("%w: exact execution step changed", ErrOperatorAuthorization)
+		return fmt.Errorf("%w: exact execution step changed", ErrOperationAuthorization)
 	}
 	target, err := e.store.Target(ctx)
 	if err != nil {
@@ -780,7 +780,7 @@ func (e *Controller) validateStep(ctx context.Context, ex Record, input stepVali
 		return err
 	}
 	if status.GroupID != "" && status.GroupID != step.GroupID {
-		return fmt.Errorf("%w: status group %q does not match %q", ErrOperatorAuthorization, status.GroupID,
+		return fmt.Errorf("%w: status group %q does not match %q", ErrOperationAuthorization, status.GroupID,
 			step.GroupID)
 	}
 	if !e.effectSatisfied(step, target, status) {
@@ -815,10 +815,10 @@ func (e *Controller) revalidateExactBeforeStart(ctx context.Context, ex Record, 
 	current, ok := e.coordinator.CurrentOperator(ctx)
 	if !ok || current.ID != ex.ID || current.Version != ex.Version || current.Attempt != ex.Attempt ||
 		current.State.Terminal() {
-		return fmt.Errorf("%w: execution changed before validation", ErrOperatorAuthorization)
+		return fmt.Errorf("%w: execution changed before validation", ErrOperationAuthorization)
 	}
 	if step.Seq > len(current.Steps) || !current.Steps[step.Seq-1].Equal(step) {
-		return fmt.Errorf("%w: exact step changed before validation", ErrOperatorAuthorization)
+		return fmt.Errorf("%w: exact step changed before validation", ErrOperationAuthorization)
 	}
 	return nil
 }

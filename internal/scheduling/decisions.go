@@ -184,11 +184,11 @@ func (r *Scheduler) validateReplicaRepair(active topology.Document,
 		group.VoterConfig != nil || identity.GroupID == topology.MetaGroupID || node == nil ||
 		node.State != topology.NodeActive || !ok || !observed.Found || observed.GroupID != identity.GroupID ||
 		topology.NodeReserved(*node) || slices.Contains(r.heldIdentities(), identity) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	for _, id := range append(append([]uint64(nil), observed.ConfState.Voters...), observed.ConfState.Learners...) {
 		if id == identity.ReplicaID {
-			return fault.New(fault.OperatorAuthorization, "repair identity is already a member", nil)
+			return fault.New(fault.OperationAuthorization, "repair identity is already a member", nil)
 		}
 	}
 	return nil

@@ -97,7 +97,7 @@ func (h *Host) ownReseatLoop(ctx context.Context, id storage.Identity) {
 // expectedReseatRefusal covers unconverged topology, a running operator, a lost
 // CAS race and transient unavailability; the loop simply retries.
 func expectedReseatRefusal(err error) bool {
-	return fault.Retryable(err) || errors.Is(err, fault.ErrOperatorAuthorization) ||
+	return fault.Retryable(err) || errors.Is(err, fault.ErrOperationAuthorization) ||
 		errors.Is(err, fault.ErrVersionConflict)
 }
 

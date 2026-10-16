@@ -161,7 +161,7 @@ func (m *Machine) queryPlanLocked(q QueryRequest) (PlanRead, error) {
 	}
 	op := m.operators[q.OperatorID]
 	if op == nil || op.Version != m.target.Version || op.State.Terminal() {
-		return PlanRead{}, fault.ErrOperatorAuthorization
+		return PlanRead{}, fault.ErrOperationAuthorization
 	}
 	for _, revocation := range m.authority.revocations {
 		if !revokedComplete(revocation) {

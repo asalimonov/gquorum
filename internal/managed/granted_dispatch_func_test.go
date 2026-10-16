@@ -216,7 +216,7 @@ func TestGrantedDispatcherRejectsIncompleteOrMisdirectedEvidence(t *testing.T) {
 					return result, nil
 				},
 			}
-			want := fault.ErrOperatorAuthorization
+			want := fault.ErrOperationAuthorization
 			if mode == "fence_not_recorded" {
 				f.cfg.RecordFence = func(context.Context, topology.FenceEvidence) error { return fault.ErrUnavailable }
 				want = fault.ErrUnavailable
@@ -259,7 +259,7 @@ func TestGrantedDispatcherPreservesIdentityRefusalAndRejectsClosedGrant(t *testi
 			return fault.ErrAuthorityFenced
 		}
 		if !candidate.Equal(grant) {
-			return fault.ErrOperatorAuthorization
+			return fault.ErrOperationAuthorization
 		}
 		return ctx.Err()
 	}

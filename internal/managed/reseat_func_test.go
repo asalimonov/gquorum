@@ -133,7 +133,7 @@ func TestDemotedMemoryVoterStopsReseating(t *testing.T) {
 			f.scopes["work"] = scope
 			f.mu.Unlock()
 		}
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	h := f.host(t)
 	startParked(t, h)

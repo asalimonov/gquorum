@@ -124,7 +124,7 @@ func TestJoinClientRefusalClassificationAndBoundedRedirects(t *testing.T) {
 		redirect   bool
 	}{
 		{name: "not ready remains retryable", reply: metatransport.Reply(fault.ErrUnavailable), want: fault.ErrUnavailable},
-		{name: "unapproved remains parked", reply: metatransport.Reply(fault.ErrOperatorAuthorization), want: fault.ErrOperatorAuthorization},
+		{name: "unapproved remains parked", reply: metatransport.Reply(fault.ErrOperationAuthorization), want: fault.ErrOperationAuthorization},
 		{name: "identity refusal is definitive", reply: metatransport.Reply(fault.New(fault.IdentityMismatch, "arbitrary prose", nil)), want: fault.ErrIdentityMismatch, fatal: true},
 		{name: "wrong credential is definitive", reply: &metapb.Reply{}, credential: "foreign", want: fault.ErrIdentityMismatch, fatal: true},
 		{name: "malformed success is definitive", reply: &metapb.Reply{Data: []byte("{")}, want: fault.ErrUnreadable, fatal: true},

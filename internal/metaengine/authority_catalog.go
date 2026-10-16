@@ -157,7 +157,7 @@ func (m *Machine) ValidateGrant(ctx context.Context, grant topology.AuthorityGra
 	defer m.mu.RUnlock()
 	r, ok := m.authority.records[grant.Key]
 	if !ok {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	if !r.Grant.Equal(grant) {
 		return fault.ErrIdentityMismatch

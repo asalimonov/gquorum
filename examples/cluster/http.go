@@ -129,7 +129,7 @@ func httpError(w http.ResponseWriter, err error) {
 	case fault.VersionConflict,
 		fault.GroupRetired,
 		fault.IdentityMismatch,
-		fault.OperatorAuthorization:
+		fault.OperationAuthorization:
 		status = http.StatusConflict
 	case fault.UnsafeMembership:
 		status = http.StatusUnprocessableEntity

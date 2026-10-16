@@ -188,12 +188,12 @@ func TestApplicationRunWaitsForStartupAuthorizationAfterReplay(t *testing.T) {
 		// Recording precedes core.Start/WaitReady. The final authorization guard
 		// must reject publication even though replay already finished successfully.
 		if recorded {
-			return fault.ErrOperatorAuthorization
+			return fault.ErrOperationAuthorization
 		}
 		return nil
 	})
 	must(t, err)
-	if _, err := h.waitStarted(t.Context(), slot); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if _, err := h.waitStarted(t.Context(), slot); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal(err)
 	}
 	if runs.Load() != 0 || closes.Load() != 1 {

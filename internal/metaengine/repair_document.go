@@ -73,7 +73,7 @@ func replaceRepairVoter(repair *topology.Document, latest topology.Document,
 	options ReplicaRepairOptions) (uint64, error) {
 	group, replica := findRepairVoter(repair, options)
 	if replica == nil {
-		return 0, fault.ErrOperatorAuthorization
+		return 0, fault.ErrOperationAuthorization
 	}
 	fresh, err := allocateRepairID(group, latest, options.GroupID)
 	if err != nil {

@@ -178,7 +178,7 @@ func TestGrantedLoadLedgerCleanupRequiresExactAuthorization(t *testing.T) {
 	if err := f.g.ForgetGrantedLoadReplica(ctx, wrong, 1); !errors.Is(err, fault.ErrIdentityMismatch) {
 		t.Fatal("stale cleanup accepted", err)
 	}
-	if err := f.g.ForgetGrantedLoadReplica(ctx, *grant, 2); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if err := f.g.ForgetGrantedLoadReplica(ctx, *grant, 2); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("wrong ledger ID erased", err)
 	}
 	if err := f.g.ForgetGrantedLoadReplica(ctx, *grant, 1); err != nil {

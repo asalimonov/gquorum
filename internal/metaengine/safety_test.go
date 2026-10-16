@@ -87,7 +87,7 @@ func TestAuthorizeEveryIdentityAndProgressBoundary(t *testing.T) {
 	}
 	badPending := a
 	badPending.ReplicaID++
-	if err := sm.Authorize(context.Background(), badPending); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if err := sm.Authorize(context.Background(), badPending); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("invalid pending identity treated as lag", err)
 	}
 	apply(t, sm, 3, TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: b.OperatorID, Version: 1, Attempt: 1, StepSeq: 1, State: topology.OperatorRunning, GroupID: "shard0", NodeName: "n1", At: at.Add(time.Second)}})
@@ -103,7 +103,7 @@ func TestAuthorizeEveryIdentityAndProgressBoundary(t *testing.T) {
 	for i, mutate := range mutations {
 		bad := a
 		mutate(&bad)
-		if err := sm.Authorize(context.Background(), bad); !errors.Is(err, fault.ErrOperatorAuthorization) {
+		if err := sm.Authorize(context.Background(), bad); !errors.Is(err, fault.ErrOperationAuthorization) {
 			t.Fatalf("identity field %d accepted: %v", i, err)
 		}
 	}
@@ -114,7 +114,7 @@ func TestAuthorizeEveryIdentityAndProgressBoundary(t *testing.T) {
 	}
 	index := consumeTestStep(t, sm, b.OperatorID, 4)
 	apply(t, sm, index, TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: b.OperatorID, Version: 1, Attempt: 1, StepSeq: 1, State: topology.OperatorSucceeded, GroupID: "shard0", NodeName: "n1", At: at.Add(2 * time.Second)}})
-	if err := sm.Authorize(context.Background(), a); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if err := sm.Authorize(context.Background(), a); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("completed effect authorized", err)
 	}
 }

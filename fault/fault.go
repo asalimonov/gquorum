@@ -32,9 +32,6 @@ const (
 	// Conflict is a local classification for a desired state that differs from
 	// existing or pending topology. It is never sent on the wire.
 	Conflict Code = "conflict"
-	// OperatorAuthorization remains only while internal callers are converted.
-	// Remove with the Operation API cutover; the wire classification stays stable.
-	OperatorAuthorization = OperationAuthorization
 )
 
 // Error carries a classified failure, optional cause and version-conflict
@@ -90,6 +87,4 @@ var (
 	ErrUnsupported            = New(Unsupported, "", nil)
 	ErrReadmissionRequired    = New(ReadmissionRequired, "", nil)
 	ErrConflict               = New(Conflict, "", nil)
-	// ErrOperatorAuthorization is temporary during the scoped execution refactor.
-	ErrOperatorAuthorization = ErrOperationAuthorization
 )

@@ -292,7 +292,7 @@ func (g *Group) ReadmitNode(ctx context.Context, name string, expectedMemberID u
 			target, active := views.Target, views.Active
 			// Task78 removes this schema3 admission guard with the legacy effect/persistence path.
 			if doc.Version != target.Version || doc.Version != active.Version {
-				return fault.New(fault.OperatorAuthorization,
+				return fault.New(fault.OperationAuthorization,
 					"readmission requires converged topology; apply or restore pending intent first", nil)
 			}
 			health, err := (observationSource{g}).Health(ctx, active)
@@ -635,7 +635,7 @@ func (g *Group) ReseatReplica(ctx context.Context, id string, key topology.Repli
 		return MutationResult{Placement: reportFromError(err)}, err
 	}
 	if len(plan.Steps) == 0 {
-		return MutationResult{}, fault.ErrOperatorAuthorization
+		return MutationResult{}, fault.ErrOperationAuthorization
 	}
 	committed, err := g.propose(ctx, metaengine.CommitRepairOperatorProposal{
 		Doc:             next,

@@ -145,7 +145,7 @@ func domainReply(err error) *loadpb.Reply {
 	if errors.As(err, &typed) {
 		code = typed.Code
 	} else {
-		for _, candidate := range []fault.Code{fault.IdentityMismatch, fault.UnsafeMembership, fault.OperatorAuthorization, fault.ReplicaNotReady, fault.NotLeader, fault.Invalid, fault.Stopped, fault.GroupRetired} {
+		for _, candidate := range []fault.Code{fault.IdentityMismatch, fault.UnsafeMembership, fault.OperationAuthorization, fault.ReplicaNotReady, fault.NotLeader, fault.Invalid, fault.Stopped, fault.GroupRetired} {
 			if errors.Is(err, fault.New(candidate, "", nil)) {
 				code = candidate
 				break

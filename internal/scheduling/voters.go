@@ -29,7 +29,7 @@ func (r *Scheduler) commitVoterChange(ctx context.Context, in schedulingapi.Sche
 		return "", err
 	}
 	if len(plan.Steps) == 0 {
-		return "", fault.ErrOperatorAuthorization
+		return "", fault.ErrOperationAuthorization
 	}
 	if _, err := r.recheckVoterChange(ctx, in, views, change); err != nil {
 		return "", err
@@ -71,7 +71,7 @@ func (r *Scheduler) recheckVoterChange(ctx context.Context,
 	if op.Found && (op.Operator.Status.State == topology.OperatorFailed &&
 		op.Operator.Status.Version == latest.Version ||
 		!op.Operator.Status.State.Terminal()) {
-		return votercheck.Input{}, fault.ErrOperatorAuthorization
+		return votercheck.Input{}, fault.ErrOperationAuthorization
 	}
 	if err := r.host.RefreshObservations(ctx); err != nil {
 		return votercheck.Input{}, err
@@ -85,7 +85,7 @@ func (r *Scheduler) recheckVoterChange(ctx context.Context,
 	fresh := votercheck.Input{Target: observed.Target, Groups: observed.Groups, Metrics: observed.Metrics,
 		Status: observed.Status, Held: observed.Held}
 	if why := votercheck.Check(fresh, change); why != "" {
-		return votercheck.Input{}, fault.New(fault.OperatorAuthorization, why, nil)
+		return votercheck.Input{}, fault.New(fault.OperationAuthorization, why, nil)
 	}
 	// A collector leadership change invalidates the callback's source epoch
 	// even

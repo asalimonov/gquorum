@@ -22,7 +22,7 @@ func TestMetadataAcquisitionSurvivesRestartAndExactRebindRetry(t *testing.T) {
 	}
 	check(false)
 	previous := s.Identity()
-	if err := s.VerifyRebind(t.Context(), previous, previous, "exact-admission"); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if err := s.VerifyRebind(t.Context(), previous, previous, "exact-admission"); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("missing transition proof accepted", err)
 	}
 	if err := s.MarkMetadataAcquired(t.Context(), previous); err != nil {

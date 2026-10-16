@@ -431,7 +431,7 @@ func (r *Scheduler) commitReplicaRepair(ctx context.Context, repairRequest repli
 		return "", err
 	}
 	if len(plan.Steps) == 0 {
-		return "", fault.New(fault.OperatorAuthorization, "fresh identity repair cannot have an empty plan", nil)
+		return "", fault.New(fault.OperationAuthorization, "fresh identity repair cannot have an empty plan", nil)
 	}
 	if !r.host.IsLeader() {
 		return "", fault.ErrNotLeader

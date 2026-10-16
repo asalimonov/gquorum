@@ -64,7 +64,7 @@ func TestReadmissionResponseRequiresExactWholeGrantBatch(t *testing.T) {
 	if err := validateReadmissionReceipts(grants, receipts[:1]); !errors.Is(err, fault.ErrAuthorityPending) {
 		t.Fatal("partial completion accepted", err)
 	}
-	if err := validateReadmissionReceipts(grants, []topology.EffectReceipt{receipts[0], receipts[0]}); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if err := validateReadmissionReceipts(grants, []topology.EffectReceipt{receipts[0], receipts[0]}); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("duplicate completion accepted", err)
 	}
 }

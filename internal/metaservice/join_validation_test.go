@@ -128,7 +128,7 @@ func TestReadmissionCallbackUsesOwnedExactGrant(t *testing.T) {
 			t.Fatal("lost remote approved catalog", grant)
 		}
 		grant.PreviousGroups[0].Replicas[0].ReplicaID = 9
-		if !errors.Is(g.AuthorizeReadmission(ctx, grant), fault.ErrOperatorAuthorization) {
+		if !errors.Is(g.AuthorizeReadmission(ctx, grant), fault.ErrOperationAuthorization) {
 			t.Fatal("mutated callback grant altered authorization")
 		}
 		return nil

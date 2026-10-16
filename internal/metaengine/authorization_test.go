@@ -28,12 +28,12 @@ func TestExactFutureProgressIsRetryableButNeverAuthorized(t *testing.T) {
 	}
 	bad := a
 	bad.Attempt++
-	if err := sm.Authorize(context.Background(), bad); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if err := sm.Authorize(context.Background(), bad); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("wrong future attempt", err)
 	}
 	bad = a
 	bad.Kind = topology.StepRemoveReplica
-	if err := sm.Authorize(context.Background(), bad); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if err := sm.Authorize(context.Background(), bad); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("wrong future operation", err)
 	}
 	index := consumeTestStep(t, sm, begin.OperatorID, 4)
@@ -43,12 +43,12 @@ func TestExactFutureProgressIsRetryableButNeverAuthorized(t *testing.T) {
 	}
 	stale := a
 	stale.StepSeq = 1
-	if err := sm.Authorize(context.Background(), stale); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if err := sm.Authorize(context.Background(), stale); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("old step accepted", err)
 	}
 	index = consumeTestStep(t, sm, begin.OperatorID, index+1)
 	transition(index, 2, topology.OperatorSucceeded)
-	if err := sm.Authorize(context.Background(), a); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if err := sm.Authorize(context.Background(), a); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("terminal effect accepted", err)
 	}
 }

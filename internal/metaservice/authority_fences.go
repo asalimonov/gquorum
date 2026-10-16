@@ -108,7 +108,7 @@ func (g *Group) reconcileFence(ctx context.Context, obligation topology.FenceObl
 	if result.From != request.To || result.Evidence.Receiver != request.To ||
 		result.Evidence.Resource != request.Resource || result.Evidence.ReplicaID != request.ReplicaID ||
 		result.Evidence.Validate(grant) != nil {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	// Recording a valid older boundary is safe if leadership or approval
 	// changed during the call. The replicated catalog checks it against all

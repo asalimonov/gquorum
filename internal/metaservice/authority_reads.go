@@ -279,7 +279,7 @@ func (g *Group) ValidateAuthorityCourier(ctx context.Context, grant topology.Aut
 		return err
 	}
 	if proof.Grant == nil {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	if proof.Courier != courier || !proof.Grant.Equal(grant) {
 		return fault.ErrIdentityMismatch

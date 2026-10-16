@@ -111,7 +111,7 @@ func (h *testHost) apply(ctx context.Context, proposal any) (metaengine.ApplyRes
 		return out, err
 	}
 	if !out.Accepted {
-		code := fault.OperatorAuthorization
+		code := fault.OperationAuthorization
 		if string(out.Code) == "version_conflict" {
 			code = fault.VersionConflict
 		}

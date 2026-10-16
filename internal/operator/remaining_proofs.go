@@ -51,7 +51,7 @@ func remainingGrants(ex Record) (map[topology.AuthorityKey]topology.AuthorityGra
 			return nil, err
 		}
 		if _, duplicate := grants[grant.Key]; duplicate {
-			return nil, ErrOperatorAuthorization
+			return nil, ErrOperationAuthorization
 		}
 		grants[grant.Key] = grant
 	}
@@ -61,11 +61,11 @@ func remainingGrants(ex Record) (map[topology.AuthorityKey]topology.AuthorityGra
 func validateRemainingGrant(ex Record, grant topology.AuthorityGrant) error {
 	validationErr := grant.Validate()
 	if validationErr != nil || grant.Action == nil || grant.OperatorID != ex.ID {
-		return ErrOperatorAuthorization
+		return ErrOperationAuthorization
 	}
 	seq := grant.Action.StepSeq
 	if seq < 1 || seq > len(ex.Steps) || !grant.Action.Matches(ex.ID, ex.Attempt, ex.Version, ex.Steps[seq-1]) {
-		return ErrOperatorAuthorization
+		return ErrOperationAuthorization
 	}
 	return nil
 }
@@ -76,7 +76,7 @@ func remainingReceipts(ex Record, grants map[topology.AuthorityKey]topology.Auth
 	for _, receipt := range ex.Receipts {
 		grant, exists := grants[receipt.Key]
 		if !exists || receipt.Validate(grant) != nil {
-			return nil, ErrOperatorAuthorization
+			return nil, ErrOperationAuthorization
 		}
 		receipts[receipt.Key] = append(receipts[receipt.Key], receipt)
 	}

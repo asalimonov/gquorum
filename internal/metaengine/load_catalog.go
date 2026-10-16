@@ -73,7 +73,7 @@ func (sm *topologySM) OperatorBase(ctx context.Context, id topology.OperatorID) 
 	defer sm.mu.RUnlock()
 	op := sm.operators[id]
 	if op == nil || op.Version != sm.target.Version {
-		return topology.Document{}, fault.ErrOperatorAuthorization
+		return topology.Document{}, fault.ErrOperationAuthorization
 	}
 	return sm.operatorBaseLocked(op)
 }

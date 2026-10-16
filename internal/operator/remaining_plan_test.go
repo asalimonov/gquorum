@@ -161,7 +161,7 @@ func TestRemainingPlanRequiresExactReceiptForAppliedVoterChange(t *testing.T) {
 		t.Fatalf("recorded metadata receipt was ignored: %v", err)
 	}
 	ex.Receipts[0].Action = nil
-	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, rules); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, rules); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatalf("stale or malformed receipt was accepted: %v", err)
 	}
 }

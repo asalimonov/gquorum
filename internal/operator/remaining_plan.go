@@ -16,7 +16,7 @@ func ValidateRemainingPlan(view RemainingPlanView, ex Record, native map[string]
 	rules Rules) error {
 	first := max(ex.CurrentStep, 1)
 	if first > len(ex.Steps) && len(ex.Steps) != 0 {
-		return ErrOperatorAuthorization
+		return ErrOperationAuthorization
 	}
 	proofs, err := remainingStepProofs(ex, native)
 	if err != nil {

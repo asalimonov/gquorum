@@ -21,7 +21,7 @@ func (m *Machine) EffectReceipts(ctx context.Context, grant topology.AuthorityGr
 	defer m.mu.RUnlock()
 	record := m.authority.records[grant.Key]
 	if record == nil || !record.Grant.Equal(grant) {
-		return nil, fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperationAuthorization
 	}
 	result := make([]topology.EffectReceipt, len(record.Effects))
 	for i, receipt := range record.Effects {

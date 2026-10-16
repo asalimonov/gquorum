@@ -56,12 +56,12 @@ func validateLoadCleanupTarget(approved topology.Document, recorded, grant topol
 		!slices.Contains(grant.Resources,
 			topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: grant.Key.GroupID,
 				NodeName: target.NodeName}) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	a := grant.Action
 	if a.Kind != topology.StepDeleteGroupState && (a.Kind != topology.StepCleanupReplicaState ||
 		a.NodeName != target.NodeName || a.ReplicaID != target.ReplicaID) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	if group := approved.Group(grant.Key.GroupID); group != nil {
 		for _, replica := range group.Replicas {

@@ -76,7 +76,7 @@ func (c groupControllers) effect(parent context.Context, grant topology.Authorit
 	invoke func(context.Context,
 		operator.GroupEffects) ([]topology.EffectReceipt, error)) ([]topology.EffectReceipt, error) {
 	if grant.Action == nil || grant.Action.Kind != kind {
-		return nil, fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperationAuthorization
 	}
 	ctxHandle, err := c.g.acquireEffectContext(parent)
 	ctx, done := ctxHandle.Context, ctxHandle.Release
@@ -147,7 +147,7 @@ func (c groupControllers) DeleteGroupState(ctx context.Context,
 func (c groupControllers) ApplyMembership(ctx context.Context,
 	grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
 	if grant.Action == nil {
-		return nil, fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperationAuthorization
 	}
 	switch grant.Action.Kind {
 	case topology.StepAddLearner,
@@ -155,7 +155,7 @@ func (c groupControllers) ApplyMembership(ctx context.Context,
 		topology.StepDemoteVoter,
 		topology.StepRemoveReplica:
 	default:
-		return nil, fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperationAuthorization
 	}
 	return c.effect(ctx, grant, grant.Action.Kind,
 		func(ctx context.Context, controller operator.GroupEffects) ([]topology.EffectReceipt, error) {
@@ -165,7 +165,7 @@ func (c groupControllers) ApplyMembership(ctx context.Context,
 
 func (g *Group) metaEffect(ctx context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
 	if grant.Action == nil || grant.Key.GroupID != topology.MetaGroupID {
-		return nil, fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperationAuthorization
 	}
 	if err := g.ValidateGrant(ctx, grant); err != nil {
 		return nil, err
@@ -259,7 +259,7 @@ func (g *Group) changeMetaReceipt(ctx context.Context, engine *raftengine.Group,
 	case topology.StepRemoveReplica:
 		change = membership.RemoveReplica(a.ReplicaID)
 	default:
-		return topology.EffectReceipt{}, fault.ErrOperatorAuthorization
+		return topology.EffectReceipt{}, fault.ErrOperationAuthorization
 	}
 	nextCheckErr := waitMetaAuthority(ctx, func() error {
 		var err error

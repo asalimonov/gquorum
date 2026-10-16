@@ -25,7 +25,7 @@ func (s *Store) VerifyRebind(ctx context.Context, previous, granted topology.Ide
 		}
 		data := tx.Bucket([]byte("identity")).Get([]byte("readmission"))
 		if data == nil {
-			return fault.ErrOperatorAuthorization
+			return fault.ErrOperationAuthorization
 		}
 		var recorded rebindRecord
 		if err := decode(data, &recorded); err != nil {

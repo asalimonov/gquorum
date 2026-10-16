@@ -178,12 +178,12 @@ func TestRetirementRechecksProofAfterDeletion(t *testing.T) {
 	bad := req
 	bad.Grant = bad.Grant.Clone()
 	bad.Grant.Key.Revision++
-	if _, err := Retire(t.Context(), root, bad); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if _, err := Retire(t.Context(), root, bad); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("different proof accepted after deletion", err)
 	}
 	bad = req
 	bad.Authorization = nil
-	if _, err := Retire(t.Context(), root, bad); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if _, err := Retire(t.Context(), root, bad); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("incomplete proof accepted after deletion", err)
 	}
 	if _, err := Open(t.Context(), root, req.Identity); !errors.Is(err, fault.ErrGroupRetired) {

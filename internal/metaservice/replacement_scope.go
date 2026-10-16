@@ -93,10 +93,10 @@ func (g *Group) prepareReseat(ctx context.Context, doc *topology.Document,
 	views := g.state().Views()
 	// Task78 replaces these schema3 guards with scoped capture/approval.
 	if !reflect.DeepEqual(views.Latest, views.Target) || !reflect.DeepEqual(views.Target, views.Active) {
-		return fault.New(fault.OperatorAuthorization, "reseat requires equal Latest, Target and Active", nil)
+		return fault.New(fault.OperationAuthorization, "reseat requires equal Latest, Target and Active", nil)
 	}
 	if ex, ok := g.state().CurrentOperator(); ok && !ex.Status.State.Terminal() {
-		return fault.New(fault.OperatorAuthorization, "reseat requires no running execution", nil)
+		return fault.New(fault.OperationAuthorization, "reseat requires no running execution", nil)
 	}
 	return g.reseatDocument(doc, views, options)
 }

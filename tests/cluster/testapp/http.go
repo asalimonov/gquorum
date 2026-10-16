@@ -111,7 +111,7 @@ func httpError(w http.ResponseWriter, err error) {
 	switch code {
 	case fault.Invalid, fault.Unsupported:
 		status = http.StatusBadRequest
-	case fault.VersionConflict, fault.GroupRetired, fault.IdentityMismatch, fault.OperatorAuthorization, fault.AuthorityFenced, fault.ReplanRequired:
+	case fault.VersionConflict, fault.GroupRetired, fault.IdentityMismatch, fault.OperationAuthorization, fault.AuthorityFenced, fault.ReplanRequired:
 		status = http.StatusConflict
 	case fault.UnsafeMembership:
 		status = http.StatusUnprocessableEntity

@@ -380,7 +380,7 @@ func TestReseatReplicaAllocatesFreshIDAndRefusesUnstableViews(t *testing.T) {
 	r, err = f.g.DrainNode(context.Background(), "n3", preview())
 	doc = mutationDoc(t, r, err)
 	f.commit(t, doc, false)
-	if _, err = f.g.ReseatReplica(context.Background(), "work", topology.ReplicaKey{NodeName: "n2", ReplicaID: 2}, preview()); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if _, err = f.g.ReseatReplica(context.Background(), "work", topology.ReplicaKey{NodeName: "n2", ReplicaID: 2}, preview()); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("repair extended staged operator intent", err)
 	}
 }

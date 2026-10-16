@@ -35,11 +35,11 @@ func retirementAction(req load.RetirementRequest) (topology.AuthorizedStep, erro
 		return topology.AuthorizedStep{}, fault.ErrUnsupported
 	} // Readmission uses its separate authenticated grant path.
 	if req.Authorization == nil || req.AdmissionID != "" || req.PreviousMemberID != 0 || req.GrantedMemberID != 0 {
-		return topology.AuthorizedStep{}, fault.ErrOperatorAuthorization
+		return topology.AuthorizedStep{}, fault.ErrOperationAuthorization
 	}
 	a := *req.Authorization
 	if a.Kind != topology.StepCleanupReplicaState && a.Kind != topology.StepDeleteGroupState {
-		return topology.AuthorizedStep{}, fault.ErrOperatorAuthorization
+		return topology.AuthorizedStep{}, fault.ErrOperationAuthorization
 	}
 	return a, nil
 }
@@ -51,7 +51,7 @@ func retirementTarget(ctx context.Context, a topology.AuthorizedStep, identity s
 		return err
 	}
 	if !slices.Contains(targets, identity) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	return ctx.Err()
 }
@@ -161,7 +161,7 @@ func (h *Host) retireApplicationVerified(ctx context.Context, req load.Retiremen
 		return err
 	}
 	if !matchingRetirement(req, result) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	return nil
 }

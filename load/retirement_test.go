@@ -46,7 +46,7 @@ func TestRetirementVerifyAcceptsCompleteTopologyProof(t *testing.T) {
 	for name, edit := range cases {
 		id, req := retirementFixture()
 		edit(&id, &req)
-		if err := req.Verify(id); !errors.Is(err, fault.ErrOperatorAuthorization) {
+		if err := req.Verify(id); !errors.Is(err, fault.ErrOperationAuthorization) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
@@ -63,7 +63,7 @@ func TestRetirementVerifyReadmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	req.GrantedMemberID = 7
-	if err := req.Verify(id); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if err := req.Verify(id); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("non-increasing member accepted", err)
 	}
 }

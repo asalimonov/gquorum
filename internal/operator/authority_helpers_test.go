@@ -112,7 +112,7 @@ func (c *controllerCoordinator) RecordEffect(ctx context.Context, receipt topolo
 	}
 	grant, found := c.grants[*receipt.Action]
 	if !found || receipt.Validate(grant) != nil {
-		return ErrOperatorAuthorization
+		return ErrOperationAuthorization
 	}
 	if !slices.ContainsFunc(c.receipts[receipt.Key], func(old topology.EffectReceipt) bool {
 		return old.Resource == receipt.Resource && old.Target == receipt.Target

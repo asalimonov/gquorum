@@ -103,7 +103,7 @@ func (e *Controller) completeStep(ctx context.Context, operator Record, input st
 			return e.recordError(ctx, operator, step, err)
 		}
 		if observed.GroupID != step.GroupID {
-			return e.recordError(ctx, operator, step, ErrOperatorAuthorization)
+			return e.recordError(ctx, operator, step, ErrOperationAuthorization)
 		}
 		if !e.effectSatisfied(step, target, observed) {
 			return e.recordError(ctx, operator, step,
@@ -144,7 +144,7 @@ func (e *Controller) recordReceipts(ctx context.Context, grant topology.Authorit
 	receipts []topology.EffectReceipt) error {
 	for _, receipt := range receipts {
 		if receipt.Validate(grant) != nil {
-			return ErrOperatorAuthorization
+			return ErrOperationAuthorization
 		}
 		if err := e.authority.RecordEffect(ctx, receipt); err != nil {
 			return err
@@ -185,7 +185,7 @@ func validateDesiredStep(ex Record, input stepValidationInput) error {
 	case StepRemoveReplica, StepStopReplica, StepCleanupReplicaState, StepDeleteGroupState:
 		return validateRetiringStep(ex, input)
 	default:
-		return fmt.Errorf(unknownStepMessage, ErrOperatorAuthorization, input.step.Kind)
+		return fmt.Errorf(unknownStepMessage, ErrOperationAuthorization, input.step.Kind)
 	}
 }
 
@@ -195,19 +195,19 @@ func validateStartingStep(ex Record, input stepValidationInput) error {
 	switch step.Kind {
 	case StepCreateFoundingGroup:
 		if active.Group(step.GroupID) != nil || target.Group(step.GroupID) == nil {
-			return fmt.Errorf("%w: founding group is not fresh", ErrOperatorAuthorization)
+			return fmt.Errorf("%w: founding group is not fresh", ErrOperationAuthorization)
 		}
 		if status.Found && !foundingMatchesTarget(target.Group(step.GroupID), status) {
-			return fmt.Errorf("%w: founding group has conflicting membership", ErrOperatorAuthorization)
+			return fmt.Errorf("%w: founding group has conflicting membership", ErrOperationAuthorization)
 		}
 	case StepPrepareReplica:
 		if targetReplica == nil ||
 			active.Group(step.GroupID) == nil && (targetReplica.Role != ReplicaLearner ||
 				!freshFoundingPlan(ex, step)) {
-			return fmt.Errorf("%w: prepare identity is not an established Target replica", ErrOperatorAuthorization)
+			return fmt.Errorf("%w: prepare identity is not an established Target replica", ErrOperationAuthorization)
 		}
 	default:
-		return fmt.Errorf(unknownStepMessage, ErrOperatorAuthorization, step.Kind)
+		return fmt.Errorf(unknownStepMessage, ErrOperationAuthorization, step.Kind)
 	}
 	return nil
 }
@@ -218,22 +218,22 @@ func validateReplicaStep(input stepValidationInput) error {
 	switch step.Kind {
 	case StepAddLearner:
 		if targetReplica == nil {
-			return fmt.Errorf("%w: learner is absent from Target", ErrOperatorAuthorization)
+			return fmt.Errorf("%w: learner is absent from Target", ErrOperationAuthorization)
 		}
 	case StepWaitCaughtUp, StepPromoteVoter:
 		if targetReplica == nil || targetReplica.Role != ReplicaVoter {
-			return fmt.Errorf("%w: promotion target is not a desired voter", ErrOperatorAuthorization)
+			return fmt.Errorf("%w: promotion target is not a desired voter", ErrOperationAuthorization)
 		}
 	case StepDemoteVoter:
 		if targetReplica == nil || targetReplica.Role != ReplicaLearner {
-			return fmt.Errorf("%w: demotion target is not a desired learner", ErrOperatorAuthorization)
+			return fmt.Errorf("%w: demotion target is not a desired learner", ErrOperationAuthorization)
 		}
 	case StepTransferLeader:
 		if targetReplica == nil || targetReplica.Role != ReplicaVoter {
-			return fmt.Errorf("%w: leadership target is not a desired voter", ErrOperatorAuthorization)
+			return fmt.Errorf("%w: leadership target is not a desired voter", ErrOperationAuthorization)
 		}
 	default:
-		return fmt.Errorf(unknownStepMessage, ErrOperatorAuthorization, step.Kind)
+		return fmt.Errorf(unknownStepMessage, ErrOperationAuthorization, step.Kind)
 	}
 	return nil
 }
@@ -245,21 +245,21 @@ func validateRetiringStep(ex Record, input stepValidationInput) error {
 	switch step.Kind {
 	case StepRemoveReplica, StepStopReplica:
 		if targetReplica != nil || activeReplica == nil || activeReplica.NodeName != step.NodeName {
-			return fmt.Errorf("%w: removal does not name an exact former replica", ErrOperatorAuthorization)
+			return fmt.Errorf("%w: removal does not name an exact former replica", ErrOperationAuthorization)
 		}
 	case StepCleanupReplicaState:
 		if step.GroupID == MetaGroupID || targetReplica != nil || activeReplica == nil || step.Seq < cleanupStepSpan ||
 			ex.Steps[step.Seq-2].Kind != StepStopReplica ||
 			ex.Steps[step.Seq-cleanupStepSpan].Kind != StepRemoveReplica {
 			return fmt.Errorf("%w: cleanup is not authorized after exact data replica removal and stop",
-				ErrOperatorAuthorization)
+				ErrOperationAuthorization)
 		}
 	case StepDeleteGroupState:
 		if step.GroupID == MetaGroupID || target.Group(step.GroupID) != nil || active.Group(step.GroupID) == nil {
-			return fmt.Errorf("%w: delete does not name an exact removed data group", ErrOperatorAuthorization)
+			return fmt.Errorf("%w: delete does not name an exact removed data group", ErrOperationAuthorization)
 		}
 	default:
-		return fmt.Errorf(unknownStepMessage, ErrOperatorAuthorization, step.Kind)
+		return fmt.Errorf(unknownStepMessage, ErrOperationAuthorization, step.Kind)
 	}
 	return nil
 }

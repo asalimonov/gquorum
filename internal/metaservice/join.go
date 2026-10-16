@@ -140,7 +140,7 @@ func (g *Group) joinReply(ctx context.Context, a metaengine.AdmissionRecord, for
 		response.Grants = grants
 		response.PreviousMemberID = readmissionMemberID(grants, a.NodeName)
 		if response.PreviousMemberID == 0 {
-			return metatransport.Reply(fault.ErrOperatorAuthorization)
+			return metatransport.Reply(fault.ErrOperationAuthorization)
 		}
 		catalog, err := g.state().LegacyRecoveryCatalog(ctx)
 		if err != nil {
@@ -336,7 +336,7 @@ func (g *Group) AuthorizeReadmission(ctx context.Context, grant Readmission) err
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	if g.readmissionGrant == nil || !reflect.DeepEqual(*g.readmissionGrant, grant) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	return nil
 }

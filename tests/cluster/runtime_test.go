@@ -659,7 +659,7 @@ func TestMetaCallerEffectCompletionLostAcrossLeaderReplacement(t *testing.T) {
 	var refusal struct {
 		Code fault.Code `json:"code"`
 	}
-	if err := refused.Decode(&refusal); err != nil || refusal.Code != fault.OperatorAuthorization {
+	if err := refused.Decode(&refusal); err != nil || refusal.Code != fault.OperationAuthorization {
 		t.Fatal("completed authorization remained usable", refusal, err)
 	}
 	operator, err := c.Operation(ctx, "node2", topology.OperatorID(created.OperationID))

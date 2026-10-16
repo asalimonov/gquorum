@@ -37,7 +37,7 @@ func (g *Group) issuedEffect(ctx context.Context, result metaengine.ApplyResult,
 		return topology.AuthorityGrant{}, err
 	}
 	if proof.Grant == nil || !proof.Grant.Equal(*result.Grant) {
-		return topology.AuthorityGrant{}, fault.ErrOperatorAuthorization
+		return topology.AuthorityGrant{}, fault.ErrOperationAuthorization
 	}
 	if proof.Courier != id {
 		return topology.AuthorityGrant{}, fault.ErrReplicaNotReady
@@ -69,7 +69,7 @@ func (g *Group) ValidateGrant(parent context.Context, grant topology.AuthorityGr
 		return err
 	}
 	if proof.Grant == nil {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	if !proof.Grant.Equal(grant) {
 		return fault.ErrIdentityMismatch
@@ -121,7 +121,7 @@ func (g *Group) ResolveAuthorityPeer(ctx context.Context, grant topology.Authori
 		return load.Peer{}, err
 	}
 	if !slices.Contains(grant.Targets, target) {
-		return load.Peer{}, fault.ErrOperatorAuthorization
+		return load.Peer{}, fault.ErrOperationAuthorization
 	}
 	id := g.Identity()
 	if target.NodeName != id.NodeName {
@@ -203,7 +203,7 @@ func (g *Group) InstallFence(parent context.Context, request load.FenceRequest) 
 	}
 	if request.Resource.GroupID != request.Grant.Key.GroupID ||
 		!slices.Contains(request.Grant.Resources, request.Resource) {
-		return load.FenceResult{}, fault.ErrOperatorAuthorization
+		return load.FenceResult{}, fault.ErrOperationAuthorization
 	}
 	if request.Resource.Kind == topology.AuthorityGroup && request.Resource.GroupID == topology.MetaGroupID {
 		return g.installMetaFence(ctx, request)

@@ -54,7 +54,7 @@ func (p *retainedProofPeer) Call(_ context.Context, method string, _ *metapb.Hea
 	}
 	proof := p.proof.Load()
 	if method != "AuthorityRead" || json.Unmarshal(data, &request) != nil || proof == nil || request.Key != proof.Grant.Key {
-		return metatransport.Reply(fault.ErrOperatorAuthorization)
+		return metatransport.Reply(fault.ErrOperationAuthorization)
 	}
 	encoded, err := json.Marshal(proof)
 	if err != nil {

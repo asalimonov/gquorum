@@ -193,7 +193,7 @@ func (n *node) reserveReadmission(parent context.Context, m *metaservice.Group,
 		return readmissionOwner{}, fault.ErrAuthorityPending
 	}
 	if n.authority == nil || len(grant.Grants) == 0 {
-		return readmissionOwner{}, fault.ErrOperatorAuthorization
+		return readmissionOwner{}, fault.ErrOperationAuthorization
 	}
 	ctx, cancel := context.WithCancel(parent)
 	retirement := &readmissionWork{cancel: cancel, done: make(chan struct{}), revision: grant.Grants[0].Key.Revision}
@@ -213,7 +213,7 @@ func (n *node) readmissionReceipts(ctx context.Context, grant metaservice.Readmi
 	}
 	s := n.localAuthority()
 	if s == nil || len(grant.Grants) == 0 {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	for _, g := range grant.Grants {
 		for _, target := range g.Targets {

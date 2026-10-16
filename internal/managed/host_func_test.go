@@ -144,7 +144,7 @@ func newFixtureAt(t *testing.T, name string, member uint64) *fixture {
 		}
 		if grant.Validate() != nil || grant.Action == nil ||
 			!slices.Contains(grant.Targets, topology.AuthorityTarget{NodeName: f.node.NodeName, MemberID: f.node.MemberID, ReplicaID: expected}) {
-			return fault.ErrOperatorAuthorization
+			return fault.ErrOperationAuthorization
 		}
 		a := *grant.Action
 		if record, found := f.records[a.GroupID]; found && record.ReplicaID != expected {

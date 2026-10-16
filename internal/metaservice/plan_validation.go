@@ -22,7 +22,7 @@ func (g *Group) validateRemainingPlan(ctx context.Context, ex operator.Record) e
 	status := view.Operator.Status
 	if status.ID != ex.ID || status.Version != ex.Version || status.Attempt != ex.Attempt ||
 		status.CurrentStep != ex.CurrentStep || !view.Operator.Plan.Equal(ex.Plan()) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	ex.Grants, ex.Receipts = view.Grants, view.Receipts
 	native := make(map[string]topology.NativeState, len(view.Target.Groups))
