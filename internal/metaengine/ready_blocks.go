@@ -39,12 +39,30 @@ func queryReadyBlocks(s *scopedState, after string, limit int) ([]operator.WorkI
 		if position < 0 || s.requiredBlocker(op, position) != nil {
 			continue
 		}
-		work = append(work, operator.WorkItem{Operation: op.Clone(), GroupID: id})
+		work = append(work, s.requiredWork(op, position))
 		if len(work) == limit {
 			break
 		}
 	}
 	return work, nil
+}
+
+func (s *scopedState) requiredWork(op *topology.Operation, position int) operator.WorkItem {
+	definition, block := op.Plan.Blocks[position], op.Status.Blocks[position]
+	work := operator.WorkItem{Operation: op.Clone(), GroupID: definition.GroupID}
+	doc := s.indexes.documents[op.Status.Version]
+	if group := doc.Group(definition.GroupID); group != nil {
+		owned := (topology.Document{Groups: []topology.Group{*group}}).Clone()
+		work.Approved = &owned.Groups[0]
+	}
+	seq := block.CurrentStep
+	if seq == 0 && len(definition.Steps) != 0 {
+		seq = definition.Steps[0]
+	}
+	if seq != 0 && op.Plan.Steps[seq-1].Kind != topology.StepWaitCaughtUp {
+		work.Consumed = scopedStepConsumed(op, op.Plan.Steps[seq-1], s.indexes, s.authorityCatalog())
+	}
+	return work
 }
 
 func readyBlockPosition(op *topology.Operation, group string) int {

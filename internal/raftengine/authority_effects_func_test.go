@@ -47,9 +47,16 @@ func TestObservedEffectsAndTransferIntentSurviveRestart(t *testing.T) {
 		t.Fatal("invented native effect", err)
 	}
 	cc := raftpb.ConfChangeV2{Changes: []raftpb.ConfChangeSingle{{Type: raftpb.ConfChangeAddLearnerNode, NodeID: 2}}}
-	_, err = g.ProposeAuthorizedConfChange(testContext(t), grant, cc, g.Status().ConfState)
+	original, err := g.ProposeAuthorizedConfChange(testContext(t), grant, cc, g.Status().ConfState)
 	must(t, err)
+	originalGrant := grant.Clone()
 	grant.Key.Revision++
+	grant.Action.Attempt++
+	grant.Action.OperatorID = topology.MakeOperatorID(grant.Action.Version, grant.Action.Attempt)
+	grant.OperatorID = grant.Action.OperatorID
+	if _, err := g.ProposeAuthorizedConfChange(testContext(t), grant, cc, g.Status().ConfState); !errors.Is(err, fault.ErrAuthorityFenced) && !errors.Is(err, fault.ErrAuthorityPending) {
+		t.Fatal("observed membership bypassed the new floor", err)
+	}
 	// An already-applied exact effect is judged by its result, even if its
 	// historical predecessor is no longer the native configuration.
 	grant.Action.ExpectedVotersDigest = topology.VoterSetDigest([]uint64{99})
@@ -59,6 +66,11 @@ func TestObservedEffectsAndTransferIntentSurviveRestart(t *testing.T) {
 	must(t, err)
 	if observed.Outcome != topology.EffectAlreadySatisfied {
 		t.Fatal(observed)
+	}
+	must(t, original.Validate(originalGrant))
+	must(t, observed.Validate(grant))
+	if observed.Key == original.Key || observed.Action.OperatorID == original.Action.OperatorID || observed.AppliedIndex <= original.AppliedIndex {
+		t.Fatal("new attempt relabelled old receipt", original, observed)
 	}
 	transfer := initial.Clone()
 	transfer.Key.Revision = 30

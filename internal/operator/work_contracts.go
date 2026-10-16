@@ -19,6 +19,11 @@ type Coordinator interface {
 type WorkItem struct {
 	Operation topology.Operation
 	GroupID   string
+	// Approved is the declaration retained with this operation, nil for deletion.
+	Approved *topology.Group
+	// Consumed describes the current required step, including original retry proof.
+	// It is an observation; the replicated transition independently checks proof.
+	Consumed bool
 }
 
 // ScopedValidator checks one immutable operation scope against current evidence.

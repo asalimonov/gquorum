@@ -171,11 +171,16 @@ func TestCleanupDispatchRotatesSameHostAfterTimeoutAndReusesGrant(t *testing.T) 
 	cfg.Interval, cfg.MaxRetryInterval, cfg.ProposalTimeout = time.Second, time.Second, 25*time.Millisecond
 	attempts := make(chan uint64, 4)
 	var returning atomic.Bool
+	secondReleased := make(chan struct{})
+	var secondOnce sync.Once
 	cfg.Groups = requestEffectsTest{call: func(ctx context.Context, grant topology.AuthorityGrant, resource topology.AuthorityResource, target topology.AuthorityTarget) (topology.EffectReceipt, error) {
 		attempts <- target.ReplicaID
 		if target.ReplicaID == 1 && !returning.Load() {
 			<-ctx.Done()
 			return topology.EffectReceipt{}, ctx.Err()
+		}
+		if target.ReplicaID == 2 {
+			<-secondReleased
 		}
 		return dispatchTestReceipt(grant, resource, target), nil
 	}}
@@ -185,6 +190,7 @@ func TestCleanupDispatchRotatesSameHostAfterTimeoutAndReusesGrant(t *testing.T) 
 	}
 	e.Start(t.Context())
 	defer e.Stop()
+	defer secondOnce.Do(func() { close(secondReleased) })
 	e.Tick(t.Context())
 	select {
 	case id := <-attempts:
@@ -207,6 +213,11 @@ func TestCleanupDispatchRotatesSameHostAfterTimeoutAndReusesGrant(t *testing.T) 
 	case <-time.After(time.Second):
 		t.Fatal("second target skipped")
 	}
+	// Successful receipt recording wakes the background loop immediately.
+	// Make the first target reachable before releasing that wake; otherwise a
+	// third timeout can install backoff while the test's fake clock is frozen.
+	returning.Store(true)
+	secondOnce.Do(func() { close(secondReleased) })
 	select {
 	case receipt := <-cleanup.receipts:
 		if receipt.Target.ReplicaID != 2 {
@@ -222,7 +233,9 @@ func TestCleanupDispatchRotatesSameHostAfterTimeoutAndReusesGrant(t *testing.T) 
 		t.Fatal("retry minted another grant", issued)
 	}
 	waitCleanupIdle(t, e)
-	returning.Store(true)
+	clock.mu.Lock()
+	clock.now = clock.now.Add(time.Second)
+	clock.mu.Unlock()
 	e.Tick(t.Context())
 	select {
 	case receipt := <-cleanup.receipts:

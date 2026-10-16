@@ -27,6 +27,13 @@ func TestReadyBlocksRequireCurrentOwnerAndIgnoreFailedSiblings(t *testing.T) {
 	if s.Operations[0].Plan.Steps[0].NodeName == "caller" {
 		t.Fatal("ready item borrowed immutable plan")
 	}
+	if work[0].Approved == nil || work[0].Approved.ID != topology.MetaGroupID {
+		t.Fatal("missing retained approved declaration", work[0])
+	}
+	work[0].Approved.Replicas[0].NodeName = "caller"
+	if s.indexes.documents[work[0].Operation.Status.Version].Groups[0].Replicas[0].NodeName == "caller" {
+		t.Fatal("ready item borrowed approved declaration")
+	}
 	s.indexes.groups[topology.MetaGroupID].Owner = ""
 	if work, err = queryReadyBlocks(&s, "", 10); err != nil || len(work) != 0 {
 		t.Fatal("nonowner selected", work, err)
@@ -83,7 +90,7 @@ func TestReadyBlocksReuseIssuedGrantAndIncludeClosedConsumedFinalStep(t *testing
 			prepareScopedFixture(t, &s)
 		}
 		work, err := queryReadyBlocks(&s, "", 1)
-		if err != nil || len(work) != 1 || work[0].GroupID != "shard0" {
+		if err != nil || len(work) != 1 || work[0].GroupID != "shard0" || work[0].Consumed != consumed {
 			t.Fatal("own issued/consumed grant blocked progress", consumed, work, err)
 		}
 	}

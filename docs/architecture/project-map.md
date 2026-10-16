@@ -559,7 +559,7 @@ coordinators and group effects. Topology alias files preserve domain value ident
 | Interface | Complete method set |
 | --- | --- |
 | `Store` | `Target(ctx) (Document,error)`; `Active(ctx) (Document,error)` |
-| `Coordinator` | `IsMetaLeader() bool`; `ReadyBlocks(ctx,int) ([]WorkItem,error)`; `RecordOperationTransition(ctx,topology.OperationTransition) error`. WorkItem owns Operation + GroupID; ScopedValidator receives `(ctx,Operation,groupID)`. |
+| `Coordinator` | `IsMetaLeader() bool`; `ReadyBlocks(ctx,int) ([]WorkItem,error)`; `RecordOperationTransition(ctx,topology.OperationTransition) error`. WorkItem owns Operation + GroupID + retained Approved declaration + current Consumed proof observation; ScopedValidator receives `(ctx,Operation,groupID)`. |
 | `CleanupCoordinator` (embedded by Coordinator) | `ReadyCleanup(ctx,int) ([]CleanupWork,error)`; `BeginCleanupEffect(ctx,Identity,AuthorizedStep) (AuthorityGrant,error)`; `ReadyFences(ctx,int) ([]FenceWork,error)`; `ResolveFenceTarget(ctx,FenceWork) (AuthorityTarget,error)`; `DispatchFence(ctx,grant,resource,target) error`. Internal selection/courier ports only. |
 | `LegacyCoordinator` | `IsMetaLeader() bool`; `CurrentOperator(ctx) (Record,bool)`; `RecordOperatorTransition(ctx,Transition) error`; schema3 bridge removed78. |
 | `AuthorityCoordinator` | `BeginEffect(ctx,topology.AuthorizedStep) (topology.AuthorityGrant,error)`; `ReconcileFences(ctx) error`; `EffectReceipts(ctx,topology.AuthorityGrant) ([]topology.EffectReceipt,error)`; `RecordEffect(ctx,topology.EffectReceipt) error` |
@@ -575,7 +575,7 @@ revocation diagnostics derive on read, without per-poll writes; native safety an
 reachability remain worker checks. Config requires exactly one coordinator and
 matching scope or legacy validators; no scoped path reads Store.Active. Production
 retains the legacy port until78; scoped selection returns Unsupported on schema3.
-Tasks63–64 provide bounded required/cleanup/fence dispatch;65 completes required effect workers,66 the service scope validators.
+Tasks63–65 provide bounded required/cleanup/fence dispatch and exact execution;66 connects service scope validators.
 
 `FI_DISPATCH_GATE`: each Start owns a dispatcher; close admission and WaitGroup.Add
 share one mutex. Group workers rotate bounded ready pages. Exact RPCs share a
@@ -585,6 +585,15 @@ observed target; `_meta` native handling refuses rather than forwards on leader
 loss. Full-grant validation repeats after fencing; valid late receipts are recorded
 without advancing stale work. Timeout releases the courier slot, preserving host
 callback/journal ownership. Retry memory is bounded and idle entries expire.
+
+`FI_REQUIRED_SUFFIX`: ReadyBlocks copies the declaration from the operation's
+retained version and derives current-step consumption through original grant proof.
+Workers advance via PlanBlock.Steps global sequences, excluding Cleanup; consumed
+prefixes never mint replacement receipts. Every unconsumed effect obtains/reuses
+its exact grant, rechecks scope after waits and dispatches one resource/target.
+Founding records all host receipts before native confirmation; bounded retry rows
+rotate failed hosts even with one execution slot. Catch-up precedes destruction;
+final membership uses ReadNative, while deletion relies on joined FSM stop proofs.
 
 `FI_CLEANUP_FAIRNESS`: exact debt identity/member/action comes from the existing
 ordered index; required Stops never become detached work. Cleanup and fences

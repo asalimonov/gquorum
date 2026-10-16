@@ -87,12 +87,19 @@ func (e *Controller) runScopedWork(ctx context.Context, work WorkItem) controlle
 		return controllerIdle
 	}
 	if len(block.Steps) != 0 {
-		return controllerWaiting // Exact effect execution is installed in Task65.
+		return e.executeScopedStep(ctx, work)
+	}
+	return e.finishScopedWork(ctx, work)
+}
+
+func (e *Controller) finishScopedWork(ctx context.Context, work WorkItem) controllerOutcome {
+	if err := e.verifyScopedGroup(ctx, work); err != nil {
+		return e.recordScopedError(ctx, work, err)
 	}
 	if err := e.scopedFinal(ctx, work.Operation.Clone(), work.GroupID); err != nil {
 		return e.recordScopedError(ctx, work, err)
 	}
-	transition := topology.OperationTransition{State: topology.OperationSucceeded}
+	transition := topology.OperationTransition{StepSeq: scopedWorkStep(work).Seq, State: topology.OperationSucceeded}
 	if err := e.recordScopedTransition(ctx, work, transition); err != nil {
 		return controllerIdle
 	}
@@ -108,7 +115,17 @@ func requiredWorkBlock(work WorkItem) (topology.PlanBlock, error) {
 		op.Status.Blocks[position].GroupID != work.GroupID || op.Status.Blocks[position].State.Terminal() {
 		return topology.PlanBlock{}, fault.ErrOperationAuthorization
 	}
-	return op.Plan.Blocks[position], nil
+	definition := op.Plan.Blocks[position]
+	for _, seq := range definition.Steps {
+		if seq < 1 || seq > len(op.Plan.Steps) || op.Plan.Steps[seq-1].Seq != seq ||
+			op.Plan.Steps[seq-1].GroupID != work.GroupID {
+			return topology.PlanBlock{}, fault.ErrOperationAuthorization
+		}
+	}
+	if cursor := op.Status.Blocks[position].CurrentStep; cursor != 0 && !slices.Contains(definition.Steps, cursor) {
+		return topology.PlanBlock{}, fault.ErrOperationAuthorization
+	}
+	return definition, nil
 }
 
 func (e *Controller) recordScopedTransition(ctx context.Context, work WorkItem,

@@ -1018,14 +1018,14 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/managed/granted_actions.go`, `replica.go`, `retirement.go`, `internal/raftengine/authority_effects.go`, `internal/operator` scoped effect execution. **Target:** [T] §6.1, §6.4, §12 retry/dispatch algorithms. **Depends on:** 44, 63–64. **Budget:** ≤550.
 
-- [ ] Complete the scoped worker effect path prepared62–64: exact global sequence within its block, retained approved declaration, before/after-wait authorization, native verification and whole-group completion; reuse existing effect/receipt and membership helpers. Service validators are connected66; complete live composition stays78.
-- [ ] Reuse actionWorks, acceptGuardedStart, stopRetiringIdentity and beginLocalEffect. After required old-floor fencing, exact already-ready/prepared/joined state may satisfy a new grant with freshly persisted exact evidence.
-- [ ] Never relabel old receipts, skip predecessor fences because native state looks satisfied or overlap unresolved factory/Close ownership. Preserve native live-quorum and leadership predicates when an effect is already observed.
-- [ ] Test retry after response loss, same-identity prepare/stop, late factory/callback return, stale floor and missing retained storage parking. Existing grants/receipts remain attributed to their original action tuples.
+- [x] Complete the scoped worker effect path prepared62–64: exact global sequence within its block, retained approved declaration, before/after-wait authorization, native verification and whole-group completion; reuse existing effect/receipt and membership helpers. Service validators are connected66; complete live composition stays78.
+- [x] Reuse actionWorks, acceptGuardedStart, stopRetiringIdentity and beginLocalEffect. After required old-floor fencing, exact already-ready/prepared/joined state may satisfy a new grant with freshly persisted exact evidence.
+- [x] Never relabel old receipts, skip predecessor fences because native state looks satisfied or overlap unresolved factory/Close ownership. Preserve native live-quorum and leadership predicates when an effect is already observed.
+- [x] Test retry after response loss, same-identity prepare/stop, late factory/callback return, stale floor and missing retained storage parking. Existing grants/receipts remain attributed to their original action tuples.
 
 **Verification**
 
-- [ ] Run managed/native authority functional race regressions and `make test`.
+- [x] Run managed/native authority functional race regressions and `make test`.
 
 ### Task 66: Connect scoped planning, approval and explicit retry services
 
@@ -1365,6 +1365,8 @@ Do not run broad process performance/chaos campaigns by default; the focused deb
 
 
 ## NOT PLANNED CHANGES
+
+- Task65: `internal/operator/dispatch_cleanup_func_test.go` now releases the second-host response only after setting the returning-host barrier, then advances its fake retry clock. The full functional run exposed a background-loop wake racing the test driver; production cleanup behavior is unchanged. Ten focused race repetitions and the complete owning functional suites pass.
 
 - Task62 / peer thread26: single Controller keeps explicit LegacyCoordinator until78; New statically rejects both/neither ports and mixed validators/stores. No copied runner, runtime flag or synthetic scoped view. Ready selection uses state barriers rather than raw historical Requires cursors; progress derives dependency/revocation reasons without polling writes. Scoped ports/selection/transition handling are62, dispatch/effects63–65, concrete service validators66 and live cutover78. Extend65 accordingly; no new tasks.
 

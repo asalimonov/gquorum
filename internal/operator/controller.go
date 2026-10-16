@@ -730,9 +730,16 @@ func caughtUpStatus(status GroupStatus, replicaID uint64) (bool, string) {
 }
 
 func (e *Controller) effectSatisfied(step Step, target Document, status GroupStatus) bool {
+	if step.Kind == StepStopReplica || step.Kind == StepCleanupReplicaState {
+		return forcedRetirementStep(target, step)
+	}
+	return e.nativeEffectSatisfied(step, target.Group(step.GroupID), status)
+}
+
+func (e *Controller) nativeEffectSatisfied(step Step, group *Group, status GroupStatus) bool {
 	switch step.Kind {
 	case StepCreateFoundingGroup:
-		return status.Found && foundingMatchesTarget(target.Group(step.GroupID), status)
+		return status.Found && foundingMatchesTarget(group, status)
 	case StepPrepareReplica, StepAddLearner:
 		return containsID(status.ConfState.Learners, step.ReplicaID) ||
 			containsID(status.ConfState.Voters, step.ReplicaID)
@@ -747,8 +754,6 @@ func (e *Controller) effectSatisfied(step Step, target Document, status GroupSta
 	case StepRemoveReplica:
 		return !containsID(status.ConfState.Voters, step.ReplicaID) &&
 			!containsID(status.ConfState.Learners, step.ReplicaID)
-	case StepStopReplica, StepCleanupReplicaState:
-		return forcedRetirementStep(target, step)
 	default:
 		return false
 	}

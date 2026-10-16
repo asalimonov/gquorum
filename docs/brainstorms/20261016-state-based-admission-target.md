@@ -595,7 +595,8 @@ valid sample. Complete observation producers are Task70; live scoped reads are78
 One Controller accepts exactly one internal coordinator port. Until78 the live
 composition uses LegacyCoordinator; scoped configuration refuses legacy Store
 and whole-document validators. Delete the bridge at complete cutover. WorkItem
-is owned Operation + GroupID; ScopedValidator receives that exact scope.
+is owned Operation + GroupID, with the retained Approved declaration and current
+Consumed proof observation added by Task65; ScopedValidator receives the exact scope.
 ReadyBlocks is bounded selection, never authorization or a durable reservation.
 Use exact current owners and state-based barriers; Requires does not revive a
 superseded predecessor cursor. Reuse current grants, and include consumed-step
@@ -653,3 +654,27 @@ retirement stays detached. No native FenceEvidence is fabricated. Derive the sam
 predicate in obligation indexes, authority queries, settlement and restore; pruning
 removes obsolete native revocation references while retaining the permanent row.
 Host resources remain protected by their exact fences/effects and durable floors.
+
+
+### Required execution and retry reuse (Task65)
+
+ReadyBlocks copies the operation-version declaration and derives current-step
+consumption through retained original authority. These fields are observations;
+the FSM independently checks exact owner, sequence and proof on every transition.
+The scoped worker advances only through PlanBlock.Steps, preserving global numbers
+and skipping detached Cleanup. Consumed retry prefixes never issue a new grant.
+Unconsumed work always obtains its exact grant, even when local/native state looks
+satisfied. Before dispatch and after waits, revalidate the selected scope; valid
+late receipts remain recorded under their original action tuple.
+
+Each worker sends one unchanged grant to one resource/target. Founding requires
+all recorded host receipts before native confirmation; the existing bounded retry
+row remembers the last selected host after RPC release, including at capacity one.
+Recheck preparatory catch-up before destruction using block order, verify observed
+native predicates and final ReadNative membership. Completed deletion requires FSM
+joined-stop/readmission proof, never a leader after the voters have stopped.
+Existing actionWorks, acceptGuardedStart, beginLocalEffect and stopRetiringIdentity
+reuse exact ready/joined state and persist fresh proof under a new fenced grant;
+missing retained storage parks and unresolved startup/Close stays owned. No new
+public API, persistent cursor or lifecycle owner is introduced. Concrete service
+validators connect66; complete scoped persistence/composition remains78.
