@@ -3,14 +3,14 @@ package metrics
 import "time"
 
 // ReplicaObservation combines a received sample with observer-derived health
-// evidence.
+// evidence. Reachability is the latest probe outcome, independent of sample age.
 type ReplicaObservation struct {
 	SeriesID       string        `json:"series_id"`
-	Sequence       uint64        `json:"sequence"` // observer history cursor, not source seq
-	ReceivedAt     time.Time     `json:"received_at"`
+	Sequence       uint64        `json:"sequence"`    // observer history cursor, not source seq
+	ReceivedAt     time.Time     `json:"received_at"` // sample receipt; cached reuse preserves it
 	State          Validity      `json:"state"`
 	Sample         ReplicaSample `json:"sample"`
-	Reachability   string        `json:"reachability"` // alive, unreachable, unknown
+	Reachability   string        `json:"reachability"` // latest probe: alive, unreachable, unknown
 	ReplicationLag UnsignedValue `json:"replication_lag"`
 	ApplyBacklog   UnsignedValue `json:"apply_backlog"`
 	Evidence       Evidence      `json:"evidence"`
@@ -39,8 +39,7 @@ type ClusterSnapshot struct {
 	ObserverInstanceID string               `json:"observer_instance_id"`
 	CollectorRunID     string               `json:"collector_run_id"`
 	At                 time.Time            `json:"at"`
-	ActiveVersion      uint64               `json:"active_version"`
-	TargetVersion      uint64               `json:"target_version"`
+	TargetVersion      uint64               `json:"target_version"` // context; validity uses each group's SourceVersion
 	IsCollectorLeader  bool                 `json:"is_collector_leader"`
 	Local              []ReplicaObservation `json:"local"`
 	Groups             []GroupObservation   `json:"groups"`

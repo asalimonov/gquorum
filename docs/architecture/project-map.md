@@ -774,12 +774,26 @@ results; LeaderEpoch and EvidenceScope fence temporal conclusions.
 
 Interfaces: `Source` = `Active(ctx) (topology.Document,error)`,
 `Health(ctx,topology.Document) (map[string]topology.Health,error)`;
-`MetricsSource` = `Active(ctx) (topology.Document,error)`,
-`Epoch() (LeaderEpoch,bool)`, `Collect(ctx,topology.Document,*ReadPool) (Round,error)`.
+`MetricsSource` = `Topology(ctx) (topology.ProgressPage,error)` (only TargetVersion/Groups),
+`Epoch() (LeaderEpoch,bool)`, `Collect(ctx,topology.ProgressPage,*ReadPool) (Round,error)`.
+Round binds one collector epoch; GroupSamples binds each ConvergedVersion.
+Managed MetricsReads takes the proven GroupProgress rows, never Desired/Approved
+replicas as probe authority. Local identity supplies ClusterID.
 Entries: `New`, Watch `{Start,Wake,Stop,Snapshot,Refresh}`;
 `NewMetricsCollector`, MetricsCollector `{Start,Stop,Refresh,Revalidate,Snapshot,History,ResetDecisions}`;
 `NewReadPool`, ReadPool `{Do,DoKey,Stop}`, `CollectReads`;
 ConditionWindow `{Reset,Observe,Duration}`.
+
+`FI_METRICS_SCOPE`: capture/recapture compares each proven source and declaration;
+TargetVersion is context only. Changed A is omitted for that round and loses only
+its actionable windows; B retains failure/catch-up duration, run/series IDs and
+history cursors. Role-record cooldown anchors survive matching retained records.
+Exact replica/process checks reject predecessor replies; leader candidates must
+belong to the captured assignment. Leadership/cancellation still fences all groups.
+Cached sample ReceivedAt is preserved (unknown placeholders stay zero); latest
+probe reachability earns time through separate advancing condition generations.
+The named service metricsTopology projects actual schema3 rows until78, when
+its body uses the existing local ProgressStatus row builder.
 
 `KB_EVIDENCE_WINDOW`: elapsed wall time does not extend failure/standby proof.
 Continuity requires fresh advancing source generations in an unchanged exact

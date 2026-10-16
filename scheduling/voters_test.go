@@ -35,7 +35,7 @@ func voterInput() ScheduleInput {
 		}
 		group.Replicas = append(group.Replicas, observation)
 	}
-	return ScheduleInput{Target: doc, Groups: provenPolicyGroups(doc), Metrics: metrics.ClusterSnapshot{ActiveVersion: 1, IsCollectorLeader: true, CollectorRunID: "collector", Groups: []metrics.GroupObservation{group}}, Status: map[string]topology.GroupStatus{topology.MetaGroupID: {GroupID: topology.MetaGroupID, SourceVersion: 1, Found: true, LeaderID: 1, Term: 2, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}, Learners: []uint64{4, 5}}, HealthKnown: true, LiveVoters: map[uint64]bool{1: true, 2: true, 3: false, 4: true, 5: true}}}}
+	return ScheduleInput{Target: doc, Groups: provenPolicyGroups(doc), Metrics: metrics.ClusterSnapshot{TargetVersion: 1, IsCollectorLeader: true, CollectorRunID: "collector", Groups: []metrics.GroupObservation{group}}, Status: map[string]topology.GroupStatus{topology.MetaGroupID: {GroupID: topology.MetaGroupID, SourceVersion: 1, Found: true, LeaderID: 1, Term: 2, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}, Learners: []uint64{4, 5}}, HealthKnown: true, LiveVoters: map[uint64]bool{1: true, 2: true, 3: false, 4: true, 5: true}}}}
 }
 func TestVoterConfigSelectsOneStableLearnerAndPreservesHealthyVoters(t *testing.T) {
 	t.Parallel()

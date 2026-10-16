@@ -65,7 +65,7 @@ func TestScopedVoterEvidenceSurvivesUnrelatedDocumentAndGroupChanges(t *testing.
 	row.OperationID = "exec-v8-a1"
 	in.Groups["a"] = row
 	in.Target.Version = 9
-	in.Metrics.ActiveVersion, in.Metrics.TargetVersion = 80, 9
+	in.Metrics.TargetVersion = 9
 	in.Metrics.Groups[0].SourceVersion = 8
 	policy, _ := NewDefaultRepairPolicy(DefaultRepairOptions{})
 	decision, err := policy.Schedule(t.Context(), in)

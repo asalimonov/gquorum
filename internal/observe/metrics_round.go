@@ -8,20 +8,18 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// Round scopes collected group samples to an active topology version and
-// leadership epoch.
+// Round binds collected samples to per-group sources and one leadership epoch.
 type Round struct {
-	ActiveVersion uint64
-	Epoch         LeaderEpoch
-	Groups        map[string]GroupSamples
+	Epoch  LeaderEpoch
+	Groups map[string]GroupSamples
 }
 
-// MetricsSource supplies active topology, collector leadership and bounded peer
-// observations.
+// MetricsSource supplies owned group checkpoints, leadership and bounded probes.
+// Topology returns only TargetVersion and Groups; it is a local observation.
 type MetricsSource interface {
-	Active(context.Context) (topology.Document, error)
+	Topology(context.Context) (topology.ProgressPage, error)
 	Epoch() (LeaderEpoch, bool)
-	Collect(context.Context, topology.Document, *ReadPool) (Round, error)
+	Collect(context.Context, topology.ProgressPage, *ReadPool) (Round, error)
 }
 
 // MetricsConfig supplies collector settings, private sources and scheduler wake

@@ -496,6 +496,11 @@ bounded process-local history without network I/O. `ScheduleInput.Metrics` and
 `Switches` give custom schedulers copied observations and replicated completed
 role records. Followers expose local replica samples; cluster evidence belongs
 to the current meta-leader observer. Unknown/stale sources remain explicit.
+TargetVersion supplies document context; each group's SourceVersion and exact
+proven assignment determine validity. Independent group changes preserve sibling
+failure/standby windows and history cursors. A cached sample keeps its original
+ReceivedAt; a later probe's reachability is separate evidence. Leadership loss
+invalidates all actionable windows while diagnostic history remains local.
 
 `lifecycle.DefaultHooks` supplies local-admission or all-founders startup gates,
 retired-storage retention and stop/diagnostics behavior after mandatory removal

@@ -19,14 +19,14 @@ func (n *node) localLoadMetrics() []metrics.ReplicaObservation {
 	return h.LocalMetrics()
 }
 
-func (n *node) loadMetricsReads(ctx context.Context, doc topology.Document) []observe.ReplicaRead {
+func (n *node) loadMetricsReads(ctx context.Context, groups []topology.GroupProgress) []observe.ReplicaRead {
 	n.mu.RLock()
 	h := n.host
 	n.mu.RUnlock()
 	if h == nil {
 		return nil
 	}
-	return h.MetricsReads(ctx, doc)
+	return h.MetricsReads(ctx, groups)
 }
 func (c *clusterView) Metrics() metrics.ClusterSnapshot {
 	c.node.mu.RLock()

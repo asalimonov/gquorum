@@ -38,6 +38,9 @@ func TestSnapshotPreservesScopedVersionContext(t *testing.T) {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatal(err)
 	}
+	if strings.Contains(string(data), `"active_version"`) {
+		t.Fatal("obsolete whole-document provenance", string(data))
+	}
 	if decoded.TargetVersion != 12 || decoded.Groups[0].SourceVersion != 7 || !strings.Contains(string(data), `"target_version":12`) || !strings.Contains(string(data), `"source_version":7`) {
 		t.Fatalf("lost per-group context: %s", data)
 	}

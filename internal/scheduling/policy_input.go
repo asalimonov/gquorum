@@ -15,8 +15,7 @@ func policyInput(in schedulingapi.ScheduleInput) schedulingapi.ScheduleInput {
 	return owned
 }
 
-// Removed at Task78 scoped activation; Task70 first removes its legacy metrics
-// source projection. This labels actual schema3 observations, without creating
+// Removed at Task78 scoped activation. This labels actual schema3 status, without creating
 // a synthetic authoritative document.
 func legacyScheduleInput(in schedulingapi.ScheduleInput, views topology.ReadView) schedulingapi.ScheduleInput {
 	owned := in.Clone()
@@ -27,9 +26,6 @@ func legacyScheduleInput(in schedulingapi.ScheduleInput, views topology.ReadView
 	for id, status := range owned.Status {
 		status.SourceVersion = views.Active.Version
 		owned.Status[id] = status
-	}
-	for i := range owned.Metrics.Groups {
-		owned.Metrics.Groups[i].SourceVersion = owned.Metrics.ActiveVersion
 	}
 	return owned
 }

@@ -90,7 +90,7 @@ func voterHostFixtureWith(t *testing.T, configure func(*topology.Document)) (*te
 	if configure != nil {
 		configure(&doc)
 	}
-	observed := metrics.GroupObservation{GroupID: topology.MetaGroupID, LeaderID: 1, Term: 2, MembershipDigest: "membership", State: metrics.Current, TargetVoters: 3, NativeVoters: 3, EligibleStandbys: 2}
+	observed := metrics.GroupObservation{SourceVersion: 1, GroupID: topology.MetaGroupID, LeaderID: 1, Term: 2, MembershipDigest: "membership", State: metrics.Current, TargetVoters: 3, NativeVoters: 3, EligibleStandbys: 2}
 	status := topology.GroupStatus{GroupID: topology.MetaGroupID, Found: true, LeaderID: 1, Term: 2, Commit: 10, Applied: 10, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}, Learners: []uint64{4, 5}}, HealthKnown: true, LiveVoters: map[uint64]bool{}, Progress: map[uint64]topology.ReplicaProgress{}}
 	for i := uint64(1); i <= 5; i++ {
 		name := fmt.Sprintf("n%d", i)
@@ -108,7 +108,7 @@ func voterHostFixtureWith(t *testing.T, configure func(*topology.Document)) (*te
 		observed.Replicas = append(observed.Replicas, r)
 	}
 	h.status[topology.MetaGroupID] = status
-	h.observations = metrics.ClusterSnapshot{CollectorRunID: "collector/epoch", ObserverInstanceID: "process", ActiveVersion: 1, IsCollectorLeader: true, Groups: []metrics.GroupObservation{observed}}
+	h.observations = metrics.ClusterSnapshot{CollectorRunID: "collector/epoch", ObserverInstanceID: "process", TargetVersion: 1, IsCollectorLeader: true, Groups: []metrics.GroupObservation{observed}}
 	h.mustApply(metaengine.ProposeDocument{Doc: doc, ExpectedVersion: 0})
 	op := h.mustApply(metaengine.BeginOperatorProposal{Version: 1, Plan: topology.Plan{Version: 1}, Origin: topology.OriginFounding, At: time.Now().UTC()})
 	h.mustApply(metaengine.TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: op.OperatorID, Version: 1, Attempt: 1, State: topology.OperatorSucceeded, At: time.Now().UTC()}})

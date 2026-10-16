@@ -34,5 +34,15 @@ func evidenceRound(d topology.Document, seq uint64) (Round, []metrics.ReplicaObs
 		obs := metrics.ReplicaObservation{State: metrics.Current, Reachability: "alive", Sample: sample}
 		probes = append(probes, Probe{Identity: id, Observation: obs, Dispatched: true, Reachability: "alive"})
 	}
-	return Round{ActiveVersion: d.Version, Epoch: LeaderEpoch{InstanceID: "n1-process", Term: 1, LeaderID: 1}, Groups: map[string]GroupSamples{topology.MetaGroupID: {Probes: probes}}}, []metrics.ReplicaObservation{probes[0].Observation.Clone()}
+	return Round{Epoch: LeaderEpoch{InstanceID: "n1-process", Term: 1, LeaderID: 1}, Groups: map[string]GroupSamples{topology.MetaGroupID: {SourceVersion: d.Version, Probes: probes}}}, []metrics.ReplicaObservation{probes[0].Observation.Clone()}
+}
+
+func evidenceTopology(doc topology.Document) topology.ProgressPage {
+	page := topology.ProgressPage{TargetVersion: doc.Version}
+	for _, g := range doc.Groups {
+		group := g
+		page.Groups = append(page.Groups, (topology.GroupProgress{GroupID: group.ID,
+			ConvergedVersion: doc.Version, Converged: &group, Approved: &group}).Clone())
+	}
+	return page
 }

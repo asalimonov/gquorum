@@ -50,6 +50,31 @@ func TestProgressDecoratesOnlyCachedReturnedRows(t *testing.T) {
 	if !reflect.DeepEqual(f.g.lastLoadStatus["work"], observed) {
 		t.Fatal("cache aliased returned page")
 	}
+
+	// A newer desired/approved declaration cannot relabel the old observation.
+	desired := active.Clone()
+	rows[0].Desired = desired.Group("work")
+	rows[0].Desired.Labels = map[string]string{"unapproved": "new"}
+	rows[0].Approved = rows[0].Desired
+	f.g.decorateProgress(rows)
+	if got := rows[0].Observation; got == nil || got.SourceVersion != 1 || got.ReceivedAt != at {
+		t.Fatal("topology decoration renewed sample", got)
+	}
+	oldLeader := observed.Clone()
+	oldLeader.LeaderID = 999
+	f.g.lastLoadStatus["work"] = oldLeader
+	f.g.decorateProgress(rows)
+	if got := rows[0].Observation; got == nil || got.LeaderID != 999 || got.LeaderNodeName != "" || got.ReceivedAt != at {
+		t.Fatal("unknown leader ID was erased or renamed", got)
+	}
+	rows[0].ConvergedVersion++
+	f.g.decorateProgress(rows)
+	if rows[0].Observation != nil {
+		t.Fatal("old observation relabeled to new source")
+	}
+	rows[0].ConvergedVersion = 1
+	f.g.lastLoadStatus["work"] = observed
+
 	f.command(t, metaengine.RevokeSession{SessionID: "progress"})
 	f.command(t, metaengine.GrantSession{SessionID: "next", NodeName: "n1", InstanceID: "successor", TTLSeconds: 30})
 	f.command(t, metaengine.AcquireLock{Key: "node/n1", SessionID: "next"})

@@ -67,7 +67,7 @@ type Options struct {
 	LoadGroups           operator.GroupEffects
 	InstallLocalFence    func(context.Context, load.FenceRequest) (load.FenceResult, error)
 	ApplyLocalMetaAction func(context.Context, load.ActionRequest) (load.ActionResult, error)
-	LoadMetricsReads     func(context.Context, topology.Document) []observe.ReplicaRead
+	LoadMetricsReads     func(context.Context, []topology.GroupProgress) []observe.ReplicaRead
 	LocalLoadMetrics     func() []metrics.ReplicaObservation
 	Health               topology.HealthSource
 	Scheduling           SchedulingOptions

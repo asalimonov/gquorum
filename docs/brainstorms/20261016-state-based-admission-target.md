@@ -793,3 +793,19 @@ preparation. This is static composition, with shared callback/lifetime ownership
 Task78 selects scopedSchedulingHost and removes the legacy port/gates. Until then,
 repair_plan is Unsupported in schema3. Task70 supplies per-group collector evidence;
 no synthetic Active or production runtime model switch is introduced.
+
+
+### Per-group metrics capture (Task70, peer33)
+
+Use existing ProgressPage as the internal envelope for TargetVersion and
+GroupProgress rows; no PlanInput, node-checkpoint key or new topology entity.
+Capture/recapture compares ConvergedVersion plus the exact proven declaration.
+Replica non-reuse binds the host; full process/run checks remain at probe/sample
+boundaries. A changed source invalidates only its own actionable windows, with
+retained role-record cooldown anchors preserved. Diagnostic histories use exact
+replica/process/run series. Leadership/cancellation still invalidates the round.
+ReceivedAt changes only on a valid newly received reply; cached reuse preserves
+it and an unknown placeholder leaves it zero. Reachability freshness uses separate
+probe generations, not the cached sample's receive time. Until78, metricsTopology
+projects actual schema3 progress; then its body reuses local
+ProgressStatus/shared group rows. No synchronous progress-read fan-out added.

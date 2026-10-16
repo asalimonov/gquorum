@@ -1079,13 +1079,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `metrics/observation.go`, `internal/observe/metrics*.go`, trackers, status caches. **Target:** [T] §3.2, §5.4, §8.3; contract C7. **Depends on:** 3, 61, 68–69. **Budget:** ≤550.
 
-- [ ] Remove ClusterSnapshot.ActiveVersion; use TargetVersion for context and per-group SourceVersion plus exact assignment for observation validity and collector round keys.
-- [ ] Invalidate only changed group evidence, preserve instance/series/sample sequence/received time and validity reasons. Leadership loss still invalidates the whole collector round.
-- [ ] Test A changes while B retains failure duration/catch-up samples, stale predecessor reports cannot describe successors, unknown leader names retain numeric IDs and safe progress decoration cannot relabel cached freshness.
+- [x] Remove ClusterSnapshot.ActiveVersion; use TargetVersion for context and per-group SourceVersion plus exact assignment for observation validity and collector round keys.
+- [x] Invalidate only changed group evidence, preserve instance/series/sample sequence/received time and validity reasons. Leadership loss still invalidates the whole collector round.
+- [x] Test A changes while B retains failure duration/catch-up samples, stale predecessor reports cannot describe successors, unknown leader names retain numeric IDs and safe progress decoration cannot relabel cached freshness.
 
 **Verification**
 
-- [ ] Run metrics/observe units and applicable functional race checks; run `make test`.
+- [x] Run metrics/observe units and applicable functional race checks; run `make test`.
 
 ### Task 71: Recover managed replicas from exact scoped evidence
 
@@ -1175,7 +1175,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metastore/store.go`, `internal/metaengine/sm.go`/`codec.go`, snapshot/restart tests, remaining composition. **Target:** [T] §4.1–4.3, §7.1, §8.4. **Depends on:** 1–77. **Budget:** ≤550.
 
-- [ ] Activate complete metadata disk/state/envelope schema 4; verify authority schema 2 from Task 54. Remove Active storage/API, Operator/WaitOperator wrappers, old MutationResult fields, ActivateTarget/legacy envelopes and every registered temporary scaffold now that all callers are converted. No fallback, migration, mixed-version acceptance or refounding old evidence. Replace Task67 legacyEnsureProgress/legacyEnsureFailure/legacyTransferPlan with confirmed scoped progress, exact operation-block diagnostics and transfer_plan; remove schema3 replacement guards when connecting scoped replacement commits. Select Task69 scopedSchedulingHost and remove the legacy scheduling Host/Config port, legacyScheduleInput and global driver gates.
+- [ ] Activate complete metadata disk/state/envelope schema 4; verify authority schema 2 from Task 54. Remove Active storage/API, Operator/WaitOperator wrappers, old MutationResult fields, ActivateTarget/legacy envelopes and every registered temporary scaffold now that all callers are converted. No fallback, migration, mixed-version acceptance or refounding old evidence. Replace Task67 legacyEnsureProgress/legacyEnsureFailure/legacyTransferPlan with confirmed scoped progress, exact operation-block diagnostics and transfer_plan; remove schema3 replacement guards when connecting scoped replacement commits. Select Task69 scopedSchedulingHost and remove the legacy scheduling Host/Config port, legacyScheduleInput and global driver gates. Replace Task70 metricsTopology legacy projection with local ProgressStatus rows for collection and local metadata samples.
 - [ ] Add intentionally sourced v4/v2 fixtures with provenance; retain old changed-format fixtures for explicit rejection and immutable unrelated physical baseline hashes for unchanged-format checks. Preserve current-index/term/confstate/pins and unchanged buckets.
 - [ ] Exercise fresh startup and current-format retained restart through real composition. Confirm all new proposals/queries/dispatch/report callbacks are reachable, with no production dual-model switch or unsupported stub left on an accepted path. Cover successful operationCoordinator pages/cursor advancement, leadership changes across reads and native group-fence recipients (peer29 L1); host/Unsupported/NotLeader functional coverage already exists.
 
