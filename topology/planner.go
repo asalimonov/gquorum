@@ -23,13 +23,19 @@ func BuildPlan(input PlanInput, desired Document, rules Rules) (Plan, error) {
 
 func constructPlan(input PlanInput, desired Document, options PlanOptions) (Plan, error) {
 	// Whole-document completion still consumes this path until Task 73.
-	plan, err := constructGroupPlan(input, desired, options, unionGroupIDs(input, desired))
-	plan.Blocks, plan.Dependencies = nil, nil
-	return plan, err
+	return constructGroupPlan(input, desired, options, planScope{groups: unionGroupIDs(input, desired)})
+}
+
+// Remove the flat construction option with the schema-3 caller at Task 73.
+// This controls plan construction only, never the active authority model.
+type planScope struct {
+	groups    []string
+	partition bool
 }
 
 // Keep full identity evidence; only execution work and native reads are scoped.
-func constructGroupPlan(input PlanInput, desired Document, options PlanOptions, groups []string) (Plan, error) {
+func constructGroupPlan(input PlanInput, desired Document, options PlanOptions, scope planScope) (Plan, error) {
+	groups := scope.groups
 	rules, preferredMetaTransfer := options.Rules, options.PreferredMetaTransfer
 	if err := desired.Validate(rules); err != nil {
 		return Plan{}, err
@@ -62,7 +68,9 @@ func constructGroupPlan(input PlanInput, desired Document, options PlanOptions, 
 	if err := bindVoterGuards(&plan, observed, desired); err != nil {
 		return Plan{}, err
 	}
-	bindPlanBlocks(input, desired, &plan, groups)
+	if scope.partition {
+		bindPlanBlocks(input, desired, &plan, groups)
+	}
 	if err := validatePlanShapeFor(input, desired, plan, groups); err != nil {
 		return Plan{}, planUnsafef("%v", err)
 	}

@@ -342,6 +342,15 @@ func (v remainingPlanValidation) validateNativeCapacity(s *remainingGroupSimulat
 	capacity := v.rules.Limits.MaxReplicas
 	if s.group.ID == MetaGroupID {
 		capacity = v.rules.Limits.MaxNodes
+		owners := remainingOwners(v.view.Input, MetaGroupID)
+		for _, members := range []map[uint64]bool{s.voters, s.learners} {
+			for id := range members {
+				if old, known := owners[id]; known && v.view.Target.MemberID(old.NodeName) == 0 &&
+					remainingPlanHas(v.ex, StepRemoveReplica, MetaGroupID, old.ReplicaKey) {
+					capacity++ // Exact decommission allowance contracts as old members leave.
+				}
+			}
+		}
 	}
 	if len(s.voters)+len(s.learners) > capacity {
 		return remainingPlanError("step %d exceeds native replica capacity", step.Seq)

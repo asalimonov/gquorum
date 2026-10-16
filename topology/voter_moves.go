@@ -46,6 +46,9 @@ func planVoterMoves(view voterPlanTopology, status GroupStatus, options PlanOpti
 		return nil, err
 	}
 	moves := s.classifyMoves(group)
+	if err := s.prepareBeforeDecommission(group); err != nil {
+		return nil, err
+	}
 	s.retireStale(moves, status)
 	if err := s.replaceOutgoing(view, group, &moves); err != nil {
 		return nil, err
@@ -66,8 +69,8 @@ func (s *voterPlanState) checkInitial() error {
 	if len(s.voters) == 0 {
 		return planUnsafef("group %q has no observed voters", s.groupID)
 	}
-	if len(s.voters)+len(s.learners) > s.maximum {
-		return planUnsafef("group %q exceeds replica_capacity %d", s.groupID, s.maximum)
+	if len(s.voters)+len(s.learners) > s.replicaCapacity() {
+		return planUnsafef("group %q exceeds replica_capacity %d", s.groupID, s.replicaCapacity())
 	}
 	if s.healthKnown && s.liveCount(s.voters) < QuorumOf(len(s.voters)) {
 		return planUnsafef("group %q has no observed live quorum", s.groupID)
@@ -88,7 +91,7 @@ func (s *voterPlanState) ensureLearner(replica Replica) error {
 	if _, learner := s.learners[replica.ReplicaID]; learner {
 		return nil
 	}
-	if len(s.voters)+len(s.learners) >= s.maximum {
+	if len(s.voters)+len(s.learners) >= s.replicaCapacity() {
 		return planUnsafef("group %q has no replica_capacity for learner %d", s.groupID, replica.ReplicaID)
 	}
 	s.emit(StepPrepareReplica, replica)
@@ -379,7 +382,7 @@ func (s *voterPlanState) validateFinal() error {
 
 func (s *voterPlanState) replacePair(group *Group, departing ReplicaKey, arrival Replica) error {
 	if _, alreadyLearner := s.learners[arrival.ReplicaID]; !alreadyLearner &&
-		len(s.voters)+len(s.learners) >= s.maximum &&
+		len(s.voters)+len(s.learners) >= s.replicaCapacity() &&
 		targetReplicaByID(group, departing.ReplicaID) == nil {
 		// Exact-identity replacement at a hard host cap has no learner
 		// seat. Release the old seat first only when the observed live

@@ -233,3 +233,46 @@ Inspected sources: [dependency validation](../../topology/plan_blocks.go),
 [join validation](../../internal/metaservice/join_checks.go) and
 [current ownership retention](../../internal/metaengine/cleanup_evidence.go).
 These are proposed regressions, not results from a new test run.
+
+## At-capacity metadata replacement (`FI_META_SURGE`)
+
+Peer thread 11 identified a cycle between admission and evacuation when metadata
+removed an outgoing host before preparing its replacement. Plan preparation and
+AddLearner for incoming metadata hosts before any decommission removal. Existing
+paired catch-up waits, leadership transfer, promotions and live-quorum/placement
+checks remain mandatory. Desired learners do not need a standalone promotion wait.
+
+Final documents and metadata voter counts remain bounded by MaxNodes. Native
+membership may temporarily contain MaxNodes plus exact still-native identities
+whose node has no desired metadata member and whose exact removal is in the plan.
+Recompute the allowance from each simulated membership state. It covers learners while
+load replicas evacuate; it contracts when those outgoing identities leave.
+Construction and remaining-plan validation apply the same bound. A same-node
+readmission has a desired replacement member and receives no decommission
+allowance. Unknown identities never supply capacity. No public capacity setting
+or authority mode is added.
+
+For a load-only successor during an in-progress readmission, the approved exact
+replacement binding selects readmission ownership of predecessor retirement.
+It is not consumption proof. Load preparation still waits for exact admission;
+deletion and zero-step completion independently require consumed readmission
+retirement for every omitted former identity. Required-stop handover must not
+convert that obligation into a call to the retired predecessor process.
+
+A replace-and-move approval waits for the incoming host to prepare and join as a
+learner before decommission removal. If that host never joins, the old member
+stays configured; removal-only approvals remain possible and unaffected. An
+operator wanting removal first can approve removal and addition separately.
+At the voter cap, the existing guarded remove-then-promote pair remains. If the
+outgoing voter is dead, metadata has no spare voter fault tolerance while load
+evacuation catches up. Demote/promote before final evacuation-gated removal is a
+separate availability improvement, deferred rather than silently changing the
+approved demotion/adjacency contract in this correction.
+
+For origin validation, Pending handover without any issued fact requires only
+structural origin eligibility and the FSM-assigned write-once field. When issued
+facts exist, original readmission AdmissionID must match the resolved origin;
+the origin cannot follow the earliest retained prefix fact. Prefix operations
+must be ordered between origin and current owner with the same approved member
+and valid admission work. Facts issued by the current owner are suffix evidence.
+Do not invent a receipt for a pending handover or add another provenance ledger.

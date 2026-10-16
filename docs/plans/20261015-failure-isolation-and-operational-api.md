@@ -510,6 +510,16 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [x] Run admission/readmission/restore units, relevant join functional regressions, staged lint and `make test`.
 
+### Correction 12: Isolate scoped construction and admit before decommission
+
+**Files:** topology planner/metadata replacement helpers, remaining-plan native capacity, join validation tests and design amendment. **Target:** peer thread 11 findings 1–2; FI_META_SURGE. **Budget:** ≤550 Go lines.
+
+- [x] Keep legacy construction entirely flat, including converged-version previews; partition only scoped construction. Remove the temporary flat construction option at Task 73.
+- [x] Prepare/add incoming metadata hosts before decommissioning members. Bound temporary native seats by MaxNodes plus exact still-native decommissioned identities; preserve document/voter limits, learner-first waits, live-quorum and placement guards. No decommission allowance for same-node readmission.
+- [x] Apply the same exact contracting allowance in remaining-plan validation. Recompute the allowance from each simulated state and require the exact planned Remove. Verify join grants accept exact retained membership hints without treating them as final document capacity.
+- [x] Add live/scoped three-node replacement, four-node learner/reduction edge cases, converged previews and resumed native-surge regressions before/after removal. Test same-node order, refused unknown identities and missing planned removals. Missing replacement readiness leaves the old member configured; removal-only approvals remain available. Remove the redundant deletion-kind test. Run focused units/functionals, staged lint and make test.
+- [x] Assign readmission-owned load-only retirement and exact completion proof to Tasks 31–32, and explicitly preserve shared approval validation in Task 44. Origin provenance test boundaries are resolved in thread 11 round 3.
+
 ### Task 30: Prepare scoped approval validation and ownership changes
 
 **Files:** `internal/metaengine` approval/scope/operation helpers and tests. **Target:** [T] §5.2, §7.1, §12 “Approve”/“validateApprovalScopes”. **Depends on:** 15, 25–29. **Budget:** estimated 350–500 changed Go lines, ceiling 550.
@@ -529,8 +539,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Prepare handover of the one live (node, instance) row to an exact same-member metadata successor. Save the original operator once, retain process origin, and preserve consumed facts and the complete retirement batch. Reject changed members, canceled/revoked proof and wrong owners; grant no replacement identity implicitly.
 - [ ] Validate original approved/consumed admission prefix plus the successor's approved suffix. Already-native successors may omit Prepare/Add; exact receipts or metadata convergence must justify that omission. Recompute milestones without inventing native membership or changing old grant/action attribution.
+- [ ] For load-only successors during an in-progress readmission, use the approved exact replacement binding to keep predecessor retirement owned by readmission. Do not reintroduce unroutable old-host stops/cleanup; test before/after consumed preparation and whole-group deletion. Approved binding selects ownership, never proves receipt consumption.
 - [ ] Extend scoped restore to the same prefix/suffix contract. Keep Previous exclusively for immutable-plan retry. Share the preparation with later retry and non-founding admission paths; atomic installation is Task 32 and scoped revocation protection is Task 33.
-- [ ] Test before/after Prepare/Add, zero-step and promotion-only successors, interleaved process replacement, retained original retirement and contradictory/missing prefix evidence. Incomplete preparations never mutate the input graph.
+- [ ] Test before/after Prepare/Add, zero-step and promotion-only successors, interleaved process replacement, retained original retirement and contradictory/missing prefix evidence, and an eligible-but-wrong origin claiming another operation's consumed prefix or batch. An unissued Pending handover needs structural origin eligibility, not a fabricated receipt or new provenance ledger. Test both no-fact acceptance and contradictions with issued facts; the origin must not follow the earliest retained prefix fact, and every prefix fact must name a same-member operation between origin and current owner. Incomplete preparations never mutate the input graph.
 
 **Verification**
 
@@ -542,7 +553,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Finish applyBeginOperation with prepared Target, operations/owners, zero-step group/node/marker completion and same-record admission handover. One non-fallible installation follows every validation; unchanged load blocks remain owned. Share approval validation with repair/voter/readmission as those handlers are implemented.
 - [ ] Atomically rebind every unconsumed required cleanup StopAction to the successor's exact required step, including across approval versions. Extend restore in the same task: current owner step or failed ownerless chain tip, preserving old actions/receipts and pinning both operation chains. Missing/wrong-host/wrong-replica stops refuse the entire approval.
-- [ ] Preserve deletion rows, retired group IDs and whole-group stop boundaries. Integrate the scoped revocation preparation in Task 33 before activating this path; do not fall back to global legacy revocation or publish partially prepared ownership.
+- [ ] Preserve deletion rows, retired group IDs and whole-group stop boundaries. For readmission-owned omitted host effects, require exact consumed retirement for every former identity even in deletion/zero-step completion; never rebind that identity to an unroutable predecessor host stop. Integrate the scoped revocation preparation in Task 33 before activating this path; do not fall back to global legacy revocation or publish partially prepared ownership.
 - [ ] Test omitted/extra/duplicate blocks, unchanged admission-dependent owners, new and inherited required stops, late CAS refusal and atomic installation/refusal. Live production activation remains Task 73 with complete persistence.
 
 **Verification**
@@ -699,6 +710,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** `cluster_mutations.go`, `internal/metaservice/mutations.go`, `internal/metaengine/admission*.go`, repair helpers. **Target:** [T] §3.1, §5.3, §7.1; contract C1. **Depends on:** 39–43. **Budget:** ≤550.
 
 - [ ] Change ReadmitNode(ctx, name, expectedMemberID, opts) and ReseatReplica(ctx, group, ReplicaKey, opts); update immediate callsites together. Require nonzero exact predecessor and retained replacement evidence before returning an already-accepted result.
+- [ ] Route readmission/reseat approval through the shared new-approval validation and atomic preparation, including rejection of duplicate consumed Remove, cleanup-owned Cleanup/Stop and DeleteGroupState without uncovered Hosted ownership.
 - [ ] Allocate fresh monotonic IDs only after replicated CAS/identity checks. Explicit reseat uses narrow repair/rebase with OriginOperator and refuses an owned group naming its operation; readmission keeps exact grant/fence/join lineage and scoped admission prerequisites.
 - [ ] Test repeated lost responses, arbitrary successor conflict, busy scopes, disjoint staged intent, readmission on a reused node name and no old global Latest=Target=Active admission requirement.
 
