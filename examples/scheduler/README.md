@@ -39,7 +39,7 @@ Configuration is environment variables (or the matching flags):
 | `GQUORUM_NODE` | required | Local node name. |
 | `GQUORUM_PEERS` | required | Comma-separated node names; each is also its host name. Member IDs come from `gquorum.FoundingIDs`. |
 | `GQUORUM_META_PORT`, `GQUORUM_LOAD_PORT` | 9000, 9001 | Ports on every peer. |
-| `GQUORUM_HTTP_LISTEN` | `:8080` | Operator HTTP. |
+| `GQUORUM_HTTP_LISTEN` | `:8080` | Node HTTP. |
 | `GQUORUM_CLUSTER`, `GQUORUM_DATA` | `scheduler-example`, `/data` | Cluster ID and data root. |
 | `GQUORUM_CREDENTIAL_FILE` | required | Shared demo secret. |
 | `GQUORUM_ALLOW_PLAINTEXT` | false | Explicit opt-in for the isolated demo network. |
@@ -73,7 +73,7 @@ local projection and returns `StateMachine`, `Run`, and `Close` to Node.
 | [executor.go](executor.go) | Wakes on `Observation.AppliedIndex`, reads committed state, runs start → calculate → finish. |
 | [task/](task/) | Business data, compare-and-swap commands, deterministic transitions and quorum read helpers. No database access. |
 | [localdb/](localdb/) | SQLite/XORM transactions, DDL, snapshots, file ownership and retirement (`RetirementRequest.Verify`). |
-| [http.go](http.go) | Operator HTTP. |
+| [http.go](http.go) | Node HTTP. |
 
 ```mermaid
 flowchart LR

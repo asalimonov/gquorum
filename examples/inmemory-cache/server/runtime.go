@@ -149,7 +149,7 @@ func (r *runtime) localGroup() (*load.Group, error) {
 	return nil, fault.ErrReplicaNotReady
 }
 
-// ensureGroup makes the cache group Active with one voter per peer and
+// ensureGroup creates the cache group with one voter per peer and
 // disk-backed Raft storage. Every node runs it; EnsureGroup makes concurrent
 // calls converge. A restarted node replays its snapshot and committed log under
 // the same replica identity, then catches up from the leader.

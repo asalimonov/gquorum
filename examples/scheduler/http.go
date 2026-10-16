@@ -110,10 +110,10 @@ func (r *runtime) handleStatus(w http.ResponseWriter, request *http.Request) {
 	nodeStatus := r.node.Status()
 	out := map[string]any{"observational": true, "node": nodeStatus}
 	if id := nodeStatus.Scheduling.CurrentOperatorID; id != nil {
-		if operator, err := r.node.Cluster().Operation(request.Context(), topology.OperationID(*id)); err == nil {
-			out["operator"] = operator
+		if operation, err := r.node.Cluster().Operation(request.Context(), topology.OperationID(*id)); err == nil {
+			out["operation"] = operation
 		} else {
-			out["operator_error"] = err.Error()
+			out["operation_error"] = err.Error()
 		}
 	}
 	if s := r.service.Load(); s != nil {

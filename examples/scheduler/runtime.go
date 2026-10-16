@@ -191,7 +191,7 @@ func schedulerGroup(peers []string) gquorum.GroupSpec {
 }
 
 // ensureGroup waits for this node to be ready, then makes the scheduler group
-// Active. Every node runs it; EnsureGroup makes concurrent calls converge.
+// fully converged. Every node runs it; EnsureGroup makes concurrent calls converge.
 func (r *runtime) ensureGroup(ctx context.Context) error {
 	for !r.node.Status().Ready {
 		if err := waitContext(ctx, 200*time.Millisecond); err != nil {
