@@ -896,13 +896,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `storage/walstore/lifecycle.go` and narrowly scoped marker helpers. **Target:** [T] §4.2, §12 “Exact collection marker and partial deletion”. **Depends on:** 6. **Budget:** ≤550.
 
-- [ ] Implement sibling `<token>.collection` JSON with schema_version=1 and the unchanged full RetiredReplica encoding. Validate confinement, identity/time equality, regular-file/no-symlink state, open store and absence of a live owner.
-- [ ] Persist and sync the marker and parent before destructive work. Retired enumeration ignores markers. Do not let missing directories or missing/swapped roots create deletion proof.
-- [ ] Test malformed/traversal tokens, mismatched/corrupt marker, wrong identity/time, symlinks and marker persistence failure preserving retired data. Adapt TiKV ordering only; retain gquorum's stricter proof semantics.
+- [x] Implement sibling `<token>.collection` JSON with schema_version=1 and the unchanged full RetiredReplica encoding. Validate confinement, identity/time equality, regular-file/no-symlink state, open store and absence of a live owner.
+- [x] Persist and sync the marker and parent before destructive work. Retired enumeration ignores markers. Do not let missing directories or missing/swapped roots create deletion proof.
+- [x] Test malformed/traversal tokens, mismatched/corrupt marker, wrong identity/time, symlinks and marker persistence failure preserving retired data. Adapt TiKV ordering only; retain gquorum's stricter proof semantics.
 
 **Verification**
 
-- [ ] Run focused walstore functional marker tests and `make test`.
+- [x] Run focused walstore functional marker tests and `make test`.
 
 ### Task 56: Complete crash-safe Collect and ForgetCollection
 

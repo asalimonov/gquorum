@@ -1128,3 +1128,16 @@ Implemented
 Verified
 - Full authoritystore functional suite passes2.771s. Collection journal regressions pass under race3.723s after the paging refactor. make test:1772/1772,9.120s; test-reports/unit/20261016T134340.089437Z-aln3p505/report.md. Staged lint/diff checks pass; logs /tmp/gquorum-task54-{functional,race,unit-final,lint}.log.
 - Coverage includes reopen at both states, immutable first timestamp, conflicting proof/sequence, prepared-row removal refusal, exact release/retry, sequence persistence and overflow, owned pages after deleting cursor rows, invalid/foreign cursors, schema1/missing-bucket/malformed/nested/key/sequence/member/receipt corruption, concurrent prepare/complete, and repeated rebind during scans/preparation. No Docker run claimed. Next Task55; mandatory peer/dead-code checkpoint70 follows that commit.
+
+## Task 55 — Exact WAL collection markers
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 70).
+
+Implemented
+- WAL collection now validates the exact retired token/identity/time and inactive owner, checks the original opened root, then persists a sibling schema1 marker with unchanged full RetiredReplica encoding before deletion. Strict reads reject symlinks, nonregular files, malformed/unknown/trailing data, unsupported schema and conflicting proof. Same-volume hard-link publication of a synced temporary file cannot overwrite existing evidence; the root is synced before destructive work, including retry after failed sync.
+- Missing data without a marker returns os.ErrNotExist; an exact marker permits a repeated completed collection. Retired enumeration excludes markers. Root inode checks reject removed/replaced/symlinked roots even if replacement files contain matching proof. Current recursive deletion remains the existing implementation until Task56 immediately replaces it with pin-last, nonrecursive final removal and ForgetCollection.
+- TiKV source inspected: components/raftstore/src/store/peer_storage.rs clear_meta_in_kv_and_raft synchronously writes PeerState::Tombstone before Raft cleanup. Only this durability ordering is reused; gquorum retains stricter exact physical collection proof. No new public API or task.
+
+Verified
+- Focused walstore marker/retirement/quarantine functional suite1.126s; make test:1772/1772,8.057s; test-reports/unit/20261016T134759.593205Z-m_z1hg2j/report.md. Staged lint and diff checks pass. Logs /tmp/gquorum-task55-{functional,unit-final,lint}.log.
+- Coverage includes marker-before-deletion, restart/repeated collection, unchanged encoding/receipt, malformed/foreign/conflicting/symlink/directory markers, root replacement/missing root, absence without marker, failed non-overwriting publication, token confinement, existing live/bound owner refusal and successor preservation. Test compilation and operand-order lint issues were fixed before validation. No Docker run claimed.
+- Commit70 dead-code audit: deadcode -test ./... symbol set exactly matches checkpoint65; no newly obsolete helper. Log /tmp/gquorum-batch70-deadcode.log. Next request reviews immutable commits66–70; Task56 continues independently while Claude reviews.
