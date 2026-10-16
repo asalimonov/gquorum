@@ -16,7 +16,7 @@
 
 **Status:** implementation in progress; completion and validation are recorded per task below.
 
-**Accepted design amendment (2026-10-16):** [state-based admission](../brainstorms/20261016-state-based-admission-target.md), from peer thread 10. The user authorized adopting peer consensus without further approval and finishing the goal. The amendment is normative alongside [T]; Task 26 is the first unchecked task.
+**Accepted design amendment (2026-10-16):** [state-based admission](../brainstorms/20261016-state-based-admission-target.md), from peer thread 10. The user authorized adopting peer consensus without further approval and finishing the goal. The amendment is normative alongside [T]; resume from the first unchecked task below.
 
 [T]: ../brainstorms/20261015-failure-isolation-and-operational-api-target.md
 [B]: ../brainstorms/20261015-failure-isolation-and-operational-api.md
@@ -477,13 +477,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaengine` scope/approval helpers and owning-package tests. **Target:** [T] §5.1–5.3, §12 “validateApprovalScopes” and repair rebase. **Depends on:** 25–26. **Budget:** estimated 300–500 changed Go lines, ceiling 550.
 
-- [ ] Derive semantic read/write conflicts from trusted approved/candidate declarations and exact allocation evidence. AffectedGroups supplies ownership scopes only; separately compare repair candidate eligibility/domain/member reads with existing placement evaluation. Ignore unassigned candidates that are ineligible in both versions; do not merge candidate reads into operation ownership or native collection. Service scope lists are checked evidence, never trusted scope selection. Keep the common derivation used by planning and replicated validation.
-- [ ] Check captured group source versions/current owners and required affected group sets under the FSM lock. No admission invalidation closure is needed; the final exact ownership set and atomic installation remain Task 29. Unknown dependencies refuse independence.
-- [ ] Test omitted/extra/duplicate scopes, stale source/owner expectations, disjoint edits versus shared eligibility/rules, node-only edits and allocation conflicts. Repair must not read every unrelated node field; same-group edits and exact host/member changes remain conflicts.
+- [x] Derive semantic read/write conflicts from trusted approved/candidate declarations and exact allocation evidence. AffectedGroups supplies ownership scopes only; separately compare repair candidate eligibility/domain/member reads with existing placement evaluation. Ignore unassigned candidates that are ineligible in both versions; do not merge candidate reads into operation ownership or native collection. Service scope lists are checked evidence, never trusted scope selection. Keep the common derivation used by planning and replicated validation.
+- [x] Check captured group source versions/current owners and required affected group sets under the FSM lock. No admission invalidation closure is needed; the final exact ownership set and atomic installation remain Task 29. Unknown dependencies refuse independence.
+- [x] Test omitted/extra/duplicate scopes, stale source/owner expectations, disjoint edits versus shared eligibility/rules, node-only edits and allocation conflicts. Repair must not read every unrelated node field; same-group edits and exact host/member changes remain conflicts.
 
 **Verification**
 
-- [ ] Run scope/approval/repair units, staged lint and `make test`. New scoped apply paths remain isolated until complete activation.
+- [x] Run scope/approval/repair units, staged lint and `make test`. New scoped apply paths remain isolated until complete activation.
 
 ### Task 28: Build required blocks and the two barrier shapes
 

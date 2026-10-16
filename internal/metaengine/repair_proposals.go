@@ -49,6 +49,9 @@ func (p *CommitRepairOperationProposal) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
+	if err := validatePlanScopes(decoded.Plan, decoded.Scopes); err != nil {
+		return err
+	}
 	*p = CommitRepairOperationProposal(decoded)
 	return nil
 }

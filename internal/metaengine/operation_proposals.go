@@ -38,6 +38,9 @@ func (p *BeginOperationProposal) UnmarshalJSON(data []byte) error {
 	if err := decodeScopedPayload(data, &decoded, "version", "plan", "scopes", "actor", "origin", "at"); err != nil {
 		return err
 	}
+	if err := validatePlanScopes(decoded.Plan, decoded.Scopes); err != nil {
+		return err
+	}
 	*p = BeginOperationProposal(decoded)
 	return nil
 }

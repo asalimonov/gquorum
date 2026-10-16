@@ -191,5 +191,12 @@ func validateScopedRebaseBase(state *scopedState, index *scopedIndexes, source, 
 	if version != repair.ParentVersion {
 		return invalidScopedState("repair parent is not an ancestor of the staged source")
 	}
+	// Apply always has Target. Restore may have compacted the old approved base;
+	// when retained, its semantic evidence must agree with the claimed independence.
+	if base, found := index.documents[version]; found {
+		if err := validateIndependentEdits(base, source, repair); err != nil {
+			return fault.New(fault.Unreadable, "retained rebase edits overlap", err)
+		}
+	}
 	return nil
 }

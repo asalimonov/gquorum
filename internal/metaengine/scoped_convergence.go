@@ -183,7 +183,7 @@ func validateNodeOwner(row nodeConvergence, index *scopedIndexes) error {
 }
 
 func validateOperationOwner(operation topology.Operation, index *scopedIndexes) error {
-	for _, block := range operation.Status.Blocks {
+	for i, block := range operation.Status.Blocks {
 		row := index.groups[block.GroupID]
 		if block.State == topology.OperationSucceeded &&
 			(row == nil || row.SourceVersion < operation.Status.Version) {
@@ -192,7 +192,9 @@ func validateOperationOwner(operation topology.Operation, index *scopedIndexes) 
 		if block.State.Terminal() {
 			continue
 		}
-		if row == nil || row.Owner != operation.Status.ID {
+		scope := ScopeExpectation{GroupID: block.GroupID, SourceVersion: operation.Plan.Blocks[i].SourceVersion,
+			Owner: operation.Status.ID}
+		if !scope.matches(row) {
 			return invalidScopedState("nonterminal block lacks exclusive group ownership")
 		}
 	}

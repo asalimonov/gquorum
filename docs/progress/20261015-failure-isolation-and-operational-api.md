@@ -661,3 +661,17 @@ Verified
 - Focused service scoped/native collection functional suite passes (2.130s), /tmp/gquorum-task26-functional.log. Initial fixture used nonexistent Group.Clone, then incorrectly expected proven owners to be duplicated in Retained; fixed the fixture to copy its replica slice and assert exact Converged evidence. Production proof checks were not weakened.
 - make test passes 1254/1254 (10.795s), test-reports/unit/20261016T045048.516751Z-g2n4dppi/report.md. Final staged lint passes at /tmp/gquorum-task26-lint.log; git diff --check passes. 342 changed handwritten Go lines including tests, below 550. No new concurrency or production scoped activation; no additional race/Docker run.
 - Next Task 27 derives replicated scope/CAS and independence checks. Next regular peer/dead-code checkpoint remains implementation/correction commit 40. Full target remains unfinished.
+
+## Task 27 — Validate semantic scopes and independence in the FSM
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 38).
+
+Implemented
+- Shared exact scope/plan set, source-version and owner predicates. Scoped proposal decoding rejects inconsistent captures atomically; restore uses the same exact owner/source predicate. Task 29 assembles these predicates with independently derived AffectedGroups under its apply lock before installation; live schema-3 dispatch remains unchanged until Task 70.
+- Independent-edit validation separates ownership writes from placement candidate reads. Existing placement evaluation supplies eligibility, voter domains and exact metadata member bindings under the proposed rules. Unassigned ineligible nodes and unrelated descriptive fields do not conflict; missing exact candidate identity refuses independence. Retained rebase ancestry now checks semantic independence when its approved base is retained.
+- Regressions cover missing/extra/duplicate scopes, stale captures, node-only metadata ownership, same-group/allocation collisions, irrelevant fields versus selector/type/domain/member changes, proposed selectors, group overrides, ineligible standbys and corrupt retained rebase evidence. Updated the payload fixture to supply its actual captured plan block.
+
+Verified
+- go test -count=1 ./internal/metaengine: pass (0.938s), /tmp/gquorum-task27-focused.log.
+- make test: pass across all five application modules, 8.180s; test-reports/unit/20261016T050122.723695Z-8szg9plg/report.md.
+- make lint-staged: pass; /tmp/gquorum-task27-lint.log. Fixed operand ordering and line length reported by the first lint pass. git diff --check passes.
+- 357 changed handwritten Go lines, within 550. No concurrency change or Docker run; focused unit tests exercise the new isolated validators. The complete apply/ownership transaction remains Task 29, as scheduled.
