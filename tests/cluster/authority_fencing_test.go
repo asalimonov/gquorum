@@ -208,7 +208,7 @@ func TestAuthorityRevocationBoundaryAndLostFenceReplyThreeNodes(t *testing.T) {
 			}
 			requireFencedReplay(ctx, t, c, owner, delayed)
 			if after {
-				if err := c.WaitOperator(ctx, "node2", newOp); err != nil {
+				if err := c.WaitOperation(ctx, "node2", newOp); err != nil {
 					t.Fatal("lost acknowledgement could not resume the same empty plan", err)
 				}
 				if err := c.WaitActive(ctx, newStage.Document.Version); err != nil {
@@ -216,7 +216,7 @@ func TestAuthorityRevocationBoundaryAndLostFenceReplyThreeNodes(t *testing.T) {
 				}
 			} else {
 				if err := Poll(ctx, func() (bool, error) {
-					op, err := c.Operator(ctx, "node2", newOp)
+					op, err := c.Operation(ctx, "node2", newOp)
 					if err != nil || !op.State.Terminal() {
 						return false, err
 					}

@@ -86,7 +86,7 @@ func TestPublicNodeCloseErrorKeepsOwnershipUntilExplicitRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, err := n.Cluster().WaitOperation(ctx, result.OperationID)
+	status, err := waitForOperation(ctx, n.Cluster(), result.OperationID)
 	if err != nil || status.State != topology.OperationSucceeded {
 		t.Fatal(status, err)
 	}

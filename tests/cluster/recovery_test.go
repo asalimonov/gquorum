@@ -512,7 +512,7 @@ func parkedReplicaReseat(t *testing.T, size int) {
 		t.Fatal(err)
 	}
 	freshID := replicaID(repaired.Document, "work", "node3")
-	if repaired.OperatorID == "" || freshID <= largest || repaired.Document.MemberID("node3") != before.Identity.MemberID {
+	if repaired.OperationID == "" || freshID <= largest || repaired.Document.MemberID("node3") != before.Identity.MemberID {
 		t.Fatal("reseat reused retired ID or changed meta identity", repaired)
 	}
 	if err := c.WaitReady(ctx); err != nil {
@@ -607,10 +607,10 @@ func lostMetaLeaderReadmission(t *testing.T, size int) {
 	}
 	freshMember := repaired.MemberID("node3")
 	operatorID := topology.MakeOperatorID(repaired.Version, 1)
-	if err := c.WaitOperator(ctx, "node1", operatorID); err != nil {
+	if err := c.WaitOperation(ctx, "node1", operatorID); err != nil {
 		t.Fatal(err)
 	}
-	operator, err := c.Operator(ctx, "node1", operatorID)
+	operator, err := c.Operation(ctx, "node1", operatorID)
 	if err != nil || operator.TotalSteps < 4 || operator.State != topology.OperatorSucceeded {
 		t.Fatal("readmission omitted durable learner-first execution", operator, err)
 	}

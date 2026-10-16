@@ -68,7 +68,7 @@ func TestApplicationReadUsesManagedQueryAndStopsWithExactReplica(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, err := a.cluster.WaitOperation(ctx, created.OperationID)
+	status, err := waitForOperation(ctx, a.cluster, created.OperationID)
 	if err != nil || status.State != topology.OperationSucceeded {
 		t.Fatal(status, err)
 	}

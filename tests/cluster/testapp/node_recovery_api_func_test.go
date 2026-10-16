@@ -50,7 +50,7 @@ func borrowedAPICluster(t *testing.T, configure func(*quorum.NodeOptions)) (*api
 
 func waitAPIOperation(ctx context.Context, t *testing.T, n quorum.Node, id topology.OperationID) {
 	t.Helper()
-	status, err := n.Cluster().WaitOperation(ctx, id)
+	status, err := waitForOperation(ctx, n.Cluster(), id)
 	if err != nil || status.State != topology.OperationSucceeded {
 		t.Fatal("operation", status, err)
 	}

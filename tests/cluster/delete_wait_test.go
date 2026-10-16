@@ -56,7 +56,7 @@ func TestDeletionWaitsForUnreachableFormerHostBeforeDeletingState(t *testing.T) 
 	}
 	operatorID := startApply(ctx, t, c, ingress, staged.Document.Version)
 	if err := Poll(ctx, func() (bool, error) {
-		operator, err := c.Operator(ctx, ingress, operatorID)
+		operator, err := c.Operation(ctx, ingress, operatorID)
 		if err != nil {
 			return false, err
 		}
@@ -95,7 +95,7 @@ func TestDeletionWaitsForUnreachableFormerHostBeforeDeletingState(t *testing.T) 
 	if err := stopped.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WaitOperator(ctx, ingress, operatorID); err != nil {
+	if err := c.WaitOperation(ctx, ingress, operatorID); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.WaitActive(ctx, staged.Document.Version); err != nil {

@@ -87,7 +87,7 @@ func startApply(ctx context.Context, t *testing.T, c *Cluster, node string, vers
 			return true, err
 		}
 		var result struct {
-			ID topology.OperatorID `json:"operator_id"`
+			ID topology.OperatorID `json:"operation_id"`
 		}
 		if err := response.Decode(&result); err != nil {
 			return true, err
@@ -185,7 +185,7 @@ func TestRuntimeGrowthExposesLearnerBeforePromotionAndSurvivesRestart(t *testing
 			t.Fatal(err)
 		}
 	}
-	if err := c.WaitOperator(ctx, "node2", id); err != nil {
+	if err := c.WaitOperation(ctx, "node2", id); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.WaitActive(ctx, staged.Document.Version); err != nil {

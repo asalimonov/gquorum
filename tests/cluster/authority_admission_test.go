@@ -112,10 +112,10 @@ func TestAuthoritySupersessionRetiresIntermediateMetaLearnerFourNodes(t *testing
 	}
 	next := startApply(ctx, t, c, "node2", staged.Document.Version)
 	waitCtx, cancelWait := context.WithTimeout(ctx, 30*time.Second)
-	err = c.WaitOperator(waitCtx, "node2", next)
+	err = c.WaitOperation(waitCtx, "node2", next)
 	cancelWait()
 	if err != nil {
-		operator, operatorErr := c.Operator(ctx, "node2", next)
+		operator, operatorErr := c.Operation(ctx, "node2", next)
 		runtime, runtimeErr := c.runtime(ctx, "node4")
 		t.Fatal("intermediate metadata/load retirement did not converge", err, operator, operatorErr, runtime, runtimeErr)
 	}

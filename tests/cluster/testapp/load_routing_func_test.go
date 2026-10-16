@@ -22,8 +22,8 @@ type retainedRouteCluster struct {
 func (*retainedRouteCluster) Target(context.Context) (topology.Document, error) {
 	return topology.Document{}, nil
 }
-func (*retainedRouteCluster) Active(context.Context) (topology.Document, error) {
-	return topology.Document{}, nil
+func (*retainedRouteCluster) ReadTopology(context.Context) (topology.ReadView, error) {
+	return topology.ReadView{}, nil
 }
 func (c *retainedRouteCluster) History(context.Context, topology.Page) (topology.HistoryResult, error) {
 	return topology.HistoryResult{Documents: c.documents}, c.historyErr

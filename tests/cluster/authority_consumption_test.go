@@ -149,13 +149,13 @@ func TestAuthorityEarlierLearnerActionCannotUndoSameOperatorPromotionThreeNodes(
 		t.Fatal("altered grant changed native/storage/application state", before, after, err)
 	}
 	release(topology.StepPromoteVoter)
-	if err := c.WaitOperator(ctx, "node2", op); err != nil {
+	if err := c.WaitOperation(ctx, "node2", op); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.WaitActive(ctx, growStage.Document.Version); err != nil {
 		t.Fatal(err)
 	}
-	finished, err := c.Operator(ctx, "node2", op)
+	finished, err := c.Operation(ctx, "node2", op)
 	if err != nil || finished.State != topology.OperatorSucceeded || finished.Attempt != earlier.Authorization.Attempt || finished.Version != earlier.Authorization.Version {
 		t.Fatal("promotion changed approved execution identity", finished, err)
 	}

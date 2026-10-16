@@ -146,7 +146,7 @@ func TestVoterSwapResumesAfterCommittedEffectAndMetaLeaderCrashFourNodes(t *test
 				if status.MetaLeaderID == 0 || status.MetaLeaderID == created.Document.MemberID("node3") {
 					return false, nil
 				}
-				op, err := c.Operator(ctx, "node2", id)
+				op, err := c.Operation(ctx, "node2", id)
 				if err != nil {
 					return false, err
 				}
@@ -166,7 +166,7 @@ func TestVoterSwapResumesAfterCommittedEffectAndMetaLeaderCrashFourNodes(t *test
 				}
 			}
 			if err := Poll(ctx, func() (bool, error) {
-				op, err := c.Operator(ctx, "node2", id)
+				op, err := c.Operation(ctx, "node2", id)
 				if err != nil {
 					return false, err
 				}
@@ -196,7 +196,7 @@ func TestVoterSwapResumesAfterCommittedEffectAndMetaLeaderCrashFourNodes(t *test
 					t.Fatal(err)
 				}
 			}
-			if err := c.WaitOperator(ctx, "node2", id); err != nil {
+			if err := c.WaitOperation(ctx, "node2", id); err != nil {
 				t.Fatal(err)
 			}
 			if err := c.WaitActive(ctx, staged.Document.Version); err != nil {
@@ -220,7 +220,7 @@ func TestVoterSwapResumesAfterCommittedEffectAndMetaLeaderCrashFourNodes(t *test
 					t.Fatal("retained swap identity/data did not converge", node.Spec.Name, err)
 				}
 			}
-			op, err := c.Operator(ctx, "node2", id)
+			op, err := c.Operation(ctx, "node2", id)
 			if err != nil || op.Attempt != 1 || op.State != topology.OperatorSucceeded {
 				t.Fatal("recovery created another attempt", op, err)
 			}
@@ -314,7 +314,7 @@ func TestVoterDemotionRepeatsExactTransferAfterLeaderRegainFourNodes(t *testing.
 	waitGuard, cancelGuard := context.WithTimeout(ctx, 30*time.Second)
 	defer cancelGuard()
 	if err := Poll(waitGuard, func() (bool, error) {
-		op, err := c.Operator(ctx, "node2", id)
+		op, err := c.Operation(ctx, "node2", id)
 		if err != nil {
 			return false, err
 		}
@@ -327,7 +327,7 @@ func TestVoterDemotionRepeatsExactTransferAfterLeaderRegainFourNodes(t *testing.
 		local, err := c.Local(ctx, "node3", "swap")
 		return op.CurrentStep == demotion.StepSeq && op.Attempt == demotion.Attempt && local.Status.LeaderID == demotion.ReplicaID && len(local.Status.ConfState.Voters) == 4 && len(local.Status.ConfState.Learners) == 0, err
 	}); err != nil {
-		operator, operatorErr := c.Operator(ctx, "node2", id)
+		operator, operatorErr := c.Operation(ctx, "node2", id)
 		local, localErr := c.Local(ctx, "node3", "swap")
 		t.Fatal("demotion did not preserve its approved guard", err, operator, operatorErr, local, localErr)
 	}
@@ -335,10 +335,10 @@ func TestVoterDemotionRepeatsExactTransferAfterLeaderRegainFourNodes(t *testing.
 		t.Fatal(err)
 	}
 	healCtx, cancelHeal := context.WithTimeout(ctx, 30*time.Second)
-	err = c.WaitOperator(healCtx, "node2", id)
+	err = c.WaitOperation(healCtx, "node2", id)
 	cancelHeal()
 	if err != nil {
-		operator, operatorErr := c.Operator(ctx, "node2", id)
+		operator, operatorErr := c.Operation(ctx, "node2", id)
 		target, targetErr := c.Local(ctx, "node1", "swap")
 		demoted, demotedErr := c.Local(ctx, "node3", "swap")
 		t.Fatal("guarded demotion did not resume after healing", err, operator, operatorErr, target, targetErr, demoted, demotedErr)
@@ -354,7 +354,7 @@ func TestVoterDemotionRepeatsExactTransferAfterLeaderRegainFourNodes(t *testing.
 			t.Fatal("guarded transfer and demotion did not converge", node.Spec.Name, err)
 		}
 	}
-	op, err := c.Operator(ctx, "node2", id)
+	op, err := c.Operation(ctx, "node2", id)
 	if err != nil || op.Attempt != demotion.Attempt || op.Version != demotion.Version {
 		t.Fatal("demotion changed approved attempt after transfer", op, err)
 	}

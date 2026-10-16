@@ -52,7 +52,7 @@ func stoppedFollowerPlacement(t *testing.T, size int) {
 		t.Fatal(err)
 	}
 	var staged gquorum.MutationResult
-	if err := response.Decode(&staged); err != nil || staged.Document.Version != base.Version+1 || staged.Document.Placement.MinReplicas != 3 || staged.OperatorID != "" {
+	if err := response.Decode(&staged); err != nil || staged.Document.Version != base.Version+1 || staged.Document.Placement.MinReplicas != 3 || staged.OperationID != "" {
 		t.Fatal(staged, err)
 	}
 	assertBlocked := func() {

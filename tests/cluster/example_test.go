@@ -144,7 +144,7 @@ func TestComposeExampleTopologyDrainActivate(t *testing.T) {
 	request("node1", "POST", "/api/nodes/node3/drain", map[string]any{"preview": true}, initial.Version, 200, &preview)
 	var afterPreview topology.Document
 	request("node1", "GET", "/api/topology/latest", nil, 0, 200, &afterPreview)
-	if afterPreview.Version != initial.Version || preview.OperatorID != "" || topology.EffectiveNodeState(preview.Document, "node3") != topology.NodeDrained {
+	if afterPreview.Version != initial.Version || preview.OperationID != "" || topology.EffectiveNodeState(preview.Document, "node3") != topology.NodeDrained {
 		t.Fatalf("preview changed cluster state or failed to preview drain: %+v, %+v", afterPreview, preview)
 	}
 	for _, action := range []string{"drain", "activate"} {
@@ -155,7 +155,7 @@ func TestComposeExampleTopologyDrainActivate(t *testing.T) {
 			request("node2", "POST", "/api/nodes/node3/drain", map[string]any{"actor": "demo-test", "approve": true}, latest.Version, 202, &mutation)
 		} else {
 			request("node2", "POST", "/api/nodes/node3/activate", map[string]any{"actor": "demo-test", "approve": false}, latest.Version, 200, &mutation)
-			if mutation.OperatorID != "" {
+			if mutation.OperationID != "" {
 				t.Fatal("staged edit unexpectedly approved", mutation)
 			}
 			path := fmt.Sprintf("/api/topology/%d/approve", mutation.Document.Version)
@@ -166,21 +166,21 @@ func TestComposeExampleTopologyDrainActivate(t *testing.T) {
 				t.Fatalf("staging or refused approval advanced Target: %+v", target)
 			}
 			var approved struct {
-				ID topology.OperatorID `json:"operator_id"`
+				ID topology.OperationID `json:"operation_id"`
 			}
 			request("node2", "POST", path, nil, mutation.Document.Version, 202, &approved)
-			mutation.OperatorID = approved.ID
+			mutation.OperationID = approved.ID
 		}
-		if mutation.OperatorID == "" {
-			t.Fatal("approval did not return operator_id")
+		if mutation.OperationID == "" {
+			t.Fatal("approval did not return operation_id")
 		}
 		for {
-			var operator topology.OperatorStatus
-			status := request("node1", "GET", "/api/operators/"+string(mutation.OperatorID), nil, 0, 0, &operator)
+			var operator topology.OperationStatus
+			status := request("node1", "GET", "/api/operations/"+string(mutation.OperationID), nil, 0, 0, &operator)
 			if status != 200 && status != 404 {
 				t.Fatalf("operator observation returned HTTP %d", status)
 			}
-			if operator.State == topology.OperatorSucceeded {
+			if operator.State == topology.OperationSucceeded {
 				break
 			}
 			if operator.State.Terminal() {

@@ -99,7 +99,7 @@ func TestAuthorityHostRevocationWaitsForExactRetainedProcessReturnThreeNodes(t *
 		}); err != nil {
 			t.Fatal("independent group evidence did not preserve pending host obligation", node, err)
 		}
-		op, err := c.Operator(ctx, node, newOp)
+		op, err := c.Operation(ctx, node, newOp)
 		if err != nil || op.State.Terminal() {
 			t.Fatal("successor bypassed an unreachable resource fence", op, err)
 		}
@@ -122,7 +122,7 @@ func TestAuthorityHostRevocationWaitsForExactRetainedProcessReturnThreeNodes(t *
 	if err := victim.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WaitOperator(ctx, "node2", newOp); err != nil {
+	if err := c.WaitOperation(ctx, "node2", newOp); err != nil {
 		for _, name := range []string{"node1", "node2", "node3"} {
 			view, viewErr := c.Authority(ctx, name, "work")
 			for _, action := range view.Actions {

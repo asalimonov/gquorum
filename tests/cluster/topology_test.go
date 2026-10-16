@@ -51,7 +51,7 @@ func TestStagedTopologyDoesNotChangeApprovedMembershipOrStartGroups(t *testing.T
 		}
 		for _, node := range c.Nodes() {
 			status, err := c.Status(ctx, node.Spec.Name)
-			if err != nil || status.LatestVersion != latestVersion || status.TargetVersion != base.Version || status.ActiveVersion != base.Version || status.Operator == nil || status.Operator.ID != created.OperatorID || status.Operator.State != topology.OperatorSucceeded {
+			if err != nil || status.LatestVersion != latestVersion || status.TargetVersion != base.Version || status.ActiveVersion != base.Version || status.Operator == nil || status.Operator.ID != topology.OperatorID(created.OperationID) || status.Operator.State != topology.OperatorSucceeded {
 				t.Fatal("staging changed an approved view or started an execution", node.Spec.Name, status, err)
 			}
 			for _, view := range []string{"target", "active"} {

@@ -11,6 +11,7 @@ import (
 	"github.com/asalimonov/gquorum"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -93,9 +94,39 @@ func (c *Cluster) Status(ctx context.Context, node string) (topology.ClusterStat
 	return status, response.Decode(&status)
 }
 
-// Operator reads an exact operator's observed execution status.
-func (c *Cluster) Operator(ctx context.Context, node string, id topology.OperatorID) (topology.OperatorStatus, error) {
-	response, err := c.Request(ctx, node, "GET", "/api/operators/"+string(id), nil, 0)
+// Progress reads one bounded progress page, optionally scoped by group, node or operation.
+func (c *Cluster) Progress(ctx context.Context, node string, query topology.ProgressQuery) (topology.ProgressPage, error) {
+	values := url.Values{}
+	if query.GroupID != "" {
+		values.Set("group", query.GroupID)
+	}
+	if query.NodeName != "" {
+		values.Set("node", query.NodeName)
+	}
+	if query.OperationID != "" {
+		values.Set("operation", string(query.OperationID))
+	}
+	if query.Limit != 0 {
+		values.Set("limit", strconv.Itoa(query.Limit))
+	}
+	if query.After != "" {
+		values.Set("after", query.After)
+	}
+	path := "/api/progress"
+	if encoded := values.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	response, err := c.Request(ctx, node, "GET", path, nil, 0)
+	var page topology.ProgressPage
+	if err := requireStatus(response, err, 200); err != nil {
+		return page, err
+	}
+	return page, response.Decode(&page)
+}
+
+// Operation reads an exact operation's observed execution status.
+func (c *Cluster) Operation(ctx context.Context, node string, id any) (topology.OperatorStatus, error) {
+	response, err := c.Request(ctx, node, "GET", "/api/operations/"+fmt.Sprint(id), nil, 0)
 	var status topology.OperatorStatus
 	if err := requireStatus(response, err, 200); err != nil {
 		return status, err
@@ -124,10 +155,10 @@ func Poll(ctx context.Context, check func() (bool, error)) error {
 	}
 }
 
-// WaitOperator waits for successful execution and rejects other terminal outcomes.
-func (c *Cluster) WaitOperator(ctx context.Context, node string, id topology.OperatorID) error {
+// WaitOperation waits for successful execution and rejects other terminal outcomes.
+func (c *Cluster) WaitOperation(ctx context.Context, node string, id any) error {
 	return Poll(ctx, func() (bool, error) {
-		status, err := c.Operator(ctx, node, id)
+		status, err := c.Operation(ctx, node, id)
 		if err != nil {
 			return false, err
 		}
@@ -152,7 +183,7 @@ func (c *Cluster) Mutate(ctx context.Context, node, method, path string, body an
 	if err := response.Decode(&result); err != nil {
 		return result, err
 	}
-	if err := c.WaitOperator(ctx, node, result.OperatorID); err != nil {
+	if err := c.WaitOperation(ctx, node, result.OperationID); err != nil {
 		return result, err
 	}
 	err = c.WaitActive(ctx, result.Document.Version)
@@ -191,7 +222,7 @@ func (c *Cluster) Stage(ctx context.Context, node string, doc topology.Document)
 // Approve approves a staged version and returns its operator ID.
 func (c *Cluster) Approve(ctx context.Context, node string, version uint64) (topology.OperatorID, error) {
 	var result struct {
-		OperatorID topology.OperatorID `json:"operator_id"`
+		OperationID topology.OperationID `json:"operation_id"`
 	}
 	response, err := c.Request(ctx, node, "POST", fmt.Sprintf("/api/topology/%d/approve", version), nil, 0)
 	if err := requireStatus(response, err, 202); err != nil {
@@ -200,13 +231,13 @@ func (c *Cluster) Approve(ctx context.Context, node string, version uint64) (top
 	if err := response.Decode(&result); err != nil {
 		return "", err
 	}
-	if result.OperatorID == "" {
+	if result.OperationID == "" {
 		return "", errors.New("apply acknowledged without an execution identity")
 	}
-	if err := c.WaitOperator(ctx, node, result.OperatorID); err != nil {
-		return result.OperatorID, err
+	if err := c.WaitOperation(ctx, node, result.OperationID); err != nil {
+		return topology.OperatorID(result.OperationID), err
 	}
-	return result.OperatorID, c.WaitActive(ctx, version)
+	return topology.OperatorID(result.OperationID), c.WaitActive(ctx, version)
 }
 
 // CreateGroup creates and converges a load group through the public fixture API.

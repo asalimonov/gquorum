@@ -129,7 +129,7 @@ func TestAuthorityGroupRevocationRemainsPendingWithoutLoadQuorumThreeNodes(t *te
 		if !pending {
 			t.Fatal("load group lost its pending resource obligation", status)
 		}
-		op, err := c.Operator(ctx, node, newOp)
+		op, err := c.Operation(ctx, node, newOp)
 		if err != nil || op.State.Terminal() || op.TotalSteps != 0 {
 			t.Fatal("empty successor bypassed its no-quorum revocation", op, err)
 		}
@@ -141,7 +141,7 @@ func TestAuthorityGroupRevocationRemainsPendingWithoutLoadQuorumThreeNodes(t *te
 	for node, local := range blocked {
 		clearReadFault(ctx, t, c, node, local)
 	}
-	if err := c.WaitOperator(ctx, "node2", newOp); err != nil {
+	if err := c.WaitOperation(ctx, "node2", newOp); err != nil {
 		t.Fatal("restored load quorum did not complete the real resource fence", err)
 	}
 	if err := c.WaitActive(ctx, newStage.Document.Version); err != nil {

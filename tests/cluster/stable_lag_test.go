@@ -118,7 +118,7 @@ func TestStableLearnerReplacesReplicationLagWhileNodeStaysAliveFourNodes(t *test
 			t.Fatal(err)
 		}
 	}
-	if err := c.WaitOperator(ctx, collector, operator); err != nil {
+	if err := c.WaitOperation(ctx, collector, operator); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.WALFault(ctx, "node3", "lag", victim, false, 0, true); err != nil {

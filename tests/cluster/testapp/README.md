@@ -126,8 +126,9 @@ library configuration or load-protocol fields.
 Use `make test-cluster-build` to build the image. Run focused scenarios with
 `make test-cluster-run CLUSTER_ARGS='-race -v -run TestRuntimeGrowth'`.
 
-HTTP mutations use `approve` and return `operator_id`. Separate approval uses
-`POST /api/topology/{version}/approve`; progress uses `GET /api/operators/{id}`.
+HTTP mutations use `approve` and return `operation_id`. Separate approval uses
+`POST /api/topology/{version}/approve`; scoped convergence uses `GET /api/progress`
+and exact execution status uses `GET /api/operations/{id}`.
 The fixture retains its additional load/group/event and fault endpoints. The
 small example remains limited to `_meta` topology/status/drain/activate.
 

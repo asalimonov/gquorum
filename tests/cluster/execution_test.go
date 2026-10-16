@@ -253,7 +253,7 @@ func callerRefusedDeletion(t *testing.T, size int) {
 			t.Fatal(err)
 		}
 		var result struct {
-			ID topology.OperatorID `json:"operator_id"`
+			ID topology.OperatorID `json:"operation_id"`
 		}
 		if err := response.Decode(&result); err != nil || result.ID == "" {
 			t.Fatal(result, err)
@@ -264,7 +264,7 @@ func callerRefusedDeletion(t *testing.T, size int) {
 	var failed topology.OperatorStatus
 	if err := Poll(ctx, func() (bool, error) {
 		var err error
-		failed, err = c.Operator(ctx, "node2", failedID)
+		failed, err = c.Operation(ctx, "node2", failedID)
 		return failed.State.Terminal(), err
 	}); err != nil {
 		t.Fatal(err)
@@ -405,18 +405,18 @@ func callerRefusedDeletion(t *testing.T, size int) {
 	if retryID == failedID {
 		t.Fatal("retry reused failed attempt", retryID)
 	}
-	if err := c.WaitOperator(ctx, "node2", retryID); err != nil {
+	if err := c.WaitOperation(ctx, "node2", retryID); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.WaitActive(ctx, deleted.Document.Version); err != nil {
 		t.Fatal(err)
 	}
-	retry, err := c.Operator(ctx, "node2", retryID)
+	retry, err := c.Operation(ctx, "node2", retryID)
 	if err != nil || retry.Attempt != 2 || retry.Version != failed.Version {
 		t.Fatal(retry, err)
 	}
 	for _, node := range c.Nodes() {
-		prior, err := c.Operator(ctx, node.Spec.Name, failedID)
+		prior, err := c.Operation(ctx, node.Spec.Name, failedID)
 		if err != nil || prior != failed {
 			t.Fatal("retry rewrote historical failure", prior, err)
 		}
