@@ -80,6 +80,16 @@ func applyScopedProposal(state *scopedState, index uint64, kind ProposalKind,
 		return proposalApplication{}, err
 	}
 	switch kind {
+	case "begin_cleanup_effect":
+		return applyScopedJSONProposal(index, body, state.applyBeginCleanupEffect)
+	case "record_cleanup_status":
+		return applyScopedJSONProposal(index, body, state.applyRecordCleanupStatus)
+	case KindRecordFence:
+		var p RecordFenceProposal
+		if err := decodeScopedPayload(body, &p, "evidence"); err != nil {
+			return proposalApplication{}, err
+		}
+		return state.applyRecordFence(index, p)
 	case KindRecordEffect:
 		var p RecordEffectProposal
 		if err := decodeScopedPayload(body, &p, "receipt", "at"); err != nil {
@@ -93,35 +103,15 @@ func applyScopedProposal(state *scopedState, index uint64, kind ProposalKind,
 		}
 		return state.applyRecordReadmissionReceipts(index, p)
 	case "begin_operation":
-		var p BeginOperationProposal
-		if err := json.Unmarshal(body, &p); err != nil {
-			return proposalApplication{}, err
-		}
-		return state.applyBeginOperation(index, p)
+		return applyScopedJSONProposal(index, body, state.applyBeginOperation)
 	case "transition_operation":
-		var p TransitionOperationProposal
-		if err := json.Unmarshal(body, &p); err != nil {
-			return proposalApplication{}, err
-		}
-		return state.applyTransitionOperation(index, p)
+		return applyScopedJSONProposal(index, body, state.applyTransitionOperation)
 	case KindBeginEffect:
-		var p BeginEffectProposal
-		if err := json.Unmarshal(body, &p); err != nil {
-			return proposalApplication{}, err
-		}
-		return state.applyBeginEffect(index, p)
+		return applyScopedJSONProposal(index, body, state.applyBeginEffect)
 	case KindGrantTransfer:
-		var p GrantTransferProposal
-		if err := json.Unmarshal(body, &p); err != nil {
-			return proposalApplication{}, err
-		}
-		return state.applyGrantTransfer(index, p)
+		return applyScopedJSONProposal(index, body, state.applyGrantTransfer)
 	case KindBeginReadmissionAuthority:
-		var p BeginReadmissionAuthority
-		if err := json.Unmarshal(body, &p); err != nil {
-			return proposalApplication{}, err
-		}
-		return state.applyBeginReadmissionAuthority(index, p)
+		return applyScopedJSONProposal(index, body, state.applyBeginReadmissionAuthority)
 	default:
 		return proposalApplication{}, fault.ErrUnsupported
 	}
@@ -130,4 +120,13 @@ func applyScopedProposal(state *scopedState, index uint64, kind ProposalKind,
 func applyIndexedJSONProposal[P any](index uint64, body json.RawMessage, operation string,
 	apply func(uint64, P) (ApplyResult, bool)) (proposalApplication, error) {
 	return applyJSONProposal(body, operation, func(p P) (ApplyResult, bool) { return apply(index, p) })
+}
+
+func applyScopedJSONProposal[P any](index uint64, body json.RawMessage,
+	apply func(uint64, P) (proposalApplication, error)) (proposalApplication, error) {
+	var p P
+	if err := json.Unmarshal(body, &p); err != nil {
+		return proposalApplication{}, err
+	}
+	return apply(index, p)
 }

@@ -207,6 +207,7 @@ type authorityRestore struct {
 	requests                                 map[string]bool
 	readmissionRevisions, readmissionMembers map[string]uint64
 	readmissionMeta                          map[string]bool
+	cleanupActions                           map[topology.AuthorizedStep]bool
 }
 
 func invalidAuthorityCatalog() error {
@@ -252,11 +253,17 @@ func (restore *authorityRestore) restoreEffectAction(grant topology.AuthorityGra
 			return invalidAuthorityCatalog()
 		}
 	}
-	if _, duplicate := a.actions[*grant.Action]; duplicate {
+	if _, duplicate := a.actions[action]; duplicate && !restore.cleanupActions[action] {
 		return invalidAuthorityCatalog()
 	}
-	a.actions[*grant.Action] = grant.Key
+	a.rememberAction(grant)
 	return nil
+}
+
+func (a authorityCatalog) rememberAction(grant topology.AuthorityGrant) {
+	if grant.Action != nil && compareAuthorityKey(grant.Key, a.actions[*grant.Action]) > 0 {
+		a.actions[*grant.Action] = grant.Key
+	}
 }
 
 func (restore *authorityRestore) readmissionAdmission(id string) (*AdmissionRecord, error) {

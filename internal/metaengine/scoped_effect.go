@@ -14,6 +14,10 @@ func (s *scopedState) applyBeginEffect(index uint64, p BeginEffectProposal) (pro
 	if err := s.authorizeLocked(context.Background(), p.Action); err != nil {
 		return proposalApplication{}, err
 	}
+	if s.authorityClass(topology.AuthorityGrant{Action: &p.Action}) == "cleanup" {
+		// Detached issuance requires an exact debt identity.
+		return proposalApplication{}, fault.ErrOperationAuthorization
+	}
 	catalog := s.authorityCatalog()
 	if record := catalog.records[catalog.actions[p.Action]]; record != nil {
 		if err := catalog.currentGrant(record); err != nil {
@@ -78,6 +82,13 @@ func (s *scopedState) installGrants(index uint64, grants []topology.AuthorityGra
 		for _, resource := range grant.Resources {
 			catalog.floors[resource] = grant.Key
 		}
+	}
+	return s.installAuthorityCatalog(index, catalog)
+}
+
+func (s *scopedState) installAuthorityCatalog(index uint64, catalog authorityCatalog) error {
+	if index <= s.AppliedIndex {
+		return fault.ErrOperationAuthorization
 	}
 	next := *s
 	update := scopedRevocation{state: &next, catalog: catalog,

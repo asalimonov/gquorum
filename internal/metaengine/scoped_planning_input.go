@@ -23,7 +23,7 @@ func (s *scopedState) authorityCatalog() authorityCatalog {
 	for key, record := range s.indexes.grants {
 		catalog.records[key] = &record.authorityRecord
 		if record.Grant.Purpose == topology.AuthorityEffect {
-			catalog.actions[*record.Grant.Action] = key
+			catalog.rememberAction(record.Grant)
 		}
 	}
 	for _, floor := range s.AuthorityFloors {

@@ -972,3 +972,16 @@ Verified
 - make test passes (latest report recorded below); focused service authority functional tests pass, 2.546s (/tmp/gquorum-task42-service.log). Diff checks pass. No new race/Docker run claimed for these pure FSM changes. Physical retirement/quarantine implementations remain in their existing storage/managed tasks; this task verifies the retained exact receipt prerequisites.
 - Next Task43 implements detached issuance/status and scoped fence receipt installation. Next peer/dead-code checkpoint is commit60; thread15 is closed with dispositions and corrected F1 reachability evidence in docs/review/feat_failure-isolation-and-api.md.
 - Final unit run: 1524/1524 pass, 6.675s; test-reports/unit/20261016T095724.909328Z-fp48l5fu/report.md.
+
+## Task 43 — Detached cleanup authority and changed deferral status
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 58).
+
+Implemented
+- Exact debt identity plus the complete current Stop/Retire action selects one original host. Immutable plan partition determines authority class; terminal operations retain deferred authority, while ordinary BeginEffect cannot bypass the identity route. A rebound Stop resolves against its own approval, preserving original retirement attribution.
+- Matching grants are reused. A newer common host floor must reconcile before another revision; scoped RecordFence now atomically installs that evidence. Restore permits compatible cleanup revisions while rejecting unreconciled duplicates and forged classes. First milestone receipts/timestamps stay unchanged when other reconciled revisions report late. Native/preparation grants retain the single-action rule.
+- Changed collection deferral/blocker status requires the exact historical MemberID and retained RetirementKey. Polling and completed debt produce no state write, and status changes preserve lifecycle proof. Restricted authenticated routing remains in its existing Task59; no general proposal-authentication bypass was added.
+- Corrected the target's internal BeginCleanupEffect method-table signature to accept AuthorizedStep rather than a sequence alone, consistent with its already-agreed proposal contract. Shared service result/courier validation is reused. Scoped handlers remain isolated from the schema3 live dispatcher until Task78.
+
+Verified
+- Full metaengine units pass; make test: 1528/1528, 7.301s, test-reports/unit/20261016T101217.869606Z-rn1sexud/report.md. Staged lint and diff checks pass (/tmp/gquorum-task43-lint.log). Existing service authority functional tests pass, 2.223s (/tmp/gquorum-task43-service.log).
+- Regressions cover terminal operation cleanup, full tuple refusal, pending same-host fence, grant replay without writes, both late revision receipt orders, unreconciled/forged restore, original-host diagnostic proof, stable milestones and required-to-detached rebinding. No race/Docker run claimed for pure FSM changes. No tasks added or split. Next Task44; review/dead-code checkpoint60.

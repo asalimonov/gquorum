@@ -52,7 +52,11 @@ func sameFenceBoundary(a, b topology.FenceEvidence) bool {
 }
 
 func (sm *topologySM) applyRecordFence(p RecordFenceProposal) (ApplyResult, bool) {
-	r := sm.authority.records[p.Evidence.Key]
+	return sm.authority.recordFence(p)
+}
+
+func (a authorityCatalog) recordFence(p RecordFenceProposal) (ApplyResult, bool) {
+	r := a.records[p.Evidence.Key]
 	if r == nil || p.Evidence.Validate(r.Grant) != nil {
 		return rejectProposal(p.ProposalID, proposalAuthorization,
 			"fence evidence does not identify its retained grant"), false
@@ -65,12 +69,12 @@ func (sm *topologySM) applyRecordFence(p RecordFenceProposal) (ApplyResult, bool
 			return ApplyResult{ProposalID: p.ProposalID, Accepted: true}, false
 		}
 	}
-	if reason := sm.authority.fenceEvidenceConflict(p.Evidence); reason != "" {
+	if reason := a.fenceEvidenceConflict(p.Evidence); reason != "" {
 		return rejectProposal(p.ProposalID, proposalAuthorization, "%s", reason), false
 	}
 	r.Fences = append(r.Fences, p.Evidence)
 	slices.SortFunc(r.Fences, func(a, b topology.FenceEvidence) int { return a.Resource.Compare(b.Resource) })
-	sm.authority.refreshRevocations()
+	a.refreshRevocations()
 	return ApplyResult{ProposalID: p.ProposalID, Accepted: true}, true
 }
 

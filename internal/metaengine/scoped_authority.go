@@ -7,22 +7,14 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
+const cleanupAuthorityClass = "cleanup"
+
 // Reuse immutable grant/evidence validation without legacy Active, whole-plan
 // completion or the old global debt limit. Scoped completion is checked separately.
 func restoreScopedAuthority(state *scopedState, index *scopedIndexes) (authorityCatalog, error) {
-	restore := authorityRestore{state: smState{Latest: state.Latest, AppliedIndex: state.AppliedIndex,
-		Admissions: state.Admissions, AuthorityFloors: state.AuthorityFloors}, catalog: newAuthorityCatalog(),
-		requests: map[string]bool{}, readmissionRevisions: map[string]uint64{},
-		readmissionMembers: map[string]uint64{}, readmissionMeta: map[string]bool{}}
-	for _, record := range state.AuthorityRecords {
-		if err := restore.restoreRecord(record.authorityRecord); err != nil {
-			return authorityCatalog{}, err
-		}
-	}
-	for id := range restore.readmissionMembers {
-		if !restore.readmissionMeta[id] {
-			return authorityCatalog{}, invalidAuthorityCatalog()
-		}
+	restore, err := restoreScopedAuthorityRecords(state)
+	if err != nil {
+		return authorityCatalog{}, err
 	}
 	if err := restore.restoreFloors(); err != nil {
 		return authorityCatalog{}, err
@@ -37,6 +29,9 @@ func restoreScopedAuthority(state *scopedState, index *scopedIndexes) (authority
 		if err := validateScopedGrant(record, index, restore.catalog); err != nil {
 			return authorityCatalog{}, err
 		}
+		if record.Class == cleanupAuthorityClass && !validCleanupRevisions(record.Grant, restore.catalog) {
+			return authorityCatalog{}, invalidScopedState("cleanup revision preceded reconciliation")
+		}
 	}
 	for _, record := range state.Revocations {
 		if err := validateScopedRevocation(state, record, index, restore.catalog); err != nil {
@@ -44,6 +39,23 @@ func restoreScopedAuthority(state *scopedState, index *scopedIndexes) (authority
 		}
 	}
 	return restore.catalog, nil
+}
+
+func validCleanupRevisions(grant topology.AuthorityGrant, catalog authorityCatalog) bool {
+	for _, older := range catalog.records {
+		if older.Grant.Action == nil || *older.Grant.Action != *grant.Action ||
+			older.Grant.Key.Revision >= grant.Key.Revision {
+			continue
+		}
+		for _, target := range grant.Targets {
+			resource := topology.AuthorityResource{Kind: topology.AuthorityHost,
+				GroupID: grant.Key.GroupID, NodeName: target.NodeName}
+			if slices.Contains(older.Grant.Targets, target) && !catalog.resourceSettled(older, resource) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func validateScopedGrant(record scopedAuthorityRecord, index *scopedIndexes, catalog authorityCatalog) error {
@@ -77,13 +89,13 @@ func validateRetainedScopedGrant(record scopedAuthorityRecord,
 	want := "execution"
 	for _, block := range operation.Plan.Blocks {
 		if slices.Contains(block.Cleanup, action.StepSeq) {
-			want = "cleanup"
+			want = cleanupAuthorityClass
 		}
 	}
 	if record.Class != want {
 		return invalidScopedState("authority class contradicts its immutable partition")
 	}
-	if want == "cleanup" {
+	if want == cleanupAuthorityClass {
 		return validateCleanupGrantDebt(record.Grant, index)
 	}
 	return nil
@@ -145,4 +157,28 @@ func (s *scopedState) readmissionRevocationScope(record scopedRevocationRecord) 
 		return r.Grant.Purpose == topology.AuthorityReadmit && r.Grant.Key.GroupID == record.GroupID &&
 			s.readmissionOwner(r.Grant.AdmissionID) == record.OperationID
 	})
+}
+
+func restoreScopedAuthorityRecords(state *scopedState) (authorityRestore, error) {
+	restore := authorityRestore{state: smState{Latest: state.Latest, AppliedIndex: state.AppliedIndex,
+		Admissions: state.Admissions, AuthorityFloors: state.AuthorityFloors}, catalog: newAuthorityCatalog(),
+		requests: map[string]bool{}, readmissionRevisions: map[string]uint64{},
+		readmissionMembers: map[string]uint64{}, readmissionMeta: map[string]bool{},
+		cleanupActions: make(map[topology.AuthorizedStep]bool)}
+	for _, record := range state.AuthorityRecords {
+		if record.Class == cleanupAuthorityClass && record.Grant.Action != nil {
+			restore.cleanupActions[*record.Grant.Action] = true
+		}
+	}
+	for _, record := range state.AuthorityRecords {
+		if err := restore.restoreRecord(record.authorityRecord); err != nil {
+			return authorityRestore{}, err
+		}
+	}
+	for id := range restore.readmissionMembers {
+		if !restore.readmissionMeta[id] {
+			return authorityRestore{}, invalidAuthorityCatalog()
+		}
+	}
+	return restore, nil
 }

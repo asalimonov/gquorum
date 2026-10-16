@@ -308,6 +308,9 @@ func TestScopedCleanupHandoverRelocationReuseAndDeletion(t *testing.T) {
 		if requiredCleanupStop(next.indexes.operations[topology.OperationID(debt.StopAction.OperatorID)], *debt.StopAction) != (version >= 9) {
 			t.Fatal("stop stayed required after relocation or detached during reuse/deletion", version)
 		}
+		if version == 7 {
+			assertReboundCleanupAuthorization(t, next, *original.StopAction)
+		}
 		s = *next
 	}
 }

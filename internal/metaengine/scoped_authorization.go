@@ -30,7 +30,7 @@ func (s *scopedState) authorizeLocked(ctx context.Context, action topology.Autho
 	}
 	definition, block := op.Plan.Blocks[position], op.Status.Blocks[position]
 	if slices.Contains(definition.Cleanup, action.StepSeq) {
-		return fault.ErrUnsupported // Exact detached-action authorization joins this path in Task 43.
+		return s.authorizeCleanupAction(action)
 	}
 	row := s.indexes.groups[action.GroupID]
 	if row == nil || row.Owner != op.Status.ID || block.State.Terminal() ||

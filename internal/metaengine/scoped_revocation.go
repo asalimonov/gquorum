@@ -206,7 +206,7 @@ func (t *scopedRevocation) publish() {
 	for _, row := range t.catalog.snapshotRecords() {
 		class := classes[row.Grant.Key]
 		if class == "" {
-			class = "execution"
+			class = t.state.authorityClass(row.Grant)
 		}
 		records = append(records, scopedAuthorityRecord{authorityRecord: row, Class: class})
 	}

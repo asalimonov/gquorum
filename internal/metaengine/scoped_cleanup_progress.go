@@ -96,7 +96,7 @@ func cleanupGrantProgress(debt *cleanupRecord, record *authorityRecord, target t
 			continue
 		}
 		for _, milestone := range milestones {
-			if !reflect.DeepEqual(&receipt, milestone) {
+			if milestone == nil || receipt.Key == milestone.Key && !reflect.DeepEqual(&receipt, milestone) {
 				return false
 			}
 		}

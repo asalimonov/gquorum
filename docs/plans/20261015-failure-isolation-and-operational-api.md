@@ -727,18 +727,18 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaengine/cleanup.go`, authority issue/resource helpers, `internal/metaservice/cleanup.go`. **Target:** [T] §6.2–6.3, §7.1–7.2. **Depends on:** 39, 42. **Budget:** ≤550.
 
-- [ ] Implement BeginCleanupEffect and RecordCleanupStatus handlers. Derive execution/cleanup Class from exact retained debt; permit only the approved deferred stop/retirement action after operation termination.
-- [ ] When permitting multiple cleanup grant revisions for one action, replace authorityCatalog's current duplicate-action rejection and adjust reverse milestone checks together: one retained exact receipt supplies a milestone; compatible late receipts from other fenced/reconciled revisions remain historical evidence. Test late old/new revision receipt order without rewriting consumed milestones.
-- [ ] Reuse a matching grant; reconcile a newer same-resource floor before reissuing a revision. Never revive native/preparation authority or affect successor ownership. Authenticate original host/readmission proof for NotBefore/blocker changes.
-- [ ] Test terminal-operation cleanup, forged cleanup classification, same-host conflict, repeated polling causing no durable writes and preserved milestones on deferral/failure updates.
+- [x] Implement BeginCleanupEffect and RecordCleanupStatus handlers. Derive execution/cleanup Class from exact retained debt; permit only the approved deferred stop/retirement action after operation termination.
+- [x] When permitting multiple cleanup grant revisions for one action, replace authorityCatalog's current duplicate-action rejection and adjust reverse milestone checks together: one retained exact receipt supplies a milestone; compatible late receipts from other fenced/reconciled revisions remain historical evidence. Test late old/new revision receipt order without rewriting consumed milestones.
+- [x] Reuse a matching grant; reconcile a newer same-resource floor before reissuing a revision. Never revive native/preparation authority or affect successor ownership. Authenticate original host/readmission proof for NotBefore/blocker changes.
+- [x] Test terminal-operation cleanup, forged cleanup classification, same-host conflict, repeated polling causing no durable writes and preserved milestones on deferral/failure updates.
 
-- [ ] Match BeginCleanupEffect.Action against the complete stored action tuple; a reused StepSeq from another operation is not the expected action. Preserve CleanupStatus historical MemberID/RetirementKey through callbacks and authenticated routing.
+- [x] Match BeginCleanupEffect.Action against the complete stored action tuple; a reused StepSeq from another operation is not the expected action. Preserve CleanupStatus historical MemberID/RetirementKey through callbacks and authenticated routing.
 
-- [ ] Resolve cleanup Stop authorization from the debt's current StopAction and its exact bound approval, which may differ from debt.OperationID after required→detached handover. Retirement and Removed keep original attribution.
+- [x] Resolve cleanup Stop authorization from the debt's current StopAction and its exact bound approval, which may differ from debt.OperationID after required→detached handover. Retirement and Removed keep original attribution.
 
 **Verification**
 
-- [ ] Run cleanup authority/status units and `make test`.
+- [x] Run cleanup authority/status units and `make test`.
 
 ### Task 44: Implement exact failed-attempt retry
 

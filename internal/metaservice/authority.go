@@ -18,6 +18,11 @@ func (g *Group) BeginEffect(ctx context.Context, action topology.AuthorizedStep)
 	if err != nil {
 		return topology.AuthorityGrant{}, err
 	}
+	return g.issuedEffect(ctx, result, action)
+}
+
+func (g *Group) issuedEffect(ctx context.Context, result metaengine.ApplyResult,
+	action topology.AuthorizedStep) (topology.AuthorityGrant, error) {
 	if result.Grant == nil || result.Grant.Action == nil || *result.Grant.Action != action ||
 		result.Grant.Validate() != nil {
 		return topology.AuthorityGrant{}, fault.ErrUnreadable
