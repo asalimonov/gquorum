@@ -884,13 +884,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/authoritystore/collection.go`, `store.go`, functional tests. **Target:** [T] §4.2, §7.2; contracts C6/C11. **Depends on:** 6. **Budget:** ≤550.
 
-- [ ] Implement PrepareCollection, CompleteCollection, RemoveCollection and paged Collections with bbolt transactions, exact-row CAS and durable once-assigned bucket sequence. Prepared precedes Collect; collected rows retain original proof until release.
-- [ ] Activate complete journal schema 2 and collection bucket validation. Preserve identity/fence/effect rules, reject schema 1 without replacement, and preserve historical MemberID/grant/token on journal rebind.
-- [ ] Test reopen at both states, duplicate preparation/completion, conflicts, corrupt rows, pagination and removal requiring exact collected receipt. Do not drop a row on reporting failure.
+- [x] Implement PrepareCollection, CompleteCollection, RemoveCollection and paged Collections with bbolt transactions, exact-row CAS and durable once-assigned bucket sequence. Prepared precedes Collect; collected rows retain original proof until release.
+- [x] Activate complete journal schema 2 and collection bucket validation. Preserve identity/fence/effect rules, reject schema 1 without replacement, and preserve historical MemberID/grant/token on journal rebind.
+- [x] Test reopen at both states, duplicate preparation/completion, conflicts, corrupt rows, pagination and removal requiring exact collected receipt. Do not drop a row on reporting failure.
 
 **Verification**
 
-- [ ] Run authoritystore functional tests, targeted race checks for store access, and `make test`.
+- [x] Run authoritystore functional tests, targeted race checks for store access, and `make test`.
 
 ### Task 55: Implement exact walstore collection markers
 
@@ -1362,6 +1362,8 @@ Do not run broad process performance/chaos campaigns by default; the focused deb
 
 
 ## NOT PLANNED CHANGES
+
+- Task54: Collections returns (CollectionPage, error), with Records/Next fields, matching the existing CleanupPage convention and mandatory two-result lint limit. This mechanically replaces the target's three-result signature without changing paging behavior or adding a public application API.
 
 - Task49: scheduler_policy_func_test.go assumed a 25ms callback deadline remained unexpired when inspected. A full parallel functional run disproved that timing assumption. Assert deadline presence/configured upper bound and retain owned-input/status checks; elapsed time after descheduling is not a contract violation.
 

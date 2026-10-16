@@ -1116,3 +1116,15 @@ Implemented
 Verified
 - make test:1772/1772,7.810s; test-reports/unit/20261016T133709.122102Z-lcbtzwqt/report.md. Focused collection suite0.508s. Full unit run includes all metaengine/authoritystore cases. Staged lint and diff checks pass after correcting import grouping. Logs /tmp/gquorum-task53-{unit-final,lineage,lint-final}.log.
 - Regressions cover exact immutable echo/owned result, timezone equality, conflicting facts/couriers, memory/missing/unknown debt, Previous and settled readmission references, deterministic clock handling, repeated metadata-only readmissions, stale original/intermediate owners, incomplete/ambiguous chains, optional hints, lost replies after another readmission and pruning, and preservation of ambiguous branches independent of order. No new concurrency mechanism or race/process run claimed. Next Task54; next mandatory peer/dead-code checkpoint70.
+
+## Task 54 — Durable host collection journal
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 69).
+
+Implemented
+- Activated authority journal schema2 and the collection bucket. Open/LoadIdentity validate exact row keys, full retirement proof, historical member bounds, state/time consistency, unique nonzero sequences and the bucket high-water mark; old schema1 and corrupt state are refused without replacement. Existing identity/fence/effect validation stays intact.
+- PrepareCollection owns exact proof and durably assigns one sequence; duplicate preparation preserves prepared/collected progress. CompleteCollection uses exact identity/sequence CAS and returns the original receipt on retries. RemoveCollection requires exact collected evidence; removal is repeatable without resetting the sequence. Rebind leaves historical member/grant/token/receipt unchanged. Paged Collections owns results, bounds work and uses exclusive identity cursors across removal/rebind; concurrent insertions behind the cursor require another scan.
+- Signature-only target adaptation: CollectionPage{Records,Next} follows the existing CleanupPage convention and two-result lint rule. No public application API or new task. Host collection/reporting wiring remains Tasks57–59. Updated current runtime documentation.
+
+Verified
+- Full authoritystore functional suite passes2.771s. Collection journal regressions pass under race3.723s after the paging refactor. make test:1772/1772,9.120s; test-reports/unit/20261016T134340.089437Z-aln3p505/report.md. Staged lint/diff checks pass; logs /tmp/gquorum-task54-{functional,race,unit-final,lint}.log.
+- Coverage includes reopen at both states, immutable first timestamp, conflicting proof/sequence, prepared-row removal refusal, exact release/retry, sequence persistence and overflow, owned pages after deleting cursor rows, invalid/foreign cursors, schema1/missing-bucket/malformed/nested/key/sequence/member/receipt corruption, concurrent prepare/complete, and repeated rebind during scans/preparation. No Docker run claimed. Next Task55; mandatory peer/dead-code checkpoint70 follows that commit.

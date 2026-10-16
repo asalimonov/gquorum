@@ -100,12 +100,12 @@ func openAuthorityDatabase(path string, identity topology.Identity, status datab
 
 func initializeAuthorityDatabase(db *bolt.DB, identity topology.Identity) error {
 	return db.Update(func(tx *bolt.Tx) error {
-		for _, name := range []string{"format", "identity", "fences", "effects"} {
+		for _, name := range []string{"format", "identity", "fences", "effects", collectionBucket} {
 			if _, err := tx.CreateBucket([]byte(name)); err != nil {
 				return err
 			}
 		}
-		if err := tx.Bucket([]byte("format")).Put([]byte("schema_version"), []byte("1")); err != nil {
+		if err := tx.Bucket([]byte("format")).Put([]byte("schema_version"), []byte("2")); err != nil {
 			return err
 		}
 		return put(tx.Bucket([]byte("identity")), []byte("current"), pin(identity))
@@ -219,17 +219,26 @@ func (s *Store) validate(tx *bolt.Tx) error {
 	if err := s.validateFences(tx); err != nil {
 		return err
 	}
-	return s.validateEffects(tx)
+	if err := s.validateEffects(tx); err != nil {
+		return err
+	}
+	return s.validateCollections(tx)
 }
 
 func validateBuckets(tx *bolt.Tx) error {
-	for _, name := range []string{"format", "identity", "fences", "effects"} {
+	format := tx.Bucket([]byte("format"))
+	if format == nil {
+		return fault.ErrUnreadable
+	}
+	// TODO(not planned): mixed-version negotiation and schema migrations.
+	// Refuse older evidence without replacing or partially upgrading it.
+	if !bytes.Equal(format.Get([]byte("schema_version")), []byte("2")) {
+		return fault.ErrUnsupported
+	}
+	for _, name := range []string{"format", "identity", "fences", "effects", collectionBucket} {
 		if tx.Bucket([]byte(name)) == nil {
 			return fault.ErrUnreadable
 		}
-	}
-	if !bytes.Equal(tx.Bucket([]byte("format")).Get([]byte("schema_version")), []byte("1")) {
-		return fault.ErrUnsupported
 	}
 	return nil
 }

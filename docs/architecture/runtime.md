@@ -188,6 +188,15 @@ identity/token, live assignments and ledger. There is no implicit age-based
 quarantine sweep. Retained approval evidence survives history pruning until its
 cleanup obligations can be proven complete. Staged-only identities never enter
 that retirement authority.
+The independent host authority journal now uses schema 2. Its collection bucket
+persists exact retirement proof before deletion and a collected receipt afterward.
+Preparation assigns one durable sequence; completion retries retain the first
+host timestamp. Rebinding preserves historical member IDs and proof. Exact
+collected-row removal follows reporting and storage-proof release. Journal pages
+are bounded owned values; their exclusive cursors survive row removal and rebind.
+Schema 1 is refused without migration. The managed collection/reporting wiring
+is implemented separately in the ongoing failure-isolation plan (Tasks 57–59).
+
 Planning also retains unfinished preparations in surviving groups. Even an old
 replica absent from native membership needs an exact remove/stop/cleanup sequence;
 the remove can produce an already-satisfied receipt under its new grant. New
