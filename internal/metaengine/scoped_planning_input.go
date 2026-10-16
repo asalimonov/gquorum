@@ -16,6 +16,9 @@ func (s *scopedState) planningCollector() planningCollector {
 	for key, record := range s.indexes.grants {
 		evidence.authority.records[key] = &record.authorityRecord
 	}
+	for _, floor := range s.AuthorityFloors {
+		evidence.authority.floors[floor.Resource] = floor.Key
+	}
 	return planningCollector{evidence: evidence, owners: make(map[planningReplicaKey]*planningReplica),
 		founding: make(map[string]bool)}
 }

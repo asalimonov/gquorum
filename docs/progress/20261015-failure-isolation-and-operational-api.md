@@ -844,3 +844,19 @@ Verified
 - Focused metaengine units pass, /tmp/gquorum-task34-focused.log. make test: 1402/1402 pass, 8.470s; test-reports/unit/20261016T065636.663789Z-efmc2cq4/report.md.
 - Staged lint passes after a line-length fix, /tmp/gquorum-task34-lint.log. git diff --check passes. 421 changed handwritten Go lines including tests and reference updates, within 550. No new concurrency/process implementation or race/Docker run claimed.
 - Task 35 is next. Next peer/dead-code checkpoint is commit 50, two commits from this one. Overall implementation remains unfinished; complete live activation is not claimed.
+
+## Task 35 — Prepare exact whole-group deletion debt
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 49).
+
+Implemented
+- Applied the pre-coding split: 87 tasks, deletion preparation 35, complete approval preparation 36, revocation/install 37, activation 77, final audit 87. Updated current references; historical log/review references remain historical.
+- Approval prepares ordinary deletion debts from exact former member/storage evidence, with required Stop and deferred DeleteGroupState and no invented Removed milestone. Existing debts and detached attribution remain intact. Deleted IDs enter permanent retirement at approval.
+- Never-converged issued groups retain source zero/nil declaration while deleting; restore permits their required-stop binding and refuses a fabricated nonzero tombstone. Unissued approved intent creates no host debt. Full graph round trips cover ordinary, inherited and never-converged deletion.
+- Closed thread 13 in consensus: omitted readmission hosts need an issued exact former-target usable batch. Partial consumption permits pending approval; absent issuance returns named Unavailable, foreign proof refuses, and closed/displaced unconsumed proof returns AuthorityFenced. Consumed closed proof stays valid. An older batch cannot hide missing later issuance. Actionless readmission debt is deferred to completion.
+- Shared catalog usability with admission handover and supplied actual floors to the planning collector. Added restore coverage for pending deletion, restricted declaration collection to deletion scopes so unrelated in-progress declarations do not become deletion preconditions. Readmission/mixed preparation and the deletion restore predicate are tested independently of the complete atomic approval wiring in Task 36.
+- Recorded cancellation protection, whole-batch completion/attribution, late founding fences, retained proof roots, and exact-binding issuance after unrelated approval in their owning next tasks.
+
+Verified
+- Focused metaengine units pass, /tmp/gquorum-task35-focused.log. Corrected the isolated restore test's conflicting same-version documents and missing replacement allocation floor; these were fixture errors.
+- make test: 1417/1417 pass, 7.374s; test-reports/unit/20261016T072238.553782Z-1l_2_577/report.md. Staged lint passes after extracting the shared batch-member lookup and simplifying debt preparation; /tmp/gquorum-task35-lint.log. Diff checks pass. 535 changed handwritten Go lines including tests/reference updates, within 550.
+- No new concurrency or process behavior; no new race/Docker run claimed. Scoped preparation remains isolated until full approval/revocation composition and activation. Next peer/dead-code checkpoint is commit 50, one commit from this one. Overall implementation remains unfinished.

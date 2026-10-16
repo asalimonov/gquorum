@@ -31,9 +31,7 @@ func prepareCleanupHandovers(source, next *scopedState, collector planningCollec
 			}
 			id := storage.Identity{ClusterID: next.Target.ClusterID, GroupID: step.GroupID,
 				NodeName: step.NodeName, ReplicaID: step.ReplicaID}
-			h.required[id] = topology.AuthorizedStep{OperatorID: topology.OperatorID(operation.Status.ID),
-				Version: operation.Status.Version, Attempt: operation.Status.Attempt, StepSeq: seq,
-				Kind: step.Kind, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID}
+			h.required[id] = scopedPlanAction(&operation, step)
 		}
 	}
 	debts := slices.Clone(source.Cleanup)

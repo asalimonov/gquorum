@@ -68,7 +68,7 @@ func (sm *topologySM) applyProposal(index uint64, kind ProposalKind,
 		return applyJSONProposal(body, "acquire_lock", sm.applyAcquireLock)
 	default:
 		// Schema 3 cannot persist scoped mutations. Remove this nil adapter at
-		// Task 76, when the complete scoped state replaces this dispatcher.
+		// Task 77, when the complete scoped state replaces this dispatcher.
 		return applyScopedProposal(nil, index, kind, body)
 	}
 }
@@ -90,7 +90,7 @@ func applyScopedProposal(state *scopedState, _ uint64, kind ProposalKind,
 		return proposalApplication{}, err
 	}
 	// Admission, required-stop handover and revocation must be prepared together
-	// before installation (Tasks 35–36); validation alone grants no authority.
+	// before installation (Tasks 36–37); validation alone grants no authority.
 	return proposalApplication{}, fault.ErrUnsupported
 }
 

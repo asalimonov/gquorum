@@ -40,7 +40,7 @@ func requiredCleanupStop(operation *topology.Operation, action topology.Authoriz
 func (check scopedCleanupValidation) pendingStop(debt cleanupRecord, tip *topology.Operation) bool {
 	row := check.index.groups[debt.Identity.GroupID]
 	if row == nil || debt.RetireAction.Kind == topology.StepDeleteGroupState &&
-		(!row.Deleting || row.Declaration == nil) {
+		(!row.Deleting || row.SourceVersion != 0 && row.Declaration == nil) {
 		return false
 	}
 	for _, block := range tip.Status.Blocks {

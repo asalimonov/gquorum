@@ -69,7 +69,7 @@ func TestScopedApprovalHandsOverOneAdmissionWithoutRelabelingEffects(t *testing.
 				!reflect.DeepEqual(next.AuthorityRecords, s.AuthorityRecords) || next.Operations[1].Previous != "" {
 				t.Fatal("handover lost readiness, identity, immutable facts or ancestry", next.Admissions)
 			}
-			// Finish only the surrounding declarations that Task 35 prepares.
+			// Finish only the surrounding declarations that Task 36 prepares.
 			next.History = append(slices.Clone(next.History), s.Target.Clone())
 			next.Nodes = slices.Clone(next.Nodes)
 			next.Nodes[1].Owner = "exec-v3-a1"
@@ -242,7 +242,6 @@ func TestScopedAdmissionHandoverRejectsNewerUnconsumedRetirementFloor(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := admissionHandover{catalog: catalog}
 	a := s.Admissions[len(s.Admissions)-1]
 	for _, record := range catalog.records {
 		if record.Grant.Purpose == topology.AuthorityReadmit {
@@ -252,7 +251,7 @@ func TestScopedAdmissionHandoverRejectsNewerUnconsumedRetirementFloor(t *testing
 			catalog.floors[record.Grant.Resources[0]] = key
 		}
 	}
-	if h.retirementUsable(a) {
+	if catalog.readmissionUsable(ReadmissionID(a)) {
 		t.Fatal("later resource floor allowed old unconsumed retirement")
 	}
 }

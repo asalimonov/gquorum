@@ -197,8 +197,8 @@ or new history-cap admission restriction is introduced.
 | Target §5.4, §6.1, §12 retry | Specify same-record admission handover, stable origin and resumed prefixes. |
 | Tasks 26–27 | Plan/collect semantic ownership scopes; remove dependent-closure input; retain scope CAS and separate repair reads. |
 | Tasks 28–34 | Keep restricted barriers; block set equals affected scopes; atomic same-member admission handover accompanies metadata takeover. |
-| Tasks 36–37, 42 | Preserve exact retirement authority through handover; share the waiting predicate and handover path with retries. |
-| Tasks 48–50 | Founding proof, non-founding binding, prefix validation, origin persistence/restore/join and retention roots. |
+| Tasks 37–38, 43 | Preserve exact retirement authority through handover; share the waiting predicate and handover path with retries. |
+| Tasks 49–51 | Founding proof, non-founding binding, prefix validation, origin persistence/restore/join and retention roots. |
 | Controller/verification tasks, final audit | Waiting classification, after-wait checks, end-to-end dependency and handover cases; remove obsolete closure expectations. |
 
 Split admission work into bounded tasks before coding if the 550-line ceiling
@@ -295,3 +295,39 @@ A live admission cannot have convergence at or after its origin version: metadat
 completion, including zero-step approval, completes its admissions atomically.
 Completed admissions still require a succeeded metadata block. Approval handover
 uses source checkpoints, never the candidate's prospective convergence.
+
+## Deletion and pending readmission (`FI_DELETION_BATCH`)
+
+Thread 13 consensus: retire a deleted group ID at approval, including before its
+first convergence. Pending deletion preserves its existing checkpoint: source
+zero with nil declaration means unknown, while nonzero source with nil declaration
+and no Deleting flag means a completed tombstone. Approved intent alone creates
+no host obligation; issued founding/preparation, native membership, proven
+checkpoints and existing debt supply exact former identities. Retain their
+approved storage/member assignments. Fence late founding/preparation before Stop.
+
+Ordinary deletion debt is created at approval with the deletion operation's exact
+required Stop and deferred DeleteGroupState, original member/storage, and no
+invented native removal. Existing debt remains original except required-stop
+handover. A new deletion may omit a readmission-owned host only once an issued
+batch targets that exact former node/member/replica and is usable or consumed.
+Every resource must retain its open current-floor grant or be consumed. Missing
+issuance returns Unavailable naming the node/former member and “readmission
+authority not yet issued”; retry approval of the same staged version. Closed or
+displaced unconsumed authority returns AuthorityFenced. Foreign proof refuses.
+Preview may describe the plan before issuance. Restore rejects missing coverage.
+
+Pending consumption keeps deletion pending, including a zero-step block;
+execution reports an awaiting-retirement reason and rechecks on receipts. An
+approval may not cancel or fence its depended-on unconsumed batch. Existing
+required-stop handover still needs consumed proof before dropping its binding.
+Completion uses the whole-batch predicate from restore, matched to the former
+identity even when a later replacement member supplied the proof. Atomically
+install the tombstone and missing actionless debts with the consuming batch's
+original admission operation, ReadmissionKey, and exact Stopped/Retired receipt.
+Reuse existing exact debts; never manufacture completion from partial receipts.
+
+Scoped readmission/admission issuance checks current exact approved member and
+metadata ownership/handover, not equality with the latest whole Target version.
+An unrelated approval must not prevent a batch from being issued. This preserves
+the approval-time batch prerequisite without adding a provenance entity or API.

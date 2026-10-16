@@ -49,6 +49,9 @@ func prepareScopedApproval(s *scopedState, desired topology.Document,
 	if err := prepareCleanupHandovers(s, next, collector); err != nil {
 		return nil, err
 	}
+	if err := prepareDeletionDebts(s, next, collector); err != nil {
+		return nil, err
+	}
 	return next, nil
 }
 

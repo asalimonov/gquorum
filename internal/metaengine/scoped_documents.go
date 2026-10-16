@@ -9,7 +9,7 @@ import (
 )
 
 // Validation never publishes derived indexes or mutates the candidate. Complete
-// convergence/authority validation precedes live installation at Task 76.
+// convergence/authority validation precedes live installation at Task 77.
 func prepareScopedGraph(state *scopedState, rules topology.Rules) (*scopedIndexes, error) {
 	if state.SchemaVersion != scopedStateSchemaVersion {
 		return nil, fault.ErrUnsupported
@@ -38,6 +38,9 @@ func prepareScopedGraph(state *scopedState, rules topology.Rules) (*scopedIndexe
 	}
 	catalog, err := restoreScopedAuthority(state, index)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateScopedDeletion(state, index); err != nil {
 		return nil, err
 	}
 	if err := validateScopedCleanup(state, index, catalog); err != nil {

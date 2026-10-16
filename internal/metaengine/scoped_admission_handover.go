@@ -41,7 +41,7 @@ func prepareAdmissionHandovers(source, next *scopedState) error {
 	admissions := slices.Clone(source.Admissions)
 	for i, admission := range admissions {
 		if admission.State.terminal() || next.Target.MemberID(admission.NodeName) != admission.MemberID {
-			continue // Different-member cancellation belongs to scoped revocation (Task 36).
+			continue // Different-member cancellation belongs to scoped revocation (Task 37).
 		}
 		admissions[i], err = handover.prepare(admission, successor)
 		if err != nil {
@@ -66,7 +66,7 @@ func (h admissionHandover) prepare(previous AdmissionRecord, successor *topology
 	if err := validateScopedRetry(*successor, h.proof); err != nil {
 		return AdmissionRecord{}, err
 	}
-	if !h.retirementUsable(previous) {
+	if !h.catalog.readmissionUsable(ReadmissionID(previous)) {
 		return AdmissionRecord{}, fault.ErrAuthorityFenced
 	}
 	next := previous
@@ -102,13 +102,13 @@ func (h admissionHandover) currentOwner(a AdmissionRecord, original *topology.Op
 	return false
 }
 
-func (h admissionHandover) retirementUsable(a AdmissionRecord) bool {
-	for _, record := range h.catalog.records {
-		if record.Grant.Purpose != topology.AuthorityReadmit || record.Grant.AdmissionID != ReadmissionID(a) {
+func (a authorityCatalog) readmissionUsable(id string) bool {
+	for _, record := range a.records {
+		if record.Grant.Purpose != topology.AuthorityReadmit || record.Grant.AdmissionID != id {
 			continue
 		}
 		for _, resource := range record.Grant.Resources {
-			if (record.Closed || h.catalog.floors[resource] != record.Grant.Key) &&
+			if (record.Closed || a.floors[resource] != record.Grant.Key) &&
 				!resourceConsumed(record, resource) {
 				return false
 			}
