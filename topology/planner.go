@@ -22,11 +22,11 @@ func BuildPlan(input PlanInput, desired Document, rules Rules) (Plan, error) {
 }
 
 func constructPlan(input PlanInput, desired Document, options PlanOptions) (Plan, error) {
-	// Whole-document completion still consumes this path until Task 73.
+	// Whole-document completion still consumes this path until Task 75.
 	return constructGroupPlan(input, desired, options, planScope{groups: unionGroupIDs(input, desired)})
 }
 
-// Remove the flat construction option with the schema-3 caller at Task 73.
+// Remove the flat construction option with the schema-3 caller at Task 75.
 // This controls plan construction only, never the active authority model.
 type planScope struct {
 	groups    []string

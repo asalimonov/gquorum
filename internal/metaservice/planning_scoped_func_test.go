@@ -20,7 +20,7 @@ type scopedPlanningController struct {
 	beforeRead func()
 }
 
-// The existing planningInput caller selects AffectedGroups at Tasks 61/73;
+// The existing planningInput caller selects AffectedGroups at Tasks 63/75;
 // this wrapper exercises that selection without a temporary production API.
 func (g *Group) scopedPlanningInput(ctx context.Context, desired topology.Document) (topology.PlanInput, error) {
 	input, err := g.state().PlanningInput(ctx, desired, nil)

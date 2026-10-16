@@ -23,7 +23,7 @@ func (g *Group) planningInput(ctx context.Context, desired topology.Document) (t
 }
 
 // Callers select native work separately from the full retained identity input.
-// Legacy planningInput keeps all desired groups until activation in Task 73.
+// Legacy planningInput keeps all desired groups until activation in Task 75.
 func (g *Group) readPlanningInput(ctx context.Context, desired topology.Document,
 	input topology.PlanInput, groups []string) (topology.PlanInput, error) {
 	observed := make(map[string]topology.GroupStatus)

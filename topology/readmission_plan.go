@@ -7,9 +7,9 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 )
 
-// ReadmissionCovers reports whether the plan's exact replacement metadata
-// preparation is the retirement boundary for this former host. The metadata FSM
-// must require all readmission receipts before granting that preparation.
+// ReadmissionCovers selects readmission as this former host's retirement owner
+// from approved identity, planned admission or convergence. It is not consumption
+// proof: the FSM requires exact retirement receipts before preparation/completion.
 func ReadmissionCovers(input PlanInput, desired Document, plan Plan, node string) bool {
 	member := desired.MemberID(node)
 	previous, known := input.loadOwnerMember(node)
@@ -19,6 +19,9 @@ func ReadmissionCovers(input PlanInput, desired Document, plan Plan, node string
 	}
 	if metaMember == member {
 		return true // Exact convergence includes the receipt-gated admission.
+	}
+	if input.Approved.ClusterID == desired.ClusterID && input.Approved.MemberID(node) == member {
+		return true // Another approved operation owns this exact pending readmission.
 	}
 	replica := exactPlanReplica(desired, Step{GroupID: MetaGroupID, NodeName: node, ReplicaID: member})
 	return replica != nil && ValidAdmissionSequence(plan.Steps, node, member, replica.Role)
@@ -52,10 +55,10 @@ func bindReadmissionRetirement(input PlanInput, desired Document, plan Plan, gro
 	var replacements []Replica
 	for _, r := range sortedReplicas(meta.Replicas) {
 		previous, known := input.loadOwnerMember(r.NodeName)
-		// Unchanged metadata is another block's responsibility. Only its exact
-		// completed admission can waive old-host work in a load-only plan.
+		// Unchanged metadata can still own pending readmission retirement.
+		// The FSM verifies consumption, including deletion without a Prepare.
 		if known && r.ReplicaID > previous && (slices.Contains(groups, MetaGroupID) ||
-			input.convergedMetaMember(r.NodeName) == r.ReplicaID) {
+			ReadmissionCovers(input, desired, Plan{}, r.NodeName)) {
 			replacements = append(replacements, r)
 		}
 	}
@@ -63,6 +66,7 @@ func bindReadmissionRetirement(input PlanInput, desired Document, plan Plan, gro
 		return plan
 	}
 	builder := readmissionPlanBuilder{input: input, desired: desired, replacements: replacements,
+		metadataOwned:      slices.Contains(groups, MetaGroupID),
 		plannedPreparation: readmissionPreparations(plan, replacements), emitted: make(map[string]bool)}
 	for _, step := range plan.Steps {
 		builder.appendStep(step)
@@ -97,6 +101,7 @@ type readmissionPlanBuilder struct {
 	plannedPreparation map[string]bool
 	emitted            map[string]bool
 	steps              []Step
+	metadataOwned      bool
 }
 
 func (p *readmissionPlanBuilder) replacement(node string) *Replica {
@@ -113,7 +118,8 @@ func (p *readmissionPlanBuilder) emit(r Replica) {
 		return
 	}
 	p.emitted[r.NodeName] = true
-	if p.plannedPreparation[r.NodeName] || p.input.convergedMetaMember(r.NodeName) == r.ReplicaID {
+	if !p.metadataOwned || p.plannedPreparation[r.NodeName] ||
+		p.input.convergedMetaMember(r.NodeName) == r.ReplicaID {
 		return // preserve the planner's paired waits and destructive ordering
 	}
 	kinds := []StepKind{StepPrepareReplica, StepAddLearner}
