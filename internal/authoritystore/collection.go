@@ -54,3 +54,10 @@ func (r CollectionRecord) Clone() CollectionRecord {
 	}
 	return owned
 }
+
+// Equal compares immutable receipt facts; timestamps compare by their instant,
+// independently of JSON timezone spelling and process-local monotonic metadata.
+func (r CollectionReceipt) Equal(other CollectionReceipt) bool {
+	return r.Identity == other.Identity && r.MemberID == other.MemberID && r.RetirementKey == other.RetirementKey &&
+		r.Token == other.Token && r.LocalSequence == other.LocalSequence && r.CollectedAt.Equal(other.CollectedAt)
+}

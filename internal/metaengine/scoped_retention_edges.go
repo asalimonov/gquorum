@@ -66,6 +66,7 @@ func (r *scopedRetention) closeCleanup() {
 			r.grants[*debt.ReadmissionKey] = true
 		}
 		r.cleanupDeclaration(debt)
+		r.closeCollectionLineage(debt)
 	}
 }
 

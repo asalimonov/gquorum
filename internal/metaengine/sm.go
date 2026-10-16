@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/authoritystore"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -22,9 +23,10 @@ type statePersister interface {
 // ApplyResult carries the deterministic acceptance, refusal and evidence from a
 // metadata proposal.
 type ApplyResult struct {
-	ExpectedVersion uint64                    `json:"expected_version,omitempty"`
-	RebasedTo       uint64                    `json:"rebased_to,omitempty"`
-	Grants          []topology.AuthorityGrant `json:"grants,omitempty"`
+	Collection      *authoritystore.CollectionResult `json:"collection,omitempty"`
+	ExpectedVersion uint64                           `json:"expected_version,omitempty"`
+	RebasedTo       uint64                           `json:"rebased_to,omitempty"`
+	Grants          []topology.AuthorityGrant        `json:"grants,omitempty"`
 	ProposalID      string
 	CurrentVersion  uint64
 	Accepted        bool

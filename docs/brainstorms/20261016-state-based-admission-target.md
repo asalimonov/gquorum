@@ -493,3 +493,28 @@ Checkpoint source compaction requires an approved identical declaration with the
 same durable node/member bindings. Preserve the source if retained witnesses
 would be ambiguous. Archived consumed metadata preparation uses its exact grant
 and receipt identity, independently of an obsolete whole source document.
+
+### Collection courier precision (peer thread 20, Task 53)
+
+`COLLECTION_LINEAGE`: a consumed metadata readmission batch proves whole-journal
+rebinding. Resolve its AdmissionID through the original AdmissionRecord, starting
+from the cleanup debt's historical MemberID. Only the unique monotonic chain's
+endpoint may report collection. Retained process restarts and excluded hosts
+remain eligible; Target membership and InstanceID equality are not gates. Older
+couriers are fenced; ambiguous branches or a courier beyond the consumed chain
+return retryable Unavailable. ReadmissionKey, when present, checks only the final
+batch and never selects authority.
+
+Exact retained retirement independently proves the old replica. Later metadata
+links need not target that replica: collection rows preserve their old member,
+token, sequence and host timestamp through journal rebind. First acceptance binds
+those immutable fields; duplicates revalidate the courier and echo the original
+receipt. Metadata UpdatedAt uses proposal time clamped against the retained row;
+it does not order the independent host clock or collection bucket sequence.
+
+Every independently retained physical retired cleanup row keeps all reachable
+consumed journal branches as closure dependencies, including after collection.
+This preserves lost-reply retries after later readmissions and prevents pruning
+from converting ambiguity into permission. Complete debt and its chain are not
+independent roots; once all other references disappear, both may prune and the
+read-only absence query can settle the host record.

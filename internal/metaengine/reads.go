@@ -97,6 +97,8 @@ func (m *Machine) queryValueLocked(q QueryRequest) (any, error) {
 		return queryScopedAuthority(nil, q) // Scoped state replaces this adapter at Task 78.
 	}
 	switch q.Kind {
+	case "collection_check":
+		return queryScopedCollection(nil, q) // Task 78 installs scoped state under this same read lock.
 	case "plan_validation":
 		return m.queryPlanLocked(q)
 	case "topology":

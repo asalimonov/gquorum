@@ -96,6 +96,8 @@ func applyScopedProposal(state *scopedState, index uint64, kind ProposalKind,
 func dispatchScopedProposal(state *scopedState, index uint64, kind ProposalKind,
 	body json.RawMessage) (proposalApplication, error) {
 	switch kind {
+	case "record_collection":
+		return applyScopedJSONProposal(index, body, state.applyRecordCollection)
 	case KindProposeDocument:
 		return applyScopedJSONProposal(index, body, state.applyProposeDocument)
 	case KindBindAdmission:

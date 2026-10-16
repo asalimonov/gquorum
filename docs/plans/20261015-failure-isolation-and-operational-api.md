@@ -872,13 +872,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaengine/cleanup.go`, `reads.go`, proposal dispatch. **Target:** [T] §4.2, §6.3, §7.1, §12 settlement algorithms. **Depends on:** 6–15, 42–43, 52. **Budget:** ≤550.
 
-- [ ] Implement CollectionCheck under the FSM read lock: Untracked requires no cleanup row and no reference under the shared predicate. Do not add CollectionAcks or create a timestamp, grant, state mutation or Raft proposal on this path.
-- [ ] Implement applyRecordCollection for retained debt: exact identity/member/token/sequence/retirement/courier linkage, class and monotonic proof; identical duplicates echo accepted evidence, conflicting duplicates fail.
-- [ ] Test memory records reject collection, unknown identities cannot fabricate milestones, missing-row acceptance refuses, Previous/readmission references prevent settlement and deterministic Apply uses proposal time only.
+- [x] Implement CollectionCheck under the FSM read lock: Untracked requires no cleanup row and no reference under the shared predicate. Do not add CollectionAcks or create a timestamp, grant, state mutation or Raft proposal on this path.
+- [x] Implement applyRecordCollection for retained debt: exact identity/member/token/sequence/retirement/courier linkage, class and monotonic proof; identical duplicates echo accepted evidence, conflicting duplicates fail.
+- [x] Test memory records reject collection, unknown identities cannot fabricate milestones, missing-row acceptance refuses, Previous/readmission references prevent settlement and deterministic Apply uses proposal time only.
 
 **Verification**
 
-- [ ] Run collection acceptance/read units and `make test`.
+- [x] Run collection acceptance/read units and `make test`.
 
 ### Task 54: Persist the host collection journal state machine
 
