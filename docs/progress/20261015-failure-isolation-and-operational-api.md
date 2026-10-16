@@ -691,3 +691,23 @@ Verified
 - make test passes 1289/1289, 9.002s; test-reports/unit/20261016T050931.293167Z-j9zttuf2/report.md. make lint-staged passes, /tmp/gquorum-task28-lint.log; diff checks pass. 318 changed handwritten Go lines, within 550.
 - The existing native fixture had a converged metadata version equal to its proposed new plan version. Advanced Approved/desired consistently so the new plan follows every source, while preserving independent metadata/load versions. Added real health evidence to the metadata-removal fixture; safety checks remain strict. Extracted barrier input indexing after the first lint pass identified excessive complexity.
 - No new concurrency or Docker execution. Next peer/dead-code review is commit 40; next task requires a pre-coding size audit because scoped approval now includes the accepted admission-origin/handover contract.
+
+## Task 29 — Preserve admission origin across operation handover
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 40).
+
+Implemented
+- Added FSM-assigned internal ReadmissionOperatorID (readmission_operator_id,omitempty). ReadmissionID retains its existing encoding and resolves operator and process origins independently. Pending process replacement copies both origin dimensions; proposals cannot select either.
+- Scoped restore requires a retained earlier operation, exact approved member and original admission sequence, with the original metadata block failed/superseded. Process-origin checks compare resolved origins. Disk projections and join response validation preserve the field; exact original grant batches and readmission-created cleanup retain their old authority attribution. Legacy restore rejects the new handover field until complete scoped activation.
+- Tests cover unchanged original ID bytes, same-version retry and cross-version handover without Previous, one record per process, consumed original batch and actionless cleanup, process replacement, missing/foreign/self/omitted origins, atomic decode refusal, caller origin selection and join batch validation. No actual ownership handover is enabled yet; live preparation and consumed-prefix/suffix validation belong to Task 31.
+- Pre-coding size audit split old Task 29 into Tasks 29–32 (origin, approval preparation, admission handover, atomic installation). The plan now has 83 tasks; scoped collection is 61, activation/removal 73, final audit 83. Updated current plan/amendment and code removal references; historical progress entries keep their original numbering.
+
+Verified
+- go test -count=1 ./internal/metaengine ./internal/metaservice: pass, /tmp/gquorum-task29-focused.log.
+- Focused functional readmission restart, exact grant/ready receipt and approved control-route tests: pass (3.040s), /tmp/gquorum-task29-functional.log.
+- make test: 1303/1303 pass, 9.390s; test-reports/unit/20261016T051601.541484Z-_nex8uno/report.md. Staged lint passes, /tmp/gquorum-task29-lint.log; fixed line wrapping and operand ordering from its first pass. git diff --check passes. 312 changed handwritten Go lines, including tests and removal-reference updates, within 550.
+- Full make lint passes across library, examples, process fixture and tooling variants: /tmp/gquorum-commit40-lint.log. No new concurrency; no race/process execution claimed.
+
+Commit-40 dead-code audit
+- Reviewed references across the batch beginning after 0219449. The obsolete replacesStoppedHost heuristic was removed in Task 28; shared scope/partition/origin helpers all have real producer/decoder/restore consumers. Test-only scoped wrappers stay in test files.
+- Legacy whole-document planner, composite/Operator adapters, query guards and scoped codec isolation still have active schema-3 callers. Preserve them until Task 73; deleting them now would activate partial persistence or break live behavior. No new public compatibility facade, runtime mode flag or unused production wrapper added.
+- Next required step is Claude review of implementation/correction commits 36–40 (0219449..this commit), covering Correction 11 and Tasks 26–29. Evaluate and resolve that review before the next implementation commit. The overall goal remains active and unfinished; the user authorized consensus decisions without further approval.

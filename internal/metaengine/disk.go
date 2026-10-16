@@ -32,12 +32,13 @@ type diskOperator struct {
 	UpdatedAt time.Time          `json:"updated_at"`
 }
 type diskAdmission struct {
-	NodeName              string              `json:"node_name"`
-	InstanceID            string              `json:"instance_id"`
-	MemberID              uint64              `json:"member_id"`
-	ExecutionID           topology.OperatorID `json:"execution_id"`
-	State                 AdmissionState      `json:"state"`
-	ReadmissionInstanceID string              `json:"readmission_instance_id,omitempty"`
+	NodeName              string               `json:"node_name"`
+	InstanceID            string               `json:"instance_id"`
+	MemberID              uint64               `json:"member_id"`
+	ExecutionID           topology.OperatorID  `json:"execution_id"`
+	State                 AdmissionState       `json:"state"`
+	ReadmissionInstanceID string               `json:"readmission_instance_id,omitempty"`
+	ReadmissionOperatorID topology.OperationID `json:"readmission_operator_id,omitempty"`
 }
 type metaDiskState struct {
 	AuthorityRecords []authorityRecord           `json:"authority_records,omitempty"`
@@ -117,6 +118,7 @@ func toDiskAdmission(a AdmissionRecord) diskAdmission {
 		ExecutionID:           a.OperatorID,
 		State:                 a.State,
 		ReadmissionInstanceID: a.ReadmissionInstanceID,
+		ReadmissionOperatorID: a.ReadmissionOperatorID,
 	}
 }
 func (a diskAdmission) public() AdmissionRecord {
@@ -127,6 +129,7 @@ func (a diskAdmission) public() AdmissionRecord {
 		OperatorID:            a.ExecutionID,
 		State:                 a.State,
 		ReadmissionInstanceID: a.ReadmissionInstanceID,
+		ReadmissionOperatorID: a.ReadmissionOperatorID,
 	}
 }
 func toDiskTransition(t topology.OperatorTransition) diskOperatorTransition {

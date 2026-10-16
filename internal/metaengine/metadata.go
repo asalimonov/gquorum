@@ -116,6 +116,9 @@ func operatorFromView(v topology.Operator) operatorRecord {
 	}
 }
 func validateRestoredState(st smState, rules topology.Rules) error {
+	if slices.ContainsFunc(st.Admissions, func(a AdmissionRecord) bool { return a.ReadmissionOperatorID != "" }) {
+		return fault.New(fault.Unsupported, "admission handover requires scoped metadata", nil)
+	}
 	if err := validateRestoredDocuments(st, rules); err != nil {
 		return err
 	}
@@ -297,6 +300,9 @@ func validateRestoredAdmissions(st smState, seen map[topology.OperatorID]bool) e
 		if !a.State.valid() {
 			return fault.New(fault.Unreadable, "unknown admission state", nil)
 		}
+		if a.ReadmissionOperatorID != "" && !seen[topology.OperatorID(a.ReadmissionOperatorID)] {
+			return fault.New(fault.Unreadable, "missing admission origin operation", nil)
+		}
 		if !a.State.terminal() {
 			if !seen[a.OperatorID] || liveAdmissions[a.NodeName] {
 				return fault.New(fault.Unreadable, "invalid live admission execution", nil)
@@ -314,7 +320,7 @@ func validateReadmissionOrigins(records []AdmissionRecord, admissions map[string
 		}
 		original, found := admissions[admissionKey(a.NodeName, a.ReadmissionInstanceID)]
 		if !found || original.ReadmissionInstanceID != "" || original.MemberID != a.MemberID ||
-			original.OperatorID != a.OperatorID || original.State != AdmissionSuperseded {
+			original.State != AdmissionSuperseded || original.originOperator() != a.originOperator() {
 			return fault.New(fault.Unreadable, "readmission origin does not name the exact superseded admission", nil)
 		}
 	}

@@ -22,7 +22,7 @@ func BuildPlan(input PlanInput, desired Document, rules Rules) (Plan, error) {
 }
 
 func constructPlan(input PlanInput, desired Document, options PlanOptions) (Plan, error) {
-	// Whole-document completion still consumes this path until Task 70.
+	// Whole-document completion still consumes this path until Task 73.
 	plan, err := constructGroupPlan(input, desired, options, unionGroupIDs(input, desired))
 	plan.Blocks, plan.Dependencies = nil, nil
 	return plan, err

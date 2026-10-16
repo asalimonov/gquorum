@@ -38,9 +38,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 - Each numbered task has a **hard ceiling of 550 changed handwritten Go lines, including tests**. Estimate its diff before editing. If a task would exceed that ceiling, split it into consecutive numbered tasks with their own verification, update subsequent references, and continue within the same approved design. Do not hide a repository-wide rename inside a final audit. Generated output and documentation are reviewed separately, not an excuse to combine unrelated code changes.
 - After each five implementation commits, inspect newly obsolete code with references and unused-code lint, delete safe dead code, and request a paseo-peer review of that batch. Evaluate findings against the target and actual code, implement justified corrections as explicit bounded correction tasks/commits, and record accepted/rejected findings with evidence before the next implementation commit. Independent preparation may continue while the peer reviews the immutable committed range. Retained transition scaffolding needs a named removal task. Count all implementation/correction commits toward subsequent five-commit review boundaries; documentation/planning commits do not count.
 - Tasks execute in numbered order. A dependency list names additional semantic prerequisites, not permission to skip earlier tasks. At every checkpoint all modules compile and `make test` passes. Run focused tests named in each task, and focused functional/race checks when ownership or persistence changes. Fix failures encountered, including unrelated failures, and record unrelated fixes under NOT PLANNED CHANGES.
-- First introduce contracts and pure helpers, then state-machine behavior, stores and execution, then public composition. Temporary compile scaffolding is allowed only for an intermediate commit: record its exact symbol/file and removal task in the progress log. Do not introduce public V2 APIs or promise compatibility. Existing old symbols may remain until their consumers are converted; new paths must fail closed until their real implementation is connected. Remove all scaffolding by Task 70. Never synthesize an authoritative composite Document to make old code compile.
+- First introduce contracts and pure helpers, then state-machine behavior, stores and execution, then public composition. Temporary compile scaffolding is allowed only for an intermediate commit: record its exact symbol/file and removal task in the progress log. Do not introduce public V2 APIs or promise compatibility. Existing old symbols may remain until their consumers are converted; new paths must fail closed until their real implementation is connected. Remove all scaffolding by Task 73. Never synthesize an authoritative composite Document to make old code compile.
 - A signature change and all callers needed for that commit to compile belong together. Partition broad naming changes across the component tasks below; if a bridge is unavoidable, keep it private wherever possible and remove it before final cutover. No production flag chooses between old/new authority models. Change a reachable behavior only when its safety prerequisites are implemented; test new helpers directly before wiring them. A temporary stub must return a classified unsupported error, never fabricated progress or success.
-- Keep schema constants at the current version until their complete encoder/decoder and invariants are ready. Do not write a partially implemented v4 state or v2 journal. Activate each complete format in its owning task; old changed formats then reject explicitly. No migration, fallback to empty state or current-code regeneration of immutable baseline fixtures. Before Task 70, exercise new FSM handlers/codecs through isolated owning-package fixtures; do not route live production proposals into scoped state that the active persistence path cannot save. Service/Node composition edits before that point prepare the final wiring; the complete activation and real-entry-point restart check happen together in Task 70. Move an inseparable wiring/format change into an earlier bounded cutover task if needed, recording that ordering change here rather than briefly enabling unsafe persistence.
+- Keep schema constants at the current version until their complete encoder/decoder and invariants are ready. Do not write a partially implemented v4 state or v2 journal. Activate each complete format in its owning task; old changed formats then reject explicitly. No migration, fallback to empty state or current-code regeneration of immutable baseline fixtures. Before Task 73, exercise new FSM handlers/codecs through isolated owning-package fixtures; do not route live production proposals into scoped state that the active persistence path cannot save. Service/Node composition edits before that point prepare the final wiring; the complete activation and real-entry-point restart check happen together in Task 73. Move an inseparable wiring/format change into an earlier bounded cutover task if needed, recording that ordering change here rather than briefly enabling unsafe persistence.
 - Tests follow AGENTS.md: pure units use `!functional`; services, stores and single-participant fixtures use `functional`; multi-node scenarios use the Docker pool. Use explicit barriers, exact identities and joined cleanup, not timing-only assertions. Test names introduced below are planned names, not claims that they already exist.
 - Consult TiKV/PD source paths and revisions in [T] §9 at the relevant lifecycle/dispatch tasks. Adapt removed-peer records, tombstone-before-delete and group ownership inside existing packages. Do not port swallowed deletion errors, volatile PD operation storage, priorities or a second controller architecture. Record any actual code port and required license attribution.
 
@@ -48,14 +48,14 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 | Target contract | Primary tasks |
 | --- | --- |
-| Public API, Operation/Plan/progress types, exact conflicts | 1–7, 39–41, 52–53, 58–59, 66–70 |
-| v4 metadata, indexes, convergence and proof retention | 8–15, 29–38, 42–45, 70 |
-| Scoped planning, admission/removal and atomic repair rebase | 22–33, 37–43, 58–62 |
-| Detached cleanup, journal v2 and exact physical collection | 34–35, 44–51, 56–57, 63–64 |
-| Bounded dispatch, policy isolation, observation provenance | 5, 54–62 |
-| Former Active consumers and actual ownership wiring | 42–43, 53, 58–70 |
-| Failure/recovery evidence, performance measurement, documentation | 71–79 |
-| Complete design-to-code and entry-point audit | 80 |
+| Public API, Operation/Plan/progress types, exact conflicts | 1–7, 42–44, 55–56, 61–62, 69–73 |
+| v4 metadata, indexes, convergence and proof retention | 8–15, 32–41, 45–48, 73 |
+| Scoped planning, admission/removal and atomic repair rebase | 22–36, 40–46, 61–65 |
+| Detached cleanup, journal v2 and exact physical collection | 37–38, 47–54, 59–60, 66–67 |
+| Bounded dispatch, policy isolation, observation provenance | 5, 57–65 |
+| Former Active consumers and actual ownership wiring | 45–46, 56, 61–73 |
+| Failure/recovery evidence, performance measurement, documentation | 74–82 |
+| Complete design-to-code and entry-point audit | 83 |
 
 ## Task list
 
@@ -64,8 +64,8 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** `topology/operator*.go` → `operation*.go`, `topology/authority*.go`, `fault/fault.go`. **Target:** [T] §3.3–3.4, §7.2; contract C3. **Budget:** ≤550 Go lines.
 
 - [x] Add the exact OperationID, OperationState, OperationStatus, BlockStatus, Operation and OperationTransition definitions and state helpers from C3, including the BlockedReason dependency from C2 in this task. Preserve execution ID strings and existing state values; implement deep copies of owned fields.
-- [x] Inventory all Operator naming consumers and assign their migration to Tasks 7–12, 24–25, 42, 50–55, 59–65. Keep Step comparable; do not put dependency slices in AuthorizedStep. Rename public authorization error vocabulary without changing unrelated Origin/event values.
-- [x] Add pure tests for ID construction, state validity, owned copies and preservation of full aggregate state in partial projections. Record temporary compile scaffolding explicitly. Aggregate calculation/tests belong to Task 32 alongside the FSM consumer, avoiding an unused helper or an extra public aggregation API.
+- [x] Inventory all Operator naming consumers and assign their migration to Tasks 7–12, 24–25, 45, 53–58, 62–68. Keep Step comparable; do not put dependency slices in AuthorizedStep. Rename public authorization error vocabulary without changing unrelated Origin/event values.
+- [x] Add pure tests for ID construction, state validity, owned copies and preservation of full aggregate state in partial projections. Record temporary compile scaffolding explicitly. Aggregate calculation/tests belong to Task 35 alongside the FSM consumer, avoiding an unused helper or an extra public aggregation API.
 
 **Verification**
 
@@ -88,8 +88,8 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** new `topology/progress.go`, `topology/read.go`, `status.go`, `views.go`. **Target:** [T] §3.2, §8.3; contract C2. **Depends on:** 1–2. **Budget:** ≤550.
 
 - [x] Add the full C2 progress structs, BlockedReason codes, FullyConverged, CleanupSummary, Validate and Clone methods. Preserve nil versus present timestamps/declarations and all JSON names.
-- [x] Prepare final ReadView{AppliedIndex, Latest, Target, FullyConverged}; GroupStatus adds Reporter, ReporterReplicaID, ReceivedAt and SourceVersion only. ClusterStatus prepares bounded Operations with explicit truncation; its Groups conversion to GroupProgress and per-group convergence/owner projection belongs to Task 53. Remove old fields only after consumers are converted in Tasks 53 and 61–65.
-- [x] Test copy isolation, query limit normalization (100 default, 1000 maximum), invalid negative/oversized limits and exact freshness identity fields. Paging algorithm belongs to Task 52.
+- [x] Prepare final ReadView{AppliedIndex, Latest, Target, FullyConverged}; GroupStatus adds Reporter, ReporterReplicaID, ReceivedAt and SourceVersion only. ClusterStatus prepares bounded Operations with explicit truncation; its Groups conversion to GroupProgress and per-group convergence/owner projection belongs to Task 56. Remove old fields only after consumers are converted in Tasks 56 and 64–68.
+- [x] Test copy isolation, query limit normalization (100 default, 1000 maximum), invalid negative/oversized limits and exact freshness identity fields. Paging algorithm belongs to Task 55.
 
 **Verification**
 
@@ -101,7 +101,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [x] Establish MutationResult{Document, OperationID, RebasedTo, Placement}; preserve MutationOptions and its Preview/Approve exclusion. Add ExpectedVersion, CurrentVersion and RebasedTo to the existing fault.Error.
 - [x] Carry structured conflict fields through ApplyResult/private leader forwarding and public errors without flattening them. Preserve an accepted staged Document when optional approval fails.
-- [x] Test conflict round trips, errors.Is/Unwrap behavior, partial staging results and preview remaining write-free. Defer semantic replay to Tasks 39–40; do not silently refresh caller CAS.
+- [x] Test conflict round trips, errors.Is/Unwrap behavior, partial staging results and preview remaining write-free. Defer semantic replay to Tasks 42–43; do not silently refresh caller CAS.
 
 **Verification**
 
@@ -111,9 +111,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `topology/document_rules.go`, `scheduling/scheduler.go`, `metrics/observation.go`. **Target:** [T] §5.4, §6.4; contracts C7/C9. **Depends on:** 3. **Budget:** ≤550.
 
-- [x] Add final Limits fields MaxNodes, MaxReplicas, MaxConcurrentGroups and MaxConcurrentCleanup; normalize to 3/5/4/2, reject negative worker counts. Remove the old pending-authority cap only with its consumers in Tasks 30–31 and 66.
+- [x] Add final Limits fields MaxNodes, MaxReplicas, MaxConcurrentGroups and MaxConcurrentCleanup; normalize to 3/5/4/2, reject negative worker counts. Remove the old pending-authority cap only with its consumers in Tasks 33–34 and 69.
 - [x] Establish ScheduleInput's exact C7 shape and owned Clone; Groups carry approved/proven state, never Desired into a policy callback. Prepare metrics TargetVersion and per-group SourceVersion fields.
-- [x] Test normalization, JSON fields and callback-copy isolation. Do not make a worker count a limit on retained durable evidence. Policy behavior and collector invalidation are implemented in Tasks 60–62.
+- [x] Test normalization, JSON fields and callback-copy isolation. Do not make a worker count a limit on retained durable evidence. Policy behavior and collector invalidation are implemented in Tasks 63–65.
 
 **Verification**
 
@@ -124,7 +124,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** plan/block validation, legacy FSM entry guards, scheduling copies/boundaries, status values and matching tests. **Target:** §3.2–3.3, §5.4, §6.4; review thread 2. **Budget:** ≤550 Go lines.
 
 - [x] Reject detached required deletion/replacement stops and unrelated founding prerequisites; source versions precede their plan version.
-- [x] Refuse scoped plans in all legacy FSM entry/restore paths until complete Task 70 activation; retain full classified errors.
+- [x] Refuse scoped plans in all legacy FSM entry/restore paths until complete Task 73 activation; retain full classified errors.
 - [x] Keep ScheduleInput.Clone faithful, strip Desired at callback/conformance boundaries, and use explicit no-effect checks at old IsEmpty callers.
 - [x] Keep raw observations free of convergence ownership; add explicit reporter replica identity, document immutable Limits and record remaining producer/removal tasks. Reuse the existing placement clone.
 - [x] Run focused regressions, staged lint and make test; record accepted/rejected review arguments and dead-code evidence.
@@ -134,7 +134,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** `storage/retirement.go`, new `internal/authoritystore/collection.go`, `internal/managed` configuration. **Target:** [T] §4.2, §7.2; contracts C6/C11. **Budget:** ≤550.
 
 - [x] Define CollectionRecord, CollectionReceipt, CollectionResult and concrete managed CollectionCallbacks exactly as C6/C11. Keep receipts internal and reuse storage.Identity/RetiredReplica; avoid import cycles.
-- [x] Prepare the final RetirementStore method set Retired/Collect/ForgetCollection and document exact deletion proof versus proof release. Coordinate interface activation with the complete walstore implementation in Task 48; no successful placeholder ForgetCollection.
+- [x] Prepare the final RetirementStore method set Retired/Collect/ForgetCollection and document exact deletion proof versus proof release. Coordinate interface activation with the complete walstore implementation in Task 51; no successful placeholder ForgetCollection.
 - [x] Specify prepared/collected validation and key encoding helpers: length-prefixed group/node plus big-endian replica ID, cluster checked against the journal pin. Add pure shape/key tests, including malformed tokens/receipt state.
 
 **Verification**
@@ -147,7 +147,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [x] Add exact BeginOperation, RetryOperation (no Plan), TransitionOperation, CommitRepairOperation and RecordCollection payloads; add ExpectedTarget/Scopes to voter-change proposals and optional Intent to document proposals. Define the C5 intentRecord dependency here; Task 8 reuses it rather than creating another type.
 - [x] Add BeginCleanupEffect/RecordCleanupStatus and progress/collection_check query shapes. The latter returns only CollectionCheck{Untracked, AppliedIndex}; authenticated Courier and optional ReadmissionKey travel with retained receipt acceptance.
-- [x] Test strict payload decoding, required fields, correlation IDs, structured errors and rejection of client-selected authority classes. Keep new mutation dispatch unavailable until its handler is ready; remove ActivateTarget in Task 70, not by mapping it to fake completion.
+- [x] Test strict payload decoding, required fields, correlation IDs, structured errors and rejection of client-selected authority classes. Keep new mutation dispatch unavailable until its handler is ready; remove ActivateTarget in Task 73, not by mapping it to fake completion.
 
 **Verification**
 
@@ -159,7 +159,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [x] Implement exact smState v4 fields and group/node convergence, intent, cleanup, authority Class and scoped revocation records. Document gains RebasedFrom; no Active field or CollectionAcks in the final format.
 - [x] Serialize deterministic sorted unique arrays and preserve existing unrelated state/bucket encodings. Define operation records around the immutable Plan and separate block statuses; preserve all current session/lock/admission/allocation data.
-- [x] Test deterministic round trips and nil tombstone versus never-converged records. Keep this codec isolated from persistent writes until restore validation and state installation are ready; record the activation point in Task 70.
+- [x] Test deterministic round trips and nil tombstone versus never-converged records. Keep this codec isolated from persistent writes until restore validation and state installation are ready; record the activation point in Task 73.
 
 **Verification**
 
@@ -171,7 +171,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [x] Rebuild group/node records and owners, operation lookup, first/latest attempt, Previous→retry, exact cleanup, parent/kind/digest intent, rebase-successor and resource-obligation indexes from durable rows. No independently persisted indexes or new public API.
 - [x] Reject duplicate lookup keys and conflicting retry/rebase edges atomically. Use one common resource index for unfinished execution/cleanup grants and missing revocation evidence; bound work by actual retained evidence, not worker counts or the removed debt cap.
-- [x] Test equivalent indexed results before/after JSON restoration, exact successor identity separation and atomic rejection preserving prior decoded state. Keep full graph/proof validation explicitly assigned to Tasks 10–15 and live installation disabled until Task 70.
+- [x] Test equivalent indexed results before/after JSON restoration, exact successor identity separation and atomic rejection preserving prior decoded state. Keep full graph/proof validation explicitly assigned to Tasks 10–15 and live installation disabled until Task 73.
 
 **Verification**
 
@@ -192,7 +192,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [x] Validate rules, document/rebase/applied-index boundaries and retained operation source documents without a hard history cap. Preserve the distinction between historical FullyConverged and current group progress.
 - [x] Validate complete operation/block status, immutable plans and restricted dependency graphs. Reject Previous cycles, skipped/forked retries, altered plans and lost terminal sibling proof. Reuse existing document-independent guard validation; exact approval/scope and authority checks remain in their owning tasks.
-- [x] Test failed attempts with successful siblings, missing sources, malformed plans/attempts, historical markers and validation without candidate mutation. Keep these pure helpers isolated from live installation until Task 70.
+- [x] Test failed attempts with successful siblings, missing sources, malformed plans/attempts, historical markers and validation without candidate mutation. Keep these pure helpers isolated from live installation until Task 73.
 
 **Verification**
 
@@ -228,7 +228,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [x] Validate cleanup identity/storage against retained approved/proven declarations, exact stop/retirement/collection tuples, milestone ordering and evidence equality. Refuse collection without retirement proof, collection for memory storage and contradictory identity floors; preserve all unresolved evidence.
 - [x] Require the applicable approved-action or complete retained readmission proof path. Whole-group deletion retains exact required-stop proof without inventing native removal receipts. Failed/unconsumed cleanup remains restorable.
-- [x] Wire cleanup proof checks into isolated candidate decoding; test atomic refusal and equivalent successful lookups. Keep live v4 installation refused until Task 70.
+- [x] Wire cleanup proof checks into isolated candidate decoding; test atomic refusal and equivalent successful lookups. Keep live v4 installation refused until Task 73.
 
 **Verification**
 
@@ -272,7 +272,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [x] Validate retained admission/readmission identity and lineage, with original approved sequence and appropriate step evidence. Preserve failed admission evidence without granting it current execution authority; unrelated Target versions cannot invalidate an owned admission.
 - [x] Validate completed required steps per block, including successful siblings and consumed prefixes inherited through Previous. Reuse exact grant/resource-consumption predicates; do not substitute fencing or legacy whole-document/global-cursor completion.
-- [x] Wire validation into isolated owned candidate decoding; test atomic refusal and equivalent successful restore. Live activation remains Task 70; voter history proof follows in Task 15.
+- [x] Wire validation into isolated owned candidate decoding; test atomic refusal and equivalent successful restore. Live activation remains Task 73; voter history proof follows in Task 15.
 
 **Verification**
 
@@ -292,7 +292,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** scoped voter validation and restore tests. **Target:** [T] §4.1–4.3, §8.4. **Depends on:** 14. **Budget:** estimated 350–500 changed handwritten Go lines, ceiling 550.
 
 - [x] Validate voter-switch identities, allocation/index bounds, cooldown retention and completed effects using scoped block/Previous proof. Reuse unchanged shape checks without global completion or synthetic Active.
-- [x] Complete owned state/index/proof preparation before candidate replacement. Test malformed retained voter proof and atomic refusal, equivalent successful restored lookup and valid history after operation pruning. Live Machine/format installation remains Task 70, where handlers and persistence activate together.
+- [x] Complete owned state/index/proof preparation before candidate replacement. Test malformed retained voter proof and atomic refusal, equivalent successful restored lookup and valid history after operation pruning. Live Machine/format installation remains Task 73, where handlers and persistence activate together.
 
 **Verification**
 
@@ -304,7 +304,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [x] Introduce exact PlanInput value fields. Convert private voter proof/state helpers to per-group/per-node proven lookups, keeping Approved independently available for placement checks; never build a synthetic composite Document.
 - [x] Preserve frozen old/new domain interpretations, learner-first promotion/demotion, exact identity and live-quorum checks. Test approved/proven disagreement, unknown/tombstoned convergence and input immutability through the new private path.
-- [x] Keep existing public planner signatures until Task 22 converts all callers atomically. The private document-to-input adapter represents only the existing whole-document callers; remove its production planner use in Task 22 and any remaining old API adapters at cutover Task 70. Do not expose a second planner API.
+- [x] Keep existing public planner signatures until Task 22 converts all callers atomically. The private document-to-input adapter represents only the existing whole-document callers; remove its production planner use in Task 22 and any remaining old API adapters at cutover Task 73. Do not expose a second planner API.
 
 **Verification**
 
@@ -358,7 +358,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** topology planner, voter moves, shape/simulation, deletion and readmission helpers; retained retirement tests. **Target:** [T] §6.2, §7.2 FI_PLAN_EVIDENCE, §12 deletion algorithms. **Depends on:** 18. **Budget:** estimated 400–550 changed Go lines, ceiling 550.
 
 - [x] Enumerate former owners from Converged plus Retained. Native hosted identities receive guarded removal; non-native hosted identities receive exact no-op removal and host retirement. Native readmission-stopped identities receive removal only. Cleanup-owned identities never receive duplicate removal/retirement actions.
-- [x] Carry only required stops for cleanup-owned non-native identities: same-host incoming assignments and every whole-deletion owner. Preserve detached debt ownership; partition/action rebinding follows in Tasks 28–29. Reject unproven stop elision and malformed adjacency without blanket live/native requirements on host-only deletion.
+- [x] Carry only required stops for cleanup-owned non-native identities: same-host incoming assignments and every whole-deletion owner. Preserve detached debt ownership; partition/action rebinding follows in Tasks 28–32. Reject unproven stop elision and malformed adjacency without blanket live/native requirements on host-only deletion.
 - [x] Update role/shape/native simulation and whole-group deletion checks together. Never infer roles from retained identity alone. Keep readmission exact-member boundaries and ordinary promotion behavior; retain old immutable-plan identities even after successful host cleanup when validating an existing plan.
 - [x] Test native/prepared former owners missing from all current documents, stopped versus cleanup-owned debt, required same-host stops, full/partial deletion and no second retirement action. A possibly-founded deleted group remains attributable without a fabricated converged declaration.
 
@@ -372,9 +372,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [x] Reuse existing retained operation/document/grant identity sources to produce PlanInput metadata with owned values. Issued Prepare and CreateFoundingGroup grants count with any outcome; approved intent alone does not create host state. Keep FoundingIssued before subtracting Desired.
 - [x] Derive Hosted/Cleanup/Stopped from exact cleanup/readmission evidence, historical MemberID and allocation bounds. Preserve the original actionless readmission debt and removal-origin receipts. Retained native contradictions require applied-index comparison: stale reads are retryable unavailability; sufficiently recent contradictions refuse.
-- [x] Share one pure retained-evidence collector between read-side production and later scoped apply revalidation. Give current schema-3 boundaries actual Active declarations and exact separately retained evidence; never decompose the synthetic DeletionBase into alleged convergence. Scoped-state adapters and authoritative approval wiring follow in Tasks 29 and 56/68.
+- [x] Share one pure retained-evidence collector between read-side production and later scoped apply revalidation. Give current schema-3 boundaries actual Active declarations and exact separately retained evidence; never decompose the synthetic DeletionBase into alleged convergence. Scoped-state adapters and authoritative approval wiring follow in Tasks 32 and 59/71.
 - [x] Expose only the needed internal Machine planning read, with a real implementation. Keep legacy DeletionBase/OperatorBase only while old nonplanner consumers still need them; record their exact removal task. No public Node/Cluster surface or exported test-only workaround.
-- [x] Test consumed/refused/unknown preparation/founding, successful cleanup, same-name readmission, lagging native evidence, identity conflicts, source ownership and multiple supersessions. Pinning writer changes remain Task 44; do not assume pruning can erase founding evidence meanwhile.
+- [x] Test consumed/refused/unknown preparation/founding, successful cleanup, same-name readmission, lagging native evidence, identity conflicts, source ownership and multiple supersessions. Pinning writer changes remain Task 47; do not assume pruning can erase founding evidence meanwhile.
 
 **Verification**
 
@@ -387,7 +387,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 - [x] Change ValidatePlanShape to (PlanInput, Document, Plan) and all immediate callers atomically. Reuse the internal planning collector for metadata validation. Keep ReadmissionCovers/ValidateVoterSetTransition with the RemainingPlanView/PlanRead native-context conversion in Task 22; those are not immediate shape callers. Their later conversion must preserve exact retained proof and update target signature notes. No public old-signature aliases.
 - [x] Keep existing immutable-plan validation separate from new-plan omission of settled identities: retain exact old steps/voter bases and readmission provenance through the operation's pinned records. Do not fabricate declarations to satisfy shape checks.
 - [x] Adapt pure fixture helpers to the actual owned base and explicit retained evidence; preserve behavioral assertions. Keep the existing BuildPlan/BuildPlanPreferred entry signatures until Task 24, so the remaining caller/native conversion is a bounded atomic commit.
-- [x] Test independent proven groups, newer Approved versus older sources, intermediate identity shape, retry after prior cleanup, and stale/member/domain rejection. Remove any private adapters made obsolete by this conversion; remaining legacy adapters have Task 24/70 removal obligations.
+- [x] Test independent proven groups, newer Approved versus older sources, intermediate identity shape, retry after prior cleanup, and stale/member/domain rejection. Remove any private adapters made obsolete by this conversion; remaining legacy adapters have Task 24/73 removal obligations.
 
 **Verification**
 
@@ -420,7 +420,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [x] Collect owned PlanInput through metadata PlanningInput and real controller ReadNative calls, including retained observation candidates. Recollect metadata against returned native evidence; preserve exact reporter/group/applied identity and stale/removal rejection.
 - [x] Keep GroupProgress observations for liveness/leadership only. While the old BuildPlan signature remains until Task 24, its membership observations must derive from actual NativeState, never manufacture NativeState from cached GroupStatus. Document the exact temporary call adaptation and remove it in Task 24; no new composite document or authority mode.
-- [x] Preserve actual founding metadata bootstrap, unknown/possibly-founded refusal and host-only deletion without a live quorum requirement. Scope-only collection remains Task 25; schema-3 actual convergence changes to scoped collection in Tasks 58/70.
+- [x] Preserve actual founding metadata bootstrap, unknown/possibly-founded refusal and host-only deletion without a live quorum requirement. Scope-only collection remains Task 25; schema-3 actual convergence changes to scoped collection in Tasks 61/73.
 - [x] Test cached/native disagreement, missing or foreign native evidence, retained candidates, actual founding and quorum safety through existing single-participant/protocol-double fixtures.
 
 **Verification**
@@ -467,7 +467,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [x] Restrict native requirements, observations and service collection to semantic ownership scopes; unchanged unhealthy A must not gate B. Admission uses the mandatory state predicate and never adds unchanged load scopes. Preserve exact guards for every affected group and actual founding seed handling.
 - [x] Keep unrelated retained deletion debt outside B's whole-deletion checks without dropping required stops for a deleting/taken-over group. Preserve immutable original-plan validation separately from new-plan scope selection.
-- [x] Test B planning with A unavailable, affected A refusal, declaration-only work, independent deletion debt and required exact host coverage. Stage these scoped helpers until their block/approval and persistence consumers are ready: never feed a partial scoped plan into legacy whole-document completion. Final activation remains Task 70; no runtime authority-mode flag or compatibility API.
+- [x] Test B planning with A unavailable, affected A refusal, declaration-only work, independent deletion debt and required exact host coverage. Stage these scoped helpers until their block/approval and persistence consumers are ready: never feed a partial scoped plan into legacy whole-document completion. Final activation remains Task 73; no runtime authority-mode flag or compatibility API.
 
 **Verification**
 
@@ -478,7 +478,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 **Files:** `internal/metaengine` scope/approval helpers and owning-package tests. **Target:** [T] §5.1–5.3, §12 “validateApprovalScopes” and repair rebase. **Depends on:** 25–26. **Budget:** estimated 300–500 changed Go lines, ceiling 550.
 
 - [x] Derive semantic read/write conflicts from trusted approved/candidate declarations and exact allocation evidence. AffectedGroups supplies ownership scopes only; separately compare repair candidate eligibility/domain/member reads with existing placement evaluation. Ignore unassigned candidates that are ineligible in both versions; do not merge candidate reads into operation ownership or native collection. Service scope lists are checked evidence, never trusted scope selection. Keep the common derivation used by planning and replicated validation.
-- [x] Check captured group source versions/current owners and required affected group sets under the FSM lock. No admission invalidation closure is needed; the final exact ownership set and atomic installation remain Task 29. Unknown dependencies refuse independence.
+- [x] Check captured group source versions/current owners and required affected group sets under the FSM lock. No admission invalidation closure is needed; the final exact ownership set and atomic installation remain Task 32. Unknown dependencies refuse independence.
 - [x] Test omitted/extra/duplicate scopes, stale source/owner expectations, disjoint edits versus shared eligibility/rules, node-only edits and allocation conflicts. Repair must not read every unrelated node field; same-group edits and exact host/member changes remain conflicts.
 
 **Verification**
@@ -498,23 +498,60 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [x] Run plan shape/destructive boundary/voter tests and `make test`.
 
-### Task 29: Apply scoped approvals and admission handover atomically
+### Task 29: Preserve admission origin across operation handover
 
-**Files:** `internal/metaengine/operator_state.go`, approval helpers. **Target:** [T] §5.2, §7.1, §12 “Approve”/“validateApprovalScopes”. **Depends on:** 15, 25–28. **Budget:** ≤550.
+**Files:** `internal/metaengine/admission.go`, `authority_readmission.go`, disk/restore/cleanup helpers, `internal/metaservice/join_checks.go`, owning tests. **Target:** accepted admission amendment FI_ADMISSION_ORIGIN; [T] §5.2, §7.1. **Depends on:** 15, 25–28. **Budget:** estimated 250–450 changed Go lines, ceiling 550.
 
-- [ ] Implement applyBeginOperation with exact Latest/plan/source/owner expectations and independent FSM scope derivation. Required block set equals semantic ownership scopes. Unchanged admission-dependent load blocks keep their owner and wait for exact proof.
-- [ ] Prepare scoped supersession, owners, Target, zero-step completion and required revocations before any state installation. Explicit approval supersedes only affected user scopes; repair cannot seize them. Preserve consumed admission facts and unrelated blocks. Prepare atomic same-record admission handover with the origin operator/instance contract; resumed admissions validate consumed prefix plus approved suffix.
-- [ ] Atomically rebind each unconsumed required cleanup StopAction to the new owner's exact required step, including across approval versions. Extend restore stop/action validation in the same task: current owner step or failed ownerless chain tip; preserve old action receipts and pin both operation chains. Refuse missing/wrong-host/wrong-replica steps. Never let a newer approval bypass a whole-group deletion stop or resurrect a retired group ID.
-- [ ] Use one FSM-side ownership check under the apply lock for every new-approval handler (operation, repair, voter change and readmission, including scoped equivalents). At new scoped approval, reject new retirement actions already owned by cleanup: no duplicate Remove backed by a consumed removal receipt, Cleanup for Cleanup/Stopped owners, Stop for Stopped owners, or DeleteGroupState without a Hosted uncovered owner. Cleanup-owned stops are allowed only for exact same-host/deletion prerequisites, without a new Remove. Check exact retained proof in the FSM; keep ValidatePlanShape valid for already-approved immutable plans after their effects complete. No new progress enum or public validation mode. Test submitted-plan rejection separately from immutable retry acceptance.
-- [ ] Test omitted/extra/duplicate blocks, unchanged dependent blocks retaining ownership, late CAS refusal and no partial in-memory mutation. Arrange revocation through the scoped implementation in Task 30 before activating this path.
+- [x] Add the internal FSM-assigned ReadmissionOperatorID field with its exact JSON name and stable ReadmissionID fallback. Preserve independent operator/instance origins and existing grant encoding; pending process replacement copies both dimensions.
+- [x] Reject caller-selected origins; validate origin operation ordering, exact approved member and original admission sequence on scoped restore. Validate process-origin references by resolved original operator; reject unsupported origin use in legacy restore until scoped activation. Preserve disk/join fields and original cleanup attribution without relabeling grants or receipts.
+- [x] Test identity stability across retries/version changes and process replacement, exact proof lookup, malformed/missing/foreign origins, atomic restore refusal and join/bind refusals. Live handover and resumed-prefix validation are Task 31; this task enables no new owner transition.
 
 **Verification**
 
-- [ ] Run approval/placement/atomicity units and `make test`.
+- [x] Run admission/readmission/restore units, relevant join functional regressions, staged lint and `make test`.
 
-### Task 30: Scope revocation and remove durable-debt capacity admission
+### Task 30: Prepare scoped approval validation and ownership changes
 
-**Files:** `internal/metaengine/authority_revocation.go`, `authority_catalog.go`, `cleanup_evidence.go`. **Target:** [T] §6.2, §6.4; contract C8. **Depends on:** 8–15, 29. **Budget:** ≤550.
+**Files:** `internal/metaengine` approval/scope/operation helpers and tests. **Target:** [T] §5.2, §7.1, §12 “Approve”/“validateApprovalScopes”. **Depends on:** 15, 25–29. **Budget:** estimated 350–500 changed Go lines, ceiling 550.
+
+- [ ] Prepare applyBeginOperation validation with exact Latest/plan/source/owner expectations and independent FSM scope derivation. Required blocks equal semantic ownership scopes; unchanged admission-dependent load blocks keep their owner. Reuse one FSM-side check under the apply lock for new approvals; repair/voter/readmission handlers adopt it in their owning tasks.
+- [ ] Prepare scoped supersession, owner changes and operation state on owned copies. Explicit user approval supersedes affected user scopes only; repair cannot seize them. Preserve unrelated blocks and original attribution. Do not install partial state before Tasks 31–33 supply admission/debt/revocation preparations.
+- [ ] Reject duplicate cleanup-owned retirement at new approval: consumed Remove, Cleanup for Cleanup/Stopped, Stop for Stopped, DeleteGroupState without an uncovered Hosted owner. Allow exact required same-host/deletion debt stops without another Remove. Keep immutable approved-plan validation valid after consumption; no public validation mode.
+- [ ] Test forged omitted/extra/duplicate blocks, stale captures/CAS, unavailable siblings, consumed retirement refusal versus immutable retry acceptance, and unchanged state on refusal. Any provisional handler returns classified Unsupported until atomic preparation is complete.
+
+**Verification**
+
+- [ ] Run scope/approval/retirement/atomicity units, staged lint and `make test`.
+
+### Task 31: Prepare same-record admission handover and resumed admission proof
+
+**Files:** `internal/metaengine` admission/restore/approval helpers and tests. **Target:** accepted admission amendment FI_ADMISSION_ORIGIN; [T] §5.2, §12. **Depends on:** 29–30. **Budget:** estimated 350–500 changed Go lines, ceiling 550.
+
+- [ ] Prepare handover of the one live (node, instance) row to an exact same-member metadata successor. Save the original operator once, retain process origin, and preserve consumed facts and the complete retirement batch. Reject changed members, canceled/revoked proof and wrong owners; grant no replacement identity implicitly.
+- [ ] Validate original approved/consumed admission prefix plus the successor's approved suffix. Already-native successors may omit Prepare/Add; exact receipts or metadata convergence must justify that omission. Recompute milestones without inventing native membership or changing old grant/action attribution.
+- [ ] Extend scoped restore to the same prefix/suffix contract. Keep Previous exclusively for immutable-plan retry. Share the preparation with later retry and non-founding admission paths; atomic installation is Task 32 and scoped revocation protection is Task 33.
+- [ ] Test before/after Prepare/Add, zero-step and promotion-only successors, interleaved process replacement, retained original retirement and contradictory/missing prefix evidence. Incomplete preparations never mutate the input graph.
+
+**Verification**
+
+- [ ] Run scoped admission/readmission/restore units, staged lint and `make test`.
+
+### Task 32: Install scoped approvals and required-stop handover atomically
+
+**Files:** `internal/metaengine` approval/debt/convergence helpers and tests. **Target:** [T] §5.2, §6.2, §7.1, §12 “Approve”; accepted admission amendment. **Depends on:** 29–31. **Budget:** estimated 350–530 changed Go lines, ceiling 550.
+
+- [ ] Finish applyBeginOperation with prepared Target, operations/owners, zero-step group/node/marker completion and same-record admission handover. One non-fallible installation follows every validation; unchanged load blocks remain owned. Share approval validation with repair/voter/readmission as those handlers are implemented.
+- [ ] Atomically rebind every unconsumed required cleanup StopAction to the successor's exact required step, including across approval versions. Extend restore in the same task: current owner step or failed ownerless chain tip, preserving old actions/receipts and pinning both operation chains. Missing/wrong-host/wrong-replica stops refuse the entire approval.
+- [ ] Preserve deletion rows, retired group IDs and whole-group stop boundaries. Integrate the scoped revocation preparation in Task 33 before activating this path; do not fall back to global legacy revocation or publish partially prepared ownership.
+- [ ] Test omitted/extra/duplicate blocks, unchanged admission-dependent owners, new and inherited required stops, late CAS refusal and atomic installation/refusal. Live production activation remains Task 73 with complete persistence.
+
+**Verification**
+
+- [ ] Run approval/placement/debt/atomicity units, staged lint and `make test`.
+
+### Task 33: Scope revocation and remove durable-debt capacity admission
+
+**Files:** `internal/metaengine/authority_revocation.go`, `authority_catalog.go`, `cleanup_evidence.go`. **Target:** [T] §6.2, §6.4; contract C8. **Depends on:** 8–15, 32. **Budget:** ≤550.
 
 - [ ] Implement revokeAuthorityLocked(index, []blockRef, successor); key revocations by OperationID+GroupID. Close/inherit only affected resources and preserve unrelated and cleanup-class grants unless an actual resource conflict requires fencing. Preserve usable exact readmission retirement for the same granted replacement during admission handover; never revive fenced grants.
 - [ ] Remove pendingCost admission and global inherited-obligation/close-all behavior. Prepare the complete catalog update before installation; preserve exact floor/evidence validation and aggregate ReadAuthority/WaitRevoked semantics.
@@ -524,9 +561,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run authority revocation/restore units and `make test`.
 
-### Task 31: Scope effect issuance, authorization and completion prerequisites
+### Task 34: Scope effect issuance, authorization and completion prerequisites
 
-**Files:** `internal/metaengine/authority_issue.go`, `authorization.go`, `authority_receipts.go`, transfer/readmission authority helpers. **Target:** [T] §2, §6.4, §12 “authorizeLocked”. **Depends on:** 29–30. **Budget:** ≤550.
+**Files:** `internal/metaengine/authority_issue.go`, `authorization.go`, `authority_receipts.go`, transfer/readmission authority helpers. **Target:** [T] §2, §6.4, §12 “authorizeLocked”. **Depends on:** 32–33. **Budget:** ≤550.
 
 - [ ] Authorize exact operation/attempt/version/step/action/group/host/replica and current block cursor/owner; use the operation's pinned document. Remove global Target.Version equality and all-revocations-complete requirements.
 - [ ] Check only required native/host floors and relevant unfinished prerequisites, including transfer/readmission paths. Remove remaining pending-record admission gates while retaining exact grant reuse and receiver identity checks. Mandatory load admission checks current approved bindings plus exact metadata convergence or consumed preparation; missing proof waits with Unavailable, including when no dependency edge exists.
@@ -536,22 +573,22 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run authorization/effect/transfer units and `make test`.
 
-### Task 32: Validate block transitions and prepare group convergence
+### Task 35: Validate block transitions and prepare group convergence
 
-**Files:** `internal/metaengine/operator_state.go`, `progress.go`. **Target:** [T] §6.1, §7.2, §12 “completeGroupLocked”. **Depends on:** 29–31. **Budget:** ≤550.
+**Files:** `internal/metaengine/operator_state.go`, `progress.go`. **Target:** [T] §6.1, §7.2, §12 “completeGroupLocked”. **Depends on:** 32–34. **Budget:** ≤550.
 
-- [ ] Implement noncompletion applyTransitionOperation/validateScopedTransition and the validation/preparation portion of completeGroupLocked. Require exact required receipts and relevant barriers; aggregate full operation state independently of projected pages. Add inherited retry lookup when Task 36 installs Previous-chain behavior.
+- [ ] Implement noncompletion applyTransitionOperation/validateScopedTransition and the validation/preparation portion of completeGroupLocked. Require exact required receipts and relevant barriers; aggregate full operation state independently of projected pages. Add inherited retry lookup when Task 39 installs Previous-chain behavior.
 - [ ] Record role-change cooldown under the exact consumed grant/action attempt, once; inherited retry consumption must not relabel the effect or reset an existing cooldown. Completion may first be recorded by a later attempt in the validated Previous chain. Preserve the original role tuple and use a completion application index after grant issuance.
-- [ ] Prepare the group's declaration from that operation's pinned approved version. Defer successful completion installation until Task 34 supplies the node/marker/debt preparations; do not publish a partially completed group in this intermediate task.
-- [ ] Test independent block cursors/failure, original declaration provenance after newer Target and stale tuple/final-validation refusal. Add the aggregate-precedence calculation/tests moved from Task 1: any runnable/waiting sibling keeps the operation nonterminal; once all terminate, failed dominates superseded, then succeeded. Task 34 adds successful atomic completion and duplicate-completion regressions once every prepared component exists.
+- [ ] Prepare the group's declaration from that operation's pinned approved version. Defer successful completion installation until Task 37 supplies the node/marker/debt preparations; do not publish a partially completed group in this intermediate task.
+- [ ] Test independent block cursors/failure, original declaration provenance after newer Target and stale tuple/final-validation refusal. Add the aggregate-precedence calculation/tests moved from Task 1: any runnable/waiting sibling keeps the operation nonterminal; once all terminate, failed dominates superseded, then succeeded. Task 37 adds successful atomic completion and duplicate-completion regressions once every prepared component exists.
 
 **Verification**
 
 - [ ] Run scoped transition/completion units and `make test`.
 
-### Task 33: Advance node proof and historical convergence markers
+### Task 36: Advance node proof and historical convergence markers
 
-**Files:** `internal/metaengine/progress.go`, deletion/admission helpers. **Target:** [T] §2, §3.3, §6.1–6.2, §12 “Group completion and deletion”. **Depends on:** 32. **Budget:** ≤550.
+**Files:** `internal/metaengine/progress.go`, deletion/admission helpers. **Target:** [T] §2, §3.3, §6.1–6.2, §12 “Group completion and deletion”. **Depends on:** 35. **Budget:** ≤550.
 
 - [ ] Implement advanceNodeProgressLocked and updateFullyConvergedLocked using current approved declarations, exact dependent proof and required deletion stops. Pin the marker's immutable document; no current-health or physical-collection claim.
 - [ ] Whole-group deletion produces a tombstone only after every former owner is stopped or fully covered by exact readmission proof. Keep retired group IDs permanent; no majority, timeout, newer ID or ForceRetire waiver.
@@ -561,11 +598,11 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run node/deletion/marker units and `make test`.
 
-### Task 34: Persist exact monotonic cleanup debt
+### Task 37: Persist exact monotonic cleanup debt
 
-**Files:** `internal/metaengine/cleanup.go`, `cleanup_evidence.go`, effect consumption. **Target:** [T] §4.1, §6.2, §12 “upsertCleanupLocked”; contract C5. **Depends on:** 32–33. **Budget:** ≤550.
+**Files:** `internal/metaengine/cleanup.go`, `cleanup_evidence.go`, effect consumption. **Target:** [T] §4.1, §6.2, §12 “upsertCleanupLocked”; contract C5. **Depends on:** 35–36. **Budget:** ≤550.
 
-- [ ] Implement upsertCleanupLocked/detachCleanupLocked and bounded CleanupPage. Native removal creates debt in the same Apply before progress publication; whole deletion uses its former assignments without fabricating RemovedAt. Finish completeGroupLocked by atomically installing validated group/debt/node/marker drafts from Tasks 32–33.
+- [ ] Implement upsertCleanupLocked/detachCleanupLocked and bounded CleanupPage. Native removal creates debt in the same Apply before progress publication; whole deletion uses its former assignments without fabricating RemovedAt. Finish completeGroupLocked by atomically installing validated group/debt/node/marker drafts from Tasks 35–36.
 - [ ] Keep readmission-created debt actionless and unchanged when its old native identity is subsequently removed; retain that exact removal receipt as execution evidence. Verify exact readmission target coverage for every omitted host effect. Preserve historical MemberID and original removal-origin receipts.
 - [ ] Preserve immutable original Storage and compatible stop/retire/readmission proof, monotonic milestones and exact historical MemberID. Repeated removal cannot overwrite collected debt or resurrect it. StorageMemory completes at Retired with nil CollectedAt.
 - [ ] Test conflicting proof/storage, repeat consumed effects, deletion attribution and complete application-retirement/quarantine/ledger prerequisites. Add A-failed/B-completed, duplicate completion and no partial mutation regressions; keep opaque tokens out of ordinary progress.
@@ -574,9 +611,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run cleanup/memory/readmission units and `make test`.
 
-### Task 35: Authorize detached cleanup and changed deferral status
+### Task 38: Authorize detached cleanup and changed deferral status
 
-**Files:** `internal/metaengine/cleanup.go`, authority issue/resource helpers, `internal/metaservice/cleanup.go`. **Target:** [T] §6.2–6.3, §7.1–7.2. **Depends on:** 31, 34. **Budget:** ≤550.
+**Files:** `internal/metaengine/cleanup.go`, authority issue/resource helpers, `internal/metaservice/cleanup.go`. **Target:** [T] §6.2–6.3, §7.1–7.2. **Depends on:** 34, 37. **Budget:** ≤550.
 
 - [ ] Implement BeginCleanupEffect and RecordCleanupStatus handlers. Derive execution/cleanup Class from exact retained debt; permit only the approved deferred stop/retirement action after operation termination.
 - [ ] When permitting multiple cleanup grant revisions for one action, replace authorityCatalog's current duplicate-action rejection and adjust reverse milestone checks together: one retained exact receipt supplies a milestone; compatible late receipts from other fenced/reconciled revisions remain historical evidence. Test late old/new revision receipt order without rewriting consumed milestones.
@@ -589,9 +626,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run cleanup authority/status units and `make test`.
 
-### Task 36: Implement exact failed-attempt retry
+### Task 39: Implement exact failed-attempt retry
 
-**Files:** `internal/metaengine/operator_state.go`, retry/receipt lookup helpers. **Target:** [T] §3.4, §6.1, §12 “Retry derives state”. **Depends on:** 30–35. **Budget:** ≤550.
+**Files:** `internal/metaengine/operator_state.go`, retry/receipt lookup helpers. **Target:** [T] §3.4, §6.1, §12 “Retry derives state”. **Depends on:** 33–38. **Budget:** ≤550.
 
 - [ ] Derive the new attempt from Previous inside the FSM; preserve the entire immutable Plan byte-for-byte. Reopen only failed blocks at the first unconsumed required step; terminal siblings retain their state/proof and superseded scopes are never reclaimed.
 - [ ] Require terminal failed aggregate, unchanged approved failed scopes and executable suffix. Prepare scoped predecessor revocations before assigning retry owners; retain original receipt tuples through Previous rather than relabeling them.
@@ -602,9 +639,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run plan retry/authority consumption units and `make test`.
 
-### Task 37: Implement deterministic semantic rebase preparation
+### Task 40: Implement deterministic semantic rebase preparation
 
-**Files:** new `internal/metaengine/rebase.go`, existing repair document helpers. **Target:** [T] §5.3, §12 “Replicated repair and rebase”. **Depends on:** 25–29. **Budget:** ≤550.
+**Files:** new `internal/metaengine/rebase.go`, existing repair document helpers. **Target:** [T] §5.3, §12 “Replicated repair and rebase”. **Depends on:** 25–32. **Budget:** ≤550.
 
 - [ ] Implement rebaseStaged(base, staged, repair) with semantic read/write conflict checks. Preserve staged caller attribution/audit, exact requested identities and all intended edits while applying a disjoint repair.
 - [ ] Prepare R at Latest+1 with parent old Target; use the atomic installer to retain S.RebasedFrom (ordinary commitLatestLocked clears it); when staged delta exists prepare S at Latest+2, parent R and RebasedFrom old Latest. Validate both before installation, preserve monotonic floors and deterministic supplied timestamps.
@@ -615,9 +652,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run rebase/repair document units and `make test`.
 
-### Task 38: Commit repair and voter changes with atomic rebase
+### Task 41: Commit repair and voter changes with atomic rebase
 
-**Files:** `internal/metaengine/repair_proposals.go`, `voter_change.go`, `rebase.go`. **Target:** [T] §5.2–5.3, §7.1, §8.2. **Depends on:** 29–37. **Budget:** ≤550.
+**Files:** `internal/metaengine/repair_proposals.go`, `voter_change.go`, `rebase.go`. **Target:** [T] §5.2–5.3, §7.1, §8.2. **Depends on:** 32–40. **Budget:** ≤550.
 
 - [ ] Implement applyCommitRepairOperation and route CommitVoterChange through the same atomic preparation/install path after existing voter guards. Check captured Latest/Target/source/owner/native inputs in the FSM.
 - [ ] Install Target=R, Latest=S (or R without staged edits), immutable operation, histories, provenance/indexes and owners as one change. Reject user-owned scope preemption, invalidated-scope omissions and overlap without partial writes.
@@ -629,7 +666,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run repair/voter/CAS units and `make test`.
 
-### Task 39: Normalize typed intent without allocating on replay
+### Task 42: Normalize typed intent without allocating on replay
 
 **Files:** root mutation helpers, `internal/metaservice/mutations.go`, document mutation helpers. **Target:** [T] §3.4, §12 “Stage / typed mutation replay”. **Depends on:** 4, 7. **Budget:** ≤550.
 
@@ -643,9 +680,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run pure intent/canonicalization units and `make test`.
 
-### Task 40: Persist accepted intent and first-approval provenance
+### Task 43: Persist accepted intent and first-approval provenance
 
-**Files:** `internal/metaengine` document apply/index code, `internal/metaservice/documents.go`, `planning.go`. **Target:** [T] §3.4, §4.1, §7.1, §12 “Approve”. **Depends on:** 15, 36–39. **Budget:** ≤550.
+**Files:** `internal/metaengine` document apply/index code, `internal/metaservice/documents.go`, `planning.go`. **Target:** [T] §3.4, §4.1, §7.1, §12 “Approve”. **Depends on:** 15, 39–42. **Budget:** ≤550.
 
 - [ ] Store one intent record per accepted typed version; FSM validates known kind/digest encoding, parent CAS, document validity, allocation floor and replacement diff tuple without duplicating typed mutation logic.
 - [ ] Approve(version) returns its first recorded attempt regardless of terminal state; RetryOperation is the only retry path. Rebased unapproved versions return structured RebasedTo; missing retained proof returns conflict/HistoryUnavailable without writing. Missing original approval means the whole atomically pruned attempt chain is absent.
@@ -657,9 +694,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run document/provenance units and focused service mutation functional checks; run `make test`.
 
-### Task 41: Require exact predecessors for readmission and reseating
+### Task 44: Require exact predecessors for readmission and reseating
 
-**Files:** `cluster_mutations.go`, `internal/metaservice/mutations.go`, `internal/metaengine/admission*.go`, repair helpers. **Target:** [T] §3.1, §5.3, §7.1; contract C1. **Depends on:** 36–40. **Budget:** ≤550.
+**Files:** `cluster_mutations.go`, `internal/metaservice/mutations.go`, `internal/metaengine/admission*.go`, repair helpers. **Target:** [T] §3.1, §5.3, §7.1; contract C1. **Depends on:** 39–43. **Budget:** ≤550.
 
 - [ ] Change ReadmitNode(ctx, name, expectedMemberID, opts) and ReseatReplica(ctx, group, ReplicaKey, opts); update immediate callsites together. Require nonzero exact predecessor and retained replacement evidence before returning an already-accepted result.
 - [ ] Allocate fresh monotonic IDs only after replicated CAS/identity checks. Explicit reseat uses narrow repair/rebase with OriginOperator and refuses an owned group naming its operation; readmission keeps exact grant/fence/join lineage and scoped admission prerequisites.
@@ -669,9 +706,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run replacement units plus focused readmission/reseat functional cases; run `make test`.
 
-### Task 42: Base founding readiness on the exact meta block
+### Task 45: Base founding readiness on the exact meta block
 
-**Files:** `internal/metaservice/bootstrap.go`, `join_admission.go`, `internal/metaengine/admission.go`. **Target:** [T] §5.4, §8.4, §10. **Depends on:** 32–33, 41. **Budget:** ≤550.
+**Files:** `internal/metaservice/bootstrap.go`, `join_admission.go`, `internal/metaengine/admission.go`. **Target:** [T] §5.4, §8.4, §10. **Depends on:** 35–36, 44. **Budget:** ≤550.
 
 - [ ] Build founding plans from empty proven PlanInput and observed seed membership. Replace whole-operation/Active/FullyConverged readiness checks with exact founding `_meta` convergence and native admission evidence.
 - [ ] Preserve member, instance, seed and current-term admission checks; retain founding proof until durable admission records make it unnecessary. Failing founding load work must not prevent metadata readiness.
@@ -681,9 +718,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run focused bootstrap/admission functional tests and `make test`.
 
-### Task 43: Fix non-founding admission and state-based barriers
+### Task 46: Fix non-founding admission and state-based barriers
 
-**Files:** `internal/metaengine/admission.go`, `progress.go`, scope/barrier validation. **Target:** [T] §3.3, §5.2/§5.4, §12 “Admission and evacuation barriers”. **Depends on:** 28–33, 41–42. **Budget:** ≤550.
+**Files:** `internal/metaengine/admission.go`, `progress.go`, scope/barrier validation. **Target:** [T] §3.3, §5.2/§5.4, §12 “Admission and evacuation barriers”. **Depends on:** 28–36, 44–45. **Budget:** ≤550.
 
 - [ ] Bind joining identities to the current nonterminal `_meta` block and its own pinned plan, not global Target.Version. Preserve Target identity consistency and exact learner-first member/instance checks after unrelated approvals/rebases.
 - [ ] Share barrierSatisfied semantics among dispatch, grant issuance and execution revalidation. Load preparation and founding voter hosts accept exact metadata convergence or consumed preparation from any valid approved operation, with current binding and full readmission checks. Do not gate evacuation/stop/cleanup. Validate resumed admission prefixes rather than demanding repeated Prepare/Add in an already-native successor. Removal scans current and retained approved/proven/intermediate assignments, preparations, native-removal proof and whole-group required stops; nil initial convergence is unknown.
@@ -693,9 +730,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run barrier/admission units and focused join functional checks; run `make test`.
 
-### Task 44: Retain proof closure and prune without resurrecting debt
+### Task 47: Retain proof closure and prune without resurrecting debt
 
-**Files:** `internal/metaengine/cleanup_evidence.go`, `cleanup.go`, history/snapshot helpers. **Target:** [T] §4.2–4.3, §12 “Collection acceptance versus settlement”. **Depends on:** 34–43. **Budget:** ≤550.
+**Files:** `internal/metaengine/cleanup_evidence.go`, `cleanup.go`, history/snapshot helpers. **Target:** [T] §4.2–4.3, §12 “Collection acceptance versus settlement”. **Depends on:** 37–46. **Budget:** ≤550.
 
 - [ ] Implement one identityReferencedLocked predicate covering Latest/Target/history, convergence, every retained attempt/Previous chain, planning/deletion catalogs, admission/readmission and every retained grant including settled grants.
 - [ ] Derive independently required proof closure before pruning; avoid a cleanup/grant self-retention cycle or map-order dependence. Pin marker/current docs, each debt origin and complete retry chain/block sources, and any distinct readmission admission operation and full batch; compact only after minimal retained evidence suffices for every verification path. Pin consumed admission preparation/provenance for approved members lacking equivalent meta convergence even with no current dependent. Release that barrier root after equivalent convergence, or abandonment without retained load/plan references; other roots still apply.
@@ -708,9 +745,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run retention/pruning/snapshot units with varied insertion order and `make test`.
 
-### Task 45: Accept collection receipts and expose no-write settlement checks
+### Task 48: Accept collection receipts and expose no-write settlement checks
 
-**Files:** `internal/metaengine/cleanup.go`, `reads.go`, proposal dispatch. **Target:** [T] §4.2, §6.3, §7.1, §12 settlement algorithms. **Depends on:** 6–15, 34–35, 44. **Budget:** ≤550.
+**Files:** `internal/metaengine/cleanup.go`, `reads.go`, proposal dispatch. **Target:** [T] §4.2, §6.3, §7.1, §12 settlement algorithms. **Depends on:** 6–15, 37–38, 47. **Budget:** ≤550.
 
 - [ ] Implement CollectionCheck under the FSM read lock: Untracked requires no cleanup row and no reference under the shared predicate. Do not add CollectionAcks or create a timestamp, grant, state mutation or Raft proposal on this path.
 - [ ] Implement applyRecordCollection for retained debt: exact identity/member/token/sequence/retirement/courier linkage, class and monotonic proof; identical duplicates echo accepted evidence, conflicting duplicates fail.
@@ -720,7 +757,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run collection acceptance/read units and `make test`.
 
-### Task 46: Persist the host collection journal state machine
+### Task 49: Persist the host collection journal state machine
 
 **Files:** `internal/authoritystore/collection.go`, `store.go`, functional tests. **Target:** [T] §4.2, §7.2; contracts C6/C11. **Depends on:** 6. **Budget:** ≤550.
 
@@ -732,7 +769,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run authoritystore functional tests, targeted race checks for store access, and `make test`.
 
-### Task 47: Implement exact walstore collection markers
+### Task 50: Implement exact walstore collection markers
 
 **Files:** `storage/walstore/lifecycle.go` and narrowly scoped marker helpers. **Target:** [T] §4.2, §12 “Exact collection marker and partial deletion”. **Depends on:** 6. **Budget:** ≤550.
 
@@ -744,9 +781,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run focused walstore functional marker tests and `make test`.
 
-### Task 48: Complete crash-safe Collect and ForgetCollection
+### Task 51: Complete crash-safe Collect and ForgetCollection
 
-**Files:** `storage/walstore/lifecycle.go`, `storage/retirement.go`, `storage/storagetest`, custom/test stores. **Target:** [T] §4.2, §12 collection algorithms; contract C6. **Depends on:** 47. **Budget:** ≤550.
+**Files:** `storage/walstore/lifecycle.go`, `storage/retirement.go`, `storage/storagetest`, custom/test stores. **Target:** [T] §4.2, §12 collection algorithms; contract C6. **Depends on:** 50. **Budget:** ≤550.
 
 - [ ] Delete contents with the exact pin retained, sync the directory, remove the pin, remove the now-empty directory nonrecursively and sync the root. Recover a missing pin only with an exact marker plus empty directory; absent data without marker returns NotFound.
 - [ ] Implement ForgetCollection as exact marker-only release after retired data is absent; absent marker is repeatable and root sync remains required. Activate the strengthened interface and update actual implementations/conformance helpers together.
@@ -756,9 +793,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run storage conformance and walstore functional/race regressions; run `make test`.
 
-### Task 49: Prepare and resume host-owned collection attempts
+### Task 52: Prepare and resume host-owned collection attempts
 
-**Files:** `internal/managed/retirement.go`, host configuration/gates. **Target:** [T] §6.3, §7.2, §12 “Host collection and reporting”. **Depends on:** 34–35, 46–48. **Budget:** ≤550.
+**Files:** `internal/managed/retirement.go`, host configuration/gates. **Target:** [T] §6.3, §7.2, §12 “Host collection and reporting”. **Depends on:** 37–38, 49–51. **Budget:** ≤550.
 
 - [ ] Update collectRetiredReplica to verify exact retirement/ledger/assignment/owner, run the existing serialized retention decision, persist prepared, acquire the existing host/group gate, revalidate and Collect before durable CompleteCollection.
 - [ ] Implement resumeCollections from journal pages as well as Retired enumeration. Prepared resumes with its saved token even when enumeration disappeared; collected resumes only reporting and can never call Collect again.
@@ -768,9 +805,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run managed collection functional/race tests and `make test`.
 
-### Task 50: Report collected receipts and release proof in order
+### Task 53: Report collected receipts and release proof in order
 
-**Files:** `internal/managed/retirement.go`, existing host lifetime/configuration. **Target:** [T] §6.3, §8.4, §12 “reportCollections”; contract C11. **Depends on:** 46–49. **Budget:** ≤550.
+**Files:** `internal/managed/retirement.go`, existing host lifetime/configuration. **Target:** [T] §6.3, §8.4, §12 “reportCollections”; contract C11. **Depends on:** 49–52. **Budget:** ≤550.
 
 - [ ] Implement bounded reportCollections using durable collected rows and injected Report/Status callbacks. Validate exact echo and accepted/settled result before proof release; defer both removals while local readmission references remain.
 - [ ] Call owningStore.ForgetCollection before exact journal removal. Reporting loss/outage retains durable evidence; do not repeat deletion after marker release. Restrict wakeups to bounded hints, never use a volatile queue as the source of truth.
@@ -780,9 +817,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run managed reporting functional/race tests and `make test`.
 
-### Task 51: Route restricted collection reporting through MetaControl
+### Task 54: Route restricted collection reporting through MetaControl
 
-**Files:** new `internal/metaservice/cleanup.go`, `rpc.go`, query/forwarding helpers. **Target:** [T] §6.3, §7.3, §12 “ReportCollection”. **Depends on:** 35, 45, 50. **Budget:** ≤550.
+**Files:** new `internal/metaservice/cleanup.go`, `rpc.go`, query/forwarding helpers. **Target:** [T] §6.3, §7.3, §12 “ReportCollection”. **Depends on:** 38, 48, 53. **Budget:** ≤550.
 
 - [ ] Add report_collection/report_cleanup_status payloads to existing MetaControl. Bind Courier to authenticated process/header, validate cluster/receipt shape and perform safe collection_check before retained proof acceptance.
 - [ ] For untracked identities return settled with the safe read's index without proposing. Otherwise require full historical host/readmission-courier proof and propose RecordCollection. Recheck only missing-evidence pruning races, including courier lookup; never suppress authentication or conflicting-receipt failures.
@@ -792,9 +829,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run metaservice protocol functional tests and `make test`; if a genuine envelope limitation requires .proto changes, use pinned generation and `make proto-check`.
 
-### Task 52: Implement bounded coherent metadata progress pages
+### Task 55: Implement bounded coherent metadata progress pages
 
-**Files:** `internal/metaengine/progress.go`, `reads.go`, topology cursor helpers if needed. **Target:** [T] §3.2, §7.1–7.2, §12 “Progress read”; contract C2. **Depends on:** 15, 32–34, 44–45. **Budget:** ≤550.
+**Files:** `internal/metaengine/progress.go`, `reads.go`, topology cursor helpers if needed. **Target:** [T] §3.2, §7.1–7.2, §12 “Progress read”; contract C2. **Depends on:** 15, 35–37, 47–48. **Budget:** ≤550.
 
 - [ ] Implement Machine.Progress/progressLocked with one FSM read lock and AppliedIndex. Page the union group/node/operation-block/cleanup in target order; total row/block budget, not one independent limit per array.
 - [ ] Use versioned base64url JSON cursors bound to filter hashes. AND filters over actual scope, retain deleted-group evidence, repeat operation headers with TotalBlocks/BlocksTruncated while aggregate state covers all blocks.
@@ -804,9 +841,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run paging/progress units and `make test`.
 
-### Task 53: Expose progress reads and bounded local diagnosis
+### Task 56: Expose progress reads and bounded local diagnosis
 
-**Files:** `internal/metaservice/progress.go`, `documents.go`, root `cluster_progress.go`/`cluster_reads.go`. **Target:** [T] §3.1–3.2, §8.3; contracts C1/C2. **Depends on:** 52. **Budget:** ≤550.
+**Files:** `internal/metaservice/progress.go`, `documents.go`, root `cluster_progress.go`/`cluster_reads.go`. **Target:** [T] §3.1–3.2, §8.3; contracts C1/C2. **Depends on:** 55. **Budget:** ≤550.
 
 - [ ] Implement ReadProgress through the existing quorum/apply query path, then decorate only returned rows from matching cached observations. Preserve reporter, received time and per-group source; nil means unknown. Never fan out for this API.
 - [ ] Implement final ReadTopology pair/marker and bounded Status operation headers (100), explicit truncation and CleanupSummary. Convert ClusterStatus.Groups to existing GroupProgress values, keeping raw GroupStatus only in Observation; adapt affected consumers together. Use the same complete declaration row builder and exact observation attachment rule for Status and ReadProgress; nil must never mean an omitted projection. Status and operation lookup remain local diagnosis without a quorum claim.
@@ -816,9 +853,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run service read/progress functional tests and `make test`.
 
-### Task 54: Replace single-current-operation controller ports
+### Task 57: Replace single-current-operation controller ports
 
-**Files:** `internal/operator/coordinator_contracts.go`, `controller.go`, metaservice coordinator adapter. **Target:** [T] §6.1, §7.2; contract C11. **Depends on:** 32–36, 43, 52. **Budget:** ≤550.
+**Files:** `internal/operator/coordinator_contracts.go`, `controller.go`, metaservice coordinator adapter. **Target:** [T] §6.1, §7.2; contract C11. **Depends on:** 35–39, 46, 55. **Budget:** ≤550.
 
 - [ ] Implement Coordinator{IsMetaLeader, ReadyBlocks, RecordOperationTransition}, WorkItem{Operation, GroupID}, and ScopedValidator. Retain GroupEffects/MembershipCoordinator and internal package name.
 - [ ] Select bounded ready blocks from durable state; include only exact current owners with viable next required work. Replace whole-document plan/final validation with exact-scope validation.
@@ -828,9 +865,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run controller selection units and relevant protocol functional checks; run `make test`.
 
-### Task 55: Dispatch fair bounded group work with joined shutdown
+### Task 58: Dispatch fair bounded group work with joined shutdown
 
-**Files:** `internal/operator/controller.go`, dispatch helpers/tests. **Target:** [T] §6.1, §6.4, §12 “Controller dispatch”. **Depends on:** 5, 31–33, 43, 54. **Budget:** ≤550.
+**Files:** `internal/operator/controller.go`, dispatch helpers/tests. **Target:** [T] §6.1, §6.4, §12 “Controller dispatch”. **Depends on:** 5, 34–36, 46, 57. **Budget:** ≤550.
 
 - [ ] Implement round-robin ready selection, MaxConcurrentGroups, exact inflight (AuthorityKey, AuthorityTarget) and shared host/group admission. Counts cap actual ready work; never preallocate pools, channels or per-slot state from the configured count. One worker executes one bounded check/effect; release RPC slots on timeout without releasing remote ownership.
 - [ ] Retain bounded per-host/group backoff, skip busy work and prune idle entries with settled work. Revalidate full action/owner/resource tuple after waits; retain late evidence without advancing superseded work.
@@ -840,9 +877,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run controller dispatch/shutdown functional race regressions and `make test`.
 
-### Task 56: Dispatch cleanup with a separate fair request budget
+### Task 59: Dispatch cleanup with a separate fair request budget
 
-**Files:** `internal/operator` cleanup dispatch, metaservice cleanup adapters, existing whole-group dispatch. **Target:** [T] §6.2, §6.4, §9 TiKV lifecycle/worker adaptations. **Depends on:** 35, 51, 55. **Budget:** ≤550.
+**Files:** `internal/operator` cleanup dispatch, metaservice cleanup adapters, existing whole-group dispatch. **Target:** [T] §6.2, §6.4, §9 TiKV lifecycle/worker adaptations. **Depends on:** 38, 54, 58. **Budget:** ≤550.
 
 - [ ] Discover durable cleanup in bounded pages; use MaxConcurrentCleanup with the same host/group gate registry and bounded backoff as ordinary work. Allocate only for actual admitted work, not MaxConcurrentCleanup slots. Remove the controller's global fence-error short circuit.
 - [ ] Dispatch/record each exact whole-group target independently; one unreachable former host cannot suppress another receipt. Retain required deletion stops in execution rather than disguising them as optional cleanup.
@@ -852,9 +889,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run dispatch/cleanup functional race checks and `make test`.
 
-### Task 57: Reuse exact host/native state under a new attempt's grant
+### Task 60: Reuse exact host/native state under a new attempt's grant
 
-**Files:** `internal/managed/granted_actions.go`, `replica.go`, `retirement.go`, `internal/raftengine/authority_effects.go`. **Target:** [T] §6.1, §6.4, §12 retry/dispatch algorithms. **Depends on:** 36, 55–56. **Budget:** ≤550.
+**Files:** `internal/managed/granted_actions.go`, `replica.go`, `retirement.go`, `internal/raftengine/authority_effects.go`. **Target:** [T] §6.1, §6.4, §12 retry/dispatch algorithms. **Depends on:** 39, 58–59. **Budget:** ≤550.
 
 - [ ] Reuse actionWorks, acceptGuardedStart, stopRetiringIdentity and beginLocalEffect. After required old-floor fencing, exact already-ready/prepared/joined state may satisfy a new grant with freshly persisted exact evidence.
 - [ ] Never relabel old receipts, skip predecessor fences because native state looks satisfied or overlap unresolved factory/Close ownership. Preserve native live-quorum and leadership predicates when an effect is already observed.
@@ -864,21 +901,21 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run managed/native authority functional race regressions and `make test`.
 
-### Task 58: Connect scoped planning, approval and explicit retry services
+### Task 61: Connect scoped planning, approval and explicit retry services
 
-**Files:** `internal/metaservice/planning.go`, `progress.go`, `documents.go`, ApplyVersion handling. **Target:** [T] §3.1/§3.4, §7.2–7.3, §12 approval algorithms. **Depends on:** 36–45, 53–57. **Budget:** ≤550.
+**Files:** `internal/metaservice/planning.go`, `progress.go`, `documents.go`, ApplyVersion handling. **Target:** [T] §3.1/§3.4, §7.2–7.3, §12 approval algorithms. **Depends on:** 39–48, 56–60. **Budget:** ≤550.
 
 - [ ] Build coherent PlanInput from approved/proven/intermediate exact scope plus fresh native evidence; capture ScopeExpectations. Use new begin/transition/retry proposals and scoped validators in existing service/controller configuration.
 - [ ] Expose Operation/WaitOperation/RetryOperation semantics and ApplyVersion discriminator; waits return full aggregate terminal status, explicit retry never replans or chooses a new intent. Remove activateCompleted when its last caller is converted.
-- [ ] Test remote forwarding, local wait cancellation, old attempt lookup, lost approval/retry replies and no hidden global convergence gate. Record remaining legacy service consumers for Task 65/64.
+- [ ] Test remote forwarding, local wait cancellation, old attempt lookup, lost approval/retry replies and no hidden global convergence gate. Record remaining legacy service consumers for Task 68/67.
 
 **Verification**
 
 - [ ] Run planning/approval/retry functional cases and `make test`.
 
-### Task 59: Make convenience mutations and transfers scope-aware
+### Task 62: Make convenience mutations and transfers scope-aware
 
-**Files:** `cluster_ensure.go`, `cluster_mutations.go`, `internal/metaservice/mutations.go`, transfer authority. **Target:** [T] §3.1, §5.3–5.4, §8.1–8.2. **Depends on:** 39–41, 53, 58. **Budget:** ≤550.
+**Files:** `cluster_ensure.go`, `cluster_mutations.go`, `internal/metaservice/mutations.go`, transfer authority. **Target:** [T] §3.1, §5.3–5.4, §8.1–8.2. **Depends on:** 42–44, 56, 61. **Budget:** ≤550.
 
 - [ ] EnsureGroup waits on its requested group's convergence, follows only its own retained rebased provenance and preserves foreign/overlapping staging conflicts. A blocked unrelated group cannot hold its result hostage.
 - [ ] TransferLeader captures exact group source/owner/target and fresh native leader predicate; unrelated Target changes do not restart it. Revalidate after waits and retain one-shot transfer authority/cancellation semantics.
@@ -888,9 +925,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run root convenience/transfer functional regressions and `make test`.
 
-### Task 60: Convert built-in repair policy to scoped progress
+### Task 63: Convert built-in repair policy to scoped progress
 
-**Files:** `scheduling/scheduler.go`, `default_repair*.go`, voter policy helpers, `scheduling/schedulingtest`. **Target:** [T] §5.4, §6.4; contract C7. **Depends on:** 5, 38, 53. **Budget:** ≤550.
+**Files:** `scheduling/scheduler.go`, `default_repair*.go`, voter policy helpers, `scheduling/schedulingtest`. **Target:** [T] §5.4, §6.4; contract C7. **Depends on:** 5, 41, 56. **Budget:** ≤550.
 
 - [ ] Finish final ScheduleInput and remove Latest/Active policy fields after caller adaptation. Built-in policy evaluates approved/proven declarations and rotates eligible groups; a blocked/busy first candidate must not monopolize ticks.
 - [ ] Preserve voter configuration, pinned learners, healthy seats, domain rules and legacy missing-voter repair for groups without voter configuration. Keep callbacks serialized and clone all maps/slices. Supply observations only in Status; clear Groups[g].Observation as well as Desired at the callback boundary, preserving faithful Clone semantics.
@@ -900,9 +937,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run policy/conformance units and `make test`.
 
-### Task 61: Revalidate scheduler decisions with scoped CAS
+### Task 64: Revalidate scheduler decisions with scoped CAS
 
-**Files:** `internal/scheduling/driver.go`, `internal/metaservice/scheduling.go`, voter-change adapters. **Target:** [T] §5.3–5.4, §7.1–7.2. **Depends on:** 38, 43, 60. **Budget:** ≤550.
+**Files:** `internal/scheduling/driver.go`, `internal/metaservice/scheduling.go`, voter-change adapters. **Target:** [T] §5.3–5.4, §7.1–7.2. **Depends on:** 41, 46, 63. **Budget:** ≤550.
 
 - [ ] Capture Latest/Target plus group SourceVersion/owner and exact repair inputs, recheck health/native membership/leadership after callbacks, then commit the atomic repair/rebase proposal.
 - [ ] Remove global equality and global busy-operation gates. A scheduler may recompute after CAS conflict; ordinary caller writes may not. Surface scoped staged_conflict/busy causes without writing unchanged blockers every tick.
@@ -912,9 +949,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run scheduling/service functional race checks and `make test`.
 
-### Task 62: Preserve observation history across unrelated topology changes
+### Task 65: Preserve observation history across unrelated topology changes
 
-**Files:** `metrics/observation.go`, `internal/observe/metrics*.go`, trackers, status caches. **Target:** [T] §3.2, §5.4, §8.3; contract C7. **Depends on:** 3, 53, 60–61. **Budget:** ≤550.
+**Files:** `metrics/observation.go`, `internal/observe/metrics*.go`, trackers, status caches. **Target:** [T] §3.2, §5.4, §8.3; contract C7. **Depends on:** 3, 56, 63–64. **Budget:** ≤550.
 
 - [ ] Remove ClusterSnapshot.ActiveVersion; use TargetVersion for context and per-group SourceVersion plus exact assignment for observation validity and collector round keys.
 - [ ] Invalidate only changed group evidence, preserve instance/series/sample sequence/received time and validity reasons. Leadership loss still invalidates the whole collector round.
@@ -924,9 +961,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run metrics/observe units and applicable functional race checks; run `make test`.
 
-### Task 63: Recover managed replicas from exact scoped evidence
+### Task 66: Recover managed replicas from exact scoped evidence
 
-**Files:** `internal/managed/boot.go`, recovery/readmission/ownership helpers, root recovery adapters. **Target:** [T] §5.4, §8.4, §12 host algorithms. **Depends on:** 41–51, 57–58. **Budget:** ≤550.
+**Files:** `internal/managed/boot.go`, recovery/readmission/ownership helpers, root recovery adapters. **Target:** [T] §5.4, §8.4, §12 host algorithms. **Depends on:** 44–54, 60–61. **Budget:** ≤550.
 
 - [ ] Replace Active ownership/admission/retention lookups with approved assignments, convergence, exact ledgers/grants and cleanup evidence. Verify pins and restored state before acquisition/publication; no global marker wait.
 - [ ] Preserve one startup reservation, replay readiness, exact holds and joined late factory/Close behavior. Readmitted owners join/fence predecessor resources before replacement; parked missing/foreign state keeps evidence.
@@ -936,9 +973,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run managed boot/recovery/readmission functional race cases and `make test`.
 
-### Task 64: Wire collection and scoped controllers into Node lifetime
+### Task 67: Wire collection and scoped controllers into Node lifetime
 
-**Files:** `node*.go`, metaservice/managed configuration and shutdown. **Target:** [T] §7.2, §8.1/§8.4. **Depends on:** 49–51, 55–63. **Budget:** ≤550.
+**Files:** `node*.go`, metaservice/managed configuration and shutdown. **Target:** [T] §7.2, §8.1/§8.4. **Depends on:** 52–54, 58–66. **Budget:** ≤550.
 
 - [ ] Supply the existing authority Store and concrete Report/Status callbacks to the existing managed Host; start/resume/report within Node's accepted lifetime. NewNode remains validation/copy only, with no I/O or callbacks.
 - [ ] Control-only excluded-host startup may inspect/report/perform already-authorized cleanup without starting Raft or application replicas. Preserve historical courier proof and no general membership admission.
@@ -948,9 +985,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run Node startup/control-only/shutdown functional race tests and `make test`.
 
-### Task 65: Convert routing, drain status, names and watch consumers
+### Task 68: Convert routing, drain status, names and watch consumers
 
-**Files:** `internal/metaservice/documents.go`, bootstrap/session/routing helpers, placement/status/watch, root status adapters. **Target:** [T] §3.2, §5.4, §8.2–8.4. **Depends on:** 42–43, 53, 58, 62–64. **Budget:** ≤550.
+**Files:** `internal/metaservice/documents.go`, bootstrap/session/routing helpers, placement/status/watch, root status adapters. **Target:** [T] §3.2, §5.4, §8.2–8.4. **Depends on:** 45–46, 56, 61, 65–67. **Budget:** ≤550.
 
 - [ ] Finish former Active reads for names/routing using exact proven/approved identities and valid intermediate grants; never staged names or bare name fallback. Drain/removal uses affected prerequisites and reports remaining old-host debt separately.
 - [ ] Label placement results approved/proven explicitly; static placement is not native availability. Watch Latest and Target changes only after atomic rebase commit; ReadTopology exposes a coherent pair.
@@ -960,11 +997,11 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run status/routing/watch functional regressions and `make test`.
 
-### Task 66: Connect the final Cluster methods and small cluster demo
+### Task 69: Connect the final Cluster methods and small cluster demo
 
-**Files:** `cluster.go`, `cluster_documents.go`, `cluster_reads.go`, root public API tests, `examples/cluster`. **Target:** [T] §3.1–3.4, §7.2; contracts C1–C4. **Depends on:** 53, 58–59, 64–65. **Budget:** ≤550.
+**Files:** `cluster.go`, `cluster_documents.go`, `cluster_reads.go`, root public API tests, `examples/cluster`. **Target:** [T] §3.1–3.4, §7.2; contracts C1–C4. **Depends on:** 56, 61–62, 67–68. **Budget:** ≤550.
 
-- [ ] Connect ReadProgress, Operation, WaitOperation, RetryOperation and exact replacement signatures on Cluster. Finish root caller conversion; leave only explicitly inventoried old symbols needed by later caller tasks, with mandatory removal in Task 70.
+- [ ] Connect ReadProgress, Operation, WaitOperation, RetryOperation and exact replacement signatures on Cluster. Finish root caller conversion; leave only explicitly inventoried old symbols needed by later caller tasks, with mandatory removal in Task 73.
 - [ ] Keep unchanged Cluster methods and Node/load.Group ownership. Update the meta-only example to use progress/operation terminology without adding load/cleanup product UI; remove unused scaffolding as each final caller converts.
 - [ ] Verify public method/type/JSON names against [T], cancellation and error behavior. No deprecated aliases or public new management interface remain at completion.
 
@@ -972,9 +1009,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run root API units/functional checks as applicable and `make test` across all five modules.
 
-### Task 67: Adapt policy helpers and the existing scheduler/cache demos
+### Task 70: Adapt policy helpers and the existing scheduler/cache demos
 
-**Files:** `examples/scheduler`, `examples/inmemory-cache`, public test-helper packages. **Target:** [T] §3, §5.4, §10; current module map. **Depends on:** 60–66. **Budget:** ≤550.
+**Files:** `examples/scheduler`, `examples/inmemory-cache`, public test-helper packages. **Target:** [T] §3, §5.4, §10; current module map. **Depends on:** 63–69. **Budget:** ≤550.
 
 - [ ] Update Operation naming, exact predecessor arguments, ScheduleInput and completion/readiness consumers using actual group evidence. Keep existing application responsibilities and each demo's current purpose.
 - [ ] Update API snippets/custom policies to preserve owned inputs and source freshness. Do not add a network operational API or fold full load examples into `examples/cluster`.
@@ -982,11 +1019,11 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Verification**
 
-- [ ] Run affected example units through `make test`; schedule Compose smoke runs for Task 79, not every API edit.
+- [ ] Run affected example units through `make test`; schedule Compose smoke runs for Task 82, not every API edit.
 
-### Task 68: Adapt authenticated load transport and process-test fixtures
+### Task 71: Adapt authenticated load transport and process-test fixtures
 
-**Files:** `transport/loadgrpc`, `tests/cluster/testapp`, relevant `tests/cluster` helpers. **Target:** [T] §7.3, §8, §10. **Depends on:** 51, 57, 64–67. **Budget:** ≤550.
+**Files:** `transport/loadgrpc`, `tests/cluster/testapp`, relevant `tests/cluster` helpers. **Target:** [T] §7.3, §8, §10. **Depends on:** 54, 60, 67–70. **Budget:** ≤550.
 
 - [ ] Convert shared authority Operation fields and fixture callers while preserving authenticated exact sender/destination/delivery IDs. Keep unchanged load protocol bytes and event/Origin values; regenerate only genuinely changed .proto sources.
 - [ ] Expose necessary test evidence through existing authenticated fixture controls: per-group progress, staged/rebased versions, cleanup milestones and deterministic fault barriers. Avoid new public library test-control APIs.
@@ -996,9 +1033,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run fixture/transport units and relevant protocol functional tests via repository targets; run `make test`.
 
-### Task 69: Remove residual legacy execution consumers
+### Task 72: Remove residual legacy execution consumers
 
-**Files:** remaining `internal/metaengine`, `internal/metaservice`, `internal/operator`, `load`, lifecycle and authority helpers found by audit. **Target:** [T] §3.3, §5.4, §6.4, §10. **Depends on:** 1–68. **Budget:** ≤550; split residual batches before editing if needed.
+**Files:** remaining `internal/metaengine`, `internal/metaservice`, `internal/operator`, `load`, lifecycle and authority helpers found by audit. **Target:** [T] §3.3, §5.4, §6.4, §10. **Depends on:** 1–71. **Budget:** ≤550; split residual batches before editing if needed.
 
 - [ ] Classify every remaining Active/Operator/CurrentOperator/MaxPendingAuthorityRecords use. Remove old execution APIs, state lookups and global gates; retain legitimate NodeActive, historical documents and intentionally stable event/Origin/encoding strings with a reason.
 - [ ] Convert remaining tests/doubles in the owning package without introducing composite state, aliases or an unreviewed shortcut. Remove the listed temporary bridges once their last caller is gone.
@@ -1008,11 +1045,11 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run focused tests for each changed consumer batch and `make test`; record the classified search results in the progress log.
 
-### Task 70: Activate complete formats and eliminate transitional state
+### Task 73: Activate complete formats and eliminate transitional state
 
-**Files:** `internal/metastore/store.go`, `internal/metaengine/sm.go`/`codec.go`, snapshot/restart tests, remaining composition. **Target:** [T] §4.1–4.3, §7.1, §8.4. **Depends on:** 1–69. **Budget:** ≤550.
+**Files:** `internal/metastore/store.go`, `internal/metaengine/sm.go`/`codec.go`, snapshot/restart tests, remaining composition. **Target:** [T] §4.1–4.3, §7.1, §8.4. **Depends on:** 1–72. **Budget:** ≤550.
 
-- [ ] Activate complete metadata disk/state/envelope schema 4; verify authority schema 2 from Task 46. Remove Active storage/API, Operator/WaitOperator wrappers, old MutationResult fields, ActivateTarget/legacy envelopes and every registered temporary scaffold now that all callers are converted. No fallback, migration, mixed-version acceptance or refounding old evidence.
+- [ ] Activate complete metadata disk/state/envelope schema 4; verify authority schema 2 from Task 49. Remove Active storage/API, Operator/WaitOperator wrappers, old MutationResult fields, ActivateTarget/legacy envelopes and every registered temporary scaffold now that all callers are converted. No fallback, migration, mixed-version acceptance or refounding old evidence.
 - [ ] Add intentionally sourced v4/v2 fixtures with provenance; retain old changed-format fixtures for explicit rejection and immutable unrelated physical baseline hashes for unchanged-format checks. Preserve current-index/term/confstate/pins and unchanged buckets.
 - [ ] Exercise fresh startup and current-format retained restart through real composition. Confirm all new proposals/queries/dispatch/report callbacks are reachable, with no production dual-model switch or unsupported stub left on an accepted path.
 
@@ -1022,9 +1059,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run focused format/restart functional tests, `make test` and `git diff --check`; confirm baseline files were not regenerated to match implementation.
 
-### Task 71: Add cross-component isolation and race regressions
+### Task 74: Add cross-component isolation and race regressions
 
-**Files:** owning `*_func_test.go` packages under metaservice/operator/managed and root. **Target:** [T] §8.5, §10. **Depends on:** 70. **Budget:** ≤550.
+**Files:** owning `*_func_test.go` packages under metaservice/operator/managed and root. **Target:** [T] §8.5, §10. **Depends on:** 73. **Budget:** ≤550.
 
 - [ ] Add only missing integration regressions after reviewing task-local tests: concurrent A/B completion, approval versus supersession, retry prefix proof, local holds, read cancellation and scoped final validation.
 - [ ] Prove a hung host callback remains owned while healthy scopes progress, and late factory/effect/Close cannot overlap replacement or race shutdown. Use barriers and exact retained ownership checks.
@@ -1034,9 +1071,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run focused functional/race cases and `make test`; do not duplicate already sufficient unit evidence with implementation-mirroring tests.
 
-### Task 72: Complete the storage and receipt crash matrix
+### Task 75: Complete the storage and receipt crash matrix
 
-**Files:** authoritystore/walstore/managed/metaservice functional tests. **Target:** [T] §8.5, §10, §12 collection algorithms. **Depends on:** 70–71. **Budget:** ≤550.
+**Files:** authoritystore/walstore/managed/metaservice functional tests. **Target:** [T] §8.5, §10, §12 collection algorithms. **Depends on:** 73–74. **Budget:** ≤550.
 
 - [ ] Fill missing crash boundaries before/after Collect, local receipt commit, meta acceptance, ForgetCollection and journal removal. Prove collected rows never Collect after marker release; prepared rows safely recover partial deletion.
 - [ ] Cover swapped/missing roots, mismatched markers, pin removed with unexpected contents, journal rebind, successor protection, retained failed-attempt reference and courier-proof pruning races.
@@ -1046,21 +1083,21 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run focused storage/managed/service functional and race regressions, then `make test`.
 
-### Task 73: Add process isolation and rebase survival scenarios
+### Task 76: Add process isolation and rebase survival scenarios
 
-**Files:** new/updated `tests/cluster` clustertest cases using existing pool and controls. **Target:** [T] §5.3, §8.2/§8.5, §10. **Depends on:** 68–72. **Budget:** ≤550.
+**Files:** new/updated `tests/cluster` clustertest cases using existing pool and controls. **Target:** [T] §5.3, §8.2/§8.5, §10. **Depends on:** 71–75. **Budget:** ≤550.
 
 - [ ] Add `TestFailureIsolation_BlockedGroup` with three nodes: hold A's required progress while B executes/repairs under available meta quorum; assert exact operation/source evidence and no hidden global gate.
 - [ ] Add `TestFailureIsolation_StagedRebase`: stage A, repair B, assert atomic R/S parents/RebasedFrom and unchanged A intent, then change metadata leader/restart and prove retained operation/provenance. Approve old L must return RebasedTo without approval of S.
-- [ ] Use authenticated group-specific faults and barriers; clean containers/volumes/workers. Register focused names for Task 79; compile now, run Docker only after the implementation set is ready.
+- [ ] Use authenticated group-specific faults and barriers; clean containers/volumes/workers. Register focused names for Task 82; compile now, run Docker only after the implementation set is ready.
 
 **Verification**
 
-- [ ] Compile the clustertest package with `go test -c` as shown below and run `make test`; reserve scenario execution for Task 79. A `-run '^$'` invocation still executes this package's Docker-starting TestMain and is not compile-only.
+- [ ] Compile the clustertest package with `go test -c` as shown below and run `make test`; reserve scenario execution for Task 82. A `-run '^$'` invocation still executes this package's Docker-starting TestMain and is not compile-only.
 
-### Task 74: Add process cleanup, returning-host and deletion scenarios
+### Task 77: Add process cleanup, returning-host and deletion scenarios
 
-**Files:** `tests/cluster` cleanup/recovery/deletion cases. **Target:** [T] §6.2, §8.5, §10. **Depends on:** 73. **Budget:** ≤550.
+**Files:** `tests/cluster` cleanup/recovery/deletion cases. **Target:** [T] §6.2, §8.5, §10. **Depends on:** 76. **Budget:** ≤550.
 
 - [ ] Add `TestFailureIsolation_RemovedHostCleanup`: remove an unreachable old load replica through surviving quorum, converge permitted replacement topology, retain exact unconfirmed debt, then return the old host and prove fencing before service and successor survival.
 - [ ] Add `TestFailureIsolation_DeletionStopProof`: unreachable former owner keeps the deleted group pending without stop/readmission proof while another group continues; no false FullyConverged or collected milestone.
@@ -1068,11 +1105,11 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Verification**
 
-- [ ] Compile clustertest cases and run `make test`; execute together in Task 79.
+- [ ] Compile clustertest cases and run `make test`; execute together in Task 82.
 
-### Task 75: Add process receipt-outage and uncertain-response scenarios
+### Task 78: Add process receipt-outage and uncertain-response scenarios
 
-**Files:** `tests/cluster` reporting/admission/mutation cases, existing fixture controls. **Target:** [T] §3.4, §6.3, §8.4–8.5, §10. **Depends on:** 74. **Budget:** ≤550.
+**Files:** `tests/cluster` reporting/admission/mutation cases, existing fixture controls. **Target:** [T] §3.4, §6.3, §8.4–8.5, §10. **Depends on:** 77. **Budget:** ≤550.
 
 - [ ] Add `TestFailureIsolation_CollectionReporting`: pause metadata quorum after local collection preparation/completion, verify durable journal survives reporting failure/restart and exact receipt is eventually accepted or safely settled without repeating deletion.
 - [ ] Add `TestFailureIsolation_ExactMutationReplay`: interrupt responses for stage/approval/retry/replacement; reuse original CAS/predecessor and assert one accepted version/allocation/retry edge. Use retained evidence, not guessed latest IDs.
@@ -1080,11 +1117,11 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Verification**
 
-- [ ] Compile clustertest cases and run `make test`; execute together in Task 79.
+- [ ] Compile clustertest cases and run `make test`; execute together in Task 82.
 
-### Task 76: Measure unresolved-debt persistence cost and query bounds
+### Task 79: Measure unresolved-debt persistence cost and query bounds
 
-**Files:** metadata benchmark tests and progress scaling tests in their owning packages. **Target:** [T] §4.2–4.3, §6.4, §10–11. **Depends on:** 70–75. **Budget:** ≤550.
+**Files:** metadata benchmark tests and progress scaling tests in their owning packages. **Target:** [T] §4.2–4.3, §6.4, §10–11. **Depends on:** 73–78. **Budget:** ≤550.
 
 - [ ] Add `BenchmarkCleanupDebtApply` comparing representative 0/1000/10000 unresolved exact debts for changed Apply serialization, allocations and persisted bytes; include snapshot/restore cost where the existing benchmark fixture supports it. Use valid retained proof, not impossible fabricated rows.
 - [ ] Measure bounded progress/cleanup paging and ordinary grant selection under debt; assert worker/queue/backoff bounds independently from durable state growth. Do not mistake bounded response size for bounded write cost.
@@ -1094,9 +1131,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Run the focused benchmark command below, relevant paging units and `make test`; preserve results without inventing an unagreed latency threshold.
 
-### Task 77: Update architecture and navigation contracts
+### Task 80: Update architecture and navigation contracts
 
-**Files:** `README.md`, `docs/architecture/library.md`, `runtime.md`, `raft.md`, `project-map.md`, `comparision-with-tikv.md`, relevant `design-constraints.md` entries. **Target:** [T] §1–10. **Depends on:** 70–76. **Budget:** documentation only; split any code corrections separately.
+**Files:** `README.md`, `docs/architecture/library.md`, `runtime.md`, `raft.md`, `project-map.md`, `comparision-with-tikv.md`, relevant `design-constraints.md` entries. **Target:** [T] §1–10. **Depends on:** 73–79. **Budget:** documentation only; split any code corrections separately.
 
 - [ ] Describe implemented Latest/Target/convergence, scoped immutable operations, exact retry/rebase, stop/retire/collect boundaries, safe-read freshness and storage proof release. Replace obsolete current-contract Active/global-operator claims.
 - [ ] Update the saturated project map with new interfaces/methods/schema/protocol ownership and grep tags from [T]. Distinguish TiKV mechanisms adapted from stronger gquorum proof requirements and remaining gaps.
@@ -1106,9 +1143,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Verify links, actual signatures/defaults and every “implemented” claim; run `git diff --check` and `make test` as the plan's checkpoint gate.
 
-### Task 78: Update API audit, testing provenance and contributor guidance
+### Task 81: Update API audit, testing provenance and contributor guidance
 
-**Files:** `docs/testing/api-refactor-validation.md`, `api-refactor-audit.md`, `api-baseline-physical.md`, `tests.md`, `AGENTS.md`, affected example/test READMEs. **Target:** [T] §4.3, §10–11. **Depends on:** 77. **Budget:** documentation only.
+**Files:** `docs/testing/api-refactor-validation.md`, `api-refactor-audit.md`, `api-baseline-physical.md`, `tests.md`, `AGENTS.md`, affected example/test READMEs. **Target:** [T] §4.3, §10–11. **Depends on:** 80. **Budget:** documentation only.
 
 - [ ] Replace current contract names and test expectations; document exact new format fixture provenance and unchanged hashes. Do not rewrite historical validation as a fresh passing run.
 - [ ] Record final suite ownership, five application modules, scoped process test names and limitations. Add concise retry/rebase and cleanup recovery examples to existing documentation, not a new public administration product.
@@ -1118,9 +1155,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Check paths/commands/snippets against code, run `git diff --check` and `make test`.
 
-### Task 79: Run integrated validation and resolve regressions
+### Task 82: Run integrated validation and resolve regressions
 
-**Files:** test reports and any focused fixes; record actual results in this plan. **Target:** [T] §10, all §8.5 failure cases. **Depends on:** 1–78. **Budget:** ≤550 Go lines per corrective task; split larger fixes before editing.
+**Files:** test reports and any focused fixes; record actual results in this plan. **Target:** [T] §10, all §8.5 failure cases. **Depends on:** 1–81. **Budget:** ≤550 Go lines per corrective task; split larger fixes before editing.
 
 - [ ] Run final non-Docker units, lint, units under race, functional and functional-race targets. Inspect report.md/timeline.md/package logs; fix every failure encountered and rerun only affected checks until the final required set passes.
 - [ ] Build the process fixture image once after source changes, run focused `TestFailureIsolation_` cases, then the complete ordinary cluster suite. Run the three affected example Compose smoke targets once. Rebuild after application changes; never replace the shared tag during a running suite.
@@ -1130,9 +1167,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Complete the Validation Commands checklist below; failures remain open work, not an automatically accepted limitation.
 
-### Task 80: Verify and close the architectural delta
+### Task 83: Verify and close the architectural delta
 
-**Target:** [T] **all sections**, especially §2 diagram, §7 routing/contracts, §8 flows and §12 algorithms. **Depends on:** 1–79. **Budget:** ≤550 Go lines per corrective task; introduce additional bounded fix tasks before this final task if necessary.
+**Target:** [T] **all sections**, especially §2 diagram, §7 routing/contracts, §8 flows and §12 algorithms. **Depends on:** 1–82. **Budget:** ≤550 Go lines per corrective task; introduce additional bounded fix tasks before this final task if necessary.
 
 - [ ] Verify public/domain delta: every C1–C4/C7/C9/C12 signature, field/tag, enum, limit and API removal matches [T]; no public aliases or extra ordinary application APIs remain. Verify all five modules and helper packages use the final contract.
 - [ ] Verify metadata delta: exact v4 buckets/state/envelopes, every convergence/debt/intent/operation/index shape, proof validation, deterministic restore, source provenance, marker/document pins and old-format refusal. Confirm no Active or CollectionAcks state survives.
@@ -1202,6 +1239,8 @@ Do not run broad process performance/chaos campaigns by default; the focused deb
 
 
 ## NOT PLANNED CHANGES
+
+- Approval pre-coding audit after Task 28: origin persistence/restore/join, scoped validation/ownership, consumed-prefix admission handover, and atomic debt-stop/approval installation exceed the 550-line task ceiling together. Split former Task 29 into Tasks 29–32; former Tasks 30–80 shift by three (83 tasks, scoped collection 61, activation 73, final audit 83). No verification obligation or user-approved behavior is removed. The shared handover and exact prefix checks precede all activation. Code removal comments are updated with Task 29.
 
 - Scope pre-coding audit after Task 24: semantic derivation, affected-only planner/service collection and replicated scope/CAS validation exceed 550 Go lines together. Split former Task 25 into Tasks 25–27 before coding; old Tasks 26–78 shift by two (80 tasks, scoped collection 58, activation 70, final audit 80). Use the existing placement evaluator and a small expert topology helper. Keep affected-only helpers isolated until scoped block/approval/persistence wiring is safe; a partial plan must never reach legacy whole-document completion. No original verification obligation is removed.
 

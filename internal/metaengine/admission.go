@@ -41,6 +41,10 @@ type AdmissionRecord struct {
 	// operator.
 	// Empty means this record is the original. Only the FSM may assign it.
 	ReadmissionInstanceID string `json:"readmission_instance_id,omitempty"`
+	// ReadmissionOperatorID independently preserves the original approved
+	// retirement authority when the same member's admission changes owner.
+	// Empty means OperatorID is the origin. Only the FSM may assign it.
+	ReadmissionOperatorID topology.OperationID `json:"readmission_operator_id,omitempty"`
 }
 
 func admissionKey(nodeName, instanceID string) string {
@@ -120,7 +124,7 @@ func (sm *topologySM) applyBindAdmission(p BindAdmissionProposal) (ApplyResult, 
 	if p.At.IsZero() {
 		return rejectProposal(p.ProposalID, proposalAuthorization, "admission timestamp is required"), false
 	}
-	if record.ReadmissionInstanceID != "" {
+	if record.ReadmissionInstanceID != "" || record.ReadmissionOperatorID != "" {
 		return rejectProposal(p.ProposalID, proposalAuthorization,
 			"readmission origin is assigned by admission binding"), false
 	}
@@ -190,6 +194,7 @@ func (sm *topologySM) admissionInstanceReplacementLocked(p BindAdmissionProposal
 			return record, &result
 		}
 		if conflict.MemberID == record.MemberID && conflict.OperatorID == record.OperatorID {
+			record.ReadmissionOperatorID = conflict.ReadmissionOperatorID
 			record.ReadmissionInstanceID = conflict.ReadmissionInstanceID
 			if record.ReadmissionInstanceID == "" {
 				record.ReadmissionInstanceID = conflict.InstanceID
@@ -206,7 +211,7 @@ func (sm *topologySM) applyCommitReadmission(index uint64, p CommitReadmissionPr
 	if p.At.IsZero() {
 		return rejectProposal(p.ProposalID, proposalAuthorization, "readmission timestamp is required"), false
 	}
-	if p.Admission.ReadmissionInstanceID != "" {
+	if p.Admission.ReadmissionInstanceID != "" || p.Admission.ReadmissionOperatorID != "" {
 		return rejectProposal(p.ProposalID, proposalAuthorization,
 			"new readmission cannot select an earlier proof"), false
 	}
@@ -343,7 +348,8 @@ func (sm *topologySM) applyReadyAdmission(p ReadyAdmissionProposal) (ApplyResult
 
 func validateAdmissionIdentity(record AdmissionRecord) error {
 	if strings.ContainsRune(record.NodeName, 0) || strings.ContainsRune(record.InstanceID, 0) ||
-		strings.ContainsRune(record.ReadmissionInstanceID, 0) {
+		strings.ContainsRune(record.ReadmissionInstanceID, 0) ||
+		strings.ContainsRune(string(record.ReadmissionOperatorID), 0) {
 		return errors.New("admission identity contains a separator")
 	}
 	if record.NodeName == "" || record.InstanceID == "" || record.MemberID == 0 {
@@ -351,6 +357,9 @@ func validateAdmissionIdentity(record AdmissionRecord) error {
 	}
 	if record.ReadmissionInstanceID == record.InstanceID {
 		return errors.New("readmission origin must name a previous process")
+	}
+	if record.ReadmissionOperatorID != "" && record.ReadmissionOperatorID == topology.OperationID(record.OperatorID) {
+		return errors.New("readmission origin must name a previous operation")
 	}
 	return nil
 }

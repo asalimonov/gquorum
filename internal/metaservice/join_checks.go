@@ -32,6 +32,11 @@ func validateJoinGrant(identity topology.Identity, rules topology.Rules, result 
 			strings.ContainsRune(result.Admission.ReadmissionInstanceID, 0)) {
 		return fault.ErrIdentityMismatch
 	}
+	if origin := string(result.Admission.ReadmissionOperatorID); origin != "" &&
+		(origin == string(result.Admission.OperatorID) || strings.TrimSpace(origin) != origin ||
+			strings.ContainsRune(origin, 0)) {
+		return fault.ErrIdentityMismatch
+	}
 	if err := validateReadmissionResponse(identity, result); err != nil {
 		return err
 	}

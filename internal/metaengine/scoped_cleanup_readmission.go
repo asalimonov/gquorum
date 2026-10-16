@@ -22,7 +22,7 @@ func (check scopedCleanupValidation) readmission(debt cleanupRecord) bool {
 		if admission.NodeName != debt.Identity.NodeName || ReadmissionID(admission) != admissionID {
 			continue
 		}
-		id := topology.OperationID(admission.OperatorID)
+		id := admission.originOperator()
 		if check.index.operations[id] == nil || debt.StopAction == nil && id != debt.OperationID {
 			return false
 		}

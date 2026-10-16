@@ -75,6 +75,11 @@ func TestJoinGrantValidatesEveryHintBeforeRoutingMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := map[string]func(*joinResponse){
+		"origin separator":  func(r *joinResponse) { r.Admission.ReadmissionOperatorID = "exec-v1-a1\x00" },
+		"origin whitespace": func(r *joinResponse) { r.Admission.ReadmissionOperatorID = " " },
+		"self origin": func(r *joinResponse) {
+			r.Admission.OperatorID, r.Admission.ReadmissionOperatorID = "exec-v1-a1", "exec-v1-a1"
+		},
 		"wrong owner":            func(r *joinResponse) { r.Members[0].Name = "intruder" },
 		"unapproved member":      func(r *joinResponse) { r.Members[0].MemberID = 99 },
 		"zero member":            func(r *joinResponse) { r.Members[0].MemberID = 0 },

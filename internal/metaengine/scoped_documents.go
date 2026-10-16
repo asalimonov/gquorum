@@ -9,7 +9,7 @@ import (
 )
 
 // Validation never publishes derived indexes or mutates the candidate. Complete
-// convergence/authority validation precedes live installation at Task 70.
+// convergence/authority validation precedes live installation at Task 73.
 func prepareScopedGraph(state *scopedState, rules topology.Rules) (*scopedIndexes, error) {
 	if state.SchemaVersion != scopedStateSchemaVersion {
 		return nil, fault.ErrUnsupported

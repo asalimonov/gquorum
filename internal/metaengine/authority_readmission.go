@@ -22,7 +22,8 @@ type BeginReadmissionAuthority struct {
 }
 
 // ReadmissionID names the original retirement authority. A pending admission
-// rebound to another process keeps that proof; readiness still uses InstanceID.
+// rebound to another process or operation keeps that proof; readiness still
+// uses the current InstanceID and OperatorID.
 // Instance IDs are scoped to a node, and length-prefixed names avoid
 // collisions.
 func ReadmissionID(a AdmissionRecord) string {
@@ -30,7 +31,14 @@ func ReadmissionID(a AdmissionRecord) string {
 	if instance == "" {
 		instance = a.InstanceID
 	}
-	return fmt.Sprintf("%s/%d/%d:%s/%s", a.OperatorID, a.MemberID, len(a.NodeName), a.NodeName, instance)
+	return fmt.Sprintf("%s/%d/%d:%s/%s", a.originOperator(), a.MemberID, len(a.NodeName), a.NodeName, instance)
+}
+
+func (a AdmissionRecord) originOperator() topology.OperationID {
+	if a.ReadmissionOperatorID != "" {
+		return a.ReadmissionOperatorID
+	}
+	return topology.OperationID(a.OperatorID)
 }
 
 func (sm *topologySM) applyBeginReadmissionAuthority(index uint64, p BeginReadmissionAuthority) (ApplyResult, bool) {

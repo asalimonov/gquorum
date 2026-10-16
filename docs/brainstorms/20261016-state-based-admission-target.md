@@ -1,7 +1,7 @@
 # Target amendment: state-based admission barriers
 
 Status: **accepted peer consensus; implementation authorized by the user on 2026-10-16**.
-Date: 2026-10-16. Code inspected: `d2b5a67`. No behavior in this amendment is implemented.
+Date: 2026-10-16. Code inspected at acceptance: `d2b5a67`. Current implementation progress is recorded in the plan and progress log.
 
 Amends the [failure-isolation target](20261015-failure-isolation-and-operational-api-target.md)
 after [peer thread 10](../review/feat_failure-isolation-and-api.md#thread-10-discussion-carry-admission-dependent-scopes-into-the-existing-planner).
@@ -196,9 +196,9 @@ or new history-cap admission restriction is introduced.
 | Target §2, §3.3, §5.1–5.2, §12 | Replace admission invalidation closure with the exact state predicate; fix approval and barrier snippets. |
 | Target §5.4, §6.1, §12 retry | Specify same-record admission handover, stable origin and resumed prefixes. |
 | Tasks 26–27 | Plan/collect semantic ownership scopes; remove dependent-closure input; retain scope CAS and separate repair reads. |
-| Tasks 28–29 | Keep restricted barriers; block set equals affected scopes; atomic same-member admission handover accompanies metadata takeover. |
-| Tasks 30–31, 36 | Preserve exact retirement authority through handover; share the waiting predicate and handover path with retries. |
-| Tasks 42–44 | Founding proof, non-founding binding, prefix validation, origin persistence/restore/join and retention roots. |
+| Tasks 28–32 | Keep restricted barriers; block set equals affected scopes; atomic same-member admission handover accompanies metadata takeover. |
+| Tasks 33–34, 39 | Preserve exact retirement authority through handover; share the waiting predicate and handover path with retries. |
+| Tasks 45–47 | Founding proof, non-founding binding, prefix validation, origin persistence/restore/join and retention roots. |
 | Controller/verification tasks, final audit | Waiting classification, after-wait checks, end-to-end dependency and handover cases; remove obsolete closure expectations. |
 
 Split admission work into bounded tasks before coding if the 550-line ceiling

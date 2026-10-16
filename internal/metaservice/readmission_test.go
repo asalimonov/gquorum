@@ -23,16 +23,23 @@ func TestReadmissionResponseRequiresExactWholeGrantBatch(t *testing.T) {
 	if err := validateReadmissionResponse(id, valid); err != nil {
 		t.Fatal(err)
 	}
+	valid.Admission.ReadmissionOperatorID = topology.OperationID(a.OperatorID)
+	valid.Admission.OperatorID = "exec-v3-a1"
+	if err := validateReadmissionResponse(id, valid); err != nil {
+		t.Fatal("same-member handover invalidated the original grant batch", err)
+	}
 	for name, mutate := range map[string]func(*joinResponse){
-		"no_grants":           func(r *joinResponse) { r.Grants = nil },
-		"wrong_admission":     func(r *joinResponse) { r.Grants[1].AdmissionID = "other" },
-		"wrong_member":        func(r *joinResponse) { r.Grants[1].Targets[0].MemberID = 2 },
-		"wrong_node":          func(r *joinResponse) { r.Grants[1].Targets[0].NodeName = "other" },
-		"mixed_revision":      func(r *joinResponse) { r.Grants[1].Key.Revision++ },
-		"missing_meta":        func(r *joinResponse) { r.Grants = r.Grants[1:] },
-		"missing_load_scope":  func(r *joinResponse) { r.PreviousGroups = nil },
-		"scope_without_grant": func(r *joinResponse) { r.Grants = r.Grants[:1] },
-		"wrong_meta_pin":      func(r *joinResponse) { r.Grants[0].Targets[0].ReplicaID = 3 },
+		"lost_operator_origin":   func(r *joinResponse) { r.Admission.ReadmissionOperatorID = "" },
+		"forged_operator_origin": func(r *joinResponse) { r.Admission.ReadmissionOperatorID = "exec-v1-a1" },
+		"no_grants":              func(r *joinResponse) { r.Grants = nil },
+		"wrong_admission":        func(r *joinResponse) { r.Grants[1].AdmissionID = "other" },
+		"wrong_member":           func(r *joinResponse) { r.Grants[1].Targets[0].MemberID = 2 },
+		"wrong_node":             func(r *joinResponse) { r.Grants[1].Targets[0].NodeName = "other" },
+		"mixed_revision":         func(r *joinResponse) { r.Grants[1].Key.Revision++ },
+		"missing_meta":           func(r *joinResponse) { r.Grants = r.Grants[1:] },
+		"missing_load_scope":     func(r *joinResponse) { r.PreviousGroups = nil },
+		"scope_without_grant":    func(r *joinResponse) { r.Grants = r.Grants[:1] },
+		"wrong_meta_pin":         func(r *joinResponse) { r.Grants[0].Targets[0].ReplicaID = 3 },
 		"replacement_in_scope": func(r *joinResponse) {
 			r.Granted.Groups = []topology.Group{{ID: "load", Replicas: []topology.Replica{{NodeName: id.NodeName, ReplicaID: 1}}}}
 		},

@@ -15,11 +15,34 @@ func validateScopedAdmissions(state *scopedState, index *scopedIndexes, catalog 
 		return err
 	}
 	for _, admission := range state.Admissions {
-		if !validScopedAdmission(admission, state, index, catalog) {
+		if !validAdmissionOrigin(admission, index) || !validScopedAdmission(admission, state, index, catalog) {
 			return invalidScopedState("admission contradicts its retained approved sequence or progress")
 		}
 	}
 	return nil
+}
+
+// FI_ADMISSION_ORIGIN: the field is a reference to retained approved proof, not
+// proof by itself. Resumed successor prefixes are validated separately.
+func validAdmissionOrigin(admission AdmissionRecord, index *scopedIndexes) bool {
+	if admission.ReadmissionOperatorID == "" {
+		return true
+	}
+	origin := index.operations[admission.ReadmissionOperatorID]
+	current := index.operations[topology.OperationID(admission.OperatorID)]
+	if origin == nil || current == nil || origin.Status.Version > current.Status.Version ||
+		origin.Status.Version == current.Status.Version && origin.Status.Attempt >= current.Status.Attempt {
+		return false
+	}
+	approved := index.documents[origin.Status.Version]
+	if approved.MemberID(admission.NodeName) != admission.MemberID ||
+		!hasAdmissionSequence(origin.Plan.Steps, approved, admission.NodeName, admission.MemberID) {
+		return false
+	}
+	return slices.ContainsFunc(origin.Status.Blocks, func(block topology.BlockStatus) bool {
+		return block.GroupID == topology.MetaGroupID &&
+			(block.State == topology.OperationFailed || block.State == topology.OperationSuperseded)
+	})
 }
 
 func validScopedAdmission(admission AdmissionRecord, state *scopedState,
