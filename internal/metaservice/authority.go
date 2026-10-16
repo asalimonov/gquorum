@@ -95,7 +95,7 @@ func (g *Group) RecordFence(ctx context.Context, evidence topology.FenceEvidence
 // RecordEffect proposes exact durable effect consumption evidence to meta
 // consensus.
 func (g *Group) RecordEffect(ctx context.Context, receipt topology.EffectReceipt) error {
-	_, err := g.propose(ctx, metaengine.RecordEffectProposal{Receipt: receipt.Clone()})
+	_, err := g.propose(ctx, metaengine.RecordEffectProposal{Receipt: receipt.Clone(), At: time.Now().UTC()})
 	return err
 }
 

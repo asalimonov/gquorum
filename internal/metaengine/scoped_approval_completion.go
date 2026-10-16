@@ -32,6 +32,9 @@ func prepareApprovalCompletion(source, next *scopedState) error {
 			continue
 		}
 		if !zeroStepMembership(source, next.Target, block.GroupID, catalog) {
+			op.Status.Blocks[i].State = topology.OperationWaitingForReplica
+			op.Status.Blocks[i].Blocked = &topology.BlockedReason{Code: "membership_unproven",
+				Message: "required effects do not prove the approved membership"}
 			continue
 		}
 		if block.GroupID == topology.MetaGroupID && !completeApprovalAdmissions(next, op, proof, catalog) {
@@ -92,6 +95,9 @@ func zeroStepMembership(source *scopedState, desired topology.Document, group st
 		if a == nil || a.GroupID != group || a.Version <= version || !membershipProofKind(a.Kind) {
 			continue
 		}
+		if abandonedHostPreparation(record.Grant, desired) {
+			continue // Abandoned host preparation is detached cleanup, not native membership.
+		}
 		if slices.ContainsFunc(record.Grant.Resources, func(r topology.AuthorityResource) bool {
 			return !resourceConsumed(&record, r)
 		}) {
@@ -111,6 +117,14 @@ func zeroStepMembership(source *scopedState, desired topology.Document, group st
 		}
 	}
 	return true
+}
+
+func abandonedHostPreparation(grant topology.AuthorityGrant, desired topology.Document) bool {
+	a := grant.Action
+	return a.Kind == topology.StepPrepareReplica && documentReplica(desired, a.GroupID, a.ReplicaID) == nil &&
+		!slices.ContainsFunc(grant.Resources, func(r topology.AuthorityResource) bool {
+			return r.Kind != topology.AuthorityHost
+		})
 }
 
 func checkpointMembership(row *groupConvergence, members map[uint64]topology.Replica,

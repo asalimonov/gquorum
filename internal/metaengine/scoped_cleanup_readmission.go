@@ -55,5 +55,5 @@ func readmissionMilestones(debt cleanupRecord) bool {
 	if readmissionMilestone(&debt, debt.Stopped) {
 		return reflect.DeepEqual(debt.Stopped, debt.Retired)
 	}
-	return debt.StopAction != nil && cleanupEffectMatches(debt.Stopped, debt.StopAction)
+	return debt.StopAction != nil && cleanupStopMatches(debt)
 }

@@ -117,7 +117,12 @@ func (check scopedCleanupValidation) milestones(debt cleanupRecord) bool {
 	}
 	return (debt.Retired == nil || debt.Stopped != nil && !debt.RetiredAt.Before(*debt.StoppedAt)) &&
 		(debt.Removed == nil || debt.Stopped == nil || !debt.StoppedAt.Before(*debt.RemovedAt)) &&
-		cleanupEffectMatches(debt.Stopped, debt.StopAction) && cleanupEffectMatches(debt.Retired, debt.RetireAction)
+		cleanupStopMatches(debt) && cleanupEffectMatches(debt.Retired, debt.RetireAction)
+}
+
+func cleanupStopMatches(debt cleanupRecord) bool {
+	return debt.Stopped == nil || debt.Stopped.Action != nil &&
+		debt.Stopped.Action.Kind == topology.StepStopReplica && cleanupRetainsAction(&debt, *debt.Stopped.Action)
 }
 
 func cleanupTimestamp(receipt *topology.EffectReceipt, at *time.Time, debt cleanupRecord) bool {

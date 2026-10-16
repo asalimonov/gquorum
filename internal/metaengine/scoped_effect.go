@@ -46,7 +46,7 @@ func (a authorityCatalog) currentGrant(record *authorityRecord) error {
 		return fault.ErrAuthorityFenced
 	}
 	for _, resource := range record.Grant.Resources {
-		if a.floors[resource] != record.Grant.Key {
+		if a.floors[resource] != record.Grant.Key && !resourceConsumed(record, resource) {
 			return fault.ErrAuthorityFenced
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
@@ -282,6 +283,7 @@ func (sm *topologySM) readmissionRequiredLocked(node string, member uint64) bool
 type RecordReadmissionReceiptsProposal struct {
 	Admission  AdmissionRecord          `json:"admission"`
 	Receipts   []topology.EffectReceipt `json:"receipts"`
+	At         time.Time                `json:"at,omitzero"`
 	ProposalID string                   `json:"proposal_id"`
 }
 

@@ -957,3 +957,18 @@ Implemented
 Verified
 - make test: 1498/1498 pass, 6.738s; test-reports/unit/20261016T091805.408077Z-r6z88lyb/report.md. Focused metaengine tests and staged lint pass: /tmp/gquorum-task41-focused.log and /tmp/gquorum-task41-lint.log; diff checks pass. An initially invalid test fixture reset the staged metadata allocator; preserving its existing high-water mark fixed it. No new race/Docker run claimed.
 - Regressions cover unknown admission, dependent whole-group retirement, deferred cleanup, retained marker documents, skipped versions, idempotent marker timestamps and proof-clock ordering. Task42 next; next peer checkpoint60, with thread15 findings still to assess.
+
+## Task 42 — Atomic cleanup receipts and independent completion
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 57).
+
+Implemented
+- Native consumption creates exact cleanup debt before publication; complete readmission batches preserve original/actionless ownership, and their last receipt completes eligible waiting deletion atomically. Successful block completion installs group, admission, final role cooldown, node and marker changes together. Original storage/member/receipt tuples and first milestone timestamps survive late effects, repeats and collection; memory retirement has no collection receipt.
+- Owned monotonic merge and bounded, identity-sorted cleanup pages retain private proof. The internal CleanupPage result groups Records/Next to meet the two-result lint rule; ordinary public progress does not expose tokens. Private receipt At fields use omitzero to preserve baseline zero-value encodings; services stamp their clock and FSM facts clamp deterministically. Legacy live state remains unchanged until Task78.
+- Folded thread15 fixes into this existing task: first late historical Stop supplies exact identity-level completion without relabeling; consumed resources survive newer floors; revocation selects source nonterminal blocks; approval replay requires Plan.Equal; executor Superseded refuses. Readmission derives the actual possible former owner, skipping unprepared intermediate approvals and refusing contradictory multiple owners. The accepted amendment records the consensus and controller/retention obligations.
+- F1's initially proposed no-removal path was disproved by the actual planner/shape validator and removed before commit. The real regression is tested through guarded no-op removal followed by a zero-step successor while the old Prepare remains unanswered. No new debt format, task, renumbering or cross-reference rewrite.
+
+Verified
+- Focused metaengine tests pass (/tmp/gquorum-task42-all.log); staged lint passes (/tmp/gquorum-task42-lint.log). Added atomic batch refusal, complete-batch deletion, late-stop/rebound deletion with an independent failed sibling, memory retirement, original attribution, stable replay, final promotion/admission, former-owner chains, paging ownership and cursor regressions.
+- make test passes (latest report recorded below); focused service authority functional tests pass, 2.546s (/tmp/gquorum-task42-service.log). Diff checks pass. No new race/Docker run claimed for these pure FSM changes. Physical retirement/quarantine implementations remain in their existing storage/managed tasks; this task verifies the retained exact receipt prerequisites.
+- Next Task43 implements detached issuance/status and scoped fence receipt installation. Next peer/dead-code checkpoint is commit60; thread15 is closed with dispositions and corrected F1 reachability evidence in docs/review/feat_failure-isolation-and-api.md.
+- Final unit run: 1524/1524 pass, 6.675s; test-reports/unit/20261016T095724.909328Z-fp48l5fu/report.md.

@@ -80,6 +80,18 @@ func applyScopedProposal(state *scopedState, index uint64, kind ProposalKind,
 		return proposalApplication{}, err
 	}
 	switch kind {
+	case KindRecordEffect:
+		var p RecordEffectProposal
+		if err := decodeScopedPayload(body, &p, "receipt", "at"); err != nil {
+			return proposalApplication{}, err
+		}
+		return state.applyRecordEffect(index, p)
+	case KindRecordReadmissionReceipts:
+		var p RecordReadmissionReceiptsProposal
+		if err := decodeScopedPayload(body, &p, "admission", "receipts", "at"); err != nil {
+			return proposalApplication{}, err
+		}
+		return state.applyRecordReadmissionReceipts(index, p)
 	case "begin_operation":
 		var p BeginOperationProposal
 		if err := json.Unmarshal(body, &p); err != nil {

@@ -47,8 +47,9 @@ func TestScopedCleanupFailedAndRetriedDeletionRemainRestorable(t *testing.T) {
 	oldStop := original.AuthorityRecords[len(original.AuthorityRecords)-1]
 	s.AuthorityRecords = append(s.AuthorityRecords, oldStop)
 	s.AuthorityFloors = append(s.AuthorityFloors, resourceFloor{Resource: oldStop.Grant.Resources[0], Key: oldStop.Grant.Key})
+	s.Cleanup[1].Stopped, s.Cleanup[1].StoppedAt = original.Cleanup[1].Stopped, original.Cleanup[1].StoppedAt
 	if _, err := prepareScopedGraph(&s, s.Rules); err != nil {
-		t.Fatal("late consumed predecessor receipt became a tip milestone", err)
+		t.Fatal("late consumed predecessor receipt lost its original milestone", err)
 	}
 	// The exact tip may subsequently record its own idempotent stop.
 	grant := oldStop.Grant.Clone()
@@ -57,9 +58,8 @@ func TestScopedCleanupFailedAndRetriedDeletionRemainRestorable(t *testing.T) {
 	s.AuthorityRecords = append(s.AuthorityRecords, scopedAuthorityRecord{Class: "execution",
 		authorityRecord: authorityRecord{Grant: grant, Effects: []topology.EffectReceipt{receipt}}})
 	s.AuthorityFloors[len(s.AuthorityFloors)-1].Key = grant.Key
-	s.Cleanup[1].Stopped, s.Cleanup[1].StoppedAt = &receipt, &s.Cleanup[1].UpdatedAt
 	if _, err := prepareScopedGraph(&s, s.Rules); err != nil {
-		t.Fatal("successor receipt lost its own action identity", err)
+		t.Fatal("successor receipt rewrote the first stop proof", err)
 	}
 }
 

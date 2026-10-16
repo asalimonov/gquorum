@@ -106,7 +106,9 @@ func cleanupGrantProgress(debt *cleanupRecord, record *authorityRecord, target t
 
 func cleanupActionMilestones(debt *cleanupRecord, action *topology.AuthorizedStep) []*topology.EffectReceipt {
 	var milestones []*topology.EffectReceipt
-	if debt.StopAction != nil && *action == *debt.StopAction && !readmissionMilestone(debt, debt.Stopped) {
+	if action.Kind == topology.StepStopReplica && cleanupRetainsAction(debt, *action) &&
+		!readmissionMilestone(debt, debt.Stopped) &&
+		(debt.Stopped == nil || reflect.DeepEqual(action, debt.Stopped.Action)) {
 		milestones = append(milestones, debt.Stopped)
 	}
 	if debt.RetireAction != nil && *action == *debt.RetireAction && !readmissionMilestone(debt, debt.Retired) {
@@ -115,6 +117,6 @@ func cleanupActionMilestones(debt *cleanupRecord, action *topology.AuthorizedSte
 	if debt.Removed != nil && reflect.DeepEqual(action, debt.Removed.Action) {
 		milestones = append(milestones, debt.Removed)
 	}
-	// An older retry action is retained evidence, not the currently bound milestone.
+	// Later stop bindings cannot rewrite the first exact identity-level milestone.
 	return milestones
 }

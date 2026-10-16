@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -76,6 +77,9 @@ func (s *scopedState) completionResourcesAvailable(resources []topology.Authorit
 	for _, resource := range resources {
 		for _, key := range s.indexes.obligations[resource] {
 			record := s.indexes.grants[key]
+			if s.stoppedGrantTargets(record) {
+				continue
+			}
 			// Required host effects have already been proven consumed. A later
 			// detached retirement on that host is not part of group convergence.
 			if record != nil && record.Class == "cleanup" && record.Grant.Purpose == topology.AuthorityEffect &&
@@ -87,4 +91,23 @@ func (s *scopedState) completionResourcesAvailable(resources []topology.Authorit
 		}
 	}
 	return nil
+}
+
+// A later Stop of the same retired identities cannot invalidate an earlier
+// durable stop. Native/preparation/foreign targets still require reconciliation.
+func (s *scopedState) stoppedGrantTargets(record *scopedAuthorityRecord) bool {
+	if record == nil || record.Grant.Purpose != topology.AuthorityEffect ||
+		record.Grant.Action.Kind != topology.StepStopReplica {
+		return false
+	}
+	for _, target := range record.Grant.Targets {
+		id := storage.Identity{ClusterID: record.Grant.Key.ClusterID, GroupID: record.Grant.Key.GroupID,
+			NodeName: target.NodeName, ReplicaID: target.ReplicaID}
+		debt := s.indexes.cleanup[id]
+		if debt == nil || debt.MemberID != target.MemberID || debt.Stopped == nil ||
+			debt.Stopped.Target != target || !cleanupRetainsAction(debt, *record.Grant.Action) {
+			return false
+		}
+	}
+	return len(record.Grant.Targets) != 0
 }

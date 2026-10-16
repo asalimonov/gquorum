@@ -357,10 +357,14 @@ must already hold; otherwise ordinary guarded removal precedes Stop.
 Restore validates the current Stop action in its bound operation, including a
 later approval's Cleanup partition. The original retirement action and Removed
 receipt still validate against the origin. All unconsumed Stop rebindings settle
-or close the old conflicting grant before successor issuance. Late old receipts
-remain historical evidence. Cleanup authorization resolves the current StopAction,
-not an assumed action in debt.OperationID. Deletion completion then uses the one
-bound required Stop receipt as Stopped; no second proof representation is needed.
+or close the old conflicting grant before successor issuance. Thread 15 refines
+consumption: the first exact Stop receipt, including a late historical binding,
+supplies the identity-level Stopped milestone with its original tuple/time. Later
+receipts cannot rewrite it. Cleanup authorization still resolves current StopAction.
+Completion and retry-prefix selection use this same exact identity/member proof.
+A newly issued Stop for that identical retired target cannot block completion;
+a live executor still settles it before later same-host preparation. No second
+proof representation or already-satisfied API flag is added.
 
 An existing unstopped debt never excuses an omitted deletion stop. If the current
 deletion block (or ownerless failed tip) has no exact required Stop, the former
@@ -370,3 +374,32 @@ applies equally to debts with detached and required bindings. Pending completion
 cannot hide a hard error on another identity: replicated preparation scans in a
 deterministic order and hard refusal outranks Unavailable. Completed-debt pruning
 must also preserve restore when another root still pins former-host declarations.
+
+
+## Receipt installation and former-owner derivation (thread 15)
+
+RecordEffect/RecordReadmissionReceipts carry private At with omitzero encoding.
+The proposing service stamps its clock; the FSM clamps receipt facts against
+retained debt/operation times, never reads a clock, and preserves first milestone
+timestamps on replay. The last batch receipt atomically completes an eligible
+waiting zero-step deletion. Controllers use max(now, observed UpdatedAt) for
+transitions and re-observe after a concurrent clock refusal; a far-future proposer
+clock can delay progress until that bound is observed.
+
+Readmission derives the former owner from converged bindings, issued Prepare/Create
+grants and unretired debt, excluding members whose complete retirement batch is
+consumed. An approved but never prepared intermediate member cannot hide the actual
+old owner. The existing single-former-member protocol remains: one candidate must
+match PreviousMemberID; multiple unretired owners refuse as Unavailable. The
+admission-before-preparation invariant prevents that contradictory state in normal
+execution. If no possible owner remains, the latest former approved member supplies
+exact pin/absence reconciliation. Retained batch retries use their immutable original
+targets. Keep these proof roots while an admission depends on them.
+
+Approve replay compares the complete immutable Plan (nil/empty-equivalent value
+equality); differing plans return VersionConflict with the first OperationID.
+Captured Scopes are first-approval CAS preconditions. Executor transitions cannot
+invent Superseded. Closed native grants without receipts leave zero-step membership
+explicitly blocked; a fence never proves nonexecution. Abandoned host preparation
+is ignored only in membership reconstruction when its identity is omitted. The
+existing planner still emits a guarded no-op Remove before creating cleanup debt.

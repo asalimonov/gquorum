@@ -1,6 +1,9 @@
 package metaengine
 
-import "github.com/asalimonov/gquorum/topology"
+import (
+	"github.com/asalimonov/gquorum/storage"
+	"github.com/asalimonov/gquorum/topology"
+)
 
 func validateScopedCompletion(state *scopedState, index *scopedIndexes, catalog authorityCatalog) error {
 	for i := range state.Operations {
@@ -31,6 +34,14 @@ func scopedStepConsumed(operation *topology.Operation, step topology.Step,
 
 func scopedConsumedAuthority(operation *topology.Operation, step topology.Step,
 	index *scopedIndexes, catalog authorityCatalog) *authorityRecord {
+	if step.Kind == topology.StepStopReplica {
+		id := storage.Identity{ClusterID: index.documents[operation.Status.Version].ClusterID,
+			GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID}
+		debt := index.cleanup[id]
+		if debt != nil && debt.Stopped != nil && cleanupRetainsAction(debt, scopedPlanAction(operation, step)) {
+			return catalog.records[debt.Stopped.Key]
+		}
+	}
 	// validateScopedRetry has already proved acyclic, contiguous attempts with
 	// identical plans. Evidence keeps its original grant/action identity.
 	for previous := operation; previous != nil; previous = index.operations[previous.Previous] {

@@ -27,16 +27,14 @@ func (s *scopedState) applyTransitionOperation(index uint64,
 	if err := s.validateScopedTransition(op, t); err != nil {
 		return proposalApplication{}, err
 	}
-	if t.State == topology.OperationSucceeded {
-		if _, err := s.prepareGroupCompletion(t); err != nil {
-			return proposalApplication{}, err
-		}
-		return proposalApplication{}, fault.ErrUnsupported // Atomic debt/node installation joins in Task 42.
-	}
 	if index <= s.AppliedIndex {
 		return proposalApplication{}, fault.ErrOperationAuthorization
 	}
-	next, err := s.prepareBlockTransition(index, t)
+	prepare := s.prepareBlockTransition
+	if t.State == topology.OperationSucceeded {
+		prepare = s.completeGroupLocked
+	}
+	next, err := prepare(index, t)
 	if err != nil {
 		return proposalApplication{}, err
 	}
@@ -63,11 +61,6 @@ func (s *scopedState) prepareBlockTransition(index uint64, t topology.OperationT
 	}
 	if t.State.Terminal() {
 		next.releaseBlockOwner(t.OperationID, t.GroupID)
-	}
-	if t.State == topology.OperationSuperseded {
-		if err := next.revokeAuthorityLocked(index, []blockRef{{t.OperationID, t.GroupID}}, ""); err != nil {
-			return nil, err
-		}
 	}
 	return next, nil
 }
@@ -113,7 +106,7 @@ func (s *scopedState) validateScopedTransition(op *topology.Operation, t topolog
 }
 
 func validScopedTransitionDiagnostic(t topology.OperationTransition) bool {
-	if t.State == topology.OperationPending || !t.State.Valid() {
+	if t.State == topology.OperationPending || t.State == topology.OperationSuperseded || !t.State.Valid() {
 		return false
 	}
 	if t.State.Waiting() {

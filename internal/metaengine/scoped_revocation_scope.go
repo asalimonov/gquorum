@@ -12,8 +12,8 @@ func (s *scopedState) supersededBlocks(successor *topology.Operation) []blockRef
 		if operation.Status.ID == successor.Status.ID {
 			continue
 		}
-		for _, block := range operation.Plan.Blocks {
-			if groups[block.GroupID] {
+		for _, block := range operation.Status.Blocks {
+			if groups[block.GroupID] && !block.State.Terminal() {
 				blocks = append(blocks, blockRef{operation.Status.ID, block.GroupID})
 			}
 		}

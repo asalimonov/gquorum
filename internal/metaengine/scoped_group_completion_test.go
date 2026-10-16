@@ -37,17 +37,21 @@ func TestScopedCompletionPreparesPinnedDeclarationBesideUnrelatedFence(t *testin
 	if !bytes.Equal(before, after) || s.indexes.grants[key].Effects == nil {
 		t.Fatal("preparation changed source progress or consumption")
 	}
-	// Before Task 42 adds node/debt/marker publication, success stays fail-closed.
-	if _, err := s.applyTransitionOperation(s.AppliedIndex+1, TransitionOperationProposal{Transition: transition}); !errors.Is(err, fault.ErrUnsupported) {
-		t.Fatal("partial completion was published", err)
-	}
-	after, _ = json.Marshal(s)
-	if !bytes.Equal(before, after) {
-		t.Fatal("unsupported installation changed state")
-	}
+	retained := s.indexes.grants[key].Effects
 	s.indexes.grants[key].Effects = nil
 	if _, err := s.prepareGroupCompletion(transition); !errors.Is(err, fault.ErrAuthorityPending) {
 		t.Fatal("missing exact final receipt accepted", err)
+	}
+	s.indexes.grants[key].Effects = retained
+	applyScopedTransitionFixture(t, &s, transition)
+	if s.indexes.groups["shard0"].SourceVersion != 2 || s.indexes.groups["shard0"].Owner != "" {
+		t.Fatal("complete installation lost pinned convergence")
+	}
+	before, _ = json.Marshal(s)
+	result, err := s.applyTransitionOperation(s.AppliedIndex+1, TransitionOperationProposal{Transition: transition})
+	after, _ = json.Marshal(s)
+	if err != nil || result.changed || !bytes.Equal(before, after) {
+		t.Fatal("duplicate completion changed proof or clocks", err)
 	}
 }
 

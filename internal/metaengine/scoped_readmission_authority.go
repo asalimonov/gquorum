@@ -23,6 +23,18 @@ func (s *scopedState) applyBeginReadmissionAuthority(index uint64,
 	if len(grants) != 0 {
 		return proposalApplication{result: ApplyResult{ProposalID: p.ProposalID, Accepted: true, Grants: grants}}, nil
 	}
+	former := unretiredFormerMembers(s, s.indexes, catalog, admission)
+	if len(former) > 1 {
+		return proposalApplication{}, fault.New(fault.Unavailable,
+			"multiple former process owners require retirement", nil)
+	}
+	want := previousApprovedMember(s, s.indexes, p.NodeName, p.MemberID)
+	for member := range former {
+		want = member
+	}
+	if p.PreviousMemberID != want {
+		return proposalApplication{}, fault.ErrOperationAuthorization
+	}
 	op := s.indexes.operations[topology.OperationID(p.OperatorID)]
 	meta := s.indexes.groups[topology.MetaGroupID]
 	if op == nil || meta == nil || meta.Owner != op.Status.ID || op.Status.State.Terminal() {

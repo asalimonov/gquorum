@@ -30,3 +30,31 @@ type cleanupRecord struct {
 	CreatedAt      time.Time                         `json:"created_at"`
 	UpdatedAt      time.Time                         `json:"updated_at"`
 }
+
+func (r cleanupRecord) clone() cleanupRecord {
+	owned := r
+	owned.StopAction, owned.RetireAction = copyCleanupValue(r.StopAction), copyCleanupValue(r.RetireAction)
+	owned.ReadmissionKey, owned.Collection = copyCleanupValue(r.ReadmissionKey), copyCleanupValue(r.Collection)
+	owned.Removed, owned.Stopped, owned.Retired = cloneCleanupReceipt(r.Removed),
+		cloneCleanupReceipt(r.Stopped), cloneCleanupReceipt(r.Retired)
+	owned.RemovedAt, owned.StoppedAt, owned.RetiredAt = copyCleanupValue(r.RemovedAt),
+		copyCleanupValue(r.StoppedAt), copyCleanupValue(r.RetiredAt)
+	owned.NotBefore, owned.Blocked = copyCleanupValue(r.NotBefore), copyCleanupValue(r.Blocked)
+	return owned
+}
+
+func copyCleanupValue[T any](value *T) *T {
+	if value == nil {
+		return nil
+	}
+	owned := *value
+	return &owned
+}
+
+func cloneCleanupReceipt(receipt *topology.EffectReceipt) *topology.EffectReceipt {
+	if receipt == nil {
+		return nil
+	}
+	owned := receipt.Clone()
+	return &owned
+}

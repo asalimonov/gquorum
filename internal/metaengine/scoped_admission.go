@@ -93,13 +93,10 @@ func validScopedAdmission(admission AdmissionRecord, state *scopedState,
 
 func scopedAdmissionRetirement(admission AdmissionRecord, state *scopedState,
 	index *scopedIndexes, catalog authorityCatalog) bool {
-	required := false
-	for _, doc := range index.documents {
-		member := doc.MemberID(admission.NodeName)
-		if member != 0 && member < admission.MemberID && scopedApprovedVersion(state, doc.Version) {
-			required = true
-		}
+	if len(unretiredFormerMembers(state, index, catalog, admission)) != 0 {
+		return false
 	}
+	required := false
 	id := ReadmissionID(admission)
 	for _, record := range catalog.records {
 		if record.Grant.Purpose == topology.AuthorityReadmit && record.Grant.AdmissionID == id {
@@ -115,4 +112,15 @@ func scopedAdmissionRetirement(admission AdmissionRecord, state *scopedState,
 		}
 	}
 	return false
+}
+
+func previousApprovedMember(state *scopedState, index *scopedIndexes, node string, member uint64) uint64 {
+	var former uint64
+	for _, doc := range index.documents {
+		candidate := doc.MemberID(node)
+		if candidate < member && candidate > former && scopedApprovedVersion(state, doc.Version) {
+			former = candidate
+		}
+	}
+	return former
 }

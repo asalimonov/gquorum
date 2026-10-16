@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"slices"
+	"time"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
@@ -38,6 +39,7 @@ type RecordFenceProposal struct {
 // RecordEffectProposal records durable consumption of an exact granted effect.
 type RecordEffectProposal struct {
 	Receipt    topology.EffectReceipt `json:"receipt"`
+	At         time.Time              `json:"at,omitzero"`
 	ProposalID string                 `json:"proposal_id"`
 }
 
@@ -89,7 +91,11 @@ func (a authorityCatalog) fenceEvidenceConflict(evidence topology.FenceEvidence)
 }
 
 func (sm *topologySM) applyRecordEffect(p RecordEffectProposal) (ApplyResult, bool) {
-	r := sm.authority.records[p.Receipt.Key]
+	return sm.authority.recordEffect(p)
+}
+
+func (a authorityCatalog) recordEffect(p RecordEffectProposal) (ApplyResult, bool) {
+	r := a.records[p.Receipt.Key]
 	if r == nil || p.Receipt.Validate(r.Grant) != nil {
 		return rejectProposal(p.ProposalID, proposalAuthorization,
 			"effect receipt does not identify its retained grant"), false
@@ -103,7 +109,7 @@ func (sm *topologySM) applyRecordEffect(p RecordEffectProposal) (ApplyResult, bo
 			return ApplyResult{ProposalID: p.ProposalID, Accepted: true}, false
 		}
 	}
-	if !sm.authority.receiptFitsInstalledFences(p.Receipt) {
+	if !a.receiptFitsInstalledFences(p.Receipt) {
 		return rejectProposal(p.ProposalID, proposalAuthorization, "effect contradicts installed authority"), false
 	}
 	r.Effects = append(r.Effects, p.Receipt.Clone())
@@ -113,7 +119,7 @@ func (sm *topologySM) applyRecordEffect(p RecordEffectProposal) (ApplyResult, bo
 		}
 		return a.Target.Compare(b.Target)
 	})
-	sm.authority.refreshRevocations()
+	a.refreshRevocations()
 	return ApplyResult{ProposalID: p.ProposalID, Accepted: true}, true
 }
 

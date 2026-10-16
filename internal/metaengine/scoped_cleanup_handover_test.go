@@ -78,12 +78,14 @@ func TestScopedApprovalRebindsExactRequiredStopAcrossVersions(t *testing.T) {
 	if _, err := prepareScopedGraph(next, next.Rules); err != nil {
 		t.Fatal("cross-version stop cannot restore", err)
 	}
-	// A late receipt for the old exact action is evidence, not the new milestone.
+	// A late receipt supplies identity-level stop proof with its original action.
 	next.AuthorityRecords = slices.Clone(next.AuthorityRecords)
 	for i := range next.AuthorityRecords {
 		r := &next.AuthorityRecords[i]
 		if r.Grant.Action != nil && *r.Grant.Action == *s.Cleanup[0].StopAction {
 			r.Effects = fixtureEffectReceipts(r.Grant)
+			next.Cleanup[0].Stopped = cloneCleanupReceipt(&r.Effects[0])
+			next.Cleanup[0].StoppedAt = copyCleanupValue(&next.Cleanup[0].UpdatedAt)
 		}
 	}
 	if _, err := prepareScopedGraph(next, next.Rules); err != nil {

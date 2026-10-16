@@ -714,14 +714,14 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaengine/cleanup.go`, `cleanup_evidence.go`, effect consumption. **Target:** [T] §4.1, §6.2, §12 “upsertCleanupLocked”; contract C5. **Depends on:** 40–41. **Budget:** ≤550.
 
-- [ ] Implement upsertCleanupLocked/detachCleanupLocked and bounded CleanupPage. Native removal creates debt in the same Apply before progress publication; whole deletion uses its former assignments without fabricating RemovedAt. Finish completeGroupLocked by atomically installing validated group/debt/node/marker drafts from Tasks 40–41.
-- [ ] Keep readmission-created debt actionless and unchanged when its old native identity is subsequently removed; retain that exact removal receipt as execution evidence. Verify exact readmission target coverage for every omitted host effect. Preserve historical MemberID and original removal-origin receipts.
-- [ ] Preserve immutable original Storage and compatible stop/retire/readmission proof, monotonic milestones and exact historical MemberID. Repeated removal cannot overwrite collected debt or resurrect it. StorageMemory completes at Retired with nil CollectedAt.
-- [ ] Test conflicting proof/storage, repeat consumed effects, deletion attribution and complete application-retirement/quarantine/ledger prerequisites. Add A-failed/B-completed, duplicate completion and no partial mutation regressions; keep opaque tokens out of ordinary progress.
+- [x] Implement upsertCleanupLocked/detachCleanupLocked and bounded CleanupPage. Native removal creates debt in the same Apply before progress publication; whole deletion uses its former assignments without fabricating RemovedAt. Finish completeGroupLocked by atomically installing validated group/debt/node/marker drafts from Tasks 40–41.
+- [x] Keep readmission-created debt actionless and unchanged when its old native identity is subsequently removed; retain that exact removal receipt as execution evidence. Verify exact readmission target coverage for every omitted host effect. Preserve historical MemberID and original removal-origin receipts.
+- [x] Preserve immutable original Storage and compatible stop/retire/readmission proof, monotonic milestones and exact historical MemberID. Repeated removal cannot overwrite collected debt or resurrect it. StorageMemory completes at Retired with nil CollectedAt.
+- [x] Test conflicting proof/storage, repeat consumed effects, deletion attribution and complete application-retirement/quarantine/ledger prerequisites. Add A-failed/B-completed, duplicate completion and no partial mutation regressions; keep opaque tokens out of ordinary progress.
 
 **Verification**
 
-- [ ] Run cleanup/memory/readmission units and `make test`.
+- [x] Run cleanup/memory/readmission units and `make test`.
 
 ### Task 43: Authorize detached cleanup and changed deferral status
 

@@ -191,6 +191,7 @@ func (g *Group) handleReady(ctx context.Context, h *metapb.Header, data []byte) 
 				OperatorID: request.OperatorID,
 			},
 			Receipts: request.Receipts,
+			At:       time.Now().UTC(),
 		})
 		if err != nil {
 			return g.leaderReply(err)

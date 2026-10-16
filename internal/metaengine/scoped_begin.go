@@ -4,6 +4,11 @@ import "github.com/asalimonov/gquorum/topology"
 
 func (s *scopedState) applyBeginOperation(index uint64, p BeginOperationProposal) (proposalApplication, error) {
 	if first := s.indexes.first[p.Version]; first != "" {
+		if !s.indexes.operations[first].Plan.Equal(p.Plan) {
+			result := rejectVersionConflict(p.ProposalID, p.Version, s.Latest.Version)
+			result.OperatorID = topology.OperatorID(first)
+			return proposalApplication{result: result}, nil
+		}
 		return proposalApplication{result: scopedApprovalResult(p.ProposalID, first)}, nil
 	}
 	if p.Version != s.Latest.Version {
@@ -16,7 +21,7 @@ func (s *scopedState) applyBeginOperation(index uint64, p BeginOperationProposal
 		return proposalApplication{}, err
 	}
 	op := &next.Operations[len(next.Operations)-1]
-	if err := next.revokeAuthorityLocked(index, next.supersededBlocks(op), op.Status.ID); err != nil {
+	if err := next.revokeAuthorityLocked(index, s.supersededBlocks(op), op.Status.ID); err != nil {
 		return proposalApplication{}, err
 	}
 	next.AppliedIndex = index
