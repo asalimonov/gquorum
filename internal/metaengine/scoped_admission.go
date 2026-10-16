@@ -64,7 +64,8 @@ func validScopedAdmission(admission AdmissionRecord, state *scopedState,
 	if approved.Version == 1 && approved.Origin == topology.OriginFounding {
 		return block.State == topology.OperationSucceeded && admission.State.terminal()
 	}
-	if !hasAdmissionSequence(operation.Plan.Steps, approved, admission.NodeName, admission.MemberID) {
+	progress, valid := scopedAdmissionProgress(admission, operation, index, catalog)
+	if !valid {
 		return false
 	}
 	if !block.State.Terminal() && !admission.State.terminal() &&
@@ -81,25 +82,13 @@ func validScopedAdmission(admission AdmissionRecord, state *scopedState,
 	if admission.State == AdmissionCompleted {
 		return block.State == topology.OperationSucceeded
 	}
-	return catalog.scopedAdmissionMilestone(admission, operation, block, index)
-}
-
-func (catalog authorityCatalog) scopedAdmissionMilestone(admission AdmissionRecord, operation *topology.Operation,
-	block topology.BlockStatus, index *scopedIndexes) bool {
 	if admission.State == AdmissionReady {
 		return true // Readiness may be recorded before the preparation receipt arrives.
 	}
-	kind := topology.StepAddLearner
 	if admission.State == AdmissionPromoted {
-		kind = topology.StepPromoteVoter
+		return progress.promoted
 	}
-	for _, step := range operation.Plan.Steps {
-		if step.Kind == kind && step.GroupID == topology.MetaGroupID && step.NodeName == admission.NodeName &&
-			step.ReplicaID == admission.MemberID {
-			return scopedStepCompleted(block, step.Seq) && scopedStepConsumed(operation, step, index, catalog)
-		}
-	}
-	return false
+	return progress.learner
 }
 
 func scopedAdmissionRetirement(admission AdmissionRecord, state *scopedState,

@@ -766,3 +766,19 @@ Verified
 - Final make test: 1344/1344 pass, 9.134s; test-reports/unit/20261016T055528.559559Z-k_0uru9j/report.md. Staged lint and diff checks pass, /tmp/gquorum-task31-lint.log. 179 changed handwritten Go lines including tests and task-reference updates, within 550.
 - Focused functional exact readmission restart/receipt and scoped planning cases pass (2.430s), /tmp/gquorum-task31-functional.log. No new concurrency implementation, race or Docker run claimed.
 - Next task is 32, admission prefix/origin proof. Commit 45 remains the next peer/dead-code checkpoint. Task-30 preparation stash was dropped after its successful commit; older unrelated task-14 stash is untouched.
+
+## Task 32 — Validate resumed admission prefixes and origin facts
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 44).
+
+Implemented
+- Scoped admission validation now combines exact consumed metadata preparation/membership prefixes with the current approved suffix. Ordered retained prefix operations must approve the same member and contain valid admission work. Current-owner facts remain suffix evidence; issued earlier Prepare/Add/Promote facts cannot precede the recorded origin.
+- Reused the existing learner-first/paired-promotion grammar with a private shape-only prefix, without creating action sequence numbers, receipts or authority. Unrelated earlier steps retain their positions. Preparation, learner and voter facts remain distinct; readiness and retirement cannot manufacture membership.
+- Existing complete readmission-batch validation enforces the original AdmissionID. Pending handover with no issued fact needs structural origin eligibility only. Previous remains an identical-plan retry edge. Historical effects keep their exact original attribution and survive cursor acknowledgement lag.
+- Validated durable metadata convergence can supply the omitted member prefix, including after the checkpoint advances and obsolete barrier receipts are compacted. Approval preparation must use the existing graph/checkpoints, never prospective convergence; Task 33 shares this proof. Fresh admissions retain their full sequence and exact current milestone checks.
+- Regressions cover Pending/Ready before and after Prepare/Add, zero-step learner and voter shapes, promotion-only and multiple cross-version handovers, unrelated step ordering, contradictory issued origins and readmission batches, eligible unissued Pending, retained original effects, checkpoint mismatch and atomic decoder refusal.
+
+Verified
+- go test -count=1 ./internal/metaengine: pass, /tmp/gquorum-task32-focused.log.
+- make test: 1357/1357 pass, 5.355s; test-reports/unit/20261016T061010.553590Z-0s2swfme/report.md.
+- Staged lint passes, /tmp/gquorum-task32-lint.log; corrected function complexity, operand order, switch default and line length. git diff --check passes. 436 changed handwritten Go lines, including tests, within 550.
+- Pure restore/proof changes; no new concurrency or process execution. The next task prepares the actual same-record handover. Next five-commit review is after Task 33 (commit 45).

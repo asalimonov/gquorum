@@ -550,14 +550,14 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaengine` admission/restore helpers and tests. **Target:** accepted admission amendment FI_ADMISSION_ORIGIN; thread 11 finding 5; [T] §5.2, §12. **Depends on:** 29–31. **Budget:** estimated 350–500 changed Go lines, ceiling 550.
 
-- [ ] Validate original approved/consumed admission prefix plus the successor's approved suffix. Already-native successors may omit Prepare/Add; exact receipts or metadata convergence must justify that omission. Recompute admission milestones without inventing native membership or relabeling old grant/action attribution.
-- [ ] Extend scoped restore to the same prefix/suffix contract. Keep Previous exclusively for immutable-plan retry. Share proof validation with the handover preparation in Task 33 and later retry/non-founding admission paths.
-- [ ] Validate an eligible origin against issued facts: exact original readmission AdmissionID, origin no later than the earliest retained prefix fact, ordered same-member prefix operations between origin/current owner. Current-owner suffix facts are not origin evidence. Pending without issued facts needs structural eligibility only; no fabricated receipt or new provenance ledger.
-- [ ] Test before/after Prepare/Add, zero-step and promotion-only successors, retained original retirement, missing/contradictory prefix evidence, eligible-but-wrong origin contradicting a batch/prefix, and eligible no-fact Pending acceptance. Restore refusal must not mutate the input graph.
+- [x] Validate original approved/consumed admission prefix plus the successor's approved suffix. Already-native successors may omit Prepare/Add; exact receipts or metadata convergence must justify that omission. Recompute admission milestones without inventing native membership or relabeling old grant/action attribution.
+- [x] Extend scoped restore to the same prefix/suffix contract. Keep Previous exclusively for immutable-plan retry. Share proof validation with the handover preparation in Task 33 and later retry/non-founding admission paths.
+- [x] Validate an eligible origin against issued facts: exact original readmission AdmissionID, origin no later than the earliest retained prefix fact, ordered same-member prefix operations between origin/current owner. Current-owner suffix facts are not origin evidence. Pending without issued facts needs structural eligibility only; no fabricated receipt or new provenance ledger.
+- [x] Test before/after Prepare/Add, zero-step and promotion-only successors, retained original retirement, missing/contradictory prefix evidence, eligible-but-wrong origin contradicting a batch/prefix, and eligible no-fact Pending acceptance. Restore refusal must not mutate the input graph.
 
 **Verification**
 
-- [ ] Run scoped admission/readmission/restore units, staged lint and `make test`.
+- [x] Run scoped admission/readmission/restore units, staged lint and `make test`.
 
 ### Task 33: Prepare same-record admission handover
 
