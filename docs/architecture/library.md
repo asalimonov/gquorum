@@ -141,6 +141,17 @@ waits for a requested revocation to be complete. A plain `ReadBarrier` confirms
 quorum and local application without returning a query result. Ready followers
 and learners can use these APIs through leader-confirmed ReadIndex; learners
 contribute no votes.
+The in-progress failure-isolation API changes `ClusterStatus.Groups` to
+`[]GroupProgress`: complete Desired/Approved/Converged declarations surround an
+optional raw `Observation`. Cached samples require exact source version, cluster,
+node, member, process and replica assignment; missing provenance means unknown.
+`ReadProgress(ctx, ProgressQuery)` uses the existing quorum/apply read path and
+only cached observations for the returned rows, preserving their timestamps.
+Schema3 currently refuses this query with Unsupported; complete scoped activation
+is Task78. Until then status projects Latest/Target/Active without inferring
+scoped owner, deletion or blocker facts. The prepared scoped status projection
+caps operation headers at100 with explicit truncation and cleanup counts.
+
 `Stage(ctx, document, expectedVersion)` uses compare-and-swap. `Plan` previews a
 staged version; `PlanFor` validates/plans an uncommitted document without staging.
 `Approve(ctx, version)` commits a concrete plan and returns an `OperatorID`.

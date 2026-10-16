@@ -86,3 +86,48 @@ func TestScopedCollectionCannotSubstituteAnotherActionOrTarget(t *testing.T) {
 		}
 	}
 }
+
+func TestScopedCollectionAcceptsReadmissionAfterCleanupRetirement(t *testing.T) {
+	t.Parallel()
+	for _, order := range []string{"cleanup first", "readmission first"} {
+		t.Run(order, func(t *testing.T) {
+			t.Parallel()
+			s := scopedReadmissionCleanupFixture()
+			debt := &s.Cleanup[0]
+			readmitKey := *debt.ReadmissionKey
+			old := fixtureEffectReceipts(s.AuthorityRecords[0].Grant)[0]
+			s.AuthorityRecords[0].Effects = []topology.EffectReceipt{old}
+			if order == "cleanup first" {
+				debt.Retired, debt.ReadmissionKey = &old, nil
+			}
+			prepareScopedFixture(t, &s)
+			first := s.Cleanup[0].clone()
+			at := first.UpdatedAt.Add(time.Hour)
+			// A repeated consumed batch must preserve the first milestone, while
+			// its own exact retirement receipt can bind the later host collection.
+			if err := s.retireReadmissionTarget("exec-v3-a1", s.indexes.grants[readmitKey].Effects[0], at); err != nil {
+				t.Fatal(err)
+			}
+			status := RecordCleanupStatusProposal{Identity: first.Identity, MemberID: first.MemberID,
+				RetirementKey: readmitKey, At: at, Blocked: &topology.BlockedReason{Code: "retention"}}
+			if _, err := s.applyRecordCleanupStatus(s.AppliedIndex+1, status); err != nil {
+				t.Fatal("readmission-keyed retention report stranded", err)
+			}
+			p := RecordCollectionProposal{Receipt: authoritystore.CollectionReceipt{Identity: first.Identity,
+				MemberID: first.MemberID, RetirementKey: readmitKey, Token: "retained-token", LocalSequence: 1, CollectedAt: at},
+				Courier: topology.Identity{ClusterID: "c", NodeName: "n", MemberID: 2, InstanceID: "restart"}, At: at}
+			if _, err := s.applyRecordCollection(s.AppliedIndex+1, p); err != nil {
+				t.Fatal("completed exact readmission could not bind collection", err)
+			}
+			pruneScopedFixture(t, &s)
+			got := s.indexes.cleanup[first.Identity]
+			if got == nil || got.Retired.Key != first.Retired.Key || !got.Collection.Equal(p.Receipt) ||
+				(first.ReadmissionKey == nil) != (got.ReadmissionKey == nil) || s.indexes.grants[readmitKey] == nil {
+				t.Fatal("pruning lost collection proof or changed the first retirement")
+			}
+			if result, err := s.applyRecordCollection(s.AppliedIndex+1, p); err != nil || result.changed {
+				t.Fatal("lost accepted reply failed after restore/pruning", result, err)
+			}
+		})
+	}
+}

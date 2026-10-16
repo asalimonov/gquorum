@@ -7,8 +7,8 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func (check scopedCleanupValidation) readmission(debt cleanupRecord) bool {
-	record := check.catalog.records[*debt.ReadmissionKey]
+func (check scopedCleanupValidation) readmission(debt cleanupRecord, key topology.AuthorityKey) bool {
+	record := check.catalog.records[key]
 	if record == nil || record.Grant.Purpose != topology.AuthorityReadmit {
 		return false
 	}

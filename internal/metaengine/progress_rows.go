@@ -5,13 +5,19 @@ import "github.com/asalimonov/gquorum/topology"
 // Declarations here are borrowed under the FSM lock. Public projections clone
 // them after selection; Status and ReadProgress share this complete row builder.
 func (s *scopedState) groupProgress(id string) topology.GroupProgress {
-	p := topology.GroupProgress{GroupID: id, Desired: s.Latest.Group(id), Approved: s.Target.Group(id)}
+	convergence := groupConvergence{GroupID: id}
 	if row := s.indexes.groups[id]; row != nil {
-		p.Converged, p.ConvergedVersion, p.OperationID = row.Declaration, row.SourceVersion, row.Owner
-		p.Deleting = row.Deleting
-		p.Blocked = s.progressBlocker(row.Owner, id)
+		convergence = *row
 	}
+	p := declaredGroupProgress(s.Latest, s.Target, convergence)
+	p.Blocked = s.progressBlocker(convergence.Owner, id)
 	return p
+}
+
+func declaredGroupProgress(latest, target topology.Document, row groupConvergence) topology.GroupProgress {
+	return topology.GroupProgress{GroupID: row.GroupID, Desired: latest.Group(row.GroupID),
+		Approved: target.Group(row.GroupID), Converged: row.Declaration, ConvergedVersion: row.SourceVersion,
+		OperationID: row.Owner, Deleting: row.Deleting}
 }
 
 func (s *scopedState) nodeProgress(name string) topology.NodeProgress {

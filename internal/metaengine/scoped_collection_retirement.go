@@ -34,7 +34,7 @@ func (check scopedCleanupValidation) collectionRetirement(debt cleanupRecord, ke
 func (check scopedCleanupValidation) retirementRevision(debt cleanupRecord, record *scopedAuthorityRecord) bool {
 	grant := record.Grant
 	if grant.Purpose == topology.AuthorityReadmit {
-		return debt.ReadmissionKey != nil && *debt.ReadmissionKey == grant.Key && check.readmission(debt)
+		return check.readmission(debt, grant.Key)
 	}
 	return debt.Retired != nil && debt.Retired.Key == grant.Key ||
 		record.Class == "cleanup" && grant.Action != nil && debt.RetireAction != nil &&

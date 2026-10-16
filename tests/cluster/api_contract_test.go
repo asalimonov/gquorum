@@ -81,12 +81,16 @@ func documentAPIContracts(t *testing.T, size int) {
 					expected = size
 				}
 				declared := base.Group(g.GroupID)
-				if declared == nil || !g.Found || len(g.ConfState.Voters) != expected || g.LeaderID == 0 || !slices.ContainsFunc(declared.Replicas, func(r topology.Replica) bool {
-					return r.ReplicaID == g.LeaderID && (g.GroupID == topology.MetaGroupID || r.NodeName == g.HostNode)
+				if g.Observation == nil {
+					return false, nil
+				}
+				observed := g.Observation
+				if declared == nil || !observed.Found || len(observed.ConfState.Voters) != expected || observed.LeaderID == 0 || !slices.ContainsFunc(declared.Replicas, func(r topology.Replica) bool {
+					return r.ReplicaID == observed.LeaderID && (g.GroupID == topology.MetaGroupID || r.NodeName == observed.HostNode)
 				}) {
 					return false, nil
 				}
-				if topology.QuorumOf(len(g.ConfState.Voters)) != expected/2+1 {
+				if topology.QuorumOf(len(observed.ConfState.Voters)) != expected/2+1 {
 					return true, fmt.Errorf("wrong quorum math")
 				}
 			}

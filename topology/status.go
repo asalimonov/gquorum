@@ -55,7 +55,7 @@ type ClusterStatus struct {
 	TargetVersion       uint64            `json:"target_version"`
 	ActiveVersion       uint64            `json:"active_version"`
 	Nodes               []NodeStatus      `json:"nodes"`
-	Groups              []GroupStatus     `json:"groups"`
+	Groups              []GroupProgress   `json:"groups"`
 	MetaLeaderID        uint64            `json:"meta_leader_id"`
 	// MetaLeaderNodeName is resolved from the numeric MetaLeaderID through
 	// Active.

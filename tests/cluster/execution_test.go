@@ -25,8 +25,8 @@ func groupStatus(ctx context.Context, c *Cluster, node, group string) (topology.
 		return topology.GroupStatus{}, err
 	}
 	for _, observed := range status.Groups {
-		if observed.GroupID == group {
-			return observed, nil
+		if observed.GroupID == group && observed.Observation != nil {
+			return observed.Observation.Clone(), nil
 		}
 	}
 	return topology.GroupStatus{}, fmt.Errorf("group %q absent from %s status", group, node)

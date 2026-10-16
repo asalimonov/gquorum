@@ -46,7 +46,7 @@ func (check scopedCleanupValidation) declaration(debt cleanupRecord) bool {
 }
 
 func (check scopedCleanupValidation) actions(debt cleanupRecord) bool {
-	if debt.ReadmissionKey != nil && !check.readmission(debt) {
+	if debt.ReadmissionKey != nil && !check.readmission(debt, *debt.ReadmissionKey) {
 		return false
 	}
 	if debt.StopAction == nil && debt.RetireAction == nil {

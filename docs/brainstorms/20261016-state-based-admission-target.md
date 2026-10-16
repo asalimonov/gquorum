@@ -567,3 +567,24 @@ the report; Apply validates exact retirement binding. A concurrent courier chang
 can leave an old diagnostic but cannot authorize deletion or alter milestones.
 ReportCleanupStatus uses the existing managed.CleanupStatus callback value for
 internal composition; no new public application type is introduced.
+
+
+### Collection proof and progress transition (peer threads24–25, Task61)
+
+A consumed readmission batch may retire an already-retired cleanup identity.
+Collection accepts either retained exact completed retirement revision, including
+the later batch grant. The cleanup row preserves its first milestone and need not
+have ReadmissionKey equal to the receipt key. Validate the explicit receipt key
+against the exact target, retained admission/origin and whole-batch consumption;
+existing collection-lineage closure retains this proof through pruning/restore.
+
+The final ReadTopology pair/marker and bounded local diagnosis are prepared with
+scoped fixtures; schema3 cannot safely switch until Task78. Keep ReadView.Active,
+Views and the legacy topology query until that cutover. Legacy status now projects
+GroupProgress from Latest/Target/Active with Active.Version only for existing
+groups; never infer owner, Deleting or Blocked. No new compatibility entity.
+ReadProgress uses the existing safe read before cache-only decoration. Missing
+source/reporter provenance (including source zero) means nil Observation. Exact
+source/assignment and current cluster/node/member/process matching preserve
+original timestamps. Later local metadata may conservatively suppress an older
+valid sample. Complete observation producers are Task70; live scoped reads are78.

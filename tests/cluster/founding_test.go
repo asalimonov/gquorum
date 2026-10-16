@@ -88,7 +88,7 @@ func assertFoundedTopology(ctx context.Context, t *testing.T, c *Cluster) topolo
 			for _, group := range []string{topology.MetaGroupID, "demo", "workers"} {
 				found := false
 				for _, observed := range status.Groups {
-					if observed.GroupID == group && observed.LeaderID != 0 {
+					if observed.GroupID == group && observed.Observation != nil && observed.Observation.LeaderID != 0 {
 						found = true
 					}
 				}

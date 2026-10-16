@@ -968,13 +968,14 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaservice/progress.go`, `documents.go`, root `cluster_progress.go`/`cluster_reads.go`. **Target:** [T] §3.1–3.2, §8.3; contracts C1/C2. **Depends on:** 60. **Budget:** ≤550.
 
-- [ ] Implement ReadProgress through the existing quorum/apply query path, then decorate only returned rows from matching cached observations. Preserve reporter, received time and per-group source; nil means unknown. Never fan out for this API.
-- [ ] Implement final ReadTopology pair/marker and bounded Status operation headers (100), explicit truncation and CleanupSummary. Convert ClusterStatus.Groups to existing GroupProgress values, keeping raw GroupStatus only in Observation; adapt affected consumers together. Use the same complete declaration row builder and exact observation attachment rule for Status and ReadProgress; nil must never mean an omitted projection. Status and operation lookup remain local diagnosis without a quorum claim.
-- [ ] Test quorum loss/read cancellation, metadata-page coherence, stale successor samples, preserved timestamps, bounded projection and no remote read calls. Keep full lookup separate from page-limited projection.
+- [x] Implement ReadProgress through the existing quorum/apply query path, then decorate only returned rows from matching cached observations. Preserve reporter, received time and per-group source; nil means unknown. Never fan out for this API.
+- [x] Prepare the final ReadTopology pair/marker and bounded Status operation headers (100), explicit truncation and CleanupSummary. Convert ClusterStatus.Groups to existing GroupProgress values, keeping raw GroupStatus only in Observation; adapt affected consumers together. Use the same complete declaration row builder and exact observation attachment rule for Status and ReadProgress; nil must never mean an omitted projection. Status and operation lookup remain local diagnosis without a quorum claim.
+- [x] Keep ReadView.Active/Views/legacy topology query until Task78 (thread25 consensus); legacy rows project exact Latest/Target/Active, with no inferred scoped owner/Deleting/Blocked. Fold thread24 collection fix into this task: accept a later consumed readmission retirement revision for already-retired debt, preserving its first milestone and validating exact retained batch proof.
+- [x] Test quorum loss/read cancellation, metadata-page coherence, stale successor samples, preserved timestamps, bounded projection and no remote read calls. Keep full lookup separate from page-limited projection.
 
 **Verification**
 
-- [ ] Run service read/progress functional tests and `make test`.
+- [x] Run service read/progress functional tests and `make test`.
 
 ### Task 62: Replace single-current-operation controller ports
 
@@ -1362,6 +1363,8 @@ Do not run broad process performance/chaos campaigns by default; the focused deb
 
 
 ## NOT PLANNED CHANGES
+
+- Task61 / peer threads24–25: `scoped_cleanup_readmission.go` validates the supplied retirement key so a later consumed readmission can prove collection of an already-retired identity; first milestone remains unchanged. Existing closure retains the proof; pruning/restore regression and peer probe pass. Keep ReadView.Active/Views/legacy topology query until78 because placement67/scheduler69/join73 still consume them. Prepare final scoped pair/diagnosis without a new public compatibility type; legacy status projects exact declarations only. Observation producers finish70. All raw status consumers adapt to GroupProgress.Observation together.
 
 - Task60: `internal/metaengine/reads.go` extracts the unchanged authority-grant query arm to keep query dispatch within lint complexity limits after adding progress. New paging helpers live beside existing convergence structs in `progress_*.go`; no new public types or live schema activation. Focused query regressions and all units pass.
 

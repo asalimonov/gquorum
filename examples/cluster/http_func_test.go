@@ -46,7 +46,7 @@ func TestClusterStatusHTTPIncludesLeaderNodeNames(t *testing.T) {
 	cluster := &httpCluster{status: topology.ClusterStatus{
 		MetaLeaderID: 2, MetaLeaderNodeName: "worker-west",
 		Nodes:  []topology.NodeStatus{{Node: topology.Node{Name: "worker-west"}}},
-		Groups: []topology.GroupStatus{{GroupID: topology.MetaGroupID, HostNode: "worker-east", LeaderID: 2, LeaderNodeName: "worker-west"}},
+		Groups: []topology.GroupProgress{{GroupID: topology.MetaGroupID, Observation: &topology.GroupStatus{GroupID: topology.MetaGroupID, HostNode: "worker-east", LeaderID: 2, LeaderNodeName: "worker-west"}}},
 	}}
 	w := httptest.NewRecorder()
 	routes(httpNode{cluster: cluster}).ServeHTTP(w, httptest.NewRequest("GET", "/api/cluster/status", nil))
@@ -54,17 +54,14 @@ func TestClusterStatusHTTPIncludesLeaderNodeNames(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	var body struct {
-		MetaLeaderID       uint64 `json:"meta_leader_id"`
-		MetaLeaderNodeName string `json:"meta_leader_node_name"`
-		Groups             []struct {
-			LeaderID       uint64 `json:"leader_id"`
-			LeaderNodeName string `json:"leader_node_name"`
-		} `json:"groups"`
+		MetaLeaderID       uint64                   `json:"meta_leader_id"`
+		MetaLeaderNodeName string                   `json:"meta_leader_node_name"`
+		Groups             []topology.GroupProgress `json:"groups"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.MetaLeaderID != 2 || body.MetaLeaderNodeName != "worker-west" || len(body.Groups) != 1 || body.Groups[0].LeaderID != 2 || body.Groups[0].LeaderNodeName != "worker-west" {
+	if body.MetaLeaderID != 2 || body.MetaLeaderNodeName != "worker-west" || len(body.Groups) != 1 || body.Groups[0].Observation.LeaderID != 2 || body.Groups[0].Observation.LeaderNodeName != "worker-west" {
 		t.Fatal(w.Body.String())
 	}
 }

@@ -131,7 +131,7 @@ func testMetaAdmission(t *testing.T, electionDuringLearner bool) {
 				t.Fatalf("meta admission terminated before load growth: %+v", status.Operator)
 			}
 			for _, group := range status.Groups {
-				if group.GroupID == topology.MetaGroupID && slices.Contains(group.ConfState.Learners, member) {
+				if group.GroupID == topology.MetaGroupID && group.Observation != nil && slices.Contains(group.Observation.ConfState.Learners, member) {
 					learnerSeen = true
 					if electionDuringLearner && !elected {
 						oldLeader := ""

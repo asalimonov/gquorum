@@ -19,6 +19,8 @@ type Cluster interface {
 	// ReadTopology captures all three documents atomically after a safe
 	// barrier.
 	ReadTopology(context.Context) (topology.ReadView, error)
+	// ReadProgress confirms metadata and attaches only matching cached observations.
+	ReadProgress(context.Context, topology.ProgressQuery) (topology.ProgressPage, error)
 	// ReadAuthority confirms the current durable revocation obligations.
 	ReadAuthority(context.Context, topology.OperatorID) (topology.AuthorityStatus, error)
 	// WaitRevoked waits for a requested revocation to complete at its

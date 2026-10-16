@@ -135,7 +135,7 @@ func TestClusterStatusReportsAllViewVersionsAndUsesActiveGroups(t *testing.T) {
 	latest.Comment = "staged"
 	f.commit(t, latest, false)
 	s := readStatus(t, f.g)
-	if s.LatestVersion != 3 || s.TargetVersion != 2 || s.ActiveVersion != 1 || len(s.Groups) != 2 || s.Groups[1].GroupID != "work" {
+	if s.LatestVersion != 3 || s.TargetVersion != 2 || s.ActiveVersion != 1 || len(s.Groups) != 3 || s.Groups[2].GroupID != "work" {
 		t.Fatal(s)
 	}
 	if len(s.Placement) != 2 || s.Placement[0].Version != 1 || s.Placement[1].Version != 2 ||
@@ -175,7 +175,18 @@ type statusController struct {
 }
 
 func (s *statusController) Status(context.Context, string) (topology.GroupStatus, error) {
-	return s.value, s.err
+	value := s.value.Clone()
+	value.Reporter = topology.Identity{ClusterID: "cluster", NodeName: "n1", MemberID: 1, InstanceID: "status-process"}
+	value.ReporterReplicaID, value.SourceVersion = 1, 1
+	value.ReceivedAt = time.Unix(100, 0).UTC()
+	return value, s.err
+}
+func newObservedStatusFixture(t *testing.T) *mutationFixture {
+	t.Helper()
+	f := newMutationFixture(t)
+	f.command(t, metaengine.GrantSession{SessionID: "status", NodeName: "n1", InstanceID: "status-process", TTLSeconds: 30})
+	f.command(t, metaengine.AcquireLock{Key: "node/n1", SessionID: "status"})
+	return f
 }
 func (s *statusController) ReadNative(context.Context, string, ...storage.Identity) (topology.NativeState, error) {
 	if s.err == nil && !s.value.Found {
@@ -185,65 +196,67 @@ func (s *statusController) ReadNative(context.Context, string, ...storage.Identi
 }
 func TestClusterStatusReportsLeaders(t *testing.T) {
 	t.Parallel()
-	f := newMutationFixture(t)
+	f := newObservedStatusFixture(t)
 	c := &statusController{value: topology.GroupStatus{GroupID: "work", Found: true, LeaderID: 3, LeaderNodeName: "incorrect-caller-name", ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}, Progress: map[uint64]topology.ReplicaProgress{3: {Match: 7}}, LiveVoters: map[uint64]bool{3: true}}}
 	f.g.opts.LoadGroups = c
 	s := readStatus(t, f.g)
-	if s.Groups[1].LeaderID != 3 || s.Groups[1].LeaderNodeName != "n3" || c.value.LeaderNodeName != "incorrect-caller-name" {
+	if s.Groups[1].Observation.LeaderID != 3 || s.Groups[1].Observation.LeaderNodeName != "n3" || c.value.LeaderNodeName != "incorrect-caller-name" {
 		t.Fatal(s)
 	}
-	s.Groups[1].ConfState.Voters[0] = 99
-	s.Groups[1].Progress[3] = topology.ReplicaProgress{}
-	delete(s.Groups[1].LiveVoters, 3)
+	s.Groups[1].Observation.ConfState.Voters[0] = 99
+	s.Groups[1].Observation.Progress[3] = topology.ReplicaProgress{}
+	delete(s.Groups[1].Observation.LiveVoters, 3)
 	if !reflect.DeepEqual(c.value.ConfState.Voters, []uint64{1, 2, 3}) || c.value.Progress[3].Match != 7 || !c.value.LiveVoters[3] {
 		t.Fatal("status aliases caller controller")
 	}
 }
 func TestClusterStatusLeaderUnknown(t *testing.T) {
 	t.Parallel()
-	f := newMutationFixture(t)
+	f := newObservedStatusFixture(t)
 	c := &statusController{value: topology.GroupStatus{GroupID: "work", Found: true, LeaderID: 99, LeaderNodeName: "fabricated"}}
 	f.g.opts.LoadGroups = c
 	s := readStatus(t, f.g)
-	if s.MetaLeaderID != 0 || s.MetaLeaderNodeName != "" || s.Groups[1].LeaderID != 99 || s.Groups[1].LeaderNodeName != "" {
+	if s.MetaLeaderID != 0 || s.MetaLeaderNodeName != "" || s.Groups[1].Observation.LeaderID != 99 || s.Groups[1].Observation.LeaderNodeName != "" {
 		t.Fatal("changed observed identity", s)
 	}
 	c.value.LeaderID = 0
-	if got := readStatus(t, f.g).Groups[1]; got.LeaderID != 0 || got.LeaderNodeName != "" {
+	if got := readStatus(t, f.g).Groups[1].Observation; got.LeaderID != 0 || got.LeaderNodeName != "" {
 		t.Fatal("invented leader during election")
 	}
 	c.err = fault.ErrUnavailable
 	s = readStatus(t, f.g)
-	if s.Groups[1].LeaderID != 0 || s.Groups[1].ErrorCode != string(fault.Unavailable) || len(s.Observation.Groups) != 2 {
+	if s.Groups[1].Observation != nil || len(s.Observation.Groups) != 2 {
 		t.Fatal(s)
 	}
 }
 
 func TestClusterStatusLeaderNamesUseActiveIncludingCachedReads(t *testing.T) {
 	t.Parallel()
-	f := newMutationFixture(t)
+	f := newObservedStatusFixture(t)
 	staged := f.g.machine.Latest()
 	staged.Group("work").Replicas[2].ReplicaID = 4
 	staged.Group("work").NextReplicaID = 5
 	f.commit(t, staged, false)
 	c := &statusController{value: topology.GroupStatus{GroupID: "work", Found: true, LeaderID: 3}}
 	f.g.opts.LoadGroups = c
-	if got := readStatus(t, f.g).Groups[1]; got.LeaderNodeName != "n3" || got.LeaderID != 3 {
+	if got := readStatus(t, f.g).Groups[1].Observation; got.LeaderNodeName != "n3" || got.LeaderID != 3 {
 		t.Fatal("staged replacement hid the active leader", got)
 	}
 	c.value.LeaderID = 4
-	if got := readStatus(t, f.g).Groups[1]; got.LeaderNodeName != "" || got.LeaderID != 4 {
+	if got := readStatus(t, f.g).Groups[1].Observation; got.LeaderNodeName != "" || got.LeaderID != 4 {
 		t.Fatal("staged replacement was reported as an active leader", got)
 	}
 	c.err = errors.New("cached reads must not call controller")
-	f.g.lastLoadStatus["work"] = topology.GroupStatus{GroupID: "work", LeaderNodeName: "stale", LeaderID: 3}
+	cached, _ := c.Status(context.Background(), "work")
+	cached.LeaderID, cached.LeaderNodeName = 3, "stale"
+	f.g.lastLoadStatus["work"] = cached
 	s, err := f.g.CachedStatus(context.Background())
-	if err != nil || s.Groups[1].LeaderNodeName != "n3" {
+	if err != nil || s.Groups[1].Observation.LeaderNodeName != "n3" {
 		t.Fatal(s, err)
 	}
 	f.commit(t, staged, true)
 	s, err = f.g.CachedStatus(context.Background())
-	if err != nil || s.Groups[1].LeaderNodeName != "" || s.Groups[1].LeaderID != 3 {
+	if err != nil || s.Groups[1].Observation != nil {
 		t.Fatal("cached leader was attributed to its replacement", s, err)
 	}
 }
@@ -251,7 +264,7 @@ func TestClusterStatusNoRuntimeDeps(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
 	s := readStatus(t, f.g)
-	if s.MetaLeaderID != 0 || len(s.Groups) != 2 || s.Groups[0].ErrorCode != string(fault.Unavailable) || s.Groups[1].ErrorCode != string(fault.NoController) {
+	if s.MetaLeaderID != 0 || len(s.Groups) != 2 || s.Groups[0].Observation != nil || s.Groups[1].Observation != nil {
 		t.Fatal(s)
 	}
 }
@@ -268,7 +281,7 @@ func TestClusterStatusRejectsWrongGroupAndCanceledCalls(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
 	f.g.opts.LoadGroups = &statusController{value: topology.GroupStatus{GroupID: "other", LeaderID: 1}}
-	if s := readStatus(t, f.g); s.Groups[1].ErrorCode != string(fault.IdentityMismatch) || s.Groups[1].LeaderID != 0 {
+	if s := readStatus(t, f.g); s.Groups[1].Observation != nil {
 		t.Fatal(s)
 	}
 	ctx, cancel := context.WithCancel(context.Background())

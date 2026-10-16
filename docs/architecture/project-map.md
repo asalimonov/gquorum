@@ -140,7 +140,7 @@ return `MutationResult`):
 
 | Concern | Methods |
 | --- | --- |
-| Confirmed reads | `ReadBarrier`, `ReadTopology`, `ReadAuthority`, `WaitRevoked`, `ReadLockHolder` |
+| Confirmed reads | `ReadBarrier`, `ReadTopology`, `ReadProgress`, `ReadAuthority`, `WaitRevoked`, `ReadLockHolder` |
 | Observations/configuration | `Rules`, `IsLeader`, `Status`, `HealthObservation`, `Metrics`, `MetricsHistory`, `ParkedJoins` |
 | Documents | `Latest`, `Target`, `Active`, `Get`, `History`, `Watch` |
 | Approval/execution | `Stage`, `Plan`, `PlanFor`, `Approve`, `Operator`, `WaitOperator` |
@@ -517,6 +517,18 @@ Load scope uses desired/approved/proven assignments and retained cleanup. Ordina
 progress exposes milestone times and blockers, never authority grants or tokens;
 returned declarations and diagnostics are owned copies, observations remain nil
 until the service decorates the bounded page from cache.
+
+`READ_FRESHNESS`: Cluster.ReadProgress -> metaservice.ReadProgress -> existing
+safe read/apply -> private progress query -> returned-row-only cache decoration.
+No host calls. Attach only exact nonzero source, current process identity and
+approved/proven replica; preserve ReceivedAt and derive leader name from exact
+proven/approved ID. Local advancement can conservatively discard an older sample.
+ClusterStatus.Groups uses the same complete GroupProgress builder. Scoped local
+ProgressStatus bounds operation headers to100 without Blocks, preserving aggregate
+state and explicit truncation; cleanup summary counts pending physical evidence.
+Until Task78, LegacyGroupProgress projects Latest/Target/Active, with source only
+for existing Active groups and no inferred owner/Deleting/Blocked. ReadView.Active,
+legacy topology query and legacy operator diagnosis remain explicit cutover bridges.
 
 ### `internal/metastore` and `internal/authoritystore`
 
