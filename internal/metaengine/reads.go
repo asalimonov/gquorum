@@ -97,6 +97,8 @@ func (m *Machine) queryValueLocked(q QueryRequest) (any, error) {
 		return queryScopedAuthority(nil, q) // Scoped state replaces this adapter at Task 78.
 	}
 	switch q.Kind {
+	case "progress":
+		return queryScopedProgress(nil, *q.Progress) // Task 78 installs the active scoped state.
 	case "collection_check":
 		return queryScopedCollection(nil, q) // Task 78 installs scoped state under this same read lock.
 	case "plan_validation":
@@ -122,19 +124,23 @@ func (m *Machine) queryValueLocked(q QueryRequest) (any, error) {
 	case "authority_proof":
 		return m.queryAuthorityProofLocked(q)
 	case "authority_grant":
-		if q.Key != "" || q.OperatorID != "" || q.AuthorityKey == nil ||
-			q.AuthorityKey.ClusterID != m.latest.ClusterID || q.AuthorityKey.Revision == 0 ||
-			topology.ValidateID(q.AuthorityKey.GroupID) != nil {
-			return nil, fault.ErrInvalid
-		}
-		var grant *topology.AuthorityGrant
-		if record := m.authority.records[*q.AuthorityKey]; record != nil {
-			grant = &record.Grant
-		}
-		return grant, nil
+		return m.queryAuthorityGrantLocked(q)
 	default:
 		return nil, fault.ErrUnsupported
 	}
+}
+
+func (m *Machine) queryAuthorityGrantLocked(q QueryRequest) (*topology.AuthorityGrant, error) {
+	if q.Key != "" || q.OperatorID != "" || q.AuthorityKey == nil ||
+		q.AuthorityKey.ClusterID != m.latest.ClusterID || q.AuthorityKey.Revision == 0 ||
+		topology.ValidateID(q.AuthorityKey.GroupID) != nil {
+		return nil, fault.ErrInvalid
+	}
+	var grant *topology.AuthorityGrant
+	if record := m.authority.records[*q.AuthorityKey]; record != nil {
+		grant = &record.Grant
+	}
+	return grant, nil
 }
 
 func (m *Machine) queryPlanLocked(q QueryRequest) (PlanRead, error) {

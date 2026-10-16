@@ -502,6 +502,22 @@ regenerate immutable baselines to conceal incompatibility. See
 [cleanup evidence tests](../../internal/metaengine/cleanup_evidence_test.go),
 [physical baseline](../testing/api-baseline-physical.md).
 
+`KB_PROGRESS_PAGE`: scoped `Machine.Progress`/`progressLocked` and private
+`progress` Query share one FSM read lock, AppliedIndex and complete declaration
+builders. Schema3 adapters deliberately return Unsupported until Task78. Pages
+order group, node, operation block, exact cleanup identity; one total budget
+(default100, max1000) counts blocks rather than headers. Repeated headers retain
+full aggregate State/TotalBlocks and mark BlocksTruncated. Versioned base64url JSON
+cursors bind cluster/filter hashes and an exclusive tuple key, not a snapshot or
+limit. New records behind that key require a fresh scan. Group/node OperationID
+filters use their current owner; operation blocks use their own source/approved
+declarations and exact step endpoints; cleanup filters use its origin and exact
+identity. Node scope for `_meta` includes its node catalog, even excluded nodes.
+Load scope uses desired/approved/proven assignments and retained cleanup. Ordinary
+progress exposes milestone times and blockers, never authority grants or tokens;
+returned declarations and diagnostics are owned copies, observations remain nil
+until the service decorates the bounded page from cache.
+
 ### `internal/metastore` and `internal/authoritystore`
 
 | Package | Entities / selected methods / contracts |

@@ -956,13 +956,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaengine/progress.go`, `reads.go`, topology cursor helpers if needed. **Target:** [T] §3.2, §7.1–7.2, §12 “Progress read”; contract C2. **Depends on:** 15, 40–42, 52–53. **Budget:** ≤550.
 
-- [ ] Implement Machine.Progress/progressLocked with one FSM read lock and AppliedIndex. Page the union group/node/operation-block/cleanup in target order; total row/block budget, not one independent limit per array.
-- [ ] Use versioned base64url JSON cursors bound to filter hashes. AND filters over actual scope, retain deleted-group evidence, repeat operation headers with TotalBlocks/BlocksTruncated while aggregate state covers all blocks.
-- [ ] Test a huge single operation, limits 1/100/1000, malformed/mismatched cursors, empty results, concurrent changes between pages, ownership copies and insertion behind cursor. Do not promise a frozen export or add server cursor state.
+- [x] Implement Machine.Progress/progressLocked with one FSM read lock and AppliedIndex. Page the union group/node/operation-block/cleanup in target order; total row/block budget, not one independent limit per array.
+- [x] Use versioned base64url JSON cursors bound to filter hashes. AND filters over actual scope, retain deleted-group evidence, repeat operation headers with TotalBlocks/BlocksTruncated while aggregate state covers all blocks.
+- [x] Test a huge single operation, limits 1/100/1000, malformed/mismatched cursors, empty results, concurrent changes between pages, ownership copies and insertion behind cursor. Do not promise a frozen export or add server cursor state.
 
 **Verification**
 
-- [ ] Run paging/progress units and `make test`.
+- [x] Run paging/progress units and `make test`.
 
 ### Task 61: Expose progress reads and bounded local diagnosis
 
@@ -1362,6 +1362,8 @@ Do not run broad process performance/chaos campaigns by default; the focused deb
 
 
 ## NOT PLANNED CHANGES
+
+- Task60: `internal/metaengine/reads.go` extracts the unchanged authority-grant query arm to keep query dispatch within lint complexity limits after adding progress. New paging helpers live beside existing convergence structs in `progress_*.go`; no new public types or live schema activation. Focused query regressions and all units pass.
 
 - Task59 / peer thread23: reuse AuthorityRead's monotonic retained-member hint for restricted collection/status requests when participation headers are zero or lag the journal pin. Add the narrow internal Machine.ValidateCleanupCourier nil adapter until78; no new query/transport override. ReportCleanupStatus is exported only inside internal/metaservice and consumes existing managed.CleanupStatus so Node can wire the concrete callback without another public data type. The tracked amendment records these precisions.
 
