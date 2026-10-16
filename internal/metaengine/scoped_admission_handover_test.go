@@ -271,7 +271,7 @@ func TestScopedAdmissionHandoverIgnoresCompletedMetadataSibling(t *testing.T) {
 	op.Plan.Steps = append(op.Plan.Steps, topology.Step{Seq: 3, Kind: topology.StepPrepareReplica,
 		GroupID: "shard0", NodeName: "n1", ReplicaID: 1})
 	s.Groups[0].SourceVersion, s.Groups[0].Declaration, s.Groups[0].Owner = 2, s.Target.MetaGroup(), ""
-	s.Nodes[1].Owner, s.Admissions[0].State = "", AdmissionLearner
+	s.Nodes[1].Owner, s.Admissions[0].State = "", AdmissionCompleted
 	var err error
 	s.indexes, err = prepareScopedGraph(&s, s.Rules)
 	if err != nil {

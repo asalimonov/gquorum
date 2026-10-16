@@ -815,3 +815,17 @@ Verified
 - Focused topology units pass, /tmp/gquorum-correction13-focused.log. Corrected a test constant name and supplied explicit live metadata observations required by the honest flat-plan regression.
 - make test: 1375/1375 pass, 9.659s; test-reports/unit/20261016T064344.057397Z-5gxfti5o/report.md. Staged lint and diff checks pass, /tmp/gquorum-correction13-lint.log. 144 changed handwritten Go lines including tests, within 550. No concurrency changes or new race/process run.
 - Next: Correction 14 for role-aware admission prefixes, then restore prepared Task 34. Next five-commit peer/dead-code checkpoint is commit 50. Goal remains unfinished.
+
+## Correction 14 — Validate admission role history and completion ordering
+Date: 2026-10-16. Commit: this correction commit (implementation/correction commit 47).
+
+Implemented
+- Applied thread-12 consensus: current native role is separate from historical promotion. Exact retained Demote issuers participate in the same ordered origin proof as Prepare/Add/Promote. A promoted voter targeting learner needs an exact demotion; a learner cannot borrow an unconsumed demotion to justify re-promotion. Immutable same-version retries share the pre-plan role.
+- An exact metadata checkpoint initializes role once. Older effects preserve milestones without overwriting newer role; a checkpoint without this member supplies no filter. Covered terminal prefixes retain binding/order checks while convergence substitutes for compacted receipts. Live admissions covered by their origin's convergence are refused; metadata completion must complete them atomically. Updated the accepted amendment and corrected completed-sibling/learner fixtures to model that invariant.
+- The real approval regression exposed a second gate behind the reviewed defect: shape validation required a converged member for Demote. Scoped shape now accepts the exact approved unconverged identity, retaining voter guards and admission proof. Flat behavior is unchanged; unapproved member/foreign host cases refuse. Recorded this composed-path correction in the peer thread.
+- Regressions cover demotion with/without transfer, missing/duplicate/unconsumed demotion, intermediate Demote-only owners and re-promotion, exact checkpoint ordering/absent member/compacted completion/live refusal, older issued Demote, real approval and promoted immutable retry. Test grant helpers now replace exact floors and sort demotion targets instead of constructing contradictory catalogs.
+
+Verified
+- Focused topology/metaengine units pass, /tmp/gquorum-correction14-focused.log. make test: 1393/1393 pass, 9.450s; test-reports/unit/20261016T065242.515385Z-wh7t2ew0/report.md.
+- Staged lint passes after operand-order corrections, /tmp/gquorum-correction14-lint.log. git diff --check passes. 359 changed handwritten Go lines including tests, within 550. Pure validation/preparation changes; no new race/process run claimed.
+- Thread-12 findings are corrected. Restore prepared Task 34 next, preserving both correction sections and the admission completion rule. Next peer/dead-code checkpoint is commit 50. Goal remains unfinished.

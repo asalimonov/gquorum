@@ -196,7 +196,10 @@ func (v *planShapeValidator) validateReplicaRole(current Step) error {
 		StepPromoteVoter:
 		return validateDesiredStepReplica(current, next)
 	case StepDemoteVoter:
-		if old == nil || next == nil || next.Role != ReplicaLearner {
+		// A scoped successor may demote an approved member whose admission has
+		// not converged yet. Voter guards and admission history prove its role.
+		if next == nil || next.Role != ReplicaLearner || old == nil &&
+			(v.plan.Blocks == nil || exactPlanReplica(v.input.Approved, current) == nil) {
 			return fmt.Errorf("step %d does not authorize a retained learner", current.Seq)
 		}
 	case StepRemoveReplica, StepStopReplica, StepCleanupReplicaState:

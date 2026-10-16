@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -50,6 +51,7 @@ func admissionPrefixReceipt(s *scopedState, operation int, seq int) {
 	action := topology.AuthorizedStep{OperatorID: topology.OperatorID(op.Status.ID), Version: op.Status.Version,
 		Attempt: op.Status.Attempt, StepSeq: seq, GroupID: step.GroupID, NodeName: step.NodeName,
 		ReplicaID: step.ReplicaID, Kind: step.Kind, ExpectedVotersDigest: step.ExpectedVotersDigest,
+		TransferNodeName: step.TransferNodeName, TransferReplicaID: step.TransferReplicaID,
 		ResultVotersDigest: step.ResultVotersDigest}
 	resource := topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: topology.MetaGroupID}
 	if step.Kind == topology.StepPrepareReplica {
@@ -59,12 +61,23 @@ func admissionPrefixReceipt(s *scopedState, operation int, seq int) {
 		GroupID: step.GroupID, Revision: uint64(len(s.AuthorityRecords) + 3)}, Purpose: topology.AuthorityEffect,
 		OperatorID: action.OperatorID, Action: &action, Resources: []topology.AuthorityResource{resource},
 		Targets: []topology.AuthorityTarget{{NodeName: step.NodeName, MemberID: step.ReplicaID, ReplicaID: step.ReplicaID}}}
+	if step.TransferReplicaID != 0 {
+		grant.Targets = append(grant.Targets, topology.AuthorityTarget{NodeName: step.TransferNodeName,
+			MemberID: s.Target.MemberID(step.TransferNodeName), ReplicaID: step.TransferReplicaID})
+	}
+	slices.SortFunc(grant.Targets, topology.AuthorityTarget.Compare)
 	receipts := fixtureEffectReceipts(grant)
 	if resource.Kind == topology.AuthorityGroup {
 		receipts[0].AppliedIndex = 5
 	}
 	s.AuthorityRecords = append(s.AuthorityRecords, scopedAuthorityRecord{Class: "execution",
 		authorityRecord: authorityRecord{Grant: grant, Effects: receipts}})
+	for i, floor := range s.AuthorityFloors {
+		if floor.Resource == resource {
+			s.AuthorityFloors[i].Key = grant.Key
+			return
+		}
+	}
 	s.AuthorityFloors = append(s.AuthorityFloors, resourceFloor{Resource: resource, Key: grant.Key})
 }
 
@@ -168,13 +181,14 @@ func TestScopedAdmissionEarlierConvergenceSuppliesOmittedPrefix(t *testing.T) {
 	s.Groups[0].SourceVersion, s.Groups[0].Declaration = 2, s.History[1].MetaGroup()
 	s.Operations[1].Plan.Blocks[0].SourceVersion = 2
 	s.Admissions[0].State = AdmissionLearner
-	if _, err := prepareScopedGraph(&s, s.Rules); err != nil {
-		t.Fatal("earlier validated exact member checkpoint refused", err)
+	if _, err := prepareScopedGraph(&s, s.Rules); !errors.Is(err, fault.ErrUnreadable) {
+		t.Fatal("live admission survived its metadata convergence", err)
 	}
 	// Once durably converged, the checkpoint can replace the admission barrier
 	// root; restore must not require already-compacted preparation receipts.
 	s.Groups[0].SourceVersion, s.Groups[0].Declaration, s.Groups[0].Owner = 3, s.Target.MetaGroup(), ""
 	s.Nodes[1].Owner = ""
+	s.Admissions[0].State = AdmissionCompleted
 	s.Operations[1].Status.State, s.Operations[1].Status.Blocks[0].State =
 		topology.OperationSucceeded, topology.OperationSucceeded
 	if _, err := prepareScopedGraph(&s, s.Rules); err != nil {
@@ -197,7 +211,7 @@ func TestScopedAdmissionSuffixKeepsUnrelatedStepOrdering(t *testing.T) {
 		t.Fatal("unrelated earlier work interrupted the proved member prefix")
 	}
 	s.Target.MetaGroup().Replicas[1].Role = topology.ReplicaVoter
-	p.learner, p.promoted = true, true
+	p.learner, p.promoted, p.nativeRole = true, true, topology.ReplicaVoter
 	if !p.validSuffix(s.Admissions[0], topology.Plan{}, s.Target) {
 		t.Fatal("proven voter required a fabricated fresh promotion")
 	}

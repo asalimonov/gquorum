@@ -7,7 +7,11 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-type admissionProgress struct{ prepared, learner, promoted bool }
+type admissionProgress struct {
+	prepared, learner, promoted bool
+	nativeRole                  topology.ReplicaRole
+	checkpoint                  uint64
+}
 
 func compareAdmissionOperations(a, b *topology.Operation) int {
 	return cmp.Or(cmp.Compare(a.Status.Version, b.Status.Version), cmp.Compare(a.Status.Attempt, b.Status.Attempt))
@@ -23,10 +27,13 @@ func (p *admissionProgress) consume(kind topology.StepKind) {
 		p.prepared = true
 	case topology.StepAddLearner:
 		p.learner = true
+		p.nativeRole = topology.ReplicaLearner
 	case topology.StepPromoteVoter:
 		p.promoted = true
-	default:
-		return
+		p.nativeRole = topology.ReplicaVoter
+	case topology.StepDemoteVoter:
+		p.nativeRole = topology.ReplicaLearner
+	default: // Other effects do not change admission milestones or role.
 	}
 }
 
@@ -40,10 +47,21 @@ func scopedAdmissionProgress(a AdmissionRecord, current *topology.Operation,
 	if !valid {
 		return progress, false
 	}
+	progress.includeCheckpoint(a, index)
+	if progress.checkpoint >= chain[0].Status.Version && !a.State.terminal() {
+		return admissionProgress{}, false // Metadata completion must complete its live admissions atomically.
+	}
+	var version uint64
+	beforeVersion := progress
 	for _, operation := range chain {
-		progress.includeCheckpoint(a, index)
+		if version != operation.Status.Version {
+			version, beforeVersion = operation.Status.Version, progress
+		}
 		approved := index.documents[operation.Status.Version]
-		if approved.MemberID(a.NodeName) != a.MemberID || !progress.validSuffix(a, operation.Plan, approved) {
+		// Immutable same-version retries share the pre-plan role. Covered terminal
+		// plans already passed structural validation; convergence subsumes their effects.
+		if approved.MemberID(a.NodeName) != a.MemberID || operation.Status.Version > progress.checkpoint &&
+			!beforeVersion.validSuffix(a, operation.Plan, approved) {
 			return admissionProgress{}, false
 		}
 		progress.includeEffects(a, operation, index, catalog)
@@ -89,13 +107,11 @@ func admissionPrefixOperations(a AdmissionRecord, current *topology.Operation,
 }
 
 func admissionPrefixKind(kind topology.StepKind) bool {
-	return kind == topology.StepPrepareReplica || kind == topology.StepAddLearner || kind == topology.StepPromoteVoter
+	return kind == topology.StepPrepareReplica || kind == topology.StepAddLearner ||
+		kind == topology.StepPromoteVoter || kind == topology.StepDemoteVoter
 }
 
 func (p *admissionProgress) includeCheckpoint(a AdmissionRecord, index *scopedIndexes) {
-	if a.ReadmissionOperatorID == "" {
-		return
-	}
 	checkpoint := index.groups[topology.MetaGroupID]
 	if checkpoint == nil || checkpoint.Declaration == nil {
 		return
@@ -105,7 +121,8 @@ func (p *admissionProgress) includeCheckpoint(a AdmissionRecord, index *scopedIn
 	for _, replica := range checkpoint.Declaration.Replicas {
 		if replica.NodeName == a.NodeName && replica.ReplicaID == a.MemberID {
 			p.prepared, p.learner = true, true
-			p.promoted = p.promoted || replica.Role == topology.ReplicaVoter
+			p.promoted = replica.Role == topology.ReplicaVoter
+			p.nativeRole, p.checkpoint = replica.Role, checkpoint.SourceVersion
 		}
 	}
 }
@@ -125,7 +142,11 @@ func (p *admissionProgress) includeEffects(a AdmissionRecord, operation *topolog
 			}) {
 			continue
 		}
+		role := p.nativeRole
 		p.consume(step.Kind)
+		if operation.Status.Version <= p.checkpoint {
+			p.nativeRole = role // Historical milestones cannot overwrite newer convergence.
+		}
 	}
 }
 
@@ -137,10 +158,8 @@ func (p admissionProgress) validSuffix(a AdmissionRecord, plan topology.Plan, ap
 		}
 	}
 	steps := plan.Steps
-	if role == topology.ReplicaVoter && p.promoted && !containsAdmissionStep(a, steps, topology.StepPromoteVoter) {
-		return !slices.ContainsFunc(steps, func(step topology.Step) bool {
-			return step.Kind != topology.StepTransferLeader && admissionStep(a, step)
-		})
+	if p.nativeRole == topology.ReplicaVoter {
+		return validAdmittedVoterSuffix(a, steps, role)
 	}
 	prefix, valid := p.suffixPrefix(a, steps)
 	if !valid {
@@ -158,6 +177,20 @@ func (p admissionProgress) validSuffix(a AdmissionRecord, plan topology.Plan, ap
 	grammar := append(slices.Clone(steps[:position]), prefix...)
 	grammar = append(grammar, steps[position:]...)
 	return topology.ValidAdmissionSequence(grammar, a.NodeName, a.MemberID, role)
+}
+
+func validAdmittedVoterSuffix(a AdmissionRecord, steps []topology.Step, role topology.ReplicaRole) bool {
+	demoted := false
+	for _, step := range steps {
+		if step.Kind == topology.StepTransferLeader || !admissionStep(a, step) {
+			continue
+		}
+		if role != topology.ReplicaLearner || demoted || step.Kind != topology.StepDemoteVoter {
+			return false
+		}
+		demoted = true
+	}
+	return demoted == (role == topology.ReplicaLearner)
 }
 
 func containsAdmissionStep(a AdmissionRecord, steps []topology.Step, kind topology.StepKind) bool {

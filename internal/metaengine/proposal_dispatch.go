@@ -90,7 +90,7 @@ func applyScopedProposal(state *scopedState, _ uint64, kind ProposalKind,
 		return proposalApplication{}, err
 	}
 	// Admission, required-stop handover and revocation must be prepared together
-	// before installation (Tasks 33–35); validation alone grants no authority.
+	// before installation (Tasks 34–35); validation alone grants no authority.
 	return proposalApplication{}, fault.ErrUnsupported
 }
 

@@ -103,30 +103,13 @@ func TestScopedAdmissionLearnerRequiresItsRecordedNativeEffect(t *testing.T) {
 	t.Parallel()
 	s := scopedAdmissionFixture()
 	op := &s.Operations[0]
-	op.Status.State, op.Status.Blocks[0].State = topology.OperationSucceeded, topology.OperationSucceeded
-	op.Status.Blocks[0].CurrentStep = 2
-	s.Groups[0].SourceVersion, s.Groups[0].Declaration, s.Groups[0].Owner = 2, s.Target.MetaGroup(), ""
-	s.Nodes[1] = nodeConvergence{NodeName: "n2", Declaration: s.Target.Node("n2"), SourceVersion: 2,
-		MemberID: 2, CompletedAt: op.UpdatedAt}
+	op.Plan.Steps = append(op.Plan.Steps, topology.Step{Seq: 3, Kind: topology.StepTransferLeader,
+		GroupID: topology.MetaGroupID, NodeName: "n1", ReplicaID: 1})
+	op.Plan.Blocks[0].Steps = []int{1, 2, 3}
+	op.Status.Blocks[0].CurrentStep, op.Status.Blocks[0].TotalSteps = 3, 3
 	s.Admissions[0].State = AdmissionLearner
-	for _, step := range op.Plan.Steps {
-		action := topology.AuthorizedStep{OperatorID: "exec-v2-a1", Version: 2, Attempt: 1, StepSeq: step.Seq,
-			GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID, Kind: step.Kind,
-			ExpectedVotersDigest: step.ExpectedVotersDigest, ResultVotersDigest: step.ResultVotersDigest}
-		resource := topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: topology.MetaGroupID}
-		if step.Kind == topology.StepPrepareReplica {
-			resource.Kind, resource.NodeName = topology.AuthorityHost, "n2"
-		}
-		grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: s.Target.ClusterID, GroupID: step.GroupID, Revision: uint64(step.Seq + 2)},
-			Purpose: topology.AuthorityEffect, OperatorID: action.OperatorID, Action: &action,
-			Resources: []topology.AuthorityResource{resource}, Targets: []topology.AuthorityTarget{{NodeName: "n2", MemberID: 2, ReplicaID: 2}}}
-		receipts := fixtureEffectReceipts(grant)
-		if resource.Kind == topology.AuthorityGroup {
-			receipts[0].AppliedIndex = 5
-		}
-		s.AuthorityRecords = append(s.AuthorityRecords, scopedAuthorityRecord{Class: "execution", authorityRecord: authorityRecord{Grant: grant, Effects: receipts}})
-		s.AuthorityFloors = append(s.AuthorityFloors, resourceFloor{Resource: resource, Key: grant.Key})
-	}
+	admissionPrefixReceipt(&s, 0, 1)
+	admissionPrefixReceipt(&s, 0, 2)
 	if _, err := prepareScopedGraph(&s, s.Rules); err != nil {
 		t.Fatal(err)
 	}

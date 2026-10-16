@@ -579,6 +579,14 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 - [x] Preserve the existing planner suffix for an already-native scoped replacement. Never repeat its consumed Prepare/Add; keep legacy flat construction until activation.
 - [x] Verify forged flat omission refusal, honest flat construction, scoped native learner/voter successors, focused units, staged lint and make test.
 
+### Correction 14: Validate admission role history and checkpoint ordering
+
+**Files:** scoped admission prefix validation, scoped demotion shape, dispatch comment and focused tests. **Target:** state-based admission amendment; peer thread 12 finding 1 and round 3. **Budget:** ≤550 Go lines.
+
+- [x] Track current native role separately from historical promotion. Include exact Demote issuers in ordered prefix provenance; reject facts before the origin. Require the exact desired role-change suffix. Permit scoped demotion of an exact approved unconverged member while retaining its voter guards.
+- [x] Initialize role once from an exact checkpoint; replay only newer consumed role changes, preserving promotion history. Refuse live admissions covered by metadata convergence; completed records still need succeeded blocks. Preserve immutable retry grammar.
+- [x] Test demotion/transfer/zero-step refusal, multiple owners and re-promotion, checkpoint chronology/compaction/absent members, earlier Demote issuance, actual approval handover and retry. Run focused units, staged lint and make test.
+
 ### Task 34: Install scoped approvals and required-stop handover atomically
 
 **Files:** `internal/metaengine` approval/debt/convergence helpers and tests. **Target:** [T] §5.2, §6.2, §7.1, §12 “Approve”; accepted admission amendment. **Depends on:** 29–33. **Budget:** estimated 350–530 changed Go lines, ceiling 550.

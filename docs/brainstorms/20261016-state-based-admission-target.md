@@ -276,3 +276,22 @@ the origin cannot follow the earliest retained prefix fact. Prefix operations
 must be ordered between origin and current owner with the same approved member
 and valid admission work. Facts issued by the current owner are suffix evidence.
 Do not invent a receipt for a pending handover or add another provenance ledger.
+
+## Admission role history and completion (`FI_ADMISSION_ROLE`)
+
+Peer thread 12 clarifies that historical promotion and current native role are
+separate evidence. Ordered exact-member Prepare/Add/Promote/Demote issuers must
+not precede the origin. Validate each version's suffix against its pre-plan role;
+immutable retries use that same role. A native voter targeting learner needs
+exactly one Demote; targeting voter allows only leadership transfer. A learner
+needs the existing admission/promotion grammar with only proven prefixes omitted.
+
+Initialize role once from an exact validated metadata checkpoint. Older consumed
+facts retain historical milestones but cannot overwrite its role; only newer
+consumed effects change role. A checkpoint without this member supplies neither
+role nor a version filter. Covered terminal plans still need retained same-member
+bindings and ordered provenance, while convergence replaces their prefix proof.
+A live admission cannot have convergence at or after its origin version: metadata
+completion, including zero-step approval, completes its admissions atomically.
+Completed admissions still require a succeeded metadata block. Approval handover
+uses source checkpoints, never the candidate's prospective convergence.
