@@ -104,19 +104,28 @@ func (sm *topologySM) authorityDocumentsLocked() []topology.Document {
 }
 
 func (sm *topologySM) authorityTargetLocked(group, node string, replica uint64) (topology.AuthorityTarget, error) {
-	for _, doc := range sm.authorityDocumentsLocked() {
-		if r := documentReplica(doc, group, replica); r != nil && r.NodeName == node && doc.MemberID(node) != 0 {
-			return topology.AuthorityTarget{NodeName: node, MemberID: doc.MemberID(node), ReplicaID: replica}, nil
+	return authorityTargetFrom(sm.authorityDocumentsLocked(), sm.authority,
+		topology.AuthorizedStep{GroupID: group, NodeName: node, ReplicaID: replica})
+}
+
+func authorityTargetFrom(documents []topology.Document, catalog authorityCatalog,
+	action topology.AuthorizedStep) (topology.AuthorityTarget, error) {
+	for _, doc := range documents {
+		if r := documentReplica(doc, action.GroupID, action.ReplicaID); r != nil &&
+			r.NodeName == action.NodeName && doc.MemberID(action.NodeName) != 0 {
+			return topology.AuthorityTarget{NodeName: action.NodeName,
+				MemberID: doc.MemberID(action.NodeName), ReplicaID: action.ReplicaID}, nil
 		}
 	}
 	var target topology.AuthorityTarget
 	var revision uint64
-	for _, record := range sm.authority.records {
-		if record.Grant.Key.GroupID != group {
+	for _, record := range catalog.records {
+		if record.Grant.Key.GroupID != action.GroupID {
 			continue
 		}
 		for _, candidate := range record.Grant.Targets {
-			if candidate.NodeName == node && candidate.ReplicaID == replica && record.Grant.Key.Revision > revision {
+			if candidate.NodeName == action.NodeName && candidate.ReplicaID == action.ReplicaID &&
+				record.Grant.Key.Revision > revision {
 				target, revision = candidate, record.Grant.Key.Revision
 			}
 		}

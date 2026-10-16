@@ -75,15 +75,38 @@ func (sm *topologySM) applyProposal(index uint64, kind ProposalKind,
 
 func applyScopedProposal(state *scopedState, index uint64, kind ProposalKind,
 	body json.RawMessage) (proposalApplication, error) {
-	if state == nil || kind != "begin_operation" {
+	if state == nil {
 		err := fault.New(fault.Unsupported, fmt.Sprintf("meta: unavailable proposal %q", kind), nil)
 		return proposalApplication{}, err
 	}
-	var p BeginOperationProposal
-	if err := json.Unmarshal(body, &p); err != nil {
-		return proposalApplication{}, err
+	switch kind {
+	case "begin_operation":
+		var p BeginOperationProposal
+		if err := json.Unmarshal(body, &p); err != nil {
+			return proposalApplication{}, err
+		}
+		return state.applyBeginOperation(index, p)
+	case KindBeginEffect:
+		var p BeginEffectProposal
+		if err := json.Unmarshal(body, &p); err != nil {
+			return proposalApplication{}, err
+		}
+		return state.applyBeginEffect(index, p)
+	case KindGrantTransfer:
+		var p GrantTransferProposal
+		if err := json.Unmarshal(body, &p); err != nil {
+			return proposalApplication{}, err
+		}
+		return state.applyGrantTransfer(index, p)
+	case KindBeginReadmissionAuthority:
+		var p BeginReadmissionAuthority
+		if err := json.Unmarshal(body, &p); err != nil {
+			return proposalApplication{}, err
+		}
+		return state.applyBeginReadmissionAuthority(index, p)
+	default:
+		return proposalApplication{}, fault.ErrUnsupported
 	}
-	return state.applyBeginOperation(index, p)
 }
 
 func applyIndexedJSONProposal[P any](index uint64, body json.RawMessage, operation string,

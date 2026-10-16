@@ -918,3 +918,16 @@ Verified
 - make test: 1453/1453 pass, 8.288s; test-reports/unit/20261016T083210.000744Z-837z3oi7/report.md. Final focused metaengine tests pass after lint-only helper extraction/preallocation; /tmp/gquorum-task38-focused.log.
 - Staged lint passes, /tmp/gquorum-task38-lint.log. Regressions cover independent progress beside pending fences, detached-to-required host conflict, issued creation/deletion fences, exact readmission preservation beyond the old capacity, original batch attribution, aggregate status, serialization/restore and atomic late refusal. Diff checks pass; no new race/Docker run claimed.
 - Next is Task 39 effect authorization/issuance. Peer/dead-code review remains due after commit 55, two commits from this one. No tasks were added or renumbered.
+
+## Task 39 — Scoped authorization and immutable effect issuance
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 54).
+
+Implemented
+- Exact block owner/cursor/action authorization uses pinned operation versions; independently advanced Target does not invalidate surviving work. Load preparation/founding verifies every current host/member binding and exact consumed metadata preparation or convergence, even without an explicit dependency edge. Metadata removal checks scoped load evacuation/readmission proof.
+- Added isolated effect, direct-transfer and whole-batch readmission issuance with atomic full-graph validation, relevant host/native prerequisites, immutable grant reuse and exact floors. Transfer uses the group's source version; retained readmission uses its original admission identity across Target advancement. Existing target/resource resolution and transfer coalescing are reused; no public API expansion.
+- Five-gate audit: issuance's global revocation loop is replaced by resource obligations; pendingCost admission is absent from scoped issuance/revocation; close-all successor and inherited-all obligations were replaced in Task 38; the new completion preparation in Task 40 uses these same scoped prerequisites, while the old success gate remains confined to the legacy path until Task 78. Receipt/milestone installation belongs to existing Task 42; detached-action authorization to Task 43. No live proposal/persistence cutover was made early.
+
+Verified
+- make test: 1474/1474 pass, 8.330s; test-reports/unit/20261016T085512.401525Z-ts3h31au/report.md. Final focused metaengine tests pass after small lint refactors; /tmp/gquorum-task39-focused.log. Staged lint passes, /tmp/gquorum-task39-lint.log; diff checks pass.
+- Regressions cover older operation issuance/restore beside unrelated pending fences, forged complete tuples versus retryable apply lag, fenced refusal without mutation, source-specific transfer/coalescing, ready/issued/consumed admission, every founding voter, exact current bindings, readmission batch reuse and atomic refusal. These are pure FSM changes; no new race/Docker run claimed.
+- Next is existing Task 40; its commit reaches the five-commit review checkpoint (55). No tasks were added or renumbered.

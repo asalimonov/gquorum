@@ -673,13 +673,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaengine/authority_issue.go`, `authorization.go`, `authority_receipts.go`, transfer/readmission authority helpers. **Target:** [T] §2, §6.4, §12 “authorizeLocked”. **Depends on:** 34–38. **Budget:** ≤550.
 
-- [ ] Authorize exact operation/attempt/version/step/action/group/host/replica and current block cursor/owner; use the operation's pinned document. Remove global Target.Version equality and all-revocations-complete requirements.
-- [ ] Check only required native/host floors and relevant unfinished prerequisites, including transfer/readmission paths. Remove remaining pending-record admission gates while retaining exact grant reuse and receiver identity checks. Mandatory load admission checks current approved bindings plus exact metadata convergence or consumed preparation; missing proof waits with Unavailable, including when no dependency edge exists.
-- [ ] Test old B operation remains authorized after A advances Target, stale tuple/floor fails, apply lag remains retryable and B can issue effects with A's pending fences. Catalogue all five target-listed gates as removed/scoped, not just the obvious issuance loop.
+- [x] Authorize exact operation/attempt/version/step/action/group/host/replica and current block cursor/owner; use the operation's pinned document. Remove global Target.Version equality and all-revocations-complete requirements.
+- [x] Check only required native/host floors and relevant unfinished prerequisites, including transfer/readmission paths. Remove remaining pending-record admission gates while retaining exact grant reuse and receiver identity checks. Mandatory load admission checks current approved bindings plus exact metadata convergence or consumed preparation; missing proof waits with Unavailable, including when no dependency edge exists.
+- [x] Test old B operation remains authorized after A advances Target, stale tuple/floor fails, apply lag remains retryable and B can issue effects with A's pending fences. Catalogue all five target-listed gates as removed/scoped, not just the obvious issuance loop.
 
 **Verification**
 
-- [ ] Run authorization/effect/transfer units and `make test`.
+- [x] Run authorization/effect/transfer units and `make test`.
 
 ### Task 40: Validate block transitions and prepare group convergence
 

@@ -5,7 +5,7 @@ import "github.com/asalimonov/gquorum/topology"
 // The caller holds the apply/read lock. All returned planning declarations are
 // owned copies; the collector only reads validated immutable evidence.
 func (s *scopedState) planningCollector() planningCollector {
-	evidence := planningEvidence{authority: newAuthorityCatalog(), allocations: make(map[string]uint64),
+	evidence := planningEvidence{authority: s.authorityCatalog(), allocations: make(map[string]uint64),
 		admissions: s.Admissions, cleanup: s.Cleanup, operations: s.indexes.operations}
 	for _, doc := range s.indexes.documents {
 		evidence.documents = append(evidence.documents, doc)
@@ -13,14 +13,23 @@ func (s *scopedState) planningCollector() planningCollector {
 	for _, allocation := range s.Allocations {
 		evidence.allocations[allocation.GroupID] = allocation.NextReplicaID
 	}
-	for key, record := range s.indexes.grants {
-		evidence.authority.records[key] = &record.authorityRecord
-	}
-	for _, floor := range s.AuthorityFloors {
-		evidence.authority.floors[floor.Resource] = floor.Key
-	}
 	return planningCollector{evidence: evidence, owners: make(map[planningReplicaKey]*planningReplica),
 		founding: make(map[string]bool)}
+}
+
+// Borrowed under the FSM lock. Mutation preparation must clone this catalog.
+func (s *scopedState) authorityCatalog() authorityCatalog {
+	catalog := newAuthorityCatalog()
+	for key, record := range s.indexes.grants {
+		catalog.records[key] = &record.authorityRecord
+		if record.Grant.Purpose == topology.AuthorityEffect {
+			catalog.actions[*record.Grant.Action] = key
+		}
+	}
+	for _, floor := range s.AuthorityFloors {
+		catalog.floors[floor.Resource] = floor.Key
+	}
+	return catalog
 }
 
 func (s *scopedState) planningDeclarations() topology.PlanInput {
