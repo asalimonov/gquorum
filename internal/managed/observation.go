@@ -52,11 +52,12 @@ func (h *Host) ObserveGroup(parent context.Context, group string) (topology.Grou
 		result.HealthKnown, result.LiveVoters = true, round.live
 		return result, nil
 	}
-	active, err := h.cfg.Active(ctx)
+	progress, err := h.cfg.Progress(ctx)
 	if err != nil {
 		return result, err
 	}
-	if round.observed == 0 && active.Group(group) == nil {
+	row := localGroupProgress(progress, group)
+	if round.observed == 0 && (row.ConvergedVersion == 0 || row.Converged == nil) {
 		return result, nil
 	}
 	result.Found = true

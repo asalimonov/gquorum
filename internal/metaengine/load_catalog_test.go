@@ -41,12 +41,12 @@ func TestDeletionCatalogIncludesApprovedPreparationAndExcludesStagedIntent(t *te
 	}
 	sm.latest = sm.history[2].Clone() // staged replica 99 was never approved
 	sm.latest.Version = 5
-	catalog, err := sm.RecoveryCatalog(t.Context())
+	catalog, err := sm.LegacyRecoveryCatalog(t.Context())
 	if err != nil || len(catalog) != 1 || len(catalog[0].Replicas) != 2 || catalog[0].Replicas[0].ReplicaID != 1 || catalog[0].Replicas[1].ReplicaID != 2 {
 		t.Fatal("readmission included staged intent or lost approved preparation", catalog, err)
 	}
 	catalog[0].Replicas[0].ReplicaID = 88
-	catalog, err = sm.RecoveryCatalog(t.Context())
+	catalog, err = sm.LegacyRecoveryCatalog(t.Context())
 	if err != nil || catalog[0].Replicas[0].ReplicaID != 1 {
 		t.Fatal("recovery catalog aliases FSM state", catalog, err)
 	}

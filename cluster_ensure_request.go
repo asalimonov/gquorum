@@ -13,7 +13,6 @@ import (
 type ensureMutations interface {
 	CreateGroup(context.Context, GroupSpec, MutationOptions) (MutationResult, error)
 	Approve(context.Context, uint64) (topology.OperatorID, error)
-	Get(context.Context, uint64) (topology.Document, error)
 }
 
 type ensureRequest struct {
@@ -60,15 +59,8 @@ func (r *ensureRequest) create(ctx context.Context, c ensureMutations, version u
 // FSM typed replay proves the original intent and its RebasedTo link. Only the
 // retained head delta needs inspection here; older rebase documents may be pruned.
 func (r *ensureRequest) approve(ctx context.Context, c ensureMutations, view topology.ReadView) error {
-	parent := view.Target
-	if parent.Version != view.Latest.ParentVersion {
-		var err error
-		parent, err = c.Get(ctx, view.Latest.ParentVersion)
-		if err != nil {
-			return err
-		}
-	}
-	if parent.Version != view.Target.Version || !ownCreation(view.Latest, parent, r.Spec, r.Options) {
+	if view.Target.Version != view.Latest.ParentVersion ||
+		!ownCreation(view.Latest, view.Target, r.Spec, r.Options) {
 		return fault.New(fault.Conflict,
 			fmt.Sprintf("unapproved staged topology at version %d", view.Latest.Version), nil)
 	}

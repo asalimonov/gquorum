@@ -122,10 +122,7 @@ type metricsSource struct {
 }
 
 func (s *metricsSource) Topology(ctx context.Context) (topology.ProgressPage, error) {
-	if err := s.g.ensureRunning(ctx); err != nil {
-		return topology.ProgressPage{}, err
-	}
-	return s.g.metricsTopology(), nil
+	return s.g.LocalProgress(ctx)
 }
 func (s *metricsSource) Epoch() (observe.LeaderEpoch, bool) {
 	engine := s.g.engine.Load()

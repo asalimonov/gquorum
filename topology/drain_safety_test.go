@@ -151,3 +151,64 @@ func TestMetaDrainResolvesRetainedIntermediateVoterAndUsesTargetState(t *testing
 		t.Fatal("conflicting native owner accepted", err)
 	}
 }
+
+// Retaining a stopped former owner cannot gate an unrelated load change.
+func TestMetaDrainIgnoresFormerOwnerForUnrelatedChange(t *testing.T) {
+	t.Parallel()
+	base := planDoc(1, 3, []string{"n1", "n2", "n3"})
+	target := base.Clone()
+	target.Version++ // unrelated change: no _meta node or member changes
+	status := GroupStatus{Found: true, HealthKnown: false, LeaderID: 1,
+		ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}}
+	check := MetaDrainInput{Status: status}
+	input := convergedPlanInput(base)
+	if _, err := ValidateMetaDrainSafety(input, target, check); err != nil {
+		t.Fatal("baseline without retained owner", err)
+	}
+	input.Retained = map[string]RetainedGroup{MetaGroupID: {Replicas: []RetainedReplica{
+		{ReplicaKey: ReplicaKey{NodeName: "former", ReplicaID: 9}, Progress: RetainedStopped}}}}
+	_, err := ValidateMetaDrainSafety(input, target, check)
+	if err != nil {
+		t.Errorf("unrelated change refused because a removed node's stopped _meta owner is retained")
+	}
+}
+
+// Reusing an active node name does not retain its former numeric member.
+func TestMetaDrainChecksReadmittedMemberReplacement(t *testing.T) {
+	t.Parallel()
+	base := planDoc(1, 3, []string{"n1", "n2", "n3"})
+	target := base.Clone()
+	target.Version++
+	meta := target.MetaGroup()
+	meta.Replicas[2].ReplicaID, meta.NextReplicaID = 4, 5
+	status := GroupStatus{Found: true, HealthKnown: true, LeaderID: 1,
+		ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}}
+	health := map[string]Health{"n1": HealthAlive, "n2": HealthDead, "n3": HealthDead}
+	_, err := ValidateMetaDrainSafety(convergedPlanInput(base), target, MetaDrainInput{Status: status, Health: health})
+	if !errors.Is(err, fault.ErrUnsafeMembership) {
+		t.Errorf("member replacement accepted with 1 known-alive retained voter (need quorum 2)")
+	}
+}
+
+// Historical stopped owners do not add departures to a forced retirement.
+func TestMetaDrainForcedRetirementIgnoresFormerOwner(t *testing.T) {
+	t.Parallel()
+	base := planDoc(1, 3, []string{"n1", "n2", "n3"})
+	target := base.Clone()
+	target.Version++
+	target.Nodes = target.Nodes[:2]
+	target.MetaGroup().Replicas = target.MetaGroup().Replicas[:2]
+	target.Audit = &ChangeAudit{Operation: AuditOperationForceRetireNode, TargetNode: "n3", Forced: true}
+	check := MetaDrainInput{Status: GroupStatus{Found: true, LeaderID: 1,
+		ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}}}
+	input := convergedPlanInput(base)
+	if _, err := ValidateMetaDrainSafety(input, target, check); err != nil {
+		t.Fatal("baseline forced retirement", err)
+	}
+	input.Retained = map[string]RetainedGroup{MetaGroupID: {Replicas: []RetainedReplica{
+		{ReplicaKey: ReplicaKey{NodeName: "former", ReplicaID: 9}, Progress: RetainedStopped}}}}
+	_, err := ValidateMetaDrainSafety(input, target, check)
+	if err != nil {
+		t.Errorf("forced retirement exemption lost: %v", err)
+	}
+}

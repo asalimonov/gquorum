@@ -149,7 +149,7 @@ func TestInterruptedLoadCleanupSurvivesHistoryAndSnapshot(t *testing.T) {
 			if !slices.Equal(ids, want) {
 				t.Fatal("incomplete recovered deletion grant", ids)
 			}
-			catalog, err := restored.RecoveryCatalog(t.Context())
+			catalog, err := restored.LegacyRecoveryCatalog(t.Context())
 			if err != nil {
 				t.Fatal(err)
 			}

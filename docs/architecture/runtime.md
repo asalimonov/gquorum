@@ -39,7 +39,10 @@ and current-floor reader at construction; construction only checks their presenc
 Every managed engine enables authority enforcement. Startup and readmission have
 no path that omits durable authority, including metadata-only readmission.
 
-Managed startup derives identity, founding peers and mode from approved topology.
+Managed startup derives identity and mode from approved scope; founding peers
+come from the immutable creation grant. Once removal excludes an identity from
+Target, its retained restart remains refused even if native removal is still
+pending; recovery does not widen membership admission.
 Staged Latest alone cannot authorize a replica. The local bbolt ledger and actual
 WAL pin are inspected before application acquisition. Durable store creation or
 restore precedes recording the identity. Repeated ledger writes preserve original
@@ -52,7 +55,7 @@ audit fields; reseating replaces only the exact prior ID transactionally.
 | Matching store and ledger | Resume. |
 | Approved fresh ID replaces an older ledger ID | Reseat with exact ledger replacement. |
 | Previously opened identity loses its store | Park and preserve its ledger. |
-| Active/completed membership proves establishment but log is empty | Park; never silently refound an established identity. |
+| Proven membership or retained creation/native receipt establishes the identity but log is empty | Park; never silently refound an established identity. |
 | Valid prepared learner with empty log | Resume preparation. |
 | Foreign or unreadable store | Park and preserve the evidence. |
 
@@ -63,7 +66,12 @@ inputs are copies. A successful factory transfers `Application.Close` to Node,
 including when cancellation occurs before its late return. Factory failure leaves
 partial acquisitions with the factory. Node joins replay, engine work and optional Application.Run before
 Close. Failed Close retains ownership and blocks replacement until a serial retry
-succeeds. Publication occurs only after local replay readiness.
+succeeds. Publication occurs only after local replay readiness. Factory ApprovedVersion is
+context: after a wait, compare the exact group/replica and founding seed, rather
+than the global document version. Recheck newly learned creation/establishment
+proof against the original storage probe before opening the engine. Recovery
+rotates its next attempted reservation before waiting on a fence, preventing one
+blocked group from monopolizing every bounded round.
 
 `StopLoadGroup(ctx, ref)` installs an exact volatile hold before joining the
 replica. Recovery and ordinary approved starts respect the hold. An explicit
@@ -88,13 +96,15 @@ only the default store; the memory store is always empty at startup.
 The decision table above is unchanged. A memory replica that restarts finds no
 state, so an established identity parks as `store_missing` with its ledger
 preserved. For an established voter, the host then reseats its own replica: it
-calls the ordinary `ReseatReplica` for its node, with `ExpectedVersion` pinned to
-the Active version in which it observed the parked identity, so a completed
-repair is never repeated on the successor. Refusals while topology is
-unconverged or an operator runs are retried with backoff up to 5 seconds. The
-approved plan prepares a fresh learner, catches it up from the leader, promotes
-it and cleans up the old identity. The loop ends once the old identity is in
-neither Active nor Target, and host shutdown joins it.
+calls the ordinary `ReseatReplica` for its node only when that exact approved
+voter matches the group's proven declaration, with no group owner/deletion.
+Each reseat call pins current Latest once; scoped repair approves only the exact
+replacement and rebases independent staging. Overlapping staged intent conflicts. A busy or unconverged sibling does not block this check. Refusals retry
+with backoff up to 5 seconds. Recheck local holds after progress reads. The approved
+plan prepares a fresh learner, catches it up from the leader, promotes it and
+cleans up the old identity. The loop ends when the exact old assignment leaves
+Target or is explicitly held; host shutdown joins it. The internal local progress
+projection remains schema3 until the complete scoped activation in Task78.
 
 Learners and replicas that restart before becoming established are not reseated;
 they stay parked with a `NotImplemented` warning. If a majority of a memory

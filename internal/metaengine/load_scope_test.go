@@ -41,7 +41,7 @@ func TestLoadScopeCreationProgressDistinguishesEmptyPreparedLearners(t *testing.
 			ex.CurrentStep, ex.State = tc.current, tc.state
 			m.operators[ex.ID] = &ex
 			id := storage.Identity{NodeName: "n1", ClusterID: doc.ClusterID, GroupID: "shard0", ReplicaID: 1}
-			if err := m.WithLoadScope(id, 1, func(scope LoadScope) error {
+			if err := m.LegacyWithLoadScope(id, 1, func(scope LoadScope) error {
 				if scope.Started != tc.started || scope.Established != tc.established || scope.Founding != tc.founding {
 					t.Fatal(scope)
 				}
@@ -59,11 +59,11 @@ func TestLoadScopeRejectsOldOwnerAndRetiredGroupAtApproval(t *testing.T) {
 	m := &Machine{topologySM: sm}
 	id := storage.Identity{NodeName: "n1", ClusterID: "cluster-abc", GroupID: "shard0", ReplicaID: 1}
 	called := false
-	if err := m.WithLoadScope(id, 9, func(LoadScope) error { called = true; return nil }); !errors.Is(err, fault.ErrIdentityMismatch) || called {
+	if err := m.LegacyWithLoadScope(id, 9, func(LoadScope) error { called = true; return nil }); !errors.Is(err, fault.ErrIdentityMismatch) || called {
 		t.Fatal(called, err)
 	}
 	m.retired["shard0"] = 2
-	if err := m.WithLoadScope(id, 1, func(LoadScope) error { called = true; return nil }); !errors.Is(err, fault.ErrGroupRetired) || called {
+	if err := m.LegacyWithLoadScope(id, 1, func(LoadScope) error { called = true; return nil }); !errors.Is(err, fault.ErrGroupRetired) || called {
 		t.Fatal(called, err)
 	}
 }

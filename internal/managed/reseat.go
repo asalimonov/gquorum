@@ -3,6 +3,8 @@ package managed
 import (
 	"context"
 	"errors"
+	"reflect"
+	"slices"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -47,14 +49,9 @@ func (h *Host) startOwnReseat(slot *replica, scope metaengine.LoadScope) {
 	}()
 }
 
-// ownReseatLoop asks for a reseat while the parked identity is in Active,
-// pinned
-// to the Active version it observed so a completed repair is never repeated on
-// the successor. It waits while the identity is only approved, and ends once
-// the identity is in neither Active nor Target, or once it is approved as a
-// learner (for example after the voter configuration demoted it), which
-// preflight
-// then reports as not reseated.
+// ownReseatLoop requests an exact predecessor replacement only when this
+// group is unowned and its approved/proven voter assignments agree. TargetVersion
+// supplies CAS; independent convergence never becomes a global startup gate.
 func (h *Host) ownReseatLoop(ctx context.Context, id storage.Identity) {
 	defer func() {
 		h.mu.Lock()
@@ -63,21 +60,25 @@ func (h *Host) ownReseatLoop(ctx context.Context, id storage.Identity) {
 	}()
 	backoff := reseatMinBackoff
 	for {
-		active, err := h.cfg.Active(ctx)
+		progress, err := h.cfg.Progress(ctx)
 		if err == nil {
-			scope, scopeErr := h.cfg.Scope(ctx, id)
+			row := localGroupProgress(progress, id.GroupID)
+			replica := localProgressReplica(row.Approved, id)
 			switch {
 			case ctx.Err() != nil:
-			case scopeErr == nil && scope.Replica.Role != topology.ReplicaVoter:
+			case slices.Contains(h.Held(), id):
 				return
-			case holdsReplica(active, id):
-				if err = h.cfg.ReseatOwn(ctx, id, active.Version); err == nil {
-					backoff = reseatMinBackoff // committed; the approved plan replaces this identity
+			case replica == nil:
+				h.clearPark(id)
+				return
+			case replica.Role != topology.ReplicaVoter:
+				return
+			case row.ConvergedVersion != 0 && row.Converged != nil && row.OperationID == "" && !row.Deleting &&
+				reflect.DeepEqual(row.Converged, row.Approved):
+				if err = h.cfg.ReseatOwn(ctx, id); err == nil {
+					backoff = reseatMinBackoff // committed; approved plan replaces this exact identity
 				}
-			case scopeErr != nil:
-				h.clearPark(id) // replaced or removed
-				return
-			default: // Retain the replica and wait before checking again.
+			default: // Retain the parked replica while its own required scope is pending.
 			}
 		}
 		if err != nil && ctx.Err() == nil && !expectedReseatRefusal(err) {
@@ -100,15 +101,25 @@ func expectedReseatRefusal(err error) bool {
 		errors.Is(err, fault.ErrVersionConflict)
 }
 
-func holdsReplica(doc topology.Document, id storage.Identity) bool {
-	if g := doc.Group(id.GroupID); g != nil {
-		for _, r := range g.Replicas {
+func localGroupProgress(page topology.ProgressPage, id string) topology.GroupProgress {
+	for _, row := range page.Groups {
+		if row.GroupID == id {
+			return row
+		}
+	}
+	return topology.GroupProgress{GroupID: id}
+}
+
+func localProgressReplica(group *topology.Group, id storage.Identity) *topology.Replica {
+	if group != nil && group.ID == id.GroupID {
+		for i := range group.Replicas {
+			r := &group.Replicas[i]
 			if r.NodeName == id.NodeName && r.ReplicaID == id.ReplicaID {
-				return true
+				return r
 			}
 		}
 	}
-	return false
+	return nil
 }
 
 func (h *Host) clearPark(id storage.Identity) {

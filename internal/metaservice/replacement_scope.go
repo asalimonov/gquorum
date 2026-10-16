@@ -19,7 +19,7 @@ func unownedProvenGroup(input topology.PlanInput, id string) (*topology.Group, e
 	if row.ConvergedVersion == 0 || row.Converged == nil || row.Deleting ||
 		!reflect.DeepEqual(row.Converged, input.Approved.Group(id)) {
 		return nil, fault.New(fault.VersionConflict,
-			fmt.Sprintf("group %q is not converged to approved intent", id), nil)
+			fmt.Sprintf("group %q is not converged to approved intent; revert or retry its change first", id), nil)
 	}
 	return row.Converged, nil
 }

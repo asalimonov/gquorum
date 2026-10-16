@@ -173,7 +173,8 @@ func (t *evidenceTracker) apply(now time.Time, doc topology.ProgressPage, round 
 		samples, sampled := round.Groups[group.ID]
 		if !sampled || samples.SourceVersion != row.ConvergedVersion {
 			g.current = false
-			clear(g.replicas)
+			// A filtered round earns no time. ConditionWindow.MaxGap bounds
+			// continuity when fresh evidence for this exact assignment returns.
 			continue
 		}
 		t.applyGroup(now, *group, evidenceRoundContext{clusterID: input.clusterID, observer: observer,
@@ -216,13 +217,14 @@ func (t *evidenceTracker) prepareGroup(row topology.GroupProgress) *groupEvidenc
 			demotions: make(map[topology.ReplicaKey]roleTimer)}
 		t.groups[row.GroupID] = g
 	}
-	if g.sourceVersion != row.ConvergedVersion || !reflect.DeepEqual(g.declaration, row.Converged) {
+	if !reflect.DeepEqual(g.declaration, row.Converged) {
 		// Preserve cooldown anchors for retained role records. Only this group's
 		// sample windows lose continuity; independent groups keep theirs.
 		clear(g.replicas)
 		g.confirmed, g.sourceAge = time.Time{}, 0
-		g.sourceVersion, g.declaration = row.ConvergedVersion, row.Clone().Converged
+		g.declaration = row.Clone().Converged
 	}
+	g.sourceVersion = row.ConvergedVersion
 	return g
 }
 

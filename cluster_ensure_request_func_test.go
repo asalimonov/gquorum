@@ -30,9 +30,6 @@ func (p *ensureMutationProbe) Approve(_ context.Context, version uint64) (topolo
 	p.approved = append(p.approved, version)
 	return topology.MakeOperatorID(version, 1), p.approveErr
 }
-func (*ensureMutationProbe) Get(context.Context, uint64) (topology.Document, error) {
-	panic("unexpected ancestry walk")
-}
 
 func TestEnsureCreationPinsCASAndApprovesOnlyReplayedRebasedHead(t *testing.T) {
 	t.Parallel()
@@ -122,5 +119,20 @@ func TestEnsureApprovalFollowsOnlyFSMNamedRebase(t *testing.T) {
 	probe.approveErr = fault.ErrVersionConflict
 	if _, err := request.step(t.Context(), probe, topology.ReadView{Latest: head, Target: base}); !errors.Is(err, fault.ErrVersionConflict) {
 		t.Fatal("guessed successor after unqualified conflict", err)
+	}
+}
+
+func TestEnsureApprovalRefusesHeadOutsideCurrentTarget(t *testing.T) {
+	t.Parallel()
+	request := ensureRequest{Spec: GroupSpec{ID: "work"}, HeadVersion: 4}
+	view := topology.ReadView{Target: topology.Document{Version: 2}, Latest: topology.Document{
+		Version: 4, ParentVersion: 3, Groups: []topology.Group{{ID: "work"}},
+	}}
+	probe := &ensureMutationProbe{}
+	if err := request.approve(t.Context(), probe, view); !errors.Is(err, fault.ErrConflict) {
+		t.Fatal(err)
+	}
+	if len(probe.approved) != 0 || len(probe.expected) != 0 {
+		t.Fatal("mutated foreign head", probe)
 	}
 }

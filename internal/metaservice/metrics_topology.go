@@ -1,6 +1,8 @@
 package metaservice
 
 import (
+	"context"
+
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -19,4 +21,13 @@ func metricsConvergedGroup(groups []topology.GroupProgress, id string) *topology
 		}
 	}
 	return nil
+}
+
+// LocalProgress copies applied group declarations without a quorum read or peer
+// probes. Private host recovery and metrics use the same source capture.
+func (g *Group) LocalProgress(ctx context.Context) (topology.ProgressPage, error) {
+	if err := g.ensureRunning(ctx); err != nil {
+		return topology.ProgressPage{}, err
+	}
+	return g.metricsTopology(), nil
 }

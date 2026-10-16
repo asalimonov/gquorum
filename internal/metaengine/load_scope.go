@@ -9,12 +9,13 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// WithGrantedLoadCleanup keeps approved assignments stable through an exact
+// LegacyWithGrantedLoadCleanup is the schema3 adapter removed at Task78.
+// It keeps approved assignments stable through an exact
 // local ledger mutation. The resource owner has already admitted this work at
 // its installed floor; a closed retained grant is still valid proof of
 // identity.
 // fn must be bounded and must not call back into this machine.
-func (m *Machine) WithGrantedLoadCleanup(ctx context.Context, grant topology.AuthorityGrant,
+func (m *Machine) LegacyWithGrantedLoadCleanup(ctx context.Context, grant topology.AuthorityGrant,
 	target topology.AuthorityTarget, fn func() error) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -36,17 +37,22 @@ func (m *Machine) WithGrantedLoadCleanup(ctx context.Context, grant topology.Aut
 func (sm *topologySM) grantedLoadCleanupLocked(grant topology.AuthorityGrant, target topology.AuthorityTarget) error {
 	record := sm.authority.records[grant.Key]
 	if record == nil {
-		// The courier can deliver a committed grant before this returning
-		// participant applies it. Keep the ledger intact and let the controller
-		// retry after catch-up; absence at an already applied index is a
-		// refusal.
-		if grant.Key.ClusterID == sm.target.ClusterID && grant.Key.Revision > sm.appliedIndex &&
-			grant.Validate() == nil {
-			return fault.New(fault.Unavailable, "receiver has not applied required cleanup grant", nil)
-		}
-		return fault.ErrOperatorAuthorization
+		return missingLoadCleanupGrant(grant, sm.target.ClusterID, sm.appliedIndex)
 	}
-	if grant.Action == nil || !record.Grant.Equal(grant) || !slices.Contains(grant.Targets, target) ||
+	return validateLoadCleanupTarget(sm.target, record.Grant, grant, target)
+}
+
+func missingLoadCleanupGrant(grant topology.AuthorityGrant, cluster string, applied uint64) error {
+	// A returning receiver may not yet have applied its courier's exact grant.
+	if grant.Key.ClusterID == cluster && grant.Key.Revision > applied && grant.Validate() == nil {
+		return fault.New(fault.Unavailable, "receiver has not applied required cleanup grant", nil)
+	}
+	return fault.ErrOperationAuthorization
+}
+
+func validateLoadCleanupTarget(approved topology.Document, recorded, grant topology.AuthorityGrant,
+	target topology.AuthorityTarget) error {
+	if grant.Action == nil || !recorded.Equal(grant) || !slices.Contains(grant.Targets, target) ||
 		!slices.Contains(grant.Resources,
 			topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: grant.Key.GroupID,
 				NodeName: target.NodeName}) {
@@ -57,7 +63,7 @@ func (sm *topologySM) grantedLoadCleanupLocked(grant topology.AuthorityGrant, ta
 		a.NodeName != target.NodeName || a.ReplicaID != target.ReplicaID) {
 		return fault.ErrOperatorAuthorization
 	}
-	if group := sm.target.Group(grant.Key.GroupID); group != nil {
+	if group := approved.Group(grant.Key.GroupID); group != nil {
 		for _, replica := range group.Replicas {
 			if replica.NodeName == target.NodeName && replica.ReplicaID == target.ReplicaID {
 				return fault.ErrIdentityMismatch
@@ -78,9 +84,10 @@ type LoadScope struct {
 	Established bool
 }
 
-// WithLoadScope holds the FSM read boundary through a local ledger operation.
+// LegacyWithLoadScope is the schema3 adapter removed at Task78. It holds the
+// FSM read boundary through a local ledger operation.
 // fn must be bounded and must not call back into this machine.
-func (m *Machine) WithLoadScope(id storage.Identity, member uint64, fn func(LoadScope) error) error {
+func (m *Machine) LegacyWithLoadScope(id storage.Identity, member uint64, fn func(LoadScope) error) error {
 	if err := topology.ValidateLoadID(id.GroupID); err != nil {
 		return err
 	}
@@ -98,15 +105,19 @@ func (sm *topologySM) approvedLoadScopeLocked(id storage.Identity, member uint64
 	if sm.retired[id.GroupID] != 0 {
 		return LoadScope{}, fault.ErrGroupRetired
 	}
-	if member == 0 || id.ReplicaID == 0 || id.ClusterID != sm.target.ClusterID ||
-		sm.target.MemberID(id.NodeName) != member {
+	return approvedLoadScope(sm.target, id, member)
+}
+
+func approvedLoadScope(approved topology.Document, id storage.Identity, member uint64) (LoadScope, error) {
+	if member == 0 || id.ReplicaID == 0 || id.ClusterID != approved.ClusterID ||
+		approved.MemberID(id.NodeName) != member {
 		return LoadScope{}, fault.New(fault.IdentityMismatch, "load owner differs from approved meta identity", nil)
 	}
-	group := sm.target.Group(id.GroupID)
+	group := approved.Group(id.GroupID)
 	if group == nil {
 		return LoadScope{}, fault.New(fault.IdentityMismatch, "load group is not approved", nil)
 	}
-	scope := LoadScope{Version: sm.target.Version}
+	scope := LoadScope{Version: approved.Version}
 	for _, replica := range group.Replicas {
 		if replica.NodeName == id.NodeName && replica.ReplicaID == id.ReplicaID {
 			scope.Replica = replica

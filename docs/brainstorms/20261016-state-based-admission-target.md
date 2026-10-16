@@ -801,11 +801,50 @@ Use existing ProgressPage as the internal envelope for TargetVersion and
 GroupProgress rows; no PlanInput, node-checkpoint key or new topology entity.
 Capture/recapture compares ConvergedVersion plus the exact proven declaration.
 Replica non-reuse binds the host; full process/run checks remain at probe/sample
-boundaries. A changed source invalidates only its own actionable windows, with
-retained role-record cooldown anchors preserved. Diagnostic histories use exact
+boundaries. A changed source invalidates a captured round, but identical declarations retain
+continuity windows and receive fresh source labels on the next accepted sample.
+Only declaration changes reset those windows; filtered rounds publish no current
+row, and ConditionWindow.MaxGap bounds continuity across gaps. Retained role-record
+cooldown anchors survive declaration changes. Diagnostic histories use exact
 replica/process/run series. Leadership/cancellation still invalidates the round.
 ReceivedAt changes only on a valid newly received reply; cached reuse preserves
 it and an unknown placeholder leaves it zero. Reachability freshness uses separate
 probe generations, not the cached sample's receive time. Until78, metricsTopology
 projects actual schema3 progress; then its body reuses local
 ProgressStatus/shared group rows. No synchronous progress-read fan-out added.
+
+
+### Scoped recovery and review34 corrections (Task71)
+
+`FI_RECOVERY_SCOPE`: factory ApprovedVersion remains document context. Recapture
+compares the exact group/replica and seed-relevant Founding flag; unrelated approved
+versions do not cancel startup. The existing grant/floor checks still run after
+waits. Managed Config.Progress uses the same local ProgressPage projection as
+metrics, without quorum probes. Own memory reseat requires the exact still-approved
+voter, proven declaration equality and no group owner/deletion. Submit against
+current Latest pinned once inside each reseat call; scoped repair approves only R
+and rebases independent S. Remove the private ReseatOwn version argument. Recheck local holds after
+progress reads. A local recovery cursor uses canonical GroupID and advances before each attempted reservation,
+so an unreachable first fence cannot monopolize subsequent bounded recovery rounds.
+
+`FI_DRAIN_MEMBERS`: departures come from proven/approved/native membership and
+Target node state plus numeric member equality. Retained/node catalogs resolve
+owners only. A stopped historical owner cannot gate an unrelated operation or
+invalidate the exact forced-retirement exemption. Readmission keeps its existing
+affected-group approved/proven preflight; refusal names the group and directs the
+caller to reconcile its change first. EnsureGroup refuses a staged head whose
+parent is not current Target without fetching that parent.
+
+`FI_BOOT_PROOF` (peer35): LoadScope Founding requires no proven checkpoint, a
+current owner with CreateFoundingGroup and the exact voter in that owner's pinned
+approval. Founding peers come from startGrant.Targets. A valid host Create receipt
+proves a durable founding snapshot and sets Started+Established even before native
+confirmation. Prepare sets only Started, preserving empty learner preparation.
+Native Add/Promote receipts establish only their affected action identity; grant
+recipient targets are not affected identities. Retained closed receipts remain
+facts. Native founding alone does not establish an individual host. Keep exact
+Add/Promote grants as hosting roots while their affected approved identity remains
+unproven; a checkpoint or proven retirement/readmission releases that root. Issuance
+alone proves no creation. RecoveryCatalog includes exact approved/converged/grant/
+cleanup identities, never staged-only Latest. Target-only restart admission remains:
+a removed-but-still-native voter cannot start simply from its historical proof.

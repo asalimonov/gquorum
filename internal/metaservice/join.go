@@ -148,7 +148,7 @@ func (g *Group) joinReply(ctx context.Context, a metaengine.AdmissionRecord, for
 	if len(grants) != 0 {
 		response.Grants = grants
 		response.PreviousMemberID = grants[0].Targets[0].MemberID
-		catalog, err := g.state().RecoveryCatalog(ctx)
+		catalog, err := g.state().LegacyRecoveryCatalog(ctx)
 		if err != nil {
 			return metatransport.Reply(err)
 		}
@@ -270,7 +270,7 @@ func (g *Group) prepareReadmission(ctx context.Context, previous topology.Identi
 	var appliedCatalog []topology.Group
 	if machine := g.state(); machine != nil {
 		var err error
-		appliedCatalog, err = machine.RecoveryCatalog(ctx)
+		appliedCatalog, err = machine.LegacyRecoveryCatalog(ctx)
 		if err != nil {
 			return err
 		}

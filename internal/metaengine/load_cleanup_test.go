@@ -58,7 +58,7 @@ func TestGrantedCleanupBindsRetainedProofAndProtectsAssignments(t *testing.T) {
 				want = context.Canceled
 			}
 			called := false
-			err := m.WithGrantedLoadCleanup(ctx, grant, target, func() error {
+			err := m.LegacyWithGrantedLoadCleanup(ctx, grant, target, func() error {
 				called = true
 				if m.mu.TryLock() {
 					m.mu.Unlock()
@@ -74,7 +74,7 @@ func TestGrantedCleanupBindsRetainedProofAndProtectsAssignments(t *testing.T) {
 				// mutate the ledger under the assignment lock.
 				m.insertGrantLocked(grant)
 				m.appliedIndex = grant.Key.Revision
-				err = m.WithGrantedLoadCleanup(ctx, grant, target, func() error {
+				err = m.LegacyWithGrantedLoadCleanup(ctx, grant, target, func() error {
 					called = true
 					return nil
 				})

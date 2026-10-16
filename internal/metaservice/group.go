@@ -447,7 +447,7 @@ func (g *Group) inspectRetainedState(store *metastore.Store) (retainedMetaState,
 			return retainedMetaState{}, err
 		}
 		recoveryVersion = check.Latest().Version
-		recoveryGroups, err = check.RecoveryCatalog(context.Background())
+		recoveryGroups, err = check.LegacyRecoveryCatalog(context.Background())
 		if err != nil {
 			return retainedMetaState{}, err
 		}

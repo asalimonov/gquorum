@@ -102,27 +102,45 @@ func (r *scopedRetention) admissionRoots() {
 
 func (r *scopedRetention) hostingRoot(grant topology.AuthorityGrant) bool {
 	action := grant.Action
-	if action == nil || action.Kind != topology.StepPrepareReplica && action.Kind != topology.StepCreateFoundingGroup {
+	if action == nil {
 		return false
 	}
 	row := r.state.indexes.groups[grant.Key.GroupID]
-	if action.Kind == topology.StepCreateFoundingGroup {
+	switch action.Kind {
+	case topology.StepCreateFoundingGroup:
 		return row == nil || row.SourceVersion == 0 // Includes every issued outcome.
+	case topology.StepAddLearner, topology.StepPromoteVoter:
+		if !groupHasMember(r.state.Target.Group(action.GroupID), action.NodeName, action.ReplicaID) {
+			return false
+		}
+	case topology.StepPrepareReplica:
+	default:
+		return false
 	}
 	for _, target := range grant.Targets {
-		if row != nil && row.SourceVersion != 0 && groupHasMember(row.Declaration, target.NodeName, target.ReplicaID) {
+		// Native targets also contain recipients/reporters; only the action's
+		// affected identity needs this pre-convergence establishment proof.
+		if target.NodeName != action.NodeName || target.ReplicaID != action.ReplicaID {
 			continue
 		}
-		id := storage.Identity{ClusterID: grant.Key.ClusterID, GroupID: grant.Key.GroupID,
-			NodeName: target.NodeName, ReplicaID: target.ReplicaID}
-		if debt := r.state.indexes.cleanup[id]; debt != nil && debt.Retired != nil {
-			continue
-		}
-		if !r.retiredTarget(grant.Key.GroupID, target) {
+		if r.hostingTarget(grant.Key.GroupID, target) {
 			return true
 		}
 	}
 	return false
+}
+
+func (r *scopedRetention) hostingTarget(group string, target topology.AuthorityTarget) bool {
+	row := r.state.indexes.groups[group]
+	if row != nil && row.SourceVersion != 0 && groupHasMember(row.Declaration, target.NodeName, target.ReplicaID) {
+		return false
+	}
+	id := storage.Identity{ClusterID: r.state.Target.ClusterID, GroupID: group,
+		NodeName: target.NodeName, ReplicaID: target.ReplicaID}
+	if debt := r.state.indexes.cleanup[id]; debt != nil && debt.Retired != nil {
+		return false
+	}
+	return !r.retiredTarget(group, target)
 }
 
 func (r *scopedRetention) retiredTarget(group string, target topology.AuthorityTarget) bool {

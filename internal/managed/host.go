@@ -3,6 +3,7 @@
 package managed
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"log/slog"
@@ -54,7 +55,7 @@ type Config struct {
 	LookupRecord         func(context.Context, string) (metastore.ReplicaLookup, error)
 	RecordReplica        func(context.Context, string, metastore.ReplicaRecord, uint64) error
 	Catalog              func(context.Context, string) ([]storage.Identity, error)
-	Active               func(context.Context) (topology.Document, error)
+	Progress             func(context.Context) (topology.ProgressPage, error)
 	RetireApplication    func(context.Context, load.RetirementRequest) (load.RetirementResult, error)
 	Collection           CollectionCallbacks
 	Retirement           storage.RetirementStore
@@ -65,7 +66,7 @@ type Config struct {
 	Store                storage.Store
 	MemoryStore          storage.Store           // optional: groups of topology.StorageMemory
 	MemoryRetirement     storage.RetirementStore // required with MemoryStore
-	ReseatOwn            func(ctx context.Context, identity storage.Identity, expectedVersion uint64) error
+	ReseatOwn            func(ctx context.Context, identity storage.Identity) error
 	Transport            load.Transport
 	ResolvePeer          func(context.Context, load.ReplicaRef) (load.Peer, error)
 	ValidatePeer         func(context.Context, load.Peer) error
@@ -107,6 +108,7 @@ type Host struct {
 	metricsPeers                map[storage.Identity]load.Peer
 	observationPool             *observe.ReadPool
 	observationCursor           int
+	recoveryCursor              string
 	observationGroups           map[string]*groupOperation
 	parked                      map[string]ParkedReplica
 	stopGate                    chan struct{}
@@ -505,7 +507,9 @@ func (h *Host) maintain(ctx context.Context) {
 }
 
 // RecoverAssignments reserves independent starts without waiting for elections
-// or slow factories in an earlier group. Holds belong to this Host lifetime.
+// or slow factories in an earlier group. Rotate after each attempted reservation
+// so a blocked authority reconciliation cannot consume every subsequent round.
+// Holds belong to this Host lifetime.
 func (h *Host) RecoverAssignments(ctx context.Context) error {
 	if h.cfg.Assignments == nil {
 		return nil
@@ -514,8 +518,15 @@ func (h *Host) RecoverAssignments(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	refs = slices.Clone(refs)
+	slices.SortFunc(refs, func(a, b load.ReplicaRef) int { return cmp.Compare(a.GroupID, b.GroupID) })
+	h.mu.Lock()
+	start := max(0, slices.IndexFunc(refs, func(ref load.ReplicaRef) bool { return ref.GroupID > h.recoveryCursor }))
+	h.mu.Unlock()
 	var failures []error
-	for _, ref := range refs {
+	for i := range refs {
+		position := (start + i) % len(refs)
+		ref := refs[position]
 		h.mu.Lock()
 		slot := h.slots[ref.GroupID]
 		needsStop := slot != nil && slot.identity.ReplicaID == ref.ReplicaID && slot.state == "ready" &&
@@ -534,6 +545,7 @@ func (h *Host) RecoverAssignments(ctx context.Context) error {
 		if needsStop {
 			h.beginStopLocked(slot)
 		}
+		h.recoveryCursor = ref.GroupID
 		h.mu.Unlock()
 		if _, err := h.reserveStart(ctx, ref, StartRecovery); err != nil {
 			failures = append(failures, err)
@@ -555,7 +567,7 @@ func validateHostConfig(cfg Config) error {
 }
 
 func validateHostRetirementConfig(cfg Config) error {
-	if cfg.Catalog == nil || cfg.Active == nil || cfg.ForgetGrantedReplica == nil || cfg.Retirement == nil ||
+	if cfg.Catalog == nil || cfg.Progress == nil || cfg.ForgetGrantedReplica == nil || cfg.Retirement == nil ||
 		cfg.Retention == nil {
 		return fault.New(fault.Invalid, "managed approval and retirement dependencies are required", nil)
 	}

@@ -94,3 +94,50 @@ func TestMetricsRoundMatchesOnlyProvenSourceAndDeclaration(t *testing.T) {
 		})
 	}
 }
+
+func TestEvidenceUnchangedDeclarationPreservesBoundedWindows(t *testing.T) {
+	t.Parallel()
+	for _, change := range []string{"source", "filtered_round", "long_gap"} {
+		t.Run(change, func(t *testing.T) {
+			t.Parallel()
+			doc, settings := evidenceFixture()
+			tracker := newEvidenceTracker(settings)
+			tracker.reset("epoch")
+			page := evidenceTopology(doc)
+			start := time.Unix(100, 0)
+			round, local := evidenceRound(doc, 1)
+			tracker.apply(start.Add(-time.Second), page, round, evidenceInput{clusterID: doc.ClusterID, local: local})
+			var victim metrics.ReplicaObservation
+			for i := 0; i <= 40; i++ {
+				if change == "source" && i == 35 {
+					page.Groups[0].ConvergedVersion++
+				}
+				round, local = evidenceRound(doc, uint64(i+2))
+				group := round.Groups[topology.MetaGroupID]
+				group.SourceVersion = page.Groups[0].ConvergedVersion
+				group.Probes[2].Reachability = "unreachable"
+				group.Probes[2].Observation = metrics.ReplicaObservation{}
+				round.Groups[topology.MetaGroupID] = group
+				filtered := change == "filtered_round" && i == 35 || change == "long_gap" && i >= 20 && i < 36
+				if filtered {
+					delete(round.Groups, topology.MetaGroupID)
+				}
+				now := start.Add(time.Duration(i) * time.Second)
+				tracker.apply(now, page, round, evidenceInput{clusterID: doc.ClusterID, local: local})
+				if filtered {
+					if len(tracker.snapshot(now)) != 0 {
+						t.Fatal("filtered round published cached evidence")
+					}
+					continue
+				}
+				victim = observedReplica(t, tracker, now, 3)
+				if tracker.snapshot(now)[0].SourceVersion != page.Groups[0].ConvergedVersion {
+					t.Fatal("observation source was not refreshed")
+				}
+			}
+			if qualifies(victim.Evidence.UnavailableFor, 30*time.Second) != (change != "long_gap") {
+				t.Fatal("wrong continuity across unchanged declaration or collection gap", victim.Evidence.UnavailableFor)
+			}
+		})
+	}
+}

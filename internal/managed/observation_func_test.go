@@ -33,8 +33,8 @@ func TestObservationKeepsHealthyMajorityAndOwnsUnreturnedReader(t *testing.T) {
 			t.Parallel()
 			f := newFixture(t)
 			f.cfg.EffectTimeout = 100 * time.Millisecond
-			f.cfg.Active = func(context.Context) (topology.Document, error) {
-				return topology.Document{Groups: []topology.Group{{ID: "work"}}}, nil
+			f.cfg.Progress = func(context.Context) (topology.ProgressPage, error) {
+				return topology.ProgressPage{Groups: []topology.GroupProgress{{GroupID: "work", ConvergedVersion: 1, Converged: &topology.Group{ID: "work"}}}}, nil
 			}
 			f.cfg.Catalog = func(context.Context, string) ([]storage.Identity, error) {
 				return []storage.Identity{
@@ -221,8 +221,8 @@ func TestObservationRefusalDoesNotAttestAReplicaButMalformedSuccessFails(t *test
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			f := newFixture(t)
-			f.cfg.Active = func(context.Context) (topology.Document, error) {
-				return topology.Document{Groups: []topology.Group{{ID: "work"}}}, nil
+			f.cfg.Progress = func(context.Context) (topology.ProgressPage, error) {
+				return topology.ProgressPage{Groups: []topology.GroupProgress{{GroupID: "work", ConvergedVersion: 1, Converged: &topology.Group{ID: "work"}}}}, nil
 			}
 			f.cfg.Catalog = func(context.Context, string) ([]storage.Identity, error) {
 				return []storage.Identity{{NodeName: "b", ClusterID: "cluster", GroupID: "work", ReplicaID: 2}}, nil

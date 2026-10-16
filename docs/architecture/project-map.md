@@ -436,6 +436,24 @@ installs an exact local hold, not deletion; only explicit matching start clears
 the hold. See [authority ordering](../../internal/managed/authority.go),
 [startup tests](../../internal/managed/authority_func_test.go).
 
+`FI_RECOVERY_SCOPE`: Config.Progress uses Group.LocalProgress, sharing the local
+metrics projection with no quorum probes. Factory ApprovedVersion is context;
+recapture requires the same exact declaration/replica and seed-relevant Founding,
+and rechecks newly learned creation/establishment facts against the store probe.
+RecoverAssignments rotates before attempting a reservation, so a blocked fence
+cannot monopolize successive bounded rounds. Memory reseat needs an unowned,
+proven still-approved exact voter and honors holds after reads. Each reseat call
+pins Latest once; scoped repair approves only its replacement and rebases independent
+staging. A failed sibling does not gate it. Scoped RecoveryCatalog keeps
+approved/converged identities, retained grant targets and cleanup identities;
+closed exact retirement grants still protect ledger mutation. The explicitly named
+LegacyRecoveryCatalog/LegacyWithGrantedLoadCleanup/LegacyWithLoadScope adapters
+last only until78. Scoped LoadScope derives Started/Established from exact checkpoints
+and validated receipts: Prepare starts; host Create and native Add/Promote establish.
+Founding requires no checkpoint and a current pinned owner/voter; seed peers come
+from the immutable creation grant. Native membership facts remain pruning roots
+until exact convergence or retirement/readmission replaces them.
+
 `KB_RETIRE`: retirement orders exact proof/resource checks, owner join,
 application cleanup acknowledgement, Raft quarantine and ledger forgetting.
 Collection later rechecks retained record, ledger, live assignments, active
@@ -471,7 +489,7 @@ DeleteGroup map to CreateLoadGroup/DeleteLoadGroup. Additional seams:
 | `ResolveLoadPeer`, `ResolveAuthorityPeer`, `ValidateLoadNode`, `ValidateLoadPeer`, `ValidateAuthorityCourier` | Exact routing/authentication against current or retained authority, including cleanup destinations. |
 | `Step`, `Call`, `InstallFence`, `ApplyMetaAction` | Authenticated wire dispatch and resource control. |
 | `Activate`, `KeepAlive`, `Deactivate`, `AcquireLock`, `LockHolder`, `ReadLockHolder` | Replicated sessions/locks plus leader-local renewal/expiry management; TTL returned to callers is configured duration. |
-| `Lifecycle`, `Readiness`, `LocalStatus`, `CachedStatus`, `Watch` | Local lifecycle, cached observations and document subscriptions. |
+| `Lifecycle`, `Readiness`, `LocalProgress`, `LocalStatus`, `CachedStatus`, `Watch` | Local lifecycle, cached observations and document subscriptions. |
 
 `KB_CONTROL_ONLY`: stopping participation is distinct from final service Stop.
 Authorized self-removal stops consensus/application participation first, but
@@ -785,9 +803,10 @@ Entries: `New`, Watch `{Start,Wake,Stop,Snapshot,Refresh}`;
 ConditionWindow `{Reset,Observe,Duration}`.
 
 `FI_METRICS_SCOPE`: capture/recapture compares each proven source and declaration;
-TargetVersion is context only. Changed A is omitted for that round and loses only
-its actionable windows; B retains failure/catch-up duration, run/series IDs and
-history cursors. Role-record cooldown anchors survive matching retained records.
+TargetVersion is context only. Changed A is omitted for that round; only a changed
+declaration resets its windows. Identical declarations retain continuity across
+source-only changes or skipped rounds within ConditionWindow.MaxGap. B retains
+failure/catch-up duration, run/series IDs and history cursors. Role-record cooldown anchors survive matching retained records.
 Exact replica/process checks reject predecessor replies; leader candidates must
 belong to the captured assignment. Leadership/cancellation still fences all groups.
 Cached sample ReceivedAt is preserved (unknown placeholders stay zero); latest

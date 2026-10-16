@@ -10,17 +10,18 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// RecoveryCatalog returns owned approved identity evidence, including older
+// LegacyRecoveryCatalog is the schema3 projection removed at Task78.
+// It returns owned approved identity evidence, including older
 // interrupted preparations. A group may contain multiple former identities for
 // one node; these are cleanup candidates, not a desired membership document.
 // Staged-only Latest is never authority for local resource retirement.
-func (sm *topologySM) RecoveryCatalog(ctx context.Context) ([]topology.Group, error) {
+func (sm *topologySM) LegacyRecoveryCatalog(ctx context.Context) ([]topology.Group, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()
-	catalog := recoveryCatalog{sm: sm, groups: make(map[string]*topology.Group),
+	catalog := recoveryCatalog{cluster: sm.target.ClusterID, groups: make(map[string]*topology.Group),
 		seen: make(map[storage.Identity]bool)}
 	catalog.addDocument(sm.target)
 	catalog.addDocument(sm.active)
@@ -31,7 +32,7 @@ func (sm *topologySM) RecoveryCatalog(ctx context.Context) ([]topology.Group, er
 	slices.SortFunc(records, func(a, b *operatorRecord) int { return cmp.Compare(a.ID, b.ID) })
 	proofs := sm.cleanupProofsLocked()
 	for _, op := range records {
-		if err := catalog.addOperator(op, proofs); err != nil {
+		if err := catalog.addOperator(sm, op, proofs); err != nil {
 			return nil, err
 		}
 	}
@@ -45,16 +46,16 @@ func (sm *topologySM) RecoveryCatalog(ctx context.Context) ([]topology.Group, er
 }
 
 type recoveryCatalog struct {
-	sm     *topologySM
-	groups map[string]*topology.Group
-	seen   map[storage.Identity]bool
+	cluster string
+	groups  map[string]*topology.Group
+	seen    map[storage.Identity]bool
 }
 
 func (catalog *recoveryCatalog) add(group string, r topology.Replica) {
 	if r.NodeName == "" || r.ReplicaID == 0 {
 		return
 	}
-	id := catalog.sm.loadIdentity(group, r.NodeName, r.ReplicaID)
+	id := storage.Identity{ClusterID: catalog.cluster, GroupID: group, NodeName: r.NodeName, ReplicaID: r.ReplicaID}
 	if catalog.seen[id] {
 		return
 	}
@@ -75,14 +76,14 @@ func (catalog *recoveryCatalog) addDocument(doc topology.Document) {
 	}
 }
 
-func (catalog *recoveryCatalog) addOperator(op *operatorRecord, proofs cleanupProofs) error {
-	doc, found := catalog.sm.documentLocked(op.Version)
+func (catalog *recoveryCatalog) addOperator(sm *topologySM, op *operatorRecord, proofs cleanupProofs) error {
+	doc, found := sm.documentLocked(op.Version)
 	if found {
 		catalog.addDocument(doc)
 	}
 	for _, step := range op.Steps {
 		if step.Kind == topology.StepCreateFoundingGroup && step.GroupID != topology.MetaGroupID &&
-			catalog.sm.active.Version < op.Version && proofs.groups[step.GroupID] == "" && (!found ||
+			sm.active.Version < op.Version && proofs.groups[step.GroupID] == "" && (!found ||
 			doc.Group(step.GroupID) == nil) {
 			return fault.ErrHistoryUnavailable
 		}

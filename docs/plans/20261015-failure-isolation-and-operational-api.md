@@ -1091,13 +1091,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/managed/boot.go`, recovery/readmission/ownership helpers, root recovery adapters. **Target:** [T] §5.4, §8.4, §12 host algorithms. **Depends on:** 49–59, 65–66. **Budget:** ≤550.
 
-- [ ] Replace Active ownership/admission/retention lookups with approved assignments, convergence, exact ledgers/grants and cleanup evidence. Verify pins and restored state before acquisition/publication; no global marker wait.
-- [ ] Preserve one startup reservation, replay readiness, exact holds and joined late factory/Close behavior. Readmitted owners join/fence predecessor resources before replacement; parked missing/foreign state keeps evidence.
-- [ ] Test healthy group recovery beside blocked debt, exact hold surviving recovery, successor protected from stale cleanup and retained startup without data refounding. Do not weaken load snapshot/tail replay contracts.
+- [x] Replace Active ownership/admission/retention lookups with approved assignments, convergence, exact ledgers/grants and cleanup evidence. Verify pins and restored state before acquisition/publication; no global marker wait.
+- [x] Preserve one startup reservation, replay readiness, exact holds and joined late factory/Close behavior. Readmitted owners join/fence predecessor resources before replacement; parked missing/foreign state keeps evidence.
+- [x] Test healthy group recovery beside blocked debt, exact hold surviving recovery, successor protected from stale cleanup and retained startup without data refounding. Do not weaken load snapshot/tail replay contracts.
 
 **Verification**
 
-- [ ] Run managed boot/recovery/readmission functional race cases and `make test`.
+- [x] Run managed boot/recovery/readmission functional race cases and `make test`.
 
 ### Task 72: Wire collection and scoped controllers into Node lifetime
 
@@ -1175,7 +1175,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metastore/store.go`, `internal/metaengine/sm.go`/`codec.go`, snapshot/restart tests, remaining composition. **Target:** [T] §4.1–4.3, §7.1, §8.4. **Depends on:** 1–77. **Budget:** ≤550.
 
-- [ ] Activate complete metadata disk/state/envelope schema 4; verify authority schema 2 from Task 54. Remove Active storage/API, Operator/WaitOperator wrappers, old MutationResult fields, ActivateTarget/legacy envelopes and every registered temporary scaffold now that all callers are converted. No fallback, migration, mixed-version acceptance or refounding old evidence. Replace Task67 legacyEnsureProgress/legacyEnsureFailure/legacyTransferPlan with confirmed scoped progress, exact operation-block diagnostics and transfer_plan; remove schema3 replacement guards when connecting scoped replacement commits. Select Task69 scopedSchedulingHost and remove the legacy scheduling Host/Config port, legacyScheduleInput and global driver gates. Replace Task70 metricsTopology legacy projection with local ProgressStatus rows for collection and local metadata samples.
+- [ ] Activate complete metadata disk/state/envelope schema 4; verify authority schema 2 from Task 54. Remove Active storage/API, Operator/WaitOperator wrappers, old MutationResult fields, ActivateTarget/legacy envelopes and every registered temporary scaffold now that all callers are converted. No fallback, migration, mixed-version acceptance or refounding old evidence. Replace Task67 legacyEnsureProgress/legacyEnsureFailure/legacyTransferPlan with confirmed scoped progress, exact operation-block diagnostics and transfer_plan; remove schema3 replacement guards when connecting scoped replacement commits. Select Task69 scopedSchedulingHost and remove the legacy scheduling Host/Config port, legacyScheduleInput and global driver gates. Replace Task70 metricsTopology legacy projection with local ProgressStatus rows for collection, LocalProgress and local metadata samples. Connect Task71 scoped WithLoadScope, RecoveryCatalog and WithGrantedLoadCleanup to that same state; remove their explicitly named Legacy adapters.
 - [ ] Add intentionally sourced v4/v2 fixtures with provenance; retain old changed-format fixtures for explicit rejection and immutable unrelated physical baseline hashes for unchanged-format checks. Preserve current-index/term/confstate/pins and unchanged buckets.
 - [ ] Exercise fresh startup and current-format retained restart through real composition. Confirm all new proposals/queries/dispatch/report callbacks are reachable, with no production dual-model switch or unsupported stub left on an accepted path. Cover successful operationCoordinator pages/cursor advancement, leadership changes across reads and native group-fence recipients (peer29 L1); host/Unsupported/NotLeader functional coverage already exists.
 
@@ -1365,6 +1365,8 @@ Do not run broad process performance/chaos campaigns by default; the focused deb
 
 
 ## NOT PLANNED CHANGES
+
+- Task 71 (peer34–35): folded drain membership/forced-retirement, observation-window continuity and redundant EnsureGroup read corrections into this task (`topology/drain_safety.go`, `internal/observe/evidence.go`, `cluster_ensure_request.go`). Retain native add/promote creation proof through pruning; own reseat pins Latest internally rather than reusing Target as CAS. See this task commit and progress entry for validation.
 
 - Task66 / peer thread30: reuse PlanRead and remaining-plan simulation, selecting required global steps with original ancestry evidence. BuildPlanPreferred now produces scoped blocks; explicit BuildLegacyPlan isolates the two schema3 preferred-planning callers until78 (the ordinary BuildPlan bridge also remains until78). OperationControllerConfig prepares existing ports without activating partial persistence. Meta drain takes PlanInput and resolves retained native bindings with target node states. No extra task, synthesized Active, retry plan payload or runtime mode switch. Peer29 L1's no-tests premise was disproven by existing functional tests; real page/native-recipient coverage is folded into78.
 

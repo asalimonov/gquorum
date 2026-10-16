@@ -121,16 +121,20 @@ func newFixtureAt(t *testing.T, name string, member uint64) *fixture {
 		}
 		return ids, ctx.Err()
 	}
-	f.cfg.Active = func(ctx context.Context) (topology.Document, error) {
+	f.cfg.Progress = func(ctx context.Context) (topology.ProgressPage, error) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		doc := topology.Document{ClusterID: f.node.ClusterID}
+		page := topology.ProgressPage{}
 		for _, scope := range f.scopes {
+			group := scope.Group
+			row := topology.GroupProgress{GroupID: group.ID, Approved: &group}
 			if scope.Established {
-				doc.Groups = append(doc.Groups, scope.Group)
+				row.ConvergedVersion, row.Converged = scope.Version, &group
 			}
+			page.Groups = append(page.Groups, row.Clone())
+			page.TargetVersion = max(page.TargetVersion, scope.Version)
 		}
-		return doc.Clone(), ctx.Err()
+		return page, ctx.Err()
 	}
 	f.cfg.ForgetGrantedReplica = func(ctx context.Context, grant topology.AuthorityGrant, expected uint64) error {
 		f.mu.Lock()

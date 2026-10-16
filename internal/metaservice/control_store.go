@@ -39,7 +39,7 @@ func (g *Group) openControlStore(identity topology.Identity) error {
 	if err = machine.Restore(context.Background(), materialized); err != nil {
 		return err
 	}
-	groups, err := machine.RecoveryCatalog(context.Background())
+	groups, err := machine.LegacyRecoveryCatalog(context.Background())
 	if err != nil {
 		return err
 	}

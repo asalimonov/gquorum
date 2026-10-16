@@ -23,7 +23,7 @@ func ValidateMetaDrainSafety(planning PlanInput, target Document, input MetaDrai
 	if err != nil {
 		return 0, err
 	}
-	departing := departingMetaNodes(owners, target)
+	departing := departingMetaNodes(planning, status, owners, target)
 	if len(departing) == 0 {
 		return 0, nil
 	}
@@ -95,12 +95,31 @@ func drainRefusal(format string, args ...any) error {
 	return fault.New(fault.UnsafeMembership, fmt.Sprintf(format, args...), nil)
 }
 
-func departingMetaNodes(owners map[uint64]string, target Document) map[string]struct{} {
+func departingMetaNodes(input PlanInput, status GroupStatus, owners map[uint64]string,
+	target Document) map[string]struct{} {
 	departing := make(map[string]struct{})
-	for _, name := range owners {
+	leaves := func(id uint64, name string) {
 		next := target.Node(name)
-		if next == nil || next.State != NodeActive {
+		if next == nil || next.State != NodeActive || target.MemberID(name) != id {
 			departing[name] = struct{}{}
+		}
+	}
+	// Retained identities resolve actual members; their presence alone cannot
+	// make an already removed member a departure in an unrelated operation.
+	for _, group := range []*Group{input.Groups[MetaGroupID].Converged, input.Approved.MetaGroup()} {
+		if group == nil {
+			continue
+		}
+		for _, replica := range group.Replicas {
+			leaves(replica.ReplicaID, replica.NodeName)
+		}
+	}
+	conf := status.ConfState
+	for _, ids := range [][]uint64{conf.Voters, conf.Learners, conf.VotersOutgoing, conf.LearnersNext} {
+		for _, id := range ids {
+			if name, ok := owners[id]; ok {
+				leaves(id, name)
+			}
 		}
 	}
 	return departing

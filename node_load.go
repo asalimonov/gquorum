@@ -32,7 +32,7 @@ func (n *node) newHost(m *metaservice.Group) (*managed.Host, error) {
 			return m.AuthorizeReadmission(ctx, metaservice.Readmission(grant))
 		},
 		Scope: m.LoadReplicaScope, LookupRecord: m.LookupLoadReplica, RecordReplica: m.RecordLoadReplica,
-		Catalog: m.LoadCatalog, Active: m.Active,
+		Catalog: m.LoadCatalog, Progress: m.LocalProgress,
 		RetireApplication: n.opts.Loads.Retire,
 		Retirement:        retirement, Retention: runner.Retention, RetirementInterval: n.opts.Loads.RetirementInterval,
 		Assignments: m.LoadAssignments, Factory: n.opts.Loads.Factory, Store: store, Transport: n.opts.Loads.Transport,
@@ -41,14 +41,14 @@ func (n *node) newHost(m *metaservice.Group) (*managed.Host, error) {
 		Metrics:          internalmetrics.Settings(n.opts.Metrics),
 		RecoveryInterval: n.opts.Loads.RecoveryInterval, Events: n.opts.Events, Logger: n.opts.Logger,
 		// A memory replica restarted without its state replaces itself through
-		// the ordinary reseat, pinned to the Active version the host observed.
-		ReseatOwn: func(ctx context.Context, id storage.Identity, version uint64) error {
+		// ordinary reseat. Each call pins Latest; scoped repair approves only
+		// this exact replacement and rebases independent staged intent.
+		ReseatOwn: func(ctx context.Context, id storage.Identity) error {
 			own := m.Identity().NodeName
 			key := topology.ReplicaKey{NodeName: id.NodeName, ReplicaID: id.ReplicaID}
 			_, err := m.ReseatReplica(ctx, id.GroupID, key, metaservice.MutationOptions{
-				ExpectedVersion: version,
-				Actor:           own,
-				Comment:         "reseat in-memory replica after restart",
+				Actor:   own,
+				Comment: "reseat in-memory replica after restart",
 			})
 			return err
 		},
