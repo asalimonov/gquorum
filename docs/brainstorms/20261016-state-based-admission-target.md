@@ -518,3 +518,27 @@ This preserves lost-reply retries after later readmissions and prevents pruning
 from converting ambiguity into permission. Complete debt and its chain are not
 independent roots; once all other references disappear, both may prune and the
 read-only absence query can settle the host record.
+
+### Host collection proof precision (peer thread 22, Task 57)
+
+`COLLECTION_REVISION`: the first retirement milestone records delivery order,
+not which valid revision the host must select. Collection and deferred status may
+cite any retained cleanup revision of the debt's exact RetireAction, the original
+milestone grant, or its consumed readmission grant. Require the cited grant's
+exact recorded host/member/replica receipt. Pending effect delivery returns
+Unavailable; restore refuses absent proof. Snapshot validation uses the same
+binding. Debt retains its operation and all grant revisions, so this adds no
+independent retention root. The host selects its latest complete exact retirement;
+Stop receipts and mere preparation never suffice.
+
+`CLEANUP_ASSIGNMENT`: completed exact local retirement and its full retained
+grant prove permanent assignment exclusion. Approval removes that identity from
+intent before issuing retirement, and allocation floors/retired-group tombstones
+prohibit reintroducing it. A fresh Target, Scope, Assignments or grant RPC adds
+no safety and can strand excluded hosts during metadata loss. Before preparation,
+validate local proof, binding/owner, ledger and enumerated storage identity/token,
+then serialized retention. Persist prepared before deletion; recheck local
+resources under the shared group gate. Prepared retries use saved proof without
+rerunning policy. Collected rows never delete again. Memory cleanup creates no
+durable collection receipt or timestamp. Reporting/release remain ordered after
+local completion and are implemented in Tasks 58–59.

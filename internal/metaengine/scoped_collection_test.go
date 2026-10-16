@@ -221,7 +221,7 @@ func TestScopedCollectionRequiresRecordedRetirementBeforeFirstAcceptance(t *test
 	before, _ := json.Marshal(s)
 	result, err := s.applyRecordCollection(31, p)
 	after, _ := json.Marshal(s)
-	if !errors.Is(err, fault.ErrOperationAuthorization) || result.changed || !bytes.Equal(before, after) {
+	if !errors.Is(err, fault.ErrUnavailable) || result.changed || !bytes.Equal(before, after) {
 		t.Fatal("collection substituted for retirement proof", result, err)
 	}
 }

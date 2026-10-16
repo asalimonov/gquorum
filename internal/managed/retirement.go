@@ -289,20 +289,21 @@ func (h *Host) collectLoop(ctx context.Context) {
 // CollectRetired checks local retirement records and collects those permitted
 // by verified retention decisions.
 func (h *Host) CollectRetired(parent context.Context) error {
-	ctxHandle, err := h.beginWork(parent)
+	ctxHandle, err := h.beginAuthorityWork(parent)
 	ctx, done := ctxHandle.Context, ctxHandle.Release
 	if err != nil {
 		return err
 	}
 	defer done()
-	return h.collectRetiredStores(ctx)
+	resumed := h.resumeCollections(ctx)
+	return errors.Join(resumed, h.collectRetiredStores(ctx))
 }
 
 func (h *Host) collectRetiredStores(ctx context.Context) error {
 	var failures []error
 	// Each record is collected through the store that enumerated it.
 	for _, retirement := range h.retirementStores() {
-		records, err := h.retiredRecords(ctx, retirement)
+		records, err := h.retiredRecords(ctx, retirement.store)
 		if err != nil {
 			return err
 		}
@@ -321,7 +322,7 @@ func (h *Host) retiredRecords(ctx context.Context,
 	return records, err
 }
 
-func (h *Host) collectRetiredRecords(ctx context.Context, retirement storage.RetirementStore,
+func (h *Host) collectRetiredRecords(ctx context.Context, retirement retirementBackend,
 	records []storage.RetiredReplica, failures *[]error) error {
 	for _, record := range records {
 		if err := ctx.Err(); err != nil {
@@ -349,32 +350,20 @@ func (h *Host) publishRetentionFailure(own topology.Identity, record storage.Ret
 	}
 }
 
-func (h *Host) collectOne(parent context.Context, retirement storage.RetirementStore,
+func (h *Host) collectOne(parent context.Context, retirement retirementBackend,
 	record storage.RetiredReplica) error {
 	ctx, cancel := context.WithTimeout(parent, h.cfg.EffectTimeout)
 	defer cancel()
-	ctxHandle, err := h.beginOperation(ctx, record.Identity.GroupID)
+	ctxHandle, err := h.beginAuthorityOperation(ctx, record.Identity.GroupID)
 	ctx, done := ctxHandle.Context, ctxHandle.Release
 	if err != nil {
 		return err
 	}
 	defer done()
-	return h.collectRetiredReplica(ctx, retirement, record)
-}
-
-func (h *Host) collectRetiredReplica(ctx context.Context, retirement storage.RetirementStore,
-	record storage.RetiredReplica) error {
-	decision, err := h.retentionDecision(ctx, record)
-	if err != nil {
-		return err
+	if retirement.class == topology.StorageMemory {
+		return h.collectMemoryReplica(ctx, retirement.store, record)
 	}
-	if !decision.Collect || time.Now().Before(decision.NotBefore) {
-		return nil
-	}
-	if err := h.checkRetiredCollection(ctx, record.Identity); err != nil {
-		return err
-	}
-	return retirement.Collect(ctx, record)
+	return h.collectRetiredReplica(ctx, retirement.store, record)
 }
 
 func (h *Host) retentionDecision(ctx context.Context,

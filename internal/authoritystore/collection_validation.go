@@ -84,13 +84,7 @@ func validateCollectionRetirement(r CollectionRecord) error {
 	if err := receipt.Validate(r.Grant); err != nil {
 		return err
 	}
-	if r.Grant.Purpose == topology.AuthorityReadmit {
-		return nil
-	}
-	if r.Grant.Purpose != topology.AuthorityEffect || r.Grant.Action == nil {
-		return fault.ErrInvalid
-	}
-	if r.Grant.Action.Kind != topology.StepCleanupReplicaState && r.Grant.Action.Kind != topology.StepDeleteGroupState {
+	if !retirementGrant(r.Grant) {
 		return fault.ErrInvalid
 	}
 	return nil

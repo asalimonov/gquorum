@@ -80,13 +80,15 @@ func collectionAcceptance(index uint64, proposal string, receipt authoritystore.
 }
 
 func (s *scopedState) validateCollectionProof(debt cleanupRecord, p RecordCollectionProposal) error {
-	if debt.Storage == topology.StorageMemory || debt.MemberID != p.Receipt.MemberID || debt.Retired == nil ||
-		debt.Retired.Key != p.Receipt.RetirementKey {
+	if debt.Storage == topology.StorageMemory || debt.MemberID != p.Receipt.MemberID {
 		return fault.ErrOperationAuthorization
 	}
 	check := scopedCleanupValidation{s, s.indexes, s.authorityCatalog()}
 	if !check.declaration(debt) || !check.actions(debt) || !check.milestones(debt) {
 		return fault.ErrOperationAuthorization
+	}
+	if err := check.collectionRetirement(debt, p.Receipt.RetirementKey); err != nil {
+		return err
 	}
 	return s.validateCollectionCourier(debt, p)
 }

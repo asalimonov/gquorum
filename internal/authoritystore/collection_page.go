@@ -23,6 +23,12 @@ type CollectionPage struct {
 	Next    string
 }
 
+// CollectionLookup distinguishes an absent journal row from either durable state.
+type CollectionLookup struct {
+	Record CollectionRecord
+	Found  bool
+}
+
 // Collections scans one transaction, not a snapshot spanning pages. Concurrent
 // insertions behind the cursor are found on the next scan from the beginning.
 // Limit zero selects 100 rows; the maximum is 1000.

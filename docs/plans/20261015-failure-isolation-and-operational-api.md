@@ -920,13 +920,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/managed/retirement.go`, host configuration/gates. **Target:** [T] §6.3, §7.2, §12 “Host collection and reporting”. **Depends on:** 42–43, 54–56. **Budget:** ≤550.
 
-- [ ] Update collectRetiredReplica to verify exact retirement/ledger/assignment/owner, run the existing serialized retention decision, persist prepared, acquire the existing host/group gate, revalidate and Collect before durable CompleteCollection.
-- [ ] Implement resumeCollections from journal pages as well as Retired enumeration. Prepared resumes with its saved token even when enumeration disappeared; collected resumes only reporting and can never call Collect again.
-- [ ] Test failed callback/Collect/persist boundaries, deferred retention status, later policy changes not undoing a prepared attempt and owned work remaining joined on waiter cancellation.
+- [x] Update collectRetiredReplica to verify exact retirement/ledger/assignment/owner, run the existing serialized retention decision, persist prepared, acquire the existing host/group gate, revalidate and Collect before durable CompleteCollection.
+- [x] Implement resumeCollections from journal pages as well as Retired enumeration. Prepared resumes with its saved token even when enumeration disappeared; collected resumes only reporting and can never call Collect again.
+- [x] Test failed callback/Collect/persist boundaries, deferred retention status, later policy changes not undoing a prepared attempt and owned work remaining joined on waiter cancellation.
 
 **Verification**
 
-- [ ] Run managed collection functional/race tests and `make test`.
+- [x] Run managed collection functional/race tests and `make test`.
 
 ### Task 58: Report collected receipts and release proof in order
 
@@ -1362,6 +1362,9 @@ Do not run broad process performance/chaos campaigns by default; the focused deb
 
 
 ## NOT PLANNED CHANGES
+
+- Task57 / peer thread22: collection acceptance, deferred status and snapshot validation now accept any retained exact retirement revision with recorded consumption, rather than binding to first receipt delivery order. Same scope, no new task; regression reproduces issuance/fence/reissue and both delivery orders. The tracked admission-target amendment documents why complete local retirement proof replaces a live assignment RPC.
+
 
 - Task54: Collections returns (CollectionPage, error), with Records/Next fields, matching the existing CleanupPage convention and mandatory two-result lint limit. This mechanically replaces the target's three-result signature without changing paging behavior or adding a public application API.
 

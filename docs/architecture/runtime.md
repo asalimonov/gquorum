@@ -184,7 +184,8 @@ Application transactions and outboxes remain caller-owned.
 
 `storage.RetirementStore` enumerates exact retired identities and opaque tokens.
 Lifecycle retention decides when collection is eligible; collection rechecks the
-identity/token, live assignments and ledger. There is no implicit age-based
+identity/token, local ownership and ledger. Complete exact retirement proof
+provides permanent assignment exclusion because retired replica IDs cannot be reused. There is no implicit age-based
 quarantine sweep. Retained approval evidence survives history pruning until its
 cleanup obligations can be proven complete. Staged-only identities never enter
 that retirement authority.
@@ -194,15 +195,23 @@ Preparation assigns one durable sequence; completion retries retain the first
 host timestamp. Rebinding preserves historical member IDs and proof. Exact
 collected-row removal follows reporting and storage-proof release. Journal pages
 are bounded owned values; their exclusive cursors survive row removal and rebind.
-Schema 1 is refused without migration. The managed collection/reporting wiring
-is implemented separately in the ongoing failure-isolation plan (Tasks 57–59).
+Schema 1 is refused without migration. Managed collection scans journal pages
+as well as storage enumeration. New attempts require complete exact local
+retirement proof before serialized retention; preparation survives later policy
+changes. Accepted attempts use the shared group gate and recheck local resources
+before deleting. Fenced hosts can resume accepted deletion without current
+metadata membership or quorum. Collected rows never repeat deletion. Reporting
+and proof-release composition remain in Tasks 58–59 of the ongoing plan.
 
 WAL collection writes and syncs an exact sibling marker before deleting contents,
 keeps the identity pin until those deletions are synced, and finishes with
 nonrecursive removal of the empty directory. A retry accepts an empty unpinned
 directory only with that marker. Missing data without proof returns an error
-matching fs.ErrNotExist. ForgetCollection releases only an exact marker after
-the retired directory is absent; it syncs the root even on repeated release.
+matching fs.ErrNotExist. Atomic marker publication requires hard-link support on
+the WAL volume; publication failure preserves retired data. A crash can leave a
+.collection-* temporary file: inventory conservatively treats it as retained
+evidence, while retired enumeration ignores it. ForgetCollection releases only
+an exact marker after the retired directory is absent; it syncs the root even on repeated release.
 Memory storage retains equivalent retry evidence only within its lifetime and
 cannot prove collection after process loss.
 

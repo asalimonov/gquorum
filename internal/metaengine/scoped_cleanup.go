@@ -3,7 +3,6 @@ package metaengine
 import (
 	"reflect"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/asalimonov/gquorum/topology"
@@ -18,7 +17,7 @@ type scopedCleanupValidation struct {
 func validateScopedCleanup(state *scopedState, index *scopedIndexes, catalog authorityCatalog) error {
 	check := scopedCleanupValidation{state, index, catalog}
 	for _, debt := range state.Cleanup {
-		if !check.declaration(debt) || !check.actions(debt) || !check.milestones(debt) || !validScopedCollection(debt) {
+		if !check.declaration(debt) || !check.actions(debt) || !check.milestones(debt) || !check.collection(debt) {
 			return invalidScopedState("cleanup lacks exact declaration, action or milestone proof")
 		}
 	}
@@ -144,6 +143,5 @@ func validScopedCollection(debt cleanupRecord) bool {
 	// Collection has its own bucket sequence and host clock. Neither can be
 	// ordered against effect-journal sequences or metadata milestone timestamps.
 	return debt.Storage != topology.StorageMemory && debt.Retired != nil && rc.LocalSequence != 0 &&
-		rc.Identity == debt.Identity && rc.MemberID == debt.MemberID && rc.RetirementKey == debt.Retired.Key &&
-		strings.TrimSpace(rc.Token) != "" && !strings.ContainsRune(rc.Token, 0) && !rc.CollectedAt.IsZero()
+		rc.Identity == debt.Identity && rc.MemberID == debt.MemberID && rc.Validate() == nil
 }

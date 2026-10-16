@@ -12,10 +12,13 @@ import (
 func (s *scopedState) applyRecordCleanupStatus(index uint64,
 	p RecordCleanupStatusProposal) (proposalApplication, error) {
 	debt := s.indexes.cleanup[p.Identity]
-	if debt == nil || debt.MemberID != p.MemberID || debt.Retired == nil ||
-		debt.Retired.Key != p.RetirementKey || p.At.IsZero() || p.NotBefore != nil && p.NotBefore.IsZero() ||
+	if debt == nil || debt.MemberID != p.MemberID || p.At.IsZero() || p.NotBefore != nil && p.NotBefore.IsZero() ||
 		p.Blocked != nil && strings.TrimSpace(p.Blocked.Code) == "" {
 		return proposalApplication{}, fault.ErrOperationAuthorization
+	}
+	check := scopedCleanupValidation{s, s.indexes, s.authorityCatalog()}
+	if err := check.collectionRetirement(*debt, p.RetirementKey); err != nil {
+		return proposalApplication{}, err
 	}
 	result := proposalApplication{result: ApplyResult{Accepted: true, ProposalID: p.ProposalID}}
 	if debt.Collection != nil || debt.Storage == topology.StorageMemory ||

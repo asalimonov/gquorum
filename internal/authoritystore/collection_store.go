@@ -13,6 +13,26 @@ import (
 
 const collectionBucket = "collection"
 
+// Collection reads one exact row without scanning unrelated pending work.
+func (s *Store) Collection(ctx context.Context, id storage.Identity) (CollectionLookup, error) {
+	var result CollectionLookup
+	err := s.readTransaction(ctx, func(tx *bolt.Tx) error {
+		key, err := s.localCollectionKey(id)
+		if err != nil {
+			return err
+		}
+		bucket := tx.Bucket([]byte(collectionBucket))
+		data := bucket.Get(key)
+		if data == nil {
+			return nil
+		}
+		result.Record, err = s.decodeCollection(bucket, key, data)
+		result.Found = err == nil
+		return err
+	})
+	return result, err
+}
+
 // PrepareCollection pins proof before destructive storage work. New callers
 // supply prepared state and zero Sequence; retries may supply the assigned one.
 // Repeating preparation after completion returns the original collected row.
