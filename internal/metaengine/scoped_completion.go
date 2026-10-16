@@ -26,12 +26,17 @@ func scopedStepConsumed(operation *topology.Operation, step topology.Step,
 	if step.Kind == topology.StepWaitCaughtUp {
 		return true // Observational wait, as in the existing execution contract.
 	}
+	return scopedConsumedAuthority(operation, step, index, catalog) != nil
+}
+
+func scopedConsumedAuthority(operation *topology.Operation, step topology.Step,
+	index *scopedIndexes, catalog authorityCatalog) *authorityRecord {
 	// validateScopedRetry has already proved acyclic, contiguous attempts with
 	// identical plans. Evidence keeps its original grant/action identity.
 	for previous := operation; previous != nil; previous = index.operations[previous.Previous] {
 		if catalog.planStepConsumed(previous.Status, step, retainedCompletion) {
-			return true
+			return catalog.planStepAuthority(previous.Status, step)
 		}
 	}
-	return false
+	return nil
 }

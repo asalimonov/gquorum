@@ -38,13 +38,6 @@ func (sm *topologySM) recordRoleEffectLocked(index uint64, ex *operatorRecord, s
 	default:
 		return
 	}
-	state := sm.voterSwitches[step.GroupID]
-	for _, previous := range state.Replicas {
-		if previous.OperatorID == ex.ID && previous.Version == ex.Version && previous.Attempt == ex.Attempt &&
-			previous.StepSeq == step.Seq {
-			return
-		}
-	}
 	r := topology.RoleChangeRecord{
 		OperatorID: ex.ID,
 		Version:    ex.Version,
@@ -58,7 +51,17 @@ func (sm *topologySM) recordRoleEffectLocked(index uint64, ex *operatorRecord, s
 		At:         at,
 		Index:      index,
 	}
-	state.GroupID, state.Last = step.GroupID, r
+	sm.voterSwitches[step.GroupID] = recordRoleChange(sm.voterSwitches[step.GroupID], r)
+}
+
+func recordRoleChange(state topology.VoterSwitchState, r topology.RoleChangeRecord) topology.VoterSwitchState {
+	for _, previous := range state.Replicas {
+		if previous.OperatorID == r.OperatorID && previous.Version == r.Version && previous.Attempt == r.Attempt &&
+			previous.StepSeq == r.StepSeq {
+			return state
+		}
+	}
+	state.GroupID, state.Last = r.GroupID, r
 	found := false
 	for i, old := range state.Replicas {
 		if old.NodeName == r.NodeName && old.ReplicaID == r.ReplicaID {
@@ -73,7 +76,7 @@ func (sm *topologySM) recordRoleEffectLocked(index uint64, ex *operatorRecord, s
 	slices.SortFunc(state.Replicas, func(a, b topology.RoleChangeRecord) int {
 		return cmp.Compare(a.ReplicaID, b.ReplicaID)
 	})
-	sm.voterSwitches[step.GroupID] = state
+	return state
 }
 
 // Records outlive ordinary topology history. Bound obsolete identities by the

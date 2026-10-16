@@ -86,6 +86,12 @@ func applyScopedProposal(state *scopedState, index uint64, kind ProposalKind,
 			return proposalApplication{}, err
 		}
 		return state.applyBeginOperation(index, p)
+	case "transition_operation":
+		var p TransitionOperationProposal
+		if err := json.Unmarshal(body, &p); err != nil {
+			return proposalApplication{}, err
+		}
+		return state.applyTransitionOperation(index, p)
 	case KindBeginEffect:
 		var p BeginEffectProposal
 		if err := json.Unmarshal(body, &p); err != nil {

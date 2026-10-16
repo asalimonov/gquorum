@@ -931,3 +931,17 @@ Verified
 - make test: 1474/1474 pass, 8.330s; test-reports/unit/20261016T085512.401525Z-ts3h31au/report.md. Final focused metaengine tests pass after small lint refactors; /tmp/gquorum-task39-focused.log. Staged lint passes, /tmp/gquorum-task39-lint.log; diff checks pass.
 - Regressions cover older operation issuance/restore beside unrelated pending fences, forged complete tuples versus retryable apply lag, fenced refusal without mutation, source-specific transfer/coalescing, ready/issued/consumed admission, every founding voter, exact current bindings, readmission batch reuse and atomic refusal. These are pure FSM changes; no new race/Docker run claimed.
 - Next is existing Task 40; its commit reaches the five-commit review checkpoint (55). No tasks were added or renumbered.
+
+## Task 40 — Independent block transitions and group completion preparation
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 55).
+
+Implemented
+- Added isolated noncompletion transitions with complete operation/block identity, block-local cursor ordering, receipt-gated advancement, owned diagnostics, terminal-owner release and idempotent replay even after a sibling advances its clock. Aggregate outcome uses every block; waiting/runnable siblings keep a failed sibling's operation nonterminal.
+- Prepared group convergence from the operation's pinned document after exact required consumption and state barriers. Only resources used by required effects gate completion; detached retirement after an exact required stop and a dead deleted group's unused native fence do not block it. Successful publication remains explicitly unsupported until existing Task 42 adds all node/marker/debt effects.
+- Reused retained Previous-chain consumption and extracted the existing cooldown upsert. A retry recording predecessor role completion retains the original grant/action tuple and completion application index; duplicate progress does not reset cooldown. Admission role advancement stays in the same owned candidate.
+- Zero-step deletion now reports its whole-batch retirement blocker. Completion reuses checkpoint-backed former ownership and bound stop/readmission debt; a regression caught and fixed omitted checkpoint seeding. Receipt-triggered atomic publication is part of Task 42, already scheduled.
+
+Verified
+- make test: 1494/1494 pass, 7.835s; test-reports/unit/20261016T091019.429767Z-5pmqty41/report.md. Focused metaengine checks and staged lint pass: /tmp/gquorum-task40-focused.log and /tmp/gquorum-task40-lint.log. Diff checks pass; no new race/Docker run claimed.
+- Regressions cover independent cursors/failure/waits, aggregate precedence, exact tuple/clock/refusal, inherited role cooldown, pinned completion, final admission recheck, atomic late refusal, partial versus complete readmission, required stop attribution, detached retirement and unreachable native deletion fences.
+- Five-commit dead-code audit: shared cooldown upsert and consumed-authority lookup remove duplicate logic; references and merged unused lint show no additional safe deletion. Legacy global authority/whole-document paths still have live schema-3 callers and are removed at Task 78; scoped completion installation is completed at Task 42, cleanup authorization at Task 43. Peer review is due now for c12eab9..this commit. No new tasks or renumbering.

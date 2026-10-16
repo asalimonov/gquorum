@@ -685,18 +685,18 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaengine/operator_state.go`, `progress.go`. **Target:** [T] §6.1, §7.2, §12 “completeGroupLocked”. **Depends on:** 34–39. **Budget:** ≤550.
 
-- [ ] Implement noncompletion applyTransitionOperation/validateScopedTransition and the validation/preparation portion of completeGroupLocked. Require exact required receipts and relevant barriers; aggregate full operation state independently of projected pages. Add inherited retry lookup when Task 44 installs Previous-chain behavior.
-- [ ] Record role-change cooldown under the exact consumed grant/action attempt, once; inherited retry consumption must not relabel the effect or reset an existing cooldown. Completion may first be recorded by a later attempt in the validated Previous chain. Preserve the original role tuple and use a completion application index after grant issuance.
-- [ ] Prepare the group's declaration from that operation's pinned approved version. Defer successful completion installation until Task 42 supplies the node/marker/debt preparations; do not publish a partially completed group in this intermediate task.
-- [ ] Test independent block cursors/failure, original declaration provenance after newer Target and stale tuple/final-validation refusal. Add the aggregate-precedence calculation/tests moved from Task 1: any runnable/waiting sibling keeps the operation nonterminal; once all terminate, failed dominates superseded, then succeeded. Task 42 adds successful atomic completion and duplicate-completion regressions once every prepared component exists.
+- [x] Implement noncompletion applyTransitionOperation/validateScopedTransition and the validation/preparation portion of completeGroupLocked. Require exact required receipts and relevant barriers; aggregate full operation state independently of projected pages. Add inherited retry lookup when Task 44 installs Previous-chain behavior.
+- [x] Record role-change cooldown under the exact consumed grant/action attempt, once; inherited retry consumption must not relabel the effect or reset an existing cooldown. Completion may first be recorded by a later attempt in the validated Previous chain. Preserve the original role tuple and use a completion application index after grant issuance.
+- [x] Prepare the group's declaration from that operation's pinned approved version. Defer successful completion installation until Task 42 supplies the node/marker/debt preparations; do not publish a partially completed group in this intermediate task.
+- [x] Test independent block cursors/failure, original declaration provenance after newer Target and stale tuple/final-validation refusal. Add the aggregate-precedence calculation/tests moved from Task 1: any runnable/waiting sibling keeps the operation nonterminal; once all terminate, failed dominates superseded, then succeeded. Task 42 adds successful atomic completion and duplicate-completion regressions once every prepared component exists.
 
-- [ ] A zero-step deletion awaiting whole-batch readmission consumption stays blocked with an exact reason; recheck on receipts before atomically completing and retaining debt.
+- [x] A zero-step deletion awaiting whole-batch readmission consumption stays blocked with an exact reason; prepare a receipt-driven recheck; Task 42 installs its complete group/debt/node result atomically.
 
-- [ ] Use Task 37's rebound required StopAction for ordinary deletion completion, including formerly detached debt. Its exact receipt supplies Stopped; do not add a second parallel proof source or relabel an old receipt.
+- [x] Use Task 37's rebound required StopAction for ordinary deletion completion, including formerly detached debt. Its exact receipt supplies Stopped; do not add a second parallel proof source or relabel an old receipt.
 
 **Verification**
 
-- [ ] Run scoped transition/completion units and `make test`.
+- [x] Run scoped transition/completion units and `make test`.
 
 ### Task 41: Advance node proof and historical convergence markers
 

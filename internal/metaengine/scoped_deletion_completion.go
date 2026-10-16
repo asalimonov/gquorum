@@ -23,6 +23,9 @@ func prepareDeletionCompletions(source, next *scopedState, collector planningCol
 		}
 		if err := p.complete(block.GroupID, operation.UpdatedAt); err != nil {
 			if errors.Is(err, fault.ErrUnavailable) {
+				operation.Status.Blocks[i].State = topology.OperationWaitingForReplica
+				operation.Status.Blocks[i].Blocked = &topology.BlockedReason{
+					Code: "readmission_retirement", Message: err.Error()}
 				continue // A zero-step block still waits for its exact retirement proof.
 			}
 			return err
