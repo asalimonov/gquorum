@@ -27,7 +27,7 @@ func (h *Host) startCollectionLoopLocked() {
 
 func (h *Host) reportCollections(ctx context.Context) error {
 	if h.cfg.Collection.Report == nil {
-		return nil // The service callback is installed at the scoped cutover.
+		return nil // Optional for isolated hosts; Node supplies the metadata reporter.
 	}
 	journal, err := h.authorityStore()
 	if err != nil {

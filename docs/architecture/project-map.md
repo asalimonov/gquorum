@@ -462,6 +462,15 @@ fences/joins old owners and verifies cleanup receipts before installing the gran
 new member pin. [Retirement](../../internal/managed/retirement.go),
 [readmission](../../internal/managed/readmission.go).
 
+`FI_COLLECTION_OWNER`: Node.newHost supplies the existing authority journal and
+Group.ReportCollection/ReportCleanupStatus. The Host authority worker survives
+participation fencing and runs on explicit control-only joining restarts without
+starting replicas. Prepared rows resume without re-running retention; collected
+rows retry their original receipt without deleting again. Node cancellation ends
+RPC waits, but joins delayed storage callbacks before closing owned resources.
+An acknowledged exact receipt releases the store marker before the journal row;
+failed reporting preserves both. Schema3 refuses replicated acceptance until78.
+
 [internal/loadhandle](../../internal/loadhandle/handle.go): `Handle` stores
 immutable storage.Identity and engine pointer; `New`, `Core`, `Identity` bridge
 managed ownership and load's public type without exposing engine methods through

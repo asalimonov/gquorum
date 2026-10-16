@@ -225,8 +225,12 @@ the historical courier before proposing receipt acceptance. Only missing history
 permits a repeated absence check; authentication/conflicting proof is never
 suppressed. A retained-member hint follows AuthorityRead semantics when the
 participation header is zero or lags the journal pin. General ProposeMeta refuses
-collection/status envelopes. Scoped state access remains Unsupported on schema3;
-Node callback composition and full activation remain Tasks72/78.
+collection/status envelopes. Node supplies both callbacks and its existing journal
+to the managed Host; its accepted lifetime owns reporting, including explicit
+control-only joining restarts. RequestStop cancels report waits; delayed storage
+callbacks remain joined before owned stores and the journal close. Borrowed stores
+remain caller-owned. Scoped state acceptance remains Unsupported on schema3 until
+the complete Task78 activation; an unsuccessful report keeps its durable receipt.
 
 WAL collection writes and syncs an exact sibling marker before deleting contents,
 keeps the identity pin until those deletions are synced, and finishes with

@@ -1103,13 +1103,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `node*.go`, metaservice/managed configuration and shutdown. **Target:** [T] §7.2, §8.1/§8.4. **Depends on:** 57–59, 63–71. **Budget:** ≤550.
 
-- [ ] Supply the existing authority Store and concrete Report/Status callbacks to the existing managed Host; start/resume/report within Node's accepted lifetime. NewNode remains validation/copy only, with no I/O or callbacks.
-- [ ] Control-only excluded-host startup may inspect/report/perform already-authorized cleanup without starting Raft or application replicas. Preserve historical courier proof and no general membership admission.
-- [ ] Stop closes dispatch admission, cancels RPC/report waits and joins workers/owners/replay/callbacks before owned stores/journal close. Preserve borrowed-resource ownership and retryable Close ownership.
+- [x] Supply the existing authority Store and concrete Report/Status callbacks to the existing managed Host; start/resume/report within Node's accepted lifetime. NewNode remains validation/copy only, with no I/O or callbacks.
+- [x] Control-only excluded-host startup may inspect/report/perform already-authorized cleanup without starting Raft or application replicas. Preserve historical courier proof and no general membership admission.
+- [x] Stop closes dispatch admission, cancels RPC/report waits and joins workers/owners/replay/callbacks before owned stores/journal close. Preserve borrowed-resource ownership and retryable Close ownership.
 
 **Verification**
 
-- [ ] Run Node startup/control-only/shutdown functional race tests and `make test`.
+- [x] Run Node startup/control-only/shutdown functional race tests and `make test`.
 
 ### Task 73: Convert routing, drain status, names and watch consumers
 

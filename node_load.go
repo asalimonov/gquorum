@@ -24,6 +24,7 @@ func (n *node) newHost(m *metaservice.Group) (*managed.Host, error) {
 		Authority: n.localAuthority, ValidateGrant: m.ValidateGrant, ValidateCourier: m.ValidateAuthorityCourier,
 		ResolveAuthorityPeer: m.ResolveAuthorityPeer, RecordFence: m.RecordFence,
 		ForgetGrantedReplica: m.ForgetGrantedLoadReplica,
+		Collection:           managed.CollectionCallbacks{Report: m.ReportCollection, Status: m.ReportCleanupStatus},
 		AuthorityFloors: func(ctx context.Context) ([]topology.AuthorityGrant, error) {
 			return m.ReadAuthorityFloors(ctx, m.Identity().NodeName)
 		},

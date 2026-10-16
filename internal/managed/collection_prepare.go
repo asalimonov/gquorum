@@ -78,7 +78,7 @@ func (h *Host) collectionCandidate(ctx context.Context,
 func (h *Host) deferCollection(ctx context.Context, row authoritystore.CollectionRecord,
 	decision lifecycle.RetentionDecision) error {
 	if h.cfg.Collection.Status == nil {
-		return nil // Service callback is installed at the complete scoped cutover.
+		return nil // Optional for isolated hosts; Node supplies the metadata reporter.
 	}
 	status := CleanupStatus{Identity: row.Retired.Identity, MemberID: row.MemberID,
 		RetirementKey: row.Grant.Key, Blocked: &topology.BlockedReason{Code: "retention", Message: decision.Reason}}
