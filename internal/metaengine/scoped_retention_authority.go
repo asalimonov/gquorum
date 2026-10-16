@@ -32,6 +32,9 @@ func (r *scopedRetention) closeGrant(record scopedAuthorityRecord) {
 		r.closeReadmission(grant.AdmissionID)
 	}
 	for _, resource := range grant.Resources {
+		if r.catalog.deletedResource(resource) {
+			continue
+		}
 		r.settlementWitness(record.authorityRecord, resource)
 		if grant.Purpose == topology.AuthorityFence && !resourceConsumed(&record.authorityRecord, resource) {
 			r.fencePredecessor(grant.Key, resource)
@@ -87,6 +90,7 @@ func (r *scopedRetention) fencePredecessor(key topology.AuthorityKey, resource t
 
 func (r *scopedRetention) closeRevocations() {
 	for i, record := range r.state.Revocations {
+		record.Obligations = r.catalog.liveObligations(record.Obligations)
 		op := r.state.indexes.operations[record.OperationID]
 		if op != nil && r.versions[op.Status.Version] || slices.ContainsFunc(record.Obligations,
 			func(ob topology.FenceObligation) bool { return ob.Evidence == nil || r.grants[ob.Key] }) {

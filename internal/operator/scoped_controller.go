@@ -34,18 +34,23 @@ func (e *Controller) runScopedTick(ctx context.Context) controllerOutcome {
 	if run == nil || run.dispatch == nil {
 		return controllerIdle
 	}
+	e.runDetachedTick(ctx, run)
+	e.runRequiredTick(ctx, run)
+	return controllerIdle
+}
+
+func (e *Controller) runRequiredTick(ctx context.Context, run *controllerRun) {
 	limit := run.dispatch.available(e.rules.Limits.WithDefaults().MaxConcurrentGroups)
 	if limit == 0 {
-		return controllerIdle
+		return
 	}
 	work, err := e.readScopedWork(ctx, limit)
 	if err != nil {
-		return controllerWaiting
+		return
 	}
 	for _, item := range work {
 		e.dispatchWork(ctx, run.dispatch, item)
 	}
-	return controllerIdle
 }
 
 func (e *Controller) readScopedWork(ctx context.Context, limit int) ([]WorkItem, error) {

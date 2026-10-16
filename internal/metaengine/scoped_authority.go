@@ -165,6 +165,7 @@ func restoreScopedAuthorityRecords(state *scopedState) (authorityRestore, error)
 		requests: map[string]bool{}, readmissionRevisions: map[string]uint64{},
 		readmissionMembers: map[string]uint64{}, readmissionMeta: map[string]bool{},
 		cleanupActions: make(map[topology.AuthorizedStep]bool)}
+	restore.catalog.deletedGroups = state.completedDeletions()
 	for _, record := range state.AuthorityRecords {
 		if record.Class == cleanupAuthorityClass && record.Grant.Action != nil {
 			restore.cleanupActions[*record.Grant.Action] = true

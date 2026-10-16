@@ -15,19 +15,20 @@ import (
 // Indexes refer only to owned decoded rows. They are rebuilt, never serialized,
 // and confer no authority before the complete restore graph/proof validation.
 type scopedIndexes struct {
-	groups       map[string]*groupConvergence
-	nodes        map[string]*nodeConvergence
-	operations   map[topology.OperationID]*topology.Operation
-	first        map[uint64]topology.OperationID
-	latest       map[uint64]topology.OperationID
-	retries      map[topology.OperationID]topology.OperationID
-	cleanup      map[storage.Identity]*cleanupRecord
-	cleanupOrder []*cleanupRecord
-	intents      map[intentKey]*Intent
-	documents    map[uint64]topology.Document
-	rebases      map[uint64]uint64
-	grants       map[topology.AuthorityKey]*scopedAuthorityRecord
-	obligations  map[topology.AuthorityResource][]topology.AuthorityKey
+	groups          map[string]*groupConvergence
+	nodes           map[string]*nodeConvergence
+	operations      map[topology.OperationID]*topology.Operation
+	first           map[uint64]topology.OperationID
+	latest          map[uint64]topology.OperationID
+	retries         map[topology.OperationID]topology.OperationID
+	cleanup         map[storage.Identity]*cleanupRecord
+	cleanupOrder    []*cleanupRecord
+	intents         map[intentKey]*Intent
+	documents       map[uint64]topology.Document
+	rebases         map[uint64]uint64
+	grants          map[topology.AuthorityKey]*scopedAuthorityRecord
+	obligations     map[topology.AuthorityResource][]topology.AuthorityKey
+	obligationOrder []topology.AuthorityResource
 }
 
 type intentKey struct {
@@ -66,6 +67,7 @@ func (s *scopedState) buildIndexes() (*scopedIndexes, error) {
 		return nil, err
 	}
 	index.obligations = scopedResourceObligations(s)
+	index.obligationOrder = slices.SortedFunc(maps.Keys(index.obligations), topology.AuthorityResource.Compare)
 	index.cleanupOrder = slices.SortedFunc(maps.Values(index.cleanup), func(a, b *cleanupRecord) int {
 		return compareReplicaIdentity(a.Identity, b.Identity)
 	})

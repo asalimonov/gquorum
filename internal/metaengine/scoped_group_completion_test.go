@@ -185,4 +185,23 @@ func TestScopedDeletionStopsDoNotRequireDeadNativeGroupFence(t *testing.T) {
 	if _, err := s.prepareGroupCompletion(completion); err != nil {
 		t.Fatal("all exact hosts stopped but dead group's native fence blocked deletion", err)
 	}
+	applyScopedTransitionFixture(t, &s, completion)
+	if len(s.indexes.obligations[native]) != 0 || !s.authorityCatalog().deletedResource(native) {
+		t.Fatal("completed permanent deletion retained unreachable native obligation")
+	}
+	host := topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: "shard0", NodeName: "n1"}
+	if s.authorityCatalog().deletedResource(host) {
+		t.Fatal("native tombstone settled a host floor")
+	}
+	for _, revocation := range s.Revocations {
+		status, err := queryScopedAuthority(&s, QueryRequest{Kind: "authority", OperationID: revocation.OperationID})
+		if err != nil || slices.ContainsFunc(status.Obligations, func(ob topology.FenceObligation) bool { return ob.Resource == native }) {
+			t.Fatal("authority query retained impossible native fence", status, err)
+		}
+	}
+	ageScopedHistory(t, &s)
+	pruneScopedFixture(t, &s)
+	if len(s.indexes.obligations[native]) != 0 || !s.authorityCatalog().deletedResource(native) {
+		t.Fatal("pruning reopened native deletion fence")
+	}
 }

@@ -10,12 +10,16 @@ import (
 // Old non-floor grants remain evidence, not independent issuance gates.
 func scopedResourceObligations(state *scopedState) map[topology.AuthorityResource][]topology.AuthorityKey {
 	catalog := newAuthorityCatalog()
+	catalog.deletedGroups = state.completedDeletions()
 	for i := range state.AuthorityRecords {
 		r := &state.AuthorityRecords[i].authorityRecord
 		catalog.records[r.Grant.Key] = r
 	}
 	sets := map[topology.AuthorityResource]map[topology.AuthorityKey]struct{}{}
 	add := func(resource topology.AuthorityResource, key topology.AuthorityKey) {
+		if catalog.deletedResource(resource) {
+			return
+		}
 		if sets[resource] == nil {
 			sets[resource] = map[topology.AuthorityKey]struct{}{}
 		}

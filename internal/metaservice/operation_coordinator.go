@@ -7,15 +7,18 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/operator"
+	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
 // The sole scoped controller adapter. Task78 replaces operatorCoordinator in
 // composition with this adapter when complete scoped persistence is installed.
 type operationCoordinator struct {
-	g     *Group
-	mu    sync.Mutex
-	after string
+	g            *Group
+	mu           sync.Mutex
+	after        string
+	cleanupAfter storage.Identity
+	fenceAfter   topology.AuthorityResource
 }
 
 func (c *operationCoordinator) IsMetaLeader() bool { return c.g.IsLeader() }

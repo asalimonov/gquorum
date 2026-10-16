@@ -24,6 +24,12 @@ func TestScopedCoordinatorKeepsSchema3ClosedAndRequiresLeadership(t *testing.T) 
 	if _, err := c.ReadyBlocks(ctx, 1); !errors.Is(err, fault.ErrUnsupported) {
 		t.Fatal(err)
 	}
+	if _, err := c.ReadyCleanup(ctx, 1); !errors.Is(err, fault.ErrUnsupported) {
+		t.Fatal(err)
+	}
+	if _, err := c.ReadyFences(ctx, 1); !errors.Is(err, fault.ErrUnsupported) {
+		t.Fatal(err)
+	}
 	canceled, stop := context.WithCancel(ctx)
 	stop()
 	if _, err := c.ReadyBlocks(canceled, 1); !errors.Is(err, context.Canceled) {

@@ -11,6 +11,7 @@ type dispatchHost struct{ group, node string }
 type dispatchBackoff struct {
 	until, updated time.Time
 	delay          time.Duration
+	last           dispatchRequest
 }
 
 // Each Start owns a new dispatcher. Admission and WaitGroup.Add share mu;
@@ -24,6 +25,7 @@ type controllerDispatch struct {
 	hosts             map[dispatchHost]bool
 	requests          map[dispatchRequest]bool
 	ordinary, cleanup int
+	fencesFirst       bool
 }
 
 func (d *controllerDispatch) close() {
@@ -105,12 +107,16 @@ func (e *Controller) backoffDispatch(d *controllerDispatch, host dispatchHost) {
 	if d.backoff == nil {
 		d.backoff = make(map[dispatchHost]dispatchBackoff)
 	}
-	d.backoff[host] = dispatchBackoff{until: now.Add(delay), updated: now, delay: delay}
+	d.backoff[host] = dispatchBackoff{until: now.Add(delay), updated: now, delay: delay, last: previous.last}
 }
 
 func (d *controllerDispatch) pruneBackoff(now time.Time, idle time.Duration) {
 	for key, row := range d.backoff {
-		if !now.Before(row.updated.Add(idle)) {
+		at := row.updated
+		if row.until.After(at) {
+			at = row.until
+		}
+		if !now.Before(at.Add(idle)) {
 			delete(d.backoff, key)
 		}
 	}

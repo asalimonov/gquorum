@@ -50,12 +50,21 @@ func (e *Controller) dispatchRequest(ctx context.Context, request effectDispatch
 	e.mu.Lock()
 	run := e.run
 	e.mu.Unlock()
-	if run == nil || run.dispatch == nil {
-		return topology.EffectReceipt{}, fault.ErrStopped
-	}
-	if err := e.reserveRequest(ctx, run.dispatch, request); err != nil {
+	permit, err := e.reserveDispatch(ctx, dispatchPermit{run: run, host: request.host(), cleanup: request.cleanup})
+	if err != nil {
 		return topology.EffectReceipt{}, err
 	}
+	receipt, err := e.dispatchReserved(ctx, permit, request)
+	e.releaseDispatch(permit, err)
+	return receipt, err
+}
+
+func (e *Controller) dispatchReserved(ctx context.Context, permit *dispatchPermit,
+	request effectDispatch) (topology.EffectReceipt, error) {
+	if err := e.bindRequest(ctx, permit, request); err != nil {
+		return topology.EffectReceipt{}, err
+	}
+	run := permit.run
 	bounded, cancel := context.WithTimeout(ctx, e.proposalTimeout)
 	stop := context.AfterFunc(run.ctx, cancel)
 	defer func() { stop(); cancel() }()
@@ -67,60 +76,7 @@ func (e *Controller) dispatchRequest(ctx context.Context, request effectDispatch
 	if err == nil && !e.scoped.IsMetaLeader() {
 		err = fault.ErrNotLeader
 	}
-	e.releaseRequest(run.dispatch, request, err)
 	return receipt, err
-}
-
-func (e *Controller) reserveRequest(ctx context.Context, d *controllerDispatch, request effectDispatch) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.closed || ctx.Err() != nil {
-		return fault.ErrStopped
-	}
-	if !e.scoped.IsMetaLeader() {
-		return fault.ErrNotLeader
-	}
-	limits := e.rules.Limits.WithDefaults()
-	if request.cleanup && d.cleanup >= limits.MaxConcurrentCleanup ||
-		!request.cleanup && d.ordinary >= limits.MaxConcurrentGroups {
-		return fault.ErrUnavailable
-	}
-	host, key := request.host(), request.key()
-	now := e.clock.Now()
-	d.pruneBackoff(now, e.maxRetry)
-	if d.hosts[host] || d.requests[key] || now.Before(d.backoff[host].until) {
-		return fault.ErrUnavailable
-	}
-	if d.hosts == nil {
-		d.hosts = make(map[dispatchHost]bool)
-		d.requests = make(map[dispatchRequest]bool)
-	}
-	d.hosts[host], d.requests[key] = true, true
-	if request.cleanup {
-		d.cleanup++
-	} else {
-		d.ordinary++
-	}
-	d.workers.Add(1) // Admission and close share mu; never Add after shutdown Wait starts.
-	return nil
-}
-
-func (e *Controller) releaseRequest(d *controllerDispatch, request effectDispatch, err error) {
-	d.mu.Lock()
-	delete(d.hosts, request.host())
-	delete(d.requests, request.key())
-	if request.cleanup {
-		d.cleanup--
-	} else {
-		d.ordinary--
-	}
-	if err != nil && !d.closed {
-		e.backoffDispatch(d, request.host())
-	} else {
-		delete(d.backoff, request.host())
-	}
-	d.mu.Unlock()
-	d.workers.Done()
 }
 
 func (e *Controller) finishRequest(ctx context.Context, request effectDispatch,

@@ -9,6 +9,7 @@ import (
 // Coordinator supplies bounded scoped work and exact replicated transitions.
 // A selected item is an observation, never authorization to perform an effect.
 type Coordinator interface {
+	CleanupCoordinator
 	IsMetaLeader() bool
 	ReadyBlocks(context.Context, int) ([]WorkItem, error)
 	RecordOperationTransition(context.Context, topology.OperationTransition) error

@@ -278,7 +278,7 @@ func TestScopedDispatchBackoffIsBoundedAndPrunesIdleHosts(t *testing.T) {
 	if _, found := d.backoff[dispatchHost{group: "work", node: "99"}]; !found {
 		t.Fatal("newest backoff evicted")
 	}
-	d.pruneBackoff(clock.Now().Add(e.maxRetry), e.maxRetry)
+	d.pruneBackoff(clock.Now().Add(2*e.maxRetry), e.maxRetry)
 	if len(d.backoff) != 0 {
 		t.Fatal("idle host entries retained", d.backoff)
 	}

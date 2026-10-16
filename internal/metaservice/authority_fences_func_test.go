@@ -11,6 +11,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
+	"github.com/asalimonov/gquorum/internal/operator"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -64,6 +65,27 @@ func TestReconcileFencesPersistsPartialProgressAfterOperatorTerminates(t *testin
 	transition.State, transition.At = topology.OperatorSuperseded, at.Add(2*time.Millisecond)
 	if _, err := g.propose(ctx, metaengine.TransitionOperatorProposal{Transition: transition}); err != nil {
 		t.Fatal(err)
+	}
+	coordinator := &operationCoordinator{g: g}
+	for _, obligation := range g.state().PendingFences() {
+		if obligation.Resource.Kind != topology.AuthorityHost {
+			continue
+		}
+		grant, found := g.state().AuthorityGrant(obligation.Key)
+		if !found {
+			t.Fatal("missing exact boundary")
+		}
+		target, err := coordinator.ResolveFenceTarget(ctx, operator.FenceWork{Grant: grant, Resource: obligation.Resource})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := coordinator.DispatchFence(ctx, grant, obligation.Resource, target); err != nil {
+			t.Fatal(err)
+		}
+		target.MemberID++
+		if err := coordinator.DispatchFence(ctx, grant, obligation.Resource, target); !errors.Is(err, fault.ErrOperationAuthorization) {
+			t.Fatal("foreign fence target accepted", err)
+		}
 	}
 	if err := g.ReconcileFences(ctx); !errors.Is(err, fault.ErrUnavailable) {
 		t.Fatal("unavailable group did not retain pending revocation", err)

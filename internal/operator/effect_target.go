@@ -11,7 +11,24 @@ import (
 // Current authority must still be confirmed before sending and by the recipient.
 func ValidateEffectTarget(grant topology.AuthorityGrant, resource topology.AuthorityResource,
 	target topology.AuthorityTarget) error {
-	if grant.Action == nil || grant.Validate() != nil ||
+	if grant.Action == nil {
+		return fault.ErrOperationAuthorization
+	}
+	return validateDispatchTarget(grant, resource, target)
+}
+
+// ValidateFenceTarget preserves the exact boundary and recipient selection.
+func ValidateFenceTarget(grant topology.AuthorityGrant, resource topology.AuthorityResource,
+	target topology.AuthorityTarget) error {
+	if grant.Purpose != topology.AuthorityFence {
+		return fault.ErrOperationAuthorization
+	}
+	return validateDispatchTarget(grant, resource, target)
+}
+
+func validateDispatchTarget(grant topology.AuthorityGrant, resource topology.AuthorityResource,
+	target topology.AuthorityTarget) error {
+	if grant.Validate() != nil ||
 		!slices.Contains(grant.Resources, resource) || !slices.Contains(grant.Targets, target) {
 		return fault.ErrOperationAuthorization
 	}

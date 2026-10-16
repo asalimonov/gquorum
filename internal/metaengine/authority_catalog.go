@@ -29,10 +29,11 @@ type revocationRecord struct {
 	Obligations []topology.FenceObligation `json:"obligations"`
 }
 type authorityCatalog struct {
-	records     map[topology.AuthorityKey]*authorityRecord
-	floors      map[topology.AuthorityResource]topology.AuthorityKey
-	actions     map[topology.AuthorizedStep]topology.AuthorityKey
-	revocations map[topology.OperatorID]*revocationRecord
+	deletedGroups map[string]bool // Scoped completed tombstones only; never serialized.
+	records       map[topology.AuthorityKey]*authorityRecord
+	floors        map[topology.AuthorityResource]topology.AuthorityKey
+	actions       map[topology.AuthorizedStep]topology.AuthorityKey
+	revocations   map[topology.OperatorID]*revocationRecord
 }
 
 func newAuthorityCatalog() authorityCatalog {
@@ -391,7 +392,7 @@ func (a authorityCatalog) validateFencePredecessors() error {
 			continue
 		}
 		for _, resource := range record.Grant.Resources {
-			if resourceConsumed(record, resource) {
+			if a.deletedResource(resource) || resourceConsumed(record, resource) {
 				continue
 			}
 			if !a.hasFencePredecessor(record, resource) {
@@ -435,7 +436,7 @@ func (a authorityCatalog) validateRestoredObligations(obligations []topology.Fen
 			return invalidAuthorityCatalog()
 		}
 		seen[key] = true
-		if ob.Evidence == nil && a.fenceConsumed(ob.Key, ob.Resource) {
+		if ob.Evidence == nil && !a.deletedResource(ob.Resource) && a.fenceConsumed(ob.Key, ob.Resource) {
 			return invalidAuthorityCatalog()
 		}
 		if ob.Evidence != nil {

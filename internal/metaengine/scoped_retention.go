@@ -97,6 +97,7 @@ func (r *scopedRetention) selected() scopedState {
 	next.Revocations = nil
 	for i, row := range r.state.Revocations {
 		if r.revocations[i] {
+			row.Obligations = r.catalog.liveObligations(row.Obligations)
 			next.Revocations = append(next.Revocations, row)
 		}
 	}

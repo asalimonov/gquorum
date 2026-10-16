@@ -9,6 +9,7 @@ import (
 
 func (a authorityCatalog) clone() authorityCatalog {
 	catalogCopy := newAuthorityCatalog()
+	catalogCopy.deletedGroups = a.deletedGroups // Immutable derived state for this preparation.
 	for key, r := range a.records {
 		v := *r
 		v.Grant = r.Grant.Clone()
@@ -215,6 +216,9 @@ func (transition *authorityRevocation) installFence(group string, scope *authori
 // A fence is unnecessary once every older one-shot grant for this resource is
 // durably consumed. This covers destroyed groups without inventing fence proof.
 func (a authorityCatalog) fenceConsumed(key topology.AuthorityKey, resource topology.AuthorityResource) bool {
+	if a.deletedResource(resource) {
+		return true
+	}
 	for _, r := range a.records {
 		if r.Grant.Key.GroupID == key.GroupID && r.Grant.Key.Revision < key.Revision &&
 			r.Grant.Purpose != topology.AuthorityFence && slices.Contains(r.Grant.Resources, resource) &&
@@ -261,6 +265,9 @@ func (a authorityCatalog) fenceSettled(r *authorityRecord) bool {
 // intent.
 // Only a newer durable resource floor proves that intent can no longer resume.
 func (a authorityCatalog) resourceSettled(r *authorityRecord, resource topology.AuthorityResource) bool {
+	if a.deletedResource(resource) {
+		return true
+	}
 	transfer := r.Grant.Action != nil && r.Grant.Action.Kind == topology.StepTransferLeader
 	if !transfer && resourceConsumed(r, resource) {
 		return true

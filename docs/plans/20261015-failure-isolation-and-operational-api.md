@@ -1006,13 +1006,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/operator` cleanup dispatch, metaservice cleanup adapters, existing whole-group dispatch. **Target:** [T] §6.2, §6.4, §9 TiKV lifecycle/worker adaptations. **Depends on:** 43, 59, 63. **Budget:** ≤550.
 
-- [ ] Discover durable cleanup in bounded pages; use MaxConcurrentCleanup with the same host/group gate registry and bounded backoff as ordinary work. Allocate only for actual admitted work, not MaxConcurrentCleanup slots. Remove the controller's global fence-error short circuit.
-- [ ] Dispatch/record each exact whole-group target independently; one unreachable former host cannot suppress another receipt. Retain required deletion stops in execution rather than disguising them as optional cleanup.
-- [ ] Test ordinary execution survives failed cleanup, shared-resource conflicts remain serialized, repeated grants are reused and fairness resumes on returning hosts. Reference TiKV's retry lifecycle while preserving errors/proof rather than consuming failed deletion.
+- [x] Discover durable cleanup in bounded pages; use MaxConcurrentCleanup with the same host/group gate registry and bounded backoff as ordinary work. Allocate only for actual admitted work, not MaxConcurrentCleanup slots. Remove the scoped controller's global fence-error short circuit; legacy composition remains until78.
+- [x] Dispatch/record each exact whole-group target independently; one unreachable former host cannot suppress another receipt. Retain required deletion stops in execution rather than disguising them as optional cleanup. Per thread28, completed permanent deletion settles only native group-resource obligations across indexes, queries, retention and restore; preserve host fences and never fabricate native evidence.
+- [x] Test ordinary execution survives failed cleanup, shared-resource conflicts remain serialized, repeated grants are reused and fairness resumes on returning hosts. Reference TiKV's retry lifecycle while preserving errors/proof rather than consuming failed deletion.
 
 **Verification**
 
-- [ ] Run dispatch/cleanup functional race checks and `make test`.
+- [x] Run dispatch/cleanup functional race checks and `make test`.
 
 ### Task 65: Reuse exact host/native state under a new attempt's grant
 

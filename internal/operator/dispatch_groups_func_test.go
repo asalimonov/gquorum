@@ -14,6 +14,7 @@ import (
 )
 
 type dispatchCoordinatorTest struct {
+	CleanupCoordinator
 	mu     sync.Mutex
 	leader bool
 	work   []WorkItem
@@ -25,6 +26,20 @@ func (c *dispatchCoordinatorTest) IsMetaLeader() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.leader
+}
+
+func (c *dispatchCoordinatorTest) ReadyCleanup(ctx context.Context, limit int) ([]CleanupWork, error) {
+	if c.CleanupCoordinator == nil {
+		return nil, nil
+	}
+	return c.CleanupCoordinator.ReadyCleanup(ctx, limit)
+}
+
+func (c *dispatchCoordinatorTest) ReadyFences(ctx context.Context, limit int) ([]FenceWork, error) {
+	if c.CleanupCoordinator == nil {
+		return nil, nil
+	}
+	return c.CleanupCoordinator.ReadyFences(ctx, limit)
 }
 
 func (c *dispatchCoordinatorTest) ReadyBlocks(_ context.Context, limit int) ([]WorkItem, error) {

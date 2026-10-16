@@ -8,6 +8,7 @@ import (
 )
 
 type scopedCoordinatorTest struct {
+	CleanupCoordinator
 	leader      bool
 	work        []WorkItem
 	onSelect    func()

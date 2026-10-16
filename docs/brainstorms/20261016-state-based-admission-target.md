@@ -625,3 +625,31 @@ selection rotates through ReadyBlocks; no waiting group owns the whole loop.
 Task64 adds cleanup selection and canonical fair target rotation;65 connects the
 exact effect worker and requires recorded founding host receipts before native
 creation. Legacy whole-grant wrappers remain until78 removes their consumers.
+
+
+### Cleanup/fence dispatch and completed deletion (peer thread28, Task64)
+
+ReadyCleanup selects exact identity/member/action from the ordered retained debt
+index, excluding required stops and completed retirement. BeginCleanupEffect
+reuses the existing immutable grant; each target dispatches and records separately.
+Cleanup and resource fences alternate within MaxConcurrentCleanup and share the
+ordinary host/group registry. Reserve bounded work before issuance or recipient
+resolution; bind the grant key and actual native host once known. One last request
+in the existing bounded backoff row rotates same-host identities after a timeout;
+fence/native requests do not overwrite that cleanup target history.
+
+ReadyFences paginates resources and selects only their current floor when it is a
+fence. Existing fenceReceiver resolves the exact current journal member or observed
+native leader inside the worker budget; DispatchFence does not reroute. Retryable
+refusals trigger another current-state selection; one failed fence never suppresses
+independent required work. No separate queue owner or application API is added.
+
+A permanent retired-group marker plus completed group tombstone (nil declaration,
+no owner, !Deleting, nonzero completion and source at least the retirement version)
+settles AuthorityGroup resources only. Completion already requires joined Stop or
+consumed whole-batch readmission for every possible former owner, including issued
+never-converged founding targets, and the group ID cannot be reused. Physical
+retirement stays detached. No native FenceEvidence is fabricated. Derive the same
+predicate in obligation indexes, authority queries, settlement and restore; pruning
+removes obsolete native revocation references while retaining the permanent row.
+Host resources remain protected by their exact fences/effects and durable floors.

@@ -231,7 +231,60 @@ func TestScopedDeletionFencesIssuedPreparationAndFounding(t *testing.T) {
 			if s.Cleanup[0].Stopped != nil || !s.Groups[1].Deleting {
 				t.Fatal("revocation manufactured a stop or tombstone")
 			}
+			if kind == topology.StepCreateFoundingGroup {
+				completeNeverConvergedDeletion(t, &s)
+			}
 		})
+	}
+}
+
+func completeNeverConvergedDeletion(t *testing.T, s *scopedState) {
+	t.Helper()
+	work, err := queryReadyFences(s, topology.AuthorityResource{}, 10)
+	if err != nil || len(work) != 2 {
+		t.Fatal(work, err)
+	}
+	for _, item := range work {
+		if item.Resource.Kind != topology.AuthorityHost {
+			continue
+		}
+		proof := topology.FenceEvidence{Key: item.Grant.Key, Resource: item.Resource, LocalSequence: 1,
+			Receiver: topology.Identity{ClusterID: item.Grant.Key.ClusterID, NodeName: "n1", MemberID: 1, InstanceID: "process"}}
+		if _, err := s.applyRecordFence(s.AppliedIndex+1, RecordFenceProposal{Evidence: proof}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	op := s.Operations[len(s.Operations)-1].Clone()
+	applyScopedTransitionFixture(t, s, scopedTransitionFor(op, "shard0", 1))
+	issued, err := s.applyBeginEffect(s.AppliedIndex+1, BeginEffectProposal{Action: scopedPlanAction(&op, op.Plan.Steps[0])})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, receipt := range fixtureEffectReceipts(*issued.result.Grant) {
+		recordScopedEffectFixture(t, s, RecordEffectProposal{Receipt: receipt, At: op.UpdatedAt.Add(time.Second)})
+	}
+	if s.indexes.groups["shard0"].Deleting {
+		completion := scopedTransitionFor(s.Operations[len(s.Operations)-1], "shard0", 1)
+		completion.State = topology.OperationSucceeded
+		applyScopedTransitionFixture(t, s, completion)
+	}
+	if s.indexes.groups["shard0"].Declaration != nil || !s.authorityCatalog().deletedResource(topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: "shard0"}) {
+		t.Fatal("never-converged group did not complete deletion")
+	}
+	for _, record := range s.AuthorityRecords {
+		for _, proof := range record.Fences {
+			if proof.Resource.Kind == topology.AuthorityGroup && proof.Resource.GroupID == "shard0" {
+				t.Fatal("manufactured native fence", proof)
+			}
+		}
+	}
+	if pending, err := queryReadyFences(s, topology.AuthorityResource{}, 10); err != nil || len(pending) != 0 {
+		t.Fatal("native obligation remained after every host stopped", pending, err)
+	}
+	ageScopedHistory(t, s)
+	pruneScopedFixture(t, s)
+	if pending, err := queryReadyFences(s, topology.AuthorityResource{}, 10); err != nil || len(pending) != 0 {
+		t.Fatal("pruning resurrected vacuous fence", pending, err)
 	}
 }
 

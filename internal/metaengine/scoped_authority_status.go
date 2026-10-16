@@ -31,10 +31,7 @@ func queryScopedAuthority(state *scopedState, query QueryRequest) (topology.Auth
 	if !known {
 		return topology.AuthorityStatus{}, fault.ErrHistoryUnavailable
 	}
-	catalog := newAuthorityCatalog()
-	for key, record := range state.indexes.grants {
-		catalog.records[key] = &record.authorityRecord
-	}
+	catalog := state.authorityCatalog()
 	status.Obligations = catalog.settledObligations(status.Obligations)
 	status.RevocationComplete = status.RevocationRequested &&
 		revokedComplete(&revocationRecord{Obligations: status.Obligations})

@@ -20,6 +20,7 @@ func (s *scopedState) planningCollector() planningCollector {
 // Borrowed under the FSM lock. Mutation preparation must clone this catalog.
 func (s *scopedState) authorityCatalog() authorityCatalog {
 	catalog := newAuthorityCatalog()
+	catalog.deletedGroups = s.completedDeletions()
 	for key, record := range s.indexes.grants {
 		catalog.records[key] = &record.authorityRecord
 		if record.Grant.Purpose == topology.AuthorityEffect {
