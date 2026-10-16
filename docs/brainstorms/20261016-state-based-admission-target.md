@@ -464,3 +464,32 @@ the seed again. Local pin/startup and authenticated join checks still prohibit
 claiming an established member after disk loss. A late unbound founder may bind
 the retained v1 metadata proof after unrelated approvals; service and FSM must
 apply the same predicate, including during the schema-3 transition.
+
+### Proof retention precision (peer thread 19, Task 52)
+
+`CLEANUP_PROOF`: select current documents, bounded recent history, live work and
+unresolved obligations before traversing dependencies. Retained versions keep
+whole retry chains and all required consumption, including successful siblings.
+Completed cleanup is retained only when this independently selected graph names
+its identity; repeat dependency closure to a fixed point. Pending deletion keeps
+its full former inventory. Required rebase ancestry may exceed the soft cap.
+
+Authority resource floors are permanent high-water keys, not grant authority.
+Schema 4 permits a missing settled holder while validating the key/resource shape,
+cluster, group and applied revision boundary. Retained grants remain below their
+floors and retain any fence evidence needed for settlement. Schema 3 stays strict
+until the complete cutover. Never treat the floor alone as a receipt.
+
+A retained readmission batch keeps every process row with its exact ReadmissionID,
+its full batch and required origin operations. Live handovers also keep intermediate
+issued prefix operations. Completed current-member admission remains available
+before first activation; an abandoned terminal member need not wait for activation
+once exact retirement/removal and all remaining dependencies permit pruning.
+Founding rows remain whenever the founding operation remains, preserving one seed
+binding. An earlier consumed batch used by a retained admission stays even when
+no other former-owner source remains.
+
+Checkpoint source compaction requires an approved identical declaration with the
+same durable node/member bindings. Preserve the source if retained witnesses
+would be ambiguous. Archived consumed metadata preparation uses its exact grant
+and receipt identity, independently of an obsolete whole source document.

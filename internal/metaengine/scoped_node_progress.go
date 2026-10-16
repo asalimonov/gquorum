@@ -87,7 +87,7 @@ func nodeApprovalProof(row nodeConvergence, next *scopedState,
 		dependent := row.MemberID != next.Target.MemberID(row.NodeName) ||
 			nodePlacementDependency(row, group, next.Target)
 		if dependent {
-			if !nodeGroupReady(group, row.NodeName, next.Target, index) {
+			if !next.nodeGroupReady(group, row.NodeName, index) {
 				return time.Time{}, false
 			}
 			at = latestTimestamp(at, group.CompletedAt)
@@ -130,16 +130,16 @@ func groupNamesNode(group *topology.Group, name string) bool {
 	})
 }
 
-func nodeGroupReady(group groupConvergence, node string, target topology.Document, index *scopedIndexes) bool {
+func (s *scopedState) nodeGroupReady(group groupConvergence, node string, index *scopedIndexes) bool {
 	if group.SourceVersion == 0 || group.Owner != "" || group.Deleting ||
-		!reflect.DeepEqual(group.Declaration, target.Group(group.GroupID)) {
+		!reflect.DeepEqual(group.Declaration, s.Target.Group(group.GroupID)) {
 		return false
 	}
 	if !groupNamesNode(group.Declaration, node) {
 		return true // Native exclusion is complete; ordinary detached cleanup may remain.
 	}
-	source := index.documents[group.SourceVersion]
-	return source.MemberID(node) == target.MemberID(node)
+	source, found := checkpointDocument(s, index, group)
+	return found && source.MemberID(node) == s.Target.MemberID(node)
 }
 
 func (s *scopedState) updateFullyConvergedLocked(at time.Time) {

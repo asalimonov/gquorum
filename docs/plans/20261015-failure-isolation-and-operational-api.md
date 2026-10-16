@@ -853,20 +853,20 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaengine/cleanup_evidence.go`, `cleanup.go`, history/snapshot helpers. **Target:** [T] §4.2–4.3, §12 “Collection acceptance versus settlement”. **Depends on:** 42–51. **Budget:** ≤550.
 
-- [ ] Implement one identityReferencedLocked predicate covering Latest/Target/history, convergence, every retained attempt/Previous chain, planning/deletion catalogs, admission/readmission and every retained grant including settled grants.
-- [ ] Derive independently required proof closure before pruning; avoid a cleanup/grant self-retention cycle or map-order dependence. Pin marker/current docs, each debt origin and complete retry chain/block sources, and any distinct readmission admission operation and full batch; compact only after minimal retained evidence suffices for every verification path. Pin consumed admission preparation/provenance for approved members lacking equivalent meta convergence even with no current dependent. Release that barrier root after equivalent convergence, or abandonment without retained load/plan references; other roots still apply.
-- [ ] Account for the full pinned operation: each retained required completion keeps its exact consumed grants/receipts through Previous, including unrelated successful blocks and their source documents. A single unresolved cleanup can pin all of these; retention estimates and growth metrics must count this closure, without imposing an approval cap.
-- [ ] Test failed-attempt references prevent pruning, complete orphaned records can prune, repeated removal cannot recreate debt, settled grants remain references when otherwise required and soft history caps do not reject unrelated approvals.
+- [x] Implement one identityReferencedLocked predicate covering Latest/Target/history, convergence, every retained attempt/Previous chain, planning/deletion catalogs, admission/readmission and every retained grant including settled grants.
+- [x] Derive independently required proof closure before pruning; avoid a cleanup/grant self-retention cycle or map-order dependence. Pin marker/current docs, each debt origin and complete retry chain/block sources, and any distinct readmission admission operation and full batch; compact only after minimal retained evidence suffices for every verification path. Pin consumed admission preparation/provenance for approved members lacking equivalent meta convergence even with no current dependent. Release that barrier root after equivalent convergence, or abandonment without retained load/plan references; other roots still apply.
+- [x] Account for the full pinned operation: each retained required completion keeps its exact consumed grants/receipts through Previous, including unrelated successful blocks and their source documents. A single unresolved cleanup can pin all of these; retention estimates and growth metrics must count this closure, without imposing an approval cap.
+- [x] Test failed-attempt references prevent pruning, complete orphaned records can prune, repeated removal cannot recreate debt, settled grants remain references when otherwise required and soft history caps do not reject unrelated approvals.
 
-- [ ] Retain every never-converged founding grant (any outcome) until convergence or completed deletion with a permanent retired-group marker; pruning must not erase the planner's FoundingIssued evidence and authorize refounding.
+- [x] Retain every never-converged founding grant (any outcome) until convergence or completed deletion with a permanent retired-group marker; pruning must not erase the planner's FoundingIssued evidence and authorize refounding.
 
-- [ ] Completed-debt pruning must remain restorable when another proof root still pins a declaration naming the former owner. Prune that ownership context together or retain equivalent completion evidence; do not let tombstone validation rediscover an owner after dropping its only proof.
+- [x] Completed-debt pruning must remain restorable when another proof root still pins a declaration naming the former owner. Prune that ownership context together or retain equivalent completion evidence; do not let tombstone validation rediscover an owner after dropping its only proof.
 
-- [ ] Pending deletion pins exact former assignments (including issued never-converged founding/preparation), usable readmission batches and their original admission/operation chains through consumption and cleanup completion.
+- [x] Pending deletion pins exact former assignments (including issued never-converged founding/preparation), usable readmission batches and their original admission/operation chains through consumption and cleanup completion.
 
 **Verification**
 
-- [ ] Run retention/pruning/snapshot units with varied insertion order and `make test`.
+- [x] Run retention/pruning/snapshot units with varied insertion order and `make test`.
 
 ### Task 53: Accept collection receipts and expose no-write settlement checks
 

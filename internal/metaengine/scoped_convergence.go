@@ -68,10 +68,8 @@ func validateGroupCheckpoint(state *scopedState, row groupConvergence,
 func validateCompactedGroup(state *scopedState, index *scopedIndexes, row groupConvergence) error {
 	// A compacted source is safe when another approved retained document supplies
 	// the identical declaration. Otherwise keep the original verification context.
-	for _, doc := range index.documents {
-		if scopedApprovedVersion(state, doc.Version) && reflect.DeepEqual(doc.Group(row.GroupID), row.Declaration) {
-			return nil
-		}
+	if _, found := checkpointDocument(state, index, row); found {
+		return nil
 	}
 	return invalidScopedState("group checkpoint lacks independently valid declaration evidence")
 }

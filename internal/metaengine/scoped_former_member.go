@@ -16,7 +16,7 @@ func unretiredFormerMembers(state *scopedState, index *scopedIndexes,
 	}
 	for _, row := range state.Groups {
 		if groupNamesNode(row.Declaration, admission.NodeName) {
-			doc := index.documents[row.SourceVersion]
+			doc, _ := checkpointDocument(state, index, row)
 			add(doc.MemberID(admission.NodeName))
 		}
 	}

@@ -16,7 +16,7 @@ func restoreScopedAuthority(state *scopedState, index *scopedIndexes) (authority
 	if err != nil {
 		return authorityCatalog{}, err
 	}
-	if err := restore.restoreFloors(); err != nil {
+	if err := restore.restoreResourceFloors(); err != nil {
 		return authorityCatalog{}, err
 	}
 	if err := restore.catalog.validateFencePredecessors(); err != nil {

@@ -79,6 +79,22 @@ func applyScopedProposal(state *scopedState, index uint64, kind ProposalKind,
 		err := fault.New(fault.Unsupported, fmt.Sprintf("meta: unavailable proposal %q", kind), nil)
 		return proposalApplication{}, err
 	}
+	next := *state
+	result, err := dispatchScopedProposal(&next, index, kind, body)
+	if err != nil || !result.changed {
+		return result, err
+	}
+	if len(next.History) > historyRetention {
+		if err := next.pruneRetainedProofs(); err != nil {
+			return proposalApplication{}, err
+		}
+	}
+	*state = next
+	return result, nil
+}
+
+func dispatchScopedProposal(state *scopedState, index uint64, kind ProposalKind,
+	body json.RawMessage) (proposalApplication, error) {
 	switch kind {
 	case KindProposeDocument:
 		return applyScopedJSONProposal(index, body, state.applyProposeDocument)

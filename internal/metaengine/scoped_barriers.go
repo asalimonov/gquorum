@@ -82,12 +82,7 @@ func (s *scopedState) metadataPrepared(node string, member uint64, catalog autho
 		}
 	}
 	for _, record := range catalog.records {
-		action := record.Grant.Action
-		if !metadataPreparationConsumed(record, node, member) {
-			continue
-		}
-		approved := s.indexes.documents[action.Version]
-		if approved.MemberID(node) == member {
+		if metadataPreparationConsumed(record, node, member) {
 			return true
 		}
 	}

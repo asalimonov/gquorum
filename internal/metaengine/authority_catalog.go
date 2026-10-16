@@ -357,11 +357,20 @@ func (restore *authorityRestore) validateRetainedOwners() error {
 }
 
 func (restore *authorityRestore) restoreFloors() error {
+	for _, floor := range restore.state.AuthorityFloors {
+		if restore.catalog.records[floor.Key] == nil {
+			return invalidAuthorityCatalog()
+		}
+	}
+	return restore.restoreResourceFloors()
+}
+
+func (restore *authorityRestore) restoreResourceFloors() error {
 	a, st := restore.catalog, restore.state
 	for _, f := range st.AuthorityFloors {
 		r := a.records[f.Key]
-		if _, duplicate := a.floors[f.Resource]; duplicate || r == nil ||
-			!slices.Contains(r.Grant.Resources, f.Resource) {
+		if _, duplicate := a.floors[f.Resource]; duplicate || !validResourceFloor(f, st) ||
+			r != nil && !slices.Contains(r.Grant.Resources, f.Resource) {
 			return invalidAuthorityCatalog()
 		}
 		a.floors[f.Resource] = f.Key
