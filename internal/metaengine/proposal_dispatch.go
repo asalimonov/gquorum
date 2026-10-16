@@ -102,6 +102,8 @@ func applyScopedProposal(state *scopedState, index uint64, kind ProposalKind,
 			return proposalApplication{}, err
 		}
 		return state.applyRecordReadmissionReceipts(index, p)
+	case "commit_repair_operation":
+		return applyScopedJSONProposal(index, body, state.applyCommitRepairOperation)
 	case "retry_operation":
 		return applyScopedJSONProposal(index, body, state.applyRetryOperation)
 	case "begin_operation":

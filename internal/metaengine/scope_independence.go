@@ -11,6 +11,11 @@ import (
 // Caller supplies trusted approved ancestry. This grants no effect authority;
 // apply must separately check versions, allocation history and current owners.
 func validateIndependentEdits(base, staged, repair topology.Document) error {
+	return validateIndependentRebase(rebaseSemanticDocument(base), rebaseSemanticDocument(staged),
+		rebaseSemanticDocument(repair))
+}
+
+func validateIndependentRebase(base, staged, repair topology.Document) error {
 	if base.ClusterID != staged.ClusterID || base.ClusterID != repair.ClusterID {
 		return fault.ErrVersionConflict
 	}

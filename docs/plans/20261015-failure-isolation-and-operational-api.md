@@ -757,14 +757,14 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** new `internal/metaengine/rebase.go`, existing repair document helpers. **Target:** [T] §5.3, §12 “Replicated repair and rebase”. **Depends on:** 25–34. **Budget:** ≤550.
 
-- [ ] Implement rebaseStaged(base, staged, repair) with semantic read/write conflict checks. Preserve staged caller attribution/audit, exact requested identities and all intended edits while applying a disjoint repair.
-- [ ] Prepare R at Latest+1 with parent old Target; use the atomic installer to retain S.RebasedFrom (ordinary commitLatestLocked clears it); when staged delta exists prepare S at Latest+2, parent R and RebasedFrom old Latest. Validate both before installation, preserve monotonic floors and deterministic supplied timestamps.
-- [ ] After an actual rebase, verify both a typed mutation and raw read-modify-Stage succeed with RebasedFrom cleared; retain original S provenance unchanged.
-- [ ] Test overlapping placement/eligibility changes, identity conflicts, multi-edit staging, no-staging case, version exhaustion and no accidental approval of the preserved edit.
+- [x] Implement rebaseStaged(base, staged, repair) with semantic read/write conflict checks. Preserve staged caller attribution/audit, exact requested identities and all intended edits while applying a disjoint repair.
+- [x] Prepare R at Latest+1 with parent old Target; use the atomic installer to retain S.RebasedFrom (ordinary commitLatestLocked clears it); when staged delta exists prepare S at Latest+2, parent R and RebasedFrom old Latest. Validate both before installation, preserve monotonic floors and deterministic supplied timestamps.
+- [x] After an actual rebase, verify both a typed mutation and raw read-modify-Stage succeed with RebasedFrom cleared; retain original S provenance unchanged.
+- [x] Test overlapping placement/eligibility changes, identity conflicts, multi-edit staging, no-staging case, version exhaustion and no accidental approval of the preserved edit.
 
 **Verification**
 
-- [ ] Run rebase/repair document units and `make test`.
+- [x] Run rebase/repair document units and `make test`.
 
 ### Task 46: Commit repair and voter changes with atomic rebase
 

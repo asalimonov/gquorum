@@ -998,3 +998,16 @@ Implemented
 Verified
 - Focused retry tests and full metaengine units pass. make test: 1552/1552, 8.719s; test-reports/unit/20261016T102629.682566Z-mbg_lxbp/report.md. Staged lint and diff checks pass (/tmp/gquorum-task44-lint.log).
 - Tests cover duplicate/concurrent replay, repeated failures, unchanged full plans/siblings, missing/stale scope refusal without mutation, unrelated Target progress, required/consumed Stop bindings, preparation/learner/promotion/catch-up phases, process replacement, missing binding, original cooldown, partial/complete/fenced readmission and batch replay. Pure serialized FSM changes; no new race/Docker run claimed. Next Task45 and then mandatory commit60 peer/dead-code checkpoint; no new tasks.
+
+## Task 45 — Deterministic semantic rebase preparation
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 60).
+
+Implemented
+- Reapply the complete independent staged delta onto repair R, preserving caller attribution, audit, exact identities, additions and deletions. Declaration ordering and generated timestamps do not create ownership conflicts; placement dependencies and allocation identities still do.
+- Prepare and validate R at Latest+1 and, when staged intent exists, S at Latest+2 with original RebasedFrom. The owned installer preserves historical documents, original intent rows and allocation floors. Supplied times and canonical ordering make replay deterministic.
+- The isolated applyCommitRepairOperation handler prepares but returns Unsupported without publication. Task46 replaces this temporary fail-closed bridge with complete atomic scoped approval; schema3 live routing remains unchanged until Task78.
+
+Verified
+- Rebase tests cover multi-edit intent, conflicts, exact allocations, overflow, unstaged repair, audit-only edits, deterministic order and no partial publication. Raw Stage and typed mutation after the actual prepared rebase clear only new-document lineage and preserve retained S.
+- make test: 1569/1569 pass, 8.591s; test-reports/unit/20261016T103501.792169Z-wt0h1_e_/report.md. Full metaengine tests, staged lint and diff checks pass. No race/Docker run claimed for these pure FSM changes.
+- Commit60 dead-code audit: deadcode -test ./... matches the archived commit55 baseline exactly; no newly unreachable functions. Retained live/scoped transition code remains assigned to Task78. Requesting the mandatory peer review of commits56–60; independent Task46 can proceed while that immutable range is reviewed. No tasks added or split.
