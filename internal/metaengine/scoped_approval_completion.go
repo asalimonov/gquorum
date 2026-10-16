@@ -41,10 +41,10 @@ func prepareApprovalCompletion(source, next *scopedState) error {
 		op.Status.Blocks[i].State = topology.OperationSucceeded
 	}
 	op.Status.State = aggregateBlockStates(op.Status.Blocks)
-	if err := prepareApprovalNodes(source, next, op); err != nil {
+	if err := next.advanceNodeProgressLocked(op.UpdatedAt); err != nil {
 		return err
 	}
-	next.updateFullyConverged(op.UpdatedAt)
+	next.updateFullyConvergedLocked(op.UpdatedAt)
 	return nil
 }
 

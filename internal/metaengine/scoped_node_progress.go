@@ -9,34 +9,39 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func prepareApprovalNodes(source, next *scopedState, operation *topology.Operation) error {
-	next.Nodes = approvalNodeRows(source.Nodes, next.Target)
-	metadata, _ := next.latestGroupOperation(topology.MetaGroupID)
+// Called on the owned approval/completion candidate. Prepare the complete node
+// slice before assigning it, so a refused graph cannot leave partial progress.
+func (s *scopedState) advanceNodeProgressLocked(at time.Time) error {
+	if at.IsZero() {
+		return fault.ErrOperationAuthorization
+	}
+	rows := approvalNodeRows(s.Nodes, s.Target)
+	metadata, _ := s.latestGroupOperation(topology.MetaGroupID)
 	if metadata == nil {
+		s.Nodes = rows
 		return nil
 	}
-	index, err := next.buildIndexes()
+	index, err := s.buildIndexes()
 	if err != nil {
 		return err
 	}
-	for i := range next.Nodes {
-		row := &next.Nodes[i]
-		if nodeMatchesTarget(*row, next.Target) {
+	for i := range rows {
+		row := &rows[i]
+		if nodeMatchesTarget(*row, s.Target) {
 			row.Owner = ""
 			continue
 		}
-		if operation.UpdatedAt.Before(row.CompletedAt) {
-			return fault.ErrOperationAuthorization
-		}
 		row.Owner = pendingNodeOwner(*row, metadata)
-		if !nodeApprovalReady(*row, next, index, metadata) {
+		proofAt, ready := nodeApprovalProof(*row, s, index, metadata)
+		if !ready {
 			continue
 		}
-		declaration := (topology.NodeProgress{Converged: next.Target.Node(row.NodeName)}).Clone().Converged
+		declaration := (topology.NodeProgress{Converged: s.Target.Node(row.NodeName)}).Clone().Converged
 		*row = nodeConvergence{NodeName: row.NodeName, Declaration: declaration,
-			MemberID:      next.Target.MemberID(row.NodeName),
-			SourceVersion: next.Target.Version, CompletedAt: operation.UpdatedAt}
+			MemberID:      s.Target.MemberID(row.NodeName),
+			SourceVersion: s.Target.Version, CompletedAt: latestTimestamp(at, row.CompletedAt, proofAt)}
 	}
+	s.Nodes = rows
 	return nil
 }
 
@@ -65,13 +70,14 @@ func nodeMatchesTarget(row nodeConvergence, target topology.Document) bool {
 		row.MemberID == target.MemberID(row.NodeName)
 }
 
-func nodeApprovalReady(row nodeConvergence, next *scopedState,
-	index *scopedIndexes, operation *topology.Operation) bool {
+func nodeApprovalProof(row nodeConvergence, next *scopedState,
+	index *scopedIndexes, operation *topology.Operation) (time.Time, bool) {
 	meta := index.groups[topology.MetaGroupID]
 	if meta == nil || meta.Owner != "" || meta.SourceVersion == 0 ||
 		!reflect.DeepEqual(meta.Declaration, next.Target.MetaGroup()) {
-		return false
+		return time.Time{}, false
 	}
+	at := meta.CompletedAt
 	for _, group := range next.Groups {
 		if group.GroupID == topology.MetaGroupID ||
 			!groupNamesNode(group.Declaration, row.NodeName) &&
@@ -82,11 +88,14 @@ func nodeApprovalReady(row nodeConvergence, next *scopedState,
 			slices.ContainsFunc(operation.Plan.Blocks, func(block topology.PlanBlock) bool {
 				return block.GroupID == group.GroupID
 			})
-		if dependent && !nodeGroupReady(group, row.NodeName, next.Target, index) {
-			return false
+		if dependent {
+			if !nodeGroupReady(group, row.NodeName, next.Target, index) {
+				return time.Time{}, false
+			}
+			at = latestTimestamp(at, group.CompletedAt)
 		}
 	}
-	return true
+	return at, true
 }
 
 func groupNamesNode(group *topology.Group, name string) bool {
@@ -107,20 +116,23 @@ func nodeGroupReady(group groupConvergence, node string, target topology.Documen
 	return source.MemberID(node) == target.MemberID(node)
 }
 
-func (s *scopedState) updateFullyConverged(at time.Time) {
-	if s.Target.Version == 0 || s.FullyConverged.Version >= s.Target.Version {
+func (s *scopedState) updateFullyConvergedLocked(at time.Time) {
+	if s.Target.Version == 0 || s.FullyConverged.Version >= s.Target.Version || at.IsZero() {
 		return
 	}
+	completedAt := latestTimestamp(at, s.FullyConverged.At)
 	for _, row := range s.Groups {
 		if row.Owner != "" || row.Deleting || row.SourceVersion == 0 && s.Target.Group(row.GroupID) != nil ||
 			!reflect.DeepEqual(row.Declaration, s.Target.Group(row.GroupID)) {
 			return
 		}
+		completedAt = latestTimestamp(completedAt, row.CompletedAt)
 	}
 	for _, row := range s.Nodes {
 		if !nodeMatchesTarget(row, s.Target) {
 			return
 		}
+		completedAt = latestTimestamp(completedAt, row.CompletedAt)
 	}
 	for _, op := range s.Operations {
 		for _, block := range op.Status.Blocks {
@@ -129,5 +141,15 @@ func (s *scopedState) updateFullyConverged(at time.Time) {
 			}
 		}
 	}
-	s.FullyConverged = topology.FullyConverged{Version: s.Target.Version, At: at}
+	s.FullyConverged = topology.FullyConverged{Version: s.Target.Version, At: completedAt}
+}
+
+func latestTimestamp(values ...time.Time) time.Time {
+	var latest time.Time
+	for _, value := range values {
+		if value.After(latest) {
+			latest = value
+		}
+	}
+	return latest
 }

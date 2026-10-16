@@ -945,3 +945,15 @@ Verified
 - make test: 1494/1494 pass, 7.835s; test-reports/unit/20261016T091019.429767Z-5pmqty41/report.md. Focused metaengine checks and staged lint pass: /tmp/gquorum-task40-focused.log and /tmp/gquorum-task40-lint.log. Diff checks pass; no new race/Docker run claimed.
 - Regressions cover independent cursors/failure/waits, aggregate precedence, exact tuple/clock/refusal, inherited role cooldown, pinned completion, final admission recheck, atomic late refusal, partial versus complete readmission, required stop attribution, detached retirement and unreachable native deletion fences.
 - Five-commit dead-code audit: shared cooldown upsert and consumed-authority lookup remove duplicate logic; references and merged unused lint show no additional safe deletion. Legacy global authority/whole-document paths still have live schema-3 callers and are removed at Task 78; scoped completion installation is completed at Task 42, cleanup authorization at Task 43. Peer review is due now for c12eab9..this commit. No new tasks or renumbering.
+
+## Task 41 — Node proof and historical convergence markers
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 56).
+
+Implemented
+- Generalized the existing approval node-proof path into advanceNodeProgressLocked for approval and forthcoming atomic group completion. It prepares an owned node slice, preserves unknown initial state, and advances only after exact metadata and dependent load/deletion checkpoints. Detached retirement remains outside required convergence; existing deletion proof and permanent retired IDs are reused.
+- updateFullyConvergedLocked preserves the marker's approved version and immutable document root, permits skipped superseded versions, ignores staged intent/physical collection, and does not rewrite a repeated marker. Node/marker times remain monotonic and no earlier than their required checkpoint proof.
+- To follow the user's efficiency steering, removed the self-imposed wait-before-next-commit rule: immutable five-commit peer reviews now overlap independent implementation. Findings must be assessed/corrected before the next checkpoint; work requiring an unresolved consensus decision still waits. Thread15 remains actively reviewing commits51–55; Task42's proposed receipt timestamp addition awaits that answer. No tasks added or renumbered.
+
+Verified
+- make test: 1498/1498 pass, 6.738s; test-reports/unit/20261016T091805.408077Z-r6z88lyb/report.md. Focused metaengine tests and staged lint pass: /tmp/gquorum-task41-focused.log and /tmp/gquorum-task41-lint.log; diff checks pass. An initially invalid test fixture reset the staged metadata allocator; preserving its existing high-water mark fixed it. No new race/Docker run claimed.
+- Regressions cover unknown admission, dependent whole-group retirement, deferred cleanup, retained marker documents, skipped versions, idempotent marker timestamps and proof-clock ordering. Task42 next; next peer checkpoint60, with thread15 findings still to assess.
