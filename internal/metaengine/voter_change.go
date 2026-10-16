@@ -115,10 +115,20 @@ func (sm *topologySM) validateVoterChangePlan(next topology.Document, change top
 	if err := sm.validatePlanShapeLocked(next, plan); err != nil {
 		return err
 	}
+	var voters []uint64
+	for _, r := range sm.active.VotersOf(change.GroupID) {
+		voters = append(voters, r.ReplicaID)
+	}
+	return validateVoterChangeSteps(next, change, plan, voters)
+}
+
+// Both approval paths apply the same surge, placement, transfer and quorum guards.
+func validateVoterChangeSteps(next topology.Document, change topology.VoterChange,
+	plan topology.Plan, voters []uint64) error {
 	check := voterPlanCheck{next: next, change: change, plan: plan,
 		voters: make(map[uint64]bool), policy: next.Group(change.GroupID).VoterConfig}
-	for _, r := range sm.active.VotersOf(change.GroupID) {
-		check.voters[r.ReplicaID] = true
+	for _, id := range voters {
+		check.voters[id] = true
 	}
 	for _, step := range plan.Steps {
 		if err := check.step(step); err != nil {

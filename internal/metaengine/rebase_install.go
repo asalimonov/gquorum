@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"slices"
 
-	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -33,20 +32,4 @@ func (s *scopedState) installRepairDocuments(pair repairDocuments) {
 			}
 		}
 	}
-}
-
-// Task46 replaces this isolated preparation-only handler with scoped approval
-// and one validated install. Even the test dispatcher must fail closed meanwhile.
-func (s *scopedState) applyCommitRepairOperation(_ uint64,
-	p CommitRepairOperationProposal) (proposalApplication, error) {
-	if p.ExpectedVersion != s.Latest.Version || p.ExpectedTarget != s.Target.Version {
-		return proposalApplication{}, fault.ErrVersionConflict
-	}
-	pair, err := s.prepareRepairDocuments(p.Doc, p.At)
-	if err != nil {
-		return proposalApplication{}, err
-	}
-	next := *s
-	next.installRepairDocuments(pair)
-	return proposalApplication{}, fault.New(fault.Unsupported, "repair approval installation is not connected", nil)
 }

@@ -770,15 +770,15 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaengine/repair_proposals.go`, `voter_change.go`, `rebase.go`. **Target:** [T] §5.2–5.3, §7.1, §8.2. **Depends on:** 34–45. **Budget:** ≤550.
 
-- [ ] Implement applyCommitRepairOperation and route CommitVoterChange through the same atomic preparation/install path after existing voter guards. Check captured Latest/Target/source/owner/native inputs in the FSM.
-- [ ] Install Target=R, Latest=S (or R without staged edits), immutable operation, histories, provenance/indexes and owners as one change. Reject user-owned scope preemption, invalidated-scope omissions and overlap without partial writes.
-- [ ] Test R/S visibility at one applied index, duplicate/conflicting proposals, retained staged attribution, failover snapshot/replay and watcher delivery only after the complete transaction.
+- [x] Implement applyCommitRepairOperation and route CommitVoterChange through the same atomic preparation/install path after existing voter guards. Check captured Latest/Target/source/owner/native inputs in the FSM.
+- [x] Install Target=R, Latest=S (or R without staged edits), immutable operation, histories, provenance/indexes and owners as one change. Reject user-owned scope preemption, invalidated-scope omissions and overlap without partial writes.
+- [x] Test R/S visibility at one applied index, duplicate/conflicting proposals, retained staged attribution, failover snapshot/replay and watcher delivery only after the complete transaction.
 
-- [ ] A rebased successor does not duplicate the original typed intent row. Replay follows RebasedFrom to the one original (expected-parent, kind, digest) acceptance record.
+- [x] A rebased successor does not duplicate the original typed intent row. Replay follows RebasedFrom to the one original (expected-parent, kind, digest) acceptance record.
 
 **Verification**
 
-- [ ] Run repair/voter/CAS units and `make test`.
+- [x] Run repair/voter/CAS units and `make test`.
 
 ### Task 47: Normalize typed intent without allocating on replay
 

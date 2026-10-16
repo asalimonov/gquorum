@@ -240,17 +240,17 @@ func TestOrdinaryEditsAfterPreparedRebaseClearOnlyNewProvenance(t *testing.T) {
 	}
 }
 
-func TestRepairPreparationHandlerCannotInstallPartialApproval(t *testing.T) {
+func TestRepairMissingPlanCannotInstallPartialApproval(t *testing.T) {
 	t.Parallel()
 	s, repair := rebaseFixture(t)
 	before, _ := json.Marshal(s)
 	p := CommitRepairOperationProposal{Doc: repair, ExpectedVersion: s.Latest.Version,
 		ExpectedTarget: s.Target.Version, At: s.Latest.CreatedAt.Add(time.Second)}
-	if _, err := s.applyCommitRepairOperation(s.AppliedIndex+1, p); !errors.Is(err, fault.ErrUnsupported) {
-		t.Fatal("preparation-only handler became effect authority", err)
+	if _, err := s.applyCommitRepairOperation(s.AppliedIndex+1, p); err == nil {
+		t.Fatal("repair without an approved plan became effect authority", err)
 	}
 	after, _ := json.Marshal(s)
 	if !bytes.Equal(before, after) {
-		t.Fatal("unconnected approval installed only its documents")
+		t.Fatal("refused approval installed only its documents")
 	}
 }

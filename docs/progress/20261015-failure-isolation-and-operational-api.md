@@ -1011,3 +1011,16 @@ Verified
 - Rebase tests cover multi-edit intent, conflicts, exact allocations, overflow, unstaged repair, audit-only edits, deterministic order and no partial publication. Raw Stage and typed mutation after the actual prepared rebase clear only new-document lineage and preserve retained S.
 - make test: 1569/1569 pass, 8.591s; test-reports/unit/20261016T103501.792169Z-wt0h1_e_/report.md. Full metaengine tests, staged lint and diff checks pass. No race/Docker run claimed for these pure FSM changes.
 - Commit60 dead-code audit: deadcode -test ./... matches the archived commit55 baseline exactly; no newly unreachable functions. Retained live/scoped transition code remains assigned to Task78. Requesting the mandatory peer review of commits56–60; independent Task46 can proceed while that immutable range is reviewed. No tasks added or split.
+
+## Task 46 — Atomic repair and voter-change approval
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 61).
+
+Implemented
+- Replaced Task45's Unsupported preparation bridge with one owned transaction: prepare R/S, validate exact captured scopes and immutable plan, prepare operation/owners and prerequisite revocations, install retained documents/floors, validate the full graph, then publish at one Apply index. Stale Latest/Target return structured CAS conflicts; duplicate repair proposals cannot allocate another document.
+- Reseat reuses the narrow single-voter validator with retained allocation floors and host-aligned comparison, preserving its exact edit restrictions despite canonical replica-ID ordering. Automatic repair and convenience reseat refuse owned scopes with AuthorityPending and the owning OperationID; independent user operations retain their exact progress and ownership.
+- Scoped voter changes use the same installer after re-deriving the exact role edit and shared surge/placement/quorum/transfer guards. Both promotion-first and at-capacity demotion-first paths are covered. Existing schema3 behavior stays isolated until Task78.
+- Rebase retains the original typed acceptance row only; S links to it through RebasedFrom. No intent duplication or extra public API. The isolated dispatcher reports changed only after the full transaction; actual persistence/watcher delivery remains with the already-planned live cutover in Task78.
+
+Verified
+- Focused repair/voter/rebase tests and full metaengine units pass. make test: 1602/1602, 7.546s; test-reports/unit/20261016T104631.689471Z-g_kzldir/report.md. Staged lint and diff checks pass.
+- Regressions cover atomic refusal, omitted/stale scopes, forged native guard chains, unrelated edits and allocation changes, original audit/intent retention, exact single-version unstaged repair, independent busy scope, busy reseat refusal, deterministic replay from a prior snapshot and lost-response CAS after restored acceptance. No new race/Docker run for these serialized pure FSM changes. Thread16 reviews the immutable prior batch; no tasks added or split.
