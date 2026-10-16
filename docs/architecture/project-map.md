@@ -160,15 +160,28 @@ are borrowed; selected WAL/memory stores are owned; the meta listener transfers
 on service acquisition. See [managed release](../../internal/managed/replica.go)
 and [ownership regressions](../../internal/managed/ownership_ports_func_test.go).
 
-`KB_ENSURE`: [EnsureGroup](../../cluster_ensure.go) recognizes its own staged
-creation using matching spec and provenance, retries CAS conflicts, approves
-only matching owned intent and waits for Active. Different existing groups or
-foreign staged intent return Conflict. Its result is an Active observation, not a
-read barrier. Actor is required; unspecified optional spec fields are unconstrained,
-while ID and Storage always match exactly. Preview and Approve cannot combine;
-if staging succeeds but approval fails, preserve the returned staged version.
-Rollback stages a new version; it
-does not rewind IDs, retired history or already-applied resource effects.
+`KB_ENSURE`: [EnsureGroup](../../cluster_ensure.go) checks requested-scope desired/
+approved compatibility before returning matching nonzero convergence. One
+[request](../../cluster_ensure_request.go) pins creation CAS and typed intent;
+uncertain replies replay that CAS. FSM RebasedTo identifies the head; verify its
+single-group delta against its actual parent and require matching actor/comment.
+Never approve foreign staging or retry a failed operation. Local holds do not
+erase convergence or get cleared by EnsureGroup. Until78, named legacy progress/
+failure adapters project actual Active/current execution;78 replaces those reads.
+Optional spec fields are unconstrained; ID/Storage always match. Preview and
+Approve cannot combine. Preserve accepted Document/RebasedTo on approval failure;
+rollback stages new validated intent without rewinding IDs or retirement proof.
+
+`KB_TRANSFER_SCOPE`: [direct transfer](../../internal/metaservice/transfer.go)
+captures exact unowned/proven group source, active declared voter, health, fresh
+native voters and observed leader; recaptures after callback/native waits.
+PlanRead comparisons use affected declarations/bindings, not global Target version.
+GrantTransferProposal joins an unfinished exact action after cancellation; repeat
+the same grant after elections/fence waits. Match the observed leader to immutable
+grant.Targets; neither Target.MemberID nor lagging node progress may rewrite it.
+Even an already-leading destination requires durable intent settlement; the native
+engine skips self-transfer. Named legacyTransferPlan and old FSM global guards
+remain until78; transfer_plan and exact replacement preflights are prepared now.
 
 ### `topology`
 

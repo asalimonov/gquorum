@@ -44,6 +44,7 @@ func TestOperationPlanningCapturesOnlyAffectedNativeAndRechecksScope(t *testing.
 					switch mode {
 					case "unrelated approval":
 						result.Input.Approved.Version++
+						result.Target.Version++
 					case "owner":
 						result.Scopes[0].Owner = "exec-v2-a1"
 					case "declaration":

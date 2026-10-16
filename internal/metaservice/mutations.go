@@ -2,12 +2,9 @@ package metaservice
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"maps"
 	"math"
-	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -288,15 +285,8 @@ func (g *Group) ReadmitNode(ctx context.Context, name string, expectedMemberID u
 		Input:   mutationInput{NodeName: name, PreviousID: expectedMemberID},
 		Comment: fmt.Sprintf("readmit node %q", name)},
 		func(doc *topology.Document, now time.Time) error {
-			node := doc.Node(name)
-			if node == nil {
-				return unknownNode(name)
-			}
-			if doc.MemberID(name) != expectedMemberID {
-				return fault.New(fault.VersionConflict, "readmission predecessor no longer matches", nil)
-			}
-			if node.State != topology.NodeActive {
-				return fault.New(fault.Invalid, "readmission requires an admitted active node", nil)
+			if err := g.validateReadmissionScope(ctx, *doc, name, expectedMemberID); err != nil {
+				return err
 			}
 			views := g.state().Views()
 			target, active := views.Target, views.Active
@@ -622,19 +612,9 @@ func (g *Group) ReseatReplica(ctx context.Context, id string, key topology.Repli
 		Input:   mutationInput{GroupID: id, NodeName: name, PreviousID: key.ReplicaID},
 		Comment: "reseat replica"},
 		func(doc *topology.Document, now time.Time) error {
-			views := g.state().Views()
-			latest, target, active := views.Latest, views.Target, views.Active
-			// Task78 replaces this schema3 repair guard with scoped capture/approval.
-			if !reflect.DeepEqual(latest, target) || !reflect.DeepEqual(target, active) {
-				return fault.New(fault.OperatorAuthorization,
-					"reseat requires equal Latest, Target and Active", nil)
-			}
-			if ex, ok := g.state().CurrentOperator(); ok && !ex.Status.State.Terminal() {
-				return fault.New(fault.OperatorAuthorization, "reseat requires no running execution", nil)
-			}
 			options := metaengine.ReplicaRepairOptions{GroupID: id, NodeName: name, ReplicaID: key.ReplicaID, At: now,
 				Origin: topology.OriginOperator, Actor: o.Actor}
-			return g.reseatDocument(doc, views, options)
+			return g.prepareReseat(ctx, doc, options)
 		})
 	base, next := documents.Base, documents.Next
 	if err != nil {
@@ -673,58 +653,6 @@ func (g *Group) ReseatReplica(ctx context.Context, id string, key topology.Repli
 // TransferLeader commits resource authority for the exact Active identity
 // without
 // creating a document version, then records its durable initiation receipt.
-func (g *Group) TransferLeader(ctx context.Context, id, name string) error {
-	if err := g.ensureRunning(ctx); err != nil {
-		return err
-	}
-	doc := g.state().Active()
-	member, err := g.leaderTransferTarget(ctx, doc, id, name)
-	if err != nil {
-		return err
-	}
-	var nonce [16]byte
-	if _, err := rand.Read(nonce[:]); err != nil {
-		return err
-	}
-	result, err := g.propose(ctx, metaengine.GrantTransferProposal{
-		ExpectedActiveVersion: doc.Version,
-		GroupID:               id,
-		NodeName:              name,
-		ReplicaID:             member,
-		RequestID:             hex.EncodeToString(nonce[:]),
-	})
-	if err != nil {
-		return err
-	}
-	action := topology.AuthorizedStep{
-		Version:   doc.Version,
-		Kind:      topology.StepTransferLeader,
-		GroupID:   id,
-		NodeName:  name,
-		ReplicaID: member,
-	}
-	if result.Grant == nil || result.Grant.Action == nil || *result.Grant.Action != action ||
-		result.Grant.Validate() != nil {
-		return fault.ErrUnreadable
-	}
-	receipts, err := (groupControllers{g}).TransferLeader(ctx, *result.Grant)
-	for _, receipt := range receipts {
-		if receipt.Validate(*result.Grant) != nil {
-			return fault.ErrOperatorAuthorization
-		}
-		if recordErr := g.RecordEffect(ctx, receipt); recordErr != nil {
-			return recordErr
-		}
-	}
-	if err != nil {
-		return err
-	}
-	if len(receipts) != 1 {
-		return fault.ErrAuthorityPending
-	}
-	return nil
-}
-
 // Pin zero CAS once, and resolve stale acceptance before invoking an edit.
 func (g *Group) mutationBase(o MutationOptions, policy mutationPolicy) (mutationDocuments, error) {
 	if o.Apply && o.Preview {

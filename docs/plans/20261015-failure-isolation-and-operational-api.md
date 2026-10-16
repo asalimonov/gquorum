@@ -1043,13 +1043,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `cluster_ensure.go`, `cluster_mutations.go`, `internal/metaservice/mutations.go`, transfer authority. **Target:** [T] §3.1, §5.3–5.4, §8.1–8.2. **Depends on:** 47–49, 61, 66. **Budget:** ≤550.
 
-- [ ] EnsureGroup waits on its requested group's convergence, follows only its own retained rebased provenance and preserves foreign/overlapping staging conflicts. A blocked unrelated group cannot hold its result hostage.
-- [ ] TransferLeader captures exact group source/owner/target and fresh native leader predicate; unrelated Target changes do not restart it. Revalidate after waits and retain one-shot transfer authority/cancellation semantics.
-- [ ] Exercise remaining typed mutations/rollback through strict CAS/provenance; rollback cannot reuse retired group or replica IDs. Test optional approval partial results, changed audit intent, local holds and replacement conflict details.
+- [x] EnsureGroup waits on its requested group's convergence, follows only its own retained rebased provenance and preserves foreign/overlapping staging conflicts. A blocked unrelated group cannot hold its result hostage.
+- [x] TransferLeader captures exact group source/owner/target and fresh native leader predicate; unrelated Target changes do not restart it. Revalidate after waits and retain one-shot transfer authority/cancellation semantics.
+- [x] Exercise remaining typed mutations/rollback through strict CAS/provenance; rollback cannot reuse retired group or replica IDs. Test optional approval partial results, changed audit intent, local holds and replacement conflict details.
 
 **Verification**
 
-- [ ] Run root convenience/transfer functional regressions and `make test`.
+- [x] Run root convenience/transfer functional regressions and `make test`.
 
 ### Task 68: Convert built-in repair policy to scoped progress
 
@@ -1175,7 +1175,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metastore/store.go`, `internal/metaengine/sm.go`/`codec.go`, snapshot/restart tests, remaining composition. **Target:** [T] §4.1–4.3, §7.1, §8.4. **Depends on:** 1–77. **Budget:** ≤550.
 
-- [ ] Activate complete metadata disk/state/envelope schema 4; verify authority schema 2 from Task 54. Remove Active storage/API, Operator/WaitOperator wrappers, old MutationResult fields, ActivateTarget/legacy envelopes and every registered temporary scaffold now that all callers are converted. No fallback, migration, mixed-version acceptance or refounding old evidence.
+- [ ] Activate complete metadata disk/state/envelope schema 4; verify authority schema 2 from Task 54. Remove Active storage/API, Operator/WaitOperator wrappers, old MutationResult fields, ActivateTarget/legacy envelopes and every registered temporary scaffold now that all callers are converted. No fallback, migration, mixed-version acceptance or refounding old evidence. Replace Task67 legacyEnsureProgress/legacyEnsureFailure/legacyTransferPlan with confirmed scoped progress, exact operation-block diagnostics and transfer_plan; remove schema3 replacement guards when connecting scoped replacement commits.
 - [ ] Add intentionally sourced v4/v2 fixtures with provenance; retain old changed-format fixtures for explicit rejection and immutable unrelated physical baseline hashes for unchanged-format checks. Preserve current-index/term/confstate/pins and unchanged buckets.
 - [ ] Exercise fresh startup and current-format retained restart through real composition. Confirm all new proposals/queries/dispatch/report callbacks are reachable, with no production dual-model switch or unsupported stub left on an accepted path. Cover successful operationCoordinator pages/cursor advancement, leadership changes across reads and native group-fence recipients (peer29 L1); host/Unsupported/NotLeader functional coverage already exists.
 

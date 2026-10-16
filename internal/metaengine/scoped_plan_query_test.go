@@ -92,3 +92,30 @@ func TestScopedPlanningQueryRefusesMixedFieldsAndUncapturedNative(t *testing.T) 
 		t.Fatal("schema3 accepted scoped planning", err)
 	}
 }
+
+func TestScopedTransferReadRequiresOnlyItsUnownedProvenGroup(t *testing.T) {
+	t.Parallel()
+	s, _ := approvalFixture(t, topology.MetaGroupID)
+	query := QueryRequest{Kind: "transfer_plan", Key: topology.MetaGroupID}
+	read, err := queryScopedPlan(&s, query)
+	if err != nil || len(read.Scopes) != 1 || read.Scopes[0].GroupID != topology.MetaGroupID || read.Scopes[0].SourceVersion != s.indexes.groups[topology.MetaGroupID].SourceVersion {
+		t.Fatal(read, err)
+	}
+	if read.Input.Groups["shard0"].OperationID == "" {
+		t.Fatal("fixture has no busy sibling")
+	}
+	s.indexes.groups[topology.MetaGroupID].Owner = "exec-v9-a1"
+	if _, err := queryScopedPlan(&s, query); !errors.Is(err, fault.ErrUnavailable) {
+		t.Fatal(err)
+	}
+	s.indexes.groups[topology.MetaGroupID].Owner = ""
+	s.indexes.groups[topology.MetaGroupID].SourceVersion = 0
+	if _, err := queryScopedPlan(&s, query); !errors.Is(err, fault.ErrUnavailable) {
+		t.Fatal(err)
+	}
+	for _, bad := range []QueryRequest{{Kind: "transfer_plan"}, {Kind: "transfer_plan", Key: "work", Version: 1}, {Kind: "transfer_plan", Key: "work", OperationID: "op"}} {
+		if _, err := queryScopedPlan(&s, bad); !errors.Is(err, fault.ErrInvalid) {
+			t.Fatal(bad, err)
+		}
+	}
+}

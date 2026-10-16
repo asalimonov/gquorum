@@ -56,11 +56,12 @@ func (g *Group) capturePlan(ctx context.Context, request metaengine.QueryRequest
 }
 
 func comparePlanCapture(before, after metaengine.PlanRead) error {
-	if before.Target.Version != after.Target.Version || !slices.Equal(before.Scopes, after.Scopes) ||
+	if !slices.Equal(before.Scopes, after.Scopes) ||
 		!before.Operation.Plan.Equal(after.Operation.Plan) {
 		return fault.ErrVersionConflict
 	}
 	changed := topology.AffectedGroups(before.Input.Approved, after.Input.Approved)
+	changed = append(changed, topology.AffectedGroups(before.Target, after.Target)...)
 	for _, scope := range before.Scopes {
 		if slices.Contains(changed, scope.GroupID) {
 			return fault.ErrVersionConflict

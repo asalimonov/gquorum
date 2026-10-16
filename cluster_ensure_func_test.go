@@ -81,6 +81,20 @@ func TestEnsureGroupCreatesApprovesAndRefusesConflicts(t *testing.T) {
 	if err != nil || again.Replicas[0].ReplicaID != created.Replicas[0].ReplicaID {
 		t.Fatal("repeat was not idempotent", again, err)
 	}
+	// Local application holds do not erase the group's replicated convergence.
+	ref := load.ReplicaRef{GroupID: created.ID, ReplicaID: created.Replicas[0].ReplicaID}
+	if err := n.StopLoadGroup(ctx, ref); err != nil {
+		t.Fatal(err)
+	}
+	if held, err := c.EnsureGroup(ctx, spec, app); err != nil || held.Replicas[0].ReplicaID != ref.ReplicaID {
+		t.Fatal("EnsureGroup waited on or replaced a held local replica", held, err)
+	}
+	if _, running := n.LoadGroup(created.ID); running {
+		t.Fatal("EnsureGroup cleared a local hold")
+	}
+	if _, err := n.StartLoadGroup(ctx, ref); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := c.EnsureGroup(ctx, singleReplicaSpec("work", map[string]string{"app": "other"}), app); !errors.Is(err, fault.ErrConflict) {
 		t.Fatal("different spec accepted", err)
 	}
@@ -97,7 +111,7 @@ func TestEnsureGroupCreatesApprovesAndRefusesConflicts(t *testing.T) {
 	if _, err := c.CreateGroup(ctx, own, MutationOptions{ExpectedVersion: latest.Version, Actor: "app", Comment: "staged only"}); err != nil {
 		t.Fatal(err)
 	}
-	if g, err := c.EnsureGroup(ctx, own, app); err != nil || g.ID != "second" {
+	if g, err := c.EnsureGroup(ctx, own, EnsureOptions{Actor: "app", Comment: "staged only"}); err != nil || g.ID != "second" {
 		t.Fatal("own staged creation not approved", g, err)
 	}
 
@@ -116,6 +130,15 @@ func TestEnsureGroupCreatesApprovesAndRefusesConflicts(t *testing.T) {
 	target, err := c.Target(ctx)
 	if err != nil || target.Version == staged.Document.Version || target.Group("third") != nil {
 		t.Fatal("foreign intent was approved", target.Version, err)
+	}
+	if existing, err := c.EnsureGroup(ctx, spec, app); err != nil || existing.ID != spec.ID {
+		t.Fatal("unrelated staged intent blocked a proven group", existing, err)
+	}
+	if _, err := c.DeleteGroup(ctx, spec.ID, MutationOptions{ExpectedVersion: staged.Document.Version, Actor: "operator"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.EnsureGroup(ctx, spec, app); !errors.Is(err, fault.ErrConflict) {
+		t.Fatal("old convergence hid a staged deletion", err)
 	}
 }
 
@@ -168,5 +191,45 @@ func TestEnsureGroupCreatesAnInMemoryGroup(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(wal, "cache")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("memory group wrote to the WAL store", err)
+	}
+}
+
+func TestEnsureGroupReturnsFailedCreationWithoutRetryingOperation(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	options := authorityNodeOptions(t, root, "failed-ensure")
+	loopback := &loopbackTransport{}
+	options.Loads = LoadOptions{Transport: loopback, Storage: LoadStorageOptions{WAL: &WALOptions{RootDir: filepath.Join(root, "loads")}},
+		Factory: func(context.Context, load.ReplicaSpec) (load.Application, error) {
+			return load.Application{}, fault.ErrInvalid
+		}}
+	n, err := NewNode(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loopback.node = n
+	t.Cleanup(func() { stopAuthorityNode(t, n) })
+	if err := n.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 12*time.Second)
+	defer cancel()
+	if err := n.WaitReady(ctx); err != nil {
+		t.Fatal(err)
+	}
+	c := n.Cluster()
+	spec := singleReplicaSpec("failed", nil)
+	for range 2 {
+		if _, err := c.EnsureGroup(ctx, spec, EnsureOptions{Actor: "app"}); !errors.Is(err, fault.ErrUnavailable) {
+			t.Fatal("failure was hidden or retried", err)
+		}
+		view, err := c.ReadTopology(ctx)
+		if err != nil || view.Latest.Version != 2 || view.Target.Version != 2 {
+			t.Fatal(view, err)
+		}
+		status, err := c.Operator(ctx, topology.MakeOperatorID(2, 1))
+		if err != nil || status.State != topology.OperatorFailed || status.Attempt != 1 {
+			t.Fatal(status, err)
+		}
 	}
 }

@@ -83,9 +83,13 @@ type transferRecorder struct {
 	err   error
 }
 
-func (r *transferRecorder) TransferLeader(_ context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+func (r *transferRecorder) DispatchEffect(_ context.Context, grant topology.AuthorityGrant,
+	resource topology.AuthorityResource, target topology.AuthorityTarget) (topology.EffectReceipt, error) {
+	if err := operator.ValidateEffectTarget(grant, resource, target); err != nil {
+		return topology.EffectReceipt{}, err
+	}
 	r.calls = append(r.calls, *grant.Action)
-	return protocolEffectReceipts(grant), r.err
+	return protocolEffectReceipts(grant)[0], r.err
 }
 
 func TestTransferLeaderUsesExactActiveScopeAndRefusesIneligibleTargets(t *testing.T) {

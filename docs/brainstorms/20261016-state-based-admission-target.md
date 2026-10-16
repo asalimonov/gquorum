@@ -711,3 +711,36 @@ only the wait. Service queries remain Unsupported until complete schema4 activat
 at78. Its cutover removes BuildLegacyPlan, old PlanFor/Apply/WaitOperator adapters,
 legacy PlanRead.Operator and activateCompleted's bootstrap/controller callers, then
 selects OperationControllerConfig and the already-prepared scoped validators.
+
+
+### Convenience convergence and direct transfers (peer threads31–32, Task67)
+
+`FI_ENSURE_CAS`: check desired/approved requested-scope compatibility before
+returning matching nonzero convergence. Pending removal conflicts even if an old
+checkpoint matches. A local hold never invalidates that proof or gets cleared.
+Pin one creation CAS/typed intent for the call; replay uncertain replies with that
+CAS. FSM replay proves original acceptance and derives RebasedTo; inspect only the
+successor head against its actual parent, requiring an exact one-group creation
+with the same actor/comment. Do not walk all rebase ancestry client-side or guess
+a fresh expected version. Approve only that head. An approval conflict naming its
+rebased successor permits inspecting that successor; an unqualified conflict is
+returned. A failed creation returns its exact diagnostic, never RetryOperation.
+
+`FI_TRANSFER_SCOPE`: capture an unowned/proven group source and exact bindings,
+validate the active declared target against health and fresh native membership,
+then recapture after waits. Use fresh observed leadership and receiver leadership
+checks; no new NativeState field. Unrelated Target version changes alone do not
+invalidate capture. GrantTransferProposal is also the existing atomic join of an
+unfinished exact action after a lost reply/canceled caller. Always propose/join,
+then send the same grant to the observed leader, chosen from immutable grant
+Targets. Recomputing member binding from Target or node progress is unsafe because
+both can differ from the retained recipient proof. A changed leader is reobserved
+under that same grant. Even an already-leading destination needs durable intent
+settlement; raftengine skips the native self-transfer. This supersedes the initial
+thread31 no-dispatch shortcut, which could strand unconsumed authority.
+
+Prepare exact readmission/reseat predecessor and owner checks with existing
+PlanInput. Named legacyEnsureProgress/legacyEnsureFailure/legacyTransferPlan and
+schema3 replacement guards remain only until78. That cutover switches to confirmed
+scoped reads/full exact operation diagnostics and scoped replacement commit paths;
+no synthetic Active document or runtime mode flag is permitted.

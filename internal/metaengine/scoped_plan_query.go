@@ -10,10 +10,12 @@ import (
 const (
 	operationPlanQuery = "operation_plan"
 	retryPlanQuery     = "retry_plan"
+	transferPlanQuery  = "transfer_plan"
 )
 
 func scopedPlanQuery(kind string) bool {
-	return kind == "planning" || kind == "approval_plan" || kind == operationPlanQuery || kind == retryPlanQuery
+	return kind == "planning" || kind == "approval_plan" || kind == operationPlanQuery ||
+		kind == retryPlanQuery || kind == transferPlanQuery
 }
 
 func (q QueryRequest) validatePlanFields() error {
@@ -27,6 +29,10 @@ func (q QueryRequest) validatePlanFields() error {
 		}
 	case "approval_plan":
 		if q.Version == 0 || q.Desired != nil || q.OperationID != "" || q.Key != "" {
+			return fault.ErrInvalid
+		}
+	case transferPlanQuery:
+		if q.Desired != nil || q.OperationID != "" || q.Version != 0 || topology.ValidateID(q.Key) != nil {
 			return fault.ErrInvalid
 		}
 	case operationPlanQuery, retryPlanQuery:
@@ -81,6 +87,8 @@ func queryScopedPlan(s *scopedState, q QueryRequest) (PlanRead, error) {
 func (s *scopedState) planReadBase(q QueryRequest) (PlanRead, error) {
 	read := PlanRead{}
 	switch q.Kind {
+	case transferPlanQuery:
+		return s.transferPlanRead(q.Key)
 	case "planning":
 		read.Target = q.Desired.Clone()
 	case "approval_plan":
@@ -163,4 +171,16 @@ func (s *scopedState) validatePlanOwner(op *topology.Operation, group string) er
 		return fault.ErrUnavailable
 	}
 	return nil
+}
+
+func (s *scopedState) transferPlanRead(group string) (PlanRead, error) {
+	row := s.indexes.groups[group]
+	if row == nil || row.SourceVersion == 0 || row.Declaration == nil || row.Deleting {
+		return PlanRead{}, fault.ErrUnavailable
+	}
+	if row.Owner != "" {
+		return PlanRead{}, fault.New(fault.Unavailable, "group is owned by operation "+string(row.Owner), nil)
+	}
+	read := PlanRead{Target: s.Target.Clone(), Scopes: s.capturePlanScopes([]string{group})}
+	return read, nil
 }
