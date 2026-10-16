@@ -75,7 +75,7 @@ func legacyOperationRows(m *Machine, q topology.ProgressQuery) []progressRecord 
 		}
 		operation := &topology.Operation{Status: status, Plan: topology.Plan{Steps: slices.Clone(record.Steps)}}
 		rows = append(rows, progressRecord{key: progressKey{Kind: progressOperation,
-			ID: string(id), Scope: status.Blocks[0].GroupID}, operation: operation, block: 0})
+			ID: string(id), Scope: record.Steps[0].GroupID}, operation: operation, block: 0})
 	}
 	return rows
 }

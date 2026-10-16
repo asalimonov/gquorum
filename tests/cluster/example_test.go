@@ -132,8 +132,9 @@ func TestComposeExampleTopologyDrainActivate(t *testing.T) {
 		request(n, "GET", "/internal/test/controls", nil, 0, 404, nil)
 		var status topology.ClusterStatus
 		request(n, "GET", "/api/cluster/status", nil, 0, 200, &status)
-		if status.Nodes[2].EffectiveState != topology.NodeActive {
-			t.Fatalf("unexpected effective node state: %+v", status.Nodes)
+		node3State, found := effectiveNodeState(status, "node3")
+		if !found || node3State != topology.NodeActive {
+			t.Fatalf("unexpected effective node state for node3: %+v", status.Nodes)
 		}
 		if status.MetaLeaderNodeName == "" || initial.MemberID(status.MetaLeaderNodeName) != status.MetaLeaderID || len(status.Groups) != 1 || status.Groups[0].Observation == nil || status.Groups[0].Observation.LeaderNodeName != status.MetaLeaderNodeName || status.Groups[0].Observation.LeaderID != status.MetaLeaderID {
 			t.Fatalf("leader name and Raft ID disagree: %+v", status)
@@ -205,7 +206,8 @@ func TestComposeExampleTopologyDrainActivate(t *testing.T) {
 				request(n, "GET", "/api/cluster/status", nil, 0, 200, &status)
 				var target topology.Document
 				request(n, "GET", "/api/topology/target", nil, 0, 200, &target)
-				if status.Nodes[2].EffectiveState == wantState {
+				node3State, found := effectiveNodeState(status, "node3")
+				if found && node3State == wantState {
 					if len(target.Group(topology.MetaGroupID).Replicas) != 3 {
 						t.Fatalf("incorrect approved meta membership: %+v", target)
 					}
@@ -243,4 +245,13 @@ func TestComposeExampleTopologyDrainActivate(t *testing.T) {
 			t.Fatalf("retained topology changed on %s: before %+v, after %+v", name, beforeRestart, retained)
 		}
 	}
+}
+
+func effectiveNodeState(status topology.ClusterStatus, name string) (topology.NodeState, bool) {
+	for _, node := range status.Nodes {
+		if node.Node.Name == name {
+			return node.EffectiveState, true
+		}
+	}
+	return "", false
 }

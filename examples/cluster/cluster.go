@@ -96,15 +96,24 @@ func readReadiness(ctx context.Context, node gquorum.Node) (readiness, error) {
 		return readiness{}, fault.ErrReplicaNotReady
 	}
 	name := node.Identity().NodeName
-	progress, err := node.Cluster().ReadProgress(ctx, topology.ProgressQuery{NodeName: name})
-	if err != nil {
-		return readiness{}, err
+	query := topology.ProgressQuery{NodeName: name}
+	for {
+		progress, err := node.Cluster().ReadProgress(ctx, query)
+		if err != nil {
+			return readiness{}, err
+		}
+		for _, row := range progress.Nodes {
+			if row.NodeName != name {
+				continue
+			}
+			if row.Approved == nil || row.Approved.State != topology.NodeActive {
+				return readiness{}, fault.ErrReplicaNotReady
+			}
+			return readiness{Node: name, SessionLive: true, TargetVersion: progress.TargetVersion}, nil
+		}
+		if progress.Next == "" {
+			return readiness{}, fault.ErrReplicaNotReady
+		}
+		query.After = progress.Next
 	}
-	if len(progress.Nodes) != 1 || progress.Nodes[0].Approved == nil {
-		return readiness{}, fault.ErrReplicaNotReady
-	}
-	if progress.Nodes[0].Approved.State != topology.NodeActive {
-		return readiness{}, fault.ErrReplicaNotReady
-	}
-	return readiness{Node: name, SessionLive: true, TargetVersion: progress.TargetVersion}, nil
 }
