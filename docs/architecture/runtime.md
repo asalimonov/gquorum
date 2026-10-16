@@ -208,8 +208,15 @@ retain evidence. Local readmission reservation, current-member readmission floor
 and incomplete superseding fences postpone release. Historical completed floors
 cease blocking after member rebind. Collection maintenance uses the authority
 lifetime: participation fencing leaves it running; Stop/readmission cancel and
-join it, including delayed callbacks. The service callback remains unwired until
-the scoped protocol/composition cutover (Tasks 59/72/78).
+join it, including delayed callbacks. The restricted MetaControl service now
+provides ReportCollection and ReportCleanupStatus callbacks. It authenticates the
+request process, confirms exact absence before settlement, and otherwise checks
+the historical courier before proposing receipt acceptance. Only missing history
+permits a repeated absence check; authentication/conflicting proof is never
+suppressed. A retained-member hint follows AuthorityRead semantics when the
+participation header is zero or lags the journal pin. General ProposeMeta refuses
+collection/status envelopes. Scoped state access remains Unsupported on schema3;
+Node callback composition and full activation remain Tasks72/78.
 
 WAL collection writes and syncs an exact sibling marker before deleting contents,
 keeps the identity pin until those deletions are synced, and finishes with

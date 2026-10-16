@@ -944,13 +944,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** new `internal/metaservice/cleanup.go`, `rpc.go`, query/forwarding helpers. **Target:** [T] §6.3, §7.3, §12 “ReportCollection”. **Depends on:** 43, 53, 58. **Budget:** ≤550.
 
-- [ ] Add report_collection/report_cleanup_status payloads to existing MetaControl. Bind Courier to authenticated process/header, validate cluster/receipt shape and perform safe collection_check before retained proof acceptance.
-- [ ] For untracked identities return settled with the safe read's index without proposing. Otherwise require full historical host/readmission-courier proof and propose RecordCollection. Recheck only missing-evidence pruning races, including courier lookup; never suppress authentication or conflicting-receipt failures.
-- [ ] Test excluded historical reporter, valid/invalid successor courier, restricted no-op after pruning, no general ProposeMeta bypass, no Raft append on settled and index/echo preservation through leader forwarding.
+- [x] Add report_collection/report_cleanup_status payloads to existing MetaControl. Bind Courier to authenticated process/header, validate cluster/receipt shape and perform safe collection_check before retained proof acceptance.
+- [x] For untracked identities return settled with the safe read's index without proposing. Otherwise require full historical host/readmission-courier proof and propose RecordCollection. Recheck only missing-evidence pruning races, including courier lookup; never suppress authentication or conflicting-receipt failures.
+- [x] Test excluded historical reporter, valid/invalid successor courier, restricted no-op after pruning, no general ProposeMeta bypass, no Raft append on settled and index/echo preservation through leader forwarding.
 
 **Verification**
 
-- [ ] Run metaservice protocol functional tests and `make test`; if a genuine envelope limitation requires .proto changes, use pinned generation and `make proto-check`.
+- [x] Run metaservice protocol functional tests and `make test`; if a genuine envelope limitation requires .proto changes, use pinned generation and `make proto-check`.
 
 ### Task 60: Implement bounded coherent metadata progress pages
 
@@ -1362,6 +1362,9 @@ Do not run broad process performance/chaos campaigns by default; the focused deb
 
 
 ## NOT PLANNED CHANGES
+
+- Task59 / peer thread23: reuse AuthorityRead's monotonic retained-member hint for restricted collection/status requests when participation headers are zero or lag the journal pin. Add the narrow internal Machine.ValidateCleanupCourier nil adapter until78; no new query/transport override. ReportCleanupStatus is exported only inside internal/metaservice and consumes existing managed.CleanupStatus so Node can wire the concrete callback without another public data type. The tracked amendment records these precisions.
+
 
 - Task57 / peer thread22: collection acceptance, deferred status and snapshot validation now accept any retained exact retirement revision with recorded consumption, rather than binding to first receipt delivery order. Same scope, no new task; regression reproduces issuance/fence/reissue and both delivery orders. The tracked admission-target amendment documents why complete local retirement proof replaces a live assignment RPC.
 

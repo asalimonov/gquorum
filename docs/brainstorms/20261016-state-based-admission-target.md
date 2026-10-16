@@ -542,3 +542,28 @@ resources under the shared group gate. Prepared retries use saved proof without
 rerunning policy. Collected rows never delete again. Memory cleanup creates no
 durable collection receipt or timestamp. Reporting/release remain ordered after
 local completion and are implemented in Tasks 58–59.
+
+### Restricted collection reporting precision (peer thread 23, Task 59)
+
+`COLLECTION_COURIER`: typed MetaControl reports always carry ReporterMemberID
+from the local authority journal pin. Use the existing AuthorityRead hint rule:
+zero selects the header member; a nonzero hint must be at least the header member.
+Cluster, node and process come from the authenticated request header; the resolved
+member must be nonzero. This handles zero or lagging participation headers without
+mutating Raft/admission identity or adding a transport override. Both header and
+hint are caller assertions under the cluster credential; retained retirement and
+the consumed metadata-readmission chain establish collection authority.
+
+The leader performs collection_check through its existing confirmed read, then
+Machine.ValidateCleanupCourier using the same FSM chain walk, then RecordCollection
+with full Apply-time validation. Only HistoryUnavailable from debt/proof lookup
+or proposal permits another confirmed absence check. Identity/authorization,
+conflicting receipt and fenced courier errors never become settlement or routing
+fallbacks. Settled echoes the receipt and safe-read index, appends nothing and
+claims no historical acceptance. Schema3 adapters remain Unsupported until78.
+
+Deferred status keeps its existing proposal shape: courier preflight authenticates
+the report; Apply validates exact retirement binding. A concurrent courier change
+can leave an old diagnostic but cannot authorize deletion or alter milestones.
+ReportCleanupStatus uses the existing managed.CleanupStatus callback value for
+internal composition; no new public application type is introduced.

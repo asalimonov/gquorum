@@ -148,6 +148,15 @@ func (g *Group) installFenceReply(ctx context.Context, header *metapb.Header, da
 }
 
 func (g *Group) metaControlReply(ctx context.Context, header *metapb.Header, data []byte) *metapb.Reply {
+	var envelope struct {
+		Kind string `json:"kind"`
+	}
+	if json.Unmarshal(data, &envelope) != nil {
+		return metatransport.Reply(fault.ErrInvalid)
+	}
+	if envelope.Kind != "" {
+		return g.cleanupControlReply(ctx, header, data, envelope.Kind)
+	}
 	var request load.ActionRequest
 	if json.Unmarshal(data, &request) != nil {
 		return metatransport.Reply(fault.ErrInvalid)
@@ -224,6 +233,8 @@ func (g *Group) keepAliveReply(header *metapb.Header, data []byte) *metapb.Reply
 
 func (g *Group) validateProposalCourier(proposal any, header *metapb.Header) error {
 	switch p := proposal.(type) {
+	case *metaengine.RecordCollectionProposal, *metaengine.RecordCleanupStatusProposal:
+		return fault.ErrOperationAuthorization // Restricted reports enter through MetaControl only.
 	case *metaengine.BindAdmissionProposal:
 		if p.Admission.NodeName != header.NodeName || p.Admission.MemberID != header.MemberId {
 			return fault.ErrIdentityMismatch
