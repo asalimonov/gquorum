@@ -802,3 +802,16 @@ Commit-45 dead-code audit
 - Reviewed references for the batch after 50a2006. Task 32 removed scopedAdmissionMilestone when its consumer adopted shared prefix proof. Correction 12 removed the redundant requiresDeletion kind condition. Existing admission sequence/receipt validators remain shared by live admission and scoped restore; the new handover is consumed by approval preparation, with later retry reuse explicitly planned.
 - Flat construction, legacy plan/query adapters, schema-3 dispatch and old whole-document ownership still have active callers. Their removal remains Task 75; no authority-mode flag, extra public API or unused production wrapper was added. Full unused-code lint passes.
 - This closes five implementation/correction commits: Correction 12 and Tasks 30–33. Request Claude review of 50a2006..this commit in peer thread 12, and evaluate findings before the next implementation commit. Thread 11 is already closed; its latest delayed notification adds no new request. Task 34 is the first unchecked task. Overall implementation remains unfinished and the goal active.
+
+## Correction 13 — Keep flat admission strict and scoped native suffixes intact
+Date: 2026-10-16. Commit: this correction commit (implementation/correction commit 46).
+
+Implemented
+- Closed peer thread 12 with agreement on all findings. Findings 2–3 are corrected here; role-history finding 1 follows before Task 34. Prepared Task-34 changes remain safely stashed.
+- Pending approved readmission ownership now applies only to partitioned plans. Binding receives the existing private planScope rather than inferring scope from an empty Plan. Flat plans still need full admission or exact convergence; a forged flat plan omitting metadata admission and predecessor host retirement is refused.
+- Scoped construction preserves the voter planner's suffix for an exact already-native replacement, avoiding a second Prepare/AddLearner. Native learners retain Wait/Promote/Transfer/Remove; native voters retain Transfer/Remove. The existing flat sequence remains until cutover. No public API added.
+
+Verified
+- Focused topology units pass, /tmp/gquorum-correction13-focused.log. Corrected a test constant name and supplied explicit live metadata observations required by the honest flat-plan regression.
+- make test: 1375/1375 pass, 9.659s; test-reports/unit/20261016T064344.057397Z-5gxfti5o/report.md. Staged lint and diff checks pass, /tmp/gquorum-correction13-lint.log. 144 changed handwritten Go lines including tests, within 550. No concurrency changes or new race/process run.
+- Next: Correction 14 for role-aware admission prefixes, then restore prepared Task 34. Next five-commit peer/dead-code checkpoint is commit 50. Goal remains unfinished.

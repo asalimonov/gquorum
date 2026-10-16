@@ -20,11 +20,15 @@ func ReadmissionCovers(input PlanInput, desired Document, plan Plan, node string
 	if metaMember == member {
 		return true // Exact convergence includes the receipt-gated admission.
 	}
-	if input.Approved.ClusterID == desired.ClusterID && input.Approved.MemberID(node) == member {
+	if plan.Blocks != nil && approvedReadmission(input, desired, node) {
 		return true // Another approved operation owns this exact pending readmission.
 	}
 	replica := exactPlanReplica(desired, Step{GroupID: MetaGroupID, NodeName: node, ReplicaID: member})
 	return replica != nil && ValidAdmissionSequence(plan.Steps, node, member, replica.Role)
+}
+
+func approvedReadmission(input PlanInput, desired Document, node string) bool {
+	return input.Approved.ClusterID == desired.ClusterID && input.Approved.MemberID(node) == desired.MemberID(node)
 }
 
 func validatePlanMembers(input PlanInput, desired Document) error {
@@ -47,7 +51,7 @@ func validatePlanMembers(input PlanInput, desired Document) error {
 // metadata owner retires its predecessor through the independently granted
 // readmission protocol before PrepareReplica can be consumed. Later host calls
 // to the retired member would be both redundant and unroutable.
-func bindReadmissionRetirement(input PlanInput, desired Document, plan Plan, groups []string) Plan {
+func bindReadmissionRetirement(input PlanInput, desired Document, plan Plan, scope planScope) Plan {
 	meta := desired.MetaGroup()
 	if meta == nil {
 		return plan
@@ -57,8 +61,9 @@ func bindReadmissionRetirement(input PlanInput, desired Document, plan Plan, gro
 		previous, known := input.loadOwnerMember(r.NodeName)
 		// Unchanged metadata can still own pending readmission retirement.
 		// The FSM verifies consumption, including deletion without a Prepare.
-		if known && r.ReplicaID > previous && (slices.Contains(groups, MetaGroupID) ||
-			ReadmissionCovers(input, desired, Plan{}, r.NodeName)) {
+		if known && r.ReplicaID > previous && (slices.Contains(scope.groups, MetaGroupID) ||
+			input.convergedMetaMember(r.NodeName) == r.ReplicaID ||
+			scope.partition && approvedReadmission(input, desired, r.NodeName)) {
 			replacements = append(replacements, r)
 		}
 	}
@@ -66,8 +71,8 @@ func bindReadmissionRetirement(input PlanInput, desired Document, plan Plan, gro
 		return plan
 	}
 	builder := readmissionPlanBuilder{input: input, desired: desired, replacements: replacements,
-		metadataOwned:      slices.Contains(groups, MetaGroupID),
-		plannedPreparation: readmissionPreparations(plan, replacements), emitted: make(map[string]bool)}
+		metadataOwned:     slices.Contains(scope.groups, MetaGroupID),
+		preserveAdmission: readmissionPreparations(input, plan, replacements, scope), emitted: make(map[string]bool)}
 	for _, step := range plan.Steps {
 		builder.appendStep(step)
 	}
@@ -79,8 +84,17 @@ func bindReadmissionRetirement(input PlanInput, desired Document, plan Plan, gro
 	return plan
 }
 
-func readmissionPreparations(plan Plan, replacements []Replica) map[string]bool {
+func readmissionPreparations(input PlanInput, plan Plan, replacements []Replica, scope planScope) map[string]bool {
 	plannedPreparation := make(map[string]bool, len(replacements))
+	if scope.partition {
+		native := input.Native[MetaGroupID].ConfState
+		for _, replacement := range replacements {
+			// Native membership has already passed exact identity validation.
+			// Scoped admission handover separately proves the consumed prefix.
+			plannedPreparation[replacement.NodeName] = slices.Contains(native.Voters, replacement.ReplicaID) ||
+				slices.Contains(native.Learners, replacement.ReplicaID)
+		}
+	}
 	for _, step := range plan.Steps {
 		if step.GroupID != MetaGroupID || step.Kind != StepPrepareReplica {
 			continue
@@ -95,13 +109,13 @@ func readmissionPreparations(plan Plan, replacements []Replica) map[string]bool 
 }
 
 type readmissionPlanBuilder struct {
-	input              PlanInput
-	desired            Document
-	replacements       []Replica
-	plannedPreparation map[string]bool
-	emitted            map[string]bool
-	steps              []Step
-	metadataOwned      bool
+	input             PlanInput
+	desired           Document
+	replacements      []Replica
+	preserveAdmission map[string]bool
+	emitted           map[string]bool
+	steps             []Step
+	metadataOwned     bool
 }
 
 func (p *readmissionPlanBuilder) replacement(node string) *Replica {
@@ -118,7 +132,7 @@ func (p *readmissionPlanBuilder) emit(r Replica) {
 		return
 	}
 	p.emitted[r.NodeName] = true
-	if !p.metadataOwned || p.plannedPreparation[r.NodeName] ||
+	if !p.metadataOwned || p.preserveAdmission[r.NodeName] ||
 		p.input.convergedMetaMember(r.NodeName) == r.ReplicaID {
 		return // preserve the planner's paired waits and destructive ordering
 	}
@@ -144,7 +158,7 @@ func (p *readmissionPlanBuilder) appendStep(step Step) {
 	r := p.replacement(step.NodeName)
 	if step.GroupID == MetaGroupID && r != nil && step.ReplicaID == r.ReplicaID {
 		p.emit(*r)
-		if !p.plannedPreparation[r.NodeName] && p.input.convergedMetaMember(r.NodeName) != r.ReplicaID &&
+		if !p.preserveAdmission[r.NodeName] && p.input.convergedMetaMember(r.NodeName) != r.ReplicaID &&
 			slices.Contains([]StepKind{StepPrepareReplica, StepAddLearner, StepWaitCaughtUp,
 				StepPromoteVoter}, step.Kind) {
 			return

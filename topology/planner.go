@@ -61,7 +61,7 @@ func constructGroupPlan(input PlanInput, desired Document, options PlanOptions, 
 	for i := range plan.Steps {
 		plan.Steps[i].Seq = i + 1
 	}
-	plan = bindReadmissionRetirement(input, desired, plan, groups)
+	plan = bindReadmissionRetirement(input, desired, plan, scope)
 	if err := bindDemotionGuards(&plan, desired, observed, preferredMetaTransfer); err != nil {
 		return Plan{}, err
 	}

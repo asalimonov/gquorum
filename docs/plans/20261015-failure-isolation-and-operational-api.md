@@ -571,6 +571,14 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [x] Run admission handover/restore units, staged lint and `make test`.
 
+### Correction 13: Preserve flat admission validation and scoped native suffixes
+
+**Files:** `topology/readmission_plan.go`, planner wiring and focused tests. **Target:** state-based admission amendment; peer thread 12 findings 2–3. **Budget:** ≤550 Go lines.
+
+- [x] Limit approved pending readmission ownership to partitioned plans. Give binding the existing construction scope instead of an ambiguous empty plan; flat validation continues to require complete admission or exact convergence.
+- [x] Preserve the existing planner suffix for an already-native scoped replacement. Never repeat its consumed Prepare/Add; keep legacy flat construction until activation.
+- [x] Verify forged flat omission refusal, honest flat construction, scoped native learner/voter successors, focused units, staged lint and make test.
+
 ### Task 34: Install scoped approvals and required-stop handover atomically
 
 **Files:** `internal/metaengine` approval/debt/convergence helpers and tests. **Target:** [T] §5.2, §6.2, §7.1, §12 “Approve”; accepted admission amendment. **Depends on:** 29–33. **Budget:** estimated 350–530 changed Go lines, ceiling 550.

@@ -18,7 +18,7 @@ func retainedRetirementPlan(input PlanInput, desired Document, status GroupStatu
 	if err := builder.planGroup("work"); err != nil {
 		return Plan{}, err
 	}
-	plan := bindReadmissionRetirement(input, desired, builder.plan, unionGroupIDs(input, desired))
+	plan := bindReadmissionRetirement(input, desired, builder.plan, planScope{groups: unionGroupIDs(input, desired)})
 	for i := range plan.Steps {
 		plan.Steps[i].Seq = i + 1
 	}

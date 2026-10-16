@@ -28,7 +28,7 @@ func scopedReadmissionPlanFixture() (PlanInput, Document, Plan) {
 func TestReadmissionReplanAfterMetaConvergence(t *testing.T) {
 	t.Parallel()
 	input, desired, loadPlan := scopedReadmissionPlanFixture()
-	original := bindReadmissionRetirement(input, desired, loadPlan, unionGroupIDs(input, desired))
+	original := bindReadmissionRetirement(input, desired, loadPlan, planScope{groups: unionGroupIDs(input, desired)})
 	if !ReadmissionCovers(input, desired, original, "a") {
 		t.Fatal("original admission did not cover its historical load owner")
 	}
@@ -37,7 +37,7 @@ func TestReadmissionReplanAfterMetaConvergence(t *testing.T) {
 	if !ReadmissionCovers(input, desired, original, "a") {
 		t.Fatal("meta convergence invalidated the immutable admission boundary")
 	}
-	replanned := bindReadmissionRetirement(input, desired, loadPlan, unionGroupIDs(input, desired))
+	replanned := bindReadmissionRetirement(input, desired, loadPlan, planScope{groups: unionGroupIDs(input, desired)})
 	if !slices.Equal(replanned.Steps, loadPlan.Steps[:1]) {
 		t.Fatal("load replan repeated metadata admission or dispatched to the retired host", replanned)
 	}
@@ -61,7 +61,7 @@ func TestReadmissionReplanPreservesOrdinaryMetaPromotion(t *testing.T) {
 		{Seq: 2, GroupID: MetaGroupID, NodeName: "a", ReplicaID: 4, Kind: StepPromoteVoter},
 	}
 	plan.Steps = append(steps, plan.Steps...)
-	bound := bindReadmissionRetirement(input, desired, plan, unionGroupIDs(input, desired))
+	bound := bindReadmissionRetirement(input, desired, plan, planScope{groups: unionGroupIDs(input, desired)})
 	if len(bound.Steps) != 3 || !slices.Equal(bound.Steps[:2], steps) || bound.Steps[2].Kind != StepRemoveReplica {
 		t.Fatal("completed admission suppressed a distinct voter-role change", bound)
 	}
@@ -84,7 +84,7 @@ func TestReadmissionConvergenceCoversOnlyExactDeletionHosts(t *testing.T) {
 				plan.Steps = append(plan.Steps, Step{GroupID: "work", NodeName: "b", ReplicaID: 2, Kind: StepStopReplica})
 			}
 			plan.Steps = append(plan.Steps, Step{GroupID: "work", Kind: StepDeleteGroupState})
-			bound := bindReadmissionRetirement(input, desired, plan, unionGroupIDs(input, desired))
+			bound := bindReadmissionRetirement(input, desired, plan, planScope{groups: unionGroupIDs(input, desired)})
 			if partial {
 				if len(bound.Steps) != 2 || bound.Steps[0].NodeName != "b" || bound.Steps[1].Kind != StepDeleteGroupState {
 					t.Fatal("completed readmission waived another host's deletion", bound)

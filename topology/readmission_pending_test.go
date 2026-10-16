@@ -117,7 +117,7 @@ func TestPendingReadmissionNeedsExactApprovedReplacement(t *testing.T) {
 				node.MemberID = 4
 				input.Nodes["a"] = node
 			}
-			if ReadmissionCovers(input, desired, Plan{}, "a") {
+			if ReadmissionCovers(input, desired, Plan{Blocks: []PlanBlock{}}, "a") {
 				t.Fatal("unrelated intent supplied a retirement owner")
 			}
 		})
