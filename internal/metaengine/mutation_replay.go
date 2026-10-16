@@ -50,9 +50,7 @@ func retainedMutation(p ProposeDocument, latest uint64, index *scopedIndexes) (A
 	}
 	result := ApplyResult{Accepted: true, ProposalID: p.ProposalID, Doc: accepted.Clone(),
 		OperatorID: topology.OperatorID(index.first[accepted.Version])}
-	for version := index.rebases[accepted.Version]; version != 0; version = index.rebases[version] {
-		result.RebasedTo = version
-	}
+	result.RebasedTo = rebasedSuccessor(accepted.Version, index)
 	return result, nil
 }
 

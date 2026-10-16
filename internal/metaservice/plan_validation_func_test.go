@@ -12,7 +12,7 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func TestControllerRejectsUnreachableEmptyPlanAndRetryKeepsIt(t *testing.T) {
+func TestControllerFailureApprovalReplayKeepsOriginalAttempt(t *testing.T) {
 	t.Parallel()
 	g := readyPublic(t, singleMetaFixtureWith(t, func(o *Options) { o.Limits.MaxNodes = 3 }))
 	g.controller.Stop()
@@ -42,8 +42,8 @@ func TestControllerRejectsUnreachableEmptyPlanAndRetryKeepsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	ex, ok := g.state().CurrentOperator()
-	if !ok || ex.Status.ID != retry || ex.Status.Attempt != 2 || len(ex.Plan.Steps) != 0 {
-		t.Fatal("same-version retry rebuilt actions", ex, err)
+	if !ok || retry != result.OperatorID || ex.Status.ID != retry || ex.Status.Attempt != 1 || len(ex.Plan.Steps) != 0 {
+		t.Fatal("approval replay created a retry or rebuilt actions", ex, err)
 	}
 	g.controller.Tick(ctx)
 	failed, err = g.Operator(ctx, retry)

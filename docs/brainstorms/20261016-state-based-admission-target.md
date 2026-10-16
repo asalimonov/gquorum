@@ -424,3 +424,12 @@ Validated receipts trigger opportunistic deletion completion only for touched
 debts or groups of their exact readmission batch. Failure of that completion
 leaves a scoped diagnostic and preserves the receipt facts. Full candidate/restore
 graph validation remains mandatory; this rule does not admit contradictory proof.
+
+### Mutation provenance precision (Task48)
+
+Typed intent records use ExpectedVersion as the acceptance CAS parent and Version
+as its immediate successor. RollbackTo preserves the existing document
+ParentVersion historical-source lineage; its requested source version also stays
+in the fingerprint. Restore must not mistake that lineage for the CAS parent.
+Original approval lookup never substitutes a retained retry when the first
+attempt's evidence is missing. Pruning removes complete attempt chains together.

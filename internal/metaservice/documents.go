@@ -77,7 +77,15 @@ func (g *Group) History(ctx context.Context, page topology.Page) (topology.Histo
 // Stage proposes an owned document under replicated expected-version
 // compare-and-swap.
 func (g *Group) Stage(ctx context.Context, doc topology.Document, expected uint64) (topology.Document, error) {
-	result, err := g.propose(ctx, metaengine.ProposeDocument{Doc: doc.Clone(), ExpectedVersion: expected})
+	if err := ctx.Err(); err != nil {
+		return topology.Document{}, err
+	}
+	proposal := metaengine.ProposeDocument{Doc: doc.Clone(), ExpectedVersion: expected}
+	if g.state().Latest().Version != expected {
+		result, err := g.state().ReplayMutation(proposal)
+		return result.Doc, err
+	}
+	result, err := g.propose(ctx, proposal)
 	return result.Doc, err
 }
 

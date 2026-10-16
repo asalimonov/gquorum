@@ -166,5 +166,6 @@ func normalizedIntentGroup(spec GroupSpec, rules topology.Rules) (GroupSpec, err
 // automatically approving an old version after a lost response.
 func mutationReplayResult(result metaengine.ApplyResult) MutationResult {
 	return MutationResult{Document: result.Doc, OperatorID: result.OperatorID,
-		RebasedTo: result.RebasedTo, Placement: result.Placement}
+		OperationID: topology.OperationID(result.OperatorID),
+		RebasedTo:   result.RebasedTo, Placement: result.Placement}
 }

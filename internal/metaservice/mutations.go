@@ -105,12 +105,14 @@ func (g *Group) mutation(ctx context.Context, o MutationOptions, policy mutation
 	if err := g.ensureRunning(ctx); err != nil {
 		return MutationResult{}, err
 	}
-	doc, err := g.Stage(ctx, next, base.Version)
-	result := MutationResult{Document: doc, Placement: report}
+	documents.Next = next
+	accepted, err := g.stageMutation(ctx, documents)
+	result := mutationReplayResult(accepted)
+	result.Placement = report
 	if err != nil || !o.Apply {
 		return result.outcome(err)
 	}
-	result.OperatorID, err = g.Apply(ctx, doc.Version)
+	result.OperatorID, err = g.Apply(ctx, result.Document.Version)
 	return result.outcome(err)
 }
 
@@ -239,7 +241,7 @@ func unknownGroup(id string) error {
 // IDs.
 func (g *Group) AddNode(ctx context.Context, node topology.Node, o MutationOptions) (MutationResult, error) {
 	return g.mutation(ctx, o, mutationPolicy{Kind: "add_node",
-		Input:   mutationInput{Value: node},
+		Input:   mutationInput{NodeName: node.Name, Value: node},
 		Comment: fmt.Sprintf("add node %q", node.Name)},
 		func(doc *topology.Document, now time.Time) error {
 			before := doc.Clone()
@@ -585,12 +587,14 @@ func (g *Group) RollbackTo(ctx context.Context, version uint64, o MutationOption
 	if o.Preview {
 		return MutationResult{Document: next, Placement: report}, nil
 	}
-	doc, err := g.Stage(ctx, next, base.Version)
-	result := MutationResult{Document: doc, Placement: report}
+	documents.Next = next
+	accepted, err := g.stageMutation(ctx, documents)
+	result := mutationReplayResult(accepted)
+	result.Placement = report
 	if err != nil || !o.Apply {
 		return result.outcome(err)
 	}
-	result.OperatorID, err = g.Apply(ctx, doc.Version)
+	result.OperatorID, err = g.Apply(ctx, result.Document.Version)
 	return result.outcome(err)
 }
 

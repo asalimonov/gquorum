@@ -9,16 +9,21 @@ import (
 func validateScopedIntents(state *scopedState, index *scopedIndexes) error {
 	for _, intent := range state.Intents {
 		doc, found := index.documents[intent.Version]
-		if !found || intent.ExpectedVersion >= intent.Version ||
-			doc.ParentVersion != intent.ExpectedVersion || doc.RebasedFrom != 0 || !validIntentFingerprint(intent) {
+		if !found || intent.Version == 0 || intent.ExpectedVersion != intent.Version-1 ||
+			intent.Kind != "rollback_to" && doc.ParentVersion != intent.ExpectedVersion ||
+			doc.RebasedFrom != 0 || !validIntentFingerprint(intent) {
 			return invalidScopedState("invalid accepted intent provenance")
 		}
 		if err := validateIntentSuccessor(intent, doc); err != nil {
 			return err
 		}
-		if intent.PreviousID != 0 && (intent.SuccessorID <= intent.PreviousID || intent.NodeName == "") ||
-			strings.ContainsRune(intent.NodeName, 0) {
+		if !validIntentTuple(intent) {
 			return invalidScopedState("invalid intent replacement tuple")
+		}
+		if before, retained := index.documents[intent.ExpectedVersion]; retained && intent.PreviousID != 0 {
+			if err := validateReplacementIntent(intent, before, doc); err != nil {
+				return invalidScopedState("retained intent contradicts its replacement diff")
+			}
 		}
 	}
 	return nil
@@ -53,4 +58,20 @@ func validateIntentSuccessor(intent Intent, doc topology.Document) error {
 		return invalidScopedState("accepted intent lacks its exact successor assignment")
 	}
 	return nil
+}
+
+func validIntentTuple(intent Intent) bool {
+	if strings.ContainsRune(intent.NodeName, 0) {
+		return false
+	}
+	if intent.Kind == "readmit_node" && intent.GroupID != "" && intent.GroupID != topology.MetaGroupID {
+		return false
+	}
+	if intent.Kind == "reseat_replica" && topology.ValidateLoadID(intent.GroupID) != nil {
+		return false
+	}
+	if intent.Kind == "readmit_node" || intent.Kind == "reseat_replica" {
+		return intent.PreviousID != 0 && intent.SuccessorID > intent.PreviousID && intent.NodeName != ""
+	}
+	return intent.PreviousID == 0
 }

@@ -496,3 +496,26 @@ func TestTypedMutationPinsZeroVersionAndChecksReplayBeforeEdit(t *testing.T) {
 		t.Fatal("lost raw Stage response was not recoverable", replay, err)
 	}
 }
+
+func TestStageLostResponseReturnsHistoricalDocumentWithoutProposal(t *testing.T) {
+	t.Parallel()
+	f := newMutationFixture(t)
+	candidate := f.g.machine.Latest()
+	candidate.Comment = "original acceptance"
+	f.commit(t, candidate, false)
+	accepted := f.g.machine.Latest()
+	candidate = f.g.machine.Latest()
+	candidate.Comment = "later unrelated edit"
+	f.commit(t, candidate, false)
+	before := f.g.machine.Latest()
+	// This fixture has no running service. Success proves the stale path returns
+	// retained evidence without trying to submit another Raft proposal.
+	result, err := f.g.Stage(t.Context(), accepted, 1)
+	if err != nil || !reflect.DeepEqual(result, accepted) || !reflect.DeepEqual(f.g.machine.Latest(), before) {
+		t.Fatal(result, err)
+	}
+	accepted.Comment = "different purpose"
+	if _, err := f.g.Stage(t.Context(), accepted, 1); !errors.Is(err, fault.ErrVersionConflict) {
+		t.Fatal(err)
+	}
+}

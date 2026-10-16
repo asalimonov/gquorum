@@ -29,6 +29,7 @@ func scopedPendingTransfer(s *scopedState) topology.AuthorityKey {
 
 func applyScopedApprovalFixture(t *testing.T, s *scopedState, proposal BeginOperationProposal) {
 	t.Helper()
+	prepareScopedFixture(t, s)
 	proposal.ProposalID = "approval"
 	body, err := json.Marshal(proposal)
 	if err != nil {

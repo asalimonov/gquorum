@@ -340,8 +340,12 @@ func (sm *topologySM) retiredIDs() map[string]bool {
 // an approved replacement/removal fences them; Latest replacements still forbid
 // restoring a different ID for the same node, even before approval.
 func (sm *topologySM) availableIdentities() topology.Document {
-	base := sm.latest.Clone()
-	for _, group := range sm.target.Groups {
+	return retainedIdentities(sm.latest, sm.target)
+}
+
+func retainedIdentities(latest, target topology.Document) topology.Document {
+	base := latest.Clone()
+	for _, group := range target.Groups {
 		current := base.Group(group.ID)
 		if current == nil {
 			base.Groups = append(base.Groups, group)

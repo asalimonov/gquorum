@@ -125,8 +125,7 @@ func TestScopedApprovalDispatchInstallsOnceAfterCompletePreparation(t *testing.T
 	p.Version = 1 // No retained original approval exists for the founding checkpoint.
 	body, _ = json.Marshal(p)
 	application, err = applyScopedProposal(&s, 13, "begin_operation", body)
-	if err != nil || application.changed || application.result.Code != proposalVersionConflict ||
-		application.result.ExpectedVersion != 1 || application.result.CurrentVersion != 3 {
+	if !errors.Is(err, fault.ErrHistoryUnavailable) || application.changed {
 		t.Fatal("stale Latest was not refused precisely", application, err)
 	}
 	after, _ := json.Marshal(s)

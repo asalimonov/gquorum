@@ -1037,3 +1037,16 @@ Implemented
 Verified
 - Pure intent/replay tests cover ordering, defaults, owned inputs, audit distinctions, exact identities, unknown history, repeated lost response after rebase and unchanged allocation/lineage. Functional service tests cover captured zero CAS, stale rejection before edits, raw response recovery and existing mutation/rollback/reseat paths.
 - make test: 1635/1635, 9.645s; test-reports/unit/20261016T110658.232693Z-iwvg3uik/report.md. Focused functional tests and staged lint pass (/tmp/gquorum-task47-functional.log, /tmp/gquorum-task47-lint.log); diff check passes. No new race/Docker run claimed for these pure transformations/FSM changes. No tasks added or split; next checkpoint65.
+
+## Task 48 — Accepted intent and original-approval provenance
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 63).
+
+Implemented
+- Scoped ProposeDocument performs retained replay before validation, then validates CAS, document/placement/retired IDs, historical allocation floors and exact replacement provenance on one owned candidate. It installs the document, original intent and allocation evidence atomically without changing Target, owners or effects. Replay survives snapshot restoration and returns the same accepted version.
+- Original-approval lookup never substitutes a retry. Missing original evidence returns HistoryUnavailable; unapproved rebased versions return structured conflict/successor. Service approval now returns the original attempt regardless of failure, rather than silently allocating another attempt. Updated the existing failed-plan functional regression to assert the new approved contract.
+- Service typed proposal composition owns provenance and resolves the accepted successor; stageMutation temporarily removes Intent for schema3 proposals. Task78 removes that exact bridge and replaces Machine.Approval/ReplayMutation read adapters with scoped indexes when persistence activates. Raw Stage already performs a read-only retained replay before proposing; the scoped dispatcher also repeats it against replicated state.
+- Rollback retains its existing ParentVersion historical-source lineage while Intent.ExpectedVersion records its CAS parent. Restore validates the exact sequential accepted version and, when retained, replacement diff. Shared identity-inventory/allocation helpers avoid duplicate logic; no composite convergence view is created. Full proof-closure pruning remains Task52; lookup tests explicitly distinguish incomplete indexes from valid restored graphs.
+
+Verified
+- Full metaengine/metaservice units and all metaservice functional tests pass (11.827s). Regressions cover atomic malformed-input refusal, both exact replacement kinds, lost responses/restoration, raw Stage after rebase, original failed approval versus latest retry, missing evidence, structured rebase conflict and rollback ancestry. Existing partial-approval/forwarding tests pass.
+- make test: 1656/1656, 6.496s; test-reports/unit/20261016T111448.067399Z-3zbd7wqt/report.md. Staged lint and diff checks pass; functional log /tmp/gquorum-task48-functional-all.log. No race/Docker run claimed for these serialized transformations and reads. No added/split tasks; next Task49, peer/dead-code checkpoint65.

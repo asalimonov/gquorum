@@ -798,15 +798,15 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaengine` document apply/index code, `internal/metaservice/documents.go`, `planning.go`. **Target:** [T] §3.4, §4.1, §7.1, §12 “Approve”. **Depends on:** 15, 44–47. **Budget:** ≤550.
 
-- [ ] Store one intent record per accepted typed version; FSM validates known kind/digest encoding, parent CAS, document validity, allocation floor and replacement diff tuple without duplicating typed mutation logic.
-- [ ] Approve(version) returns its first recorded attempt regardless of terminal state; RetryOperation is the only retry path. Rebased unapproved versions return structured RebasedTo; missing retained proof returns conflict/HistoryUnavailable without writing. Missing original approval means the whole atomically pruned attempt chain is absent.
-- [ ] Test optional approval failure preserves Document/RebasedTo, identical replay allocates nothing, first approval versus latest attempt, pruning and forwarding of structured results.
+- [x] Store one intent record per accepted typed version; FSM validates known kind/digest encoding, parent CAS, document validity, allocation floor and replacement diff tuple without duplicating typed mutation logic.
+- [x] Approve(version) returns its first recorded attempt regardless of terminal state; RetryOperation is the only retry path. Rebased unapproved versions return structured RebasedTo; missing retained proof returns conflict/HistoryUnavailable without writing. Missing original approval means the whole atomically pruned attempt chain is absent.
+- [x] Test optional approval failure preserves Document/RebasedTo, identical replay allocates nothing, first approval versus latest attempt, pruning and forwarding of structured results.
 
-- [ ] Original approval lookup never falls back to a later retained retry; absent original evidence returns HistoryUnavailable.
+- [x] Original approval lookup never falls back to a later retained retry; absent original evidence returns HistoryUnavailable.
 
 **Verification**
 
-- [ ] Run document/provenance units and focused service mutation functional checks; run `make test`.
+- [x] Run document/provenance units and focused service mutation functional checks; run `make test`.
 
 ### Task 49: Require exact predecessors for readmission and reseating
 

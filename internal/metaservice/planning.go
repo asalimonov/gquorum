@@ -159,32 +159,16 @@ func (g *Group) applyLocal(ctx context.Context, version uint64) (topology.Operat
 		return "", fault.ErrNotLeader
 	}
 	machine := g.state()
+	if first, err := machine.Approval(version); first != "" || err != nil {
+		return topology.OperatorID(first), err
+	}
 	latest := machine.Latest()
 	if latest.Version != version {
-		return "", &fault.Error{
-			Code:            fault.VersionConflict,
-			ExpectedVersion: version,
-			CurrentVersion:  latest.Version,
-			Message:         "only current Latest can be approved",
-		}
+		return "", &fault.Error{Code: fault.VersionConflict, ExpectedVersion: version, CurrentVersion: latest.Version}
 	}
-	var plan topology.Plan
-	if ex, ok := machine.CurrentOperator(); ok && ex.Status.Version == version {
-		if ex.Status.State == topology.OperatorSucceeded || !ex.Status.State.Terminal() {
-			g.controller.Signal()
-			return ex.Status.ID, nil
-		}
-		if ex.Status.State == topology.OperatorSuperseded {
-			return "", fault.ErrVersionConflict
-		}
-		plan = ex.Plan
-	}
-	if plan.Version == 0 {
-		var err error
-		plan, err = g.PlanFor(ctx, latest)
-		if err != nil {
-			return "", err
-		}
+	plan, err := g.PlanFor(ctx, latest)
+	if err != nil {
+		return "", err
 	}
 	result, err := g.propose(ctx, metaengine.BeginOperatorProposal{
 		Version: version,

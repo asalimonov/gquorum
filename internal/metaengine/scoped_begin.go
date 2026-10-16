@@ -11,10 +11,9 @@ func (s *scopedState) applyBeginOperation(index uint64, p BeginOperationProposal
 		}
 		return proposalApplication{result: scopedApprovalResult(p.ProposalID, first)}, nil
 	}
-	if p.Version != s.Latest.Version {
-		result := rejectVersionConflict(p.ProposalID, p.Version, s.Latest.Version)
-		result.RebasedTo = s.indexes.rebases[p.Version]
-		return proposalApplication{result: result}, nil
+	view := topology.ReadView{Latest: s.Latest, Target: s.Target}
+	if _, err := retainedApproval(p.Version, view, s.indexes); err != nil {
+		return proposalApplication{}, err
 	}
 	next, err := prepareScopedApproval(s, s.Latest, p, explicitApproval)
 	if err != nil {

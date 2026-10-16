@@ -19,17 +19,21 @@ func (s *scopedState) installRepairDocuments(pair repairDocuments) {
 	}
 	slices.SortFunc(history, func(a, b topology.Document) int { return cmp.Compare(a.Version, b.Version) })
 	s.History, s.Target, s.Latest = history, pair.Repair.Clone(), pair.Latest.Clone()
-	s.Allocations = slices.Clone(s.Allocations)
 	for _, doc := range []topology.Document{pair.Repair, pair.Latest} {
-		for _, group := range doc.Groups {
-			position := slices.IndexFunc(s.Allocations, func(row allocationRecord) bool {
-				return row.GroupID == group.ID
-			})
-			if position < 0 {
-				s.Allocations = append(s.Allocations, allocationRecord{group.ID, group.NextReplicaID})
-			} else {
-				s.Allocations[position].NextReplicaID = max(s.Allocations[position].NextReplicaID, group.NextReplicaID)
-			}
+		s.rememberScopedAllocations(doc)
+	}
+}
+
+func (s *scopedState) rememberScopedAllocations(doc topology.Document) {
+	s.Allocations = slices.Clone(s.Allocations)
+	for _, group := range doc.Groups {
+		position := slices.IndexFunc(s.Allocations, func(row allocationRecord) bool {
+			return row.GroupID == group.ID
+		})
+		if position < 0 {
+			s.Allocations = append(s.Allocations, allocationRecord{group.ID, group.NextReplicaID})
+		} else {
+			s.Allocations[position].NextReplicaID = max(s.Allocations[position].NextReplicaID, group.NextReplicaID)
 		}
 	}
 }
