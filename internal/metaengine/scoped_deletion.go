@@ -22,9 +22,9 @@ func prepareDeletionDebts(source, next *scopedState, collector planningCollector
 	operation := &next.Operations[len(next.Operations)-1]
 	deleting, retired := next.deletionScopes(operation)
 	debts := slices.Clone(next.Cleanup)
-	existing := make(map[storage.Identity]bool, len(debts))
-	for _, debt := range debts {
-		existing[debt.Identity] = true
+	existing := make(map[storage.Identity]*cleanupRecord, len(debts))
+	for i := range debts {
+		existing[debts[i].Identity] = &debts[i]
 	}
 	preparation := deletionPreparation{source, next, collector}
 	var pending error
@@ -33,10 +33,10 @@ func prepareDeletionDebts(source, next *scopedState, collector planningCollector
 		block, deleted := deleting[key.group]
 		id := storage.Identity{ClusterID: next.Target.ClusterID, GroupID: key.group,
 			NodeName: owner.target.NodeName, ReplicaID: key.id}
-		if !deleted || owner.progress == "" || existing[id] {
+		if !deleted || owner.progress == "" {
 			continue
 		}
-		debt, err := preparation.ordinaryDebt(id, block)
+		debt, err := preparation.deletionDebt(id, block, existing[id])
 		if errors.Is(err, fault.ErrUnavailable) {
 			pending = err
 			continue
@@ -201,7 +201,7 @@ func validateScopedDeletion(state *scopedState, index *scopedIndexes) error {
 		if owner.progress == "" || !deletionRow(row) {
 			continue
 		}
-		if debt := index.cleanup[id]; debt != nil && (row.Deleting || debt.Stopped != nil) {
+		if debt := index.cleanup[id]; debt != nil && (debt.Stopped != nil || state.deletionStop(id)) {
 			continue
 		}
 		if !row.Deleting {

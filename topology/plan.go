@@ -3,6 +3,7 @@ package topology
 import (
 	"cmp"
 	"fmt"
+	"slices"
 )
 
 // Metadata admission establishes host ownership before load effects run.
@@ -295,6 +296,7 @@ func (v *planShapeValidator) validateStopOrder(i int, current Step) error {
 	progress := v.input.retirementProgress(current.GroupID, key)
 	debtStop := (progress == RetainedCleanup || progress == RetainedStopped) &&
 		requiredRetainedStop(v.desired.Group(current.GroupID), key)
+	debtStop = debtStop || progress == RetainedCleanup && v.detachingStop(current, key)
 	if !debtStop && v.desired.Group(current.GroupID) != nil &&
 		!adjacentPlanStep(v.plan.Steps, i, StepRemoveReplica, current) {
 		return fmt.Errorf("stop %s/%d lacks adjacent removal", current.GroupID, current.ReplicaID)
@@ -305,6 +307,18 @@ func (v *planShapeValidator) validateStopOrder(i int, current Step) error {
 	v.stopped[current.GroupID][current.ReplicaID] = true
 
 	return nil
+}
+
+func (v *planShapeValidator) detachingStop(step Step, key ReplicaKey) bool {
+	if v.desired.Group(step.GroupID) == nil || !requiredRetainedStop(v.input.Approved.Group(step.GroupID), key) {
+		return false
+	}
+	for _, block := range v.plan.Blocks {
+		if block.GroupID == step.GroupID && slices.Contains(block.Cleanup, step.Seq) {
+			return true
+		}
+	}
+	return false
 }
 
 func (v *planShapeValidator) validateDeletionOrder(current Step) error {

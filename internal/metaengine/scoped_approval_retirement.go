@@ -22,11 +22,27 @@ func validateNewRetirement(c planningCollector, input topology.PlanInput,
 	for _, step := range plan.Steps {
 		owner := c.owners[planningReplicaKey{step.GroupID, step.ReplicaID}]
 		if step.Kind == topology.StepDeleteGroupState && !hosted[step.GroupID] ||
-			owner != nil && duplicateRetirement(*owner, desired.Group(step.GroupID), step) {
+			owner != nil && duplicateRetirement(*owner, desired.Group(step.GroupID), step) &&
+				!(owner.progress == topology.RetainedCleanup && c.detachingRequiredStop(step)) {
 			return fault.New(fault.OperationAuthorization, "retirement already belongs to retained cleanup", nil)
 		}
 	}
 	return nil
+}
+
+func (c planningCollector) detachingRequiredStop(step topology.Step) bool {
+	if step.Kind != topology.StepStopReplica {
+		return false
+	}
+	for _, debt := range c.evidence.cleanup {
+		if debt.Identity.GroupID != step.GroupID || debt.Identity.NodeName != step.NodeName ||
+			debt.Identity.ReplicaID != step.ReplicaID || debt.Stopped != nil || debt.StopAction == nil {
+			continue
+		}
+		bound := c.evidence.operations[topology.OperationID(debt.StopAction.OperatorID)]
+		return requiredCleanupStop(bound, *debt.StopAction)
+	}
+	return false
 }
 
 func (c planningCollector) markConvergedOwners(groups map[string]topology.GroupProgress) {

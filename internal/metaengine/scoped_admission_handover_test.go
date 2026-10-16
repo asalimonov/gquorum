@@ -63,16 +63,12 @@ func TestScopedApprovalHandsOverOneAdmissionWithoutRelabelingEffects(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := []AdmissionState{AdmissionPending, AdmissionReady, AdmissionLearner}[count]
+			want := []AdmissionState{AdmissionPending, AdmissionReady, AdmissionCompleted}[count]
 			if len(next.Admissions) != 1 || next.Admissions[0].OperatorID != "exec-v3-a1" ||
 				next.Admissions[0].State != want || ReadmissionID(next.Admissions[0]) != ReadmissionID(s.Admissions[0]) ||
 				!reflect.DeepEqual(next.AuthorityRecords, s.AuthorityRecords) || next.Operations[1].Previous != "" {
 				t.Fatal("handover lost readiness, identity, immutable facts or ancestry", next.Admissions)
 			}
-			// Finish only the surrounding declarations that Task 37 prepares.
-			next.History = append(slices.Clone(next.History), s.Target.Clone())
-			next.Nodes = slices.Clone(next.Nodes)
-			next.Nodes[1].Owner = "exec-v3-a1"
 			if _, err := prepareScopedGraph(next, next.Rules); err != nil {
 				t.Fatal("prepared admission cannot restore with its successor", err)
 			}

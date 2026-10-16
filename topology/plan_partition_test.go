@@ -76,6 +76,59 @@ func TestScopedPartitionsCarryRequiredDebtStopWithoutNewRetirement(t *testing.T)
 	}
 }
 
+func TestScopedPlannerDetachesObsoleteRequiredStopOnce(t *testing.T) {
+	t.Parallel()
+	input, desired := retainedPlanFixture()
+	input.Approved.Group("work").Replicas[2] = learner("d", 6)
+	input.Retained["work"].Replicas[0].Progress = RetainedCleanup
+	input.Retained["work"].Replicas[1].Progress = RetainedStopped
+	desired.Group("work").Replicas[2] = learner("e", 6)
+	// Use a fresh ID for the newly selected host, preserving the former key.
+	desired.Group("work").Replicas[2].ReplicaID = 7
+	desired.Group("work").NextReplicaID = 8
+	status := groupStatus("work", 1, []uint64{1, 2}, nil)
+	status.HealthKnown, status.LiveVoters = true, map[uint64]bool{1: true, 2: true}
+	input.Native = map[string]NativeState{"work": {GroupID: "work", ReplicaID: 1, Applied: 1, ConfState: status.ConfState}}
+	row := input.Groups["work"]
+	row.Observation = &status
+	input.Groups["work"] = row
+	plan, err := scopedPlan(input, desired, PlanOptions{Rules: plannerRules()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stops int
+	for _, step := range plan.Steps {
+		if step.ReplicaID != 4 {
+			continue
+		}
+		if step.Kind != StepStopReplica || !slices.Contains(plan.Blocks[0].Cleanup, step.Seq) {
+			t.Fatal("relocation retained a required stop or recreated retirement", step)
+		}
+		stops++
+	}
+	if stops != 1 {
+		t.Fatal("relocation lost the exact required-to-detached binding", plan)
+	}
+	input.Approved = desired.Clone()
+	desired.Version++
+	desired.Group("work").Labels = map[string]string{"owner": "next"}
+	plan, err = scopedPlan(input, desired, PlanOptions{Rules: plannerRules()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range plan.Steps {
+		if step.ReplicaID == 4 {
+			t.Fatal("already detached debt acquired a second stop", step)
+		}
+	}
+	native := input.Native["work"]
+	native.ConfState.Voters = []uint64{1, 2, 4}
+	input.Native["work"] = native
+	if _, err := scopedPlan(input, desired, PlanOptions{Rules: plannerRules()}); err == nil {
+		t.Fatal("detached debt hid a still-native replica")
+	}
+}
+
 func TestScopedAdmissionEdgesCoverExactFoundersAndLearners(t *testing.T) {
 	t.Parallel()
 	for _, role := range []ReplicaRole{ReplicaVoter, ReplicaLearner} {

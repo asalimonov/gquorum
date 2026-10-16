@@ -75,7 +75,6 @@ func TestScopedApprovalRebindsExactRequiredStopAcrossVersions(t *testing.T) {
 		!reflect.DeepEqual(d.RetireAction, s.Cleanup[0].RetireAction) || !reflect.DeepEqual(d.Removed, s.Cleanup[0].Removed) {
 		t.Fatal("rebound stop lost distinct origin or new sequence", d)
 	}
-	next.History = append(slices.Clone(next.History), s.Target.Clone())
 	if _, err := prepareScopedGraph(next, next.Rules); err != nil {
 		t.Fatal("cross-version stop cannot restore", err)
 	}
@@ -186,7 +185,7 @@ func TestScopedCleanupHandoverPreservesConsumedAndReadmissionProof(t *testing.T)
 	}
 }
 
-func TestScopedCleanupHandoverPreservesDetachedStop(t *testing.T) {
+func TestScopedCleanupHandoverPromotesDetachedStop(t *testing.T) {
 	t.Parallel()
 	s, p := cleanupApprovalFixture(t)
 	origin := s.indexes.operations[s.Cleanup[0].OperationID]
@@ -204,12 +203,110 @@ func TestScopedCleanupHandoverPreservesDetachedStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	next, err := prepareScopedApproval(&s, s.Latest, p, explicitApproval)
-	if err != nil || !reflect.DeepEqual(next.Cleanup[0], s.Cleanup[0]) {
-		t.Fatal("a new required stop relabeled previously detached cleanup", err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	next.History = append(slices.Clone(next.History), s.Target.Clone())
+	if next.Cleanup[0].StopAction.OperatorID != "exec-v7-a1" ||
+		next.Cleanup[0].OperationID != s.Cleanup[0].OperationID ||
+		!reflect.DeepEqual(next.Cleanup[0].RetireAction, s.Cleanup[0].RetireAction) {
+		t.Fatal("required promotion lost its exact binding or original retirement")
+	}
 	if _, err := prepareScopedGraph(next, next.Rules); err != nil {
 		t.Fatal("detached original proof cannot restore beside successor work", err)
+	}
+}
+
+func TestScopedCleanupHandoverRelocationReuseAndDeletion(t *testing.T) {
+	t.Parallel()
+	s, proposal := cleanupApprovalFixture(t)
+	documents := []*topology.Document{&s.Target, &s.Latest}
+	for i := range s.History {
+		documents = append(documents, &s.History[i])
+	}
+	for _, doc := range documents {
+		node := doc.Nodes[0]
+		node.Name = "away"
+		doc.Nodes = append(doc.Nodes, node)
+		doc.MetaGroup().Replicas = append(doc.MetaGroup().Replicas,
+			topology.Replica{NodeName: "away", ReplicaID: 3, Role: topology.ReplicaLearner})
+		doc.MetaGroup().NextReplicaID = 4
+	}
+	for i := range s.Groups {
+		if s.Groups[i].GroupID == topology.MetaGroupID {
+			s.Groups[i].Declaration = s.History[1].MetaGroup()
+		}
+	}
+	s.Nodes = append(s.Nodes, nodeConvergence{NodeName: "away", Declaration: s.History[1].Node("away"),
+		MemberID: 3, SourceVersion: 1, CompletedAt: s.Nodes[1].CompletedAt})
+	s.Latest.Group("a").Replicas[0].NodeName = "away"
+	proposal.Plan.Blocks[0].Steps, proposal.Plan.Blocks[0].Cleanup = nil, []int{1}
+	var err error
+	s.indexes, err = prepareScopedGraph(&s, s.Rules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := s.Cleanup[0]
+	for _, version := range []uint64{7, 8, 9, 10} {
+		if version == 8 {
+			duplicate := s.Target.Clone()
+			duplicate.Version, duplicate.ParentVersion = 8, 7
+			duplicate.Group("a").Labels = map[string]string{"owner": "duplicate"}
+			bad := proposal
+			bad.Version, bad.Plan = 8, proposal.Plan.Clone()
+			bad.Plan.Version, bad.At = 8, proposal.At.Add(time.Second)
+			bad.Scopes = []ScopeExpectation{{GroupID: "a", SourceVersion: 1, Owner: "exec-v7-a1"}}
+			if _, err := prepareScopedApproval(&s, duplicate, bad, explicitApproval); err == nil {
+				t.Fatal("already detached debt accepted another detached stop")
+			}
+		}
+		if version != 7 {
+			s.Latest = s.Target.Clone()
+			s.Latest.Version, s.Latest.ParentVersion = version, version-1
+			group := "a"
+			if version == 8 {
+				group = "live"
+				s.Latest.Group(group).Labels = map[string]string{"owner": "unrelated"}
+			} else if version == 9 {
+				s.Latest.Group("a").Replicas[0].NodeName = "n"
+				s.Latest.Group("a").Replicas[0].ReplicaID, s.Latest.Group("a").NextReplicaID = 10, 11
+				for i := range s.Allocations {
+					if s.Allocations[i].GroupID == "a" {
+						s.Allocations[i].NextReplicaID = 11
+					}
+				}
+			} else {
+				s.Latest.Groups = slices.DeleteFunc(s.Latest.Groups, func(g topology.Group) bool { return g.ID == "a" })
+			}
+			row := s.indexes.groups[group]
+			proposal.Version, proposal.At = version, proposal.At.Add(time.Second)
+			proposal.Scopes = []ScopeExpectation{{GroupID: group, SourceVersion: row.SourceVersion, Owner: row.Owner}}
+			proposal.Plan = topology.Plan{Version: version, Blocks: []topology.PlanBlock{{GroupID: group, SourceVersion: row.SourceVersion}}}
+			if version != 8 {
+				proposal.Plan.Steps = []topology.Step{{Seq: 1, GroupID: group, Kind: topology.StepStopReplica, NodeName: "n", ReplicaID: 7}}
+				proposal.Plan.Blocks[0].Steps = []int{1}
+			}
+		}
+		next, err := prepareScopedApproval(&s, s.Latest, proposal, explicitApproval)
+		if err != nil {
+			t.Fatal(version, err)
+		}
+		next.indexes, err = prepareScopedGraph(next, next.Rules)
+		if err != nil {
+			t.Fatal("handover cannot restore", version, err)
+		}
+		debt := next.indexes.cleanup[original.Identity]
+		bound := version
+		if version == 8 {
+			bound = 7
+		}
+		if debt.StopAction.Version != bound || debt.OperationID != original.OperationID ||
+			!reflect.DeepEqual(debt.RetireAction, original.RetireAction) || !reflect.DeepEqual(debt.Removed, original.Removed) {
+			t.Fatal("handover changed original attribution or lost the exact binding", version, debt)
+		}
+		if requiredCleanupStop(next.indexes.operations[topology.OperationID(debt.StopAction.OperatorID)], *debt.StopAction) != (version >= 9) {
+			t.Fatal("stop stayed required after relocation or detached during reuse/deletion", version)
+		}
+		s = *next
 	}
 }
 

@@ -58,6 +58,7 @@ type planningEvidence struct {
 	allocations map[string]uint64
 	admissions  []AdmissionRecord
 	cleanup     []cleanupRecord
+	operations  map[topology.OperationID]*topology.Operation
 }
 
 func (sm *topologySM) validatePlanShapeLocked(desired topology.Document, plan topology.Plan) error {

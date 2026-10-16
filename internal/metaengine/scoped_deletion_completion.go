@@ -155,20 +155,27 @@ func (p deletionPreparation) protectReadmission() error {
 func (p deletionPreparation) dependsOnReadmission(key planningReplicaKey, target topology.AuthorityTarget) bool {
 	id := storage.Identity{ClusterID: p.next.Target.ClusterID, GroupID: key.group,
 		NodeName: target.NodeName, ReplicaID: key.id}
+	deleting := slices.ContainsFunc(p.next.Groups, func(row groupConvergence) bool {
+		return row.GroupID == key.group && row.Deleting
+	})
 	for _, debt := range p.next.Cleanup {
 		if debt.Identity != id {
 			continue
 		}
-		if debt.Stopped != nil || debt.StopAction == nil {
+		if debt.Stopped != nil {
+			return false
+		}
+		if deleting && !p.next.deletionStop(id) {
+			return true
+		}
+		if debt.StopAction == nil {
 			return false
 		}
 		bound := p.source.indexes.operations[topology.OperationID(debt.StopAction.OperatorID)]
 		return requiredCleanupStop(bound, *debt.StopAction) &&
 			p.source.Target.MemberID(target.NodeName) > target.MemberID
 	}
-	return slices.ContainsFunc(p.next.Groups, func(row groupConvergence) bool {
-		return row.GroupID == key.group && row.Deleting
-	})
+	return deleting
 }
 
 func (c planningCollector) readmissionOrigin(id string) topology.OperationID {

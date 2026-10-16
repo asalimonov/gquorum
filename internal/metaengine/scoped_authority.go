@@ -112,7 +112,13 @@ func cleanupRetainsAction(debt *cleanupRecord, action topology.AuthorizedStep) b
 			return true
 		}
 	}
-	return false
+	bound := debt.StopAction
+	// Earlier cleanup stops remain historical authority after a required/deferred
+	// rebind. Execution still resolves only the debt's current exact action.
+	return bound != nil && debt.RetireAction != nil && action.Kind == topology.StepStopReplica &&
+		action.GroupID == debt.Identity.GroupID && action.NodeName == debt.Identity.NodeName &&
+		action.ReplicaID == debt.Identity.ReplicaID && action.Version >= debt.RetireAction.Version &&
+		(action.Version < bound.Version || action.Version == bound.Version && action.Attempt < bound.Attempt)
 }
 
 func validateScopedRevocation(record scopedRevocationRecord, index *scopedIndexes, catalog authorityCatalog) error {

@@ -2,6 +2,7 @@ package metaengine
 
 import (
 	"slices"
+	"time"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
@@ -55,6 +56,9 @@ func prepareScopedApproval(s *scopedState, desired topology.Document,
 	if err := prepareDeletionCompletions(s, next, collector); err != nil {
 		return nil, err
 	}
+	if err := prepareApprovalCompletion(s, next); err != nil {
+		return nil, err
+	}
 	return next, nil
 }
 
@@ -77,15 +81,25 @@ func (s *scopedState) validateApprovalCaptures(desired topology.Document,
 		return fault.ErrOperationAuthorization
 	}
 	for _, scope := range p.Scopes {
-		if !scope.matches(s.indexes.groups[scope.GroupID]) {
-			return fault.ErrVersionConflict
-		}
-		if owner := s.indexes.operations[scope.Owner]; scope.Owner != "" &&
-			(kind != explicitApproval || owner == nil || p.At.Before(owner.UpdatedAt)) {
-			return fault.ErrOperationAuthorization
+		if err := s.validateApprovalScope(scope, p.At, kind); err != nil {
+			return err
 		}
 	}
 	return topology.ValidatePlanGuardChain(p.Plan)
+}
+
+func (s *scopedState) validateApprovalScope(scope ScopeExpectation, at time.Time, kind approvalKind) error {
+	if !scope.matches(s.indexes.groups[scope.GroupID]) {
+		return fault.ErrVersionConflict
+	}
+	if row := s.indexes.groups[scope.GroupID]; row != nil && at.Before(row.CompletedAt) {
+		return fault.ErrOperationAuthorization
+	}
+	if owner := s.indexes.operations[scope.Owner]; scope.Owner != "" &&
+		(kind != explicitApproval || owner == nil || at.Before(owner.UpdatedAt)) {
+		return fault.ErrOperationAuthorization
+	}
+	return nil
 }
 
 func (s *scopedState) prepareApprovalOwners(desired topology.Document, p BeginOperationProposal) *scopedState {

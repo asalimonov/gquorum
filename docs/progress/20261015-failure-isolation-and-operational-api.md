@@ -889,3 +889,18 @@ Verified
 - Focused deletion/admission/approval units pass, /tmp/gquorum-correction15-focused.log. make test after the linter refactor: 1425/1425 pass, 8.386s; test-reports/unit/20261016T075553.481078Z-5ew04zoi/report.md.
 - Staged lint passes, /tmp/gquorum-correction15-lint.log. Diff checks pass. 172 changed handwritten Go lines including tests, below 550. No new concurrency/process implementation or race/Docker run claimed.
 - Correction 16 is next, then Correction 17, then Task 37. Next peer/dead-code checkpoint is commit 55. The 88-task goal and final activation remain unfinished.
+
+## Task 37 — Complete approval preparation, stop rebinding and deletion coverage
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 52).
+
+Implemented
+- Followed new user steering: removed the queued Correction 16/17 task sections and folded their obligations into existing Task 37. No task renumbering or new tasks; the former 550-line ceiling is superseded. Larger cohesive implementation batches retain review after every five commits.
+- Approval prepares owned history, pinned previous Target, group/node checkpoints, aggregate completion and the historical marker. Empty present-group plans require proven membership plus exact consumed retained effects; they cannot manufacture preparation or promotion. Live admissions complete in the same candidate as metadata convergence. Node progress preserves dependent load prerequisites and releases superseded owners. The dispatcher still refuses installation until Task 38 adds scoped revocation.
+- Existing unstopped cleanup debt no longer exempts deletion from issued usable exact readmission coverage. Approval, cancellation protection and restore inspect the current deletion block or ownerless failed tip. Whole-batch consumption completes the tombstone while preserving original debt attribution and actions.
+- Planner and FSM support required-to-detached, required-to-required and detached-to-required stop rebinding. Unchanged detached debt retains its prior binding; duplicate detached stops refuse. Original Removed, retirement, member and storage evidence remain unchanged. Restore accepts the exact later-bound Cleanup stop while retaining older grants as historical evidence; Task 38 settles their conflicting resources before new issuance.
+- Added planner/native-presence and composed approval/restore regressions for relocation, unrelated approval, reuse, deletion, missing/pending/fenced/partial/complete readmission, cancellation, zero-step evidence, node dependencies, history ownership and checkpoint clocks.
+
+Verified
+- make test: 1441/1441 pass, 9.452s; test-reports/unit/20261016T081752.340615Z-o7vko_lu/report.md. Final focused metaengine/topology tests pass after lint-only operand ordering and removing redundant fixture history appends; /tmp/gquorum-task37-focused.log.
+- Staged lint passes, /tmp/gquorum-task37-lint.log; diff checks pass. Complexity checks led to small shared validation/checkpoint helpers. No new concurrency/process code; no race/Docker run claimed.
+- Next: Task 38 scoped revocation and isolated atomic installation. Next peer/dead-code checkpoint remains commit 55. Live activation and the overall goal remain unfinished.

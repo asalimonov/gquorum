@@ -26,8 +26,11 @@ func (check scopedCleanupValidation) stopAction(debt cleanupRecord) bool {
 		}
 		return check.pendingStop(debt, bound)
 	}
-	// Detached work stays bound to its original action, independently of retries.
-	return debt.RetireAction.Kind != topology.StepDeleteGroupState && check.action(debt, *debt.StopAction)
+	// Only Stop may change binding; retirement and removal retain their origin.
+	return debt.RetireAction.Kind != topology.StepDeleteGroupState &&
+		slices.ContainsFunc(bound.Plan.Blocks, func(block topology.PlanBlock) bool {
+			return block.GroupID == debt.Identity.GroupID && slices.Contains(block.Cleanup, debt.StopAction.StepSeq)
+		})
 }
 
 func requiredCleanupStop(operation *topology.Operation, action topology.AuthorizedStep) bool {

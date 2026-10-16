@@ -58,6 +58,9 @@ func constructGroupPlan(input PlanInput, desired Document, options PlanOptions, 
 		}
 	}
 	plan := builder.plan
+	if scope.partition {
+		bindDetachedStops(input, desired, &plan, groups)
+	}
 	for i := range plan.Steps {
 		plan.Steps[i].Seq = i + 1
 	}

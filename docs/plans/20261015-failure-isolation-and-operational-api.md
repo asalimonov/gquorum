@@ -35,8 +35,8 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 - Actual modules are root, `examples/cluster`, `examples/scheduler`, `examples/inmemory-cache`, and `tests/cluster`; `scripts/revive` is a tooling module. `make test` covers all five application modules. Preserve the existing scheduler/cache demos while adapting their API use; keep `examples/cluster` small and meta-only.
 - `make lint` runs the repository's vet, revive, staticcheck and golangci configuration; it is not merely `go vet`. Use the current Makefile and [test guide](../testing/tests.md).
 - There is no `project.txt`, `architecture/`, or nested documentation Git repository here. Work in the existing root branch. `docs/plans/` is ignored; stage this plan explicitly without staging unrelated `docs/review/` files.
-- Each numbered task has a **hard ceiling of 550 changed handwritten Go lines, including tests**. Estimate its diff before editing. If a task would exceed that ceiling, split it into consecutive numbered tasks with their own verification, update subsequent references, and continue within the same approved design. Do not hide a repository-wide rename inside a final audit. Generated output and documentation are reviewed separately, not an excuse to combine unrelated code changes.
-- After each five implementation commits, inspect newly obsolete code with references and unused-code lint, delete safe dead code, and request a paseo-peer review of that batch. Evaluate findings against the target and actual code, implement justified corrections as explicit bounded correction tasks/commits, and record accepted/rejected findings with evidence before the next implementation commit. Independent preparation may continue while the peer reviews the immutable committed range. Retained transition scaffolding needs a named removal task. Count all implementation/correction commits toward subsequent five-commit review boundaries; documentation/planning commits do not count.
+- User steering (2026-10-16): stop adding/splitting tasks and renumbering cross-references. Extend existing tasks and use larger cohesive implementation commits. The former 550-line ceiling and per-task budget estimates are superseded; task numbers remain stable. Fold review fixes into the next relevant existing task. Preserve meaningful verification and review after every five implementation/correction commits.
+- After each five implementation commits, inspect newly obsolete code with references and unused-code lint, delete safe dead code, and request a paseo-peer review of that batch. Evaluate findings against the target and actual code, fold justified corrections into the next relevant existing task, and record accepted/rejected findings with evidence before the next implementation commit. Independent preparation may continue while the peer reviews the immutable committed range. Retained transition scaffolding needs a named removal task. Count all implementation/correction commits toward subsequent five-commit review boundaries; documentation/planning commits do not count.
 - Tasks execute in numbered order. A dependency list names additional semantic prerequisites, not permission to skip earlier tasks. At every checkpoint all modules compile and `make test` passes. Run focused tests named in each task, and focused functional/race checks when ownership or persistence changes. Fix failures encountered, including unrelated failures, and record unrelated fixes under NOT PLANNED CHANGES.
 - First introduce contracts and pure helpers, then state-machine behavior, stores and execution, then public composition. Temporary compile scaffolding is allowed only for an intermediate commit: record its exact symbol/file and removal task in the progress log. Do not introduce public V2 APIs or promise compatibility. Existing old symbols may remain until their consumers are converted; new paths must fail closed until their real implementation is connected. Remove all scaffolding by Task 78. Never synthesize an authoritative composite Document to make old code compile.
 - A signature change and all callers needed for that commit to compile belong together. Partition broad naming changes across the component tasks below; if a bridge is unavoidable, keep it private wherever possible and remove it before final cutover. No production flag chooses between old/new authority models. Change a reachable behavior only when its safety prerequisites are implemented; test new helpers directly before wiring them. A temporary stub must return a classified unsupported error, never fabricated progress or success.
@@ -638,43 +638,22 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [x] Run focused deletion/admission units, staged lint, `make test`, and diff checks; record the result and commit separately.
 
-### Correction 16: Require readmission coverage for omitted deletion stops despite existing debt
-
-**Source:** peer thread 14 finding 2 and round-3 consensus. **Budget:** estimated 250–500 changed Go lines including tests, ceiling 550.
-
-- [ ] Classify omission from the actual current deletion block, including an ownerless failed tip. An unstopped existing detached debt without an exact required Stop needs the same issued usable batch as a debt-less former identity.
-- [ ] Apply that predicate to approval, cancellation protection and restore; preserve original debt attribution and pending whole-batch completion.
-- [ ] Test actual approval with detached debt, missing/fenced/pending/consumed batch coverage, protected cancellation and restore refusal/immutability.
-
-**Verification**
-
-- [ ] Run focused deletion/cleanup units, staged lint, `make test`, and diff checks; log and commit separately.
-
-### Correction 17: Rebind stops according to the successor's required or cleanup partition
-
-**Source:** peer thread 14 finding 3 and forward-question consensus. **Budget:** estimated 300–530 changed Go lines including tests, ceiling 550.
-
-- [ ] Use existing Approved/desired same-host placement plus RetainedCleanup to plan an exact standalone Cleanup Stop when a formerly required stop becomes detached. Do not add a public retained-input field. Require native absence/consumed removal, and keep required reuse/deletion stops required.
-- [ ] Rebind required→required, required→detached, and detached→required to the successor's exact approved action. Refuse detached→detached duplicates and omission of a still-required stop unless exact readmission consumption covers it. Preserve origin/member/storage/Removed/RetireAction and consumed receipts.
-- [ ] Validate each action in its own required/Cleanup partition at restore; later-bound cleanup stops may differ from the debt origin. Late old receipts remain historical.
-- [ ] Test handover/restore chain, obsolete host no longer blocking required work, same-host/deletion safety, omission and duplicate refusal. Record every-rebind old-grant settlement in Task 38 and bound-action lookup in Task 43.
-
-**Verification**
-
-- [ ] Run focused planner/approval/cleanup/restore units, staged lint, `make test`, and diff checks; log and commit separately.
-
 ### Task 37: Prepare atomic approvals and zero-step convergence
 
-**Files:** `internal/metaengine` approval/deletion/convergence helpers and tests. **Target:** [T] §5.2, §6.2, §7.1, §12 “Approve”; accepted admission amendment. **Depends on:** 29–36. **Budget:** estimated 350–530 changed Go lines, ceiling 550.
+**Files:** `internal/metaengine` approval/deletion/convergence helpers and tests. **Target:** [T] §5.2, §6.2, §7.1, §12 “Approve”; accepted admission amendment. **Depends on:** 29–36 and Correction 15. **Batch:** complete approval preparation plus the remaining thread-14 corrections; no further task split.
 
-- [ ] Finish the approval candidate with prepared Target/history, operations/owners, zero-step group/node/marker completion and same-record admission/required-stop handover. Complete live admissions atomically with their metadata block, including zero-step completion; a covering checkpoint cannot coexist with a live admission. Prepare one non-fallible installation boundary after every validation; unchanged load blocks remain owned. Share approval validation with repair/voter/readmission as those handlers are implemented.
-- [ ] Use Tasks 35–36's prepared deletion debt, completion and permanent retirement IDs. Zero-step completion requires whole-batch consumption for every omitted exact former identity, including a later replacement member's batch. Create missing original-admission-attributed actionless debts atomically with the tombstone; reuse existing exact debts. Pending prerequisites keep the block pending. Approval binding alone cannot prove completion or create its own admission checkpoint. Refuse cancellation of an unconsumed batch on which retained deletion/required-stop omission depends.
-- [ ] Integrate scoped revocation preparation in Task 38 before enabling isolated FSM installation; until then the dispatcher returns Unsupported after complete candidate preparation. Never call global legacy revocation or publish partially prepared ownership. Live production activation remains Task 78 with complete persistence.
-- [ ] Test omitted/extra/duplicate scopes, unchanged admission-dependent owners, new/inherited deletion boundaries, zero-step deletion before/after exact preparation/retirement receipts, late CAS refusal and atomic candidate/refusal. Task 38 completes actual isolated install/refusal checks with revocation present.
+- [x] Finish the approval candidate with prepared Target/history, operations/owners, zero-step group/node/marker completion and same-record admission/required-stop handover. Complete live admissions atomically with their metadata block, including zero-step completion; a covering checkpoint cannot coexist with a live admission. Prepare one non-fallible installation boundary after every validation; unchanged load blocks remain owned. Share approval validation with repair/voter/readmission as those handlers are implemented.
+- [x] Use Tasks 35–36's prepared deletion debt, completion and permanent retirement IDs. Zero-step completion requires whole-batch consumption for every omitted exact former identity, including a later replacement member's batch. Create missing original-admission-attributed actionless debts atomically with the tombstone; reuse existing exact debts. Pending prerequisites keep the block pending. Approval binding alone cannot prove completion or create its own admission checkpoint. Refuse cancellation of an unconsumed batch on which retained deletion/required-stop omission depends.
+- [x] Integrate scoped revocation preparation in Task 38 before enabling isolated FSM installation; until then the dispatcher returns Unsupported after complete candidate preparation. Never call global legacy revocation or publish partially prepared ownership. Live production activation remains Task 78 with complete persistence.
+- [x] Test omitted/extra/duplicate scopes, unchanged admission-dependent owners, new/inherited deletion boundaries, zero-step deletion before/after exact preparation/retirement receipts, late CAS refusal and atomic candidate/refusal. Task 38 completes actual isolated install/refusal checks with revocation present.
+
+- [x] Close thread-14 existing-debt omission gap: approval, cancellation protection and restore inspect the exact deletion block (including failed tip). An unstopped existing debt without a required Stop needs an issued usable exact readmission batch.
+- [x] Implement thread-14 Stop rebinding table: required→required, required→detached when reuse/deletion ends, and detached→required. Use existing Approved/desired placement in planning; validate actual binding in the FSM. Preserve original debt/retirement/Removed attribution and consumed receipts; refuse duplicate detached stops and omitted required stops. Restore later-bound Cleanup actions by their exact bound operation.
+- [x] Add composed planner/approval/restore regressions for the rebinding chain, pending/fenced/missing readmission with existing debt, and cancellation. General conflicting-grant settlement remains Task 38; bound-action cleanup authorization remains Task 43.
 
 **Verification**
 
-- [ ] Run approval/placement/deletion/convergence/atomicity units, staged lint and `make test`.
+- [x] Run approval/placement/deletion/convergence/atomicity units, staged lint and `make test`.
 
 ### Task 38: Scope revocation and remove durable-debt capacity admission
 
@@ -713,7 +692,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] A zero-step deletion awaiting whole-batch readmission consumption stays blocked with an exact reason; recheck on receipts before atomically completing and retaining debt.
 
-- [ ] Use Correction 17's rebound required StopAction for ordinary deletion completion, including formerly detached debt. Its exact receipt supplies Stopped; do not add a second parallel proof source or relabel an old receipt.
+- [ ] Use Task 37's rebound required StopAction for ordinary deletion completion, including formerly detached debt. Its exact receipt supplies Stopped; do not add a second parallel proof source or relabel an old receipt.
 
 **Verification**
 

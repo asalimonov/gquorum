@@ -6,7 +6,7 @@ import "github.com/asalimonov/gquorum/topology"
 // owned copies; the collector only reads validated immutable evidence.
 func (s *scopedState) planningCollector() planningCollector {
 	evidence := planningEvidence{authority: newAuthorityCatalog(), allocations: make(map[string]uint64),
-		admissions: s.Admissions, cleanup: s.Cleanup}
+		admissions: s.Admissions, cleanup: s.Cleanup, operations: s.indexes.operations}
 	for _, doc := range s.indexes.documents {
 		evidence.documents = append(evidence.documents, doc)
 	}

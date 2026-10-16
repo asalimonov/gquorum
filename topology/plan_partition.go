@@ -2,6 +2,27 @@ package topology
 
 import "slices"
 
+// An obsolete same-host prerequisite becomes an exact deferred action in the
+// successor. Already-detached debt keeps its existing approval and emits nothing.
+func bindDetachedStops(input PlanInput, desired Document, plan *Plan, groups []string) {
+	steps := make(map[string][]Step, len(groups))
+	for _, step := range plan.Steps {
+		steps[step.GroupID] = append(steps[step.GroupID], step)
+	}
+	plan.Steps = nil
+	for _, id := range groups {
+		plan.Steps = append(plan.Steps, steps[id]...)
+		for _, replica := range input.formerReplicas(id) {
+			if replica.Progress == RetainedCleanup &&
+				requiredRetainedStop(input.Approved.Group(id), replica.ReplicaKey) &&
+				!requiredRetainedStop(desired.Group(id), replica.ReplicaKey) {
+				plan.Steps = append(plan.Steps, Step{Kind: StepStopReplica, GroupID: id,
+					NodeName: replica.NodeName, ReplicaID: replica.ReplicaID})
+			}
+		}
+	}
+}
+
 // Partition after all step rewrites: global sequences, guards and exact actions
 // remain immutable. The flat order retains adjacent safety pairs; a scoped
 // executor visits only required references, and cleanup uses retained actions.
