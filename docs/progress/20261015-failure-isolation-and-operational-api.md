@@ -829,3 +829,18 @@ Verified
 - Focused topology/metaengine units pass, /tmp/gquorum-correction14-focused.log. make test: 1393/1393 pass, 9.450s; test-reports/unit/20261016T065242.515385Z-wh7t2ew0/report.md.
 - Staged lint passes after operand-order corrections, /tmp/gquorum-correction14-lint.log. git diff --check passes. 359 changed handwritten Go lines including tests, within 550. Pure validation/preparation changes; no new race/process run claimed.
 - Thread-12 findings are corrected. Restore prepared Task 34 next, preserving both correction sections and the admission completion rule. Next peer/dead-code checkpoint is commit 50. Goal remains unfinished.
+
+## Task 34 — Prepare exact required-stop handover
+Date: 2026-10-16. Commit: this task commit (implementation/correction commit 48).
+
+Implemented
+- Restored the prepared task after Corrections 13–14, resolving the plan/comment conflicts while preserving all correction records. The pre-coding split makes 86 tasks: required-stop handover 34, complete atomic/zero-step approval preparation 35, scoped revocation/isolated installation 36, activation 76, final audit 86. Current references were updated; historical progress/review text stays unchanged.
+- Approval prepares copied debt rows and rebinds unconsumed required stops to exact successor required actions across versions/attempts. Original debt operation, storage, removed proof, detached retirement and consumed milestones remain unchanged. Missing or foreign required stops refuse preparation atomically. Detached stops remain original even if a new plan also requires a stop for that identity.
+- Restore validates the bound action's own partition and sequence, its current owner or failed ownerless version tip, independently of the debt origin. Late predecessor receipts remain historical evidence. Deletion retains the former declaration and required stop boundary.
+- Omission through readmission requires complete exact consumed retirement for the granted current member and former host identity. The debt retains its original action attribution plus the original readmission receipt; no call is rebound to the retired predecessor. Already consumed and actionless debt stay unchanged.
+- New tests cover cross-version sequence changes, late old receipts, failed-tip restore, actual failed retry preparation, omitted/foreign/detached required stops, detached-stop preservation, full/incomplete readmission batches, restored readmission milestones and source immutability. Zero-step/new deletion completion and final installation remain explicitly later tasks.
+
+Verified
+- Focused metaengine units pass, /tmp/gquorum-task34-focused.log. make test: 1402/1402 pass, 8.470s; test-reports/unit/20261016T065636.663789Z-efmc2cq4/report.md.
+- Staged lint passes after a line-length fix, /tmp/gquorum-task34-lint.log. git diff --check passes. 421 changed handwritten Go lines including tests and reference updates, within 550. No new concurrency/process implementation or race/Docker run claimed.
+- Task 35 is next. Next peer/dead-code checkpoint is commit 50, two commits from this one. Overall implementation remains unfinished; complete live activation is not claimed.

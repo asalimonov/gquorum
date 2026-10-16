@@ -69,7 +69,7 @@ func TestScopedApprovalHandsOverOneAdmissionWithoutRelabelingEffects(t *testing.
 				!reflect.DeepEqual(next.AuthorityRecords, s.AuthorityRecords) || next.Operations[1].Previous != "" {
 				t.Fatal("handover lost readiness, identity, immutable facts or ancestry", next.Admissions)
 			}
-			// Finish only the surrounding declarations that Task 34 installs.
+			// Finish only the surrounding declarations that Task 35 prepares.
 			next.History = append(slices.Clone(next.History), s.Target.Clone())
 			next.Nodes = slices.Clone(next.Nodes)
 			next.Nodes[1].Owner = "exec-v3-a1"

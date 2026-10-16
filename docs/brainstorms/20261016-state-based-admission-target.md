@@ -197,8 +197,8 @@ or new history-cap admission restriction is introduced.
 | Target §5.4, §6.1, §12 retry | Specify same-record admission handover, stable origin and resumed prefixes. |
 | Tasks 26–27 | Plan/collect semantic ownership scopes; remove dependent-closure input; retain scope CAS and separate repair reads. |
 | Tasks 28–34 | Keep restricted barriers; block set equals affected scopes; atomic same-member admission handover accompanies metadata takeover. |
-| Tasks 35–36, 41 | Preserve exact retirement authority through handover; share the waiting predicate and handover path with retries. |
-| Tasks 47–49 | Founding proof, non-founding binding, prefix validation, origin persistence/restore/join and retention roots. |
+| Tasks 36–37, 42 | Preserve exact retirement authority through handover; share the waiting predicate and handover path with retries. |
+| Tasks 48–50 | Founding proof, non-founding binding, prefix validation, origin persistence/restore/join and retention roots. |
 | Controller/verification tasks, final audit | Waiting classification, after-wait checks, end-to-end dependency and handover cases; remove obsolete closure expectations. |
 
 Split admission work into bounded tasks before coding if the 550-line ceiling

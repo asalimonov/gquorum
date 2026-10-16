@@ -10,29 +10,31 @@ import (
 
 func (check scopedCleanupValidation) stopAction(debt cleanupRecord) bool {
 	origin := check.index.operations[debt.OperationID]
-	for _, block := range origin.Plan.Blocks {
-		if !slices.Contains(block.Steps, debt.StopAction.StepSeq) {
-			continue
-		}
-		bound := check.index.operations[topology.OperationID(debt.StopAction.OperatorID)]
-		if bound == nil || bound.Status.Version != origin.Status.Version ||
-			bound.Status.Attempt < origin.Status.Attempt {
-			return false
-		}
-		// Graph validation has already proved this version's one complete retry chain.
-		candidate := debt
-		candidate.OperationID = bound.Status.ID
-		if !check.action(candidate, *debt.StopAction) {
-			return false
-		}
+	bound := check.index.operations[topology.OperationID(debt.StopAction.OperatorID)]
+	if bound == nil || bound.Status.Version < origin.Status.Version ||
+		bound.Status.Version == origin.Status.Version && bound.Status.Attempt < origin.Status.Attempt {
+		return false
+	}
+	candidate := debt
+	candidate.OperationID = bound.Status.ID
+	if !check.action(candidate, *debt.StopAction) {
+		return false
+	}
+	if requiredCleanupStop(bound, *debt.StopAction) {
 		if debt.Stopped != nil || debt.ReadmissionKey != nil {
 			return true // Consumed predecessor receipts keep their original tuple.
 		}
-		tip := check.index.operations[check.index.latest[origin.Status.Version]]
-		return bound == tip && check.pendingStop(debt, tip)
+		return check.pendingStop(debt, bound)
 	}
 	// Detached work stays bound to its original action, independently of retries.
 	return debt.RetireAction.Kind != topology.StepDeleteGroupState && check.action(debt, *debt.StopAction)
+}
+
+func requiredCleanupStop(operation *topology.Operation, action topology.AuthorizedStep) bool {
+	return operation != nil && action.Kind == topology.StepStopReplica &&
+		slices.ContainsFunc(operation.Plan.Blocks, func(block topology.PlanBlock) bool {
+			return block.GroupID == action.GroupID && slices.Contains(block.Steps, action.StepSeq)
+		})
 }
 
 func (check scopedCleanupValidation) pendingStop(debt cleanupRecord, tip *topology.Operation) bool {
@@ -46,7 +48,8 @@ func (check scopedCleanupValidation) pendingStop(debt cleanupRecord, tip *topolo
 			continue
 		}
 		if block.State == topology.OperationFailed {
-			return row.Owner == ""
+			return row.Owner == "" && row.SourceVersion < tip.Status.Version &&
+				check.index.latest[tip.Status.Version] == tip.Status.ID
 		}
 		return row.Owner == tip.Status.ID && !block.State.Terminal()
 	}

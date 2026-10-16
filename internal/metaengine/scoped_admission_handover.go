@@ -41,7 +41,7 @@ func prepareAdmissionHandovers(source, next *scopedState) error {
 	admissions := slices.Clone(source.Admissions)
 	for i, admission := range admissions {
 		if admission.State.terminal() || next.Target.MemberID(admission.NodeName) != admission.MemberID {
-			continue // Different-member cancellation belongs to scoped revocation (Task 35).
+			continue // Different-member cancellation belongs to scoped revocation (Task 36).
 		}
 		admissions[i], err = handover.prepare(admission, successor)
 		if err != nil {
