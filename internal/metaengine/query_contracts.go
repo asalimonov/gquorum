@@ -14,6 +14,9 @@ type CollectionCheck struct {
 }
 
 func (q QueryRequest) validateScopedFields() error {
+	if q.Version != 0 || q.Desired != nil || q.Native != nil || scopedPlanQuery(q.Kind) {
+		return q.validatePlanFields()
+	}
 	if q.OperationID != "" {
 		return q.validateScopedAuthority()
 	}

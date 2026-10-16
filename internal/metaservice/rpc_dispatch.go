@@ -178,13 +178,18 @@ func (g *Group) metaControlReply(ctx context.Context, header *metapb.Header, dat
 }
 
 func (g *Group) applyVersionReply(ctx context.Context, data []byte) *metapb.Reply {
-	var request struct {
-		Version uint64 `json:"version"`
+	request, err := decodeApplyVersionRequest(data)
+	if err != nil {
+		return metatransport.Reply(err)
 	}
-	if json.Unmarshal(data, &request) != nil {
-		return metatransport.Reply(fault.ErrInvalid)
+	var id topology.OperationID
+	if request.Kind == "" { // Schema3 callers are removed with their persistence at Task78.
+		var legacy topology.OperatorID
+		legacy, err = g.applyLocal(ctx, request.Version)
+		id = topology.OperationID(legacy)
+	} else {
+		id, err = g.applyOperationLocal(ctx, request)
 	}
-	id, err := g.applyLocal(ctx, request.Version)
 	if err != nil {
 		return g.leaderReply(err)
 	}

@@ -530,6 +530,20 @@ Until Task78, LegacyGroupProgress projects Latest/Target/Active, with source onl
 for existing Active groups and no inferred owner/Deleting/Blocked. ReadView.Active,
 legacy topology query and legacy operator diagnosis remain explicit cutover bridges.
 
+`FI_PLAN_CAPTURE`: private PlanRead captures affected Scopes plus desired/approved/
+proven/retained identities; safe read → selected native reads → safe recapture.
+No native read for unrelated groups or deletion. Recheck source/owner, approved
+scope changes and exact normalized cursor; sibling progress and own Running
+transition do not invalidate work. `Approve`, `RetryOperation`, `Operation`,
+`WaitOperation` preserve first approval/immediate retry edges and full old-attempt
+outcomes. ApplyVersion uses explicit approve/retry discriminators; schema3 remains
+on the named legacy branch until78. `OperationControllerConfig` binds existing
+coordinator and scope/final validators, activated with complete persistence at78.
+`BuildPlanPreferred` builds scoped partitions; `BuildLegacyPlan` isolates remaining
+schema3 callers until78. `ValidateMetaDrainSafety(PlanInput,Document,MetaDrainInput)`
+resolves actual voters through exact proven/retained/approved bindings, uses target
+node state and observed health, and refuses unknown/conflicting owners.
+
 ### `internal/metastore` and `internal/authoritystore`
 
 | Package | Entities / selected methods / contracts |
@@ -606,7 +620,12 @@ obligations without fabricated fence evidence, consistently across query/index/
 restore/prune. Pending deletion settles nothing; host resources keep exact proof.
 
 Entries: `New`; Controller `{Start,Stop,Signal,Tick,SetFinalValidator,DispatchEffect}`;
-`FromPublic`, `IDFor`, `NewFixedMembershipCoordinator`, `ValidateRemainingPlan`.
+`FromPublic`, `IDFor`, `NewFixedMembershipCoordinator`, `ValidateRemainingPlan`,
+`ValidateRemainingScope`. `FI_RETRY_PROOF`: scoped validation reuses native simulation
+with original Previous/grant/receipt tuples and global block sequences. FSM-derived
+consumption may skip a required prefix; native satisfaction alone permits idempotent
+new-grant execution without inventing consumption. Successful sibling scopes and
+detached cleanup are excluded from that simulation.
 `KB_RECEIPT`: success requires exact durable receipts plus observed native result;
 nil RPC error or a refusal is not completion. Tick reconciles resource fences,
 validates remaining plan against native membership, obtains exact grants, executes

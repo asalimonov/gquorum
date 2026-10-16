@@ -82,6 +82,10 @@ func TestScopedRetryPreservesPlanSiblingsAndImmediateSuccessor(t *testing.T) {
 		if third.result.OperatorID != "exec-v2-a3" {
 			t.Fatal("explicit retry of second failure did not extend the chain", third)
 		}
+		original, err := queryOperationStatus(&s, previous.Status.ID)
+		if err != nil || !reflect.DeepEqual(original, previous.Status) {
+			t.Fatal("historical lookup followed a later retry", original, err)
+		}
 	}
 }
 

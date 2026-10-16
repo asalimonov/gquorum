@@ -1031,13 +1031,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/metaservice/planning.go`, `progress.go`, `documents.go`, ApplyVersion handling. **Target:** [T] §3.1/§3.4, §7.2–7.3, §12 approval algorithms. **Depends on:** 44–53, 61–65. **Budget:** ≤550.
 
-- [ ] Build coherent PlanInput from approved/proven/intermediate exact scope plus fresh native evidence; capture ScopeExpectations. Use new begin/transition/retry proposals and scoped validators in existing service/controller configuration.
-- [ ] Expose Operation/WaitOperation/RetryOperation semantics and ApplyVersion discriminator; waits return full aggregate terminal status, explicit retry never replans or chooses a new intent. Remove activateCompleted when its last caller is converted.
-- [ ] Test remote forwarding, local wait cancellation, old attempt lookup, lost approval/retry replies and no hidden global convergence gate. Record remaining legacy service consumers for Task 73/70.
+- [x] Build coherent PlanInput from approved/proven/intermediate exact scope plus fresh native evidence; capture ScopeExpectations. Use new begin/transition/retry proposals and scoped validators in existing service/controller configuration.
+- [x] Expose Operation/WaitOperation/RetryOperation semantics and ApplyVersion discriminator; waits return full aggregate terminal status, explicit retry never replans or chooses a new intent. Remove activateCompleted when its last caller is converted.
+- [x] Test remote forwarding, local wait cancellation, old attempt lookup, lost approval/retry replies and no hidden global convergence gate. Record remaining legacy service consumers for Task 73/70. Legacy PlanFor/Apply/WaitOperator and activateCompleted remain isolated until bootstrap73 and controller/persistence78 finish conversion; scoped config/query adapters remain fail-closed until78.
 
 **Verification**
 
-- [ ] Run planning/approval/retry functional cases and `make test`.
+- [x] Run planning/approval/retry functional cases and `make test`.
 
 ### Task 67: Make convenience mutations and transfers scope-aware
 
@@ -1177,7 +1177,7 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 - [ ] Activate complete metadata disk/state/envelope schema 4; verify authority schema 2 from Task 54. Remove Active storage/API, Operator/WaitOperator wrappers, old MutationResult fields, ActivateTarget/legacy envelopes and every registered temporary scaffold now that all callers are converted. No fallback, migration, mixed-version acceptance or refounding old evidence.
 - [ ] Add intentionally sourced v4/v2 fixtures with provenance; retain old changed-format fixtures for explicit rejection and immutable unrelated physical baseline hashes for unchanged-format checks. Preserve current-index/term/confstate/pins and unchanged buckets.
-- [ ] Exercise fresh startup and current-format retained restart through real composition. Confirm all new proposals/queries/dispatch/report callbacks are reachable, with no production dual-model switch or unsupported stub left on an accepted path.
+- [ ] Exercise fresh startup and current-format retained restart through real composition. Confirm all new proposals/queries/dispatch/report callbacks are reachable, with no production dual-model switch or unsupported stub left on an accepted path. Cover successful operationCoordinator pages/cursor advancement, leadership changes across reads and native group-fence recipients (peer29 L1); host/Unsupported/NotLeader functional coverage already exists.
 
 - [ ] Keep raw-Stage RebasedFrom normalization after removing temporary intent guards, and test that a supplied value is never persisted through the public entry point. Shared AuthorityGrant/AuthorizedStep operation vocabulary and JSON tags must be converted before freezing v4 fixtures; AdmissionRecord execution_id stays unchanged.
 
@@ -1365,6 +1365,8 @@ Do not run broad process performance/chaos campaigns by default; the focused deb
 
 
 ## NOT PLANNED CHANGES
+
+- Task66 / peer thread30: reuse PlanRead and remaining-plan simulation, selecting required global steps with original ancestry evidence. BuildPlanPreferred now produces scoped blocks; explicit BuildLegacyPlan isolates the two schema3 preferred-planning callers until78 (the ordinary BuildPlan bridge also remains until78). OperationControllerConfig prepares existing ports without activating partial persistence. Meta drain takes PlanInput and resolves retained native bindings with target node states. No extra task, synthesized Active, retry plan payload or runtime mode switch. Peer29 L1's no-tests premise was disproven by existing functional tests; real page/native-recipient coverage is folded into78.
 
 - Task65: `internal/operator/dispatch_cleanup_func_test.go` now releases the second-host response only after setting the returning-host barrier, then advances its fake retry clock. The full functional run exposed a background-loop wake racing the test driver; production cleanup behavior is unchanged. Ten focused race repetitions and the complete owning functional suites pass.
 

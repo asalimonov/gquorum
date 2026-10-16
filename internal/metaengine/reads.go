@@ -18,13 +18,16 @@ import (
 // QueryRequest is the private protocol between the meta service and its
 // machine.
 type QueryRequest struct {
-	Progress           *topology.ProgressQuery `json:"progress,omitempty"`
-	CollectionIdentity *storage.Identity       `json:"collection_identity,omitempty"`
-	OperationID        topology.OperationID    `json:"operation_id,omitempty"`
-	AuthorityKey       *topology.AuthorityKey  `json:"authority_key,omitempty"`
-	OperatorID         topology.OperatorID     `json:"operator_id,omitempty"`
-	Kind               string                  `json:"kind"`
-	Key                string                  `json:"key,omitempty"`
+	Desired            *topology.Document              `json:"desired,omitempty"`
+	Native             map[string]topology.NativeState `json:"native,omitempty"`
+	Version            uint64                          `json:"version,omitempty"`
+	Progress           *topology.ProgressQuery         `json:"progress,omitempty"`
+	CollectionIdentity *storage.Identity               `json:"collection_identity,omitempty"`
+	OperationID        topology.OperationID            `json:"operation_id,omitempty"`
+	AuthorityKey       *topology.AuthorityKey          `json:"authority_key,omitempty"`
+	OperatorID         topology.OperatorID             `json:"operator_id,omitempty"`
+	Kind               string                          `json:"kind"`
+	Key                string                          `json:"key,omitempty"`
 }
 
 // LockRead returns a lock-holder session and whether the lock is held.
@@ -33,11 +36,16 @@ type LockRead = topology.LockHolder
 // PlanRead captures an operator, its topology boundaries and retained authority
 // evidence.
 type PlanRead struct {
-	Operator topology.Operator         `json:"operator"`
-	Input    topology.PlanInput        `json:"input"`
-	Target   topology.Document         `json:"target"`
-	Grants   []topology.AuthorityGrant `json:"grants,omitempty"`
-	Receipts []topology.EffectReceipt  `json:"receipts,omitempty"`
+	Operation topology.Operation        `json:"operation"`
+	Previous  []topology.Operation      `json:"previous,omitempty"`
+	Scopes    []ScopeExpectation        `json:"scopes,omitempty"`
+	Consumed  []int                     `json:"consumed,omitempty"`
+	Accepted  topology.OperationID      `json:"accepted,omitempty"`
+	Operator  topology.Operator         `json:"operator"`
+	Input     topology.PlanInput        `json:"input"`
+	Target    topology.Document         `json:"target"`
+	Grants    []topology.AuthorityGrant `json:"grants,omitempty"`
+	Receipts  []topology.EffectReceipt  `json:"receipts,omitempty"`
 }
 
 // SupportsQuery reports that the metadata machine implements serialized engine
@@ -93,6 +101,9 @@ func SessionValue(s SessionRecord) (topology.Session, error) {
 }
 
 func (m *Machine) queryValueLocked(q QueryRequest) (any, error) {
+	if scopedPlanQuery(q.Kind) {
+		return queryScopedPlan(nil, q) // Task78 installs the complete scoped persistence model.
+	}
 	if q.OperationID != "" {
 		return queryScopedAuthority(nil, q) // Scoped state replaces this adapter at Task 78.
 	}

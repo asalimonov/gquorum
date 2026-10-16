@@ -54,11 +54,11 @@ func (g *Group) PlanFor(ctx context.Context, doc topology.Document) (topology.Pl
 	observed.Found, observed.ConfState = found, native.Clone().ConfState
 	health := healthFromMeta(active, doc, observed)
 	input := topology.MetaDrainInput{Status: observed, Health: health}
-	preferred, err := topology.ValidateMetaDrainSafety(active, doc, input)
+	preferred, err := topology.ValidateMetaDrainSafety(planning, doc, input)
 	if err != nil {
 		return topology.Plan{}, err
 	}
-	plan, err := topology.BuildPlanPreferred(planning, doc,
+	plan, err := topology.BuildLegacyPlan(planning, doc,
 		topology.PlanOptions{Rules: g.rules, PreferredMetaTransfer: preferred})
 	return plan, explainUnsafePlacementPlan(approved, active, doc, err)
 }
@@ -121,7 +121,11 @@ func (g *Group) finalTarget(ctx context.Context, active, target topology.Documen
 	}
 	input := topology.MetaDrainInput{Status: status,
 		Health: healthFromMeta(active, target, status), Final: true}
-	_, err = topology.ValidateMetaDrainSafety(active, target, input)
+	planning, err := g.state().PlanningInput(ctx, target, nil)
+	if err != nil {
+		return err
+	}
+	_, err = topology.ValidateMetaDrainSafety(planning, target, input)
 	return err
 }
 

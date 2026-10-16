@@ -19,27 +19,27 @@ func TestDrainSafetyUsesActualQuorumAndKnownRetainedLeader(t *testing.T) {
 	target.Node("n1").State = NodeDraining
 	status := GroupStatus{GroupID: MetaGroupID, Found: true, LeaderID: 1, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}, HealthKnown: true}
 	alive := map[string]Health{"n1": HealthAlive, "n2": HealthAlive, "n3": HealthAlive}
-	transfer, err := ValidateMetaDrainSafety(active, target, MetaDrainInput{Status: status, Health: alive, Final: false})
+	transfer, err := ValidateMetaDrainSafety(convergedPlanInput(active), target, MetaDrainInput{Status: status, Health: alive, Final: false})
 	if err != nil || transfer != 2 {
 		t.Fatal(transfer, err)
 	}
-	if _, err = ValidateMetaDrainSafety(active, target, MetaDrainInput{Status: status, Health: alive, Final: true}); !errors.Is(err, fault.ErrUnsafeMembership) {
+	if _, err = ValidateMetaDrainSafety(convergedPlanInput(active), target, MetaDrainInput{Status: status, Health: alive, Final: true}); !errors.Is(err, fault.ErrUnsafeMembership) {
 		t.Fatal("active drain kept departing leader", err)
 	}
 	status.LeaderID = 2
-	if _, err = ValidateMetaDrainSafety(active, target, MetaDrainInput{Status: status, Health: alive, Final: true}); err != nil {
+	if _, err = ValidateMetaDrainSafety(convergedPlanInput(active), target, MetaDrainInput{Status: status, Health: alive, Final: true}); err != nil {
 		t.Fatal(err)
 	}
 	alive["n3"] = HealthDead
-	if _, err = ValidateMetaDrainSafety(active, target, MetaDrainInput{Status: status, Health: alive, Final: false}); !errors.Is(err, fault.ErrUnsafeMembership) {
+	if _, err = ValidateMetaDrainSafety(convergedPlanInput(active), target, MetaDrainInput{Status: status, Health: alive, Final: false}); !errors.Is(err, fault.ErrUnsafeMembership) {
 		t.Fatal("unsafe retained majority", err)
 	}
-	if _, err = ValidateMetaDrainSafety(active, target, MetaDrainInput{Status: status, Health: nil, Final: false}); !errors.Is(err, fault.ErrUnsafeMembership) {
+	if _, err = ValidateMetaDrainSafety(convergedPlanInput(active), target, MetaDrainInput{Status: status, Health: nil, Final: false}); !errors.Is(err, fault.ErrUnsafeMembership) {
 		t.Fatal("unknown health allowed drain", err)
 	}
 	// Desired membership cannot lower the pre-change majority requirement.
 	target.MetaGroup().Replicas = target.MetaGroup().Replicas[1:]
-	if _, err = ValidateMetaDrainSafety(active, target, MetaDrainInput{Status: status, Health: alive, Final: false}); !errors.Is(err, fault.ErrUnsafeMembership) {
+	if _, err = ValidateMetaDrainSafety(convergedPlanInput(active), target, MetaDrainInput{Status: status, Health: alive, Final: false}); !errors.Is(err, fault.ErrUnsafeMembership) {
 		t.Fatal("desired majority replaced actual majority", err)
 	}
 }
@@ -74,7 +74,7 @@ func TestMetaDrainSafetyActualQuorumSizes(t *testing.T) {
 			target.Node(names[tc.size-1]).State = NodeDraining
 			observed := statusForDocument(active)[MetaGroupID]
 			observed.HealthKnown = true
-			_, err := ValidateMetaDrainSafety(active, target, MetaDrainInput{Status: observed, Health: health, Final: false})
+			_, err := ValidateMetaDrainSafety(convergedPlanInput(active), target, MetaDrainInput{Status: observed, Health: health, Final: false})
 			if tc.want && err != nil || !tc.want && !errors.Is(err, fault.ErrUnsafeMembership) {
 				t.Fatal("actual voter safety", err)
 			}
@@ -82,7 +82,7 @@ func TestMetaDrainSafetyActualQuorumSizes(t *testing.T) {
 			// requirement of the configuration still running in Raft.
 			if tc.size > 1 {
 				target.MetaGroup().Replicas = target.MetaGroup().Replicas[:tc.size-1]
-				_, err = ValidateMetaDrainSafety(active, target, MetaDrainInput{Status: observed, Health: health, Final: false})
+				_, err = ValidateMetaDrainSafety(convergedPlanInput(active), target, MetaDrainInput{Status: observed, Health: health, Final: false})
 				if tc.want && err != nil || !tc.want && !errors.Is(err, fault.ErrUnsafeMembership) {
 					t.Fatal("desired quorum replaced actual quorum", err)
 				}
@@ -121,10 +121,33 @@ func TestMetaDrainSafetyFailsClosed(t *testing.T) {
 				health = nil
 			}
 			for _, final := range []bool{false, true} {
-				if _, err := ValidateMetaDrainSafety(active, target, MetaDrainInput{Status: observed, Health: health, Final: final}); !errors.Is(err, fault.ErrUnsafeMembership) {
+				if _, err := ValidateMetaDrainSafety(convergedPlanInput(active), target, MetaDrainInput{Status: observed, Health: health, Final: final}); !errors.Is(err, fault.ErrUnsafeMembership) {
 					t.Fatal("unsafe observation accepted", final, err)
 				}
 			}
 		})
+	}
+}
+
+func TestMetaDrainResolvesRetainedIntermediateVoterAndUsesTargetState(t *testing.T) {
+	t.Parallel()
+	base := planDoc(1, 3, []string{"n1", "n2", "n3"})
+	target := base.Clone()
+	target.Node("n3").State = NodeDraining
+	input := convergedPlanInput(base)
+	input.Nodes["n2"].Converged.State = NodeDraining // A lagging checkpoint cannot override approved activity.
+	input.Retained = map[string]RetainedGroup{MetaGroupID: {Replicas: []RetainedReplica{{ReplicaKey: ReplicaKey{NodeName: "former", ReplicaID: 4}, Progress: RetainedHosted}}}}
+	status := GroupStatus{Found: true, HealthKnown: true, LeaderID: 1, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 4}}}
+	check := MetaDrainInput{Status: status, Health: map[string]Health{"n1": HealthAlive, "n2": HealthAlive, "former": HealthDead}}
+	if _, err := ValidateMetaDrainSafety(input, target, check); err != nil {
+		t.Fatal("retained exact voter was unresolved", err)
+	}
+	delete(input.Retained, MetaGroupID)
+	if _, err := ValidateMetaDrainSafety(input, target, check); !errors.Is(err, fault.ErrUnsafeMembership) {
+		t.Fatal("unknown native voter accepted", err)
+	}
+	input.Retained = map[string]RetainedGroup{MetaGroupID: {Replicas: []RetainedReplica{{ReplicaKey: ReplicaKey{NodeName: "wrong", ReplicaID: 1}}}}}
+	if _, err := ValidateMetaDrainSafety(input, target, check); !errors.Is(err, fault.ErrUnsafeMembership) {
+		t.Fatal("conflicting native owner accepted", err)
 	}
 }

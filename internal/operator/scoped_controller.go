@@ -107,18 +107,30 @@ func (e *Controller) finishScopedWork(ctx context.Context, work WorkItem) contro
 }
 
 func requiredWorkBlock(work WorkItem) (topology.PlanBlock, error) {
-	op := work.Operation
+	block, err := requiredPlanBlock(work.Operation, work.GroupID)
+	if err != nil {
+		return block, err
+	}
+	for _, status := range work.Operation.Status.Blocks {
+		if status.GroupID == work.GroupID && status.State.Terminal() {
+			return topology.PlanBlock{}, fault.ErrOperationAuthorization
+		}
+	}
+	return block, nil
+}
+
+func requiredPlanBlock(op topology.Operation, group string) (topology.PlanBlock, error) {
 	position := slices.IndexFunc(op.Plan.Blocks, func(block topology.PlanBlock) bool {
-		return block.GroupID == work.GroupID
+		return block.GroupID == group
 	})
 	if position < 0 || position >= len(op.Status.Blocks) || op.Status.BlocksTruncated ||
-		op.Status.Blocks[position].GroupID != work.GroupID || op.Status.Blocks[position].State.Terminal() {
+		op.Status.Blocks[position].GroupID != group {
 		return topology.PlanBlock{}, fault.ErrOperationAuthorization
 	}
 	definition := op.Plan.Blocks[position]
 	for _, seq := range definition.Steps {
 		if seq < 1 || seq > len(op.Plan.Steps) || op.Plan.Steps[seq-1].Seq != seq ||
-			op.Plan.Steps[seq-1].GroupID != work.GroupID {
+			op.Plan.Steps[seq-1].GroupID != group {
 			return topology.PlanBlock{}, fault.ErrOperationAuthorization
 		}
 	}

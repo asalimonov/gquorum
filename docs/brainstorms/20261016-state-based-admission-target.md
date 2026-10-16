@@ -678,3 +678,36 @@ reuse exact ready/joined state and persist fresh proof under a new fenced grant;
 missing retained storage parks and unresolved startup/Close stays owned. No new
 public API, persistent cursor or lifecycle owner is introduced. Concrete service
 validators connect66; complete scoped persistence/composition remains78.
+
+
+### Scoped service capture and retry validation (peer thread30, Task66)
+
+`FI_PLAN_CAPTURE`: reuse the safe-read PlanRead envelope. Capture desired intent,
+exact group source/owner and retained identities under one FSM lock; read native
+membership only for those scopes; recapture with that evidence. Recheck the scope
+set, affected approved declarations and selected operation cursor. Unrelated group
+progress and the selected block's own Pending-to-Running transition do not revoke
+work. A missing deletion quorum is not a prerequisite. Original approval and retry
+edges resolve before any native I/O, including a lost response after later progress.
+
+`FI_RETRY_PROOF`: validate original grant/receipt tuples against contiguous Previous
+ancestry and immutable full-plan equality; select required global sequences without
+reindexing. Metadata derives consumed steps, including exact readmission-discharge
+proof for required stops. Native receipts can prove that the current step's voter
+result is already present for simulation, but never manufacture metadata consumption.
+An unconsumed step still runs under its new exact grant and persists fresh proof.
+Detached cleanup and successful sibling blocks do not enter the selected suffix.
+
+Drain validation consumes PlanInput, approved node state, actual native voters and
+health, with exact ownership from proven/approved groups, node checkpoints and
+retained `_meta` bindings. Unknown/conflicting owners refuse; old node-state
+checkpoints cannot override approved draining. Forced-retirement audit scope remains
+exact. Evaluate drain safety only for the selected metadata scope.
+
+ApplyVersion discriminates approve(version) and retry(previous); retry carries no
+plan and never silently selects newer intent. Operation observes the exact original
+attempt; WaitOperation waits for its complete aggregate, with cancellation ending
+only the wait. Service queries remain Unsupported until complete schema4 activation
+at78. Its cutover removes BuildLegacyPlan, old PlanFor/Apply/WaitOperator adapters,
+legacy PlanRead.Operator and activateCompleted's bootstrap/controller callers, then
+selects OperationControllerConfig and the already-prepared scoped validators.

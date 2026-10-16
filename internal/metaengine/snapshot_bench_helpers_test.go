@@ -86,7 +86,7 @@ func snapshotMatrix(tb testing.TB, size int) *Machine {
 		if version == historyRetention+3 {
 			preferred = 2
 		}
-		plan, err := topology.BuildPlanPreferred(testPlanningInput(tb, machine, desired, observed), desired, topology.PlanOptions{Rules: rules, PreferredMetaTransfer: preferred})
+		plan, err := topology.BuildLegacyPlan(testPlanningInput(tb, machine, desired, observed), desired, topology.PlanOptions{Rules: rules, PreferredMetaTransfer: preferred})
 		if err != nil {
 			tb.Fatal("fixture plan", version, err)
 		}

@@ -17,9 +17,13 @@ type MetaDrainInput struct {
 // ValidateMetaDrainSafety evaluates the actual _meta voter set, never the
 // declared target quorum. It returns a known-alive retained voter to use for a
 // leadership transfer when the current leader is departing.
-func ValidateMetaDrainSafety(active, target Document, input MetaDrainInput) (uint64, error) {
+func ValidateMetaDrainSafety(planning PlanInput, target Document, input MetaDrainInput) (uint64, error) {
 	status, health := input.Status, input.Health
-	departing := departingMetaNodes(active, target)
+	owners, err := metaMemberOwners(planning, target)
+	if err != nil {
+		return 0, err
+	}
+	departing := departingMetaNodes(owners, target)
 	if len(departing) == 0 {
 		return 0, nil
 	}
@@ -37,12 +41,7 @@ func ValidateMetaDrainSafety(active, target Document, input MetaDrainInput) (uin
 		return 0, drainRefusal("cannot change _meta membership while a joint configuration is active")
 	}
 
-	owners, err := metaMemberOwners(active, target)
-	if err != nil {
-		return 0, err
-	}
-
-	aliveRetained, err := retainedMetaVoters(active, input, owners, departing)
+	aliveRetained, err := retainedMetaVoters(target, input, owners, departing)
 	if err != nil {
 		return 0, err
 	}
@@ -55,24 +54,30 @@ func ValidateMetaDrainSafety(active, target Document, input MetaDrainInput) (uin
 	return validateDrainLeader(input, owners, departing, aliveRetained)
 }
 
-// metaMemberOwners maps every _meta raft member ID to the node that owns it,
-// reading the given documents in order. A member ID that two documents map to
-// DIFFERENT nodes is a resolution conflict, not a last-write-wins merge:
-// answering with either name could aim a leadership transfer — or a forwarded
-// Apply — at the wrong node.
-func metaMemberOwners(docs ...Document) (map[uint64]string, error) {
+// Resolve exact historical and intermediate membership without inventing a
+// whole converged document. Conflicting names for one member always refuse.
+func metaMemberOwners(input PlanInput, target Document) (map[uint64]string, error) {
 	owners := make(map[uint64]string)
-	for _, doc := range docs {
-		meta := doc.MetaGroup()
-		if meta == nil {
+
+	groups := []*Group{input.Groups[MetaGroupID].Converged, input.Approved.MetaGroup(), target.MetaGroup()}
+	for _, group := range groups {
+		if group == nil {
 			continue
 		}
-		for _, replica := range meta.Replicas {
-			if owner, exists := owners[replica.ReplicaID]; exists && owner != replica.NodeName {
-				return nil, drainRefusal("cannot resolve _meta voter %d: mapped to both %q and %q", replica.ReplicaID,
-					owner, replica.NodeName)
+		if err := addMetaReplicaOwners(owners, group.Replicas); err != nil {
+			return nil, err
+		}
+	}
+	for name, node := range input.Nodes {
+		if node.MemberID != 0 {
+			if err := addMetaMemberOwner(owners, node.MemberID, name); err != nil {
+				return nil, err
 			}
-			owners[replica.ReplicaID] = replica.NodeName
+		}
+	}
+	for _, replica := range input.Retained[MetaGroupID].Replicas {
+		if err := addMetaMemberOwner(owners, replica.ReplicaID, replica.NodeName); err != nil {
+			return nil, err
 		}
 	}
 	return owners, nil
@@ -90,45 +95,32 @@ func drainRefusal(format string, args ...any) error {
 	return fault.New(fault.UnsafeMembership, fmt.Sprintf(format, args...), nil)
 }
 
-func departingMetaNodes(active, target Document) map[string]struct{} {
+func departingMetaNodes(owners map[uint64]string, target Document) map[string]struct{} {
 	departing := make(map[string]struct{})
-	for _, node := range active.Nodes {
-		next := target.Node(node.Name)
-		if next == nil {
-			continue
-		}
-		if node.State == NodeActive && next.State != NodeActive {
-			departing[node.Name] = struct{}{}
+	for _, name := range owners {
+		next := target.Node(name)
+		if next == nil || next.State != NodeActive {
+			departing[name] = struct{}{}
 		}
 	}
-	activeMeta := active.MetaGroup()
-	targetMeta := target.MetaGroup()
-	if activeMeta != nil {
-		for _, replica := range activeMeta.Replicas {
-			nextNode := target.Node(replica.NodeName)
-			if (nextNode == nil || nextNode.State != NodeActive) &&
-				(targetMeta == nil || target.MemberID(replica.NodeName) != replica.ReplicaID) {
-				departing[replica.NodeName] = struct{}{}
-			}
-		}
-	}
-
 	return departing
 }
 
-func retainedMetaVoters(active Document, input MetaDrainInput, owners map[uint64]string,
+func retainedMetaVoters(target Document, input MetaDrainInput, owners map[uint64]string,
 	departing map[string]struct{}) ([]uint64, error) {
 	aliveRetained := make([]uint64, 0, len(input.Status.ConfState.Voters))
 	for _, voterID := range input.Status.ConfState.Voters {
 		owner, ok := owners[voterID]
 		if !ok {
-			return nil, drainRefusal("cannot resolve actual _meta voter %d through Active or Target", voterID)
+			return nil, drainRefusal("cannot resolve actual _meta voter %d through retained topology bindings",
+				voterID)
 		}
 		if _, leaves := departing[owner]; leaves {
 			continue
 		}
-		node := active.Node(owner)
-		if node != nil && node.State == NodeActive && input.Health[owner] == HealthAlive {
+		node := target.Node(owner)
+		if input.Health[owner] == HealthAlive && node != nil && node.State == NodeActive &&
+			target.MemberID(owner) == voterID {
 			aliveRetained = append(aliveRetained, voterID)
 		}
 	}
@@ -153,4 +145,24 @@ func validateDrainLeader(input MetaDrainInput, owners map[uint64]string, departi
 		return 0, drainRefusal("cannot change _meta membership: leader node %q is not known alive", leaderOwner)
 	}
 	return 0, nil
+}
+
+func addMetaReplicaOwners(owners map[uint64]string, replicas []Replica) error {
+	for _, replica := range replicas {
+		if err := addMetaMemberOwner(owners, replica.ReplicaID, replica.NodeName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func addMetaMemberOwner(owners map[uint64]string, id uint64, name string) error {
+	if id == 0 || name == "" {
+		return drainRefusal("cannot resolve empty _meta owner")
+	}
+	if old, exists := owners[id]; exists && old != name {
+		return drainRefusal("cannot resolve _meta voter %d: mapped to both %q and %q", id, old, name)
+	}
+	owners[id] = name
+	return nil
 }

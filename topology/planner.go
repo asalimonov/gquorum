@@ -267,6 +267,13 @@ func validateObservedMembership(status GroupStatus) error {
 // BuildPlanPreferred uses the same rules while preferring an eligible meta
 // leadership destination (for example, when draining the current leader).
 func BuildPlanPreferred(input PlanInput, desired Document, options PlanOptions) (Plan, error) {
+	return constructGroupPlan(input, desired, options,
+		planScope{groups: AffectedGroups(input.Approved, desired), partition: true})
+}
+
+// BuildLegacyPlan isolates schema3 callers until their complete removal at Task78.
+// Applications use BuildPlanPreferred; this bridge does not select an authority model.
+func BuildLegacyPlan(input PlanInput, desired Document, options PlanOptions) (Plan, error) {
 	return constructPlan(input, desired, options)
 }
 

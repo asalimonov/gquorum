@@ -32,8 +32,15 @@ func ValidateRemainingPlan(view RemainingPlanView, ex Record, native map[string]
 
 // RemainingPlanView pairs retained resources with the approved target document.
 type RemainingPlanView struct {
-	Input  topology.PlanInput
-	Target Document
+	Input    topology.PlanInput
+	Target   Document
+	Plan     topology.Plan
+	Previous []topology.Operation
+	Grants   []topology.AuthorityGrant
+	Receipts []topology.EffectReceipt
+	// Consumed comes from the same confirmed metadata read, including exact
+	// required stops discharged by a retained readmission batch.
+	Consumed []int
 }
 
 func remainingPlanError(format string, args ...any) error {
@@ -85,8 +92,12 @@ func validateRetainedReplica(view RemainingPlanView, ex Record, group string,
 		next.NodeName == replica.NodeName {
 		return nil
 	}
+	plan := view.Plan
+	if plan.Version == 0 {
+		plan = ex.Plan()
+	}
 	if replica.Progress == topology.RetainedStopped ||
-		topology.ReadmissionCovers(view.Input, view.Target, ex.Plan(), replica.NodeName) {
+		topology.ReadmissionCovers(view.Input, view.Target, plan, replica.NodeName) {
 		return nil
 	}
 	desired := view.Target.Group(group)
@@ -118,12 +129,14 @@ func validateRetainedRetirement(view RemainingPlanView, ex Record, group string,
 }
 
 type remainingPlanValidation struct {
-	view   RemainingPlanView
-	ex     Record
-	native map[string]topology.NativeState
-	rules  Rules
-	first  int
-	proofs map[int]bool
+	view     RemainingPlanView
+	ex       Record
+	native   map[string]topology.NativeState
+	rules    Rules
+	first    int
+	proofs   map[int]bool
+	required map[int]bool
+	consumed map[int]bool
 }
 
 func (v remainingPlanValidation) validateGroups() error {
@@ -190,6 +203,9 @@ func remainingMembers(ids []uint64) map[uint64]bool {
 func (v remainingPlanValidation) simulateSteps(simulation *remainingGroupSimulation) error {
 	for _, step := range v.ex.Steps {
 		if step.Seq < v.first || step.GroupID != simulation.group.ID {
+			continue
+		}
+		if v.required != nil && (!v.required[step.Seq] || v.consumed[step.Seq]) {
 			continue
 		}
 		if err := v.simulateStep(simulation, step); err != nil {
