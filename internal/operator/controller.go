@@ -81,7 +81,10 @@ const (
 type Controller struct {
 	store           Store
 	rules           Rules
-	coordinator     Coordinator
+	coordinator     LegacyCoordinator
+	scoped          Coordinator
+	scopedPlan      ScopedValidator
+	scopedFinal     ScopedValidator
 	authority       AuthorityCoordinator
 	groups          GroupEffects
 	membership      MembershipCoordinator
@@ -102,15 +105,19 @@ type Controller struct {
 // Config supplies approved topology, exact effects, validators and execution
 // timing.
 type Config struct {
-	Store            Store
-	Rules            Rules
-	Coordinator      Coordinator
-	Authority        AuthorityCoordinator
-	Groups           GroupEffects
-	Membership       MembershipCoordinator
-	OwnsGroup        func(groupID string) bool
-	Interval         time.Duration
-	MaxRetryInterval time.Duration
+	Store       Store
+	Rules       Rules
+	Coordinator Coordinator
+	// LegacyCoordinator and legacy validators are removed at Task78.
+	LegacyCoordinator    LegacyCoordinator
+	ScopedPlanValidator  ScopedValidator
+	ScopedFinalValidator ScopedValidator
+	Authority            AuthorityCoordinator
+	Groups               GroupEffects
+	Membership           MembershipCoordinator
+	OwnsGroup            func(groupID string) bool
+	Interval             time.Duration
+	MaxRetryInterval     time.Duration
 	// ProposalTimeout bounds each replicated execution-record write the engine
 	// makes (transition/fail/supersede). Zero selects the default. See the
 	// deadline rationale on Controller.transition.
@@ -130,15 +137,15 @@ func New(cfg Config) (*Controller, error) {
 	if err := cfg.Rules.Limits.Validate(); err != nil || cfg.Rules.SchemaVersion != 1 {
 		return nil, fault.New(fault.Invalid, "operator requires explicit valid cluster rules", err)
 	}
-	if cfg.Store == nil || cfg.Coordinator == nil || cfg.Groups == nil || cfg.Authority == nil {
+	if cfg.Groups == nil || cfg.Authority == nil {
 		return nil, fault.New(fault.Invalid,
 			"operator requires store, operator/authority coordinators and group effects", nil)
 	}
 	if cfg.OwnsGroup == nil {
 		return nil, fault.New(fault.Invalid, "operator requires an immutable owns-group predicate", nil)
 	}
-	if cfg.PlanValidator == nil {
-		return nil, fault.New(fault.Invalid, "operator requires a post-fence plan validator", nil)
+	if err := validateCoordinatorConfig(cfg); err != nil {
+		return nil, err
 	}
 	if cfg.Interval < 0 || cfg.MaxRetryInterval < 0 || cfg.ProposalTimeout < 0 {
 		return nil, fault.New(fault.Invalid, "negative operator timing", nil)
@@ -162,7 +169,9 @@ func New(cfg Config) (*Controller, error) {
 		cfg.Membership = NewFixedMembershipCoordinator(cfg.Groups)
 	}
 	return &Controller{
-		store: cfg.Store, rules: cfg.Rules, coordinator: cfg.Coordinator, groups: cfg.Groups, authority: cfg.Authority,
+		store: cfg.Store, rules: cfg.Rules, coordinator: cfg.LegacyCoordinator, scoped: cfg.Coordinator,
+		scopedPlan: cfg.ScopedPlanValidator, scopedFinal: cfg.ScopedFinalValidator,
+		groups: cfg.Groups, authority: cfg.Authority,
 		membership: cfg.Membership, ownsGroup: cfg.OwnsGroup,
 		interval: cfg.Interval, maxRetry: cfg.MaxRetryInterval,
 		proposalTimeout: cfg.ProposalTimeout, clock: cfg.clock,
@@ -291,6 +300,9 @@ func (e *Controller) Tick(ctx context.Context) {
 func (e *Controller) runTick(ctx context.Context) controllerOutcome {
 	e.tickMu.Lock()
 	defer e.tickMu.Unlock()
+	if e.scoped != nil {
+		return e.runScopedTick(ctx)
+	}
 	if ctx.Err() != nil || !e.coordinator.IsMetaLeader() {
 		return controllerIdle
 	}
@@ -492,7 +504,7 @@ func (e *Controller) dispatchEffect(ctx context.Context, step Step,
 	}
 }
 
-func authorizedStepForCurrent(ctx context.Context, coordinator Coordinator, step Step) AuthorizedStep {
+func authorizedStepForCurrent(ctx context.Context, coordinator LegacyCoordinator, step Step) AuthorizedStep {
 	ex, ok := coordinator.CurrentOperator(ctx)
 	if !ok || step.Seq < 1 || step.Seq > len(ex.Steps) || ex.CurrentStep != step.Seq || ex.State.Terminal() ||
 		!ex.Steps[step.Seq-1].Equal(step) {

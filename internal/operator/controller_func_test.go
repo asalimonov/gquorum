@@ -430,7 +430,7 @@ func newControllerFixture(active, target Document, steps []Step, current int, st
 	}
 	groups := &controllerGroups{store: store, statuses: map[string]GroupStatus{}, errs: map[string]error{}}
 	engine := mustController(Config{Rules: Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 3, MaxReplicas: 5}},
-		Store: store, Coordinator: coord, Groups: groups,
+		Store: store, LegacyCoordinator: coord, Groups: groups,
 		OwnsGroup: func(groupID string) bool { return groupID != MetaGroupID },
 	})
 	return &controllerFixture{store: store, coord: coord, groups: groups, engine: engine}
@@ -969,7 +969,7 @@ func TestController_ResumePreservesDurableWaiting(t *testing.T) {
 	// state and the exact cursor remain authoritative; no local timer state is
 	// needed to resume live observation.
 	f.engine = mustController(Config{Rules: Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 3, MaxReplicas: 5}},
-		Store: f.store, Coordinator: f.coord, Groups: f.groups,
+		Store: f.store, LegacyCoordinator: f.coord, Groups: f.groups,
 		OwnsGroup: func(groupID string) bool { return groupID != MetaGroupID },
 	})
 	status.Progress[2] = ReplicaProgress{Match: 100, RecentActive: true}
@@ -1033,7 +1033,7 @@ func TestController_ResumeMixedPlaneOwnership(t *testing.T) {
 	f.groups.statuses[MetaGroupID] = statusFor(MetaGroupID, []uint64{1}, nil, 1)
 	f.groups.statuses["shard0"] = statusFor("shard0", []uint64{1}, nil, 1)
 	metaEngine := mustController(Config{Rules: Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 3, MaxReplicas: 5}},
-		Store: f.store, Coordinator: f.coord, Groups: f.groups,
+		Store: f.store, LegacyCoordinator: f.coord, Groups: f.groups,
 		OwnsGroup: func(groupID string) bool { return groupID == MetaGroupID },
 	})
 	dataEngine := f.engine
@@ -1071,7 +1071,7 @@ func TestController_ShutdownCancelsBlockedWorkAndIsIdempotent(t *testing.T) {
 	f.groups.statuses["shard0"] = statusFor("shard0", []uint64{1}, nil, 1)
 	clock := newFakeControllerClock()
 	f.engine = mustController(Config{Rules: Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 3, MaxReplicas: 5}},
-		Store: f.store, Coordinator: f.coord, Groups: f.groups, Interval: time.Second,
+		Store: f.store, LegacyCoordinator: f.coord, Groups: f.groups, Interval: time.Second,
 		OwnsGroup: func(groupID string) bool { return groupID != MetaGroupID }, clock: clock,
 	})
 	entered := make(chan struct{})
@@ -1128,7 +1128,7 @@ func TestController_ShutdownReusesBoundedRetryTimer(t *testing.T) {
 	f.groups.errs["shard0"] = ErrGroupUnavailable
 	clock := newFakeControllerClock()
 	f.engine = mustController(Config{Rules: Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 3, MaxReplicas: 5}},
-		Store: f.store, Coordinator: f.coord, Groups: f.groups,
+		Store: f.store, LegacyCoordinator: f.coord, Groups: f.groups,
 		OwnsGroup: func(groupID string) bool { return groupID != MetaGroupID },
 		Interval:  time.Second, MaxRetryInterval: 5 * time.Second, clock: clock,
 	})
@@ -1245,7 +1245,7 @@ func TestController_TickSurvivesLostProposal(t *testing.T) {
 		sawErr:                make(chan error, 1),
 	}
 	engine := mustController(Config{Rules: Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 3, MaxReplicas: 5}},
-		Store: fixture.store, Coordinator: blocking, Groups: fixture.groups,
+		Store: fixture.store, LegacyCoordinator: blocking, Groups: fixture.groups,
 		OwnsGroup:       func(groupID string) bool { return groupID != MetaGroupID },
 		ProposalTimeout: 50 * time.Millisecond,
 	})
@@ -1290,7 +1290,7 @@ func TestController_TickSurvivesLostProposal(t *testing.T) {
 
 func mustController(cfg Config) *Controller {
 	if cfg.Authority == nil {
-		cfg.Authority = cfg.Coordinator.(AuthorityCoordinator)
+		cfg.Authority = cfg.LegacyCoordinator.(AuthorityCoordinator)
 	}
 	if cfg.PlanValidator == nil {
 		// These protocol doubles intentionally exercise individual steps. Full

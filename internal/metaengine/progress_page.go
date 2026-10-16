@@ -71,7 +71,7 @@ func (s *scopedState) appendProgress(page *topology.ProgressPage, row progressRe
 	case progressNode:
 		page.Nodes = append(page.Nodes, s.nodeProgress(row.key.ID).Clone())
 	case progressOperation:
-		appendOperationProgress(page, row.operation, row.block)
+		s.appendOperationProgress(page, row.operation, row.block)
 	case progressCleanup:
 		page.Cleanup = append(page.Cleanup, row.cleanup.progress())
 	default:
@@ -79,7 +79,7 @@ func (s *scopedState) appendProgress(page *topology.ProgressPage, row progressRe
 	}
 }
 
-func appendOperationProgress(page *topology.ProgressPage, op *topology.Operation, block int) {
+func (s *scopedState) appendOperationProgress(page *topology.ProgressPage, op *topology.Operation, block int) {
 	last := len(page.Operations) - 1
 	if last < 0 || page.Operations[last].ID != op.Status.ID {
 		header := op.Status
@@ -88,6 +88,9 @@ func appendOperationProgress(page *topology.ProgressPage, op *topology.Operation
 		last++
 	}
 	owned := op.Status.Blocks[block]
+	if row := s.indexes.groups[owned.GroupID]; row != nil && row.Owner == op.Status.ID {
+		owned.Blocked = s.progressBlocker(op.Status.ID, owned.GroupID)
+	}
 	owned.Blocked = copyCleanupValue(owned.Blocked)
 	page.Operations[last].Blocks = append(page.Operations[last].Blocks, owned)
 }

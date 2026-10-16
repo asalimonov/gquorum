@@ -588,3 +588,17 @@ source/reporter provenance (including source zero) means nil Observation. Exact
 source/assignment and current cluster/node/member/process matching preserve
 original timestamps. Later local metadata may conservatively suppress an older
 valid sample. Complete observation producers are Task70; live scoped reads are78.
+
+
+### Controller transition and ready selection (peer thread26, Task62)
+
+One Controller accepts exactly one internal coordinator port. Until78 the live
+composition uses LegacyCoordinator; scoped configuration refuses legacy Store
+and whole-document validators. Delete the bridge at complete cutover. WorkItem
+is owned Operation + GroupID; ScopedValidator receives that exact scope.
+ReadyBlocks is bounded selection, never authorization or a durable reservation.
+Use exact current owners and state-based barriers; Requires does not revive a
+superseded predecessor cursor. Reuse current grants, and include consumed-step
+advancement and zero-step finalization. Derive dependency/revocation diagnostics
+on read rather than writing per poll. Group-key continuation permits fair rotation;
+workers still validate the full tuple after waits at issuance/transition boundaries.

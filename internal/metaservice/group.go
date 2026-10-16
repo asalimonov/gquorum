@@ -250,16 +250,16 @@ func (g *Group) configureServices() error {
 		return err
 	}
 	g.controller, err = operator.New(operator.Config{
-		Store:            operatorStore{g},
-		Rules:            g.rules,
-		Coordinator:      operatorCoordinator{g},
-		Authority:        g,
-		Groups:           groupControllers{g},
-		OwnsGroup:        func(string) bool { return true },
-		Interval:         g.opts.Timing.TickInterval,
-		MaxRetryInterval: time.Second,
-		FinalValidator:   g.finalTarget,
-		PlanValidator:    g.validateRemainingPlan,
+		Store:             operatorStore{g},
+		Rules:             g.rules,
+		LegacyCoordinator: operatorCoordinator{g},
+		Authority:         g,
+		Groups:            groupControllers{g},
+		OwnsGroup:         func(string) bool { return true },
+		Interval:          g.opts.Timing.TickInterval,
+		MaxRetryInterval:  time.Second,
+		FinalValidator:    g.finalTarget,
+		PlanValidator:     g.validateRemainingPlan,
 	})
 	if err != nil {
 		return err

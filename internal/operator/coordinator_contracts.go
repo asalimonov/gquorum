@@ -6,9 +6,9 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// Coordinator supplies leadership, current execution and replicated step
-// transitions.
-type Coordinator interface {
+// LegacyCoordinator preserves schema3 execution until the complete Task78 cutover.
+// It is not a scoped work source and must not be used by the new dispatcher.
+type LegacyCoordinator interface {
 	IsMetaLeader() bool
 	CurrentOperator(context.Context) (Record, bool)
 	RecordOperatorTransition(context.Context, Transition) error

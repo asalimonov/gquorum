@@ -559,10 +559,22 @@ coordinators and group effects. Topology alias files preserve domain value ident
 | Interface | Complete method set |
 | --- | --- |
 | `Store` | `Target(ctx) (Document,error)`; `Active(ctx) (Document,error)` |
-| `Coordinator` | `IsMetaLeader() bool`; `CurrentOperator(ctx) (Record,bool)`; `RecordOperatorTransition(ctx,Transition) error` |
+| `Coordinator` | `IsMetaLeader() bool`; `ReadyBlocks(ctx,int) ([]WorkItem,error)`; `RecordOperationTransition(ctx,topology.OperationTransition) error`. WorkItem owns Operation + GroupID; ScopedValidator receives `(ctx,Operation,groupID)`. |
+| `LegacyCoordinator` | `IsMetaLeader() bool`; `CurrentOperator(ctx) (Record,bool)`; `RecordOperatorTransition(ctx,Transition) error`; schema3 bridge removed78. |
 | `AuthorityCoordinator` | `BeginEffect(ctx,topology.AuthorizedStep) (topology.AuthorityGrant,error)`; `ReconcileFences(ctx) error`; `EffectReceipts(ctx,topology.AuthorityGrant) ([]topology.EffectReceipt,error)`; `RecordEffect(ctx,topology.EffectReceipt) error` |
 | `MembershipCoordinator` | `Apply(ctx,topology.AuthorityGrant) ([]topology.EffectReceipt,error)`; `CaughtUp(GroupStatus,uint64) bool` |
 | `GroupEffects` | `Status(ctx,string) (GroupStatus,error)`; `ReadNative(ctx,string,...storage.Identity) (topology.NativeState,error)`; each of `CreateGroup`, `PrepareReplica`, `ApplyMembership`, `TransferLeader`, `StopReplica`, `CleanupReplicaState`, `DeleteGroupState` takes `(ctx,topology.AuthorityGrant)` and returns `([]topology.EffectReceipt,error)` |
+
+`FI_READY_BLOCKS`: Machine.ReadyBlocks selects exact nonterminal owners under the
+FSM lock, with an exclusive group continuation and wrap. It never reserves work
+or confers authority. Reuse state-based admission/evacuation predicates and exact
+resource obligations; consumed required steps and zero-step blocks remain eligible
+for advancement/finalization. Issued grants reuse their own floor. Dependency and
+revocation diagnostics derive on read, without per-poll writes; native safety and
+reachability remain worker checks. Config requires exactly one coordinator and
+matching scope or legacy validators; no scoped path reads Store.Active. Production
+retains the legacy port until78; scoped selection returns Unsupported on schema3.
+Tasks63–65 complete bounded dispatch/effects,66 the service scope validators.
 
 Entries: `New`; Controller `{Start,Stop,Signal,Tick,SetFinalValidator}`;
 `FromPublic`, `IDFor`, `NewFixedMembershipCoordinator`, `ValidateRemainingPlan`.

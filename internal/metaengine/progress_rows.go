@@ -30,14 +30,20 @@ func (s *scopedState) nodeProgress(name string) topology.NodeProgress {
 }
 
 func (s *scopedState) progressBlocker(owner topology.OperationID, group string) *topology.BlockedReason {
-	if op := s.indexes.operations[owner]; op != nil {
-		for _, block := range op.Status.Blocks {
-			if block.GroupID == group {
-				return block.Blocked
-			}
-		}
+	op := s.indexes.operations[owner]
+	position := readyBlockPosition(op, group)
+	if position < 0 {
+		return nil
 	}
-	return nil
+	if reason := s.requiredBlocker(op, position); reason != nil {
+		return reason
+	}
+	reason := op.Status.Blocks[position].Blocked
+	if reason != nil && len(op.Plan.Blocks[position].Steps) != 0 &&
+		(reason.Code == topology.BlockedDependency || reason.Code == topology.BlockedRevocationPending) {
+		return nil // Derived prerequisites resolved; never preserve a stale poll cause.
+	}
+	return reason
 }
 
 func (r cleanupRecord) progress() topology.CleanupProgress {

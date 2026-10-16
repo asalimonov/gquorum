@@ -19,7 +19,7 @@ func TestConstructorRefusesInvalidDependenciesAndDurations(t *testing.T) {
 	}{
 		{"rules", func(c *Config) { c.Rules.SchemaVersion = 0 }},
 		{"store", func(c *Config) { c.Store = nil }},
-		{"coordinator", func(c *Config) { c.Coordinator = nil }},
+		{"coordinator", func(c *Config) { c.LegacyCoordinator = nil }},
 		{"authority", func(c *Config) { c.Authority = nil }},
 		{"effects", func(c *Config) { c.Groups = nil }},
 		{"owner", func(c *Config) { c.OwnsGroup = nil }},
@@ -30,7 +30,7 @@ func TestConstructorRefusesInvalidDependenciesAndDurations(t *testing.T) {
 	} {
 		t.Run(change.name, func(t *testing.T) {
 			t.Parallel()
-			cfg := Config{Rules: Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}, Store: &controllerStore{}, Coordinator: &controllerCoordinator{}, Authority: &controllerCoordinator{}, Groups: &controllerGroups{}, OwnsGroup: func(string) bool { return true }}
+			cfg := Config{Rules: Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}, Store: &controllerStore{}, LegacyCoordinator: &controllerCoordinator{}, Authority: &controllerCoordinator{}, Groups: &controllerGroups{}, OwnsGroup: func(string) bool { return true }}
 			cfg.PlanValidator = func(context.Context, Record) error { return nil }
 			change.set(&cfg)
 			c, err := New(cfg)

@@ -981,13 +981,14 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `internal/operator/coordinator_contracts.go`, `controller.go`, metaservice coordinator adapter. **Target:** [T] §6.1, §7.2; contract C11. **Depends on:** 40–44, 51, 60. **Budget:** ≤550.
 
-- [ ] Implement Coordinator{IsMetaLeader, ReadyBlocks, RecordOperationTransition}, WorkItem{Operation, GroupID}, and ScopedValidator. Retain GroupEffects/MembershipCoordinator and internal package name.
-- [ ] Select bounded ready blocks from durable state; include only exact current owners with viable next required work. Replace whole-document plan/final validation with exact-scope validation.
-- [ ] Convert controller record/transition naming and tests in this component. Test selection with running/waiting/failed siblings, leadership changes and incomplete dependencies without holding a durable work slot indefinitely.
+- [x] Implement Coordinator{IsMetaLeader, ReadyBlocks, RecordOperationTransition}, WorkItem{Operation, GroupID}, and ScopedValidator. Retain GroupEffects/MembershipCoordinator and internal package name.
+- [x] Preserve one Controller with an exactly-one-coordinator constructor guard (thread26). Static live composition uses LegacyCoordinator until78; scope-only tests cannot supply legacy Store/validators. Final scoped ports/transition handling land now; bounded dispatch/effect execution is63–65 and service validators66. Remove legacy fields/adapters78.
+- [x] Select bounded ready blocks from durable state; include only exact current owners with viable next required work. Replace whole-document plan/final validation with exact-scope validation.
+- [x] Convert controller record/transition naming and tests in this component. Test selection with running/waiting/failed siblings, leadership changes and incomplete dependencies without holding a durable work slot indefinitely.
 
 **Verification**
 
-- [ ] Run controller selection units and relevant protocol functional checks; run `make test`.
+- [x] Run controller selection units and relevant protocol functional checks; run `make test`.
 
 ### Task 63: Dispatch fair bounded group work with joined shutdown
 
@@ -1015,8 +1016,9 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 ### Task 65: Reuse exact host/native state under a new attempt's grant
 
-**Files:** `internal/managed/granted_actions.go`, `replica.go`, `retirement.go`, `internal/raftengine/authority_effects.go`. **Target:** [T] §6.1, §6.4, §12 retry/dispatch algorithms. **Depends on:** 44, 63–64. **Budget:** ≤550.
+**Files:** `internal/managed/granted_actions.go`, `replica.go`, `retirement.go`, `internal/raftengine/authority_effects.go`, `internal/operator` scoped effect execution. **Target:** [T] §6.1, §6.4, §12 retry/dispatch algorithms. **Depends on:** 44, 63–64. **Budget:** ≤550.
 
+- [ ] Complete the scoped worker effect path prepared62–64: exact global sequence within its block, retained approved declaration, before/after-wait authorization, native verification and whole-group completion; reuse existing effect/receipt and membership helpers. Service validators are connected66; complete live composition stays78.
 - [ ] Reuse actionWorks, acceptGuardedStart, stopRetiringIdentity and beginLocalEffect. After required old-floor fencing, exact already-ready/prepared/joined state may satisfy a new grant with freshly persisted exact evidence.
 - [ ] Never relabel old receipts, skip predecessor fences because native state looks satisfied or overlap unresolved factory/Close ownership. Preserve native live-quorum and leadership predicates when an effect is already observed.
 - [ ] Test retry after response loss, same-identity prepare/stop, late factory/callback return, stale floor and missing retained storage parking. Existing grants/receipts remain attributed to their original action tuples.
@@ -1363,6 +1365,8 @@ Do not run broad process performance/chaos campaigns by default; the focused deb
 
 
 ## NOT PLANNED CHANGES
+
+- Task62 / peer thread26: single Controller keeps explicit LegacyCoordinator until78; New statically rejects both/neither ports and mixed validators/stores. No copied runner, runtime flag or synthetic scoped view. Ready selection uses state barriers rather than raw historical Requires cursors; progress derives dependency/revocation reasons without polling writes. Scoped ports/selection/transition handling are62, dispatch/effects63–65, concrete service validators66 and live cutover78. Extend65 accordingly; no new tasks.
 
 - Task61 / peer threads24–25: `scoped_cleanup_readmission.go` validates the supplied retirement key so a later consumed readmission can prove collection of an already-retired identity; first milestone remains unchanged. Existing closure retains the proof; pruning/restore regression and peer probe pass. Keep ReadView.Active/Views/legacy topology query until78 because placement67/scheduler69/join73 still consume them. Prepare final scoped pair/diagnosis without a new public compatibility type; legacy status projects exact declarations only. Observation producers finish70. All raw status consumers adapt to GroupProgress.Observation together.
 
