@@ -1,7 +1,7 @@
 package topology
 
 // Exercise the scope selection that replaces legacy whole-document planning at
-// activation (Task 77), without enabling partial completion before that cutover.
+// activation (Task 78), without enabling partial completion before that cutover.
 func scopedPlan(input PlanInput, desired Document, options PlanOptions) (Plan, error) {
 	return constructGroupPlan(input, desired, options,
 		planScope{groups: AffectedGroups(input.Approved, desired), partition: true})

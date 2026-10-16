@@ -145,7 +145,7 @@ func (c planningCollector) deletionReadmission(group string, target topology.Aut
 			fenced = true
 			continue
 		}
-		if selected == nil || compareAuthorityKey(grant.Key, selected.Grant.Key) < 0 {
+		if c.evidence.authority.preferReadmission(record, selected) {
 			selected = record
 		}
 	}
@@ -171,7 +171,7 @@ func validateScopedDeletion(state *scopedState, index *scopedIndexes) error {
 	for i, doc := range collector.evidence.documents {
 		doc.Groups = slices.DeleteFunc(slices.Clone(doc.Groups), func(g topology.Group) bool {
 			row := index.groups[g.ID]
-			return g.ID != topology.MetaGroupID && (row == nil || !row.Deleting)
+			return g.ID != topology.MetaGroupID && !deletionRow(row)
 		})
 		collector.evidence.documents[i] = doc
 	}
@@ -183,8 +183,14 @@ func validateScopedDeletion(state *scopedState, index *scopedIndexes) error {
 		row := index.groups[key.group]
 		id := storage.Identity{ClusterID: source.Target.ClusterID, GroupID: key.group,
 			NodeName: owner.target.NodeName, ReplicaID: key.id}
-		if row == nil || !row.Deleting || owner.progress == "" || index.cleanup[id] != nil {
+		if owner.progress == "" || !deletionRow(row) {
 			continue
+		}
+		if debt := index.cleanup[id]; debt != nil && (row.Deleting || debt.Stopped != nil) {
+			continue
+		}
+		if !row.Deleting {
+			return invalidScopedState("completed deletion lacks exact retained host-stop debt")
 		}
 		if _, err := collector.deletionReadmission(key.group, owner.target, source.Target); err != nil {
 			return invalidScopedState("pending deletion lacks exact debt or usable readmission coverage")
@@ -201,4 +207,21 @@ func (c planningCollector) readmissionMembers(node string) map[string]uint64 {
 		}
 	}
 	return members
+}
+
+// Consumption outranks pending proof; the key makes equal candidates deterministic.
+func (a authorityCatalog) preferReadmission(candidate, previous *authorityRecord) bool {
+	if previous == nil {
+		return true
+	}
+	consumed := a.readmissionBatchConsumed(candidate.Grant.AdmissionID)
+	prior := a.readmissionBatchConsumed(previous.Grant.AdmissionID)
+	if consumed != prior {
+		return consumed
+	}
+	return compareAuthorityKey(candidate.Grant.Key, previous.Grant.Key) < 0
+}
+
+func deletionRow(row *groupConvergence) bool {
+	return row != nil && (row.Deleting || row.SourceVersion != 0 && row.Declaration == nil)
 }

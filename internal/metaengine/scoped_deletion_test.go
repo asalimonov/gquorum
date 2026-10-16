@@ -145,7 +145,11 @@ func TestScopedDeletionBeforeFirstConvergence(t *testing.T) {
 			t.Fatal(err)
 		}
 		row := next.Groups[1]
-		if row.SourceVersion != 0 || row.Declaration != nil || !row.Deleting || row.Owner != "exec-v3-a1" ||
+		wantSource, wantOwner := uint64(3), topology.OperationID("")
+		if issued {
+			wantSource, wantOwner = 0, "exec-v3-a1"
+		}
+		if row.SourceVersion != wantSource || row.Declaration != nil || row.Deleting != issued || row.Owner != wantOwner ||
 			(len(next.Cleanup) != 0) != issued || !slices.Contains(next.RetiredGroups, retiredGroup{ID: "shard0", Version: 3}) {
 			t.Fatal("deletion invented convergence or lost issued ownership", row, next.Cleanup)
 		}
