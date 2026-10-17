@@ -20,7 +20,7 @@ remains for a later retry until the test explicitly releases it.
 
 Action errors preserve structured `membership.SafetyRefusal` details in the
 existing reply data envelope, including on loopback calls. A transient loss of
-post-change live quorum therefore keeps the approved operator waiting instead
+post-change live quorum therefore keeps the affected operation block waiting instead
 of becoming an unclassified terminal failure. Unknown detail schemas retain the
 conservative unstructured refusal; error messages are never parsed for policy.
 
@@ -50,8 +50,8 @@ and route. Pending authority maps to HTTP 503; a fenced grant or replan-required
 result maps to HTTP 409.
 
 Approved load learners can serve local observations and forward writes through
-their Raft leader. The serving gate requires the exact Active assignment and
-matching native role, so prepared replicas cannot serve early. Bootstrap gives
+their Raft leader. The serving gate reads exact group/node convergence from one
+bounded ReadProgress page and checks the local handle plus matching native role, so prepared replicas cannot serve early. Bootstrap gives
 the `workers` group an explicit two-voter target and places learners on remaining
 eligible hosts. Group administration also exposes `voter-config`, `hosting` and
 `pinned-learner` mutations through the fixture's public API adapter.
@@ -71,7 +71,7 @@ barriers. Captures keep exact uint64 revisions and clone immutable grant/proof
 fields. They are diagnostic and do not authorize an effect. Authenticated
 `POST /internal/test/authority/{group}/action` replays a supplied action through
 Node's ordinary ingress with the original courier/grant/target; refusals do not
-produce completion receipts. `GET /internal/test/revocation/{operator}` uses the
+produce completion receipts. `GET /internal/test/revocation/{operation}` uses the
 public safe `Cluster.ReadAuthority` API to observe pending/completed obligations.
 These controls let process tests distinguish approval, local fencing and receipt
 acknowledgement, including a lost fence reply.
@@ -128,7 +128,9 @@ Use `make test-cluster-build` to build the image. Run focused scenarios with
 
 HTTP mutations use `approve` and return `operation_id`. Separate approval uses
 `POST /api/topology/{version}/approve`; scoped convergence uses `GET /api/progress`
-and exact execution status uses `GET /api/operations/{id}`.
+and exact execution status uses `GET /api/operations/{id}`. Explicit failed-attempt
+retry uses `POST /api/operations/{id}/retry`; lost-response retries preserve the
+original CAS/identity. Version-conflict errors preserve `rebased_to`.
 The fixture retains its additional load/group/event and fault endpoints. The
 small example remains limited to `_meta` topology/status/drain/activate.
 
@@ -152,3 +154,19 @@ and snapshot delivery to one exact metadata process/member while continuing to
 forward control/proof RPCs. Its dropped-frame counter and the receiver's local
 Target show metadata staleness. Snapshot drops return a transport refusal, and
 controls cannot affect a successor identity.
+
+For collection-outage tests, the same proxy accepts authenticated
+`PUT/GET/DELETE /internal/test/collection-report` for one exact `storage.Identity`.
+It holds only matching ReportCollection frames, records the immutable receipt
+and releases individual canceled RPC waits. Other metadata traffic remains live.
+`GET /internal/test/collections/{group}/{replica}` returns process-local Collect
+call counts (bounded to 128 identities); restarting resets those counters. Durable
+success evidence comes from the library journal, not these counters.
+`-retention` explicitly configures the fixture lifecycle retention; zero preserves
+the library default of seven days. Fast collection scenarios use a positive short
+duration. The retirement wrapper delegates actual proof handling to WAL storage.
+
+Collection recovery needs no application cleanup loop: Node resumes prepared
+journal rows, retries original collected receipts, and releases markers only
+after verified metadata acceptance/settlement. Tests copy the authority database
+only while its process is stopped; opening a second live owner is forbidden.

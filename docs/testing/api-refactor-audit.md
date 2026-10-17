@@ -1,7 +1,28 @@
 # Public API refactor acceptance audit
 
+## Current scoped contract and assertion index
+
+This section maps the later scoped implementation; the October11 audit below is
+historical, including its old names, paths and counts. New final validation is
+still pending Tasks87–88 of the
+[implementation plan](../plans/20261015-failure-isolation-and-operational-api.md).
+
+| Current contract | Owning evidence / behavior |
+| --- | --- |
+| No Active or cluster-wide cursor | `topology/progress*.go`, `internal/metaengine/scoped_*`; `TestIndependentGroupConvergesWhileFactoryRemainsOwned` exercises actual Node publication, blocked callback ownership, sibling progress and joined shutdown. |
+| Immutable operations / retries | `scoped_approval_test.go`, `scoped_retry*_test.go`, `operation_planning_func_test.go`; first approval is stable, failed IDs have one immediate successor, original receipts retain their authority. Known invalid plans refuse without halting Apply (`TestScopedMalformedPlansRefuseWithoutHaltingReplay`). |
+| Exact mutation replay / repair rebase | `mutation_*test.go`, `scoped_repair_test.go`, `scope_independence_test.go`; original CAS, actor/comment, predecessor IDs and normalized intent bind retries. Disjoint repair preserves staged intent and attribution; overlap refuses. |
+| Native effect completion / fairness | `internal/operator/scoped_execution_func_test.go`, `dispatch_*func_test.go`, `remaining_scope_test.go`; exact recorded receipt plus native predicate, scope revalidation after waits, separate budgets, shared host/group gate, timeout/backoff and joined Stop. |
+| Removal versus deletion | `scoped_cleanup*_test.go`, `scoped_group_completion_test.go`, `scoped_barriers_test.go`; offline removed members leave detached debt, whole-group deletion still requires every former owner's stop/readmission proof. |
+| Collection crash/restart | `storage/walstore/collection*_func_test.go`, authoritystore collection tests, managed collection tests and `node_collection_func_test.go`; preparation, physical deletion, durable receipt, reporting, ForgetCollection and row removal retain exact proof at each crash boundary. |
+| Coherent bounded progress | `progress_*test.go`, metaservice progress functionals; shared row budget, full operation aggregate, exact filters/cursor, copied declarations, original observation freshness and no read fan-out. |
+| Durable formats/retention | Frozen metadata v4/authority v2 tests, `scoped_retention*_test.go`; source/attempt/admission/debt references survive pruning and restore; completed unreferenced evidence can be released without a permanent ACK index. |
+| Process acceptance | Six `TestFailureIsolation_` cases listed in [test guide](tests.md#scoped-operations-and-cleanup-validation); compile-only until the final Docker run. Existing public admission/readmission/shutdown cases complement them. |
+
+## Historical API refactor audit
+
 Status: **complete**, October 11, 2026. This is an evidence index for the
-[target architecture](../brainstorms/20261011-public-api-simplification-target.md),
+historical `20261011-public-api-simplification-target.md` architecture,
 with source review and runtime gates completed against the final implementation.
 The [validation record](api-refactor-validation.md) identifies source `355b728`,
 the exact process image and the complete passing run, including fixes discovered

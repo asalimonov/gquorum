@@ -18,6 +18,8 @@ type deletionPreparation struct {
 
 // Prepare new debt without changing existing proof or inventing native removal.
 // The caller has already validated scopes and prepared required-stop handover.
+// TODO(not planned): a physically destroyed-host waiver. Missing exact stop
+// proof keeps whole-group deletion pending; collection remains unconfirmed.
 func prepareDeletionDebts(source, next *scopedState, collector planningCollector) error {
 	operation := &next.Operations[len(next.Operations)-1]
 	deleting, retired := next.deletionScopes(operation)

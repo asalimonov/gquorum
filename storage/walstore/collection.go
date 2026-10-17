@@ -12,6 +12,8 @@ import (
 
 // Keep the exact pin until all other contents have been removed and synced.
 // A retry with no pin may only remove an empty directory, never recurse.
+// porting:improvement-over-upstream: deletion errors remain retryable with the
+// exact marker/journal proof; they cannot be consumed as successful collection.
 func removeCollectedDirectory(ctx context.Context, dir string, want storage.Identity) error {
 	owner, err := retirementIdentity(dir)
 	if err != nil {

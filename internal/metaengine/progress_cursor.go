@@ -28,6 +28,8 @@ type progressKey struct {
 	ReplicaID uint64 `json:"replica_id,omitempty"`
 }
 
+// TODO(not planned): frozen multi-page exports and historical observations.
+// This cursor binds filters/order only; each page confirms its own applied index.
 type progressCursor struct {
 	Version uint32      `json:"version"`
 	Last    progressKey `json:"last"`

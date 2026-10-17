@@ -95,6 +95,8 @@ func (m *Machine) applyScoped(index, term uint64, data []byte, conf raftpb.ConfS
 		application.result.CurrentVersion = state.Latest.Version
 	}
 	if m.persister != nil {
+		// TODO(not planned): incremental persistence. The 10k-debt benchmark
+		// measures full-state cost; never discard unresolved proof to cap it.
 		encoded, err := json.Marshal(state)
 		if err != nil {
 			return ApplyResult{}, err
@@ -134,6 +136,8 @@ func (m *Machine) Restore(ctx context.Context, data []byte) error {
 			return fault.New(fault.Unreadable, "invalid metadata snapshot", err)
 		}
 		if header.SchemaVersion != scopedStateSchemaVersion {
+			// TODO(not planned): negotiated migrations and coordinated disaster
+			// restore. Reject old evidence intact rather than interpreting it.
 			return fault.ErrUnsupported
 		}
 		if err := json.Unmarshal(data, &next); err != nil {

@@ -111,7 +111,11 @@ Concurrent/stale version edits return 409. Mutations require one positive
 staging it and cannot combine with `approve:true`. The approval endpoint accepts
 an empty body or `{}`, no query parameters, and an optional matching `If-Match`.
 If staging commits but approval fails, `X-Staged-Version` identifies the document
-to inspect and approve.
+to inspect and approve. Repeating approval returns the original first attempt;
+it does not restart a failed operation. The Go library's `RetryOperation(ctx, id)`
+explicitly retries that immutable failed plan and returns one stable immediate
+successor ID. After a lost mutation response, repeat the original If-Match and
+request, rather than rereading Latest and accidentally creating another edit.
 
 Routes: `GET /health/{live,ready}`, `GET /api/cluster/status`,
 `GET /api/topology/{latest,target}`, `POST /api/nodes/{name}/{drain,activate}`,
@@ -122,5 +126,5 @@ using a unique project/image, random host ports and private temporary volumes.
 It checks bootstrap, node types, both approval flows, previews, drain/activate,
 unchanged meta membership, readiness, stale-version refusal and restart from
 retained volumes. `make test-function` runs the richer
-in-process library integration tests under the cluster test tree. Docker Raft
+single-participant library and fixture integration tests beside their owners. Docker Raft
 correctness/fault scenarios use `make test-cluster`.

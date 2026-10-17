@@ -15,6 +15,8 @@ func validateCoordinatorConfig(cfg Config) error {
 	return nil
 }
 
+// TODO(not planned): priorities, expiry and resource-pressure weighting.
+// Current dispatch uses separate bounded budgets with rotation and backoff.
 func (e *Controller) runScopedTick(ctx context.Context) controllerOutcome {
 	e.mu.Lock()
 	run := e.run

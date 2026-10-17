@@ -1,10 +1,38 @@
 # Public API refactor validation
 
 This is the historical API-refactor validation record. The later
-[authority/read implementation](../plans/20261012-authority-contract-consistent-reads.md)
+authority/read implementation
 deliberately changes snapshot/log formats and rejects immutable legacy meta/load
 fixtures without rewriting them; the results below remain those actually run at
 the recorded source revision.
+
+## Scoped operations update — 2026-10-17
+
+Current contracts supersede the historical Active/global-operator model below:
+Latest/Target intent, independent group/node convergence, Operation/WaitOperation/
+RetryOperation, exact CAS/rebase and detached cleanup. See the
+[current architecture](../architecture/library.md) and
+[implementation log](../plans/20261015-failure-isolation-and-operational-api.md#progress-log).
+Metadata store/FSM/envelopes are v4; the independent authority journal is v2.
+Changed older formats refuse unchanged; there is no migration or mixed-version
+support. Frozen fixtures and immutable hashes are indexed in
+[physical provenance](api-baseline-physical.md).
+
+Executed evidence through `18fd92f` (no final-completion claim):
+
+| Check | Actual evidence |
+| --- | --- |
+| Fast units | Task85: 1,874/1,874; `test-reports/unit/20261017T011918.618279Z-r35k3ye1/report.md`. Five application modules compile; elapsed 6.242s. |
+| Scoped activation | Task78 complete functional suite 1,034/1,034; lint and operator/metaservice functional race pass. Exact report paths are retained in the implementation log. |
+| Real ownership/collection | Task79 blocked-factory isolation and Task80 four retained collection handoffs pass normally and under race; Task83 caller-fixture functional-race passes. |
+| Debt scale/bounds | Task84 count=3 benchmark, 0/1k/10k debts; at 10k ~51 MB/changed Apply, median ~222 ms serialize/~250 ms bbolt. Paging and independent grant regression plus bounded dispatch race pass. |
+| Process scenarios | Six `TestFailureIsolation_` cases compile. Docker execution is pending Task87; compile-only is not consensus/crash evidence. |
+| Final architecture gate | Task88 must trace real wiring, resolve gaps and rerun complete functional, functional-race and cluster suites on final source. Task87 does not replace those runs. |
+
+The historical October11 gates below remain evidence only for their recorded
+revision. They do not validate the current scoped cutover or its process image.
+
+## Historical API refactor — October 11, 2026
 
 Status: **complete**, validated October 11, 2026. The corrected-image complete
 process run and all other required gates pass. The
@@ -26,7 +54,7 @@ The corrected process image is `gquorum-test:api-final-gates`:
 - Built through `make test-cluster-build`; the run targets below reuse that image
   without replacing its tag while scenarios are active.
 
-| Gate | Current result |
+| Historical gate | Result at recorded revision |
 | --- | --- |
 | `make test` | PASS, including the corrected complete caller fixture (84.784s). |
 | `make test-unit` | PASS, uncached elapsed **15.61s**, below the 30-second budget. |

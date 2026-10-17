@@ -13,7 +13,7 @@ nodes named `n1`, `n2`, and `n3`.
 ### Groups, replicas, and placement
 
 **`_meta` group.** The library-owned Raft group that replicates topology,
-admission, approved operators, authority, sessions, and locks. Every admitted
+admission, approved operations, authority, sessions, and locks. Every admitted
 node joins `_meta`, although some members may be learners. An `orders` command
 does not pass through `_meta` on every proposal; creating or changing the
 `orders` group does require `_meta` approval. See [Raft group boundaries](raft.md).
@@ -120,25 +120,29 @@ Retirement does not create a new quorum after permanent majority loss. See
 **Authority.** The committed permission for an *exact* effect, such as adding
 an `orders` learner, plus the durable fences and receipts that prevent an older
 effect from acting on its successor. Staging a document is not authority;
-approval records a concrete plan, and execution checks the grant's operator,
+approval records a concrete plan, and execution checks the grant's operation,
 version, attempt, step, action, and identity. `Cluster.ReadAuthority(ctx, opID)`
-returns that operator's **revocation status and outstanding resource
+returns that operation's **revocation status and outstanding resource
 obligations**; `WaitRevoked` waits until a requested revocation is durably
-complete. For example, a superseded operator can remain pending while `n3` is
+complete. For example, a superseded operation can remain pending while `n3` is
 unreachable and its old action cannot yet be fenced. This is effect authority,
 not user authentication. See [approved actions](runtime.md).
 
 ```mermaid
 flowchart LR
-    Latest["Latest: staged intent"] -->|Approve| Target["Target: approved plan"]
-    Target -->|exact grants and guarded effects| Active["Active: converged topology"]
+    Latest["Latest: staged intent"] -->|Approve| Target["Target: approved intent"]
+    Target -->|exact grants and guarded effects| Progress["Per-group/node convergence"]
+    Progress --> Marker["Historical FullyConverged marker"]
+    Target --> Cleanup["Detached exact cleanup debt"]
 ```
 
 **Read barrier (`ReadBarrier`).** A point-in-time confirmation through the
 relevant Raft group's quorum, followed by waiting for local application. It
 returns no data. `Cluster.ReadBarrier` concerns `_meta`; a local
 `load.Group.ReadBarrier` concerns that load group. For example, use
-`Cluster.ReadTopology` to get the three topology views after a confirmed read,
+`Cluster.ReadTopology` to capture Latest, Target and the historical completion
+marker after a confirmed read; `ReadProgress` reports bounded per-group/node,
+operation and cleanup rows,
 or `load.Group.Read` to run an application query serialized with Apply/Restore.
 A barrier alone does not make a later, unsynchronized application read atomic or
 authorize a future effect. See [the consistency target](raft.md).

@@ -5,7 +5,7 @@ key/value test application image once, then runs Docker process tests with the
 `clustertest` build tag. Non-Docker functional tests stay in their owning packages
 in `*_func_test.go` files, use at most one local participant, and run with `make test-function` (`-tags=functional`).
 `make test` runs fast unit checks with default build tags across the
-library, example and application-fixture modules.
+five application modules (library, three examples and the caller-fixture/test module).
 Docker must be reachable. For focused process validation, reuse the built image:
 
 ```sh
@@ -65,7 +65,7 @@ and seven-node repetitions are omitted. The only four-node membership cases are:
 - `TestMetaAdmissionUsesLearnerBeforeServingAndRetainsIdentityOnRestart`: learner-first admission, early-serving refusal and retained promotion.
 - `TestAdmissionOperatorResumesAfterMetaLeaderElectionWithoutNewAttempt`: leadership changes during admission must retain the exact operator attempt.
 - `TestMetaPinnedAdmissionRestartsBeforeAndAfterReadyWithoutAllocatingIDs`, with `pending` and `ready` cases: a crash after durable pinning must preserve the member ID and admission attempt.
-- `TestAuthoritySupersessionRetiresIntermediateMetaLearnerFourNodes`: three established voters plus an admitted learner prove removal of a native member that never reached Active, including prepared load cleanup and stale-action refusal.
+- `TestAuthoritySupersessionRetiresIntermediateMetaLearnerFourNodes`: three established voters plus an admitted learner prove removal of a native member that never reached a proven group checkpoint, including prepared load cleanup and stale-action refusal.
 
 A new larger-cluster case must explain the specific failure requiring the extra
 member. Ordinary checks must not grow a node-count matrix.
@@ -89,16 +89,18 @@ elects its replacement through the healthy majority and requires
 the same execution ID, attempt and exact authorized promotion to finish. A real
 one-second repair interval preserves intentional learners through several ticks;
 a staged promotion remains inert until approval. Whole-group deletion waits for
-an unreachable former host while Active and its retained local state remain
-intact. Multi-group shutdown uses three founders, verifies each host's membership and
+an unreachable former host while its last proven declaration and retained local
+state remain intact; independent groups may still converge. Multi-group shutdown uses three founders, verifies each host's membership and
 acknowledged values, then requires
 all concurrent process stops to finish within thirty seconds with exit code zero.
 Node limits come from `topology.Limits`; routine scenarios use three nodes. Fixtures use the library default 100ms Raft tick and a five-second
 activation TTL. Build the image before running cluster cases, so compilation
 does not contend with the processes being measured. The image build retains Go
 module and compiler caches across source changes. Source adaptations are tracked
-in the [inventory](../../docs/brainstorms/20261010-raft-library-test-port.md);
-the completed regression is recorded in [validation](../../docs/testing/validation.md).
+in the [migration map](../../docs/testing/cluster-migration.md);
+[validation](../../docs/testing/validation.md) retains historical results. Current
+scoped process cases and final-gate requirements are indexed in the
+[test guide](../../docs/testing/tests.md#scoped-operations-and-cleanup-validation).
 
 The [test application](testapp/README.md) is a dedicated binary under `tests/cluster/testapp`; the ordinary Compose
 example contains no test instrumentation. Adding a

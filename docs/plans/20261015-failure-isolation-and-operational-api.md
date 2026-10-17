@@ -1274,13 +1274,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `docs/testing/api-refactor-validation.md`, `api-refactor-audit.md`, `api-baseline-physical.md`, `tests.md`, `AGENTS.md`, affected example/test READMEs. **Target:** [T] §4.3, §10–11. **Depends on:** 85. **Budget:** documentation only.
 
-- [ ] Replace current contract names and test expectations; document exact new format fixture provenance and unchanged hashes. Do not rewrite historical validation as a fresh passing run.
-- [ ] Record final suite ownership, five application modules, scoped process test names and limitations. Add concise retry/rebase and cleanup recovery examples to existing documentation, not a new public administration product.
-- [ ] Carry deferred items from NOT CONSIDERED & TODOs to their relevant code comments (`TODO(not planned)`) only at actual seams. Do not add fake APIs, unreachable NotImplemented branches or recurring warning logs for absent features.
+- [x] Replace current contract names and test expectations; document exact new format fixture provenance and unchanged hashes. Do not rewrite historical validation as a fresh passing run.
+- [x] Record final suite ownership, five application modules, scoped process test names and limitations. Add concise retry/rebase and cleanup recovery examples to existing documentation, not a new public administration product.
+- [x] Carry deferred items from NOT CONSIDERED & TODOs to their relevant code comments (`TODO(not planned)`) only at actual seams. Do not add fake APIs, unreachable NotImplemented branches or recurring warning logs for absent features.
 
 **Verification**
 
-- [ ] Check paths/commands/snippets against code, run `git diff --check` and `make test`.
+- [x] Check paths/commands/snippets against code, run `git diff --check` and `make test`.
 
 ### Task 87: Run integrated validation and resolve regressions
 
@@ -1491,6 +1491,8 @@ During execution use `- [ ] target section — missing behavior — affected pat
   Full-state persistence remains linear in retained proof; large JSON-buffer allocations vary with pool reuse. Bounded query output does not bound all processing: at 10,000 debts Progress allocates ~16.6 MB and ordinary selection ~55.1 MB despite returning only 25 rows/one live block. Cleanup selection allocates 672 B/2 objects at both nonzero scales. These costs are an explicit scaling limitation; incremental persistence/index redesign remains deferred and no unresolved evidence is discarded. Independent dispatch/queue/backoff/timeout/shutdown/fence fairness regressions pass under race (`/tmp/task84-dispatch-race.log`); focused paging units and the new real-Apply functional test pass (`/tmp/task84-paging.log`, `/tmp/task84-bounds.log`). `make test` passes, report `test-reports/unit/20261017T011231.820974Z-sucds_9q/report.md`; `git diff --check` passes. No Docker run.
 
 - 2026-10-17 — Task85 complete. Updated README and six current architecture guides: removed Active/global-operation and temporary schema3 bridge claims; documented immutable scoped ownership, state-based barriers, first-approval/exact retry/rebase, coherent bounded metadata pages with separately aged observations, stop/retire/collect separation and exact member release. Expanded the saturated map with current interfaces/methods, v4/v2 ownership, private query/report routes and grep tags; fixed links to deleted legacy tests. Ordinary usage stays on Node/Cluster/load.Group; specialized ForgetCollection/store-proof obligations remain in storage/recovery sections. TiKV comparison now separates adapted per-group/lifecycle mechanisms from gquorum's stronger receipt requirements and measured full-state cost. Rechecked removed-peer and tablet-destruction source at pinned TiKV `137cbb2593decafebf99905b4d570869230565c2`; no upstream test/production-equivalence claim. Verified changed signatures/defaults and local links against current source; `git diff --check` passed. `make test` passed 1,874/1,874, report `test-reports/unit/20261017T011918.618279Z-r35k3ye1/report.md`. Final Docker and post-review validation remain Tasks87–88.
+
+- 2026-10-17 — Task86 complete. Added current scoped API/assertion and validation sections while retaining October11 reports as historical evidence; documented all five application modules, six named process scenarios and exact v4/v2 fixture provenance. All seven legacy physical hashes and five new scoped hashes match their immutable manifests; no artifacts regenerated. Updated contributor invariants, architecture dictionary and demo/fixture guidance for independent convergence, explicit retry, original-CAS replay, report fault controls and automatic cleanup recovery. Added only comments at actual persistence/format/deletion/cursor/dispatch/package seams for the agreed deferred work; deletion-error proof handling is documented as an implemented upstream difference. Fixed stale local links and verified method/route/test names; `git diff --check` passed. `make test` passed 1,874/1,874, report `test-reports/unit/20261017T012242.375317Z-5zpz1na3/report.md`. Final integrated and post-architecture gates remain unchecked.
 
 ## Contract excerpts
 
