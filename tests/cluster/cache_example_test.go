@@ -35,6 +35,7 @@ func TestCacheExampleWALRestart(t *testing.T) {
 	for _, name := range nodes {
 		fmt.Fprintf(&yaml, "  %s:\n    image: %s:local\n    ports: !override [\"127.0.0.1::6379\"]\n    environment:\n      STORAGE_DISABLE_FSYNC: \"true\"\n", name, project)
 	}
+	fmt.Fprintf(&yaml, "  loadgen:\n    image: %s:local\n", project)
 	if err := os.WriteFile(override, []byte(yaml.String()), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -128,6 +129,14 @@ func TestCacheExampleWALRestart(t *testing.T) {
 	}
 	verify() // all replicas have applied the value before stopping any process
 	control("kill", "-s", "SIGKILL", "node3")
+	// Keep the key set tiny so this failover workload cannot evict the
+	// retained-data assertion below. Node3 must be excluded by health polling.
+	out, err := compose(ctx, "run", "--rm", "--no-deps", "-e", "CACHE_WORKERS=1",
+		"-e", "CACHE_KEYS=1", "-e", "CACHE_DURATION=5s", "loadgen")
+	if err != nil || !strings.Contains(string(out), "healthy=node1:6379,node2:6379 ") ||
+		!strings.Contains(string(out), "stale=0 corrupt=0") {
+		t.Fatalf("loader did not exclude unavailable node3: %v\n%s", err, out)
+	}
 	control("start", "node3")
 	discover()
 	verify()
@@ -141,6 +150,61 @@ func TestCacheExampleWALRestart(t *testing.T) {
 	if got := command("node1", "GET", "after-restart"); got != "ok" {
 		t.Fatal("restarted cluster did not commit new writes", got)
 	}
+	// Only run load after retention assertions; the workload forces eviction.
+	for _, workload := range []struct {
+		workers, duration string
+	}{{"1", "5s"}, {"10", "75s"}, {"256", "5s"}} {
+		out, err := compose(ctx, "run", "--rm", "--no-deps", "-e", "CACHE_WORKERS="+workload.workers,
+			"-e", "CACHE_DURATION="+workload.duration, "loadgen")
+		if err != nil {
+			t.Fatalf("balanced load with %s workers: %v\n%s", workload.workers, err, out)
+		}
+		var previousWrites int64
+		final := false
+		for line := range strings.SplitSeq(string(out), "\n") {
+			if !strings.HasPrefix(line, "progress ") && !strings.HasPrefix(line, "final ") {
+				continue
+			}
+			fields := map[string]string{}
+			for field := range strings.FieldsSeq(line) {
+				if key, value, ok := strings.Cut(field, "="); ok {
+					fields[key] = value
+				}
+			}
+			for _, key := range []string{"stale", "corrupt", "write_errors", "read_errors"} {
+				if fields[key] != "0" {
+					t.Fatalf("%s workers: %s is not zero: %s", workload.workers, key, line)
+				}
+			}
+			writes, err := strconv.ParseInt(fields["total_writes"], 10, 64)
+			if err != nil || writes == 0 || (strings.HasPrefix(line, "progress ") && writes <= previousWrites) {
+				t.Fatalf("%s workers stopped making progress: %s", workload.workers, line)
+			}
+			previousWrites = writes
+			if !strings.HasPrefix(line, "final ") && fields["healthy"] != "node1:6379,node2:6379,node3:6379" {
+				t.Fatalf("loader did not discover all healthy nodes: %s", line)
+			}
+			dials, err := strconv.Atoi(fields["dials"])
+			workers, _ := strconv.Atoi(workload.workers)
+			limit := len(nodes) * max(1, (workers+len(nodes)-1)/len(nodes))
+			// Shutdown cancels borrowed connections; the final DBSIZE may
+			// need one replacement per node after all workers have joined.
+			if strings.HasPrefix(line, "final ") {
+				limit += len(nodes)
+			}
+			if err != nil || dials > limit {
+				t.Fatalf("%s workers failed to reuse connections: %s", workload.workers, line)
+			}
+			if strings.HasPrefix(line, "final ") {
+				final = true
+			}
+		}
+		if !final || (workload.workers == "10" && previousWrites < 20000) {
+			t.Fatalf("workload did not exercise sustained connection reuse:\n%s", out)
+		}
+		t.Logf("balanced load with %s workers:\n%s", workload.workers, out)
+	}
+
 }
 
 // Only status and bulk replies are needed by this process test.

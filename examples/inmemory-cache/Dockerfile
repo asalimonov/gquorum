@@ -15,5 +15,5 @@ COPY --from=build /out/cache-server /cache-server
 COPY --from=build /out/cache-loadgen /cache-loadgen
 COPY --from=build --chown=65532:65532 /out/data /data
 USER 65532:65532
-EXPOSE 6379 9000 9001
+EXPOSE 6379 8080 9000 9001
 ENTRYPOINT ["/cache-server"]

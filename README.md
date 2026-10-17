@@ -171,7 +171,8 @@ in-memory map bounded to 512 keys with deterministic eviction, and its group
 uses disk-backed Raft logs and snapshots: a restarted process replays its state
 under the same replica ID. The Compose demo skips load WAL/applied-state fsync
 for speed; host crashes or power loss can lose acknowledged writes. A separate load generator
-writes through one random node and reads from another with several workers.
+balances writes and reads across healthy nodes using reusable connections,
+500ms HTTP health checks and 1–256 workers selected through `CACHE_WORKERS`.
 
 ```sh
 make run-cache-example

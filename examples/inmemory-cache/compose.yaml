@@ -20,6 +20,7 @@ x-env: &env
   GQUORUM_DATA: /data
   GQUORUM_CREDENTIAL_FILE: /run/secrets/credential
   GQUORUM_ALLOW_PLAINTEXT: "true"
+  CACHE_HEALTH_LISTEN: ":${CACHE_HEALTH_PORT:-8080}"
   STORAGE_DISABLE_FSYNC: ${STORAGE_DISABLE_FSYNC:-true}
 services:
   node1:
@@ -43,8 +44,7 @@ services:
       GQUORUM_NODE: node3
     ports: ["127.0.0.1:${CACHE_NODE3_PORT:-16383}:6379"]
     volumes: ["cache-node3:/data"]
-  # Stresses the cache from several workers; runs until stopped unless
-  # CACHE_DURATION is set. `docker compose logs -f loadgen` shows progress.
+  # Workers reuse connections and balance requests across healthy nodes.
   loadgen:
     image: ${CACHE_IMAGE:-gquorum-cache:local}
     entrypoint: ["/cache-loadgen"]
@@ -52,6 +52,7 @@ services:
     restart: "no"
     environment:
       CACHE_NODES: node1:6379,node2:6379,node3:6379
+      CACHE_HEALTH_PORT: ${CACHE_HEALTH_PORT:-8080}
       CACHE_WORKERS: ${CACHE_WORKERS:-8}
       CACHE_KEYS: "1024"
       CACHE_DURATION: ${CACHE_DURATION:-0s}

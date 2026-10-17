@@ -68,7 +68,7 @@ The §8.5 failure table and §10 acceptance cases map to these assertion owners:
 | --- | --- |
 | Lost Stage/approval/retry response; pruned retry; strict CAS | `mutation_*test.go`, `scoped_approval_test.go`, `scoped_retry*_test.go`, process `TestFailureIsolation_ExactMutationReplay`. |
 | Repair races or overlaps staged edits; unrelated block/metrics survives | `scoped_repair_test.go`, `scope_independence_test.go`, observe/metrics tests; process `TestFailureIsolation_StagedRebase` and `BlockedGroup`. |
-| Load quorum loss, metadata outage, independent founding | `scoped_founding_test.go`, root `node_isolation_func_test.go`, process isolation and existing quorum/transport cases. |
+| Load quorum loss, metadata outage, independent founding | `scoped_founding_test.go`, root `node_load_func_test.go`, process isolation and existing quorum/transport cases. |
 | Offline removed host versus required whole-group stop | `scoped_cleanup*_test.go`, `scoped_group_completion_test.go`; process `RemovedHostCleanup` and `DeletionStopProof`. |
 | Same-host replacement, late/superseded callback, exact native proof | `scoped_host_replacement_test.go`, managed ownership/action tests, operator scoped execution/dispatch/remaining-scope tests; process reseat/authority cases. |
 | Deferred/failed retention, Collect failure, crash before/after deletion/receipt | managed `collection_prepare_func_test.go`, `collection_func_test.go`; WAL `collection_func_test.go`, `collection_marker_func_test.go`. |
@@ -149,7 +149,7 @@ shared lifecycle runner lives in `node_policy.go`, approval forwarding is in
 
 | Appendix C algorithm | Implementation and assertion evidence |
 | --- | --- |
-| NewNode | `node.go` / `node_options.go`: validate and copy before I/O; resolve only the selected policy defaults. `node_options_test.go` verifies pure construction, copied settings, ambiguity refusal and Limits-only capacities. |
+| NewNode | `node.go` / `node_options.go`: validate and copy before I/O; resolve only the selected policy defaults. `node_test.go` verifies pure construction, copied settings, ambiguity refusal and Limits-only capacities. |
 | Node.Start | `node_lifecycle.go`: serialized one-shot start, one lifetime, meta before admission waits, registered teardown. Public sequential-start, founder gate and retained-restart cases in `tests/cluster/testapp/node*_api_test.go`. |
 | Node.WaitReady | Separate readiness signal/wait context; mandatory admission, replay, session and identity rechecked after caller policy. Canceling a wait leaves the node running. Removal immediately overrides readiness. |
 | Host.StartReplica | `replica.go` and `boot.go`: exact slot and hold admission, probe before factory, owned successful factory result, replay and ledger CAS, final approval check before publication. Managed ownership/boot/action tests and public lost-WAL recovery cover all paths. |

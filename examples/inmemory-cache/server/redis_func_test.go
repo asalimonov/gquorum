@@ -9,6 +9,8 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/asalimonov/gquorum/examples/inmemory-cache/resp"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/storage"
+	"github.com/asalimonov/gquorum/storage/memstore"
 	"github.com/asalimonov/gquorum/storage/walstore"
 	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"
@@ -31,7 +34,7 @@ func (singleReplica) Send(context.Context, []raftpb.Message) error {
 // startReplica opens one local replica of the cache group with a fresh
 // in-memory machine over a retained store, and serves it on a Redis listener.
 // Multi-node replication is covered by the Compose run, not in-process.
-func startReplica(ctx context.Context, t *testing.T, store storage.Store, mode load.StartMode) (string, func()) {
+func startReplica(ctx context.Context, t *testing.T, store storage.Store, mode load.StartMode) (string, http.Handler, func()) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	id := storage.Identity{NodeName: "node1", ClusterID: "test", GroupID: groupID, ReplicaID: 1}
@@ -59,7 +62,7 @@ func startReplica(ctx context.Context, t *testing.T, store storage.Store, mode l
 	serveCtx, cancel := context.WithCancel(ctx)
 	server := newRedisServer(func() (*load.Group, error) { return owner.Group(), nil }, logger)
 	go func() { _ = server.Serve(serveCtx, listener) }()
-	return listener.Addr().String(), func() {
+	return listener.Addr().String(), healthHandler(func() (*load.Group, error) { return owner.Group(), nil }), func() {
 		cancel()
 		if err := server.Wait(context.Background()); err != nil {
 			t.Error(err)
@@ -85,7 +88,16 @@ func TestRedisSubsetOverReplicaAndRecoveryFromLog(t *testing.T) {
 		return s
 	}
 	store := openStore()
-	addr, stop := startReplica(ctx, t, store, load.Founding)
+	addr, health, stop := startReplica(ctx, t, store, load.Founding)
+	probe := func(want int) {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		health.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/health", nil))
+		if recorder.Code != want {
+			t.Fatalf("health status=%d want=%d", recorder.Code, want)
+		}
+	}
+	probe(http.StatusOK)
 	c, err := resp.Dial(ctx, addr)
 	if err != nil {
 		t.Fatal(err)
@@ -100,6 +112,11 @@ func TestRedisSubsetOverReplicaAndRecoveryFromLog(t *testing.T) {
 	}
 	if r := do("PING"); r.Str != "PONG" {
 		t.Fatal(r)
+	}
+	before := do("INFO").Str
+	probe(http.StatusOK)
+	if after := do("INFO").Str; after != before {
+		t.Fatalf("readiness probe changed Raft state: before=%q after=%q", before, after)
 	}
 	if r := do("SET", "a", "1"); r.Str != "OK" {
 		t.Fatal(r)
@@ -128,6 +145,7 @@ func TestRedisSubsetOverReplicaAndRecoveryFromLog(t *testing.T) {
 			t.Fatal(r)
 		}
 	}
+	probe(http.StatusOK) // The readiness probe must leave cache keys intact.
 	if r := do("DBSIZE"); r.Int != cache.Capacity {
 		t.Fatal("capacity", r)
 	}
@@ -136,6 +154,7 @@ func TestRedisSubsetOverReplicaAndRecoveryFromLog(t *testing.T) {
 	}
 	_ = c.Close()
 	stop()
+	probe(http.StatusServiceUnavailable)
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +162,8 @@ func TestRedisSubsetOverReplicaAndRecoveryFromLog(t *testing.T) {
 
 	// A new owner starts from an empty machine; the library restores the
 	// snapshot and replays the committed tail from the store before serving.
-	addr, stop = startReplica(ctx, t, store, load.Joining)
+	addr, health, stop = startReplica(ctx, t, store, load.Joining)
+	probe(http.StatusOK)
 	defer stop()
 	c, err = resp.Dial(ctx, addr)
 	if err != nil {
@@ -158,5 +178,44 @@ func TestRedisSubsetOverReplicaAndRecoveryFromLog(t *testing.T) {
 	}
 	if r := do("GET", "key:0000"); !r.Nil {
 		t.Fatal("evicted key resurrected", r)
+	}
+}
+
+func TestHealthRefusesReplayReadyReplicaWithoutQuorum(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	store, err := memstore.New(memstore.Options{NodeName: "node1", ClusterID: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	owner, err := load.NewStandalone(load.StandaloneOptions{
+		Identity:   storage.Identity{NodeName: "node1", ClusterID: "test", GroupID: groupID, ReplicaID: 1},
+		InstanceID: "no-quorum", Mode: load.Founding, Store: store,
+		StateMachine: cache.NewMachine(), Transport: singleReplica{},
+		// Only this participant runs; the two other declared voters are absent.
+		Peers:  []raft.Peer{{ID: 1}, {ID: 2}, {ID: 3}},
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := owner.Stop(context.Background()); err != nil {
+			t.Error(err)
+		}
+	}()
+	if err := owner.Group().WaitReady(ctx); err != nil {
+		t.Fatal(err)
+	}
+	handler := healthHandler(func() (*load.Group, error) { return owner.Group(), nil })
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("node without a mutation quorum reported healthy: %d", recorder.Code)
 	}
 }
