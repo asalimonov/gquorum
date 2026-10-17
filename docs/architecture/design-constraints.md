@@ -19,7 +19,7 @@ resource fence, and must refuse afterward. Unreachable hosts or missing group
 quorum keep revocation pending. Exact receipts distinguish completed effects from
 native absence, and retained evidence protects successor resources. See
 [authority and recovery](runtime.md#authority-control-after-participation-fencing)
-and the [implementation plan](../plans/20261012-authority-contract-consistent-reads.md).
+and the [scoped target](../brainstorms/20261015-failure-isolation-and-operational-api-target.md).
 
 P1 safe reads use ReadIndex confirmation plus local application on any ready
 replica, including followers and learners. `Group.Read` runs optional Query
@@ -28,14 +28,30 @@ and authority reads. Existing diagnostics stay observational. Cancellation ends 
 wait and partitions prevent fresh confirmation; there are no lease reads or
 external/time-valid lock fences. See the [read contract](raft.md).
 
+`FI_SCOPE` / `NO_ACTIVE`: Latest and Target are immutable intent; durable group/node
+checkpoints own current convergence. FullyConverged is historical. Per-group
+operation ownership and state-based admission/evacuation barriers replace global
+execution gates. Disjoint repair atomically rebases staged intent without
+approving it; strict CAS and retained exact replay remain mandatory.
+
+`CLEANUP_PROOF`: native removal, joined stop, retirement and collection are
+separate facts. Whole-group deletion still requires every former owner's stop
+proof. Detached cleanup uses its own bounded workers, durable host journal and
+store marker; permanently lost hosts can leave unconfirmed debt. Same-host
+successors still wait for actual owner release. No public cleanup manager/API.
+
+The Go operational interface is Operation/WaitOperation/RetryOperation and one
+ReadProgress query. Page bounds and cached observation timestamps are explicit;
+quorum-confirmed metadata is not fresh native health. Defaults are four executing
+groups and two cleanup requests, immutable replicated Limits. Retained proof has
+no global count cap. Full-state persistence remains a scale limit: 10,000 debts
+measured ~51 MB per changed Apply; see the [measurement](../plans/20261015-failure-isolation-and-operational-api.md#progress-log).
+
 ## Backlog
 
 | Priority | Proposed change | Required outcome / acceptance evidence |
 | --- | --- | --- |
-| P0: failure isolation | Make approval and execution scopes explicit per group where dependencies allow it. Keep cluster-wide admission/decommission dependencies explicit. | Staging an unrelated edit or blocking one group's operation does not prevent safe repair elsewhere; the repair never approves that staged edit. Preserve CAS, exact action identities and durable history. |
-| P0: cleanup separation | Represent consensus removal, runtime fencing and physical collection as separate durable milestones. Retain cleanup obligations until verified. | An unreachable removed host cannot indefinitely block unrelated topology progress. On return, it is fenced before serving, and cleanup cannot delete a successor's data. TiKV's asynchronous peer destruction is the reference, not permission to discard evidence. |
-| P0: deployment fault tolerance | Add failure-domain constraints and capacity-aware eligibility for `_meta` voters and application replicas. | Show which host/zone failures each placement tolerates. Reject or report unsatisfiable placement; do not silently claim target redundancy or count learners as votes. |
+| P0: deployment fault tolerance | Validate deployment AZ labels against implemented strict voter-domain placement; applications supply resource-aware eligibility. | Show which host/zone failures each placement tolerates. Reject or report unsatisfiable placement; do not silently claim target redundancy or count learners as votes. |
 | P0: rollout safety | Establish replicated feature/policy revisions and participant capability negotiation. | Old nodes cannot accept topology they misinterpret. Test mixed versions, feature activation, retained restarts and allowed rollback boundaries. |
 | P1: scalable reconciliation | Combine independent group execution with global/per-node budgets, priorities and observed resource pressure. Benchmark management metadata and metric fan-out. | Bound recovery storms and user-workload impact while many groups repair. Demonstrate useful throughput without unbounded snapshots, polling or progress writes. |
-| P1: operational interface | Expose desired/approved/native/applied state, freshness, blocked reasons, current operation and cleanup obligations. Provide exporters and recovery/upgrade runbooks. | An operator can tell whether a request was accepted, committed, observed complete or physically cleaned, and can safely resume after an interrupted API response. |
 | P1: disaster readiness | Supported backup/restore first for explicit unsafe majority-loss recovery. | Verify restoration of `_meta`, application state, IDs and fencing evidence together. State data-loss and unavailable-operation boundaries; never imply a normal scheduler can repair permanent majority loss. |

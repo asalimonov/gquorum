@@ -1,7 +1,7 @@
 # Project map
 
-Source baseline: `926a18b` (2026-10-15). Scope: all 41 Go package directories
-outside `examples/`, including internal packages, generated protocols, caller
+Source baseline: scoped implementation through `37ac2bf` (2026-10-17).
+Scope: all Go package directories outside `examples/`, including internal packages, generated protocols, caller
 fixtures and tooling. This is a source navigation and contract index: interface
 method lists are complete for the interfaces named below; concrete functions and
 methods are selected entry points, with explanations concentrated on consequential
@@ -70,20 +70,20 @@ of new authority; accepted healthy load owners can continue their own consensus.
 | `topology.Identity` | `{ClusterID, NodeName, MemberID, InstanceID}`: participant identity; MemberID is its numeric `_meta` replica ID; InstanceID changes every process start. |
 | `storage.Identity` | `{ClusterID, NodeName, GroupID, ReplicaID}`: durable exact local replica; excludes process incarnation. `load.ReplicaRef` contains only GroupID/ReplicaID and is resolved in the owning Node. |
 | `metrics.ReplicaIdentity` / `load.Observation` | Add InstanceID and RunID to distinguish restarts and successive local engine runs; watch Revision and sample Sequence have only local meaning. |
-| `topology.Document` / `ReadView` | One versioned declaration / atomic capture of Latest, Target, Active. Latest may be staged; Target is approved; Active is converged. A version alone is not permission to act. |
-| `Plan`, `PlanVoterBase`, `Step`, `AuthorizedStep` | Immutable execution plan, retained voter-set bases, ordered operation, and exact `{OperatorID, Version, Attempt, StepSeq, Kind, GroupID, node/replica/transfer identities, voter digests}`. |
+| `topology.Document` / `ReadView` | Versioned declaration / atomic Latest, Target, FullyConverged marker and AppliedIndex. Latest may be staged; Target is approved. Per-group/node checkpoints supply convergence; no composite Active document exists. |
+| `Plan`, `PlanVoterBase`, `Step`, `AuthorizedStep` | Immutable execution plan, retained voter-set bases, ordered operation, and exact `{OperationID, Version, Attempt, StepSeq, Kind, GroupID, node/replica/transfer identities, voter digests}`. |
 | `AuthorityKey`, `AuthorityGrant` | Key `{ClusterID, GroupID, Revision}` identifies immutable authority. Grant adds purpose, action/admission/request identity, sorted resources and exact targets `{NodeName, MemberID, ReplicaID}`. |
 | `AuthorityResource` | Group resource is fenced through that group's Raft log; host resource names GroupID/NodeName and is fenced in the node-local authority database. |
 | `FenceEvidence`, `EffectReceipt` | Fence proves installation of an authority boundary; receipt proves consumption of one exact effect. Group evidence carries AppliedIndex/AppliedTerm; host evidence carries LocalSequence. |
 | `NativeState` | Quorum-confirmed local applied ConfState plus installed grant/receipt, used to validate actual membership against remaining plan; not interchangeable with cached GroupStatus. |
-| `AuthorityStatus` | Operator revocation requested/complete flags and outstanding fence obligations. Operator supersession/terminal state does not imply resource revocation completion. |
+| `AuthorityStatus` | Operation revocation requested/complete flags and outstanding fence obligations. Operation supersession/terminal state does not imply resource revocation completion. |
 
 `KB_IDENTITY`: names, MemberID, ReplicaID, InstanceID, RunID, document versions,
 authority revisions and Raft indices are distinct namespaces. In particular,
 authority Revision originates in `_meta`; it is not the affected load group's
 applied index. IDs are allocated monotonically, deleted group IDs remain retired,
 and stale handles/delivery reports never redirect to successors. Leader names in
-cluster status are resolved through exact identities in the captured Active view;
+cluster status are resolved through captured approved/proven identities and retained meta owners;
 an unresolved name remains empty while the observed numeric ID is preserved.
 
 | Retained resource | Owner and role |
@@ -102,6 +102,27 @@ include unknown groups, partial acquisitions and quarantined data. See
 [freshness checks](../../node_authority.go) and
 [storage inventory contract](../../storage/store_contract.go).
 
+## Scoped execution and proof map
+
+| Entity / search tag | Non-obvious contract and source |
+| --- | --- |
+| `PlanInput`, `PlanBlock`, `StepDependency` — `FI_SCOPE` | PlanInput separates approved, proven, native and retained facts. A block partitions global step sequences into required Steps and detached Cleanup. Only admission-before-installation and evacuation-before-meta-removal barriers exist. Dependencies are checked against exact state, not a predecessor operation's aggregate success. [Partition](../../topology/plan_partition.go), [dependency evaluation](../../internal/metaengine/scoped_barriers.go). |
+| `Operation`, `OperationStatus`, `BlockStatus` — `FI_OWNER` | `{Status, Plan, Previous, Actor, Origin, StartedAt, UpdatedAt}` retains immutable execution and explicit retry lineage. One nonterminal block owns a group. New Target versions do not cancel unchanged scopes; completing a block copies its own pinned source. Failed siblings do not prevent independent required work. [Approval](../../internal/metaengine/scoped_approval.go), [completion](../../internal/metaengine/scoped_group_completion.go). |
+| `FullyConverged`, group/node checkpoint — `NO_ACTIVE` | Marker advances only when current approved declarations and required deletion stops are proven. Detached cleanup is excluded. Source zero is unknown; nil group with nonzero source is a deletion tombstone. Marker history is pinned but cannot gate current serving, recovery, admission or repair. |
+| Intent records / `Document.RebasedFrom` — `API_RETRY`, `FI_REBASE` | Original parent CAS + normalized typed intent + attribution identify staging replay; never allocate again merely because a reply was lost. Approve returns the first attempt; RetryOperation returns the failed ID's immediate successor. Repair writes R and rebased unapproved S atomically; old approval conflicts with RebasedTo. Missing retained proof is HistoryUnavailable/conflict. [Replay](../../internal/metaengine/mutation_replay.go), [repair](../../internal/metaengine/scoped_repair.go). |
+| `cleanupRecord` / `CleanupProgress` — `CLEANUP_PROOF` | Durable exact identity, former member, storage class, origin, Stop/Retire actions and monotonic Removed/Stopped/Retired/Collected proof; public DTO omits grants/tokens. Required deletion stop remains blocking; removed-replica retirement is detached. Supersession may rebind action ownership without inventing milestones. [Debt](../../internal/metaengine/scoped_cleanup.go), [handover](../../internal/metaengine/scoped_cleanup_handover.go). |
+| `CollectionRecord`, `CollectionReceipt`, `CollectionResult` — `CLEANUP_CRASH` | Host journal pins Retired+Grant+Retirement before Collect, assigns one durable Sequence, then records the first successful CollectedAt. Report exact receipt; only verified acceptance or safe-read settlement allows ForgetCollection then RemoveCollection. Settled=true proves no remaining references, never prior acceptance. [Journal](../../internal/authoritystore/collection.go), [reporter](../../internal/managed/collection_report.go). |
+| `Limits` / dispatch gates — `FI_CAPACITY` | Defaults MaxNodes=3, MaxReplicas=5, MaxConcurrentGroups=4, MaxConcurrentCleanup=2. Immutable replicated execution budgets, bounded queues/backoff and shared (host,group) RPC gates. Timeout releases a remote slot while a late local callback stays owned. Retained debt is not capped/evicted. [Dispatch](../../internal/operator/dispatch_groups.go), [benchmark](../../internal/metaengine/cleanup_debt_bench_func_test.go). |
+
+`READ_FRESHNESS`: ReadProgress is one confirmed metadata page, with cached native
+observations attached only for the returned exact source/member/process/replica.
+ReadAt does not refresh ReceivedAt. A Next cursor is an exclusive sort position,
+not a frozen snapshot. Operation aggregate state survives block-page truncation.
+`FI_CAPACITY` measurement at 10k debts: ~51 MB persisted per changed Apply,
+~222 ms serialize/~250 ms bbolt, ~5.17 ms progress/~33.8 ms ordinary selection on
+Apple M4 Pro. Bounded results/workers are not constant-cost state processing;
+full-state persistence and query scans remain scaling limits.
+
 ## Public packages
 
 ### Root `gquorum`
@@ -119,7 +140,7 @@ watches; `clusterView` delegates administration through that same owner.
 | `LoadOptions`, `LoadStorageOptions`, `WALOptions` | Factory, retirement callback, transport, engine settings and injected Store or Node-owned WAL backend; class selects memory storage separately. |
 | `GroupFactory(ctx, load.ReplicaSpec) (load.Application, error)` | Acquires exactly one approved application's machine and lifetime callbacks. `ReplicaSpec` includes exact durable identity, process identity, declaration and ApprovedVersion. |
 | `RetireReplicaFunc(ctx, load.RetirementRequest) (load.RetirementResult, error)` | Application-side identity-checked retirement, also for resources whose live factory was never acquired. |
-| `MutationOptions`, `MutationResult`, `GroupSpec`, `EnsureOptions`, `RetireOptions` | CAS expected version, actor/comment, preview/approval; returned document/operator/placement; complete group creation intent; idempotent-create provenance; explicit forced-retirement reason. |
+| `MutationOptions`, `MutationResult`, `GroupSpec`, `EnsureOptions`, `RetireOptions` | CAS expected version, actor/comment, preview/approval; returned document/operation/placement/RebasedTo; complete group creation intent; idempotent-create provenance; explicit forced-retirement reason. |
 | `NodeStatus`, `NodeObservation`, `ParkedLoad`, `LoadParkedError` | Local state/admission/replica health; coalesced observation; retained refused-start evidence and classified error. |
 | `FoundingIDs`, `LoadStoredIdentity`, `StaticPeers.{Resolve,ResolveLoad,Founders}` | Deterministic founding IDs, read-only metadata pin lookup and fixed-roster routing/bootstrap. A fresh InstanceID is still required on retained restart. |
 
@@ -142,8 +163,8 @@ return `MutationResult`):
 | --- | --- |
 | Confirmed reads | `ReadBarrier`, `ReadTopology`, `ReadProgress`, `ReadAuthority`, `WaitRevoked`, `ReadLockHolder` |
 | Observations/configuration | `Rules`, `IsLeader`, `Status`, `HealthObservation`, `Metrics`, `MetricsHistory`, `ParkedJoins` |
-| Documents | `Latest`, `Target`, `Active`, `Get`, `History`, `Watch` |
-| Approval/execution | `Stage`, `Plan`, `PlanFor`, `Approve`, `Operator`, `WaitOperator` |
+| Documents | `Latest`, `Target`, `Get`, `History`, `Watch` |
+| Approval/execution | `Stage`, `Plan`, `PlanFor`, `Approve`, `Operation`, `WaitOperation`, `RetryOperation` |
 | Nodes | `AddNode`, `ReadmitNode`, `DrainNode`, `ActivateNode`, `ExcludeNode`, `ForceRetireNode` |
 | Placement/roles | `SetPlacement`, `SetGroupPlacement`, `SetGroupVoterConfig`, `SetGroupHosting`, `SetReplicaPinnedLearner` |
 | Groups | `CreateGroup`, `EnsureGroup`, `DeleteGroup`, `ChangeReplica`, `ReseatReplica`, `RollbackTo` |
@@ -166,8 +187,7 @@ approved compatibility before returning matching nonzero convergence. One
 uncertain replies replay that CAS. FSM RebasedTo identifies the head; verify its
 single-group delta against its actual parent and require matching actor/comment.
 Never approve foreign staging or retry a failed operation. Local holds do not
-erase convergence or get cleared by EnsureGroup. Until78, named legacy progress/
-failure adapters project actual Active/current execution;78 replaces those reads.
+erase convergence or get cleared by EnsureGroup.
 Optional spec fields are unconstrained; ID/Storage always match. Preview and
 Approve cannot combine. Preserve accepted Document/RebasedTo on approval failure;
 rollback stages new validated intent without rewinding IDs or retirement proof.
@@ -180,8 +200,8 @@ GrantTransferProposal joins an unfinished exact action after cancellation; repea
 the same grant after elections/fence waits. Match the observed leader to immutable
 grant.Targets; neither Target.MemberID nor lagging node progress may rewrite it.
 Even an already-leading destination requires durable intent settlement; the native
-engine skips self-transfer. Named legacyTransferPlan and old FSM global guards
-remain until78; transfer_plan and exact replacement preflights are prepared now.
+engine skips self-transfer. transfer_plan and exact replacement preflights use
+the same source/owner capture; unrelated Target advancement does not revoke it.
 
 ### `topology`
 
@@ -189,20 +209,21 @@ remain until78; transfer_plan and exact replacement preflights are prepared now.
 [planning](../../topology/planner.go), [placement](../../topology/placement.go).
 Pure domain values, validation, placement evaluation and plan construction; no
 network probes, ownership acquisition or persistence. Default Limits are 3 nodes,
-5 replicas per load group and 1024 pending authority records. VoterConfig is a
+5 replicas per load group, 4 executing groups and 2 cleanup requests. No global
+retained-proof count blocks new work; unresolved proof can grow on disk. VoterConfig is a
 complete replicated value: begin with DefaultVoterConfig when overriding fields;
 zero can be meaningful, and decoding never installs defaults into a nil config.
 
 | Entity family | Responsibilities / selected methods and package functions |
 | --- | --- |
 | `Document`, `Node`, `Group`, `Replica` | Nodes carry type/state/labels; groups carry replicas, allocation cursor, storage class, optional placement/voter/hosting rules and descriptive labels. `Document.{Clone,Node,Group,MetaGroup,LoadGroups,MemberID,VotersOf,GroupPlacement,GroupBounds,Validate}`; `Group.AllocateReplicaID`, `Document.{AllocateMemberID,SetMemberID}`. |
-| `Rules`, `Limits`, `PlacementRule`, `HostingRule` | Hard node/replica/authority capacities; placement voter bounds, allowed types and exact NodeSelector; all-eligible or explicit hosting. `Limits.{WithDefaults,Validate}`, `ValidateTransition`, `ValidateHostingCapacityFor`, `RequiredLoadHostsFor`, `SelectFoundingRoles`. |
+| `Rules`, `Limits`, `PlacementRule`, `HostingRule` | Hard node/replica capacities and replicated execution budgets; placement voter bounds, allowed types and exact NodeSelector; all-eligible or explicit hosting. `Limits.{WithDefaults,Validate}`, `ValidateTransition`, `ValidateHostingCapacityFor`, `RequiredLoadHostsFor`, `SelectFoundingRoles`. |
 | Placement reports | `PlacementInput`, `PreparedPlacement`, `PlacementReport`, `GroupPlacementReport`, `PlacementCandidate`, `PlacementIssue`, `PlacementError`: proposed hosts/roles, eligibility and actionable refusal detail. Status `PlacementReport.Source` is `approved` or `converged`; these static declarations do not prove native availability. `PreparePlacement`, `ExplainPlacement`, `EvaluatePlacement`, `AffectedPlacementGroups`, `ValidatePlacementTransition`, `ValidateVoterPlacement`, `MatchNodeSelector`. |
 | Labels | `Node.{GetLabels,SetLabels}`, `Group.{GetLabels,SetLabels}`, `ValidateLabels`, `ValidateSelector`, `NodeReserved`, `NodeLearnerOnly`. Get owns a non-nil copy; Set validates/copies a full replacement without staging or I/O. |
 | Voters | `VoterConfig`, `VoterChange`, `ReplicaKey`, `LearnerPin`, `VoterSwitchState`, `RoleChangeRecord`, `VoterSets`; `DefaultVoterConfig`, `VoterSetDigest`, `ValidateVoterSetTransition`. Target voter seats are separate from hosted replica count. |
-| Plans/operators | `Plan`, `PlanVoterBase`, `Step`, `AuthorizedStep`, `Operator`, `OperatorStatus`, `OperatorTransition`; `BuildPlan`, `BuildPlanPreferred`, `ValidatePlanShape`, `ValidatePlanGuardChain`, `AuthorizedStep.Matches`, `MakeOperatorID`, `ReadmissionCovers`, `ValidAdmissionSequence`, `ValidateMetaDrainSafety`. |
+| Plans/operations | `PlanInput`, `Plan`, `PlanBlock`, `StepDependency`, `PlanVoterBase`, `Step`, `AuthorizedStep`, `Operation`, `OperationStatus`, `OperationTransition`; `BuildPlan`, `BuildPlanPreferred`, `ValidatePlanShape`, `ValidatePlanGuardChain`, `AuthorizedStep.Matches`, `MakeOperationID`, `ReadmissionCovers`, `ValidAdmissionSequence`, `ValidateMetaDrainSafety`. |
 | Authority | `AuthorityGrant.{Validate,Clone,Equal}`, `FenceEvidence.Validate`, `EffectReceipt.{Validate,Clone}`, `AuthorityStatus.Clone`; structural verification, immutable copy boundaries and exact evidence matching. |
-| Observations | `ReadView`, `GroupStatus`, `ClusterStatus`, `NodeStatus`, `HealthObservation`, `GroupHealthEvaluation`, `SchedulingStatus`, `Session`, `LockHolder`, `ParkedJoin`, `SelfRemovalStatus`; `EvaluateGroupHealth`, `EvaluateAllGroupHealth`, `EffectiveNodeState`, `QuorumOf`. HealthObservation is bound to one approved Target version and exact member IDs; it measures declared-voter availability, not native convergence. Health conclusions do not establish consensus. |
+| Observations | `ReadView`, `ProgressQuery`, `ProgressPage`, `GroupProgress`, `NodeProgress`, `CleanupProgress`, `FullyConverged`, `GroupStatus`, `ClusterStatus`, `NodeStatus`, `HealthObservation`, `GroupHealthEvaluation`, `SchedulingStatus`, `Session`, `LockHolder`, `ParkedJoin`, `SelfRemovalStatus`; `EvaluateGroupHealth`, `EvaluateAllGroupHealth`, `EffectiveNodeState`, `QuorumOf`. HealthObservation is bound to one approved Target version and exact member IDs; it measures declared-voter availability, not native convergence. Health conclusions do not establish consensus. |
 
 Integration interfaces: `AddressResolver.Resolve(ctx,string) (string,error)`;
 `HealthSource.Snapshot(ctx) (map[string]Health,error)`. The latter's string keys
@@ -305,14 +326,17 @@ contradictory or partial evidence. `ReadyWrite` holds entries/HardState;
   snapshot markers and bbolt applied hints. `KB_WAL`: segment size is fixed
   process-wide by the first Open; conflicting later sizes fail. Snapshot/compact
   ordering preserves recovery coverage; cached markers avoid rescanning WAL on
-  hot paths. Quarantine/Collect recheck exact identity and token.
+  hot paths. Quarantine/Collect recheck exact identity and token. A synced sibling collection
+  marker precedes deletion; retain the identity pin until contents are removed,
+  then remove the empty directory nonrecursively. Missing data without that marker
+  is NotFound. ForgetCollection releases only exact proof after data is absent.
   DisableFSync bypasses WAL/applied-state fsync, not snapshot/pin/directory sync;
   acknowledged writes then lack host-crash durability.
 - [memstore](../../storage/memstore/store.go): `New(Options)` returns a
   concurrency-safe Store implementing both interfaces plus Stats, with copied
   in-memory state and exact-identity retirement. `KB_MEMORY`: a Node restart
   retains the meta ledger but loses this store. Managed recovery requests a fresh
-  replica ID for a lost memory voter using Active-version CAS; it never starts an
+  replica ID for a lost memory voter using exact proven scope plus Latest/Target CAS; it never starts an
   empty established voter. Lost learners and replicas restarted before joining
   are not automatically reseated. Reseating still needs the surviving group's quorum;
   majority loss has no force-new recovery. See
@@ -447,8 +471,7 @@ pins Latest once; scoped repair approves only its replacement and rebases indepe
 staging. A failed sibling does not gate it. Scoped RecoveryCatalog keeps
 approved/converged identities, retained grant targets and cleanup identities;
 closed exact retirement grants still protect ledger mutation. The explicitly named
-LegacyRecoveryCatalog/LegacyWithGrantedLoadCleanup/LegacyWithLoadScope adapters
-last only until78. Scoped LoadScope derives Started/Established from exact checkpoints
+LoadScope derives Started/Established from exact checkpoints
 and validated receipts: Prepare starts; host Create and native Add/Promote establish.
 Founding requires no checkpoint and a current pinned owner/voter; seed peers come
 from the immutable creation grant. Native membership facts remain pruning roots
@@ -469,7 +492,8 @@ starting replicas. Prepared rows resume without re-running retention; collected
 rows retry their original receipt without deleting again. Node cancellation ends
 RPC waits, but joins delayed storage callbacks before closing owned resources.
 An acknowledged exact receipt releases the store marker before the journal row;
-failed reporting preserves both. Schema3 refuses replicated acceptance until78.
+failed reporting preserves both. Historical receipts bind their former member;
+settled-only replies cannot create timestamps or authorize deletion.
 
 [internal/loadhandle](../../internal/loadhandle/handle.go): `Handle` stores
 immutable storage.Identity and engine pointer; `New`, `Core`, `Identity` bridge
@@ -493,7 +517,7 @@ DeleteGroup map to CreateLoadGroup/DeleteLoadGroup. Additional seams:
 | Methods / entity | Responsibility |
 | --- | --- |
 | `New`, `Start`, `WaitReady`, `Quiesce`, `FenceParticipation`, `RequestStop`, `Stop` | Acquire/serve/join meta lifetime; keep control-only authority handling alive after participation fencing. |
-| `BeginEffect`, `ValidateGrant`, `ReadGrant`, `RecordFence`, `RecordEffect`, `EffectReceipts`, `ReconcileFences`, `ReadAuthorityFloors` | Replicated grant creation/evidence acceptance and resource fence progress. |
+| `BeginEffect`, `ValidateGrant`, `ReadGrant`, `RecordFence`, `RecordEffect`, `EffectReceipts`, `ReadAuthorityFloors` | Replicated grant creation/evidence acceptance and resource fence progress. |
 | `LoadAssignments`, `LoadReplicaScope`, `LoadCatalog`, `LookupLoadReplica`, `RecordLoadReplica`, `ForgetGrantedLoadReplica` | Managed Host's approved recovery and local-ledger boundaries. |
 | `ResolveLoadPeer`, `ResolveAuthorityPeer`, `ValidateLoadNode`, `ValidateLoadPeer`, `ValidateAuthorityCourier` | Exact routing/authentication against current or retained authority, including cleanup destinations. |
 | `Step`, `Call`, `InstallFence`, `ApplyMetaAction` | Authenticated wire dispatch and resource control. |
@@ -505,9 +529,8 @@ Join replies carry approved `Granted`, member owners and only grant-derived
 `validateSessionCourier` requires `AdmissionBasis` for the first session,
 including retained restarts. Renewal/expiry use the Target member or the proven
 `_meta` member with exact process instance checks. `Watch` publishes captured
-Latest/Target pairs only. `joinWithLegacyTopology` and
-`commitLegacyReadmission` still enforce whole-document schema-3 equality until
-Task78 can switch read, Apply and persistence together.
+Latest/Target pairs only. Join/readmission bind the exact metadata owner and
+stable admission origin; unrelated document advancement does not invalidate them.
 
 `KB_CONTROL_ONLY`: stopping participation is distinct from final service Stop.
 Authorized self-removal stops consensus/application participation first, but
@@ -522,23 +545,24 @@ Current status or credential possession is insufficient effect authority. See
 
 [Machine](../../internal/metaengine/machine.go), [FSM state](../../internal/metaengine/sm.go),
 [proposal codec](../../internal/metaengine/codec.go).
-Deterministic replicated metadata state: Latest/Target/Active/history, operators,
-admissions, retired group IDs, allocation high-water marks, sessions/locks,
-voter-switch history and authority grants/floors/revocations. `Machine` embeds
-locked `topologySM` and implements raftengine.Machine, AppliedObserver and
-QueryMachine. Proposals carry state-transition data rather than performing I/O to
-remote hosts; ApplyResult encodes accepted/refused outcome and exact evidence.
+Deterministic schema-4 metadata: Latest/Target/history, operations and independent
+group/node checkpoints, exact cleanup debt, retained mutation intents,
+FullyConverged marker, admissions, retired IDs, allocations, sessions/locks,
+voter-switch history and grants/floors/revocations. Machine owns scopedState under
+one RWMutex and implements raftengine.Machine, AppliedObserver and QueryMachine.
+Apply handlers validate owned candidates before mutation; deterministic content
+refusals return ApplyResult.Code, while malformed envelopes/unknown actions and
+internal invariant failures remain fatal Apply errors.
 
-Selected entries: `NewMachine`, `Encode`, `DecodeProposal`,
-`Machine.{Apply,Snapshot,Restore,AfterApply,Query,SupportsQuery,Views,ValidateDesired,ValidateGrant,AuthorityGrant,AuthorityStatus,PendingFences,EffectReceipts,ReadmissionGrants,AuthorityFloorsForNode,WithLoadScope,WithGrantedLoadCleanup}`;
+Entries: `NewMachine`, `Encode`, `DecodeProposal`; Machine
+`{Apply,Snapshot,Restore,AfterApply,Query,SupportsQuery,Views,Latest,Target,Get,History}`,
+`{Progress,ProgressStatus,Operation,OperationStatuses,ReadyBlocks,ReadyCleanup,ReadyFences}`,
+`{ValidateDesired,ValidateGrant,AuthorityGrant,EffectReceipts,ReadmissionGrants,AuthorityFloorsForNode}`,
+`{WithLoadScope,WithGrantedLoadCleanup,RecoveryCatalog,LoadCatalog,MemberOwner,MemberOwners}`.
 `ReplicaRepairDocument`, `VoterChangeDocument`, `ReadmissionDocument` construct
-owned candidate edits. Promoted topologySM queries include Latest/Target/Active,
-Get/History, Operator/OperatorRecord/CurrentOperator and RecoveryCatalog/LoadCatalog.
-`scopedMetaMemberOwners` derives inbound `_meta` identities from Target, the
-proven `_meta` checkpoint, its current owner plan and unconsumed grants, then
-subtracts receipt/cleanup-proven removals; it deliberately ignores retained
-history and is wired to the live reader only at Task78. The current reader is the
-explicit schema-3 `MemberOwner(s)` adapter.
+owned candidate edits. `scopedMetaMemberOwners` derives inbound `_meta` identities
+from approved/proven membership, owner plans and retained grant facts, subtracting
+consumed removals. Staged-only rows and arbitrary history do not authorize traffic.
 
 Private persistence interfaces: `statePersister.SaveState([]byte) error`;
 optional `applicationPersister.SaveApplication(uint64,raftpb.ConfState,[]byte) error`.
@@ -549,16 +573,19 @@ durable boundary, not merely a staged document or in-memory callback result.
 
 `KB_HISTORY`: pruning retains documents/catalog identities/authority needed by
 interrupted preparation, retirement and revocation until proof completes. Snapshot
-must retain the same obligations. Schema is currently metadata version 3;
-`disk.go` deliberately keeps legacy execution-field vocabulary within supported
-encodings. Reject unsupported retained formats unchanged; current code must never
-regenerate immutable baselines to conceal incompatibility. See
-[cleanup evidence tests](../../internal/metaengine/cleanup_evidence_test.go),
+must retain the same obligations. Metastore format, FSM snapshots and command/result
+envelopes use version 4; authority journal uses version 2. Old changed formats
+refuse without migration or data reset. Native raftstate stays version 2 and
+unrelated retained encodings remain unchanged. `scoped_retention*` computes the
+transitive closure through source documents, attempts, admission origins,
+readmission batches, exact debts, grants and floors before pruning. Completed
+unreferenced debt/floor proof can be released; no permanent collection ACK index.
+Never regenerate immutable baselines to hide incompatibility. See
 [physical baseline](../testing/api-baseline-physical.md).
 
 `KB_PROGRESS_PAGE`: scoped `Machine.Progress`/`progressLocked` and private
 `progress` Query share one FSM read lock, AppliedIndex and complete declaration
-builders. Schema3 adapters deliberately return Unsupported until Task78. Pages
+builders. Pages
 order group, node, operation block, exact cleanup identity; one total budget
 (default100, max1000) counts blocks rather than headers. Repeated headers retain
 full aggregate State/TotalBlocks and mark BlocksTruncated. Versioned base64url JSON
@@ -580,9 +607,8 @@ proven/approved ID. Local advancement can conservatively discard an older sample
 ClusterStatus.Groups uses the same complete GroupProgress builder. Scoped local
 ProgressStatus bounds operation headers to100 without Blocks, preserving aggregate
 state and explicit truncation; cleanup summary counts pending physical evidence.
-Until Task78, LegacyGroupProgress projects Latest/Target/Active, with source only
-for existing Active groups and no inferred owner/Deleting/Blocked. ReadView.Active,
-legacy topology query and legacy operator diagnosis remain explicit cutover bridges.
+There is no Active projection or legacy execution path. Missing native samples
+remain unknown even when metadata was quorum-confirmed.
 
 `FI_PLAN_CAPTURE`: private PlanRead captures affected Scopes plus desired/approved/
 proven/retained identities; safe read → selected native reads → safe recapture.
@@ -590,11 +616,9 @@ No native read for unrelated groups or deletion. Recheck source/owner, approved
 scope changes and exact normalized cursor; sibling progress and own Running
 transition do not invalidate work. `Approve`, `RetryOperation`, `Operation`,
 `WaitOperation` preserve first approval/immediate retry edges and full old-attempt
-outcomes. ApplyVersion uses explicit approve/retry discriminators; schema3 remains
-on the named legacy branch until78. `OperationControllerConfig` binds existing
-coordinator and scope/final validators, activated with complete persistence at78.
-`BuildPlanPreferred` builds scoped partitions; `BuildLegacyPlan` isolates remaining
-schema3 callers until78. `ValidateMetaDrainSafety(PlanInput,Document,MetaDrainInput)`
+outcomes. ApplyVersion uses explicit approve/retry discriminators.
+`OperationControllerConfig` binds the coordinator and scope/final validators.
+`BuildPlanPreferred(PlanInput,Document,PlanOptions)` builds scoped partitions; `ValidateMetaDrainSafety(PlanInput,Document,MetaDrainInput)`
 resolves actual voters through exact proven/retained/approved bindings, uses target
 node state and observed health, and refuses unknown/conflicting owners.
 
@@ -603,7 +627,7 @@ node state and observed health, and refuses unknown/conflicting owners.
 | Package | Entities / selected methods / contracts |
 | --- | --- |
 | [metastore](../../internal/metastore/store.go) | Store owns `_meta.bolt`; Adapter implements storage.Store for `_meta`. `Open`, `LoadIdentity`, `StoreIsFresh`, `PeekLocalLineage`, `LoadReplicaRecords`; Store `{EnsureIdentity,VerifyIdentity,SaveReady,SaveSnapshot,InstallSnapshot,LoadAll,SaveState,LoadState,SaveApplication,SetApplied,AppliedConfState,RecordReplicaCAS,LookupReplica,ForgetReplica,SaveOverride,LoadOverride,Close}`. ReplicaRecord/ReplicaLookup track exact load acquisition; IdentityLookup and AppliedMembership distinguish absent from zero-valued evidence. SaveApplication binds FSM bytes/index/ConfState in one transaction. |
-| [authoritystore](../../internal/authoritystore/store.go) | Independent bbolt Store with Freshness=`FreshEvidence` or `RetainedEvidence`; `Open`, `LoadIdentity`; Store `{Identity,MetadataAcquired,MarkMetadataAcquired,Current,Fence,CompleteFence,BeginEffect,FinishEffect,FenceEffect,Running,Receipt,MetaParticipationStopped,CompletedMetaStop,VerifyRebind,Rebind,Close}`. FenceRecord retains current grant and completion; EffectRecord/EffectLookup/ReceiptLookup distinguish running work, durable receipt and absence. |
+| [authoritystore](../../internal/authoritystore/store.go) | Independent bbolt Store with Freshness=`FreshEvidence` or `RetainedEvidence`; `Open`, `LoadIdentity`; Store `{Identity,MetadataAcquired,MarkMetadataAcquired,Current,Fence,CompleteFence,BeginEffect,FinishEffect,FenceEffect,Running,Receipt,MetaParticipationStopped,CompletedMetaStop,VerifyRebind,Rebind,Collection,Collections,PrepareCollection,CompleteCollection,RemoveCollection,Close}`. FenceRecord retains current grant and completion; EffectRecord/EffectLookup/ReceiptLookup distinguish running work, durable receipt and absence. |
 
 `KB_FENCE_COMPLETION`: authoritystore.Fence persists the admission floor before
 canceling/joining old work; CompleteFence records completion only after old owners
@@ -621,16 +645,14 @@ it cannot be inferred from a new process InstanceID. See
 [effects contracts](../../internal/operator/contracts.go),
 [coordinators](../../internal/operator/coordinator_contracts.go).
 Leader-owned approved-plan executor; Record retains ID/version/attempt, immutable
-steps/voter bases, grants/receipts and progress. Config injects topology store,
-coordinators and group effects. Topology alias files preserve domain value identity.
+steps/voter bases, grants/receipts and progress for shared suffix validation.
+Config injects scoped coordinators, validators and group effects. Topology alias files preserve domain value identity.
 
 | Interface | Complete method set |
 | --- | --- |
-| `Store` | `Target(ctx) (Document,error)`; `Active(ctx) (Document,error)` |
 | `Coordinator` | `IsMetaLeader() bool`; `ReadyBlocks(ctx,int) ([]WorkItem,error)`; `RecordOperationTransition(ctx,topology.OperationTransition) error`. WorkItem owns Operation + GroupID + retained Approved declaration + current Consumed proof observation; ScopedValidator receives `(ctx,Operation,groupID)`. |
 | `CleanupCoordinator` (embedded by Coordinator) | `ReadyCleanup(ctx,int) ([]CleanupWork,error)`; `BeginCleanupEffect(ctx,Identity,AuthorizedStep) (AuthorityGrant,error)`; `ReadyFences(ctx,int) ([]FenceWork,error)`; `ResolveFenceTarget(ctx,FenceWork) (AuthorityTarget,error)`; `DispatchFence(ctx,grant,resource,target) error`. Internal selection/courier ports only. |
-| `LegacyCoordinator` | `IsMetaLeader() bool`; `CurrentOperator(ctx) (Record,bool)`; `RecordOperatorTransition(ctx,Transition) error`; schema3 bridge removed78. |
-| `AuthorityCoordinator` | `BeginEffect(ctx,topology.AuthorizedStep) (topology.AuthorityGrant,error)`; `ReconcileFences(ctx) error`; `EffectReceipts(ctx,topology.AuthorityGrant) ([]topology.EffectReceipt,error)`; `RecordEffect(ctx,topology.EffectReceipt) error` |
+| `AuthorityCoordinator` | `BeginEffect(ctx,topology.AuthorizedStep) (topology.AuthorityGrant,error)`; `EffectReceipts(ctx,topology.AuthorityGrant) ([]topology.EffectReceipt,error)`; `RecordEffect(ctx,topology.EffectReceipt) error` |
 | `MembershipCoordinator` | `Apply(ctx,topology.AuthorityGrant) ([]topology.EffectReceipt,error)`; `CaughtUp(GroupStatus,uint64) bool` |
 | `GroupEffects` | `Status(ctx,string) (GroupStatus,error)`; `ReadNative(ctx,string,...storage.Identity) (topology.NativeState,error)`; `DispatchEffect(ctx,grant,resource,target) (EffectReceipt,error)` sends one exact target without trimming the grant; each of `CreateGroup`, `PrepareReplica`, `ApplyMembership`, `TransferLeader`, `StopReplica`, `CleanupReplicaState`, `DeleteGroupState` takes `(ctx,topology.AuthorityGrant)` and returns `([]topology.EffectReceipt,error)` |
 
@@ -640,10 +662,9 @@ or confers authority. Reuse state-based admission/evacuation predicates and exac
 resource obligations; consumed required steps and zero-step blocks remain eligible
 for advancement/finalization. Issued grants reuse their own floor. Dependency and
 revocation diagnostics derive on read, without per-poll writes; native safety and
-reachability remain worker checks. Config requires exactly one coordinator and
-matching scope or legacy validators; no scoped path reads Store.Active. Production
-retains the legacy port until78; scoped selection returns Unsupported on schema3.
-Tasks63–65 provide bounded required/cleanup/fence dispatch and exact execution;66 connects service scope validators.
+reachability remain worker checks. Config requires Coordinator, Authority,
+GroupEffects, an immutable owns-group predicate and both scope/final validators.
+The live service wires bounded required/cleanup/fence dispatch and scoped validation.
 
 `FI_DISPATCH_GATE`: each Start owns a dispatcher; close admission and WaitGroup.Add
 share one mutex. Group workers rotate bounded ready pages. Exact RPCs share a
@@ -673,21 +694,21 @@ fences use existing exact recipient resolution inside the reserved worker budget
 obligations without fabricated fence evidence, consistently across query/index/
 restore/prune. Pending deletion settles nothing; host resources keep exact proof.
 
-Entries: `New`; Controller `{Start,Stop,Signal,Tick,SetFinalValidator,DispatchEffect}`;
-`FromPublic`, `IDFor`, `NewFixedMembershipCoordinator`, `ValidateRemainingPlan`,
+Entries: `New`; Controller `{Start,Stop,Signal,Tick}`;
+`NewFixedMembershipCoordinator`, `ValidateRemainingPlan`,
 `ValidateRemainingScope`. `FI_RETRY_PROOF`: scoped validation reuses native simulation
 with original Previous/grant/receipt tuples and global block sequences. FSM-derived
 consumption may skip a required prefix; native satisfaction alone permits idempotent
 new-grant execution without inventing consumption. Successful sibling scopes and
 detached cleanup are excluded from that simulation.
 `KB_RECEIPT`: success requires exact durable receipts plus observed native result;
-nil RPC error or a refusal is not completion. Tick reconciles resource fences,
-validates remaining plan against native membership, obtains exact grants, executes
-steps, records evidence and only then advances/activates. TransferStarted receipts
+nil RPC error or a refusal is not completion. Tick selects independent required
+and cleanup/fence work; workers validate remaining scopes against native
+membership, obtain exact grants, execute and record before advancing convergence. TransferStarted receipts
 prove initiation; leadership must still be observed as required. Retained cleanup
 may address identities absent from current desired topology. See
 [remaining-plan validation](../../internal/operator/remaining_plan.go),
-[verification regressions](../../internal/operator/verification_func_test.go).
+[verification regressions](../../internal/operator/scoped_execution_func_test.go).
 
 ### `internal/scheduling` and `internal/votercheck`
 
@@ -695,19 +716,17 @@ may address identities absent from current desired topology. See
 lifetime, cooldown/stability state and diagnostic transitions. `New`; Scheduler
 `{Start,Stop,Status,SetEnabled,Enabled,Tick,Wake}`. Config provides policy, Host,
 held identities and transition callback; RepairCommit binds approval to observed
-versions/operator state rather than unconditionally approving latest intent.
+versions/scope ownership rather than unconditionally approving latest intent.
 
 Host interface complete method list:
-`Views`, `CurrentOperator`, `IsLeader`, `Health`, `GlobalStatus`, `PlanFor`,
-`Approve`, `CommitRepair`, `RefreshObservations`, `ResetObservations`,
-`Observations`, `VoterSwitches`, `CommitVoterChange`, `WakeOperator`.
-Exact signatures are in [contracts.go](../../internal/scheduling/contracts.go).
-`FI_REPAIR_CAS`: the prepared [ScopedHost](../../internal/scheduling/scoped_contracts.go)
-replaces Views/CurrentOperator/Approve with `ReadRepair(ctx,group)` and
-`PlanRepair(ctx,capture,desired)`; keeps IsLeader/Health, observation refresh/reset,
-Observations/VoterSwitches, CommitRepair/CommitVoterChange and WakeOperator.
-Empty-group reads capture Latest, Target and group checkpoints in one FSM query;
-named reads recapture around native I/O. New requires exactly one static host port.
+`IsLeader`, `Health`, `RefreshObservations`, `ResetObservations`, `Observations`,
+`VoterSwitches`, `WakeOperations`, `ReadRepair(ctx,group) (metaengine.PlanRead,error)`,
+`PlanRepair(ctx,capture,desired) (topology.Plan,error)`,
+`CommitRepair(ctx,RepairCommit) (OperationID,error)`,
+`CommitVoterChange(ctx,VoterChange,RepairCommit) (OperationID,error)`.
+Exact signatures: [contracts.go](../../internal/scheduling/contracts.go).
+`FI_REPAIR_CAS`: Empty-group reads capture Latest, Target and group checkpoints in one FSM query;
+named reads recapture around native I/O. New requires the scoped Host dependency.
 Scoped ticks share callback serialization, probe eligible groups independently,
 recheck source/owner/health/native/collector epoch, and submit both document CAS
 versions plus exact scopes. Unrelated callback-time changes refresh the scheduler
@@ -715,7 +734,7 @@ base; changes during planning retry on a later tick. `staged_conflict` comes fro
 shared FSM read/write-set validation; diagnostics name the group and unchanged
 refusals produce no replicated blocker. Attempt cooldowns bind source+replica;
 member replacement resets local alive duration. Replica repair preserves node
-metadata to avoid incidental `_meta` ownership. The legacy port disappears at78.
+metadata to avoid incidental `_meta` ownership.
 `KB_POLICY`: callback return is a proposal for revalidation, not permission;
 overdue calls keep the gate and status becomes policy_stalled. Leadership/enablement
 changes reset relevant observation continuity.
@@ -735,8 +754,7 @@ the driver later refuses it; skip busy groups. Group/replica evidence and cooldo
 use exact source versions, never cluster document-version equality. The callback
 boundary strips both Desired and Observation from Groups; Status is the observation
 channel and Clone remains faithful. Internal driver CAS captures retain their own
-ReadView outside the public input. legacyScheduleInput labels real schema3 evidence
-until78 (metrics source projection removed70); the scoped driver has no global convergence/operation gate.
+ReadView outside the public input; the driver has no global convergence/operation gate.
 
 ### `internal/raftengine`
 
@@ -813,7 +831,7 @@ builds scheduler evidence, cluster snapshots and history. ReadPool bounds callba
 parallelism and exact-source overlap; Round/Probe/GroupSamples describe collection
 results; LeaderEpoch and EvidenceScope fence temporal conclusions.
 
-Interfaces: `Source` = `Active(ctx) (topology.Document,error)`,
+Interfaces: `Source` = `Target(ctx) (topology.Document,error)`,
 `Health(ctx,topology.Document) (map[string]topology.Health,error)`;
 `MetricsSource` = `Topology(ctx) (topology.ProgressPage,error)` (only TargetVersion/Groups),
 `Epoch() (LeaderEpoch,bool)`, `Collect(ctx,topology.ProgressPage,*ReadPool) (Round,error)`.
@@ -834,8 +852,7 @@ Exact replica/process checks reject predecessor replies; leader candidates must
 belong to the captured assignment. Leadership/cancellation still fences all groups.
 Cached sample ReceivedAt is preserved (unknown placeholders stay zero); latest
 probe reachability earns time through separate advancing condition generations.
-The named service metricsTopology projects actual schema3 rows until78, when
-its body uses the existing local ProgressStatus row builder.
+Service metricsTopology uses the local ProgressStatus row builder.
 
 `KB_EVIDENCE_WINDOW`: elapsed wall time does not extend failure/standby proof.
 Continuity requires fresh advancing source generations in an unchanged exact
@@ -879,23 +896,34 @@ RPC method set: `StreamMessages`, `SendSnapshot`, `Join`, `JoinReady`, `KeepAliv
 carries typed internal JSON commands; protobuf headers provide routing identity.
 Generated `.pb.go` files follow pinned `make generate`, never hand edits.
 
+`FI_PROTOCOL`: public methods remain Go calls; private MetaControl handles
+`report_collection`/`report_cleanup_status` with exact authenticated courier/member
+proof. General ProposeMeta rejects these reporting envelopes. ApplyVersion has
+explicit approve/retry paths. Internal safe queries include topology, progress,
+collection_check, planning, approval_plan, operation_plan, retry_plan, repair_plan, transfer_plan,
+authority, authority_grant, authority_proof and authority_floors. Planning captures
+carry source/owner expectations and original consumed grants; report settlement
+is read-only. Protobuf routing is unchanged; typed JSON payloads and v4 command/
+result envelopes carry the new model. [Read dispatch](../../internal/metaengine/reads.go),
+[cleanup protocol](../../internal/metaservice/cleanup_protocol.go).
+
 ## Cross-package execution paths
 
 | Trigger | Path / non-obvious boundary |
 | --- | --- |
 | Start/recover a participant | `Node.Start` -> retained authority/meta inventory -> `metaservice.Start` -> founding/join/recovery -> durable admission -> `managed.RecoverAssignments` -> exact startup reservation -> storage/factory/engine replay -> authorization -> publication/Run. `KB_RETAINED_EVIDENCE`, `KB_START_RESERVATION`. |
-| Change topology | Cluster mutation/PreparePlacement -> expected-Latest CAS Stage -> Plan/Approve -> metaengine committed plan/grants -> operator -> managed/meta effects -> group/host receipts -> native verification -> Active. Staged intent never directly stops/creates replicas. `KB_PLACEMENT`, `KB_RECEIPT`. |
-| Supersede an operator | metaengine records revocation obligations -> metaservice.ReconcileFences -> raftengine.InstallAuthority (group) or managed.InstallHostFence (host) -> durable evidence -> RecordFence -> ReadAuthority/WaitRevoked. Offline host or lost group quorum leaves obligations pending. `KB_FENCE_COMPLETION`. |
+| Change topology | Cluster mutation/PreparePlacement -> expected-Latest CAS Stage -> Plan/Approve -> metaengine committed plan/grants -> operator -> managed/meta effects -> group/host receipts -> native verification -> exact group/node convergence -> historical FullyConverged. Staged intent never directly stops/creates replicas. `KB_PLACEMENT`, `KB_RECEIPT`. |
+| Supersede an operation scope | metaengine records affected-group obligations -> bounded ReadyFences/DispatchFence -> raftengine.InstallAuthority (group) or managed.InstallHostFence (host) -> durable evidence -> RecordFence -> ReadAuthority/WaitRevoked. Offline host or lost group quorum leaves obligations pending. `KB_FENCE_COMPLETION`. |
 | Write application command | Group.Propose -> engine admission/correlation -> local leader or forwarded Raft proposal -> durable Ready -> local Apply -> result. Engine correlation routes a waiter; application RequestID supplies deduplication. `KB_APPLY`, `KB_READY_ORDER`. |
 | Read application/topology | Group.Read / Cluster.ReadTopology -> own group's ReadIndex -> local apply catch-up -> serialized Query returning copied result. Status/Watch/Latest/LockHolder do not imply this path. `KB_READ_COHORT`, `KB_OBSERVATION`. |
-| Repair voter seats | observe samples/windows -> scheduling policy -> internal scheduling refresh/revalidation -> metaengine CAS -> immutable operator plan -> native membership/placement guards -> receipts. No shortcut from health label to voting authority. `KB_EVIDENCE_WINDOW`, `KB_POLICY`, `KB_MEMBERSHIP`. |
+| Repair voter seats | observe samples/windows -> scheduling policy -> internal scheduling refresh/revalidation -> metaengine CAS -> immutable operation plan -> native membership/placement guards -> receipts. No shortcut from health label to voting authority. `KB_EVIDENCE_WINDOW`, `KB_POLICY`, `KB_MEMBERSHIP`. |
 | Stop/retire/readmit | Fence new admission -> cancel/join accepted work -> application Close; retirement additionally verifies grant/application identity, quarantines Raft and clears exact ledger; readmission then installs fresh IDs. Failed release blocks successors. `KB_OWNER`, `KB_RETIRE`. |
 
 ## Test packages and repository operations
 
 | Package / path | Entities, entry points and scope |
 | --- | --- |
-| [tests/cluster](../../tests/cluster/cluster.go) | Docker harness: Spec/NodeSpec describe processes; Cluster/Node expose HTTP/status/mutation/data and lifecycle controls; Pool/Lease provide bounded isolated resources. `NewPool`, Pool `{Start,Acquire,RequestClose,Close}`, Lease.Release; Node `{Start,Stop,Kill,StartJoining,Endpoint,Logs}`; Cluster `{WaitReady,Request,Document,Status,Operator,WaitOperator,Mutate,WaitActive,Stage,Approve,CreateGroup,Put,Get,Read,WaitValue}` plus fault/snapshot/barrier/authority controls; `Poll` waits for observed conditions. Multi-node consensus, faults, recovery, scaling/performance; `clustertest` build tag. Pool release verifies container/volume cleanup before network reuse. |
+| [tests/cluster](../../tests/cluster/cluster.go) | Docker harness: Spec/NodeSpec describe processes; Cluster/Node expose HTTP/status/mutation/data and lifecycle controls; Pool/Lease provide bounded isolated resources. `NewPool`, Pool `{Start,Acquire,RequestClose,Close}`, Lease.Release; Node `{Start,Stop,Kill,StartJoining,Endpoint,Logs}`; Cluster `{WaitReady,Request,Document,Status,Operation,WaitOperation,Mutate,WaitFullyConverged,Stage,Approve,CreateGroup,Put,Get,Read,WaitValue}` plus fault/snapshot/barrier/authority controls; `Poll` waits for observed conditions. Multi-node consensus, faults, recovery, scaling/performance; `clustertest` build tag. Pool release verifies container/volume cleanup before network reuse. |
 | [tests/cluster/testapp](../../tests/cluster/testapp/README.md) | Package main, actual caller of public APIs: application owns Node, WAL store, listeners, load transport, event journal, HTTP adapter and fixture controls; `newApplication`, application `{Start,RequestClose,Close,newReplica,retireReplica}`. kvMachine `{Apply,Query,Snapshot,Restore}` stores values, dedup requests and applied index. fixtureStore/controlledStore and controlledMachine inject WAL/apply/query faults; projection loop exercises Application.Run; fixtureScheduler/lifecycle exercise callbacks. Authenticated hooks expose exact-replica barriers, resource counters, authority replay/fence and meta/load traffic faults. |
 | [tests/cluster/testapp/loadpb](../../tests/cluster/testapp/load.proto) | Fixture-specific generated protocol: Header/Request/Frame/Reply; LoadClient/LoadServer methods `Deliver`, `Call`. Distinct from reusable transport/loadgrpc protocol; fixture retains fault interception and typed control operations. |
 | [scripts/revive](../../scripts/revive/main.go) | Package main, separately pinned revive library wrapper. `run`, `collectFindings`, `packageFiles`, `groupFiles`, `filterFindings`, `outputFindings`; groups selected tagged files by directory to preserve package/type context and filters findings without editing code. |
@@ -930,9 +958,9 @@ Reports: `test-reports/<suite>/latest/{report.md,timeline.md}` and package logs.
 | `KB_OWNER` / Stop timeout or overlapping successor | [managed/host.go](../../internal/managed/host.go), [ownership_ports_func_test.go](../../internal/managed/ownership_ports_func_test.go), [lifecycle runner](../../node_lifecycle_hooks.go) |
 | `KB_RETAINED_EVIDENCE` / missing authority or storage | [node_authority.go](../../node_authority.go), [node_retained_authority_func_test.go](../../node_retained_authority_func_test.go), [managed/boot.go](../../internal/managed/boot.go) |
 | `KB_FENCE_COMPLETION` / superseded effect still running | [authoritystore/fences.go](../../internal/authoritystore/fences.go), [managed/authority_func_test.go](../../internal/managed/authority_func_test.go), [authority process tests](../../tests/cluster/authority_fencing_test.go) |
-| `KB_RECEIPT` / operator falsely converged | [operator/receipts.go](../../internal/operator/receipts.go), [verification_func_test.go](../../internal/operator/verification_func_test.go), [metaengine/retirement_receipts_test.go](../../internal/metaengine/retirement_receipts_test.go) |
+| `KB_RECEIPT` / operator falsely converged | [operator/receipts.go](../../internal/operator/receipts.go), [scoped_execution_func_test.go](../../internal/operator/scoped_execution_func_test.go), [metaengine/scoped_receipts_test.go](../../internal/metaengine/scoped_receipts_test.go) |
 | `KB_RETIRE` / cleanup destroys newer resources | [managed/retirement.go](../../internal/managed/retirement.go), [retirement_func_test.go](../../internal/managed/retirement_func_test.go), [readmission_authority_func_test.go](../../internal/managed/readmission_authority_func_test.go) |
-| `KB_HISTORY` / interrupted cleanup forgotten after restart | [metaengine/cleanup_evidence_test.go](../../internal/metaengine/cleanup_evidence_test.go), [raftstate/snapshot.go](../../internal/raftstate/snapshot.go) |
+| `KB_HISTORY` / interrupted cleanup forgotten after restart | [metaengine/scoped_retention_test.go](../../internal/metaengine/scoped_retention_test.go), [raftstate/snapshot.go](../../internal/raftstate/snapshot.go) |
 | `KB_READ_COHORT` / stale read, late apply, lost read reply | [raftengine/reads.go](../../internal/raftengine/reads.go), [reads_func_test.go](../../internal/raftengine/reads_func_test.go), [consistent_reads_test.go](../../tests/cluster/consistent_reads_test.go) |
 | `KB_EVIDENCE_WINDOW` / stale sample qualifies promotion | [observe/windows.go](../../internal/observe/windows.go), [evidence tests](../../internal/observe/evidence_test.go), [votercheck/check.go](../../internal/votercheck/check.go) |
 | `KB_PLACEMENT` / selector, reserved host or AZ conflict | [placement_prepare.go](../../topology/placement_prepare.go), [placement_approval_test.go](../../internal/metaengine/placement_approval_test.go), [placement process tests](../../tests/cluster/placement_test.go) |

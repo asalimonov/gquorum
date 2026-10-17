@@ -104,7 +104,7 @@ with backoff up to 5 seconds. Recheck local holds after progress reads. The appr
 plan prepares a fresh learner, catches it up from the leader, promotes it and
 cleans up the old identity. The loop ends when the exact old assignment leaves
 Target or is explicitly held; host shutdown joins it. The internal local progress
-projection remains schema3 until the complete scoped activation in Task78.
+projection reads the same durable per-group checkpoints as public progress.
 
 Learners and replicas that restart before becoming established are not reseated;
 they stay parked with a `NotImplemented` warning. If a majority of a memory
@@ -121,8 +121,8 @@ verify the entire operator/version/attempt/step/action/identity tuple and rechec
 authority after waits. Unknown future approvals, stale attempts and mismatched
 identities never authorize work. A remote refusal may be retried by a dispatcher
 whose complete local approval is still valid; refusal is never completion proof.
-After inherited resource fences complete, a safe metadata query and native
-membership reads validate the remaining immutable plan before each step. Missing
+After the next effect's required resource fences complete, a safe metadata query
+and native membership reads validate the remaining immutable plan before each step. Missing
 quorum remains a wait; an impossible membership sequence or omitted retained
 cleanup fails with `replan_required`. Same-version retries keep the exact plan,
 and snapshot restoration rejects differing plans for attempts of one version.
@@ -229,8 +229,9 @@ collection/status envelopes. Node supplies both callbacks and its existing journ
 to the managed Host; its accepted lifetime owns reporting, including explicit
 control-only joining restarts. RequestStop cancels report waits; delayed storage
 callbacks remain joined before owned stores and the journal close. Borrowed stores
-remain caller-owned. Scoped state acceptance remains Unsupported on schema3 until
-the complete Task78 activation; an unsuccessful report keeps its durable receipt.
+remain caller-owned. An unsuccessful report keeps its durable receipt; missing
+receipt history permits only read-only settlement after exact reference checks,
+never reconstruction of a CollectedAt timestamp.
 
 WAL collection writes and syncs an exact sibling marker before deleting contents,
 keeps the identity pin until those deletions are synced, and finishes with
@@ -253,8 +254,9 @@ identities named by its previously approved steps.
 ## Readmission and removal
 
 `ReadmitNode` rotates a declared active node's meta/load identities only after
-fresh health reports it dead. Live/unknown health or unconverged documents are
-refused before staging. The ordinary CAS/optional approval pipeline preserves a
+fresh health reports it dead. Live/unknown health or busy/unproven affected
+scopes are refused before staging; unrelated staged or executing groups do not
+provide a global veto. The ordinary CAS/optional approval pipeline preserves a
 staged version on later approval failure. Retry `Approve` for that version.
 
 A returning process joins with its caller-supplied retained paths. The library
@@ -290,11 +292,12 @@ Approved plans retain the full replacement metadata admission sequence even when
 the new member is already observed as a learner or voter. That preparation is the
 receipt-gated host retirement boundary: the plan omits redundant stop and cleanup
 calls to the former metadata identity, while retaining native membership removal.
-Metadata steps run before load groups, which then run in name order. Deletion of
+Blocks run independently. Admission barriers precede affected load installation;
+evacuation barriers precede metadata removal. Deletion of
 a group hosted entirely by returning owners is covered by their preparations;
 partial deletion still retires the other hosts. Actual readmission receipts remove
 only their exact load identities from subsequent deletion grants. Planning retains
-those identities for native removal until the replacement becomes Active.
+those identities for native removal until exact replacement convergence.
 Completed retirement receipts survive grant closure and can satisfy preparation
 by a successor operator for the same exact granted member. They do not authorize
 a different member or make a superseded admission ready.
@@ -315,8 +318,8 @@ path is fresh. After a process restart, the rebound admission retains the same
 retirement proof. Before rebind, retirement resumes against its retained receipts
 and exact backup. After rebind, Node verifies the durable previous/granted/member
 transition and admission ID before returning receipts; the successor is not
-retired again. Complete operator convergence remains tracked in Task 15 of the
-authority-contract implementation plan.
+retired again. Required operation completion remains distinct from detached
+physical collection.
 
 The independent authority store records metadata acquisition for its current
 durable member. Node records it after the metadata pin is durable and before the
@@ -418,17 +421,19 @@ eligible host. [Placement](placement.md) describes these rules and their
 diagnostic reports.
 
 `Node.Status()` reads local owned snapshots without probes. `Cluster.Status(ctx)`
-collects observations and separate static placement reports for Active and
-Target; neither proves quorum, physical failure isolation or linearizability.
+collects observations and separate static placement reports for proven and
+approved declarations; neither proves quorum, physical failure isolation or
+linearizability.
 Compare leader and term when assessing continuity. Follower approvals make at
 most one control hop to the observed leader. Domain errors preserve exact
 expected/current CAS versions; empty success replies cannot identify an operator
 and are refused.
 
 Status adds `MetaLeaderNodeName` and `LeaderNodeName` to the existing numeric
-Raft observations. Names resolve through the local Active topology. Unknown or
-retired replicas have empty names; staged replacements cannot supply them.
-Cached status re-resolves names against its current Active view.
+Raft observations. Names resolve through exact approved/proven identities and
+the retained metadata owner catalog. Unknown or retired replicas have empty names;
+staged replacements cannot supply them. Cached samples retain their source and
+receive time and cannot be relabelled as a successor.
 
 The small `examples/cluster` app is a separate Go module. Kong parses its commands
 and environment; `cluster.go` constructs Node and evaluates readiness, `http.go`
@@ -469,7 +474,7 @@ A fenced metadata owner can use this evidence to forget an old load ledger even
 when its stopped catalog predates the grant. It rechecks its captured identity,
 durable metadata pin and exact replica-ID CAS. The managed host retains the group
 gate until the cleanup receipt is durable, so successor fencing joins this work
-before admitting later effects. Active owners keep the local FSM read lock through
+before admitting later effects. Participating owners keep the local FSM read lock through
 ledger mutation. Managed action/fence ingress validates current courier identity
 and retained grant together through the safe proof route; immutable grant cache
 hits remain usable under protocol ownership after participation ends.
@@ -482,11 +487,12 @@ healthy. Ordinary identity probes continue to require a running engine. Node-own
 receipts under a bounded owned worker. Prepare verifies the acquired pin and
 replay-ready engine; stop joins metadata participation and local load work before
 persisting its receipt. Courier cancellation ends only its wait. Removal hooks
-waits until one quorum read confirms the exact stop receipt, convergence of
-approved Target into Active, and settlement of this member's retained host
-authority. Convergence covers later plan steps whose grants have not yet been
-issued. A metadata stop receipt alone cannot trigger optional shutdown while
-load cleanup remains. The local authority store retrieves the completed stop
+wait until one quorum read confirms the exact stop receipt, absence of the
+former member from Target, retirement of that member's exact cleanup debts and
+settlement of its retained host authority. This includes unissued cleanup work.
+A metadata stop receipt alone cannot trigger optional shutdown while host
+retirement remains; physical collection and unrelated group progress do not
+block release. The local authority store retrieves the completed stop
 even after a newer fence replaces its current floor; rebind cannot reuse a former
 member's stop receipt.
 
@@ -497,12 +503,12 @@ still obtains its own receipts; it does not reintroduce earlier retired replicas
 
 Private planning retains approved intermediate `_meta` identities and node
 attributes as well as load identities. An admitted learner may already be native
-before its document reaches Active; supersession must still remove and retire it.
+before its group checkpoint advances; supersession must still remove and retire it.
 Unresolved metadata preparation pins its approved document through bounded history
 pruning. Inbound member routing uses an index rebuilt on FSM mutation/restore:
 historical intermediate members remain routable until their exact native removal
-is consumed, or a later Active proves convergence. Staged rows and already removed
-members never authorize inbound traffic. Outbound final-commit/cleanup routing is
+is consumed, or exact checkpoint evidence replaces their provenance. Staged rows
+and already removed members never authorize inbound traffic. Outbound final-commit/cleanup routing is
 separate. Durable retirement receipts remain cleanup proof after their completed
 operator leaves ordinary history, preventing retained grants from resurrecting
 collected resources. Native removal alone preserves unfinished host retirement.

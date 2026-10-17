@@ -1262,13 +1262,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `README.md`, `docs/architecture/library.md`, `runtime.md`, `raft.md`, `project-map.md`, `comparision-with-tikv.md`, relevant `design-constraints.md` entries. **Target:** [T] §1–10. **Depends on:** 78–84. **Budget:** documentation only; split any code corrections separately.
 
-- [ ] Describe implemented Latest/Target/convergence, scoped immutable operations, exact retry/rebase, stop/retire/collect boundaries, safe-read freshness and storage proof release. Replace obsolete current-contract Active/global-operator claims.
-- [ ] Update the saturated project map with new interfaces/methods/schema/protocol ownership and grep tags from [T]. Distinguish TiKV mechanisms adapted from stronger gquorum proof requirements and remaining gaps.
-- [ ] Document ordinary application usage without requiring cleanup/reporting calls; advanced specialized storage obligations stay outside the main Node/Cluster/load.Group learning path. Preserve limits and honest permanently lost-host behavior.
+- [x] Describe implemented Latest/Target/convergence, scoped immutable operations, exact retry/rebase, stop/retire/collect boundaries, safe-read freshness and storage proof release. Replace obsolete current-contract Active/global-operator claims.
+- [x] Update the saturated project map with new interfaces/methods/schema/protocol ownership and grep tags from [T]. Distinguish TiKV mechanisms adapted from stronger gquorum proof requirements and remaining gaps.
+- [x] Document ordinary application usage without requiring cleanup/reporting calls; advanced specialized storage obligations stay outside the main Node/Cluster/load.Group learning path. Preserve limits and honest permanently lost-host behavior.
 
 **Verification**
 
-- [ ] Verify links, actual signatures/defaults and every “implemented” claim; run `git diff --check` and `make test` as the plan's checkpoint gate.
+- [x] Verify links, actual signatures/defaults and every “implemented” claim; run `git diff --check` and `make test` as the plan's checkpoint gate.
 
 ### Task 86: Update API audit, testing provenance and contributor guidance
 
@@ -1489,6 +1489,8 @@ During execution use `- [ ] target section — missing behavior — affected pat
   | 10,000 | 222 ms | 250 ms | 51,304,060 | 208,004,377 / 80,123 | 221 ms | 1.54 s | 5.17 ms | 335 ns | 33.8 ms |
 
   Full-state persistence remains linear in retained proof; large JSON-buffer allocations vary with pool reuse. Bounded query output does not bound all processing: at 10,000 debts Progress allocates ~16.6 MB and ordinary selection ~55.1 MB despite returning only 25 rows/one live block. Cleanup selection allocates 672 B/2 objects at both nonzero scales. These costs are an explicit scaling limitation; incremental persistence/index redesign remains deferred and no unresolved evidence is discarded. Independent dispatch/queue/backoff/timeout/shutdown/fence fairness regressions pass under race (`/tmp/task84-dispatch-race.log`); focused paging units and the new real-Apply functional test pass (`/tmp/task84-paging.log`, `/tmp/task84-bounds.log`). `make test` passes, report `test-reports/unit/20261017T011231.820974Z-sucds_9q/report.md`; `git diff --check` passes. No Docker run.
+
+- 2026-10-17 — Task85 complete. Updated README and six current architecture guides: removed Active/global-operation and temporary schema3 bridge claims; documented immutable scoped ownership, state-based barriers, first-approval/exact retry/rebase, coherent bounded metadata pages with separately aged observations, stop/retire/collect separation and exact member release. Expanded the saturated map with current interfaces/methods, v4/v2 ownership, private query/report routes and grep tags; fixed links to deleted legacy tests. Ordinary usage stays on Node/Cluster/load.Group; specialized ForgetCollection/store-proof obligations remain in storage/recovery sections. TiKV comparison now separates adapted per-group/lifecycle mechanisms from gquorum's stronger receipt requirements and measured full-state cost. Rechecked removed-peer and tablet-destruction source at pinned TiKV `137cbb2593decafebf99905b4d570869230565c2`; no upstream test/production-equivalence claim. Verified changed signatures/defaults and local links against current source; `git diff --check` passed. `make test` passed 1,874/1,874, report `test-reports/unit/20261017T011918.618279Z-r35k3ye1/report.md`. Final Docker and post-review validation remain Tasks87–88.
 
 ## Contract excerpts
 
