@@ -1226,13 +1226,13 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 **Files:** `tests/cluster` cleanup/recovery/deletion cases. **Target:** [T] §6.2, §8.5, §10. **Depends on:** 81. **Budget:** ≤550.
 
-- [ ] Add `TestFailureIsolation_RemovedHostCleanup`: remove an unreachable old load replica through surviving quorum, converge permitted replacement topology, retain exact unconfirmed debt, then return the old host and prove fencing before service and successor survival.
-- [ ] Add `TestFailureIsolation_DeletionStopProof`: unreachable former owner keeps the deleted group pending without stop/readmission proof while another group continues; no false FullyConverged or collected milestone.
-- [ ] Use distinct retained roots and exact IDs, not sleeps or “host absent means erased.” Use three nodes and reseating/placement available in existing fixtures; require a named justification before adding a fourth.
+- [x] Add `TestFailureIsolation_RemovedHostCleanup`: remove an unreachable old load replica through surviving quorum, converge permitted replacement topology, retain exact unconfirmed debt, then return the old host and prove fencing before service and successor survival.
+- [x] Add `TestFailureIsolation_DeletionStopProof`: unreachable former owner keeps the deleted group pending without stop/readmission proof while another group continues; no false FullyConverged or collected milestone.
+- [x] Use distinct retained roots and exact IDs, not sleeps or “host absent means erased.” Use three nodes and reseating/placement available in existing fixtures; require a named justification before adding a fourth.
 
 **Verification**
 
-- [ ] Compile clustertest cases and run `make test`; execute together in Task 87.
+- [x] Compile clustertest cases and run `make test`; execute together in Task 87.
 
 ### Task 83: Add process receipt-outage and uncertain-response scenarios
 
@@ -1475,6 +1475,8 @@ During execution use `- [ ] target section — missing behavior — affected pat
 - 2026-10-17 — Task80 complete. Extended the real Node control-only retained-restart matrix to prepared, physically deleted without receipt, collected, and marker-forgotten without journal removal. Each case preserves the original sequence, retains an unsent collected receipt across Stop, resends it unchanged, and releases marker/journal only after settlement. Existing walstore deletion-boundary/root/marker/error tests, authoritystore reopen/rebind/corruption tests, managed report/Forget/crash/successor tests and scoped collection proof/retention/courier units supply the remaining matrix; no duplicate storage framework was added. Checks: focused root functional passed (`/tmp/task80-node-crash.log`); collection/cleanup functional race across walstore, authoritystore, managed, metaservice and root passed (`/tmp/task80-crash-matrix-race.log`); `make test` passed 1,873/1,873, report `test-reports/unit/20261017T004836.727303Z-uptkdd1l/report.md`; `git diff --check` passed. Docker execution remains Task87.
 
 - 2026-10-17 — Task81 complete (process execution reserved for Task87). Added three-node `TestFailureIsolation_BlockedGroup` (authenticated founding barrier, independent founding and exact same-host reseat, original operation/source, historical marker, serving and resume) and `TestFailureIsolation_StagedRebase` (disjoint staged labels, repair R/rebased S ancestry and author, leader loss/retained restart, old approval conflict with RebasedTo and no implicit S approval). Found and removed the fixture serving gate on FullyConverged: serving now reads exact group/node convergence at one bounded metadata page and still checks the local handle/native role; added stale-member/approval-only regression. The fixture conflict adapter now preserves RebasedTo. Checks: clustertest compile-only passed (`/tmp/task81-cluster-compile.log`); complete caller-fixture functional suite passed (`/tmp/task81-fixture-functional.log`); real managed query/serving functional-race passed (`/tmp/task81-serving-race.log`); `make test` passed 1,874/1,874, report `test-reports/unit/20261017T005423.347877Z-cjjgoy4z/report.md`; `git diff --check` passed. No Docker scenario run claimed.
+
+- 2026-10-17 — Task82 complete (Docker execution remains Task87). Added three-node `TestFailureIsolation_RemovedHostCleanup`: surviving native quorum converges removal while the offline exact identity retains Removed but no stop/retire/collect proof, its original volume survives, return completes durable cleanup, then a fresh-ID successor recovers values and refuses replay of the captured stale cleanup action without storage/membership changes. Extended the existing deletion test as `TestFailureIsolation_DeletionStopProof`: independently found/serve a two-voter group while the third host's required deletion stop is missing; check old source/owner, Deleting, historical marker and exact unconfirmed debt, then return the retained host and observe detached physical collection separately. No fourth node or new control framework. Checks: clustertest compile-only passed (`/tmp/task82-cluster-compile.log`); `make test` passed 1,874/1,874, report `test-reports/unit/20261017T005639.627493Z-p5f7ob7j/report.md`; `git diff --check` passed.
 
 ## Contract excerpts
 
