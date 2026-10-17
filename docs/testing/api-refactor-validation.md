@@ -18,7 +18,11 @@ Changed older formats refuse unchanged; there is no migration or mixed-version
 support. Frozen fixtures and immutable hashes are indexed in
 [physical provenance](api-baseline-physical.md).
 
-Post-audit evidence on `e4c5392` plus Task88 corrections (all required test gates pass; peer review remains pending).
+Post-audit evidence for implementation commit `10b680b` (`e4c5392` plus Task88
+corrections): all required test gates pass. The user waived the remaining Claude
+review on 2026-10-17 with “Continue w/o claude”. Completion rechecked the source
+fingerprint, fixture hashes and report results; the closure changes documentation
+only and does not claim a fresh test run or final peer consensus.
 The tested source/build set contains 1,096 files; its SHA-256 is
 `e7b9b2a60cd4c4d42df52020ef843c2bee325e797c011a9646897436902ed7d3`.
 The fingerprint hashes sorted tracked Go/proto/go.mod/go.sum/Makefile/Dockerfile
@@ -42,7 +46,7 @@ followed that correction and passed.
 | Compose scheduler | PASS, 131.121s; `example/20261017T031845.408057Z-1ejzrshw/report.md`. |
 | Compose cache | PASS, 40.816s; `example/20261017T032056.589394Z-ok6sjmbf/report.md`. |
 | Resource/format checks | No run-owned containers/networks/volumes or demo containers remain. Unrelated pre-existing volumes are preserved. Image digest is unchanged; local documentation links and git diff --check pass. |
-| Peer review | Thread42 is written but undelivered while Claude's terminal displays a usage-limit question. Later fixes have no claimed peer consensus. |
+| Peer review | Final thread42 review waived by the user on 2026-10-17 (“Continue w/o claude”). Local architecture/dead-code review is complete; later fixes have no claimed peer consensus. |
 
 Final application image: `gquorum-test:fi-e4c5392-task88a`, OCI index
 `sha256:035a0fc5e46a51cc200f28154480d4a222bed6bc13c81ebd6418119c2b660947`,

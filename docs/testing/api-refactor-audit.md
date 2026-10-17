@@ -82,7 +82,11 @@ The §8.5 failure table and §10 acceptance cases map to these assertion owners:
 Peer review: threads39–41 settled the malformed-plan refusal, deletion coverage,
 bootstrap routing and same-host retirement ordering. Thread42 records the next
 five-commit review request; Claude's usage-limit prompt prevented delivery. Later
-audit changes have local review/tests, not claimed peer consensus.
+audit changes have local review/tests, not claimed peer consensus. On 2026-10-17
+the user instructed “Continue w/o claude”, waiving the remaining peer review.
+The final completion audit confirmed the validated source fingerprint, fixture
+hashes and passing reports against implementation commit `10b680b`; all plan
+tasks are complete. The closure changes documentation only.
 
 ## Historical API refactor audit
 
