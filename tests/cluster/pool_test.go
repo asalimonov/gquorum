@@ -44,7 +44,7 @@ func TestPoolReusesIsolatedNetworkAndReplacesAllPersistentState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.OperatorID == "" {
+	if result.OperationID == "" {
 		t.Fatal("missing durable execution")
 	}
 	if err := c.Put(ctx, "node3", "retire-me", "key", "first-command", "value"); err != nil {

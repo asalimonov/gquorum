@@ -41,9 +41,12 @@ group provides ordering and local durability but no redundant copy.
 
 For `_meta`, the central invariant is that effects follow the same approved
 topology and exact replica identities. `Latest` is staged intent, `Target` is
-approved intent, and `Active` is fully converged topology. A committed edit to
-Latest alone does not authorize startup or retirement. An approved operator
-drives the effects before Active advances.
+approved intent. Durable group/node checkpoints record independent convergence;
+`FullyConverged` is only the historical last complete topology marker. A committed
+edit to Latest alone does not authorize startup or retirement. Immutable operation
+blocks authorize exact effects and converge independently, subject to explicit
+admission/evacuation dependencies. Deferred physical cleanup does not hold that
+marker. Neither checkpoint nor marker proves current native quorum.
 
 For application groups, `load.Group.Propose` may be called on a ready local
 leader, follower or learner. A follower or learner forwards the command through
@@ -84,7 +87,7 @@ flowchart TD
     Cluster --> Meta[Meta state machine and Raft group]
     Meta --> MetaStore[Per-node bbolt metadata store]
     Node --> AuthorityStore[Independent durable host authority store]
-    Meta --> Operator[Approved operator execution]
+    Meta --> Operator[Approved group operations]
     Operator --> Managed[Managed local replicas]
     Node --> Managed
     AuthorityStore --> Managed
@@ -290,7 +293,7 @@ the exact authorization and identity before releasing or collecting storage.
 | --- | --- |
 | Raft loop, writer and destination send workers | Tick, process messages/proposals, persist Ready batches and replicate without sharing RawNode across goroutines. |
 | Meta service and session manager | Admission, bootstrap, session renewal/expiry and observing approved self-removal. |
-| Operator controller | Execute approved steps and record progress before topology activation. |
+| Operation controller | Execute independently owned group blocks; record exact receipts and convergence; dispatch detached cleanup with a separate budget. |
 | Managed replica maintenance | Recover assigned replicas, honor local holds and retire exact authorized identities. |
 | Health observer and scheduler | Observe degradation and propose supported repairs, with authorization and safety rechecked by the core. |
 
@@ -334,7 +337,7 @@ or latency target is guaranteed by the default settings.
 | A majority of an in-memory group's replicas restarts | Their state is gone; the group cannot commit or reseat. Delete it and create a group under a new ID. |
 
 Status is an observation. `MetaLeaderID` and `LeaderID` are numeric Raft IDs;
-their readable node names are resolved through the captured Active view in
+their readable node names are resolved through exact approved/proven identities in
 cluster status, local meta status and scheduler inputs. Raw load status does not
 resolve names. A known leader ID is not proof that the caller can currently
 reach a committing quorum. Events are local and are not replicated through

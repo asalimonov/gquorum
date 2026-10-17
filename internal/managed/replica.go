@@ -3,6 +3,7 @@ package managed
 import (
 	"context"
 	"errors"
+	"reflect"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -249,13 +250,21 @@ func (h *Host) openReplica(slot *replica) error {
 	if err != nil {
 		return err
 	}
-	if current.Version != scope.Version {
+	// Version is document context for the factory. Independent approvals may
+	// advance it while this exact assignment and startup seed remain unchanged.
+	if current.Replica != scope.Replica || !probe.HasLog && current.Founding != scope.Founding ||
+		!reflect.DeepEqual(current.Group, scope.Group) {
 		return fault.ErrVersionConflict
+	}
+	// Metadata may learn a retained creation receipt while the factory waits.
+	// An unchanged declaration cannot hide newly proven missing durable state.
+	if _, err := h.authorizeBoot(slot, bootEvidence{probe: probe, scope: current}); err != nil {
+		return err
 	}
 	if err := h.checkGuardedStartup(slot); err != nil {
 		return err
 	}
-	seed := replicaMembership(scope, probe)
+	seed := replicaMembership(current, probe, slot.startGrant)
 	core, err := raftengine.NewContext(ctx, h.engineOptions(slot, app, seed.mode, seed.peers))
 	if err != nil {
 		return h.park(slot, parkReason(err), err)
@@ -308,7 +317,8 @@ func (h *Host) engineOptions(slot *replica, app load.Application, mode raftengin
 type machineAdapter struct{ load.StateMachine }
 
 func (m machineAdapter) Apply(ctx context.Context, command raftengine.Command) (raftengine.Result, error) {
-	result, err := m.StateMachine.Apply(ctx, load.Command(command))
+	result, err := m.StateMachine.Apply(ctx, load.Command{Index: command.Index, Term: command.Term,
+		RequestID: command.RequestID, Data: command.Data})
 	return raftengine.Result(result), err
 }
 
@@ -536,15 +546,14 @@ type replicaRaftSeed struct {
 	peers []raft.Peer
 }
 
-func replicaMembership(scope metaengine.LoadScope, probe storage.Probe) replicaRaftSeed {
+func replicaMembership(scope metaengine.LoadScope, probe storage.Probe,
+	grant *topology.AuthorityGrant) replicaRaftSeed {
 	mode := raftengine.Joining
 	var peers []raft.Peer
 	if !probe.HasLog && scope.Founding {
 		mode = raftengine.Founding
-		for _, r := range scope.Group.Replicas {
-			if r.Role == topology.ReplicaVoter {
-				peers = append(peers, raft.Peer{ID: r.ReplicaID})
-			}
+		for _, target := range grant.Targets {
+			peers = append(peers, raft.Peer{ID: target.ReplicaID})
 		}
 	}
 	return replicaRaftSeed{mode: mode, peers: peers}

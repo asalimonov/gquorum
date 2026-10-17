@@ -27,7 +27,21 @@ type sourceFixture struct {
 	once    sync.Once
 }
 
-func (s *sourceFixture) Active(ctx context.Context) (topology.Document, error) {
+type recaptureSource struct {
+	*sourceFixture
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *recaptureSource) Health(context.Context, topology.Document) (map[string]topology.Health, error) {
+	close(s.entered)
+	<-s.release
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return maps.Clone(s.health), nil
+}
+
+func (s *sourceFixture) Target(ctx context.Context) (topology.Document, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.doc.Clone(), ctx.Err()
@@ -134,6 +148,32 @@ func TestWatchPublishesMetaAndDataUniformly(t *testing.T) {
 		if g.Voters != 3 || g.Quorum != 2 || g.ObservedHealth.State != topology.GroupHealthy {
 			t.Fatal(g)
 		}
+	}
+}
+
+func TestWatchRejectsHealthAfterApprovedMemberRebind(t *testing.T) {
+	t.Parallel()
+	base := newSource()
+	source := &recaptureSource{sourceFixture: base, entered: make(chan struct{}), release: make(chan struct{})}
+	settings := Settings{Interval: 2 * time.Second, Timeout: time.Second}
+	w := newWatch(t, base, Config{Settings: settings})
+	refresh(t, w)
+	before := w.Snapshot()
+	w.cfg.Source = source
+	result := make(chan error, 1)
+	go func() { result <- w.Refresh(context.Background()) }()
+	<-source.entered
+	base.mu.Lock()
+	base.doc.Version = 2
+	base.doc.MetaGroup().Replicas[0].ReplicaID = 4
+	base.doc.MetaGroup().NextReplicaID = 5
+	base.mu.Unlock()
+	close(source.release)
+	if err := <-result; !errors.Is(err, fault.ErrVersionConflict) {
+		t.Fatal("health sample crossed an approved member rebind", err)
+	}
+	if after := w.Snapshot(); after.Version != before.Version || !after.At.Equal(before.At) {
+		t.Fatal("rejected sample replaced the prior snapshot", after)
 	}
 }
 func TestWatchBelowMinReplicasSeparate(t *testing.T) {

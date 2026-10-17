@@ -67,7 +67,8 @@ func (g *Group) expireSessions(ctx context.Context, now time.Time) error {
 func (g *Group) probeSession(parent context.Context, session metaengine.SessionRecord) bool {
 	identity := g.currentIdentity()
 	if session.NodeName == identity.NodeName {
-		return session.InstanceID == identity.InstanceID && g.ctx.Err() == nil
+		return session.InstanceID == identity.InstanceID && identity.MemberID == g.eligibleMemberID(session.NodeName) &&
+			g.ctx.Err() == nil
 	}
 	ctx, cancel := context.WithTimeout(parent, g.opts.Timing.DialTimeout)
 	defer cancel()
@@ -84,5 +85,5 @@ func (g *Group) probeSession(parent context.Context, session metaengine.SessionR
 		return false
 	}
 	return observed.ClusterID == identity.ClusterID && observed.NodeName == session.NodeName &&
-		observed.InstanceID == session.InstanceID && observed.MemberID == g.activeMemberID(session.NodeName)
+		observed.InstanceID == session.InstanceID && observed.MemberID == g.eligibleMemberID(session.NodeName)
 }

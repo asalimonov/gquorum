@@ -9,26 +9,26 @@ type Code string
 // Failure codes classify validation, authorization, availability and lifecycle
 // errors.
 const (
-	Invalid               Code = "invalid"
-	VersionConflict       Code = "version_conflict"
-	HistoryUnavailable    Code = "history_unavailable"
-	NotLeader             Code = "not_leader"
-	ReplicaNotReady       Code = "replica_not_ready"
-	Unavailable           Code = "unavailable"
-	NoController          Code = "no_controller"
-	UnsafeMembership      Code = "unsafe_membership"
-	OperatorAuthorization Code = "execution_authorization"
-	AuthorityFenced       Code = "authority_fenced"
-	AuthorityPending      Code = "authority_pending"
-	ReplanRequired        Code = "replan_required"
-	IdentityMismatch      Code = "identity_mismatch"
-	Unreadable            Code = "unreadable"
-	GroupRetired          Code = "group_retired"
-	Overloaded            Code = "overloaded"
-	Stopped               Code = "stopped"
-	ShutdownTimeout       Code = "shutdown_timeout"
-	Unsupported           Code = "unsupported"
-	ReadmissionRequired   Code = "readmission_required"
+	Invalid                Code = "invalid"
+	VersionConflict        Code = "version_conflict"
+	HistoryUnavailable     Code = "history_unavailable"
+	NotLeader              Code = "not_leader"
+	ReplicaNotReady        Code = "replica_not_ready"
+	Unavailable            Code = "unavailable"
+	NoController           Code = "no_controller"
+	UnsafeMembership       Code = "unsafe_membership"
+	OperationAuthorization Code = "execution_authorization"
+	AuthorityFenced        Code = "authority_fenced"
+	AuthorityPending       Code = "authority_pending"
+	ReplanRequired         Code = "replan_required"
+	IdentityMismatch       Code = "identity_mismatch"
+	Unreadable             Code = "unreadable"
+	GroupRetired           Code = "group_retired"
+	Overloaded             Code = "overloaded"
+	Stopped                Code = "stopped"
+	ShutdownTimeout        Code = "shutdown_timeout"
+	Unsupported            Code = "unsupported"
+	ReadmissionRequired    Code = "readmission_required"
 	// Conflict is a local classification for a desired state that differs from
 	// existing or pending topology. It is never sent on the wire.
 	Conflict Code = "conflict"
@@ -42,6 +42,7 @@ type Error struct {
 	Cause           error
 	ExpectedVersion uint64
 	CurrentVersion  uint64
+	RebasedTo       uint64
 }
 
 func (e *Error) Error() string {
@@ -65,25 +66,25 @@ func New(code Code, message string, cause error) *Error {
 
 // Sentinel errors support code-based matching with errors.Is.
 var (
-	ErrInvalid               = New(Invalid, "", nil)
-	ErrVersionConflict       = New(VersionConflict, "", nil)
-	ErrHistoryUnavailable    = New(HistoryUnavailable, "", nil)
-	ErrNotLeader             = New(NotLeader, "", nil)
-	ErrReplicaNotReady       = New(ReplicaNotReady, "", nil)
-	ErrUnavailable           = New(Unavailable, "", nil)
-	ErrNoController          = New(NoController, "", nil)
-	ErrUnsafeMembership      = New(UnsafeMembership, "", nil)
-	ErrOperatorAuthorization = New(OperatorAuthorization, "", nil)
-	ErrAuthorityFenced       = New(AuthorityFenced, "", nil)
-	ErrAuthorityPending      = New(AuthorityPending, "", nil)
-	ErrReplanRequired        = New(ReplanRequired, "", nil)
-	ErrIdentityMismatch      = New(IdentityMismatch, "", nil)
-	ErrUnreadable            = New(Unreadable, "", nil)
-	ErrGroupRetired          = New(GroupRetired, "", nil)
-	ErrOverloaded            = New(Overloaded, "", nil)
-	ErrStopped               = New(Stopped, "", nil)
-	ErrShutdownTimeout       = New(ShutdownTimeout, "", nil)
-	ErrUnsupported           = New(Unsupported, "", nil)
-	ErrReadmissionRequired   = New(ReadmissionRequired, "", nil)
-	ErrConflict              = New(Conflict, "", nil)
+	ErrInvalid                = New(Invalid, "", nil)
+	ErrVersionConflict        = New(VersionConflict, "", nil)
+	ErrHistoryUnavailable     = New(HistoryUnavailable, "", nil)
+	ErrNotLeader              = New(NotLeader, "", nil)
+	ErrReplicaNotReady        = New(ReplicaNotReady, "", nil)
+	ErrUnavailable            = New(Unavailable, "", nil)
+	ErrNoController           = New(NoController, "", nil)
+	ErrUnsafeMembership       = New(UnsafeMembership, "", nil)
+	ErrOperationAuthorization = New(OperationAuthorization, "", nil)
+	ErrAuthorityFenced        = New(AuthorityFenced, "", nil)
+	ErrAuthorityPending       = New(AuthorityPending, "", nil)
+	ErrReplanRequired         = New(ReplanRequired, "", nil)
+	ErrIdentityMismatch       = New(IdentityMismatch, "", nil)
+	ErrUnreadable             = New(Unreadable, "", nil)
+	ErrGroupRetired           = New(GroupRetired, "", nil)
+	ErrOverloaded             = New(Overloaded, "", nil)
+	ErrStopped                = New(Stopped, "", nil)
+	ErrShutdownTimeout        = New(ShutdownTimeout, "", nil)
+	ErrUnsupported            = New(Unsupported, "", nil)
+	ErrReadmissionRequired    = New(ReadmissionRequired, "", nil)
+	ErrConflict               = New(Conflict, "", nil)
 )

@@ -12,13 +12,13 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func TestControllerRejectsUnreachableEmptyPlanAndRetryKeepsIt(t *testing.T) {
+func TestControllerFailureApprovalReplayKeepsOriginalAttempt(t *testing.T) {
 	t.Parallel()
 	g := readyPublic(t, singleMetaFixtureWith(t, func(o *Options) { o.Limits.MaxNodes = 3 }))
 	g.controller.Stop()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	doc := g.state().Active()
+	doc := fixtureConvergedDocument(t, g.state())
 	doc.Nodes = append(doc.Nodes, topology.Node{Name: "n2", Type: "worker", State: topology.NodeActive})
 	doc.MetaGroup().Replicas = append(doc.MetaGroup().Replicas, topology.Replica{NodeName: "n2", ReplicaID: 2, Role: topology.ReplicaLearner})
 	doc.MetaGroup().NextReplicaID = 3
@@ -28,29 +28,32 @@ func TestControllerRejectsUnreachableEmptyPlanAndRetryKeepsIt(t *testing.T) {
 	}
 	// Model an approved plan whose assumptions no longer cover native state.
 	// The real single-participant meta engine still has only voter 1.
-	result, err := g.propose(ctx, metaengine.BeginOperatorProposal{Version: staged.Version, Plan: topology.Plan{Version: staged.Version}, At: time.Now().UTC()})
+	result, err := g.propose(ctx, metaengine.BeginOperationProposal{Version: staged.Version,
+		Plan:   topology.Plan{Version: staged.Version, Blocks: []topology.PlanBlock{{GroupID: topology.MetaGroupID, SourceVersion: 1}}},
+		Scopes: []metaengine.ScopeExpectation{{GroupID: topology.MetaGroupID, SourceVersion: 1}}, At: time.Now().UTC(), ProposalID: newProposalID()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	g.controller.Tick(ctx)
-	failed, err := g.Operator(ctx, result.OperatorID)
-	if err != nil || failed.State != topology.OperatorFailed || !strings.Contains(failed.Error, "replan_required") || g.state().Active().Version != 1 {
+	g.controller.Start(g.workCtx)
+	failed, err := g.WaitOperation(ctx, result.OperationID)
+	g.controller.Stop()
+	if err != nil || failed.State != topology.OperationFailed || len(failed.Blocks) != 1 || !strings.Contains(failed.Blocks[0].Error, "replan_required") || g.state().Views().FullyConverged.Version != 1 {
 		t.Fatal(failed, err)
 	}
-	retry, err := g.Apply(ctx, staged.Version)
+	retry, err := g.Approve(ctx, staged.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ex, ok := g.state().CurrentOperator()
-	if !ok || ex.Status.ID != retry || ex.Status.Attempt != 2 || len(ex.Plan.Steps) != 0 {
-		t.Fatal("same-version retry rebuilt actions", ex, err)
+	ex, readErr := g.state().Operation(retry)
+	if readErr != nil || retry != result.OperationID || ex.ID != retry || ex.Attempt != 1 || len(ex.Blocks) != 1 || ex.Blocks[0].TotalSteps != 0 {
+		t.Fatal("approval replay created a retry or rebuilt actions", ex, err)
 	}
-	g.controller.Tick(ctx)
-	failed, err = g.Operator(ctx, retry)
-	if err != nil || failed.State != topology.OperatorFailed || !strings.Contains(failed.Error, "replan_required") {
+	failed, err = g.Operation(ctx, retry)
+	if err != nil || failed.State != topology.OperationFailed || len(failed.Blocks) != 1 || !strings.Contains(failed.Blocks[0].Error, "replan_required") {
 		t.Fatal(failed, err)
 	}
-	// A new version may explicitly authorize the missing prepare/add sequence.
+	// A changed metadata scope may explicitly authorize the missing prepare/add sequence.
+	staged.Node("n1").Labels = map[string]string{"repair": "new-plan"}
 	staged, err = g.Stage(ctx, staged, staged.Version)
 	if err != nil {
 		t.Fatal(err)

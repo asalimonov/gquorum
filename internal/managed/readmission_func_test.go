@@ -33,7 +33,7 @@ func configureReadmission(t *testing.T, f *fixture, ids ...uint64) Readmission {
 	expected := grant.Clone()
 	f.cfg.AuthorizeReadmission = func(ctx context.Context, got Readmission) error {
 		if !reflect.DeepEqual(got, expected) {
-			return fault.ErrOperatorAuthorization
+			return fault.ErrOperationAuthorization
 		}
 		return ctx.Err()
 	}
@@ -76,7 +76,7 @@ func TestReadmissionJoinsMachineBeforeRetirementAndPreservesMetaBackup(t *testin
 			return load.RetirementResult{}, errors.New("machine was not joined and closed")
 		}
 		if req.Reason != load.RetirementReadmission || req.Authorization != nil || req.AdmissionID != grant.AdmissionID || req.PreviousMemberID != 1 || req.GrantedMemberID != 9 {
-			return load.RetirementResult{}, fault.ErrOperatorAuthorization
+			return load.RetirementResult{}, fault.ErrOperationAuthorization
 		}
 		retired.Store(true)
 		return retirementProof(req), nil
@@ -196,7 +196,7 @@ func TestReadmissionRefusesForeignEvidenceAndUnverifiedCallbacks(t *testing.T) {
 			authorize := f.cfg.AuthorizeReadmission
 			f.cfg.AuthorizeReadmission = func(ctx context.Context, grant Readmission) error {
 				if revoked.Load() {
-					return fault.ErrOperatorAuthorization
+					return fault.ErrOperationAuthorization
 				}
 				return authorize(ctx, grant)
 			}
@@ -216,7 +216,7 @@ func TestReadmissionRefusesForeignEvidenceAndUnverifiedCallbacks(t *testing.T) {
 				grant.AdmissionID = "forged"
 			}
 			err := h.Readmit(t.Context(), grant)
-			if !errors.Is(err, fault.ErrIdentityMismatch) && !errors.Is(err, fault.ErrOperatorAuthorization) {
+			if !errors.Is(err, fault.ErrIdentityMismatch) && !errors.Is(err, fault.ErrOperationAuthorization) {
 				t.Fatal("unsafe readmission was accepted", err)
 			}
 			probe, probeErr := f.store.Probe(t.Context(), "work")

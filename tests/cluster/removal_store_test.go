@@ -58,7 +58,10 @@ func assertDurableSelfRemoval(ctx context.Context, t *testing.T, c *Cluster, sta
 	if err != nil {
 		t.Fatal(err)
 	}
-	machine := metaengine.NewMachine(topology.Rules{SchemaVersion: 1, Limits: c.Spec.Limits.WithDefaults()}, nil)
+	machine, err := metaengine.NewMachine(topology.Rules{SchemaVersion: 1, Limits: c.Spec.Limits.WithDefaults()}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := machine.Restore(ctx, data); err != nil {
 		t.Fatal(err)
 	}

@@ -58,7 +58,7 @@ func TestTypedGroupPlacementPreviewMatchesPurePreparation(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
 	views := f.g.state().Views()
-	latest, target, active := views.Latest, views.Target, views.Active
+	latest, target := views.Latest, views.Target
 	rule := topology.PlacementRule{MinReplicas: 1, MaxReplicas: 3, NodeSelector: map[string]string{"network": "public_ip"}}
 	edited := latest.Clone()
 	edited.Node("n2").Labels = map[string]string{"network": "public_ip"}
@@ -67,11 +67,11 @@ func TestTypedGroupPlacementPreviewMatchesPurePreparation(t *testing.T) {
 	// a complete document; the typed rule then uses those same approved labels.
 	f.commit(t, edited, true)
 	views = f.g.state().Views()
-	latest, target, active = views.Latest, views.Target, views.Active
+	latest, target = views.Latest, views.Target
 	edited = latest.Clone()
 	edited.Group("work").Placement = &rule
 	edited.ChangedBy = "n1"
-	preparation, err := topology.PreparePlacement(topology.ReadView{Latest: latest, Target: target, Active: active}, edited, f.g.rules, time.Now().UTC())
+	preparation, err := topology.PreparePlacement(topology.ReadView{Latest: latest, Target: target}, edited, f.g.rules, time.Now().UTC())
 	pure := preparation.Document
 	if err != nil {
 		t.Fatal(err)
@@ -101,11 +101,11 @@ func TestReservedIdentityCannotBeReseatedOrReadmittedInPlace(t *testing.T) {
 	doc.Node("n3").Labels = map[string]string{topology.LabelReserved: "true"}
 	f.commit(t, doc, true)
 	before := f.g.state().Latest()
-	if _, err := f.g.ReseatReplica(t.Context(), "work", "n3", preview()); !errors.Is(err, fault.ErrInvalid) {
+	if _, err := f.g.ReseatReplica(t.Context(), "work", topology.ReplicaKey{NodeName: "n3", ReplicaID: 3}, preview()); !errors.Is(err, fault.ErrInvalid) {
 		t.Fatal("reseat minted a new load identity on reserved node", err)
 	}
 	f.g.opts.Health = mutationHealth{"n3": topology.HealthDead}
-	if _, err := f.g.ReadmitNode(t.Context(), "n3", preview()); !errors.Is(err, fault.ErrInvalid) {
+	if _, err := f.g.ReadmitNode(t.Context(), "n3", 3, preview()); !errors.Is(err, fault.ErrInvalid) {
 		t.Fatal("readmission minted a new load identity on reserved node", err)
 	}
 	after := f.g.state().Latest()

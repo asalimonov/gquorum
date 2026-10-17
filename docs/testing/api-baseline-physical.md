@@ -31,5 +31,28 @@ implementation deliberately introduced schema-2 complete snapshot/log envelopes
 and metadata snapshots; backward compatibility was not required. Those cases now
 prove rejection of the immutable legacy stores without rewriting their records.
 The event-journal compatibility case remains supported. See the
-[authority/read plan](../plans/20261012-authority-contract-consistent-reads.md)
+[current validation record](api-refactor-validation.md#scoped-operations-update--2026-10-17)
 for current validation; earlier API-refactor reports retain their historical results.
+
+## Current scoped formats and immutable provenance
+
+Task78 captured new fixtures on 2026-10-17 from base `bae0fb2` plus the scoped
+cutover; commit `1df3623` introduced them. These do not replace the legacy
+rejection fixtures above. Their adjacent README files and inert `.go.txt` capture
+sources describe exact content and one-time generation. Tests copy stores before
+opening them and never update expected artifacts.
+
+| Artifact (repository-relative) | SHA-256 / coverage |
+| --- | --- |
+| `internal/metaengine/testdata/scoped-v4/snapshot.json` | `be91b10e7a18c306bba1ac5230777df36b8b0f325e7d8ced91bd558de07f43ac`; canonical v4 state at index30/term4, Latest6/Target5/FullyConverged1, independent progress and retained proof. |
+| `internal/metaengine/testdata/scoped-v4/collection-command.json` | `100c0f7f62c166d9d5a13a954165c7e0d45114604b78d1ed6f8e490a492c917a`; exact v4 collection proposal. |
+| `internal/metaengine/testdata/scoped-v4/collection-result.json` | `f4b5cc5b846699a2e2d52dd64bac3b88435f9f848af896154385ad39ca48ce6f`; original receipt echo and acceptance at index31. |
+| `internal/metaengine/testdata/scoped-v4/meta.bolt` | `dc26a383bf55f803879b43e54616e069b62f0c950e4ed311c2df0082d855281b`; pin, native membership, override, load ledger, snapshot and committed tail replay. |
+| `internal/authoritystore/testdata/scoped-v2/authority.bolt` | `0a638c5e52984a8e8eab09faa6df8be91c54a4564bf1d3785ed5705361b88ce0`; prepared and collected rows, first timestamp/sequence, retained retirement effects/floors and new process restart. |
+
+[Metadata capture](../../internal/metaengine/testdata/scoped-v4/README.md) and
+[journal capture](../../internal/authoritystore/testdata/scoped-v2/README.md)
+retain full provenance. v3 metadata and v1 authority journals refuse without
+migration. Native load envelope v2, old immutable fixture files and event journal
+encodings remain unchanged. OperationID replaces public OperatorID; retained event
+spelling and the admission `execution_id` field are intentional stable encodings.

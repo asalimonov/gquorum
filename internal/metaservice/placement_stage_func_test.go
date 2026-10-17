@@ -32,9 +32,9 @@ func TestStageUsesApprovedPlacementAndPreservesCAS(t *testing.T) {
 		}
 	}
 	views := g.state().Views()
-	latest, target, active := views.Latest, views.Target, views.Active
-	if latest.Version != before.Version || target.Version != before.Version || active.Version != before.Version {
-		t.Fatal("rejected stage published a topology view", latest.Version, target.Version, active.Version)
+	latest, target := views.Latest, views.Target
+	if latest.Version != before.Version || target.Version != before.Version || views.FullyConverged.Version != before.Version {
+		t.Fatal("rejected stage published a topology view", latest.Version, target.Version, views.FullyConverged.Version)
 	}
 
 	valid := before.Clone()

@@ -34,8 +34,17 @@ func setMetaLearner(doc *topology.Document, name string) {
 }
 
 func (g *Group) prepareNormalRetirement(doc *topology.Document, node *topology.Node, name string) error {
-	active := g.state().Active()
-	old := active.Node(name)
+	page, err := g.state().Progress(topology.ProgressQuery{NodeName: name})
+	if err != nil {
+		return err
+	}
+	var old *topology.Node
+	for _, row := range page.Nodes {
+		if row.NodeName == name {
+			old = row.Converged
+			break
+		}
+	}
 	if old != nil && old.State != topology.NodeDraining && old.State != topology.NodeDrained {
 		return fault.New(fault.Invalid, "node must have a converged drain before retirement", nil)
 	}
@@ -111,12 +120,14 @@ func (g *Group) reseatDocument(doc *topology.Document, views topology.ReadView,
 		if r.NodeName != name {
 			continue
 		}
+		if r.ReplicaID != options.ReplicaID {
+			return fault.New(fault.VersionConflict, "reseat predecessor no longer matches", nil)
+		}
 		request := options
-		request.ReplicaID = r.ReplicaID
 		if request.Actor == "" {
 			request.Actor = g.currentIdentity().NodeName
 		}
-		repair, err := metaengine.ReplicaRepairDocument(views.Active, views.Latest, request)
+		repair, err := metaengine.ReplicaRepairDocument(views.Target, views.Latest, request)
 		if err != nil {
 			return err
 		}

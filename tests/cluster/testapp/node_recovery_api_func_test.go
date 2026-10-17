@@ -48,11 +48,11 @@ func borrowedAPICluster(t *testing.T, configure func(*quorum.NodeOptions)) (*api
 	return c, store, root
 }
 
-func waitAPIOperator(ctx context.Context, t *testing.T, n quorum.Node, id topology.OperatorID) {
+func waitAPIOperation(ctx context.Context, t *testing.T, n quorum.Node, id topology.OperationID) {
 	t.Helper()
-	status, err := n.Cluster().WaitOperator(ctx, id)
-	if err != nil || status.State != topology.OperatorSucceeded {
-		t.Fatal("operator", status, err)
+	status, err := n.Cluster().WaitOperation(ctx, id)
+	if err != nil || status.State != topology.OperationSucceeded {
+		t.Fatal("operation", status, err)
 	}
 }
 
@@ -94,7 +94,7 @@ func TestPublicNodeIdentityMismatchParkSurvivesMetaRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitAPIOperator(ctx, t, n, result.OperatorID)
+	waitAPIOperation(ctx, t, n, result.OperationID)
 	g, ok := n.LoadGroup("work")
 	if !ok {
 		t.Fatal("approved replica missing")
@@ -163,7 +163,7 @@ func TestPublicNodeApprovedLoadParksLostWALRecoversAndRetires(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitAPIOperator(ctx, t, n, id)
+	waitAPIOperation(ctx, t, n, id)
 	g, found := n.LoadGroup("work")
 	if !found || !g.Running() {
 		t.Fatal("approved replica did not start")
@@ -200,13 +200,14 @@ func TestPublicNodeApprovedLoadParksLostWALRecoversAndRetires(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitAPIOperator(ctx, t, n, deleted.OperatorID)
+	waitAPIOperation(ctx, t, n, deleted.OperationID)
 	if _, exists := n.LoadGroup("work"); exists {
 		t.Fatal("deleted handle stayed registered")
 	}
-	if probe, err := store.Probe(ctx, "work"); err != nil || probe.Exists {
-		t.Fatal("deleted store retained at live path", probe, err)
-	}
+	apiEventually(t, func() bool {
+		probe, err := store.Probe(ctx, "work")
+		return err == nil && !probe.Exists
+	})
 	if _, err := n.StartLoadGroup(ctx, ref); !errors.Is(err, fault.ErrGroupRetired) {
 		t.Fatal("retired ID reopened", err)
 	}

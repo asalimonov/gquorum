@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"reflect"
 	"slices"
 	"time"
 
@@ -27,14 +28,17 @@ type replicaEvidence struct {
 	at                                 time.Time
 }
 type groupEvidence struct {
-	confirmed   time.Time
-	sourceAge   time.Duration
-	voterConfig topology.VoterConfig
-	replicas    map[topology.ReplicaKey]*replicaEvidence
-	recordIndex uint64
-	recordAt    time.Time
-	demotions   map[topology.ReplicaKey]roleTimer
-	observation metrics.GroupObservation
+	declaration   *topology.Group
+	sourceVersion uint64
+	current       bool
+	confirmed     time.Time
+	sourceAge     time.Duration
+	voterConfig   topology.VoterConfig
+	replicas      map[topology.ReplicaKey]*replicaEvidence
+	recordIndex   uint64
+	recordAt      time.Time
+	demotions     map[topology.ReplicaKey]roleTimer
+	observation   metrics.GroupObservation
 }
 type roleTimer struct {
 	index uint64
@@ -73,15 +77,19 @@ func freshRaft(s metrics.ReplicaSample, bound time.Duration) bool {
 func generation(source string, s metrics.ReplicaSample, stamp metrics.Stamp) Generation {
 	return Generation{Source: source, RunID: s.Identity.RunID, Sequence: stamp.Sequence, Age: stamp.Age}
 }
-func (t *evidenceTracker) leader(g GroupSamples) (metrics.ReplicaSample, bool) {
+func (t *evidenceTracker) leader(g GroupSamples, group topology.Group, clusterID string) (metrics.ReplicaSample, bool) {
 	var leader metrics.ReplicaSample
 	ambiguous := false
 	for _, p := range g.Probes {
 		s := p.Observation.Sample
 		if !p.Dispatched || p.Reachability != reachabilityAlive || p.Observation.State != metrics.Current ||
 			s.LeaderID != s.Identity.ReplicaID || s.Term == 0 || s.MembershipDigest == "" ||
+			p.Identity.ClusterID != clusterID || p.Identity.GroupID != group.ID ||
 			!exactSample(p.Identity, s.Identity) || !freshRaft(s, t.settings.MaxSampleAge) ||
-			!slices.Contains(s.Voters, s.LeaderID) {
+			!slices.Contains(s.Voters, s.LeaderID) ||
+			!slices.ContainsFunc(group.Replicas, func(r topology.Replica) bool {
+				return r.NodeName == p.Identity.NodeName && r.ReplicaID == p.Identity.ReplicaID
+			}) {
 			continue
 		}
 		if leader.Term < s.Term {
@@ -133,11 +141,12 @@ func (g *groupEvidence) observeRecords(now time.Time, state topology.VoterSwitch
 }
 
 type evidenceInput struct {
-	local    []metrics.ReplicaObservation
-	switches []topology.VoterSwitchState
+	clusterID string
+	local     []metrics.ReplicaObservation
+	switches  []topology.VoterSwitchState
 }
 
-func (t *evidenceTracker) apply(now time.Time, doc topology.Document, round Round, input evidenceInput) {
+func (t *evidenceTracker) apply(now time.Time, doc topology.ProgressPage, round Round, input evidenceInput) {
 	local, switches := input.local, input.switches
 	if t.sequence == math.MaxUint64 {
 		// Probe generations cannot be reused within this collector lifetime.
@@ -146,15 +155,7 @@ func (t *evidenceTracker) apply(now time.Time, doc topology.Document, round Roun
 		return
 	}
 	t.sequence++
-	var observer metrics.ReplicaSample
-	for _, v := range local {
-		if v.Sample.Identity.GroupID == topology.MetaGroupID &&
-			v.Sample.Identity.InstanceID == round.Epoch.InstanceID &&
-			v.Sample.Identity.ReplicaID == round.Epoch.LeaderID {
-			observer = v.Sample
-			break
-		}
-	}
+	observer := collectorObserver(local, round.Epoch)
 	observerValid := observer.Term == round.Epoch.Term && observer.LeaderID == round.Epoch.LeaderID &&
 		freshRaft(observer, t.settings.MaxSampleAge) && currentStamp(observer.Writer, t.settings.MaxSampleAge)
 	records := map[string]topology.VoterSwitchState{}
@@ -162,12 +163,21 @@ func (t *evidenceTracker) apply(now time.Time, doc topology.Document, round Roun
 		records[record.GroupID] = record
 	}
 	retained := map[string]bool{}
-	for _, group := range doc.Groups {
-		if group.VoterConfig == nil {
+	for _, row := range doc.Groups {
+		group := row.Converged
+		if group == nil || row.ConvergedVersion == 0 || group.VoterConfig == nil {
 			continue
 		}
 		retained[group.ID] = true
-		t.applyGroup(now, group, evidenceRoundContext{clusterID: doc.ClusterID, observer: observer,
+		g := t.prepareGroup(row)
+		samples, sampled := round.Groups[group.ID]
+		if !sampled || samples.SourceVersion != row.ConvergedVersion {
+			g.current = false
+			// A filtered round earns no time. ConditionWindow.MaxGap bounds
+			// continuity when fresh evidence for this exact assignment returns.
+			continue
+		}
+		t.applyGroup(now, *group, evidenceRoundContext{clusterID: input.clusterID, observer: observer,
 			observerValid: observerValid, records: records, round: round})
 	}
 	for id := range t.groups {
@@ -179,6 +189,9 @@ func (t *evidenceTracker) apply(now time.Time, doc topology.Document, round Roun
 func (t *evidenceTracker) snapshot(now time.Time) []metrics.GroupObservation {
 	out := make([]metrics.GroupObservation, 0, len(t.groups))
 	for _, g := range t.groups {
+		if !g.current {
+			continue
+		}
 		group := t.snapshotGroup(now, g)
 		out = append(out, group)
 	}
@@ -195,4 +208,32 @@ func (t *evidenceTracker) snapshot(now time.Time) []metrics.GroupObservation {
 }
 func qualifies(value metrics.DurationValue, window time.Duration) bool {
 	return value.State == metrics.Current && value.Value >= window
+}
+
+func (t *evidenceTracker) prepareGroup(row topology.GroupProgress) *groupEvidence {
+	g := t.groups[row.GroupID]
+	if g == nil {
+		g = &groupEvidence{replicas: make(map[topology.ReplicaKey]*replicaEvidence),
+			demotions: make(map[topology.ReplicaKey]roleTimer)}
+		t.groups[row.GroupID] = g
+	}
+	if !reflect.DeepEqual(g.declaration, row.Converged) {
+		// Preserve cooldown anchors for retained role records. Only this group's
+		// sample windows lose continuity; independent groups keep theirs.
+		clear(g.replicas)
+		g.confirmed, g.sourceAge = time.Time{}, 0
+		g.declaration = row.Clone().Converged
+	}
+	g.sourceVersion = row.ConvergedVersion
+	return g
+}
+
+func collectorObserver(local []metrics.ReplicaObservation, epoch LeaderEpoch) metrics.ReplicaSample {
+	for _, v := range local {
+		if v.Sample.Identity.GroupID == topology.MetaGroupID &&
+			v.Sample.Identity.InstanceID == epoch.InstanceID && v.Sample.Identity.ReplicaID == epoch.LeaderID {
+			return v.Sample
+		}
+	}
+	return metrics.ReplicaSample{}
 }

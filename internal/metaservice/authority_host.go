@@ -47,14 +47,14 @@ func (g *Group) VerifyPreparedMeta(parent context.Context, id topology.Identity)
 func (g *Group) ConfirmHostRelease(ctx context.Context, grant topology.AuthorityGrant,
 	receipt topology.EffectReceipt) error {
 	if receipt.Validate(grant) != nil {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	proof, err := g.readAuthorityProof(ctx, grant.Key, "")
 	if err != nil {
 		return err
 	}
 	if proof.Grant == nil || !proof.Grant.Equal(grant) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	if !slices.Contains(proof.ReleasedHosts, receipt.Target) {
 		return fault.ErrAuthorityPending

@@ -44,18 +44,15 @@ type replicaEvidenceFrame struct {
 
 func (t *evidenceTracker) applyGroup(now time.Time, group topology.Group, input evidenceRoundContext) {
 	g := t.groups[group.ID]
-	if g == nil {
-		g = &groupEvidence{replicas: map[topology.ReplicaKey]*replicaEvidence{},
-			demotions: map[topology.ReplicaKey]roleTimer{}}
-		t.groups[group.ID] = g
-	}
+	g.current = true
 	g.voterConfig = *group.VoterConfig
 	g.observeRecords(now, input.records[group.ID])
 	samples := input.round.Groups[group.ID]
-	leader, leaderValid := t.leader(samples)
+	leader, leaderValid := t.leader(samples, group, input.clusterID)
 	leaderValid = leaderValid && input.observerValid && samples.Error == nil
 	g.observation = metrics.GroupObservation{
 		GroupID:          group.ID,
+		SourceVersion:    g.sourceVersion,
 		LeaderID:         leader.LeaderID,
 		Term:             leader.Term,
 		MembershipDigest: leader.MembershipDigest,
@@ -164,7 +161,9 @@ func (t *evidenceTracker) prepareReplicaObservation(r *replicaEvidence, frame *r
 		}
 		observed.State = metrics.Unknown
 	}
-	observed.ReceivedAt = now.UTC()
+	if replyValid {
+		observed.ReceivedAt = now.UTC()
+	}
 	observed.Reachability = "unknown"
 	if validTarget && probe.Dispatched && (probe.Reachability == reachabilityAlive ||
 		probe.Reachability == "unreachable") {

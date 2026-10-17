@@ -46,26 +46,15 @@ func (g *Group) bootstrap(ctx context.Context) error {
 		}
 	}
 	latest := machine.Latest()
-	if latest.Origin != topology.OriginFounding || latest.Version != 1 || machine.Active().Version != 0 {
+	if latest.Origin != topology.OriginFounding || latest.Version != 1 {
 		return nil
 	}
-	_, ok := machine.CurrentOperator()
-	if !ok {
-		observed := map[string]topology.GroupStatus{topology.MetaGroupID: g.engine.Load().Status()}
-		plan, err := topology.BuildPlan(machine.Active(), latest, observed, g.rules)
-		if err != nil {
-			return err
-		}
-		if len(plan.Steps) != 0 {
-			return fault.New(fault.OperatorAuthorization, "founding membership differs from durable seed", nil)
-		}
-		_, err = g.propose(ctx, metaengine.BeginOperatorProposal{
-			Version: latest.Version,
-			Plan:    plan,
-			Actor:   identity.NodeName,
-			Origin:  topology.OriginFounding,
-			At:      time.Now().UTC(),
-		})
+	approved, err := machine.Approval(latest.Version)
+	if err != nil {
+		return err
+	}
+	if approved == "" {
+		_, err = g.applyOperationLocal(ctx, applyVersionRequest{Kind: "approve", Version: latest.Version})
 		if err != nil {
 			return err
 		}
@@ -196,9 +185,6 @@ func (g *Group) runtimeTerminated(engine *raftengine.Group) bool {
 func (g *Group) activateLeaderForTick() {
 	ctx, cancel := context.WithTimeout(g.workCtx, 5*time.Second)
 	err := g.bootstrap(ctx)
-	if err == nil {
-		err = g.activateCompleted(ctx)
-	}
 	cancel()
 	if err != nil && g.workCtx.Err() == nil {
 		g.opts.Logger.Debug("meta bootstrap or activation retry", "error", err)
@@ -225,9 +211,7 @@ func (g *Group) activateLocalForTick(engine *raftengine.Group) {
 		members[id] = true
 	}
 	g.transport.Prune(members)
-	active := g.state().Active()
-	if !members[identity.MemberID] || active.Version == 0 ||
-		active.MemberID(identity.NodeName) != identity.MemberID {
+	if !members[identity.MemberID] {
 		return
 	}
 	ctx, cancel := context.WithTimeout(g.workCtx, 5*time.Second)
@@ -302,26 +286,33 @@ type sessionActivation struct {
 
 func (g *Group) validateSessionTopology(ctx context.Context, state sessionActivation) error {
 	identity, machine := state.identity, state.machine
-	active := machine.Active()
-	node := active.Node(identity.NodeName)
-	if node == nil || !node.State.Places() || active.MemberID(identity.NodeName) != identity.MemberID {
+	if !containsMember(g.engine.Load().Status().ConfState, identity.MemberID) {
 		return fault.ErrUnavailable
 	}
-	activated := machine.HasActivated(identity.NodeName)
-	if !activated && active.Origin == topology.OriginFounding {
-		operator, ok := machine.CurrentOperator()
-		if !ok || operator.Status.State != topology.OperatorSucceeded {
-			return fault.ErrUnavailable
-		}
-		_, bindErr := g.propose(ctx,
-			metaengine.BindAdmissionProposal{Admission: metaengine.AdmissionRecord{NodeName: identity.NodeName,
-				InstanceID: identity.InstanceID, MemberID: identity.MemberID,
-				OperatorID: operator.Status.ID}, Founding: true, At: time.Now().UTC()})
-		if bindErr != nil {
-			return bindErr
-		}
+	founding, err := sessionAdmissionBasis(machine, identity)
+	if err != nil || founding == "" {
+		return err
 	}
-	return nil
+	_, err = g.propose(ctx,
+		metaengine.BindAdmissionProposal{Admission: metaengine.AdmissionRecord{NodeName: identity.NodeName,
+			InstanceID: identity.InstanceID, MemberID: identity.MemberID,
+			OperationID: topology.OperationID(founding)}, Founding: true, At: time.Now().UTC(),
+			ProposalID: newProposalID()})
+	return err
+}
+
+func sessionAdmissionBasis(machine *metaengine.Machine, identity topology.Identity) (topology.OperationID, error) {
+	founding, ready := machine.AdmissionBasis(identity)
+	if !ready {
+		return "", fault.ErrUnavailable
+	}
+	if machine.HasActivated(identity.NodeName) || machine.HasCompletedAdmission(identity.NodeName, identity.MemberID) {
+		return "", nil
+	}
+	if founding == "" {
+		return "", fault.ErrUnavailable
+	}
+	return founding, nil
 }
 
 func selectSessionIdentity(state *sessionActivation) error {
@@ -369,14 +360,15 @@ func (g *Group) grantSession(ctx context.Context, state sessionActivation) (time
 	if _, exists := machine.Session(sessionID); !exists {
 		_, sessionErr := g.propose(ctx,
 			metaengine.GrantSession{SessionID: sessionID, NodeName: identity.NodeName,
-				InstanceID: identity.InstanceID, TTLSeconds: int(g.opts.SessionTTL / time.Second)})
+				InstanceID: identity.InstanceID, TTLSeconds: int(g.opts.SessionTTL / time.Second),
+				ProposalID: newProposalID()})
 		if sessionErr != nil {
 			return 0, sessionErr
 		}
 	}
 	if !held {
 		_, lockErr := g.propose(ctx, metaengine.AcquireLock{Key: "node/" + identity.NodeName,
-			SessionID: sessionID})
+			SessionID: sessionID, ProposalID: newProposalID()})
 		if lockErr != nil {
 			return 0, lockErr
 		}

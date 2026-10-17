@@ -7,6 +7,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
@@ -14,7 +15,7 @@ import (
 
 func TestCurrentPlacementSnapshotRetainsReplicatedIntentAndReservation(t *testing.T) {
 	t.Parallel()
-	sm := newTopologySM(nil, testRules())
+	sm := mustMachine(t, testRules(), nil)
 	base := baseDoc()
 	base.Version = 1
 	base.Node("n1").Labels = map[string]string{
@@ -29,41 +30,49 @@ func TestCurrentPlacementSnapshotRetainsReplicatedIntentAndReservation(t *testin
 	voterConfig.DistinctVoterLabel = "az"
 	group.VoterConfig = &voterConfig
 	group.Hosting = &topology.HostingRule{Mode: topology.HostingExplicit, Nodes: []string{"n1"}}
-	sm.latest, sm.target, sm.active = base.Clone(), base.Clone(), base.Clone()
-	sm.history = []topology.Document{base.Clone()}
-	sm.rememberAllocations(base)
+	at := time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC)
+	state := scopedState{SchemaVersion: scopedStateSchemaVersion, Rules: testRules(),
+		Latest: base.Clone(), Target: base.Clone(), History: []topology.Document{base.Clone()},
+		FullyConverged: topology.FullyConverged{Version: 1, At: at}}
+	for i := range base.Groups {
+		g := &base.Groups[i]
+		state.Groups = append(state.Groups, groupConvergence{GroupID: g.ID, Declaration: g, SourceVersion: 1, CompletedAt: at})
+		state.Allocations = append(state.Allocations, allocationRecord{GroupID: g.ID, NextReplicaID: g.NextReplicaID})
+	}
+	state.Nodes = []nodeConvergence{{NodeName: "n1", Declaration: base.Node("n1"), SourceVersion: 1, MemberID: 1, CompletedAt: at}}
+	sm = restoreMachineFixture(t, state)
 
-	data, err := sm.Snapshot()
+	data, err := sm.Snapshot(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored := newTopologySM(nil, testRules())
-	if err := restored.Restore(data); err != nil {
+	restored := mustMachine(t, testRules(), nil)
+	if err := restored.Restore(t.Context(), data); err != nil {
 		t.Fatalf("restore: %v (cause: %v)", err, errors.Unwrap(err))
 	}
-	for _, got := range []topology.Document{restored.latest, restored.target, restored.active} {
+	for _, got := range []topology.Document{restored.Latest(), restored.Target()} {
 		if !reflect.DeepEqual(got, base) {
 			t.Fatalf("snapshot changed exact placement intent: got %+v, want %+v", got, base)
 		}
 	}
-	if restored.allocations["shard0"] != 2 {
-		t.Fatal("snapshot lost replica identity high-water mark", restored.allocations)
+	if restored.scoped.Allocations[1].NextReplicaID != 2 {
+		t.Fatal("snapshot lost replica identity high-water mark", restored.scoped.Allocations)
 	}
 
 	// An unsupported state version must not partially replace live evidence.
-	var obsolete smState
+	var obsolete map[string]json.RawMessage
 	if err := json.Unmarshal(data, &obsolete); err != nil {
 		t.Fatal(err)
 	}
-	obsolete.SchemaVersion = 2
+	obsolete["schema_version"] = json.RawMessage(`2`)
 	damaged, err := json.Marshal(obsolete)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := restored.Restore(damaged); !errors.Is(err, fault.ErrUnsupported) {
+	if err := restored.Restore(t.Context(), damaged); !errors.Is(err, fault.ErrUnsupported) {
 		t.Fatal("obsolete snapshot was not classified unsupported", err)
 	}
-	if !reflect.DeepEqual(restored.active, base) || restored.allocations["shard0"] != 2 {
+	if !reflect.DeepEqual(restored.Target(), base) || restored.scoped.Allocations[1].NextReplicaID != 2 {
 		t.Fatal("rejected snapshot rewrote approved placement or identity")
 	}
 }

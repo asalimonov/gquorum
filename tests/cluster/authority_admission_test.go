@@ -74,7 +74,7 @@ func TestAuthoritySupersessionRetiresIntermediateMetaLearnerFourNodes(t *testing
 	if err := Poll(ctx, func() (bool, error) {
 		view, err := c.Authority(ctx, "node1", "work")
 		for _, request := range view.Actions {
-			if request.Authorization.OperatorID == old && request.Authorization.Kind == topology.StepAddLearner && request.Authorization.ReplicaID == replica {
+			if request.Authorization.OperationID == old && request.Authorization.Kind == topology.StepAddLearner && request.Authorization.ReplicaID == replica {
 				delayed = request
 				return true, err
 			}
@@ -112,10 +112,10 @@ func TestAuthoritySupersessionRetiresIntermediateMetaLearnerFourNodes(t *testing
 	}
 	next := startApply(ctx, t, c, "node2", staged.Document.Version)
 	waitCtx, cancelWait := context.WithTimeout(ctx, 30*time.Second)
-	err = c.WaitOperator(waitCtx, "node2", next)
+	err = c.WaitOperation(waitCtx, "node2", next)
 	cancelWait()
 	if err != nil {
-		operator, operatorErr := c.Operator(ctx, "node2", next)
+		operator, operatorErr := c.Operation(ctx, "node2", next)
 		runtime, runtimeErr := c.runtime(ctx, "node4")
 		t.Fatal("intermediate metadata/load retirement did not converge", err, operator, operatorErr, runtime, runtimeErr)
 	}

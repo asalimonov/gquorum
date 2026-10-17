@@ -1,10 +1,67 @@
 # Public API refactor validation
 
 This is the historical API-refactor validation record. The later
-[authority/read implementation](../plans/20261012-authority-contract-consistent-reads.md)
+authority/read implementation
 deliberately changes snapshot/log formats and rejects immutable legacy meta/load
 fixtures without rewriting them; the results below remain those actually run at
 the recorded source revision.
+
+## Scoped operations update — 2026-10-17
+
+Current contracts supersede the historical Active/global-operator model below:
+Latest/Target intent, independent group/node convergence, Operation/WaitOperation/
+RetryOperation, exact CAS/rebase and detached cleanup. See the
+[current architecture](../architecture/library.md) and
+[implementation log](../plans/20261015-failure-isolation-and-operational-api.md#progress-log).
+Metadata store/FSM/envelopes are v4; the independent authority journal is v2.
+Changed older formats refuse unchanged; there is no migration or mixed-version
+support. Frozen fixtures and immutable hashes are indexed in
+[physical provenance](api-baseline-physical.md).
+
+Post-audit evidence for implementation commit `10b680b` (`e4c5392` plus Task88
+corrections): all required test gates pass. The user waived the remaining Claude
+review on 2026-10-17 with “Continue w/o claude”. Completion rechecked the source
+fingerprint, fixture hashes and report results; the closure changes documentation
+only and does not claim a fresh test run or final peer consensus.
+The tested source/build set contains 1,096 files; its SHA-256 is
+`e7b9b2a60cd4c4d42df52020ef843c2bee325e797c011a9646897436902ed7d3`.
+The fingerprint hashes sorted tracked Go/proto/go.mod/go.sum/Makefile/Dockerfile
+paths and bytes, each followed by NUL. The only correction after non-Docker
+suites/benchmark was clustertest-only stop/readiness barriers; library, fixture and
+benchmark sources are unchanged. Final units/lint and complete cluster rerun
+followed that correction and passed.
+
+| Check | Actual evidence under `test-reports/` unless otherwise stated |
+| --- | --- |
+| Fast units | PASS 1,884/1,884; `unit/20261017T031345.867812Z-wbi1bvet/report.md`. |
+| Unit race | PASS 1,884/1,884; `unit-race/20261017T030141.240620Z-vdcfzk_u/report.md`. |
+| Functional | PASS 1,043/1,043; `function/20261017T030207.714644Z-62nx4vsx/report.md`. |
+| Functional race | PASS 1,043/1,043; `function-race/20261017T030252.395699Z-jca4sx81/report.md`. |
+| Lint | PASS; `architecture/20261017-task88/lint.log`, all configured module/build-tag analyzers. |
+| Physical formats | All seven legacy baseline files and five current frozen fixtures match their recorded SHA-256 hashes. No protocol sources changed. |
+| Debt scale/bounds | PASS count=3; `bench/20261017-task88/benchmark.log`. At 10k debts: ~51.3 MB persisted per Apply; median encoding 228.7 ms, bbolt 253.1 ms, restore 1.56 s, progress page 5.37 ms. Separate cleanup selection stays bounded (~344 ns); ordinary four-block selection costs 35.2 ms. |
+| Focused process | PASS 6/6 isolation cases (`cluster/20261017T030540.982912Z-11m_z9_l`); exact replay setup regression PASS 3/3 (`cluster/20261017T031315.217037Z-qp98zmp2`). |
+| Complete process suite | PASS 91/91, 260.691s; `cluster/20261017T031352.388287Z-yggkc_uc/report.md`, no failures/skips. |
+| Compose basic | PASS, 32.226s; `example/20261017T031813.126290Z-4bpecc1h/report.md`. |
+| Compose scheduler | PASS, 131.121s; `example/20261017T031845.408057Z-1ejzrshw/report.md`. |
+| Compose cache | PASS, 40.816s; `example/20261017T032056.589394Z-ok6sjmbf/report.md`. |
+| Resource/format checks | No run-owned containers/networks/volumes or demo containers remain. Unrelated pre-existing volumes are preserved. Image digest is unchanged; local documentation links and git diff --check pass. |
+| Peer review | Final thread42 review waived by the user on 2026-10-17 (“Continue w/o claude”). Local architecture/dead-code review is complete; later fixes have no claimed peer consensus. |
+
+Final application image: `gquorum-test:fi-e4c5392-task88a`, OCI index
+`sha256:035a0fc5e46a51cc200f28154480d4a222bed6bc13c81ebd6418119c2b660947`,
+config `sha256:eb3a1f6c6f9344a502f7614e1139024182a15ca7f4873d4fee2410744e78716e`.
+The first complete post-audit run was 90/91 (`cluster/20261017T030558.058983Z-2gm3okjf`):
+a replay test raced detached Stop between plan capture and approval. Its explicit
+predecessor-stop barrier and subsequent serving-readiness barrier retain all
+exact grant, membership, storage, value and consistent-read assertions. These
+changes affect only the host-side clustertest harness, so the application image
+is identical for the focused and complete reruns.
+
+The historical October11 gates below remain evidence only for their recorded
+revision. They do not validate the current scoped cutover or its process image.
+
+## Historical API refactor — October 11, 2026
 
 Status: **complete**, validated October 11, 2026. The corrected-image complete
 process run and all other required gates pass. The
@@ -26,7 +83,7 @@ The corrected process image is `gquorum-test:api-final-gates`:
 - Built through `make test-cluster-build`; the run targets below reuse that image
   without replacing its tag while scenarios are active.
 
-| Gate | Current result |
+| Historical gate | Result at recorded revision |
 | --- | --- |
 | `make test` | PASS, including the corrected complete caller fixture (84.784s). |
 | `make test-unit` | PASS, uncached elapsed **15.61s**, below the 30-second budget. |

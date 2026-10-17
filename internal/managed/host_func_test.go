@@ -121,16 +121,20 @@ func newFixtureAt(t *testing.T, name string, member uint64) *fixture {
 		}
 		return ids, ctx.Err()
 	}
-	f.cfg.Active = func(ctx context.Context) (topology.Document, error) {
+	f.cfg.Progress = func(ctx context.Context) (topology.ProgressPage, error) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		doc := topology.Document{ClusterID: f.node.ClusterID}
+		page := topology.ProgressPage{}
 		for _, scope := range f.scopes {
+			group := scope.Group
+			row := topology.GroupProgress{GroupID: group.ID, Approved: &group}
 			if scope.Established {
-				doc.Groups = append(doc.Groups, scope.Group)
+				row.ConvergedVersion, row.Converged = scope.Version, &group
 			}
+			page.Groups = append(page.Groups, row.Clone())
+			page.TargetVersion = max(page.TargetVersion, scope.Version)
 		}
-		return doc.Clone(), ctx.Err()
+		return page, ctx.Err()
 	}
 	f.cfg.ForgetGrantedReplica = func(ctx context.Context, grant topology.AuthorityGrant, expected uint64) error {
 		f.mu.Lock()
@@ -140,7 +144,7 @@ func newFixtureAt(t *testing.T, name string, member uint64) *fixture {
 		}
 		if grant.Validate() != nil || grant.Action == nil ||
 			!slices.Contains(grant.Targets, topology.AuthorityTarget{NodeName: f.node.NodeName, MemberID: f.node.MemberID, ReplicaID: expected}) {
-			return fault.ErrOperatorAuthorization
+			return fault.ErrOperationAuthorization
 		}
 		a := *grant.Action
 		if record, found := f.records[a.GroupID]; found && record.ReplicaID != expected {
@@ -181,7 +185,7 @@ func (f *fixture) setScope(group string, id uint64, founding, established bool) 
 	if founding {
 		resources = append([]topology.AuthorityResource{{Kind: topology.AuthorityGroup, GroupID: group}}, resources...)
 	}
-	f.floors[group] = topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: f.node.ClusterID, GroupID: group, Revision: max(10, old.Key.Revision+1)}, Purpose: topology.AuthorityEffect, OperatorID: a.OperatorID, Action: &a, Resources: resources, Targets: []topology.AuthorityTarget{{NodeName: f.node.NodeName, MemberID: f.node.MemberID, ReplicaID: id}}}
+	f.floors[group] = topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: f.node.ClusterID, GroupID: group, Revision: max(10, old.Key.Revision+1)}, Purpose: topology.AuthorityEffect, OperationID: a.OperationID, Action: &a, Resources: resources, Targets: []topology.AuthorityTarget{{NodeName: f.node.NodeName, MemberID: f.node.MemberID, ReplicaID: id}}}
 }
 
 func (f *fixture) host(t *testing.T) *Host {

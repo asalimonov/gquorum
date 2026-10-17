@@ -39,7 +39,7 @@ func fixtureAuthority(t *testing.T, f *fixture) (*authoritystore.Store, topology
 		return f.cfg.ValidateGrant(ctx, grant)
 	}
 	a := f.approve(topology.StepCreateFoundingGroup, f.localID(1))
-	g := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: f.node.ClusterID, GroupID: "work", Revision: 10}, Purpose: topology.AuthorityEffect, OperatorID: a.OperatorID, Action: &a, Resources: []topology.AuthorityResource{{Kind: topology.AuthorityGroup, GroupID: "work"}, {Kind: topology.AuthorityHost, GroupID: "work", NodeName: f.node.NodeName}}, Targets: []topology.AuthorityTarget{{NodeName: f.node.NodeName, MemberID: f.node.MemberID, ReplicaID: 1}}}
+	g := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: f.node.ClusterID, GroupID: "work", Revision: 10}, Purpose: topology.AuthorityEffect, OperationID: a.OperationID, Action: &a, Resources: []topology.AuthorityResource{{Kind: topology.AuthorityGroup, GroupID: "work"}, {Kind: topology.AuthorityHost, GroupID: "work", NodeName: f.node.NodeName}}, Targets: []topology.AuthorityTarget{{NodeName: f.node.NodeName, MemberID: f.node.MemberID, ReplicaID: 1}}}
 	return s, g
 }
 

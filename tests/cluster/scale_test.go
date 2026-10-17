@@ -78,9 +78,16 @@ func TestFifteenLoadGroupsCommitIndependentlyAndDeleteEveryLocalStore(t *testing
 			if err != nil || doc.Group(id) != nil {
 				t.Fatal("deletion did not propagate", node.Spec.Name, id, err)
 			}
-			_, err = c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(), docker.ContainerStatPathOptions{Path: "/data/load/" + id})
-			if !errdefs.IsNotFound(err) {
-				t.Fatal("succeeded execution retained local state", node.Spec.Name, id, err)
+			// Joined stops complete deletion; detached retirement removes the
+			// usable store independently of the operation's completion.
+			if err := Poll(ctx, func() (bool, error) {
+				_, err := c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(), docker.ContainerStatPathOptions{Path: "/data/load/" + id})
+				if errdefs.IsNotFound(err) {
+					return true, nil
+				}
+				return false, err
+			}); err != nil {
+				t.Fatal("detached retirement retained local state", node.Spec.Name, id, err)
 			}
 			response, err := c.Request(ctx, node.Spec.Name, "GET", "/api/load/"+id+"/keys/state", nil, 0)
 			if err := requireStatus(response, err, 503); err != nil {

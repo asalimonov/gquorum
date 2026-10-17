@@ -19,9 +19,15 @@ type MutationOptions struct {
 
 // MutationResult preserves the staged Document if subsequent approval fails.
 type MutationResult struct {
-	Document   topology.Document         `json:"document"`
-	OperatorID topology.OperatorID       `json:"operator_id,omitempty"`
-	Placement  *topology.PlacementReport `json:"placement,omitempty"`
+	Document    topology.Document         `json:"document"`
+	OperationID topology.OperationID      `json:"operation_id,omitempty"`
+	RebasedTo   uint64                    `json:"rebased_to,omitempty"`
+	Placement   *topology.PlacementReport `json:"placement,omitempty"`
+}
+
+func publicMutationResult(result metaservice.MutationResult) MutationResult {
+	return MutationResult{OperationID: result.OperationID, RebasedTo: result.RebasedTo,
+		Document: result.Document, Placement: result.Placement}
 }
 
 // GroupSpec describes a load group and its initial placement, hosting and voter
@@ -52,16 +58,17 @@ func (c *clusterView) AddNode(ctx context.Context, node topology.Node, opts Muta
 		return MutationResult{}, err
 	}
 	result, err := m.AddNode(ctx, node, opts.internal())
-	return MutationResult(result), err
+	return publicMutationResult(result), err
 }
 
-func (c *clusterView) ReadmitNode(ctx context.Context, name string, opts MutationOptions) (MutationResult, error) {
+func (c *clusterView) ReadmitNode(ctx context.Context, name string, expectedMemberID uint64,
+	opts MutationOptions) (MutationResult, error) {
 	m, err := c.node.service(ctx, workService)
 	if err != nil {
 		return MutationResult{}, err
 	}
-	result, err := m.ReadmitNode(ctx, name, opts.internal())
-	return MutationResult(result), err
+	result, err := m.ReadmitNode(ctx, name, expectedMemberID, opts.internal())
+	return publicMutationResult(result), err
 }
 
 func (c *clusterView) DrainNode(ctx context.Context, name string, opts MutationOptions) (MutationResult, error) {
@@ -70,7 +77,7 @@ func (c *clusterView) DrainNode(ctx context.Context, name string, opts MutationO
 		return MutationResult{}, err
 	}
 	result, err := m.DrainNode(ctx, name, opts.internal())
-	return MutationResult(result), err
+	return publicMutationResult(result), err
 }
 
 func (c *clusterView) ActivateNode(ctx context.Context, name string, opts MutationOptions) (MutationResult, error) {
@@ -79,7 +86,7 @@ func (c *clusterView) ActivateNode(ctx context.Context, name string, opts Mutati
 		return MutationResult{}, err
 	}
 	result, err := m.ActivateNode(ctx, name, opts.internal())
-	return MutationResult(result), err
+	return publicMutationResult(result), err
 }
 
 func (c *clusterView) ExcludeNode(ctx context.Context, name string, opts MutationOptions) (MutationResult, error) {
@@ -88,7 +95,7 @@ func (c *clusterView) ExcludeNode(ctx context.Context, name string, opts Mutatio
 		return MutationResult{}, err
 	}
 	result, err := m.ExcludeNode(ctx, name, opts.internal())
-	return MutationResult(result), err
+	return publicMutationResult(result), err
 }
 
 func (c *clusterView) SetPlacement(ctx context.Context, rule topology.PlacementRule,
@@ -98,7 +105,7 @@ func (c *clusterView) SetPlacement(ctx context.Context, rule topology.PlacementR
 		return MutationResult{}, err
 	}
 	result, err := m.SetPlacement(ctx, rule, opts.internal())
-	return MutationResult(result), err
+	return publicMutationResult(result), err
 }
 
 func (c *clusterView) SetGroupPlacement(ctx context.Context, id string, rule topology.PlacementRule,
@@ -108,7 +115,7 @@ func (c *clusterView) SetGroupPlacement(ctx context.Context, id string, rule top
 		return MutationResult{}, err
 	}
 	result, err := m.SetGroupPlacement(ctx, id, rule, opts.internal())
-	return MutationResult(result), err
+	return publicMutationResult(result), err
 }
 
 func (c *clusterView) CreateGroup(ctx context.Context, spec GroupSpec, opts MutationOptions) (MutationResult, error) {
@@ -117,7 +124,7 @@ func (c *clusterView) CreateGroup(ctx context.Context, spec GroupSpec, opts Muta
 		return MutationResult{}, err
 	}
 	result, err := m.CreateLoadGroup(ctx, metaservice.GroupSpec(spec), opts.internal())
-	return MutationResult(result), err
+	return publicMutationResult(result), err
 }
 
 // SetGroupVoterConfig stages a complete placement edit. Target/domain changes
@@ -129,7 +136,7 @@ func (c *clusterView) SetGroupVoterConfig(ctx context.Context, id string, p topo
 		return MutationResult{}, err
 	}
 	r, err := m.SetGroupVoterConfig(ctx, id, p, opts.internal())
-	return MutationResult(r), err
+	return publicMutationResult(r), err
 }
 
 func (c *clusterView) SetGroupHosting(ctx context.Context, id string, h topology.HostingRule,
@@ -139,7 +146,7 @@ func (c *clusterView) SetGroupHosting(ctx context.Context, id string, h topology
 		return MutationResult{}, err
 	}
 	r, err := m.SetGroupHosting(ctx, id, h, opts.internal())
-	return MutationResult(r), err
+	return publicMutationResult(r), err
 }
 
 // SetReplicaPinnedLearner pins an exact replica against automatic promotion.
@@ -152,7 +159,7 @@ func (c *clusterView) SetReplicaPinnedLearner(ctx context.Context, id string, pi
 		return MutationResult{}, err
 	}
 	r, err := m.SetReplicaPinnedLearner(ctx, id, pin, opts.internal())
-	return MutationResult(r), err
+	return publicMutationResult(r), err
 }
 
 func (c *clusterView) DeleteGroup(ctx context.Context, id string, opts MutationOptions) (MutationResult, error) {
@@ -161,7 +168,7 @@ func (c *clusterView) DeleteGroup(ctx context.Context, id string, opts MutationO
 		return MutationResult{}, err
 	}
 	result, err := m.DeleteLoadGroup(ctx, id, opts.internal())
-	return MutationResult(result), err
+	return publicMutationResult(result), err
 }
 
 func (c *clusterView) ChangeReplica(ctx context.Context, id string, change topology.ReplicaRoleChange,
@@ -171,17 +178,17 @@ func (c *clusterView) ChangeReplica(ctx context.Context, id string, change topol
 		return MutationResult{}, err
 	}
 	result, err := m.ChangeReplica(ctx, id, change, opts.internal())
-	return MutationResult(result), err
+	return publicMutationResult(result), err
 }
 
-func (c *clusterView) ReseatReplica(ctx context.Context, id, name string,
+func (c *clusterView) ReseatReplica(ctx context.Context, id string, key topology.ReplicaKey,
 	opts MutationOptions) (MutationResult, error) {
 	m, err := c.node.service(ctx, workService)
 	if err != nil {
 		return MutationResult{}, err
 	}
-	result, err := m.ReseatReplica(ctx, id, name, opts.internal())
-	return MutationResult(result), err
+	result, err := m.ReseatReplica(ctx, id, key, opts.internal())
+	return publicMutationResult(result), err
 }
 
 func (c *clusterView) RollbackTo(ctx context.Context, version uint64, opts MutationOptions) (MutationResult, error) {
@@ -190,7 +197,7 @@ func (c *clusterView) RollbackTo(ctx context.Context, version uint64, opts Mutat
 		return MutationResult{}, err
 	}
 	result, err := m.RollbackTo(ctx, version, opts.internal())
-	return MutationResult(result), err
+	return publicMutationResult(result), err
 }
 
 func (c *clusterView) ForceRetireNode(ctx context.Context, name string, opts RetireOptions) (MutationResult, error) {
@@ -200,7 +207,7 @@ func (c *clusterView) ForceRetireNode(ctx context.Context, name string, opts Ret
 	}
 	result, err := m.ForceRetireNode(ctx, name, metaservice.RetireOptions{Reason: opts.Reason,
 		Mutation: opts.Mutation.internal()})
-	return MutationResult(result), err
+	return publicMutationResult(result), err
 }
 
 func (c *clusterView) TransferLeader(ctx context.Context, group, name string) error {

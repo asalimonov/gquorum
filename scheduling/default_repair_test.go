@@ -18,9 +18,9 @@ const reconcileTestStability = 60 * time.Second
 func TestDefaultRepairPolicyAllowList(t *testing.T) {
 	t.Parallel()
 	doc := clusterDocument(true)
-	matching := topology.GroupStatus{GroupID: "shard0", Found: true, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}}
-	missing := topology.GroupStatus{GroupID: "shard0", Found: true, ConfState: raftpb.ConfState{Voters: []uint64{1, 2}}}
-	asLearner := topology.GroupStatus{GroupID: "shard0", Found: true, ConfState: raftpb.ConfState{
+	matching := topology.GroupStatus{GroupID: "shard0", SourceVersion: 1, Found: true, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}}
+	missing := topology.GroupStatus{GroupID: "shard0", SourceVersion: 1, Found: true, ConfState: raftpb.ConfState{Voters: []uint64{1, 2}}}
+	asLearner := topology.GroupStatus{GroupID: "shard0", SourceVersion: 1, Found: true, ConfState: raftpb.ConfState{
 		Voters: []uint64{1, 2}, Learners: []uint64{3},
 	}}
 
@@ -61,7 +61,7 @@ func TestDefaultRepairPolicyAllowList(t *testing.T) {
 		{
 			name: "intentional Active learner is never promoted",
 			mutate: func(in *ScheduleInput) {
-				in.Active.Group("shard0").Replicas[2].Role = topology.ReplicaLearner
+				in.Target.Group("shard0").Replicas[2].Role = topology.ReplicaLearner
 				in.Status["shard0"] = missing
 			},
 		},
@@ -69,14 +69,14 @@ func TestDefaultRepairPolicyAllowList(t *testing.T) {
 			name: "missing voter belongs to draining node",
 			mutate: func(in *ScheduleInput) {
 				in.Status["shard0"] = missing
-				in.Active.Node("n3").State = topology.NodeDraining
+				in.Target.Node("n3").State = topology.NodeDraining
 			},
 		},
 		{
 			name: "deleted group",
 			mutate: func(in *ScheduleInput) {
 				in.Status["shard0"] = missing
-				in.Active.Groups = in.Active.Groups[:1]
+				in.Target.Groups = in.Target.Groups[:1]
 			},
 		},
 		{
@@ -86,7 +86,7 @@ func TestDefaultRepairPolicyAllowList(t *testing.T) {
 		{
 			name: "surplus live voter does not authorize removal",
 			mutate: func(in *ScheduleInput) {
-				in.Status["shard0"] = topology.GroupStatus{GroupID: "shard0", Found: true, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3, 99}}}
+				in.Status["shard0"] = topology.GroupStatus{GroupID: "shard0", SourceVersion: 1, Found: true, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3, 99}}}
 			},
 		},
 	}
@@ -99,7 +99,7 @@ func TestDefaultRepairPolicyAllowList(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			in := ScheduleInput{
-				Latest: doc.Clone(), Target: doc.Clone(), Active: doc.Clone(),
+				Target: doc.Clone(),
 				Status: map[string]topology.GroupStatus{"shard0": matching},
 				Health: map[string]topology.GroupHealthEvaluation{"shard0": {GroupID: "shard0"}},
 				Alive: map[string]time.Duration{
@@ -111,6 +111,7 @@ func TestDefaultRepairPolicyAllowList(t *testing.T) {
 			if tc.mutate != nil {
 				tc.mutate(&in)
 			}
+			in.Groups = provenPolicyGroups(in.Target)
 			got, err := scheduler.Schedule(context.Background(), in)
 			if err != nil {
 				t.Fatal(err)
@@ -142,9 +143,9 @@ func TestDefaultRepairPolicyNeverRepairsUnconfiguredMeta(t *testing.T) {
 		t.Fatal(err)
 	}
 	decision, err := scheduler.Schedule(context.Background(), ScheduleInput{
-		Active: doc,
+		Target: doc, Groups: provenPolicyGroups(doc),
 		Status: map[string]topology.GroupStatus{topology.MetaGroupID: {
-			GroupID: topology.MetaGroupID, Found: true, ConfState: raftpb.ConfState{Voters: []uint64{1, 2}},
+			GroupID: topology.MetaGroupID, SourceVersion: 1, Found: true, ConfState: raftpb.ConfState{Voters: []uint64{1, 2}},
 		}},
 		Alive: map[string]time.Duration{"n3": time.Hour},
 	})
@@ -167,10 +168,10 @@ func TestDefaultRepairPolicyHoldAndReasonPriority(t *testing.T) {
 	second.ID = "second"
 	doc.Groups = append(doc.Groups, second)
 	in := ScheduleInput{
-		Active: doc,
+		Target: doc, Groups: provenPolicyGroups(doc),
 		Status: map[string]topology.GroupStatus{
-			"shard0": {GroupID: "shard0", Found: true, ConfState: raftpb.ConfState{Voters: []uint64{1, 2}}},
-			"second": {GroupID: "second", Found: true, ConfState: raftpb.ConfState{Voters: []uint64{1, 2}}},
+			"shard0": {GroupID: "shard0", SourceVersion: 1, Found: true, ConfState: raftpb.ConfState{Voters: []uint64{1, 2}}},
+			"second": {GroupID: "second", SourceVersion: 1, Found: true, ConfState: raftpb.ConfState{Voters: []uint64{1, 2}}},
 		},
 		Health: map[string]topology.GroupHealthEvaluation{"shard0": {ObservedHealth: topology.ObservedGroupHealth{State: topology.GroupQuorumLost}}},
 		Alive:  map[string]time.Duration{"n3": time.Second},
@@ -212,4 +213,13 @@ func clusterDocument(load bool) topology.Document {
 		doc.Groups = append(doc.Groups, group)
 	}
 	return doc
+}
+
+func provenPolicyGroups(doc topology.Document) map[string]topology.GroupProgress {
+	groups := make(map[string]topology.GroupProgress, len(doc.Groups))
+	for i := range doc.Groups {
+		group := &doc.Groups[i]
+		groups[group.ID] = topology.GroupProgress{GroupID: group.ID, Approved: group, Converged: group, ConvergedVersion: doc.Version}
+	}
+	return groups
 }

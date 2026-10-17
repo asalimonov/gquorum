@@ -32,7 +32,7 @@ func strictReplacementFixture() (Document, Document, map[string]GroupStatus, Rul
 func TestStrictSameAZReplacementUsesThreeTwoThree(t *testing.T) {
 	t.Parallel()
 	active, desired, status, rules := strictReplacementFixture()
-	plan, err := BuildPlan(active, desired, status, rules)
+	plan, err := BuildPlan(testPlanInput(active, status), desired, rules)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestStrictSameAZReplacementRefusesLostSurvivor(t *testing.T) {
 	work := status["work"]
 	work.LiveVoters[2] = false
 	status["work"] = work
-	if plan, err := BuildPlan(active, desired, status, rules); err == nil || !strings.Contains(err.Error(), "live quorum") {
+	if plan, err := BuildPlan(testPlanInput(active, status), desired, rules); err == nil || !strings.Contains(err.Error(), "live quorum") {
 		t.Fatalf("unsafe two-survivor replacement accepted: %+v, %v", plan, err)
 	}
 }
@@ -74,11 +74,11 @@ func TestTargetViolationSetCannotTradeOnePairForAnother(t *testing.T) {
 	state := voterPlanState{groupID: "work"}
 	before := []ReplicaKey{{NodeName: "a", ReplicaID: 1}, {NodeName: "b", ReplicaID: 2}, {NodeName: "c", ReplicaID: 3}}
 	mid := []ReplicaKey{{NodeName: "a", ReplicaID: 1}, {NodeName: "c", ReplicaID: 3}}
-	if err := validateVoterTransition(voterPlanTopology{base: base, desired: desired, groupID: "work"}, before, mid, state); err != nil {
+	if err := validateVoterTransition(voterPlanTopology{base: convergedPlanInput(base), desired: desired, groupID: "work"}, before, mid, state); err != nil {
 		t.Fatalf("repair of exact baseline violation was rejected: %v", err)
 	}
 	after := []ReplicaKey{{NodeName: "a", ReplicaID: 1}, {NodeName: "c", ReplicaID: 3}, {NodeName: "d", ReplicaID: 4}}
-	if err := validateVoterTransition(voterPlanTopology{base: base, desired: desired, groupID: "work"}, before, after, state); err == nil {
+	if err := validateVoterTransition(voterPlanTopology{base: convergedPlanInput(base), desired: desired, groupID: "work"}, before, after, state); err == nil {
 		t.Fatal("changed exact domain pair was accepted")
 	}
 }

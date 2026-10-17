@@ -9,7 +9,7 @@ import (
 func receiptSetComplete(grant topology.AuthorityGrant, receipts []topology.EffectReceipt) (bool, error) {
 	for _, receipt := range receipts {
 		if receipt.Validate(grant) != nil {
-			return false, ErrOperatorAuthorization
+			return false, ErrOperationAuthorization
 		}
 	}
 	for _, resource := range grant.Resources {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -31,6 +32,19 @@ func TestAuthorityEarlierLearnerActionCannotUndoSameOperatorPromotionThreeNodes(
 	}
 	if _, err := c.Approve(ctx, "node2", staged.Document.Version); err != nil {
 		t.Fatal(err)
+	}
+	// Required convergence does not wait for the removed host's detached stop.
+	// Finish that exact setup boundary before planning the replay scenario;
+	// otherwise a stop consumed between plan capture and approval correctly
+	// refuses a plan which attempts to reissue the completed retirement work.
+	old := storage.Identity{ClusterID: original.ClusterID, GroupID: "work", NodeName: "node3",
+		ReplicaID: replicaID(original, "work", "node3")}
+	if err := Poll(ctx, func() (bool, error) {
+		page, err := c.Progress(ctx, "node2", topology.ProgressQuery{GroupID: "work", NodeName: "node3"})
+		debt, found := exactCleanup(page, old)
+		return found && debt.StoppedAt != nil, err
+	}); err != nil {
+		t.Fatal("removed predecessor did not finish its exact detached stop", err)
 	}
 	owner, err := c.Local(ctx, "node1", "work")
 	if err != nil || !owner.Found || owner.Status.LeaderID != owner.ReplicaID {
@@ -76,7 +90,7 @@ func TestAuthorityEarlierLearnerActionCannotUndoSameOperatorPromotionThreeNodes(
 	if err := Poll(ctx, func() (bool, error) {
 		view, err := c.Controls(ctx, "node1")
 		for _, barrier := range view.Barriers {
-			if barrier.Kind == topology.StepAddLearner && barrier.Hits > 0 && barrier.Last.OperatorID == op && barrier.Last.ReplicaID == newReplica {
+			if barrier.Kind == topology.StepAddLearner && barrier.Hits > 0 && barrier.Last.OperationID == op && barrier.Last.ReplicaID == newReplica {
 				return true, err
 			}
 		}
@@ -94,7 +108,7 @@ func TestAuthorityEarlierLearnerActionCannotUndoSameOperatorPromotionThreeNodes(
 	if err := Poll(ctx, func() (bool, error) {
 		view, err := c.Controls(ctx, "node1")
 		for _, barrier := range view.Barriers {
-			if barrier.Kind == topology.StepPromoteVoter && barrier.Hits > 0 && barrier.Last.OperatorID == op && barrier.Last.ReplicaID == newReplica {
+			if barrier.Kind == topology.StepPromoteVoter && barrier.Hits > 0 && barrier.Last.OperationID == op && barrier.Last.ReplicaID == newReplica {
 				return true, err
 			}
 		}
@@ -108,7 +122,7 @@ func TestAuthorityEarlierLearnerActionCannotUndoSameOperatorPromotionThreeNodes(
 	}
 	var earlier, later load.ActionRequest
 	for _, request := range view.Actions {
-		if request.Authorization.OperatorID != op {
+		if request.Authorization.OperationID != op {
 			continue
 		}
 		switch request.Authorization.Kind {
@@ -149,19 +163,24 @@ func TestAuthorityEarlierLearnerActionCannotUndoSameOperatorPromotionThreeNodes(
 		t.Fatal("altered grant changed native/storage/application state", before, after, err)
 	}
 	release(topology.StepPromoteVoter)
-	if err := c.WaitOperator(ctx, "node2", op); err != nil {
+	if err := c.WaitOperation(ctx, "node2", op); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WaitActive(ctx, growStage.Document.Version); err != nil {
+	if err := c.WaitFullyConverged(ctx, growStage.Document.Version); err != nil {
 		t.Fatal(err)
 	}
-	finished, err := c.Operator(ctx, "node2", op)
-	if err != nil || finished.State != topology.OperatorSucceeded || finished.Attempt != earlier.Authorization.Attempt || finished.Version != earlier.Authorization.Version {
+	finished, err := c.Operation(ctx, "node2", op)
+	if err != nil || finished.State != topology.OperationSucceeded || finished.Attempt != earlier.Authorization.Attempt || finished.Version != earlier.Authorization.Version {
 		t.Fatal("promotion changed approved execution identity", finished, err)
 	}
 	// The earlier add-learner action must not demote the freshly promoted voter.
 	requireFencedReplay(ctx, t, c, owner, earlier)
 	waitAuthorityMembership(ctx, t, c, growStage.Document, false)
+	// The fixture publishes serving observations asynchronously after metadata
+	// and native membership. Observe readiness before the consistent-read check.
+	if err := c.WaitValue(ctx, "node3", "work", "key", "before"); err != nil {
+		t.Fatal("promoted successor did not become ready to serve", err)
+	}
 	value, err := c.Read(ctx, "node3", "work", "key")
 	requireReadValue(t, value, err, "node3", "before")
 }

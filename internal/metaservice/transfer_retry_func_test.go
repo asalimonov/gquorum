@@ -9,34 +9,56 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/operator"
 	"github.com/asalimonov/gquorum/topology"
 )
 
 type interruptedTransferOwner struct {
 	operator.GroupEffects
-	mu      sync.Mutex
-	grants  []topology.AuthorityGrant
-	entered chan struct{}
+	mu         sync.Mutex
+	grants     []topology.AuthorityGrant
+	entered    chan struct{}
+	firstError error
 }
 
-func (o *interruptedTransferOwner) TransferLeader(ctx context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+func (o *interruptedTransferOwner) DispatchEffect(ctx context.Context, grant topology.AuthorityGrant,
+	resource topology.AuthorityResource, target topology.AuthorityTarget) (topology.EffectReceipt, error) {
+	if grant.Action != nil && grant.Action.Kind != topology.StepTransferLeader {
+		return o.GroupEffects.DispatchEffect(ctx, grant, resource, target)
+	}
+	if err := operator.ValidateEffectTarget(grant, resource, target); err != nil {
+		return topology.EffectReceipt{}, err
+	}
 	o.mu.Lock()
 	o.grants = append(o.grants, grant.Clone())
 	first := len(o.grants) == 1
 	o.mu.Unlock()
 	if first {
 		close(o.entered)
+		if o.firstError != nil {
+			return topology.EffectReceipt{}, o.firstError
+		}
 		<-ctx.Done()
-		return nil, ctx.Err()
+		return topology.EffectReceipt{}, ctx.Err()
 	}
-	return protocolEffectReceipts(grant), nil
+	return protocolEffectReceipts(grant)[0], nil
 }
 
 func TestDirectTransferResumesAfterCanceledCaller(t *testing.T) {
 	t.Parallel()
+	for _, mode := range []string{"canceled", "recipient election"} {
+		t.Run(mode, func(t *testing.T) { t.Parallel(); testDirectTransferRetry(t, mode) })
+	}
+}
+
+func testDirectTransferRetry(t *testing.T, mode string) {
+	t.Helper()
 	owner := &verifiedLoadController{groups: map[string]topology.Group{}, hosts: map[string]map[string]uint64{}}
 	interrupted := &interruptedTransferOwner{GroupEffects: owner, entered: make(chan struct{})}
+	if mode == "recipient election" {
+		interrupted.firstError = fault.ErrNotLeader
+	}
 	groups := singleMetaFixtureWith(t, func(o *Options) { o.LoadGroups = interrupted })
 	g := readyPublic(t, groups)
 	owner.mu.Lock()
@@ -48,14 +70,14 @@ func TestDirectTransferResumesAfterCanceledCaller(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	op, err := g.Apply(ctx, doc.Version)
+	op, err := g.Approve(ctx, doc.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := g.WaitOperator(ctx, op); err != nil {
-		t.Fatal(err)
+	if status, err := g.WaitOperation(ctx, op); err != nil || status.State != topology.OperationSucceeded {
+		t.Fatal(status, err)
 	}
-	waitPublic(t, func() bool { return g.state().Active().Version == doc.Version })
+	waitPublic(t, func() bool { return g.state().Views().FullyConverged.Version == doc.Version })
 	caller, cancelCaller := context.WithCancel(ctx)
 	defer cancelCaller()
 	result := make(chan error, 1)
@@ -65,11 +87,17 @@ func TestDirectTransferResumesAfterCanceledCaller(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("transfer did not reach resource owner", ctx.Err())
 	}
-	cancelCaller()
-	if err := <-result; !errors.Is(err, context.Canceled) {
+	retries := 1
+	var expected error
+	if mode == "canceled" {
+		cancelCaller()
+		expected = context.Canceled
+		retries = 2
+	}
+	if err := <-result; !errors.Is(err, expected) {
 		t.Fatal(err)
 	}
-	for range 2 {
+	for range retries {
 		if err := g.TransferLeader(ctx, "load-one", "n1"); err != nil {
 			t.Fatal("retry stranded transfer authority", err)
 		}

@@ -75,6 +75,11 @@ func TestJoinGrantValidatesEveryHintBeforeRoutingMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := map[string]func(*joinResponse){
+		"origin separator":  func(r *joinResponse) { r.Admission.ReadmissionOperatorID = "exec-v1-a1\x00" },
+		"origin whitespace": func(r *joinResponse) { r.Admission.ReadmissionOperatorID = " " },
+		"self origin": func(r *joinResponse) {
+			r.Admission.OperationID, r.Admission.ReadmissionOperatorID = "exec-v1-a1", "exec-v1-a1"
+		},
 		"wrong owner":            func(r *joinResponse) { r.Members[0].Name = "intruder" },
 		"unapproved member":      func(r *joinResponse) { r.Members[0].MemberID = 99 },
 		"zero member":            func(r *joinResponse) { r.Members[0].MemberID = 0 },
@@ -114,7 +119,7 @@ func TestReadmissionCallbackUsesOwnedExactGrant(t *testing.T) {
 	g := &Group{opts: Options{DBPath: filepath.Join(t.TempDir(), "missing.bolt")}}
 	previous := topology.Identity{NodeName: "one", ClusterID: "cluster", InstanceID: "process", MemberID: 1}
 	r := joinResponse{MemberID: 2, PreviousGroups: []topology.Group{{ID: "old", Replicas: []topology.Replica{{NodeName: "one", ReplicaID: 7}}}}}
-	r.Admission.OperatorID, r.Admission.InstanceID = "exec-v3-a1", "process"
+	r.Admission.OperationID, r.Admission.InstanceID = "exec-v3-a1", "process"
 	g.opts.OnReadmission = func(ctx context.Context, grant Readmission) error {
 		if err := g.AuthorizeReadmission(ctx, grant); err != nil {
 			t.Fatal(err)
@@ -123,7 +128,7 @@ func TestReadmissionCallbackUsesOwnedExactGrant(t *testing.T) {
 			t.Fatal("lost remote approved catalog", grant)
 		}
 		grant.PreviousGroups[0].Replicas[0].ReplicaID = 9
-		if !errors.Is(g.AuthorizeReadmission(ctx, grant), fault.ErrOperatorAuthorization) {
+		if !errors.Is(g.AuthorizeReadmission(ctx, grant), fault.ErrOperationAuthorization) {
 			t.Fatal("mutated callback grant altered authorization")
 		}
 		return nil

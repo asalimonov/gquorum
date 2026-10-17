@@ -103,7 +103,7 @@ func Open(path string) (*Store, error) {
 				return err
 			}
 		}
-		return tx.Bucket(bucketFormat).Put(keySchemaVersion, []byte("3"))
+		return tx.Bucket(bucketFormat).Put(keySchemaVersion, []byte("4"))
 	})
 	if updateErr != nil {
 		_ = db.Close()
@@ -183,7 +183,7 @@ func validateDiskSchema(tx *bolt.Tx) error {
 		}
 		return nil
 	}
-	if string(b.Get(keySchemaVersion)) != "3" {
+	if string(b.Get(keySchemaVersion)) != "4" {
 		return fault.New(fault.Unsupported, "unsupported meta storage schema", nil)
 	}
 	nextForEachErr := b.ForEach(func(key, value []byte) error {
@@ -272,14 +272,14 @@ func PeekLocalLineage(path string) (lineage LocalLineage, err error) {
 		lineage.MemberID = id.Identity.MemberID
 		if b := tx.Bucket(bucketState); b != nil && b.Get(keyState) != nil {
 			var views struct {
-				Latest lineageVersion `json:"latest"`
-				Target lineageVersion `json:"target"`
-				Active lineageVersion `json:"active"`
+				Latest         lineageVersion `json:"latest"`
+				Target         lineageVersion `json:"target"`
+				FullyConverged lineageVersion `json:"fully_converged"`
 			}
 			if err := json.Unmarshal(b.Get(keyState), &views); err != nil {
 				return fault.New(fault.Unreadable, "invalid meta materialized state", err)
 			}
-			lineage.Version = max(views.Latest.Version, views.Target.Version, views.Active.Version)
+			lineage.Version = max(views.Latest.Version, views.Target.Version, views.FullyConverged.Version)
 		}
 		return nil
 	})

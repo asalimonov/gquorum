@@ -61,7 +61,7 @@ func (n *node) applyMetaHostAction(ctx context.Context, request load.ActionReque
 	}
 	if request.Authorization.Kind != topology.StepPrepareReplica &&
 		request.Authorization.Kind != topology.StepStopReplica {
-		return load.ActionResult{}, fault.ErrOperatorAuthorization
+		return load.ActionResult{}, fault.ErrOperationAuthorization
 	}
 	work, err := n.runMetaAuthority(ctx, request.Grant, id, applyMetaAuthority)
 	if err != nil {
@@ -83,7 +83,7 @@ func (n *node) runMetaAuthority(ctx context.Context, grant topology.AuthorityGra
 	if grant.Key.GroupID != topology.MetaGroupID || grant.Key.ClusterID != id.ClusterID || grant.Validate() != nil ||
 		!slices.Contains(grant.Targets, topology.AuthorityTarget{NodeName: id.NodeName, MemberID: id.MemberID,
 			ReplicaID: id.MemberID}) {
-		return nil, fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperationAuthorization
 	}
 	work, err := n.reserveMetaAuthority(grant, id, mode)
 	if err != nil {
@@ -176,7 +176,7 @@ func (n *node) executeMetaAuthority(m *metaservice.Group, s *authoritystore.Stor
 	case topology.StepStopReplica:
 		err = n.joinMetaHost(ctx, m)
 	default:
-		err = fault.ErrOperatorAuthorization
+		err = fault.ErrOperationAuthorization
 	}
 	if err != nil {
 		work.err = err

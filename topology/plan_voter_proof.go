@@ -2,7 +2,7 @@ package topology
 
 import "slices"
 
-func validatePlanVoterProof(active, desired Document, plan Plan) error {
+func validatePlanVoterProof(base PlanInput, desired Document, plan Plan) error {
 	required, err := requiredProofGroups(plan)
 	if err != nil {
 		return err
@@ -10,7 +10,7 @@ func validatePlanVoterProof(active, desired Document, plan Plan) error {
 	if len(required) != len(plan.VoterBases) {
 		return planUnsafef("plan has incomplete or extraneous voter bases")
 	}
-	p := planVoterProof{active: active, desired: desired, sets: make(map[string]map[uint64]struct{}, len(required))}
+	p := planVoterProof{base: base, desired: desired, sets: make(map[string]map[uint64]struct{}, len(required))}
 	last := ""
 	for _, entry := range plan.VoterBases {
 		if !required[entry.GroupID] || last != "" && comparePlanGroups(entry.GroupID, last) <= 0 {
@@ -38,7 +38,7 @@ func validatePlanVoterProof(active, desired Document, plan Plan) error {
 }
 
 type planVoterProof struct {
-	active  Document
+	base    PlanInput
 	desired Document
 	sets    map[string]map[uint64]struct{}
 }
@@ -52,20 +52,20 @@ func (p *planVoterProof) validateBase(entry PlanVoterBase) (map[uint64]struct{},
 		if id == 0 {
 			return nil, planUnsafef("group %q voter base contains zero ID", entry.GroupID)
 		}
-		if _, ok := replicaIdentity(p.active.Group(entry.GroupID), p.desired.Group(entry.GroupID), id); !ok {
+		if _, ok := p.base.planReplicaKey(entry.GroupID, p.desired.Group(entry.GroupID), id); !ok {
 			return nil, planUnsafef("group %q voter base has unknown replica %d", entry.GroupID, id)
 		}
 		set[id] = struct{}{}
 	}
-	if p.active.Group(entry.GroupID) == nil {
+	if p.base.foundingGroup(entry.GroupID) {
 		if len(set) != 0 {
 			return nil, planUnsafef("founding group %q has a nonempty voter base", entry.GroupID)
 		}
 	} else if len(set) == 0 {
 		return nil, planUnsafef("established group %q has an empty voter base", entry.GroupID)
 	}
-	state := voterPlanState{base: p.active, desired: p.desired, groupID: entry.GroupID}
-	if err := validateOldDomains(p.active, p.desired, entry.GroupID, voterKeysForSet(state, set)); err != nil {
+	state := voterPlanState{base: p.base, desired: p.desired, groupID: entry.GroupID}
+	if err := validateOldDomains(p.base, p.desired, entry.GroupID, voterKeysForSet(state, set)); err != nil {
 		return nil, err
 	}
 	return set, nil
@@ -100,8 +100,8 @@ func (p *planVoterProof) validateStep(step Step) error {
 	if step.ResultVotersDigest != digestIDSet(set) {
 		return planUnsafef("step %d has a mismatched result voter proof", step.Seq)
 	}
-	state := voterPlanState{base: p.active, desired: p.desired, groupID: step.GroupID}
-	view := voterPlanTopology{base: p.active, desired: p.desired, groupID: step.GroupID}
+	state := voterPlanState{base: p.base, desired: p.desired, groupID: step.GroupID}
+	view := voterPlanTopology{base: p.base, desired: p.desired, groupID: step.GroupID}
 	checkErr := validateVoterTransition(view, voterKeysForSet(state, before),
 		voterKeysForSet(state, set), state)
 	if checkErr != nil {
@@ -148,8 +148,8 @@ func (p *planVoterProof) validateFinalGroup(id string, set map[uint64]struct{}) 
 	if !sameVoterIDs(set, p.desired.VotersOf(id)) {
 		return planUnsafef("group %q plan does not end at desired voters", id)
 	}
-	state := voterPlanState{base: p.active, desired: p.desired, groupID: id}
-	violations, err := targetVoterViolations(p.active, p.desired, id, voterKeysForSet(state, set))
+	state := voterPlanState{base: p.base, desired: p.desired, groupID: id}
+	violations, err := targetVoterViolations(p.base, p.desired, id, voterKeysForSet(state, set))
 	if err != nil {
 		return err
 	}

@@ -33,8 +33,8 @@ func TestObservationKeepsHealthyMajorityAndOwnsUnreturnedReader(t *testing.T) {
 			t.Parallel()
 			f := newFixture(t)
 			f.cfg.EffectTimeout = 100 * time.Millisecond
-			f.cfg.Active = func(context.Context) (topology.Document, error) {
-				return topology.Document{Groups: []topology.Group{{ID: "work"}}}, nil
+			f.cfg.Progress = func(context.Context) (topology.ProgressPage, error) {
+				return topology.ProgressPage{Groups: []topology.GroupProgress{{GroupID: "work", ConvergedVersion: 1, Converged: &topology.Group{ID: "work"}}}}, nil
 			}
 			f.cfg.Catalog = func(context.Context, string) ([]storage.Identity, error) {
 				return []storage.Identity{
@@ -221,8 +221,8 @@ func TestObservationRefusalDoesNotAttestAReplicaButMalformedSuccessFails(t *test
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			f := newFixture(t)
-			f.cfg.Active = func(context.Context) (topology.Document, error) {
-				return topology.Document{Groups: []topology.Group{{ID: "work"}}}, nil
+			f.cfg.Progress = func(context.Context) (topology.ProgressPage, error) {
+				return topology.ProgressPage{Groups: []topology.GroupProgress{{GroupID: "work", ConvergedVersion: 1, Converged: &topology.Group{ID: "work"}}}}, nil
 			}
 			f.cfg.Catalog = func(context.Context, string) ([]storage.Identity, error) {
 				return []storage.Identity{{NodeName: "b", ClusterID: "cluster", GroupID: "work", ReplicaID: 2}}, nil
@@ -263,5 +263,34 @@ func TestObservationRefusalDoesNotAttestAReplicaButMalformedSuccessFails(t *test
 				}
 			}
 		})
+	}
+}
+
+func TestObservationPinsSourceBeforeDispatch(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t)
+	var version atomic.Uint64
+	version.Store(7)
+	f.cfg.Progress = func(context.Context) (topology.ProgressPage, error) {
+		return topology.ProgressPage{Groups: []topology.GroupProgress{{GroupID: "work",
+			ConvergedVersion: version.Load(), Converged: &topology.Group{ID: "work"}}}}, nil
+	}
+	f.cfg.Catalog = func(context.Context, string) ([]storage.Identity, error) {
+		return []storage.Identity{{NodeName: "b", ClusterID: "cluster", GroupID: "work", ReplicaID: 2}}, nil
+	}
+	var reporter topology.Identity
+	f.cfg.Transport = observationTransport{read: func(_ context.Context, q load.ReplicaQuery) (load.ReplicaStatus, error) {
+		reporter = q.To.Node
+		version.Store(9) // Convergence changes while the native read is outstanding.
+		return load.ReplicaStatus{Peer: q.To, Found: true, Status: topology.GroupStatus{
+			GroupID: "work", HostNode: "b", Found: true, LeaderID: 2, Term: 1,
+			SourceVersion: 999, ReporterReplicaID: 999, ReceivedAt: time.Unix(1, 0)}}, nil
+	}}
+	h := f.host(t)
+	before := time.Now()
+	status, err := h.ObserveGroup(t.Context(), "work")
+	if err != nil || status.SourceVersion != 7 || status.Reporter != reporter ||
+		status.ReporterReplicaID != 2 || status.ReceivedAt.Before(before) {
+		t.Fatal("response relabeled to newer convergence or trusted remote provenance", status, err)
 	}
 }

@@ -50,15 +50,8 @@ func (p PlacementRule) Clone() PlacementRule {
 // AffectedPlacementGroups reports groups whose effective host or voter choices
 // may change. Descriptive group labels alone do not affect placement.
 func AffectedPlacementGroups(before, after Document) []string {
-	ids := make(map[string]bool, len(before.Groups)+len(after.Groups))
-	for _, group := range before.Groups {
-		ids[group.ID] = true
-	}
-	for _, group := range after.Groups {
-		ids[group.ID] = true
-	}
 	var affected []string
-	for _, id := range sortedMapKeys(ids) {
+	for _, id := range documentGroupIDs(before, after) {
 		old, next := before.Group(id), after.Group(id)
 		if old == nil || next == nil {
 			affected = append(affected, id)

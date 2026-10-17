@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/operator"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -21,16 +22,20 @@ type slowEffectController struct {
 	once                                 sync.Once
 }
 
-func (c *slowEffectController) CreateGroup(ctx context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+func (c *slowEffectController) DispatchEffect(ctx context.Context, grant topology.AuthorityGrant,
+	resource topology.AuthorityResource, target topology.AuthorityTarget) (topology.EffectReceipt, error) {
+	if err := operator.ValidateEffectTarget(grant, resource, target); err != nil {
+		return topology.EffectReceipt{}, err
+	}
 	if _, err := c.authorized(ctx, grant); err != nil {
-		return nil, err
+		return topology.EffectReceipt{}, err
 	}
 	c.once.Do(func() { close(c.entered) })
 	<-ctx.Done()
 	close(c.canceled)
 	<-c.release
 	close(c.returned)
-	return nil, ctx.Err()
+	return topology.EffectReceipt{}, ctx.Err()
 }
 func TestMetaQuiesceJoinsEffectBeforeReturningAndKeepsOwnedState(t *testing.T) {
 	t.Parallel()
@@ -77,7 +82,7 @@ func TestMetaQuiesceJoinsEffectBeforeReturningAndKeepsOwnedState(t *testing.T) {
 	if _, err = g.Stage(ctx, r.Document, 2); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal("accepted mutation during quiescence", err)
 	}
-	if err = g.Authorize(ctx, topology.AuthorizedStep{}); !errors.Is(err, fault.ErrStopped) {
+	if _, err = g.BeginEffect(ctx, topology.AuthorizedStep{}); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal("accepted external effect authorization during quiescence", err)
 	}
 	release()

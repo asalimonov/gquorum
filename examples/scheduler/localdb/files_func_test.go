@@ -148,8 +148,8 @@ func TestApplicationFilesPreserveForeignEvidence(t *testing.T) {
 }
 func retirementRequest() load.RetirementRequest {
 	id := testStorageIdentity()
-	step := topology.AuthorizedStep{OperatorID: topology.MakeOperatorID(2, 1), Version: 2, Attempt: 1, StepSeq: 3, Kind: topology.StepCleanupReplicaState, GroupID: id.GroupID, NodeName: id.NodeName, ReplicaID: id.ReplicaID}
-	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: id.ClusterID, GroupID: id.GroupID, Revision: 3}, Purpose: topology.AuthorityEffect, OperatorID: step.OperatorID, Action: &step, Resources: []topology.AuthorityResource{{Kind: topology.AuthorityHost, GroupID: id.GroupID, NodeName: id.NodeName}}, Targets: []topology.AuthorityTarget{{NodeName: id.NodeName, MemberID: 1, ReplicaID: id.ReplicaID}}}
+	step := topology.AuthorizedStep{OperationID: topology.MakeOperationID(2, 1), Version: 2, Attempt: 1, StepSeq: 3, Kind: topology.StepCleanupReplicaState, GroupID: id.GroupID, NodeName: id.NodeName, ReplicaID: id.ReplicaID}
+	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: id.ClusterID, GroupID: id.GroupID, Revision: 3}, Purpose: topology.AuthorityEffect, OperationID: step.OperationID, Action: &step, Resources: []topology.AuthorityResource{{Kind: topology.AuthorityHost, GroupID: id.GroupID, NodeName: id.NodeName}}, Targets: []topology.AuthorityTarget{{NodeName: id.NodeName, MemberID: 1, ReplicaID: id.ReplicaID}}}
 	return load.RetirementRequest{Identity: id, Grant: grant, Reason: load.RetirementTopology, Authorization: &step}
 }
 func TestRetirementRechecksProofAfterDeletion(t *testing.T) {
@@ -178,12 +178,12 @@ func TestRetirementRechecksProofAfterDeletion(t *testing.T) {
 	bad := req
 	bad.Grant = bad.Grant.Clone()
 	bad.Grant.Key.Revision++
-	if _, err := Retire(t.Context(), root, bad); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if _, err := Retire(t.Context(), root, bad); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("different proof accepted after deletion", err)
 	}
 	bad = req
 	bad.Authorization = nil
-	if _, err := Retire(t.Context(), root, bad); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if _, err := Retire(t.Context(), root, bad); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("incomplete proof accepted after deletion", err)
 	}
 	if _, err := Open(t.Context(), root, req.Identity); !errors.Is(err, fault.ErrGroupRetired) {

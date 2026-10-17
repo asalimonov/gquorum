@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/asalimonov/gquorum"
 	"io"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -25,8 +26,8 @@ func groupStatus(ctx context.Context, c *Cluster, node, group string) (topology.
 		return topology.GroupStatus{}, err
 	}
 	for _, observed := range status.Groups {
-		if observed.GroupID == group {
-			return observed, nil
+		if observed.GroupID == group && observed.Observation != nil {
+			return observed.Observation.Clone(), nil
 		}
 	}
 	return topology.GroupStatus{}, fmt.Errorf("group %q absent from %s status", group, node)
@@ -184,7 +185,13 @@ func TestRemoteApplyFromNonHostMetaLeader(t *testing.T) {
 		t.Fatal("remote deletion", deleted, err)
 	}
 	for _, node := range c.Nodes() {
-		if _, err := c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(), client.ContainerStatPathOptions{Path: "/data/load/remote"}); !errdefs.IsNotFound(err) {
+		if err := Poll(ctx, func() (bool, error) {
+			_, err := c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(), client.ContainerStatPathOptions{Path: "/data/load/remote"})
+			if errdefs.IsNotFound(err) {
+				return true, nil
+			}
+			return false, err
+		}); err != nil {
 			t.Fatal("deleted remote store remains", node.Spec.Name, err)
 		}
 	}
@@ -246,14 +253,14 @@ func callerRefusedDeletion(t *testing.T, size int) {
 	if len(plan.Steps) != 4 || plan.Steps[0].Kind != topology.StepStopReplica || plan.Steps[3].Kind != topology.StepDeleteGroupState {
 		t.Fatal(plan)
 	}
-	approve := func() topology.OperatorID {
+	approve := func() topology.OperationID {
 		t.Helper()
 		response, err := c.Request(ctx, "node2", "POST", fmt.Sprintf("/api/topology/%d/approve", deleted.Document.Version), nil, 0)
 		if err := requireStatus(response, err, 202); err != nil {
 			t.Fatal(err)
 		}
 		var result struct {
-			ID topology.OperatorID `json:"operator_id"`
+			ID topology.OperationID `json:"operation_id"`
 		}
 		if err := response.Decode(&result); err != nil || result.ID == "" {
 			t.Fatal(result, err)
@@ -261,15 +268,18 @@ func callerRefusedDeletion(t *testing.T, size int) {
 		return result.ID
 	}
 	failedID := approve()
-	var failed topology.OperatorStatus
+	var failed topology.OperationStatus
 	if err := Poll(ctx, func() (bool, error) {
 		var err error
-		failed, err = c.Operator(ctx, "node2", failedID)
+		failed, err = c.Operation(ctx, "node2", failedID)
 		return failed.State.Terminal(), err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if failed.State != topology.OperatorFailed || failed.Attempt != 1 || failed.Version != deleted.Document.Version || failed.CurrentStep != 1 || !strings.Contains(failed.Error, "caller refuses deletion") {
+	block, found := operationBlock(failed, "occupied")
+	if failed.State != topology.OperationFailed || failed.Attempt != 1 || failed.Version != deleted.Document.Version ||
+		!found || block.State != topology.OperationFailed || block.CurrentStep != 1 ||
+		!strings.Contains(block.Error, "caller refuses deletion") {
 		t.Fatal(failed)
 	}
 	assertFailure := func(restarted string) {
@@ -277,7 +287,8 @@ func callerRefusedDeletion(t *testing.T, size int) {
 		for _, node := range c.Nodes() {
 			if err := Poll(ctx, func() (bool, error) {
 				status, err := c.Status(ctx, node.Spec.Name)
-				return status.LatestVersion == deleted.Document.Version && status.TargetVersion == deleted.Document.Version && status.ActiveVersion == created.Document.Version && status.Operator != nil && *status.Operator == failed, err
+				summary, found := operationSummary(status, failed.ID)
+				return status.LatestVersion == deleted.Document.Version && status.TargetVersion == deleted.Document.Version && status.FullyConverged.Version == created.Document.Version && found && summary.State == failed.State && summary.Attempt == failed.Attempt, err
 			}); err != nil {
 				t.Fatal(node.Spec.Name, err)
 			}
@@ -311,12 +322,12 @@ func callerRefusedDeletion(t *testing.T, size int) {
 			if b.Group == "occupied" {
 				hits += b.Hits
 			}
-			if b.Group == "occupied" && b.Hits > 0 && (!b.Refuse || !b.Last.Matches(failedID, 1, deleted.Document.Version, plan.Steps[0])) {
+			if b.Group == "occupied" && b.Hits > 0 && (!b.Refuse || !b.Last.Matches(topology.OperationID(failedID), 1, deleted.Document.Version, plan.Steps[0])) {
 				t.Fatal("refusal lost exact authorized scope", b)
 			}
 		}
 		for _, receipt := range controls.Receipts {
-			if receipt.OperatorID == failedID {
+			if receipt.OperationID == topology.OperationID(failedID) {
 				t.Fatal("refused attempt performed an effect", receipt)
 			}
 		}
@@ -368,7 +379,8 @@ func callerRefusedDeletion(t *testing.T, size int) {
 	}
 	if err := Poll(ctx, func() (bool, error) {
 		observed, err := c.Status(ctx, survivor)
-		return observed.MetaLeaderID != 0 && observed.MetaLeaderID != status.MetaLeaderID && observed.Operator != nil && *observed.Operator == failed, err
+		summary, found := operationSummary(observed, failed.ID)
+		return observed.MetaLeaderID != 0 && observed.MetaLeaderID != status.MetaLeaderID && found && summary.State == failed.State && summary.Attempt == failed.Attempt, err
 	}); err != nil {
 		t.Fatal("failed execution did not survive leader replacement", err)
 	}
@@ -377,7 +389,8 @@ func callerRefusedDeletion(t *testing.T, size int) {
 	}
 	if err := Poll(ctx, func() (bool, error) {
 		observed, err := c.Status(ctx, oldLeader.Spec.Name)
-		return observed.SessionLive && observed.MetaLeaderID != 0 && observed.Operator != nil && *observed.Operator == failed, err
+		summary, found := operationSummary(observed, failed.ID)
+		return observed.SessionLive && observed.MetaLeaderID != 0 && found && summary.State == failed.State && summary.Attempt == failed.Attempt, err
 	}); err != nil {
 		t.Fatal("retained meta did not recover the failed execution", err)
 	}
@@ -401,26 +414,45 @@ func callerRefusedDeletion(t *testing.T, size int) {
 		}
 	}
 
-	retryID := approve()
+	response, err = c.Request(ctx, "node2", "POST", "/api/operations/"+string(failedID)+"/retry", nil, 0)
+	if err := requireStatus(response, err, 202); err != nil {
+		t.Fatal(err)
+	}
+	var retryResult struct {
+		ID topology.OperationID `json:"operation_id"`
+	}
+	if err := response.Decode(&retryResult); err != nil || retryResult.ID == "" {
+		t.Fatal(retryResult, err)
+	}
+	retryID := retryResult.ID
 	if retryID == failedID {
 		t.Fatal("retry reused failed attempt", retryID)
 	}
-	if err := c.WaitOperator(ctx, "node2", retryID); err != nil {
+	if err := c.WaitOperation(ctx, "node2", retryID); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WaitActive(ctx, deleted.Document.Version); err != nil {
+	if err := c.WaitFullyConverged(ctx, deleted.Document.Version); err != nil {
 		t.Fatal(err)
 	}
-	retry, err := c.Operator(ctx, "node2", retryID)
+	retry, err := c.Operation(ctx, "node2", retryID)
 	if err != nil || retry.Attempt != 2 || retry.Version != failed.Version {
 		t.Fatal(retry, err)
 	}
 	for _, node := range c.Nodes() {
-		prior, err := c.Operator(ctx, node.Spec.Name, failedID)
-		if err != nil || prior != failed {
+		prior, err := c.Operation(ctx, node.Spec.Name, failedID)
+		if err != nil || !reflect.DeepEqual(prior, failed) {
 			t.Fatal("retry rewrote historical failure", prior, err)
 		}
-		if _, err := c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(), client.ContainerStatPathOptions{Path: "/data/load/occupied"}); !errdefs.IsNotFound(err) {
+		// Required stops complete the operation; quarantine is detached and
+		// must be observed independently before asserting physical absence.
+		if err := Poll(ctx, func() (bool, error) {
+			_, err := c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(),
+				client.ContainerStatPathOptions{Path: "/data/load/occupied"})
+			if errdefs.IsNotFound(err) {
+				return true, nil
+			}
+			return false, err
+		}); err != nil {
 			t.Fatal("successful deletion retained usable store", node.Spec.Name, err)
 		}
 	}

@@ -39,7 +39,11 @@ func TestAuthorityRevocationBoundaryAndLostFenceReplyThreeNodes(t *testing.T) {
 			if err := c.SetBarrier(ctx, "node1", "work", topology.StepDemoteVoter, true); err != nil {
 				t.Fatal(err)
 			}
+			actionHeld := true
 			t.Cleanup(func() {
+				if !actionHeld {
+					return
+				}
 				cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
 				if err := c.SetBarrier(cleanup, "node1", "work", topology.StepDemoteVoter, false); err != nil {
@@ -66,7 +70,7 @@ func TestAuthorityRevocationBoundaryAndLostFenceReplyThreeNodes(t *testing.T) {
 			if err := Poll(ctx, func() (bool, error) {
 				view, err := c.Authority(ctx, "node1", "work")
 				for _, action := range view.Actions {
-					if action.Authorization.OperatorID == old && action.Authorization.Kind == topology.StepDemoteVoter {
+					if action.Authorization.OperationID == old && action.Authorization.Kind == topology.StepDemoteVoter {
 						delayed = action
 						return true, err
 					}
@@ -118,7 +122,7 @@ func TestAuthorityRevocationBoundaryAndLostFenceReplyThreeNodes(t *testing.T) {
 			if err := response.Decode(&plan); err != nil {
 				t.Fatal(err)
 			}
-			if !plan.IsEmpty() {
+			if len(plan.Steps) != 0 || len(plan.Blocks) != 1 || plan.Blocks[0].GroupID != "work" {
 				t.Fatal("successor setup must capture the pre-delivery native state", plan)
 			}
 			newOp := startApply(ctx, t, c, "node2", newStage.Document.Version)
@@ -208,19 +212,46 @@ func TestAuthorityRevocationBoundaryAndLostFenceReplyThreeNodes(t *testing.T) {
 			}
 			requireFencedReplay(ctx, t, c, owner, delayed)
 			if after {
-				if err := c.WaitOperator(ctx, "node2", newOp); err != nil {
-					t.Fatal("lost acknowledgement could not resume the same empty plan", err)
+				// A fence proves revocation, not whether the earlier native
+				// demotion ran. The declaration block must retain that uncertainty.
+				pending, err := c.Operation(ctx, "node2", newOp)
+				block, found := operationBlock(pending, "work")
+				if err != nil || !found || block.Blocked == nil ||
+					block.Blocked.Code != "membership_unproven" {
+					t.Fatal("resource fence manufactured membership outcome", pending, err)
 				}
-				if err := c.WaitActive(ctx, newStage.Document.Version); err != nil {
+				if err := c.SetBarrier(ctx, "node1", "work", topology.StepDemoteVoter, false); err != nil {
 					t.Fatal(err)
+				}
+				actionHeld = false
+				// Explicit role changes obtain fresh fenced receipts and establish
+				// a new checkpoint. An unchanged document cannot invent proof.
+				demoted.Version = newStage.Document.Version
+				confirmed, err := c.Stage(ctx, "node3", demoted)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := c.Approve(ctx, "node3", confirmed.Document.Version); err != nil {
+					t.Fatal("fresh demotion did not establish exact outcome", err)
+				}
+				restored := original.Clone()
+				restored.Version = confirmed.Document.Version
+				confirmed, err = c.Stage(ctx, "node3", restored)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := c.Approve(ctx, "node3", confirmed.Document.Version); err != nil {
+					t.Fatal("fresh promotion did not restore original membership", err)
 				}
 			} else {
 				if err := Poll(ctx, func() (bool, error) {
-					op, err := c.Operator(ctx, "node2", newOp)
+					op, err := c.Operation(ctx, "node2", newOp)
 					if err != nil || !op.State.Terminal() {
 						return false, err
 					}
-					if op.State != topology.OperatorFailed || !strings.Contains(op.Error, string(fault.ReplanRequired)+":") {
+					block, found := operationBlock(op, "work")
+					if op.State != topology.OperationFailed || !found ||
+						block.ErrorCode != string(fault.ReplanRequired) || !strings.Contains(block.Error, string(fault.ReplanRequired)+":") {
 						return true, fmt.Errorf("stale empty plan did not report its replan requirement: %+v", op)
 					}
 					return true, nil
@@ -235,6 +266,12 @@ func TestAuthorityRevocationBoundaryAndLostFenceReplyThreeNodes(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				// A semantic group edit creates a replacement scope; a whole-
+				// document no-op no longer restarts a failed group's work.
+				if latest.Group("work").Labels == nil {
+					latest.Group("work").Labels = make(map[string]string)
+				}
+				latest.Group("work").Labels["fence_replan"] = "confirmed"
 				replanned, err := c.Stage(ctx, "node2", latest)
 				if err != nil {
 					t.Fatal(err)

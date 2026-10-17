@@ -87,7 +87,7 @@ func (h *Host) finishStartupEffect(slot *replica) error {
 func actionTargets(ctx context.Context, a topology.AuthorizedStep,
 	grant topology.AuthorityGrant) ([]storage.Identity, error) {
 	if grant.Action == nil || *grant.Action != a || grant.Validate() != nil {
-		return nil, fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperationAuthorization
 	}
 	var targets []storage.Identity
 	for _, t := range grant.Targets {
@@ -101,7 +101,7 @@ func actionTargets(ctx context.Context, a topology.AuthorizedStep,
 func (h *Host) validateGrantedAction(ctx context.Context, req load.ActionRequest) error {
 	if req.Grant.Action == nil || *req.Grant.Action != req.Authorization || !completeIdentity(req.From) ||
 		!completePeer(req.To) || req.Grant.Validate() != nil {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	identity := h.cfg.Identity()
 	if req.To.Node != identity || req.From.ClusterID != req.To.Node.ClusterID ||
@@ -119,12 +119,12 @@ func (h *Host) validateGrantedAction(ctx context.Context, req load.ActionRequest
 			ReplicaID: req.To.Replica.ReplicaID,
 		}
 		if req.LocalTarget != want || !slices.Contains(req.Grant.Targets, actionTarget(req)) {
-			return fault.ErrOperatorAuthorization
+			return fault.ErrOperationAuthorization
 		}
 		return nil
 	}
 	if req.LocalTarget != (storage.Identity{}) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	return h.cfg.ValidatePeer(ctx, req.To)
 }
@@ -159,7 +159,7 @@ func (h *Host) checkInstalledGrant(ctx context.Context, grant topology.Authority
 // gate. A later request must first pass checkInstalledGrant and BeginEffect.
 func (h *Host) checkRetirementAuthority(ctx context.Context, req load.RetirementRequest) error {
 	if req.Grant.Action == nil || *req.Grant.Action != *req.Authorization {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	if err := h.cfg.ValidateGrant(ctx, req.Grant); err != nil {
 		return err

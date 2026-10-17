@@ -27,10 +27,10 @@ func TestMetaWatchSeedIsNotRepeatedByLateApply(t *testing.T) {
 	if receiveUpdate(t, ch).Document.Version != 3 {
 		t.Fatal("seed")
 	}
-	r.publish(topology.Document{Version: 2}, topology.Document{}, topology.Document{})
-	r.publish(seed, topology.Document{}, topology.Document{})
+	r.publish(topology.ReadView{Latest: topology.Document{Version: 2}})
+	r.publish(topology.ReadView{Latest: seed})
 	assertWatchQuiet(t, ch)
-	r.publish(topology.Document{Version: 4}, topology.Document{}, topology.Document{})
+	r.publish(topology.ReadView{Latest: topology.Document{Version: 4}})
 	if receiveUpdate(t, ch).Document.Version != 4 {
 		t.Fatal("seed repeated")
 	}
@@ -45,7 +45,7 @@ func TestMetaWatchDropOldestKeepsNewestWithoutBlocking(t *testing.T) {
 		t.Fatal(err)
 	}
 	for v := uint64(1); v <= 128; v++ {
-		r.publish(topology.Document{Version: v}, topology.Document{}, topology.Document{})
+		r.publish(topology.ReadView{Latest: topology.Document{Version: v}})
 	}
 	if len(ch) != 1 || receiveUpdate(t, ch).Document.Version != 128 {
 		t.Fatal("watch did not coalesce newest")
@@ -77,9 +77,9 @@ func TestMetaWatchCancelAndBound(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("cancel did not close watch")
 	}
-	r.publish(topology.Document{Version: 1}, topology.Document{}, topology.Document{})
+	r.publish(topology.ReadView{Latest: topology.Document{Version: 1}})
 	receiveUpdate(t, keep)
-	if _, err := r.watch(context.Background(), topology.Active, func() topology.Document { return topology.Document{} }); err != nil {
+	if _, err := r.watch(context.Background(), topology.Target, func() topology.Document { return topology.Document{} }); err != nil {
 		t.Fatal("canceled watcher retained capacity", err)
 	}
 }
@@ -103,9 +103,37 @@ func TestMetaWatchConcurrentSubscribePublishCancelAndClose(t *testing.T) {
 		})
 	}
 	for v := uint64(2); v < 128; v++ {
-		r.publish(topology.Document{Version: v}, topology.Document{}, topology.Document{})
+		r.publish(topology.ReadView{Latest: topology.Document{Version: v}})
 	}
 	r.close()
 	wg.Wait()
 	r.close()
+}
+
+func TestMetaWatchPublishesCapturedRebasePair(t *testing.T) {
+	t.Parallel()
+	r := newWatchRegistry(2)
+	defer r.close()
+	channels := make(map[topology.View]<-chan topology.Update)
+	for _, view := range []topology.View{topology.Latest, topology.Target} {
+		ch, err := r.watch(t.Context(), view, func() topology.Document { return topology.Document{} })
+		if err != nil {
+			t.Fatal(err)
+		}
+		channels[view] = ch
+	}
+	views := topology.ReadView{AppliedIndex: 42,
+		Target: topology.Document{Version: 11, ParentVersion: 9, Comment: "repair"},
+		Latest: topology.Document{Version: 12, ParentVersion: 11, RebasedFrom: 10, Comment: "preserved intent"}}
+	r.publish(views)
+	views.Latest.Comment = "caller mutation"
+	latest := receiveUpdate(t, channels[topology.Latest])
+	target := receiveUpdate(t, channels[topology.Target])
+	if latest.Document.ParentVersion != target.Document.Version || latest.Document.RebasedFrom != 10 ||
+		latest.Document.Comment != "preserved intent" || target.Document.Comment != "repair" {
+		t.Fatal("watch mixed or aliased the captured pair", latest, target)
+	}
+	r.publish(topology.ReadView{Target: topology.Document{Version: 10}, Latest: topology.Document{Version: 11}})
+	assertWatchQuiet(t, channels[topology.Latest])
+	assertWatchQuiet(t, channels[topology.Target])
 }

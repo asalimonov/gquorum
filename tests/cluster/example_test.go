@@ -123,7 +123,7 @@ func TestComposeExampleTopologyDrainActivate(t *testing.T) {
 		return res.StatusCode
 	}
 	var initial topology.Document
-	request("node1", "GET", "/api/topology/active", nil, 0, 200, &initial)
+	request("node1", "GET", "/api/topology/target", nil, 0, 200, &initial)
 	if len(initial.Nodes) != 3 || len(initial.LoadGroups()) != 0 || initial.Node("node3").Type != "observer" {
 		t.Fatalf("unexpected demo: %+v", initial)
 	}
@@ -132,7 +132,11 @@ func TestComposeExampleTopologyDrainActivate(t *testing.T) {
 		request(n, "GET", "/internal/test/controls", nil, 0, 404, nil)
 		var status topology.ClusterStatus
 		request(n, "GET", "/api/cluster/status", nil, 0, 200, &status)
-		if status.MetaLeaderNodeName == "" || initial.MemberID(status.MetaLeaderNodeName) != status.MetaLeaderID || len(status.Groups) != 1 || status.Groups[0].LeaderNodeName != status.MetaLeaderNodeName || status.Groups[0].LeaderID != status.MetaLeaderID {
+		node3State, found := effectiveNodeState(status, "node3")
+		if !found || node3State != topology.NodeActive {
+			t.Fatalf("unexpected effective node state for node3: %+v", status.Nodes)
+		}
+		if status.MetaLeaderNodeName == "" || initial.MemberID(status.MetaLeaderNodeName) != status.MetaLeaderID || len(status.Groups) != 1 || status.Groups[0].Observation == nil || status.Groups[0].Observation.LeaderNodeName != status.MetaLeaderNodeName || status.Groups[0].Observation.LeaderID != status.MetaLeaderID {
 			t.Fatalf("leader name and Raft ID disagree: %+v", status)
 		}
 	}
@@ -144,7 +148,7 @@ func TestComposeExampleTopologyDrainActivate(t *testing.T) {
 	request("node1", "POST", "/api/nodes/node3/drain", map[string]any{"preview": true}, initial.Version, 200, &preview)
 	var afterPreview topology.Document
 	request("node1", "GET", "/api/topology/latest", nil, 0, 200, &afterPreview)
-	if afterPreview.Version != initial.Version || preview.OperatorID != "" || topology.EffectiveNodeState(preview.Document, "node3") != topology.NodeDrained {
+	if afterPreview.Version != initial.Version || preview.OperationID != "" || topology.EffectiveNodeState(preview.Document, "node3") != topology.NodeDrained {
 		t.Fatalf("preview changed cluster state or failed to preview drain: %+v, %+v", afterPreview, preview)
 	}
 	for _, action := range []string{"drain", "activate"} {
@@ -155,7 +159,7 @@ func TestComposeExampleTopologyDrainActivate(t *testing.T) {
 			request("node2", "POST", "/api/nodes/node3/drain", map[string]any{"actor": "demo-test", "approve": true}, latest.Version, 202, &mutation)
 		} else {
 			request("node2", "POST", "/api/nodes/node3/activate", map[string]any{"actor": "demo-test", "approve": false}, latest.Version, 200, &mutation)
-			if mutation.OperatorID != "" {
+			if mutation.OperationID != "" {
 				t.Fatal("staged edit unexpectedly approved", mutation)
 			}
 			path := fmt.Sprintf("/api/topology/%d/approve", mutation.Document.Version)
@@ -166,21 +170,21 @@ func TestComposeExampleTopologyDrainActivate(t *testing.T) {
 				t.Fatalf("staging or refused approval advanced Target: %+v", target)
 			}
 			var approved struct {
-				ID topology.OperatorID `json:"operator_id"`
+				ID topology.OperationID `json:"operation_id"`
 			}
 			request("node2", "POST", path, nil, mutation.Document.Version, 202, &approved)
-			mutation.OperatorID = approved.ID
+			mutation.OperationID = approved.ID
 		}
-		if mutation.OperatorID == "" {
-			t.Fatal("approval did not return operator_id")
+		if mutation.OperationID == "" {
+			t.Fatal("approval did not return operation_id")
 		}
 		for {
-			var operator topology.OperatorStatus
-			status := request("node1", "GET", "/api/operators/"+string(mutation.OperatorID), nil, 0, 0, &operator)
+			var operator topology.OperationStatus
+			status := request("node1", "GET", "/api/operations/"+string(mutation.OperationID), nil, 0, 0, &operator)
 			if status != 200 && status != 404 {
 				t.Fatalf("operator observation returned HTTP %d", status)
 			}
-			if operator.State == topology.OperatorSucceeded {
+			if operator.State == topology.OperationSucceeded {
 				break
 			}
 			if operator.State.Terminal() {
@@ -192,17 +196,20 @@ func TestComposeExampleTopologyDrainActivate(t *testing.T) {
 			case <-time.After(100 * time.Millisecond):
 			}
 		}
+		wantState := topology.NodeActive
+		if action == "drain" {
+			wantState = topology.NodeDrained
+		}
 		for _, n := range []string{"node1", "node2", "node3"} {
 			for {
-				var active topology.Document
-				request(n, "GET", "/api/topology/active", nil, 0, 200, &active)
-				if active.Version == mutation.Document.Version {
-					want := topology.NodeActive
-					if action == "drain" {
-						want = topology.NodeDrained
-					}
-					if topology.EffectiveNodeState(active, "node3") != want || len(active.Group(topology.MetaGroupID).Replicas) != 3 {
-						t.Fatalf("incorrect node state or meta membership: %+v", active)
+				var status topology.ClusterStatus
+				request(n, "GET", "/api/cluster/status", nil, 0, 200, &status)
+				var target topology.Document
+				request(n, "GET", "/api/topology/target", nil, 0, 200, &target)
+				node3State, found := effectiveNodeState(status, "node3")
+				if found && node3State == wantState {
+					if len(target.Group(topology.MetaGroupID).Replicas) != 3 {
+						t.Fatalf("incorrect approved meta membership: %+v", target)
 					}
 					break
 				}
@@ -221,7 +228,7 @@ func TestComposeExampleTopologyDrainActivate(t *testing.T) {
 		request("node1", "POST", "/api/nodes/node3/drain", map[string]any{"approve": true}, latest.Version, 409, nil)
 	}
 	var beforeRestart topology.Document
-	request("node1", "GET", "/api/topology/active", nil, 0, 200, &beforeRestart)
+	request("node1", "GET", "/api/topology/target", nil, 0, 200, &beforeRestart)
 	if output, err := compose(ctx, "restart"); err != nil {
 		t.Fatalf("restart retained demo: %v\n%s", err, output)
 	}
@@ -233,9 +240,18 @@ func TestComposeExampleTopologyDrainActivate(t *testing.T) {
 	client.CloseIdleConnections()
 	for _, name := range []string{"node1", "node2", "node3"} {
 		var retained topology.Document
-		request(name, "GET", "/api/topology/active", nil, 0, 200, &retained)
+		request(name, "GET", "/api/topology/target", nil, 0, 200, &retained)
 		if !reflect.DeepEqual(retained, beforeRestart) {
 			t.Fatalf("retained topology changed on %s: before %+v, after %+v", name, beforeRestart, retained)
 		}
 	}
+}
+
+func effectiveNodeState(status topology.ClusterStatus, name string) (topology.NodeState, bool) {
+	for _, node := range status.Nodes {
+		if node.Node.Name == name {
+			return node.EffectiveState, true
+		}
+	}
+	return "", false
 }

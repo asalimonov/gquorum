@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math"
-	"reflect"
 	"sync"
 	"time"
 
@@ -67,8 +66,8 @@ type MetricsCollector struct {
 // NewMetricsCollector validates dependencies and creates bounded observation
 // history and read ownership.
 func NewMetricsCollector(cfg MetricsConfig) (*MetricsCollector, error) {
-	if cfg.Source == nil {
-		return nil, fault.New(fault.Invalid, "metrics source is required", nil)
+	if cfg.Source == nil || cfg.Identity == nil {
+		return nil, fault.New(fault.Invalid, "metrics source and identity are required", nil)
 	}
 	settings, err := cfg.Settings.Resolve()
 	if err != nil {
@@ -207,7 +206,7 @@ func (c *MetricsCollector) collectMetrics(parent context.Context, wakeMode metri
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	doc, err := c.cfg.Source.Active(ctx)
+	doc, err := c.cfg.Source.Topology(ctx)
 	if err != nil {
 		c.invalidate()
 		return err
@@ -219,9 +218,12 @@ func (c *MetricsCollector) collectMetrics(parent context.Context, wakeMode metri
 		bounded, finish := context.WithTimeout(ctx, c.cfg.Settings.CollectTimeout)
 		round, err = c.cfg.Source.Collect(bounded, doc, c.pool)
 		finish()
-		if validationErr := c.validateCollectedRound(ctx, doc, epoch, round); validationErr != nil {
+		current, validationErr := c.validateCollectedRound(ctx, epoch, round)
+		if validationErr != nil {
 			return validationErr
 		}
+		round = filterMetricsRound(doc, current, round)
+		doc = current
 	}
 	local := c.local()
 	var switches []topology.VoterSwitchState
@@ -379,33 +381,33 @@ func (c *MetricsCollector) epochID() string {
 }
 
 func (c *MetricsCollector) validateCollectedRound(ctx context.Context,
-	doc topology.Document, epoch LeaderEpoch, round Round) error {
-	// Per-round deadline can publish dispatched partial outcomes. Ownership
-	// or leadership loss invalidates the whole round, including apparent
-	// failures.
-	if ctx.Err() != nil {
+	epoch LeaderEpoch, round Round) (topology.ProgressPage, error) {
+	// Per-round deadlines can yield partial outcomes; owner cancellation or
+	// collector leadership loss invalidates even apparent failure evidence.
+	if err := ctx.Err(); err != nil {
 		c.invalidate()
-		return ctx.Err()
+		return topology.ProgressPage{}, err
 	}
-	after, isLeader := c.cfg.Source.Epoch()
-	if !isLeader || after != epoch {
+	after, leader := c.cfg.Source.Epoch()
+	if !leader || after != epoch || round.Epoch != epoch {
 		c.invalidate()
-		return fault.ErrNotLeader
+		return topology.ProgressPage{}, fault.ErrNotLeader
 	}
-	current, readErr := c.cfg.Source.Active(ctx)
-	if readErr != nil {
+	current, err := c.cfg.Source.Topology(ctx)
+	if err != nil {
 		c.invalidate()
-		return readErr
+		return topology.ProgressPage{}, err
 	}
-	if round.ActiveVersion != doc.Version || round.Epoch != epoch || !reflect.DeepEqual(current, doc) {
+	after, leader = c.cfg.Source.Epoch()
+	if !leader || after != epoch {
 		c.invalidate()
-		return fault.ErrVersionConflict
+		return topology.ProgressPage{}, fault.ErrNotLeader
 	}
-	return nil
+	return current, nil
 }
 
 type collectedMetrics struct {
-	doc             topology.Document
+	doc             topology.ProgressPage
 	epoch           LeaderEpoch
 	leader, enabled bool
 	round           Round
@@ -426,16 +428,14 @@ func (c *MetricsCollector) publishCollected(input collectedMetrics) bool {
 	c.snapshot = metrics.ClusterSnapshot{
 		CollectorRunID:    c.epochID(),
 		At:                now.UTC(),
-		ActiveVersion:     doc.Version,
+		TargetVersion:     doc.TargetVersion,
 		IsCollectorLeader: leader && !c.generationExhausted,
 		Local:             local,
 		Groups:            []metrics.GroupObservation{},
 	}
-	if c.cfg.Identity != nil {
-		id := c.cfg.Identity()
-		c.snapshot.ObserverNodeName = id.NodeName
-		c.snapshot.ObserverInstanceID = id.InstanceID
-	}
+	id := c.cfg.Identity()
+	c.snapshot.ObserverNodeName = id.NodeName
+	c.snapshot.ObserverInstanceID = id.InstanceID
 	// Collection remains active while disabled, but disabled time cannot earn a
 	// future eligibility window. A fresh enabling epoch rearms durable
 	// cooldowns.
@@ -443,7 +443,7 @@ func (c *MetricsCollector) publishCollected(input collectedMetrics) bool {
 		if !enabled {
 			c.tracker.reset(fmt.Sprintf("%s/disabled/%d", c.runID, c.epochSequence))
 		}
-		c.tracker.apply(now, doc, round, evidenceInput{local: local, switches: switches})
+		c.tracker.apply(now, doc, round, evidenceInput{local: local, switches: switches, clusterID: id.ClusterID})
 		c.snapshot.Groups = c.tracker.snapshot(now)
 	}
 	c.rememberCollected(now, doc)
@@ -457,11 +457,17 @@ func (c *MetricsCollector) publishCollected(input collectedMetrics) bool {
 	return actionable
 }
 
-func (c *MetricsCollector) rememberCollected(now time.Time, doc topology.Document) {
+func (c *MetricsCollector) rememberCollected(now time.Time, doc topology.ProgressPage) {
 	retained := map[seriesKey]bool{}
-	for _, group := range doc.Groups {
-		for _, r := range group.Replicas {
-			retained[seriesKey{doc.ClusterID, group.ID, r.NodeName, r.ReplicaID}] = true
+	cluster := c.cfg.Identity().ClusterID
+	for _, row := range doc.Groups {
+		for _, group := range []*topology.Group{row.Converged, row.Approved} {
+			if group == nil {
+				continue
+			}
+			for _, r := range group.Replicas {
+				retained[seriesKey{cluster, group.ID, r.NodeName, r.ReplicaID}] = true
+			}
 		}
 	}
 	for i := range c.snapshot.Groups {

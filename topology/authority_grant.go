@@ -16,7 +16,7 @@ type AuthorityTarget struct {
 type AuthorityGrant struct {
 	Key         AuthorityKey        `json:"key"`
 	Purpose     AuthorityPurpose    `json:"purpose"`
-	OperatorID  OperatorID          `json:"operator_id,omitempty"`
+	OperationID OperationID         `json:"operation_id,omitempty"`
 	Action      *AuthorizedStep     `json:"action,omitempty"`
 	AdmissionID string              `json:"admission_id,omitempty"`
 	RequestID   string              `json:"request_id,omitempty"`

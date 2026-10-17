@@ -7,7 +7,7 @@ import (
 	"github.com/asalimonov/gquorum/internal/collection"
 )
 
-// ObservedGroupHealth evaluates the declared Active voters against one node
+// ObservedGroupHealth evaluates the declared voters against one node
 // health snapshot. Unknown observations remain nullable rather than measured
 // zero.
 type ObservedGroupHealth struct {
@@ -41,8 +41,9 @@ func (e GroupHealthEvaluation) Clone() GroupHealthEvaluation {
 	return e
 }
 
-// HealthObservation is an observer-local snapshot of one Active document and
-// one node-health sample. At and Version expose its age and document scope.
+// HealthObservation evaluates one approved Target and one node-health sample.
+// At and Version expose its age and approved document scope. Group progress and
+// native membership are separate observations; these are declared voter counts.
 // It describes declared voter availability, not a linearizable Raft read.
 type HealthObservation struct {
 	Version uint64                  `json:"version"`

@@ -3,6 +3,7 @@ package topology
 import (
 	"cmp"
 	"fmt"
+	"slices"
 )
 
 // Metadata admission establishes host ownership before load effects run.
@@ -19,13 +20,24 @@ func comparePlanGroups(a, b string) int {
 	return cmp.Compare(a, b)
 }
 
-// ValidatePlanShape checks step ordering and exact identities against active
-// and desired topology.
-func ValidatePlanShape(active, desired Document, plan Plan) error {
-	if plan.Version != desired.Version {
-		return fmt.Errorf("plan version %d does not match desired version %d", plan.Version, desired.Version)
+// ValidatePlanShape checks immutable step ordering and exact identities against
+// approved intent, proven declarations and separately retained host evidence.
+// It also validates existing plans after effects complete; new effect ownership
+// must be checked separately at approval against retained grants and cleanup.
+func ValidatePlanShape(input PlanInput, desired Document, plan Plan) error {
+	groups := make([]string, 0, len(plan.Blocks))
+	for _, block := range plan.Blocks {
+		groups = append(groups, block.GroupID)
 	}
-	v := planShapeValidator{active: active, desired: desired, plan: plan,
+	return validatePlanShapeFor(input, desired, plan, groups)
+}
+
+// Scopes select deletion coverage, never identity evidence or original-plan steps.
+func validatePlanShapeFor(input PlanInput, desired Document, plan Plan, groups []string) error {
+	if err := validatePlanHeader(input, desired, plan); err != nil {
+		return err
+	}
+	v := planShapeValidator{input: input, desired: desired, plan: plan,
 		seenGroups: make(map[string]bool), stopped: make(map[string]map[uint64]bool)}
 	for i, current := range plan.Steps {
 		if err := v.validatePosition(i, current); err != nil {
@@ -42,7 +54,26 @@ func ValidatePlanShape(active, desired Document, plan Plan) error {
 		}
 	}
 
-	return validatePlanVoterProof(active, desired, plan)
+	if err := v.validateDeletionCoverage(groups); err != nil {
+		return err
+	}
+	return validatePlanVoterProof(input, desired, plan)
+}
+
+func validatePlanHeader(input PlanInput, desired Document, plan Plan) error {
+	if plan.Version != desired.Version {
+		return fmt.Errorf("plan version %d does not match desired version %d", plan.Version, desired.Version)
+	}
+	if err := validateRetainedInput(input, desired); err != nil {
+		return err
+	}
+	if err := validatePlanMembers(input, desired); err != nil {
+		return err
+	}
+	if err := validatePlanBlocks(plan); err != nil {
+		return err
+	}
+	return validateBlockSafety(desired, plan)
 }
 
 func preparatoryWaitPair(steps []Step, index int, incoming Step) bool {
@@ -106,7 +137,7 @@ func nextPlanStepMatches(steps []Step, current int, kind StepKind, target Step) 
 }
 
 type planShapeValidator struct {
-	active     Document
+	input      PlanInput
 	desired    Document
 	plan       Plan
 	seenGroups map[string]bool
@@ -144,7 +175,7 @@ func validateStepIdentity(current Step) error {
 }
 
 func (v *planShapeValidator) validateReplicaRole(current Step) error {
-	old := exactPlanReplica(v.active, current)
+	old := v.input.provenReplica(current)
 	next := exactPlanReplica(v.desired, current)
 	if err := v.validateTransferGuard(current); err != nil {
 		return err
@@ -156,11 +187,14 @@ func (v *planShapeValidator) validateReplicaRole(current Step) error {
 		StepPromoteVoter:
 		return validateDesiredStepReplica(current, next)
 	case StepDemoteVoter:
-		if old == nil || next == nil || next.Role != ReplicaLearner {
+		// A scoped successor may demote an approved member whose admission has
+		// not converged yet. Voter guards and admission history prove its role.
+		if next == nil || next.Role != ReplicaLearner || old == nil &&
+			exactPlanReplica(v.input.Approved, current) == nil {
 			return fmt.Errorf("step %d does not authorize a retained learner", current.Seq)
 		}
 	case StepRemoveReplica, StepStopReplica, StepCleanupReplicaState:
-		if old == nil || next != nil {
+		if next != nil || !v.input.formerReplica(current) {
 			return fmt.Errorf("step %d does not name a removed replica", current.Seq)
 		}
 	case StepTransferLeader:
@@ -189,7 +223,7 @@ func (v *planShapeValidator) validateTransferGuard(current Step) error {
 func (v *planShapeValidator) validateStepOrder(i int, current Step) error {
 	switch current.Kind {
 	case StepCreateFoundingGroup:
-		if v.active.Group(current.GroupID) != nil || v.desired.Group(current.GroupID) == nil {
+		if !v.input.foundingGroup(current.GroupID) || v.desired.Group(current.GroupID) == nil {
 			return fmt.Errorf("create founding group %q is not fresh", current.GroupID)
 		}
 	case StepPrepareReplica:
@@ -197,6 +231,8 @@ func (v *planShapeValidator) validateStepOrder(i int, current Step) error {
 			return fmt.Errorf("prepare %s/%d is not immediately followed by add learner", current.GroupID,
 				current.ReplicaID)
 		}
+		return requireFormerOwnerStop(voterPlanTopology{base: v.input, desired: v.desired, groupID: current.GroupID},
+			v.plan, current, v.stopped[current.GroupID])
 	case StepWaitCaughtUp:
 		if !nextPlanStepMatches(v.plan.Steps, i, StepPromoteVoter, current) &&
 			!preparatoryWaitPair(v.plan.Steps, i, current) {
@@ -233,7 +269,7 @@ func (v *planShapeValidator) validateStepOrder(i int, current Step) error {
 
 func (v *planShapeValidator) validateRemovalOrder(i int, current Step) error {
 	stoppedNext := nextPlanStepMatches(v.plan.Steps, i, StepStopReplica, current)
-	if !stoppedNext && !ReadmissionCovers(v.active, v.desired, v.plan, current.NodeName) {
+	if !stoppedNext && !ReadmissionCovers(v.input, v.desired, v.plan, current.NodeName) {
 		return fmt.Errorf("remove %s/%d is not immediately followed by stop", current.GroupID,
 			current.ReplicaID)
 	}
@@ -246,7 +282,13 @@ func (v *planShapeValidator) validateRemovalOrder(i int, current Step) error {
 }
 
 func (v *planShapeValidator) validateStopOrder(i int, current Step) error {
-	if v.desired.Group(current.GroupID) != nil && !adjacentPlanStep(v.plan.Steps, i, StepRemoveReplica, current) {
+	key := ReplicaKey{NodeName: current.NodeName, ReplicaID: current.ReplicaID}
+	progress := v.input.retirementProgress(current.GroupID, key)
+	debtStop := (progress == RetainedCleanup || progress == RetainedStopped) &&
+		requiredRetainedStop(v.desired.Group(current.GroupID), key)
+	debtStop = debtStop || progress == RetainedCleanup && v.detachingStop(current, key)
+	if !debtStop && v.desired.Group(current.GroupID) != nil &&
+		!adjacentPlanStep(v.plan.Steps, i, StepRemoveReplica, current) {
 		return fmt.Errorf("stop %s/%d lacks adjacent removal", current.GroupID, current.ReplicaID)
 	}
 	if v.stopped[current.GroupID] == nil {
@@ -257,14 +299,23 @@ func (v *planShapeValidator) validateStopOrder(i int, current Step) error {
 	return nil
 }
 
+func (v *planShapeValidator) detachingStop(step Step, key ReplicaKey) bool {
+	if v.desired.Group(step.GroupID) == nil || !requiredRetainedStop(v.input.Approved.Group(step.GroupID), key) {
+		return false
+	}
+	for _, block := range v.plan.Blocks {
+		if block.GroupID == step.GroupID && slices.Contains(block.Cleanup, step.Seq) {
+			return true
+		}
+	}
+	return false
+}
+
 func (v *planShapeValidator) validateDeletionOrder(current Step) error {
-	if previous := v.active.Group(current.GroupID); previous != nil {
-		for _, replica := range previous.Replicas {
-			if !v.stopped[current.GroupID][replica.ReplicaID] &&
-				!ReadmissionCovers(v.active, v.desired, v.plan, replica.NodeName) {
-				return fmt.Errorf("delete group %q lacks stop for replica %d", current.GroupID,
-					replica.ReplicaID)
-			}
+	for _, replica := range v.input.formerReplicas(current.GroupID) {
+		if replica.Progress != RetainedStopped && !v.stopped[current.GroupID][replica.ReplicaID] &&
+			!ReadmissionCovers(v.input, v.desired, v.plan, replica.NodeName) {
+			return fmt.Errorf("delete group %q lacks stop for replica %d", current.GroupID, replica.ReplicaID)
 		}
 	}
 
@@ -283,7 +334,7 @@ func validateDesiredStepReplica(current Step, next *Replica) error {
 }
 
 func (v *planShapeValidator) validateDeletedGroup(current Step) error {
-	if current.GroupID == MetaGroupID || v.active.Group(current.GroupID) == nil ||
+	if current.GroupID == MetaGroupID || len(v.input.formerReplicas(current.GroupID)) == 0 ||
 		v.desired.Group(current.GroupID) != nil {
 		return fmt.Errorf("step %d does not name a deleted load group", current.Seq)
 	}

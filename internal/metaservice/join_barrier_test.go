@@ -30,7 +30,10 @@ func TestJoinClassificationWaitsForAppliedCurrentTerm(t *testing.T) {
 		{"machine_ahead_of_publication", raft.StateLeader, 7, 13, 13, 14, 7, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			machine := metaengine.NewMachine(topology.Rules{SchemaVersion: 1, Limits: (topology.Limits{}).WithDefaults()}, nil)
+			machine, err := metaengine.NewMachine(topology.Rules{SchemaVersion: 1, Limits: (topology.Limits{}).WithDefaults()}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if err := machine.AfterApply(t.Context(), tc.machineIndex, tc.machineTerm, raftpb.ConfState{Voters: []uint64{1}}); err != nil {
 				t.Fatal(err)
 			}

@@ -135,7 +135,7 @@ func stabilityHealthAndReads(t *testing.T, size int) {
 				var ready struct {
 					Node        string `json:"node"`
 					SessionLive bool   `json:"session_live"`
-					Version     uint64 `json:"active_version"`
+					Version     uint64 `json:"target_version"`
 				}
 				if err := response.Decode(&ready); err != nil || ready.Node != node.Spec.Name || !ready.SessionLive || ready.Version != created.Document.Version {
 					result.err = fmt.Errorf("readiness lost its exact serving identity/version: %+v: %v", ready, err)
@@ -146,7 +146,7 @@ func stabilityHealthAndReads(t *testing.T, size int) {
 					result.err = err
 					return
 				}
-				if len(status.Nodes) != size || status.ActiveVersion != created.Document.Version || !status.SessionLive {
+				if len(status.Nodes) != size || status.FullyConverged.Version != created.Document.Version || !status.SessionLive {
 					result.err = fmt.Errorf("healthy cluster changed node count/serving version: %+v", status)
 					return
 				}

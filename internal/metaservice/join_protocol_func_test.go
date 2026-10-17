@@ -124,7 +124,7 @@ func TestJoinClientRefusalClassificationAndBoundedRedirects(t *testing.T) {
 		redirect   bool
 	}{
 		{name: "not ready remains retryable", reply: metatransport.Reply(fault.ErrUnavailable), want: fault.ErrUnavailable},
-		{name: "unapproved remains parked", reply: metatransport.Reply(fault.ErrOperatorAuthorization), want: fault.ErrOperatorAuthorization},
+		{name: "unapproved remains parked", reply: metatransport.Reply(fault.ErrOperationAuthorization), want: fault.ErrOperationAuthorization},
 		{name: "identity refusal is definitive", reply: metatransport.Reply(fault.New(fault.IdentityMismatch, "arbitrary prose", nil)), want: fault.ErrIdentityMismatch, fatal: true},
 		{name: "wrong credential is definitive", reply: &metapb.Reply{}, credential: "foreign", want: fault.ErrIdentityMismatch, fatal: true},
 		{name: "malformed success is definitive", reply: &metapb.Reply{Data: []byte("{")}, want: fault.ErrUnreadable, fatal: true},
@@ -194,7 +194,7 @@ func TestJoinClientSkipsColdSeedsAndFollowsLeaderHintToExactGrant(t *testing.T) 
 	grant := joinResponse{
 		Rules: g.rules, MemberID: 1, Granted: doc, LeaderAddress: leader,
 		Members:   []joinMember{{Name: "n1", MemberID: 1, Address: g.opts.Network.AdvertiseAddress}},
-		Admission: metaengine.AdmissionRecord{NodeName: "n1", InstanceID: g.Identity().InstanceID, MemberID: 1, OperatorID: "exec-v1-a1", State: metaengine.AdmissionPending},
+		Admission: metaengine.AdmissionRecord{NodeName: "n1", InstanceID: g.Identity().InstanceID, MemberID: 1, OperationID: "exec-v1-a1", State: metaengine.AdmissionPending},
 	}
 	data, err := json.Marshal(grant)
 	if err != nil {

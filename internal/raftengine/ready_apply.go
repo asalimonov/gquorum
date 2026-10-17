@@ -119,11 +119,14 @@ func (g *Group) applyNormalEntry(entry raftpb.Entry) error {
 		return g.applyAuthority(entry, e)
 	}
 	started := time.Now()
-	result, err := g.opts.Machine.Apply(g.ctx,
-		Command{Index: entry.Index, Term: entry.Term, RequestID: e.RequestID, Data: bytes.Clone(e.Data)})
+	command := Command{Index: entry.Index, Term: entry.Term, RequestID: e.RequestID, Data: bytes.Clone(e.Data)}
+	if g.opts.GroupID == topology.MetaGroupID {
+		command.ConfState = copyConf(g.cs)
+	}
+	result, err := g.opts.Machine.Apply(g.ctx, command)
 	g.meter.ObserveApply(time.Since(started))
 	if err != nil {
-		return fault.New(fault.Unavailable, "load machine apply failed", err)
+		return fault.New(fault.Unavailable, "load machine apply failed: "+err.Error(), err)
 	}
 	if req := g.props[e.Correlation]; req != nil {
 		delete(g.props, e.Correlation)

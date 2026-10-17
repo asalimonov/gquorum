@@ -281,7 +281,7 @@ func Retire(ctx context.Context, root string, req load.RetirementRequest) (load.
 	} else if err != nil {
 		return empty, err
 	} else if !reflect.DeepEqual(saved, receipt) {
-		return empty, fault.ErrOperatorAuthorization
+		return empty, fault.ErrOperationAuthorization
 	}
 	if err := removeSQLiteFiles(ctx, dir, req.Identity); err != nil {
 		return empty, err

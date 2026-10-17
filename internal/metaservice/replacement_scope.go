@@ -1,0 +1,70 @@
+package metaservice
+
+import (
+	"context"
+	"fmt"
+	"reflect"
+
+	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/metaengine"
+	"github.com/asalimonov/gquorum/topology"
+)
+
+func unownedProvenGroup(input topology.PlanInput, id string) (*topology.Group, error) {
+	row := input.Groups[id]
+	if row.OperationID != "" {
+		return nil, fault.New(fault.Unavailable, "group is owned by operation "+string(row.OperationID), nil)
+	}
+	if row.ConvergedVersion == 0 || row.Converged == nil || row.Deleting ||
+		!reflect.DeepEqual(row.Converged, input.Approved.Group(id)) {
+		return nil, fault.New(fault.VersionConflict,
+			fmt.Sprintf("group %q is not converged to approved intent; revert or retry its change first", id), nil)
+	}
+	return row.Converged, nil
+}
+
+func checkReseatScope(input topology.PlanInput, id string, key topology.ReplicaKey) error {
+	group, err := unownedProvenGroup(input, id)
+	if err != nil {
+		return err
+	}
+	for _, replica := range group.Replicas {
+		if replica.NodeName == key.NodeName && replica.ReplicaID == key.ReplicaID {
+			return nil
+		}
+	}
+	return fault.New(fault.VersionConflict, "reseat predecessor no longer matches", nil)
+}
+
+func (g *Group) validateReadmissionScope(ctx context.Context, doc topology.Document,
+	name string, expectedMemberID uint64) error {
+	node := doc.Node(name)
+	if node == nil {
+		return unknownNode(name)
+	}
+	if doc.MemberID(name) != expectedMemberID {
+		return fault.New(fault.VersionConflict, "readmission predecessor no longer matches", nil)
+	}
+	if node.State != topology.NodeActive {
+		return fault.New(fault.Invalid, "readmission requires an admitted active node", nil)
+	}
+	input, err := g.state().PlanningInput(ctx, doc, nil)
+	if err != nil {
+		return err
+	}
+	return metaengine.ValidateReadmissionScope(input, name, expectedMemberID)
+}
+
+func (g *Group) prepareReseat(ctx context.Context, doc *topology.Document,
+	options metaengine.ReplicaRepairOptions) error {
+	input, err := g.state().PlanningInput(ctx, *doc, nil)
+	if err != nil {
+		return err
+	}
+	key := topology.ReplicaKey{NodeName: options.NodeName, ReplicaID: options.ReplicaID}
+	if err := checkReseatScope(input, options.GroupID, key); err != nil {
+		return err
+	}
+	views := g.state().Views()
+	return g.reseatDocument(doc, views, options)
+}

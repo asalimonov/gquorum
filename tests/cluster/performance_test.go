@@ -108,10 +108,10 @@ func perfConcurrentHealth(t *testing.T, size int) {
 					var ready struct {
 						Node          string `json:"node"`
 						SessionLive   bool   `json:"session_live"`
-						ActiveVersion uint64 `json:"active_version"`
+						TargetVersion uint64 `json:"target_version"`
 					}
-					if err = response.Decode(&ready); err == nil && (ready.Node != node || !ready.SessionLive || ready.ActiveVersion != base.Version) {
-						err = fmt.Errorf("health reply has another identity or active version: %+v", ready)
+					if err = response.Decode(&ready); err == nil && (ready.Node != node || !ready.SessionLive || ready.TargetVersion != base.Version) {
+						err = fmt.Errorf("health reply has another identity or target version: %+v", ready)
 					}
 				}
 				// Keep concurrent real cluster status handling in this workload, with a
@@ -119,7 +119,7 @@ func perfConcurrentHealth(t *testing.T, size int) {
 				if err == nil && request%10 == 0 {
 					status, statusErr := c.Status(ctx, node)
 					err = statusErr
-					if err == nil && (len(status.Nodes) != size || status.MetaLeaderID == 0 || status.ActiveVersion != base.Version || !status.SessionLive) {
+					if err == nil && (len(status.Nodes) != size || status.MetaLeaderID == 0 || status.FullyConverged.Version != base.Version || !status.SessionLive) {
 						err = fmt.Errorf("health/status lost stable cluster membership: %+v", status)
 					}
 				}

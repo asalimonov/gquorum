@@ -35,10 +35,6 @@ func TestPublicLabelEditUsesDocumentWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	active, err := c.Active(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
 	edited := latest.Clone()
 	labels := edited.Node("n1").GetLabels()
 	labels["network"] = "public_ip"
@@ -49,7 +45,7 @@ func TestPublicLabelEditUsesDocumentWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	edited.ChangedBy = "operator"
-	preparation, err := topology.PreparePlacement(topology.ReadView{Latest: latest, Target: target, Active: active}, edited,
+	preparation, err := topology.PreparePlacement(topology.ReadView{Latest: latest, Target: target}, edited,
 		topology.Rules{SchemaVersion: 1, Limits: opts.Limits.WithDefaults()}, time.Now().UTC())
 	prepared := preparation.Document
 	if err != nil {

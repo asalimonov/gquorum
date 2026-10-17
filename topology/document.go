@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	defaultPendingAuthorityRecords = 1024
-	defaultMaxNodes                = 3
-	defaultMaxReplicas             = 5
+	defaultMaxNodes          = 3
+	defaultMaxReplicas       = 5
+	defaultConcurrentGroups  = 4
+	defaultConcurrentCleanup = 2
 )
 
 // MetaGroupID names the reserved Raft group that replicates cluster topology.
@@ -54,23 +55,28 @@ const (
 
 // WithDefaults fills absent capacity limits with the library defaults.
 func (l Limits) WithDefaults() Limits {
-	if l.MaxPendingAuthorityRecords == 0 {
-		l.MaxPendingAuthorityRecords = defaultPendingAuthorityRecords
-	}
 	if l.MaxNodes == 0 {
 		l.MaxNodes = defaultMaxNodes
 	}
 	if l.MaxReplicas == 0 {
 		l.MaxReplicas = defaultMaxReplicas
 	}
+	if l.MaxConcurrentGroups == 0 {
+		l.MaxConcurrentGroups = defaultConcurrentGroups
+	}
+	if l.MaxConcurrentCleanup == 0 {
+		l.MaxConcurrentCleanup = defaultConcurrentCleanup
+	}
 	return l
 }
 
-// Validate checks positive node and replica capacities and a nonnegative
-// authority limit.
+// Validate checks positive topology capacities and nonnegative execution limits.
 func (l Limits) Validate() error {
-	if l.MaxNodes < 1 || l.MaxReplicas < 1 || l.MaxPendingAuthorityRecords < 0 {
+	if l.MaxNodes < 1 || l.MaxReplicas < 1 {
 		return invalid("limits must be positive")
+	}
+	if l.MaxConcurrentGroups < 0 || l.MaxConcurrentCleanup < 0 {
+		return invalid("execution limits cannot be negative")
 	}
 	return nil
 }
@@ -98,8 +104,8 @@ type ChangeAudit struct {
 const AuditOperationForceRetireNode = "force_retire_node"
 
 // Document is one versioned cluster-topology declaration. Latest may be
-// unapproved intent, Target is approved intent, and Active is fully converged;
-// those views carry the same value type but have different authority.
+// unapproved intent and Target is approved intent. Per-group convergence lives
+// in progress records; FullyConverged only names a historical document.
 type Document struct {
 	// Version and ClusterID identify this declaration within one cluster.
 	Version   uint64 `json:"version"`
@@ -114,6 +120,7 @@ type Document struct {
 	Comment       string       `json:"comment,omitempty"`
 	CreatedAt     time.Time    `json:"created_at"`
 	ParentVersion uint64       `json:"parent_version"`
+	RebasedFrom   uint64       `json:"rebased_from,omitempty"` // prior staged edit, not approval
 	Audit         *ChangeAudit `json:"audit,omitempty"`
 }
 
@@ -296,23 +303,7 @@ func (d Document) Clone() Document {
 	}
 	out.Groups = slices.Clone(d.Groups)
 	for i := range out.Groups {
-		out.Groups[i].Replicas = slices.Clone(d.Groups[i].Replicas)
-		out.Groups[i].Labels = maps.Clone(d.Groups[i].Labels)
-		if d.Groups[i].VoterConfig != nil {
-			p := *d.Groups[i].VoterConfig
-			out.Groups[i].VoterConfig = &p
-		}
-		if d.Groups[i].Hosting != nil {
-			h := *d.Groups[i].Hosting
-			h.Nodes = slices.Clone(h.Nodes)
-			out.Groups[i].Hosting = &h
-		}
-		if d.Groups[i].Placement != nil {
-			p := *d.Groups[i].Placement
-			p.AllowedNodeTypes = slices.Clone(p.AllowedNodeTypes)
-			p.NodeSelector = maps.Clone(p.NodeSelector)
-			out.Groups[i].Placement = &p
-		}
+		out.Groups[i] = cloneGroup(d.Groups[i])
 	}
 	return out
 }

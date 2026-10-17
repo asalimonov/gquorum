@@ -29,7 +29,7 @@ func configureGrantDispatch(f *fixture) {
 	f.cfg.RecordFence = func(ctx context.Context, _ topology.FenceEvidence) error { return ctx.Err() }
 }
 
-func TestGrantedDispatcherCollectsDurableFoundingAndMembershipReceipts(t *testing.T) {
+func TestExactDispatcherCollectsDurableFoundingAndMembershipReceipts(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	s, founding := fixtureAuthority(t, f)
@@ -43,11 +43,24 @@ func TestGrantedDispatcherCollectsDurableFoundingAndMembershipReceipts(t *testin
 	f.cfg.Transport = transport
 	h := f.host(t)
 	transport.host = h
+	// Exercise the real host and native receivers as separate exact requests.
+	// The controller owns ordering and partial receipt persistence.
+	dispatchFounding := func(ctx context.Context) ([]topology.EffectReceipt, error) {
+		host, err := h.DispatchEffect(ctx, founding, founding.Resources[1], founding.Targets[0])
+		if err != nil {
+			return nil, err
+		}
+		native, err := h.DispatchEffect(ctx, founding, founding.Resources[0], founding.Targets[0])
+		if err != nil {
+			return nil, err
+		}
+		return []topology.EffectReceipt{native, host}, nil
+	}
 	var receipts []topology.EffectReceipt
 	dispatchCtx := deadline(t)
 	await(dispatchCtx, t, func() bool {
 		var err error
-		receipts, err = h.DispatchGrant(dispatchCtx, founding)
+		receipts, err = dispatchFounding(dispatchCtx)
 		// Each dispatch has its own EffectTimeout. Initial election and durable
 		// startup can outlast one attempt under the race detector; retry the
 		// same immutable grant within this test's overall bounded wait.
@@ -72,7 +85,7 @@ func TestGrantedDispatcherCollectsDurableFoundingAndMembershipReceipts(t *testin
 	var again []topology.EffectReceipt
 	await(deadline(t), t, func() bool {
 		var err error
-		again, err = h.DispatchGrant(deadline(t), founding)
+		again, err = dispatchFounding(deadline(t))
 		if errors.Is(err, fault.ErrAuthorityPending) {
 			return false
 		}
@@ -89,7 +102,8 @@ func TestGrantedDispatcherCollectsDurableFoundingAndMembershipReceipts(t *testin
 	membership.Targets = append(membership.Targets, topology.AuthorityTarget{NodeName: "b", MemberID: 2, ReplicaID: 2})
 	await(deadline(t), t, func() bool {
 		var err error
-		receipts, err = h.DispatchGrant(deadline(t), membership)
+		receipt, callErr := h.DispatchEffect(deadline(t), membership, membership.Resources[0], membership.Targets[0])
+		receipts, err = []topology.EffectReceipt{receipt}, callErr
 		if errors.Is(err, fault.ErrAuthorityPending) {
 			return false
 		}
@@ -101,7 +115,7 @@ func TestGrantedDispatcherCollectsDurableFoundingAndMembershipReceipts(t *testin
 	}
 	must(t, receipts[0].Validate(membership))
 	await(deadline(t), t, func() bool {
-		_, err := h.DispatchGrant(deadline(t), founding)
+		_, err := dispatchFounding(deadline(t))
 		if errors.Is(err, fault.ErrAuthorityPending) {
 			return false
 		}
@@ -132,7 +146,7 @@ func hostActionReply(request load.ActionRequest) load.ActionResult {
 	return grantedResult(request, topology.EffectReceipt{Key: request.Grant.Key, Resource: topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: request.Grant.Key.GroupID, NodeName: request.To.Node.NodeName}, Action: request.Grant.Action, Target: actionTarget(request), Outcome: topology.EffectApplied, LocalSequence: 1})
 }
 
-func TestGrantedDispatcherPreservesPartialReceiptsAcrossIndependentHosts(t *testing.T) {
+func TestExactDispatcherPreservesPartialReceiptsAcrossIndependentHosts(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	_, grant := fixtureAuthority(t, f)
@@ -161,9 +175,18 @@ func TestGrantedDispatcherPreservesPartialReceiptsAcrossIndependentHosts(t *test
 		},
 	}
 	h := f.host(t)
-	result := make(chan []topology.EffectReceipt, 1)
-	failed := make(chan error, 1)
-	go func() { got, err := h.DispatchGrant(deadline(t), grant); result <- got; failed <- err }()
+	type reply struct {
+		receipt topology.EffectReceipt
+		err     error
+	}
+	result := make(chan reply, 2)
+	for i, target := range grant.Targets {
+		go func() {
+			got, err := h.DispatchEffect(deadline(t), grant, grant.Resources[i+1], target)
+			result <- reply{got, err}
+		}()
+	}
+
 	for range 2 {
 		select {
 		case <-entered:
@@ -172,15 +195,26 @@ func TestGrantedDispatcherPreservesPartialReceiptsAcrossIndependentHosts(t *test
 		}
 	}
 	once.Do(func() { close(proceed) })
-	if err := <-failed; !errors.Is(err, fault.ErrUnavailable) {
-		t.Fatal(err)
+	var successes, failures int
+	for range 2 {
+		got := <-result
+		if errors.Is(got.err, fault.ErrUnavailable) {
+			failures++
+			continue
+		}
+		if got.err != nil || got.receipt.Target.ReplicaID != 1 {
+			t.Fatal(got)
+		}
+		must(t, got.receipt.Validate(grant))
+		successes++
 	}
-	if got := <-result; len(got) != 1 || got[0].Target.ReplicaID != 1 {
-		t.Fatal("successful host evidence was discarded", got)
+	if successes != 1 || failures != 1 {
+		t.Fatal("independent host evidence was discarded", successes, failures)
 	}
+
 }
 
-func TestGrantedDispatcherRejectsIncompleteOrMisdirectedEvidence(t *testing.T) {
+func TestExactDispatcherRejectsIncompleteOrMisdirectedEvidence(t *testing.T) {
 	for _, mode := range []string{"missing", "other_receipt", "other_process", "other_action", "other_local_target", "wrong_fence", "fence_not_recorded", "successor_member"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
@@ -216,7 +250,7 @@ func TestGrantedDispatcherRejectsIncompleteOrMisdirectedEvidence(t *testing.T) {
 					return result, nil
 				},
 			}
-			want := fault.ErrOperatorAuthorization
+			want := fault.ErrOperationAuthorization
 			if mode == "fence_not_recorded" {
 				f.cfg.RecordFence = func(context.Context, topology.FenceEvidence) error { return fault.ErrUnavailable }
 				want = fault.ErrUnavailable
@@ -230,8 +264,9 @@ func TestGrantedDispatcherRejectsIncompleteOrMisdirectedEvidence(t *testing.T) {
 				want = fault.ErrIdentityMismatch
 			}
 			h := f.host(t)
-			if got, err := h.DispatchGrant(deadline(t), grant); !errors.Is(err, want) || len(got) != 0 {
-				t.Fatal("incomplete evidence advanced the effect", got, err)
+
+			if got, err := h.DispatchEffect(deadline(t), grant, grant.Resources[0], grant.Targets[0]); !errors.Is(err, want) || got.Key != (topology.AuthorityKey{}) {
+				t.Fatal("exact dispatch accepted incomplete evidence", got, err)
 			}
 			if (mode == "wrong_fence" || mode == "fence_not_recorded" || mode == "successor_member") && actions.Load() != 0 {
 				t.Fatal("action ran without its exact recorded fence")
@@ -240,7 +275,7 @@ func TestGrantedDispatcherRejectsIncompleteOrMisdirectedEvidence(t *testing.T) {
 	}
 }
 
-func TestGrantedDispatcherPreservesIdentityRefusalAndRejectsClosedGrant(t *testing.T) {
+func TestExactDispatcherPreservesIdentityRefusalAndRejectsClosedGrant(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
 	_, grant := fixtureAuthority(t, f)
@@ -256,7 +291,7 @@ func TestGrantedDispatcherPreservesIdentityRefusalAndRejectsClosedGrant(t *testi
 			return fault.ErrAuthorityFenced
 		}
 		if !candidate.Equal(grant) {
-			return fault.ErrOperatorAuthorization
+			return fault.ErrOperationAuthorization
 		}
 		return ctx.Err()
 	}
@@ -270,12 +305,12 @@ func TestGrantedDispatcherPreservesIdentityRefusalAndRejectsClosedGrant(t *testi
 		},
 	}
 	h := f.host(t)
-	if receipts, err := h.DispatchGrant(deadline(t), grant); !errors.Is(err, fault.ErrIdentityMismatch) || len(receipts) != 0 {
-		t.Fatal(receipts, err)
+	if receipt, err := h.DispatchEffect(deadline(t), grant, grant.Resources[0], target); !errors.Is(err, fault.ErrIdentityMismatch) || receipt.Key != (topology.AuthorityKey{}) {
+		t.Fatal(receipt, err)
 	}
 	revoked.Store(true)
-	if receipts, err := h.DispatchGrant(deadline(t), grant); !errors.Is(err, fault.ErrAuthorityFenced) || len(receipts) != 0 {
-		t.Fatal(receipts, err)
+	if receipt, err := h.DispatchEffect(deadline(t), grant, grant.Resources[0], target); !errors.Is(err, fault.ErrAuthorityFenced) || receipt.Key != (topology.AuthorityKey{}) {
+		t.Fatal(receipt, err)
 	}
 	if actions.Load() != 1 {
 		t.Fatal("closed grant reached transport", actions.Load())

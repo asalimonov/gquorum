@@ -47,11 +47,17 @@ func (h *Host) locate(ctx context.Context, groupID string) (locatedStore, error)
 	return locatedStore{Store: h.cfg.Store, Probe: durable}, nil
 }
 
-// retirementStores lists every store whose quarantined replicas this host
-// collects.
-func (h *Host) retirementStores() []storage.RetirementStore {
-	if h.cfg.MemoryRetirement == nil {
-		return []storage.RetirementStore{h.cfg.Retirement}
+type retirementBackend struct {
+	store storage.RetirementStore
+	class topology.StorageClass
+}
+
+// retirementStores binds enumeration to its physical backend. Only durable
+// storage creates host collection receipts; memory cleanup remains volatile.
+func (h *Host) retirementStores() []retirementBackend {
+	stores := []retirementBackend{{h.cfg.Retirement, topology.StorageDefault}}
+	if h.cfg.MemoryRetirement != nil {
+		stores = append(stores, retirementBackend{h.cfg.MemoryRetirement, topology.StorageMemory})
 	}
-	return []storage.RetirementStore{h.cfg.Retirement, h.cfg.MemoryRetirement}
+	return stores
 }

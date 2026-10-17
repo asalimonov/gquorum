@@ -19,7 +19,7 @@ func TestProjectionRetirementVerifiesDurableIdentityAndRetries(t *testing.T) {
 	a := &application{cfg: config{NodeName: "node1", ClusterID: "cluster", DataDir: t.TempDir()}, clusterHooks: newClusterHooks()}
 	key := walKey{"work", 7}
 	id := a.projectionIdentity(key)
-	authorization := topology.AuthorizedStep{OperatorID: "exec-v3-a1", Version: 3, Attempt: 1, StepSeq: 1, Kind: topology.StepCleanupReplicaState, GroupID: "work", NodeName: "node1", ReplicaID: 7}
+	authorization := topology.AuthorizedStep{OperationID: "exec-v3-a1", Version: 3, Attempt: 1, StepSeq: 1, Kind: topology.StepCleanupReplicaState, GroupID: "work", NodeName: "node1", ReplicaID: 7}
 	request := load.RetirementRequest{Identity: id, Reason: load.RetirementTopology, Authorization: &authorization}
 	foreign := id
 	foreign.ReplicaID++

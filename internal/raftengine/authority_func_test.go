@@ -20,9 +20,9 @@ import (
 )
 
 func foundingAuthority() topology.AuthorityGrant {
-	a := topology.AuthorizedStep{OperatorID: topology.MakeOperatorID(1, 1), Version: 1, Attempt: 1, StepSeq: 1, GroupID: "load", Kind: topology.StepCreateFoundingGroup,
+	a := topology.AuthorizedStep{OperationID: topology.MakeOperationID(1, 1), Version: 1, Attempt: 1, StepSeq: 1, GroupID: "load", Kind: topology.StepCreateFoundingGroup,
 		ExpectedVotersDigest: topology.VoterSetDigest(nil), ResultVotersDigest: topology.VoterSetDigest([]uint64{1})}
-	return topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: "load", Revision: 10}, Purpose: topology.AuthorityEffect, OperatorID: a.OperatorID, Action: &a, Resources: []topology.AuthorityResource{{Kind: topology.AuthorityGroup, GroupID: "load"}, {Kind: topology.AuthorityHost, GroupID: "load", NodeName: "1"}}, Targets: []topology.AuthorityTarget{{NodeName: "1", MemberID: 7, ReplicaID: 1}}}
+	return topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: "load", Revision: 10}, Purpose: topology.AuthorityEffect, OperationID: a.OperationID, Action: &a, Resources: []topology.AuthorityResource{{Kind: topology.AuthorityGroup, GroupID: "load"}, {Kind: topology.AuthorityHost, GroupID: "load", NodeName: "1"}}, Targets: []topology.AuthorityTarget{{NodeName: "1", MemberID: 7, ReplicaID: 1}}}
 }
 
 func learnerAuthority(revision, replica uint64) topology.AuthorityGrant {
@@ -222,7 +222,7 @@ func TestManagedAuthorityDurableFloorAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	changed := fence.Clone()
-	changed.OperatorID = "different"
+	changed.OperationID = "different"
 	if _, err := g.InstallAuthority(testContext(t), changed); !errors.Is(err, fault.ErrAuthorityFenced) {
 		t.Fatal(err)
 	}

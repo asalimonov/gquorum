@@ -29,13 +29,18 @@ func (h *Host) LocalMetrics() []metrics.ReplicaObservation {
 // MetricsReads prepares exact replica operations for one cluster-wide pool.
 // ResolvePeer reads the replicated process pin; applications are called only
 // inside the owned Read callback. Unknown pins produce no failure evidence.
-func (h *Host) MetricsReads(ctx context.Context, doc topology.Document) []observe.ReplicaRead {
+func (h *Host) MetricsReads(ctx context.Context, groups []topology.GroupProgress) []observe.ReplicaRead {
 	var reads []observe.ReplicaRead
 	kept := map[storage.Identity]bool{}
-	for _, group := range doc.LoadGroups() {
+	cluster := h.cfg.Identity().ClusterID
+	for _, row := range groups {
+		group := row.Converged
+		if row.GroupID == topology.MetaGroupID || row.ConvergedVersion == 0 || group == nil {
+			continue
+		}
 		for _, replica := range group.Replicas {
 			identity := storage.Identity{
-				ClusterID: doc.ClusterID,
+				ClusterID: cluster,
 				GroupID:   group.ID,
 				NodeName:  replica.NodeName,
 				ReplicaID: replica.ReplicaID,

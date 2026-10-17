@@ -158,7 +158,7 @@ func (h *Host) retireReadmissionReplica(ctx context.Context, req load.Retirement
 		return err
 	}
 	if !matchingRetirement(req, result) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	if err := ctx.Err(); err != nil {
 		return err

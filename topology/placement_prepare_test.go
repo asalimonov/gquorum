@@ -13,7 +13,7 @@ import (
 
 func placementTestView() ReadView {
 	d := testDocument()
-	return ReadView{Latest: d.Clone(), Target: d.Clone(), Active: d.Clone()}
+	return ReadView{Latest: d.Clone(), Target: d.Clone()}
 }
 
 func TestPreparePlacementRelocatesLegacyVoterWithoutMutatingInputs(t *testing.T) {
@@ -21,7 +21,7 @@ func TestPreparePlacementRelocatesLegacyVoterWithoutMutatingInputs(t *testing.T)
 	view := placementTestView()
 	view.Latest.Node("b").Type = "worker"
 	view.Target.Node("b").Type = "worker"
-	view.Active.Node("b").Type = "worker"
+	view.Target.Node("b").Type = "worker"
 	edited := view.Latest.Clone()
 	edited.Node("b").Labels = map[string]string{"network": "public_ip"}
 	edited.Group("load").Placement.NodeSelector = map[string]string{"network": "public_ip"}

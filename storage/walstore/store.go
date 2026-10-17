@@ -89,6 +89,7 @@ type Store struct {
 	mu        sync.Mutex
 	opts      Options
 	logger    *slog.Logger
+	rootInfo  os.FileInfo
 	groups    map[string]*group
 	bindings  map[string]storage.Identity
 	closed    bool
@@ -136,11 +137,13 @@ func Open(opts Options) (*Store, error) {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
-	if err := os.MkdirAll(opts.RootDir, dirMode); err != nil {
+	rootInfo, err := prepareCollectionRoot(opts.RootDir)
+	if err != nil {
 		return nil, err
 	}
 	return &Store{
 		opts:     opts,
+		rootInfo: rootInfo,
 		logger:   opts.Logger,
 		groups:   make(map[string]*group),
 		bindings: make(map[string]storage.Identity),

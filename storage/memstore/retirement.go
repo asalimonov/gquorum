@@ -3,6 +3,7 @@ package memstore
 import (
 	"context"
 	"fmt"
+	"os"
 	"slices"
 	"time"
 
@@ -51,32 +52,84 @@ func (s *Store) Retired(ctx context.Context) ([]storage.RetiredReplica, error) {
 	return slices.Clone(s.retired), nil
 }
 
-// Collect forgets exactly an enumerated record. It is idempotent once the
-// record is gone and refuses an identity that is bound or live again.
+// Collect releases an enumerated volatile retirement and retains exact local
+// proof until ForgetCollection. A fresh process has no such proof and returns
+// NotFound; callers must never turn this into durable CollectedAt evidence.
 func (s *Store) Collect(ctx context.Context, record storage.RetiredReplica) error {
-	want := record.Identity
-	if want.NodeName != s.opts.NodeName || want.ClusterID != s.opts.ClusterID || want.ReplicaID == 0 {
-		return fault.ErrIdentityMismatch
+	if err := s.validateCollection(record); err != nil {
+		return err
 	}
 	if err := s.enter(ctx); err != nil {
 		return err
 	}
 	defer s.mu.Unlock()
+	want := record.Identity
 	if bound, exists := s.bindings[want.GroupID]; exists && bound == want {
 		return fault.ErrIdentityMismatch
 	}
 	if live := s.groups[want.GroupID]; live != nil && live.identity == want {
 		return fault.ErrIdentityMismatch
 	}
-	i := slices.IndexFunc(s.retired, func(r storage.RetiredReplica) bool { return r.Token == record.Token })
+	i := retiredTokenIndex(s.retired, record.Token)
+	if i < 0 {
+		if prior := retiredTokenIndex(s.collected, record.Token); prior >= 0 {
+			return matchRetiredRecord(s.collected[prior], record)
+		}
+		return os.ErrNotExist
+	}
+	if err := matchRetiredRecord(s.retired[i], record); err != nil {
+		return err
+	}
+	s.collected = append(s.collected, s.retired[i])
+	s.retired = slices.Delete(s.retired, i, i+1)
+	return nil
+}
+
+// ForgetCollection drops only exact volatile collection proof. It cannot prove
+// anything about a prior process and never creates a collection receipt.
+func (s *Store) ForgetCollection(ctx context.Context, record storage.RetiredReplica) error {
+	if err := s.validateCollection(record); err != nil {
+		return err
+	}
+	if err := s.enter(ctx); err != nil {
+		return err
+	}
+	defer s.mu.Unlock()
+	if retiredTokenIndex(s.retired, record.Token) >= 0 {
+		return fault.ErrIdentityMismatch
+	}
+	i := retiredTokenIndex(s.collected, record.Token)
 	if i < 0 {
 		return nil
 	}
-	if found := s.retired[i]; found.Identity != want {
+	if err := matchRetiredRecord(s.collected[i], record); err != nil {
+		return err
+	}
+	s.collected = slices.Delete(s.collected, i, i+1)
+	return nil
+}
+
+func (s *Store) validateCollection(record storage.RetiredReplica) error {
+	want := record.Identity
+	if want.NodeName != s.opts.NodeName || want.ClusterID != s.opts.ClusterID || want.ReplicaID == 0 {
 		return fault.ErrIdentityMismatch
-	} else if !found.QuarantinedAt.Equal(record.QuarantinedAt) {
+	}
+	if record.Token == "" || record.QuarantinedAt.IsZero() {
 		return fault.ErrInvalid
 	}
-	s.retired = slices.Delete(s.retired, i, i+1)
+	return topology.ValidateLoadID(want.GroupID)
+}
+
+func retiredTokenIndex(records []storage.RetiredReplica, token string) int {
+	return slices.IndexFunc(records, func(r storage.RetiredReplica) bool { return r.Token == token })
+}
+
+func matchRetiredRecord(a, b storage.RetiredReplica) error {
+	if a.Identity != b.Identity {
+		return fault.ErrIdentityMismatch
+	}
+	if a.Token != b.Token || !a.QuarantinedAt.Equal(b.QuarantinedAt) {
+		return fault.ErrInvalid
+	}
 	return nil
 }

@@ -48,7 +48,7 @@ type Group struct {
 	observer             *observe.Watch
 	collector            *observe.MetricsCollector
 	recorderMu           sync.Mutex
-	lastOperator         *topology.OperatorStatus
+	lastOperations       map[topology.OperationID]map[string]topology.BlockStatus
 	lastDrained          map[string]bool
 	leases               *sessionManager
 	parked               parkedRegistry
@@ -106,7 +106,10 @@ func New(input Options) (*Group, error) {
 	if err != nil {
 		return nil, err
 	}
-	g := startup.constructGroup()
+	g, err := startup.constructGroup()
+	if err != nil {
+		return nil, err
+	}
 	if err := g.configureServices(); err != nil {
 		return nil, err
 	}
@@ -181,7 +184,7 @@ func inspectMetaStartup(input Options) (metaStartup, error) {
 	return metaStartup{options: opts, pinFound: pin.Found}, nil
 }
 
-func (startup metaStartup) constructGroup() *Group {
+func (startup metaStartup) constructGroup() (*Group, error) {
 	opts := startup.options
 	g := &Group{
 		opts:                opts,
@@ -207,9 +210,13 @@ func (startup metaStartup) constructGroup() *Group {
 		g.addresses[founder.Node.Name] = founder.Address
 	}
 	g.addresses[opts.Identity.NodeName] = opts.Network.AdvertiseAddress
-	g.machine = metaengine.NewMachine(g.rules, nil)
+	var err error
+	g.machine, err = metaengine.NewMachine(g.rules, nil)
+	if err != nil {
+		return nil, err
+	}
 	g.watches = newWatchRegistry(opts.MaxWatchers)
-	return g
+	return g, nil
 }
 
 func (g *Group) configureServices() error {
@@ -249,18 +256,7 @@ func (g *Group) configureServices() error {
 	if err != nil {
 		return err
 	}
-	g.controller, err = operator.New(operator.Config{
-		Store:            operatorStore{g},
-		Rules:            g.rules,
-		Coordinator:      operatorCoordinator{g},
-		Authority:        g,
-		Groups:           groupControllers{g},
-		OwnsGroup:        func(string) bool { return true },
-		Interval:         g.opts.Timing.TickInterval,
-		MaxRetryInterval: time.Second,
-		FinalValidator:   g.finalTarget,
-		PlanValidator:    g.validateRemainingPlan,
-	})
+	g.controller, err = operator.New(g.OperationControllerConfig())
 	if err != nil {
 		return err
 	}
@@ -364,7 +360,11 @@ func (g *Group) openAuthorizedEngine(identity topology.Identity, mode raftengine
 		store.Close()
 		return err
 	}
-	machine := g.engineMachine(store, identity)
+	machine, err := g.engineMachine(store, identity)
+	if err != nil {
+		store.Close()
+		return err
+	}
 	var learners []raft.Peer
 	if mode == raftengine.Founding {
 		roles := g.foundingRoles
@@ -442,7 +442,10 @@ func (g *Group) inspectRetainedState(store *metastore.Store) (retainedMetaState,
 		return retainedMetaState{}, err
 	}
 	if len(materialized) > 0 {
-		check := metaengine.NewMachine(g.rules, nil)
+		check, err := metaengine.NewMachine(g.rules, nil)
+		if err != nil {
+			return retainedMetaState{}, err
+		}
 		if err = check.Restore(context.Background(), materialized); err != nil {
 			return retainedMetaState{}, err
 		}
@@ -466,20 +469,23 @@ func (g *Group) inspectRetainedState(store *metastore.Store) (retainedMetaState,
 	return retainedMetaState{groups: recoveryGroups, version: recoveryVersion, override: override, seen: seen}, nil
 }
 
-func (g *Group) engineMachine(store *metastore.Store, identity topology.Identity) *metaengine.Machine {
-	machine := metaengine.NewMachine(g.rules, store)
+func (g *Group) engineMachine(store *metastore.Store, identity topology.Identity) (*metaengine.Machine, error) {
+	machine, err := metaengine.NewMachine(g.rules, store)
+	if err != nil {
+		return nil, err
+	}
 	machine.OnApplied = func(index uint64, cs raftpb.ConfState) {
 		views := machine.Views()
-		latest, target, active := views.Latest, views.Target, views.Active
-		g.watches.publish(latest, target, active)
-		g.recordApplied(machine, active)
+		target := views.Target
+		g.watches.publish(views)
+		g.recordScopedApplied(machine)
 		g.observer.Wake()
 		g.observeRemoval(identity, target, cs, index)
 		if g.opts.OnApplied != nil {
 			g.opts.OnApplied()
 		}
 	}
-	return machine
+	return machine, nil
 }
 
 // Start acquires and starts meta participation under the supplied lifetime
@@ -601,6 +607,9 @@ func (g *Group) resolveNode(ctx context.Context, name string) (string, error) {
 	}
 	if g.opts.Network.Resolver != nil {
 		address, err := g.opts.Network.Resolver.Resolve(ctx, name)
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
 		if err == nil && address != "" {
 			return address, nil
 		}
@@ -634,7 +643,7 @@ func (g *Group) memberNode(id uint64) string {
 
 func (g *Group) resolveMember(ctx context.Context, id uint64) (string, error) {
 	name := g.memberNode(id)
-	// Ready messages can still carry a retired peer's final commit when Active
+	// Ready messages can still carry a retired peer's final commit when progress
 	// advances before the asynchronous sender drains. Retained documents may
 	// resolve that destination, but never authorize incoming retired
 	// identities.
@@ -703,12 +712,16 @@ func (g *Group) terminalCode() string {
 	return ""
 }
 
-func (g *Group) activeMemberID(name string) uint64 {
-	return g.state().ActiveMemberID(name)
+func (g *Group) eligibleMemberID(name string) uint64 {
+	return g.state().EligibleMemberID(name)
 }
 
 func (g *Group) sessionLive() bool {
 	if g.ensureRunning(context.Background()) != nil {
+		return false
+	}
+	identity := g.currentIdentity()
+	if g.eligibleMemberID(identity.NodeName) != identity.MemberID {
 		return false
 	}
 	g.sessionMu.Lock()

@@ -9,10 +9,10 @@ import (
 func testAuthorityGrant() AuthorityGrant {
 	return AuthorityGrant{
 		Key: AuthorityKey{ClusterID: "cluster", GroupID: "orders", Revision: 41}, Purpose: AuthorityEffect,
-		OperatorID: MakeOperatorID(3, 2),
-		Action:     &AuthorizedStep{OperatorID: MakeOperatorID(3, 2), Version: 3, Attempt: 2, StepSeq: 5, Kind: StepPromoteVoter, GroupID: "orders", NodeName: "b", ReplicaID: 12},
-		Resources:  []AuthorityResource{{Kind: AuthorityGroup, GroupID: "orders"}},
-		Targets:    []AuthorityTarget{{NodeName: "a", MemberID: 1, ReplicaID: 11}, {NodeName: "b", MemberID: 2, ReplicaID: 12}},
+		OperationID: MakeOperationID(3, 2),
+		Action:      &AuthorizedStep{OperationID: MakeOperationID(3, 2), Version: 3, Attempt: 2, StepSeq: 5, Kind: StepPromoteVoter, GroupID: "orders", NodeName: "b", ReplicaID: 12},
+		Resources:   []AuthorityResource{{Kind: AuthorityGroup, GroupID: "orders"}},
+		Targets:     []AuthorityTarget{{NodeName: "a", MemberID: 1, ReplicaID: 11}, {NodeName: "b", MemberID: 2, ReplicaID: 12}},
 	}
 }
 
@@ -26,7 +26,7 @@ func TestAuthorityGrantRejectsIncompleteOrReboundApproval(t *testing.T) {
 		"zero revision":         func(g *AuthorityGrant) { g.Key.Revision = 0 },
 		"foreign group":         func(g *AuthorityGrant) { g.Key.GroupID = "other" },
 		"unsafe group":          func(g *AuthorityGrant) { g.Key.GroupID = "../orders" },
-		"foreign operator":      func(g *AuthorityGrant) { g.OperatorID = MakeOperatorID(4, 2) },
+		"foreign operator":      func(g *AuthorityGrant) { g.OperationID = MakeOperationID(4, 2) },
 		"foreign attempt":       func(g *AuthorityGrant) { g.Action.Attempt++ },
 		"missing step":          func(g *AuthorityGrant) { g.Action.StepSeq = 0 },
 		"ungiven target":        func(g *AuthorityGrant) { g.Action.ReplicaID++ },
@@ -75,9 +75,9 @@ func TestAuthorityGrantVariantsAndOwnership(t *testing.T) {
 	}
 	transfer := g.Clone()
 	transfer.Purpose = AuthorityTransfer
-	transfer.OperatorID = ""
+	transfer.OperationID = ""
 	transfer.RequestID = "request"
-	transfer.Action.OperatorID = ""
+	transfer.Action.OperationID = ""
 	transfer.Action.Attempt = 0
 	transfer.Action.StepSeq = 0
 	transfer.Action.Kind = StepTransferLeader
@@ -167,7 +167,7 @@ func TestHostProofAndRevocationStatusOwnership(t *testing.T) {
 	if r.Validate(g) == nil {
 		t.Fatal("host receipt without durability accepted")
 	}
-	s := AuthorityStatus{OperatorID: g.OperatorID, RevocationRequested: true, Obligations: []FenceObligation{{Key: g.Key, Resource: e.Resource, Evidence: &e}}}
+	s := AuthorityStatus{OperationID: g.OperationID, RevocationRequested: true, Obligations: []FenceObligation{{Key: g.Key, Resource: e.Resource, Evidence: &e}}}
 	copy := s.Clone()
 	copy.Obligations[0].Evidence.LocalSequence++
 	copy.Obligations[0].Key.Revision++

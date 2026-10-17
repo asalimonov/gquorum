@@ -1,7 +1,97 @@
 # Public API refactor acceptance audit
 
+## Current scoped contract and assertion index
+
+This section maps the later scoped implementation; the October11 audit below is
+historical, including its old names, paths and counts. New final validation is
+recorded by Tasks87–88 of the
+[implementation plan](../plans/20261015-failure-isolation-and-operational-api.md).
+
+| Current contract | Owning evidence / behavior |
+| --- | --- |
+| No Active or cluster-wide cursor | `topology/progress*.go`, `internal/metaengine/scoped_*`; `TestIndependentGroupConvergesWhileFactoryRemainsOwned` exercises actual Node publication, blocked callback ownership, sibling progress and joined shutdown. |
+| Immutable operations / retries | `scoped_approval_test.go`, `scoped_retry*_test.go`, `operation_planning_func_test.go`; first approval is stable, failed IDs have one immediate successor, original receipts retain their authority. Known invalid plans refuse without halting Apply (`TestScopedMalformedPlansRefuseWithoutHaltingReplay`). |
+| Exact mutation replay / repair rebase | `mutation_*test.go`, `scoped_repair_test.go`, `scope_independence_test.go`; original CAS, actor/comment, predecessor IDs and normalized intent bind retries. Disjoint repair preserves staged intent and attribution; overlap refuses. |
+| Native effect completion / fairness | `internal/operator/scoped_execution_func_test.go`, `dispatch_*func_test.go`, `remaining_scope_test.go`; exact recorded receipt plus native predicate, scope revalidation after waits, separate budgets, shared host/group gate, timeout/backoff and joined Stop. |
+| Removal versus deletion | `scoped_cleanup*_test.go`, `scoped_group_completion_test.go`, `scoped_barriers_test.go`; offline removed members leave detached debt, whole-group deletion still requires every former owner's stop/readmission proof. |
+| Collection crash/restart | `storage/walstore/collection*_func_test.go`, authoritystore collection tests, managed collection tests and `node_collection_func_test.go`; preparation, physical deletion, durable receipt, reporting, ForgetCollection and row removal retain exact proof at each crash boundary. |
+| Coherent bounded progress | `progress_*test.go`, metaservice progress functionals; shared row budget, full operation aggregate, exact filters/cursor, copied declarations, original observation freshness and no read fan-out. |
+| Durable formats/retention | Frozen metadata v4/authority v2 tests, `scoped_retention*_test.go`; source/attempt/admission/debt references survive pruning and restore; completed unreferenced evidence can be released without a permanent ACK index. |
+| Process acceptance | Six `TestFailureIsolation_` cases listed in [test guide](tests.md#scoped-operations-and-cleanup-validation); included in the final Docker gate. Existing public admission/readmission/shutdown cases complement them. |
+
+## Final scoped architecture audit — Task88
+
+Reviewed the complete source brainstorm/target, its accepted admission amendment,
+and the live public → service → FSM → controller → receiver → store paths. The
+post-audit gate results are recorded in [validation](api-refactor-validation.md).
+The target's explicitly deferred host-loss waiver, migrations/disaster restore,
+priorities, frozen exports and incremental persistence remain outside this change.
+
+| Target boundary | Actual construction, call path and verification |
+| --- | --- |
+| §3 public/domain | `cluster.go`, `cluster_*.go`, `topology/progress*.go`, `operation.go`, `plan.go`, `document_rules.go`: local observations versus safe reads, exact predecessor retry, copied/bounded progress, semantic scopes and two barrier kinds. No Active/current-operator API or compatibility aliases. Five application modules use the final surface. |
+| §4 persisted graph | `metaengine.Machine` accepts only schema4; candidate validation and persistence precede publication. `scoped_*` graph/retention/checkpoint tests cover source compaction, immutable attempts, deterministic restore, exact member ambiguity, complete debt and readmission closure. Frozen v4/v2 and unchanged baseline hashes cover restart/refusal. |
+| §5/§12 approval/repair | Cluster mutations → service normalized intent → Machine Apply → scoped approval/repair/retry. Scope is recomputed, original CAS is retained, repair rebases both documents atomically, approvals replay first attempt and retries name one predecessor. Admission/evacuation derives current state and preserved origin rather than a global cursor. |
+| §6 execution | `metaservice.New` constructs `operator.New(OperationControllerConfig())`; coordinator, authority, exact dispatcher and scoped/final validators are mandatory. Separate group/cleanup budgets share resource gates; immutable receipts plus native checks complete work. Pending revocation affects only conflicting resources. |
+| §6 storage/recovery | `Node.Start → openLoadResources → newHost` wires journal, exact grant/courier checks, catalogs, local progress, collection report/status and store ownership. Host starts its recovery and independent collection worker before control ingress; participation fencing leaves collection maintenance alive. Prepared-only Collect, persisted receipt, accepted/settled report, ForgetCollection, then journal deletion are separate durable boundaries. |
+| §7 private routes | `ReadProgress → read(kind=progress) → Machine.Query`; `collection_check` is a safe no-write absence query. ApplyVersion discriminates approval/retry. MetaControl authenticates restricted collection/status couriers before exact FSM validation; ProposeMeta cannot bypass this route. No new public network API. |
+| §8 lifecycle/wiring | `Node.RequestStop/Stop → metaservice.Quiesce → Host.Stop → owned stores → metadata/journal release`; work and callbacks join before release. Exact load receivers use `DispatchEffect`; native metadata receivers retain `applyNativeMetaEffect`. Excluded hosts can report evidence without acquiring a participant. Root Node isolation/collection regressions exercise actual wiring. |
+| §10 observations | Safe progress reads attach copied cached samples only for matching source/member/instance/replica and preserve ReceivedAt. Local Status remains diagnostic and can probe; fixture requests use a bounded owned cache, never a quorum read on Raft send paths. Metrics/repair windows survive unrelated topology changes. |
+
+Audit corrections, without extra tasks or public APIs:
+
+- Removed unused whole-plan `ValidateRemainingPlan` and its private chain,
+  MembershipCoordinator/fixed adapter, bulk GroupEffects/DispatchGrant wrappers,
+  service/node bulk wrappers and obsolete constants/aliases. Retained simulation,
+  grant/receipt verification and real exact receivers. The former tests now drive
+  `ValidateRemainingScope` and `DispatchEffect`, including founding, independent
+  hosts, native membership, fences and wrong/incomplete receipts.
+- Removed a fixture-only history gate: serving used `Get(ConvergedVersion)` even
+  though that source may be compacted. It now verifies the current approved
+  member locally; `localServing` still checks the exact Node-published handle,
+  replica ID and native role. `TestServingUsesCompactedConvergenceAndExactApprovedMember`
+  panics on any historical/quorum probe and rejects a foreign approved member.
+- The complete post-audit cluster run exposed a setup race in the earlier-learner
+  replay test: required shrink convergence did not prove detached Stop. It now
+  waits for the exact predecessor's StoppedAt before planning regrowth, avoiding
+  an approval race with already-consumed stop work. Repeated runs also exposed
+  the asynchronous serving-cache boundary; the existing WaitValue readiness
+  poll now precedes the unchanged consistent-read assertion. Grant/native/state
+  replay assertions are unchanged; final full rerun evidence is recorded separately.
+- Corrected stale Active/pre-activation comments and the project-map interface
+  inventory. Remaining Active names are node/native liveness or unrelated test
+  counters; Operator names retained in events/origin encodings are intentional.
+
+The §8.5 failure table and §10 acceptance cases map to these assertion owners:
+
+| Failure / requirement | Regression owners |
+| --- | --- |
+| Lost Stage/approval/retry response; pruned retry; strict CAS | `mutation_*test.go`, `scoped_approval_test.go`, `scoped_retry*_test.go`, process `TestFailureIsolation_ExactMutationReplay`. |
+| Repair races or overlaps staged edits; unrelated block/metrics survives | `scoped_repair_test.go`, `scope_independence_test.go`, observe/metrics tests; process `TestFailureIsolation_StagedRebase` and `BlockedGroup`. |
+| Load quorum loss, metadata outage, independent founding | `scoped_founding_test.go`, root `node_isolation_func_test.go`, process isolation and existing quorum/transport cases. |
+| Offline removed host versus required whole-group stop | `scoped_cleanup*_test.go`, `scoped_group_completion_test.go`; process `RemovedHostCleanup` and `DeletionStopProof`. |
+| Same-host replacement, late/superseded callback, exact native proof | `scoped_host_replacement_test.go`, managed ownership/action tests, operator scoped execution/dispatch/remaining-scope tests; process reseat/authority cases. |
+| Deferred/failed retention, Collect failure, crash before/after deletion/receipt | managed `collection_prepare_func_test.go`, `collection_func_test.go`; WAL `collection_func_test.go`, `collection_marker_func_test.go`. |
+| Replaced/missing root, malformed/foreign marker, partial pin deletion | WAL collection/marker functional tests preserve exact identity and proof and refuse absence without a marker. |
+| Lost report response, no-write settlement, pruning race, Forget/journal crash | managed `collection_report_func_test.go`, metaservice cleanup acceptance/protocol tests, `scoped_collection*_test.go`, root `node_collection_func_test.go`; process `CollectionReporting`. |
+| Memory retirement; retained attempts and readmission courier; old storage class | scoped cleanup/collection/retention tests, managed collection/readmission tests, root retained collection handoffs. |
+| Unrelated Target during join; superseded evacuation; intermediate preparations | scoped admission/barrier tests, real service join tests and process durable admission/readmission/drain cases. |
+| Thousands of debts, independent capacity/fairness and shutdown | `scoped_retention_test.go`, cleanup Apply benchmark, operator dispatch/fairness tests; controller/Node joined-shutdown functional race tests. |
+| Old formats, new restart, exact progress freshness/bounds | immutable physical fixtures, scoped snapshot/graph tests, progress query/cursor tests, metaservice progress functional tests and full race suites. |
+
+Peer review: threads39–41 settled the malformed-plan refusal, deletion coverage,
+bootstrap routing and same-host retirement ordering. Thread42 records the next
+five-commit review request; Claude's usage-limit prompt prevented delivery. Later
+audit changes have local review/tests, not claimed peer consensus. On 2026-10-17
+the user instructed “Continue w/o claude”, waiving the remaining peer review.
+The final completion audit confirmed the validated source fingerprint, fixture
+hashes and passing reports against implementation commit `10b680b`; all plan
+tasks are complete. The closure changes documentation only.
+
+## Historical API refactor audit
+
 Status: **complete**, October 11, 2026. This is an evidence index for the
-[target architecture](../brainstorms/20261011-public-api-simplification-target.md),
+historical `20261011-public-api-simplification-target.md` architecture,
 with source review and runtime gates completed against the final implementation.
 The [validation record](api-refactor-validation.md) identifies source `355b728`,
 the exact process image and the complete passing run, including fixes discovered

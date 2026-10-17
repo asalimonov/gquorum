@@ -35,7 +35,7 @@ func (s Settings) Validate() error {
 	return nil
 }
 
-// Watch samples Active-declared groups uniformly, without a process-global
+// Watch samples approved Target-declared groups uniformly, without a process-global
 // metrics registry. Applications may publish metrics from its owned Snapshot.
 type Watch struct {
 	cfg              Config
@@ -162,7 +162,7 @@ func (w *Watch) Refresh(parent context.Context) error {
 	if stopped {
 		return fault.ErrStopped
 	}
-	doc, err := w.cfg.Source.Active(ctx)
+	doc, err := w.cfg.Source.Target(ctx)
 	if err != nil {
 		return err
 	}
@@ -175,11 +175,24 @@ func (w *Watch) Refresh(parent context.Context) error {
 	}
 	if healthErr != nil {
 		health = nil
+	} else if err := w.verifyTarget(ctx, doc); err != nil {
+		return err
 	}
 	// Failed node observation is itself visible as unknown, preserving durable
 	// declared shape and removing stale numeric measurements.
 	w.recompute(doc, health)
 	return healthErr
+}
+
+func (w *Watch) verifyTarget(ctx context.Context, captured topology.Document) error {
+	current, err := w.cfg.Source.Target(ctx)
+	if err != nil {
+		return err
+	}
+	if current.Version != captured.Version || current.ClusterID != captured.ClusterID {
+		return fault.ErrVersionConflict // A waited sample cannot describe a successor assignment.
+	}
+	return nil
 }
 
 func (w *Watch) recompute(doc topology.Document, health map[string]topology.Health) {

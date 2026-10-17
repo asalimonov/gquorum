@@ -29,14 +29,14 @@ func TestCustomSchedulerInputIsOwnedAndForeignActionRefused(t *testing.T) {
 	h := newTestHost(t, 1, 2)
 	r := newTestScheduler(t, h, Settings{})
 	r.policy = schedulerFunc(func(_ context.Context, in schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error) {
-		in.Active.ClusterID = "foreign"
-		in.Active.Nodes[0].Name = "changed"
+		in.Target.ClusterID = "foreign"
+		in.Target.Nodes[0].Name = "changed"
 		in.Status["shard0"].ConfState.Voters[0] = 99
 		return schedulingapi.ScheduleDecision{Action: &schedulingapi.ScheduleAction{Kind: schedulingapi.RestoreMissingReplica, Identity: storage.Identity{ClusterID: "foreign", GroupID: "shard0", NodeName: "n3", ReplicaID: 3}}}, nil
 	})
 	tick(t, r)
-	assertStatus(t, r, topology.SchedulingError, ReconcileReasonPolicyRejected)
-	if h.commits != 0 || h.machine.Active().Nodes[0].Name != "n1" || h.status["shard0"].ConfState.Voters[0] != 1 {
+	assertStatus(t, r, topology.SchedulingWaiting, ReconcileReasonPolicyRejected)
+	if h.commits != 0 || h.machine.Target().Nodes[0].Name != "n1" || h.status["shard0"].ConfState.Voters[0] != 1 {
 		t.Fatal("callback mutated host state or approved foreign identity")
 	}
 }
@@ -48,10 +48,10 @@ func TestCustomSchedulerDeadlineDoesNotApproveLateResult(t *testing.T) {
 	r.callbackTimeout = time.Millisecond
 	r.policy = schedulerFunc(func(ctx context.Context, in schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error) {
 		<-ctx.Done()
-		return schedulingapi.ScheduleDecision{Action: &schedulingapi.ScheduleAction{Kind: schedulingapi.RestoreMissingReplica, Identity: storage.Identity{ClusterID: in.Active.ClusterID, GroupID: "shard0", NodeName: "n3", ReplicaID: 3}}}, nil
+		return schedulingapi.ScheduleDecision{Action: &schedulingapi.ScheduleAction{Kind: schedulingapi.RestoreMissingReplica, Identity: storage.Identity{ClusterID: in.Target.ClusterID, GroupID: "shard0", NodeName: "n3", ReplicaID: 3}}}, nil
 	})
 	tick(t, r)
-	assertStatus(t, r, topology.SchedulingError, ReconcileReasonPolicyRejected)
+	assertStatus(t, r, topology.SchedulingWaiting, ReconcileReasonPolicyRejected)
 	if h.commits != 0 {
 		t.Fatal("timed-out callback result was approved")
 	}
@@ -65,7 +65,7 @@ func TestCustomSchedulerCannotOverrideLocalHold(t *testing.T) {
 	r.held = func() []storage.Identity { return []storage.Identity{id} }
 	r.policy = &stubPolicy{decision: schedulingapi.ScheduleDecision{Action: &schedulingapi.ScheduleAction{Kind: schedulingapi.RestoreMissingReplica, Identity: id}}}
 	tick(t, r)
-	assertStatus(t, r, topology.SchedulingError, ReconcileReasonPolicyRejected)
+	assertStatus(t, r, topology.SchedulingWaiting, ReconcileReasonPolicyRejected)
 	if h.commits != 0 {
 		t.Fatal("local stop hold was replaced")
 	}
@@ -82,13 +82,13 @@ func TestCustomSchedulerCannotReplaceReplicaRecoveredDuringCallback(t *testing.T
 		observed := h.status["shard0"]
 		observed.ConfState = raftpb.ConfState{Voters: []uint64{1, 2, 3}}
 		h.status["shard0"] = observed
-		return schedulingapi.ScheduleDecision{Action: &schedulingapi.ScheduleAction{Kind: schedulingapi.RestoreMissingReplica, Identity: storage.Identity{ClusterID: in.Active.ClusterID, GroupID: "shard0", NodeName: "n3", ReplicaID: 3}}}, nil
+		return schedulingapi.ScheduleDecision{Action: &schedulingapi.ScheduleAction{Kind: schedulingapi.RestoreMissingReplica, Identity: storage.Identity{ClusterID: in.Target.ClusterID, GroupID: "shard0", NodeName: "n3", ReplicaID: 3}}}, nil
 	})
 	tick(t, r)
 	if h.commits != 0 || h.machine.Latest().Version != 1 {
 		t.Fatalf("stale missing-replica observation approved a replacement: commits=%d latest=%d", h.commits, h.machine.Latest().Version)
 	}
-	assertStatus(t, r, topology.SchedulingError, ReconcileReasonPolicyRejected)
+	assertStatus(t, r, topology.SchedulingWaiting, ReconcileReasonPolicyRejected)
 }
 
 func TestCustomSchedulerRechecksApprovalBoundaryAfterCallback(t *testing.T) {
@@ -98,12 +98,12 @@ func TestCustomSchedulerRechecksApprovalBoundaryAfterCallback(t *testing.T) {
 		change func(*testHost)
 		reason string
 	}{
-		{"new staged intent", func(h *testHost) { h.stage(topology.OriginOperator, 1) }, ReconcileReasonCASConflict},
+		{"new staged intent", func(h *testHost) { h.stage(topology.OriginOperator, 1) }, "staged_conflict"},
 		{"unknown health", func(h *testHost) { h.health = nil }, ReconcileReasonPolicyRejected},
 		{"lost quorum", func(h *testHost) {
 			h.health = map[string]topology.Health{"n1": topology.HealthDead, "n2": topology.HealthDead, "n3": topology.HealthAlive}
 		}, ReconcileReasonPolicyRejected},
-		{"leadership transferred", func(h *testHost) { h.leader = false }, ReconcileReasonPolicyRejected},
+		{"leadership transferred", func(h *testHost) { h.leader = false }, ReconcileReasonNotLeader},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -111,11 +111,11 @@ func TestCustomSchedulerRechecksApprovalBoundaryAfterCallback(t *testing.T) {
 			r := newTestScheduler(t, h, Settings{})
 			r.policy = schedulerFunc(func(_ context.Context, in schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error) {
 				tc.change(h)
-				return schedulingapi.ScheduleDecision{Action: &schedulingapi.ScheduleAction{Kind: schedulingapi.RestoreMissingReplica, Identity: storage.Identity{ClusterID: in.Active.ClusterID, GroupID: "shard0", NodeName: "n3", ReplicaID: 3}}}, nil
+				return schedulingapi.ScheduleDecision{Action: &schedulingapi.ScheduleAction{Kind: schedulingapi.RestoreMissingReplica, Identity: storage.Identity{ClusterID: in.Target.ClusterID, GroupID: "shard0", NodeName: "n3", ReplicaID: 3}}}, nil
 			})
 			tick(t, r)
-			assertStatus(t, r, topology.SchedulingError, tc.reason)
-			if h.commits != 0 || h.machine.Target().Version != 1 || h.machine.Active().Version != 1 {
+			assertStatus(t, r, topology.SchedulingWaiting, tc.reason)
+			if h.commits != 0 || h.machine.Target().Version != 1 || h.machine.Target().Version != 1 {
 				t.Fatal("callback result crossed a changed approval boundary")
 			}
 		})
@@ -176,7 +176,6 @@ func TestCustomSchedulerStallRemainsVisibleAndOwnedUntilReturn(t *testing.T) {
 func TestDisabledSchedulerStillWakesApprovedOperator(t *testing.T) {
 	t.Parallel()
 	h := newTestHost(t, 1, 2)
-	h.operatorOverride = &topology.Operator{Status: topology.OperatorStatus{ID: "approved", Version: 1, State: topology.OperatorRunning}}
 	r := newTestScheduler(t, h, Settings{Disabled: true})
 	r.policy = schedulerFunc(func(context.Context, schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error) {
 		t.Error("disabled scheduler called")
@@ -186,5 +185,36 @@ func TestDisabledSchedulerStillWakesApprovedOperator(t *testing.T) {
 	assertStatus(t, r, topology.SchedulingDisabled, ReconcileReasonConfigDisabled)
 	if h.wakes != 1 || h.commits != 0 {
 		t.Fatalf("wakes=%d commits=%d", h.wakes, h.commits)
+	}
+}
+
+func TestCustomPolicyCannotSeizeOwnedGroupOrClearItsCapturedOwner(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []schedulingapi.ScheduleActionKind{schedulingapi.RestoreMissingReplica, schedulingapi.ReconfigureVoters} {
+		t.Run(string(kind), func(t *testing.T) {
+			t.Parallel()
+			h := newScopedHost(t)
+			r := scopedDriver(t, h, nil)
+			row := h.read.Input.Groups["shard0"]
+			row.OperationID = "exec-v2-a1"
+			h.read.Input.Groups["shard0"] = row
+			r.policy = schedulerFunc(func(_ context.Context, input schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error) {
+				changed := input.Groups["shard0"]
+				changed.OperationID = ""
+				input.Groups["shard0"] = changed
+				action := &schedulingapi.ScheduleAction{Kind: kind}
+				if kind == schedulingapi.RestoreMissingReplica {
+					action.Identity = storage.Identity{ClusterID: input.Target.ClusterID, GroupID: "shard0", NodeName: "n3", ReplicaID: 3}
+				} else {
+					action.VoterChange = &topology.VoterChange{GroupID: "shard0", Promote: &topology.ReplicaKey{NodeName: "n3", ReplicaID: 3}}
+				}
+				return schedulingapi.ScheduleDecision{Action: action}, nil
+			})
+			tick(t, r)
+			assertStatus(t, r, topology.SchedulingWaiting, "group_busy")
+			if len(h.attempts) != 0 || h.read.Input.Groups["shard0"].OperationID != row.OperationID {
+				t.Fatal("custom policy seized an owned scope")
+			}
+		})
 	}
 }

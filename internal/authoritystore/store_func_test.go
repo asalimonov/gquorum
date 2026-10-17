@@ -20,8 +20,8 @@ func localIdentity() topology.Identity {
 	return topology.Identity{ClusterID: "cluster", NodeName: "n1", MemberID: 1, InstanceID: "process"}
 }
 func localGrant(revision uint64) topology.AuthorityGrant {
-	a := topology.AuthorizedStep{OperatorID: topology.MakeOperatorID(2, 1), Version: 2, Attempt: 1, StepSeq: 1, GroupID: "work", NodeName: "n1", ReplicaID: 7, Kind: topology.StepPrepareReplica}
-	return topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: "work", Revision: revision}, Purpose: topology.AuthorityEffect, OperatorID: a.OperatorID, Action: &a, Resources: []topology.AuthorityResource{resource("work", "n1")}, Targets: []topology.AuthorityTarget{{NodeName: "n1", MemberID: 1, ReplicaID: 7}}}
+	a := topology.AuthorizedStep{OperationID: topology.MakeOperationID(2, 1), Version: 2, Attempt: 1, StepSeq: 1, GroupID: "work", NodeName: "n1", ReplicaID: 7, Kind: topology.StepPrepareReplica}
+	return topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: "work", Revision: revision}, Purpose: topology.AuthorityEffect, OperationID: a.OperationID, Action: &a, Resources: []topology.AuthorityResource{resource("work", "n1")}, Targets: []topology.AuthorityTarget{{NodeName: "n1", MemberID: 1, ReplicaID: 7}}}
 }
 func openLocal(t *testing.T) (*Store, string) {
 	t.Helper()
@@ -143,7 +143,7 @@ func TestNewFenceRejectsOldAdmissionAndJoinsOldConsumption(t *testing.T) {
 		t.Fatal(err)
 	}
 	wrong := next.Clone()
-	wrong.OperatorID = "changed"
+	wrong.OperationID = "changed"
 	if _, err := s.Fence(t.Context(), wrong); !errors.Is(err, fault.ErrIdentityMismatch) {
 		t.Fatal(err)
 	}
@@ -319,7 +319,7 @@ func TestCompletedReadmissionReceiptRemainsReadableAfterRebind(t *testing.T) {
 	t.Parallel()
 	s, path := openLocal(t)
 	g := localGrant(12)
-	g.Purpose, g.Action, g.OperatorID, g.AdmissionID = topology.AuthorityReadmit, nil, "", "admission"
+	g.Purpose, g.Action, g.OperationID, g.AdmissionID = topology.AuthorityReadmit, nil, "", "admission"
 	floor := completeLocal(t, s, g)
 	if _, err := s.BeginEffect(t.Context(), g, g.Targets[0]); err != nil {
 		t.Fatal(err)

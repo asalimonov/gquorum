@@ -132,7 +132,8 @@ func (s *Standalone) ReportSnapshot(id uint64, status raft.SnapshotStatus) {
 type machineAdapter struct{ StateMachine }
 
 func (m machineAdapter) Apply(ctx context.Context, c raftengine.Command) (raftengine.Result, error) {
-	result, err := m.StateMachine.Apply(ctx, Command(c))
+	result, err := m.StateMachine.Apply(ctx, Command{Index: c.Index, Term: c.Term,
+		RequestID: c.RequestID, Data: c.Data})
 	return raftengine.Result(result), err
 }
 

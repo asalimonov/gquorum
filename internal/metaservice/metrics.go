@@ -34,8 +34,7 @@ func (g *Group) localReplicaMetrics(ctx context.Context, header *metapb.Header) 
 		return metatransport.Reply(fault.ErrUnavailable)
 	}
 	identity := g.currentIdentity()
-	active := g.state().Active()
-	meta := active.MetaGroup()
+	meta := metricsConvergedGroup(g.metricsTopology().Groups, topology.MetaGroupID)
 	if meta == nil {
 		return metatransport.Reply(fault.ErrReplicaNotReady)
 	}
@@ -95,8 +94,7 @@ func (g *Group) localMetaMetrics() (metrics.ReplicaObservation, bool) {
 		return metrics.ReplicaObservation{}, false
 	}
 	id := g.currentIdentity()
-	doc := g.state().Active()
-	group := doc.MetaGroup()
+	group := metricsConvergedGroup(g.metricsTopology().Groups, topology.MetaGroupID)
 	if group == nil {
 		return metrics.ReplicaObservation{}, false
 	}
@@ -123,8 +121,8 @@ type metricsSource struct {
 	pins map[topology.ReplicaKey]topology.Identity
 }
 
-func (s *metricsSource) Active(ctx context.Context) (topology.Document, error) {
-	return s.g.Active(ctx)
+func (s *metricsSource) Topology(ctx context.Context) (topology.ProgressPage, error) {
+	return s.g.LocalProgress(ctx)
 }
 func (s *metricsSource) Epoch() (observe.LeaderEpoch, bool) {
 	engine := s.g.engine.Load()
@@ -141,17 +139,22 @@ func (s *metricsSource) Epoch() (observe.LeaderEpoch, bool) {
 	}, running && status.LeaderID == own.MemberID && status.Term != 0 && s.g.IsLeader()
 }
 
-func (s *metricsSource) Collect(ctx context.Context, doc topology.Document,
+func (s *metricsSource) Collect(ctx context.Context, doc topology.ProgressPage,
 	pool *observe.ReadPool) (observe.Round, error) {
 	epoch, _ := s.Epoch()
-	round := observe.Round{ActiveVersion: doc.Version, Epoch: epoch, Groups: map[string]observe.GroupSamples{}}
+	round := observe.Round{Epoch: epoch, Groups: map[string]observe.GroupSamples{}}
+	for _, row := range doc.Groups {
+		if row.Converged != nil && row.ConvergedVersion != 0 {
+			round.Groups[row.GroupID] = observe.GroupSamples{SourceVersion: row.ConvergedVersion}
+		}
+	}
 	reads := []observe.ReplicaRead{}
 	kept := map[topology.ReplicaKey]bool{}
-	if group := doc.MetaGroup(); group != nil {
+	if group := metricsConvergedGroup(doc.Groups, topology.MetaGroupID); group != nil {
 		for _, r := range group.Replicas {
 			key := topology.ReplicaKey{NodeName: r.NodeName, ReplicaID: r.ReplicaID}
 			kept[key] = true
-			reads = append(reads, s.metaMetricsRead(doc, r))
+			reads = append(reads, s.metaMetricsRead(r))
 		}
 	}
 	for key := range s.pins {
@@ -160,7 +163,7 @@ func (s *metricsSource) Collect(ctx context.Context, doc topology.Document,
 		}
 	}
 	if s.g.opts.LoadMetricsReads != nil {
-		reads = append(reads, s.g.opts.LoadMetricsReads(ctx, doc)...)
+		reads = append(reads, s.g.opts.LoadMetricsReads(ctx, doc.Groups)...)
 	}
 	options := observe.ReadOptions{Start: s.cursor, Parallel: s.g.opts.Metrics.MaxParallelReads,
 		MaxAge: s.g.opts.Metrics.MaxSampleAge}
@@ -176,14 +179,14 @@ func (s *metricsSource) Collect(ctx context.Context, doc topology.Document,
 	return round, nil
 }
 
-func (s *metricsSource) metricsPin(doc topology.Document, r topology.Replica) (topology.Identity, bool) {
+func (s *metricsSource) metricsPin(r topology.Replica) (topology.Identity, bool) {
 	key := topology.ReplicaKey{NodeName: r.NodeName, ReplicaID: r.ReplicaID}
 	own := s.g.currentIdentity()
 	pin, found := s.g.state().ProcessIdentity(r.NodeName)
 	if r.NodeName == own.NodeName {
 		pin, found = own, true
 	}
-	if pin.MemberID != r.ReplicaID || pin.ClusterID != doc.ClusterID {
+	if pin.MemberID != r.ReplicaID || pin.ClusterID != own.ClusterID {
 		delete(s.pins, key)
 		return pin, false
 	}
@@ -195,10 +198,11 @@ func (s *metricsSource) metricsPin(doc topology.Document, r topology.Replica) (t
 	return pin, found
 }
 
-func (s *metricsSource) metaMetricsRead(doc topology.Document, r topology.Replica) observe.ReplicaRead {
-	pin, found := s.metricsPin(doc, r)
+func (s *metricsSource) metaMetricsRead(r topology.Replica) observe.ReplicaRead {
+	pin, found := s.metricsPin(r)
 	id := metrics.ReplicaIdentity{
-		ClusterID: doc.ClusterID, GroupID: topology.MetaGroupID, NodeName: r.NodeName, ReplicaID: r.ReplicaID,
+		ClusterID: s.g.currentIdentity().ClusterID, GroupID: topology.MetaGroupID,
+		NodeName: r.NodeName, ReplicaID: r.ReplicaID,
 	}
 	if !found {
 		return observe.ReplicaRead{Identity: id, Error: fault.ErrReplicaNotReady}

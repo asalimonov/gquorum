@@ -422,5 +422,9 @@ func (g *Group) halt(err error) {
 	g.publishObservationLocked(regularObservation)
 	g.mu.Unlock()
 	g.emit(events.Event{Type: events.RuntimeError, Code: "raft_halted"})
-	g.opts.Logger.Error("Raft group halted", "group", g.opts.GroupID, "error", err)
+	cause := err
+	for unwrapped := errors.Unwrap(cause); unwrapped != nil; unwrapped = errors.Unwrap(cause) {
+		cause = unwrapped
+	}
+	g.opts.Logger.Error("Raft group halted", "group", g.opts.GroupID, "error", err, "cause", cause)
 }

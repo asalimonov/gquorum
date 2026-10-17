@@ -11,7 +11,22 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
+	"github.com/asalimonov/gquorum/internal/metapb"
 )
+
+func TestInitialSessionCourierRequiresAdmissionBasis(t *testing.T) {
+	t.Parallel()
+	f := newMutationFixture(t)
+	identity := f.g.Identity()
+	identity.MemberID = 1
+	header := &metapb.Header{NodeName: identity.NodeName, MemberId: identity.MemberID,
+		InstanceId: "retained-restart"}
+	proposal := &metaengine.GrantSession{NodeName: identity.NodeName,
+		InstanceID: header.InstanceId, SessionID: "first-session", TTLSeconds: 30}
+	if err := f.g.validateProposalCourier(proposal, header); err != nil {
+		t.Fatal("proven retained member could not grant its first session", err)
+	}
+}
 
 func TestLockHolderUsesOwnedLocallyAppliedSession(t *testing.T) {
 	t.Parallel()

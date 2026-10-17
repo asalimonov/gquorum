@@ -34,7 +34,7 @@ func TestSelfRemovalCallbackFailureStaysFencedAndIsLocallyObservable(t *testing.
 	if !status.Fenced || !status.Notified || status.ErrorCode != "callback_failed" || g.OwnSessionLive() {
 		t.Fatal(status)
 	}
-	if err := g.Authorize(context.Background(), topology.AuthorizedStep{}); !errors.Is(err, fault.ErrStopped) {
+	if _, err := g.BeginEffect(context.Background(), topology.AuthorizedStep{}); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal("callback failure restored authority", err)
 	}
 	eventBarrier(t, bus, stream)

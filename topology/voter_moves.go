@@ -5,7 +5,8 @@ import "slices"
 // voterPlanState is symbolic: a wait makes a future voter conditionally ready,
 // but never changes an observation or proves the member live at execution time.
 type voterPlanState struct {
-	base, desired     Document
+	base              PlanInput
+	desired           Document
 	groupID           string
 	voters, learners  map[uint64]struct{}
 	observedLive      map[uint64]bool
@@ -17,8 +18,9 @@ type voterPlanState struct {
 }
 
 type voterPlanTopology struct {
-	base, desired Document
-	groupID       string
+	base    PlanInput
+	desired Document
+	groupID string
 }
 
 func planVoterMoves(view voterPlanTopology, status GroupStatus, options PlanOptions) ([]Step, error) {
@@ -44,6 +46,9 @@ func planVoterMoves(view voterPlanTopology, status GroupStatus, options PlanOpti
 		return nil, err
 	}
 	moves := s.classifyMoves(group)
+	if err := s.prepareBeforeDecommission(group); err != nil {
+		return nil, err
+	}
 	s.retireStale(moves, status)
 	if err := s.replaceOutgoing(view, group, &moves); err != nil {
 		return nil, err
@@ -58,11 +63,14 @@ func planVoterMoves(view voterPlanTopology, status GroupStatus, options PlanOpti
 }
 
 func (s *voterPlanState) checkInitial() error {
+	if err := s.validateNativeRetirement(); err != nil {
+		return err
+	}
 	if len(s.voters) == 0 {
 		return planUnsafef("group %q has no observed voters", s.groupID)
 	}
-	if len(s.voters)+len(s.learners) > s.maximum {
-		return planUnsafef("group %q exceeds replica_capacity %d", s.groupID, s.maximum)
+	if len(s.voters)+len(s.learners) > s.replicaCapacity() {
+		return planUnsafef("group %q exceeds replica_capacity %d", s.groupID, s.replicaCapacity())
 	}
 	if s.healthKnown && s.liveCount(s.voters) < QuorumOf(len(s.voters)) {
 		return planUnsafef("group %q has no observed live quorum", s.groupID)
@@ -83,7 +91,17 @@ func (s *voterPlanState) ensureLearner(replica Replica) error {
 	if _, learner := s.learners[replica.ReplicaID]; learner {
 		return nil
 	}
-	if len(s.voters)+len(s.learners) >= s.maximum {
+	if s.groupID != MetaGroupID {
+		for _, old := range s.base.formerReplicas(s.groupID) {
+			_, voter := s.voters[old.ReplicaID]
+			_, learner := s.learners[old.ReplicaID]
+			if old.NodeName == replica.NodeName && old.ReplicaID != replica.ReplicaID && (voter || learner) {
+				return planUnsafef("group %q host %q still owns native replica %d",
+					s.groupID, replica.NodeName, old.ReplicaID)
+			}
+		}
+	}
+	if len(s.voters)+len(s.learners) >= s.replicaCapacity() {
 		return planUnsafef("group %q has no replica_capacity for learner %d", s.groupID, replica.ReplicaID)
 	}
 	s.emit(StepPrepareReplica, replica)
@@ -127,7 +145,7 @@ func (s *voterPlanState) promote(replica Replica) error {
 	return nil
 }
 
-func (s *voterPlanState) canDestroyAfterPromotion(departing, arrival Replica) bool {
+func (s *voterPlanState) canDestroyAfterPromotion(departing ReplicaKey, arrival Replica) bool {
 	clone := *s
 	clone.voters = cloneIDSet(s.voters)
 	clone.learners = cloneIDSet(s.learners)
@@ -141,7 +159,7 @@ func (s *voterPlanState) canDestroyAfterPromotion(departing, arrival Replica) bo
 	return clone.canDestroy(departing) == nil
 }
 
-func (s *voterPlanState) canDestroy(replica Replica) error {
+func (s *voterPlanState) canDestroy(replica ReplicaKey) error {
 	if !s.healthKnown {
 		return planUnsafef("group %q replacement needs live membership observations", s.groupID)
 	}
@@ -160,7 +178,7 @@ func (s *voterPlanState) canDestroy(replica Replica) error {
 	return validateVoterTransition(view, voterKeys(*s), voterKeysForSet(*s, after), *s)
 }
 
-func (s *voterPlanState) destroy(replica Replica) error {
+func (s *voterPlanState) destroy(replica ReplicaKey) error {
 	if err := s.canDestroy(replica); err != nil {
 		return err
 	}
@@ -173,27 +191,21 @@ func (s *voterPlanState) destroy(replica Replica) error {
 		s.leader = transfer.ReplicaID
 	}
 	if wanted := s.desired.Group(s.groupID); targetReplicaByID(wanted, replica.ReplicaID) != nil {
-		s.emit(StepDemoteVoter, replica)
+		s.emitRetirement(StepDemoteVoter, replica)
 		delete(s.voters, replica.ReplicaID)
 		s.learners[replica.ReplicaID] = struct{}{}
 	} else {
-		s.emit(StepRemoveReplica, replica)
+		s.emitRetirement(StepRemoveReplica, replica)
 		delete(s.voters, replica.ReplicaID)
-		s.emit(StepStopReplica, replica)
-		if s.groupID != MetaGroupID {
-			s.emit(StepCleanupReplicaState, replica)
-		}
+		s.retireHost(replica)
 	}
 	return nil
 }
 
-func (s *voterPlanState) remove(replica Replica) {
-	s.emit(StepRemoveReplica, replica)
+func (s *voterPlanState) remove(replica ReplicaKey) {
+	s.emitRetirement(StepRemoveReplica, replica)
 	delete(s.learners, replica.ReplicaID)
-	s.emit(StepStopReplica, replica)
-	if s.groupID != MetaGroupID {
-		s.emit(StepCleanupReplicaState, replica)
-	}
+	s.retireHost(replica)
 }
 
 func (s *voterPlanState) transferTarget(exclude uint64) (Replica, bool) {
@@ -217,7 +229,7 @@ func (s *voterPlanState) liveCount(voters map[uint64]struct{}) int {
 	return count
 }
 
-func compareReplicaIdentity(a, b Replica) int {
+func compareReplicaIdentity(a, b ReplicaKey) int {
 	if a.ReplicaID < b.ReplicaID {
 		return -1
 	}
@@ -227,8 +239,15 @@ func compareReplicaIdentity(a, b Replica) int {
 	return compareNames(a.NodeName, b.NodeName)
 }
 
-func pairIncomingIndex(view voterPlanTopology, departing Replica, incoming []Replica) int {
+func pairIncomingIndex(view voterPlanTopology, departing ReplicaKey, incoming []Replica) int {
 	base, desired, groupID := view.base, view.desired, view.groupID
+	if groupID != MetaGroupID {
+		for i, arrival := range incoming {
+			if arrival.NodeName == departing.NodeName {
+				return i
+			}
+		}
+	}
 	group := desired.Group(groupID)
 	if group.VoterConfig == nil || group.VoterConfig.DistinctVoterLabel == "" {
 		return 0
@@ -236,7 +255,7 @@ func pairIncomingIndex(view voterPlanTopology, departing Replica, incoming []Rep
 	key := group.VoterConfig.DistinctVoterLabel
 	old := desired.Node(departing.NodeName)
 	if old == nil {
-		old = base.Node(departing.NodeName)
+		old = base.provenNode(departing.NodeName)
 	}
 	if old != nil {
 		for i, arrival := range incoming {
@@ -261,13 +280,15 @@ func sameVoterIDs(actual map[uint64]struct{}, wanted []Replica) bool {
 }
 
 type voterMoves struct {
-	want                              map[uint64]Replica
-	incoming, outgoing, staleLearners []Replica
+	want                    map[uint64]Replica
+	incoming                []Replica
+	outgoing, staleLearners []ReplicaKey
 }
 
 func (s *voterPlanState) classifyMoves(group *Group) voterMoves {
 	want := make(map[uint64]Replica, len(group.Replicas))
-	var incoming, outgoing, staleLearners []Replica
+	var incoming []Replica
+	var outgoing, staleLearners []ReplicaKey
 	for _, replica := range sortedReplicas(group.Replicas) {
 		want[replica.ReplicaID] = replica
 		if replica.Role == ReplicaVoter {
@@ -278,13 +299,13 @@ func (s *voterPlanState) classifyMoves(group *Group) voterMoves {
 	}
 	for id := range s.voters {
 		if replica, keep := want[id]; !keep || replica.Role != ReplicaVoter {
-			old, _ := replicaIdentity(s.base.Group(s.groupID), group, id)
+			old, _ := s.base.planReplicaKey(s.groupID, group, id)
 			outgoing = append(outgoing, old)
 		}
 	}
 	for id := range s.learners {
 		if _, keep := want[id]; !keep {
-			old, _ := replicaIdentity(s.base.Group(s.groupID), group, id)
+			old, _ := s.base.planReplicaKey(s.groupID, group, id)
 			staleLearners = append(staleLearners, old)
 		}
 	}
@@ -303,20 +324,34 @@ func (s *voterPlanState) retireStale(moves voterMoves, status GroupStatus) {
 	for _, replica := range moves.staleLearners {
 		s.remove(replica)
 	}
-	if previous := s.base.Group(s.groupID); previous != nil {
-		for _, replica := range sortedReplicas(previous.Replicas) {
-			if _, kept := moves.want[replica.ReplicaID]; kept {
-				continue
+	for _, replica := range s.base.formerReplicas(s.groupID) {
+		_, kept := moves.want[replica.ReplicaID]
+		_, native := initialNative[replica.ReplicaID]
+		if kept || native {
+			continue
+		}
+		switch replica.Progress {
+		case RetainedHosted:
+			s.remove(replica.ReplicaKey) // prepared state still needs an exact no-op removal receipt
+		case RetainedCleanup:
+			if requiredRetainedStop(s.desired.Group(s.groupID), replica.ReplicaKey) {
+				s.emitRetirement(StepStopReplica, replica.ReplicaKey)
 			}
-			if _, native := initialNative[replica.ReplicaID]; !native {
-				s.remove(replica) // prepared durable state still needs an exact receipt
-			}
+		default: // Validated RetainedStopped: existing debt owns any remaining retirement.
 		}
 	}
 }
 
 func (s *voterPlanState) replaceOutgoing(view voterPlanTopology, group *Group, moves *voterMoves) error {
+	s.orderHostReplacements(group, moves)
 	for _, departing := range moves.outgoing {
+		if arrival := groupReplicaOnNode(group, departing.NodeName); s.groupID != MetaGroupID &&
+			arrival != nil && arrival.ReplicaID != departing.ReplicaID && arrival.Role == ReplicaLearner {
+			if err := s.destroy(departing); err != nil {
+				return err
+			}
+			continue // addIncoming prepares this stable learner after releasing its host.
+		}
 		if len(moves.incoming) == 0 {
 			if err := s.destroy(departing); err != nil {
 				return err
@@ -331,6 +366,25 @@ func (s *voterPlanState) replaceOutgoing(view voterPlanTopology, group *Group, m
 		}
 	}
 	return nil
+}
+
+func (s *voterPlanState) orderHostReplacements(group *Group, moves *voterMoves) {
+	if s.groupID != MetaGroupID {
+		// Reuse occupied hosts before pairing departures with other arrivals.
+		// Replacing a non-leader first also supplies a live transfer destination
+		// when every old replica is being reseated in the same approval.
+		priority := func(key ReplicaKey) int {
+			if incoming := groupReplicaOnNode(group, key.NodeName); incoming != nil &&
+				incoming.ReplicaID != key.ReplicaID {
+				if key.ReplicaID == s.leader {
+					return 1
+				}
+				return 0
+			}
+			return 2
+		}
+		slices.SortStableFunc(moves.outgoing, func(a, b ReplicaKey) int { return priority(a) - priority(b) })
+	}
 }
 
 func (s *voterPlanState) addIncoming(group *Group, incoming []Replica) error {
@@ -370,9 +424,17 @@ func (s *voterPlanState) validateFinal() error {
 	return nil
 }
 
-func (s *voterPlanState) replacePair(group *Group, departing, arrival Replica) error {
+func (s *voterPlanState) replacePair(group *Group, departing ReplicaKey, arrival Replica) error {
+	if s.groupID != MetaGroupID && departing.NodeName == arrival.NodeName {
+		// A host owns only one local replica per group. Native spare capacity
+		// does not permit preparing a second identity over its running owner.
+		if err := s.destroy(departing); err != nil {
+			return err
+		}
+		return s.addVoter(arrival)
+	}
 	if _, alreadyLearner := s.learners[arrival.ReplicaID]; !alreadyLearner &&
-		len(s.voters)+len(s.learners) >= s.maximum &&
+		len(s.voters)+len(s.learners) >= s.replicaCapacity() &&
 		targetReplicaByID(group, departing.ReplicaID) == nil {
 		// Exact-identity replacement at a hard host cap has no learner
 		// seat. Release the old seat first only when the observed live

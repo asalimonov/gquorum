@@ -64,7 +64,7 @@ func (g AuthorityGrant) Clone() AuthorityGrant {
 // Equal compares every grant field, including exact resource and target
 // ordering.
 func (g AuthorityGrant) Equal(other AuthorityGrant) bool {
-	return g.Key == other.Key && g.Purpose == other.Purpose && g.OperatorID == other.OperatorID &&
+	return g.Key == other.Key && g.Purpose == other.Purpose && g.OperationID == other.OperationID &&
 		g.AdmissionID == other.AdmissionID && g.RequestID == other.RequestID && equalAction(g.Action,
 		other.Action) && slices.Equal(g.Resources, other.Resources) &&
 		slices.Equal(g.Targets, other.Targets)
@@ -260,11 +260,11 @@ func (g AuthorityGrant) validateEffect() error {
 	}
 	a := *g.Action
 	if g.Purpose == AuthorityEffect {
-		if a.Attempt == 0 || a.StepSeq < 1 || g.OperatorID != a.OperatorID || g.RequestID != "" ||
-			a.OperatorID != MakeOperatorID(a.Version, a.Attempt) {
+		if a.Attempt == 0 || a.StepSeq < 1 || g.OperationID != a.OperationID || g.RequestID != "" ||
+			a.OperationID != MakeOperationID(a.Version, a.Attempt) {
 			return invalid("effect does not identify its exact operator attempt and step")
 		}
-	} else if a.Kind != StepTransferLeader || a.OperatorID != "" || g.OperatorID != "" || a.StepSeq != 0 ||
+	} else if a.Kind != StepTransferLeader || a.OperationID != "" || g.OperationID != "" || a.StepSeq != 0 ||
 		a.Attempt != 0 || !authorityText(g.RequestID) {
 		return invalid("direct transfer requires an exact request identity")
 	}

@@ -31,7 +31,7 @@ func BenchmarkMetaSnapshotMatrix(b *testing.B) {
 				b.ReportAllocs()
 				b.SetBytes(int64(len(snapshot)))
 				for b.Loop() {
-					restored := NewMachine(machine.rules, nil)
+					restored := mustMachine(b, machine.rules, nil)
 					if err := restored.Restore(context.Background(), snapshot); err != nil {
 						b.Fatal(err)
 					}

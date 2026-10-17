@@ -29,8 +29,9 @@ type Probe struct {
 // GroupSamples combines native group status, replica observations and transport
 // probes.
 type GroupSamples struct {
-	Status   topology.GroupStatus
-	Replicas []metrics.ReplicaObservation
-	Probes   []Probe
-	Error    error
+	SourceVersion uint64
+	Status        topology.GroupStatus
+	Replicas      []metrics.ReplicaObservation
+	Probes        []Probe
+	Error         error
 }

@@ -50,11 +50,9 @@ func (g *Group) readmissionPayload(previous topology.Identity, result joinRespon
 	granted.MemberID = result.MemberID
 	if result.PreviousMemberID != 0 {
 		previous.MemberID = result.PreviousMemberID
-	} else if previous.MemberID == 0 {
-		previous.MemberID = result.Previous.MemberID(previous.NodeName)
 	}
 	g.mu.RLock()
-	docs := []topology.Document{result.Previous, {Groups: result.PreviousGroups}, {Groups: g.recoveryGroups},
+	docs := []topology.Document{{Groups: result.PreviousGroups}, {Groups: g.recoveryGroups},
 		{Groups: applied}}
 	g.mu.RUnlock()
 	groups := previousNodeGroups(docs, result.Granted, previous.NodeName)
@@ -78,7 +76,7 @@ func validateReadmissionResponse(identity topology.Identity, result joinResponse
 	}
 	if len(result.Grants) == 0 {
 		if result.Readmitted || result.PreviousMemberID != 0 {
-			return fault.ErrOperatorAuthorization
+			return fault.ErrOperationAuthorization
 		}
 		return nil
 	}
@@ -112,7 +110,7 @@ func (v *readmissionValidation) validateGrant(grant topology.AuthorityGrant) err
 		len(grant.Resources) != 1 || grant.Resources[0] != resource || v.seen[grant.Key.GroupID] ||
 		v.revision != 0 && v.revision != grant.Key.Revision || grant.Validate() != nil ||
 		grant.AdmissionID != metaengine.ReadmissionID(v.response.Admission) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	v.revision = grant.Key.Revision
 	v.seen[grant.Key.GroupID] = true
@@ -139,7 +137,7 @@ func (v *readmissionValidation) validateGrant(grant topology.AuthorityGrant) err
 
 func (v *readmissionValidation) validatePreviousGroups() error {
 	if !v.seen[topology.MetaGroupID] {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	for _, group := range v.response.PreviousGroups {
 		for _, replica := range group.Replicas {
@@ -150,13 +148,13 @@ func (v *readmissionValidation) validatePreviousGroups() error {
 				ReplicaID: replica.ReplicaID,
 			}
 			if !v.prior[id] {
-				return fault.ErrOperatorAuthorization
+				return fault.ErrOperationAuthorization
 			}
 			delete(v.prior, id)
 		}
 	}
 	if len(v.prior) != 0 {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	return nil
 }
@@ -176,7 +174,7 @@ func validateReadmissionReceipts(grants []topology.AuthorityGrant, receipts []to
 		key := effect{receipt.Key, receipt.Target}
 		grant, found := pending[key]
 		if !found || receipt.Validate(grant) != nil {
-			return fault.ErrOperatorAuthorization
+			return fault.ErrOperationAuthorization
 		}
 		delete(pending, key)
 	}

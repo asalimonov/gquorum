@@ -11,8 +11,9 @@ application-controlled scaling.
 
 The module is `github.com/asalimonov/gquorum`. `go.mod` requires Go 1.26.0 and
 pins toolchain Go 1.26.5. Core dependencies are etcd Raft, bbolt, etcd WAL, gRPC
-and protobuf. Kong lives in the separate `examples/cluster` module, and Docker
-tooling lives in the separate `tests/cluster` module.
+and protobuf. Five application modules are the root, `examples/cluster`,
+`examples/scheduler`, `examples/inmemory-cache` and `tests/cluster` (including the
+caller fixture). Kong and Docker tooling stay outside the library module.
 
 The public API refactor established these boundaries:
 
@@ -55,7 +56,7 @@ cleanup evidence and shutdown release ownership.
 | Path | Responsibility |
 | --- | --- |
 | `node*.go`, `cluster*.go`, `doc.go` | Public API, validation, lifecycle composition and administration. |
-| `topology/` | Documents, identities, placement, planning, operators, status and validation. |
+| `topology/` | Documents, identities, placement, scoped operations, progress and validation. |
 | `load/` | State-machine and transport contracts, replica handles and standalone owner. |
 | `scheduling/`, `lifecycle/` and their test-helper packages | Repair policies, local lifecycle hooks and caller contract helpers. |
 | `storage/`, `storage/walstore/`, `storage/memstore/`, `storage/storagetest/` | Persistence/retirement contracts, WAL backend, in-memory store and conformance helpers. |
@@ -75,19 +76,34 @@ cleanup evidence and shutdown release ownership.
 
 ### Topology and authorization
 
-- `Latest` may contain unapproved intent; `Target` is approved desired topology;
-  `Active` is fully converged topology. Staging alone never authorizes effects.
+- `Latest` may contain unapproved intent; `Target` is approved desired topology.
+  Group/node progress retains independent proven declarations and source versions.
+  `FullyConverged` is historical; there is no Active document or global execution
+  cursor. Staging alone never authorizes effects.
 - Mutations use expected-version compare-and-swap. Preview cannot combine with
   approval. If staging succeeds and approval fails, return the staged version
   so the caller can retry that version's approval.
 - Execute immutable approved plans. Verify the complete
-  operator/version/attempt/step/action/identity tuple, including after waits.
+  operation/version/attempt/step/action/identity tuple, including after waits.
   A refusal or incomplete acknowledgement is never completion proof.
+- Approve returns the retained first attempt; RetryOperation explicitly creates
+  one immediate successor of a failed attempt with the same immutable plan.
+  Replay uncertain mutations with their original CAS, actor/comment and exact
+  predecessor IDs. Disjoint repair atomically rebases unapproved intent; inspect
+  typed RebasedTo conflicts rather than approving whichever version is Latest.
+- Per-group owners and state-based admission/evacuation barriers govern effects.
+  Unrelated Target advancement, staged intent or offline cleanup cannot globally
+  block healthy groups. Shared quorum and exact conflicting resources still gate.
+- ReadProgress confirms one bounded metadata page, attaches only exact cached
+  observations with original timestamps and never fans out. Its cursor is not a
+  frozen snapshot; operation aggregate status remains complete on truncated pages.
 - Preserve learner-first membership, guarded promotion, leadership transfer
   before leader removal/demotion and post-change live-quorum checks. Policies
   and serve overrides cannot bypass core safety checks.
-- `topology.Limits` is the sole capacity setting: defaults are three nodes and
-  five load replicas. Avoid fixed cluster-size assumptions. All admitted node
+- `topology.Limits` is the sole capacity setting: defaults are three nodes,
+  five replicas per load group, four executing groups and two cleanup requests.
+  Execution limits are immutable replicated settings; retained proof has no
+  global count cap. Avoid fixed cluster-size assumptions. All admitted node
   types join `_meta`; type-based placement controls load hosting.
 - Topology/status/lock-holder reads are observations, not linearizable barriers
   or proof of quorum.
@@ -97,8 +113,8 @@ cleanup evidence and shutdown release ownership.
 - Keep string node names (`Identity.NodeName`, `Node.Name`) distinct from
   numeric `_meta` `MemberID` and group `ReplicaID`. Status adds
   `MetaLeaderNodeName`/`LeaderNodeName` alongside existing numeric
-  `MetaLeaderID`/`LeaderID`. Resolve names through Active by exact group/replica
-  identity, including cached status; preserve unknown names and observed IDs.
+  `MetaLeaderID`/`LeaderID`. Resolve names through approved/proven exact
+  group/replica identity and retained meta owners, including cached status; preserve unknown names and observed IDs.
 - Distinguish durable identity from process incarnation. Retained restarts
   preserve pins and supply a fresh `InstanceID`. Replacements use fresh monotonic
   replica IDs; deleted group IDs cannot be reused.
@@ -118,6 +134,16 @@ cleanup evidence and shutdown release ownership.
 - Preserve approved cleanup/recovery evidence through history pruning until
   obligations are proven complete. Readmission fences and joins the old owner
   before installing the exact granted replacement identity.
+- Separate native removal, joined stop, retirement and physical collection.
+  Whole-group deletion requires exact stop/readmission proof for every former
+  owner; detached collection does not delay group convergence. Missing data alone
+  is not collection proof. Custom RetirementStore must implement ForgetCollection.
+  Persist preparation before Collect, completion before report, and release the
+  exact store marker before removing the collected journal row. Permanently lost
+  hosts retain unconfirmed debt; no destroyed-host waiver is implemented.
+- Metadata store/FSM/envelopes are v4 and authority journal is v2. Older changed
+  formats refuse with evidence intact; no migration/mixed-version fallback.
+  Preserve both legacy rejection fixtures and new frozen scoped fixtures.
 - Applied, durably authorized self-removal fences participation before optional
   lifecycle decisions. Drain or an unapproved removal does not provide that proof.
 - The approved alpha policy-naming refactor changes voter configuration and
@@ -165,7 +191,7 @@ The built-in repair policy converges replicated voter configuration, including
 `_meta`, by selecting guarded promotions, demotions and stable-learner
 replacements. Groups without voter configuration retain missing-load-voter
 repair. It preserves pinned learners and healthy seats, never approves unrelated
-staged operator intent and does not balance healthy groups. The internal scheduler
+staged user intent and does not balance healthy groups. The internal scheduler
 rechecks topology, health, native membership and leadership after callbacks and
 guards approval with replicated CAS. Local readiness, retention and removal
 callbacks belong to `lifecycle.Hooks`. Repair implementation consistency remains
@@ -191,8 +217,8 @@ separate example and test modules. Choose checks according to the change:
 
 | Command | Coverage |
 | --- | --- |
-| `make test` / `make test-unit` | Compile the library, example and fixture; run fast, uncached units with default build tags. |
-| `make lint` | `go vet` for unit and functional builds of the library, example and caller fixture. |
+| `make test` / `make test-unit` | Compile all five application modules and run fast, uncached units with default build tags. |
+| `make lint` | Vet, revive and merged unused analysis across all modules/build tags, including compile-only process tests. |
 | `make test-race` / `make test-unit-race` | Fast unit checks under the race detector. |
 | `make test-function` / `make test-function-race` | Non-Docker functional tests using `-tags=functional`, with optional race detection. |
 | `make test-example` | Actual demo; requires Docker Compose. |

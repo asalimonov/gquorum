@@ -61,11 +61,11 @@ func TestStoppedRetainedJoinUsesControlStoreWithoutReopeningRaft(t *testing.T) {
 	g := readyPublic(t, singleMetaFixture(t))
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	issued, err := g.propose(ctx, metaengine.GrantTransferProposal{ExpectedActiveVersion: g.state().Active().Version, GroupID: topology.MetaGroupID, NodeName: "n1", ReplicaID: 1, RequestID: "retained-proof"})
+	issued, err := g.propose(ctx, metaengine.GrantTransferProposal{ExpectedSourceVersion: g.state().Views().FullyConverged.Version, GroupID: topology.MetaGroupID, NodeName: "n1", ReplicaID: 1, RequestID: "retained-proof"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc := g.state().Active()
+	doc := fixtureConvergedDocument(t, g.state())
 	opts := g.opts
 	if err = g.Stop(ctx); err != nil {
 		t.Fatal(err)

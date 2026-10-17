@@ -171,7 +171,7 @@ func (g *Group) callAuthorityReader(ctx context.Context, request authorityReadRe
 	if err != nil {
 		return nil, err
 	}
-	return g.callAuthorityRoutes(ctx, data, addresses)
+	return g.callAuthorityRoutes(ctx, "AuthorityRead", data, addresses)
 }
 
 func (g *Group) authorityReadRoutes(ctx context.Context, id topology.Identity) []string {
@@ -217,7 +217,8 @@ func (g *Group) prependAuthorityLeader(ctx context.Context, candidates []string)
 	return addresses
 }
 
-func (g *Group) callAuthorityRoutes(ctx context.Context, data []byte, candidates []string) ([]byte, error) {
+func (g *Group) callAuthorityRoutes(ctx context.Context, method string,
+	data []byte, candidates []string) ([]byte, error) {
 	addresses := candidates
 	seen := map[string]bool{}
 	// One redirect budget per initial route bounds stale or malicious routing
@@ -234,22 +235,30 @@ func (g *Group) callAuthorityRoutes(ctx context.Context, data []byte, candidates
 		}
 		seen[address] = true
 		attempt, cancel := context.WithTimeout(ctx, g.opts.Timing.DialTimeout)
-		reply, err := g.transport.CallAddress(attempt, address, "AuthorityRead", data)
+		reply, err := g.transport.CallAddress(attempt, address, method, data)
 		cancel()
-		if err != nil {
-			last = err
-			continue
+		if err == nil {
+			err = metatransport.ReplyError(reply)
 		}
-		if err = metatransport.ReplyError(reply); err == nil {
+		if err == nil {
 			return reply.Data, nil
 		}
+		if !retryAuthorityRoute(err) {
+			return nil, err
+		}
 		last = err
-		notLeader := errors.Is(err, fault.ErrNotLeader)
-		if notLeader && reply.LeaderAddress != "" {
+		if reply != nil && reply.LeaderAddress != "" && errors.Is(err, fault.ErrNotLeader) {
 			addresses = append(addresses, reply.LeaderAddress)
 		}
 	}
 	return nil, last
+}
+
+// Route failures may try another authenticated endpoint. A refused identity,
+// conflicting proof or unsupported payload is never hidden by another route.
+func retryAuthorityRoute(err error) bool {
+	return errors.Is(err, fault.ErrNotLeader) || errors.Is(err, fault.ErrUnavailable) ||
+		errors.Is(err, fault.ErrReplicaNotReady) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // ValidateAuthorityCourier binds immutable authority and current courier
@@ -270,10 +279,21 @@ func (g *Group) ValidateAuthorityCourier(ctx context.Context, grant topology.Aut
 		return err
 	}
 	if proof.Grant == nil {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	if proof.Courier != courier || !proof.Grant.Equal(grant) {
 		return fault.ErrIdentityMismatch
+	}
+	// A fresh metadata learner can receive load preparation before replay has
+	// installed its approved identity. The remote proof authenticates the
+	// request, but local startup still needs the matching scope and ledger.
+	// Metadata preparation and retained cleanup must work before/after local
+	// participation, so only load creation waits for this replay boundary.
+	if grant.Key.GroupID != topology.MetaGroupID && grant.Action != nil &&
+		(grant.Action.Kind == topology.StepPrepareReplica || grant.Action.Kind == topology.StepCreateFoundingGroup) {
+		if applied, _ := g.state().AppliedState(); applied < grant.Key.Revision {
+			return fault.New(fault.Unavailable, "receiver has not applied load creation grant", nil)
+		}
 	}
 	return nil
 }

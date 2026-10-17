@@ -136,7 +136,7 @@ func (h *Host) ReadReplica(ctx context.Context, query load.ReplicaQuery) (load.R
 	}
 	if localPeer(slot) != query.To {
 		// The query's exact identity was authorized above. During reseating,
-		// Active and Target may name different local replicas; absence of this
+		// Convergence and Target may name different local replicas; absence of this
 		// one must not expose or misidentify the other handle.
 		h.mu.Unlock()
 		return result, nil

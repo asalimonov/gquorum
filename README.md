@@ -76,9 +76,11 @@ Performance of a single thread worker with single Raft group on 3-node cluster:
   durability, but it easily achieves for a single Raft group 4000 RPS
   and under 1mks for operation on mediocre hardware.
 - **Versioned topology administration:** compare-and-swap edits, previews,
-  explicit approval, observable operator progress, document history, watches and
-  rollback planning. `Latest`, `Target` and `Active` distinguish staged,
-  approved and converged topology.
+  explicit approval, per-group convergence and operation progress, document
+  history, watches and rollback planning. Explicit `RetryOperation` reuses an
+  immutable failed plan; exact CAS replay recovers uncertain mutation replies.
+  `Latest` is staged intent; `Target`
+  is approved intent; `ReadProgress` reports group convergence independently.
 - **Dynamic membership and placement:** founding and joining, caller-defined
   node types, cluster-wide and per-group placement rules, learner-first growth,
   guarded promotion, leadership transfer, drain, activation and exclusion.
@@ -88,7 +90,9 @@ Performance of a single thread worker with single Raft group on 3-node cluster:
   groups before approval and in status.
 - **Identity-aware recovery and cleanup:** retained restarts, fresh-ID
   readmission and replica reseating, parking of missing or foreign storage,
-  verified retirement, quarantine and configurable retention. Deleted group IDs
+  verified retirement, quarantine and configurable retention. Membership removal,
+  joined host stop, retirement and physical collection have separate durable
+  milestones; offline former hosts retain cleanup debt. Deleted group IDs
   are permanently retired.
 - **Stable learners and voter configurations:** new groups default to three voters;
   additional eligible hosts hold promotable learners. Per-group replicated
@@ -112,7 +116,10 @@ voter configuration retain their legacy repair behavior until explicit
 configuration adoption.
 `topology.Limits` controls capacity and defaults to three nodes and five total
 replicas per load group. Seven-node all-host deployments explicitly configure
-both limits to at least seven. All admitted node types participate in `_meta`;
+both placement limits to at least seven. Independent execution defaults to four
+groups and two cleanup requests (`MaxConcurrentGroups`, `MaxConcurrentCleanup`);
+these replicated limits bound work, not retained proof. All admitted node types
+participate in `_meta`;
 placement rules select load hosts, and voter configuration selects their voting roles.
 Infrastructure provisioning and automatic data partitioning remain application
 responsibilities. Resource measurement and resource-based placement decisions
@@ -189,7 +196,7 @@ compatibility impact.
 3. Run all tests before sending of a request:
 
    ```sh
-   make test          # Compile all four modules and run fast, uncached units
+   make test          # Compile all five application modules and run fast, uncached units
    make lint          # vet, revive style and unused-code checks across modules
    make test-race     # Fast unit checks under the race detector
    make test-function # Isolated non-Docker functional and storage tests

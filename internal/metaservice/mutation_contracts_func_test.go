@@ -83,12 +83,19 @@ type transferRecorder struct {
 	err   error
 }
 
-func (r *transferRecorder) TransferLeader(_ context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
+func (r *transferRecorder) DispatchEffect(ctx context.Context, grant topology.AuthorityGrant,
+	resource topology.AuthorityResource, target topology.AuthorityTarget) (topology.EffectReceipt, error) {
+	if grant.Action != nil && grant.Action.Kind != topology.StepTransferLeader {
+		return r.GroupEffects.DispatchEffect(ctx, grant, resource, target)
+	}
+	if err := operator.ValidateEffectTarget(grant, resource, target); err != nil {
+		return topology.EffectReceipt{}, err
+	}
 	r.calls = append(r.calls, *grant.Action)
-	return protocolEffectReceipts(grant), r.err
+	return protocolEffectReceipts(grant)[0], r.err
 }
 
-func TestTransferLeaderUsesExactActiveScopeAndRefusesIneligibleTargets(t *testing.T) {
+func TestTransferTargetUsesApprovedScopeAndRefusesIneligibleTargets(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name, group, node string
@@ -127,23 +134,18 @@ func TestTransferLeaderUsesExactActiveScopeAndRefusesIneligibleTargets(t *testin
 			f.g.ctx = t.Context()
 			f.g.workCtx = t.Context()
 			f.g.opts.Health = tc.health
-			controller := &transferRecorder{}
-			f.g.opts.LoadGroups = controller
-			before := f.g.state().Active()
+			before := f.g.state().Target()
 			// A newer staged label must not authorize a different transfer version.
 			staged := before.Clone()
 			staged.Node("n1").Labels = map[string]string{"staged": "intent"}
 			f.commit(t, staged, false)
 			latest := f.g.state().Latest()
-			err := f.g.TransferLeader(t.Context(), tc.group, tc.node)
+			_, err := f.g.leaderTransferTarget(t.Context(), before, tc.group, tc.node)
 			if !errors.Is(err, tc.err) {
 				t.Fatal(err)
 			}
-			if len(controller.calls) != 0 {
-				t.Fatal("refused transfer reached caller", controller.calls)
-			}
 
-			if !reflect.DeepEqual(f.g.state().Active(), before) || !reflect.DeepEqual(f.g.state().Latest(), latest) {
+			if !reflect.DeepEqual(f.g.state().Target(), before) || !reflect.DeepEqual(f.g.state().Latest(), latest) {
 				t.Fatal("transfer changed document")
 			}
 		})
@@ -165,13 +167,13 @@ func TestDrainNodeQuorumSafetyAllowsStagingButLeavesApprovedViews(t *testing.T) 
 		t.Run(tc.name, func(t *testing.T) {
 			f := newMutationFixture(t)
 			f.g.opts.Health = tc.health
-			before := f.g.state().Active()
+			before := f.g.state().Target()
 			r, err := f.g.DrainNode(t.Context(), tc.drain, preview())
 			doc := mutationDoc(t, r, err)
 			if len(doc.VotersOf("work")) != 2 || len(doc.VotersOf(topology.MetaGroupID)) != 3 || doc.Node(tc.drain).State != topology.NodeDraining {
 				t.Fatal(doc)
 			}
-			if !reflect.DeepEqual(f.g.state().Active(), before) || !reflect.DeepEqual(f.g.state().Target(), before) || f.g.state().Latest().Version != before.Version {
+			if !reflect.DeepEqual(f.g.state().Target(), before) || !reflect.DeepEqual(f.g.state().Target(), before) || f.g.state().Latest().Version != before.Version {
 				t.Fatal("declarative preview approved unsafe intent")
 			}
 		})
@@ -197,10 +199,10 @@ func TestChangeReplicaPromoteIsDeclarativeAndPlansCatchUpBeforePromotion(t *test
 	active := f.g.state().Latest()
 	active.Group("work").Replicas[2].Role = topology.ReplicaLearner
 	f.commit(t, active, true)
-	active = f.g.state().Active()
+	active = f.g.state().Target()
 	r, err := f.g.ChangeReplica(t.Context(), "work", topology.ReplicaRoleChange{NodeName: "n3", Role: topology.ReplicaVoter}, preview())
 	desired := mutationDoc(t, r, err)
-	if desired.Group("work").Replicas[2].ReplicaID != 3 || desired.Group("work").Replicas[2].Role != topology.ReplicaVoter || !reflect.DeepEqual(f.g.state().Active(), active) {
+	if desired.Group("work").Replicas[2].ReplicaID != 3 || desired.Group("work").Replicas[2].Role != topology.ReplicaVoter || !reflect.DeepEqual(f.g.state().Target(), active) {
 		t.Fatal("promotion changed approved membership or identity")
 	}
 	observed := map[string]topology.GroupStatus{}
@@ -216,7 +218,7 @@ func TestChangeReplicaPromoteIsDeclarativeAndPlansCatchUpBeforePromotion(t *test
 		}
 		observed[group.ID] = s
 	}
-	plan, err := topology.BuildPlan(active, desired, observed, f.g.rules)
+	plan, err := topology.BuildPlan(testPlanningInput(t, f.g.machine, desired, observed), desired, f.g.rules)
 	if err != nil || len(plan.Steps) != 2 || plan.Steps[0].Kind != topology.StepWaitCaughtUp || plan.Steps[1].Kind != topology.StepPromoteVoter {
 		t.Fatal(plan, err)
 	}
@@ -287,18 +289,18 @@ func TestRollbackRefusalsAndAllocationFloors(t *testing.T) {
 func TestOperatorMalformedIDsDoNotAliasRetainedAttempt(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
-	id := topology.MakeOperatorID(1, 1)
-	for _, value := range []topology.OperatorID{
+	id := topology.MakeOperationID(1, 1)
+	for _, value := range []topology.OperationID{
 		"exec-v1xyz", "exec-v1 ", "exec-v1.5", "exec-v", "exec-v-1",
 		"exec-v+1", "prefix-v1", "exec-vv1", " exec-v1", "exec-v0x1",
 		id + "xyz", id + " ", " " + id, "exec-v1-a+1", "exec-v1-a0",
 	} {
-		if _, err := f.g.Operator(t.Context(), value); !errors.Is(err, fault.ErrHistoryUnavailable) {
+		if _, err := f.g.Operation(t.Context(), value); !errors.Is(err, fault.ErrHistoryUnavailable) {
 			t.Fatal("malformed handle aliased a retained execution", value, err)
 		}
 	}
-	status, err := f.g.Operator(t.Context(), id)
-	if err != nil || status.ID != id || status.Version != 1 || status.Attempt != 1 || status.State != topology.OperatorSucceeded {
+	status, err := f.g.Operation(t.Context(), id)
+	if err != nil || status.ID != id || status.Version != 1 || status.Attempt != 1 || status.State != topology.OperationSucceeded {
 		t.Fatal("valid retained execution did not resolve", status, err)
 	}
 }
@@ -326,26 +328,34 @@ func TestTransferLeaderCommitsGrantForActiveScope(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			id, err := g.Apply(ctx, doc.Version)
+			id, err := g.Approve(ctx, doc.Version)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err = g.WaitOperator(ctx, id); err != nil {
-				t.Fatal(err)
+			if status, err := g.WaitOperation(ctx, id); err != nil || status.State != topology.OperationSucceeded {
+				t.Fatal(status, err)
 			}
-			for g.state().Active().Version != doc.Version {
+			for g.state().Views().FullyConverged.Version != doc.Version {
 				select {
 				case <-ctx.Done():
 					t.Fatal("target was not activated", ctx.Err())
 				case <-time.After(time.Millisecond):
 				}
 			}
-			before := g.state().Active()
+			before := fixtureConvergedDocument(t, g.state())
 			staged := before.Clone()
 			staged.Node("n1").Labels = map[string]string{"staged": "intent"}
 			latest, err := g.Stage(ctx, staged, before.Version)
 			if err != nil {
 				t.Fatal(err)
+			}
+			for _, target := range []struct{ group, node string }{{"missing", "n1"}, {"load-one", "missing"}} {
+				if err := g.TransferLeader(ctx, target.group, target.node); !errors.Is(err, fault.ErrInvalid) {
+					t.Fatal("unknown transfer target accepted", target, err)
+				}
+			}
+			if len(recorder.calls) != 0 {
+				t.Fatal("invalid transfer dispatched an effect", recorder.calls)
 			}
 			if err = g.TransferLeader(ctx, "load-one", "n1"); err != nil {
 				t.Fatal(err)
@@ -354,7 +364,7 @@ func TestTransferLeaderCommitsGrantForActiveScope(t *testing.T) {
 			if len(recorder.calls) != 1 || recorder.calls[0] != want {
 				t.Fatal("lost Active scope", recorder.calls)
 			}
-			if !reflect.DeepEqual(g.state().Active(), before) || !reflect.DeepEqual(g.state().Latest(), latest) {
+			if !reflect.DeepEqual(fixtureConvergedDocument(t, g.state()), before) || !reflect.DeepEqual(g.state().Latest(), latest) {
 				t.Fatal("transfer changed topology")
 			}
 		})

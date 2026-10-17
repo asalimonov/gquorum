@@ -201,6 +201,11 @@ func TestConsistentLearnerReadLostRepliesKeepRoundsBoundedThreeNodes(t *testing.
 	if _, err := c.Approve(ctx, "node2", staged.Document.Version); err != nil {
 		t.Fatal(err)
 	}
+	// Required convergence may precede the caller's local readiness cache.
+	// Observe its new learner role before arming faults in the read protocol.
+	if err := c.WaitReady(ctx); err != nil {
+		t.Fatal(err)
+	}
 	value, err := c.Read(ctx, "node3", "work", "key")
 	requireReadValue(t, value, err, "node3", "before")
 	before := armReadFault(ctx, t, c, "node3", ReadFaults{DropReadResponse: true})

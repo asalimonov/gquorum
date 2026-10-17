@@ -32,22 +32,22 @@ type joinMember struct {
 	MemberID      uint64
 }
 type joinResponse struct {
-	Rules             topology.Rules             `json:"rules"`
-	MemberID          uint64                     `json:"member_id"`
-	Existing          bool                       `json:"existing"`
-	Admission         metaengine.AdmissionRecord `json:"admission"`
-	Members           []joinMember               `json:"members"`
-	LeaderAddress     string                     `json:"leader_address"`
-	Readmitted        bool                       `json:"readmitted"`
-	Previous, Granted topology.Document
-	PreviousGroups    []topology.Group          `json:"previous_groups,omitempty"`
-	PreviousMemberID  uint64                    `json:"previous_member_id,omitempty"`
-	Grants            []topology.AuthorityGrant `json:"grants,omitempty"`
+	Rules            topology.Rules             `json:"rules"`
+	MemberID         uint64                     `json:"member_id"`
+	Existing         bool                       `json:"existing"`
+	Admission        metaengine.AdmissionRecord `json:"admission"`
+	Members          []joinMember               `json:"members"`
+	LeaderAddress    string                     `json:"leader_address"`
+	Readmitted       bool                       `json:"readmitted"`
+	Granted          topology.Document
+	PreviousGroups   []topology.Group          `json:"previous_groups,omitempty"`
+	PreviousMemberID uint64                    `json:"previous_member_id,omitempty"`
+	Grants           []topology.AuthorityGrant `json:"grants,omitempty"`
 }
 type readyRequest struct {
 	NodeName, InstanceID, Address string
 	MemberID                      uint64
-	OperatorID                    topology.OperatorID      `json:"ExecutionID"`
+	OperationID                   topology.OperationID     `json:"ExecutionID"`
 	Receipts                      []topology.EffectReceipt `json:"receipts,omitempty"`
 }
 
@@ -111,31 +111,11 @@ func joinClassificationReady(status raft.Status, machine *metaengine.Machine) bo
 		status.Applied >= status.Commit && index >= status.Commit && term >= status.Term
 }
 
-func hasAdmissionSteps(plan topology.Plan, desired topology.Document, name string, id uint64) bool {
-	if meta := desired.MetaGroup(); meta != nil {
-		for _, r := range meta.Replicas {
-			if r.NodeName == name && r.ReplicaID == id {
-				return topology.ValidAdmissionSequence(plan.Steps, name, id, r.Role)
-			}
-		}
-	}
-	return false
-}
-
 func (g *Group) membershipReply(ctx context.Context) joinResponse {
 	response := joinResponse{Rules: g.rules, LeaderAddress: g.opts.Network.AdvertiseAddress}
-	views := g.state().Views()
-	target, active := views.Target, views.Active
+	target := g.state().Target()
 	response.Granted = target
-	response.Previous = active
-	owners := map[uint64]string{}
-	for _, doc := range []topology.Document{active, target} {
-		if group := doc.MetaGroup(); group != nil {
-			for _, r := range group.Replicas {
-				owners[r.ReplicaID] = r.NodeName
-			}
-		}
-	}
+	owners, _ := g.state().MemberOwners()
 	for id, name := range owners {
 		address, _ := g.resolveNode(ctx, name)
 		response.Members = append(response.Members, joinMember{Name: name, MemberID: id, Address: address})
@@ -158,7 +138,10 @@ func (g *Group) joinReply(ctx context.Context, a metaengine.AdmissionRecord, for
 	}
 	if len(grants) != 0 {
 		response.Grants = grants
-		response.PreviousMemberID = grants[0].Targets[0].MemberID
+		response.PreviousMemberID = readmissionMemberID(grants, a.NodeName)
+		if response.PreviousMemberID == 0 {
+			return metatransport.Reply(fault.ErrOperationAuthorization)
+		}
 		catalog, err := g.state().RecoveryCatalog(ctx)
 		if err != nil {
 			return metatransport.Reply(err)
@@ -172,11 +155,25 @@ func (g *Group) joinReply(ctx context.Context, a metaengine.AdmissionRecord, for
 	return &metapb.Reply{Data: encoded}
 }
 
+func readmissionMemberID(grants []topology.AuthorityGrant, node string) uint64 {
+	for _, grant := range grants {
+		if grant.Purpose != topology.AuthorityReadmit || grant.Key.GroupID != topology.MetaGroupID {
+			continue
+		}
+		for _, target := range grant.Targets {
+			if target.NodeName == node {
+				return target.MemberID
+			}
+		}
+	}
+	return 0
+}
+
 func (g *Group) handleReady(ctx context.Context, h *metapb.Header, data []byte) *metapb.Reply {
 	var request readyRequest
 	decodeErr := json.Unmarshal(data, &request)
 	if decodeErr != nil || request.NodeName != h.NodeName || request.MemberID != h.MemberId ||
-		request.InstanceID == "" || request.InstanceID != h.InstanceId || request.OperatorID == "" {
+		request.InstanceID == "" || request.InstanceID != h.InstanceId || request.OperationID == "" {
 		return metatransport.Reply(fault.ErrInvalid)
 	}
 	if _, _, err := net.SplitHostPort(request.Address); err != nil {
@@ -185,22 +182,24 @@ func (g *Group) handleReady(ctx context.Context, h *metapb.Header, data []byte) 
 	if len(request.Receipts) != 0 {
 		_, err := g.propose(ctx, metaengine.RecordReadmissionReceiptsProposal{
 			Admission: metaengine.AdmissionRecord{
-				NodeName:   request.NodeName,
-				InstanceID: request.InstanceID,
-				MemberID:   request.MemberID,
-				OperatorID: request.OperatorID,
+				NodeName:    request.NodeName,
+				InstanceID:  request.InstanceID,
+				MemberID:    request.MemberID,
+				OperationID: request.OperationID,
 			},
-			Receipts: request.Receipts,
+			Receipts:   request.Receipts,
+			At:         time.Now().UTC(),
+			ProposalID: newProposalID(),
 		})
 		if err != nil {
 			return g.leaderReply(err)
 		}
 	}
 	_, err := g.propose(ctx, metaengine.ReadyAdmissionProposal{
-		NodeName:   request.NodeName,
-		InstanceID: request.InstanceID,
-		MemberID:   request.MemberID,
-		OperatorID: request.OperatorID,
+		NodeName:    request.NodeName,
+		InstanceID:  request.InstanceID,
+		MemberID:    request.MemberID,
+		OperationID: request.OperationID,
 	})
 	if err == nil {
 		g.primeAddress(request.NodeName, request.Address)
@@ -338,7 +337,7 @@ func (g *Group) AuthorizeReadmission(ctx context.Context, grant Readmission) err
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	if g.readmissionGrant == nil || !reflect.DeepEqual(*g.readmissionGrant, grant) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	return nil
 }
@@ -391,12 +390,12 @@ func (g *Group) acknowledgeJoin(ctx context.Context) error {
 	}
 	a := g.joinAdmission
 	data, _ := json.Marshal(readyRequest{
-		NodeName:   a.NodeName,
-		InstanceID: a.InstanceID,
-		MemberID:   a.MemberID,
-		OperatorID: a.OperatorID,
-		Address:    g.opts.Network.AdvertiseAddress,
-		Receipts:   g.joinReceipts,
+		NodeName:    a.NodeName,
+		InstanceID:  a.InstanceID,
+		MemberID:    a.MemberID,
+		OperationID: a.OperationID,
+		Address:     g.opts.Network.AdvertiseAddress,
+		Receipts:    g.joinReceipts,
 	})
 	addresses := g.joinReadyAddresses(ctx, engine)
 	seen := map[string]bool{}

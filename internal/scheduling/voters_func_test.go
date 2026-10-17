@@ -76,7 +76,11 @@ func voterHostFixture(t *testing.T) (*testHost, *Scheduler) {
 func voterHostFixtureWith(t *testing.T, configure func(*topology.Document)) (*testHost, *Scheduler) {
 	t.Helper()
 	limits := topology.Limits{MaxNodes: 5, MaxReplicas: 5}
-	h := &testHost{t: t, leader: true, limits: limits, machine: metaengine.NewMachine(topology.Rules{SchemaVersion: 1, Limits: limits}, nil), health: map[string]topology.Health{}, status: map[string]topology.GroupStatus{}}
+	machine, err := metaengine.NewMachine(topology.Rules{SchemaVersion: 1, Limits: limits.WithDefaults()}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &testHost{t: t, leader: true, limits: limits, machine: machine, health: map[string]topology.Health{}, status: map[string]topology.GroupStatus{}}
 	doc := clusterDocument(false)
 	p := topology.DefaultVoterConfig()
 	g := doc.MetaGroup()
@@ -90,7 +94,7 @@ func voterHostFixtureWith(t *testing.T, configure func(*topology.Document)) (*te
 	if configure != nil {
 		configure(&doc)
 	}
-	observed := metrics.GroupObservation{GroupID: topology.MetaGroupID, LeaderID: 1, Term: 2, MembershipDigest: "membership", State: metrics.Current, TargetVoters: 3, NativeVoters: 3, EligibleStandbys: 2}
+	observed := metrics.GroupObservation{SourceVersion: 1, GroupID: topology.MetaGroupID, LeaderID: 1, Term: 2, MembershipDigest: "membership", State: metrics.Current, TargetVoters: 3, NativeVoters: 3, EligibleStandbys: 2}
 	status := topology.GroupStatus{GroupID: topology.MetaGroupID, Found: true, LeaderID: 1, Term: 2, Commit: 10, Applied: 10, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}, Learners: []uint64{4, 5}}, HealthKnown: true, LiveVoters: map[uint64]bool{}, Progress: map[uint64]topology.ReplicaProgress{}}
 	for i := uint64(1); i <= 5; i++ {
 		name := fmt.Sprintf("n%d", i)
@@ -108,11 +112,8 @@ func voterHostFixtureWith(t *testing.T, configure func(*topology.Document)) (*te
 		observed.Replicas = append(observed.Replicas, r)
 	}
 	h.status[topology.MetaGroupID] = status
-	h.observations = metrics.ClusterSnapshot{CollectorRunID: "collector/epoch", ObserverInstanceID: "process", ActiveVersion: 1, IsCollectorLeader: true, Groups: []metrics.GroupObservation{observed}}
-	h.mustApply(metaengine.ProposeDocument{Doc: doc, ExpectedVersion: 0})
-	op := h.mustApply(metaengine.BeginOperatorProposal{Version: 1, Plan: topology.Plan{Version: 1}, Origin: topology.OriginFounding, At: time.Now().UTC()})
-	h.mustApply(metaengine.TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: op.OperatorID, Version: 1, Attempt: 1, State: topology.OperatorSucceeded, At: time.Now().UTC()}})
-	h.mustApply(metaengine.ActivateTargetProposal{OperatorID: op.OperatorID, Version: 1, Attempt: 1})
+	h.observations = metrics.ClusterSnapshot{CollectorRunID: "collector/epoch", ObserverInstanceID: "process", TargetVersion: 1, IsCollectorLeader: true, Groups: []metrics.GroupObservation{observed}}
+	h.restoreConverged(doc)
 	driver, err := New(Config{Host: h})
 	if err != nil {
 		t.Fatal(err)
@@ -156,13 +157,13 @@ func TestSchedulerApprovesExactStableLearnerReplacement(t *testing.T) {
 	if err := r.Tick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if h.commits != 1 || h.approvals != 0 {
-		t.Fatalf("commits=%d approvals=%d status=%+v", h.commits, h.approvals, r.Status())
+	if h.commits != 1 {
+		t.Fatalf("commits=%d status=%+v", h.commits, r.Status())
 	}
 	views := h.machine.Views()
-	latest, target, active := views.Latest, views.Target, views.Active
-	if latest.Version != 2 || target.Version != 2 || active.Version != 1 {
-		t.Fatalf("approval did not preserve convergence boundary: %d/%d/%d", latest.Version, target.Version, active.Version)
+	latest, target := views.Latest, views.Target
+	if latest.Version != 2 || target.Version != 2 || views.FullyConverged.Version != 1 {
+		t.Fatalf("approval did not preserve convergence boundary: %d/%d/%d", latest.Version, target.Version, views.FullyConverged.Version)
 	}
 	got := map[uint64]topology.ReplicaRole{}
 	for _, p := range target.MetaGroup().Replicas {
@@ -188,6 +189,7 @@ func TestSchedulerRevalidatesVoterEvidenceAndScopedCAS(t *testing.T) {
 				doc.Version++
 				doc.ParentVersion = version
 				doc.ChangedBy = "operator"
+				doc.MetaGroup().Labels = map[string]string{"intent": "staged"}
 				h.mustApply(metaengine.ProposeDocument{Doc: doc, ExpectedVersion: version})
 			}
 			r.policy = schedulerFunc(func(ctx context.Context, in schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error) {
@@ -217,8 +219,8 @@ func TestSchedulerRevalidatesVoterEvidenceAndScopedCAS(t *testing.T) {
 			if err := r.Tick(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			if h.commits != 0 || h.approvals != 0 || h.machine.Target().Version != 1 {
-				t.Fatalf("unsafe approval commits=%d approvals=%d status=%+v", h.commits, h.approvals, r.Status())
+			if h.commits != 0 || h.machine.Target().Version != 1 {
+				t.Fatalf("unsafe approval commits=%d status=%+v", h.commits, r.Status())
 			}
 			if scenario == "callback staged intent" || scenario == "approval CAS race" {
 				if h.machine.Latest().Version != 2 {

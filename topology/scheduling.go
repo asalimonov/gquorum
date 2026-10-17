@@ -28,15 +28,15 @@ type SchedulingActionStatus struct {
 // SchedulingStatus reports local policy activity, blocking intent and current
 // execution.
 type SchedulingStatus struct {
-	Enabled           bool                    `json:"enabled"`
-	IsLeader          bool                    `json:"is_leader"`
-	State             SchedulingState         `json:"state"`
-	Reason            string                  `json:"reason"`
-	RepairPolicy      string                  `json:"repair_policy"`
-	Since             time.Time               `json:"since"`
-	BlockingVersion   *uint64                 `json:"blocking_version,omitempty"`
-	CurrentOperatorID *OperatorID             `json:"current_operator_id,omitempty"`
-	CurrentAction     *SchedulingActionStatus `json:"current_action,omitempty"`
+	Enabled            bool                    `json:"enabled"`
+	IsLeader           bool                    `json:"is_leader"`
+	State              SchedulingState         `json:"state"`
+	Reason             string                  `json:"reason"`
+	RepairPolicy       string                  `json:"repair_policy"`
+	Since              time.Time               `json:"since"`
+	BlockingVersion    *uint64                 `json:"blocking_version,omitempty"`
+	CurrentOperationID *OperationID            `json:"current_operation_id,omitempty"`
+	CurrentAction      *SchedulingActionStatus `json:"current_action,omitempty"`
 }
 
 // Clone copies optional version, operator and action observations.
@@ -44,8 +44,8 @@ func (s SchedulingStatus) Clone() SchedulingStatus {
 	if s.BlockingVersion != nil {
 		s.BlockingVersion = valuePtr(*s.BlockingVersion)
 	}
-	if s.CurrentOperatorID != nil {
-		s.CurrentOperatorID = valuePtr(*s.CurrentOperatorID)
+	if s.CurrentOperationID != nil {
+		s.CurrentOperationID = valuePtr(*s.CurrentOperationID)
 	}
 	if s.CurrentAction != nil {
 		s.CurrentAction = valuePtr(*s.CurrentAction)

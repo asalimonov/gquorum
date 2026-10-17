@@ -4,10 +4,9 @@ import (
 	"context"
 	"errors"
 	"maps"
-	"slices"
+	"time"
 
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/internal/collection"
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -27,14 +26,6 @@ func (g *Group) Target(ctx context.Context) (topology.Document, error) {
 		return topology.Document{}, err
 	}
 	return g.state().Target(), nil
-}
-
-// Active returns an owned locally applied converged topology document.
-func (g *Group) Active(ctx context.Context) (topology.Document, error) {
-	if err := ctx.Err(); err != nil {
-		return topology.Document{}, err
-	}
-	return g.state().Active(), nil
 }
 
 // Get returns an owned retained topology version or a history-unavailable
@@ -77,38 +68,16 @@ func (g *Group) History(ctx context.Context, page topology.Page) (topology.Histo
 // Stage proposes an owned document under replicated expected-version
 // compare-and-swap.
 func (g *Group) Stage(ctx context.Context, doc topology.Document, expected uint64) (topology.Document, error) {
-	result, err := g.propose(ctx, metaengine.ProposeDocument{Doc: doc.Clone(), ExpectedVersion: expected})
-	if errors.Is(err, fault.ErrVersionConflict) {
-		return topology.Document{}, &fault.Error{
-			Code:            fault.VersionConflict,
-			Message:         result.Reason,
-			ExpectedVersion: expected,
-			CurrentVersion:  result.CurrentVersion,
-		}
-	}
-	return result.Doc, err
-}
-
-// Authorize checks an exact step against locally applied approved execution
-// state.
-func (g *Group) Authorize(ctx context.Context, a topology.AuthorizedStep) error {
-	if err := g.ensureRunning(ctx); err != nil {
-		return err
-	}
-	return g.state().Authorize(ctx, a)
-}
-
-// Operator returns retained locally applied execution status for an exact
-// operator ID.
-func (g *Group) Operator(ctx context.Context, id topology.OperatorID) (topology.OperatorStatus, error) {
 	if err := ctx.Err(); err != nil {
-		return topology.OperatorStatus{}, err
+		return topology.Document{}, err
 	}
-	status, ok := g.state().Operator(id)
-	if !ok {
-		return topology.OperatorStatus{}, fault.New(fault.HistoryUnavailable, "execution is not retained", nil)
+	proposal := metaengine.ProposeDocument{Doc: doc.Clone(), ExpectedVersion: expected}
+	if g.state().Latest().Version > expected {
+		result, err := g.state().ReplayMutation(proposal)
+		return result.Doc, err
 	}
-	return status, nil
+	result, err := g.propose(ctx, proposal)
+	return result.Doc, err
 }
 
 // LocalStatus returns owned, locally observed meta Raft state. It does not
@@ -118,7 +87,16 @@ func (g *Group) Operator(ctx context.Context, id topology.OperatorID) (topology.
 // proof.
 func (g *Group) LocalStatus() topology.GroupStatus {
 	if engine := g.engine.Load(); engine != nil {
-		return withLeaderNodeName(engine.Status(), g.state().Active())
+		page, _ := g.state().Progress(topology.ProgressQuery{GroupID: topology.MetaGroupID})
+		var source uint64
+		if len(page.Groups) == 1 {
+			source = page.Groups[0].ConvergedVersion
+		}
+		status := engine.Status()
+		status.Reporter, status.ReporterReplicaID = g.currentIdentity(), engine.ReplicaID()
+		status.SourceVersion, status.ReceivedAt = source, time.Now().UTC()
+		status.LeaderNodeName, _ = g.state().MemberOwner(status.LeaderID)
+		return status
 	}
 	return topology.GroupStatus{GroupID: topology.MetaGroupID, HostNode: g.Identity().NodeName, ErrorCode: string(
 		fault.Unavailable)}
@@ -126,7 +104,7 @@ func (g *Group) LocalStatus() topology.GroupStatus {
 
 // Status combines owned local document/runtime state with caller load-group
 // status queries. The caller controller must honor ctx. Health is sampled by
-// the observer; a mismatched Active version is reported as unsampled unknown
+// the observer; a mismatched approved version is reported as unsampled unknown
 // with a zero observation timestamp until a current sample becomes available.
 func (g *Group) Status(ctx context.Context) (topology.ClusterStatus, error) {
 	return g.readClusterStatus(ctx, true)
@@ -142,59 +120,57 @@ func (g *Group) readClusterStatus(ctx context.Context, live bool) (topology.Clus
 		return topology.ClusterStatus{}, err
 	}
 	machine := g.state()
-	views := machine.Views()
-	latest, target, active := views.Latest, views.Target, views.Active
-	local := g.clusterStatusSnapshot(live)
-	result := topology.ClusterStatus{
-		Lifecycle:     local.lifecycle,
-		ErrorCode:     g.terminalCode(),
-		LatestVersion: latest.Version,
-		TargetVersion: target.Version,
-		ActiveVersion: active.Version,
-		SelfRemoval:   local.removal,
-	}
-	placement, err := statusPlacement(active, target)
+	progress, err := machine.ProgressStatus()
 	if err != nil {
 		return topology.ClusterStatus{}, err
 	}
-	result.Placement = placement
+	local := g.clusterStatusSnapshot(live)
+	result := progress
+	result.Lifecycle, result.ErrorCode, result.SelfRemoval = local.lifecycle, g.terminalCode(), local.removal
 	result.SessionLive = g.OwnSessionLive()
 	if g.scheduler != nil {
 		result.Scheduling = g.scheduler.Status()
 	}
-	result.Observation = g.HealthObservation()
-	if result.Observation.Version != active.Version {
-		result.Observation = topology.HealthObservation{Version: active.Version,
-			Groups: topology.EvaluateAllGroupHealth(
-				active, nil)}
+	if observation := g.HealthObservation(); observation.Version == result.TargetVersion {
+		result.Observation = observation
 	}
-	result.Nodes = statusNodes(latest, active, result.Observation, local.addresses)
+	g.decorateClusterStatus(ctx, machine, &result, local)
+	return result, nil
+}
+
+func (g *Group) decorateClusterStatus(ctx context.Context, machine *metaengine.Machine,
+	result *topology.ClusterStatus, local localClusterStatus) {
+	for i := range result.Nodes {
+		row := &result.Nodes[i]
+		row.Address = local.addresses[row.Node.Name]
+		if result.Observation.Version == result.TargetVersion {
+			if health, ok := result.Observation.Nodes[row.Node.Name]; ok {
+				row.Health = health
+			}
+		}
+	}
 	if engine := g.engine.Load(); engine != nil {
-		status := withLeaderNodeName(engine.Status(), active)
-		result.Groups = append(result.Groups, status)
+		status := g.LocalStatus()
+		status.LeaderNodeName, _ = machine.MemberOwner(status.LeaderID)
+		g.cacheProgressObservation(status)
 		result.MetaLeaderID = status.LeaderID
 		result.MetaLeaderNodeName = status.LeaderNodeName
-	} else if active.MetaGroup() != nil {
-		result.Groups = append(result.Groups, topology.GroupStatus{GroupID: topology.MetaGroupID, ErrorCode: string(
-			fault.Unavailable)})
 	}
-	loads, err := g.statusLoadGroups(ctx, active, loadStatusRead{live: local.includeLive, cached: local.cached})
-	if err != nil {
-		return topology.ClusterStatus{}, err
+	if local.includeLive {
+		for _, row := range result.Groups {
+			if row.GroupID == topology.MetaGroupID || row.Converged == nil {
+				continue
+			}
+			g.cacheProgressObservation(g.liveLoadStatus(ctx, row.GroupID))
+		}
 	}
-	result.Groups = append(result.Groups, loads...)
-	if operator, ok := machine.CurrentOperator(); ok {
-		status := operator.Status
-		result.Operator = &status
-	}
-	return result, nil
+	g.decorateProgress(result.Groups)
 }
 
 type localClusterStatus struct {
 	lifecycle   string
 	addresses   map[string]string
 	includeLive bool
-	cached      map[string]topology.GroupStatus
 	removal     *topology.SelfRemovalStatus
 }
 
@@ -203,7 +179,6 @@ func (g *Group) clusterStatusSnapshot(live bool) localClusterStatus {
 	lifecycle := g.lifecycle
 	addresses := maps.Clone(g.addresses)
 	includeLive := live && !g.quiescing && g.selfRemoval == nil
-	cached := maps.Clone(g.lastLoadStatus)
 	var removal *topology.SelfRemovalStatus
 	if g.selfRemoval != nil {
 		owned := *g.selfRemoval
@@ -211,87 +186,7 @@ func (g *Group) clusterStatusSnapshot(live bool) localClusterStatus {
 	}
 	g.mu.RUnlock()
 	return localClusterStatus{lifecycle: lifecycle, addresses: addresses,
-		includeLive: includeLive, cached: cached, removal: removal}
-}
-
-func statusPlacement(active, target topology.Document) ([]topology.PlacementReport, error) {
-	var reports []topology.PlacementReport
-	for _, doc := range []topology.Document{active, target} {
-		if doc.Version == 0 || len(reports) > 0 &&
-			reports[len(reports)-1].Version == doc.Version {
-			continue
-		}
-		ids := make([]string, 0, len(doc.Groups))
-		for _, group := range doc.Groups {
-			ids = append(ids, group.ID)
-		}
-		slices.Sort(ids)
-		report, err := placementReportFor(doc, doc, ids)
-		if err != nil {
-			return nil, err
-		}
-		if report != nil {
-			report.AffectedGroups = nil // status is a snapshot, not an edit
-			reports = append(reports, *report)
-		}
-	}
-	return reports, nil
-}
-
-func statusNodes(latest, active topology.Document, observation topology.HealthObservation,
-	addresses map[string]string) []topology.NodeStatus {
-	out := collection.Slice[topology.NodeStatus](len(latest.Nodes))
-	for _, node := range latest.Nodes {
-		effective := topology.EffectiveNodeState(active, node.Name)
-		if effective == "" {
-			effective = node.State
-		}
-		health := topology.HealthUnknown
-		if observation.Version == active.Version {
-			if observed, exists := observation.Nodes[node.Name]; exists {
-				health = observed
-			}
-		}
-		out = append(out, topology.NodeStatus{
-			Node:           node,
-			EffectiveState: effective,
-			Health:         health,
-			Address:        addresses[node.Name],
-		})
-	}
-	return out
-}
-
-type loadStatusRead struct {
-	live   bool
-	cached map[string]topology.GroupStatus
-}
-
-func (g *Group) statusLoadGroups(ctx context.Context, active topology.Document,
-	read loadStatusRead) ([]topology.GroupStatus, error) {
-	var out []topology.GroupStatus
-	for _, group := range active.LoadGroups() {
-		if !read.live {
-			observed, found := read.cached[group.ID]
-			if !found {
-				observed = topology.GroupStatus{GroupID: group.ID, ErrorCode: string(fault.Unavailable)}
-			}
-			out = append(out, withLeaderNodeName(observed.Clone(), active))
-			continue
-		}
-		observed := g.liveLoadStatus(ctx, group.ID)
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		out = append(out, withLeaderNodeName(observed.Clone(), active))
-		g.mu.Lock()
-		if g.lastLoadStatus == nil {
-			g.lastLoadStatus = make(map[string]topology.GroupStatus)
-		}
-		g.lastLoadStatus[group.ID] = observed.Clone()
-		g.mu.Unlock()
-	}
-	return out, nil
+		includeLive: includeLive, removal: removal}
 }
 
 func (g *Group) liveLoadStatus(ctx context.Context, id string) topology.GroupStatus {
@@ -314,21 +209,4 @@ func (g *Group) liveLoadStatus(ctx context.Context, id string) topology.GroupSta
 		observed = topology.GroupStatus{GroupID: id, ErrorCode: string(code)}
 	}
 	return observed
-}
-
-// Resolve names from the same Active snapshot used by the status response.
-// Never trust a caller's name or map a retired ID through a staged replacement.
-func withLeaderNodeName(status topology.GroupStatus, active topology.Document) topology.GroupStatus {
-	status.LeaderNodeName = ""
-	if status.LeaderID != 0 {
-		if group := active.Group(status.GroupID); group != nil {
-			for _, replica := range group.Replicas {
-				if replica.ReplicaID == status.LeaderID {
-					status.LeaderNodeName = replica.NodeName
-					break
-				}
-			}
-		}
-	}
-	return status
 }

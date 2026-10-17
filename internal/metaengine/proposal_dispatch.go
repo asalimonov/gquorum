@@ -3,6 +3,8 @@ package metaengine
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/asalimonov/gquorum/fault"
 )
 
 type proposalApplication struct {
@@ -10,66 +12,112 @@ type proposalApplication struct {
 	changed bool
 }
 
-func applyJSONProposal[P any](body json.RawMessage, operation string,
-	apply func(P) (ApplyResult, bool)) (proposalApplication, error) {
-	var p P
-	if err := json.Unmarshal(body, &p); err != nil {
-		if operation != "" {
-			return proposalApplication{}, fmt.Errorf("meta: unmarshal %s: %w", operation, err)
-		}
+func applyScopedProposal(state *scopedState, index uint64, kind ProposalKind,
+	body json.RawMessage) (proposalApplication, error) {
+	if state == nil {
+		err := fault.New(fault.Unsupported, fmt.Sprintf("meta: unavailable proposal %q", kind), nil)
 		return proposalApplication{}, err
 	}
-	result, changed := apply(p)
-	return proposalApplication{result: result, changed: changed}, nil
+	next := *state
+	result, err := dispatchScopedProposal(&next, index, kind, body)
+	if err != nil || !result.changed {
+		return result, err
+	}
+	if len(next.History) > historyRetention {
+		if err := next.pruneRetainedProofs(); err != nil {
+			return proposalApplication{}, err
+		}
+	}
+	*state = next
+	return result, nil
 }
 
-func (sm *topologySM) applyProposal(index uint64, kind ProposalKind,
+func dispatchScopedProposal(state *scopedState, index uint64, kind ProposalKind,
 	body json.RawMessage) (proposalApplication, error) {
+	if result, err := dispatchScopedEvidence(state, index, kind, body); result != nil || err != nil {
+		if result == nil {
+			return proposalApplication{}, err
+		}
+		return *result, err
+	}
 	switch kind {
-	case KindRecordReadmissionReceipts:
-		return applyJSONProposal(body, "", sm.applyRecordReadmissionReceipts)
-	case KindBeginReadmissionAuthority:
-		return applyIndexedJSONProposal(index, body, "", sm.applyBeginReadmissionAuthority)
-	case KindGrantTransfer:
-		return applyIndexedJSONProposal(index, body, "", sm.applyGrantTransfer)
-	case KindRecordFence:
-		return applyJSONProposal(body, "", sm.applyRecordFence)
-	case KindRecordEffect:
-		return applyJSONProposal(body, "", sm.applyRecordEffect)
-	case KindBeginEffect:
-		return applyIndexedJSONProposal(index, body, "", sm.applyBeginEffect)
+	case "record_collection":
+		return applyScopedJSONProposal(index, body, state.applyRecordCollection)
 	case KindProposeDocument:
-		return applyJSONProposal(body, "propose_document", sm.applyProposeDocument)
-	case KindAdmitNode:
-		return applyJSONProposal(body, "admit_node", sm.applyAdmitNode)
-	case KindBeginOperator:
-		return applyIndexedJSONProposal(index, body, "begin_execution", sm.applyBeginOperator)
-	case KindCommitRepairOperator:
-		return applyIndexedJSONProposal(index, body, "commit_repair_execution", sm.applyCommitRepairOperator)
-	case KindTransitionOperator:
-		return applyIndexedJSONProposal(index, body, "transition_execution", sm.applyTransitionOperator)
-	case KindCommitVoterChange:
-		return applyIndexedJSONProposal(index, body, "commit_voter_change", sm.applyCommitVoterChange)
-	case KindActivateTarget:
-		return applyJSONProposal(body, "activate_target", sm.applyActivateTarget)
+		return applyScopedJSONProposal(index, body, state.applyProposeDocument)
 	case KindBindAdmission:
-		return applyJSONProposal(body, "bind_admission", sm.applyBindAdmission)
+		return applyScopedJSONProposal(index, body, state.applyBindAdmission)
 	case KindCommitReadmission:
-		return applyIndexedJSONProposal(index, body, "commit_readmission", sm.applyCommitReadmission)
+		return applyScopedJSONProposal(index, body, state.applyCommitReadmission)
 	case KindReadyAdmission:
-		return applyJSONProposal(body, "ready_admission", sm.applyReadyAdmission)
+		return applyScopedJSONProposal(index, body, state.applyReadyAdmission)
+	case "begin_cleanup_effect":
+		return applyScopedJSONProposal(index, body, state.applyBeginCleanupEffect)
+	case "record_cleanup_status":
+		return applyScopedJSONProposal(index, body, state.applyRecordCleanupStatus)
+	case KindCommitVoterChange:
+		return applyScopedJSONProposal(index, body, state.applyCommitVoterChange)
+	case "commit_repair_operation":
+		return applyScopedJSONProposal(index, body, state.applyCommitRepairOperation)
+	case "retry_operation":
+		return applyScopedJSONProposal(index, body, state.applyRetryOperation)
+	case "begin_operation":
+		return applyScopedJSONProposal(index, body, state.applyBeginOperation)
+	case "transition_operation":
+		return applyScopedJSONProposal(index, body, state.applyTransitionOperation)
+	case KindBeginEffect:
+		return applyScopedJSONProposal(index, body, state.applyBeginEffect)
+	case KindGrantTransfer:
+		return applyScopedJSONProposal(index, body, state.applyGrantTransfer)
+	case KindBeginReadmissionAuthority:
+		return applyScopedJSONProposal(index, body, state.applyBeginReadmissionAuthority)
 	case KindGrantSession:
-		return applyJSONProposal(body, "grant_session", sm.applyGrantSession)
+		return applyScopedJSONProposal(index, body, state.applyScopedGrantSession)
 	case KindRevokeSession:
-		return applyJSONProposal(body, "revoke_session", sm.applyRevokeSession)
+		return applyScopedJSONProposal(index, body, state.applyScopedRevokeSession)
 	case KindAcquireLock:
-		return applyJSONProposal(body, "acquire_lock", sm.applyAcquireLock)
+		return applyScopedJSONProposal(index, body, state.applyScopedAcquireLock)
 	default:
-		return proposalApplication{}, fmt.Errorf("meta: unknown proposal kind %q", kind)
+		// A committed command this binary cannot interpret is not a business
+		// refusal: another replica may apply it. Halt before advancing the index.
+		return proposalApplication{}, fmt.Errorf("meta: unknown scoped proposal %q", kind)
 	}
 }
 
-func applyIndexedJSONProposal[P any](index uint64, body json.RawMessage, operation string,
-	apply func(uint64, P) (ApplyResult, bool)) (proposalApplication, error) {
-	return applyJSONProposal(body, operation, func(p P) (ApplyResult, bool) { return apply(index, p) })
+func dispatchScopedEvidence(state *scopedState, index uint64, kind ProposalKind,
+	body json.RawMessage) (*proposalApplication, error) {
+	switch kind {
+	case KindRecordFence:
+		var p RecordFenceProposal
+		if err := decodeScopedPayload(body, &p, "evidence"); err != nil {
+			return nil, err
+		}
+		result, err := state.applyRecordFence(index, p)
+		return &result, err
+	case KindRecordEffect:
+		var p RecordEffectProposal
+		if err := decodeScopedPayload(body, &p, "receipt", "at"); err != nil {
+			return nil, err
+		}
+		result, err := state.applyRecordEffect(index, p)
+		return &result, err
+	case KindRecordReadmissionReceipts:
+		var p RecordReadmissionReceiptsProposal
+		if err := decodeScopedPayload(body, &p, "admission", "receipts", "at"); err != nil {
+			return nil, err
+		}
+		result, err := state.applyRecordReadmissionReceipts(index, p)
+		return &result, err
+	default:
+		return nil, nil
+	}
+}
+
+func applyScopedJSONProposal[P any](index uint64, body json.RawMessage,
+	apply func(uint64, P) (proposalApplication, error)) (proposalApplication, error) {
+	var p P
+	if err := json.Unmarshal(body, &p); err != nil {
+		return proposalApplication{}, err
+	}
+	return apply(index, p)
 }

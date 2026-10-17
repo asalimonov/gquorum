@@ -8,9 +8,9 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// Source supplies active topology and owned node-health observations.
+// Source supplies approved topology and owned node-health observations.
 type Source interface {
-	Active(context.Context) (topology.Document, error)
+	Target(context.Context) (topology.Document, error)
 	Health(context.Context, topology.Document) (map[string]topology.Health, error)
 }
 

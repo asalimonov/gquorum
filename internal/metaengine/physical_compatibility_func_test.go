@@ -4,11 +4,12 @@ package metaengine
 
 import (
 	"errors"
-	"github.com/asalimonov/gquorum/fault"
 	"maps"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/asalimonov/gquorum/fault"
 
 	"github.com/asalimonov/gquorum/internal/metastore"
 	bolt "go.etcd.io/bbolt"

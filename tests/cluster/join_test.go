@@ -13,6 +13,15 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
+func hasOperationStep(status topology.OperationStatus, group string, step int) bool {
+	for _, block := range status.Blocks {
+		if block.GroupID == group && block.CurrentStep == step {
+			return true
+		}
+	}
+	return false
+}
+
 func joiningNode(spec NodeSpec) topology.Node {
 	return topology.Node{Name: spec.Name, Type: spec.Type, Labels: map[string]string{
 		"example.meta_address": spec.Name + ":9000",
@@ -108,7 +117,7 @@ func testMetaAdmission(t *testing.T, electionDuringLearner bool) {
 			t.Fatal(err)
 		}
 	}
-	admitted.OperatorID = startApply(ctx, t, c, "node2", admitted.Document.Version)
+	admitted.OperationID = topology.OperationID(startApply(ctx, t, c, "node2", admitted.Document.Version))
 	member := admitted.Document.MemberID("node4")
 	loadID := replicaID(admitted.Document, "work", "node4")
 	if member == 0 || loadID == 0 {
@@ -127,11 +136,15 @@ func testMetaAdmission(t *testing.T, electionDuringLearner bool) {
 	for {
 		status, err := c.Status(ctx, observer)
 		if err == nil {
-			if status.Operator != nil && status.Operator.ID == admitted.OperatorID && status.Operator.State.Terminal() && status.Operator.State != topology.OperatorSucceeded {
-				t.Fatalf("meta admission terminated before load growth: %+v", status.Operator)
+			if operation, found := operationSummary(status, admitted.OperationID); found && operation.State.Terminal() && operation.State != topology.OperationSucceeded {
+				t.Fatalf("meta admission terminated before load growth: %+v", operation)
 			}
-			for _, group := range status.Groups {
-				if group.GroupID == topology.MetaGroupID && slices.Contains(group.ConfState.Learners, member) {
+			// Independent load preparation can begin before metadata membership
+			// reaches its learner step. Inspect the native local state and require
+			// that milestone before accepting progress in the other block.
+			observed, observedErr := c.Local(ctx, observer, topology.MetaGroupID)
+			for _, group := range []topology.GroupStatus{observed.Status} {
+				if observedErr == nil && group.GroupID == topology.MetaGroupID && slices.Contains(group.ConfState.Learners, member) {
 					learnerSeen = true
 					if electionDuringLearner && !elected {
 						oldLeader := ""
@@ -159,8 +172,9 @@ func testMetaAdmission(t *testing.T, electionDuringLearner bool) {
 							if err != nil || changed.MetaLeaderID == 0 || changed.MetaLeaderID == local.Identity.MemberID {
 								return false, err
 							}
-							if changed.Operator == nil || changed.Operator.ID != admitted.OperatorID || changed.Operator.Attempt != 1 {
-								return true, fmt.Errorf("election changed exact admission execution: %+v", changed.Operator)
+							operation, err := c.Operation(ctx, observer, admitted.OperationID)
+							if err != nil || operation.ID != admitted.OperationID || operation.Attempt != 1 {
+								return true, fmt.Errorf("election changed exact admission operation: %+v (%v)", operation, err)
 							}
 							replacementMember = changed.MetaLeaderID
 							return true, nil
@@ -171,8 +185,11 @@ func testMetaAdmission(t *testing.T, electionDuringLearner bool) {
 					}
 				}
 			}
-			if status.Operator != nil && status.Operator.ID == admitted.OperatorID && status.Operator.GroupID == "work" && status.Operator.CurrentStep > 0 {
-				break
+			operation, operationErr := c.Operation(ctx, observer, admitted.OperationID)
+			if operationErr == nil {
+				if block, found := operationBlock(operation, "work"); found && block.CurrentStep > 0 && learnerSeen && (!electionDuringLearner || elected) {
+					break
+				}
 			}
 		}
 		select {
@@ -211,8 +228,8 @@ func testMetaAdmission(t *testing.T, electionDuringLearner bool) {
 	}
 	instance := local.Identity.InstanceID
 	if electionDuringLearner {
-		operator, err := c.Operator(ctx, observer, admitted.OperatorID)
-		if err != nil || operator.ID != admitted.OperatorID || operator.Attempt != 1 || operator.Version != admitted.Document.Version || operator.State.Terminal() {
+		operator, err := c.Operation(ctx, observer, admitted.OperationID)
+		if err != nil || operator.ID != admitted.OperationID || operator.Attempt != 1 || operator.Version != admitted.Document.Version || operator.State.Terminal() {
 			t.Fatal("leader replacement changed or finished the paused execution", operator, err)
 		}
 		status, err := c.Status(ctx, observer)
@@ -222,11 +239,11 @@ func testMetaAdmission(t *testing.T, electionDuringLearner bool) {
 		// The stored execution's current exact step is exposed by the authorized
 		// receiver, even if planning against already changed membership differs.
 		if err := Poll(ctx, func() (bool, error) {
-			current, err := c.Operator(ctx, observer, admitted.OperatorID)
+			current, err := c.Operation(ctx, observer, admitted.OperationID)
 			if err != nil {
 				return false, err
 			}
-			if current.ID != admitted.OperatorID || current.Attempt != 1 || current.Version != admitted.Document.Version || current.State.Terminal() {
+			if current.ID != admitted.OperationID || current.Attempt != 1 || current.Version != admitted.Document.Version || current.State.Terminal() {
 				return true, fmt.Errorf("replacement changed the paused execution: %+v", current)
 			}
 			for _, seed := range c.Spec.Nodes {
@@ -236,7 +253,7 @@ func testMetaAdmission(t *testing.T, electionDuringLearner bool) {
 				}
 				for _, barrier := range controls.Barriers {
 					a := barrier.Last
-					if barrier.Hits > 0 && a.OperatorID == admitted.OperatorID && a.Attempt == 1 && a.Version == admitted.Document.Version && a.StepSeq == current.CurrentStep && a.Kind == topology.StepPromoteVoter && a.GroupID == "work" && a.NodeName == "node4" && a.ReplicaID == loadID {
+					if barrier.Hits > 0 && a.OperationID == topology.OperationID(admitted.OperationID) && a.Attempt == 1 && a.Version == admitted.Document.Version && hasOperationStep(current, "work", a.StepSeq) && a.Kind == topology.StepPromoteVoter && a.GroupID == "work" && a.NodeName == "node4" && a.ReplicaID == loadID {
 						return true, nil
 					}
 				}
@@ -259,16 +276,16 @@ func testMetaAdmission(t *testing.T, electionDuringLearner bool) {
 			t.Fatal(err)
 		}
 	}
-	if err := c.WaitOperator(ctx, "node2", admitted.OperatorID); err != nil {
+	if err := c.WaitOperation(ctx, "node2", admitted.OperationID); err != nil {
 		t.Fatal(err)
 	}
 	if electionDuringLearner {
-		operator, err := c.Operator(ctx, "node2", admitted.OperatorID)
-		if err != nil || operator.Attempt != 1 || operator.ID != admitted.OperatorID || operator.State != topology.OperatorSucceeded {
+		operator, err := c.Operation(ctx, "node2", admitted.OperationID)
+		if err != nil || operator.Attempt != 1 || operator.ID != admitted.OperationID || operator.State != topology.OperationSucceeded {
 			t.Fatal("resumed admission created another attempt", operator, err)
 		}
 	}
-	if err := c.WaitActive(ctx, admitted.Document.Version); err != nil {
+	if err := c.WaitFullyConverged(ctx, admitted.Document.Version); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.WaitReady(ctx); err != nil {
@@ -340,7 +357,7 @@ func TestMetaPinnedAdmissionRestartsBeforeAndAfterReadyWithoutAllocatingIDs(t *t
 				t.Fatal(err)
 			}
 			if err := node.Start(ctx); err != nil {
-				op, readErr := c.Operator(ctx, "node1", admission.OperatorID)
+				op, readErr := c.Operation(ctx, "node1", topology.OperationID(admission.OperationID))
 				t.Logf("approved pin-driver admission: %+v (read error: %v)", op, readErr)
 				t.Fatal(err)
 			}
@@ -371,10 +388,10 @@ func TestMetaPinnedAdmissionRestartsBeforeAndAfterReadyWithoutAllocatingIDs(t *t
 			if err := node.StartJoining(ctx); err != nil {
 				t.Fatal(err)
 			}
-			if err := c.WaitOperator(ctx, "node1", admission.OperatorID); err != nil {
+			if err := c.WaitOperation(ctx, "node1", topology.OperationID(admission.OperationID)); err != nil {
 				t.Fatal(err)
 			}
-			if err := c.WaitActive(ctx, admission.Document.Version); err != nil {
+			if err := c.WaitFullyConverged(ctx, admission.Document.Version); err != nil {
 				t.Fatal(err)
 			}
 			if err := c.WaitReady(ctx); err != nil {
@@ -390,8 +407,8 @@ func TestMetaPinnedAdmissionRestartsBeforeAndAfterReadyWithoutAllocatingIDs(t *t
 					t.Fatal("pinned admission restart churned topology", latest, err)
 				}
 			}
-			operator, err := c.Operator(ctx, "node1", admission.OperatorID)
-			if err != nil || operator.Attempt != 1 || operator.State != topology.OperatorSucceeded {
+			operator, err := c.Operation(ctx, "node1", admission.OperationID)
+			if err != nil || operator.Attempt != 1 || operator.State != topology.OperationSucceeded {
 				t.Fatal("restart replaced the exact admission attempt", operator, err)
 			}
 		})

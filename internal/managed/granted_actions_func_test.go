@@ -109,7 +109,7 @@ func TestGrantedRetirementFinishesWhileNewFenceJoinsCallback(t *testing.T) {
 	}
 	f.cfg.ForgetGrantedReplica = func(ctx context.Context, g topology.AuthorityGrant, expected uint64) error {
 		if g.Action == nil || g.Action.Kind != topology.StepCleanupReplicaState || g.Action.ReplicaID != expected {
-			return fault.ErrOperatorAuthorization
+			return fault.ErrOperationAuthorization
 		}
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -263,7 +263,7 @@ func TestGrantedRetirementRejectsIncompleteCallbackProofAndKeepsEvidence(t *test
 	must(t, err)
 	req := f.request(a, f.localID(1))
 	req.Grant = grant
-	if result, err := h.ApplyAction(deadline(t), req); !errors.Is(err, fault.ErrOperatorAuthorization) || len(result.Receipts) != 0 {
+	if result, err := h.ApplyAction(deadline(t), req); !errors.Is(err, fault.ErrOperationAuthorization) || len(result.Receipts) != 0 {
 		t.Fatal("incomplete callback proof counted as success", result, err)
 	}
 	if found, err := s.Receipt(t.Context(), grant, actionTarget(req)); err != nil || found.Found {

@@ -24,7 +24,7 @@ func TestLegacyEventJournalCompatibility(t *testing.T) {
 				t.Fatal(err)
 			}
 			e, err := decodeEvent(legacy)
-			if err != nil || e.Type != kind || e.OperatorID != "exec-v4-a2" {
+			if err != nil || e.Type != kind || e.OperationID != "exec-v4-a2" {
 				t.Fatalf("legacy decode: %+v/%v", e, err)
 			}
 			raw, err := encodeEvent(e)
@@ -35,7 +35,7 @@ func TestLegacyEventJournalCompatibility(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !bytes.Contains(public, []byte(`"operator_id":"exec-v4-a2"`)) || bytes.Contains(public, []byte("execution_id")) || !bytes.Contains(public, []byte(`"type":"`+string(kind)+`"`)) {
+			if !bytes.Contains(public, []byte(`"operation_id":"exec-v4-a2"`)) || bytes.Contains(public, []byte("execution_id")) || !bytes.Contains(public, []byte(`"type":"`+string(kind)+`"`)) {
 				t.Fatalf("public names: %s", public)
 			}
 			path := filepath.Join(t.TempDir(), "events.bolt")
@@ -65,7 +65,7 @@ func TestLegacyEventJournalCompatibility(t *testing.T) {
 				}
 			})
 			got, err := j.List(context.Background(), Query{Filter: Filter{Types: []Type{kind}}})
-			if err != nil || len(got) != 1 || got[0].OperatorID != e.OperatorID {
+			if err != nil || len(got) != 1 || got[0].OperationID != e.OperationID {
 				t.Fatalf("journal filter/reopen: %+v/%v", got, err)
 			}
 			if err = j.db.View(func(tx *bolt.Tx) error {

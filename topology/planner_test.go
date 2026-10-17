@@ -110,7 +110,7 @@ func TestBuildPlanFreshFounding(t *testing.T) {
 	statuses := statusForDocument(active)
 	statuses["shard1"] = GroupStatus{GroupID: "shard1", Found: false}
 
-	plan, err := BuildPlan(active, desired, statuses, plannerRules())
+	plan, err := BuildPlan(testPlanInput(active, statuses), desired, plannerRules())
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestBuildPlanFreshFoundingAddsIntentionalLearnerAfterFounders(t *testing.T)
 	statuses := statusForDocument(active)
 	statuses["shard1"] = GroupStatus{GroupID: "shard1", Found: false}
 
-	plan, err := BuildPlan(active, desired, statuses, plannerRules())
+	plan, err := BuildPlan(testPlanInput(active, statuses), desired, plannerRules())
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestBuildPlanEstablishedVoterGrowAddsLearnerThenVoter(t *testing.T) {
 	desired.Group("shard0").NextReplicaID = 3
 	statuses := statusForDocument(active)
 
-	plan, err := BuildPlan(active, desired, statuses, plannerRules())
+	plan, err := BuildPlan(testPlanInput(active, statuses), desired, plannerRules())
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestBuildPlanExistingLearnerPromotion(t *testing.T) {
 	desired.Group("shard0").Replicas[1].Role = ReplicaVoter
 	statuses := statusForDocument(active)
 
-	plan, err := BuildPlan(active, desired, statuses, plannerRules())
+	plan, err := BuildPlan(testPlanInput(active, statuses), desired, plannerRules())
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestBuildPlanIntentionalLearnerStopsAfterAdd(t *testing.T) {
 	desired.Group("shard0").NextReplicaID = 3
 	statuses := statusForDocument(active)
 
-	plan, err := BuildPlan(active, desired, statuses, plannerRules())
+	plan, err := BuildPlan(testPlanInput(active, statuses), desired, plannerRules())
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestBuildPlanDemotesVoterAndTransfersLeader(t *testing.T) {
 	status.LiveVoters = map[uint64]bool{1: true, 2: true, 3: true}
 	statuses["shard0"] = status
 
-	plan, err := BuildPlan(active, desired, statuses, plannerRules())
+	plan, err := BuildPlan(testPlanInput(active, statuses), desired, plannerRules())
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestBuildPlanIncludesMetaLearnerThenVoterChange(t *testing.T) {
 	active.Group(MetaGroupID).NextReplicaID = 4
 	statuses := statusForDocument(active)
 
-	plan, err := BuildPlan(active, desired, statuses, plannerRules())
+	plan, err := BuildPlan(testPlanInput(active, statuses), desired, plannerRules())
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestBuildPlanReplacementAtMaxUsesSafeDemotionFirst(t *testing.T) {
 	status.LiveVoters = map[uint64]bool{1: true, 2: true, 3: true}
 	statuses["shard0"] = status
 
-	plan, err := BuildPlan(active, desired, statuses, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 4, MaxReplicas: 3}})
+	plan, err := BuildPlan(testPlanInput(active, statuses), desired, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 4, MaxReplicas: 3}})
 	if err != nil {
 		t.Fatal("safe at-capacity replacement was refused", err)
 	}
@@ -275,7 +275,7 @@ func TestBuildPlanReplacementAtMaxUsesSafeDemotionFirst(t *testing.T) {
 	}
 	status.LiveVoters[3] = false
 	statuses["shard0"] = status
-	if plan, err := BuildPlan(active, desired, statuses, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 4, MaxReplicas: 3}}); !errors.Is(err, fault.ErrUnsafeMembership) || !strings.Contains(err.Error(), "live quorum") {
+	if plan, err := BuildPlan(testPlanInput(active, statuses), desired, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 4, MaxReplicas: 3}}); !errors.Is(err, fault.ErrUnsafeMembership) || !strings.Contains(err.Error(), "live quorum") {
 		t.Fatalf("replacement lost a survivor but was not refused: %+v, %v", plan, err)
 	}
 }
@@ -288,7 +288,7 @@ func TestBuildPlanWholeGroupDeletionStopsEveryFormerHost(t *testing.T) {
 	desired.Groups = desired.Groups[:1]
 	statuses := statusForDocument(active)
 
-	plan, err := BuildPlan(active, desired, statuses, plannerRules())
+	plan, err := BuildPlan(testPlanInput(active, statuses), desired, plannerRules())
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestBuildPlanPairsMultipleDisjointReplacements(t *testing.T) {
 		statuses[id] = status
 	}
 
-	plan, err := BuildPlan(active, desired, statuses, plannerRules())
+	plan, err := BuildPlan(testPlanInput(active, statuses), desired, plannerRules())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,16 +337,17 @@ func TestBuildPlanEstablishedGroupMissingGloballyIsUnavailable(t *testing.T) {
 	active := planDoc(1, 3, []string{"n1"}, shardOf("shard0", rep("n1", 1)))
 	desired := active.Clone()
 	desired.Version++
+	desired.Group("shard0").Labels = map[string]string{"owner": "jobs"}
 	statuses := statusForDocument(active)
 	statuses["shard0"] = GroupStatus{GroupID: "shard0", Found: false}
 
-	_, err := BuildPlan(active, desired, statuses, plannerRules())
+	_, err := BuildPlan(testPlanInput(active, statuses), desired, plannerRules())
 	if !errors.Is(err, fault.ErrUnavailable) {
 		t.Fatalf("BuildPlan error = %v, want fault.ErrUnavailable", err)
 	}
 }
 
-func TestBuildPlanRefusesObservedGroupWithoutActiveIdentities(t *testing.T) {
+func TestBuildPlanValidatesUnknownNativeIdentityOnlyInAffectedScope(t *testing.T) {
 	t.Parallel()
 	active := planDoc(1, 3, []string{"n1"})
 	desired := active.Clone()
@@ -354,7 +355,12 @@ func TestBuildPlanRefusesObservedGroupWithoutActiveIdentities(t *testing.T) {
 	statuses := statusForDocument(active)
 	statuses["orphan"] = groupStatus("orphan", 1, []uint64{1}, nil)
 
-	_, err := BuildPlan(active, desired, statuses, plannerRules())
+	input := testPlanInput(active, statuses)
+	if plan, err := BuildPlan(input, desired, plannerRules()); err != nil || len(plan.Blocks) != 0 {
+		t.Fatal("unrelated native state acquired an execution scope", plan, err)
+	}
+	desired.Groups = append(desired.Groups, shardOf("orphan", rep("n1", 2)))
+	_, err := BuildPlan(input, desired, plannerRules())
 	if !errors.Is(err, fault.ErrUnsafeMembership) {
 		t.Fatalf("BuildPlan error = %v, want fault.ErrUnsafeMembership", err)
 	}
@@ -372,12 +378,12 @@ func TestBuildPlanDeterministic(t *testing.T) {
 	desired.Group("shardB").NextReplicaID = 4
 	statuses := statusForDocument(active)
 
-	first, err := BuildPlan(active, desired, statuses, plannerRules())
+	first, err := BuildPlan(testPlanInput(active, statuses), desired, plannerRules())
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
 	for i := range 50 {
-		again, err := BuildPlan(active, desired, statuses, plannerRules())
+		again, err := BuildPlan(testPlanInput(active, statuses), desired, plannerRules())
 		if err != nil {
 			t.Fatalf("BuildPlan run %d: %v", i, err)
 		}
@@ -408,7 +414,7 @@ func TestValidatePlanShapeRejectsMissingAcknowledgementAdjacency(t *testing.T) {
 			for i := range tc.steps {
 				tc.steps[i].Seq = i + 1
 			}
-			if err := ValidatePlanShape(active, desired, Plan{Version: desired.Version, Steps: tc.steps}); err == nil {
+			if err := ValidatePlanShape(convergedPlanInput(active), desired, Plan{Version: desired.Version, Steps: tc.steps}); err == nil {
 				t.Fatalf("ValidatePlanShape accepted %+v", tc.steps)
 			}
 		})
@@ -424,6 +430,7 @@ func TestPlannerRejectsMalformedObservedMembership(t *testing.T) {
 	active := planDoc(1, 3, []string{"n1", "n2"}, shardOf("load", rep("n1", 1), rep("n2", 2)))
 	desired := active.Clone()
 	desired.Version++
+	desired.Group("load").Labels = map[string]string{"owner": "jobs"}
 	cases := []struct {
 		name string
 		cs   raftpb.ConfState
@@ -439,7 +446,7 @@ func TestPlannerRejectsMalformedObservedMembership(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			status := statusForDocument(active)
 			status["load"] = GroupStatus{GroupID: "load", Found: true, ConfState: tc.cs}
-			if _, err := BuildPlan(active, desired, status, plannerRules()); !errors.Is(err, tc.want) {
+			if _, err := BuildPlan(testPlanInput(active, status), desired, plannerRules()); !errors.Is(err, tc.want) {
 				t.Fatal("invalid observation admitted", err)
 			}
 		})

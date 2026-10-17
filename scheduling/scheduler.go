@@ -28,10 +28,11 @@ type RepairPolicy interface {
 // ScheduleInput provides owned topology, membership, health and local-hold
 // observations.
 type ScheduleInput struct {
-	Now                    time.Time
-	Latest, Target, Active topology.Document
-	// Status contains group observations with leader names resolved through
-	// this input's Active view, not a peer-supplied name or a newer document.
+	Now    time.Time
+	Target topology.Document
+	// Groups contains approved/proven declarations; Desired and Observation are omitted from callbacks.
+	Groups map[string]topology.GroupProgress
+	// Status contains observations bound to each group's exact source and identities.
 	Status   map[string]topology.GroupStatus
 	Health   map[string]topology.GroupHealthEvaluation
 	Alive    map[string]time.Duration
@@ -42,7 +43,11 @@ type ScheduleInput struct {
 
 // Clone creates an independent callback input, including nested observations.
 func (in ScheduleInput) Clone() ScheduleInput {
-	in.Latest, in.Target, in.Active = in.Latest.Clone(), in.Target.Clone(), in.Active.Clone()
+	in.Target = in.Target.Clone()
+	in.Groups = maps.Clone(in.Groups)
+	for id, progress := range in.Groups {
+		in.Groups[id] = progress.Clone()
+	}
 	in.Status = maps.Clone(in.Status)
 	for id, status := range in.Status {
 		in.Status[id] = status.Clone()

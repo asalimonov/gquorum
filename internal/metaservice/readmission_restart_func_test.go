@@ -33,7 +33,7 @@ func TestReadmissionResumesExactRetirementAcrossProcessRestart(t *testing.T) {
 func testReadmissionRestart(t *testing.T, phase string) {
 	t.Helper()
 	old := readyPublic(t, singleMetaFixture(t))
-	previous, err := old.Active(t.Context())
+	previous, err := old.state().FullyConvergedDocument()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func testReadmissionRestart(t *testing.T, phase string) {
 	granted.Version++
 	granted.MetaGroup().NextReplicaID = 3
 	granted.MetaGroup().Replicas[0].ReplicaID = 2
-	admission := metaengine.AdmissionRecord{NodeName: "n1", InstanceID: "first-readmission", MemberID: 2, OperatorID: topology.MakeOperatorID(granted.Version, 1), State: metaengine.AdmissionPending}
+	admission := metaengine.AdmissionRecord{NodeName: "n1", InstanceID: "first-readmission", MemberID: 2, OperationID: topology.MakeOperationID(granted.Version, 1), State: metaengine.AdmissionPending}
 	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: topology.MetaGroupID, Revision: 100}, Purpose: topology.AuthorityReadmit, AdmissionID: metaengine.ReadmissionID(admission), Resources: []topology.AuthorityResource{{Kind: topology.AuthorityHost, GroupID: topology.MetaGroupID, NodeName: "n1"}}, Targets: []topology.AuthorityTarget{{NodeName: "n1", MemberID: 1, ReplicaID: 1}}}
 	var firstReceipt topology.EffectReceipt
 	for attempt := range 2 {
@@ -126,7 +126,10 @@ func testReadmissionRestart(t *testing.T, phase string) {
 			}
 		})
 		g.ctx = t.Context()
-		response := joinResponse{Rules: g.rules, MemberID: 2, PreviousMemberID: 1, Readmitted: authority.Identity().MemberID == 1, Admission: admission, Previous: previous, Granted: granted, LeaderAddress: address, Grants: []topology.AuthorityGrant{grant}}
+		response := joinResponse{Rules: g.rules, MemberID: 2, PreviousMemberID: 1,
+			Readmitted: authority.Identity().MemberID == 1, Admission: admission, Granted: granted,
+			Members: []joinMember{{Name: "n1", MemberID: 2}}, LeaderAddress: address,
+			Grants: []topology.AuthorityGrant{grant}}
 		if attempt == 1 {
 			response.Admission.InstanceID = g.Identity().InstanceID
 			response.Admission.ReadmissionInstanceID = admission.InstanceID

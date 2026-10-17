@@ -51,6 +51,7 @@ type application struct {
 	metaProxy                    *metaFaultProxy
 	mu                           sync.RWMutex
 	machines                     map[load.ReplicaRef]*kvMachine
+	serving                      map[string]topology.GroupProgress
 	startupMissing               string
 	startupObserved              bool
 	clients                      map[string]*loadClient
@@ -275,7 +276,7 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 	if placement.MinReplicas == 0 {
 		placement = topology.PlacementRule{MinReplicas: 1, MaxReplicas: 3}
 	}
-	lifecycleOptions := lifecycle.DefaultOptions{}
+	lifecycleOptions := lifecycle.DefaultOptions{Retention: cfg.Retention}
 	if cfg.GateFounders {
 		lifecycleOptions.Startup = lifecycle.AllFounders
 		lifecycleOptions.FoundersTimeout = cfg.FoundingTimeout
@@ -307,8 +308,11 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 			Timing:  gquorum.MetaTiming{TickInterval: cfg.TickInterval, ElectionTicks: 10},
 			Network: gquorum.MetaNetworkOptions{Listener: ls.meta, AdvertiseAddress: cfg.MetaAddress, AllowPlaintext: true, ClusterCredential: []byte(cfg.Credential), Resolver: metaResolver{a}}},
 		Loads: gquorum.LoadOptions{Factory: a.newReplica, Retire: a.retireReplica, Transport: loadTransport{app: a},
-			Storage: gquorum.LoadStorageOptions{Store: &fixtureStore{Store: a.store, app: a}, Retirement: a.store},
-			Engine:  load.EngineOptions{Timing: load.Timing{TickInterval: cfg.TickInterval, ElectionTicks: 10, WALWriteWait: cfg.WALWriteWait}, SnapshotThreshold: cfg.SnapshotThreshold, ProposalTimeout: cfg.ProposalTimeout}},
+			// Process tests exercise two collection passes across a crash. Keep
+			// maintenance prompt; retention still decides whether deletion is due.
+			RetirementInterval: 250 * time.Millisecond,
+			Storage:            gquorum.LoadStorageOptions{Store: &fixtureStore{Store: a.store, app: a}, Retirement: fixtureRetirement{RetirementStore: a.store, app: a}},
+			Engine:             load.EngineOptions{Timing: load.Timing{TickInterval: cfg.TickInterval, ElectionTicks: 10, WALWriteWait: cfg.WALWriteWait}, SnapshotThreshold: cfg.SnapshotThreshold, ProposalTimeout: cfg.ProposalTimeout}},
 		Scheduling: scheduleOptions,
 		Lifecycle:  lifecycle.Options{Hooks: &fixtureLifecycle{DefaultHooks: defaults, app: a}},
 	})
@@ -375,6 +379,7 @@ func (a *application) Start(parent context.Context) error {
 		}
 	})
 	a.workWG.Go(a.markEstablished)
+	a.workWG.Go(a.observeServing)
 	if a.cfg.Bootstrap {
 		a.workWG.Go(a.bootstrap)
 	}
@@ -460,25 +465,30 @@ func (a *application) finishClose() {
 	close(a.closed)
 }
 
-func (a *application) documents(ctx context.Context) (topology.Document, topology.Document, error) {
-	target, err := a.cluster.Target(ctx)
+// readConvergedTopology resolves the pinned complete historical baseline;
+// current per-group convergence is exposed separately through ReadProgress.
+func readConvergedTopology(ctx context.Context, cluster gquorum.Cluster) (topology.Document, error) {
+	view, err := cluster.ReadTopology(ctx)
 	if err != nil {
-		return target, topology.Document{}, err
+		return topology.Document{}, err
 	}
-	active, err := a.cluster.Active(ctx)
-	return target, active, err
+	return cluster.Get(ctx, view.FullyConverged.Version)
 }
+
 func (a *application) address(ctx context.Context, name, label string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if a.cluster != nil {
-		target, active, err := a.documents(ctx)
-		if err != nil {
-			return "", err
+		// Routing must work before election and during metadata quorum loss.
+		// The receiver validates identity; resolving an address grants no authority.
+		target, err := a.cluster.Target(ctx)
+		if node := target.Node(name); err == nil && node != nil && node.Labels[label] != "" {
+			return node.Labels[label], nil
 		}
-		for _, doc := range []*topology.Document{&target, &active} {
-			if node := doc.Node(name); node != nil && node.Labels[label] != "" {
-				return node.Labels[label], nil
-			}
-		}
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	for _, p := range a.cfg.Peers {
 		if p.Name == name {
@@ -501,20 +511,13 @@ func (r metaResolver) Resolve(ctx context.Context, name string) (string, error) 
 	return r.a.address(ctx, name, metaAddressLabel)
 }
 func (a *application) owner(ctx context.Context, group string, replica uint64) (string, error) {
-	target, active, err := a.documents(ctx)
+	doc, err := a.approvedRoute(ctx, func(doc topology.Document) bool {
+		return replicaOwner(doc.Group(group), replica) != ""
+	})
 	if err != nil {
 		return "", err
 	}
-	for _, doc := range []*topology.Document{&target, &active} {
-		if g := doc.Group(group); g != nil {
-			for _, r := range g.Replicas {
-				if r.ReplicaID == replica {
-					return r.NodeName, nil
-				}
-			}
-		}
-	}
-	return "", fault.ErrIdentityMismatch
+	return replicaOwner(doc.Group(group), replica), nil
 }
 
 func (a *application) bootstrap() {
@@ -558,15 +561,15 @@ func (a *application) bootstrapOnce(ctx context.Context) (bool, error) {
 			if err != nil {
 				return false, err
 			}
-			status, err := a.cluster.WaitOperator(ctx, created.OperatorID)
+			status, err := a.cluster.WaitOperation(ctx, created.OperationID)
 			if err != nil {
 				return false, err
 			}
-			if status.State != topology.OperatorSucceeded {
+			if status.State != topology.OperationSucceeded {
 				return false, fault.New(fault.Unavailable, status.Error, nil)
 			}
 		} else {
-			active, err := a.cluster.Active(ctx)
+			active, err := readConvergedTopology(ctx, a.cluster)
 			if err != nil {
 				return false, err
 			}
@@ -575,8 +578,8 @@ func (a *application) bootstrapOnce(ctx context.Context) (bool, error) {
 				if err != nil {
 					return false, err
 				}
-				status, err := a.cluster.WaitOperator(ctx, id)
-				if err != nil || status.State != topology.OperatorSucceeded {
+				status, err := a.cluster.WaitOperation(ctx, id)
+				if err != nil || status.State != topology.OperationSucceeded {
 					return false, err
 				}
 			}

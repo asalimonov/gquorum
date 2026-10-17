@@ -11,58 +11,51 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func TestLoadScopeCreationProgressDistinguishesEmptyPreparedLearners(t *testing.T) {
+func TestLoadScopeCreationRequiresDurableReceipt(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct {
-		name                           string
-		role                           topology.ReplicaRole
-		kind                           topology.StepKind
-		current                        int
-		state                          topology.OperatorState
-		started, established, founding bool
-	}{
-		{"pending founding voter", topology.ReplicaVoter, topology.StepCreateFoundingGroup, 0, topology.OperatorPending, false, false, true},
-		{"failed founding effect", topology.ReplicaVoter, topology.StepCreateFoundingGroup, 1, topology.OperatorFailed, false, false, true},
-		{"completed founding effect", topology.ReplicaVoter, topology.StepCreateFoundingGroup, 2, topology.OperatorRunning, true, true, true},
-		{"intentional learner skipped by founding", topology.ReplicaLearner, topology.StepCreateFoundingGroup, 2, topology.OperatorRunning, false, false, false},
-		{"prepared learner", topology.ReplicaLearner, topology.StepPrepareReplica, 2, topology.OperatorRunning, true, false, false},
-		{"admitted learner", topology.ReplicaLearner, topology.StepAddLearner, 2, topology.OperatorRunning, true, true, false},
-		{"succeeded final prepare", topology.ReplicaLearner, topology.StepPrepareReplica, 1, topology.OperatorSucceeded, true, false, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			m := NewMachine(testRules(), nil)
-			doc := baseDoc()
-			doc.Version = 1
-			doc.Group("shard0").Replicas[0].Role = tc.role
-			m.latest, m.target = doc.Clone(), doc.Clone()
-			m.history = []topology.Document{doc.Clone()}
-			ex := newOperatorRecord(1, 1, []topology.Step{{Seq: 1, Kind: tc.kind, GroupID: "shard0", NodeName: "n1", ReplicaID: 1}}, "actor", topology.OriginOperator, doc.CreatedAt)
-			ex.CurrentStep, ex.State = tc.current, tc.state
-			m.operators[ex.ID] = &ex
-			id := storage.Identity{NodeName: "n1", ClusterID: doc.ClusterID, GroupID: "shard0", ReplicaID: 1}
-			if err := m.WithLoadScope(id, 1, func(scope LoadScope) error {
-				if scope.Started != tc.started || scope.Established != tc.established || scope.Founding != tc.founding {
-					t.Fatal(scope)
-				}
-				return nil
-			}); err != nil {
-				t.Fatal(err)
+	s := loadMembershipScopeFixture(t, topology.StepAddLearner)
+	id := storage.Identity{NodeName: "n2", ClusterID: s.Target.ClusterID, GroupID: "shard0", ReplicaID: 2}
+	m := restoreMachineFixture(t, s)
+	check := func(started bool) {
+		t.Helper()
+		if err := m.WithLoadScope(id, 2, func(scope LoadScope) error {
+			if scope.Started != started || scope.Established || scope.Founding {
+				t.Fatal("prepared learner was mistaken for an established replica", scope)
 			}
-		})
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
+	check(false)
+	op := m.scoped.Operations[0]
+	issued := applyMachine(t, m, BeginEffectProposal{ProposalID: "prepare", Action: scopedPlanAction(&op, op.Plan.Steps[0])})
+	if !issued.Accepted || issued.Grant == nil {
+		t.Fatal(issued)
+	}
+	check(false) // Permission to create is not proof of creation.
+	for _, receipt := range fixtureEffectReceipts(*issued.Grant) {
+		accepted := applyMachine(t, m, RecordEffectProposal{Receipt: receipt, At: op.StartedAt, ProposalID: "prepared"})
+		if !accepted.Accepted {
+			t.Fatal(accepted)
+		}
+	}
+	check(true) // A prepared learner can still have an empty log.
 }
 
-func TestLoadScopeRejectsOldOwnerAndRetiredGroupAtApproval(t *testing.T) {
+func TestLoadScopeRejectsOldOwnerAndRetiredGroupBeforeCallback(t *testing.T) {
 	t.Parallel()
-	sm, _ := activatedSM(t)
-	m := &Machine{topologySM: sm}
-	id := storage.Identity{NodeName: "n1", ClusterID: "cluster-abc", GroupID: "shard0", ReplicaID: 1}
+	s, p := deletionApprovalFixture(t)
+	m := restoreMachineFixture(t, s)
+	id := storage.Identity{NodeName: "n1", ClusterID: s.Target.ClusterID, GroupID: "shard0", ReplicaID: 1}
 	called := false
 	if err := m.WithLoadScope(id, 9, func(LoadScope) error { called = true; return nil }); !errors.Is(err, fault.ErrIdentityMismatch) || called {
 		t.Fatal(called, err)
 	}
-	m.retired["shard0"] = 2
+	result := applyMachine(t, m, p)
+	if !result.Accepted {
+		t.Fatal(result)
+	}
 	if err := m.WithLoadScope(id, 1, func(LoadScope) error { called = true; return nil }); !errors.Is(err, fault.ErrGroupRetired) || called {
 		t.Fatal(called, err)
 	}

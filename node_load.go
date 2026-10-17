@@ -24,6 +24,7 @@ func (n *node) newHost(m *metaservice.Group) (*managed.Host, error) {
 		Authority: n.localAuthority, ValidateGrant: m.ValidateGrant, ValidateCourier: m.ValidateAuthorityCourier,
 		ResolveAuthorityPeer: m.ResolveAuthorityPeer, RecordFence: m.RecordFence,
 		ForgetGrantedReplica: m.ForgetGrantedLoadReplica,
+		Collection:           managed.CollectionCallbacks{Report: m.ReportCollection, Status: m.ReportCleanupStatus},
 		AuthorityFloors: func(ctx context.Context) ([]topology.AuthorityGrant, error) {
 			return m.ReadAuthorityFloors(ctx, m.Identity().NodeName)
 		},
@@ -32,7 +33,7 @@ func (n *node) newHost(m *metaservice.Group) (*managed.Host, error) {
 			return m.AuthorizeReadmission(ctx, metaservice.Readmission(grant))
 		},
 		Scope: m.LoadReplicaScope, LookupRecord: m.LookupLoadReplica, RecordReplica: m.RecordLoadReplica,
-		Catalog: m.LoadCatalog, Active: m.Active,
+		Catalog: m.LoadCatalog, Progress: m.LocalProgress,
 		RetireApplication: n.opts.Loads.Retire,
 		Retirement:        retirement, Retention: runner.Retention, RetirementInterval: n.opts.Loads.RetirementInterval,
 		Assignments: m.LoadAssignments, Factory: n.opts.Loads.Factory, Store: store, Transport: n.opts.Loads.Transport,
@@ -41,13 +42,14 @@ func (n *node) newHost(m *metaservice.Group) (*managed.Host, error) {
 		Metrics:          internalmetrics.Settings(n.opts.Metrics),
 		RecoveryInterval: n.opts.Loads.RecoveryInterval, Events: n.opts.Events, Logger: n.opts.Logger,
 		// A memory replica restarted without its state replaces itself through
-		// the ordinary reseat, pinned to the Active version the host observed.
-		ReseatOwn: func(ctx context.Context, group string, version uint64) error {
+		// ordinary reseat. Each call pins Latest; scoped repair approves only
+		// this exact replacement and rebases independent staged intent.
+		ReseatOwn: func(ctx context.Context, id storage.Identity) error {
 			own := m.Identity().NodeName
-			_, err := m.ReseatReplica(ctx, group, own, metaservice.MutationOptions{
-				ExpectedVersion: version,
-				Actor:           own,
-				Comment:         "reseat in-memory replica after restart",
+			key := topology.ReplicaKey{NodeName: id.NodeName, ReplicaID: id.ReplicaID}
+			_, err := m.ReseatReplica(ctx, id.GroupID, key, metaservice.MutationOptions{
+				Actor:   own,
+				Comment: "reseat in-memory replica after restart",
 			})
 			return err
 		},
@@ -191,7 +193,7 @@ func (n *node) reserveReadmission(parent context.Context, m *metaservice.Group,
 		return readmissionOwner{}, fault.ErrAuthorityPending
 	}
 	if n.authority == nil || len(grant.Grants) == 0 {
-		return readmissionOwner{}, fault.ErrOperatorAuthorization
+		return readmissionOwner{}, fault.ErrOperationAuthorization
 	}
 	ctx, cancel := context.WithCancel(parent)
 	retirement := &readmissionWork{cancel: cancel, done: make(chan struct{}), revision: grant.Grants[0].Key.Revision}
@@ -211,7 +213,7 @@ func (n *node) readmissionReceipts(ctx context.Context, grant metaservice.Readmi
 	}
 	s := n.localAuthority()
 	if s == nil || len(grant.Grants) == 0 {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	for _, g := range grant.Grants {
 		for _, target := range g.Targets {
@@ -257,6 +259,15 @@ func (n *node) replaceReadmittedHost(m *metaservice.Group) error {
 // service never keeps an adapter bound to a retired host.
 type nodeEffects struct{ node *node }
 
+func (e nodeEffects) DispatchEffect(ctx context.Context, grant topology.AuthorityGrant,
+	resource topology.AuthorityResource, target topology.AuthorityTarget) (topology.EffectReceipt, error) {
+	h, err := e.node.loadHost(ctx)
+	if err != nil {
+		return topology.EffectReceipt{}, err
+	}
+	return h.DispatchEffect(ctx, grant, resource, target)
+}
+
 func (e nodeEffects) ReadNative(ctx context.Context, id string,
 	candidates ...storage.Identity) (topology.NativeState, error) {
 	h, err := e.node.loadHost(ctx)
@@ -272,44 +283,6 @@ func (e nodeEffects) Status(ctx context.Context, id string) (topology.GroupStatu
 		return topology.GroupStatus{}, err
 	}
 	return h.ObserveGroup(ctx, id)
-}
-
-func (e nodeEffects) dispatch(ctx context.Context, a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	h, err := e.node.loadHost(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return h.DispatchGrant(ctx, a)
-}
-
-func (e nodeEffects) CreateGroup(ctx context.Context, a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return e.dispatch(ctx, a)
-}
-
-func (e nodeEffects) PrepareReplica(ctx context.Context, a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return e.dispatch(ctx, a)
-}
-
-func (e nodeEffects) ApplyMembership(ctx context.Context, a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return e.dispatch(ctx, a)
-}
-
-func (e nodeEffects) TransferLeader(ctx context.Context, a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return e.dispatch(ctx, a)
-}
-
-func (e nodeEffects) StopReplica(ctx context.Context, a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return e.dispatch(ctx, a)
-}
-
-func (e nodeEffects) CleanupReplicaState(ctx context.Context,
-	a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return e.dispatch(ctx, a)
-}
-
-func (e nodeEffects) DeleteGroupState(ctx context.Context,
-	a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return e.dispatch(ctx, a)
 }
 
 func (n *node) readmissionIdentity() topology.Identity {

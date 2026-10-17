@@ -4,16 +4,18 @@ package cluster
 
 import (
 	"context"
-	"github.com/asalimonov/gquorum"
 	"testing"
 	"time"
 
+	"github.com/asalimonov/gquorum"
+
+	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 	"github.com/containerd/errdefs"
 	docker "github.com/moby/moby/client"
 )
 
-func TestDeletionWaitsForUnreachableFormerHostBeforeDeletingState(t *testing.T) {
+func TestFailureIsolation_DeletionStopProof(t *testing.T) {
 	t.Parallel()
 	c := acquire(t, matrixSpec(3)).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 110*time.Second)
@@ -56,37 +58,63 @@ func TestDeletionWaitsForUnreachableFormerHostBeforeDeletingState(t *testing.T) 
 	}
 	operatorID := startApply(ctx, t, c, ingress, staged.Document.Version)
 	if err := Poll(ctx, func() (bool, error) {
-		operator, err := c.Operator(ctx, ingress, operatorID)
+		operator, err := c.Operation(ctx, ingress, operatorID)
 		if err != nil {
 			return false, err
 		}
 		if operator.State.Terminal() {
 			t.Fatalf("deletion finished without unreachable former host: %+v", operator)
 		}
-		return operator.State.Waiting() && operator.NodeName == stopped.Spec.Name, nil
+		for _, block := range operator.Blocks {
+			if block.Blocked != nil && block.Blocked.NodeName == stopped.Spec.Name {
+				return operator.State.Waiting(), nil
+			}
+		}
+		return false, nil
 	}); err != nil {
 		t.Fatal("deletion did not wait for the exact unreachable host", err)
 	}
+	// A second group's founding must proceed while every exact stop for this
+	// deletion is still required. Host it only on the two available processes.
+	var survivors []string
 	for _, node := range c.Nodes() {
-		if !node.running.Load() {
-			continue
+		if node.running.Load() {
+			survivors = append(survivors, node.Spec.Name)
 		}
-		active, err := c.Document(ctx, node.Spec.Name, "active")
-		if err != nil || active.Version != created.Document.Version || active.Group("delete-wait") == nil {
-			t.Fatal("deletion activated before every stop acknowledgement", active, err)
+	}
+	response, err = c.Request(ctx, ingress, "POST", "/api/groups", map[string]any{
+		"group": gquorum.GroupSpec{ID: "independent", Nodes: survivors,
+			Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 2}, VoterConfig: voterConfig(2)},
+		"mutation": gquorum.MutationOptions{Actor: "isolation-test"},
+	}, staged.Document.Version)
+	if err := requireStatus(response, err, 200); err != nil {
+		t.Fatal(err)
+	}
+	var independent gquorum.MutationResult
+	if err := response.Decode(&independent); err != nil {
+		t.Fatal(err)
+	}
+	independent.OperationID = startApply(ctx, t, c, ingress, independent.Document.Version)
+	if err := c.WaitOperation(ctx, ingress, independent.OperationID); err != nil {
+		t.Fatal("deletion stop blocked independent founding", err)
+	}
+	if err := c.Put(ctx, ingress, "independent", "during-delete", "during-delete", "available"); err != nil {
+		t.Fatal(err)
+	}
+	old := storage.Identity{ClusterID: c.ID, GroupID: "delete-wait", NodeName: stopped.Spec.Name,
+		ReplicaID: replicaID(created.Document, "delete-wait", stopped.Spec.Name)}
+	for _, name := range survivors {
+		page, err := c.Progress(ctx, name, topology.ProgressQuery{GroupID: "delete-wait"})
+		debt, found := exactCleanup(page, old)
+		if err != nil || page.FullyConverged.Version != created.Document.Version || page.TargetVersion != independent.Document.Version ||
+			len(page.Groups) != 1 || !page.Groups[0].Deleting || page.Groups[0].Approved != nil ||
+			page.Groups[0].ConvergedVersion != created.Document.Version || page.Groups[0].OperationID != operatorID ||
+			!found || debt.StoppedAt != nil || debt.RetiredAt != nil || debt.CollectedAt != nil {
+			t.Fatal("deletion manufactured exact stop or collection proof", name, page, err)
 		}
-		target, err := c.Document(ctx, node.Spec.Name, "target")
-		if err != nil || target.Version != staged.Document.Version || target.Group("delete-wait") != nil {
-			t.Fatal("approved deletion target was not retained", target, err)
-		}
-		controls, err := c.Controls(ctx, node.Spec.Name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, receipt := range controls.Receipts {
-			if receipt.OperatorID == operatorID && receipt.Kind == topology.StepDeleteGroupState {
-				t.Fatal("state deletion effect ran before every host stopped", receipt)
-			}
+		op, err := c.Operation(ctx, name, operatorID)
+		if err != nil || op.State.Terminal() {
+			t.Fatal("later group completion changed pending deletion", op, err)
 		}
 	}
 	if _, err := c.docker.ContainerStatPath(ctx, stopped.Container.GetContainerID(), docker.ContainerStatPathOptions{Path: "/data/load/delete-wait"}); err != nil {
@@ -95,19 +123,26 @@ func TestDeletionWaitsForUnreachableFormerHostBeforeDeletingState(t *testing.T) 
 	if err := stopped.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WaitOperator(ctx, ingress, operatorID); err != nil {
+	if err := c.WaitOperation(ctx, ingress, operatorID); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WaitActive(ctx, staged.Document.Version); err != nil {
+	if err := c.WaitFullyConverged(ctx, independent.Document.Version); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.WaitReady(ctx); err != nil {
 		t.Fatal(err)
 	}
 	for _, node := range c.Nodes() {
-		_, err := c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(), docker.ContainerStatPathOptions{Path: "/data/load/delete-wait"})
-		if !errdefs.IsNotFound(err) {
-			t.Fatal("completed deletion retained former-host state", node.Spec.Name, err)
+		// Required stops converge the declaration. Physical collection is later
+		// detached work and must be observed separately on each retained volume.
+		if err := Poll(ctx, func() (bool, error) {
+			_, err := c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(), docker.ContainerStatPathOptions{Path: "/data/load/delete-wait"})
+			if errdefs.IsNotFound(err) {
+				return true, nil
+			}
+			return false, err
+		}); err != nil {
+			t.Fatal("collection did not release former-host state", node.Spec.Name, err)
 		}
 		response, err := c.Request(ctx, node.Spec.Name, "GET", "/api/load/delete-wait/keys/retained", nil, 0)
 		if err := requireStatus(response, err, 503); err != nil {

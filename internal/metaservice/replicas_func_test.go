@@ -7,7 +7,6 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
@@ -149,36 +148,45 @@ func cleanupLedgerFixture(t *testing.T) (*mutationFixture, topology.AuthorizedSt
 	doc := f.g.machine.Latest()
 	doc.Groups = doc.Groups[:1]
 	f.commit(t, doc, false)
-	at := time.Now().UTC()
-	steps := []topology.Step{{Seq: 1, Kind: topology.StepStopReplica, GroupID: "work", NodeName: "n1", ReplicaID: 1}, {Seq: 2, Kind: topology.StepStopReplica, GroupID: "work", NodeName: "n2", ReplicaID: 2}, {Seq: 3, Kind: topology.StepStopReplica, GroupID: "work", NodeName: "n3", ReplicaID: 3}, {Seq: 4, Kind: topology.StepDeleteGroupState, GroupID: "work"}}
-	b := f.command(t, metaengine.BeginOperatorProposal{Version: 2, Plan: topology.Plan{Version: 2, Steps: steps}, At: at})
-	for _, step := range steps {
-		at = at.Add(time.Millisecond)
-		f.command(t, metaengine.TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: b.OperatorID, Version: 2, Attempt: 1, StepSeq: step.Seq, State: topology.OperatorRunning, GroupID: step.GroupID, NodeName: step.NodeName, At: at}})
-		if step.Kind != topology.StepDeleteGroupState {
-			f.consumeStep(t, topology.AuthorizedStep{OperatorID: b.OperatorID, Version: 2, Attempt: 1, StepSeq: step.Seq, Kind: step.Kind, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID})
-		}
+	approval := f.fixtureApproval(t, f.g.machine.Latest())
+	begin := f.command(t, approval)
+	work, err := f.g.machine.ReadyBlocks("", 1)
+	if err != nil || len(work) != 1 {
+		t.Fatal(work, err)
 	}
-	a := topology.AuthorizedStep{OperatorID: b.OperatorID, Version: 2, Attempt: 1, StepSeq: 4, Kind: topology.StepDeleteGroupState, GroupID: "work"}
+	f.completeFixtureWork(t, work[0].Operation, "work", f.g.machine.Target())
+	status, err := f.g.machine.Operation(begin.OperationID)
+	if err != nil || status.State != topology.OperationSucceeded {
+		t.Fatal(status, err)
+	}
+	block := approval.Plan.Blocks[0]
+	if len(block.Steps) != 3 || len(block.Cleanup) != 1 {
+		t.Fatal(approval.Plan)
+	}
+	step := approval.Plan.Steps[block.Cleanup[0]-1]
+	if step.Kind != topology.StepDeleteGroupState {
+		t.Fatal(step)
+	}
+	a := topology.AuthorizedStep{OperationID: begin.OperationID, Version: approval.Version, Attempt: 1, StepSeq: step.Seq, Kind: step.Kind, GroupID: step.GroupID}
 	return f, a
 }
 
 func TestGrantedLoadLedgerCleanupRequiresExactAuthorization(t *testing.T) {
 	t.Parallel()
 	f, a := cleanupLedgerFixture(t)
-	grant := f.command(t, metaengine.BeginEffectProposal{Action: a}).Grant
+	grant := f.command(t, metaengine.BeginCleanupEffectProposal{Identity: fixtureLoadIdentity(), Action: a, ProposalID: newProposalID()}).Grant
 	if grant == nil {
 		t.Fatal("missing cleanup grant")
 	}
 	ctx := t.Context()
 	wrong := grant.Clone()
 	wrong.Action.Attempt++
-	wrong.OperatorID = topology.MakeOperatorID(wrong.Action.Version, wrong.Action.Attempt)
-	wrong.Action.OperatorID = wrong.OperatorID
+	wrong.OperationID = topology.MakeOperationID(wrong.Action.Version, wrong.Action.Attempt)
+	wrong.Action.OperationID = wrong.OperationID
 	if err := f.g.ForgetGrantedLoadReplica(ctx, wrong, 1); !errors.Is(err, fault.ErrIdentityMismatch) {
 		t.Fatal("stale cleanup accepted", err)
 	}
-	if err := f.g.ForgetGrantedLoadReplica(ctx, *grant, 2); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if err := f.g.ForgetGrantedLoadReplica(ctx, *grant, 2); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("wrong ledger ID erased", err)
 	}
 	if err := f.g.ForgetGrantedLoadReplica(ctx, *grant, 1); err != nil {
@@ -195,18 +203,14 @@ func TestGrantedLoadLedgerCleanupRequiresExactAuthorization(t *testing.T) {
 	}
 }
 
-func TestGrantedLoadLedgerCleanupAfterSupersessionPreservesSuccessors(t *testing.T) {
-	for _, mode := range []string{"closed_grant", "successor_replica", "successor_member", "different_grant"} {
+func TestGrantedLoadLedgerCleanupAfterCompletionPreservesSuccessors(t *testing.T) {
+	for _, mode := range []string{"completed_parent", "successor_replica", "successor_member", "different_grant"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			f, action := cleanupLedgerFixture(t)
-			grant := f.command(t, metaengine.BeginEffectProposal{Action: action}).Grant
+			grant := f.command(t, metaengine.BeginCleanupEffectProposal{Identity: fixtureLoadIdentity(), Action: action, ProposalID: newProposalID()}).Grant
 			if grant == nil {
 				t.Fatal("missing cleanup grant")
-			}
-			f.command(t, metaengine.TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: action.OperatorID, Version: action.Version, Attempt: action.Attempt, StepSeq: action.StepSeq, GroupID: action.GroupID, State: topology.OperatorSuperseded, At: time.Now().UTC().Add(time.Minute)}})
-			if err := f.g.Authorize(t.Context(), action); err == nil {
-				t.Fatal("cleanup still has current operator authority")
 			}
 			if mode == "successor_replica" {
 				if err := f.g.store.RecordReplicaCAS("work", ReplicaRecord{NodeName: "n1", ClusterID: "cluster", ReplicaID: 4}, 1); err != nil {
@@ -220,9 +224,9 @@ func TestGrantedLoadLedgerCleanupAfterSupersessionPreservesSuccessors(t *testing
 				grant.Action.Attempt++
 			}
 			err := f.g.ForgetGrantedLoadReplica(t.Context(), *grant, 1)
-			if mode == "closed_grant" {
+			if mode == "completed_parent" {
 				if err != nil {
-					t.Fatal("owned old cleanup could not finish before its new resource fence", err)
+					t.Fatal("detached cleanup could not finish after its required parent", err)
 				}
 				if err := f.g.ForgetGrantedLoadReplica(t.Context(), *grant, 1); err != nil {
 					t.Fatal("exact retry was not idempotent", err)

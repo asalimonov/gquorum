@@ -18,6 +18,7 @@ import (
 type collectorSource struct {
 	mu      sync.Mutex
 	doc     topology.Document
+	page    *topology.ProgressPage
 	epoch   LeaderEpoch
 	leader  bool
 	round   Round
@@ -25,17 +26,20 @@ type collectorSource struct {
 	collect func(context.Context, *ReadPool) (Round, error)
 }
 
-func (s *collectorSource) Active(context.Context) (topology.Document, error) {
+func (s *collectorSource) Topology(context.Context) (topology.ProgressPage, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.doc.Clone(), nil
+	if s.page != nil {
+		return s.page.Clone(), nil
+	}
+	return evidenceTopology(s.doc), nil
 }
 func (s *collectorSource) Epoch() (LeaderEpoch, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.epoch, s.leader
 }
-func (s *collectorSource) Collect(ctx context.Context, _ topology.Document, p *ReadPool) (Round, error) {
+func (s *collectorSource) Collect(ctx context.Context, _ topology.ProgressPage, p *ReadPool) (Round, error) {
 	s.mu.Lock()
 	f, r := s.collect, s.round
 	s.mu.Unlock()
@@ -61,7 +65,9 @@ func collectorFixture(t *testing.T) (*MetricsCollector, *collectorSource, *time.
 	s := &collectorSource{doc: doc, epoch: round.Epoch, leader: true, round: round, local: local}
 	settings.MaxHistoryPoints = 3
 	settings.HistoryRetention = 10 * time.Second
-	c, err := NewMetricsCollector(MetricsConfig{Source: s, Settings: settings, Local: s.locals, Now: func() time.Time { return now }})
+	c, err := NewMetricsCollector(MetricsConfig{Source: s, Settings: settings, Local: s.locals, Identity: func() topology.Identity {
+		return topology.Identity{ClusterID: doc.ClusterID, NodeName: "n1", MemberID: 1, InstanceID: "n1-process"}
+	}, Now: func() time.Time { return now }})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,10 +220,10 @@ func TestMetricsCollectorDiscardsRoundAcrossLeadershipOrTopology(t *testing.T) {
 				return s.round, nil
 			}
 			err := c.Refresh(context.Background())
-			if err == nil {
-				t.Fatal("accepted stale round")
+			if (err != nil) != (change == "leadership") {
+				t.Fatal("wrong round refusal", err)
 			}
-			if c.Snapshot().IsCollectorLeader || len(c.Snapshot().Groups) != 0 {
+			if c.Snapshot().IsCollectorLeader != (change == "topology") || len(c.Snapshot().Groups) != 0 {
 				t.Fatal("stale remote evidence remained actionable")
 			}
 			if len(c.Snapshot().Local) != 1 {

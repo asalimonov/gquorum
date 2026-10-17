@@ -24,7 +24,7 @@ func TestExternalSchedulerContract(t *testing.T) {
 	}
 	schedulingtest.CheckRepairPolicy(t, factory, []schedulingtest.RepairPolicyCase{
 		{Name: "empty observations", Input: scheduling.ScheduleInput{}, Want: scheduling.ScheduleDecision{Reason: "converged"}},
-		{Name: "missing observation is not a repair", Input: scheduling.ScheduleInput{Active: topology.Document{ClusterID: "c", Groups: []topology.Group{{ID: "g"}}}}, Want: scheduling.ScheduleDecision{Reason: "converged"}},
+		{Name: "missing observation is not a repair", Input: scheduling.ScheduleInput{Target: topology.Document{ClusterID: "c", Groups: []topology.Group{{ID: "g"}}}}, Want: scheduling.ScheduleDecision{Reason: "approved_execution"}},
 	})
 }
 

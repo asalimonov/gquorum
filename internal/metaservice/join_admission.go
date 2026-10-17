@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net"
-	"reflect"
 	"strings"
 	"time"
 
@@ -34,7 +33,6 @@ func decodeJoinRequest(h *metapb.Header, data []byte) (joinRequest, error) {
 
 type joinClassification struct {
 	req     joinRequest
-	views   topology.ReadView
 	machine *metaengine.Machine
 	node    *topology.Node
 	member  uint64
@@ -54,7 +52,7 @@ func (g *Group) admitJoin(ctx context.Context, req joinRequest, machine *metaeng
 			kind = parkedExcluded
 		}
 		return g.refuseJoin(req, kind,
-			fault.New(fault.OperatorAuthorization, "node needs an approved topology admission", nil))
+			fault.New(fault.OperationAuthorization, "node needs an approved topology admission", nil))
 	}
 	if node.Type != req.Node.Type {
 		return metatransport.Reply(fault.New(fault.IdentityMismatch, "node type differs from approved topology", nil))
@@ -64,7 +62,7 @@ func (g *Group) admitJoin(ctx context.Context, req joinRequest, machine *metaeng
 	}
 	if admission, ok := machine.Admission(req.Node.Name, req.Identity.InstanceID); ok {
 		if admission.State == metaengine.AdmissionSuperseded || admission.State == metaengine.AdmissionRetired {
-			return g.refuseJoin(req, parkedSuperseded, fault.New(fault.OperatorAuthorization,
+			return g.refuseJoin(req, parkedSuperseded, fault.New(fault.OperationAuthorization,
 				"process admission was superseded or retired", nil))
 		}
 		// The exact admitted process may need predecessor host fences before
@@ -74,12 +72,12 @@ func (g *Group) admitJoin(ctx context.Context, req joinRequest, machine *metaeng
 		g.primeAddress(req.Identity.NodeName, req.Address)
 		return g.joinReply(ctx, admission, req.AuthorityMemberID)
 	}
-	state := joinClassification{req: req, views: views, machine: machine, node: node,
+	state := joinClassification{req: req, machine: machine, node: node,
 		member: target.MemberID(req.Node.Name)}
 	if reply := g.classifyLiveAdmission(ctx, &state); reply != nil {
 		return reply
 	}
-	return g.joinWithTopology(ctx, state)
+	return g.joinWithScopedTopology(ctx, state)
 }
 
 func (g *Group) refuseJoin(req joinRequest, kind string, err error) *metapb.Reply {
@@ -122,16 +120,17 @@ func (g *Group) classifyLiveAdmission(ctx context.Context, state *joinClassifica
 			!containsMember(g.engine.Load().Status().ConfState, other.MemberID) {
 			state.replace = true
 		} else if req.Identity.MemberID != member {
-			return g.refuseJoin(req, parkedUnapproved, fault.New(fault.OperatorAuthorization,
+			return g.refuseJoin(req, parkedUnapproved, fault.New(fault.OperationAuthorization,
 				"entered admission requires fresh identity repair", nil))
 		}
 	}
 	return nil
 }
 
-func (g *Group) joinWithTopology(ctx context.Context, state joinClassification) *metapb.Reply {
+// Scope checks belong to the exact returning member; unrelated load progress
+// and the historical whole-document marker do not gate admission.
+func (g *Group) joinWithScopedTopology(ctx context.Context, state joinClassification) *metapb.Reply {
 	req, machine, node, member, replace := state.req, state.machine, state.node, state.member, state.replace
-	latest, target, active := state.views.Latest, state.views.Target, state.views.Active
 
 	if member != 0 && req.Identity.MemberID == member && !replace {
 		// Ordinary retained-disk restart: no version or membership change.
@@ -143,35 +142,52 @@ func (g *Group) joinWithTopology(ctx context.Context, state joinClassification) 
 	}
 	if node.State != topology.NodeActive && req.Identity.MemberID != member {
 		return g.refuseJoin(req, parkedUnapproved,
-			fault.New(fault.OperatorAuthorization, "draining nodes may only restart their retained identity", nil))
+			fault.New(fault.OperationAuthorization, "draining nodes may only restart their retained identity", nil))
 	}
-	if ex, ok := machine.CurrentOperator(); ok && ex.Status.Version == target.Version && !ex.Status.State.Terminal() &&
-		hasAdmissionSteps(ex.Plan, target, req.Node.Name, member) {
+	if id, ok := machine.AdmissionOperation(req.Node.Name, member); ok {
 		return g.bindJoinAdmission(ctx, req, metaengine.BindAdmissionProposal{
 			Admission: metaengine.AdmissionRecord{
-				NodeName:   req.Node.Name,
-				InstanceID: req.Identity.InstanceID,
-				MemberID:   member,
-				OperatorID: ex.Status.ID,
+				NodeName:    req.Node.Name,
+				InstanceID:  req.Identity.InstanceID,
+				MemberID:    member,
+				OperationID: topology.OperationID(id),
 			},
 			ReplaceInstance: replace,
 			At:              time.Now().UTC(),
 		})
 	}
-	if machine.HasActivated(req.Node.Name) && reflect.DeepEqual(latest, target) && reflect.DeepEqual(target, active) {
-		return g.commitJoinReadmission(ctx, state)
+	if machine.HasActivated(req.Node.Name) {
+		return g.commitScopedReadmission(ctx, state)
 	}
 	return g.joinFoundingNode(ctx, state)
 }
 
-func (g *Group) commitJoinReadmission(ctx context.Context, state joinClassification) *metapb.Reply {
-	req, latest, active := state.req, state.views.Latest, state.views.Active
+func (g *Group) commitScopedReadmission(ctx context.Context, state joinClassification) *metapb.Reply {
+	req := state.req
+	captured, err := g.readPlan(ctx, metaengine.QueryRequest{Kind: "repair_plan"})
+	if err != nil {
+		return g.leaderReply(err)
+	}
+	if err := metaengine.ValidateReadmissionScope(captured.Input, req.Node.Name, state.member); err != nil {
+		return g.refuseJoin(req, parkedUnapproved, err)
+	}
 	at := time.Now().UTC()
-	fresh, err := metaengine.ReadmissionDocument(active, req.Node.Name, at)
+	fresh, err := metaengine.ReadmissionDocument(captured.Target, req.Node.Name, at)
 	if err != nil {
 		return metatransport.Reply(err)
 	}
-	plan, err := g.PlanFor(ctx, fresh)
+	fresh.Version = captured.Latest.Version + 1
+	if err := metaengine.ValidateRepairIndependence(captured.Target, captured.Latest, fresh); err != nil {
+		return g.refuseJoin(req, parkedUnapproved, err)
+	}
+	read, err := g.capturePlan(ctx, metaengine.QueryRequest{Kind: "planning", Desired: &fresh}, g.readPlan)
+	if err != nil {
+		return g.leaderReply(err)
+	}
+	if read.Input.Approved.Version != captured.Target.Version {
+		return g.leaderReply(fault.ErrVersionConflict)
+	}
+	plan, err := g.planOperation(read)
 	if err != nil {
 		return g.leaderReply(err)
 	}
@@ -182,7 +198,10 @@ func (g *Group) commitJoinReadmission(ctx context.Context, state joinClassificat
 			MemberID:   fresh.MemberID(req.Node.Name),
 		},
 		Doc:             fresh,
-		ExpectedVersion: latest.Version,
+		ExpectedVersion: captured.Latest.Version,
+		ExpectedTarget:  captured.Target.Version,
+		Scopes:          read.Scopes,
+		ProposalID:      newProposalID(),
 		Plan:            plan,
 		At:              at,
 	})
@@ -196,27 +215,25 @@ func (g *Group) commitJoinReadmission(ctx context.Context, state joinClassificat
 
 func (g *Group) joinFoundingNode(ctx context.Context, state joinClassification) *metapb.Reply {
 	req, machine, member, replace := state.req, state.machine, state.member, state.replace
-	target, active := state.views.Target, state.views.Active
+	identity := req.Identity
+	identity.MemberID = member
+	founding, ready := machine.AdmissionBasis(identity)
 	activated := machine.HasActivated(req.Node.Name)
-	if !activated && target.Origin == topology.OriginFounding && reflect.DeepEqual(target, active) &&
+	if !activated && ready && founding != "" &&
 		containsMember(g.engine.Load().Status().ConfState, member) {
-		ex, ok := machine.CurrentOperator()
-		if !ok || ex.Status.State != topology.OperatorSucceeded {
-			return metatransport.Reply(fault.ErrUnavailable)
-		}
 		return g.bindJoinAdmission(ctx, req, metaengine.BindAdmissionProposal{
 			Admission: metaengine.AdmissionRecord{
-				NodeName:   req.Node.Name,
-				InstanceID: req.Identity.InstanceID,
-				MemberID:   member,
-				OperatorID: ex.Status.ID,
+				NodeName:    req.Node.Name,
+				InstanceID:  req.Identity.InstanceID,
+				MemberID:    member,
+				OperationID: topology.OperationID(founding),
 			},
 			Founding:        true,
 			ReplaceInstance: replace,
 			At:              time.Now().UTC(),
 		})
 	}
-	return g.refuseJoin(req, parkedUnapproved, fault.New(fault.OperatorAuthorization,
+	return g.refuseJoin(req, parkedUnapproved, fault.New(fault.OperationAuthorization,
 		"node has no current approved learner-first admission", nil))
 }
 
@@ -244,7 +261,7 @@ func (g *Group) checkJoinFormer(ctx context.Context, response *joinResponse, for
 				InstanceID:       a.InstanceID,
 				MemberID:         a.MemberID,
 				PreviousMemberID: former,
-				OperatorID:       a.OperatorID,
+				OperationID:      a.OperationID,
 			})
 			if err != nil {
 				return nil, g.leaderReply(err)

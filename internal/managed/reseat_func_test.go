@@ -12,16 +12,12 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metastore"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
-type reseatCall struct {
-	group   string
-	version uint64
-}
-
 // restartedReplica describes replica 1 of "work" after a process restart: it is
-// established in Active and recorded in the ledger, but its store is empty.
+// proven converged and recorded in the ledger, but its store is empty.
 func restartedReplica(t *testing.T, f *fixture, class topology.StorageClass, role topology.ReplicaRole) {
 	t.Helper()
 	f.setScope("work", 1, false, true)
@@ -33,11 +29,11 @@ func restartedReplica(t *testing.T, f *fixture, class topology.StorageClass, rol
 	f.scopes["work"] = scope
 	f.records["work"] = metastore.ReplicaRecord{NodeName: f.node.NodeName, ClusterID: f.node.ClusterID, ReplicaID: 1, Origin: "fresh"}
 	f.mu.Unlock()
-	active := f.cfg.Active
-	f.cfg.Active = func(ctx context.Context) (topology.Document, error) {
-		doc, err := active(ctx)
-		doc.Version = 7
-		return doc, err
+	progress := f.cfg.Progress
+	f.cfg.Progress = func(ctx context.Context) (topology.ProgressPage, error) {
+		page, err := progress(ctx)
+		page.TargetVersion = 7
+		return page, err
 	}
 }
 
@@ -61,11 +57,14 @@ func TestParkedMemoryVoterReseatsItsOwnReplica(t *testing.T) {
 	f := newFixture(t)
 	withMemory(t, f)
 	restartedReplica(t, f, topology.StorageMemory, topology.ReplicaVoter)
-	calls := make(chan reseatCall, 16)
-	f.cfg.ReseatOwn = func(ctx context.Context, group string, version uint64) error {
-		calls <- reseatCall{group, version}
+	calls := make(chan string, 16)
+	f.cfg.ReseatOwn = func(ctx context.Context, id storage.Identity) error {
+		if id != f.localID(1) {
+			t.Error("reseat changed predecessor", id)
+		}
+		calls <- id.GroupID
 		// The committed repair approves a fresh identity; once it converges the
-		// parked identity leaves both Target and Active.
+		// parked identity leaves approved/proven assignments.
 		f.setScope("work", 2, false, false)
 		return ctx.Err()
 	}
@@ -73,8 +72,8 @@ func TestParkedMemoryVoterReseatsItsOwnReplica(t *testing.T) {
 	startParked(t, h)
 	select {
 	case call := <-calls:
-		if call != (reseatCall{"work", 7}) {
-			t.Fatal("reseat not pinned to the observed Active version", call)
+		if call != "work" {
+			t.Fatal("reseat not pinned to the observed Target version", call)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("parked memory voter was not reseated")
@@ -107,7 +106,7 @@ func TestOnlyMemoryVotersAreReseated(t *testing.T) {
 			withMemory(t, f)
 			restartedReplica(t, f, c.class, c.role)
 			var calls atomic.Int32
-			f.cfg.ReseatOwn = func(context.Context, string, uint64) error { calls.Add(1); return nil }
+			f.cfg.ReseatOwn = func(context.Context, storage.Identity) error { calls.Add(1); return nil }
 			h := f.host(t)
 			startParked(t, h)
 			startParked(t, h)
@@ -125,7 +124,7 @@ func TestDemotedMemoryVoterStopsReseating(t *testing.T) {
 	withMemory(t, f)
 	restartedReplica(t, f, topology.StorageMemory, topology.ReplicaVoter)
 	var calls atomic.Int32
-	f.cfg.ReseatOwn = func(context.Context, string, uint64) error {
+	f.cfg.ReseatOwn = func(context.Context, storage.Identity) error {
 		if calls.Add(1) == 1 {
 			// The voter configuration demotes the unavailable voter before any reseat commits.
 			f.mu.Lock()
@@ -134,7 +133,7 @@ func TestDemotedMemoryVoterStopsReseating(t *testing.T) {
 			f.scopes["work"] = scope
 			f.mu.Unlock()
 		}
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	h := f.host(t)
 	startParked(t, h)
@@ -161,7 +160,7 @@ func TestStopJoinsTheOwnReseatLoop(t *testing.T) {
 	entered := make(chan struct{})
 	var once atomic.Bool
 	var canceled atomic.Bool
-	f.cfg.ReseatOwn = func(ctx context.Context, _ string, _ uint64) error {
+	f.cfg.ReseatOwn = func(ctx context.Context, _ storage.Identity) error {
 		if once.CompareAndSwap(false, true) {
 			close(entered)
 		}

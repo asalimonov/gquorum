@@ -8,26 +8,5 @@ import "github.com/asalimonov/gquorum/topology"
 func (m *Machine) ProcessIdentity(name string) (topology.Identity, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.processIdentityLocked(name)
-}
-
-func (m *Machine) processIdentityLocked(name string) (topology.Identity, bool) {
-	member := m.target.MemberID(name)
-	if member == 0 {
-		member = m.active.MemberID(name)
-	}
-	id := topology.Identity{NodeName: name, ClusterID: m.target.ClusterID, MemberID: member}
-	if member == 0 {
-		return id, false
-	}
-	if admission := m.liveAdmissionForNodeLocked(name, ""); admission != nil && admission.MemberID == member {
-		id.InstanceID = admission.InstanceID
-		return id, id.InstanceID != ""
-	}
-	if m.active.MemberID(name) == member {
-		if session := m.sessions[m.locks["node/"+name]]; session != nil && session.NodeName == name {
-			id.InstanceID = session.InstanceID
-		}
-	}
-	return id, id.InstanceID != ""
+	return scopedProcessIdentity(m.scoped, name)
 }

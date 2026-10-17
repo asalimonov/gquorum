@@ -1,11 +1,11 @@
 # Labels and placement
 
 Status: **implemented**. This document describes the current feature contract.
-The broader library context is in [library.md](library.md). Detailed design,
-persistence fields, execution guards and acceptance criteria remain in the
-[implementation specification](../brainstorms/20261013-labels-node-selector-target.md).
-Decisions and source research are recorded in the
-[brainstorm](../brainstorms/20261013-labels-node-selector.md).
+The broader library context is in [library.md](library.md). The original design
+was recorded as `20261013-labels-node-selector-target.md` and
+`20261013-labels-node-selector.md`; those historical brainstorms are not included
+in this checkout. Current persistence and execution contracts are described here
+and in [runtime.md](runtime.md).
 
 ## Ownership and purpose
 

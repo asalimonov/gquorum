@@ -39,7 +39,10 @@ and current-floor reader at construction; construction only checks their presenc
 Every managed engine enables authority enforcement. Startup and readmission have
 no path that omits durable authority, including metadata-only readmission.
 
-Managed startup derives identity, founding peers and mode from approved topology.
+Managed startup derives identity and mode from approved scope; founding peers
+come from the immutable creation grant. Once removal excludes an identity from
+Target, its retained restart remains refused even if native removal is still
+pending; recovery does not widen membership admission.
 Staged Latest alone cannot authorize a replica. The local bbolt ledger and actual
 WAL pin are inspected before application acquisition. Durable store creation or
 restore precedes recording the identity. Repeated ledger writes preserve original
@@ -52,7 +55,7 @@ audit fields; reseating replaces only the exact prior ID transactionally.
 | Matching store and ledger | Resume. |
 | Approved fresh ID replaces an older ledger ID | Reseat with exact ledger replacement. |
 | Previously opened identity loses its store | Park and preserve its ledger. |
-| Active/completed membership proves establishment but log is empty | Park; never silently refound an established identity. |
+| Proven membership or retained creation/native receipt establishes the identity but log is empty | Park; never silently refound an established identity. |
 | Valid prepared learner with empty log | Resume preparation. |
 | Foreign or unreadable store | Park and preserve the evidence. |
 
@@ -63,7 +66,12 @@ inputs are copies. A successful factory transfers `Application.Close` to Node,
 including when cancellation occurs before its late return. Factory failure leaves
 partial acquisitions with the factory. Node joins replay, engine work and optional Application.Run before
 Close. Failed Close retains ownership and blocks replacement until a serial retry
-succeeds. Publication occurs only after local replay readiness.
+succeeds. Publication occurs only after local replay readiness. Factory ApprovedVersion is
+context: after a wait, compare the exact group/replica and founding seed, rather
+than the global document version. Recheck newly learned creation/establishment
+proof against the original storage probe before opening the engine. Recovery
+rotates its next attempted reservation before waiting on a fence, preventing one
+blocked group from monopolizing every bounded round.
 
 `StopLoadGroup(ctx, ref)` installs an exact volatile hold before joining the
 replica. Recovery and ordinary approved starts respect the hold. An explicit
@@ -88,13 +96,15 @@ only the default store; the memory store is always empty at startup.
 The decision table above is unchanged. A memory replica that restarts finds no
 state, so an established identity parks as `store_missing` with its ledger
 preserved. For an established voter, the host then reseats its own replica: it
-calls the ordinary `ReseatReplica` for its node, with `ExpectedVersion` pinned to
-the Active version in which it observed the parked identity, so a completed
-repair is never repeated on the successor. Refusals while topology is
-unconverged or an operator runs are retried with backoff up to 5 seconds. The
-approved plan prepares a fresh learner, catches it up from the leader, promotes
-it and cleans up the old identity. The loop ends once the old identity is in
-neither Active nor Target, and host shutdown joins it.
+calls the ordinary `ReseatReplica` for its node only when that exact approved
+voter matches the group's proven declaration, with no group owner/deletion.
+Each reseat call pins current Latest once; scoped repair approves only the exact
+replacement and rebases independent staging. Overlapping staged intent conflicts. A busy or unconverged sibling does not block this check. Refusals retry
+with backoff up to 5 seconds. Recheck local holds after progress reads. The approved
+plan prepares a fresh learner, catches it up from the leader, promotes it and
+cleans up the old identity. The loop ends when the exact old assignment leaves
+Target or is explicitly held; host shutdown joins it. The internal local progress
+projection reads the same durable per-group checkpoints as public progress.
 
 Learners and replicas that restart before becoming established are not reseated;
 they stay parked with a `NotImplemented` warning. If a majority of a memory
@@ -111,8 +121,8 @@ verify the entire operator/version/attempt/step/action/identity tuple and rechec
 authority after waits. Unknown future approvals, stale attempts and mismatched
 identities never authorize work. A remote refusal may be retried by a dispatcher
 whose complete local approval is still valid; refusal is never completion proof.
-After inherited resource fences complete, a safe metadata query and native
-membership reads validate the remaining immutable plan before each step. Missing
+After the next effect's required resource fences complete, a safe metadata query
+and native membership reads validate the remaining immutable plan before each step. Missing
 quorum remains a wait; an impossible membership sequence or omitted retained
 cleanup fails with `replan_required`. Same-version retries keep the exact plan,
 and snapshot restoration rejects differing plans for attempts of one version.
@@ -182,12 +192,66 @@ verification. A foreign or successor resource must be preserved. Only then may
 the library quarantine the exact Raft state and forget its matching ledger.
 Application transactions and outboxes remain caller-owned.
 
+`FI_HOST_REUSE`: a same-host load replacement removes and stops the exact old
+owner before preparation. Prepare waits for every predecessor on that group/host
+to record Retired, so detached cleanup consumes the shared host floor before the
+successor acquires it. Collection is independent and does not delay Prepare.
+This preserves exclusive storage ownership and restart authority without coupling
+other groups or hosts to the predecessor's cleanup.
+
 `storage.RetirementStore` enumerates exact retired identities and opaque tokens.
 Lifecycle retention decides when collection is eligible; collection rechecks the
-identity/token, live assignments and ledger. There is no implicit age-based
+identity/token, local ownership and ledger. Complete exact retirement proof
+provides permanent assignment exclusion because retired replica IDs cannot be reused. There is no implicit age-based
 quarantine sweep. Retained approval evidence survives history pruning until its
 cleanup obligations can be proven complete. Staged-only identities never enter
 that retirement authority.
+The independent host authority journal now uses schema 2. Its collection bucket
+persists exact retirement proof before deletion and a collected receipt afterward.
+Preparation assigns one durable sequence; completion retries retain the first
+host timestamp. Rebinding preserves historical member IDs and proof. Exact
+collected-row removal follows reporting and storage-proof release. Journal pages
+are bounded owned values; their exclusive cursors survive row removal and rebind.
+Schema 1 is refused without migration. Managed collection scans journal pages
+as well as storage enumeration. New attempts require complete exact local
+retirement proof before serialized retention; preparation survives later policy
+changes. Accepted attempts use the shared group gate and recheck local resources
+before deleting. Fenced hosts can resume accepted deletion without current
+metadata membership or quorum. Collected rows never repeat deletion. Reporting
+scans bounded pages and verifies the exact receipt echo plus nonzero applied
+index, for both acceptance and read-only settlement. It releases the store marker
+before removing the exact journal row. Lost replies or either failed release
+retain evidence. Local readmission reservation, current-member readmission floors
+and incomplete superseding fences postpone release. Historical completed floors
+cease blocking after member rebind. Collection maintenance uses the authority
+lifetime: participation fencing leaves it running; Stop/readmission cancel and
+join it, including delayed callbacks. The restricted MetaControl service now
+provides ReportCollection and ReportCleanupStatus callbacks. It authenticates the
+request process, confirms exact absence before settlement, and otherwise checks
+the historical courier before proposing receipt acceptance. Only missing history
+permits a repeated absence check; authentication/conflicting proof is never
+suppressed. A retained-member hint follows AuthorityRead semantics when the
+participation header is zero or lags the journal pin. General ProposeMeta refuses
+collection/status envelopes. Node supplies both callbacks and its existing journal
+to the managed Host; its accepted lifetime owns reporting, including explicit
+control-only joining restarts. RequestStop cancels report waits; delayed storage
+callbacks remain joined before owned stores and the journal close. Borrowed stores
+remain caller-owned. An unsuccessful report keeps its durable receipt; missing
+receipt history permits only read-only settlement after exact reference checks,
+never reconstruction of a CollectedAt timestamp.
+
+WAL collection writes and syncs an exact sibling marker before deleting contents,
+keeps the identity pin until those deletions are synced, and finishes with
+nonrecursive removal of the empty directory. A retry accepts an empty unpinned
+directory only with that marker. Missing data without proof returns an error
+matching fs.ErrNotExist. Atomic marker publication requires hard-link support on
+the WAL volume; publication failure preserves retired data. A crash can leave a
+.collection-* temporary file: inventory conservatively treats it as retained
+evidence, while retired enumeration ignores it. ForgetCollection releases only
+an exact marker after the retired directory is absent; it syncs the root even on repeated release.
+Memory storage retains equivalent retry evidence only within its lifetime and
+cannot prove collection after process loss.
+
 Planning also retains unfinished preparations in surviving groups. Even an old
 replica absent from native membership needs an exact remove/stop/cleanup sequence;
 the remove can produce an already-satisfied receipt under its new grant. New
@@ -197,8 +261,9 @@ identities named by its previously approved steps.
 ## Readmission and removal
 
 `ReadmitNode` rotates a declared active node's meta/load identities only after
-fresh health reports it dead. Live/unknown health or unconverged documents are
-refused before staging. The ordinary CAS/optional approval pipeline preserves a
+fresh health reports it dead. Live/unknown health or busy/unproven affected
+scopes are refused before staging; unrelated staged or executing groups do not
+provide a global veto. The ordinary CAS/optional approval pipeline preserves a
 staged version on later approval failure. Retry `Approve` for that version.
 
 A returning process joins with its caller-supplied retained paths. The library
@@ -229,16 +294,22 @@ completion retain their separate checks.
 The metadata grant covers the exact former pin, and load grants exclude approved
 successor replicas. Replacement metadata preparation waits for all of the
 admission's resource receipts; a completed fence alone is insufficient.
+If native load removal finishes before that independent batch, recording its
+receipt waits retryably for the exact batch to create the cleanup record. The
+resource retains the original native receipt; retries do not repeat the effect
+or invent stop/retirement proof. Once the batch completes, the actionless cleanup
+record keeps its original readmission milestones.
 
 Approved plans retain the full replacement metadata admission sequence even when
 the new member is already observed as a learner or voter. That preparation is the
 receipt-gated host retirement boundary: the plan omits redundant stop and cleanup
 calls to the former metadata identity, while retaining native membership removal.
-Metadata steps run before load groups, which then run in name order. Deletion of
+Blocks run independently. Admission barriers precede affected load installation;
+evacuation barriers precede metadata removal. Deletion of
 a group hosted entirely by returning owners is covered by their preparations;
 partial deletion still retires the other hosts. Actual readmission receipts remove
 only their exact load identities from subsequent deletion grants. Planning retains
-those identities for native removal until the replacement becomes Active.
+those identities for native removal until exact replacement convergence.
 Completed retirement receipts survive grant closure and can satisfy preparation
 by a successor operator for the same exact granted member. They do not authorize
 a different member or make a superseded admission ready.
@@ -259,8 +330,8 @@ path is fresh. After a process restart, the rebound admission retains the same
 retirement proof. Before rebind, retirement resumes against its retained receipts
 and exact backup. After rebind, Node verifies the durable previous/granted/member
 transition and admission ID before returning receipts; the successor is not
-retired again. Complete operator convergence remains tracked in Task 15 of the
-authority-contract implementation plan.
+retired again. Required operation completion remains distinct from detached
+physical collection.
 
 The independent authority store records metadata acquisition for its current
 durable member. Node records it after the metadata pin is durable and before the
@@ -271,6 +342,10 @@ cannot be recreated under that member, even if a Join response names it. A fresh
 approved readmission is required. Before recording acquisition, an interrupted
 creation can resume against the exact granted identity and original readmission
 proof after the new process receives its committed admission binding.
+Load creation also waits until local metadata replay reaches its granted revision
+before looking up the startup scope. A remote grant proof alone cannot supply a
+not-yet-replayed local identity or ledger. Metadata preparation and retained
+cleanup keep their control-only paths outside this load-creation gate.
 
 The managed retirement boundary accepts the exact readmission grant batch. With
 Node-owned authority configured, it validates the full prior scope before writing
@@ -362,17 +437,19 @@ eligible host. [Placement](placement.md) describes these rules and their
 diagnostic reports.
 
 `Node.Status()` reads local owned snapshots without probes. `Cluster.Status(ctx)`
-collects observations and separate static placement reports for Active and
-Target; neither proves quorum, physical failure isolation or linearizability.
+collects observations and separate static placement reports for proven and
+approved declarations; neither proves quorum, physical failure isolation or
+linearizability.
 Compare leader and term when assessing continuity. Follower approvals make at
 most one control hop to the observed leader. Domain errors preserve exact
 expected/current CAS versions; empty success replies cannot identify an operator
 and are refused.
 
 Status adds `MetaLeaderNodeName` and `LeaderNodeName` to the existing numeric
-Raft observations. Names resolve through the local Active topology. Unknown or
-retired replicas have empty names; staged replacements cannot supply them.
-Cached status re-resolves names against its current Active view.
+Raft observations. Names resolve through exact approved/proven identities and
+the retained metadata owner catalog. Unknown or retired replicas have empty names;
+staged replacements cannot supply them. Cached samples retain their source and
+receive time and cannot be relabelled as a successor.
 
 The small `examples/cluster` app is a separate Go module. Kong parses its commands
 and environment; `cluster.go` constructs Node and evaluates readiness, `http.go`
@@ -413,7 +490,7 @@ A fenced metadata owner can use this evidence to forget an old load ledger even
 when its stopped catalog predates the grant. It rechecks its captured identity,
 durable metadata pin and exact replica-ID CAS. The managed host retains the group
 gate until the cleanup receipt is durable, so successor fencing joins this work
-before admitting later effects. Active owners keep the local FSM read lock through
+before admitting later effects. Participating owners keep the local FSM read lock through
 ledger mutation. Managed action/fence ingress validates current courier identity
 and retained grant together through the safe proof route; immutable grant cache
 hits remain usable under protocol ownership after participation ends.
@@ -426,11 +503,12 @@ healthy. Ordinary identity probes continue to require a running engine. Node-own
 receipts under a bounded owned worker. Prepare verifies the acquired pin and
 replay-ready engine; stop joins metadata participation and local load work before
 persisting its receipt. Courier cancellation ends only its wait. Removal hooks
-waits until one quorum read confirms the exact stop receipt, convergence of
-approved Target into Active, and settlement of this member's retained host
-authority. Convergence covers later plan steps whose grants have not yet been
-issued. A metadata stop receipt alone cannot trigger optional shutdown while
-load cleanup remains. The local authority store retrieves the completed stop
+wait until one quorum read confirms the exact stop receipt, absence of the
+former member from Target, retirement of that member's exact cleanup debts and
+settlement of its retained host authority. This includes unissued cleanup work.
+A metadata stop receipt alone cannot trigger optional shutdown while host
+retirement remains; physical collection and unrelated group progress do not
+block release. The local authority store retrieves the completed stop
 even after a newer fence replaces its current floor; rebind cannot reuse a former
 member's stop receipt.
 
@@ -441,12 +519,12 @@ still obtains its own receipts; it does not reintroduce earlier retired replicas
 
 Private planning retains approved intermediate `_meta` identities and node
 attributes as well as load identities. An admitted learner may already be native
-before its document reaches Active; supersession must still remove and retire it.
+before its group checkpoint advances; supersession must still remove and retire it.
 Unresolved metadata preparation pins its approved document through bounded history
 pruning. Inbound member routing uses an index rebuilt on FSM mutation/restore:
 historical intermediate members remain routable until their exact native removal
-is consumed, or a later Active proves convergence. Staged rows and already removed
-members never authorize inbound traffic. Outbound final-commit/cleanup routing is
+is consumed, or exact checkpoint evidence replaces their provenance. Staged rows
+and already removed members never authorize inbound traffic. Outbound final-commit/cleanup routing is
 separate. Durable retirement receipts remain cleanup proof after their completed
 operator leaves ordinary history, preventing retained grants from resurrecting
 collected resources. Native removal alone preserves unfinished host retirement.

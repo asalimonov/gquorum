@@ -20,8 +20,8 @@ import (
 // The private callback tests supply verified-grant protocol inputs. The service
 // suite separately exercises authenticated quorum proof before invoking them.
 func metaHostGrant(id topology.Identity, revision uint64, kind topology.StepKind) topology.AuthorityGrant {
-	action := topology.AuthorizedStep{OperatorID: topology.MakeOperatorID(1, 1), Version: 1, Attempt: 1, StepSeq: 1, Kind: kind, GroupID: topology.MetaGroupID, NodeName: id.NodeName, ReplicaID: id.MemberID}
-	return topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: id.ClusterID, GroupID: topology.MetaGroupID, Revision: revision}, Purpose: topology.AuthorityEffect, OperatorID: action.OperatorID, Action: &action, Resources: []topology.AuthorityResource{{Kind: topology.AuthorityHost, GroupID: topology.MetaGroupID, NodeName: id.NodeName}}, Targets: []topology.AuthorityTarget{{NodeName: id.NodeName, MemberID: id.MemberID, ReplicaID: id.MemberID}}}
+	action := topology.AuthorizedStep{OperationID: topology.MakeOperationID(1, 1), Version: 1, Attempt: 1, StepSeq: 1, Kind: kind, GroupID: topology.MetaGroupID, NodeName: id.NodeName, ReplicaID: id.MemberID}
+	return topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: id.ClusterID, GroupID: topology.MetaGroupID, Revision: revision}, Purpose: topology.AuthorityEffect, OperationID: action.OperationID, Action: &action, Resources: []topology.AuthorityResource{{Kind: topology.AuthorityHost, GroupID: topology.MetaGroupID, NodeName: id.NodeName}}, Targets: []topology.AuthorityTarget{{NodeName: id.NodeName, MemberID: id.MemberID, ReplicaID: id.MemberID}}}
 }
 func metaHostRequest(id topology.Identity, grant topology.AuthorityGrant) load.ActionRequest {
 	return load.ActionRequest{From: id, To: load.Peer{Node: id, Replica: load.ReplicaRef{GroupID: topology.MetaGroupID, ReplicaID: id.MemberID}}, Grant: grant, Authorization: *grant.Action, LocalTarget: storage.Identity{ClusterID: id.ClusterID, NodeName: id.NodeName, GroupID: topology.MetaGroupID, ReplicaID: id.MemberID}}

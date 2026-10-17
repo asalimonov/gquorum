@@ -20,7 +20,7 @@ import (
 )
 
 // Caller readiness logic may relax serving readiness using the persisted local override.
-// Fresh health and exact Active identity remain required. Consensus writes keep
+// Fresh health and exact approved identity remain required. Consensus writes keep
 // their ordinary Raft quorum requirements regardless of this local decision.
 func (a *application) canServe(ctx context.Context) bool {
 	if a.node.OwnSessionLive() {
@@ -30,8 +30,9 @@ func (a *application) canServe(ctx context.Context) bool {
 	if minimum == 0 || !a.node.Status().Meta.Found {
 		return false
 	}
-	active, err := a.cluster.Active(ctx)
-	if err != nil || active.Version == 0 || active.MetaGroup() == nil {
+	active, err := a.cluster.Target(ctx)
+	if err != nil || active.Version == 0 || active.MetaGroup() == nil ||
+		active.MemberID(a.cfg.NodeName) != a.node.Identity().MemberID {
 		return false
 	}
 	observation := a.cluster.HealthObservation()
@@ -47,9 +48,9 @@ func (a *application) canServe(ctx context.Context) bool {
 	return alive >= minimum
 }
 
-// Serving follows caller readiness logic and requires the exact Active replica and role.
+// Serving follows caller readiness logic and requires the exact converged replica and role.
 // Approved learners serve local reads and forward mutations through Raft.
-// Prepared replicas and stale handles remain ineligible until Active authorizes them.
+// Prepared replicas and stale handles remain ineligible until their group converges.
 func (a *application) localServing(ctx context.Context, id string) (*localReplica, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -62,17 +63,10 @@ func (a *application) localServing(ctx context.Context, id string) (*localReplic
 	if !a.canServe(ctx) {
 		return nil, fault.ErrUnavailable
 	}
-	active, err := a.cluster.Active(ctx)
+	identity := a.node.Identity()
+	group, err := a.servingGroup(ctx, id)
 	if err != nil {
 		return nil, err
-	}
-	identity := a.node.Identity()
-	if active.MemberID(identity.NodeName) != identity.MemberID {
-		return nil, fault.ErrIdentityMismatch
-	}
-	group := active.Group(id)
-	if group == nil {
-		return nil, fault.ErrReplicaNotReady
 	}
 	local := a.local(id)
 	if local == nil || !local.group.Running() || local.group.Error() != nil {
@@ -111,7 +105,7 @@ func httpError(w http.ResponseWriter, err error) {
 	switch code {
 	case fault.Invalid, fault.Unsupported:
 		status = http.StatusBadRequest
-	case fault.VersionConflict, fault.GroupRetired, fault.IdentityMismatch, fault.OperatorAuthorization, fault.AuthorityFenced, fault.ReplanRequired:
+	case fault.VersionConflict, fault.GroupRetired, fault.IdentityMismatch, fault.OperationAuthorization, fault.AuthorityFenced, fault.ReplanRequired:
 		status = http.StatusConflict
 	case fault.UnsafeMembership:
 		status = http.StatusUnprocessableEntity
@@ -123,6 +117,7 @@ func httpError(w http.ResponseWriter, err error) {
 	body := map[string]any{"code": code, "error": err.Error()}
 	if typed != nil && code == fault.VersionConflict {
 		body["expected_version"], body["current_version"] = typed.ExpectedVersion, typed.CurrentVersion
+		body["rebased_to"] = typed.RebasedTo
 	}
 	jsonResponse(w, status, body)
 }
@@ -216,7 +211,7 @@ func mutationResponse(w http.ResponseWriter, result gquorum.MutationResult, err 
 	}
 	w.Header().Set("ETag", fmt.Sprintf("\"%d\"", result.Document.Version))
 	status := http.StatusOK
-	if result.OperatorID != "" {
+	if result.OperationID != "" {
 		status = http.StatusAccepted
 	}
 	jsonResponse(w, status, result)
@@ -237,18 +232,37 @@ func (a *application) routes() http.Handler {
 		jsonResponse(w, http.StatusOK, parked)
 	})
 	mux.HandleFunc("POST /api/nodes/{name}/readmit", func(w http.ResponseWriter, r *http.Request) {
-		var opts gquorum.MutationOptions
-		if err := requestBody(w, r, &opts); err != nil {
+		var body struct {
+			gquorum.MutationOptions
+			ExpectedMemberID uint64 `json:"expected_member_id"`
+		}
+		if err := requestBody(w, r, &body); err != nil {
 			httpError(w, err)
 			return
 		}
-		opts, err := mutationOptions(r, opts)
+		opts, err := mutationOptions(r, body.MutationOptions)
 		if err != nil {
 			httpError(w, err)
 			return
 		}
-		result, err := a.cluster.ReadmitNode(r.Context(), r.PathValue("name"), opts)
+		result, err := a.cluster.ReadmitNode(r.Context(), r.PathValue("name"), body.ExpectedMemberID, opts)
 		mutationResponse(w, result, err)
+	})
+	mux.HandleFunc("GET /api/progress", func(w http.ResponseWriter, r *http.Request) {
+		query := topology.ProgressQuery{GroupID: r.URL.Query().Get("group"), NodeName: r.URL.Query().Get("node"),
+			OperationID: topology.OperationID(r.URL.Query().Get("operation")), After: r.URL.Query().Get("after")}
+		if raw := r.URL.Query().Get("limit"); raw != "" {
+			query.Limit, _ = strconv.Atoi(raw)
+			if query.Limit == 0 {
+				query.Limit = -1
+			}
+		}
+		page, err := a.cluster.ReadProgress(r.Context(), query)
+		if err != nil {
+			httpError(w, err)
+			return
+		}
+		jsonResponse(w, http.StatusOK, page)
 	})
 	mux.HandleFunc("GET /api/cluster/status", func(w http.ResponseWriter, r *http.Request) {
 		status, err := a.cluster.Status(r.Context())
@@ -268,7 +282,7 @@ func (a *application) routes() http.Handler {
 		case "target":
 			doc, err = a.cluster.Target(r.Context())
 		case "active":
-			doc, err = a.cluster.Active(r.Context())
+			doc, err = readConvergedTopology(r.Context(), a.cluster)
 		default:
 			var version uint64
 			version, err = positiveNumber(r.PathValue("view"))
@@ -355,15 +369,23 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		jsonResponse(w, http.StatusAccepted, map[string]any{"operator_id": id})
+		jsonResponse(w, http.StatusAccepted, map[string]any{"operation_id": id})
 	})
-	mux.HandleFunc("GET /api/operators/{id}", func(w http.ResponseWriter, r *http.Request) {
-		status, err := a.cluster.Operator(r.Context(), topology.OperatorID(r.PathValue("id")))
+	mux.HandleFunc("POST /api/operations/{id}/retry", func(w http.ResponseWriter, r *http.Request) {
+		id, err := a.cluster.RetryOperation(r.Context(), topology.OperationID(r.PathValue("id")))
 		if err != nil {
 			httpError(w, err)
 			return
 		}
-		jsonResponse(w, http.StatusOK, status)
+		jsonResponse(w, http.StatusAccepted, map[string]any{"operation_id": id})
+	})
+	mux.HandleFunc("GET /api/operations/{id}", func(w http.ResponseWriter, r *http.Request) {
+		status, err := a.cluster.Operation(r.Context(), topology.OperationID(r.PathValue("id")))
+		if err != nil {
+			httpError(w, err)
+			return
+		}
+		jsonResponse(w, http.StatusOK, projectOperationHTTPStatus(status))
 	})
 	mux.HandleFunc("POST /api/nodes", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -530,17 +552,20 @@ func (a *application) routes() http.Handler {
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("POST /api/groups/{id}/replicas/{name}/reseat", func(w http.ResponseWriter, r *http.Request) {
-		var opts gquorum.MutationOptions
-		if err := requestBody(w, r, &opts); err != nil {
+		var body struct {
+			gquorum.MutationOptions
+			ReplicaID uint64 `json:"replica_id"`
+		}
+		if err := requestBody(w, r, &body); err != nil {
 			httpError(w, err)
 			return
 		}
-		opts, err := mutationOptions(r, opts)
+		opts, err := mutationOptions(r, body.MutationOptions)
 		if err != nil {
 			httpError(w, err)
 			return
 		}
-		result, err := a.cluster.ReseatReplica(r.Context(), r.PathValue("id"), r.PathValue("name"), opts)
+		result, err := a.cluster.ReseatReplica(r.Context(), r.PathValue("id"), topology.ReplicaKey{NodeName: r.PathValue("name"), ReplicaID: body.ReplicaID}, opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("PUT /api/load/{id}/keys/{key}", a.putHTTP)
@@ -567,26 +592,61 @@ func (a *application) routes() http.Handler {
 		mux.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
+
+// operationHTTPStatus keeps compact process diagnostics beside the canonical
+// operation response while callers migrate to per-block fields.
+type operationHTTPStatus struct {
+	topology.OperationStatus
+	GroupID       string `json:"group_id,omitempty"`
+	NodeName      string `json:"node_name,omitempty"`
+	CurrentStep   int    `json:"current_step,omitempty"`
+	TotalSteps    int    `json:"total_steps,omitempty"`
+	WaitingReason string `json:"waiting_reason,omitempty"`
+}
+
+func projectOperationHTTPStatus(status topology.OperationStatus) operationHTTPStatus {
+	projected := operationHTTPStatus{OperationStatus: status}
+	for _, block := range status.Blocks {
+		projected.TotalSteps += block.TotalSteps
+	}
+	var selected *topology.BlockStatus
+	for i := range status.Blocks {
+		if status.Blocks[i].State != topology.OperationSucceeded {
+			selected = &status.Blocks[i]
+			break
+		}
+	}
+	if selected == nil && len(status.Blocks) != 0 {
+		selected = &status.Blocks[len(status.Blocks)-1]
+	}
+	if selected != nil {
+		projected.GroupID, projected.CurrentStep = selected.GroupID, selected.CurrentStep
+		if selected.Blocked != nil {
+			projected.NodeName, projected.WaitingReason = selected.Blocked.NodeName, selected.Blocked.Message
+		}
+	}
+	return projected
+}
 func (a *application) readyHTTP(w http.ResponseWriter, r *http.Request) {
 	if !a.canServe(r.Context()) {
 		httpError(w, fault.ErrUnavailable)
 		return
 	}
-	active, err := a.cluster.Active(r.Context())
+	target, err := a.cluster.Target(r.Context())
 	if err != nil {
 		httpError(w, err)
 		return
 	}
-	if active.Version == 0 || active.MemberID(a.cfg.NodeName) != a.node.Identity().MemberID {
+	if target.Version == 0 || target.MemberID(a.cfg.NodeName) != a.node.Identity().MemberID {
 		httpError(w, fault.ErrReplicaNotReady)
 		return
 	}
-	if node := active.Node(a.cfg.NodeName); node == nil || node.State != topology.NodeActive {
+	if node := target.Node(a.cfg.NodeName); node == nil || node.State != topology.NodeActive {
 		httpError(w, fault.ErrReplicaNotReady)
 		return
 	}
 	var groups []string
-	for _, group := range active.LoadGroups() {
+	for _, group := range target.LoadGroups() {
 		for _, replica := range group.Replicas {
 			if replica.NodeName == a.cfg.NodeName {
 				if _, err := a.localServing(r.Context(), group.ID); err != nil {
@@ -599,11 +659,11 @@ func (a *application) readyHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// Initial founding has no load declarations; bootstrap readiness must wait for
 	// the groups it promises. A retired demo ID is intentionally allowed later.
-	if a.cfg.Bootstrap && active.Version == 1 {
+	if a.cfg.Bootstrap && target.Version == 1 {
 		httpError(w, fault.ErrReplicaNotReady)
 		return
 	}
-	jsonResponse(w, http.StatusOK, map[string]any{"node": a.cfg.NodeName, "session_live": a.node.OwnSessionLive(), "serve_override": a.node.ServeOverride(), "groups": groups, "active_version": active.Version})
+	jsonResponse(w, http.StatusOK, map[string]any{"node": a.cfg.NodeName, "session_live": a.node.OwnSessionLive(), "serve_override": a.node.ServeOverride(), "groups": groups, "target_version": target.Version})
 }
 func (a *application) historyHTTP(w http.ResponseWriter, r *http.Request) {
 	offset, limit := 0, 100

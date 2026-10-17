@@ -5,6 +5,7 @@ package memstore
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"reflect"
 	"testing"
 
@@ -187,5 +188,26 @@ func TestCloseStopsTheStore(t *testing.T) {
 	}
 	if err := s.Ensure(ctx, "group"); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal(err)
+	}
+}
+
+func TestRetirementConformance(t *testing.T) {
+	t.Parallel()
+	storagetest.RunRetirement(t, func(t *testing.T, node string) storage.Store { return open(t, node) })
+}
+
+func TestMemoryCollectionCannotProveDeletionAfterProcessLoss(t *testing.T) {
+	t.Parallel()
+	s := bound(t, 7)
+	must(t, s.Ensure(t.Context(), "group"))
+	_, err := s.Quarantine(t.Context(), "group", 7)
+	must(t, err)
+	rows, err := s.Retired(t.Context())
+	must(t, err)
+	must(t, s.Collect(t.Context(), rows[0]))
+	must(t, s.Close())
+	fresh := open(t, "a")
+	if err := fresh.Collect(t.Context(), rows[0]); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("fresh volatile store fabricated collection proof", err)
 	}
 }

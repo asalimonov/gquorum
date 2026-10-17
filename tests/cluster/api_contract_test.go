@@ -67,7 +67,7 @@ func documentAPIContracts(t *testing.T, size int) {
 			if err != nil {
 				return false, err
 			}
-			if !status.SessionLive || status.MetaLeaderID == 0 || status.LatestVersion != base.Version || status.TargetVersion != base.Version || status.ActiveVersion != base.Version || len(status.Nodes) != size || len(status.Groups) != 2 {
+			if !status.SessionLive || status.MetaLeaderID == 0 || status.LatestVersion != base.Version || status.TargetVersion != base.Version || status.FullyConverged.Version != base.Version || len(status.Nodes) != size || len(status.Groups) != 2 {
 				return false, nil
 			}
 			for _, n := range status.Nodes {
@@ -81,12 +81,16 @@ func documentAPIContracts(t *testing.T, size int) {
 					expected = size
 				}
 				declared := base.Group(g.GroupID)
-				if declared == nil || !g.Found || len(g.ConfState.Voters) != expected || g.LeaderID == 0 || !slices.ContainsFunc(declared.Replicas, func(r topology.Replica) bool {
-					return r.ReplicaID == g.LeaderID && (g.GroupID == topology.MetaGroupID || r.NodeName == g.HostNode)
+				if g.Observation == nil {
+					return false, nil
+				}
+				observed := g.Observation
+				if declared == nil || !observed.Found || len(observed.ConfState.Voters) != expected || observed.LeaderID == 0 || !slices.ContainsFunc(declared.Replicas, func(r topology.Replica) bool {
+					return r.ReplicaID == observed.LeaderID && (g.GroupID == topology.MetaGroupID || r.NodeName == observed.HostNode)
 				}) {
 					return false, nil
 				}
-				if topology.QuorumOf(len(g.ConfState.Voters)) != expected/2+1 {
+				if topology.QuorumOf(len(observed.ConfState.Voters)) != expected/2+1 {
 					return true, fmt.Errorf("wrong quorum math")
 				}
 			}
@@ -135,7 +139,7 @@ func documentAPIContracts(t *testing.T, size int) {
 		t.Fatal(err)
 	}
 	var preview gquorum.MutationResult
-	if err := response.Decode(&preview); err != nil || preview.OperatorID != "" || preview.Document.Version != base.Version+1 || preview.Document.Node("node3").State != topology.NodeDraining {
+	if err := response.Decode(&preview); err != nil || preview.OperationID != "" || preview.Document.Version != base.Version+1 || preview.Document.Node("node3").State != topology.NodeDraining {
 		t.Fatal("preview staged or approved", preview, err)
 	}
 	response, err = c.Request(ctx, "node2", "POST", "/api/topology/preview/plan", preview.Document, 0)
@@ -299,7 +303,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 			t.Fatal(err)
 		}
 		var staged gquorum.MutationResult
-		if err := response.Decode(&staged); err != nil || staged.OperatorID != "" {
+		if err := response.Decode(&staged); err != nil || staged.OperationID != "" {
 			t.Fatal(staged, err)
 		}
 		if err := Poll(ctx, func() (bool, error) {
@@ -325,7 +329,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 		t.Fatal("staged drain lacks exact removal", drainPlan)
 	}
 	assertActualAPIMembership(ctx, t, c, base, 3)
-	drained.OperatorID, err = c.Approve(ctx, c.Spec.Nodes[size-1].Name, drained.Document.Version)
+	_, err = c.Approve(ctx, c.Spec.Nodes[size-1].Name, drained.Document.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +368,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 			return false, nil // The returning HTTP server may not be listening yet.
 		}
 		status, err := c.Status(ctx, "node3")
-		return err == nil && status.SessionLive && status.ActiveVersion == drained.Document.Version &&
+		return err == nil && status.SessionLive && status.FullyConverged.Version == drained.Document.Version &&
 			local.Identity.MemberID == beforeRestart.Identity.MemberID &&
 			local.Identity.InstanceID != beforeRestart.Identity.InstanceID &&
 			len(local.Status.ConfState.Voters) == size && local.Status.Applied >= beforeRestart.Status.Applied, nil
@@ -438,7 +442,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 		}
 	}
 	assertActualAPIMembership(ctx, t, c, activated.Document, 2)
-	grown.OperatorID, err = c.Approve(ctx, "node2", grown.Document.Version)
+	_, err = c.Approve(ctx, "node2", grown.Document.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,7 +496,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 		t.Fatal(err)
 	}
 	var added gquorum.MutationResult
-	if err := response.Decode(&added); err != nil || added.Document.Node("staged-only") == nil || added.Document.MemberID("staged-only") <= uint64(size) || added.OperatorID != "" {
+	if err := response.Decode(&added); err != nil || added.Document.Node("staged-only") == nil || added.Document.MemberID("staged-only") <= uint64(size) || added.OperationID != "" {
 		t.Fatal("staged admission lost fresh identity", added, err)
 	}
 	if err := Poll(ctx, func() (bool, error) {

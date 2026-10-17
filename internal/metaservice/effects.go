@@ -62,7 +62,7 @@ func (c groupControllers) Status(ctx context.Context, id string) (topology.Group
 		}
 		return status, nil
 	}
-	status := c.g.engine.Load().Status()
+	status := c.g.LocalStatus()
 	live, err := c.g.metaHealth(ctx, status)
 	if err != nil {
 		return status, err
@@ -72,111 +72,15 @@ func (c groupControllers) Status(ctx context.Context, id string) (topology.Group
 	return status, nil
 }
 
-func (c groupControllers) effect(parent context.Context, grant topology.AuthorityGrant, kind topology.StepKind,
-	invoke func(context.Context,
-		operator.GroupEffects) ([]topology.EffectReceipt, error)) ([]topology.EffectReceipt, error) {
-	if grant.Action == nil || grant.Action.Kind != kind {
-		return nil, fault.ErrOperatorAuthorization
-	}
-	ctxHandle, err := c.g.acquireEffectContext(parent)
-	ctx, done := ctxHandle.Context, ctxHandle.Release
-	if err != nil {
-		return nil, err
-	}
-	defer done()
-	if err := c.g.ValidateGrant(ctx, grant); err != nil {
-		return nil, err
-	}
-	if grant.Key.GroupID == topology.MetaGroupID {
-		return c.g.metaEffect(ctx, grant)
-	}
-	if c.g.opts.LoadGroups == nil {
-		return nil, fault.ErrNoController
-	}
-	return invoke(ctx, c.g.opts.LoadGroups)
-}
-
-func (c groupControllers) CreateGroup(ctx context.Context,
+func (g *Group) applyNativeMetaEffect(ctx context.Context,
 	grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return c.effect(ctx, grant, topology.StepCreateFoundingGroup,
-		func(ctx context.Context, controller operator.GroupEffects) ([]topology.EffectReceipt, error) {
-			return controller.CreateGroup(ctx, grant)
-		})
-}
-
-func (c groupControllers) PrepareReplica(ctx context.Context,
-	grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return c.effect(ctx, grant, topology.StepPrepareReplica,
-		func(ctx context.Context, controller operator.GroupEffects) ([]topology.EffectReceipt, error) {
-			return controller.PrepareReplica(ctx, grant)
-		})
-}
-
-func (c groupControllers) TransferLeader(ctx context.Context,
-	grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return c.effect(ctx, grant, topology.StepTransferLeader,
-		func(ctx context.Context, controller operator.GroupEffects) ([]topology.EffectReceipt, error) {
-			return controller.TransferLeader(ctx, grant)
-		})
-}
-
-func (c groupControllers) StopReplica(ctx context.Context,
-	grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return c.effect(ctx, grant, topology.StepStopReplica,
-		func(ctx context.Context, controller operator.GroupEffects) ([]topology.EffectReceipt, error) {
-			return controller.StopReplica(ctx, grant)
-		})
-}
-
-func (c groupControllers) CleanupReplicaState(ctx context.Context,
-	grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return c.effect(ctx, grant, topology.StepCleanupReplicaState,
-		func(ctx context.Context, controller operator.GroupEffects) ([]topology.EffectReceipt, error) {
-			return controller.CleanupReplicaState(ctx, grant)
-		})
-}
-
-func (c groupControllers) DeleteGroupState(ctx context.Context,
-	grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return c.effect(ctx, grant, topology.StepDeleteGroupState,
-		func(ctx context.Context, controller operator.GroupEffects) ([]topology.EffectReceipt, error) {
-			return controller.DeleteGroupState(ctx, grant)
-		})
-}
-
-func (c groupControllers) ApplyMembership(ctx context.Context,
-	grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	if grant.Action == nil {
-		return nil, fault.ErrOperatorAuthorization
-	}
-	switch grant.Action.Kind {
-	case topology.StepAddLearner,
-		topology.StepPromoteVoter,
-		topology.StepDemoteVoter,
-		topology.StepRemoveReplica:
-	default:
-		return nil, fault.ErrOperatorAuthorization
-	}
-	return c.effect(ctx, grant, grant.Action.Kind,
-		func(ctx context.Context, controller operator.GroupEffects) ([]topology.EffectReceipt, error) {
-			return controller.ApplyMembership(ctx, grant)
-		})
-}
-
-func (g *Group) metaEffect(ctx context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	if grant.Action == nil || grant.Key.GroupID != topology.MetaGroupID {
-		return nil, fault.ErrOperatorAuthorization
+	if !g.IsLeader() {
+		return nil, fault.ErrNotLeader
 	}
 	if err := g.ValidateGrant(ctx, grant); err != nil {
 		return nil, err
 	}
 	a := *grant.Action
-	if a.Kind == topology.StepPrepareReplica || a.Kind == topology.StepStopReplica {
-		return g.metaHostEffect(ctx, grant)
-	}
-	if !g.IsLeader() {
-		return g.forwardMetaEffect(ctx, grant)
-	}
 	engine := g.engine.Load()
 	var proof topology.FenceEvidence
 	checkErr := waitMetaAuthority(ctx, func() error {
@@ -235,7 +139,7 @@ func (g *Group) changeMetaReceipt(ctx context.Context, engine *raftengine.Group,
 	var change raftpb.ConfChangeV2
 	switch a.Kind {
 	case topology.StepAddLearner:
-		admission, ok := g.state().AdmissionForOperator(a.OperatorID, a.NodeName, a.ReplicaID)
+		admission, ok := g.state().AdmissionForOperator(a.OperationID, a.NodeName, a.ReplicaID)
 		if !ok || !admission.State.Prepared() {
 			return topology.EffectReceipt{}, fault.ErrReplicaNotReady
 		}
@@ -247,7 +151,7 @@ func (g *Group) changeMetaReceipt(ctx context.Context, engine *raftengine.Group,
 	case topology.StepRemoveReplica:
 		change = membership.RemoveReplica(a.ReplicaID)
 	default:
-		return topology.EffectReceipt{}, fault.ErrOperatorAuthorization
+		return topology.EffectReceipt{}, fault.ErrOperationAuthorization
 	}
 	nextCheckErr := waitMetaAuthority(ctx, func() error {
 		var err error

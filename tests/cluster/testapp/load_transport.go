@@ -39,22 +39,7 @@ func (a *application) client(ctx context.Context, name string, member uint64) (*
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	address, err := a.address(ctx, name, loadAddressLabel)
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	if errors.Is(err, fault.ErrUnavailable) && member != 0 {
-		// Cleanup can outlive both current documents. A cached exact endpoint
-		// remains a route, not authority; ingress still checks the complete To.
-		a.mu.RLock()
-		if old := a.clients[name]; old != nil && old.member == member {
-			address, err = old.address, nil
-		}
-		a.mu.RUnlock()
-		if err != nil {
-			address, err = a.historicalControlAddress(ctx, name, member)
-		}
-	}
+	address, err := a.loadAddress(ctx, name, member)
 	if err != nil {
 		return nil, err
 	}
@@ -81,27 +66,6 @@ func (a *application) client(ctx context.Context, name string, member uint64) (*
 	return client, nil
 }
 
-func (a *application) historicalControlAddress(ctx context.Context, name string, member uint64) (string, error) {
-	if a.cluster == nil {
-		return "", fault.ErrUnavailable
-	}
-	history, err := a.cluster.History(ctx, topology.Page{})
-	if err != nil {
-		return "", err
-	}
-	for _, doc := range history.Documents {
-		node := doc.Node(name)
-		if node == nil || doc.MemberID(name) != member || node.Labels[loadAddressLabel] == "" {
-			continue
-		}
-		id := topology.MakeOperatorID(doc.Version, 1)
-		op, err := a.cluster.Operator(ctx, id)
-		if err == nil && op.ID == id && op.Version == doc.Version {
-			return node.Labels[loadAddressLabel], nil
-		}
-	}
-	return "", fault.New(fault.Unavailable, "no retained approved load endpoint", nil)
-}
 func (a *application) auth(ctx context.Context) error {
 	md, _ := metadata.FromIncomingContext(ctx)
 	values := md.Get(credentialHeader)
@@ -114,7 +78,7 @@ func (a *application) validateHeader(ctx context.Context, h *loadpb.Header) erro
 	if h == nil || h.ClusterId != a.cfg.ClusterID || h.NodeName == "" || h.InstanceId == "" || h.MemberId == 0 {
 		return fault.ErrIdentityMismatch
 	}
-	target, active, err := a.documents(ctx)
+	target, err := a.cluster.Target(ctx)
 	if err != nil {
 		return err
 	}
@@ -124,8 +88,10 @@ func (a *application) validateHeader(ctx context.Context, h *loadpb.Header) erro
 		}
 		return fault.ErrIdentityMismatch
 	}
-	if current := active.MemberID(h.NodeName); current > 0 {
-		if current == h.MemberId {
+	if previous, err := a.approvedRoute(ctx, func(doc topology.Document) bool {
+		return doc.MemberID(h.NodeName) != 0
+	}); err == nil {
+		if previous.MemberID(h.NodeName) == h.MemberId {
 			return nil
 		}
 		return fault.ErrIdentityMismatch
@@ -145,7 +111,7 @@ func domainReply(err error) *loadpb.Reply {
 	if errors.As(err, &typed) {
 		code = typed.Code
 	} else {
-		for _, candidate := range []fault.Code{fault.IdentityMismatch, fault.UnsafeMembership, fault.OperatorAuthorization, fault.ReplicaNotReady, fault.NotLeader, fault.Invalid, fault.Stopped, fault.GroupRetired} {
+		for _, candidate := range []fault.Code{fault.IdentityMismatch, fault.UnsafeMembership, fault.OperationAuthorization, fault.ReplicaNotReady, fault.NotLeader, fault.Invalid, fault.Stopped, fault.GroupRetired} {
 			if errors.Is(err, fault.New(candidate, "", nil)) {
 				code = candidate
 				break

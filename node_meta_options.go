@@ -34,6 +34,7 @@ type MetaNetworkOptions struct {
 	// Listener transfers to Node when Start successfully acquires meta.
 	Listener net.Listener
 	// AdvertiseAddress and Resolver identify reachable _meta peers.
+	// Resolver must work from local information before election and during quorum loss.
 	AdvertiseAddress string
 	Resolver         topology.AddressResolver
 	// TLS settings, plaintext opt-in and the shared cluster credential protect

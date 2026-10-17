@@ -36,7 +36,7 @@ type config struct {
 	AddressFree                                          bool
 	Limits                                               topology.Limits
 	SessionTTL, TickInterval                             time.Duration
-	WALWriteWait                                         time.Duration
+	WALWriteWait, Retention                              time.Duration
 	ProposalTimeout                                      time.Duration
 	SnapshotThreshold                                    uint64
 	Bootstrap                                            bool
@@ -79,6 +79,7 @@ func main() {
 	flag.IntVar(&c.Limits.MaxReplicas, "max-replicas", c.Limits.MaxReplicas, "Limits.MaxReplicas")
 	flag.DurationVar(&c.SessionTTL, "session-ttl", 3*time.Second, "meta activation session TTL")
 	flag.DurationVar(&c.TickInterval, "tick", 50*time.Millisecond, "Raft tick interval")
+	flag.DurationVar(&c.Retention, "retention", 0, "fixture: quarantine retention; zero uses library default")
 	flag.DurationVar(&c.WALWriteWait, "wal-write-wait", 0, "load WAL coalescing wait")
 	flag.DurationVar(&c.ProposalTimeout, "proposal-timeout", 0, "load proposal result timeout; zero selects the library default")
 	flag.Uint64Var(&c.SnapshotThreshold, "snapshot-threshold", 64, "load snapshot interval in applied entries")

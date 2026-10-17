@@ -22,13 +22,14 @@ type Options struct{ NodeName, ClusterID string }
 
 // Store is safe for concurrent use. The component that creates it owns Close.
 type Store struct {
-	mu       sync.Mutex
-	opts     Options
-	bindings map[string]storage.Identity
-	groups   map[string]*group
-	retired  []storage.RetiredReplica
-	sequence uint64 // makes retirement tokens unique
-	closed   bool
+	mu        sync.Mutex
+	opts      Options
+	bindings  map[string]storage.Identity
+	groups    map[string]*group
+	retired   []storage.RetiredReplica
+	collected []storage.RetiredReplica // volatile exact proof, never a durable milestone
+	sequence  uint64                   // makes retirement tokens unique
+	closed    bool
 }
 
 type group struct {
@@ -94,7 +95,7 @@ func (s *Store) HasState(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	defer s.mu.Unlock()
-	return len(s.bindings) != 0 || len(s.groups) != 0 || len(s.retired) != 0, nil
+	return len(s.bindings) != 0 || len(s.groups) != 0 || len(s.retired) != 0 || len(s.collected) != 0, nil
 }
 
 // BindReplica binds an exact identity and refuses conflicting retained state.
@@ -319,7 +320,7 @@ func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closed = true
-	s.bindings, s.groups, s.retired = nil, nil, nil
+	s.bindings, s.groups, s.retired, s.collected = nil, nil, nil, nil
 	return nil
 }
 

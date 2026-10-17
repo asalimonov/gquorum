@@ -16,7 +16,7 @@ import (
 )
 
 func (_ *fixture) approve(kind topology.StepKind, targets ...storage.Identity) topology.AuthorizedStep {
-	a := topology.AuthorizedStep{OperatorID: topology.MakeOperatorID(1, 1), Version: 1, Attempt: 1, StepSeq: 1, Kind: kind, GroupID: "work"}
+	a := topology.AuthorizedStep{OperationID: topology.MakeOperationID(1, 1), Version: 1, Attempt: 1, StepSeq: 1, Kind: kind, GroupID: "work"}
 	if kind != topology.StepCreateFoundingGroup && kind != topology.StepDeleteGroupState {
 		a.NodeName, a.ReplicaID = targets[0].NodeName, targets[0].ReplicaID
 	}
@@ -151,7 +151,7 @@ func TestGrantedCreationAndRefusedIdentities(t *testing.T) {
 	// still requires retries to share the accepted operation.
 	ctx := deadline(t)
 	await(ctx, t, func() bool {
-		_, err := h.DispatchGrant(ctx, grant)
+		_, err := h.DispatchEffect(ctx, grant, grant.Resources[1], grant.Targets[0])
 		if errors.Is(err, fault.ErrUnavailable) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, fault.ErrReplicaNotReady) || errors.Is(err, fault.ErrAuthorityPending) || errors.Is(err, fault.ErrNotLeader) {
 			return false
 		}

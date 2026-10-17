@@ -24,14 +24,10 @@ func placementEdit(ctx context.Context, t *testing.T, c *Cluster, edit func(*top
 	if err != nil {
 		t.Fatal(err)
 	}
-	active, err := c.Document(ctx, "node2", "active")
-	if err != nil {
-		t.Fatal(err)
-	}
 	edited := latest.Clone()
 	edit(&edited)
 	edited.ChangedBy = "placement-process-test"
-	preparation, err := topology.PreparePlacement(topology.ReadView{Latest: latest, Target: target, Active: active}, edited,
+	preparation, err := topology.PreparePlacement(topology.ReadView{Latest: latest, Target: target}, edited,
 		topology.Rules{SchemaVersion: 1, Limits: c.Spec.Limits}, time.Now().UTC())
 	next, report := preparation.Document, preparation.Report
 	if err != nil {

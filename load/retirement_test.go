@@ -14,8 +14,8 @@ import (
 
 func retirementFixture() (storage.Identity, load.RetirementRequest) {
 	id := storage.Identity{ClusterID: "c", GroupID: "work", NodeName: "n1", ReplicaID: 4}
-	step := topology.AuthorizedStep{OperatorID: topology.MakeOperatorID(2, 1), Version: 2, Attempt: 1, StepSeq: 3, Kind: topology.StepCleanupReplicaState, GroupID: "work", NodeName: "n1", ReplicaID: 4}
-	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "c", GroupID: "work", Revision: 9}, Purpose: topology.AuthorityEffect, OperatorID: step.OperatorID, Action: &step,
+	step := topology.AuthorizedStep{OperationID: topology.MakeOperationID(2, 1), Version: 2, Attempt: 1, StepSeq: 3, Kind: topology.StepCleanupReplicaState, GroupID: "work", NodeName: "n1", ReplicaID: 4}
+	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "c", GroupID: "work", Revision: 9}, Purpose: topology.AuthorityEffect, OperationID: step.OperationID, Action: &step,
 		Resources: []topology.AuthorityResource{{Kind: topology.AuthorityHost, GroupID: "work", NodeName: "n1"}},
 		Targets:   []topology.AuthorityTarget{{NodeName: "n1", MemberID: 7, ReplicaID: 4}}}
 	authorization := step
@@ -46,7 +46,7 @@ func TestRetirementVerifyAcceptsCompleteTopologyProof(t *testing.T) {
 	for name, edit := range cases {
 		id, req := retirementFixture()
 		edit(&id, &req)
-		if err := req.Verify(id); !errors.Is(err, fault.ErrOperatorAuthorization) {
+		if err := req.Verify(id); !errors.Is(err, fault.ErrOperationAuthorization) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
@@ -63,7 +63,7 @@ func TestRetirementVerifyReadmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	req.GrantedMemberID = 7
-	if err := req.Verify(id); !errors.Is(err, fault.ErrOperatorAuthorization) {
+	if err := req.Verify(id); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("non-increasing member accepted", err)
 	}
 }

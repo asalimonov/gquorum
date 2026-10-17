@@ -126,32 +126,26 @@ func (s *Store) Collect(ctx context.Context, record storage.RetiredReplica) erro
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	base, ok := retirementToken(record.Token)
-	if !ok || !base.At.Equal(record.QuarantinedAt) {
-		return fault.ErrInvalid
-	}
-	want := record.Identity
-	if want.NodeName != s.opts.NodeName || want.ClusterID != s.opts.ClusterID || want.GroupID != base.GroupID ||
-		want.ReplicaID == 0 {
-		return fault.ErrIdentityMismatch
+	if err := s.validateCollectionRecord(record); err != nil {
+		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return fault.ErrStopped
 	}
-	if err := s.validateRetirementInactive(base.GroupID, want); err != nil {
+	if err := s.validateRetirementInactive(record.Identity.GroupID, record.Identity); err != nil {
 		return err
 	}
-	dir := filepath.Join(s.opts.RootDir, record.Token)
-	present, err := retiredDirectoryMatches(dir, want)
+	present, err := s.prepareCollectionMarker(record)
 	if err != nil || !present {
 		return err
 	}
+	dir := filepath.Join(s.opts.RootDir, record.Token)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(dir); err != nil {
+	if err := removeCollectedDirectory(ctx, dir, record.Identity); err != nil {
 		return err
 	}
 	return syncDir(s.opts.RootDir)

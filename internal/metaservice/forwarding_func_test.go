@@ -6,10 +6,8 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -43,7 +41,7 @@ func TestMetaMemberRoutingSeparatesApprovedInboundFromRetainedOutbound(t *testin
 	if address, err := g.resolveMember(t.Context(), 4); err != nil || address != "meta-four" {
 		t.Fatal("retained outbound route absent", address, err)
 	}
-	f.command(t, metaengine.BeginOperatorProposal{Version: 2, Plan: topology.Plan{Version: 2}, Actor: "test", Origin: topology.OriginOperator, At: time.Now().UTC()})
+	f.command(t, f.fixtureApproval(t, f.g.machine.Latest()))
 	if address, err := g.resolveMember(t.Context(), 4); err != nil || address != "meta-four" {
 		t.Fatal("approved Target route absent", address, err)
 	}

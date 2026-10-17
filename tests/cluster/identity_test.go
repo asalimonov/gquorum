@@ -37,7 +37,7 @@ func identityServing(t *testing.T, size int) {
 			t.Fatal("identity surface is not answering process", local, err)
 		}
 		status, err := c.Status(ctx, name)
-		if err != nil || !status.SessionLive || status.Lifecycle != "ready" || status.ActiveVersion != created.Document.Version {
+		if err != nil || !status.SessionLive || status.Lifecycle != "ready" || status.FullyConverged.Version != created.Document.Version {
 			t.Fatal("healthy activation status missing", status, err)
 		}
 		response, err := c.Request(ctx, name, "GET", "/health/ready", nil, 0)

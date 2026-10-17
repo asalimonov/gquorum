@@ -24,7 +24,7 @@ func validateJoinGrant(identity topology.Identity, rules topology.Rules, result 
 	}
 	if !result.Existing && (result.Admission.NodeName != identity.NodeName ||
 		result.Admission.InstanceID != identity.InstanceID || result.Admission.MemberID != result.MemberID ||
-		result.Admission.OperatorID == "") {
+		result.Admission.OperationID == "") {
 		return fault.ErrIdentityMismatch
 	}
 	if result.Admission.ReadmissionInstanceID != "" &&
@@ -32,10 +32,12 @@ func validateJoinGrant(identity topology.Identity, rules topology.Rules, result 
 			strings.ContainsRune(result.Admission.ReadmissionInstanceID, 0)) {
 		return fault.ErrIdentityMismatch
 	}
-	if err := validateReadmissionResponse(identity, result); err != nil {
-		return err
+	if origin := string(result.Admission.ReadmissionOperatorID); origin != "" &&
+		(origin == string(result.Admission.OperationID) || strings.TrimSpace(origin) != origin ||
+			strings.ContainsRune(origin, 0)) {
+		return fault.ErrIdentityMismatch
 	}
-	if err := validateJoinPrevious(identity, rules, result.Previous); err != nil {
+	if err := validateReadmissionResponse(identity, result); err != nil {
 		return err
 	}
 	if err := validatePreviousJoinGroups(identity, result); err != nil {
@@ -74,18 +76,6 @@ func retainedGroupReplica(previous topology.Group, next *topology.Group, r topol
 	return skip
 }
 
-func validateJoinPrevious(identity topology.Identity, rules topology.Rules, previous topology.Document) error {
-	if previous.Version > 0 {
-		if previous.ClusterID != identity.ClusterID {
-			return fault.ErrIdentityMismatch
-		}
-		if err := previous.Validate(rules); err != nil {
-			return fault.New(fault.Invalid, "invalid previous topology", err)
-		}
-	}
-	return nil
-}
-
 func validatePreviousJoinGroups(identity topology.Identity, result joinResponse) error {
 	seenGroups := make(map[string]bool)
 	for _, group := range result.PreviousGroups {
@@ -117,14 +107,9 @@ func validatePreviousJoinReplicas(name string, group topology.Group, next *topol
 
 func joinMemberOwners(result joinResponse) (map[uint64]string, error) {
 	owners := map[uint64]string{}
-	for _, doc := range []topology.Document{result.Previous, result.Granted} {
-		if group := doc.MetaGroup(); group != nil {
-			for _, r := range group.Replicas {
-				if old := owners[r.ReplicaID]; old != "" && old != r.NodeName {
-					return nil, fault.ErrIdentityMismatch
-				}
-				owners[r.ReplicaID] = r.NodeName
-			}
+	if group := result.Granted.MetaGroup(); group != nil {
+		for _, r := range group.Replicas {
+			owners[r.ReplicaID] = r.NodeName
 		}
 	}
 	return owners, nil
@@ -137,7 +122,8 @@ func validateJoinMembers(result joinResponse) error {
 	}
 	seen := map[uint64]bool{}
 	for _, member := range result.Members {
-		if member.MemberID == 0 || member.Name == "" || owners[member.MemberID] != member.Name ||
+		if member.MemberID == 0 || member.Name == "" ||
+			owners[member.MemberID] != "" && owners[member.MemberID] != member.Name ||
 			seen[member.MemberID] {
 			return fault.ErrIdentityMismatch
 		}
@@ -146,6 +132,11 @@ func validateJoinMembers(result joinResponse) error {
 			if _, _, err := net.SplitHostPort(member.Address); err != nil {
 				return fault.ErrInvalid
 			}
+		}
+	}
+	for id := range owners {
+		if !seen[id] {
+			return fault.ErrIdentityMismatch
 		}
 	}
 	if _, _, err := net.SplitHostPort(result.LeaderAddress); err != nil {

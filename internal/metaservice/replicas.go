@@ -143,7 +143,7 @@ func (g *Group) ForgetGrantedLoadReplica(parent context.Context, grant topology.
 		return err
 	}
 	if proof.Grant == nil || !proof.Grant.Equal(grant) || !slices.Contains(proof.CleanupTargets, target) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	g.mu.RLock()
 	defer g.mu.RUnlock()

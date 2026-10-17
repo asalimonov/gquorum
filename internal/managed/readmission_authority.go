@@ -24,7 +24,7 @@ type readmissionAuthority struct {
 func beginReadmissionAuthority(ctx context.Context, s *authoritystore.Store,
 	grant Readmission) (*readmissionAuthority, error) {
 	if s == nil || len(grant.Grants) == 0 || s.Identity() != grant.Previous {
-		return nil, fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperationAuthorization
 	}
 	prior, err := readmissionIDs(grant.PreviousGroups, grant.Previous)
 	if err != nil {
@@ -46,7 +46,7 @@ func beginReadmissionAuthority(ctx context.Context, s *authoritystore.Store,
 			g.Key.ClusterID != grant.Previous.ClusterID || len(g.Resources) != 1 || g.Resources[0] != want ||
 			a.grants[g.Key.GroupID].Key.Revision != 0 || revision != 0 &&
 			revision != g.Key.Revision || g.Validate() != nil {
-			return nil, fault.ErrOperatorAuthorization
+			return nil, fault.ErrOperationAuthorization
 		}
 		revision = g.Key.Revision
 		scope := readmissionTargetScope{previous: grant.Previous, prior: prior, granted: granted}
@@ -56,7 +56,7 @@ func beginReadmissionAuthority(ctx context.Context, s *authoritystore.Store,
 		a.grants[g.Key.GroupID] = g.Clone()
 	}
 	if len(prior) != 0 {
-		return nil, fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperationAuthorization
 	}
 	// Complete validation precedes the first durable write. Partial
 	// installation after an I/O failure remains pending and is safe to resume
@@ -95,7 +95,7 @@ func (a *readmissionAuthority) joined(ctx context.Context) error {
 func (a *readmissionAuthority) effect(ctx context.Context, group string, replica uint64, run func() error) error {
 	grant, ok := a.grants[group]
 	if !ok {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	target := topology.AuthorityTarget{NodeName: a.store.Identity().NodeName, MemberID: a.store.Identity().MemberID,
 		ReplicaID: replica}

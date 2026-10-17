@@ -148,6 +148,15 @@ func (g *Group) installFenceReply(ctx context.Context, header *metapb.Header, da
 }
 
 func (g *Group) metaControlReply(ctx context.Context, header *metapb.Header, data []byte) *metapb.Reply {
+	var envelope struct {
+		Kind string `json:"kind"`
+	}
+	if json.Unmarshal(data, &envelope) != nil {
+		return metatransport.Reply(fault.ErrInvalid)
+	}
+	if envelope.Kind != "" {
+		return g.cleanupControlReply(ctx, header, data, envelope.Kind)
+	}
 	var request load.ActionRequest
 	if json.Unmarshal(data, &request) != nil {
 		return metatransport.Reply(fault.ErrInvalid)
@@ -169,13 +178,11 @@ func (g *Group) metaControlReply(ctx context.Context, header *metapb.Header, dat
 }
 
 func (g *Group) applyVersionReply(ctx context.Context, data []byte) *metapb.Reply {
-	var request struct {
-		Version uint64 `json:"version"`
+	request, err := decodeApplyVersionRequest(data)
+	if err != nil {
+		return metatransport.Reply(err)
 	}
-	if json.Unmarshal(data, &request) != nil {
-		return metatransport.Reply(fault.ErrInvalid)
-	}
-	id, err := g.applyLocal(ctx, request.Version)
+	id, err := g.applyOperationLocal(ctx, request)
 	if err != nil {
 		return g.leaderReply(err)
 	}
@@ -211,7 +218,7 @@ func (g *Group) keepAliveReply(header *metapb.Header, data []byte) *metapb.Reply
 	defer g.leaseGate.Unlock()
 	session, ok := g.state().Session(request.SessionID)
 	if !ok || session.NodeName != header.NodeName || session.InstanceID != request.InstanceID ||
-		session.InstanceID != header.InstanceId || g.activeMemberID(header.NodeName) != header.MemberId {
+		session.InstanceID != header.InstanceId || g.eligibleMemberID(header.NodeName) != header.MemberId {
 		return metatransport.Reply(fault.ErrIdentityMismatch)
 	}
 	now := time.Now()
@@ -224,15 +231,14 @@ func (g *Group) keepAliveReply(header *metapb.Header, data []byte) *metapb.Reply
 
 func (g *Group) validateProposalCourier(proposal any, header *metapb.Header) error {
 	switch p := proposal.(type) {
+	case *metaengine.RecordCollectionProposal, *metaengine.RecordCleanupStatusProposal:
+		return fault.ErrOperationAuthorization // Restricted reports enter through MetaControl only.
 	case *metaengine.BindAdmissionProposal:
 		if p.Admission.NodeName != header.NodeName || p.Admission.MemberID != header.MemberId {
 			return fault.ErrIdentityMismatch
 		}
 	case *metaengine.GrantSession:
-		if p.NodeName != header.NodeName || p.InstanceID == "" || p.InstanceID != header.InstanceId ||
-			g.activeMemberID(p.NodeName) != header.MemberId {
-			return fault.ErrIdentityMismatch
-		}
+		return g.validateSessionCourier(p, header)
 	case *metaengine.AcquireLock:
 		session, ok := g.state().Session(p.SessionID)
 		if !ok || session.NodeName != header.NodeName || session.InstanceID != header.InstanceId ||
@@ -247,4 +253,16 @@ func (g *Group) validateProposalCourier(proposal any, header *metapb.Header) err
 	default: // Other proposals use their own replicated validation.
 	}
 	return nil
+}
+
+func (g *Group) validateSessionCourier(proposal *metaengine.GrantSession, header *metapb.Header) error {
+	machine := g.state()
+	identity := topology.Identity{ClusterID: machine.Target().ClusterID, NodeName: proposal.NodeName,
+		MemberID: header.MemberId, InstanceID: proposal.InstanceID}
+	if proposal.NodeName != header.NodeName || proposal.InstanceID == "" ||
+		proposal.InstanceID != header.InstanceId || machine.EligibleMemberID(proposal.NodeName) != header.MemberId {
+		return fault.ErrIdentityMismatch
+	}
+	_, err := sessionAdmissionBasis(machine, identity)
+	return err
 }

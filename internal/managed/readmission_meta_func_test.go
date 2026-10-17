@@ -27,7 +27,7 @@ func TestMetaOnlyReadmissionRetainsExactBackup(t *testing.T) {
 	t.Cleanup(func() { must(t, s.Close()) })
 	authorize := func(ctx context.Context, got Readmission) error {
 		if !reflect.DeepEqual(got, grant) {
-			return fault.ErrOperatorAuthorization
+			return fault.ErrOperationAuthorization
 		}
 		return ctx.Err()
 	}
@@ -55,7 +55,7 @@ func TestMetaOnlyReadmissionFreshJoinRequiresAuthority(t *testing.T) {
 	fresh.MemberID = 0
 	authorize := func(ctx context.Context, _ Readmission) error { return ctx.Err() }
 	if err := ReadmitMeta(t.Context(), grant, MetaReadmissionOptions{Identity: fresh, Path: grant.MetaDBPath,
-		Authority: nil, Authorize: authorize}); !errors.Is(err, fault.ErrOperatorAuthorization) {
+		Authority: nil, Authorize: authorize}); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("readmission without durable authority succeeded", err)
 	}
 	s, err := authoritystore.Open(filepath.Join(t.TempDir(), "authority.bolt"), before, authoritystore.FreshEvidence)

@@ -84,7 +84,7 @@ func TestPublicMetaRestartUsesPinReplaysTailAndRefusesChangedRules(t *testing.T)
 		t.Fatal(err)
 	}
 	latest, _ := restarted.Latest(ctx)
-	active, _ := restarted.Active(ctx)
+	active := fixtureConvergedDocument(t, restarted.state())
 	if latest.Version != 2 || active.Version != 1 || latest.Nodes[0].Labels["disk"] != "retained" {
 		t.Fatal("restart skipped committed tail", latest, active)
 	}
@@ -123,7 +123,7 @@ func TestRetainedSingletonDoesNotAcquireFreshVoterDefault(t *testing.T) {
 	if err := restarted.WaitReady(ctx); err != nil {
 		t.Fatal(err)
 	}
-	active, err := restarted.Active(ctx)
+	active, err := restarted.state().FullyConvergedDocument()
 	if err != nil || active.MetaGroup().VoterConfig.TargetVoters != 1 {
 		t.Fatal(active, err)
 	}

@@ -17,7 +17,7 @@ func TestStoppedFollowerHealthUsesActivePlacementAndRetainsStagingThreeNodes(t *
 	stoppedFollowerPlacement(t, 3)
 }
 
-// Source stopped-follower health/readiness, including its staged-placement blocker
+// Source stopped-follower health/readiness, including retained staged placement
 // and normal survivor restart under Latest/Active drift. Meta health covers every
 // admitted type; the data plane remains a caller-defined three-worker subset.
 func stoppedFollowerPlacement(t *testing.T, size int) {
@@ -52,10 +52,10 @@ func stoppedFollowerPlacement(t *testing.T, size int) {
 		t.Fatal(err)
 	}
 	var staged gquorum.MutationResult
-	if err := response.Decode(&staged); err != nil || staged.Document.Version != base.Version+1 || staged.Document.Placement.MinReplicas != 3 || staged.OperatorID != "" {
+	if err := response.Decode(&staged); err != nil || staged.Document.Version != base.Version+1 || staged.Document.Placement.MinReplicas != 3 || staged.OperationID != "" {
 		t.Fatal(staged, err)
 	}
-	assertBlocked := func() {
+	assertStagedInert := func() {
 		t.Helper()
 		for _, node := range c.Nodes() {
 			if !node.running.Load() {
@@ -63,9 +63,9 @@ func stoppedFollowerPlacement(t *testing.T, size int) {
 			}
 			if err := Poll(ctx, func() (bool, error) {
 				status, err := c.Status(ctx, node.Spec.Name)
-				return status.LatestVersion == staged.Document.Version && status.TargetVersion == base.Version && status.ActiveVersion == base.Version && status.Scheduling.State == topology.SchedulingBlocked && status.Scheduling.Reason == "staged_latest", err
+				return status.LatestVersion == staged.Document.Version && status.TargetVersion == base.Version && status.FullyConverged.Version == base.Version && status.Scheduling.Enabled, err
 			}); err != nil {
-				t.Fatal("durable staged placement did not block repair", node.Spec.Name, err)
+				t.Fatal("staged placement changed approved progress", node.Spec.Name, err)
 			}
 			latest, err := c.Document(ctx, node.Spec.Name, "latest")
 			if err != nil || !reflect.DeepEqual(latest, staged.Document) {
@@ -77,13 +77,13 @@ func stoppedFollowerPlacement(t *testing.T, size int) {
 			}
 		}
 	}
-	assertBlocked()
+	assertStagedInert()
 	response, err = c.Request(ctx, "node2", "POST", fmt.Sprintf("/api/topology/%d/plan", staged.Document.Version), nil, 0)
 	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
 	}
 	var plan topology.Plan
-	if err := response.Decode(&plan); err != nil || !plan.IsEmpty() {
+	if err := response.Decode(&plan); err != nil || len(plan.Steps) != 0 {
 		t.Fatal("placement-only staging has a runtime effect", plan, err)
 	}
 	if err := c.Node("node3").Stop(ctx); err != nil {
@@ -145,7 +145,7 @@ func stoppedFollowerPlacement(t *testing.T, size int) {
 		}
 	}
 	inspectHealth(false)
-	assertBlocked()
+	assertStagedInert()
 	if err := c.Put(ctx, "node2", "work", "during-stop", "during-stop", "acknowledged"); err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +156,7 @@ func stoppedFollowerPlacement(t *testing.T, size int) {
 		t.Fatal(err)
 	}
 	inspectHealth(true)
-	assertBlocked()
+	assertStagedInert()
 	expected := map[string]string{"before-stop": "retained", "during-stop": "acknowledged"}
 	if err := exactOwnedValues(ctx, c, base, "work", expected); err != nil {
 		t.Fatal("returning follower lost acknowledged commands", err)
@@ -173,7 +173,7 @@ func stoppedFollowerPlacement(t *testing.T, size int) {
 		t.Fatal("retained survivor failed under staged drift", err)
 	}
 	inspectHealth(true)
-	assertBlocked()
+	assertStagedInert()
 	if err := exactOwnedValues(ctx, c, base, "work", expected); err != nil {
 		t.Fatal(err)
 	}

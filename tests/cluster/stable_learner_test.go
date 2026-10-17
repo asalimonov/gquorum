@@ -138,7 +138,7 @@ func TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn(t *testing.T)
 		if err != nil {
 			return false, err
 		}
-		if status.Operator != nil && status.Operator.State != topology.OperatorSucceeded {
+		if operation, found := operationAtVersion(status, doc.Version); found && operation.State != topology.OperationSucceeded {
 			return false, nil
 		}
 		converged = doc
@@ -156,7 +156,7 @@ func TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn(t *testing.T)
 		if err != nil {
 			return false, err
 		}
-		if snapshot.ActiveVersion != converged.Version || !snapshot.IsCollectorLeader {
+		if snapshot.TargetVersion != converged.Version || !snapshot.IsCollectorLeader {
 			return false, nil
 		}
 		for _, id := range []string{topology.MetaGroupID, "work"} {
@@ -210,7 +210,7 @@ func TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn(t *testing.T)
 	var cooldownDeadline time.Time
 	if err := Poll(ctx, func() (bool, error) {
 		snapshot, err := clusterMetrics(ctx, c, collector)
-		if err != nil || !snapshot.IsCollectorLeader || snapshot.ActiveVersion != converged.Version {
+		if err != nil || !snapshot.IsCollectorLeader || snapshot.TargetVersion != converged.Version {
 			return false, err
 		}
 		ready := 0
@@ -298,7 +298,8 @@ func TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn(t *testing.T)
 			return false, err
 		}
 		status, err := c.Status(withinCooldown, collector)
-		return err == nil && status.Operator != nil && status.Operator.State == topology.OperatorSucceeded && status.Operator.Version == doc.Version, err
+		operation, found := operationAtVersion(status, doc.Version)
+		return err == nil && found && operation.State == topology.OperationSucceeded, err
 	}); err != nil {
 		snapshot, readErr := clusterMetrics(context.Background(), c, collector)
 		t.Logf("metrics after second failure: %+v %v", snapshot, readErr)

@@ -82,13 +82,13 @@ func assertFoundedTopology(ctx context.Context, t *testing.T, c *Cluster) topolo
 			if err != nil {
 				return false, err
 			}
-			if status.MetaLeaderID == 0 || !status.SessionLive || status.ActiveVersion != doc.Version {
+			if status.MetaLeaderID == 0 || !status.SessionLive || status.FullyConverged.Version != doc.Version {
 				return false, fmt.Errorf("meta not activated: %+v", status)
 			}
 			for _, group := range []string{topology.MetaGroupID, "demo", "workers"} {
 				found := false
 				for _, observed := range status.Groups {
-					if observed.GroupID == group && observed.LeaderID != 0 {
+					if observed.GroupID == group && observed.Observation != nil && observed.Observation.LeaderID != 0 {
 						found = true
 					}
 				}

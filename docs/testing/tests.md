@@ -22,7 +22,7 @@ Put each build constraint at the top of the file, followed by a blank line befor
 `package`. Shared helper-only files may retain their existing names, such as
 `fixtures_test.go`. Unit helpers used only by units stay with their unit files.
 
-`make test-function` uses `go test -tags=functional` in all four modules, so it
+`make test-function` uses `go test -tags=functional` in all five application modules, so it
 runs only functional tests. The `!functional` constraint excludes unit tests
 from that command; default `go test` excludes functional files. Classification
 does not depend on `testing.Short()` or per-test skip guards. Lightweight value
@@ -204,12 +204,12 @@ Use `make test-cluster-run CLUSTER_ARGS='-race -v -run TestRuntimeGrowth'` to
 reuse a built image for focused checks. Short or focused runs complement the
 complete regression.
 
-See [the source inventory](../brainstorms/20261010-raft-library-test-port.md),
+See the [process migration map](cluster-migration.md),
 [process harness](../../tests/cluster/README.md),
 [Node ownership](../architecture/runtime.md) and
 [measured performance gates](performance.md). Milestone validation and earlier
-timings are retained in the [implementation log](../plans/20261010-implementation.md)
-and repository history.
+timings remain historical records in repository history. Current scoped validation
+is recorded in the [implementation log](../plans/20261015-failure-isolation-and-operational-api.md#progress-log).
 
 The scheduler module has unit validation (CAS transitions, codec, revocation
 rules, executor choice, configuration) and functional SQLite/FSM, snapshot,
@@ -225,13 +225,55 @@ the shared `storagetest.Run` conformance suite plus snapshot, retirement and
 ownership cases without touching disk. `internal/managed` functional tests check
 store selection by storage class, conflicting state, retirement through the
 memory store and the own-reseat loop (memory voters only, pinned to the observed
-Active version, joined on Stop). A root functional test creates a memory group
+proven group source plus Latest/Target CAS, joined on Stop). A root functional test creates a memory group
 with `EnsureGroup`. `TestMemoryGroupReseatsARestartedReplicaThreeNodes` in
 `tests/cluster` restarts a node and verifies that its memory replica is reseated
-without an operator while its persistent replica keeps its identity. The
+without human intervention while its persistent replica keeps its identity. The
 in-memory cache example's functional test closes and reopens a WAL store with
 `DisableFSync` enabled, rebuilding a fresh cache machine from snapshots and log.
 `make test-cache-example` runs the actual three-node cache Compose application
 with private volumes, ports and an image tag. It kills/restarts one process and
 then all three, verifying retained values, unchanged replica IDs and new writes.
 It exercises process failure with the OS running, not host/VM power loss.
+
+## Scoped operations and cleanup validation
+
+All five application modules are the root library, `examples/cluster`,
+`examples/scheduler`, `examples/inmemory-cache` and `tests/cluster` (including
+its caller fixture). The lint wrapper is separate tooling. Component tests stay
+beside their owners: metadata planning/Apply/restore/progress are units; actual
+bbolt/WAL, Node, managed owners and protocol doubles use `functional`. New
+three-process acceptance cases use the existing Docker pool:
+
+| Case | Boundary exercised |
+| --- | --- |
+| `TestFailureIsolation_BlockedGroup` | Hold A's founding effect; B creates, reseats and serves while A retains original owner/source and the historical marker stays behind. |
+| `TestFailureIsolation_StagedRebase` | Repair B preserves unapproved A through atomic R/S ancestry, meta leader loss/retained restart and typed old-version conflict. |
+| `TestFailureIsolation_RemovedHostCleanup` | Offline former host leaves exact debt; surviving quorum converges, return retires/collects, stale cleanup cannot affect a fresh-ID successor. |
+| `TestFailureIsolation_DeletionStopProof` | Missing exact stop keeps whole-group deletion pending while an independent group converges and serves. |
+| `TestFailureIsolation_CollectionReporting` | Hold durable report, lose metadata quorum, crash reporter, inspect stopped journal, restart and deliver original receipt without redoing deletion. |
+| `TestFailureIsolation_ExactMutationReplay` | Lose accepted HTTP replies to Stage/Approve/Reseat/Retry; original request returns the same version, identity and immediate attempt. |
+
+Build only after application changes settle, then reuse the image:
+
+```sh
+make test-cluster-build
+make test-cluster-run CLUSTER_ARGS='-v -run ^TestFailureIsolation_'
+make test-cluster-run
+```
+
+`BenchmarkCleanupDebtApply` lives in the functional suite because it opens a real
+store. It scales validated retained proof at 0/1k/10k debts and measures changed
+Apply serialization, bbolt bytes/allocations, snapshot/restore and bounded query
+selection. Run independently of other heavy checks to reduce measurement noise:
+
+```sh
+go test -tags=functional -run '^$' -bench '^BenchmarkCleanupDebtApply$' -benchmem -count=3 ./internal/metaengine
+```
+
+These are coverage locations and commands, not a claim that a listed process
+scenario has passed. Actual revisions, image/report paths, outcomes and cleanup
+are recorded in the [implementation log](../plans/20261015-failure-isolation-and-operational-api.md#progress-log).
+The final scoped architecture review requires complete functional,
+functional-race and cluster runs after any corrections; earlier runs do not
+replace that final gate.

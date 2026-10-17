@@ -43,7 +43,7 @@ func TestMetaConsensusLoadReplicationAndRetainedLeaderRecoveryThreeNodes(t *test
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !status.SessionLive || status.ActiveVersion != doc.Version || len(status.Groups) != 1 || len(status.Groups[0].ConfState.Voters) != size {
+		if !status.SessionLive || status.FullyConverged.Version != doc.Version || len(status.Groups) != 1 || status.Groups[0].Observation == nil || len(status.Groups[0].Observation.ConfState.Voters) != size {
 			t.Fatal("founder did not join meta", node.Spec.Name, status)
 		}
 	}

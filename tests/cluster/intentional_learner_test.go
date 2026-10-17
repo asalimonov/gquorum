@@ -108,13 +108,13 @@ observe:
 				return false, err
 			}
 			r := status.Scheduling
-			if r.Enabled && r.IsLeader && r.State == topology.SchedulingBlocked && r.Reason == "staged_latest" {
+			if r.Enabled && r.IsLeader && r.State == topology.SchedulingWaiting && r.Reason == "pinned_learner" {
 				return true, assertLearner()
 			}
 		}
 		return false, nil
 	}); err != nil {
-		t.Fatal("staged promotion did not leave the learner intact and block repair", err)
+		t.Fatal("staged promotion changed approved pinned-learner scheduling", err)
 	}
 	if _, err := c.Approve(ctx, "node2", staged.Document.Version); err != nil {
 		t.Fatal(err)

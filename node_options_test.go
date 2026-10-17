@@ -73,7 +73,7 @@ func TestNodeOptionsPureDefaultsAndStorageSelection(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if d.Identity.MemberID != 1 || d.Node.Type != "worker" || d.Limits != (topology.Limits{MaxNodes: 3, MaxReplicas: 5, MaxPendingAuthorityRecords: 1024}) || d.Meta.Timing != DefaultMetaTiming() || d.Meta.SessionTTL != 15*time.Second || d.Meta.MaxWatchers != 256 || d.Meta.SnapshotThreshold != 512 || d.Meta.Network.MaxSnapshotBytes != 64<<20 {
+			if d.Identity.MemberID != 1 || d.Node.Type != "worker" || d.Limits != (topology.Limits{MaxNodes: 3, MaxReplicas: 5, MaxConcurrentGroups: 4, MaxConcurrentCleanup: 2}) || d.Meta.Timing != DefaultMetaTiming() || d.Meta.SessionTTL != 15*time.Second || d.Meta.MaxWatchers != 256 || d.Meta.SnapshotThreshold != 512 || d.Meta.Network.MaxSnapshotBytes != 64<<20 {
 				t.Fatal("incorrect node defaults", d)
 			}
 			if d.Meta.Observation != (ObservationOptions{Interval: 5 * time.Second, Timeout: 2 * time.Second}) || (d.Scheduling.Disabled || d.Scheduling.Interval != 30*time.Second || d.Scheduling.Timeout != 20*time.Second || d.Scheduling.Cooldown != 5*time.Minute) || d.CallbackTimeout != 10*time.Second {

@@ -51,7 +51,8 @@ func TestStagedTopologyDoesNotChangeApprovedMembershipOrStartGroups(t *testing.T
 		}
 		for _, node := range c.Nodes() {
 			status, err := c.Status(ctx, node.Spec.Name)
-			if err != nil || status.LatestVersion != latestVersion || status.TargetVersion != base.Version || status.ActiveVersion != base.Version || status.Operator == nil || status.Operator.ID != created.OperatorID || status.Operator.State != topology.OperatorSucceeded {
+			operation, found := operationSummary(status, created.OperationID)
+			if err != nil || status.LatestVersion != latestVersion || status.TargetVersion != base.Version || status.FullyConverged.Version != base.Version || !found || operation.State != topology.OperationSucceeded {
 				t.Fatal("staging changed an approved view or started an execution", node.Spec.Name, status, err)
 			}
 			for _, view := range []string{"target", "active"} {
@@ -176,18 +177,19 @@ func stagedReplicaRepair(t *testing.T, size int) {
 		}
 	}
 	waitLatest(staged.Document.Version)
-	// Cross fifteen configured policy ticks. The active controller must report
-	// staged_latest; merely observing an unchanged document once is insufficient.
+	// Cross fifteen configured policy ticks. Healthy approved membership remains
+	// converged; staged intent is not itself a global scheduling gate.
 	until := time.Now().Add(3 * time.Second)
-	blocked, samples := false, 0
+	observed, samples := false, 0
 	for time.Now().Before(until) {
 		for _, node := range c.Nodes() {
 			status, err := c.Status(ctx, node.Spec.Name)
-			if err != nil || status.LatestVersion != staged.Document.Version || status.TargetVersion != created.Document.Version || status.ActiveVersion != created.Document.Version {
+			if err != nil || status.LatestVersion != staged.Document.Version || status.TargetVersion != created.Document.Version || status.FullyConverged.Version != created.Document.Version {
 				t.Fatal("reconciler overwrote unapproved operator intent", node.Spec.Name, status, err)
 			}
 			r := status.Scheduling
-			blocked = blocked || r.Enabled && r.IsLeader && r.State == topology.SchedulingBlocked && r.Reason == "staged_latest"
+			observed = observed || r.Enabled && r.IsLeader && r.CurrentOperationID == nil &&
+				(r.State == topology.SchedulingIdle || r.State == topology.SchedulingWaiting)
 		}
 		local, err := c.Local(ctx, "node3", "work")
 		if err != nil || local.ReplicaID != oldID || !slices.Contains(local.Status.ConfState.Voters, oldID) || !maps.Equal(local.Values, expected) {
@@ -202,16 +204,18 @@ func stagedReplicaRepair(t *testing.T, size int) {
 		case <-timer.C:
 		}
 	}
-	if !blocked || samples < 10 {
-		t.Fatal("automatic controller never observed staged protection", blocked, samples)
+	if !observed || samples < 10 {
+		t.Fatal("automatic controller never observed unchanged approved convergence", observed, samples)
 	}
 	removeID, err := c.Approve(ctx, "node2", staged.Document.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
-	removed, err := c.Local(ctx, "node3", "work")
-	if err != nil || removed.Found || removed.StorageIdentity != nil {
-		t.Fatal("approved removal retained local voting handle", removed, err)
+	if err := Poll(ctx, func() (bool, error) {
+		removed, err := c.Local(ctx, "node3", "work")
+		return err == nil && !removed.Found && removed.StorageIdentity == nil, err
+	}); err != nil {
+		t.Fatal("detached cleanup did not release the removed owner", err)
 	}
 	repaired := staged.Document.Clone()
 	freshID, err := repaired.Group("work").AllocateReplicaID()

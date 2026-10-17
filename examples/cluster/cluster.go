@@ -84,25 +84,36 @@ func newNode(cfg config) (nodeResources, error) {
 type readiness struct {
 	Node          string `json:"node"`
 	SessionLive   bool   `json:"session_live"`
-	ActiveVersion uint64 `json:"active_version"`
+	TargetVersion uint64 `json:"target_version"`
 }
 
 func readReadiness(ctx context.Context, node gquorum.Node) (readiness, error) {
 	// Startup returns before quorum readiness. Serve ready only after
-	// admission, a live session and approved Active topology agree that this
+	// admission, a live session and approved node intent agree that this
 	// node may serve.
 	status := node.Status()
 	if !status.Ready || !status.SessionLive {
 		return readiness{}, fault.ErrReplicaNotReady
 	}
-	active, err := node.Cluster().Active(ctx)
-	if err != nil {
-		return readiness{}, err
-	}
 	name := node.Identity().NodeName
-	member := active.Node(name)
-	if member == nil || member.State != topology.NodeActive {
-		return readiness{}, fault.ErrReplicaNotReady
+	query := topology.ProgressQuery{NodeName: name}
+	for {
+		progress, err := node.Cluster().ReadProgress(ctx, query)
+		if err != nil {
+			return readiness{}, err
+		}
+		for _, row := range progress.Nodes {
+			if row.NodeName != name {
+				continue
+			}
+			if row.Approved == nil || row.Approved.State != topology.NodeActive {
+				return readiness{}, fault.ErrReplicaNotReady
+			}
+			return readiness{Node: name, SessionLive: true, TargetVersion: progress.TargetVersion}, nil
+		}
+		if progress.Next == "" {
+			return readiness{}, fault.ErrReplicaNotReady
+		}
+		query.After = progress.Next
 	}
-	return readiness{Node: name, SessionLive: true, ActiveVersion: active.Version}, nil
 }

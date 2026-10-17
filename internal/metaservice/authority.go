@@ -18,6 +18,11 @@ func (g *Group) BeginEffect(ctx context.Context, action topology.AuthorizedStep)
 	if err != nil {
 		return topology.AuthorityGrant{}, err
 	}
+	return g.issuedEffect(ctx, result, action)
+}
+
+func (g *Group) issuedEffect(ctx context.Context, result metaengine.ApplyResult,
+	action topology.AuthorizedStep) (topology.AuthorityGrant, error) {
 	if result.Grant == nil || result.Grant.Action == nil || *result.Grant.Action != action ||
 		result.Grant.Validate() != nil {
 		return topology.AuthorityGrant{}, fault.ErrUnreadable
@@ -32,7 +37,7 @@ func (g *Group) BeginEffect(ctx context.Context, action topology.AuthorizedStep)
 		return topology.AuthorityGrant{}, err
 	}
 	if proof.Grant == nil || !proof.Grant.Equal(*result.Grant) {
-		return topology.AuthorityGrant{}, fault.ErrOperatorAuthorization
+		return topology.AuthorityGrant{}, fault.ErrOperationAuthorization
 	}
 	if proof.Courier != id {
 		return topology.AuthorityGrant{}, fault.ErrReplicaNotReady
@@ -64,7 +69,7 @@ func (g *Group) ValidateGrant(parent context.Context, grant topology.AuthorityGr
 		return err
 	}
 	if proof.Grant == nil {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	if !proof.Grant.Equal(grant) {
 		return fault.ErrIdentityMismatch
@@ -88,14 +93,15 @@ func (g *Group) ReadGrant(ctx context.Context, key topology.AuthorityKey) (topol
 // RecordFence proposes durable resource fence installation evidence to meta
 // consensus.
 func (g *Group) RecordFence(ctx context.Context, evidence topology.FenceEvidence) error {
-	_, err := g.propose(ctx, metaengine.RecordFenceProposal{Evidence: evidence})
+	_, err := g.propose(ctx, metaengine.RecordFenceProposal{Evidence: evidence, ProposalID: newProposalID()})
 	return err
 }
 
 // RecordEffect proposes exact durable effect consumption evidence to meta
 // consensus.
 func (g *Group) RecordEffect(ctx context.Context, receipt topology.EffectReceipt) error {
-	_, err := g.propose(ctx, metaengine.RecordEffectProposal{Receipt: receipt.Clone()})
+	_, err := g.propose(ctx, metaengine.RecordEffectProposal{Receipt: receipt.Clone(), At: time.Now().UTC(),
+		ProposalID: newProposalID()})
 	return err
 }
 
@@ -116,7 +122,7 @@ func (g *Group) ResolveAuthorityPeer(ctx context.Context, grant topology.Authori
 		return load.Peer{}, err
 	}
 	if !slices.Contains(grant.Targets, target) {
-		return load.Peer{}, fault.ErrOperatorAuthorization
+		return load.Peer{}, fault.ErrOperationAuthorization
 	}
 	id := g.Identity()
 	if target.NodeName != id.NodeName {
@@ -143,16 +149,16 @@ func (g *Group) ReadAuthorityFloors(ctx context.Context, node string) ([]topolog
 
 // ReadAuthority performs a confirmed query of an operator's revocation
 // obligations.
-func (g *Group) ReadAuthority(ctx context.Context, id topology.OperatorID) (topology.AuthorityStatus, error) {
+func (g *Group) ReadAuthority(ctx context.Context, id topology.OperationID) (topology.AuthorityStatus, error) {
 	var result topology.AuthorityStatus
-	err := g.read(ctx, metaengine.QueryRequest{Kind: "authority", OperatorID: id}, &result)
+	err := g.read(ctx, metaengine.QueryRequest{Kind: "authority", OperationID: id}, &result)
 	return result, err
 }
 
 // WaitRevoked returns only a durably completed requested revocation. A
 // currently
 // empty prerequisite list is not proof that revocation was ever requested.
-func (g *Group) WaitRevoked(ctx context.Context, id topology.OperatorID) (topology.AuthorityStatus, error) {
+func (g *Group) WaitRevoked(ctx context.Context, id topology.OperationID) (topology.AuthorityStatus, error) {
 	tick := time.NewTicker(20 * time.Millisecond)
 	defer tick.Stop()
 	for {
@@ -198,7 +204,7 @@ func (g *Group) InstallFence(parent context.Context, request load.FenceRequest) 
 	}
 	if request.Resource.GroupID != request.Grant.Key.GroupID ||
 		!slices.Contains(request.Grant.Resources, request.Resource) {
-		return load.FenceResult{}, fault.ErrOperatorAuthorization
+		return load.FenceResult{}, fault.ErrOperationAuthorization
 	}
 	if request.Resource.Kind == topology.AuthorityGroup && request.Resource.GroupID == topology.MetaGroupID {
 		return g.installMetaFence(ctx, request)

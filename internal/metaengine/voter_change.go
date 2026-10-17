@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"reflect"
 	"strings"
 	"time"
 
@@ -23,7 +22,7 @@ func VoterChangeDocument(base topology.Document, change topology.VoterChange, at
 	next := base.Clone()
 	g := next.Group(change.GroupID)
 	if g == nil || g.VoterConfig == nil {
-		return topology.Document{}, fault.ErrOperatorAuthorization
+		return topology.Document{}, fault.ErrOperationAuthorization
 	}
 	count := len(base.VotersOf(change.GroupID))
 	if err := validateVoterCountChange(count, g.VoterConfig.TargetVoters, change); err != nil {
@@ -55,15 +54,15 @@ func validateVoterCountChange(count, target int, change topology.VoterChange) er
 	switch {
 	case change.Promote != nil && change.Demote != nil:
 		if *change.Promote == *change.Demote || count != target {
-			return fault.ErrOperatorAuthorization
+			return fault.ErrOperationAuthorization
 		}
 	case change.Promote != nil:
 		if count >= target {
-			return fault.ErrOperatorAuthorization
+			return fault.ErrOperationAuthorization
 		}
 	case change.Demote != nil:
 		if count <= target {
-			return fault.ErrOperatorAuthorization
+			return fault.ErrOperationAuthorization
 		}
 	default: // A change without either role was rejected above.
 	}
@@ -82,39 +81,23 @@ func (editor voterRoleEditor) edit(key *topology.ReplicaKey, from, to topology.R
 	}
 	r := documentReplica(editor.document, editor.group, key.ReplicaID)
 	if r == nil || r.NodeName != key.NodeName || r.Role != from || r.PinnedLearner {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	n := editor.document.Node(r.NodeName)
 	if n == nil || to == topology.ReplicaVoter && n.State != topology.NodeActive || !n.State.Places() {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	r.Role, r.UpdatedAt = to, editor.at
 	return nil
 }
 
-func validateVoterChangeDocument(base, next topology.Document, change topology.VoterChange) error {
-	g := next.Group(change.GroupID)
-	if g == nil {
-		return fault.ErrOperatorAuthorization
-	}
-	want, err := VoterChangeDocument(base, change, g.UpdatedAt, next.ChangedBy)
-	if err != nil {
-		return err
-	}
-	if !reflect.DeepEqual(want, next) {
-		return errors.New("voter change edits fields outside exact role scope")
-	}
-	return nil
-}
-
-func validateVoterChangePlan(base, next topology.Document, change topology.VoterChange, plan topology.Plan) error {
-	if err := topology.ValidatePlanShape(base, next, plan); err != nil {
-		return err
-	}
+// Both approval paths apply the same surge, placement, transfer and quorum guards.
+func validateVoterChangeSteps(next topology.Document, change topology.VoterChange,
+	plan topology.Plan, voters []uint64) error {
 	check := voterPlanCheck{next: next, change: change, plan: plan,
 		voters: make(map[uint64]bool), policy: next.Group(change.GroupID).VoterConfig}
-	for _, r := range base.VotersOf(change.GroupID) {
-		check.voters[r.ReplicaID] = true
+	for _, id := range voters {
+		check.voters[id] = true
 	}
 	for _, step := range plan.Steps {
 		if err := check.step(step); err != nil {
@@ -162,7 +145,7 @@ func (check *voterPlanCheck) step(s topology.Step) error {
 func (check *voterPlanCheck) waitCaughtUp(s topology.Step) error {
 	if check.promoted || check.waits >= 2 || check.waits == 1 && !check.demoted ||
 		!exactVoterStep(check.change.Promote, s) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	check.waits++
 	return nil
@@ -170,7 +153,7 @@ func (check *voterPlanCheck) waitCaughtUp(s topology.Step) error {
 
 func (check *voterPlanCheck) promote(s topology.Step) error {
 	if check.waits == 0 || check.promoted || check.voters[s.ReplicaID] || !exactVoterStep(check.change.Promote, s) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	if len(check.voters) >= check.policy.TargetVoters &&
 		len(check.voters)-check.policy.TargetVoters >= check.policy.MaxSurgeVoters {
@@ -187,7 +170,7 @@ func (check *voterPlanCheck) promote(s topology.Step) error {
 func (check *voterPlanCheck) demote(s topology.Step) error {
 	if check.demoted || !check.voters[s.ReplicaID] || s.TransferReplicaID == 0 || !check.voters[s.TransferReplicaID] ||
 		!exactVoterStep(check.change.Demote, s) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	if len(check.voters)-1 < topology.QuorumOf(len(check.voters)) {
 		return errors.New("demotion crosses unsupported destructive quorum boundary")
@@ -200,58 +183,18 @@ func (check *voterPlanCheck) demote(s topology.Step) error {
 func (check *voterPlanCheck) transfer(s topology.Step) error {
 	if check.change.Demote == nil || check.demoted || check.transferred || !check.voters[s.ReplicaID] ||
 		s.ReplicaID == check.change.Demote.ReplicaID {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	// An explicit transfer is the prerequisite of this same victim's
 	// guarded demotion, never a second independent control action.
 	if s.Seq >= len(check.plan.Steps) {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	nextStep := check.plan.Steps[s.Seq]
 	if nextStep.Kind != topology.StepDemoteVoter || nextStep.TransferReplicaID != s.ReplicaID ||
 		nextStep.TransferNodeName != s.NodeName {
-		return fault.ErrOperatorAuthorization
+		return fault.ErrOperationAuthorization
 	}
 	check.transferred = true
 	return nil
-}
-
-func (sm *topologySM) applyCommitVoterChange(index uint64, p CommitVoterChangeProposal) (ApplyResult, bool) {
-	if p.ExpectedVersion != sm.latest.Version {
-		return rejectProposal(p.ProposalID, proposalVersionConflict, "expected Latest %d, current Latest %d",
-			p.ExpectedVersion, sm.latest.Version), false
-	}
-	if !reflect.DeepEqual(sm.latest, sm.target) || !reflect.DeepEqual(sm.target, sm.active) ||
-		sm.hasNonterminalOperatorLocked() {
-		return rejectProposal(p.ProposalID, proposalAuthorization,
-			"voter change requires converged views and no nonterminal execution"), false
-	}
-	if p.At.IsZero() {
-		return rejectProposal(p.ProposalID, proposalAuthorization, "voter change timestamp required"), false
-	}
-	doc := p.Doc.Clone()
-	if err := validateVoterChangeDocument(sm.active, doc, p.Change); err != nil {
-		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
-	}
-	if !doc.Group(p.Change.GroupID).UpdatedAt.Equal(p.At) {
-		return rejectProposal(p.ProposalID, proposalAuthorization, "voter change timestamp differs"), false
-	}
-	if err := validateVoterChangePlan(sm.active, doc, p.Change, p.Plan); err != nil {
-		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
-	}
-	if err := sm.validateDocument(doc); err != nil {
-		return rejectProposalError(p.ProposalID, proposalGuardrail, err), false
-	}
-	oldAuthority := sm.authority
-	if err := sm.revokeAuthorityLocked(index, nil, topology.MakeOperatorID(doc.Version, 1)); err != nil {
-		return rejectProposal(p.ProposalID, proposalOverloaded, "cannot reserve revocation: %v", err), false
-	}
-	if err := sm.commitLatestLocked(&doc); err != nil {
-		sm.authority = oldAuthority
-		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
-	}
-	sm.target = doc.Clone()
-	rec := newOperatorRecordWithPlan(p.Plan, 1, operatorAudit{doc.ChangedBy, doc.Origin, p.At})
-	sm.operators[rec.ID] = &rec
-	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, Doc: doc.Clone(), OperatorID: rec.ID}, true
 }

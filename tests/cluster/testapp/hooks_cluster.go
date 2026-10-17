@@ -43,6 +43,8 @@ type effectBarrier struct {
 	after   bool
 }
 type clusterHooks struct {
+	collectionReport  collectionReportControl
+	collections       map[storage.Identity]uint64
 	runtime           runtimeHooks
 	mu                sync.Mutex
 	barriers          map[effectKey]*effectBarrier
@@ -183,6 +185,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 	a.registerReadRoutes(mux, protect)
 	a.registerAuthorityRoutes(mux, protect)
 	a.registerProjectionRoutes(mux, protect)
+	a.registerCollectionRoutes(mux, protect)
 	mux.HandleFunc("GET /internal/test/meta-backups", protect(func(w http.ResponseWriter, _ *http.Request) {
 		paths, err := filepath.Glob(filepath.Join(a.cfg.DataDir, "_meta.bolt.retired-*"))
 		if err != nil {

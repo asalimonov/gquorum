@@ -27,7 +27,11 @@ func TestAuthorityGroupRevocationRemainsPendingWithoutLoadQuorumThreeNodes(t *te
 	if err := c.SetBarrier(ctx, "node1", "work", topology.StepDemoteVoter, true); err != nil {
 		t.Fatal(err)
 	}
+	actionHeld := true
 	t.Cleanup(func() {
+		if !actionHeld {
+			return
+		}
 		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := c.SetBarrier(cleanup, "node1", "work", topology.StepDemoteVoter, false); err != nil {
@@ -52,7 +56,7 @@ func TestAuthorityGroupRevocationRemainsPendingWithoutLoadQuorumThreeNodes(t *te
 	if err := Poll(ctx, func() (bool, error) {
 		view, err := c.Authority(ctx, "node1", "work")
 		for _, action := range view.Actions {
-			if action.Authorization.OperatorID == old && action.Authorization.Kind == topology.StepDemoteVoter {
+			if action.Authorization.OperationID == old && action.Authorization.Kind == topology.StepDemoteVoter {
 				delayed = action
 				return true, err
 			}
@@ -129,8 +133,12 @@ func TestAuthorityGroupRevocationRemainsPendingWithoutLoadQuorumThreeNodes(t *te
 		if !pending {
 			t.Fatal("load group lost its pending resource obligation", status)
 		}
-		op, err := c.Operator(ctx, node, newOp)
-		if err != nil || op.State.Terminal() || op.TotalSteps != 0 {
+		op, err := c.Operation(ctx, node, newOp)
+		totalSteps := 0
+		for _, block := range op.Blocks {
+			totalSteps += block.TotalSteps
+		}
+		if err != nil || op.State.Terminal() || totalSteps != 0 {
 			t.Fatal("empty successor bypassed its no-quorum revocation", op, err)
 		}
 		active, err := c.Document(ctx, node, "active")
@@ -141,17 +149,41 @@ func TestAuthorityGroupRevocationRemainsPendingWithoutLoadQuorumThreeNodes(t *te
 	for node, local := range blocked {
 		clearReadFault(ctx, t, c, node, local)
 	}
-	if err := c.WaitOperator(ctx, "node2", newOp); err != nil {
-		t.Fatal("restored load quorum did not complete the real resource fence", err)
-	}
-	if err := c.WaitActive(ctx, newStage.Document.Version); err != nil {
-		t.Fatal(err)
-	}
 	if err := Poll(ctx, func() (bool, error) {
 		status, err := c.Revocation(ctx, "node3", old)
 		return err == nil && status.RevocationRequested && status.RevocationComplete, err
 	}); err != nil {
+		t.Fatal("restored quorum did not confirm the resource fence", err)
+	}
+	if err := Poll(ctx, func() (bool, error) {
+		status, err := c.Operation(ctx, "node2", newOp)
+		block, found := operationBlock(status, "work")
+		return found && block.Blocked != nil && block.Blocked.Code == "membership_unproven", err
+	}); err != nil {
+		t.Fatal("a fence incorrectly proved the old demotion outcome", err)
+	}
+	if err := c.SetBarrier(ctx, "node1", "work", topology.StepDemoteVoter, false); err != nil {
 		t.Fatal(err)
+	}
+	actionHeld = false
+	// Obtain explicit new-grant receipts before declaring the original voting
+	// configuration converged. Fencing alone cannot prove non-execution.
+	demoted.Version = newStage.Document.Version
+	confirmed, err := c.Stage(ctx, "node2", demoted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Approve(ctx, "node2", confirmed.Document.Version); err != nil {
+		t.Fatal("confirm demotion after fencing", err)
+	}
+	restored := original.Clone()
+	restored.Version = confirmed.Document.Version
+	confirmed, err = c.Stage(ctx, "node2", restored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Approve(ctx, "node2", confirmed.Document.Version); err != nil {
+		t.Fatal("restore confirmed membership", err)
 	}
 	status, err := groupStatus(ctx, c, "node2", "work")
 	if err != nil || status.LeaderID == 0 {

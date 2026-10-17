@@ -111,7 +111,7 @@ func (a *application) groupStatus(ctx context.Context, id string) (topology.Grou
 			return status, nil
 		}
 	}
-	active, err := a.cluster.Active(ctx)
+	active, err := a.cluster.Target(ctx)
 	if err != nil {
 		return topology.GroupStatus{}, err
 	}

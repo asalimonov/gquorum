@@ -5,7 +5,9 @@ package managed
 import (
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metastore"
+	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/storage"
+	"github.com/asalimonov/gquorum/topology"
 	"testing"
 )
 
@@ -50,5 +52,19 @@ func TestLoadBootCurrentFormatMatrix(t *testing.T) {
 				t.Fatal(got, reason)
 			}
 		})
+	}
+}
+
+func TestReplicaFoundingSeedUsesImmutableGrantTargets(t *testing.T) {
+	t.Parallel()
+	scope := metaengine.LoadScope{Founding: true, Group: topology.Group{ID: "work", Replicas: []topology.Replica{{NodeName: "later", ReplicaID: 99, Role: topology.ReplicaVoter}}}}
+	grant := &topology.AuthorityGrant{Targets: []topology.AuthorityTarget{{NodeName: "a", MemberID: 1, ReplicaID: 2}, {NodeName: "b", MemberID: 2, ReplicaID: 7}}}
+	seed := replicaMembership(scope, storage.Probe{}, grant)
+	if seed.mode != raftengine.Founding || len(seed.peers) != 2 || seed.peers[0].ID != 2 || seed.peers[1].ID != 7 {
+		t.Fatal("seed came from newer approved declaration", seed)
+	}
+	retained := replicaMembership(scope, storage.Probe{HasLog: true}, grant)
+	if retained.mode != raftengine.Joining || len(retained.peers) != 0 {
+		t.Fatal("retained log received founding seed", retained)
 	}
 }

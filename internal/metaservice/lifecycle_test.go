@@ -45,7 +45,7 @@ func TestLifecycleCallGatesRefuseQuiescentBeforeWait(t *testing.T) {
 	if _, err := g.beginRPC(parent); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal(err)
 	}
-	if err := g.Authorize(parent, topology.AuthorizedStep{}); !errors.Is(err, fault.ErrStopped) {
+	if _, err := g.BeginEffect(parent, topology.AuthorizedStep{}); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal("authorized frozen state", err)
 	}
 	g.sessionToken = make(chan struct{}, 1)

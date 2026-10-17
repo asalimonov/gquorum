@@ -5,6 +5,7 @@ package metaservice
 import (
 	"context"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -20,6 +21,8 @@ type verifiedLoadController struct {
 	mu           sync.Mutex
 	meta         []*Group
 	groups       map[string]topology.Group
+	grants       map[string]topology.AuthorityGrant
+	deleted      chan struct{}
 	hosts        map[string]map[string]uint64
 	creates      int
 	firstEffect  chan struct{}
@@ -48,7 +51,14 @@ func (c *verifiedLoadController) ReadNative(ctx context.Context, id string, _ ..
 	if err == nil && !status.Found {
 		err = fault.ErrUnavailable
 	}
-	return topology.NativeState{GroupID: id, ReplicaID: 1, Applied: 1, ConfState: status.ConfState}, err
+	native := topology.NativeState{GroupID: id, ReplicaID: 1, Applied: 1, ConfState: status.ConfState}
+	c.mu.Lock()
+	if grant, found := c.grants[id]; found {
+		owned := grant.Clone()
+		native.Grant = &owned
+	}
+	c.mu.Unlock()
+	return native, err
 }
 func (c *verifiedLoadController) Status(ctx context.Context, id string) (topology.GroupStatus, error) {
 	if err := ctx.Err(); err != nil {
@@ -96,6 +106,10 @@ func (c *verifiedLoadController) CreateGroup(ctx context.Context, grant topology
 		}
 		return protocolEffectReceipts(grant), nil
 	}
+	if c.grants == nil {
+		c.grants = make(map[string]topology.AuthorityGrant)
+	}
+	c.grants[a.GroupID] = grant.Clone()
 	c.groups[a.GroupID] = *wanted
 	c.hosts[a.GroupID] = map[string]uint64{}
 	for _, r := range wanted.Replicas {
@@ -117,18 +131,7 @@ func (c *verifiedLoadController) CreateGroup(ctx context.Context, grant topology
 	}
 	return protocolEffectReceipts(grant), nil
 }
-func (_ *verifiedLoadController) PrepareReplica(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return nil, fault.ErrUnsupported
-}
-func (_ *verifiedLoadController) ApplyMembership(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return nil, fault.ErrUnsupported
-}
-func (_ *verifiedLoadController) TransferLeader(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return nil, fault.ErrUnsupported
-}
-func (_ *verifiedLoadController) CleanupReplicaState(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return nil, fault.ErrUnsupported
-}
+
 func (c *verifiedLoadController) StopReplica(ctx context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
 	a := *grant.Action
 	if _, err := c.authorized(ctx, grant); err != nil {
@@ -137,7 +140,7 @@ func (c *verifiedLoadController) StopReplica(ctx context.Context, grant topology
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if a.Kind != topology.StepStopReplica {
-		return nil, fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperationAuthorization
 	}
 	if existing := c.hosts[a.GroupID][a.NodeName]; existing != 0 && existing != a.ReplicaID {
 		return nil, fault.ErrIdentityMismatch
@@ -153,21 +156,26 @@ func (c *verifiedLoadController) DeleteGroupState(ctx context.Context, grant top
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if a.Kind != topology.StepDeleteGroupState || a.NodeName != "" || a.ReplicaID != 0 {
-		return nil, fault.ErrOperatorAuthorization
+		return nil, fault.ErrOperationAuthorization
 	}
 	if len(c.hosts[a.GroupID]) > 0 {
 		return nil, fault.ErrReplicaNotReady
 	}
 	delete(c.groups, a.GroupID)
+	delete(c.grants, a.GroupID)
+	if c.deleted != nil {
+		close(c.deleted)
+		c.deleted = nil
+	}
 	delete(c.hosts, a.GroupID)
 	return protocolEffectReceipts(grant), nil
 }
 
-func TestMetaDeletesInterruptedFoundingBeforeActive(t *testing.T) {
+func TestMetaDeletesInterruptedFoundingBeforeConvergence(t *testing.T) {
 	t.Parallel()
 	release := make(chan struct{})
-	controller := &verifiedLoadController{groups: map[string]topology.Group{}, hosts: map[string]map[string]uint64{}, firstEffect: make(chan struct{}), firstRelease: release}
-	effect := controller.firstEffect
+	controller := &verifiedLoadController{groups: map[string]topology.Group{}, hosts: map[string]map[string]uint64{}, firstEffect: make(chan struct{}), firstRelease: release, deleted: make(chan struct{})}
+	effect, deleted := controller.firstEffect, controller.deleted
 	groups := singleMetaFixtureWith(t, func(o *Options) { o.LoadGroups = controller; o.InstallLocalFence = controller.installFence })
 	leader := readyPublic(t, groups)
 	controller.mu.Lock()
@@ -178,7 +186,7 @@ func TestMetaDeletesInterruptedFoundingBeforeActive(t *testing.T) {
 	if _, err := leader.Stage(ctx, loadDocument(t, leader), 1); err != nil {
 		t.Fatal(err)
 	}
-	creating, err := leader.Apply(ctx, 2)
+	creating, err := leader.Approve(ctx, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +195,7 @@ func TestMetaDeletesInterruptedFoundingBeforeActive(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("founding effect did not start")
 	}
-	active := leader.state().Active()
+	active := fixtureConvergedDocument(t, leader.state())
 	if active.Group("load-one") != nil {
 		t.Fatal("unacknowledged group reached Active")
 	}
@@ -201,18 +209,23 @@ func TestMetaDeletesInterruptedFoundingBeforeActive(t *testing.T) {
 	if _, err = leader.Stage(ctx, desired, 2); err != nil {
 		t.Fatal(err)
 	}
-	deleting, err := leader.Apply(ctx, 3)
+	deleting, err := leader.Approve(ctx, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
 	close(release) // The old RPC returns without a durable completion record.
-	status, err := leader.WaitOperator(ctx, deleting)
-	if err != nil || status.State != topology.OperatorSucceeded {
+	status, err := leader.WaitOperation(ctx, deleting)
+	if err != nil || status.State != topology.OperationSucceeded {
 		t.Fatal(status, err)
 	}
-	old, err := leader.Operator(ctx, creating)
-	if err != nil || old.State != topology.OperatorSuperseded {
+	old, err := leader.Operation(ctx, creating)
+	if err != nil || old.State != topology.OperationSuperseded {
 		t.Fatal(old, err)
+	}
+	select {
+	case <-deleted: // Physical cleanup is separate from required deletion completion.
+	case <-ctx.Done():
+		t.Fatal("detached deletion did not finish", ctx.Err())
 	}
 	controller.mu.Lock()
 	defer controller.mu.Unlock()
@@ -227,4 +240,33 @@ func loadDocument(t *testing.T, g *Group) topology.Document {
 	doc.Origin = topology.OriginOperator
 	doc.Groups = append(doc.Groups, topology.Group{ID: "load-one", NextReplicaID: 2, Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 1}, Replicas: []topology.Replica{{NodeName: "n1", ReplicaID: 1, Role: topology.ReplicaVoter}}})
 	return doc
+}
+
+func (c *verifiedLoadController) DispatchEffect(ctx context.Context, grant topology.AuthorityGrant,
+	resource topology.AuthorityResource, target topology.AuthorityTarget) (topology.EffectReceipt, error) {
+	if grant.Action == nil || !slices.Contains(grant.Resources, resource) ||
+		resource.Kind == topology.AuthorityHost && !slices.Contains(grant.Targets, target) {
+		return topology.EffectReceipt{}, fault.ErrOperationAuthorization
+	}
+	var receipts []topology.EffectReceipt
+	var err error
+	switch grant.Action.Kind {
+	case topology.StepCreateFoundingGroup:
+		receipts, err = c.CreateGroup(ctx, grant)
+	case topology.StepStopReplica:
+		receipts, err = c.StopReplica(ctx, grant)
+	case topology.StepDeleteGroupState:
+		receipts, err = c.DeleteGroupState(ctx, grant)
+	default:
+		return topology.EffectReceipt{}, fault.ErrUnsupported
+	}
+	for _, receipt := range receipts {
+		if receipt.Resource == resource && (resource.Kind == topology.AuthorityGroup || receipt.Target == target) {
+			return receipt, err
+		}
+	}
+	if err == nil {
+		err = fault.ErrOperationAuthorization
+	}
+	return topology.EffectReceipt{}, err
 }

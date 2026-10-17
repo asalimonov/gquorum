@@ -50,14 +50,23 @@ func TestReadmissionPlanUsesPreparationAsHostRetirementBoundary(t *testing.T) {
 				}
 			}
 			statuses[MetaGroupID] = meta
-			plan, err := BuildPlan(active, desired, statuses, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 4, MaxReplicas: 5}})
+			input := testPlanInput(active, statuses)
+			if mode == "already learner" || mode == "already voter" {
+				// Native progress belongs to a prior approved readmission. The
+				// successor changes these scopes without replaying its preparation.
+				input.Approved = desired.Clone()
+				desired.Version++
+				desired.MetaGroup().Labels = map[string]string{"edit": "successor"}
+				desired.Group(group).Labels = map[string]string{"edit": "successor"}
+			}
+			plan, err := BuildPlan(input, desired, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 4, MaxReplicas: 5}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(plan.Steps) == 0 || plan.Steps[0].GroupID != MetaGroupID {
-				t.Fatal("metadata admission must precede load work", plan)
+			if len(plan.Blocks) == 0 || plan.Blocks[0].GroupID != MetaGroupID {
+				t.Fatal("metadata admission scope must precede load work", plan)
 			}
-			if !ReadmissionCovers(active, desired, plan, "a") {
+			if !ReadmissionCovers(input, desired, plan, "a") {
 				t.Fatal("missing retirement boundary", plan)
 			}
 			for _, s := range plan.Steps {
@@ -74,7 +83,7 @@ func TestReadmissionPlanUsesPreparationAsHostRetirementBoundary(t *testing.T) {
 			}
 			incomplete := Plan{Version: plan.Version, Steps: slices.Clone(plan.Steps)}
 			incomplete.Steps = slices.DeleteFunc(incomplete.Steps, func(s Step) bool { return s.GroupID == MetaGroupID && s.Kind == StepPrepareReplica })
-			if ReadmissionCovers(active, desired, incomplete, "a") {
+			if ReadmissionCovers(convergedPlanInput(active), desired, incomplete, "a") {
 				t.Fatal("incomplete admission satisfied retirement")
 			}
 		})
@@ -99,11 +108,11 @@ func TestStrictMetaReadmissionPreservesDestructionFirstPair(t *testing.T) {
 	meta.HealthKnown = true
 	meta.LiveVoters = map[uint64]bool{1: true, 2: true}
 	status[MetaGroupID] = meta
-	plan, err := BuildPlan(active, desired, status, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 4, MaxReplicas: 5}})
+	plan, err := BuildPlan(testPlanInput(active, status), desired, Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: 4, MaxReplicas: 5}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ValidAdmissionSequence(plan.Steps, "c", 4, ReplicaVoter) || !ReadmissionCovers(active, desired, plan, "c") {
+	if !ValidAdmissionSequence(plan.Steps, "c", 4, ReplicaVoter) || !ReadmissionCovers(convergedPlanInput(active), desired, plan, "c") {
 		t.Fatal("paired strict readmission lost exact admission authority", plan)
 	}
 	var kinds []StepKind

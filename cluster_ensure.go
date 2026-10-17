@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -25,11 +24,11 @@ type EnsureOptions struct {
 
 const ensurePoll = 200 * time.Millisecond
 
-// EnsureGroup makes spec present in Active topology. It is idempotent across
-// retries, restarts and concurrent callers using the same spec and actor. It
-// approves only its own staged creation and never overwrites a different
-// group: those cases return fault.ErrConflict. The returned group is an
-// observation of Active, not a linearizable barrier.
+// EnsureGroup waits for the requested group to converge. It approves only the
+// caller's exact staged creation, identified by spec, actor and comment. A call
+// preserves its original creation CAS across uncertain replies. Conflicting
+// pending intent returns fault.ErrConflict; convergence is an observation, not
+// a linearizable barrier or a guarantee that a local replica is running.
 func (c *clusterView) EnsureGroup(ctx context.Context, spec GroupSpec, opts EnsureOptions) (topology.Group, error) {
 	if err := topology.ValidateLoadID(spec.ID); err != nil {
 		return topology.Group{}, err
@@ -40,14 +39,15 @@ func (c *clusterView) EnsureGroup(ctx context.Context, spec GroupSpec, opts Ensu
 	if opts.Comment == "" {
 		opts.Comment = fmt.Sprintf("ensure group %q", spec.ID)
 	}
+	request := ensureRequest{Spec: spec, Options: opts}
 	retry := fault.RetryOptions{InitialBackoff: ensurePoll, MaxBackoff: time.Second}
 	for {
 		view, err := fault.Retry(ctx, retry, c.ReadTopology)
 		if err != nil {
 			return topology.Group{}, err
 		}
-		step, err := c.ensureStep(ctx, view, spec, opts)
-		if step.Done || (err != nil && !fault.Retryable(err) && !errors.Is(err, fault.ErrVersionConflict)) {
+		step, err := request.step(ctx, c, view)
+		if step.Done || (err != nil && !fault.Retryable(err)) {
 			return step.Group, err
 		}
 		if err := sleepContext(ctx, ensurePoll); err != nil {
@@ -61,39 +61,24 @@ type ensureResult struct {
 	Done  bool
 }
 
-// ensureStep performs at most one mutation for the observed view. Done reports
-// a final result; a nil error with Done=false means re-read and continue.
-func (c *clusterView) ensureStep(ctx context.Context, view topology.ReadView, spec GroupSpec,
-	opts EnsureOptions) (ensureResult, error) {
-	if g := view.Active.Group(spec.ID); g != nil {
-		if !groupMatches(spec, *g) {
-			return ensureResult{Done: true}, fault.New(fault.Conflict, fmt.Sprintf(
-				"group %q exists with a different specification", spec.ID), nil)
-		}
-		return ensureResult{Group: cloneGroup(*g), Done: true}, nil
-	}
-	if g := view.Target.Group(spec.ID); g != nil {
-		if !groupMatches(spec, *g) {
-			return ensureResult{Done: true}, fault.New(fault.Conflict, fmt.Sprintf(
-				"approved group %q has a different specification", spec.ID), nil)
-		}
-		return ensureResult{}, nil // approved and converging
-	}
-	if view.Latest.Version != view.Target.Version {
-		if !ownCreation(view.Latest, view.Target, spec, opts.Actor) {
+// Declared overlap is checked before historical convergence: a pending deletion
+// or incompatible change cannot be hidden by an older matching checkpoint.
+func ensureKnownGroup(spec GroupSpec, row topology.GroupProgress) (ensureResult, error) {
+	for _, group := range []*topology.Group{row.Desired, row.Approved} {
+		if group != nil && !groupMatches(spec, *group) {
 			return ensureResult{Done: true}, fault.New(fault.Conflict,
-				fmt.Sprintf("unapproved staged topology at version %d", view.Latest.Version), nil)
+				fmt.Sprintf("group %q has a different specification", spec.ID), nil)
 		}
-		_, err := c.Approve(ctx, view.Latest.Version)
-		return ensureResult{}, err
 	}
-	_, err := c.CreateGroup(ctx, spec, MutationOptions{
-		ExpectedVersion: view.Latest.Version,
-		Actor:           opts.Actor,
-		Comment:         opts.Comment,
-		Approve:         true,
-	})
-	return ensureResult{}, err
+	if row.Deleting || row.Desired == nil && (row.Approved != nil || row.Converged != nil) ||
+		row.Approved == nil && row.Converged != nil {
+		return ensureResult{Done: true}, fault.New(fault.Conflict,
+			fmt.Sprintf("group %q has pending removal", spec.ID), nil)
+	}
+	if row.ConvergedVersion != 0 && row.Converged != nil && groupMatches(spec, *row.Converged) {
+		return ensureResult{Group: cloneGroup(*row.Converged), Done: true}, nil
+	}
+	return ensureResult{}, nil
 }
 
 // groupMatches reports whether every field set in spec equals the group's
@@ -124,8 +109,9 @@ func groupMatches(spec GroupSpec, g topology.Group) bool {
 
 // ownCreation reports whether latest is exactly the actor's unapproved creation
 // of spec on top of target, with no other topology change.
-func ownCreation(latest, target topology.Document, spec GroupSpec, actor string) bool {
-	if latest.ParentVersion != target.Version || latest.ChangedBy != actor || target.Group(spec.ID) != nil {
+func ownCreation(latest, target topology.Document, spec GroupSpec, opts EnsureOptions) bool {
+	if latest.ParentVersion != target.Version || latest.ChangedBy != opts.Actor ||
+		latest.Comment != opts.Comment || target.Group(spec.ID) != nil {
 		return false
 	}
 	created := latest.Group(spec.ID)

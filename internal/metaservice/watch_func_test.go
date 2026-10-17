@@ -12,14 +12,14 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func TestMetaWatchSeparatesLatestTargetAndActive(t *testing.T) {
+func TestMetaWatchSeparatesLatestAndTarget(t *testing.T) {
 	t.Parallel()
 	groups := singleMetaFixture(t)
 	g := readyPublic(t, groups)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	channels := map[topology.View]<-chan topology.Update{}
-	for _, view := range []topology.View{topology.Latest, topology.Target, topology.Active} {
+	for _, view := range []topology.View{topology.Latest, topology.Target} {
 		ch, err := g.Watch(ctx, view)
 		if err != nil {
 			t.Fatal(err)
@@ -41,20 +41,19 @@ func TestMetaWatchSeparatesLatestTargetAndActive(t *testing.T) {
 		t.Fatal(u)
 	}
 	assertWatchQuiet(t, channels[topology.Target])
-	assertWatchQuiet(t, channels[topology.Active])
-	ex, err := g.Apply(ctx, 2)
+	ex, err := g.Approve(ctx, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := g.WaitOperator(ctx, ex); err != nil {
+	if _, err := g.WaitOperation(ctx, ex); err != nil {
 		t.Fatal(err)
 	}
-	for _, view := range []topology.View{topology.Target, topology.Active} {
+	for _, view := range []topology.View{topology.Target} {
 		if u := receiveUpdate(t, channels[view]); u.View != view || u.Document.Version != 2 {
 			t.Fatal(u)
 		}
 	}
-	for _, view := range []topology.View{topology.Latest, topology.Target, topology.Active} {
+	for _, view := range []topology.View{topology.Latest, topology.Target} {
 		assertWatchQuiet(t, channels[view])
 	}
 }
@@ -89,7 +88,9 @@ func TestMetaWatchRejectsCanceledAndInvalidView(t *testing.T) {
 	if _, err := g.Watch(ctx, topology.Latest); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
-	if _, err := g.Watch(context.Background(), topology.View("other")); !errors.Is(err, fault.ErrInvalid) {
-		t.Fatal(err)
+	for _, view := range []topology.View{"active", "other"} {
+		if _, err := g.Watch(context.Background(), view); !errors.Is(err, fault.ErrInvalid) {
+			t.Fatal(view, err)
+		}
 	}
 }

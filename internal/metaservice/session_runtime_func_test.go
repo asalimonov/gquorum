@@ -64,10 +64,11 @@ func TestMetaExpiryPreservesLiveExactInstanceAndRevokesDeadLock(t *testing.T) {
 	if _, ok := g.state().Session(session.ID); !ok {
 		t.Fatal("revoked live process")
 	}
-	if _, err = g.propose(ctx, metaengine.GrantSession{SessionID: "dead", NodeName: "dead-node", InstanceID: "dead-instance", TTLSeconds: 3}); err != nil {
+	// The admitted node is alive, but this earlier process incarnation is not.
+	if _, err = g.propose(ctx, metaengine.GrantSession{SessionID: "dead", NodeName: session.NodeName, InstanceID: "dead-instance", TTLSeconds: 3}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = g.propose(ctx, metaengine.AcquireLock{SessionID: "dead", Key: "node/dead-node"}); err != nil {
+	if _, err = g.propose(ctx, metaengine.AcquireLock{SessionID: "dead", Key: "job/abandoned"}); err != nil {
 		t.Fatal(err)
 	}
 	g.leases.refreshTTL("dead", expired, -time.Second)
@@ -77,8 +78,8 @@ func TestMetaExpiryPreservesLiveExactInstanceAndRevokesDeadLock(t *testing.T) {
 	if _, ok := g.state().Session("dead"); ok {
 		t.Fatal("dead session survived")
 	}
-	if _, ok := g.state().LockSession("node/dead-node"); ok {
-		t.Fatal("dead process name stayed locked")
+	if _, ok := g.state().LockSession("job/abandoned"); ok {
+		t.Fatal("dead process lock survived")
 	}
 }
 
