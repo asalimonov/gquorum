@@ -47,9 +47,9 @@ func (a *application) canServe(ctx context.Context) bool {
 	return alive >= minimum
 }
 
-// Serving follows caller readiness logic and requires the exact Active replica and role.
+// Serving follows caller readiness logic and requires the exact converged replica and role.
 // Approved learners serve local reads and forward mutations through Raft.
-// Prepared replicas and stale handles remain ineligible until Active authorizes them.
+// Prepared replicas and stale handles remain ineligible until their group converges.
 func (a *application) localServing(ctx context.Context, id string) (*localReplica, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -62,17 +62,10 @@ func (a *application) localServing(ctx context.Context, id string) (*localReplic
 	if !a.canServe(ctx) {
 		return nil, fault.ErrUnavailable
 	}
-	active, err := readConvergedTopology(ctx, a.cluster)
+	identity := a.node.Identity()
+	group, err := servingGroup(ctx, a.cluster, id, identity)
 	if err != nil {
 		return nil, err
-	}
-	identity := a.node.Identity()
-	if active.MemberID(identity.NodeName) != identity.MemberID {
-		return nil, fault.ErrIdentityMismatch
-	}
-	group := active.Group(id)
-	if group == nil {
-		return nil, fault.ErrReplicaNotReady
 	}
 	local := a.local(id)
 	if local == nil || !local.group.Running() || local.group.Error() != nil {
@@ -123,6 +116,7 @@ func httpError(w http.ResponseWriter, err error) {
 	body := map[string]any{"code": code, "error": err.Error()}
 	if typed != nil && code == fault.VersionConflict {
 		body["expected_version"], body["current_version"] = typed.ExpectedVersion, typed.CurrentVersion
+		body["rebased_to"] = typed.RebasedTo
 	}
 	jsonResponse(w, status, body)
 }

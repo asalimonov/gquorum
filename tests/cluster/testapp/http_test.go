@@ -67,11 +67,22 @@ func TestHTTPFaultsHaveStableStatusAndCASVersions(t *testing.T) {
 	for _, tc := range []struct {
 		err    error
 		status int
-	}{{fault.ErrInvalid, 400}, {fault.ErrGroupRetired, 409}, {fault.ErrUnsafeMembership, 422}, {fault.ErrUnavailable, 503}, {fault.ErrAuthorityPending, 503}, {fault.ErrAuthorityFenced, 409}, {fault.ErrReplanRequired, 409}, {&fault.Error{Code: fault.VersionConflict, ExpectedVersion: 3, CurrentVersion: 4}, 409}} {
+	}{{fault.ErrInvalid, 400}, {fault.ErrGroupRetired, 409}, {fault.ErrUnsafeMembership, 422}, {fault.ErrUnavailable, 503}, {fault.ErrAuthorityPending, 503}, {fault.ErrAuthorityFenced, 409}, {fault.ErrReplanRequired, 409}, {&fault.Error{Code: fault.VersionConflict, ExpectedVersion: 3, CurrentVersion: 4, RebasedTo: 4}, 409}} {
 		w := httptest.NewRecorder()
 		httpError(w, tc.err)
 		if w.Code != tc.status {
 			t.Fatal(w.Code, w.Body.String())
+		}
+		var typed *fault.Error
+		if errors.As(tc.err, &typed) && typed.Code == fault.VersionConflict {
+			var reply struct {
+				Expected  uint64 `json:"expected_version"`
+				Current   uint64 `json:"current_version"`
+				RebasedTo uint64 `json:"rebased_to"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &reply); err != nil || reply.Expected != typed.ExpectedVersion || reply.Current != typed.CurrentVersion || reply.RebasedTo != typed.RebasedTo {
+				t.Fatal("conflict lost exact retry provenance", reply, err)
+			}
 		}
 	}
 }
