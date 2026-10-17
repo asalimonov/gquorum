@@ -84,7 +84,6 @@ type Controller struct {
 	scopedFinal     ScopedValidator
 	authority       AuthorityCoordinator
 	groups          GroupEffects
-	membership      MembershipCoordinator
 	ownsGroup       func(groupID string) bool
 	interval        time.Duration
 	maxRetry        time.Duration
@@ -106,7 +105,6 @@ type Config struct {
 	ScopedFinalValidator ScopedValidator
 	Authority            AuthorityCoordinator
 	Groups               GroupEffects
-	Membership           MembershipCoordinator
 	OwnsGroup            func(groupID string) bool
 	Interval             time.Duration
 	MaxRetryInterval     time.Duration
@@ -151,15 +149,12 @@ func New(cfg Config) (*Controller, error) {
 	if cfg.clock == nil {
 		cfg.clock = systemControllerClock{}
 	}
-	if cfg.Membership == nil {
-		cfg.Membership = NewFixedMembershipCoordinator(cfg.Groups)
-	}
 	return &Controller{
 		rules: cfg.Rules, scoped: cfg.Coordinator,
 		scopedPlan: cfg.ScopedPlanValidator, scopedFinal: cfg.ScopedFinalValidator,
 		groups: cfg.Groups, authority: cfg.Authority,
-		membership: cfg.Membership, ownsGroup: cfg.OwnsGroup,
-		interval: cfg.Interval, maxRetry: cfg.MaxRetryInterval,
+		ownsGroup: cfg.OwnsGroup,
+		interval:  cfg.Interval, maxRetry: cfg.MaxRetryInterval,
 		proposalTimeout: cfg.ProposalTimeout, clock: cfg.clock,
 		wake: make(chan struct{}, 1),
 	}, nil
@@ -338,32 +333,8 @@ func classifySafetyStepError(step Step, err error) stepErrorOutcome {
 	return stepErrorOutcome{state: topology.OperationFailed}
 }
 
-// fixedMembershipCoordinator keeps controller on the scoped GroupEffects
-// path. The receiving group leader owns the concrete membership.Coordinator;
-// CaughtUp applies the same fixed neutral status rule before promotion.
-type fixedMembershipCoordinator struct{ groups GroupEffects }
-
-// NewFixedMembershipCoordinator adapts group effects to the fixed membership
-// safety coordinator.
-func NewFixedMembershipCoordinator(groups GroupEffects) MembershipCoordinator {
-	return &fixedMembershipCoordinator{groups: groups}
-}
-
-func (c *fixedMembershipCoordinator) Apply(ctx context.Context,
-	cmd topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return c.groups.ApplyMembership(ctx, cmd)
-}
-
-func (*fixedMembershipCoordinator) CaughtUp(status GroupStatus, replicaID uint64) bool {
-	ok, _ := caughtUpStatus(status, replicaID)
-	return ok
-}
-
-// caughtUpStatus is CaughtUp plus the SPECIFIC reason it is not yet satisfied,
-// so
-// the reason reaches the step's WaitingReason instead of a fixed constant: a
-// learner stuck "not recently active" (a transient idle-leader window) is
-// otherwise indistinguishable from one that is genuinely lagging.
+// caughtUpStatus checks the fixed learner promotion rule and reports why a
+// learner still needs to wait. A caught-up idle learner remains eligible.
 func caughtUpStatus(status GroupStatus, replicaID uint64) (bool, string) {
 	if !containsID(status.ConfState.Learners, replicaID) {
 		return false, "replica is not a current learner"
@@ -391,7 +362,7 @@ func caughtUpStatus(status GroupStatus, replicaID uint64) (bool, string) {
 	return true, ""
 }
 
-func (e *Controller) nativeEffectSatisfied(step Step, group *Group, status GroupStatus) bool {
+func nativeEffectSatisfied(step Step, group *Group, status GroupStatus) bool {
 	switch step.Kind {
 	case StepCreateFoundingGroup:
 		return status.Found && foundingMatchesTarget(group, status)
@@ -399,7 +370,8 @@ func (e *Controller) nativeEffectSatisfied(step Step, group *Group, status Group
 		return containsID(status.ConfState.Learners, step.ReplicaID) ||
 			containsID(status.ConfState.Voters, step.ReplicaID)
 	case StepWaitCaughtUp:
-		return containsID(status.ConfState.Voters, step.ReplicaID) || e.membership.CaughtUp(status, step.ReplicaID)
+		caughtUp, _ := caughtUpStatus(status, step.ReplicaID)
+		return caughtUp || containsID(status.ConfState.Voters, step.ReplicaID)
 	case StepPromoteVoter:
 		return containsID(status.ConfState.Voters, step.ReplicaID)
 	case StepDemoteVoter:

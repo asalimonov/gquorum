@@ -9,27 +9,6 @@ import (
 	"go.etcd.io/raft/v3/raftpb"
 )
 
-// ValidateRemainingPlan simulates the immutable suffix against confirmed
-// applied membership. It never manufactures an effect receipt or changes the plan.
-// Input separates proven declarations from retained exact host obligations.
-func ValidateRemainingPlan(view RemainingPlanView, ex Record, native map[string]topology.NativeState,
-	rules Rules) error {
-	first := max(ex.CurrentStep, 1)
-	if first > len(ex.Steps) && len(ex.Steps) != 0 {
-		return ErrOperationAuthorization
-	}
-	proofs, err := remainingStepProofs(ex, native)
-	if err != nil {
-		return err
-	}
-	if err := validateRetainedPlan(view, ex); err != nil {
-		return err
-	}
-	validation := remainingPlanValidation{view: view, ex: ex, native: native, rules: rules,
-		first: first, proofs: proofs}
-	return validation.validateGroups()
-}
-
 // RemainingPlanView pairs retained resources with the approved target document.
 type RemainingPlanView struct {
 	Input    topology.PlanInput
@@ -52,24 +31,6 @@ func remainingPlanHas(ex Record, kind StepKind, group string, replica topology.R
 		return s.Kind == kind && s.GroupID == group && (replica.NodeName == "" ||
 			s.NodeName == replica.NodeName && s.ReplicaID == replica.ReplicaID)
 	})
-}
-
-func validateRetainedPlan(view RemainingPlanView, ex Record) error {
-	groups := make(map[string]bool)
-	for id := range view.Input.Groups {
-		groups[id] = true
-	}
-	for id := range view.Input.Retained {
-		groups[id] = true
-	}
-	for id := range groups {
-		for _, replica := range remainingOwners(view.Input, id) {
-			if err := validateRetainedReplica(view, ex, id, replica); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 func remainingOwners(input topology.PlanInput, group string) map[uint64]topology.RetainedReplica {
@@ -137,15 +98,6 @@ type remainingPlanValidation struct {
 	proofs   map[int]bool
 	required map[int]bool
 	consumed map[int]bool
-}
-
-func (v remainingPlanValidation) validateGroups() error {
-	for _, group := range v.view.Target.Groups {
-		if err := v.validateGroup(group); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (v remainingPlanValidation) validateGroup(group Group) error {

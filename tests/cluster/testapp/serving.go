@@ -11,8 +11,9 @@ import (
 )
 
 // Serving uses locally applied convergence, not a metadata quorum barrier. The
-// pinned source document binds this exact replica to its admitted host member;
-// a historical complete-document marker cannot describe independent progress.
+// approved member binds the process; localServing additionally checks the exact
+// published replica and native role. ConvergedVersion is provenance, not a pin:
+// its source document can be compacted while this declaration stays usable.
 func servingGroup(ctx context.Context, cluster gquorum.Cluster, row topology.GroupProgress,
 	identity topology.Identity) (*topology.Group, error) {
 	if err := ctx.Err(); err != nil {
@@ -26,11 +27,11 @@ func servingGroup(ctx context.Context, cluster gquorum.Cluster, row topology.Gro
 	}) {
 		return nil, fault.ErrReplicaNotReady
 	}
-	source, err := cluster.Get(ctx, row.ConvergedVersion)
+	approved, err := cluster.Target(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if identity.MemberID == 0 || source.MemberID(identity.NodeName) != identity.MemberID {
+	if identity.MemberID == 0 || approved.MemberID(identity.NodeName) != identity.MemberID {
 		return nil, fault.ErrIdentityMismatch
 	}
 	return row.Converged, nil

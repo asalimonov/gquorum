@@ -12,68 +12,6 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func (g *Group) metaHostEffect(ctx context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	a := grant.Action
-	var target topology.AuthorityTarget
-	for _, candidate := range grant.Targets {
-		if candidate.NodeName == a.NodeName && candidate.ReplicaID == a.ReplicaID {
-			target = candidate
-			break
-		}
-	}
-	peer, err := g.ResolveAuthorityPeer(ctx, grant, target)
-	if err != nil {
-		return nil, err
-	}
-	resource := topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: topology.MetaGroupID,
-		NodeName: target.NodeName}
-	request := load.FenceRequest{From: g.Identity(), To: peer.Node, Resource: resource, Grant: grant}
-	proof, err := g.sendFence(ctx, request)
-	if err != nil {
-		return nil, err
-	}
-	if proof.From != request.To || proof.Evidence.Receiver != request.To || proof.Evidence.Resource != resource ||
-		proof.Evidence.ReplicaID != 0 || proof.Evidence.Validate(grant) != nil {
-		return nil, fault.ErrOperationAuthorization
-	}
-	if err := g.RecordFence(ctx, proof.Evidence); err != nil {
-		return nil, err
-	}
-	return g.sendMetaAction(ctx, load.ActionRequest{
-		From:          g.Identity(),
-		To:            peer,
-		Grant:         grant,
-		Authorization: *a,
-		LocalTarget: storage.Identity{
-			ClusterID: grant.Key.ClusterID,
-			GroupID:   topology.MetaGroupID,
-			NodeName:  target.NodeName,
-			ReplicaID: target.ReplicaID,
-		},
-	})
-}
-
-func (g *Group) forwardMetaEffect(ctx context.Context,
-	grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	engine := g.engine.Load()
-	if engine == nil {
-		return nil, fault.ErrReplicaNotReady
-	}
-	leader := engine.Status().LeaderID
-	for _, target := range grant.Targets {
-		if target.ReplicaID != leader {
-			continue
-		}
-		peer, err := g.ResolveAuthorityPeer(ctx, grant, target)
-		if err != nil {
-			return nil, err
-		}
-		return g.sendMetaAction(ctx, load.ActionRequest{From: g.Identity(), To: peer, Grant: grant,
-			Authorization: *grant.Action})
-	}
-	return nil, fault.ErrUnavailable
-}
-
 func (g *Group) sendMetaAction(ctx context.Context, request load.ActionRequest) ([]topology.EffectReceipt, error) {
 	var result load.ActionResult
 	var err error

@@ -643,7 +643,7 @@ func (g *Group) memberNode(id uint64) string {
 
 func (g *Group) resolveMember(ctx context.Context, id uint64) (string, error) {
 	name := g.memberNode(id)
-	// Ready messages can still carry a retired peer's final commit when Active
+	// Ready messages can still carry a retired peer's final commit when progress
 	// advances before the asynchronous sender drains. Retained documents may
 	// resolve that destination, but never authorize incoming retired
 	// identities.

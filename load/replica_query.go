@@ -26,7 +26,8 @@ type ReplicaStatus struct {
 	// Absence (including Found=false) never proves that a group does not exist.
 	Native *topology.NativeState `json:"native,omitempty"`
 	// Status is a raw replica observation. LeaderNodeName is not authoritative;
-	// cluster status and scheduler inputs resolve it through their Active view.
+	// cluster status and scheduler inputs resolve it through exact approved or
+	// converged replica identities.
 	Status     topology.GroupStatus
 	LocalState string
 	Metrics    *metrics.ReplicaSample `json:"metrics,omitempty"`

@@ -34,7 +34,7 @@ func (h cleanupProtocolHandler) Call(ctx context.Context, method string, header 
 
 // One authenticated caller and protocol doubles isolate forwarding from multi-
 // node consensus. Scoped FSM acceptance/lineage tests live in metaengine; the
-// actual safe read and schema3 refusal are exercised by their owning services.
+// actual safe read and old-format refusal are exercised by their owning suites.
 func collectionProtocolClient(t *testing.T, seeds []string) *Group {
 	t.Helper()
 	client := joinProtocolClient(t, seeds, func(o *Options) {

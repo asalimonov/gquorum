@@ -43,18 +43,18 @@ func TestRemainingMetaReplacementAllowsOnlyExactDecommissionSurge(t *testing.T) 
 		t.Fatal(err)
 	}
 	ex := Record{Version: 2, Steps: plan.Steps, VoterBases: plan.VoterBases}
-	if err := ValidateRemainingPlan(view, ex, native, rules); err != nil {
+	if err := ex.validateScope(view, native, "_meta", rules); err != nil {
 		t.Fatal("approved learner-first replacement refused", err)
 	}
 	state := native[MetaGroupID]
 	state.ConfState.Learners = []uint64{4}
 	native[MetaGroupID], ex.CurrentStep = state, 3
-	if err := ValidateRemainingPlan(view, ex, native, rules); err != nil {
+	if err := ex.validateScope(view, native, "_meta", rules); err != nil {
 		t.Fatal("resumed native surge refused", err)
 	}
 	state.ConfState.Voters = []uint64{1, 2}
 	native[MetaGroupID], ex.CurrentStep = state, 5
-	if err := ValidateRemainingPlan(view, ex, native, rules); err != nil {
+	if err := ex.validateScope(view, native, "_meta", rules); err != nil {
 		t.Fatal("resumed removal did not contract the allowance", err)
 	}
 	v := remainingPlanValidation{view: view, ex: ex, rules: rules}

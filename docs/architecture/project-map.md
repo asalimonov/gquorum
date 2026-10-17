@@ -1,6 +1,7 @@
 # Project map
 
-Source baseline: scoped implementation through `37ac2bf` (2026-10-17).
+Source: scoped implementation and Task88 architecture audit (2026-10-17);
+[validation provenance](../testing/api-refactor-validation.md) records the tested revision.
 Scope: all Go package directories outside `examples/`, including internal packages, generated protocols, caller
 fixtures and tooling. This is a source navigation and contract index: interface
 method lists are complete for the interfaces named below; concrete functions and
@@ -446,7 +447,7 @@ application/storage/transport dependencies; Host does not own the metadata FSM.
 Selected Host methods: `New`, `Start`, `Quiesce`, `Fence`, `Stop`,
 `FenceParticipation`, `FenceReadmission`, `StartReplica`, `StopReplica`,
 `Lookup`, `IDs`, `Held`, `Parked`, `Snapshot`, `Wake`, `RecoverAssignments`,
-`Effects`, `DispatchGrant`, `ApplyAction`, `InstallFence`, `InstallHostFence`,
+`Effects`, `DispatchEffect`, `ApplyAction`, `InstallFence`, `InstallHostFence`,
 `ReadNative`, `ObserveGroup`, `ReceiveRaft`, `ReadReplica`, `ReportDelivery`,
 `LocalMetrics`, `MetricsReads`, `Readmit`, `CollectRetired`.
 `Readmission.{Clone,Validate}` and `ReadmitMeta` coordinate exact meta replacement.
@@ -611,6 +612,10 @@ routes `_meta` through the load observer. Local advancement can conservatively d
 ClusterStatus.Groups uses the same complete GroupProgress builder. Scoped local
 ProgressStatus bounds operation headers to100 without Blocks, preserving aggregate
 state and explicit truncation; cleanup summary counts pending physical evidence.
+`FI_CHECKPOINT_CONTEXT`: ConvergedVersion is provenance, not a document pin.
+Pruning may substitute an identical approved declaration with the same member
+bindings; checkpointDocument refuses ambiguous contexts. Consumers use the copied
+checkpoint and exact published handle, not mandatory Get(source) on serving paths.
 There is no Active projection or legacy execution path. Missing native samples
 remain unknown even when metadata was quorum-confirmed.
 
@@ -657,8 +662,7 @@ Config injects scoped coordinators, validators and group effects. Topology alias
 | `Coordinator` | `IsMetaLeader() bool`; `ReadyBlocks(ctx,int) ([]WorkItem,error)`; `RecordOperationTransition(ctx,topology.OperationTransition) error`. WorkItem owns Operation + GroupID + retained Approved declaration + current Consumed proof observation; ScopedValidator receives `(ctx,Operation,groupID)`. |
 | `CleanupCoordinator` (embedded by Coordinator) | `ReadyCleanup(ctx,int) ([]CleanupWork,error)`; `BeginCleanupEffect(ctx,Identity,AuthorizedStep) (AuthorityGrant,error)`; `ReadyFences(ctx,int) ([]FenceWork,error)`; `ResolveFenceTarget(ctx,FenceWork) (AuthorityTarget,error)`; `DispatchFence(ctx,grant,resource,target) error`. Internal selection/courier ports only. |
 | `AuthorityCoordinator` | `BeginEffect(ctx,topology.AuthorizedStep) (topology.AuthorityGrant,error)`; `EffectReceipts(ctx,topology.AuthorityGrant) ([]topology.EffectReceipt,error)`; `RecordEffect(ctx,topology.EffectReceipt) error` |
-| `MembershipCoordinator` | `Apply(ctx,topology.AuthorityGrant) ([]topology.EffectReceipt,error)`; `CaughtUp(GroupStatus,uint64) bool` |
-| `GroupEffects` | `Status(ctx,string) (GroupStatus,error)`; `ReadNative(ctx,string,...storage.Identity) (topology.NativeState,error)`; `DispatchEffect(ctx,grant,resource,target) (EffectReceipt,error)` sends one exact target without trimming the grant; each of `CreateGroup`, `PrepareReplica`, `ApplyMembership`, `TransferLeader`, `StopReplica`, `CleanupReplicaState`, `DeleteGroupState` takes `(ctx,topology.AuthorityGrant)` and returns `([]topology.EffectReceipt,error)` |
+| `GroupEffects` | `Status(ctx,string) (GroupStatus,error)`; `ReadNative(ctx,string,...storage.Identity) (topology.NativeState,error)`; `DispatchEffect(ctx,grant,resource,target) (EffectReceipt,error)` sends one exact target without trimming the grant |
 
 `FI_READY_BLOCKS`: Machine.ReadyBlocks selects exact nonterminal owners under the
 FSM lock, with an exclusive group continuation and wrap. It never reserves work
@@ -699,7 +703,6 @@ obligations without fabricated fence evidence, consistently across query/index/
 restore/prune. Pending deletion settles nothing; host resources keep exact proof.
 
 Entries: `New`; Controller `{Start,Stop,Signal,Tick}`;
-`NewFixedMembershipCoordinator`, `ValidateRemainingPlan`,
 `ValidateRemainingScope`. `FI_RETRY_PROOF`: scoped validation reuses native simulation
 with original Previous/grant/receipt tuples and global block sequences. FSM-derived
 consumption may skip a required prefix; native satisfaction alone permits idempotent

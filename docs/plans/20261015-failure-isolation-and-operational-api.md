@@ -1296,18 +1296,18 @@ The final contract has Latest and Target, durable group/node convergence, and a 
 
 ### Task 88: Verify and close the architectural delta
 
-**Target:** [T] **all sections**, especially §2 diagram, §7 routing/contracts, §8 flows and §12 algorithms. **Depends on:** 1–87. **Budget:** ≤550 Go lines per corrective task; introduce additional bounded fix tasks before this final task if necessary.
+**Target:** [T] **all sections**, especially §2 diagram, §7 routing/contracts, §8 flows and §12 algorithms. **Depends on:** 1–87. **Execution:** extend this final task with corrective batches; no additional tasks (user direction).
 
-- [ ] Verify public/domain delta: every C1–C4/C7/C9/C12 signature, field/tag, enum, limit and API removal matches [T]; no public aliases or extra ordinary application APIs remain. Verify all five modules and helper packages use the final contract.
-- [ ] Verify metadata delta: exact v4 buckets/state/envelopes, every convergence/debt/intent/operation/index shape, proof validation, deterministic restore, source provenance, marker/document pins and old-format refusal. Confirm no Active or CollectionAcks state survives.
-- [ ] Verify planner/FSM delta: exact semantic block set, only two barrier shapes, state-based admission/evacuation, stable admission origin and resumed-prefix validation, first approval, immutable retry/Previous receipts, atomic rebase and all strict CAS/allocation checks. Reconcile each §12 algorithm with actual call order.
-- [ ] Verify authority/controller delta: all five global gates and controller fence short circuit are removed/scoped; one owner per group, exact floors/receipts, independent budgets, grant reuse, fair backoff and joined shutdown remain effective in transfers, readmission and restore.
-- [ ] Verify storage/managed delta: journal v2, exact synced marker, all partial-deletion states, prepared-only Collect, collected-only report/release, Forget-before-journal-removal, immutable storage class, historical courier proof, same-host ownership joins and control-only recovery.
-- [ ] Verify observation/service delta: every [T] §7.3 private route and authenticated discriminator exists; bounded safe-read pages/settlement, no fan-out, no-write settled response, exact freshness and local diagnostic limits. Confirm metrics and repair history survive unrelated changes.
-- [ ] Remove peer41's verified dead internal surface while preserving receiver coverage: whole-plan `ValidateRemainingPlan` chain after porting its three remaining tests, bulk GroupEffects/DispatchGrant adapters and unused operator aliases. Keep shared simulation and actual DispatchEffect receiver behavior.
-- [ ] Verify tests/docs delta: map every [T] §8.5/§10 case to actual passing evidence or an explicit unresolved gap, verify 10k measurement and physical hashes, and reconcile all current architecture docs and contributor guidance with implemented behavior.
+- [x] Verify public/domain delta: every C1–C4/C7/C9/C12 signature, field/tag, enum, limit and API removal matches [T]; no public aliases or extra ordinary application APIs remain. Verify all five modules and helper packages use the final contract.
+- [x] Verify metadata delta: exact v4 buckets/state/envelopes, every convergence/debt/intent/operation/index shape, proof validation, deterministic restore, source provenance, marker/document pins and old-format refusal. Confirm no Active or CollectionAcks state survives.
+- [x] Verify planner/FSM delta: exact semantic block set, only two barrier shapes, state-based admission/evacuation, stable admission origin and resumed-prefix validation, first approval, immutable retry/Previous receipts, atomic rebase and all strict CAS/allocation checks. Reconcile each §12 algorithm with actual call order.
+- [x] Verify authority/controller delta: all five global gates and controller fence short circuit are removed/scoped; one owner per group, exact floors/receipts, independent budgets, grant reuse, fair backoff and joined shutdown remain effective in transfers, readmission and restore.
+- [x] Verify storage/managed delta: journal v2, exact synced marker, all partial-deletion states, prepared-only Collect, collected-only report/release, Forget-before-journal-removal, immutable storage class, historical courier proof, same-host ownership joins and control-only recovery.
+- [x] Verify observation/service delta: every [T] §7.3 private route and authenticated discriminator exists; bounded safe-read pages/settlement, no fan-out, no-write settled response, exact freshness and local diagnostic limits. Confirm metrics and repair history survive unrelated changes.
+- [x] Remove peer41's verified dead internal surface while preserving receiver coverage: whole-plan `ValidateRemainingPlan` chain after porting its three remaining tests, bulk GroupEffects/DispatchGrant adapters and unused operator aliases. Keep shared simulation and actual DispatchEffect receiver behavior.
+- [x] Verify tests/docs delta: map every [T] §8.5/§10 case to actual passing evidence or an explicit unresolved gap, verify 10k measurement and physical hashes, and reconcile all current architecture docs and contributor guidance with implemented behavior.
 - [ ] Record every discovered gap in NOT IMPLEMENTED GAPS, then fix and verify it under the original target. An unresolved complex item is marked `[_]` with impact; it is not silently deferred or called complete. Re-run affected checks and the final required gate after corrections.
-- [ ] **LAST subtask — verify actual wiring:** trace real NewNode→Start→metaservice/managed/controller/store construction and Cluster→private query/proposal paths through execution, persistence, recovery, collection and Stop. Confirm every target method/component is constructed, registered, invoked and reachable in normal operation, including excluded-host reporting; no feature exists only as an uncalled helper, test implementation, stub or optional unused callback.
+- [x] **LAST subtask — verify actual wiring:** trace real NewNode→Start→metaservice/managed/controller/store construction and Cluster→private query/proposal paths through execution, persistence, recovery, collection and Stop. Confirm every target method/component is constructed, registered, invoked and reachable in normal operation, including excluded-host reporting; no feature exists only as an uncalled helper, test implementation, stub or optional unused callback.
 
 **Verification:** After this architectural review and its corrections, run the complete functional, functional-race and cluster suites again on the final code revision, fixing every failure before closure. Task 87 results do not replace these post-review runs. Complete all other Validation Commands on that revision; leave the task unchecked while any implementation, wiring or validation gap remains.
 
@@ -1355,13 +1355,13 @@ rg -n '\bActive\b|\bOperator\b|CollectionAcks|ActivateTarget|TODO\(not planned\)
 git diff --check
 ```
 
-- [ ] All five application modules compile; all fast units pass after each task.
-- [ ] Required focused functional/race regressions pass; final lint, race and functional suites pass.
-- [ ] Focused process scenarios and complete ordinary cluster suite pass on the final image; modified demos pass smoke tests.
-- [ ] 10k unresolved-debt measurement recorded, without confusing durable-state growth with worker/page limits.
-- [ ] Old changed formats reject; new formats restart; unrelated physical baseline hashes remain unchanged.
-- [ ] Remaining name/search hits classified; no hidden global gate, temporary stub or unwired feature remains.
-- [ ] Report paths, revision and any limitations recorded; resource cleanup verified.
+- [x] All five application modules compile; all fast units pass after each task.
+- [x] Required focused functional/race regressions pass; final lint, race and functional suites pass.
+- [x] Focused process scenarios and complete ordinary cluster suite pass on the final image; modified demos pass smoke tests.
+- [x] 10k unresolved-debt measurement recorded, without confusing durable-state growth with worker/page limits.
+- [x] Old changed formats reject; new formats restart; unrelated physical baseline hashes remain unchanged.
+- [x] Remaining name/search hits classified; no hidden global gate, temporary stub or unwired feature remains.
+- [x] Report paths, revision and any limitations recorded; resource cleanup verified.
 
 Do not run broad process performance/chaos campaigns by default; the focused debt benchmark and requested failure scenarios above supply this target's explicit scope. If Docker or another prerequisite is unavailable, record exactly what remains unverified and keep its checkbox open.
 
@@ -1446,11 +1446,19 @@ These are the target's existing exclusions, not new scope reductions. Add a focu
 
 ## NOT IMPLEMENTED GAPS
 
-No implementation audit has run yet. All task checkboxes are initially open; absence of entries here does not mean the target is implemented.
+Task88 implementation, source/wiring audit and all required post-correction
+validation gates pass. Closure remains open only for the requested peer review;
+there is no known remaining implementation or test failure.
 
-During execution use `- [ ] target section — missing behavior — affected path/task — evidence`, change to `[x]` only after fixing and verifying, or `[_]` for explicitly identified unresolved complexity. Only the user can approve a design deferral; report its impact. The final architectural audit must resolve every item or leave completion explicitly open.
+- [x] §6/§7 — obsolete whole-plan/bulk-effect internal APIs survived cutover. Removed their unused production chains and ported assertions to scoped validation/exact dispatch; focused functional race and full lint pass.
+- [x] §8 — caller serving required the compactable checkpoint source document. Replaced that fixture-only gate with local approved-member validation plus the existing exact published handle/native-role checks; compacted-source/foreign-member regression passes.
+- [x] §8/§10 — replay scenario raced detached stop and asynchronous serving readiness. Added exact StoppedAt and existing readiness barriers without changing grant/native/storage/read assertions; three focused process repetitions pass.
+- [x] §10 — post-audit units1,884, unit-race1,884, functional1,043, functional-race1,043, lint, 10k-debt benchmark, six focused isolation cases, three replay repetitions, full cluster91/91 and all three Compose demos pass. Exact source/image/report evidence is in docs/testing/api-refactor-validation.md; run-owned Docker cleanup verified.
+- [ ] Review cadence — thread42 is file-backed but undelivered: Claude terminal is at a usage-limit question. Do not claim consensus for Task87's later corrections or Task88; remaining peer review requires an available peer.
 
 ## Progress log
+
+- 2026-10-17 — Task88 implementation/audit and final validation finished on `e4c5392` plus this commit; peer closure remains open. Removed obsolete whole-plan/bulk-dispatch/coordinator adapters and ported their meaningful assertions to scoped validation/exact receivers. Fixed the caller serving dependency on a compactable source document. Full process testing exposed detached-stop and serving-observation setup races in the stale learner replay scenario; explicit existing proof/readiness waits preserve all safety assertions. Final gates: units/unit-race1,884 each, functional/functional-race1,043 each, lint, benchmark count3, focused process6/6 plus replay3/3, full process91/91 and basic/scheduler/cache Compose all pass. [Validation record](../testing/api-refactor-validation.md#scoped-operations-update--2026-10-17) contains immutable image/source hashes, timings, reports and the earlier90/91 run. Seven legacy and five current fixture hashes match; semantic names, links, diff formatting and owned Docker cleanup verified. [Audit](../testing/api-refactor-audit.md#final-scoped-architecture-audit--task88) maps target contracts/failure cases to real constructors/call paths/tests. Thread42 remains undelivered while Claude displays a usage-limit question; later changes have no claimed peer consensus. No new tasks or public APIs were added.
 
 - 2026-10-15 — Plan created from the complete target and closed peer review; inspected current contracts, authority gates, planner/controller, retirement/journal paths and five-module test layout. No source implementation or implementation test run in this planning session.
 - 2026-10-15 — Planning validation: checked 64 sequential tasks, backward declared dependencies, per-task target/verification references, local links, code fences and final wiring subtask. Corrected early type dependencies, completion preparation order, final API removal order and compile-only Docker instructions after inspecting TestMain. `git diff --cached --check` passed. No change to the target design was required.

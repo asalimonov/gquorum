@@ -232,8 +232,10 @@ The original 2026-10-12 comparison inspected source without running tests. The
 destruction at the same pinned revision; no TiKV/PD tests were run. Current
 gquorum unit, functional and focused race evidence plus the retained-debt benchmark
 is recorded in the [implementation log](../plans/20261015-failure-isolation-and-operational-api.md#progress-log).
-New process scenarios compile but await the final integrated Docker gate; this
-document does not turn proposed acceptance scenarios into passing test evidence.
+The final post-audit run passes all 91 process cases, including the six named
+failure-isolation scenarios; all three Compose demos also pass. Exact source/image,
+reports, benchmark costs and the outstanding peer-review limitation are in the
+[validation record](../testing/api-refactor-validation.md#scoped-operations-update--2026-10-17).
 
 This is an implementation comparison, not a deployment certification. It does
 not establish an RPO/RTO, a maximum supported cluster size, security audit

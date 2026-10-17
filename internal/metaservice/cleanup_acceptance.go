@@ -13,7 +13,7 @@ import (
 
 // These are existing service/FSM boundaries, not a second persistence owner.
 // Keeping the sequence together makes the pruning race and its single recheck
-// testable before the scoped FSM is activated in the live engine.
+// explicit at the live service/FSM boundary.
 type collectionReportAccess struct {
 	check   func(context.Context, storage.Identity) (metaengine.CollectionCheck, error)
 	courier func(storage.Identity, uint64, topology.Identity) error

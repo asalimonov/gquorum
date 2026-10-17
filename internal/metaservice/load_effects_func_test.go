@@ -131,18 +131,7 @@ func (c *verifiedLoadController) CreateGroup(ctx context.Context, grant topology
 	}
 	return protocolEffectReceipts(grant), nil
 }
-func (_ *verifiedLoadController) PrepareReplica(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return nil, fault.ErrUnsupported
-}
-func (_ *verifiedLoadController) ApplyMembership(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return nil, fault.ErrUnsupported
-}
-func (_ *verifiedLoadController) TransferLeader(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return nil, fault.ErrUnsupported
-}
-func (_ *verifiedLoadController) CleanupReplicaState(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return nil, fault.ErrUnsupported
-}
+
 func (c *verifiedLoadController) StopReplica(ctx context.Context, grant topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
 	a := *grant.Action
 	if _, err := c.authorized(ctx, grant); err != nil {

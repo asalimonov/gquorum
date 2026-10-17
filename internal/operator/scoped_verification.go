@@ -19,7 +19,7 @@ func (e *Controller) verifyScopedStep(ctx context.Context, work WorkItem) error 
 	if status.GroupID != work.GroupID {
 		return fault.ErrOperationAuthorization
 	}
-	if status.LeaderID == 0 || !e.scopedEffectSatisfied(work, status) {
+	if status.LeaderID == 0 || !scopedEffectSatisfied(work, status) {
 		return fault.ErrReplicaNotReady
 	}
 	return nil
@@ -37,7 +37,7 @@ func (e *Controller) checkScopedPreparation(ctx context.Context, work WorkItem) 
 	if status.GroupID != work.GroupID {
 		return fault.ErrOperationAuthorization
 	}
-	if e.scopedEffectSatisfied(work, status) {
+	if scopedEffectSatisfied(work, status) {
 		return nil // The native receiver still persists fresh, fenced result proof.
 	}
 	if ready, _ := caughtUpStatus(status, learner); !ready || status.LeaderID == 0 {
@@ -71,9 +71,9 @@ func scopedPreparatoryLearner(work WorkItem) uint64 {
 	return 0
 }
 
-func (e *Controller) scopedEffectSatisfied(work WorkItem, status GroupStatus) bool {
+func scopedEffectSatisfied(work WorkItem, status GroupStatus) bool {
 	step := scopedWorkStep(work)
-	return status.Found && e.nativeEffectSatisfied(step, work.Approved, status)
+	return status.Found && nativeEffectSatisfied(step, work.Approved, status)
 }
 
 func (e *Controller) verifyScopedGroup(ctx context.Context, work WorkItem) error {

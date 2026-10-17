@@ -87,7 +87,7 @@ func scopedRemainingProofs(view RemainingPlanView, op topology.Operation) (map[i
 		}
 		grants[grant.Key] = grant
 	}
-	receipts, err := remainingReceipts(Record{Receipts: view.Receipts}, grants)
+	receipts, err := remainingReceipts(view.Receipts, grants)
 	if err != nil {
 		return nil, err
 	}

@@ -142,7 +142,7 @@ func (g *Group) ValidateLoadPeer(ctx context.Context, peer load.Peer) error {
 	if !slices.Contains(catalog, id) {
 		// A current sender can observe an approval before this receiver applies
 		// it. Refuse the unrecognized replica without turning observation lag
-		// into a terminal Operator failure. No Raft input is admitted here.
+		// into a terminal Operation failure. No Raft input is admitted here.
 		return fault.New(fault.ReplicaNotReady, "load replica is not locally approved", nil)
 	}
 	return nil

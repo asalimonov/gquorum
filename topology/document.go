@@ -104,8 +104,8 @@ type ChangeAudit struct {
 const AuditOperationForceRetireNode = "force_retire_node"
 
 // Document is one versioned cluster-topology declaration. Latest may be
-// unapproved intent, Target is approved intent, and Active is fully converged;
-// those views carry the same value type but have different authority.
+// unapproved intent and Target is approved intent. Per-group convergence lives
+// in progress records; FullyConverged only names a historical document.
 type Document struct {
 	// Version and ClusterID identify this declaration within one cluster.
 	Version   uint64 `json:"version"`

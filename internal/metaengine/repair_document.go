@@ -8,7 +8,7 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// ReplicaRepairOptions identifies the Active voter and the repair audit details.
+// ReplicaRepairOptions identifies the approved voter and the repair audit details.
 type ReplicaRepairOptions struct {
 	GroupID, NodeName string
 	ReplicaID         uint64
@@ -24,19 +24,19 @@ type ReplicaRepairResult struct {
 }
 
 // ReplicaRepairDocument is shared by operator reseating and automatic repair.
-// It replaces one exact Active voter while preserving placement and audit.
-func ReplicaRepairDocument(active, latest topology.Document,
+// It replaces one exact approved voter while preserving placement and audit.
+func ReplicaRepairDocument(approved, latest topology.Document,
 	options ReplicaRepairOptions) (ReplicaRepairResult, error) {
 	if !options.valid(latest.Version) {
 		return ReplicaRepairResult{}, fault.ErrInvalid
 	}
-	repair := active.Clone()
+	repair := approved.Clone()
 	fresh, err := replaceRepairVoter(&repair, latest, options)
 	if err != nil {
 		return ReplicaRepairResult{}, err
 	}
-	finishRepair(&repair, active.Version, latest.Version, options)
-	if err = validateRepairDocument(active, repair); err != nil {
+	finishRepair(&repair, approved.Version, latest.Version, options)
+	if err = validateRepairDocument(approved, repair); err != nil {
 		return ReplicaRepairResult{}, fault.New(fault.Invalid, "invalid replica repair", err)
 	}
 	return ReplicaRepairResult{Doc: repair, ReplicaID: fresh}, nil
@@ -97,9 +97,9 @@ func stampRepairVoter(_ *topology.Document, group *topology.Group, replica *topo
 	group.UpdatedAt = options.At
 }
 
-func finishRepair(repair *topology.Document, activeVersion, latestVersion uint64, options ReplicaRepairOptions) {
+func finishRepair(repair *topology.Document, approvedVersion, latestVersion uint64, options ReplicaRepairOptions) {
 	repair.Version = latestVersion + 1
-	repair.ParentVersion = activeVersion
+	repair.ParentVersion = approvedVersion
 	repair.Origin = options.Origin
 	repair.ChangedBy = options.Actor
 }

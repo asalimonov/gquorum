@@ -33,22 +33,16 @@ type ApplyResult struct {
 	Placement       *topology.PlacementReport `json:"placement,omitempty"`
 }
 
-const (
-	errorFormat            = "%v"
-	metaStateSchemaVersion = 3
-)
+const errorFormat = "%v"
 
 type proposalErrorCode string
 
 const (
 	proposalVersionConflict  proposalErrorCode = "version_conflict"
 	proposalAuthorization    proposalErrorCode = "authorization"
-	proposalSuperseded       proposalErrorCode = "superseded"
 	proposalGuardrail        proposalErrorCode = "guardrail"
-	proposalOverloaded       proposalErrorCode = "overloaded"
 	proposalAuthorityPending proposalErrorCode = "authority_pending"
 	proposalAuthorityFenced  proposalErrorCode = "authority_fenced"
-	proposalUnsupported      proposalErrorCode = "unsupported"
 )
 
 const historyRetention = 128

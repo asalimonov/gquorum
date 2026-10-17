@@ -130,6 +130,10 @@ Completing a block copies its own approved declaration. A missing quorum, callba
 or former host blocks affected resources and explicit admission/evacuation
 prerequisites, without imposing a cluster-wide execution cursor. All durable
 management writes still require the shared `_meta` quorum.
+`ConvergedVersion` records provenance, not a history-retention promise: its source
+may be compacted when an identical approved declaration preserves every durable
+member binding. Consume the returned declaration and exact Node-published handle;
+do not require `Get(ConvergedVersion)` as an application readiness gate.
 
 `EnsureGroup(ctx, spec, EnsureOptions{Actor})` is the ordinary provisioning path.
 It verifies requested-scope desired/approved compatibility, then returns that

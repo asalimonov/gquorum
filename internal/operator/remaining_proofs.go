@@ -29,35 +29,6 @@ func voterIDs(voters map[uint64]bool) []uint64 {
 	return ids
 }
 
-// The metadata read supplies exact granted actions and recorded receipts from
-// one state snapshot. A native receipt can close the crash window after Raft
-// applies an effect but before its receipt reaches metadata.
-func remainingStepProofs(ex Record, native map[string]topology.NativeState) (map[int]bool, error) {
-	grants, err := remainingGrants(ex)
-	if err != nil {
-		return nil, err
-	}
-	receipts, err := remainingReceipts(ex, grants)
-	if err != nil {
-		return nil, err
-	}
-	return completedRemainingSteps(grants, receipts, native)
-}
-
-func remainingGrants(ex Record) (map[topology.AuthorityKey]topology.AuthorityGrant, error) {
-	grants := make(map[topology.AuthorityKey]topology.AuthorityGrant, len(ex.Grants))
-	for _, grant := range ex.Grants {
-		if err := validateRemainingGrant(ex, grant); err != nil {
-			return nil, err
-		}
-		if _, duplicate := grants[grant.Key]; duplicate {
-			return nil, ErrOperationAuthorization
-		}
-		grants[grant.Key] = grant
-	}
-	return grants, nil
-}
-
 func validateRemainingGrant(ex Record, grant topology.AuthorityGrant) error {
 	validationErr := grant.Validate()
 	if validationErr != nil || grant.Action == nil || grant.OperationID != ex.ID {
@@ -70,10 +41,10 @@ func validateRemainingGrant(ex Record, grant topology.AuthorityGrant) error {
 	return nil
 }
 
-func remainingReceipts(ex Record, grants map[topology.AuthorityKey]topology.AuthorityGrant) (
+func remainingReceipts(effects []topology.EffectReceipt, grants map[topology.AuthorityKey]topology.AuthorityGrant) (
 	map[topology.AuthorityKey][]topology.EffectReceipt, error) {
 	receipts := make(map[topology.AuthorityKey][]topology.EffectReceipt)
-	for _, receipt := range ex.Receipts {
+	for _, receipt := range effects {
 		grant, exists := grants[receipt.Key]
 		if !exists || receipt.Validate(grant) != nil {
 			return nil, ErrOperationAuthorization
@@ -81,20 +52,6 @@ func remainingReceipts(ex Record, grants map[topology.AuthorityKey]topology.Auth
 		receipts[receipt.Key] = append(receipts[receipt.Key], receipt)
 	}
 	return receipts, nil
-}
-
-func completedRemainingSteps(grants map[topology.AuthorityKey]topology.AuthorityGrant,
-	receipts map[topology.AuthorityKey][]topology.EffectReceipt,
-	native map[string]topology.NativeState) (map[int]bool, error) {
-	completed := make(map[int]bool)
-	for key, grant := range grants {
-		complete, err := remainingGrantComplete(grant, receipts[key], native)
-		if err != nil {
-			return nil, err
-		}
-		completed[grant.Action.StepSeq] = complete
-	}
-	return completed, nil
 }
 
 func remainingGrantComplete(grant topology.AuthorityGrant, receipts []topology.EffectReceipt,

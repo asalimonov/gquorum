@@ -19,15 +19,6 @@ type GroupEffects interface {
 	// and never reroute behind the controller's host accounting.
 	DispatchEffect(context.Context, topology.AuthorityGrant, topology.AuthorityResource,
 		topology.AuthorityTarget) (topology.EffectReceipt, error)
-	// CreateGroup seeds only the approved founding voters. Intentional learners
-	// are prepared and admitted by later exact steps.
-	CreateGroup(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error)
-	PrepareReplica(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error)
-	ApplyMembership(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error)
-	TransferLeader(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error)
-	StopReplica(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error)
-	CleanupReplicaState(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error)
-	DeleteGroupState(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error)
 }
 
 // Topology constants retain the original plan, role and state values during
@@ -63,20 +54,15 @@ var (
 	ErrReplicaNotReady        = fault.ErrReplicaNotReady
 	ErrNoQuorum               = fault.ErrUnavailable
 	ErrSafetyRefused          = fault.ErrUnsafeMembership
-	ErrVersionUnknown         = fault.ErrHistoryUnavailable
-	ErrNotImplemented         = fault.ErrUnsupported
 )
 
-// Record captures an exact execution attempt, plan, progress and retained
-// authority evidence.
+// Record identifies the immutable attempt and cursor used by native simulation.
 type Record struct {
 	ID          topology.OperationID
 	Version     uint64
 	Attempt     uint32
 	Steps       []Step
 	VoterBases  []topology.PlanVoterBase
-	Grants      []topology.AuthorityGrant
-	Receipts    []topology.EffectReceipt
 	CurrentStep int
 }
 

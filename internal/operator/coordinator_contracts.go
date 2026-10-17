@@ -12,10 +12,3 @@ type AuthorityCoordinator interface {
 	EffectReceipts(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error)
 	RecordEffect(context.Context, topology.EffectReceipt) error
 }
-
-// MembershipCoordinator applies granted membership effects and checks learner
-// catch-up.
-type MembershipCoordinator interface {
-	Apply(context.Context, topology.AuthorityGrant) ([]topology.EffectReceipt, error)
-	CaughtUp(GroupStatus, uint64) bool
-}

@@ -178,7 +178,7 @@ func TestScopedFoundingBindRechecksMemberOperationAndNativeProof(t *testing.T) {
 	}
 }
 
-// Task 78 connects this entry boundary to Machine.Apply with scoped persistence.
+// This isolated command fixture mirrors Machine.Apply's committed context.
 // Context is installed only on an owned candidate and cannot leak to a later
 // command, a snapshot, or a read. AfterApply is too late to supply this evidence.
 func applyScopedCommand(state *scopedState, c raftengine.Command) (proposalApplication, error) {

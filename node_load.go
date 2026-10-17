@@ -285,44 +285,6 @@ func (e nodeEffects) Status(ctx context.Context, id string) (topology.GroupStatu
 	return h.ObserveGroup(ctx, id)
 }
 
-func (e nodeEffects) dispatch(ctx context.Context, a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	h, err := e.node.loadHost(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return h.DispatchGrant(ctx, a)
-}
-
-func (e nodeEffects) CreateGroup(ctx context.Context, a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return e.dispatch(ctx, a)
-}
-
-func (e nodeEffects) PrepareReplica(ctx context.Context, a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return e.dispatch(ctx, a)
-}
-
-func (e nodeEffects) ApplyMembership(ctx context.Context, a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return e.dispatch(ctx, a)
-}
-
-func (e nodeEffects) TransferLeader(ctx context.Context, a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return e.dispatch(ctx, a)
-}
-
-func (e nodeEffects) StopReplica(ctx context.Context, a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return e.dispatch(ctx, a)
-}
-
-func (e nodeEffects) CleanupReplicaState(ctx context.Context,
-	a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return e.dispatch(ctx, a)
-}
-
-func (e nodeEffects) DeleteGroupState(ctx context.Context,
-	a topology.AuthorityGrant) ([]topology.EffectReceipt, error) {
-	return e.dispatch(ctx, a)
-}
-
 func (n *node) readmissionIdentity() topology.Identity {
 	if s := n.localAuthority(); s != nil {
 		return s.Identity()

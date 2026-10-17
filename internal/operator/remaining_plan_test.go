@@ -47,7 +47,7 @@ func TestRemainingPlanAgainstPostFenceMembership(t *testing.T) {
 			if !tc.unavailable {
 				native["work"] = topology.NativeState{GroupID: "work", ReplicaID: 1, Applied: 10, ConfState: raftpb.ConfState{Voters: tc.voters, Learners: tc.learners}}
 			}
-			if err := ValidateRemainingPlan(RemainingPlanView{Target: target}, ex, native, Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}); !errors.Is(err, tc.expected) {
+			if err := ex.validateScope(RemainingPlanView{Target: target}, native, "work", Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}); !errors.Is(err, tc.expected) {
 				t.Fatalf("got %v, want %v", err, tc.expected)
 			}
 		})
@@ -61,20 +61,20 @@ func TestRemainingPlanRetainsHostOnlyCleanupObligations(t *testing.T) {
 	base.Groups[0].Replicas = append(base.Groups[0].Replicas, Replica{NodeName: "b", ReplicaID: 2, Role: topology.ReplicaLearner})
 	native := map[string]topology.NativeState{"work": {GroupID: "work", ReplicaID: 1, Applied: 10, ConfState: raftpb.ConfState{Voters: []uint64{1}}}}
 	ex := Record{}
-	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}); !errors.Is(err, fault.ErrReplanRequired) {
+	if err := ex.validateScope(RemainingPlanView{Input: remainingInput(base), Target: target}, native, "work", Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}); !errors.Is(err, fault.ErrReplanRequired) {
 		t.Fatal(err)
 	}
 	ex.Steps = []Step{{Seq: 1, GroupID: "work", Kind: StepRemoveReplica, NodeName: "b", ReplicaID: 2}, {Seq: 2, GroupID: "work", Kind: StepStopReplica, NodeName: "b", ReplicaID: 2}, {Seq: 3, GroupID: "work", Kind: StepCleanupReplicaState, NodeName: "b", ReplicaID: 2}}
-	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}); err != nil {
+	if err := ex.validateScope(RemainingPlanView{Input: remainingInput(base), Target: target}, native, "work", Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}); err != nil {
 		t.Fatal(err)
 	}
 	// Proven progress in this immutable plan can satisfy its earlier host steps.
 	ex.CurrentStep = 3
-	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}); err != nil {
+	if err := ex.validateScope(RemainingPlanView{Input: remainingInput(base), Target: target}, native, "work", Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}); err != nil {
 		t.Fatal(err)
 	}
 	ex.Steps[2].NodeName = "different-owner"
-	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}); !errors.Is(err, fault.ErrReplanRequired) {
+	if err := ex.validateScope(RemainingPlanView{Input: remainingInput(base), Target: target}, native, "work", Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}); !errors.Is(err, fault.ErrReplanRequired) {
 		t.Fatal(err)
 	}
 }
@@ -98,11 +98,14 @@ func TestRemainingPlanRequiresCompleteReadmissionBoundary(t *testing.T) {
 	}}
 	native := map[string]topology.NativeState{MetaGroupID: {GroupID: MetaGroupID, ReplicaID: 2, Applied: 10, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}}}
 	rules := Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}
-	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, rules); err != nil {
+	if err := ex.validateScope(RemainingPlanView{Input: remainingInput(base), Target: target}, native, MetaGroupID, rules); err != nil {
+		t.Fatal("metadata replacement cannot reach its target", err)
+	}
+	if err := ex.validateScope(RemainingPlanView{Input: remainingInput(base), Target: target}, native, "deleted", rules); err != nil {
 		t.Fatal(err)
 	}
 	ex.Steps[1].Kind = StepWaitCaughtUp
-	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, rules); !errors.Is(err, fault.ErrReplanRequired) {
+	if err := ex.validateScope(RemainingPlanView{Input: remainingInput(base), Target: target}, native, "deleted", rules); !errors.Is(err, fault.ErrReplanRequired) {
 		t.Fatal("incomplete preparation hid retained hosts", err)
 	}
 }
@@ -119,15 +122,16 @@ func TestRemainingPlanRequiresExactReceiptForAppliedVoterChange(t *testing.T) {
 		ExpectedVotersDigest: topology.VoterSetDigest([]uint64{1}), ResultVotersDigest: topology.VoterSetDigest([]uint64{1, 2})}
 	ex := Record{ID: id, Version: 2, Attempt: 1, CurrentStep: 2,
 		Steps: []Step{{Seq: 1, Kind: StepWaitCaughtUp, GroupID: "work", NodeName: "b", ReplicaID: 2}, step}}
+	view := RemainingPlanView{Input: remainingInput(base), Target: target}
 	rules := Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}
 	native := map[string]topology.NativeState{"work": {GroupID: "work", ReplicaID: 1, Applied: 10,
 		ConfState: raftpb.ConfState{Voters: []uint64{1}, Learners: []uint64{2}}}}
-	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, rules); err != nil {
+	if err := ex.validateScope(view, native, "work", rules); err != nil {
 		t.Fatalf("matching predecessor cannot reach target: %v", err)
 	}
 	native["work"] = topology.NativeState{GroupID: "work", ReplicaID: 1, Applied: 11,
 		ConfState: raftpb.ConfState{Voters: []uint64{1, 2}}}
-	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, rules); !errors.Is(err, fault.ErrReplanRequired) {
+	if err := ex.validateScope(view, native, "work", rules); !errors.Is(err, fault.ErrReplanRequired) {
 		t.Fatalf("unexplained native promotion was reused: %v", err)
 	}
 	action := topology.AuthorizedStep{OperationID: id, Version: 2, Attempt: 1, StepSeq: 2,
@@ -140,28 +144,28 @@ func TestRemainingPlanRequiresExactReceiptForAppliedVoterChange(t *testing.T) {
 		Resources: []topology.AuthorityResource{resource}, Targets: []topology.AuthorityTarget{member}}
 	receipt := topology.EffectReceipt{Key: grant.Key, Resource: resource, Action: &action,
 		Target: member, Outcome: topology.EffectApplied, AppliedIndex: 11, AppliedTerm: 1}
-	ex.Grants = []topology.AuthorityGrant{grant}
+	view.Grants = []topology.AuthorityGrant{grant}
 	nativeState := native["work"]
 	nativeState.Grant, nativeState.Receipt = &grant, &receipt
 	native["work"] = nativeState
-	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, rules); err != nil {
+	if err := ex.validateScope(view, native, "work", rules); err != nil {
 		t.Fatalf("exact native receipt did not bridge metadata recording: %v", err)
 	}
 	stale := grant.Clone()
 	stale.Key.Revision--
 	nativeState.Grant = &stale
 	native["work"] = nativeState
-	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, rules); !errors.Is(err, fault.ErrReplanRequired) {
+	if err := ex.validateScope(view, native, "work", rules); !errors.Is(err, fault.ErrReplanRequired) {
 		t.Fatalf("stale native grant supplied completion proof: %v", err)
 	}
 	nativeState.Grant, nativeState.Receipt = nil, nil
 	native["work"] = nativeState
-	ex.Receipts = []topology.EffectReceipt{receipt}
-	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, rules); err != nil {
+	view.Receipts = []topology.EffectReceipt{receipt}
+	if err := ex.validateScope(view, native, "work", rules); err != nil {
 		t.Fatalf("recorded metadata receipt was ignored: %v", err)
 	}
-	ex.Receipts[0].Action = nil
-	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, rules); !errors.Is(err, fault.ErrOperationAuthorization) {
+	view.Receipts[0].Action = nil
+	if err := ex.validateScope(view, native, "work", rules); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatalf("stale or malformed receipt was accepted: %v", err)
 	}
 }
@@ -179,17 +183,17 @@ func TestRemainingPlanAcceptsExactApprovedFoundingSeedBeforeReceipt(t *testing.T
 		Purpose: topology.AuthorityEffect, OperationID: id, Action: &action,
 		Resources: []topology.AuthorityResource{{Kind: topology.AuthorityGroup, GroupID: "work"}, {Kind: topology.AuthorityHost, GroupID: "work", NodeName: "a"}},
 		Targets:   []topology.AuthorityTarget{{NodeName: "a", MemberID: 1, ReplicaID: 1}}}
-	ex := Record{ID: id, Version: 2, Attempt: 1, CurrentStep: 1, Steps: []Step{step}, Grants: []topology.AuthorityGrant{grant}}
+	ex := Record{ID: id, Version: 2, Attempt: 1, CurrentStep: 1, Steps: []Step{step}}
 	state := topology.NativeState{GroupID: "work", ReplicaID: 1, Applied: 10,
 		ConfState: raftpb.ConfState{Voters: []uint64{1}}, Grant: &grant}
 	native := map[string]topology.NativeState{"work": state}
 	rules := Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}}
-	if err := ValidateRemainingPlan(RemainingPlanView{Target: target}, ex, native, rules); err != nil {
+	if err := ex.validateScope(RemainingPlanView{Target: target, Grants: []topology.AuthorityGrant{grant}}, native, "work", rules); err != nil {
 		t.Fatalf("exact approved founding seed could not obtain receipt: %v", err)
 	}
 	state.Grant = nil
 	native["work"] = state
-	if err := ValidateRemainingPlan(RemainingPlanView{Target: target}, ex, native, rules); !errors.Is(err, fault.ErrReplanRequired) {
+	if err := ex.validateScope(RemainingPlanView{Target: target, Grants: []topology.AuthorityGrant{grant}}, native, "work", rules); !errors.Is(err, fault.ErrReplanRequired) {
 		t.Fatalf("unapproved founding seed was reused: %v", err)
 	}
 }
@@ -209,4 +213,33 @@ func remainingInput(doc Document) topology.PlanInput {
 			ConvergedVersion: doc.Version, MemberID: doc.MemberID(node.Name)}
 	}
 	return input
+}
+
+// validateScope ports the simulation fixtures through the production scoped
+// entry point. These deliberately partial plans isolate native/retained checks;
+// plan-shape validation is covered separately through Machine.Apply.
+func (ex Record) validateScope(view RemainingPlanView, native map[string]topology.NativeState,
+	group string, rules Rules) error {
+	view.Input.Native = native
+	block := topology.PlanBlock{GroupID: group}
+	for _, step := range ex.Steps {
+		if step.GroupID != group {
+			continue
+		}
+		if step.Kind == StepCleanupReplicaState || step.Kind == StepDeleteGroupState {
+			block.Cleanup = append(block.Cleanup, step.Seq)
+			continue
+		}
+		block.Steps = append(block.Steps, step.Seq)
+		if step.Seq < ex.CurrentStep {
+			view.Consumed = append(view.Consumed, step.Seq)
+		}
+	}
+	plan := ex.Plan()
+	plan.Blocks = []topology.PlanBlock{block}
+	op := topology.Operation{Plan: plan, Status: topology.OperationStatus{
+		ID: ex.ID, Version: ex.Version, Attempt: ex.Attempt, State: topology.OperationRunning,
+		Blocks: []topology.BlockStatus{{GroupID: group, State: topology.OperationRunning}},
+	}}
+	return ValidateRemainingScope(view, op, group, rules)
 }

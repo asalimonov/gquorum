@@ -11,6 +11,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -31,6 +32,19 @@ func TestAuthorityEarlierLearnerActionCannotUndoSameOperatorPromotionThreeNodes(
 	}
 	if _, err := c.Approve(ctx, "node2", staged.Document.Version); err != nil {
 		t.Fatal(err)
+	}
+	// Required convergence does not wait for the removed host's detached stop.
+	// Finish that exact setup boundary before planning the replay scenario;
+	// otherwise a stop consumed between plan capture and approval correctly
+	// refuses a plan which attempts to reissue the completed retirement work.
+	old := storage.Identity{ClusterID: original.ClusterID, GroupID: "work", NodeName: "node3",
+		ReplicaID: replicaID(original, "work", "node3")}
+	if err := Poll(ctx, func() (bool, error) {
+		page, err := c.Progress(ctx, "node2", topology.ProgressQuery{GroupID: "work", NodeName: "node3"})
+		debt, found := exactCleanup(page, old)
+		return found && debt.StoppedAt != nil, err
+	}); err != nil {
+		t.Fatal("removed predecessor did not finish its exact detached stop", err)
 	}
 	owner, err := c.Local(ctx, "node1", "work")
 	if err != nil || !owner.Found || owner.Status.LeaderID != owner.ReplicaID {
@@ -162,6 +176,11 @@ func TestAuthorityEarlierLearnerActionCannotUndoSameOperatorPromotionThreeNodes(
 	// The earlier add-learner action must not demote the freshly promoted voter.
 	requireFencedReplay(ctx, t, c, owner, earlier)
 	waitAuthorityMembership(ctx, t, c, growStage.Document, false)
+	// The fixture publishes serving observations asynchronously after metadata
+	// and native membership. Observe readiness before the consistent-read check.
+	if err := c.WaitValue(ctx, "node3", "work", "key", "before"); err != nil {
+		t.Fatal("promoted successor did not become ready to serve", err)
+	}
 	value, err := c.Read(ctx, "node3", "work", "key")
 	requireReadValue(t, value, err, "node3", "before")
 }

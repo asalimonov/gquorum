@@ -279,7 +279,7 @@ func setPlacementTimestamps(before Document, next *Document, at time.Time) {
 
 // ValidatePlacementTransition checks the final declared assignment against the
 // approved reservation reference. Native intermediate configurations are
-// validated by the plan and execution paths using Active as their baseline.
+// validated by plan and execution paths using proven per-group input.
 func ValidatePlacementTransition(approved, base, desired Document) error {
 	if approved.ClusterID != desired.ClusterID || base.ClusterID != desired.ClusterID {
 		return invalid(fmt.Sprintf("placement transition has mismatched cluster identity: "+

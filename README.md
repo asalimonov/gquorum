@@ -196,7 +196,7 @@ compatibility impact.
 3. Run all tests before sending of a request:
 
    ```sh
-   make test          # Compile all four modules and run fast, uncached units
+   make test          # Compile all five application modules and run fast, uncached units
    make lint          # vet, revive style and unused-code checks across modules
    make test-race     # Fast unit checks under the race detector
    make test-function # Isolated non-Docker functional and storage tests

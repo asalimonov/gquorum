@@ -18,16 +18,41 @@ Changed older formats refuse unchanged; there is no migration or mixed-version
 support. Frozen fixtures and immutable hashes are indexed in
 [physical provenance](api-baseline-physical.md).
 
-Executed evidence through `18fd92f` (no final-completion claim):
+Post-audit evidence on `e4c5392` plus Task88 corrections (all required test gates pass; peer review remains pending).
+The tested source/build set contains 1,096 files; its SHA-256 is
+`e7b9b2a60cd4c4d42df52020ef843c2bee325e797c011a9646897436902ed7d3`.
+The fingerprint hashes sorted tracked Go/proto/go.mod/go.sum/Makefile/Dockerfile
+paths and bytes, each followed by NUL. The only correction after non-Docker
+suites/benchmark was clustertest-only stop/readiness barriers; library, fixture and
+benchmark sources are unchanged. Final units/lint and complete cluster rerun
+followed that correction and passed.
 
-| Check | Actual evidence |
+| Check | Actual evidence under `test-reports/` unless otherwise stated |
 | --- | --- |
-| Fast units | Task85: 1,874/1,874; `test-reports/unit/20261017T011918.618279Z-r35k3ye1/report.md`. Five application modules compile; elapsed 6.242s. |
-| Scoped activation | Task78 complete functional suite 1,034/1,034; lint and operator/metaservice functional race pass. Exact report paths are retained in the implementation log. |
-| Real ownership/collection | Task79 blocked-factory isolation and Task80 four retained collection handoffs pass normally and under race; Task83 caller-fixture functional-race passes. |
-| Debt scale/bounds | Task84 count=3 benchmark, 0/1k/10k debts; at 10k ~51 MB/changed Apply, median ~222 ms serialize/~250 ms bbolt. Paging and independent grant regression plus bounded dispatch race pass. |
-| Process scenarios | Six `TestFailureIsolation_` cases compile. Docker execution is pending Task87; compile-only is not consensus/crash evidence. |
-| Final architecture gate | Task88 must trace real wiring, resolve gaps and rerun complete functional, functional-race and cluster suites on final source. Task87 does not replace those runs. |
+| Fast units | PASS 1,884/1,884; `unit/20261017T031345.867812Z-wbi1bvet/report.md`. |
+| Unit race | PASS 1,884/1,884; `unit-race/20261017T030141.240620Z-vdcfzk_u/report.md`. |
+| Functional | PASS 1,043/1,043; `function/20261017T030207.714644Z-62nx4vsx/report.md`. |
+| Functional race | PASS 1,043/1,043; `function-race/20261017T030252.395699Z-jca4sx81/report.md`. |
+| Lint | PASS; `architecture/20261017-task88/lint.log`, all configured module/build-tag analyzers. |
+| Physical formats | All seven legacy baseline files and five current frozen fixtures match their recorded SHA-256 hashes. No protocol sources changed. |
+| Debt scale/bounds | PASS count=3; `bench/20261017-task88/benchmark.log`. At 10k debts: ~51.3 MB persisted per Apply; median encoding 228.7 ms, bbolt 253.1 ms, restore 1.56 s, progress page 5.37 ms. Separate cleanup selection stays bounded (~344 ns); ordinary four-block selection costs 35.2 ms. |
+| Focused process | PASS 6/6 isolation cases (`cluster/20261017T030540.982912Z-11m_z9_l`); exact replay setup regression PASS 3/3 (`cluster/20261017T031315.217037Z-qp98zmp2`). |
+| Complete process suite | PASS 91/91, 260.691s; `cluster/20261017T031352.388287Z-yggkc_uc/report.md`, no failures/skips. |
+| Compose basic | PASS, 32.226s; `example/20261017T031813.126290Z-4bpecc1h/report.md`. |
+| Compose scheduler | PASS, 131.121s; `example/20261017T031845.408057Z-1ejzrshw/report.md`. |
+| Compose cache | PASS, 40.816s; `example/20261017T032056.589394Z-ok6sjmbf/report.md`. |
+| Resource/format checks | No run-owned containers/networks/volumes or demo containers remain. Unrelated pre-existing volumes are preserved. Image digest is unchanged; local documentation links and git diff --check pass. |
+| Peer review | Thread42 is written but undelivered while Claude's terminal displays a usage-limit question. Later fixes have no claimed peer consensus. |
+
+Final application image: `gquorum-test:fi-e4c5392-task88a`, OCI index
+`sha256:035a0fc5e46a51cc200f28154480d4a222bed6bc13c81ebd6418119c2b660947`,
+config `sha256:eb3a1f6c6f9344a502f7614e1139024182a15ca7f4873d4fee2410744e78716e`.
+The first complete post-audit run was 90/91 (`cluster/20261017T030558.058983Z-2gm3okjf`):
+a replay test raced detached Stop between plan capture and approval. Its explicit
+predecessor-stop barrier and subsequent serving-readiness barrier retain all
+exact grant, membership, storage, value and consistent-read assertions. These
+changes affect only the host-side clustertest harness, so the application image
+is identical for the focused and complete reruns.
 
 The historical October11 gates below remain evidence only for their recorded
 revision. They do not validate the current scoped cutover or its process image.

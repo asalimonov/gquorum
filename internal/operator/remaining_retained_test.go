@@ -47,7 +47,7 @@ func TestRemainingPlanDistinguishesRetainedHostObligations(t *testing.T) {
 			}
 			native := map[string]topology.NativeState{"work": {GroupID: "work", ReplicaID: 1, Applied: 10,
 				ConfState: raftpb.ConfState{Voters: []uint64{1}}}}
-			err := ValidateRemainingPlan(RemainingPlanView{Input: input, Target: target}, ex, native,
+			err := ex.validateScope(RemainingPlanView{Input: input, Target: target}, native, "work",
 				Rules{Limits: Limits{MaxNodes: 3, MaxReplicas: 5}})
 			if tc.wantErr && !errors.Is(err, fault.ErrReplanRequired) || !tc.wantErr && err != nil {
 				t.Fatal("wrong retained obligation", err)

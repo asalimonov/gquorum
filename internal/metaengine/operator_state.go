@@ -63,23 +63,23 @@ func validStepKind(kind topology.StepKind) bool {
 	}
 }
 
-func validateRepairDocument(active, repair topology.Document) error {
-	if active.ClusterID != repair.ClusterID || !reflect.DeepEqual(active.Placement, repair.Placement) ||
-		!reflect.DeepEqual(active.Audit, repair.Audit) {
+func validateRepairDocument(approved, repair topology.Document) error {
+	if approved.ClusterID != repair.ClusterID || !reflect.DeepEqual(approved.Placement, repair.Placement) ||
+		!reflect.DeepEqual(approved.Audit, repair.Audit) {
 		return errors.New("repair changes cluster placement or forced audit")
 	}
-	if len(active.Nodes) != len(repair.Nodes) || len(active.Groups) != len(repair.Groups) {
+	if len(approved.Nodes) != len(repair.Nodes) || len(approved.Groups) != len(repair.Groups) {
 		return errors.New("repair changes node or group cardinality")
 	}
-	for i := range active.Nodes {
-		a, b := active.Nodes[i], repair.Nodes[i]
+	for i := range approved.Nodes {
+		a, b := approved.Nodes[i], repair.Nodes[i]
 		a.UpdatedAt, b.UpdatedAt = time.Time{}, time.Time{}
 		if !reflect.DeepEqual(a, b) {
-			return fmt.Errorf("repair changes node %q beyond an update timestamp", active.Nodes[i].Name)
+			return fmt.Errorf("repair changes node %q beyond an update timestamp", approved.Nodes[i].Name)
 		}
 	}
-	for i := range active.Groups {
-		if err := validateRepairGroup(active.Groups[i], repair.Groups[i]); err != nil {
+	for i := range approved.Groups {
+		if err := validateRepairGroup(approved.Groups[i], repair.Groups[i]); err != nil {
 			return err
 		}
 	}
@@ -89,33 +89,33 @@ func validateRepairDocument(active, repair topology.Document) error {
 // validateSingleReplicaRepair re-derives the sole document edit permitted by
 // the atomic repair command. Readmission has a separate validator because it
 // replaces the admitted node's meta and load identities together.
-func validateSingleReplicaRepair(active, repair topology.Document) error {
-	if err := validateRepairDocument(active, repair); err != nil {
+func validateSingleReplicaRepair(approved, repair topology.Document) error {
+	if err := validateRepairDocument(approved, repair); err != nil {
 		return err
 	}
-	if repair.ParentVersion != active.Version {
-		return errors.New("repair parent is not Active")
+	if repair.ParentVersion != approved.Version {
+		return errors.New("repair parent is not approved")
 	}
-	expected := active.Clone()
+	expected := approved.Clone()
 	expected.Version, expected.ParentVersion = repair.Version, repair.ParentVersion
 	expected.Origin, expected.ChangedBy = repair.Origin, repair.ChangedBy
 	// Explicit operator mutations may stamp their document audit comment/time.
-	// Automatic repair preserves these fields from Active.
+	// Automatic repair preserves these fields from the approved document.
 	if repair.Origin == topology.OriginOperator {
 		expected.Comment, expected.CreatedAt = repair.Comment, repair.CreatedAt
 	}
 	changed := 0
-	for i, group := range active.Groups {
+	for i, group := range approved.Groups {
 		for j, old := range group.Replicas {
 			next := repair.Groups[i].Replicas[j]
 			if old.ReplicaID == next.ReplicaID {
 				continue
 			}
-			node := active.Node(old.NodeName)
+			node := approved.Node(old.NodeName)
 			if group.ID == topology.MetaGroupID || old.Role != topology.ReplicaVoter || node == nil ||
 				node.State != topology.NodeActive || next.ReplicaID != group.NextReplicaID ||
 				next.ReplicaID == ^uint64(0) {
-				return errors.New("repair must replace one exact Active load voter with its allocator identity")
+				return errors.New("repair must replace one exact approved load voter with its allocator identity")
 			}
 			changed++
 			expected.Groups[i].Replicas[j].ReplicaID = next.ReplicaID
@@ -126,7 +126,7 @@ func validateSingleReplicaRepair(active, repair topology.Document) error {
 		}
 	}
 	if changed != 1 || !reflect.DeepEqual(expected, repair) {
-		return errors.New("repair changes fields outside one exact Active load voter")
+		return errors.New("repair changes fields outside one exact approved load voter")
 	}
 	return nil
 }
