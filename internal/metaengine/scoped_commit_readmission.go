@@ -88,7 +88,7 @@ func (s *scopedState) readmissionDocuments(p CommitReadmissionProposal) (repairD
 	}
 	expected, err := buildReadmissionDocument(s.Target, name, p.At)
 	if err != nil {
-		return repairDocuments{}, err
+		return repairDocuments{}, planContentRefusal(err)
 	}
 	pair, err := s.prepareRepairDocuments(expected, p.At)
 	if err != nil {

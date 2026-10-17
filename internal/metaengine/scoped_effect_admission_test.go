@@ -147,3 +147,27 @@ func TestScopedReadmissionIssuanceSurvivesUnrelatedTargetAdvance(t *testing.T) {
 		t.Fatal("refused readmission changed authority")
 	}
 }
+
+func TestScopedMetadataPrepareWaitsForJoiningProcess(t *testing.T) {
+	t.Parallel()
+	s := scopedAdmissionFixture()
+	admission := s.Admissions[0]
+	s.Admissions = nil
+	s.Operations[0].Status.State = topology.OperationRunning
+	s.Operations[0].Status.Blocks[0].State = topology.OperationRunning
+	prepareScopedFixture(t, &s)
+	action := scopedPlanAction(&s.Operations[0], s.Operations[0].Plan.Steps[0])
+	before, _ := json.Marshal(s)
+	if _, err := s.applyBeginEffect(11, BeginEffectProposal{Action: action}); !errors.Is(err, fault.ErrUnavailable) {
+		t.Fatal("approved joining member permanently failed before binding", err)
+	}
+	after, _ := json.Marshal(s)
+	if !bytes.Equal(before, after) {
+		t.Fatal("waiting for the joining process changed authority")
+	}
+	s.Admissions = []AdmissionRecord{admission}
+	prepareScopedFixture(t, &s)
+	if result, err := s.applyBeginEffect(11, BeginEffectProposal{Action: action}); err != nil || result.result.Grant == nil {
+		t.Fatal("same operation could not resume after exact binding", result, err)
+	}
+}

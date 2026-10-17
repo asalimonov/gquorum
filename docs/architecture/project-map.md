@@ -111,6 +111,7 @@ include unknown groups, partial acquisitions and quarantined data. See
 | `FullyConverged`, group/node checkpoint — `NO_ACTIVE` | Marker advances only when current approved declarations and required deletion stops are proven. Detached cleanup is excluded. Source zero is unknown; nil group with nonzero source is a deletion tombstone. Marker history is pinned but cannot gate current serving, recovery, admission or repair. |
 | Intent records / `Document.RebasedFrom` — `API_RETRY`, `FI_REBASE` | Original parent CAS + normalized typed intent + attribution identify staging replay; never allocate again merely because a reply was lost. Approve returns the first attempt; RetryOperation returns the failed ID's immediate successor. Repair writes R and rebased unapproved S atomically; old approval conflicts with RebasedTo. Missing retained proof is HistoryUnavailable/conflict. [Replay](../../internal/metaengine/mutation_replay.go), [repair](../../internal/metaengine/scoped_repair.go). |
 | `cleanupRecord` / `CleanupProgress` — `CLEANUP_PROOF` | Durable exact identity, former member, storage class, origin, Stop/Retire actions and monotonic Removed/Stopped/Retired/Collected proof; public DTO omits grants/tokens. Required deletion stop remains blocking; removed-replica retirement is detached. Supersession may rebind action ownership without inventing milestones. [Debt](../../internal/metaengine/scoped_cleanup.go), [handover](../../internal/metaengine/scoped_cleanup_handover.go). |
+| Same-host replacement — `FI_HOST_REUSE` | Pair old/new load IDs by host; native Remove + required Stop precede Prepare. Issuance waits for all predecessor debt on that group/host to be Retired, never Collected; detached retirement consumes the common host floor before successor preparation. Other hosts/groups remain independent. [Planner](../../topology/voter_moves.go), [gate](../../internal/metaengine/scoped_barriers.go). |
 | `CollectionRecord`, `CollectionReceipt`, `CollectionResult` — `CLEANUP_CRASH` | Host journal pins Retired+Grant+Retirement before Collect, assigns one durable Sequence, then records the first successful CollectedAt. Report exact receipt; only verified acceptance or safe-read settlement allows ForgetCollection then RemoveCollection. Settled=true proves no remaining references, never prior acceptance. [Journal](../../internal/authoritystore/collection.go), [reporter](../../internal/managed/collection_report.go). |
 | `Limits` / dispatch gates — `FI_CAPACITY` | Defaults MaxNodes=3, MaxReplicas=5, MaxConcurrentGroups=4, MaxConcurrentCleanup=2. Immutable replicated execution budgets, bounded queues/backoff and shared (host,group) RPC gates. Timeout releases a remote slot while a late local callback stays owned. Retained debt is not capped/evicted. [Dispatch](../../internal/operator/dispatch_groups.go), [benchmark](../../internal/metaengine/cleanup_debt_bench_func_test.go). |
 
@@ -603,7 +604,10 @@ until the service decorates the bounded page from cache.
 safe read/apply -> private progress query -> returned-row-only cache decoration.
 No host calls. Attach only exact nonzero source, current process identity and
 approved/proven replica; preserve ReceivedAt and derive leader name from exact
-proven/approved ID. Local advancement can conservatively discard an older sample.
+proven/approved ID. Managed native observations capture the source before dispatch,
+then bind the authenticated responding process/replica and local receive time;
+metadata LocalStatus binds its own engine/member and captured source. Status never
+routes `_meta` through the load observer. Local advancement can conservatively discard an older sample.
 ClusterStatus.Groups uses the same complete GroupProgress builder. Scoped local
 ProgressStatus bounds operation headers to100 without Blocks, preserving aggregate
 state and explicit truncation; cleanup summary counts pending physical evidence.

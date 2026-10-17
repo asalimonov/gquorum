@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
@@ -45,7 +46,7 @@ func (e *Controller) dispatchRequest(ctx context.Context, request effectDispatch
 		return topology.EffectReceipt{}, err
 	}
 	if !e.ownsGroup(request.grant.Key.GroupID) {
-		return topology.EffectReceipt{}, fault.ErrOperationAuthorization
+		return topology.EffectReceipt{}, fault.New(fault.OperationAuthorization, "effect group ownership lost", nil)
 	}
 	e.mu.Lock()
 	run := e.run
@@ -94,7 +95,7 @@ func (e *Controller) finishRequest(ctx context.Context, request effectDispatch,
 	bounded, cancel := context.WithTimeout(ctx, e.proposalTimeout)
 	defer cancel()
 	if err := e.authority.RecordEffect(bounded, receipt.Clone()); err != nil {
-		return err
+		return fmt.Errorf("record effect receipt: %w", err)
 	}
 	return callErr
 }

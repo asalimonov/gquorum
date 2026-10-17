@@ -231,7 +231,7 @@ func (v *planShapeValidator) validateStepOrder(i int, current Step) error {
 			return fmt.Errorf("prepare %s/%d is not immediately followed by add learner", current.GroupID,
 				current.ReplicaID)
 		}
-		return requireCleanupOwnerStop(voterPlanTopology{base: v.input, desired: v.desired, groupID: current.GroupID},
+		return requireFormerOwnerStop(voterPlanTopology{base: v.input, desired: v.desired, groupID: current.GroupID},
 			v.plan, current, v.stopped[current.GroupID])
 	case StepWaitCaughtUp:
 		if !nextPlanStepMatches(v.plan.Steps, i, StepPromoteVoter, current) &&

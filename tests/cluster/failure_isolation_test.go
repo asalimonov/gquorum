@@ -156,6 +156,12 @@ func TestFailureIsolation_StagedRebase(t *testing.T) {
 		t.Fatal(err)
 	}
 	repaired := reseatIsolationReplica(ctx, t, c, "repair", replicaID(base.Document, "repair", "node3"), staged.Document.Version)
+	// The mutation may have been forwarded. Local document observations need
+	// their explicit barrier before asserting the atomically committed pair.
+	page, err := c.Progress(ctx, "node1", topology.ProgressQuery{GroupID: "repair"})
+	if err != nil || page.TargetVersion != repaired.Document.Version || page.LatestVersion != repaired.Document.Version+1 {
+		t.Fatal("repair/rebase pair not visible after quorum read", page, err)
+	}
 	latest, err := c.Document(ctx, "node1", "latest")
 	if err != nil {
 		t.Fatal(err)
@@ -219,7 +225,7 @@ func TestFailureIsolation_StagedRebase(t *testing.T) {
 	if err := response.Decode(&conflict); err != nil || conflict.Code != fault.VersionConflict || conflict.RebasedTo != s.Version {
 		t.Fatal("old approval did not identify preserved successor", conflict, err)
 	}
-	page, err := c.Progress(ctx, "node1", topology.ProgressQuery{GroupID: "intent"})
+	page, err = c.Progress(ctx, "node1", topology.ProgressQuery{GroupID: "intent"})
 	if err != nil || page.TargetVersion != r.Version || page.LatestVersion != s.Version || len(page.Groups) != 1 ||
 		!reflect.DeepEqual(page.Groups[0].Desired, s.Group("intent")) || !reflect.DeepEqual(page.Groups[0].Approved, r.Group("intent")) || page.Groups[0].OperationID != "" {
 		t.Fatal("old approval changed the approved intent", page, err)

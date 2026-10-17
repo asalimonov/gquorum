@@ -145,4 +145,26 @@ func TestJoinPreservesIndependentProgressAndProcessExclusivity(t *testing.T) {
 		replacement.MemberID != doc.MemberID(id.NodeName) || metaengine.ReadmissionID(replacement) != metaengine.ReadmissionID(response.Admission) {
 		t.Fatal("replacement lost exact pending member", replacement)
 	}
+	// The real ready receiver must encode a complete v4 receipt proposal. A
+	// protocol double accepting JoinReady misses payload validation by the FSM.
+	var receipts []topology.EffectReceipt
+	for _, grant := range response.Grants {
+		receipts = append(receipts, protocolEffectReceipts(grant)...)
+	}
+	ready := readyRequest{NodeName: id.NodeName, InstanceID: copyRequest.Identity.InstanceID,
+		MemberID: response.MemberID, OperationID: response.Admission.OperationID,
+		Address: copyRequest.Address, Receipts: receipts}
+	data, err = json.Marshal(ready)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copyHeader.MemberId = ready.MemberID
+	for range 2 {
+		if err := metatransport.ReplyError(g.Call(ctx, "JoinReady", copyHeader, data)); err != nil {
+			t.Fatal("ready receipt batch did not reach the replicated FSM", err)
+		}
+	}
+	if admission, ok := g.state().Admission(id.NodeName, ready.InstanceID); !ok || admission.State != metaengine.AdmissionReady {
+		t.Fatal("retired former owner did not unblock the exact admission", admission)
+	}
 }

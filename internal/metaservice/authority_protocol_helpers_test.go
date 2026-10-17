@@ -21,7 +21,7 @@ func protocolEffectReceipts(grant topology.AuthorityGrant) []topology.EffectRece
 		if resource.Kind == topology.AuthorityHost {
 			for _, target := range grant.Targets {
 				if target.NodeName == resource.NodeName {
-					result = append(result, topology.EffectReceipt{Key: grant.Key, Resource: resource, Action: grant.Action, Target: target, Outcome: topology.EffectApplied, LocalSequence: grant.Key.Revision*10 + 1})
+					result = append(result, topology.EffectReceipt{Key: grant.Key, Resource: resource, Action: grant.Action, AdmissionID: grant.AdmissionID, Target: target, Outcome: topology.EffectApplied, LocalSequence: grant.Key.Revision*10 + 1})
 				}
 			}
 			continue
@@ -55,6 +55,18 @@ func (c *verifiedLoadController) installFence(ctx context.Context, request load.
 
 func (f *mutationFixture) consumeStep(t *testing.T, action topology.AuthorizedStep) {
 	t.Helper()
+	if action.GroupID != topology.MetaGroupID && action.Kind == topology.StepPrepareReplica {
+		f.retireFormerHost(t, action)
+	}
+	f.bindFixtureAdmission(t, action)
+	grant := f.command(t, metaengine.BeginEffectProposal{Action: action, ProposalID: newProposalID()}).Grant
+	for _, receipt := range protocolEffectReceipts(*grant) {
+		f.command(t, metaengine.RecordEffectProposal{Receipt: receipt, At: time.Now().UTC(), ProposalID: newProposalID()})
+	}
+}
+
+func (f *mutationFixture) bindFixtureAdmission(t *testing.T, action topology.AuthorizedStep) {
+	t.Helper()
 	if action.GroupID == topology.MetaGroupID && action.Kind == topology.StepPrepareReplica {
 		instance := "fixture-" + action.NodeName
 		if _, exists := f.g.machine.Admission(action.NodeName, instance); !exists {
@@ -64,10 +76,6 @@ func (f *mutationFixture) consumeStep(t *testing.T, action topology.AuthorizedSt
 			f.command(t, metaengine.ReadyAdmissionProposal{NodeName: admission.NodeName, InstanceID: instance,
 				MemberID: action.ReplicaID, OperationID: action.OperationID, ProposalID: newProposalID()})
 		}
-	}
-	grant := f.command(t, metaengine.BeginEffectProposal{Action: action, ProposalID: newProposalID()}).Grant
-	for _, receipt := range protocolEffectReceipts(*grant) {
-		f.command(t, metaengine.RecordEffectProposal{Receipt: receipt, At: time.Now().UTC(), ProposalID: newProposalID()})
 	}
 }
 
@@ -122,6 +130,10 @@ func (f *mutationFixture) approveFixture(t *testing.T, doc topology.Document) {
 	proposal := f.fixtureApproval(t, doc)
 	plan := proposal.Plan
 	begin := f.command(t, proposal)
+	for _, step := range plan.Steps {
+		f.bindFixtureAdmission(t, topology.AuthorizedStep{OperationID: begin.OperationID,
+			GroupID: step.GroupID, Kind: step.Kind, NodeName: step.NodeName, ReplicaID: step.ReplicaID})
+	}
 	for turn := 0; turn <= len(plan.Steps)+len(plan.Blocks); turn++ {
 		status, err := f.g.machine.Operation(begin.OperationID)
 		if err != nil {
@@ -165,5 +177,37 @@ func (f *mutationFixture) completeFixtureWork(t *testing.T, op topology.Operatio
 		f.native[group] = fixtureNative(*desired)
 	} else {
 		delete(f.native, group)
+	}
+}
+
+// Detached retirement owns its own grant. A required same-host Prepare waits
+// for that exact predecessor's retirement, without waiting for collection.
+func (f *mutationFixture) retireFormerHost(t *testing.T, action topology.AuthorizedStep) {
+	t.Helper()
+	for after := ""; ; {
+		page, err := f.g.machine.CleanupPage(after, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, debt := range page.Records {
+			id := debt.Identity
+			if id.GroupID != action.GroupID || id.NodeName != action.NodeName ||
+				id.ReplicaID == action.ReplicaID || debt.Retired != nil {
+				continue
+			}
+			if debt.Stopped == nil || debt.RetireAction == nil {
+				t.Fatal("predecessor lacks required stop or retirement action", debt)
+			}
+			grant := f.command(t, metaengine.BeginCleanupEffectProposal{Identity: id,
+				Action: *debt.RetireAction, ProposalID: newProposalID()}).Grant
+			for _, receipt := range protocolEffectReceipts(*grant) {
+				f.command(t, metaengine.RecordEffectProposal{Receipt: receipt, At: time.Now().UTC(),
+					ProposalID: newProposalID()})
+			}
+		}
+		if page.Next == "" {
+			return
+		}
+		after = page.Next
 	}
 }

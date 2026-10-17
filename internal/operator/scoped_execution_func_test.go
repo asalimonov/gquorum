@@ -312,6 +312,8 @@ func TestScopedExecutionRequiresExactRecordedReceipts(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			e, f, c, work := scopedExecutionFixture(t)
+			clock := newFakeControllerClock()
+			e.clock = clock
 			switch mode {
 			case "missing":
 				f.alterReceipt = func(topology.EffectReceipt) topology.EffectReceipt { return topology.EffectReceipt{} }
@@ -327,6 +329,22 @@ func TestScopedExecutionRequiresExactRecordedReceipts(t *testing.T) {
 			}
 			if mode != "record unavailable" && last.State != topology.OperationFailed {
 				t.Fatal("malformed proof was retryable", last)
+			}
+			if mode == "record unavailable" {
+				f.recordErr = nil
+				clock.mu.Lock()
+				clock.now = clock.now.Add(2 * time.Second)
+				clock.mu.Unlock()
+				// Founding records its two host phases and then the native phase.
+				// Retrying the lost record keeps the original exact grant.
+				for range 2 {
+					if outcome := e.runScopedWork(t.Context(), work); outcome != controllerWaiting {
+						t.Fatal("founding skipped a receipt phase after record recovery", outcome)
+					}
+				}
+				if outcome := e.runScopedWork(t.Context(), work); outcome != controllerProgressed || len(f.receipts) != 3 {
+					t.Fatal("record recovery did not resume original work", outcome, f.receipts)
+				}
 			}
 		})
 	}

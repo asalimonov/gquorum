@@ -2,6 +2,7 @@ package managed
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/operator"
@@ -37,10 +38,10 @@ func (h *Host) DispatchEffect(parent context.Context, incoming topology.Authorit
 	}
 	peer, err := h.grantedPeer(ctx, grant, target)
 	if err != nil {
-		return topology.EffectReceipt{}, err
+		return topology.EffectReceipt{}, fmt.Errorf("resolve effect recipient: %w", err)
 	}
 	if err := h.installGrantedFence(ctx, grant, resource, peer); err != nil {
-		return topology.EffectReceipt{}, err
+		return topology.EffectReceipt{}, fmt.Errorf("install effect fence: %w", err)
 	}
 	// Resolving the peer and committing the fence can wait. Recheck the full
 	// immutable grant before submitting the effect; the receiver checks it too.
@@ -52,5 +53,9 @@ func (h *Host) DispatchEffect(parent context.Context, incoming topology.Authorit
 		request.LocalTarget = storage.Identity{ClusterID: grant.Key.ClusterID, GroupID: grant.Key.GroupID,
 			NodeName: target.NodeName, ReplicaID: target.ReplicaID}
 	}
-	return h.sendGrantedAction(ctx, request)
+	receipt, err := h.sendGrantedAction(ctx, request)
+	if err != nil {
+		return topology.EffectReceipt{}, fmt.Errorf("apply granted action: %w", err)
+	}
+	return receipt, nil
 }

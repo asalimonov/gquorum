@@ -5,6 +5,8 @@ import (
 )
 
 // AddressResolver resolves a logical node name to its meta transport endpoint.
+// Resolve runs on the Raft send path, including before a leader exists. Use
+// local routing information; a quorum read here prevents the election it needs.
 type AddressResolver interface {
 	Resolve(context.Context, string) (string, error)
 }

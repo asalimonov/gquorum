@@ -136,6 +136,67 @@ func TestAuthorityReadUsesLeaderForBlankAndFencedProtocolOwner(t *testing.T) {
 
 type approvedRouteResolver struct{ name, address string }
 
+func TestLoadCreationWaitsForLocalGrantReplay(t *testing.T) {
+	t.Parallel()
+	g := readyPublic(t, singleMetaFixture(t))
+	g.controller.Stop()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	doc, err := g.Stage(ctx, loadDocument(t, g), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval := (&mutationFixture{g: g}).fixtureApproval(t, doc)
+	begin, err := g.propose(ctx, approval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := approval.Plan.Steps[0]
+	transition := topology.OperationTransition{OperationID: begin.OperationID, Version: doc.Version,
+		Attempt: 1, StepSeq: step.Seq, GroupID: step.GroupID, State: topology.OperationRunning, At: time.Now().UTC()}
+	if _, err = g.propose(ctx, metaengine.TransitionOperationProposal{Transition: transition, ProposalID: newProposalID()}); err != nil {
+		t.Fatal(err)
+	}
+	action := topology.AuthorizedStep{OperationID: begin.OperationID, Version: doc.Version, Attempt: 1,
+		StepSeq: step.Seq, GroupID: step.GroupID, Kind: step.Kind,
+		ExpectedVotersDigest: step.ExpectedVotersDigest, ResultVotersDigest: step.ResultVotersDigest}
+	grant, err := g.BeginEffect(ctx, action)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := joinProtocolClient(t, []string{g.opts.Network.AdvertiseAddress}, func(o *Options) {
+		o.Network.ClusterCredential = g.opts.Network.ClusterCredential
+		o.Limits = g.opts.Limits
+	})
+	client.mu.Lock()
+	client.identity.MemberID = 1
+	client.started = true
+	client.ctx, client.cancel = context.WithCancel(t.Context())
+	client.workCtx, client.workCancel = context.WithCancel(client.ctx)
+	client.mu.Unlock()
+	client.transport.SetMemberID(1)
+	if err = client.ValidateGrant(ctx, grant); err != nil {
+		t.Fatal("remote proof unavailable before replay", err)
+	}
+	if err = client.ValidateAuthorityCourier(ctx, grant, g.Identity()); !errors.Is(err, fault.ErrUnavailable) {
+		t.Fatal("load creation did not wait for its local scope", err)
+	}
+	snapshot, err := g.state().Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = client.state().Restore(ctx, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if err = client.ValidateAuthorityCourier(ctx, grant, g.Identity()); err != nil {
+		t.Fatal("same grant did not resume after replay", err)
+	}
+	id := storage.Identity{ClusterID: g.Identity().ClusterID, NodeName: "n1", GroupID: step.GroupID, ReplicaID: 1}
+	if scope, err := client.LoadReplicaScope(ctx, id); err != nil || !scope.Founding {
+		t.Fatal("replay did not install the exact approved startup scope", scope, err)
+	}
+}
+
 func (r approvedRouteResolver) Resolve(_ context.Context, name string) (string, error) {
 	if name != r.name {
 		return "", fault.ErrUnavailable

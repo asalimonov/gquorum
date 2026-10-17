@@ -284,6 +284,17 @@ func (g *Group) ValidateAuthorityCourier(ctx context.Context, grant topology.Aut
 	if proof.Courier != courier || !proof.Grant.Equal(grant) {
 		return fault.ErrIdentityMismatch
 	}
+	// A fresh metadata learner can receive load preparation before replay has
+	// installed its approved identity. The remote proof authenticates the
+	// request, but local startup still needs the matching scope and ledger.
+	// Metadata preparation and retained cleanup must work before/after local
+	// participation, so only load creation waits for this replay boundary.
+	if grant.Key.GroupID != topology.MetaGroupID && grant.Action != nil &&
+		(grant.Action.Kind == topology.StepPrepareReplica || grant.Action.Kind == topology.StepCreateFoundingGroup) {
+		if applied, _ := g.state().AppliedState(); applied < grant.Key.Revision {
+			return fault.New(fault.Unavailable, "receiver has not applied load creation grant", nil)
+		}
+	}
 	return nil
 }
 

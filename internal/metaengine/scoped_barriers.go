@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -19,21 +20,30 @@ func (s *scopedState) validateActionBarriers(op *topology.Operation, action topo
 		return nil
 	}
 	if action.Kind == topology.StepPrepareReplica {
-		for _, admission := range s.Admissions {
-			if admission.NodeName == action.NodeName && admission.MemberID == action.ReplicaID &&
-				admission.OperationID == action.OperationID && !admission.State.terminal() {
-				if scopedAdmissionRetirement(admission, s, s.indexes, catalog) {
-					return nil
-				}
-				return fault.ErrUnavailable
-			}
-		}
-		return fault.ErrOperationAuthorization
+		return s.validateMetaPreparation(action, catalog)
 	}
 	if action.Kind == topology.StepRemoveReplica {
 		return s.validateMetaEvacuation(action, catalog)
 	}
 	return nil
+}
+
+func (s *scopedState) validateMetaPreparation(action topology.AuthorizedStep, catalog authorityCatalog) error {
+	for _, admission := range s.Admissions {
+		if admission.NodeName == action.NodeName && admission.MemberID == action.ReplicaID &&
+			admission.OperationID == action.OperationID && !admission.State.terminal() {
+			if scopedAdmissionRetirement(admission, s, s.indexes, catalog) {
+				return nil
+			}
+			return fault.ErrUnavailable
+		}
+	}
+	if s.Target.MemberID(action.NodeName) != action.ReplicaID {
+		return fault.ErrOperationAuthorization
+	}
+	// Approval may precede the joining process. Its exact binding arrives
+	// through Join; absence is a dependency wait, not a failed operation.
+	return fault.New(fault.Unavailable, "metadata admission binding pending", nil)
 }
 
 func (s *scopedState) validateLoadAdmission(op *topology.Operation, action topology.AuthorizedStep,
@@ -66,8 +76,32 @@ func (s *scopedState) validateLoadAdmission(op *topology.Operation, action topol
 		if !s.metadataPrepared(replica.NodeName, member, catalog) {
 			return fault.ErrUnavailable
 		}
+		if !s.loadHostRetired(action.GroupID, replica) {
+			return fault.New(fault.Unavailable, "same-host predecessor retirement pending", nil)
+		}
 	}
 	return nil
+}
+
+// FI_HOST_REUSE: Stop joins the old owner but does not quarantine its storage.
+// Retire must consume the shared host floor before a successor Prepare takes it;
+// otherwise late cleanup fences the successor's next restart. Collection stays
+// detached. Use the existing sorted debt index, not a scan of unrelated hosts.
+func (s *scopedState) loadHostRetired(group string, replica topology.Replica) bool {
+	key := storage.Identity{ClusterID: s.Target.ClusterID, GroupID: group, NodeName: replica.NodeName}
+	rows := s.indexes.cleanupOrder
+	start, _ := slices.BinarySearchFunc(rows, key, func(row *cleanupRecord, key storage.Identity) int {
+		return compareReplicaIdentity(row.Identity, key)
+	})
+	for _, debt := range rows[start:] {
+		if debt.Identity.GroupID != group || debt.Identity.NodeName != replica.NodeName {
+			break
+		}
+		if debt.Identity.ReplicaID != replica.ReplicaID && debt.Retired == nil {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *scopedState) metadataPrepared(node string, member uint64, catalog authorityCatalog) bool {

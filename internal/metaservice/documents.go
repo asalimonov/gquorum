@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"time"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
@@ -86,7 +87,14 @@ func (g *Group) Stage(ctx context.Context, doc topology.Document, expected uint6
 // proof.
 func (g *Group) LocalStatus() topology.GroupStatus {
 	if engine := g.engine.Load(); engine != nil {
+		page, _ := g.state().Progress(topology.ProgressQuery{GroupID: topology.MetaGroupID})
+		var source uint64
+		if len(page.Groups) == 1 {
+			source = page.Groups[0].ConvergedVersion
+		}
 		status := engine.Status()
+		status.Reporter, status.ReporterReplicaID = g.currentIdentity(), engine.ReplicaID()
+		status.SourceVersion, status.ReceivedAt = source, time.Now().UTC()
 		status.LeaderNodeName, _ = g.state().MemberOwner(status.LeaderID)
 		return status
 	}
@@ -142,7 +150,7 @@ func (g *Group) decorateClusterStatus(ctx context.Context, machine *metaengine.M
 		}
 	}
 	if engine := g.engine.Load(); engine != nil {
-		status := engine.Status()
+		status := g.LocalStatus()
 		status.LeaderNodeName, _ = machine.MemberOwner(status.LeaderID)
 		g.cacheProgressObservation(status)
 		result.MetaLeaderID = status.LeaderID
@@ -150,7 +158,7 @@ func (g *Group) decorateClusterStatus(ctx context.Context, machine *metaengine.M
 	}
 	if local.includeLive {
 		for _, row := range result.Groups {
-			if row.Converged == nil {
+			if row.GroupID == topology.MetaGroupID || row.Converged == nil {
 				continue
 			}
 			g.cacheProgressObservation(g.liveLoadStatus(ctx, row.GroupID))

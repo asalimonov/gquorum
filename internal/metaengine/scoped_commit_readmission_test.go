@@ -156,6 +156,87 @@ func TestScopedReadmissionAllocatorOverflow(t *testing.T) {
 	}
 }
 
+func TestReadmissionNativeRemovalReceiptWaitsForCompleteRetirement(t *testing.T) {
+	t.Parallel()
+	doc := multiNodeDoc()
+	doc.Group("shard0").Replicas = slices.Clone(doc.MetaGroup().Replicas)
+	doc.Group("shard0").NextReplicaID = doc.MetaGroup().NextReplicaID
+	s := convergedScopedFixture(t, doc)
+	doc = s.Target.Clone()
+	m := restoreMachineFixture(t, s)
+	submit := func(p any) ApplyResult {
+		t.Helper()
+		r := applyMachine(t, m, p)
+		if !r.Accepted {
+			t.Fatalf("%T: %+v", p, r)
+		}
+		return r
+	}
+	at := s.FullyConverged.At.Add(time.Second)
+	desired, err := ReadmissionDocument(doc, "node3", at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	desired = submit(ProposeDocument{Doc: desired, ExpectedVersion: doc.Version, ProposalID: "stage"}).Doc
+	input := testPlanningInput(t, m, desired, assumedReadmissionStatuses(doc, "node3"))
+	plan, err := topology.BuildPlan(input, desired, s.Rules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	begin := submit(BeginOperationProposal{Version: desired.Version, Plan: plan,
+		Scopes: m.scoped.capturePlanScopes(topology.AffectedGroups(doc, desired)),
+		Actor:  "admin", Origin: topology.OriginAPI, At: at, ProposalID: "approve"})
+	op := m.scoped.indexes.operations[begin.OperationID]
+	position := slices.IndexFunc(plan.Steps, func(step topology.Step) bool {
+		return step.GroupID == "shard0" && step.Kind == topology.StepRemoveReplica
+	})
+	if position < 0 {
+		t.Fatal("missing native removal", plan)
+	}
+	action := scopedPlanAction(op, plan.Steps[position])
+	submit(TransitionOperationProposal{Transition: topology.OperationTransition{OperationID: op.Status.ID,
+		Version: desired.Version, Attempt: 1, GroupID: action.GroupID, StepSeq: action.StepSeq,
+		State: topology.OperationRunning, At: at}, ProposalID: "running"})
+	grant := submit(BeginEffectProposal{Action: action, ProposalID: "remove"}).Grant
+	receipt := fixtureEffectReceipts(*grant)[0]
+	checkPending := func() {
+		t.Helper()
+		before, _ := m.Snapshot(t.Context())
+		r := applyMachine(t, m, RecordEffectProposal{Receipt: receipt, At: at, ProposalID: "record-remove"})
+		if r.Accepted || r.Code != proposalErrorCode(fault.Unavailable) {
+			t.Fatal("pending independent readmission must retry the same receipt", r)
+		}
+		if len(m.scoped.Cleanup) != 0 || len(m.scoped.indexes.grants[grant.Key].Effects) != 0 {
+			t.Fatal("partial retirement manufactured cleanup or consumed native proof", string(before))
+		}
+	}
+	checkPending()
+	admission := AdmissionRecord{NodeName: "node3", InstanceID: "returning", MemberID: desired.MemberID("node3"), OperationID: begin.OperationID}
+	submit(BindAdmissionProposal{Admission: admission, At: at, ProposalID: "bind"})
+	batch := submit(BeginReadmissionAuthority{NodeName: admission.NodeName, InstanceID: admission.InstanceID,
+		MemberID: admission.MemberID, PreviousMemberID: doc.MemberID("node3"), OperationID: admission.OperationID,
+		ProposalID: "retire"}).Grants
+	if len(batch) != 2 {
+		t.Fatal("fixture requires both metadata and load retirement", batch)
+	}
+	for i, memberGrant := range batch {
+		for _, hostReceipt := range fixtureEffectReceipts(memberGrant) {
+			submit(RecordEffectProposal{Receipt: hostReceipt, At: at, ProposalID: "retired"})
+		}
+		if i == 0 {
+			checkPending()
+		}
+	}
+	submit(RecordEffectProposal{Receipt: receipt, At: at, ProposalID: "record-remove"})
+	submit(RecordEffectProposal{Receipt: receipt, At: at, ProposalID: "replay-remove"})
+	for _, debt := range m.scoped.Cleanup {
+		if debt.Removed != nil || debt.ReadmissionKey == nil || debt.Stopped == nil || debt.Retired == nil {
+			t.Fatal("native receipt replaced independent retirement proof", debt)
+		}
+	}
+	_ = restoreMachineFixture(t, *m.scoped)
+}
+
 func TestScopedReadmissionSeparatesNodesWithSameInstanceID(t *testing.T) {
 	t.Parallel()
 	doc := baseDoc()

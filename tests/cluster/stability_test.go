@@ -135,7 +135,7 @@ func stabilityHealthAndReads(t *testing.T, size int) {
 				var ready struct {
 					Node        string `json:"node"`
 					SessionLive bool   `json:"session_live"`
-					Version     uint64 `json:"active_version"`
+					Version     uint64 `json:"target_version"`
 				}
 				if err := response.Decode(&ready); err != nil || ready.Node != node.Spec.Name || !ready.SessionLive || ready.Version != created.Document.Version {
 					result.err = fmt.Errorf("readiness lost its exact serving identity/version: %+v: %v", ready, err)

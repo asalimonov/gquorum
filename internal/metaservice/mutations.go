@@ -619,6 +619,13 @@ func (g *Group) ReseatReplica(ctx context.Context, id string, key topology.Repli
 	if err := topology.ValidateLoadID(id); err != nil {
 		return MutationResult{}, err
 	}
+	if !o.Preview {
+		// A preceding Stage may have committed through this follower before
+		// its local apply caught up. Capture the caller's CAS against that log.
+		if err := g.ReadBarrier(ctx); err != nil {
+			return MutationResult{}, err
+		}
+	}
 	documents, err := g.computeMutation(ctx, o, mutationPolicy{Kind: "reseat_replica",
 		Input:   mutationInput{GroupID: id, NodeName: name, PreviousID: key.ReplicaID},
 		Comment: "reseat replica"},
@@ -645,6 +652,10 @@ func (g *Group) ReseatReplica(ctx context.Context, id string, key topology.Repli
 	if err != nil {
 		return MutationResult{Placement: reportFromError(err)}, fmt.Errorf("capture reseat scope %q: %w", id, err)
 	}
+	if read.Latest.Version != base.Version {
+		return MutationResult{}, &fault.Error{Code: fault.VersionConflict,
+			ExpectedVersion: base.Version, CurrentVersion: read.Latest.Version}
+	}
 	plan, err := (schedulingHost{g}).PlanRepair(ctx, read, next)
 	if err != nil {
 		return MutationResult{Placement: reportFromError(err)}, fmt.Errorf("plan reseat of %q: %w", id, err)
@@ -654,7 +665,7 @@ func (g *Group) ReseatReplica(ctx context.Context, id string, key topology.Repli
 			fmt.Sprintf("reseat of %q produced no operation steps", id), nil)
 	}
 	committed, err := g.propose(ctx, metaengine.CommitRepairOperationProposal{
-		Doc: next, Intent: documents.Intent, ExpectedVersion: read.Latest.Version,
+		Doc: next, Intent: mutationProposal(documents).Intent, ExpectedVersion: base.Version,
 		ExpectedTarget: read.Target.Version, Scopes: read.Scopes, Plan: plan,
 		At: time.Now().UTC(), ProposalID: newProposalID(),
 	})

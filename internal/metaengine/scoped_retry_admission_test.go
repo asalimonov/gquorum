@@ -172,7 +172,7 @@ func TestScopedRetryBeforeProcessBindsAdmission(t *testing.T) {
 	transition := scopedTransitionFor(*op, topology.MetaGroupID, 1)
 	applyScopedTransitionFixture(t, &s, transition)
 	if _, err := s.applyBeginEffect(s.AppliedIndex+1, BeginEffectProposal{
-		Action: scopedPlanAction(op, op.Plan.Steps[0])}); !errors.Is(err, fault.ErrOperationAuthorization) {
+		Action: scopedPlanAction(op, op.Plan.Steps[0])}); !errors.Is(err, fault.ErrUnavailable) {
 		t.Fatal("retry approval bypassed actual admission binding", err)
 	}
 	bind := joiningProposal(&s)

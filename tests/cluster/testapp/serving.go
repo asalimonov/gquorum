@@ -2,25 +2,89 @@ package main
 
 import (
 	"context"
+	"slices"
+	"time"
 
 	"github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// Read the exact group and host at one metadata index. These two rows precede
-// operation and cleanup rows, so retained history cannot displace either one.
-// The historical FullyConverged marker is never a serving prerequisite.
-func servingGroup(ctx context.Context, cluster gquorum.Cluster, id string, identity topology.Identity) (*topology.Group, error) {
-	page, err := cluster.ReadProgress(ctx, topology.ProgressQuery{GroupID: id, NodeName: identity.NodeName, Limit: 2})
+// Serving uses locally applied convergence, not a metadata quorum barrier. The
+// pinned source document binds this exact replica to its admitted host member;
+// a historical complete-document marker cannot describe independent progress.
+func servingGroup(ctx context.Context, cluster gquorum.Cluster, row topology.GroupProgress,
+	identity topology.Identity) (*topology.Group, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if row.Converged == nil || row.ConvergedVersion == 0 {
+		return nil, fault.ErrReplicaNotReady
+	}
+	if !slices.ContainsFunc(row.Converged.Replicas, func(replica topology.Replica) bool {
+		return replica.NodeName == identity.NodeName
+	}) {
+		return nil, fault.ErrReplicaNotReady
+	}
+	source, err := cluster.Get(ctx, row.ConvergedVersion)
 	if err != nil {
 		return nil, err
 	}
-	if len(page.Nodes) != 1 || page.Nodes[0].MemberID != identity.MemberID {
+	if identity.MemberID == 0 || source.MemberID(identity.NodeName) != identity.MemberID {
 		return nil, fault.ErrIdentityMismatch
 	}
-	if len(page.Groups) != 1 || page.Groups[0].Converged == nil || page.Groups[0].ConvergedVersion == 0 {
-		return nil, fault.ErrReplicaNotReady
+	return row.Converged, nil
+}
+
+func (a *application) servingGroup(ctx context.Context, id string) (*topology.Group, error) {
+	a.mu.RLock()
+	row := a.serving[id].Clone()
+	a.mu.RUnlock()
+	if row.Converged == nil || row.ConvergedVersion == 0 {
+		// A just-completed creation may precede the next periodic observation.
+		// Bound that initial read; established serving never probes its peers.
+		a.refreshServing(ctx)
+		a.mu.RLock()
+		row = a.serving[id].Clone()
+		a.mu.RUnlock()
 	}
-	return page.Groups[0].Converged, nil
+	return servingGroup(ctx, a.cluster, row, a.node.Identity())
+}
+
+// Status may probe remote replicas. Keep those observations off application
+// requests: only its locally applied convergence rows feed this readiness cache.
+// The existing work lifetime joins the single bounded refresher during shutdown.
+func (a *application) observeServing() {
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		a.refreshServing(a.workCtx)
+		select {
+		case <-a.workCtx.Done():
+			return
+		case <-tick.C:
+		}
+	}
+}
+
+func (a *application) refreshServing(parent context.Context) {
+	ctx, cancel := context.WithTimeout(parent, 250*time.Millisecond)
+	defer cancel()
+	status, err := a.cluster.Status(ctx)
+	if err != nil {
+		return
+	}
+	groups := make(map[string]topology.GroupProgress, len(status.Groups))
+	for _, row := range status.Groups {
+		groups[row.GroupID] = row.Clone()
+	}
+	a.mu.Lock()
+	// Concurrent request/bootstrap observations cannot roll a checkpoint back.
+	for id, row := range groups {
+		if previous := a.serving[id]; previous.ConvergedVersion > row.ConvergedVersion {
+			groups[id] = previous
+		}
+	}
+	a.serving = groups
+	a.mu.Unlock()
 }

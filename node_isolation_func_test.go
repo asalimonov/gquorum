@@ -82,6 +82,21 @@ func TestIndependentGroupConvergesWhileFactoryRemainsOwned(t *testing.T) {
 			if err != nil || status.State != topology.OperationSucceeded {
 				t.Fatal(status, err)
 			}
+			local, err := c.Status(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, row := range local.Groups {
+				if row.GroupID != topology.MetaGroupID && row.GroupID != "healthy" {
+					continue
+				}
+				observed := row.Observation
+				if observed == nil || !observed.Found || observed.Reporter != n.Identity() ||
+					observed.SourceVersion != row.ConvergedVersion || observed.ReporterReplicaID == 0 ||
+					observed.ReceivedAt.IsZero() || observed.LeaderID != observed.ReporterReplicaID {
+					t.Fatal("real status producer lost exact observation provenance", row)
+				}
+			}
 			page, err := c.ReadProgress(ctx, topology.ProgressQuery{})
 			if err != nil || page.TargetVersion != second.Document.Version || page.FullyConverged.Version != 1 {
 				t.Fatal("global completion hid pending work", page, err)

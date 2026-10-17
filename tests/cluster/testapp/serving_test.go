@@ -14,29 +14,44 @@ import (
 
 type servingProgressCluster struct {
 	gquorum.Cluster
-	page topology.ProgressPage
+	status topology.ClusterStatus
+	source topology.Document
 }
 
-func (c servingProgressCluster) ReadProgress(context.Context, topology.ProgressQuery) (topology.ProgressPage, error) {
-	return c.page, nil
+func (c servingProgressCluster) Status(context.Context) (topology.ClusterStatus, error) {
+	panic("serving attempted live cluster probes")
+}
+func (c servingProgressCluster) Get(context.Context, uint64) (topology.Document, error) {
+	return c.source.Clone(), nil
+}
+func (servingProgressCluster) ReadProgress(context.Context, topology.ProgressQuery) (topology.ProgressPage, error) {
+	return topology.ProgressPage{}, fault.ErrUnavailable
 }
 
 func TestServingUsesIndependentConvergenceAndExactMember(t *testing.T) {
 	t.Parallel()
 	identity := topology.Identity{NodeName: "one", MemberID: 7}
-	page := topology.ProgressPage{TargetVersion: 9, FullyConverged: topology.FullyConverged{Version: 2},
-		Groups: []topology.GroupProgress{{GroupID: "work", ConvergedVersion: 8, Converged: &topology.Group{ID: "work"}}},
-		Nodes:  []topology.NodeProgress{{NodeName: "one", MemberID: 7}}}
-	if group, err := servingGroup(t.Context(), servingProgressCluster{page: page}, "work", identity); err != nil || group == nil {
-		t.Fatal("historical marker blocked independent group", group, err)
+	cluster := servingProgressCluster{
+		status: topology.ClusterStatus{TargetVersion: 9, FullyConverged: topology.FullyConverged{Version: 2},
+			Groups: []topology.GroupProgress{{GroupID: "work", ConvergedVersion: 8, Converged: &topology.Group{ID: "work",
+				Replicas: []topology.Replica{{NodeName: "one", ReplicaID: 1}}}}}},
+		source: topology.Document{Version: 8, Groups: []topology.Group{{ID: topology.MetaGroupID,
+			Replicas: []topology.Replica{{NodeName: "one", ReplicaID: 7}}}}},
 	}
-	page.Nodes[0].MemberID++
-	if _, err := servingGroup(t.Context(), servingProgressCluster{page: page}, "work", identity); !errors.Is(err, fault.ErrIdentityMismatch) {
+	if group, err := servingGroup(t.Context(), cluster, cluster.status.Groups[0], identity); err != nil || group == nil {
+		t.Fatal("historical marker or metadata quorum blocked independent group", group, err)
+	}
+	cluster.source.Groups[0].Replicas[0].ReplicaID++
+	if _, err := servingGroup(t.Context(), cluster, cluster.status.Groups[0], identity); !errors.Is(err, fault.ErrIdentityMismatch) {
 		t.Fatal("successor member authorized stale process", err)
 	}
-	page.Nodes[0].MemberID = identity.MemberID
-	page.Groups[0].Approved, page.Groups[0].Converged = page.Groups[0].Converged, nil
-	if _, err := servingGroup(t.Context(), servingProgressCluster{page: page}, "work", identity); !errors.Is(err, fault.ErrReplicaNotReady) {
+	cluster.source.Groups[0].Replicas[0].ReplicaID = identity.MemberID
+	if _, err := servingGroup(t.Context(), cluster, cluster.status.Groups[0], topology.Identity{NodeName: "joining", MemberID: 8}); !errors.Is(err, fault.ErrReplicaNotReady) {
+		t.Fatal("pending admission was classified as a foreign converged owner", err)
+	}
+	row := &cluster.status.Groups[0]
+	row.Approved, row.Converged = row.Converged, nil
+	if _, err := servingGroup(t.Context(), cluster, cluster.status.Groups[0], identity); !errors.Is(err, fault.ErrReplicaNotReady) {
 		t.Fatal("approval was treated as convergence", err)
 	}
 }

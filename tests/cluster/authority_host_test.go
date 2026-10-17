@@ -26,7 +26,8 @@ func TestAuthorityHostRevocationWaitsForExactRetainedProcessReturnThreeNodes(t *
 	if err != nil || !owner.Found {
 		t.Fatal(owner, err)
 	}
-	if err := c.SetBarrier(ctx, "node1", "work", topology.StepStopReplica, true); err != nil {
+	response, err := c.Request(ctx, "node1", "PUT", "/internal/test/barriers/work/stop_replica?refuse=true", nil, 0)
+	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
 	}
 	held := true
@@ -40,7 +41,7 @@ func TestAuthorityHostRevocationWaitsForExactRetainedProcessReturnThreeNodes(t *
 			t.Error("host action barrier cleanup", err)
 		}
 	})
-	response, err := c.Request(ctx, "node2", "DELETE", "/api/groups/work", gquorum.MutationOptions{Actor: "cluster-test"}, original.Version)
+	response, err = c.Request(ctx, "node2", "DELETE", "/api/groups/work", gquorum.MutationOptions{Actor: "cluster-test"}, original.Version)
 	if err := requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
 	}
@@ -66,6 +67,12 @@ func TestAuthorityHostRevocationWaitsForExactRetainedProcessReturnThreeNodes(t *
 	if delayed.To.Node != owner.Identity || delayed.LocalTarget.ReplicaID != owner.ReplicaID || len(delayed.Grant.Resources) != 1 || delayed.Grant.Resources[0] != resource {
 		t.Fatal("old stop lost exact host/storage scope", delayed)
 	}
+	if err := Poll(ctx, func() (bool, error) {
+		status, err := c.Operation(ctx, "node2", old)
+		return status.State == topology.OperationFailed, err
+	}); err != nil {
+		t.Fatal("refused stop did not retain a failed attempt", err)
+	}
 	victim := c.Node("node1")
 	if err := victim.Kill(ctx); err != nil {
 		t.Fatal(err)
@@ -74,30 +81,36 @@ func TestAuthorityHostRevocationWaitsForExactRetainedProcessReturnThreeNodes(t *
 	if _, err := c.docker.ContainerStatPath(ctx, victim.Container.GetContainerID(), docker.ContainerStatPathOptions{Path: "/data/load/work"}); err != nil {
 		t.Fatal("unconsumed stop lost retained application storage", err)
 	}
-	// A fresh approval supersedes the held effect while keeping deletion intent.
-	// A deleted group ID is permanently retired and cannot be restored/reused.
-	newStage, err := c.Stage(ctx, "node2", deleted.Document)
-	if err != nil {
+	// Retry the exact failed deletion. Staging identical intent does not replace
+	// an owned scope; RetryOperation creates the new attempt and revokes its old
+	// issued host grant without restoring the permanently retired group ID.
+	response, err = c.Request(ctx, "node2", "POST", "/api/operations/"+string(old)+"/retry", nil, 0)
+	if err := requireStatus(response, err, 202); err != nil {
 		t.Fatal(err)
 	}
-	newOp := startApply(ctx, t, c, "node2", newStage.Document.Version)
+	var retry struct {
+		ID topology.OperationID `json:"operation_id"`
+	}
+	if err := response.Decode(&retry); err != nil || retry.ID == "" || retry.ID == old {
+		t.Fatal("retry did not create a new exact attempt", retry, err)
+	}
+	newOp := retry.ID
 	for _, node := range []string{"node2", "node3"} {
 		if err := Poll(ctx, func() (bool, error) {
 			status, err := c.Revocation(ctx, node, old)
 			if err != nil || !status.RevocationRequested {
 				return false, err
 			}
-			groupComplete, hostPending := false, false
+			hostPending := false
 			for _, obligation := range status.Obligations {
-				groupComplete = groupComplete || obligation.Resource == (topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: "work"}) && obligation.Evidence != nil
 				hostPending = hostPending || obligation.Resource == resource && obligation.Evidence == nil
 			}
 			if status.RevocationComplete || !hostPending {
 				return true, fmt.Errorf("unreachable host manufactured revocation completion: %+v", status)
 			}
-			return groupComplete, nil
+			return true, nil
 		}); err != nil {
-			t.Fatal("independent group evidence did not preserve pending host obligation", node, err)
+			t.Fatal("retry did not preserve the pending exact host obligation", node, err)
 		}
 		op, err := c.Operation(ctx, node, newOp)
 		if err != nil || op.State.Terminal() {
@@ -139,7 +152,7 @@ func TestAuthorityHostRevocationWaitsForExactRetainedProcessReturnThreeNodes(t *
 		}
 		t.Fatal("returning retained host could not finish exact fence and successor cleanup", err)
 	}
-	if err := c.WaitFullyConverged(ctx, newStage.Document.Version); err != nil {
+	if err := c.WaitFullyConverged(ctx, deleted.Document.Version); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.WaitReady(ctx); err != nil {
@@ -167,7 +180,13 @@ func TestAuthorityHostRevocationWaitsForExactRetainedProcessReturnThreeNodes(t *
 		t.Fatal("absent data substituted for exact stale-authority refusal", refusal, err)
 	}
 	for _, node := range c.Nodes() {
-		if _, err := c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(), docker.ContainerStatPathOptions{Path: "/data/load/work"}); !errdefs.IsNotFound(err) {
+		if err := Poll(ctx, func() (bool, error) {
+			_, err := c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(), docker.ContainerStatPathOptions{Path: "/data/load/work"})
+			if errdefs.IsNotFound(err) {
+				return true, nil
+			}
+			return false, err
+		}); err != nil {
 			t.Fatal("completed cleanup or old replay retained/recreated storage", node.Spec.Name, err)
 		}
 		local, err := c.Local(ctx, node.Spec.Name, "work")

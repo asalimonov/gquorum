@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net"
 	"net/http"
 	"net/http/httptrace"
 	"slices"
@@ -50,8 +51,25 @@ func pendingPressure(t *testing.T, size int) {
 	spec.ProposalTimeout = time.Minute
 	ctx, c := performanceClusterSpec(t, spec)
 	c.http.Timeout = 65 * time.Second
-	transport := c.http.Transport.(*http.Transport)
+	previousTransport := c.http.Transport.(*http.Transport)
+	transport := previousTransport.Clone()
+	previousTransport.CloseIdleConnections()
 	transport.MaxIdleConnsPerHost, transport.MaxIdleConns = 512, 1024
+	// Prepare the full holder wave without flooding Docker's port forwarder
+	// with 256 simultaneous TCP handshakes. Completed dials release this slot
+	// before GotConn waits at the request barrier below.
+	dial := transport.DialContext
+	dials := make(chan struct{}, 16)
+	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		select {
+		case dials <- struct{}{}:
+			defer func() { <-dials }()
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return dial(ctx, network, address)
+	}
+	c.http.Transport = transport
 	work, err := c.CreateGroup(ctx, "node1", gquorum.GroupSpec{ID: "held", Nodes: []string{"node1"}, VoterConfig: voterConfig(1), Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 1, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal(err)

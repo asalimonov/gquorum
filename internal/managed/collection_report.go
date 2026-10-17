@@ -25,7 +25,7 @@ func (h *Host) startCollectionLoopLocked() {
 	}()
 }
 
-func (h *Host) reportCollections(ctx context.Context) error {
+func (h *Host) reportCollections(ctx context.Context, pageLimit int) error {
 	if h.cfg.Collection.Report == nil {
 		return nil // Optional for isolated hosts; Node supplies the metadata reporter.
 	}
@@ -36,7 +36,7 @@ func (h *Host) reportCollections(ctx context.Context) error {
 	var failures []error
 	var after string
 	for {
-		page, err := journal.Collections(ctx, after, 0)
+		page, err := journal.Collections(ctx, after, pageLimit)
 		if err != nil {
 			return errors.Join(append(failures, err)...)
 		}

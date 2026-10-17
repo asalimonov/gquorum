@@ -91,6 +91,16 @@ func (s *voterPlanState) ensureLearner(replica Replica) error {
 	if _, learner := s.learners[replica.ReplicaID]; learner {
 		return nil
 	}
+	if s.groupID != MetaGroupID {
+		for _, old := range s.base.formerReplicas(s.groupID) {
+			_, voter := s.voters[old.ReplicaID]
+			_, learner := s.learners[old.ReplicaID]
+			if old.NodeName == replica.NodeName && old.ReplicaID != replica.ReplicaID && (voter || learner) {
+				return planUnsafef("group %q host %q still owns native replica %d",
+					s.groupID, replica.NodeName, old.ReplicaID)
+			}
+		}
+	}
 	if len(s.voters)+len(s.learners) >= s.replicaCapacity() {
 		return planUnsafef("group %q has no replica_capacity for learner %d", s.groupID, replica.ReplicaID)
 	}
@@ -231,6 +241,13 @@ func compareReplicaIdentity(a, b ReplicaKey) int {
 
 func pairIncomingIndex(view voterPlanTopology, departing ReplicaKey, incoming []Replica) int {
 	base, desired, groupID := view.base, view.desired, view.groupID
+	if groupID != MetaGroupID {
+		for i, arrival := range incoming {
+			if arrival.NodeName == departing.NodeName {
+				return i
+			}
+		}
+	}
 	group := desired.Group(groupID)
 	if group.VoterConfig == nil || group.VoterConfig.DistinctVoterLabel == "" {
 		return 0
@@ -326,7 +343,15 @@ func (s *voterPlanState) retireStale(moves voterMoves, status GroupStatus) {
 }
 
 func (s *voterPlanState) replaceOutgoing(view voterPlanTopology, group *Group, moves *voterMoves) error {
+	s.orderHostReplacements(group, moves)
 	for _, departing := range moves.outgoing {
+		if arrival := groupReplicaOnNode(group, departing.NodeName); s.groupID != MetaGroupID &&
+			arrival != nil && arrival.ReplicaID != departing.ReplicaID && arrival.Role == ReplicaLearner {
+			if err := s.destroy(departing); err != nil {
+				return err
+			}
+			continue // addIncoming prepares this stable learner after releasing its host.
+		}
 		if len(moves.incoming) == 0 {
 			if err := s.destroy(departing); err != nil {
 				return err
@@ -341,6 +366,25 @@ func (s *voterPlanState) replaceOutgoing(view voterPlanTopology, group *Group, m
 		}
 	}
 	return nil
+}
+
+func (s *voterPlanState) orderHostReplacements(group *Group, moves *voterMoves) {
+	if s.groupID != MetaGroupID {
+		// Reuse occupied hosts before pairing departures with other arrivals.
+		// Replacing a non-leader first also supplies a live transfer destination
+		// when every old replica is being reseated in the same approval.
+		priority := func(key ReplicaKey) int {
+			if incoming := groupReplicaOnNode(group, key.NodeName); incoming != nil &&
+				incoming.ReplicaID != key.ReplicaID {
+				if key.ReplicaID == s.leader {
+					return 1
+				}
+				return 0
+			}
+			return 2
+		}
+		slices.SortStableFunc(moves.outgoing, func(a, b ReplicaKey) int { return priority(a) - priority(b) })
+	}
 }
 
 func (s *voterPlanState) addIncoming(group *Group, incoming []Replica) error {
@@ -381,6 +425,14 @@ func (s *voterPlanState) validateFinal() error {
 }
 
 func (s *voterPlanState) replacePair(group *Group, departing ReplicaKey, arrival Replica) error {
+	if s.groupID != MetaGroupID && departing.NodeName == arrival.NodeName {
+		// A host owns only one local replica per group. Native spare capacity
+		// does not permit preparing a second identity over its running owner.
+		if err := s.destroy(departing); err != nil {
+			return err
+		}
+		return s.addVoter(arrival)
+	}
 	if _, alreadyLearner := s.learners[arrival.ReplicaID]; !alreadyLearner &&
 		len(s.voters)+len(s.learners) >= s.replicaCapacity() &&
 		targetReplicaByID(group, departing.ReplicaID) == nil {

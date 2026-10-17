@@ -344,9 +344,10 @@ func TestCollectionReportPagesContinueAfterOneFailedIdentity(t *testing.T) {
 	journal := f.cfg.Authority()
 	base, err := journal.Collection(deadline(t), receipt.Identity)
 	must(t, err)
-	// Only journal paging/release is under test; extra records use protocol
-	// proofs and a store double, without creating application replicas.
-	for replica := uint64(2); replica <= 101; replica++ {
+	// A two-row page exercises the removed-cursor boundary with three records.
+	// The assertion must not depend on completing 100 fsyncs in one deadline.
+	// Extra records use protocol proofs and a store double, without replicas.
+	for replica := uint64(2); replica <= 3; replica++ {
 		row := base.Record.Clone()
 		row.State, row.Sequence, row.CollectedAt = "prepared", 0, nil
 		row.Retired.Identity.ReplicaID = replica
@@ -357,19 +358,19 @@ func TestCollectionReportPagesContinueAfterOneFailedIdentity(t *testing.T) {
 		_, err = journal.CompleteCollection(deadline(t), row.Retired.Identity, row.Sequence, receipt.CollectedAt)
 		must(t, err)
 	}
-	if err := h.CollectRetired(deadline(t)); !errors.Is(err, fault.ErrUnavailable) {
+	if err := h.reportCollections(deadline(t), 2); !errors.Is(err, fault.ErrUnavailable) {
 		t.Fatal(err)
 	}
 	page, err := journal.Collections(deadline(t), "", 0)
 	must(t, err)
-	if released.Load() != 100 || len(page.Records) != 1 || page.Records[0].Retired.Identity != receipt.Identity {
+	if released.Load() != 2 || len(page.Records) != 1 || page.Records[0].Retired.Identity != receipt.Identity {
 		t.Fatal("one failure or removed cursor stranded another page", released.Load(), page)
 	}
 	fail.Store(false)
-	must(t, h.CollectRetired(deadline(t)))
+	must(t, h.reportCollections(deadline(t), 2))
 	page, err = journal.Collections(deadline(t), "", 0)
 	must(t, err)
-	if released.Load() != 101 || len(page.Records) != 0 {
+	if released.Load() != 3 || len(page.Records) != 0 {
 		t.Fatal("failed identity did not retry exactly", released.Load(), page)
 	}
 }

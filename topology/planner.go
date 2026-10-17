@@ -363,7 +363,7 @@ func (v *plannedStepValidator) applyStep(i int, step Step, state *validationGrou
 		return v.applyCreateFoundingGroup(step, state)
 	case StepPrepareReplica:
 		view := voterPlanTopology{base: v.input, desired: v.desired, groupID: step.GroupID}
-		if err := requireCleanupOwnerStop(view, v.plan, step, state.stopped); err != nil {
+		if err := requireFormerOwnerStop(view, v.plan, step, state.stopped); err != nil {
 			return err
 		}
 		return state.applyPrepareReplica(step)

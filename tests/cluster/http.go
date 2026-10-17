@@ -192,7 +192,11 @@ func (c *Cluster) WaitOperation(ctx context.Context, node string, id any) error 
 		if status.State.Terminal() && status.State != topology.OperationSucceeded {
 			return true, fmt.Errorf("operation %s terminated: %+v", id, status)
 		}
-		return status.State == topology.OperationSucceeded, nil
+		if status.State == topology.OperationSucceeded {
+			return true, nil
+		}
+		encoded, _ := json.Marshal(status)
+		return false, fmt.Errorf("operation %s still pending: %s", id, encoded)
 	})
 }
 

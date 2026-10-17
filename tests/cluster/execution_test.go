@@ -185,7 +185,13 @@ func TestRemoteApplyFromNonHostMetaLeader(t *testing.T) {
 		t.Fatal("remote deletion", deleted, err)
 	}
 	for _, node := range c.Nodes() {
-		if _, err := c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(), client.ContainerStatPathOptions{Path: "/data/load/remote"}); !errdefs.IsNotFound(err) {
+		if err := Poll(ctx, func() (bool, error) {
+			_, err := c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(), client.ContainerStatPathOptions{Path: "/data/load/remote"})
+			if errdefs.IsNotFound(err) {
+				return true, nil
+			}
+			return false, err
+		}); err != nil {
 			t.Fatal("deleted remote store remains", node.Spec.Name, err)
 		}
 	}
@@ -408,7 +414,17 @@ func callerRefusedDeletion(t *testing.T, size int) {
 		}
 	}
 
-	retryID := approve()
+	response, err = c.Request(ctx, "node2", "POST", "/api/operations/"+string(failedID)+"/retry", nil, 0)
+	if err := requireStatus(response, err, 202); err != nil {
+		t.Fatal(err)
+	}
+	var retryResult struct {
+		ID topology.OperationID `json:"operation_id"`
+	}
+	if err := response.Decode(&retryResult); err != nil || retryResult.ID == "" {
+		t.Fatal(retryResult, err)
+	}
+	retryID := retryResult.ID
 	if retryID == failedID {
 		t.Fatal("retry reused failed attempt", retryID)
 	}
@@ -427,7 +443,16 @@ func callerRefusedDeletion(t *testing.T, size int) {
 		if err != nil || !reflect.DeepEqual(prior, failed) {
 			t.Fatal("retry rewrote historical failure", prior, err)
 		}
-		if _, err := c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(), client.ContainerStatPathOptions{Path: "/data/load/occupied"}); !errdefs.IsNotFound(err) {
+		// Required stops complete the operation; quarantine is detached and
+		// must be observed independently before asserting physical absence.
+		if err := Poll(ctx, func() (bool, error) {
+			_, err := c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(),
+				client.ContainerStatPathOptions{Path: "/data/load/occupied"})
+			if errdefs.IsNotFound(err) {
+				return true, nil
+			}
+			return false, err
+		}); err != nil {
 			t.Fatal("successful deletion retained usable store", node.Spec.Name, err)
 		}
 	}

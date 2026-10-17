@@ -20,7 +20,7 @@ import (
 )
 
 // Caller readiness logic may relax serving readiness using the persisted local override.
-// Fresh health and exact Active identity remain required. Consensus writes keep
+// Fresh health and exact approved identity remain required. Consensus writes keep
 // their ordinary Raft quorum requirements regardless of this local decision.
 func (a *application) canServe(ctx context.Context) bool {
 	if a.node.OwnSessionLive() {
@@ -30,8 +30,9 @@ func (a *application) canServe(ctx context.Context) bool {
 	if minimum == 0 || !a.node.Status().Meta.Found {
 		return false
 	}
-	active, err := readConvergedTopology(ctx, a.cluster)
-	if err != nil || active.Version == 0 || active.MetaGroup() == nil {
+	active, err := a.cluster.Target(ctx)
+	if err != nil || active.Version == 0 || active.MetaGroup() == nil ||
+		active.MemberID(a.cfg.NodeName) != a.node.Identity().MemberID {
 		return false
 	}
 	observation := a.cluster.HealthObservation()
@@ -63,7 +64,7 @@ func (a *application) localServing(ctx context.Context, id string) (*localReplic
 		return nil, fault.ErrUnavailable
 	}
 	identity := a.node.Identity()
-	group, err := servingGroup(ctx, a.cluster, id, identity)
+	group, err := a.servingGroup(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -631,21 +632,21 @@ func (a *application) readyHTTP(w http.ResponseWriter, r *http.Request) {
 		httpError(w, fault.ErrUnavailable)
 		return
 	}
-	active, err := readConvergedTopology(r.Context(), a.cluster)
+	target, err := a.cluster.Target(r.Context())
 	if err != nil {
 		httpError(w, err)
 		return
 	}
-	if active.Version == 0 || active.MemberID(a.cfg.NodeName) != a.node.Identity().MemberID {
+	if target.Version == 0 || target.MemberID(a.cfg.NodeName) != a.node.Identity().MemberID {
 		httpError(w, fault.ErrReplicaNotReady)
 		return
 	}
-	if node := active.Node(a.cfg.NodeName); node == nil || node.State != topology.NodeActive {
+	if node := target.Node(a.cfg.NodeName); node == nil || node.State != topology.NodeActive {
 		httpError(w, fault.ErrReplicaNotReady)
 		return
 	}
 	var groups []string
-	for _, group := range active.LoadGroups() {
+	for _, group := range target.LoadGroups() {
 		for _, replica := range group.Replicas {
 			if replica.NodeName == a.cfg.NodeName {
 				if _, err := a.localServing(r.Context(), group.ID); err != nil {
@@ -658,11 +659,11 @@ func (a *application) readyHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// Initial founding has no load declarations; bootstrap readiness must wait for
 	// the groups it promises. A retired demo ID is intentionally allowed later.
-	if a.cfg.Bootstrap && active.Version == 1 {
+	if a.cfg.Bootstrap && target.Version == 1 {
 		httpError(w, fault.ErrReplicaNotReady)
 		return
 	}
-	jsonResponse(w, http.StatusOK, map[string]any{"node": a.cfg.NodeName, "session_live": a.node.OwnSessionLive(), "serve_override": a.node.ServeOverride(), "groups": groups, "active_version": active.Version})
+	jsonResponse(w, http.StatusOK, map[string]any{"node": a.cfg.NodeName, "session_live": a.node.OwnSessionLive(), "serve_override": a.node.ServeOverride(), "groups": groups, "target_version": target.Version})
 }
 func (a *application) historyHTTP(w http.ResponseWriter, r *http.Request) {
 	offset, limit := 0, 100

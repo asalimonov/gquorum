@@ -139,8 +139,12 @@ func testMetaAdmission(t *testing.T, electionDuringLearner bool) {
 			if operation, found := operationSummary(status, admitted.OperationID); found && operation.State.Terminal() && operation.State != topology.OperationSucceeded {
 				t.Fatalf("meta admission terminated before load growth: %+v", operation)
 			}
-			for _, group := range status.Groups {
-				if group.GroupID == topology.MetaGroupID && group.Observation != nil && slices.Contains(group.Observation.ConfState.Learners, member) {
+			// Independent load preparation can begin before metadata membership
+			// reaches its learner step. Inspect the native local state and require
+			// that milestone before accepting progress in the other block.
+			observed, observedErr := c.Local(ctx, observer, topology.MetaGroupID)
+			for _, group := range []topology.GroupStatus{observed.Status} {
+				if observedErr == nil && group.GroupID == topology.MetaGroupID && slices.Contains(group.ConfState.Learners, member) {
 					learnerSeen = true
 					if electionDuringLearner && !elected {
 						oldLeader := ""
@@ -183,7 +187,7 @@ func testMetaAdmission(t *testing.T, electionDuringLearner bool) {
 			}
 			operation, operationErr := c.Operation(ctx, observer, admitted.OperationID)
 			if operationErr == nil {
-				if block, found := operationBlock(operation, "work"); found && block.CurrentStep > 0 {
+				if block, found := operationBlock(operation, "work"); found && block.CurrentStep > 0 && learnerSeen && (!electionDuringLearner || elected) {
 					break
 				}
 			}

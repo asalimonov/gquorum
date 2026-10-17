@@ -73,6 +73,21 @@ func (s *scopedState) createRemovalDebt(receipt topology.EffectReceipt, at time.
 	}
 	bindCleanupActions(&debt, op)
 	if debt.StopAction == nil || debt.RetireAction == nil {
+		if debt.StopAction == nil && debt.RetireAction == nil {
+			// A readmission-owned plan deliberately omits host actions. Its
+			// native removal can finish before the independent retirement batch.
+			// Keep the exact native receipt at its resource and retry recording
+			// until that batch creates the actionless debt; do not fail the block
+			// or manufacture host-retirement evidence from native removal.
+			collector := s.planningCollector()
+			proof, err := collector.deletionReadmission(action.GroupID, receipt.Target, s.Target)
+			if err != nil {
+				return err
+			}
+			if !s.authorityCatalog().readmissionBatchConsumed(proof.Grant.AdmissionID) {
+				return fault.New(fault.Unavailable, "native removal awaits readmission retirement receipts", nil)
+			}
+		}
 		return fault.ErrOperationAuthorization
 	}
 	return s.upsertCleanupLocked(debt)

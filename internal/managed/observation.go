@@ -38,7 +38,12 @@ func (h *Host) ObserveGroup(parent context.Context, group string) (topology.Grou
 	if len(ids) == 0 {
 		return result, nil
 	}
-	reads := h.nativeObservationReads(group, ids)
+	progress, err := h.cfg.Progress(ctx)
+	if err != nil {
+		return result, err
+	}
+	row := localGroupProgress(progress, group)
+	reads := h.nativeObservationReads(group, ids, row.ConvergedVersion)
 	probes := h.collectNativeProbes(ctx, reads)
 	if err := ctx.Err(); err != nil {
 		return result, err
@@ -52,11 +57,6 @@ func (h *Host) ObserveGroup(parent context.Context, group string) (topology.Grou
 		result.HealthKnown, result.LiveVoters = true, round.live
 		return result, nil
 	}
-	progress, err := h.cfg.Progress(ctx)
-	if err != nil {
-		return result, err
-	}
-	row := localGroupProgress(progress, group)
 	if round.observed == 0 && (row.ConvergedVersion == 0 || row.Converged == nil) {
 		return result, nil
 	}
@@ -98,8 +98,8 @@ func (h *Host) serializeObservation(ctx context.Context, group string) (func(), 
 	}
 }
 
-func (h *Host) readNativeObservation(parent context.Context, group string, id storage.Identity,
-	attempt *observe.ReadAttempt) (observe.Probe, error) {
+func (h *Host) readNativeObservation(parent context.Context, id storage.Identity,
+	source uint64, attempt *observe.ReadAttempt) (observe.Probe, error) {
 	ctxHandle, err := h.beginWork(parent)
 	ctx, done := ctxHandle.Context, ctxHandle.Release
 	if err != nil {
@@ -126,11 +126,16 @@ func (h *Host) readNativeObservation(parent context.Context, group string, id st
 	if err != nil {
 		return observe.Probe{}, err
 	}
-	if reply.Peer != peer || reply.Found != reply.Status.Found || reply.Found && (reply.Status.GroupID != group ||
+	if reply.Peer != peer || reply.Found != reply.Status.Found || reply.Found && (reply.Status.GroupID != id.GroupID ||
 		reply.Status.HostNode != peer.Node.NodeName) {
 		return observe.Probe{}, fault.ErrIdentityMismatch
 	}
-	return observe.Probe{Status: reply.Status.Clone()}, nil
+	status := reply.Status.Clone()
+	// Bind the authenticated response to the source captured before dispatch.
+	// A later progress read may reject this source; it must never relabel it.
+	status.Reporter, status.ReporterReplicaID = peer.Node, peer.Replica.ReplicaID
+	status.SourceVersion, status.ReceivedAt = source, time.Now().UTC()
+	return observe.Probe{Status: status}, nil
 }
 
 type observedGroup struct {
@@ -139,10 +144,14 @@ type observedGroup struct {
 	observed int
 }
 
-func (h *Host) nativeObservationReads(group string, ids []storage.Identity) []observe.ReplicaRead {
+func (h *Host) nativeObservationReads(group string, ids []storage.Identity, source uint64) []observe.ReplicaRead {
 	seen := make(map[storage.Identity]bool)
 	reads := make([]observe.ReplicaRead, 0, len(ids))
 	for _, id := range ids {
+		if id.GroupID != group {
+			reads = append(reads, observe.ReplicaRead{Error: fault.ErrIdentityMismatch})
+			continue
+		}
 		if seen[id] {
 			continue
 		}
@@ -158,7 +167,7 @@ func (h *Host) nativeObservationReads(group string, ids []storage.Identity) []ob
 				ReplicaID: id.ReplicaID,
 			},
 			Read: func(work context.Context, attempt *observe.ReadAttempt) (observe.Probe, error) {
-				return h.readNativeObservation(work, group, id, attempt)
+				return h.readNativeObservation(work, id, source, attempt)
 			},
 		})
 	}

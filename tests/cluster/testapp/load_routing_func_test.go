@@ -23,7 +23,7 @@ func (*retainedRouteCluster) Target(context.Context) (topology.Document, error) 
 	return topology.Document{}, nil
 }
 func (*retainedRouteCluster) ReadTopology(context.Context) (topology.ReadView, error) {
-	return topology.ReadView{FullyConverged: topology.FullyConverged{Version: 2}}, nil
+	return topology.ReadView{}, fault.ErrUnavailable
 }
 func (c *retainedRouteCluster) Get(_ context.Context, version uint64) (topology.Document, error) {
 	for _, doc := range c.documents {

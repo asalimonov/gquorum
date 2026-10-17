@@ -45,7 +45,14 @@ func assertDrained(ctx context.Context, t *testing.T, c *Cluster, name, group st
 	if err := requireStatus(response, err, 503); err != nil {
 		t.Fatal("drained node still serves load", err)
 	}
-	if _, err := c.docker.ContainerStatPath(ctx, c.Node(name).Container.GetContainerID(), client.ContainerStatPathOptions{Path: "/data/load/" + group}); !errdefs.IsNotFound(err) {
+	// Drain converges after joined stop; physical retirement runs independently.
+	if err := Poll(ctx, func() (bool, error) {
+		_, err := c.docker.ContainerStatPath(ctx, c.Node(name).Container.GetContainerID(), client.ContainerStatPathOptions{Path: "/data/load/" + group})
+		if errdefs.IsNotFound(err) {
+			return true, nil
+		}
+		return false, err
+	}); err != nil {
 		t.Fatal("drained node retained removed load store", err)
 	}
 }

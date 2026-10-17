@@ -62,7 +62,7 @@ func (c groupControllers) Status(ctx context.Context, id string) (topology.Group
 		}
 		return status, nil
 	}
-	status := c.g.engine.Load().Status()
+	status := c.g.LocalStatus()
 	live, err := c.g.metaHealth(ctx, status)
 	if err != nil {
 		return status, err

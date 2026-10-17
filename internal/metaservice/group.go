@@ -607,6 +607,9 @@ func (g *Group) resolveNode(ctx context.Context, name string) (string, error) {
 	}
 	if g.opts.Network.Resolver != nil {
 		address, err := g.opts.Network.Resolver.Resolve(ctx, name)
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
 		if err == nil && address != "" {
 			return address, nil
 		}

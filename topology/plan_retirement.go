@@ -75,13 +75,17 @@ func (s *voterPlanState) validateNativeRetirement() error {
 	return nil
 }
 
-// Existing debt retains retirement ownership; only its exact required stop can
-// be carried by a successor plan before preparing another owner on that host.
-func requireCleanupOwnerStop(view voterPlanTopology, plan Plan, incoming Step, stopped map[uint64]bool) error {
-	for _, replica := range view.base.Retained[view.groupID].Replicas {
-		if replica.Progress != RetainedCleanup || replica.NodeName != incoming.NodeName ||
+// Host reuse requires its exact predecessor to join before preparation, whether
+// the predecessor is still native, prepared-only or already owned by cleanup.
+// Readmission supplies that boundary through its separately consumed batch.
+func requireFormerOwnerStop(view voterPlanTopology, plan Plan, incoming Step, stopped map[uint64]bool) error {
+	for _, replica := range view.base.formerReplicas(view.groupID) {
+		if replica.Progress == RetainedStopped || replica.NodeName != incoming.NodeName ||
 			replica.ReplicaID == incoming.ReplicaID || stopped[replica.ReplicaID] {
 			continue
+		}
+		if view.groupID == MetaGroupID && replica.Progress != RetainedCleanup {
+			continue // Metadata replacement uses the admission protocol.
 		}
 		if !ReadmissionCovers(view.base, view.desired, plan, replica.NodeName) {
 			return planUnsafef("prepare %s/%d lacks required stop for former owner %d", incoming.GroupID,

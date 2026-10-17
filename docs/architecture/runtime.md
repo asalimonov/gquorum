@@ -192,6 +192,13 @@ verification. A foreign or successor resource must be preserved. Only then may
 the library quarantine the exact Raft state and forget its matching ledger.
 Application transactions and outboxes remain caller-owned.
 
+`FI_HOST_REUSE`: a same-host load replacement removes and stops the exact old
+owner before preparation. Prepare waits for every predecessor on that group/host
+to record Retired, so detached cleanup consumes the shared host floor before the
+successor acquires it. Collection is independent and does not delay Prepare.
+This preserves exclusive storage ownership and restart authority without coupling
+other groups or hosts to the predecessor's cleanup.
+
 `storage.RetirementStore` enumerates exact retired identities and opaque tokens.
 Lifecycle retention decides when collection is eligible; collection rechecks the
 identity/token, local ownership and ledger. Complete exact retirement proof
@@ -287,6 +294,11 @@ completion retain their separate checks.
 The metadata grant covers the exact former pin, and load grants exclude approved
 successor replicas. Replacement metadata preparation waits for all of the
 admission's resource receipts; a completed fence alone is insufficient.
+If native load removal finishes before that independent batch, recording its
+receipt waits retryably for the exact batch to create the cleanup record. The
+resource retains the original native receipt; retries do not repeat the effect
+or invent stop/retirement proof. Once the batch completes, the actionless cleanup
+record keeps its original readmission milestones.
 
 Approved plans retain the full replacement metadata admission sequence even when
 the new member is already observed as a learner or voter. That preparation is the
@@ -330,6 +342,10 @@ cannot be recreated under that member, even if a Join response names it. A fresh
 approved readmission is required. Before recording acquisition, an interrupted
 creation can resume against the exact granted identity and original readmission
 proof after the new process receives its committed admission binding.
+Load creation also waits until local metadata replay reaches its granted revision
+before looking up the startup scope. A remote grant proof alone cannot supply a
+not-yet-replayed local identity or ledger. Metadata preparation and retained
+cleanup keep their control-only paths outside this load-creation gate.
 
 The managed retirement boundary accepts the exact readmission grant batch. With
 Node-owned authority configured, it validates the full prior scope before writing
