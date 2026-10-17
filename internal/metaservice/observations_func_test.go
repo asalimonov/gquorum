@@ -5,6 +5,7 @@ package metaservice
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -17,7 +18,7 @@ func TestRecordersNilBusNoOp(t *testing.T) {
 	f := newMutationFixture(t)
 	f.g.recordGroupHealth(topology.GroupHealthy, topology.GroupHealthEvaluation{GroupID: "work", ObservedHealth: topology.ObservedGroupHealth{State: topology.GroupQuorumLost}})
 	f.g.recordNodeHealth("n2", topology.HealthAlive, topology.HealthDead)
-	f.g.recordLegacyApplied(f.g.machine, f.g.machine.Active())
+	f.g.recordScopedApplied(f.g.machine)
 }
 
 func TestHealthRecorderQuorumCrossingsOnly(t *testing.T) {
@@ -104,9 +105,10 @@ func TestLivenessRecorderObserverAndSubjectIdentities(t *testing.T) {
 	}
 }
 
-func TestAppliedRecorderIsLocalAndDeduplicatesUnchangedOperatorAndDrain(t *testing.T) {
+func TestAppliedRecorderIsLocalAndDeduplicatesUnchangedBlockAndDrain(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
+	f.g.recordScopedApplied(f.g.machine) // Establish the already-observed founding blocks.
 	doc := f.g.machine.Latest()
 	doc.Node("n3").State = topology.NodeDraining
 	doc.Group("work").Replicas = doc.Group("work").Replicas[:2]
@@ -118,7 +120,7 @@ func TestAppliedRecorderIsLocalAndDeduplicatesUnchangedOperatorAndDrain(t *testi
 		t.Fatal(err)
 	}
 	for range 10 {
-		f.g.recordLegacyApplied(f.g.machine, f.g.machine.Active())
+		f.g.recordScopedApplied(f.g.machine)
 	}
 	after, err := f.g.machine.Snapshot(context.Background())
 	if err != nil {
@@ -131,10 +133,59 @@ func TestAppliedRecorderIsLocalAndDeduplicatesUnchangedOperatorAndDrain(t *testi
 		t.Fatal(err)
 	}
 	got := journalEvents(t, j, events.Filter{})
-	if len(got) != 2 || got[1].Type != events.DrainCompleted || got[1].SubjectNode != "n3" || got[1].Version != 2 || got[0].Type != events.OperatorChanged || got[0].Version != 2 || got[0].OperatorID == "" || got[0].Attempt != 1 || got[0].State != string(topology.OperatorSucceeded) {
+	if len(got) != 3 || got[2].Type != events.DrainCompleted || got[2].SubjectNode != "n3" || got[2].Version != 2 {
 		t.Fatal(got)
+	}
+	for i, group := range []string{topology.MetaGroupID, "work"} {
+		event := got[i]
+		if event.Type != events.OperatorChanged || event.GroupID != group || event.Version != 2 ||
+			event.OperationID != string(topology.MakeOperationID(2, 1)) || event.Attempt != 1 ||
+			event.State != string(topology.OperationSucceeded) {
+			t.Fatal("block event lost exact operation scope", event)
+		}
 	}
 	if !reflect.DeepEqual(f.g.lastDrained, map[string]bool{"n3": true}) {
 		t.Fatal(f.g.lastDrained)
+	}
+}
+
+func TestAppliedRecorderTracksOlderWorkBeyondStatusHeaderLimit(t *testing.T) {
+	t.Parallel()
+	f := newMutationFixture(t)
+	desired := f.g.machine.Target()
+	desired.Group("work").Labels = map[string]string{"pending": "old-approval"}
+	f.commit(t, desired, false)
+	proposal := f.fixtureApproval(t, f.g.machine.Latest())
+	proposal.Plan.Steps = []topology.Step{{Seq: 1, Kind: topology.StepTransferLeader,
+		GroupID: "work", NodeName: "n1", ReplicaID: 1}}
+	proposal.Plan.Blocks[0].Steps = []int{1}
+	pending := f.command(t, proposal).OperationID
+	// More than 100 newer operation headers must not hide independent old work.
+	for i := range 101 {
+		desired = f.g.machine.Target()
+		desired.Node("n1").Labels = map[string]string{"revision": fmt.Sprint(i)}
+		f.commit(t, desired, true)
+	}
+	status, err := f.g.machine.ProgressStatus()
+	if err != nil || !status.OperationsTruncated {
+		t.Fatal("fixture did not exceed the bounded header view", status, err)
+	}
+	operation, err := f.g.machine.Operation(pending)
+	if err != nil || operation.State != topology.OperationPending {
+		t.Fatal("independent old work must remain pending", operation, err)
+	}
+	f.g.recordScopedApplied(f.g.machine)
+	bus, journal := eventFixture(t)
+	f.g.opts.Events = bus
+	f.completeFixtureWork(t, topology.Operation{Status: operation, Plan: proposal.Plan}, "work", f.g.machine.Target())
+	f.g.recordScopedApplied(f.g.machine)
+	f.g.recordScopedApplied(f.g.machine)
+	if err := bus.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	got := journalEvents(t, journal, events.Filter{Types: []events.Type{events.OperatorChanged}})
+	if len(got) != 1 || got[0].OperationID != string(pending) || got[0].GroupID != "work" ||
+		got[0].State != string(topology.OperationSucceeded) || got[0].Version != 2 {
+		t.Fatal("older scoped completion was lost or repeated", got)
 	}
 }

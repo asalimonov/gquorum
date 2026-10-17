@@ -12,14 +12,18 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func TestScopedControllerRejectsMixedAuthorityComposition(t *testing.T) {
+func TestScopedControllerRejectsInvalidComposition(t *testing.T) {
 	t.Parallel()
 	for name, change := range map[string]func(*Config){
-		"both ports":          func(c *Config) { c.LegacyCoordinator = forbiddenLegacyCoordinator{} },
-		"neither port":        func(c *Config) { c.Coordinator = nil },
-		"legacy store":        func(c *Config) { c.Store = forbiddenLegacyStore{} },
-		"legacy plan":         func(c *Config) { c.PlanValidator = func(context.Context, Record) error { return nil } },
-		"legacy final":        func(c *Config) { c.FinalValidator = func(context.Context, Document, Document) error { return nil } },
+		"coordinator":         func(c *Config) { c.Coordinator = nil },
+		"rules":               func(c *Config) { c.Rules.SchemaVersion = 0 },
+		"limits":              func(c *Config) { c.Rules.Limits.MaxNodes = -1 },
+		"authority":           func(c *Config) { c.Authority = nil },
+		"effects":             func(c *Config) { c.Groups = nil },
+		"owner":               func(c *Config) { c.OwnsGroup = nil },
+		"interval":            func(c *Config) { c.Interval = -time.Second },
+		"retry":               func(c *Config) { c.MaxRetryInterval = -time.Second },
+		"proposal timeout":    func(c *Config) { c.ProposalTimeout = -time.Second },
 		"missing scope plan":  func(c *Config) { c.ScopedPlanValidator = nil },
 		"missing scope final": func(c *Config) { c.ScopedFinalValidator = nil },
 	} {
@@ -36,7 +40,7 @@ func TestScopedControllerRejectsMixedAuthorityComposition(t *testing.T) {
 
 func TestScopedControllerFinalizesOnlySelectedScopeAndRechecksLeadership(t *testing.T) {
 	t.Parallel()
-	for _, loss := range []string{"none", "selection", "plan", "final", "canceled"} {
+	for _, loss := range []string{"none", "selection", "plan", "final", "canceled", "other owner"} {
 		t.Run(loss, func(t *testing.T) {
 			t.Parallel()
 			op := topology.Operation{Status: topology.OperationStatus{ID: "exec-v2-a1", Version: 2, Attempt: 1,
@@ -52,6 +56,9 @@ func TestScopedControllerFinalizesOnlySelectedScopeAndRechecksLeadership(t *test
 			}
 			cfg := scopedControllerConfig(coord)
 			planCalls, finalCalls := 0, 0
+			if loss == "other owner" {
+				cfg.OwnsGroup = func(string) bool { return false }
+			}
 			cfg.ScopedPlanValidator = func(_ context.Context, got topology.Operation, group string) error {
 				planCalls++
 				if got.Status.ID != op.Status.ID || group != "b" {

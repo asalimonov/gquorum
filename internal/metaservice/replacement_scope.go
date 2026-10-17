@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"slices"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
@@ -22,30 +21,6 @@ func unownedProvenGroup(input topology.PlanInput, id string) (*topology.Group, e
 			fmt.Sprintf("group %q is not converged to approved intent; revert or retry its change first", id), nil)
 	}
 	return row.Converged, nil
-}
-
-func checkReadmissionScope(input topology.PlanInput, name string, member uint64) error {
-	row := input.Nodes[name]
-	if row.OperationID != "" {
-		return fault.New(fault.Unavailable,
-			"node is owned by operation "+string(row.OperationID), nil)
-	}
-	if row.ConvergedVersion == 0 || row.Converged == nil || row.MemberID != member ||
-		input.Approved.MemberID(name) != member {
-		return fault.ErrVersionConflict
-	}
-	for _, group := range input.Approved.Groups {
-		hosts := slices.ContainsFunc(group.Replicas, func(replica topology.Replica) bool {
-			return replica.NodeName == name
-		})
-		if !hosts {
-			continue
-		}
-		if _, err := unownedProvenGroup(input, group.ID); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func checkReseatScope(input topology.PlanInput, id string, key topology.ReplicaKey) error {
@@ -77,7 +52,7 @@ func (g *Group) validateReadmissionScope(ctx context.Context, doc topology.Docum
 	if err != nil {
 		return err
 	}
-	return checkReadmissionScope(input, name, expectedMemberID)
+	return metaengine.ValidateReadmissionScope(input, name, expectedMemberID)
 }
 
 func (g *Group) prepareReseat(ctx context.Context, doc *topology.Document,
@@ -91,12 +66,5 @@ func (g *Group) prepareReseat(ctx context.Context, doc *topology.Document,
 		return err
 	}
 	views := g.state().Views()
-	// Task78 replaces these schema3 guards with scoped capture/approval.
-	if !reflect.DeepEqual(views.Latest, views.Target) || !reflect.DeepEqual(views.Target, views.Active) {
-		return fault.New(fault.OperationAuthorization, "reseat requires equal Latest, Target and Active", nil)
-	}
-	if ex, ok := g.state().CurrentOperator(); ok && !ex.Status.State.Terminal() {
-		return fault.New(fault.OperationAuthorization, "reseat requires no running execution", nil)
-	}
 	return g.reseatDocument(doc, views, options)
 }

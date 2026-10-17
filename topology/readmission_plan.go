@@ -51,7 +51,7 @@ func validatePlanMembers(input PlanInput, desired Document) error {
 // metadata owner retires its predecessor through the independently granted
 // readmission protocol before PrepareReplica can be consumed. Later host calls
 // to the retired member would be both redundant and unroutable.
-func bindReadmissionRetirement(input PlanInput, desired Document, plan Plan, scope planScope) Plan {
+func bindReadmissionRetirement(input PlanInput, desired Document, plan Plan, groups []string) Plan {
 	meta := desired.MetaGroup()
 	if meta == nil {
 		return plan
@@ -61,9 +61,9 @@ func bindReadmissionRetirement(input PlanInput, desired Document, plan Plan, sco
 		previous, known := input.loadOwnerMember(r.NodeName)
 		// Unchanged metadata can still own pending readmission retirement.
 		// The FSM verifies consumption, including deletion without a Prepare.
-		if known && r.ReplicaID > previous && (slices.Contains(scope.groups, MetaGroupID) ||
+		if known && r.ReplicaID > previous && (slices.Contains(groups, MetaGroupID) ||
 			input.convergedMetaMember(r.NodeName) == r.ReplicaID ||
-			scope.partition && approvedReadmission(input, desired, r.NodeName)) {
+			approvedReadmission(input, desired, r.NodeName)) {
 			replacements = append(replacements, r)
 		}
 	}
@@ -71,8 +71,8 @@ func bindReadmissionRetirement(input PlanInput, desired Document, plan Plan, sco
 		return plan
 	}
 	builder := readmissionPlanBuilder{input: input, desired: desired, replacements: replacements,
-		metadataOwned:     slices.Contains(scope.groups, MetaGroupID),
-		preserveAdmission: readmissionPreparations(input, plan, replacements, scope), emitted: make(map[string]bool)}
+		metadataOwned:     slices.Contains(groups, MetaGroupID),
+		preserveAdmission: readmissionPreparations(input, plan, replacements), emitted: make(map[string]bool)}
 	for _, step := range plan.Steps {
 		builder.appendStep(step)
 	}
@@ -84,16 +84,14 @@ func bindReadmissionRetirement(input PlanInput, desired Document, plan Plan, sco
 	return plan
 }
 
-func readmissionPreparations(input PlanInput, plan Plan, replacements []Replica, scope planScope) map[string]bool {
+func readmissionPreparations(input PlanInput, plan Plan, replacements []Replica) map[string]bool {
 	plannedPreparation := make(map[string]bool, len(replacements))
-	if scope.partition {
-		native := input.Native[MetaGroupID].ConfState
-		for _, replacement := range replacements {
-			// Native membership has already passed exact identity validation.
-			// Scoped admission handover separately proves the consumed prefix.
-			plannedPreparation[replacement.NodeName] = slices.Contains(native.Voters, replacement.ReplicaID) ||
-				slices.Contains(native.Learners, replacement.ReplicaID)
-		}
+	native := input.Native[MetaGroupID].ConfState
+	for _, replacement := range replacements {
+		// Native membership has already passed exact identity validation.
+		// Scoped admission handover separately proves the consumed prefix.
+		plannedPreparation[replacement.NodeName] = slices.Contains(native.Voters, replacement.ReplicaID) ||
+			slices.Contains(native.Learners, replacement.ReplicaID)
 	}
 	for _, step := range plan.Steps {
 		if step.GroupID != MetaGroupID || step.Kind != StepPrepareReplica {

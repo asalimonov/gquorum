@@ -10,34 +10,22 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func TestMetaControlKeepsLegacyAuthorizationTuple(t *testing.T) {
+func TestAuthorizationTupleUsesOperationIdentity(t *testing.T) {
 	t.Parallel()
-	a := topology.AuthorizedStep{OperatorID: "exec-v4-a2", Version: 4, Attempt: 2, StepSeq: 3, Kind: topology.StepAddLearner, GroupID: topology.MetaGroupID, NodeName: "n2", ReplicaID: 7}
-	legacy := []byte(`{"execution_id":"exec-v4-a2","version":4,"attempt":2,"step_seq":3,"kind":"add_learner","group_id":"_meta","node_name":"n2","replica_id":7}`)
-	got, err := json.Marshal(toWireAuthorization(a))
-	if err != nil || !bytes.Equal(got, legacy) {
-		t.Fatalf("meta authorization changed: %s/%v", got, err)
+	a := topology.AuthorizedStep{OperationID: "exec-v4-a2", Version: 4, Attempt: 2, StepSeq: 3, Kind: topology.StepAddLearner, GroupID: topology.MetaGroupID, NodeName: "n2", ReplicaID: 7,
+		ExpectedVotersDigest: topology.VoterSetDigest([]uint64{1}), ResultVotersDigest: topology.VoterSetDigest([]uint64{1})}
+	encoded, err := json.Marshal(a)
+	if err != nil || !bytes.Contains(encoded, []byte(`"operation_id"`)) || bytes.Contains(encoded, []byte(`"operator_id"`)) || bytes.Contains(encoded, []byte(`"execution_id"`)) {
+		t.Fatalf("unexpected authorization vocabulary: %s/%v", encoded, err)
 	}
-	var read wireAuthorization
-	if err := json.Unmarshal(legacy, &read); err != nil {
-		t.Fatal(err)
+	var read topology.AuthorizedStep
+	if err := json.Unmarshal(encoded, &read); err != nil || read != a {
+		t.Fatalf("authorization lost exact scope or voter proof: %+v/%v", read, err)
 	}
-	if read.public() != a || !read.public().Matches(a.OperatorID, a.Attempt, a.Version, topology.Step{Seq: a.StepSeq, Kind: a.Kind, GroupID: a.GroupID, NodeName: a.NodeName, ReplicaID: a.ReplicaID}) {
-		t.Fatal("wire conversion lost exact authorization scope")
-	}
-	guarded := a
-	guarded.ExpectedVotersDigest = topology.VoterSetDigest([]uint64{1})
-	guarded.ResultVotersDigest = topology.VoterSetDigest([]uint64{1})
-	encoded, err := json.Marshal(toWireAuthorization(guarded))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(encoded, &read); err != nil || read.public() != guarded {
-		t.Fatalf("wire conversion lost voter proof: %s %v", encoded, err)
-	}
-	public, err := json.Marshal(a)
-	if err != nil || !bytes.Contains(public, []byte(`"operator_id"`)) || bytes.Contains(public, []byte(`"execution_id"`)) {
-		t.Fatalf("public authorization leaked stored vocabulary: %s/%v", public, err)
+	step := topology.Step{Seq: a.StepSeq, Kind: a.Kind, GroupID: a.GroupID, NodeName: a.NodeName, ReplicaID: a.ReplicaID,
+		ExpectedVotersDigest: a.ExpectedVotersDigest, ResultVotersDigest: a.ResultVotersDigest}
+	if !read.Matches(a.OperationID, a.Attempt, a.Version, step) || read.Matches("another-operation", a.Attempt, a.Version, step) {
+		t.Fatal("authorization does not bind the complete operation tuple")
 	}
 }
 
@@ -48,7 +36,7 @@ func TestJoinReadyKeepsLegacyReplyKey(t *testing.T) {
 	if err := json.Unmarshal(legacy, &request); err != nil {
 		t.Fatal(err)
 	}
-	if request.OperatorID != "exec-v1-a1" || request.MemberID != 1 {
+	if request.OperationID != "exec-v1-a1" || request.MemberID != 1 {
 		t.Fatal("join readiness lost approval identity", request)
 	}
 	got, err := json.Marshal(request)

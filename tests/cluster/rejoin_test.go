@@ -200,7 +200,7 @@ func assertRejoinedIdentities(ctx context.Context, t *testing.T, c *Cluster, bef
 	if err := c.WaitReady(ctx); err != nil {
 		t.Fatal("returning process failed its serving gate", err)
 	}
-	if err := c.WaitActive(ctx, after.Version); err != nil {
+	if err := c.WaitFullyConverged(ctx, after.Version); err != nil {
 		t.Fatal(err)
 	}
 	if err := exactOwnedValues(ctx, c, after, "work", values); err != nil {
@@ -313,7 +313,7 @@ func excludedSameDiskRejoin(t *testing.T, size int) {
 	if err := response.Decode(&excluded); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WaitOperation(ctx, "node1", topology.OperatorID(excluded.OperationID)); err != nil {
+	if err := c.WaitOperation(ctx, "node1", topology.OperationID(excluded.OperationID)); err != nil {
 		t.Fatal(err)
 	}
 	victim := c.Node("node3")
@@ -333,7 +333,7 @@ func excludedSameDiskRejoin(t *testing.T, size int) {
 	}); err != nil {
 		t.Fatal("exclusion alone must cause clean self-exit", err)
 	}
-	if err := c.WaitActive(ctx, excluded.Document.Version); err != nil {
+	if err := c.WaitFullyConverged(ctx, excluded.Document.Version); err != nil {
 		t.Fatal("restart requires fully active exclusion", err)
 	}
 	logs, err := victim.Logs(ctx)
@@ -437,7 +437,7 @@ func excludedSameDiskRejoin(t *testing.T, size int) {
 	if err := response.Decode(&admitted); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WaitOperation(ctx, "node1", topology.OperatorID(admitted.OperationID)); err != nil {
+	if err := c.WaitOperation(ctx, "node1", topology.OperationID(admitted.OperationID)); err != nil {
 		t.Fatal(err)
 	}
 	assertRejoinedIdentities(ctx, t, c, before, admitted.Document, previous, parkedIdentity.Identity.InstanceID, values)
@@ -515,7 +515,7 @@ func rotatedDownNodeRejoin(t *testing.T, size int) {
 	if err := ownDurableFiles(ctx, c, "node3", "work"); err != nil {
 		t.Fatal(err)
 	}
-	operator, err := c.Operation(ctx, "node1", topology.OperatorID(rotated.OperationID))
+	operator, err := c.Operation(ctx, "node1", topology.OperationID(rotated.OperationID))
 	if err != nil || operator.State.Terminal() {
 		t.Fatal("down node completed learner admission without its process", operator, err)
 	}
@@ -536,7 +536,7 @@ func rotatedDownNodeRejoin(t *testing.T, size int) {
 	if err != nil || returned.Identity.InstanceID == previous.Identity.InstanceID {
 		t.Fatal("returning process identity missing", returned, err)
 	}
-	if err := c.WaitOperation(ctx, "node1", topology.OperatorID(rotated.OperationID)); err != nil {
+	if err := c.WaitOperation(ctx, "node1", topology.OperationID(rotated.OperationID)); err != nil {
 		t.Fatal(err)
 	}
 	assertRejoinedIdentities(ctx, t, c, before, rotated.Document, previous, returned.Identity.InstanceID, values)

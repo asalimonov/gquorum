@@ -131,7 +131,6 @@ func TestScopedIndexesRejectAmbiguousKeysAtomically(t *testing.T) {
 func TestScopedObligationsShareResourcesAndIgnoreDebtCapacity(t *testing.T) {
 	t.Parallel()
 	s := scopedState{SchemaVersion: scopedStateSchemaVersion, Rules: testRules()}
-	s.Rules.Limits.MaxPendingAuthorityRecords = 1
 	s.Rules.Limits.MaxConcurrentGroups, s.Rules.Limits.MaxConcurrentCleanup = 1, 1
 	const debtCount = 2500
 	for i := range debtCount {

@@ -30,8 +30,6 @@ func foundingApprovalFixture(t *testing.T) (scopedState, BeginOperationProposal)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The public planner remains flat until Task78; partition its exact steps.
-	plan.Blocks = []topology.PlanBlock{{GroupID: topology.MetaGroupID}, {GroupID: "shard0", Steps: []int{1}}}
 	return s, BeginOperationProposal{Version: 1, Plan: plan, ProposalID: "found", Origin: topology.OriginFounding,
 		At: doc.CreatedAt, Actor: "n1", Scopes: []ScopeExpectation{{GroupID: topology.MetaGroupID}, {GroupID: "shard0"}}}
 }
@@ -86,7 +84,7 @@ func TestScopedFoundingConvergesMetadataDespiteFailedLoadAndRestoresAdmission(t 
 	}
 	s = follower
 	pbind := BindAdmissionProposal{Founding: true, At: failed.At, Admission: AdmissionRecord{
-		NodeName: "n1", MemberID: 1, InstanceID: "first", OperatorID: topology.OperatorID(s.Operations[0].Status.ID)}}
+		NodeName: "n1", MemberID: 1, InstanceID: "first", OperationID: topology.OperationID(s.Operations[0].Status.ID)}}
 	result, err = foundingCommand(t, &s, pbind, raftpb.ConfState{})
 	if err != nil || !result.changed || result.result.Admission.State != AdmissionCompleted ||
 		s.Operations[0].Status.State != topology.OperationFailed {
@@ -149,7 +147,7 @@ func TestScopedFoundingBindRechecksMemberOperationAndNativeProof(t *testing.T) {
 				t.Fatal(err)
 			}
 			p := BindAdmissionProposal{Founding: true, At: approval.At, Admission: AdmissionRecord{
-				NodeName: "n1", MemberID: 1, InstanceID: "first", OperatorID: "exec-v1-a1"}}
+				NodeName: "n1", MemberID: 1, InstanceID: "first", OperationID: "exec-v1-a1"}}
 			switch mode {
 			case "replaced":
 				s.Target = s.Target.Clone()
@@ -162,7 +160,7 @@ func TestScopedFoundingBindRechecksMemberOperationAndNativeProof(t *testing.T) {
 			case "instance":
 				p.Admission.InstanceID = ""
 			case "operation":
-				p.Admission.OperatorID = "exec-v1-a2"
+				p.Admission.OperationID = "exec-v1-a2"
 			case "time":
 				p.At = time.Time{}
 			case "origin":
@@ -217,5 +215,77 @@ func TestScopedFoundingReplayBeforeAfterApplyHasIdenticalCheckpoint(t *testing.T
 	replayed, _ := json.Marshal(restarted)
 	if !bytes.Equal(original, replayed) {
 		t.Fatal("replay needed AfterApply membership cache")
+	}
+}
+
+func TestMachineAppliesScopedFoundingApprovalThroughEngineEntryPoint(t *testing.T) {
+	t.Parallel()
+	machine := mustMachine(t, testRules(), nil)
+	doc := baseDoc()
+	doc.Origin = topology.OriginFounding
+	if _, err := machine.Apply(t.Context(), raftengine.Command{Index: 1, Term: 1,
+		Data: mustEncode(t, ProposeDocument{Doc: doc})}); err != nil {
+		t.Fatal("stage founding topology", err)
+	}
+	var read PlanRead
+	query, _ := json.Marshal(QueryRequest{Kind: "approval_plan", Version: 1})
+	result, err := machine.Query(t.Context(), query)
+	if err != nil {
+		t.Fatal("capture founding approval", err)
+	}
+	if err := json.Unmarshal(result.Data, &read); err != nil {
+		t.Fatal("decode founding plan capture", err)
+	}
+	read.Input.Native = map[string]topology.NativeState{topology.MetaGroupID: {
+		GroupID: topology.MetaGroupID, ReplicaID: 1, Applied: 1,
+		ConfState: raftpb.ConfState{Voters: []uint64{1}},
+	}}
+	plan, err := topology.BuildPlanPreferred(read.Input, read.Target, topology.PlanOptions{Rules: testRules()})
+	if err != nil {
+		t.Fatal("build exact seed plan", err)
+	}
+	proposal := BeginOperationProposal{Version: 1, Plan: plan, Scopes: read.Scopes,
+		Actor: "n1", Origin: topology.OriginFounding, At: time.Now().UTC(), ProposalID: "found"}
+	if _, err := machine.Apply(t.Context(), raftengine.Command{Index: 2, Term: 1,
+		Data: mustEncode(t, proposal), ConfState: raftpb.ConfState{Voters: []uint64{1}}}); err != nil {
+		t.Fatal("apply founding operation", err)
+	}
+	basis, ok := machine.AdmissionBasis(topology.Identity{ClusterID: doc.ClusterID,
+		NodeName: "n1", MemberID: 1, InstanceID: "instance"})
+	if machine.Target().Version != 1 || !ok || basis == "" {
+		t.Fatal("founding approval did not retain admission basis")
+	}
+	commands := []any{
+		BindAdmissionProposal{Admission: AdmissionRecord{NodeName: "n1", InstanceID: "instance",
+			MemberID: 1, OperationID: topology.OperationID(basis)}, Founding: true,
+			At: time.Now().UTC(), ProposalID: "bind"},
+		GrantSession{SessionID: "session", NodeName: "n1", InstanceID: "instance", TTLSeconds: 30, ProposalID: "session"},
+		AcquireLock{Key: "node/n1", SessionID: "session", ProposalID: "lock"},
+	}
+	for i, command := range commands {
+		if _, err := machine.Apply(t.Context(), raftengine.Command{Index: uint64(i + 3), Term: 1,
+			Data: mustEncode(t, command), ConfState: raftpb.ConfState{Voters: []uint64{1}}}); err != nil {
+			t.Fatalf("apply startup command %T: %v", command, err)
+		}
+	}
+}
+
+func TestMachineApplyRejectsFoundingSeedMismatchWithoutStateChange(t *testing.T) {
+	t.Parallel()
+	state, proposal := foundingApprovalFixture(t)
+	machine := mustMachine(t, testRules(), nil)
+	machine.scoped = &state
+	before, err := machine.Snapshot(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = machine.Apply(t.Context(), raftengine.Command{Index: state.AppliedIndex + 1, Term: 1,
+		Data: mustEncode(t, proposal), ConfState: raftpb.ConfState{Voters: []uint64{9}}})
+	if !errors.Is(err, errFoundingSeedMismatch) {
+		t.Fatalf("founding seed mismatch must be an Apply error, got %v", err)
+	}
+	after, err := machine.Snapshot(t.Context())
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("failed founding entry changed durable state: snapshot err=%v", err)
 	}
 }

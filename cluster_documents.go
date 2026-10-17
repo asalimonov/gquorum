@@ -97,8 +97,7 @@ func (c *clusterView) Approve(ctx context.Context, version uint64) (topology.Ope
 	if err != nil {
 		return "", err
 	}
-	id, err := m.Apply(ctx, version)
-	return topology.OperationID(id), err
+	return m.Approve(ctx, version)
 }
 
 func (c *clusterView) ParkedJoins(ctx context.Context) ([]topology.ParkedJoin, error) {

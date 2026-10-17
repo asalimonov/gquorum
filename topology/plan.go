@@ -25,12 +25,9 @@ func comparePlanGroups(a, b string) int {
 // It also validates existing plans after effects complete; new effect ownership
 // must be checked separately at approval against retained grants and cleanup.
 func ValidatePlanShape(input PlanInput, desired Document, plan Plan) error {
-	groups := unionGroupIDs(input, desired)
-	if plan.Blocks != nil {
-		groups = make([]string, 0, len(plan.Blocks))
-		for _, block := range plan.Blocks {
-			groups = append(groups, block.GroupID)
-		}
+	groups := make([]string, 0, len(plan.Blocks))
+	for _, block := range plan.Blocks {
+		groups = append(groups, block.GroupID)
 	}
 	return validatePlanShapeFor(input, desired, plan, groups)
 }
@@ -73,17 +70,10 @@ func validatePlanHeader(input PlanInput, desired Document, plan Plan) error {
 	if err := validatePlanMembers(input, desired); err != nil {
 		return err
 	}
-	// The current planner emits flat plans until its scoped-input conversion.
-	// Remove this transitional guard when all producers supply block partitions.
-	if len(plan.Blocks) != 0 || len(plan.Dependencies) != 0 {
-		if err := validatePlanBlocks(plan); err != nil {
-			return err
-		}
-		if err := validateBlockSafety(desired, plan); err != nil {
-			return err
-		}
+	if err := validatePlanBlocks(plan); err != nil {
+		return err
 	}
-	return nil
+	return validateBlockSafety(desired, plan)
 }
 
 func preparatoryWaitPair(steps []Step, index int, incoming Step) bool {
@@ -200,7 +190,7 @@ func (v *planShapeValidator) validateReplicaRole(current Step) error {
 		// A scoped successor may demote an approved member whose admission has
 		// not converged yet. Voter guards and admission history prove its role.
 		if next == nil || next.Role != ReplicaLearner || old == nil &&
-			(v.plan.Blocks == nil || exactPlanReplica(v.input.Approved, current) == nil) {
+			exactPlanReplica(v.input.Approved, current) == nil {
 			return fmt.Errorf("step %d does not authorize a retained learner", current.Seq)
 		}
 	case StepRemoveReplica, StepStopReplica, StepCleanupReplicaState:

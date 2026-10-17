@@ -31,7 +31,7 @@ func TestClusterBarrierCancellationAndAuthenticatedRelease(t *testing.T) {
 	if code := call("PUT", path, a.cfg.Credential); code != 200 {
 		t.Fatal(code)
 	}
-	approved := topology.AuthorizedStep{OperatorID: "exec-v4-a1", Version: 4, Attempt: 1, StepSeq: 8, Kind: topology.StepPromoteVoter, GroupID: "work", NodeName: "node3", ReplicaID: 4}
+	approved := topology.AuthorizedStep{OperationID: "exec-v4-a1", Version: 4, Attempt: 1, StepSeq: 8, Kind: topology.StepPromoteVoter, GroupID: "work", NodeName: "node3", ReplicaID: 4}
 	canceled, stop := context.WithCancel(t.Context())
 	stop()
 	if err := a.beforeClusterEffect(canceled, approved); !errors.Is(err, context.Canceled) {
@@ -103,7 +103,7 @@ func TestCallerDeletionRefusalRecordsScopeAndReleases(t *testing.T) {
 	if code := call("PUT", path+"?refuse=true", "owned"); code != 200 {
 		t.Fatal(code)
 	}
-	approved := topology.AuthorizedStep{OperatorID: "exec-v3-a1", Version: 3, Attempt: 1, StepSeq: 1, Kind: topology.StepStopReplica, GroupID: "occupied", NodeName: "node1", ReplicaID: 7}
+	approved := topology.AuthorizedStep{OperationID: "exec-v3-a1", Version: 3, Attempt: 1, StepSeq: 1, Kind: topology.StepStopReplica, GroupID: "occupied", NodeName: "node1", ReplicaID: 7}
 	if err := a.beforeClusterEffect(t.Context(), approved); !errors.Is(err, fault.ErrUnsafeMembership) {
 		t.Fatal(err)
 	}

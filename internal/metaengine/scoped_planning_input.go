@@ -35,7 +35,7 @@ func (s *scopedState) authorityCatalog() authorityCatalog {
 
 func (s *scopedState) planningDeclarations() topology.PlanInput {
 	input := topology.PlanInput{Approved: s.Target.Clone(), Groups: make(map[string]topology.GroupProgress),
-		Nodes: make(map[string]topology.NodeProgress)}
+		Nodes: make(map[string]topology.NodeProgress), Native: make(map[string]topology.NativeState)}
 	for _, row := range s.Groups {
 		input.Groups[row.GroupID] = (topology.GroupProgress{GroupID: row.GroupID,
 			ConvergedVersion: row.SourceVersion, Converged: row.Declaration,
@@ -43,7 +43,7 @@ func (s *scopedState) planningDeclarations() topology.PlanInput {
 	}
 	for _, row := range s.Nodes {
 		input.Nodes[row.NodeName] = (topology.NodeProgress{NodeName: row.NodeName, MemberID: row.MemberID,
-			ConvergedVersion: row.SourceVersion, Converged: row.Declaration}).Clone()
+			ConvergedVersion: row.SourceVersion, Converged: row.Declaration, OperationID: row.Owner}).Clone()
 	}
 	return input
 }

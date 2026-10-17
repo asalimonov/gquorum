@@ -1,0 +1,25 @@
+//go:build functional
+
+package authoritystore
+
+import (
+ "testing"
+ "time"
+)
+
+func TestExportScopedV2PhysicalFixture(t *testing.T) {
+ store, err := Open("testdata/scoped-v2/authority.bolt", localIdentity(), FreshEvidence)
+ if err != nil { t.Fatal(err) }
+ defer store.Close()
+ for i, replica := range []uint64{7, 8} {
+  row := localCollection(replica)
+  row.Grant.Key.Revision += uint64(i)
+  row.Grant.Action.StepSeq += i
+  row.Retirement = finishRetirementFixture(t, store, row.Grant)
+  prepared, err := store.PrepareCollection(t.Context(), row)
+  if err != nil { t.Fatal(err) }
+  if replica == 8 {
+   if _, err := store.CompleteCollection(t.Context(), row.Retired.Identity, prepared.Sequence, time.Unix(20,0).UTC()); err != nil { t.Fatal(err) }
+  }
+ }
+}

@@ -125,13 +125,40 @@ func (c *Cluster) Progress(ctx context.Context, node string, query topology.Prog
 }
 
 // Operation reads an exact operation's observed execution status.
-func (c *Cluster) Operation(ctx context.Context, node string, id any) (topology.OperatorStatus, error) {
+func (c *Cluster) Operation(ctx context.Context, node string, id any) (topology.OperationStatus, error) {
 	response, err := c.Request(ctx, node, "GET", "/api/operations/"+fmt.Sprint(id), nil, 0)
-	var status topology.OperatorStatus
+	var status topology.OperationStatus
 	if err := requireStatus(response, err, 200); err != nil {
 		return status, err
 	}
 	return status, response.Decode(&status)
+}
+
+func operationSummary(status topology.ClusterStatus, id topology.OperationID) (topology.OperationStatus, bool) {
+	for _, operation := range status.Operations {
+		if operation.ID == id {
+			return operation, true
+		}
+	}
+	return topology.OperationStatus{}, false
+}
+
+func operationBlock(status topology.OperationStatus, group string) (topology.BlockStatus, bool) {
+	for _, block := range status.Blocks {
+		if block.GroupID == group {
+			return block, true
+		}
+	}
+	return topology.BlockStatus{}, false
+}
+
+func operationAtVersion(status topology.ClusterStatus, version uint64) (topology.OperationStatus, bool) {
+	for _, operation := range status.Operations {
+		if operation.Version == version {
+			return operation, true
+		}
+	}
+	return topology.OperationStatus{}, false
 }
 
 // Poll retries a condition until completion or cancellation, retaining the last observation error.
@@ -162,10 +189,10 @@ func (c *Cluster) WaitOperation(ctx context.Context, node string, id any) error 
 		if err != nil {
 			return false, err
 		}
-		if status.State.Terminal() && status.State != topology.OperatorSucceeded {
-			return true, fmt.Errorf("execution %s terminated: %+v", id, status)
+		if status.State.Terminal() && status.State != topology.OperationSucceeded {
+			return true, fmt.Errorf("operation %s terminated: %+v", id, status)
 		}
-		return status.State == topology.OperatorSucceeded, nil
+		return status.State == topology.OperationSucceeded, nil
 	})
 }
 
@@ -186,22 +213,22 @@ func (c *Cluster) Mutate(ctx context.Context, node, method, path string, body an
 	if err := c.WaitOperation(ctx, node, result.OperationID); err != nil {
 		return result, err
 	}
-	err = c.WaitActive(ctx, result.Document.Version)
+	err = c.WaitFullyConverged(ctx, result.Document.Version)
 	return result, err
 }
 
-// WaitActive waits for every running process to observe the exact active version.
-func (c *Cluster) WaitActive(ctx context.Context, version uint64) error {
+// WaitFullyConverged waits until every running process records the exact fully converged version.
+func (c *Cluster) WaitFullyConverged(ctx context.Context, version uint64) error {
 	return Poll(ctx, func() (bool, error) {
 		for _, n := range c.Nodes() {
 			if !n.running.Load() {
 				continue
 			}
-			doc, err := c.Document(ctx, n.Spec.Name, "active")
+			status, err := c.Status(ctx, n.Spec.Name)
 			if err != nil {
 				return false, err
 			}
-			if doc.Version != version {
+			if status.FullyConverged.Version != version {
 				return false, nil
 			}
 		}
@@ -220,7 +247,7 @@ func (c *Cluster) Stage(ctx context.Context, node string, doc topology.Document)
 }
 
 // Approve approves a staged version and returns its operator ID.
-func (c *Cluster) Approve(ctx context.Context, node string, version uint64) (topology.OperatorID, error) {
+func (c *Cluster) Approve(ctx context.Context, node string, version uint64) (topology.OperationID, error) {
 	var result struct {
 		OperationID topology.OperationID `json:"operation_id"`
 	}
@@ -235,9 +262,9 @@ func (c *Cluster) Approve(ctx context.Context, node string, version uint64) (top
 		return "", errors.New("apply acknowledged without an execution identity")
 	}
 	if err := c.WaitOperation(ctx, node, result.OperationID); err != nil {
-		return topology.OperatorID(result.OperationID), err
+		return result.OperationID, err
 	}
-	return topology.OperatorID(result.OperationID), c.WaitActive(ctx, version)
+	return result.OperationID, c.WaitFullyConverged(ctx, version)
 }
 
 // CreateGroup creates and converges a load group through the public fixture API.

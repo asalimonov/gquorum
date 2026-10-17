@@ -58,6 +58,30 @@ func TestScopedCollectionAcceptsExactReceiptAndReplaysWithoutMutation(t *testing
 	}
 }
 
+func TestMachineCollectionEchoSurvivesApplyEncodingAndRestart(t *testing.T) {
+	t.Parallel()
+	s, p := collectionProposalFixture(t)
+	m := restoreMachineFixture(t, s)
+	result := applyMachine(t, m, p)
+	if !result.Accepted || result.Collection == nil || result.Collection.AppliedIndex != s.AppliedIndex+1 ||
+		result.Collection.Settled || !result.Collection.Receipt.Equal(p.Receipt) {
+		t.Fatal("Apply response lost accepted collection proof", result)
+	}
+	snapshot, err := m.Snapshot(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored := mustMachine(t, s.Rules, nil)
+	if err := restored.Restore(t.Context(), snapshot); err != nil {
+		t.Fatal(err)
+	}
+	result = applyMachine(t, restored, p)
+	if !result.Accepted || result.Collection == nil || result.Collection.AppliedIndex != s.AppliedIndex+2 ||
+		result.Collection.Settled || !result.Collection.Receipt.Equal(p.Receipt) {
+		t.Fatal("retry after restart lost collection acknowledgement", result)
+	}
+}
+
 func TestScopedCollectionRejectsConflictsAndForgedProofAtomically(t *testing.T) {
 	t.Parallel()
 	cases := map[string]func(*RecordCollectionProposal){
@@ -176,8 +200,8 @@ func TestScopedCollectionQueryIsReadOnlyAndRejectsForeignIdentity(t *testing.T) 
 	}
 	id.NodeName = "n"
 	data, _ := json.Marshal(q)
-	if _, err := NewMachine(testRules(), nil).Query(t.Context(), data); !errors.Is(err, fault.ErrUnsupported) {
-		t.Fatal("scoped settlement exposed on schema3", err)
+	if _, err := mustMachine(t, testRules(), nil).Query(t.Context(), data); !errors.Is(err, fault.ErrIdentityMismatch) {
+		t.Fatal("foreign collection identity was not rejected", err)
 	}
 }
 

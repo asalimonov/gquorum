@@ -12,7 +12,7 @@ import (
 func (m *Machine) ReadyFences(after topology.AuthorityResource, limit int) ([]operator.FenceWork, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return queryReadyFences(nil, after, limit) // Task78 installs scoped persistence.
+	return queryReadyFences(m.scoped, after, limit)
 }
 
 func queryReadyFences(s *scopedState, after topology.AuthorityResource, limit int) ([]operator.FenceWork, error) {

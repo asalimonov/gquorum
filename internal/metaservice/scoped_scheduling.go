@@ -2,6 +2,7 @@ package metaservice
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"reflect"
 	"slices"
@@ -12,13 +13,7 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// Task78 selects this static port together with complete scoped persistence.
-// The schema3 composition keeps schedulingHost until that single cutover.
-type scopedSchedulingHost struct{ schedulingHost }
-
-var _ internalscheduling.ScopedHost = scopedSchedulingHost{}
-
-func (h scopedSchedulingHost) ReadRepair(ctx context.Context, group string) (metaengine.PlanRead, error) {
+func (h schedulingHost) ReadRepair(ctx context.Context, group string) (metaengine.PlanRead, error) {
 	query := metaengine.QueryRequest{Kind: "repair_plan", Key: group}
 	if group == "" {
 		return h.g.readPlan(ctx, query)
@@ -41,7 +36,7 @@ func (h scopedSchedulingHost) ReadRepair(ctx context.Context, group string) (met
 	return read, nil
 }
 
-func (h scopedSchedulingHost) PlanRepair(ctx context.Context, captured metaengine.PlanRead,
+func (h schedulingHost) PlanRepair(ctx context.Context, captured metaengine.PlanRead,
 	doc topology.Document) (topology.Plan, error) {
 	if len(captured.Scopes) != 1 {
 		return topology.Plan{}, fault.ErrInvalid
@@ -49,13 +44,17 @@ func (h scopedSchedulingHost) PlanRepair(ctx context.Context, captured metaengin
 	query := metaengine.QueryRequest{Kind: "repair_plan", Key: captured.Scopes[0].GroupID, Desired: &doc}
 	read, err := h.g.capturePlan(ctx, query, h.g.readPlan)
 	if err != nil {
-		return topology.Plan{}, err
+		return topology.Plan{}, fmt.Errorf("capture repair plan query for %q: %w", query.Key, err)
 	}
 	if read.Latest.Version != captured.Latest.Version || read.Input.Approved.Version != captured.Target.Version ||
 		!slices.Equal(read.Scopes, captured.Scopes) || !sameRepairNative(read, captured) {
 		return topology.Plan{}, fault.ErrVersionConflict
 	}
-	return h.g.planOperation(read)
+	plan, err := h.g.planOperation(read)
+	if err != nil {
+		return topology.Plan{}, fmt.Errorf("build scoped repair plan for %q: %w", captured.Scopes[0].GroupID, err)
+	}
+	return plan, nil
 }
 
 func sameRepairNative(a, b metaengine.PlanRead) bool {
@@ -68,29 +67,29 @@ func sameRepairNative(a, b metaengine.PlanRead) bool {
 	return true
 }
 
-func (h scopedSchedulingHost) CommitRepair(ctx context.Context,
-	commit internalscheduling.RepairCommit) (topology.OperatorID, error) {
+func (h schedulingHost) CommitRepair(ctx context.Context,
+	commit internalscheduling.RepairCommit) (topology.OperationID, error) {
 	if !h.g.IsLeader() {
 		return "", fault.ErrNotLeader
 	}
 	result, err := h.g.propose(ctx, metaengine.CommitRepairOperationProposal{Doc: commit.Document,
 		ExpectedVersion: commit.ExpectedVersion, ExpectedTarget: commit.ExpectedTarget,
-		Scopes: commit.Scopes, Plan: commit.Plan, At: commit.Document.CreatedAt})
-	return result.OperatorID, err
+		Scopes: commit.Scopes, Plan: commit.Plan, At: commit.Document.CreatedAt, ProposalID: newProposalID()})
+	return result.OperationID, err
 }
 
-func (h scopedSchedulingHost) CommitVoterChange(ctx context.Context, change topology.VoterChange,
-	commit internalscheduling.RepairCommit) (topology.OperatorID, error) {
+func (h schedulingHost) CommitVoterChange(ctx context.Context, change topology.VoterChange,
+	commit internalscheduling.RepairCommit) (topology.OperationID, error) {
 	if !h.g.IsLeader() {
 		return "", fault.ErrNotLeader
 	}
 	result, err := h.g.propose(ctx, metaengine.CommitVoterChangeProposal{Change: change.Clone(), Doc: commit.Document,
 		ExpectedVersion: commit.ExpectedVersion, ExpectedTarget: commit.ExpectedTarget,
-		Scopes: commit.Scopes, Plan: commit.Plan, At: commit.Document.CreatedAt})
-	return result.OperatorID, err
+		Scopes: commit.Scopes, Plan: commit.Plan, At: commit.Document.CreatedAt, ProposalID: newProposalID()})
+	return result.OperationID, err
 }
 
-func (h scopedSchedulingHost) Health(ctx context.Context) (map[string]topology.Health, error) {
+func (h schedulingHost) Health(ctx context.Context) (map[string]topology.Health, error) {
 	if h.g.opts.Health != nil {
 		observed, err := h.g.opts.Health.Snapshot(ctx)
 		return maps.Clone(observed), err

@@ -147,36 +147,75 @@ func TestOperationForwardingPreservesKindAndExactOutcome(t *testing.T) {
 	}
 }
 
-func TestOperationServicesRemainClosedBeforeScopedPersistence(t *testing.T) {
+func TestOperationServicesUseScopedPersistence(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	g := singleMetaFixtureWith(t, func(*Options) {})[0]
-	if err := g.WaitReady(ctx); err != nil {
-		t.Fatal(err)
-	}
-	before := g.machine.Latest().Version
-	for _, request := range []applyVersionRequest{{Kind: "approve", Version: before}, {Kind: "retry", Previous: "exec-v1-a1"}} {
-		data, _ := json.Marshal(request)
-		if err := metatransport.ReplyError(g.applyVersionReply(ctx, data)); !errors.Is(err, fault.ErrUnsupported) {
-			t.Fatal("scoped route reached schema3 mutation", err)
+	g := readyPublic(t, singleMetaFixture(t))
+	initial := g.machine.Latest().Version
+	request := func(value applyVersionRequest) (topology.OperationID, error) {
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
 		}
+		reply := g.applyVersionReply(ctx, data)
+		if err := metatransport.ReplyError(reply); err != nil {
+			return "", err
+		}
+		var id topology.OperationID
+		if err := json.Unmarshal(reply.Data, &id); err != nil {
+			t.Fatal(err)
+		}
+		return id, nil
 	}
-	if _, err := g.Approve(ctx, before); !errors.Is(err, fault.ErrUnsupported) {
-		t.Fatal(err)
+	founding := topology.MakeOperationID(initial, 1)
+	if id, err := request(applyVersionRequest{Kind: "approve", Version: initial}); err != nil || id != founding {
+		t.Fatal("approval replay lost the original operation", id, err)
 	}
-	if _, err := g.RetryOperation(ctx, "exec-v1-a1"); !errors.Is(err, fault.ErrUnsupported) {
-		t.Fatal(err)
+	if _, err := request(applyVersionRequest{Kind: "retry", Previous: founding}); !errors.Is(err, fault.ErrOperationAuthorization) {
+		t.Fatal("succeeded operation became retryable", err)
 	}
-	if _, err := g.Operation(ctx, "exec-v1-a1"); !errors.Is(err, fault.ErrUnsupported) {
-		t.Fatal(err)
-	}
-	if g.machine.Latest().Version != before {
-		t.Fatal("closed route wrote state")
-	}
-	controller, err := operator.New(g.OperationControllerConfig())
+	desired := g.machine.Latest()
+	desired.Node("n1").Labels = map[string]string{"scope": "current-format"}
+	staged, err := g.Stage(ctx, desired, initial)
 	if err != nil {
-		t.Fatal("final scoped wiring is incomplete", err)
+		t.Fatal(err)
 	}
-	_ = controller
+	id, err := request(applyVersionRequest{Kind: "approve", Version: staged.Version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := g.WaitOperation(ctx, id)
+	if err != nil || status.State != topology.OperationSucceeded || len(status.Blocks) != 1 || status.Blocks[0].GroupID != topology.MetaGroupID {
+		t.Fatal("approved operation did not converge through scoped composition", status, err)
+	}
+	page, err := g.ReadProgress(ctx, topology.ProgressQuery{GroupID: topology.MetaGroupID})
+	if err != nil || len(page.Groups) != 1 || page.Groups[0].ConvergedVersion != staged.Version || page.FullyConverged.Version != staged.Version {
+		t.Fatal("progress lost committed completion", page, err)
+	}
+	if again, err := g.Approve(ctx, staged.Version); err != nil || again != id {
+		t.Fatal("approval retry created another attempt", again, err)
+	}
+	// No affected scopes is a valid approved document. Its explicit empty
+	// capture must survive the same JSON read/proposal path as nonempty plans.
+	comment := g.machine.Latest()
+	comment.Comment = "annotation-only approval"
+	staged, err = g.Stage(ctx, comment, comment.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptyID, err := g.Approve(ctx, staged.Version)
+	if err != nil {
+		t.Fatal("approve empty scope capture", err)
+	}
+	empty, err := g.WaitOperation(ctx, emptyID)
+	if err != nil || empty.State != topology.OperationSucceeded || len(empty.Blocks) != 0 {
+		t.Fatal("annotation-only approval fabricated a block or failed", empty, err)
+	}
+	if replay, err := g.Approve(ctx, staged.Version); err != nil || replay != emptyID {
+		t.Fatal("empty approval replay changed identity", replay, err)
+	}
+	if _, err := operator.New(g.OperationControllerConfig()); err != nil {
+		t.Fatal("scoped controller composition is incomplete", err)
+	}
 }

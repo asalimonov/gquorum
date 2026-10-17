@@ -115,7 +115,7 @@ func testNodeReadmissionFence(t *testing.T, group string) {
 			granted.Groups[i].NextReplicaID = member + 1
 			granted.Groups[i].Replicas[0].ReplicaID = member
 		}
-		a := metaengine.AdmissionRecord{NodeName: previousID.NodeName, InstanceID: previousID.InstanceID, MemberID: member, OperatorID: topology.MakeOperatorID(member, 1), State: metaengine.AdmissionPending}
+		a := metaengine.AdmissionRecord{NodeName: previousID.NodeName, InstanceID: previousID.InstanceID, MemberID: member, OperationID: topology.MakeOperationID(member, 1), State: metaengine.AdmissionPending}
 		var grants []topology.AuthorityGrant
 		for _, name := range []string{topology.MetaGroupID, "work"} {
 			grants = append(grants, topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: name, Revision: revision}, Purpose: topology.AuthorityReadmit, AdmissionID: metaengine.ReadmissionID(a), Resources: []topology.AuthorityResource{{Kind: topology.AuthorityHost, GroupID: name, NodeName: "n1"}}, Targets: []topology.AuthorityTarget{{NodeName: "n1", MemberID: 1, ReplicaID: 1}}})

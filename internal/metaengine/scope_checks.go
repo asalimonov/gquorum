@@ -1,6 +1,9 @@
 package metaengine
 
 import (
+	"fmt"
+	"slices"
+
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -35,7 +38,13 @@ func validatePlanScopes(plan topology.Plan, scopes []ScopeExpectation) error {
 		sources[block.GroupID] = block.SourceVersion
 	}
 	if err := validateScopeGroups(scopes, groups); err != nil {
-		return err
+		captured := make([]string, 0, len(scopes))
+		for _, scope := range scopes {
+			captured = append(captured, scope.GroupID)
+		}
+		slices.Sort(captured)
+		message := fmt.Sprintf("captured scopes %v do not cover plan blocks %v", captured, groups)
+		return fault.New(fault.Invalid, message, err)
 	}
 	for _, scope := range scopes {
 		if sources[scope.GroupID] != scope.SourceVersion {

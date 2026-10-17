@@ -33,7 +33,7 @@ func TestScopedLoadBarrierSurvivesMetadataSupersession(t *testing.T) {
 			applyScopedApprovalFixture(t, &s, p)
 			if s.indexes.groups["shard0"].Owner != original.Status.ID ||
 				!reflect.DeepEqual(s.Operations[0].Status.Blocks[1], original.Status.Blocks[1]) ||
-				s.Admissions[0].OperatorID != "exec-v3-a1" {
+				s.Admissions[0].OperationID != "exec-v3-a1" {
 				t.Fatal("metadata supersession took over the unchanged load block")
 			}
 			// Dispatch/execution revalidation and grant issuance share the same

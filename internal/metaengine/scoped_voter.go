@@ -19,13 +19,12 @@ func validateScopedVoterSwitches(state *scopedState, index *scopedIndexes, catal
 	if len(state.VoterSwitches) == 0 {
 		return nil
 	}
-	// Reuse the unchanged shape checks, with no legacy operators or Active.
-	check := newVoterSwitchValidation(smState{Latest: state.Latest, Target: state.Target,
-		History: state.History, Allocations: state.Allocations, AppliedIndex: state.AppliedIndex})
-	if err := check.rememberCurrent(); err != nil {
+	check := newVoterSwitchValidation(state.Allocations, state.Target.Version, state.AppliedIndex)
+	current := []topology.Document{state.Latest, state.Target}
+	if err := check.rememberDocuments(current, retainSwitchIdentity); err != nil {
 		return err
 	}
-	if err := check.rememberHistory(); err != nil {
+	if err := check.rememberDocuments(state.History, archiveSwitchIdentity); err != nil {
 		return err
 	}
 	if !check.rememberScopedDeclarations(state) || !check.rememberScopedEffects(state) {
@@ -101,7 +100,7 @@ func (check *voterSwitchValidation) rememberScopedGrants(records []scopedAuthori
 }
 
 func scopedRoleEffect(record topology.RoleChangeRecord, index *scopedIndexes, catalog authorityCatalog) bool {
-	op := index.operations[topology.OperationID(record.OperatorID)]
+	op := index.operations[topology.OperationID(record.OperationID)]
 	if op == nil {
 		// Cooldown anchors outlive an entire pruned attempt chain, not one missing attempt.
 		return index.first[record.Version] == ""

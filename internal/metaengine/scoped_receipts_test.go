@@ -106,7 +106,7 @@ func TestScopedReadmissionLastReceiptCompletesWaitingDeletion(t *testing.T) {
 	// Native removal after whole-batch retirement remains execution evidence;
 	// its debt already belongs to the exact readmission origin.
 	for _, debt := range s.Cleanup {
-		action := topology.AuthorizedStep{OperatorID: "exec-v2-a1", Version: 2, Attempt: 1,
+		action := topology.AuthorizedStep{OperationID: "exec-v2-a1", Version: 2, Attempt: 1,
 			StepSeq: 6, Kind: topology.StepRemoveReplica, GroupID: debt.Identity.GroupID,
 			NodeName: debt.Identity.NodeName, ReplicaID: debt.Identity.ReplicaID}
 		receipt := *debt.Retired
@@ -141,7 +141,7 @@ func TestScopedLateStopCompletesReboundDeletionWithoutDeadHost(t *testing.T) {
 	s.AuthorityRecords = append(s.AuthorityRecords, scopedAuthorityRecord{Class: "execution",
 		authorityRecord: authorityRecord{Grant: grant, Closed: true}})
 	later := grant.Clone()
-	later.Key.Revision, later.Action, later.OperatorID = 31, debt.StopAction, debt.StopAction.OperatorID
+	later.Key.Revision, later.Action, later.OperationID = 31, debt.StopAction, debt.StopAction.OperationID
 	s.AuthorityRecords = append(s.AuthorityRecords, scopedAuthorityRecord{Class: "execution",
 		authorityRecord: authorityRecord{Grant: later}})
 	s.AuthorityFloors = append(s.AuthorityFloors, resourceFloor{Resource: later.Resources[0], Key: later.Key})
@@ -157,7 +157,7 @@ func TestScopedLateStopCompletesReboundDeletionWithoutDeadHost(t *testing.T) {
 	applyScopedTransitionFixture(t, &s, transition)
 	got := s.indexes.cleanup[debt.Identity]
 	if s.indexes.groups["b"].Deleting || s.indexes.groups["b"].Owner != "" ||
-		got.Stopped.Action.OperatorID != grant.OperatorID || got.StopAction.OperatorID != later.OperatorID ||
+		got.Stopped.Action.OperationID != grant.OperationID || got.StopAction.OperationID != later.OperationID ||
 		s.indexes.grants[later.Key].Effects != nil {
 		t.Fatal("late exact stop was lost or relabeled", got)
 	}
@@ -170,7 +170,7 @@ func TestScopedLateStopCompletesReboundDeletionWithoutDeadHost(t *testing.T) {
 	// Memory retirement ends the debt without a durable collection token/time.
 	recordScopedEffectFixture(t, &s, RecordEffectProposal{Receipt: fixtureEffectReceipts(later)[0], At: stamp})
 	retire := later.Clone()
-	retire.Key.Revision, retire.Action, retire.OperatorID = s.AppliedIndex+1, got.RetireAction, got.RetireAction.OperatorID
+	retire.Key.Revision, retire.Action, retire.OperationID = s.AppliedIndex+1, got.RetireAction, got.RetireAction.OperationID
 	s.AuthorityRecords = append(s.AuthorityRecords, scopedAuthorityRecord{Class: "cleanup",
 		authorityRecord: authorityRecord{Grant: retire}})
 	s.AuthorityFloors[len(s.AuthorityFloors)-1].Key = retire.Key
@@ -179,7 +179,7 @@ func TestScopedLateStopCompletesReboundDeletionWithoutDeadHost(t *testing.T) {
 	recordScopedEffectFixture(t, &s, RecordEffectProposal{Receipt: fixtureEffectReceipts(retire)[0], At: stamp})
 	got = s.indexes.cleanup[debt.Identity]
 	if got.Storage != topology.StorageMemory || got.Retired == nil || got.Collection != nil ||
-		got.Stopped.Action.OperatorID != grant.OperatorID {
+		got.Stopped.Action.OperationID != grant.OperationID {
 		t.Fatal("memory retirement invented collection or replaced its stop proof", got)
 	}
 }

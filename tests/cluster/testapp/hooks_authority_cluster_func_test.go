@@ -126,8 +126,8 @@ func TestAuthorityReplayKeepsExactIngressRefusalsAndBoundedOwnedCaptures(t *test
 	id := topology.Identity{ClusterID: "cluster", NodeName: "one", MemberID: 1, InstanceID: "process"}
 	node := &authorityProtocolNode{id: id}
 	a := &application{node: node, cfg: config{Credential: "credential"}, workCtx: t.Context(), closing: make(chan struct{}), clusterHooks: newClusterHooks()}
-	action := topology.AuthorizedStep{OperatorID: topology.MakeOperatorID(1, 1), Version: 1, Attempt: 1, StepSeq: 1, GroupID: "work", Kind: topology.StepStopReplica, NodeName: id.NodeName, ReplicaID: 7}
-	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: id.ClusterID, GroupID: "work", Revision: 17}, Purpose: topology.AuthorityEffect, OperatorID: action.OperatorID, Action: &action, Resources: []topology.AuthorityResource{{Kind: topology.AuthorityHost, GroupID: "work", NodeName: id.NodeName}}, Targets: []topology.AuthorityTarget{{NodeName: id.NodeName, MemberID: 1, ReplicaID: 7}}}
+	action := topology.AuthorizedStep{OperationID: topology.MakeOperationID(1, 1), Version: 1, Attempt: 1, StepSeq: 1, GroupID: "work", Kind: topology.StepStopReplica, NodeName: id.NodeName, ReplicaID: 7}
+	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: id.ClusterID, GroupID: "work", Revision: 17}, Purpose: topology.AuthorityEffect, OperationID: action.OperationID, Action: &action, Resources: []topology.AuthorityResource{{Kind: topology.AuthorityHost, GroupID: "work", NodeName: id.NodeName}}, Targets: []topology.AuthorityTarget{{NodeName: id.NodeName, MemberID: 1, ReplicaID: 7}}}
 	request := load.ActionRequest{From: id, To: load.Peer{Node: id, Replica: load.ReplicaRef{GroupID: "work", ReplicaID: 7}}, Authorization: action, Grant: grant, LocalTarget: storage.Identity{ClusterID: id.ClusterID, NodeName: id.NodeName, GroupID: "work", ReplicaID: 7}}
 	for revision := uint64(1); revision <= 200; revision++ {
 		request.Grant.Key.Revision = revision

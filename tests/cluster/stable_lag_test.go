@@ -93,7 +93,7 @@ func TestStableLearnerReplacesReplicationLagWhileNodeStaysAliveFourNodes(t *test
 	}); err != nil {
 		t.Fatal("live voter's replication lag did not qualify independently", err)
 	}
-	var operator topology.OperatorID
+	var operator topology.OperationID
 	if err := Poll(ctx, func() (bool, error) {
 		controls, err := c.Controls(ctx, "node1")
 		if err != nil {
@@ -101,7 +101,7 @@ func TestStableLearnerReplacesReplicationLagWhileNodeStaysAliveFourNodes(t *test
 		}
 		for _, b := range controls.Barriers {
 			if b.Hits > 0 && b.Last.Kind == topology.StepPromoteVoter && b.Last.GroupID == "lag" && b.Last.ReplicaID == replicaID(created.Document, "lag", "node4") {
-				operator = b.Last.OperatorID
+				operator = b.Last.OperationID
 				return true, nil
 			}
 		}
@@ -124,7 +124,7 @@ func TestStableLearnerReplacesReplicationLagWhileNodeStaysAliveFourNodes(t *test
 	if err := c.WALFault(ctx, "node3", "lag", victim, false, 0, true); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WaitActive(ctx, created.Document.Version+1); err != nil {
+	if err := c.WaitFullyConverged(ctx, created.Document.Version+1); err != nil {
 		t.Fatal(err)
 	}
 	for _, node := range c.Nodes() {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/scheduling"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
@@ -20,49 +21,63 @@ func (f schedulerFunc) Schedule(ctx context.Context, in scheduling.ScheduleInput
 	return f(ctx, in)
 }
 
-func TestSchedulingStatusLeaderNamesUseCapturedActive(t *testing.T) {
+func TestSchedulingStatusLeaderNamesUseCapturedProgress(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
-	captured := f.g.state().Active()
+	captured := f.g.state().Target()
 	replacement := captured.Clone()
 	replacement.Group("work").Replicas[2].ReplicaID = 4
 	replacement.Group("work").NextReplicaID = 5
 	f.commit(t, replacement, true)
-	current := f.g.state().Active()
-	// Exercise the load observation boundary without opening a meta transport.
-	captured.Groups = []topology.Group{*captured.Group("work")}
-	current.Groups = []topology.Group{*current.Group("work")}
+	current := f.g.state().Target()
 	c := &statusController{}
 	f.g.opts.LoadGroups = c
 	for _, tt := range []struct {
-		name   string
-		active topology.Document
-		leader uint64
-		want   string
+		name       string
+		doc        topology.Document
+		leader     uint64
+		want       string
+		observeErr error
+		wrongGroup bool
 	}{
-		{"captured owner", captured, 3, "n3"},
-		{"replacement outside captured view", captured, 4, ""},
-		{"retired ID in current view", current, 3, ""},
-		{"current replacement", current, 4, "n3"},
-		{"unknown leader", captured, 0, ""},
-		{"unmapped leader", captured, 99, ""},
+		{name: "captured owner", doc: captured, leader: 3, want: "n3"},
+		{name: "replacement outside capture", doc: captured, leader: 4},
+		{name: "retired ID", doc: current, leader: 3},
+		{name: "current replacement", doc: current, leader: 4, want: "n3"},
+		{name: "unknown leader", doc: captured},
+		{name: "unmapped leader", doc: captured, leader: 99},
+		{name: "unavailable", doc: captured, observeErr: fault.ErrUnavailable},
+		{name: "foreign group", doc: captured, wrongGroup: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			c.err = tt.observeErr
 			c.value = topology.GroupStatus{GroupID: "work", Found: true, LeaderID: tt.leader, LeaderNodeName: "peer-supplied-name"}
-			got, err := (schedulingHost{f.g}).GlobalStatus(context.Background(), tt.active)
-			if err != nil || len(got) != 1 || got["work"].LeaderID != tt.leader || got["work"].LeaderNodeName != tt.want || c.value.LeaderNodeName != "peer-supplied-name" {
-				t.Fatal("leader name did not follow the captured Active identity", got, err)
+			if tt.wrongGroup {
+				c.value.GroupID = "foreign"
+			}
+			read := metaengine.PlanRead{Latest: tt.doc.Clone(), Target: tt.doc.Clone(),
+				Scopes: []metaengine.ScopeExpectation{{GroupID: "work", SourceVersion: tt.doc.Version}},
+				Input: topology.PlanInput{Approved: tt.doc.Clone(), Groups: map[string]topology.GroupProgress{
+					"work": {GroupID: "work", Converged: tt.doc.Group("work"), ConvergedVersion: tt.doc.Version},
+				}}}
+			got, err := f.g.capturePlan(t.Context(), metaengine.QueryRequest{},
+				func(context.Context, metaengine.QueryRequest) (metaengine.PlanRead, error) { return read, nil })
+			if tt.observeErr != nil || tt.wrongGroup {
+				want := tt.observeErr
+				if tt.wrongGroup {
+					want = fault.ErrIdentityMismatch
+				}
+				if !errors.Is(err, want) {
+					t.Fatal("observation refusal lost", err)
+				}
+				return
+			}
+			observed := got.Input.Groups["work"].Observation
+			if err != nil || observed == nil || observed.LeaderID != tt.leader || observed.LeaderNodeName != tt.want ||
+				c.value.LeaderNodeName != "peer-supplied-name" {
+				t.Fatal("leader name did not follow captured exact identity", observed, err)
 			}
 		})
-	}
-	c.err = fault.ErrUnavailable
-	if got, err := (schedulingHost{f.g}).GlobalStatus(context.Background(), captured); err != fault.ErrUnavailable || got != nil {
-		t.Fatal("observation error was hidden", got, err)
-	}
-	c.err = nil
-	c.value.GroupID = "another-group"
-	if got, err := (schedulingHost{f.g}).GlobalStatus(context.Background(), captured); !errors.Is(err, fault.ErrIdentityMismatch) || got != nil {
-		t.Fatal("cross-group observation was accepted", got, err)
 	}
 }
 
@@ -80,6 +95,9 @@ func TestMetaUsesSelectedSchedulerWithOwnedHoldsAndCallbackDeadline(t *testing.T
 		o.CallbackTimeout = 25 * time.Millisecond
 		o.HeldLoads = func() []storage.Identity { return held }
 		o.RepairPolicy = schedulerFunc(func(ctx context.Context, in scheduling.ScheduleInput) (scheduling.ScheduleDecision, error) {
+			if !in.Status[topology.MetaGroupID].Found {
+				return scheduling.ScheduleDecision{Reason: "waiting_for_observation"}, nil
+			}
 			deadline, hasDeadline := ctx.Deadline()
 			select {
 			case seen <- observation{input: in.Clone(), duration: time.Until(deadline), hasDeadline: hasDeadline}:
@@ -101,14 +119,14 @@ func TestMetaUsesSelectedSchedulerWithOwnedHoldsAndCallbackDeadline(t *testing.T
 		}
 		meta := got.input.Status[topology.MetaGroupID]
 		if meta.LeaderID == 0 || meta.LeaderNodeName == "" || got.input.Target.MemberID(meta.LeaderNodeName) != meta.LeaderID {
-			t.Fatal("scheduler meta leader name was not resolved through its Active view", meta)
+			t.Fatal("scheduler meta leader name was not resolved through captured progress", meta)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("selected scheduler was not invoked")
 	}
 	waitPublic(t, func() bool { return leader.SchedulingStatus().Reason == "application_scheduler" })
-	active, err := leader.Active(context.Background())
-	if err != nil || active.Nodes[0].Name == "changed" || held[0].ReplicaID != 9 || leader.SchedulingStatus().State != topology.SchedulingIdle {
-		t.Fatal("policy inputs shared live state", active, held, err)
+	target, err := leader.Target(context.Background())
+	if err != nil || target.Nodes[0].Name == "changed" || held[0].ReplicaID != 9 || leader.SchedulingStatus().State != topology.SchedulingIdle {
+		t.Fatal("policy inputs shared live state", target, held, err)
 	}
 }

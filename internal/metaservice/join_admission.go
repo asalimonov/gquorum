@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net"
-	"reflect"
 	"strings"
 	"time"
 
@@ -34,7 +33,6 @@ func decodeJoinRequest(h *metapb.Header, data []byte) (joinRequest, error) {
 
 type joinClassification struct {
 	req     joinRequest
-	views   topology.ReadView
 	machine *metaengine.Machine
 	node    *topology.Node
 	member  uint64
@@ -74,12 +72,12 @@ func (g *Group) admitJoin(ctx context.Context, req joinRequest, machine *metaeng
 		g.primeAddress(req.Identity.NodeName, req.Address)
 		return g.joinReply(ctx, admission, req.AuthorityMemberID)
 	}
-	state := joinClassification{req: req, views: views, machine: machine, node: node,
+	state := joinClassification{req: req, machine: machine, node: node,
 		member: target.MemberID(req.Node.Name)}
 	if reply := g.classifyLiveAdmission(ctx, &state); reply != nil {
 		return reply
 	}
-	return g.joinWithLegacyTopology(ctx, state)
+	return g.joinWithScopedTopology(ctx, state)
 }
 
 func (g *Group) refuseJoin(req joinRequest, kind string, err error) *metapb.Reply {
@@ -129,11 +127,10 @@ func (g *Group) classifyLiveAdmission(ctx context.Context, state *joinClassifica
 	return nil
 }
 
-// joinWithLegacyTopology retains the schema-3 whole-document readmission gate
-// until Task78 installs scoped readmission planning and apply.
-func (g *Group) joinWithLegacyTopology(ctx context.Context, state joinClassification) *metapb.Reply {
+// Scope checks belong to the exact returning member; unrelated load progress
+// and the historical whole-document marker do not gate admission.
+func (g *Group) joinWithScopedTopology(ctx context.Context, state joinClassification) *metapb.Reply {
 	req, machine, node, member, replace := state.req, state.machine, state.node, state.member, state.replace
-	latest, target, active := state.views.Latest, state.views.Target, state.views.Active
 
 	if member != 0 && req.Identity.MemberID == member && !replace {
 		// Ordinary retained-disk restart: no version or membership change.
@@ -150,35 +147,47 @@ func (g *Group) joinWithLegacyTopology(ctx context.Context, state joinClassifica
 	if id, ok := machine.AdmissionOperation(req.Node.Name, member); ok {
 		return g.bindJoinAdmission(ctx, req, metaengine.BindAdmissionProposal{
 			Admission: metaengine.AdmissionRecord{
-				NodeName:   req.Node.Name,
-				InstanceID: req.Identity.InstanceID,
-				MemberID:   member,
-				OperatorID: topology.OperatorID(id),
+				NodeName:    req.Node.Name,
+				InstanceID:  req.Identity.InstanceID,
+				MemberID:    member,
+				OperationID: topology.OperationID(id),
 			},
 			ReplaceInstance: replace,
 			At:              time.Now().UTC(),
 		})
 	}
-	if machine.HasActivated(req.Node.Name) && reflect.DeepEqual(latest, target) && reflect.DeepEqual(target, active) {
-		return g.commitLegacyReadmission(ctx, state)
-	}
 	if machine.HasActivated(req.Node.Name) {
-		// Until scoped readmission replaces the schema-3 whole-document path,
-		// preserve the admission gate and explain how to unblock the return.
-		return g.refuseJoin(req, parkedUnapproved, fault.New(fault.OperationAuthorization,
-			"readmission requires converged topology; apply or restore pending intent first", nil))
+		return g.commitScopedReadmission(ctx, state)
 	}
 	return g.joinFoundingNode(ctx, state)
 }
 
-func (g *Group) commitLegacyReadmission(ctx context.Context, state joinClassification) *metapb.Reply {
-	req, latest, active := state.req, state.views.Latest, state.views.Active
+func (g *Group) commitScopedReadmission(ctx context.Context, state joinClassification) *metapb.Reply {
+	req := state.req
+	captured, err := g.readPlan(ctx, metaengine.QueryRequest{Kind: "repair_plan"})
+	if err != nil {
+		return g.leaderReply(err)
+	}
+	if err := metaengine.ValidateReadmissionScope(captured.Input, req.Node.Name, state.member); err != nil {
+		return g.refuseJoin(req, parkedUnapproved, err)
+	}
 	at := time.Now().UTC()
-	fresh, err := metaengine.ReadmissionDocument(active, req.Node.Name, at)
+	fresh, err := metaengine.ReadmissionDocument(captured.Target, req.Node.Name, at)
 	if err != nil {
 		return metatransport.Reply(err)
 	}
-	plan, err := g.PlanFor(ctx, fresh)
+	fresh.Version = captured.Latest.Version + 1
+	if err := metaengine.ValidateRepairIndependence(captured.Target, captured.Latest, fresh); err != nil {
+		return g.refuseJoin(req, parkedUnapproved, err)
+	}
+	read, err := g.capturePlan(ctx, metaengine.QueryRequest{Kind: "planning", Desired: &fresh}, g.readPlan)
+	if err != nil {
+		return g.leaderReply(err)
+	}
+	if read.Input.Approved.Version != captured.Target.Version {
+		return g.leaderReply(fault.ErrVersionConflict)
+	}
+	plan, err := g.planOperation(read)
 	if err != nil {
 		return g.leaderReply(err)
 	}
@@ -189,7 +198,10 @@ func (g *Group) commitLegacyReadmission(ctx context.Context, state joinClassific
 			MemberID:   fresh.MemberID(req.Node.Name),
 		},
 		Doc:             fresh,
-		ExpectedVersion: latest.Version,
+		ExpectedVersion: captured.Latest.Version,
+		ExpectedTarget:  captured.Target.Version,
+		Scopes:          read.Scopes,
+		ProposalID:      newProposalID(),
 		Plan:            plan,
 		At:              at,
 	})
@@ -211,10 +223,10 @@ func (g *Group) joinFoundingNode(ctx context.Context, state joinClassification) 
 		containsMember(g.engine.Load().Status().ConfState, member) {
 		return g.bindJoinAdmission(ctx, req, metaengine.BindAdmissionProposal{
 			Admission: metaengine.AdmissionRecord{
-				NodeName:   req.Node.Name,
-				InstanceID: req.Identity.InstanceID,
-				MemberID:   member,
-				OperatorID: topology.OperatorID(founding),
+				NodeName:    req.Node.Name,
+				InstanceID:  req.Identity.InstanceID,
+				MemberID:    member,
+				OperationID: topology.OperationID(founding),
 			},
 			Founding:        true,
 			ReplaceInstance: replace,
@@ -249,7 +261,7 @@ func (g *Group) checkJoinFormer(ctx context.Context, response *joinResponse, for
 				InstanceID:       a.InstanceID,
 				MemberID:         a.MemberID,
 				PreviousMemberID: former,
-				OperatorID:       a.OperatorID,
+				OperationID:      a.OperationID,
 			})
 			if err != nil {
 				return nil, g.leaderReply(err)

@@ -4,13 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
 )
 
-const metaEnvelopeSchemaVersion = 3
+const metaEnvelopeSchemaVersion = 4
 
 // ProposalKind identifies a versioned replicated metadata operation.
 type ProposalKind string
@@ -25,18 +24,20 @@ const (
 	KindRecordFence               ProposalKind = "record_fence"
 	KindRecordEffect              ProposalKind = "record_effect"
 	KindProposeDocument           ProposalKind = "propose_document"
-	KindAdmitNode                 ProposalKind = "admit_node"
-	KindBeginOperator             ProposalKind = "begin_execution"
-	KindCommitRepairOperator      ProposalKind = "commit_repair_execution"
 	KindCommitVoterChange         ProposalKind = "commit_voter_change"
-	KindTransitionOperator        ProposalKind = "transition_execution"
-	KindActivateTarget            ProposalKind = "activate_target"
 	KindBindAdmission             ProposalKind = "bind_admission"
 	KindCommitReadmission         ProposalKind = "commit_readmission"
 	KindReadyAdmission            ProposalKind = "ready_admission"
 	KindGrantSession              ProposalKind = "grant_session"
 	KindRevokeSession             ProposalKind = "revoke_session"
 	KindAcquireLock               ProposalKind = "acquire_lock"
+	KindBeginOperation            ProposalKind = "begin_operation"
+	KindRetryOperation            ProposalKind = "retry_operation"
+	KindTransitionOperation       ProposalKind = "transition_operation"
+	KindCommitRepairOperation     ProposalKind = "commit_repair_operation"
+	KindRecordCollection          ProposalKind = "record_collection"
+	KindBeginCleanupEffect        ProposalKind = "begin_cleanup_effect"
+	KindRecordCleanupStatus       ProposalKind = "record_cleanup_status"
 )
 
 type envelope struct {
@@ -54,60 +55,11 @@ type ProposeDocument struct {
 	ProposalID      string            `json:"proposal_id"`
 }
 
-// AdmitNode supplies a node declaration and optional replacement identity for
-// admission.
-type AdmitNode struct {
-	Node            topology.Node `json:"node"`
-	MemberID        uint64        `json:"member_id,omitempty"`
-	ReplaceExisting bool          `json:"replace_existing,omitempty"`
-	At              time.Time     `json:"at"`
-	ProposalID      string        `json:"proposal_id"`
-}
-
 // Encode wraps a supported metadata proposal in the versioned replicated
 // envelope.
 func Encode(proposal any) ([]byte, error) {
-	var kind ProposalKind
-	switch proposal.(type) {
-	case RecordReadmissionReceiptsProposal:
-		kind = KindRecordReadmissionReceipts
-	case BeginReadmissionAuthority:
-		kind = KindBeginReadmissionAuthority
-	case GrantTransferProposal:
-		kind = KindGrantTransfer
-	case RecordFenceProposal:
-		kind = KindRecordFence
-	case RecordEffectProposal:
-		kind = KindRecordEffect
-	case BeginEffectProposal:
-		kind = KindBeginEffect
-	case ProposeDocument:
-		kind = KindProposeDocument
-	case AdmitNode:
-		kind = KindAdmitNode
-	case BeginOperatorProposal:
-		kind = KindBeginOperator
-	case CommitRepairOperatorProposal:
-		kind = KindCommitRepairOperator
-	case CommitVoterChangeProposal:
-		kind = KindCommitVoterChange
-	case TransitionOperatorProposal:
-		kind = KindTransitionOperator
-	case ActivateTargetProposal:
-		kind = KindActivateTarget
-	case BindAdmissionProposal:
-		kind = KindBindAdmission
-	case CommitReadmissionProposal:
-		kind = KindCommitReadmission
-	case ReadyAdmissionProposal:
-		kind = KindReadyAdmission
-	case GrantSession:
-		kind = KindGrantSession
-	case RevokeSession:
-		kind = KindRevokeSession
-	case AcquireLock:
-		kind = KindAcquireLock
-	default:
+	kind, ok := proposalKind(proposal)
+	if !ok {
 		return nil, fault.New(fault.Unsupported, fmt.Sprintf("meta: cannot encode proposal of type %T", proposal), nil)
 	}
 	body, err := json.Marshal(proposal)
@@ -119,6 +71,55 @@ func Encode(proposal any) ([]byte, error) {
 		return nil, fmt.Errorf("meta: marshal envelope: %w", err)
 	}
 	return data, nil
+}
+
+func proposalKind(proposal any) (ProposalKind, bool) {
+	switch proposal.(type) {
+	case BeginOperationProposal:
+		return KindBeginOperation, true
+	case RetryOperationProposal:
+		return KindRetryOperation, true
+	case TransitionOperationProposal:
+		return KindTransitionOperation, true
+	case CommitRepairOperationProposal:
+		return KindCommitRepairOperation, true
+	case RecordCollectionProposal:
+		return KindRecordCollection, true
+	case BeginCleanupEffectProposal:
+		return KindBeginCleanupEffect, true
+	case RecordCleanupStatusProposal:
+		return KindRecordCleanupStatus, true
+	case RecordReadmissionReceiptsProposal:
+		return KindRecordReadmissionReceipts, true
+	case BeginReadmissionAuthority:
+		return KindBeginReadmissionAuthority, true
+	case GrantTransferProposal:
+		return KindGrantTransfer, true
+	case RecordFenceProposal:
+		return KindRecordFence, true
+	case RecordEffectProposal:
+		return KindRecordEffect, true
+	case BeginEffectProposal:
+		return KindBeginEffect, true
+	case ProposeDocument:
+		return KindProposeDocument, true
+	case CommitVoterChangeProposal:
+		return KindCommitVoterChange, true
+	case BindAdmissionProposal:
+		return KindBindAdmission, true
+	case CommitReadmissionProposal:
+		return KindCommitReadmission, true
+	case ReadyAdmissionProposal:
+		return KindReadyAdmission, true
+	case GrantSession:
+		return KindGrantSession, true
+	case RevokeSession:
+		return KindRevokeSession, true
+	case AcquireLock:
+		return KindAcquireLock, true
+	default:
+		return "", false
+	}
 }
 
 func decodeEnvelope(data []byte) (envelope, error) {
@@ -144,8 +145,36 @@ func DecodeProposal(data []byte) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	proposal, err := newProposal(kind)
+	if err != nil {
+		return nil, err
+	}
+	if string(body) == "null" {
+		return nil, errors.New("meta: null command body")
+	}
+	if err = json.Unmarshal(body, proposal); err != nil {
+		return nil, err
+	}
+	return proposal, nil
+}
+
+func newProposal(kind ProposalKind) (any, error) {
 	var proposal any
 	switch kind {
+	case KindBeginOperation:
+		proposal = &BeginOperationProposal{}
+	case KindRetryOperation:
+		proposal = &RetryOperationProposal{}
+	case KindTransitionOperation:
+		proposal = &TransitionOperationProposal{}
+	case KindCommitRepairOperation:
+		proposal = &CommitRepairOperationProposal{}
+	case KindRecordCollection:
+		proposal = &RecordCollectionProposal{}
+	case KindBeginCleanupEffect:
+		proposal = &BeginCleanupEffectProposal{}
+	case KindRecordCleanupStatus:
+		proposal = &RecordCleanupStatusProposal{}
 	case KindRecordReadmissionReceipts:
 		proposal = &RecordReadmissionReceiptsProposal{}
 	case KindBeginReadmissionAuthority:
@@ -160,18 +189,8 @@ func DecodeProposal(data []byte) (any, error) {
 		proposal = &BeginEffectProposal{}
 	case KindProposeDocument:
 		proposal = &ProposeDocument{}
-	case KindAdmitNode:
-		proposal = &AdmitNode{}
-	case KindBeginOperator:
-		proposal = &BeginOperatorProposal{}
-	case KindCommitRepairOperator:
-		proposal = &CommitRepairOperatorProposal{}
 	case KindCommitVoterChange:
 		proposal = &CommitVoterChangeProposal{}
-	case KindTransitionOperator:
-		proposal = &TransitionOperatorProposal{}
-	case KindActivateTarget:
-		proposal = &ActivateTargetProposal{}
 	case KindBindAdmission:
 		proposal = &BindAdmissionProposal{}
 	case KindCommitReadmission:
@@ -186,12 +205,6 @@ func DecodeProposal(data []byte) (any, error) {
 		proposal = &AcquireLock{}
 	default:
 		return nil, fmt.Errorf("meta: unknown proposal kind %q", kind)
-	}
-	if string(body) == "null" {
-		return nil, errors.New("meta: null command body")
-	}
-	if err = json.Unmarshal(body, proposal); err != nil {
-		return nil, err
 	}
 	return proposal, nil
 }

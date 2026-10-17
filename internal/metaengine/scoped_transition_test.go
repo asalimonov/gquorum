@@ -170,7 +170,7 @@ func TestScopedTransitionRecordsOriginalConsumedRoleOnce(t *testing.T) {
 	transition := scopedTransitionFor(s.Operations[1], topology.MetaGroupID, 2)
 	applyScopedTransitionFixture(t, &s, transition)
 	r := s.VoterSwitches[0].Last
-	if r.OperatorID != "exec-v2-a1" || r.Attempt != 1 || r.StepSeq != 1 || r.Index != 11 ||
+	if r.OperationID != "exec-v2-a1" || r.Attempt != 1 || r.StepSeq != 1 || r.Index != 11 ||
 		r.From != topology.ReplicaLearner || r.To != topology.ReplicaVoter {
 		t.Fatal("retry relabeled inherited role proof", r)
 	}

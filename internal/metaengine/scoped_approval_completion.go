@@ -65,7 +65,7 @@ func (s *scopedState) completeApprovalGroup(group string, op *topology.Operation
 func completeApprovalAdmissions(next *scopedState, op *topology.Operation,
 	proof *scopedIndexes, catalog authorityCatalog) bool {
 	for _, a := range next.Admissions {
-		if a.State.terminal() || topology.OperationID(a.OperatorID) != op.Status.ID {
+		if a.State.terminal() || topology.OperationID(a.OperationID) != op.Status.ID {
 			continue
 		}
 		progress, valid := scopedAdmissionProgress(a, op, proof, catalog)
@@ -77,7 +77,7 @@ func completeApprovalAdmissions(next *scopedState, op *topology.Operation,
 	next.Admissions = slices.Clone(next.Admissions)
 	for i := range next.Admissions {
 		a := &next.Admissions[i]
-		if !a.State.terminal() && topology.OperationID(a.OperatorID) == op.Status.ID {
+		if !a.State.terminal() && topology.OperationID(a.OperationID) == op.Status.ID {
 			a.State = AdmissionCompleted
 		}
 	}

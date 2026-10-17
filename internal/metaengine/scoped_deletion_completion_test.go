@@ -198,7 +198,7 @@ func TestScopedDeletionMatchesLaterBatchToFormerIdentity(t *testing.T) {
 	s, _ := readmissionDeletionFixture(t)
 	collector := s.planningCollector()
 	later := s.Admissions[0]
-	later.MemberID, later.OperatorID = 3, "exec-v4-a1"
+	later.MemberID, later.OperationID = 3, "exec-v4-a1"
 	collector.evidence.admissions = append(slices.Clone(s.Admissions), later)
 	for _, original := range s.AuthorityRecords {
 		grant := original.Grant.Clone()

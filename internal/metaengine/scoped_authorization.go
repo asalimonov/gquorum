@@ -16,9 +16,9 @@ func (s *scopedState) authorizeLocked(ctx context.Context, action topology.Autho
 	if action.StepSeq == 0 {
 		return s.authorizeDirectTransfer(action)
 	}
-	op := s.indexes.operations[topology.OperationID(action.OperatorID)]
+	op := s.indexes.operations[topology.OperationID(action.OperationID)]
 	if op == nil || action.StepSeq < 1 || action.StepSeq > len(op.Plan.Steps) ||
-		!action.Matches(topology.OperatorID(op.Status.ID), op.Status.Attempt,
+		!action.Matches(topology.OperationID(op.Status.ID), op.Status.Attempt,
 			op.Status.Version, op.Plan.Steps[action.StepSeq-1]) {
 		return fault.ErrOperationAuthorization
 	}
@@ -47,7 +47,7 @@ func (s *scopedState) authorizeLocked(ctx context.Context, action topology.Autho
 }
 
 func (s *scopedState) authorizeDirectTransfer(action topology.AuthorizedStep) error {
-	if action.OperatorID != "" || action.Attempt != 0 || action.Version == 0 ||
+	if action.OperationID != "" || action.Attempt != 0 || action.Version == 0 ||
 		action.Kind != topology.StepTransferLeader || action.TransferNodeName != "" || action.TransferReplicaID != 0 ||
 		action.ExpectedVotersDigest != "" || action.ResultVotersDigest != "" {
 		return fault.ErrOperationAuthorization

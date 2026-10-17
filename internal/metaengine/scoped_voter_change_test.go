@@ -5,6 +5,7 @@ package metaengine
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -13,12 +14,30 @@ import (
 
 func scopedVoterChangeFixture(t *testing.T, group string, surge int) (scopedState, CommitVoterChangeProposal) {
 	t.Helper()
-	legacy, p, _ := voterChangeFixture(t, group, surge)
-	base := legacy.Active()
-	base.CreatedAt = p.At.Add(-time.Second)
-	s := scopedState{SchemaVersion: scopedStateSchemaVersion, Rules: legacy.rules, Target: base, Latest: base.Clone(),
-		AppliedIndex: 10, AppliedTerm: 1, FullyConverged: topology.FullyConverged{Version: 1, At: base.CreatedAt}}
-	s.Latest.Version, s.Latest.ParentVersion, s.Latest.CreatedAt = 2, 1, p.At.Add(-time.Nanosecond)
+	rules := topology.Rules{SchemaVersion: 1, Limits: topology.Limits{MaxNodes: 5, MaxReplicas: 5}}
+	config := topology.DefaultVoterConfig()
+	config.MaxSurgeVoters = surge
+	at := time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC)
+	base := topology.Document{Version: 1, ClusterID: "cluster", CreatedAt: at,
+		Placement: topology.PlacementRule{MinReplicas: 1, MaxReplicas: 5}, Groups: []topology.Group{
+			{ID: topology.MetaGroupID, NextReplicaID: 6, VoterConfig: &config},
+			{ID: "work", NextReplicaID: 6, VoterConfig: &config, Hosting: &topology.HostingRule{Mode: topology.HostingAllEligible}},
+		}}
+	for i := 1; i <= 5; i++ {
+		name := fmt.Sprintf("n%d", i)
+		base.Nodes = append(base.Nodes, topology.Node{Name: name, Type: "worker", State: topology.NodeActive})
+		role := topology.ReplicaVoter
+		if i > 3 {
+			role = topology.ReplicaLearner
+		}
+		for j := range base.Groups {
+			base.Groups[j].Replicas = append(base.Groups[j].Replicas,
+				topology.Replica{NodeName: name, ReplicaID: uint64(i), Role: role})
+		}
+	}
+	s := scopedState{SchemaVersion: scopedStateSchemaVersion, Rules: rules, Target: base, Latest: base.Clone(),
+		AppliedIndex: 10, AppliedTerm: 1, FullyConverged: topology.FullyConverged{Version: 1, At: at}}
+	s.Latest.Version, s.Latest.ParentVersion, s.Latest.CreatedAt = 2, 1, at.Add(time.Second-time.Nanosecond)
 	other := topology.MetaGroupID
 	if group == other {
 		other = "work"
@@ -32,12 +51,27 @@ func scopedVoterChangeFixture(t *testing.T, group string, surge int) (scopedStat
 		s.Nodes = append(s.Nodes, nodeConvergence{NodeName: n.Name, Declaration: base.Node(n.Name), MemberID: base.MemberID(n.Name), SourceVersion: 1, CompletedAt: base.CreatedAt})
 	}
 	prepareScopedFixture(t, &s)
-	p.ExpectedVersion, p.ExpectedTarget, p.Doc.Version, p.Plan.Version = 2, 1, 3, 3
-	p.Scopes = []ScopeExpectation{{GroupID: group, SourceVersion: 1}}
-	p.Plan.Blocks = []topology.PlanBlock{{GroupID: group, SourceVersion: 1}}
-	for _, step := range p.Plan.Steps {
-		p.Plan.Blocks[0].Steps = append(p.Plan.Blocks[0].Steps, step.Seq)
+	change := topology.VoterChange{GroupID: group, Promote: &topology.ReplicaKey{NodeName: "n4", ReplicaID: 4},
+		Demote: &topology.ReplicaKey{NodeName: "n3", ReplicaID: 3}}
+	desired, err := VoterChangeDocument(base, change, at.Add(time.Second), "scheduler")
+	if err != nil {
+		t.Fatal(err)
 	}
+	desired.Version = 3
+	statuses := assumedReadmissionStatuses(base, "")
+	for id, status := range statuses {
+		status.HealthKnown = true
+		status.LiveVoters = map[uint64]bool{1: true, 2: true, 3: false, 4: true, 5: true}
+		statuses[id] = status
+	}
+	input := testPlanningInput(t, restoreMachineFixture(t, s), desired, statuses)
+	plan, err := topology.BuildPlan(input, desired, rules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := CommitVoterChangeProposal{Change: change, Doc: desired, ExpectedVersion: 2, ExpectedTarget: 1,
+		Scopes: []ScopeExpectation{{GroupID: group, SourceVersion: 1}}, Plan: plan,
+		At: at.Add(time.Second), ProposalID: "replace"}
 	return s, p
 }
 

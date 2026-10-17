@@ -42,7 +42,7 @@ func TestFencedCleanupUsesRemoteGrantAndPreservesSuccessorEvidence(t *testing.T)
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			f, action := cleanupLedgerFixture(t)
-			grant := *f.command(t, metaengine.BeginEffectProposal{Action: action}).Grant
+			grant := *f.command(t, metaengine.BeginCleanupEffectProposal{Identity: fixtureLoadIdentity(), Action: action, ProposalID: newProposalID()}).Grant
 			credential := []byte("authority-cleanup-test")
 			address := joinProtocolServer(t, authorityQueryProtocol{machine: f.g.machine}, credential)
 			client := joinProtocolClient(t, []string{address}, func(o *Options) { o.Network.ClusterCredential = credential })

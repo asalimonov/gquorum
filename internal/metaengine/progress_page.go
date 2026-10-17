@@ -24,14 +24,7 @@ type progressPageHeader struct {
 func (m *Machine) Progress(q topology.ProgressQuery) (topology.ProgressPage, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return queryProgress(nil, m, q)
-}
-
-func queryProgress(s *scopedState, m *Machine, q topology.ProgressQuery) (topology.ProgressPage, error) {
-	if s != nil {
-		return queryScopedProgress(s, q)
-	}
-	return legacyProgress(m, q)
+	return queryScopedProgress(m.scoped, q)
 }
 
 func queryScopedProgress(s *scopedState, q topology.ProgressQuery) (topology.ProgressPage, error) {

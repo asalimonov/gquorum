@@ -109,7 +109,7 @@ func (r *runtime) handleHealth(w http.ResponseWriter, request *http.Request) {
 func (r *runtime) handleStatus(w http.ResponseWriter, request *http.Request) {
 	nodeStatus := r.node.Status()
 	out := map[string]any{"observational": true, "node": nodeStatus}
-	if id := nodeStatus.Scheduling.CurrentOperatorID; id != nil {
+	if id := nodeStatus.Scheduling.CurrentOperationID; id != nil {
 		if operation, err := r.node.Cluster().Operation(request.Context(), topology.OperationID(*id)); err == nil {
 			out["operation"] = operation
 		} else {

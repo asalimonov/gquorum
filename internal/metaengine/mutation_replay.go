@@ -11,16 +11,10 @@ import (
 )
 
 // ReplayMutation inspects historical acceptance without allocating or writing.
-// Task78 replaces this schema3 adapter with the scoped intent/document indexes.
 func (m *Machine) ReplayMutation(p ProposeDocument) (ApplyResult, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	index := &scopedIndexes{documents: make(map[uint64]topology.Document)}
-	for _, doc := range m.history {
-		index.documents[doc.Version] = doc
-	}
-	index.documents[m.latest.Version] = m.latest
-	return retainedMutation(p, m.latest.Version, index)
+	return retainedMutation(p, m.scoped.Latest.Version, m.scoped.indexes)
 }
 
 func retainedMutation(p ProposeDocument, latest uint64, index *scopedIndexes) (ApplyResult, error) {
@@ -49,7 +43,7 @@ func retainedMutation(p ProposeDocument, latest uint64, index *scopedIndexes) (A
 		return ApplyResult{}, fault.New(fault.HistoryUnavailable, "retained history cannot prove mutation outcome", nil)
 	}
 	result := ApplyResult{Accepted: true, ProposalID: p.ProposalID, Doc: accepted.Clone(),
-		OperatorID: topology.OperatorID(index.first[accepted.Version])}
+		OperationID: topology.OperationID(index.first[accepted.Version])}
 	result.RebasedTo = rebasedSuccessor(accepted.Version, index)
 	return result, nil
 }

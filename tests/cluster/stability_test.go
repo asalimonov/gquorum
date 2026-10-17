@@ -146,7 +146,7 @@ func stabilityHealthAndReads(t *testing.T, size int) {
 					result.err = err
 					return
 				}
-				if len(status.Nodes) != size || status.ActiveVersion != created.Document.Version || !status.SessionLive {
+				if len(status.Nodes) != size || status.FullyConverged.Version != created.Document.Version || !status.SessionLive {
 					result.err = fmt.Errorf("healthy cluster changed node count/serving version: %+v", status)
 					return
 				}

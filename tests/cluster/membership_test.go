@@ -234,7 +234,7 @@ func forceRetireDeadNode(t *testing.T, size int) {
 	}); err != nil {
 		t.Fatal("forced retirement did not remove the dead metadata voter", err)
 	}
-	op, err := c.Operation(ctx, "node1", topology.OperatorID(retired.OperationID))
+	op, err := c.Operation(ctx, "node1", topology.OperationID(retired.OperationID))
 	active, activeErr := c.Document(ctx, "node1", "active")
 	if err != nil || activeErr != nil || op.State.Terminal() || active.Version != created.Document.Version {
 		t.Fatal("unreachable required host was falsely acknowledged", op, active, err, activeErr)
@@ -245,10 +245,10 @@ func forceRetireDeadNode(t *testing.T, size int) {
 		t.Fatal("retained host could not return for required retirement", err)
 	}
 	waitCtx, cancelWait := context.WithTimeout(ctx, 30*time.Second)
-	err = c.WaitOperation(waitCtx, "node1", topology.OperatorID(retired.OperationID))
+	err = c.WaitOperation(waitCtx, "node1", topology.OperationID(retired.OperationID))
 	cancelWait()
 	if err != nil {
-		operator, operatorErr := c.Operation(ctx, "node1", topology.OperatorID(retired.OperationID))
+		operator, operatorErr := c.Operation(ctx, "node1", topology.OperationID(retired.OperationID))
 		runtime, runtimeErr := c.runtime(ctx, "node3")
 		t.Fatal("returning host could not complete exact forced retirement", err, operator, operatorErr, runtime, runtimeErr)
 	}

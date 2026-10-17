@@ -12,48 +12,27 @@ import (
 func (m *Machine) Operation(id topology.OperationID) (topology.OperationStatus, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return queryOperation(nil, m.operators, id)
+	return queryOperationStatus(m.scoped, id)
 }
 
-func queryOperation(s *scopedState, records map[topology.OperatorID]*operatorRecord,
-	id topology.OperationID) (topology.OperationStatus, error) {
-	if s != nil {
-		return queryOperationStatus(s, id)
+// OperationStatuses captures the retained operations for the local event
+// observer in one read. It avoids paging through unrelated cleanup evidence on
+// every Apply; public diagnosis continues to use bounded Status/Progress reads.
+func (m *Machine) OperationStatuses() ([]topology.OperationStatus, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.scoped == nil {
+		return nil, fault.ErrUnreadable
 	}
-	return legacyOperationStatus(records, id)
-}
-
-// legacyOperationStatus exposes the exact schema-3 retained record while the
-// public Operation API is already available. Schema 4 replaces this adapter.
-func legacyOperationStatus(records map[topology.OperatorID]*operatorRecord,
-	id topology.OperationID) (topology.OperationStatus, error) {
-	if strings.TrimSpace(string(id)) == "" {
-		return topology.OperationStatus{}, fault.ErrInvalid
+	statuses := make([]topology.OperationStatus, 0, len(m.scoped.Operations))
+	for _, op := range m.scoped.Operations {
+		status, err := queryOperationStatus(m.scoped, op.Status.ID)
+		if err != nil {
+			return nil, err
+		}
+		statuses = append(statuses, status)
 	}
-	record := records[topology.OperatorID(id)]
-	if record == nil || topology.OperationID(record.ID) != id {
-		return topology.OperationStatus{}, fault.New(fault.HistoryUnavailable, "operation outcome is not retained", nil)
-	}
-	status := topology.OperationStatus{ID: id, Version: record.Version, Attempt: record.Attempt,
-		State: topology.OperationState(record.State), Error: record.Error}
-	if len(record.Steps) == 0 {
-		return status, nil
-	}
-	group := record.GroupID
-	if group == "" && record.CurrentStep == 0 {
-		group = record.Steps[0].GroupID
-	}
-	if group == "" {
-		return topology.OperationStatus{}, fault.New(fault.Unreadable, "retained operation has no current group", nil)
-	}
-	block := topology.BlockStatus{GroupID: group, State: status.State,
-		CurrentStep: record.CurrentStep, TotalSteps: len(record.Steps), Error: record.Error}
-	if record.WaitingReason != "" && record.State.Waiting() {
-		block.Blocked = &topology.BlockedReason{Code: topology.BlockedDependency,
-			Message: record.WaitingReason, NodeName: record.NodeName}
-	}
-	status.Blocks, status.TotalBlocks = []topology.BlockStatus{block}, 1
-	return status, nil
+	return statuses, nil
 }
 
 func queryOperationStatus(s *scopedState, id topology.OperationID) (topology.OperationStatus, error) {

@@ -30,7 +30,7 @@ func TestScopedCleanupCourierPreflightReusesHistoricalEndpoint(t *testing.T) {
 	if err := queryScopedCleanupCourier(&s, unknown, p.Receipt.MemberID, p.Courier); !errors.Is(err, fault.ErrHistoryUnavailable) {
 		t.Fatal("missing debt did not permit safe-read recheck", err)
 	}
-	if err := NewMachine(testRules(), nil).ValidateCleanupCourier(p.Receipt.Identity, p.Receipt.MemberID, p.Courier); !errors.Is(err, fault.ErrUnsupported) {
-		t.Fatal("preflight fabricated proof on schema3", err)
+	if err := mustMachine(t, testRules(), nil).ValidateCleanupCourier(p.Receipt.Identity, p.Receipt.MemberID, p.Courier); !errors.Is(err, fault.ErrIdentityMismatch) {
+		t.Fatal("preflight did not reject an unbound courier", err)
 	}
 }

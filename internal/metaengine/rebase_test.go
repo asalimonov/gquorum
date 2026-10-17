@@ -199,7 +199,7 @@ func TestRebaseDeterministicOrderAndAuditOnlyIntent(t *testing.T) {
 
 func TestOrdinaryEditsAfterPreparedRebaseClearOnlyNewProvenance(t *testing.T) {
 	t.Parallel()
-	for _, kind := range []string{"stage", "admit"} {
+	for _, kind := range []string{"edit", "new node"} {
 		t.Run(kind, func(t *testing.T) {
 			t.Parallel()
 			s, repair := rebaseFixture(t)
@@ -208,27 +208,23 @@ func TestOrdinaryEditsAfterPreparedRebaseClearOnlyNewProvenance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			oldTarget := s.Target.Clone()
 			s.installRepairDocuments(pair)
-			// Exercise current ordinary mutation methods against an actual prepared
-			// R/S pair. Live scoped persistence/approval activates together at Task78.
-			m := newTopologySM(nil, s.Rules)
-			m.latest, m.target, m.active, m.history = s.Latest.Clone(), s.Target.Clone(), oldTarget, s.History
-			for _, doc := range m.history {
-				m.rememberAllocations(doc)
+			m := restoreMachineFixture(t, s)
+			edit := m.scoped.Latest.Clone()
+			edit.Comment, edit.ParentVersion = "next edit", m.scoped.Latest.Version
+			if kind == "new node" {
+				edit.Nodes = append(edit.Nodes, topology.Node{Name: "n4", Type: "worker", State: topology.NodeActive})
+				if err := edit.SetMemberID("n4", 4, pair.Latest.CreatedAt); err != nil {
+					t.Fatal(err)
+				}
 			}
-			edit := m.latest.Clone()
-			edit.Comment, edit.ParentVersion = "next edit", m.latest.Version
-			var proposal any = ProposeDocument{Doc: edit, ExpectedVersion: m.latest.Version}
-			if kind == "admit" {
-				proposal = AdmitNode{Node: topology.Node{Name: "n4", Type: "worker"}, MemberID: 4, At: pair.Latest.CreatedAt}
-			}
-			result := apply(t, m, 11, proposal)
-			if !result.Accepted || result.Doc.Version != 5 || result.Doc.RebasedFrom != 0 || m.target.Version != 3 {
+			proposal := ProposeDocument{Doc: edit, ExpectedVersion: m.scoped.Latest.Version}
+			result := applyMachine(t, m, proposal)
+			if !result.Accepted || result.Doc.Version != 5 || result.Doc.RebasedFrom != 0 || m.scoped.Target.Version != 3 {
 				t.Fatal("ordinary mutation lost/approved rebased intent or copied lineage", result)
 			}
 			found := false
-			for _, doc := range m.history {
+			for _, doc := range m.scoped.History {
 				if doc.Version == pair.Latest.Version {
 					found = reflect.DeepEqual(doc, pair.Latest)
 				}

@@ -14,7 +14,7 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func TestScopedSchedulerAdapterKeepsSchema3Closed(t *testing.T) {
+func TestSchedulerAdapterReadsScopedStateAndPreservesProposalRefusals(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -22,14 +22,40 @@ func TestScopedSchedulerAdapterKeepsSchema3Closed(t *testing.T) {
 	if err := g.WaitReady(ctx); err != nil {
 		t.Fatal(err)
 	}
-	h := scopedSchedulingHost{schedulingHost{g}}
+	h := schedulingHost{g}
 	for _, group := range []string{"", topology.MetaGroupID} {
-		if _, err := h.ReadRepair(ctx, group); !errors.Is(err, fault.ErrUnsupported) {
-			t.Fatal(group, err)
+		read, err := h.ReadRepair(ctx, group)
+		if err != nil || read.Target.Version != 1 || len(read.Scopes) != 1 ||
+			read.Scopes[0].GroupID != topology.MetaGroupID || read.Scopes[0].SourceVersion != 1 {
+			t.Fatal(group, read, err)
+		}
+		if group == "" {
+			continue
+		}
+		row := read.Input.Groups[group]
+		if row.Observation == nil || row.Observation.SourceVersion != row.ConvergedVersion ||
+			read.Input.Native[group].Applied == 0 {
+			t.Fatal("repair did not bind native observation to captured progress", read)
+		}
+		desired := read.Target.Clone()
+		desired.Version, desired.ParentVersion = read.Latest.Version+1, read.Target.Version
+		desired.MetaGroup().Labels = map[string]string{"test": "declaration"}
+		plan, err := h.PlanRepair(ctx, read, desired)
+		if err != nil || len(plan.Blocks) != 1 || plan.Blocks[0].GroupID != group || len(plan.Steps) != 0 {
+			t.Fatal("declaration preview did not use scoped planning", plan, err)
+		}
+		// A real proposal must reach the FSM's CAS check. Missing correlation
+		// metadata used to turn scheduler commits into Invalid at decoding.
+		commit := internalscheduling.RepairCommit{Document: desired, Plan: plan,
+			ExpectedVersion: read.Latest.Version + 1, ExpectedTarget: read.Target.Version, Scopes: read.Scopes}
+		if _, err := h.CommitRepair(ctx, commit); !errors.Is(err, fault.ErrVersionConflict) {
+			t.Fatal("repair lost its CAS refusal", err)
+		}
+		if _, err := h.CommitVoterChange(ctx, topology.VoterChange{GroupID: group}, commit); !errors.Is(err, fault.ErrVersionConflict) {
+			t.Fatal("voter change lost its CAS refusal", err)
 		}
 	}
-	capture := metaengine.PlanRead{Scopes: []metaengine.ScopeExpectation{{GroupID: topology.MetaGroupID, SourceVersion: 1}}}
-	if _, err := h.PlanRepair(ctx, capture, g.machine.Target()); !errors.Is(err, fault.ErrUnsupported) {
+	if _, err := h.PlanRepair(ctx, metaengine.PlanRead{}, g.machine.Target()); !errors.Is(err, fault.ErrInvalid) {
 		t.Fatal(err)
 	}
 	canceled, stop := context.WithCancel(ctx)
@@ -38,7 +64,7 @@ func TestScopedSchedulerAdapterKeepsSchema3Closed(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := newMutationFixture(t)
-	notLeader := scopedSchedulingHost{schedulingHost{f.g}}
+	notLeader := schedulingHost{f.g}
 	if _, err := notLeader.CommitRepair(ctx, internalscheduling.RepairCommit{}); !errors.Is(err, fault.ErrNotLeader) {
 		t.Fatal(err)
 	}

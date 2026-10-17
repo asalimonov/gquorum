@@ -65,16 +65,16 @@ func TestVoterReplacementOrderingAndGuard(t *testing.T) {
 func TestDemotionGuardIsPartOfExactApproval(t *testing.T) {
 	t.Parallel()
 	step := Step{Seq: 1, Kind: StepDemoteVoter, GroupID: "work", NodeName: "n3", ReplicaID: 3, TransferNodeName: "n1", TransferReplicaID: 1}
-	a := AuthorizedStep{OperatorID: "exec-v2-a1", Version: 2, Attempt: 1, StepSeq: 1, Kind: step.Kind, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID, TransferNodeName: step.TransferNodeName, TransferReplicaID: step.TransferReplicaID}
-	if !a.Matches(a.OperatorID, a.Attempt, a.Version, step) {
+	a := AuthorizedStep{OperationID: "exec-v2-a1", Version: 2, Attempt: 1, StepSeq: 1, Kind: step.Kind, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID, TransferNodeName: step.TransferNodeName, TransferReplicaID: step.TransferReplicaID}
+	if !a.Matches(a.OperationID, a.Attempt, a.Version, step) {
 		t.Fatal("exact guard rejected")
 	}
 	a.TransferReplicaID = 2
-	if a.Matches(a.OperatorID, a.Attempt, a.Version, step) {
+	if a.Matches(a.OperationID, a.Attempt, a.Version, step) {
 		t.Fatal("changed destination accepted")
 	}
 	a.TransferReplicaID, a.TransferNodeName = 1, "successor"
-	if a.Matches(a.OperatorID, a.Attempt, a.Version, step) {
+	if a.Matches(a.OperationID, a.Attempt, a.Version, step) {
 		t.Fatal("changed destination name accepted")
 	}
 	active := planDoc(1, 5, []string{"n1", "n2", "n3"}, shardOf("work", rep("n1", 1), rep("n2", 2), rep("n3", 3)))
@@ -85,6 +85,7 @@ func TestDemotionGuardIsPartOfExactApproval(t *testing.T) {
 	if err := bindVoterGuards(&plan, map[string]GroupStatus{"work": groupStatus("work", 1, []uint64{1, 2, 3}, nil)}, desired); err != nil {
 		t.Fatal(err)
 	}
+	bindPlanBlocks(convergedPlanInput(active), desired, &plan, []string{"work"})
 	if err := ValidatePlanShape(convergedPlanInput(active), desired, plan); err != nil {
 		t.Fatal(err)
 	}

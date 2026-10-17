@@ -71,7 +71,7 @@ func TestScopedCleanupIssuesExactRetirementAfterFailedOperation(t *testing.T) {
 		t.Fatal("cleanup polling minted another grant or wrote state")
 	}
 	for _, mutate := range []func(*BeginCleanupEffectProposal){
-		func(p *BeginCleanupEffectProposal) { p.Action.OperatorID = "exec-v3-a1" },
+		func(p *BeginCleanupEffectProposal) { p.Action.OperationID = "exec-v3-a1" },
 		func(p *BeginCleanupEffectProposal) { p.Action.Kind = topology.StepPrepareReplica },
 		func(p *BeginCleanupEffectProposal) { p.Identity.ReplicaID++ },
 		func(p *BeginCleanupEffectProposal) { p.Action.StepSeq-- },
@@ -92,7 +92,7 @@ func fenceCleanupFixture(t *testing.T, s *scopedState, old topology.AuthorityGra
 	t.Helper()
 	s.indexes.grants[old.Key].Closed = true
 	grant := old.Clone()
-	grant.Key.Revision, grant.Purpose, grant.OperatorID, grant.Action = s.AppliedIndex+1, topology.AuthorityFence, "", nil
+	grant.Key.Revision, grant.Purpose, grant.OperationID, grant.Action = s.AppliedIndex+1, topology.AuthorityFence, "", nil
 	s.AuthorityRecords = append(s.AuthorityRecords, scopedAuthorityRecord{Class: "execution",
 		authorityRecord: authorityRecord{Grant: grant}})
 	for i := range s.AuthorityFloors {
@@ -196,7 +196,7 @@ func assertReboundCleanupAuthorization(t *testing.T, source *scopedState, origin
 	}
 	grant := issueScopedCleanup(t, &s, BeginCleanupEffectProposal{
 		Identity: debt.Identity, Action: *debt.StopAction}).result.Grant
-	if grant.OperatorID == topology.OperatorID(debt.OperationID) || *grant.Action != *debt.StopAction {
+	if grant.OperationID == topology.OperationID(debt.OperationID) || *grant.Action != *debt.StopAction {
 		t.Fatal("rebound stop was resolved against debt origin", grant)
 	}
 }

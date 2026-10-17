@@ -185,7 +185,7 @@ func (f *fixture) setScope(group string, id uint64, founding, established bool) 
 	if founding {
 		resources = append([]topology.AuthorityResource{{Kind: topology.AuthorityGroup, GroupID: group}}, resources...)
 	}
-	f.floors[group] = topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: f.node.ClusterID, GroupID: group, Revision: max(10, old.Key.Revision+1)}, Purpose: topology.AuthorityEffect, OperatorID: a.OperatorID, Action: &a, Resources: resources, Targets: []topology.AuthorityTarget{{NodeName: f.node.NodeName, MemberID: f.node.MemberID, ReplicaID: id}}}
+	f.floors[group] = topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: f.node.ClusterID, GroupID: group, Revision: max(10, old.Key.Revision+1)}, Purpose: topology.AuthorityEffect, OperationID: a.OperationID, Action: &a, Resources: resources, Targets: []topology.AuthorityTarget{{NodeName: f.node.NodeName, MemberID: f.node.MemberID, ReplicaID: id}}}
 }
 
 func (f *fixture) host(t *testing.T) *Host {

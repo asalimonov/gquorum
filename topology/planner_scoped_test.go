@@ -25,7 +25,7 @@ func TestScopedPlannerDoesNotObserveUnchangedGroups(t *testing.T) {
 	row.Observation = &GroupStatus{GroupID: "foreign"}
 	input.Groups["a"] = row
 	before, _ := json.Marshal(input)
-	plan, err := scopedPlan(input, desired, PlanOptions{Rules: plannerRules()})
+	plan, err := BuildPlanPreferred(input, desired, PlanOptions{Rules: plannerRules()})
 	if err != nil || len(plan.Steps) != 2 || len(plan.VoterBases) != 1 {
 		t.Fatal("unchanged unavailable groups blocked B", plan, err)
 	}
@@ -40,8 +40,8 @@ func TestScopedPlannerDoesNotObserveUnchangedGroups(t *testing.T) {
 	if !slices.Equal(before, after) {
 		t.Fatal("scope selection changed caller evidence")
 	}
-	if _, err := BuildPlan(input, desired, plannerRules()); err == nil {
-		t.Fatal("partial planning leaked into legacy whole-document completion")
+	if ordinary, err := BuildPlan(input, desired, plannerRules()); err != nil || !ordinary.Equal(plan) {
+		t.Fatal("public constructors disagree on unchanged unavailable scopes", ordinary, err)
 	}
 }
 
@@ -63,7 +63,7 @@ func TestScopedPlannerStillRequiresAffectedEvidence(t *testing.T) {
 			case "invalid native":
 				input.Native["b"] = NativeState{GroupID: "foreign"}
 			}
-			plan, err := scopedPlan(input, desired, PlanOptions{Rules: plannerRules()})
+			plan, err := BuildPlanPreferred(input, desired, PlanOptions{Rules: plannerRules()})
 			if mode == "declaration only" {
 				if err != nil || len(plan.Steps) != 0 {
 					t.Fatal("declaration-only work changed membership", plan, err)
@@ -84,17 +84,12 @@ func TestScopedPlannerLeavesIndependentDeletionDebt(t *testing.T) {
 	input := testPlanInput(base, statusForDocument(base))
 	input.Retained = map[string]RetainedGroup{"gone": {Replicas: []RetainedReplica{
 		{ReplicaKey: ReplicaKey{NodeName: "n3", ReplicaID: 1}, Progress: RetainedHosted}}}}
-	plan, err := scopedPlan(input, desired, PlanOptions{Rules: plannerRules()})
+	plan, err := BuildPlanPreferred(input, desired, PlanOptions{Rules: plannerRules()})
 	if err != nil || len(plan.Steps) != 0 {
 		t.Fatal("independent former ownership entered B's plan", plan, err)
 	}
 	if err := ValidatePlanShape(input, desired, plan); err != nil {
 		t.Fatal("scoped validation required independent deletion", err)
-	}
-	legacy := plan.Clone()
-	legacy.Blocks = nil
-	if err := ValidatePlanShape(input, desired, legacy); err == nil {
-		t.Fatal("legacy full-plan validator lost omitted deletion coverage")
 	}
 }
 
@@ -108,7 +103,7 @@ func TestScopedDeletionKeepsExactRequiredHosts(t *testing.T) {
 	input := testPlanInput(base, nil)
 	input.Retained = map[string]RetainedGroup{"a": {Replicas: []RetainedReplica{
 		{ReplicaKey: ReplicaKey{NodeName: "n3", ReplicaID: 2}, Progress: RetainedCleanup}}}}
-	plan, err := scopedPlan(input, desired, PlanOptions{Rules: plannerRules()})
+	plan, err := BuildPlanPreferred(input, desired, PlanOptions{Rules: plannerRules()})
 	if err != nil || len(plan.Steps) != 3 {
 		t.Fatal("deletion omitted required old hosts or needed a quorum", plan, err)
 	}
@@ -139,7 +134,7 @@ func TestScopedPlannerDoesNotTakeOverAnotherAdmission(t *testing.T) {
 	desired.Version++
 	desired.Group("b").Labels = map[string]string{"owner": "jobs"}
 	delete(input.Native, MetaGroupID)
-	plan, err := scopedPlan(input, desired, PlanOptions{Rules: plannerRules()})
+	plan, err := BuildPlanPreferred(input, desired, PlanOptions{Rules: plannerRules()})
 	if err != nil || len(plan.Steps) != 0 {
 		t.Fatal("B synthesized an unchanged metadata admission", plan, err)
 	}
@@ -150,13 +145,13 @@ func TestScopedFoundingUsesActualSeedEvidence(t *testing.T) {
 	desired := planDoc(1, 3, []string{"n1"}, shardOf("work", rep("n1", 1)))
 	seed := testPlanInput(desired, statusForDocument(desired)).Native[MetaGroupID]
 	input := PlanInput{Native: map[string]NativeState{MetaGroupID: seed}}
-	plan, err := scopedPlan(input, desired, PlanOptions{Rules: plannerRules()})
+	plan, err := BuildPlanPreferred(input, desired, PlanOptions{Rules: plannerRules()})
 	if err != nil || len(plan.Steps) != 1 || plan.Steps[0].GroupID != "work" ||
 		plan.Steps[0].Kind != StepCreateFoundingGroup {
 		t.Fatal("founding ignored actual metadata seed membership", plan, err)
 	}
 	input.Retained = map[string]RetainedGroup{"work": {FoundingIssued: true}}
-	if _, err := scopedPlan(input, desired, PlanOptions{Rules: plannerRules()}); !errors.Is(err, fault.ErrUnavailable) {
+	if _, err := BuildPlanPreferred(input, desired, PlanOptions{Rules: plannerRules()}); !errors.Is(err, fault.ErrUnavailable) {
 		t.Fatal("possibly-founded group was refounded", err)
 	}
 }

@@ -9,7 +9,6 @@ import (
 
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/topology"
-	"go.etcd.io/raft/v3/raftpb"
 )
 
 func TestApproveAbandonsUnissuedLoadIntent(t *testing.T) {
@@ -22,7 +21,7 @@ func TestApproveAbandonsUnissuedLoadIntent(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			f := newMutationFixture(t)
-			active := f.g.machine.Active()
+			active := fixtureConvergedDocument(t, f.g.machine)
 			desired := active.Clone()
 			groupID := "work"
 			if founding {
@@ -36,14 +35,15 @@ func TestApproveAbandonsUnissuedLoadIntent(t *testing.T) {
 			}
 			f.commit(t, desired, false)
 			desired = f.g.machine.Latest()
-			plan := abandonedIntentPlan(t, f, active)
+			approval := f.fixtureApproval(t, desired)
+			plan := approval.Plan
 			at := time.Now().UTC()
-			op := f.command(t, metaengine.BeginOperatorProposal{Version: desired.Version, Plan: plan, At: at})
+			op := f.command(t, approval)
 			first := plan.Steps[0]
-			f.command(t, metaengine.TransitionOperatorProposal{Transition: topology.OperatorTransition{
-				OperatorID: op.OperatorID, Version: desired.Version, Attempt: 1, StepSeq: first.Seq,
-				GroupID: first.GroupID, NodeName: first.NodeName, State: topology.OperatorFailed,
-				Error: "failed before any grant", At: at.Add(time.Second)}})
+			f.command(t, metaengine.TransitionOperationProposal{Transition: topology.OperationTransition{
+				OperationID: op.OperationID, Version: desired.Version, Attempt: 1, StepSeq: first.Seq,
+				GroupID: first.GroupID, State: topology.OperationFailed,
+				Error: "failed before any grant", At: at.Add(time.Second)}, ProposalID: newProposalID()})
 			if founding {
 				desired.Groups = slices.DeleteFunc(desired.Groups, func(g topology.Group) bool { return g.ID == groupID })
 			} else {
@@ -51,8 +51,10 @@ func TestApproveAbandonsUnissuedLoadIntent(t *testing.T) {
 			}
 			f.commit(t, desired, false)
 			desired = f.g.machine.Latest()
-			plan = abandonedIntentPlan(t, f, active)
-			f.command(t, metaengine.BeginOperatorProposal{Version: desired.Version, Plan: plan, At: at.Add(2 * time.Second)})
+			approval = f.fixtureApproval(t, desired)
+			approval.At = at.Add(2 * time.Second)
+			plan = approval.Plan
+			f.command(t, approval)
 			// An approved plan alone cannot create host work. Exact established
 			// replica 3 still needs retirement in the replacement case.
 			for _, step := range plan.Steps {
@@ -60,34 +62,9 @@ func TestApproveAbandonsUnissuedLoadIntent(t *testing.T) {
 					t.Fatalf("unissued intent produced host work: %+v", plan)
 				}
 			}
-			if !founding && len(plan.Steps) != 3 {
+			if !founding && (len(plan.Steps) != 3 || plan.Steps[0].Kind != topology.StepRemoveReplica || plan.Steps[0].ReplicaID != 3 || !slices.Equal(plan.Blocks[0].Steps, []int{1}) || !slices.Equal(plan.Blocks[0].Cleanup, []int{2, 3})) {
 				t.Fatalf("lost established replica retirement: %+v", plan)
 			}
 		})
 	}
-}
-
-func abandonedIntentPlan(t *testing.T, f *mutationFixture, active topology.Document) topology.Plan {
-	t.Helper()
-	desired := f.g.machine.Latest()
-	base, err := f.g.machine.DeletionBase(t.Context(), desired)
-	if err != nil {
-		t.Fatal(err)
-	}
-	observed := make(map[string]topology.GroupStatus)
-	for _, doc := range []topology.Document{base, desired} {
-		for _, group := range doc.Groups {
-			observed[group.ID] = topology.GroupStatus{GroupID: group.ID}
-		}
-	}
-	for _, group := range active.Groups {
-		observed[group.ID] = topology.GroupStatus{GroupID: group.ID, Found: true, LeaderID: 1,
-			ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}, HealthKnown: true,
-			LiveVoters: map[uint64]bool{1: true, 2: true, 3: true}}
-	}
-	plan, err := topology.BuildPlan(testPlanningInput(t, f.g.machine, desired, observed), desired, f.g.rules)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return plan
 }

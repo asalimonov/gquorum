@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"reflect"
 	"strings"
 	"time"
 
@@ -90,36 +89,6 @@ func (editor voterRoleEditor) edit(key *topology.ReplicaKey, from, to topology.R
 	}
 	r.Role, r.UpdatedAt = to, editor.at
 	return nil
-}
-
-func validateVoterChangeDocument(base, next topology.Document, change topology.VoterChange) error {
-	g := next.Group(change.GroupID)
-	if g == nil {
-		return fault.ErrOperationAuthorization
-	}
-	want, err := VoterChangeDocument(base, change, g.UpdatedAt, next.ChangedBy)
-	if err != nil {
-		return err
-	}
-	if !reflect.DeepEqual(want, next) {
-		return errors.New("voter change edits fields outside exact role scope")
-	}
-	return nil
-}
-
-func (sm *topologySM) validateVoterChangePlan(next topology.Document, change topology.VoterChange,
-	plan topology.Plan) error {
-	if err := validateLegacyPlan(plan); err != nil {
-		return err
-	}
-	if err := sm.validatePlanShapeLocked(next, plan); err != nil {
-		return err
-	}
-	var voters []uint64
-	for _, r := range sm.active.VotersOf(change.GroupID) {
-		voters = append(voters, r.ReplicaID)
-	}
-	return validateVoterChangeSteps(next, change, plan, voters)
 }
 
 // Both approval paths apply the same surge, placement, transfer and quorum guards.
@@ -228,47 +197,4 @@ func (check *voterPlanCheck) transfer(s topology.Step) error {
 	}
 	check.transferred = true
 	return nil
-}
-
-func (sm *topologySM) applyCommitVoterChange(index uint64, p CommitVoterChangeProposal) (ApplyResult, bool) {
-	// Remove at Task 78 with complete scoped persistence and dispatch activation.
-	if p.ExpectedTarget != 0 || p.Scopes != nil {
-		return rejectProposalError(p.ProposalID, proposalUnsupported, fault.ErrUnsupported), false
-	}
-	if p.ExpectedVersion != sm.latest.Version {
-		return rejectVersionConflict(p.ProposalID, p.ExpectedVersion, sm.latest.Version), false
-	}
-	if !reflect.DeepEqual(sm.latest, sm.target) || !reflect.DeepEqual(sm.target, sm.active) ||
-		sm.hasNonterminalOperatorLocked() {
-		return rejectProposal(p.ProposalID, proposalAuthorization,
-			"voter change requires converged views and no nonterminal execution"), false
-	}
-	if p.At.IsZero() {
-		return rejectProposal(p.ProposalID, proposalAuthorization, "voter change timestamp required"), false
-	}
-	doc := p.Doc.Clone()
-	if err := validateVoterChangeDocument(sm.active, doc, p.Change); err != nil {
-		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
-	}
-	if !doc.Group(p.Change.GroupID).UpdatedAt.Equal(p.At) {
-		return rejectProposal(p.ProposalID, proposalAuthorization, "voter change timestamp differs"), false
-	}
-	if err := sm.validateVoterChangePlan(doc, p.Change, p.Plan); err != nil {
-		return rejectProposal(p.ProposalID, proposalAuthorization, "%v", err), false
-	}
-	if err := sm.validateDocument(doc); err != nil {
-		return rejectProposalError(p.ProposalID, proposalGuardrail, err), false
-	}
-	oldAuthority := sm.authority
-	if err := sm.revokeAuthorityLocked(index, nil, topology.MakeOperatorID(doc.Version, 1)); err != nil {
-		return rejectProposal(p.ProposalID, proposalOverloaded, "cannot reserve revocation: %v", err), false
-	}
-	if err := sm.commitLatestLocked(&doc); err != nil {
-		sm.authority = oldAuthority
-		return rejectProposal(p.ProposalID, proposalGuardrail, "%v", err), false
-	}
-	sm.target = doc.Clone()
-	rec := newOperatorRecordWithPlan(p.Plan, 1, operatorAudit{doc.ChangedBy, doc.Origin, p.At})
-	sm.operators[rec.ID] = &rec
-	return ApplyResult{ProposalID: p.ProposalID, Accepted: true, Doc: doc.Clone(), OperatorID: rec.ID}, true
 }

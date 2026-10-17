@@ -21,7 +21,7 @@ func (s *scopedState) validateActionBarriers(op *topology.Operation, action topo
 	if action.Kind == topology.StepPrepareReplica {
 		for _, admission := range s.Admissions {
 			if admission.NodeName == action.NodeName && admission.MemberID == action.ReplicaID &&
-				admission.OperatorID == action.OperatorID && !admission.State.terminal() {
+				admission.OperationID == action.OperationID && !admission.State.terminal() {
 				if scopedAdmissionRetirement(admission, s, s.indexes, catalog) {
 					return nil
 				}

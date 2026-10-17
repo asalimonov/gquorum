@@ -47,16 +47,16 @@ func TestPlanProofCloneEqualityAndAuthorization(t *testing.T) {
 	if copy.Equal(p) {
 		t.Fatal("plan equality ignored step guard")
 	}
-	a := AuthorizedStep{OperatorID: "exec-v3-a1", Version: 3, Attempt: 1, StepSeq: 1,
+	a := AuthorizedStep{OperationID: "exec-v3-a1", Version: 3, Attempt: 1, StepSeq: 1,
 		Kind: StepPromoteVoter, GroupID: "work", NodeName: "b", ReplicaID: 2,
 		ExpectedVotersDigest: p.Steps[0].ExpectedVotersDigest,
 		ResultVotersDigest:   p.Steps[0].ResultVotersDigest}
-	if !a.Matches(a.OperatorID, a.Attempt, a.Version, p.Steps[0]) {
+	if !a.Matches(a.OperationID, a.Attempt, a.Version, p.Steps[0]) {
 		t.Fatal("exact action did not match")
 	}
 	wrong := p.Steps[0]
 	wrong.ResultVotersDigest = "forged"
-	if a.Matches(a.OperatorID, a.Attempt, a.Version, wrong) {
+	if a.Matches(a.OperationID, a.Attempt, a.Version, wrong) {
 		t.Fatal("mismatched guard matched")
 	}
 	raw, err := json.Marshal(p)

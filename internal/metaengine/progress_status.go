@@ -15,7 +15,7 @@ const statusOperationLimit = 100
 func (m *Machine) ProgressStatus() (topology.ClusterStatus, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return queryScopedStatus(nil) // Task78 installs complete scoped state here.
+	return queryScopedStatus(m.scoped)
 }
 
 func queryScopedStatus(s *scopedState) (topology.ClusterStatus, error) {
@@ -25,22 +25,74 @@ func queryScopedStatus(s *scopedState) (topology.ClusterStatus, error) {
 	views, _ := queryScopedTopology(s)
 	status := topology.ClusterStatus{LatestVersion: views.Latest.Version, TargetVersion: views.Target.Version,
 		FullyConverged: views.FullyConverged, Cleanup: s.cleanupSummary()}
-	groups, _ := s.progressNames()
+	var err error
+	status.Placement, err = s.statusPlacement()
+	if err != nil {
+		return topology.ClusterStatus{}, err
+	}
+	status.Observation = topology.HealthObservation{Version: s.Target.Version,
+		Groups: topology.EvaluateAllGroupHealth(s.Target, nil)}
+	groups, nodes := s.progressNames()
 	for _, id := range slices.Sorted(maps.Keys(groups)) {
 		status.Groups = append(status.Groups, s.groupProgress(id).Clone())
 	}
-	for _, node := range s.Latest.Nodes {
-		row := s.nodeProgress(node.Name).Clone()
-		status.Nodes = append(status.Nodes, topology.NodeStatus{Node: *row.Desired,
+	for _, name := range slices.Sorted(maps.Keys(nodes)) {
+		row := s.nodeProgress(name).Clone()
+		if row.Approved == nil && row.Converged == nil {
+			continue // Staging or retained cleanup alone does not admit a node.
+		}
+		declaration := row.Desired
+		if declaration == nil {
+			declaration = row.Approved
+		}
+		if declaration == nil {
+			declaration = row.Converged
+		}
+		status.Nodes = append(status.Nodes, topology.NodeStatus{Node: *declaration,
 			EffectiveState: s.progressNodeState(row), Health: topology.HealthUnknown})
 	}
 	status.Operations, status.OperationsTruncated = s.operationHeaders()
 	return status, nil
 }
 
+// Static placement uses each proven group's pinned declaration document. A
+// newer approval must not relabel an older checkpoint with newer node labels.
+func (s *scopedState) statusPlacement() ([]topology.PlacementReport, error) {
+	groups := make(map[uint64][]string)
+	for _, row := range s.Groups {
+		if row.Declaration != nil && row.SourceVersion != s.Target.Version {
+			groups[row.SourceVersion] = append(groups[row.SourceVersion], row.GroupID)
+		}
+	}
+	for _, group := range s.Target.Groups {
+		groups[s.Target.Version] = append(groups[s.Target.Version], group.ID)
+	}
+	var reports []topology.PlacementReport
+	for _, version := range slices.Sorted(maps.Keys(groups)) {
+		doc, found := s.indexes.documents[version]
+		if !found {
+			return nil, fault.ErrUnreadable
+		}
+		report := topology.PlacementReport{Version: version, ApprovedVersion: s.Target.Version, Source: "converged"}
+		if version == s.Target.Version {
+			report.Source = "approved"
+		}
+		slices.Sort(groups[version])
+		for _, id := range groups[version] {
+			group, err := topology.EvaluatePlacement(topology.PlacementInput{Approved: doc, Desired: doc, GroupID: id})
+			if err != nil {
+				return nil, err
+			}
+			report.Groups = append(report.Groups, group)
+		}
+		reports = append(reports, report)
+	}
+	return reports, nil
+}
+
 func (s *scopedState) progressNodeState(row topology.NodeProgress) topology.NodeState {
 	if row.Converged == nil {
-		return row.Desired.State
+		return row.Approved.State
 	}
 	if row.Converged.State != topology.NodeDraining {
 		return row.Converged.State
@@ -86,28 +138,7 @@ func (s *scopedState) cleanupSummary() topology.CleanupSummary {
 	return summary
 }
 
-// LegacyGroupProgress is the schema3 transition projection, removed at Task78.
-// Active proves these declarations only as a whole document. No owner, deleting
-// flag or blocker is inferred from the old global operation or missing Target.
-func LegacyGroupProgress(views topology.ReadView) []topology.GroupProgress {
-	groups := make(map[string]bool)
-	for _, doc := range []topology.Document{views.Latest, views.Target, views.Active} {
-		for _, group := range doc.Groups {
-			groups[group.ID] = true
-		}
-	}
-	rows := make([]topology.GroupProgress, 0, len(groups))
-	for _, id := range slices.Sorted(maps.Keys(groups)) {
-		row := groupConvergence{GroupID: id, Declaration: views.Active.Group(id)}
-		if row.Declaration != nil {
-			row.SourceVersion = views.Active.Version
-		}
-		rows = append(rows, declaredGroupProgress(views.Latest, views.Target, row).Clone())
-	}
-	return rows
-}
-
-// Borrowed under the Machine read lock, like the legacy topology query. Query
+// Borrowed under the Machine read lock. Query
 // marshals the pair before releasing that lock; direct owned reads must clone.
 func queryScopedTopology(s *scopedState) (topology.ReadView, error) {
 	if s == nil {

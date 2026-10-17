@@ -103,7 +103,7 @@ func TestClusterStatusEffectiveState(t *testing.T) {
 	active := f.g.machine.Latest()
 	active.Node("n2").State = topology.NodeDraining
 	active.Node("n3").State = topology.NodeDraining
-	active.Group("work").Replicas = []topology.Replica{{NodeName: "n1", ReplicaID: 1, Role: topology.ReplicaVoter}}
+	active.Groups = active.Groups[:1] // Delete the work group and prove every former host stopped.
 	f.commit(t, active, true)
 	latest := f.g.machine.Latest()
 	latest.Nodes = append(latest.Nodes, topology.Node{Name: "n4", Type: "worker", State: topology.NodeActive})
@@ -127,51 +127,29 @@ func TestClusterStatusEffectiveState(t *testing.T) {
 		t.Fatal("staged-only node appeared in effective status", s.Nodes)
 	}
 }
-func TestClusterStatusReportsAllViewVersionsAndUsesActiveGroups(t *testing.T) {
+func TestClusterStatusReportsVersionScopesAndConvergedGroups(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
 	target := f.g.machine.Latest()
-	target.Node("n3").Labels = map[string]string{topology.LabelReserved: "true"}
+	target.Node("n3").Labels = map[string]string{"team": "storage"}
 	target.Groups = append(target.Groups, topology.Group{ID: "target-work", NextReplicaID: 2, Replicas: []topology.Replica{{NodeName: "n1", ReplicaID: 1, Role: topology.ReplicaVoter}}})
 	f.commit(t, target, false)
-	f.command(t, metaengine.BeginOperatorProposal{Version: 2, Plan: topology.Plan{Version: 2}, Actor: "test", Origin: topology.OriginFounding, At: time.Now().UTC()})
+	f.command(t, f.fixtureApproval(t, f.g.machine.Latest()))
 	latest := f.g.machine.Latest()
 	latest.Comment = "staged"
 	f.commit(t, latest, false)
 	s := readStatus(t, f.g)
-	if s.LatestVersion != 3 || s.TargetVersion != 2 || s.ActiveVersion != 1 || len(s.Groups) != 3 || s.Groups[2].GroupID != "work" {
+	if s.LatestVersion != 3 || s.TargetVersion != 2 || s.FullyConverged.Version != 1 || len(s.Groups) != 3 {
 		t.Fatal(s)
 	}
-	if len(s.Placement) != 2 || s.Placement[0].Version != 1 || s.Placement[1].Version != 2 ||
-		len(s.Placement[0].Groups) != 2 || len(s.Placement[1].Groups) != 3 {
-		t.Fatal("status omitted captured Active/Target placement", s.Placement)
-	}
-	if s.Placement[0].Source != "converged" || s.Placement[0].ApprovedVersion != 2 ||
-		s.Placement[1].Source != "approved" {
-		t.Fatal("placement snapshots lack their source context", s.Placement)
-	}
-	for _, group := range s.Placement[1].Groups {
-		if group.GroupID != "work" {
-			continue
-		}
-		if len(group.Issues) != 0 {
-			t.Fatal("grandfathered reservation was reported as group failure", group)
-		}
-		found := false
-		for _, candidate := range group.Candidates {
-			if candidate.NodeName == "n3" {
-				for _, reason := range candidate.Reasons {
-					found = found || reason.Code == "node_reserved"
-				}
-			}
-		}
-		if !found {
-			t.Fatal("status lost excluded-candidate reason", group)
+	var work topology.GroupProgress
+	for _, row := range s.Groups {
+		if row.GroupID == "work" {
+			work = row
 		}
 	}
-	s.Placement[0].Groups[0].Candidates[0].NodeName = "tampered"
-	if fresh := readStatus(t, f.g); fresh.Placement[0].Groups[0].Candidates[0].NodeName == "tampered" {
-		t.Fatal("placement status aliases prior response")
+	if work.Converged == nil || work.ConvergedVersion != 1 || work.Approved == nil || work.Desired == nil {
+		t.Fatal("status did not preserve independent group declarations", work)
 	}
 }
 
@@ -279,7 +257,11 @@ func TestClusterStatusNoRuntimeDeps(t *testing.T) {
 func TestClusterStatusNoMetaGroup(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
-	f.g.machine = metaengine.NewMachine(f.g.rules, nil)
+	var err error
+	f.g.machine, err = metaengine.NewMachine(f.g.rules, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	s := readStatus(t, f.g)
 	if len(s.Groups) != 0 || len(s.Observation.Groups) != 0 || s.MetaLeaderID != 0 {
 		t.Fatal("invented pre-founding groups", s)

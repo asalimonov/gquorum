@@ -36,7 +36,10 @@ func TestProgressDecoratesOnlyCachedReturnedRows(t *testing.T) {
 		SourceVersion: 1, ReceivedAt: at, LeaderID: 3, LeaderNodeName: "untrusted",
 		ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}, Progress: map[uint64]topology.ReplicaProgress{3: {Match: 22}}}
 	f.g.lastLoadStatus = map[string]topology.GroupStatus{"work": observed, "unreturned": {GroupID: "unreturned"}}
-	active := f.g.machine.Active()
+	active, err := f.g.machine.FullyConvergedDocument()
+	if err != nil {
+		t.Fatal(err)
+	}
 	declaration := active.Group("work")
 	rows := []topology.GroupProgress{{GroupID: "work", Converged: declaration, ConvergedVersion: 1},
 		{GroupID: "unknown", Observation: &observed}}
@@ -92,10 +95,10 @@ func TestReadProgressUsesSafeReadAndCancellation(t *testing.T) {
 	if err := g.WaitReady(ctx); err != nil {
 		t.Fatal(err)
 	}
-	// The active schema3 machine explicitly refuses progress after the safe read.
-	// Task78 swaps the complete scoped implementation into the same entry point.
-	if _, err := g.ReadProgress(ctx, topology.ProgressQuery{}); !errors.Is(err, fault.ErrUnsupported) {
-		t.Fatal(err)
+	page, err := g.ReadProgress(ctx, topology.ProgressQuery{GroupID: topology.MetaGroupID})
+	if err != nil || page.AppliedIndex == 0 || page.TargetVersion != 1 || len(page.Groups) != 1 ||
+		page.Groups[0].ConvergedVersion != 1 || page.Groups[0].Converged == nil {
+		t.Fatal("safe read lost current scoped progress", page, err)
 	}
 	canceled, stop := context.WithCancel(ctx)
 	stop()

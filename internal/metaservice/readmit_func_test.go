@@ -41,7 +41,7 @@ func TestReadmitNodeRotatesOnlyExactNodeIdentities(t *testing.T) {
 			}
 		}
 	}
-	if !reflect.DeepEqual(f.g.machine.Latest(), before) || result.OperatorID != "" {
+	if !reflect.DeepEqual(f.g.machine.Latest(), before) || result.OperationID != "" {
 		t.Fatal("preview committed or approved readmission")
 	}
 }
@@ -71,10 +71,16 @@ func TestReadmitNodeRefusesUnverifiedAndPendingIdentities(t *testing.T) {
 		{"stale_version", fault.ErrVersionConflict, func(t *testing.T, _ *mutationFixture) (string, MutationOptions, context.Context) {
 			return "n3", MutationOptions{ExpectedVersion: 2, Preview: true}, t.Context()
 		}},
-		{"pending_topology", fault.ErrOperationAuthorization, func(t *testing.T, f *mutationFixture) (string, MutationOptions, context.Context) {
+		{"owned_affected_group", fault.ErrUnavailable, func(t *testing.T, f *mutationFixture) (string, MutationOptions, context.Context) {
 			next := f.g.machine.Latest()
-			next.Comment = "staged"
+			for i := range next.Group("work").Replicas {
+				if next.Group("work").Replicas[i].NodeName == "n3" {
+					next.Group("work").Replicas[i].Role = topology.ReplicaLearner
+				}
+			}
 			f.commit(t, next, false)
+			f.command(t, f.fixtureApproval(t, f.g.machine.Latest()))
+			f.g.opts.Health = mutationHealth{"n3": topology.HealthDead}
 			return "n3", preview(), t.Context()
 		}},
 		{"cancelled", context.Canceled, func(t *testing.T, _ *mutationFixture) (string, MutationOptions, context.Context) {

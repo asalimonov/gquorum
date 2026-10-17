@@ -93,7 +93,7 @@ func TestScopedCleanupRequiresApprovedDeclarationContext(t *testing.T) {
 func scopedReadmissionCleanupFixture() scopedState {
 	s := scopedCodecFixture()
 	admission := AdmissionRecord{NodeName: "n", InstanceID: "replacement", MemberID: 2,
-		OperatorID: "exec-v3-a1", State: AdmissionSuperseded}
+		OperationID: "exec-v3-a1", State: AdmissionSuperseded}
 	s.Admissions = append(s.Admissions, admission)
 	retainScopedReadmissionOrigin(&s)
 	for _, group := range []string{"a", topology.MetaGroupID} {

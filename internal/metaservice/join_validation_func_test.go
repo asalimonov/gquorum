@@ -6,12 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"go.etcd.io/raft/v3/raftpb"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"go.etcd.io/raft/v3/raftpb"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
@@ -32,23 +33,25 @@ func TestReadmissionReplyCarriesApprovedFormerReplicasWithoutLocalMetaDisk(t *te
 	}
 	proposed := f.command(t, metaengine.ProposeDocument{Doc: doc, ExpectedVersion: 1})
 	observed := map[string]topology.GroupStatus{}
-	for _, group := range f.g.machine.Active().Groups {
+	for _, group := range fixtureConvergedDocument(t, f.g.machine).Groups {
 		observed[group.ID] = topology.GroupStatus{GroupID: group.ID, Found: true, LeaderID: 2, Commit: 1, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}, HealthKnown: true, LiveVoters: map[uint64]bool{2: true, 3: true}}
 	}
 	plan, err := topology.BuildPlan(testPlanningInput(t, f.g.machine, proposed.Doc, observed), proposed.Doc, f.g.rules)
 	if err != nil {
 		t.Fatal(err)
 	}
-	op := f.command(t, metaengine.BeginOperatorProposal{Version: 2, Plan: plan, At: time.Now().UTC()}).OperatorID
+	approval := f.fixtureApproval(t, proposed.Doc)
+	approval.Plan = plan
+	op := f.command(t, approval).OperationID
 	if id, ok := f.g.machine.AdmissionOperation("n1", 4); !ok || id != topology.OperationID(op) {
 		t.Fatal("join could not resolve its pinned admission operation", id, ok)
 	}
 	if _, ok := f.g.machine.AdmissionOperation("n1", 1); ok {
 		t.Fatal("join selected an operation for the former member")
 	}
-	admission := metaengine.AdmissionRecord{NodeName: "n1", InstanceID: "fresh-process", MemberID: 4, OperatorID: op}
+	admission := metaengine.AdmissionRecord{NodeName: "n1", InstanceID: "fresh-process", MemberID: 4, OperationID: op}
 	f.command(t, metaengine.BindAdmissionProposal{Admission: admission, At: time.Now().UTC()})
-	f.command(t, metaengine.BeginReadmissionAuthority{NodeName: admission.NodeName, InstanceID: admission.InstanceID, MemberID: admission.MemberID, PreviousMemberID: 1, OperatorID: op})
+	f.command(t, metaengine.BeginReadmissionAuthority{NodeName: admission.NodeName, InstanceID: admission.InstanceID, MemberID: admission.MemberID, PreviousMemberID: 1, OperationID: op})
 	staged := f.g.machine.Latest()
 	staged.Groups = append(staged.Groups, topology.Group{ID: "unapproved", NextReplicaID: 2, Replicas: []topology.Replica{{NodeName: "n1", ReplicaID: 1, Role: topology.ReplicaVoter}}})
 	f.commit(t, staged, false)

@@ -122,9 +122,9 @@ func TestNodeRetainsGrantedIngressAfterWholeNodeFence(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := n.Identity()
-	a := topology.AuthorizedStep{OperatorID: topology.MakeOperatorID(2, 1), Version: 2, Attempt: 1, StepSeq: 3, Kind: topology.StepCleanupReplicaState, GroupID: "work", NodeName: id.NodeName, ReplicaID: 1}
+	a := topology.AuthorizedStep{OperationID: topology.MakeOperationID(2, 1), Version: 2, Attempt: 1, StepSeq: 3, Kind: topology.StepCleanupReplicaState, GroupID: "work", NodeName: id.NodeName, ReplicaID: 1}
 	target := topology.AuthorityTarget{NodeName: id.NodeName, MemberID: id.MemberID, ReplicaID: 1}
-	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: id.ClusterID, GroupID: "work", Revision: 100}, Purpose: topology.AuthorityEffect, OperatorID: a.OperatorID, Action: &a,
+	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: id.ClusterID, GroupID: "work", Revision: 100}, Purpose: topology.AuthorityEffect, OperationID: a.OperationID, Action: &a,
 		Resources: []topology.AuthorityResource{{Kind: topology.AuthorityHost, GroupID: "work", NodeName: id.NodeName}}, Targets: []topology.AuthorityTarget{target}}
 	peer.proof.Store(&metaengine.AuthorityProof{Grant: &grant, Courier: id, CleanupTargets: []topology.AuthorityTarget{target}})
 	if err = n.onRemoved(ctx, "verified test removal"); err != nil {

@@ -5,7 +5,6 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// The existing query entry point supplies scoped state at the Task 78 cutover.
 // Until then its nil adapter refuses while owning-package tests exercise this path.
 func queryScopedAuthority(state *scopedState, query QueryRequest) (topology.AuthorityStatus, error) {
 	if state == nil {
@@ -14,7 +13,7 @@ func queryScopedAuthority(state *scopedState, query QueryRequest) (topology.Auth
 	if err := query.validateScopedAuthority(); err != nil {
 		return topology.AuthorityStatus{}, err
 	}
-	status := topology.AuthorityStatus{OperatorID: topology.OperatorID(query.OperationID)}
+	status := topology.AuthorityStatus{OperationID: topology.OperationID(query.OperationID)}
 	known := state.indexes.operations[query.OperationID] != nil
 	for _, row := range state.Revocations {
 		if row.OperationID != query.OperationID {
@@ -34,6 +33,6 @@ func queryScopedAuthority(state *scopedState, query QueryRequest) (topology.Auth
 	catalog := state.authorityCatalog()
 	status.Obligations = catalog.settledObligations(status.Obligations)
 	status.RevocationComplete = status.RevocationRequested &&
-		revokedComplete(&revocationRecord{Obligations: status.Obligations})
+		revokedComplete(status.Obligations)
 	return status.Clone(), nil
 }

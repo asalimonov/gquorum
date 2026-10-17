@@ -19,7 +19,10 @@ func (g *Group) snapshotSender(ctx context.Context, msg raftpb.Message, identity
 	if err != nil {
 		return "", err
 	}
-	check := metaengine.NewMachine(g.rules, nil)
+	check, err := metaengine.NewMachine(g.rules, nil)
+	if err != nil {
+		return "", err
+	}
 	if err := check.Restore(ctx, state.Application); err != nil {
 		return "", err
 	}

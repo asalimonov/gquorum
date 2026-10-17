@@ -128,7 +128,7 @@ func TestScopedDeletionCompletionUsesBoundStopAndIgnoresDetachedRetirement(t *te
 	action := *debt.StopAction
 	host := topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: "b", NodeName: "n"}
 	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "c", GroupID: "b", Revision: 31},
-		Purpose: topology.AuthorityEffect, OperatorID: action.OperatorID, Action: &action,
+		Purpose: topology.AuthorityEffect, OperationID: action.OperationID, Action: &action,
 		Resources: []topology.AuthorityResource{host},
 		Targets:   []topology.AuthorityTarget{{NodeName: "n", MemberID: 1, ReplicaID: 8}}}
 	receipt := fixtureEffectReceipts(grant)[0]
@@ -136,7 +136,7 @@ func TestScopedDeletionCompletionUsesBoundStopAndIgnoresDetachedRetirement(t *te
 	s.AuthorityRecords = append(s.AuthorityRecords, scopedAuthorityRecord{Class: "execution",
 		authorityRecord: authorityRecord{Grant: grant, Effects: []topology.EffectReceipt{receipt}}})
 	retire := grant.Clone()
-	retire.Key.Revision, retire.Action, retire.OperatorID = 32, debt.RetireAction, debt.RetireAction.OperatorID
+	retire.Key.Revision, retire.Action, retire.OperationID = 32, debt.RetireAction, debt.RetireAction.OperationID
 	s.AuthorityRecords = append(s.AuthorityRecords, scopedAuthorityRecord{Class: "cleanup",
 		authorityRecord: authorityRecord{Grant: retire}})
 	s.AuthorityFloors = append(s.AuthorityFloors, resourceFloor{Resource: host, Key: retire.Key})
@@ -145,7 +145,7 @@ func TestScopedDeletionCompletionUsesBoundStopAndIgnoresDetachedRetirement(t *te
 	transition := scopedTransitionFor(*op, "b", action.StepSeq)
 	transition.State = topology.OperationSucceeded
 	next, err := s.prepareGroupCompletion(transition)
-	if err != nil || next.Cleanup[1].Stopped.Action.OperatorID != action.OperatorID ||
+	if err != nil || next.Cleanup[1].Stopped.Action.OperationID != action.OperationID ||
 		next.Cleanup[1].OperationID != "exec-v2-a1" || next.Cleanup[1].Retired != nil {
 		t.Fatal("detached retirement blocked exact required-stop completion", next, err)
 	}

@@ -1,0 +1,30 @@
+//go:build functional
+
+package metaengine
+
+import (
+ "os"
+ "testing"
+ "time"
+
+ "github.com/asalimonov/gquorum/internal/metastore"
+ "go.etcd.io/raft/v3/raftpb"
+)
+
+func TestExportScopedV4PhysicalFixture(t *testing.T) {
+ raw, err := os.ReadFile("testdata/scoped-v4/snapshot.json")
+ if err != nil { t.Fatal(err) }
+ store, err := metastore.Open("testdata/scoped-v4/meta.bolt")
+ if err != nil { t.Fatal(err) }
+ defer store.Close()
+ check := func(err error) { t.Helper(); if err != nil { t.Fatal(err) } }
+ check(store.EnsureIdentity("n", "c", 1))
+ cs := raftpb.ConfState{Voters: []uint64{1}}
+ check(store.SaveSnapshot(raftpb.Snapshot{Data: raw, Metadata: raftpb.SnapshotMetadata{Index: 30, Term: 4, ConfState: cs}}))
+ data, err := Encode(GrantSession{SessionID: "tail-session", NodeName: "n", InstanceID: "tail-instance", TTLSeconds: 30, ProposalID: "tail-command"})
+ check(err)
+ check(store.SaveReady([]raftpb.Entry{{Index: 31, Term: 4, Data: data}}, raftpb.HardState{Term: 4, Vote: 1, Commit: 31}))
+ check(store.SaveApplication(30, cs, raw))
+ check(store.SaveOverride(2))
+ check(store.RecordReplica("live", metastore.ReplicaRecord{NodeName: "n", ClusterID: "c", ReplicaID: 1, Origin: "founding", CreatedAt: time.Date(2026,10,15,0,0,0,0,time.UTC)}))
+}

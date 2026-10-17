@@ -25,7 +25,7 @@ func (r *scopedRetention) closeDocumentsAndOperations() {
 		// A pinned plan includes every successful sibling, Previous receipt and
 		// issued effect that may have completed before its cursor acknowledgement.
 		for _, record := range r.state.AuthorityRecords {
-			if record.Grant.OperatorID == topology.OperatorID(operation.Status.ID) {
+			if record.Grant.OperationID == topology.OperationID(operation.Status.ID) {
 				r.grants[record.Grant.Key] = true
 			}
 		}
@@ -58,7 +58,7 @@ func (r *scopedRetention) closeCleanup() {
 		r.operation(debt.OperationID)
 		for _, action := range []*topology.AuthorizedStep{debt.StopAction, debt.RetireAction} {
 			if action != nil {
-				r.operation(topology.OperationID(action.OperatorID))
+				r.operation(topology.OperationID(action.OperationID))
 			}
 		}
 		r.cleanupReceipts(debt)
@@ -75,7 +75,7 @@ func (r *scopedRetention) cleanupReceipts(debt cleanupRecord) {
 		if receipt != nil {
 			r.grants[receipt.Key] = true
 			if receipt.Action != nil {
-				r.operation(topology.OperationID(receipt.Action.OperatorID))
+				r.operation(topology.OperationID(receipt.Action.OperationID))
 			}
 		}
 	}
@@ -115,14 +115,14 @@ func (r *scopedRetention) closeAdmissions() {
 	for _, admission := range r.state.Admissions {
 		key := admissionKey(admission.NodeName, admission.InstanceID)
 		// A retained founding operation must remember that its seed was used.
-		if r.versions[1] && admission.OperatorID == topology.MakeOperatorID(1, 1) {
+		if r.versions[1] && admission.OperationID == topology.MakeOperationID(1, 1) {
 			r.admissions[key] = true
 		}
 		if !r.admissions[key] {
 			continue
 		}
 		if admission.ReadmissionOperatorID != "" || !admission.State.terminal() {
-			r.operation(topology.OperationID(admission.OperatorID))
+			r.operation(topology.OperationID(admission.OperationID))
 			r.operation(admission.ReadmissionOperatorID)
 		}
 		if admission.ReadmissionInstanceID != "" {
@@ -193,7 +193,7 @@ func (r *scopedRetention) admissionRetirementWitness(admission AdmissionRecord) 
 }
 
 func (r *scopedRetention) admissionPrefix(admission AdmissionRecord) {
-	current := r.state.indexes.operations[topology.OperationID(admission.OperatorID)]
+	current := r.state.indexes.operations[topology.OperationID(admission.OperationID)]
 	if admission.ReadmissionOperatorID == "" || current == nil {
 		return
 	}
@@ -206,7 +206,7 @@ func (r *scopedRetention) admissionPrefix(admission AdmissionRecord) {
 		}
 		if action.Version < current.Status.Version ||
 			action.Version == current.Status.Version && action.Attempt < current.Status.Attempt {
-			r.operation(topology.OperationID(action.OperatorID))
+			r.operation(topology.OperationID(action.OperationID))
 		}
 	}
 }

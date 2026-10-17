@@ -15,12 +15,12 @@ import (
 
 func joiningProposal(s *scopedState) BindAdmissionProposal {
 	return BindAdmissionProposal{ProposalID: "bind", At: s.Operations[0].UpdatedAt,
-		Admission: AdmissionRecord{NodeName: "n2", MemberID: 2, InstanceID: "first", OperatorID: "exec-v2-a1"}}
+		Admission: AdmissionRecord{NodeName: "n2", MemberID: 2, InstanceID: "first", OperationID: "exec-v2-a1"}}
 }
 
 func readyProposal(a AdmissionRecord) ReadyAdmissionProposal {
 	return ReadyAdmissionProposal{ProposalID: "ready", NodeName: a.NodeName, InstanceID: a.InstanceID,
-		MemberID: a.MemberID, OperatorID: a.OperatorID}
+		MemberID: a.MemberID, OperationID: a.OperationID}
 }
 
 func applyAdmissionFixture(t *testing.T, s *scopedState, kind ProposalKind, p any) proposalApplication {
@@ -52,7 +52,7 @@ func TestScopedJoinBindsPinnedOwnerAfterUnrelatedApproval(t *testing.T) {
 	bind.Admission.State = AdmissionPromoted // The caller cannot supply progress.
 	bound := applyAdmissionFixture(t, &s, KindBindAdmission, bind)
 	if !bound.changed || bound.result.Admission.State != AdmissionPending ||
-		bound.result.Admission.OperatorID != "exec-v2-a1" || s.Target.Version != 3 {
+		bound.result.Admission.OperationID != "exec-v2-a1" || s.Target.Version != 3 {
 		t.Fatal("binding used whole Target or trusted caller progress", bound)
 	}
 	ready := readyProposal(bound.result.Admission)
@@ -84,10 +84,10 @@ func TestScopedJoinProcessReplacementPreservesHandoverOrigin(t *testing.T) {
 	s, p := admissionApprovalFixture(t, s, 0)
 	applyScopedApprovalFixture(t, &s, p)
 	bind := joiningProposal(&s)
-	bind.Admission.InstanceID, bind.Admission.OperatorID, bind.ReplaceInstance = "second", "exec-v3-a1", true
+	bind.Admission.InstanceID, bind.Admission.OperationID, bind.ReplaceInstance = "second", "exec-v3-a1", true
 	replacement := applyAdmissionFixture(t, &s, KindBindAdmission, bind).result.Admission
 	if replacement.ReadmissionInstanceID != bound.InstanceID ||
-		replacement.ReadmissionOperatorID != topology.OperationID(bound.OperatorID) ||
+		replacement.ReadmissionOperatorID != topology.OperationID(bound.OperationID) ||
 		ReadmissionID(replacement) != ReadmissionID(bound) || s.Admissions[0].State != AdmissionSuperseded {
 		t.Fatal("process replacement lost the original batch identity", s.Admissions)
 	}
@@ -106,7 +106,7 @@ func TestScopedJoinProcessReplacementPreservesHandoverOrigin(t *testing.T) {
 		t.Fatal("late prior-owner Ready rebound itself", err)
 	}
 	current := s.Admissions[1]
-	if ReadmissionID(current) != ReadmissionID(bound) || current.OperatorID != "exec-v4-a1" {
+	if ReadmissionID(current) != ReadmissionID(bound) || current.OperationID != "exec-v4-a1" {
 		t.Fatal("second handover changed the origin", current)
 	}
 	applyAdmissionFixture(t, &s, KindReadyAdmission, readyProposal(current))
@@ -121,7 +121,7 @@ func TestScopedJoinRefusesStaleAndPreparedProcessReplacement(t *testing.T) {
 	t.Parallel()
 	cases := map[string]func(*scopedState, *BindAdmissionProposal){
 		"member":                 func(_ *scopedState, p *BindAdmissionProposal) { p.Admission.MemberID = 3 },
-		"owner":                  func(_ *scopedState, p *BindAdmissionProposal) { p.Admission.OperatorID = "exec-v2-a2" },
+		"owner":                  func(_ *scopedState, p *BindAdmissionProposal) { p.Admission.OperationID = "exec-v2-a2" },
 		"process":                func(_ *scopedState, p *BindAdmissionProposal) { p.Admission.InstanceID = "" },
 		"process origin":         func(_ *scopedState, p *BindAdmissionProposal) { p.Admission.ReadmissionInstanceID = "forged" },
 		"operator origin":        func(_ *scopedState, p *BindAdmissionProposal) { p.Admission.ReadmissionOperatorID = "exec-v1-a1" },

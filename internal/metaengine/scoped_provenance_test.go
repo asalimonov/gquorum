@@ -60,6 +60,25 @@ func TestScopedRebasePreservesMultipleUnapprovedEdits(t *testing.T) {
 	}
 }
 
+func TestScopedRebaseUsesApprovalOrderInsteadOfStagedLineage(t *testing.T) {
+	t.Parallel()
+	for _, parent := range []uint64{0, 1, 2} {
+		s := scopedCodecFixture()
+		// Accepted v4 has an old document lineage (raw Stage or RollbackTo).
+		// Repair v5 still derives from the most recent approved version, v3.
+		s.History[3].ParentVersion = parent
+		if _, err := prepareScopedGraph(&s, s.Rules); err != nil {
+			t.Fatal("historical document lineage blocked an independent rebase", parent, err)
+		}
+		// Changing the repair base must not hide v3's retained approval, even
+		// though that version no longer lies on v4's ParentVersion chain.
+		s.Target.ParentVersion = 1
+		if _, err := prepareScopedGraph(&s, s.Rules); !errors.Is(err, fault.ErrUnreadable) {
+			t.Fatal("document lineage bypassed an intermediate approval", parent, err)
+		}
+	}
+}
+
 func TestScopedCheckpointCompactionRequiresApprovedContext(t *testing.T) {
 	t.Parallel()
 	for _, kind := range []string{"group", "node"} {

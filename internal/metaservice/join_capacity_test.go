@@ -33,7 +33,7 @@ func TestJoinGrantAllowsBoundedDecommissionMembershipHints(t *testing.T) {
 	identity := topology.Identity{ClusterID: "cluster", NodeName: "four", InstanceID: "process"}
 	result := joinResponse{Rules: rules, MemberID: 4, Granted: granted, Members: members,
 		LeaderAddress: "127.0.0.1:1234", Admission: metaengine.AdmissionRecord{
-			NodeName: "four", InstanceID: "process", MemberID: 4, OperatorID: topology.MakeOperatorID(2, 1)}}
+			NodeName: "four", InstanceID: "process", MemberID: 4, OperationID: topology.MakeOperationID(2, 1)}}
 	if err := validateJoinGrant(identity, rules, result); err != nil {
 		t.Fatal("temporary native membership hints were confused with document capacity", err)
 	}

@@ -76,7 +76,7 @@ func TestReadyCleanupWholeGroupTargetsRotateIndependently(t *testing.T) {
 			row.RetireAction.NodeName, row.RetireAction.ReplicaID = "", 0
 		}
 	}
-	op := s.indexes.operations[topology.OperationID(original.RetireAction.OperatorID)]
+	op := s.indexes.operations[topology.OperationID(original.RetireAction.OperationID)]
 	step := &op.Plan.Steps[original.RetireAction.StepSeq-1]
 	step.Kind, step.NodeName, step.ReplicaID = topology.StepDeleteGroupState, "", 0
 	first, err := queryReadyCleanup(&s, storage.Identity{}, 1)

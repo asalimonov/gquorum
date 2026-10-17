@@ -14,7 +14,7 @@ func (s *scopedState) rebindRetryStops(previous, retry *topology.Operation) erro
 	for i := range debts {
 		debt := &debts[i]
 		if debt.Stopped != nil || debt.StopAction == nil ||
-			debt.StopAction.OperatorID != topology.OperatorID(previous.Status.ID) ||
+			debt.StopAction.OperationID != topology.OperationID(previous.Status.ID) ||
 			!requiredCleanupStop(previous, *debt.StopAction) {
 			continue
 		}

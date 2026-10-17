@@ -10,20 +10,8 @@ import (
 func (m *Machine) Approval(version uint64) (topology.OperationID, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	// Task78 replaces this schema3 read adapter with the scoped indexes below.
-	id := topology.MakeOperatorID(version, 1)
-	if operation := m.operators[id]; operation != nil {
-		return topology.OperationID(id), nil
-	}
-	index := &scopedIndexes{documents: make(map[uint64]topology.Document), rebases: make(map[uint64]uint64)}
-	for _, doc := range m.history {
-		index.documents[doc.Version] = doc
-		if doc.RebasedFrom != 0 {
-			index.rebases[doc.RebasedFrom] = doc.Version
-		}
-	}
-	index.documents[m.latest.Version] = m.latest
-	return retainedApproval(version, topology.ReadView{Latest: m.latest, Target: m.target}, index)
+	view := topology.ReadView{Latest: m.scoped.Latest, Target: m.scoped.Target}
+	return retainedApproval(version, view, m.scoped.indexes)
 }
 
 func retainedApproval(version uint64, view topology.ReadView, index *scopedIndexes) (topology.OperationID, error) {

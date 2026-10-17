@@ -39,7 +39,7 @@ func TestScopedPlanningCaptureApprovesWithoutSiblingConvergence(t *testing.T) {
 	before, _ := json.Marshal(s)
 	repeated, err := queryScopedPlan(&s, query)
 	after, _ := json.Marshal(s)
-	if err != nil || repeated.Accepted != topology.OperationID(accepted.result.OperatorID) || len(repeated.Scopes) != 0 || !bytes.Equal(before, after) {
+	if err != nil || repeated.Accepted != topology.OperationID(accepted.result.OperationID) || len(repeated.Scopes) != 0 || !bytes.Equal(before, after) {
 		t.Fatal("lost approval reply was replanned", repeated, err)
 	}
 }
@@ -55,7 +55,7 @@ func TestScopedRetryReadKeepsOriginalPlanEvidenceAndSuccessor(t *testing.T) {
 	}
 	issued := applyScopedRetryFixture(t, &s, scopedRetryProposal(&s, &old))
 	read, err = queryScopedPlan(&s, query)
-	if err != nil || read.Accepted != topology.OperationID(issued.result.OperatorID) {
+	if err != nil || read.Accepted != topology.OperationID(issued.result.OperationID) {
 		t.Fatal("retry replay lost immediate edge", read, err)
 	}
 	next := s.indexes.operations[read.Accepted]
@@ -64,7 +64,7 @@ func TestScopedRetryReadKeepsOriginalPlanEvidenceAndSuccessor(t *testing.T) {
 		t.Fatal("ancestry missing", read, err)
 	}
 	for _, grant := range read.Grants {
-		if grant.OperatorID != topology.OperatorID(old.Status.ID) {
+		if grant.OperationID != topology.OperationID(old.Status.ID) {
 			t.Fatal("original grant relabelled", grant)
 		}
 	}
@@ -88,8 +88,8 @@ func TestScopedPlanningQueryRefusesMixedFieldsAndUncapturedNative(t *testing.T) 
 		}
 	}
 	body, _ := json.Marshal(QueryRequest{Kind: "approval_plan", Version: p.Version})
-	if _, err := NewMachine(testRules(), nil).Query(t.Context(), body); !errors.Is(err, fault.ErrUnsupported) {
-		t.Fatal("schema3 accepted scoped planning", err)
+	if _, err := mustMachine(t, testRules(), nil).Query(t.Context(), body); !errors.Is(err, fault.ErrVersionConflict) {
+		t.Fatal("empty scoped state did not refuse uncaptured approval", err)
 	}
 }
 
@@ -103,6 +103,9 @@ func TestScopedTransferReadRequiresOnlyItsUnownedProvenGroup(t *testing.T) {
 	}
 	if read.Input.Groups["shard0"].OperationID == "" {
 		t.Fatal("fixture has no busy sibling")
+	}
+	if _, err := queryScopedPlan(&s, QueryRequest{Kind: "transfer_plan", Key: "missing"}); !errors.Is(err, fault.ErrInvalid) {
+		t.Fatal("unknown group treated as temporarily unavailable", err)
 	}
 	s.indexes.groups[topology.MetaGroupID].Owner = "exec-v9-a1"
 	if _, err := queryScopedPlan(&s, query); !errors.Is(err, fault.ErrUnavailable) {

@@ -90,7 +90,7 @@ func admissionPrefixOperations(a AdmissionRecord, current *topology.Operation,
 			action.Version == current.Status.Version && action.Attempt >= current.Status.Attempt {
 			continue // Current-owner suffix and later historical facts cannot select the origin.
 		}
-		operation := index.operations[topology.OperationID(action.OperatorID)]
+		operation := index.operations[topology.OperationID(action.OperationID)]
 		if operation == nil {
 			return nil, false // Live handover must retain its issued provenance.
 		}
@@ -137,7 +137,7 @@ func (p *admissionProgress) includeEffects(a AdmissionRecord, operation *topolog
 		}
 		// A historical receipt can precede its cursor acknowledgement. Current
 		// milestones retain the normal execution cursor requirement.
-		if operation.Status.ID == topology.OperationID(a.OperatorID) &&
+		if operation.Status.ID == topology.OperationID(a.OperationID) &&
 			!slices.ContainsFunc(operation.Status.Blocks, func(block topology.BlockStatus) bool {
 				return block.GroupID == topology.MetaGroupID && scopedStepCompleted(block, step.Seq)
 			}) {

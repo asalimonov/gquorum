@@ -67,7 +67,7 @@ func documentAPIContracts(t *testing.T, size int) {
 			if err != nil {
 				return false, err
 			}
-			if !status.SessionLive || status.MetaLeaderID == 0 || status.LatestVersion != base.Version || status.TargetVersion != base.Version || status.ActiveVersion != base.Version || len(status.Nodes) != size || len(status.Groups) != 2 {
+			if !status.SessionLive || status.MetaLeaderID == 0 || status.LatestVersion != base.Version || status.TargetVersion != base.Version || status.FullyConverged.Version != base.Version || len(status.Nodes) != size || len(status.Groups) != 2 {
 				return false, nil
 			}
 			for _, n := range status.Nodes {
@@ -368,7 +368,7 @@ func lifecyclePlacementContracts(t *testing.T, size int) {
 			return false, nil // The returning HTTP server may not be listening yet.
 		}
 		status, err := c.Status(ctx, "node3")
-		return err == nil && status.SessionLive && status.ActiveVersion == drained.Document.Version &&
+		return err == nil && status.SessionLive && status.FullyConverged.Version == drained.Document.Version &&
 			local.Identity.MemberID == beforeRestart.Identity.MemberID &&
 			local.Identity.InstanceID != beforeRestart.Identity.InstanceID &&
 			len(local.Status.ConfState.Voters) == size && local.Status.Applied >= beforeRestart.Status.Applied, nil

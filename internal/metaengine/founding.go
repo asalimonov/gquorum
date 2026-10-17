@@ -8,37 +8,7 @@ import "github.com/asalimonov/gquorum/topology"
 func (m *Machine) AdmissionBasis(identity topology.Identity) (topology.OperationID, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	// Task 78: replace this schema-3 adapter with scopedState.admissionBasis.
-	if !admissionMemberMatches(m.target, m.active.MetaGroup(), identity) {
-		return "", false
-	}
-	id := topology.MakeOperatorID(1, 1)
-	if m.foundingMemberLocked(identity.NodeName, identity.MemberID) {
-		return topology.OperationID(id), true
-	}
-	return "", true
-}
-
-func (sm *topologySM) foundingMemberLocked(name string, member uint64) bool {
-	op := sm.operators[topology.MakeOperatorID(1, 1)]
-	doc, ok := sm.documentLocked(1)
-	return ok && op != nil && op.State == topology.OperatorSucceeded && doc.Origin == topology.OriginFounding &&
-		doc.MemberID(name) == member
-}
-
-func (sm *topologySM) validFoundingBinding(record AdmissionRecord) bool {
-	identity := topology.Identity{ClusterID: sm.target.ClusterID, NodeName: record.NodeName, MemberID: record.MemberID}
-	if record.OperatorID != topology.MakeOperatorID(1, 1) ||
-		!sm.foundingMemberLocked(record.NodeName, record.MemberID) ||
-		!admissionMemberMatches(sm.target, sm.active.MetaGroup(), identity) {
-		return false
-	}
-	for _, prior := range sm.admissions {
-		if prior.NodeName == record.NodeName && prior.MemberID == record.MemberID {
-			return false // A retained restart uses completed membership proof, not another seed binding.
-		}
-	}
-	return true
+	return m.scoped.admissionBasis(identity)
 }
 
 func admissionMemberMatches(target topology.Document, proven *topology.Group, identity topology.Identity) bool {

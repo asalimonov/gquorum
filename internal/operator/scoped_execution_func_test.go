@@ -24,6 +24,9 @@ type scopedExecutionTest struct {
 	status         GroupStatus
 	native         topology.NativeState
 	beginErr       error
+	recordErr      error
+	nativeErr      error
+	alterReceipt   func(topology.EffectReceipt) topology.EffectReceipt
 	discardOnError bool
 	onDispatch     func(effectDispatch) error
 }
@@ -38,6 +41,9 @@ func (f *scopedExecutionTest) EffectReceipts(context.Context, topology.Authority
 	return append([]topology.EffectReceipt(nil), f.receipts...), nil
 }
 func (f *scopedExecutionTest) RecordEffect(_ context.Context, receipt topology.EffectReceipt) error {
+	if f.recordErr != nil {
+		return f.recordErr
+	}
 	f.receipts = append(f.receipts, receipt.Clone())
 	return nil
 }
@@ -51,13 +57,17 @@ func (f *scopedExecutionTest) DispatchEffect(_ context.Context, grant topology.A
 	if err != nil && f.discardOnError {
 		return topology.EffectReceipt{}, err
 	}
-	return dispatchTestReceipt(grant, resource, target), err
+	receipt := dispatchTestReceipt(grant, resource, target)
+	if f.alterReceipt != nil {
+		receipt = f.alterReceipt(receipt)
+	}
+	return receipt, err
 }
 func (f *scopedExecutionTest) Status(context.Context, string) (GroupStatus, error) {
 	return f.status, nil
 }
 func (f *scopedExecutionTest) ReadNative(context.Context, string, ...storage.Identity) (topology.NativeState, error) {
-	return f.native, nil
+	return f.native, f.nativeErr
 }
 
 func scopedExecutionFixture(t *testing.T) (*Controller, *scopedExecutionTest, *scopedCoordinatorTest, WorkItem) {
@@ -294,5 +304,144 @@ func TestScopedExecutionRechecksPreparatoryLearnerBeforeDestruction(t *testing.T
 	last := c.transitions[len(c.transitions)-1]
 	if !last.State.Waiting() || last.StepSeq != 6 || len(f.requests) != 0 {
 		t.Fatal("destruction skipped lagging preparation", last, f.requests)
+	}
+}
+
+func TestScopedExecutionRequiresExactRecordedReceipts(t *testing.T) {
+	for _, mode := range []string{"missing", "wrong target", "record unavailable"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			e, f, c, work := scopedExecutionFixture(t)
+			switch mode {
+			case "missing":
+				f.alterReceipt = func(topology.EffectReceipt) topology.EffectReceipt { return topology.EffectReceipt{} }
+			case "wrong target":
+				f.alterReceipt = func(r topology.EffectReceipt) topology.EffectReceipt { r.Target.ReplicaID++; return r }
+			case "record unavailable":
+				f.recordErr = fault.ErrUnavailable
+			}
+			e.runScopedWork(t.Context(), work)
+			last := c.transitions[len(c.transitions)-1]
+			if len(f.receipts) != 0 || last.StepSeq != 1 || last.State == topology.OperationSucceeded {
+				t.Fatal("invalid or unrecorded proof advanced work", last, f.receipts)
+			}
+			if mode != "record unavailable" && last.State != topology.OperationFailed {
+				t.Fatal("malformed proof was retryable", last)
+			}
+		})
+	}
+}
+
+func TestScopedFinalValidationRequiresNativeProofAndSafety(t *testing.T) {
+	for _, mode := range []string{"unavailable", "foreign group", "membership mismatch", "joint", "final refusal"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			e, f, c, work := scopedExecutionFixture(t)
+			f.receipts = controllerReceipts(f.grant)
+			valid := f.native.Clone()
+			switch mode {
+			case "unavailable":
+				f.nativeErr = fault.ErrUnavailable
+			case "foreign group":
+				f.native.GroupID = "foreign"
+			case "membership mismatch":
+				f.native.ConfState.Voters = []uint64{1}
+			case "joint":
+				f.native.ConfState.VotersOutgoing = []uint64{1}
+			case "final refusal":
+				e.scopedFinal = func(context.Context, topology.Operation, string) error { return fault.ErrReplanRequired }
+			}
+			e.runScopedWork(t.Context(), work)
+			last := c.transitions[len(c.transitions)-1]
+			if last.State == topology.OperationSucceeded || len(f.requests) != 0 {
+				t.Fatal("diagnostic membership bypassed final validation", last, f.requests)
+			}
+			if mode == "final refusal" {
+				if last.State != topology.OperationFailed {
+					t.Fatal(last)
+				}
+				return
+			}
+			f.native, f.nativeErr = valid, nil
+			if e.runScopedWork(t.Context(), work) != controllerProgressed || len(f.requests) != 0 {
+				t.Fatal("confirmed membership did not resume consumed work", c.transitions, f.requests)
+			}
+		})
+	}
+}
+
+func TestScopedMembershipReceiptNeedsObservedResult(t *testing.T) {
+	for _, kind := range []topology.StepKind{topology.StepAddLearner, topology.StepPromoteVoter, topology.StepDemoteVoter, topology.StepRemoveReplica, topology.StepTransferLeader} {
+		t.Run(string(kind), func(t *testing.T) {
+			t.Parallel()
+			e, f, c, work := scopedExecutionFixture(t)
+			step := topology.Step{Seq: 1, Kind: kind, GroupID: "work", NodeName: "b", ReplicaID: 2}
+			work.Operation.Plan.Steps = []topology.Step{step, {Seq: 2, Kind: topology.StepWaitCaughtUp, GroupID: "work", NodeName: "b", ReplicaID: 2}}
+			work.Operation.Plan.Blocks[0].Steps = []int{1, 2}
+			action := scopedAction(work, step)
+			f.grant.Action = &action
+			f.grant.Resources = []topology.AuthorityResource{{Kind: topology.AuthorityGroup, GroupID: "work"}}
+			f.status.ConfState = raftpb.ConfState{Voters: []uint64{1, 2}}
+			if kind == topology.StepAddLearner {
+				f.status.ConfState.Voters = []uint64{1}
+			}
+			if kind == topology.StepPromoteVoter {
+				f.status.ConfState = raftpb.ConfState{Voters: []uint64{1}, Learners: []uint64{2}}
+			}
+			if err := f.grant.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			e.runScopedWork(t.Context(), work)
+			last := c.transitions[len(c.transitions)-1]
+			if last.StepSeq != 1 || !last.State.Waiting() || len(f.receipts) != 1 {
+				t.Fatal("acknowledgement bypassed observed result", last, f.receipts)
+			}
+			switch kind {
+			case topology.StepAddLearner, topology.StepDemoteVoter:
+				f.status.ConfState = raftpb.ConfState{Voters: []uint64{1}, Learners: []uint64{2}}
+			case topology.StepPromoteVoter:
+				f.status.ConfState = raftpb.ConfState{Voters: []uint64{1, 2}}
+			case topology.StepRemoveReplica:
+				f.status.ConfState = raftpb.ConfState{Voters: []uint64{1}}
+			case topology.StepTransferLeader:
+				f.status.LeaderID = 2
+			}
+			if e.runScopedWork(t.Context(), work) != controllerProgressed {
+				t.Fatal(c.transitions)
+			}
+			last = c.transitions[len(c.transitions)-1]
+			if last.StepSeq != 2 || last.State != topology.OperationRunning {
+				t.Fatal(last)
+			}
+			want := 1
+			if kind == topology.StepTransferLeader {
+				want = 2
+			} // Re-observe the transfer using the same grant.
+			if len(f.requests) != want {
+				t.Fatal("consumed membership repeated", f.requests)
+			}
+		})
+	}
+}
+
+func TestScopedFoundingSeedsVotersBeforeIntentionalLearner(t *testing.T) {
+	t.Parallel()
+	e, f, c, work := scopedExecutionFixture(t)
+	work.Approved.Replicas = append(work.Approved.Replicas, topology.Replica{NodeName: "c", ReplicaID: 3, Role: topology.ReplicaLearner})
+	work.Operation.Plan.Steps = append(work.Operation.Plan.Steps,
+		topology.Step{Seq: 2, Kind: topology.StepPrepareReplica, GroupID: "work", NodeName: "c", ReplicaID: 3},
+		topology.Step{Seq: 3, Kind: topology.StepAddLearner, GroupID: "work", NodeName: "c", ReplicaID: 3})
+	work.Operation.Plan.Blocks[0].Steps = []int{1, 2, 3}
+	for range 3 {
+		e.runScopedWork(t.Context(), work)
+	}
+	last := c.transitions[len(c.transitions)-1]
+	if last.State != topology.OperationRunning || last.StepSeq != 2 {
+		t.Fatal("voter seed did not advance to learner preparation", last)
+	}
+	for _, request := range f.requests {
+		if request.target.NodeName == "c" {
+			t.Fatal("intentional learner was founded", request)
+		}
 	}
 }

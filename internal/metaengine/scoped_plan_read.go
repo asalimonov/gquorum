@@ -18,7 +18,7 @@ func (s *scopedState) collectScopedPlanEvidence(read *PlanRead) error {
 	for _, record := range s.indexes.grants {
 		grant := record.Grant
 		if grant.Purpose != topology.AuthorityEffect || grant.Action == nil ||
-			!ancestry[topology.OperationID(grant.OperatorID)] {
+			!ancestry[topology.OperationID(grant.OperationID)] {
 			continue
 		}
 		read.Grants = append(read.Grants, grant.Clone())

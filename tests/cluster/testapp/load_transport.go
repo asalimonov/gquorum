@@ -39,6 +39,20 @@ func (a *application) client(ctx context.Context, name string, member uint64) (*
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if member != 0 {
+		target, converged, readErr := a.documents(ctx)
+		if readErr == nil && target.MemberID(name) != member && converged.MemberID(name) != member {
+			return nil, fault.ErrUnavailable
+		}
+		if readErr != nil {
+			a.mu.RLock()
+			cached := a.clients[name]
+			a.mu.RUnlock()
+			if cached == nil || cached.member != member {
+				return nil, readErr
+			}
+		}
+	}
 	address, err := a.address(ctx, name, loadAddressLabel)
 	if ctx.Err() != nil {
 		return nil, ctx.Err()

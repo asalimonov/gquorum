@@ -25,11 +25,9 @@ type GroupStatus struct {
 	LiveVoters        map[uint64]bool            `json:"live_voters,omitempty"`
 	HealthKnown       bool                       `json:"health_known"`
 	ErrorCode         string                     `json:"error_code,omitempty"`
-	// LeaderNodeName is resolved from LeaderID through the captured Active view
-	// in cluster status, local meta status and scheduler inputs. In those
-	// views,
-	// empty means leadership is unknown or the replica is absent from Active.
-	// Raw replica status does not resolve node names; use LeaderID there.
+	// LeaderNodeName is resolved from LeaderID through the exact converged
+	// group declaration captured with the status read. Empty means leadership
+	// is unknown or the observed replica is absent from that declaration.
 	LeaderNodeName string `json:"leader_node_name"`
 }
 
@@ -53,20 +51,16 @@ type ClusterStatus struct {
 	ErrorCode           string            `json:"error_code,omitempty"`
 	LatestVersion       uint64            `json:"latest_version"`
 	TargetVersion       uint64            `json:"target_version"`
-	ActiveVersion       uint64            `json:"active_version"`
 	Nodes               []NodeStatus      `json:"nodes"`
 	Groups              []GroupProgress   `json:"groups"`
 	MetaLeaderID        uint64            `json:"meta_leader_id"`
-	// MetaLeaderNodeName is resolved from the numeric MetaLeaderID through
-	// Active.
-	// Empty means leadership is unknown or that member is absent from Active.
+	// MetaLeaderNodeName resolves the numeric MetaLeaderID through exact
+	// converged _meta membership. Empty means the identity is unknown.
 	MetaLeaderNodeName string            `json:"meta_leader_node_name"`
 	SessionLive        bool              `json:"session_live"`
-	Operator           *OperatorStatus   `json:"operator,omitempty"`
 	Scheduling         SchedulingStatus  `json:"scheduling"`
 	Observation        HealthObservation `json:"observation"`
-	// Placement is a static report for the captured Active and Target
-	// documents.
+	// Placement is a static report for approved Target.
 	// It is not a native health or quorum observation.
 	Placement   []PlacementReport  `json:"placement,omitempty"`
 	SelfRemoval *SelfRemovalStatus `json:"self_removal,omitempty"`

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/internal/metaengine"
 	schedulingapi "github.com/asalimonov/gquorum/scheduling"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
@@ -69,7 +68,6 @@ func (s Settings) Validate() error {
 // callback.
 type Config struct {
 	Host            Host
-	ScopedHost      ScopedHost
 	Settings        Settings
 	Logger          *slog.Logger
 	Policy          schedulingapi.RepairPolicy
@@ -80,13 +78,11 @@ type Config struct {
 	OnTransition func(topology.SchedulingStatus)
 }
 
-// Scheduler invokes the selected scheduler only after leader/staging/health
+// Scheduler invokes the selected scheduler only after leadership and per-group safety
 // gates. It owns validation and concrete repair proposals; callbacks cannot
 // bypass them.
 type Scheduler struct {
-	host             observationHost
-	legacyHost       Host
-	scopedHost       ScopedHost
+	host             Host
 	repairAttempts   map[repairAttempt]time.Time
 	settings         Settings
 	policy           schedulingapi.RepairPolicy
@@ -99,7 +95,6 @@ type Scheduler struct {
 	wake             chan struct{}
 	aliveSince       map[string]time.Time
 	aliveMembers     map[string]uint64
-	lastRun          time.Time
 	mu               sync.Mutex
 	started, stopped bool
 	cancel           context.CancelFunc
@@ -114,8 +109,8 @@ type Scheduler struct {
 // New validates repair dependencies and constructs an inactive serialized
 // scheduler.
 func New(cfg Config) (*Scheduler, error) {
-	if (cfg.Host == nil) == (cfg.ScopedHost == nil) {
-		return nil, fault.New(fault.Invalid, "exactly one repair host is required", nil)
+	if cfg.Host == nil {
+		return nil, fault.New(fault.Invalid, "repair host is required", nil)
 	}
 	if err := cfg.Settings.Validate(); err != nil {
 		return nil, err
@@ -128,8 +123,6 @@ func New(cfg Config) (*Scheduler, error) {
 	}
 	r := &Scheduler{
 		host:           cfg.Host,
-		legacyHost:     cfg.Host,
-		scopedHost:     cfg.ScopedHost,
 		repairAttempts: make(map[repairAttempt]time.Time),
 		settings:       cfg.Settings.WithDefaults(),
 		logger:         cfg.Logger,
@@ -140,9 +133,6 @@ func New(cfg Config) (*Scheduler, error) {
 		done:           make(chan struct{}),
 		aliveSince:     make(map[string]time.Time),
 		aliveMembers:   make(map[string]uint64),
-	}
-	if cfg.ScopedHost != nil {
-		r.host = cfg.ScopedHost
 	}
 	r.policy, r.callbackTimeout, r.held = cfg.Policy, cfg.CallbackTimeout, cfg.Held
 	if r.policy == nil {
@@ -281,169 +271,6 @@ func (r *Scheduler) Tick(parent context.Context) error {
 	return ctx.Err()
 }
 
-func (r *Scheduler) reconcileOnce(ctx context.Context) {
-	if r.scopedHost != nil {
-		r.reconcileScoped(ctx)
-		return
-	}
-	leader := r.host.IsLeader()
-	views, err := r.legacyHost.Views(ctx)
-	target, active := views.Target, views.Active
-	if err != nil {
-		r.resetAlive()
-		r.transition(r.newStatus(leader, topology.SchedulingError, ReconcileReasonStatusUnavailable), err.Error())
-		return
-	}
-	leader = r.host.IsLeader()
-	if !leader {
-		r.resetAlive()
-	}
-	operator, err := r.legacyHost.CurrentOperator(ctx)
-	if err != nil {
-		r.transition(r.newStatus(leader, topology.SchedulingError, ReconcileReasonStatusUnavailable), err.Error())
-		return
-	}
-	if r.reconcileApproval(ctx, schedulingApproval{views: views, operator: operator, leader: leader}) {
-		return
-	}
-	health, err := r.host.Health(ctx)
-	if err != nil || !knownHealth(active, health) {
-		r.resetAlive()
-		r.transition(r.newStatus(true, topology.SchedulingWaiting, ReconcileReasonUnknownHealth), "")
-		return
-	}
-	now := r.now()
-	r.sampleAlive(active, health, now)
-	if !hasVoterConfigs(active) && !r.lastRun.IsZero() && now.Sub(r.lastRun) < r.settings.Cooldown {
-		r.transition(r.newStatus(true, topology.SchedulingWaiting, ReconcileReasonCooldown), "")
-		return
-	}
-	status, err := r.legacyHost.GlobalStatus(ctx, active)
-	if err != nil {
-		r.transition(r.newStatus(true, topology.SchedulingError, ReconcileReasonStatusUnavailable), err.Error())
-		return
-	}
-	evaluations := map[string]topology.GroupHealthEvaluation{}
-	for _, item := range topology.EvaluateDataGroupHealth(active, health) {
-		evaluations[item.GroupID] = item
-	}
-	in := schedulingapi.ScheduleInput{
-		Now:      now,
-		Target:   target,
-		Status:   status,
-		Health:   evaluations,
-		Alive:    r.aliveDurations(now),
-		Held:     r.heldIdentities(),
-		Metrics:  r.host.Observations(),
-		Switches: r.host.VoterSwitches(),
-	}
-	r.evaluatePolicy(ctx, legacyScheduleInput(in, views), views)
-}
-
-func resumable(ex topology.Operator, exists bool, active, target topology.Document) bool {
-	return exists && (!ex.Status.State.Terminal() || ex.Status.State == topology.OperatorSucceeded &&
-		!reflect.DeepEqual(active, target))
-}
-
-func (r *Scheduler) healable(ctx context.Context, latest, active topology.Document) (bool, error) {
-	if latest.Origin != topology.OriginInternal || latest.ParentVersion != active.Version {
-		return false, nil
-	}
-	health, err := r.host.Health(ctx)
-	if err != nil || !knownHealth(active, health) {
-		return false, nil
-	}
-	plan, err := r.legacyHost.PlanFor(ctx, latest)
-	return err == nil && len(plan.Steps) == 0, err
-}
-
-func (r *Scheduler) healStagedInternal(ctx context.Context, latest, active topology.Document) bool {
-	ok, err := r.healable(ctx, latest, active)
-	if err != nil {
-		s := r.newStatus(true, topology.SchedulingError, ReconcileReasonStatusUnavailable)
-		s.BlockingVersion = &latest.Version
-		r.transition(s, err.Error())
-		return true
-	}
-	if !ok {
-		return false
-	}
-	id, err := r.legacyHost.Approve(ctx, latest.Version)
-	if err != nil {
-		r.transition(r.blockedStagedStatus(true, latest.Version), err.Error())
-		return true
-	}
-	r.transition(r.runningOperatorStatus(true, id), "")
-	return true
-}
-
-type replicaRepair struct {
-	Latest, Active topology.Document
-	Action         schedulingapi.ScheduleAction
-	At             time.Time
-}
-
-func (r *Scheduler) commitReplicaRepair(ctx context.Context, repairRequest replicaRepair) (topology.OperatorID, error) {
-	latest, active, action, at := repairRequest.Latest, repairRequest.Active, repairRequest.Action, repairRequest.At
-	// Caller code may have waited while topology or native membership changed.
-	// Recheck the decision boundary using fresh owned observations. The
-	// replicated
-	// CAS still protects changes occurring after this local validation.
-	views, err := r.legacyHost.Views(ctx)
-	currentLatest, currentTarget, currentActive := views.Latest, views.Target, views.Active
-	if err != nil {
-		return "", err
-	}
-	if !reflect.DeepEqual(currentLatest, latest) || !reflect.DeepEqual(currentTarget, latest) ||
-		!reflect.DeepEqual(currentActive, active) {
-		return "", fault.ErrVersionConflict
-	}
-	if !r.host.IsLeader() {
-		return "", fault.ErrNotLeader
-	}
-	health, err := r.host.Health(ctx)
-	if err != nil {
-		return "", err
-	}
-	if !knownHealth(active, health) {
-		return "", fault.New(fault.Unavailable, "repair health observation is unknown", nil)
-	}
-	if topology.EvaluateGroupHealth(active, action.Identity.GroupID, health).ObservedHealth.State.QuorumLost() {
-		return "", fault.New(fault.UnsafeMembership, "repair group has lost its observed quorum", nil)
-	}
-	status, err := r.legacyHost.GlobalStatus(ctx, active)
-	if err != nil {
-		return "", err
-	}
-	if err := r.validateReplicaRepair(active, action, status); err != nil {
-		return "", err
-	}
-	identity := action.Identity
-	options := metaengine.ReplicaRepairOptions{GroupID: identity.GroupID, NodeName: identity.NodeName,
-		ReplicaID: identity.ReplicaID, At: at, Origin: topology.OriginReconciler, Actor: "auto-repair"}
-	repaired, err := metaengine.ReplicaRepairDocument(active, latest, options)
-	if err != nil {
-		return "", err
-	}
-	repair := repaired.Doc
-	plan, err := r.legacyHost.PlanFor(ctx, repair)
-	if err != nil {
-		return "", err
-	}
-	if len(plan.Steps) == 0 {
-		return "", fault.New(fault.OperationAuthorization, "fresh identity repair cannot have an empty plan", nil)
-	}
-	if !r.host.IsLeader() {
-		return "", fault.ErrNotLeader
-	}
-	id, err := r.legacyHost.CommitRepair(ctx,
-		RepairCommit{Document: repair, ExpectedVersion: latest.Version, Plan: plan})
-	if err == nil {
-		r.host.WakeOperator()
-	}
-	return id, err
-}
-
 func (r *Scheduler) sampleAlive(doc topology.Document, health map[string]topology.Health, now time.Time) {
 	declared := make(map[string]bool, len(doc.Nodes))
 	for _, node := range doc.Nodes {
@@ -467,18 +294,6 @@ func (r *Scheduler) sampleAlive(doc topology.Document, health map[string]topolog
 	}
 }
 
-func knownHealth(doc topology.Document, health map[string]topology.Health) bool {
-	if health == nil {
-		return false
-	}
-	for _, n := range doc.Nodes {
-		if n.State != topology.NodeExcluded && health[n.Name] != topology.HealthAlive &&
-			health[n.Name] != topology.HealthDead {
-			return false
-		}
-	}
-	return true
-}
 func (r *Scheduler) resetAlive() { clear(r.aliveSince); clear(r.aliveMembers) }
 func (r *Scheduler) aliveDurations(now time.Time) map[string]time.Duration {
 	out := make(map[string]time.Duration, len(r.aliveSince))
@@ -509,17 +324,12 @@ func (r *Scheduler) heldIdentities() []storage.Identity {
 	return slices.Clone(r.held())
 }
 
-func (r *Scheduler) runningOperatorStatus(leader bool, id topology.OperatorID) topology.SchedulingStatus {
-	s := r.newStatus(leader, topology.SchedulingRunning, ReconcileReasonApprovedOperator)
-	s.CurrentOperatorID = &id
+func (r *Scheduler) runningOperationStatus(leader bool, id topology.OperationID) topology.SchedulingStatus {
+	s := r.newStatus(leader, topology.SchedulingRunning, ReconcileReasonApprovedOperation)
+	s.CurrentOperationID = &id
 	return s
 }
 
-func (r *Scheduler) blockedStagedStatus(leader bool, version uint64) topology.SchedulingStatus {
-	s := r.newStatus(leader, topology.SchedulingBlocked, ReconcileReasonStagedLatest)
-	s.BlockingVersion = &version
-	return s
-}
 func (r *Scheduler) transition(next topology.SchedulingStatus, detail string) {
 	r.statusMu.Lock()
 	previous := r.status
@@ -559,12 +369,4 @@ func (r *Scheduler) Wake() {
 	case r.wake <- struct{}{}:
 	default:
 	}
-}
-func hasVoterConfigs(doc topology.Document) bool {
-	for _, g := range doc.Groups {
-		if g.VoterConfig != nil {
-			return true
-		}
-	}
-	return false
 }

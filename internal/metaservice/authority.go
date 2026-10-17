@@ -93,14 +93,15 @@ func (g *Group) ReadGrant(ctx context.Context, key topology.AuthorityKey) (topol
 // RecordFence proposes durable resource fence installation evidence to meta
 // consensus.
 func (g *Group) RecordFence(ctx context.Context, evidence topology.FenceEvidence) error {
-	_, err := g.propose(ctx, metaengine.RecordFenceProposal{Evidence: evidence})
+	_, err := g.propose(ctx, metaengine.RecordFenceProposal{Evidence: evidence, ProposalID: newProposalID()})
 	return err
 }
 
 // RecordEffect proposes exact durable effect consumption evidence to meta
 // consensus.
 func (g *Group) RecordEffect(ctx context.Context, receipt topology.EffectReceipt) error {
-	_, err := g.propose(ctx, metaengine.RecordEffectProposal{Receipt: receipt.Clone(), At: time.Now().UTC()})
+	_, err := g.propose(ctx, metaengine.RecordEffectProposal{Receipt: receipt.Clone(), At: time.Now().UTC(),
+		ProposalID: newProposalID()})
 	return err
 }
 
@@ -148,16 +149,16 @@ func (g *Group) ReadAuthorityFloors(ctx context.Context, node string) ([]topolog
 
 // ReadAuthority performs a confirmed query of an operator's revocation
 // obligations.
-func (g *Group) ReadAuthority(ctx context.Context, id topology.OperatorID) (topology.AuthorityStatus, error) {
+func (g *Group) ReadAuthority(ctx context.Context, id topology.OperationID) (topology.AuthorityStatus, error) {
 	var result topology.AuthorityStatus
-	err := g.read(ctx, metaengine.QueryRequest{Kind: "authority", OperatorID: id}, &result)
+	err := g.read(ctx, metaengine.QueryRequest{Kind: "authority", OperationID: id}, &result)
 	return result, err
 }
 
 // WaitRevoked returns only a durably completed requested revocation. A
 // currently
 // empty prerequisite list is not proof that revocation was ever requested.
-func (g *Group) WaitRevoked(ctx context.Context, id topology.OperatorID) (topology.AuthorityStatus, error) {
+func (g *Group) WaitRevoked(ctx context.Context, id topology.OperationID) (topology.AuthorityStatus, error) {
 	tick := time.NewTicker(20 * time.Millisecond)
 	defer tick.Stop()
 	for {

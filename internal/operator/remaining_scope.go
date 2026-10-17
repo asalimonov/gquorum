@@ -36,7 +36,7 @@ func ValidateRemainingScope(view RemainingPlanView, op topology.Operation, group
 			return fault.ErrOperationAuthorization
 		}
 	}
-	ex := Record{ID: topology.OperatorID(op.Status.ID), Version: op.Status.Version, Attempt: op.Status.Attempt,
+	ex := Record{ID: topology.OperationID(op.Status.ID), Version: op.Status.Version, Attempt: op.Status.Attempt,
 		Steps: op.Plan.Steps, VoterBases: op.Plan.VoterBases, CurrentStep: first}
 	view.Plan = op.Plan
 	if err := validateRetainedScope(view, ex, group); err != nil {
@@ -73,11 +73,11 @@ func scopedRemainingProofs(view RemainingPlanView, op topology.Operation) (map[i
 	}
 	grants := make(map[topology.AuthorityKey]topology.AuthorityGrant)
 	for _, grant := range view.Grants {
-		original, exists := attempts[topology.OperationID(grant.OperatorID)]
+		original, exists := attempts[topology.OperationID(grant.OperationID)]
 		if !exists {
 			return nil, fault.ErrOperationAuthorization
 		}
-		ex := Record{ID: grant.OperatorID, Version: original.Status.Version, Attempt: original.Status.Attempt,
+		ex := Record{ID: grant.OperationID, Version: original.Status.Version, Attempt: original.Status.Attempt,
 			Steps: original.Plan.Steps}
 		if err := validateRemainingGrant(ex, grant); err != nil {
 			return nil, err

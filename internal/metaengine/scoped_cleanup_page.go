@@ -26,12 +26,11 @@ type cleanupCursor struct {
 	Last    storage.Identity `json:"last"`
 }
 
-// CleanupPage returns exact debt in stable identity order. It gains the active
-// scoped state at the Task 78 schema cutover; no legacy debt is synthesized.
+// CleanupPage returns exact retained debt in stable identity order.
 func (m *Machine) CleanupPage(after string, limit int) (CleanupPage, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return queryScopedCleanupPage(nil, after, limit)
+	return queryScopedCleanupPage(m.scoped, after, limit)
 }
 
 func queryScopedCleanupPage(s *scopedState, after string, limit int) (CleanupPage, error) {

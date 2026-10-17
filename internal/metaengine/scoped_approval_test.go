@@ -114,12 +114,12 @@ func TestScopedApprovalDispatchInstallsOnceAfterCompletePreparation(t *testing.T
 	body, _ := json.Marshal(p)
 	application, err := applyScopedProposal(&s, 11, "begin_operation", body)
 	if err != nil || !application.changed || !application.result.Accepted ||
-		application.result.OperatorID != "exec-v3-a1" || s.AppliedIndex != 11 || s.Target.Version != 3 {
+		application.result.OperationID != "exec-v3-a1" || s.AppliedIndex != 11 || s.Target.Version != 3 {
 		t.Fatal("complete candidate was not installed", application, err)
 	}
 	before, _ := json.Marshal(s)
 	application, err = applyScopedProposal(&s, 12, "begin_operation", body)
-	if err != nil || application.changed || !application.result.Accepted || application.result.OperatorID != "exec-v3-a1" {
+	if err != nil || application.changed || !application.result.Accepted || application.result.OperationID != "exec-v3-a1" {
 		t.Fatal("approval replay created another operation", application, err)
 	}
 	p.Version = 1 // No retained original approval exists for the founding checkpoint.
@@ -131,5 +131,41 @@ func TestScopedApprovalDispatchInstallsOnceAfterCompletePreparation(t *testing.T
 	after, _ := json.Marshal(s)
 	if !bytes.Equal(before, after) {
 		t.Fatal("replay/refusal changed durable state")
+	}
+}
+
+func TestScopedForcedApprovalRequiresApplyingActorAndOrigin(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"missing actor", "missing origin", "wrong audit operation", "valid"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			s, p := approvalFixture(t, topology.MetaGroupID)
+			s.Latest.Audit = &topology.ChangeAudit{Operation: topology.AuditOperationForceRetireNode,
+				TargetNode: "n1", Forced: true, Reason: "host lost", StagedBy: "staging-admin", StagedAt: p.At}
+			switch mode {
+			case "missing actor":
+				p.Actor = ""
+			case "missing origin":
+				p.Origin = ""
+			case "wrong audit operation":
+				s.Latest.Audit.Operation = "unrelated"
+			}
+			m := restoreMachineFixture(t, s)
+			before := m.Target()
+			result := applyMachine(t, m, p)
+			if mode != "valid" {
+				if result.Accepted || result.Code != proposalErrorCode(fault.OperationAuthorization) || !reflect.DeepEqual(m.Target(), before) {
+					t.Fatal("forced approval bypassed provenance or changed Target", result)
+				}
+				return
+			}
+			if !result.Accepted {
+				t.Fatal(result)
+			}
+			op := m.scoped.indexes.operations[result.OperationID]
+			if op == nil || op.Actor != "admin" || op.Origin != topology.OriginAPI || m.Target().Audit.StagedBy != "staging-admin" {
+				t.Fatal("approval lost distinct staging/applying actors", op)
+			}
+		})
 	}
 }

@@ -32,7 +32,7 @@ func (s *scopedState) bindJoiningAdmission(p BindAdmissionProposal) (AdmissionRe
 
 func (s *scopedState) validateJoiningAdmission(a AdmissionRecord) error {
 	op := s.admissionOperation(a.NodeName, a.MemberID)
-	if op == nil || op.Status.ID != topology.OperationID(a.OperatorID) || !validAdmissionOrigin(a, s.indexes) {
+	if op == nil || op.Status.ID != topology.OperationID(a.OperationID) || !validAdmissionOrigin(a, s.indexes) {
 		return fault.ErrOperationAuthorization
 	}
 	if _, valid := scopedAdmissionProgress(a, op, s.indexes, s.authorityCatalog()); !valid {
@@ -57,7 +57,7 @@ func (s *scopedState) admissionMemberPrepared(a AdmissionRecord) bool {
 func (s *scopedState) applyReadyAdmission(index uint64, p ReadyAdmissionProposal) (proposalApplication, error) {
 	for _, record := range s.Admissions {
 		if record.NodeName != p.NodeName || record.InstanceID != p.InstanceID ||
-			record.MemberID != p.MemberID || record.OperatorID != p.OperatorID {
+			record.MemberID != p.MemberID || record.OperationID != p.OperationID {
 			continue
 		}
 		if record.State == AdmissionSuperseded || record.State == AdmissionRetired {

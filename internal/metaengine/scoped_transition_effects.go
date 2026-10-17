@@ -24,7 +24,7 @@ func (s *scopedState) recordScopedTransitionEffect(index uint64, op *topology.Op
 	if action.Kind == topology.StepDemoteVoter {
 		from, to = to, from
 	}
-	change := topology.RoleChangeRecord{OperatorID: action.OperatorID, Version: action.Version,
+	change := topology.RoleChangeRecord{OperationID: action.OperationID, Version: action.Version,
 		Attempt: action.Attempt, StepSeq: action.StepSeq, GroupID: action.GroupID, NodeName: action.NodeName,
 		ReplicaID: action.ReplicaID, From: from, To: to, At: at, Index: index}
 	position := slices.IndexFunc(s.VoterSwitches, func(row topology.VoterSwitchState) bool {
@@ -44,7 +44,7 @@ func (s *scopedState) recordScopedAdmissionStep(id topology.OperationID, step to
 	}
 	for i := range s.Admissions {
 		a := &s.Admissions[i]
-		if topology.OperationID(a.OperatorID) != id || !admissionStep(*a, step) || a.State.terminal() {
+		if topology.OperationID(a.OperationID) != id || !admissionStep(*a, step) || a.State.terminal() {
 			continue
 		}
 		switch step.Kind {

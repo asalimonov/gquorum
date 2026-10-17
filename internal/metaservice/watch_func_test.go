@@ -41,11 +41,11 @@ func TestMetaWatchSeparatesLatestAndTarget(t *testing.T) {
 		t.Fatal(u)
 	}
 	assertWatchQuiet(t, channels[topology.Target])
-	ex, err := g.Apply(ctx, 2)
+	ex, err := g.Approve(ctx, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := g.WaitOperator(ctx, ex); err != nil {
+	if _, err := g.WaitOperation(ctx, ex); err != nil {
 		t.Fatal(err)
 	}
 	for _, view := range []topology.View{topology.Target} {

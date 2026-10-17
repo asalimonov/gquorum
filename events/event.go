@@ -42,7 +42,7 @@ type Event struct {
 	Term          uint64 `json:"term,omitempty"`
 	HealthyVoters *int   `json:"healthy_voters,omitempty"`
 	Voters        int    `json:"voters,omitempty"`
-	OperatorID    string `json:"operator_id,omitempty"`
+	OperationID   string `json:"operation_id,omitempty"`
 	Code          string `json:"code,omitempty"`
 	State         string `json:"state,omitempty"`
 	Version       uint64 `json:"version,omitempty"`

@@ -53,7 +53,7 @@ func TestAuthorityHostRevocationWaitsForExactRetainedProcessReturnThreeNodes(t *
 	if err := Poll(ctx, func() (bool, error) {
 		view, err := c.Authority(ctx, "node1", "work")
 		for _, action := range view.Actions {
-			if action.Authorization.OperatorID == old && action.Authorization.Kind == topology.StepStopReplica {
+			if action.Authorization.OperationID == old && action.Authorization.Kind == topology.StepStopReplica {
 				delayed = action
 				return true, err
 			}
@@ -112,7 +112,7 @@ func TestAuthorityHostRevocationWaitsForExactRetainedProcessReturnThreeNodes(t *
 			t.Fatal(err)
 		}
 		for _, action := range view.Actions {
-			if action.Authorization.OperatorID == newOp {
+			if action.Authorization.OperationID == newOp {
 				t.Fatal("successor issued effects before inherited host revocation", action)
 			}
 		}
@@ -126,12 +126,12 @@ func TestAuthorityHostRevocationWaitsForExactRetainedProcessReturnThreeNodes(t *
 		for _, name := range []string{"node1", "node2", "node3"} {
 			view, viewErr := c.Authority(ctx, name, "work")
 			for _, action := range view.Actions {
-				if action.Authorization.OperatorID == newOp && action.Authorization.Kind == topology.StepDeleteGroupState {
+				if action.Authorization.OperationID == newOp && action.Authorization.Kind == topology.StepDeleteGroupState {
 					t.Logf("delete request %s: %+v", name, action)
 				}
 			}
 			for _, result := range view.Receipts {
-				if result.Authorization.OperatorID == newOp && result.Authorization.Kind == topology.StepDeleteGroupState {
+				if result.Authorization.OperationID == newOp && result.Authorization.Kind == topology.StepDeleteGroupState {
 					t.Logf("delete receipt %s: %+v", name, result)
 				}
 			}
@@ -139,7 +139,7 @@ func TestAuthorityHostRevocationWaitsForExactRetainedProcessReturnThreeNodes(t *
 		}
 		t.Fatal("returning retained host could not finish exact fence and successor cleanup", err)
 	}
-	if err := c.WaitActive(ctx, newStage.Document.Version); err != nil {
+	if err := c.WaitFullyConverged(ctx, newStage.Document.Version); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.WaitReady(ctx); err != nil {

@@ -3,15 +3,17 @@ package metaservice
 import (
 	"context"
 
-	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// Task78 replaces this named schema3 projection with local ProgressStatus rows.
-// It copies actual proven rows; TargetVersion is only document context.
+// Local metrics and host recovery consume the same applied per-group progress
+// rows as status. TargetVersion is document context, never convergence proof.
 func (g *Group) metricsTopology() topology.ProgressPage {
-	views := g.state().Views()
-	return topology.ProgressPage{TargetVersion: views.Target.Version, Groups: metaengine.LegacyGroupProgress(views)}
+	page, err := g.state().Progress(topology.ProgressQuery{})
+	if err != nil {
+		return topology.ProgressPage{}
+	}
+	return page
 }
 
 func metricsConvergedGroup(groups []topology.GroupProgress, id string) *topology.Group {

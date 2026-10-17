@@ -23,7 +23,7 @@ func TestScopedPartitionsDetachRemovalButKeepDeletionStops(t *testing.T) {
 				desired.Groups = slices.Delete(desired.Groups, 1, 2)
 			}
 			input := testPlanInput(base, statusForDocument(base))
-			plan, err := scopedPlan(input, desired, PlanOptions{Rules: plannerRules()})
+			plan, err := BuildPlanPreferred(input, desired, PlanOptions{Rules: plannerRules()})
 			if err != nil || len(plan.Blocks) != 1 || plan.Blocks[0].SourceVersion != base.Version {
 				t.Fatal("lost scoped provenance", plan, err)
 			}
@@ -92,7 +92,7 @@ func TestScopedPlannerDetachesObsoleteRequiredStopOnce(t *testing.T) {
 	row := input.Groups["work"]
 	row.Observation = &status
 	input.Groups["work"] = row
-	plan, err := scopedPlan(input, desired, PlanOptions{Rules: plannerRules()})
+	plan, err := BuildPlanPreferred(input, desired, PlanOptions{Rules: plannerRules()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestScopedPlannerDetachesObsoleteRequiredStopOnce(t *testing.T) {
 	input.Approved = desired.Clone()
 	desired.Version++
 	desired.Group("work").Labels = map[string]string{"owner": "next"}
-	plan, err = scopedPlan(input, desired, PlanOptions{Rules: plannerRules()})
+	plan, err = BuildPlanPreferred(input, desired, PlanOptions{Rules: plannerRules()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestScopedPlannerDetachesObsoleteRequiredStopOnce(t *testing.T) {
 	native := input.Native["work"]
 	native.ConfState.Voters = []uint64{1, 2, 4}
 	input.Native["work"] = native
-	if _, err := scopedPlan(input, desired, PlanOptions{Rules: plannerRules()}); err == nil {
+	if _, err := BuildPlanPreferred(input, desired, PlanOptions{Rules: plannerRules()}); err == nil {
 		t.Fatal("detached debt hid a still-native replica")
 	}
 }
@@ -142,7 +142,7 @@ func TestScopedAdmissionEdgesCoverExactFoundersAndLearners(t *testing.T) {
 			desired.MetaGroup().NextReplicaID = 3
 			incoming := Replica{NodeName: "n2", ReplicaID: 2, Role: role}
 			desired.Groups = append(desired.Groups, shardOf("work", rep("n1", 1), incoming))
-			plan, err := scopedPlan(testPlanInput(base, statusForDocument(base)), desired, PlanOptions{Rules: plannerRules()})
+			plan, err := BuildPlanPreferred(testPlanInput(base, statusForDocument(base)), desired, PlanOptions{Rules: plannerRules()})
 			if err != nil || len(plan.Dependencies) != 1 || !slices.Equal(plan.Dependencies[0].Requires, []int{1}) {
 				t.Fatal("admission edge lost exact metadata preparation", plan, err)
 			}
@@ -169,7 +169,7 @@ func TestScopedRemovalEdgeUsesRequiredEvacuation(t *testing.T) {
 	status := observed[MetaGroupID]
 	status.HealthKnown, status.LiveVoters = true, map[uint64]bool{1: true, 2: true, 3: true}
 	observed[MetaGroupID] = status
-	plan, err := scopedPlan(testPlanInput(base, observed), desired, PlanOptions{Rules: plannerRules()})
+	plan, err := BuildPlanPreferred(testPlanInput(base, observed), desired, PlanOptions{Rules: plannerRules()})
 	if err != nil || len(plan.Dependencies) != 1 || len(plan.Dependencies[0].Requires) != 1 {
 		t.Fatal("decommission omitted exact stop barrier", plan, err)
 	}
@@ -198,7 +198,7 @@ func TestScopedDeclarationBlockKeepsItsOwnSource(t *testing.T) {
 	desired := base.Clone()
 	desired.Version++
 	desired.Group("b").Labels = map[string]string{"edit": "yes"}
-	plan, err := scopedPlan(input, desired, PlanOptions{Rules: plannerRules()})
+	plan, err := BuildPlanPreferred(input, desired, PlanOptions{Rules: plannerRules()})
 	if err != nil || len(plan.Blocks) != 1 || plan.Blocks[0].GroupID != "b" ||
 		plan.Blocks[0].SourceVersion != 3 || len(plan.Steps) != 0 || plan.IsEmpty() {
 		t.Fatal("zero-step block lost independent provenance", plan, err)
@@ -213,7 +213,7 @@ func TestScopedDeletionUsesCompletedReadmissionWithoutOwningMetadata(t *testing.
 		Converged: input.Approved.MetaGroup()}
 	desired.Version++
 	desired.Groups = desired.Groups[:1]
-	plan, err := scopedPlan(input, desired, PlanOptions{Rules: plannerRules()})
+	plan, err := BuildPlanPreferred(input, desired, PlanOptions{Rules: plannerRules()})
 	if err != nil || len(plan.Blocks) != 1 || plan.Blocks[0].GroupID != "work" || len(plan.Steps) != 3 {
 		t.Fatal("load-only deletion repeated metadata admission or contacted its retired predecessor", plan, err)
 	}

@@ -17,6 +17,15 @@ type ensureMutationProbe struct {
 	result     MutationResult
 	err        error
 	approveErr error
+	progress   topology.ProgressPage
+}
+
+func (p *ensureMutationProbe) ReadProgress(_ context.Context, query topology.ProgressQuery) (topology.ProgressPage, error) {
+	page := p.progress
+	if query.GroupID != "" && len(page.Groups) == 0 {
+		page.Groups = []topology.GroupProgress{{GroupID: query.GroupID}}
+	}
+	return page, nil
 }
 
 func (p *ensureMutationProbe) CreateGroup(_ context.Context, _ GroupSpec, opts MutationOptions) (MutationResult, error) {
@@ -36,7 +45,7 @@ func TestEnsureCreationPinsCASAndApprovesOnlyReplayedRebasedHead(t *testing.T) {
 	spec, group := GroupSpec{ID: "work"}, topology.Group{ID: "work"}
 	request := ensureRequest{Spec: spec, Options: EnsureOptions{Actor: "app", Comment: "create"}}
 	base := topology.Document{Version: 2}
-	view := topology.ReadView{Latest: base, Target: base, Active: base}
+	view := topology.ReadView{Latest: base, Target: base}
 	probe := &ensureMutationProbe{err: context.DeadlineExceeded}
 	if _, err := request.step(t.Context(), probe, view); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal(err)

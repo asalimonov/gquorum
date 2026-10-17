@@ -31,9 +31,4 @@ func TestScopedArchivedFloorsRemainValidatedWithoutHolder(t *testing.T) {
 			}
 		})
 	}
-	restore := authorityRestore{state: smState{Latest: s.Latest, AppliedIndex: s.AppliedIndex,
-		AuthorityFloors: s.AuthorityFloors}, catalog: newAuthorityCatalog()}
-	if err := restore.restoreFloors(); err == nil {
-		t.Fatal("schema3 floor contract relaxed before cutover")
-	}
 }

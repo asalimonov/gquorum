@@ -20,19 +20,22 @@ func TestAuthorityServiceReadsRetainedGrantAndRequestedRevocation(t *testing.T) 
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	doc := g.state().Latest()
+	doc.MetaGroup().Labels = map[string]string{"test": "transfer"}
 	staged, err := g.Stage(ctx, doc, doc.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
 	step := topology.Step{Seq: 1, GroupID: topology.MetaGroupID, NodeName: "n1", ReplicaID: 1, Kind: topology.StepTransferLeader}
-	at := time.Now().UTC()
-	begin, err := g.propose(ctx, metaengine.BeginOperatorProposal{Version: staged.Version, Plan: topology.Plan{Version: staged.Version, Steps: []topology.Step{step}}, At: at})
+	approval := (&mutationFixture{g: g, native: map[string]topology.NativeState{topology.MetaGroupID: fixtureNative(*doc.MetaGroup())}}).fixtureApproval(t, staged)
+	approval.Plan.Steps = []topology.Step{step}
+	approval.Plan.Blocks[0].Steps = []int{1}
+	begin, err := g.propose(ctx, approval)
 	if err != nil {
 		t.Fatal(err)
 	}
-	action := topology.AuthorizedStep{OperatorID: begin.OperatorID, Version: staged.Version, Attempt: 1, StepSeq: step.Seq, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID, Kind: step.Kind}
-	transition := topology.OperatorTransition{OperatorID: begin.OperatorID, Version: staged.Version, Attempt: 1, StepSeq: step.Seq, GroupID: step.GroupID, NodeName: step.NodeName, State: topology.OperatorRunning, At: at.Add(time.Millisecond)}
-	if _, err := g.propose(ctx, metaengine.TransitionOperatorProposal{Transition: transition}); err != nil {
+	action := topology.AuthorizedStep{OperationID: begin.OperationID, Version: staged.Version, Attempt: 1, StepSeq: step.Seq, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID, Kind: step.Kind}
+	transition := topology.OperationTransition{OperationID: begin.OperationID, Version: staged.Version, Attempt: 1, StepSeq: step.Seq, GroupID: step.GroupID, State: topology.OperationRunning, At: time.Now().UTC()}
+	if _, err := g.propose(ctx, metaengine.TransitionOperationProposal{Transition: transition, ProposalID: newProposalID()}); err != nil {
 		t.Fatal(err)
 	}
 	grant, err := g.BeginEffect(ctx, action)
@@ -73,20 +76,25 @@ func TestAuthorityServiceReadsRetainedGrantAndRequestedRevocation(t *testing.T) 
 	if err := g.ValidateGrant(ctx, future); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("unknown grant inferred from current approval", err)
 	}
-	status, err := g.ReadAuthority(ctx, begin.OperatorID)
+	status, err := g.ReadAuthority(ctx, begin.OperationID)
 	if err != nil || status.RevocationRequested {
 		t.Fatal(status, err)
 	}
 	wait, stop := context.WithTimeout(ctx, 30*time.Millisecond)
 	defer stop()
-	if _, err := g.WaitRevoked(wait, begin.OperatorID); !errors.Is(err, context.DeadlineExceeded) {
+	if _, err := g.WaitRevoked(wait, begin.OperationID); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal("unrequested revocation reported complete", err)
 	}
-	transition.State, transition.At = topology.OperatorSuperseded, at.Add(2*time.Millisecond)
-	if _, err := g.propose(ctx, metaengine.TransitionOperatorProposal{Transition: transition}); err != nil {
+	successor := g.state().Latest()
+	successor.MetaGroup().Labels["test"] = "supersede"
+	staged, err = g.Stage(ctx, successor, successor.Version)
+	if err != nil {
 		t.Fatal(err)
 	}
-	status, err = g.ReadAuthority(ctx, begin.OperatorID)
+	if _, err := g.Approve(ctx, staged.Version); err != nil {
+		t.Fatal(err)
+	}
+	status, err = g.ReadAuthority(ctx, begin.OperationID)
 	if err != nil || !status.RevocationRequested || status.RevocationComplete || len(status.Obligations) != 1 {
 		t.Fatal(status, err)
 	}

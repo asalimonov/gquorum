@@ -35,7 +35,7 @@ func TestLoadOnlyPlanKeepsPendingReadmissionRetirement(t *testing.T) {
 					ReplicaKey: ReplicaKey{NodeName: "a", ReplicaID: 1}, Progress: RetainedStopped}}}}
 			}
 			before, _ := json.Marshal(input)
-			plan, err := scopedPlan(input, desired, PlanOptions{Rules: plannerRules()})
+			plan, err := BuildPlanPreferred(input, desired, PlanOptions{Rules: plannerRules()})
 			if err != nil || len(plan.Blocks) != 1 || plan.Blocks[0].GroupID != "work" {
 				t.Fatal("load-only approval captured pending metadata admission", plan, err)
 			}
@@ -79,7 +79,7 @@ func TestPendingReadmissionDeletionKeepsOtherHostsAndNoSyntheticAdmission(t *tes
 				input.Native["work"] = native
 				input.Groups["work"].Observation.ConfState = native.ConfState
 			}
-			plan, err := scopedPlan(input, desired, PlanOptions{Rules: plannerRules()})
+			plan, err := BuildPlanPreferred(input, desired, PlanOptions{Rules: plannerRules()})
 			if err != nil || len(plan.Blocks) != 1 || plan.Blocks[0].GroupID != "work" {
 				t.Fatal("pending retirement prevented scoped deletion", plan, err)
 			}

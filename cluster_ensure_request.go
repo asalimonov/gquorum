@@ -13,6 +13,7 @@ import (
 type ensureMutations interface {
 	CreateGroup(context.Context, GroupSpec, MutationOptions) (MutationResult, error)
 	Approve(context.Context, uint64) (topology.OperationID, error)
+	ReadProgress(context.Context, topology.ProgressQuery) (topology.ProgressPage, error)
 }
 
 type ensureRequest struct {
@@ -22,12 +23,24 @@ type ensureRequest struct {
 	HeadVersion     uint64
 }
 
+const ensureProgressPageLimit = 1000
+
 func (r *ensureRequest) step(ctx context.Context, c ensureMutations,
 	view topology.ReadView) (ensureResult, error) {
-	row := legacyEnsureProgress(view, r.Spec.ID)
+	page, err := c.ReadProgress(ctx, topology.ProgressQuery{GroupID: r.Spec.ID})
+	if err != nil {
+		return ensureResult{}, err
+	}
+	row := ensureProgressRow(page.Groups, r.Spec.ID)
 	known, err := ensureKnownGroup(r.Spec, row)
-	if known.Done || err != nil || row.Approved != nil {
+	if known.Done || err != nil {
 		return known, err
+	}
+	if err := r.checkFailedOperation(ctx, c, row); err != nil {
+		return ensureResult{Done: true}, err
+	}
+	if row.Approved != nil {
+		return ensureResult{}, nil // Approved intent is progressing; keep observing it.
 	}
 	if r.ExpectedVersion != 0 && r.HeadVersion != view.Latest.Version {
 		return ensureResult{}, r.create(ctx, c, view.Latest.Version)
@@ -36,6 +49,64 @@ func (r *ensureRequest) step(ctx context.Context, c ensureMutations,
 		return ensureResult{}, r.approve(ctx, c, view)
 	}
 	return ensureResult{}, r.create(ctx, c, view.Latest.Version)
+}
+
+func ensureProgressRow(groups []topology.GroupProgress, id string) topology.GroupProgress {
+	for _, row := range groups {
+		if row.GroupID == id {
+			return row
+		}
+	}
+	return topology.GroupProgress{GroupID: id}
+}
+
+func (r *ensureRequest) checkFailedOperation(ctx context.Context, c ensureMutations,
+	row topology.GroupProgress) error {
+	if row.OperationID != "" {
+		page, err := c.ReadProgress(ctx, topology.ProgressQuery{OperationID: row.OperationID})
+		if err != nil {
+			return err
+		}
+		return failedEnsureBlock(page.Operations, r.Spec.ID, row.OperationID)
+	}
+	if row.Approved == nil || row.ConvergedVersion != 0 {
+		return nil
+	}
+	// Terminal failure releases the owner ID; inspect the retained group history.
+	query := topology.ProgressQuery{GroupID: r.Spec.ID, Limit: ensureProgressPageLimit}
+	for {
+		page, err := c.ReadProgress(ctx, query)
+		if err != nil {
+			return err
+		}
+		if failed := failedEnsureBlock(page.Operations, r.Spec.ID, ""); failed != nil {
+			return failed
+		}
+		if page.Next == "" {
+			return nil
+		}
+		query.After = page.Next
+	}
+}
+
+func failedEnsureBlock(operations []topology.OperationStatus, group string, exact topology.OperationID) error {
+	for _, operation := range operations {
+		if exact != "" && operation.ID != exact {
+			continue
+		}
+		for _, block := range operation.Blocks {
+			if block.GroupID != group || block.State != topology.OperationFailed {
+				continue
+			}
+			code := fault.Code(block.ErrorCode)
+			if code == "" {
+				code = fault.Unavailable
+			}
+			return fault.New(code,
+				fmt.Sprintf("operation %s failed for group %q: %s", operation.ID, group, block.Error), nil)
+		}
+	}
+	return nil
 }
 
 func (r *ensureRequest) create(ctx context.Context, c ensureMutations, version uint64) error {
@@ -74,28 +145,4 @@ func (r *ensureRequest) approve(ctx context.Context, c ensureMutations, view top
 		return nil // The FSM names the successor; inspect its exact delta on the next read.
 	}
 	return err
-}
-
-// Task78 replaces this schema3 diagnostic with the requested group's operation
-// block. A failed attempt is returned, never implicitly retried by EnsureGroup.
-func (c *clusterView) legacyEnsureFailure(ctx context.Context, view topology.ReadView,
-	group string) (ensureResult, error) {
-	service, err := c.node.service(ctx, readService)
-	if err != nil {
-		return ensureResult{}, err
-	}
-	status, err := service.CachedStatus(ctx)
-	if err != nil {
-		return ensureResult{}, err
-	}
-	op := status.Operator
-	if op == nil || op.Version != view.Target.Version || op.GroupID != group || op.State != topology.OperatorFailed {
-		return ensureResult{}, nil
-	}
-	code := fault.Code(op.ErrorCode)
-	if code == "" {
-		code = fault.Unavailable
-	}
-	message := fmt.Sprintf("operation %s failed for group %q: %s", op.ID, group, op.Error)
-	return ensureResult{Done: true}, fault.New(code, message, nil)
 }

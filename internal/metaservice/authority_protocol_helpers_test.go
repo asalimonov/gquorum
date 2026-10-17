@@ -4,10 +4,14 @@ package metaservice
 
 import (
 	"context"
+	"encoding/json"
+	"slices"
+	"testing"
+	"time"
+
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/topology"
-	"testing"
 )
 
 // Protocol doubles model durable host and group evidence independently of meta.
@@ -51,8 +55,115 @@ func (c *verifiedLoadController) installFence(ctx context.Context, request load.
 
 func (f *mutationFixture) consumeStep(t *testing.T, action topology.AuthorizedStep) {
 	t.Helper()
-	grant := f.command(t, metaengine.BeginEffectProposal{Action: action}).Grant
+	if action.GroupID == topology.MetaGroupID && action.Kind == topology.StepPrepareReplica {
+		instance := "fixture-" + action.NodeName
+		if _, exists := f.g.machine.Admission(action.NodeName, instance); !exists {
+			admission := metaengine.AdmissionRecord{NodeName: action.NodeName, InstanceID: instance,
+				MemberID: action.ReplicaID, OperationID: action.OperationID}
+			f.command(t, metaengine.BindAdmissionProposal{Admission: admission, At: time.Now().UTC(), ProposalID: newProposalID()})
+			f.command(t, metaengine.ReadyAdmissionProposal{NodeName: admission.NodeName, InstanceID: instance,
+				MemberID: action.ReplicaID, OperationID: action.OperationID, ProposalID: newProposalID()})
+		}
+	}
+	grant := f.command(t, metaengine.BeginEffectProposal{Action: action, ProposalID: newProposalID()}).Grant
 	for _, receipt := range protocolEffectReceipts(*grant) {
-		f.command(t, metaengine.RecordEffectProposal{Receipt: receipt})
+		f.command(t, metaengine.RecordEffectProposal{Receipt: receipt, At: time.Now().UTC(), ProposalID: newProposalID()})
+	}
+}
+
+func (f *mutationFixture) fixturePlanRead(t *testing.T, request metaengine.QueryRequest) metaengine.PlanRead {
+	t.Helper()
+	data, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := f.g.machine.Query(t.Context(), data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var read metaengine.PlanRead
+	if err := json.Unmarshal(result.Data, &read); err != nil {
+		t.Fatal(err)
+	}
+	return read
+}
+
+func (f *mutationFixture) fixtureApproval(t *testing.T, doc topology.Document) metaengine.BeginOperationProposal {
+	t.Helper()
+	request := metaengine.QueryRequest{Kind: "approval_plan", Version: doc.Version}
+	read := f.fixturePlanRead(t, request)
+	request.Native = make(map[string]topology.NativeState)
+	for _, scope := range read.Scopes {
+		if native, found := f.native[scope.GroupID]; found && doc.Group(scope.GroupID) != nil {
+			request.Native[scope.GroupID] = native
+		}
+	}
+	read = f.fixturePlanRead(t, request)
+	for group, native := range request.Native {
+		live := make(map[uint64]bool)
+		for _, id := range native.ConfState.Voters {
+			live[id] = true
+		}
+		row := read.Input.Groups[group]
+		row.Observation = &topology.GroupStatus{GroupID: group, Found: true, LeaderID: native.ReplicaID,
+			Commit: native.Applied, ConfState: native.ConfState, HealthKnown: true, LiveVoters: live}
+		read.Input.Groups[group] = row
+	}
+	plan, err := topology.BuildPlanPreferred(read.Input, doc, topology.PlanOptions{Rules: f.g.rules})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return metaengine.BeginOperationProposal{Version: doc.Version, Plan: plan, Scopes: read.Scopes,
+		Actor: "test", Origin: doc.Origin, At: time.Now().UTC(), ProposalID: newProposalID()}
+}
+
+func (f *mutationFixture) approveFixture(t *testing.T, doc topology.Document) {
+	t.Helper()
+	proposal := f.fixtureApproval(t, doc)
+	plan := proposal.Plan
+	begin := f.command(t, proposal)
+	for turn := 0; turn <= len(plan.Steps)+len(plan.Blocks); turn++ {
+		status, err := f.g.machine.Operation(begin.OperationID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status.State == topology.OperationSucceeded {
+			return
+		}
+		work, err := f.g.machine.ReadyBlocks("", 1)
+		if err != nil || len(work) == 0 {
+			t.Fatal("fixture operation cannot progress", status, err)
+		}
+		f.completeFixtureWork(t, work[0].Operation, work[0].GroupID, doc)
+	}
+	t.Fatal("fixture operation did not finish", plan)
+}
+
+func (f *mutationFixture) completeFixtureWork(t *testing.T, op topology.Operation, group string,
+	doc topology.Document) {
+	t.Helper()
+	position := slices.IndexFunc(op.Plan.Blocks, func(block topology.PlanBlock) bool { return block.GroupID == group })
+	block := op.Plan.Blocks[position]
+	transition := topology.OperationTransition{OperationID: op.Status.ID, Version: op.Status.Version,
+		Attempt: op.Status.Attempt, GroupID: group, State: topology.OperationRunning}
+	for _, seq := range block.Steps {
+		step := op.Plan.Steps[seq-1]
+		transition.StepSeq, transition.At = seq, time.Now().UTC()
+		f.command(t, metaengine.TransitionOperationProposal{Transition: transition, ProposalID: newProposalID()})
+		if step.Kind == topology.StepWaitCaughtUp {
+			continue
+		}
+		f.consumeStep(t, topology.AuthorizedStep{OperationID: topology.OperationID(op.Status.ID),
+			Version: op.Status.Version, Attempt: op.Status.Attempt, StepSeq: seq, Kind: step.Kind,
+			GroupID: group, NodeName: step.NodeName, ReplicaID: step.ReplicaID,
+			TransferNodeName: step.TransferNodeName, TransferReplicaID: step.TransferReplicaID,
+			ExpectedVotersDigest: step.ExpectedVotersDigest, ResultVotersDigest: step.ResultVotersDigest})
+	}
+	transition.State, transition.At = topology.OperationSucceeded, time.Now().UTC()
+	f.command(t, metaengine.TransitionOperationProposal{Transition: transition, ProposalID: newProposalID()})
+	if desired := doc.Group(group); desired != nil {
+		f.native[group] = fixtureNative(*desired)
+	} else {
+		delete(f.native, group)
 	}
 }

@@ -46,9 +46,9 @@ func TestRepairPlanQueryValidationAndNilAdapter(t *testing.T) {
 	s, p := repairCommitFixture(t)
 	for _, q := range []QueryRequest{
 		{Kind: "repair_plan", Version: 1}, {Kind: "repair_plan", OperationID: "foreign"},
-		{Kind: "repair_plan", Desired: &p.Doc}, {Kind: "repair_plan", Key: "b", Desired: &p.Doc},
+		{Kind: "repair_plan", Desired: &p.Doc},
 	} {
-		// The unmodified helper edits _meta and b; the keyed query refuses both.
+		// Repair candidates must be keyed and scoped to exactly one group.
 		if _, err := queryScopedPlan(&s, q); !errors.Is(err, fault.ErrInvalid) && !errors.Is(err, fault.ErrOperationAuthorization) {
 			t.Fatal(q, err)
 		}

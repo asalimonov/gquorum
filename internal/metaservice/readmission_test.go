@@ -14,7 +14,7 @@ import (
 func TestReadmissionResponseRequiresExactWholeGrantBatch(t *testing.T) {
 	t.Parallel()
 	id := topology.Identity{ClusterID: "cluster", NodeName: "one", InstanceID: "process", MemberID: 1}
-	a := metaengine.AdmissionRecord{NodeName: id.NodeName, InstanceID: id.InstanceID, MemberID: 2, OperatorID: "exec-v2-a1"}
+	a := metaengine.AdmissionRecord{NodeName: id.NodeName, InstanceID: id.InstanceID, MemberID: 2, OperationID: "exec-v2-a1"}
 	grants := []topology.AuthorityGrant{}
 	for _, group := range []string{topology.MetaGroupID, "load"} {
 		grants = append(grants, topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: id.ClusterID, GroupID: group, Revision: 10}, Purpose: topology.AuthorityReadmit, AdmissionID: metaengine.ReadmissionID(a), Resources: []topology.AuthorityResource{{Kind: topology.AuthorityHost, GroupID: group, NodeName: id.NodeName}}, Targets: []topology.AuthorityTarget{{NodeName: id.NodeName, MemberID: 1, ReplicaID: 1}}})
@@ -23,8 +23,8 @@ func TestReadmissionResponseRequiresExactWholeGrantBatch(t *testing.T) {
 	if err := validateReadmissionResponse(id, valid); err != nil {
 		t.Fatal(err)
 	}
-	valid.Admission.ReadmissionOperatorID = topology.OperationID(a.OperatorID)
-	valid.Admission.OperatorID = "exec-v3-a1"
+	valid.Admission.ReadmissionOperatorID = topology.OperationID(a.OperationID)
+	valid.Admission.OperationID = "exec-v3-a1"
 	if err := validateReadmissionResponse(id, valid); err != nil {
 		t.Fatal("same-member handover invalidated the original grant batch", err)
 	}

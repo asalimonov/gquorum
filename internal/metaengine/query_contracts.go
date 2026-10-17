@@ -22,7 +22,7 @@ func (q QueryRequest) validateScopedFields() error {
 	}
 	if q.Progress != nil || q.Kind == "progress" {
 		if q.Kind != "progress" || q.Progress == nil || q.CollectionIdentity != nil ||
-			q.Key != "" || q.OperatorID != "" || q.AuthorityKey != nil {
+			q.Key != "" || q.OperationID != "" || q.AuthorityKey != nil {
 			return fault.ErrInvalid
 		}
 		return q.Progress.Validate()
@@ -34,7 +34,7 @@ func (q QueryRequest) validateScopedFields() error {
 }
 
 func (q QueryRequest) validateScopedAuthority() error {
-	if q.Kind != "authority" || q.OperationID == "" || q.Key != "" || q.OperatorID != "" ||
+	if q.Kind != "authority" || q.OperationID == "" || q.Key != "" ||
 		q.AuthorityKey != nil || q.Progress != nil || q.CollectionIdentity != nil {
 		return fault.ErrInvalid
 	}
@@ -43,7 +43,7 @@ func (q QueryRequest) validateScopedAuthority() error {
 
 func (q QueryRequest) validateCollectionFields() error {
 	id := q.CollectionIdentity
-	if q.Kind != "collection_check" || id == nil || q.Key != "" || q.OperatorID != "" ||
+	if q.Kind != "collection_check" || id == nil || q.Key != "" ||
 		q.OperationID != "" || q.Progress != nil || q.AuthorityKey != nil || id.ReplicaID == 0 {
 		return fault.ErrInvalid
 	}

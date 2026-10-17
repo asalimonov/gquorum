@@ -300,7 +300,7 @@ func TestConcurrentAuthorizedCleanupRetriesAreIdempotent(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if approved.GroupID != "demo" || approved.NodeName != "node3" || approved.Kind != topology.StepCleanupReplicaState || approved.OperatorID != topology.OperatorID(result.OperationID) || approved.ReplicaID == 0 {
+	if approved.GroupID != "demo" || approved.NodeName != "node3" || approved.Kind != topology.StepCleanupReplicaState || approved.OperationID != topology.OperationID(result.OperationID) || approved.ReplicaID == 0 {
 		t.Fatal("wrong authorization", approved)
 	}
 	local, err := c.Local(ctx, "node3", topology.MetaGroupID)
@@ -346,10 +346,10 @@ func TestConcurrentAuthorizedCleanupRetriesAreIdempotent(t *testing.T) {
 	if err := c.SetBarrier(ctx, "node3", "demo", topology.StepCleanupReplicaState, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WaitOperation(ctx, "node1", topology.OperatorID(result.OperationID)); err != nil {
+	if err := c.WaitOperation(ctx, "node1", topology.OperationID(result.OperationID)); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WaitActive(ctx, result.Document.Version); err != nil {
+	if err := c.WaitFullyConverged(ctx, result.Document.Version); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -444,7 +444,7 @@ func TestPublicNodeRemovalFencesBeforeLifecycleHooks(t *testing.T) {
 	if err := response.Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WaitOperation(ctx, "node1", topology.OperatorID(result.OperationID)); err != nil {
+	if err := c.WaitOperation(ctx, "node1", topology.OperationID(result.OperationID)); err != nil {
 		t.Fatal(err)
 	}
 	// A fenced participant keeps its removal diagnostics, not the successor's
@@ -601,7 +601,7 @@ func TestMetaCallerEffectCompletionLostAcrossLeaderReplacement(t *testing.T) {
 			return false, err
 		}
 		for _, barrier := range controls.Barriers {
-			if barrier.Kind == topology.StepCreateFoundingGroup && barrier.Hits > 0 && barrier.Last.OperatorID == topology.OperatorID(created.OperationID) {
+			if barrier.Kind == topology.StepCreateFoundingGroup && barrier.Hits > 0 && barrier.Last.OperationID == topology.OperationID(created.OperationID) {
 				approved = barrier.Last
 				view, err := c.Local(ctx, "node3", "lost-ack")
 				return view.Found, err
@@ -625,10 +625,10 @@ func TestMetaCallerEffectCompletionLostAcrossLeaderReplacement(t *testing.T) {
 	if err := c.SetBarrier(ctx, "node3", "lost-ack", topology.StepCreateFoundingGroup, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WaitOperation(ctx, "node2", topology.OperatorID(created.OperationID)); err != nil {
+	if err := c.WaitOperation(ctx, "node2", topology.OperationID(created.OperationID)); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WaitActive(ctx, created.Document.Version); err != nil {
+	if err := c.WaitFullyConverged(ctx, created.Document.Version); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Node("node1").Start(ctx); err != nil {
@@ -662,8 +662,8 @@ func TestMetaCallerEffectCompletionLostAcrossLeaderReplacement(t *testing.T) {
 	if err := refused.Decode(&refusal); err != nil || refusal.Code != fault.OperationAuthorization {
 		t.Fatal("completed authorization remained usable", refusal, err)
 	}
-	operator, err := c.Operation(ctx, "node2", topology.OperatorID(created.OperationID))
-	if err != nil || operator.Attempt != 1 || operator.State != topology.OperatorSucceeded {
+	operator, err := c.Operation(ctx, "node2", created.OperationID)
+	if err != nil || operator.Attempt != 1 || operator.State != topology.OperationSucceeded {
 		t.Fatal("leader replacement changed operator attempt", operator, err)
 	}
 }

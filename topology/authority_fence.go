@@ -23,7 +23,7 @@ type FenceObligation struct {
 // AuthorityStatus reports operator revocation progress and outstanding fence
 // obligations.
 type AuthorityStatus struct {
-	OperatorID          OperatorID        `json:"operator_id"`
+	OperationID         OperationID       `json:"operation_id"`
 	RevocationRequested bool              `json:"revocation_requested"`
 	RevocationComplete  bool              `json:"revocation_complete"`
 	Obligations         []FenceObligation `json:"obligations"`

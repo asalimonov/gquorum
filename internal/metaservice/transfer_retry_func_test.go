@@ -24,6 +24,9 @@ type interruptedTransferOwner struct {
 
 func (o *interruptedTransferOwner) DispatchEffect(ctx context.Context, grant topology.AuthorityGrant,
 	resource topology.AuthorityResource, target topology.AuthorityTarget) (topology.EffectReceipt, error) {
+	if grant.Action != nil && grant.Action.Kind != topology.StepTransferLeader {
+		return o.GroupEffects.DispatchEffect(ctx, grant, resource, target)
+	}
 	if err := operator.ValidateEffectTarget(grant, resource, target); err != nil {
 		return topology.EffectReceipt{}, err
 	}
@@ -67,14 +70,14 @@ func testDirectTransferRetry(t *testing.T, mode string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	op, err := g.Apply(ctx, doc.Version)
+	op, err := g.Approve(ctx, doc.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := g.WaitOperator(ctx, op); err != nil {
-		t.Fatal(err)
+	if status, err := g.WaitOperation(ctx, op); err != nil || status.State != topology.OperationSucceeded {
+		t.Fatal(status, err)
 	}
-	waitPublic(t, func() bool { return g.state().Active().Version == doc.Version })
+	waitPublic(t, func() bool { return g.state().Views().FullyConverged.Version == doc.Version })
 	caller, cancelCaller := context.WithCancel(ctx)
 	defer cancelCaller()
 	result := make(chan error, 1)

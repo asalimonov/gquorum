@@ -15,8 +15,8 @@ import (
 func codecGrant() topology.AuthorityGrant {
 	return topology.AuthorityGrant{
 		Key:     topology.AuthorityKey{ClusterID: "cluster", GroupID: "orders", Revision: 100},
-		Purpose: topology.AuthorityEffect, OperatorID: topology.MakeOperatorID(2, 1),
-		Action:    &topology.AuthorizedStep{OperatorID: topology.MakeOperatorID(2, 1), Version: 2, Attempt: 1, StepSeq: 1, Kind: topology.StepAddLearner, GroupID: "orders", NodeName: "b", ReplicaID: 4},
+		Purpose: topology.AuthorityEffect, OperationID: topology.MakeOperationID(2, 1),
+		Action:    &topology.AuthorizedStep{OperationID: topology.MakeOperationID(2, 1), Version: 2, Attempt: 1, StepSeq: 1, Kind: topology.StepAddLearner, GroupID: "orders", NodeName: "b", ReplicaID: 4},
 		Resources: []topology.AuthorityResource{{Kind: topology.AuthorityGroup, GroupID: "orders"}},
 		Targets:   []topology.AuthorityTarget{{NodeName: "a", MemberID: 1, ReplicaID: 3}, {NodeName: "b", MemberID: 2, ReplicaID: 4}},
 	}

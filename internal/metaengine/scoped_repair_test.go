@@ -49,8 +49,6 @@ func repairCommitFixture(t *testing.T) (scopedState, CommitRepairOperationPropos
 	return s, p
 }
 
-// The legacy public constructor remains flat until78. These ordinary reseat/role
-// fixtures partition that exact plan; no admission or deletion edges are involved.
 func repairFixturePlan(t *testing.T, s *scopedState, desired topology.Document) topology.Plan {
 	t.Helper()
 	collector := s.planningCollector()
@@ -74,20 +72,6 @@ func repairFixturePlan(t *testing.T, s *scopedState, desired topology.Document) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range topology.AffectedGroups(s.Target, desired) {
-		block := topology.PlanBlock{GroupID: id, SourceVersion: input.Groups[id].ConvergedVersion}
-		for _, step := range plan.Steps {
-			if step.GroupID != id {
-				continue
-			}
-			if step.Kind == topology.StepCleanupReplicaState {
-				block.Cleanup = append(block.Cleanup, step.Seq)
-			} else {
-				block.Steps = append(block.Steps, step.Seq)
-			}
-		}
-		plan.Blocks = append(plan.Blocks, block)
-	}
 	return plan
 }
 
@@ -102,7 +86,7 @@ func TestScopedRepairAtomicallyInstallsOperationAndPreservedIntent(t *testing.T)
 		t.Fatal(result, err)
 	}
 	if s.AppliedIndex != 11 || s.Target.Version != 3 || s.Latest.Version != 4 || s.Latest.RebasedFrom != 2 ||
-		result.result.Doc.Version != 3 || result.result.OperatorID != "exec-v3-a1" ||
+		result.result.Doc.Version != 3 || result.result.OperationID != "exec-v3-a1" ||
 		s.indexes.groups["b"].Owner != "exec-v3-a1" || s.indexes.groups["shard0"].Owner != "" ||
 		s.Target.Group("shard0").Labels != nil || documentReplica(s.Latest, "b", 4).NodeName != "n2" ||
 		!reflect.DeepEqual(s.Latest.Audit, staged.Audit) || !reflect.DeepEqual(s.Intents, intents) ||
@@ -210,7 +194,7 @@ func TestScopedRepairRefusesOwnedGroupForSchedulerAndConvenienceReseat(t *testin
 			}
 			before, _ := json.Marshal(s)
 			if result, err := s.applyCommitRepairOperation(12, p); err != nil || result.changed ||
-				result.result.Code != proposalAuthorityPending || result.result.OperatorID != "exec-v2-a1" {
+				result.result.Code != proposalAuthorityPending || result.result.OperationID != "exec-v2-a1" {
 				t.Fatal("repair seized existing user scope", result, err)
 			}
 			after, _ := json.Marshal(s)

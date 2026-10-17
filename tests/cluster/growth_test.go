@@ -69,9 +69,9 @@ func stageVoterActivation(ctx context.Context, t *testing.T, c *Cluster, name st
 	}
 	return staged, plan
 }
-func startApply(ctx context.Context, t *testing.T, c *Cluster, node string, version uint64) topology.OperatorID {
+func startApply(ctx context.Context, t *testing.T, c *Cluster, node string, version uint64) topology.OperationID {
 	t.Helper()
-	var id topology.OperatorID
+	var id topology.OperationID
 	// A follower loss can interrupt leader observation after the intent was
 	// staged. Apply is idempotent for this exact version; retry only transient
 	// unavailable responses, and fail immediately on any other refusal.
@@ -87,7 +87,7 @@ func startApply(ctx context.Context, t *testing.T, c *Cluster, node string, vers
 			return true, err
 		}
 		var result struct {
-			ID topology.OperatorID `json:"operation_id"`
+			ID topology.OperationID `json:"operation_id"`
 		}
 		if err := response.Decode(&result); err != nil {
 			return true, err
@@ -188,7 +188,7 @@ func TestRuntimeGrowthExposesLearnerBeforePromotionAndSurvivesRestart(t *testing
 	if err := c.WaitOperation(ctx, "node2", id); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WaitActive(ctx, staged.Document.Version); err != nil {
+	if err := c.WaitFullyConverged(ctx, staged.Document.Version); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Node("node3").Stop(ctx); err != nil {

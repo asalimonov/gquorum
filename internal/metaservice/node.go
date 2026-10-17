@@ -164,7 +164,7 @@ func (g *Group) ResolveLoadPeer(ctx context.Context, ref load.ReplicaRef) (load.
 		}
 	}
 	if name == "" {
-		groups, err := g.state().LegacyRecoveryCatalog(ctx)
+		groups, err := g.state().RecoveryCatalog(ctx)
 		if err != nil {
 			return load.Peer{}, err
 		}

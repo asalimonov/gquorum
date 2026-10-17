@@ -19,7 +19,7 @@ func scopedPendingTransfer(s *scopedState) topology.AuthorityKey {
 	action := scopedPlanAction(&s.Operations[1], s.Operations[1].Plan.Steps[1])
 	resource := topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: "shard0"}
 	key := topology.AuthorityKey{ClusterID: s.Target.ClusterID, GroupID: "shard0", Revision: 9}
-	grant := topology.AuthorityGrant{Key: key, Purpose: topology.AuthorityEffect, OperatorID: action.OperatorID,
+	grant := topology.AuthorityGrant{Key: key, Purpose: topology.AuthorityEffect, OperationID: action.OperationID,
 		Action: &action, Resources: []topology.AuthorityResource{resource},
 		Targets: []topology.AuthorityTarget{{NodeName: "n1", MemberID: 1, ReplicaID: 1}}}
 	s.AuthorityRecords = append(s.AuthorityRecords, scopedAuthorityRecord{Class: "execution", authorityRecord: authorityRecord{Grant: grant}})
@@ -128,7 +128,6 @@ func TestScopedRevocationFencesReboundStopAndPreservesOtherCleanup(t *testing.T)
 func TestScopedRevocationKeepsPendingDeletionReadmission(t *testing.T) {
 	t.Parallel()
 	s, proposal := existingDebtDeletionFixture(t)
-	s.Rules.Limits.MaxPendingAuthorityRecords = 3 // Durable proof exceeds the obsolete global budget.
 	var records []scopedAuthorityRecord
 	for _, record := range s.AuthorityRecords {
 		if record.Grant.Purpose == topology.AuthorityReadmit {
@@ -204,7 +203,7 @@ func TestScopedDeletionFencesIssuedPreparationAndFounding(t *testing.T) {
 				}
 			}
 			action := scopedPlanAction(&s.Operations[0], s.Operations[0].Plan.Steps[1])
-			grant := topology.AuthorityGrant{Purpose: topology.AuthorityEffect, OperatorID: action.OperatorID,
+			grant := topology.AuthorityGrant{Purpose: topology.AuthorityEffect, OperationID: action.OperationID,
 				Key: topology.AuthorityKey{ClusterID: s.Target.ClusterID, GroupID: "shard0", Revision: 5}, Action: &action,
 				Resources: []topology.AuthorityResource{{Kind: topology.AuthorityHost, GroupID: "shard0", NodeName: "n1"}},
 				Targets:   []topology.AuthorityTarget{{NodeName: "n1", MemberID: 1, ReplicaID: 1}}}

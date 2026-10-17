@@ -16,7 +16,7 @@ func (s *scopedState) applyBindAdmission(index uint64, p BindAdmissionProposal) 
 	})
 	if position >= 0 {
 		existing := &s.Admissions[position]
-		if existing.MemberID != p.Admission.MemberID || existing.OperatorID != p.Admission.OperatorID {
+		if existing.MemberID != p.Admission.MemberID || existing.OperationID != p.Admission.OperationID {
 			return proposalApplication{}, fault.ErrOperationAuthorization
 		}
 		return proposalApplication{result: admissionResult(p.ProposalID, *existing)}, nil
@@ -35,7 +35,7 @@ func (s *scopedState) boundAdmission(p BindAdmissionProposal) (AdmissionRecord, 
 	identity := topology.Identity{ClusterID: s.Target.ClusterID, NodeName: p.Admission.NodeName,
 		MemberID: p.Admission.MemberID, InstanceID: p.Admission.InstanceID}
 	founding, ready := s.admissionBasis(identity)
-	if !ready || founding == "" || founding != topology.OperationID(p.Admission.OperatorID) {
+	if !ready || founding == "" || founding != topology.OperationID(p.Admission.OperationID) {
 		return AdmissionRecord{}, fault.ErrOperationAuthorization
 	}
 	for _, prior := range s.Admissions {
@@ -81,7 +81,7 @@ func (s *scopedState) installAdmission(index uint64, id string, record Admission
 
 func validateAdmissionBinding(p BindAdmissionProposal) error {
 	if err := validateAdmissionIdentity(p.Admission); err != nil {
-		return err
+		return fault.New(fault.Invalid, "invalid admission identity", err)
 	}
 	if p.Admission.ReadmissionInstanceID != "" || p.Admission.ReadmissionOperatorID != "" || p.At.IsZero() {
 		return fault.ErrOperationAuthorization

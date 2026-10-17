@@ -16,7 +16,7 @@ func (m *Machine) WithLoadScope(id storage.Identity, member uint64, fn func(Load
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	scope, err := queryScopedLoadScope(nil, id, member) // Task78 installs complete scoped state.
+	scope, err := queryScopedLoadScope(m.scoped, id, member)
 	if err != nil {
 		return err
 	}

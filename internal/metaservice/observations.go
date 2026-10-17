@@ -108,22 +108,26 @@ func (g *Group) recordNodeHealth(name string, _ topology.Health, next topology.H
 	g.opts.Events.Publish(e)
 }
 
-// recordLegacyApplied projects drain completion from schema-3 whole-document
-// convergence. Task78 replaces this adapter with per-group progress.
-func (g *Group) recordLegacyApplied(machine *metaengine.Machine, active topology.Document) {
+// recordScopedApplied publishes drain completion from durable per-node
+// progress and operation changes from the exact retained operation record.
+func (g *Group) recordScopedApplied(machine *metaengine.Machine) {
 	g.recorderMu.Lock()
 	defer g.recorderMu.Unlock()
-	g.recordOperatorApplied(machine)
+	g.recordOperationChanges(machine)
+	status, err := machine.ProgressStatus()
+	if err != nil {
+		return
+	}
 	drained := map[string]bool{}
-	for _, n := range active.Nodes {
-		if topology.EffectiveNodeState(active, n.Name) != topology.NodeDrained {
+	for _, n := range status.Nodes {
+		if n.EffectiveState != topology.NodeDrained {
 			continue
 		}
-		drained[n.Name] = true
-		if !g.lastDrained[n.Name] && g.opts.Events != nil {
+		drained[n.Node.Name] = true
+		if !g.lastDrained[n.Node.Name] && g.opts.Events != nil {
 			e := g.observerEvent(events.DrainCompleted)
-			e.SubjectNode = n.Name
-			e.Version = active.Version
+			e.SubjectNode = n.Node.Name
+			e.Version = status.TargetVersion
 			e.GroupID = topology.MetaGroupID
 			g.opts.Events.Publish(e)
 		}
@@ -131,27 +135,45 @@ func (g *Group) recordLegacyApplied(machine *metaengine.Machine, active topology
 	g.lastDrained = drained
 }
 
-// recordOperatorApplied shares recordApplied's recorder lock.
-func (g *Group) recordOperatorApplied(machine *metaengine.Machine) {
-	if ex, exists := machine.CurrentOperator(); exists {
-		next := ex.Status
-		if g.lastOperator == nil || !reflect.DeepEqual(*g.lastOperator, next) {
-			g.lastOperator = &next
-			if g.opts.Events != nil {
-				e := g.observerEvent(events.OperatorChanged)
-				e.OperatorID = string(next.ID)
-				e.Version = next.Version
-				e.Attempt = next.Attempt
-				e.StepSeq = next.CurrentStep
-				e.State = string(next.State)
-				e.Code = next.ErrorCode
-				e.GroupID = next.GroupID
-				e.SubjectNode = next.NodeName
-				if next.CurrentStep > 0 && next.CurrentStep <= len(ex.Plan.Steps) {
-					e.ReplicaID = ex.Plan.Steps[next.CurrentStep-1].ReplicaID
-				}
-				g.opts.Events.Publish(e)
-			}
+// The recorder follows every retained block, including work from older approvals;
+// a newer disjoint operation cannot hide an earlier block's completion.
+// The caller holds recorderMu and the engine invokes it after durable Apply.
+func (g *Group) recordOperationChanges(machine *metaengine.Machine) {
+	operations, err := machine.OperationStatuses()
+	if err != nil {
+		return
+	}
+	current := make(map[topology.OperationID]map[string]topology.BlockStatus, len(operations))
+	for _, op := range operations {
+		blocks := make(map[string]topology.BlockStatus, len(op.Blocks))
+		current[op.ID] = blocks
+		g.recordChangedBlocks(op, blocks)
+	}
+	g.lastOperations = current // Pruned operations release their local dedup state.
+}
+
+func (g *Group) recordChangedBlocks(op topology.OperationStatus, blocks map[string]topology.BlockStatus) {
+	for _, block := range op.Blocks {
+		blocks[block.GroupID] = block
+		previous, found := g.lastOperations[op.ID][block.GroupID]
+		if !found || !reflect.DeepEqual(previous, block) {
+			g.recordOperationBlock(op, block)
 		}
 	}
+}
+
+func (g *Group) recordOperationBlock(operation topology.OperationStatus, block topology.BlockStatus) {
+	if g.opts.Events == nil {
+		return
+	}
+	e := g.observerEvent(events.OperatorChanged)
+	e.OperationID, e.Version, e.Attempt = string(operation.ID), operation.Version, operation.Attempt
+	e.GroupID, e.StepSeq, e.State, e.Code = block.GroupID, block.CurrentStep, string(block.State), block.ErrorCode
+	if reason := block.Blocked; reason != nil {
+		e.SubjectNode, e.ReplicaID = reason.NodeName, reason.ReplicaID
+		if e.Code == "" {
+			e.Code = reason.Code
+		}
+	}
+	g.opts.Events.Publish(e)
 }

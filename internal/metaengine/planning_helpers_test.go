@@ -1,17 +1,13 @@
 package metaengine
 
 import (
-	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/asalimonov/gquorum/topology"
 )
 
-type planningFixtureSource interface {
-	PlanningInput(context.Context, topology.Document, map[string]topology.NativeState) (topology.PlanInput, error)
-}
-
-func testPlanningInput(tb testing.TB, source planningFixtureSource, desired topology.Document,
+func testPlanningInput(tb testing.TB, source *Machine, desired topology.Document,
 	observed map[string]topology.GroupStatus) topology.PlanInput {
 	tb.Helper()
 	native := make(map[string]topology.NativeState)
@@ -25,10 +21,31 @@ func testPlanningInput(tb testing.TB, source planningFixtureSource, desired topo
 				ConfState: status.Clone().ConfState}
 		}
 	}
-	input, err := source.PlanningInput(tb.Context(), desired, native)
-	if err != nil {
-		tb.Fatal(err)
+	read := func(query QueryRequest) PlanRead {
+		tb.Helper()
+		data, err := json.Marshal(query)
+		if err != nil {
+			tb.Fatal(err)
+		}
+		result, err := source.Query(tb.Context(), data)
+		if err != nil {
+			tb.Fatal(err)
+		}
+		var captured PlanRead
+		if err := json.Unmarshal(result.Data, &captured); err != nil {
+			tb.Fatal(err)
+		}
+		return captured
 	}
+	request := QueryRequest{Kind: "planning", Desired: &desired}
+	captured := read(request)
+	request.Native = make(map[string]topology.NativeState)
+	for _, scope := range captured.Scopes {
+		if value, ok := native[scope.GroupID]; ok {
+			request.Native[scope.GroupID] = value
+		}
+	}
+	input := read(request).Input
 	for id, status := range observed {
 		row := input.Groups[id]
 		owned := status.Clone()

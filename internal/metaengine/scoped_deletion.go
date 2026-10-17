@@ -108,7 +108,7 @@ func (p deletionPreparation) ordinaryDebt(id storage.Identity, block topology.Pl
 }
 
 func scopedPlanAction(operation *topology.Operation, step topology.Step) topology.AuthorizedStep {
-	return topology.AuthorizedStep{OperatorID: topology.OperatorID(operation.Status.ID),
+	return topology.AuthorizedStep{OperationID: topology.OperationID(operation.Status.ID),
 		Version: operation.Status.Version, Attempt: operation.Status.Attempt, StepSeq: step.Seq,
 		Kind: step.Kind, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID,
 		TransferNodeName: step.TransferNodeName, TransferReplicaID: step.TransferReplicaID,

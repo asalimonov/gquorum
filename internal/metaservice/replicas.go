@@ -59,7 +59,7 @@ func (g *Group) LoadReplicaScope(ctx context.Context, id storage.Identity) (scop
 	if id.NodeName != g.identity.NodeName || id.ClusterID != g.identity.ClusterID {
 		return scope, fault.ErrIdentityMismatch
 	}
-	err = g.machine.LegacyWithLoadScope(id, g.identity.MemberID, func(owned metaengine.LoadScope) error {
+	err = g.machine.WithLoadScope(id, g.identity.MemberID, func(owned metaengine.LoadScope) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -94,7 +94,7 @@ func (g *Group) RecordLoadReplica(ctx context.Context, group string, record Repl
 	}
 	id := storage.Identity{NodeName: record.NodeName, ClusterID: record.ClusterID, GroupID: group,
 		ReplicaID: record.ReplicaID}
-	return g.machine.LegacyWithLoadScope(id, g.identity.MemberID, func(metaengine.LoadScope) error {
+	return g.machine.WithLoadScope(id, g.identity.MemberID, func(metaengine.LoadScope) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -129,7 +129,7 @@ func (g *Group) ForgetGrantedLoadReplica(parent context.Context, grant topology.
 		if g.store == nil {
 			return fault.ErrReplicaNotReady
 		}
-		return g.machine.LegacyWithGrantedLoadCleanup(ctx, grant, target, func() error {
+		return g.machine.WithGrantedLoadCleanup(ctx, grant, target, func() error {
 			return g.store.ForgetReplica(grant.Key.GroupID, expected)
 		})
 	}

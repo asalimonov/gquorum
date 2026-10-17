@@ -71,7 +71,7 @@ func (g *Group) applyOperationLocal(ctx context.Context, request applyVersionReq
 		return "", err
 	}
 	g.controller.Signal()
-	return topology.OperationID(result.OperatorID), nil
+	return result.OperationID, nil
 }
 
 func (g *Group) operationProposal(read metaengine.PlanRead, request applyVersionRequest) (any, error) {
@@ -82,12 +82,13 @@ func (g *Group) operationProposal(read metaengine.PlanRead, request applyVersion
 			}
 		}
 		return metaengine.RetryOperationProposal{Previous: request.Previous,
-			Scopes: read.Scopes, At: time.Now().UTC()}, nil
+			Scopes: read.Scopes, At: time.Now().UTC(), ProposalID: newProposalID()}, nil
 	}
 	plan, err := g.planOperation(read)
 	if err != nil {
 		return nil, err
 	}
 	return metaengine.BeginOperationProposal{Version: request.Version, Plan: plan, Scopes: read.Scopes,
-		Actor: g.currentIdentity().NodeName, Origin: read.Target.Origin, At: time.Now().UTC()}, nil
+		Actor: g.currentIdentity().NodeName, Origin: read.Target.Origin, At: time.Now().UTC(),
+		ProposalID: newProposalID()}, nil
 }

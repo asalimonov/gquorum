@@ -1,6 +1,7 @@
 package metaengine
 
 import (
+	"fmt"
 	"slices"
 	"time"
 
@@ -19,6 +20,9 @@ const (
 // before this candidate can replace live state. No application callbacks or I/O.
 func prepareScopedApproval(s *scopedState, desired topology.Document,
 	p BeginOperationProposal, kind approvalKind) (*scopedState, error) {
+	if err := knownPlanSteps(p.Plan); err != nil {
+		return nil, err
+	}
 	if err := s.validateApprovalCaptures(desired, p, kind); err != nil {
 		return nil, err
 	}
@@ -33,12 +37,8 @@ func prepareScopedApproval(s *scopedState, desired topology.Document,
 	if err != nil {
 		return nil, err
 	}
-	shape := p.Plan
-	if shape.Blocks == nil {
-		shape.Blocks = []topology.PlanBlock{} // Explicitly empty scoped coverage.
-	}
-	if err := topology.ValidatePlanShape(input, desired, shape); err != nil {
-		return nil, err
+	if err := topology.ValidatePlanShape(input, desired, p.Plan); err != nil {
+		return nil, planContentRefusal(err)
 	}
 	if err := validateNewRetirement(collector, input, desired, p.Plan); err != nil {
 		return nil, err
@@ -71,8 +71,14 @@ func (s *scopedState) validateApprovalCaptures(desired topology.Document,
 		p.Version <= s.Target.Version || s.indexes.first[p.Version] != "" || p.At.IsZero() {
 		return fault.ErrOperationAuthorization
 	}
-	if err := validateScopeGroups(p.Scopes, topology.AffectedGroups(s.Target, desired)); err != nil {
-		return err
+	if desired.Audit != nil && desired.Audit.Forced &&
+		(desired.Audit.Operation != topology.AuditOperationForceRetireNode || p.Actor == "" || p.Origin == "") {
+		return fault.ErrOperationAuthorization
+	}
+	groups := topology.AffectedGroups(s.Target, desired)
+	if err := validateScopeGroups(p.Scopes, groups); err != nil {
+		return fault.New(fault.Invalid,
+			fmt.Sprintf("approval scopes %+v do not cover affected groups %v", p.Scopes, groups), err)
 	}
 	if err := validatePlanScopes(p.Plan, p.Scopes); err != nil {
 		return err

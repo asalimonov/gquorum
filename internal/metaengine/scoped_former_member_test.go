@@ -22,7 +22,7 @@ func threeMemberReadmissionFixture(t *testing.T, prepared bool) scopedState {
 		action := scopedPlanAction(&s.Operations[0], s.Operations[0].Plan.Steps[0])
 		grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: s.Target.ClusterID,
 			GroupID: topology.MetaGroupID, Revision: 8}, Purpose: topology.AuthorityEffect,
-			OperatorID: action.OperatorID, Action: &action,
+			OperationID: action.OperationID, Action: &action,
 			Resources: []topology.AuthorityResource{{Kind: topology.AuthorityHost, GroupID: topology.MetaGroupID, NodeName: "n1"}},
 			Targets:   []topology.AuthorityTarget{{NodeName: "n1", MemberID: 2, ReplicaID: 2}}}
 		s.AuthorityRecords = append(s.AuthorityRecords, scopedAuthorityRecord{Class: "execution",
@@ -68,7 +68,7 @@ func threeMemberReadmissionFixture(t *testing.T, prepared bool) scopedState {
 	s.Nodes[0].Owner = op.Status.ID
 	s.Admissions[0].State = AdmissionSuperseded
 	s.Admissions = append(s.Admissions, AdmissionRecord{NodeName: "n1", InstanceID: "third",
-		MemberID: 3, OperatorID: "exec-v3-a1", State: AdmissionPending})
+		MemberID: 3, OperationID: "exec-v3-a1", State: AdmissionPending})
 	prepareScopedFixture(t, &s)
 	return s
 }
@@ -82,7 +82,7 @@ func TestScopedReadmissionDerivesFormerOwnerAcrossUnpreparedApproval(t *testing.
 			want, wrong = wrong, want
 		}
 		p := BeginReadmissionAuthority{NodeName: "n1", InstanceID: "third", MemberID: 3,
-			PreviousMemberID: wrong, OperatorID: "exec-v3-a1", ProposalID: "third"}
+			PreviousMemberID: wrong, OperationID: "exec-v3-a1", ProposalID: "third"}
 		before, _ := json.Marshal(s)
 		if _, err := s.applyBeginReadmissionAuthority(11, p); !errors.Is(err, fault.ErrOperationAuthorization) {
 			t.Fatal("stale/unprepared former member was trusted", prepared, err)
@@ -134,7 +134,7 @@ func TestScopedReadmissionRefusesContradictoryMultipleFormerOwners(t *testing.T)
 	s.indexes, _ = s.buildIndexes()
 	before, _ := json.Marshal(s)
 	p := BeginReadmissionAuthority{NodeName: "n1", InstanceID: "third", MemberID: 3,
-		PreviousMemberID: 2, OperatorID: "exec-v3-a1", ProposalID: "contradictory"}
+		PreviousMemberID: 2, OperationID: "exec-v3-a1", ProposalID: "contradictory"}
 	if _, err := s.applyBeginReadmissionAuthority(11, p); !errors.Is(err, fault.ErrUnavailable) {
 		t.Fatal("ambiguous former owner was selected", err)
 	}

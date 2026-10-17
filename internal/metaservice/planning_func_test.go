@@ -24,7 +24,7 @@ func TestMetaUnknownLoadControllerRefusesApprovalWithoutChangingTarget(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = g.Apply(ctx, staged.Version); !errors.Is(err, fault.ErrNoController) {
+	if _, err = g.Approve(ctx, staged.Version); !errors.Is(err, fault.ErrNoController) {
 		t.Fatal("approval has no load controller", err)
 	}
 	if g.state().Target().Version != 1 || g.state().Latest().Version != 2 {

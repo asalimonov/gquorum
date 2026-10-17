@@ -66,7 +66,7 @@ func TestAuthorityRevocationBoundaryAndLostFenceReplyThreeNodes(t *testing.T) {
 			if err := Poll(ctx, func() (bool, error) {
 				view, err := c.Authority(ctx, "node1", "work")
 				for _, action := range view.Actions {
-					if action.Authorization.OperatorID == old && action.Authorization.Kind == topology.StepDemoteVoter {
+					if action.Authorization.OperationID == old && action.Authorization.Kind == topology.StepDemoteVoter {
 						delayed = action
 						return true, err
 					}
@@ -211,7 +211,7 @@ func TestAuthorityRevocationBoundaryAndLostFenceReplyThreeNodes(t *testing.T) {
 				if err := c.WaitOperation(ctx, "node2", newOp); err != nil {
 					t.Fatal("lost acknowledgement could not resume the same empty plan", err)
 				}
-				if err := c.WaitActive(ctx, newStage.Document.Version); err != nil {
+				if err := c.WaitFullyConverged(ctx, newStage.Document.Version); err != nil {
 					t.Fatal(err)
 				}
 			} else {
@@ -220,7 +220,7 @@ func TestAuthorityRevocationBoundaryAndLostFenceReplyThreeNodes(t *testing.T) {
 					if err != nil || !op.State.Terminal() {
 						return false, err
 					}
-					if op.State != topology.OperatorFailed || !strings.Contains(op.Error, string(fault.ReplanRequired)+":") {
+					if op.State != topology.OperationFailed || !strings.Contains(op.Error, string(fault.ReplanRequired)+":") {
 						return true, fmt.Errorf("stale empty plan did not report its replan requirement: %+v", op)
 					}
 					return true, nil

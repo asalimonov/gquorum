@@ -63,7 +63,7 @@ func stoppedFollowerPlacement(t *testing.T, size int) {
 			}
 			if err := Poll(ctx, func() (bool, error) {
 				status, err := c.Status(ctx, node.Spec.Name)
-				return status.LatestVersion == staged.Document.Version && status.TargetVersion == base.Version && status.ActiveVersion == base.Version && status.Scheduling.State == topology.SchedulingBlocked && status.Scheduling.Reason == "staged_latest", err
+				return status.LatestVersion == staged.Document.Version && status.TargetVersion == base.Version && status.FullyConverged.Version == base.Version && status.Scheduling.State == topology.SchedulingBlocked && status.Scheduling.Reason == "staged_latest", err
 			}); err != nil {
 				t.Fatal("durable staged placement did not block repair", node.Spec.Name, err)
 			}

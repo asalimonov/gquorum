@@ -254,7 +254,7 @@ func TestCleanupDispatchAlternatesFencesAtCapacityOne(t *testing.T) {
 	cleanup.pending = cleanup.pending[:1]
 	fence := cleanup.grant.Clone()
 	fence.Key.GroupID, fence.Key.Revision = "fenced", 2
-	fence.Action, fence.OperatorID, fence.Purpose = nil, "", topology.AuthorityFence
+	fence.Action, fence.OperationID, fence.Purpose = nil, "", topology.AuthorityFence
 	fence.Resources = []topology.AuthorityResource{{Kind: topology.AuthorityHost, GroupID: "fenced", NodeName: "a"}}
 	fence.Targets = fence.Targets[:1]
 	if err := fence.Validate(); err != nil {

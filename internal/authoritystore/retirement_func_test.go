@@ -40,7 +40,7 @@ func TestCompletedRetirementRetainsExactProofAcrossFencesAndRebind(t *testing.T)
 	}
 	readmit := input.Grant.Clone()
 	readmit.Key.Revision, readmit.Purpose = 30, topology.AuthorityReadmit
-	readmit.OperatorID, readmit.Action, readmit.AdmissionID = "", nil, "replacement"
+	readmit.OperationID, readmit.Action, readmit.AdmissionID = "", nil, "replacement"
 	readmissionReceipt := finishRetirementFixture(t, s, readmit)
 	previous := s.Identity()
 	next := previous

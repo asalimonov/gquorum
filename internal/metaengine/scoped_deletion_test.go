@@ -102,7 +102,7 @@ func TestScopedDeletionPreservesInheritedRetirement(t *testing.T) {
 		!reflect.DeepEqual(next.Cleanup[1], s.Cleanup[1]) {
 		t.Fatal("deletion replaced inherited or consumed cleanup proof")
 	}
-	if next.Cleanup[0].StopAction.OperatorID != "exec-v7-a1" ||
+	if next.Cleanup[0].StopAction.OperationID != "exec-v7-a1" ||
 		!slices.Contains(next.RetiredGroups, retiredGroup{ID: "a", Version: 7}) {
 		t.Fatal("deletion lost its required stop or permanent identity")
 	}
@@ -129,7 +129,7 @@ func TestScopedDeletionBeforeFirstConvergence(t *testing.T) {
 			host := topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: "shard0", NodeName: "n1"}
 			s.AuthorityRecords = append(s.AuthorityRecords, scopedAuthorityRecord{Class: "execution",
 				authorityRecord: authorityRecord{Grant: topology.AuthorityGrant{Key: key, Purpose: topology.AuthorityEffect,
-					OperatorID: action.OperatorID, Action: &action, Resources: []topology.AuthorityResource{host},
+					OperationID: action.OperationID, Action: &action, Resources: []topology.AuthorityResource{host},
 					Targets: []topology.AuthorityTarget{{NodeName: "n1", MemberID: 1, ReplicaID: 1}}}}})
 			s.AuthorityFloors = append(s.AuthorityFloors, resourceFloor{Resource: host, Key: key})
 		} else {
@@ -192,7 +192,7 @@ func TestScopedDeletionReadmissionCoverage(t *testing.T) {
 			}
 			next := s.prepareApprovalOwners(s.Latest, p)
 			next.Target.MetaGroup().Replicas[0].ReplicaID = 2
-			a := AdmissionRecord{NodeName: "n1", MemberID: 2, InstanceID: "replacement", OperatorID: "exec-v2-a1"}
+			a := AdmissionRecord{NodeName: "n1", MemberID: 2, InstanceID: "replacement", OperationID: "exec-v2-a1"}
 			collector.evidence.admissions = append(slices.Clone(s.Admissions), a)
 			for _, group := range []string{topology.MetaGroupID, "shard0"} {
 				if mode == "missing" {

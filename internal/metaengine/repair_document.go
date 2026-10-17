@@ -91,13 +91,10 @@ func allocateRepairID(group *topology.Group, latest topology.Document, groupID s
 	return group.AllocateReplicaID()
 }
 
-func stampRepairVoter(repair *topology.Document, group *topology.Group, replica *topology.Replica,
+func stampRepairVoter(_ *topology.Document, group *topology.Group, replica *topology.Replica,
 	options ReplicaRepairOptions) {
 	replica.UpdatedAt = options.At
 	group.UpdatedAt = options.At
-	if node := repair.Node(options.NodeName); node != nil {
-		node.UpdatedAt = options.At
-	}
 }
 
 func finishRepair(repair *topology.Document, activeVersion, latestVersion uint64, options ReplicaRepairOptions) {

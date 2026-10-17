@@ -69,7 +69,7 @@ func TestScopedUnprovenNativeMembershipGetsExplicitBlocker(t *testing.T) {
 	s, _ := approvalFixture(t, "shard0")
 	// Isolate completion preparation: an issued native Add may have run even
 	// after its grant closes. The settled fence is not its outcome receipt.
-	action := topology.AuthorizedStep{OperatorID: "exec-v2-a1", Version: 2, Attempt: 1, StepSeq: 2,
+	action := topology.AuthorizedStep{OperationID: "exec-v2-a1", Version: 2, Attempt: 1, StepSeq: 2,
 		GroupID: "shard0", Kind: topology.StepAddLearner, NodeName: "n1", ReplicaID: 2}
 	resource := topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: "shard0"}
 	catalog := s.authorityCatalog().clone()
@@ -123,7 +123,7 @@ func TestScopedApprovalReplayChecksPlanAndDoesNotRevokeSucceededBlock(t *testing
 	p.Plan.Blocks[0].SourceVersion++
 	result, err = s.applyBeginOperation(s.AppliedIndex+1, p)
 	after, _ := json.Marshal(s)
-	if err != nil || result.result.Accepted || result.result.OperatorID != "exec-v3-a1" || !bytes.Equal(before, after) {
+	if err != nil || result.result.Accepted || result.result.OperationID != "exec-v3-a1" || !bytes.Equal(before, after) {
 		t.Fatal("different plan was accepted as an approval replay", result, err)
 	}
 }

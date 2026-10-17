@@ -18,7 +18,7 @@ import (
 // the old load replica, which was already retired by the first batch.
 func appendCollectionReadmission(s *scopedState, former, next uint64) topology.AuthorityKey {
 	admission := AdmissionRecord{NodeName: "n", InstanceID: fmt.Sprintf("member-%d", next),
-		MemberID: next, OperatorID: topology.OperatorID(fmt.Sprintf("exec-v%d-a1", next+10)), State: AdmissionSuperseded}
+		MemberID: next, OperationID: topology.OperationID(fmt.Sprintf("exec-v%d-a1", next+10)), State: AdmissionSuperseded}
 	s.Admissions = append(s.Admissions, admission)
 	key := topology.AuthorityKey{ClusterID: "c", GroupID: topology.MetaGroupID, Revision: 20 + next}
 	resource := topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: topology.MetaGroupID, NodeName: "n"}

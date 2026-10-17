@@ -18,7 +18,7 @@ func (s *scopedState) collectionCheckLocked(id storage.Identity) CollectionCheck
 
 func queryScopedCollection(state *scopedState, query QueryRequest) (CollectionCheck, error) {
 	if state == nil {
-		return CollectionCheck{}, fault.ErrUnsupported // Remove the schema3 adapter at Task 78.
+		return CollectionCheck{}, fault.ErrUnsupported
 	}
 	if err := query.validateCollectionFields(); err != nil {
 		return CollectionCheck{}, err

@@ -16,7 +16,7 @@ import (
 )
 
 func (_ *fixture) approve(kind topology.StepKind, targets ...storage.Identity) topology.AuthorizedStep {
-	a := topology.AuthorizedStep{OperatorID: topology.MakeOperatorID(1, 1), Version: 1, Attempt: 1, StepSeq: 1, Kind: kind, GroupID: "work"}
+	a := topology.AuthorizedStep{OperationID: topology.MakeOperationID(1, 1), Version: 1, Attempt: 1, StepSeq: 1, Kind: kind, GroupID: "work"}
 	if kind != topology.StepCreateFoundingGroup && kind != topology.StepDeleteGroupState {
 		a.NodeName, a.ReplicaID = targets[0].NodeName, targets[0].ReplicaID
 	}

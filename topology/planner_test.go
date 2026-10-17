@@ -337,6 +337,7 @@ func TestBuildPlanEstablishedGroupMissingGloballyIsUnavailable(t *testing.T) {
 	active := planDoc(1, 3, []string{"n1"}, shardOf("shard0", rep("n1", 1)))
 	desired := active.Clone()
 	desired.Version++
+	desired.Group("shard0").Labels = map[string]string{"owner": "jobs"}
 	statuses := statusForDocument(active)
 	statuses["shard0"] = GroupStatus{GroupID: "shard0", Found: false}
 
@@ -346,7 +347,7 @@ func TestBuildPlanEstablishedGroupMissingGloballyIsUnavailable(t *testing.T) {
 	}
 }
 
-func TestBuildPlanRefusesObservedGroupWithoutActiveIdentities(t *testing.T) {
+func TestBuildPlanValidatesUnknownNativeIdentityOnlyInAffectedScope(t *testing.T) {
 	t.Parallel()
 	active := planDoc(1, 3, []string{"n1"})
 	desired := active.Clone()
@@ -354,7 +355,12 @@ func TestBuildPlanRefusesObservedGroupWithoutActiveIdentities(t *testing.T) {
 	statuses := statusForDocument(active)
 	statuses["orphan"] = groupStatus("orphan", 1, []uint64{1}, nil)
 
-	_, err := BuildPlan(testPlanInput(active, statuses), desired, plannerRules())
+	input := testPlanInput(active, statuses)
+	if plan, err := BuildPlan(input, desired, plannerRules()); err != nil || len(plan.Blocks) != 0 {
+		t.Fatal("unrelated native state acquired an execution scope", plan, err)
+	}
+	desired.Groups = append(desired.Groups, shardOf("orphan", rep("n1", 2)))
+	_, err := BuildPlan(input, desired, plannerRules())
 	if !errors.Is(err, fault.ErrUnsafeMembership) {
 		t.Fatalf("BuildPlan error = %v, want fault.ErrUnsafeMembership", err)
 	}
@@ -424,6 +430,7 @@ func TestPlannerRejectsMalformedObservedMembership(t *testing.T) {
 	active := planDoc(1, 3, []string{"n1", "n2"}, shardOf("load", rep("n1", 1), rep("n2", 2)))
 	desired := active.Clone()
 	desired.Version++
+	desired.Group("load").Labels = map[string]string{"owner": "jobs"}
 	cases := []struct {
 		name string
 		cs   raftpb.ConfState

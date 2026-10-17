@@ -35,8 +35,8 @@ func TestRetryGrantReusesReadyAndJoinedIdentityWithFreshProof(t *testing.T) {
 		grant.Key.Revision++
 		action := f.approve(kind, f.localID(1))
 		action.Attempt = uint32(grant.Key.Revision)
-		action.OperatorID = topology.MakeOperatorID(action.Version, action.Attempt)
-		grant.Action, grant.OperatorID = &action, action.OperatorID
+		action.OperationID = topology.MakeOperationID(action.Version, action.Attempt)
+		grant.Action, grant.OperationID = &action, action.OperationID
 		req := f.request(action, f.localID(1))
 		req.Grant = grant.Clone()
 		// The exact state is already ready/joined, but the new grant cannot use
@@ -93,9 +93,9 @@ func TestRetryGrantParksMissingRetainedReplicaBeforeFactory(t *testing.T) {
 	h := f.host(t)
 	for attempt := uint32(1); attempt <= 2; attempt++ {
 		a := f.approve(topology.StepPrepareReplica, f.localID(1))
-		a.Attempt, a.OperatorID = attempt, topology.MakeOperatorID(1, attempt)
+		a.Attempt, a.OperationID = attempt, topology.MakeOperationID(1, attempt)
 		grant.Key.Revision++
-		grant.Action, grant.OperatorID = &a, a.OperatorID
+		grant.Action, grant.OperationID = &a, a.OperationID
 		grant.Resources = []topology.AuthorityResource{{Kind: topology.AuthorityHost, GroupID: "work", NodeName: f.node.NodeName}}
 		_, err := h.InstallHostFence(deadline(t), grant)
 		must(t, err)

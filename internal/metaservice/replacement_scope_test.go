@@ -33,14 +33,14 @@ func TestReplacementScopesUseExactProofAndNameBusyOwner(t *testing.T) {
 	if err := checkReseatScope(read.Input, "work", key); err != nil {
 		t.Fatal(err)
 	}
-	if err := checkReadmissionScope(read.Input, "n1", 11); err != nil {
+	if err := metaengine.ValidateReadmissionScope(read.Input, "n1", 11); err != nil {
 		t.Fatal(err)
 	}
 	key.ReplicaID = 7
 	if err := checkReseatScope(read.Input, "work", key); !errors.Is(err, fault.ErrVersionConflict) {
 		t.Fatal(err)
 	}
-	if err := checkReadmissionScope(read.Input, "n1", 7); !errors.Is(err, fault.ErrVersionConflict) {
+	if err := metaengine.ValidateReadmissionScope(read.Input, "n1", 7); !errors.Is(err, fault.ErrVersionConflict) {
 		t.Fatal(err)
 	}
 	row := read.Input.Groups["work"]
@@ -49,7 +49,7 @@ func TestReplacementScopesUseExactProofAndNameBusyOwner(t *testing.T) {
 	if _, err := unownedProvenGroup(read.Input, "work"); !errors.Is(err, fault.ErrUnavailable) || !strings.Contains(err.Error(), string(row.OperationID)) {
 		t.Fatal(err)
 	}
-	if err := checkReadmissionScope(read.Input, "n1", 11); !errors.Is(err, fault.ErrUnavailable) {
+	if err := metaengine.ValidateReadmissionScope(read.Input, "n1", 11); !errors.Is(err, fault.ErrUnavailable) {
 		t.Fatal(err)
 	}
 	row.OperationID, row.ConvergedVersion = "", 0

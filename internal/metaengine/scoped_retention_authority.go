@@ -20,7 +20,7 @@ func (r *scopedRetention) closeAuthority() {
 func (r *scopedRetention) closeGrant(record scopedAuthorityRecord) {
 	grant := record.Grant
 	if record.Class == cleanupAuthorityClass || !r.catalog.recordSettled(&record.authorityRecord) {
-		r.operation(topology.OperationID(grant.OperatorID))
+		r.operation(topology.OperationID(grant.OperationID))
 	}
 	if record.Class == cleanupAuthorityClass {
 		for _, target := range grant.Targets {
@@ -47,7 +47,7 @@ func (r *scopedRetention) closeReadmission(id string) {
 	for _, admission := range r.state.Admissions {
 		if ReadmissionID(admission) == id {
 			r.admissions[admissionKey(admission.NodeName, admission.InstanceID)] = true
-			r.operation(topology.OperationID(admission.OperatorID))
+			r.operation(topology.OperationID(admission.OperationID))
 		}
 	}
 }

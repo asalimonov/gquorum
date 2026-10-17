@@ -19,7 +19,7 @@ func (m *Machine) EffectReceipts(ctx context.Context, grant topology.AuthorityGr
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	record := m.authority.records[grant.Key]
+	record := m.scoped.indexes.grants[grant.Key]
 	if record == nil || !record.Grant.Equal(grant) {
 		return nil, fault.ErrOperationAuthorization
 	}
@@ -51,10 +51,6 @@ func sameFenceBoundary(a, b topology.FenceEvidence) bool {
 	return a.Resource.Kind == topology.AuthorityGroup || a.Receiver.MemberID == b.Receiver.MemberID
 }
 
-func (sm *topologySM) applyRecordFence(p RecordFenceProposal) (ApplyResult, bool) {
-	return sm.authority.recordFence(p)
-}
-
 func (a authorityCatalog) recordFence(p RecordFenceProposal) (ApplyResult, bool) {
 	r := a.records[p.Evidence.Key]
 	if r == nil || p.Evidence.Validate(r.Grant) != nil {
@@ -74,7 +70,6 @@ func (a authorityCatalog) recordFence(p RecordFenceProposal) (ApplyResult, bool)
 	}
 	r.Fences = append(r.Fences, p.Evidence)
 	slices.SortFunc(r.Fences, func(a, b topology.FenceEvidence) int { return a.Resource.Compare(b.Resource) })
-	a.refreshRevocations()
 	return ApplyResult{ProposalID: p.ProposalID, Accepted: true}, true
 }
 
@@ -92,10 +87,6 @@ func (a authorityCatalog) fenceEvidenceConflict(evidence topology.FenceEvidence)
 		}
 	}
 	return ""
-}
-
-func (sm *topologySM) applyRecordEffect(p RecordEffectProposal) (ApplyResult, bool) {
-	return sm.authority.recordEffect(p)
 }
 
 func (a authorityCatalog) recordEffect(p RecordEffectProposal) (ApplyResult, bool) {
@@ -123,7 +114,6 @@ func (a authorityCatalog) recordEffect(p RecordEffectProposal) (ApplyResult, boo
 		}
 		return a.Target.Compare(b.Target)
 	})
-	a.refreshRevocations()
 	return ApplyResult{ProposalID: p.ProposalID, Accepted: true}, true
 }
 
@@ -136,40 +126,4 @@ func (a authorityCatalog) receiptFitsInstalledFences(receipt topology.EffectRece
 		}
 	}
 	return true
-}
-
-// PendingFences returns outstanding resource fence obligations from retained
-// revocations.
-func (m *Machine) PendingFences() []topology.FenceObligation {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	var pending []topology.FenceObligation
-	for _, r := range m.authority.revocations {
-		for _, ob := range r.Obligations {
-			if ob.Evidence == nil {
-				pending = appendObligation(pending, ob)
-			}
-		}
-	}
-	return pending
-}
-
-// AuthorityStatus reports retained revocation progress for an operator.
-func (m *Machine) AuthorityStatus(id topology.OperatorID) (topology.AuthorityStatus, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.authorityStatusLocked(id)
-}
-
-func (sm *topologySM) authorityStatusLocked(id topology.OperatorID) (topology.AuthorityStatus, error) {
-	r := sm.authority.revocations[id]
-	if r == nil {
-		if sm.operators[id] == nil {
-			return topology.AuthorityStatus{}, fault.ErrHistoryUnavailable
-		}
-		return topology.AuthorityStatus{OperatorID: id}, nil
-	}
-	return (topology.AuthorityStatus{OperatorID: id, RevocationRequested: r.Requested,
-		RevocationComplete: r.Requested &&
-			revokedComplete(r), Obligations: r.Obligations}).Clone(), nil
 }

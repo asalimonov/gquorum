@@ -3,6 +3,7 @@ package metaservice
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -44,11 +45,12 @@ func (g *Group) capturePlan(ctx context.Context, request metaengine.QueryRequest
 		return after, err
 	}
 	if err := comparePlanCapture(before, after); err != nil {
-		return metaengine.PlanRead{}, err
+		return metaengine.PlanRead{}, fmt.Errorf("recapture plan scopes %v -> %v: %w", before.Scopes, after.Scopes, err)
 	}
 	for id, status := range observed {
 		row := after.Input.Groups[id]
 		owned := status.Clone()
+		owned.LeaderNodeName = progressLeaderName(row, owned.LeaderID)
 		row.GroupID, row.Observation = id, &owned
 		after.Input.Groups[id] = row
 	}

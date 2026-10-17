@@ -63,10 +63,10 @@ func TestNodeWatchBeforeStartBoundAndFinalState(t *testing.T) {
 func TestNodeObservationOwnsNestedStatus(t *testing.T) {
 	t.Parallel()
 	version := uint64(4)
-	operator := topology.OperatorID("operation")
+	operator := topology.OperationID("operation")
 	original := NodeObservation{Status: NodeStatus{
 		Meta:        topology.GroupStatus{ConfState: raftpb.ConfState{Voters: []uint64{1}}, Progress: map[uint64]topology.ReplicaProgress{1: {Match: 4}}, LiveVoters: map[uint64]bool{1: true}},
-		Scheduling:  topology.SchedulingStatus{BlockingVersion: &version, CurrentOperatorID: &operator, CurrentAction: &topology.SchedulingActionStatus{GroupID: "work"}},
+		Scheduling:  topology.SchedulingStatus{BlockingVersion: &version, CurrentOperationID: &operator, CurrentAction: &topology.SchedulingActionStatus{GroupID: "work"}},
 		SelfRemoval: &topology.SelfRemovalStatus{Version: 4}, Loads: []LocalReplicaStatus{{RunID: "original"}},
 	}}
 	copy := cloneNodeObservation(original)
@@ -74,7 +74,7 @@ func TestNodeObservationOwnsNestedStatus(t *testing.T) {
 	copy.Status.Meta.Progress[1] = topology.ReplicaProgress{Match: 9}
 	copy.Status.Meta.LiveVoters[1] = false
 	*copy.Status.Scheduling.BlockingVersion = 9
-	*copy.Status.Scheduling.CurrentOperatorID = "changed"
+	*copy.Status.Scheduling.CurrentOperationID = "changed"
 	copy.Status.Scheduling.CurrentAction.GroupID = "changed"
 	copy.Status.SelfRemoval.Version = 9
 	copy.Status.Loads[0].RunID = "changed"

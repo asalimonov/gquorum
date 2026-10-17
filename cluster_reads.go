@@ -35,7 +35,7 @@ func (c *clusterView) ReadAuthority(ctx context.Context, id topology.OperationID
 	if err != nil {
 		return topology.AuthorityStatus{}, err
 	}
-	return m.ReadAuthority(ctx, topology.OperatorID(id))
+	return m.ReadAuthority(ctx, topology.OperationID(id))
 }
 
 func (c *clusterView) WaitRevoked(ctx context.Context, id topology.OperationID) (topology.AuthorityStatus, error) {
@@ -43,5 +43,5 @@ func (c *clusterView) WaitRevoked(ctx context.Context, id topology.OperationID) 
 	if err != nil {
 		return topology.AuthorityStatus{}, err
 	}
-	return m.WaitRevoked(ctx, topology.OperatorID(id))
+	return m.WaitRevoked(ctx, topology.OperationID(id))
 }

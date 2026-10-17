@@ -32,7 +32,7 @@ func TestAppliedObserverRunsOutsideLockAfterPersistence(t *testing.T) {
 		if fail {
 			p.fail = errors.New("application fsync failed")
 		}
-		m := NewMachine(testRules(), p)
+		m := mustMachine(t, testRules(), p)
 		data, err := Encode(ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0})
 		if err != nil {
 			t.Fatal(err)

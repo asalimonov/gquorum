@@ -76,7 +76,7 @@ func resolvePlacement(view ReadView, edited Document,
 	if err := ValidateTransition(view.Latest, candidate, rules, nil); err != nil {
 		return PreparedPlacement{Report: report}, err
 	}
-	if err := ValidatePlacementTransition(view.Target, view.Active, candidate); err != nil {
+	if err := ValidatePlacementTransition(view.Target, view.Target, candidate); err != nil {
 		appendPlacementRejections(&report, err)
 		return PreparedPlacement{Report: report}, err
 	}
@@ -282,7 +282,9 @@ func setPlacementTimestamps(before Document, next *Document, at time.Time) {
 // validated by the plan and execution paths using Active as their baseline.
 func ValidatePlacementTransition(approved, base, desired Document) error {
 	if approved.ClusterID != desired.ClusterID || base.ClusterID != desired.ClusterID {
-		return invalid("placement transition has mismatched cluster identity")
+		return invalid(fmt.Sprintf("placement transition has mismatched cluster identity: "+
+			"approved=%q base=%q desired=%q",
+			approved.ClusterID, base.ClusterID, desired.ClusterID))
 	}
 	for _, group := range desired.Groups {
 		report, err := EvaluatePlacement(PlacementInput{Approved: approved, Desired: desired, GroupID: group.ID})
@@ -403,7 +405,7 @@ func validatePlacementEdit(view ReadView, edited Document, options placementPrep
 	if err := rules.Limits.Validate(); err != nil {
 		return err
 	}
-	for _, doc := range []Document{view.Latest, view.Target, view.Active} {
+	for _, doc := range []Document{view.Latest, view.Target} {
 		if err := doc.Validate(rules); err != nil {
 			return err
 		}
@@ -414,9 +416,8 @@ func validatePlacementEdit(view ReadView, edited Document, options placementPrep
 
 func coherentPlacementEdit(view ReadView, edited Document) bool {
 	return !(view.Latest.Version == 0 || view.Latest.Version == math.MaxUint64 || view.Target.Version == 0 ||
-		view.Active.Version == 0 || view.Latest.Version < view.Target.Version ||
-		view.Target.Version < view.Active.Version || view.Latest.ClusterID == "" ||
-		view.Target.ClusterID != view.Latest.ClusterID || view.Active.ClusterID != view.Latest.ClusterID ||
+		view.Latest.Version < view.Target.Version || view.Latest.ClusterID == "" ||
+		view.Target.ClusterID != view.Latest.ClusterID ||
 		edited.ClusterID != view.Latest.ClusterID || edited.Version != view.Latest.Version)
 }
 

@@ -12,11 +12,10 @@ import (
 )
 
 const (
-	defaultPendingAuthorityRecords = 1024
-	defaultMaxNodes                = 3
-	defaultMaxReplicas             = 5
-	defaultConcurrentGroups        = 4
-	defaultConcurrentCleanup       = 2
+	defaultMaxNodes          = 3
+	defaultMaxReplicas       = 5
+	defaultConcurrentGroups  = 4
+	defaultConcurrentCleanup = 2
 )
 
 // MetaGroupID names the reserved Raft group that replicates cluster topology.
@@ -56,9 +55,6 @@ const (
 
 // WithDefaults fills absent capacity limits with the library defaults.
 func (l Limits) WithDefaults() Limits {
-	if l.MaxPendingAuthorityRecords == 0 {
-		l.MaxPendingAuthorityRecords = defaultPendingAuthorityRecords
-	}
 	if l.MaxNodes == 0 {
 		l.MaxNodes = defaultMaxNodes
 	}
@@ -76,7 +72,7 @@ func (l Limits) WithDefaults() Limits {
 
 // Validate checks positive topology capacities and nonnegative execution limits.
 func (l Limits) Validate() error {
-	if l.MaxNodes < 1 || l.MaxReplicas < 1 || l.MaxPendingAuthorityRecords < 0 {
+	if l.MaxNodes < 1 || l.MaxReplicas < 1 {
 		return invalid("limits must be positive")
 	}
 	if l.MaxConcurrentGroups < 0 || l.MaxConcurrentCleanup < 0 {

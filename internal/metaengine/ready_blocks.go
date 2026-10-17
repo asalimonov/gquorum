@@ -15,7 +15,7 @@ import (
 func (m *Machine) ReadyBlocks(after string, limit int) ([]operator.WorkItem, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return queryReadyBlocks(nil, after, limit) // Task78 installs complete scoped state.
+	return queryReadyBlocks(m.scoped, after, limit)
 }
 
 func queryReadyBlocks(s *scopedState, after string, limit int) ([]operator.WorkItem, error) {
@@ -115,6 +115,6 @@ func (s *scopedState) requiredBlocker(op *topology.Operation, position int) *top
 
 func blockWait(action topology.AuthorizedStep, code string, err error) *topology.BlockedReason {
 	return &topology.BlockedReason{Code: code, Message: err.Error(),
-		OperationID: topology.OperationID(action.OperatorID),
+		OperationID: topology.OperationID(action.OperationID),
 		StepSeq:     action.StepSeq, NodeName: action.NodeName, ReplicaID: action.ReplicaID}
 }

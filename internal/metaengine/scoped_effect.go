@@ -34,7 +34,8 @@ func (s *scopedState) applyBeginEffect(index uint64, p BeginEffectProposal) (pro
 		return proposalApplication{}, err
 	}
 	action := p.Action
-	grant := topology.AuthorityGrant{Purpose: topology.AuthorityEffect, OperatorID: action.OperatorID, Action: &action,
+	grant := topology.AuthorityGrant{Purpose: topology.AuthorityEffect,
+		OperationID: action.OperationID, Action: &action,
 		Key:       topology.AuthorityKey{ClusterID: s.Target.ClusterID, GroupID: action.GroupID, Revision: index},
 		Resources: resources.Resources, Targets: resources.Targets}
 	if err := s.installGrants(index, []topology.AuthorityGrant{grant}); err != nil {

@@ -1,0 +1,27 @@
+//go:build !functional
+
+package metaengine
+
+import (
+ "encoding/json"
+ "os"
+ "testing"
+)
+
+// One-time deliberate fixture capture; never run as an automatic update mode.
+func TestExportScopedV4Fixture(t *testing.T) {
+ state := scopedCodecFixture()
+ prepareScopedFixture(t, &state)
+ data, err := json.Marshal(state)
+ if err != nil { t.Fatal(err) }
+ if err := os.WriteFile("testdata/scoped-v4/snapshot.json", append(data, '\n'), 0600); err != nil { t.Fatal(err) }
+ _, collection := collectionProposalFixture(t)
+ data, err = Encode(collection)
+ if err != nil { t.Fatal(err) }
+ if err := os.WriteFile("testdata/scoped-v4/collection-command.json", append(data, '\n'), 0600); err != nil { t.Fatal(err) }
+ pending, p := collectionProposalFixture(t)
+ result := applyMachine(t, restoreMachineFixture(t, pending), p)
+ data, err = json.Marshal(result)
+ if err != nil { t.Fatal(err) }
+ if err := os.WriteFile("testdata/scoped-v4/collection-result.json", append(data, '\n'), 0600); err != nil { t.Fatal(err) }
+}

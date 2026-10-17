@@ -85,13 +85,13 @@ func (c config) prepareAdmissionPin() error {
 				MemberID   uint64 `json:"member_id"`
 				Readmitted bool   `json:"readmitted"`
 				Admission  struct {
-					OperatorID topology.OperatorID `json:"execution_id"`
+					OperationID topology.OperationID `json:"execution_id"`
 				} `json:"admission"`
 			}
 			if err := json.Unmarshal(reply.Data, &grant); err != nil {
 				return err
 			}
-			if grant.Readmitted || grant.MemberID == 0 || grant.Admission.OperatorID == "" {
+			if grant.Readmitted || grant.MemberID == 0 || grant.Admission.OperationID == "" {
 				return fmt.Errorf("join returned no exact pending grant")
 			}
 			granted := identity
@@ -117,7 +117,7 @@ func (c config) prepareAdmissionPin() error {
 			}
 			if c.AdmissionPinPhase == "ready" {
 				header.MemberId = grant.MemberID
-				ready, _ := json.Marshal(map[string]any{"NodeName": c.NodeName, "InstanceID": c.InstanceID, "Address": c.MetaAddress, "MemberID": grant.MemberID, "ExecutionID": grant.Admission.OperatorID})
+				ready, _ := json.Marshal(map[string]any{"NodeName": c.NodeName, "InstanceID": c.InstanceID, "Address": c.MetaAddress, "MemberID": grant.MemberID, "ExecutionID": grant.Admission.OperationID})
 				for {
 					reply, err := rpc.JoinReady(ctx, &metapb.MetaRequest{Header: header, Data: ready})
 					if err != nil {

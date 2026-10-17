@@ -54,7 +54,7 @@ func prepareAdmissionHandovers(source, next *scopedState) error {
 
 func (h admissionHandover) prepare(previous AdmissionRecord, successor *topology.Operation) (AdmissionRecord, error) {
 	approved := h.proof.documents[successor.Status.Version]
-	original := h.source.indexes.operations[topology.OperationID(previous.OperatorID)]
+	original := h.source.indexes.operations[topology.OperationID(previous.OperationID)]
 	if original == nil || previous.State.terminal() || !h.currentOwner(previous, original) ||
 		approved.MemberID(previous.NodeName) != previous.MemberID ||
 		compareAdmissionOperations(original, successor) >= 0 ||
@@ -71,9 +71,9 @@ func (h admissionHandover) prepare(previous AdmissionRecord, successor *topology
 	}
 	next := previous
 	if next.ReadmissionOperatorID == "" {
-		next.ReadmissionOperatorID = topology.OperationID(previous.OperatorID)
+		next.ReadmissionOperatorID = topology.OperationID(previous.OperationID)
 	}
-	next.OperatorID = topology.OperatorID(successor.Status.ID)
+	next.OperationID = topology.OperationID(successor.Status.ID)
 	if !validAdmissionOrigin(next, h.proof) {
 		return AdmissionRecord{}, fault.ErrOperationAuthorization
 	}

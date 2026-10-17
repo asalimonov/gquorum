@@ -53,7 +53,7 @@ func (s *scopedState) validateCollectionCourier(debt cleanupRecord, p RecordColl
 	}
 	if p.ReadmissionKey != nil {
 		grant := s.authorityCatalog().records[*p.ReadmissionKey]
-		if last.OperatorID == "" || grant == nil || grant.Grant.Purpose != topology.AuthorityReadmit ||
+		if last.OperationID == "" || grant == nil || grant.Grant.Purpose != topology.AuthorityReadmit ||
 			grant.Grant.AdmissionID != ReadmissionID(last) {
 			return fault.ErrOperationAuthorization
 		}

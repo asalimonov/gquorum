@@ -3,12 +3,10 @@ package metaengine
 import "github.com/asalimonov/gquorum/topology"
 
 func validateScopedIdentities(state *scopedState, index *scopedIndexes) error {
-	legacy := smState{Latest: state.Latest, Target: state.Target, RetiredGroups: state.RetiredGroups,
-		Sessions: state.Sessions, Locks: state.Locks}
-	if err := validateRestoredRetirements(legacy); err != nil {
+	if err := validateRestoredRetirements(state.RetiredGroups, state.Latest, state.Target); err != nil {
 		return err
 	}
-	if err := validateRestoredSessions(legacy); err != nil {
+	if err := validateRestoredSessions(state.Sessions, state.Locks); err != nil {
 		return err
 	}
 	check := scopedIdentityValidation{floors: map[string]uint64{}, names: map[voterSwitchKey]string{}}

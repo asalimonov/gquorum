@@ -4,6 +4,7 @@ package metaengine
 
 import (
 	"testing"
+	"time"
 
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3/raftpb"
@@ -176,5 +177,70 @@ func TestScopedRetentionPinsIssuedIntermediateAdmissionPrefix(t *testing.T) {
 		if s.indexes.operations[topology.MakeOperationID(version, 1)] == nil || s.indexes.documents[version].Version == 0 {
 			t.Fatal("handover lost issued intermediate prefix provenance", version)
 		}
+	}
+}
+
+func TestScopedIntermediateMemberRoutingSurvivesPruningAndRestore(t *testing.T) {
+	t.Parallel()
+	s := scopedAdmissionFixture()
+	admissionPrefixReceipt(&s, 0, 1)
+	m := restoreMachineFixture(t, s)
+	desired := s.History[0].Clone()
+	desired.MetaGroup().NextReplicaID = s.Target.MetaGroup().NextReplicaID
+	desired.ParentVersion = s.Target.Version
+	staged := applyMachine(t, m, ProposeDocument{Doc: desired, ExpectedVersion: s.Target.Version, ProposalID: "abandon-member"})
+	if !staged.Accepted {
+		t.Fatal(staged)
+	}
+	desired = staged.Doc
+	observed := assumedReadmissionStatuses(s.History[0], "")
+	meta := observed[topology.MetaGroupID]
+	meta.ConfState.Learners = []uint64{2}
+	observed[topology.MetaGroupID] = meta
+	plan, err := topology.BuildPlan(testPlanningInput(t, m, desired, observed), desired, s.Rules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Steps) != 2 || plan.Steps[0].Kind != topology.StepRemoveReplica || plan.Steps[1].Kind != topology.StepStopReplica || plan.Steps[0].NodeName != "n2" || plan.Steps[0].ReplicaID != 2 {
+		t.Fatal("lost exact intermediate retirement", plan)
+	}
+	begin := applyMachine(t, m, BeginOperationProposal{Version: desired.Version, Plan: plan,
+		Scopes: m.scoped.capturePlanScopes(topology.AffectedGroups(s.Target, desired)), At: s.Operations[0].UpdatedAt.Add(time.Second),
+		Actor: "admin", Origin: topology.OriginAPI, ProposalID: "retire-member"})
+	if !begin.Accepted {
+		t.Fatal(begin)
+	}
+	ageScopedHistory(t, m.scoped)
+	pruneScopedFixture(t, m.scoped)
+	m = restoreMachineFixture(t, *m.scoped)
+	if owner, established := m.MemberOwner(2); owner != "n2" || !established {
+		t.Fatal("restore lost the prepared intermediate route", owner, established)
+	}
+	owners, _ := m.MemberOwners()
+	delete(owners, 2)
+	if owner, _ := m.MemberOwner(2); owner != "n2" {
+		t.Fatal("routing read aliases retained proof")
+	}
+	op := m.scoped.indexes.operations[begin.OperationID].Clone()
+	transition := scopedTransitionFor(op, topology.MetaGroupID, 1)
+	if result := applyMachine(t, m, TransitionOperationProposal{Transition: transition, ProposalID: "removing"}); !result.Accepted {
+		t.Fatal(result)
+	}
+	issued := applyMachine(t, m, BeginEffectProposal{Action: scopedPlanAction(&op, plan.Steps[0]), ProposalID: "remove-member"})
+	if !issued.Accepted || issued.Grant == nil {
+		t.Fatal(issued)
+	}
+	for _, receipt := range fixtureEffectReceipts(*issued.Grant) {
+		result := applyMachine(t, m, RecordEffectProposal{Receipt: receipt, At: transition.At, ProposalID: "removed"})
+		if !result.Accepted {
+			t.Fatal(result)
+		}
+	}
+	if owner, _ := m.MemberOwner(2); owner != "" {
+		t.Fatal("consumed removal still accepts the retired member", owner)
+	}
+	m = restoreMachineFixture(t, *m.scoped)
+	if owner, _ := m.MemberOwner(2); owner != "" {
+		t.Fatal("restore resurrected the retired intermediate route", owner)
 	}
 }

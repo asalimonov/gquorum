@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -11,30 +12,30 @@ import (
 func (e *Controller) performScopedEffect(ctx context.Context, work WorkItem, grant topology.AuthorityGrant) error {
 	receipts, err := e.authority.EffectReceipts(ctx, grant)
 	if err != nil {
-		return err
+		return fmt.Errorf("read receipts: %w", err)
 	}
 	complete, err := receiptSetComplete(grant, receipts)
 	if err != nil {
-		return err
+		return fmt.Errorf("validate receipts: %w", err)
 	}
 	if complete && grant.Action.Kind != topology.StepTransferLeader {
 		return nil
 	}
 	request, err := e.nextScopedRequest(ctx, grant, receipts)
 	if err != nil {
-		return err
+		return fmt.Errorf("select next target: %w", err)
 	}
 	if err := e.checkScopedWork(ctx, work); err != nil {
-		return err
+		return fmt.Errorf("revalidate scope: %w", err)
 	}
 	_, err = e.dispatchRequest(ctx, request)
 	e.rememberScopedRequest(request)
 	if err != nil {
-		return err
+		return fmt.Errorf("dispatch target %s: %w", request.target.NodeName, err)
 	}
 	complete, err = e.effectComplete(ctx, grant)
 	if err != nil {
-		return err
+		return fmt.Errorf("verify effect receipt: %w", err)
 	}
 	if !complete {
 		return fault.ErrAuthorityPending // Next worker takes the next missing target/phase.
@@ -89,7 +90,9 @@ func (e *Controller) nextScopedRequest(ctx context.Context, grant topology.Autho
 			return effectDispatch{grant: grant, resource: resource, target: target}, nil
 		}
 	}
-	return effectDispatch{}, fault.ErrReplicaNotReady
+	return effectDispatch{}, fault.New(fault.ReplicaNotReady,
+		fmt.Sprintf("no granted target matches observed leader %d for %s (targets=%v)", status.LeaderID,
+			grant.Key.GroupID, grant.Targets), nil)
 }
 
 func (e *Controller) nextScopedHost(grant topology.AuthorityGrant,

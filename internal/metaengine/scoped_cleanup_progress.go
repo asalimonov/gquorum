@@ -10,7 +10,7 @@ import (
 
 func (check scopedCleanupValidation) stopAction(debt cleanupRecord) bool {
 	origin := check.index.operations[debt.OperationID]
-	bound := check.index.operations[topology.OperationID(debt.StopAction.OperatorID)]
+	bound := check.index.operations[topology.OperationID(debt.StopAction.OperationID)]
 	if bound == nil || bound.Status.Version < origin.Status.Version ||
 		bound.Status.Version == origin.Status.Version && bound.Status.Attempt < origin.Status.Attempt {
 		return false

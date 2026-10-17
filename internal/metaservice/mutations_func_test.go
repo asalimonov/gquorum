@@ -21,15 +21,20 @@ import (
 // These source mutation ports use the real deterministic FSM as their document
 // store. Native membership/transport are verified separately by runtime tests.
 type mutationFixture struct {
-	g     *Group
-	index uint64
+	g      *Group
+	index  uint64
+	native map[string]topology.NativeState
 }
 
 func newMutationFixture(t *testing.T) *mutationFixture {
 	t.Helper()
 	rules := topology.Rules{SchemaVersion: 1, Limits: topology.Limits{MaxNodes: 5, MaxReplicas: 5}}
-	g := &Group{rules: rules, identity: topology.Identity{NodeName: "n1", ClusterID: "cluster"}, machine: metaengine.NewMachine(rules, nil)}
-	f := &mutationFixture{g: g}
+	machine, err := metaengine.NewMachine(rules, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := &Group{rules: rules, identity: topology.Identity{NodeName: "n1", ClusterID: "cluster"}, machine: machine}
+	f := &mutationFixture{g: g, native: make(map[string]topology.NativeState)}
 	doc := topology.Document{ClusterID: "cluster", Placement: topology.PlacementRule{MinReplicas: 1, MaxReplicas: 3}, Origin: topology.OriginFounding, Groups: []topology.Group{{ID: topology.MetaGroupID, NextReplicaID: 4}, {ID: "work", NextReplicaID: 4}}}
 	for i := 1; i <= 3; i++ {
 		name := fmt.Sprintf("n%d", i)
@@ -38,6 +43,7 @@ func newMutationFixture(t *testing.T) *mutationFixture {
 			doc.Groups[j].Replicas = append(doc.Groups[j].Replicas, topology.Replica{NodeName: name, ReplicaID: uint64(i), Role: topology.ReplicaVoter})
 		}
 	}
+	f.native[topology.MetaGroupID] = fixtureNative(*doc.MetaGroup())
 	f.commit(t, doc, true)
 	return f
 }
@@ -45,12 +51,13 @@ func (f *mutationFixture) command(t *testing.T, proposal any) metaengine.ApplyRe
 	t.Helper()
 	data, err := metaengine.Encode(proposal)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("encode %T: %v", proposal, err)
 	}
 	f.index++
-	result, err := f.g.machine.Apply(context.Background(), raftengine.Command{Index: f.index, Term: 1, Data: data})
+	result, err := f.g.machine.Apply(context.Background(), raftengine.Command{Index: f.index, Term: 1, Data: data,
+		ConfState: f.native[topology.MetaGroupID].ConfState})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("apply %T: %v", proposal, err)
 	}
 	var applied metaengine.ApplyResult
 	if err = json.Unmarshal(result.Data, &applied); err != nil {
@@ -68,29 +75,22 @@ func (f *mutationFixture) commit(t *testing.T, doc topology.Document, activate b
 	if !activate {
 		return
 	}
-	at := time.Now().UTC()
-	version := result.Doc.Version
-	plan := topology.Plan{Version: version}
-	active := f.g.machine.Active()
-	for _, group := range active.Groups {
-		if group.ID == topology.MetaGroupID || result.Doc.Group(group.ID) != nil {
-			continue
+	f.approveFixture(t, result.Doc)
+}
+
+func fixtureNative(group topology.Group) topology.NativeState {
+	native := topology.NativeState{GroupID: group.ID, Applied: 1}
+	for _, replica := range group.Replicas {
+		if native.ReplicaID == 0 {
+			native.ReplicaID = replica.ReplicaID
 		}
-		for _, replica := range group.Replicas {
-			plan.Steps = append(plan.Steps, topology.Step{Seq: len(plan.Steps) + 1, Kind: topology.StepStopReplica, GroupID: group.ID, NodeName: replica.NodeName, ReplicaID: replica.ReplicaID})
+		if replica.Role == topology.ReplicaVoter {
+			native.ConfState.Voters = append(native.ConfState.Voters, replica.ReplicaID)
+		} else {
+			native.ConfState.Learners = append(native.ConfState.Learners, replica.ReplicaID)
 		}
-		plan.Steps = append(plan.Steps, topology.Step{Seq: len(plan.Steps) + 1, Kind: topology.StepDeleteGroupState, GroupID: group.ID})
 	}
-	begin := f.command(t, metaengine.BeginOperatorProposal{Version: version, Plan: plan, Actor: "test", Origin: result.Doc.Origin, At: at})
-	transition := topology.OperatorTransition{OperatorID: begin.OperatorID, Version: version, Attempt: 1, At: at.Add(time.Millisecond)}
-	for _, step := range plan.Steps {
-		transition.StepSeq, transition.GroupID, transition.NodeName, transition.State = step.Seq, step.GroupID, step.NodeName, topology.OperatorRunning
-		f.command(t, metaengine.TransitionOperatorProposal{Transition: transition})
-		f.consumeStep(t, topology.AuthorizedStep{OperatorID: begin.OperatorID, Version: version, Attempt: 1, StepSeq: step.Seq, Kind: step.Kind, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID})
-	}
-	transition.State = topology.OperatorSucceeded
-	f.command(t, metaengine.TransitionOperatorProposal{Transition: transition})
-	f.command(t, metaengine.ActivateTargetProposal{OperatorID: begin.OperatorID, Version: version, Attempt: 1})
+	return native
 }
 func preview() MutationOptions { return MutationOptions{Preview: true} }
 func mutationDoc(t *testing.T, r MutationResult, err error) topology.Document {
@@ -369,7 +369,7 @@ func TestMutationExpectedVersionAndPreviewAreExact(t *testing.T) {
 	}
 }
 
-func TestReseatReplicaAllocatesFreshIDAndRefusesUnstableViews(t *testing.T) {
+func TestReseatReplicaPreviewAllocatesAgainstApprovedIntent(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
 	r, err := f.g.ReseatReplica(context.Background(), "work", topology.ReplicaKey{NodeName: "n2", ReplicaID: 2}, preview())
@@ -380,9 +380,14 @@ func TestReseatReplicaAllocatesFreshIDAndRefusesUnstableViews(t *testing.T) {
 	r, err = f.g.DrainNode(context.Background(), "n3", preview())
 	doc = mutationDoc(t, r, err)
 	f.commit(t, doc, false)
-	if _, err = f.g.ReseatReplica(context.Background(), "work", topology.ReplicaKey{NodeName: "n2", ReplicaID: 2}, preview()); !errors.Is(err, fault.ErrOperationAuthorization) {
-		t.Fatal("repair extended staged operator intent", err)
+	latest := f.g.machine.Latest()
+	r, err = f.g.ReseatReplica(t.Context(), "work", topology.ReplicaKey{NodeName: "n2", ReplicaID: 2}, preview())
+	repair := mutationDoc(t, r, err)
+	if repair.Node("n3").State != topology.NodeActive || repair.Group("work").Replicas[1].ReplicaID != 4 ||
+		!reflect.DeepEqual(f.g.machine.Latest(), latest) {
+		t.Fatal("preview merged staged drain or mutated intent", repair)
 	}
+
 }
 func TestReseatReplicaRetainsAuditAndRejectsMetaLearnersAndUnknown(t *testing.T) {
 	t.Parallel()
@@ -488,8 +493,7 @@ func TestTypedMutationPinsZeroVersionAndChecksReplayBeforeEdit(t *testing.T) {
 	if !errors.Is(err, fault.ErrVersionConflict) || calls != 0 || !reflect.DeepEqual(before, f.g.machine.Latest()) {
 		t.Fatal("stale intent invoked allocating edit or changed CAS", calls, err)
 	}
-	// Raw acceptance is still inspectable in the schema3 transition adapter. Typed
-	// provenance is deliberately not enabled until the complete format cutover.
+	// A raw acceptance remains inspectable independently of typed provenance.
 	accepted := f.g.machine.Latest()
 	replay, err := f.g.machine.ReplayMutation(metaengine.ProposeDocument{ExpectedVersion: 1, Doc: accepted})
 	if err != nil || !replay.Accepted || !reflect.DeepEqual(replay.Doc, accepted) {

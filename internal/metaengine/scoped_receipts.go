@@ -20,7 +20,7 @@ func (s *scopedState) applyRecordReadmissionReceipts(index uint64,
 	p RecordReadmissionReceiptsProposal) (proposalApplication, error) {
 	position := slices.IndexFunc(s.Admissions, func(a AdmissionRecord) bool {
 		return a.NodeName == p.Admission.NodeName && a.InstanceID == p.Admission.InstanceID &&
-			a.MemberID == p.Admission.MemberID && a.OperatorID == p.Admission.OperatorID
+			a.MemberID == p.Admission.MemberID && a.OperationID == p.Admission.OperationID
 	})
 	if position < 0 || len(p.Receipts) == 0 {
 		return proposalApplication{}, fault.ErrOperationAuthorization

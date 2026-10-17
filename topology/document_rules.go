@@ -4,11 +4,10 @@ package topology
 // Limits are immutable replicated cluster settings: participants must agree, and
 // changing them rejects retained-state startup or admission.
 type Limits struct {
-	MaxPendingAuthorityRecords int `json:"max_pending_authority_records,omitempty"`
-	MaxNodes                   int `json:"max_nodes"`
-	MaxReplicas                int `json:"max_replicas"`
-	MaxConcurrentGroups        int `json:"max_concurrent_groups,omitempty"`
-	MaxConcurrentCleanup       int `json:"max_concurrent_cleanup,omitempty"`
+	MaxNodes             int `json:"max_nodes"`
+	MaxReplicas          int `json:"max_replicas"`
+	MaxConcurrentGroups  int `json:"max_concurrent_groups,omitempty"`
+	MaxConcurrentCleanup int `json:"max_concurrent_cleanup,omitempty"`
 }
 
 // Rules contains the replicated schema version and cluster capacity limits.

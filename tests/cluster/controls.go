@@ -254,7 +254,7 @@ func (c *Cluster) Authority(ctx context.Context, node, group string) (AuthorityO
 }
 
 // Revocation reads retained operator fence obligations through the fixture endpoint.
-func (c *Cluster) Revocation(ctx context.Context, node string, operator topology.OperatorID) (topology.AuthorityStatus, error) {
+func (c *Cluster) Revocation(ctx context.Context, node string, operator topology.OperationID) (topology.AuthorityStatus, error) {
 	var status topology.AuthorityStatus
 	response, err := c.Request(ctx, node, "GET", "/internal/test/revocation/"+string(operator), nil, 0)
 	if err := requireStatus(response, err, 200); err != nil {

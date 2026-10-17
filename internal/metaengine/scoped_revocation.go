@@ -24,7 +24,6 @@ type scopedRevocation struct {
 }
 
 // Called on an owned candidate only. All fallible work precedes publication.
-// Legacy whole-document revocation is removed at the schema cutover (Task 78).
 func (s *scopedState) revokeAuthorityLocked(index uint64, blocks []blockRef,
 	successor topology.OperationID) error {
 	if index <= s.AppliedIndex {
@@ -91,7 +90,7 @@ func (t *scopedRevocation) shouldClose(record scopedAuthorityRecord, selected ma
 		// Unchanged exact retirement can outlive the original admission owner.
 		return !t.state.readmissionStillBound(grant.AdmissionID)
 	}
-	if record.Class == "execution" && selected[blockRef{topology.OperationID(grant.OperatorID), grant.Key.GroupID}] {
+	if record.Class == "execution" && selected[blockRef{topology.OperationID(grant.OperationID), grant.Key.GroupID}] {
 		return true
 	}
 	return slices.ContainsFunc(grant.Resources, func(resource topology.AuthorityResource) bool {
@@ -115,7 +114,7 @@ func (s *scopedState) readmissionOwner(id string) topology.OperationID {
 }
 
 func (t *scopedRevocation) closeRecord(grant topology.AuthorityGrant, successor topology.OperationID) error {
-	owner := topology.OperationID(grant.OperatorID)
+	owner := topology.OperationID(grant.OperationID)
 	if grant.Purpose == topology.AuthorityReadmit {
 		owner = t.state.readmissionOwner(grant.AdmissionID)
 	}

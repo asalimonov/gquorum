@@ -3,6 +3,7 @@
 package metaengine
 
 import (
+	"testing"
 	"time"
 
 	"github.com/asalimonov/gquorum/internal/authoritystore"
@@ -19,13 +20,13 @@ func populateScopedCodecAuthority(state *scopedState, id storage.Identity, key t
 			id.GroupID, id.ReplicaID, key.GroupID, key.Revision = "b", 8, "b", 9
 			kind, storageClass = topology.StepDeleteGroupState, topology.StorageMemory
 		}
-		action := topology.AuthorizedStep{OperatorID: "exec-v2-a1", Version: 2, Attempt: 1, StepSeq: 3 + i*2,
+		action := topology.AuthorizedStep{OperationID: "exec-v2-a1", Version: 2, Attempt: 1, StepSeq: 3 + i*2,
 			Kind: kind, GroupID: id.GroupID, NodeName: id.NodeName, ReplicaID: id.ReplicaID}
 		if kind == topology.StepDeleteGroupState {
 			action.NodeName, action.ReplicaID = "", 0
 		}
 		host := topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: id.GroupID, NodeName: id.NodeName}
-		grant := topology.AuthorityGrant{Key: key, Purpose: topology.AuthorityEffect, OperatorID: action.OperatorID,
+		grant := topology.AuthorityGrant{Key: key, Purpose: topology.AuthorityEffect, OperationID: action.OperationID,
 			Action: &action, Resources: []topology.AuthorityResource{host},
 			Targets: []topology.AuthorityTarget{{NodeName: id.NodeName, MemberID: 1, ReplicaID: id.ReplicaID}}}
 		receipt := fixtureEffectReceipts(grant)[0]
@@ -114,11 +115,11 @@ func retainScopedReadmissionOrigin(s *scopedState) {
 }
 
 func populateScopedGraphAuthority(state *scopedState) {
-	action := topology.AuthorizedStep{OperatorID: "exec-v2-a1", Version: 2, Attempt: 1, StepSeq: 1,
+	action := topology.AuthorizedStep{OperationID: "exec-v2-a1", Version: 2, Attempt: 1, StepSeq: 1,
 		GroupID: topology.MetaGroupID, Kind: topology.StepTransferLeader, NodeName: "n1", ReplicaID: 1}
 	resource := topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: topology.MetaGroupID}
 	key := topology.AuthorityKey{ClusterID: state.Latest.ClusterID, GroupID: topology.MetaGroupID, Revision: 3}
-	grant := topology.AuthorityGrant{Key: key, Purpose: topology.AuthorityEffect, OperatorID: action.OperatorID,
+	grant := topology.AuthorityGrant{Key: key, Purpose: topology.AuthorityEffect, OperationID: action.OperationID,
 		Action: &action, Resources: []topology.AuthorityResource{resource},
 		Targets: []topology.AuthorityTarget{{NodeName: "n1", MemberID: 1, ReplicaID: 1}}}
 	receipt := fixtureEffectReceipts(grant)[0]
@@ -128,10 +129,33 @@ func populateScopedGraphAuthority(state *scopedState) {
 	key.Revision = 4
 	fence := topology.FenceEvidence{Key: key, Resource: resource, ReplicaID: 1, AppliedIndex: 4, AppliedTerm: 1,
 		Receiver: topology.Identity{ClusterID: key.ClusterID, NodeName: "n1", MemberID: 1, InstanceID: "instance"}}
-	grant.Key, grant.Purpose, grant.OperatorID, grant.Action = key, topology.AuthorityFence, "", nil
+	grant.Key, grant.Purpose, grant.OperationID, grant.Action = key, topology.AuthorityFence, "", nil
 	state.AuthorityRecords = append(state.AuthorityRecords, scopedAuthorityRecord{Class: "execution",
 		authorityRecord: authorityRecord{Grant: grant, Fences: []topology.FenceEvidence{fence}}})
 	state.AuthorityFloors = []resourceFloor{{Resource: resource, Key: key}}
 	state.Revocations = []scopedRevocationRecord{{Requested: true, OperationID: "exec-v2-a1",
 		GroupID: topology.MetaGroupID, Obligations: []topology.FenceObligation{{Key: key, Resource: resource, Evidence: &fence}}}}
+}
+
+// A pruned, fully proven declaration needs no historical execution row. This
+// fixture builds that current schema shape for planning and read-only tests.
+func convergedScopedFixture(t *testing.T, doc topology.Document) scopedState {
+	t.Helper()
+	at := time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC)
+	doc.Version = 1
+	s := scopedState{SchemaVersion: scopedStateSchemaVersion, Rules: testRules(),
+		Latest: doc.Clone(), Target: doc.Clone(), History: []topology.Document{doc.Clone()},
+		FullyConverged: topology.FullyConverged{Version: 1, At: at}, AppliedIndex: 10, AppliedTerm: 1}
+	for i := range doc.Groups {
+		g := &doc.Groups[i]
+		s.Groups = append(s.Groups, groupConvergence{GroupID: g.ID, Declaration: g, SourceVersion: 1, CompletedAt: at})
+		s.Allocations = append(s.Allocations, allocationRecord{GroupID: g.ID, NextReplicaID: g.NextReplicaID})
+	}
+	for i := range doc.Nodes {
+		node := &doc.Nodes[i]
+		s.Nodes = append(s.Nodes, nodeConvergence{NodeName: node.Name, Declaration: node,
+			SourceVersion: 1, MemberID: doc.MemberID(node.Name), CompletedAt: at})
+	}
+	prepareScopedFixture(t, &s)
+	return s
 }

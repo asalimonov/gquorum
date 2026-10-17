@@ -36,6 +36,9 @@ func proposalFaultCode(code string) fault.Code {
 		return fault.AuthorityFenced
 	case "authorization", "superseded":
 		return fault.OperationAuthorization
+	case string(fault.OperationAuthorization), string(fault.Unavailable), string(fault.UnsafeMembership),
+		string(fault.ReplanRequired), string(fault.IdentityMismatch), string(fault.GroupRetired):
+		return fault.Code(code)
 	default:
 		return fault.Invalid
 	}
@@ -43,10 +46,6 @@ func proposalFaultCode(code string) fault.Code {
 
 func (r MutationResult) outcome(err error) (MutationResult, error) {
 	owned := r
-	// Remove the old field when all callers use OperationID at the API cutover.
-	if owned.OperationID == "" {
-		owned.OperationID = topology.OperationID(r.OperatorID)
-	}
 	var conflict *fault.Error
 	if errors.As(err, &conflict) {
 		if conflict.RebasedTo != 0 {

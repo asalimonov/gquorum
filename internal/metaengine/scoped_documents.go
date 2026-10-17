@@ -8,8 +8,8 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// Validation never publishes derived indexes or mutates the candidate. Complete
-// convergence/authority validation precedes live installation at Task 78.
+// Validation builds owned indexes without mutating the candidate. Every proof
+// must pass before a handler installs the prepared state.
 func prepareScopedGraph(state *scopedState, rules topology.Rules) (*scopedIndexes, error) {
 	if state.SchemaVersion != scopedStateSchemaVersion {
 		return nil, fault.ErrUnsupported
@@ -177,26 +177,22 @@ func scopedActionVersion(state *scopedState, version uint64) bool {
 }
 
 func validateScopedRebaseBase(state *scopedState, index *scopedIndexes, source, repair topology.Document) error {
-	version := source.ParentVersion
-	for version > repair.ParentVersion {
-		if scopedApprovedVersion(state, version) || scopedActionVersion(state, version) {
+	baseVersion := repair.ParentVersion
+	if baseVersion == 0 || baseVersion >= source.Version {
+		return invalidScopedState("repair parent must precede its staged source")
+	}
+	// ParentVersion is document lineage, not acceptance order: raw Stage may
+	// retain it and RollbackTo deliberately names a historical source. The
+	// repair uses the last approved version before L, regardless of that lineage.
+	for version := range index.documents {
+		if version > baseVersion && version < source.Version &&
+			(scopedApprovedVersion(state, version) || scopedActionVersion(state, version)) {
 			return invalidScopedState("repair parent skips an approved staged ancestor")
 		}
-		doc, found := index.documents[version]
-		if !found {
-			return nil // Compaction retained no evidence contradicting this parent.
-		}
-		if doc.ParentVersion >= version {
-			return invalidScopedState("staged ancestry does not decrease")
-		}
-		version = doc.ParentVersion
-	}
-	if version != repair.ParentVersion {
-		return invalidScopedState("repair parent is not an ancestor of the staged source")
 	}
 	// Apply always has Target. Restore may have compacted the old approved base;
 	// when retained, its semantic evidence must agree with the claimed independence.
-	if base, found := index.documents[version]; found {
+	if base, found := index.documents[baseVersion]; found {
 		if err := ValidateRepairIndependence(base, source, repair); err != nil {
 			return fault.New(fault.Unreadable, "retained rebase edits overlap", err)
 		}

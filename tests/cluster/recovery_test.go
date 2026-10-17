@@ -259,9 +259,9 @@ func correlatedWALStall(t *testing.T, size int) {
 				var ready struct {
 					Node          string `json:"node"`
 					SessionLive   bool   `json:"session_live"`
-					ActiveVersion uint64 `json:"active_version"`
+					TargetVersion uint64 `json:"target_version"`
 				}
-				if err := response.Decode(&ready); err != nil || ready.Node != node.Spec.Name || !ready.SessionLive || ready.ActiveVersion != created.Document.Version {
+				if err := response.Decode(&ready); err != nil || ready.Node != node.Spec.Name || !ready.SessionLive || ready.TargetVersion != created.Document.Version {
 					t.Fatal("readiness changed identity, activation or topology during WAL stall", ready, err)
 				}
 				readySamples++
@@ -606,15 +606,19 @@ func lostMetaLeaderReadmission(t *testing.T, size int) {
 		t.Fatal("same-name data-lost founder did not readmit", repaired, err)
 	}
 	freshMember := repaired.MemberID("node3")
-	operatorID := topology.MakeOperatorID(repaired.Version, 1)
+	operatorID := topology.MakeOperationID(repaired.Version, 1)
 	if err := c.WaitOperation(ctx, "node1", operatorID); err != nil {
 		t.Fatal(err)
 	}
 	operator, err := c.Operation(ctx, "node1", operatorID)
-	if err != nil || operator.TotalSteps < 4 || operator.State != topology.OperatorSucceeded {
+	totalSteps := 0
+	for _, block := range operator.Blocks {
+		totalSteps += block.TotalSteps
+	}
+	if err != nil || totalSteps < 4 || operator.State != topology.OperationSucceeded {
 		t.Fatal("readmission omitted durable learner-first execution", operator, err)
 	}
-	if err := c.WaitActive(ctx, repaired.Version); err != nil {
+	if err := c.WaitFullyConverged(ctx, repaired.Version); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.WaitReady(ctx); err != nil {
@@ -654,5 +658,5 @@ func lostMetaLeaderReadmission(t *testing.T, size int) {
 	if err := exactOwnedValues(ctx, c, repaired, "work", expected); err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("METRIC nodes=%d lost_meta_leader=%d readmitted_member=%d fresh_load_replica=%d execution_steps=%d recovered_commands=%d", size, oldMember, freshMember, replicaID(repaired, "work", "node3"), operator.TotalSteps, len(expected))
+	t.Logf("METRIC nodes=%d lost_meta_leader=%d readmitted_member=%d fresh_load_replica=%d execution_steps=%d recovered_commands=%d", size, oldMember, freshMember, replicaID(repaired, "work", "node3"), totalSteps, len(expected))
 }

@@ -2,80 +2,13 @@ package scheduling
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"reflect"
 	"slices"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/votercheck"
 	schedulingapi "github.com/asalimonov/gquorum/scheduling"
-	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
-
-type schedulingApproval struct {
-	views    topology.ReadView
-	operator topology.OperatorLookup
-	leader   bool
-}
-
-func (r *Scheduler) reconcileApproval(ctx context.Context, input schedulingApproval) bool {
-	latest, target, active := input.views.Latest, input.views.Target, input.views.Active
-	operator, leader := input.operator, input.leader
-	if !r.enabled.Load() {
-		r.resetAlive()
-		if leader && resumable(operator.Operator, operator.Found, active, target) {
-			r.host.WakeOperator()
-		}
-		r.transition(r.newStatus(leader, topology.SchedulingDisabled, ReconcileReasonConfigDisabled), "")
-		return true
-	}
-	if resumable(operator.Operator, operator.Found, active, target) {
-		if leader {
-			r.host.WakeOperator()
-		}
-		r.transition(r.runningOperatorStatus(leader, operator.Operator.Status.ID), "")
-		return true
-	}
-	if operator.Found && operator.Operator.Status.State == topology.OperatorFailed &&
-		operator.Operator.Status.Version == latest.Version {
-		s := r.newStatus(leader, topology.SchedulingBlocked, ReconcileReasonFailedOperator)
-		s.BlockingVersion, s.CurrentOperatorID = &operator.Operator.Status.Version, &operator.Operator.Status.ID
-		r.transition(s, "")
-		return true
-	}
-	if !reflect.DeepEqual(latest, target) || !reflect.DeepEqual(latest, active) {
-		if leader && !hasVoterConfigs(active) && r.healStagedInternal(ctx, latest, active) {
-			return true
-		}
-		r.transition(r.blockedStagedStatus(leader, latest.Version), "")
-		return true
-	}
-	if !leader {
-		r.transition(r.newStatus(false, topology.SchedulingStandby, ReconcileReasonNotLeader), "")
-		return true
-	}
-	return false
-}
-
-func (r *Scheduler) evaluatePolicy(ctx context.Context, in schedulingapi.ScheduleInput, views topology.ReadView) {
-	decision, err := r.callPolicy(ctx, in)
-	if err != nil {
-		r.transition(r.newStatus(true, topology.SchedulingError, ReconcileReasonPolicyRejected), err.Error())
-		return
-	}
-	if decision.Action == nil {
-		r.reportIdleDecision(decision.Reason)
-		return
-	}
-	action := *decision.Action
-	if action.Kind == schedulingapi.ReconfigureVoters {
-		r.applyVoterDecision(ctx, in, views, action)
-		return
-	}
-	r.applyReplicaDecision(ctx, in, views, action)
-}
 
 func (r *Scheduler) callPolicy(ctx context.Context,
 	in schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error) {
@@ -109,70 +42,6 @@ func (r *Scheduler) reportIdleDecision(reason string) {
 	default: // Keep the initial status for other decision reasons.
 	}
 	r.transition(s, "")
-}
-
-func (r *Scheduler) applyVoterDecision(ctx context.Context,
-	in schedulingapi.ScheduleInput, views topology.ReadView, action schedulingapi.ScheduleAction) {
-	if action.VoterChange == nil || action.Identity != (storage.Identity{}) {
-		r.transition(r.newStatus(true, topology.SchedulingError,
-			ReconcileReasonPolicyRejected), "invalid voter action union")
-		return
-	}
-	if r.refusePolicyScope(in, action.VoterChange.GroupID) {
-		return
-	}
-	change := action.VoterChange.Clone()
-	id, err := r.commitVoterChange(ctx, in, views, change)
-	if err != nil {
-		reason := ReconcileReasonPolicyRejected
-		if errors.Is(err, fault.ErrVersionConflict) {
-			reason = ReconcileReasonCASConflict
-		}
-		r.transition(r.newStatus(true, topology.SchedulingWaiting, reason), err.Error())
-		return
-	}
-	r.transition(r.runningOperatorStatus(true, id), "")
-}
-
-func (r *Scheduler) applyReplicaDecision(ctx context.Context,
-	in schedulingapi.ScheduleInput, views topology.ReadView, action schedulingapi.ScheduleAction) {
-	if action.VoterChange != nil {
-		r.transition(r.newStatus(true, topology.SchedulingError,
-			ReconcileReasonPolicyRejected), "mixed action variants")
-		return
-	}
-	if !r.lastRun.IsZero() && in.Now.Sub(r.lastRun) < r.settings.Cooldown {
-		r.transition(r.newStatus(true, topology.SchedulingWaiting, ReconcileReasonCooldown), "")
-		return
-	}
-	if action.Kind != schedulingapi.RestoreMissingReplica {
-		r.transition(r.newStatus(true, topology.SchedulingError, ReconcileReasonPolicyRejected),
-			fmt.Sprintf("forbidden action %q", action.Kind))
-		return
-	}
-	if r.refusePolicyScope(in, action.Identity.GroupID) {
-		return
-	}
-	s := r.newStatus(true, topology.SchedulingRunning, ReconcileReasonMissingReplica)
-	s.CurrentAction = &topology.SchedulingActionStatus{
-		Kind:      string(action.Kind),
-		GroupID:   action.Identity.GroupID,
-		NodeName:  action.Identity.NodeName,
-		ReplicaID: action.Identity.ReplicaID,
-	}
-	r.transition(s, "")
-	id, err := r.commitReplicaRepair(ctx, replicaRepair{Latest: views.Latest, Active: views.Active,
-		Action: action, At: in.Now})
-	r.lastRun = in.Now
-	if err != nil {
-		reason := ReconcileReasonPolicyRejected
-		if errors.Is(err, fault.ErrVersionConflict) {
-			reason = ReconcileReasonCASConflict
-		}
-		r.transition(r.newStatus(true, topology.SchedulingError, reason), err.Error())
-		return
-	}
-	r.transition(r.runningOperatorStatus(true, id), "")
 }
 
 func (r *Scheduler) validateReplicaRepair(active topology.Document,

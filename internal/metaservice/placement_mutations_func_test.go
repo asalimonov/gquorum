@@ -58,7 +58,7 @@ func TestTypedGroupPlacementPreviewMatchesPurePreparation(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
 	views := f.g.state().Views()
-	latest, target, active := views.Latest, views.Target, views.Active
+	latest, target := views.Latest, views.Target
 	rule := topology.PlacementRule{MinReplicas: 1, MaxReplicas: 3, NodeSelector: map[string]string{"network": "public_ip"}}
 	edited := latest.Clone()
 	edited.Node("n2").Labels = map[string]string{"network": "public_ip"}
@@ -67,11 +67,11 @@ func TestTypedGroupPlacementPreviewMatchesPurePreparation(t *testing.T) {
 	// a complete document; the typed rule then uses those same approved labels.
 	f.commit(t, edited, true)
 	views = f.g.state().Views()
-	latest, target, active = views.Latest, views.Target, views.Active
+	latest, target = views.Latest, views.Target
 	edited = latest.Clone()
 	edited.Group("work").Placement = &rule
 	edited.ChangedBy = "n1"
-	preparation, err := topology.PreparePlacement(topology.ReadView{Latest: latest, Target: target, Active: active}, edited, f.g.rules, time.Now().UTC())
+	preparation, err := topology.PreparePlacement(topology.ReadView{Latest: latest, Target: target}, edited, f.g.rules, time.Now().UTC())
 	pure := preparation.Document
 	if err != nil {
 		t.Fatal(err)

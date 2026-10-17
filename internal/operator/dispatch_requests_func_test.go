@@ -35,10 +35,10 @@ func (a requestAuthorityTest) RecordEffect(_ context.Context, receipt topology.E
 
 func dispatchTestGrant(t *testing.T, group string) topology.AuthorityGrant {
 	t.Helper()
-	action := topology.AuthorizedStep{OperatorID: topology.MakeOperatorID(2, 1), Version: 2, Attempt: 1,
+	action := topology.AuthorizedStep{OperationID: topology.MakeOperationID(2, 1), Version: 2, Attempt: 1,
 		StepSeq: 1, Kind: topology.StepCreateFoundingGroup, GroupID: group}
 	g := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: group, Revision: 1},
-		Purpose: topology.AuthorityEffect, OperatorID: action.OperatorID, Action: &action,
+		Purpose: topology.AuthorityEffect, OperationID: action.OperationID, Action: &action,
 		Resources: []topology.AuthorityResource{{Kind: topology.AuthorityGroup, GroupID: group},
 			{Kind: topology.AuthorityHost, GroupID: group, NodeName: "a"},
 			{Kind: topology.AuthorityHost, GroupID: group, NodeName: "b"}},

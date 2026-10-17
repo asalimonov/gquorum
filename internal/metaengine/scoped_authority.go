@@ -67,7 +67,7 @@ func validateScopedGrant(record scopedAuthorityRecord, index *scopedIndexes, cat
 		return nil
 	}
 	action := *grant.Action // Grant.Validate has already required it.
-	operation := index.operations[topology.OperationID(action.OperatorID)]
+	operation := index.operations[topology.OperationID(action.OperationID)]
 	if operation != nil {
 		return validateRetainedScopedGrant(record, operation, index)
 	}
@@ -82,7 +82,7 @@ func validateScopedGrant(record scopedAuthorityRecord, index *scopedIndexes, cat
 func validateRetainedScopedGrant(record scopedAuthorityRecord,
 	operation *topology.Operation, index *scopedIndexes) error {
 	action := *record.Grant.Action
-	if action.StepSeq > len(operation.Plan.Steps) || !action.Matches(topology.OperatorID(operation.Status.ID),
+	if action.StepSeq > len(operation.Plan.Steps) || !action.Matches(topology.OperationID(operation.Status.ID),
 		operation.Status.Attempt, operation.Status.Version, operation.Plan.Steps[action.StepSeq-1]) {
 		return invalidScopedState("authority action differs from its retained immutable plan")
 	}
@@ -160,8 +160,8 @@ func (s *scopedState) readmissionRevocationScope(record scopedRevocationRecord) 
 }
 
 func restoreScopedAuthorityRecords(state *scopedState) (authorityRestore, error) {
-	restore := authorityRestore{state: smState{Latest: state.Latest, AppliedIndex: state.AppliedIndex,
-		Admissions: state.Admissions, AuthorityFloors: state.AuthorityFloors}, catalog: newAuthorityCatalog(),
+	restore := authorityRestore{cluster: state.Latest.ClusterID, appliedIndex: state.AppliedIndex,
+		admissions: state.Admissions, floors: state.AuthorityFloors, catalog: newAuthorityCatalog(),
 		requests: map[string]bool{}, readmissionRevisions: map[string]uint64{},
 		readmissionMembers: map[string]uint64{}, readmissionMeta: map[string]bool{},
 		cleanupActions: make(map[topology.AuthorizedStep]bool)}

@@ -18,7 +18,7 @@ import (
 
 // The load resources here are protocol doubles. Only the local _meta participant
 // runs consensus; multi-node resource fencing is covered by the process suite.
-func TestReconcileFencesPersistsPartialProgressAfterOperatorTerminates(t *testing.T) {
+func TestScopedFencesPersistPartialProgressAfterOperationTerminates(t *testing.T) {
 	t.Parallel()
 	var available atomic.Bool
 	var hosts, groups atomic.Int32
@@ -49,29 +49,41 @@ func TestReconcileFencesPersistsPartialProgressAfterOperatorTerminates(t *testin
 	step := topology.Step{Seq: 1, GroupID: "load-one", Kind: topology.StepCreateFoundingGroup}
 	plan := guardedFixturePlan(doc.Version, step.GroupID, nil, []uint64{1}, step)
 	step = plan.Steps[0]
-	at := time.Now().UTC()
-	begin, err := g.propose(ctx, metaengine.BeginOperatorProposal{Version: doc.Version, Plan: plan, At: at})
+	approval := (&mutationFixture{g: g}).fixtureApproval(t, doc)
+	plan.Blocks = approval.Plan.Blocks
+	approval.Plan = plan
+	begin, err := g.propose(ctx, approval)
 	if err != nil {
 		t.Fatal(err)
 	}
-	transition := topology.OperatorTransition{OperatorID: begin.OperatorID, Version: doc.Version, Attempt: 1, StepSeq: 1, GroupID: step.GroupID, State: topology.OperatorRunning, At: at.Add(time.Millisecond)}
-	if _, err := g.propose(ctx, metaengine.TransitionOperatorProposal{Transition: transition}); err != nil {
+	transition := topology.OperationTransition{OperationID: begin.OperationID, Version: doc.Version, Attempt: 1, StepSeq: 1, GroupID: step.GroupID, State: topology.OperationRunning, At: time.Now().UTC()}
+	if _, err := g.propose(ctx, metaengine.TransitionOperationProposal{Transition: transition, ProposalID: newProposalID()}); err != nil {
 		t.Fatal(err)
 	}
-	action := topology.AuthorizedStep{OperatorID: begin.OperatorID, Version: doc.Version, Attempt: 1, StepSeq: 1, GroupID: step.GroupID, Kind: step.Kind, ExpectedVotersDigest: step.ExpectedVotersDigest, ResultVotersDigest: step.ResultVotersDigest}
+	action := topology.AuthorizedStep{OperationID: begin.OperationID, Version: doc.Version, Attempt: 1, StepSeq: 1, GroupID: step.GroupID, Kind: step.Kind, ExpectedVotersDigest: step.ExpectedVotersDigest, ResultVotersDigest: step.ResultVotersDigest}
 	if _, err := g.BeginEffect(ctx, action); err != nil {
 		t.Fatal(err)
 	}
-	transition.State, transition.At = topology.OperatorSuperseded, at.Add(2*time.Millisecond)
-	if _, err := g.propose(ctx, metaengine.TransitionOperatorProposal{Transition: transition}); err != nil {
+	successor := g.state().Latest()
+	successor.Group("load-one").Labels = map[string]string{"test": "supersede"}
+	doc, err = g.Stage(ctx, successor, successor.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval = (&mutationFixture{g: g, native: map[string]topology.NativeState{"load-one": fixtureNative(*doc.Group("load-one"))}}).fixtureApproval(t, doc)
+	if _, err := g.propose(ctx, approval); err != nil {
 		t.Fatal(err)
 	}
 	coordinator := &operationCoordinator{g: g}
-	for _, obligation := range g.state().PendingFences() {
+	pending, err := coordinator.ReadyFences(ctx, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, obligation := range pending {
 		if obligation.Resource.Kind != topology.AuthorityHost {
 			continue
 		}
-		grant, found := g.state().AuthorityGrant(obligation.Key)
+		grant, found := g.state().AuthorityGrant(obligation.Grant.Key)
 		if !found {
 			t.Fatal("missing exact boundary")
 		}
@@ -87,10 +99,10 @@ func TestReconcileFencesPersistsPartialProgressAfterOperatorTerminates(t *testin
 			t.Fatal("foreign fence target accepted", err)
 		}
 	}
-	if err := g.ReconcileFences(ctx); !errors.Is(err, fault.ErrUnavailable) {
+	if err := dispatchFixtureFences(ctx, coordinator); !errors.Is(err, fault.ErrUnavailable) {
 		t.Fatal("unavailable group did not retain pending revocation", err)
 	}
-	status, err := g.ReadAuthority(ctx, begin.OperatorID)
+	status, err := g.ReadAuthority(ctx, begin.OperationID)
 	if err != nil || status.RevocationComplete || len(status.Obligations) != 2 {
 		t.Fatal(status, err)
 	}
@@ -103,13 +115,31 @@ func TestReconcileFencesPersistsPartialProgressAfterOperatorTerminates(t *testin
 		t.Fatal("revocation skipped a resource", hosts.Load(), groups.Load())
 	}
 	available.Store(true)
-	if err := g.ReconcileFences(ctx); err != nil {
+	if err := dispatchFixtureFences(ctx, coordinator); err != nil {
 		t.Fatal(err)
 	}
-	if status, err := g.WaitRevoked(ctx, begin.OperatorID); err != nil || !status.RevocationComplete {
+	if status, err := g.WaitRevoked(ctx, begin.OperationID); err != nil || !status.RevocationComplete {
 		t.Fatal(status, err)
 	}
-	if err := g.ReconcileFences(ctx); err != nil || hosts.Load() != 1 || groups.Load() != 2 {
+	if err := dispatchFixtureFences(ctx, coordinator); err != nil || hosts.Load() != 1 || groups.Load() != 2 {
 		t.Fatal("completed resources repeated", hosts.Load(), groups.Load(), err)
 	}
+}
+
+func dispatchFixtureFences(ctx context.Context, coordinator *operationCoordinator) error {
+	pending, err := coordinator.ReadyFences(ctx, 16)
+	if err != nil {
+		return err
+	}
+	var failures []error
+	for _, work := range pending {
+		target, err := coordinator.ResolveFenceTarget(ctx, work)
+		if err == nil {
+			err = coordinator.DispatchFence(ctx, work.Grant, work.Resource, target)
+		}
+		if err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
 }

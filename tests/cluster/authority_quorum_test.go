@@ -52,7 +52,7 @@ func TestAuthorityGroupRevocationRemainsPendingWithoutLoadQuorumThreeNodes(t *te
 	if err := Poll(ctx, func() (bool, error) {
 		view, err := c.Authority(ctx, "node1", "work")
 		for _, action := range view.Actions {
-			if action.Authorization.OperatorID == old && action.Authorization.Kind == topology.StepDemoteVoter {
+			if action.Authorization.OperationID == old && action.Authorization.Kind == topology.StepDemoteVoter {
 				delayed = action
 				return true, err
 			}
@@ -130,7 +130,11 @@ func TestAuthorityGroupRevocationRemainsPendingWithoutLoadQuorumThreeNodes(t *te
 			t.Fatal("load group lost its pending resource obligation", status)
 		}
 		op, err := c.Operation(ctx, node, newOp)
-		if err != nil || op.State.Terminal() || op.TotalSteps != 0 {
+		totalSteps := 0
+		for _, block := range op.Blocks {
+			totalSteps += block.TotalSteps
+		}
+		if err != nil || op.State.Terminal() || totalSteps != 0 {
 			t.Fatal("empty successor bypassed its no-quorum revocation", op, err)
 		}
 		active, err := c.Document(ctx, node, "active")
@@ -144,7 +148,7 @@ func TestAuthorityGroupRevocationRemainsPendingWithoutLoadQuorumThreeNodes(t *te
 	if err := c.WaitOperation(ctx, "node2", newOp); err != nil {
 		t.Fatal("restored load quorum did not complete the real resource fence", err)
 	}
-	if err := c.WaitActive(ctx, newStage.Document.Version); err != nil {
+	if err := c.WaitFullyConverged(ctx, newStage.Document.Version); err != nil {
 		t.Fatal(err)
 	}
 	if err := Poll(ctx, func() (bool, error) {

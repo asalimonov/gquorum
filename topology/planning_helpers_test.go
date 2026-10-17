@@ -1,11 +1,6 @@
 package topology
 
-// Exercise the scope selection that replaces legacy whole-document planning at
-// activation (Task 78), without enabling partial completion before that cutover.
-func scopedPlan(input PlanInput, desired Document, options PlanOptions) (Plan, error) {
-	return constructGroupPlan(input, desired, options,
-		planScope{groups: AffectedGroups(input.Approved, desired), partition: true})
-}
+import "slices"
 
 func validatePlannedSteps(input PlanInput, desired Document, observed map[string]GroupStatus, plan Plan) error {
 	v := plannedStepValidator{input: input, desired: desired, plan: plan}
@@ -46,4 +41,30 @@ func testPlanInput(base Document, observed map[string]GroupStatus) PlanInput {
 		}
 	}
 	return input
+}
+
+func unionGroupIDs(input PlanInput, desired Document) []string {
+	seen := make(map[string]struct{})
+	var ids []string
+	add := func(id string) {
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	for id := range input.Groups {
+		add(id)
+	}
+	for _, group := range desired.Groups {
+		add(group.ID)
+	}
+	for id := range input.Native {
+		add(id)
+	}
+	for id := range input.Retained {
+		add(id)
+	}
+	slices.SortFunc(ids, comparePlanGroups)
+	return ids
 }

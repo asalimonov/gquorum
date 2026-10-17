@@ -28,10 +28,10 @@ func TestRemainingScopeUsesOriginalProofAndGlobalCursor(t *testing.T) {
 	op.Status.State = topology.OperationPending
 	op.Status.Blocks[1].State = topology.OperationPending
 	step := old.Plan.Steps[2]
-	action := topology.AuthorizedStep{OperatorID: topology.OperatorID(old.Status.ID), Version: 2, Attempt: 1, StepSeq: 3, Kind: step.Kind, GroupID: "work", NodeName: "b", ReplicaID: 2, ExpectedVotersDigest: step.ExpectedVotersDigest, ResultVotersDigest: step.ResultVotersDigest}
+	action := topology.AuthorizedStep{OperationID: topology.OperationID(old.Status.ID), Version: 2, Attempt: 1, StepSeq: 3, Kind: step.Kind, GroupID: "work", NodeName: "b", ReplicaID: 2, ExpectedVotersDigest: step.ExpectedVotersDigest, ResultVotersDigest: step.ResultVotersDigest}
 	resource := topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: "work"}
 	member := topology.AuthorityTarget{NodeName: "b", MemberID: 2, ReplicaID: 2}
-	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: "work", Revision: 10}, Purpose: topology.AuthorityEffect, OperatorID: action.OperatorID, Action: &action, Resources: []topology.AuthorityResource{resource}, Targets: []topology.AuthorityTarget{member}}
+	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: "work", Revision: 10}, Purpose: topology.AuthorityEffect, OperationID: action.OperationID, Action: &action, Resources: []topology.AuthorityResource{resource}, Targets: []topology.AuthorityTarget{member}}
 	receipt := topology.EffectReceipt{Key: grant.Key, Resource: resource, Target: member, Action: &action, Outcome: topology.EffectApplied, AppliedIndex: 11, AppliedTerm: 1}
 	target := Document{Version: 2, Placement: topology.PlacementRule{MinReplicas: 1, MaxReplicas: 3}, Groups: []Group{{ID: "work", Replicas: []Replica{{NodeName: "a", ReplicaID: 1, Role: topology.ReplicaVoter}, {NodeName: "b", ReplicaID: 2, Role: topology.ReplicaVoter}}}, {ID: "other"}}}
 	native := topology.NativeState{GroupID: "work", ReplicaID: 1, Applied: 11, ConfState: raftpb.ConfState{Voters: []uint64{1, 2}}, Grant: &grant, Receipt: &receipt}

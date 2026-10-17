@@ -26,11 +26,7 @@ type MutationResult struct {
 }
 
 func publicMutationResult(result metaservice.MutationResult) MutationResult {
-	operation := result.OperationID
-	if operation == "" {
-		operation = topology.OperationID(result.OperatorID)
-	}
-	return MutationResult{OperationID: operation, RebasedTo: result.RebasedTo,
+	return MutationResult{OperationID: result.OperationID, RebasedTo: result.RebasedTo,
 		Document: result.Document, Placement: result.Placement}
 }
 

@@ -57,7 +57,7 @@ func (s *scopedState) recordRemovalCleanup(receipt topology.EffectReceipt, at ti
 
 func (s *scopedState) createRemovalDebt(receipt topology.EffectReceipt, at time.Time) error {
 	action := receipt.Action
-	op := s.indexes.operations[topology.OperationID(action.OperatorID)]
+	op := s.indexes.operations[topology.OperationID(action.OperationID)]
 	if op == nil || receipt.Resource.Kind != topology.AuthorityGroup {
 		return fault.ErrOperationAuthorization
 	}

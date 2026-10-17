@@ -12,23 +12,43 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func TestScopedCoordinatorKeepsSchema3ClosedAndRequiresLeadership(t *testing.T) {
+func TestScopedCoordinatorPagesCurrentWorkAndRequiresLeadership(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	g := singleMetaFixtureWith(t, func(*Options) {})[0]
-	if err := g.WaitReady(ctx); err != nil {
-		t.Fatal(err)
-	}
+	g := readyPublic(t, singleMetaFixtureWith(t, func(o *Options) { o.LoadGroups = &statusController{} }))
+	g.controller.Stop()
 	c := &operationCoordinator{g: g}
-	if _, err := c.ReadyBlocks(ctx, 1); !errors.Is(err, fault.ErrUnsupported) {
+	if _, err := c.ReadyBlocks(ctx, 1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.ReadyCleanup(ctx, 1); !errors.Is(err, fault.ErrUnsupported) {
+	if _, err := c.ReadyCleanup(ctx, 1); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.ReadyFences(ctx, 1); !errors.Is(err, fault.ErrUnsupported) {
+	if _, err := c.ReadyFences(ctx, 1); err != nil {
 		t.Fatal(err)
+	}
+	doc := loadDocument(t, g)
+	other := doc.Groups[len(doc.Groups)-1]
+	other.ID = "load-two"
+	doc.Groups = append(doc.Groups, other)
+	staged, err := g.Stage(ctx, doc, doc.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Approve(ctx, staged.Version); err != nil {
+		t.Fatal(err)
+	}
+	var selected []string
+	for range 3 {
+		work, err := c.ReadyBlocks(ctx, 1)
+		if err != nil || len(work) != 1 {
+			t.Fatal(work, err)
+		}
+		selected = append(selected, work[0].GroupID)
+	}
+	if selected[0] != "load-one" || selected[1] != "load-two" || selected[2] != selected[0] {
+		t.Fatal("cursor failed to advance or wrap", selected)
 	}
 	canceled, stop := context.WithCancel(ctx)
 	stop()

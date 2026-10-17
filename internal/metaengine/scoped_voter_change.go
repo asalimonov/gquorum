@@ -8,6 +8,9 @@ import (
 
 func (s *scopedState) applyCommitVoterChange(index uint64,
 	p CommitVoterChangeProposal) (proposalApplication, error) {
+	if err := knownPlanSteps(p.Plan); err != nil {
+		return proposalApplication{}, err
+	}
 	repair := CommitRepairOperationProposal{Doc: p.Doc, ExpectedVersion: p.ExpectedVersion,
 		ExpectedTarget: p.ExpectedTarget, Scopes: p.Scopes, Plan: p.Plan, At: p.At, ProposalID: p.ProposalID}
 	if p.ExpectedVersion != s.Latest.Version || p.ExpectedTarget != s.Target.Version {
@@ -34,7 +37,7 @@ func (s *scopedState) applyCommitVoterChange(index uint64,
 		}
 	}
 	if err := validateVoterChangeSteps(pair.Repair, p.Change, p.Plan, voters); err != nil {
-		return proposalApplication{}, err
+		return proposalApplication{}, planContentRefusal(err)
 	}
 	// Scoped shape validation checks captured native guard chains and exact
 	// source/owner before the shared installer can publish either document.

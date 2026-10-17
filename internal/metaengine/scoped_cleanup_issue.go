@@ -37,7 +37,7 @@ func (s *scopedState) applyBeginCleanupEffect(index uint64,
 	action := p.Action
 	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: debt.Identity.ClusterID,
 		GroupID: debt.Identity.GroupID, Revision: index}, Purpose: topology.AuthorityEffect,
-		OperatorID: action.OperatorID, Action: &action,
+		OperationID: action.OperationID, Action: &action,
 		Resources: []topology.AuthorityResource{host}, Targets: []topology.AuthorityTarget{target}}
 	if err := s.installGrants(index, []topology.AuthorityGrant{grant}); err != nil {
 		return proposalApplication{}, err

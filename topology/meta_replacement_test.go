@@ -5,7 +5,6 @@ package topology
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"testing"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -50,13 +49,13 @@ func TestMetaAdmissionPrecedesDecommissionAtCapacity(t *testing.T) {
 			}
 			input := testPlanInput(base, observed)
 			rules := Rules{SchemaVersion: 1, Limits: Limits{MaxNodes: tc.nodes, MaxReplicas: 5}.WithDefaults()}
-			flat, err := BuildPlan(input, desired, rules)
-			if err != nil || len(flat.Blocks) != 0 {
-				t.Fatal("live planner rejected replacement or emitted partitions", flat, err)
+			plan, err := BuildPlan(input, desired, rules)
+			if err != nil || len(plan.Blocks) != 2 {
+				t.Fatal("planner rejected replacement or lost its scopes", plan, err)
 			}
-			plan, err := scopedPlan(input, desired, PlanOptions{Rules: rules})
-			if err != nil || !slices.Equal(flat.Steps, plan.Steps) {
-				t.Fatal("scoped barriers made replacement cyclic", plan, err)
+			preferred, err := BuildPlanPreferred(input, desired, PlanOptions{Rules: rules})
+			if err != nil || !plan.Equal(preferred) {
+				t.Fatal("public constructors disagree on replacement barriers", preferred, err)
 			}
 			prepare, remove := 0, 0
 			for _, step := range plan.Steps {
@@ -77,7 +76,7 @@ func TestMetaAdmissionPrecedesDecommissionAtCapacity(t *testing.T) {
 	}
 }
 
-func TestLivePlanPreviewAllowsAlreadyConvergedSources(t *testing.T) {
+func TestPlanPreviewDoesNotTakeUnchangedConvergingScopes(t *testing.T) {
 	t.Parallel()
 	base := planDoc(1, 3, []string{"n1", "n2", "n3"}, shardOf("work", rep("n1", 1)))
 	input := testPlanInput(base, statusForDocument(base))
@@ -93,8 +92,14 @@ func TestLivePlanPreviewAllowsAlreadyConvergedSources(t *testing.T) {
 	input.Groups[MetaGroupID] = GroupProgress{GroupID: MetaGroupID,
 		ConvergedVersion: desired.Version, Converged: desired.MetaGroup()}
 	plan, err = BuildPlan(input, desired, plannerRules())
-	if err != nil || len(plan.Steps) != 2 || plan.Steps[0].GroupID != "work" {
-		t.Fatal("partially converged preview failed", plan, err)
+	if err != nil || len(plan.Steps) != 0 || len(plan.Blocks) != 0 {
+		t.Fatal("unchanged intent took over pending work", plan, err)
+	}
+	desired.Version++
+	desired.Group("work").Labels = map[string]string{"owner": "jobs"}
+	plan, err = BuildPlan(input, desired, plannerRules())
+	if err != nil || len(plan.Steps) != 2 || len(plan.Blocks) != 1 || plan.Blocks[0].GroupID != "work" {
+		t.Fatal("changed intent lost the affected pending membership", plan, err)
 	}
 }
 
@@ -111,14 +116,14 @@ func TestMetaReplacementRefusesUnknownCapacityAndKeepsReadmissionOrder(t *testin
 	observed[MetaGroupID] = status
 	input := testPlanInput(base, observed)
 	rules := Rules{SchemaVersion: 1, Limits: Limits{}.WithDefaults()}
-	plan, err := scopedPlan(input, desired, PlanOptions{Rules: rules})
+	plan, err := BuildPlanPreferred(input, desired, PlanOptions{Rules: rules})
 	if err != nil || plan.Steps[0].Kind != StepRemoveReplica || plan.Steps[0].ReplicaID != 3 ||
 		len(plan.Dependencies) != 0 {
 		t.Fatal("same-node readmission acquired a decommission order or barrier", plan, err)
 	}
-	flat, err := BuildPlan(input, desired, rules)
-	if err != nil || !slices.Equal(flat.Steps, plan.Steps) {
-		t.Fatal("live and scoped readmission order differs", flat, err)
+	ordinary, err := BuildPlan(input, desired, rules)
+	if err != nil || !ordinary.Equal(plan) {
+		t.Fatal("public constructors disagree on readmission order", ordinary, err)
 	}
 	native := input.Native[MetaGroupID]
 	native.ConfState.Learners = []uint64{99}

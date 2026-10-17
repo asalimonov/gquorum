@@ -11,7 +11,7 @@ import (
 )
 
 // ApplyVersion keeps approval and explicit retry distinct on the existing
-// authenticated administration route. Empty Kind is schema3-only until Task78.
+// authenticated administration route.
 type applyVersionRequest struct {
 	Kind     string               `json:"kind,omitempty"`
 	Version  uint64               `json:"version,omitempty"`
@@ -30,7 +30,7 @@ func decodeApplyVersionRequest(data []byte) (applyVersionRequest, error) {
 
 func (request applyVersionRequest) validate() error {
 	switch request.Kind {
-	case "", "approve":
+	case "approve":
 		if request.Version == 0 || request.Previous != "" {
 			return fault.ErrInvalid
 		}

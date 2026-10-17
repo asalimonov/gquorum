@@ -29,6 +29,7 @@ func nativePlanningFixture() (PlanInput, Document) {
 	input.Groups[MetaGroupID] = meta
 	input.Approved.Version = desired.Version
 	desired.Version++ // A fresh plan's version follows every captured source.
+	desired.Group("work").Labels = map[string]string{"owner": "jobs"}
 	return input, desired
 }
 

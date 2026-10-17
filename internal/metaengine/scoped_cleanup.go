@@ -68,7 +68,7 @@ func (check scopedCleanupValidation) action(debt cleanupRecord, action topology.
 		action.Attempt == 0 || action.StepSeq < 1 ||
 		action.TransferNodeName != "" || action.TransferReplicaID != 0 || action.Kind != topology.StepRemoveReplica &&
 		(action.ExpectedVotersDigest != "" || action.ResultVotersDigest != "") ||
-		action.OperatorID != topology.MakeOperatorID(action.Version, action.Attempt) {
+		action.OperationID != topology.MakeOperationID(action.Version, action.Attempt) {
 		return false
 	}
 	if action.Kind == topology.StepDeleteGroupState {
@@ -78,12 +78,12 @@ func (check scopedCleanupValidation) action(debt cleanupRecord, action topology.
 	} else if action.NodeName != debt.Identity.NodeName || action.ReplicaID != debt.Identity.ReplicaID {
 		return false
 	}
-	operation := check.index.operations[topology.OperationID(action.OperatorID)]
+	operation := check.index.operations[topology.OperationID(action.OperationID)]
 	if operation == nil {
 		return false
 	}
-	return action.StepSeq <= len(operation.Plan.Steps) && topology.OperationID(action.OperatorID) == debt.OperationID &&
-		action.Matches(topology.OperatorID(operation.Status.ID), operation.Status.Attempt,
+	return action.StepSeq <= len(operation.Plan.Steps) && action.OperationID == debt.OperationID &&
+		action.Matches(topology.OperationID(operation.Status.ID), operation.Status.Attempt,
 			operation.Status.Version, operation.Plan.Steps[action.StepSeq-1])
 }
 

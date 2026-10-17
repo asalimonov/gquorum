@@ -201,7 +201,61 @@ func TestScopedLoadScopeRequiresExactApprovedIdentityAndOwnsDeclaration(t *testi
 		t.Fatal(err)
 	}
 	called := false
-	if err := NewMachine(testRules(), nil).WithLoadScope(id, 1, func(LoadScope) error { called = true; return nil }); !errors.Is(err, fault.ErrUnsupported) || called {
+	if err := mustMachine(t, testRules(), nil).WithLoadScope(id, 1, func(LoadScope) error { called = true; return nil }); !errors.Is(err, fault.ErrIdentityMismatch) || called {
 		t.Fatal(err, called)
+	}
+}
+
+func TestScopedFoundingHostReceiptsNeverStartIntentionalLearner(t *testing.T) {
+	t.Parallel()
+	doc := baseDoc()
+	doc.Origin = topology.OriginFounding
+	doc.CreatedAt = time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC)
+	doc.Nodes = append(doc.Nodes, topology.Node{Name: "n2", Type: "worker", State: topology.NodeActive})
+	for i := range doc.Groups {
+		g := &doc.Groups[i]
+		role := topology.ReplicaLearner
+		if g.ID == topology.MetaGroupID {
+			role = topology.ReplicaVoter
+		}
+		g.Replicas = append(g.Replicas, topology.Replica{NodeName: "n2", ReplicaID: 2, Role: role})
+		g.NextReplicaID = 3
+	}
+	s := scopedState{SchemaVersion: scopedStateSchemaVersion, Rules: testRules()}
+	prepareScopedFixture(t, &s)
+	seed := raftpb.ConfState{Voters: []uint64{1, 2}}
+	if _, err := foundingCommand(t, &s, ProposeDocument{Doc: doc}, seed); err != nil {
+		t.Fatal(err)
+	}
+	input := topology.PlanInput{Native: map[string]topology.NativeState{topology.MetaGroupID: {
+		GroupID: topology.MetaGroupID, ReplicaID: 1, Applied: 1, ConfState: seed}}}
+	plan, err := topology.BuildPlan(input, s.Latest, s.Rules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval := BeginOperationProposal{Version: 1, Plan: plan, ProposalID: "found", At: doc.CreatedAt,
+		Scopes: []ScopeExpectation{{GroupID: topology.MetaGroupID}, {GroupID: "shard0"}}}
+	if _, err := foundingCommand(t, &s, approval, seed); err != nil {
+		t.Fatal(err)
+	}
+	op := s.Operations[0].Clone()
+	step := op.Plan.Steps[0]
+	if step.Kind != topology.StepCreateFoundingGroup {
+		t.Fatal("missing founding boundary", plan)
+	}
+	applyScopedTransitionFixture(t, &s, scopedTransitionFor(op, step.GroupID, step.Seq))
+	result, err := s.applyBeginEffect(s.AppliedIndex+1, BeginEffectProposal{Action: scopedPlanAction(&op, step)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, receipt := range fixtureEffectReceipts(*result.result.Grant) {
+		if receipt.Resource.Kind == topology.AuthorityHost {
+			recordScopedEffectFixture(t, &s, RecordEffectProposal{Receipt: receipt, At: doc.CreatedAt.Add(time.Second)})
+		}
+	}
+	id := storage.Identity{ClusterID: doc.ClusterID, GroupID: "shard0", NodeName: "n2", ReplicaID: 2}
+	scope, err := queryScopedLoadScope(&s, id, 2)
+	if err != nil || scope.Founding || scope.Started || scope.Established {
+		t.Fatal("founder receipt authorized learner storage", scope, err)
 	}
 }

@@ -23,7 +23,8 @@ func TestConsistentMetadataReadsAndStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	view, err := g.ReadTopology(ctx)
-	if err != nil || view.AppliedIndex == 0 || view.Active.Version == 0 || view.Target.Version != view.Active.Version {
+	if err != nil || view.AppliedIndex == 0 || view.FullyConverged.Version == 0 ||
+		view.Target.Version != view.FullyConverged.Version {
 		t.Fatal(view, err)
 	}
 	if _, err := g.propose(ctx, metaengine.GrantSession{SessionID: "read-session", NodeName: "n1", InstanceID: "read-instance", TTLSeconds: 3}); err != nil {

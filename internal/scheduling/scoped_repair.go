@@ -18,7 +18,7 @@ var errStagedRepair = errors.New("staged_conflict")
 // A callback selects an exact action. Unrelated changes may refresh the CAS
 // base before planning; changes during planning refuse and retry on a later tick.
 func (r *Scheduler) commitScopedRepair(ctx context.Context, in schedulingapi.ScheduleInput,
-	action schedulingapi.ScheduleAction) (topology.OperatorID, error) {
+	action schedulingapi.ScheduleAction) (topology.OperationID, error) {
 	fresh, err := r.recheckScopedRepair(ctx, in, action)
 	if err != nil {
 		return "", err
@@ -30,7 +30,7 @@ func (r *Scheduler) commitScopedRepair(ctx context.Context, in schedulingapi.Sch
 	if err := metaengine.ValidateRepairIndependence(fresh.Target, fresh.Latest, doc); err != nil {
 		return "", errors.Join(errStagedRepair, err)
 	}
-	plan, err := r.scopedHost.PlanRepair(ctx, fresh, doc)
+	plan, err := r.host.PlanRepair(ctx, fresh, doc)
 	if err != nil {
 		return "", err
 	}
@@ -53,17 +53,17 @@ func (r *Scheduler) commitScopedRepair(ctx context.Context, in schedulingapi.Sch
 	}
 	commit := RepairCommit{Document: doc, ExpectedVersion: fresh.Latest.Version, ExpectedTarget: fresh.Target.Version,
 		Scopes: slices.Clone(fresh.Scopes), Plan: plan}
-	var id topology.OperatorID
+	var id topology.OperationID
 	if action.Kind == schedulingapi.ReconfigureVoters {
-		id, err = r.scopedHost.CommitVoterChange(ctx, action.VoterChange.Clone(), commit)
+		id, err = r.host.CommitVoterChange(ctx, action.VoterChange.Clone(), commit)
 	} else {
 		key := repairAttempt{identity: action.Identity,
 			source: fresh.Input.Groups[action.Identity.GroupID].ConvergedVersion}
 		r.repairAttempts[key] = r.now()
-		id, err = r.scopedHost.CommitRepair(ctx, commit)
+		id, err = r.host.CommitRepair(ctx, commit)
 	}
 	if err == nil {
-		r.host.WakeOperator()
+		r.host.WakeOperations()
 	}
 	return id, err
 }
@@ -83,7 +83,7 @@ func (r *Scheduler) recheckScopedRepair(ctx context.Context, in schedulingapi.Sc
 	if err := r.host.RefreshObservations(ctx); err != nil {
 		return metaengine.PlanRead{}, err
 	}
-	fresh, err := r.scopedHost.ReadRepair(ctx, group)
+	fresh, err := r.host.ReadRepair(ctx, group)
 	if err != nil {
 		return metaengine.PlanRead{}, err
 	}

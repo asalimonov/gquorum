@@ -30,7 +30,7 @@ func retryScopedDeletion() scopedState {
 	s.Operations = append(s.Operations, retry)
 	s.Groups[len(s.Groups)-1].Owner = retry.Status.ID
 	action := *s.Cleanup[1].StopAction
-	action.OperatorID, action.Attempt = topology.OperatorID(retry.Status.ID), 2
+	action.OperationID, action.Attempt = topology.OperationID(retry.Status.ID), 2
 	s.Cleanup[1].StopAction = &action
 	return s
 }
@@ -53,7 +53,7 @@ func TestScopedCleanupFailedAndRetriedDeletionRemainRestorable(t *testing.T) {
 	}
 	// The exact tip may subsequently record its own idempotent stop.
 	grant := oldStop.Grant.Clone()
-	grant.Action, grant.OperatorID, grant.Key.Revision = s.Cleanup[1].StopAction, "exec-v2-a2", 10
+	grant.Action, grant.OperationID, grant.Key.Revision = s.Cleanup[1].StopAction, "exec-v2-a2", 10
 	receipt := fixtureEffectReceipts(grant)[0]
 	s.AuthorityRecords = append(s.AuthorityRecords, scopedAuthorityRecord{Class: "execution",
 		authorityRecord: authorityRecord{Grant: grant, Effects: []topology.EffectReceipt{receipt}}})
@@ -88,11 +88,11 @@ func TestScopedCleanupRejectsLostProgressAndPrematureRetirement(t *testing.T) {
 		},
 		"tip action not rebound": func(s *scopedState) {
 			*s = retryScopedDeletion()
-			s.Cleanup[1].StopAction.OperatorID, s.Cleanup[1].StopAction.Attempt = "exec-v2-a1", 1
+			s.Cleanup[1].StopAction.OperationID, s.Cleanup[1].StopAction.Attempt = "exec-v2-a1", 1
 		},
 		"retire rebound": func(s *scopedState) {
 			*s = retryScopedDeletion()
-			s.Cleanup[1].RetireAction.OperatorID, s.Cleanup[1].RetireAction.Attempt = "exec-v2-a2", 2
+			s.Cleanup[1].RetireAction.OperationID, s.Cleanup[1].RetireAction.Attempt = "exec-v2-a2", 2
 		},
 	}
 	for name, corrupt := range cases {

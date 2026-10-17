@@ -27,7 +27,7 @@ func (g *Group) TransferLeader(ctx context.Context, id, name string) error {
 		return err
 	}
 	result, err := g.propose(ctx, metaengine.GrantTransferProposal{
-		ExpectedActiveVersion: action.Version, GroupID: id, NodeName: name,
+		ExpectedSourceVersion: action.Version, GroupID: id, NodeName: name,
 		ReplicaID: action.ReplicaID, RequestID: rand.Text()})
 	if err != nil {
 		return err
@@ -78,7 +78,7 @@ func (g *Group) dispatchTransfer(ctx context.Context, grant topology.AuthorityGr
 
 func (g *Group) captureTransfer(ctx context.Context, request topology.AuthorizedStep) (metaengine.PlanRead, error) {
 	query := metaengine.QueryRequest{Kind: "transfer_plan", Key: request.GroupID}
-	before, err := g.legacyTransferPlan(ctx, query)
+	before, err := g.readPlan(ctx, query)
 	if err != nil {
 		return metaengine.PlanRead{}, err
 	}
@@ -90,7 +90,7 @@ func (g *Group) captureTransfer(ctx context.Context, request topology.Authorized
 	}
 	// Recapture after health callbacks as well as native I/O. No callback wait may
 	// turn the earlier topology observation into authority for the proposal.
-	read, err := g.capturePlan(ctx, query, g.legacyTransferPlan)
+	read, err := g.capturePlan(ctx, query, g.readPlan)
 	if err != nil {
 		return read, err
 	}
@@ -99,19 +99,6 @@ func (g *Group) captureTransfer(ctx context.Context, request topology.Authorized
 		return metaengine.PlanRead{}, err
 	}
 	return read, validateTransferNative(read, action)
-}
-
-// Task78 switches this read to readPlan. This adapter uses real schema3 Active
-// evidence; the unchanged schema3 grant handler retains its global guards.
-func (g *Group) legacyTransferPlan(ctx context.Context, query metaengine.QueryRequest) (metaengine.PlanRead, error) {
-	input, err := g.state().PlanningInput(ctx, g.state().Target(), query.Native)
-	if err != nil {
-		return metaengine.PlanRead{}, err
-	}
-	row := input.Groups[query.Key]
-	return metaengine.PlanRead{Input: input, Target: input.Approved.Clone(),
-		Scopes: []metaengine.ScopeExpectation{{GroupID: query.Key, SourceVersion: row.ConvergedVersion,
-			Owner: row.OperationID}}}, nil
 }
 
 func transferAction(read metaengine.PlanRead, request topology.AuthorizedStep) (topology.AuthorizedStep, error) {

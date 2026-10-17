@@ -11,9 +11,9 @@ func (s *scopedState) applyGrantTransfer(index uint64, p GrantTransferProposal) 
 	if strings.TrimSpace(p.RequestID) == "" {
 		return proposalApplication{}, fault.ErrOperationAuthorization
 	}
-	// Rename the legacy payload field with its wire consumers at Task 78. In
-	// scoped state it names this group's proven source, never global completion.
-	action := topology.AuthorizedStep{Version: p.ExpectedActiveVersion, GroupID: p.GroupID,
+	// The source version binds this group's proven membership, independently
+	// of the cluster completion marker.
+	action := topology.AuthorizedStep{Version: p.ExpectedSourceVersion, GroupID: p.GroupID,
 		NodeName: p.NodeName, ReplicaID: p.ReplicaID, Kind: topology.StepTransferLeader}
 	catalog := s.authorityCatalog()
 	if prior := catalog.retainedTransferRequest(p, action); prior != nil {

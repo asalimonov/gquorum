@@ -6,7 +6,7 @@ func (s *scopedState) applyBeginOperation(index uint64, p BeginOperationProposal
 	if first := s.indexes.first[p.Version]; first != "" {
 		if !s.indexes.operations[first].Plan.Equal(p.Plan) {
 			result := rejectVersionConflict(p.ProposalID, p.Version, s.Latest.Version)
-			result.OperatorID = topology.OperatorID(first)
+			result.OperationID = first
 			return proposalApplication{result: result}, nil
 		}
 		return proposalApplication{result: scopedApprovalResult(p.ProposalID, first)}, nil
@@ -34,6 +34,5 @@ func (s *scopedState) applyBeginOperation(index uint64, p BeginOperationProposal
 }
 
 func scopedApprovalResult(id string, operation topology.OperationID) ApplyResult {
-	// The existing result codec is renamed with its consumers at Task 78.
-	return ApplyResult{ProposalID: id, Accepted: true, OperatorID: topology.OperatorID(operation)}
+	return ApplyResult{ProposalID: id, Accepted: true, OperationID: operation}
 }

@@ -12,7 +12,7 @@ import (
 func (s *scopedState) authorityClass(grant topology.AuthorityGrant) string {
 	if grant.Action != nil {
 		a := grant.Action
-		if op := s.indexes.operations[topology.OperationID(a.OperatorID)]; op != nil &&
+		if op := s.indexes.operations[topology.OperationID(a.OperationID)]; op != nil &&
 			slices.ContainsFunc(op.Plan.Blocks, func(b topology.PlanBlock) bool {
 				return b.GroupID == a.GroupID && slices.Contains(b.Cleanup, a.StepSeq)
 			}) {
@@ -29,9 +29,9 @@ func (s *scopedState) cleanupDebtForAction(id storage.Identity,
 		!exactCleanupBinding(debt, action) {
 		return nil, fault.ErrOperationAuthorization
 	}
-	op := s.indexes.operations[topology.OperationID(action.OperatorID)]
+	op := s.indexes.operations[topology.OperationID(action.OperationID)]
 	if op == nil || action.StepSeq < 1 || action.StepSeq > len(op.Plan.Steps) ||
-		!action.Matches(topology.OperatorID(op.Status.ID), op.Status.Attempt,
+		!action.Matches(topology.OperationID(op.Status.ID), op.Status.Attempt,
 			op.Status.Version, op.Plan.Steps[action.StepSeq-1]) ||
 		s.authorityClass(topology.AuthorityGrant{Action: &action}) != "cleanup" {
 		return nil, fault.ErrOperationAuthorization

@@ -39,7 +39,7 @@ func (c planningCollector) detachingRequiredStop(step topology.Step) bool {
 			debt.Identity.ReplicaID != step.ReplicaID || debt.Stopped != nil || debt.StopAction == nil {
 			continue
 		}
-		bound := c.evidence.operations[topology.OperationID(debt.StopAction.OperatorID)]
+		bound := c.evidence.operations[topology.OperationID(debt.StopAction.OperationID)]
 		return requiredCleanupStop(bound, *debt.StopAction)
 	}
 	return false

@@ -138,7 +138,7 @@ func TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn(t *testing.T)
 		if err != nil {
 			return false, err
 		}
-		if status.Operator != nil && status.Operator.State != topology.OperatorSucceeded {
+		if operation, found := operationAtVersion(status, doc.Version); found && operation.State != topology.OperationSucceeded {
 			return false, nil
 		}
 		converged = doc
@@ -298,7 +298,8 @@ func TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn(t *testing.T)
 			return false, err
 		}
 		status, err := c.Status(withinCooldown, collector)
-		return err == nil && status.Operator != nil && status.Operator.State == topology.OperatorSucceeded && status.Operator.Version == doc.Version, err
+		operation, found := operationAtVersion(status, doc.Version)
+		return err == nil && found && operation.State == topology.OperationSucceeded, err
 	}); err != nil {
 		snapshot, readErr := clusterMetrics(context.Background(), c, collector)
 		t.Logf("metrics after second failure: %+v %v", snapshot, readErr)

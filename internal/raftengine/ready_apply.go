@@ -126,7 +126,7 @@ func (g *Group) applyNormalEntry(entry raftpb.Entry) error {
 	result, err := g.opts.Machine.Apply(g.ctx, command)
 	g.meter.ObserveApply(time.Since(started))
 	if err != nil {
-		return fault.New(fault.Unavailable, "load machine apply failed", err)
+		return fault.New(fault.Unavailable, "load machine apply failed: "+err.Error(), err)
 	}
 	if req := g.props[e.Correlation]; req != nil {
 		delete(g.props, e.Correlation)

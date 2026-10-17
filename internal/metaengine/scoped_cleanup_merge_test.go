@@ -76,7 +76,7 @@ func TestScopedCleanupUpsertRejectsConflictingProofWithoutMutation(t *testing.T)
 		"member":         func(r *cleanupRecord) { r.MemberID++ },
 		"storage":        func(r *cleanupRecord) { r.Storage = topology.StorageMemory; r.Collection = nil },
 		"origin":         func(r *cleanupRecord) { r.OperationID = "exec-v3-a1" },
-		"stop binding":   func(r *cleanupRecord) { r.StopAction.OperatorID = "exec-v3-a1" },
+		"stop binding":   func(r *cleanupRecord) { r.StopAction.OperationID = "exec-v3-a1" },
 		"retire binding": func(r *cleanupRecord) { r.RetireAction.StepSeq++ },
 		"removal":        func(r *cleanupRecord) { r.Removed.AppliedIndex++ },
 		"stopped":        func(r *cleanupRecord) { r.Stopped.LocalSequence++ },

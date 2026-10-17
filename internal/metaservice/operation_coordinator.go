@@ -11,8 +11,7 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// The sole scoped controller adapter. Task78 replaces operatorCoordinator in
-// composition with this adapter when complete scoped persistence is installed.
+// The controller adapter selects current scoped work with local fair cursors.
 type operationCoordinator struct {
 	g            *Group
 	mu           sync.Mutex
@@ -52,7 +51,8 @@ func (c *operationCoordinator) RecordOperationTransition(ctx context.Context, t 
 	if !c.IsMetaLeader() {
 		return fault.ErrNotLeader
 	}
-	_, err := c.g.propose(ctx, metaengine.TransitionOperationProposal{Transition: t.Clone()})
+	_, err := c.g.propose(ctx, metaengine.TransitionOperationProposal{Transition: t.Clone(),
+		ProposalID: newProposalID()})
 	return err
 }
 

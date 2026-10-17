@@ -12,7 +12,7 @@ import (
 
 func TestRetirementProofRequiresTheCompleteAuthorizedTuple(t *testing.T) {
 	t.Parallel()
-	a := topology.AuthorizedStep{OperatorID: "exec-v2-a1", Version: 2, Attempt: 1, StepSeq: 3, Kind: topology.StepCleanupReplicaState, GroupID: "work", NodeName: "a", ReplicaID: 7}
+	a := topology.AuthorizedStep{OperationID: "exec-v2-a1", Version: 2, Attempt: 1, StepSeq: 3, Kind: topology.StepCleanupReplicaState, GroupID: "work", NodeName: "a", ReplicaID: 7}
 	req := load.RetirementRequest{Identity: storage.Identity{NodeName: "a", ClusterID: "cluster", GroupID: "work", ReplicaID: 7}, Reason: load.RetirementTopology, Authorization: &a}
 	for _, mutate := range []func(*load.RetirementResult){
 		func(r *load.RetirementResult) { r.Verified = false },
@@ -24,7 +24,7 @@ func TestRetirementProofRequiresTheCompleteAuthorizedTuple(t *testing.T) {
 		func(r *load.RetirementResult) { r.AdmissionID = "forged" },
 		func(r *load.RetirementResult) { r.PreviousMemberID = 1 },
 		func(r *load.RetirementResult) { r.GrantedMemberID = 2 },
-		func(r *load.RetirementResult) { r.Authorization.OperatorID = "other" },
+		func(r *load.RetirementResult) { r.Authorization.OperationID = "other" },
 		func(r *load.RetirementResult) { r.Authorization.Version++ },
 		func(r *load.RetirementResult) { r.Authorization.Attempt++ },
 		func(r *load.RetirementResult) { r.Authorization.StepSeq++ },

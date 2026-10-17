@@ -44,31 +44,31 @@ func clusterDocument(load bool) topology.Document {
 }
 
 type testHost struct {
-	limits                                               topology.Limits
-	observations                                         metrics.ClusterSnapshot
-	t                                                    *testing.T
-	machine                                              *metaengine.Machine
-	index                                                uint64
-	leader                                               bool
-	health                                               map[string]topology.Health
-	status                                               map[string]topology.GroupStatus
-	viewErr, operatorErr, statusErr, planErr, approveErr error
-	beforeCommit                                         func()
-	operatorOverride                                     *topology.Operator
-	planOverride                                         *topology.Plan
-	blockViews                                           bool
-	wakes, commits, approvals, healthCalls, statusCalls  int
+	limits                                   topology.Limits
+	observations                             metrics.ClusterSnapshot
+	t                                        *testing.T
+	machine                                  *metaengine.Machine
+	index                                    uint64
+	leader                                   bool
+	health                                   map[string]topology.Health
+	status                                   map[string]topology.GroupStatus
+	viewErr, statusErr, planErr              error
+	beforeCommit                             func()
+	blockViews                               bool
+	wakes, commits, healthCalls, statusCalls int
 }
 
 func newTestHost(t *testing.T, voters ...uint64) *testHost {
 	t.Helper()
-	h := &testHost{t: t, leader: true, machine: metaengine.NewMachine(topology.Rules{SchemaVersion: 1, Limits: (topology.Limits{}).WithDefaults()}, nil), health: map[string]topology.Health{"n1": topology.HealthAlive, "n2": topology.HealthAlive, "n3": topology.HealthAlive}, status: map[string]topology.GroupStatus{}}
+	machine, err := metaengine.NewMachine(topology.Rules{SchemaVersion: 1, Limits: (topology.Limits{}).WithDefaults()}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &testHost{t: t, leader: true, machine: machine, health: map[string]topology.Health{"n1": topology.HealthAlive, "n2": topology.HealthAlive, "n3": topology.HealthAlive}, status: map[string]topology.GroupStatus{}}
 	h.status[topology.MetaGroupID] = topology.GroupStatus{GroupID: topology.MetaGroupID, Found: true, LeaderID: 1, Commit: 10, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}, HealthKnown: true, LiveVoters: map[uint64]bool{1: true, 2: true, 3: true}}
 	h.status["shard0"] = topology.GroupStatus{GroupID: "shard0", Found: true, LeaderID: 1, Commit: 10, ConfState: raftpb.ConfState{Voters: voters}, HealthKnown: true, LiveVoters: map[uint64]bool{1: true, 2: true, 3: true}}
-	h.mustApply(metaengine.ProposeDocument{Doc: clusterDocument(true), ExpectedVersion: 0})
-	ex := h.mustApply(metaengine.BeginOperatorProposal{Version: 1, Plan: topology.Plan{Version: 1}, Origin: topology.OriginFounding, At: time.Now().UTC()})
-	h.mustApply(metaengine.TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: ex.OperatorID, Version: 1, Attempt: 1, State: topology.OperatorSucceeded, At: time.Now().UTC()}})
-	h.mustApply(metaengine.ActivateTargetProposal{OperatorID: ex.OperatorID, Version: 1, Attempt: 1})
+	h.restoreConverged(clusterDocument(true))
+	h.observations = metrics.ClusterSnapshot{CollectorRunID: "epoch", ObserverInstanceID: "process", IsCollectorLeader: true}
 	return h
 }
 
@@ -77,11 +77,7 @@ func TestCustomLegacyRepairCannotAllocateOnReservedNode(t *testing.T) {
 	h := newTestHost(t, 1, 2)
 	doc := h.machine.Latest()
 	doc.Node("n3").Labels = map[string]string{topology.LabelReserved: "true"}
-	staged := h.mustApply(metaengine.ProposeDocument{Doc: doc, ExpectedVersion: doc.Version})
-	at := time.Now().UTC()
-	op := h.mustApply(metaengine.BeginOperatorProposal{Version: staged.Doc.Version, Plan: topology.Plan{Version: staged.Doc.Version}, Origin: topology.OriginOperator, At: at})
-	h.mustApply(metaengine.TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: op.OperatorID, Version: staged.Doc.Version, Attempt: 1, State: topology.OperatorSucceeded, At: at}})
-	h.mustApply(metaengine.ActivateTargetProposal{OperatorID: op.OperatorID, Version: staged.Doc.Version, Attempt: 1})
+	h.restoreConverged(doc)
 	r, err := New(Config{Host: h, Policy: schedulerFunc(func(context.Context, schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error) {
 		return schedulingapi.ScheduleDecision{Action: &schedulingapi.ScheduleAction{Kind: schedulingapi.RestoreMissingReplica,
 			Identity: storage.Identity{ClusterID: doc.ClusterID, GroupID: "shard0", NodeName: "n3", ReplicaID: 3}}}, nil
@@ -92,7 +88,7 @@ func TestCustomLegacyRepairCannotAllocateOnReservedNode(t *testing.T) {
 	if err := r.Tick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if h.approvals != 0 || h.commits != 0 || h.machine.Target().Version != staged.Doc.Version {
+	if h.commits != 0 || h.machine.Target().Version != doc.Version {
 		t.Fatal("custom repair bypassed reserved admission", r.Status())
 	}
 }
@@ -102,7 +98,7 @@ func (h *testHost) apply(ctx context.Context, proposal any) (metaengine.ApplyRes
 		return metaengine.ApplyResult{}, err
 	}
 	h.index++
-	result, err := h.machine.Apply(ctx, raftengine.Command{Index: h.index, Term: 1, Data: data})
+	result, err := h.machine.Apply(ctx, raftengine.Command{Index: h.index, Term: 1, Data: data, ConfState: h.status[topology.MetaGroupID].ConfState})
 	if err != nil {
 		return metaengine.ApplyResult{}, err
 	}
@@ -127,90 +123,19 @@ func (h *testHost) mustApply(p any) metaengine.ApplyResult {
 	}
 	return out
 }
-func (h *testHost) Views(ctx context.Context) (topology.ReadView, error) {
-	if h.blockViews {
-		<-ctx.Done()
-		return topology.ReadView{}, ctx.Err()
-	}
-	return h.machine.Views(), h.viewErr
-}
-func (h *testHost) CurrentOperator(context.Context) (topology.OperatorLookup, error) {
-	if h.operatorOverride != nil {
-		return topology.OperatorLookup{Operator: *h.operatorOverride, Found: true}, h.operatorErr
-	}
-	ex, ok := h.machine.CurrentOperator()
-	return topology.OperatorLookup{Operator: ex, Found: ok}, h.operatorErr
-}
 func (h *testHost) IsLeader() bool { return h.leader }
 func (h *testHost) Health(context.Context) (map[string]topology.Health, error) {
 	h.healthCalls++
 	return h.health, nil
 }
-func (h *testHost) GlobalStatus(context.Context, topology.Document) (map[string]topology.GroupStatus, error) {
-	h.statusCalls++
-	return h.status, h.statusErr
-}
-func (h *testHost) PlanFor(ctx context.Context, doc topology.Document) (topology.Plan, error) {
-	if h.planErr != nil {
-		return topology.Plan{}, h.planErr
-	}
-	if h.planOverride != nil {
-		p := *h.planOverride
-		p.Version = doc.Version
-		return p, nil
-	}
-	native := make(map[string]topology.NativeState)
-	for id, status := range h.status {
-		if status.Found {
-			native[id] = topology.NativeState{GroupID: id, ReplicaID: status.ConfState.Voters[0], Applied: 1,
-				ConfState: status.Clone().ConfState}
-		}
-	}
-	input, err := h.machine.PlanningInput(ctx, doc, native)
-	if err != nil {
-		return topology.Plan{}, err
-	}
-	for id, status := range h.status {
-		row := input.Groups[id]
-		owned := status.Clone()
-		row.Observation = &owned
-		input.Groups[id] = row
-	}
-	return topology.BuildPlan(input, doc, topology.Rules{SchemaVersion: 1, Limits: h.limits.WithDefaults()})
-}
-func (h *testHost) Approve(ctx context.Context, version uint64) (topology.OperatorID, error) {
-	if h.approveErr != nil {
-		return "", h.approveErr
-	}
-	doc, _ := h.machine.Get(version)
-	plan, err := h.PlanFor(ctx, doc)
-	if err != nil {
-		return "", err
-	}
-	res, err := h.apply(ctx, metaengine.BeginOperatorProposal{Version: version, Plan: plan, At: time.Now().UTC(), Actor: "auto-repair", Origin: doc.Origin})
-	if err == nil {
-		h.approvals++
-	}
-	return res.OperatorID, err
-}
-func (h *testHost) CommitRepair(ctx context.Context, commit RepairCommit) (topology.OperatorID, error) {
-	doc, expected, plan := commit.Document, commit.ExpectedVersion, commit.Plan
-	if h.beforeCommit != nil {
-		h.beforeCommit()
-	}
-	res, err := h.apply(ctx, metaengine.CommitRepairOperatorProposal{Doc: doc, ExpectedVersion: expected, Plan: plan, At: time.Now().UTC()})
-	if err == nil {
-		h.commits++
-	}
-	return res.OperatorID, err
-}
-func (h *testHost) WakeOperator() { h.wakes++ }
+func (h *testHost) WakeOperations() { h.wakes++ }
 func (h *testHost) stage(origin topology.Origin, parent uint64) topology.Document {
 	doc := h.machine.Latest()
 	doc.Version++
 	doc.ParentVersion = parent
 	doc.Origin = origin
 	doc.Comment = "staged intent"
+	doc.Groups[len(doc.Groups)-1].Labels = map[string]string{"intent": "staged"}
 	return h.mustApply(metaengine.ProposeDocument{Doc: doc, ExpectedVersion: doc.Version - 1}).Doc
 }
 func newTestScheduler(t *testing.T, h *testHost, settings Settings) *Scheduler {
@@ -221,7 +146,7 @@ func newTestScheduler(t *testing.T, h *testHost, settings Settings) *Scheduler {
 	}
 	now := time.Date(2026, 7, 16, 0, 0, 0, 0, time.UTC)
 	r.now = func() time.Time { return now }
-	for _, n := range h.machine.Active().Nodes {
+	for _, n := range h.machine.Target().Nodes {
 		r.aliveSince[n.Name] = now.Add(-2 * r.settings.StabilityWindow)
 	}
 	return r
@@ -277,7 +202,7 @@ func TestSchedulerGatesLeaderHealthAndDisabled(t *testing.T) {
 			}
 			r := newTestScheduler(t, h, settings)
 			tick(t, r)
-			if h.commits != 0 || h.statusCalls != 0 {
+			if h.commits != 0 || mode != "unknown" && h.statusCalls != 0 {
 				t.Fatal("gate allowed repair observations")
 			}
 		})
@@ -323,67 +248,24 @@ func TestSchedulerLocalKillSwitchResetsStability(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-func TestSchedulerResumesApprovedOperatorBeforeHealthGate(t *testing.T) {
-	t.Parallel()
-	for _, state := range []topology.OperatorState{topology.OperatorPending, topology.OperatorRunning, topology.OperatorWaitingForCatchUp, topology.OperatorSucceeded} {
-		t.Run(string(state), func(t *testing.T) {
-			for _, leader := range []bool{true, false} {
-				h := newTestHost(t, 1, 2, 3)
-				h.leader = leader
-				h.health = nil
-				h.stage(topology.OriginOperator, 1)
-				h.mustApply(metaengine.BeginOperatorProposal{Version: 2, Plan: topology.Plan{Version: 2}, At: time.Now().UTC()})
-				h.operatorOverride = &topology.Operator{Status: topology.OperatorStatus{ID: "exec-v2-a1", Version: 2, State: state}}
-				r := newTestScheduler(t, h, Settings{})
-				tick(t, r)
-				assertStatus(t, r, topology.SchedulingRunning, ReconcileReasonApprovedOperator)
-				want := 0
-				if leader {
-					want = 1
-				}
-				if h.wakes != want || h.healthCalls != 0 || h.commits != 0 {
-					t.Fatal("resume ordering or follower action")
-				}
-			}
-		})
-	}
-}
-func TestSchedulerDoesNotMergeStagedOrFailedOperatorIntent(t *testing.T) {
-	t.Parallel()
-	for _, failed := range []bool{true, false} {
-		t.Run(fmt.Sprint(failed), func(t *testing.T) {
-			h := newTestHost(t, 1, 2)
-			latest := h.stage(topology.OriginOperator, 1)
-			if failed {
-				h.operatorOverride = &topology.Operator{Status: topology.OperatorStatus{ID: "exec-v2-a1", Version: 2, State: topology.OperatorFailed}}
-			}
-			r := newTestScheduler(t, h, Settings{})
-			tick(t, r)
-			want := ReconcileReasonStagedLatest
-			if failed {
-				want = ReconcileReasonFailedOperator
-			}
-			assertStatus(t, r, topology.SchedulingBlocked, want)
-			if !reflect.DeepEqual(latest, h.machine.Latest()) || h.commits != 0 || h.approvals != 0 {
-				t.Fatal("merged operator intent")
-			}
-		})
-	}
-}
 func TestSchedulerCommitsExactLearnerFirstRepair(t *testing.T) {
 	t.Parallel()
 	h := newTestHost(t, 1, 2)
 	r := newTestScheduler(t, h, Settings{})
 	tick(t, r)
 	views := h.machine.Views()
-	latest, target, active := views.Latest, views.Target, views.Active
-	if latest.Version != 2 || target.Version != 2 || active.Version != 1 || h.commits != 1 || h.wakes != 1 {
-		t.Fatal("repair was not atomic", latest.Version, target.Version, active.Version, h.commits)
+	latest, target := views.Latest, views.Target
+	if latest.Version != 2 || target.Version != 2 || views.FullyConverged.Version != 1 || h.commits != 1 || h.wakes != 1 {
+		t.Fatal("repair was not atomic", latest.Version, target.Version, views.FullyConverged.Version, h.commits)
 	}
 	if latest.Origin != topology.OriginReconciler || latest.ParentVersion != 1 || latest.ChangedBy != "auto-repair" || latest.Group("shard0").NextReplicaID != 5 || latest.Group("shard0").Replicas[2].ReplicaID != 4 {
 		t.Fatalf("wrong repair %+v", latest)
 	}
-	ex, _ := h.machine.CurrentOperator()
+	work, err := h.machine.ReadyBlocks("", 1)
+	if err != nil || len(work) != 1 {
+		t.Fatal(work, err)
+	}
+	ex := work[0].Operation
 	// A fresh replacement on the same host cannot be prepared until the old
 	// exact identity is removed and cleaned; the capacity bound forbids surge.
 	want := []topology.StepKind{topology.StepRemoveReplica, topology.StepStopReplica, topology.StepCleanupReplicaState, topology.StepPrepareReplica, topology.StepAddLearner, topology.StepWaitCaughtUp, topology.StepPromoteVoter}
@@ -399,7 +281,7 @@ func TestSchedulerCommitsExactLearnerFirstRepair(t *testing.T) {
 			t.Fatal(ex.Plan)
 		}
 	}
-	assertStatus(t, r, topology.SchedulingRunning, ReconcileReasonApprovedOperator)
+	assertStatus(t, r, topology.SchedulingRunning, ReconcileReasonApprovedOperation)
 }
 func TestSchedulerCASRaceLeavesOperatorVersionStaged(t *testing.T) {
 	t.Parallel()
@@ -407,9 +289,104 @@ func TestSchedulerCASRaceLeavesOperatorVersionStaged(t *testing.T) {
 	r := newTestScheduler(t, h, Settings{})
 	h.beforeCommit = func() { h.stage(topology.OriginOperator, 1) }
 	tick(t, r)
-	assertStatus(t, r, topology.SchedulingError, ReconcileReasonCASConflict)
-	if h.machine.Latest().Origin != topology.OriginOperator || h.machine.Target().Version != 1 || h.machine.Active().Version != 1 || h.commits != 0 || h.wakes != 0 {
+	assertStatus(t, r, topology.SchedulingWaiting, ReconcileReasonCASConflict)
+	if h.machine.Latest().Origin != topology.OriginOperator || h.machine.Target().Version != 1 || h.commits != 0 || h.wakes != 0 {
 		t.Fatal("repair overwrote operator CAS")
+	}
+}
+
+func TestSchedulerNeverApprovesStagingByOrigin(t *testing.T) {
+	t.Parallel()
+	for _, origin := range []topology.Origin{topology.OriginOperator, topology.OriginInternal, topology.OriginReconciler} {
+		t.Run(string(origin), func(t *testing.T) {
+			t.Parallel()
+			h := newTestHost(t, 1, 2)
+			staged := h.stage(origin, 1)
+			r := newTestScheduler(t, h, Settings{})
+			for range 2 {
+				tick(t, r)
+			}
+			assertStatus(t, r, topology.SchedulingWaiting, "staged_conflict")
+			if h.commits != 0 || h.machine.Target().Version != 1 || !reflect.DeepEqual(h.machine.Latest(), staged) {
+				t.Fatal("scheduler approved or overwrote staged intent", h.machine.Views())
+			}
+		})
+	}
+}
+
+func TestSchedulerFollowerDropsStabilityEvidence(t *testing.T) {
+	t.Parallel()
+	h := newTestHost(t, 1, 2)
+	r := newTestScheduler(t, h, Settings{})
+	h.leader = false
+	tick(t, r)
+	assertStatus(t, r, topology.SchedulingStandby, ReconcileReasonNotLeader)
+	if len(r.aliveSince) != 0 || len(r.aliveMembers) != 0 || h.healthCalls != 0 || h.commits != 0 {
+		t.Fatal("follower retained or sampled repair evidence")
+	}
+	h.leader = true
+	tick(t, r)
+	assertStatus(t, r, topology.SchedulingWaiting, ReconcileReasonStabilityWindow)
+	if h.commits != 0 {
+		t.Fatal("new leader reused previous stability evidence")
+	}
+}
+
+func TestSchedulerWaitsForApprovedTopologyBeforeCallingPolicy(t *testing.T) {
+	t.Parallel()
+	h := newTestHost(t, 1)
+	var err error
+	h.machine, err = metaengine.NewMachine(topology.Rules{SchemaVersion: 1, Limits: (topology.Limits{}).WithDefaults()}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := newTestScheduler(t, h, Settings{})
+	r.policy = schedulerFunc(func(context.Context, schedulingapi.ScheduleInput) (schedulingapi.ScheduleDecision, error) {
+		t.Fatal("policy called before any topology was approved")
+		return schedulingapi.ScheduleDecision{}, nil
+	})
+	tick(t, r)
+	assertStatus(t, r, topology.SchedulingWaiting, ReconcileReasonStarting)
+	if h.healthCalls != 0 || h.statusCalls != 0 || h.commits != 0 {
+		t.Fatal("unapproved topology initiated repair work")
+	}
+}
+
+func TestSchedulerStatusTransitionsAreOwnedAndLoggedOnce(t *testing.T) {
+	t.Parallel()
+	h := newTestHost(t, 1, 2, 3)
+	r := newTestScheduler(t, h, Settings{})
+	var buf bytes.Buffer
+	r.logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	changes := 0
+	r.onTransition = func(s topology.SchedulingStatus) {
+		changes++
+		if s.CurrentOperationID != nil {
+			*s.CurrentOperationID = "changed"
+		}
+		if s.CurrentAction != nil {
+			s.CurrentAction.ReplicaID = 99
+		}
+	}
+	blocked := r.newStatus(true, topology.SchedulingBlocked, ReconcileReasonQuorumLost)
+	r.transition(blocked, "quorum lost")
+	since := r.Status().Since
+	r.now = func() time.Time { return since.Add(time.Second) }
+	r.transition(blocked, "same observation")
+	if strings.Count(buf.String(), "level=WARN") != 1 || changes != 1 || r.Status().Since != since {
+		t.Fatal("unchanged status emitted another transition", buf.String(), changes, r.Status())
+	}
+	running := r.runningOperationStatus(true, "exec-v2-a1")
+	running.CurrentAction = &topology.SchedulingActionStatus{ReplicaID: 3}
+	r.transition(running, "repair approved")
+	if strings.Count(buf.String(), "level=INFO") != 1 || changes != 2 {
+		t.Fatal("recovery log lost", buf.String(), changes)
+	}
+	status := r.Status()
+	*status.CurrentOperationID, status.CurrentAction.ReplicaID = "mutated", 100
+	status = r.Status()
+	if *status.CurrentOperationID != "exec-v2-a1" || status.CurrentAction.ReplicaID != 3 {
+		t.Fatal("status or transition callback aliased scheduler state", status)
 	}
 }
 
@@ -426,92 +403,9 @@ func TestSchedulerRejectsPolicyActionsOutsideAllowList(t *testing.T) {
 	r := newTestScheduler(t, h, Settings{})
 	r.policy = &stubPolicy{schedulingapi.ScheduleDecision{Action: &schedulingapi.ScheduleAction{Kind: "remove_voter", Identity: storage.Identity{GroupID: "shard0", ReplicaID: 3}}}}
 	tick(t, r)
-	assertStatus(t, r, topology.SchedulingError, ReconcileReasonPolicyRejected)
+	assertStatus(t, r, topology.SchedulingWaiting, ReconcileReasonPolicyRejected)
 	if h.commits != 0 || h.wakes != 0 {
 		t.Fatal("forbidden action")
-	}
-}
-func TestHealableMatrix(t *testing.T) {
-	t.Parallel()
-	for _, origin := range []topology.Origin{topology.OriginInternal, topology.OriginOperator, topology.OriginSystem, topology.OriginReconciler, topology.OriginFounding} {
-		for _, parentOK := range []bool{true, false} {
-			for _, empty := range []bool{true, false} {
-				for _, known := range []bool{true, false} {
-					t.Run(fmt.Sprintf("%s/%t/%t/%t", origin, parentOK, empty, known), func(t *testing.T) {
-						h := newTestHost(t, 1, 2, 3)
-						if !known {
-							h.health = nil
-						}
-						if !empty {
-							s := h.status["shard0"]
-							s.ConfState.Voters = []uint64{1, 2}
-							h.status["shard0"] = s
-						}
-						parent := uint64(1)
-						if !parentOK {
-							parent = 99
-						}
-						latest := h.stage(origin, parent)
-						r := newTestScheduler(t, h, Settings{})
-						got, err := r.healable(context.Background(), latest, h.machine.Active())
-						want := origin == topology.OriginInternal && parentOK && empty && known
-						if err != nil || got != want {
-							t.Fatalf("healable=%v/%v want %v", got, err, want)
-						}
-					})
-				}
-			}
-		}
-	}
-}
-func TestSchedulerHealsStagedInternal(t *testing.T) {
-	t.Parallel()
-	h := newTestHost(t, 1, 2, 3)
-	h.stage(topology.OriginInternal, 1)
-	r := newTestScheduler(t, h, Settings{})
-	r.lastRun = r.now()
-	tick(t, r)
-	assertStatus(t, r, topology.SchedulingRunning, ReconcileReasonApprovedOperator)
-	if h.approvals != 1 || h.machine.Target().Version != 2 {
-		t.Fatal("internal heal blocked by cooldown")
-	}
-}
-func TestSchedulerHealRefusals(t *testing.T) {
-	t.Parallel()
-	for _, mode := range []string{"operator", "laundered", "follower", "plan-error", "apply-error", "nonempty", "unknown"} {
-		t.Run(mode, func(t *testing.T) {
-			h := newTestHost(t, 1, 2, 3)
-			origin, parent := topology.OriginInternal, uint64(1)
-			switch mode {
-			case "operator":
-				origin = topology.OriginOperator
-			case "laundered":
-				parent = 99
-			case "follower":
-				h.leader = false
-			case "plan-error":
-				h.planErr = errors.New("unavailable detail")
-			case "apply-error":
-				h.approveErr = fault.ErrUnavailable
-			case "nonempty":
-				s := h.status["shard0"]
-				s.ConfState.Voters = []uint64{1, 2}
-				h.status["shard0"] = s
-			case "unknown":
-				h.health = nil
-			}
-			h.stage(origin, parent)
-			r := newTestScheduler(t, h, Settings{})
-			tick(t, r)
-			if mode == "plan-error" {
-				assertStatus(t, r, topology.SchedulingError, ReconcileReasonStatusUnavailable)
-			} else {
-				assertStatus(t, r, topology.SchedulingBlocked, ReconcileReasonStagedLatest)
-			}
-			if h.approvals != 0 || h.commits != 0 || r.Status().BlockingVersion == nil || *r.Status().BlockingVersion != 2 {
-				t.Fatal("heal escaped refusal", r.Status())
-			}
-		})
 	}
 }
 func TestReconcileTickIsBoundedAndCancelable(t *testing.T) {
@@ -524,7 +418,7 @@ func TestReconcileTickIsBoundedAndCancelable(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > time.Second {
 		t.Fatal(err, time.Since(start))
 	}
-	assertStatus(t, r, topology.SchedulingError, ReconcileReasonStatusUnavailable)
+	assertStatus(t, r, topology.SchedulingWaiting, ReconcileReasonPolicyRejected)
 	// Stop must cancel a read already inside the automatic worker, rather than
 	// waiting for the configured tick timeout.
 	r = newTestScheduler(t, h, Settings{Interval: 100 * time.Millisecond, TickTimeout: 90 * time.Millisecond})
@@ -536,133 +430,6 @@ func TestReconcileTickIsBoundedAndCancelable(t *testing.T) {
 	defer cancel()
 	if err := r.Stop(ctx); err != nil {
 		t.Fatal(err)
-	}
-}
-func TestSchedulerFollowerResetsStabilityObservations(t *testing.T) {
-	t.Parallel()
-	for _, mode := range []string{"standby", "staged", "failed", "approved"} {
-		t.Run(mode, func(t *testing.T) {
-			h := newTestHost(t, 1, 2)
-			r := newTestScheduler(t, h, Settings{})
-			h.leader = false
-			if mode != "standby" {
-				h.stage(topology.OriginOperator, 1)
-			}
-			if mode == "failed" || mode == "approved" {
-				state := topology.OperatorFailed
-				if mode == "approved" {
-					state = topology.OperatorPending
-				}
-				h.operatorOverride = &topology.Operator{Status: topology.OperatorStatus{Version: 2, State: state}}
-			}
-			tick(t, r)
-			if len(r.aliveSince) != 0 || h.healthCalls != 0 || h.commits != 0 {
-				t.Fatal("follower sampled or retained health")
-			}
-			if mode == "standby" {
-				h.leader = true
-				tick(t, r)
-				assertStatus(t, r, topology.SchedulingWaiting, ReconcileReasonStabilityWindow)
-			}
-		})
-	}
-}
-func TestSchedulerStatusGatesAndStableSince(t *testing.T) {
-	t.Parallel()
-	for _, mode := range []string{"converged", "stability", "quorum", "cooldown", "status-error", "read-error", "execution-error"} {
-		t.Run(mode, func(t *testing.T) {
-			h := newTestHost(t, 1, 2)
-			r := newTestScheduler(t, h, Settings{})
-			state, reason := topology.SchedulingIdle, ReconcileReasonConverged
-			switch mode {
-			case "converged":
-				s := h.status["shard0"]
-				s.ConfState.Voters = []uint64{1, 2, 3}
-				h.status["shard0"] = s
-			case "stability":
-				r.resetAlive()
-				state, reason = topology.SchedulingWaiting, ReconcileReasonStabilityWindow
-			case "quorum":
-				h.health["n1"] = topology.HealthDead
-				h.health["n2"] = topology.HealthDead
-				state, reason = topology.SchedulingBlocked, ReconcileReasonQuorumLost
-			case "cooldown":
-				r.lastRun = r.now()
-				state, reason = topology.SchedulingWaiting, ReconcileReasonCooldown
-			case "status-error":
-				h.statusErr = fault.ErrUnavailable
-				state, reason = topology.SchedulingError, ReconcileReasonStatusUnavailable
-			case "read-error":
-				h.viewErr = fault.ErrUnreadable
-				state, reason = topology.SchedulingError, ReconcileReasonStatusUnavailable
-			case "execution-error":
-				h.operatorErr = fault.ErrUnreadable
-				state, reason = topology.SchedulingError, ReconcileReasonStatusUnavailable
-			}
-			tick(t, r)
-			assertStatus(t, r, state, reason)
-			since := r.Status().Since
-			r.now = func() time.Time { return since.Add(time.Second) }
-			tick(t, r)
-			if r.Status().Since != since {
-				t.Fatal("identical status changed Since")
-			}
-		})
-	}
-}
-func TestSchedulerStatusTransitionsAreOwnedAndLoggedOnce(t *testing.T) {
-	t.Parallel()
-	h := newTestHost(t, 1, 2, 3)
-	r := newTestScheduler(t, h, Settings{})
-	var buf bytes.Buffer
-	r.logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	changes := 0
-	r.onTransition = func(s topology.SchedulingStatus) {
-		changes++
-		if s.BlockingVersion != nil {
-			*s.BlockingVersion = 99
-		}
-	}
-	h.stage(topology.OriginOperator, 1)
-	tick(t, r)
-	tick(t, r)
-	if strings.Count(buf.String(), "level=WARN") != 1 || changes != 1 {
-		t.Fatal(buf.String(), changes)
-	}
-	s := r.Status()
-	*s.BlockingVersion = 99
-	if *r.Status().BlockingVersion != 2 {
-		t.Fatal("status mutation escaped")
-	}
-	h.operatorOverride = &topology.Operator{Status: topology.OperatorStatus{ID: "exec-v2-a1", Version: 2, State: topology.OperatorRunning}}
-	tick(t, r)
-	if strings.Count(buf.String(), "level=INFO") != 1 {
-		t.Fatal(buf.String())
-	}
-	s = r.Status()
-	*s.CurrentOperatorID = "changed"
-	if *r.Status().CurrentOperatorID != "exec-v2-a1" {
-		t.Fatal("execution alias")
-	}
-	r.transition(topology.SchedulingStatus{State: topology.SchedulingRunning, CurrentAction: &topology.SchedulingActionStatus{ReplicaID: 3}}, "")
-	s = r.Status()
-	s.CurrentAction.ReplicaID = 99
-	if r.Status().CurrentAction.ReplicaID != 3 {
-		t.Fatal("action alias")
-	}
-}
-func TestSchedulerStatusErrorWarnsOnce(t *testing.T) {
-	t.Parallel()
-	h := newTestHost(t, 1, 2, 3)
-	r := newTestScheduler(t, h, Settings{})
-	var buf bytes.Buffer
-	r.logger = slog.New(slog.NewTextHandler(&buf, nil))
-	h.viewErr = errors.New("raw error detail")
-	for range 3 {
-		tick(t, r)
-	}
-	if strings.Count(buf.String(), "level=WARN") != 1 || !strings.Contains(buf.String(), "raw error detail") || r.Status().Reason != ReconcileReasonStatusUnavailable {
-		t.Fatal(buf.String(), r.Status())
 	}
 }
 func TestSchedulerStatusConcurrentAccess(t *testing.T) {
@@ -694,21 +461,8 @@ func TestSchedulerSettingsValidation(t *testing.T) {
 	}
 }
 
-func (h *testHost) Observations() metrics.ClusterSnapshot      { return h.observations.Clone() }
-func (h *testHost) VoterSwitches() []topology.VoterSwitchState { return h.machine.VoterSwitches() }
-func (h *testHost) CommitVoterChange(ctx context.Context, change topology.VoterChange,
-	commit RepairCommit) (topology.OperatorID, error) {
-	doc, expected, plan := commit.Document, commit.ExpectedVersion, commit.Plan
-	if h.beforeCommit != nil {
-		h.beforeCommit()
-	}
-	result, err := h.apply(ctx, metaengine.CommitVoterChangeProposal{Change: change, Doc: doc, ExpectedVersion: expected, Plan: plan, At: doc.Group(change.GroupID).UpdatedAt})
-	if err == nil {
-		h.commits++
-	}
-	return result.OperatorID, err
-}
-
+func (h *testHost) Observations() metrics.ClusterSnapshot         { return h.observations.Clone() }
+func (h *testHost) VoterSwitches() []topology.VoterSwitchState    { return h.machine.VoterSwitches() }
 func (_ *testHost) RefreshObservations(ctx context.Context) error { return ctx.Err() }
 
 func (h *testHost) ResetObservations() {

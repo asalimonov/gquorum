@@ -174,7 +174,7 @@ func (p deletionPreparation) dependsOnReadmission(key planningReplicaKey, target
 		if debt.StopAction == nil {
 			return false
 		}
-		bound := p.source.indexes.operations[topology.OperationID(debt.StopAction.OperatorID)]
+		bound := p.source.indexes.operations[topology.OperationID(debt.StopAction.OperationID)]
 		return requiredCleanupStop(bound, *debt.StopAction) &&
 			p.source.Target.MemberID(target.NodeName) > target.MemberID
 	}

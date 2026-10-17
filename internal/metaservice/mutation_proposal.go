@@ -29,9 +29,5 @@ func mutationProposal(documents mutationDocuments) metaengine.ProposeDocument {
 }
 
 func (g *Group) stageMutation(ctx context.Context, documents mutationDocuments) (metaengine.ApplyResult, error) {
-	proposal := mutationProposal(documents)
-	// Task78 removes this schema3 composition bridge together with the old FSM.
-	// Sending provenance earlier would claim replay durability the live format lacks.
-	proposal.Intent = nil
-	return g.propose(ctx, proposal)
+	return g.propose(ctx, mutationProposal(documents))
 }

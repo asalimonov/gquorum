@@ -19,13 +19,17 @@ type repairAttempt struct {
 	source   uint64
 }
 
-func (r *Scheduler) reconcileScoped(ctx context.Context) {
+func (r *Scheduler) reconcileOnce(ctx context.Context) {
 	if r.scopedInactive() {
 		return
 	}
-	read, err := r.scopedHost.ReadRepair(ctx, "")
+	read, err := r.host.ReadRepair(ctx, "")
 	if err != nil {
 		r.reportRepairError(err, nil)
+		return
+	}
+	if read.Target.Version == 0 {
+		r.transition(r.newStatus(true, topology.SchedulingWaiting, ReconcileReasonStarting), "")
 		return
 	}
 	in, err := r.scopedInput(ctx, read)
@@ -63,14 +67,14 @@ func (r *Scheduler) reconcileScoped(ctx context.Context) {
 		r.reportRepairError(err, &action)
 		return
 	}
-	r.transition(r.runningOperatorStatus(true, id), "")
+	r.transition(r.runningOperationStatus(true, id), "")
 }
 
 func (r *Scheduler) scopedInactive() bool {
 	if !r.enabled.Load() {
 		r.resetAlive()
 		if r.host.IsLeader() {
-			r.host.WakeOperator()
+			r.host.WakeOperations()
 		}
 		r.transition(r.newStatus(r.host.IsLeader(), topology.SchedulingDisabled, ReconcileReasonConfigDisabled), "")
 		return true
@@ -102,7 +106,7 @@ func (r *Scheduler) scopedInput(ctx context.Context, read metaengine.PlanRead) (
 			continue
 		}
 		probeCtx, cancel := context.WithTimeout(ctx, r.settings.TickTimeout/time.Duration(len(read.Scopes)+2))
-		fresh, err := r.scopedHost.ReadRepair(probeCtx, id)
+		fresh, err := r.host.ReadRepair(probeCtx, id)
 		cancel()
 		if err != nil || sameRepairScope(in, fresh, id) != nil {
 			continue

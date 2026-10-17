@@ -51,7 +51,8 @@ func TestStagedTopologyDoesNotChangeApprovedMembershipOrStartGroups(t *testing.T
 		}
 		for _, node := range c.Nodes() {
 			status, err := c.Status(ctx, node.Spec.Name)
-			if err != nil || status.LatestVersion != latestVersion || status.TargetVersion != base.Version || status.ActiveVersion != base.Version || status.Operator == nil || status.Operator.ID != topology.OperatorID(created.OperationID) || status.Operator.State != topology.OperatorSucceeded {
+			operation, found := operationSummary(status, created.OperationID)
+			if err != nil || status.LatestVersion != latestVersion || status.TargetVersion != base.Version || status.FullyConverged.Version != base.Version || !found || operation.State != topology.OperationSucceeded {
 				t.Fatal("staging changed an approved view or started an execution", node.Spec.Name, status, err)
 			}
 			for _, view := range []string{"target", "active"} {
@@ -183,7 +184,7 @@ func stagedReplicaRepair(t *testing.T, size int) {
 	for time.Now().Before(until) {
 		for _, node := range c.Nodes() {
 			status, err := c.Status(ctx, node.Spec.Name)
-			if err != nil || status.LatestVersion != staged.Document.Version || status.TargetVersion != created.Document.Version || status.ActiveVersion != created.Document.Version {
+			if err != nil || status.LatestVersion != staged.Document.Version || status.TargetVersion != created.Document.Version || status.FullyConverged.Version != created.Document.Version {
 				t.Fatal("reconciler overwrote unapproved operator intent", node.Spec.Name, status, err)
 			}
 			r := status.Scheduling

@@ -3,6 +3,8 @@ package metaengine
 import (
 	"fmt"
 	"slices"
+
+	"github.com/asalimonov/gquorum/topology"
 )
 
 type sessionState struct {
@@ -12,144 +14,91 @@ type sessionState struct {
 	TTLSeconds int    `json:"ttl_seconds"`
 }
 
-func (sm *topologySM) applyGrantSession(p GrantSession) (ApplyResult, bool) {
+func (s *scopedState) applyScopedGrantSession(_ uint64, p GrantSession) (proposalApplication, error) {
 	if p.SessionID == "" || p.NodeName == "" || p.InstanceID == "" || p.TTLSeconds <= 0 {
-		return rejectProposal(p.ProposalID, proposalGuardrail,
-			"session requires exact identity and positive TTL"), false
+		return proposalApplication{result: rejectProposal(p.ProposalID, proposalGuardrail,
+			"session requires exact identity and positive TTL")}, nil
 	}
-	if existing, exists := sm.sessions[p.SessionID]; exists {
+	identity := topology.Identity{ClusterID: s.Target.ClusterID, NodeName: p.NodeName,
+		MemberID: s.Target.MemberID(p.NodeName)}
+	if _, admitted := s.admissionBasis(identity); !admitted {
+		return proposalApplication{result: rejectProposal(p.ProposalID, proposalAuthorization,
+			"session requires proven approved metadata membership")}, nil
+	}
+	for _, existing := range s.Sessions {
+		if existing.SessionID != p.SessionID {
+			continue
+		}
 		if existing.NodeName != p.NodeName || existing.InstanceID != p.InstanceID ||
 			existing.TTLSeconds != p.TTLSeconds {
-			return rejectProposal(p.ProposalID, proposalAuthorization, "session identity differs"), false
+			result := rejectProposal(p.ProposalID, proposalAuthorization, "session identity differs")
+			return proposalApplication{result: result}, nil
 		}
-		return ApplyResult{ProposalID: p.ProposalID, Accepted: true}, false
+		return proposalApplication{result: ApplyResult{ProposalID: p.ProposalID, Accepted: true}}, nil
 	}
-	sm.sessions[p.SessionID] = &sessionState{
-		SessionID:  p.SessionID,
-		NodeName:   p.NodeName,
-		InstanceID: p.InstanceID,
-		TTLSeconds: p.TTLSeconds,
+	next := *s
+	next.Sessions = append(slices.Clone(s.Sessions), sessionState{SessionID: p.SessionID,
+		NodeName: p.NodeName, InstanceID: p.InstanceID, TTLSeconds: p.TTLSeconds})
+	if !slices.Contains(next.Activated, p.NodeName) {
+		next.Activated = append(slices.Clone(s.Activated), p.NodeName)
 	}
-	if p.NodeName != "" {
-		sm.activated[p.NodeName] = struct{}{}
-	}
-	return ApplyResult{ProposalID: p.ProposalID, Accepted: true}, true
+	*s = next
+	return proposalApplication{changed: true, result: ApplyResult{ProposalID: p.ProposalID, Accepted: true}}, nil
 }
 
-func (sm *topologySM) applyRevokeSession(p RevokeSession) (ApplyResult, bool) {
-	if _, exists := sm.sessions[p.SessionID]; !exists {
-		return ApplyResult{ProposalID: p.ProposalID, Accepted: true}, false
+func (s *scopedState) applyScopedRevokeSession(_ uint64, p RevokeSession) (proposalApplication, error) {
+	next := *s
+	next.Sessions = slices.DeleteFunc(slices.Clone(s.Sessions), func(row sessionState) bool {
+		return row.SessionID == p.SessionID
+	})
+	if len(next.Sessions) == len(s.Sessions) {
+		return proposalApplication{result: ApplyResult{ProposalID: p.ProposalID, Accepted: true}}, nil
 	}
-	delete(sm.sessions, p.SessionID)
-	changed := true
-	for key, holder := range sm.locks {
-		if holder == p.SessionID {
-			delete(sm.locks, key)
-		}
-	}
-	return ApplyResult{ProposalID: p.ProposalID, Accepted: true}, changed
+	next.Locks = slices.DeleteFunc(slices.Clone(s.Locks), func(row lockEntry) bool {
+		return row.SessionID == p.SessionID
+	})
+	*s = next
+	return proposalApplication{changed: true, result: ApplyResult{ProposalID: p.ProposalID, Accepted: true}}, nil
 }
 
-func (sm *topologySM) applyAcquireLock(p AcquireLock) (ApplyResult, bool) {
+func (s *scopedState) applyScopedAcquireLock(_ uint64, p AcquireLock) (proposalApplication, error) {
 	if p.Key == "" {
-		return rejectProposal(p.ProposalID, proposalGuardrail, "lock key required"), false
+		return proposalApplication{result: rejectProposal(p.ProposalID, proposalGuardrail, "lock key required")}, nil
 	}
-	if _, ok := sm.sessions[p.SessionID]; !ok {
-		return ApplyResult{
-			ProposalID: p.ProposalID,
-			Accepted:   false,
-			Reason:     fmt.Sprintf("lock %q: acquiring session %q does not exist", p.Key, p.SessionID),
-		}, false
-	}
-	if holder, held := sm.locks[p.Key]; held {
-		if holder == p.SessionID {
-			return ApplyResult{ProposalID: p.ProposalID, Accepted: true}, false
+	var acquiring *sessionState
+	for i := range s.Sessions {
+		if s.Sessions[i].SessionID == p.SessionID {
+			acquiring = &s.Sessions[i]
+			break
 		}
-		if _, live := sm.sessions[holder]; live {
-			node := ""
-			if s := sm.sessions[holder]; s != nil {
-				node = s.NodeName
+	}
+	if acquiring == nil {
+		return proposalApplication{result: ApplyResult{ProposalID: p.ProposalID,
+			Reason: fmt.Sprintf("lock %q: acquiring session %q does not exist", p.Key, p.SessionID)}}, nil
+	}
+	for _, held := range s.Locks {
+		if held.Key != p.Key {
+			continue
+		}
+		if held.SessionID == p.SessionID {
+			return proposalApplication{result: ApplyResult{ProposalID: p.ProposalID, Accepted: true}}, nil
+		}
+		for _, owner := range s.Sessions {
+			if owner.SessionID == held.SessionID {
+				message := fmt.Sprintf("lock %q already held by a live session of node %q",
+					p.Key, owner.NodeName)
+				return proposalApplication{result: ApplyResult{ProposalID: p.ProposalID,
+					Reason: message}}, nil
 			}
-			return ApplyResult{
-				ProposalID: p.ProposalID,
-				Accepted:   false,
-				Reason:     fmt.Sprintf("lock %q already held by a live session of node %q", p.Key, node),
-			}, false
 		}
 	}
-	sm.locks[p.Key] = p.SessionID
-	return ApplyResult{ProposalID: p.ProposalID, Accepted: true}, true
-}
-
-func (sm *topologySM) sessionSnapshotLocked() []sessionState {
-	ids := make([]string, 0, len(sm.sessions))
-	for id := range sm.sessions {
-		ids = append(ids, id)
-	}
-	slices.Sort(ids)
-	out := make([]sessionState, 0, len(ids))
-	for _, id := range ids {
-		out = append(out, *sm.sessions[id])
-	}
-	return out
+	next := *s
+	next.Locks = append(slices.Clone(s.Locks), lockEntry{Key: p.Key, SessionID: p.SessionID})
+	*s = next
+	return proposalApplication{changed: true, result: ApplyResult{ProposalID: p.ProposalID, Accepted: true}}, nil
 }
 
 type lockEntry struct {
 	Key       string `json:"key"`
 	SessionID string `json:"session_id"`
-}
-
-func (sm *topologySM) lockSnapshotLocked() []lockEntry {
-	keys := make([]string, 0, len(sm.locks))
-	for k := range sm.locks {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	out := make([]lockEntry, 0, len(keys))
-	for _, k := range keys {
-		out = append(out, lockEntry{Key: k, SessionID: sm.locks[k]})
-	}
-	return out
-}
-
-func (sm *topologySM) Sessions() []sessionState {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.sessionSnapshotLocked()
-}
-
-func (sm *topologySM) session(sessionID string) (sessionState, bool) {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	s, ok := sm.sessions[sessionID]
-	if !ok {
-		return sessionState{}, false
-	}
-	return *s, true
-}
-
-func (sm *topologySM) lockHolderSession(key string) (sessionState, bool) {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	sid, held := sm.locks[key]
-	if !held {
-		return sessionState{}, false
-	}
-	if s, ok := sm.sessions[sid]; ok {
-		return *s, true
-	}
-	return sessionState{}, true
-}
-
-func (sm *topologySM) LockHolder(key string) (string, bool) {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	holder, held := sm.locks[key]
-	if !held {
-		return "", false
-	}
-	if s := sm.sessions[holder]; s != nil {
-		return s.NodeName, true
-	}
-	return "", true
 }

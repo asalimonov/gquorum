@@ -182,14 +182,7 @@ func (g *Group) applyVersionReply(ctx context.Context, data []byte) *metapb.Repl
 	if err != nil {
 		return metatransport.Reply(err)
 	}
-	var id topology.OperationID
-	if request.Kind == "" { // Schema3 callers are removed with their persistence at Task78.
-		var legacy topology.OperatorID
-		legacy, err = g.applyLocal(ctx, request.Version)
-		id = topology.OperationID(legacy)
-	} else {
-		id, err = g.applyOperationLocal(ctx, request)
-	}
+	id, err := g.applyOperationLocal(ctx, request)
 	if err != nil {
 		return g.leaderReply(err)
 	}

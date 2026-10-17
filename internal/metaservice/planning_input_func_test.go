@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3/raftpb"
@@ -49,7 +50,7 @@ func TestPlanForUsesNativeMembershipInsteadOfCachedConfState(t *testing.T) {
 					MemberID: 2, Address: "127.0.0.1:1", PinnedLearner: true})
 			}))
 			g.controller.Stop()
-			doc := g.state().Active()
+			doc := g.state().Target()
 			doc.Groups = append(doc.Groups, topology.Group{ID: "work", NextReplicaID: 3, Replicas: []topology.Replica{
 				{NodeName: g.Identity().NodeName, ReplicaID: 1, Role: topology.ReplicaVoter},
 				{NodeName: "n2", ReplicaID: 2, Role: topology.ReplicaLearner},
@@ -68,7 +69,8 @@ func TestPlanForUsesNativeMembershipInsteadOfCachedConfState(t *testing.T) {
 			if err != nil || len(plan.Steps) != 0 {
 				t.Fatal("cached membership created an unnecessary demotion", plan, err)
 			}
-			input, err := g.planningInput(t.Context(), desired)
+			read, err := g.capturePlan(t.Context(), metaengine.QueryRequest{Kind: "planning", Desired: &desired}, g.readPlan)
+			input := read.Input
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -91,7 +93,7 @@ func TestPlanningNativeAbsenceOnlyAllowsFreshFounding(t *testing.T) {
 			t.Parallel()
 			f := newMutationFixture(t)
 			f.g.opts.LoadGroups = &planningController{nativeErr: fault.ErrUnavailable}
-			active := f.g.machine.Active()
+			active := f.g.machine.Target()
 			input := topology.PlanInput{Groups: map[string]topology.GroupProgress{}, Retained: map[string]topology.RetainedGroup{}}
 			switch mode {
 			case "converged":
@@ -119,11 +121,12 @@ func TestPlanningNativeAbsenceOnlyAllowsFreshFounding(t *testing.T) {
 func TestPlanningDeletionDoesNotReadDeletedGroupQuorum(t *testing.T) {
 	t.Parallel()
 	f := newMutationFixture(t)
-	// All declarations are removed for this collector-only probe. There is no
-	// live engine or load controller; any native read would fail immediately.
-	desired := f.g.machine.Active()
-	desired.Groups = nil
-	input, err := f.g.planningInput(t.Context(), desired)
+	// The deleted load group needs no native read; unchanged metadata is also
+	// outside the scope. There is no engine or load controller in this fixture.
+	desired := f.g.machine.Target()
+	desired.Groups = desired.Groups[:1]
+	read, err := f.captureFixturePlan(t, desired)
+	input := read.Input
 	if err != nil || len(input.Native) != 0 || input.Groups["work"].Converged == nil {
 		t.Fatal("host-only deletion depended on a deleted group's quorum", input, err)
 	}

@@ -191,6 +191,13 @@ func TestScopedNodeDrainKeepsDependenciesAcrossUnrelatedMetadataApproval(t *test
 	}
 	p := BeginOperationProposal{Version: 2, Plan: plan, Scopes: repair.Scopes, At: repair.At,
 		Actor: "drainer", Origin: topology.OriginOperator}
+	// The plan includes the host's _meta drain block as well as the load
+	// evacuation. Both exact progress rows are owned by this approval.
+	for _, block := range plan.Blocks {
+		if block.GroupID == topology.MetaGroupID {
+			p.Scopes = append(p.Scopes, ScopeExpectation{GroupID: block.GroupID, SourceVersion: block.SourceVersion})
+		}
+	}
 	applyScopedApprovalFixture(t, &s, p)
 	old := *s.indexes.nodes["n2"]
 	if old.SourceVersion != 1 || old.Declaration.State != topology.NodeActive || s.indexes.groups["b"].Owner != "exec-v2-a1" {

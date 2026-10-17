@@ -30,8 +30,6 @@ func (c *scopedCoordinatorTest) RecordOperationTransition(ctx context.Context, t
 	return nil
 }
 
-type forbiddenLegacyCoordinator struct{ LegacyCoordinator }
-type forbiddenLegacyStore struct{ Store }
 type forbiddenScopedEffects struct{ GroupEffects }
 type forbiddenScopedAuthority struct{ AuthorityCoordinator }
 

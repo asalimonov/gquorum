@@ -88,8 +88,8 @@ func TestScopedTopologyReadOwnsPairAndHistoricalMarker(t *testing.T) {
 	s.FullyConverged = topology.FullyConverged{Version: 1, At: time.Unix(10, 0)}
 	view, err := queryScopedTopology(&s)
 	if err != nil || view.AppliedIndex != 72 || view.FullyConverged != s.FullyConverged ||
-		!reflect.DeepEqual(view.Latest, s.Latest) || !reflect.DeepEqual(view.Target, s.Target) || view.Active.Version != 0 {
-		t.Fatal("topology pair waited for convergence or invented Active", view, err)
+		!reflect.DeepEqual(view.Latest, s.Latest) || !reflect.DeepEqual(view.Target, s.Target) {
+		t.Fatal("topology pair waited for convergence or included a converged document", view, err)
 	}
 	// Query serializes under the read lock, just as the current topology path.
 	data, err := json.Marshal(view)
@@ -108,32 +108,10 @@ func TestScopedTopologyReadOwnsPairAndHistoricalMarker(t *testing.T) {
 	if _, err := queryScopedTopology(nil); !errors.Is(err, fault.ErrUnsupported) {
 		t.Fatal(err)
 	}
-	if _, err := NewMachine(topology.Rules{}, nil).ProgressStatus(); !errors.Is(err, fault.ErrUnsupported) {
+	if _, err := mustMachine(t, testRules(), nil).ProgressStatus(); err != nil {
 		t.Fatal(err)
 	}
 }
-
-func TestLegacyProgressProjectionNeverInventsScopedFacts(t *testing.T) {
-	t.Parallel()
-	s := progressFilterFixture(t)
-	views := topology.ReadView{Latest: s.Latest, Target: s.Target, Active: s.History[0]}
-	rows := LegacyGroupProgress(views)
-	for _, row := range rows {
-		if !reflect.DeepEqual(row.Desired, views.Latest.Group(row.GroupID)) ||
-			!reflect.DeepEqual(row.Approved, views.Target.Group(row.GroupID)) ||
-			!reflect.DeepEqual(row.Converged, views.Active.Group(row.GroupID)) ||
-			row.OperationID != "" || row.Deleting || row.Blocked != nil || row.Observation != nil {
-			t.Fatal("legacy row omitted a declaration or invented scoped progress", row)
-		}
-	}
-	views.Active.Groups = nil
-	for _, row := range LegacyGroupProgress(views) {
-		if row.ConvergedVersion != 0 || row.Converged != nil {
-			t.Fatal("legacy absence became a convergence tombstone", row)
-		}
-	}
-}
-
 func TestScopedStatusDrainUsesApprovedAndProvenAssignments(t *testing.T) {
 	t.Parallel()
 	group := topology.Group{ID: "work", Replicas: []topology.Replica{{NodeName: "n1", ReplicaID: 1}}}
@@ -165,5 +143,33 @@ func TestScopedStatusDrainUsesApprovedAndProvenAssignments(t *testing.T) {
 				t.Fatal(got, tc.want)
 			}
 		})
+	}
+}
+
+func TestScopedStatusKeepsEffectiveNodesSeparateFromStagedIntent(t *testing.T) {
+	t.Parallel()
+	s := scopedGraphFixture()
+	m := restoreMachineFixture(t, s)
+	doc := m.Latest()
+	doc.Nodes = append(doc.Nodes, topology.Node{Name: "n2", Type: "worker", State: topology.NodeActive})
+	doc.MetaGroup().Replicas = append(doc.MetaGroup().Replicas, topology.Replica{NodeName: "n2", ReplicaID: 2, Role: topology.ReplicaLearner})
+	doc.MetaGroup().NextReplicaID = 3
+	if r := applyMachine(t, m, ProposeDocument{Doc: doc, ExpectedVersion: doc.Version}); !r.Accepted {
+		t.Fatal(r)
+	}
+	status, err := m.ProgressStatus()
+	if err != nil || len(status.Nodes) != 1 || status.Nodes[0].Node.Name != "n1" {
+		t.Fatal("staged node became effective", status.Nodes, err)
+	}
+	page, err := m.Progress(topology.ProgressQuery{NodeName: "n2"})
+	if err != nil || len(page.Nodes) != 1 || page.Nodes[0].Desired == nil || page.Nodes[0].Approved != nil {
+		t.Fatal("staged intent disappeared from progress", page, err)
+	}
+	// A declaration removed from Latest remains visible through its approved or
+	// proven identity. This read must not dereference an absent Desired row.
+	m.scoped.Latest.Nodes = m.scoped.Latest.Nodes[1:]
+	status, err = m.ProgressStatus()
+	if err != nil || len(status.Nodes) != 1 || status.Nodes[0].Node.Name != "n1" || status.Nodes[0].EffectiveState != topology.NodeActive {
+		t.Fatal(status.Nodes, err)
 	}
 }

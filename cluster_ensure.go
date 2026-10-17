@@ -47,9 +47,6 @@ func (c *clusterView) EnsureGroup(ctx context.Context, spec GroupSpec, opts Ensu
 			return topology.Group{}, err
 		}
 		step, err := request.step(ctx, c, view)
-		if !step.Done && err == nil && view.Target.Group(spec.ID) != nil {
-			step, err = c.legacyEnsureFailure(ctx, view, spec.ID)
-		}
 		if step.Done || (err != nil && !fault.Retryable(err)) {
 			return step.Group, err
 		}
@@ -62,17 +59,6 @@ func (c *clusterView) EnsureGroup(ctx context.Context, spec GroupSpec, opts Ensu
 type ensureResult struct {
 	Group topology.Group
 	Done  bool
-}
-
-// Task78 replaces this actual schema3 projection with one confirmed progress
-// row. No synthetic whole-document convergence is introduced.
-func legacyEnsureProgress(view topology.ReadView, id string) topology.GroupProgress {
-	row := topology.GroupProgress{GroupID: id, Desired: view.Latest.Group(id), Approved: view.Target.Group(id),
-		Converged: view.Active.Group(id)}
-	if row.Converged != nil {
-		row.ConvergedVersion = view.Active.Version
-	}
-	return row
 }
 
 // Declared overlap is checked before historical convergence: a pending deletion

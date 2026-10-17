@@ -39,16 +39,16 @@ func admissionSuccessorFixture(s scopedState, steps []topology.Step) scopedState
 	s.Latest = s.Target.Clone()
 	s.Groups[0].Owner, s.Nodes[1].Owner = next.Status.ID, next.Status.ID
 	if s.Admissions[0].ReadmissionOperatorID == "" {
-		s.Admissions[0].ReadmissionOperatorID = topology.OperationID(s.Admissions[0].OperatorID)
+		s.Admissions[0].ReadmissionOperatorID = topology.OperationID(s.Admissions[0].OperationID)
 	}
-	s.Admissions[0].OperatorID = topology.OperatorID(next.Status.ID)
+	s.Admissions[0].OperationID = topology.OperationID(next.Status.ID)
 	return s
 }
 
 func admissionPrefixReceipt(s *scopedState, operation int, seq int) {
 	op := s.Operations[operation]
 	step := op.Plan.Steps[seq-1]
-	action := topology.AuthorizedStep{OperatorID: topology.OperatorID(op.Status.ID), Version: op.Status.Version,
+	action := topology.AuthorizedStep{OperationID: topology.OperationID(op.Status.ID), Version: op.Status.Version,
 		Attempt: op.Status.Attempt, StepSeq: seq, GroupID: step.GroupID, NodeName: step.NodeName,
 		ReplicaID: step.ReplicaID, Kind: step.Kind, ExpectedVotersDigest: step.ExpectedVotersDigest,
 		TransferNodeName: step.TransferNodeName, TransferReplicaID: step.TransferReplicaID,
@@ -59,7 +59,7 @@ func admissionPrefixReceipt(s *scopedState, operation int, seq int) {
 	}
 	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: s.Target.ClusterID,
 		GroupID: step.GroupID, Revision: uint64(len(s.AuthorityRecords) + 3)}, Purpose: topology.AuthorityEffect,
-		OperatorID: action.OperatorID, Action: &action, Resources: []topology.AuthorityResource{resource},
+		OperationID: action.OperationID, Action: &action, Resources: []topology.AuthorityResource{resource},
 		Targets: []topology.AuthorityTarget{{NodeName: step.NodeName, MemberID: step.ReplicaID, ReplicaID: step.ReplicaID}}}
 	if step.TransferReplicaID != 0 {
 		grant.Targets = append(grant.Targets, topology.AuthorityTarget{NodeName: step.TransferNodeName,
@@ -140,8 +140,8 @@ func TestScopedAdmissionPromotionOnlySuccessorAndMultipleHandovers(t *testing.T)
 	if err := json.Unmarshal(data, &restored); err != nil {
 		t.Fatal("ordered original preparation and successor learner prefix refused", err)
 	}
-	if restored.Operations[2].Previous != "" || restored.AuthorityRecords[0].Grant.Action.OperatorID != "exec-v2-a1" ||
-		restored.AuthorityRecords[1].Grant.Action.OperatorID != "exec-v3-a1" {
+	if restored.Operations[2].Previous != "" || restored.AuthorityRecords[0].Grant.Action.OperationID != "exec-v2-a1" ||
+		restored.AuthorityRecords[1].Grant.Action.OperationID != "exec-v3-a1" {
 		t.Fatal("handover relabeled original facts or invented retry lineage")
 	}
 	s.AuthorityRecords[0].Effects = nil
@@ -234,7 +234,7 @@ func TestScopedAdmissionEligibleOriginMustMatchRetirementBatch(t *testing.T) {
 		}
 	}
 	admission := &s.Admissions[len(s.Admissions)-1]
-	admission.OperatorID = topology.OperatorID(next.Status.ID)
+	admission.OperationID = topology.OperationID(next.Status.ID)
 	if _, err := prepareScopedGraph(&s, s.Rules); err != nil {
 		t.Fatal("retained original batch refused", err)
 	}

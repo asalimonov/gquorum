@@ -61,7 +61,10 @@ func (s *scopedState) validateScopedReplicaRepair(repair topology.Document) erro
 			group.NextReplicaID = max(group.NextReplicaID, floor.NextReplicaID)
 		}
 	}
-	return validateSingleReplicaRepair(base, ordered)
+	if err := validateSingleReplicaRepair(base, ordered); err != nil {
+		return fault.New(fault.OperationAuthorization, "repair must change only one exact approved load voter", err)
+	}
+	return nil
 }
 
 func repairComparison(doc topology.Document) topology.Document {
@@ -84,7 +87,7 @@ func (s *scopedState) commitRepairDocuments(index uint64, pair repairDocuments,
 		if row := s.indexes.groups[scope.GroupID]; row != nil && row.Owner != "" && scope.matches(row) {
 			result := rejectProposal(p.ProposalID, proposalAuthorityPending,
 				"group %q is owned by operation %s", scope.GroupID, row.Owner)
-			result.OperatorID = topology.OperatorID(row.Owner)
+			result.OperationID = topology.OperationID(row.Owner)
 			return proposalApplication{result: result}, nil
 		}
 	}

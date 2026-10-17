@@ -28,7 +28,7 @@ func TestScopedProposalPayloads(t *testing.T) {
 		TransitionOperationProposal{Transition: topology.OperationTransition{OperationID: "exec-v4-a2", Version: 4, Attempt: 2, GroupID: "work", StepSeq: 3, State: topology.OperationFailed, At: at}, ProposalID: "transition"},
 		CommitRepairOperationProposal{Doc: topology.Document{Version: 5}, ExpectedVersion: 4, ExpectedTarget: 3, Scopes: scopes, Plan: plan, At: at, ProposalID: "repair"},
 		RecordCollectionProposal{Receipt: authoritystore.CollectionReceipt{Identity: id, MemberID: 2, RetirementKey: key, Token: "opaque", LocalSequence: 8, CollectedAt: at}, Courier: topology.Identity{ClusterID: "c", NodeName: "n", MemberID: 3, InstanceID: "next"}, ReadmissionKey: &key, At: at, ProposalID: "receipt"},
-		BeginCleanupEffectProposal{Identity: id, Action: topology.AuthorizedStep{OperatorID: "exec-v4-a2", Version: 4, Attempt: 2, StepSeq: 3, GroupID: "work", NodeName: "n", ReplicaID: 7, Kind: topology.StepCleanupReplicaState}, ProposalID: "cleanup"},
+		BeginCleanupEffectProposal{Identity: id, Action: topology.AuthorizedStep{OperationID: "exec-v4-a2", Version: 4, Attempt: 2, StepSeq: 3, GroupID: "work", NodeName: "n", ReplicaID: 7, Kind: topology.StepCleanupReplicaState}, ProposalID: "cleanup"},
 		RecordCleanupStatusProposal{Identity: id, MemberID: 2, RetirementKey: key, NotBefore: &at, Blocked: &topology.BlockedReason{Code: "retention"}, At: at, ProposalID: "status"},
 	} {
 		t.Run(reflect.TypeOf(want).Name(), func(t *testing.T) {
@@ -42,8 +42,8 @@ func TestScopedProposalPayloads(t *testing.T) {
 				t.Fatal("payload lost exact tuple or correlation", string(data), into, err)
 			}
 			assertScopedPayloadRefusals(t, data, into)
-			if _, err := Encode(want); !errors.Is(err, fault.ErrUnsupported) {
-				t.Fatal("incomplete scoped persistence was enabled", err)
+			if _, err := Encode(want); err != nil {
+				t.Fatal("scoped proposal did not encode", err)
 			}
 		})
 	}
@@ -86,29 +86,9 @@ func assertScopedPayloadRefusals(t *testing.T, data []byte, into any) {
 	}
 }
 
-func TestScopedFieldsCannotReachLegacyMutationHandlers(t *testing.T) {
-	t.Parallel()
-	m := convergedAuthorityFixture(t)
-	before := m.latest.Clone()
-	for i, proposal := range []any{
-		ProposeDocument{ExpectedVersion: before.Version, Doc: before, Intent: &Intent{Kind: "add_node"}, ProposalID: "intent"},
-		CommitVoterChangeProposal{ExpectedVersion: before.Version, ExpectedTarget: before.Version, ProposalID: "voter"},
-	} {
-		result := apply(t, m.topologySM, uint64(i+6), proposal)
-		if result.Accepted || result.Code != proposalUnsupported || result.ProposalID == "" || !reflect.DeepEqual(m.latest, before) {
-			t.Fatal("legacy FSM discarded new authority fields", result)
-		}
-	}
-	for _, kind := range []ProposalKind{"begin_operation", "retry_operation", "transition_operation", "commit_repair_operation", "record_collection", "begin_cleanup_effect", "record_cleanup_status"} {
-		if _, err := m.applyProposal(10, kind, json.RawMessage(`{}`)); !errors.Is(err, fault.ErrUnsupported) {
-			t.Fatal("unimplemented command dispatched", kind, err)
-		}
-	}
-}
-
 func TestScopedQueryShapesCannotBeIgnored(t *testing.T) {
 	t.Parallel()
-	m := NewMachine(testRules(), nil)
+	m := mustMachine(t, testRules(), nil)
 	for _, input := range []string{
 		`{"kind":"progress"}`, `{"kind":"progress","progress":null}`, `{"kind":"progress","progress":{"limit":-1}}`,
 		`{"kind":"topology","progress":{}}`, `{"kind":"collection_check"}`, `{"kind":"collection_check","collection_identity":{}}`,
@@ -119,9 +99,10 @@ func TestScopedQueryShapesCannotBeIgnored(t *testing.T) {
 			t.Fatal(input, err)
 		}
 	}
-	for _, input := range []string{`{"kind":"authority","operation_id":"exec-v1-a1"}`, `{"kind":"collection_check","collection_identity":{"cluster_id":"c","group_id":"g","node_name":"n","replica_id":1}}`} {
-		if _, err := m.Query(t.Context(), []byte(input)); !errors.Is(err, fault.ErrUnsupported) {
-			t.Fatal("unimplemented read returned fabricated progress", input, err)
-		}
+	if _, err := m.Query(t.Context(), []byte(`{"kind":"authority","operation_id":"exec-v1-a1"}`)); !errors.Is(err, fault.ErrHistoryUnavailable) {
+		t.Fatal("missing operation was not classified as unavailable history", err)
+	}
+	if _, err := m.Query(t.Context(), []byte(`{"kind":"collection_check","collection_identity":{"cluster_id":"c","group_id":"g","node_name":"n","replica_id":1}}`)); !errors.Is(err, fault.ErrIdentityMismatch) {
+		t.Fatal("foreign collection identity was not rejected", err)
 	}
 }

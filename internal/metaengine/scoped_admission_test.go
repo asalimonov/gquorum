@@ -38,7 +38,7 @@ func scopedAdmissionFixture() scopedState {
 	s.Nodes = append(s.Nodes, nodeConvergence{NodeName: "n2", Owner: op.Status.ID})
 	s.AuthorityRecords, s.AuthorityFloors, s.Revocations = nil, nil, nil
 	s.Admissions = []AdmissionRecord{{NodeName: "n2", InstanceID: "process", MemberID: 2,
-		OperatorID: topology.OperatorID(op.Status.ID), State: AdmissionPending}}
+		OperationID: topology.OperationID(op.Status.ID), State: AdmissionPending}}
 	return s
 }
 
@@ -63,7 +63,7 @@ func TestScopedAdmissionKeepsItsPinnedApprovalAcrossUnrelatedVersions(t *testing
 func TestScopedAdmissionRejectsContradictoryLineageAndMilestones(t *testing.T) {
 	t.Parallel()
 	cases := map[string]func(*scopedState){
-		"missing operation":          func(s *scopedState) { s.Admissions[0].OperatorID = "exec-v2-a9" },
+		"missing operation":          func(s *scopedState) { s.Admissions[0].OperationID = "exec-v2-a9" },
 		"foreign process":            func(s *scopedState) { s.Admissions[0].InstanceID = "" },
 		"reused member":              func(s *scopedState) { s.Admissions[0].MemberID = 1 },
 		"unallocated member":         func(s *scopedState) { s.Admissions[0].MemberID = 3 },

@@ -72,6 +72,7 @@ func TestBuildPlanRejectsUnknownObservedIdentity(t *testing.T) {
 	active := planDoc(1, 3, []string{"n1"}, shardOf("work", rep("n1", 1)))
 	desired := active.Clone()
 	desired.Version++
+	desired.Group("work").Labels = map[string]string{"owner": "jobs"}
 	statuses := statusForDocument(active)
 	work := statuses["work"]
 	work.ConfState.Learners = []uint64{999}

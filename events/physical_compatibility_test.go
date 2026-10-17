@@ -54,11 +54,11 @@ func TestBaselinePhysicalJournalPreservesRecordsAndSequence(t *testing.T) {
 			t.Fatal("baseline event filter", rows, err)
 		}
 		e := rows[0]
-		if e.Seq != uint64(i+1) || e.OperatorID != "exec-v1-a1" || e.InstanceID != "baseline-process" || e.MemberID != 1 || e.ReplicaID != 7 || e.ClusterID != "compat-cluster" || e.GroupID != "work" || e.StepSeq != 2 {
+		if e.Seq != uint64(i+1) || e.OperationID != "exec-v1-a1" || e.InstanceID != "baseline-process" || e.MemberID != 1 || e.ReplicaID != 7 || e.ClusterID != "compat-cluster" || e.GroupID != "work" || e.StepSeq != 2 {
 			t.Fatal("baseline event identity", e)
 		}
 	}
-	added, err := j.Append(Event{Type: OperatorChanged, OperatorID: "exec-v2-a1"})
+	added, err := j.Append(Event{Type: OperatorChanged, OperationID: "exec-v2-a1"})
 	if err != nil || added.Seq != 3 {
 		t.Fatal("retained append sequence", added, err)
 	}
@@ -81,7 +81,7 @@ func TestBaselinePhysicalJournalPreservesRecordsAndSequence(t *testing.T) {
 	}
 	defer j.Close()
 	rows, err := j.List(t.Context(), Query{})
-	if err != nil || len(rows) != 3 || rows[2].OperatorID != "exec-v2-a1" {
+	if err != nil || len(rows) != 3 || rows[2].OperationID != "exec-v2-a1" {
 		t.Fatal("mixed legacy/current reopen", rows, err)
 	}
 }

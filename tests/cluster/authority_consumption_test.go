@@ -76,7 +76,7 @@ func TestAuthorityEarlierLearnerActionCannotUndoSameOperatorPromotionThreeNodes(
 	if err := Poll(ctx, func() (bool, error) {
 		view, err := c.Controls(ctx, "node1")
 		for _, barrier := range view.Barriers {
-			if barrier.Kind == topology.StepAddLearner && barrier.Hits > 0 && barrier.Last.OperatorID == op && barrier.Last.ReplicaID == newReplica {
+			if barrier.Kind == topology.StepAddLearner && barrier.Hits > 0 && barrier.Last.OperationID == op && barrier.Last.ReplicaID == newReplica {
 				return true, err
 			}
 		}
@@ -94,7 +94,7 @@ func TestAuthorityEarlierLearnerActionCannotUndoSameOperatorPromotionThreeNodes(
 	if err := Poll(ctx, func() (bool, error) {
 		view, err := c.Controls(ctx, "node1")
 		for _, barrier := range view.Barriers {
-			if barrier.Kind == topology.StepPromoteVoter && barrier.Hits > 0 && barrier.Last.OperatorID == op && barrier.Last.ReplicaID == newReplica {
+			if barrier.Kind == topology.StepPromoteVoter && barrier.Hits > 0 && barrier.Last.OperationID == op && barrier.Last.ReplicaID == newReplica {
 				return true, err
 			}
 		}
@@ -108,7 +108,7 @@ func TestAuthorityEarlierLearnerActionCannotUndoSameOperatorPromotionThreeNodes(
 	}
 	var earlier, later load.ActionRequest
 	for _, request := range view.Actions {
-		if request.Authorization.OperatorID != op {
+		if request.Authorization.OperationID != op {
 			continue
 		}
 		switch request.Authorization.Kind {
@@ -152,11 +152,11 @@ func TestAuthorityEarlierLearnerActionCannotUndoSameOperatorPromotionThreeNodes(
 	if err := c.WaitOperation(ctx, "node2", op); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WaitActive(ctx, growStage.Document.Version); err != nil {
+	if err := c.WaitFullyConverged(ctx, growStage.Document.Version); err != nil {
 		t.Fatal(err)
 	}
 	finished, err := c.Operation(ctx, "node2", op)
-	if err != nil || finished.State != topology.OperatorSucceeded || finished.Attempt != earlier.Authorization.Attempt || finished.Version != earlier.Authorization.Version {
+	if err != nil || finished.State != topology.OperationSucceeded || finished.Attempt != earlier.Authorization.Attempt || finished.Version != earlier.Authorization.Version {
 		t.Fatal("promotion changed approved execution identity", finished, err)
 	}
 	// The earlier add-learner action must not demote the freshly promoted voter.

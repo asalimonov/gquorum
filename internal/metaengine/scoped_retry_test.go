@@ -59,7 +59,7 @@ func TestScopedRetryPreservesPlanSiblingsAndImmediateSuccessor(t *testing.T) {
 		previous := s.Operations[0].Clone()
 		p := scopedRetryProposal(&s, &previous)
 		issued := applyScopedRetryFixture(t, &s, p)
-		retry := s.indexes.operations[topology.OperationID(issued.result.OperatorID)]
+		retry := s.indexes.operations[issued.result.OperationID]
 		if !issued.changed || retry.Previous != previous.Status.ID || !reflect.DeepEqual(retry.Plan, previous.Plan) ||
 			!reflect.DeepEqual(retry.Status.Blocks[0], previous.Status.Blocks[0]) ||
 			s.indexes.groups[topology.MetaGroupID].Owner != "" || s.indexes.groups["shard0"].Owner != retry.Status.ID {
@@ -74,12 +74,12 @@ func TestScopedRetryPreservesPlanSiblingsAndImmediateSuccessor(t *testing.T) {
 		p.ProposalID, p.At, p.Scopes = "concurrent/lost-reply", time.Time{}, []ScopeExpectation{}
 		repeat := applyScopedRetryFixture(t, &s, p)
 		after, _ := json.Marshal(s)
-		if repeat.changed || repeat.result.OperatorID != issued.result.OperatorID || !bytes.Equal(before, after) {
+		if repeat.changed || repeat.result.OperationID != issued.result.OperationID || !bytes.Equal(before, after) {
 			t.Fatal("repeat retry selected a different attempt or wrote state")
 		}
-		latest := s.indexes.operations[topology.OperationID(issued.result.OperatorID)]
+		latest := s.indexes.operations[issued.result.OperationID]
 		third := applyScopedRetryFixture(t, &s, scopedRetryProposal(&s, latest))
-		if third.result.OperatorID != "exec-v2-a3" {
+		if third.result.OperationID != "exec-v2-a3" {
 			t.Fatal("explicit retry of second failure did not extend the chain", third)
 		}
 		original, err := queryOperationStatus(&s, previous.Status.ID)
@@ -136,9 +136,9 @@ func TestScopedRetryAllowsUnrelatedTargetAndKeepsPendingStopOrigin(t *testing.T)
 	previous := s.indexes.operations["exec-v2-a1"]
 	debt := s.Cleanup[1].clone()
 	result := applyScopedRetryFixture(t, &s, scopedRetryProposal(&s, previous))
-	retry := s.indexes.operations[topology.OperationID(result.result.OperatorID)]
+	retry := s.indexes.operations[topology.OperationID(result.result.OperationID)]
 	got := s.indexes.cleanup[debt.Identity]
-	if got.StopAction.OperatorID != result.result.OperatorID || got.OperationID != debt.OperationID ||
+	if got.StopAction.OperationID != topology.OperationID(result.result.OperationID) || got.OperationID != debt.OperationID ||
 		!reflect.DeepEqual(got.RetireAction, debt.RetireAction) ||
 		retry.Status.Blocks[0].State != topology.OperationSuperseded || s.Target.Version != 5 {
 		t.Fatal("retry lost required stop binding or reclaimed newer independent scope")

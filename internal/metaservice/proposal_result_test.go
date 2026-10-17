@@ -48,7 +48,7 @@ func TestMutationOutcomeKeepsStageOnApprovalConflict(t *testing.T) {
 		!errors.Is(failure, cause) || !errors.Is(failure, fault.ErrVersionConflict) {
 		t.Fatal("approval failure discarded staged evidence or error cause", result, failure)
 	}
-	staged.OperatorID = topology.MakeOperatorID(9, 1)
+	staged.OperationID = topology.OperationID(topology.MakeOperationID(9, 1))
 	result, failure = staged.outcome(nil)
 	if failure != nil || result.OperationID != topology.MakeOperationID(9, 1) {
 		t.Fatal("accepted execution missing from mutation result", result, failure)

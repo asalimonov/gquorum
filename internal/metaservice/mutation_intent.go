@@ -165,7 +165,6 @@ func normalizedIntentGroup(spec GroupSpec, rules topology.Rules) (GroupSpec, err
 // Replay carries the retained acceptance, without recomputing its placement or
 // automatically approving an old version after a lost response.
 func mutationReplayResult(result metaengine.ApplyResult) MutationResult {
-	return MutationResult{Document: result.Doc, OperatorID: result.OperatorID,
-		OperationID: topology.OperationID(result.OperatorID),
-		RebasedTo:   result.RebasedTo, Placement: result.Placement}
+	return MutationResult{Document: result.Doc, OperationID: result.OperationID,
+		RebasedTo: result.RebasedTo, Placement: result.Placement}
 }

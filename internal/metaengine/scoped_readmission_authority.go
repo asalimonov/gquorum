@@ -65,7 +65,7 @@ func (s *scopedState) readmissionForAuthority(p BeginReadmissionAuthority) (Admi
 	}
 	for _, admission := range s.Admissions {
 		if admission.NodeName != p.NodeName || admission.InstanceID != p.InstanceID ||
-			admission.MemberID != p.MemberID || admission.OperatorID != p.OperatorID {
+			admission.MemberID != p.MemberID || admission.OperationID != p.OperationID {
 			continue
 		}
 		if admission.State == AdmissionSuperseded || admission.State == AdmissionRetired {

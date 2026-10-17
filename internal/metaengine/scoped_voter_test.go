@@ -21,7 +21,7 @@ func scopedArchivedVoterFixture(at time.Time) []topology.VoterSwitchState {
 		if group == "a" {
 			id = 8
 		}
-		r := topology.RoleChangeRecord{OperatorID: "exec-v5-a1", Version: 5, Attempt: 1, StepSeq: i + 1,
+		r := topology.RoleChangeRecord{OperationID: "exec-v5-a1", Version: 5, Attempt: 1, StepSeq: i + 1,
 			GroupID: group, NodeName: "n", ReplicaID: id, From: topology.ReplicaLearner,
 			To: topology.ReplicaVoter, At: at, Index: uint64(25 + i)}
 		groups = append(groups, topology.VoterSwitchState{GroupID: group, Last: r,
@@ -62,7 +62,7 @@ func scopedVoterFixture() scopedState {
 	grant.Targets[0] = topology.AuthorityTarget{NodeName: "n2", MemberID: 2, ReplicaID: 2}
 	s.AuthorityRecords[0].Effects = fixtureEffectReceipts(*grant)
 	s.AuthorityRecords[0].Effects[0].AppliedIndex = 3
-	r := topology.RoleChangeRecord{OperatorID: "exec-v2-a1", Version: 2, Attempt: 1, StepSeq: 1,
+	r := topology.RoleChangeRecord{OperationID: "exec-v2-a1", Version: 2, Attempt: 1, StepSeq: 1,
 		GroupID: topology.MetaGroupID, NodeName: "n2", ReplicaID: 2, From: topology.ReplicaLearner,
 		To: topology.ReplicaVoter, At: s.Operations[0].UpdatedAt, Index: 5}
 	s.VoterSwitches = []topology.VoterSwitchState{{GroupID: r.GroupID, Last: r, Replicas: []topology.RoleChangeRecord{r}}}
@@ -93,6 +93,21 @@ func TestScopedVoterHistorySurvivesRetryAndPrunedOperation(t *testing.T) {
 	}
 }
 
+func TestMachineVoterSwitchesPreservesCooldownAndOwnsRecords(t *testing.T) {
+	t.Parallel()
+	s := scopedVoterFixture()
+	m := restoreMachineFixture(t, s)
+	got := m.VoterSwitches()
+	if !reflect.DeepEqual(got, s.VoterSwitches) {
+		t.Fatal("scheduler lost restored role-change cooldown", got)
+	}
+	got[0].Replicas[0].At = got[0].Replicas[0].At.Add(time.Hour)
+	got[0].Last.NodeName = "caller mutation"
+	if !reflect.DeepEqual(m.VoterSwitches(), s.VoterSwitches) {
+		t.Fatal("scheduler input aliases retained cooldown proof")
+	}
+}
+
 func TestScopedVoterHistoryRejectsCorruptionAtomically(t *testing.T) {
 	t.Parallel()
 	cases := map[string]func(*topology.RoleChangeRecord){
@@ -101,9 +116,9 @@ func TestScopedVoterHistoryRejectsCorruptionAtomically(t *testing.T) {
 		"zero index":         func(r *topology.RoleChangeRecord) { r.Index = 0 },
 		"before grant":       func(r *topology.RoleChangeRecord) { r.Index = 3 },
 		"future index":       func(r *topology.RoleChangeRecord) { r.Index = 11 },
-		"future version":     func(r *topology.RoleChangeRecord) { r.Version, r.OperatorID = 3, "exec-v3-a1" },
-		"unretained attempt": func(r *topology.RoleChangeRecord) { r.Attempt, r.OperatorID = 3, "exec-v2-a3" },
-		"relabeled retry":    func(r *topology.RoleChangeRecord) { r.Attempt, r.OperatorID = 2, "exec-v2-a2" },
+		"future version":     func(r *topology.RoleChangeRecord) { r.Version, r.OperationID = 3, "exec-v3-a1" },
+		"unretained attempt": func(r *topology.RoleChangeRecord) { r.Attempt, r.OperationID = 3, "exec-v2-a3" },
+		"relabeled retry":    func(r *topology.RoleChangeRecord) { r.Attempt, r.OperationID = 2, "exec-v2-a2" },
 		"wrong step":         func(r *topology.RoleChangeRecord) { r.StepSeq = 2 },
 		"wrong role":         func(r *topology.RoleChangeRecord) { r.From, r.To = r.To, r.From },
 		"same role":          func(r *topology.RoleChangeRecord) { r.To = r.From },

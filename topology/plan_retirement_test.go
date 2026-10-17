@@ -18,13 +18,14 @@ func retainedRetirementPlan(input PlanInput, desired Document, status GroupStatu
 	if err := builder.planGroup("work"); err != nil {
 		return Plan{}, err
 	}
-	plan := bindReadmissionRetirement(input, desired, builder.plan, planScope{groups: unionGroupIDs(input, desired)})
+	plan := bindReadmissionRetirement(input, desired, builder.plan, unionGroupIDs(input, desired))
 	for i := range plan.Steps {
 		plan.Steps[i].Seq = i + 1
 	}
 	if err := bindVoterGuards(&plan, observed, desired); err != nil {
 		return Plan{}, err
 	}
+	bindPlanBlocks(input, desired, &plan, []string{"work"})
 	if err := ValidatePlanShape(input, desired, plan); err != nil {
 		return Plan{}, err
 	}
@@ -119,6 +120,7 @@ func TestRetainedCleanupCarriesOnlyRequiredStop(t *testing.T) {
 				for i := range broken.Steps {
 					broken.Steps[i].Seq = i + 1
 				}
+				bindPlanBlocks(input, desired, &broken, []string{"work"})
 				if err := ValidatePlanShape(input, desired, broken); err == nil {
 					t.Fatal("incoming owner bypassed required debt stop")
 				}
@@ -157,6 +159,7 @@ func TestRetainedDeletionNeedsEveryUnprovenHostStop(t *testing.T) {
 	broken := plan.Clone()
 	broken.Steps = append(broken.Steps[:1], broken.Steps[2:]...)
 	broken.Steps[1].Seq = 2
+	bindPlanBlocks(input, desired, &broken, []string{"work"})
 	if err := ValidatePlanShape(input, desired, broken); err == nil {
 		t.Fatal("deletion shape waived another debt's unproven stop")
 	}
@@ -168,7 +171,7 @@ func TestRetainedDeletionNeedsEveryUnprovenHostStop(t *testing.T) {
 	if err != nil || len(plan.Steps) != 1 || plan.Steps[0].Kind != StepStopReplica || plan.Steps[0].ReplicaID != 5 {
 		t.Fatal("debt-only deletion duplicated retirement or lost its last stop", plan, err)
 	}
-	if err := ValidatePlanShape(input, desired, Plan{Version: desired.Version}); err == nil {
+	if err := ValidatePlanShape(input, desired, Plan{Version: desired.Version, Blocks: []PlanBlock{{GroupID: "work"}}}); err == nil {
 		t.Fatal("zero-step deletion bypassed the remaining cleanup stop")
 	}
 }

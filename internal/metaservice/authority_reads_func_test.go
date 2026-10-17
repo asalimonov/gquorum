@@ -48,7 +48,7 @@ func TestAuthorityReadUsesLeaderForBlankAndFencedProtocolOwner(t *testing.T) {
 	g := readyPublic(t, singleMetaFixture(t))
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	result, err := g.propose(ctx, metaengine.GrantTransferProposal{ExpectedActiveVersion: g.state().Active().Version, GroupID: topology.MetaGroupID, NodeName: "n1", ReplicaID: 1, RequestID: "authority-read"})
+	result, err := g.propose(ctx, metaengine.GrantTransferProposal{ExpectedSourceVersion: g.state().Views().FullyConverged.Version, GroupID: topology.MetaGroupID, NodeName: "n1", ReplicaID: 1, RequestID: "authority-read"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestAuthorityProofRoutesFromRetainedCatalogWithoutLeaderHintOrSeeds(t *test
 	g.controller.Stop()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	result, err := g.propose(ctx, metaengine.GrantTransferProposal{ExpectedActiveVersion: g.state().Active().Version, GroupID: topology.MetaGroupID, NodeName: "n1", ReplicaID: 1, RequestID: "retained-route"})
+	result, err := g.propose(ctx, metaengine.GrantTransferProposal{ExpectedSourceVersion: g.state().Views().FullyConverged.Version, GroupID: topology.MetaGroupID, NodeName: "n1", ReplicaID: 1, RequestID: "retained-route"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,11 +162,9 @@ func TestAuthorityProofRoutesFromRetainedCatalogWithoutLeaderHintOrSeeds(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := guardedFixturePlan(doc.Version, topology.MetaGroupID, []uint64{1}, nil,
-		topology.Step{Seq: 1, GroupID: topology.MetaGroupID, NodeName: "n2", ReplicaID: 2, Kind: topology.StepPrepareReplica},
-		topology.Step{Seq: 2, GroupID: topology.MetaGroupID, NodeName: "n2", ReplicaID: 2, Kind: topology.StepAddLearner},
-	)
-	_, err = g.propose(ctx, metaengine.BeginOperatorProposal{Version: doc.Version, Plan: plan, At: time.Now().UTC()})
+	base := g.state().Target()
+	approval := (&mutationFixture{g: g, native: map[string]topology.NativeState{topology.MetaGroupID: fixtureNative(*base.MetaGroup())}}).fixtureApproval(t, doc)
+	_, err = g.propose(ctx, approval)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,26 +207,39 @@ func TestAuthorityProofRoutesFromRetainedCatalogWithoutLeaderHintOrSeeds(t *test
 
 func TestMetaHostControlSurvivesParticipationFence(t *testing.T) {
 	t.Parallel()
-	g := readyPublic(t, singleMetaFixture(t))
+	g := readyPublic(t, singleMetaFixtureWith(t, func(o *Options) { o.Limits.MaxNodes = 2 }))
 	g.controller.Stop()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	doc, err := g.Stage(ctx, g.state().Latest(), g.state().Latest().Version)
+	desired := g.state().Latest()
+	desired.Nodes = append(desired.Nodes, topology.Node{Name: "n2", Type: "worker", State: topology.NodeActive})
+	desired.MetaGroup().Replicas = append(desired.MetaGroup().Replicas, topology.Replica{NodeName: "n2", ReplicaID: 2, Role: topology.ReplicaLearner})
+	desired.MetaGroup().NextReplicaID = 3
+	doc, err := g.Stage(ctx, desired, desired.Version)
 	if err != nil {
 		t.Fatal(err)
 	}
-	step := topology.Step{Seq: 1, GroupID: topology.MetaGroupID, NodeName: "n1", ReplicaID: 1, Kind: topology.StepPrepareReplica}
-	at := time.Now().UTC()
-	plan := guardedFixturePlan(doc.Version, topology.MetaGroupID, []uint64{1}, nil, step, topology.Step{Seq: 2, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID, Kind: topology.StepAddLearner})
-	step = plan.Steps[0]
-	started, err := g.propose(ctx, metaengine.BeginOperatorProposal{Version: doc.Version, Plan: plan, At: at})
+	base := g.state().Target()
+	approval := (&mutationFixture{g: g, native: map[string]topology.NativeState{topology.MetaGroupID: fixtureNative(*base.MetaGroup())}}).fixtureApproval(t, doc)
+	started, err := g.propose(ctx, approval)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = g.propose(ctx, metaengine.TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: started.OperatorID, Version: doc.Version, Attempt: 1, StepSeq: 1, GroupID: step.GroupID, NodeName: step.NodeName, State: topology.OperatorRunning, At: at}}); err != nil {
+	step := approval.Plan.Steps[0]
+	if step.Kind != topology.StepPrepareReplica || step.NodeName != "n2" || step.ReplicaID != 2 {
+		t.Fatal(approval.Plan)
+	}
+	admission := metaengine.AdmissionRecord{NodeName: "n2", InstanceID: "joining", MemberID: 2, OperationID: started.OperationID}
+	if _, err = g.propose(ctx, metaengine.BindAdmissionProposal{Admission: admission, At: time.Now().UTC(), ProposalID: newProposalID()}); err != nil {
 		t.Fatal(err)
 	}
-	action := topology.AuthorizedStep{OperatorID: started.OperatorID, Version: doc.Version, Attempt: 1, StepSeq: 1, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID, Kind: step.Kind}
+	if _, err = g.propose(ctx, metaengine.ReadyAdmissionProposal{NodeName: "n2", InstanceID: "joining", MemberID: 2, OperationID: started.OperationID, ProposalID: newProposalID()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = g.propose(ctx, metaengine.TransitionOperationProposal{Transition: topology.OperationTransition{OperationID: started.OperationID, Version: doc.Version, Attempt: 1, StepSeq: step.Seq, GroupID: step.GroupID, State: topology.OperationRunning, At: time.Now().UTC()}, ProposalID: newProposalID()}); err != nil {
+		t.Fatal(err)
+	}
+	action := topology.AuthorizedStep{OperationID: started.OperationID, Version: doc.Version, Attempt: 1, StepSeq: step.Seq, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID, Kind: step.Kind}
 	grant, err := g.BeginEffect(ctx, action)
 	if err != nil {
 		t.Fatal(err)
@@ -236,6 +247,7 @@ func TestMetaHostControlSurvivesParticipationFence(t *testing.T) {
 	calls := 0
 	client := joinProtocolClient(t, []string{g.opts.Network.AdvertiseAddress}, func(o *Options) {
 		o.Network.ClusterCredential = g.opts.Network.ClusterCredential
+		o.Identity.NodeName, o.Identity.InstanceID, o.Node.Name = "n2", "joining", "n2"
 		o.ApplyLocalMetaAction = func(_ context.Context, r load.ActionRequest) (load.ActionResult, error) {
 			calls++
 			return load.ActionResult{From: r.To, Authorization: r.Authorization, LocalTarget: r.LocalTarget, Receipts: protocolEffectReceipts(r.Grant)}, nil
@@ -245,15 +257,15 @@ func TestMetaHostControlSurvivesParticipationFence(t *testing.T) {
 		}
 	})
 	client.mu.Lock()
-	client.identity.MemberID = 1
+	client.identity.MemberID = 2
 	client.started = true
 	client.ctx, client.cancel = context.WithCancel(t.Context())
 	client.workCtx, client.workCancel = context.WithCancel(client.ctx)
 	client.mu.Unlock()
-	client.transport.SetMemberID(1)
+	client.transport.SetMemberID(2)
 	header := g.transport.Header()
-	peer := load.Peer{Node: client.Identity(), Replica: load.ReplicaRef{GroupID: topology.MetaGroupID, ReplicaID: 1}}
-	request := load.ActionRequest{From: g.Identity(), To: peer, Grant: grant, Authorization: action, LocalTarget: storage.Identity{ClusterID: peer.Node.ClusterID, NodeName: peer.Node.NodeName, GroupID: topology.MetaGroupID, ReplicaID: 1}}
+	peer := load.Peer{Node: client.Identity(), Replica: load.ReplicaRef{GroupID: topology.MetaGroupID, ReplicaID: 2}}
+	request := load.ActionRequest{From: g.Identity(), To: peer, Grant: grant, Authorization: action, LocalTarget: storage.Identity{ClusterID: peer.Node.ClusterID, NodeName: peer.Node.NodeName, GroupID: topology.MetaGroupID, ReplicaID: 2}}
 	probe := authorityIdentityRequest{Grant: &grant, Target: grant.Targets[0]}
 	encodedProbe, _ := json.Marshal(probe)
 	for _, member := range []uint64{0, 99} {
@@ -269,7 +281,7 @@ func TestMetaHostControlSurvivesParticipationFence(t *testing.T) {
 		}
 	}
 	client.mu.Lock()
-	client.identity.MemberID = 1
+	client.identity.MemberID = 2
 	client.mu.Unlock()
 	if calls != 0 {
 		t.Fatal("identity probing applied a host action", calls)

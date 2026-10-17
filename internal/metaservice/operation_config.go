@@ -6,9 +6,8 @@ import (
 	"github.com/asalimonov/gquorum/internal/operator"
 )
 
-// OperationControllerConfig prepares the existing controller ports. Task78 selects
-// this configuration together with complete scoped persistence.
-// There is no production switch between authorization models.
+// OperationControllerConfig binds scoped work and final validation to the
+// service-owned controller.
 func (g *Group) OperationControllerConfig() operator.Config {
 	return operator.Config{Rules: g.rules, Coordinator: &operationCoordinator{g: g}, Authority: g,
 		Groups: groupControllers{g}, OwnsGroup: func(string) bool { return true },

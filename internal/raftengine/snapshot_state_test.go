@@ -25,7 +25,7 @@ func TestIncomingSnapshotCannotLowerAuthority(t *testing.T) {
 			case "lower":
 				a.Grant.Key.Revision--
 			case "different":
-				a.Grant.OperatorID = "changed"
+				a.Grant.OperationID = "changed"
 			case "index":
 				a.InstallIndex++
 			case "newer_old_index":
@@ -48,8 +48,8 @@ func TestIncomingSnapshotCannotLowerAuthority(t *testing.T) {
 
 func TestSnapshotCannotRewriteDemotionIntentOrFenceBeforeIt(t *testing.T) {
 	t.Parallel()
-	action := topology.AuthorizedStep{OperatorID: topology.MakeOperatorID(2, 1), Version: 2, Attempt: 1, StepSeq: 1, Kind: topology.StepDemoteVoter, GroupID: "load", NodeName: "a", ReplicaID: 1, TransferNodeName: "b", TransferReplicaID: 2}
-	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: "load", Revision: 10}, Purpose: topology.AuthorityEffect, OperatorID: action.OperatorID, Action: &action, Resources: []topology.AuthorityResource{{Kind: topology.AuthorityGroup, GroupID: "load"}}, Targets: []topology.AuthorityTarget{{NodeName: "a", MemberID: 1, ReplicaID: 1}, {NodeName: "b", MemberID: 2, ReplicaID: 2}}}
+	action := topology.AuthorizedStep{OperationID: topology.MakeOperationID(2, 1), Version: 2, Attempt: 1, StepSeq: 1, Kind: topology.StepDemoteVoter, GroupID: "load", NodeName: "a", ReplicaID: 1, TransferNodeName: "b", TransferReplicaID: 2}
+	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: "load", Revision: 10}, Purpose: topology.AuthorityEffect, OperationID: action.OperationID, Action: &action, Resources: []topology.AuthorityResource{{Kind: topology.AuthorityGroup, GroupID: "load"}}, Targets: []topology.AuthorityTarget{{NodeName: "a", MemberID: 1, ReplicaID: 1}, {NodeName: "b", MemberID: 2, ReplicaID: 2}}}
 	g := &Group{opts: Options{ManagedAuthority: true, ClusterID: "cluster", GroupID: "load"}, authority: raftstate.AuthorityState{Grant: &grant, InstallIndex: 2, InstallTerm: 1, DemotionTransferIndex: 5, DemotionTransferTerm: 2}}
 	for _, kind := range []string{"missing", "changed", "newer_before_intent", "newer_before_receipt"} {
 		t.Run(kind, func(t *testing.T) {

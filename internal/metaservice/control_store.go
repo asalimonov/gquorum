@@ -35,11 +35,14 @@ func (g *Group) openControlStore(identity topology.Identity) error {
 	if len(materialized) == 0 {
 		return fault.New(fault.Unreadable, "stopped metadata has no retained topology evidence", nil)
 	}
-	machine := metaengine.NewMachine(g.rules, nil)
+	machine, err := metaengine.NewMachine(g.rules, nil)
+	if err != nil {
+		return err
+	}
 	if err = machine.Restore(context.Background(), materialized); err != nil {
 		return err
 	}
-	groups, err := machine.LegacyRecoveryCatalog(context.Background())
+	groups, err := machine.RecoveryCatalog(context.Background())
 	if err != nil {
 		return err
 	}

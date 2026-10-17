@@ -1,11 +1,5 @@
 package topology
 
-// OperatorLookup pairs a retained operator with its presence.
-type OperatorLookup struct {
-	Operator Operator
-	Found    bool
-}
-
 // AuthorityGrantLookup pairs an exact validated grant with its presence.
 type AuthorityGrantLookup struct {
 	Grant AuthorityGrant

@@ -112,10 +112,9 @@ func TestScopedReadmissionIssuanceSurvivesUnrelatedTargetAdvance(t *testing.T) {
 	s.History = append(s.History, s.Target.Clone())
 	s.Target.Version, s.Target.ParentVersion = 3, 2
 	s.Latest = s.Target.Clone()
-	s.Rules.Limits.MaxPendingAuthorityRecords = 1
 	prepareScopedFixture(t, &s)
 	p := BeginReadmissionAuthority{NodeName: "n1", InstanceID: "process", MemberID: 2,
-		PreviousMemberID: 1, OperatorID: "exec-v2-a1", ProposalID: "readmit"}
+		PreviousMemberID: 1, OperationID: "exec-v2-a1", ProposalID: "readmit"}
 	before, _ := json.Marshal(s)
 	if _, err := s.applyBeginReadmissionAuthority(s.AppliedIndex, p); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("stale application index issued a batch", err)

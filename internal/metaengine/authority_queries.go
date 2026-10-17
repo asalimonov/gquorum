@@ -3,22 +3,122 @@ package metaengine
 import (
 	"slices"
 
+	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
 )
+
+func queryScopedAuthorityProof(s *scopedState, q QueryRequest) (AuthorityProof, error) {
+	if s == nil {
+		return AuthorityProof{}, fault.ErrUnsupported
+	}
+	if q.OperationID != "" || q.AuthorityKey == nil || q.AuthorityKey.ClusterID != s.Target.ClusterID ||
+		q.AuthorityKey.Revision == 0 || topology.ValidateID(q.AuthorityKey.GroupID) != nil {
+		return AuthorityProof{}, fault.ErrInvalid
+	}
+	proof := AuthorityProof{}
+	if record := s.indexes.grants[*q.AuthorityKey]; record != nil {
+		grant := record.Grant.Clone()
+		proof.Grant = &grant
+		proof.Receipts = slices.Clone(record.Effects)
+		catalog := s.authorityCatalog()
+		for _, target := range grant.Targets {
+			if grant.Key.GroupID == topology.MetaGroupID && grant.Action != nil &&
+				grant.Action.Kind == topology.StepStopReplica && target.ReplicaID == target.MemberID &&
+				s.Target.MemberID(target.NodeName) != target.MemberID &&
+				slices.ContainsFunc(record.Effects, func(receipt topology.EffectReceipt) bool {
+					return receipt.Resource.Kind == topology.AuthorityHost && receipt.Target == target
+				}) && s.hostCleanupRetired(target) && catalog.hostResourcesSettled(target) {
+				proof.ReleasedHosts = append(proof.ReleasedHosts, target)
+			}
+			if topology.ValidateLoadID(grant.Key.GroupID) == nil &&
+				queryScopedLoadCleanup(s, grant, target) == nil {
+				proof.CleanupTargets = append(proof.CleanupTargets, target)
+			}
+		}
+	}
+	if q.Key != "" {
+		proof.Courier, _ = scopedProcessIdentity(s, q.Key)
+	}
+	return proof, nil
+}
+
+// A removed process must remain available to retire its exact local owners even
+// before the cleanup worker issues their grants. Collection may follow later;
+// neither retained collection debt nor a successor member owns this process.
+func (s *scopedState) hostCleanupRetired(target topology.AuthorityTarget) bool {
+	return !slices.ContainsFunc(s.Cleanup, func(debt cleanupRecord) bool {
+		return debt.Identity.NodeName == target.NodeName && debt.MemberID == target.MemberID && debt.Retired == nil
+	})
+}
+
+func scopedProcessIdentity(s *scopedState, name string) (topology.Identity, bool) {
+	member := scopedMemberID(s, name)
+	id := topology.Identity{NodeName: name, ClusterID: s.Target.ClusterID, MemberID: member}
+	if member == 0 {
+		return id, false
+	}
+	if admission := scopedLiveAdmission(s, name, ""); admission != nil && admission.MemberID == member {
+		id.InstanceID = admission.InstanceID
+		return id, id.InstanceID != ""
+	}
+	// A session predates a replacement approval until its exact member has
+	// converged. Never attach the former process to the successor's member ID.
+	meta := s.indexes.groups[topology.MetaGroupID]
+	if meta == nil || !groupHasMember(meta.Declaration, name, member) {
+		return id, false
+	}
+	id.InstanceID = scopedLockedSessionInstance(s, name)
+	return id, id.InstanceID != ""
+}
+
+func scopedMemberID(s *scopedState, name string) uint64 {
+	if member := s.Target.MemberID(name); member != 0 {
+		return member
+	}
+	for _, row := range s.Nodes {
+		if row.NodeName == name {
+			return row.MemberID
+		}
+	}
+	return 0
+}
+
+func scopedLockedSessionInstance(s *scopedState, name string) string {
+	for _, lock := range s.Locks {
+		if lock.Key != "node/"+name {
+			continue
+		}
+		for _, session := range s.Sessions {
+			if session.SessionID == lock.SessionID && session.NodeName == name {
+				return session.InstanceID
+			}
+		}
+	}
+	return ""
+}
 
 // AuthorityFloorsForNode returns sorted owned grants for a node's current
 // host-resource floors.
 func (m *Machine) AuthorityFloorsForNode(node string) []topology.AuthorityGrant {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.authorityFloorsLocked(node)
+	return scopedAuthorityFloorsForNode(m.scoped, node)
 }
 
-func (sm *topologySM) authorityFloorsLocked(node string) []topology.AuthorityGrant {
+func scopedAuthorityFloorsForNode(state *scopedState, node string) []topology.AuthorityGrant {
+	if state == nil || node == "" {
+		return nil
+	}
 	var grants []topology.AuthorityGrant
-	for resource, key := range sm.authority.floors {
-		if resource.Kind == topology.AuthorityHost && resource.NodeName == node {
-			grants = append(grants, sm.authority.records[key].Grant.Clone())
+	for _, floor := range state.AuthorityFloors {
+		if floor.Resource.Kind != topology.AuthorityHost || floor.Resource.NodeName != node {
+			continue
+		}
+		for _, record := range state.AuthorityRecords {
+			if record.Grant.Key == floor.Key {
+				grants = append(grants, record.Grant.Clone())
+				break
+			}
 		}
 	}
 	slices.SortFunc(grants, func(a, b topology.AuthorityGrant) int { return compareAuthorityKey(a.Key, b.Key) })
@@ -37,27 +137,6 @@ type AuthorityProof struct {
 	// deletion.
 	CleanupTargets []topology.AuthorityTarget `json:"cleanup_targets,omitempty"`
 	ReleasedHosts  []topology.AuthorityTarget `json:"released_hosts,omitempty"`
-}
-
-// Optional removal follows complete approved convergence, including host steps
-// whose grants have not yet been issued. Catalog checks additionally cover
-// inherited revocations and nonoperator authority outside that operator cursor.
-func (sm *topologySM) hostReleasedLocked(record *authorityRecord, target topology.AuthorityTarget) bool {
-	grant := record.Grant
-	if grant.Key.GroupID != topology.MetaGroupID || grant.Action == nil ||
-		grant.Action.Kind != topology.StepStopReplica || target.ReplicaID != target.MemberID ||
-		sm.active.Version == 0 || sm.active.Version != sm.target.Version ||
-		sm.target.MemberID(target.NodeName) == target.MemberID ||
-		sm.active.MemberID(target.NodeName) == target.MemberID {
-		return false
-	}
-	host := topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: topology.MetaGroupID,
-		NodeName: target.NodeName}
-	if !slices.ContainsFunc(record.Effects,
-		func(receipt topology.EffectReceipt) bool { return receipt.Resource == host && receipt.Target == target }) {
-		return false
-	}
-	return sm.authority.hostResourcesSettled(target)
 }
 
 func (a authorityCatalog) hostResourcesSettled(target topology.AuthorityTarget) bool {

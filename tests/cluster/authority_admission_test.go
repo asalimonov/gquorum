@@ -74,7 +74,7 @@ func TestAuthoritySupersessionRetiresIntermediateMetaLearnerFourNodes(t *testing
 	if err := Poll(ctx, func() (bool, error) {
 		view, err := c.Authority(ctx, "node1", "work")
 		for _, request := range view.Actions {
-			if request.Authorization.OperatorID == old && request.Authorization.Kind == topology.StepAddLearner && request.Authorization.ReplicaID == replica {
+			if request.Authorization.OperationID == old && request.Authorization.Kind == topology.StepAddLearner && request.Authorization.ReplicaID == replica {
 				delayed = request
 				return true, err
 			}

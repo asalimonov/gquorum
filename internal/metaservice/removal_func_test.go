@@ -64,7 +64,10 @@ func TestSelfRemoval_ApplyEntryDoesNotDeliverBeforeDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := &removalPersister{err: errors.New("disk failure")}
-	m := metaengine.NewMachine(f.g.rules, store)
+	m, err := metaengine.NewMachine(f.g.rules, store)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err = m.Restore(context.Background(), data); err != nil {
 		t.Fatal(err)
 	}

@@ -70,7 +70,7 @@ func TestScopedApprovalRebindsExactRequiredStopAcrossVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := next.Cleanup[0]
-	if d.StopAction.OperatorID != "exec-v7-a1" || d.StopAction.StepSeq != 1 ||
+	if d.StopAction.OperationID != "exec-v7-a1" || d.StopAction.StepSeq != 1 ||
 		s.Cleanup[0].StopAction.StepSeq != 2 || d.OperationID != s.Cleanup[0].OperationID ||
 		!reflect.DeepEqual(d.RetireAction, s.Cleanup[0].RetireAction) || !reflect.DeepEqual(d.Removed, s.Cleanup[0].Removed) {
 		t.Fatal("rebound stop lost distinct origin or new sequence", d)
@@ -208,7 +208,7 @@ func TestScopedCleanupHandoverPromotesDetachedStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if next.Cleanup[0].StopAction.OperatorID != "exec-v7-a1" ||
+	if next.Cleanup[0].StopAction.OperationID != "exec-v7-a1" ||
 		next.Cleanup[0].OperationID != s.Cleanup[0].OperationID ||
 		!reflect.DeepEqual(next.Cleanup[0].RetireAction, s.Cleanup[0].RetireAction) {
 		t.Fatal("required promotion lost its exact binding or original retirement")
@@ -305,7 +305,7 @@ func TestScopedCleanupHandoverRelocationReuseAndDeletion(t *testing.T) {
 			!reflect.DeepEqual(debt.RetireAction, original.RetireAction) || !reflect.DeepEqual(debt.Removed, original.Removed) {
 			t.Fatal("handover changed original attribution or lost the exact binding", version, debt)
 		}
-		if requiredCleanupStop(next.indexes.operations[topology.OperationID(debt.StopAction.OperatorID)], *debt.StopAction) != (version >= 9) {
+		if requiredCleanupStop(next.indexes.operations[topology.OperationID(debt.StopAction.OperationID)], *debt.StopAction) != (version >= 9) {
 			t.Fatal("stop stayed required after relocation or detached during reuse/deletion", version)
 		}
 		if version == 7 {
@@ -329,7 +329,7 @@ func TestScopedCleanupHandoverRebindsFailedRetry(t *testing.T) {
 	if err := prepareCleanupHandovers(&s, &next, s.planningCollector()); err != nil {
 		t.Fatal(err)
 	}
-	if next.Cleanup[1].StopAction.OperatorID != "exec-v2-a2" ||
+	if next.Cleanup[1].StopAction.OperationID != "exec-v2-a2" ||
 		!reflect.DeepEqual(next.Cleanup[1].RetireAction, s.Cleanup[1].RetireAction) {
 		t.Fatal("retry lost exact pending stop or rebound detached retirement")
 	}

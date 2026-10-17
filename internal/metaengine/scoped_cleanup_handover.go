@@ -56,7 +56,7 @@ func prepareCleanupHandovers(source, next *scopedState, collector planningCollec
 }
 
 func (h cleanupHandover) prepare(debt cleanupRecord) (cleanupRecord, error) {
-	bound := h.source.indexes.operations[topology.OperationID(debt.StopAction.OperatorID)]
+	bound := h.source.indexes.operations[topology.OperationID(debt.StopAction.OperationID)]
 	required := requiredCleanupStop(bound, *debt.StopAction)
 	action, found := h.required[debt.Identity]
 	if detached, ok := h.detached[debt.Identity]; ok {

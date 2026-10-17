@@ -12,7 +12,7 @@ import (
 func (m *Machine) ValidateCleanupCourier(id storage.Identity, member uint64, courier topology.Identity) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return queryScopedCleanupCourier(nil, id, member, courier) // Task 78 installs scoped state.
+	return queryScopedCleanupCourier(m.scoped, id, member, courier)
 }
 
 func queryScopedCleanupCourier(s *scopedState, id storage.Identity, member uint64, courier topology.Identity) error {

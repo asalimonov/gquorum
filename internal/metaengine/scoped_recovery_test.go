@@ -66,8 +66,8 @@ func TestScopedRecoveryCatalogRetainsCleanupAndExcludesUnapprovedIntent(t *testi
 	if _, err := queryScopedRecoveryCatalog(&s); !errors.Is(err, fault.ErrHistoryUnavailable) {
 		t.Fatal("missing pinned approval accepted", err)
 	}
-	if _, err := NewMachine(testRules(), nil).RecoveryCatalog(t.Context()); !errors.Is(err, fault.ErrUnsupported) {
-		t.Fatal(err)
+	if rows, err := mustMachine(t, testRules(), nil).RecoveryCatalog(t.Context()); err != nil || len(rows) != 0 {
+		t.Fatal("empty recovery catalog should be readable", rows, err)
 	}
 }
 
@@ -98,7 +98,7 @@ func TestScopedLoadCleanupPreservesClosedProofAndProtectsSuccessor(t *testing.T)
 		t.Fatal("grant ahead of receiver was not retryable", err)
 	}
 	called := false
-	if err := NewMachine(testRules(), nil).WithGrantedLoadCleanup(t.Context(), grant, target, func() error { called = true; return nil }); !errors.Is(err, fault.ErrUnsupported) || called {
-		t.Fatal("schema3 silently admitted scoped cleanup", err, called)
+	if err := mustMachine(t, testRules(), nil).WithGrantedLoadCleanup(t.Context(), grant, target, func() error { called = true; return nil }); !errors.Is(err, fault.ErrOperationAuthorization) || called {
+		t.Fatal("unapproved cleanup identity was admitted", err, called)
 	}
 }

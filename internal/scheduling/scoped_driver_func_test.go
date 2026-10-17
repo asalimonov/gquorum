@@ -65,11 +65,11 @@ func (h *scopedTestHost) PlanRepair(_ context.Context, read metaengine.PlanRead,
 	return topology.BuildPlanPreferred(read.Input, doc, topology.PlanOptions{Rules: topology.Rules{SchemaVersion: 1, Limits: h.limits.WithDefaults()}})
 }
 
-func (h *scopedTestHost) CommitRepair(_ context.Context, c RepairCommit) (topology.OperatorID, error) {
+func (h *scopedTestHost) CommitRepair(_ context.Context, c RepairCommit) (topology.OperationID, error) {
 	h.attempts = append(h.attempts, c)
 	return "repair", h.commitError
 }
-func (h *scopedTestHost) CommitVoterChange(ctx context.Context, _ topology.VoterChange, c RepairCommit) (topology.OperatorID, error) {
+func (h *scopedTestHost) CommitVoterChange(ctx context.Context, _ topology.VoterChange, c RepairCommit) (topology.OperationID, error) {
 	return h.CommitRepair(ctx, c)
 }
 
@@ -107,7 +107,7 @@ func missingDecision(in schedulingapi.ScheduleInput) schedulingapi.ScheduleDecis
 }
 func scopedDriver(t *testing.T, h *scopedTestHost, policy schedulingapi.RepairPolicy) *Scheduler {
 	t.Helper()
-	r, err := New(Config{ScopedHost: h, Policy: policy})
+	r, err := New(Config{Host: h, Policy: policy})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,16 +244,6 @@ func TestScopedSchedulerCallbackCancellationRetainsSerialization(t *testing.T) {
 	}
 	if calls.Load() != 1 || len(h.attempts) != 0 {
 		t.Fatal("overlap or late callback mutation")
-	}
-}
-
-func TestSchedulerRequiresExactlyOneStaticHost(t *testing.T) {
-	t.Parallel()
-	h := newScopedHost(t)
-	for _, cfg := range []Config{{}, {Host: h.testHost, ScopedHost: h}} {
-		if _, err := New(cfg); !errors.Is(err, fault.ErrInvalid) {
-			t.Fatal(err)
-		}
 	}
 }
 

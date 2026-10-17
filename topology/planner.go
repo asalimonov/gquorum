@@ -18,24 +18,11 @@ type PlanOptions struct {
 // BuildPlan derives safe desired work from approved intent, proven declarations,
 // retained effects and confirmed native membership. It does not authorize effects.
 func BuildPlan(input PlanInput, desired Document, rules Rules) (Plan, error) {
-	return constructPlan(input, desired, PlanOptions{Rules: rules})
-}
-
-func constructPlan(input PlanInput, desired Document, options PlanOptions) (Plan, error) {
-	// Whole-document completion still consumes this path until Task 78.
-	return constructGroupPlan(input, desired, options, planScope{groups: unionGroupIDs(input, desired)})
-}
-
-// Remove the flat construction option with the schema-3 caller at Task 78.
-// This controls plan construction only, never the active authority model.
-type planScope struct {
-	groups    []string
-	partition bool
+	return BuildPlanPreferred(input, desired, PlanOptions{Rules: rules})
 }
 
 // Keep full identity evidence; only execution work and native reads are scoped.
-func constructGroupPlan(input PlanInput, desired Document, options PlanOptions, scope planScope) (Plan, error) {
-	groups := scope.groups
+func constructGroupPlan(input PlanInput, desired Document, options PlanOptions, groups []string) (Plan, error) {
 	rules, preferredMetaTransfer := options.Rules, options.PreferredMetaTransfer
 	if err := desired.Validate(rules); err != nil {
 		return Plan{}, err
@@ -58,22 +45,18 @@ func constructGroupPlan(input PlanInput, desired Document, options PlanOptions, 
 		}
 	}
 	plan := builder.plan
-	if scope.partition {
-		bindDetachedStops(input, desired, &plan, groups)
-	}
+	bindDetachedStops(input, desired, &plan, groups)
 	for i := range plan.Steps {
 		plan.Steps[i].Seq = i + 1
 	}
-	plan = bindReadmissionRetirement(input, desired, plan, scope)
+	plan = bindReadmissionRetirement(input, desired, plan, groups)
 	if err := bindDemotionGuards(&plan, desired, observed, preferredMetaTransfer); err != nil {
 		return Plan{}, err
 	}
 	if err := bindVoterGuards(&plan, observed, desired); err != nil {
 		return Plan{}, err
 	}
-	if scope.partition {
-		bindPlanBlocks(input, desired, &plan, groups)
-	}
+	bindPlanBlocks(input, desired, &plan, groups)
 	if err := validatePlanShapeFor(input, desired, plan, groups); err != nil {
 		return Plan{}, planUnsafef("%v", err)
 	}
@@ -192,32 +175,6 @@ func replicaIdentity(previous, target *Group, id uint64) (Replica, bool) {
 	return Replica{}, false
 }
 
-func unionGroupIDs(input PlanInput, desired Document) []string {
-	seen := make(map[string]struct{})
-	var ids []string
-	add := func(id string) {
-		if _, ok := seen[id]; ok {
-			return
-		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
-	}
-	for id := range input.Groups {
-		add(id)
-	}
-	for _, group := range desired.Groups {
-		add(group.ID)
-	}
-	for id := range input.Native {
-		add(id)
-	}
-	for id := range input.Retained {
-		add(id)
-	}
-	slices.SortFunc(ids, comparePlanGroups)
-	return ids
-}
-
 func idSet(ids []uint64) map[uint64]struct{} {
 	set := make(map[uint64]struct{}, len(ids))
 	for _, id := range ids {
@@ -267,14 +224,7 @@ func validateObservedMembership(status GroupStatus) error {
 // BuildPlanPreferred uses the same rules while preferring an eligible meta
 // leadership destination (for example, when draining the current leader).
 func BuildPlanPreferred(input PlanInput, desired Document, options PlanOptions) (Plan, error) {
-	return constructGroupPlan(input, desired, options,
-		planScope{groups: AffectedGroups(input.Approved, desired), partition: true})
-}
-
-// BuildLegacyPlan isolates schema3 callers until their complete removal at Task78.
-// Applications use BuildPlanPreferred; this bridge does not select an authority model.
-func BuildLegacyPlan(input PlanInput, desired Document, options PlanOptions) (Plan, error) {
-	return constructPlan(input, desired, options)
+	return constructGroupPlan(input, desired, options, AffectedGroups(input.Approved, desired))
 }
 
 type topologyPlanBuilder struct {

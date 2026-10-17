@@ -20,7 +20,7 @@ func scopedPlanQuery(kind string) bool {
 }
 
 func (q QueryRequest) validatePlanFields() error {
-	if q.Progress != nil || q.CollectionIdentity != nil || q.AuthorityKey != nil || q.OperatorID != "" {
+	if q.Progress != nil || q.CollectionIdentity != nil || q.AuthorityKey != nil {
 		return fault.ErrInvalid
 	}
 	switch q.Kind {
@@ -180,6 +180,9 @@ func (s *scopedState) validatePlanOwner(op *topology.Operation, group string) er
 
 func (s *scopedState) transferPlanRead(group string) (PlanRead, error) {
 	row := s.indexes.groups[group]
+	if row == nil && s.Target.Group(group) == nil {
+		return PlanRead{}, fault.New(fault.Invalid, "unknown transfer group", nil)
+	}
 	if row == nil || row.SourceVersion == 0 || row.Declaration == nil || row.Deleting {
 		return PlanRead{}, fault.ErrUnavailable
 	}

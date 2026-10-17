@@ -34,13 +34,6 @@ func (c planningCollector) sortedOwners() []planningReplicaKey {
 	})
 }
 
-func collectPlanningEvidence(input topology.PlanInput, desired topology.Document,
-	evidence planningEvidence) (topology.PlanInput, error) {
-	c := planningCollector{evidence: evidence, owners: make(map[planningReplicaKey]*planningReplica),
-		founding: make(map[string]bool)}
-	return c.collect(input, desired)
-}
-
 func (c *planningCollector) collect(input topology.PlanInput, desired topology.Document) (topology.PlanInput, error) {
 	if err := c.declarations(); err != nil {
 		return topology.PlanInput{}, err

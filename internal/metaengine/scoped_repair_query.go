@@ -1,6 +1,7 @@
 package metaengine
 
 import (
+	"fmt"
 	"slices"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -33,8 +34,10 @@ func (s *scopedState) repairPlanRead(q QueryRequest) (PlanRead, error) {
 	if err := q.Desired.Validate(s.Rules); err != nil {
 		return PlanRead{}, err
 	}
-	if !slices.Equal(topology.AffectedGroups(s.Target, *q.Desired), []string{q.Key}) {
-		return PlanRead{}, fault.ErrOperationAuthorization
+	affected := topology.AffectedGroups(s.Target, *q.Desired)
+	if !slices.Equal(affected, []string{q.Key}) {
+		return PlanRead{}, fault.New(fault.OperationAuthorization,
+			fmt.Sprintf("repair scope mismatch: requested group %q, affected groups %v", q.Key, affected), nil)
 	}
 	read.Target = q.Desired.Clone()
 	return read, nil

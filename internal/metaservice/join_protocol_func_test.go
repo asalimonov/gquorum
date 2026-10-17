@@ -194,7 +194,7 @@ func TestJoinClientSkipsColdSeedsAndFollowsLeaderHintToExactGrant(t *testing.T) 
 	grant := joinResponse{
 		Rules: g.rules, MemberID: 1, Granted: doc, LeaderAddress: leader,
 		Members:   []joinMember{{Name: "n1", MemberID: 1, Address: g.opts.Network.AdvertiseAddress}},
-		Admission: metaengine.AdmissionRecord{NodeName: "n1", InstanceID: g.Identity().InstanceID, MemberID: 1, OperatorID: "exec-v1-a1", State: metaengine.AdmissionPending},
+		Admission: metaengine.AdmissionRecord{NodeName: "n1", InstanceID: g.Identity().InstanceID, MemberID: 1, OperationID: "exec-v1-a1", State: metaengine.AdmissionPending},
 	}
 	data, err := json.Marshal(grant)
 	if err != nil {

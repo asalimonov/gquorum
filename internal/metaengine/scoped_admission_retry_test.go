@@ -27,7 +27,7 @@ func scopedAdmissionRetryFixture() scopedState {
 		}
 	}
 	s.Admissions = append(s.Admissions, AdmissionRecord{NodeName: "n", InstanceID: "retried",
-		MemberID: 2, OperatorID: topology.OperatorID(retry.Status.ID), State: AdmissionReady})
+		MemberID: 2, OperationID: topology.OperationID(retry.Status.ID), State: AdmissionReady})
 	return s
 }
 
@@ -102,7 +102,7 @@ func TestAdmissionRetirementMatchesExactGrantedMember(t *testing.T) {
 		catalog.admissionRetirementConsumed(admission, "n", 3) {
 		t.Fatal("retirement crossed node/member identity")
 	}
-	admission.OperatorID = "exec-v3-a2"
+	admission.OperationID = "exec-v3-a2"
 	if catalog.admissionRetirementConsumed(admission, "n", 2) {
 		t.Fatal("unrecorded batch accepted")
 	}

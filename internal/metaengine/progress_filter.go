@@ -3,12 +3,10 @@ package metaengine
 import "github.com/asalimonov/gquorum/topology"
 
 type progressRecord struct {
-	key         progressKey
-	operation   *topology.Operation
-	block       int
-	cleanup     *cleanupRecord
-	legacyGroup *topology.GroupProgress
-	legacyNode  *topology.NodeProgress
+	key       progressKey
+	operation *topology.Operation
+	block     int
+	cleanup   *cleanupRecord
 }
 
 func (s *scopedState) progressRecords(q topology.ProgressQuery) []progressRecord {

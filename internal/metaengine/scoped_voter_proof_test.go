@@ -77,7 +77,7 @@ func TestScopedVoterRejectsBrokenSummaryAndStagedProvenance(t *testing.T) {
 		"missing last":  func(s *scopedState) { s.VoterSwitches[0].Replicas = nil },
 		"unknown group": func(s *scopedState) { s.VoterSwitches[0].GroupID = "absent" },
 		"staged approval": func(s *scopedState) {
-			s.VoterSwitches[0].Last.Version, s.VoterSwitches[0].Last.OperatorID = 4, "exec-v4-a1"
+			s.VoterSwitches[0].Last.Version, s.VoterSwitches[0].Last.OperationID = 4, "exec-v4-a1"
 			s.VoterSwitches[0].Replicas[0] = s.VoterSwitches[0].Last
 		},
 	}

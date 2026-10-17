@@ -193,6 +193,18 @@ func TestScopedDispatchStopClosesAdmissionAndJoinsLateWorker(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
+	e.Stop() // Repeated Stop and stopped Signal are harmless.
+	e.Signal()
+	e.Start(ctx)
+	e.Start(ctx)
+	select {
+	case id := <-coord.done:
+		if id != "a" {
+			t.Fatal("restart lost unfinished scope", id)
+		}
+	case <-ctx.Done():
+		t.Fatal("controller could not restart after joined Stop", ctx.Err())
+	}
 }
 
 func TestScopedDispatchHugeLimitAllocatesOnlyActualWork(t *testing.T) {
@@ -212,5 +224,41 @@ func TestScopedDispatchHugeLimitAllocatesOnlyActualWork(t *testing.T) {
 	case <-coord.done:
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
+	}
+}
+
+type lostTransitionCoordinator struct {
+	*scopedCoordinatorTest
+	calls int
+}
+
+func (c *lostTransitionCoordinator) RecordOperationTransition(ctx context.Context, _ topology.OperationTransition) error {
+	c.calls++
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestScopedControllerSurvivesLostTransitionProposal(t *testing.T) {
+	t.Parallel()
+	coord := &lostTransitionCoordinator{scopedCoordinatorTest: &scopedCoordinatorTest{leader: true}}
+	cfg := scopedControllerConfig(coord)
+	cfg.ProposalTimeout = 20 * time.Millisecond
+	e, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := dispatchFixtureWork("a")[0]
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	for range 2 {
+		if got := e.runScopedWork(ctx, work); got != controllerIdle {
+			t.Fatal(got)
+		}
+		if ctx.Err() != nil {
+			t.Fatal("lost proposal exhausted caller lifetime", ctx.Err())
+		}
+	}
+	if coord.calls != 2 {
+		t.Fatal("controller did not resume after lost proposal", coord.calls)
 	}
 }

@@ -247,7 +247,7 @@ func (g *Group) changeMetaReceipt(ctx context.Context, engine *raftengine.Group,
 	var change raftpb.ConfChangeV2
 	switch a.Kind {
 	case topology.StepAddLearner:
-		admission, ok := g.state().AdmissionForOperator(a.OperatorID, a.NodeName, a.ReplicaID)
+		admission, ok := g.state().AdmissionForOperator(a.OperationID, a.NodeName, a.ReplicaID)
 		if !ok || !admission.State.Prepared() {
 			return topology.EffectReceipt{}, fault.ErrReplicaNotReady
 		}

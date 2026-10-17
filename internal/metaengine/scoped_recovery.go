@@ -8,8 +8,8 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// Task78 connects this to the existing RecoveryCatalog read lock. These rows
-// are discovery evidence for exact cleanup/recovery, never a membership document
+// Called under the RecoveryCatalog read lock. These rows are discovery
+// evidence for exact cleanup/recovery, never a membership document
 // or permission to acquire an application. Staged declarations are excluded.
 func queryScopedRecoveryCatalog(s *scopedState) ([]topology.Group, error) {
 	if s == nil {
@@ -64,7 +64,7 @@ func (m *Machine) RecoveryCatalog(ctx context.Context) ([]topology.Group, error)
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return queryScopedRecoveryCatalog(nil) // Task78 installs complete scoped state.
+	return queryScopedRecoveryCatalog(m.scoped)
 }
 
 // WithGrantedLoadCleanup pins approved assignments through an exact ledger
@@ -80,9 +80,9 @@ func (m *Machine) WithGrantedLoadCleanup(ctx context.Context, grant topology.Aut
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if err := queryScopedLoadCleanup(nil, grant, target); err != nil {
+	if err := queryScopedLoadCleanup(m.scoped, grant, target); err != nil {
 		return err
-	} // Task78 supplies scoped state.
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}

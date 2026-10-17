@@ -58,19 +58,19 @@ func TestScopedRetryDerivesAdmissionProgressWithoutReplayingConsumedPrefix(t *te
 			original := s.Operations[0].Clone()
 			before := s.Admissions[0]
 			result := applyScopedRetryFixture(t, &s, scopedRetryProposal(&s, &original))
-			retry := s.indexes.operations[topology.OperationID(result.result.OperatorID)]
+			retry := s.indexes.operations[topology.OperationID(result.result.OperationID)]
 			if retry.Status.Blocks[0].CurrentStep != cursor || s.Admissions[0].State != want ||
-				s.Admissions[0].OperatorID != result.result.OperatorID ||
+				s.Admissions[0].OperationID != topology.OperationID(result.result.OperationID) ||
 				s.Admissions[0].ReadmissionOperatorID != original.Status.ID ||
 				ReadmissionID(s.Admissions[0]) != ReadmissionID(before) || !reflect.DeepEqual(retry.Plan, original.Plan) {
 				t.Fatal("retry lost admission origin, immutable prefix or process readiness", s.Admissions, retry)
 			}
 			if phase == "unacknowledged promotion" && (len(s.VoterSwitches) != 1 ||
-				s.VoterSwitches[0].Last.OperatorID != topology.OperatorID(original.Status.ID)) {
+				s.VoterSwitches[0].Last.OperationID != topology.OperationID(original.Status.ID)) {
 				t.Fatal("retry skipped original promotion cooldown")
 			}
 			for _, record := range s.AuthorityRecords {
-				if record.Grant.OperatorID == result.result.OperatorID {
+				if record.Grant.OperationID == topology.OperationID(result.result.OperationID) {
 					t.Fatal("retry manufactured effect consumption under its new identity")
 				}
 			}
@@ -93,7 +93,7 @@ func TestScopedRetryRetainsUnobservedCatchupAndScopesRevocations(t *testing.T) {
 	failScopedMetadata(t, &s)
 	old := s.Operations[0].Clone()
 	result := applyScopedRetryFixture(t, &s, scopedRetryProposal(&s, &old))
-	retry := s.indexes.operations[topology.OperationID(result.result.OperatorID)]
+	retry := s.indexes.operations[topology.OperationID(result.result.OperationID)]
 	if retry.Status.Blocks[0].CurrentStep != 3 {
 		t.Fatal("retry fabricated a catchup observation")
 	}
@@ -145,13 +145,13 @@ func TestScopedRetryPreservesWholeReadmissionBatchAndFences(t *testing.T) {
 			}
 			result := applyScopedRetryFixture(t, &s, p)
 			admission := s.Admissions[0]
-			if ReadmissionID(admission) != ReadmissionID(original) || admission.OperatorID != result.result.OperatorID ||
+			if ReadmissionID(admission) != ReadmissionID(original) || admission.OperationID != topology.OperationID(result.result.OperationID) ||
 				(scopedAdmissionRetirement(admission, &s, s.indexes, s.authorityCatalog())) != (phase == "ready") {
 				t.Fatal("retry lost original batch or trusted partial retirement", admission)
 			}
 			replay, err := s.applyBeginReadmissionAuthority(s.AppliedIndex+1, BeginReadmissionAuthority{
 				NodeName: admission.NodeName, InstanceID: admission.InstanceID, MemberID: admission.MemberID,
-				PreviousMemberID: 1, OperatorID: admission.OperatorID})
+				PreviousMemberID: 1, OperationID: admission.OperationID})
 			if err != nil || replay.changed || len(replay.result.Grants) != 2 {
 				t.Fatal("retry could not recover the exact original retirement batch", replay, err)
 			}
@@ -165,7 +165,7 @@ func TestScopedRetryBeforeProcessBindsAdmission(t *testing.T) {
 	s.Admissions = nil
 	failScopedMetadata(t, &s)
 	result := applyScopedRetryFixture(t, &s, scopedRetryProposal(&s, &s.Operations[0]))
-	op := s.indexes.operations[topology.OperationID(result.result.OperatorID)]
+	op := s.indexes.operations[topology.OperationID(result.result.OperationID)]
 	if len(s.Admissions) != 0 || op.Status.Blocks[0].CurrentStep != 1 {
 		t.Fatal("retry fabricated an admission or skipped preparation")
 	}
@@ -179,7 +179,7 @@ func TestScopedRetryBeforeProcessBindsAdmission(t *testing.T) {
 	if _, err := s.applyBindAdmission(s.AppliedIndex+1, bind); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("fresh process selected the failed attempt", err)
 	}
-	bind.Admission.OperatorID = result.result.OperatorID
+	bind.Admission.OperationID = topology.OperationID(result.result.OperationID)
 	bound := applyAdmissionFixture(t, &s, KindBindAdmission, bind)
 	applyAdmissionFixture(t, &s, KindReadyAdmission, readyProposal(bound.result.Admission))
 	if _, err := s.applyBeginEffect(s.AppliedIndex+1, BeginEffectProposal{

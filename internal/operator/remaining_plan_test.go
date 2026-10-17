@@ -114,7 +114,7 @@ func TestRemainingPlanRequiresExactReceiptForAppliedVoterChange(t *testing.T) {
 	target := base.Clone()
 	target.Version = 2
 	target.Group("work").Replicas[1].Role = topology.ReplicaVoter
-	id := topology.MakeOperatorID(2, 1)
+	id := topology.MakeOperationID(2, 1)
 	step := Step{Seq: 2, Kind: StepPromoteVoter, GroupID: "work", NodeName: "b", ReplicaID: 2,
 		ExpectedVotersDigest: topology.VoterSetDigest([]uint64{1}), ResultVotersDigest: topology.VoterSetDigest([]uint64{1, 2})}
 	ex := Record{ID: id, Version: 2, Attempt: 1, CurrentStep: 2,
@@ -130,13 +130,13 @@ func TestRemainingPlanRequiresExactReceiptForAppliedVoterChange(t *testing.T) {
 	if err := ValidateRemainingPlan(RemainingPlanView{Input: remainingInput(base), Target: target}, ex, native, rules); !errors.Is(err, fault.ErrReplanRequired) {
 		t.Fatalf("unexplained native promotion was reused: %v", err)
 	}
-	action := topology.AuthorizedStep{OperatorID: id, Version: 2, Attempt: 1, StepSeq: 2,
+	action := topology.AuthorizedStep{OperationID: id, Version: 2, Attempt: 1, StepSeq: 2,
 		Kind: step.Kind, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID,
 		ExpectedVotersDigest: step.ExpectedVotersDigest, ResultVotersDigest: step.ResultVotersDigest}
 	resource := topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: "work"}
 	member := topology.AuthorityTarget{NodeName: "b", MemberID: 2, ReplicaID: 2}
 	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: "work", Revision: 10},
-		Purpose: topology.AuthorityEffect, OperatorID: id, Action: &action,
+		Purpose: topology.AuthorityEffect, OperationID: id, Action: &action,
 		Resources: []topology.AuthorityResource{resource}, Targets: []topology.AuthorityTarget{member}}
 	receipt := topology.EffectReceipt{Key: grant.Key, Resource: resource, Action: &action,
 		Target: member, Outcome: topology.EffectApplied, AppliedIndex: 11, AppliedTerm: 1}
@@ -170,13 +170,13 @@ func TestRemainingPlanAcceptsExactApprovedFoundingSeedBeforeReceipt(t *testing.T
 	t.Parallel()
 	target := Document{ClusterID: "cluster", Version: 2, Placement: topology.PlacementRule{MinReplicas: 1, MaxReplicas: 3},
 		Groups: []Group{{ID: "work", Replicas: []Replica{{NodeName: "a", ReplicaID: 1, Role: topology.ReplicaVoter}}}}}
-	id := topology.MakeOperatorID(2, 1)
+	id := topology.MakeOperationID(2, 1)
 	step := Step{Seq: 1, Kind: StepCreateFoundingGroup, GroupID: "work",
 		ExpectedVotersDigest: topology.VoterSetDigest(nil), ResultVotersDigest: topology.VoterSetDigest([]uint64{1})}
-	action := topology.AuthorizedStep{OperatorID: id, Version: 2, Attempt: 1, StepSeq: 1,
+	action := topology.AuthorizedStep{OperationID: id, Version: 2, Attempt: 1, StepSeq: 1,
 		Kind: step.Kind, GroupID: step.GroupID, ExpectedVotersDigest: step.ExpectedVotersDigest, ResultVotersDigest: step.ResultVotersDigest}
 	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: "work", Revision: 10},
-		Purpose: topology.AuthorityEffect, OperatorID: id, Action: &action,
+		Purpose: topology.AuthorityEffect, OperationID: id, Action: &action,
 		Resources: []topology.AuthorityResource{{Kind: topology.AuthorityGroup, GroupID: "work"}, {Kind: topology.AuthorityHost, GroupID: "work", NodeName: "a"}},
 		Targets:   []topology.AuthorityTarget{{NodeName: "a", MemberID: 1, ReplicaID: 1}}}
 	ex := Record{ID: id, Version: 2, Attempt: 1, CurrentStep: 1, Steps: []Step{step}, Grants: []topology.AuthorityGrant{grant}}

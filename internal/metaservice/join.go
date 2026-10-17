@@ -47,7 +47,7 @@ type joinResponse struct {
 type readyRequest struct {
 	NodeName, InstanceID, Address string
 	MemberID                      uint64
-	OperatorID                    topology.OperatorID      `json:"ExecutionID"`
+	OperationID                   topology.OperationID     `json:"ExecutionID"`
 	Receipts                      []topology.EffectReceipt `json:"receipts,omitempty"`
 }
 
@@ -142,7 +142,7 @@ func (g *Group) joinReply(ctx context.Context, a metaengine.AdmissionRecord, for
 		if response.PreviousMemberID == 0 {
 			return metatransport.Reply(fault.ErrOperationAuthorization)
 		}
-		catalog, err := g.state().LegacyRecoveryCatalog(ctx)
+		catalog, err := g.state().RecoveryCatalog(ctx)
 		if err != nil {
 			return metatransport.Reply(err)
 		}
@@ -173,7 +173,7 @@ func (g *Group) handleReady(ctx context.Context, h *metapb.Header, data []byte) 
 	var request readyRequest
 	decodeErr := json.Unmarshal(data, &request)
 	if decodeErr != nil || request.NodeName != h.NodeName || request.MemberID != h.MemberId ||
-		request.InstanceID == "" || request.InstanceID != h.InstanceId || request.OperatorID == "" {
+		request.InstanceID == "" || request.InstanceID != h.InstanceId || request.OperationID == "" {
 		return metatransport.Reply(fault.ErrInvalid)
 	}
 	if _, _, err := net.SplitHostPort(request.Address); err != nil {
@@ -182,10 +182,10 @@ func (g *Group) handleReady(ctx context.Context, h *metapb.Header, data []byte) 
 	if len(request.Receipts) != 0 {
 		_, err := g.propose(ctx, metaengine.RecordReadmissionReceiptsProposal{
 			Admission: metaengine.AdmissionRecord{
-				NodeName:   request.NodeName,
-				InstanceID: request.InstanceID,
-				MemberID:   request.MemberID,
-				OperatorID: request.OperatorID,
+				NodeName:    request.NodeName,
+				InstanceID:  request.InstanceID,
+				MemberID:    request.MemberID,
+				OperationID: request.OperationID,
 			},
 			Receipts: request.Receipts,
 			At:       time.Now().UTC(),
@@ -195,10 +195,10 @@ func (g *Group) handleReady(ctx context.Context, h *metapb.Header, data []byte) 
 		}
 	}
 	_, err := g.propose(ctx, metaengine.ReadyAdmissionProposal{
-		NodeName:   request.NodeName,
-		InstanceID: request.InstanceID,
-		MemberID:   request.MemberID,
-		OperatorID: request.OperatorID,
+		NodeName:    request.NodeName,
+		InstanceID:  request.InstanceID,
+		MemberID:    request.MemberID,
+		OperationID: request.OperationID,
 	})
 	if err == nil {
 		g.primeAddress(request.NodeName, request.Address)
@@ -278,7 +278,7 @@ func (g *Group) prepareReadmission(ctx context.Context, previous topology.Identi
 	var appliedCatalog []topology.Group
 	if machine := g.state(); machine != nil {
 		var err error
-		appliedCatalog, err = machine.LegacyRecoveryCatalog(ctx)
+		appliedCatalog, err = machine.RecoveryCatalog(ctx)
 		if err != nil {
 			return err
 		}
@@ -389,12 +389,12 @@ func (g *Group) acknowledgeJoin(ctx context.Context) error {
 	}
 	a := g.joinAdmission
 	data, _ := json.Marshal(readyRequest{
-		NodeName:   a.NodeName,
-		InstanceID: a.InstanceID,
-		MemberID:   a.MemberID,
-		OperatorID: a.OperatorID,
-		Address:    g.opts.Network.AdvertiseAddress,
-		Receipts:   g.joinReceipts,
+		NodeName:    a.NodeName,
+		InstanceID:  a.InstanceID,
+		MemberID:    a.MemberID,
+		OperationID: a.OperationID,
+		Address:     g.opts.Network.AdvertiseAddress,
+		Receipts:    g.joinReceipts,
 	})
 	addresses := g.joinReadyAddresses(ctx, engine)
 	seen := map[string]bool{}

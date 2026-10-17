@@ -9,24 +9,12 @@ import (
 )
 
 func validateCoordinatorConfig(cfg Config) error {
-	if (cfg.Coordinator == nil) == (cfg.LegacyCoordinator == nil) {
-		return fault.New(fault.Invalid, "controller requires exactly one execution coordinator", nil)
-	}
-	if cfg.LegacyCoordinator != nil {
-		if cfg.Store == nil || cfg.PlanValidator == nil ||
-			cfg.ScopedPlanValidator != nil || cfg.ScopedFinalValidator != nil {
-			return fault.New(fault.Invalid, "legacy controller requires its store and plan validator", nil)
-		}
-		return nil
-	}
-	if cfg.ScopedPlanValidator == nil || cfg.ScopedFinalValidator == nil ||
-		cfg.Store != nil || cfg.PlanValidator != nil || cfg.FinalValidator != nil {
-		return fault.New(fault.Invalid, "scoped controller requires only scope validators", nil)
+	if cfg.Coordinator == nil || cfg.ScopedPlanValidator == nil || cfg.ScopedFinalValidator == nil {
+		return fault.New(fault.Invalid, "controller requires coordinator and scope validators", nil)
 	}
 	return nil
 }
 
-// Scoped execution is isolated from schema3 composition until Task78.
 func (e *Controller) runScopedTick(ctx context.Context) controllerOutcome {
 	e.mu.Lock()
 	run := e.run

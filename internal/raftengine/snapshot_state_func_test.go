@@ -17,8 +17,8 @@ func TestCompleteAuthoritySnapshotSurvivesTailAndResnapshot(t *testing.T) {
 	s := openStore(t, t.TempDir(), "1")
 	must(t, s.BindReplica(t.Context(), storage.Identity{NodeName: "1", ClusterID: "cluster", GroupID: "load", ReplicaID: 1}))
 	must(t, s.Ensure(t.Context(), "load"))
-	a := topology.AuthorizedStep{OperatorID: topology.MakeOperatorID(1, 1), Version: 1, Attempt: 1, StepSeq: 1, GroupID: "load", NodeName: "1", ReplicaID: 1, Kind: topology.StepTransferLeader}
-	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: "load", Revision: 100}, Purpose: topology.AuthorityEffect, OperatorID: a.OperatorID, Action: &a, Resources: []topology.AuthorityResource{{Kind: topology.AuthorityGroup, GroupID: "load"}}, Targets: []topology.AuthorityTarget{{NodeName: "1", MemberID: 1, ReplicaID: 1}}}
+	a := topology.AuthorizedStep{OperationID: topology.MakeOperationID(1, 1), Version: 1, Attempt: 1, StepSeq: 1, GroupID: "load", NodeName: "1", ReplicaID: 1, Kind: topology.StepTransferLeader}
+	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: "cluster", GroupID: "load", Revision: 100}, Purpose: topology.AuthorityEffect, OperationID: a.OperationID, Action: &a, Resources: []topology.AuthorityResource{{Kind: topology.AuthorityGroup, GroupID: "load"}}, Targets: []topology.AuthorityTarget{{NodeName: "1", MemberID: 1, ReplicaID: 1}}}
 	receipt := topology.EffectReceipt{Key: grant.Key, Resource: grant.Resources[0], Action: &a, Target: grant.Targets[0], Outcome: topology.EffectTransferStarted, AppliedIndex: 5, AppliedTerm: 1}
 	authority := raftstate.AuthorityState{Grant: &grant, InstallIndex: 4, InstallTerm: 1, Receipt: &receipt}
 	data, err := raftstate.EncodeSnapshot(raftstate.Snapshot{Schema: raftstate.Schema, ClusterID: "cluster", GroupID: "load", Application: []byte(`{"commands":["snapshot"]}`), Authority: authority})

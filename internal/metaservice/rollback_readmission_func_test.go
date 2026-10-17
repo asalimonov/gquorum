@@ -21,7 +21,7 @@ func TestRollbackUnfinishedReadmissionRefusesRetiredIdentity(t *testing.T) {
 	f := newMutationFixture(t)
 	f.g.opts.Health = mutationHealth{"n1": topology.HealthAlive, "n2": topology.HealthAlive,
 		"n3": topology.HealthDead}
-	active := f.g.machine.Active()
+	active := fixtureConvergedDocument(t, f.g.machine)
 	result, err := f.g.ReadmitNode(t.Context(), "n3", 3, preview())
 	if err != nil {
 		t.Fatal(err)
@@ -39,12 +39,14 @@ func TestRollbackUnfinishedReadmissionRefusesRetiredIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	at := time.Now().UTC()
-	op := f.command(t, metaengine.BeginOperatorProposal{Version: desired.Version, Plan: plan, At: at}).OperatorID
+	approval := f.fixtureApproval(t, desired)
+	approval.Plan = plan
+	op := f.command(t, approval).OperationID
 	first := plan.Steps[0]
-	f.command(t, metaengine.TransitionOperatorProposal{Transition: topology.OperatorTransition{
-		OperatorID: op, Version: desired.Version, Attempt: 1, StepSeq: first.Seq,
-		GroupID: first.GroupID, NodeName: first.NodeName, State: topology.OperatorFailed,
-		Error: "readmission did not start", At: at.Add(time.Second)}})
+	f.command(t, metaengine.TransitionOperationProposal{Transition: topology.OperationTransition{
+		OperationID: op, Version: desired.Version, Attempt: 1, StepSeq: first.Seq,
+		GroupID: first.GroupID, State: topology.OperationFailed,
+		Error: "readmission did not start", At: at.Add(time.Second)}, ProposalID: newProposalID()})
 	_, err = f.g.RollbackTo(t.Context(), active.Version, preview())
 	if !errors.Is(err, fault.ErrInvalid) || !strings.Contains(err.Error(), "retired replica identity") {
 		t.Fatal("rollback reused an identity retired by approved readmission", err)
@@ -71,7 +73,7 @@ func TestRollbackUnfinishedReadmissionRefusesRetiredIdentity(t *testing.T) {
 	if rejected.Accepted || !strings.Contains(rejected.Reason, "retired replica identity") {
 		t.Fatal("raw staging bypassed the approved identity floor", rejected)
 	}
-	target, current := f.g.machine.Target(), f.g.machine.Active()
+	target, current := f.g.machine.Target(), fixtureConvergedDocument(t, f.g.machine)
 	if f.g.machine.Latest().Version != desired.Version || target.MemberID("n3") != 4 || current.MemberID("n3") != 3 {
 		t.Fatal("refused rollback mutated approved or converged identities")
 	}

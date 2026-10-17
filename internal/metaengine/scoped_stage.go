@@ -46,6 +46,9 @@ func (s *scopedState) applyProposeDocument(index uint64, p ProposeDocument) (pro
 }
 
 func (s *scopedState) validateStagedDocument(doc topology.Document) error {
+	if doc.ParentVersion >= doc.Version {
+		return fault.New(fault.Invalid, "document parent must precede its assigned version", nil)
+	}
 	retired := make(map[string]bool, len(s.RetiredGroups))
 	for _, group := range s.RetiredGroups {
 		retired[group.ID] = true

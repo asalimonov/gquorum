@@ -60,7 +60,7 @@ func remainingGrants(ex Record) (map[topology.AuthorityKey]topology.AuthorityGra
 
 func validateRemainingGrant(ex Record, grant topology.AuthorityGrant) error {
 	validationErr := grant.Validate()
-	if validationErr != nil || grant.Action == nil || grant.OperatorID != ex.ID {
+	if validationErr != nil || grant.Action == nil || grant.OperationID != ex.ID {
 		return ErrOperationAuthorization
 	}
 	seq := grant.Action.StepSeq

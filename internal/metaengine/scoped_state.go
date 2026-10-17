@@ -10,8 +10,8 @@ import (
 	"go.etcd.io/raft/v3/raftpb"
 )
 
-// This codec is isolated from live state installation until Task 78. At cutover
-// it replaces smState and the legacy disk codec, rather than becoming a V2 API.
+// scopedState is the complete replicated schema-4 metadata checkpoint.
+// Derived indexes are rebuilt and validated before live installation.
 const scopedStateSchemaVersion = 4
 
 type scopedState struct {
@@ -45,8 +45,8 @@ type scopedState struct {
 	AppliedTerm      uint64                      `json:"applied_term"`
 }
 
-// The embedded unchanged grant/evidence shape is flattened in JSON. Replace the
-// old authorityRecord at cutover; do not expose a caller-selected Class.
+// The shared grant/evidence shape is flattened in JSON. Class is derived by
+// the FSM; callers cannot select the authority class.
 type scopedAuthorityRecord struct {
 	authorityRecord
 	Class string `json:"class"`

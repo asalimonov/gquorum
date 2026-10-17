@@ -199,14 +199,14 @@ func TestProgressContinuationObservesNewIndexWithoutSnapshotLease(t *testing.T) 
 	}
 }
 
-func TestProgressLegacyAdapterServesNewAPIBeforeCutover(t *testing.T) {
+func TestEmptyMachineProgressPreservesAppliedReadBoundary(t *testing.T) {
 	t.Parallel()
-	m := NewMachine(topology.Rules{}, nil)
+	m := mustMachine(t, testRules(), nil)
 	if page, err := m.Progress(topology.ProgressQuery{}); err != nil || page.ReadAt.IsZero() ||
 		page.LatestVersion != 0 || len(page.Groups)+len(page.Nodes)+len(page.Operations)+len(page.Cleanup) != 0 {
 		t.Fatal(page, err)
 	}
 	if _, err := m.Query(t.Context(), []byte(`{"kind":"progress","progress":{}}`)); err != nil {
-		t.Fatal("legacy progress query failed", err)
+		t.Fatal("empty progress query failed", err)
 	}
 }

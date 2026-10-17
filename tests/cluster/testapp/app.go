@@ -460,14 +460,14 @@ func (a *application) finishClose() {
 	close(a.closed)
 }
 
-// readConvergedTopology is a schema-3 fixture bridge. Task78 replaces callers
-// with scoped progress queries when the Active document leaves ReadView.
+// readConvergedTopology resolves the pinned complete historical baseline;
+// current per-group convergence is exposed separately through ReadProgress.
 func readConvergedTopology(ctx context.Context, cluster gquorum.Cluster) (topology.Document, error) {
 	view, err := cluster.ReadTopology(ctx)
 	if err != nil {
 		return topology.Document{}, err
 	}
-	return view.Active, nil
+	return cluster.Get(ctx, view.FullyConverged.Version)
 }
 
 func (a *application) documents(ctx context.Context) (topology.Document, topology.Document, error) {

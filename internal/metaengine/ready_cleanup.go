@@ -10,11 +10,10 @@ import (
 )
 
 // ReadyCleanup rotates exact retained identities, returning only detached work.
-// The schema3 adapter remains closed until complete scoped persistence in Task78.
 func (m *Machine) ReadyCleanup(after storage.Identity, limit int) ([]operator.CleanupWork, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return queryReadyCleanup(nil, after, limit)
+	return queryReadyCleanup(m.scoped, after, limit)
 }
 
 func queryReadyCleanup(s *scopedState, after storage.Identity, limit int) ([]operator.CleanupWork, error) {

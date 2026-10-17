@@ -3,7 +3,8 @@
 package metaengine
 
 import (
-	"reflect"
+	"bytes"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -30,7 +31,6 @@ func TestRepairCommandRejectsEditsOutsideOneActiveVoter(t *testing.T) {
 		{"node labels", func(d *topology.Document) { d.Node("n1").Labels = map[string]string{"rack": "other"} }},
 		{"audit", func(d *topology.Document) { d.Audit = &topology.ChangeAudit{Forced: true} }},
 		{"comment", func(d *topology.Document) { d.Comment = "unrelated operator change" }},
-		{"lineage", func(d *topology.Document) { d.ParentVersion = 99 }},
 		{"allocator skip", func(d *topology.Document) {
 			d.Group("shard0").Replicas[0].ReplicaID++
 			d.Group("shard0").NextReplicaID++
@@ -39,25 +39,41 @@ func TestRepairCommandRejectsEditsOutsideOneActiveVoter(t *testing.T) {
 		{"unrelated timestamp", func(d *topology.Document) { d.MetaGroup().UpdatedAt = time.Now() }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			sm := newTopologySM(nil, topology.Rules{SchemaVersion: 1, Limits: (topology.Limits{}).WithDefaults()})
-			active := apply(t, sm, 1, ProposeDocument{Doc: baseDoc(), ExpectedVersion: 0}).Doc
-			at := time.Now().UTC()
-			ex := apply(t, sm, 2, BeginOperatorProposal{Version: 1, Plan: topology.Plan{Version: 1}, At: at})
-			apply(t, sm, 3, TransitionOperatorProposal{Transition: topology.OperatorTransition{OperatorID: ex.OperatorID, Version: 1, Attempt: 1, State: topology.OperatorSucceeded, At: at}})
-			apply(t, sm, 4, ActivateTargetProposal{OperatorID: ex.OperatorID, Version: 1, Attempt: 1})
-			options := ReplicaRepairOptions{GroupID: "shard0", NodeName: "n1", ReplicaID: 1,
-				At: at, Origin: topology.OriginReconciler, Actor: "auto-repair"}
-			repaired, err := ReplicaRepairDocument(active, active, options)
+			t.Parallel()
+			s, proposal := repairCommitFixture(t)
+			m := restoreMachineFixture(t, s)
+			tc.edit(&proposal.Doc)
+			before, err := m.Snapshot(t.Context())
 			if err != nil {
 				t.Fatal(err)
 			}
-			repair := repaired.Doc
-			tc.edit(&repair)
-			plan := topology.Plan{Version: 2, Steps: []topology.Step{{Seq: 1, Kind: topology.StepPrepareReplica, GroupID: "shard0", NodeName: "n1", ReplicaID: 2}, {Seq: 2, Kind: topology.StepAddLearner, GroupID: "shard0", NodeName: "n1", ReplicaID: 2}, {Seq: 3, Kind: topology.StepWaitCaughtUp, GroupID: "shard0", NodeName: "n1", ReplicaID: 2}, {Seq: 4, Kind: topology.StepPromoteVoter, GroupID: "shard0", NodeName: "n1", ReplicaID: 2}}}
-			result := apply(t, sm, 5, CommitRepairOperatorProposal{Doc: repair, ExpectedVersion: 1, Plan: plan, At: at})
-			if result.Accepted || !reflect.DeepEqual(active, sm.Latest()) || !reflect.DeepEqual(active, sm.Target()) || !reflect.DeepEqual(active, sm.Active()) {
-				t.Fatal("repair edit escaped replicated refusal", result)
+			result := applyMachine(t, m, proposal)
+			var expected scopedState
+			if err := json.Unmarshal(before, &expected); err != nil {
+				t.Fatal(err)
+			}
+			expected.AppliedIndex, expected.AppliedTerm = m.AppliedState()
+			want, err := json.Marshal(expected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			after, err := m.Snapshot(t.Context())
+			if err != nil || result.Accepted || !bytes.Equal(want, after) {
+				t.Fatal("repair edit escaped replicated refusal", result, err)
 			}
 		})
+	}
+}
+
+func TestScopedRepairDerivesLineageFromReplicatedHeads(t *testing.T) {
+	t.Parallel()
+	s, proposal := repairCommitFixture(t)
+	proposal.Doc.Version, proposal.Doc.ParentVersion, proposal.Doc.RebasedFrom = 99, 98, 97
+	m := restoreMachineFixture(t, s)
+	result := applyMachine(t, m, proposal)
+	if !result.Accepted || result.Doc.Version != s.Latest.Version+1 ||
+		result.Doc.ParentVersion != s.Target.Version || result.Doc.RebasedFrom != 0 ||
+		m.Latest().RebasedFrom != s.Latest.Version {
+		t.Fatal("caller selected generated repair ancestry", result)
 	}
 }

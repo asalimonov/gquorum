@@ -76,9 +76,9 @@ Performance of a single thread worker with single Raft group on 3-node cluster:
   durability, but it easily achieves for a single Raft group 4000 RPS
   and under 1mks for operation on mediocre hardware.
 - **Versioned topology administration:** compare-and-swap edits, previews,
-  explicit approval, observable operator progress, document history, watches and
-  rollback planning. `Latest`, `Target` and `Active` distinguish staged,
-  approved and converged topology.
+  explicit approval, per-group convergence and operation progress, document
+  history, watches and rollback planning. `Latest` is staged intent; `Target`
+  is approved intent; `ReadProgress` reports group convergence independently.
 - **Dynamic membership and placement:** founding and joining, caller-defined
   node types, cluster-wide and per-group placement rules, learner-first growth,
   guarded promotion, leadership transfer, drain, activation and exclusion.

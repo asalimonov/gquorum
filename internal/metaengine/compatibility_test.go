@@ -7,13 +7,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/asalimonov/gquorum/fault"
 	"testing"
+
+	"github.com/asalimonov/gquorum/fault"
 
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func TestBaselineProposalsRejectedAndResultBytesPreserved(t *testing.T) {
+func TestBaselineProposalsRejectedAndLegacyResultFieldIgnored(t *testing.T) {
 	t.Parallel()
 	var proposals []json.RawMessage
 	if err := json.Unmarshal(baselineBytes(t, "proposals.json"), &proposals); err != nil {
@@ -32,24 +33,24 @@ func TestBaselineProposalsRejectedAndResultBytesPreserved(t *testing.T) {
 	if err := json.Unmarshal(raw, &result); err != nil {
 		t.Fatal(err)
 	}
-	if !result.Accepted || result.OperatorID != "exec-v1-a1" {
-		t.Fatalf("lost approval identity: %+v", result)
+	if !result.Accepted || result.OperationID != "" {
+		t.Fatalf("legacy operator field leaked into the new result contract: %+v", result)
 	}
 	got, err := json.Marshal(result)
-	if err != nil || !bytes.Equal(got, raw) {
-		t.Fatalf("apply reply encoding changed:\n%s\n%s\n%v", raw, got, err)
+	if err != nil || bytes.Equal(got, raw) {
+		t.Fatalf("legacy result unexpectedly retained operator encoding:\n%s\n%s\n%v", raw, got, err)
 	}
 }
 
 func TestBaselineSnapshotIsRejectedWithoutMutation(t *testing.T) {
 	t.Parallel()
-	m := NewMachine(topology.Rules{SchemaVersion: 1, Limits: topology.Limits{}.WithDefaults()}, nil)
+	m := mustMachine(t, topology.Rules{SchemaVersion: 1, Limits: topology.Limits{}.WithDefaults()}, nil)
 	if err := m.Restore(context.Background(), baselineBytes(t, "snapshot.json")); !errors.Is(err, fault.ErrUnsupported) {
 		t.Fatal(err)
 	}
 	views := m.Views()
-	latest, target, active := views.Latest, views.Target, views.Active
-	if latest.Version != 0 || target.Version != 0 || active.Version != 0 {
+	latest, target := views.Latest, views.Target
+	if latest.Version != 0 || target.Version != 0 {
 		t.Fatal("rejected old snapshot mutated state")
 	}
 }

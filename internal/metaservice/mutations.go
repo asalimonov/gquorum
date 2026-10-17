@@ -26,13 +26,12 @@ type MutationOptions struct {
 	Preview         bool   `json:"preview"`
 }
 
-// MutationResult preserves a staged document, optional operator and placement
+// MutationResult preserves a staged document, optional operation and placement
 // diagnostics.
 type MutationResult struct {
 	OperationID topology.OperationID      `json:"operation_id,omitempty"`
 	RebasedTo   uint64                    `json:"rebased_to,omitempty"`
 	Document    topology.Document         `json:"document"`
-	OperatorID  topology.OperatorID       `json:"operator_id,omitempty"`
 	Placement   *topology.PlacementReport `json:"placement,omitempty"`
 }
 
@@ -68,12 +67,11 @@ type mutationDocuments struct {
 // document it is editing; Stage/Approve still revalidate replicated state.
 func (g *Group) preparePlacementEdit(before topology.Document, doc *topology.Document, now time.Time) error {
 	views := g.state().Views()
-	target, active := views.Target, views.Active
+	target := views.Target
 	if doc.ChangedBy == "" {
 		doc.ChangedBy = g.currentIdentity().NodeName
 	}
-	preparation, err := topology.PreparePlacement(topology.ReadView{Latest: before, Target: target,
-		Active: active}, *doc, g.rules, now)
+	preparation, err := topology.PreparePlacement(topology.ReadView{Latest: before, Target: target}, *doc, g.rules, now)
 	prepared := preparation.Document
 	if err != nil {
 		return err
@@ -109,7 +107,7 @@ func (g *Group) mutation(ctx context.Context, o MutationOptions, policy mutation
 	if err != nil || !o.Apply {
 		return result.outcome(err)
 	}
-	result.OperatorID, err = g.Apply(ctx, result.Document.Version)
+	result.OperationID, err = g.Approve(ctx, result.Document.Version)
 	return result.outcome(err)
 }
 
@@ -273,9 +271,10 @@ func (g *Group) AddNode(ctx context.Context, node topology.Node, o MutationOptio
 
 // ReadmitNode rotates the meta and load identities of a declared active node
 // observed dead. It preserves its type, placement and other nodes' identities.
-// Latest, Target and Active must already agree; approval remains an ordinary
-// learner-first execution that can wait for the returning process. The caller
-// restarts that process with Join and an exact OnReadmission quarantine hook.
+// Every affected group and the node's exact prior member must be converged and
+// unowned; unrelated groups may continue converging independently. Approval
+// remains an ordinary learner-first execution that can wait for the returning
+// process. The caller restarts with Join and an exact OnReadmission hook.
 func (g *Group) ReadmitNode(ctx context.Context, name string, expectedMemberID uint64,
 	o MutationOptions) (MutationResult, error) {
 	if expectedMemberID == 0 {
@@ -288,14 +287,8 @@ func (g *Group) ReadmitNode(ctx context.Context, name string, expectedMemberID u
 			if err := g.validateReadmissionScope(ctx, *doc, name, expectedMemberID); err != nil {
 				return err
 			}
-			views := g.state().Views()
-			target, active := views.Target, views.Active
-			// Task78 removes this schema3 admission guard with the legacy effect/persistence path.
-			if doc.Version != target.Version || doc.Version != active.Version {
-				return fault.New(fault.OperationAuthorization,
-					"readmission requires converged topology; apply or restore pending intent first", nil)
-			}
-			health, err := (observationSource{g}).Health(ctx, active)
+			target := g.state().Target()
+			health, err := (observationSource{g}).Health(ctx, target)
 			if err != nil {
 				return err
 			}
@@ -327,22 +320,40 @@ func (g *Group) DrainNode(ctx context.Context, name string, o MutationOptions) (
 				return unknownNode(name)
 			}
 			if node.State != topology.NodeActive {
-				active := g.state().Active()
-				n := active.Node(name)
-				if (node.State == topology.NodeDraining || node.State == topology.NodeDrained) &&
-					doc.Version > active.Version && (n == nil || n.State == topology.NodeActive) {
-					return fault.New(fault.Invalid,
-						fmt.Sprintf("drain of %q already staged as v%d; apply it or activate the node to undo", name,
-							doc.Version), nil)
-				}
-				return fault.New(fault.Invalid,
-					fmt.Sprintf("node %q is %s; activate to return it to service or exclude to retire it", name,
-						node.State), nil)
+				return g.validateDrainRetry(doc, node)
 			}
 			node.State = topology.NodeDraining
 			node.UpdatedAt = now
 			return g.preparePlacementEdit(before, doc, now)
 		})
+}
+
+func (g *Group) validateDrainRetry(doc *topology.Document, node *topology.Node) error {
+	page, err := g.state().Progress(topology.ProgressQuery{NodeName: node.Name})
+	if err != nil {
+		return err
+	}
+	var converged *topology.NodeProgress
+	for i := range page.Nodes {
+		if page.Nodes[i].NodeName == node.Name {
+			converged = &page.Nodes[i]
+			break
+		}
+	}
+	var sourceVersion uint64
+	if converged != nil {
+		sourceVersion = converged.ConvergedVersion
+	}
+	if (node.State == topology.NodeDraining || node.State == topology.NodeDrained) &&
+		doc.Version > sourceVersion && (converged == nil || converged.Converged == nil ||
+		converged.Converged.State == topology.NodeActive) {
+		return fault.New(fault.Invalid,
+			fmt.Sprintf("drain of %q already staged as v%d; apply it or activate the node to undo", node.Name,
+				doc.Version), nil)
+	}
+	return fault.New(fault.Invalid,
+		fmt.Sprintf("node %q is %s; activate to return it to service or exclude to retire it", node.Name,
+			node.State), nil)
 }
 
 // ActivateNode stages reactivation of an eligible declared node.
@@ -592,13 +603,13 @@ func (g *Group) RollbackTo(ctx context.Context, version uint64, o MutationOption
 	if err != nil || !o.Apply {
 		return result.outcome(err)
 	}
-	result.OperatorID, err = g.Apply(ctx, result.Document.Version)
+	result.OperationID, err = g.Approve(ctx, result.Document.Version)
 	return result.outcome(err)
 }
 
-// ReseatReplica atomically commits and approves a fresh-ID repair against equal
-// Latest/Target/Active views. Preview computes it without approval. Apply is
-// unnecessary for this operation: a real reseat always returns an execution.
+// ReseatReplica atomically approves a fresh-ID repair against the proven group.
+// Independent staged intent is rebased; conflicting intent refuses the commit.
+// Preview computes the repair without approval; Apply is unnecessary.
 func (g *Group) ReseatReplica(ctx context.Context, id string, key topology.ReplicaKey,
 	o MutationOptions) (MutationResult, error) {
 	if key.ReplicaID == 0 || strings.TrimSpace(key.NodeName) == "" {
@@ -630,29 +641,34 @@ func (g *Group) ReseatReplica(ctx context.Context, id string, key topology.Repli
 	if o.Preview {
 		return MutationResult{Document: next, Placement: report}, nil
 	}
-	plan, err := g.PlanFor(ctx, next)
+	read, err := g.capturePlan(ctx, metaengine.QueryRequest{Kind: "repair_plan", Key: id}, g.readPlan)
 	if err != nil {
-		return MutationResult{Placement: reportFromError(err)}, err
+		return MutationResult{Placement: reportFromError(err)}, fmt.Errorf("capture reseat scope %q: %w", id, err)
+	}
+	plan, err := (schedulingHost{g}).PlanRepair(ctx, read, next)
+	if err != nil {
+		return MutationResult{Placement: reportFromError(err)}, fmt.Errorf("plan reseat of %q: %w", id, err)
 	}
 	if len(plan.Steps) == 0 {
-		return MutationResult{}, fault.ErrOperationAuthorization
+		return MutationResult{}, fault.New(fault.OperationAuthorization,
+			fmt.Sprintf("reseat of %q produced no operation steps", id), nil)
 	}
-	committed, err := g.propose(ctx, metaengine.CommitRepairOperatorProposal{
-		Doc:             next,
-		ExpectedVersion: base.Version,
-		Plan:            plan,
-		At:              time.Now().UTC(),
+	committed, err := g.propose(ctx, metaengine.CommitRepairOperationProposal{
+		Doc: next, Intent: documents.Intent, ExpectedVersion: read.Latest.Version,
+		ExpectedTarget: read.Target.Version, Scopes: read.Scopes, Plan: plan,
+		At: time.Now().UTC(), ProposalID: newProposalID(),
 	})
-	result := MutationResult{Document: committed.Doc, OperatorID: committed.OperatorID, Placement: report}
+	if err != nil {
+		return MutationResult{Document: committed.Doc, OperationID: committed.OperationID, Placement: report},
+			fmt.Errorf("commit reseat of %q: %w", id, err)
+	}
+	result := MutationResult{Document: committed.Doc, OperationID: committed.OperationID, Placement: report}
 	if err == nil {
 		g.controller.Signal()
 	}
 	return result.outcome(err)
 }
 
-// TransferLeader commits resource authority for the exact Active identity
-// without
-// creating a document version, then records its durable initiation receipt.
 // Pin zero CAS once, and resolve stale acceptance before invoking an edit.
 func (g *Group) mutationBase(o MutationOptions, policy mutationPolicy) (mutationDocuments, error) {
 	if o.Apply && o.Preview {

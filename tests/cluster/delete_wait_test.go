@@ -63,7 +63,12 @@ func TestDeletionWaitsForUnreachableFormerHostBeforeDeletingState(t *testing.T) 
 		if operator.State.Terminal() {
 			t.Fatalf("deletion finished without unreachable former host: %+v", operator)
 		}
-		return operator.State.Waiting() && operator.NodeName == stopped.Spec.Name, nil
+		for _, block := range operator.Blocks {
+			if block.Blocked != nil && block.Blocked.NodeName == stopped.Spec.Name {
+				return operator.State.Waiting(), nil
+			}
+		}
+		return false, nil
 	}); err != nil {
 		t.Fatal("deletion did not wait for the exact unreachable host", err)
 	}
@@ -84,7 +89,7 @@ func TestDeletionWaitsForUnreachableFormerHostBeforeDeletingState(t *testing.T) 
 			t.Fatal(err)
 		}
 		for _, receipt := range controls.Receipts {
-			if receipt.OperatorID == operatorID && receipt.Kind == topology.StepDeleteGroupState {
+			if receipt.OperationID == operatorID && receipt.Kind == topology.StepDeleteGroupState {
 				t.Fatal("state deletion effect ran before every host stopped", receipt)
 			}
 		}
@@ -98,7 +103,7 @@ func TestDeletionWaitsForUnreachableFormerHostBeforeDeletingState(t *testing.T) 
 	if err := c.WaitOperation(ctx, ingress, operatorID); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WaitActive(ctx, staged.Document.Version); err != nil {
+	if err := c.WaitFullyConverged(ctx, staged.Document.Version); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.WaitReady(ctx); err != nil {

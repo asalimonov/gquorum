@@ -30,8 +30,7 @@ func newScopedRetention(state *scopedState) *scopedRetention {
 }
 
 // Prune only an owned candidate. Failure leaves the complete original graph
-// intact; no caller may publish a partially compacted state. Live installation
-// remains isolated with the rest of scoped proposal dispatch until Task 78.
+// intact; no caller may publish a partially compacted state.
 func (s *scopedState) pruneRetainedProofs() error {
 	retention := newScopedRetention(s)
 	retention.roots()

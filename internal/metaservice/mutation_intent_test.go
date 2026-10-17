@@ -134,9 +134,9 @@ func TestMutationIntentValidatesAndOwnsInputs(t *testing.T) {
 	if rule.AllowedNodeTypes[0] != "worker" || rule.NodeSelector["az"] != "a" {
 		t.Fatal("caller input mutated")
 	}
-	result := metaengine.ApplyResult{Doc: topology.Document{Version: 2}, OperatorID: topology.MakeOperatorID(2, 1), RebasedTo: 4}
+	result := metaengine.ApplyResult{Doc: topology.Document{Version: 2}, OperationID: topology.OperationID(topology.MakeOperationID(2, 1)), RebasedTo: 4}
 	replay := mutationReplayResult(result)
-	if replay.OperatorID != result.OperatorID || replay.RebasedTo != 4 || !reflect.DeepEqual(replay.Document, result.Doc) {
+	if replay.OperationID != result.OperationID || replay.RebasedTo != 4 || !reflect.DeepEqual(replay.Document, result.Doc) {
 		t.Fatal("lost historical result", replay)
 	}
 }

@@ -41,8 +41,8 @@ func TestReadyBlocksRequireCurrentOwnerAndIgnoreFailedSiblings(t *testing.T) {
 	if _, err := queryReadyBlocks(&s, "", 0); !errors.Is(err, fault.ErrInvalid) {
 		t.Fatal(err)
 	}
-	if _, err := NewMachine(testRules(), nil).ReadyBlocks("", 1); !errors.Is(err, fault.ErrUnsupported) {
-		t.Fatal("schema3 published scoped work", err)
+	if work, err := mustMachine(t, testRules(), nil).ReadyBlocks("", 1); err != nil || len(work) != 0 {
+		t.Fatal("empty operation catalog returned work", work, err)
 	}
 }
 

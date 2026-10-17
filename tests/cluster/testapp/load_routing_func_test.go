@@ -23,7 +23,15 @@ func (*retainedRouteCluster) Target(context.Context) (topology.Document, error) 
 	return topology.Document{}, nil
 }
 func (*retainedRouteCluster) ReadTopology(context.Context) (topology.ReadView, error) {
-	return topology.ReadView{}, nil
+	return topology.ReadView{FullyConverged: topology.FullyConverged{Version: 2}}, nil
+}
+func (c *retainedRouteCluster) Get(_ context.Context, version uint64) (topology.Document, error) {
+	for _, doc := range c.documents {
+		if doc.Version == version {
+			return doc.Clone(), nil
+		}
+	}
+	return topology.Document{}, fault.ErrHistoryUnavailable
 }
 func (c *retainedRouteCluster) History(context.Context, topology.Page) (topology.HistoryResult, error) {
 	return topology.HistoryResult{Documents: c.documents}, c.historyErr

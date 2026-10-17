@@ -34,29 +34,24 @@ func TestOperationLookupOwnsFullExactAggregate(t *testing.T) {
 			t.Fatal(tc, err)
 		}
 	}
-	if _, err := NewMachine(testRules(), nil).Operation(id); !errors.Is(err, fault.ErrHistoryUnavailable) {
-		t.Fatal("unknown legacy operation", err)
+	if _, err := mustMachine(t, testRules(), nil).Operation(id); !errors.Is(err, fault.ErrHistoryUnavailable) {
+		t.Fatal("unknown operation", err)
 	}
 }
 
-func TestLegacyOperationLookupUsesExactRetainedAttempt(t *testing.T) {
+func TestOperationLookupUsesExactRetainedAttempt(t *testing.T) {
 	t.Parallel()
-	older := &operatorRecord{ID: "exec-v1-a1", Version: 1, Attempt: 1,
-		State: topology.OperatorFailed, CurrentStep: 2, GroupID: "work", NodeName: "n1",
-		WaitingReason: "", Error: "disk unavailable", Steps: []topology.Step{
-			{Seq: 1, GroupID: "meta", NodeName: "n1"}, {Seq: 2, GroupID: "work", NodeName: "n1"}}}
-	newer := &operatorRecord{ID: "exec-v2-a1", Version: 2, Attempt: 1,
-		State: topology.OperatorRunning, CurrentStep: 1, GroupID: "other", Steps: []topology.Step{
-			{Seq: 1, GroupID: "other", NodeName: "n2"}}}
-	records := map[topology.OperatorID]*operatorRecord{older.ID: older, newer.ID: newer}
-	got, err := legacyOperationStatus(records, topology.OperationID(older.ID))
-	if err != nil || got.ID != topology.OperationID(older.ID) || got.State != topology.OperationFailed ||
-		got.Error != "disk unavailable" || len(got.Blocks) != 1 || got.TotalBlocks != 1 ||
-		got.Blocks[0].GroupID != "work" || got.Blocks[0].CurrentStep != 2 || got.Blocks[0].TotalSteps != 2 ||
-		got.Blocks[0].Error != "disk unavailable" {
-		t.Fatal("legacy operation did not preserve exact retained attempt", got, err)
+	s := scopedGraphFixture()
+	prepareScopedFixture(t, &s)
+	m := mustMachine(t, s.Rules, nil)
+	m.scoped = &s
+	older := s.Operations[0].Status.ID
+	got, err := m.Operation(older)
+	if err != nil || got.ID != older || got.State != topology.OperationFailed || len(got.Blocks) != 2 ||
+		got.Blocks[0].State != topology.OperationSucceeded || got.Blocks[1].Error != "unreachable" {
+		t.Fatal("newer attempt hid exact older outcome", got, err)
 	}
-	if _, err := legacyOperationStatus(records, "exec-v99-a1"); !errors.Is(err, fault.ErrHistoryUnavailable) {
-		t.Fatal("unknown legacy operation", err)
+	if _, err := m.Operation("exec-v99-a1"); !errors.Is(err, fault.ErrHistoryUnavailable) {
+		t.Fatal("unknown outcome inferred from another attempt", err)
 	}
 }

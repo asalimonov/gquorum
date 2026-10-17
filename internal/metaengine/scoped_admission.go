@@ -7,11 +7,11 @@ import (
 )
 
 func validateScopedAdmissions(state *scopedState, index *scopedIndexes, catalog authorityCatalog) error {
-	seen := make(map[topology.OperatorID]bool, len(state.Operations))
+	seen := make(map[topology.OperationID]bool, len(state.Operations))
 	for _, operation := range state.Operations {
-		seen[topology.OperatorID(operation.Status.ID)] = true
+		seen[topology.OperationID(operation.Status.ID)] = true
 	}
-	if err := validateRestoredAdmissions(smState{Admissions: state.Admissions}, seen); err != nil {
+	if err := validateRestoredAdmissions(state.Admissions, seen); err != nil {
 		return err
 	}
 	for _, admission := range state.Admissions {
@@ -29,7 +29,7 @@ func validAdmissionOrigin(admission AdmissionRecord, index *scopedIndexes) bool 
 		return true
 	}
 	origin := index.operations[admission.ReadmissionOperatorID]
-	current := index.operations[topology.OperationID(admission.OperatorID)]
+	current := index.operations[topology.OperationID(admission.OperationID)]
 	if origin == nil || current == nil || origin.Status.Version > current.Status.Version ||
 		origin.Status.Version == current.Status.Version && origin.Status.Attempt >= current.Status.Attempt {
 		return false
@@ -47,9 +47,9 @@ func validAdmissionOrigin(admission AdmissionRecord, index *scopedIndexes) bool 
 
 func validScopedAdmission(admission AdmissionRecord, state *scopedState,
 	index *scopedIndexes, catalog authorityCatalog) bool {
-	operation := index.operations[topology.OperationID(admission.OperatorID)]
+	operation := index.operations[topology.OperationID(admission.OperationID)]
 	if operation == nil {
-		return admission.OperatorID != "" && admission.State.terminal()
+		return admission.OperationID != "" && admission.State.terminal()
 	}
 	approved := index.documents[operation.Status.Version]
 	if approved.MemberID(admission.NodeName) != admission.MemberID {

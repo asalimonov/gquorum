@@ -75,7 +75,7 @@ func TestEnsureGroupCreatesApprovesAndRefusesConflicts(t *testing.T) {
 	spec := singleReplicaSpec("work", map[string]string{"app": "demo"})
 	created, err := c.EnsureGroup(ctx, spec, app)
 	if err != nil || created.ID != "work" || len(created.Replicas) != 1 || created.Replicas[0].NodeName != "n1" {
-		t.Fatal(created, err)
+		t.Fatalf("create: %+v; error: %#v", created, err)
 	}
 	again, err := c.EnsureGroup(ctx, spec, app)
 	if err != nil || again.Replicas[0].ReplicaID != created.Replicas[0].ReplicaID {
@@ -142,7 +142,7 @@ func TestEnsureGroupCreatesApprovesAndRefusesConflicts(t *testing.T) {
 	}
 }
 
-func TestOperationAndProgressReadsWorkOnSchema3Composition(t *testing.T) {
+func TestOperationAndProgressReadsWorkOnScopedComposition(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	o := authorityNodeOptions(t, root, "operation-progress")
@@ -162,10 +162,11 @@ func TestOperationAndProgressReadsWorkOnSchema3Composition(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	if err := n.WaitReady(ctx); err != nil {
-		t.Fatal(err)
-	}
 	c := n.Cluster()
+	if err := n.WaitReady(ctx); err != nil {
+		status, statusErr := c.Status(context.Background())
+		t.Fatalf("wait for readiness: %v; status=%+v statusErr=%v", err, status, statusErr)
+	}
 	latest, err := c.Latest(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -175,10 +176,22 @@ func TestOperationAndProgressReadsWorkOnSchema3Composition(t *testing.T) {
 	if err != nil || result.OperationID == "" {
 		t.Fatal("approved mutation returned no exact operation", result, err)
 	}
-	status, err := c.WaitOperation(ctx, result.OperationID)
+	waitCtx, stopWait := context.WithTimeout(ctx, 5*time.Second)
+	defer stopWait()
+	status, err := c.WaitOperation(waitCtx, result.OperationID)
 	if err != nil || status.ID != result.OperationID || status.State != topology.OperationSucceeded ||
 		status.TotalBlocks != 1 || len(status.Blocks) != 1 || status.Blocks[0].TotalSteps == 0 {
-		t.Fatal("operation was not observable through the public API", status, err)
+		var blocked *topology.BlockedReason
+		if len(status.Blocks) != 0 {
+			blocked = status.Blocks[0].Blocked
+		}
+		group, found := n.LoadGroup("progress")
+		var native topology.GroupStatus
+		if found {
+			native = group.Status()
+		}
+		t.Fatalf("operation was not observable through the public API: status=%+v blocks=%+v blocked=%+v native=%+v found=%t err=%v",
+			status, status.Blocks, blocked, native, found, err)
 	}
 	for {
 		page, err := c.ReadProgress(ctx, topology.ProgressQuery{GroupID: "progress", Limit: 10})
@@ -194,6 +207,18 @@ func TestOperationAndProgressReadsWorkOnSchema3Composition(t *testing.T) {
 			t.Fatal("approved convergence was not observable through the public API", page, ctx.Err())
 		case <-time.After(20 * time.Millisecond):
 		}
+	}
+	replica := result.Document.Group("progress").Replicas[0]
+	converged, err := c.ReadProgress(ctx, topology.ProgressQuery{GroupID: "progress", Limit: 10})
+	if err != nil {
+		t.Fatal("read converged group before reseat", err)
+	}
+	_, err = c.ReseatReplica(ctx, "progress", topology.ReplicaKey{
+		NodeName: replica.NodeName, ReplicaID: replica.ReplicaID}, MutationOptions{
+		ExpectedVersion: result.Document.Version, Actor: "functional-test"})
+	if !errors.Is(err, fault.ErrUnsafeMembership) {
+		t.Fatalf("single-voter scoped reseat should fail its live quorum guard: progress=%+v err=%v",
+			converged.Groups, err)
 	}
 }
 
@@ -275,7 +300,7 @@ func TestEnsureGroupReturnsFailedCreationWithoutRetryingOperation(t *testing.T) 
 	c := n.Cluster()
 	spec := singleReplicaSpec("failed", nil)
 	for range 2 {
-		if _, err := c.EnsureGroup(ctx, spec, EnsureOptions{Actor: "app"}); !errors.Is(err, fault.ErrUnavailable) {
+		if _, err := c.EnsureGroup(ctx, spec, EnsureOptions{Actor: "app"}); !errors.Is(err, fault.ErrInvalid) {
 			t.Fatal("failure was hidden or retried", err)
 		}
 		view, err := c.ReadTopology(ctx)
@@ -283,8 +308,15 @@ func TestEnsureGroupReturnsFailedCreationWithoutRetryingOperation(t *testing.T) 
 			t.Fatal(view, err)
 		}
 		status, err := c.Status(ctx)
-		if err != nil || status.Operator == nil || status.Operator.State != topology.OperatorFailed || status.Operator.Attempt != 1 {
-			t.Fatal(status.Operator, err)
+		failed := false
+		for _, operation := range status.Operations {
+			if operation.State != topology.OperationFailed || operation.Attempt != 1 {
+				continue
+			}
+			failed = true
+		}
+		if err != nil || !failed {
+			t.Fatal(status.Operations, err)
 		}
 	}
 }

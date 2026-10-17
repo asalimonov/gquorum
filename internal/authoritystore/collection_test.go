@@ -17,10 +17,10 @@ import (
 
 func collectionFixture() CollectionRecord {
 	id := storage.Identity{ClusterID: "cluster", GroupID: "work", NodeName: "n1", ReplicaID: 7}
-	action := topology.AuthorizedStep{OperatorID: topology.MakeOperatorID(2, 1), Version: 2, Attempt: 1,
+	action := topology.AuthorizedStep{OperationID: topology.MakeOperationID(2, 1), Version: 2, Attempt: 1,
 		StepSeq: 4, GroupID: id.GroupID, NodeName: id.NodeName, ReplicaID: id.ReplicaID, Kind: topology.StepCleanupReplicaState}
 	grant := topology.AuthorityGrant{Key: topology.AuthorityKey{ClusterID: id.ClusterID, GroupID: id.GroupID, Revision: 3},
-		Purpose: topology.AuthorityEffect, OperatorID: action.OperatorID, Action: &action,
+		Purpose: topology.AuthorityEffect, OperationID: action.OperationID, Action: &action,
 		Resources: []topology.AuthorityResource{resource(id.GroupID, id.NodeName)},
 		Targets:   []topology.AuthorityTarget{{NodeName: id.NodeName, MemberID: 5, ReplicaID: id.ReplicaID}}}
 	return CollectionRecord{Retired: storage.RetiredReplica{Identity: id, Token: "opaque/token", QuarantinedAt: time.Unix(10, 0)},
@@ -134,7 +134,7 @@ func TestCollectedProofRoundTripAndOwnedValues(t *testing.T) {
 func TestCollectionReadmissionProofRetainsFormerMember(t *testing.T) {
 	t.Parallel()
 	r := collectionFixture()
-	r.Grant.Purpose, r.Grant.Action, r.Grant.OperatorID, r.Grant.AdmissionID = topology.AuthorityReadmit, nil, "", "admit"
+	r.Grant.Purpose, r.Grant.Action, r.Grant.OperationID, r.Grant.AdmissionID = topology.AuthorityReadmit, nil, "", "admit"
 	r.Retirement.Action, r.Retirement.AdmissionID = nil, "admit"
 	if err := r.Validate(topology.Identity{ClusterID: "cluster", NodeName: "n1", MemberID: 6}); err != nil {
 		t.Fatal("readmission retirement proof refused", err)

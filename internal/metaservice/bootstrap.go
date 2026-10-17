@@ -54,45 +54,12 @@ func (g *Group) bootstrap(ctx context.Context) error {
 		return err
 	}
 	if approved == "" {
-		plan, err := g.foundingPlan(ctx, latest)
-		if err != nil {
-			return err
-		}
-		// Task 78 replaces this legacy proposal with BeginOperation and scopes.
-		_, err = g.propose(ctx, metaengine.BeginOperatorProposal{
-			Version: latest.Version,
-			Plan:    plan,
-			Actor:   identity.NodeName,
-			Origin:  topology.OriginFounding,
-			At:      time.Now().UTC(),
-		})
+		_, err = g.applyOperationLocal(ctx, applyVersionRequest{Kind: "approve", Version: latest.Version})
 		if err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// Native seed membership is the only initial evidence. Load declarations do
-// not imply that their replicas exist, and their controllers cannot hold up
-// metadata bootstrap. ReadNative retains the current-term quorum barrier.
-func (g *Group) foundingPlan(ctx context.Context, desired topology.Document) (topology.Plan, error) {
-	seed, err := (groupControllers{g}).ReadNative(ctx, topology.MetaGroupID)
-	if err != nil {
-		return topology.Plan{}, err
-	}
-	input := topology.PlanInput{Native: map[string]topology.NativeState{topology.MetaGroupID: seed}}
-	plan, err := topology.BuildPlan(input, desired, g.rules)
-	if err != nil {
-		return topology.Plan{}, err
-	}
-	for _, step := range plan.Steps {
-		if step.GroupID == topology.MetaGroupID {
-			return topology.Plan{}, fault.New(fault.OperationAuthorization,
-				"founding membership differs from durable seed", nil)
-		}
-	}
-	return plan, nil
 }
 
 // Activate establishes or renews this participant's session under serialized
@@ -218,9 +185,6 @@ func (g *Group) runtimeTerminated(engine *raftengine.Group) bool {
 func (g *Group) activateLeaderForTick() {
 	ctx, cancel := context.WithTimeout(g.workCtx, 5*time.Second)
 	err := g.bootstrap(ctx)
-	if err == nil {
-		err = g.activateCompleted(ctx)
-	}
 	cancel()
 	if err != nil && g.workCtx.Err() == nil {
 		g.opts.Logger.Debug("meta bootstrap or activation retry", "error", err)
@@ -332,7 +296,8 @@ func (g *Group) validateSessionTopology(ctx context.Context, state sessionActiva
 	_, err = g.propose(ctx,
 		metaengine.BindAdmissionProposal{Admission: metaengine.AdmissionRecord{NodeName: identity.NodeName,
 			InstanceID: identity.InstanceID, MemberID: identity.MemberID,
-			OperatorID: topology.OperatorID(founding)}, Founding: true, At: time.Now().UTC()})
+			OperationID: topology.OperationID(founding)}, Founding: true, At: time.Now().UTC(),
+			ProposalID: newProposalID()})
 	return err
 }
 
@@ -395,14 +360,15 @@ func (g *Group) grantSession(ctx context.Context, state sessionActivation) (time
 	if _, exists := machine.Session(sessionID); !exists {
 		_, sessionErr := g.propose(ctx,
 			metaengine.GrantSession{SessionID: sessionID, NodeName: identity.NodeName,
-				InstanceID: identity.InstanceID, TTLSeconds: int(g.opts.SessionTTL / time.Second)})
+				InstanceID: identity.InstanceID, TTLSeconds: int(g.opts.SessionTTL / time.Second),
+				ProposalID: newProposalID()})
 		if sessionErr != nil {
 			return 0, sessionErr
 		}
 	}
 	if !held {
 		_, lockErr := g.propose(ctx, metaengine.AcquireLock{Key: "node/" + identity.NodeName,
-			SessionID: sessionID})
+			SessionID: sessionID, ProposalID: newProposalID()})
 		if lockErr != nil {
 			return 0, lockErr
 		}

@@ -29,7 +29,7 @@ func TestScopedReseatReplaysExactIntentAcrossAtomicRebase(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := applyScopedProposal(&s, 11, "commit_repair_operation", encoded)
-	if err != nil || !result.changed || result.result.Doc.Version != 3 || result.result.OperatorID != "exec-v3-a1" || s.Latest.Version != 4 || len(s.Intents) != 2 {
+	if err != nil || !result.changed || result.result.Doc.Version != 3 || result.result.OperationID != "exec-v3-a1" || s.Latest.Version != 4 || len(s.Intents) != 2 {
 		t.Fatal(result, err)
 	}
 	before, _ := json.Marshal(s)
@@ -39,7 +39,7 @@ func TestScopedReseatReplaysExactIntentAcrossAtomicRebase(t *testing.T) {
 	}
 	for range 2 {
 		replay, err := applyScopedProposal(&restored, 12, "commit_repair_operation", encoded)
-		if err != nil || replay.changed || replay.result.Doc.Version != 3 || replay.result.OperatorID != result.result.OperatorID {
+		if err != nil || replay.changed || replay.result.Doc.Version != 3 || replay.result.OperationID != result.result.OperationID {
 			t.Fatal("reseat retry lost approval or allocated twice", replay, err)
 		}
 	}
@@ -93,7 +93,7 @@ func TestScopedReadmissionIssuanceAfterUnrelatedApprovalThenDeletion(t *testing.
 		t.Fatal(result, err)
 	}
 	a := s.Admissions[0]
-	issued, err := s.applyBeginReadmissionAuthority(12, BeginReadmissionAuthority{NodeName: a.NodeName, InstanceID: a.InstanceID, MemberID: a.MemberID, PreviousMemberID: 1, OperatorID: a.OperatorID})
+	issued, err := s.applyBeginReadmissionAuthority(12, BeginReadmissionAuthority{NodeName: a.NodeName, InstanceID: a.InstanceID, MemberID: a.MemberID, PreviousMemberID: 1, OperationID: a.OperationID})
 	if err != nil || !issued.changed || len(issued.result.Grants) != 2 {
 		t.Fatal("whole Target version blocked exact admission", issued, err)
 	}

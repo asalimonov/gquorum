@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -60,7 +61,7 @@ func (e *Controller) runScopedStep(ctx context.Context, work WorkItem) error {
 	action := scopedAction(work, step)
 	grant, err := e.authority.BeginEffect(ctx, action)
 	if err != nil {
-		return err
+		return fmt.Errorf("issue authority for %s step %d (%s): %w", work.GroupID, step.Seq, step.Kind, err)
 	}
 	if grant.Action == nil || *grant.Action != action || grant.Validate() != nil {
 		return fault.ErrOperationAuthorization
@@ -69,14 +70,14 @@ func (e *Controller) runScopedStep(ctx context.Context, work WorkItem) error {
 		return err
 	}
 	if err := e.performScopedEffect(ctx, work, grant); err != nil {
-		return err
+		return fmt.Errorf("execute %s step %d (%s): %w", work.GroupID, step.Seq, step.Kind, err)
 	}
 	return e.verifyScopedStep(ctx, work)
 }
 
 func scopedAction(work WorkItem, step topology.Step) topology.AuthorizedStep {
 	op := work.Operation.Status
-	return topology.AuthorizedStep{OperatorID: topology.OperatorID(op.ID), Version: op.Version, Attempt: op.Attempt,
+	return topology.AuthorizedStep{OperationID: topology.OperationID(op.ID), Version: op.Version, Attempt: op.Attempt,
 		StepSeq: step.Seq, Kind: step.Kind, GroupID: step.GroupID, NodeName: step.NodeName, ReplicaID: step.ReplicaID,
 		TransferNodeName: step.TransferNodeName, TransferReplicaID: step.TransferReplicaID,
 		ExpectedVotersDigest: step.ExpectedVotersDigest, ResultVotersDigest: step.ResultVotersDigest}

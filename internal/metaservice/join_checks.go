@@ -24,7 +24,7 @@ func validateJoinGrant(identity topology.Identity, rules topology.Rules, result 
 	}
 	if !result.Existing && (result.Admission.NodeName != identity.NodeName ||
 		result.Admission.InstanceID != identity.InstanceID || result.Admission.MemberID != result.MemberID ||
-		result.Admission.OperatorID == "") {
+		result.Admission.OperationID == "") {
 		return fault.ErrIdentityMismatch
 	}
 	if result.Admission.ReadmissionInstanceID != "" &&
@@ -33,7 +33,7 @@ func validateJoinGrant(identity topology.Identity, rules topology.Rules, result 
 		return fault.ErrIdentityMismatch
 	}
 	if origin := string(result.Admission.ReadmissionOperatorID); origin != "" &&
-		(origin == string(result.Admission.OperatorID) || strings.TrimSpace(origin) != origin ||
+		(origin == string(result.Admission.OperationID) || strings.TrimSpace(origin) != origin ||
 			strings.ContainsRune(origin, 0)) {
 		return fault.ErrIdentityMismatch
 	}

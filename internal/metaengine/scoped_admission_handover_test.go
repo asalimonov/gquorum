@@ -64,7 +64,7 @@ func TestScopedApprovalHandsOverOneAdmissionWithoutRelabelingEffects(t *testing.
 				t.Fatal(err)
 			}
 			want := []AdmissionState{AdmissionPending, AdmissionReady, AdmissionCompleted}[count]
-			if len(next.Admissions) != 1 || next.Admissions[0].OperatorID != "exec-v3-a1" ||
+			if len(next.Admissions) != 1 || next.Admissions[0].OperationID != "exec-v3-a1" ||
 				next.Admissions[0].State != want || ReadmissionID(next.Admissions[0]) != ReadmissionID(s.Admissions[0]) ||
 				!reflect.DeepEqual(next.AuthorityRecords, s.AuthorityRecords) || next.Operations[1].Previous != "" {
 				t.Fatal("handover lost readiness, identity, immutable facts or ancestry", next.Admissions)
@@ -140,7 +140,7 @@ func TestScopedAdmissionHandoverPreservesProcessOriginAndWriteOnceOperator(t *te
 		t.Fatal(err)
 	}
 	if next.Admissions[0].ReadmissionOperatorID != a.ReadmissionOperatorID ||
-		next.Admissions[0].OperatorID != "exec-v2-a3" || next.Admissions[0].State != AdmissionPending {
+		next.Admissions[0].OperationID != "exec-v2-a3" || next.Admissions[0].State != AdmissionPending {
 		t.Fatal("repeated handover rewrote origin", next.Admissions[0])
 	}
 }

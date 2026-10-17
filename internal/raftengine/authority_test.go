@@ -34,11 +34,11 @@ func TestAuthorityReplayAndAdministrativeTail(t *testing.T) {
 		t.Fatal("stale replay moved fence")
 	}
 	grant.Key.Revision++
-	grant.OperatorID = "altered"
+	grant.OperationID = "altered"
 	if err := g.applyAuthority(raftpb.Entry{Index: 4, Term: 1}, e); !errors.Is(err, fault.ErrUnreadable) {
 		t.Fatal(err)
 	}
-	grant.OperatorID = ""
+	grant.OperationID = ""
 	data, err := raftstate.EncodeEntry(e)
 	if err != nil {
 		t.Fatal(err)
