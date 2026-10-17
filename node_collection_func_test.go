@@ -174,11 +174,18 @@ func seedNodeCollection(t *testing.T, root, mode string) authoritystore.Collecti
 			t.Fatal(err)
 		}
 	}
-	if mode == "collected" {
+	if mode == "deleted" || mode == "collected" || mode == "forgotten" {
 		if err = store.Collect(ctx, row.Retired); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if mode == "collected" || mode == "forgotten" {
 		if _, err = journal.CompleteCollection(ctx, id, row.Sequence, time.Now().UTC()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if mode == "forgotten" {
+		if err = store.ForgetCollection(ctx, row.Retired); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -307,7 +314,9 @@ func nextNodeCollection(t *testing.T, peer *nodeCollectionPeer) nodeCollectionMe
 
 func TestNodeControlOnlyCollectionResumesAndRetainsUnsentReceipt(t *testing.T) {
 	t.Parallel()
-	for _, mode := range []string{"prepared", "collected"} {
+	// Reopen both stores at each handoff: before deletion, deletion without a
+	// journal receipt, completed receipt, and marker release before row removal.
+	for _, mode := range []string{"prepared", "deleted", "collected", "forgotten"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			root := t.TempDir()
@@ -318,6 +327,11 @@ func TestNodeControlOnlyCollectionResumesAndRetainsUnsentReceipt(t *testing.T) {
 			first := nextNodeCollection(t, peer)
 			if first.Kind != "report_collection" || first.Receipt.Identity != row.Retired.Identity || first.Receipt.Token != row.Retired.Token {
 				t.Fatal("wrong durable receipt", first)
+			}
+			retained, err := n.localAuthority().Collection(t.Context(), row.Retired.Identity)
+			if err != nil || !retained.Found || retained.Record.State != "collected" ||
+				retained.Record.Sequence != row.Sequence || first.Receipt.LocalSequence != row.Sequence {
+				t.Fatal("restart lost the original collection proof", retained, first, err)
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 			defer cancel()
