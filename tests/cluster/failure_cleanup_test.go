@@ -26,7 +26,9 @@ func exactCleanup(page topology.ProgressPage, id storage.Identity) (topology.Cle
 
 func TestFailureIsolation_RemovedHostCleanup(t *testing.T) {
 	t.Parallel()
-	c := acquire(t, matrixSpec(3)).Cluster
+	spec := matrixSpec(3)
+	spec.Retention = time.Nanosecond // Exercise collection after retirement in this case.
+	c := acquire(t, spec).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 110*time.Second)
 	defer cancel()
 	created, err := c.CreateGroup(ctx, "node1", gquorum.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3}})

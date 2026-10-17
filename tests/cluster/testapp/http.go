@@ -370,6 +370,14 @@ func (a *application) routes() http.Handler {
 		}
 		jsonResponse(w, http.StatusAccepted, map[string]any{"operation_id": id})
 	})
+	mux.HandleFunc("POST /api/operations/{id}/retry", func(w http.ResponseWriter, r *http.Request) {
+		id, err := a.cluster.RetryOperation(r.Context(), topology.OperationID(r.PathValue("id")))
+		if err != nil {
+			httpError(w, err)
+			return
+		}
+		jsonResponse(w, http.StatusAccepted, map[string]any{"operation_id": id})
+	})
 	mux.HandleFunc("GET /api/operations/{id}", func(w http.ResponseWriter, r *http.Request) {
 		status, err := a.cluster.Operation(r.Context(), topology.OperationID(r.PathValue("id")))
 		if err != nil {

@@ -137,6 +137,11 @@ func (p *metaFaultProxy) forward(_ any, downstream grpc.ServerStream) error {
 	if err := downstream.RecvMsg(&frame); err != nil {
 		return err
 	}
+	if strings.HasSuffix(method, "/MetaControl") {
+		if err := p.app.waitCollectionReport(ctx, frame); err != nil {
+			return status.FromContextError(err).Err()
+		}
+	}
 	var fence *load.FenceRequest
 	if strings.HasSuffix(method, "/InstallFence") {
 		request, err := proxyFenceRequest(frame)

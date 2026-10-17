@@ -275,7 +275,7 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 	if placement.MinReplicas == 0 {
 		placement = topology.PlacementRule{MinReplicas: 1, MaxReplicas: 3}
 	}
-	lifecycleOptions := lifecycle.DefaultOptions{}
+	lifecycleOptions := lifecycle.DefaultOptions{Retention: cfg.Retention}
 	if cfg.GateFounders {
 		lifecycleOptions.Startup = lifecycle.AllFounders
 		lifecycleOptions.FoundersTimeout = cfg.FoundingTimeout
@@ -307,7 +307,7 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 			Timing:  gquorum.MetaTiming{TickInterval: cfg.TickInterval, ElectionTicks: 10},
 			Network: gquorum.MetaNetworkOptions{Listener: ls.meta, AdvertiseAddress: cfg.MetaAddress, AllowPlaintext: true, ClusterCredential: []byte(cfg.Credential), Resolver: metaResolver{a}}},
 		Loads: gquorum.LoadOptions{Factory: a.newReplica, Retire: a.retireReplica, Transport: loadTransport{app: a},
-			Storage: gquorum.LoadStorageOptions{Store: &fixtureStore{Store: a.store, app: a}, Retirement: a.store},
+			Storage: gquorum.LoadStorageOptions{Store: &fixtureStore{Store: a.store, app: a}, Retirement: fixtureRetirement{RetirementStore: a.store, app: a}},
 			Engine:  load.EngineOptions{Timing: load.Timing{TickInterval: cfg.TickInterval, ElectionTicks: 10, WALWriteWait: cfg.WALWriteWait}, SnapshotThreshold: cfg.SnapshotThreshold, ProposalTimeout: cfg.ProposalTimeout}},
 		Scheduling: scheduleOptions,
 		Lifecycle:  lifecycle.Options{Hooks: &fixtureLifecycle{DefaultHooks: defaults, app: a}},
