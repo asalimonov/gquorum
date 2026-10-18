@@ -33,27 +33,26 @@ func get(t *testing.T, m *Machine, key string) (string, bool) {
 
 func key(i int) string { return fmt.Sprintf("key:%04d", i) }
 
-func TestEvictsOldestWriteBeyondCapacity(t *testing.T) {
+func TestRetainsKeysBeyondFormerCapacity(t *testing.T) {
 	t.Parallel()
 	m := NewMachine()
-	for i := range Capacity {
-		apply(t, m, Command{Op: "set", Key: key(i), Value: "v"})
+	const count = 2048
+	for i := range count {
+		apply(t, m, Command{Op: "set", Key: key(i), Value: fmt.Sprint(i)})
 	}
-	// Rewriting key 0 makes it the newest, so key 1 is now the oldest.
-	apply(t, m, Command{Op: "set", Key: key(0), Value: "v2"})
-	out := apply(t, m, Command{Op: "set", Key: key(Capacity), Value: "v"})
-	var count Count
-	if err := json.Unmarshal(out.Data, &count); err != nil || count.Evicted != 1 {
-		t.Fatal(out, err)
+	apply(t, m, Command{Op: "set", Key: key(0), Value: "updated"})
+	for i := range count {
+		want := fmt.Sprint(i)
+		if i == 0 {
+			want = "updated"
+		}
+		if value, ok := get(t, m, key(i)); !ok || value != want {
+			t.Fatalf("key %d lost or changed: %q, present=%v", i, value, ok)
+		}
 	}
-	if _, ok := get(t, m, key(1)); ok {
-		t.Fatal("oldest key survived")
-	}
-	if v, ok := get(t, m, key(0)); !ok || v != "v2" {
-		t.Fatal("rewritten key evicted", v, ok)
-	}
-	if m.order.Len() != Capacity || len(m.index) != Capacity {
-		t.Fatal("capacity exceeded", m.order.Len())
+	data, _ := json.Marshal(Query{Op: "dbsize"})
+	if out, _ := m.Query(context.Background(), data); string(out.Data) != `{"n":2048}` {
+		t.Fatal("incorrect size", string(out.Data))
 	}
 }
 
@@ -79,13 +78,13 @@ func TestDeleteExistsAndInvalidCommands(t *testing.T) {
 	}
 }
 
-func TestSnapshotPreservesEvictionOrder(t *testing.T) {
+func TestSnapshotPreservesAllValues(t *testing.T) {
 	t.Parallel()
 	m := NewMachine()
-	for i := range 5 {
+	for i := range 1024 {
 		apply(t, m, Command{Op: "set", Key: key(i), Value: fmt.Sprint(i)})
 	}
-	apply(t, m, Command{Op: "set", Key: key(0), Value: "newest"})
+	apply(t, m, Command{Op: "set", Key: key(0), Value: "updated"})
 	data, err := m.Snapshot(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -95,13 +94,41 @@ func TestSnapshotPreservesEvictionOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	again, _ := restored.Snapshot(context.Background())
-	if string(again) != string(data) || restored.order.Front().Value.(*entry).Key != key(1) {
-		t.Fatal("order changed", string(again))
+	if string(again) != string(data) {
+		t.Fatal("snapshot changed", string(again))
 	}
-	if err := restored.Restore(context.Background(), nil); err != nil || restored.order.Len() != 0 {
+	for i := range 1024 {
+		want, _ := get(t, m, key(i))
+		if got, ok := get(t, restored, key(i)); !ok || got != want {
+			t.Fatalf("restored key %d: %q, present=%v, want %q", i, got, ok, want)
+		}
+	}
+	if err := restored.Restore(context.Background(), nil); err != nil || len(restored.values) != 0 {
 		t.Fatal("Restore(nil) kept entries", err)
 	}
 	if err := restored.Restore(context.Background(), []byte(`{"format":1,"entries":[{"Key":"a"},{"Key":"a"}]}`)); err == nil {
 		t.Fatal("duplicate snapshot entries accepted")
+	}
+}
+
+func TestRestoreLegacySnapshot(t *testing.T) {
+	t.Parallel()
+	m := NewMachine()
+	// The old cache stored entries in write order, with the same format.
+	data := []byte(`{"format":1,"entries":[{"Key":"z","Value":"last"},{"Key":"a","Value":""}]}`)
+	if err := m.Restore(context.Background(), data); err != nil {
+		t.Fatal(err)
+	}
+	if value, ok := get(t, m, "z"); !ok || value != "last" {
+		t.Fatal("lost legacy value", value, ok)
+	}
+	if value, ok := get(t, m, "a"); !ok || value != "" {
+		t.Fatal("lost empty value", value, ok)
+	}
+	if err := m.Restore(context.Background(), []byte(`{"format":1,"entries":[{"Key":"a"},{"Key":"a"}]}`)); err == nil {
+		t.Fatal("accepted duplicate empty values")
+	}
+	if value, ok := get(t, m, "z"); !ok || value != "last" {
+		t.Fatal("failed restore changed existing state", value, ok)
 	}
 }

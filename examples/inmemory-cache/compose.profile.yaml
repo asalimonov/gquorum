@@ -1,0 +1,18 @@
+# Optional diagnostics, published only on host loopback.
+services:
+  node1:
+    environment:
+      CACHE_PPROF_LISTEN: ":6060"
+    ports: ["127.0.0.1:6061:6060"]
+  node2:
+    environment:
+      CACHE_PPROF_LISTEN: ":6060"
+    ports: ["127.0.0.1:6062:6060"]
+  node3:
+    environment:
+      CACHE_PPROF_LISTEN: ":6060"
+    ports: ["127.0.0.1:6063:6060"]
+  loadgen:
+    environment:
+      CACHE_PPROF_LISTEN: ":6060"
+    ports: ["127.0.0.1:6064:6060"]

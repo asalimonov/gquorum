@@ -43,6 +43,7 @@ func TestCacheExampleWALRestart(t *testing.T) {
 		argv := append([]string{"compose", "-p", project, "-f", filepath.Join(root, "examples/inmemory-cache/compose.yaml"), "-f", override}, args...)
 		cmd := exec.CommandContext(ctx, "docker", argv...)
 		cmd.Dir = root
+		cmd.Env = append(os.Environ(), "CACHE_LOADGEN=0")
 		return cmd.CombinedOutput()
 	}
 	t.Cleanup(func() {
@@ -67,8 +68,11 @@ func TestCacheExampleWALRestart(t *testing.T) {
 			t.Fatalf("compose %v: %v\n%s", args, err, out)
 		}
 	}
-	// Do not start loadgen: eviction would obscure the retained-data assertion.
-	control("up", "--build", "-d", "--wait", "--wait-timeout", "90", "node1", "node2", "node3")
+	// Disable loadgen through the same environment switch exposed to users.
+	control("up", "--build", "-d", "--wait", "--wait-timeout", "90")
+	if out, err := compose(ctx, "ps", "--all", "--quiet", "loadgen"); err != nil || strings.TrimSpace(string(out)) != "" {
+		t.Fatalf("CACHE_LOADGEN=0 created a loader container: %v\n%s", err, out)
+	}
 	endpoints := map[string]string{}
 	discover := func() {
 		t.Helper()
@@ -129,11 +133,10 @@ func TestCacheExampleWALRestart(t *testing.T) {
 	}
 	verify() // all replicas have applied the value before stopping any process
 	control("kill", "-s", "SIGKILL", "node3")
-	// Keep the key set tiny so this failover workload cannot evict the
-	// retained-data assertion below. Node3 must be excluded by health polling.
+	// Node3 must be excluded by health polling during this failover workload.
 	out, err := compose(ctx, "run", "--rm", "--no-deps", "-e", "CACHE_WORKERS=1",
 		"-e", "CACHE_KEYS=1", "-e", "CACHE_DURATION=5s", "loadgen")
-	if err != nil || !strings.Contains(string(out), "healthy=node1:6379,node2:6379 ") ||
+	if err != nil || !strings.Contains(string(out), "healthy=node1:6379,node2:6379\n") ||
 		!strings.Contains(string(out), "stale=0 corrupt=0") {
 		t.Fatalf("loader did not exclude unavailable node3: %v\n%s", err, out)
 	}
@@ -150,7 +153,7 @@ func TestCacheExampleWALRestart(t *testing.T) {
 	if got := command("node1", "GET", "after-restart"); got != "ok" {
 		t.Fatal("restarted cluster did not commit new writes", got)
 	}
-	// Only run load after retention assertions; the workload forces eviction.
+	// Exercise read/write traffic and connection reuse after recovery.
 	for _, workload := range []struct {
 		workers, duration string
 	}{{"1", "5s"}, {"10", "75s"}, {"256", "5s"}} {
@@ -187,15 +190,18 @@ func TestCacheExampleWALRestart(t *testing.T) {
 			dials, err := strconv.Atoi(fields["dials"])
 			workers, _ := strconv.Atoi(workload.workers)
 			limit := len(nodes) * max(1, (workers+len(nodes)-1)/len(nodes))
-			// Shutdown cancels borrowed connections; the final DBSIZE may
-			// need one replacement per node after all workers have joined.
-			if strings.HasPrefix(line, "final ") {
-				limit += len(nodes)
-			}
 			if err != nil || dials > limit {
 				t.Fatalf("%s workers failed to reuse connections: %s", workload.workers, line)
 			}
 			if strings.HasPrefix(line, "final ") {
+				reads, err := strconv.ParseInt(fields["total_reads"], 10, 64)
+				if err != nil || reads > 4*writes || reads < 4*writes-4*int64(workers) {
+					t.Fatalf("%s workers did not produce 80/20 read/write traffic: %s", workload.workers, line)
+				}
+				misses, err := strconv.ParseInt(fields["misses"], 10, 64)
+				if err != nil || misses == 0 {
+					t.Fatalf("unpopulated keys produced no cache misses: %s", line)
+				}
 				final = true
 			}
 		}
@@ -205,6 +211,16 @@ func TestCacheExampleWALRestart(t *testing.T) {
 		t.Logf("balanced load with %s workers:\n%s", workload.workers, out)
 	}
 
+	// Disabling loadgen must also remove a previously running container.
+	control("up", "-d", "--wait", "--no-deps", "--scale", "loadgen=1", "loadgen")
+	if out, err := compose(ctx, "ps", "--quiet", "loadgen"); err != nil || strings.TrimSpace(string(out)) == "" {
+		t.Fatalf("loader did not start: %v\n%s", err, out)
+	}
+	control("up", "-d", "--wait", "--no-deps", "loadgen")
+	if out, err := compose(ctx, "ps", "--all", "--quiet", "loadgen"); err != nil || strings.TrimSpace(string(out)) != "" {
+		t.Fatalf("CACHE_LOADGEN=0 retained a loader container: %v\n%s", err, out)
+	}
+	verify()
 }
 
 // Only status and bulk replies are needed by this process test.

@@ -15,6 +15,8 @@ x-node: &node
     start_period: 10s
     retries: 40
 x-env: &env
+  # A single small Raft group benefits from fewer scheduler handoffs.
+  GOMAXPROCS: ${CACHE_GOMAXPROCS:-1}
   GQUORUM_CLUSTER: cache-example
   GQUORUM_PEERS: node1,node2,node3
   GQUORUM_DATA: /data
@@ -46,15 +48,17 @@ services:
     volumes: ["cache-node3:/data"]
   # Workers reuse connections and balance requests across healthy nodes.
   loadgen:
+    scale: ${CACHE_LOADGEN:-1}
     image: ${CACHE_IMAGE:-gquorum-cache:local}
     entrypoint: ["/cache-loadgen"]
     networks: [cache]
     restart: "no"
     environment:
+      GOMAXPROCS: ${CACHE_GOMAXPROCS:-1}
       CACHE_NODES: node1:6379,node2:6379,node3:6379
       CACHE_HEALTH_PORT: ${CACHE_HEALTH_PORT:-8080}
       CACHE_WORKERS: ${CACHE_WORKERS:-8}
-      CACHE_KEYS: "1024"
+      CACHE_KEYS: ${CACHE_KEYS:-615}
       CACHE_DURATION: ${CACHE_DURATION:-0s}
       CACHE_REPORT: 5s
     depends_on:

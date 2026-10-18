@@ -1,6 +1,6 @@
 // The load generator stresses the replicated cache from several workers. Each
 // request is balanced across healthy replicas, with reusable connections and
-// independent HTTP health probes under eviction and node failures.
+// independent HTTP health probes during node failures.
 package main
 
 import (
@@ -12,26 +12,31 @@ import (
 	mathrand "math/rand/v2"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/alecthomas/kong"
+	"github.com/asalimonov/gquorum/examples/inmemory-cache/internal/profiling"
 )
 
 const (
 	payloadSeedBytes = 16
 	minReportSeconds = 1e-9
 	maxWorkers       = 256
+	defaultKeys      = 615
 )
 
 type config struct {
-	Nodes      []string      `env:"CACHE_NODES" required:"true" sep:"," help:"${nodes}"`
-	HealthPort int           `env:"CACHE_HEALTH_PORT" default:"8080" help:"HTTP health port on each Redis host."`
-	Workers    int           `env:"CACHE_WORKERS" default:"8" help:"Parallel workers, from 1 to 256."`
-	Keys       int           `env:"CACHE_KEYS" default:"1024" help:"${keys}"`
-	Duration   time.Duration `env:"CACHE_DURATION" default:"0s" help:"Stop after this long; 0 runs until interrupted."`
-	Report     time.Duration `env:"CACHE_REPORT" default:"5s"`
+	PprofListen string   `env:"CACHE_PPROF_LISTEN" help:"Optional pprof listen address; disabled by default."`
+	Nodes       []string `env:"CACHE_NODES" required:"true" sep:"," help:"${nodes}"`
+	HealthPort  int      `env:"CACHE_HEALTH_PORT" default:"8080" help:"HTTP health port on each Redis host."`
+	Workers     int      `env:"CACHE_WORKERS" default:"8" help:"Parallel workers, from 1 to 256."`
+	//revive:disable-next-line:struct-tag // Kong expands this variable to the numeric key-count default.
+	Keys     int           `env:"CACHE_KEYS" default:"${key_count}" help:"${keys}"`
+	Duration time.Duration `env:"CACHE_DURATION" default:"0s" help:"Stop after this long; 0 runs until interrupted."`
+	Report   time.Duration `env:"CACHE_REPORT" default:"5s"`
 }
 
 func (c config) Validate() error {
@@ -63,8 +68,14 @@ func main() {
 		ctx, cancel = context.WithTimeout(ctx, cfg.Duration)
 		defer cancel()
 	}
+	stopProfile, err := profiling.Listen(cfg.PprofListen)
+	if err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	s := run(ctx, cfg)
-	if s.stale.Load() > 0 || s.corrupt.Load() > 0 || s.hits.Load() == 0 {
+	stopProfile()
+	if s.stale.Load() > 0 || s.corrupt.Load() > 0 || s.hits.Load()+s.misses.Load() == 0 {
 		os.Exit(1)
 	}
 }
@@ -94,13 +105,13 @@ func run(ctx context.Context, cfg config) *stats {
 	}
 	for i := range cfg.Keys {
 		w := workers[i%cfg.Workers]
-		w.keys = append(w.keys, &keyState{name: fmt.Sprintf("key:%04d", i), failures: map[uint64]bool{}})
+		w.keys = append(w.keys, &keyState{name: fmt.Sprintf("key:%s:%04d", payload, i), failures: map[uint64]bool{}})
 	}
 	var wg sync.WaitGroup
 	for _, w := range workers {
 		wg.Go(func() { w.run(ctx) })
 	}
-	r := &reporter{stats: s, pool: pool, balancer: balancer, nodes: cfg.Nodes, started: time.Now()}
+	r := &reporter{stats: s, pool: pool, balancer: balancer, started: time.Now()}
 	r.last.at = r.started
 	tick := time.NewTicker(cfg.Report)
 	defer tick.Stop()
@@ -118,15 +129,16 @@ func run(ctx context.Context, cfg config) *stats {
 		if done {
 			mode = finalReport
 		}
-		r.report(ctx, mode)
+		r.report(mode)
 	}
 	return s
 }
 
 // sample is a point-in-time copy of the counters the report differentiates.
 type sample struct {
-	at                                time.Time
-	writes, writeNanos, reads, readNs int64
+	hits, misses, uncertain, stale, corrupt int64
+	at                                      time.Time
+	writes, writeNanos, reads, readNs       int64
 }
 
 // reporter prints interval figures (what changed since the previous line), so
@@ -135,7 +147,6 @@ type reporter struct {
 	stats    *stats
 	pool     *requestPool
 	balancer *balancer
-	nodes    []string
 	started  time.Time
 	last     sample
 }
@@ -147,15 +158,17 @@ const (
 	finalReport
 )
 
-func (r *reporter) report(ctx context.Context, mode reportMode) {
+func (r *reporter) report(mode reportMode) {
 	s := r.stats
 	now := sample{
 		at:         time.Now(),
 		writes:     s.writes.Load(),
 		writeNanos: s.writeNanos.Load(),
 		readNs:     s.readNanos.Load(),
-		reads:      s.hits.Load() + s.misses.Load() + s.uncertain.Load() + s.stale.Load() + s.corrupt.Load(),
+		hits:       s.hits.Load(), misses: s.misses.Load(), uncertain: s.uncertain.Load(),
+		stale: s.stale.Load(), corrupt: s.corrupt.Load(),
 	}
+	now.reads = now.hits + now.misses + now.uncertain + now.stale + now.corrupt
 	avg := func(total, n int64) time.Duration {
 		if n == 0 {
 			return 0
@@ -166,43 +179,25 @@ func (r *reporter) report(ctx context.Context, mode reportMode) {
 	if mode == finalReport {
 		label, from = "final", sample{at: r.started} // the final line covers the whole run
 	}
-	sizeContext := ctx
-	if mode == finalReport {
-		sizeContext = context.Background()
-	}
 	seconds := max(now.at.Sub(from.at).Seconds(), minReportSeconds)
-	sizes := dbsizes(sizeContext, r.balancer, r.nodes)
 	fmt.Printf(
-		"%s elapsed=%s rate=%.0f/s write_avg=%s read_avg=%s total_writes=%d total_reads=%d "+
-			"hits=%d evicted_misses=%d uncertain=%d stale=%d corrupt=%d write_errors=%d read_errors=%d "+
-			"connections=%d dials=%d healthy=%s dbsize=%s\n",
+		"%s elapsed=%s write_rate=%.0f/s rate=%.0f/s write_avg=%s read_avg=%s total_writes=%d total_reads=%d "+
+			"hits=%d misses=%d uncertain=%d stale=%d corrupt=%d write_errors=%d read_errors=%d "+
+			"connections=%d dials=%d healthy=%s\n",
 		label, now.at.Sub(r.started).Round(time.Second), float64(now.writes-from.writes)/seconds,
+		float64(now.writes-from.writes+now.reads-from.reads)/seconds,
 		avg(now.writeNanos-from.writeNanos, now.writes-from.writes), avg(now.readNs-from.readNs, now.reads-from.reads),
 		now.writes,
-		now.reads, s.hits.Load(), s.misses.Load(), s.uncertain.Load(), s.stale.Load(), s.corrupt.Load(),
+		now.reads, now.hits, now.misses, now.uncertain, now.stale, now.corrupt,
 		s.writeErrors.Load(),
-		s.readErrors.Load(), r.pool.connections.Load(), r.pool.dials.Load(), r.balancer.healthyNodes(), sizes)
+		s.readErrors.Load(), r.pool.connections.Load(), r.pool.dials.Load(), r.balancer.healthyNodes())
 	r.last = now
-}
-
-// dbsizes reports a key count through each configured endpoint; the bound is 512.
-func dbsizes(ctx context.Context, balancer *balancer, nodes []string) string {
-	out := ""
-	for _, node := range nodes {
-		value := "down"
-		if balancer.isHealthy(node) {
-			if reply, err := balancer.pool.request(ctx, node, "DBSIZE"); err == nil {
-				value = fmt.Sprint(reply.Int)
-			}
-		}
-		out += fmt.Sprintf("%s=%s ", node, value)
-	}
-	return "[" + out[:max(len(out)-1, 0)] + "]"
 }
 
 func cliHelp() kong.Vars {
 	return kong.Vars{
-		"nodes": "Comma-separated host:port Redis endpoints; healthy nodes are selected round-robin.",
-		"keys":  "Size of the key set; twice the cache capacity forces eviction.",
+		"nodes":     "Comma-separated host:port Redis endpoints; healthy nodes are selected round-robin.",
+		"keys":      "Size of the generated key set.",
+		"key_count": strconv.Itoa(defaultKeys),
 	}
 }

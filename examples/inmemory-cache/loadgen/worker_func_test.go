@@ -155,3 +155,11 @@ func TestRequestPoolCancellationDiscardsConnection(t *testing.T) {
 		t.Fatal("cancellation did not interrupt the borrowed connection")
 	}
 }
+
+// request reuses a pooled connection. Failed attempts discard their connection
+// before retrying the same endpoint. Balanced requests select a node separately.
+func (p *requestPool) request(ctx context.Context, endpoint string, args ...string) (resp.Reply, error) {
+	return retryRequest(ctx, func(call context.Context) (resp.Reply, error) {
+		return p.exchange(call, endpoint, args)
+	})
+}

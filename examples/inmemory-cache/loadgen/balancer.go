@@ -187,17 +187,6 @@ func (b *balancer) healthyNodes() string {
 	return strings.Join(nodes, ",")
 }
 
-func (b *balancer) isHealthy(address string) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for _, node := range b.nodes {
-		if node.address == address {
-			return node.health == backendHealthy
-		}
-	}
-	return false
-}
-
 func (b *balancer) stop() {
 	b.cancel()
 	b.workers.Wait()

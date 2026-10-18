@@ -139,18 +139,19 @@ func TestRedisSubsetOverReplicaAndRecoveryFromLog(t *testing.T) {
 	if r := do("INCR", "a"); r.Err() == nil {
 		t.Fatal("unsupported command accepted")
 	}
-	// Fill past capacity: the oldest writes are evicted.
-	for i := range cache.Capacity + 10 {
+	// Grow beyond the former 512-key capacity; every value must survive.
+	const keyCount = 1024
+	for i := range keyCount {
 		if r := do("SET", fmt.Sprintf("key:%04d", i), fmt.Sprint(i)); r.Str != "OK" {
 			t.Fatal(r)
 		}
 	}
 	probe(http.StatusOK) // The readiness probe must leave cache keys intact.
-	if r := do("DBSIZE"); r.Int != cache.Capacity {
-		t.Fatal("capacity", r)
+	if r := do("DBSIZE"); r.Int != keyCount {
+		t.Fatal("size", r)
 	}
-	if r := do("GET", "key:0000"); !r.Nil {
-		t.Fatal("oldest key not evicted", r)
+	if r := do("GET", "key:0000"); r.Str != "0" {
+		t.Fatal("oldest key lost", r)
 	}
 	_ = c.Close()
 	stop()
@@ -170,14 +171,14 @@ func TestRedisSubsetOverReplicaAndRecoveryFromLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	if r := do("DBSIZE"); r.Int != cache.Capacity {
+	if r := do("DBSIZE"); r.Int != keyCount {
 		t.Fatal("restored size", r)
 	}
-	if r := do("GET", fmt.Sprintf("key:%04d", cache.Capacity+9)); r.Str != fmt.Sprint(cache.Capacity+9) {
+	if r := do("GET", fmt.Sprintf("key:%04d", keyCount-1)); r.Str != fmt.Sprint(keyCount-1) {
 		t.Fatal("newest key not restored", r)
 	}
-	if r := do("GET", "key:0000"); !r.Nil {
-		t.Fatal("evicted key resurrected", r)
+	if r := do("GET", "key:0000"); r.Str != "0" {
+		t.Fatal("oldest key not restored", r)
 	}
 }
 

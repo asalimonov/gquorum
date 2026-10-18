@@ -216,16 +216,9 @@ func (h *Host) registerDelivery(slot *replica, d delivery) (uint64, error) {
 		return 0, fault.ErrStopped
 	}
 	if len(slot.deliveries) >= deliveryWindow {
-		oldest := uint64(math.MaxUint64)
-		for id, d := range slot.deliveries {
-			if !d.snapshot && id < oldest {
-				oldest = id
-			}
-		}
-		if oldest == math.MaxUint64 {
+		if !slot.evictOrdinaryDelivery() {
 			return 0, fault.ErrOverloaded
 		}
-		delete(slot.deliveries, oldest)
 	}
 	if h.deliverySeq == math.MaxUint64 {
 		return 0, fault.ErrOverloaded
@@ -234,7 +227,39 @@ func (h *Host) registerDelivery(slot *replica, d delivery) (uint64, error) {
 	id := h.deliverySeq
 	d.deadline = time.Now().Add(h.cfg.EffectTimeout)
 	slot.deliveries[id] = d
+	if !d.snapshot {
+		slot.appendDelivery(id)
+	}
 	return id, nil
+}
+
+// Delivery IDs are monotonic. A FIFO avoids scanning the full map on every
+// send once the acknowledgement window fills. Completion and expiry may leave
+// stale IDs; skip them lazily, and compact to keep that bookkeeping bounded.
+// The host mutex protects both the FIFO and the exact delivery map.
+func (r *replica) evictOrdinaryDelivery() bool {
+	for len(r.deliveryOrder) > 0 {
+		id := r.deliveryOrder[0]
+		r.deliveryOrder = r.deliveryOrder[1:]
+		if _, live := r.deliveries[id]; live {
+			delete(r.deliveries, id)
+			return true
+		}
+	}
+	return false
+}
+
+func (r *replica) appendDelivery(id uint64) {
+	if len(r.deliveryOrder) >= 2*deliveryWindow {
+		live := r.deliveryOrder[:0]
+		for _, old := range r.deliveryOrder {
+			if _, found := r.deliveries[old]; found {
+				live = append(live, old)
+			}
+		}
+		r.deliveryOrder = live
+	}
+	r.deliveryOrder = append(r.deliveryOrder, id)
 }
 
 type receivedReplica struct {

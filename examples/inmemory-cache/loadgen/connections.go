@@ -30,14 +30,6 @@ func newRequestPool(endpoints []string, workers int) *requestPool {
 	return p
 }
 
-// request reuses a pooled connection. Failed attempts discard their connection
-// before retrying the same endpoint. Balanced requests select a node separately.
-func (p *requestPool) request(ctx context.Context, endpoint string, args ...string) (resp.Reply, error) {
-	return retryRequest(ctx, func(call context.Context) (resp.Reply, error) {
-		return p.exchange(call, endpoint, args)
-	})
-}
-
 func (p *requestPool) exchange(ctx context.Context, endpoint string, args []string) (resp.Reply, error) {
 	if err := contextError(ctx); err != nil {
 		return resp.Reply{}, err

@@ -21,6 +21,7 @@ const (
 	versionBase       = 10
 	versionBits       = 64
 	maxFailedVersions = 256
+	readsPerWrite     = 4
 )
 
 // stats are shared by all workers and read by the reporter.
@@ -39,6 +40,7 @@ type keyState struct {
 	acked    uint64
 	written  uint64
 	failures map[uint64]bool
+	writer   string
 }
 
 // outcome classifies a GET reply for a key.
@@ -58,7 +60,7 @@ func encodeValue(key string, version uint64, payload string) string {
 
 func classify(k *keyState, reply resp.Reply) outcome {
 	if reply.Nil {
-		return miss // evicted by the 512-entry bound
+		return miss // Missing keys are normal cache misses.
 	}
 	parts := strings.SplitN(reply.Str, "|", encodedValueParts)
 	if len(parts) != encodedValueParts || parts[0] != k.name {
@@ -77,8 +79,9 @@ func classify(k *keyState, reply resp.Reply) outcome {
 	}
 }
 
-// worker writes a new version of one of its keys, then reads it back through
-// the next healthy node selected by the shared round-robin balancer.
+// worker owns a disjoint set of keys. Each cycle performs one write and four
+// reads, independently sampling a key for every operation. Misses are expected
+// until keys have been populated.
 type worker struct {
 	id       int
 	keys     []*keyState
@@ -90,53 +93,63 @@ type worker struct {
 
 func (w *worker) run(ctx context.Context) {
 	for contextError(ctx) == nil {
-		k := w.keys[w.rnd.IntN(len(w.keys))]
-		k.written++
-		version := k.written
-		started := time.Now()
-		write, err := w.balancer.request(ctx, "SET", k.name, encodeValue(k.name, version, w.payload))
-		if err != nil {
+		w.write(ctx, w.keys[w.rnd.IntN(len(w.keys))])
+		for range readsPerWrite {
 			if contextError(ctx) != nil {
 				return
 			}
-			w.stats.writeErrors.Add(1)
-			k.failures[version] = true
-			if len(k.failures) > maxFailedVersions {
-				clear(k.failures) // bound memory; older failures are long settled
-			}
-			pause(ctx, 50*time.Millisecond) // a node may be down; let failover happen
-			continue
+			w.read(ctx, w.keys[w.rnd.IntN(len(w.keys))])
 		}
-		k.acked = version
-		w.stats.writes.Add(1)
-		w.stats.writeNanos.Add(int64(time.Since(started)))
+	}
+}
 
-		started = time.Now()
-		reply, err := w.balancer.request(ctx, "GET", k.name)
-		if err != nil {
-			if contextError(ctx) != nil {
-				return
-			}
+func (w *worker) write(ctx context.Context, k *keyState) {
+	k.written++
+	version := k.written
+	started := time.Now()
+	reply, err := w.balancer.request(ctx, "SET", k.name, encodeValue(k.name, version, w.payload))
+	if err != nil {
+		if contextError(ctx) != nil {
+			return
+		}
+		w.stats.writeErrors.Add(1)
+		k.failures[version] = true
+		if len(k.failures) > maxFailedVersions {
+			clear(k.failures)
+		}
+		pause(ctx, 50*time.Millisecond)
+		return
+	}
+	k.acked, k.writer = version, reply.node
+	w.stats.writes.Add(1)
+	w.stats.writeNanos.Add(int64(time.Since(started)))
+}
+
+func (w *worker) read(ctx context.Context, k *keyState) {
+	started := time.Now()
+	reply, err := w.balancer.request(ctx, "GET", k.name)
+	if err != nil {
+		if contextError(ctx) == nil {
 			w.stats.readErrors.Add(1)
-			continue
 		}
-		w.stats.readNanos.Add(int64(time.Since(started)))
-		switch classify(k, reply.Reply) {
-		case hit:
-			w.stats.hits.Add(1)
-		case miss:
-			w.stats.misses.Add(1)
-		case uncertainHit:
-			w.stats.uncertain.Add(1)
-		case staleRead:
-			w.stats.stale.Add(1)
-			fmt.Printf("STALE worker=%d key=%s writer=%s reader=%s acked=%d got=%q\n",
-				w.id, k.name, write.node, reply.node, k.acked, reply.Str)
-		case corruptRead:
-			w.stats.corrupt.Add(1)
-			fmt.Printf("CORRUPT worker=%d key=%s reader=%s got=%q\n", w.id, k.name, reply.node, reply.Str)
-		default: // Other read outcomes do not update these counters.
-		}
+		return
+	}
+	w.stats.readNanos.Add(int64(time.Since(started)))
+	switch classify(k, reply.Reply) {
+	case hit:
+		w.stats.hits.Add(1)
+	case miss:
+		w.stats.misses.Add(1)
+	case uncertainHit:
+		w.stats.uncertain.Add(1)
+	case staleRead:
+		w.stats.stale.Add(1)
+		fmt.Printf("STALE worker=%d key=%s writer=%s reader=%s acked=%d got=%q\n",
+			w.id, k.name, k.writer, reply.node, k.acked, reply.Str)
+	case corruptRead:
+		w.stats.corrupt.Add(1)
+		fmt.Printf("CORRUPT worker=%d key=%s reader=%s got=%q\n", w.id, k.name, reply.node, reply.Str)
+	default:
 	}
 }
 
