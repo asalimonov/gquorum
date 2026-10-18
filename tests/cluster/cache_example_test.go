@@ -68,6 +68,22 @@ func TestCacheExampleWALRestart(t *testing.T) {
 			t.Fatalf("compose %v: %v\n%s", args, err, out)
 		}
 	}
+	// Docker kill delivers the signal before the process necessarily exits.
+	// Join that exit before Start; otherwise Start can observe a still-running
+	// container, do nothing, and leave it stopped when the signal takes effect.
+	killAndWait := func(nodes ...string) {
+		t.Helper()
+		control(append([]string{"kill", "-s", "SIGKILL"}, nodes...)...)
+		for _, node := range nodes {
+			id, err := compose(ctx, "ps", "--all", "--quiet", node)
+			if err != nil || strings.TrimSpace(string(id)) == "" {
+				t.Fatalf("locate killed %s: %v %s", node, err, id)
+			}
+			if out, err := exec.CommandContext(ctx, "docker", "wait", strings.TrimSpace(string(id))).CombinedOutput(); err != nil {
+				t.Fatalf("join killed %s: %v %s", node, err, out)
+			}
+		}
+	}
 	// Disable loadgen through the same environment switch exposed to users.
 	control("up", "--build", "-d", "--wait", "--wait-timeout", "90")
 	if out, err := compose(ctx, "ps", "--all", "--quiet", "loadgen"); err != nil || strings.TrimSpace(string(out)) != "" {
@@ -132,7 +148,7 @@ func TestCacheExampleWALRestart(t *testing.T) {
 		}
 	}
 	verify() // all replicas have applied the value before stopping any process
-	control("kill", "-s", "SIGKILL", "node3")
+	killAndWait("node3")
 	// Node3 must be excluded by health polling during this failover workload.
 	out, err := compose(ctx, "run", "--rm", "--no-deps", "-e", "CACHE_WORKERS=1",
 		"-e", "CACHE_KEYS=1", "-e", "CACHE_DURATION=5s", "loadgen")
@@ -140,11 +156,11 @@ func TestCacheExampleWALRestart(t *testing.T) {
 		!strings.Contains(string(out), "stale=0 corrupt=0") {
 		t.Fatalf("loader did not exclude unavailable node3: %v\n%s", err, out)
 	}
-	control("start", "node3")
+	control("start", "--wait", "--wait-timeout", "90", "node3")
 	discover()
 	verify()
-	control("kill", "-s", "SIGKILL", "node1", "node2", "node3")
-	control("start", "node1", "node2", "node3")
+	killAndWait("node1", "node2", "node3")
+	control("start", "--wait", "--wait-timeout", "90", "node1", "node2", "node3")
 	discover()
 	verify()
 	if got := command("node3", "SET", "after-restart", "ok"); got != "OK" {

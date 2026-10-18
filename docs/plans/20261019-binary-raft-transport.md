@@ -6,7 +6,7 @@
 **Target architecture:** [docs/brainstorms/20261019-binary-raft-transport-target.md](../brainstorms/20261019-binary-raft-transport-target.md)
 **Brainstorm log:** [docs/brainstorms/20261019-binary-raft-transport.md](../brainstorms/20261019-binary-raft-transport.md)
 **Source baseline:** `631a606`, branch `feat/structural-refactorings-and-fuzzing`
-**Status:** in progress; Tasks 1–3 complete; real application validation is next.
+**Status:** in progress; Tasks 1–4 complete; final architectural audit and full cluster validation remain.
 
 ## Important notices
 
@@ -301,47 +301,47 @@ specific missing assertion is necessary. Raw artifacts stay under test-reports.
 §Persistence and compatibility; §Verification and performance experiment;
 §NOT CONSIDERED & TODO.
 
-- [ ] Run `make test-cache-example` and `make test-scheduler-example` once the
+- [x] Run `make test-cache-example` and `make test-scheduler-example` once the
   implementation/regression set is complete. Both build their real applications
   using loadgrpc. Verify cache retained restart and scheduler lifecycle behavior,
   private image/volume cleanup, and no alteration of the user's running cluster.
-- [ ] Do not use the separate tests/cluster/testapp transport as sole evidence
+- [x] Do not use the separate tests/cluster/testapp transport as sole evidence
   for loadgrpc. No new multi-node fixture belongs in root functional tests;
   extend the existing three-node Compose cases only if coverage is missing.
-- [ ] Capture three binary runs with the same settings as the JSON baseline and
+- [x] Capture three binary runs with the same settings as the JSON baseline and
   retain source/build provenance, logs and profiles. Compare actual leaders,
   total cluster CPU/op, per-node CPU/op, allocation estimates, completed operation
   rates, read/write average latency and errors. Report run-to-run variation.
-- [ ] Align workload intervals with CPU capture timestamps. Do not divide a
+- [x] Align workload intervals with CPU capture timestamps. Do not divide a
   30-second CPU sample by lifetime operation counts. If needed, add one separate
   measurement run with counters at exact start/end boundaries; do not pretend
   5-second progress logs provide exact boundary counts.
-- [ ] Check accepted ordinary-stream stacks contain no `loadgrpc.decodeJSON`.
+- [x] Check accepted ordinary-stream stacks contain no `loadgrpc.decodeJSON`.
   Keep syscall tracing in a separate phase and exclude its distorted workload
   rates from CPU-window comparisons. Do not compare heap lifetime totals as a
   steady allocation rate without matching durations/startup or profile deltas.
-- [ ] If results are noisy, rerun baseline and binary serially on isolated
+- [x] If results are noisy, rerun baseline and binary serially on isolated
   checkouts/images containing the same prerequisite credential fixes. Do not
   switch branches over unrelated dirty work, reuse a tag during another run,
   or remove the user's containers/volumes. Record why a rerun was necessary.
-- [ ] Document the exact version-2 schema behavior, public API genericity,
+- [x] Document the exact version-2 schema behavior, public API genericity,
   coordinated upgrade, absence of JSON Raft input/fallback, preserved controls
   and reply codecs, frame bounds, snapshot limitations, byte ownership and
   shutdown sequencing. Add scoped TODO comments for deferred work as listed
   below; no runtime warning on normal traffic.
-- [ ] Write the validation record with commands actually executed, report paths,
+- [x] Write the validation record with commands actually executed, report paths,
   failure/retry history and measured results/limitations. Do not invent latency
   percentiles from averages or translate codec speedup directly into throughput.
-- [ ] Run final `make test`, `make lint` and generated diff checks if runtime or
+- [x] Run final `make test`, `make lint` and generated diff checks if runtime or
   test changes were needed in this task; otherwise reuse passing checks from
   unchanged code and perform documentation/link/diff checks.
 
 #### Verification
 
-- [ ] Confirm both example reports passed and their owned resources were cleaned.
-- [ ] Confirm the performance comparison is reproducible, excludes tracing
+- [x] Confirm both example reports passed and their owned resources were cleaned.
+- [x] Confirm the performance comparison is reproducible, excludes tracing
   overhead and does not claim improvements unsupported by repeated measurements.
-- [ ] Verify document paths/API names and the 5,000-line commit limit.
+- [x] Verify document paths/API names and the 5,000-line commit limit.
 
 ### Task 5: Verify the architectural delta and close implementation gaps
 
@@ -531,6 +531,17 @@ implementation exists: all tasks remain unchecked. During execution add:
 when unit tests exercise them. Task 1 is schema-only; its codec/test work moves
 into Task 2 so each committed production build passes lint without suppression.
 Target design and the 5,000-line cap are unchanged.
+
+2026-10-19: Task 4 real-example validation exposed two pre-existing setup defects.
+`examples/scheduler/{Dockerfile,compose.yaml,README.md}` now bundle the public
+example credential (same approach as the preserved cache prerequisite), because
+Colima cannot bind the checkout's host path. `tests/cluster/cache_example_test.go`
+now joins killed container exits before start and waits for health before endpoint
+discovery; previously Start could race signal delivery and leave a node stopped.
+No library/application encoding changes. Diffs are included in the Task 4 commit;
+failed and rerun example evidence is recorded in the validation report.
+The scheduler partition fixture also refreshes its ephemeral HTTP port after
+network reattachment, matching its existing refresh after process restart.
 
 Record file, reason, target impact and validation for every
 execution deviation. Do not absorb unrelated credential, profiler or Sonic work.

@@ -6,8 +6,6 @@ x-node: &node
     dockerfile: examples/scheduler/Dockerfile
   stop_grace_period: 30s
   networks: [scheduler]
-  secrets:
-    - credential
 x-env: &env
   GQUORUM_CLUSTER: scheduler-example
   GQUORUM_PEERS: node1,node2,node3
@@ -36,9 +34,6 @@ services:
       GQUORUM_NODE: node3
     ports: ["127.0.0.1:${SCHEDULER_NODE3_PORT:-19083}:8080"]
     volumes: ["scheduler-node3:/data"]
-secrets:
-  credential:
-    file: ./demo-credential.txt
 networks:
   scheduler:
 volumes:
