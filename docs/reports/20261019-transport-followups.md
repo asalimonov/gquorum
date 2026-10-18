@@ -3,7 +3,15 @@
 Started 2026-10-19 from c16c28f. Implement and measure each candidate before the
 next; keep improvements and discard candidates that do not justify their cost.
 The five pre-existing staged credential/profiler files are preserved separately.
-No public API, persisted schema or application codec changes are intended.
+No public API, persisted schema or application codec changed.
+
+Interactive CPU heatmaps and call-stack flamegraphs: open
+[baseline-2](../../test-reports/performance/transport-followups/baseline-2/report.html)
+and [index-5](../../test-reports/performance/transport-followups/index-5/report.html)
+for a pair where node3 leads in both captures. Rejected candidates also retain
+interactive reports, for example
+[lifecycle-3](../../test-reports/performance/transport-followups/lifecycle-3/report.html)
+and [batching-1](../../test-reports/performance/transport-followups/batching-1/report.html).
 
 ## Method
 
@@ -176,7 +184,7 @@ alongside its profiles and interactive reports.
 Only the exact routing index is retained in production (0b015d7). Current
 incarnation checks still run per frame; transport lifecycle and batching remain
 as they were before these experiments. Final all-module, race, functional,
-protocol-generation and Docker scenario checks are recorded below when complete.
+protocol-generation and Docker scenario checks are recorded below.
 
 The first full functional run overlapped Docker example work and had two
 five-second deadline failures: TestOperationServicesUseScopedPersistence and
@@ -232,5 +240,50 @@ The first full process run had 89 passes and two failures
   ([report](../../test-reports/cluster/20261018T225507.433733Z-9klrp1rz/report.md)),
   and all-module lint passed again.
 - Runtime learner growth timed out before reaching its exact promotion barrier.
-  Its failed logs are retained; focused repetitions and the final suite outcome
-  are recorded below. No timeout or barrier assertion has been relaxed.
+  Its failed logs are retained. Three unchanged isolated repetitions passed
+  ([report](../../test-reports/cluster/20261018T225606.207233Z-31i2rrr2/report.md));
+  the cause of the initial timeout remains unconfirmed. No timeout or barrier
+  assertion has been relaxed.
+
+
+The next full process run passed 90/91 checks, including corrected forced
+retirement and unchanged learner growth. The remaining failure occurred before
+TestLoadIngressAndExactIndependentCommandsThreeNodes entered its test body:
+Docker's container-inspection request timed out during mapped-port startup
+([report](../../test-reports/cluster/20261018T225633.667431Z-pvp7eai7/report.md)).
+Serializing fixture startup with `GQUORUM_TEST_COOK_PARALLEL=1` while retaining
+`CLUSTER_PARALLEL=4` did not eliminate this infrastructure failure. That run also
+passed 90/91; the snapshot/WAL recovery case hit the same Docker inspection
+startup timeout before its body
+([report](../../test-reports/cluster/20261018T230211.282027Z-4n7lcp54/report.md)).
+The final run uses `CLUSTER_PARALLEL=1` and `GQUORUM_TEST_COOK_PARALLEL=1` to
+remove overlap between scenarios. `CLUSTER_TIMEOUT=30m` accommodates serial
+suite execution; individual case deadlines and application assertions remain
+unchanged. All earlier process runs remain available as evidence.
+
+
+Final full process suite: **91 passed, zero failures**, 1,144.255 seconds
+([report](../../test-reports/cluster/20261018T230834.265657Z-gyqa1ryn/report.md),
+[timeline](../../test-reports/cluster/20261018T230834.265657Z-gyqa1ryn/timeline.md)).
+Command, after the private image build:
+
+```sh
+DOCKER_HOST=unix:///var/run/docker.sock \
+TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock \
+GQUORUM_TEST_COOK_PARALLEL=1 \
+make test-cluster-run CLUSTER_IMAGE=gquorum-test:transport-followups-0b015d7 \
+  CLUSTER_PARALLEL=1 CLUSTER_TIMEOUT=30m
+```
+
+This passing serial run does not establish that Docker's concurrent-startup
+problem or the earlier intermittent scheduler/growth timeouts have been fixed.
+Those failures and their successful reruns are documented above. The only
+validation-driven code change was the corrected forced-retirement process test;
+its production semantics were already established by the planner and existing
+cleanup tests.
+
+All 16 capture manifests completed, with raw evidence and interactive reports
+retained. Removed the captures' private image tags and the final private test
+image. No containers, networks or volumes with the process-test ownership label
+remain. The five original staged files and their worktree content remain
+unchanged. Every commit is below the 5,000-line added-plus-deleted limit.
