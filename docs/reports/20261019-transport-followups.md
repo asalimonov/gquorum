@@ -129,8 +129,51 @@ Latency analysis was refined to weight each interval's logged mean by its
 completed operation count; the initial routing table above uses that corrected
 calculation. This does not change the routing-index decision.
 
-## 3. Queued-message coalescing — pending
+## 3. Queued-message coalescing — rolled back
 
 The existing destination worker already drains queued batches without a delay.
-The proposed experiment will test earlier coalescing before destination dispatch;
-any retained change must preserve order, bounds, shutdown and one-worker latency.
+The candidate additionally combined already queued Ready batches before splitting
+by destination, only while all destination workers were idle. The sole dispatcher
+drained a fixed queue-length snapshot, bounded to 64 Ready batches, with no timer
+or wait for arrivals. Backlogged workers retained their existing bounded queues.
+
+Five isolated 500 ms repetitions of BenchmarkReadyDispatchBatching, one CPU:
+
+| Ready batches | Individual/coalesced median ns | Individual/coalesced bytes | Individual/coalesced allocations |
+| --- | ---: | ---: | ---: |
+| 1 | 205.9 / 206.4 | 320 / 320 | 2 / 2 |
+| 8 | 1,453 / 1,920 | 2,560 / 9,984 | 16 / 11 |
+| 64 | 11,020 / 11,971 | 20,480 / 85,888 | 128 / 20 |
+
+This benchmark includes splitting/enqueuing and draining destination queues,
+without network workers. It demonstrates fewer allocations but more slice-copy
+bytes and longer dispatch time for queued bursts; network capture determines
+whether fewer frames compensate. [Raw benchmark](../../test-reports/performance/transport-followups/batching-bench.txt).
+
+| Run | Operations/s | Estimated CPU µs/op | Weighted write/read µs |
+| --- | ---: | ---: | ---: |
+| batching-1 | 4,298 | 326.6 | 283 / 220 |
+| batching-2 | 4,370 | 321.7 | 280 / 217 |
+| batching-3 | 4,264 | 330.8 | 288 / 221 |
+
+All three windows had zero workload errors. Candidate checks passed: 1,969
+all-module units, focused Raft unit race checks, three functional race repetitions
+and all-module lint (after replacing reassignment of a parameter with a local).
+Ordering, snapshot payload preservation, backlog refusal, drain bounds and the
+empty-queue fast path were explicitly tested.
+
+Decision: roll back. Median throughput was 4,298 ops/s versus the five indexed
+controls' 4,331; estimated CPU/op was 326.6 versus 322.5 µs. Results overlap the
+baseline range and do not establish improvement. Earlier batching adds code and
+copying cost without a demonstrated one-worker benefit. No claim is made that
+this experiment proves batching cannot help other workloads. Restored
+outbound.go and removed the candidate-only test file; the existing destination
+coalescer remains. The full candidate is retained in batching-candidate.patch
+alongside its profiles and interactive reports.
+
+## Final retained change and verification
+
+Only the exact routing index is retained in production (0b015d7). Current
+incarnation checks still run per frame; transport lifecycle and batching remain
+as they were before these experiments. Final all-module, race, functional,
+protocol-generation and Docker scenario checks are recorded below when complete.
