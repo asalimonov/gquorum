@@ -177,3 +177,60 @@ Only the exact routing index is retained in production (0b015d7). Current
 incarnation checks still run per frame; transport lifecycle and batching remain
 as they were before these experiments. Final all-module, race, functional,
 protocol-generation and Docker scenario checks are recorded below when complete.
+
+The first full functional run overlapped Docker example work and had two
+five-second deadline failures: TestOperationServicesUseScopedPersistence and
+TestOperationAndProgressReadsWorkOnScopedComposition. Both passed five isolated
+repetitions, and all 1,055 functional checks subsequently passed with Docker work
+stopped, without code changes. Contention is a plausible explanation, not a
+proven cause. The failed run is retained at
+[functional initial run](../../test-reports/function/20261018T224007.976373Z-s_l_25fx/report.md).
+
+The first scheduler example run separately timed out waiting for task reads from
+the former leader after quorum restoration. Other replicas continued executing
+tasks, while node1 repeatedly pre-voted; its logs do not establish a root cause.
+This failure is retained at
+[scheduler initial run](../../test-reports/example/20261018T224241.890260Z-vavee3jx/report.md).
+The unchanged scheduler rerun passed all phases, including quorum restoration
+and live executor partition/reconnection. The first failure is intermittent;
+its cause remains unconfirmed. No deadline or assertion has been relaxed.
+
+Final retained-code checks (fresh runs):
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `make test` | 1,967 passed | [report](../../test-reports/unit/20261018T223937.738979Z-i3b88kio/report.md) |
+| `make test-race` | 1,967 passed | [report](../../test-reports/unit-race/20261018T223944.625146Z-xy62z8ws/report.md) |
+| `make test-function` (isolated rerun) | 1,055 passed | [report](../../test-reports/function/20261018T224535.303773Z-umhq9tfh/report.md) |
+| `make test-function-race` | 1,055 passed | [report](../../test-reports/function-race/20261018T224615.458492Z-3hxs2zfq/report.md) |
+| `make lint` | Passed | [log](../../test-reports/performance/transport-followups/final-lint.log) |
+| `make proto-check` | Passed; no generated diff | [log](../../test-reports/performance/transport-followups/final-proto-check.log) |
+| Python scripts unittest discovery | 38 passed | [log](../../test-reports/performance/transport-followups/final-python.log) |
+| `make test-example` | Passed | [report](../../test-reports/example/20261018T223942.055533Z-m4f3kw_g/report.md) |
+| `make test-cache-example` | Passed, including 1/10/256 workers and restarts | [report](../../test-reports/example/20261018T224017.489290Z-imhxncgz/report.md) |
+| `make test-scheduler-example` (rerun) | Passed | [report](../../test-reports/example/20261018T224736.210591Z-yruxtmqp/report.md) |
+
+The full process suite uses the private image
+`gquorum-test:transport-followups-0b015d7`, built from the retained runtime,
+and `CLUSTER_PARALLEL=4` after all other workloads have finished.
+
+
+The first full process run had 89 passes and two failures
+([report](../../test-reports/cluster/20261018T224928.039283Z-eefhnkkq/report.md)):
+
+- Forced retirement asserted the superseded whole-operation wait for an offline
+  host. Current `topology/plan_partition.go` detaches ordinary removal's stop and
+  retirement work; `TestScopedPartitionsDetachRemovalButKeepDeletionStops` and
+  `TestFailureIsolation_RemovedHostCleanup` explicitly cover this contract. The
+  assertion raced native convergence, explaining why it sometimes passed.
+  Updated the process test to wait for native convergence, then require exact
+  unconfirmed debt and intact offline storage. After host return it waits for
+  matching stop/retirement proof before proceeding with retained membership,
+  values, readiness fencing and fresh-identity assertions. Clarified the
+  corresponding architecture paragraph. No production behavior changed.
+  Three consecutive repetitions passed
+  ([report](../../test-reports/cluster/20261018T225507.433733Z-9klrp1rz/report.md)),
+  and all-module lint passed again.
+- Runtime learner growth timed out before reaching its exact promotion barrier.
+  Its failed logs are retained; focused repetitions and the final suite outcome
+  are recorded below. No timeout or barrier assertion has been relaxed.

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/client"
@@ -241,18 +242,40 @@ func forceRetireDeadNode(t *testing.T, size int) {
 	}); err != nil {
 		t.Fatal("forced retirement did not remove the dead metadata voter", err)
 	}
-	op, err := c.Operation(ctx, "node1", topology.OperationID(retired.OperationID))
-	active, activeErr := c.Document(ctx, "node1", "active")
-	if err != nil || activeErr != nil || op.State.Terminal() || active.Version != created.Document.Version {
-		t.Fatal("unreachable required host was falsely acknowledged", op, active, err, activeErr)
+	if err := c.WaitOperation(ctx, "node1", retired.OperationID); err != nil {
+		t.Fatal("offline cleanup blocked native retirement", err)
 	}
-	// Forced intent does not fabricate resource receipts. Returning the retained
-	// process supplies exact host fencing/cleanup before Active can advance.
+	if err := c.WaitFullyConverged(ctx, retired.Document.Version); err != nil {
+		t.Fatal(err)
+	}
+	op, err := c.Operation(ctx, "node1", retired.OperationID)
+	active, activeErr := c.Document(ctx, "node1", "active")
+	if err != nil || activeErr != nil || op.State != topology.OperationSucceeded || active.Version != retired.Document.Version {
+		t.Fatal("native retirement did not converge", op, active, err, activeErr)
+	}
+	old := storage.Identity{ClusterID: created.Document.ClusterID, NodeName: "node3", GroupID: "work", ReplicaID: oldReplica}
+	query := topology.ProgressQuery{GroupID: "work", NodeName: "node3"}
+	page, err := c.Progress(ctx, "node1", query)
+	debt, found := exactCleanup(page, old)
+	if err != nil || !found || debt.MemberID != oldMember || debt.OperationID != retired.OperationID ||
+		debt.RemovedAt == nil || debt.StoppedAt != nil || debt.RetiredAt != nil || debt.CollectedAt != nil {
+		t.Fatal("native retirement fabricated offline-host cleanup", debt, page, err)
+	}
+	if _, err := c.docker.ContainerStatPath(ctx, victim.Container.GetContainerID(), client.ContainerStatPathOptions{Path: "/data/load/work"}); err != nil {
+		t.Fatal("offline host lost retained storage", err)
+	}
+	// Native convergence never fabricates host receipts. Returning the retained
+	// process must settle the exact detached obligation before this test proceeds.
 	if err := victim.Start(ctx); err != nil {
 		t.Fatal("retained host could not return for required retirement", err)
 	}
 	waitCtx, cancelWait := context.WithTimeout(ctx, 30*time.Second)
-	err = c.WaitOperation(waitCtx, "node1", topology.OperationID(retired.OperationID))
+	err = Poll(waitCtx, func() (bool, error) {
+		page, err := c.Progress(waitCtx, "node1", query)
+		debt, found := exactCleanup(page, old)
+		return found && debt.MemberID == oldMember && debt.OperationID == retired.OperationID &&
+			debt.StoppedAt != nil && debt.RetiredAt != nil, err
+	})
 	cancelWait()
 	if err != nil {
 		operator, operatorErr := c.Operation(ctx, "node1", topology.OperationID(retired.OperationID))
