@@ -2,6 +2,7 @@ package loadgrpc
 
 import (
 	"context"
+	"errors"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load"
@@ -50,21 +51,54 @@ func (h requestHandler[T]) handle(ctx context.Context, t *Transport, node Ingres
 }
 
 func (t *Transport) authenticateSender(ctx context.Context, from topology.Identity) error {
-	if err := t.options.Authenticate(ctx, from); err != nil {
-		return status.Error(codes.Unauthenticated, "load authentication failed")
-	}
 	if err := ctx.Err(); err != nil {
 		return status.FromContextError(err).Err()
+	}
+	authErr := t.options.Authenticate(ctx, from)
+	if err := ctx.Err(); err != nil {
+		return status.FromContextError(err).Err()
+	}
+	if authErr != nil {
+		return status.Error(codes.Unauthenticated, "load authentication failed")
 	}
 	return nil
 }
 
-func (s *serverAdapter) SendRaft(ctx context.Context, request *loadpb.Envelope) (*loadpb.Reply, error) {
-	return receive(ctx, s, request, requestHandler[load.RaftBatch]{bodyLimit: s.transport.options.MaxMessageBytes,
-		route: func(b load.RaftBatch) (topology.Identity, topology.Identity) { return b.From.Node, b.To.Node },
-		dispatch: func(ctx context.Context, n Ingress, b load.RaftBatch) (any, error) {
-			return struct{}{}, n.ReceiveLoadRaft(ctx, b)
-		}})
+func (s *serverAdapter) SendRaft(parent context.Context, frame *loadpb.RaftFrame) (*loadpb.Reply, error) {
+	t := s.transport
+	ctx, err := t.begin(parent)
+	if err != nil {
+		return encodeReply(nil, err, t.options.MaxMessageBytes)
+	}
+	defer ctx.Release()
+	batch, err := decodeRaftHeader(frame, t.options.MaxMessageBytes)
+	if err != nil {
+		return nil, err
+	}
+	if err := t.authenticateSender(ctx.Context, batch.From.Node); err != nil {
+		return nil, err
+	}
+	if batch.To.Node != ctx.Node.Identity() {
+		return encodeReply(nil, fault.ErrIdentityMismatch, t.options.MaxMessageBytes)
+	}
+	if err := decodeRaftMessages(ctx.Context, frame, &batch); err != nil {
+		if errors.Is(err, fault.ErrIdentityMismatch) {
+			return encodeReply(nil, err, t.options.MaxMessageBytes)
+		}
+		return nil, raftReceiveError(err)
+	}
+	err = ctx.Node.ReceiveLoadRaft(ctx.Context, batch)
+	if ctx.Context.Err() != nil {
+		return nil, status.FromContextError(ctx.Context.Err()).Err()
+	}
+	return encodeReply(struct{}{}, err, t.options.MaxMessageBytes)
+}
+
+func raftReceiveError(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return status.FromContextError(err).Err()
+	}
+	return err
 }
 
 func (s *serverAdapter) ReadReplica(ctx context.Context, request *loadpb.Envelope) (*loadpb.Reply, error) {

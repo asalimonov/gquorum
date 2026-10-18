@@ -6,7 +6,7 @@
 **Target architecture:** [docs/brainstorms/20261019-binary-raft-transport-target.md](../brainstorms/20261019-binary-raft-transport-target.md)
 **Brainstorm log:** [docs/brainstorms/20261019-binary-raft-transport.md](../brainstorms/20261019-binary-raft-transport.md)
 **Source baseline:** `631a606`, branch `feat/structural-refactorings-and-fuzzing`
-**Status:** in progress; Task 1 complete; codec helpers and RPC cutover are Task 2.
+**Status:** in progress; Tasks 1–2 complete; boundary regressions and benchmarks are next.
 
 ## Important notices
 
@@ -54,8 +54,8 @@ current exact-peer authorization; no transport cache substitutes for that check.
 
 Concrete interpretations needed to implement the target consistently:
 
-1. Add schema types and pure codec helpers first, while the existing RPCs keep
-   serving the old implementation. Switch both RPCs, sender and receiver together
+1. Add schema types first, while the existing RPCs keep serving the old implementation.
+   Pure codec helpers land with their production callers to satisfy unused-code lint. Switch both RPCs, sender and receiver together
    in Task 2. This is development sequencing, not a production dual-protocol mode.
 2. Header/structural/native encoding errors map to InvalidArgument, oversize
    input to ResourceExhausted, and authentication failures to Unauthenticated.
@@ -93,8 +93,8 @@ or public behavior. No target-file edits are required by this plan.
 
 | Commit/task | Scope | Estimated additions + deletions |
 | --- | --- | ---: |
-| 1 | Add binary schema, pure codec and core units | 1,000–1,800 |
-| 2 | Switch both Raft RPCs and remove fallback | 900–1,800 |
+| 1 | Add binary schema | 1,000–1,800 |
+| 2 | Add codec/core units, switch both Raft RPCs and remove fallback | 900–1,800 |
 | 3 | Expand regression coverage and codec benchmarks | 650–1,300 |
 | 4 | Process/performance validation and architecture docs | 250–700 |
 | 5 | Architectural delta verification and gap fixes | 100–500 expected; split fixes if needed |
@@ -128,7 +128,7 @@ included; current adapter generated files total 583 lines before this change.
 `stream.go`, `transport.go`); §Key algorithms for send/receive; brainstorm
 §Request and decisions (no backward compatibility).
 
-- [ ] Create the complete helper surface below. Move `validateBatch` rather
+- [x] Create the complete helper surface below. Move `validateBatch` rather
   than leave duplicate definitions; strengthen it to complete exact peers,
   matching cluster/group, valid UTF-8 strings, nonzero delivery/message list,
   and matching native From/To. Keep its old caller valid until Task 2.
@@ -146,30 +146,30 @@ included; current adapter generated files total 583 lines before this change.
   func decodeRaftMessages(context.Context, *loadpb.RaftFrame, *load.RaftBatch) error
   ```
 
-- [ ] Plan contiguous ranges using header `proto.Size`, native `Message.Size`,
+- [x] Plan contiguous ranges using header `proto.Size`, native `Message.Size`,
   and `protowire.SizeTag(5) + protowire.SizeBytes(n)`. Check limit arithmetic
   without overflow; reject an individually oversize message before encoding or
   sending anything. Enforce both frame byte and message-count limits.
-- [ ] Encode each native message once after full planning. Prepare every frame
+- [x] Encode each native message once after full planning. Prepare every frame
   and verify final sizes before return. Do not mutate input messages, interpret
   application bytes, introduce pooled buffers, or use JSON inside these helpers.
-- [ ] Separate bounded header conversion from native decoding. Require version
+- [x] Separate bounded header conversion from native decoding. Require version
   2; reject nil/missing peers, zero delivery IDs, bad group IDs, empty/oversize
   arrays and corrupt native messages. Decode into fresh locals and assign
   `batch.Messages` only after the entire frame is valid; check cancellation.
-- [ ] Add parallel isolated unit tests for peer round trips, native message/data
+- [x] Add parallel isolated unit tests for peer round trips, native message/data
   round trips, message order, frame splitting, oversized later messages and
   malformed headers/bytes. Use `//go:build !functional`; do not start services.
-- [ ] Add concise `// TODO(not planned): ...` comments at the relevant binary
+- [x] Add concise `// TODO(not planned): ...` comments at the relevant binary
   codec boundary for snapshot chunking and buffer pooling, documenting existing
   refusal/ownership behavior without introducing stubs or hot-path warnings.
 
 
-- [ ] Before changing runtime behavior, retain three fresh JSON baseline captures
+- [x] Before changing runtime behavior, retain three fresh JSON baseline captures
   using the commands below. Record source revision, dirty diff, binary hashes,
   actual leader, host conditions and phase timing. Task 1 is additive; label this
   baseline accurately. Keep existing credential fixes identical across A/B.
-- [ ] Replace the two RPC request types in place and regenerate with the pinned
+- [x] Replace the two RPC request types in place and regenerate with the pinned
   command. Perform all callers/handlers/test adaptations in this same commit:
 
   ```proto
@@ -177,7 +177,7 @@ included; current adapter generated files total 583 lines before this change.
   rpc StreamRaft(stream RaftFrame) returns (stream StreamRefusal);
   ```
 
-- [ ] Change `sendBatchFrames` to call `encodeRaftFrames`. Implement this target
+- [x] Change `sendBatchFrames` to call `encodeRaftFrames`. Implement this target
   signature delta; keep public `SendRaft`, `sendOutcome.report`, routes, IDs and
   snapshot completion classification unchanged:
 
@@ -196,43 +196,43 @@ included; current adapter generated files total 583 lines before this change.
       *loadpb.RaftFrame) (refused, terminal error)
   ```
 
-- [ ] Route every ordinary batch through the exact-route stream; route every
+- [x] Route every ordinary batch through the exact-route stream; route every
   frame of a snapshot-bearing batch through ordered unary calls. Continue
   using existing bounded reply decoding for unary responses. Do not acknowledge
   a snapshot early or add command retries.
-- [ ] Remove trial JSON splitting (`splitBatch`, `splitValidBatch`, `batchChunk`,
+- [x] Remove trial JSON splitting (`splitBatch`, `splitValidBatch`, `batchChunk`,
   `batchSearch`, `findBatchChunk`, `encodeBatchChunk`, `batchSearch.try`). Update
   their unit callers to the binary codec. Leave administrative envelope helpers.
-- [ ] Implement binary unary ingress with `begin`/Release, bounded header decode,
+- [x] Implement binary unary ingress with `begin`/Release, bounded header decode,
   authentication, exact local recipient check, native decode and Node ingress.
   Keep malformed input, identity refusals and cancellation distinct. Preserve
   existing Reply error details and success body.
-- [ ] Implement stream receipt using the same codec validation order. Return
+- [x] Implement stream receipt using the same codec validation order. Return
   terminal status for unattributable/malformed frames and invalid credentials;
   report attributable identity/Node refusals using original delivery IDs. Check
   refusal `proto.Size` against the configured bound before sending; an oversized
   refusal terminates with ResourceExhausted rather than bypassing byte limits.
-- [ ] Preserve serialized Send, reusable stream routing, cancellation linkage,
+- [x] Preserve serialized Send, reusable stream routing, cancellation linkage,
   last-delivery reporting, address-change replacement, idle retirement,
   references and joined shutdown. Do not cache authorization for stream lifetime.
-- [ ] Remove `unaryOnly`, its initialization/lookups/writes, `unaryRetry` and
+- [x] Remove `unaryOnly`, its initialization/lookups/writes, `unaryRetry` and
   Unimplemented fallback. `sendStream` no longer returns a fallback boolean;
   `raftStream` cannot return nil/nil to signal an older peer. Missing methods
   remain failures subject to the existing unreachable/report semantics.
-- [ ] Adapt existing protocol functional tests and splitting assertions to native
+- [x] Adapt existing protocol functional tests and splitting assertions to native
   semantic equality. Replace `olderServer`/`TestOlderRecipientReceivesUnaryCalls`
   with a missing-stream-method regression: observe failure/report, zero unary
   fallback calls, and no goroutine/ref leak. Allow the existing asynchronous
   error timing instead of requiring immediate SendRaft failure.
-- [ ] Confirm ReadReplica, ApplyAction and InstallFence tests retain JSON strict
+- [x] Confirm ReadReplica, ApplyAction and InstallFence tests retain JSON strict
   envelope checks and typed safety/CAS error preservation. Their RPC signatures
   must not change.
 
 #### Verification
 
-- [ ] Run `make test`, focused adapter functional tests and the same suite with
+- [x] Run `make test`, focused adapter functional tests and the same suite with
   `-race`, focused unit race tests, and `make lint`.
-- [ ] Recheck generated reproducibility and the independent commit line budget.
+- [x] Recheck generated reproducibility and the independent commit line budget.
   No temporary unimplemented binary handlers or old-version adapters may remain.
 
 ### Task 3: Cover boundary failures and benchmark the complete codec

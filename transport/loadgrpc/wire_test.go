@@ -67,7 +67,7 @@ func TestSplitBatchPreservesOrderAndIdentity(t *testing.T) {
 	for i := range 20 {
 		batch.Messages = append(batch.Messages, raftpb.Message{From: 1, To: 2, Type: raftpb.MsgApp, Term: 2, Index: uint64(i + 1), Context: []byte(strings.Repeat("x", 100))})
 	}
-	frames, err := splitBatch(batch, 1500)
+	frames, err := encodeRaftFrames(batch, 1500)
 	if err != nil || len(frames) < 2 {
 		t.Fatalf("split: %d %v", len(frames), err)
 	}
@@ -76,8 +76,11 @@ func TestSplitBatchPreservesOrderAndIdentity(t *testing.T) {
 		if proto.Size(frame) > 1500 {
 			t.Fatal("oversized frame")
 		}
-		var part load.RaftBatch
-		if err := decodeEnvelope(frame, &part, 1500, 1500); err != nil {
+		part, err := decodeRaftHeader(frame, 1500)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := decodeRaftMessages(context.Background(), frame, &part); err != nil {
 			t.Fatal(err)
 		}
 		if part.From != from || part.To != to || part.DeliveryID != 37 {
@@ -85,11 +88,11 @@ func TestSplitBatchPreservesOrderAndIdentity(t *testing.T) {
 		}
 		messages = append(messages, part.Messages...)
 	}
-	if !reflect.DeepEqual(messages, batch.Messages) {
+	if !sameRaftMessages(messages, batch.Messages) {
 		t.Fatal("lost or reordered messages")
 	}
 	batch.Messages[3].Context = make([]byte, 2000)
-	if frames, err := splitBatch(batch, 1500); !errors.Is(err, fault.ErrOverloaded) || len(frames) != 0 {
+	if frames, err := encodeRaftFrames(batch, 1500); !errors.Is(err, fault.ErrOverloaded) || len(frames) != 0 {
 		t.Fatal("oversized message not refused atomically")
 	}
 }

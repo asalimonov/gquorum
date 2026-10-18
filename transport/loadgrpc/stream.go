@@ -13,6 +13,7 @@ import (
 	"github.com/asalimonov/gquorum/transport/loadgrpc/internal/loadpb"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 // Raft batches without snapshots travel on a long-lived stream per exact
@@ -21,12 +22,7 @@ import (
 // recipient steps frames in order and answers only refusals, which the sender
 // reports as unreachable deliveries. Snapshots keep the unary call, whose
 // completion is reported explicitly.
-const (
-	defaultStreamIdle = 2 * time.Minute
-	// A recipient without StreamRaft (an older release) is sent unary calls,
-	// and streaming is retried after this period.
-	unaryRetry = time.Minute
-)
+const defaultStreamIdle = 2 * time.Minute
 
 type streamKey struct{ from, to load.Peer }
 
@@ -45,13 +41,13 @@ type raftStream struct {
 	broken, retired atomic.Bool
 }
 
-// sendStream reports whether the batch was handled by a stream. False means the
-// recipient only supports unary calls.
-func (t *Transport) sendStream(ctx context.Context, batch load.RaftBatch, frames []*loadpb.Envelope) (bool, error) {
+// sendStream writes ordinary traffic without a unary downgrade.
+// TODO(not planned): Header compression and cross-batch coalescing remain deferred.
+func (t *Transport) sendStream(ctx context.Context, batch load.RaftBatch, frames []*loadpb.RaftFrame) error {
 	for attempt := 0; ; attempt++ {
 		s, err := t.raftStream(ctx, batch)
-		if s == nil || err != nil {
-			return s != nil || err != nil, err
+		if err != nil {
+			return err
 		}
 		s.mu.Lock()
 		if s.broken.Load() || s.retired.Load() {
@@ -59,24 +55,27 @@ func (t *Transport) sendStream(ctx context.Context, batch load.RaftBatch, frames
 			if attempt == 0 {
 				continue // replaced while this caller waited; open a fresh stream once
 			}
-			return true, fault.New(fault.Unavailable, "load stream closed", nil)
+			return fault.New(fault.Unavailable, "load stream closed", nil)
 		}
 		err = s.sendFramesLocked(ctx, batch.DeliveryID, frames)
 		s.mu.Unlock()
 		if err != nil {
 			s.broken.Store(true)
 			s.cancel()
-			return true, transportError(err)
+			return transportError(err)
 		}
-		return true, nil
+		return nil
 	}
 }
 
-func (s *raftStream) sendFramesLocked(ctx context.Context, delivery uint64, frames []*loadpb.Envelope) error {
+func (s *raftStream) sendFramesLocked(ctx context.Context, delivery uint64, frames []*loadpb.RaftFrame) error {
 	// A send blocked by flow control past the caller's deadline breaks the
 	// stream rather than leaving the caller waiting.
 	var err error
 	stop := context.AfterFunc(ctx, s.cancel)
+	// Publish before Send: the receive goroutine can fail while Send is still
+	// buffering the first frame. Its report must identify that delivery.
+	s.lastDelivery.Store(delivery)
 	for _, frame := range frames {
 		if err = s.stream.Send(frame); err != nil {
 			break
@@ -86,15 +85,17 @@ func (s *raftStream) sendFramesLocked(ctx context.Context, delivery uint64, fram
 	if !stopped && err == nil {
 		err = ctx.Err()
 	}
+	if err == nil && s.broken.Load() {
+		err = fault.New(fault.Unavailable, "load stream closed during send", nil)
+	}
 	if err == nil {
-		s.lastDelivery.Store(delivery)
 		s.lastUsed.Store(time.Now().UnixNano())
 	}
 	return err
 }
 
 // raftStream returns the open stream for the batch's route, opening one when
-// needed. It returns nil without error when the recipient only supports unary.
+// needed.
 func (t *Transport) raftStream(ctx context.Context, batch load.RaftBatch) (*raftStream, error) {
 	key := streamKey{from: batch.From, to: batch.To}
 	address, err := t.resolve(ctx, batch.To.Node)
@@ -112,10 +113,7 @@ func (t *Transport) raftStream(ctx context.Context, batch load.RaftBatch) (*raft
 		t.mu.Unlock()
 		return cached, nil
 	}
-	if until, found := t.unaryOnly[address]; found && time.Now().Before(until) {
-		t.mu.Unlock()
-		return nil, nil
-	}
+
 	t.mu.Unlock()
 	s, err := t.openRaftStream(key, address)
 	if err != nil {
@@ -185,10 +183,7 @@ func (t *Transport) readRefusals(s *raftStream) {
 			if t.streams[s.key] == s {
 				delete(t.streams, s.key)
 			}
-			code := status.Code(err)
-			if code == codes.Unimplemented && t.unaryOnly != nil {
-				t.unaryOnly[s.address] = time.Now().Add(unaryRetry)
-			}
+
 			t.mu.Unlock()
 			if !s.retired.Load() && t.ctx.Err() == nil {
 				// Frames written to a broken stream may be lost.
@@ -250,11 +245,7 @@ func (s *serverAdapter) StreamRaft(stream loadpb.Load_StreamRaftServer) error {
 		if err != nil {
 			return err
 		}
-		var batch load.RaftBatch
-		if err := decodeEnvelope(request, &batch, t.options.MaxMessageBytes, t.options.MaxMessageBytes); err != nil {
-			return err
-		}
-		refused, err := s.receiveStreamed(stream.Context(), batch)
+		refused, err := s.receiveStreamed(stream.Context(), request)
 		if err != nil {
 			return err
 		}
@@ -262,13 +253,16 @@ func (s *serverAdapter) StreamRaft(stream loadpb.Load_StreamRaftServer) error {
 			continue
 		}
 		reply := &loadpb.StreamRefusal{
-			DeliveryId:   batch.DeliveryID,
+			DeliveryId:   request.DeliveryId,
 			ErrorCode:    string(fault.Unavailable),
 			ErrorMessage: refused.Error(),
 		}
 		var typed *fault.Error
 		if errors.As(refused, &typed) {
 			reply.ErrorCode, reply.ErrorMessage = string(typed.Code), typed.Message
+		}
+		if proto.Size(reply) > t.options.MaxMessageBytes {
+			return status.Error(codes.ResourceExhausted, "Raft refusal exceeds limit")
 		}
 		if err := stream.Send(reply); err != nil {
 			return err
@@ -278,8 +272,12 @@ func (s *serverAdapter) StreamRaft(stream loadpb.Load_StreamRaftServer) error {
 
 // receiveStreamed applies the unary ingress checks to one frame. A returned
 // error ends the stream; a refusal is reported for this delivery only.
-func (s *serverAdapter) receiveStreamed(parent context.Context, batch load.RaftBatch) (refused, err error) {
+func (s *serverAdapter) receiveStreamed(parent context.Context, frame *loadpb.RaftFrame) (refused, terminal error) {
 	t := s.transport
+	batch, err := decodeRaftHeader(frame, t.options.MaxMessageBytes)
+	if err != nil {
+		return nil, err
+	}
 	ctx, err := t.begin(parent)
 	if errors.Is(err, fault.ErrOverloaded) {
 		return err, nil
@@ -288,17 +286,21 @@ func (s *serverAdapter) receiveStreamed(parent context.Context, batch load.RaftB
 		return nil, status.Error(codes.Unavailable, "load transport is not serving")
 	}
 	defer ctx.Release()
-	if err := t.options.Authenticate(ctx.Context, batch.From.Node); err != nil {
-		return nil, status.Error(codes.Unauthenticated, "load authentication failed")
+	if err := t.authenticateSender(ctx.Context, batch.From.Node); err != nil {
+		return nil, err
 	}
-	if batch.From.Node.ClusterID != batch.To.Node.ClusterID ||
-		!validIdentity(batch.From.Node) || !validIdentity(batch.To.Node) ||
-		batch.To.Node != ctx.Node.Identity() {
+	if batch.To.Node != ctx.Node.Identity() {
 		return fault.ErrIdentityMismatch, nil
 	}
+	if err := decodeRaftMessages(ctx.Context, frame, &batch); err != nil {
+		if errors.Is(err, fault.ErrIdentityMismatch) {
+			return err, nil
+		}
+		return nil, raftReceiveError(err)
+	}
 	if err := ctx.Node.ReceiveLoadRaft(ctx.Context, batch); err != nil {
-		if errors.Is(err, context.Canceled) && parent.Err() != nil {
-			return nil, status.FromContextError(err).Err()
+		if parent.Err() != nil {
+			return nil, status.FromContextError(parent.Err()).Err()
 		}
 		return err, nil
 	}

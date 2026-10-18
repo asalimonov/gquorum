@@ -182,7 +182,7 @@ func (x *RaftFrame) GetMessages() [][]byte {
 	return nil
 }
 
-// Public load values use a versioned JSON encoding inside a typed RPC surface.
+// Administrative load values use a versioned JSON encoding inside a typed RPC surface.
 type Envelope struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Version       uint32                 `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
@@ -419,11 +419,11 @@ const file_transport_loadgrpc_internal_loadpb_load_proto_rawDesc = "" +
 	"deliveryId\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x02 \x01(\tR\terrorCode\x12#\n" +
-	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage2\xd9\x02\n" +
-	"\x04Load\x12=\n" +
-	"\bSendRaft\x12\x19.gquorum.load.v1.Envelope\x1a\x16.gquorum.load.v1.Reply\x12K\n" +
+	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage2\xdb\x02\n" +
+	"\x04Load\x12>\n" +
+	"\bSendRaft\x12\x1a.gquorum.load.v1.RaftFrame\x1a\x16.gquorum.load.v1.Reply\x12L\n" +
 	"\n" +
-	"StreamRaft\x12\x19.gquorum.load.v1.Envelope\x1a\x1e.gquorum.load.v1.StreamRefusal(\x010\x01\x12@\n" +
+	"StreamRaft\x12\x1a.gquorum.load.v1.RaftFrame\x1a\x1e.gquorum.load.v1.StreamRefusal(\x010\x01\x12@\n" +
 	"\vReadReplica\x12\x19.gquorum.load.v1.Envelope\x1a\x16.gquorum.load.v1.Reply\x12@\n" +
 	"\vApplyAction\x12\x19.gquorum.load.v1.Envelope\x1a\x16.gquorum.load.v1.Reply\x12A\n" +
 	"\fInstallFence\x12\x19.gquorum.load.v1.Envelope\x1a\x16.gquorum.load.v1.ReplyBBZ@github.com/asalimonov/gquorum/transport/loadgrpc/internal/loadpbb\x06proto3"
@@ -451,8 +451,8 @@ var file_transport_loadgrpc_internal_loadpb_load_proto_goTypes = []any{
 var file_transport_loadgrpc_internal_loadpb_load_proto_depIdxs = []int32{
 	0, // 0: gquorum.load.v1.RaftFrame.from:type_name -> gquorum.load.v1.RaftPeer
 	0, // 1: gquorum.load.v1.RaftFrame.to:type_name -> gquorum.load.v1.RaftPeer
-	2, // 2: gquorum.load.v1.Load.SendRaft:input_type -> gquorum.load.v1.Envelope
-	2, // 3: gquorum.load.v1.Load.StreamRaft:input_type -> gquorum.load.v1.Envelope
+	1, // 2: gquorum.load.v1.Load.SendRaft:input_type -> gquorum.load.v1.RaftFrame
+	1, // 3: gquorum.load.v1.Load.StreamRaft:input_type -> gquorum.load.v1.RaftFrame
 	2, // 4: gquorum.load.v1.Load.ReadReplica:input_type -> gquorum.load.v1.Envelope
 	2, // 5: gquorum.load.v1.Load.ApplyAction:input_type -> gquorum.load.v1.Envelope
 	2, // 6: gquorum.load.v1.Load.InstallFence:input_type -> gquorum.load.v1.Envelope

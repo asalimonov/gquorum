@@ -30,10 +30,10 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type LoadClient interface {
-	SendRaft(ctx context.Context, in *Envelope, opts ...grpc.CallOption) (*Reply, error)
+	SendRaft(ctx context.Context, in *RaftFrame, opts ...grpc.CallOption) (*Reply, error)
 	// StreamRaft carries ordered Raft batches from one sender replica to one
 	// recipient replica without waiting for each batch to be stepped.
-	StreamRaft(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[Envelope, StreamRefusal], error)
+	StreamRaft(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[RaftFrame, StreamRefusal], error)
 	ReadReplica(ctx context.Context, in *Envelope, opts ...grpc.CallOption) (*Reply, error)
 	ApplyAction(ctx context.Context, in *Envelope, opts ...grpc.CallOption) (*Reply, error)
 	InstallFence(ctx context.Context, in *Envelope, opts ...grpc.CallOption) (*Reply, error)
@@ -47,7 +47,7 @@ func NewLoadClient(cc grpc.ClientConnInterface) LoadClient {
 	return &loadClient{cc}
 }
 
-func (c *loadClient) SendRaft(ctx context.Context, in *Envelope, opts ...grpc.CallOption) (*Reply, error) {
+func (c *loadClient) SendRaft(ctx context.Context, in *RaftFrame, opts ...grpc.CallOption) (*Reply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Reply)
 	err := c.cc.Invoke(ctx, Load_SendRaft_FullMethodName, in, out, cOpts...)
@@ -57,18 +57,18 @@ func (c *loadClient) SendRaft(ctx context.Context, in *Envelope, opts ...grpc.Ca
 	return out, nil
 }
 
-func (c *loadClient) StreamRaft(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[Envelope, StreamRefusal], error) {
+func (c *loadClient) StreamRaft(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[RaftFrame, StreamRefusal], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &Load_ServiceDesc.Streams[0], Load_StreamRaft_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[Envelope, StreamRefusal]{ClientStream: stream}
+	x := &grpc.GenericClientStream[RaftFrame, StreamRefusal]{ClientStream: stream}
 	return x, nil
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Load_StreamRaftClient = grpc.BidiStreamingClient[Envelope, StreamRefusal]
+type Load_StreamRaftClient = grpc.BidiStreamingClient[RaftFrame, StreamRefusal]
 
 func (c *loadClient) ReadReplica(ctx context.Context, in *Envelope, opts ...grpc.CallOption) (*Reply, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -104,10 +104,10 @@ func (c *loadClient) InstallFence(ctx context.Context, in *Envelope, opts ...grp
 // All implementations must embed UnimplementedLoadServer
 // for forward compatibility.
 type LoadServer interface {
-	SendRaft(context.Context, *Envelope) (*Reply, error)
+	SendRaft(context.Context, *RaftFrame) (*Reply, error)
 	// StreamRaft carries ordered Raft batches from one sender replica to one
 	// recipient replica without waiting for each batch to be stepped.
-	StreamRaft(grpc.BidiStreamingServer[Envelope, StreamRefusal]) error
+	StreamRaft(grpc.BidiStreamingServer[RaftFrame, StreamRefusal]) error
 	ReadReplica(context.Context, *Envelope) (*Reply, error)
 	ApplyAction(context.Context, *Envelope) (*Reply, error)
 	InstallFence(context.Context, *Envelope) (*Reply, error)
@@ -121,10 +121,10 @@ type LoadServer interface {
 // pointer dereference when methods are called.
 type UnimplementedLoadServer struct{}
 
-func (UnimplementedLoadServer) SendRaft(context.Context, *Envelope) (*Reply, error) {
+func (UnimplementedLoadServer) SendRaft(context.Context, *RaftFrame) (*Reply, error) {
 	return nil, status.Error(codes.Unimplemented, "method SendRaft not implemented")
 }
-func (UnimplementedLoadServer) StreamRaft(grpc.BidiStreamingServer[Envelope, StreamRefusal]) error {
+func (UnimplementedLoadServer) StreamRaft(grpc.BidiStreamingServer[RaftFrame, StreamRefusal]) error {
 	return status.Error(codes.Unimplemented, "method StreamRaft not implemented")
 }
 func (UnimplementedLoadServer) ReadReplica(context.Context, *Envelope) (*Reply, error) {
@@ -158,7 +158,7 @@ func RegisterLoadServer(s grpc.ServiceRegistrar, srv LoadServer) {
 }
 
 func _Load_SendRaft_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Envelope)
+	in := new(RaftFrame)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -170,17 +170,17 @@ func _Load_SendRaft_Handler(srv interface{}, ctx context.Context, dec func(inter
 		FullMethod: Load_SendRaft_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LoadServer).SendRaft(ctx, req.(*Envelope))
+		return srv.(LoadServer).SendRaft(ctx, req.(*RaftFrame))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _Load_StreamRaft_Handler(srv interface{}, stream grpc.ServerStream) error {
-	return srv.(LoadServer).StreamRaft(&grpc.GenericServerStream[Envelope, StreamRefusal]{ServerStream: stream})
+	return srv.(LoadServer).StreamRaft(&grpc.GenericServerStream[RaftFrame, StreamRefusal]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type Load_StreamRaftServer = grpc.BidiStreamingServer[Envelope, StreamRefusal]
+type Load_StreamRaftServer = grpc.BidiStreamingServer[RaftFrame, StreamRefusal]
 
 func _Load_ReadReplica_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(Envelope)

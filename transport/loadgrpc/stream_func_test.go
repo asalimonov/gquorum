@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -108,55 +109,58 @@ func TestStreamRefusalIsReportedAsUnreachableDelivery(t *testing.T) {
 	}
 }
 
-// olderServer is a recipient from a release without StreamRaft.
-type olderServer struct{ *serverAdapter }
+// missingStreamServer represents an incompatible recipient without the method.
+type missingStreamServer struct {
+	*serverAdapter
+	unary atomic.Int32
+}
 
-func (olderServer) StreamRaft(loadpb.Load_StreamRaftServer) error {
+func (*missingStreamServer) StreamRaft(loadpb.Load_StreamRaftServer) error {
 	return status.Error(codes.Unimplemented, "method StreamRaft not implemented")
 }
 
-func TestOlderRecipientReceivesUnaryCalls(t *testing.T) {
+func (s *missingStreamServer) SendRaft(ctx context.Context, frame *loadpb.RaftFrame) (*loadpb.Reply, error) {
+	s.unary.Add(1)
+	return s.serverAdapter.SendRaft(ctx, frame)
+}
+
+func TestMissingStreamDoesNotFallBack(t *testing.T) {
 	t.Parallel()
+	var server *missingStreamServer
 	sender, _, local, remote := newProtocolPairWith(t, 4096, func(s *grpc.Server, receiver *Transport) {
-		loadpb.RegisterLoadServer(s, olderServer{&serverAdapter{transport: receiver}})
+		server = &missingStreamServer{serverAdapter: &serverAdapter{transport: receiver}}
+		loadpb.RegisterLoadServer(s, server)
 	})
-	var mu sync.Mutex
-	var got []uint64
-	remote.receive = func(_ context.Context, b load.RaftBatch) error {
-		mu.Lock()
-		defer mu.Unlock()
-		got = append(got, b.DeliveryID)
-		return nil
-	}
-	reports := make(chan load.DeliveryReport, 4)
+	var received atomic.Int32
+	remote.receive = func(context.Context, load.RaftBatch) error { received.Add(1); return nil }
+	reports := make(chan load.DeliveryReport, 16)
 	local.report = func(_ context.Context, r load.DeliveryReport) error { reports <- r; return nil }
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	// The first batch is written to a stream the recipient refuses; it is lost
-	// and reported unreachable, so Raft resends it.
-	if err := sender.SendRaft(ctx, appendBatch(local, remote, 1)); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case r := <-reports:
-		if r.DeliveryID != 1 || r.Kind != load.DeliveryUnreachable {
-			t.Fatal(r)
+	for id := uint64(1); id <= 2; id++ {
+		batch := appendBatch(local, remote, id)
+		// The error can arrive asynchronously after Send buffered the frame.
+		_ = sender.SendRaft(ctx, batch)
+		for {
+			select {
+			case r := <-reports:
+				if r.From != batch.From || r.To != batch.To || r.Kind != load.DeliveryUnreachable {
+					t.Fatal("incorrect failure identity", r)
+				}
+				if r.DeliveryID == id {
+					goto reported
+				}
+			case <-ctx.Done():
+				t.Fatal("missing stream failure was not reported", ctx.Err())
+			}
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("lost streamed batch was not reported")
+	reported:
 	}
-	waitFor(t, "unary fallback", func() bool {
-		sender.mu.Lock()
-		defer sender.mu.Unlock()
-		return len(sender.unaryOnly) == 1
-	})
-	if err := sender.SendRaft(ctx, appendBatch(local, remote, 2)); err != nil {
-		t.Fatal(err)
+	if err := sender.Close(ctx); err != nil {
+		t.Fatal("stream was not joined", err)
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(got) != 1 || got[0] != 2 {
-		t.Fatal("unary fallback did not deliver", got)
+	if server.unary.Load() != 0 || received.Load() != 0 {
+		t.Fatal("incompatible stream fell back to unary")
 	}
 }
 
