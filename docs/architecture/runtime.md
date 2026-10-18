@@ -376,6 +376,13 @@ availability and pending/excluded admission can remain parked. A leader's volati
 exact-process name-conflict diagnostic never displaces the live holder's route or
 allocates membership. `Cluster.ParkedJoins` exposes these observations.
 
+Load peer validation checks membership through an exact `(cluster, node, group,
+replica)` index derived from the approved and retained routing catalog. Metadata
+graph changes, pruning and restore rebuild it before publication; session-only
+changes share the immutable set. Every received batch still checks the current
+process incarnation and service lifetime. Staged intent never grants a route,
+and the index does not replace current authorization or local replica checks.
+
 ## Shutdown, reads and decision callbacks
 
 `RequestStop` schedules teardown; callbacks may invoke it and return. `Stop(ctx)`
