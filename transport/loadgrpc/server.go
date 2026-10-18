@@ -68,6 +68,9 @@ func (s *serverAdapter) SendRaft(parent context.Context, frame *loadpb.RaftFrame
 	t := s.transport
 	ctx, err := t.begin(parent)
 	if err != nil {
+		if parent.Err() != nil {
+			return nil, status.FromContextError(parent.Err()).Err()
+		}
 		return encodeReply(nil, err, t.options.MaxMessageBytes)
 	}
 	defer ctx.Release()

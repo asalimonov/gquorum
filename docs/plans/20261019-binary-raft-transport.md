@@ -6,7 +6,7 @@
 **Target architecture:** [docs/brainstorms/20261019-binary-raft-transport-target.md](../brainstorms/20261019-binary-raft-transport-target.md)
 **Brainstorm log:** [docs/brainstorms/20261019-binary-raft-transport.md](../brainstorms/20261019-binary-raft-transport.md)
 **Source baseline:** `631a606`, branch `feat/structural-refactorings-and-fuzzing`
-**Status:** in progress; Tasks 1–2 complete; boundary regressions and benchmarks are next.
+**Status:** in progress; Tasks 1–3 complete; real application validation is next.
 
 ## Important notices
 
@@ -245,51 +245,51 @@ only if the new regressions reveal an implementation defect.
 ownership; §Delivery flows/Failures; §Verification and performance experiment;
 §Persistence and compatibility.
 
-- [ ] Extend table-driven unit coverage to every native Raft message kind the
+- [x] Extend table-driven unit coverage to every native Raft message kind the
   engine uses; include entry data, ConfState, snapshots, contexts, large numeric
   IDs and arbitrary/non-UTF-8 application bytes. Assert exact peer preservation
   and distinguish meta MemberID from ReplicaID.
-- [ ] Test exact byte-limit and limit+1 behavior, protobuf length-varint
+- [x] Test exact byte-limit and limit+1 behavior, protobuf length-varint
   transitions, 4096 versus 4097 messages (split on send, reject an excessive
   single received frame), and oversized later messages with no returned frames.
   Keep fixtures small except the deliberate count-bound case.
-- [ ] Test nil peers, incomplete fields, invalid UTF-8 identity strings on send,
+- [x] Test nil peers, incomplete fields, invalid UTF-8 identity strings on send,
   version 0/1/unknown, empty message encodings, corrupt later native messages,
   mismatched native endpoints, and already-canceled decode contexts. Assert no
   partial `batch.Messages` publication when decoding fails.
-- [ ] Verify ownership: mutate original messages after encoding and raw frame
+- [x] Verify ownership: mutate original messages after encoding and raw frame
   bytes after decoding; decoded commands/contexts/snapshots must not change.
   Avoid reflect.DeepEqual assertions that mistake nil/empty normalization for
   lost data. Do not require unknown native fields unsupported by the pinned
   codec to round-trip; this is not a mixed-Raft-version feature.
-- [ ] Add functional protocol-double checks for authentication before native
+- [x] Add functional protocol-double checks for authentication before native
   decoding/Node ingress, current recipient change, invalid input yielding zero
   ingress calls, and a healthy stream surviving an attributable refusal.
   Keep real authorization/quorum behavior in existing Node/example coverage.
-- [ ] Retain and strengthen ordered stream reuse, cancellation while blocked,
+- [x] Retain and strengthen ordered stream reuse, cancellation while blocked,
   ignored-cancellation Close ownership, and partial snapshot failure assertions.
   Ensure reduced binary frame sizes do not accidentally turn the old multi-frame
   snapshot fixture into a single-frame case; size its messages deliberately.
-- [ ] Test oversized outgoing streaming refusal handling as changed in Task 2,
+- [x] Test oversized outgoing streaming refusal handling as changed in Task 2,
   preserving shutdown/join cleanup and original delivery identity. Malformed
   native-frame regressions must cover both streaming and unary reception.
-- [ ] Add `BenchmarkRaftFrameCodecs`, using test-only legacy JSON framing against
+- [x] Add `BenchmarkRaftFrameCodecs`, using test-only legacy JSON framing against
   the binary codec for heartbeat, app response, ReadIndex, append commands,
   multiple messages and snapshot. Measure encode and decode separately with
   the outer protobuf layer included, plus full split/encode path where relevant.
   Test-only JSON helpers must not become a production fallback.
-- [ ] Report ns/op, B/op, allocs/op, encoded bytes and frames per case. Use the
+- [x] Report ns/op, B/op, allocs/op, encoded bytes and frames per case. Use the
   same input and semantic validation for both codecs; do not substitute the old
   cache-command/Sonic benchmark for this transport benchmark. Save repeated raw
   results under `test-reports/performance/binary-raft-codec/`.
 
 #### Verification
 
-- [ ] Run `make test`, focused adapter units/functional tests with race, and vet
+- [x] Run `make test`, focused adapter units/functional tests with race, and vet
   for both tags. Run repeated benchmarks with the exact command below.
-- [ ] If benchmark results regress, inspect actual frame/codec costs and fix or
+- [x] If benchmark results regress, inspect actual frame/codec costs and fix or
   record a blocker; do not proceed on an unmeasured performance claim.
-- [ ] Check the commit's changed-line total, including any defect fixes.
+- [x] Check the commit's changed-line total, including any defect fixes.
 
 ### Task 4: Verify real applications and document measured behavior
 

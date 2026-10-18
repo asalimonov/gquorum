@@ -283,6 +283,9 @@ func (s *serverAdapter) receiveStreamed(parent context.Context, frame *loadpb.Ra
 		return err, nil
 	}
 	if err != nil {
+		if parent.Err() != nil {
+			return nil, status.FromContextError(parent.Err()).Err()
+		}
 		return nil, status.Error(codes.Unavailable, "load transport is not serving")
 	}
 	defer ctx.Release()
