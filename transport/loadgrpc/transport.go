@@ -80,8 +80,7 @@ type Transport struct {
 	closed  bool
 	active  int
 	clients map[string]*connection
-	// Outgoing Raft streams by exact replica route; addresses whose recipient
-	// lacks StreamRaft map to the time streaming is retried.
+	// Outgoing Raft streams by exact replica route.
 	streams    map[streamKey]*raftStream
 	janitor    bool
 	streamIdle time.Duration

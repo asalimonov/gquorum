@@ -6,7 +6,7 @@
 **Target architecture:** [docs/brainstorms/20261019-binary-raft-transport-target.md](../brainstorms/20261019-binary-raft-transport-target.md)
 **Brainstorm log:** [docs/brainstorms/20261019-binary-raft-transport.md](../brainstorms/20261019-binary-raft-transport.md)
 **Source baseline:** `631a606`, branch `feat/structural-refactorings-and-fuzzing`
-**Status:** in progress; Tasks 1–4 complete; final architectural audit and full cluster validation remain.
+**Status:** complete; all five tasks implemented, validated and audited.
 
 ## Important notices
 
@@ -352,34 +352,34 @@ verification in `docs/testing/binary-raft-transport.md` and this plan.
 **References:** target architecture **all sections**, especially §Implementation
 map and method signatures, §Persistence and compatibility, and §Key algorithms.
 
-- [ ] Verify protocol component: every RaftPeer/RaftFrame field number/type,
+- [x] Verify protocol component: every RaftPeer/RaftFrame field number/type,
   version rule, two changed RPC inputs, generated artifacts and unchanged
   administrative/reply definitions match the target.
-- [ ] Verify codec component: all seven target helpers, range type and two
+- [x] Verify codec component: all seven target helpers, range type and two
   constants exist; size planning, complete preflight, limits, owned native
   decoding and error classifications match the target and clarifications.
-- [ ] Verify client/stream component: every signature in Task 2 matches; streaming
+- [x] Verify client/stream component: every signature in Task 2 matches; streaming
   ordinary traffic, unary snapshots, delivery-report identity, cancellation,
   reuse, rerouting, idle retirement and joining remain implemented. Confirm all
   JSON trial splitters and `unaryOnly` downgrade paths are gone.
-- [ ] Verify server component: both handlers authenticate before native decode,
+- [x] Verify server component: both handlers authenticate before native decode,
   reject malformed inputs before Node, and invoke current exact authorization
   per frame. Confirm control handlers preserve their original behavior.
-- [ ] Verify lifecycle/configuration component: no new public options, callbacks,
+- [x] Verify lifecycle/configuration component: no new public options, callbacks,
   default routes or lifetime owners; New remains I/O-free and Close retains
   accepted work. No unplanned pooling, header caching or authorization cache.
-- [ ] Verify persistence/application component: no schema/DDL/migration delta,
+- [x] Verify persistence/application component: no schema/DDL/migration delta,
   public API changes or application codec changes; frozen fixture hashes and
   storage versions are untouched. No regeneration of old fixtures to pass tests.
-- [ ] Verify coverage/evidence component: unit/functional suite separation,
+- [x] Verify coverage/evidence component: unit/functional suite separation,
   race coverage, real cache/scheduler tests, codec benchmarks and repeated
   profiling all address the target. Deferred scenarios have their documented
   existing behavior and narrowly placed TODO comments.
-- [ ] Record every deviation in NOT IMPLEMENTED GAPS, then resolve each against
+- [x] Record every deviation in NOT IMPLEMENTED GAPS, then resolve each against
   the target/plan, rerunning affected checks. Do not mark completion while a
   mandatory component is missing. If a gap cannot be corrected, leave it `[_]`,
   explain the blocker, and report it rather than silently narrowing the target.
-- [ ] Verify actual wiring LAST: trace cache and scheduler runtime construction
+- [x] Verify actual wiring LAST: trace cache and scheduler runtime construction
   through New/Bind/Register, generated SendRaft/StreamRaft dispatch, binary
   sender/receiver helpers, Node.ReceiveLoadRaft and delivery reporting. Every
   new production component must be reachable from real entry points, not merely
@@ -518,12 +518,21 @@ compatibility is deliberately unsupported by user decision, not a missing TODO.
 
 ## NOT IMPLEMENTED GAPS
 
-No discovered design gap at planning completion. This does **not** claim that
-implementation exists: all tasks remain unchecked. During execution add:
+- [x] Transport cache comment — target §Implementation map/transport.go — audit
+  found a stale comment describing the removed legacy downgrade cache; corrected
+  to exact-route streams only. No runtime change.
+- [x] First-send failure reporting — target §Delivery flows/ordinary traffic —
+  implementation records lastDelivery before Send and checks broken state after
+  buffering, rather than the pseudocode's success-only store. This closes the
+  first-delivery asynchronous error race; missing-method and blocked-send
+  regressions pass. Public/report identities and lifecycle ownership are preserved.
+- [x] Cancellation classification — target §Failures — canceled admission is
+  returned as context status rather than Unavailable; both binary ingress modes
+  have passing functional regressions.
 
-- `[_] Component — target reference — observed gap — attempted resolution — blocker`.
-- Replace with `[x]` only after the fix and relevant verification pass; an
-  approved deferral must quote the user's decision and explain its scope.
+No mandatory target component is missing. Final full-suite validation passed
+91/91 checks on Docker Desktop with CLUSTER_PARALLEL=4. Earlier failed attempts
+and measured performance uncertainty are documented explicitly in the validation report.
 
 ## NOT PLANNED CHANGES
 

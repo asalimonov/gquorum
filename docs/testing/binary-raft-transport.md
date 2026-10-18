@@ -29,7 +29,7 @@ Raw [benchmark output](../../test-reports/performance/binary-raft-codec/benchmar
 
 ## Three-node cache experiment
 
-Each variant was captured three times serially on the same Apple M4 Pro/Colima linux/arm64 host: one loader worker, 615 generated keys, 80% reads/20% writes, GOMAXPROCS=1 per container, disabled load fsync, five-second warmup and 30-second CPU capture. Syscalls were traced in a separate subsequent ten-second phase. The existing user cache deployment remained running with its loader disabled. No tests or benchmarks were run concurrently with CPU captures.
+Each variant was captured three times serially on the same Apple M4 Pro/Colima linux/arm64 host (VM: 2 CPUs, 2 GiB RAM): one loader worker, 615 generated keys, 80% reads/20% writes, GOMAXPROCS=1 per container, disabled load fsync, five-second warmup and 30-second CPU capture. Syscalls were traced in a separate subsequent ten-second phase. The existing user cache deployment remained running with its loader disabled. No tests or benchmarks were run concurrently with CPU captures.
 
 JSON source: 3359346 (schema-only change, old RPC path still active). Binary source: b5a1f44. Identical pre-existing credential/profiler fixes were preserved for both. Each capture retains its manifest, source patch, exact binaries/build metadata/hashes, logs, heap/CPU/goroutine profiles, syscall events, CSV summaries and interactive heatmap/flamegraph.
 
@@ -84,10 +84,11 @@ The following checks have completed on the implementation. Counts include parent
 | `make test-function-race` | 1,054 passed; [functional race report](../../test-reports/function-race/20261018T211937.294502Z-xp59cmgc/report.md) |
 | `make lint` | All modules/tags passed; `test-reports/binary-raft/task4-lint-final.log` |
 | `make proto-check` | Passed; generated output reproducible, other protocols unchanged |
+| Full Docker cluster suite | 91/91 passed, no skips, `CLUSTER_PARALLEL=4`; [report](../../test-reports/cluster/20261018T213853.204909Z-1v_qw8ny/report.md) |
 | Python script tests | 38 passed; `test-reports/binary-raft/final-python-tests.log` |
 | `make test-example` | Meta-only Compose lifecycle passed; [report](../../test-reports/example/20261018T211922.401136Z-pddqabyu/report.md) |
 
-`make test-cache-example` passed after the restart-barrier fix: [report](../../test-reports/example/20261018T212038.573110Z-bonbjpqm/report.md). It covers retained WAL/value/replica identity after one-node and full-cluster restart, health-aware failover and 1/10/256 loader workers. `make test-scheduler-example` also passed: [report](../../test-reports/example/20261018T212406.852766Z-6qi0rw53/report.md), covering execution, leadership transfer, executor/leader crashes, snapshot recovery, quorum loss and a returning partitioned executor. Both private example projects/images/volumes were cleaned; the user cache containers remained running. The final full cluster suite is running and will be recorded in the architectural audit.
+`make test-cache-example` passed after the restart-barrier fix: [report](../../test-reports/example/20261018T212038.573110Z-bonbjpqm/report.md). It covers retained WAL/value/replica identity after one-node and full-cluster restart, health-aware failover and 1/10/256 loader workers. `make test-scheduler-example` also passed: [report](../../test-reports/example/20261018T212406.852766Z-6qi0rw53/report.md), covering execution, leadership transfer, executor/leader crashes, snapshot recovery, quorum loss and a returning partitioned executor. Both private example projects/images/volumes were cleaned; the user cache containers remained running. The final full cluster suite also passed; its environment and earlier failure history are recorded below.
 
 Failure history is retained rather than replaced: initial schema commit lint rejected unused preparatory codec helpers; they were moved to the RPC-switch commit. Temporary `.go` evidence backups were renamed `.go.txt` after Go discovered them as packages. A new stream cancellation test found admission converting Canceled to Unavailable; both binary handlers now preserve context classification.
 
@@ -96,3 +97,69 @@ The first cache example run failed on endpoint discovery after immediate kill/st
 ## Deferred work
 
 Administrative/reply protobuf conversion, application codecs, buffer pooling, header compression, coalescing, routing/authorization indexing, oversized-snapshot chunking and broader queue accounting remain outside this change. Heap lifetime allocation totals include startup; they are not steady-state allocation rates. Traced syscall durations include blocking/tracer overhead and are never added to sampled CPU time.
+
+## Process test environment
+
+The initial broad cluster run selected the Docker SDK default socket while the
+CLI had built the private image in Colima. The missing image caused setup
+failures; that [failed report](../../test-reports/cluster/20261018T212607.796857Z-hf6gicbs/report.md)
+is retained. The rerun uses the same private image with an explicit daemon:
+
+```sh
+make test-cluster-build CLUSTER_IMAGE=gquorum-test:binary-raft-b5a1f44
+DOCKER_HOST=unix:///Users/speckzzz/.colima/default/docker.sock \
+TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock \
+make test-cluster-run CLUSTER_IMAGE=gquorum-test:binary-raft-b5a1f44
+```
+
+The socket path is host-specific; use the endpoint from `docker context inspect`
+for the selected daemon. No shared image tag was overwritten. The failed daemon
+attempt left no labeled gquorum test networks/volumes. Additional Go tool-module
+tests (`scripts/profiledecode`, `scripts/revive`) passed.
+
+## Architectural audit
+
+Reviewed every section of the target, including its algorithms, against the final
+implementation. The mappings below describe implemented behavior, not planned stubs.
+
+| Requirement | Implementation and evidence |
+| --- | --- |
+| Exact schema/version/RPC inputs | `internal/loadpb/load.proto`: RaftPeer fields 1–6 and RaftFrame fields 1–5 match the target; both Raft inputs use RaftFrame. Controls/Reply/StreamRefusal are unchanged. `make proto-check` passes. |
+| Complete identity and native ownership | `raft_wire.go`: all seven specified helpers, range type, version 2/count 4096 constants; distinct MemberID/ReplicaID, UTF-8 identity validation, owned native bytes. Native-kind, large-ID and mutation/aliasing tests pass. |
+| Atomic complete preflight and bounds | `planRaftFrames` accounts for exact outer header/tag/length/native sizes with checked arithmetic. `encodeRaftFrames` prepares every frame before network activity. Exact-size, varint, 4096/4097 and oversized-later-item regressions pass. |
+| Ordered streams and snapshot completion | `client.go`/`stream.go` preserve ordered Send, exact-route reuse, rerouting, idle retirement and delivery reports. Ordinary requests always stream; every snapshot-bearing batch frame is unary. Partial-snapshot and missing-method/no-fallback tests pass. |
+| Receive validation and authorization | Both binary handlers authenticate before native decoding and check current local identity. Invalid frames never publish a prefix. `Node.ReceiveLoadRaft` still delegates to Host.ReceiveRaft, which validates current exact peers before engine Step. Protocol functional/race tests cover these boundaries. |
+| Failure/cancellation/ownership | Terminal malformed/auth/size errors remain distinct from attributable refusals. begin/Release, canceled sends, retained Close ownership and joined receiver/janitor references remain. Cancellation, blocked-send, idle retirement, oversized-refusal and ignored-callback-close tests pass. |
+| Generic public APIs/configuration | No changes to Node, load.Transport/RaftBatch/Peer, Ingress, Options, constructors or application codec interfaces. New has no I/O/callbacks. Only the legacy unary downgrade cache was removed. |
+| Persistence and opaque application data | Diff against 631a606 contains no store/WAL/meta schema or application payload-codec changes. Frozen fixtures, go.mod/go.sum, meta protobuf and testapp protocol are unchanged. Functional compatibility tests and real cache retained-state restart pass. |
+| Measured evidence and scope | Unit/functional tags remain separate, real examples use loadgrpc, repeated benchmarks/captures retain all evidence and uncertainty. Scoped TODOs document deferred work without new pooling, authorization caching or warnings. |
+
+Audit corrections: removed one stale comment describing the old unary fallback
+cache. The first-delivery race fix publishes lastDelivery before Send and checks
+broken state afterward, strengthening the target pseudocode's success-only
+update. Cancellation during admission/authentication preserves context status.
+These refinements are covered by regressions and recorded in the plan.
+
+The Colima complete process run finished with 88/91 passing checks: the fifteen-group
+cleanup test exhausted its 110-second deadline, the fifteen-group resource case
+exhausted its setup deadline, and one founding-startup liveness request returned
+EOF. Its [report](../../test-reports/cluster/20261018T212742.871137Z-5997u2nt/report.md)
+is retained. Eight concurrent cases oversubscribe this VM's 2 CPUs/2 GiB; this
+run does not establish a codec regression (the process fixture uses its own
+unchanged transport). To distinguish environment limits from code failures, the
+identical private image was exported/imported to the existing Docker Desktop
+engine (14 CPUs, 39,878,758,400 bytes RAM). No deadlines or assertions changed.
+Its manifest digest is
+`sha256:c5c941fa8decbbd4a5fd795235d2e9a546353b20874ecfa2cced42131632fff2`.
+The full rerun explicitly selects `DOCKER_HOST=unix:///var/run/docker.sock`.
+
+Docker Desktop at parallelism 8 passed 90/91 checks ([report](../../test-reports/cluster/20261018T213207.202220Z-17_ufbs7/report.md)), including those three previously failing cases. The pressure fixture timed out during HTTP connection preparation (214/256 connections within ten seconds), before its measured workload. The unchanged pressure test passed alone in 47 seconds ([report](../../test-reports/cluster/20261018T213751.954075Z-z1bovqxf/report.md)): pending peak 256, 146 continuous samples, 14,784 overload attempts, overload p95 3.388 ms, and all measured healthy-group operations below 100 ms. The full rerun with `CLUSTER_PARALLEL=4` passed 91/91 checks with no skips in 360.302 seconds ([report](../../test-reports/cluster/20261018T213853.204909Z-1v_qw8ny/report.md)). Per-case workloads, deadlines and correctness assertions are unchanged. This is the passing full-suite configuration; eight-way setup remains sensitive to the environment.
+
+Final wiring trace, performed after all other audit items and process validation:
+
+- Cache `server/main.go` and scheduler `main.go` call their runtime Start methods. Both construct loadgrpc with explicit credentials/resolution, assign it to Node's `Loads.Transport`, Bind the constructed Node, Register the generated service and serve gRPC before Node.Start.
+- Managed `engineTransport.Send` supplies the exact peers and registered delivery ID to the configured transport. `SendRaft → sendBatchFrames → encodeRaftFrames` reaches the size planner/native encoder; `sendFrames` selects the reusable stream or ordered snapshot unary calls. No old Raft JSON branch remains.
+- Generated `_Load_SendRaft_Handler` and `_Load_StreamRaft_Handler` dispatch typed RaftFrame values to the registered adapter. Both ingress paths run bounded header validation, authentication and native decoding, then call `Node.ReceiveLoadRaft → Host.ReceiveRaft → validateReceivedBatch/receivedReplica → StepBatch`. The current peer and local publication checks remain in that real path.
+- Unary outcomes and stream refusals call `Node.ReportLoadDelivery → Host.ReportDelivery`, preserving exact route and delivery-token checks. Both application Stop methods join Node before transport Close and gRPC Stop; accepted operations, receive workers and connection references remain joined.
+
+Final Docker Desktop checks found no gquorum test containers, networks or volumes; the private test image was removed. The Colima context/socket disappeared during final validation, so its image copy could not be removed or its user deployment rechecked at the end. Earlier Colima cleanup checks had confirmed no test resources and preserved the original cache containers. No attempt was made to restart or recreate that daemon. The five pre-existing staged files remain byte-for-byte and index-identical to the saved starting state.
