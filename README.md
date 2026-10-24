@@ -221,3 +221,9 @@ timelines under `test-reports/<suite>/latest/`. Each run keeps its own directory
 The [API validation record](docs/testing/api-refactor-validation.md) records the
 completed public API refactor checks. The [stable learner validation record](docs/testing/stable-learner-validation.md)
 maps voter configurations, metrics, forwarding and recovery to their implementation and tests.
+
+## License
+
+Copyright 2026 Aleksandr Salimonov.
+
+Licensed under the [Apache License, Version 2.0](LICENSE).
