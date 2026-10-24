@@ -16,7 +16,7 @@
 
 **Review/clarifications:** [docs/review/feat_permanent-majority-loss-recovery.md](../review/feat_permanent-majority-loss-recovery.md)
 
-**Status:** ready for implementation; peer review closed; no implementation task has been executed.
+**Status:** implementation in progress; Task 1 complete; Task 2 next.
 
 ## Scope and precedence
 
@@ -152,45 +152,45 @@ UPDATED `load/application.go`; owning unit tests and external caller compile cov
 **Dependencies:** none. **Outcome:** exact API and pure functionality, with explicit
 refusals for unimplemented I/O paths.
 
-- [ ] Before the first Go edit, capture `make bench BENCH_TIME=1s` at the current
+- [x] Before the first Go edit, capture `make bench BENCH_TIME=1s` at the current
   code baseline with machine/toolchain/source information. Preserve its raw output
   for the matching after-change run in Task 15; this is measurement, not a new task.
-- [ ] Implement the public value/error types and exact root signatures in Appendix A.
+- [x] Implement the public value/error types and exact root signatures in Appendix A.
   Keep root → recovery → private model/topology/storage dependency direction;
   neither the value package nor internals import root gquorum. Do not expose Paths.
-- [ ] Define shared private local/import/seed/receipt models from Appendices B/C and
+- [x] Define shared private local/import/seed/receipt models from Appendices B/C and
   target §10. Use aliases where specified, one canonical encoding, owned-copy
   helpers, and explicit nil omission for the future FSM subtree. No SQL/ORM/cache
   service is introduced. The current metadata FSM is not extended until Task 9.
-- [ ] Implement NewRecovery's zero-or-one Options rule and required-field copying.
+- [x] Implement NewRecovery's zero-or-one Options rule and required-field copying.
   Preserve zero-vs-explicit resource settings. Reject Store/Retirement and invalid
   source configuration without I/O; ignore irrelevant old bootstrap, factory,
   transport, listener, policy and lifecycle inputs. Defer physical path/pin checks.
-- [ ] Implement Request/ID validation, the finite resource defaults, Issue.Remedy
+- [x] Implement Request/ID validation, the finite resource defaults, Issue.Remedy
   and Refusal.Error/Unwrap with existing fault categories and original causes.
   Generated IDs are created during Inspect, not during pure construction.
-- [ ] Implement RecoveryStartOptions exactly per target §3.4: phase/mode checks,
+- [x] Implement RecoveryStartOptions exactly per target §3.4: phase/mode checks,
   fresh B member or zero-member join, single founder or preserved join seeds,
   caller-supplied fresh InstanceID, unchanged roots/policy/credentials, and copied
   mutable values. Do not call listener/resolver methods or create resources.
-- [ ] Add `Recovery *load.RecoveryInfo` to ReplicaSpec with the exact Appendix A
+- [x] Add `Recovery *load.RecoveryInfo` to ReplicaSpec with the exact Appendix A
   fields. Keep GroupFactory/Application/StateMachine signatures unchanged and nil
   Recovery on ordinary acquisition. Do not start recovery replay from this field alone.
-- [ ] Add explicit temporary typed refusals for Inspect/Approve/Run/Cancel/Status/List
+- [x] Add explicit temporary typed refusals for Inspect/Approve/Run/Cancel/Status/List
   until their implementing tasks land. Constructor success must not imply recovery
   readiness, and no method may synthesize a successful phase.
-- [ ] Add meaningful units for configuration copying/refusal, ignored unrelated
+- [x] Add meaningful units for configuration copying/refusal, ignored unrelated
   invalid Node settings, zero/one/multiple options, helper field transformations,
   fresh-ID requirements, status-not-authority and errors.Is/As. Add caller-side
   compilation against all public signatures, including nil optional recovery input.
 
 #### Verification
 
-- [ ] `make test` passes in all five application modules; run focused recovery/model
+- [x] `make test` passes in all five application modules; run focused recovery/model
   units and root/load vet checks. Do not create engines or stores in these units.
-- [ ] Verify no public recovery package import cycle, no exported Rollback/Paths/
+- [x] Verify no public recovery package import cycle, no exported Rollback/Paths/
   executable Plan codec and no changes to existing persisted fixtures or Node API.
-- [ ] Record commands/results; fix all failures before moving on.
+- [x] Record commands/results; fix all failures before moving on.
 
 ### Task 2: Establish private WAL implementation and exclusive startup ownership
 
