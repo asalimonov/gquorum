@@ -16,7 +16,7 @@
 
 **Review/clarifications:** [docs/review/feat_permanent-majority-loss-recovery.md](../review/feat_permanent-majority-loss-recovery.md)
 
-**Status:** implementation plan; no implementation task has been executed.
+**Status:** ready for implementation; peer review closed; no implementation task has been executed.
 
 ## Scope and precedence
 
@@ -271,6 +271,13 @@ before the recovery workflow is implemented. Recovery jobs/routes come in Task 1
   recreate consumed meta listeners and fresh InstanceID. Keep normal startup and
   final whole-process cleanup behavior, and make every handler safe when no Node
   is active. Do not implement the recovery job or call unimplemented recovery I/O.
+- [ ] Route transport callbacks/filters (including filterReadRaft), header/auth
+  handlers and observations through a synchronized current-Node-generation accessor.
+  Pin the accepted generation for a call, reject unavailable/stale generations and
+  join its in-flight work before replacing it. Do not read a.node unsynchronized
+  during a swap or hold the generation mutex while waiting on library callbacks.
+  Add a race test delivering Raft batches/HTTP requests during Stop/replacement;
+  old-generation deliveries cannot be forwarded into the new Node.
 - [ ] Audit every a.store dereference and every wrapper-dependent handler, including
   local observations and shutdown. Preserve borrowed-mode observations/tests.
   In owned mode expose Node.Status/Identity/ParkedLoads, load.Group.Identity/Status,
@@ -660,7 +667,9 @@ ownership, with data/publication held until Tasks 11–12 complete restoration.
   manifest **before metadata founding/start**, including the interval with no
   replicated Recovery record. Disable scheduler/repair ticks and reject public
   Cluster stage/approve/mutations, admission/join and StartLoadGroup with an existing
-  typed fault plus `recovery_in_progress` reason. Allow only exact internal v1
+  typed fault plus `recovery_in_progress` reason. Explicitly reject
+  `Node.SetSchedulingEnabled(ctx, true)` while this gate is active; neither that
+  override nor configuration may enable a scheduler/repair tick. Allow exact internal v1
   founding/auto-approval, local session activation and needed grants/receipts.
   The gate and replicated restrictions overlap until committed import completion;
   no caller-supplied context/flag can bypass them. Publication/Run remains separately
@@ -689,8 +698,8 @@ ownership, with data/publication held until Tasks 11–12 complete restoration.
   cannot archive the successor again. Terminal history does not veto later valid B
   readmission or turn source archives into automatic reseeding permission.
 - [ ] Hold the private controller between v1 founding and import in an owning test;
-  attempt public Stage/Approve/mutation, a scheduler tick, StartLoadGroup and a
-  joining protocol request. Prove no intervening topology change occurs while
+  attempt public Stage/Approve/mutation, SetSchedulingEnabled(ctx, true), a scheduler
+  tick, StartLoadGroup and a joining protocol request. Prove no intervening topology change occurs while
   internal founding/session/authority progress remains possible, then release the
   controller and complete the same exact import. Test handoff/restart without a gap.
 - [ ] Add functional/race tests for marker failure, admission/stop races, invalid
@@ -902,6 +911,11 @@ for the requirements requested by Meridian, without running Meridian.
   approve/run the complete survivor, restart B on identical roots, verify new lineage
   and monotonic identities, exact retained data/deduplication and successful new writes.
   Management remains responsive throughout and no operator shell/file copy is needed.
+- [ ] Keep REC-02 and REC-04 in separate isolated subtests or groups: REC-02 uses
+  a lagging follower as survivor; REC-04 uses the leader holding the uncommitted
+  tail. Select and confirm the actual load leader as the REC-04 survivor, or use
+  an existing supported leadership-transfer control before enabling drops if a
+  fixed survivor is required. Never assume one replica is both roles in one setup.
 - [ ] REC-02/04: hold the donor behind writes acknowledged by the other majority and
   separately create a valid uncommitted load tail using Task 13's follower
   DropAppend setup. Require offline Inspect LastLog > Commit and an absent unique
@@ -1264,6 +1278,16 @@ scope or discard user changes.
   the existing 64 MiB transport limit. No public API or approved behavior changed.
 - Target/brainstorm and their recorded hashes remain unchanged: these are explicit
   implementation/verification refinements of the approved design, not new API proposals.
+
+### Review closure — 2026-10-25
+
+- The focused peer review of 6917d47 closed with no blocker, disagreement or open
+  user decision. Its three precision notes are incorporated: SetSchedulingEnabled
+  cannot defeat the local gate, REC-02/REC-04 use distinct donor setups, and fixture
+  callbacks/handlers use a synchronized pinned Node generation with a swap race test.
+- The 16-task structure and approved public API remain unchanged. Validation here
+  covers documentation and source comparison only; implementation tests remain
+  execution work.
 
 ## Appendix A: Public target declarations
 
