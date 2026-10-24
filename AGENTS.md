@@ -70,6 +70,7 @@ cleanup evidence and shutdown release ownership.
 | `examples/cluster/` | Separate Go module: Kong CLI/configuration, cluster construction/readiness in `cluster.go`, HTTP adapter in `http.go` and process wiring in `main.go`. |
 | `tests/cluster/testapp/` | Caller FSM, load protocol, retirement, unit/functional fixture tests and authenticated fault controls. |
 | `tests/cluster/` | Separate module for Docker process, fault, scale, performance and Compose tests. |
+| `tests/sim/` | Separate opt-in Gosim module: deterministic runtime/filesystem/network simulations using real Node APIs and metadata gRPC transport. |
 | `scripts/test_report.py` | Shared test runner: Meridian-style stdout summaries, persistent package logs/JUnit and Markdown timelines. |
 
 ## Contracts to preserve
@@ -208,6 +209,8 @@ including private ledger and engine assertions, stay in their owning packages.
 They may start one local participant or protocol doubles. Multi-node consensus,
 admission and application scenarios belong to the Docker pool under
 `tests/cluster`, even when their former fixtures ran inside a single Go process.
+The separate `tests/sim` module is the opt-in exception for deterministic
+multi-node Gosim scenarios; keep simulation dependencies out of library modules.
 The library does not load application configuration or choose implicit storage roots.
 
 ## Development and verification
@@ -223,6 +226,7 @@ separate example and test modules. Choose checks according to the change:
 | `make test-function` / `make test-function-race` | Non-Docker functional tests using `-tags=functional`, with optional race detection. |
 | `make test-example` | Actual demo; requires Docker Compose. |
 | `make test-cluster` | VERY SLOW Docker process scenarios with the `clustertest` tag. Run only at the end of a set of changes/commits, not after small or intermediate changes. |
+| `make test-sim` | Deterministic three-node simulations; `SIM_SEEDS` selects replay seeds and `SIM_ARGS` filters tests. |
 | `make test-perf` / `make bench` | Process performance/resource gates or planner/snapshot benchmarks. |
 | `make generate` / `make proto-check` | Regenerate protocols / require no generated diff; needs `protoc`. |
 

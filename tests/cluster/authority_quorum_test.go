@@ -146,21 +146,41 @@ func TestAuthorityGroupRevocationRemainsPendingWithoutLoadQuorumThreeNodes(t *te
 			t.Fatal("unconfirmed fence advanced Active", active, err)
 		}
 	}
+	// Restore a majority while keeping the original executor isolated until
+	// another leader is observed. The uncertainty assertion must also hold
+	// across leader replacement, not just when node1 wins the next election.
+	blockedLeader := armReadFault(ctx, t, c, "node1", ReadFaults{DropRaft: true})
 	for node, local := range blocked {
 		clearReadFault(ctx, t, c, node, local)
 	}
+	if err := Poll(ctx, func() (bool, error) {
+		local, err := c.Local(ctx, "node2", "work")
+		return err == nil && local.Status.LeaderID != 0 && local.Status.LeaderID != owner.ReplicaID, err
+	}); err != nil {
+		t.Fatal("restored majority did not replace the original executor", err)
+	}
+	clearReadFault(ctx, t, c, "node1", blockedLeader)
 	if err := Poll(ctx, func() (bool, error) {
 		status, err := c.Revocation(ctx, "node3", old)
 		return err == nil && status.RevocationRequested && status.RevocationComplete, err
 	}); err != nil {
 		t.Fatal("restored quorum did not confirm the resource fence", err)
 	}
-	if err := Poll(ctx, func() (bool, error) {
-		status, err := c.Operation(ctx, "node2", newOp)
+	// A transient quorum failure may replace the approval-time
+	// membership_unproven diagnostic. Assert the safety state after fresh
+	// quorum reads, rather than requiring that historical reason to persist.
+	for _, node := range c.Nodes() {
+		value, err := c.Read(ctx, node.Spec.Name, "work", "key")
+		requireReadValue(t, value, err, node.Spec.Name, "before")
+		status, err := c.Operation(ctx, node.Spec.Name, newOp)
 		block, found := operationBlock(status, "work")
-		return found && block.Blocked != nil && block.Blocked.Code == "membership_unproven", err
-	}); err != nil {
-		t.Fatal("a fence incorrectly proved the old demotion outcome", err)
+		if err != nil || !found || block.State.Terminal() || block.TotalSteps != 0 || block.Blocked == nil {
+			t.Fatal("a fence incorrectly proved the old demotion outcome", status, err)
+		}
+		converged, err := c.Document(ctx, node.Spec.Name, "active")
+		if err != nil || converged.Version != original.Version {
+			t.Fatal("fencing advanced convergence without membership receipts", converged, err)
+		}
 	}
 	if err := c.SetBarrier(ctx, "node1", "work", topology.StepDemoteVoter, false); err != nil {
 		t.Fatal(err)

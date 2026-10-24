@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/scheduling"
 	"github.com/asalimonov/gquorum/topology"
 	"github.com/asalimonov/gquorum/util"
@@ -36,6 +37,9 @@ type config struct {
 	AddressFree                                          bool
 	Limits                                               topology.Limits
 	SessionTTL, TickInterval                             time.Duration
+	ElectionTicks                                        int
+	MetaVoterConfig                                      *topology.VoterConfig
+	Metrics                                              gquorum.MetricsOptions
 	WALWriteWait, Retention                              time.Duration
 	ProposalTimeout                                      time.Duration
 	SnapshotThreshold                                    uint64
@@ -79,6 +83,13 @@ func main() {
 	flag.IntVar(&c.Limits.MaxReplicas, "max-replicas", c.Limits.MaxReplicas, "Limits.MaxReplicas")
 	flag.DurationVar(&c.SessionTTL, "session-ttl", 3*time.Second, "meta activation session TTL")
 	flag.DurationVar(&c.TickInterval, "tick", 50*time.Millisecond, "Raft tick interval")
+	flag.IntVar(&c.ElectionTicks, "election-ticks", 0, "Raft election ticks for meta and load; zero selects the library default")
+	flag.Func("meta-voter-config", "complete JSON voter configuration for fresh metadata founding; null selects defaults", func(value string) error {
+		return decodeJSON([]byte(value), &c.MetaVoterConfig)
+	})
+	flag.Func("metrics", "JSON metrics options; zero fields select library defaults", func(value string) error {
+		return decodeJSON([]byte(value), &c.Metrics)
+	})
 	flag.DurationVar(&c.Retention, "retention", 0, "fixture: quarantine retention; zero uses library default")
 	flag.DurationVar(&c.WALWriteWait, "wal-write-wait", 0, "load WAL coalescing wait")
 	flag.DurationVar(&c.ProposalTimeout, "proposal-timeout", 0, "load proposal result timeout; zero selects the library default")

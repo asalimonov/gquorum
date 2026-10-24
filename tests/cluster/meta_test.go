@@ -55,6 +55,21 @@ func TestMetaConsensusLoadReplicationAndRetainedLeaderRecoveryThreeNodes(t *test
 	if len(result.Document.Group("work").Replicas) != 3 {
 		t.Fatal("subset placement", result.Document)
 	}
+	// Keep this recovery case on production election and voter-policy defaults.
+	// Three voters have no spare learner; this verifies failover, not promotion.
+	defaults := topology.DefaultVoterConfig()
+	for _, id := range []string{topology.MetaGroupID, "work"} {
+		group := result.Document.Group(id)
+		if group.VoterConfig == nil || *group.VoterConfig != defaults {
+			t.Fatalf("%s did not retain production voter defaults: %+v", id, group.VoterConfig)
+		}
+	}
+	timing := gquorum.DefaultMetaTiming()
+	if c.Spec.Tick != timing.TickInterval || c.Spec.ElectionTicks != timing.ElectionTicks || c.Spec.MetaVoterConfig != nil || c.Spec.Metrics != (gquorum.MetricsOptions{}) {
+		t.Fatal("default recovery case acquired overridden timing", c.Spec)
+	}
+	t.Logf("production defaults: tick=%s election_ticks=%d failure=%s standby=%s",
+		timing.TickInterval, timing.ElectionTicks, defaults.FailureWindow, defaults.StandbyWindow)
 	for i := range 24 {
 		if err := c.Put(ctx, c.Spec.Nodes[i%size].Name, "work", fmt.Sprintf("key-%d", i), fmt.Sprintf("command-%d", i), fmt.Sprintf("value-%d", i)); err != nil {
 			t.Fatal("cross-node proposal", err)
@@ -82,6 +97,7 @@ func TestMetaConsensusLoadReplicationAndRetainedLeaderRecoveryThreeNodes(t *test
 	if stopped == nil {
 		t.Fatal("unknown meta leader")
 	}
+	failureAt := time.Now()
 	if err := stopped.Kill(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -98,6 +114,7 @@ func TestMetaConsensusLoadReplicationAndRetainedLeaderRecoveryThreeNodes(t *test
 	}); err != nil {
 		t.Fatal("leader replacement", err)
 	}
+	t.Logf("replacement metadata leader observed after %s", time.Since(failureAt).Round(time.Millisecond))
 	// Prove the replacement meta leader can commit through a surviving
 	// follower. A staged label has no load lifecycle effects while a host
 	// is down; the recovering process must replay this new document.

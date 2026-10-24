@@ -24,7 +24,8 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parent.parent
 MODULE = "github.com/asalimonov/gquorum"
-LABELS = {"unit": "Unit", "function": "Functional", "cluster": "Cluster", "example": "Example"}
+LABELS = {"unit": "Unit", "function": "Functional", "cluster": "Cluster", "example": "Example",
+          "sim": "Simulation"}
 TERMINAL = {"pass": "PASS", "fail": "FAIL", "skip": "SKIP"}
 
 
@@ -55,6 +56,8 @@ class Test:
         self.status = None
         self.output = []
         self.segments = []
+        self.parallel = False
+        self.resumed = None
 
     def close_segment(self, ended):
         if self.segments and self.segments[-1][1] is None:
@@ -63,9 +66,12 @@ class Test:
     def event(self, event, now):
         action = event["Action"]
         if action in ("run", "cont"):
+            if action == "cont" and self.resumed is None:
+                self.resumed = now
             if not self.segments or self.segments[-1][1] is not None:
                 self.segments.append([now, None])
         elif action == "pause":
+            self.parallel = True
             self.close_segment(now)
         elif action in TERMINAL:
             self.close_segment(now)
@@ -270,9 +276,10 @@ class Run:
                     package.event(event, now)
                     if event["Action"] == "build-fail":
                         package.status = "FAIL"
-                    if event.get("Test") and "/" not in event["Test"] and self.suite in ("cluster", "example"):
-                        if event["Action"] == "run":
-                            self.say(f"=== {event['Test']}: running")
+                    if event.get("Test") and self.suite in ("cluster", "example", "sim"):
+                        if event["Action"] in ("run", "pause", "cont"):
+                            state = {"run": "entered", "pause": "queued", "cont": "running"}[event["Action"]]
+                            self.say(f"=== {event['Test']}: {state} (+{now - self.start:.3f}s)")
                         elif event["Action"] in TERMINAL:
                             self.say(f"--- {event['Test']}: {TERMINAL[event['Action']]} ({event.get('Elapsed', 0):.3f}s)")
                     elif not event.get("Test") and event["Action"] in TERMINAL:
@@ -348,6 +355,8 @@ class Run:
                   "Counts include parent tests, subtests, repeated invocations and executable examples, as in JUnit.", "",
                   "[Timeline](timeline.md) · [Timeline data](timeline.json) · [Console log](console.log) · [Raw Go events](events.json)", "",
                   "## Commands", ""]
+        if (self.directory / "cluster-replay.html").exists():
+            lines[7:7] = ["[Cluster replay](cluster-replay.html) · [Replay log](cluster-replay.jsonl)", ""]
         for command in self.commands:
             lines += [f"- `{shlex.join(command['command'])}` — exit {command['exit_code']}"]
         (self.directory / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -367,11 +376,26 @@ class Run:
         records = []
         for package in packages:
             for test in package.tests:
+                execution_start = test.resumed if test.parallel else test.start
+                execution = [[a, b] for a, b in test.segments
+                             if execution_start is not None and a >= execution_start]
+                occupied = sum(b - a for a, b in test.segments)
                 records.append(dict(package=package.name, name=test.name, status=test.status,
                                     start=test.start - self.start, end=test.end - self.start,
+                                    execution_start=None if execution_start is None else execution_start - self.start,
+                                    queued=max(0.0, test.end - test.start - occupied),
+                                    active=sum(b - a for a, b in execution),
+                                    execution_segments=[[a - self.start, b - self.start] for a, b in execution],
                                     elapsed=test.elapsed,
                                     segments=[[a - self.start, b - self.start] for a, b in test.segments]))
-        records.sort(key=lambda t: (t["start"], t["package"], t["name"]))
+        for test in records:
+            test["coordinator"] = any(
+                other["package"] == test["package"] and
+                other["name"].startswith(test["name"] + "/") and
+                test["start"] <= other["start"] <= other["end"] <= test["end"]
+                for other in records)
+        records.sort(key=lambda t: (t["execution_start"] if t["execution_start"] is not None else t["end"],
+                                    t["package"], t["name"], t["start"]))
         for index, test in enumerate(records, 1):
             test["id"] = index
         data = dict(suite=self.suite, status=status, started=utc(self.start), finished=utc(ended),
@@ -393,30 +417,40 @@ class Run:
             chart.append(f"{('phase: ' + phase['name']):<65} {bar(phase['start'], phase['end'], '=')} {phase['end'] - phase['start']:.3f}s")
         chart.append(f"{'':65} {'─' * width}")
         for test in records:
-            if "/" in test["name"]:
+            if test["coordinator"]:
                 continue
-            cells = bar(test["start"], test["end"], ":")
+            cells = [" "] * width
             char = {"PASS": "#", "FAIL": "!", "ERROR": "!", "SKIP": "s"}[test["status"]]
-            for start, end in test["segments"]:
+            for start, end in test["execution_segments"]:
                 cells = bar(start, end, char, cells)
-            label = f"{test['id']:04} {test['name']}"[:65]
-            chart.append(f"{label:<65} {cells} {test['start']:.3f}–{test['end']:.3f}s {test['status']}")
+            name = test["name"]
+            if "/" in name:
+                parent, child = name.split("/", 1)
+                name = parent[:35] + "…/" + child
+            label = f"{test['id']:04} {name}"[:65]
+            begin = "not resumed" if test["execution_start"] is None else f"{test['execution_start']:.3f}"
+            chart.append(f"{label:<65} {''.join(cells)} {begin}–{test['end']:.3f}s {test['status']}")
         lines = [f"# {self.label} test timeline", "", f"**Status:** {status}",
                  f"**Started:** {utc(self.start)}", f"**Finished:** {utc(ended)}",
                  f"**Wall time:** {elapsed:.3f}s (includes compilation, setup and teardown)", "",
-                 "## Gantt timeline", "", "Offsets are seconds from run start. Top-level tests are shown; IDs refer to the full timing table below.",
-                 "`=` command phase · `#` executing · `:` paused/waiting · `!` failure/error · `s` skipped. Very short spans occupy one cell.", "",
+                 "## Gantt timeline", "", "Offsets are seconds from run start, sorted by execution start. Leaf tests (including subtests) are shown; parent coordinators appear only in the table.",
+                 "`=` command phase · `#` executing · `!` failure/error · `s` skipped. Queue time is excluded from bars. Very short spans occupy one cell.", "",
                  "```text", *chart, "```", "", "## All test timings", "",
-                 "Reported time is Go's `Elapsed`; wall span includes time paused by `t.Parallel()`. Subtests overlap their parents, so durations must not be summed as wall time.", "",
-                 "| ID | Package | Test | Status | Start (s) | End (s) | Wall span (s) | Reported time (s) |",
-                 "| ---: | --- | --- | --- | ---: | ---: | ---: | ---: |"]
+                 "**Entered** is Go's `run` event, before `t.Parallel()` may queue the test. **Execute** is its first `cont` event (or `run` for sequential tests). **Queued** counts paused intervals. **Active** excludes queueing and pre-parallel setup; Go's **Elapsed** includes setup. Execution can include fixture acquisition and cleanup. Parent coordinators wait for children and have no active-duration figure here. Subtest durations overlap; do not sum them as wall time.", "",
+                 "| ID | Package | Test | Status | Entered (s) | Execute (s) | End (s) | Queued (s) | Active (s) | Go elapsed (s) |",
+                 "| ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
         for test in records:
-            lines.append(f"| {test['id']} | {md(test['package'])} | {md(test['name'])} | {test['status']} | {test['start']:.3f} | {test['end']:.3f} | {test['end'] - test['start']:.3f} | {test['elapsed']:.3f} |")
+            begin = "—" if test["execution_start"] is None else f"{test['execution_start']:.3f}"
+            active = "coordinator" if test["coordinator"] else f"{test['active']:.3f}"
+            lines.append(f"| {test['id']} | {md(test['package'])} | {md(test['name'])} | {test['status']} | {test['start']:.3f} | {begin} | {test['end']:.3f} | {test['queued']:.3f} | {active} | {test['elapsed']:.3f} |")
         lines += ["", "[Summary](report.md) · [Raw events](events.json)", ""]
         (self.directory / "timeline.md").write_text("\n".join(lines), encoding="utf-8")
 
 
 def commands(options, extra):
+    if options.suite == "sim":
+        return [("tests-sim", [sys.executable, "scripts/sim_events.py",
+                              "--seeds", options.seeds, "--parallel", str(options.parallel), "--", *extra])]
     flags = ["-json", "-count=1"]
     if options.race:
         flags.append("-race")
@@ -452,13 +486,28 @@ def main(argv=None):
     parser.add_argument("--packages", type=int, default=4)
     parser.add_argument("--timeout", default="10m")
     parser.add_argument("--race", action="store_true")
+    parser.add_argument("--seeds", default="1-3")
     parser.add_argument("--image", default="gquorum-test:local")
     parser.add_argument("--build-image", action="store_true")
+    parser.add_argument("--cluster-replay", choices=("0", "1"), default="0")
     options = parser.parse_args(argv)
+    if options.suite == "sim" and options.race:
+        parser.error("simulation race runs require explicit gosim tooling; use make test-sim")
+    if options.cluster_replay == "1" and options.suite != "cluster":
+        parser.error("--cluster-replay applies only to the cluster suite")
     run = Run(options.suite, options.reports_dir.resolve(), options.race)
     result = 0
     env = dict(os.environ)
     env["GQUORUM_TEST_IMAGE"] = options.image
+    env.pop("GQUORUM_TEST_REPLAY_DIR", None)
+    if options.cluster_replay == "1":
+        env["GQUORUM_TEST_REPLAY_DIR"] = str(run.directory / "replay")
+    if options.suite == "sim":
+        result = run.command("sim-build", [
+            "go", "-C", "tests/sim", "build", "-mod=readonly",
+            "-ldflags=-checklinkname=0", "-tags=linkname",
+            "-o", ".gosim/gosimtool", "github.com/neria-cloud/gosim/cmd/gosim",
+        ], json_output=False)
     if options.build_image:
         result = run.command("docker-build", ["docker", "build", "-f", "tests/cluster/testapp/Dockerfile",
                                              "-t", options.image, "."], json_output=False)
@@ -468,6 +517,13 @@ def main(argv=None):
             result = result or code
             if code == 130:
                 break
+    if options.cluster_replay == "1":
+        from cluster_replay import finalize
+        try:
+            finalize(run)
+        except (OSError, ValueError) as exc:
+            run.say(f"Cluster replay generation failed; raw captures retained: {exc}")
+            result = result or 1
     return run.finish(result)
 
 

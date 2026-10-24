@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gquorum · Cluster replay</title>
+<style>/*STYLE*/</style>
+</head>
+<body>
+<aside class="sidebar">
+  <div class="brand"><span class="brand-mark">gq</span> GQUORUM <span class="edition">TESTS</span></div>
+  <div class="nav-title">CAPTURE INDEX <span id="test-count"></span></div>
+  <nav id="tests" aria-label="Simulation test captures"></nav>
+  <div class="sidebar-foot">One test. One isolated cluster.<br>Each capture keeps its own timeline.</div>
+</aside>
+<main>
+  <header>
+    <div><div class="eyebrow">DISTRIBUTED SYSTEMS / LOG PLAYBACK</div><h1>Cluster replay<span>.</span></h1></div>
+    <div class="offline"><span></span> OFFLINE REPORT</div>
+  </header>
+  <div id="drop-zone" class="drop-zone" role="button" tabindex="0" aria-label="Choose or drop test replay logs">
+    <span class="drop-symbol" aria-hidden="true">↓</span>
+    <div><strong>Drop a test replay log here</strong><span>Simulation .log or cluster-replay.jsonl · one or several files · processed in your browser</span></div>
+    <button type="button" id="browse">Choose files</button>
+  </div>
+  <input id="file-input" type="file" accept=".log,.json,.jsonl,.txt" multiple hidden>
+  <p id="load-status" class="load-status" role="status" aria-live="polite"></p>
+  <div id="playback">
+  <div class="capture-heading"><div><div id="test-meta" class="eyebrow"></div><h2 id="test-name"></h2></div><span id="result" class="result"></span></div>
+  <div id="warnings" class="notice" hidden></div>
+  <section class="metrics" aria-label="Run-wide summary">
+    <div><label id="duration-label">SIMULATED DURATION</label><strong id="duration"></strong></div>
+    <div><label>NODES OBSERVED</label><strong id="node-count"></strong></div>
+    <div><label id="checks-label">RUN-WIDE QUORUM CHECKS</label><strong id="checks"></strong></div>
+    <div><label id="failures-label">RUN-WIDE PROBE FAILURES</label><strong id="failures"></strong></div>
+  </section>
+  <div class="workspace">
+    <section class="scene-panel">
+      <div class="panel-heading"><h3>Node state</h3><span>LAST OBSERVATION AT PLAYHEAD</span></div>
+      <div class="scene">
+        <div id="clock">00:00.000</div>
+        <svg id="cluster" viewBox="0 0 680 360" role="img" aria-label="Node roles, terms and reported health"></svg>
+        <div class="scene-note" id="network-note"></div>
+      </div>
+      <div class="legend"><span><i class="leader"></i>Leader</span><span><i class="follower"></i><span id="follower-label">Follower</span></span><span><i class="candidate"></i>Election</span><span><i class="partition"></i>Scheduled isolation</span></div>
+      <div class="controls">
+        <button id="previous" aria-label="Previous state event" title="Previous state event">←</button>
+        <button id="play" class="primary" aria-label="Play animation">▶ Play</button>
+        <button id="next" aria-label="Next state event" title="Next state event">→</button>
+        <input id="scrub" type="range" min="0" max="100" step="0.001" value="0" aria-label="Simulated time">
+        <label class="speed-label">Speed <select id="speed" aria-label="Playback speed"><option value="1">1×</option><option value="5" selected>5×</option><option value="10">10×</option><option value="25">25×</option></select></label>
+      </div>
+    </section>
+    <section class="events-panel">
+      <div class="panel-heading"><h3>Evidence</h3><span id="event-count"></span></div>
+      <div class="event-controls"><select id="event-filter" aria-label="Event filter"><option value="state">State &amp; faults</option><option value="all">All log events</option></select><input id="search" placeholder="Search messages" aria-label="Search log messages"></div>
+      <div id="events" class="events" aria-live="off"></div>
+    </section>
+  </div>
+  <section class="timeline-panel">
+    <div class="panel-heading"><h3>State over time</h3><span>CLICK A TRACK TO SEEK</span></div>
+    <div class="timeline-legend"><span>Upper band: Raft role</span><span id="status-band-label">Lower band: reported health</span><span class="muted">Striped overlay: scheduled outage</span></div>
+    <div id="timeline"></div>
+    <div id="time-axis"></div>
+  </section>
+  <details id="observation-detail" class="notes" hidden><summary>Observation detail — <span id="observation-label"></span></summary><pre id="observation-json" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:32rem;overflow:auto"></pre></details>
+  <details class="notes" open><summary>How to read this capture</summary>
+    <div id="sim-notes">
+    <p>Roles and terms come from Raft log messages. Health comes from “group health changed” observations; it is not a fresh quorum proof. Missing observations stay unknown. Lines show cluster relationships, not measured traffic or verified connectivity.</p>
+    <p>Striped intervals use the test’s logged isolation schedule. The interval end is a scheduled repair, not a logged acknowledgement. Logs without explicit partition events cannot show their network faults. Quorum totals summarize the entire test, not the current frame.</p>
+    </div>
+    <div id="docker-notes" hidden>
+      <p>Docker captures sample existing local runtime and cluster-status endpoints every 500 ms, with a 400 ms timeout per request. Slow sweeps skip ticks. The diagram shows metadata leadership: “nonleader” does not distinguish a follower, learner or candidate. Failed runtime reads clear the displayed role to unknown and mark the endpoint unreachable; they do not prove that the process is dead.</p>
+      <p>Startup-ready is the Node startup gate, not current mutation readiness or quorum proof. Observation detail contains session liveness, local load lifecycle, topology versions, group observations and their original timestamps. Each node reports its own view; views can disagree and are not an atomic cluster snapshot. State between samples remains the last observation. No fault or connectivity schedule is inferred.</p>
+      <p id="capture-scope"></p>
+    </div>
+    <p id="probe-note"></p><p id="source"></p><p id="build"></p>
+  </details>
+  </div>
+  <footer><span>GQUORUM / TEST LAB</span><span>TypeScript player · self-contained HTML · no external services</span></footer>
+</main>
+<script id="capture-data" type="application/json">/*DATA*/</script>
+<script>/*PLAYER*/</script>
+</body>
+</html>

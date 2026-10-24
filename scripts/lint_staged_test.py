@@ -16,11 +16,13 @@ class StagedLintTest(unittest.TestCase):
         self.assertEqual(lint_staged.staged_scopes([
             "README.md", "old file.go", "new file.go", "examples/scheduler/main.go",
             "tests/cluster/testapp/deleted.go", "scripts/revive/main.go",
+            "tests/sim/cluster_test.go",
         ]), {
             ".": {"old file.go", "new file.go"},
             "examples/scheduler": {"examples/scheduler/main.go"},
             "tests/cluster": {"tests/cluster/testapp/deleted.go"},
             "scripts/revive": {"scripts/revive/main.go"},
+            "tests/sim": {"tests/sim/cluster_test.go"},
         })
         self.assertEqual(lint_staged.staged_scopes(["README.md"]), {})
 

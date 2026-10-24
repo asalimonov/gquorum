@@ -8,6 +8,15 @@ recovery, approved effects, membership, readmission and local stop holds.
 or Raft engine packages. The Compose demo
 is a separate application; fixture controls and integration tests stay here.
 
+The process fixture accepts `-meta-voter-config` (complete JSON
+`topology.VoterConfig`, or `null` for defaults), `-metrics` (JSON
+`gquorum.MetricsOptions`, with duration fields in nanoseconds), and
+`-election-ticks` (zero selects the library default). These map directly to
+public Node options. Metadata voter configuration applies only to fresh
+founding; retained replicas use approved replicated configuration.
+The Docker pool exposes these as `Spec.MetaVoterConfig`, `Spec.Metrics` and
+`Spec.ElectionTicks` for per-test overrides.
+
 Test controls live in `hooks_cluster.go`. They provide direct
 local replica and actual storage identities, membership/materialized values, durable snapshot size and
 index, received-snapshot counts, exact successful effect receipts and cancelable

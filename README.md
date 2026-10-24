@@ -11,10 +11,10 @@ state. Each group has its own membership, leader, log and snapshots.
 
 ## Purpose of the library
 
-The library was created for a service which has the following requirements:
+The library was created for network services which have the following requirements:
 
-- Strict consistency between nodes due to high number of parallel operations with
-  single budget and overspending is forbidden
+- Strict consistency between nodes due to high number of parallel operations with single
+  entity like "budet" or "quota"
 - Reduce issues with locks in OLTP database
 - Minimze risks of loosing user's requests
 - Horizonal scaling with keeping low latency for R/RW operations despite on
@@ -55,8 +55,41 @@ Performance of a single thread worker with single Raft group on 3-node cluster:
 
 ## Features
 
+The features which the library propose in comparision with using coordination via
+Raft and CRDT libraries, Zookeeper or PostgreSQL:
+
+- **Cluster management:** the library already knows how to manage cluster via its
+  topology, host states and healths.
+- **Automatic cluster health:** the library already has mechanisms for testing
+  reachability of each host (p2p), its statuses and can aggreagate all
+  information for cluster leader and calculation of global cluster state.
 - **Multiple Raft groups:** a shared topology quorum and independent application
-  groups built on `go.etcd.io/raft/v3`, with managed local replica lifetimes.
+  groups built on enterprise grade stable `etcd` Raft library. Allow to scale
+  clusters on tens hosts.
+- **Scheduling and automatic reapair:** the library already has built-in scheduler
+  for placement of load groups and policies for automatic repair of nodes after
+  incidents or intermittent issues with gating user's traffic from temporary 
+  unavailable nodes.
+- **Stable learners and voter configurations:** scaling cluster horizontally without
+  loosing of time on large quorum. The scheduler and policies replace persistently
+  unhealthy voters with qualified learners, with independent authorization and
+  live-quorum checks.
+- **Versioned topology administration:** compare-and-swap edits, previews,
+  explicit approval, per-group convergence and operation progress, document
+  history, watches and rollback planning. Explicit `RetryOperation` reuses an
+  immutable failed plan; exact CAS replay recovers uncertain mutation replies.
+  `Latest` is staged intent; `Target`
+  is approved intent; `ReadProgress` reports group convergence independently.
+- **Label-aware placement:** exact node selectors, reservation of nodes from new
+  load replicas, learner-only nodes, and strict voter separation by a caller
+  label such as `az`. Placement reports explain excluded hosts and unsatisfied
+  groups before approval and in status.
+- **Repair policies and lifecycle hooks:** customize supported repair decisions through
+  `scheduling.RepairPolicy`, and startup readiness, retired-storage retention and
+  removal behavior through `lifecycle.Hooks`.
+
+### Other
+
 - **Replica-local proposal results:** ready load followers and learners forward
   ordinary writes to their leader and return results after local application,
   with bounded waits and application request IDs preserved across forwarding.
@@ -67,41 +100,23 @@ Performance of a single thread worker with single Raft group on 3-node cluster:
   identities. Supersession requests revocation; durable group/host fencing and
   receipts establish completion, with pending state when required resources
   cannot be reached or lack quorum.
-- **Durable recovery:** bbolt-backed metadata, an included etcd WAL backend for
-  load groups, full state-machine snapshots, committed-tail replay, compaction
-  and snapshot catch-up.
 - **In-memory groups:** create a load group with
   `GroupSpec{Storage: topology.StorageMemory}` to keep its Raft state in memory.
   Writes still commit on a quorum. Memory cache has persist on a disk for
   durability, but it easily achieves for a single Raft group 4000 RPS
   and under 1mks for operation on mediocre hardware.
-- **Versioned topology administration:** compare-and-swap edits, previews,
-  explicit approval, per-group convergence and operation progress, document
-  history, watches and rollback planning. Explicit `RetryOperation` reuses an
-  immutable failed plan; exact CAS replay recovers uncertain mutation replies.
-  `Latest` is staged intent; `Target`
-  is approved intent; `ReadProgress` reports group convergence independently.
+- **Durable recovery:** bbolt-backed metadata, an included etcd WAL backend for
+  load groups, full state-machine snapshots, committed-tail replay, compaction
+  and snapshot catch-up.
 - **Dynamic membership and placement:** founding and joining, caller-defined
   node types, cluster-wide and per-group placement rules, learner-first growth,
   guarded promotion, leadership transfer, drain, activation and exclusion.
-- **Label-aware placement:** exact node selectors, reservation of nodes from new
-  load replicas, learner-only nodes, and strict voter separation by a caller
-  label such as `az`. Placement reports explain excluded hosts and unsatisfied
-  groups before approval and in status.
 - **Identity-aware recovery and cleanup:** retained restarts, fresh-ID
   readmission and replica reseating, parking of missing or foreign storage,
   verified retirement, quarantine and configurable retention. Membership removal,
   joined host stop, retirement and physical collection have separate durable
   milestones; offline former hosts retain cleanup debt. Deleted group IDs
   are permanently retired.
-- **Stable learners and voter configurations:** new groups default to three voters;
-  additional eligible hosts hold promotable learners. Per-group replicated
-  configuration controls voter targets, failure/stability windows and switch cooldowns.
-  The default scheduler replaces persistently unhealthy voters with qualified
-  learners, with independent authorization and live-quorum checks.
-- **Repair policies and lifecycle hooks:** customize supported repair decisions through
-  `scheduling.RepairPolicy`, and startup readiness, retired-storage retention and
-  removal behavior through `lifecycle.Hooks`.
 - **Sessions and distributed locks:** activate and renew process sessions,
   acquire application locks and inspect their locally observed holders.
 - **Bounded work and diagnostics:** proposal limits, bounded per-destination
@@ -110,22 +125,6 @@ Performance of a single thread worker with single Raft group on 3-node cluster:
 - **Pluggable application integration:** typed load transport, custom storage,
   address resolution and health observations; included gRPC meta transport with
   TLS configuration and cluster credentials.
-
-The default scheduler preserves healthy voter seats. Existing groups without a
-voter configuration retain their legacy repair behavior until explicit
-configuration adoption.
-`topology.Limits` controls capacity and defaults to three nodes and five total
-replicas per load group. Seven-node all-host deployments explicitly configure
-both placement limits to at least seven. Independent execution defaults to four
-groups and two cleanup requests (`MaxConcurrentGroups`, `MaxConcurrentCleanup`);
-these replicated limits bound work, not retained proof. All admitted node types
-participate in `_meta`;
-placement rules select load hosts, and voter configuration selects their voting roles.
-Infrastructure provisioning and automatic data partitioning remain application
-responsibilities. Resource measurement and resource-based placement decisions
-also belong to the application. See [labels and placement](docs/architecture/placement.md)
-for `GetLabels`/`SetLabels`, selector inheritance, safe relocation and the
-staging/approval workflow.
 
 ## Getting started
 
@@ -213,6 +212,7 @@ compatibility impact.
    make test-race     # Fast unit checks under the race detector
    make test-function # Isolated non-Docker functional and storage tests
    make test-cluster  # Cluster tests
+   make test-sim      # Deterministic three-node latency and partition simulations
    ```
 
 The [testing guide](docs/testing/tests.md) describes test boundaries and commands.

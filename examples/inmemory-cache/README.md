@@ -34,6 +34,10 @@ so fsync is enabled unless explicitly disabled.
 
 From the repository root, with Docker Compose available:
 
+The image includes the public demo credential at `/run/secrets/credential`.
+No credential bind mount or workspace file sharing with the Docker VM is needed,
+including when using Colima or Docker Desktop.
+
 ```sh
 CACHE_WORKERS=32 make run-cache-example       # 1..256 workers; default 8
 # Starts three cache nodes and the load generator.
