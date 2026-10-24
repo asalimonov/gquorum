@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"github.com/asalimonov/gquorum"
+	"path/filepath"
 	"sync"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -60,4 +62,13 @@ func (s *fixtureStore) SaveSnapshot(ctx context.Context, group string, snapshot 
 		return err
 	}
 	return writer.SaveSnapshot(ctx, group, snapshot)
+}
+
+// loadStorageOptions selects ownership without opening or borrowing extra stores.
+func (a *application) loadStorageOptions() gquorum.LoadStorageOptions {
+	if a.cfg.NodeOwnedWAL {
+		prewrite := false
+		return gquorum.LoadStorageOptions{WAL: &gquorum.WALOptions{RootDir: filepath.Join(a.cfg.DataDir, "load"), SegmentBytes: 1 << 20, Prewrite: &prewrite}}
+	}
+	return gquorum.LoadStorageOptions{Store: &fixtureStore{Store: a.store, app: a}, Retirement: fixtureRetirement{RetirementStore: a.store, app: a}}
 }

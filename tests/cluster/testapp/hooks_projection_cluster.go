@@ -189,7 +189,7 @@ func (a *application) registerProjectionRoutes(mux *http.ServeMux, protect func(
 			httpError(w, fault.ErrInvalid)
 			return
 		}
-		g, found := a.node.LoadGroup(group)
+		g, found := a.currentNode().LoadGroup(group)
 		if !found || g.ReplicaID() != replica {
 			httpError(w, fault.ErrIdentityMismatch)
 			return

@@ -46,7 +46,7 @@ func (a *application) registerCollectionRoutes(mux *http.ServeMux, protect func(
 			httpError(w, err)
 			return
 		}
-		if a.metaProxy == nil || body.Identity.ClusterID != a.node.Identity().ClusterID || body.Identity.NodeName == "" || body.Identity.GroupID == "" || body.Identity.ReplicaID == 0 {
+		if a.metaProxy == nil || body.Identity.ClusterID != a.currentNode().Identity().ClusterID || body.Identity.NodeName == "" || body.Identity.GroupID == "" || body.Identity.ReplicaID == 0 {
 			httpError(w, fault.ErrIdentityMismatch)
 			return
 		}
@@ -77,12 +77,16 @@ func (a *application) registerCollectionRoutes(mux *http.ServeMux, protect func(
 		jsonResponse(w, 200, h.collectionReport)
 	}))
 	mux.HandleFunc("GET /internal/test/collections/{group}/{replica}", protect(func(w http.ResponseWriter, r *http.Request) {
+		if a.store == nil {
+			httpError(w, fault.ErrUnsupported)
+			return
+		}
 		replica, err := positiveNumber(r.PathValue("replica"))
 		if err != nil {
 			httpError(w, err)
 			return
 		}
-		identity := a.node.Identity()
+		identity := a.currentNode().Identity()
 		id := storage.Identity{ClusterID: identity.ClusterID, NodeName: identity.NodeName, GroupID: r.PathValue("group"), ReplicaID: replica}
 		h := a.clusterHooks
 		h.mu.Lock()

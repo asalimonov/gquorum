@@ -16,7 +16,7 @@
 
 **Review/clarifications:** [docs/review/feat_permanent-majority-loss-recovery.md](../review/feat_permanent-majority-loss-recovery.md)
 
-**Status:** implementation in progress; Tasks 1–2 complete; Task 3 next.
+**Status:** implementation in progress; Tasks 1–3 complete; Task 4 next.
 
 ## Scope and precedence
 
@@ -261,45 +261,45 @@ configuration and owned-mode smoke tests. **Dependencies:** Tasks 1–2.
 **Outcome:** exercise the new ordinary startup/lease behavior on real bind mounts
 before the recovery workflow is implemented. Recovery jobs/routes come in Task 13.
 
-- [ ] Add test-only `config.NodeOwnedWAL bool` (false retains the existing borrowed
+- [x] Add test-only `config.NodeOwnedWAL bool` (false retains the existing borrowed
   fixture) and an owned copy of construction settings in
   `application.nodeOptions gquorum.NodeOptions`. In owned mode select WAL with the
   current fixture root, `SegmentBytes: 1 << 20` and a pointer to a local false
   Prewrite value; leave Store/Retirement nil and do not open a second a.store.
-- [ ] Separate process/management lifetime from each embedded Node generation.
+- [x] Separate process/management lifetime from each embedded Node generation.
   Stop/join and replace a Node while keeping authenticated management HTTP alive;
   recreate consumed meta listeners and fresh InstanceID. Keep normal startup and
   final whole-process cleanup behavior, and make every handler safe when no Node
   is active. Do not implement the recovery job or call unimplemented recovery I/O.
-- [ ] Route transport callbacks/filters (including filterReadRaft), header/auth
+- [x] Route transport callbacks/filters (including filterReadRaft), header/auth
   handlers and observations through a synchronized current-Node-generation accessor.
   Pin the accepted generation for a call, reject unavailable/stale generations and
   join its in-flight work before replacing it. Do not read a.node unsynchronized
   during a swap or hold the generation mutex while waiting on library callbacks.
   Add a race test delivering Raft batches/HTTP requests during Stop/replacement;
   old-generation deliveries cannot be forwarded into the new Node.
-- [ ] Audit every a.store dereference and every wrapper-dependent handler, including
+- [x] Audit every a.store dereference and every wrapper-dependent handler, including
   local observations and shutdown. Preserve borrowed-mode observations/tests.
   In owned mode expose Node.Status/Identity/ParkedLoads, load.Group.Identity/Status,
   application values and existing transport counters. A stopped/unpublished handle
   is explicitly unavailable; it is not proof that its physical WAL is absent.
-- [ ] Extend localObservation and the matching LocalObservation client with the
+- [x] Extend localObservation and the matching LocalObservation client with the
   exact availability fields below. Do not manufacture StorageIdentity/Stats/SnapshotBytes or
   WAL-wrapper counters from a public runtime identity. Physical-store assertions
   remain in owning-package tests or original borrowed-mode scenarios. Task 13 adds
   recovery Status/List/Inspect evidence for durable recovery-specific positions.
-- [ ] In owned mode explicitly refuse POST `/internal/test/lose-store/{group}/{replica}`,
+- [x] In owned mode explicitly refuse POST `/internal/test/lose-store/{group}/{replica}`,
   PUT/DELETE `/internal/test/wal/{group}`, and wrapper-based collection-call counts
   from GET `/internal/test/collections/{group}/{replica}`. Preserve supported controls
   that use public Node/Group APIs, application callbacks, or transport/proxy behavior:
   proposals, snapshots, replica start/stop, read/append-drop controls, metadata proxy
   drops and collection-report holding. Audit newly touched routes with the same rule.
-- [ ] Keep the original physical-stat/wrapper tests unchanged in borrowed mode.
+- [x] Keep the original physical-stat/wrapper tests unchanged in borrowed mode.
   Add owned-mode variants of ordinary create/write/snapshot/retained-restart and
   readmission scenarios using only their available public observations and exact
   post-restart data/identity checks. Do not run an unchanged helper that dereferences
   a.store or asserts physical Storage.Stats against the owned fixture.
-- [ ] Add `TestOwnedWALRuntimeSmoke` process coverage through the existing three-node
+- [x] Add `TestOwnedWALRuntimeSmoke` process coverage through the existing three-node
   pool, plus pure fixture/configuration units and single-participant lifecycle/race
   checks. Use actual bind mounts, repeated Stop/start generations and final cleanup
   to expose lock-file/root-enumeration issues immediately after Task 2.
@@ -322,13 +322,13 @@ Task 13 through the public recovery values, not by expanding library status APIs
 
 #### Verification
 
-- [ ] `make test`; focused testapp functional/race checks for both ownership modes,
+- [x] `make test`; focused testapp functional/race checks for both ownership modes,
   nil/stopped Node handling and correct callback/process-resource ownership.
-- [ ] Once this fixture batch settles, build `gquorum-recovery:local` and run
+- [x] Once this fixture batch settles, build `gquorum-recovery:local` and run
   `make test-cluster-run CLUSTER_IMAGE=gquorum-recovery:local CLUSTER_ARGS='-v -run ^TestOwnedWALRuntimeSmoke'`.
   This early targeted process run is required because Task 2 changes every startup;
   it is not a broad cluster run after each library edit.
-- [ ] Keep Task 2's passing default-seed simulation evidence unless library code
+- [x] Keep Task 2's passing default-seed simulation evidence unless library code
   changed; rerun it if a smoke fix changes the library. Record image/report/cleanup
   evidence, and preserve the original borrowed-mode regressions.
 

@@ -101,3 +101,62 @@ Notes
   and a facade conformance fixture's wrong cluster ID were corrected before commit.
 - Full manifest semantics and root-relative archival mutations remain Task 4/7 work;
   this task's normal-start guard conservatively refuses all pending operations.
+
+
+## Task 3 — Node-owned process fixture and independent runtime generations
+Date: 2026-10-25. Commit: included with this task's implementation commit.
+
+Implemented
+- Added opt-in NodeOwnedWAL configuration/CLI/pool setting. Owned mode selects
+  the existing /data/load root, 1 MiB segments and Prewrite=false through public
+  NodeOptions; it opens no second Store. Default borrowed wrappers remain intact.
+- Retained private construction settings and copied caller peer/voter inputs.
+  Added synchronized Node/Cluster accessors throughout production fixture code;
+  the original fields remain immutable compatibility inputs for focused fixtures.
+- Added per-generation request cancellation/join, background-worker ownership,
+  serialized Stop/restart, fresh process identity and recreated metadata listeners.
+  HTTP/load listeners, authentication, status and process liveness survive Node
+  shutdown. Metadata-proxy calls, load deliveries and fault filters retain their
+  accepted generation. New installation waits for the old generation to join.
+- Added management stop/start/status routes and public-only owned observations:
+  StorageAvailable/WALControlAvailable and exact published GroupIdentity.
+  Physical WAL statistics/wrapper controls are unavailable in owned mode;
+  unsupported loss/WAL/collection-counter routes refuse explicitly.
+- Owned-mode functional/race coverage exercises replayed data across repeated
+  snapshot/restarts, stale concurrent Raft/HTTP ingress, accepted-request shutdown
+  and failed startup before listener transfer. A failed Start can be joined and
+  retried without leaving a listener bound.
+- Added TestOwnedWALRuntimeSmoke with parallel three-node retained-generation and
+  metadata-loss/readmission cases. The latter reuses only public identity/native
+  membership/value assertions; original borrowed scenarios keep their behavior.
+
+Verified
+- make test: PASS, 1,984 tests/53 reports, 5.957s, all five modules. Report:
+  test-reports/unit/20261024T235132.129491Z-8xaca872/report.md.
+- Full testapp functional suite: PASS (5.334s); full functional -race -count=1:
+  PASS (7.869s), including new generation/ownership regressions.
+- make lint: PASS, all configured modules/build tags/tooling.
+- Cluster-tag caller modules compile with -run '^$'.
+- Built gquorum-recovery:local, immutable final image ID
+  sha256:2737a8f6b428b34c8c79107e1d5dd8e47cdceb595e093c0c178ce26d56f8073e.
+- Required targeted Docker run: PASS, both smoke scenarios/3 report rows, 17.879s.
+  Report: test-reports/cluster/20261024T235138.663795Z-23xl27wm/report.md.
+  Repeated embedded Node restarts preserve exact numeric/storage identities and
+  data while changing InstanceID. Readmission rotates metadata/load identities
+  and then preserves the fresh pin through another process restart.
+- Pool teardown verified all application containers, labeled volumes and labeled
+  networks removed; only the ordinary testcontainers reaper remained. Tests use
+  the pool's existing persistent Docker volumes mounted at /data, retaining the
+  same root mounts across runtime generations and process restarts.
+- Task 2 simulation evidence remains applicable: no library code changed.
+- git diff --check: PASS.
+
+Notes
+- The first retained-generation smoke reached group creation before load leadership
+  election and returned not_leader on its initial write. Added explicit observed
+  leadership and same-request retry barriers; both subsequent Docker runs passed.
+  No product timeout or consensus behavior was weakened.
+- Focused real-replica tests likewise wait for leader election before proposing,
+  and wait for asynchronous request cancellation rather than assuming AfterFunc
+  executes synchronously. Initial lint findings were fixed before final validation.
+- Recovery jobs/routes remain Task 13; no stubbed recovery I/O method is called.

@@ -51,7 +51,7 @@ func (a *application) registerRuntimeRoutes(mux *http.ServeMux, protect func(htt
 			httpError(w, err)
 			return
 		}
-		id := a.node.Identity()
+		id := a.currentNode().Identity()
 		if !pin.Found || pin.Identity.NodeName != id.NodeName || pin.Identity.ClusterID != id.ClusterID {
 			httpError(w, fault.ErrIdentityMismatch)
 			return
@@ -78,7 +78,7 @@ func (a *application) registerRuntimeRoutes(mux *http.ServeMux, protect func(htt
 		if a.callerScheduler != nil {
 			calls = a.callerScheduler.calls.Load()
 		}
-		jsonResponse(w, 200, map[string]any{"status": a.node.Status(), "scheduler_calls": calls, "removal_calls": a.clusterHooks.runtime.removalCalls.Load(), "factories": a.clusterHooks.runtime.factories.Load()})
+		jsonResponse(w, 200, map[string]any{"status": a.currentNode().Status(), "scheduler_calls": calls, "removal_calls": a.clusterHooks.runtime.removalCalls.Load(), "factories": a.clusterHooks.runtime.factories.Load()})
 	}))
 	mux.HandleFunc("PUT /internal/test/scheduling", protect(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -88,11 +88,11 @@ func (a *application) registerRuntimeRoutes(mux *http.ServeMux, protect func(htt
 			httpError(w, err)
 			return
 		}
-		if err := a.node.SetSchedulingEnabled(r.Context(), body.Enabled); err != nil {
+		if err := a.currentNode().SetSchedulingEnabled(r.Context(), body.Enabled); err != nil {
 			httpError(w, err)
 			return
 		}
-		jsonResponse(w, 200, a.node.SchedulingStatus())
+		jsonResponse(w, 200, a.currentNode().SchedulingStatus())
 	}))
 	mux.HandleFunc("POST /internal/test/session/{action}", protect(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -107,15 +107,15 @@ func (a *application) registerRuntimeRoutes(mux *http.ServeMux, protect func(htt
 		var err error
 		switch r.PathValue("action") {
 		case "activate":
-			value, err = a.node.ActivateSession(r.Context())
+			value, err = a.currentNode().ActivateSession(r.Context())
 		case "deactivate":
-			err = a.node.DeactivateSession(r.Context(), body.ID)
+			err = a.currentNode().DeactivateSession(r.Context(), body.ID)
 		case "keepalive":
-			err = a.node.KeepAlive(r.Context(), body.ID)
+			err = a.currentNode().KeepAlive(r.Context(), body.ID)
 		case "acquire":
-			err = a.cluster.AcquireLock(r.Context(), body.Key, body.ID)
+			err = a.currentCluster().AcquireLock(r.Context(), body.Key, body.ID)
 		case "holder":
-			holder, readErr := a.cluster.LockHolder(r.Context(), body.Key)
+			holder, readErr := a.currentCluster().LockHolder(r.Context(), body.Key)
 			err = readErr
 			value = map[string]any{"session": holder.Session, "found": holder.Held}
 		default:
@@ -141,7 +141,7 @@ func (a *application) registerRuntimeRoutes(mux *http.ServeMux, protect func(htt
 		defer h.mu.Unlock()
 		switch r.PathValue("action") {
 		case "stop":
-			old, found := a.node.LoadGroup(ref.GroupID)
+			old, found := a.currentNode().LoadGroup(ref.GroupID)
 			if !found || old.ReplicaID() != ref.ReplicaID {
 				httpError(w, fault.ErrIdentityMismatch)
 				return
@@ -150,14 +150,14 @@ func (a *application) registerRuntimeRoutes(mux *http.ServeMux, protect func(htt
 				httpError(w, fault.ErrOverloaded)
 				return
 			}
-			if err := a.node.StopLoadGroup(r.Context(), ref); err != nil {
+			if err := a.currentNode().StopLoadGroup(r.Context(), ref); err != nil {
 				httpError(w, err)
 				return
 			}
 			h.stopped[ref] = old
 		case "start":
 			old := h.stopped[ref]
-			g, err := a.node.StartLoadGroup(r.Context(), ref)
+			g, err := a.currentNode().StartLoadGroup(r.Context(), ref)
 			if err != nil {
 				httpError(w, err)
 				return
@@ -186,11 +186,11 @@ func (a *application) registerRuntimeRoutes(mux *http.ServeMux, protect func(htt
 			httpError(w, err)
 			return
 		}
-		if req.From != a.node.Identity() || req.To.Node != a.node.Identity() {
+		if req.From != a.currentNode().Identity() || req.To.Node != a.currentNode().Identity() {
 			httpError(w, fault.ErrIdentityMismatch)
 			return
 		}
-		result, err := a.node.ApplyLoadAction(r.Context(), req)
+		result, err := a.currentNode().ApplyLoadAction(r.Context(), req)
 		if err != nil {
 			httpError(w, err)
 			return
@@ -198,7 +198,7 @@ func (a *application) registerRuntimeRoutes(mux *http.ServeMux, protect func(htt
 		jsonResponse(w, 200, result)
 	}))
 	mux.HandleFunc("GET /internal/test/watch/{view}", protect(func(w http.ResponseWriter, r *http.Request) {
-		updates, err := a.cluster.Watch(r.Context(), topology.View(r.PathValue("view")))
+		updates, err := a.currentCluster().Watch(r.Context(), topology.View(r.PathValue("view")))
 		if err != nil {
 			httpError(w, err)
 			return

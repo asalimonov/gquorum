@@ -147,22 +147,25 @@ type barrierObservation struct {
 	Refuse bool                    `json:"refuse"`
 }
 type localObservation struct {
-	Identity          topology.Identity    `json:"identity"`
-	Found             bool                 `json:"found"`
-	ReplicaID         uint64               `json:"replica_id"`
-	Status            topology.GroupStatus `json:"status"`
-	Storage           storage.Stats        `json:"storage"`
-	Values            map[string]string    `json:"values"`
-	ReceivedSnapshots uint64               `json:"received_snapshots"`
-	WAL               walCounters          `json:"wal"`
-	WALStallNS        int64                `json:"wal_stall_ns"`
-	ReadQueue         metrics.ReadQueue    `json:"read_queue"`
-	ReadQueueStamp    metrics.Stamp        `json:"read_queue_stamp"`
-	Reads             readCounters         `json:"reads"`
-	Proposals         load.ProposalStats   `json:"proposals"`
-	Parked            *gquorum.ParkedLoad  `json:"parked,omitempty"`
-	StorageIdentity   *storage.Identity    `json:"storage_identity,omitempty"`
-	ServeOverride     int                  `json:"serve_override"`
+	Identity            topology.Identity    `json:"identity"`
+	Found               bool                 `json:"found"`
+	ReplicaID           uint64               `json:"replica_id"`
+	Status              topology.GroupStatus `json:"status"`
+	Storage             storage.Stats        `json:"storage"`
+	Values              map[string]string    `json:"values"`
+	ReceivedSnapshots   uint64               `json:"received_snapshots"`
+	WAL                 walCounters          `json:"wal"`
+	WALStallNS          int64                `json:"wal_stall_ns"`
+	ReadQueue           metrics.ReadQueue    `json:"read_queue"`
+	ReadQueueStamp      metrics.Stamp        `json:"read_queue_stamp"`
+	Reads               readCounters         `json:"reads"`
+	Proposals           load.ProposalStats   `json:"proposals"`
+	Parked              *gquorum.ParkedLoad  `json:"parked,omitempty"`
+	StorageIdentity     *storage.Identity    `json:"storage_identity,omitempty"`
+	ServeOverride       int                  `json:"serve_override"`
+	StorageAvailable    bool                 `json:"storage_available"`
+	WALControlAvailable bool                 `json:"wal_control_available"`
+	GroupIdentity       *storage.Identity    `json:"group_identity,omitempty"`
 }
 
 func (a *application) registerClusterRoutes(mux *http.ServeMux) {
@@ -178,8 +181,11 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			handler(w, r)
 		}
 	}
-	mux.HandleFunc("GET /internal/test/metrics", protect(func(w http.ResponseWriter, _ *http.Request) { jsonResponse(w, http.StatusOK, a.cluster.Metrics()) }))
+	mux.HandleFunc("GET /internal/test/metrics", protect(func(w http.ResponseWriter, _ *http.Request) {
+		jsonResponse(w, http.StatusOK, a.currentCluster().Metrics())
+	}))
 	a.registerRuntimeRoutes(mux, protect)
+	a.registerNodeGenerationRoutes(mux, protect)
 	a.registerResourceRoutes(mux, protect)
 	a.registerWALRoutes(mux, protect)
 	a.registerReadRoutes(mux, protect)
@@ -204,19 +210,19 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			httpError(w, err)
 			return
 		}
-		if body.Identity != a.node.Identity() {
+		if body.Identity != a.currentNode().Identity() {
 			httpError(w, fault.ErrIdentityMismatch)
 			return
 		}
-		if err := a.node.SetServeOverride(r.Context(), body.Minimum); err != nil {
+		if err := a.currentNode().SetServeOverride(r.Context(), body.Minimum); err != nil {
 			httpError(w, err)
 			return
 		}
-		jsonResponse(w, http.StatusOK, map[string]any{"identity": a.node.Identity(), "minimum": a.node.ServeOverride()})
+		jsonResponse(w, http.StatusOK, map[string]any{"identity": a.currentNode().Identity(), "minimum": a.currentNode().ServeOverride()})
 	}))
 	mux.HandleFunc("POST /internal/test/lose-meta/{member}", protect(func(w http.ResponseWriter, r *http.Request) {
-		own := a.node.Identity()
-		if fmt.Sprint(own.MemberID) != r.PathValue("member") || !a.node.OwnSessionLive() {
+		own := a.currentNode().Identity()
+		if fmt.Sprint(own.MemberID) != r.PathValue("member") || !a.currentNode().OwnSessionLive() {
 			httpError(w, fault.ErrIdentityMismatch)
 			return
 		}
@@ -241,12 +247,16 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 	// Retain the node-local boot ledger while removing the exact replica's
 	// usable store. Quarantine preserves evidence without making it reopenable.
 	mux.HandleFunc("POST /internal/test/lose-store/{group}/{replica}", protect(func(w http.ResponseWriter, r *http.Request) {
+		if a.store == nil {
+			httpError(w, fault.ErrUnsupported)
+			return
+		}
 		group := r.PathValue("group")
 		if err := topology.ValidateLoadID(group); err != nil {
 			httpError(w, err)
 			return
 		}
-		g, found := a.node.LoadGroup(group)
+		g, found := a.currentNode().LoadGroup(group)
 		if !found || fmt.Sprint(g.ReplicaID()) != r.PathValue("replica") {
 			httpError(w, fault.ErrIdentityMismatch)
 			return
@@ -257,7 +267,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			err = fault.ErrIdentityMismatch
 		}
 		if err == nil {
-			err = a.node.StopLoadGroup(r.Context(), load.ReplicaRef{GroupID: group, ReplicaID: want.ReplicaID})
+			err = a.currentNode().StopLoadGroup(r.Context(), load.ReplicaRef{GroupID: group, ReplicaID: want.ReplicaID})
 		}
 		if err != nil {
 			httpError(w, err)
@@ -280,7 +290,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			httpError(w, err)
 			return
 		}
-		g, found := a.node.LoadGroup(group)
+		g, found := a.currentNode().LoadGroup(group)
 		if !found || fmt.Sprint(g.ReplicaID()) != r.PathValue("replica") {
 			httpError(w, fault.ErrIdentityMismatch)
 			return
@@ -363,23 +373,25 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /internal/test/local/{group}", protect(func(w http.ResponseWriter, r *http.Request) {
 		group := r.PathValue("group")
 		if group == topology.MetaGroupID {
-			status := a.node.Status().Meta
-			jsonResponse(w, http.StatusOK, localObservation{Identity: a.node.Identity(), Found: status.Found, ReplicaID: a.node.Identity().MemberID, Status: status, ServeOverride: a.node.ServeOverride()})
+			status := a.currentNode().Status().Meta
+			jsonResponse(w, http.StatusOK, localObservation{Identity: a.currentNode().Identity(), Found: status.Found, ReplicaID: a.currentNode().Identity().MemberID, Status: status, ServeOverride: a.currentNode().ServeOverride()})
 			return
 		}
 		if err := topology.ValidateLoadID(group); err != nil {
 			httpError(w, err)
 			return
 		}
-		observation := localObservation{Identity: a.node.Identity()}
-		if park, found := a.node.ParkedLoads()[group]; found {
+		observation := localObservation{Identity: a.currentNode().Identity(), StorageAvailable: a.store != nil, WALControlAvailable: a.store != nil}
+		if park, found := a.currentNode().ParkedLoads()[group]; found {
 			observation.Parked = &park
 		}
-		if probe, err := a.store.Probe(r.Context(), group); err != nil {
-			httpError(w, err)
-			return
-		} else if probe.Exists {
-			observation.StorageIdentity = &probe.Identity
+		if a.store != nil {
+			if probe, err := a.store.Probe(r.Context(), group); err != nil {
+				httpError(w, err)
+				return
+			} else if probe.Exists {
+				observation.StorageIdentity = &probe.Identity
+			}
 		}
 		a.clusterHooks.mu.Lock()
 		observation.ReceivedSnapshots = a.clusterHooks.snapshots[group]
@@ -387,25 +399,31 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 		local := a.local(group)
 		if local != nil {
 			observation.Found, observation.ReplicaID = true, local.group.ReplicaID()
+			identity := local.group.Identity()
+			observation.GroupIdentity = &identity
 			observation.Status = local.group.Status()
 			observation.Proposals = local.group.ProposalStats()
 			observation.Reads = a.clusterHooks.readMetrics(walKey{group, local.group.ReplicaID()})
 			sample := local.group.Metrics().Sample
 			observation.ReadQueue, observation.ReadQueueStamp = sample.ReadQueue, sample.Raft
 			observation.Values = local.machine.values()
-			observation.WAL = a.clusterHooks.walMetrics(walKey{group, local.group.ReplicaID()})
-			observation.WALStallNS = int64(local.group.WALStall())
-			stats, err := a.store.Stats(r.Context(), group)
-			if err != nil {
-				httpError(w, err)
-				return
+			if a.store != nil {
+				observation.WAL = a.clusterHooks.walMetrics(walKey{group, local.group.ReplicaID()})
 			}
-			observation.Storage = stats
+			observation.WALStallNS = int64(local.group.WALStall())
+			if a.store != nil {
+				stats, err := a.store.Stats(r.Context(), group)
+				if err != nil {
+					httpError(w, err)
+					return
+				}
+				observation.Storage = stats
+			}
 		}
 		jsonResponse(w, http.StatusOK, observation)
 	}))
 	mux.HandleFunc("POST /internal/test/local/{group}/snapshot", protect(func(w http.ResponseWriter, r *http.Request) {
-		g, found := a.node.LoadGroup(r.PathValue("group"))
+		g, found := a.currentNode().LoadGroup(r.PathValue("group"))
 		if !found {
 			httpError(w, fault.ErrReplicaNotReady)
 			return

@@ -62,22 +62,25 @@ func (c *Cluster) SetReadFaults(ctx context.Context, node, group string, replica
 
 // LocalObservation combines exact local process, replica, application and persistence observations.
 type LocalObservation struct {
-	Reads             ReadCounters         `json:"reads"`
-	ReadQueue         metrics.ReadQueue    `json:"read_queue"`
-	ReadQueueStamp    metrics.Stamp        `json:"read_queue_stamp"`
-	Identity          topology.Identity    `json:"identity"`
-	Found             bool                 `json:"found"`
-	ReplicaID         uint64               `json:"replica_id"`
-	Status            topology.GroupStatus `json:"status"`
-	Storage           storage.Stats        `json:"storage"`
-	Values            map[string]string    `json:"values"`
-	ReceivedSnapshots uint64               `json:"received_snapshots"`
-	WAL               WALCounters          `json:"wal"`
-	WALStallNS        int64                `json:"wal_stall_ns"`
-	Proposals         load.ProposalStats   `json:"proposals"`
-	Parked            *gquorum.ParkedLoad  `json:"parked,omitempty"`
-	StorageIdentity   *storage.Identity    `json:"storage_identity,omitempty"`
-	ServeOverride     int                  `json:"serve_override"`
+	Reads               ReadCounters         `json:"reads"`
+	ReadQueue           metrics.ReadQueue    `json:"read_queue"`
+	ReadQueueStamp      metrics.Stamp        `json:"read_queue_stamp"`
+	Identity            topology.Identity    `json:"identity"`
+	Found               bool                 `json:"found"`
+	ReplicaID           uint64               `json:"replica_id"`
+	Status              topology.GroupStatus `json:"status"`
+	Storage             storage.Stats        `json:"storage"`
+	Values              map[string]string    `json:"values"`
+	ReceivedSnapshots   uint64               `json:"received_snapshots"`
+	WAL                 WALCounters          `json:"wal"`
+	WALStallNS          int64                `json:"wal_stall_ns"`
+	Proposals           load.ProposalStats   `json:"proposals"`
+	Parked              *gquorum.ParkedLoad  `json:"parked,omitempty"`
+	StorageIdentity     *storage.Identity    `json:"storage_identity,omitempty"`
+	ServeOverride       int                  `json:"serve_override"`
+	StorageAvailable    bool                 `json:"storage_available"`
+	WALControlAvailable bool                 `json:"wal_control_available"`
+	GroupIdentity       *storage.Identity    `json:"group_identity,omitempty"`
 }
 
 // ProjectionObservation reports external projection progress and its exact replica identity.

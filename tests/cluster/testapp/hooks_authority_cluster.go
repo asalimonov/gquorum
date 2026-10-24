@@ -174,7 +174,7 @@ func (a *application) registerAuthorityRoutes(mux *http.ServeMux, protect func(h
 			httpError(w, err)
 			return
 		}
-		if body.Identity != a.node.Identity() {
+		if body.Identity != a.currentNode().Identity() {
 			httpError(w, fault.ErrIdentityMismatch)
 			return
 		}
@@ -186,7 +186,7 @@ func (a *application) registerAuthorityRoutes(mux *http.ServeMux, protect func(h
 			return
 		}
 		if r.Method == "PUT" && kind == topology.AuthorityGroup {
-			group, found := a.node.LoadGroup(group)
+			group, found := a.currentNode().LoadGroup(group)
 			if !found || body.ReplicaID != 0 && body.ReplicaID != group.ReplicaID() {
 				httpError(w, fault.ErrIdentityMismatch)
 				return
@@ -237,7 +237,7 @@ func (a *application) registerAuthorityRoutes(mux *http.ServeMux, protect func(h
 			httpError(w, err)
 			return
 		}
-		if body.Identity != a.node.Identity() || body.Action.To.Node != body.Identity || body.Action.To.Replica.GroupID != r.PathValue("group") {
+		if body.Identity != a.currentNode().Identity() || body.Action.To.Node != body.Identity || body.Action.To.Replica.GroupID != r.PathValue("group") {
 			httpError(w, fault.ErrIdentityMismatch)
 			return
 		}
@@ -245,7 +245,7 @@ func (a *application) registerAuthorityRoutes(mux *http.ServeMux, protect func(h
 			httpError(w, fault.ErrInvalid)
 			return
 		}
-		result, err := a.node.ApplyLoadAction(r.Context(), body.Action)
+		result, err := a.currentNode().ApplyLoadAction(r.Context(), body.Action)
 		if err != nil {
 			httpError(w, err)
 			return
@@ -254,7 +254,7 @@ func (a *application) registerAuthorityRoutes(mux *http.ServeMux, protect func(h
 		jsonResponse(w, http.StatusOK, result)
 	}))
 	mux.HandleFunc("GET /internal/test/revocation/{operator}", protect(func(w http.ResponseWriter, r *http.Request) {
-		status, err := a.cluster.ReadAuthority(r.Context(), topology.OperationID(r.PathValue("operator")))
+		status, err := a.currentCluster().ReadAuthority(r.Context(), topology.OperationID(r.PathValue("operator")))
 		if err != nil {
 			httpError(w, err)
 			return
