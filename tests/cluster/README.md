@@ -20,6 +20,49 @@ links to the latest completed run. The `make test-cluster` report includes the
 image-build phase and its full log, including failed builds. See the
 [reporting guide](../../docs/testing/tests.md#test-reports).
 
+The console distinguishes test entry, queueing and actual execution. The timeline
+sorts leaf tests and parallel subtests by execution start, excluding Go's
+`t.Parallel()` queue from their bars. Its timing table retains parent coordinators
+and reports entry, execution start, queue time and active time separately.
+Fixture acquisition and cleanup are part of execution.
+
+### Optional status replay
+
+```sh
+make test-cluster CLUSTER_REPLAY=1 \
+  CLUSTER_ARGS='-run ^TestMetaConsensusLoadReplicationAndRetainedLeaderRecoveryThreeNodes$'
+open test-reports/cluster/latest/cluster-replay.html
+```
+
+`CLUSTER_REPLAY=1` also works with `make test-cluster-run`. It samples each node's
+existing authenticated runtime status and cluster status every 500 ms, with a
+400 ms timeout per request. Each sweep joins its requests before the next starts;
+slow sweeps skip ticks. The default is off, with no extra status requests.
+Keep it off for performance comparisons because observation adds HTTP/JSON work.
+
+Each acquired cluster has a separate `replay/capture-*.jsonl`, including multiple
+leases in one test. The runner combines these into `cluster-replay.jsonl` and
+creates the offline `cluster-replay.html` with a player per capture. Drop the
+JSONL into the reusable viewer from `make sim-viewer` to replay it alongside
+simulation logs. The report summary links to both files. `TEST_REPORTS_DIR`
+also changes the capture destination.
+
+Capture starts after `acquire` / `acquireFrom` returns and stops before lease
+cleanup. It covers dynamically added nodes and retained restarts. Initial
+deployment, failed acquisition, resource teardown, and pool tests calling
+`Pool.Acquire` directly are outside this capture scope. Sequential subtests
+sharing a parent lease appear in that parent's timeline. Parallel leases remain
+separate, with Go's final test result attached after cleanup. Interrupted captures
+stay incomplete and retain their raw records.
+
+The diagram shows `_meta` leader/nonleader observations and **startup readiness**.
+It does not infer follower/candidate roles, mutation readiness, process death,
+network faults or a live quorum. A failed runtime read clears the previous role
+to unknown and marks the endpoint unreachable. Select an evidence entry and
+expand **Observation detail** to inspect session liveness, local load lifecycle,
+topology versions, group status and original observation timestamps from that
+reporter. Views can disagree and are not an atomic cluster snapshot.
+
 `CLUSTER_IMAGE` selects
 a different application image; that image must implement the fixture's REST and
 startup contracts. Cluster cases run in parallel, with eight concurrent cases by
@@ -37,6 +80,53 @@ The bounded pool defaults to eight deployment units and eight concurrent cooks.
 Pool capacity and startup concurrency follow Go's `-parallel` setting;
 `GQUORUM_TEST_POOL_SIZE` and `GQUORUM_TEST_COOK_PARALLEL` override these counts.
 Both `make test-cluster` and `make test-cluster-run` pass `CLUSTER_PARALLEL` to Go.
+
+On macOS with a local Docker Unix socket and no `TESTCONTAINERS_HOST_OVERRIDE`,
+the fixture publishes HTTP and optional metadata ports on `127.0.0.1`, selecting
+unused host ports randomly from 20000–29999. Docker Desktop's VM allocator cannot
+see macOS sockets; its automatic ephemeral choices collided with host listeners
+and outbound connections. The fixture reserves each host socket through container
+creation, hands it to Docker at startup, and keeps an in-process lease until
+container removal, including retained restarts. This range avoids the default
+macOS ephemeral range. Testcontainers still owns containers and their bindings.
+Other Docker endpoints retain Docker's automatic port allocation.
+
+Fixture timing can be configured per isolated lease without changing library
+defaults:
+
+```go
+voters := topology.DefaultVoterConfig()
+voters.FailureWindow, voters.StandbyWindow = 5*time.Second, 5*time.Second
+spec := matrixSpec(5)
+spec.Scheduling = true
+spec.MetaVoterConfig = &voters // copied; applies only to fresh metadata founding
+spec.Metrics = gquorum.MetricsOptions{
+    SampleInterval: 200 * time.Millisecond,
+    CollectInterval: time.Second, CollectTimeout: 800 * time.Millisecond,
+}
+// Optional shorter elections: 100 ms tick × 5–9 randomized ticks.
+spec.Tick, spec.ElectionTicks = 100*time.Millisecond, 5
+```
+
+`Spec.MetaVoterConfig` and `Spec.Metrics` are passed through the fixture's
+`-meta-voter-config` and `-metrics` JSON flags to the public Node options.
+`Spec.ElectionTicks` is passed through `-election-ticks` to both metadata and
+load engines. Nil voter configuration, zero metrics options, and zero election
+ticks retain library defaults (10 election ticks); the pool's default tick stays
+100 ms. Retained metadata uses its replicated configuration, not a new founding
+override. Create load groups with `GroupSpec.VoterConfig`, or change an existing
+group through an approved `SetGroupVoterConfig` topology mutation.
+
+`TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn` uses 5-second
+failure/standby windows for both groups and faster metrics collection. It retains
+default elections and five-minute cooldowns, including the proof that a second
+failure is replaced before the first cooldown expires. Its phase logs expose
+qualification, replacement and retained recovery delays.
+`TestMetaConsensusLoadReplicationAndRetainedLeaderRecoveryThreeNodes` explicitly
+asserts production voter configuration and election defaults, measures leader
+replacement, and checks retained identity/data recovery. With three voters and
+no standby, it does not exercise the learner qualification window.
+
 Raw `go test -tags=clustertest` also defaults to eight, or accepts `-parallel=N`.
 Independent admission-phase subtests each acquire their own
 lease and run in parallel. Subtests mutating a shared lease remain sequential.

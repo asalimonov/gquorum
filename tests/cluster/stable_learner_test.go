@@ -31,17 +31,25 @@ func TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn(t *testing.T)
 	t.Parallel()
 	spec := matrixSpec(5)
 	spec.Scheduling = true
+	fastVoters := topology.DefaultVoterConfig()
+	fastVoters.FailureWindow, fastVoters.StandbyWindow = 5*time.Second, 5*time.Second
+	spec.MetaVoterConfig = &fastVoters
+	spec.Metrics = gquorum.MetricsOptions{
+		SampleInterval:  200 * time.Millisecond,
+		CollectInterval: time.Second, CollectTimeout: 800 * time.Millisecond,
+	}
 	c := acquire(t, spec).Cluster
-	ctx, cancel := context.WithTimeout(t.Context(), 360*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
 	defer cancel()
-	created, err := c.CreateGroup(ctx, "node5", gquorum.GroupSpec{ID: "work"})
+	started := time.Now()
+	created, err := c.CreateGroup(ctx, "node5", gquorum.GroupSpec{ID: "work", VoterConfig: &fastVoters})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{topology.MetaGroupID, "work"} {
 		g := created.Document.Group(id)
-		if g == nil || len(g.Replicas) != 5 || len(created.Document.VotersOf(id)) != 3 || g.VoterConfig == nil {
-			t.Fatalf("wrong default %s: %+v", id, g)
+		if g == nil || len(g.Replicas) != 5 || len(created.Document.VotersOf(id)) != 3 || g.VoterConfig == nil || *g.VoterConfig != fastVoters {
+			t.Fatalf("wrong test voter configuration %s: %+v", id, g)
 		}
 	}
 	// This calls the exact learner handle, bypassing the fixture's HTTP leader
@@ -84,7 +92,7 @@ func TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn(t *testing.T)
 		}
 		t.Fatal("two standbys never became eligible", err)
 	}
-	t.Log("both groups have two qualified standbys; stopping a voter")
+	t.Logf("elapsed=%s both groups have two qualified standbys; stopping a voter", time.Since(started).Round(time.Millisecond))
 	victim := "node3"
 	if collector == victim {
 		victim = "node2"
@@ -172,6 +180,7 @@ func TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn(t *testing.T)
 	if err := c.Node(victim).Start(ctx); err != nil {
 		t.Fatal(err)
 	}
+	t.Logf("elapsed=%s both replacements committed; restarted %s", time.Since(started).Round(time.Millisecond), victim)
 	if err := Poll(ctx, func() (bool, error) {
 		for _, id := range []string{topology.MetaGroupID, "work"} {
 			local, err := c.Local(ctx, victim, id)
@@ -192,6 +201,7 @@ func TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn(t *testing.T)
 	if err != nil || local.Values["forwarded"] != "retained" {
 		t.Fatal("retained learner lost application state", local, err)
 	}
+	t.Logf("elapsed=%s retained learner caught up with original identities and value", time.Since(started).Round(time.Millisecond))
 
 	// Align leaders before rebuilding the remaining standby's window. This lets
 	// the same observer see a healthy voter after the first durable switch and
@@ -254,7 +264,7 @@ func TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn(t *testing.T)
 	if secondVictim == "" {
 		t.Fatal("no original voter available for the second failure")
 	}
-	t.Log("remaining standby qualified while former voter is cooling; stopping", secondVictim)
+	t.Logf("elapsed=%s remaining standby qualified while former voter is cooling; stopping %s", time.Since(started).Round(time.Millisecond), secondVictim)
 	if err := c.Node(secondVictim).Kill(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -305,4 +315,5 @@ func TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn(t *testing.T)
 		t.Logf("metrics after second failure: %+v %v", snapshot, readErr)
 		t.Fatal("new failure did not replace through the group cooldown", err)
 	}
+	t.Logf("elapsed=%s both groups replaced the second failed voter during cooldown", time.Since(started).Round(time.Millisecond))
 }

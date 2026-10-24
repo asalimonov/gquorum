@@ -42,8 +42,8 @@ class ReportTest(unittest.TestCase):
             event["Test"] = name
         return dict(event, **fields)
 
-    def run_events(self, events, code=0):
-        run = report.Run("unit", self.directory)
+    def run_events(self, events, code=0, suite="unit"):
+        run = report.Run(suite, self.directory)
         with patch.object(report.subprocess, "Popen", return_value=FakeProcess(events, code)):
             status = run.command("library", ["go", "test", "-json", "./..."])
         status = run.finish(status)
@@ -60,6 +60,59 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(test.elapsed, 3)
         self.assertEqual(test.end - test.start, 9)
         self.assertEqual([end - start for start, end in test.segments], [1, 2])
+
+    def test_timeline_distinguishes_entry_queue_and_execution(self):
+        run, status = self.run_events([
+            self.event("start", 0),
+            self.event("run", 1, "TestQueued"), self.event("pause", 2, "TestQueued"),
+            self.event("run", 3, "TestEarlier"), self.event("pass", 5, "TestEarlier", Elapsed=2),
+            self.event("cont", 8, "TestQueued"), self.event("pass", 10, "TestQueued", Elapsed=3),
+            self.event("pass", 11, Elapsed=11),
+        ], suite="cluster")
+        self.assertEqual(status, 0)
+        tests = json.loads((run.directory / "timeline.json").read_text())["tests"]
+        self.assertEqual([test["name"] for test in tests], ["TestEarlier", "TestQueued"])
+        queued = tests[1]
+        self.assertEqual(queued["execution_start"] - queued["start"], 7)
+        self.assertEqual(queued["queued"], 6)
+        self.assertEqual(queued["active"], 2)
+        self.assertEqual(queued["elapsed"], 3)
+        self.assertEqual(queued["execution_segments"], [queued["segments"][1]])
+        console = self.stdout.getvalue()
+        for state in ("entered", "queued", "running"):
+            self.assertIn(f"TestQueued: {state}", console)
+
+    def test_parallel_subtests_have_individual_bars_and_parent_is_coordinator(self):
+        run, _ = self.run_events([
+            self.event("start", 0), self.event("run", 1, "TestParent"),
+            self.event("run", 2, "TestParent/one"), self.event("pause", 2, "TestParent/one"),
+            self.event("run", 3, "TestParent/two"), self.event("pause", 3, "TestParent/two"),
+            self.event("cont", 4, "TestParent/two"), self.event("pass", 6, "TestParent/two", Elapsed=2),
+            self.event("cont", 7, "TestParent/one"), self.event("pass", 9, "TestParent/one", Elapsed=2),
+            self.event("pass", 9, "TestParent", Elapsed=0),
+            # A later invocation with the same name has no children.
+            self.event("run", 10, "TestParent"), self.event("pass", 11, "TestParent", Elapsed=1),
+            self.event("pass", 12, Elapsed=12),
+        ])
+        tests = json.loads((run.directory / "timeline.json").read_text())["tests"]
+        self.assertEqual([test["coordinator"] for test in tests], [True, False, False, False])
+        chart = (run.directory / "timeline.md").read_text().split("```text", 1)[1].split("```", 1)[0]
+        self.assertNotIn("0001 TestParent ", chart)
+        self.assertIn("TestParent…/one", chart)
+        self.assertIn("TestParent…/two", chart)
+        self.assertIn("0004 TestParent ", chart)
+
+    def test_aborted_queued_test_has_no_execution_bar(self):
+        run, status = self.run_events([
+            self.event("start", 0), self.event("run", 1, "TestQueued"),
+            self.event("pause", 2, "TestQueued"), self.event("fail", 5, Elapsed=5),
+        ], code=1)
+        self.assertEqual(status, 1)
+        test = json.loads((run.directory / "timeline.json").read_text())["tests"][0]
+        self.assertIsNone(test["execution_start"])
+        self.assertEqual(test["execution_segments"], [])
+        self.assertEqual(test["active"], 0)
+        self.assertIn("not resumed", (run.directory / "timeline.md").read_text())
 
     def test_repeats_subtests_and_skip_are_preserved_in_junit(self):
         events = [self.event("start", 0)]

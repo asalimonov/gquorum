@@ -14,6 +14,7 @@ MODULES = (
     ("examples/scheduler", ("unit", "functional")),
     ("examples/inmemory-cache", ("unit", "functional")),
     ("tests/cluster", ("unit", "functional", "clustertest", "example")),
+    ("tests/sim", ("sim",)),
     ("scripts/revive", ("unit",)),
     ("scripts/profiledecode", ("unit",)),
 )

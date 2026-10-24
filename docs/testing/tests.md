@@ -6,7 +6,9 @@ participant, isolated Raft engines, protocol doubles, background application
 workers and persistence/recovery fixtures. Units and functional tests stay in
 the original packages beside the code they test. Multi-node consensus and
 application scenarios live in `tests/cluster` and use real Docker processes
-through the bounded pool.
+through the bounded pool. Deterministic multi-node simulations live separately
+in `tests/sim`; `make test-sim` runs the real metadata transport and storage on
+Gosim's runtime, filesystem and network providers.
 
 `make test` compiles the library, the separate `examples/cluster`,
 `examples/scheduler` and `examples/inmemory-cache` modules and the caller application fixture, then runs their uncached units with `-count=1`.
@@ -64,6 +66,7 @@ The five modules are run in sequence, including `examples/scheduler` and
 | `make test-function-race` | Functional tests under the race detector |
 | `make test-example` | Actual small Compose demo REST e2e |
 | `make test-cluster` | Build the image, then run Docker process tests with `-tags=clustertest` |
+| `make test-sim` | Seeded three-node latency and intermittent-connectivity simulations in a separate module |
 | `make test-perf` | Three measured Docker cases, each under two minutes |
 | `make bench` | Planner and complete meta FSM snapshot matrices |
 | `make lint` | Vet all module/build variants; TiDB revive style rules and merged Staticcheck unused declarations |
@@ -74,6 +77,19 @@ The five modules are run in sequence, including `examples/scheduler` and
 non-Docker regression. `FUNCTIONAL_TIMEOUT` defaults to eight minutes per package.
 Use functional race checks for changes to ownership and concurrency. Keep the
 full Docker suite for the end of a related set of changes.
+
+For animated Docker status captures, set `CLUSTER_REPLAY=1` on `make test-cluster`
+or `make test-cluster-run`, optionally selecting cases with `CLUSTER_ARGS`.
+The run directory gains `cluster-replay.jsonl`, `cluster-replay.html` and
+individual raw captures under `replay/`. Sampling is opt-in; see
+[capture semantics and limitations](../../tests/cluster/README.md#optional-status-replay).
+
+The simulation suite is opt-in and uses `//go:build sim`; it does not join the
+five-module unit or functional loop. `SIM_SEEDS` defaults to `1-3`, and
+`SIM_ARGS='-run TestName'` selects cases. Reports are retained under
+`test-reports/sim/`. See [the simulation guide](../../tests/sim/README.md) for
+the 100 ms quorum sampling contract, network/timing settings, current coverage
+boundaries and reproducible seed commands.
 
 
 `make lint` installs versioned binaries under the ignored `.tools/lint/` directory:
@@ -137,9 +153,12 @@ Every run saves:
 
 - `report.md`: summary table, durations, commands and links to package details.
 - `timeline.md`: timing report with an ASCII Gantt diagram and the complete
-  test timing table. The chart shows command phases and top-level tests; the
-  table also includes subtests. Paused `t.Parallel()` intervals are distinct
-  from execution. Wall time includes compilation, setup, teardown and the image
+  test timing table. The chart shows command phases and leaf tests, including
+  parallel subtests, sorted by actual execution start. Parent coordinators appear
+  in the table. Entered (`run`), execution (`cont` for parallel tests), queue
+  time and active time are separate columns; queued intervals are excluded from
+  the execution bars. Execution includes fixture acquisition and cleanup.
+  Wall time includes compilation, setup, teardown and the image
   build when running `make test-cluster`.
 - `timeline.json`: machine-readable timings and execution segments.
 - `events.json`: the merged raw Go event stream.

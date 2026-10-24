@@ -159,10 +159,14 @@ Raft traffic, health probes and session renewals serve different purposes:
 | Session renewal | `Meta.KeepAlive` | Renews an exact process session at the meta leader; this is separate from Raft election heartbeats. |
 | Consensus status query | `Meta.MetaStatus` | Retrieves meta status and health information; it is a diagnostic query. |
 
-`StreamMessages` is a client-streaming RPC, but the current meta sender opens a
-stream, sends one Raft message and closes it for each non-snapshot message. Its
-`Reply` acknowledges transport handling; `MsgHeartbeatResp` is a separate Raft
-message sent back through another call. There is no dedicated Heartbeat RPC.
+The meta sender drains already queued messages into bounded batches and sends
+consecutive non-snapshot messages through one `StreamMessages` RPC. It does not
+wait to fill a batch. This avoids a round trip per message overwhelming the
+sender when RTT exceeds the heartbeat interval. Snapshots retain their ordered,
+separate chunked RPC and completion acknowledgement. A later batch failure does
+not invalidate an already acknowledged snapshot. The stream's `Reply`
+acknowledges transport handling; `MsgHeartbeatResp` remains a separate Raft
+message sent in the reverse direction. There is no dedicated Heartbeat RPC.
 
 Load groups send the same Raft message types through `load.Transport.SendRaft`
 and receive them through `Node.ReceiveLoadRaft`. The application chooses the wire

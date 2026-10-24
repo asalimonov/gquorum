@@ -273,14 +273,15 @@ func (t *Transport) runPeer(p *peer) {
 			retiring, retire = true, nil
 			continue
 		case msg := <-p.queue:
-			if err := t.sendPeerMessage(p, &connection, msg); err == nil {
+			messages := drainPeerMessages(msg, p.queue)
+			undelivered, err := t.sendPeerMessages(p, &connection, messages)
+			if err == nil {
 				backoff = t.opts.RetryInitial
-				t.finishSnapshot(msg)
 				continue
 			}
 			delay := t.peerRetryDelay(backoff)
 			p.until.Store(time.Now().Add(delay).UnixNano())
-			t.fail(msg)
+			t.failMessages(undelivered)
 			// Failed and buffered messages are discarded; a later Raft tick
 			// sends fresh traffic.
 			t.failQueued(p.queue)
@@ -296,9 +297,9 @@ func (t *Transport) runPeer(p *peer) {
 	}
 }
 
-func (t *Transport) sendPeerMessage(p *peer, connection *peerConnection, msg raftpb.Message) error {
+func (t *Transport) sendPeerBatch(p *peer, connection *peerConnection, messages []raftpb.Message) error {
 	timeout := t.opts.SendTimeout
-	if msg.Type == raftpb.MsgSnap {
+	if messages[0].Type == raftpb.MsgSnap {
 		timeout = t.opts.SnapshotTimeout
 	}
 	ctx, cancel := context.WithTimeout(p.ctx, timeout)
@@ -309,7 +310,12 @@ func (t *Transport) sendPeerMessage(p *peer, connection *peerConnection, msg raf
 		connection.address = resolved
 	}
 	if err == nil {
-		err = t.sendMessage(t.authenticated(ctx), metapb.NewMetaClient(connection.conn), msg)
+		client := metapb.NewMetaClient(connection.conn)
+		if messages[0].Type == raftpb.MsgSnap {
+			err = t.sendSnapshot(t.authenticated(ctx), client, messages[0])
+		} else {
+			err = sendRaftFrames(t.authenticated(ctx), client, t.Header(), messages)
+		}
 	}
 	cancel()
 	return err
@@ -349,11 +355,8 @@ func waitPeerRetry(ctx context.Context, delay time.Duration) bool {
 	}
 }
 
-func (t *Transport) sendMessage(ctx context.Context, client metapb.MetaClient, msg raftpb.Message) error {
+func (t *Transport) sendSnapshot(ctx context.Context, client metapb.MetaClient, msg raftpb.Message) error {
 	h := t.Header()
-	if msg.Type != raftpb.MsgSnap {
-		return sendRaftFrame(ctx, client, h, msg)
-	}
 	if msg.Snapshot == nil || len(msg.Snapshot.Data) == 0 || len(msg.Snapshot.Data) > t.opts.MaxSnapshotBytes {
 		return fault.ErrInvalid
 	}
@@ -387,17 +390,19 @@ func (t *Transport) sendMessage(ctx context.Context, client metapb.MetaClient, m
 	return ReplyError(reply)
 }
 
-func sendRaftFrame(ctx context.Context, client metapb.MetaClient, h *metapb.Header, msg raftpb.Message) error {
-	data, err := msg.Marshal()
-	if err != nil {
-		return err
-	}
+func sendRaftFrames(ctx context.Context, client metapb.MetaClient, h *metapb.Header, messages []raftpb.Message) error {
 	stream, err := client.StreamMessages(ctx)
 	if err != nil {
 		return err
 	}
-	if err = stream.Send(&metapb.RaftMessage{Header: h, ToMemberId: msg.To, RaftMessage: data}); err != nil {
-		return err
+	for _, msg := range messages {
+		data, marshalErr := msg.Marshal()
+		if marshalErr != nil {
+			return marshalErr
+		}
+		if err = stream.Send(&metapb.RaftMessage{Header: h, ToMemberId: msg.To, RaftMessage: data}); err != nil {
+			return err
+		}
 	}
 	reply, err := stream.CloseAndRecv()
 	if err != nil {

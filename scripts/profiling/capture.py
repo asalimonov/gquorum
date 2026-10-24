@@ -198,11 +198,10 @@ def run_cache(args, directory, manifest, tool, targets):
     nodes = ['node1', 'node2', 'node3']
     overlay = directory / 'compose.json'
     original = json.loads(execute(['docker', 'compose', '-f', 'examples/inmemory-cache/compose.yaml', 'config', '--format', 'json']))
-    # File-backed Compose secrets are bind mounts on the daemon host. Transfer
-    # this public demo credential through the Docker API instead, so an external
-    # workspace need not be shared into a Docker Desktop/Colima VM.
+    # Retain and transfer the public demo credential through the Docker API;
+    # this does not depend on host file sharing or a Compose secrets definition.
     credential = directory / 'demo-credential.txt'
-    shutil.copyfile(original['secrets']['credential']['file'], credential)
+    shutil.copyfile(ROOT / 'examples/inmemory-cache/demo-credential.txt', credential)
     credential.chmod(0o444)
     original = cache_config(original, image, args)
     overlay.write_text(json.dumps(original, indent=2))

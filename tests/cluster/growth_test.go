@@ -151,19 +151,51 @@ func TestRuntimeGrowthExposesLearnerBeforePromotionAndSurvivesRestart(t *testing
 	}
 	id := startApply(ctx, t, c, "node2", staged.Document.Version)
 	if err := Poll(ctx, func() (bool, error) {
+		op, err := c.Operation(ctx, "node2", id)
+		if err != nil {
+			return false, err
+		}
+		if op.State.Terminal() {
+			return true, fmt.Errorf("operation ended before promotion barrier: %+v", op)
+		}
+		block, ok := operationBlock(op, "work")
+		if !ok || block.CurrentStep == 0 {
+			return false, nil
+		}
+		// Preview is not the immutable approved plan: refreshed native state
+		// can remove an already-satisfied step before approval. Use the
+		// retained operation's current step number, but still match every
+		// operation, replica and voter-set field of the intended promotion.
+		approvedPromotion := promotion
+		approvedPromotion.Seq = block.CurrentStep
 		for _, node := range c.Nodes() {
 			controls, err := c.Controls(ctx, node.Spec.Name)
 			if err != nil {
 				return false, err
 			}
 			for _, b := range controls.Barriers {
-				if b.Hits > 0 && b.Last.Matches(id, 1, staged.Document.Version, promotion) {
+				if b.Hits > 0 && b.Last.Matches(id, 1, staged.Document.Version, approvedPromotion) {
 					return true, nil
+				}
+				if b.Hits > 0 && b.Last.OperationID == id && b.Last.Kind == topology.StepPromoteVoter {
+					// The status read may precede the barrier by one step.
+					if b.Last.StepSeq != block.CurrentStep {
+						continue
+					}
+					return true, fmt.Errorf("unexpected promotion authorization: got %+v, expected %+v", b.Last, approvedPromotion)
 				}
 			}
 		}
 		return false, nil
 	}); err != nil {
+		diagnostic, stop := context.WithTimeout(context.Background(), 3*time.Second)
+		defer stop()
+		op, readErr := c.Operation(diagnostic, "node2", id)
+		t.Logf("promotion operation: %+v (read error: %v)", op, readErr)
+		for _, node := range c.Nodes() {
+			local, readErr := c.Local(diagnostic, node.Spec.Name, "work")
+			t.Logf("%s local: %+v (read error: %v)", node.Spec.Name, local, readErr)
+		}
 		t.Fatal("promotion never reached the exact effect barrier", err)
 	}
 	local, err := c.Local(ctx, "node3", "work")

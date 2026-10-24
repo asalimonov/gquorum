@@ -19,6 +19,7 @@ import (
 // Each case owns three processes. The metadata controller and application
 // leader differ, so every held action/fence crosses the authenticated transport.
 func TestAuthorityRevocationBoundaryAndLostFenceReplyThreeNodes(t *testing.T) {
+	t.Parallel()
 	for _, after := range []bool{false, true} {
 		name := "delayed_action_before_fence"
 		if after {

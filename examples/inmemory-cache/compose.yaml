@@ -6,8 +6,6 @@ x-node: &node
     dockerfile: examples/inmemory-cache/Dockerfile
   stop_grace_period: 30s
   networks: [cache]
-  secrets:
-    - credential
   healthcheck:
     test: ["CMD", "/cache-server", "healthcheck", "127.0.0.1:6379"]
     interval: 2s
@@ -65,9 +63,6 @@ services:
       node1: {condition: service_healthy}
       node2: {condition: service_healthy}
       node3: {condition: service_healthy}
-secrets:
-  credential:
-    file: ./demo-credential.txt
 networks:
   cache:
 volumes:

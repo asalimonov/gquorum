@@ -108,5 +108,7 @@ func acquireFrom(t *testing.T, pool *Pool, spec Spec) *Lease {
 			t.Error("release:", err)
 		}
 	})
+	// LIFO cleanup joins the sampler before the lease releases its resources.
+	t.Cleanup(startReplay(t, lease.Cluster))
 	return lease
 }

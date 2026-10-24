@@ -131,10 +131,7 @@ class CaptureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
             (directory/'raw').mkdir()
-            credential = directory/'source-credential'
-            credential.write_text('public-demo-credential')
-            config = {'secrets': {'credential': {'file': str(credential)}},
-                      'services': {n: {'environment': {}} for n in ('node1', 'node2', 'node3', 'loadgen')}}
+            config = {'services': {n: {'environment': {}} for n in ('node1', 'node2', 'node3', 'loadgen')}}
             options = SimpleNamespace(workers=1, keys=615, gomaxprocs=1, fsync=False,
                                       seconds=1, warmup=0, syscalls=True, syscall_seconds=1)
             commands = []
@@ -229,9 +226,6 @@ class CaptureTests(unittest.TestCase):
                                   seconds=1, warmup=0, syscalls=False)
         for failure in (RuntimeError('startup failed'), KeyboardInterrupt()):
             with self.subTest(failure=type(failure).__name__), tempfile.TemporaryDirectory() as tmp:
-                credential = Path(tmp)/'source-credential'
-                credential.write_text('public-demo-credential')
-                config['secrets'] = {'credential': {'file': str(credential)}}
                 commands = []
                 def command(args, **kwargs):
                     args = list(map(str, args))

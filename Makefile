@@ -14,9 +14,14 @@ PERF_PARALLEL ?= 1
 CLUSTER_IMAGE ?= gquorum-test:local
 CLUSTER_ARGS ?=
 CLUSTER_TIMEOUT ?= 10m
+CLUSTER_REPLAY ?= 0
 BENCH_TIME ?= 200ms
 TEST_REPORTS_DIR ?= test-reports
 UNIT_ARGS ?=
+SIM_SEEDS ?= 1-3
+SIM_PARALLEL ?= 4
+SIM_ARGS ?=
+SIM_LOG ?=
 
 help: ## List available targets and their descriptions
 	@awk 'BEGIN { FS = ":.*## "; print "Usage: make <target>\n\nTargets:" } /^[a-zA-Z0-9_-]+:.*## / { printf "  %-20s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -30,6 +35,18 @@ test-unit-race: ## Run unit tests with the race detector
 test: test-unit ## Compile all five modules and run fast, uncached unit tests
 
 test-race: test-unit-race ## Run fast unit tests with the race detector
+
+.PHONY: test-sim
+test-sim: ## Run deterministic three-node simulations (SIM_SEEDS=1-3; SIM_ARGS='-run TestName')
+	@python3 scripts/test_report.py sim --reports-dir "$(TEST_REPORTS_DIR)" --seeds="$(SIM_SEEDS)" --parallel="$(SIM_PARALLEL)" -- $(SIM_ARGS)
+
+.PHONY: sim-visualize
+sim-visualize: ## Build offline animated HTML from SIM_LOG=path/to/tests-sim-root.log
+	@python3 scripts/sim_visualize.py $(if $(SIM_LOG),"$(SIM_LOG)")
+
+.PHONY: sim-viewer
+sim-viewer: ## Build reusable drag-and-drop viewer at test-reports/sim/viewer.html
+	@python3 scripts/sim_visualize.py
 
 REVIVE := .tools/lint/revive-v1.17.1/revive
 REVIVE_PACKAGES := .tools/lint/revive-v1.17.1/revive-packages
@@ -79,11 +96,11 @@ test-cluster-build: ## Build the Docker process-test application image
 	docker build -f tests/cluster/testapp/Dockerfile -t $(CLUSTER_IMAGE) .
 
 test-cluster: ## Build the image and run Docker process tests
-	@python3 scripts/test_report.py cluster --build-image --image "$(CLUSTER_IMAGE)" --parallel=$(CLUSTER_PARALLEL) --reports-dir "$(TEST_REPORTS_DIR)" --timeout=$(CLUSTER_TIMEOUT) -- $(CLUSTER_ARGS)
+	@python3 scripts/test_report.py cluster --cluster-replay="$(CLUSTER_REPLAY)" --build-image --image "$(CLUSTER_IMAGE)" --parallel=$(CLUSTER_PARALLEL) --reports-dir "$(TEST_REPORTS_DIR)" --timeout=$(CLUSTER_TIMEOUT) -- $(CLUSTER_ARGS)
 
 # Separate module keeps Docker tooling out of the library and unit-test loop.
 test-cluster-run: ## Run Docker cluster tests using an existing image
-	@python3 scripts/test_report.py cluster --image "$(CLUSTER_IMAGE)" --parallel=$(CLUSTER_PARALLEL) --reports-dir "$(TEST_REPORTS_DIR)" --timeout=$(CLUSTER_TIMEOUT) -- $(CLUSTER_ARGS)
+	@python3 scripts/test_report.py cluster --cluster-replay="$(CLUSTER_REPLAY)" --image "$(CLUSTER_IMAGE)" --parallel=$(CLUSTER_PARALLEL) --reports-dir "$(TEST_REPORTS_DIR)" --timeout=$(CLUSTER_TIMEOUT) -- $(CLUSTER_ARGS)
 
 # Each performance case owns a separate deadline, including generation cleanup.
 test-perf: test-cluster-build ## Build the image and run process performance checks

@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/topology"
 	"github.com/containerd/errdefs"
 	containerapi "github.com/moby/moby/api/types/container"
@@ -46,6 +47,9 @@ type Spec struct {
 	GateFounders                          bool
 	FoundingTimeout                       time.Duration
 	SessionTTL, Tick                      time.Duration
+	ElectionTicks                         int
+	MetaVoterConfig                       *topology.VoterConfig
+	Metrics                               gquorum.MetricsOptions
 	WALWriteWait, Retention               time.Duration
 	ProposalTimeout                       time.Duration
 	SnapshotThreshold                     uint64
@@ -59,12 +63,19 @@ type Spec struct {
 func (s Spec) normalized() Spec {
 	s.Nodes = slices.Clone(s.Nodes)
 	s.Deferred = slices.Clone(s.Deferred)
+	if s.MetaVoterConfig != nil {
+		config := *s.MetaVoterConfig
+		s.MetaVoterConfig = &config
+	}
 	s.Limits = s.Limits.WithDefaults()
 	if s.SessionTTL == 0 {
 		s.SessionTTL = 5 * time.Second
 	}
 	if s.Tick == 0 {
 		s.Tick = 100 * time.Millisecond
+	}
+	if s.ElectionTicks == 0 {
+		s.ElectionTicks = gquorum.DefaultMetaTiming().ElectionTicks
 	}
 	if s.SnapshotThreshold == 0 {
 		s.SnapshotThreshold = 8
@@ -99,6 +110,14 @@ func (s Spec) validate() error {
 	}
 	if s.SessionTTL <= 0 || s.Tick <= 0 {
 		return errors.New("invalid cluster timing")
+	}
+	if s.ElectionTicks < 2 {
+		return errors.New("election ticks must be at least two")
+	}
+	if s.MetaVoterConfig != nil {
+		if err := s.MetaVoterConfig.Validate(1, s.Limits.MaxNodes); err != nil {
+			return err
+		}
 	}
 	if s.FoundingTimeout < 0 {
 		return errors.New("negative founding timeout")
@@ -143,6 +162,7 @@ type Node struct {
 	endpoint  string
 	running   atomic.Bool
 	cluster   *Cluster
+	hostPorts *hostPorts
 }
 
 // Endpoint returns the container's current published HTTP address.
@@ -155,6 +175,7 @@ func (n *Node) Start(ctx context.Context) error {
 		return err
 	}
 	defer cancel()
+	n.hostPorts.handoff()
 	if err := n.Container.Start(owned); err != nil {
 		return err
 	}
@@ -211,6 +232,8 @@ func (n *Node) StartJoining(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	n.hostPorts.release()
+	n.hostPorts = nil
 	n.running.Store(false)
 	peers := make([]peer, len(c.Spec.Nodes))
 	for i, seed := range c.Spec.Nodes {
@@ -360,6 +383,14 @@ func (c *Cluster) createNodeContainer(ctx context.Context, node *Node, image str
 	if err != nil {
 		return err
 	}
+	voterConfig, err := json.Marshal(c.Spec.MetaVoterConfig)
+	if err != nil {
+		return err
+	}
+	metricsConfig, err := json.Marshal(c.Spec.Metrics)
+	if err != nil {
+		return err
+	}
 	ports := []string{"8080/tcp"}
 	if c.Spec.PublishMeta {
 		ports = append(ports, "9000/tcp")
@@ -371,6 +402,17 @@ func (c *Cluster) createNodeContainer(ctx context.Context, node *Node, image str
 		WaitingFor:     wait.ForListeningPort("8080/tcp").SkipInternalCheck().WithStartupTimeout(20 * time.Second),
 		ConfigModifier: func(config *containerapi.Config) { config.Hostname = spec.Name },
 	}
+	node.hostPorts, err = reserveHostPorts(c.docker.DaemonHost(), ports)
+	if err != nil {
+		return err
+	}
+	if node.hostPorts != nil {
+		request.HostConfigModifier = func(config *containerapi.HostConfig) {
+			config.PortBindings = node.hostPorts.bindings
+		}
+	}
+	request.Cmd = append(request.Cmd, "-election-ticks="+strconv.Itoa(c.Spec.ElectionTicks),
+		"-meta-voter-config="+string(voterConfig), "-metrics="+string(metricsConfig))
 	if pinPhase != "" {
 		// A published Docker port can accept connections before the protocol
 		// driver pins identity and starts HTTP. Wait for its actual diagnostic.
@@ -494,6 +536,7 @@ func (c *Cluster) destroy(ctx context.Context) error {
 					return
 				}
 			}
+			node.hostPorts.release()
 			if node.Volume != "" {
 				_, err := c.docker.VolumeRemove(ctx, node.Volume, docker.VolumeRemoveOptions{})
 				_, inspectErr := c.docker.VolumeInspect(ctx, node.Volume, docker.VolumeInspectOptions{})
@@ -515,6 +558,9 @@ func (c *Cluster) destroy(ctx context.Context) error {
 	// to the pool; no unlabeled or other-generation resources are touched.
 	if err := c.removeResidue(ctx); err != nil {
 		return errors.Join(append(failures, err)...)
+	}
+	for _, node := range c.Nodes() {
+		node.hostPorts.release()
 	}
 	if c.uncertainCreate != nil {
 		return fmt.Errorf("unit cannot be reused after an unacknowledged Docker create: %w", c.uncertainCreate)
