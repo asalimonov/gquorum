@@ -1,7 +1,12 @@
+//revive:disable:max-public-structs Keep Node and subsystem options together for API navigation.
+
 package gquorum
 
 import (
+	"context"
+	"crypto/tls"
 	"log/slog"
+	"net"
 	"strings"
 	"time"
 
@@ -13,6 +18,7 @@ import (
 	"github.com/asalimonov/gquorum/lifecycle"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/scheduling"
+	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -77,6 +83,103 @@ type FoundingMember struct {
 	MemberID      uint64
 	Address       string
 	PinnedLearner bool
+}
+
+// MetaOptions configures the local _meta replica, reads, sessions and
+// observation. Membership changes after founding use Cluster topology edits.
+type MetaOptions struct {
+	// VoterConfig applies only to fresh founding; nil selects the default.
+	// Retained topology is changed through Cluster.SetGroupVoterConfig.
+	VoterConfig *topology.VoterConfig
+
+	// Network, read and Raft timing settings.
+	Network MetaNetworkOptions
+	Reads   load.ReadOptions
+	Timing  MetaTiming
+
+	// Session, snapshot, watch and observation settings.
+	SessionTTL        time.Duration
+	SnapshotThreshold uint64
+	MaxWatchers       int
+	Observation       ObservationOptions
+}
+
+// MetaNetworkOptions configures _meta transport and peer discovery. Listener
+// ownership transfers to Node only when startup acquires the meta service.
+type MetaNetworkOptions struct {
+	// Listener transfers to Node when Start successfully acquires meta.
+	Listener net.Listener
+	// AdvertiseAddress and Resolver identify reachable _meta peers.
+	// Resolver must work from local information before election and during quorum loss.
+	AdvertiseAddress string
+	Resolver         topology.AddressResolver
+	// TLS settings, plaintext opt-in and the shared cluster credential protect
+	// meta transport; MaxSnapshotBytes bounds incoming snapshots.
+	TLS, ClientTLS    *tls.Config
+	AllowPlaintext    bool
+	ClusterCredential []byte
+	MaxSnapshotBytes  int
+}
+
+// MetaTiming configures _meta Raft ticks and peer communication timeouts.
+// Zero-valued settings use the library defaults during option resolution.
+type MetaTiming struct {
+	// TickInterval drives Raft; ElectionTicks and HeartbeatTicks count its
+	// ticks.
+	TickInterval                  time.Duration
+	ElectionTicks, HeartbeatTicks int
+	// DialTimeout and SendTimeout bound peer calls; retry bounds reconnects.
+	DialTimeout, SendTimeout       time.Duration
+	PeerRetryInitial, PeerRetryMax time.Duration
+}
+
+// ObservationOptions bounds the interval and timeout of peer observations.
+type ObservationOptions struct{ Interval, Timeout time.Duration }
+
+// GroupFactory acquires a machine for the owned, approved replica
+// specification.
+// On success, Node owns Application.Close. On failure, the factory releases any
+// partial acquisitions. Callbacks must honor cancellation; they may inspect
+// status or RequestStop, but must not wait for teardown that joins themselves.
+type GroupFactory func(context.Context, load.ReplicaSpec) (load.Application, error)
+
+// RetireReplicaFunc idempotently verifies and retires exact application state,
+// including retries after prior cleanup. Return the entire matching proof with
+// Verified=true. Callbacks must honor cancellation and may read status or call
+// RequestStop; do not wait for their own group's lifecycle or Node.Stop.
+type RetireReplicaFunc func(context.Context, load.RetirementRequest) (load.RetirementResult, error)
+
+// LoadOptions supplies managed application factories, transport, storage and
+// engine settings.
+type LoadOptions struct {
+	Factory                              GroupFactory
+	Retire                               RetireReplicaFunc
+	Transport                            load.Transport
+	Storage                              LoadStorageOptions
+	Engine                               load.EngineOptions
+	EffectTimeout                        time.Duration
+	RecoveryInterval, RetirementInterval time.Duration
+}
+
+// LoadStorageOptions selects Node-owned WAL storage or borrowed storage and
+// retirement interfaces.
+type LoadStorageOptions struct {
+	// Select owned WAL storage, or a borrowed Store with explicit Retirement.
+	WAL        *WALOptions
+	Store      storage.Store
+	Retirement storage.RetirementStore
+}
+
+// WALOptions configures the caller-selected load storage root and WAL writes.
+type WALOptions struct {
+	RootDir      string
+	SegmentBytes int64
+	Prewrite     *bool
+	// DisableFSync skips fsync for WAL and applied-state writes. Writes still
+	// reach the OS, but host crashes can lose acknowledged data or corrupt
+	// state. Snapshot files, identity pins and directory synchronization are
+	// unchanged.
+	DisableFSync bool
 }
 
 // DefaultMetaTiming returns the library's default meta Raft and transport

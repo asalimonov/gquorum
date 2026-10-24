@@ -131,17 +131,30 @@ clean-scheduler-example: ## Stop the scheduler example and delete its own data v
 	docker compose -f examples/scheduler/compose.yaml down --volumes
 
 .PHONY: run-cache-example stop-cache-example clean-cache-example test-cache-example
-run-cache-example: ## Build and run the replicated in-memory cache with its load generator
-	docker compose -f examples/inmemory-cache/compose.yaml up --build -d --wait --wait-timeout 120
+run-cache-example: ## Run cache (CACHE_WORKERS=1..256; CACHE_LOADGEN=0 disables loader)
+	docker compose -f examples/inmemory-cache/compose.yaml up --build -d --wait --remove-orphans --wait-timeout 120
 
 stop-cache-example: ## Stop the cache example and preserve its Raft and topology volumes
-	docker compose -f examples/inmemory-cache/compose.yaml down
+	docker compose -f examples/inmemory-cache/compose.yaml down --remove-orphans
 
 clean-cache-example: ## Stop the cache example and delete its own volumes
-	docker compose -f examples/inmemory-cache/compose.yaml down --volumes
+	docker compose -f examples/inmemory-cache/compose.yaml down --volumes --remove-orphans
 
 test-scheduler-example: ## Verify scheduler execution, transfer, crashes and quorum recovery in Docker
 	@python3 scripts/test_report.py example --reports-dir "$(TEST_REPORTS_DIR)" --timeout=6m -- -run=^TestSchedulerExample
 
 test-cache-example: ## Verify cache recovery across one-node and full process restarts
 	@python3 scripts/test_report.py example --reports-dir "$(TEST_REPORTS_DIR)" --timeout=5m -- -run=^TestCacheExample
+
+PROFILE_ARGS ?=
+.PHONY: profile-cache profile-report test-profile-tools
+profile-cache: ## Build and profile an isolated cache cluster; PROFILE_ARGS customizes capture
+	python3 scripts/profile.py cache $(PROFILE_ARGS)
+
+profile-report: ## Analyze saved profiles; PROFILE_ARGS='--profile node1=cpu.pprof --strace node1=trace.gz'
+	python3 scripts/profile.py analyze $(PROFILE_ARGS)
+
+test-profile-tools: ## Test profile decoding, syscall aggregation and report generation
+	python3 -m unittest discover -s scripts -p 'profile_test.py'
+	go -C scripts/profiledecode test -count=1 ./...
+	go -C scripts/profiledecode vet ./...

@@ -80,10 +80,8 @@ type Transport struct {
 	closed  bool
 	active  int
 	clients map[string]*connection
-	// Outgoing Raft streams by exact replica route; addresses whose recipient
-	// lacks StreamRaft map to the time streaming is retried.
+	// Outgoing Raft streams by exact replica route.
 	streams    map[streamKey]*raftStream
-	unaryOnly  map[string]time.Time
 	janitor    bool
 	streamIdle time.Duration
 	ctx        context.Context
@@ -127,7 +125,6 @@ func New(options Options) (*Transport, error) {
 		options:    options,
 		clients:    make(map[string]*connection),
 		streams:    make(map[streamKey]*raftStream),
-		unaryOnly:  make(map[string]time.Time),
 		streamIdle: defaultStreamIdle,
 		ctx:        ctx,
 		cancel:     cancel,

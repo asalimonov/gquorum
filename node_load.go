@@ -3,6 +3,8 @@ package gquorum
 import (
 	"context"
 	"errors"
+	"fmt"
+	"time"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/authoritystore"
@@ -14,6 +16,42 @@ import (
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
+
+// ParkReason classifies why local replica startup was refused.
+type ParkReason string
+
+// ParkedLoad describes a refused local boot, not a replicated cluster event.
+// Entries clear only after a successful start of the approved identity.
+type ParkedLoad struct {
+	Identity storage.Identity `json:"identity"`
+	Reason   ParkReason       `json:"reason"`
+	Since    time.Time        `json:"since"`
+}
+
+// LoadParkedError reports a refused replica boot while preserving its
+// underlying cause.
+type LoadParkedError struct {
+	ParkedLoad
+	Cause error
+}
+
+// ParkStoreMissing and the following reasons identify unavailable or
+// contradictory storage.
+const (
+	ParkStoreMissing     ParkReason = "store_missing"
+	ParkStoreUnreadable  ParkReason = "store_unreadable"
+	ParkIdentityMismatch ParkReason = "identity_mismatch"
+)
+
+func (e *LoadParkedError) Error() string {
+	return fmt.Sprintf("load group %s replica %d parked: %s", e.Identity.GroupID, e.Identity.ReplicaID, e.Reason)
+}
+func (e *LoadParkedError) Unwrap() error { return e.Cause }
+
+// Is matches a parked boot against the replica-not-ready classification.
+func (*LoadParkedError) Is(err error) bool {
+	return errors.Is(fault.ErrReplicaNotReady, err)
+}
 
 func (n *node) newHost(m *metaservice.Group) (*managed.Host, error) {
 	n.mu.RLock()
@@ -317,4 +355,47 @@ func (n *node) collectReadmissionReceipts(ctx context.Context,
 		}
 	}
 	return receipts, nil
+}
+
+func (n *node) ReceiveLoadRaft(ctx context.Context, batch load.RaftBatch) error {
+	h, err := n.loadHost(ctx)
+	if err != nil {
+		return err
+	}
+	return h.ReceiveRaft(ctx, batch)
+}
+
+func (n *node) ReadLoadReplica(ctx context.Context, query load.ReplicaQuery) (load.ReplicaStatus, error) {
+	h, err := n.loadHost(ctx)
+	if err != nil {
+		return load.ReplicaStatus{}, err
+	}
+	return h.ReadReplica(ctx, query)
+}
+
+func (n *node) ApplyLoadAction(ctx context.Context, request load.ActionRequest) (load.ActionResult, error) {
+	h, err := n.authorityHost(ctx)
+	if err != nil {
+		return load.ActionResult{}, err
+	}
+	return h.ApplyAction(ctx, request)
+}
+
+func (n *node) ReportLoadDelivery(ctx context.Context, report load.DeliveryReport) error {
+	h, err := n.loadHost(ctx)
+	if err != nil {
+		return err
+	}
+	return h.ReportDelivery(ctx, report)
+}
+
+func (n *node) InstallLoadFence(ctx context.Context, request load.FenceRequest) (load.FenceResult, error) {
+	if n.needsReadmissionFence(request) {
+		return n.installReadmissionFence(ctx, request)
+	}
+	h, err := n.authorityHost(ctx)
+	if err != nil {
+		return load.FenceResult{}, err
+	}
+	return h.InstallFence(ctx, request)
 }

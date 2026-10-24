@@ -201,3 +201,8 @@ executor crash/reassignment, leader crash, retained restart, snapshot/tail
 recovery, quorum loss/restoration and a partitioned executor.
 `SCHEDULER_TEST_IMAGE=<tag>` optionally borrows an already built image without
 replacing or deleting that tag.
+
+The demo image bundles the public `demo-credential.txt` at
+`/run/secrets/credential`, so Compose needs no host credential bind mount.
+Deployments using private credentials should supply their own file and set
+`GQUORUM_CREDENTIAL_FILE` accordingly.

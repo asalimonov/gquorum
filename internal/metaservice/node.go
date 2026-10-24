@@ -3,7 +3,6 @@ package metaservice
 import (
 	"context"
 	"errors"
-	"slices"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -129,8 +128,7 @@ func (g *Group) ValidateLoadPeer(ctx context.Context, peer load.Peer) error {
 	if err := g.ValidateLoadNode(ctx, peer.Node); err != nil {
 		return err
 	}
-	catalog, err := g.LoadCatalog(ctx, peer.Replica.GroupID)
-	if err != nil {
+	if err := g.ensureRunning(ctx); err != nil {
 		return err
 	}
 	id := storage.Identity{
@@ -139,7 +137,11 @@ func (g *Group) ValidateLoadPeer(ctx context.Context, peer load.Peer) error {
 		GroupID:   peer.Replica.GroupID,
 		ReplicaID: peer.Replica.ReplicaID,
 	}
-	if !slices.Contains(catalog, id) {
+	found, err := g.state().HasLoadPeer(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !found {
 		// A current sender can observe an approval before this receiver applies
 		// it. Refuse the unrecognized replica without turning observation lag
 		// into a terminal Operation failure. No Raft input is admitted here.

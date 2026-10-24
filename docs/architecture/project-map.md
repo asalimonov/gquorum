@@ -99,7 +99,7 @@ an unresolved name remains empty while the observed numeric ID is preserved.
 retirement root, including resolved/symlinked paths. Missing retained authority,
 pins or logs cannot be interpreted as fresh founding. Read-only inventory must
 include unknown groups, partial acquisitions and quarantined data. See
-[authority path checks](../../node_authority_path.go),
+[authority path checks](../../node_authority.go),
 [freshness checks](../../node_authority.go) and
 [storage inventory contract](../../storage/store_contract.go).
 
@@ -961,9 +961,9 @@ Reports: `test-reports/<suite>/latest/{report.md,timeline.md}` and package logs.
 
 | Search token | First implementation / regression to inspect |
 | --- | --- |
-| `KB_START_RESERVATION` / handle visible too early | [managed/replica.go](../../internal/managed/replica.go), [application_func_test.go](../../internal/managed/application_func_test.go), [node publication tests](../../node_meta_authority_func_test.go) |
+| `KB_START_RESERVATION` / handle visible too early | [managed/replica.go](../../internal/managed/replica.go), [application_func_test.go](../../internal/managed/application_func_test.go), [node publication tests](../../node_authority_func_test.go) |
 | `KB_OWNER` / Stop timeout or overlapping successor | [managed/host.go](../../internal/managed/host.go), [ownership_ports_func_test.go](../../internal/managed/ownership_ports_func_test.go), [lifecycle runner](../../node_lifecycle_hooks.go) |
-| `KB_RETAINED_EVIDENCE` / missing authority or storage | [node_authority.go](../../node_authority.go), [node_retained_authority_func_test.go](../../node_retained_authority_func_test.go), [managed/boot.go](../../internal/managed/boot.go) |
+| `KB_RETAINED_EVIDENCE` / missing authority or storage | [node_authority.go](../../node_authority.go), [node_authority_func_test.go](../../node_authority_func_test.go), [managed/boot.go](../../internal/managed/boot.go) |
 | `KB_FENCE_COMPLETION` / superseded effect still running | [authoritystore/fences.go](../../internal/authoritystore/fences.go), [managed/authority_func_test.go](../../internal/managed/authority_func_test.go), [authority process tests](../../tests/cluster/authority_fencing_test.go) |
 | `KB_RECEIPT` / operator falsely converged | [operator/receipts.go](../../internal/operator/receipts.go), [scoped_execution_func_test.go](../../internal/operator/scoped_execution_func_test.go), [metaengine/scoped_receipts_test.go](../../internal/metaengine/scoped_receipts_test.go) |
 | `KB_RETIRE` / cleanup destroys newer resources | [managed/retirement.go](../../internal/managed/retirement.go), [retirement_func_test.go](../../internal/managed/retirement_func_test.go), [readmission_authority_func_test.go](../../internal/managed/readmission_authority_func_test.go) |

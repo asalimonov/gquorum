@@ -15,6 +15,7 @@ import (
 // Indexes refer only to owned decoded rows. They are rebuilt, never serialized,
 // and confer no authority before the complete restore graph/proof validation.
 type scopedIndexes struct {
+	loadPeers       map[storage.Identity]struct{}
 	groups          map[string]*groupConvergence
 	nodes           map[string]*nodeConvergence
 	operations      map[topology.OperationID]*topology.Operation
@@ -71,6 +72,7 @@ func (s *scopedState) buildIndexes() (*scopedIndexes, error) {
 	index.cleanupOrder = slices.SortedFunc(maps.Values(index.cleanup), func(a, b *cleanupRecord) int {
 		return compareReplicaIdentity(a.Identity, b.Identity)
 	})
+	index.loadPeers = indexLoadPeers(s, index)
 	return index, nil
 }
 

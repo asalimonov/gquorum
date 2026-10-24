@@ -1,29 +1,25 @@
 // Package cache is the replicated state machine of the cache example: an
-// in-memory map bounded to Capacity entries that evicts the entry written
-// longest ago. Every replica applies the same commands in the same order, so
-// eviction is identical everywhere. Nothing is written to disk by the
-// application; the library restores state from its Raft snapshot and log.
+// in-memory key/value map without automatic expiration or eviction. Nothing
+// is written to disk by the application; the library restores state from its
+// Raft snapshot and log.
 package cache
 
 import (
-	"container/list"
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
+	"strings"
 
 	"github.com/asalimonov/gquorum/load"
 )
-
-// Capacity is the maximum number of keys; writing a new key beyond it evicts
-// the oldest one. A SET of an existing key makes it the newest.
-const Capacity = 512
 
 const (
 	codeInvalid = "invalid"
 	codeOK      = "ok"
 )
 
-// Bounds for keys and values keep complete snapshots small.
+// Bounds for individual keys and values limit command size.
 const (
 	MaxKeyBytes   = 1 << 10
 	MaxValueBytes = 4 << 10
@@ -49,16 +45,14 @@ type entry struct{ Key, Value string }
 // Machine implements load.StateMachine and load.QueryMachine. The library
 // serializes Apply, Query, Snapshot and Restore, so it needs no lock.
 type Machine struct {
-	index map[string]*list.Element
-	order *list.List // front is the oldest write
+	values map[string]string
 }
 
 var _ load.StateMachine = (*Machine)(nil)
 var _ load.QueryMachine = (*Machine)(nil)
 
-// NewMachine creates an empty cache state machine with deterministic insertion
-// order.
-func NewMachine() *Machine { return &Machine{index: map[string]*list.Element{}, order: list.New()} }
+// NewMachine creates an empty cache state machine.
+func NewMachine() *Machine { return &Machine{values: make(map[string]string)} }
 
 func reply(code string, value any) load.Result {
 	data, _ := json.Marshal(value)
@@ -78,13 +72,13 @@ func (m *Machine) Apply(_ context.Context, c load.Command) (load.Result, error) 
 		if !keyValid || len(cmd.Value) > MaxValueBytes {
 			return load.Result{Code: codeInvalid}, nil
 		}
-		return reply(codeOK, Count{N: 1, Evicted: m.set(cmd.Key, cmd.Value)}), nil
+		m.values[cmd.Key] = cmd.Value
+		return reply(codeOK, Count{N: 1}), nil
 	case "del":
 		removed := 0
 		for _, key := range cmd.Keys {
-			if e, ok := m.index[key]; ok {
-				m.order.Remove(e)
-				delete(m.index, key)
+			if _, ok := m.values[key]; ok {
+				delete(m.values, key)
 				removed++
 			}
 		}
@@ -92,22 +86,6 @@ func (m *Machine) Apply(_ context.Context, c load.Command) (load.Result, error) 
 	default:
 		return load.Result{Code: codeInvalid}, nil
 	}
-}
-
-func (m *Machine) set(key, value string) (evicted int) {
-	if e, ok := m.index[key]; ok {
-		e.Value.(*entry).Value = value
-		m.order.MoveToBack(e)
-		return 0
-	}
-	m.index[key] = m.order.PushBack(&entry{Key: key, Value: value})
-	for m.order.Len() > Capacity {
-		oldest := m.order.Front()
-		m.order.Remove(oldest)
-		delete(m.index, oldest.Value.(*entry).Key)
-		evicted++
-	}
-	return evicted
 }
 
 // Query returns a read-only cache result for a validated query payload.
@@ -118,20 +96,20 @@ func (m *Machine) Query(_ context.Context, data []byte) (load.Result, error) {
 	}
 	switch q.Op {
 	case "get":
-		if e, ok := m.index[q.Key]; ok {
-			return load.Result{Code: codeOK, Data: []byte(e.Value.(*entry).Value)}, nil
+		if value, ok := m.values[q.Key]; ok {
+			return load.Result{Code: codeOK, Data: []byte(value)}, nil
 		}
 		return load.Result{Code: "nil"}, nil
 	case "exists":
 		found := 0
 		for _, key := range q.Keys {
-			if _, ok := m.index[key]; ok {
+			if _, ok := m.values[key]; ok {
 				found++
 			}
 		}
 		return reply(codeOK, Count{N: found}), nil
 	case "dbsize":
-		return reply(codeOK, Count{N: m.order.Len()}), nil
+		return reply(codeOK, Count{N: len(m.values)}), nil
 	default:
 		return load.Result{Code: codeInvalid}, nil
 	}
@@ -139,15 +117,17 @@ func (m *Machine) Query(_ context.Context, data []byte) (load.Result, error) {
 
 type snapshot struct {
 	Format  int     `json:"format"`
-	Entries []entry `json:"entries"` // oldest first
+	Entries []entry `json:"entries"`
 }
 
-// Snapshot encodes every entry in eviction order.
+// Snapshot encodes every entry in key order for deterministic output.
+// The entry format remains compatible with snapshots from the bounded cache.
 func (m *Machine) Snapshot(context.Context) ([]byte, error) {
-	s := snapshot{Format: 1, Entries: make([]entry, 0, m.order.Len())}
-	for e := m.order.Front(); e != nil; e = e.Next() {
-		s.Entries = append(s.Entries, *e.Value.(*entry))
+	s := snapshot{Format: 1, Entries: make([]entry, 0, len(m.values))}
+	for key, value := range m.values {
+		s.Entries = append(s.Entries, entry{Key: key, Value: value})
 	}
+	slices.SortFunc(s.Entries, func(a, b entry) int { return strings.Compare(a.Key, b.Key) })
 	return json.Marshal(s)
 }
 
@@ -159,15 +139,15 @@ func (m *Machine) Restore(_ context.Context, data []byte) error {
 		if err := json.Unmarshal(data, &s); err != nil {
 			return err
 		}
-		if s.Format != 1 || len(s.Entries) > Capacity {
+		if s.Format != 1 {
 			return errors.New("invalid cache snapshot")
 		}
 		for _, e := range s.Entries {
-			keyValid := validKey(e.Key)
-			if !keyValid || len(e.Value) > MaxValueBytes || restored.index[e.Key] != nil {
+			_, duplicate := restored.values[e.Key]
+			if duplicate || len(e.Value) > MaxValueBytes || !validKey(e.Key) {
 				return errors.New("invalid cache snapshot entry")
 			}
-			restored.set(e.Key, e.Value)
+			restored.values[e.Key] = e.Value
 		}
 	}
 	*m = *restored

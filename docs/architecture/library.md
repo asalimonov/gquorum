@@ -225,8 +225,9 @@ exact receiver, action and local target and carries durable receipts. It has no
 The controller records exact resource receipts before advancing a block, and
 the metadata FSM checks those receipts independently. A new controller can reuse
 committed consumption evidence; observed membership alone cannot complete an
-effect. Forced retirement still requires affected host receipts. An unreachable
-host keeps its teardown pending while unrelated groups can converge. Whole-group
+effect. Forced retirement still requires affected host receipts for teardown.
+Native removal can converge while an unreachable host retains exact detached
+stop and retirement debt; convergence does not prove host cleanup. Whole-group
 deletion requires exact stop/readmission proof for every former owner. Physical
 collection is detached from convergence; fenced hosts retain a control lifetime
 for exact cleanup and durable receipt delivery.

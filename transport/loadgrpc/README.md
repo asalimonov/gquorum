@@ -54,8 +54,24 @@ are evicted. A full pool or call limit returns `fault.Overloaded`. Control reque
 bodies are limited to 64 KiB. Configure the server's message limits to match the
 adapter; gRPC's default receive limit is smaller than the adapter default.
 
-Raft batches are split into ordered complete-message frames with the original
-endpoints and delivery ID. Oversized individual messages are refused.
+Raft requests use binary protobuf `RaftFrame` version 2, with complete `RaftPeer`
+identities, the original delivery ID and repeated native `raftpb.Message` bytes.
+The adapter preserves application command and snapshot bytes without interpreting
+them; the public `load.Transport` interface remains generic. Administrative RPC
+requests and unary acknowledgement/error bodies retain their JSON codecs.
+
+Batches are planned in full, then encoded into ordered complete-message frames.
+Each frame is bounded by `MaxMessageBytes` and 4,096 messages; larger batches split
+transparently. An individually oversized message, including a snapshot, refuses
+the whole local send before any frames are transmitted. Messages are never split
+internally. Native receive buffers are owned copies, safe for asynchronous Raft
+work. Pooling and snapshot chunking are deferred.
+
+Every frame validates its header, authenticates the declared sender, checks the
+current local recipient and decodes native messages before Node ingress. Node
+then checks current exact peer authorization. Stream lifetime does not cache
+that authorization. Malformed frames end the RPC; attributable identity or Node
+refusals retain their delivery ID.
 
 Batches without a snapshot travel on a long-lived bidirectional `StreamRaft`
 stream for each exact sender/recipient replica pair. `SendRaft` returns once the
@@ -64,9 +80,8 @@ link is not limited to one batch per round trip. The recipient steps frames in
 order and answers only refused batches; the sender reports each refusal as an
 unreachable delivery through `Node.ReportLoadDelivery`. A broken stream reports
 its last delivery unreachable so Raft resends promptly, and the next batch opens
-a new stream. Streams idle for two minutes are closed. A recipient without
-`StreamRaft` (an older release) gets unary `SendRaft` calls, and streaming is
-retried after a minute.
+a new stream. Streams idle for two minutes are closed. Missing stream methods
+fail; there is no unary downgrade or JSON Raft fallback.
 
 Snapshot batches always use the unary call: success is reported after all
 frames are accepted. Failure reports preserve the same exact identity; canceled
@@ -79,3 +94,9 @@ Then call `transport.Close(ctx)` and stop the borrowed server. Close fences new
 calls, cancels and joins accepted work, and releases owned connections. A timeout
 does not abandon teardown; call Close again to join. Authentication/resolution
 callbacks must honor cancellation and cannot synchronously wait for Close.
+
+This is an unreleased breaking wire revision: rebuild and upgrade all participants
+using this adapter together. Versions other than 2 are rejected. Retained volumes,
+WALs, snapshots, metadata and application encodings need no migration. The separate
+test application's transport is unaffected. See the [validation record](../../docs/testing/binary-raft-transport.md)
+for measured codec costs, real-example checks and profiling limitations.

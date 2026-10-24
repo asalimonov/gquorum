@@ -213,7 +213,7 @@ on the same application-owned server, with their own handlers and authentication
 | Source | Responsibility |
 | --- | --- |
 | [Managed transport](../../internal/managed/transport.go) | Build endpoint identities, route batches to slots, validate peers and delivery reports |
-| [Node transport entry points](../../node_transport.go) | Delegate authenticated ingress to the managed host |
+| [Node transport entry points](../../node_load.go) | Delegate authenticated ingress to the managed host |
 | [gRPC transport](../../transport/loadgrpc/transport.go) | Node binding, service registration, connection cache, bounds and shutdown |
 | [Client](../../transport/loadgrpc/client.go), [streams](../../transport/loadgrpc/stream.go) | Frame splitting, stream selection, unary fallback and delivery reports |
 | [Server](../../transport/loadgrpc/server.go), [wire encoding](../../transport/loadgrpc/wire.go) | Authentication, decoding and typed dispatch |

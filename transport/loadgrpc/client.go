@@ -2,7 +2,6 @@ package loadgrpc
 
 import (
 	"context"
-	"errors"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load"
@@ -94,7 +93,7 @@ func hasSnapshot(messages []raftpb.Message) bool {
 
 func (t *Transport) sendBatchFrames(ctx context.Context, batch load.RaftBatch) sendOutcome {
 	outcome := sendOutcome{snapshot: hasSnapshot(batch.Messages)}
-	frames, err := splitBatch(batch, t.options.MaxMessageBytes)
+	frames, err := encodeRaftFrames(batch, t.options.MaxMessageBytes)
 	if err != nil {
 		outcome.err = err
 		return outcome
@@ -103,17 +102,12 @@ func (t *Transport) sendBatchFrames(ctx context.Context, batch load.RaftBatch) s
 	return outcome
 }
 
-func (t *Transport) sendFrames(ctx context.Context, batch load.RaftBatch, frames []*loadpb.Envelope,
+func (t *Transport) sendFrames(ctx context.Context, batch load.RaftBatch, frames []*loadpb.RaftFrame,
 	outcome sendOutcome) error {
-	streamed := false
-	var err error
 	if !outcome.snapshot {
-		streamed, err = t.sendStream(ctx, batch, frames)
+		return t.sendStream(ctx, batch, frames)
 	}
-	if !streamed {
-		err = t.sendUnary(ctx, batch.To.Node, frames)
-	}
-	return err
+	return t.sendUnary(ctx, batch.To.Node, frames)
 }
 
 func (o sendOutcome) deliveryKind() load.DeliveryKind {
@@ -138,7 +132,7 @@ func (o sendOutcome) report(ctx context.Context, node Ingress, batch load.RaftBa
 	return o.err
 }
 
-func (t *Transport) sendUnary(ctx context.Context, to topology.Identity, frames []*loadpb.Envelope) error {
+func (t *Transport) sendUnary(ctx context.Context, to topology.Identity, frames []*loadpb.RaftFrame) error {
 	conn, err := t.client(ctx, to)
 	if err != nil {
 		return err
@@ -150,86 +144,6 @@ func (t *Transport) sendUnary(ctx context.Context, to topology.Identity, frames 
 		if err := invoke(ctx, conn.Conn, exchange); err != nil {
 			return err
 		}
-	}
-	return nil
-}
-
-func splitBatch(batch load.RaftBatch, limit int) ([]*loadpb.Envelope, error) {
-	if err := validateBatch(batch); err != nil {
-		return nil, err
-	}
-	return splitValidBatch(batch, limit)
-}
-
-func validateBatch(batch load.RaftBatch) error {
-	if len(batch.Messages) == 0 || batch.DeliveryID == 0 || batch.From.Replica.ReplicaID == 0 ||
-		batch.To.Replica.ReplicaID == 0 || batch.From.Replica.GroupID != batch.To.Replica.GroupID ||
-		topology.ValidateLoadID(batch.To.Replica.GroupID) != nil {
-		return fault.ErrInvalid
-	}
-	for _, msg := range batch.Messages {
-		if msg.From != batch.From.Replica.ReplicaID || msg.To != batch.To.Replica.ReplicaID {
-			return fault.ErrIdentityMismatch
-		}
-	}
-	return nil
-}
-
-func splitValidBatch(batch load.RaftBatch, limit int) ([]*loadpb.Envelope, error) {
-	var frames []*loadpb.Envelope
-	for start := 0; start < len(batch.Messages); {
-		chunk, err := findBatchChunk(batch, start, limit)
-		if err != nil {
-			return nil, err
-		}
-		frames = append(frames, chunk.frame)
-		start += chunk.count
-	}
-	return frames, nil
-}
-
-type batchChunk struct {
-	frame *loadpb.Envelope
-	count int
-}
-
-type batchSearch struct {
-	lo, hi int
-	best   batchChunk
-}
-
-// Preflight every message before sending. Binary search keeps the original
-// order and never truncates an oversized message.
-func findBatchChunk(batch load.RaftBatch, start, limit int) (batchChunk, error) {
-	search := batchSearch{lo: 1, hi: len(batch.Messages) - start}
-	for search.lo <= search.hi {
-		if err := search.try(batch, start, limit); err != nil {
-			return batchChunk{}, err
-		}
-	}
-	if search.best.frame == nil {
-		return batchChunk{}, fault.New(fault.Overloaded, "single Raft message exceeds load frame limit", nil)
-	}
-	return search.best, nil
-}
-
-func encodeBatchChunk(batch load.RaftBatch, start, count, limit int) (batchChunk, error) {
-	part := batch
-	part.Messages = batch.Messages[start : start+count]
-	frame, err := envelope(part, limit, limit)
-	return batchChunk{frame: frame, count: count}, err
-}
-
-func (s *batchSearch) try(batch load.RaftBatch, start, limit int) error {
-	count := s.lo + (s.hi-s.lo)/2
-	chunk, err := encodeBatchChunk(batch, start, count, limit)
-	if err == nil {
-		s.best = chunk
-		s.lo = count + 1
-	} else if errors.Is(err, fault.ErrOverloaded) {
-		s.hi = count - 1
-	} else {
-		return err
 	}
 	return nil
 }

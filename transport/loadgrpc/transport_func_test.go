@@ -158,7 +158,7 @@ func TestSnapshotReportsOnlyCompleteAcceptance(t *testing.T) {
 	defer cancel()
 	batch := load.RaftBatch{From: replicaPeer(local.id, 1), To: replicaPeer(remote.id, 2), DeliveryID: 91}
 	for i := range 10 {
-		batch.Messages = append(batch.Messages, raftpb.Message{From: 1, To: 2, Type: raftpb.MsgApp, Index: uint64(i + 1), Context: make([]byte, 100)})
+		batch.Messages = append(batch.Messages, raftpb.Message{From: 1, To: 2, Type: raftpb.MsgApp, Index: uint64(i + 1), Context: make([]byte, 300)})
 	}
 	batch.Messages = append(batch.Messages, raftpb.Message{From: 1, To: 2, Type: raftpb.MsgSnap})
 	var mu sync.Mutex
@@ -181,7 +181,7 @@ func TestSnapshotReportsOnlyCompleteAcceptance(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		reports = append(reports, r)
-		if r.Kind == load.DeliverySnapshotSucceeded && !reflect.DeepEqual(messages, batch.Messages) {
+		if r.Kind == load.DeliverySnapshotSucceeded && !sameRaftMessages(messages, batch.Messages) {
 			t.Error("success before complete acceptance")
 		}
 		return nil

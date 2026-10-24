@@ -168,8 +168,17 @@ Load groups send the same Raft message types through `load.Transport.SendRaft`
 and receive them through `Node.ReceiveLoadRaft`. The application chooses the wire
 schema and authenticates senders. The included `loadgrpc` adapter streams
 non-snapshot batches per replica pair without waiting for each to be stepped,
-and keeps snapshots on unary calls with explicit completion reports. The test application's `Load.Deliver` RPC is
-an example protocol, not a library requirement.
+and keeps snapshots on unary calls with explicit completion reports. Its version-2
+`RaftFrame` uses generated protobuf headers and native binary `raftpb.Message`
+bytes. It validates/authenticates each frame before native decoding and current
+Node authorization; application payloads remain opaque. Complete frames obey the
+configured byte limit and a 4,096-message bound. Full local preflight precedes any
+send, and snapshot completion requires all unary frames to be accepted.
+Administrative requests and unary replies retain their JSON codecs. There is no
+JSON Raft fallback or missing-stream downgrade: all adapter users must upgrade
+together, preserving existing storage. See [binary transport validation](../testing/binary-raft-transport.md).
+The test application's `Load.Deliver` RPC is an example protocol, not a library
+requirement.
 
 The default node-health sampler runs every five seconds. It uses the configured
 `HealthSource`, or probes meta members with IdentityPing. Own-session renewal is

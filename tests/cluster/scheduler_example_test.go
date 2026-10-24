@@ -100,6 +100,16 @@ func (f *schedulerFixture) isolate(node string) func() {
 		if !connected {
 			networkCommand("connect", "--alias", node, network, id)
 			connected = true
+			// Reattaching Docker networking can reallocate a published ephemeral
+			// host port even though the application process never restarted.
+			data, err := f.compose(f.ctx, "port", node, "8080")
+			if err != nil {
+				f.t.Fatal(err, string(data))
+			}
+			address := "http://" + strings.TrimSpace(string(data))
+			f.t.Logf("reconnected %s: %s -> %s", node, f.urls[node], address)
+			f.urls[node] = address
+			f.client.CloseIdleConnections()
 		}
 	}
 	f.t.Cleanup(reconnect)

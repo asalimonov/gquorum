@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -37,6 +39,7 @@ type runtime struct {
 	node      gquorum.Node
 	transport *loadgrpc.Transport
 	redis     *redisServer
+	health    *http.Server
 	grpc      *grpc.Server
 	listeners []net.Listener
 	workers   sync.WaitGroup
@@ -65,12 +68,12 @@ func (r *runtime) Start(parent context.Context) error {
 	if err != nil {
 		return err
 	}
-	var meta, loadListener, redisListener net.Listener
+	var meta, loadListener, redisListener, healthListener net.Listener
 	for _, l := range []struct {
 		target *net.Listener
 		addr   string
 	}{{&meta, ":" + strconv.Itoa(r.cfg.MetaPort)}, {&loadListener, ":" + strconv.Itoa(r.cfg.LoadPort)},
-		{&redisListener, r.cfg.RedisListen}} {
+		{&redisListener, r.cfg.RedisListen}, {&healthListener, r.cfg.HealthListen}} {
 		if *l.target, err = net.Listen("tcp", l.addr); err != nil {
 			return err
 		}
@@ -125,6 +128,18 @@ func (r *runtime) Start(parent context.Context) error {
 	r.grpc = grpc.NewServer(grpc.MaxRecvMsgSize(16<<20), grpc.MaxSendMsgSize(16<<20))
 	r.transport.Register(r.grpc)
 	r.redis = newRedisServer(r.localGroup, r.logger)
+	r.health = &http.Server{
+		Handler: healthHandler(r.readyGroup), ReadHeaderTimeout: time.Second,
+		WriteTimeout: time.Second, IdleTimeout: time.Second,
+		BaseContext: func(net.Listener) context.Context { return r.ctx },
+	}
+	r.goWorker(func() error {
+		err := r.health.Serve(healthListener)
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	})
 	r.goWorker(func() error { return r.grpc.Serve(loadListener) })
 	r.goWorker(func() error { return r.redis.Serve(r.ctx, redisListener) })
 	if err := r.node.Start(r.ctx); err != nil {
@@ -147,6 +162,13 @@ func (r *runtime) localGroup() (*load.Group, error) {
 		return group, nil
 	}
 	return nil, fault.ErrReplicaNotReady
+}
+
+func (r *runtime) readyGroup() (*load.Group, error) {
+	if !r.node.Status().Ready {
+		return nil, fault.ErrReplicaNotReady
+	}
+	return r.localGroup()
 }
 
 // ensureGroup creates the cache group with one voter per peer and
@@ -182,6 +204,11 @@ func (r *runtime) ensureGroup(ctx context.Context) error {
 func (r *runtime) Stop(ctx context.Context) error {
 	if r.cancel != nil {
 		r.cancel()
+	}
+	if r.health != nil {
+		if err := r.health.Shutdown(ctx); err != nil {
+			return err
+		}
 	}
 	if r.redis != nil {
 		if err := r.redis.Wait(ctx); err != nil {

@@ -21,7 +21,168 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// Public load values use a versioned JSON encoding inside a typed RPC surface.
+// RaftPeer names an exact replica and its current hosting process.
+type RaftPeer struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ClusterId     string                 `protobuf:"bytes,1,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
+	NodeName      string                 `protobuf:"bytes,2,opt,name=node_name,json=nodeName,proto3" json:"node_name,omitempty"`
+	InstanceId    string                 `protobuf:"bytes,3,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
+	MemberId      uint64                 `protobuf:"varint,4,opt,name=member_id,json=memberId,proto3" json:"member_id,omitempty"`
+	GroupId       string                 `protobuf:"bytes,5,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"`
+	ReplicaId     uint64                 `protobuf:"varint,6,opt,name=replica_id,json=replicaId,proto3" json:"replica_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RaftPeer) Reset() {
+	*x = RaftPeer{}
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RaftPeer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RaftPeer) ProtoMessage() {}
+
+func (x *RaftPeer) ProtoReflect() protoreflect.Message {
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RaftPeer.ProtoReflect.Descriptor instead.
+func (*RaftPeer) Descriptor() ([]byte, []int) {
+	return file_transport_loadgrpc_internal_loadpb_load_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *RaftPeer) GetClusterId() string {
+	if x != nil {
+		return x.ClusterId
+	}
+	return ""
+}
+
+func (x *RaftPeer) GetNodeName() string {
+	if x != nil {
+		return x.NodeName
+	}
+	return ""
+}
+
+func (x *RaftPeer) GetInstanceId() string {
+	if x != nil {
+		return x.InstanceId
+	}
+	return ""
+}
+
+func (x *RaftPeer) GetMemberId() uint64 {
+	if x != nil {
+		return x.MemberId
+	}
+	return 0
+}
+
+func (x *RaftPeer) GetGroupId() string {
+	if x != nil {
+		return x.GroupId
+	}
+	return ""
+}
+
+func (x *RaftPeer) GetReplicaId() uint64 {
+	if x != nil {
+		return x.ReplicaId
+	}
+	return 0
+}
+
+type RaftFrame struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Version       uint32                 `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"` // Must be 2.
+	From          *RaftPeer              `protobuf:"bytes,2,opt,name=from,proto3" json:"from,omitempty"`
+	To            *RaftPeer              `protobuf:"bytes,3,opt,name=to,proto3" json:"to,omitempty"`
+	DeliveryId    uint64                 `protobuf:"varint,4,opt,name=delivery_id,json=deliveryId,proto3" json:"delivery_id,omitempty"`
+	Messages      [][]byte               `protobuf:"bytes,5,rep,name=messages,proto3" json:"messages,omitempty"` // Complete native raftpb.Message encodings.
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RaftFrame) Reset() {
+	*x = RaftFrame{}
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RaftFrame) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RaftFrame) ProtoMessage() {}
+
+func (x *RaftFrame) ProtoReflect() protoreflect.Message {
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RaftFrame.ProtoReflect.Descriptor instead.
+func (*RaftFrame) Descriptor() ([]byte, []int) {
+	return file_transport_loadgrpc_internal_loadpb_load_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *RaftFrame) GetVersion() uint32 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+func (x *RaftFrame) GetFrom() *RaftPeer {
+	if x != nil {
+		return x.From
+	}
+	return nil
+}
+
+func (x *RaftFrame) GetTo() *RaftPeer {
+	if x != nil {
+		return x.To
+	}
+	return nil
+}
+
+func (x *RaftFrame) GetDeliveryId() uint64 {
+	if x != nil {
+		return x.DeliveryId
+	}
+	return 0
+}
+
+func (x *RaftFrame) GetMessages() [][]byte {
+	if x != nil {
+		return x.Messages
+	}
+	return nil
+}
+
+// Administrative load values use a versioned JSON encoding inside a typed RPC surface.
 type Envelope struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Version       uint32                 `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
@@ -32,7 +193,7 @@ type Envelope struct {
 
 func (x *Envelope) Reset() {
 	*x = Envelope{}
-	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[0]
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -44,7 +205,7 @@ func (x *Envelope) String() string {
 func (*Envelope) ProtoMessage() {}
 
 func (x *Envelope) ProtoReflect() protoreflect.Message {
-	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[0]
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -57,7 +218,7 @@ func (x *Envelope) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Envelope.ProtoReflect.Descriptor instead.
 func (*Envelope) Descriptor() ([]byte, []int) {
-	return file_transport_loadgrpc_internal_loadpb_load_proto_rawDescGZIP(), []int{0}
+	return file_transport_loadgrpc_internal_loadpb_load_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Envelope) GetVersion() uint32 {
@@ -88,7 +249,7 @@ type Reply struct {
 
 func (x *Reply) Reset() {
 	*x = Reply{}
-	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[1]
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -100,7 +261,7 @@ func (x *Reply) String() string {
 func (*Reply) ProtoMessage() {}
 
 func (x *Reply) ProtoReflect() protoreflect.Message {
-	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[1]
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -113,7 +274,7 @@ func (x *Reply) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Reply.ProtoReflect.Descriptor instead.
 func (*Reply) Descriptor() ([]byte, []int) {
-	return file_transport_loadgrpc_internal_loadpb_load_proto_rawDescGZIP(), []int{1}
+	return file_transport_loadgrpc_internal_loadpb_load_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Reply) GetBody() []byte {
@@ -171,7 +332,7 @@ type StreamRefusal struct {
 
 func (x *StreamRefusal) Reset() {
 	*x = StreamRefusal{}
-	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[2]
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -183,7 +344,7 @@ func (x *StreamRefusal) String() string {
 func (*StreamRefusal) ProtoMessage() {}
 
 func (x *StreamRefusal) ProtoReflect() protoreflect.Message {
-	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[2]
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -196,7 +357,7 @@ func (x *StreamRefusal) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamRefusal.ProtoReflect.Descriptor instead.
 func (*StreamRefusal) Descriptor() ([]byte, []int) {
-	return file_transport_loadgrpc_internal_loadpb_load_proto_rawDescGZIP(), []int{2}
+	return file_transport_loadgrpc_internal_loadpb_load_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *StreamRefusal) GetDeliveryId() uint64 {
@@ -224,7 +385,24 @@ var File_transport_loadgrpc_internal_loadpb_load_proto protoreflect.FileDescript
 
 const file_transport_loadgrpc_internal_loadpb_load_proto_rawDesc = "" +
 	"\n" +
-	"-transport/loadgrpc/internal/loadpb/load.proto\x12\x0fgquorum.load.v1\"8\n" +
+	"-transport/loadgrpc/internal/loadpb/load.proto\x12\x0fgquorum.load.v1\"\xbe\x01\n" +
+	"\bRaftPeer\x12\x1d\n" +
+	"\n" +
+	"cluster_id\x18\x01 \x01(\tR\tclusterId\x12\x1b\n" +
+	"\tnode_name\x18\x02 \x01(\tR\bnodeName\x12\x1f\n" +
+	"\vinstance_id\x18\x03 \x01(\tR\n" +
+	"instanceId\x12\x1b\n" +
+	"\tmember_id\x18\x04 \x01(\x04R\bmemberId\x12\x19\n" +
+	"\bgroup_id\x18\x05 \x01(\tR\agroupId\x12\x1d\n" +
+	"\n" +
+	"replica_id\x18\x06 \x01(\x04R\treplicaId\"\xbc\x01\n" +
+	"\tRaftFrame\x12\x18\n" +
+	"\aversion\x18\x01 \x01(\rR\aversion\x12-\n" +
+	"\x04from\x18\x02 \x01(\v2\x19.gquorum.load.v1.RaftPeerR\x04from\x12)\n" +
+	"\x02to\x18\x03 \x01(\v2\x19.gquorum.load.v1.RaftPeerR\x02to\x12\x1f\n" +
+	"\vdelivery_id\x18\x04 \x01(\x04R\n" +
+	"deliveryId\x12\x1a\n" +
+	"\bmessages\x18\x05 \x03(\fR\bmessages\"8\n" +
 	"\bEnvelope\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\rR\aversion\x12\x12\n" +
 	"\x04body\x18\x02 \x01(\fR\x04body\"\xda\x01\n" +
@@ -241,11 +419,11 @@ const file_transport_loadgrpc_internal_loadpb_load_proto_rawDesc = "" +
 	"deliveryId\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x02 \x01(\tR\terrorCode\x12#\n" +
-	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage2\xd9\x02\n" +
-	"\x04Load\x12=\n" +
-	"\bSendRaft\x12\x19.gquorum.load.v1.Envelope\x1a\x16.gquorum.load.v1.Reply\x12K\n" +
+	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage2\xdb\x02\n" +
+	"\x04Load\x12>\n" +
+	"\bSendRaft\x12\x1a.gquorum.load.v1.RaftFrame\x1a\x16.gquorum.load.v1.Reply\x12L\n" +
 	"\n" +
-	"StreamRaft\x12\x19.gquorum.load.v1.Envelope\x1a\x1e.gquorum.load.v1.StreamRefusal(\x010\x01\x12@\n" +
+	"StreamRaft\x12\x1a.gquorum.load.v1.RaftFrame\x1a\x1e.gquorum.load.v1.StreamRefusal(\x010\x01\x12@\n" +
 	"\vReadReplica\x12\x19.gquorum.load.v1.Envelope\x1a\x16.gquorum.load.v1.Reply\x12@\n" +
 	"\vApplyAction\x12\x19.gquorum.load.v1.Envelope\x1a\x16.gquorum.load.v1.Reply\x12A\n" +
 	"\fInstallFence\x12\x19.gquorum.load.v1.Envelope\x1a\x16.gquorum.load.v1.ReplyBBZ@github.com/asalimonov/gquorum/transport/loadgrpc/internal/loadpbb\x06proto3"
@@ -262,28 +440,32 @@ func file_transport_loadgrpc_internal_loadpb_load_proto_rawDescGZIP() []byte {
 	return file_transport_loadgrpc_internal_loadpb_load_proto_rawDescData
 }
 
-var file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_transport_loadgrpc_internal_loadpb_load_proto_goTypes = []any{
-	(*Envelope)(nil),      // 0: gquorum.load.v1.Envelope
-	(*Reply)(nil),         // 1: gquorum.load.v1.Reply
-	(*StreamRefusal)(nil), // 2: gquorum.load.v1.StreamRefusal
+	(*RaftPeer)(nil),      // 0: gquorum.load.v1.RaftPeer
+	(*RaftFrame)(nil),     // 1: gquorum.load.v1.RaftFrame
+	(*Envelope)(nil),      // 2: gquorum.load.v1.Envelope
+	(*Reply)(nil),         // 3: gquorum.load.v1.Reply
+	(*StreamRefusal)(nil), // 4: gquorum.load.v1.StreamRefusal
 }
 var file_transport_loadgrpc_internal_loadpb_load_proto_depIdxs = []int32{
-	0, // 0: gquorum.load.v1.Load.SendRaft:input_type -> gquorum.load.v1.Envelope
-	0, // 1: gquorum.load.v1.Load.StreamRaft:input_type -> gquorum.load.v1.Envelope
-	0, // 2: gquorum.load.v1.Load.ReadReplica:input_type -> gquorum.load.v1.Envelope
-	0, // 3: gquorum.load.v1.Load.ApplyAction:input_type -> gquorum.load.v1.Envelope
-	0, // 4: gquorum.load.v1.Load.InstallFence:input_type -> gquorum.load.v1.Envelope
-	1, // 5: gquorum.load.v1.Load.SendRaft:output_type -> gquorum.load.v1.Reply
-	2, // 6: gquorum.load.v1.Load.StreamRaft:output_type -> gquorum.load.v1.StreamRefusal
-	1, // 7: gquorum.load.v1.Load.ReadReplica:output_type -> gquorum.load.v1.Reply
-	1, // 8: gquorum.load.v1.Load.ApplyAction:output_type -> gquorum.load.v1.Reply
-	1, // 9: gquorum.load.v1.Load.InstallFence:output_type -> gquorum.load.v1.Reply
-	5, // [5:10] is the sub-list for method output_type
-	0, // [0:5] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	0, // 0: gquorum.load.v1.RaftFrame.from:type_name -> gquorum.load.v1.RaftPeer
+	0, // 1: gquorum.load.v1.RaftFrame.to:type_name -> gquorum.load.v1.RaftPeer
+	1, // 2: gquorum.load.v1.Load.SendRaft:input_type -> gquorum.load.v1.RaftFrame
+	1, // 3: gquorum.load.v1.Load.StreamRaft:input_type -> gquorum.load.v1.RaftFrame
+	2, // 4: gquorum.load.v1.Load.ReadReplica:input_type -> gquorum.load.v1.Envelope
+	2, // 5: gquorum.load.v1.Load.ApplyAction:input_type -> gquorum.load.v1.Envelope
+	2, // 6: gquorum.load.v1.Load.InstallFence:input_type -> gquorum.load.v1.Envelope
+	3, // 7: gquorum.load.v1.Load.SendRaft:output_type -> gquorum.load.v1.Reply
+	4, // 8: gquorum.load.v1.Load.StreamRaft:output_type -> gquorum.load.v1.StreamRefusal
+	3, // 9: gquorum.load.v1.Load.ReadReplica:output_type -> gquorum.load.v1.Reply
+	3, // 10: gquorum.load.v1.Load.ApplyAction:output_type -> gquorum.load.v1.Reply
+	3, // 11: gquorum.load.v1.Load.InstallFence:output_type -> gquorum.load.v1.Reply
+	7, // [7:12] is the sub-list for method output_type
+	2, // [2:7] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_transport_loadgrpc_internal_loadpb_load_proto_init() }
@@ -297,7 +479,7 @@ func file_transport_loadgrpc_internal_loadpb_load_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_transport_loadgrpc_internal_loadpb_load_proto_rawDesc), len(file_transport_loadgrpc_internal_loadpb_load_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

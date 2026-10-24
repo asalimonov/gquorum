@@ -17,6 +17,7 @@ import (
 
 const controlLimit = 64 << 10
 
+// TODO(not planned): Convert administrative and unary reply payloads in a separate change.
 func decodeJSON(data []byte, dst any) error {
 	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
 		return fault.New(fault.Invalid, "null load JSON", nil)

@@ -17,6 +17,7 @@ import (
 
 	"github.com/alecthomas/kong"
 	"github.com/asalimonov/gquorum"
+	"github.com/asalimonov/gquorum/examples/inmemory-cache/internal/profiling"
 	"github.com/asalimonov/gquorum/examples/inmemory-cache/resp"
 )
 
@@ -28,13 +29,15 @@ const (
 // config is read from flags or GQUORUM_* environment variables. Every node
 // lists the same peers; member IDs are derived from the names.
 type config struct {
-	Node        string   `env:"GQUORUM_NODE" required:"true" help:"Local node name; must appear in --peers."`
-	Cluster     string   `env:"GQUORUM_CLUSTER" default:"cache-example"`
-	Peers       []string `env:"GQUORUM_PEERS" required:"true" sep:"," help:"${peers}"`
-	MetaPort    int      `env:"GQUORUM_META_PORT" default:"9000"`
-	LoadPort    int      `env:"GQUORUM_LOAD_PORT" default:"9001"`
-	RedisListen string   `env:"CACHE_REDIS_LISTEN" default:":6379"`
-	Data        string   `env:"GQUORUM_DATA" default:"/data" help:"${data}"`
+	PprofListen  string   `env:"CACHE_PPROF_LISTEN" help:"Optional pprof listen address; disabled by default."`
+	Node         string   `env:"GQUORUM_NODE" required:"true" help:"Local node name; must appear in --peers."`
+	Cluster      string   `env:"GQUORUM_CLUSTER" default:"cache-example"`
+	Peers        []string `env:"GQUORUM_PEERS" required:"true" sep:"," help:"${peers}"`
+	MetaPort     int      `env:"GQUORUM_META_PORT" default:"9000"`
+	LoadPort     int      `env:"GQUORUM_LOAD_PORT" default:"9001"`
+	HealthListen string   `env:"CACHE_HEALTH_LISTEN" default:":8080"`
+	RedisListen  string   `env:"CACHE_REDIS_LISTEN" default:":6379"`
+	Data         string   `env:"GQUORUM_DATA" default:"/data" help:"${data}"`
 
 	DisableFSync bool `name:"storage-disable-fsync" env:"STORAGE_DISABLE_FSYNC" default:"false" help:"${fsync}"`
 
@@ -65,9 +68,14 @@ func (c config) peers() gquorum.StaticPeers {
 }
 
 func run(ctx context.Context, cfg config) error {
+	stopProfile, err := profiling.Listen(cfg.PprofListen)
+	if err != nil {
+		return err
+	}
+	defer stopProfile()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	r := &runtime{cfg: cfg, logger: logger, errors: make(chan error, workerErrorCapacity)}
-	err := r.Start(ctx)
+	err = r.Start(ctx)
 	if err == nil {
 		select {
 		case <-ctx.Done():

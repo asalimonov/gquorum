@@ -6,11 +6,15 @@ COPY examples/scheduler/go.mod examples/scheduler/go.sum ./examples/scheduler/
 RUN --mount=type=cache,target=/go/pkg/mod go -C examples/scheduler mod download
 COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build CGO_ENABLED=0 go -C examples/scheduler build -trimpath -o /out/scheduler .
-RUN mkdir -p /out/data && chmod 0700 /out/data
+RUN mkdir -p /out/data /out/run/secrets && chmod 0700 /out/data && \
+    cp examples/scheduler/demo-credential.txt /out/run/secrets/credential && \
+    chmod 0755 /out/run /out/run/secrets && chmod 0444 /out/run/secrets/credential
 
 FROM scratch
 COPY --from=build /out/scheduler /scheduler
 COPY --from=build --chown=65532:65532 /out/data /data
+# Public demo credential; avoids host bind paths in Docker VMs.
+COPY --from=build /out/run /run
 USER 65532:65532
 EXPOSE 8080 9000 9001
 ENTRYPOINT ["/scheduler"]

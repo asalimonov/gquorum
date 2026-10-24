@@ -60,6 +60,7 @@ type replica struct {
 	ownsApp, released bool
 	release           *releaseAttempt
 	deliveries        map[uint64]delivery
+	deliveryOrder     []uint64 // ordinary tokens in registration order; snapshots never enter this FIFO
 	startGuard        func(context.Context) error
 }
 type releaseAttempt struct {
@@ -438,6 +439,7 @@ func (h *Host) releaseResources(slot *replica) error {
 		h.mu.Lock()
 		slot.coreJoined = true
 		clear(slot.deliveries)
+		slot.deliveryOrder = nil
 		h.mu.Unlock()
 	}
 	if runDone != nil {

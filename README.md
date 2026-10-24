@@ -167,11 +167,15 @@ make stop-scheduler-example
 
 The [replicated in-memory cache example](examples/inmemory-cache/README.md)
 serves a subset of the Redis protocol from three nodes. Its state machine is an
-in-memory map bounded to 512 keys with deterministic eviction, and its group
+in-memory map that grows without automatic eviction or TTL, and its group
 uses disk-backed Raft logs and snapshots: a restarted process replays its state
 under the same replica ID. The Compose demo skips load WAL/applied-state fsync
 for speed; host crashes or power loss can lose acknowledged writes. A separate load generator
-writes through one random node and reads from another with several workers.
+balances writes and reads across healthy nodes using reusable connections,
+500ms HTTP health checks and 1–256 workers selected through `CACHE_WORKERS`.
+The workload uses 80% reads and 20% writes across 615 keys by default; reads of
+unpopulated keys are normal cache misses. Set `CACHE_LOADGEN=0` to run only
+the three nodes.
 
 ```sh
 make run-cache-example
@@ -179,6 +183,14 @@ make test-cache-example
 docker compose -f examples/inmemory-cache/compose.yaml logs -f loadgen
 make clean-cache-example
 ```
+
+## Performance investigation
+
+Run `make profile-cache` to build and profile an isolated cache cluster. It saves
+raw pprof/syscall evidence, an interactive heatmap and flame graph, and CSV/JSON
+statistics under `test-reports/performance/`. See the
+[profiling guide](docs/testing/performance-profiling.md) for options and analysis
+of existing applications or saved profiles.
 
 ## Contributing
 

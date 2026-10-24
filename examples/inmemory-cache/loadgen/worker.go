@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"strconv"
@@ -13,11 +14,14 @@ import (
 )
 
 const (
-	requestTimeout    = 5 * time.Second
+	requestTimeout    = 2 * time.Second
+	retryWindow       = 500 * time.Millisecond
+	requestRetries    = 2
 	encodedValueParts = 3
 	versionBase       = 10
 	versionBits       = 64
 	maxFailedVersions = 256
+	readsPerWrite     = 4
 )
 
 // stats are shared by all workers and read by the reporter.
@@ -36,6 +40,7 @@ type keyState struct {
 	acked    uint64
 	written  uint64
 	failures map[uint64]bool
+	writer   string
 }
 
 // outcome classifies a GET reply for a key.
@@ -55,7 +60,7 @@ func encodeValue(key string, version uint64, payload string) string {
 
 func classify(k *keyState, reply resp.Reply) outcome {
 	if reply.Nil {
-		return miss // evicted by the 512-entry bound
+		return miss // Missing keys are normal cache misses.
 	}
 	parts := strings.SplitN(reply.Str, "|", encodedValueParts)
 	if len(parts) != encodedValueParts || parts[0] != k.name {
@@ -74,111 +79,138 @@ func classify(k *keyState, reply resp.Reply) outcome {
 	}
 }
 
-// worker writes a new version of one of its keys through a random node, then
-// reads that key back from a different node.
+// worker owns a disjoint set of keys. Each cycle performs one write and four
+// reads, independently sampling a key for every operation. Misses are expected
+// until keys have been populated.
 type worker struct {
-	id      int
-	nodes   []string
-	keys    []*keyState
-	payload string
-	stats   *stats
-	conns   map[string]*resp.Client
-	rnd     *rand.Rand
+	id       int
+	keys     []*keyState
+	payload  string
+	stats    *stats
+	balancer *balancer
+	rnd      *rand.Rand
 }
 
 func (w *worker) run(ctx context.Context) {
-	defer w.closeAll()
-	for ctx.Err() == nil {
-		k := w.keys[w.rnd.IntN(len(w.keys))]
-		writer := w.nodes[w.rnd.IntN(len(w.nodes))]
-		k.written++
-		version := k.written
-		started := time.Now()
-		reply, err := w.do(ctx, writer, "SET", k.name, encodeValue(k.name, version, w.payload))
-		if err == nil {
-			err = reply.Err()
-		}
-		if err != nil {
-			w.stats.writeErrors.Add(1)
-			k.failures[version] = true
-			if len(k.failures) > maxFailedVersions {
-				clear(k.failures) // bound memory; older failures are long settled
+	for contextError(ctx) == nil {
+		w.write(ctx, w.keys[w.rnd.IntN(len(w.keys))])
+		for range readsPerWrite {
+			if contextError(ctx) != nil {
+				return
 			}
-			pause(ctx, 50*time.Millisecond) // a node may be down; let failover happen
-			continue
-		}
-		k.acked = version
-		w.stats.writes.Add(1)
-		w.stats.writeNanos.Add(int64(time.Since(started)))
-
-		reader := w.other(writer)
-		started = time.Now()
-		reply, err = w.do(ctx, reader, "GET", k.name)
-		if err == nil {
-			err = reply.Err()
-		}
-		if err != nil {
-			w.stats.readErrors.Add(1)
-			continue
-		}
-		w.stats.readNanos.Add(int64(time.Since(started)))
-		switch classify(k, reply) {
-		case hit:
-			w.stats.hits.Add(1)
-		case miss:
-			w.stats.misses.Add(1)
-		case uncertainHit:
-			w.stats.uncertain.Add(1)
-		case staleRead:
-			w.stats.stale.Add(1)
-			fmt.Printf("STALE worker=%d key=%s writer=%s reader=%s acked=%d got=%q\n", w.id, k.name, writer, reader,
-				k.acked, reply.Str)
-		case corruptRead:
-			w.stats.corrupt.Add(1)
-			fmt.Printf("CORRUPT worker=%d key=%s reader=%s got=%q\n", w.id, k.name, reader, reply.Str)
-		default: // Other read outcomes do not update these counters.
+			w.read(ctx, w.keys[w.rnd.IntN(len(w.keys))])
 		}
 	}
 }
 
-// other picks a random node different from the writer when there is one.
-func (w *worker) other(writer string) string {
-	if len(w.nodes) == 1 {
-		return writer
-	}
-	for {
-		if node := w.nodes[w.rnd.IntN(len(w.nodes))]; node != writer {
-			return node
-		}
-	}
-}
-
-// do sends one command over this worker's connection to node, reconnecting
-// once if the cached connection broke.
-func (w *worker) do(ctx context.Context, node string, args ...string) (resp.Reply, error) {
-	client := w.conns[node]
-	if client == nil {
-		dial, cancel := context.WithTimeout(ctx, requestTimeout)
-		var err error
-		client, err = resp.Dial(dial, node)
-		cancel()
-		if err != nil {
-			return resp.Reply{}, err
-		}
-		w.conns[node] = client
-	}
-	reply, err := client.Do(requestTimeout, args...)
+func (w *worker) write(ctx context.Context, k *keyState) {
+	k.written++
+	version := k.written
+	started := time.Now()
+	reply, err := w.balancer.request(ctx, "SET", k.name, encodeValue(k.name, version, w.payload))
 	if err != nil {
-		_ = client.Close()
-		delete(w.conns, node)
+		if contextError(ctx) != nil {
+			return
+		}
+		w.stats.writeErrors.Add(1)
+		k.failures[version] = true
+		if len(k.failures) > maxFailedVersions {
+			clear(k.failures)
+		}
+		pause(ctx, 50*time.Millisecond)
+		return
 	}
-	return reply, err
+	k.acked, k.writer = version, reply.node
+	w.stats.writes.Add(1)
+	w.stats.writeNanos.Add(int64(time.Since(started)))
 }
 
-func (w *worker) closeAll() {
-	for _, c := range w.conns {
-		_ = c.Close()
+func (w *worker) read(ctx context.Context, k *keyState) {
+	started := time.Now()
+	reply, err := w.balancer.request(ctx, "GET", k.name)
+	if err != nil {
+		if contextError(ctx) == nil {
+			w.stats.readErrors.Add(1)
+		}
+		return
 	}
+	w.stats.readNanos.Add(int64(time.Since(started)))
+	switch classify(k, reply.Reply) {
+	case hit:
+		w.stats.hits.Add(1)
+	case miss:
+		w.stats.misses.Add(1)
+	case uncertainHit:
+		w.stats.uncertain.Add(1)
+	case staleRead:
+		w.stats.stale.Add(1)
+		fmt.Printf("STALE worker=%d key=%s writer=%s reader=%s acked=%d got=%q\n",
+			w.id, k.name, k.writer, reply.node, k.acked, reply.Str)
+	case corruptRead:
+		w.stats.corrupt.Add(1)
+		fmt.Printf("CORRUPT worker=%d key=%s reader=%s got=%q\n", w.id, k.name, reply.node, reply.Str)
+	default:
+	}
+}
+
+// Socket deadlines can fire just before the context's timer marks it done.
+// An elapsed workload deadline is normal shutdown in either order.
+func contextError(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
+// retryRequest gives the initial attempt two seconds (including dialing) and
+// at most two further attempts sharing a total 500ms budget.
+func retryRequest(ctx context.Context, call func(context.Context) (resp.Reply, error)) (resp.Reply, error) {
+	if err := contextError(ctx); err != nil {
+		return resp.Reply{}, err
+	}
+	initial, cancel := context.WithTimeout(ctx, requestTimeout)
+	reply, err := call(initial)
+	cancel()
+	if stopped := contextError(ctx); stopped != nil {
+		return resp.Reply{}, stopped
+	}
+	retry := retryableReply(reply, err)
+	if !retry {
+		return reply, requestError(reply, err)
+	}
+	retries, cancel := context.WithTimeout(ctx, retryWindow)
+	defer cancel()
+	for attempt := range requestRetries {
+		if contextError(retries) != nil {
+			break
+		}
+		deadline, _ := retries.Deadline()
+		budget := time.Until(deadline) / time.Duration(requestRetries-attempt)
+		next, done := context.WithTimeout(retries, budget)
+		reply, err = call(next)
+		done()
+		if !retryableReply(reply, err) {
+			break
+		}
+	}
+	return reply, requestError(reply, err)
+}
+
+func requestError(reply resp.Reply, err error) error {
+	if err != nil {
+		return err
+	}
+	return reply.Err()
+}
+
+func retryableReply(reply resp.Reply, err error) bool {
+	if err != nil {
+		return !errors.Is(err, resp.ErrProtocol)
+	}
+	return reply.Kind == '-' && (strings.HasPrefix(reply.Str, "TRYAGAIN ") || strings.HasPrefix(reply.Str, "LOADING "))
 }
 
 func pause(ctx context.Context, d time.Duration) {
