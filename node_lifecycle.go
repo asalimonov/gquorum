@@ -2,10 +2,14 @@ package gquorum
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaservice"
+	"github.com/asalimonov/gquorum/internal/recoverydisk"
+	"github.com/asalimonov/gquorum/internal/recoverymodel"
+	"github.com/asalimonov/gquorum/internal/walbackend"
 	"github.com/asalimonov/gquorum/lifecycle"
 	"github.com/asalimonov/gquorum/storage/memstore"
 	"github.com/asalimonov/gquorum/storage/walstore"
@@ -22,6 +26,9 @@ func (n *node) Start(parent context.Context) error {
 	n.publishObservation()
 
 	if err := n.checkAuthorityPath(); err != nil {
+		return n.fail(err)
+	}
+	if err := n.acquireStorageOwner(); err != nil {
 		return n.fail(err)
 	}
 	if err := n.inspectAuthority(); err != nil {
@@ -62,6 +69,21 @@ func (n *node) Start(parent context.Context) error {
 	n.wg.Add(1)
 	go n.monitor()
 	return nil
+}
+
+func (n *node) acquireStorageOwner() error {
+	paths := recoverymodel.Paths{StorageDir: n.opts.StorageDir}
+	if wal := n.opts.Loads.Storage.WAL; wal != nil {
+		paths.LoadWALDir = wal.RootDir
+	}
+	owner, err := recoverydisk.Acquire(n.ctx, paths)
+	if err != nil {
+		return err
+	}
+	n.mu.Lock()
+	n.storageOwner = owner
+	n.mu.Unlock()
+	return owner.CheckStartup(n.ctx, paths)
 }
 
 func (n *node) acceptNodeStart(parent context.Context) (bool, error) {
@@ -112,7 +134,11 @@ func (n *node) openLoadResources(m *metaservice.Group) error {
 	}
 	store, retirement := n.opts.Loads.Storage.Store, n.opts.Loads.Storage.Retirement
 	if o := n.opts.Loads.Storage.WAL; o != nil {
-		owned, err := walstore.Open(walstore.Options{
+		lease, err := n.storageOwner.TakeWALLease()
+		if err != nil {
+			return err
+		}
+		owned, err := walbackend.OpenWithLease(walstore.Options{
 			RootDir:      o.RootDir,
 			NodeName:     m.Identity().NodeName,
 			ClusterID:    m.Identity().ClusterID,
@@ -120,9 +146,9 @@ func (n *node) openLoadResources(m *metaservice.Group) error {
 			Prewrite:     o.Prewrite,
 			DisableFSync: o.DisableFSync,
 			Logger:       n.opts.Logger,
-		})
+		}, lease)
 		if err != nil {
-			return err
+			return errors.Join(err, n.storageOwner.ReturnWALLease(lease))
 		}
 		n.mu.Lock()
 		n.ownedWAL = owned
@@ -507,7 +533,13 @@ func (n *node) teardownResources() error {
 			return err
 		}
 	}
-	return n.closeAuthority()
+	if err := n.closeAuthority(); err != nil {
+		return err
+	}
+	if n.storageOwner != nil {
+		return n.storageOwner.Close()
+	}
+	return nil
 }
 
 func closeLoadStores(memory *memstore.Store, owned *walstore.Store) error {

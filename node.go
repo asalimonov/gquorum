@@ -9,6 +9,7 @@ import (
 	"github.com/asalimonov/gquorum/internal/authoritystore"
 	"github.com/asalimonov/gquorum/internal/managed"
 	"github.com/asalimonov/gquorum/internal/metaservice"
+	"github.com/asalimonov/gquorum/internal/recoverydisk"
 	"github.com/asalimonov/gquorum/internal/watchstate"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/storage"
@@ -127,6 +128,7 @@ type node struct {
 	store                   storage.Store
 	retirement              storage.RetirementStore
 	ownedWAL                *walstore.Store
+	storageOwner            *recoverydisk.Owner
 	ownedMemory             *memstore.Store
 	lifecycle               *lifecycleRunner
 	pending                 *topology.Identity

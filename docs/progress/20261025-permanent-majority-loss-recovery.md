@@ -49,3 +49,55 @@ Notes
 - A direct golangci invocation initially included test rules that the repository
   wrapper intentionally scopes to production; final checks use the repository's
   production/test analyzer split. No unrelated baseline tests were rewritten.
+
+
+## Task 2 — WAL implementation and exclusive startup ownership
+Date: 2026-10-25. Commit: included with this task's implementation commit.
+
+Implemented
+- Moved WAL implementation and private tests to internal/walbackend. Public
+  walstore retains aliases/constants/Open and public conformance coverage.
+  All moved files except store.go are byte-identical after the package rename.
+- Stable system/WAL lock files, retained root descriptors, nonblocking ownership,
+  exact lease adoption/return, partial-acquisition cleanup and root/lock substitution
+  checks. Nested WAL roots work; reverse, symlink, alias/private-root misuse refuses.
+  Canonical private-root refusal happens before creating any directory there.
+- Ordinary Node startup owns both roots before authority/meta/store acquisition.
+  Failed WAL adoption returns its lease to Node until actual joined teardown.
+  Injected stores retain borrowed ownership. Pending/corrupt/unknown recovery
+  evidence refuses before either metadata database is created.
+- Validated terminal system history authorizes only exact WAL archive names.
+  HasState ignores stable locks and proven archives, rechecks namespace entries,
+  and preserves unproven standalone/unknown/partial evidence.
+- Audited root enumeration: Retired filters exact retirement-token directories;
+  snapshot/segment/collection scans address replica-local subtrees and require no
+  namespace exception. Resource endpoint counts actual /proc/self/fd descriptors;
+  new lock/root descriptors remain counted and no adjustment hides them.
+- Added lifecycle regression coverage for constructor purity, metadata-only and
+  separately held WAL contention, pending startup, failed application Close,
+  factory shutdown timeout, lease transfer/failed adoption and retained lock files.
+
+Verified
+- make test: PASS, 1,983 tests/53 reports across all five application modules,
+  18.659s with concurrent qualification. Report:
+  test-reports/unit/20261024T233915.936345Z-c09yo0oq/report.md.
+- Focused functional suites for root, recoverydisk, backend and public facade: PASS;
+  final durations 22.967s/0.290s/7.225s/6.773s respectively.
+- Same full focused functional suites under -race -count=1: PASS;
+  root19.420s, disk1.414s, backend8.744s, facade8.549s.
+- make lint: PASS across all configured modules/build tags and tooling modules.
+- make test-sim SIM_SEEDS=1-3: PASS, 21/21 cases, 53.648s. Report:
+  test-reports/sim/20261024T233914.702621Z-huqufugx/report.md.
+- All 12 recorded legacy/scoped physical fixture hashes match; no fixture edits.
+  Existing WAL encode/reopen/retirement and public conformance suites pass.
+- git diff --check: PASS.
+
+Notes
+- Pinned Gosim does not hook Go's internal/syscall/unix.Fstatat used by os.Root.Lstat.
+  Startup instead uses os.Lstat plus root/lock identity checks; root descriptors and
+  actual locking remain active in simulation. No simulation-tag bypass was added.
+- Concurrent source edits during two intermediate analyzer/simulator runs produced
+  input-resolution/compile races; stable-source reruns above pass. Early lint/style
+  and a facade conformance fixture's wrong cluster ID were corrected before commit.
+- Full manifest semantics and root-relative archival mutations remain Task 4/7 work;
+  this task's normal-start guard conservatively refuses all pending operations.

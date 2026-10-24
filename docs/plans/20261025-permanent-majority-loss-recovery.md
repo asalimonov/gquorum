@@ -16,7 +16,7 @@
 
 **Review/clarifications:** [docs/review/feat_permanent-majority-loss-recovery.md](../review/feat_permanent-majority-loss-recovery.md)
 
-**Status:** implementation in progress; Task 1 complete; Task 2 next.
+**Status:** implementation in progress; Tasks 1–2 complete; Task 3 next.
 
 ## Scope and precedence
 
@@ -202,29 +202,29 @@ CREATED `internal/recoverydisk/owner.go` and namespace/path helpers.
 **Dependencies:** Task 1. **Outcome:** no live owner can overlap offline mutation,
 and pending recovery evidence blocks ordinary startup before B acquisition.
 
-- [ ] Move existing WAL implementation files named in target §10.3 without changing
+- [x] Move existing WAL implementation files named in target §10.3 without changing
   their persisted behavior. Preserve public Store/Options/IdentityMismatchError
   aliases, exported constants and Open. Move private-field tests beside their owner;
   keep public conformance coverage at storage/walstore. No private recovery methods
   become exported Store methods. The move may exceed the task line-size guideline.
-- [ ] Implement root-relative no-follow validation and stable system/WAL leases:
+- [x] Implement root-relative no-follow validation and stable system/WAL leases:
   `Acquire`, `Owner.CheckRoots/Close`, `TakeWALLease`, `Lease.Close`. Support WAL
   nested under StorageDir, refuse the reverse/aliases/private archive roots, and
   retain lock files in place across archives. Nonblocking contention reports busy.
-- [ ] Make ordinary Node and WAL Open/Close honor these leases for their full resource
+- [x] Make ordinary Node and WAL Open/Close honor these leases for their full resource
   lifetimes. Normal injected storage ownership remains borrowed. Preserve explicit
   ownership on timeout/failed Close; never unlink a lock to “release” it early.
-- [ ] Implement internal `walbackend.OpenWithLease` with exact root verification and
+- [x] Implement internal `walbackend.OpenWithLease` with exact root verification and
   adoption only on successful acquisition. Failure leaves ownership with the caller;
   Node shutdown closes the transferred WAL owner only after managed work joins.
-- [ ] Add early Node recovery-namespace inspection before inspectAuthority/metaservice
+- [x] Add early Node recovery-namespace inspection before inspectAuthority/metaservice
   construction/load-store acquisition. Recognize only validated control records;
   malformed, conflicting or pending evidence refuses. At this stage **all** pending
   recovery starts refuse until Task 10 installs the accepted restart path.
-- [ ] Make HasState/fresh-start detection distinguish the stable lock/validated
+- [x] Make HasState/fresh-start detection distinguish the stable lock/validated
   archive namespace from genuine live data without ignoring unknown/partial entries.
   Metadata-only nodes and independent live WAL owners receive the same protection.
-- [ ] Audit every system/WAL-root enumeration, not only Store.HasState: root
+- [x] Audit every system/WAL-root enumeration, not only Store.HasState: root
   inspectFreshLoadStorage currently rejects any entry, and retirement/collection,
   snapshot/segment scans and tests may assume old directory contents. Recognize
   only the stable lock and validated control namespace in the appropriate scan;
@@ -232,25 +232,25 @@ and pending recovery evidence blocks ordinary startup before B acquisition.
   valid history and forged/unknown control names. Audit resource accounting too:
   `/internal/test/resources` counts open FDs, not disk bytes, so account for actual
   lock descriptors rather than hiding them. Never touch frozen fixture trees.
-- [ ] Preserve existing authority-first acquisition and readmission/shutdown ordering.
+- [x] Preserve existing authority-first acquisition and readmission/shutdown ordering.
   NewNode remains I/O-free; no filesystem locks are acquired by constructors.
-- [ ] Add functional/race cases for simultaneous Node/recovery/WAL owners, release
+- [x] Add functional/race cases for simultaneous Node/recovery/WAL owners, release
   after actual teardown, nested roots, alias/symlink/root substitution, partial
   acquisition and invalid namespaces. Keep existing public WAL and retirement
   conformance intact; use fixed compatible segment settings in parallel fixtures.
 
 #### Verification
 
-- [ ] `make test`; focused functional tests for root Node, authority and both WAL
+- [x] `make test`; focused functional tests for root Node, authority and both WAL
   facade/backend; race variants for ownership/lease transfer and Stop/Close failures.
-- [ ] Run `make lint` and `make test-sim SIM_SEEDS=1-3` now, not just at final
+- [x] Run `make lint` and `make test-sim SIM_SEEDS=1-3` now, not just at final
   qualification. Audit the actual pinned gosim hooks: ordinary ownership/startup
   must remain supported (Flock/openat/Renameat/fstatat are hooked; renameat2/linkat
   are not in the inspected ARM64 hooks). Verify compiled recovery helpers do not
   break simulation either; do not bypass ownership checks under simulation tags.
-- [ ] Compile all caller modules using public aliases; compare immutable physical
+- [x] Compile all caller modules using public aliases; compare immutable physical
   fixture hashes and normal WAL encode/reopen behavior before/after the move.
-- [ ] Prove no pending marker permits normal fresh founding. Record and fix failures.
+- [x] Prove no pending marker permits normal fresh founding. Record and fix failures.
 
 ### Task 3: Expose Node-owned WAL and independent Node lifetimes in the process fixture
 

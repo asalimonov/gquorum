@@ -1,6 +1,6 @@
 //go:build functional
 
-package walstore
+package walbackend
 
 import (
 	"log/slog"

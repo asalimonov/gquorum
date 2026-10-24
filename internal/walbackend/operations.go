@@ -1,4 +1,4 @@
-package walstore
+package walbackend
 
 import (
 	"bytes"

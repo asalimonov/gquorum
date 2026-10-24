@@ -9,6 +9,7 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/authoritystore"
 	"github.com/asalimonov/gquorum/internal/metastore"
+	"github.com/asalimonov/gquorum/internal/recoverydisk"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -299,11 +300,11 @@ func (n *node) acquireReadmissionAuthority() error {
 
 func (n *node) inspectFreshLoadStorage() error {
 	if wal := n.opts.Loads.Storage.WAL; wal != nil {
-		entries, err := os.ReadDir(wal.RootDir)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
+		retained, err := recoverydisk.HasLiveEvidence(n.ctx, wal.RootDir)
+		if err != nil {
 			return err
 		}
-		if len(entries) != 0 {
+		if retained {
 			return fault.New(fault.Unreadable, "retained load storage has no authority database", nil)
 		}
 	} else if store := n.opts.Loads.Storage.Store; store != nil {
