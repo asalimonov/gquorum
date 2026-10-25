@@ -67,3 +67,12 @@ contains a nonempty native metadata snapshot (33/term 2), committed tail through
 no existing frozen artifact changed. Owning functional coverage validates exact
 raw hashes, read-only replay and an ordinary current Node restart from private
 copies. The adjacent capture source and raw/compressed hashes record provenance.
+
+## Optional disaster-recovery subtree
+
+The separately named [recovery-schema1 fixtures](../../internal/metaengine/testdata/recovery-schema1/README.md)
+retain exact capture inputs, hashes and the actual pre-recovery decoder refusal.
+They add the optional recovery subtree to metadata schema 4 and preserve ordinary
+nil-recovery encodings. Existing legacy, scoped and native stores remain immutable.
+The [recovery qualification record](permanent-majority-loss-recovery.md) records
+current unit/functional/process validation and unchanged physical hashes.

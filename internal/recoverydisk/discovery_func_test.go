@@ -37,6 +37,9 @@ func TestDiscoveryKeepsValidRowsAndExcludesDuplicateOrRenamedIDs(t *testing.T) {
 	mustJournal(t, os.Remove(unknown))
 	clone := cancelled.View()
 	clone.AcceptedAt = clone.AcceptedAt.Add(time.Hour)
+	for i := range clone.History {
+		clone.History[i].At = clone.History[i].At.Add(time.Hour)
+	}
 	clone.BackupName, err = model.BackupName(clone.AcceptedAt, clone.Request.RecoveryID)
 	mustJournal(t, err)
 	clone.Cancellation.At = clone.AcceptedAt

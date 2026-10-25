@@ -6,13 +6,14 @@ and load transport. The library contains the `_meta` protocol, its bbolt store,
 the Raft engines, recovery, an etcd WAL backend for load groups and an
 in-memory store for groups that do not need to survive a full restart.
 
-Three handles describe the public API:
+The public handles separate participant operation, administration, consensus and offline recovery:
 
 | Handle | Responsibility |
 | --- | --- |
 | `gquorum.Node` | One participant: start, readiness, shutdown, local replica ownership, sessions and load protocol receivers. |
 | `gquorum.Cluster` | A stable administration view obtained from `node.Cluster()`: topology, membership, approval and progress. It has no independent lifetime. |
 | `*load.Group` | One local replica: application proposals, leadership/status, snapshots and proposal-pressure diagnostics. A stopped handle never redirects into its replacement. |
+| `*gquorum.Recovery` | Configuration for inspecting, accepting and archiving a stopped survivor. Each call owns and releases its resources; the handle has no Close lifetime. |
 
 ```mermaid
 flowchart TD
@@ -204,8 +205,10 @@ nonzero previous member ID; `ReseatReplica` requires the previous
 `topology.ReplicaKey{NodeName, ReplicaID}`. A changed identity refuses the request;
 a node name alone never authorizes replacing its successor. Deleted group IDs cannot be
 reused. Fresh-ID readmission and replica reseating preserve the distinction
-between old state and its authorized replacement. Force-new recovery after
-permanent majority loss remains deferred.
+between old state and its authorized replacement. Permanent-majority-loss
+recovery uses the separate local `NewRecovery(NodeOptions, ...recovery.Options)`
+handle and an explicit fresh lineage. It does not authorize an ordinary retained
+A node to join B. See [the recovery lifecycle](runtime.md#permanent-majority-loss-recovery).
 
 `ChangeReplica` takes the group ID, `topology.ReplicaRoleChange{NodeName, Role}`,
 and mutation options.
@@ -638,3 +641,35 @@ commits and then read committed state.
 excess subscriptions return `fault.ErrOverloaded`. These are observations, not
 quorum barriers or a durable cluster-wide event stream. Existing Cluster.Watch
 continues to cover topology and events.Bus continues to cover local diagnostics.
+
+
+## Permanent-majority-loss API
+
+`NewRecovery` is a pure configuration constructor. Its handle exposes
+`Inspect(ctx, Request) (Plan, error)`, `Approve(ctx, Request, Acceptance)
+(Operation, error)`, `Run(ctx, id) (Status, error)`, `Cancel(ctx, id, actor,
+reason) (Status, error)`, `Status(ctx, id)` and `List(ctx)`. Package `recovery`
+contains their value/error types and the optional node-wide Files hook.
+`RecoveryStartOptions(Status, NodeOptions)` copies settings and sets the reported
+identity and founding/join mode; callers recreate listeners and supply a fresh
+InstanceID. It is not startup authorization.
+
+The first implementation requires one complete stopped survivor with usable
+metadata and every approved load group. Only Node-owned `LoadStorageOptions.WAL`
+configuration is supported; injected Store/Retirement instances and in-memory
+load groups cannot supply a rebuilding donor. Ordinary borrowed-store operation
+is unchanged. Recovery never loads application configuration or supplies an HTTP
+server. An independent caller fixture demonstrates durable remote maintenance
+jobs without operator access to a container's filesystem.
+
+The approved Target determines recovered group declarations. Staged Latest,
+interrupted operations, sessions and locks are not resumed; allocation floors,
+retired IDs and unresolved evidence survive in the appropriate new state/backup.
+A source can lack writes acknowledged by the lost majority. Recovery restores
+its selected application snapshot and retained committed tail only, then commits
+normal B founding/import/effect evidence. It never raises commit from applied
+hints, force-elects an old replica or truncates A.
+
+See [runtime ownership](runtime.md#permanent-majority-loss-recovery),
+[policy deficits](placement.md#recovery-policy-deficits) and the
+[validation record](../testing/permanent-majority-loss-recovery.md).

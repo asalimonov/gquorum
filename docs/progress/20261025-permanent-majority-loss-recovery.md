@@ -1091,3 +1091,123 @@ Scope precision
 - Rejoin payloads are small ordinary KV snapshots, below64MiB framing; this makes
   no GQ-02 large remote snapshot claim. Large local resources and all remaining
   qualification commands are next in Task15, followed by the requested review.
+
+
+## Task 15 — Resources, compatibility and current architecture qualification
+Date: 2026-10-25 (final resource figures appended below before commit)
+
+Implemented
+- Added opt-in root functional BenchmarkRecoveryResources and metaengine
+  BenchmarkRecoveryMetadataResources. Real public Node/recovery flows cover
+  metadata-only,64MiB application snapshot plus tail, three sequential groups,
+  and a992MiB encoded group, each with ordinary DisableFSync false/true. Timed
+  recovery excludes setup/negative probes; OS RSS measures a compiled process.
+  Exact recovered application counts/snapshot lengths and joined stops are
+  asserted. A10ms observer samples peak temporary logical file growth and
+  deduplicates inodes across archive renames. Final sizes are separate metrics.
+- Derived10,000 cleanup debts from actual approval/consumption graphs. Persisted
+  materialized state51,303,994 bytes, native snapshot68,405,452 and committed tail;
+  total logical119,710,000 fits default128MiB, with no evidence truncation.
+  One-byte-over metadata/frame/group bounds refuse before approval. Defaults
+  remain64MiB/1GiB/128MiB and do not claim hard application RSS limits.
+- Qualification exposed generic unreadable/missing diagnostics for size limits.
+  An internal error marker now reports resource_bound independently of corruption,
+  retaining fault.Unreadable, source bytes and the same refusal boundary. No
+  public API/format/protobuf changed. Public functional/race tests verify metadata,
+  frame and group refusals, zero factory calls and no accepted operation.
+- Current README/package/architecture/runtime/raft/placement/project-map and AGENTS
+  now describe the implemented handle, same-root lifecycle, exact committed replay,
+  callback/publication ownership, policy deficits and reset-for-join. Added
+  docs/testing/permanent-majority-loss-recovery.md with exact commands/reports,
+  resource/benchmark results, provenance and explicit independent-library scope.
+  Fixed moved backend/historical validation links found by the Markdown audit.
+- Target was backed up before clarifying that client-only reachability copies
+  ClientTLS; server TLS remains on ordinary Node networking. Backup:
+  docs/brainstorms/20261024-permanent-majority-loss-recovery-target-before-client-probe-clarification-20261025T091647Z.md.
+
+Verified
+- make test PASS2,129/58 reports,10.751s:
+  test-reports/unit/20261025T085224.595176Z-kxpqlqus/report.md.
+- make test-race PASS2,129/58,25.358s:
+  test-reports/unit-race/20261025T090950.568013Z-50igaps_/report.md.
+- make test-function PASS1,274/58,104.579s:
+  test-reports/function/20261025T085516.903043Z-eilp47_c/report.md.
+- make test-function-race PASS1,274/58,130.460s:
+  test-reports/function-race/20261025T085745.128200Z-2uoic3c4/report.md.
+- make lint PASS all modules/tags/tools after benchmark helper checks:
+  /tmp/gquorum-task15-lint-final-complete.log.
+- Full cluster107/107 PASS185.290s in Task14 remains applicable to unchanged
+  healthy behavior. Final image e8b7afa094e194e9bdecb3cdf787c48e00f6be33c5439f44f55ff0993e080a63,
+  created2026-10-25T09:05:07Z, includes the diagnostic refinement; new recovery
+  prefix12/12 PASS48.390s:
+  test-reports/cluster/20261025T092749.285010Z-gqk5v1f2/report.md.
+- make test-perf CLUSTER_IMAGE=gquorum-recovery:local PERF_PARALLEL=1 PASS3/3,
+  61.958s on that image, isolated from other heavy suites:
+  test-reports/cluster/20261025T090508.316326Z-hzu3f_h3/report.md.
+- make test-example PASS the Compose case,34.008s. Its runner's built-in filter
+  omits scheduler/cache, so complete example tags were then run with:
+  python3 scripts/test_report.py example --reports-dir test-reports --timeout=4m -- -run .
+  PASS3/3,175.012s including actual scheduler lifecycle/cache WAL restart:
+  test-reports/example/20261025T090928.764879Z-ptpbkpjx/report.md.
+- make test-sim SIM_SEEDS=1-3 PASS21/21,56.796s:
+  test-reports/sim/20261025T090817.245140Z-no8_q9n2/report.md.
+- make bench BENCH_TIME=1s PASS, same M4 Pro/Go1.26.5 settings as the before-Task1
+  capture. Planner allocation counts/sizes unchanged, timing approximately0..+1.94%.
+  Snapshot byte sizes unchanged. Investigated metadata variation by exporting
+  baseline88833e8 outside the workspace (no nested repository) and running matched
+  five/seven-node serialize/restore cases three times at1s. Median time deltas:
+  -1.95%,+0.30%,-0.09%,+3.44%; restore bytes within0.01%,+3 allocations/op. No
+  benchmark/gate threshold changed. Raw initial/matched logs retained with resources.
+- Seven original physical fixture hashes verified against their retained manifest;
+  all31 tracked baseline/scoped/native/recovery fixture/capture files unchanged.
+  Actual older2684202 decoder refusal/provenance remains the immutable Task9 capture.
+  Current frozen schema1 canonical round trips and nil-recovery format assertions
+  pass. No generated/protobuf file changed, so proto-check was not required.
+- Markdown links/fences checked across ten current documentation files;
+  git diff --check PASS. No Meridian build/test/deployment/wiring.
+
+Corrections and scope
+- First combined functional qualification failed7 counted tests: discovery's
+  shifted acceptance omitted shifted history timestamps; two five-second waits
+  exhausted their budgets under concurrent load; a restart test incorrectly
+  treated participant Ready as load publication. Fixed fixture time consistency,
+  used15s waits preserving all operation assertions, and asserted exact B parking,
+  zero factories, no handle and absent WAL. Focused race plus complete functional/
+  functional-race reruns above passed. These were fixed, not skipped/waived.
+- Root resource benchmarks live at the public composition owner rather than the
+  originally named backend/inspection directories, so they include archive,
+  import, real Node replay/publication and Stop. Metadata's large debt reader case
+  remains in metaengine. The plan's executable resource command was corrected.
+- Current data uses full buffers and repeated validation. Large cumulative
+  allocations/latency and sampled scratch peaks are recorded honestly; streaming,
+  hard RSS guarantees and large remote transfer remain excluded. Task16 and the
+  requested checkpoint review follow this commit; overall goal remains active.
+
+
+Task15 final resource evidence
+- All eight complete workflow/durability variants and both metadata reader shapes
+  passed. Compiled process measurements and JSON: test-reports/recovery-resources/20261025T094118.922044Z/measurements.json.
+- Root binary SHA256:032892b32b1795d700f9e5fb0c6d484a2885c5073009b44529b2dd82d49ed396; metadata binary SHA256:
+  10098f909aedf8c0a6c571769728f22aac1472ae8161b944181d35c92e47bff2.
+- The10ms inode-deduplicated observer records sampled peak scratch use, not just
+  steady final files; its joined overhead is included in benchmark allocations.
+  Raw logs retain exact S/C/L, effective bounds, actual record/group/metadata
+  one-byte refusal, RSS units, process wall time and source disk size.
+- cleanup-debts-0: recovery=0.001s; RSS=27148288B; allocations=232776B; PASS.
+- cleanup-debts-10000: recovery=2.833s; RSS=1113473024B; allocations=1280799912B; PASS.
+- metadata-only-false: recovery=0.684s; RSS=35078144B; allocations=13072608B; final-extra=398072B; sampled-peak-extra=401968B; cancel/join=69.981ms; PASS.
+- metadata-only-true: recovery=0.724s; RSS=34439168B; allocations=13177256B; final-extra=398071B; sampled-peak-extra=398071B; cancel/join=83.962ms; PASS.
+- near-1GiB-false: recovery=133.389s; RSS=4074979328B; allocations=235842074064B; final-extra=1208512881B; sampled-peak-extra=1275628736B; cancel/join=1441.867ms; PASS.
+- near-1GiB-true: recovery=133.462s; RSS=3505864704B; allocations=235840696888B; final-extra=1208512882B; sampled-peak-extra=1275626376B; cancel/join=1487.785ms; PASS.
+- sequential-three-groups-false: recovery=5.646s; RSS=200261632B; allocations=3293423208B; final-extra=437421153B; sampled-peak-extra=638754314B; cancel/join=569.139ms; PASS.
+- sequential-three-groups-true: recovery=5.669s; RSS=196001792B; allocations=3293965384B; final-extra=437421149B; sampled-peak-extra=638759459B; cancel/join=575.559ms; PASS.
+- snapshot-64MiB-tail-false: recovery=6.465s; RSS=1250983936B; allocations=11912350016B; final-extra=313713581B; sampled-peak-extra=380827652B; cancel/join=422.530ms; PASS.
+- snapshot-64MiB-tail-true: recovery=6.409s; RSS=1072316416B; allocations=11912077976B; final-extra=313713579B; sampled-peak-extra=380822443B; cancel/join=426.273ms; PASS.
+
+- Peak disk observer metadata-only functional benchmark under race PASS3.098s:
+  /tmp/gquorum-task15-resource-observer-race.log. Observer joins on success/failure.
+- Final image recovery prefix12/12 PASS48.390s after the only production diagnostic
+  refinement; the healthy full107-case run and isolated3-case performance run
+  remain valid. Final code/links/fences/diff and observer lint verification passed.
+- Task15 complete; request the mandated five-task review covering Tasks11–15, then
+  perform Task16's complete target/public-wiring audit. No required scope deferred.

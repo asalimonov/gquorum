@@ -200,7 +200,12 @@ caller-owned; replicated implementation agreement is deferred.
 
 Applications build autoscaling controllers with membership and placement APIs.
 Infrastructure provisioning, workload scheduling and stream ingestion stay in
-the application. Forced recovery after permanent majority loss is deferred.
+the application. Permanent-majority-loss recovery uses `NewRecovery` with a
+complete stopped survivor, Node-owned WAL, explicit loss acceptance, in-root
+backups and a fresh lineage. Applications own durable remote maintenance jobs and
+Files Backup/Undo; ordinary GroupFactory/Node startup perform replay. Old nodes
+require explicit reset-for-join. Custom/in-memory recovery donors, multiple
+survivors and disaster rollback remain unsupported. See the current runtime docs.
 Events are node-local and never replicated through `_meta`.
 
 Keep `examples/cluster` small and meta-only. Full load integration and fault

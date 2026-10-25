@@ -1028,7 +1028,7 @@ relevant testing/capture records and this plan. **Dependencies:** Tasks 1–14.
 **Outcome:** measured supported behavior, honest current documentation and complete
 library regression evidence; no Meridian integration work.
 
-- [ ] Measure metadata-only, 64 MiB snapshot plus tail, multiple sequential groups,
+- [x] Measure metadata-only, 64 MiB snapshot plus tail, multiple sequential groups,
   near-1 GiB aggregate group and just-over-limit cases with real fsync and ordinary
   DisableFSync settings. Record S/C/L, encoded sizes, group count, effective bounds,
   wall time, peak process RSS, allocations, temporary disk and cancellation/join latency.
@@ -1036,49 +1036,49 @@ library regression evidence; no Meridian integration work.
   Include metadata containing 10,000 retained cleanup debts, with both the
   materialized state and snapshot copy plus the committed tail counted against
   MaxMetadataBytes; qualify the 128 MiB default on that shape (review L5).
-- [ ] Put large fixtures in opt-in benchmarks/resource qualification, not fast units
+- [x] Put large fixtures in opt-in benchmarks/resource qualification, not fast units
   or every default functional run. Use `BenchmarkRecoveryResources` under the owning
   functional build where real stores are required. Measure a compiled test binary
   separately from compilation when reporting peak process RSS; record OS/tool units.
-- [ ] Verify every bounds refusal occurs before uncontrolled allocation/mutation
+- [x] Verify every bounds refusal occurs before uncontrolled allocation/mutation
   where the contracts allow, including manifest/import size under ordinary metadata
   limits. If selected defaults fail qualification, record a release-blocking gap
   and a concrete resolution; do not truncate data or silently widen them.
-- [ ] Repeat `make bench BENCH_TIME=1s` with the same settings as Task 1 and compare
+- [x] Repeat `make bench BENCH_TIME=1s` with the same settings as Task 1 and compare
   matching planner/metadata-snapshot cases, allocations and timing. Run dedicated
   `make test-perf CLUSTER_IMAGE=gquorum-recovery:local PERF_PARALLEL=1` after all
   image changes settle, isolated from other heavy suites. A parallel full cluster
   run is not the comparable dedicated performance measurement. Investigate regressions
   without weakening existing gates; record actual source/image/hardware and results.
-- [ ] Finalize separate recovery-format fixture provenance and old-decoder refusal
+- [x] Finalize separate recovery-format fixture provenance and old-decoder refusal
   evidence while preserving all existing frozen hashes. Check ordinary nil-recovery
   snapshots, public WAL aliases, normal borrowed-store support and all caller modules.
-- [ ] Update **current implemented** architecture/README/package docs only after the
+- [x] Update **current implemented** architecture/README/package docs only after the
   behavior exists. Explain the public handle/lifecycle, same-root backups, loss
   semantics, Node-owned scope, reset join, policy deficits, consumed evidence and
   callback ownership. Distinguish ordinary restart recovery from disaster recovery.
-- [ ] Document remote embedding as an independent caller pattern/test fixture.
+- [x] Document remote embedding as an independent caller pattern/test fixture.
   Do not add a library HTTP server or claim Meridian is integrated. Document reserved
   Rollback and other exclusions with `TODO(not planned): ...` at relevant code
   boundaries, typed refusals where callable, and no repeated warning noise.
-- [ ] Run all required library test scopes listed below: regular units/all modules,
+- [x] Run all required library test scopes listed below: regular units/all modules,
   lint, unit race, functional, functional race, full Docker cluster, dedicated
   performance, before/after benchmarks, existing Compose examples and default-seed
   simulations. GQ-02 remains separate; these tests must not
   claim unsupported large remote snapshot rejoin is solved by local reconstruction.
-- [ ] Save actual commands, fresh reports, source/image revision, fixture hashes,
+- [x] Save actual commands, fresh reports, source/image revision, fixture hashes,
   resource measurements and cleanup outcome in the Progress log/validation record.
   Diagnose every failure; missing prerequisites are reported blockers, not passes
   or implicit waivers. No Meridian build/test/deployment appears in the evidence.
 
 #### Verification
 
-- [ ] All commands in Validation Commands pass, including their real multi-module/
+- [x] All commands in Validation Commands pass, including their real multi-module/
   process scopes. Large benchmark/resource runs produce measurements, not assertions
   copied from the design. Repeat a gate only after relevant changes or unresolved failures.
-- [ ] Documentation paths/API names/commands match implemented behavior;
+- [x] Documentation paths/API names/commands match implemented behavior;
   `git diff --check` passes, and no baseline fixture was regenerated to satisfy tests.
-- [ ] No in-scope implementation or validation gap is hidden by a documentation claim.
+- [x] No in-scope implementation or validation gap is hidden by a documentation claim.
 
 ### Task 16: Verify the architectural delta, close gaps and prove library wiring
 
@@ -1191,9 +1191,9 @@ do not repeat broad suites solely because documentation or this plan changed.
 | Entire process/cluster suite | `make test-cluster-run CLUSTER_IMAGE=gquorum-recovery:local` (equivalent full suite after the explicit build; `make test-cluster` may be used instead when a rebuild is needed) |
 | Existing planner/metadata performance baseline and comparison | `make bench BENCH_TIME=1s` before Task 1 Go changes and again in Task 15 |
 | Dedicated process performance | `make test-perf CLUSTER_IMAGE=gquorum-recovery:local PERF_PARALLEL=1` after the fixture settles; do not run concurrently with another image build/heavy suite |
-| Existing Compose examples, public caller integration | `make test-example` (the complete example-tag suite; use named scheduler/cache targets for focused diagnosis) |
+| Existing Compose examples, public caller integration | `make test-example` plus `python3 scripts/test_report.py example --reports-dir test-reports --timeout=4m -- -run .` for the complete example-tag suite (the Make default selects only Compose) |
 | Existing deterministic simulations | `make test-sim SIM_SEEDS=1-3` (regression coverage, no new simulation framework/dependency in the library) |
-| Recovery resource qualification | `go test -tags=functional -run '^$' -bench '^BenchmarkRecoveryResources$' -benchtime=1x -benchmem ./internal/walbackend ./internal/recoveryinspect` after Task 15 adds the benchmarks |
+| Recovery resource qualification | Compile functional binaries for root `BenchmarkRecoveryResources` and `internal/metaengine.BenchmarkRecoveryMetadataResources`; run one selected case at a time with `-test.benchtime=1x -test.benchmem` under `/usr/bin/time -l` (commands in the validation record) |
 | Generated protocol consistency | `make proto-check` if a protocol/generated artifact changed; the approved design requires no protobuf delta |
 | Documentation/patch hygiene | `git diff --check`; explicit Markdown link/fence/path checks for ignored documents |
 
@@ -1276,7 +1276,7 @@ public stubs just to represent deferred features.
 
 ## NOT IMPLEMENTED GAPS
 
-No execution audit has run yet. This section tracks **discovered mismatches**, not
+The final Task16 audit follows Task15 qualification. This section tracks **discovered mismatches**, not
 the unchecked planned work above. Every entry must include target section,
 implementation evidence, impact, assigned task and resolution/validation.
 
@@ -1376,6 +1376,17 @@ Do not pre-mark the absence of implementation as a passed delta audit.
   post-inspection seam. No library or public API changes. The full process suite
   uses the rebuilt settled image. Diff: Task14 commit, testapp/recovery_job.go,
   recovery_worker.go and recovery_job_func_test.go.
+
+- Task15 qualification corrected a shifted discovery-history fixture, two
+  five-second functional waits and an assertion incorrectly equating participant
+  Ready with a parked load being published. All original identity/operation/
+  missing-byte assertions remain, and full functional/race suites pass. Added
+  resource_bound cause/diagnostics because measured bounds were otherwise reported
+  as generic damaged input. Public APIs/encodings remain unchanged. See the Task15
+  commit and validation record for exact paths/results.
+- Task15 found that make test-example selects only Compose. The complete example
+  suite was executed through the same runner with final -run . (3/3 PASS), and the
+  validation command now makes that scope explicit. No runner/Makefile changed.
 
 None during planning. During implementation record each necessary out-of-plan
 change with path, rationale, relation to a required fix, validation and commit/diff

@@ -124,6 +124,15 @@ func inspectionRefusal(err error, issues []recovery.Issue) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
+	if errors.Is(err, model.ErrResourceBound) {
+		for _, issue := range issues {
+			if issue.Code == "resource_bound" {
+				return &recovery.Refusal{Issue: issue, Cause: err}
+			}
+		}
+		issue := model.InputIssue(model.Issue{Blocking: true, Remedy: model.RemedyInvestigate}, err)
+		return &recovery.Refusal{Issue: issue, Cause: err}
+	}
 	for _, issue := range issues {
 		if issue.Blocking {
 			return &recovery.Refusal{Issue: issue, Cause: err}

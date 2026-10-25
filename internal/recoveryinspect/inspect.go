@@ -30,9 +30,9 @@ func Inspect(ctx context.Context, owner *recoverydisk.Owner, request model.Reque
 	if err != nil {
 		return model.AcceptedPlan{Request: request, Paths: owner.Paths(), Resources: resolved,
 			Source: state.identity,
-			Issues: []model.Issue{{Code: "metadata_unreadable", Blocking: true,
+			Issues: []model.Issue{model.InputIssue(model.Issue{Code: "metadata_unreadable", Blocking: true,
 				Message: "retained metadata or authority cannot establish a complete source",
-				Remedy:  model.RemedyInvestigate}}}, err
+				Remedy:  model.RemedyInvestigate}, err)}}, err
 	}
 	state.owner = owner
 	defer func() { err = errors.Join(err, state.close()) }()

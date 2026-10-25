@@ -581,3 +581,93 @@ local `AppliedIndex`, republished after each applied batch or snapshot restore;
 it is a wake-up hint for reading committed state, not a quorum barrier.
 `Leadership.Replicas` reads the leader's cached Raft progress under the engine
 lock and resolves peer names through the managed catalog outside that lock.
+
+
+## Permanent-majority-loss recovery
+
+A `Recovery` handle owns configuration, with no open lifetime or Close method.
+Each I/O call acquires its own exclusive source ownership. Stop and join Node,
+including application callbacks and Node-owned stores, before Inspect/Approve/Run.
+A timeout or failed Close retains the original owner; retry its joined Stop before
+attempting recovery. Ordinary Node startup also takes the stable root lease and
+checks pending recovery records before acquiring a destination identity.
+
+The caller drives this sequence:
+
+1. Persist maintenance, stop business traffic and join A.
+2. `Inspect` a Rebuild request with stable audit. Save `Plan.Request`, digest,
+   positions and loss report; generated identities must survive HTTP/process loss.
+3. Obtain explicit `Acceptance` for that digest, including data-loss acknowledgement
+   and the old-deployment-fenced attestation. `Approve` repeats static inspection
+   under the same owner and persists an operation, without moving files.
+4. `Run` performs the idempotent Files Backup hook, journals each library archive
+   move and returns AwaitingStart. Backups have generated timestamped names under
+   `@gquorum-recovery` inside the configured system/WAL roots. The active roots and
+   container bindings stay in place. Preserve the complete backup.
+5. Supply fresh process resources/InstanceID, apply `RecoveryStartOptions`, construct
+   and start an ordinary Node. It validates the exact on-disk operation before B
+   acquisition, founds `_meta` normally and commits one narrow recovery import.
+6. Wait for validated readiness, read durable Status, then release maintenance.
+   A disconnected request does not own or cancel this caller job.
+
+The handle probes other approved old `_meta` members using existing authenticated
+IdentityPing. Any reply that passed credential/cluster binding, including
+Unavailable from a stopped engine, blocks with `old_member_reachable`; there is
+no override. Dial/deadline/TLS failures are absence of reachability evidence.
+Explicit auth/binding rejection and missing probe configuration are informational.
+The bounded probe runs again at approval, does not change the accepted digest,
+and does not replace the fencing attestation.
+
+The application Files hook receives one node-wide `FilesTask` with its generated
+BackupDir and exact recovery ID/digest. It owns external database/projection files
+at their existing paths. Backup and Undo must be idempotent and join their work.
+The hook never receives an Application or Close lifetime. Ordinary GroupFactory
+later receives `ReplicaSpec.Recovery` only for an unconsumed recovered replica;
+Node owns successful Application.Close as usual. No application machine runs in
+offline Inspect/Approve/Run. The caller's active maintenance job stays outside
+application archival.
+
+Each load seed copies only the chosen source snapshot and entries through durable
+C, preserving application bytes/indexes/terms/request IDs. Validated native/admin
+positions become inert positions; B membership and authority come from normal
+approved effects. Seed/checkpoint writes force fsync even when ordinary WAL
+DisableFSync is configured. A normalized complete checkpoint and exact current
+host/native receipts are confirmed in replicated metadata before consumption.
+Replay is serial across required groups. Business handles stay withheld until
+replicated import completion; lifecycle validation may then inspect handles while
+Application.Run remains held. Local Complete and protected-writer release precede
+Run. Stop, holds and unresolved callback owners win publication races.
+
+An interrupted startup resumes exact retained B. A missing installed/acquired/
+consumed B identity or WAL parks with evidence intact; it is never refilled from A.
+Completed B restarts use ordinary retained-pin settings and receive no RecoveryInfo.
+Node readiness is a participant startup gate; a parked ordinary load remains
+unpublished even when that participant's metadata/session gate is ready.
+
+Before approval, cancellation belongs to the caller job. After approval,
+persist cancellation intent, cancel/join any Run, then call Cancel with stable
+audit. Cancel is available only before Archiving and before successor startup.
+It journals Files Undo and keeps maintenance through failures; retry the same
+cancellation. Run failures never initiate automatic Undo. Cancelled IDs cannot
+be rearmed. Rollback/RollingBack/RolledBack are reserved; no Rollback method exists.
+
+An old A node cannot move its retained pins through ordinary B readmission.
+`ResetForJoin` explicitly archives its library/application files, reaches
+JoinReady with destination member zero, then uses normal B admission and fresh
+monotonic identities. It does not replay A application data or merge clusters.
+The destination remains an explicitly named cluster.
+
+Status/List are local historical observations, independent of current quorum.
+They expose the same bounded History: approval plus the newest 255 transitions,
+oldest first, at most 256 entries with sanitized messages of at most 512 bytes.
+Events share their manifest revision/fsync with the transition; semantic retries
+add no duplicate event. Unknown/corrupt archive diagnostics remain errors alongside
+valid historical rows. Caller jobs reconcile public Status rather than parsing
+private journals. See the [independent remote fixture](../../tests/cluster/testapp/README.md).
+
+Defaults bound each encoded WAL frame to 64 MiB, selected snapshot plus logical tail
+to 1 GiB per load group, and retained logical metadata to 128 MiB. Metadata includes
+materialized state, snapshot copy and tail, not just one decoded document. Limits
+are latched at acceptance and can be explicitly configured through Resources;
+they are not RSS limits. Existing full-buffer snapshot/callback contracts remain.
+See [measured qualification](../testing/permanent-majority-loss-recovery.md).

@@ -62,7 +62,8 @@ func (d *strictFrames) next(file *os.File, size int64) (walpb.Record, error) {
 		return walpb.Record{}, d.tornEnd(io.ErrUnexpectedEOF)
 	}
 	if length > d.limits.MaxRecordBytes || length > d.limits.MaxGroupBytes {
-		return walpb.Record{}, fault.New(fault.Unreadable, "WAL record exceeds recovery byte budget", nil)
+		return walpb.Record{}, fault.New(fault.Unreadable, "WAL record exceeds recovery byte budget",
+			model.ErrResourceBound)
 	}
 	if length > math.MaxInt-walFrameHeaderBytes {
 		return walpb.Record{}, fault.ErrUnreadable

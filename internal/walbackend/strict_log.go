@@ -160,7 +160,7 @@ func (s *strictLog) entry(data []byte, maxBytes uint64) error {
 		return err
 	}
 	if s.bytes > maxBytes || size > maxBytes-s.bytes {
-		return unreadable("WAL tail exceeds recovery byte budget", nil)
+		return unreadable("WAL tail exceeds recovery byte budget", model.ErrResourceBound)
 	}
 	s.bytes += size
 	s.result.LastLog = model.Position{Index: entry.Index, Term: entry.Term}

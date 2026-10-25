@@ -147,7 +147,11 @@ func TestRecoveryCompletedRestartUsesPortableBAndNeverRefillsMissingWAL(t *testi
 					t.Fatal("missing B was not parked", restarted.Status())
 				}
 			}
-			if factories.Load() != 0 || restarted.Status().Ready {
+			parked := restarted.ParkedLoads()
+			if len(parked) != 1 || parked["work"].Identity.GroupID != "work" || parked["work"].Identity.ClusterID != restarted.Identity().ClusterID || parked["work"].Reason != ParkStoreMissing {
+				t.Fatal("missing exact parked B evidence", parked)
+			}
+			if factories.Load() != 0 || len(restarted.LoadGroupIDs()) != 0 {
 				t.Fatal("missing consumed B was refilled", factories.Load(), restarted.Status())
 			}
 			if _, err := os.Stat(filepath.Join(root, "work")); !errors.Is(err, os.ErrNotExist) {

@@ -75,7 +75,7 @@ func readBoundedFile(ctx context.Context, path string, maxBytes uint64) ([]byte,
 		return nil, fault.ErrUnreadable
 	}
 	if info.Size() > int64(maxBytes) {
-		return nil, unreadable("retained file exceeds recovery byte budget", nil)
+		return nil, unreadable("retained file exceeds recovery byte budget", model.ErrResourceBound)
 	}
 	file, err := os.Open(path)
 	if err != nil {

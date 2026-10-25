@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	model "github.com/asalimonov/gquorum/internal/recoverymodel"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -65,7 +66,7 @@ func (b *dbReadBudget) take(data []byte) error {
 		return err
 	}
 	if uint64(len(data)) > b.remaining {
-		return fault.New(fault.Unreadable, "retained metadata exceeds byte budget", nil)
+		return fault.New(fault.Unreadable, "retained metadata exceeds byte budget", model.ErrResourceBound)
 	}
 	b.remaining -= uint64(len(data))
 	return nil

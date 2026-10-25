@@ -302,6 +302,7 @@ func visitInventoryPage(ctx context.Context, entries []os.DirEntry, remaining *u
 }
 
 func (w *walInventory) failed(code, group, message string, cause error) {
-	w.issue(code, group, message)
+	issue := model.InputIssue(model.Issue{Code: code, GroupID: group, Message: message}, cause)
+	w.issue(issue.Code, group, issue.Message)
 	w.cause = errors.Join(w.cause, cause)
 }

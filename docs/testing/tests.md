@@ -228,7 +228,7 @@ See the [process migration map](cluster-migration.md),
 [Node ownership](../architecture/runtime.md) and
 [measured performance gates](performance.md). Milestone validation and earlier
 timings remain historical records in repository history. Current scoped validation
-is recorded in the [implementation log](../plans/20261015-failure-isolation-and-operational-api.md#progress-log).
+is recorded in the [validation record](api-refactor-validation.md).
 
 The scheduler module has unit validation (CAS transitions, codec, revocation
 rules, executor choice, configuration) and functional SQLite/FSM, snapshot,
@@ -292,7 +292,15 @@ go test -tags=functional -run '^$' -bench '^BenchmarkCleanupDebtApply$' -benchme
 
 These are coverage locations and commands, not a claim that a listed process
 scenario has passed. Actual revisions, image/report paths, outcomes and cleanup
-are recorded in the [implementation log](../plans/20261015-failure-isolation-and-operational-api.md#progress-log).
+are recorded in the [validation record](api-refactor-validation.md).
 The final scoped architecture review requires complete functional,
 functional-race and cluster runs after any corrections; earlier runs do not
 replace that final gate.
+
+Permanent-majority-loss component cases stay in owning functional packages;
+`TestPermanentMajorityLoss*` uses the three-node Docker pool and authenticated
+remote maintenance controls. Opt-in `BenchmarkRecoveryResources` (root functional
+build) and `BenchmarkRecoveryMetadataResources` (`internal/metaengine` functional
+build) cover large local recovery input. Compile a binary before OS RSS measurement
+and run one case at a time with `-test.benchtime=1x`; these large fixtures are not
+part of normal fast/functional runs. See the [qualification record](permanent-majority-loss-recovery.md).

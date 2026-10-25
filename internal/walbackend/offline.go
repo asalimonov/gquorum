@@ -174,7 +174,7 @@ func validateOfflineRecovery(result *model.WALEvidence, limits model.ReadBounds)
 	}
 	snapshotBytes := uint64(snapshotSize)
 	if result.Bytes > limits.MaxGroupBytes || snapshotBytes > limits.MaxGroupBytes-result.Bytes {
-		return fault.ErrUnreadable
+		return unreadable("snapshot and tail exceed recovery byte budget", model.ErrResourceBound)
 	}
 	result.Bytes += snapshotBytes
 	if result.TornTail != nil {

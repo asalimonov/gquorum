@@ -230,3 +230,21 @@ The implementation specification records exact format changes. Existing
 immutable compatibility fixtures were not regenerated to hide a format change.
 Current and rejected-format verification is recorded in
 [placement validation](../testing/placement-validation.md).
+
+
+## Recovery policy deficits
+
+A successful permanent-loss import preserves the desired placement and voter
+configuration, including strict distinct-voter labels, even though its only live
+replica is the recovered singleton. Replicated import state records this narrow
+exception. Ordinary founding, learner preparation, guarded promotion and actual
+fences/receipts still govern every effect; recovery does not relax core native
+quorum or identity checks.
+
+The planner and scheduler admit approved intermediate growth from one to two to
+three within the retained deficit. Unrelated safe edits remain available.
+Healthy seats and pinned learners retain ordinary protection. A proven satisfied
+policy, an explicit approved policy change, or retirement permanently releases
+the corresponding exception; restart/history pruning cannot revive it. An
+unsupported or unrelated topology edit cannot borrow recovery's exception.
+Data reconstruction completion and policy repair completion are distinct.
