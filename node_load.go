@@ -8,12 +8,14 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/authoritystore"
+	"github.com/asalimonov/gquorum/internal/loadsnapshot"
 	"github.com/asalimonov/gquorum/internal/managed"
 	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/internal/metastore"
 	internalmetrics "github.com/asalimonov/gquorum/internal/metrics"
 	"github.com/asalimonov/gquorum/internal/recovery/model"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/load/snapshot"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -52,6 +54,20 @@ func (e *LoadParkedError) Unwrap() error { return e.Cause }
 // Is matches a parked boot against the replica-not-ready classification.
 func (*LoadParkedError) Is(err error) bool {
 	return errors.Is(fault.ErrReplicaNotReady, err)
+}
+
+// LoadSnapshots returns the stable borrowed snapshot facade for managed loads.
+func (n *node) LoadSnapshots() snapshot.Service { return n.snapshots }
+
+func (n *node) snapshotCoordinator() (*loadsnapshot.Coordinator, error) {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	if n.stopping || n.state == NodeStopped {
+		return nil, fault.ErrStopped
+	}
+	// Host attachment follows the resource-owning coordinator implementation
+	// in plan task 12. No incomplete transfer path is selected before then.
+	return nil, fault.ErrReplicaNotReady
 }
 
 func (n *node) newHost(m *metaservice.Group) (*managed.Host, error) {

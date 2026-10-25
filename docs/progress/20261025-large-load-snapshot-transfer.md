@@ -31,3 +31,25 @@ Task 1 validation follow-up
 - Fixed the code, including a local positive chunk/window guard before the unsigned conversion. Kept target DTO grouping with narrow max-public-structs exemptions, matching repository conventions.
 - make lint (pending files only): pass, including unit/functional vet, production checks, revive and unused analysis.
 - Re-ran make test after fixes: all 2,182 tests pass; 6.484 seconds. Report: test-reports/unit/20261025T163713.024365Z-mb3uckv2/report.md.
+
+## Task 2 — pure facade and Node construction
+
+Date: 2026-10-25. Commit: this task commit; prior task 821ca49.
+
+Implemented
+- Added Node.LoadSnapshots and LoadOptions.SnapshotTransfer in existing root files; only configured managed loads construct a facade. Metadata-only Nodes return nil.
+- Resolved/copied snapshot policy during construction with no resolver/callback/I/O; immutable options remain available after stop.
+- Added internal pure facade, observation-only fallback, closed unknown-session signal and pure typed-nil-aware RequireTransport helper. Constructor capability enforcement remains deferred to task 15.
+- Coordinator methods deliberately refuse with ReplicaNotReady until tasks 6–8; root Host attachment remains deferred to task 12. These are the plan's explicit temporary seams, not completed runtime transfer behavior.
+
+Verified
+- go vet ./internal/loadsnapshot .: pass.
+- go test -count=1 ./internal/loadsnapshot .: pass, including construction/cancellation/capability and stable options tests.
+- make lint (pending changes only): pass after correcting stub receiver names/context helper order.
+- Initial make test failed one existing event-bus timing test (2193/2194 passed); report test-reports/unit/20261025T164607.543982Z-v_apavlc/report.md.
+- Corrected journal/loss observation order in that test only; go test -count=100 -parallel=1 ./events -run '^TestBus_BoundedIngressAndSubscriberLoss$': pass (1.502s). The pre-fix focused repetition also passed, confirming the observed full-suite failure was schedule-dependent rather than a consistently failing case.
+- Re-run make test: all 2,194 tests across 62 package reports/five modules passed in 10.476s. Report test-reports/unit/20261025T165018.031700Z-85j2spjz/report.md.
+
+Notes
+- Event test correction is recorded with its diff in the plan's NOT PLANNED CHANGES; no bus behavior/encoding changed.
+- No new root files, live application replicas, network services, Docker or large-data tests introduced/run for this task. Existing native snapshot send selection is unchanged.

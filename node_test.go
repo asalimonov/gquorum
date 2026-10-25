@@ -16,6 +16,7 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/lifecycle"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/load/snapshot"
 	"github.com/asalimonov/gquorum/scheduling"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
@@ -182,6 +183,18 @@ func TestNodeOptionsRejectAmbiguousOrUnsafeSettings(t *testing.T) {
 		"load negative pending":            func(o *NodeOptions) { o.Loads.Engine.MaxPendingProposals = -1 },
 		"load excessive write wait":        func(o *NodeOptions) { o.Loads.Engine.Timing.WALWriteWait = time.Second },
 		"implicit load configuration":      func(o *NodeOptions) { o.Loads = LoadOptions{EffectTimeout: time.Second} },
+		"snapshot without loads": func(o *NodeOptions) {
+			o.Loads = LoadOptions{SnapshotTransfer: snapshot.Options{MaxIncoming: 2}}
+		},
+		"negative snapshot timeout": func(o *NodeOptions) {
+			o.Loads.SnapshotTransfer.TotalTimeout = -time.Second
+		},
+		"snapshot progress exceeds total": func(o *NodeOptions) {
+			o.Loads.SnapshotTransfer.TotalTimeout = time.Second
+		},
+		"snapshot receive budget": func(o *NodeOptions) {
+			o.Loads.SnapshotTransfer.MaxReceiveBytes = 1
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -355,5 +368,66 @@ func TestSystemStorageRejectsOldFilenamesWithoutCreatingReplacement(t *testing.T
 				}
 			}
 		})
+	}
+}
+
+func TestNodeSnapshotFacadeIsPureStableAndOwnsOptions(t *testing.T) {
+	t.Parallel()
+	o := nodeOptionsForTest(t)
+	o.Loads = loadOptionsForTest(t)
+	o.Loads.SnapshotTransfer = snapshot.Options{MaxSnapshotBytes: 8 << 20, MaxOutgoing: 2}
+	want, err := o.Loads.SnapshotTransfer.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := NewNode(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	facade := n.LoadSnapshots()
+	if facade == nil || facade != n.LoadSnapshots() || facade.Options() != want {
+		t.Fatal("missing, unstable or unresolved snapshot facade")
+	}
+	o.Loads.SnapshotTransfer.MaxSnapshotBytes = 1
+	observed := facade.Options()
+	observed.TotalTimeout = time.Second
+	if facade.Options() != want {
+		t.Fatal("constructor/options borrowed mutable settings")
+	}
+	if _, err := facade.Begin(context.Background(), snapshot.BeginRequest{}); !errors.Is(err, fault.ErrReplicaNotReady) {
+		t.Fatal("unstarted Node accepted snapshot work", err)
+	}
+	if page := facade.List(snapshot.Query{}); len(page.Items) != 0 || page.Incoming != 0 || page.Outgoing != 0 {
+		t.Fatal("unstarted Node acquired transfer state", page)
+	}
+	select {
+	case <-facade.SessionDone(snapshot.Session{}):
+	default:
+		t.Fatal("unknown session should already be closed")
+	}
+	for _, path := range []string{o.StorageDir, o.Loads.Storage.WAL.RootDir} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("construction or observations acquired storage", path, err)
+		}
+	}
+	if err := n.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n.LoadSnapshots() != facade || facade.Options() != want {
+		t.Fatal("stop replaced immutable facade/settings")
+	}
+	if _, err := facade.Finish(context.Background(), snapshot.Session{}); !errors.Is(err, fault.ErrStopped) {
+		t.Fatal("stopped Node accepted transfer work", err)
+	}
+}
+
+func TestMetaOnlyNodeHasNoSnapshotService(t *testing.T) {
+	t.Parallel()
+	n, err := NewNode(nodeOptionsForTest(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.LoadSnapshots() != nil {
+		t.Fatal("metadata-only Node acquired a load service")
 	}
 }

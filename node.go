@@ -7,6 +7,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/authoritystore"
+	"github.com/asalimonov/gquorum/internal/loadsnapshot"
 	"github.com/asalimonov/gquorum/internal/managed"
 	"github.com/asalimonov/gquorum/internal/metaservice"
 	recoverydisk "github.com/asalimonov/gquorum/internal/recovery/disk"
@@ -14,6 +15,7 @@ import (
 	recoveryruntime "github.com/asalimonov/gquorum/internal/recovery/runtime"
 	"github.com/asalimonov/gquorum/internal/watchstate"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/load/snapshot"
 	"github.com/asalimonov/gquorum/recovery"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/storage/memstore"
@@ -63,6 +65,9 @@ type Node interface {
 	LoadGroup(string) (*load.Group, bool)
 	// LoadGroupIDs lists published local group IDs.
 	LoadGroupIDs() []string
+	// LoadSnapshots returns the borrowed load-transfer service, or nil for a
+	// metadata-only Node. Options is available before Start; ingress is not.
+	LoadSnapshots() snapshot.Service
 	// StopLoadGroup holds an exact local replica without deleting its durable
 	// state.
 	StopLoadGroup(context.Context, load.ReplicaRef) error
@@ -115,6 +120,7 @@ type node struct {
 	opts                    NodeOptions
 	metaOpts                metaservice.Options
 	cluster                 *clusterView
+	snapshots               snapshot.Service
 	startGate               sync.Mutex
 	authorityGate           sync.Mutex
 	authority               *authoritystore.Store
@@ -174,6 +180,9 @@ func NewNode(input NodeOptions) (Node, error) {
 		stopped:        make(chan struct{}),
 	}
 	n.cluster = &clusterView{node: n}
+	if opts.Loads.Factory != nil {
+		n.snapshots = loadsnapshot.NewService(opts.Loads.SnapshotTransfer, n.snapshotCoordinator)
+	}
 	n.observation = NodeObservation{Revision: 1, Status: n.Status()}
 	n.observations = watchstate.New(opts.MaxWatchers, n.observation, cloneNodeObservation)
 	return n, nil

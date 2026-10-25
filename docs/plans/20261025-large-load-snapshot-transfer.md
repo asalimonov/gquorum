@@ -104,16 +104,16 @@ The target's historical final `make lint` command means full validation; on the 
 **Files:** existing `node.go`, `node_options.go`, `node_load.go`; create `internal/loadsnapshot/service.go` and minimal package declarations needed by it; update existing root tests/Node mocks, not new root test files.
 **References:** target [§4.2 facade](../brainstorms/20261025-large-load-snapshot-transfer-target.md#42-package-service-minimal-existing-root-wiring), §6.2, §8.1, §9.1 and §12 NewService.
 
-- [ ] Add `LoadOptions.SnapshotTransfer snapshot.Options` and `Node.LoadSnapshots() snapshot.Service`. NewNode resolves/copies policy and constructs `NewService(options, Resolver)` without invoking the resolver. For configured managed loads, Options works before Start and ingress returns ReplicaNotReady until a real coordinator exists. Meta-only Nodes retain no snapshot coordinator/service; their accessor returns nil and loadgrpc.Bind refuses nil support, consistent with target §9.4.
-- [ ] Implement Service Options/Begin/Write/Finish/Detach/Abort/SessionDone/List delegation and the observation-only last-coordinator fallback. No fallback is allowed for mutations. Unknown/stale SessionDone is closed; pre-host List is empty.
-- [ ] Keep current-root edits limited to existing composition files. Define internal Resolver/coordinator seam from target §4.2, but leave it unattached until Task 12; temporary errors cannot become successful API responses.
-- [ ] Update Node interface mocks in all modules as necessary. Add construction tests showing caller options mutation is isolated and no transport, resolver, factory or filesystem callbacks occur.
-- [ ] Implement a pure capability-check helper against snapshot.Transport, but **do not invoke its rejecting path from NewNode until Task 15**; existing adapters migrate in Task 13. Record this temporary boundary explicitly.
+- [x] Add `LoadOptions.SnapshotTransfer snapshot.Options` and `Node.LoadSnapshots() snapshot.Service`. NewNode resolves/copies policy and constructs `NewService(options, Resolver)` without invoking the resolver. For configured managed loads, Options works before Start and ingress returns ReplicaNotReady until a real coordinator exists. Meta-only Nodes retain no snapshot coordinator/service; their accessor returns nil and loadgrpc.Bind refuses nil support, consistent with target §9.4.
+- [x] Implement Service Options/Begin/Write/Finish/Detach/Abort/SessionDone/List delegation and the observation-only last-coordinator fallback. No fallback is allowed for mutations. Unknown/stale SessionDone is closed; pre-host List is empty.
+- [x] Keep current-root edits limited to existing composition files. Define internal Resolver/coordinator seam from target §4.2, but leave it unattached until Task 12; temporary errors cannot become successful API responses.
+- [x] Update Node interface mocks in all modules as necessary. Add construction tests showing caller options mutation is isolated and no transport, resolver, factory or filesystem callbacks occur.
+- [x] Implement a pure capability-check helper against snapshot.Transport, but **do not invoke its rejecting path from NewNode until Task 15**; existing adapters migrate in Task 13. Record this temporary boundary explicitly.
 
 #### Verification
 
-- [ ] `make test`; `go vet ./internal/loadsnapshot .`; focused existing Node-construction tests.
-- [ ] Verify no resource acquisition before Start and no new independent service lifetime; existing small snapshot delivery still follows the old path.
+- [x] `make test`; `go vet ./internal/loadsnapshot .`; focused existing Node-construction tests.
+- [x] Verify no resource acquisition before Start and no new independent service lifetime; existing small snapshot delivery still follows the old path.
 
 ### Task 3: Add the versioned snapshot RPC and bounded wire codecs
 
@@ -573,7 +573,37 @@ The single code TODO is reproduced with the staging interface in Appendix C. Do 
 
 ## NOT PLANNED CHANGES
 
-None authorized. During execution, record any necessary deviation with affected files, why it is needed, relevant target section and validation. Do not silently replace the target's package/lifetime/protocol model or alter unrelated pending user changes.
+Task 2 required one unrelated test-only correction to keep the required five-module unit checkpoint green. `events/events_test.go` sampled subscriber loss before journal progress and could combine stale ingress-loss evidence with a later append. Read journal progress first, establishing that the first dispatch has consumed ingress loss before inspecting subscriber overflow. Production bus code and persisted events are unchanged. Failure evidence: test-reports/unit/20261025T164607.543982Z-v_apavlc/library-events.log. The corrected focused test passed 100 repetitions; all 2,194 module unit tests then passed.
+
+Diff with tabs expanded for documentation:
+
+```diff
+diff --git a/events/events_test.go b/events/events_test.go
+index 997cc85..ec269f7 100644
+--- a/events/events_test.go
++++ b/events/events_test.go
+@@ -298,13 +298,17 @@ func TestBus_BoundedIngressAndSubscriberLoss(t *testing.T) {
+    must(t, <-finished)
+    // Wait until both accepted events have been dispatched into the bounded subscriber.
+    for {
++       // The second append follows the first dispatch, which consumes the
++       // ingress-loss count. Read the journal first so a later lost count
++       // cannot be confused with that earlier ingress loss.
++       journaled := len(listTest(t, j, Query{})) >= 2
+        b.mu.Lock()
+        pendingLoss := uint64(0)
+        for s := range b.subs {
+            pendingLoss = s.lost
+        }
+        b.mu.Unlock()
+-       if pendingLoss == 1 && len(listTest(t, j, Query{})) >= 2 {
++       if journaled && pendingLoss == 1 {
+            break
+        }
+        select {
+```
+
+Record any later necessary deviations with files, reasons, target references and verification; preserve unrelated user work.
 
 ## NOT IMPLEMENTED GAPS
 
@@ -588,6 +618,7 @@ No implementation exists yet; ordinary unchecked tasks are not defects in the pl
 
 | Date | Stage | Work and evidence |
 |---|---|---|
+| 2026-10-25 | Task 2 | Pure Node service/options composition and unavailable coordinator seam; all 2,194 units, vet and pending-file lint passed. Corrected an observed event-test ordering flake, recorded below. |
 | 2026-10-25 | Task 1 | Public snapshot contracts/options/errors implemented; 42 package cases, all 2,182 five-module units and focused vet passed. See execution log/report path. |
 | 2026-10-25 | Planning | Read reviewed target/log, current source/contracts, AGENTS and current Makefile/testing guide. Prepared task sequence and activation boundary. No code implementation, Go tests, Docker runs or large allocations. |
 | 2026-10-25 | Self-review | Checked all 20 task dependencies/references/unchecked lists, exact type appendices, acceptance mapping and final wiring. Clarified early metrics DTO declaration, optional pre-activation Ingress provider, temporary compile artifacts and final-only expensive checks. Documentation checks only. |
