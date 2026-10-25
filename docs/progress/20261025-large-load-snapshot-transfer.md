@@ -262,3 +262,25 @@ Verified
 Notes
 - The pinned pump teardown feasibility gate passes; no architectural replacement or suppressed race was needed. Re-run it on gRPC upgrades.
 - Source networking and managed activation remain later tasks. No new root source, port, persistent encoding or large fixture. The unrelated .gitignore change remains excluded.
+
+## Task 11 — independent bulk clients, pipeline and retained resume clocks
+
+Date: 2026-10-26. Commit: this task commit; prior 2168c6e. Five implementation commits after review anchor 251a594; request the next colleague review after Task 12 (sixth commit), counting any additional correction commit.
+
+Implemented
+- Snapshot-only bounded outgoing admission and ClientConn cache use the existing caller resolver/load address while remaining independent of ordinary Raft/control connections. Close cancels/joins all accepted send work before closing bulk connections.
+- Independent joined chunk sender/Ack receiver enforce the negotiated window, exact session/run/chunk mapping and cumulative prefix bounded by issued chunks. No Data before admission, no Finish before all bytes are verified, no callback after joined return.
+- Resume preserves the original manifest and total/progress clocks, accepts tighter policy only, and joins old workers before replacement. Transient stream loss uses 100ms-to-2s capped jittered backoff; permanent/capacity/restart-required refusals end this delivery without unary fallback.
+- Header/frame/size validation, exact typed errors and native-proven not_needed remain distinct from accepted full receipt. Effective callbacks/Acks use locally narrowed timings; synchronous timeout checks prevent a late Ack from renewing an expired clock.
+- Removed the codec's temporary unused exemption now that both directions have production callers.
+
+Verified
+- make test: 2,272 tests across 62 reports/five modules pass (8.503s); report test-reports/unit/20261025T200445.349913Z-oalwwdg9/report.md.
+- go vet ./transport/loadgrpc; pending make lint; git diff --check: pass.
+- Owning-package unit race passes (1.311s). Functional snapshot RPC race suite, three repetitions, passes (2.843s), including the required server teardown gate.
+- Lost Open/chunk/final Ack resume with unchanged manifest; native not_needed sends no payload; unsupported peer and typed capacity/restart refusals do not retry/fallback. Missing/duplicate admission progress expires, total lifetime survives reconnects, finalization after verified bytes uses total lifetime, frame mismatch refuses before Data, and callbacks/workers join on Close.
+- An eight-MiB generated transfer blocks on bulk flow control while ordinary ReadReplica succeeds to the identical address over a distinct ClientConn. A three-chunk window test observes exactly three issued chunks while the first verified write is blocked; outgoing admission also remains held during a blocked Begin.
+- Pure regressions reject wrong delivery/run/attachment, changed chunk mapping, unaligned/unissued offsets and premature accepted Acks; duplicate and late Acks cannot renew progress.
+
+Notes
+- No new listener, root source, persisted encoding or committed payload. Ordinary legacy snapshot routing remains selected until Task 15; managed Host wiring is Task 12. Unrelated .gitignore edit remains excluded.

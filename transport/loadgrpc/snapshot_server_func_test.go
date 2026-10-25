@@ -70,6 +70,8 @@ type snapshotRPCService struct {
 	write       func(context.Context, snapshot.Chunk) error
 	lastRequest snapshot.BeginRequest
 	closeFinish bool
+	finish      func(context.Context, snapshot.Session) error
+	notNeeded   bool
 }
 
 func (s *snapshotRPCService) Options() snapshot.Options { return s.options }
@@ -96,8 +98,16 @@ func (s *snapshotRPCService) Begin(ctx context.Context, r snapshot.BeginRequest)
 		next = s.ack.NextOffset
 	}
 	s.lastRequest = r
+	if s.notNeeded {
+		return snapshot.Ack{Session: snapshot.Session{Key: r.Manifest.Key},
+			State: snapshot.DeliveryNotNeeded, RemainingTotal: s.options.TotalTimeout,
+			ProgressTimeout: s.options.ProgressTimeout, ReceiverRunID: "receiver-run"}, nil
+	}
+	if r.Resume && s.ack.State == snapshot.DeliveryAccepted {
+		return s.ack, nil
+	}
 	s.ack = snapshot.Ack{Session: snapshot.Session{Key: r.Manifest.Key, Attachment: s.generation}, NextOffset: next,
-		ChunkBytes: min(r.Manifest.ChunkBytes, r.MaxChunkBytes), State: snapshot.DeliveryReceiving,
+		ChunkBytes: min(r.Manifest.ChunkBytes, r.MaxChunkBytes, uint32(s.options.ChunkBytes)), State: snapshot.DeliveryReceiving,
 		RemainingTotal: s.options.TotalTimeout, ProgressTimeout: s.options.ProgressTimeout, ReceiverRunID: strings.Repeat("r", 512)}
 	return s.ack, nil
 }
@@ -113,7 +123,12 @@ func (s *snapshotRPCService) Write(ctx context.Context, c snapshot.Chunk) (snaps
 	s.ack.NextOffset = max(s.ack.NextOffset, c.Offset+uint64(len(c.Data)))
 	return s.ack, nil
 }
-func (s *snapshotRPCService) Finish(_ context.Context, _ snapshot.Session) (snapshot.Ack, error) {
+func (s *snapshotRPCService) Finish(ctx context.Context, session snapshot.Session) (snapshot.Ack, error) {
+	if s.finish != nil {
+		if err := s.finish(ctx, session); err != nil {
+			return snapshot.Ack{}, err
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ack.State = snapshot.DeliveryAccepted
@@ -173,9 +188,13 @@ type snapshotRPCFixture struct {
 	conn      *grpc.ClientConn
 	stats     *snapshotRPCStats
 	open      *loadpb.SnapshotOpen
+	listener  *bufconn.Listener
 }
 
 func newSnapshotRPCFixture(t *testing.T, options snapshot.Options) *snapshotRPCFixture {
+	return newSnapshotRPCFixtureWith(t, options, nil)
+}
+func newSnapshotRPCFixtureWith(t *testing.T, options snapshot.Options, interceptor grpc.StreamServerInterceptor) *snapshotRPCFixture {
 	t.Helper()
 	options, err := options.Resolve()
 	if err != nil {
@@ -197,7 +216,11 @@ func newSnapshotRPCFixture(t *testing.T, options snapshot.Options) *snapshotRPCF
 		t.Fatal(err)
 	}
 	observed := &snapshotRPCStats{end: make(chan struct{}, 32)}
-	server := grpc.NewServer(grpc.StatsHandler(observed))
+	serverOptions := []grpc.ServerOption{grpc.StatsHandler(observed)}
+	if interceptor != nil {
+		serverOptions = append(serverOptions, grpc.StreamInterceptor(interceptor))
+	}
+	server := grpc.NewServer(serverOptions...)
 	transport.Register(server)
 	serverDone := make(chan struct{})
 	go func() { defer close(serverDone); _ = server.Serve(listener) }()
@@ -227,7 +250,7 @@ func newSnapshotRPCFixture(t *testing.T, options snapshot.Options) *snapshotRPCF
 		_ = listener.Close()
 		<-serverDone
 	})
-	return &snapshotRPCFixture{transport, service, loadpb.NewLoadClient(conn), conn, observed, open}
+	return &snapshotRPCFixture{transport, service, loadpb.NewLoadClient(conn), conn, observed, open, listener}
 }
 func testSnapshotIdentity(name string, id uint64) topology.Identity {
 	return topology.Identity{ClusterID: "cluster", NodeName: name, MemberID: id, InstanceID: name + "-process"}

@@ -293,18 +293,18 @@ Review baseline: `251a594`; findings in review Thread 3. The next review is due 
 **Files:** `transport/loadgrpc/snapshot_client.go`, `snapshot_connections.go`, existing Bind/Close fields and tests.
 **References:** target §4.1, §5, §7.4/7.6, §9.4 and §12 SendSnapshot reconnect loop.
 
-- [ ] Implement SendSnapshot, sendSnapshotAttempt, openSnapshotStream, sendChunks, receiveAcks, snapshotClient and closeSnapshotConnections with the exact target signatures.
-- [ ] Give bulk transfers a separate bounded ClientConn map to the **same** existing load endpoint. Hold connections/streams under MaxOutgoing; old attempts must join before replacement. Ordinary Raft streams/control use their current pool.
-- [ ] Implement eight-chunk default pipelining with independent send/receive goroutines, no Data until admission Ack, and Finish only after all bytes are cumulatively acknowledged. Validate every Ack against exact transfer/destination run and local/negotiated bounds.
-- [ ] Wire ReportProgress for admission/new verified prefix/final outcome, coalescing safely and never after return. No fabricated progress from duplicate Acks, keepalives or reconnect.
-- [ ] Resume with original manifest/requested ChunkBytes and stored negotiated value. Honor original total/progress clocks; negotiate only tighter bounds. Keep source preparation/finalization on total lifetime, not fake zero-byte progress.
-- [ ] Retry transient connection loss with 100ms→2s bounded jitter inside the same transfer; do not retry permanent or restart_required in that delivery. Capacity/busy returned before admission goes to the short native retry policy, not a 30-minute adapter loop.
-- [ ] Preserve explicit plaintext credentials, typed errors and application endpoint resolution; no silent unary fallback.
+- [x] Implement SendSnapshot, sendSnapshotAttempt, openSnapshotStream, sendChunks, receiveAcks, snapshotClient and closeSnapshotConnections with the exact target signatures.
+- [x] Give bulk transfers a separate bounded ClientConn map to the **same** existing load endpoint. Hold connections/streams under MaxOutgoing; old attempts must join before replacement. Ordinary Raft streams/control use their current pool.
+- [x] Implement eight-chunk default pipelining with independent send/receive goroutines, no Data until admission Ack, and Finish only after all bytes are cumulatively acknowledged. Validate every Ack against exact transfer/destination run and local/negotiated bounds.
+- [x] Wire ReportProgress for admission/new verified prefix/final outcome, coalescing safely and never after return. No fabricated progress from duplicate Acks, keepalives or reconnect.
+- [x] Resume with original manifest/requested ChunkBytes and stored negotiated value. Honor original total/progress clocks; negotiate only tighter bounds. Keep source preparation/finalization on total lifetime, not fake zero-byte progress.
+- [x] Retry transient connection loss with 100ms→2s bounded jitter inside the same transfer; do not retry permanent or restart_required in that delivery. Capacity/busy returned before admission goes to the short native retry policy, not a 30-minute adapter loop.
+- [x] Preserve explicit plaintext credentials, typed errors and application endpoint resolution; no silent unary fallback.
 
 #### Verification
 
-- [ ] `make test`; owning vet; functional/race tests for lost Open/chunk/final Ack, disconnect/resume, old stream join, unsupported peer, differing frame/time policies and bounded outstanding chunks.
-- [ ] Block the bulk connection's flow control and prove ordinary traffic to the same peer address proceeds on the ordinary connection. Reuse Task 10's teardown gate for client Close.
+- [x] `make test`; owning vet; functional/race tests for lost Open/chunk/final Ack, disconnect/resume, old stream join, unsupported peer, differing frame/time policies and bounded outstanding chunks.
+- [x] Block the bulk connection's flow control and prove ordinary traffic to the same peer address proceeds on the ordinary connection. Reuse Task 10's teardown gate for client Close.
 
 ### Task 12: Wire managed ports, Node lifetime and readmission barriers
 

@@ -75,6 +75,8 @@ type Options struct {
 // server. Stop Node while this adapter and the server are still available, then
 // Close the adapter and stop the server. Close timeouts retain join ownership.
 type Transport struct {
+	snapshotClients                                     map[string]*connection
+	snapshotSending                                     int
 	snapshotService                                     snapshot.Service
 	snapshotOptions                                     snapshot.Options
 	snapshotPreOpen, snapshotHandlers, snapshotPreLimit int
@@ -129,6 +131,7 @@ func New(options Options) (*Transport, error) {
 	return &Transport{
 		options:          options,
 		clients:          make(map[string]*connection),
+		snapshotClients:  make(map[string]*connection),
 		streams:          make(map[streamKey]*raftStream),
 		streamIdle:       defaultStreamIdle,
 		ctx:              ctx,
@@ -313,6 +316,7 @@ func (t *Transport) Close(ctx context.Context) error {
 			for _, c := range clients {
 				_ = c.conn.Close()
 			}
+			_ = t.closeSnapshotConnections()
 			close(t.done)
 		}()
 	}
