@@ -1,0 +1,46 @@
+// Build this captured probe from a temporary .go copy for native Linux mount qualification.
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/recoverydisk"
+	model "github.com/asalimonov/gquorum/internal/recoverymodel"
+	"golang.org/x/sys/unix"
+)
+
+func main() {
+	if err := run(); err != nil { fmt.Fprintln(os.Stderr,err); os.Exit(1) }
+}
+
+func run() error {
+	paths:=model.Paths{StorageDir:"/fixture/system",LoadWALDir:"/fixture/wal"}
+	if len(os.Args)==2 && os.Args[1]=="setup" {
+		for _,path:=range []string{paths.StorageDir,filepath.Join(paths.LoadWALDir,"artifact","nested")} {
+			if err:=os.MkdirAll(path,0700);err!=nil{return err}
+		}
+		return os.WriteFile(filepath.Join(paths.LoadWALDir,"artifact","data"),[]byte("original"),0600)
+	}
+	owner,err:=recoverydisk.Acquire(context.Background(),paths)
+	if err!=nil{return err}
+	defer owner.Close()
+	root,nested:=unix.Stat_t{},unix.Stat_t{}
+	if err:=unix.Stat(paths.LoadWALDir,&root);err!=nil{return err}
+	if err:=unix.Stat(filepath.Join(paths.LoadWALDir,"artifact","nested"),&nested);err!=nil{return err}
+	if root.Dev!=nested.Dev{return errors.New("fixture did not produce a same-device bind mount")}
+	err=owner.ValidateArtifact(context.Background(),"wal","artifact",4096)
+	if !errors.Is(err,fault.ErrUnreadable) || !strings.Contains(err.Error(),"nested artifact mount") {
+		return fmt.Errorf("same-device nested mount was not specifically refused: %v",err)
+	}
+	fmt.Printf("PASS: same device %d, distinct mount identity refused; source bytes preserved\n",root.Dev)
+	data,err:=os.ReadFile(filepath.Join(paths.LoadWALDir,"artifact","data"))
+	if err!=nil{return err}
+	if string(data)!="original"{return errors.New("source bytes changed")}
+	return nil
+}

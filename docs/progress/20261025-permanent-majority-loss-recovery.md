@@ -445,3 +445,78 @@ Notes
 - Public Run remains temporarily non-destructive and startup refuses AwaitingStart
   until the scheduled matching Node integration. Continue with Task7. Next regular
   peer checkpoint remains after Task10 (five completed tasks since Task5).
+
+
+## Task 7 — Joined backup/cancellation and in-root archive execution
+Date: 2026-10-25. Commit: included with this task's implementation commit.
+
+Implemented
+- Added private recoveryexec above the disk and WAL/system-reader layers. It
+  borrows one owner/journal per call, starts no engine/application/workers and
+  joins callbacks directly. This avoids the disk↔reader dependency cycle;
+  filesystem operations remain descriptor-bound disk capabilities. Public
+  lifecycle signatures are unchanged and the local target records the placement.
+- Approved/Files enters journaled Backup; each callback attempt is durable before
+  invocation and success is recorded after actual return. Nil hook declares no
+  external work. A cancelled waiter cannot detach an ignoring callback or free
+  its root leases. Successful late callbacks record completion before returning
+  cancellation; errors never invoke automatic Undo. Failure diagnostics are
+  bounded/sanitized while original causes remain returned.
+- Cancel validates the immutable operation and original library evidence before
+  write-once audit/Cancelling. Any Backup attempt requires separately journaled
+  Undo even after Backup failure. Failed Undo retains guard/ownership semantics;
+  Run(Cancelling) resumes only that Undo. Verify unchanged source again, persist
+  Cancelled before clearing the matching pointer, retain history/reserved IDs.
+- Verify original inventory before Backup and again afterwards. Prepare private
+  destinations, then persist Archiving before any source move. Move authority,
+  metadata, verified readmission files and owned WAL data within their original
+  roots; no mountpoint/root rename, cross-volume copy, overwrite or collection.
+- Reconcile exact accepted evidence at source or backup after uncertain rename.
+  Both/neither/conflicting paths and durable-Moved reversals refuse. Sync both
+  parents before marking Moved. Full logical bbolt/WAL digests verify active data;
+  opaque retained artifacts use streaming whole-content hashes. Unknown new live
+  or backup entries refuse. Finish with AwaitingStart/JoinReady, not a running B.
+- Added descriptor mount identity to artifact/private-directory validation:
+  Darwin Fstatfs mount names and Linux Statx MNT_ID distinguish same-device bind
+  mounts. Unsupported proof refuses. No ordinary Node/simulation lock bypass.
+- Public Cancel and cancellation/history Run are wired. Destructive public Run
+  still refuses before Backup/archive until Task12 supplies safe matching Node
+  startup; tests exercise that same private executor without exposing a force flag.
+
+Verified
+- make test: PASS, 2,045 tests/56 reports, all five modules, 7.279s.
+  test-reports/unit/20261025T032739.790108Z-41wuvbko/report.md.
+- Full make lint: PASS across modules/build tags/tooling.
+  /tmp/gquorum-task7-lint.log.
+- Full affected functional-race suites -p4 -parallel8 -count=1: PASS
+  root38.727s/disk2.930s/backend10.870s/facade7.016s/meta-store3.165s/
+  authority6.541s/meta-FSM27.441s/engine8.380s.
+  /tmp/gquorum-task7-functional-race.log.
+- Non-race root/disk functional suites: PASS27.242s/1.232s.
+  /tmp/gquorum-task7-functional.log. Focused callback/move/guard races PASS,
+  including final actual AwaitingStart startup refusal9.452s.
+- make test-sim SIM_SEEDS=1-3: PASS21/21,51.847s.
+  test-reports/sim/20261025T032742.134625Z-1_p178f9/report.md.
+- Linux/arm64 static probe built from the captured inert source in
+  internal/recoverydisk/testdata/mount-probe. Cached alpine:3.23.3 ran one unique
+  labeled volume mounted twice: device65025 matched, distinct descriptor mount
+  identity was specifically refused, source bytes unchanged. Probe PASS; both
+  containers and volume removed and label-filtered listings empty.
+  /tmp/gquorum-task7-mount-probe.log. No shared image rebuild or broad cluster run.
+- Tests cover failed Backup after application-file move, failed/retried Undo,
+  no automatic Undo, callback late return/context/lease contention, cancellation
+  before Backup, conflicting audit, durable Archiving before first move, lost
+  move acknowledgement, both/neither/changed backup paths, source mutation,
+  separate/nested/missing roots, rename/parent-sync/ENOSPC faults, no-clobber,
+  preserved original bytes, reset preparation and public destructive/startup guards.
+- git diff --check passes; no frozen fixture changed. Temporary Linux .go probe
+  was removed; only inert source and qualification notes remain in testdata.
+
+Notes
+- The first callback-race test reused its local result type name as a variable;
+  fixed that test declaration. No product contract was weakened.
+- A missing WAL root now fails source verification before application Backup.
+  Root acquisition may create its stable empty directory/lock, but never treats
+  missing data as completion, runs the hook, archives A or clears its guard.
+- Ordinary post-archive startup remains intentionally refused until Task10–12.
+  Policy repair (Task8) is next; peer review remains scheduled after Task10.

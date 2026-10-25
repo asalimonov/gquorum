@@ -30,12 +30,20 @@ func recoveryFixtureOptions(t *testing.T, withLoad bool) NodeOptions {
 
 func recoveryFixtureWithSpec(t *testing.T, spec *GroupSpec) NodeOptions {
 	t.Helper()
+	return recoveryFixtureStorage(t, spec, "")
+}
+
+func recoveryFixtureStorage(t *testing.T, spec *GroupSpec, walRoot string) NodeOptions {
+	t.Helper()
 	withLoad := spec != nil
 	root := t.TempDir()
 	options := authorityNodeOptions(t, root, "recovery-source")
 	if withLoad {
+		if walRoot == "" {
+			walRoot = filepath.Join(root, "loads")
+		}
 		loopback := &loopbackTransport{}
-		options.Loads = LoadOptions{Transport: loopback, Storage: LoadStorageOptions{WAL: &WALOptions{RootDir: filepath.Join(root, "loads")}},
+		options.Loads = LoadOptions{Transport: loopback, Storage: LoadStorageOptions{WAL: &WALOptions{RootDir: walRoot}},
 			Factory: func(context.Context, load.ReplicaSpec) (load.Application, error) {
 				return load.Application{StateMachine: ensureMachine{}}, nil
 			}}

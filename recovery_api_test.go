@@ -23,16 +23,16 @@ var _ interface {
 	List(context.Context) ([]recovery.Status, error)
 } = (*gquorum.Recovery)(nil)
 
-func TestRecoveryPublicContractsRejectInvalidInputAndGuardPendingExecution(t *testing.T) {
+func TestRecoveryPublicContractsRejectInvalidInputAndRespectContext(t *testing.T) {
 	t.Parallel()
 	r, err := gquorum.NewRecovery(gquorum.NodeOptions{StorageDir: "unused", Identity: topology.Identity{NodeName: "n1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = r.Run(context.Background(), "unimplemented")
+	_, err = r.Inspect(context.Background(), recovery.Request{})
 	var refusal *recovery.Refusal
-	if !errors.As(err, &refusal) || refusal.Issue.Code != "implementation_pending" || !errors.Is(err, fault.ErrUnsupported) {
-		t.Fatal("unimplemented operation looked successful", err)
+	if !errors.As(err, &refusal) || refusal.Issue.Code != "invalid_request" || !errors.Is(err, fault.ErrInvalid) {
+		t.Fatal("invalid inspection request looked successful", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

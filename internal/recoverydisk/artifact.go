@@ -44,6 +44,7 @@ type artifactWalk struct {
 	ctx       context.Context
 	root      *os.Root
 	device    unix.Stat_t
+	mount     string
 	remaining uint64
 	digest    hash.Hash
 	base      string
@@ -68,10 +69,14 @@ func (o *Owner) artifactWalk(ctx context.Context, kind string, maxNames uint64) 
 	}
 	var info unix.Stat_t
 	err = unix.Fstat(int(file.Fd()), &info)
+	var mount string
+	if err == nil {
+		mount, err = openedMount(file)
+	}
 	if err := errors.Join(err, file.Close()); err != nil {
 		return nil, err
 	}
-	return &artifactWalk{ctx: ctx, root: lease.root, device: info, remaining: maxNames}, nil
+	return &artifactWalk{ctx: ctx, root: lease.root, device: info, mount: mount, remaining: maxNames}, nil
 }
 
 func (w *artifactWalk) visit(relative string, depth int) error {
@@ -96,16 +101,43 @@ func (w *artifactWalk) visit(relative string, depth int) error {
 		return fault.New(fault.Unreadable, "nested artifact mount refuses movement", nil)
 	}
 	kind := info.Mode & unix.S_IFMT
+	if kind != unix.S_IFDIR && kind != unix.S_IFREG {
+		return fault.New(fault.Unreadable, "artifact contains a link or special file", nil)
+	}
+	if kind == unix.S_IFREG && (info.Nlink != 1 || info.Size < 0) {
+		return fault.New(fault.Unreadable, "artifact contains a writable alias", nil)
+	}
+	if err := w.checkMount(relative, info); err != nil {
+		return err
+	}
 	if kind == unix.S_IFDIR {
 		return w.directory(relative, depth)
-	}
-	if kind != unix.S_IFREG || info.Nlink != 1 || info.Size < 0 {
-		return fault.New(fault.Unreadable, "artifact contains a link or special file", nil)
 	}
 	if w.digest == nil {
 		return nil
 	}
 	return w.file(relative, info.Size)
+}
+
+func (w *artifactWalk) checkMount(relative string, info unix.Stat_t) error {
+	var file *os.File
+	var err error
+	if info.Mode&unix.S_IFMT == unix.S_IFDIR {
+		file, err = openDirectory(w.root, relative)
+	} else {
+		file, err = openRelative(w.root, relative, unix.O_RDONLY, 0)
+	}
+	if err != nil {
+		return err
+	}
+	mount, err := openedMount(file)
+	if err := errors.Join(err, file.Close()); err != nil {
+		return err
+	}
+	if mount != w.mount {
+		return fault.New(fault.Unreadable, "nested artifact mount refuses movement", nil)
+	}
+	return nil
 }
 
 func (w *artifactWalk) directory(relative string, depth int) error {

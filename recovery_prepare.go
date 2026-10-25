@@ -61,12 +61,27 @@ func (r *Recovery) priorApproval(ctx context.Context, owner *recoverydisk.Owner,
 
 func (r *Recovery) validatePrior(owner *recoverydisk.Owner, prior model.LocalManifest,
 	request recovery.Request) error {
+	if err := r.validateExecutionOptions(owner, prior); err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(canonicalRecoveryRequest(prior.Request), canonicalRecoveryRequest(request)) {
+		return fault.ErrConflict
+	}
+	if prior.Phase == recovery.Cancelled {
+		return fault.New(fault.Conflict, "cancelled recovery ID is reserved", nil)
+	}
+	if prior.Phase == recovery.RollingBack || prior.Phase == recovery.RolledBack {
+		return fault.ErrUnsupported
+	}
+	return nil
+}
+
+func (r *Recovery) validateExecutionOptions(owner *recoverydisk.Owner, prior model.LocalManifest) error {
 	if r.source.ClusterID != "" && prior.Source.ClusterID != r.source.ClusterID ||
 		prior.Source.NodeName != r.source.NodeName || prior.Paths != owner.Paths() {
 		return fault.ErrIdentityMismatch
 	}
-	if prior.Files.Required != (r.options.Files != nil) ||
-		!reflect.DeepEqual(canonicalRecoveryRequest(prior.Request), canonicalRecoveryRequest(request)) {
+	if prior.Files.Required != (r.options.Files != nil) {
 		return fault.ErrConflict
 	}
 	for _, pair := range [][2]uint64{
@@ -77,12 +92,6 @@ func (r *Recovery) validatePrior(owner *recoverydisk.Owner, prior model.LocalMan
 		if pair[0] != 0 && pair[0] != pair[1] {
 			return fault.ErrConflict
 		}
-	}
-	if prior.Phase == recovery.Cancelled {
-		return fault.New(fault.Conflict, "cancelled recovery ID is reserved", nil)
-	}
-	if prior.Phase == recovery.RollingBack || prior.Phase == recovery.RolledBack {
-		return fault.ErrUnsupported
 	}
 	return nil
 }

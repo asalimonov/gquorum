@@ -16,7 +16,7 @@
 
 **Review/clarifications:** [docs/review/feat_permanent-majority-loss-recovery.md](../review/feat_permanent-majority-loss-recovery.md)
 
-**Status:** implementation in progress; Tasks 1–6 complete; checkpoint review closed; next task is backup/cancellation.
+**Status:** implementation in progress; Tasks 1–7 complete; next task is recovery placement/repair; checkpoint review closed.
 
 ## Scope and precedence
 
@@ -482,37 +482,38 @@ application work or archive move from approval.
 
 **References:** Target §§2–5, §9, §11, §15.2/15.3; brainstorm D02/D03/D05/D10/D21.
 **Files:** `recovery_run.go`, `recovery_cancel.go`,
-`internal/recoverydisk/archive.go`, journal transitions, owning functional/race tests.
+`internal/recoverydisk/{archive,archive_io,mount_*}.go`, CREATED
+`internal/recoveryexec/{executor,archive}.go`, journal transitions, owning functional/race tests.
 **Dependencies:** Tasks 1–6. **Outcome:** complete owned offline executor and
 cancellation; public destructive Run remains temporarily guarded until Task 12
 finishes the matching Node restore/publication paths.
 
-- [ ] Implement the executor behind a temporary implementation-pending check before
+- [x] Implement the executor behind a temporary implementation-pending check before
   public Run starts Backup/archive in either mode. Cancelling may still resume
   recorded Undo and terminal/history paths remain readable. Exercise destructive
   transitions through the same private executor in owning-package tests. Keep the
   destructive public check until Task 12, so an intermediate feature commit cannot
   archive A while B startup remains incomplete. This is temporary scaffolding,
   not a public option or final unsupported case.
-- [ ] Implement Run's phase dispatch from the exact saved operation. Approved enters
+- [x] Implement Run's phase dispatch from the exact saved operation. Approved enters
   Files; Files runs Backup; Cancelling resumes only saved cancellation; terminal/
   post-archive phases return history/resume status. Reserved rollback states refuse.
   Do not inspect/rearchive current B as a new A source on retry.
-- [ ] Invoke one node-wide FilesBackup with the generated application BackupDir.
+- [x] Invoke one node-wide FilesBackup with the generated application BackupDir.
   Journal running attempt before callbacks and completion only after nil return.
   Nil Files is an explicit no-external-work declaration, not fallback on hook error.
   A retry of a shared database backup must not reset already reconstructed siblings.
-- [ ] On cancellation/error, retain the exact callback/locks until actual return.
+- [x] On cancellation/error, retain the exact callback/locks until actual return.
   Context cancellation never triggers Undo or releases the pending guard. Produce
   last durable Status plus cause-preserving Refusal with a phase-appropriate Remedy.
-- [ ] Implement Cancel's exact allowed phases and write-once actor/reason/time.
+- [x] Implement Cancel's exact allowed phases and write-once actor/reason/time.
   Refuse while another Run owns roots; management must join it first. Any recorded
   Backup attempt requires idempotent FilesUndo, even if Backup failed before mutation.
   Track Undo independently; a failed Undo remains Cancelling and guarded.
-- [ ] Verify unchanged original library evidence before/after Undo, record Cancelled
+- [x] Verify unchanged original library evidence before/after Undo, record Cancelled
   before clearing the matching current pointer, retain history/reserved ID, and
   handle lost cancellation responses without reactivating the operation.
-- [ ] After Backup, revalidate A and persist Archiving before the first library move.
+- [x] After Backup, revalidate A and persist Archiving before the first library move.
   Rename authority, metadata, verified readmission backups and owned WAL entries
   into their respective in-root backups. Extend preparation checks from device
   boundaries to descriptor-bound mount identity, including nested bind mounts on
@@ -520,25 +521,25 @@ finishes the matching Node restore/publication paths.
   Add native/Linux process coverage or an explicit unsupported refusal when that
   proof is unavailable. Never move a root/mountpoint, copy across
   filesystems, overwrite a destination or collect old forensic data.
-- [ ] Reconcile each uncertain move against its immutable evidence and both paths.
+- [x] Reconcile each uncertain move against its immutable evidence and both paths.
   Source absent alone is not success. Both/neither/conflicting paths refuse and
   retain the guard. Parent fsync precedes recording Moved. Finish with durable
   AwaitingStart/JoinReady; no factory, Raft worker or Application.Run executes here.
-- [ ] Implement reset preparation through the same machinery, without seed/replay.
+- [x] Implement reset preparation through the same machinery, without seed/replay.
   Keep target cluster binding and ownership checks. Cancel has the same pre-archive
   boundary for reset; successful preparation does not claim completed admission.
-- [ ] Add comprehensive lifecycle tests for duplicate Run/Cancel, wrong audit,
+- [x] Add comprehensive lifecycle tests for duplicate Run/Cancel, wrong audit,
   source mutation, shared hooks, late callback return, guard release, disk-full/
   rename/sync faults, separate and nested roots, missing mounts and no-clobber
   conflicts. Assert old bytes and backup names remain unchanged across retries.
 
 #### Verification
 
-- [ ] `make test`; root recovery/recoverydisk functional and race suites with all
+- [x] `make test`; root recovery/recoverydisk functional and race suites with all
   callback and archive boundaries. Tests use private roots and joined owners.
-- [ ] Show Cancel succeeds through Files, refuses after durable Archiving even before
+- [x] Show Cancel succeeds through Files, refuses after durable Archiving even before
   its first rename, and Run(Cancelling) never executes Backup/archive.
-- [ ] Confirm ordinary startup still refuses incomplete output and no implementation
+- [x] Confirm ordinary startup still refuses incomplete output and no implementation
   claims a running cluster from AwaitingStart/JoinReady. Record and fix failures.
 
 ### Task 8: Implement narrowly scoped recovery placement and repair planning
@@ -1242,6 +1243,15 @@ prevent completion; an accepted out-of-scope item belongs in the table above.
 Do not pre-mark the absence of implementation as a passed delta audit.
 
 ## NOT PLANNED CHANGES
+
+- Task 7 places semantic archive orchestration in private recoveryexec above
+  recoverydisk and WAL/system readers. Keeping it in recoverydisk would create a
+  dependency cycle: those readers already use disk ownership/bounded I/O. The
+  executor owns one borrowed per-call scope and no independent resource lifetime;
+  disk helpers own mount/no-follow/rename/sync mechanics. Public API is unchanged.
+  The local target records the private placement refinement with a before-archive-
+  executor backup. Mount identity now detects same-device bind mounts, not only
+  cross-device entries, before source moves.
 
 - Task 6 accepts checkpoint review M3 as a recovery availability correction:
   the strict WAL reader tracks batch term provenance, classifies an unsynced
