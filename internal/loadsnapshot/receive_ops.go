@@ -64,7 +64,7 @@ func (tr *snapshotReceive) pin(session snapshot.Session) (*snapshotAttachment, e
 	if tr.attachment != session.Attachment || tr.attached == nil || tr.attached.ctx.Err() != nil {
 		return nil, transferError(snapshot.ReasonRestartRequired)
 	}
-	if tr.active != 0 || tr.resuming {
+	if tr.cleanupRunning || tr.active != 0 || tr.resuming {
 		return nil, transferError(snapshot.ReasonGroupBusy)
 	}
 	tr.active = 1
@@ -93,44 +93,6 @@ func (tr *snapshotReceive) ackLocked(now time.Time) snapshot.Ack {
 		ProgressTimeout: tr.progressTimeout, ReceiverRunID: tr.owner.key.RunID}
 }
 
-// failReceive fences first, then joins mutation on a separate cleanup worker.
-// The caller may still own a pin; it never waits for its own pin to drain.
-func (c *Coordinator) failReceive(tr *snapshotReceive, cause error) {
-	tr.mu.Lock()
-	if tr.failed == nil {
-		tr.failed = cause
-		tr.state = snapshot.DeliveryFailed
-	}
-	tr.cancel()
-	if tr.attached != nil {
-		tr.attached.cancel()
-	}
-	idle := tr.idle
-	tr.mu.Unlock()
-	tr.cleanupOnce.Do(func() {
-		c.mu.Lock()
-		c.operations++
-		c.mu.Unlock()
-		go func() {
-			defer func() { c.mu.Lock(); c.operations--; c.signalLocked(); c.mu.Unlock() }()
-			<-idle
-			if err := tr.staging.Close(); err != nil {
-				return
-			} // Keep the reservation if backend release did not finish.
-			tr.ownerCancelStop()
-			c.mu.Lock()
-			if c.incoming[tr.key] == tr {
-				delete(c.incoming, tr.key)
-			}
-			if c.groups[tr.key.To.Replica.GroupID] == tr {
-				delete(c.groups, tr.key.To.Replica.GroupID)
-			}
-			c.mu.Unlock()
-			c.release(tr.reservation)
-			close(tr.cleaned)
-		}()
-	})
-}
 func awaitReceiveCleanup(ctx context.Context, tr *snapshotReceive) error {
 	select {
 	case <-tr.cleaned:

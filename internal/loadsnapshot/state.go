@@ -25,6 +25,11 @@ type snapshotOwner struct {
 	handle Owner
 }
 type snapshotReceive struct {
+	statusID        uint64
+	cleanupRunning  bool
+	cleanupErr      error
+	receiverOutcome snapshot.ReceiverOutcome
+
 	mu              sync.Mutex
 	ctx             context.Context
 	header          raftpb.Message
@@ -35,7 +40,6 @@ type snapshotReceive struct {
 	resuming        bool
 	failed          error
 	cleaned         chan struct{}
-	cleanupOnce     sync.Once
 
 	key                         snapshot.Key
 	manifest                    snapshot.Manifest
@@ -64,11 +68,17 @@ type snapshotAttachment struct {
 	cancel context.CancelFunc
 }
 type snapshotCompletion struct {
-	mu      sync.Mutex
-	done    chan struct{}
-	once    sync.Once
-	outcome raftengine.SnapshotInstallOutcome
-	err     error
+	reply         chan struct{}
+	finalizerDone chan struct{}
+	nativeDone    chan struct{}
+	replyOnce     sync.Once
+	nativeOnce    sync.Once
+	ingressCalled bool // transfer mutex; frozen before finalizerDone closes
+	stepReturned  bool
+	stepErr       error
+	accepted      bool
+	outcome       raftengine.SnapshotInstallOutcome
+	err           error
 }
 type snapshotTerminal struct {
 	owner    snapshotOwner

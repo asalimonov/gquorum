@@ -22,6 +22,11 @@ const (
 // Coordinator owns Node-wide volatile transfer reservations and bounded
 // metadata. Payload work, callbacks and joins happen outside mu.
 type Coordinator struct {
+	workers      int
+	ownerWorkers map[OwnerKey]int
+	fencedOwners map[OwnerKey]struct{}
+	historyIDs   []uint64
+
 	options                      snapshot.Options
 	ports                        Ports
 	configErr                    error
@@ -55,7 +60,8 @@ func NewCoordinator(options snapshot.Options, ports Ports) *Coordinator {
 		incoming: make(map[snapshot.Key]*snapshotReceive), groups: make(map[string]*snapshotReceive),
 		groupReservations: make(map[string]*snapshotReservation), reservations: make(map[*snapshotReservation]struct{}),
 		terminal: make(map[snapshot.Key]*snapshotTerminal), digests: make(map[SourceSnapshotID][32]byte),
-		digestOrder: make(map[string][]SourceSnapshotID)}
+		digestOrder:  make(map[string][]SourceSnapshotID),
+		ownerWorkers: make(map[OwnerKey]int), fencedOwners: make(map[OwnerKey]struct{})}
 }
 
 // Start binds the coordinator to the Host lifetime once. It never restarts a
@@ -73,6 +79,8 @@ func (c *Coordinator) Start(parent context.Context) {
 	}
 	c.ctx, c.cancel = context.WithCancel(parent)
 	c.started = true
+	c.workers++
+	go func() { defer c.workerReturned(OwnerKey{}); c.expiryLoop() }()
 	c.signalLocked()
 }
 
@@ -92,20 +100,8 @@ func (c *Coordinator) Fence() {
 // for a later join. Cancellation is never proof that a worker has returned.
 func (c *Coordinator) Stop(ctx context.Context) error {
 	c.Fence()
-	for {
-		c.mu.Lock()
-		joined := c.incomingCount == 0 && c.outgoingCount == 0 && c.operations == 0
-		changed := c.changed
-		c.mu.Unlock()
-		if joined {
-			return nil
-		}
-		select {
-		case <-changed:
-		case <-ctx.Done():
-			return fault.New(fault.ShutdownTimeout, "snapshot ownership has not joined", ctx.Err())
-		}
-	}
+	c.cancelReceives(OwnerKey{})
+	return c.joinSnapshotOwnership(ctx, OwnerKey{})
 }
 
 func (c *Coordinator) signalLocked() {
@@ -148,6 +144,9 @@ func (c *Coordinator) reserve(
 		return nil, err
 	}
 	if ownerCtx.Err() != nil {
+		return nil, transferError(snapshot.ReasonStopped)
+	}
+	if _, fenced := c.fencedOwners[owner.key]; fenced {
 		return nil, transferError(snapshot.ReasonStopped)
 	}
 	group := owner.key.Peer.Replica.GroupID

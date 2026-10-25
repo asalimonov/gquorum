@@ -119,6 +119,12 @@ func (c *Coordinator) validateSnapshotPeer(ctx context.Context, key snapshot.Key
 	if err := ctx.Err(); err != nil {
 		return snapshotOwner{}, err
 	}
+	c.mu.Lock()
+	_, fenced := c.fencedOwners[exact]
+	c.mu.Unlock()
+	if fenced {
+		return snapshotOwner{}, transferError(snapshot.ReasonStopped)
+	}
 	return snapshotOwner{key: exact, handle: owner}, nil
 }
 func (c *Coordinator) revalidateSnapshotPeer(ctx context.Context, tr *snapshotReceive) error {

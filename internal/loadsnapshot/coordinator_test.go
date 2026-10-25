@@ -46,7 +46,9 @@ func budgetCoordinator(t *testing.T, o snapshot.Options) *Coordinator {
 	if c.configErr != nil {
 		t.Fatal(c.configErr)
 	}
-	c.Start(t.Context())
+	c.ctx, c.cancel = context.WithCancel(t.Context())
+	t.Cleanup(c.cancel)
+	c.started = true
 	return c
 }
 func wantTransferReason(t *testing.T, err error, reason string) {

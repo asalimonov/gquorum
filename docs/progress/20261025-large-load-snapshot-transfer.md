@@ -157,3 +157,25 @@ Notes
 - Finish, diagnostic List and background expiry remain for Task 8; no incomplete native handoff can return success. The memory backend now has production callers, so its temporary unused exemption was removed.
 - Cleanup currently handles pre-ingress work. Task 8 must extend it to wait for finalizer/native completion, retain close failures for retry, and guard preemption/Abort races against an entered handoff.
 - No generated payload files, root files, new listeners or persistent format changes.
+
+## Task 8 — finalization, observations and joined receiver teardown
+
+Date: 2026-10-25. Commit: this task commit; prior task 174d4f8.
+
+Implemented
+- One finalizer verifies the full digest, seals/materializes staging and prepares the complete envelope off-loop before exact-owner native handoff. Duplicate Finish/resume shares its completion.
+- Native callbacks only record/signal. A failed native callback racing a successful Step reply cannot publish a false transport refusal. Installed/skipped completion also proves prior acceptance when a waiter was canceled.
+- Cleanup joins active writes, finalizer return and any entered native owner before closing staging/releasing its reservation. Failed Close retains ownership for serialized Stop retries. Exact-owner stop, background expiry and group preemption preserve entered native ownership.
+- Added bounded active/history List observations and cursor paging, completed-Ack cache replay/TTL and post-stop observations. Accepted delivery remains separate from installed/skipped/failed receiver outcome.
+- User steering: request the named colleague's review after this task, then every six implementation commits; cadence is now in the plan.
+
+Verified
+- make test: all 2,258 tests across 62 reports/five modules pass (8.712s); report test-reports/unit/20261025T184048.279611Z-yjxgubnr/report.md.
+- go vet ./internal/loadsnapshot; make lint (pending changes); git diff --check: pass.
+- go test -race -tags=functional -count=1 -timeout=90s ./internal/loadsnapshot: pass (1.470s), including real single-participant engine persistence, blocked Restore, Restore/write failure, native skip and partial-data exclusion.
+- Protocol-double cases cover lost final Ack replay, canceled queued ingress, acceptance-versus-failed-callback race, duplicate native completion, off-loop decode cancellation, retained permits, Close/Stop retry, exact-owner stop, detached expiry, and callback/error-inspection separation.
+- Pure status tests verify bounded history, bounded filtered pagination and owned result values. Pure admission tests now construct live value state without launching the expiry worker; functional fixtures exercise Start/Stop.
+
+Notes
+- No new root files, persistent encodings, listeners or large payloads. Sender, network RPC and managed production activation remain in Tasks 9–15.
+- Review request will pin this completed checkpoint and include target/brainstorm/plan. The earlier plan-review session-limit response is not claimed as a completed review.

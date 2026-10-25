@@ -22,6 +22,8 @@ import (
 )
 
 type receiveOwner struct {
+	prepare      func(context.Context, raftpb.Message) (raftstate.Snapshot, error)
+	step         func(context.Context, raftengine.SnapshotIngress) error
 	key          OwnerKey
 	ctx          context.Context
 	cancel       context.CancelFunc
@@ -42,11 +44,17 @@ func (o *receiveOwner) PreflightSnapshot(ctx context.Context, m raftpb.Message) 
 	skip := m.Term < o.term.Load() || m.Snapshot.Metadata.Index <= o.commit.Load()
 	return raftengine.SnapshotPreflight{Term: o.term.Load(), Commit: o.commit.Load(), NotNeeded: skip, HeaderStepped: skip}, nil
 }
-func (*receiveOwner) PrepareOwnedSnapshot(context.Context, raftpb.Message) (raftstate.Snapshot, error) {
-	panic("task 7 cannot hand off")
+func (o *receiveOwner) PrepareOwnedSnapshot(ctx context.Context, m raftpb.Message) (raftstate.Snapshot, error) {
+	if o.prepare == nil {
+		panic("unexpected native preparation")
+	}
+	return o.prepare(ctx, m)
 }
-func (*receiveOwner) StepOwnedSnapshot(context.Context, raftengine.SnapshotIngress) error {
-	panic("task 7 cannot hand off")
+func (o *receiveOwner) StepOwnedSnapshot(ctx context.Context, in raftengine.SnapshotIngress) error {
+	if o.step == nil {
+		panic("unexpected native ingress")
+	}
+	return o.step(ctx, in)
 }
 
 type receiveFixture struct {
@@ -74,7 +82,7 @@ func newReceiveFixture(t *testing.T) *receiveFixture {
 		t.Fatal(err)
 	}
 	f.begin = snapshot.BeginRequest{Manifest: snapshot.Manifest{Key: snapshot.Key{From: f.source, To: o.key.Peer, DeliveryID: 1}, NativeHeader: encoded, TotalBytes: uint64(len(f.data)), SHA256: sha256.Sum256(f.data), ChunkBytes: 8}, RemainingTotal: time.Minute, ProgressTimeout: 45 * time.Second, MaxChunkBytes: 6}
-	f.c = NewCoordinator(snapshot.Options{MaxSnapshotBytes: 128, ChunkBytes: 4, TotalTimeout: time.Minute, ProgressTimeout: 30 * time.Second}, Ports{Authorize: func(ctx context.Context, key snapshot.Key) (Owner, error) {
+	f.c = NewCoordinator(snapshot.Options{MaxSnapshotBytes: 4 << 10, ChunkBytes: 4, TotalTimeout: time.Minute, ProgressTimeout: 30 * time.Second}, Ports{Authorize: func(ctx context.Context, key snapshot.Key) (Owner, error) {
 		f.auths.Add(1)
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -312,7 +320,7 @@ func TestSnapshotReceive_InvalidHeadersBeforeAuthorization(t *testing.T) {
 			case "deadline":
 				b.RemainingTotal = 0
 			case "oversized":
-				b.Manifest.TotalBytes = 129
+				b.Manifest.TotalBytes = f.c.options.MaxSnapshotBytes + 1
 			}
 			var err error
 			b.Manifest.NativeHeader, err = h.Marshal()

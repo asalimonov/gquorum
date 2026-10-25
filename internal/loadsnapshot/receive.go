@@ -6,7 +6,6 @@ import (
 	"math"
 	"time"
 
-	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load/snapshot"
 	"go.etcd.io/raft/v3/raftpb"
 )
@@ -58,7 +57,7 @@ func (c *Coordinator) beginFresh(ctx context.Context, owner snapshotOwner, b sna
 		if !preflight.HeaderStepped {
 			return snapshot.Ack{}, transferError(snapshot.ReasonIngressFailed)
 		}
-		return c.notNeeded(owner, b)
+		return c.notNeeded(owner, b, header)
 	}
 	if err := c.preemptObsolete(ctx, owner); err != nil {
 		return snapshot.Ack{}, err
@@ -90,11 +89,12 @@ func (c *Coordinator) newReceive(b snapshot.BeginRequest, header raftpb.Message,
 	c.mu.Lock()
 	lifetime := c.ctx
 	c.mu.Unlock()
-	ctx, cancel := context.WithCancel(lifetime)
 	now := time.Now()
+	deadline := now.Add(min(c.options.TotalTimeout, b.RemainingTotal))
+	ctx, cancel := context.WithDeadline(lifetime, deadline)
 	tr := &snapshotReceive{key: b.Manifest.Key, manifest: b.Manifest, owner: owner, header: header, staging: staging,
 		state: snapshot.DeliveryReceiving, digest: sha256.New(), started: now, progress: now,
-		deadline:        now.Add(min(c.options.TotalTimeout, b.RemainingTotal)),
+		deadline:        deadline,
 		progressTimeout: min(c.options.ProgressTimeout, b.ProgressTimeout),
 		reservation:     r, ctx: ctx, cancel: cancel, idle: make(chan struct{}), cleaned: make(chan struct{})}
 	close(tr.idle)
@@ -124,6 +124,12 @@ func (c *Coordinator) publishReceive(tr *snapshotReceive, b snapshot.BeginReques
 	tr.attachment = seq
 	ctx, cancel := context.WithCancel(tr.ctx)
 	tr.attached = &snapshotAttachment{ctx: ctx, cancel: cancel}
+	id, err := c.nextObservationLocked()
+	if err != nil {
+		return snapshot.Ack{}, err
+	}
+	tr.statusID = id
+	tr.receiverOutcome = snapshot.ReceiverUnknown
 	c.incoming[tr.key] = tr
 	c.groups[tr.key.To.Replica.GroupID] = tr
 	return tr.ackLocked(time.Now()), nil
@@ -135,7 +141,9 @@ func (c *Coordinator) discardUnpublished(tr *snapshotReceive) {
 		c.release(tr.reservation)
 	}
 }
-func (c *Coordinator) notNeeded(owner snapshotOwner, b snapshot.BeginRequest) (snapshot.Ack, error) {
+func (c *Coordinator) notNeeded(
+	owner snapshotOwner, b snapshot.BeginRequest, header raftpb.Message,
+) (snapshot.Ack, error) {
 	ownerCtx := owner.handle.Context()
 	now := time.Now()
 	ack := snapshot.Ack{Session: snapshot.Session{Key: b.Manifest.Key}, State: snapshot.DeliveryNotNeeded,
@@ -151,21 +159,13 @@ func (c *Coordinator) notNeeded(owner snapshotOwner, b snapshot.BeginRequest) (s
 	}
 	c.putTerminalLocked(b.Manifest.Key, snapshotTerminal{owner: owner, manifest: b.Manifest, ack: ack,
 		outcome: snapshot.ReceiverSkipped, expires: now.Add(ack.RemainingTotal).Add(ack.ProgressTimeout)})
+	c.appendHistoryLocked(snapshot.Status{Key: b.Manifest.Key, Direction: "incoming",
+		SnapshotIndex: header.Snapshot.Metadata.Index,
+		SnapshotTerm:  header.Snapshot.Metadata.Term, TotalBytes: b.Manifest.TotalBytes,
+		StartedAt: now, LastProgressAt: now,
+		Deadline: now.Add(ack.RemainingTotal), Delivery: snapshot.DeliveryNotNeeded,
+		ReceiverOutcome: snapshot.ReceiverSkipped})
 	return ack, nil
-}
-
-// FinishSnapshot remains unavailable until task 8 adds verified native handoff.
-func (*Coordinator) FinishSnapshot(ctx context.Context, _ snapshot.Session) (snapshot.Ack, error) {
-	return snapshot.Ack{}, unavailable(ctx)
-}
-
-// List is completed with bounded observations in task 8.
-func (*Coordinator) List(_ snapshot.Query) snapshot.Page { return snapshot.Page{} }
-func unavailable(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	return fault.ErrReplicaNotReady
 }
 
 func (c *Coordinator) negotiatedChunk(b snapshot.BeginRequest) (uint32, error) {

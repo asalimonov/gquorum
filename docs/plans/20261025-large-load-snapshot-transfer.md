@@ -5,7 +5,7 @@
 **Project source:** `../..` relative to this plan (repository root `.`)
 **Branch:** `feat/large-snapshots-transfer`
 **Source checkout inspected:** `646e9c1` (implementation baseline `14a54c2`, transport-document correction `2ba951a`, current lint/testing updates in `646e9c1`)
-**Target architecture SHA256:** `9fa89bb168dd599bff6691c128dccbc06eb53c0e40ec69de4ac3b0a60811c1d2`
+**Target architecture SHA256:** `2be53d3cfda9357b564e1b1e3be73cb16fba38ac7f026eef8ad6f49e37c1962f` (current target, including Task 7 transport-cap refinement; original reviewed digest retained in review history)
 **Target architecture:** [20261025-large-load-snapshot-transfer-target.md](../brainstorms/20261025-large-load-snapshot-transfer-target.md)
 **Full brainstorm log:** [20261025-large-load-snapshot-transfer.md](../brainstorms/20261025-large-load-snapshot-transfer.md)
 **Review history:** [feature review thread](../review/feat_large-snapshots-transfer.md)
@@ -28,6 +28,12 @@ Preserve the user's constraints:
 Current source differs from historical wording in two operational details. `make lint` now covers pending Go files only; repository-wide final lint is **`make lint-full`**. Current AGENTS reserves full `make test-race`, full lint, Docker and broad simulation/performance runs for the final checkpoint. The current uncommitted `docs/architecture/design-constraints.md` reinforces memory-only receiving and caller-owned service discovery; preserve it and other unrelated work.
 
 `project.txt` and a nested documentation Git repository are absent; source is this worktree and architecture lives in `docs/architecture`. `docs/plans`/`docs/brainstorms` are ignored by the project Git repository. The planning deliverable may be explicitly force-added alone on the existing branch; do not initialize another repository or stage unrelated files. The skill-requested documentation commit uses the feature name and `(go-brainstorm)` suffix.
+
+## User-directed implementation reviews
+
+After Task 8 is verified and committed, request an analysis-only implementation review from Paseo agent `43cff8c6-3dab-4f3f-a0eb-d4393c777725` using paseo-committee. Include this plan, the target architecture and full brainstorm paths. Focus on reliability/ownership, compatibility with the pinned Go runtime and libraries, and performance. The user selected this existing colleague; do not launch additional reviewers.
+
+Repeat the review after every six further implementation commits, including review-fix commits. Record the pinned reviewed commit and the next checkpoint in the progress/review log. Review a fixed commit range while later work proceeds; distinguish intentionally deferred Tasks 9–20 from defects in completed work. Verify and fix actionable findings before production activation. Do not poll or interrupt the reviewer; await Paseo's finish notification.
 
 ## Dependency strategy and buildable checkpoints
 
@@ -217,17 +223,17 @@ The target's historical final `make lint` command means full validation; on the 
 **Files:** `internal/loadsnapshot/{receive,lifecycle,status,resume}.go`, service delegation and tests.
 **References:** target §4.3, §6.2, [§7.2–7.3 ownership](../brainstorms/20261025-large-load-snapshot-transfer-target.md#72-incoming-owned-handoff), §8.4–8.5 and §12 Finish/completion/expiry/terminal-cache algorithms.
 
-- [ ] Implement FinishSnapshot, completeReceivedSnapshot, cleanupCompletedSnapshot, cleanupReceive, expire, StopOwner, retainTerminal and List/observe. Populate Status/Query/Page from Appendix A without unbounded logs or copied payloads.
-- [ ] Claim one finalizer, seal/check total digest, materialize, call PrepareOwnedSnapshot off-loop, revalidate identity and hand encoded+decoded state to StepOwnedSnapshot. Cache/await the same completion on duplicate Finish/resume.
-- [ ] Separate ingress acceptance from receiver installed/skipped/failed and from a canceled caller wait. An enqueued handoff survives waiter cancellation; only actual owner outcome can release its permit.
-- [ ] Make engine callbacks record/signal only; cleanup workers join independently and never join themselves or a Finish waiter that waits for their reply.
-- [ ] Evict oldest completed accepted/not_needed Ack metadata at bounded capacity/TTL. Failure diagnostics are separate. Keep handing-off payloads non-evictable until owner completion.
-- [ ] Join all operations on Stop/Abort/expiry; close only owned staging references. Preserve retryable stop/close ownership, last bounded observations and exact old-owner cleanup after replacement.
+- [x] Implement FinishSnapshot, completeReceivedSnapshot, cleanupCompletedSnapshot, cleanupReceive, expire, StopOwner, retainTerminal and List/observe. Populate Status/Query/Page from Appendix A without unbounded logs or copied payloads.
+- [x] Claim one finalizer, seal/check total digest, materialize, call PrepareOwnedSnapshot off-loop, revalidate identity and hand encoded+decoded state to StepOwnedSnapshot. Cache/await the same completion on duplicate Finish/resume.
+- [x] Separate ingress acceptance from receiver installed/skipped/failed and from a canceled caller wait. An enqueued handoff survives waiter cancellation; only actual owner outcome can release its permit.
+- [x] Make engine callbacks record/signal only; cleanup workers join independently and never join themselves or a Finish waiter that waits for their reply.
+- [x] Evict oldest completed accepted/not_needed Ack metadata at bounded capacity/TTL. Failure diagnostics are separate. Keep handing-off payloads non-evictable until owner completion.
+- [x] Join all operations on Stop/Abort/expiry; close only owned staging references. Preserve retryable stop/close ownership, last bounded observations and exact old-owner cleanup after replacement.
 
 #### Verification
 
-- [ ] `make test`; owning-package vet; targeted functional/race cases for lost final Ack, canceled queued ingress, disk/Restore failure after accepted Step, retained permit, failed Close and Stop retry.
-- [ ] Combine the real one-participant engine from Task 4 with protocol doubles to prove persistence/restore/skip outcomes; no partial snapshot enters recovery state.
+- [x] `make test`; owning-package vet; targeted functional/race cases for lost final Ack, canceled queued ingress, disk/Restore failure after accepted Step, retained permit, failed Close and Stop retry.
+- [x] Combine the real one-participant engine from Task 4 with protocol doubles to prove persistence/restore/skip outcomes; no partial snapshot enters recovery state.
 
 ### Task 9: Implement sender pins, cached digests and verified progress reports
 

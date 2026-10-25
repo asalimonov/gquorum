@@ -7,6 +7,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load/snapshot"
 )
 
@@ -36,7 +37,8 @@ func (c *Coordinator) WriteSnapshot(ctx context.Context, chunk snapshot.Chunk) (
 		return snapshot.Ack{}, err
 	}
 	ack, err := c.writeChunk(work, tr, chunk)
-	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) &&
+		!errors.Is(err, fault.ErrOverloaded) {
 		c.failReceive(tr, err)
 	}
 	return ack, err

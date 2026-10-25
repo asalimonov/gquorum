@@ -39,12 +39,16 @@ func (c *Coordinator) appendHistoryLocked(status snapshot.Status) {
 		return
 	}
 	c.historySequence++
+	id := c.historySequence
 	status.ErrorReason = status.ErrorReason[:min(len(status.ErrorReason), snapshotTextLimit)]
 	if len(c.history) == snapshotHistoryLimit {
 		copy(c.history, c.history[1:])
+		copy(c.historyIDs, c.historyIDs[1:])
+		c.historyIDs[len(c.historyIDs)-1] = id
 		c.history[len(c.history)-1] = status
 	} else {
 		c.history = append(c.history, status)
+		c.historyIDs = append(c.historyIDs, id)
 	}
 }
 
@@ -66,4 +70,12 @@ func (c *Coordinator) clearDigestsLocked(runID string) {
 		delete(c.digests, id)
 	}
 	delete(c.digestOrder, runID)
+}
+
+func (c *Coordinator) nextObservationLocked() (uint64, error) {
+	if c.historySequence == math.MaxUint64 {
+		return 0, transferError(snapshot.ReasonTransferConflict)
+	}
+	c.historySequence++
+	return c.historySequence, nil
 }

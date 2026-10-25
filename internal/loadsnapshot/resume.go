@@ -50,6 +50,21 @@ func (c *Coordinator) resumeSnapshot(
 	if b.MaxChunkBytes != 0 && tr.chunkBytes > b.MaxChunkBytes {
 		return snapshot.Ack{}, transferError(snapshot.ReasonFrameLimit)
 	}
+	tr.mu.Lock()
+	finalizing := tr.completion != nil
+	tr.mu.Unlock()
+	if finalizing {
+		_, err := c.replaceAttachment(ctx, tr)
+		if err != nil {
+			tr.mu.Lock()
+			accepted := tr.completion.accepted
+			tr.mu.Unlock()
+			if !accepted {
+				return snapshot.Ack{}, err
+			}
+		}
+		return c.awaitSnapshotAcceptance(ctx, tr)
+	}
 	if err := tr.obsolete(); err != nil {
 		c.failReceive(tr, err)
 		return snapshot.Ack{}, err
@@ -132,12 +147,6 @@ func (c *Coordinator) preemptObsolete(ctx context.Context, owner snapshotOwner) 
 	if old == nil {
 		return nil
 	}
-	old.mu.Lock()
-	prehandoff := old.state == snapshot.DeliveryReceiving || old.state == snapshot.DeliveryVerifying
-	old.mu.Unlock()
-	if !prehandoff {
-		return transferError(snapshot.ReasonGroupBusy)
-	}
 	if old.owner.key == owner.key {
 		if err := old.obsolete(); err == nil {
 			return transferError(snapshot.ReasonGroupBusy)
@@ -145,7 +154,15 @@ func (c *Coordinator) preemptObsolete(ctx context.Context, owner snapshotOwner) 
 	} else if old.owner.handle.Context().Err() == nil {
 		return transferError(snapshot.ReasonGroupBusy)
 	}
-	c.failReceive(old, transferError(snapshot.ReasonObsolete))
+	old.mu.Lock()
+	prehandoff := old.state == snapshot.DeliveryReceiving || old.state == snapshot.DeliveryVerifying
+	if !prehandoff || old.completion != nil && old.completion.ingressCalled {
+		old.mu.Unlock()
+		return transferError(snapshot.ReasonGroupBusy)
+	}
+	old.fenceLocked(transferError(snapshot.ReasonObsolete))
+	old.mu.Unlock()
+	c.cleanupCompletedSnapshot(old)
 	return awaitReceiveCleanup(ctx, old)
 }
 
@@ -200,10 +217,8 @@ func (c *Coordinator) endAttachment(ctx context.Context, session snapshot.Sessio
 	}
 	tr.attached.cancel()
 	idle := tr.idle
-	if mode == abortTransfer && tr.failed == nil {
-		tr.failed = transferError(snapshot.ReasonStopped)
-		tr.state = snapshot.DeliveryFailed
-		tr.cancel()
+	if mode == abortTransfer {
+		tr.fenceLocked(transferError(snapshot.ReasonStopped))
 	}
 	tr.mu.Unlock()
 	if mode == abortTransfer {
