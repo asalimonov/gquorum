@@ -5,7 +5,7 @@
 **Project source:** `../..` relative to this plan (repository root `.`)
 **Branch:** `feat/large-snapshots-transfer`
 **Source checkout inspected:** `646e9c1` (implementation baseline `14a54c2`, transport-document correction `2ba951a`, current lint/testing updates in `646e9c1`)
-**Target architecture SHA256:** `7847b314fc5eb373445a86671c01ebb3a0f33080a1cb346cba484469bc78b202` (current target, including Task 7 transport-cap and Task 9 exact-failure-port refinements; original reviewed digest retained in review history)
+**Target architecture SHA256:** `ec0bd9a83e310757ae3599a8fdc2e395d8284a04e666088a87a70e11e1709669` (current target including Task 7/9 refinements and Task 10 completed-session Ack clarification)
 **Target architecture:** [20261025-large-load-snapshot-transfer-target.md](../brainstorms/20261025-large-load-snapshot-transfer-target.md)
 **Full brainstorm log:** [20261025-large-load-snapshot-transfer.md](../brainstorms/20261025-large-load-snapshot-transfer.md)
 **Review history:** [feature review thread](../review/feat_large-snapshots-transfer.md)
@@ -272,20 +272,20 @@ Review baseline: `251a594`; findings in review Thread 3. The next review is due 
 **Files:** create `transport/loadgrpc/snapshot_server.go`; update adapter fields/Register/Close; owning functional tests using generated client protocol doubles.
 **References:** target [§7.6 server cancellation](../brainstorms/20261025-large-load-snapshot-transfer-target.md#76-server-attachment-cancellation-and-half-open-streams), §5, §9.4, §12 server-pump algorithm and §13 release gates.
 
-- [ ] Implement TransferSnapshot and receiveSnapshotOpen using the borrowed Service. Register on the existing load service/listener; no additional listener/address configuration. Before Task 15, obtain LoadSnapshots through a private optional provider type assertion so existing ordinary-only Ingress doubles remain buildable; absent support makes only the new RPC refuse. Do not yet add the method to the mandatory Ingress interface or hard-fail Bind. Migrate the doubles in Task 13 and remove this bridge at activation.
-- [ ] Add separate pre-Open quota max(8,2*MaxIncoming) and at-most-three-second timeout; authenticate before consuming authenticated 2*MaxIncoming handler slots or transfer byte/count permits. Neither quota uses ordinary MaxConcurrentCalls.
-- [ ] Run one adapter-owned Recv pump and one Send pump per admitted handler, with bounded queues. Observe SessionDone, stream/adapter contexts and phase deadlines. Defer exact detach after any active Node mutation returns.
-- [ ] On cancellation return the handler so pinned gRPC can terminate actual stream I/O; do not self-join a blocked Recv before return. Retain pump wait-group ownership and quota until both pumps return. Await final Ack write under cancellation/deadline bounds on successful completion.
-- [ ] Revalidate authenticated session identity/attachment before dispatch; reject data before Open, repeated Open, stale generations and unsupported protocol versions.
-- [ ] **Required feasibility gate:** functional `-race` tests with real stats.Handler for empty/half-open Recv, blocked Send, replacement attachment, Abort, deadline, Node stop and adapter Close. Assert exactly one RPC completion, no late callback/resource release, no leaked pump or quota.
-- [ ] If this pinned-version-sensitive mechanism fails, record a blocking NOT IMPLEMENTED GAP and revise the target before proceeding to activation. Do not waive or suppress the race, invent an unreviewed teardown protocol, or leave a success stub.
+- [x] Implement TransferSnapshot and receiveSnapshotOpen using the borrowed Service. Register on the existing load service/listener; no additional listener/address configuration. Before Task 15, obtain LoadSnapshots through a private optional provider type assertion so existing ordinary-only Ingress doubles remain buildable; absent support makes only the new RPC refuse. Do not yet add the method to the mandatory Ingress interface or hard-fail Bind. Migrate the doubles in Task 13 and remove this bridge at activation.
+- [x] Add separate pre-Open quota max(8,2*MaxIncoming) and at-most-three-second timeout; authenticate before consuming authenticated 2*MaxIncoming handler slots or transfer byte/count permits. Neither quota uses ordinary MaxConcurrentCalls.
+- [x] Run one adapter-owned Recv pump and one Send pump per admitted handler, with bounded queues. Observe SessionDone, stream/adapter contexts and phase deadlines. Defer exact detach after any active Node mutation returns.
+- [x] On cancellation return the handler so pinned gRPC can terminate actual stream I/O; do not self-join a blocked Recv before return. Retain pump wait-group ownership and quota until both pumps return. Await final Ack write under cancellation/deadline bounds on successful completion.
+- [x] Revalidate authenticated session identity/attachment before dispatch; reject data before Open, repeated Open, stale generations and unsupported protocol versions.
+- [x] **Required feasibility gate:** functional `-race` tests with real stats.Handler for empty/half-open Recv, blocked Send, replacement attachment, Abort, deadline, Node stop and adapter Close. Assert exactly one RPC completion, no late callback/resource release, no leaked pump or quota.
+- [x] If this pinned-version-sensitive mechanism fails, record a blocking NOT IMPLEMENTED GAP and revise the target before proceeding to activation. Do not waive or suppress the race, invent an unreviewed teardown protocol, or leave a success stub.
 
-- [ ] Populate BeginRequest.MaxChunkBytes from the adapter's checked frame capacity before Service.Begin. Preserve Manifest.ChunkBytes unchanged; reject a resumed negotiated chunk that no longer fits. This transport-local field was added in Task 7 to express the target's existing separate bounds without rewriting the immutable manifest.
+- [x] Populate BeginRequest.MaxChunkBytes from the adapter's checked frame capacity before Service.Begin. Preserve Manifest.ChunkBytes unchanged; reject a resumed negotiated chunk that no longer fits. This transport-local field was added in Task 7 to express the target's existing separate bounds without rewriting the immutable manifest.
 
 #### Verification
 
-- [ ] `make test`; `go vet ./transport/loadgrpc`; `go test -tags=functional -race -count=1 ./transport/loadgrpc -run '^TestSnapshotRPC_'`.
-- [ ] Stress pre-Open quota independently from an already-authenticated progressing transfer and ordinary RPCs. This gate is a focused functional race run, not an early full `make test-race`.
+- [x] `make test`; `go vet ./transport/loadgrpc`; `go test -tags=functional -race -count=1 ./transport/loadgrpc -run '^TestSnapshotRPC_'`.
+- [x] Stress pre-Open quota independently from an already-authenticated progressing transfer and ordinary RPCs. This gate is a focused functional race run, not an early full `make test-race`.
 
 ### Task 11: Implement bulk client connections, pipelining and resume
 
@@ -658,6 +658,13 @@ Task 9 exact pre-registration reporting refinement:
  }
 - errors.Is(err, fault.ErrOverloaded)
 + errors.As(err, &classified) // select classified.Code, preserving the outer policy
+```
+
+Task 10 completed-session Ack clarification:
+- `transport/loadgrpc/snapshot_server.go`, target §7.6: accepted Finish/replayed accepted Begin awaits its exact final Ack under RPC/adapter/total bounds even if native cleanup has already closed SessionDone. No later mutation runs. Active nonterminal dispatch/replies retain attachment fencing. A functional regression closes the signal inside Finish and requires the final accepted Ack.
+
+```diff
++ if result.terminal { done = nil } // final reply only; RPC/total deadline remains
 ```
 
 ## NOT IMPLEMENTED GAPS

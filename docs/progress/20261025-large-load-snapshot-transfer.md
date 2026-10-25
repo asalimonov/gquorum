@@ -241,3 +241,24 @@ Verified
 Notes
 - Report notification intentionally precedes pin release; the prepared-cancellation test joins exact-owner ownership before asserting release, avoiding a false test race.
 - Managed ports, transport network integration and repair policy consumption remain later tasks. No listener, root source, persisted format or large fixture was added. Unrelated .gitignore edit is preserved and excluded.
+
+## Task 10 — bounded gRPC receiving and pinned teardown gate
+
+Date: 2026-10-26. Commit: this task commit; prior 526efec. Four implementation commits after review anchor 251a594; next review after two further commits.
+
+Implemented
+- Snapshot RPC on the existing load registration. A private optional service provider preserves ordinary-only doubles until Task 15. Bind copies resolved Node policy; no additional port or listener.
+- Separate pre-Open quota max(8, 2*MaxIncoming), min(3s, local policy, RPC deadline) handshake lifetime, authenticated 2*MaxIncoming quota and bounded single Recv/Send pumps. Ordinary call admission is independent.
+- Handler return causes actual gRPC stream cancellation; an adapter-owned finalizer joins both pumps and the returned handler before releasing its quota/wait-group owner. Blocking authentication/Node calls retain ownership through actual return and Close retries.
+- Exact-generation dispatch, separate checked frame cap, immutable requested chunk size and verified-prefix/total phase clocks. Accepted final Ack remains writable when native cleanup closes its completed SessionDone; target clarification recorded.
+
+Verified
+- make test: 2,262 tests across 62 reports/five modules pass (8.116s); report test-reports/unit/20261025T195628.191729Z-k_nf21z2/report.md.
+- go vet ./transport/loadgrpc; pending make lint; git diff --check: pass.
+- Required real gRPC 1.79.3 functional race gate with stats.Handler, five repetitions: pass (1.659s). Covers empty and admitted half-open Recv, flow-control-blocked Send, attachment replacement, Abort, progress deadline, owner/session stop, adapter Close and exact single RPC completion with joined pumps/quotas.
+- Cancellation-ignoring authentication/Write callbacks retain their permits until actual return; Close timeout/retry joins. Saturated pre-Open slots coexist with a progressing authenticated transfer and successful ordinary ReadReplica RPC. Invalid versions, pre-Open data, repeated Open and stale attachment refuse without mutation.
+- Full owning-package functional suite passes (0.369s). Transport-local 1024-byte frame test preserves the 4096-byte manifest request and supplies a smaller explicit cap.
+
+Notes
+- The pinned pump teardown feasibility gate passes; no architectural replacement or suppressed race was needed. Re-run it on gRPC upgrades.
+- Source networking and managed activation remain later tasks. No new root source, port, persistent encoding or large fixture. The unrelated .gitignore change remains excluded.
