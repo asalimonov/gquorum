@@ -55,6 +55,9 @@ type Phase = recoverymodel.Phase
 // GroupProgress reports restoration progress for one exact load replica.
 type GroupProgress = recoverymodel.GroupProgress
 
+// StatusEvent records a bounded durable local progress observation.
+type StatusEvent = recoverymodel.StatusEvent
+
 // Status reports durable historical recovery progress, not current quorum.
 type Status = recoverymodel.Status
 

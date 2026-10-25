@@ -7,7 +7,8 @@ func StatusFromManifest(r LocalManifest) Status {
 		identity = *r.JoinedIdentity
 	}
 	identity.InstanceID = ""
-	status := Status{BackupName: r.BackupName, AcceptedAt: r.AcceptedAt, RecoveryID: r.Request.RecoveryID,
+	status := Status{History: CloneHistory(r.History), BackupName: r.BackupName,
+		AcceptedAt: r.AcceptedAt, RecoveryID: r.Request.RecoveryID,
 		PlanDigest: r.PlanDigest, Mode: r.Request.Mode, Phase: r.Phase, Identity: identity,
 		Resources: r.Resources, Issue: clonePointer(r.Failure),
 		Complete: r.Phase == Complete || r.Phase == JoinReady || r.Phase == Joined}

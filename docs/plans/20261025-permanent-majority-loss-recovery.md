@@ -863,38 +863,53 @@ positions explicit in the real catalog tests; do not substitute fabricated tuple
 ### Task 13: Add durable recovery jobs and independent remote test controls
 
 **References:** Target §§2–4, §9, §11, §13, §14.2; no Meridian integration.
-**Files:** CREATED testapp recovery worker/job/files-hook/HTTP files; UPDATED the
+**Files:** CREATED bounded library reachability/history helpers and testapp recovery worker/job/files-hook/HTTP files; UPDATED recovery models/journals and the
 Task 3 fixture generation/observation support and harness clients.
 **Dependencies:** Tasks 1–12. **Outcome:** complete public-API recovery scenarios
 can run remotely while the embedded Node is stopped.
 
-- [ ] Extend Task 3's already-tested Node-owned fixture and independent management
+- [x] Implement the user-approved Thread6 old-member precheck: pure copied network
+  options; bounded authenticated client-only IdentityPing of other approved source
+  _meta members during Inspect and again Approve. A live old-cluster answer blocks
+  without override; missing configuration and authentication/identity diagnostics
+  are explicit information. Keep OldDeploymentFenced, unchanged digest semantics,
+  fixed roots and the existing RPC/protobuf. Authenticated structured refusals,
+  including a stopped-engine Unavailable reply, still block; transport failures
+  alone mean unreachable. Test live, stopped-engine, closed, timed-out and foreign
+  responders in owning single-participant/protocol fixtures.
+- [x] Add approved recovery.StatusEvent and Status.History with at most 256 events,
+  first approval plus newest events, oldest first, sanitized messages <=512 bytes.
+  Append in existing atomic journal revisions with no duplicate semantic retries
+  or extra fsyncs, preserve digest/acceptance, reserve format headroom and deep-copy
+  returned history. Status/List both include it. Add codec/bounds/crash-resume tests.
+
+- [x] Extend Task 3's already-tested Node-owned fixture and independent management
   lifetime; do not recreate the borrowed-store wrapper for recovery fault injection.
   Keep existing controls/capability distinctions and generation-safe routing.
-- [ ] Implement an application-owned durable job using public recovery values.
+- [x] Implement an application-owned durable job using public recovery values.
   Persist maintenance before stopping A, effective Request/digest before confirmation,
   acceptance intent before Approve, and cancellation intent before joining Run.
   Reconcile public Status after process restart without parsing private journals.
-- [ ] Register authenticated test-only prepare/confirm/retry/cancel/status/list routes
+- [x] Register authenticated test-only prepare/confirm/retry/cancel/status/list routes
   under `/internal/test/`. Model target §4 semantics without implementing Meridian
   endpoints. Paths and backup names remain server-configured; request contexts do
   not own long work. Add Recovery.Status/List and Inspect report positions to the
   owned-mode observations; none of these observations is proof of current quorum.
-- [ ] Before approval cancel only the fixture preparation job. After approval join
+- [x] Before approval cancel only the fixture preparation job. After approval join
   Run and call Cancel with stable audit; release maintenance only after Cancelled.
   Repeat lost HTTP replies using the same IDs/request/acceptance. Test every supported
   control through the owned-mode client, never an unsupported physical-stat helper.
-- [ ] Supply node-wide FilesBackup/FilesUndo for fixture-owned affiliation/projection
+- [x] Supply node-wide FilesBackup/FilesUndo for fixture-owned affiliation/projection
   state at fixed paths using the generated BackupDir. Exclude the active maintenance
   job from archival. Use real small application files/shared projection to exercise
   Backup/Undo, not Meridian SQL/workflow repair.
-- [ ] Start B using RecoveryStartOptions, recreated listeners and fresh InstanceID;
+- [x] Start B using RecoveryStartOptions, recreated listeners and fresh InstanceID;
   switch application transport/routing to B before service and reject A delivery
   reports. Reconcile affiliation/boot mode from the job before old pin checks.
-- [ ] Exercise readiness validation and counters/barriers proving Application.Run is
+- [x] Exercise readiness validation and counters/barriers proving Application.Run is
   held. Use normal GroupFactory and recovery input, not a test-specific recovery
   engine. Keep management available through failure, retry and cancellation.
-- [ ] Make REC-04's load-tail setup executable using existing public-transport test
+- [x] Make REC-04's load-tail setup executable using existing public-transport test
   controls: stabilize a load leader and committed snapshot/prefix; enable inbound
   DropAppend on both followers (drops MsgApp/MsgSnap, not heartbeat traffic); propose
   a unique command to the leader; observe dropped-append counters and unchanged
@@ -902,19 +917,26 @@ can run remotely while the embedded Node is stopped.
   while the drops remain active. Require Inspect to report LastLog > Commit before
   accepting the test setup. A proposal timeout/queue counter alone is not durable
   tail proof. Metadata-tail/CRC/corruption proofs stay in component tests.
-- [ ] Add pure input/job-state units and single-participant functional/race tests for
+- [x] Add pure input/job-state units and single-participant functional/race tests for
   persistent maintenance, lost responses, unknown IDs, cancelling Run, callback
   joins, HTTP availability and process generation/affiliation replacement.
 
 #### Verification
 
-- [ ] `make test`, `make lint`; testapp functional/race checks using public APIs.
+- [x] `make test`, `make lint`; testapp functional/race checks using public APIs.
   Compile normal/process-tag variants. No import of gquorum/internal, new library
   HTTP API or arbitrary remote filesystem argument is introduced.
-- [ ] All Node-owned observations work without a.store; unsupported controls refuse
+- [x] All Node-owned observations work without a.store; unsupported controls refuse
   explicitly and borrowed-mode tests retain their original physical assertions.
-- [ ] Verify tail preparation checks actual offline Inspect evidence and all
+- [x] Verify tail preparation checks actual offline Inspect evidence and all
   job/Node/process resources join. Build the final process image after edits settle.
+
+
+Task13 evidence: unit 2,129/58 PASS7.057s; lint all modules/tags PASS;
+full testapp functional/race PASS13.627s; focused library probe/history/tail
+functional/race PASS8.940s/1.312s. Settled image gquorum-recovery:local built
+2026-10-25T08:09Z (14aabadd847a). RequireRecoveryTail enforces offline L>C;
+actual three-node drop/leader preparation qualification follows in Task14.
 
 ### Task 14: Validate permanent loss and returning nodes in the three-node Docker pool
 
@@ -924,6 +946,10 @@ and public fixture clients; small existing pool/harness extensions only as neede
 **Dependencies:** Tasks 1–13. **Outcome:** real process/consensus acceptance tests
 for the requirements requested by Meridian, without running Meridian.
 
+- [ ] Add the approved old-member-alive process case: prepare a complete survivor
+  with another old participant still running, verify Inspect/Approve block, stop
+  that member, and confirm the same source/digest is then eligible. No override or
+  attestation bypass. Keep the ordinary three-node pool and authenticated controls.
 - [ ] Build the settled Node-owned recovery test image once with an explicit tag;
   use existing isolated pool resources and authenticated controls. Ordinary cases
   use three original nodes; return/re-admit the two old nodes rather than adding
@@ -1228,6 +1254,7 @@ public stubs just to represent deferred features.
 | Tags | Excluded behavior | Required treatment / owner |
 | --- | --- | --- |
 | postponed; too-complex | Multi-survivor merge, arbitrary backup import, cross-group recovery-point selection | Inspect reports missing coverage/unsupported source and refuses. No hidden source search or merger. |
+| postponed; Thread6 backlog | Freshest donor selection per group across several survivors | Later explicit donor acceptance using validated retained commits and compatible lineage, never max(last, applied). Reuse current seed/inspection/consumption; single complete survivor remains this release. |
 | postponed | Intentionally dropping/resetting an approved group | RequiredGroups only supplements inventory; missing data blocks. No allow-loss switch. |
 | postponed | Memory/custom/injected-store or log-only recovery | NewRecovery/Inspect typed unsupported_source; preserve evidence. Node-owned standard WAL only. Ordinary custom-store support elsewhere remains. |
 | postponed | Rollback after Archiving | Reserve schema fields/marker/phases; export no Rollback method. Unsupported rollback records remain guarded. Explicit pre-archive Cancel/Undo is implemented. |
@@ -2070,3 +2097,12 @@ reconcile affected tasks rather than implementing stale declarations.
   owning single-participant fixtures. Successful admission to another real
   participant remains in Task14's authorized three-node Docker scenarios, rather
   than introducing a forbidden multi-node functional fixture in Task12.
+
+### Approved Thread6 scope allocation (2026-10-25)
+
+The user's approved old-member reachability precheck and Status progress history
+are assigned to existing Task13, including owning tests and fixture route exposure.
+Task14 adds the old-member-alive process regression; Task15 documents/qualifies the
+same additions. Multi-survivor donor selection is postponed in the backlog. No
+seventeenth task and no one-step Execute wrapper are introduced. The target was
+backed up before these approved public Status and inspection refinements.

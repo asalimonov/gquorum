@@ -172,8 +172,18 @@ type GroupProgress struct {
 	Issue   *Issue   `json:"issue,omitempty"`
 }
 
+// StatusEvent records one durable local progress observation.
+type StatusEvent struct {
+	At      time.Time `json:"at"`
+	Phase   Phase     `json:"phase"`
+	Message string    `json:"message"`
+	GroupID string    `json:"group_id,omitempty"`
+	Issue   *Issue    `json:"issue,omitempty"`
+}
+
 // Status reports durable historical recovery progress, not current quorum.
 type Status struct {
+	History    []StatusEvent     `json:"history"`
 	BackupName string            `json:"backup_name"`
 	AcceptedAt time.Time         `json:"accepted_at"`
 	RecoveryID string            `json:"recovery_id"`

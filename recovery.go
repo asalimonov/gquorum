@@ -15,6 +15,7 @@ import (
 type Recovery struct {
 	source  recoverymodel.SourceOptions
 	options recovery.Options
+	probe   recoveryProbeOptions
 }
 
 // NewRecovery validates/copies recovery configuration without I/O or callbacks.
@@ -35,7 +36,7 @@ func NewRecovery(opts NodeOptions, options ...recovery.Options) (*Recovery, erro
 	if _, err := recoverymodel.ResolveResources(selected.Resources); err != nil {
 		return nil, recoveryRefusal("resource_bound", "invalid recovery resource settings", err)
 	}
-	return &Recovery{source: source, options: selected}, nil
+	return &Recovery{source: source, options: selected, probe: copyRecoveryProbe(opts.Meta.Network)}, nil
 }
 
 func recoverySourceOptions(opts NodeOptions) (recoverymodel.SourceOptions, error) {

@@ -36,6 +36,9 @@ func (r *Recovery) Approve(ctx context.Context, request recovery.Request,
 	var accepted recoverymodel.AcceptedPlan
 	if prior != nil {
 		accepted = recoverymodel.AcceptedFromManifest(*prior)
+		if err := r.probeAccepted(ctx, &accepted); err != nil {
+			return operation, inspectionRefusal(err, accepted.Issues)
+		}
 	} else {
 		accepted, err = r.inspectOwned(ctx, owner, request)
 		if err != nil {

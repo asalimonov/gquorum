@@ -43,6 +43,8 @@ type application struct {
 	logger                       *slog.Logger
 	node                         gquorum.Node
 	nodeOptions                  gquorum.NodeOptions
+	recoveryJobs                 *recoveryJobs
+	recoveryControls             recoveryControls
 	generationMu                 sync.RWMutex
 	nodeOpMu                     sync.Mutex
 	generation                   *nodeGeneration
@@ -147,7 +149,8 @@ func (a *application) markEstablishedFor(ctx context.Context, n gquorum.Node) {
 	}
 }
 func (a *application) persistEstablished() error {
-	raw, err := json.Marshal(struct{ ClusterID, NodeName string }{a.cfg.ClusterID, a.cfg.NodeName})
+	identity := a.currentNode().Identity()
+	raw, err := json.Marshal(struct{ ClusterID, NodeName string }{identity.ClusterID, identity.NodeName})
 	if err != nil {
 		return err
 	}
@@ -216,11 +219,23 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 			return nil, err
 		}
 	}
-	resume, err := cfg.recoverBootMode()
+	savedJob, err := readRecoveryJob(cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	var resume bool
+	if savedJob == nil || !savedJob.Maintenance {
+		if savedJob != nil && savedJob.Phase == "complete" && savedJob.Status != nil {
+			cfg.ClusterID = savedJob.Status.Identity.ClusterID
+			cfg.Bootstrap = false
+		}
+		resume, err = cfg.recoverBootMode()
+	}
 	if err != nil {
 		return nil, err
 	}
 	a := &application{cfg: cfg, logger: logger, machines: map[load.ReplicaRef]*kvMachine{}, clients: map[string]*loadClient{}, closing: make(chan struct{}), closed: make(chan struct{})}
+	a.recoveryJobs = &recoveryJobs{app: a, job: savedJob}
 	a.workCtx, a.stopWork = context.WithCancel(context.Background())
 	a.clusterHooks = newClusterHooks()
 	a.lifeCtx, a.stopLife = context.WithCancel(context.Background())
@@ -386,7 +401,13 @@ func (a *application) Start(parent context.Context) error {
 			}
 		})
 	}
-	if err := a.startNodeGeneration(); err != nil {
+	if a.recoveryMaintenance() {
+		a.recoveryJobs.mu.Lock()
+		if a.recoveryJobs.job.Phase != "prepared" {
+			a.recoveryJobs.launchLocked()
+		}
+		a.recoveryJobs.mu.Unlock()
+	} else if err := a.startNodeGeneration(); err != nil {
 		a.RequestClose()
 		return err
 	}
@@ -433,6 +454,9 @@ func (a *application) finishClose() {
 	}
 	a.workWG.Wait()
 	a.effectWG.Wait()
+	if a.recoveryJobs != nil {
+		a.recoveryJobs.workers.Wait()
+	}
 	if a.currentNode() != nil {
 		remember(a.stopNodeGeneration(context.Background()))
 	}

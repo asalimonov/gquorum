@@ -33,7 +33,7 @@ func (r *Recovery) inspectOwned(ctx context.Context, owner *recoverydisk.Owner,
 			Remedy:  model.RemedyInvestigate})
 		return accepted, err
 	}
-	return accepted, nil
+	return accepted, r.probeAccepted(ctx, &accepted)
 }
 
 func (r *Recovery) priorApproval(ctx context.Context, owner *recoverydisk.Owner,

@@ -965,3 +965,64 @@ Notes and next scope
 - Thread6 arrived during this task with user-approved old-member reachability and
   Status history additions, plus multi-survivor selection as backlog. Incorporate
   them after this commit into existing Tasks13–14, keeping sixteen total tasks.
+
+
+## Task 13 — Durable remote recovery jobs, reachability and history
+Date: 2026-10-25
+
+Implemented
+- Approved Thread6 reachability check uses four client-only workers, two seconds
+  per peer, copied credentials/client TLS and the existing IdentityPing RPC.
+  Inspect and both approval paths probe approved old membership. Authenticated
+  Unavailable/NotReady replies block old_member_reachable; explicit auth/binding
+  rejection is information. Probes never change accepted digests.
+- Same-revision local history retains approval and newest255 events, sanitizes
+  messages, reserves encoded growth before acceptance, tolerates absent legacy
+  history and deep-copies Status/List. No extra journal revision or fsync.
+- Node-owned testapp adds a caller-owned atomic recovery-job.json and authenticated
+  prepare/confirm/retry/cancel/status/list routes. Maintenance, effective request,
+  exact acceptance and cancellation audit precede dependent effects. Workers use
+  process lifetime, join interrupted calls, and reconcile public Status on restart.
+  Management remains available with A stopped or validation pending.
+- Application Files hook journals fixed affiliation/projection inventory and moves
+  only those paths inside generated backup directories. Retry/Undo are idempotent;
+  failed Undo retains maintenance. Job and event journal remain live.
+- RecoveryStartOptions recreates listeners and fresh identities before publication;
+  routing follows the installed generation. Completed job affiliation overrides
+  unchanged original container arguments at process boot. GroupFactory receives
+  ordinary recovery input; real Run counters and readiness/file gates verify order.
+- Public harness clients and RequireRecoveryTail require actual offline usable
+  LastLog>Commit rather than proposal timeout. Existing DropAppend controls cover
+  the live process setup in Task14. README documents the independent caller pattern.
+
+Verified
+- make test PASS2,129/58 reports,7.057s, all five modules:
+  test-reports/unit/20261025T080759.811008Z-shldfy7t/report.md.
+- make lint PASS all modules/tags/tools: /tmp/gquorum-task13-lint-final.log.
+- Full testapp functional/race PASS13.627s:
+  /tmp/gquorum-task13-testapp-full-race2.log.
+- Focused remote-job/race PASS9.141s after Undo-failure retry additions:
+  /tmp/gquorum-task13-jobs-race5.log. Covers complete recovery, withheld Run,
+  exact confirmation retry, retained B restart, actual app file backup/Undo,
+  failed Undo, rejected manual start, unknown IDs, preapproval cancellation,
+  process restart awaiting confirmation, restart after moving affiliation and
+  a later normal process boot with unchanged original cluster arguments.
+- Focused probe/history/tail functional/race PASS8.940s/1.312s:
+  /tmp/gquorum-task13-final-library-race.log. Authenticated stopped-engine and
+  wrong-credential/wrong-cluster responses tested with protocol doubles; no
+  forbidden in-process multi-node consensus fixtures were introduced.
+- make test-cluster-build CLUSTER_IMAGE=gquorum-recovery:local PASS;
+  image sha256:14aabadd847a2c11d47e12ab8c7dca5240065ff9faefc029c9cad7b8142a6dac,
+  created2026-10-25T08:09:25Z. No running scenario replaces this image.
+- git diff --check PASS; prior frozen fixtures unchanged. No Meridian work.
+
+Findings
+- The restart regression caught shared pointers from a worker's temporary Status
+  in the caller job; saved job graphs now own deep copies before publication.
+- Full fixture qualification exposed file/protocol doubles without Node handles;
+  dynamic affiliation falls back to configured identity only for those inert
+  fixtures. Real processes always use the installed generation.
+- Probe needs the ordinary transport's client TLS settings only. Server TLS
+  remains owned by ordinary Node networking; no probe listener is acquired.
+- Actual three-node loss, old-member-alive, retained tail and reset admission are
+  next in Task14, using the settled image. Overall goal remains active.

@@ -22,8 +22,11 @@ func (a *application) newReplica(ctx context.Context, spec load.ReplicaSpec) (lo
 	if err := ctx.Err(); err != nil {
 		return load.Application{}, err
 	}
-	if spec.Identity.NodeName != a.cfg.NodeName || spec.Identity.ClusterID != a.cfg.ClusterID || spec.Node != a.currentNode().Identity() {
+	if spec.Identity.NodeName != a.cfg.NodeName || spec.Identity.ClusterID != a.clusterID() || spec.Node != a.currentNode().Identity() {
 		return load.Application{}, fault.ErrIdentityMismatch
+	}
+	if spec.Recovery != nil {
+		a.recoveryControls.recoveredFactories.Add(1)
 	}
 	ref := load.ReplicaRef{GroupID: spec.Identity.GroupID, ReplicaID: spec.Identity.ReplicaID}
 	machine := newMachine()
@@ -48,6 +51,10 @@ func (a *application) newReplica(ctx context.Context, spec load.ReplicaSpec) (lo
 		}
 		delete(a.machines, ref)
 		a.forgetReadControl(walKey{ref.GroupID, ref.ReplicaID})
+		return nil
+	}, Run: func(ctx context.Context, _ *load.Group) error {
+		a.recoveryControls.runs.Add(1)
+		<-ctx.Done()
 		return nil
 	}}, nil
 }
@@ -138,6 +145,9 @@ func (a *application) groupStatus(ctx context.Context, id string) (topology.Grou
 }
 
 func (p *fixtureLifecycle) Readiness(ctx context.Context, input lifecycle.ReadinessInput) (lifecycle.ReadinessDecision, error) {
+	if p.app.recoveryReadinessHeld() {
+		return lifecycle.ReadinessDecision{State: lifecycle.Waiting, Reason: "fixture recovery validation"}, nil
+	}
 	decision, err := p.DefaultHooks.Readiness(ctx, input)
 	if err != nil {
 		return decision, err

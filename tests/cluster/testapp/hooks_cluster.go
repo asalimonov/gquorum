@@ -186,6 +186,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 	}))
 	a.registerRuntimeRoutes(mux, protect)
 	a.registerNodeGenerationRoutes(mux, protect)
+	a.registerRecoveryRoutes(mux, protect)
 	a.registerResourceRoutes(mux, protect)
 	a.registerWALRoutes(mux, protect)
 	a.registerReadRoutes(mux, protect)
@@ -262,7 +263,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 			return
 		}
 		probe, err := a.store.Probe(r.Context(), group)
-		want := storage.Identity{NodeName: a.cfg.NodeName, ClusterID: a.cfg.ClusterID, GroupID: group, ReplicaID: g.ReplicaID()}
+		want := storage.Identity{NodeName: a.cfg.NodeName, ClusterID: a.clusterID(), GroupID: group, ReplicaID: g.ReplicaID()}
 		if err == nil && (!probe.Exists || probe.Identity != want) {
 			err = fault.ErrIdentityMismatch
 		}

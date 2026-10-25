@@ -19,6 +19,7 @@ func ClonePlan(value Plan) Plan {
 
 // CloneStatus copies operation observations without sharing diagnostic pointers.
 func CloneStatus(value Status) Status {
+	value.History = CloneHistory(value.History)
 	value.Issue = clonePointer(value.Issue)
 	value.Groups = slices.Clone(value.Groups)
 	for i := range value.Groups {
@@ -29,6 +30,7 @@ func CloneStatus(value Status) Status {
 
 // CloneManifest copies the journal's immutable evidence and mutable progress.
 func CloneManifest(value LocalManifest) LocalManifest {
+	value.History = CloneHistory(value.History)
 	value.Request = CloneRequest(value.Request)
 	value.Approved = value.Approved.Clone()
 	value.Floors = slices.Clone(value.Floors)
@@ -90,4 +92,13 @@ func clonePointer[T any](value *T) *T {
 	}
 	owned := *value
 	return &owned
+}
+
+// CloneHistory owns each event and optional diagnostic.
+func CloneHistory(history []StatusEvent) []StatusEvent {
+	result := slices.Clone(history)
+	for i := range result {
+		result[i].Issue = clonePointer(result[i].Issue)
+	}
+	return result
 }

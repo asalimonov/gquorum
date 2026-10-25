@@ -121,7 +121,7 @@ func (j *Journal) SetPhase(ctx context.Context, phase recoverymodel.Phase, issue
 		next.Phase = phase
 		next.Failure = nil
 		if issue != nil {
-			value := *issue
+			value := recoverymodel.LimitFailure(*issue)
 			next.Failure = &value
 		}
 		if phase == recoverymodel.Complete && next.CompletedAt == nil {

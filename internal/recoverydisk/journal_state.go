@@ -31,6 +31,7 @@ func newManifest(p recoverymodel.AcceptedPlan, a recoverymodel.Acceptance, at ti
 				recoverymodel.SeedProgress{GroupID: group.ID, State: "pending"})
 		}
 	}
+	recoverymodel.StartHistory(&r)
 	return recoverymodel.CloneManifest(r)
 }
 
@@ -74,6 +75,7 @@ func (j *Journal) change(ctx context.Context, edit func(*recoverymodel.LocalMani
 		return err
 	}
 	next.Revision = old.Revision + 1
+	recoverymodel.AdvanceHistory(old, &next, j.owner.clock())
 	if err := recoverymodel.ValidateManifestUpdate(old, next); err != nil {
 		return err
 	}

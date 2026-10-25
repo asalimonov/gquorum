@@ -29,7 +29,10 @@ func (r *Recovery) Inspect(ctx context.Context, input recovery.Request) (plan re
 		return plan, inspectionRefusal(err, nil)
 	}
 	if prior != nil {
-		return recoverymodel.PlanFromManifest(*prior)
+		accepted := recoverymodel.AcceptedFromManifest(*prior)
+		probeErr := r.probeAccepted(ctx, &accepted)
+		report, reportErr := recoverymodel.PlanFromAccepted(accepted)
+		return report, errors.Join(inspectionRefusal(probeErr, accepted.Issues), reportErr)
 	}
 	accepted, inspectErr := r.inspectOwned(ctx, owner, request)
 	plan, err = recoverymodel.PlanFromAccepted(accepted)

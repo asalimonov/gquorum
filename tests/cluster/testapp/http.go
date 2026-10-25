@@ -23,6 +23,9 @@ import (
 // Fresh health and exact approved identity remain required. Consensus writes keep
 // their ordinary Raft quorum requirements regardless of this local decision.
 func (a *application) canServe(ctx context.Context) bool {
+	if a.recoveryMaintenance() {
+		return false
+	}
 	if a.currentNode().OwnSessionLive() {
 		return true
 	}
@@ -105,7 +108,7 @@ func httpError(w http.ResponseWriter, err error) {
 	switch code {
 	case fault.Invalid, fault.Unsupported:
 		status = http.StatusBadRequest
-	case fault.VersionConflict, fault.GroupRetired, fault.IdentityMismatch, fault.OperationAuthorization, fault.AuthorityFenced, fault.ReplanRequired:
+	case fault.Conflict, fault.VersionConflict, fault.GroupRetired, fault.IdentityMismatch, fault.OperationAuthorization, fault.AuthorityFenced, fault.ReplanRequired:
 		status = http.StatusConflict
 	case fault.UnsafeMembership:
 		status = http.StatusUnprocessableEntity
@@ -574,6 +577,10 @@ func (a *application) routes() http.Handler {
 	mux.HandleFunc("GET /api/events", a.eventsHTTP)
 	mux.HandleFunc("GET /api/events/watch", a.watchHTTP)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a.recoveryMaintenance() && (strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/health/ready") {
+			httpError(w, fault.New(fault.Unavailable, "recovery maintenance", nil))
+			return
+		}
 		begin := a.beginEffect
 		if managementRoute(r.URL.Path) {
 			begin = a.beginProcessEffect

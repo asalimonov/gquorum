@@ -56,7 +56,7 @@ func (a *application) startGeneration(g *nodeGeneration) error {
 	}
 	g.workers.Go(func() { a.markEstablishedFor(g.ctx, g.node) })
 	g.workers.Go(func() { a.observeServingContext(g.ctx) })
-	if a.cfg.Bootstrap {
+	if a.cfg.Bootstrap && !a.hasRecoveryJob() {
 		g.workers.Go(func() { a.bootstrapContext(g.ctx, g.node) })
 	}
 	return nil
@@ -100,6 +100,9 @@ func (a *application) restartNodeGeneration(ctx context.Context) error {
 	defer a.nodeOpMu.Unlock()
 	if !a.cfg.NodeOwnedWAL {
 		return fault.ErrUnsupported
+	}
+	if a.recoveryMaintenance() {
+		return fault.ErrUnavailable
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -151,7 +154,7 @@ func (a *application) restartNodeGeneration(ctx context.Context) error {
 // Management routes remain available without an active participant. They are
 // process effects, so stopping a Node never waits on its own HTTP stop request.
 func managementRoute(path string) bool {
-	return path == "/health/live" || strings.HasPrefix(path, "/internal/test/node/") || path == "/internal/test/runtime" || path == "/internal/test/resources"
+	return path == "/health/live" || strings.HasPrefix(path, "/internal/test/node/") || strings.HasPrefix(path, "/internal/test/recovery") || path == "/internal/test/runtime" || path == "/internal/test/resources"
 }
 func (a *application) registerNodeGenerationRoutes(mux *http.ServeMux, protect func(http.HandlerFunc) http.HandlerFunc) {
 	mux.HandleFunc("POST /internal/test/node/stop", protect(func(w http.ResponseWriter, r *http.Request) {
@@ -175,4 +178,13 @@ func (a *application) registerNodeGenerationRoutes(mux *http.ServeMux, protect f
 	mux.HandleFunc("GET /internal/test/node/status", protect(func(w http.ResponseWriter, _ *http.Request) {
 		jsonResponse(w, http.StatusOK, a.currentNode().Status())
 	}))
+}
+
+// Focused protocol/file fixtures may have no Node. Real participants always
+// derive routing affiliation from the currently installed generation.
+func (a *application) clusterID() string {
+	if node := a.currentNode(); node != nil {
+		return node.Identity().ClusterID
+	}
+	return a.cfg.ClusterID
 }

@@ -26,6 +26,9 @@ func ValidateApprovalShape(input model.AcceptedPlan) error {
 	}
 	manifest := newManifest(accepted, model.Acceptance{PlanDigest: digest, AcknowledgeDataLoss: true,
 		OldDeploymentFenced: true}, at, name)
+	if err := model.ValidateJournalBudget(manifest); err != nil {
+		return err
+	}
 	if _, err := model.EncodeManifest(manifest); err != nil {
 		return err
 	}

@@ -71,6 +71,9 @@ func publishApproved(ctx context.Context, owner *Owner, approval acceptedApprova
 		return nil, err
 	}
 	r := newManifest(accepted, acceptance, at, name)
+	if err := recoverymodel.ValidateJournalBudget(r); err != nil {
+		return nil, err
+	}
 	data, err := recoverymodel.EncodeManifest(r)
 	if err != nil {
 		return nil, err

@@ -75,7 +75,7 @@ func (a *application) auth(ctx context.Context) error {
 	return nil
 }
 func (a *application) validateHeader(ctx context.Context, h *loadpb.Header) error {
-	if h == nil || h.ClusterId != a.cfg.ClusterID || h.NodeName == "" || h.InstanceId == "" || h.MemberId == 0 {
+	if h == nil || h.ClusterId != a.clusterID() || h.NodeName == "" || h.InstanceId == "" || h.MemberId == 0 {
 		return fault.ErrIdentityMismatch
 	}
 	target, err := a.currentCluster().Target(ctx)

@@ -14,7 +14,7 @@ import (
 // ValidateManifest checks accepted authority and progress without opening stores.
 func ValidateManifest(r LocalManifest) error {
 	checks := []func(LocalManifest) error{validateManifestHeader, validateManifestSource,
-		validateManifestInventory, validateManifestProgress}
+		validateManifestInventory, validateManifestProgress, ValidateHistory}
 	for _, check := range checks {
 		if err := check(r); err != nil {
 			return fault.New(fault.Unreadable, "invalid recovery manifest", err)

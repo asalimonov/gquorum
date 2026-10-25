@@ -24,6 +24,7 @@ type Current struct {
 
 // LocalManifest is a private recovery persistence value.
 type LocalManifest struct {
+	History            []StatusEvent      `json:"history,omitempty"`
 	BackupName         string             `json:"backup_name"`
 	Schema             uint32             `json:"schema"`
 	Revision           uint64             `json:"revision"`
