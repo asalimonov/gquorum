@@ -8,7 +8,6 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load/snapshot"
-	"github.com/asalimonov/gquorum/topology"
 )
 
 const (
@@ -200,10 +199,7 @@ func (c *Coordinator) release(r *snapshotReservation) {
 }
 
 func validOwnerKey(key OwnerKey) bool {
-	p := key.Peer
-	return key.RunID != "" && p.Node.ClusterID != "" && p.Node.NodeName != "" &&
-		p.Node.InstanceID != "" && p.Node.MemberID != 0 &&
-		p.Replica.ReplicaID != 0 && topology.ValidateLoadID(p.Replica.GroupID) == nil
+	return boundedSnapshotText(key.RunID) && validSnapshotPeer(key.Peer)
 }
 func transferError(reason string) error { return &snapshot.TransferError{Reason: reason} }
 

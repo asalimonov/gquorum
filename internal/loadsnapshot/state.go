@@ -10,6 +10,7 @@ import (
 
 	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/load/snapshot"
+	"go.etcd.io/raft/v3/raftpb"
 )
 
 type snapshotDirection uint8
@@ -24,6 +25,18 @@ type snapshotOwner struct {
 	handle Owner
 }
 type snapshotReceive struct {
+	mu              sync.Mutex
+	ctx             context.Context
+	header          raftpb.Message
+	progressTimeout time.Duration
+	ownerCancelStop func() bool
+	idle            chan struct{}
+	active          int
+	resuming        bool
+	failed          error
+	cleaned         chan struct{}
+	cleanupOnce     sync.Once
+
 	key                         snapshot.Key
 	manifest                    snapshot.Manifest
 	owner                       snapshotOwner
@@ -47,7 +60,7 @@ type snapshotReservation struct {
 	released    bool // guarded by coordinator.mu
 }
 type snapshotAttachment struct {
-	done   chan struct{}
+	ctx    context.Context
 	cancel context.CancelFunc
 }
 type snapshotCompletion struct {

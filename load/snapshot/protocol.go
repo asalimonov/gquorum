@@ -37,6 +37,9 @@ type Session struct {
 // BeginRequest creates or resumes a transfer. Relative durations may only narrow
 // receiver policy; resume never renews stored deadlines or changes the manifest.
 type BeginRequest struct {
+	// MaxChunkBytes optionally narrows the initial payload to a transport frame
+	// bound. Zero adds no bound. Resume can refuse but never renegotiate it.
+	MaxChunkBytes   uint32
 	Manifest        Manifest
 	RemainingTotal  time.Duration
 	ProgressTimeout time.Duration

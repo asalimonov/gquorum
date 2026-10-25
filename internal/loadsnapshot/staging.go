@@ -1,4 +1,3 @@
-//nolint:unused // The admitted receiver connects this backend in plan task 7.
 package loadsnapshot
 
 import (

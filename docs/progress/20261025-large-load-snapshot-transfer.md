@@ -137,3 +137,23 @@ Verified
 Notes
 - Receive operations remain explicit unavailable methods in receive.go until tasks 7–8. New state/backend declarations have temporary unused exemptions until those tasks and task 9 connect them; remove them during that wiring/cutover.
 - No root, persistent-format, fixture-baseline or filesystem-staging changes. Coordinator Stop currently joins reservations and operation ownership; receiver cleanup/expiry is completed with receiver lifecycle in task 8 before Host attachment.
+
+## Task 7 — authenticated receive, chunks and same-run resume
+
+Date: 2026-10-25. Commit: this task commit; prior task c8b1e07.
+
+Implemented
+- Added bounded authorization-operation admission, independent service/native-header validation, exact owner checks before/after waits, native preflight before allocation and post-allocation authorization before publication.
+- Added contiguous chunk SHA verification, cumulative offsets, duplicate comparison without clock renewal, fixed negotiated mapping and cached exact-run obsolescence checks. Hashing/staging do not hold the coordinator or transfer metadata mutex.
+- Resume fences the old attachment and joins its active mutation before issuing a new generation. Abort/failed chunks keep reservations until joined cleanup. Obsolete pre-handoff work and canceled old owners can be joined before group-slot reuse.
+- Added optional transport-local BeginRequest.MaxChunkBytes, preserving the original requested Manifest.ChunkBytes. Documented the gap/refinement in the target and plan; gRPC supplies this cap in Task 10. Recorded the formerly locally ignored target so this refinement and its design basis are reviewable with the implementation.
+
+Verified
+- make test: all 2,257 tests across 62 reports/five modules pass (7.956s); report test-reports/unit/20261025T180528.339047Z-ejwvga9h/report.md.
+- Focused functional/race receive tests: pass (1.506s), including blocked backend writes, reconnect fencing/join, Abort timeout retention, bounded blocked authorization and Stop ownership, native-skip cache/miss, malformed headers, chunk corruption/duplicates, timeout/obsolete cleanup, source process and receiver-run replacement, post-allocation owner change, and negotiated-cap immutability.
+- go vet ./internal/loadsnapshot ./load/snapshot; make lint (pending changes); git diff --check: pass.
+
+Notes
+- Finish, diagnostic List and background expiry remain for Task 8; no incomplete native handoff can return success. The memory backend now has production callers, so its temporary unused exemption was removed.
+- Cleanup currently handles pre-ingress work. Task 8 must extend it to wait for finalizer/native completion, retain close failures for retry, and guard preemption/Abort races against an entered handoff.
+- No generated payload files, root files, new listeners or persistent format changes.

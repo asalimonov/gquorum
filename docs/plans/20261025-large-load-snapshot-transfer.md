@@ -199,17 +199,17 @@ The target's historical final `make lint` command means full validation; on the 
 **Files:** `internal/loadsnapshot/receive.go`, `resume.go`, state/service helpers and tests.
 **References:** target §4.1–4.2, [§5 protocol](../brainstorms/20261025-large-load-snapshot-transfer-target.md#5-wire-protocol-and-resume-semantics), §7.5, §8.2–8.3 and §12 Begin/resume/Write/cached-bounds algorithms.
 
-- [ ] Implement BeginSnapshot, WriteSnapshot, DetachSnapshot, AbortSnapshot, SessionDone, validateSnapshotPeer, findTransfer, resumeSnapshot and replaceAttachment with Appendix A/C exact types.
-- [ ] Validate/authenticate through ports before substantial reservation; verify exact source/destination/run after waits and before publication. Require positive/consistent terms, snapshot index, bounded metadata and declared length in service calls too.
-- [ ] Preflight before allocation; return owner-confirmed not_needed without claiming payload delivery. Use exact-run cached monotonic bounds on chunk/resume; preempt only proven obsolete **pre-handoff** work, cancel/join before slot reuse.
-- [ ] Bind immutable manifest fields and original requested ChunkBytes. Store negotiated chunk size separately and echo it; resume cannot renegotiate offsets/ordinals or reset deadlines.
-- [ ] Implement contiguous append, chunk/whole digest state, exact duplicate comparison and cumulative acknowledgements. Reject holes, conflicting overlaps, corrupt chunks, short/oversized chunks and overflow before copy. Duplicates/keepalives never refresh useful progress.
-- [ ] Fence old attachments with a new generation and SessionDone; join active Node mutations before new writes. Unknown resume returns restart_required without allocation. Never mix successor bytes or use a terminal miss as proof of installation.
+- [x] Implement BeginSnapshot, WriteSnapshot, DetachSnapshot, AbortSnapshot, SessionDone, validateSnapshotPeer, findTransfer, resumeSnapshot and replaceAttachment with Appendix A/C exact types.
+- [x] Validate/authenticate through ports before substantial reservation; verify exact source/destination/run after waits and before publication. Require positive/consistent terms, snapshot index, bounded metadata and declared length in service calls too.
+- [x] Preflight before allocation; return owner-confirmed not_needed without claiming payload delivery. Use exact-run cached monotonic bounds on chunk/resume; preempt only proven obsolete **pre-handoff** work, cancel/join before slot reuse.
+- [x] Bind immutable manifest fields and original requested ChunkBytes. Store negotiated chunk size separately and echo it; resume cannot renegotiate offsets/ordinals or reset deadlines.
+- [x] Implement contiguous append, chunk/whole digest state, exact duplicate comparison and cumulative acknowledgements. Reject holes, conflicting overlaps, corrupt chunks, short/oversized chunks and overflow before copy. Duplicates/keepalives never refresh useful progress.
+- [x] Fence old attachments with a new generation and SessionDone; join active Node mutations before new writes. Unknown resume returns restart_required without allocation. Never mix successor bytes or use a terminal miss as proof of installation.
 
 #### Verification
 
-- [ ] `make test`; `go vet ./internal/loadsnapshot`; focused functional/race cases with one local owner/protocol doubles for reconnect, concurrent old/new attachments and cancellation during append.
-- [ ] Cover source/destination run replacement, key reuse with changed data, cache hit/miss and pre-handoff obsolete preemption. Do not yet test a multi-node cluster.
+- [x] `make test`; `go vet ./internal/loadsnapshot`; focused functional/race cases with one local owner/protocol doubles for reconnect, concurrent old/new attachments and cancellation during append.
+- [x] Cover source/destination run replacement, key reuse with changed data, cache hit/miss and pre-handoff obsolete preemption. Do not yet test a multi-node cluster.
 
 ### Task 8: Complete finalization, diagnostics and joined receiver teardown
 
@@ -260,6 +260,8 @@ The target's historical final `make lint` command means full validation; on the 
 - [ ] Revalidate authenticated session identity/attachment before dispatch; reject data before Open, repeated Open, stale generations and unsupported protocol versions.
 - [ ] **Required feasibility gate:** functional `-race` tests with real stats.Handler for empty/half-open Recv, blocked Send, replacement attachment, Abort, deadline, Node stop and adapter Close. Assert exactly one RPC completion, no late callback/resource release, no leaked pump or quota.
 - [ ] If this pinned-version-sensitive mechanism fails, record a blocking NOT IMPLEMENTED GAP and revise the target before proceeding to activation. Do not waive or suppress the race, invent an unreviewed teardown protocol, or leave a success stub.
+
+- [ ] Populate BeginRequest.MaxChunkBytes from the adapter's checked frame capacity before Service.Begin. Preserve Manifest.ChunkBytes unchanged; reject a resumed negotiated chunk that no longer fits. This transport-local field was added in Task 7 to express the target's existing separate bounds without rewriting the immutable manifest.
 
 #### Verification
 
@@ -615,6 +617,16 @@ Task 5 internal reporting refinement:
 +}
 ```
 
+Task 7 transport-cap refinement:
+- `load/snapshot/protocol.go`: added optional `BeginRequest.MaxChunkBytes`. The service has no gRPC frame limit and must preserve the original Manifest.ChunkBytes for resume identity; this separate scalar supplies the adapter's bound without changing a wire field, Node option or immutable manifest. Target §4.1 and Appendix A now include it; Task 10 populates it from the gRPC frame calculation.
+
+```diff
+ type BeginRequest struct {
++    MaxChunkBytes uint32 // optional adapter payload cap; zero adds no cap
+     Manifest Manifest
+ }
+```
+
 ## NOT IMPLEMENTED GAPS
 
 No implementation exists yet; ordinary unchecked tasks are not defects in the plan. During execution, record discovered deviations here with task/target references and evidence. Use `[_]` for an unresolved gap that could not be corrected; such a mark is not a passed task or an approved deferral.
@@ -684,6 +696,7 @@ type Session struct {
 }
 
 type BeginRequest struct {
+    MaxChunkBytes uint32 // optional adapter frame cap; zero adds no cap; not part of manifest
     Manifest       Manifest
     RemainingTotal time.Duration // relative, not a sender wall-clock timestamp
     ProgressTimeout time.Duration // sender policy; negotiated downward
