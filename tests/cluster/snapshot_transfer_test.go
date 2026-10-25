@@ -25,10 +25,11 @@ type snapshotProcessControl struct {
 	FailRestoreCount uint64            `json:"fail_restore_count"`
 }
 type snapshotProcessObservation struct {
-	Identity  topology.Identity `json:"identity"`
-	ReplicaID uint64            `json:"replica_id"`
-	Active    uint64            `json:"active"`
-	Hits      map[string]uint64 `json:"hits"`
+	Wire      struct{ Frames, ChunkPeak, WindowPeak uint64 } `json:"wire"`
+	Identity  topology.Identity                              `json:"identity"`
+	ReplicaID uint64                                         `json:"replica_id"`
+	Active    uint64                                         `json:"active"`
+	Hits      map[string]uint64                              `json:"hits"`
 	Offer     struct {
 		Index, Term  uint64
 		EncodedBytes uint64 `json:"encoded_bytes"`

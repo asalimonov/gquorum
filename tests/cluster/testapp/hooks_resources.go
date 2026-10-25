@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"github.com/asalimonov/gquorum/topology"
+	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -17,6 +19,8 @@ import (
 // Linux process observations belong to the Docker test fixture. They are not
 // part of the library status document or demo protocol.
 type processResources struct {
+	StoreDiskBytes                    uint64            `json:"store_disk_bytes"`
+	AvailableDiskBytes                uint64            `json:"available_disk_bytes"`
 	Identity                          topology.Identity `json:"identity"`
 	At                                time.Time         `json:"at"`
 	HeapBytes, ResidentBytes, CPUNS   uint64
@@ -24,7 +28,7 @@ type processResources struct {
 }
 
 func (a *application) registerResourceRoutes(mux *http.ServeMux, protect func(http.HandlerFunc) http.HandlerFunc) {
-	mux.HandleFunc("GET /internal/test/resources", protect(func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /internal/test/resources", protect(func(w http.ResponseWriter, r *http.Request) {
 		if runtime.GOOS != "linux" {
 			httpError(w, fault.ErrUnsupported)
 			return
@@ -54,9 +58,34 @@ func (a *application) registerResourceRoutes(mux *http.ServeMux, protect func(ht
 			httpError(w, err)
 			return
 		}
+		var disk syscall.Statfs_t
+		if err := syscall.Statfs(a.cfg.DataDir, &disk); err != nil {
+			httpError(w, err)
+			return
+		}
+		var storeDisk uint64
+		if r.URL.Query().Get("store_disk") == "1" {
+			err = filepath.WalkDir(filepath.Join(a.cfg.DataDir, "load"), func(_ string, entry fs.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				if !entry.Type().IsRegular() {
+					return nil
+				}
+				info, err := entry.Info()
+				if err == nil {
+					storeDisk += uint64(max(int64(0), info.Size()))
+				}
+				return err
+			})
+			if err != nil {
+				httpError(w, err)
+				return
+			}
+		}
 		var memory runtime.MemStats
 		runtime.ReadMemStats(&memory)
 		cpu := uint64(usage.Utime.Sec+usage.Stime.Sec)*uint64(time.Second) + uint64(usage.Utime.Usec+usage.Stime.Usec)*uint64(time.Microsecond)
-		jsonResponse(w, http.StatusOK, processResources{Identity: a.currentNode().Identity(), At: time.Now().UTC(), HeapBytes: memory.HeapAlloc, ResidentBytes: pages * uint64(os.Getpagesize()), CPUNS: cpu, Goroutines: runtime.NumGoroutine(), OpenFiles: len(descriptors), LoadGroups: len(a.currentNode().LoadGroupIDs())})
+		jsonResponse(w, http.StatusOK, processResources{StoreDiskBytes: storeDisk, AvailableDiskBytes: disk.Bavail * uint64(disk.Bsize), Identity: a.currentNode().Identity(), At: time.Now().UTC(), HeapBytes: memory.HeapAlloc, ResidentBytes: pages * uint64(os.Getpagesize()), CPUNS: cpu, Goroutines: runtime.NumGoroutine(), OpenFiles: len(descriptors), LoadGroups: len(a.currentNode().LoadGroupIDs())})
 	}))
 }

@@ -418,3 +418,21 @@ Verified
 Notes
 - No private library imports added to the application, no larger ordinary cluster fixtures, no payload files or new listeners. The Restore failure budget extends the existing exact-identity fixture seam and remains outside library behavior.
 - Process cases may need correction from final runtime evidence; green compilation is not acceptance proof. The unrelated staged .gitignore change remains excluded.
+
+## Task 18 — explicitly tagged generated encoded-size qualification
+
+Date: 2026-10-26. Commit: this task commit; prior 3c6ba22.
+
+Implemented
+- Added clustertest && snapshotlarge cases for 256,000,000, 1,000,000,000 and 2,000,000,000 encoded bytes. Explicit options, sequential qualification, Docker memory/free-disk preflight and full generated transfer/WAL/Restore/restart prevent silently substituting smaller data.
+- Small observed manifest calibration sizes the unchanged JSON/base64 envelope within encoding granularity. Changed fixture filler to reproducible ChaCha8 bytes, verified byte-for-byte on Restore; no compression, sparse files or payload artifacts. Target fixture-sizing paragraph updated to reflect this refinement.
+- Qualification exercises lost chunk Ack/resume, other-group traffic, committed tail and new writes, and logs sampled heap/RSS/store-disk/reservations plus wire frames/chunk/window peaks and phase times. Optional disk inspection walks only caller-supplied load storage. Wire stats retain scalar offsets, not payloads. Generation HTTP wait is explicitly bounded at 30 minutes.
+
+Verified
+- make test: 2,309 tests / 62 reports / five modules pass (7.194s), test-reports/unit/20261025T215905.608439Z-81xf1hhk/report.md.
+- Fixture unit race pass (1.622s); focused snapshot/synthetic functional race pass (4.633s); pending owning lint/vet pass.
+- Explicit opt-in process binary compiles into an automatically cleaned temporary directory. Go file selection excludes snapshot_large_test.go with clustertest and includes it only with both tags. No TestMain/Docker or large payload generation executed for this task.
+- Docker preflight reports 39,878,758,400 bytes memory and host has 2.7 TiB available. Actual qualification remains unqualified until Task 20 executes it; this is resource availability, not a passing qualification result.
+
+Notes
+- Measurements are sampled high-water observations, not hard RSS or throughput guarantees. Producer-window bounds are separately asserted by transport tests. All fixtures remain runtime-generated. Unrelated staged .gitignore remains excluded.

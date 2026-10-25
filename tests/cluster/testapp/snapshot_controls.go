@@ -29,6 +29,7 @@ type snapshotControlRequest struct {
 	DropFinalAck     bool              `json:"drop_final_ack"`
 }
 type snapshotControl struct {
+	wire                                                    snapshotWireCounters
 	request                                                 snapshotControlRequest
 	release                                                 chan struct{}
 	active                                                  uint64
@@ -45,6 +46,7 @@ type snapshotOfferObservation struct {
 	SHA256       string            `json:"sha256"`
 }
 type snapshotControlObservation struct {
+	Wire             snapshotWireCounters     `json:"wire"`
 	NotNeededReplies uint64                   `json:"not_needed_replies"`
 	Identity         topology.Identity        `json:"identity"`
 	ReplicaID        uint64                   `json:"replica_id"`
@@ -279,6 +281,7 @@ func (a *application) snapshotObservationHTTP(w http.ResponseWriter, r *http.Req
 	h.mu.Lock()
 	control := h.snapshotControls[key]
 	if control != nil {
+		result.Wire = control.wire
 		result.Active = control.active
 		result.Offer = control.offer
 		for phase, count := range control.hits {

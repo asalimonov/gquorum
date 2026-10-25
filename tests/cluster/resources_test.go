@@ -17,6 +17,8 @@ import (
 )
 
 type processResources struct {
+	StoreDiskBytes                    uint64            `json:"store_disk_bytes"`
+	AvailableDiskBytes                uint64            `json:"available_disk_bytes"`
 	Identity                          topology.Identity `json:"identity"`
 	At                                time.Time         `json:"at"`
 	HeapBytes, ResidentBytes, CPUNS   uint64

@@ -145,3 +145,25 @@ func TestSnapshotRestoreFailureBudgetIsExactAndDoesNotReachSuccessor(t *testing.
 		t.Fatal("restore failure budget did not expire", err)
 	}
 }
+
+func TestSyntheticSnapshotCalibratedEnvelopeBudget(t *testing.T) {
+	t.Parallel()
+	m := configuredSyntheticMachine(t)
+	m.state.Synthetic.Spec.FramingBytes = 123
+	data, err := m.Snapshot(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := uint64(123) + 4*((uint64(len(data))+2)/3)
+	ceiling := m.state.Synthetic.Spec.EncodedBytes
+	if encoded > ceiling || ceiling-encoded >= 4 {
+		t.Fatal("calibrated size exceeded ceiling/granularity", encoded, ceiling)
+	}
+	restored := newMachine()
+	if err = restored.Restore(t.Context(), data); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(restored.state, m.state) {
+		t.Fatal("calibrated state changed on restore")
+	}
+}

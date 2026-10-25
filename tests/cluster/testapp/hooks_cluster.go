@@ -23,6 +23,9 @@ import (
 )
 
 func clusterRequestTimeout(r *http.Request) time.Duration {
+	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/internal/test/snapshot/") && strings.HasSuffix(r.URL.Path, "/generate") {
+		return 30 * time.Minute
+	}
 	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/internal/test/propose/") {
 		return time.Minute
 	}

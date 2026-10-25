@@ -36,7 +36,7 @@ func (a *application) prepareLoadBinding(options *gquorum.NodeOptions) (*fixture
 			return a.loadAddress(ctx, id.NodeName, id.MemberID)
 		},
 		Authenticate: credential.Authenticate, MaxMessageBytes: 64 << 20,
-		DialOptions: []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(credential)}})
+		DialOptions: []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithPerRPCCredentials(credential), grpc.WithStatsHandler(snapshotStatsHandler{app: a})}})
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +239,7 @@ func (t loadTransport) SendSnapshot(ctx context.Context, send snapshot.Send) (sn
 		return snapshot.Ack{}, &snapshot.TransferError{Reason: snapshot.ReasonUnsupported, Cause: fault.ErrUnsupported}
 	}
 	t.app.recordSnapshotOffer(send)
-	return t.binding.transport.SendSnapshot(ctx, send)
+	return t.binding.transport.SendSnapshot(context.WithValue(ctx, fixtureSnapshotStatsKey{}, send.Manifest.Key), send)
 }
 
 type fixtureSnapshotContextKey struct{}

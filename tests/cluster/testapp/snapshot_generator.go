@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"math"
+	"math/rand/v2"
 
 	"github.com/asalimonov/gquorum/fault"
 )
@@ -20,6 +21,7 @@ const (
 )
 
 type syntheticSpec struct {
+	FramingBytes uint64 `json:"framing_bytes,omitempty"`
 	Version      uint32 `json:"version"`
 	Seed         uint64 `json:"seed"`
 	EncodedBytes uint64 `json:"encoded_bytes"`
@@ -40,7 +42,7 @@ type syntheticObservation struct {
 }
 
 func (s syntheticSpec) validate() error {
-	if s.Version != 1 || s.EncodedBytes <= syntheticFramingAllowance || s.EncodedBytes > uint64(math.MaxInt) {
+	if s.Version != 1 || s.EncodedBytes <= syntheticFramingAllowance || s.EncodedBytes > uint64(math.MaxInt) || s.FramingBytes > syntheticFramingAllowance {
 		return fault.ErrInvalid
 	}
 	return nil
@@ -62,7 +64,7 @@ func syntheticSnapshot(ctx context.Context, state machineState) ([]byte, error) 
 	}
 	// Engine JSON/base64 adds about 4/3 plus authority framing. Leave explicit
 	// headroom; qualification checks the actual encoded transfer manifest.
-	raw := (spec.EncodedBytes - syntheticFramingAllowance) / 4 * 3
+	raw := (spec.EncodedBytes - spec.framingBytes()) / 4 * 3
 	minimum := uint64(syntheticHeaderBytes + len(header) + sha256.Size)
 	if raw < minimum {
 		return nil, fault.ErrInvalid
@@ -83,18 +85,14 @@ func syntheticSnapshot(ctx context.Context, state machineState) ([]byte, error) 
 	return data, nil
 }
 func fillSynthetic(ctx context.Context, data []byte, state *syntheticState) error {
-	seed := binary.BigEndian.AppendUint64(nil, state.Spec.Seed)
-	seed = binary.BigEndian.AppendUint64(seed, state.Counter)
-	seed = binary.BigEndian.AppendUint32(seed, state.Spec.Version)
+	random := syntheticRandom(state)
 	for offset := 0; offset < len(data); {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		input := binary.BigEndian.AppendUint64(seed[:len(seed):len(seed)], uint64(offset/syntheticBlockBytes))
-		pattern := sha256.Sum256(input)
 		n := min(syntheticBlockBytes, len(data)-offset)
-		for i := 0; i < n; i++ {
-			data[offset+i] = pattern[i%sha256.Size]
+		if _, err := random.Read(data[offset : offset+n]); err != nil {
+			return err
 		}
 		offset += n
 	}
@@ -116,7 +114,7 @@ func decodeSynthetic(ctx context.Context, data []byte) (machineState, error) {
 	if state.Synthetic == nil || state.Synthetic.Spec.validate() != nil || validateMachineState(state) != nil {
 		return state, fault.ErrUnreadable
 	}
-	if uint64(len(data)) != (state.Synthetic.Spec.EncodedBytes-syntheticFramingAllowance)/4*3 {
+	if uint64(len(data)) != (state.Synthetic.Spec.EncodedBytes-state.Synthetic.Spec.framingBytes())/4*3 {
 		return state, fault.ErrUnreadable
 	}
 	expected := newSyntheticState(state.Synthetic.Spec)
@@ -139,18 +137,14 @@ func decodeSynthetic(ctx context.Context, data []byte) (machineState, error) {
 	// as its integrity digest; no second snapshot-sized fixture is allocated.
 	payload := data[end : len(data)-sha256.Size]
 	scratch := make([]byte, min(syntheticBlockBytes, len(payload)))
-	seed := binary.BigEndian.AppendUint64(nil, state.Synthetic.Spec.Seed)
-	seed = binary.BigEndian.AppendUint64(seed, state.Synthetic.Counter)
-	seed = binary.BigEndian.AppendUint32(seed, state.Synthetic.Spec.Version)
+	random := syntheticRandom(state.Synthetic)
 	for offset := 0; offset < len(payload); {
 		if err := ctx.Err(); err != nil {
 			return state, err
 		}
-		input := binary.BigEndian.AppendUint64(seed[:len(seed):len(seed)], uint64(offset/syntheticBlockBytes))
-		pattern := sha256.Sum256(input)
 		n := min(len(scratch), len(payload)-offset)
-		for i := range n {
-			scratch[i] = pattern[i%sha256.Size]
+		if _, err := random.Read(scratch[:n]); err != nil {
+			return state, err
 		}
 		if !bytes.Equal(scratch[:n], payload[offset:offset+n]) {
 			return state, fault.ErrUnreadable
@@ -175,4 +169,18 @@ func hashSynthetic(ctx context.Context, data []byte) ([sha256.Size]byte, error) 
 	var sum [sha256.Size]byte
 	copy(sum[:], hash.Sum(sum[:0]))
 	return sum, ctx.Err()
+}
+
+func (s syntheticSpec) framingBytes() uint64 {
+	if s.FramingBytes > 0 {
+		return s.FramingBytes
+	}
+	return syntheticFramingAllowance
+}
+
+func syntheticRandom(state *syntheticState) *rand.ChaCha8 {
+	input := binary.BigEndian.AppendUint64(nil, state.Spec.Seed)
+	input = binary.BigEndian.AppendUint64(input, state.Counter)
+	input = binary.BigEndian.AppendUint32(input, state.Spec.Version)
+	return rand.NewChaCha8(sha256.Sum256(input))
 }
