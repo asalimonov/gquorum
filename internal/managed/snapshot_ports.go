@@ -264,8 +264,7 @@ func reportSnapshotAttemptFailure(core *raftengine.Group, attempt raftengine.Sna
 	}
 }
 
-//nolint:unused // Task 15 promotes this tested nonselecting bridge to PrepareSnapshot atomically.
-func (t engineTransport) prepareSnapshot(offer raftengine.SnapshotOffer) (raftengine.SnapshotJob, error) {
+func (t engineTransport) PrepareSnapshot(offer raftengine.SnapshotOffer) (raftengine.SnapshotJob, error) {
 	t.host.mu.Lock()
 	owner, err := t.host.snapshotOwnerLocked(t.slot)
 	t.host.mu.Unlock()

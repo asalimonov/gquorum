@@ -20,8 +20,8 @@ import (
 // sender/recipient replica pair. The sender does not wait for each batch to be
 // stepped, so a link is no longer limited to one batch per round trip. The
 // recipient steps frames in order and answers only refusals, which the sender
-// reports as unreachable deliveries. Snapshots keep the unary call, whose
-// completion is reported explicitly.
+// reports as unreachable deliveries. Snapshots use independent bulk streams
+// and are refused by this ordinary Raft path.
 const defaultStreamIdle = 2 * time.Minute
 
 type streamKey struct{ from, to load.Peer }

@@ -8,7 +8,6 @@ import (
 )
 
 // RequireTransport checks capability without calling application methods.
-// Constructor enforcement is enabled only after adapter migration (task 15).
 func RequireTransport(transport load.Transport) (snapshot.Transport, error) {
 	if isNilTransport(transport) {
 		return nil, &snapshot.TransferError{Reason: snapshot.ReasonUnsupported}

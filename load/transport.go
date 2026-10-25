@@ -16,9 +16,11 @@ import (
 // through an in-process call or the application protocol.
 // Preserve membership.SafetyRefusal details in ApplyAction errors so transient
 // quorum or health loss remains distinguishable from permanent refusal.
-// SendRaft receives owned messages. A nil return means acceptance, not
-// completed snapshot transfer: report that exact delivery through
-// Node.ReportLoadDelivery.
+// SendRaft receives owned ordinary messages. A nil return accepts queued work;
+// later failures report the exact delivery through Node.ReportLoadDelivery.
+// Managed Node transports must also implement load/snapshot.Transport.
+// Snapshot sends run independently of ordinary Raft traffic to the same peer;
+// the Node-owned snapshot job reports their outcome exactly once.
 type Transport interface {
 	SendRaft(context.Context, RaftBatch) error
 	ReadReplica(context.Context, ReplicaQuery) (ReplicaStatus, error)

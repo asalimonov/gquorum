@@ -32,6 +32,7 @@ const (
 // after constructing it with this Transport, before starting it or serving
 // RPCs.
 type Ingress interface {
+	LoadSnapshots() snapshot.Service
 	Identity() topology.Identity
 	ReceiveLoadRaft(context.Context, load.RaftBatch) error
 	ReadLoadReplica(context.Context, load.ReplicaQuery) (load.ReplicaStatus, error)
@@ -147,17 +148,20 @@ func (t *Transport) Bind(node Ingress) error {
 	if node == nil || (reflect.ValueOf(node).Kind() == reflect.Pointer && reflect.ValueOf(node).IsNil()) {
 		return fault.ErrInvalid
 	}
-	var service snapshot.Service
-	options, _ := (snapshot.Options{}).Resolve()
-	if provider, ok := node.(snapshotProvider); ok {
-		service = provider.LoadSnapshots()
-		if service != nil && !nilSnapshotService(service) {
-			var err error
-			options, err = service.Options().Resolve()
-			if err != nil {
-				return err
-			}
-		}
+	service := node.LoadSnapshots()
+	if nilSnapshotService(service) {
+		return fault.New(fault.Unsupported, "loadgrpc requires snapshot service support", nil)
+	}
+	options := service.Options()
+	resolved, err := options.Resolve()
+	if err != nil {
+		return err
+	}
+	if resolved != options {
+		return fault.New(fault.Invalid, "snapshot service options must be resolved", nil)
+	}
+	if _, err = snapshotChunkCapacity(t.options.MaxMessageBytes, options.ChunkBytes); err != nil {
+		return err
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -168,9 +172,6 @@ func (t *Transport) Bind(node Ingress) error {
 		return fault.New(fault.Invalid, "loadgrpc already bound", nil)
 	}
 	t.node = node
-	if nilSnapshotService(service) {
-		service = nil
-	}
 	t.snapshotService, t.snapshotOptions = service, options
 	t.snapshotPreLimit = max(snapshotPreOpenMinimum, 2*options.MaxIncoming)
 	return nil

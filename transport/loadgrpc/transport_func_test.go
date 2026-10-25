@@ -152,59 +152,19 @@ func TestAuthenticatedProtocolPreservesPublicValues(t *testing.T) {
 	}
 }
 
-func TestSnapshotReportsOnlyCompleteAcceptance(t *testing.T) {
+func TestOrdinarySnapshotRefusesBeforePartialDispatch(t *testing.T) {
 	t.Parallel()
 	sender, _, local, remote := newProtocolPair(t, 1500)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	batch := load.RaftBatch{From: replicaPeer(local.id, 1), To: replicaPeer(remote.id, 2), DeliveryID: 91}
-	for i := range 10 {
-		batch.Messages = append(batch.Messages, raftpb.Message{From: 1, To: 2, Type: raftpb.MsgApp, Index: uint64(i + 1), Context: make([]byte, 300)})
-	}
-	batch.Messages = append(batch.Messages, raftpb.Message{From: 1, To: 2, Type: raftpb.MsgSnap})
-	var mu sync.Mutex
-	var messages []raftpb.Message
-	fail := false
-	remote.receive = func(_ context.Context, part load.RaftBatch) error {
-		mu.Lock()
-		defer mu.Unlock()
-		if part.From != batch.From || part.To != batch.To || part.DeliveryID != 91 {
-			t.Error("batch identity changed")
-		}
-		if fail && len(messages) > 0 {
-			return fault.ErrOverloaded
-		}
-		messages = append(messages, part.Messages...)
-		return nil
-	}
-	var reports []load.DeliveryReport
-	local.report = func(_ context.Context, r load.DeliveryReport) error {
-		mu.Lock()
-		defer mu.Unlock()
-		reports = append(reports, r)
-		if r.Kind == load.DeliverySnapshotSucceeded && !sameRaftMessages(messages, batch.Messages) {
-			t.Error("success before complete acceptance")
-		}
-		return nil
-	}
-	if err := sender.SendRaft(ctx, batch); err != nil {
+	batch := load.RaftBatch{From: replicaPeer(local.id, 1), To: replicaPeer(remote.id, 2), DeliveryID: 91,
+		Messages: []raftpb.Message{{From: 1, To: 2, Type: raftpb.MsgHeartbeat}, {From: 1, To: 2, Type: raftpb.MsgSnap}}}
+	var dispatched, reported atomic.Int64
+	remote.receive = func(context.Context, load.RaftBatch) error { dispatched.Add(1); return nil }
+	local.report = func(context.Context, load.DeliveryReport) error { reported.Add(1); return nil }
+	if err := sender.SendRaft(t.Context(), batch); !errors.Is(err, fault.ErrUnsupported) {
 		t.Fatal(err)
 	}
-	mu.Lock()
-	if len(reports) != 1 || reports[0].Kind != load.DeliverySnapshotSucceeded || reports[0].DeliveryID != 91 || reports[0].From != batch.From || reports[0].To != batch.To {
-		t.Fatal("incorrect success report", reports)
-	}
-	messages = nil
-	reports = nil
-	fail = true
-	mu.Unlock()
-	if err := sender.SendRaft(ctx, batch); !errors.Is(err, fault.ErrOverloaded) {
-		t.Fatalf("expected partial delivery failure: %v", err)
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(reports) != 1 || reports[0].Kind != load.DeliverySnapshotFailed || len(messages) >= len(batch.Messages) {
-		t.Fatal("partial snapshot reported as accepted", reports)
+	if dispatched.Load() != 0 || reported.Load() != 0 {
+		t.Fatal("ordinary prefix or false snapshot report escaped refusal")
 	}
 }
 
@@ -358,3 +318,40 @@ func (unsupportedSnapshotService) SessionDone(snapshot.Session) <-chan struct{} 
 	return done
 }
 func (unsupportedSnapshotService) List(snapshot.Query) snapshot.Page { return snapshot.Page{} }
+
+type nilSnapshotIngress struct{ *ingressDouble }
+
+func (*nilSnapshotIngress) LoadSnapshots() snapshot.Service { return nil }
+
+type partialSnapshotIngress struct{ *ingressDouble }
+
+func (*partialSnapshotIngress) LoadSnapshots() snapshot.Service { return partialSnapshotService{} }
+
+type partialSnapshotService struct{ unsupportedSnapshotService }
+
+func (partialSnapshotService) Options() snapshot.Options { return snapshot.Options{} }
+func TestSnapshotBindingRequiresResolvedBorrowedService(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []string{"missing", "unresolved"} {
+		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
+			transport, err := New(Options{Resolve: func(context.Context, topology.Identity) (string, error) { return "unused", nil },
+				Authenticate: func(context.Context, topology.Identity) error { return nil }, DialOptions: []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var ingress Ingress = &nilSnapshotIngress{new(ingressDouble)}
+			expected := fault.ErrUnsupported
+			if kind == "unresolved" {
+				ingress = &partialSnapshotIngress{new(ingressDouble)}
+				expected = fault.ErrInvalid
+			}
+			if err = transport.Bind(ingress); !errors.Is(err, expected) {
+				t.Fatal(err)
+			}
+			if err = transport.Close(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

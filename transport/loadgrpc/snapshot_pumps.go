@@ -13,8 +13,6 @@ import (
 
 const snapshotPreOpenMinimum = 8
 
-type snapshotProvider interface{ LoadSnapshots() snapshot.Service }
-
 type snapshotReceived struct {
 	frame *loadpb.SnapshotFrame
 	err   error

@@ -355,3 +355,26 @@ Verified
 Notes
 - _meta/standalone use a zero generic snapshot policy and retain legacy send/report behavior. Full four-node repair and process transfer scenarios remain Tasks 17/20; no Docker or large generation was run here.
 - Activation is still deferred to Task 15. The unrelated staged .gitignore change remains excluded from feature commits.
+
+## Task 15 — atomic managed cutover and ordinary-path closure
+
+Date: 2026-10-26. Commit: this task commit; prior a1d1412. Further colleague review remains canceled.
+
+Implemented
+- Managed engineTransport now implements the actual selecting PrepareSnapshot method. Native Ready selects common source admission/jobs for every managed MsgSnap, preserving generic _meta/standalone transport behavior.
+- NewNode performs pure missing/typed-nil snapshot capability refusal. loadgrpc.Ingress requires LoadSnapshots; Bind captures a nonnil borrowed service with already-resolved policy and checked frame feasibility. Removed the optional provider and default-policy bridge.
+- Ordinary managed ingress, managed sender and production loadgrpc sender/codec reject MsgSnap. Removed the adapter's old unary snapshot send/report path; snapshot jobs alone own terminal managed reports.
+- Removed transitional unused exemptions and renamed the private preparation bridge. Migrated obsolete ordinary-snapshot tests/benchmarks to refusal semantics, retaining ordinary token identity/expiry and snapshot reservation-window regressions.
+- Added real native Ready → Node-owned managed coordinator → production gRPC → common receiver ingress → exact native report integration. One actual managed engine adds a protocol-double learner through authorized membership, sends a native snapshot and resumes append probing only after the terminal report. The double reports injected installation failure after accepting ownership, proving accepted transport is not an installed claim. Public Node construction/Bind/Start composition is covered by the prior Node regression; real multi-node process qualification follows in Tasks 17/20.
+
+Verified
+- make test: 2,299 tests across 62 reports/five modules pass (17.887s); report test-reports/unit/20261025T212345.398911Z-f3facj7l/report.md.
+- Owning pending lint/vet, merged unused analysis, git diff --check and process compile-only clustertest binary pass. No TestMain/Docker run.
+- Full managed/adapter functional race checks pass (14.171s / 1.874s), including the native activation path, safe-boundary queue ownership, legacy _meta/standalone reporting and pinned gRPC teardown.
+- Full fixture functional race passes (35.179s). Recovery functional suite passes (69.893s). Full public Node functional suite passes on its own (15.098s).
+- Constructor tests reject ordinary-only and typed-nil transports without callbacks; Bind tests reject nil/unresolved services. Ordinary mixed batches refuse snapshots before any partial dispatch or fabricated report.
+
+Findings
+- The new integration test's first cleanup used t.Context, which Go cancels before cleanup. Switched only cleanup to a fresh bounded background context; the actual protocol run and ownership assertions remain unchanged.
+- An overlapping broad run timed out the existing storage-lease test during operation convergence and its intentional first Close failure. It passed alone (4.155s), then the complete public suite passed sequentially without changing its timeout or production storage behavior.
+- No runtime rollout flag, giant unary fallback, additional listener, root file or persistent format change. The unrelated staged .gitignore change remains excluded.

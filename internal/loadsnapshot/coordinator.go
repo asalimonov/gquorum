@@ -1,4 +1,3 @@
-//nolint:unused // Resource primitives are wired by the receive/send tasks 7–9.
 package loadsnapshot
 
 import (

@@ -369,17 +369,17 @@ Review baseline: `251a594`; findings in review Thread 3. The original six-commit
 **Files:** existing node options/composition; managed engineTransport/ReceiveRaft; raftengine selecting seam; loadgrpc client/wire/Bind; migrated tests/mocks.
 **References:** target §4.1–4.2, §7.1–7.4, §8.1–8.2, §9 and §11 compatibility.
 
-- [ ] Verify Tasks 1–14 completed and the Task 10 teardown race gate passed; migrated production adapters, fixtures and exercised loopbacks are real implementations, not compile-only stubs.
-- [ ] Add the actual `engineTransport.PrepareSnapshot(raftengine.SnapshotOffer)` method delegating to Coordinator.PrepareSend so native managed MsgSnap selects the new bulk path. Preserve _meta/standalone semantics and ordinary ordering.
-- [ ] Enforce NewNode's pure missing/nil snapshot.Transport capability refusal. Promote LoadSnapshots into the mandatory loadgrpc.Ingress method set and remove Task 10's optional-provider bridge. Activate LoadSnapshot service Bind validation; defaults originate only from resolved Node options.
-- [ ] Reject managed ordinary MsgSnap in ReceiveLoadRaft and ordinary loadgrpc SendRaft/planning. Every managed snapshot, including small ones, goes through common budgeted ingress; no giant unary downgrade.
-- [ ] Remove all temporary unavailable bridges and intermediate selection helpers introduced earlier; do not leave a runtime feature flag. Ensure acceptance/report exactly once, deadlines bypass half-election/EffectTimeout/CallTimeout, and adopted buffers remain owned through install/skip/failure.
-- [ ] Exercise a real local Node→adapter→common service→engine path with a protocol double, not only private method tests. Demonstrate the pipeline is actually selected by native Ready and terminates through native report handling.
+- [x] Verify Tasks 1–14 completed and the Task 10 teardown race gate passed; migrated production adapters, fixtures and exercised loopbacks are real implementations, not compile-only stubs.
+- [x] Add the actual `engineTransport.PrepareSnapshot(raftengine.SnapshotOffer)` method delegating to Coordinator.PrepareSend so native managed MsgSnap selects the new bulk path. Preserve _meta/standalone semantics and ordinary ordering.
+- [x] Enforce NewNode's pure missing/nil snapshot.Transport capability refusal. Promote LoadSnapshots into the mandatory loadgrpc.Ingress method set and remove Task 10's optional-provider bridge. Activate LoadSnapshot service Bind validation; defaults originate only from resolved Node options.
+- [x] Reject managed ordinary MsgSnap in ReceiveLoadRaft and ordinary loadgrpc SendRaft/planning. Every managed snapshot, including small ones, goes through common budgeted ingress; no giant unary downgrade.
+- [x] Remove all temporary unavailable bridges and intermediate selection helpers introduced earlier; do not leave a runtime feature flag. Ensure acceptance/report exactly once, deadlines bypass half-election/EffectTimeout/CallTimeout, and adopted buffers remain owned through install/skip/failure.
+- [x] Exercise a real local Node→adapter→common service→engine path with a protocol double, not only private method tests. Demonstrate the pipeline is actually selected by native Ready and terminates through native report handling.
 
 #### Verification
 
-- [ ] `make test`; focused Node/managed/engine/adapter functional checks and their relevant races; compile process tests.
-- [ ] Search for remaining old managed unary snapshot sends, unsupported bridge methods or callback gaps. Existing root/recovery and application fixture suites remain green.
+- [x] `make test`; focused Node/managed/engine/adapter functional checks and their relevant races; compile process tests.
+- [x] Search for remaining old managed unary snapshot sends, unsupported bridge methods or callback gaps. Existing root/recovery and application fixture suites remain green.
 
 ### Task 16: Prepare the synthetic snapshot fixture and phase controls
 

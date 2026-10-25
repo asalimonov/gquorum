@@ -158,6 +158,12 @@ func TestBinaryNativeKindsAndOwnership(t *testing.T) {
 				ConfState: raftpb.ConfState{Voters: []uint64{msg.From, msg.To}, Learners: []uint64{3}, VotersOutgoing: []uint64{4}, LearnersNext: []uint64{5}, AutoLeave: true}}}
 			want := legacyproto.Clone(msg).(*raftpb.Message)
 			frames, err := encodeRaftFrames(original, 4096)
+			if msg.Type == raftpb.MsgSnap {
+				if !errors.Is(err, fault.ErrUnsupported) {
+					t.Fatal("ordinary snapshot planning allowed", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/loadsnapshot"
 	"github.com/asalimonov/gquorum/internal/metaservice"
 	internalmetrics "github.com/asalimonov/gquorum/internal/metrics"
 	"github.com/asalimonov/gquorum/internal/raftengine"
@@ -349,6 +350,9 @@ func validateLoadOptions(o LoadOptions) error {
 	}
 	if o.Factory == nil || o.Transport == nil {
 		return invalid("managed loads require Factory and Transport")
+	}
+	if _, err := loadsnapshot.RequireTransport(o.Transport); err != nil {
+		return err
 	}
 	if o.Storage.WAL != nil {
 		if o.Storage.Store != nil || o.Storage.Retirement != nil {

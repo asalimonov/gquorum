@@ -159,7 +159,6 @@ func BenchmarkRaftFrameCodecs(b *testing.B) {
 		{"read-index", raftpb.MsgReadIndex, 1, 24},
 		{"append", raftpb.MsgApp, 1, 256},
 		{"batch", raftpb.MsgApp, 64, 256},
-		{"snapshot", raftpb.MsgSnap, 1, 32768},
 	}
 	codecs := []benchmarkRaftCodec{{"json", benchmarkJSONEncode, benchmarkJSONDecode}, {"binary", benchmarkBinaryEncode, benchmarkBinaryDecode}}
 	for _, tc := range cases {
@@ -175,14 +174,9 @@ func BenchmarkRaftFrameCodecs(b *testing.B) {
 					msg.Entries = []raftpb.Entry{{Index: uint64(i + 1), Term: 3, Data: make([]byte, tc.data)}}
 				case raftpb.MsgReadIndex:
 					msg.Context = make([]byte, tc.data)
-				case raftpb.MsgSnap:
-					msg.Snapshot = &raftpb.Snapshot{Data: make([]byte, tc.data), Metadata: raftpb.SnapshotMetadata{Index: 7, Term: 3, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}}}}
 				}
 			}
 			limit := 4096
-			if tc.kind == raftpb.MsgSnap {
-				limit = 128 << 10
-			}
 			for _, codec := range codecs {
 				b.Run(codec.name, func(b *testing.B) {
 					wire, err := codec.encode(batch, limit)

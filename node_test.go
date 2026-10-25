@@ -435,3 +435,17 @@ func TestMetaOnlyNodeHasNoSnapshotService(t *testing.T) {
 func (unopenedTransport) SendSnapshot(context.Context, snapshot.Send) (snapshot.Ack, error) {
 	panic("snapshot transport used before resource acquisition")
 }
+
+type ordinaryOnlyTransport struct{ load.Transport }
+
+func TestManagedNodeRequiresSnapshotCapabilityWithoutCallingIt(t *testing.T) {
+	t.Parallel()
+	for _, transport := range []load.Transport{ordinaryOnlyTransport{}, (*unopenedTransport)(nil)} {
+		options := nodeOptionsForTest(t)
+		options.Loads = loadOptionsForTest(t)
+		options.Loads.Transport = transport
+		if _, err := NewNode(options); !errors.Is(err, fault.ErrUnsupported) {
+			t.Fatal("missing/nil snapshot transport accepted", err)
+		}
+	}
+}

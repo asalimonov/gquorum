@@ -87,7 +87,7 @@ func planRaftFrames(b load.RaftBatch, limit int) ([]raftFrameRange, error) {
 			return nil, fault.ErrOverloaded
 		}
 		overhead := protowire.SizeTag(raftMessagesFieldNumber) + protowire.SizeVarint(uint64(n))
-		// TODO(not planned): Oversized snapshots are refused, not internally chunked.
+		// Each ordinary native message must fit the configured frame bound.
 		if overhead > limit-headerBytes-n {
 			return nil, fault.ErrOverloaded
 		}
@@ -102,6 +102,11 @@ func planRaftFrames(b load.RaftBatch, limit int) ([]raftFrameRange, error) {
 }
 
 func encodeRaftFrames(b load.RaftBatch, limit int) ([]*loadpb.RaftFrame, error) {
+	for _, message := range b.Messages {
+		if message.Type == raftpb.MsgSnap {
+			return nil, fault.ErrUnsupported
+		}
+	}
 	ranges, err := planRaftFrames(b, limit)
 	if err != nil {
 		return nil, err
@@ -148,7 +153,7 @@ func decodeRaftHeader(f *loadpb.RaftFrame, limit int) (load.RaftBatch, error) {
 
 func decodeRaftMessages(ctx context.Context, f *loadpb.RaftFrame, b *load.RaftBatch) error {
 	// TODO(not planned): Pooling must not expose recycled data to asynchronous Raft work.
-	// Application command and snapshot bytes stay opaque and caller-formatted.
+	// Application command bytes stay opaque and caller-formatted.
 	messages := make([]raftpb.Message, len(f.Messages))
 	for i, data := range f.Messages {
 		if err := ctx.Err(); err != nil {
@@ -156,6 +161,9 @@ func decodeRaftMessages(ctx context.Context, f *loadpb.RaftFrame, b *load.RaftBa
 		}
 		if len(data) == 0 || messages[i].Unmarshal(data) != nil {
 			return status.Error(codes.InvalidArgument, "invalid native Raft message")
+		}
+		if messages[i].Type == raftpb.MsgSnap {
+			return status.Error(codes.Unimplemented, "snapshots require snapshot ingress")
 		}
 		if messages[i].From != b.From.Replica.ReplicaID || messages[i].To != b.To.Replica.ReplicaID {
 			return fault.ErrIdentityMismatch

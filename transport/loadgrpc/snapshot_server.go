@@ -40,9 +40,6 @@ func (s *serverAdapter) TransferSnapshot(stream loadpb.Load_TransferSnapshotServ
 	ctx, cancel := context.WithCancel(stream.Context())
 	stop := context.AfterFunc(s.transport.ctx, cancel)
 	defer func() { stop(); cancel() }()
-	if h.service == nil {
-		return status.Error(codes.Unimplemented, "snapshot service unavailable")
-	}
 	return s.serveSnapshot(ctx, h)
 }
 

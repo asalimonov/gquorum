@@ -64,14 +64,15 @@ func (t engineTransport) Send(parent context.Context, messages []raftpb.Message)
 	if err := h.cfg.ValidatePeer(ctx, to); err != nil {
 		return err
 	}
-	snapshot := false
 	for _, msg := range messages {
 		if msg.From != from.Replica.ReplicaID || msg.To != to.Replica.ReplicaID {
 			return fault.ErrIdentityMismatch
 		}
-		snapshot = snapshot || msg.Type == raftpb.MsgSnap
+		if msg.Type == raftpb.MsgSnap {
+			return fault.ErrUnsupported
+		}
 	}
-	id, err := h.registerDelivery(slot, delivery{from: from, to: to, snapshot: snapshot})
+	id, err := h.registerDelivery(slot, delivery{from: from, to: to})
 	if err != nil {
 		return err
 	}
@@ -283,6 +284,9 @@ func (h *Host) validateReceivedBatch(ctx context.Context, batch load.RaftBatch) 
 		return fault.ErrIdentityMismatch
 	}
 	for _, msg := range batch.Messages {
+		if msg.Type == raftpb.MsgSnap {
+			return fault.New(fault.Unsupported, "managed snapshots require snapshot ingress", nil)
+		}
 		if msg.From != batch.From.Replica.ReplicaID || msg.To != batch.To.Replica.ReplicaID {
 			return fault.ErrIdentityMismatch
 		}

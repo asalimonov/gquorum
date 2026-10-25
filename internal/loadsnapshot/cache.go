@@ -1,4 +1,3 @@
-//nolint:unused // Bounded caches are connected by finalization/digest tasks 8–9.
 package loadsnapshot
 
 import (

@@ -1,5 +1,3 @@
-//nolint:unused // Receive/send ownership fields are connected by plan tasks 7–9.
-//lint:file-ignore U1000 Receive/send fields are connected by plan tasks 7–9.
 package loadsnapshot
 
 import (

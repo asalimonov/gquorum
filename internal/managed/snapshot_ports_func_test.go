@@ -103,10 +103,10 @@ func TestManagedSnapshot_SourceStopJoinsBorrowedTransportBeforeClose(t *testing.
 	must(t, err)
 	owner := managedSnapshotOwnerFor(t, h)
 	transport := engineTransport{h, owner.slot}
-	if _, selected := any(transport).(raftengine.SnapshotJobTransport); selected {
-		t.Fatal("Task 15 activated early")
+	if _, selected := any(transport).(raftengine.SnapshotJobTransport); !selected {
+		t.Fatal("managed snapshot job path not selected")
 	}
-	job, err := transport.prepareSnapshot(managedSnapshotOffer(t, f, owner))
+	job, err := transport.PrepareSnapshot(managedSnapshotOffer(t, f, owner))
 	must(t, err)
 	done := make(chan struct{})
 	go func() { defer close(done); job.Run(t.Context()) }()
