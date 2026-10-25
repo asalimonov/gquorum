@@ -73,6 +73,54 @@ class StagedLintTest(unittest.TestCase):
             self.assertEqual(git("write-tree"), staged_tree)
             self.assertEqual(file.read_text(), "unstaged invalid Go\n")
 
+    def test_pending_mode_lints_staged_unstaged_and_untracked_files_in_place(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+
+            def git(*args):
+                return subprocess.check_output(["git", *args], cwd=root)
+
+            git("init", "-q")
+            for name in ("staged.go", "unstaged.go", "clean.go", "deleted.go"):
+                (root / name).write_text("package pending\n")
+            git("add", "--", ".")
+            git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "base")
+            (root / "staged.go").write_text("package pending // staged\n")
+            git("add", "--", "staged.go")
+            (root / "unstaged.go").write_text("package pending // unstaged\n")
+            (root / "deleted.go").unlink()
+            (root / "untracked.go").write_text("package pending\n")
+            (root / ".gitignore").write_text("ignored.go\n")
+            (root / "ignored.go").write_text("package pending\n")
+            index = git("write-tree")
+            real_run = subprocess.run
+            observed = []
+
+            def run(command, **kwargs):
+                if command[0] == "make":
+                    return subprocess.CompletedProcess(command, 0)
+                return real_run(command, **kwargs)
+
+            def snapshot(actual_root, directory, scopes):
+                observed.append((actual_root, directory, scopes))
+                return 0
+
+            with patch.object(lint_staged.Path, "cwd", return_value=root), \
+                    patch.object(lint_staged.subprocess, "run", side_effect=run), \
+                    patch.object(lint_staged, "lint_snapshot", side_effect=snapshot):
+                self.assertEqual(lint_staged.main(["--pending"]), 0)
+            self.assertEqual(observed, [(root, root, {".": {
+                "staged.go", "unstaged.go", "deleted.go", "untracked.go"}})])
+            self.assertEqual(git("write-tree"), index)
+
+    def test_pending_mode_without_go_changes_does_not_install_or_run_tools(self):
+        with patch.object(lint_staged, "git", side_effect=[b"/repo\n", b"README.md\0", b"", b"notes.txt\0"]), \
+                patch.object(lint_staged.subprocess, "run") as run, \
+                contextlib.redirect_stdout(io.StringIO()) as captured:
+            self.assertEqual(lint_staged.main(["--pending"]), 0)
+        run.assert_not_called()
+        self.assertIn("Pending lint", captured.getvalue())
+
     def test_documentation_commit_does_not_install_or_run_tools(self):
         with patch.object(lint_staged, "git", side_effect=[b"/repo\n", b"README.md\0"]), \
                 patch.object(lint_staged.subprocess, "run") as run, \

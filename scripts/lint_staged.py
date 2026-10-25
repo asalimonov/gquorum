@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
-"""Lint staged Go files in an isolated copy of the Git index."""
+"""Lint changed Go files: staged contents by default, or the working tree.
 
+Without arguments, staged files are linted in an isolated copy of the Git
+index, as the pre-commit hook requires. With --pending, staged, unstaged and
+untracked files are linted in place using their working-tree contents.
+"""
+
+import argparse
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 
 import lint
@@ -59,13 +66,33 @@ def lint_snapshot(root, snapshot, scopes):
     return int(failed)
 
 
-def main():
+def changed_paths(root, pending):
+    """List staged paths, plus unstaged and untracked ones in pending mode."""
+    commands = [("diff", "--cached", "--name-only", "--no-renames", "-z", "--diff-filter=ACMRD")]
+    if pending:
+        commands += [("diff", "--name-only", "--no-renames", "-z", "--diff-filter=ACMRD"),
+                     ("ls-files", "--others", "--exclude-standard", "-z")]
+    paths = set()
+    for command in commands:
+        paths.update(os.fsdecode(path) for path in git(root, *command).split(b"\0") if path)
+    return sorted(paths)
+
+
+def main(argv=()):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--pending", action="store_true",
+                        help="lint staged, unstaged and untracked files in the working tree")
+    args = parser.parse_args(argv)
+    label = "Pending lint" if args.pending else "Staged lint"
     root = Path(git(Path.cwd(), "rev-parse", "--show-toplevel").decode().strip()).resolve()
-    paths = git(root, "diff", "--cached", "--name-only", "--no-renames", "-z", "--diff-filter=ACMRD")
-    scopes = staged_scopes(os.fsdecode(path) for path in paths.split(b"\0") if path)
+    scopes = staged_scopes(changed_paths(root, args.pending))
     if not scopes:
-        print("Staged lint: no Go files or lint configuration changes.")
+        print(f"{label}: no Go files or lint configuration changes.")
         return 0
+    if args.pending:
+        # Working-tree contents are the subject, so analyze them in place.
+        subprocess.run(["make", "--no-print-directory", "lint-tools"], cwd=root, check=True)
+        return lint_snapshot(root, root, scopes)
     # Capture the index before installing tools; checkout-index never modifies
     # the caller's index or working tree, including partially staged files.
     with tempfile.TemporaryDirectory(prefix="gquorum-staged-lint-") as temporary:
@@ -82,7 +109,7 @@ def main():
 
 if __name__ == "__main__":
     try:
-        raise SystemExit(main())
+        raise SystemExit(main(sys.argv[1:]))
     except (OSError, subprocess.CalledProcessError) as error:
-        print(f"Staged lint failed: {error}")
+        print(f"Changed-file lint failed: {error}")
         raise SystemExit(1)

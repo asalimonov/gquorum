@@ -70,7 +70,8 @@ The five modules are run in sequence, including `examples/scheduler` and
 | `make test-sim` | Seeded three-node latency and intermittent-connectivity simulations in a separate module |
 | `make test-perf` | Three measured Docker cases, each under two minutes |
 | `make bench` | Planner and complete meta FSM snapshot matrices |
-| `make lint` | Vet all module/build variants; TiDB revive style rules and merged Staticcheck unused declarations |
+| `make lint` | The same checks for pending Go files: staged, unstaged and untracked changes in the working tree |
+| `make lint-full` | Vet all module/build variants; TiDB revive style rules and merged Staticcheck unused declarations |
 | `make proto-check` | Regenerate pinned protocol code and require no diff |
 
 `make test-functional` and `make test-functional-race` remain aliases for the
@@ -93,7 +94,7 @@ the 100 ms quorum sampling contract, network/timing settings, current coverage
 boundaries and reproducible seed commands.
 
 
-`make lint` installs versioned binaries under the ignored `.tools/lint/` directory:
+`make lint-full` installs versioned binaries under the ignored `.tools/lint/` directory:
 revive v1.17.1 and Staticcheck v0.8.2. The checked-in [revive configuration](../../revive.toml)
 copies `tools/check/revive.toml` from the local TiDB checkout, including its 16
 enabled style rules, confidence threshold and severity. These
@@ -120,6 +121,11 @@ lint configuration changes check every module, and staged `go.mod`/`go.sum`
 changes check their entire module. Documentation-only commits skip lint.
 Pinned tools are installed automatically when needed. The checks never run tests
 or change staged files. Run `make lint-staged` to invoke them manually.
+
+`make lint` applies the same scoping to all pending work instead of the index:
+staged, unstaged and untracked (non-ignored) files are linted in place using
+their working-tree contents. Use it while editing; `make lint-full` remains the
+complete check before cluster tests.
 
 ## Test reports
 
@@ -235,7 +241,7 @@ The scheduler module has unit validation (CAS transitions, codec, revocation
 rules, executor choice, configuration) and functional SQLite/FSM, snapshot,
 schema-reset, retirement and single-replica recovery coverage under the same
 tags as the library. `make test` and `make test-function` include it, and
-`make lint` checks both variants. The public load gRPC adapter has
+`make lint-full` checks both variants. The public load gRPC adapter has
 protocol-double tests under its owning package's `functional` tag. Process
 failover acceptance is the separate `make test-scheduler-example` Compose
 scenario.

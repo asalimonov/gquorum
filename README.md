@@ -206,16 +206,17 @@ compatibility impact.
 2. Make a focused change with regression coverage appropriate to the behavior.
    Keep documentation and examples aligned with public API changes.
    Run `make install-hooks` once to enable lint checks for staged files before
-   each commit. Use `make lint-staged` to run those checks manually.
+   each commit. Use `make lint-staged` to run those checks manually, or
+   `make lint` to check all pending staged, unstaged and untracked changes.
 3. Run all tests before sending of a request:
 
    ```sh
    make test          # Compile all five application modules and run fast, uncached units
    make lint          # vet, revive style and unused-code checks across modules
-   make test-race     # Fast unit checks under the race detector
-   make test-function # Isolated non-Docker functional and storage tests
-   make test-cluster  # Cluster tests
-   make test-sim      # Deterministic three-node latency and partition simulations
+   make test-race     # SLOW unit checks under the race detector
+   make test-function # SLOW isolated non-Docker functional and storage tests
+   make test-cluster  # VERY SLOW cluster tests, run only after large tasks or several large commits
+   make test-sim      # SLOW deterministic three-node latency and partition simulations
    ```
 
 The [testing guide](docs/testing/tests.md) describes test boundaries and commands.

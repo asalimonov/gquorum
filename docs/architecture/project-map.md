@@ -935,7 +935,7 @@ result envelopes carry the new model. [Read dispatch](../../internal/metaengine/
 | [tests/cluster/testapp/loadpb](../../tests/cluster/testapp/load.proto) | Fixture-specific generated protocol: Header/Request/Frame/Reply; LoadClient/LoadServer methods `Deliver`, `Call`. Distinct from reusable transport/loadgrpc protocol; fixture retains fault interception and typed control operations. |
 | [scripts/revive](../../scripts/revive/main.go) | Package main, separately pinned revive library wrapper. `run`, `collectFindings`, `packageFiles`, `groupFiles`, `filterFindings`, `outputFindings`; groups selected tagged files by directory to preserve package/type context and filters findings without editing code. |
 | [scripts/test_report.py](../../scripts/test_report.py) | Go JSON/build runner; per-suite persistent package logs, JUnit, Markdown summary/timeline and raw events. Preserves failures/timeouts/interruptions; `latest` references completed run. |
-| [scripts/lint.py](../../scripts/lint.py), [lint_staged.py](../../scripts/lint_staged.py), [.githooks/pre-commit](../../.githooks/pre-commit) | Vet/build-tag matrix, pinned golangci/revive/Staticcheck, merged unused analysis; staged lint reconstructs the Git index in a temporary tree and limits diagnostics to affected scope. |
+| [scripts/lint.py](../../scripts/lint.py), [lint_staged.py](../../scripts/lint_staged.py), [.githooks/pre-commit](../../.githooks/pre-commit) | Vet/build-tag matrix, pinned golangci/revive/Staticcheck, merged unused analysis; staged lint reconstructs the Git index in a temporary tree, pending lint (`--pending`) checks staged, unstaged and untracked files in place, and both limit diagnostics to affected scope. |
 | [docs/architecture](README.md), [docs/testing](../testing/tests.md), `docs/plans`, `docs/brainstorms` | Current contracts, test/validation records and historical design/implementation context. Plans may describe superseded APIs; no `docs/plans/completed/` directory at this baseline. |
 
 `KB_TEST_BOUNDARY`: units (`!functional`) exercise isolated logic without
@@ -947,7 +947,7 @@ Root `go test ./...` misses nested modules. Existing baseline files under
 `internal/metaengine/testdata/api-baseline` are immutable provenance, not outputs
 to regenerate with the implementation under test.
 
-Useful [Makefile](../../Makefile) targets: `make test`, `make lint`,
+Useful [Makefile](../../Makefile) targets: `make test`, `make lint` (pending changes), `make lint-full`,
 `make test-race`, `make test-function`, `make test-function-race`;
 `make test-cluster-build` then
 `make test-cluster-run CLUSTER_ARGS='-v -run TestName'` for focused process work;
