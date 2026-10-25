@@ -151,3 +151,19 @@ func TestSnapshotReportsPeerRestartVersusEngineRestart(t *testing.T) {
 		t.Fatal("new peer process did not reset backoff")
 	}
 }
+
+func TestSnapshotReportsLegacyFailureDoesNotEscalateBackoff(t *testing.T) {
+	t.Parallel()
+	g := snapshotMailbox(t, 1)
+	record := g.snapshotReports[1]
+	record.backoff = 8 * time.Second
+	for range 3 {
+		record.attempt.Generation++
+		record.terminal = false
+		record.pending = nil
+		g.ReportSnapshot(1, raft.SnapshotFailure)
+		if record.pending == nil || record.pending.due.After(time.Now()) || record.backoff != 8*time.Second {
+			t.Fatal("legacy report changed managed backoff")
+		}
+	}
+}

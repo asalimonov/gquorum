@@ -5,8 +5,12 @@ package raftengine
 import (
 	"context"
 	"errors"
+	"github.com/asalimonov/gquorum/internal/metastore"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
+	"github.com/asalimonov/gquorum/topology"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -51,10 +55,25 @@ func (d *snapshotTransportDouble) PrepareSnapshot(o SnapshotOffer) (SnapshotJob,
 // The test drives the owner synchronously and may start independent send workers.
 func outboundSnapshotLeader(t *testing.T, transport Transport) *Group {
 	t.Helper()
-	s, err := memstore.New(memstore.Options{NodeName: "1", ClusterID: "cluster"})
-	must(t, err)
-	t.Cleanup(func() { must(t, s.Close()) })
-	g, err := New(Options{ClusterID: "cluster", GroupID: "load", NodeName: "1", ReplicaID: 1, Mode: Founding,
+	return outboundSnapshotLeaderForGroup(t, transport, "load")
+}
+func outboundSnapshotLeaderForGroup(t *testing.T, transport Transport, groupID string) *Group {
+	t.Helper()
+	var s storage.Store
+	create := New
+	if groupID == topology.MetaGroupID {
+		meta, err := metastore.Open(filepath.Join(t.TempDir(), "meta.bolt"))
+		must(t, err)
+		t.Cleanup(func() { must(t, meta.Close()) })
+		s = &metastore.Adapter{Store: meta}
+		create = NewMeta
+	} else {
+		memory, err := memstore.New(memstore.Options{NodeName: "1", ClusterID: "cluster"})
+		must(t, err)
+		t.Cleanup(func() { must(t, memory.Close()) })
+		s = memory
+	}
+	g, err := create(Options{ClusterID: "cluster", GroupID: groupID, NodeName: "1", ReplicaID: 1, Mode: Founding,
 		Peers: []raft.Peer{{ID: 1}}, FoundingLearners: []raft.Peer{{ID: 2}}, Store: s, Machine: &machine{}, Transport: transport,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	must(t, err)
@@ -320,5 +339,57 @@ func TestSnapshotOutbound_FailedReadyDiscardsBeforeDispatch(t *testing.T) {
 	}
 	if !errors.Is(g.exitError(), fault.ErrUnreadable) || job.discarded.Load() != 1 || job.runs.Load() != 0 {
 		t.Fatal(g.exitError(), job.discarded.Load(), job.runs.Load())
+	}
+}
+
+func TestSnapshotOutbound_LegacyFailureReportsRemainImmediate(t *testing.T) {
+	t.Parallel()
+	for _, groupID := range []string{"load", topology.MetaGroupID} {
+		t.Run(groupID, func(t *testing.T) {
+			t.Parallel()
+			g := outboundSnapshotLeaderForGroup(t, &captureTransport{}, groupID)
+			must(t, g.rn.Step(raftpb.Message{Type: raftpb.MsgAppResp, From: 2, To: 1, Term: g.rn.BasicStatus().Term, Reject: true, Index: 1, RejectHint: 0}))
+			settleIngressReady(t, g)
+			if g.rn.Status().Progress[2].State != tracker.StateSnapshot {
+				t.Fatal("native snapshot was not offered")
+			}
+			g.ReportSnapshot(2, raft.SnapshotFailure)
+			record := g.snapshotReports[2]
+			if record.pending == nil || record.pending.due.After(time.Now()) || record.backoff != 0 {
+				t.Fatal("legacy failure acquired managed cooldown", record)
+			}
+			g.drainSnapshotReports(time.Now())
+			if g.rn.Status().Progress[2].State == tracker.StateSnapshot || record.pending != nil {
+				t.Fatal("legacy failure was delayed")
+			}
+		})
+	}
+}
+func TestSnapshotOutbound_LegacyDoesNotRequireDigestGeneration(t *testing.T) {
+	t.Parallel()
+	g := outboundSnapshotLeader(t, &captureTransport{})
+	g.snapshotPublication = 0
+	rd, jobs, err := g.ownReady(raft.Ready{Messages: []raftpb.Message{outboundSnapshotMessage(t, g)}})
+	must(t, err)
+	if len(rd.Messages) != 1 || len(jobs) != 0 {
+		t.Fatal("legacy snapshot discarded by bulk-only generation rule")
+	}
+}
+func TestSnapshotOutbound_RecoveryCheckpointRenewsPublication(t *testing.T) {
+	t.Parallel()
+	g := outboundSnapshotLeader(t, &captureTransport{})
+	for _, index := range []uint64{g.applied, g.applied} {
+		before := g.snapshotPublication
+		term, err := g.ms.Term(index)
+		must(t, err)
+		data, err := encodeSnapshot(g.opts, []byte("checkpoint"), g.authority)
+		must(t, err)
+		g.pending = &writeJob{kind: writeRecoveryCheckpoint, snapshot: raftpb.Snapshot{Data: data,
+			Metadata: raftpb.SnapshotMetadata{Index: index, Term: term, ConfState: copyConf(g.cs)}},
+			request: &request{reply: make(chan response, 1)}, proof: new(model.CheckpointProof)}
+		must(t, g.finishRecoveryCheckpoint())
+		if g.snapshotPublication != before+1 {
+			t.Fatal("checkpoint artifact reused publication generation")
+		}
 	}
 }

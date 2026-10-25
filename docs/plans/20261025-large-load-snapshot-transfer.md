@@ -60,6 +60,19 @@ Target §9.4 requires managed ports to forward exact-attempt worker progress int
 
 The target's historical final `make lint` command means full validation; on the inspected checkout its actual command is `make lint-full`. Do not change the target design merely to retain a stale target name.
 
+## Review checkpoint after Task 8
+
+Review baseline: `251a594`; findings in review Thread 3. The next review is due after six subsequent implementation commits, including these corrections.
+
+- [x] P1-1: gate consumption of the bounded owned-ingress queue at a safe Ready boundary; retain defensive handler checks and verify queued payload ownership through write/timer stalls.
+- [x] P1-2: preserve immediate legacy `_meta`/standalone snapshot failure reports; retain managed exact-attempt backoff and non-lossy mailbox.
+- [x] P2-1: advance snapshot publication on both recovery-checkpoint publication paths and require a nonzero digest generation only for bulk jobs.
+- [x] P2-4: use the write job's exact ingress ticket during Restore instead of leaving the field write-only.
+- [ ] P2-2: remove idle voter-map allocation and avoid repeated report-deadline scans/timer resets.
+- [ ] P2-3a: reduce duplicate-chunk allocation, redundant contexts and per-chunk wake-channel allocation.
+- [ ] P2-3b: Task 12 must implement/verify constant-time Authorize through exact routing indexes.
+- [ ] P2-5: preserve a transfer's observation ID when moving from active state into completed history.
+
 ## Task index
 
 | Task | Goal | Prerequisites | Approximate non-generated LOC |
@@ -148,7 +161,7 @@ The target's historical final `make lint` command means full validation; on the 
 - [x] Add SnapshotIngress with cached `raftstate.Snapshot` and one Done callback, SnapshotBounds, SnapshotPreflight and the exact methods from Appendix B. Give enqueue ownership an explicit enqueued/not-enqueued result; caller cancellation does not release enqueued payloads.
 - [x] PrepareOwnedSnapshot fully decodes/validates the envelope on the caller worker using immutable engine options. JSON decode is not claimed to be interruptible: cancellation waits for actual return before releasing buffers.
 - [x] Publish exact-run monotonic term/commit lower bounds for cheap obsolescence checks. Cached bounds prove only obsolescence; they cannot authorize acceptance, restore or a native reply.
-- [x] Gate header-only preflight and owned ingress: no pending write, Ready timer, full/header ticket or outstanding Ready. Validate nonzero/consistent terms/index before Step; closed gate returns busy without Step.
+- [x] Enable the bounded header-only/owned ingress queue only with no pending write, Ready timer, full/header ticket or outstanding Ready. Queued work waits while busy; defensive handler checks still refuse a closed boundary without Step. Validate nonzero/consistent terms/index before Step.
 - [x] Implement header-only not_needed only when the owner immediately proves lower positive term or index <= commit. Preserve native term/reply/persistence behavior; require no Snapshot in the ensuing Ready. Clear its ticket immediately if no Ready results.
 - [x] Keep one Ready consumer: store the owned ticket, let existing beginReady classify install versus skip, and apply dynamic authority-progress validation only to a selected snapshot. Reuse cached state for Restore and avoid cloning the immutable received payload again.
 - [x] Invoke Done exactly once on refusal, skip, successful persistence/Restore, or joined failure. Abnormal shutdown callbacks run after all engine workers join and before closing done; never release a buffer while the writer still owns it.
@@ -306,6 +319,8 @@ The target's historical final `make lint` command means full validation; on the 
 - [ ] Retain completed diagnostics through the observation-only facade fallback; stale sessions cannot mutate it or redirect into a new host/run.
 - [ ] Add resolved snapshot deadlines to managed delivery records and preserve ordinary EffectTimeout. Store attempt token for non-lossy reports and terminal CAS between expiry/Ack.
 - [ ] Keep `engineTransport.PrepareSnapshot` selection and rejecting constructor/ordinary-ingress behavior deferred to Task 15. Private adapters may delegate internally for focused tests but must not accidentally satisfy the selecting interface early.
+
+- [ ] Resolve review P2-3b: Authorize/revalidation on each chunk must use constant-time exact owner/peer routing indexes, without a topology scan or remote I/O.
 
 #### Verification
 

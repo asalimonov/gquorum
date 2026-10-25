@@ -504,7 +504,8 @@ func (g *Group) ReportSnapshot(id uint64, status raft.SnapshotStatus) {
 		attempt = record.attempt
 	}
 	g.snapshotReportMu.Unlock()
-	g.ReportSnapshotAttempt(attempt, status)
+	// Legacy _meta and standalone callers retain immediate native reports.
+	g.recordSnapshotReport(attempt, status, snapshotLegacyReport)
 }
 func copyConf(cs raftpb.ConfState) raftpb.ConfState {
 	cs.Voters = slices.Clone(cs.Voters)

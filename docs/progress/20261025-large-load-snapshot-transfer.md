@@ -179,3 +179,23 @@ Verified
 Notes
 - No new root files, persistent encodings, listeners or large payloads. Sender, network RPC and managed production activation remain in Tasks 9–15.
 - Review request will pin this completed checkpoint and include target/brainstorm/plan. The earlier plan-review session-limit response is not claimed as a completed review.
+
+## Review 1 — reliability and compatibility corrections
+
+Date: 2026-10-26. Commit: this correction commit. Review anchor: 251a594. This is the first implementation commit after the anchor; five more commits trigger the next requested colleague review.
+
+Findings accepted and fixed
+- P1-1: the engine now consumes owned snapshot/preflight requests only at a safe Ready boundary. Fully prepared data waits in the existing bounded queue through a writer stall or WAL batching timer. Handler refusal remains a defensive invariant check.
+- P1-2: legacy ReportSnapshot retains immediate native delivery, including failure, through the non-lossy mailbox. Managed exact-attempt reports alone use the cooldown policy.
+- P2-1: recovery checkpoint publication/normalization increments the publication generation; legacy snapshots do not require the bulk digest generation.
+- P2-4: Restore now reads and validates the exact ingress ticket bound to its persisted write job.
+
+Verified
+- make test: all 2,259 tests across 62 reports/five modules pass (11.507s); report test-reports/unit/20261025T185952.913055Z-2jlssmiu/report.md.
+- Pending make lint, focused go vet ./internal/raftengine and git diff --check: pass.
+- Focused functional SnapshotIngress/Outbound race tests: pass (1.420s), including queued handoff through a blocked HardState write and explicit Ready timer, immediate legacy native reports for _meta and standalone engines, and both recovery publication paths.
+- Focused SnapshotReports unit race: pass (1.299s).
+- Functional regressions: internal/raftengine, internal/metaservice, load and tests/recovery all pass (5.885s / 23.294s / 1.613s / 54.947s).
+
+Remaining review work
+- P2-2, P2-3a and P2-5 form the next performance/observation checkpoint. Constant-time Authorize remains an explicit Task 12 wiring check. The full response and dispositions are retained in review Thread 3; no gRPC/Host runtime verification is claimed yet.

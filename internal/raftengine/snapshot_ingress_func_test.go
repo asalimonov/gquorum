@@ -137,19 +137,18 @@ func TestSnapshotIngress_InstalledAfterWriteAndRestore(t *testing.T) {
 	}
 	busy := ingressMessage(t, g, 10)
 	busyDone := ingressDone(&busy)
-	if err := g.StepOwnedSnapshot(testContext(t), busy); !errors.Is(err, fault.ErrOverloaded) {
+	busyCtx, cancelBusy := context.WithCancel(t.Context())
+	defer cancelBusy()
+	busyReturned := make(chan error, 1)
+	go func() { busyReturned <- g.StepOwnedSnapshot(busyCtx, busy) }()
+	eventually(t, func() bool { return len(g.snapshotIngress) == 1 })
+	expectIngressHeld(t, busyDone)
+	cancelBusy()
+	if err := <-busyReturned; !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
-	if result := awaitIngressDone(t, busyDone); result.outcome != SnapshotInstallFailed {
-		t.Fatal(result)
-	}
-	header := busy.Message
-	ss := *header.Snapshot
-	ss.Data = nil
-	header.Snapshot = &ss
-	if _, err := g.PreflightSnapshot(testContext(t), header); !errors.Is(err, fault.ErrOverloaded) {
-		t.Fatal(err)
-	}
+	expectIngressHeld(t, busyDone)
+
 	expectIngressHeld(t, done)
 	releaseWrite()
 	select {
@@ -164,6 +163,9 @@ func TestSnapshotIngress_InstalledAfterWriteAndRestore(t *testing.T) {
 	releaseRestore()
 	result := awaitIngressDone(t, done)
 	if result.err != nil || result.outcome != SnapshotInstalled {
+		t.Fatal(result)
+	}
+	if result := awaitIngressDone(t, busyDone); result.outcome != SnapshotInstallFailed || !errors.Is(result.err, context.Canceled) {
 		t.Fatal(result)
 	}
 	eventually(t, func() bool { return g.Status().Applied == 9 })
@@ -403,5 +405,94 @@ func TestSnapshotIngress_MatchingLogSkipsOfferedApplication(t *testing.T) {
 	must(t, g.finishWrite(job.kind))
 	if g.applied != 2 || len(g.opts.Machine.(*machine).values()) != 0 {
 		t.Fatal("fast-forward lost native commit or restored offered data")
+	}
+}
+
+type ingressReadyGate struct {
+	storage.Store
+	entered, release chan struct{}
+	once             sync.Once
+}
+
+func (s *ingressReadyGate) SaveReady(ctx context.Context, group string, ready storage.ReadyWrite) error {
+	s.once.Do(func() { close(s.entered) })
+	<-s.release
+	return s.Store.SaveReady(ctx, group, ready)
+}
+func TestSnapshotIngress_QueuedPayloadSurvivesBusyHardStateWrite(t *testing.T) {
+	t.Parallel()
+	gate := &ingressReadyGate{Store: ingressMemoryStore(t), entered: make(chan struct{}), release: make(chan struct{})}
+	g := ingressGroup(t, gate, &machine{})
+	release := closeIngressGate(t, gate.release)
+	must(t, g.Start(t.Context()))
+	must(t, g.WaitReady(testContext(t)))
+	must(t, g.Step(testContext(t), raftpb.Message{Type: raftpb.MsgHeartbeat, From: 1, To: 2, Term: 2}))
+	select {
+	case <-gate.entered:
+	case <-testContext(t).Done():
+		t.Fatal("HardState write not reached")
+	}
+	in := ingressMessage(t, g, 9)
+	done := ingressDone(&in)
+	returned := make(chan error, 1)
+	go func() { returned <- g.StepOwnedSnapshot(testContext(t), in) }()
+	eventually(t, func() bool { return len(g.snapshotIngress) == 1 })
+	expectIngressHeld(t, done)
+	header := in.Message
+	ss := *header.Snapshot
+	ss.Data = nil
+	header.Snapshot = &ss
+	preflight := make(chan SnapshotPreflight, 1)
+	preflightErr := make(chan error, 1)
+	go func() {
+		result, err := g.PreflightSnapshot(testContext(t), header)
+		preflight <- result
+		preflightErr <- err
+	}()
+	eventually(t, func() bool { return len(g.snapshotIngress) == 2 })
+	release()
+	must(t, <-returned)
+	if result := awaitIngressDone(t, done); result.outcome != SnapshotInstalled || result.err != nil {
+		t.Fatal(result)
+	}
+	select {
+	case result := <-preflight:
+		must(t, <-preflightErr)
+		if !result.NotNeeded || !result.HeaderStepped {
+			t.Fatal(result)
+		}
+	case <-testContext(t).Done():
+		t.Fatal("queued preflight did not finish")
+	}
+}
+func TestSnapshotIngress_ReadyTimerDefersQueueConsumption(t *testing.T) {
+	t.Parallel()
+	g := ingressGroup(t, ingressMemoryStore(t), &machine{})
+	g.ctx = t.Context()
+	in := ingressMessage(t, g, 9)
+	done := ingressDone(&in)
+	req := &request{ctx: t.Context(), ownedSnapshot: &ownedSnapshotTicket{ingress: in}, reply: make(chan response, 1)}
+	g.snapshotIngress <- req
+	marker := &request{ctx: t.Context(), reply: make(chan response, 1)}
+	g.inbound <- marker
+	state := loopState{readyTimer: time.NewTimer(time.Hour)}
+	defer state.stopReadyTimer()
+	if !g.receiveLoopEvent(&state) {
+		t.Fatal("loop stopped")
+	}
+	must(t, (<-marker.reply).err)
+	if len(g.snapshotIngress) != 1 {
+		t.Fatal("owned payload consumed during Ready batching")
+	}
+	expectIngressHeld(t, done)
+	state.readyTimer.Stop()
+	state.readyTimer = nil
+	if !g.receiveLoopEvent(&state) {
+		t.Fatal("loop stopped")
+	}
+	must(t, (<-req.reply).err)
+	settleIngressReady(t, g)
+	if result := awaitIngressDone(t, done); result.outcome != SnapshotInstalled {
+		t.Fatal(result)
 	}
 }

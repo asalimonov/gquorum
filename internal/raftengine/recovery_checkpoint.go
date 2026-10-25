@@ -3,6 +3,7 @@ package raftengine
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"sync"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -173,6 +174,9 @@ func (g *Group) finishRecoveryCheckpoint() error {
 		answer(job.request, Result{}, nil)
 		return nil
 	}
+	if g.snapshotPublication == math.MaxUint64 {
+		return fault.ErrOverloaded
+	}
 	if job.snapshot.Metadata.Index > g.snapshotIndex {
 		cs := copyConf(job.snapshot.Metadata.ConfState)
 		if _, err := g.ms.CreateSnapshot(job.snapshot.Metadata.Index, &cs, job.snapshot.Data); err != nil {
@@ -184,6 +188,7 @@ func (g *Group) finishRecoveryCheckpoint() error {
 	} else {
 		g.checkpointMemory.normalize(job.snapshot)
 	}
+	g.snapshotPublication++
 	g.snapshotIndex = job.snapshot.Metadata.Index
 	data, err := json.Marshal(*job.proof)
 	if err != nil {

@@ -29,7 +29,7 @@ func (g *Group) prepareSnapshotOffer(m raftpb.Message) (SnapshotOffer, error) {
 	status := g.rn.Status()
 	g.refreshSnapshotEpochStatus(status)
 	if g.snapshotEpoch == nil || m.Term != g.snapshotEpochTerm || m.Snapshot == nil ||
-		m.From != g.opts.ReplicaID || g.snapshotPublication == 0 || g.snapshotEpoch.Err() != nil {
+		m.From != g.opts.ReplicaID || g.snapshotEpoch.Err() != nil {
 		return SnapshotOffer{}, fault.ErrNotLeader
 	}
 	progress, present := status.Progress[m.To]
@@ -163,6 +163,10 @@ func (g *Group) prepareReadySnapshot(m raftpb.Message, bulk SnapshotJobTransport
 	}
 	if bulk == nil {
 		return nil, false
+	}
+	if offer.PublicationGeneration == 0 {
+		g.ReportSnapshotAttemptError(offer.Attempt, fault.ErrInvalid)
+		return nil, true
 	}
 	job, err := bulk.PrepareSnapshot(offer)
 	if err != nil || job == nil {

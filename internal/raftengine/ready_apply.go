@@ -82,9 +82,13 @@ func (g *Group) restoreReadySnapshot(snapshot raftpb.Snapshot) error {
 	if !raft.IsEmptySnap(snapshot) {
 		var state raftstate.Snapshot
 		var err error
-		owned := g.activeSnapshot != nil && g.activeSnapshot.selected
+		ticket := g.pending.ingress
+		owned := ticket != nil && ticket.selected
 		if owned {
-			state = g.activeSnapshot.ingress.Decoded
+			if ticket != g.activeSnapshot {
+				return fault.New(fault.Invalid, "snapshot write lost its owned ingress ticket", nil)
+			}
+			state = ticket.ingress.Decoded
 		} else {
 			state, err = g.decodeSnapshot(snapshot)
 			if err != nil {

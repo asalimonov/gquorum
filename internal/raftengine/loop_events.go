@@ -76,6 +76,10 @@ func (g *Group) receiveLoopEvent(state *loopState) bool {
 	if g.pending == nil && state.readyTimer == nil {
 		snapshotC = g.snapshots
 	}
+	var ingressC chan *request
+	if g.snapshotBoundaryReady(state) {
+		ingressC = g.snapshotIngress
+	}
 	var readyC <-chan time.Time
 	controlC := g.controls
 	if state.readyTimer != nil {
@@ -107,7 +111,7 @@ func (g *Group) receiveLoopEvent(state *loopState) bool {
 		g.admitRead(req)
 	case req := <-g.proposals:
 		g.handleProposal(req)
-	case req := <-g.snapshotIngress:
+	case req := <-ingressC:
 		if req.ownedSnapshot != nil {
 			g.handleOwnedSnapshot(req, state)
 		} else {

@@ -22,6 +22,7 @@ const (
 	snapshotAdmittedFailure snapshotFailureKind = iota
 	snapshotCapacityRefusal
 	snapshotPermanentRefusal
+	snapshotLegacyReport
 )
 
 type snapshotReportState struct {
@@ -88,6 +89,8 @@ func (g *Group) recordSnapshotReport(a SnapshotAttempt, result raft.SnapshotStat
 
 func snapshotFailureDelay(record *snapshotReportState, kind snapshotFailureKind) time.Duration {
 	switch kind {
+	case snapshotLegacyReport:
+		return 0
 	case snapshotCapacityRefusal:
 		// Resource retry jitter is metadata-only; no payload or permit is retained.
 		//nolint:gosec // Retry jitter is not security-sensitive.
