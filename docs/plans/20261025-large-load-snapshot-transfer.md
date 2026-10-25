@@ -5,7 +5,7 @@
 **Project source:** `../..` relative to this plan (repository root `.`)
 **Branch:** `feat/large-snapshots-transfer`
 **Source checkout inspected:** `646e9c1` (implementation baseline `14a54c2`, transport-document correction `2ba951a`, current lint/testing updates in `646e9c1`)
-**Target architecture SHA256:** `c3ed12ab7460b9366dc5345e8629ea3ec8cf6a95cf23babad285b2c4ccaa5f56` (current target including implementation refinements through Task 14)
+**Target architecture SHA256:** `e01548aafc9990dc5237a2d8c4ce6ba7ceead87037c9a5e20880ed7d8af23d15` (current target including implementation refinements through Task 16)
 **Target architecture:** [20261025-large-load-snapshot-transfer-target.md](../brainstorms/20261025-large-load-snapshot-transfer-target.md)
 **Full brainstorm log:** [20261025-large-load-snapshot-transfer.md](../brainstorms/20261025-large-load-snapshot-transfer.md)
 **Review history:** [feature review thread](../review/feat_large-snapshots-transfer.md)
@@ -387,17 +387,17 @@ Review baseline: `251a594`; findings in review Thread 3. The original six-commit
 **Files:** tests/cluster/testapp synthetic FSM, snapshot service/transport decorators, authenticated hooks; tests/cluster Spec/config helpers and fixture tests.
 **References:** target §9.5, §10.1–10.2 and §8.5 failure matrix; current testapp identity/fault-control contracts.
 
-- [ ] Implement a deterministic synthetic application state machine selected only by explicit fixture configuration/control. Its Snapshot generates real bytes containing seed/version, logical counter and opaque staging/replay records; Restore checks their full digest and semantics. No checked-in payload or giant HTTP response.
-- [ ] Add bounded authenticated commands to configure generator size/seed, force local snapshot, observe encoded transport length/digest/index and select exact phase barriers. Mutation paths stay on public Node/Group/Service/Transport APIs; no private imports.
-- [ ] Extend existing migration decorators with snapshot-specific lost admission/chunk/final Ack, delay/disconnect/corruption, and before/after handoff/persistence/Restore controls. Bind every control to exact node/process/group/replica identity and ensure drop produces failure rather than false success.
-- [ ] Record bounded phase/progress/resource observations, with accepted handoff distinct from installed state and header-only not_needed. Counters cannot infer installation from ingress acceptance.
-- [ ] Plumb per-case snapshot options through existing Spec/app configuration and maintain exactly the existing meta/load listeners. Synthetic allocation starts only when the selected test explicitly requests it; ordinary startup remains small.
-- [ ] Add fixture unit/local functional regressions for authentication, successor refusal, deterministic round-trip content, callback cancellation and joined cleanup. Keep actual multi-node scenarios for Task 17.
+- [x] Implement a deterministic synthetic application state machine selected only by explicit fixture configuration/control. Its Snapshot generates real bytes containing seed/version, logical counter and opaque staging/replay records; Restore checks their full digest and semantics. No checked-in payload or giant HTTP response.
+- [x] Add bounded authenticated commands to configure generator size/seed, force local snapshot, observe encoded transport length/digest/index and select exact phase barriers. Mutation paths stay on public Node/Group/Service/Transport APIs; no private imports.
+- [x] Extend existing migration decorators with snapshot-specific lost admission/chunk/final Ack, delay/disconnect/corruption, and before/after handoff/persistence/Restore controls. Bind every control to exact node/process/group/replica identity and ensure drop produces failure rather than false success.
+- [x] Record bounded phase/progress/resource observations, with accepted handoff distinct from installed state and header-only not_needed. Counters cannot infer installation from ingress acceptance.
+- [x] Plumb per-case snapshot options through existing Spec/app configuration and maintain exactly the existing meta/load listeners. Synthetic allocation starts only when the selected test explicitly requests it; ordinary startup remains small.
+- [x] Add fixture unit/local functional regressions for authentication, successor refusal, deterministic round-trip content, callback cancellation and joined cleanup. Keep actual multi-node scenarios for Task 17.
 
 #### Verification
 
-- [ ] `make test`; focused testapp vet/functional/race checks; compile process cases without executing TestMain. Use small generated data in these local checks.
-- [ ] Confirm no `testdata` payload, runtime blob, implicit root/path or extra listener was introduced.
+- [x] `make test`; focused testapp vet/functional/race checks; compile process cases without executing TestMain. Use small generated data in these local checks.
+- [x] Confirm no `testdata` payload, runtime blob, implicit root/path or extra listener was introduced.
 
 ### Task 17: Add small process regressions and the named repair scenario
 

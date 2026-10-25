@@ -29,6 +29,8 @@ type walControl struct {
 	release  chan struct{}
 }
 type controlledStore struct {
+	app  *application
+	node topology.Identity
 	storage.Store
 	hooks *clusterHooks
 	key   walKey
@@ -45,7 +47,7 @@ func (a *application) clusterStore(base storage.Store, group string, replica uin
 	if h.wals[key] == nil {
 		h.wals[key] = &walControl{}
 	}
-	return controlledStore{Store: base, hooks: h, key: key}
+	return controlledStore{app: a, node: a.snapshotNodeIdentity(), Store: base, hooks: h, key: key}
 }
 func (s controlledStore) before(ctx context.Context, entries int) error {
 	h := s.hooks
@@ -119,7 +121,13 @@ func (s controlledStore) SaveSnapshot(ctx context.Context, group string, snapsho
 	if err != nil {
 		return err
 	}
-	return s.Store.SaveSnapshot(ctx, group, snapshot)
+	if err = s.app.snapshotPhase(ctx, s.node, s.key, "before_persist", 0); err != nil {
+		return err
+	}
+	if err = s.Store.SaveSnapshot(ctx, group, snapshot); err != nil {
+		return err
+	}
+	return s.app.snapshotPhase(ctx, s.node, s.key, "after_persist", 0)
 }
 func (h *clusterHooks) walMetrics(key walKey) walCounters {
 	h.mu.Lock()

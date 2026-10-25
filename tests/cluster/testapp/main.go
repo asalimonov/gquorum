@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum"
+	"github.com/asalimonov/gquorum/load/snapshot"
 	"github.com/asalimonov/gquorum/scheduling"
 	"github.com/asalimonov/gquorum/topology"
 	"github.com/asalimonov/gquorum/util"
@@ -28,6 +29,7 @@ type peer struct {
 	HTTPAddress string            `json:"http_address"`
 }
 type config struct {
+	SnapshotTransfer                                     snapshot.Options
 	NodeName, ClusterID, InstanceID, DataDir, Credential string
 	NodeType                                             topology.NodeType
 	MetaListen, LoadListen, HTTPListen                   string
@@ -95,6 +97,7 @@ func main() {
 	flag.DurationVar(&c.Retention, "retention", 0, "fixture: quarantine retention; zero uses library default")
 	flag.DurationVar(&c.WALWriteWait, "wal-write-wait", 0, "load WAL coalescing wait")
 	flag.DurationVar(&c.ProposalTimeout, "proposal-timeout", 0, "load proposal result timeout; zero selects the library default")
+	flag.Func("snapshot-transfer", "fixture: JSON snapshot transfer options", func(value string) error { return decodeJSON([]byte(value), &c.SnapshotTransfer) })
 	flag.Uint64Var(&c.SnapshotThreshold, "snapshot-threshold", 64, "load snapshot interval in applied entries")
 	flag.BoolVar(&c.Scheduling.Disabled, "disable-reconciliation", false, "disable automatic load replica repair")
 	flag.DurationVar(&c.Scheduling.Interval, "reconciliation-interval", 0, "automatic repair observation interval; zero selects the library default")

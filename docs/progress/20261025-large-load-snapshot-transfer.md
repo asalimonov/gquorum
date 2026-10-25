@@ -378,3 +378,23 @@ Findings
 - The new integration test's first cleanup used t.Context, which Go cancels before cleanup. Switched only cleanup to a fresh bounded background context; the actual protocol run and ownership assertions remain unchanged.
 - An overlapping broad run timed out the existing storage-lease test during operation convergence and its intentional first Close failure. It passed alone (4.155s), then the complete public suite passed sequentially without changing its timeout or production storage behavior.
 - No runtime rollout flag, giant unary fallback, additional listener, root file or persistent format change. The unrelated staged .gitignore change remains excluded.
+
+## Task 16 — explicit generated state and identity-bound phase controls
+
+Date: 2026-10-26. Commit: this task commit; prior 0c1daca.
+
+Implemented
+- Explicit replicated synthetic configuration extends the fixture FSM; ordinary state remains small JSON. Generated binary snapshots preserve KV/dedup state, logical counter, prepared/replay records, deterministic seeded bytes and full integrity digest. Restore validates all bytes and semantics with bounded scratch; cancellable block hashing/generation avoids another full fixture allocation.
+- Authenticated group/replica endpoints configure generation through public Group.Propose, force snapshots and return compact state/manifest/progress observations. Generation above the local encoded allowance refuses before materializing data. Requested encoded budgets reserve 64 KiB engine framing headroom; qualification observes actual manifest length/digest/index/term.
+- Exact node/process/group/replica controls implement one-shot admission/chunk/final Ack loss at actual wire writes, bounded chunk corruption/delay and before/after Finish/handoff, persistence and Restore gates. Canceled gates join and retain active counts until actual return. Old identities cannot affect successors.
+- Snapshot options now flow from process Spec through one JSON flag into Node creation. Borrowed fixture WAL provides persistence gates; Node-owned WAL explicitly refuses them. Existing meta/load listeners and transport services remain unchanged.
+
+Verified
+- make test: 2,306 tests across 62 reports/five modules pass (18.933s); report test-reports/unit/20261025T213712.819137Z-6vornj6k/report.md.
+- Full fixture functional race suite passes (16.782s); final focused generator/control/authentication/cancellation race checks pass (2.867s).
+- Pending owning vet/lint, clustertest/example compile variants, git diff --check and explicit process go test -c compilation pass. No TestMain/Docker or large generator ran.
+- Pure cases verify deterministic complete-state restore plus committed tail/dedup, corruption/truncation/forged digest/JSON-only rejection, no publication on failed restore, cancellation and small ordinary snapshots. Functional controls reject absent credentials/stale identities and oversize generation; phase cancellation and one-shot wire loss/corruption preserve ownership and borrowed data.
+
+Notes
+- Initial identity capture assumed every focused fixture had a live Node; fixed capture to tolerate protocol-only fixtures while running controls retain exact identity checks. Existing tests remain green.
+- No payload/testdata file, implicit storage root, extra listener or new root file. Generated qualification remains opt-in and unexecuted until the process tasks. Unrelated staged .gitignore remains preserved and excluded.

@@ -337,7 +337,7 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 		Meta: gquorum.MetaOptions{SessionTTL: cfg.SessionTTL, VoterConfig: cfg.MetaVoterConfig,
 			Timing:  gquorum.MetaTiming{TickInterval: cfg.TickInterval, ElectionTicks: cfg.ElectionTicks},
 			Network: gquorum.MetaNetworkOptions{Listener: ls.meta, AdvertiseAddress: cfg.MetaAddress, AllowPlaintext: true, ClusterCredential: []byte(cfg.Credential), Resolver: metaResolver{a}}},
-		Loads: gquorum.LoadOptions{Factory: a.newReplica, Retire: a.retireReplica, Transport: loadTransport{app: a},
+		Loads: gquorum.LoadOptions{SnapshotTransfer: cfg.SnapshotTransfer, Factory: a.newReplica, Retire: a.retireReplica, Transport: loadTransport{app: a},
 			// Process tests exercise two collection passes across a crash. Keep
 			// maintenance prompt; retention still decides whether deletion is due.
 			RetirementInterval: 250 * time.Millisecond,

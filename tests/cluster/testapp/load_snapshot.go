@@ -45,7 +45,7 @@ func (a *application) prepareLoadBinding(options *gquorum.NodeOptions) (*fixture
 	return binding, nil
 }
 func (b *fixtureLoadBinding) bind(a *application, n gquorum.Node) error {
-	b.snapshots = &fixtureSnapshotService{Service: n.LoadSnapshots(), app: a, receipts: make(map[snapshot.Key]fixtureSnapshotReceipt)}
+	b.snapshots = &fixtureSnapshotService{Service: n.LoadSnapshots(), app: a, receipts: make(map[snapshot.Key]fixtureSnapshotReceipt), faults: fixtureSnapshotFaults{write: a.snapshotWrite, sendAck: a.snapshotWireAck}}
 	ingress := &fixtureLoadIngress{Node: n, app: a, snapshots: b.snapshots}
 	if err := b.transport.Bind(ingress); err != nil {
 		return err
@@ -195,7 +195,13 @@ func (s *fixtureSnapshotService) Finish(ctx context.Context, session snapshot.Se
 			return snapshot.Ack{}, err
 		}
 	}
+	if err := s.app.snapshotPhase(ctx, session.Key.To.Node, walKey{session.Key.To.Replica.GroupID, session.Key.To.Replica.ReplicaID}, "before_finish", 0); err != nil {
+		return snapshot.Ack{}, err
+	}
 	ack, err := s.Service.Finish(ctx, session)
+	if err == nil {
+		err = s.app.snapshotPhase(ctx, session.Key.To.Node, walKey{session.Key.To.Replica.GroupID, session.Key.To.Replica.ReplicaID}, "after_handoff", 0)
+	}
 	if err == nil {
 		err = s.recordReply(ctx, ack)
 	}
@@ -232,6 +238,7 @@ func (t loadTransport) SendSnapshot(ctx context.Context, send snapshot.Send) (sn
 	if t.binding == nil {
 		return snapshot.Ack{}, &snapshot.TransferError{Reason: snapshot.ReasonUnsupported, Cause: fault.ErrUnsupported}
 	}
+	t.app.recordSnapshotOffer(send)
 	return t.binding.transport.SendSnapshot(ctx, send)
 }
 
