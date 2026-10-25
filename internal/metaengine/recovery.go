@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"math"
 	"slices"
 	"strings"
@@ -24,22 +23,13 @@ func (m *Machine) RecoveryState() *model.ImportState {
 	return m.scoped.recoveryPlacementState()
 }
 
-func recoveryRequestDigest(proposal model.ImportProposal) (string, error) {
-	data, err := json.Marshal(proposal)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:]), nil
-}
-
 func validRecoveryDigest(value string) bool {
 	decoded, err := hex.DecodeString(value)
 	return err == nil && len(decoded) == sha256.Size && strings.ToLower(value) == value
 }
 
 func (s *scopedState) applyRecoveryImport(index uint64, p model.ImportProposal) (proposalApplication, error) {
-	digest, err := recoveryRequestDigest(p)
+	digest, err := model.ImportRequestDigest(p)
 	if err != nil {
 		return proposalApplication{}, err
 	}

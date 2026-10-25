@@ -147,3 +147,7 @@ func (g *Group) recoveryFoundingTime(ordinary time.Time) time.Time {
 	}
 	return ordinary
 }
+
+// RecoveryInProgress exposes the local applied import gate to its owning Node.
+// It is an authorization refusal check, not a quorum or readiness observation.
+func (g *Group) RecoveryInProgress() bool { return g.recoveryPending() }

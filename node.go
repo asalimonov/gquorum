@@ -10,6 +10,8 @@ import (
 	"github.com/asalimonov/gquorum/internal/managed"
 	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/internal/recoverydisk"
+	model "github.com/asalimonov/gquorum/internal/recoverymodel"
+	"github.com/asalimonov/gquorum/internal/recoveryruntime"
 	"github.com/asalimonov/gquorum/internal/watchstate"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/storage"
@@ -129,6 +131,11 @@ type node struct {
 	retirement              storage.RetirementStore
 	ownedWAL                *walstore.Store
 	storageOwner            *recoverydisk.Owner
+	recoveryJournal         *recoverydisk.Journal
+	recoveryCoordinator     *recoveryruntime.Coordinator
+	recoveryMetaPort        func(recoveryruntime.MetaPort) recoveryruntime.MetaPort // instance-owned protocol test seam
+	recoveryManifest        *model.LocalManifest
+	limitsExplicit          bool
 	ownedMemory             *memstore.Store
 	lifecycle               *lifecycleRunner
 	pending                 *topology.Identity
@@ -153,14 +160,15 @@ func NewNode(input NodeOptions) (Node, error) {
 	}
 	opts, meta := resolved.node, resolved.meta
 	n := &node{
-		opts:        opts,
-		metaOpts:    meta,
-		state:       NodeNew,
-		readySignal: make(chan struct{}),
-		wake:        make(chan struct{}, 1),
-		removal:     make(chan struct{}, 1),
-		retryStop:   make(chan *nodeStopAttempt, 1),
-		stopped:     make(chan struct{}),
+		opts:           opts,
+		limitsExplicit: input.Limits != (topology.Limits{}),
+		metaOpts:       meta,
+		state:          NodeNew,
+		readySignal:    make(chan struct{}),
+		wake:           make(chan struct{}, 1),
+		removal:        make(chan struct{}, 1),
+		retryStop:      make(chan *nodeStopAttempt, 1),
+		stopped:        make(chan struct{}),
 	}
 	n.cluster = &clusterView{node: n}
 	n.observation = NodeObservation{Revision: 1, Status: n.Status()}

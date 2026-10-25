@@ -369,8 +369,8 @@ func TestRecoveryPrivateArchivePreservesOriginalsAndPublicDestructiveGate(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := node.Start(t.Context()); !errors.Is(err, fault.ErrUnavailable) {
-				t.Fatal("AwaitingStart bypassed the temporary startup guard", err)
+			if err := node.Start(t.Context()); !errors.Is(err, fault.ErrIdentityMismatch) {
+				t.Fatal("archived A identity was accepted for B startup", err)
 			}
 			stopAuthorityNode(t, node)
 			for source, digest := range before {

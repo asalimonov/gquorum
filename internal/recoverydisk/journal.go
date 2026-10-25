@@ -170,13 +170,7 @@ func (j *Journal) View() recoverymodel.LocalManifest {
 }
 
 // Paths returns canonical configuration bound to the held root leases.
-func (owner *Owner) Paths() recoverymodel.Paths {
-	paths := recoverymodel.Paths{StorageDir: owner.system.path}
-	if owner.wal != nil {
-		paths.LoadWALDir = owner.wal.path
-	}
-	return paths
-}
+func (owner *Owner) Paths() recoverymodel.Paths { return owner.paths }
 
 func (owner *Owner) clock() time.Time {
 	if owner.now != nil {

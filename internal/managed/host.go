@@ -21,6 +21,7 @@ import (
 	internalmetrics "github.com/asalimonov/gquorum/internal/metrics"
 	"github.com/asalimonov/gquorum/internal/observe"
 	"github.com/asalimonov/gquorum/internal/raftengine"
+	model "github.com/asalimonov/gquorum/internal/recoverymodel"
 	"github.com/asalimonov/gquorum/lifecycle"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/storage"
@@ -93,6 +94,9 @@ type ReplicaStatus struct {
 // Host owns exact replica reservations, application lifetimes, recovery and
 // retirement work.
 type Host struct {
+	recoveryManifest            *model.LocalManifest
+	recoveryImport              *model.ImportState
+	recoveryReleased            bool
 	runFailures                 map[storage.Identity]ReplicaStatus
 	actionWorks                 map[string]*actionWork
 	fenceWorks                  map[string]*fenceWork
@@ -521,7 +525,8 @@ func (h *Host) RecoverAssignments(ctx context.Context) error {
 	refs = slices.Clone(refs)
 	slices.SortFunc(refs, func(a, b load.ReplicaRef) int { return cmp.Compare(a.GroupID, b.GroupID) })
 	h.mu.Lock()
-	start := max(0, slices.IndexFunc(refs, func(ref load.ReplicaRef) bool { return ref.GroupID > h.recoveryCursor }))
+	start := max(0, slices.IndexFunc(refs,
+		func(ref load.ReplicaRef) bool { return ref.GroupID > h.recoveryCursor }))
 	h.mu.Unlock()
 	var failures []error
 	for i := range refs {
@@ -555,7 +560,8 @@ func (h *Host) RecoverAssignments(ctx context.Context) error {
 }
 
 func validateHostConfig(cfg Config) error {
-	if cfg.Authority == nil || cfg.ValidateGrant == nil || cfg.ValidateCourier == nil || cfg.AuthorityFloors == nil {
+	if cfg.Authority == nil || cfg.ValidateGrant == nil || cfg.ValidateCourier == nil ||
+		cfg.AuthorityFloors == nil {
 		return fault.New(fault.Invalid, "managed authority dependencies are required", nil)
 	}
 	if cfg.Identity == nil || cfg.Scope == nil || cfg.LookupRecord == nil || cfg.RecordReplica == nil ||

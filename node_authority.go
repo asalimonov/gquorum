@@ -9,7 +9,7 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/authoritystore"
 	"github.com/asalimonov/gquorum/internal/metastore"
-	"github.com/asalimonov/gquorum/internal/recoverydisk"
+	model "github.com/asalimonov/gquorum/internal/recoverymodel"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -252,7 +252,8 @@ func (n *node) acquireMetaAuthority(id topology.Identity) error {
 			return err
 		}
 		if !meta.Found {
-			return fault.New(fault.Unreadable, "acquired metadata is missing; the same member cannot be recreated", nil)
+			return fault.New(fault.Unreadable,
+				"acquired metadata is missing; the same member cannot be recreated", nil)
 		}
 		if meta.Identity.ClusterID != id.ClusterID || meta.Identity.NodeName != id.NodeName ||
 			meta.Identity.MemberID != id.MemberID {
@@ -270,7 +271,16 @@ func (n *node) acquireMetaAuthority(id topology.Identity) error {
 }
 
 func (n *node) markMetaAcquired(id topology.Identity) error {
-	return n.localAuthority().MarkMetadataAcquired(n.ctx, id)
+	if err := n.localAuthority().MarkMetadataAcquired(n.ctx, id); err != nil {
+		return err
+	}
+	n.mu.RLock()
+	journal := n.recoveryJournal
+	n.mu.RUnlock()
+	if journal != nil && journal.View().Phase == model.JoinReady {
+		return journal.MarkJoined(n.ctx, id)
+	}
+	return nil
 }
 
 func (n *node) acquirePinnedAuthority(pin metastore.Identity) error {
@@ -300,7 +310,7 @@ func (n *node) acquireReadmissionAuthority() error {
 
 func (n *node) inspectFreshLoadStorage() error {
 	if wal := n.opts.Loads.Storage.WAL; wal != nil {
-		retained, err := recoverydisk.HasLiveEvidence(n.ctx, wal.RootDir)
+		retained, err := n.storageOwner.HasLiveLoadEvidence(n.ctx)
 		if err != nil {
 			return err
 		}

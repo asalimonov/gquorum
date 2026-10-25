@@ -52,7 +52,14 @@ func (n *node) SchedulingStatus() topology.SchedulingStatus {
 	}
 	return m.SchedulingStatus()
 }
+
+//revive:disable-next-line:flag-parameter Recovery permits disabling the existing public boolean setting.
 func (n *node) SetSchedulingEnabled(ctx context.Context, enabled bool) error {
+	if enabled {
+		if err := n.recoveryMutationAllowed(); err != nil {
+			return err
+		}
+	}
 	m, err := n.service(ctx, workService)
 	if err != nil {
 		return err

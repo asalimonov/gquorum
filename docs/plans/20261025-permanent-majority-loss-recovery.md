@@ -16,7 +16,7 @@
 
 **Review/clarifications:** [docs/review/feat_permanent-majority-loss-recovery.md](../review/feat_permanent-majority-loss-recovery.md)
 
-**Status:** implementation in progress; Tasks 1–9 complete; next is Node bootstrap/coordinator; checkpoint review closed.
+**Status:** implementation in progress; Tasks 1–10 complete; checkpoint review due; next is durable WAL seeds.
 
 ## Scope and precedence
 
@@ -665,15 +665,15 @@ composition and joined shutdown; owning functional tests.
 **Dependencies:** Tasks 1–9. **Outcome:** exact accepted B startup and coordinator
 ownership, with data/publication held until Tasks 11–12 complete restoration.
 
-- [ ] Implement the coordinator Config, MetaPort, HostPort, New/Start/Stop and
+- [x] Implement the coordinator Config, MetaPort, HostPort, New/Start/Stop and
   readiness/completion methods from Appendix D. Node owns it; it owns no separate
   application lifetime. Private startup/receipt progress must not wait for the
   public readiness gate the coordinator itself will release.
-- [ ] Implement early prepareRecoveryStart under system/WAL ownership, after pure
+- [x] Implement early prepareRecoveryStart under system/WAL ownership, after pure
   option checks and immediately before first B acquisition. Reject Approved/Files/
   Cancelling/Archiving/unsupported rollback and contradictory evidence. Validate
   accepted roots, exact destination/bootstrap mode and pending/historical identity.
-- [ ] Activate a private local recovery-start gate from the accepted rebuild
+- [x] Activate a private local recovery-start gate from the accepted rebuild
   manifest **before metadata founding/start**, including the interval with no
   replicated Recovery record. Disable scheduler/repair ticks and reject public
   Cluster stage/approve/mutations, admission/join and StartLoadGroup with an existing
@@ -685,24 +685,24 @@ ownership, with data/publication held until Tasks 11–12 complete restoration.
   no caller-supplied context/flag can bypass them. Publication/Run remains separately
   gated through readiness validation. Reset joins retain their distinct allowed
   normal-admission path; do not accidentally block the authorized reset join.
-- [ ] Durably mark SuccessorStartedAt before any B authority/meta/WAL creation,
+- [x] Durably mark SuccessorStartedAt before any B authority/meta/WAL creation,
   including reset joins. A failed marker sync permits no B file. The marker never
   clears; existing B evidence without its required pending marker is a conflict.
-- [ ] Preserve whether Limits were explicitly supplied before constructor defaults.
+- [x] Preserve whether Limits were explicitly supplied before constructor defaults.
   At Start adopt accepted source Rules/Limits for zero input, reject conflicting
   explicit values, and derive only private temporary singleton meta voter settings.
   Leave public helper output/original policy unchanged; import restores source policy.
-- [ ] Perform normal OriginFounding v1 admission/session activation, then submit
+- [x] Perform normal OriginFounding v1 admission/session activation, then submit
   the exact stable import request. Retain original IDs/time/actor/comment/CAS on
   uncertain responses and use exact ordinary RetryOperation for failed attempts.
   No blind approval of Latest or unbounded factory/approval retry loop.
-- [ ] Install the recovery barrier/manifest context on the managed host before
+- [x] Install the recovery barrier/manifest context on the managed host before
   ordinary operator actions can create a load. Until seed capability is present,
   refuse those effects explicitly; never allow empty founding during partial work.
-- [ ] Transfer the held WAL lease through OpenWithLease with no release/reacquire
+- [x] Transfer the held WAL lease through OpenWithLease with no release/reacquire
   gap, and preserve ownership on partial acquisition. Join coordinator, managed
   effects/callbacks and stores in dependency order on Stop or failed startup.
-- [ ] Implement reset JoinReady restrictions: named cluster, Join=true, fresh process
+- [x] Implement reset JoinReady restrictions: named cluster, Join=true, fresh process
   identity and normal fresh admission. Record JoinedIdentity/Joined only after exact
   durable acquisition. Reject wrong cluster/founding; interrupted admission retries
   cannot archive the successor again. Terminal history does not veto later valid B
@@ -710,23 +710,23 @@ ownership, with data/publication held until Tasks 11–12 complete restoration.
   Fresh-start load-evidence checks must use the held WAL lease's validated
   archive history, rather than the history-free package helper; otherwise the
   reset's own archive namespace falsely counts as retained live data (review M6).
-- [ ] Hold the private controller between v1 founding and import in an owning test;
+- [x] Hold the private controller between v1 founding and import in an owning test;
   attempt public Stage/Approve/mutation, SetSchedulingEnabled(ctx, true), a scheduler
   tick, StartLoadGroup and a joining protocol request. Prove no intervening topology change occurs while
   internal founding/session/authority progress remains possible, then release the
   controller and complete the same exact import. Test handoff/restart without a gap.
-- [ ] Add functional/race tests for marker failure, admission/stop races, invalid
+- [x] Add functional/race tests for marker failure, admission/stop races, invalid
   phase/root/destination, metadata-only completion, inherited/conflicting limits,
   default/all-founder readiness, lost import response and exact retry ownership.
 
 #### Verification
 
-- [ ] `make test`; Node/metaservice/recoveryruntime functional and race suites.
+- [x] `make test`; Node/metaservice/recoveryruntime functional and race suites.
   Until Task 12 releases the public destructive Run check, prepare these disposable
   startup fixtures through the same private executor, not a public bypass flag.
-- [ ] Assert ordinary nil-recovery startup/shutdown remains unchanged and every
+- [x] Assert ordinary nil-recovery startup/shutdown remains unchanged and every
   pending recovery path is gated before application work/publication.
-- [ ] Verify no premature B acquisition or duplicate WAL lease owner, and that reset
+- [x] Verify no premature B acquisition or duplicate WAL lease owner, and that reset
   cannot silently join a different lineage. Record remaining seed/publication wiring
   as Tasks 11–12 work, not successful recovery.
 

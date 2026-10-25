@@ -37,6 +37,7 @@ type Lease struct {
 // Owner holds system and optional WAL roots until work and callbacks are joined.
 type Owner struct {
 	system, wal *Lease
+	paths       recoverymodel.Paths // immutable after acquisition, including after WAL lease transfer
 	journalMu   sync.Mutex
 	now         func() time.Time
 	boundary    func(string) error
@@ -59,6 +60,10 @@ func Acquire(ctx context.Context, paths recoverymodel.Paths) (*Owner, error) {
 			return nil, errors.Join(fault.New(fault.Invalid, "system root is inside the WAL root", nil),
 				owner.Close())
 		}
+	}
+	owner.paths = recoverymodel.Paths{StorageDir: system.path}
+	if owner.wal != nil {
+		owner.paths.LoadWALDir = owner.wal.path
 	}
 	return owner, nil
 }

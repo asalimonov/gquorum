@@ -6,6 +6,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/recoverymodel"
+	"github.com/asalimonov/gquorum/topology"
 )
 
 // MarkFiles records one exact callback attempt before or after its joined work.
@@ -127,6 +128,27 @@ func (j *Journal) SetPhase(ctx context.Context, phase recoverymodel.Phase, issue
 			at := j.owner.clock()
 			next.CompletedAt = &at
 		}
+		return nil
+	})
+}
+
+// MarkJoined records only an exact durable successor pin acquired by normal admission.
+func (j *Journal) MarkJoined(ctx context.Context, identity topology.Identity) error {
+	return j.change(ctx, func(next *recoverymodel.LocalManifest) error {
+		identity.InstanceID = ""
+		if next.Phase == recoverymodel.Joined {
+			if next.JoinedIdentity == nil || *next.JoinedIdentity != identity {
+				return fault.ErrIdentityMismatch
+			}
+			return nil
+		}
+		if next.Phase != recoverymodel.JoinReady || next.SuccessorStartedAt == nil ||
+			identity.NodeName != next.Identity.NodeName || identity.ClusterID != next.Identity.ClusterID ||
+			identity.MemberID == 0 {
+			return fault.ErrOperationAuthorization
+		}
+		next.JoinedIdentity, next.Phase = &identity, recoverymodel.Joined
+		next.Failure = nil
 		return nil
 	})
 }

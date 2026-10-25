@@ -696,3 +696,92 @@ Handoff
 - Continue Task10 Node early marker/bootstrap/coordinator. Public destructive Run
   remains explicitly gated until seed/publication work in Tasks11–12; Task9 does
   not claim an end-to-end recovered Node. Peer checkpoint follows Task10.
+
+
+## Task 10 — Node early startup, reset admission and recovery control ownership
+Date: 2026-10-25
+
+Implemented
+- Node discovers the unique accepted pending operation under both root leases,
+  validates phase/roots/destination/bootstrap/immutable limits and verifies archived
+  bytes before the first successor marker. The marker is persisted before any B
+  authority/meta/WAL acquisition. Existing unjournaled destination files conflict;
+  missing established Importing/Validating identities refuse instead of refounding.
+  Approved/Files/Cancelling/Archiving remain guarded; rollback remains unsupported.
+- NewNode remembers whether Limits were explicit without I/O. Start inherits
+  accepted rules for zero input, rejects explicit conflicts and privately derives
+  singleton metadata bootstrap policy. Completed matching lineage history supplies
+  retained rules on later ordinary restarts without authorizing source reseeding.
+- Added private recoveryruntime Config/ports and Node-owned coordinator. It waits
+  for metadata replay independently of Node readiness, submits the exact accepted
+  import and confirms full request-digest/source/destination bindings after a lost
+  reply. It follows retained retries, issues at most one successor per Node start,
+  and never blindly approves Latest or loops factory/approval retries.
+- Local manifest gating precedes v1 founding and overlaps replicated restrictions.
+  Source app startup is barred in Host before metadata/operator ingress. Node
+  StartLoadGroup/scheduling enable, metadata mutations/join and repair scheduling
+  cannot bypass that pre-import interval. A private instance-owned MetaPort test
+  seam holds the real service at that boundary; it is not a public option.
+- Metadata-only recovery reaches replicated completion, local Validating, existing
+  serialized readiness hooks, durable Complete and normal retained B restart.
+  Publication methods retain cancellation/join ownership. Stop joins coordinator
+  control/publication before metadata, applications, stores and leases close.
+- Completion joins/detaches the temporary coordinator and manifest identity gate;
+  later normal B readmission is not constrained to the original recovery member.
+  A new host also skips completed recovery scope. No application lifetime is
+  transferred to the coordinator.
+- Owner keeps immutable canonical paths after handing the WAL lease to the owned
+  backend. Journal updates retain exact root binding without releasing/reacquiring
+  the lease. Fresh-start evidence checks use the held lease's validated archive
+  history (review M6), so reset's own backup does not masquerade as live WAL.
+- Reset JoinReady requires the named cluster, Join=true, seeds and fresh admission.
+  Exact post-acquisition callback records JoinedIdentity only after the ordinary
+  metadata pin/authority acquisition. Joined identity is durable, excludes process
+  incarnation and cannot change through a repeated journal call. Interrupted joins
+  stay JoinReady and never archive B or replay A.
+- Shared ImportRequestDigest now lives in recoverymodel and is used by FSM and
+  coordinator. The encoded bytes/fixtures are unchanged. Historical Task7 startup
+  scaffold assertions now expect old-A identity refusal after archive; the public
+  destructive Run guard remains until Task12.
+
+Verified
+- make test: PASS2,099 tests/58 reports, all five modules,8.136s on the settled run.
+  test-reports/unit/20261025T051318.910779Z-s6scf_vz/report.md.
+- make lint: PASS all configured modules/build tags/tools.
+  /tmp/gquorum-task10-qualification-lint.log.
+- Full affected functional -race -p4 -parallel8 -count=1 PASS: root53.383s,
+  managed16.783s, metadata service28.523s, recoverydisk6.264s, coordinator3.768s.
+  /tmp/gquorum-task10-final-functional-race.log. The executor is exercised through
+  root API fixtures; it has no separate functional test files.
+- Final terminal-scope/default+all-founder/paused-import/load-refusal recovery
+  regressions -race PASS14.208s; /tmp/gquorum-task10-terminal-scope-race.log.
+- Changed pure packages -race PASS runtime1.433s/model1.291s/service1.435s/FSM3.857s;
+  /tmp/gquorum-task10-final-unit-race.log. Frozen ordinary/recovery fixtures pass.
+- Real Node tests verify no app factory or handle before seed capability, exact
+  single-founder B identity, source limits inheritance/conflict, wrong cluster/mode,
+  unjournaled B files, missing established B, default/all-founder readiness, old-A
+  refusal, paused pre-import mutation/scheduling gates and lost committed reply.
+- Real metadata service test proves the pre-import singleton is an actual leader
+  with live session while joining and scheduler leadership remain blocked.
+- Marker temp-sync/rename/parent-sync faults preserve no destination acquisition;
+  restart reopens and durably retries the marker. Journals remain writable across
+  WAL lease transfer; exact Joined repeats preserve identity and refuse changes.
+- Coordinator protocol tests confirm lost import/completion replies, exact request
+  mismatch refusal, one retry after retained failed attempts, and cancellation of
+  a deliberately late publication callback: Stop retains ownership, late success
+  cannot publish, no Run release occurs. All are owning-package functional fixtures.
+- Actual reset with archived WAL starts/stops/restarts its ordinary fresh join
+  against an unreachable seed, preserving backups and invoking no A factory.
+  Successful cross-node admission remains in the planned Docker scenarios.
+- make test-sim SIM_SEEDS=1-3 PASS21/21,51.431s; ordinary startup regressions only,
+  no claim of recovery filesystem support under Gosim.
+  test-reports/sim/20261025T051122.233987Z-ln83asu5/report.md.
+- git diff --check PASS. No Docker image change, broad process run or Meridian work.
+
+Expected remaining work
+- Tasks11–12 replace explicit private seed/checkpoint/publication refusals for load
+  groups. They are installed before factories and cannot fall through to empty
+  founding. Metadata-only completion is real; full recovered-load readiness is
+  deliberately not claimed. Public destructive Run stays gated until Task12.
+- The next action is the user-requested colleague checkpoint after Tasks6–10,
+  before proceeding to Task11. Keep the 16-task plan and active overall goal.

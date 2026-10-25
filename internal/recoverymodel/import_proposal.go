@@ -1,6 +1,9 @@
 package recoverymodel
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"slices"
 
 	"github.com/asalimonov/gquorum/storage"
@@ -27,4 +30,14 @@ func ImportFromManifest(manifest LocalManifest) ImportProposal {
 		}
 	}
 	return proposal
+}
+
+// ImportRequestDigest binds the entire stable original proposal across lost replies.
+func ImportRequestDigest(proposal ImportProposal) (string, error) {
+	data, err := json.Marshal(proposal)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
 }

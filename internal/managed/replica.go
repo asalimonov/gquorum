@@ -121,6 +121,9 @@ func (h *Host) acceptGuardedStart(ctx context.Context, ref load.ReplicaRef, why 
 	if h.quiescing || h.stopped || h.ctx.Err() != nil {
 		return nil, fault.ErrStopped
 	}
+	if err := h.recoveryStartAllowedLocked(); err != nil {
+		return nil, err
+	}
 	grant, err := h.startAuthority(ctx, id, node)
 	if err != nil {
 		return nil, err
