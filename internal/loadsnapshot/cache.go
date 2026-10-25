@@ -40,6 +40,9 @@ func (c *Coordinator) appendHistoryLocked(status snapshot.Status) {
 	}
 	c.historySequence++
 	id := c.historySequence
+	c.appendHistoryAtLocked(id, status)
+}
+func (c *Coordinator) appendHistoryAtLocked(id uint64, status snapshot.Status) {
 	status.ErrorReason = status.ErrorReason[:min(len(status.ErrorReason), snapshotTextLimit)]
 	if len(c.history) == snapshotHistoryLimit {
 		copy(c.history, c.history[1:])

@@ -1,6 +1,7 @@
 package loadsnapshot
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"math"
@@ -99,4 +100,41 @@ func (s *memorySnapshotStaging) Close() error {
 	s.closed = true
 	s.broken = nil
 	return nil
+}
+
+// EqualAt compares a written region without exposing or copying its mutable
+// receive buffer. The coordinator's existing mutation pin serializes access.
+func (s *memorySnapshotStaging) EqualAt(ctx context.Context, off uint64, p []byte) (bool, error) {
+	if err := s.available(ctx); err != nil {
+		return false, err
+	}
+	if off > s.written || uint64(len(p)) > s.written-off {
+		return false, io.EOF
+	}
+	return bytes.Equal(s.data[off:off+uint64(len(p))], p), nil
+}
+
+type snapshotRegionEqualer interface {
+	EqualAt(context.Context, uint64, []byte) (bool, error)
+}
+
+const snapshotCompareScratch = 64 << 10
+
+func equalSnapshotBytes(ctx context.Context, staging snapshotStaging, off uint64, p []byte) (bool, error) {
+	if comparer, ok := staging.(snapshotRegionEqualer); ok {
+		return comparer.EqualAt(ctx, off, p)
+	}
+	// Future backends can use ReadAt without allocating a whole duplicate chunk.
+	scratch := make([]byte, min(len(p), snapshotCompareScratch))
+	for pos := 0; pos < len(p); {
+		n := min(len(scratch), len(p)-pos)
+		if _, err := staging.ReadAt(ctx, scratch[:n], off+uint64(pos)); err != nil {
+			return false, err
+		}
+		if !bytes.Equal(scratch[:n], p[pos:pos+n]) {
+			return false, nil
+		}
+		pos += n
+	}
+	return true, nil
 }

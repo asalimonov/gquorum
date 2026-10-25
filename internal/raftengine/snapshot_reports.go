@@ -83,6 +83,9 @@ func (g *Group) recordSnapshotReport(a SnapshotAttempt, result raft.SnapshotStat
 		due = due.Add(snapshotFailureDelay(record, kind))
 	}
 	record.pending = &snapshotAttemptReport{attempt: a, result: result, due: due}
+	if g.snapshotReportDue.IsZero() || due.Before(g.snapshotReportDue) {
+		g.snapshotReportDue = due
+	}
 	g.snapshotReportMu.Unlock()
 	g.wakeSnapshotReports()
 }
@@ -143,6 +146,15 @@ func (g *Group) NoteSnapshotProgress(a SnapshotAttempt, p metrics.SnapshotCatchU
 }
 
 func (g *Group) drainSnapshotReports(now time.Time) {
+	if len(g.snapshotReports) == 0 {
+		return
+	}
+	g.snapshotReportMu.Lock()
+	due := g.snapshotReportDue
+	g.snapshotReportMu.Unlock()
+	if due.IsZero() || due.After(now) {
+		return
+	}
 	g.refreshSnapshotEpoch()
 	g.snapshotReportMu.Lock()
 	defer g.snapshotReportMu.Unlock()
@@ -157,41 +169,54 @@ func (g *Group) drainSnapshotReports(now time.Time) {
 			g.rn.ReportSnapshot(report.attempt.ReplicaID, report.result)
 		}
 	}
+	g.recalculateSnapshotReportDueLocked()
 }
 
 func (g *Group) closeSnapshotReportsAfterJoin() {
 	g.snapshotReportMu.Lock()
 	g.snapshotReportsClosed = true
 	clear(g.snapshotReports)
+	g.snapshotReportDue = time.Time{}
 	g.snapshotReportMu.Unlock()
 }
 
 func (g *Group) snapshotReportDeadline(state *loopState) <-chan time.Time {
-	g.snapshotReportMu.Lock()
 	var due time.Time
-	for _, record := range g.snapshotReports {
-		if record.pending != nil && (due.IsZero() || record.pending.due.Before(due)) {
-			due = record.pending.due
-		}
+	// Map membership is native-loop-owned; no worker can add a record.
+	if len(g.snapshotReports) != 0 {
+		g.snapshotReportMu.Lock()
+		due = g.snapshotReportDue
+		g.snapshotReportMu.Unlock()
 	}
-	g.snapshotReportMu.Unlock()
 	if due.IsZero() {
 		if state.snapshotReportTimer != nil {
 			state.snapshotReportTimer.Stop()
 			state.snapshotReportTimer = nil
 		}
+		state.snapshotReportDue = time.Time{}
 		return nil
 	}
 	wait := max(time.Duration(0), time.Until(due))
 	if state.snapshotReportTimer == nil {
 		state.snapshotReportTimer = time.NewTimer(wait)
-	} else {
+	} else if !state.snapshotReportDue.Equal(due) {
 		state.snapshotReportTimer.Reset(wait)
 	}
+	state.snapshotReportDue = due
 	return state.snapshotReportTimer.C
 }
 
 func sameEpisodePeerIgnoringEngineRun(a, b metrics.ReplicaIdentity) bool {
 	return a.ClusterID == b.ClusterID && a.GroupID == b.GroupID && a.NodeName == b.NodeName &&
 		a.ReplicaID == b.ReplicaID && a.InstanceID == b.InstanceID
+}
+
+func (g *Group) recalculateSnapshotReportDueLocked() {
+	var due time.Time
+	for _, record := range g.snapshotReports {
+		if record.pending != nil && (due.IsZero() || record.pending.due.Before(due)) {
+			due = record.pending.due
+		}
+	}
+	g.snapshotReportDue = due
 }

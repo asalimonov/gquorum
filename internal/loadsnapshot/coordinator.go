@@ -22,6 +22,7 @@ const (
 // Coordinator owns Node-wide volatile transfer reservations and bounded
 // metadata. Payload work, callbacks and joins happen outside mu.
 type Coordinator struct {
+	waiters      int
 	workers      int
 	ownerWorkers map[OwnerKey]int
 	fencedOwners map[OwnerKey]struct{}
@@ -87,9 +88,12 @@ func (c *Coordinator) Start(parent context.Context) {
 // Fence refuses new work and cancels the lifetime without releasing ownership.
 func (c *Coordinator) Fence() {
 	c.mu.Lock()
+	wasClosed := c.closed
 	c.closed = true
 	cancel := c.cancel
-	c.signalLocked()
+	if !wasClosed {
+		c.signalLocked()
+	}
 	c.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -105,6 +109,9 @@ func (c *Coordinator) Stop(ctx context.Context) error {
 }
 
 func (c *Coordinator) signalLocked() {
+	if c.waiters == 0 {
+		return
+	}
 	if c.changed != nil {
 		close(c.changed)
 	}

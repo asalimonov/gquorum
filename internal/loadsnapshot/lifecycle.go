@@ -110,18 +110,26 @@ func (c *Coordinator) joinSnapshotOwnership(ctx context.Context, owner OwnerKey)
 	for {
 		c.mu.Lock()
 		joined := c.snapshotOwnershipJoinedLocked(owner)
-		changed := c.changed
-		c.mu.Unlock()
 		if joined {
+			c.mu.Unlock()
 			return nil
 		}
-		if err := c.snapshotCleanupError(owner); err != nil {
-			return err
+		c.waiters++
+		changed := c.changed
+		c.mu.Unlock()
+		err := c.snapshotCleanupError(owner)
+		if err == nil {
+			select {
+			case <-changed:
+			case <-ctx.Done():
+				err = fault.New(fault.ShutdownTimeout, "snapshot ownership has not joined", ctx.Err())
+			}
 		}
-		select {
-		case <-changed:
-		case <-ctx.Done():
-			return fault.New(fault.ShutdownTimeout, "snapshot ownership has not joined", ctx.Err())
+		c.mu.Lock()
+		c.waiters--
+		c.mu.Unlock()
+		if err != nil {
+			return err
 		}
 	}
 }
@@ -210,7 +218,7 @@ func (c *Coordinator) releaseCompletedReceive(tr *snapshotReceive, completion *s
 	}
 	c.mu.Unlock()
 	c.release(tr.reservation)
-	c.observe(status)
+	c.observeTransfer(tr.statusID, status)
 	close(tr.cleaned)
 }
 

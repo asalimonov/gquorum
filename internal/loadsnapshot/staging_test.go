@@ -3,6 +3,7 @@
 package loadsnapshot
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -130,5 +131,62 @@ func TestMemoryStagingRejectsWriteAfterSeal(t *testing.T) {
 	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+type readAtOnlyStaging struct{ snapshotStaging }
+
+func TestMemoryStagingDuplicateComparisonWithoutMaterializing(t *testing.T) {
+	t.Parallel()
+	data := bytes.Repeat([]byte("abc"), 64<<10)
+	staging, err := newMemorySnapshotStaging(uint64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := staging.Append(t.Context(), 0, data); err != nil {
+		t.Fatal(err)
+	}
+	for _, backend := range []snapshotStaging{staging, readAtOnlyStaging{staging}} {
+		equal, err := equalSnapshotBytes(t.Context(), backend, 3, data[3:])
+		if err != nil || !equal {
+			t.Fatal(equal, err)
+		}
+		changed := bytes.Clone(data)
+		changed[len(changed)-1] ^= 1
+		equal, err = equalSnapshotBytes(t.Context(), backend, 0, changed)
+		if err != nil || equal {
+			t.Fatal(equal, err)
+		}
+		if _, err := equalSnapshotBytes(t.Context(), backend, uint64(len(data)), []byte{1}); !errors.Is(err, io.EOF) {
+			t.Fatal(err)
+		}
+	}
+
+	if err := staging.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func BenchmarkMemorySnapshotDuplicateCompare(b *testing.B) {
+	data := bytes.Repeat([]byte("x"), 1<<20)
+	staging, err := newMemorySnapshotStaging(uint64(len(data)))
+	if err != nil {
+		b.Fatal(err)
+	}
+	if err := staging.Append(b.Context(), 0, data); err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() {
+		if err := staging.Close(); err != nil {
+			b.Error(err)
+		}
+	})
+	b.ReportAllocs()
+	b.SetBytes(int64(len(data)))
+	for b.Loop() {
+		equal, err := equalSnapshotBytes(b.Context(), staging, 0, data)
+		if err != nil || !equal {
+			b.Fatal(equal, err)
+		}
 	}
 }

@@ -79,3 +79,9 @@ func (c *Coordinator) observe(status snapshot.Status) {
 	c.appendHistoryLocked(status)
 	c.mu.Unlock()
 }
+
+func (c *Coordinator) observeTransfer(id uint64, status snapshot.Status) {
+	c.mu.Lock()
+	c.appendHistoryAtLocked(id, status)
+	c.mu.Unlock()
+}

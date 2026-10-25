@@ -566,3 +566,30 @@ func TestSnapshotFinish_NativeCallbackOnlyRecordsAndSignals(t *testing.T) {
 	release.Do(func() { close(cause.release) })
 	receiveBarrier(t, tr.cleaned)
 }
+
+func TestSnapshotFinish_StatusCursorDoesNotRepeatCompletedTransfer(t *testing.T) {
+	t.Parallel()
+	f := finishFixture(t)
+	native := make(chan raftengine.SnapshotIngress, 1)
+	f.owner.step = func(_ context.Context, in raftengine.SnapshotIngress) error { native <- in; return nil }
+	ack := fillReceive(t, f)
+	tr, _ := f.c.findTransfer(ack.Session.Key)
+	page := f.c.List(snapshot.Query{Limit: 1})
+	if len(page.Items) != 1 {
+		t.Fatal(page)
+	}
+	if _, err := f.c.FinishSnapshot(t.Context(), ack.Session); err != nil {
+		t.Fatal(err)
+	}
+	in := <-native
+	in.Done(raftengine.SnapshotInstalled, nil)
+	receiveBarrier(t, tr.cleaned)
+	next := f.c.List(snapshot.Query{Cursor: page.NextCursor, Limit: 1})
+	if len(next.Items) != 0 {
+		t.Fatal("completed transfer reappeared under a new cursor ID", next)
+	}
+	current := f.c.List(snapshot.Query{Limit: 1})
+	if len(current.Items) != 1 || current.Items[0].ReceiverOutcome != snapshot.ReceiverInstalled || current.NextCursor != page.NextCursor {
+		t.Fatal(current)
+	}
+}

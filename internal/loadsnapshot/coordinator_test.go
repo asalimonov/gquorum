@@ -9,6 +9,7 @@ import (
 	"math"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/raftengine"
@@ -252,4 +253,38 @@ func TestCoordinatorConcurrentAdmissionNeverOversubscribes(t *testing.T) {
 	owner.key.RunID = "foreign"
 	_, err = c.reserve(outgoing, owner, 1)
 	wantTransferReason(t, err, snapshot.ReasonIdentity)
+}
+
+func TestCoordinatorStopCannotLoseReservationRelease(t *testing.T) {
+	t.Parallel()
+	c := budgetCoordinator(t, snapshot.Options{MaxSnapshotBytes: 64})
+
+	r, err := c.reserve(incoming, budgetOwnerRef("group"), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopped := make(chan error, 1)
+	go func() { stopped <- c.Stop(t.Context()) }()
+	// Fence cancels the private lifetime before join registers its waiter. The
+	// release can race either side without losing the state-change notification.
+	<-c.ctx.Done()
+	c.release(r)
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Stop lost reservation release")
+	}
+}
+
+func BenchmarkCoordinatorIdleWake(b *testing.B) {
+	c := NewCoordinator(snapshot.Options{}, Ports{})
+	b.ReportAllocs()
+	for b.Loop() {
+		c.mu.Lock()
+		c.signalLocked()
+		c.mu.Unlock()
+	}
 }

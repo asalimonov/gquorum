@@ -1,7 +1,6 @@
 package loadsnapshot
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -27,8 +26,9 @@ func (c *Coordinator) WriteSnapshot(ctx context.Context, chunk snapshot.Chunk) (
 		return snapshot.Ack{}, err
 	}
 	defer tr.unpin()
-	work, release := bindAttachment(op.ctx, attachment)
-	defer release()
+	stop := op.bindAttachment(attachment)
+	defer stop()
+	work := op.ctx
 	if err := c.revalidateSnapshotPeer(work, tr); err != nil {
 		return snapshot.Ack{}, err
 	}
@@ -57,11 +57,11 @@ func (c *Coordinator) writeChunk(ctx context.Context, tr *snapshotReceive, chunk
 		return snapshot.Ack{}, transferError(snapshot.ReasonChecksum)
 	}
 	if duplicate {
-		previous := make([]byte, len(chunk.Data))
-		if _, err := tr.staging.ReadAt(ctx, previous, chunk.Offset); err != nil {
+		equal, err := equalSnapshotBytes(ctx, tr.staging, chunk.Offset, chunk.Data)
+		if err != nil {
 			return snapshot.Ack{}, err
 		}
-		if !bytes.Equal(previous, chunk.Data) {
+		if !equal {
 			return snapshot.Ack{}, transferError(snapshot.ReasonTransferConflict)
 		}
 		tr.mu.Lock()

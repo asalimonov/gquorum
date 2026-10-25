@@ -69,6 +69,7 @@ type Group struct {
 	snapshotReportMu        sync.Mutex
 	snapshotReports         map[uint64]*snapshotReportState
 	snapshotReportWake      chan struct{}
+	snapshotReportDue       time.Time // snapshotReportMu; earliest retained terminal report
 	snapshotReportsClosed   bool
 
 	snapshotIngress                           chan *request

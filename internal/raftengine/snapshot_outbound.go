@@ -42,6 +42,9 @@ func (g *Group) prepareSnapshotOffer(m raftpb.Message) (SnapshotOffer, error) {
 	g.snapshotAttemptSequence++
 	attempt := SnapshotAttempt{RunID: g.nonce, Term: m.Term, ReplicaID: m.To, Generation: g.snapshotAttemptSequence}
 	g.snapshotReportMu.Lock()
+	if g.snapshotReports == nil {
+		g.snapshotReports = make(map[uint64]*snapshotReportState)
+	}
 	record := g.snapshotReports[m.To]
 	if record == nil {
 		record = &snapshotReportState{lastMatch: progress.Match}
@@ -49,6 +52,7 @@ func (g *Group) prepareSnapshotOffer(m raftpb.Message) (SnapshotOffer, error) {
 	}
 	record.attempt = attempt
 	record.pending = nil
+	g.recalculateSnapshotReportDueLocked()
 	record.terminal = false
 	record.progress = nil
 	record.started = time.Now()
@@ -75,21 +79,29 @@ func (g *Group) refreshSnapshotEpochStatus(status raft.Status) {
 		g.snapshotEpoch, g.cancelSnapshotEpoch = context.WithCancel(g.ctx)
 	}
 	g.snapshotEpochTerm = status.Term
+	// Only the native loop changes map membership; workers update existing
+	// records under the mutex. Idle runs need no map work or report lock.
+	if len(g.snapshotReports) == 0 {
+		return
+	}
 	g.snapshotReportMu.Lock()
 	defer g.snapshotReportMu.Unlock()
-	if g.snapshotReports == nil {
-		g.snapshotReports = make(map[uint64]*snapshotReportState)
-	}
-	voters := status.Config.Voters.IDs()
+	g.refreshSnapshotRecordsLocked(status)
+}
+func (g *Group) refreshSnapshotRecordsLocked(status raft.Status) {
+	deadlineChanged := false
 	for peer, record := range g.snapshotReports {
-		_, voter := voters[peer]
+		_, voter := status.Config.Voters[0][peer]
+		_, outgoingVoter := status.Config.Voters[1][peer]
 		_, learner := status.Config.Learners[peer]
 		_, nextLearner := status.Config.LearnersNext[peer]
-		if !voter && !learner && !nextLearner {
+		if !voter && !outgoingVoter && !learner && !nextLearner {
+			deadlineChanged = deadlineChanged || record.pending != nil
 			delete(g.snapshotReports, peer)
 			continue
 		}
-		if changed {
+		if g.snapshotEpoch == nil || record.attempt.Term != status.Term {
+			deadlineChanged = deadlineChanged || record.pending != nil
 			record.attempt = SnapshotAttempt{}
 			record.pending = nil
 			record.progress = nil
@@ -99,6 +111,9 @@ func (g *Group) refreshSnapshotEpochStatus(status raft.Status) {
 			record.lastMatch = progress.Match
 			record.backoff = 0
 		}
+	}
+	if deadlineChanged {
+		g.recalculateSnapshotReportDueLocked()
 	}
 }
 

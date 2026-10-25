@@ -37,6 +37,7 @@ func (g *Group) finishRun() {
 }
 
 type loopState struct {
+	snapshotReportDue   time.Time
 	snapshotReportTimer *time.Timer
 	lastEntriesWrite    time.Time
 	readyTimer          *time.Timer
@@ -128,6 +129,7 @@ func (g *Group) receiveLoopEvent(state *loopState) bool {
 	case id := <-g.unreachable:
 		g.rn.ReportUnreachable(id)
 	case <-g.snapshotReportDeadline(state):
+		state.snapshotReportDue = time.Time{}
 		g.drainSnapshotReports(time.Now())
 	case <-g.snapshotReportWake:
 		g.drainSnapshotReports(time.Now())

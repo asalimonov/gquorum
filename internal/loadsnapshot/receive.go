@@ -149,23 +149,32 @@ func (c *Coordinator) notNeeded(
 	ack := snapshot.Ack{Session: snapshot.Session{Key: b.Manifest.Key}, State: snapshot.DeliveryNotNeeded,
 		RemainingTotal:  min(c.options.TotalTimeout, b.RemainingTotal),
 		ProgressTimeout: min(c.options.ProgressTimeout, b.ProgressTimeout), ReceiverRunID: owner.key.RunID}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if err := c.liveLocked(); err != nil {
+	record := snapshotTerminal{owner: owner, manifest: b.Manifest, ack: ack, outcome: snapshot.ReceiverSkipped,
+		expires: now.Add(ack.RemainingTotal).Add(ack.ProgressTimeout)}
+	if err := c.cacheNotNeeded(ownerCtx, b.Manifest.Key, record); err != nil {
 		return snapshot.Ack{}, err
 	}
-	if ownerCtx.Err() != nil {
-		return snapshot.Ack{}, transferError(snapshot.ReasonStopped)
-	}
-	c.putTerminalLocked(b.Manifest.Key, snapshotTerminal{owner: owner, manifest: b.Manifest, ack: ack,
-		outcome: snapshot.ReceiverSkipped, expires: now.Add(ack.RemainingTotal).Add(ack.ProgressTimeout)})
-	c.appendHistoryLocked(snapshot.Status{Key: b.Manifest.Key, Direction: "incoming",
+	c.observe(snapshot.Status{Key: b.Manifest.Key, Direction: "incoming",
 		SnapshotIndex: header.Snapshot.Metadata.Index,
 		SnapshotTerm:  header.Snapshot.Metadata.Term, TotalBytes: b.Manifest.TotalBytes,
 		StartedAt: now, LastProgressAt: now,
 		Deadline: now.Add(ack.RemainingTotal), Delivery: snapshot.DeliveryNotNeeded,
 		ReceiverOutcome: snapshot.ReceiverSkipped})
 	return ack, nil
+}
+
+func (c *Coordinator) cacheNotNeeded(ownerCtx context.Context, key snapshot.Key, record snapshotTerminal) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.liveLocked(); err != nil {
+		return err
+	}
+	if ownerCtx.Err() != nil {
+		return transferError(snapshot.ReasonStopped)
+	}
+	c.putTerminalLocked(key, record)
+
+	return nil
 }
 
 func (c *Coordinator) negotiatedChunk(b snapshot.BeginRequest) (uint32, error) {

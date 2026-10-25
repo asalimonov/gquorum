@@ -199,3 +199,25 @@ Verified
 
 Remaining review work
 - P2-2, P2-3a and P2-5 form the next performance/observation checkpoint. Constant-time Authorize remains an explicit Task 12 wiring check. The full response and dispositions are retained in review Thread 3; no gRPC/Host runtime verification is claimed yet.
+
+## Review 1 — performance and observation corrections
+
+Date: 2026-10-26. Commit: this correction commit. Prior correction: 1bb509c. This is implementation commit two after review anchor 251a594; four further commits trigger the next requested review.
+
+Implemented
+- P2-2: idle epoch refresh avoids report locking/map work when no records exist, and membership checks use existing voter maps. The mailbox caches its earliest deadline; unchanged deadlines do not rescan records or reset timers on every event. Timer consumption explicitly permits rearming a retained deadline.
+- P2-3a: duplicate bytes compare directly in memory staging, with a bounded ReadAt fallback for future backends. A chunk uses one cancellable operation context; attachment cancellation reuses it. Coordinator wake channels are recreated only while a join waiter exists, with waiter registration and state changes serialized to avoid lost wakeups.
+- P2-5: active-to-completed observations retain the same row ID. Cursor continuation no longer repeats a transfer after completion; fresh reads still see its updated final state.
+
+Verified
+- make test: all 2,261 tests across 62 reports/five modules pass (10.638s); report test-reports/unit/20261025T192221.058706Z-wu8r1x7w/report.md.
+- go vet ./internal/raftengine ./internal/loadsnapshot; pending make lint; git diff --check: pass.
+- Focused default-package race: raftengine and loadsnapshot pass (1.487s / 1.488s).
+- Focused functional ingress/outbound/receive/finish race: both packages pass (1.454s / 1.331s).
+- Microbenchmarks on this Apple M4 Pro, 100ms benchtime: idle epoch refresh 63.03 ns before versus 3.618 ns after, both 0 B/op and 0 allocs/op. This measures only the no-record helper, not end-to-end throughput.
+- Idle coordinator wake: 2.265 ns/op, 0 B/op, 0 allocs/op. In-memory 1 MiB duplicate comparison: 18,659 ns/op, 0 B/op, 0 allocs/op. Bench fixtures are generated in memory and not committed data.
+
+Notes
+- Initial allocation assertions inside parallel unit tests were rejected by Go 1.26 AllocsPerRun, which changes GOMAXPROCS and disallows parallel tests. Moved measurements to benchmarks, preserving parallel unit isolation.
+- The colleague's allocation wording was broader than measured behavior: the old voter-map work was stack-allocated here (already zero heap allocations); the measured improvement is CPU work.
+- The remaining P2-3b obligation is the future Task 12 O(1) authorization routing index. RPC teardown and Host stop ordering remain later-task qualification gates.

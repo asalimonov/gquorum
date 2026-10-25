@@ -79,13 +79,12 @@ func (tr *snapshotReceive) unpin() {
 	}
 	tr.mu.Unlock()
 }
-func bindAttachment(parent context.Context, attachment *snapshotAttachment) (context.Context, func()) {
-	ctx, cancel := context.WithCancel(parent)
-	stop := context.AfterFunc(attachment.ctx, cancel)
+func (op *coordinatorOperation) bindAttachment(attachment *snapshotAttachment) func() bool {
+	stop := context.AfterFunc(attachment.ctx, op.cancel)
 	if attachment.ctx.Err() != nil {
-		cancel()
+		op.cancel()
 	}
-	return ctx, func() { stop(); cancel() }
+	return stop
 }
 func (tr *snapshotReceive) ackLocked(now time.Time) snapshot.Ack {
 	return snapshot.Ack{Session: snapshot.Session{Key: tr.key, Attachment: tr.attachment}, NextOffset: tr.next,

@@ -68,10 +68,10 @@ Review baseline: `251a594`; findings in review Thread 3. The next review is due 
 - [x] P1-2: preserve immediate legacy `_meta`/standalone snapshot failure reports; retain managed exact-attempt backoff and non-lossy mailbox.
 - [x] P2-1: advance snapshot publication on both recovery-checkpoint publication paths and require a nonzero digest generation only for bulk jobs.
 - [x] P2-4: use the write job's exact ingress ticket during Restore instead of leaving the field write-only.
-- [ ] P2-2: remove idle voter-map allocation and avoid repeated report-deadline scans/timer resets.
-- [ ] P2-3a: reduce duplicate-chunk allocation, redundant contexts and per-chunk wake-channel allocation.
+- [x] P2-2: remove idle voter-map allocation and avoid repeated report-deadline scans/timer resets.
+- [x] P2-3a: reduce duplicate-chunk allocation, redundant contexts and per-chunk wake-channel allocation.
 - [ ] P2-3b: Task 12 must implement/verify constant-time Authorize through exact routing indexes.
-- [ ] P2-5: preserve a transfer's observation ID when moving from active state into completed history.
+- [x] P2-5: preserve a transfer's observation ID when moving from active state into completed history.
 
 ## Task index
 

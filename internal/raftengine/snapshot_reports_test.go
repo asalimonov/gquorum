@@ -118,6 +118,7 @@ func TestSnapshotReportsDeadlineIndependentOfRaftTick(t *testing.T) {
 		t.Fatal("no cooldown timer")
 	}
 	g.snapshotReports[1].pending.due = time.Now().Add(-time.Second)
+	g.recalculateSnapshotReportDueLocked()
 	timer = g.snapshotReportDeadline(state)
 	select {
 	case <-timer:
@@ -125,6 +126,7 @@ func TestSnapshotReportsDeadlineIndependentOfRaftTick(t *testing.T) {
 		t.Fatal("due report waiting for raft tick")
 	}
 	g.snapshotReports[1].pending = nil
+	g.recalculateSnapshotReportDueLocked()
 	if g.snapshotReportDeadline(state) != nil || state.snapshotReportTimer != nil {
 		t.Fatal("timer not released")
 	}
@@ -165,5 +167,18 @@ func TestSnapshotReportsLegacyFailureDoesNotEscalateBackoff(t *testing.T) {
 		if record.pending == nil || record.pending.due.After(time.Now()) || record.backoff != 8*time.Second {
 			t.Fatal("legacy report changed managed backoff")
 		}
+	}
+}
+
+func BenchmarkSnapshotIdleEpochRefresh(b *testing.B) {
+	g := &Group{ctx: b.Context(), snapshotReports: make(map[uint64]*snapshotReportState)}
+	status := raft.Status{}
+	status.Term = 3
+	status.RaftState = raft.StateLeader
+	status.Config.Voters[0] = map[uint64]struct{}{1: {}, 2: {}, 3: {}}
+	g.refreshSnapshotEpochStatus(status)
+	b.ReportAllocs()
+	for b.Loop() {
+		g.refreshSnapshotEpochStatus(status)
 	}
 }
