@@ -105,10 +105,11 @@ func validateRecoveryConsumed(state *scopedState, index *scopedIndexes, group mo
 		evidence.Identity != group.Destination || !validRecoveryDigest(evidence.SnapshotDigest) {
 		return fault.ErrIdentityMismatch
 	}
-	if evidence.GroupReceipt.AppliedIndex < group.Source.Snapshot.Index ||
-		evidence.GroupReceipt.AppliedTerm < group.Source.Snapshot.Term ||
-		evidence.GroupReceipt.AppliedIndex > evidence.Checkpoint.Index ||
-		evidence.GroupReceipt.AppliedTerm > evidence.Checkpoint.Term {
+	receipt := evidence.GroupReceipt
+	atSeed := receipt.AppliedIndex == group.Source.Snapshot.Index && receipt.AppliedTerm == group.Source.Snapshot.Term
+	afterSource := receipt.AppliedIndex > group.Source.Commit.Index && receipt.AppliedTerm > group.Source.HardStateTerm
+	if (!atSeed && !afterSource) || receipt.AppliedIndex > evidence.Checkpoint.Index ||
+		receipt.AppliedTerm > evidence.Checkpoint.Term {
 		return fault.ErrIdentityMismatch
 	}
 	for _, receipt := range []topology.EffectReceipt{evidence.HostReceipt, evidence.GroupReceipt} {

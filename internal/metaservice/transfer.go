@@ -17,6 +17,9 @@ func (g *Group) TransferLeader(ctx context.Context, id, name string) error {
 	if err := g.ensureRunning(ctx); err != nil {
 		return err
 	}
+	if err := g.guardRecoveryMutation(); err != nil {
+		return err
+	}
 	request := topology.AuthorizedStep{GroupID: id, NodeName: name, Kind: topology.StepTransferLeader}
 	read, err := g.captureTransfer(ctx, request)
 	if err != nil {

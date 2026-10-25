@@ -143,7 +143,7 @@ func TestRecoveredCreationReceiptValidatesThroughRealCatalogAfterRestartAndPrune
 	evidence := model.Consumed{Identity: group.Destination, Checkpoint: model.Position{Index: retained.Snapshot.Metadata.Index,
 		Term: retained.Snapshot.Metadata.Term}, SnapshotDigest: hex.EncodeToString(digest[:]), HostReceipt: host, GroupReceipt: receipt}
 	applyRecoveryCatalog(t, m, model.GroupConsumedProposal{RecoveryID: m.RecoveryState().RecoveryID,
-		PlanDigest: m.RecoveryState().PlanDigest, GroupID: "shard0", Evidence: evidence, ProposalID: "consumed"})
+		PlanDigest: m.RecoveryState().PlanDigest, GroupID: "shard0", Checkpoint: model.CheckpointProof{Identity: evidence.Identity, Position: evidence.Checkpoint, Digest: evidence.SnapshotDigest}, ProposalID: "consumed"})
 	catalogCheck(t, core.Stop(ctx))
 	opts.InstanceID = "restart"
 	restarted, err := raftengine.NewContext(ctx, opts)

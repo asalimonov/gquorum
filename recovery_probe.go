@@ -50,8 +50,9 @@ func (r *Recovery) probeAccepted(ctx context.Context, accepted *model.AcceptedPl
 	if r.probe.resolver == nil || len(r.probe.credential) == 0 || r.probe.clientTLS == nil && !r.probe.allowPlaintext {
 		accepted.Issues = append(accepted.Issues, model.Issue{Code: "peer_probe_unavailable",
 			GroupID: topology.MetaGroupID,
-			Message: "Old-member probe needs a resolver, credential and authenticated meta client settings",
-			Remedy:  model.RemedyInvestigate})
+			Message: fmt.Sprintf("Old-member probe attempted 0 of %d peers; "+
+				"configure resolver, credential and client settings", len(peers)),
+			Remedy: model.RemedyInvestigate})
 		return ctx.Err()
 	}
 	observations, err := r.probeMembers(ctx, accepted.Source, peers)
@@ -59,11 +60,22 @@ func (r *Recovery) probeAccepted(ctx context.Context, accepted *model.AcceptedPl
 		return err
 	}
 	blocked := false
+	unresolved := 0
 	for _, issue := range observations {
 		if issue != nil {
 			accepted.Issues = append(accepted.Issues, *issue)
+			if issue.Code == "peer_probe_address_unavailable" {
+				unresolved++
+			}
 			blocked = blocked || issue.Blocking
 		}
+	}
+	if unresolved > 0 {
+		accepted.Issues = append(accepted.Issues, model.Issue{Code: "peer_probe_incomplete",
+			GroupID: topology.MetaGroupID,
+			Message: fmt.Sprintf("Old-member probe attempted %d of %d approved peers; "+
+				"unresolved members were not checked", len(peers)-unresolved, len(peers)),
+			Remedy: model.RemedyInvestigate})
 	}
 	if blocked {
 		return fault.New(fault.OperationAuthorization, "old_member_reachable", nil)

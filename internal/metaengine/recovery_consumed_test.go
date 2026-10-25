@@ -64,13 +64,10 @@ func consumedRecoveryWithPolicy(t *testing.T, strict bool) (scopedState, model.G
 	}
 	grant := *result.result.Grant
 	proposal := model.GroupConsumedProposal{RecoveryID: p.RecoveryID, PlanDigest: p.PlanDigest, GroupID: "shard0", ProposalID: "consumed",
-		Evidence: model.Consumed{Identity: s.Recovery.Groups[0].Destination, Checkpoint: model.Position{Index: 2, Term: 1}, SnapshotDigest: strings.Repeat("b", 64)}}
+		Checkpoint: model.CheckpointProof{Identity: s.Recovery.Groups[0].Destination, Position: model.Position{Index: 2, Term: 1}, Digest: strings.Repeat("b", 64)}}
 	for _, receipt := range fixtureEffectReceipts(grant) {
 		if receipt.Resource.Kind == topology.AuthorityGroup {
 			receipt.AppliedIndex, receipt.AppliedTerm = 1, 1
-			proposal.Evidence.GroupReceipt = receipt
-		} else {
-			proposal.Evidence.HostReceipt = receipt
 		}
 		if result, err := s.applyRecordEffect(s.AppliedIndex+1, RecordEffectProposal{Receipt: receipt, At: p.At.Add(time.Second), ProposalID: "receipt"}); err != nil || !result.result.Accepted {
 			t.Fatal(result, err)
@@ -82,14 +79,9 @@ func consumedRecoveryWithPolicy(t *testing.T, strict bool) (scopedState, model.G
 func TestRecoveryConsumptionRequiresExactCreationReceiptsAndCheckpoint(t *testing.T) {
 	t.Parallel()
 	for name, mutate := range map[string]func(*model.GroupConsumedProposal){
-		"identity":       func(p *model.GroupConsumedProposal) { p.Evidence.Identity.ReplicaID++ },
-		"checkpoint":     func(p *model.GroupConsumedProposal) { p.Evidence.Checkpoint.Index = 1 },
-		"snapshot hash":  func(p *model.GroupConsumedProposal) { p.Evidence.SnapshotDigest = "not-a-hash" },
-		"host sequence":  func(p *model.GroupConsumedProposal) { p.Evidence.HostReceipt.LocalSequence++ },
-		"group boundary": func(p *model.GroupConsumedProposal) { p.Evidence.GroupReceipt.AppliedIndex++ },
-		"group target": func(p *model.GroupConsumedProposal) {
-			p.Evidence.GroupReceipt.Target = topology.AuthorityTarget{NodeName: "foreign", MemberID: 9, ReplicaID: 9}
-		},
+		"identity":      func(p *model.GroupConsumedProposal) { p.Checkpoint.Identity.ReplicaID++ },
+		"checkpoint":    func(p *model.GroupConsumedProposal) { p.Checkpoint.Position.Index = 1 },
+		"snapshot hash": func(p *model.GroupConsumedProposal) { p.Checkpoint.Digest = "not-a-hash" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -114,6 +106,16 @@ func TestRecoveryConsumptionRequiresExactCreationReceiptsAndCheckpoint(t *testin
 	}
 	if result, err := s.applyRecoveryGroupConsumed(s.AppliedIndex+1, p); err != nil || result.changed {
 		t.Fatal("consumption retry rewrote evidence", result, err)
+	}
+	changed := p
+	changed.Checkpoint.Position.Index++
+	before, _ := json.Marshal(s)
+	if _, err := s.applyRecoveryGroupConsumed(s.AppliedIndex+1, changed); err == nil {
+		t.Fatal("changed checkpoint replaced retained consumption")
+	}
+	after, _ := json.Marshal(s)
+	if !bytes.Equal(before, after) {
+		t.Fatal("changed checkpoint mutated retained consumption")
 	}
 	op := s.indexes.operations[s.indexes.first[2]].Clone()
 	transition := scopedTransitionFor(op, "shard0", op.Plan.Steps[len(op.Plan.Steps)-1].Seq)

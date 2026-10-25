@@ -16,7 +16,7 @@
 
 **Review/clarifications:** [docs/review/feat_permanent-majority-loss-recovery.md](../review/feat_permanent-majority-loss-recovery.md)
 
-**Status:** implementation in progress; Tasks 1–12 complete; next is durable remote fixture recovery and approved UX refinements.
+**Status:** all16 tasks complete. Architectural audit finished; the two corrected ordinary cluster tests passed in the user-requested isolated rerun. No post-audit peer review or further broad heavy rerun is requested.
 
 ## Scope and precedence
 
@@ -1088,74 +1088,74 @@ implementation/tests/docs when closing discovered gaps. **Dependencies:** Tasks 
 **Outcome:** every in-scope target contract exists, matches and is reachable through
 gquorum's real entry points. This is not a Meridian wiring review.
 
-- [ ] Verify public root/recovery/load API delta against Appendix A and target §3:
+- [x] Verify public root/recovery/load API delta against Appendix A and target §3:
   exact signatures/types/defaults, constructor purity, helper copies, typed errors,
   no public Paths/Session/codec/force/Rollback and no public Storage interface growth.
-- [ ] Verify local persistence delta against Appendix B/§5: every record/tag/phase,
+- [x] Verify local persistence delta against Appendix B/§5: every record/tag/phase,
   immutable field, timestamped name, cancellation/Undo fact, startup marker,
   current/history semantics, bounds, atomic fsync ordering and ownership constraint.
   Confirm unchanged existing buckets/formats, no SQL migration/cache service and
   no adopted unknown namespace or unsupported rollback execution.
-- [ ] Verify source inspection/replay (§6/§10.2/§10.3): complete required inventory,
+- [x] Verify source inspection/replay (§6/§10.2/§10.3): complete required inventory,
   exact donor eligibility, every WAL classified, read-only metadata with nil
   persister, strict framing/snapshot selection, valid S/C/L and digest/acceptance.
-- [ ] Verify metadata/import/placement delta (§7/§10.4): ordinary founding, atomic
+- [x] Verify metadata/import/placement delta (§7/§10.4): ordinary founding, atomic
   stage+approve, source policy/floors/tombstones, ordinary grants/receipts, strict
   private ingress, actual service/FSM/scheduler integration, permanent policy
   release, pruning/restart and new-fixture/old-decoder behavior.
-- [ ] Verify WAL/engine delta (§8/§10.3): exact seed transformation, real fsync,
+- [x] Verify WAL/engine delta (§8/§10.3): exact seed transformation, real fsync,
   prepared/installed/replayed/consumed distinctions, re-probe/no InitialAuthority,
   owned Restore context, portable checkpoints and no refill of lost consumed B.
-- [ ] Verify Node/managed/coordinator delta (§9/§10.5): early marker, limits/bootstrap,
+- [x] Verify Node/managed/coordinator delta (§9/§10.5): early marker, limits/bootstrap,
   lease transfer, manifest-derived pre-import mutation/join gate, gap-free FSM
   handoff, normal factory lifetime, private-ready/public barrier, readiness
   validation, Application.Run release, exact retry, reset admission and joined Stop.
-- [ ] Verify independent fixture/test coverage (§11/§13/§14): all REC cases, remote
+- [x] Verify independent fixture/test coverage (§11/§13/§14): all REC cases, remote
   management without Node/quorum, durable job/cancellation behavior, strict policy
   regrowth, old-lineage refusal, actual resource measurements and every test scope.
   Target §4's Meridian-specific integration is an approved deferral, not a missing
   gquorum endpoint or a reason to inspect that application's wiring.
-- [ ] Verify exclusions (§16) remain explicit comments/refusals with no accidental
+- [x] Verify exclusions (§16) remain explicit comments/refusals with no accidental
   fallback, and current docs describe only implemented/validated behavior. Ensure
   historical backups/proposals did not leak superseded APIs into code.
 For the following failure-boundary audit, reuse the preceding owning tasks'
 verified tests and add/fix only missing evidence. This is not a duplicate test suite.
 
-- [ ] Map each target crash/failure row to an actual test/assertion and fill gaps;
+- [x] Map each target crash/failure row to an actual test/assertion and fill gaps;
   do not duplicate tests merely to match a filename or implementation branch.
   Cover initial approval publication, pointer loss, Backup/Undo attempt/result,
   Archiving-before-first-rename, every archive move and phase publication.
-- [ ] Cover SuccessorStartedAt failure/uncertain startup, normal v1/import lost
+- [x] Cover SuccessorStartedAt failure/uncertain startup, normal v1/import lost
   responses, prepared/installed seed ambiguity, checkpoint-before-consumed reply,
   replicated completion-before-local handoff and later B WAL loss. A non-identifiable
   partial record must refuse with original evidence, never fabricate accepted work.
-- [ ] Exercise system-only/separate/nested roots, unavailable mounts, root alias/
+- [x] Exercise system-only/separate/nested roots, unavailable mounts, root alias/
   replacement, no-follow traversal, both/neither rename paths, unknown entries,
   cancelled/history/current-pointer ambiguity and duplicate IDs with new timestamps.
-- [ ] Exercise required snapshot corruption, gaps/term regressions, unsupported
+- [x] Exercise required snapshot corruption, gaps/term regressions, unsupported
   schemas, contradictory authority/hints, oversized early-segment length, valid
   final torn tail and future orphan snapshot. Check original bytes/names on every
   success/refusal; no repair/truncation/`.broken` rename of A.
-- [ ] Exercise factory/Restore/Apply/Snapshot/Run/Close failure, waiter cancellation,
+- [x] Exercise factory/Restore/Apply/Snapshot/Run/Close failure, waiter cancellation,
   noncooperative late return, concurrent Cancel/Run/Start/Stop and serial ownership
   retry. Prove no callback or owner is abandoned after a timeout and no successor
   starts until the previous owner actually releases.
-- [ ] Exercise complete approved inventory despite unfinished topology, unrelated
+- [x] Exercise complete approved inventory despite unfinished topology, unrelated
   staged Latest, predecessor donors, archived unresolved cleanup, imported high-water
   marks and tombstones, exact idempotency, ordinary post-recovery retirement and
   another later recovery from B. Old historical identity is not a permanent veto.
-- [ ] Verify the policy adapter remains active after import and releases permanently
+- [x] Verify the policy adapter remains active after import and releases permanently
   only on proof/valid policy change, with ordinary strict behavior for unrelated
   groups. Test the extra service count/report paths identified in the research table.
-- [ ] Keep filesystem faults in instance-owned owning-package seams and tests; do
+- [x] Keep filesystem faults in instance-owned owning-package seams and tests; do
   not add global failpoints or production force switches for process testing.
   Each test owns its roots/listeners/transport and joins cleanup under race runs.
 
-- [ ] Record every mismatch in NOT IMPLEMENTED GAPS with target reference, evidence,
+- [x] Record every mismatch in NOT IMPLEMENTED GAPS with target reference, evidence,
   owner and resolution. Fix each in-scope gap and rerun affected validation. A truly
   uncorrected item is marked `[_]` with its reason; do not mark this plan complete
   while required work remains. Only explicit user approval can defer in-scope work.
-- [ ] **Verify final actual wiring:** construct the configured Recovery handle through
+- [x] **Verify final actual wiring:** construct the configured Recovery handle through
   public NewRecovery, execute Inspect/Approve/Run/Cancel/Status/List through real
   library paths, transform startup options, start Node, observe exact import/seed/
   consumption/readiness and normal new writes, then reset/join a returning process.
@@ -1169,6 +1169,17 @@ All prior validation evidence must describe the final code after gap fixes. Use
 focused reruns for each correction, then refresh impacted full-suite gates; an
 unresolved failure or `[_]` gap prevents completion. The last implementation
 checkbox above deliberately verifies real composition/reachability after gap closure.
+
+Audit report: [architectural delta and failure-boundary map](../testing/permanent-majority-loss-recovery-audit.md).
+All architecture/wiring checks are complete. The last full cluster run was
+105/107; both ordinary failures were corrected and passed the specifically
+authorized isolated rerun2/2,63.312s. Recovery functional/race and every process
+recovery case passed. Existing unaffected Task15 scopes retain their recorded
+provenance. No new full-cluster107/107 run is claimed. The user cancelled
+post-audit peer review and further broad heavy runs, then explicitly requested:
+“Fix these two tests and run only these two tests.” Only those corrected cases
+were rerun; [report](../../test-reports/cluster/20261025T102556.559434Z-j3g38zvo/report.md).
+There is no unresolved implementation or requested verification gap.
 
 ## Validation Commands
 
@@ -1284,6 +1295,33 @@ Use `- [ ]` for an open gap, `- [x]` only after the fix and relevant validation,
 and `- [_]` for a gap explicitly left uncorrected with its reason. Required gaps
 prevent completion; an accepted out-of-scope item belongs in the table above.
 Do not pre-mark the absence of implementation as a passed delta audit.
+
+- [x] Target §§7/8/10/15, Task16: user-approved checkpoint-only consumption command
+  replaces duplicate receipt payload/RecoveryEvidence port. FSM derives/retains
+  complete proof; exact lost replies compare checkpoint tuple. Focused and full
+  unit/functional/race gates pass; frozen schema1 proof stays unchanged.
+- [x] Target §§7.2/8.2, Task16, review M1/M2: guard public TransferLeader and direct
+  grants during import; select exact retry-aware creation pair despite noncreation
+  floors; restrict receipt positions to S or the new lineage beyond C/source term.
+  Real Node barrier and pure retry/window regressions pass under race/full suites.
+- [x] Target §§3.3/11.4, Task16: fixture HTTP list/job previously discarded valid
+  report plus namespace error. Preserve report and typed Issue. New functional
+  race regression and complete functional suites pass.
+- [x] Target §§3/10, Task16: stale private source-inventory signature/type and root
+  cancellation-resume wrapper description. Inventory is the owned complete
+  metaengine.RecoveryInventory; donor filtering happens in recoveryinspect. Resume
+  ownership is consolidated in Executor.resumeCancellation. Reconciled target and
+  plan; no public API changed. Added actual second recovery and inclusive source
+  bound tests; both functional race checks pass.
+- [x] Task16 final verification: ordinary full cluster run105/107 passed; scale
+  deletion exhausted its110s whole-scenario context at the final group, and the
+  stable-learner case killed the prior leader after transfer acceptance but before
+  its new-term healthy evidence. Both original cases passed isolated2/2. Changed
+  scale budget to3min and added the missing leader/healthy-observation barrier;
+  unit/compile/lint checks pass. The user then explicitly authorized only these two cases. Corrected cases
+  PASS2/2,63.312s on image3669916e9ea8; report102556.559434Z-j3g38zvo. No additional
+  broad heavy run or peer review was requested. No unresolved recovery
+  implementation defect was found by the audit.
 
 ## NOT PLANNED CHANGES
 
@@ -1831,7 +1869,7 @@ type RecoveryGroupConsumedProposal struct {
     RecoveryID string           `json:"recovery_id"`
     PlanDigest string           `json:"plan_digest"`
     GroupID    string           `json:"group_id"`
-    Evidence   recoveryConsumed `json:"evidence"`
+    Checkpoint CheckpointProof `json:"checkpoint"`
     ProposalID string           `json:"proposal_id"`
 }
 type CompleteRecoveryImportProposal struct {
@@ -1924,6 +1962,7 @@ func (g *Group) RecoveryCheckpoint(ctx context.Context, key model.SeedKey) (mode
 ```go
 // internal/managed/recovery.go — CREATED, private capability (not an app extension)
 type recoveryStore interface {
+    storage.Store
     RecoveryRoot() string
     ProtectRecovery(ctx context.Context, key model.SeedKey) error
     InstallRecoverySeed(ctx context.Context, seed model.SeedSpec) (model.SeedMarker,error)
@@ -1958,7 +1997,7 @@ func FinishRecovery(ctx context.Context, s *Store, key model.SeedKey, proof mode
 ```go
 // internal/metaengine/recovery.go — CREATED
 func (m *Machine) RecoveryState() *model.ImportState
-func (m *Machine) RecoveryInventory(ctx context.Context,node string) (model.SourceInventory,error)
+func (m *Machine) RecoveryInventory(ctx context.Context) (RecoveryInventory,error)
 func (s *scopedState) applyRecoveryImport(index uint64,p RecoveryImportProposal) (proposalApplication,error)
 func (s *scopedState) applyRecoveryGroupConsumed(index uint64,p RecoveryGroupConsumedProposal) (proposalApplication,error)
 func (s *scopedState) applyCompleteRecoveryImport(index uint64,p CompleteRecoveryImportProposal) (proposalApplication,error)
@@ -2014,7 +2053,6 @@ type MetaPort interface {
     WaitRecoveryReplay(context.Context) error
     ImportRecovery(context.Context, model.ImportProposal) (topology.OperationID,error)
     ReadRecovery(context.Context) (*model.ImportState,error)
-    RecoveryEvidence(context.Context, model.CheckpointProof) (model.Consumed,error)
     RecordRecoveredGroup(context.Context, model.GroupConsumedProposal) error
     CompleteRecovery(context.Context, model.CompleteImportProposal) error
     Operation(context.Context, topology.OperationID) (topology.OperationStatus,error)
@@ -2094,7 +2132,7 @@ reconcile affected tasks rather than implementing stale declarations.
 - Corrected creation fence versus receipt positions using authority_effects.go and
   authority_membership.go: ObserveEffect produces the receipt at its committed
   entry, not at the seed installation position. No fabricated receipt is allowed.
-- Checkpoint-only command simplification remains pending user approval.
+- At Task11 this simplification was pending. The user subsequently approved the checkpoint-only command; Task16 removes the receipt-bearing payload/read port.
 
 - Source validation is mandatory private adapter wiring: backend InstallRecoverySeed
   takes SeedReplay as its fourth argument; the adapter supplies shared engine Replay.
@@ -2115,8 +2153,8 @@ reconcile affected tasks rather than implementing stale declarations.
   of the initial recovered singleton's result voter basis. It requires the exact
   retained fence and ancestry; it cannot consume a step or fabricate a receipt.
 - Added private journal progress wiring and read-only current-key receipt
-  selection. The replicated command retains its approved full Evidence payload;
-  the checkpoint-only simplification remains pending user approval.
+  selection. At Task12 the command retained full Evidence; the user approved
+  checkpoint-only consumption for Task16, whose refinement supersedes this port.
 - Finish durably acknowledges confirmed consumption before ordinary durability is
   restored, permitting safe retained B restart after its old checkpoint is pruned.
 - Added an instance-owned committed-command observer to test the actual pending
@@ -2134,3 +2172,37 @@ Task14 adds the old-member-alive process regression; Task15 documents/qualifies 
 same additions. Multi-survivor donor selection is postponed in the backlog. No
 seventeenth task and no one-step Execute wrapper are introduced. The target was
 backed up before these approved public Status and inspection refinements.
+
+
+### Task16 approved checkpoint-only refinement and checkpoint review
+
+User approved M3 on2026-10-25: GroupConsumedProposal carries only the exact
+CheckpointProof plus operation/group identity. The FSM selects and retains full
+same-key receipts from its own import attempt chain. No receipts cross coordinator
+ports; durable Consumed state and frozen snapshots remain unchanged. Run nonce
+stays local. Lost replies compare retained identity/position/digest.
+
+Thread7 M1/M2: gate public TransferLeader and direct transfer grants while pending;
+select creation proof independently of later non-creation floors, reject a later
+unsettled creation, and require receipt exactly at S or beyond source C in a term
+strictly above source HardStateTerm. Add public checkpoint-interval completion,
+selector/retry and exact-position regressions. Optional streaming verification
+optimization is a measured follow-up; finite full-buffer behavior remains the
+approved scope, with qualification costs retained in the current validation record.
+
+### Task16 audit refinements and verification boundary (2026-10-25)
+
+The user-approved checkpoint-only command and review safety corrections are
+implemented; the full receipt-bearing Consumed schema remains unchanged. Private
+inventory/helper descriptions and exclusion comments now match actual composition.
+The audit also fixes fixture error-plus-status visibility and adds successive
+recovery/source-budget edge coverage. No Meridian integration was inspected.
+
+Unplanned test corrections: `tests/cluster/scale_test.go` changes only the
+whole-scenario budget110s→3min; `tests/cluster/stable_learner_test.go` requires
+actual transferred leadership and the soon-to-fail voter's fresh matching-term,
+zero-lag observation before killing it. No safety assertion, cooldown or
+performance threshold is relaxed. The corrected cases passed the subsequently authorized isolated run2/2. The full
+suite failure, original isolated pass and corrected-case pass reports are retained
+in progress; no new full-suite pass is inferred.
+Post-audit peer review was explicitly cancelled by the user.

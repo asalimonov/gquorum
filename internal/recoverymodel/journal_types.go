@@ -63,6 +63,9 @@ type AllocationFloor struct {
 }
 
 // SeedSource is a private recovery persistence value.
+// TODO(not planned): streaming snapshots/hard RSS control; encoded byte bounds
+// retain full-buffer application contracts. Never reconstruct commit from an
+// application projection or repair/truncate the source log.
 type SeedSource struct {
 	GroupID       string           `json:"group_id"`
 	Identity      storage.Identity `json:"identity"`

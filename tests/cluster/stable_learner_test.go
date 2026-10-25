@@ -209,6 +209,16 @@ func TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn(t *testing.T)
 	if err := requestLeaderTransfer(ctx, c, collector, "work", collector); err != nil {
 		t.Fatal(err)
 	}
+	secondVictim := ""
+	for _, name := range []string{"node1", "node2", "node3"} {
+		if name != victim && name != collector {
+			secondVictim = name
+			break
+		}
+	}
+	if secondVictim == "" {
+		t.Fatal("no original voter available for the second failure")
+	}
 	standbys := map[string]topology.ReplicaKey{}
 	for _, id := range []string{topology.MetaGroupID, "work"} {
 		for _, r := range converged.Group(id).Replicas {
@@ -227,10 +237,11 @@ func TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn(t *testing.T)
 		remaining := 5 * time.Minute
 		for _, group := range snapshot.Groups {
 			candidate, ok := standbys[group.GroupID]
-			if !ok || group.State != metrics.Current || group.EligibleStandbys != 1 || group.CooldownRemaining <= 90*time.Second {
+			if !ok || group.State != metrics.Current || group.EligibleStandbys != 1 || group.CooldownRemaining <= 90*time.Second ||
+				group.LeaderID != replicaID(converged, group.GroupID, collector) {
 				continue
 			}
-			qualified, suppressed := false, false
+			qualified, suppressed, healthy := false, false, false
 			for _, r := range group.Replicas {
 				if r.Sample.Identity.NodeName == candidate.NodeName && r.Sample.Identity.ReplicaID == candidate.ReplicaID {
 					qualified = r.Evidence.StandbyReadyFor.State == metrics.Current && r.Evidence.StandbyReadyFor.Value >= converged.Group(group.GroupID).VoterConfig.StandbyWindow
@@ -238,8 +249,16 @@ func TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn(t *testing.T)
 				if r.Sample.Identity.NodeName == victim {
 					suppressed = r.Evidence.DemotionCooldownRemaining > 0
 				}
+				if r.Sample.Identity.NodeName == secondVictim {
+					// Transfer acceptance is not completion. Require the same
+					// observer to see this voter healthy under the new leader
+					// before testing a new failure during the retained cooldown.
+					healthy = r.State == metrics.Current && r.Reachability == "alive" &&
+						r.Sample.LeaderID == group.LeaderID && r.Sample.Term == group.Term &&
+						r.ReplicationLag.State == metrics.Current && r.ReplicationLag.Value == 0
+				}
 			}
-			if qualified && suppressed {
+			if qualified && suppressed && healthy {
 				ready++
 				remaining = min(remaining, group.CooldownRemaining)
 			}
@@ -253,16 +272,6 @@ func TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn(t *testing.T)
 		return true, nil
 	}); err != nil {
 		t.Fatal("remaining standby did not qualify during cooldown", err)
-	}
-	secondVictim := ""
-	for _, name := range []string{"node1", "node2", "node3"} {
-		if name != victim && name != collector {
-			secondVictim = name
-			break
-		}
-	}
-	if secondVictim == "" {
-		t.Fatal("no original voter available for the second failure")
 	}
 	t.Logf("elapsed=%s remaining standby qualified while former voter is cooling; stopping %s", time.Since(started).Round(time.Millisecond), secondVictim)
 	if err := c.Node(secondVictim).Kill(ctx); err != nil {

@@ -307,3 +307,36 @@ func TestRecoveryFailedValidationNeverCompletesOrReleasesRun(t *testing.T) {
 		t.Fatal("failed validator released recovery", current, err, runs.Load(), closed.Load())
 	}
 }
+
+func TestRecoveryTransferCannotPoisonCreationBeforeConsumption(t *testing.T) {
+	t.Parallel()
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	participant, facade, operation := newRecoveryLoadNode(t, func(context.Context, load.ReplicaSpec) (load.Application, error) {
+		return load.Application{StateMachine: recoveryBarrierMachine{snapshot: func(context.Context) ([]byte, error) {
+			close(entered)
+			<-release
+			return ensureMachine{}.Snapshot(context.Background())
+		}}}, nil
+	}, nil)
+	t.Cleanup(unblock)
+	if err := participant.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	awaitRecoverySignal(t, entered)
+	// The creation operation has succeeded; this is the former floor-poisoning
+	// interval between actual creation and metadata consumption.
+	identity := participant.Identity()
+	if err := participant.Cluster().TransferLeader(t.Context(), "work", identity.NodeName); !errors.Is(err, fault.ErrOperationAuthorization) {
+		t.Fatal("public transfer crossed pending import gate", err)
+	}
+	unblock()
+	if err := participant.WaitReady(recoveryBarrierContext(t)); err != nil {
+		t.Fatal(err, participant.Status())
+	}
+	status, err := facade.Status(t.Context(), operation.RecoveryID)
+	if err != nil || !status.Complete {
+		t.Fatal("refused transfer stranded consumption", status, err)
+	}
+}

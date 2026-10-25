@@ -14,7 +14,6 @@ type MetaPort interface {
 	WaitRecoveryReplay(context.Context) error
 	ImportRecovery(context.Context, model.ImportProposal) (topology.OperationID, error)
 	ReadRecovery(context.Context) (*model.ImportState, error)
-	RecoveryEvidence(context.Context, model.CheckpointProof) (model.Consumed, error)
 	RecordRecoveredGroup(context.Context, model.GroupConsumedProposal) error
 	CompleteRecovery(context.Context, model.CompleteImportProposal) error
 	Operation(context.Context, topology.OperationID) (topology.OperationStatus, error)

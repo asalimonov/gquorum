@@ -17,7 +17,7 @@ func TestRecoveryPendingGatePermitsOnlyExactInternalProgress(t *testing.T) {
 	t.Parallel()
 	s, _ := importedRecoveryWithPolicy(t, false)
 	for _, p := range []any{
-		ProposeDocument{Doc: s.Latest.Clone()}, BeginOperationProposal{Version: 2},
+		ProposeDocument{Doc: s.Latest.Clone()}, BeginOperationProposal{Version: 2}, GrantTransferProposal{},
 		CommitReadmissionProposal{}, ReadyAdmissionProposal{}, CommitVoterChangeProposal{},
 		AcquireLock{Key: "app/lock"}, GrantSession{NodeName: "foreign"},
 		BindAdmissionProposal{Founding: true, Admission: AdmissionRecord{NodeName: "n1", MemberID: 1}},

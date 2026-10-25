@@ -77,6 +77,8 @@ func (e *Executor) execute(ctx context.Context) error {
 		return e.recordFailure(err, "archive_failed", model.RemedyRetry)
 	}
 	phase := model.AwaitingStart
+	// TODO(not planned): backup purge or a destroyed-host cleanup waiver. Retain
+	// every archived original and its unresolved obligations after the handoff.
 	if manifest.Request.Mode == model.ResetForJoin {
 		phase = model.JoinReady
 	}

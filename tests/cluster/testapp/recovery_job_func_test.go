@@ -240,6 +240,42 @@ func TestRemoteRecoveryUnknownAndPreparationCancel(t *testing.T) {
 	}
 }
 
+func TestRemoteRecoveryHistoryDiagnosticsKeepValidReports(t *testing.T) {
+	t.Parallel()
+	a := ownedApplication(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	if err := a.currentNode().WaitReady(ctx); err != nil {
+		t.Fatal(err)
+	}
+	job := prepareFixtureRecovery(t, a)
+	recoveryHTTP(t, a, "POST", "/internal/test/recovery/job/confirm", recovery.Acceptance{
+		PlanDigest: job.Plan.Digest, AcknowledgeDataLoss: true, OldDeploymentFenced: true}, 202)
+	waitRecoveryJob(t, a, func(j *recoveryJob) bool { return j.Phase == "complete" })
+	// An unrelated invalid entry must remain visible without hiding valid history.
+	foreign := filepath.Join(a.cfg.DataDir, "@gquorum-recovery", "foreign")
+	if err := os.WriteFile(foreign, []byte("unowned"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	w := fixtureRequest(ctx, a, "GET", "/internal/test/recovery", nil)
+	var listed struct {
+		Operations []recovery.Status `json:"operations"`
+		Issue      *recovery.Issue   `json:"issue"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &listed); err != nil || w.Code != 200 ||
+		len(listed.Operations) != 1 || listed.Issue == nil || listed.Issue.Code != "invalid_namespace" {
+		t.Fatal("history or diagnostic hidden", w.Code, w.Body.String(), err)
+	}
+	observed := recoveryHTTP(t, a, "GET", "/internal/test/recovery/job", nil, 200)
+	if observed.Status == nil || !observed.Status.Complete || observed.StatusIssue == nil ||
+		observed.StatusIssue.Code != "invalid_namespace" {
+		t.Fatal("selected status or diagnostic hidden", observed)
+	}
+	if raw, err := os.ReadFile(foreign); err != nil || string(raw) != "unowned" {
+		t.Fatal("discovery modified invalid evidence", err)
+	}
+}
+
 func reopenRecoveryFixture(t *testing.T, old *application) *application {
 	t.Helper()
 	cfg := old.cfg

@@ -31,6 +31,9 @@ func TestRecoveryPreImportGateBlocksJoinAndSchedulerOnAnActualLeader(t *testing.
 	if !group.IsLeader() || group.state().RecoveryState() != nil {
 		t.Fatal("test did not hold the pre-import leader interval")
 	}
+	if err := group.TransferLeader(ctx, "_meta", group.currentIdentity().NodeName); !errors.Is(err, fault.ErrOperationAuthorization) {
+		t.Fatal("pre-import transfer admitted", err)
+	}
 	if (schedulingHost{g: group}).IsLeader() {
 		t.Fatal("scheduler admitted a repair tick before import")
 	}

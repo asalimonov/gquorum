@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -158,6 +159,20 @@ func TestRecoveryProbeClosedPortMissingResolverAndCancellation(t *testing.T) {
 	missing := probeFacade(t, nil, "credential")
 	if err := missing.probeAccepted(t.Context(), &accepted); err != nil || len(accepted.Issues) != 1 || accepted.Issues[0].Code != "peer_probe_unavailable" || accepted.Issues[0].Blocking {
 		t.Fatal(accepted.Issues, err)
+	}
+	accepted = probeAcceptedFixture(t)
+	unresolved := probeFacade(t, recoveryProbeResolver{resolve: func(context.Context, string) (string, error) { return "", errors.New("unresolved") }}, "credential")
+	if err := unresolved.probeAccepted(t.Context(), &accepted); err != nil {
+		t.Fatal(err)
+	}
+	counted := false
+	for _, issue := range accepted.Issues {
+		if issue.Code == "peer_probe_incomplete" && strings.Contains(issue.Message, "0 of 1") && !issue.Blocking {
+			counted = true
+		}
+	}
+	if !counted {
+		t.Fatal("unresolved peers appeared checked", accepted.Issues)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

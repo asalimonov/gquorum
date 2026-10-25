@@ -1,8 +1,6 @@
 package metaengine
 
 import (
-	"reflect"
-
 	"github.com/asalimonov/gquorum/fault"
 	model "github.com/asalimonov/gquorum/internal/recoverymodel"
 	"github.com/asalimonov/gquorum/topology"
@@ -26,7 +24,8 @@ func (s *scopedState) applyRecoveryGroupConsumed(index uint64,
 	}
 	group := s.Recovery.Groups[position]
 	if group.Consumed != nil {
-		if !reflect.DeepEqual(*group.Consumed, p.Evidence) {
+		if group.Consumed.Identity != p.Checkpoint.Identity || group.Consumed.Checkpoint != p.Checkpoint.Position ||
+			group.Consumed.SnapshotDigest != p.Checkpoint.Digest {
 			return proposalApplication{}, fault.ErrConflict
 		}
 		return proposalApplication{result: ApplyResult{Accepted: true, ProposalID: p.ProposalID}}, nil
@@ -34,20 +33,11 @@ func (s *scopedState) applyRecoveryGroupConsumed(index uint64,
 	if s.Recovery.Phase != "importing" {
 		return proposalApplication{}, fault.ErrConflict
 	}
-	current, err := s.currentRecoveryCreation(group)
+	evidence, err := s.recoveryEvidence(group, p.Checkpoint)
 	if err != nil {
 		return proposalApplication{}, err
 	}
-	if current.Grant.Key != p.Evidence.GroupReceipt.Key {
-		return proposalApplication{}, fault.ErrAuthorityFenced
-	}
-	if err := validateRecoveryConsumed(s, s.indexes, group, p.Evidence); err != nil {
-		return proposalApplication{}, err
-	}
 	owned := model.CloneImport(*s.Recovery)
-	evidence := p.Evidence
-	evidence.HostReceipt = p.Evidence.HostReceipt.Clone()
-	evidence.GroupReceipt = p.Evidence.GroupReceipt.Clone()
 	owned.Groups[position].Consumed = &evidence
 	next := *s
 	next.Recovery = &owned

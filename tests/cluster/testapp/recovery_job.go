@@ -27,6 +27,7 @@ type recoveryJob struct {
 	Acceptance    *recovery.Acceptance  `json:"acceptance,omitempty"`
 	Operation     *recovery.Operation   `json:"operation,omitempty"`
 	Status        *recovery.Status      `json:"status,omitempty"`
+	StatusIssue   *recovery.Issue       `json:"status_issue,omitempty"`
 	Cancellation  *recoveryCancellation `json:"cancellation,omitempty"`
 	Error         string                `json:"error,omitempty"`
 }
@@ -177,9 +178,13 @@ func (s *recoveryJobs) view(ctx context.Context, id string) (*recoveryJob, error
 			return nil, err
 		}
 		status, err := handle.Status(ctx, job.Request.RecoveryID)
-		if err == nil {
+		if status.RecoveryID != "" {
 			job.Status = &status
-		} else if !errors.Is(err, fault.ErrHistoryUnavailable) {
+		}
+		var refusal *recovery.Refusal
+		if status.RecoveryID != "" && errors.As(err, &refusal) {
+			job.StatusIssue = &refusal.Issue
+		} else if err != nil && !errors.Is(err, fault.ErrHistoryUnavailable) {
 			return nil, err
 		}
 	}

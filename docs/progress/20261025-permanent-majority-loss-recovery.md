@@ -1211,3 +1211,101 @@ Task15 final resource evidence
   remain valid. Final code/links/fences/diff and observer lint verification passed.
 - Task15 complete; request the mandated five-task review covering Tasks11–15, then
   perform Task16's complete target/public-wiring audit. No required scope deferred.
+
+
+## Task16 — architectural delta audit and approved command simplification
+
+Date:2026-10-25. Working tree after eaa1162; final task validation in progress.
+
+Implemented/audited
+- The user explicitly approved the checkpoint-only internal command. Removed
+  receipt-bearing input and RecoveryEvidence read port. Deterministic FSM apply
+  selects and validates a committed complete same-key creation pair and persists
+  the unchanged full Consumed proof. Exact uncertain replies compare checkpoint
+  identity/position/digest. Existing frozen recovery fixtures are unchanged.
+- Review M1: guarded public TransferLeader; removed direct GrantTransfer from the
+  pending command gate. Selection follows the exact import attempt chain,
+  survives later noncreation floors and blocks later unsettled creation.
+- Review M2: receipt positions are exactly S/S-term or above C/source HardState
+  term and never beyond the normalized checkpoint. Added retry/fenced-successor,
+  invalid-position and real transfer-before-consumption regressions.
+- Review L1/L2: probes report attempted X of Y peers; documented nil IdentityPing
+  must not learn routes or establish a session from its synthetic header.
+- Fixture HTTP list/job now retain valid reports alongside typed namespace
+  diagnostics. New remote fixture regression preserves foreign evidence.
+- Added actual second public recovery B→C retaining both histories and monotonic
+  identities, plus an inclusive source-byte-bound Node startup regression.
+- Completed section-by-section target/public/persistence/reader/import/placement/
+  seed/Node/ownership/fixture/exclusion and real composition audit. Report:
+  docs/testing/permanent-majority-loss-recovery-audit.md. Includes each crash/
+  other-failure boundary with actual assertions; no Meridian wiring inspected.
+- Corrected stale target/plan private Inventory signature/type, consolidated
+  cancellation-resume ownership and checkpoint pseudocode; documented optional
+  private seed controls/adapter methods and exclusion markers. Backed up target
+  before final reconciliation to target-before-final-audit-20261025T101244Z.md;
+  the earlier approved-command backup095355Z remains intact.
+
+Verification before the latest test-only corrections
+- make test PASS2138/2138,11.572s after final source/comment changes:
+  test-reports/unit/20261025T102116.146036Z-bxnmaw5k/report.md.
+- make test-race PASS2138/2138,103.336s (concurrent build/qualification):
+  test-reports/unit-race/20261025T101226.949159Z-4l0xxrrs/report.md.
+- make test-function PASS1278/1278,116.914s:
+  test-reports/function/20261025T101226.951248Z-e6qxu5kg/report.md.
+- make test-function-race PASS1278/1278,154.472s:
+  test-reports/function-race/20261025T101512.389206Z-5hb6072p/report.md.
+- Focused recovery race suite PASS54.936s; inclusive bound PASS17.637s;
+  successive recovery PASS32.771s; HTTP diagnostic regression PASS3.117s.
+- make lint PASS across all modules/tags, including compile-only process cases:
+  /tmp/gquorum-task16-lint-complete.log. git diff --check PASS. No protobuf delta,
+  physical fixture rewrite, nested repository or .gitignore change.
+- Rebuilt Docker image after implementation changes. Final image:
+  sha256:3669916e9ea8f7f228f206fa7cb46d6f6beb452578c24d5c6b1f95a5dae3654c,
+  created2026-10-25T10:20:49.460515759Z. No tag replacement during a test run.
+- Complete cluster run105/107 PASS,2 ordinary cases failed,277.527s:
+  test-reports/cluster/20261025T101335.990815Z-fu22bdyg/report.md.
+  All recovery cases passed. Original failures rerun in isolation both PASS,
+  63.545s: test-reports/cluster/20261025T101839.576562Z-40e8xyeh/report.md.
+
+Failure analysis/corrections
+- Scale deletion expired its shared110s context on scale-14, the last deletion.
+  Increased this non-performance whole-scenario budget to3min; every propagation,
+  native/state, collection and baseline-preservation assertion remains.
+- Stable learner accepted a transfer but checked pre-transfer collector data,
+  killed the old leader and changed the evidence scope before its healthy baseline.
+  Added exact observed collector leadership and the next victim's fresh,
+  matching-term, zero-lag health barrier before the kill. The test retains its
+  cooldown bound, failure window and identity/native/application assertions.
+  Both modified cases compile and lint cleanly.
+
+User steering
+- The user cancelled post-audit peer review and further broad functional/cluster
+  runs to prepare for minor refactoring. No new peer request was sent. Thread7
+  findings were dispositioned and closed locally without a message to the peer.
+- The user then explicitly instructed: "Fix these two tests and run only these
+  two tests." Started only those two corrected Docker cases on the final image;
+  their result follows. No other test suite is being rerun.
+- Task15 example/simulation/performance/resource/ordinary-benchmark and physical
+  compatibility evidence is retained. Task16 changes control-payload/conditional
+  recovery authorization and diagnostics; it does not change measured source/WAL
+  materialization, full-buffer defaults, ordinary nil-recovery or example wiring.
+  Repeated full reads remain a recorded potential improvement, not a new scope
+  deferral or an RSS guarantee.
+
+
+Task16 selected-case result and completion
+- The explicitly requested corrected pair passed2/2,63.312s:
+  test-reports/cluster/20261025T102556.559434Z-j3g38zvo/report.md.
+  TestStableLearnerFiveNodesAutomaticPromotionAndRetainedReturn34.220s;
+  TestFifteenLoadGroupsCommitIndependentlyAndDeleteEveryLocalStore60.490s.
+  Only these two tests were selected. No other suite or peer review was started.
+- All16 implementation tasks and the architectural/wiring audit are complete.
+  Existing unaffected qualification evidence is retained with exact provenance;
+  Task16's full run105/107 failure and corrected pair pass are both preserved.
+  This is not represented as a fresh107/107 full run. No required gap remains.
+- Current validation docs replace broken links to pruned rolling Task14/15
+  report directories with the retained execution record; final Task16 reports
+  remain linked. Resource logs/binary hashes and frozen fixture inputs are intact.
+- Final docs/path/fence/diff checks pass. No gquorum-test containers/volumes
+  remain. Post-audit peer review was cancelled by the user. Meridian wiring and
+  the already documented feature exclusions remain outside this implementation.

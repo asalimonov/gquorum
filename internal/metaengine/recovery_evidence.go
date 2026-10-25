@@ -1,41 +1,32 @@
 package metaengine
 
 import (
-	"context"
-
 	"github.com/asalimonov/gquorum/fault"
 	model "github.com/asalimonov/gquorum/internal/recoverymodel"
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// RecoveryEvidence selects the same-key pair already committed by ordinary
-// creation. This read does not manufacture receipts or change command payloads.
-func (m *Machine) RecoveryEvidence(ctx context.Context, proof model.CheckpointProof) (model.Consumed, error) {
-	if err := ctx.Err(); err != nil {
-		return model.Consumed{}, err
-	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	state := m.scoped
-	if state.Recovery == nil {
-		return model.Consumed{}, fault.ErrOperationAuthorization
-	}
-	for _, group := range state.Recovery.Groups {
-		if group.Destination == proof.Identity {
-			return state.recoveryEvidence(group, proof)
-		}
-	}
-	return model.Consumed{}, fault.ErrIdentityMismatch
-}
-
+// recoveryEvidence derives a complete same-key pair from committed state only.
+// Non-creation fences/transfers cannot erase proof of B's actual creation.
 func (s *scopedState) recoveryEvidence(group model.ImportGroup,
 	proof model.CheckpointProof) (model.Consumed, error) {
 	record, err := s.currentRecoveryCreation(group)
 	if err != nil {
 		return model.Consumed{}, err
 	}
-	evidence := model.Consumed{Identity: proof.Identity, Checkpoint: proof.Position, SnapshotDigest: proof.Digest}
+	evidence := recoveryRecordedPair(record, group)
+	evidence.Identity, evidence.Checkpoint, evidence.SnapshotDigest = proof.Identity, proof.Position, proof.Digest
+	if err := validateRecoveryConsumed(s, s.indexes, group, evidence); err != nil {
+		return model.Consumed{}, err
+	}
+	return evidence, nil
+}
+func recoveryRecordedPair(record *authorityRecord, group model.ImportGroup) model.Consumed {
+	var evidence model.Consumed
 	for _, receipt := range record.Effects {
+		if receipt.Key != record.Grant.Key {
+			continue
+		}
 		switch receipt.Resource.Kind {
 		case topology.AuthorityHost:
 			if receipt.Target.NodeName == group.Destination.NodeName &&
@@ -44,32 +35,68 @@ func (s *scopedState) recoveryEvidence(group model.ImportGroup,
 			}
 		case topology.AuthorityGroup:
 			evidence.GroupReceipt = receipt.Clone()
-		default: // Other resources do not supply the exact creation pair.
+		default:
 		}
 	}
-	if evidence.HostReceipt.Key.Revision == 0 || evidence.GroupReceipt.Key.Revision == 0 {
-		return model.Consumed{}, fault.ErrAuthorityPending
-	}
-	if err := validateRecoveryConsumed(s, s.indexes, group, evidence); err != nil {
-		return model.Consumed{}, err
-	}
-	return evidence, nil
+	return evidence
 }
-
+func completeRecoveryPair(record *authorityRecord, group model.ImportGroup) bool {
+	pair := recoveryRecordedPair(record, group)
+	return pair.HostReceipt.Key.Revision != 0 && pair.GroupReceipt.Key.Revision != 0
+}
 func (s *scopedState) currentRecoveryCreation(group model.ImportGroup) (*authorityRecord, error) {
 	catalog := s.authorityCatalog()
-	groupResource := topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: group.GroupID}
-	hostResource := topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: group.GroupID,
-		NodeName: group.Destination.NodeName}
-	key := catalog.floors[groupResource]
-	if key.Revision == 0 || catalog.floors[hostResource] != key {
+	attempts := s.recoveryCreationAttempts()
+	var selected *authorityRecord
+	for _, record := range catalog.records {
+		if !s.isRecoveryCreation(record.Grant, group, attempts) || !completeRecoveryPair(record, group) {
+			continue
+		}
+		if selected == nil || record.Grant.Key.Revision > selected.Grant.Key.Revision {
+			selected = record
+		}
+	}
+	if selected == nil {
 		return nil, fault.ErrAuthorityPending
 	}
-	record := catalog.records[key]
-	if record == nil || record.Grant.Action == nil ||
-		record.Grant.Action.Kind != topology.StepCreateFoundingGroup ||
-		record.Grant.Action.Version != s.Recovery.Version {
-		return nil, fault.ErrOperationAuthorization
+	for _, resource := range selected.Grant.Resources {
+		if compareAuthorityKey(catalog.floors[resource], selected.Grant.Key) < 0 {
+			return nil, fault.ErrAuthorityPending
+		}
 	}
-	return record, nil
+	for _, record := range catalog.records {
+		if record.Grant.Key.Revision > selected.Grant.Key.Revision &&
+			s.isRecoveryCreation(record.Grant, group, attempts) &&
+			!catalog.recordSettled(record) {
+			return nil, fault.ErrAuthorityPending
+		}
+	}
+	return selected, nil
+}
+func (s *scopedState) recoveryCreationAttempts() map[topology.OperationID]bool {
+	result := make(map[topology.OperationID]bool)
+	if s.Recovery == nil {
+		return result
+	}
+	op := s.indexes.operations[s.indexes.latest[s.Recovery.Version]]
+	for op != nil && !result[op.Status.ID] {
+		if op.Status.Version != s.Recovery.Version {
+			break
+		}
+		result[op.Status.ID] = true
+		op = s.indexes.operations[op.Previous]
+	}
+	return result
+}
+func (s *scopedState) isRecoveryCreation(grant topology.AuthorityGrant, group model.ImportGroup,
+	attempts map[topology.OperationID]bool) bool {
+	action := grant.Action
+	if s.Recovery == nil || action == nil || action.Kind != topology.StepCreateFoundingGroup ||
+		action.Version != s.Recovery.Version || grant.Key.ClusterID != group.Destination.ClusterID ||
+		grant.Key.GroupID != group.GroupID || !attempts[grant.OperationID] {
+		return false
+	}
+	target := topology.AuthorityTarget{NodeName: group.Destination.NodeName, MemberID: s.Recovery.Survivor.ReplicaID,
+		ReplicaID: group.Destination.ReplicaID}
+	return len(grant.Targets) == 1 && grant.Targets[0] == target
 }

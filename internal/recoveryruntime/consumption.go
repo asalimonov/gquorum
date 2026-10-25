@@ -3,7 +3,6 @@ package recoveryruntime
 import (
 	"context"
 	"errors"
-	"reflect"
 
 	"github.com/asalimonov/gquorum/fault"
 	model "github.com/asalimonov/gquorum/internal/recoverymodel"
@@ -40,7 +39,9 @@ func (c *Coordinator) recordGroup(ctx context.Context, proposal model.GroupConsu
 		if group.GroupID != proposal.GroupID || group.Consumed == nil {
 			continue
 		}
-		if reflect.DeepEqual(*group.Consumed, proposal.Evidence) {
+		if group.Consumed.Identity == proposal.Checkpoint.Identity &&
+			group.Consumed.Checkpoint == proposal.Checkpoint.Position &&
+			group.Consumed.SnapshotDigest == proposal.Checkpoint.Digest {
 			return nil
 		}
 		return fault.ErrConflict
@@ -61,15 +62,8 @@ func (c *Coordinator) consumeGroup(ctx context.Context, group model.ImportGroup,
 	if group.Consumed != nil {
 		return nil
 	}
-	evidence, err := fault.Retry(ctx, fault.RetryOptions{},
-		func(attempt context.Context) (model.Consumed, error) {
-			return c.config.Meta.RecoveryEvidence(attempt, proof)
-		})
-	if err != nil {
-		return err
-	}
 	proposal := model.GroupConsumedProposal{RecoveryID: record.RecoveryID, PlanDigest: record.PlanDigest,
-		GroupID: group.GroupID, Evidence: evidence, ProposalID: record.RecoveryID + ".consume." + group.GroupID}
+		GroupID: group.GroupID, Checkpoint: proof, ProposalID: record.RecoveryID + ".consume." + group.GroupID}
 	recordErr := retryControl(ctx, func(attempt context.Context) error { return c.recordGroup(attempt, proposal) })
 	if recordErr != nil {
 		return recordErr

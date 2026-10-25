@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -99,9 +100,14 @@ func (a *application) recoveryListHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	statuses, err := handle.List(r.Context())
-	if err != nil {
+	var refusal *recovery.Refusal
+	if err != nil && !errors.As(err, &refusal) {
 		httpError(w, err)
 		return
 	}
-	jsonResponse(w, http.StatusOK, map[string]any{"job": a.recoveryJobs.snapshot(), "operations": statuses})
+	response := map[string]any{"job": a.recoveryJobs.snapshot(), "operations": statuses}
+	if refusal != nil {
+		response["issue"] = refusal.Issue
+	}
+	jsonResponse(w, http.StatusOK, response)
 }

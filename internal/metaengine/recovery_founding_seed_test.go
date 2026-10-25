@@ -11,8 +11,12 @@ import (
 
 func fencedRecoverySeedFixture(t *testing.T) (scopedState, PlanRead, topology.AuthorityGrant) {
 	t.Helper()
-	s, p := consumedRecoveryFixture(t)
-	birth := s.indexes.grants[p.Evidence.GroupReceipt.Key].Grant.Clone()
+	s, _ := consumedRecoveryFixture(t)
+	record, err := s.currentRecoveryCreation(s.Recovery.Groups[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	birth := record.Grant.Clone()
 	fence := birth.Clone()
 	fence.Key.Revision++
 	fence.Purpose = topology.AuthorityFence

@@ -36,6 +36,8 @@ func ProbeIdentity(ctx context.Context, options ProbeOptions) (*metapb.Reply, er
 		return nil, err
 	}
 	defer connection.Close()
+	// Nil-payload IdentityPing must remain side-effect-free: the synthetic
+	// inspection header must never teach routes or establish a process session.
 	authenticated := metadata.AppendToOutgoingContext(ctx, credentialKey, hex.EncodeToString(options.Credential))
 	return metapb.NewMetaClient(connection).IdentityPing(authenticated,
 		&metapb.MetaRequest{Header: proto.CloneOf(options.Header)})

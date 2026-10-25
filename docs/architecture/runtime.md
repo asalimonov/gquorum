@@ -631,8 +631,13 @@ Each load seed copies only the chosen source snapshot and entries through durabl
 C, preserving application bytes/indexes/terms/request IDs. Validated native/admin
 positions become inert positions; B membership and authority come from normal
 approved effects. Seed/checkpoint writes force fsync even when ordinary WAL
-DisableFSync is configured. A normalized complete checkpoint and exact current
-host/native receipts are confirmed in replicated metadata before consumption.
+DisableFSync is configured. The coordinator submits only the durable normalized checkpoint identity, position
+and digest. At deterministic apply, metadata selects the highest complete same-key
+host/native creation receipt pair in the import's exact operation attempt chain.
+Later unsettled creation blocks older proof; a noncreation floor does not erase
+it. The native receipt is at source S/S-term or beyond source C in a term above
+the source HardState term, and at/below the checkpoint. The full pair is retained
+in Consumed. Public leader transfer stays guarded while import is pending.
 Replay is serial across required groups. Business handles stay withheld until
 replicated import completion; lifecycle validation may then inspect handles while
 Application.Run remains held. Local Complete and protected-writer release precede

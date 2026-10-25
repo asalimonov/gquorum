@@ -16,6 +16,8 @@ import (
 )
 
 // InspectRebuild requires one validated local donor for every approved group.
+// TODO(not planned): multi-survivor/freshest-donor selection, arbitrary backup
+// import and intentional group dropping; missing approved coverage must refuse.
 func InspectRebuild(ctx context.Context, state SourceState, request model.Request) (model.AcceptedPlan, error) {
 	accepted := baseAccepted(state, request)
 	wal := walInventory{state: &state, accepted: &accepted, sources: make(map[string]model.SeedSource),
@@ -238,6 +240,7 @@ func (w *walInventory) finishCoverage() {
 			report = model.GroupRecovery{GroupID: group.ID}
 		}
 		if group.Storage != topology.StorageDefault {
+			// TODO(not planned): memory/custom or log-only recovery inputs.
 			w.failed("unsupported_storage", group.ID, "rebuild requires a durable Node-owned WAL group",
 				fault.ErrUnsupported)
 		}

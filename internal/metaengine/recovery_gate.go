@@ -21,7 +21,7 @@ func ValidateRecoveryCommand(proposal any, scope RecoveryCommandScope) error {
 	switch p := proposal.(type) {
 	case *model.ImportProposal, *model.GroupConsumedProposal, *model.CompleteImportProposal,
 		*RevokeSession, *RecordFenceProposal, *RecordEffectProposal, *BeginEffectProposal,
-		*TransitionOperationProposal, *GrantTransferProposal:
+		*TransitionOperationProposal:
 		return nil // Existing exact courier/grant/resource validation still applies.
 	case *RetryOperationProposal:
 		if scope.Version != 0 && scope.RetryVersion == scope.Version {

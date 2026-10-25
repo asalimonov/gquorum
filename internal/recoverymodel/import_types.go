@@ -9,6 +9,8 @@ import (
 )
 
 // ImportState defines private replicated recovery evidence.
+// TODO(not planned): compact completed provenance only under a later versioned
+// design; mixed-version recovery and downgrade migration are unsupported.
 type ImportState struct {
 	Schema        uint32            `json:"schema"` // 1
 	RecoveryID    string            `json:"recovery_id"`
@@ -68,11 +70,11 @@ type ImportProposal struct {
 
 // GroupConsumedProposal defines private replicated recovery evidence.
 type GroupConsumedProposal struct {
-	RecoveryID string   `json:"recovery_id"`
-	PlanDigest string   `json:"plan_digest"`
-	GroupID    string   `json:"group_id"`
-	Evidence   Consumed `json:"evidence"`
-	ProposalID string   `json:"proposal_id"`
+	RecoveryID string          `json:"recovery_id"`
+	PlanDigest string          `json:"plan_digest"`
+	GroupID    string          `json:"group_id"`
+	Checkpoint CheckpointProof `json:"checkpoint"`
+	ProposalID string          `json:"proposal_id"`
 }
 
 // CompleteImportProposal defines private replicated recovery evidence.

@@ -43,7 +43,7 @@ func (g *Group) ReadRecovery(ctx context.Context) (*model.ImportState, error) {
 	return result, err
 }
 
-// RecordRecoveredGroup records exact normalized-checkpoint and creation receipts.
+// RecordRecoveredGroup submits a durable checkpoint; metadata selects its recorded receipts.
 func (g *Group) RecordRecoveredGroup(ctx context.Context, proposal model.GroupConsumedProposal) error {
 	if err := g.authorizeRecoveryOwner(); err != nil {
 		return err
@@ -168,19 +168,4 @@ func recoveryFoundingResume(startup metaStartup) (bool, error) {
 		return false, fault.New(fault.OperationAuthorization, "recovery founding requires pin-only metadata", err)
 	}
 	return true, nil
-}
-
-// RecoveryEvidence confirms the locally retained ordinary creation receipt pair.
-func (g *Group) RecoveryEvidence(ctx context.Context, proof model.CheckpointProof) (model.Consumed, error) {
-	if err := g.authorizeRecoveryOwner(); err != nil {
-		return model.Consumed{}, err
-	}
-	if err := g.ReadBarrier(ctx); err != nil {
-		return model.Consumed{}, err
-	}
-	state := g.state()
-	if state == nil {
-		return model.Consumed{}, fault.ErrReplicaNotReady
-	}
-	return state.RecoveryEvidence(ctx, proof)
 }
