@@ -3,8 +3,6 @@ package raftengine
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
@@ -152,60 +150,7 @@ func newGroup(parent context.Context, opts Options, mode engineMode) (*Group, er
 	if err := initializeFounding(ctx, options, &state); err != nil {
 		return nil, err
 	}
-	recovery, restored := state.recovery, state.restored
-	initialized, err := initializeRaft(options, recovery)
-	if err != nil {
-		return nil, err
-	}
-	var seed [16]byte
-	if _, err := rand.Read(seed[:]); err != nil {
-		return nil, err
-	}
-	g := &Group{
-		opts:           options,
-		rn:             initialized.raw,
-		ms:             initialized.memory,
-		cs:             copyConf(recovery.Snapshot.Metadata.ConfState),
-		applied:        recovery.Snapshot.Metadata.Index,
-		snapshotIndex:  recovery.Snapshot.Metadata.Index,
-		recoveryCommit: recovery.HardState.Commit,
-		durableHS:      recovery.HardState,
-		done:           make(chan struct{}),
-		ready:          make(chan struct{}),
-		proposals:      make(chan *request, proposalQueueCapacity),
-		inbound:        make(chan *request, inboundQueueCapacity),
-		controls:       make(chan *request, controlQueueCapacity),
-		snapshots:      make(chan *request, snapshotQueueCapacity),
-		slots:          make(chan struct{}, options.MaxPendingProposals),
-		unreachable:    make(chan uint64, unreachableQueueCapacity),
-		reports:        make(chan snapshotReport, snapshotReportQueueCapacity),
-		sendC:          make(chan []raftpb.Message, outboundBatchQueueCapacity),
-		writeC:         make(chan writeJob, 1),
-		writeDone:      make(chan writeResult, 1),
-		props:          make(map[string]*request),
-		changes:        make(map[string]*request),
-		nonce:          hex.EncodeToString(seed[:]),
-	}
-	g.observations = watchstate.New(options.MaxWatchers, replicastate.Observation{},
-		func(o replicastate.Observation) replicastate.Observation { return o })
-	g.leadershipChanged = make(chan struct{})
-	g.authority = restored.Authority.Clone()
-	g.reads = make(chan *readRequest, options.Reads.MaxPending)
-	g.readSlots = make(chan struct{}, options.Reads.MaxPending)
-	g.peerAcks = make(map[uint64]peerAck)
-	g.meter, err = internalmetrics.NewMeter(metrics.ReplicaIdentity{
-		ClusterID:  options.ClusterID,
-		GroupID:    options.GroupID,
-		NodeName:   options.NodeName,
-		ReplicaID:  options.ReplicaID,
-		InstanceID: options.InstanceID,
-		RunID:      g.nonce,
-	}, options.Metrics)
-	if err != nil {
-		return nil, err
-	}
-	g.refresh()
-	return g, nil
+	return newRestoredCore(ctx, options, state)
 }
 
 // Start begins engine work under the supplied lifetime context.

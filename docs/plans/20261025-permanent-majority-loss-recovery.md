@@ -16,7 +16,7 @@
 
 **Review/clarifications:** [docs/review/feat_permanent-majority-loss-recovery.md](../review/feat_permanent-majority-loss-recovery.md)
 
-**Status:** implementation in progress; Tasks 1–4 complete; Task 5 next.
+**Status:** implementation in progress; Tasks 1–5 complete; scheduled peer review before Task 6.
 
 ## Scope and precedence
 
@@ -388,43 +388,43 @@ startup/interpreter extraction; owning tests.
 **Dependencies:** Tasks 1–4. **Outcome:** trustworthy immutable source evidence,
 without application reconstruction, workers or source repair.
 
-- [ ] Implement the target Reader/OpenReadOnly/Recovery/Evidence methods for metadata
+- [x] Implement the target Reader/OpenReadOnly/Recovery/Evidence methods for metadata
   and authority using existing complete pin/bucket/record validation. No bucket
   creation, migration, writable open or materialized-state rewrite is permitted.
   Bound decoded metadata and close partial acquisitions on every exit.
-- [ ] Implement bounded WAL framing/segment inspection, preserving CRC chain and
+- [x] Implement bounded WAL framing/segment inspection, preserving CRC chain and
   segment/offset evidence. Reject unchecked oversized lengths before allocation;
   use bounded descriptors and checked arithmetic. Earlier-segment UnexpectedEOF
   is corruption, not an older complete prefix. Do not broaden upstream torn-CRC claims.
-- [ ] Implement nonmutating snapshot selection/CRC checks from retained markers.
+- [x] Implement nonmutating snapshot selection/CRC checks from retained markers.
   A required corrupt snapshot refuses; orphan files/markers above proven commit
   are reported, never used to raise C. Do not invoke a snapshotter path that renames
   corrupt source files to `.broken` or otherwise repairs them.
-- [ ] Enforce `0 < S <= C <= L`, hint ≤ C, contiguous entries, valid envelopes,
+- [x] Enforce `0 < S <= C <= L`, hint ≤ C, contiguous entries, valid envelopes,
   nondecreasing terms and supported native configurations. A final torn record is
   tolerated only with target §6's final-segment and retained-boundary proof.
-- [ ] Extract the shared committed-entry interpreter and restored-core initializer.
+- [x] Extract the shared committed-entry interpreter and restored-core initializer.
   Implement `raftengine.Replay`/ReplayOptions/ReplayResult from Appendix D. It starts
   no Raft workers/elections/transport and writes no store. Reuse actual native and
   authority semantics rather than maintaining a divergent source interpreter.
-- [ ] Replay metadata with `metaengine.NewMachine(rules, nil)` so AfterApply cannot
+- [x] Replay metadata with `metaengine.NewMachine(rules, nil)` so AfterApply cannot
   persist to A. Load preflight uses a discarding application machine; no caller
   factory, Restore, Apply, Snapshot, Run or Close runs during inspection.
-- [ ] Release group payloads between groups; enforce MaxRecord/MaxGroup/MaxMetadata
+- [x] Release group payloads between groups; enforce MaxRecord/MaxGroup/MaxMetadata
   limits before allocation wherever the existing full-buffer contracts permit.
   Keep the stated limitation on application allocations; no hard RSS claim.
-- [ ] Add pure malformed-frame/boundary units and real WAL/bbolt functional fixtures
+- [x] Add pure malformed-frame/boundary units and real WAL/bbolt functional fixtures
   for early/final EOF, zero-sector/CRC, gaps, descending terms, stale hints, tail > C,
   foreign/unsupported state and read-only byte preservation. Reuse immutable
   fixtures through temporary copies; never regenerate expected legacy data.
 
 #### Verification
 
-- [ ] `make test`; focused functional and relevant race checks for readers and engine
+- [x] `make test`; focused functional and relevant race checks for readers and engine
   interpreter extraction. Existing normal replay suites must still pass.
-- [ ] Assert source hashes/names unchanged on success, refusal and cancellation;
+- [x] Assert source hashes/names unchanged on success, refusal and cancellation;
   prove no source persister/worker is invoked. Test exact replay through C, not H/L.
-- [ ] Record resource/refusal evidence and fix every failure before Inspect uses readers.
+- [x] Record resource/refusal evidence and fix every failure before Inspect uses readers.
 
 ### Task 6: Implement complete-survivor inspection and exact durable approval
 
@@ -1226,6 +1226,18 @@ prevent completion; an accepted out-of-scope item belongs in the table above.
 Do not pre-mark the absence of implementation as a passed delta audit.
 
 ## NOT PLANNED CHANGES
+
+- Task 5: added `internal/metaengine/snapshot_boundary.go` and the optional
+  `raftengine.RestoredValidator` in the shared restore helper, wired into startup,
+  incoming snapshots and offline replay (`internal/raftengine/{restore,ready_apply,startup}.go`).
+  Inspection found that Machine.AfterApply overwrites applied positions: metadata
+  ahead of its native snapshot could otherwise suppress committed replay before
+  that overwrite hid the contradiction. Exact snapshot index/term validation now
+  refuses this, retaining the initial empty founding checkpoint exception. This
+  enforces target §6 rather than adding a new public API. Verified by modern
+  single-node metadata replay, an altered-boundary regression and normal suites;
+  see Task 5 commit/progress for the complete diff and validation.
+
 
 None during planning. During implementation record each necessary out-of-plan
 change with path, rationale, relation to a required fix, validation and commit/diff

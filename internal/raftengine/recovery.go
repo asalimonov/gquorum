@@ -1,6 +1,8 @@
 package raftengine
 
 import (
+	"math"
+
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/storage"
 	"go.etcd.io/raft/v3"
@@ -8,7 +10,8 @@ import (
 )
 
 func validateSnapshot(ss raftpb.Snapshot) error {
-	if ss.Metadata.Index == 0 || ss.Metadata.Term == 0 || len(ss.Data) == 0 || len(ss.Metadata.ConfState.Voters) == 0 {
+	if ss.Metadata.Index == 0 || ss.Metadata.Term == 0 || len(ss.Data) == 0 ||
+		len(ss.Metadata.ConfState.Voters) == 0 {
 		return fault.New(fault.Invalid, "snapshot requires complete state and voters", nil)
 	}
 	cs := ss.Metadata.ConfState
@@ -38,14 +41,17 @@ func validateRecovery(r storage.Recovery) error {
 		}
 	}
 	last := r.Snapshot.Metadata.Index
+	previousTerm := r.Snapshot.Metadata.Term
 	for _, e := range r.Entries {
-		if e.Index != last+1 || e.Term == 0 || e.Term > r.HardState.Term {
+		if last == math.MaxUint64 || e.Index != last+1 || e.Term == 0 || e.Term > r.HardState.Term ||
+			e.Term < previousTerm {
 			return fault.New(fault.Unreadable, "invalid recovered log prefix", nil)
 		}
 		if err := validateEntryFormat(e); err != nil {
 			return err
 		}
 		last = e.Index
+		previousTerm = e.Term
 	}
 	if r.HardState.Commit < r.Snapshot.Metadata.Index || r.HardState.Commit > last ||
 		r.HardState.Term < r.Snapshot.Metadata.Term || r.AppliedHint > r.HardState.Commit {

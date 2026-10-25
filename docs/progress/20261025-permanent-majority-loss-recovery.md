@@ -220,3 +220,72 @@ Notes
   process suites, not new Gosim recovery scenarios.
 - A pure test-model helper package and split validation/progress files keep the
   shared schema and tests coherent. No persisted legacy encoding was changed.
+
+
+## Task 5 — Bounded source readers and shared committed replay
+Date: 2026-10-25. Commit: included with this task's implementation commit.
+
+Implemented
+- Read-only metadata/authority Readers retain their descriptors, validate schema,
+  pins, ledgers and complete journal facts, and bound encoded database key/value
+  input before typed decoding. Missing stores are never initialized; no bucket
+  creation, materialized-state rewrite or migration occurs. Files with unused
+  bbolt pages are not confused with decoded-byte budgets.
+- A streaming WAL frame decoder checks lengths before allocation, chains CRCs
+  across gap-free segments and holds one segment descriptor at a time. Earlier
+  unexpected EOF/CRC/gaps refuse; only the final file can supply a reported torn
+  candidate, and retained commit/snapshot/applied/floor boundaries still gate it.
+  Normal readLog now shares these rules with its original addressable-input
+  ceiling; recovery-specific byte defaults are not imposed on ordinary stores.
+- Nonmutating bounded snapshot CRC/marker selection refuses a required corrupt
+  image without .broken renames. Above-commit markers/files are reported and never
+  promote C. Retained positions/semantic digest include hints, tail and torn evidence;
+  selected snapshot plus materialized tail obey the group input budget.
+- Extracted newRestoredCore and reused the live committed-entry interpreter in
+  raftengine.Replay. It restores the complete snapshot and only entries through C,
+  interprets native/authority effects and starts no workers, elections, transport or
+  persistence. DiscardMachine supports load preflight without caller callbacks;
+  metadata replay uses NewMachine(rules,nil).
+- Added metadata snapshot-boundary validation in shared restore paths. An
+  application metadata position cannot hide tail commands or exceed the native
+  checkpoint; the normal empty index-1 founding checkpoint remains valid.
+- Added source-preservation, bounded/absent/legacy/refusal tests, exact C-versus-H/L
+  replay, native authority replay, malformed padding, early/final EOF, earlier CRC
+  with zero sectors, gaps, corrupt/orphan snapshots and cancellation coverage.
+
+Verified
+- make test: PASS, 2,021 tests/54 reports, all five modules, 9.262s. Report:
+  test-reports/unit/20261025T012030.588943Z-nrwskv_6/report.md.
+- Full focused functional suites: backend9.958s, facade9.659s, engine8.990s,
+  metastore4.609s, authority7.876s, metadata FSM3.383s; all PASS.
+- Same six full functional suites under -race -count=1: all PASS
+  (backend11.977s/facade11.435s/engine10.647s/meta-store6.798s/
+  authority9.248s/meta-engine27.389s). Additional discard replay -race: PASS1.504s.
+- Full root functional suite: PASS15.277s. make lint: PASS across all configured
+  modules/build tags/tooling; focused production lint also reports zero issues.
+- make test-sim SIM_SEEDS=1-3: PASS21/21,55.091s. Report:
+  test-reports/sim/20261025T011634.373399Z-43548mi0/report.md.
+- Rebuilt gquorum-recovery:local image
+  sha256:e4b2c2eac0290c73948ea4d2b95b90c1b24378b7361c9ea28a914dc18a4b9539;
+  repeated required three-node owned-runtime/readmission smoke: PASS3/3,18.349s.
+  Report: test-reports/cluster/20261025T011900.269055Z-cu6ynlns/report.md.
+  Verified no labeled application containers, volumes or networks remain.
+- Recorded legacy physical hashes and scoped metadata/authority hashes match.
+  git diff --check: PASS. Read-only success, refusal and cancellation leave source
+  bytes and names unchanged; no frozen artifact was regenerated.
+
+Notes
+- The frozen scoped-v4 meta.bolt is a store/FSM fixture: its captured snapshot and
+  entries are bare metadata payloads, not native engine envelopes. Read-only
+  metadata loading is supported, but native replay correctly refuses them.
+  Modern end-to-end metadata replay instead uses an actual single-node runtime's
+  retained store, preserving the frozen fixture rather than adapting it in place.
+- The first shared initializer accidentally retained the cancelled startup context
+  in dormant groups. An existing synchronous-owner leadership regression caught
+  this; normal groups again obtain their context only at Start, while offline
+  replay explicitly owns its context. The unchanged regression and full suites pass.
+- Snapshot boundary validation extends cited files as recorded in NOT PLANNED
+  CHANGES. Authority journal persisted record definitions remain untouched; typed
+  offline evidence is a working projection, not a replacement disk format.
+- Review cadence reached: ask the existing colleague to review Tasks1–5 before
+  continuing with complete-survivor inspection/approval in Task6.
