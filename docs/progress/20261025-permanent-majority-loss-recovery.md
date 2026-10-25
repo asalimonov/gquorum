@@ -1026,3 +1026,68 @@ Findings
   remains owned by ordinary Node networking; no probe listener is acquired.
 - Actual three-node loss, old-member-alive, retained tail and reset admission are
   next in Task14, using the settled image. Overall goal remains active.
+
+
+## Task 14 — Permanent-loss and returning-node process acceptance
+Date: 2026-10-25
+
+Implemented
+- Added twelve counted recovery process cases under TestPermanentMajorityLoss,
+  each using the isolated ordinary three-node pool and authenticated public
+  controls. No operator shell/file-copy or private library import is used.
+- Complete survivor recovery preserves exact values/deduplication, fresh lineage
+  and monotonic member/replica IDs, permits new writes, explicitly resets both old
+  nodes for normal B admission, catches up their state and survives all-node restart.
+- The same case uses strict three-AZ meta/load voter policy and MinReplicas3,
+  exercises singleton→two→three and an unrelated safe edit during deficit, rejects
+  retargeted old-cluster authority, and confirms later native effect receipts lie
+  beyond the real seeded birth receipt. Desired policy remains intact.
+- Separate lagging-survivor and old-leader-tail cases prove acknowledged loss risk
+  and committed-prefix-only replay. Tail setup requires both follower append-drop
+  counters, stable old-leader commit/values and actual offline LastLog>Commit.
+- Sparse missing coverage refuses with group names and no accepted library work.
+  An approved deletion stalled at exact StopReplica plus a staged extra group
+  proves approved-only recovery, unfinished operation retention and cleanup debt.
+- Live old-member refusal survives fencing attestation; after stopping that member,
+  the same source/digest becomes eligible. Crash cases SIGKILL/restart at prepared,
+  application files moved and readiness-held boundaries; saved acceptance and
+  generated identity survive. No Run escapes validation.
+- Preparation cancellation, changed/incomplete acceptance, changed destination,
+  cancelled-job rearming, post-archive cancellation and changed audit are refused
+  at the appropriate boundary. Failed Undo keeps maintenance until exact retry,
+  then A resumes on its original volumes/identities and accepts a new command.
+- Harness Local retains ordinary deployment identity checks and tracks confirmed
+  recovered lineage per node, so an A node cannot silently become B.
+- Fixed a caller worker handoff gap found while qualifying remote timing: durable
+  confirm/retry/cancel now queues behind an owned worker; blocking plan issues are
+  rechecked independently of later error publication. A deterministic functional
+  race test confirms acceptance while Inspect still owns the worker slot.
+
+Verified
+- Entire cluster suite PASS107/107,185.290s:
+  test-reports/cluster/20261025T082710.420939Z-aul3fmio/report.md,
+  timeline.md and tests-cluster-root.log in the same run directory.
+  Command: make test-cluster-run CLUSTER_IMAGE=gquorum-recovery:local CLUSTER_ARGS='-v'.
+- Settled image: sha256:26db0b07efb6eff1a10d92d1eae1b90a39b3bf7dc7977958ff97e21b8d0a89a2,
+  created2026-10-25T08:24:28Z. Rebuilt after the fixture handoff fix, before any
+  settled process run. No image replacement during a running suite.
+- Focused new prefix PASS12/12 before that final small fix; settled image prefix
+  passed11/12 and exposed one test's final A write racing retained group readiness.
+  The test now retries the exact request ID while leadership becomes ready;
+  focused rerun PASS36.691s. The complete final suite above passes all12 new cases.
+- Public remote worker functional/race PASS9.593s:
+  /tmp/gquorum-task14-worker-queue-race.log.
+- make test PASS2,129/58 reports,8.200s:
+  test-reports/unit/20261025T082457.987168Z-45ox29vh/report.md.
+- make lint PASS all configured modules/tags/tools:
+  /tmp/gquorum-task14-lint-settled.log. git diff --check PASS.
+- Docker ps -a and volume list filtered to gquorum-test- are empty after teardown.
+  Frozen baseline files unchanged; no Meridian work.
+
+Scope precision
+- Physical stale-source, custom/corrupt records, exact live-owner locks and
+  no-Files-hook cancellation remain detailed owning-component evidence from
+  Tasks4–12. Process tests do not parse or mutate private formats to duplicate it.
+- Rejoin payloads are small ordinary KV snapshots, below64MiB framing; this makes
+  no GQ-02 large remote snapshot claim. Large local resources and all remaining
+  qualification commands are next in Task15, followed by the requested review.

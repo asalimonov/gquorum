@@ -35,12 +35,14 @@ type recoveryCancellation struct {
 	Reason string `json:"reason"`
 }
 type recoveryJobs struct {
-	mu      sync.Mutex
-	app     *application
-	job     *recoveryJob
-	cancel  context.CancelFunc
-	done    chan struct{}
-	workers sync.WaitGroup
+	mu           sync.Mutex
+	app          *application
+	job          *recoveryJob
+	cancel       context.CancelFunc
+	done         chan struct{}
+	wake         bool
+	workers      sync.WaitGroup
+	afterInspect func(context.Context) error
 }
 
 const recoveryJobFile = "recovery-job.json"
@@ -229,7 +231,7 @@ func (s *recoveryJobs) command(id, action string, acceptance recovery.Acceptance
 				return fault.ErrConflict
 			}
 		} else {
-			if job.Phase != "prepared" || job.Plan == nil || job.Plan.Digest == "" || job.Error != "" ||
+			if job.Phase != "prepared" || job.Plan == nil || job.Plan.Digest == "" || job.Error != "" || blockedRecoveryPlan(job.Plan) ||
 				acceptance.PlanDigest != job.Plan.Digest ||
 				!acceptance.AcknowledgeDataLoss || !acceptance.OldDeploymentFenced {
 				return fault.ErrInvalid
@@ -266,4 +268,13 @@ func (s *recoveryJobs) command(id, action string, acceptance recovery.Acceptance
 	}
 	s.launchLocked()
 	return nil
+}
+
+func blockedRecoveryPlan(plan *recovery.Plan) bool {
+	for _, issue := range plan.Issues {
+		if issue.Blocking {
+			return true
+		}
+	}
+	return false
 }

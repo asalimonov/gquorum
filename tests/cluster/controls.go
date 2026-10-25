@@ -143,7 +143,7 @@ func (c *Cluster) Local(ctx context.Context, node, group string) (LocalObservati
 	if err := response.Decode(&result); err != nil {
 		return result, err
 	}
-	if result.Identity.NodeName != node || result.Identity.ClusterID != c.ID || result.Identity.MemberID == 0 || result.Identity.InstanceID == "" || result.Found && (result.Status.HostNode != node || result.Status.GroupID != group) {
+	if result.Identity.NodeName != node || result.Identity.ClusterID != c.expectedCluster(node) || result.Identity.MemberID == 0 || result.Identity.InstanceID == "" || result.Found && (result.Status.HostNode != node || result.Status.GroupID != group) {
 		return result, fmt.Errorf("local observation identity does not match %s/%s", node, group)
 	}
 	return result, nil

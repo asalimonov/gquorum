@@ -15,13 +15,17 @@ import (
 // launchLocked owns one worker, independent of any request waiter. Cancellation
 // queues its durable intent behind the joined Run; it never overlaps two owners.
 func (s *recoveryJobs) launchLocked() {
-	if s.done != nil || s.job == nil || !s.job.Maintenance {
+	if s.done != nil {
+		s.wake = true
 		return
 	}
+	if s.job == nil || !s.job.Maintenance {
+		return
+	}
+	s.wake = false
 	ctx, cancel := context.WithCancel(s.app.workCtx)
 	s.cancel, s.done = cancel, make(chan struct{})
 	done := s.done
-	cancelling := s.job.Cancellation != nil
 	s.workers.Go(func() {
 		err := s.execute(ctx)
 		cancel()
@@ -31,9 +35,9 @@ func (s *recoveryJobs) launchLocked() {
 		s.mu.Lock()
 		close(done)
 		s.done, s.cancel = nil, nil
-		// An operator cancellation can arrive during any stage. The next worker
-		// starts only after the old library call and all its callbacks have returned.
-		if !cancelling && s.app.workCtx.Err() == nil && s.job.Phase == "cancelling" {
+		// A new confirm/retry/cancel may arrive after progress is saved but before
+		// this owner returns. Join its call and callbacks before consuming that wake.
+		if s.wake && s.app.workCtx.Err() == nil {
 			s.launchLocked()
 		}
 		s.mu.Unlock()
@@ -72,6 +76,9 @@ func (s *recoveryJobs) execute(ctx context.Context) error {
 				next.Request = plan.Request
 			}
 		})
+		if saveErr == nil && s.afterInspect != nil {
+			saveErr = s.afterInspect(ctx)
+		}
 		return errors.Join(inspectErr, saveErr)
 	}
 	return s.executeAccepted(ctx, handle, job)

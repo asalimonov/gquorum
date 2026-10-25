@@ -317,3 +317,41 @@ func TestRemoteRecoveryProcessRestartUsesMaintenanceBeforePinChecks(t *testing.T
 		t.Fatal("booted old lineage")
 	}
 }
+
+func TestRemoteRecoveryConfirmationQueuesBehindInspectOwner(t *testing.T) {
+	t.Parallel()
+	a := ownedApplication(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	if err := a.currentNode().WaitReady(ctx); err != nil {
+		t.Fatal(err)
+	}
+	held, release := make(chan struct{}), make(chan struct{})
+	a.recoveryJobs.afterInspect = func(ctx context.Context) error {
+		close(held)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-release:
+			return nil
+		}
+	}
+	job := prepareFixtureRecovery(t, a)
+	select {
+	case <-held:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	acceptance := recovery.Acceptance{PlanDigest: job.Plan.Digest, AcknowledgeDataLoss: true, OldDeploymentFenced: true}
+	recoveryHTTP(t, a, "POST", "/internal/test/recovery/job/confirm", acceptance, 202)
+	// Confirmation is durably saved while Inspect still owns this worker slot.
+	saved, err := readRecoveryJob(a.cfg.DataDir)
+	if err != nil || saved.Acceptance == nil || *saved.Acceptance != acceptance {
+		t.Fatal(saved, err)
+	}
+	close(release)
+	complete := waitRecoveryJob(t, a, func(j *recoveryJob) bool { return j.Phase == "complete" })
+	if complete.Status == nil || complete.Status.Phase != recovery.Complete {
+		t.Fatal(complete)
+	}
+}

@@ -946,70 +946,78 @@ and public fixture clients; small existing pool/harness extensions only as neede
 **Dependencies:** Tasks 1–13. **Outcome:** real process/consensus acceptance tests
 for the requirements requested by Meridian, without running Meridian.
 
-- [ ] Add the approved old-member-alive process case: prepare a complete survivor
+- [x] Add the approved old-member-alive process case: prepare a complete survivor
   with another old participant still running, verify Inspect/Approve block, stop
   that member, and confirm the same source/digest is then eligible. No override or
   attestation bypass. Keep the ordinary three-node pool and authenticated controls.
-- [ ] Build the settled Node-owned recovery test image once with an explicit tag;
+- [x] Build the settled Node-owned recovery test image once with an explicit tag;
   use existing isolated pool resources and authenticated controls. Ordinary cases
   use three original nodes; return/re-admit the two old nodes rather than adding
   a five/seven-node matrix. Call t.Parallel before independent resource acquisition.
-- [ ] REC-01: write real application data/snapshots, stop two voters, remotely inspect/
+- [x] REC-01: write real application data/snapshots, stop two voters, remotely inspect/
   approve/run the complete survivor, restart B on identical roots, verify new lineage
   and monotonic identities, exact retained data/deduplication and successful new writes.
   Management remains responsive throughout and no operator shell/file copy is needed.
-- [ ] Keep REC-02 and REC-04 in separate isolated subtests or groups: REC-02 uses
+- [x] Keep REC-02 and REC-04 in separate isolated subtests or groups: REC-02 uses
   a lagging follower as survivor; REC-04 uses the leader holding the uncommitted
   tail. Select and confirm the actual load leader as the REC-04 survivor, or use
   an existing supported leadership-transfer control before enabling drops if a
   fixed survivor is required. Never assume one replica is both roles in one setup.
-- [ ] REC-02/04: hold the donor behind writes acknowledged by the other majority and
+- [x] REC-02/04: hold the donor behind writes acknowledged by the other majority and
   separately create a valid uncommitted load tail using Task 13's follower
   DropAppend setup. Require offline Inspect LastLog > Commit and an absent unique
   tail command before proceeding; fail setup instead of accepting a mere proposal
   timeout. Metadata-tail proof remains in component tests. Prove loss acknowledgement,
   report positions and recovered prefix correctness; never assert zero loss from
   donor readability or apply beyond its retained commit.
-- [ ] REC-03/11: use sparse placement for an incomplete survivor and staged/unapproved
+- [x] REC-03/11: use sparse placement for an incomplete survivor and staged/unapproved
   edits plus approved in-flight work/cleanup for a complete one. Missing coverage
   refuses with names; approved groups recover; old work/debt remains archived without
   being relabelled complete. No global convergence prerequisite is introduced.
-- [ ] REC-06/07/12: reject stale inspection, active owner, changed acceptance/audit/
+- [x] REC-06/07/12: reject stale inspection, active owner, changed acceptance/audit/
   destination and repeated cancelled IDs. Retry exact remote operations after lost
   replies without double archive, duplicated import or unintended new identity.
-- [ ] REC-08/10: kill/restart at observable management, hook, archive/start/import
+- [x] REC-08/10: kill/restart at observable management, hook, archive/start/import
   boundaries available through public behavior. Use deterministic barriers; keep
   finer private filesystem cut points in owning-package tests from Tasks 4–12.
   Confirm no early Run/readiness and status/journal resume across process death or disconnected HTTP callers.
-- [ ] Keep rejoin snapshots/frames comfortably below the fixture's current 64 MiB
+- [x] Keep rejoin snapshots/frames comfortably below the fixture's current 64 MiB
   send/receive limit (including encoding overhead). Large local recovery resources
   are measured separately in Task 15; do not claim GQ-02 remote transfer coverage.
-- [ ] REC-09: return A nodes and delayed old packets/reports; ordinary retained pins
+- [x] REC-09: return A nodes and delayed old packets/reports; ordinary retained pins
   cannot join B. Explicit reset-for-join backs up their state, then normal B admission
   grants fresh identities. Verify wrong-destination refusal, no merge/reseed, data
   catch-up and new writes after each returning node.
-- [ ] Rebuild source `_meta` and loads with strict three-AZ/MinReplicas policy, then
+- [x] Rebuild source `_meta` and loads with strict three-AZ/MinReplicas policy, then
   grow singleton→two→three through ordinary administration/repair. Desired policy
   never silently drops; second-node growth and unrelated safe edits work while a
   deficit remains; normal safety and permanent release hold after restart.
   Validate actual later group-effect receipts through the authority catalog after
   the seeded creation receipt, including restart/pruning (Task 11).
-- [ ] Include remote Cancel before approval, approved/no-hook cancellation, FilesUndo
+- [x] Include remote Cancel before approval, approved/no-hook cancellation, FilesUndo
   retry, refusal after Archiving, generated-name/List history and same-directory
   backups. Confirm consumed B state survives later normal restart and old retries.
-- [ ] Assert teardown: no leaked containers/volumes/network workers or replaced
+- [x] Assert teardown: no leaked containers/volumes/network workers or replaced
   shared image during a run. Keep complete failure reports and fixture logs.
 
 #### Verification
 
-- [ ] `make test-cluster-build CLUSTER_IMAGE=gquorum-recovery:local`, then
+- [x] `make test-cluster-build CLUSTER_IMAGE=gquorum-recovery:local`, then
   `make test-cluster-run CLUSTER_IMAGE=gquorum-recovery:local CLUSTER_ARGS='-v -run ^TestPermanentMajorityLoss'`.
   Use that prefix for the planned scenarios so filtering is executable.
-- [ ] After all scenario/image changes settle, run the **entire** cluster suite using
+- [x] After all scenario/image changes settle, run the **entire** cluster suite using
   the same image. Rebuild only after fixture changes and rerun affected/full gates
   as appropriate; record image, report paths, exit status and cleanup evidence.
-- [ ] Complete the REC mapping with actual tests, distinguishing detailed component
+- [x] Complete the REC mapping with actual tests, distinguishing detailed component
   corruption/ownership evidence from three-process consensus behavior.
+
+
+Task14 evidence: all107 process tests PASS185.290s with settled image
+26db0b07efb6 (2026-10-25T08:24:28Z), including all12 new recovery cases
+(parent/subtests counted). Report: test-reports/cluster/20261025T082710.420939Z-aul3fmio/report.md.
+Task13's callback queue gap was fixed with a deterministic public HTTP/race
+regression; focused remote jobs PASS9.593s. Unit2,129 PASS8.200s; lint PASS.
+No gquorum-test containers or volumes remain after the complete pool teardown.
 
 ### Task 15: Qualify resources, compatibility, all suites and current architecture docs
 
@@ -1217,26 +1225,27 @@ and the target's recovery resource measurements cover the new failure/size scope
 
 ## Requirement-to-evidence map
 
-Test names are planned names until implemented. Update this map with actual
-owners/names/report paths; preserve every required assertion.
+Component evidence covers private corruption, exact ownership and durability cut
+points; process evidence uses authenticated public fixture controls. Task14's
+settled reports record the actual run and image (see Progress).
 
 | Requirement | Primary component evidence | Process evidence |
 | --- | --- | --- |
-| REC-01 complete survivor/new writes | `TestRecoveryMetadataOnly`, managed import/readiness tests | `TestPermanentMajorityLossRebuild` |
-| REC-02 acknowledged-write loss risk | inspection/acceptance loss checks | `TestPermanentMajorityLossLaggingSurvivor` |
-| REC-03 incomplete sparse coverage | inventory classification and no-effects assertions | `TestPermanentMajorityLossMissingGroup` |
-| REC-04 committed prefix only | strict metadata/load reader, Replay and seed exact-entry proofs | `TestPermanentMajorityLossCommittedPrefix`: follower DropAppend control; offline L>C required before recovery; unique tail command never applied |
-| REC-05 corrupt/foreign/unsupported source | WAL, snapshot, authority, metadata fixtures with unchanged originals | Public refusal paths where reproducible without private-format application code |
-| REC-06 changed source after Inspect | `TestRecoveryApprovalSourceChanged`, backup revalidation | `TestPermanentMajorityLossApprovalAndRetry` |
-| REC-07 live owner refusal | `TestRecoveryExclusiveOwners`, lease handoff/races | ApprovalAndRetry busy-owner case |
-| REC-08 interrupted durable work | journal/archive/seed/checkpoint crash matrices | `TestPermanentMajorityLossInterruptedWorkflow` |
-| REC-09 returning old nodes/messages | exact ingress/reset/grant tests | `TestPermanentMajorityLossResetAndRejoin` |
-| REC-10 callback/Close failure/cancellation | managed lifecycle and owner-join races | InterruptedWorkflow and readiness/Run barriers |
-| REC-11 approved vs staged/debt | metadata inventory/import/floor/tombstone/pruning cases | `TestPermanentMajorityLossApprovedTopology` |
-| REC-12 conflicting repeat | immutable operation/audit/destination/terminal history tests | ApprovalAndRetry and ResetAndRejoin repeats |
-| Policy repair after import | adapter plus service/FSM/scheduler call-path tests | `TestPermanentMajorityLossStrictPolicyRegrowth` |
-| Cancel/Undo, remote management and generated names | journal/root API/testapp functional/race tests | `TestPermanentMajorityLossCancelAndHistory` |
-| Resource and compatibility bounds | Task 15 benchmarks, frozen fixtures/old decoder | Existing full caller/cluster/Compose/simulation regressions |
+| REC-01 complete survivor/new writes | `TestRecoveryNodeMetadataOnlyFoundingImportAndCompletion`, `TestRecoveryNodeReplaysAndPublishesLoadBeforeDeferredRun` | `TestPermanentMajorityLossCompleteSurvivorAndReturningNodes` |
+| REC-02 acknowledged-write loss risk | inspection/acceptance checks | `TestPermanentMajorityLossLaggingCommittedSurvivor` |
+| REC-03 incomplete sparse coverage | `TestRecoveryInspectionCollectsCoverageAndResetAllowsOwnedDamagedPayload` | `TestPermanentMajorityLossIncompleteSurvivorRefuses` |
+| REC-04 committed prefix only | strict reader, shared Replay and exact seed-entry tests | `TestPermanentMajorityLossCommittedPrefix`: actual follower drops, offline L>C, absent unique tail command |
+| REC-05 corrupt/foreign/unsupported source | WAL/snapshot/authority/meta frozen and corruption fixtures with unchanged originals | Public incomplete/old-identity refusals; no private-format manipulation in caller code |
+| REC-06 changed source after Inspect | `TestRecoveryApprovalRejectsStaleMetadataAndRequiresExactAttestations`, hook source revalidation | `TestPermanentMajorityLossRemotePreparationCancel` tests changed digest/destination; physical stale-source proof stays in components |
+| REC-07 live owner refusal | `TestRecoveryInspectionRefusesBusyAndMismatchedSource`, lock handoff/races | Management joins Node before inspection; live-old-peer check in `TestPermanentMajorityLossOldMemberReachableBlocks` |
+| REC-08 interrupted durable work | journal/archive/seed/checkpoint crash matrices, `TestRecoveryRestartResumesEachPreFoundingAcquisitionBoundary` | `TestPermanentMajorityLossRemoteCrashResume` at prepared, moved application files, and validation |
+| REC-09 returning old nodes/messages | exact ingress/reset/grant checks | CompleteSurvivorAndReturningNodes: retained A identity, explicit reset, fresh B admission, retargeted old authority refusal, catch-up and restart |
+| REC-10 callback/Close failure/cancellation | managed lifecycle/owner joins, `TestRecoveryCancelledWaiterRetainsCallbackAndRootOwnership`, testapp functional/race | RemoteCrashResume readiness/Run check; RemoteCancelUndoRetry |
+| REC-11 approved vs staged/debt | inventory/import/floors/tombstones/pruning tests | `TestPermanentMajorityLossApprovedInventoryArchivesOldWork`: approved deletion debt and staged group excluded |
+| REC-12 conflicting repeat | `TestRecoveryInspectionRejectsMemoryAndApprovalCannotReuseCancelledID`, exact approval/audit/history tests | RemotePreparationCancel; RemoteCancelUndoRetry changed audit; exact repeated confirmation in completion helpers |
+| Policy repair after import | adapter/service/FSM/scheduler tests | CompleteSurvivorAndReturningNodes: meta/load strict three-AZ policy, singleton→two→three, unrelated safe edit, actual receipt beyond seeded birth, all-node restart |
+| Cancel/Undo, remote management and generated names | root/journal and testapp suites; no-hook cancellation in `TestRecoveryResetArchiveAndBeforeBackupCancellation` | RemotePreparationCancel, RemoteCancelUndoRetry, RemoteCrashResume; Status/List and bounded history |
+| Resource and compatibility bounds | Task15 measurements, frozen fixtures/old decoder | Entire caller/cluster/Compose/simulation regression scopes |
 
 These scenarios originate in the requirement/target and Meridian's tested behavior,
 but execute against gquorum and its independent fixture only. Meridian's old
@@ -1359,6 +1368,14 @@ Do not pre-mark the absence of implementation as a passed delta audit.
   Target backed up to
   `docs/brainstorms/20261024-permanent-majority-loss-recovery-target-before-import-provenance-20261025T0432.md`
   before documenting both details; Appendix C matches the private field addition.
+
+- Task14 found a caller-worker handoff gap: confirm/retry could arrive after
+  progress publication but before the old worker joined. The testapp now queues
+  that wake, rechecks blocking plan issues and joins before consuming it. Added
+  TestRemoteRecoveryConfirmationQueuesBehindInspectOwner with an instance-owned
+  post-inspection seam. No library or public API changes. The full process suite
+  uses the rebuilt settled image. Diff: Task14 commit, testapp/recovery_job.go,
+  recovery_worker.go and recovery_job_func_test.go.
 
 None during planning. During implementation record each necessary out-of-plan
 change with path, rationale, relation to a required fix, validation and commit/diff

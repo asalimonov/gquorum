@@ -76,11 +76,28 @@ func (c *Cluster) WaitRecoveryJob(ctx context.Context, node, id, phase string) (
 			return false, err
 		}
 		if job.Error != "" {
-			return false, fmt.Errorf("recovery %s: %s", job.Phase, job.Error)
+			return true, fmt.Errorf("recovery %s: %s", job.Phase, job.Error)
 		}
 		return job.Phase == phase, nil
 	})
+	if err == nil && job.Phase == "complete" && job.Status != nil {
+		c.mu.Lock()
+		if c.recoveredLineages == nil {
+			c.recoveredLineages = make(map[string]string)
+		}
+		c.recoveredLineages[node] = job.Status.Identity.ClusterID
+		c.mu.Unlock()
+	}
 	return job, err
+}
+
+func (c *Cluster) expectedCluster(node string) string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if recovered := c.recoveredLineages[node]; recovered != "" {
+		return recovered
+	}
+	return c.ID
 }
 
 // RequireRecoveryTail refuses a false-positive REC-04 setup. Proposal timeouts,

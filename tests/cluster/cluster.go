@@ -265,6 +265,7 @@ type Cluster struct {
 	Spec                           Spec
 	mu                             sync.RWMutex
 	nodes                          []*Node
+	recoveredLineages              map[string]string
 	http                           *http.Client
 	docker                         *testcontainers.DockerClient
 	labels                         map[string]string
