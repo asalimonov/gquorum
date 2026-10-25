@@ -65,9 +65,10 @@ func (n *node) snapshotCoordinator() (*loadsnapshot.Coordinator, error) {
 	if n.stopping || n.state == NodeStopped {
 		return nil, fault.ErrStopped
 	}
-	// Host attachment follows the resource-owning coordinator implementation
-	// in plan task 12. No incomplete transfer path is selected before then.
-	return nil, fault.ErrReplicaNotReady
+	if n.host == nil {
+		return nil, fault.ErrReplicaNotReady
+	}
+	return n.host.SnapshotCoordinator(), nil
 }
 
 func (n *node) newHost(m *metaservice.Group) (*managed.Host, error) {
@@ -94,8 +95,9 @@ func (n *node) newHost(m *metaservice.Group) (*managed.Host, error) {
 		Retirement:        retirement, Retention: runner.Retention,
 		RetirementInterval: n.opts.Loads.RetirementInterval,
 		Assignments:        m.LoadAssignments, Factory: n.opts.Loads.Factory, Store: store,
-		Transport:   n.opts.Loads.Transport,
-		ResolvePeer: m.ResolveLoadPeer, ValidatePeer: m.ValidateLoadPeer, ValidateNode: m.ValidateLoadNode,
+		Transport:        n.opts.Loads.Transport,
+		SnapshotTransfer: n.opts.Loads.SnapshotTransfer,
+		ResolvePeer:      m.ResolveLoadPeer, ValidatePeer: m.ValidateLoadPeer, ValidateNode: m.ValidateLoadNode,
 		Engine: n.opts.Loads.Engine, EffectTimeout: n.opts.Loads.EffectTimeout,
 		CallbackTimeout:  n.opts.CallbackTimeout,
 		Metrics:          internalmetrics.Settings(n.opts.Metrics),

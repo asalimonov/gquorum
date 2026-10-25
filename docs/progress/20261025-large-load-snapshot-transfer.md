@@ -284,3 +284,29 @@ Verified
 
 Notes
 - No new listener, root source, persisted encoding or committed payload. Ordinary legacy snapshot routing remains selected until Task 15; managed Host wiring is Task 12. Unrelated .gitignore edit remains excluded.
+
+## Task 12 — managed ownership, exact ports and lifetime joins
+
+Date: 2026-10-26. Commit: this task commit; prior 1bd6373. User steering canceled subsequent colleague reviews; no six-commit request is due and none will be sent.
+
+Implemented
+- Host constructs/starts/fences/stops one coordinator from copied Node policy. Node's existing accessor/resolver reaches it; publication remembers the coordinator for observation-only source history after Stop.
+- Exact Owner wrappers pin slot/core/run/context, allow unpublished running replicas to catch up and revalidate before native handoff. A refusal before native enqueue completes its owned callback; accepted ownership cannot be undone by a later check.
+- Private ports resolve/validate off-loop, register the exact native attempt and original deadline, and retain one terminal result against expiry. Ordinary adapter reports cannot consume job tokens; stale destination failures still end only their original source attempt.
+- Replica release requests engine stop before StopOwner, then joins core/application ownership. Host-wide Stop/readmission joins all coordinator reservations before completion/new Host creation; timeout and failed Close retain the old owner.
+- Closed P2-3b: load-peer catalog lookup was already indexed; added an applied derived process index to remove the remaining per-chunk member/admission/session/lock scans. No new persisted field or baseline encoding.
+- Source selection remains a private lowercase prepareSnapshot bridge, explicitly tested not to satisfy SnapshotJobTransport before Task 15.
+
+Verified
+- make test: 2,274 tests across 62 reports/five modules pass (10.504s); report test-reports/unit/20261025T201829.891258Z-j2qnev5s/report.md.
+- Owning-package vet, pending make lint and git diff --check pass.
+- Focused managed snapshot/shutdown race regressions, five repetitions: pass (4.187s). Full managed functional race at parallel=8 passes (14.615s). Covers blocked source actual return, received native Restore, failed Close/retry, unpublished startup skip, old coordinator/new run resume refusal, original delivery deadline/private CAS and retained permits.
+- Node binding race passes (3.048s); expanded Node binding/readmission/factory ownership race selection passes (14.772s).
+- loadsnapshot/metaengine unit races pass (1.422s / 3.853s), including source-only observation fallback and index session/lock/revoke/restore equivalence. Existing replacement-admission routing regression remains green.
+- Recovery functional suite passes (67.121s). Metaservice functional suite passes at repository parallel=8 (16.416s).
+- Process lookup microbenchmark, 100ms runs on Apple M4 Pro: 1/100/10,000 identities take 14.80/14.93/15.38 ns/op, all 0 B/op and 0 allocs/op. This measures lookup only, not metadata rebuild cost or transfer throughput.
+
+Findings and corrections
+- The first broad managed race run exposed an existing 20ms pre-admission timing assumption. Replaced it with a stopping-state barrier before canceling; the original resource assertions remain. All subsequent focused/full managed race checks pass.
+- A simultaneous unconstrained metadata/recovery/compile run hit several metadata fixture deadlines. Re-running the metadata suite alone at the documented eight-worker limit passes without changing those tests.
+- No root file was created, no large fixture/persistent transfer record was added, and the unrelated .gitignore edit remains excluded. Further implementation proceeds without colleague review per the user's latest instruction.

@@ -441,6 +441,9 @@ func (h *Host) releaseResources(slot *replica) error {
 	if runCancel != nil {
 		runCancel()
 	}
+	if err := h.joinSnapshotOwner(slot, core); err != nil {
+		return err
+	}
 	if core != nil && !joined {
 		ctx, cancel := context.WithTimeout(context.Background(), h.cfg.EffectTimeout)
 		err := core.Stop(ctx)

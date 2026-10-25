@@ -16,6 +16,7 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/authoritystore"
 	"github.com/asalimonov/gquorum/internal/loadhandle"
+	"github.com/asalimonov/gquorum/internal/loadsnapshot"
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metastore"
 	internalmetrics "github.com/asalimonov/gquorum/internal/metrics"
@@ -24,6 +25,7 @@ import (
 	"github.com/asalimonov/gquorum/internal/recovery/model"
 	"github.com/asalimonov/gquorum/lifecycle"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/load/snapshot"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -37,6 +39,7 @@ const (
 // Config supplies private authority, application, storage and transport
 // dependencies for a node's replicas.
 type Config struct {
+	SnapshotTransfer snapshot.Options
 	// OnChange only wakes the owning Node; it runs outside host locks.
 	OnChange           func()
 	RecordRecoverySeed func(context.Context, model.SeedProgress) error
@@ -95,6 +98,7 @@ type ReplicaStatus struct {
 // Host owns exact replica reservations, application lifetimes, recovery and
 // retirement work.
 type Host struct {
+	snapshots                   *loadsnapshot.Coordinator
 	recoveryManifest            *model.LocalManifest
 	recoveryImport              *model.ImportState
 	recoveryReleased            bool
@@ -161,6 +165,10 @@ func New(cfg Config) (*Host, error) {
 		cfg.Logger = slog.Default()
 	}
 	var err error
+	cfg.SnapshotTransfer, err = cfg.SnapshotTransfer.Resolve()
+	if err != nil {
+		return nil, err
+	}
 	if cfg.Metrics, err = cfg.Metrics.Resolve(); err != nil {
 		return nil, err
 	}
@@ -173,6 +181,7 @@ func New(cfg Config) (*Host, error) {
 		stopGate:    make(chan struct{}, 1),
 		wake:        make(chan struct{}, 1),
 	}
+	h.snapshots = loadsnapshot.NewCoordinator(cfg.SnapshotTransfer, h.snapshotPorts())
 	h.operations, h.operationsDone = make(map[string]*groupOperation), make(chan struct{})
 	h.observationGroups = make(map[string]*groupOperation)
 	close(h.operationsDone)
@@ -217,6 +226,7 @@ func (h *Host) Start(ctx context.Context) error {
 		return nil
 	}
 	h.started, h.ctx = true, ctx
+	h.snapshots.Start(ctx)
 	work, cancel := context.WithCancel(ctx)
 	h.workCancel, h.workDone = cancel, make(chan struct{})
 	h.operationContext = work
@@ -239,6 +249,7 @@ func (h *Host) Quiesce(ctx context.Context) error {
 		h.workCancel()
 	}
 	h.mu.Unlock()
+	h.snapshots.Fence()
 	// Native status calls have their own bounded pool so a stuck status adapter
 	// cannot consume the independent temporal collector's permits. Join even
 	// callbacks whose observation caller already returned with partial results.
@@ -272,6 +283,7 @@ func (h *Host) Fence() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.quiescing = true
+	h.snapshots.Fence()
 	if h.workCancel != nil {
 		h.workCancel()
 	}
@@ -373,6 +385,9 @@ func (h *Host) stopReplicas(ctx context.Context) error {
 		}
 	}
 	if err := errors.Join(failures...); err != nil {
+		return err
+	}
+	if err := h.snapshots.Stop(ctx); err != nil {
 		return err
 	}
 	h.mu.Lock()

@@ -5,7 +5,7 @@
 **Project source:** `../..` relative to this plan (repository root `.`)
 **Branch:** `feat/large-snapshots-transfer`
 **Source checkout inspected:** `646e9c1` (implementation baseline `14a54c2`, transport-document correction `2ba951a`, current lint/testing updates in `646e9c1`)
-**Target architecture SHA256:** `ec0bd9a83e310757ae3599a8fdc2e395d8284a04e666088a87a70e11e1709669` (current target including Task 7/9 refinements and Task 10 completed-session Ack clarification)
+**Target architecture SHA256:** `2b217f098376a903d0419b26b1a8c9d9a7ca2e7a35e6e01e1f53e7dddf7b1d55` (current target including implementation refinements through Task 12)
 **Target architecture:** [20261025-large-load-snapshot-transfer-target.md](../brainstorms/20261025-large-load-snapshot-transfer-target.md)
 **Full brainstorm log:** [20261025-large-load-snapshot-transfer.md](../brainstorms/20261025-large-load-snapshot-transfer.md)
 **Review history:** [feature review thread](../review/feat_large-snapshots-transfer.md)
@@ -31,9 +31,7 @@ Current source differs from historical wording in two operational details. `make
 
 ## User-directed implementation reviews
 
-After Task 8 is verified and committed, request an analysis-only implementation review from Paseo agent `43cff8c6-3dab-4f3f-a0eb-d4393c777725` using paseo-committee. Include this plan, the target architecture and full brainstorm paths. Focus on reliability/ownership, compatibility with the pinned Go runtime and libraries, and performance. The user selected this existing colleague; do not launch additional reviewers.
-
-Repeat the review after every six further implementation commits, including review-fix commits. Record the pinned reviewed commit and the next checkpoint in the progress/review log. Review a fixed commit range while later work proceeds; distinguish intentionally deferred Tasks 9–20 from defects in completed work. Verify and fix actionable findings before production activation. Do not poll or interrupt the reviewer; await Paseo's finish notification.
+The user canceled further colleague reviews on 2026-10-26: “Skip review from colleague, continue w/o it.” Continue implementation and verification without sending further review requests. Earlier review evidence/dispositions remain historical; the outstanding constant-time authorization requirement is still part of Task 12.
 
 ## Dependency strategy and buildable checkpoints
 
@@ -62,7 +60,7 @@ The target's historical final `make lint` command means full validation; on the 
 
 ## Review checkpoint after Task 8
 
-Review baseline: `251a594`; findings in review Thread 3. The next review is due after six subsequent implementation commits, including these corrections.
+Review baseline: `251a594`; findings in review Thread 3. The original six-commit review schedule was canceled by the user on 2026-10-26; no further review request is due. Earlier findings remain implementation obligations.
 
 - [x] P1-1: gate consumption of the bounded owned-ingress queue at a safe Ready boundary; retain defensive handler checks and verify queued payload ownership through write/timer stalls.
 - [x] P1-2: preserve immediate legacy `_meta`/standalone snapshot failure reports; retain managed exact-attempt backoff and non-lossy mailbox.
@@ -70,7 +68,7 @@ Review baseline: `251a594`; findings in review Thread 3. The next review is due 
 - [x] P2-4: use the write job's exact ingress ticket during Restore instead of leaving the field write-only.
 - [x] P2-2: remove idle voter-map allocation and avoid repeated report-deadline scans/timer resets.
 - [x] P2-3a: reduce duplicate-chunk allocation, redundant contexts and per-chunk wake-channel allocation.
-- [ ] P2-3b: Task 12 must implement/verify constant-time Authorize through exact routing indexes.
+- [x] P2-3b: Task 12 must implement/verify constant-time Authorize through exact routing indexes.
 - [x] P2-5: preserve a transfer's observation ID when moving from active state into completed history.
 
 ## Task index
@@ -312,20 +310,20 @@ Review baseline: `251a594`; findings in review Thread 3. The next review is due 
 **Files:** new `internal/managed/snapshot_ports.go`; existing managed host/replica/transport/readmission and root node.go/node_load.go/node_options.go; internal facade implementation.
 **References:** target §4.2, §6.2, [§7.3 shutdown](../brainstorms/20261025-large-load-snapshot-transfer-target.md#73-shutdown-and-readmission), §7.8, §8.1/8.4 and §9.1–9.2.
 
-- [ ] Implement Owner and Ports, including the explicit NoteSnapshotProgress callback, from Appendix C over exact existing Host slots, run IDs, authority/peer checks, native ingress/preflight and exact SnapshotAttempt delivery reports. Do not import managed/root from internal/loadsnapshot.
-- [ ] Host owns Coordinator; Node passes its already-resolved policy and the pure facade resolver returns the current coordinator. Bind captures the stable service and Options before Start; all actual acquisition waits for Start/admission.
-- [ ] Integrate Start/Fence/Quiesce/Stop and per-replica StopOwner. Request engine cancellation before waiting on engine-dependent snapshot cleanup; join source/pumps/queued handoff/Restore before application/store release.
-- [ ] Extend joinReadmission: old coordinator fences and fully joins, with zero live reservations, before authority completion/new Host Start. Timeout retains old ownership; two coordinators must never admit under separate Node allowances simultaneously.
-- [ ] Retain completed diagnostics through the observation-only facade fallback; stale sessions cannot mutate it or redirect into a new host/run.
-- [ ] Add resolved snapshot deadlines to managed delivery records and preserve ordinary EffectTimeout. Store attempt token for non-lossy reports and terminal CAS between expiry/Ack.
-- [ ] Keep `engineTransport.PrepareSnapshot` selection and rejecting constructor/ordinary-ingress behavior deferred to Task 15. Private adapters may delegate internally for focused tests but must not accidentally satisfy the selecting interface early.
+- [x] Implement Owner and Ports, including the explicit NoteSnapshotProgress callback, from Appendix C over exact existing Host slots, run IDs, authority/peer checks, native ingress/preflight and exact SnapshotAttempt delivery reports. Do not import managed/root from internal/loadsnapshot.
+- [x] Host owns Coordinator; Node passes its already-resolved policy and the pure facade resolver returns the current coordinator. Bind captures the stable service and Options before Start; all actual acquisition waits for Start/admission.
+- [x] Integrate Start/Fence/Quiesce/Stop and per-replica StopOwner. Request engine cancellation before waiting on engine-dependent snapshot cleanup; join source/pumps/queued handoff/Restore before application/store release.
+- [x] Extend joinReadmission: old coordinator fences and fully joins, with zero live reservations, before authority completion/new Host Start. Timeout retains old ownership; two coordinators must never admit under separate Node allowances simultaneously.
+- [x] Retain completed diagnostics through the observation-only facade fallback; stale sessions cannot mutate it or redirect into a new host/run.
+- [x] Add resolved snapshot deadlines to managed delivery records and preserve ordinary EffectTimeout. Store attempt token for non-lossy reports and terminal CAS between expiry/Ack.
+- [x] Keep `engineTransport.PrepareSnapshot` selection and rejecting constructor/ordinary-ingress behavior deferred to Task 15. Private adapters may delegate internally for focused tests but must not accidentally satisfy the selecting interface early.
 
-- [ ] Resolve review P2-3b: Authorize/revalidation on each chunk must use constant-time exact owner/peer routing indexes, without a topology scan or remote I/O.
+- [x] Resolve review P2-3b: Authorize/revalidation on each chunk must use constant-time exact owner/peer routing indexes, without a topology scan or remote I/O.
 
 #### Verification
 
-- [ ] `make test`; focused managed/root vet; local functional/race tests for constructor→Bind→Start, StopLoadGroup, failed Close, unpublished joining replica, readmission and old-host join.
-- [ ] Prove Node Stop joins owned work while borrowed adapter/server remains available and no context waiter can free a successor's resources.
+- [x] `make test`; focused managed/root vet; local functional/race tests for constructor→Bind→Start, StopLoadGroup, failed Close, unpublished joining replica, readmission and old-host join.
+- [x] Prove Node Stop joins owned work while borrowed adapter/server remains available and no context waiter can free a successor's resources.
 
 ### Task 13: Migrate fixture, examples and custom transports before enforcement
 
@@ -665,6 +663,21 @@ Task 10 completed-session Ack clarification:
 
 ```diff
 + if result.terminal { done = nil } // final reply only; RPC/total deadline remains
+```
+
+Task 12 routing and lifecycle refinements:
+- `internal/metaengine/{machine,routing}.go`: existing HasLoadPeer was indexed, but ProcessIdentity still scanned member/admission/session/lock collections. Added a derived map published at applied changes and restore, preserving existing identity precedence without a persisted format change. This closes P2-3b's complete hot path, rather than optimizing only the catalog half.
+- `internal/loadsnapshot/service.go`, existing `node_lifecycle.go`: remember the accepted Host coordinator for observation-only fallback so outgoing-only history remains visible after Stop even if nobody previously called the facade.
+- `internal/managed/host_func_test.go`: an existing shutdown test's 20ms deadline expired before Stop was admitted during a concurrent race/compile run. Replaced the timing assumption with an observed stopping barrier, then canceled the waiter. Ownership/Restore/Close assertions remain intact; production cancellation semantics are unchanged.
+
+```diff
+- ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+- err := h.StopReplica(ctx, ref, StopExplicit)
++ ctx, cancel := context.WithCancel(t.Context())
++ go func() { stopped <- h.StopReplica(ctx, ref, StopExplicit) }()
++ await(..., func() bool { return exactSlot.state == "stopping" })
++ cancel()
++ err := <-stopped
 ```
 
 ## NOT IMPLEMENTED GAPS

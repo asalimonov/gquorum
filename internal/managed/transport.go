@@ -9,6 +9,7 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/load"
+	loadsnapshotapi "github.com/asalimonov/gquorum/load/snapshot"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"
@@ -20,6 +21,7 @@ import (
 const deliveryWindow = 256
 
 type delivery struct {
+	attempt  raftengine.SnapshotAttempt
 	from, to load.Peer
 	snapshot bool
 	deadline time.Time
@@ -173,6 +175,9 @@ func (h *Host) ReportDelivery(ctx context.Context, report load.DeliveryReport) e
 	if !found {
 		return nil
 	} // completed/old handle; cannot reach a successor
+	if d.attempt.Generation != 0 {
+		return fault.ErrInvalid
+	}
 	if report.From != d.from || report.To != d.to {
 		return fault.ErrIdentityMismatch
 	}
@@ -193,7 +198,12 @@ func (h *Host) expireDeliveries(now time.Time) {
 			}
 			delete(slot.deliveries, id)
 			if d.snapshot && slot.core != nil {
-				slot.core.ReportSnapshot(d.to.Replica.ReplicaID, raft.SnapshotFailure)
+				if d.attempt.Generation != 0 {
+					slot.core.ReportSnapshotAttemptError(d.attempt,
+						&loadsnapshotapi.TransferError{Reason: loadsnapshotapi.ReasonTotalTimeout})
+				} else {
+					slot.core.ReportSnapshot(d.to.Replica.ReplicaID, raft.SnapshotFailure)
+				}
 			}
 		}
 	}
@@ -202,6 +212,9 @@ func (h *Host) expireDeliveries(now time.Time) {
 func (h *Host) registerDelivery(slot *replica, d delivery) (uint64, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	return h.registerDeliveryLocked(slot, d)
+}
+func (h *Host) registerDeliveryLocked(slot *replica, d delivery) (uint64, error) {
 	if h.slots[slot.identity.GroupID] != slot || slot.ctx.Err() != nil {
 		return 0, fault.ErrStopped
 	}
@@ -215,7 +228,9 @@ func (h *Host) registerDelivery(slot *replica, d delivery) (uint64, error) {
 	}
 	h.deliverySeq++
 	id := h.deliverySeq
-	d.deadline = time.Now().Add(h.cfg.EffectTimeout)
+	if d.deadline.IsZero() {
+		d.deadline = time.Now().Add(h.cfg.EffectTimeout)
+	}
 	slot.deliveries[id] = d
 	if !d.snapshot {
 		slot.appendDelivery(id)

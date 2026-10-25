@@ -468,9 +468,15 @@ func TestStopTimeoutKeepsStartupOwnedUntilRestoreAndCloseJoin(t *testing.T) {
 	started := make(chan error, 1)
 	go func() { _, err := h.StartReplica(deadline(t), ref, StartExplicit); started <- err }()
 	waitSignal(t, m.entered)
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	if err := h.StopReplica(ctx, ref, StopExplicit); !errors.Is(err, fault.ErrShutdownTimeout) {
+	stopped := make(chan error, 1)
+	go func() { stopped <- h.StopReplica(ctx, ref, StopExplicit) }()
+	// Cancellation ends a wait only after the exact stop has been admitted.
+	// A short wall-clock deadline can otherwise expire before StopReplica runs.
+	await(deadline(t), t, func() bool { h.mu.Lock(); defer h.mu.Unlock(); return h.slots[ref.GroupID].state == "stopping" })
+	cancel()
+	if err := <-stopped; !errors.Is(err, fault.ErrShutdownTimeout) {
 		t.Fatal(err)
 	}
 	waitSignal(t, m.canceled)

@@ -19,7 +19,11 @@ import (
 	"github.com/asalimonov/gquorum/internal/metapb"
 	"github.com/asalimonov/gquorum/internal/metatransport"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/load/snapshot"
 	"github.com/asalimonov/gquorum/topology"
+	"github.com/asalimonov/gquorum/transport/loadgrpc"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // One local participant exercises the real service/controller/managed ownership
@@ -393,5 +397,73 @@ func testNodeReadmissionFence(t *testing.T, group string) {
 		if receipt, err := n.localAuthority().Receipt(ctx, grant, grant.Targets[0]); err != nil || !receipt.Found || receipt.Receipt.Validate(grant) != nil {
 			t.Fatal(receipt.Receipt, receipt.Found, err)
 		}
+	}
+}
+
+func TestNodeSnapshotBindingFollowsManagedLifetime(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	options := authorityNodeOptions(t, root, "snapshot-binding")
+	adapter, err := loadgrpc.New(loadgrpc.Options{
+		Resolve: func(context.Context, topology.Identity) (string, error) {
+			return "passthrough:///unused-local-test", nil
+		},
+		Authenticate: func(context.Context, topology.Identity) error { return nil },
+		DialOptions:  []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	options.Loads = LoadOptions{Transport: adapter,
+		Storage:          LoadStorageOptions{WAL: &WALOptions{RootDir: filepath.Join(root, "loads")}},
+		SnapshotTransfer: snapshot.Options{MaxSnapshotBytes: 8 << 20, TotalTimeout: time.Second, ProgressTimeout: 100 * time.Millisecond},
+		Factory: func(context.Context, load.ReplicaSpec) (load.Application, error) {
+			return load.Application{StateMachine: ensureMachine{}}, nil
+		}}
+	participant, err := NewNode(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		stopAuthorityNode(t, participant)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := adapter.Close(ctx); err != nil {
+			t.Error(err)
+		}
+	}()
+	view := participant.LoadSnapshots()
+	if err = adapter.Bind(participant); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = view.Begin(t.Context(), snapshot.BeginRequest{}); !errors.Is(err, fault.ErrReplicaNotReady) {
+		t.Fatal(err)
+	}
+	if err = participant.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	if err = participant.WaitReady(ctx); err != nil {
+		t.Fatal(err)
+	}
+	owned := participant.(*node)
+	coordinator, err := owned.snapshotCoordinator()
+	if err != nil || coordinator == nil {
+		t.Fatal(coordinator, err)
+	}
+	if participant.LoadSnapshots() != view || view.Options().MaxSnapshotBytes != 8<<20 {
+		t.Fatal("snapshot binding/options changed")
+	}
+	if _, err = view.Begin(ctx, snapshot.BeginRequest{}); !errors.Is(err, fault.ErrInvalid) {
+		t.Fatal("managed snapshot ingress not attached", err)
+	}
+	if err = participant.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = view.Begin(ctx, snapshot.BeginRequest{}); !errors.Is(err, fault.ErrStopped) {
+		t.Fatal("stopped Node admitted snapshot", err)
+	}
+	if page := view.List(snapshot.Query{}); page.Incoming != 0 || page.Outgoing != 0 {
+		t.Fatal(page)
 	}
 }

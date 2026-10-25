@@ -3,6 +3,7 @@
 package metaengine
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/asalimonov/gquorum/topology"
@@ -51,5 +52,78 @@ func TestProcessRoutingSeparatesReplacementAdmissionFromFormerSession(t *testing
 	// The retained old session must not be overwritten to route the newcomer.
 	if record, ok := m.Session("old-session"); !ok || record.InstanceID != "old-process" {
 		t.Fatal("routing changed former process evidence", record, ok)
+	}
+}
+
+func assertIndexedProcessRouting(t *testing.T, m *Machine) {
+	t.Helper()
+	names := map[string]bool{"unknown": true}
+	for _, node := range m.scoped.Target.Nodes {
+		names[node.Name] = true
+	}
+	for _, node := range m.scoped.Nodes {
+		names[node.NodeName] = true
+	}
+	for _, a := range m.scoped.Admissions {
+		names[a.NodeName] = true
+	}
+	for _, session := range m.scoped.Sessions {
+		names[session.NodeName] = true
+	}
+	for name := range names {
+		want, valid := scopedProcessIdentity(m.scoped, name)
+		got, ok := m.ProcessIdentity(name)
+		if got != want || ok != valid {
+			t.Fatalf("indexed route %s differs: %+v/%v, want %+v/%v", name, got, ok, want, valid)
+		}
+	}
+}
+func TestProcessRoutingIndexTracksSessionsLocksAndRestore(t *testing.T) {
+	t.Parallel()
+	m := restoreMachineFixture(t, scopedCodecFixture())
+	assertIndexedProcessRouting(t, m)
+	result := applyMachine(t, m, GrantSession{ProposalID: "route-session", SessionID: "route", NodeName: "n", InstanceID: "fresh", TTLSeconds: 30})
+	if !result.Accepted {
+		t.Fatal(result)
+	}
+	assertIndexedProcessRouting(t, m)
+	result = applyMachine(t, m, AcquireLock{ProposalID: "route-lock", Key: "node/n", SessionID: "route"})
+	if !result.Accepted {
+		t.Fatal(result)
+	}
+	assertIndexedProcessRouting(t, m)
+	if id, ok := m.ProcessIdentity("n"); !ok || id.InstanceID != "fresh" {
+		t.Fatal(id, ok)
+	}
+	restored := restoreMachineFixture(t, *m.scoped)
+	assertIndexedProcessRouting(t, restored)
+	result = applyMachine(t, restored, RevokeSession{ProposalID: "route-revoke", SessionID: "route"})
+	if !result.Accepted {
+		t.Fatal(result)
+	}
+	assertIndexedProcessRouting(t, restored)
+	if id, ok := restored.ProcessIdentity("n"); ok || id.InstanceID != "" {
+		t.Fatal("revoked process still routed", id, ok)
+	}
+}
+
+func BenchmarkProcessIdentityIndex(b *testing.B) {
+	for _, count := range []int{1, 100, 10000} {
+		b.Run(strconv.Itoa(count), func(b *testing.B) {
+			m := &Machine{processIdentities: make(map[string]topology.Identity, count)}
+			for i := range count {
+				name := strconv.Itoa(i)
+				m.processIdentities[name] = topology.Identity{NodeName: name, ClusterID: "cluster", InstanceID: "process", MemberID: uint64(i + 1)}
+			}
+			name := strconv.Itoa(count - 1)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				id, ok := m.ProcessIdentity(name)
+				if !ok || id.MemberID != uint64(count) {
+					b.Fatal(id, ok)
+				}
+			}
+		})
 	}
 }

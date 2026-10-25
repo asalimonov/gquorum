@@ -144,3 +144,22 @@ func TestRequireTransportIsPureAndRejectsTypedNil(t *testing.T) {
 		t.Fatal("real capability lost", capable, err)
 	}
 }
+
+func TestRememberedSourceCoordinatorRetainsOnlyObservations(t *testing.T) {
+	t.Parallel()
+	options, err := (snapshot.Options{}).Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := NewCoordinator(options, Ports{})
+	c.observe(snapshot.Status{Direction: "outgoing", Delivery: snapshot.DeliveryFailed, SnapshotIndex: 42})
+	view := NewService(options, func() (*Coordinator, error) { return nil, fault.ErrStopped })
+	RememberCoordinator(view, c)
+	page := view.List(snapshot.Query{})
+	if len(page.Items) != 1 || page.Items[0].SnapshotIndex != 42 {
+		t.Fatal("source-only history lost", page)
+	}
+	if _, err = view.Begin(t.Context(), snapshot.BeginRequest{}); !errors.Is(err, fault.ErrStopped) {
+		t.Fatal("observation fallback admitted work", err)
+	}
+}

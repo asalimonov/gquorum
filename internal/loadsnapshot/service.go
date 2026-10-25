@@ -126,3 +126,13 @@ var closedSessionSignal = func() <-chan struct{} {
 	close(done)
 	return done
 }()
+
+// RememberCoordinator retains observation-only access even if no incoming RPC
+// looked up this source-only coordinator before Node shutdown. It grants no work.
+func RememberCoordinator(view snapshot.Service, c *Coordinator) {
+	if s, ok := view.(*service); ok {
+		s.mu.Lock()
+		s.last = c
+		s.mu.Unlock()
+	}
+}

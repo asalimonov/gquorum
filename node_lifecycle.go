@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/loadsnapshot"
 	"github.com/asalimonov/gquorum/internal/managed"
 	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/internal/recovery/model"
@@ -177,6 +178,7 @@ func (n *node) openLoadResources(m *metaservice.Group) error {
 	n.mu.Lock()
 	n.host = h
 	n.mu.Unlock()
+	loadsnapshot.RememberCoordinator(n.snapshots, h.SnapshotCoordinator())
 	return nil
 }
 
