@@ -116,3 +116,24 @@ Notes
 - A native rejection fixture initially used Index=2 instead of the append prefix Index=1; correcting the protocol-double reply produced the real StateSnapshot path. Another new fixture omitted required entry correlation; fixed before verification.
 - Tests prove heartbeat sends while bulk is blocked, epoch cancellation plus join, stale report rejection, native failure cooldown, failed-Ready discard, legacy snapshot copy behavior and publication generation. No multi-node functional fixture or large payload was added.
 - Reuse the existing status capture for epoch refresh to avoid a second RawNode.Status allocation on every ordinary refresh. Empty bulk dispatch does no extra work.
+
+## Task 6 — coordinator admission and memory staging
+
+Date: 2026-10-25. Commit: this task commit; prior task dde2701.
+
+Implemented
+- Added exact Owner/Ports contracts and volatile transfer state, plus pure coordinator construction, Host lifetime binding, fencing and retryable joined Stop.
+- Atomic directional count/byte reservations include exact owner/run validation and a group slot reserved before allocation/publication. Release is idempotent, rejects foreign reservations and cannot erase a successor slot.
+- Added memory staging with contiguous owned appends, poisoned failed appends, bounded ReadAt, complete Seal and zero-copy immutable Materialize. Close drops references without zeroing native-retained bytes.
+- Added the single future-disk TODO at the staging interface, using the stable group-scoped incoming-snapshot name.
+- Added evictable completed-Ack metadata, bounded history and two digest entries per run; none of these caches is an admission permit. Attachment/history counters never wrap.
+
+Verified
+- make test: all 2,257 tests across 62 reports/five modules pass (7.748s); report test-reports/unit/20261025T174716.663600Z-17j1vsen/report.md.
+- go test -race -count=1 ./internal/loadsnapshot: pass (1.342s); go vet ./internal/loadsnapshot: pass.
+- make lint (pending changes); git diff --check: pass.
+- Pure units cover independent budgets, concurrent 64-way admission, duplicate release, group successors, stop timeout retention, cache eviction independent of admission, overflow and borrowed-view lifetime. A 64 GiB reservation uses metadata only; no large payload allocation.
+
+Notes
+- Receive operations remain explicit unavailable methods in receive.go until tasks 7–8. New state/backend declarations have temporary unused exemptions until those tasks and task 9 connect them; remove them during that wiring/cutover.
+- No root, persistent-format, fixture-baseline or filesystem-staging changes. Coordinator Stop currently joins reservations and operation ownership; receiver cleanup/expiry is completed with receiver lifecycle in task 8 before Host attachment.

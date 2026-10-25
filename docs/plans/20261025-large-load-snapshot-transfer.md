@@ -180,18 +180,18 @@ The target's historical final `make lint` command means full validation; on the 
 **Files:** create `internal/loadsnapshot/{coordinator,state,ports,staging}.go`, owning units and shared helpers; complete Task 2's declarations without attaching to Host yet.
 **References:** target [§3.2 budgets](../brainstorms/20261025-large-load-snapshot-transfer-target.md#32-what-the-budgets-cover), [§6 state/storage](../brainstorms/20261025-large-load-snapshot-transfer-target.md#6-state-storage-and-ownership-schema), §9.2 and §12 reserve/staging. Appendix C reproduces Owner/Ports/volatile state and staging signatures.
 
-- [ ] Implement NewCoordinator/Start/Fence/Stop and directional count/byte reservations atomically. Include exact owner/run pins and one active incoming group slot. Reserve before payload allocation or extending a source pin.
-- [ ] Implement memorySnapshotStaging Append/ReadAt/Seal/Materialize/Close exactly as specified. Append owns chunks; Materialize returns immutable borrowed data without copying; Close never zeroes/recycles native-retained bytes.
-- [ ] Place the **single** future-disk TODO at snapshotStaging. Stable logical name incoming-snapshot is group-scoped; no filesystem paths, backend selector or disk journal.
-- [ ] Implement release-once counters and finite attachment/history sequences; overflow refuses. Disconnected resumable work keeps its reservations; stop timeout retains ownership.
-- [ ] Create bounded active/history/digest/terminal metadata containers. Completed Ack cache is evictable and never admission capacity; unresolved handoffs stay in the live map. No failure Ack rows.
-- [ ] Keep locks short: no hash/decoder, application callback, I/O, waiting or joins under coordinator/host locks.
-- [ ] Add pure units for multi-group quotas, distinct direction limits, group slot collision, duplicate release, arithmetic, cache-pressure independence and immutable view lifetime.
+- [x] Implement NewCoordinator/Start/Fence/Stop and directional count/byte reservations atomically. Include exact owner/run pins and one active incoming group slot. Reserve before payload allocation or extending a source pin.
+- [x] Implement memorySnapshotStaging Append/ReadAt/Seal/Materialize/Close exactly as specified. Append owns chunks; Materialize returns immutable borrowed data without copying; Close never zeroes/recycles native-retained bytes.
+- [x] Place the **single** future-disk TODO at snapshotStaging. Stable logical name incoming-snapshot is group-scoped; no filesystem paths, backend selector or disk journal.
+- [x] Implement release-once counters and finite attachment/history sequences; overflow refuses. Disconnected resumable work keeps its reservations; stop timeout retains ownership.
+- [x] Create bounded active/history/digest/terminal metadata containers. Completed Ack cache is evictable and never admission capacity; unresolved handoffs stay in the live map. No failure Ack rows.
+- [x] Keep locks short: no hash/decoder, application callback, I/O, waiting or joins under coordinator/host locks.
+- [x] Add pure units for multi-group quotas, distinct direction limits, group slot collision, duplicate release, arithmetic, cache-pressure independence and immutable view lifetime.
 
 #### Verification
 
-- [ ] `make test`; `go vet ./internal/loadsnapshot`; pure budget/backend units allocate only small fixtures.
-- [ ] Verify declared >2 GB values/overflows reject or validate before allocating; no root/persistent-file changes.
+- [x] `make test`; `go vet ./internal/loadsnapshot`; pure budget/backend units allocate only small fixtures.
+- [x] Verify declared >2 GB values/overflows reject or validate before allocating; no root/persistent-file changes.
 
 ### Task 7: Implement authenticated Begin, chunk receive and same-run resume
 
