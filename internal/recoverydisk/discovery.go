@@ -123,6 +123,10 @@ type manifestScan struct {
 
 func (s *manifestScan) add(entry os.DirEntry) {
 	relative := filepath.Join(Namespace, entry.Name())
+	if approvalTemporary(entry.Name()) {
+		s.err = errors.Join(s.err, validateApprovalTemporary(s.root, relative))
+		return
+	}
 	if entry.Name() == "current.json" {
 		var current recoverymodel.Current
 		if err := readRecordFrom(s.root, relative, &current, recoverymodel.HeaderMaxBytes); err != nil {
@@ -158,9 +162,6 @@ func (s *manifestScan) finish() ([]recoverymodel.LocalManifest, error) {
 			continue
 		}
 		valid = append(valid, record)
-	}
-	if len(valid) == 0 && s.err == nil {
-		s.err = fault.New(fault.Unreadable, "recovery namespace has no owned manifest", nil)
 	}
 	if s.pointer != nil {
 		s.err = errors.Join(s.err, validateCurrent(*s.pointer, valid))

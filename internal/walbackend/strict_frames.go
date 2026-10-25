@@ -47,22 +47,25 @@ func (d *strictFrames) next(file *os.File, size int64) (walpb.Record, error) {
 	}
 	field := binary.LittleEndian.Uint64(header[:])
 	if field == 0 {
-		return walpb.Record{}, io.EOF
+		return walpb.Record{}, d.zeroEnd(file)
 	}
 	frame, err := checkedFrameSize(field)
 	length, padding := frame.length, frame.padding
 	if err != nil {
 		return walpb.Record{}, err
 	}
-	if length > d.limits.MaxRecordBytes || length > d.limits.MaxGroupBytes {
-		return walpb.Record{}, fault.New(fault.Unreadable, "WAL record exceeds recovery byte budget", nil)
-	}
-	if length > math.MaxInt-walFrameHeaderBytes {
+	if length > math.MaxInt64-walFrameHeaderBytes {
 		return walpb.Record{}, fault.ErrUnreadable
 	}
 	frameBytes := int64(length) + int64(padding)
 	if size-d.offset-walFrameHeaderBytes < frameBytes {
 		return walpb.Record{}, d.tornEnd(io.ErrUnexpectedEOF)
+	}
+	if length > d.limits.MaxRecordBytes || length > d.limits.MaxGroupBytes {
+		return walpb.Record{}, fault.New(fault.Unreadable, "WAL record exceeds recovery byte budget", nil)
+	}
+	if length > math.MaxInt-walFrameHeaderBytes {
+		return walpb.Record{}, fault.ErrUnreadable
 	}
 	data := make([]byte, int(frameBytes))
 	if _, err := io.ReadFull(file, data); err != nil {
@@ -74,6 +77,29 @@ func (d *strictFrames) next(file *os.File, size int64) (walpb.Record, error) {
 	}
 	d.offset += walFrameHeaderBytes + frameBytes
 	return record, nil
+}
+
+// A zero frame is preallocation only when the entire remaining final segment is
+// zero. Never hide later records behind a corrupted length field.
+func (d *strictFrames) zeroEnd(file *os.File) error {
+	if !d.final {
+		return unreadable("zero frame before final WAL segment", nil)
+	}
+	var buffer [64 << 10]byte
+	for {
+		if err := d.ctx.Err(); err != nil {
+			return err
+		}
+		count, err := file.Read(buffer[:])
+		for _, value := range buffer[:count] {
+			if value != 0 {
+				return unreadable("nonzero data after zero WAL frame", nil)
+			}
+		}
+		if err != nil {
+			return err
+		}
+	}
 }
 func (d *strictFrames) decodeFrame(data []byte, length uint64) (walpb.Record, error) {
 	var record walpb.Record

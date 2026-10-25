@@ -12,6 +12,8 @@ import (
 )
 
 // Status reads historical operation progress; an empty ID selects the current operation.
+// A valid result may accompany an error describing unrelated invalid namespace entries.
+// Without a current pointer, use List to discover pending operations by their exact IDs.
 func (r *Recovery) Status(ctx context.Context, id string) (recovery.Status, error) {
 	if err := ctx.Err(); err != nil {
 		return recovery.Status{}, err

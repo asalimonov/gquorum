@@ -101,6 +101,65 @@ func TestOfflineSnapshotCRCRefusesWithoutBrokenRename(t *testing.T) {
 		t.Fatal("snapshot reader renamed or repaired corrupt evidence")
 	}
 }
+
+func TestOfflineUnacknowledgedHigherTermTailRefusesWithoutChangingEvidence(t *testing.T) {
+	t.Parallel()
+	root := offlineWAL(t)
+	s := boundTest(t, root, false)
+	g, err := s.openGroup("group")
+	check(t, err)
+	// Model etcd's entries-before-HardState write order interrupted before the
+	// new term is durable. V1 deliberately retains the ordinary strict contract;
+	// it must never raise the saved term or claim this inconsistent tail is used.
+	check(t, g.w.Save(raftpb.HardState{}, []raftpb.Entry{{Index: 6, Term: 2, Data: []byte("unacknowledged")}}))
+	check(t, g.w.Sync())
+	check(t, s.Close())
+	before := sourceHashes(t, root)
+	if _, err := ReadRecovery(t.Context(), root, "group", offlineLimits()); err == nil {
+		t.Fatal("entries above retained HardState term were silently accepted")
+	}
+	if !reflect.DeepEqual(before, sourceHashes(t, root)) {
+		t.Fatal("inconsistent unacknowledged tail was repaired or discarded")
+	}
+}
+
+func TestOfflineCRCValidCommittedRewriteRefusesButExactRetryPreservesSuffix(t *testing.T) {
+	t.Parallel()
+	for _, conflicting := range []bool{true, false} {
+		t.Run(map[bool]string{true: "conflicting", false: "exact"}[conflicting], func(t *testing.T) {
+			t.Parallel()
+			root := offlineWAL(t)
+			original, err := ReadRecovery(t.Context(), root, "group", offlineLimits())
+			check(t, err)
+			s := boundTest(t, root, false)
+			g, err := s.openGroup("group")
+			check(t, err)
+			entry := original.Recovery.Entries[0]
+			if conflicting {
+				entry.Data = []byte("CRC-valid conflicting committed value")
+			}
+			// Bypass Store validation to persist actual validly framed corruption,
+			// not a CRC failure that masks the committed-prefix check.
+			check(t, g.w.Save(raftpb.HardState{}, []raftpb.Entry{entry}))
+			check(t, s.Close())
+			before := sourceHashes(t, root)
+			result, err := ReadRecovery(t.Context(), root, "group", offlineLimits())
+			if conflicting {
+				if err == nil {
+					t.Fatal("CRC-valid committed rewrite accepted")
+				}
+			} else {
+				check(t, err)
+				if result.Recovery.HardState.Commit != 4 || result.LastLog.Index != 4 || len(result.Recovery.Entries) != 2 {
+					t.Fatal("exact retry lost the committed suffix or retained the overwritten uncommitted tail", result)
+				}
+			}
+			if !reflect.DeepEqual(before, sourceHashes(t, root)) {
+				t.Fatal("source changed during committed retry validation")
+			}
+		})
+	}
+}
 func TestOfflineEarlierOversizedLengthCannotBecomeOlderCommit(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

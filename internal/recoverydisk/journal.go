@@ -57,6 +57,9 @@ func Create(ctx context.Context, owner *Owner, input recoverymodel.AcceptedPlan,
 			return nil, fault.New(fault.Conflict, "another recovery is pending", nil)
 		}
 	}
+	if err := owner.cleanupApprovals(ctx); err != nil {
+		return nil, err
+	}
 	return publishApproved(ctx, owner, acceptedApproval{plan: accepted, acceptance: acceptance})
 }
 
@@ -73,11 +76,8 @@ func publishApproved(ctx context.Context, owner *Owner, approval acceptedApprova
 		return nil, err
 	}
 	relative := manifestRelative(name)
-	if err := mkdirAllDurable(owner.system.root, filepath.Dir(relative)); err != nil {
-		return nil, err
-	}
 	j := &Journal{owner: owner, value: r}
-	if err := j.write("manifest", relative, data, false); err != nil {
+	if err := owner.publishApproval(name, data); err != nil {
 		var actual recoverymodel.LocalManifest
 		readErr := readRecordFrom(owner.system.root, relative, &actual, recoverymodel.ManifestMaxBytes)
 		if readErr == nil {
@@ -85,7 +85,7 @@ func publishApproved(ctx context.Context, owner *Owner, approval acceptedApprova
 			return j, err
 		}
 		if errors.Is(readErr, os.ErrNotExist) {
-			return nil, errors.Join(err, owner.cleanupUnpublished(name))
+			return nil, err
 		}
 		return nil, errors.Join(err, readErr)
 	}

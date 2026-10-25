@@ -92,19 +92,6 @@ func (j *Journal) change(ctx context.Context, edit func(*recoverymodel.LocalMani
 	j.value = next
 	return nil
 }
-func (owner *Owner) cleanupUnpublished(name string) error {
-	root := owner.system.root
-	if err := removeEmptyDirectory(root, filepath.Join(Namespace, name)); err != nil {
-		return err
-	}
-	if err := SyncParents(root, filepath.Join(Namespace, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if err := removeEmptyDirectory(root, Namespace); err != nil && !errors.Is(err, unix.ENOTEMPTY) {
-		return err
-	}
-	return SyncParents(root, Namespace)
-}
 func removeEmptyDirectory(root *os.Root, relative string) error {
 	parent, err := openParent(root, relative)
 	if err != nil {

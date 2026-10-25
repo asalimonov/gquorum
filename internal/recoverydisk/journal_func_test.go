@@ -61,7 +61,7 @@ func mustJournal(t *testing.T, err error) {
 
 func TestApprovalPublicationFaultsPreserveSourceAndGuard(t *testing.T) {
 	t.Parallel()
-	for _, point := range []string{"manifest.temp_sync", "manifest.rename", "manifest.parent_sync", "current.temp_sync", "current.rename", "current.parent_sync"} {
+	for _, point := range []string{"approval.namespace", "approval.mkdir", "manifest.temp_sync", "manifest.rename", "manifest.parent_sync", "current.temp_sync", "current.rename", "current.parent_sync"} {
 		t.Run(point, func(t *testing.T) {
 			t.Parallel()
 			owner := journalOwner(t)
@@ -87,7 +87,7 @@ func TestApprovalPublicationFaultsPreserveSourceAndGuard(t *testing.T) {
 					t.Fatal("approval changed source", name, err)
 				}
 			}
-			if point == "manifest.temp_sync" || point == "manifest.rename" {
+			if point == "approval.namespace" || point == "approval.mkdir" || point == "manifest.temp_sync" || point == "manifest.rename" {
 				if j != nil {
 					t.Fatal("unpublished approval was adopted")
 				}
@@ -96,6 +96,7 @@ func TestApprovalPublicationFaultsPreserveSourceAndGuard(t *testing.T) {
 				if len(rows) != 0 {
 					t.Fatal("unpublished approval became history")
 				}
+				mustJournal(t, CheckStartup(t.Context(), owner.paths()))
 			} else {
 				if j == nil {
 					t.Fatal("published manifest was lost")

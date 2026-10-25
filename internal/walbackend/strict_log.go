@@ -136,20 +136,25 @@ func (s *strictLog) entry(data []byte, maxBytes uint64) error {
 	if entry.Index == 0 || entry.Term == 0 {
 		return fault.ErrUnreadable
 	}
-	s.result.LastLog = model.Position{Index: entry.Index, Term: entry.Term}
 	if !s.collect || entry.Index <= s.point.Index {
+		s.result.LastLog = model.Position{Index: entry.Index, Term: entry.Term}
 		return nil
 	}
 	offset := entry.Index - s.point.Index - 1
 	if offset > uint64(len(s.result.Recovery.Entries)) {
 		return unreadable("WAL entry gap", nil)
 	}
-	for _, old := range s.result.Recovery.Entries[offset:] {
-		size, err := strictEntrySize(old)
-		if err != nil {
+	if entry.Index <= s.result.Recovery.HardState.Commit && offset < uint64(len(s.result.Recovery.Entries)) {
+		if err := verifyStrictCommittedEntry(s.result.Recovery.Entries[offset], entry); err != nil {
 			return err
 		}
-		s.bytes -= size
+		// A partial repeated Ready cannot erase the durable committed suffix.
+		// Its old uncommitted suffix can still be replaced, as with etcd replay.
+		keep := s.result.Recovery.HardState.Commit - s.point.Index
+		return s.truncate(min(keep, uint64(len(s.result.Recovery.Entries))))
+	}
+	if err := s.truncate(offset); err != nil {
+		return err
 	}
 	size, err := strictEntrySize(entry)
 	if err != nil {
@@ -159,8 +164,35 @@ func (s *strictLog) entry(data []byte, maxBytes uint64) error {
 		return unreadable("WAL tail exceeds recovery byte budget", nil)
 	}
 	s.bytes += size
-	s.result.Recovery.Entries = append(s.result.Recovery.Entries[:offset], entry)
+	s.result.LastLog = model.Position{Index: entry.Index, Term: entry.Term}
+	s.result.Recovery.Entries = append(s.result.Recovery.Entries, entry)
 	s.result.Bytes = s.bytes
+	return nil
+}
+
+func (s *strictLog) truncate(offset uint64) error {
+	for _, old := range s.result.Recovery.Entries[offset:] {
+		size, err := strictEntrySize(old)
+		if err != nil {
+			return err
+		}
+		s.bytes -= size
+	}
+	s.result.Recovery.Entries = s.result.Recovery.Entries[:offset]
+	s.result.Bytes = s.bytes
+	s.result.LastLog = model.Position{Index: s.point.Index, Term: s.point.Term}
+	if offset > 0 {
+		last := s.result.Recovery.Entries[offset-1]
+		s.result.LastLog = model.Position{Index: last.Index, Term: last.Term}
+	}
+	return nil
+}
+
+// Exact acknowledged Ready retries preserve the already committed suffix.
+func verifyStrictCommittedEntry(old, entry raftpb.Entry) error {
+	if old.Term != entry.Term || old.Type != entry.Type || !bytes.Equal(old.Data, entry.Data) {
+		return unreadable("WAL rewrites a committed entry", nil)
+	}
 	return nil
 }
 

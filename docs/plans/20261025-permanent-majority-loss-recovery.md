@@ -697,6 +697,9 @@ ownership, with data/publication held until Tasks 11–12 complete restoration.
   durable acquisition. Reject wrong cluster/founding; interrupted admission retries
   cannot archive the successor again. Terminal history does not veto later valid B
   readmission or turn source archives into automatic reseeding permission.
+  Fresh-start load-evidence checks must use the held WAL lease's validated
+  archive history, rather than the history-free package helper; otherwise the
+  reset's own archive namespace falsely counts as retained live data (review M6).
 - [ ] Hold the private controller between v1 founding and import in an owning test;
   attempt public Stage/Approve/mutation, SetSchedulingEnabled(ctx, true), a scheduler
   tick, StartLoadGroup and a joining protocol request. Prove no intervening topology change occurs while
@@ -978,6 +981,9 @@ library regression evidence; no Meridian integration work.
   DisableFSync settings. Record S/C/L, encoded sizes, group count, effective bounds,
   wall time, peak process RSS, allocations, temporary disk and cancellation/join latency.
   Design defaults are not measurements and no hard application-RSS guarantee is added.
+  Include metadata containing 10,000 retained cleanup debts, with both the
+  materialized state and snapshot copy plus the committed tail counted against
+  MaxMetadataBytes; qualify the 128 MiB default on that shape (review L5).
 - [ ] Put large fixtures in opt-in benchmarks/resource qualification, not fast units
   or every default functional run. Use `BenchmarkRecoveryResources` under the owning
   functional build where real stores are required. Measure a compiled test binary
@@ -1226,6 +1232,26 @@ prevent completion; an accepted out-of-scope item belongs in the table above.
 Do not pre-mark the absence of implementation as a passed delta audit.
 
 ## NOT PLANNED CHANGES
+
+- Tasks 1–5 peer-review checkpoint (no additional task section):
+  `internal/recoverydisk/{approval_publication,discovery,journal,owner}.go` now
+  publishes the first approval by syncing a reserved, strictly shaped staging
+  directory and renaming the directory to the final BackupName. An empty
+  namespace/unpublished staging never authorizes recovery or guards A; foreign
+  staging contents still refuse. The next approval collects abandoned staging
+  under the owner lease. This closes crash-before-manifest-rename recovery, not
+  just the prior in-process cleanup case, and clarifies target §§5.4/9.1 without
+  changing public APIs. Source files and application hooks are untouched.
+  WAL framing now validates final zero padding and evaluates file fit before
+  allocation budgets. CRC-valid conflicting committed rewrites refuse; exact
+  committed retries retain the committed suffix while replacing the old
+  uncommitted tail. Already-closed owner locks no longer leak root descriptors.
+  Added a separately captured native `2684202` snapshot/tail/authority fixture,
+  read-only replay and ordinary A restart coverage; existing frozen files remain
+  unchanged. Task 10 tracks M6's owned archive-history check; Task 15 includes L5's
+  retained-cleanup-debt metadata budget shape. Status pointer selection and the
+  existing higher-than-HardState-term refusal stay unchanged and are documented
+  explicitly. See the checkpoint commit and progress entry for exact validation.
 
 - Task 5: added `internal/metaengine/snapshot_boundary.go` and the optional
   `raftengine.RestoredValidator` in the shared restore helper, wired into startup,

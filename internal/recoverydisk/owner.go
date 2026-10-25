@@ -215,7 +215,7 @@ func (l *Lease) Close() error {
 		return nil
 	}
 	err := l.lock.Close()
-	if err != nil {
+	if err != nil && !errors.Is(err, os.ErrClosed) {
 		return err
 	}
 	l.closed = true

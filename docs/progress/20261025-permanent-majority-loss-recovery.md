@@ -289,3 +289,74 @@ Notes
   offline evidence is a working projection, not a replacement disk format.
 - Review cadence reached: ask the existing colleague to review Tasks1–5 before
   continuing with complete-survivor inspection/approval in Task6.
+
+
+## Tasks 1–5 review checkpoint — crash publication and retained-source defenses
+Date: 2026-10-25. Commit: included with this checkpoint fix commit.
+
+Implemented
+- H1: initial approval now writes/syncs a manifest inside reserved
+  @approve-<32 lowercase hex> staging, syncs the directory, then renames the
+  entire directory without replacement to the immutable BackupName and syncs
+  its parent. Empty namespaces and strictly shaped unpublished staging never
+  become operations/guards. New approval collects staging under the lease;
+  foreign files, nested directories, links and oversized manifests still refuse.
+- Tests retain real interrupted disk shapes across owner restart, cover namespace
+  creation/directory creation/file sync/rename/parent sync/current-pointer faults,
+  preserve A's source bytes, distinguish prepublication from the durable guard,
+  and prove retry repairs publication/pointer state without manual filesystem work.
+- M1/M2: final zero headers require a streaming all-zero remainder; a zero header
+  in an earlier segment refuses. File-fit checks precede record/group allocation
+  budgets, so an oversized incomplete final frame gets the explicit torn path.
+- M4: CRC-valid conflicting committed rewrites refuse. Exact committed retries
+  preserve the durable committed suffix even after a partial repeated Ready;
+  they discard the old uncommitted suffix consistently with replacement replay.
+  Pure and real-WAL tests cover term/type/payload conflicts, exact retries and
+  legitimate replacement beyond C. No source repair or tail rewrite occurs.
+- L1: an already-closed owner lock no longer prevents joining the root descriptor.
+- M7: generated a separate native fixture from an isolated exact baseline
+  26842024d2fb4fe6fd74b15efa5106749a8b0674 export, never current codecs. It contains
+  a nonempty native snapshot at 33/term2, commit35 and two tail entries plus the
+  matching authority journal. Capture source, raw/compressed hashes and provenance
+  accompany frozen gzip files. Read-only replay leaves source bytes unchanged;
+  ordinary current Node restart succeeds even with abandoned approval staging.
+  Received snapshots already use the same restoreMachine validator as startup.
+- M6/L5 are explicit additions within existing Task10/Task15 checkboxes: owned
+  archive-history fresh-start checks, and 10k-cleanup-debt metadata budget shape.
+  No seventeenth task was created. Public API signatures remain unchanged.
+
+Verified
+- make test: PASS, 2,027 tests/54 reports across all five modules, 6.604s.
+  test-reports/unit/20261025T014404.401680Z-nyia1m_3/report.md.
+- make lint: PASS across all configured modules/build tags/tooling.
+  /tmp/gquorum-recovery-review-lint.log.
+- Full affected functional suites under -race -count=1: disk4.550s,
+  WAL7.625s, metadata FSM27.555s, engine5.447s, root20.443s, all PASS.
+  /tmp/gquorum-recovery-review-race.log.
+- After final committed-retry refinements, repeated full WAL/facade functional
+  race suites: PASS7.465s/6.911s. Final baseline restart including staging:
+  PASS -race3.017s. New higher-term-tail and CRC-valid rewrite cases also PASS.
+- make test-sim SIM_SEEDS=1-3: PASS21/21,50.524s.
+  test-reports/sim/20261025T014034.842676Z-upl00pjq/report.md.
+- git diff --check: PASS. No existing frozen fixture was overwritten. No Docker
+  image rebuild or new process-suite run at this checkpoint; the Task5 smoke
+  evidence is historical, and final qualification remains scheduled.
+
+Review dispositions / design notes
+- M3 remains the pre-existing conservative refusal: a retained entry term above
+  HardState.Term refuses even beyond C. Added a realistic interrupted-write,
+  source-preservation regression; no term inference or hidden normalization.
+  Requesting the peer's response before any decision to widen this contract.
+- M5's proposed fallback is not in the approved target: sections3.3/15.10 select
+  the exact current pointer. Kept that behavior, documented Status's valid-value
+  plus unrelated-namespace-error result, and documented List as discovery when
+  the current pointer is absent. Missing pointers never bypass startup scanning.
+- L2 descriptor-relative lock hardening is optional; hostile concurrent mutation
+  is excluded, existing identity rechecks remain, and Gosim's missing dirfd hooks
+  cannot justify weakening the shared ownership path. L4 optional typed progress
+  strings are not needed for correctness and approved declarations stay intact.
+- Clarified the local target's approval publication and existing conservative
+  term/pointer semantics; saved its previous content at
+  docs/brainstorms/20261024-permanent-majority-loss-recovery-target.before-implementation-review-20261025.md.
+  Brainstorm sources remain ignored local design inputs as before; the tracked
+  plan records the implementation correction and the checkpoint commit its diff.

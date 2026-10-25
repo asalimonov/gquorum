@@ -1,0 +1,69 @@
+//go:build functional
+
+package metaengine_test
+
+import (
+"context"
+"fmt"
+"io"
+"log/slog"
+"net"
+"os"
+"path/filepath"
+"testing"
+"time"
+quorum "github.com/asalimonov/gquorum"
+"github.com/asalimonov/gquorum/internal/metastore"
+"github.com/asalimonov/gquorum/topology"
+)
+
+func TestCaptureNativeBaseline(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	opts := quorum.NodeOptions{StorageDir: root, Identity: topology.Identity{NodeName: "n1", ClusterID: "cluster", InstanceID: "source"}, Node: topology.Node{Name: "n1", Type: "worker"}, Bootstrap: quorum.BootstrapOptions{Founders: []quorum.FoundingMember{{Node: topology.Node{Name: "n1", Type: "worker"}, MemberID: 1, Address: listener.Addr().String()}}}, Meta: quorum.MetaOptions{SnapshotThreshold: 8, Network: quorum.MetaNetworkOptions{Listener: listener, AdvertiseAddress: listener.Addr().String(), AllowPlaintext: true, ClusterCredential: []byte("credential")}}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	node, err := quorum.NewNode(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := node.Stop(ctx); err != nil {
+			t.Error(err)
+		}
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	if err := node.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := node.WaitReady(ctx); err != nil {
+		t.Fatal(err)
+	}
+	session, err := node.ActivateSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := range 27 {
+        if err := node.Cluster().AcquireLock(ctx, fmt.Sprintf("capture/%d", index), session.ID); err != nil { t.Fatal(err) }
+    }
+	if err := node.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+    store, err := metastore.Open(filepath.Join(root, "_meta.bolt"))
+    if err != nil { t.Fatal(err) }
+    retained, err := store.LoadAll()
+    if err != nil { t.Fatal(err) }
+    if err := store.Close(); err != nil { t.Fatal(err) }
+    t.Logf("snapshot=%d term=%d commit=%d tail=%d", retained.Snapshot.Metadata.Index, retained.Snapshot.Metadata.Term, retained.HardState.Commit, len(retained.Entries))
+    if retained.Snapshot.Metadata.Index <= 1 || retained.HardState.Commit <= retained.Snapshot.Metadata.Index { t.Fatal("need nonempty snapshot plus committed tail") }
+    for _, name := range []string{"_meta.bolt", "_authority.bolt"} {
+        data, err := os.ReadFile(filepath.Join(root, name)); if err != nil { t.Fatal(err) }
+        if err := os.WriteFile(filepath.Join("/tmp/gquorum-baseline-native-output", name), data, 0600); err != nil { t.Fatal(err) }
+    }
+}
