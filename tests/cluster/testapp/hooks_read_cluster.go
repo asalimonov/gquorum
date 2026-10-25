@@ -303,6 +303,9 @@ func (m *controlledMachine) Restore(ctx context.Context, data []byte) error {
 	if err := m.app.snapshotPhase(ctx, m.node, m.key, "before_restore", 0); err != nil {
 		return err
 	}
+	if err := m.app.snapshotRestoreFailure(m.node, m.key); err != nil {
+		return err
+	}
 	if err := m.kvMachine.Restore(ctx, data); err != nil {
 		return err
 	}

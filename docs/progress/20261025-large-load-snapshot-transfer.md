@@ -398,3 +398,23 @@ Verified
 Notes
 - Initial identity capture assumed every focused fixture had a live Node; fixed capture to tolerate protocol-only fixtures while running controls retain exact identity checks. Existing tests remain green.
 - No payload/testdata file, implicit storage root, extra listener or new root file. Generated qualification remains opt-in and unexecuted until the process tasks. Unrelated staged .gitignore remains preserved and excluded.
+
+## Task 17 — process matrix and the justified four-node repair regression
+
+Date: 2026-10-26. Commit: this task commit; prior 76cabfb.
+
+Implemented
+- Added isolated three-node generated snapshot scenarios for 32MiB multi-frame transfer/tail/later leadership, production same-peer ordinary traffic during held bulk, lost admission/chunk/final Acks, corruption/retry, source election, receiver process incarnation and stale control refusal.
+- Crash cases gate before Finish, before/after persistence and after Restore, then verify complete generated state and committed tail on retained restart. Automatic receiver recovery uses an exact-process bounded Restore failure budget; a unit verifies it cannot affect a successor.
+- Multi-group capacity case holds the sole incoming slot, observes a second source's remote capacity refusal and requires refill/catch-up within eight seconds after release, detecting the old long native backoff.
+- Four-node regression names its required capacity: three voters retain quorum and one stable learner enables guarded replacement. It preserves default 30s failure windows, throttles 32MiB beyond them and observes snapshot_catchup; a second episode repeatedly acknowledges one chunk then times out and must qualify replacement despite renewed bytes.
+- Added the concrete SNAP-01–15 suite/test mapping to the plan. All actual process execution remains reserved for Task 20.
+
+Verified
+- make test: 2,307 tests across 62 reports/five modules pass (7.343s); report test-reports/unit/20261025T214845.642502Z-ydoaev0e/report.md.
+- Focused fixture snapshot/control functional race selection passes (4.710s). Pending owning lint/vet and git diff --check pass.
+- All clustertest cases compile through go test -c in an automatically cleaned temporary directory, exit 0. No TestMain/Docker was run, so cross-node runtime outcomes are not yet claimed.
+
+Notes
+- No private library imports added to the application, no larger ordinary cluster fixtures, no payload files or new listeners. The Restore failure budget extends the existing exact-identity fixture seam and remains outside library behavior.
+- Process cases may need correction from final runtime evidence; green compilation is not acceptance proof. The unrelated staged .gitignore change remains excluded.

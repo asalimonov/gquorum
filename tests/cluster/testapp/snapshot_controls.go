@@ -18,6 +18,7 @@ import (
 )
 
 type snapshotControlRequest struct {
+	FailRestoreCount uint64            `json:"fail_restore_count"`
 	Identity         topology.Identity `json:"identity"`
 	Hold             string            `json:"hold"`
 	HoldOffset       *uint64           `json:"hold_offset,omitempty"`
@@ -353,4 +354,20 @@ func (a *application) snapshotNodeIdentity() topology.Identity {
 		return node.Identity()
 	}
 	return topology.Identity{NodeName: a.cfg.NodeName, ClusterID: a.cfg.ClusterID, InstanceID: a.cfg.InstanceID}
+}
+
+func (a *application) snapshotRestoreFailure(id topology.Identity, key walKey) error {
+	if a == nil || a.clusterHooks == nil {
+		return nil
+	}
+	h := a.clusterHooks
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	control := h.snapshotControls[key]
+	if control != nil && control.request.Identity == id && control.request.FailRestoreCount > 0 {
+		control.request.FailRestoreCount--
+		control.hits["restore_failed"]++
+		return fault.ErrUnavailable
+	}
+	return nil
 }

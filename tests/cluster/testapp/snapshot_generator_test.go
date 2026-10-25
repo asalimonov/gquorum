@@ -13,6 +13,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/topology"
 )
 
 func configuredSyntheticMachine(t *testing.T) *kvMachine {
@@ -121,5 +122,26 @@ func TestSyntheticGenerationIsExplicitAndCancelable(t *testing.T) {
 	spec := syntheticSpec{Version: 2, EncodedBytes: 256 << 10}
 	if err = spec.validate(); !errors.Is(err, fault.ErrInvalid) {
 		t.Fatal(err)
+	}
+}
+
+func TestSnapshotRestoreFailureBudgetIsExactAndDoesNotReachSuccessor(t *testing.T) {
+	t.Parallel()
+	a := &application{clusterHooks: newClusterHooks()}
+	key := walKey{"work", 2}
+	id := topology.Identity{NodeName: "node", InstanceID: "original"}
+	a.clusterHooks.snapshotControls[key] = &snapshotControl{request: snapshotControlRequest{Identity: id, FailRestoreCount: 3}, hits: make(map[string]uint64)}
+	replacement := id
+	replacement.InstanceID = "successor"
+	if err := a.snapshotRestoreFailure(replacement, key); err != nil {
+		t.Fatal("old fault reached successor", err)
+	}
+	for range 3 {
+		if err := a.snapshotRestoreFailure(id, key); !errors.Is(err, fault.ErrUnavailable) {
+			t.Fatal(err)
+		}
+	}
+	if err := a.snapshotRestoreFailure(id, key); err != nil {
+		t.Fatal("restore failure budget did not expire", err)
 	}
 }

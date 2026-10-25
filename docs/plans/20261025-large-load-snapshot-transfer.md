@@ -405,17 +405,17 @@ Review baseline: `251a594`; findings in review Thread 3. The original six-commit
 **Files:** tests/cluster/snapshot_transfer_test.go; tests/cluster/testapp synthetic FSM/helpers/authenticated controls; existing Spec/config wiring.
 **References:** target [§10.1 SNAP matrix](../brainstorms/20261025-large-load-snapshot-transfer-target.md#101-acceptance-mapping), §7.7, §8.5 and full GQ-02 SNAP-01–15.
 
-- [ ] Add three-node small generated cases for 32 MiB multi-frame transfer, >500ms under ordinary elections, same-peer ordinary traffic progress, compaction+tail+later leadership, stale identities, lost Acks, source election change, callback/storage failures and crash boundaries. Use observable phase barriers rather than correctness sleeps.
-- [ ] Cover remaining SNAP cases through the appropriate existing unit/functional suite where multi-node behavior is unnecessary; maintain the explicit matrix in this plan.
-- [ ] Add local/remote capacity-pressure multi-group process coverage: one receiving permit becomes available, cheap pre-admission retries refill it without long idle gaps; payload/metadata/worker limits remain bounded.
-- [ ] Add `TestSnapshotTransfer_RepairProtectionFourNodes` as the one justified larger fixture: three voters retain majority while one falls behind, fourth is an eligible stable learner. Verify no premature replacement during genuine progress, then repeated terminal timeouts/no Match advance restore failure eligibility. Use explicit shortened windows where practical; test the real default-window interaction separately if required for the regression.
-- [ ] Add receiver automatic recovery/run-churn scenario without assuming failed engines are held. A new run requires a fresh transfer but cannot renew the source episode for the same peer.
-- [ ] Preserve isolated pool leases, t.Parallel before acquisition, exact resource identity and verified joined container/volume/worker cleanup. Do not import private library packages into the test application.
+- [x] Add three-node small generated cases for 32 MiB multi-frame transfer, >500ms under ordinary elections, same-peer ordinary traffic progress, compaction+tail+later leadership, stale identities, lost Acks, source election change, callback/storage failures and crash boundaries. Use observable phase barriers rather than correctness sleeps.
+- [x] Cover remaining SNAP cases through the appropriate existing unit/functional suite where multi-node behavior is unnecessary; maintain the explicit matrix in this plan.
+- [x] Add local/remote capacity-pressure multi-group process coverage: one receiving permit becomes available, cheap pre-admission retries refill it without long idle gaps; payload/metadata/worker limits remain bounded.
+- [x] Add `TestSnapshotTransfer_RepairProtectionFourNodes` as the one justified larger fixture: three voters retain majority while one falls behind, fourth is an eligible stable learner. Verify no premature replacement during genuine progress, then repeated terminal timeouts/no Match advance restore failure eligibility. Use explicit shortened windows where practical; test the real default-window interaction separately if required for the regression.
+- [x] Add receiver automatic recovery/run-churn scenario without assuming failed engines are held. A new run requires a fresh transfer but cannot renew the source episode for the same peer.
+- [x] Preserve isolated pool leases, t.Parallel before acquisition, exact resource identity and verified joined container/volume/worker cleanup. Do not import private library packages into the test application.
 
 #### Verification
 
-- [ ] `make test`; fixture-focused checks; compile all `clustertest` cases without running Docker. Validate scenario/test naming and matrix coverage.
-- [ ] Execute these process cases only in final Task 20 after full lint and one image build; do not rebuild a shared tag during a run.
+- [x] `make test`; fixture-focused checks; compile all `clustertest` cases without running Docker. Validate scenario/test naming and matrix coverage.
+- [x] Execute these process cases only in final Task 20 after full lint and one image build; do not rebuild a shared tag during a run.
 
 ### Task 18: Add generated opt-in qualification through 2 GB
 
@@ -707,6 +707,22 @@ Task 14 omitted private policy/classification inputs:
  }
 +func (g *Group) ReportSnapshotAttemptTimeout(SnapshotAttempt)
 ```
+
+Task 17 concrete SNAP verification matrix (process execution is Task 20):
+
+| Requirement | Concrete evidence surface |
+|---|---|
+| SNAP-01/02/03/10/12 | TestSnapshotTransfer_LargeChunksTailAndHeartbeatIsolation: 32MiB budget, full restore/tail, separate-group same-destination writes and later leadership |
+| SNAP-04 | TestCoordinatorDirectionalBudgetsAndExactGroupSlot; terminal/cache units; TestSnapshotTransfer_MultiGroupCapacityRefillsWithoutLongBackoff |
+| SNAP-05 | TestSnapshotReceive_RejectsBadChunksAndReleasesAfterJoin; chunk/digest fixtures; process corruption variant |
+| SNAP-06/07 | TestSnapshotTransfer_SourceElectionAndReceiverIncarnation; managed exact-owner/Stop/Close and native ingress cancellation races |
+| SNAP-08/15 | TestSnapshotTransfer_CrashAtOwnedBoundaries; real-engine persistence/Restore failure and native activation accepted/failed outcome integration |
+| SNAP-09 | TestSnapshotTransfer_RepairProtectionFourNodes; fixed-episode/native Match/receiver-run churn units and shared mandatory-policy evidence tests |
+| SNAP-11 | Node capability/configuration units; production adapter frame/policy/unsupported-peer functional cases |
+| SNAP-13 | TestSnapshotIngress_PreflightNativeSkipAndImmediateCapture; TestSnapshotReceive_ObsoletePreemptionAndRunReplacement; source-election process case |
+| SNAP-14 | TestSnapshotIngress_MatchingLogSkipsOfferedApplication and unused-authority skip regression |
+| Ack loss/resume | TestSnapshotTransfer_LostAcknowledgementsAndCorruption plus client lost Open/chunk/final Ack races |
+| Recovery/churn | TestSnapshotTransfer_ReceiverAutomaticRecoveryAfterRestoreFailures plus same-process episode deadline/latch units |
 
 ## NOT IMPLEMENTED GAPS
 
