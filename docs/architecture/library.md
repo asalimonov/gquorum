@@ -13,7 +13,7 @@ The public handles separate participant operation, administration, consensus and
 | `gquorum.Node` | One participant: start, readiness, shutdown, local replica ownership, sessions and load protocol receivers. |
 | `gquorum.Cluster` | A stable administration view obtained from `node.Cluster()`: topology, membership, approval and progress. It has no independent lifetime. |
 | `*load.Group` | One local replica: application proposals, leadership/status, snapshots and proposal-pressure diagnostics. A stopped handle never redirects into its replacement. |
-| `*gquorum.Recovery` | Configuration for inspecting, accepting and archiving a stopped survivor. Each call owns and releases its resources; the handle has no Close lifetime. |
+| `gquorum.Recovery` | Configuration for inspecting, accepting and archiving a stopped survivor. Each call owns and releases its resources; the handle has no Close lifetime. |
 
 ```mermaid
 flowchart TD
@@ -206,8 +206,8 @@ nonzero previous member ID; `ReseatReplica` requires the previous
 a node name alone never authorizes replacing its successor. Deleted group IDs cannot be
 reused. Fresh-ID readmission and replica reseating preserve the distinction
 between old state and its authorized replacement. Permanent-majority-loss
-recovery uses the separate local `NewRecovery(NodeOptions, ...recovery.Options)`
-handle and an explicit fresh lineage. It does not authorize an ordinary retained
+recovery uses the local `Node.Recovery` or standalone `NewRecovery`
+controller and an explicit fresh lineage. It does not authorize an ordinary retained
 A node to join B. See [the recovery lifecycle](runtime.md#permanent-majority-loss-recovery).
 
 `ChangeReplica` takes the group ID, `topology.ReplicaRoleChange{NodeName, Role}`,
@@ -645,7 +645,14 @@ continues to cover topology and events.Bus continues to cover local diagnostics.
 
 ## Permanent-majority-loss API
 
-`NewRecovery` is a pure configuration constructor. Its handle exposes
+`Recovery` is a public interface implemented in `internal/recovery`.
+`Node.Recovery(...recovery.Options) (Recovery, error)` uses copied Node settings;
+standalone `NewRecovery(NodeOptions, ...recovery.Options) (Recovery, error)`
+supports maintenance CLIs without constructing a participant or supplying runtime
+dependencies. Both perform no I/O or application callbacks. The Node accessor
+works before Start, while running and after Stop; it does not manage the Node's
+lifetime. Inspect/Approve/Run/Cancel require released source ownership, while
+Status/List can read history online. The interface exposes
 `Inspect(ctx, Request) (Plan, error)`, `Approve(ctx, Request, Acceptance)
 (Operation, error)`, `Run(ctx, id) (Status, error)`, `Cancel(ctx, id, actor,
 reason) (Status, error)`, `Status(ctx, id)` and `List(ctx)`. Package `recovery`
@@ -676,10 +683,11 @@ See [runtime ownership](runtime.md#permanent-majority-loss-recovery),
 
 ## Recovery package layout
 
-The public Recovery type, NewRecovery and RecoveryStartOptions remain in
-`recovery.go`. That file translates NodeOptions and delegates the offline work to
-`internal/recovery`; `node_recovery.go` contains only Node lifecycle wiring and
-synchronization. Cluster read/status/progress adapters and RetireOptions are grouped
+The public Recovery interface, Node.Recovery accessor, standalone NewRecovery
+and RecoveryStartOptions live together in `node_recovery.go`, alongside Node
+lifecycle wiring and synchronization. Both entry points translate NodeOptions
+and return the same concrete controller from `internal/recovery` directly;
+there is no root concrete wrapper or forwarding implementation. Cluster read/status/progress adapters and RetireOptions are grouped
 in `cluster.go`; MetricsOptions and mutable NodeOptions copying live in
 `node_options.go`.
 
@@ -690,8 +698,8 @@ consumption/publication (`runtime`). Pure record fixtures live in `testutil`.
 Children depend on lower-level siblings/model rather than importing the parent.
 The runtime package is imported as recoveryruntime to distinguish Go's runtime.
 Recovery logic specific to the metadata FSM, managed replicas, WAL backend and
-Raft interpreter stays beside those owners. Public APIs and persisted schemas are
-unchanged by this source-layout refactor.
+Raft interpreter stays beside those owners. Persisted schemas are unchanged;
+callers use the Recovery interface rather than a pointer to a public struct.
 
 Implementation tests follow their internal owner. Public API and single-Node
 recovery integration tests and resource benchmarks are in `tests/recovery`, within

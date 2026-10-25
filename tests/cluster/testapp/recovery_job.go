@@ -154,7 +154,7 @@ func (a *application) hasRecoveryJob() bool {
 	defer a.recoveryJobs.mu.Unlock()
 	return a.recoveryJobs.job != nil
 }
-func (s *recoveryJobs) handle() (*gquorum.Recovery, error) {
+func (s *recoveryJobs) handle() (gquorum.Recovery, error) {
 	s.mu.Lock()
 	source := s.app.nodeOptions.Identity.ClusterID
 	if s.job != nil {

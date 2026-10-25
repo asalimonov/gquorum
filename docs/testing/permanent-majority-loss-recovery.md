@@ -227,7 +227,7 @@ progress, while final Task16 reports are retained at the links above.
 
 Public methods and durable schemas are preserved. Current implementation lives in
 `internal/recovery/{disk,exec,inspect,model,placement,runtime,testutil}` and the parent
-offline facade; the root contains only `recovery.go` and `node_recovery.go` adapters.
+offline facade; the root recovery API and Node wiring share `node_recovery.go`.
 Public tests/benchmarks moved to `tests/recovery`, and implementation assertions
 moved beside their component. Earlier audit/qualification paths describe the
 recorded pre-refactor revision; use the current architecture package map for

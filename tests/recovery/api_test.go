@@ -25,7 +25,7 @@ var _ interface {
 	Cancel(context.Context, string, string, string) (recovery.Status, error)
 	Status(context.Context, string) (recovery.Status, error)
 	List(context.Context) ([]recovery.Status, error)
-} = (*quorum.Recovery)(nil)
+} = (quorum.Recovery)(nil)
 
 func TestRecoveryPublicContractsRejectInvalidInputAndRespectContext(t *testing.T) {
 	t.Parallel()
@@ -77,6 +77,55 @@ func TestRecoveryConstructionDoesNotAcquireOrValidateRuntimeDependencies(t *test
 	}
 	if _, err := os.Stat(root); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("constructor acquired storage", err)
+	}
+}
+
+func TestNodeRecoveryUsesCopiedOptionsWithoutStartingParticipant(t *testing.T) {
+	t.Parallel()
+	root := filepath.Join(t.TempDir(), "absent")
+	opts := quorum.NodeOptions{
+		StorageDir: root,
+		Identity:   topology.Identity{NodeName: "n1", ClusterID: "a", MemberID: 1, InstanceID: "process"},
+		Node:       topology.Node{Name: "n1", Type: "worker"},
+		Bootstrap: quorum.BootstrapOptions{Founders: []quorum.FoundingMember{{
+			Node: topology.Node{Name: "n1", Type: "worker"}, MemberID: 1, Address: "127.0.0.1:3000",
+		}}},
+		Meta: quorum.MetaOptions{Network: quorum.MetaNetworkOptions{
+			Listener: unopenedListener{}, AdvertiseAddress: "127.0.0.1:3000",
+			AllowPlaintext: true, ClusterCredential: []byte("secret"),
+		}},
+		Loads: quorum.LoadOptions{
+			Factory: func(context.Context, load.ReplicaSpec) (load.Application, error) {
+				panic("recovery accessor called application factory")
+			},
+			Transport: unopenedTransport{},
+			Storage:   quorum.LoadStorageOptions{WAL: &quorum.WALOptions{RootDir: filepath.Join(root, "load")}},
+		},
+	}
+	node, err := quorum.NewNode(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts.Loads.Storage.WAL.RootDir = ""
+	controller, err := node.Recovery(recovery.Options{Files: func(context.Context, recovery.FilesTask) error {
+		panic("recovery accessor called files hook")
+	}})
+	if err != nil || controller == nil {
+		t.Fatal("copied Node configuration unavailable before Start", err)
+	}
+	if _, err := node.Recovery(recovery.Options{}, recovery.Options{}); !errors.Is(err, fault.ErrInvalid) {
+		t.Fatal("Node accessor accepted multiple recovery options", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := controller.Inspect(ctx, recovery.Request{}); !errors.Is(err, context.Canceled) {
+		t.Fatal("lost cancellation cause", err)
+	}
+	if _, err := controller.Status(ctx, ""); !errors.Is(err, context.Canceled) {
+		t.Fatal("lost status cancellation cause", err)
+	}
+	if _, err := os.Stat(root); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("recovery accessor acquired storage", err)
 	}
 }
 

@@ -1006,8 +1006,7 @@ explicit reset/admission. These are independent callers, not Meridian wiring.
 
 | Path | Role |
 | --- | --- |
-| `recovery.go` | Stable public facade and pure NodeOptions transformation. |
-| `node_recovery.go` | Node synchronization, lifecycle composition and resource adoption. |
+| `node_recovery.go` | Public Recovery interface, Node.Recovery and standalone constructors, startup-options transformation, Node synchronization and resource adoption. |
 | `internal/recovery` | Configured offline Inspect/Approve/Run/Cancel/Status/List orchestration and reachability precheck. |
 | `internal/recovery/{disk,exec,inspect,model}` | Root ownership and journals, archive/Undo execution, source inventory/readers and shared schemas. |
 | `internal/recovery/{placement,runtime,testutil}` | Retained deficits, Node startup/control/publication, and pure record fixtures. |

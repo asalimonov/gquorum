@@ -61,9 +61,18 @@ func recoveryMetadataOnly(t *testing.T, gate lifecycle.StartupGate) {
 	if err := participant.WaitReady(ctx); err != nil {
 		t.Fatal(err, participant.Status())
 	}
-	completed, err := facade.Status(ctx, operation.RecoveryID)
+	controller, err := participant.Recovery()
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := controller.Status(ctx, operation.RecoveryID)
 	if err != nil || completed.Phase != recovery.Complete {
 		t.Fatal(completed, err)
+	}
+	_, err = controller.Inspect(ctx, recovery.Request{Mode: recovery.Rebuild, Actor: "operator", Comment: "must stop first"})
+	var refusal *recovery.Refusal
+	if !errors.As(err, &refusal) || refusal.Issue.Code != "source_busy" {
+		t.Fatal("Node accessor bypassed live storage ownership", err)
 	}
 	// Successful ordinary administration proves the initial recovery gate detached.
 	if err := participant.SetSchedulingEnabled(ctx, false); err != nil {
@@ -81,6 +90,14 @@ func recoveryMetadataOnly(t *testing.T, gate lifecycle.StartupGate) {
 		t.Fatal(observed)
 	}
 	stopAuthorityNode(t, participant)
+	controller, err = participant.Recovery()
+	if err != nil {
+		t.Fatal("stopped Node lost recovery access", err)
+	}
+	completed, err = controller.Status(ctx, operation.RecoveryID)
+	if err != nil || completed.Phase != recovery.Complete {
+		t.Fatal("stopped Node lost recovery history", completed, err)
+	}
 	// Completed history is evidence, never a second recovery/founding permission.
 	restart := authorityNodeOptions(t, source.StorageDir, "recovered-restart")
 	restart.Identity.ClusterID = status.Identity.ClusterID

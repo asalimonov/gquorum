@@ -585,14 +585,28 @@ lock and resolves peer names through the managed catalog outside that lock.
 
 ## Permanent-majority-loss recovery
 
-The root `recovery.go` adapter delegates to `internal/recovery`; Node wiring is
-consolidated in `node_recovery.go`. Accepted-start validation and partial-start
-reconciliation live in `internal/recovery/runtime`, and seed progress belongs to
+The public `Recovery` interface, constructors and Node wiring are consolidated
+in `node_recovery.go`. The concrete controller lives in `internal/recovery`.
+Accepted-start validation and partial-start reconciliation live in
+`internal/recovery/runtime`, and seed progress belongs to
 `internal/recovery/disk.Journal`.
 
+`Node.Recovery(...recovery.Options) (Recovery, error)` uses the Node's copied
+configuration and is available before Start, while running and after Stop.
+Standalone `NewRecovery(NodeOptions, ...recovery.Options) (Recovery, error)`
+returns the same interface for a maintenance CLI without constructing a Node.
+Both constructors perform no I/O or callbacks. Standalone construction validates
+only recovery settings; no listener, load factory or load transport is required.
+Neither entry point starts or stops the participant. An offline CLI can inspect,
+approve and archive; ordinary Node.Start performs the subsequent replay and
+publication. Status/List can read history while the participant runs. To resume
+an old-lineage operation after replacing the Node, standalone construction can
+retain that operation's original source ClusterID.
+
 A `Recovery` handle owns configuration, with no open lifetime or Close method.
-Each I/O call acquires its own exclusive source ownership. Stop and join Node,
-including application callbacks and Node-owned stores, before Inspect/Approve/Run.
+Source operations acquire exclusive ownership; Status/List only read journals.
+Stop and join Node, including application callbacks and Node-owned stores, before
+Inspect/Approve/Run/Cancel.
 A timeout or failed Close retains the original owner; retry its joined Stop before
 attempting recovery. Ordinary Node startup also takes the stable root lease and
 checks pending recovery records before acquiring a destination identity.

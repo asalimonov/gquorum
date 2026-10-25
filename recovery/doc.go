@@ -1,6 +1,7 @@
 // Package recovery supplies reports, acceptance values and application-files hooks
 // for gquorum permanent-majority-loss recovery. Construct the configuration handle
-// through gquorum.NewRecovery with the existing NodeOptions. The application owns
+// through Node.Recovery or standalone gquorum.NewRecovery with NodeOptions.
+// The application owns
 // maintenance, operator authorization and business validation; Node owns machines.
 //
 // Recovery requires one complete survivor and creates a fresh lineage. A survivor

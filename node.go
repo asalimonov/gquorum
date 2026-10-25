@@ -14,6 +14,7 @@ import (
 	recoveryruntime "github.com/asalimonov/gquorum/internal/recovery/runtime"
 	"github.com/asalimonov/gquorum/internal/watchstate"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/recovery"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/storage/memstore"
 	"github.com/asalimonov/gquorum/storage/walstore"
@@ -49,6 +50,9 @@ type Node interface {
 	Watch(context.Context) (<-chan NodeObservation, error)
 	// Cluster returns the administration view owned by this Node.
 	Cluster() Cluster
+	// Recovery configures local maintenance without starting or stopping Node.
+	// Join shutdown before inspecting or archiving; Status/List can run online.
+	Recovery(...recovery.Options) (Recovery, error)
 
 	// Managed load replicas. StartLoadGroup and StopLoadGroup address an exact
 	// replica; LoadGroup and LoadGroupIDs inspect currently published handles.

@@ -83,7 +83,7 @@ func (s *recoveryJobs) execute(ctx context.Context) error {
 	}
 	return s.executeAccepted(ctx, handle, job)
 }
-func (s *recoveryJobs) executeAccepted(ctx context.Context, handle *gquorum.Recovery, job *recoveryJob) error {
+func (s *recoveryJobs) executeAccepted(ctx context.Context, handle gquorum.Recovery, job *recoveryJob) error {
 	// Resolve a lost approval response from public durable status before repeating
 	// the exact saved Request/Acceptance. Never replace a generated request ID.
 	status, err := handle.Status(ctx, job.Request.RecoveryID)
@@ -151,7 +151,7 @@ func startableRecovery(status recovery.Status) bool {
 		return false
 	}
 }
-func (s *recoveryJobs) executeCancel(ctx context.Context, handle *gquorum.Recovery, job *recoveryJob) error {
+func (s *recoveryJobs) executeCancel(ctx context.Context, handle gquorum.Recovery, job *recoveryJob) error {
 	status, err := recovery.Status{}, error(fault.ErrHistoryUnavailable)
 	if job.Acceptance != nil {
 		status, err = handle.Status(ctx, job.Request.RecoveryID)

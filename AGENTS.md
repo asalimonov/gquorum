@@ -202,7 +202,8 @@ caller-owned; replicated implementation agreement is deferred.
 
 Applications build autoscaling controllers with membership and placement APIs.
 Infrastructure provisioning, workload scheduling and stream ingestion stay in
-the application. Permanent-majority-loss recovery uses `NewRecovery` with a
+the application. Permanent-majority-loss recovery uses `Node.Recovery` or
+standalone `NewRecovery`, returning the same public Recovery interface, with a
 complete stopped survivor, Node-owned WAL, explicit loss acceptance, in-root
 backups and a fresh lineage. Applications own durable remote maintenance jobs and
 Files Backup/Undo; ordinary GroupFactory/Node startup perform replay. Old nodes

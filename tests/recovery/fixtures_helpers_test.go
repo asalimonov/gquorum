@@ -18,7 +18,7 @@ type unopenedStorage struct {
 	storage.RetirementStore
 }
 type recoveryFacade struct {
-	*quorum.Recovery
+	quorum.Recovery
 	paths model.Paths
 	files recovery.FilesHook
 }
