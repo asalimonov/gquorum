@@ -168,21 +168,9 @@ not invalidate an already acknowledged snapshot. The stream's `Reply`
 acknowledges transport handling; `MsgHeartbeatResp` remains a separate Raft
 message sent in the reverse direction. There is no dedicated Heartbeat RPC.
 
-Load groups send the same Raft message types through `load.Transport.SendRaft`
-and receive them through `Node.ReceiveLoadRaft`. The application chooses the wire
-schema and authenticates senders. The included `loadgrpc` adapter streams
-non-snapshot batches per replica pair without waiting for each to be stepped,
-and keeps snapshots on unary calls with explicit completion reports. Its version-2
-`RaftFrame` uses generated protobuf headers and native binary `raftpb.Message`
-bytes. It validates/authenticates each frame before native decoding and current
-Node authorization; application payloads remain opaque. Complete frames obey the
-configured byte limit and a 4,096-message bound. Full local preflight precedes any
-send, and snapshot completion requires all unary frames to be accepted.
-Administrative requests and unary replies retain their JSON codecs. There is no
-JSON Raft fallback or missing-stream downgrade: all adapter users must upgrade
-together, preserving existing storage. See [binary transport validation](../testing/binary-raft-transport.md).
-The test application's `Load.Deliver` RPC is an example protocol, not a library
-requirement.
+Load groups send ordinary Raft through `load.Transport.SendRaft` and `Node.ReceiveLoadRaft`. Managed snapshots use the additional `load/snapshot.Transport` capability and a Node-owned transfer coordinator. `_meta` and standalone contracts are unchanged. The included adapter uses version-2 ordinary `RaftFrame` streams and version-1 `TransferSnapshot` frames on separate bulk connections to the existing load listener. Ordinary/admin wire formats are unchanged; there is no legacy unary snapshot fallback. Authentication and exact current authorization apply before dispatch.
+
+Native Ready hands an immutable snapshot offer to a bounded worker without cloning the full payload or blocking heartbeat sends. Leadership/term changes cancel deposed source jobs. Receiver admission can skip provably obsolete positive-term headers at an isolated safe Ready boundary; full snapshots are verified and decoded off-loop, then queued at that same boundary. The single Raft owner classifies accepted data before native Advance. Normal persistence and Restore decide installed/skipped/failed independently of transport acceptance. Snapshot progress cannot supply quorum, membership or promotion proof.
 
 The default node-health sampler runs every five seconds. It uses the configured
 `HealthSource`, or probes meta members with IdentityPing. Own-session renewal is
@@ -283,9 +271,7 @@ catch up by snapshot transfer. The WAL backend keeps the newest two complete
 snapshots and deletes every WAL segment wholly below the older one, so disk use
 is bounded by about two segments plus their preallocated successors. It reads
 the WAL's snapshot markers once when a group opens and maintains them in memory
-afterwards; saving a snapshot or compacting never rescans the log. Managed load transports must report the exact
-snapshot delivery's completion or failure through `Node.ReportLoadDelivery`;
-accepting a send is not proof of completed snapshot installation.
+afterwards; saving a snapshot or compacting never rescans the log. The Node-owned managed job reports the exact native snapshot attempt once; accepting ingress is not proof of completed snapshot installation.
 
 ## 7. Membership and background coordination
 
@@ -390,4 +376,4 @@ replicas, writes a normalized complete checkpoint and confirms actual effect
 receipts before consumption. The metadata recovery subtree is independently
 versioned; old decoders explicitly refuse it. No force-leader RPC, forged vote,
 new protobuf or copied A authority is introduced. Local reconstruction does not
-solve large remote snapshot transfer; GQ-02 remains separate.
+change the full-buffer application/storage contract. Remote chunking is described in [load transport multiplexing](load-transport-multiplexing.md).

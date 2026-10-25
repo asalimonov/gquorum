@@ -150,8 +150,9 @@ cancels and joins every lifecycle worker before returning; the reaper is a
 fallback, not the success criterion for cleanup.
 
 Ordinary quorum, fault, API and performance tests use three nodes. Generic five-
-and seven-node repetitions are omitted. The only four-node membership cases are:
+and seven-node repetitions are omitted. Four-node cases with named capacity requirements include:
 
+- `TestSnapshotTransfer_RepairProtectionFourNodes`: three voters retain a live majority while a fourth stable learner proves guarded replacement after bounded snapshot protection expires.
 - `TestMetaAdmissionUsesLearnerBeforeServingAndRetainsIdentityOnRestart`: learner-first admission, early-serving refusal and retained promotion.
 - `TestAdmissionOperatorResumesAfterMetaLeaderElectionWithoutNewAttempt`: leadership changes during admission must retain the exact operator attempt.
 - `TestMetaPinnedAdmissionRestartsBeforeAndAfterReadyWithoutAllocatingIDs`, with `pending` and `ready` cases: a crash after durable pinning must preserve the member ID and admission attempt.
@@ -366,3 +367,21 @@ advances the same approved operator to promotion. Replaying its earlier action
 before and after promotion cannot toggle the voter back to a learner. A changed
 target set using the same revision is also refused; retained values and storage
 pins are checked alongside membership.
+
+## Explicit large-snapshot qualification
+
+Ordinary units, functional checks, performance targets and `clustertest` alone exclude large generated payloads. The additional `snapshotlarge` build tag selects `TestLargeSnapshot_`; there is no default Make dependency or checked-in snapshot blob. The generated cases request 256,000,000, 1,000,000,000 and 2,000,000,000 encoded bytes, with observed envelope calibration and explicit per-node policy. This ceiling is a test choice; production options accept larger representable sizes.
+
+Use one unique image tag for the final ordinary suite and qualification; do not replace it during a run:
+
+```sh
+SNAPSHOT_TEST_IMAGE=gquorum-test:snapshot-20261026
+make test-cluster-build CLUSTER_IMAGE="$SNAPSHOT_TEST_IMAGE"
+make test-cluster-run CLUSTER_IMAGE="$SNAPSHOT_TEST_IMAGE" \
+  CLUSTER_PARALLEL=1 CLUSTER_TIMEOUT=2h \
+  CLUSTER_ARGS='-tags=clustertest,snapshotlarge -run ^TestLargeSnapshot_ -v'
+```
+
+The test refuses insufficient resources rather than shrinking a case. It requires Docker memory of at least twelve times the requested encoded length and available storage of at least eight times that length. Each case generates reproducible actual bytes, uses production chunks/Node-owned WAL/Restore, verifies tail/new writes/restart and a lost chunk Ack, and checks ordinary traffic on another group. Reports retain compact sizes/hashes and sampled heap/RSS/store high-water, reservations, wire chunk/window peaks and phase timing. These observations are not RSS/throughput guarantees; serialized full-buffer callbacks and resident state remain material costs.
+
+Qualification status: not yet measured in this execution. Compile-only/tag-selection checks are not qualification. Retain an explicit unqualified result when the host cannot run a case; record actual report paths and limits when it does. Release gates also include five-module units/race/functional/race, full lint, proto-check, the gRPC teardown race gate, focused snapshot faults and the full ordinary cluster suite.

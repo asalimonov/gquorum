@@ -442,17 +442,17 @@ Review baseline: `251a594`; findings in review Thread 3. The original six-commit
 **Files:** existing README, transport/loadgrpc/README.md, docs/architecture/{raft,library,runtime,load-transport-multiplexing}.md, docs/testing/tests.md, tests/cluster and testapp READMEs; update current design constraints only where feature facts require it while preserving unrelated edits.
 **References:** target §1–4, §6.1, §7.6–7.8, §10–11 and §13.
 
-- [ ] Document NewNode options/defaults, minimal accessor and package layout, shared load listener with isolated bulk connections, explicit plaintext support and custom transport upgrade requirement.
-- [ ] Describe ingress acceptance versus installed/not_needed/failed, same-run resume, immutable deadlines and retained ownership after waiter cancellation.
-- [ ] Explain payload budgets versus actual RSS, resident snapshot costs/local callbacks, configurable sizes above 2 GB, no receive disk files and the single deferred-backend TODO.
-- [ ] Explain finite repair episode/timeout latch and engine-only receiver churn: one timeout can end protection while a later retry runs; no quorum/promotion proof is inferred from chunk progress.
-- [ ] Document explicit qualification command, measured limits versus unmeasured sizes, four-node exception and all required release gates. Leave results blank/unqualified until Task 20 actually runs them.
-- [ ] Keep wire v2 ordinary/admin protocols and persistent formats/baselines unchanged; document new snapshot RPC version and no legacy fallback after activation. No new GQ-03/06/07 client or standalone service claim.
+- [x] Document NewNode options/defaults, minimal accessor and package layout, shared load listener with isolated bulk connections, explicit plaintext support and custom transport upgrade requirement.
+- [x] Describe ingress acceptance versus installed/not_needed/failed, same-run resume, immutable deadlines and retained ownership after waiter cancellation.
+- [x] Explain payload budgets versus actual RSS, resident snapshot costs/local callbacks, configurable sizes above 2 GB, no receive disk files and the single deferred-backend TODO.
+- [x] Explain finite repair episode/timeout latch and engine-only receiver churn: one timeout can end protection while a later retry runs; no quorum/promotion proof is inferred from chunk progress.
+- [x] Document explicit qualification command, measured limits versus unmeasured sizes, four-node exception and all required release gates. Leave results blank/unqualified until Task 20 actually runs them.
+- [x] Keep wire v2 ordinary/admin protocols and persistent formats/baselines unchanged; document new snapshot RPC version and no legacy fallback after activation. No new GQ-03/06/07 client or standalone service claim.
 
 #### Verification
 
-- [ ] `make test` if any Go example snippet/support code changes; otherwise verify paths, names, runnable commands and `git diff --check`. Do not claim current architecture is implemented before the corresponding tasks are complete.
-- [ ] Ensure only one code TODO remains for disk staging, not a WARN/NotImplemented stub for each previously excluded scenario.
+- [x] `make test` if any Go example snippet/support code changes; otherwise verify paths, names, runnable commands and `git diff --check`. Do not claim current architecture is implemented before the corresponding tasks are complete.
+- [x] Ensure only one code TODO remains for disk staging, not a WARN/NotImplemented stub for each previously excluded scenario.
 
 ### Task 20: Final verification and architectural delta audit
 

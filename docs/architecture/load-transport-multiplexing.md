@@ -2,7 +2,7 @@
 
 One node can host many load groups through one shared network listener. With
 the included `transport/loadgrpc` adapter, groups targeting the same peer address
-reuse a cached gRPC connection. Each batch identifies its group and exact
+reuse bounded cached gRPC connections, with separate ordinary and bulk pools. Each batch identifies its group and exact
 replicas, so the receiver can deliver it to the correct Raft engine.
 
 This document describes the current managed load transport and gRPC adapter.
@@ -16,7 +16,9 @@ see [the library guide](library.md).
 | Resource | Scope |
 | --- | --- |
 | Load listener and registered gRPC service | Shared by all load groups on a node in the examples |
-| Cached `grpc.ClientConn` | Shared by outgoing streams and unary calls to the same resolved address within one adapter |
+| Ordinary cached `grpc.ClientConn` | Shared by ordinary streams/control calls to the same address |
+| Bulk cached `grpc.ClientConn` | Separate pool for snapshot RPCs to that same address and listener |
+| Snapshot workers and byte/count admission | Node-wide bounded coordinator, independent of ordinary destination workers |
 | Outgoing `StreamRaft` stream | One exact sender/recipient replica pair, including group and process identities |
 | Node send worker and queue | One per destination replica inside each group's Raft engine |
 | Raft engine, log, snapshots, membership and leader | Independent for each group; each host owns its local replica |
@@ -35,7 +37,7 @@ and gRPC server, registers the adapter once, and supplies that adapter through
 
 “One connection” means connection reuse for a peer endpoint, not one socket for
 the entire cluster or a promise that one TCP socket lives forever. Each adapter
-caches a gRPC client connection by address; gRPC manages the underlying HTTP/2
+caches ordinary and bulk gRPC client connections separately by address; gRPC manages the underlying HTTP/2
 connections and reconnection. Other peer addresses have their own connections,
 and the reverse direction uses the other node's outgoing transport.
 
@@ -46,6 +48,8 @@ flowchart LR
         AA[accounting replica] --> ASA[StreamRaft: accounting A to B]
         ASJ --> AC[Cached gRPC ClientConn for node-b:9001]
         ASA --> AC
+        AJ --> AB[Independent bulk ClientConn for node-b:9001]
+        AB -->|TransferSnapshot| BL
     end
     AC -->|HTTP/2 multiplexed streams and RPCs| BL
     subgraph B[Node B]
@@ -113,7 +117,8 @@ message RaftFrame {
 | RPC | Purpose |
 | --- | --- |
 | `StreamRaft` | Ordered, non-snapshot Raft frames on a bidirectional stream; replies carry only refusals |
-| `SendRaft` | Unary delivery of each frame of a batch containing `MsgSnap` |
+| `SendRaft` | Unary ordinary frame ingress; MsgSnap is refused |
+| `TransferSnapshot` | Version-1 bidirectional chunk transfer on separate bulk connections |
 | `ReadReplica` | Replica diagnostics or requested quorum-confirmed native evidence |
 | `ApplyAction` | An approved action with its exact authority grant and receipts |
 | `InstallFence` | A fence request for an exact authority resource |
@@ -138,8 +143,7 @@ frame contract's test coverage.
    validates the batch identities. It plans and encodes every frame before sending
    any of them, splitting the batch into frames bounded by `MaxMessageBytes` and
    at most 4,096 messages each, without splitting an individual Raft message or
-   changing message order. An individual message, including a snapshot, that cannot
-   fit one frame is refused as overloaded; there is no internal snapshot chunking.
+   changing message order. An individual ordinary message that cannot fit one frame is refused as overloaded. Managed MsgSnap never enters this queue/path: native Ready prepares a separately admitted snapshot job.
 4. The application's resolver maps the full recipient identity to an address.
    The adapter reuses `clients[address]`, opening a gRPC client connection when
    needed. Resolving an address does not itself authorize the destination.
@@ -155,8 +159,7 @@ deadline breaks the stream instead of holding the caller. There is no global
 ordering between different groups and no cross-group transaction implied by
 sharing a connection.
 
-Batches containing `MsgSnap` use unary `SendRaft`, one call per frame in order.
-Ordinary traffic never downgrades to unary calls: a recipient without `StreamRaft`
+Managed `MsgSnap` is rejected by ordinary send/receive paths. Ordinary traffic never downgrades to unary calls: a recipient without `StreamRaft`
 fails the send. Streams unused for two minutes are retired by a background
 janitor; the next send opens a fresh stream.
 
@@ -168,8 +171,7 @@ calls the application's `Authenticate` for the declared sender, and requires the
 declared recipient to equal the bound Node's exact cluster, node, member and
 process identity. Only then does it decode the native messages, checking each
 one's `From`/`To` against the declared replicas, and call
-`Node.ReceiveLoadRaft(batch)`. Application command and snapshot payloads remain
-opaque.
+`Node.ReceiveLoadRaft(batch)`. Application command payloads remain opaque. Native MsgSnap is refused before any dispatch; verified snapshots enter through the coordinator.
 
 The node delegates to the managed host, which:
 
@@ -211,26 +213,17 @@ per-delivery refusal.
 
 Stream refusals are reported through `Node.ReportLoadDelivery` as unreachable
 deliveries. A broken stream reports its last delivery unreachable so Raft can
-resend. Snapshot delivery reports `DeliverySnapshotSucceeded` only after every
-unary frame was accepted, and `DeliverySnapshotFailed` otherwise. Success means
-the recipient's Node ingress accepted the message; it is not proof of durable
-snapshot installation or application restore. Delivery reports retain exact
-endpoints and delivery IDs: a report for an unknown, completed or expired delivery
-is ignored, so it cannot affect a replacement. A snapshot delivery that expires
-before a report arrives is treated as failed.
+resend. Delivery reports retain exact endpoints and delivery IDs; stale reports cannot affect replacements. Managed snapshot jobs own native reporting, independently of ordinary delivery-window expiry. A successful terminal Ack means native ingress accepted ownership, not that persistence or Restore finished. `not_needed` is an owner-confirmed native skip. The bounded local `LoadSnapshots().List` observation separates delivery state from receiver installed/skipped/failed outcomes.
 
 The adapter defaults to 64 cached connections, 128 concurrent incoming/outgoing
 operations, 16 MiB `MaxMessageBytes` per protobuf request or reply, and a
 10-second `CallTimeout` per operation; a shorter caller deadline wins. Control
 request bodies are limited to 64 KiB. Configure the caller's `grpc.Server` with
 the same receive/send limits. Idle cached connections may be evicted; exhausted
-limits return `Overloaded`. Because Node bounds each Raft send to half an
-election interval and the frame limit applies to each complete message, large
-snapshots are bounded by both; see
+limits return `Overloaded`. Node bounds ordinary Raft sends to half an election interval. Snapshot RPCs instead use independent total/progress deadlines and count/byte/window limits; see
 [adapter configuration](../../transport/loadgrpc/README.md).
 
-Independent group engines and streams still share CPU, network bandwidth and
-connection flow control. Multiplexing avoids a listener/connection per group; it
+Independent group engines and streams still share CPU and network bandwidth. Bulk traffic has separate connection flow control, queues and workers. Multiplexing avoids a listener/connection per group; it
 does not provide complete performance isolation. A broken shared connection can
 affect several groups communicating with that peer.
 
@@ -238,7 +231,17 @@ The application keeps the transport and server available while `Node.Stop` joins
 managed work. It then closes the transport, which cancels and joins its streams
 and calls and releases its client connections, before stopping the borrowed server.
 
-## 6. Application request routing
+## 6. Large snapshot transfer
+
+NewNode validates `Loads.SnapshotTransfer` and requires `snapshot.Transport` alongside `load.Transport`; missing or typed-nil capabilities refuse without I/O. The Node owns the coordinator, while its `LoadSnapshots()` facade is borrowed. The same load service registers `TransferSnapshot`; `_meta` retains its separate listener and no third port is needed.
+
+Open authenticates and authorizes exact peers and carries a small native MsgSnap header, encoded length and whole SHA256. The receiver reserves full size/count quotas before allocating memory and negotiates a payload fitting both frame limits. Data carries offset, ordinal and chunk hash; cumulative Acks advance only verified bytes. Exact duplicates are harmless and do not renew progress. Finish checks complete digest, decodes once off-loop and queues owned ingress at the sole Raft consumer's safe Ready boundary. Native classification, persistence and serialized Restore release the retained ownership. Header-only obsolete skip is isolated at the same boundary, with strict positive term/index checks.
+
+Defaults are 256 MiB encoded maximum, one transfer in each direction, derived directional byte budgets, 1 MiB payloads/window eight, 30-minute total and one-minute verified-progress timeout. Reconnect preserves both clocks and exact manifest/process/receiver-run identity. A restart/replacement requires a new transfer. Terminal cache eviction degrades safely to restart; it cannot refuse new admission. Invalid data and size/frame/capability refusal differ from transient capacity/group_busy backoff.
+
+Full-buffer state-machine/storage APIs remain. In-memory staging is behind a private backend interface; no receive files or caller storage-location parameters exist. Transfer budgets exclude resident snapshots, encoding/decoded copies and application state, so RSS can exceed them substantially. Local Snapshot/Restore callbacks remain serialized and can delay their replica. See [ownership and bounded repair protection](runtime.md#managed-load-snapshot-ownership) and [adapter settings](../../transport/loadgrpc/README.md).
+
+## 7. Application request routing
 
 HTTP, Redis or application-specific gRPC requests use the application's own
 handler. That handler chooses a local group, for example:
@@ -261,7 +264,9 @@ on the same application-owned server, with their own handlers and authentication
 | [Managed transport](../../internal/managed/transport.go) | Build endpoint identities, route batches to slots, validate peers and delivery reports |
 | [Node transport entry points](../../node_load.go) | Delegate authenticated ingress to the managed host |
 | [gRPC transport](../../transport/loadgrpc/transport.go) | Node binding, service registration, connection cache, bounds and shutdown |
-| [Client](../../transport/loadgrpc/client.go), [streams](../../transport/loadgrpc/stream.go) | Stream selection, unary snapshot delivery, stream refusals and delivery reports |
+| [Client](../../transport/loadgrpc/client.go), [streams](../../transport/loadgrpc/stream.go) | Ordinary stream selection, refusals and delivery reports |
+| [Snapshot coordinator](../../internal/loadsnapshot/coordinator.go), [managed ports](../../internal/managed/snapshot_ports.go) | Admission, pinned source jobs, receiver ownership and exact native callbacks |
+| [Snapshot client](../../transport/loadgrpc/snapshot_client.go), [snapshot server](../../transport/loadgrpc/snapshot_server.go) | Independent bulk RPCs, framing, resume and joined teardown |
 | [Raft wire](../../transport/loadgrpc/raft_wire.go) | Version-2 frame planning, splitting and header/native-message validation |
 | [Server](../../transport/loadgrpc/server.go), [control wire](../../transport/loadgrpc/wire.go) | Authentication, JSON control envelopes/replies and typed dispatch |
 | [Cache runtime](../../examples/inmemory-cache/server/runtime.go) | Shared listener/server setup in an application |

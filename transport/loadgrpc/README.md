@@ -1,7 +1,7 @@
 # Load gRPC adapter
 
 `loadgrpc.Transport` implements `load.Transport` for managed replicas. It carries
-Raft messages, replica/native reads, approved actions and fences. The application
+Raft messages, chunked managed snapshots, replica/native reads, approved actions and fences. The application
 supplies the server, authentication policy, TLS settings and endpoint resolver.
 It carries only library load traffic: gquorum provides no application RPC
 channel, and applications hand work between replicas through replicated state.
@@ -56,16 +56,12 @@ adapter; gRPC's default receive limit is smaller than the adapter default.
 
 Raft requests use binary protobuf `RaftFrame` version 2, with complete `RaftPeer`
 identities, the original delivery ID and repeated native `raftpb.Message` bytes.
-The adapter preserves application command and snapshot bytes without interpreting
-them; the public `load.Transport` interface remains generic. Administrative RPC
+The adapter preserves application command bytes without interpreting them; snapshot data uses the separate transfer protocol below. Administrative RPC
 requests and unary acknowledgement/error bodies retain their JSON codecs.
 
 Batches are planned in full, then encoded into ordered complete-message frames.
 Each frame is bounded by `MaxMessageBytes` and 4,096 messages; larger batches split
-transparently. An individually oversized message, including a snapshot, refuses
-the whole local send before any frames are transmitted. Messages are never split
-internally. Native receive buffers are owned copies, safe for asynchronous Raft
-work. Pooling and snapshot chunking are deferred.
+transparently. An individually oversized ordinary message refuses the whole local send before any frames are transmitted. Native receive buffers are owned copies, safe for asynchronous Raft work. Managed `MsgSnap` is rejected on ordinary ingress and sends; it uses `TransferSnapshot`.
 
 Every frame validates its header, authenticates the declared sender, checks the
 current local recipient and decodes native messages before Node ingress. Node
@@ -83,9 +79,15 @@ its last delivery unreachable so Raft resends promptly, and the next batch opens
 a new stream. Streams idle for two minutes are closed. Missing stream methods
 fail; there is no unary downgrade or JSON Raft fallback.
 
-Snapshot batches always use the unary call: success is reported after all
-frames are accepted. Failure reports preserve the same exact identity; canceled
-sends also use Node's existing send-failure path.
+`TransferSnapshot` is a version-1 bidirectional RPC registered on the same load server. Its bounded Open/Data/Finish/Abort frames use independent cached bulk connections to the same resolved address. Ordinary Raft workers, streams, connection flow control and short deadlines remain separate; no third port is opened. CPU, memory, NIC bandwidth and the server are still shared.
+
+Node creation configures `Loads.SnapshotTransfer` (`load/snapshot.Options`). Defaults are 256 MiB maximum encoded Snapshot.Data, one incoming and one outgoing transfer across all groups, directional byte budgets of maximum size times concurrency, 1 MiB chunks and eight outstanding chunks. The adapter narrows payloads to fit `MaxMessageBytes`; server send/receive limits must fit the same frames. Total timeout is 30 minutes; verified-progress timeout is one minute, including disconnected time. Snapshot calls use these independent clocks rather than `CallTimeout`. Reconnect never renews them.
+
+The Node-owned job pins immutable data, hashes it once per publication generation, and owns exactly one native result report. `SendSnapshot` sends only after admission, pipelines the bounded chunk window and reports verified cumulative Acks through its supplied callback. Resume requires the exact manifest, delivery, source/destination process and receiver engine run. Process restart or replacement requires a fresh transfer. Lost final Acks can use the bounded terminal cache; eviction safely requires restart.
+
+`accepted` means the native ingress owns the snapshot. It does not prove persistence or Restore. `not_needed` is an owner-confirmed native skip, with no claim to receiving the body. `node.LoadSnapshots().List` separates delivery state from local receiver installed/skipped/failed observations; these remain diagnostics. Errors distinguish size/frame/capability refusal from transient capacity/group_busy.
+
+Custom managed transports must implement both `load.Transport` and `snapshot.Transport`. `NewNode` refuses missing or typed-nil snapshot capability without I/O; Bind requires a nonnil borrowed `LoadSnapshots()` service with resolved options. Authenticate before invoking its ingress and preserve exact session attachments. Do not report managed snapshot delivery through `ReportLoadDelivery`: the common job does so. There is no unary snapshot fallback. `_meta` and `load.NewStandalone` retain their own transport contracts.
 Typed membership refusals, CAS versions, native evidence and effect receipts
 survive the wire encoding. The generated protocol is internal to the adapter.
 
@@ -96,7 +98,6 @@ does not abandon teardown; call Close again to join. Authentication/resolution
 callbacks must honor cancellation and cannot synchronously wait for Close.
 
 This is an unreleased breaking wire revision: rebuild and upgrade all participants
-using this adapter together. Versions other than 2 are rejected. Retained volumes,
-WALs, snapshots, metadata and application encodings need no migration. The separate
-test application's transport is unaffected. See the [validation record](../../docs/testing/binary-raft-transport.md)
+using this adapter together. Ordinary Raft frames require version 2; snapshot Open requires version 1. Unsupported versions refuse explicitly. Retained volumes,
+WALs, snapshots, metadata and application encodings need no migration. The process fixture uses this production adapter for Raft and snapshots. See the [validation record](../../docs/testing/binary-raft-transport.md)
 for measured codec costs, real-example checks and profiling limitations.

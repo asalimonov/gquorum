@@ -436,3 +436,20 @@ Verified
 
 Notes
 - Measurements are sampled high-water observations, not hard RSS or throughput guarantees. Producer-window bounds are separately asserted by transport tests. All fixtures remain runtime-generated. Unrelated staged .gitignore remains excluded.
+
+## Task 19 — current architecture and operational contracts
+
+Date: 2026-10-26. Commit: this task commit; prior cf6c79f.
+
+Implemented
+- Updated existing root/adapter/fixture READMEs, Raft/library/runtime/multiplexing architecture and testing guides. Removed stale unary/unchunked snapshot descriptions while preserving ordinary/admin encodings, health/session text and application routing.
+- Documented construction-time options/defaults, custom capability refusal, same-port independent bulk connections, explicit plaintext policy, accepted versus installed/not_needed, exact-run resume and fixed clocks.
+- Explained full-buffer memory amplification outside transfer budgets, memory-only staging and the single future-backend TODO, joined ownership and finite source repair episodes including timeout latches and receiver-run churn.
+- Added explicit generated qualification command/resource envelope and named four-node repair justification. Qualification remains explicitly unmeasured pending Task 20. No compatibility baseline or persisted encoding was regenerated.
+
+Verified
+- Local Markdown links in all nine updated documents resolve; API/options/protocol names checked against current sources. git diff --check passes.
+- Exactly one mechanism code TODO remains, at internal/loadsnapshot/staging.go for the deferred group-scoped disk backend. No Go/support snippet changed, so no redundant unit run for this documentation task.
+
+Notes
+- Applied go-upd-arch guidance to the already authorized target/plan; no new proposal/approval cycle was necessary. No new root files or design scope. Unrelated staged .gitignore remains excluded.
