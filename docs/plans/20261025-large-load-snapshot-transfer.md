@@ -9,7 +9,7 @@
 **Target architecture:** [20261025-large-load-snapshot-transfer-target.md](../brainstorms/20261025-large-load-snapshot-transfer-target.md)
 **Full brainstorm log:** [20261025-large-load-snapshot-transfer.md](../brainstorms/20261025-large-load-snapshot-transfer.md)
 **Review history:** [feature review thread](../review/feat_large-snapshots-transfer.md)
-**Status:** prepared and self-checked; colleague review pending because the reviewer hit a provider session limit. Implementation has not started.
+**Status:** implementation in progress under the user's subsequent explicit goal. Task completion and verification are recorded below and in the execution log; the earlier plan-review provider limit remains historical.
 
 ## Execution contract and current-state reconciliation
 
@@ -87,16 +87,16 @@ The target's historical final `make lint` command means full validation; on the 
 **Files:** create `load/snapshot/{options,protocol,service,status,error}.go` and owning unit tests.
 **References:** target [§3 configuration](../brainstorms/20261025-large-load-snapshot-transfer-target.md#3-configuration-admission-and-bounded-resources), [§4 integration](../brainstorms/20261025-large-load-snapshot-transfer-target.md#4-public-integration-contracts), §9.1 and §12 Options.Resolve. Exact target states are reproduced in Appendix A.
 
-- [ ] Implement `snapshot.Options.Resolve/Validate`, including zero defaults, negative count/duration refusal, overflow-safe products and deadline sums, platform allocation representability, byte budgets accommodating a maximum snapshot, and ProgressTimeout <= TotalTimeout. No I/O/callbacks/goroutines or maximum-sized allocation during validation.
-- [ ] Add Key, Manifest, Session, BeginRequest, Chunk, Ack, Send, Progress, DeliveryState, ReceiverOutcome, Transport and borrowed Service exactly as Appendix A/target §4. Include SessionDone and Send.ReportProgress; no service Start/Stop or application export/import API.
-- [ ] Add Query/Page/Status with bounded observation semantics, and TransferError with the target Reason/Size/Limit/fault mapping. Permanent size/frame/capability refusal must differ from transient capacity/group_busy. NotNeeded never means delivered payload or installed state.
-- [ ] Keep imports acyclic: this child package may import `load.Peer`; `load` must never import `load/snapshot`. Use 64-bit totals/offsets and immutable copied small metadata.
-- [ ] Add parallel units for zero/negative/overflow settings, budgets, >2 GB configurations without allocating payloads, exact fault classification, and zero-value conservative status/error behavior.
+- [x] Implement `snapshot.Options.Resolve/Validate`, including zero defaults, negative count/duration refusal, overflow-safe products and deadline sums, platform allocation representability, byte budgets accommodating a maximum snapshot, and ProgressTimeout <= TotalTimeout. No I/O/callbacks/goroutines or maximum-sized allocation during validation.
+- [x] Add Key, Manifest, Session, BeginRequest, Chunk, Ack, Send, Progress, DeliveryState, ReceiverOutcome, Transport and borrowed Service exactly as Appendix A/target §4. Include SessionDone and Send.ReportProgress; no service Start/Stop or application export/import API.
+- [x] Add Query/Page/Status with bounded observation semantics, and TransferError with the target Reason/Size/Limit/fault mapping. Permanent size/frame/capability refusal must differ from transient capacity/group_busy. NotNeeded never means delivered payload or installed state.
+- [x] Keep imports acyclic: this child package may import `load.Peer`; `load` must never import `load/snapshot`. Use 64-bit totals/offsets and immutable copied small metadata.
+- [x] Add parallel units for zero/negative/overflow settings, budgets, >2 GB configurations without allocating payloads, exact fault classification, and zero-value conservative status/error behavior.
 
 #### Verification
 
-- [ ] `make test`; `go vet ./load/snapshot`. Verify all five modules still compile with their existing transports.
-- [ ] Confirm no root file and no persistent or baseline encoding changed; no constructor capability enforcement yet.
+- [x] `make test`; `go vet ./load/snapshot`. Verify all five modules still compile with their existing transports.
+- [x] Confirm no root file and no persistent or baseline encoding changed; no constructor capability enforcement yet.
 
 ### Task 2: Compose the pure snapshot facade into existing Node files
 
@@ -582,12 +582,13 @@ No implementation exists yet; ordinary unchecked tasks are not defects in the pl
 | Gap | Target/task | Evidence | Resolution / status |
 |---|---|---|---|
 | Private progress-port shorthand | Target §9.2/9.4; Tasks 6/12 | NoteSnapshotProgress is required but omitted from the Ports sketch | Explicit private callback in Appendix C; external review still pending |
-| External plan review unavailable | Planning/review only | Selected colleague returned a provider session-limit message, no findings | Pending; do not describe this plan as colleague-reviewed or execute it without the user's subsequent instruction |
+| External plan review unavailable | Planning/review only | Selected colleague returned a provider session-limit message, no findings | Historical review gap; subsequent explicit implementation goal authorizes execution. Do not describe the plan as colleague-reviewed |
 
 ## Progress log
 
 | Date | Stage | Work and evidence |
 |---|---|---|
+| 2026-10-25 | Task 1 | Public snapshot contracts/options/errors implemented; 42 package cases, all 2,182 five-module units and focused vet passed. See execution log/report path. |
 | 2026-10-25 | Planning | Read reviewed target/log, current source/contracts, AGENTS and current Makefile/testing guide. Prepared task sequence and activation boundary. No code implementation, Go tests, Docker runs or large allocations. |
 | 2026-10-25 | Self-review | Checked all 20 task dependencies/references/unchecked lists, exact type appendices, acceptance mapping and final wiring. Clarified early metrics DTO declaration, optional pre-activation Ingress provider, temporary compile artifacts and final-only expensive checks. Documentation checks only. |
 | 2026-10-25 | Colleague request | Review dispatched to the selected existing colleague. Provider session limit prevented review; reset reported as 23:30 Asia/Almaty. No review findings or readiness verdict were received. |
@@ -596,7 +597,7 @@ No implementation exists yet; ordinary unchecked tasks are not defects in the pl
 
 Review was requested from the user-selected colleague `43cff8c6-3dab-4f3f-a0eb-d4393c777725`, with the complete plan, target and context in review thread 2. The provider returned: “You've hit your session limit · resets 11:30pm (Asia/Almaty)”. **No review was performed and no colleague findings/readiness verdict exist for this plan.** The prior architecture review does not substitute for plan review.
 
-Self-review corrected the explicit private progress port, metrics DTO declaration order, optional pre-activation Ingress bridge and compilation/validation sequencing. A future colleague pass must still check dependency/buildability, target coverage, schema/signature completeness, migration/cutover and the final wiring audit. Do not substitute another reviewer without the user's direction. Planning stops here for subsequent instructions; no implementation begins.
+Self-review corrected the explicit private progress port, metrics DTO declaration order, optional pre-activation Ingress bridge and compilation/validation sequencing. A future colleague pass must still check dependency/buildability, target coverage, schema/signature completeness, migration/cutover and the final wiring audit. Do not substitute another reviewer without the user's direction. The user subsequently supplied an explicit implementation goal, authorizing execution despite the earlier unavailable plan review. Do not misrepresent that provider-limit result as a completed review.
 
 ## Target-state appendices
 
