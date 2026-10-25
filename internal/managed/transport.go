@@ -9,7 +9,6 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/load"
-	loadsnapshotapi "github.com/asalimonov/gquorum/load/snapshot"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"
@@ -199,8 +198,7 @@ func (h *Host) expireDeliveries(now time.Time) {
 			delete(slot.deliveries, id)
 			if d.snapshot && slot.core != nil {
 				if d.attempt.Generation != 0 {
-					slot.core.ReportSnapshotAttemptError(d.attempt,
-						&loadsnapshotapi.TransferError{Reason: loadsnapshotapi.ReasonTotalTimeout})
+					slot.core.ReportSnapshotAttemptTimeout(d.attempt)
 				} else {
 					slot.core.ReportSnapshot(d.to.Replica.ReplicaID, raft.SnapshotFailure)
 				}

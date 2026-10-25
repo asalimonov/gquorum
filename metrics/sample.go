@@ -6,12 +6,13 @@ import "time"
 // PeerProgress describes a peer's observed replication and acknowledgement
 // progress.
 type PeerProgress struct {
-	ReplicaID    uint64        `json:"replica_id"`
-	Match        uint64        `json:"match"`
-	RecentActive bool          `json:"recent_active"`
-	AckSequence  uint64        `json:"ack_sequence"`
-	AckAge       time.Duration `json:"ack_age_ns"`
-	AckKnown     bool          `json:"ack_known"`
+	Snapshot     *SnapshotCatchUp `json:"snapshot,omitempty"`
+	ReplicaID    uint64           `json:"replica_id"`
+	Match        uint64           `json:"match"`
+	RecentActive bool             `json:"recent_active"`
+	AckSequence  uint64           `json:"ack_sequence"`
+	AckAge       time.Duration    `json:"ack_age_ns"`
+	AckKnown     bool             `json:"ack_known"`
 }
 
 // ReadQueue describes one owner-loop sample of bounded read work. It has the

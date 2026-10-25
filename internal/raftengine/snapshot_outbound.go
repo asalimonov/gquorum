@@ -55,6 +55,8 @@ func (g *Group) prepareSnapshotOffer(m raftpb.Message) (SnapshotOffer, error) {
 	g.recalculateSnapshotReportDueLocked()
 	record.terminal = false
 	record.progress = nil
+	record.progressConsumed = false
+	record.terminalTimeout = false
 	record.started = time.Now()
 	g.snapshotReportMu.Unlock()
 	return SnapshotOffer{Message: m, Attempt: attempt,
@@ -91,6 +93,7 @@ func (g *Group) refreshSnapshotEpochStatus(status raft.Status) {
 func (g *Group) refreshSnapshotRecordsLocked(status raft.Status) {
 	deadlineChanged := false
 	for peer, record := range g.snapshotReports {
+		g.consumeSnapshotProgressLocked(peer, record)
 		_, voter := status.Config.Voters[0][peer]
 		_, outgoingVoter := status.Config.Voters[1][peer]
 		_, learner := status.Config.Learners[peer]
@@ -98,6 +101,7 @@ func (g *Group) refreshSnapshotRecordsLocked(status raft.Status) {
 		if !voter && !outgoingVoter && !learner && !nextLearner {
 			deadlineChanged = deadlineChanged || record.pending != nil
 			delete(g.snapshotReports, peer)
+			delete(g.snapshotEpisodes, peer)
 			continue
 		}
 		if g.snapshotEpoch == nil || record.attempt.Term != status.Term {
@@ -106,9 +110,11 @@ func (g *Group) refreshSnapshotRecordsLocked(status raft.Status) {
 			record.pending = nil
 			record.progress = nil
 			record.terminal = false
+			record.terminalTimeout = false
 		}
 		if progress, ok := status.Progress[peer]; ok && progress.Match > record.lastMatch {
 			record.lastMatch = progress.Match
+			g.observeNativeMatchAdvance(peer, progress.Match)
 			record.backoff = 0
 		}
 	}

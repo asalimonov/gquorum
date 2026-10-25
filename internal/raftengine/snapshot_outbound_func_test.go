@@ -393,3 +393,54 @@ func TestSnapshotOutbound_RecoveryCheckpointRenewsPublication(t *testing.T) {
 		}
 	}
 }
+
+func TestSnapshotOutbound_EpisodePublishesOnlyFromNativeOwner(t *testing.T) {
+	t.Parallel()
+	g := outboundSnapshotLeader(t, &captureTransport{})
+	g.opts.SnapshotPolicy = SnapshotPolicy{TotalTimeout: 10 * time.Second, ProgressTimeout: 2 * time.Second}
+	offer, err := g.prepareSnapshotOffer(outboundSnapshotMessage(t, g))
+	must(t, err)
+	native := g.rn.Status().Progress[2]
+	sample := metrics.SnapshotCatchUp{DeliveryID: 1, SnapshotIndex: offer.Message.Snapshot.Metadata.Index,
+		SnapshotTerm: offer.Message.Snapshot.Metadata.Term, LeaderTerm: offer.Attempt.Term, TotalBytes: 100, VerifiedBytes: 50,
+		ProgressSequence: 1, ProgressTimeout: 2 * time.Second, RemainingTotal: 10 * time.Second, Phase: "sending",
+		Destination: metrics.ReplicaIdentity{ClusterID: "cluster", GroupID: "load", NodeName: "two", ReplicaID: 2, InstanceID: "process", RunID: "receiver-1"}}
+	sequence := g.raftSample.Raft.Sequence
+	g.NoteSnapshotProgress(offer.Attempt, sample)
+	if g.raftSample.Raft.Sequence != sequence {
+		t.Fatal("worker published a Raft generation")
+	}
+	g.sampleRaftMetrics(time.Now())
+	var observed metrics.PeerProgress
+	for _, peer := range g.raftSample.Progress {
+		if peer.ReplicaID == 2 {
+			observed = peer
+		}
+	}
+	if observed.Snapshot == nil || observed.Snapshot.VerifiedBytes != 50 || observed.Snapshot.EpisodeRemaining <= 0 ||
+		observed.Match != native.Match || observed.RecentActive != native.RecentActive || observed.AckSequence != 0 {
+		t.Fatal("snapshot sample missing or manufactured native evidence", observed)
+	}
+	original := g.snapshotEpisodes[2].Deadline
+	g.ReportSnapshotAttemptTimeout(offer.Attempt)
+	g.sampleRaftMetrics(time.Now())
+	if !g.snapshotEpisodes[2].Failed {
+		t.Fatal("terminal timeout not consumed by owner")
+	}
+	offer, err = g.prepareSnapshotOffer(outboundSnapshotMessage(t, g))
+	must(t, err)
+	sample.DeliveryID++
+	sample.Destination.RunID = "receiver-2"
+	sample.EpisodeFailed = false
+	sample.EpisodeRemaining = time.Hour
+	g.NoteSnapshotProgress(offer.Attempt, sample)
+	g.sampleRaftMetrics(time.Now())
+	if !g.snapshotEpisodes[2].Failed || g.snapshotEpisodes[2].Deadline != original {
+		t.Fatal("receiver churn renewed bounded protection")
+	}
+	g.cs = copyConf(*g.rn.ApplyConfChange(raftpb.ConfChangeV2{Changes: []raftpb.ConfChangeSingle{{Type: raftpb.ConfChangeRemoveNode, NodeID: 2}}}))
+	g.refreshSnapshotEpoch()
+	if len(g.snapshotEpisodes) != 0 {
+		t.Fatal("retired native peer retained episode")
+	}
+}

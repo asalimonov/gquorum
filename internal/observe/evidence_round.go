@@ -31,6 +31,7 @@ type replicaEvidenceInput struct {
 }
 
 type replicaEvidenceFrame struct {
+	maxSampleAge            time.Duration
 	input                   replicaEvidenceInput
 	scope                   EvidenceScope
 	validTarget, replyValid bool
@@ -144,7 +145,8 @@ func (t *evidenceTracker) prepareReplicaScope(g *groupEvidence, r *replicaEviden
 	for _, w := range []*ConditionWindow{&r.unavailable, &r.lag, &r.stalled, &r.standby} {
 		w.MaxGap, w.MaxAge = g.voterConfig.MaxObservationGap, t.settings.MaxSampleAge
 	}
-	return replicaEvidenceFrame{input: input, scope: scope, validTarget: validTarget, replyValid: replyValid}
+	return replicaEvidenceFrame{input: input, scope: scope, validTarget: validTarget,
+		replyValid: replyValid, maxSampleAge: t.settings.MaxSampleAge}
 }
 
 func (t *evidenceTracker) prepareReplicaObservation(r *replicaEvidence, frame *replicaEvidenceFrame) {
@@ -207,14 +209,17 @@ func (t *evidenceTracker) observeReplicaProgress(g *groupEvidence, r *replicaEvi
 		}
 		observed.ReplicationLag = metrics.UnsignedValue{State: metrics.Current, Value: lag}
 	}
-	r.lag.Observe(now, scope, EvidenceSample{Valid: lagKnown, True: lag > g.voterConfig.FailureLagEntries,
+	catchingUp := recordSnapshotEvidence(&observed, *frame, progress)
+	r.lag.Observe(now, scope, EvidenceSample{Valid: lagKnown,
+		True:        !catchingUp && lag > g.voterConfig.FailureLagEntries,
 		Generations: base})
 	advanced := r.matchKnown && progress.Match > r.match
 	if !r.matchKnown || progress.Match != r.match {
 		r.stalled.Reset()
 	}
 	r.stalled.Observe(now, scope,
-		EvidenceSample{Valid: lagKnown && g.voterConfig.ReplaceNoProgress, True: lag > 0, Generations: base})
+		EvidenceSample{Valid: lagKnown && g.voterConfig.ReplaceNoProgress,
+			True: !catchingUp && lag > 0, Generations: base})
 	if lagKnown {
 		r.match, r.matchKnown = progress.Match, true
 	}

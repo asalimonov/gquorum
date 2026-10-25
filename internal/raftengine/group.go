@@ -61,6 +61,7 @@ type request struct {
 // Group owns one exact persistence-ordered Raft replica and its serialized
 // application work.
 type Group struct {
+	snapshotEpisodes        map[uint64]*snapshotEpisode
 	snapshotEpoch           context.Context
 	cancelSnapshotEpoch     context.CancelFunc
 	snapshotEpochTerm       uint64

@@ -333,3 +333,25 @@ Findings
 - A broader concurrent run exposed an existing projection cancellation-accounting assumption; test assertions now retain the full-state/join guarantees while allowing its documented one canceled attempt. Recovery readiness now uses the existing job diagnostic waiter; subsequent full fixture race passes.
 - Initial heavily overlapping checks increased unit wall time to 61.817s; the final routine checkpoint is 8.216s. No default large allocation/generation was introduced.
 - The unrelated .gitignore edit became staged externally during this task. It remains preserved and is excluded using an explicit-path commit.
+
+## Task 14 — bounded repair catch-up episodes and shared failure evidence
+
+Date: 2026-10-26. Commit: this task commit; prior 797adba. No further colleague review requested per user steering.
+
+Implemented
+- Optional PeerProgress.Snapshot publishes the complete planned DTO, with owned pointer clones and omission when absent. Native owner sampling alone exposes progress; worker callbacks cannot refresh Raft stamps, Match, RecentActive or AckSequence.
+- One source-owned episode per native peer anchors historical Match and a locally configured TotalTimeout+ProgressTimeout deadline. Bytes, retries, artifacts, source term renewal and receiver engine-only run changes preserve it. Total/progress timeout latches failure; strict native Match advance or a changed process/durable peer permits a new episode. Native peer retirement removes it.
+- Added private generic policy and timeout-report inputs omitted from the original sketch, preserving the engine/load package boundary. Immutable owner-core forwarding avoids a Host lock on each progress Ack.
+- Relative progress, total, grace and episode durations age at native/meter/transit/cache boundaries. Invalid negative remaining values cannot wrap into fresh protection. Sending requires fresh normal target Raft evidence; bounded handoff grace tolerates Restore while rejecting contrary run/term/stopped evidence.
+- Observer suppresses only lag/stall predicates, leaves raw numeric lag visible and records snapshot_catchup/snapshot_transfer_failed reasons. Independent unavailability, learner promotion and quorum checks remain unchanged. Built-in policy and mandatory votercheck consume the same derived evidence.
+
+Verified
+- make test: 2,298 tests across 62 reports/five modules pass (7.967s); report test-reports/unit/20261025T211313.995417Z-8iaem78v/report.md.
+- Focused owning vet, pending make lint and git diff --check pass.
+- Default-package race checks: metrics 1.317s, internal/metrics 1.353s, observe 1.543s, raftengine 1.285s and scheduling 1.217s; all pass.
+- Real one-engine snapshot ingress/outbound functional race selection passes (1.483s). New case proves native-only publication, no fabricated Match/RecentActive/AckSequence, timeout latch across receiver-run churn and cleanup at native peer retirement.
+- Controlled-clock units cover retry/term/run changes, process replacement, unknown receiver run, native Match reset, bounded grace, expired/stale/zero-byte/contrary target evidence and cached reads. Later fresh progress cannot reset a failed episode's ordinary failure window. Pointer clone, JSON omission, duration arithmetic and shared policy/mandatory-check agreement regressions pass.
+
+Notes
+- _meta/standalone use a zero generic snapshot policy and retain legacy send/report behavior. Full four-node repair and process transfer scenarios remain Tasks 17/20; no Docker or large generation was run here.
+- Activation is still deferred to Task 15. The unrelated staged .gitignore change remains excluded from feature commits.

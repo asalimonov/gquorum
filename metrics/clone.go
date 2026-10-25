@@ -24,6 +24,12 @@ func (s ReplicaSample) Clone() ReplicaSample {
 	s.Voters = cloneSlice(s.Voters)
 	s.Learners = cloneSlice(s.Learners)
 	s.Progress = cloneSlice(s.Progress)
+	for i := range s.Progress {
+		if p := s.Progress[i].Snapshot; p != nil {
+			value := *p
+			s.Progress[i].Snapshot = &value
+		}
+	}
 	return s
 }
 

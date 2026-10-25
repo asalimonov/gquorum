@@ -259,6 +259,7 @@ func (m *Meter) Snapshot(now time.Time) api.ReplicaObservation {
 	}
 	for i := range s.Sample.Progress {
 		s.Sample.Progress[i].AckAge = AddDuration(s.Sample.Progress[i].AckAge, elapsed)
+		AgeSnapshot(s.Sample.Progress[i].Snapshot, elapsed)
 	}
 	if s.Sample.Meter.State != api.Current {
 		s.Sample.Rates.State = api.Stale

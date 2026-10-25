@@ -23,17 +23,21 @@ const (
 	snapshotCapacityRefusal
 	snapshotPermanentRefusal
 	snapshotLegacyReport
+	snapshotTransferTimedOut
 )
 
 type snapshotReportState struct {
-	destination metrics.ReplicaIdentity
-	attempt     SnapshotAttempt
-	pending     *snapshotAttemptReport
-	terminal    bool
-	backoff     time.Duration
-	lastMatch   uint64
-	started     time.Time
-	progress    *snapshotProgressEvent
+	progressConsumed bool
+	terminalTimeout  bool
+	terminalResult   raft.SnapshotStatus
+	destination      metrics.ReplicaIdentity
+	attempt          SnapshotAttempt
+	pending          *snapshotAttemptReport
+	terminal         bool
+	backoff          time.Duration
+	lastMatch        uint64
+	started          time.Time
+	progress         *snapshotProgressEvent
 }
 type snapshotAttemptReport struct {
 	attempt SnapshotAttempt
@@ -80,6 +84,8 @@ func (g *Group) recordSnapshotReport(a SnapshotAttempt, result raft.SnapshotStat
 		return
 	}
 	record.terminal = true
+	record.terminalResult = result
+	record.terminalTimeout = kind == snapshotTransferTimedOut
 	now := time.Now()
 	due := now
 	if result == raft.SnapshotFailure {
@@ -142,6 +148,7 @@ func (g *Group) NoteSnapshotProgress(a SnapshotAttempt, p metrics.SnapshotCatchU
 		record.destination = p.Destination
 	}
 	p.EpisodeAnchorMatch, p.EpisodeRemaining, p.EpisodeFailed = 0, 0, false
+	record.progressConsumed = false
 	record.progress = &snapshotProgressEvent{Attempt: a, Progress: p, ReceivedAt: time.Now(),
 		FirstAdmittedAttemptStarted: record.started}
 	g.snapshotReportMu.Unlock()
@@ -179,6 +186,7 @@ func (g *Group) closeSnapshotReportsAfterJoin() {
 	g.snapshotReportMu.Lock()
 	g.snapshotReportsClosed = true
 	clear(g.snapshotReports)
+	clear(g.snapshotEpisodes)
 	g.snapshotReportDue = time.Time{}
 	g.snapshotReportMu.Unlock()
 }
@@ -222,4 +230,10 @@ func (g *Group) recalculateSnapshotReportDueLocked() {
 		}
 	}
 	g.snapshotReportDue = due
+}
+
+// ReportSnapshotAttemptTimeout records a source-classified terminal transfer
+// timeout. Only the native owner consumes it into the fixed episode latch.
+func (g *Group) ReportSnapshotAttemptTimeout(a SnapshotAttempt) {
+	g.recordSnapshotReport(a, raft.SnapshotFailure, snapshotTransferTimedOut)
 }

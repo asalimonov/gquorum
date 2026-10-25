@@ -45,3 +45,19 @@ func TestSnapshotPreservesScopedVersionContext(t *testing.T) {
 		t.Fatalf("lost per-group context: %s", data)
 	}
 }
+
+func TestSnapshotProgressCloneOwnsPointersAndOmitsAbsentValues(t *testing.T) {
+	t.Parallel()
+	original := ReplicaSample{Progress: []PeerProgress{{ReplicaID: 2, Snapshot: &SnapshotCatchUp{
+		VerifiedBytes: 8, Destination: ReplicaIdentity{NodeName: "two", RunID: "run"}}}}}
+	cloned := original.Clone()
+	cloned.Progress[0].Snapshot.VerifiedBytes = 99
+	cloned.Progress[0].Snapshot.Destination.RunID = "changed"
+	if original.Progress[0].Snapshot.VerifiedBytes != 8 || original.Progress[0].Snapshot.Destination.RunID != "run" {
+		t.Fatal("snapshot observation aliases producer")
+	}
+	encoded, err := json.Marshal(ReplicaSample{Progress: []PeerProgress{{ReplicaID: 2}}})
+	if err != nil || strings.Contains(string(encoded), `"snapshot":`) {
+		t.Fatal(string(encoded), err)
+	}
+}

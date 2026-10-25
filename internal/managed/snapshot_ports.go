@@ -2,6 +2,7 @@ package managed
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -222,7 +223,7 @@ func (h *Host) reportSnapshotDelivery(owner loadsnapshot.Owner, key snapshot.Key
 		err = &snapshot.TransferError{Reason: snapshot.ReasonMalformed}
 	}
 	if err != nil {
-		o.core.ReportSnapshotAttemptError(record.attempt, err)
+		reportSnapshotAttemptFailure(o.core, record.attempt, err)
 	} else {
 		o.core.ReportSnapshotAttempt(record.attempt, raft.SnapshotFinish)
 	}
@@ -236,21 +237,30 @@ func (h *Host) reportSnapshotFailure(owner loadsnapshot.Owner, attempt raftengin
 	valid := h.exactSnapshotOwnerLocked(o)
 	h.mu.Unlock()
 	if valid {
-		o.core.ReportSnapshotAttemptError(attempt, err)
+		reportSnapshotAttemptFailure(o.core, attempt, err)
 	}
 }
 func (h *Host) noteSnapshotProgress(
 	owner loadsnapshot.Owner, attempt raftengine.SnapshotAttempt, p metrics.SnapshotCatchUp,
 ) {
 	o, ok := owner.(*managedSnapshotOwner)
-	if !ok || o == nil || attempt.RunID != o.key.RunID {
+	if !ok || o == nil || o.host != h || attempt.RunID != o.key.RunID {
 		return
 	}
-	h.mu.Lock()
-	valid := h.exactSnapshotOwnerLocked(o)
-	h.mu.Unlock()
-	if valid {
-		o.core.NoteSnapshotProgress(attempt, p)
+	// The immutable core handle never redirects. Its bounded mailbox validates
+	// this exact run/attempt and refuses updates after join, without Host locking.
+	o.core.NoteSnapshotProgress(attempt, p)
+}
+func reportSnapshotAttemptFailure(core *raftengine.Group, attempt raftengine.SnapshotAttempt, err error) {
+	var detail *snapshot.TransferError
+	if !errors.As(err, &detail) {
+		core.ReportSnapshotAttemptError(attempt, err)
+		return
+	}
+	if detail.Reason == snapshot.ReasonProgressTimeout || detail.Reason == snapshot.ReasonTotalTimeout {
+		core.ReportSnapshotAttemptTimeout(attempt)
+	} else {
+		core.ReportSnapshotAttemptError(attempt, err)
 	}
 }
 

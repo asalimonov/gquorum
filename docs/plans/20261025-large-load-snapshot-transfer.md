@@ -5,7 +5,7 @@
 **Project source:** `../..` relative to this plan (repository root `.`)
 **Branch:** `feat/large-snapshots-transfer`
 **Source checkout inspected:** `646e9c1` (implementation baseline `14a54c2`, transport-document correction `2ba951a`, current lint/testing updates in `646e9c1`)
-**Target architecture SHA256:** `bcbb3836b4c3dd941aa1a9c07c9c2e12b62de2d24c14c5d4b840cff5046bd203` (current target including implementation refinements through Task 13)
+**Target architecture SHA256:** `c3ed12ab7460b9366dc5345e8629ea3ec8cf6a95cf23babad285b2c4ccaa5f56` (current target including implementation refinements through Task 14)
 **Target architecture:** [20261025-large-load-snapshot-transfer-target.md](../brainstorms/20261025-large-load-snapshot-transfer-target.md)
 **Full brainstorm log:** [20261025-large-load-snapshot-transfer.md](../brainstorms/20261025-large-load-snapshot-transfer.md)
 **Review history:** [feature review thread](../review/feat_large-snapshots-transfer.md)
@@ -350,18 +350,18 @@ Review baseline: `251a594`; findings in review Thread 3. The original six-commit
 **Files:** metrics/sample.go/clone.go; raftengine metrics/reports/episode state; internal/observe evidence_round/evidence_snapshot and owning tests; scheduling/votercheck tests; managed progress ports.
 **References:** target [§7.7 repair evidence](../brainstorms/20261025-large-load-snapshot-transfer-target.md#77-repair-evidence-during-genuine-snapshot-catch-up), §9.3–9.4, §12 fixed episode and catch-up predicate, and §13 receiver-churn correction. Exact metrics fields are in Appendix D.
 
-- [ ] Use the SnapshotCatchUp DTO introduced in Task 5; add optional PeerProgress.Snapshot publication with all target JSON fields; clone its pointer-owned data and retain omission for absent values. No persisted topology/voter-config schema changes.
-- [ ] Connect Node-owned Send.ReportProgress to the bounded source-engine mailbox. Only the owner loop samples fresh Raft observations; preserve raw lag and never manufacture RecentActive, AckSequence, live quorum, readiness or promotion proof.
-- [ ] Implement the per-peer episode: locally stamped first admitted attempt; one fixed TotalTimeout+ProgressTimeout deadline; anchor at historical native Match; sticky failure for total/progress timeout. Retry, bytes, artifact/delivery changes and source term renewal cannot extend it.
-- [ ] Preserve episode deadline/failed latch across **engine-only receiver RunID** changes for the same process/durable peer. Actual Match advancement or a new process/durable replica identity can create a new episode. Unknown receiver run cannot grant protection. Source-run restart loses volatile evidence; no replicated crash-loop detector.
-- [ ] Observer validates exact/fresh leader/target/run and positive verified progress, ages duration fields, and suppresses only lag/stall failure predicates while episode/progress/grace remain valid. After expiry/failure, later partial retries cannot reset ordinary failure accumulation.
-- [ ] Feed the same derived metrics.Evidence to both built-in `scheduling/voters.go` and mandatory `internal/scheduling/scoped_repair.go` checks via votercheck. Preserve default voter windows, learner promotion and live-quorum guards.
-- [ ] Add units with controllable clocks for repeated timeout attempts, engine-run churn, term renewal, observation replay/staleness, receiver failure, unknown run, Match advancement and bounded grace. Source callbacks must not set episode start or failed latch.
+- [x] Use the SnapshotCatchUp DTO introduced in Task 5; add optional PeerProgress.Snapshot publication with all target JSON fields; clone its pointer-owned data and retain omission for absent values. No persisted topology/voter-config schema changes.
+- [x] Connect Node-owned Send.ReportProgress to the bounded source-engine mailbox. Only the owner loop samples fresh Raft observations; preserve raw lag and never manufacture RecentActive, AckSequence, live quorum, readiness or promotion proof.
+- [x] Implement the per-peer episode: locally stamped first admitted attempt; one fixed TotalTimeout+ProgressTimeout deadline; anchor at historical native Match; sticky failure for total/progress timeout. Retry, bytes, artifact/delivery changes and source term renewal cannot extend it.
+- [x] Preserve episode deadline/failed latch across **engine-only receiver RunID** changes for the same process/durable peer. Actual Match advancement or a new process/durable replica identity can create a new episode. Unknown receiver run cannot grant protection. Source-run restart loses volatile evidence; no replicated crash-loop detector.
+- [x] Observer validates exact/fresh leader/target/run and positive verified progress, ages duration fields, and suppresses only lag/stall failure predicates while episode/progress/grace remain valid. After expiry/failure, later partial retries cannot reset ordinary failure accumulation.
+- [x] Feed the same derived metrics.Evidence to both built-in `scheduling/voters.go` and mandatory `internal/scheduling/scoped_repair.go` checks via votercheck. Preserve default voter windows, learner promotion and live-quorum guards.
+- [x] Add units with controllable clocks for repeated timeout attempts, engine-run churn, term renewal, observation replay/staleness, receiver failure, unknown run, Match advancement and bounded grace. Source callbacks must not set episode start or failed latch.
 
 #### Verification
 
-- [ ] `make test`; `go vet ./metrics ./internal/observe ./internal/votercheck ./internal/scheduling ./scheduling ./internal/raftengine`.
-- [ ] Focused functional/race progress ownership tests; full process repair scenario is Task 17/20. No broad race suite yet.
+- [x] `make test`; `go vet ./metrics ./internal/observe ./internal/votercheck ./internal/scheduling ./scheduling ./internal/raftengine`.
+- [x] Focused functional/race progress ownership tests; full process repair scenario is Task 17/20. No broad race suite yet.
 
 ### Task 15: Activate the complete managed snapshot path atomically
 
@@ -693,6 +693,19 @@ Task 13 fixture ownership and verification refinements:
 + require(beforeCancel.Failures == 0)
 + require(final.Failures <= 1 && final.Attempts == final.Writes + final.Failures)
 + require(final.Stopped && final.Active == 0 && final.State.AppliedIndex == 2)
+```
+
+Task 14 omitted private policy/classification inputs:
+- `internal/raftengine/{options,snapshot_episode}.go`, managed mapping: add generic SnapshotPolicy with the two locally resolved durations. The target episode algorithm needs local immutable policy; callback RemainingTotal cannot choose/extend that deadline. Zero preserves legacy _meta/standalone observations, with checked configured arithmetic.
+- `ReportSnapshotAttemptTimeout(SnapshotAttempt)` is a generic exact-terminal companion. Managed ports classify load/snapshot timeouts before calling it; the native owner sets the sticky failure latch, preserving the engine import boundary.
+- Exact-owner progress forwarding no longer takes the Host mutex: its immutable core pointer cannot redirect, and the bounded engine mailbox already verifies run/attempt and rejects post-join reports.
+- Shared metric aging handles the optional pointer across native/meter/transit/cache layers and safely clamps invalid remaining durations; callback fields never set episode state.
+
+```diff
+ type Options struct {
++    SnapshotPolicy SnapshotPolicy // private generic durations, not load options
+ }
++func (g *Group) ReportSnapshotAttemptTimeout(SnapshotAttempt)
 ```
 
 ## NOT IMPLEMENTED GAPS

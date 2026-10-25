@@ -23,6 +23,7 @@ type peerAck struct {
 // sampler can refresh this generation while Apply or Restore blocks that loop.
 func (g *Group) sampleRaftMetrics(now time.Time) {
 	s := g.rn.Status()
+	transfers := g.snapshotTransferMetrics(now, s)
 	cs := copyConf(g.cs)
 	slices.Sort(cs.Voters)
 	slices.Sort(cs.Learners)
@@ -77,6 +78,7 @@ func (g *Group) sampleRaftMetrics(now time.Time) {
 		ack := g.peerAcks[id]
 		next.Progress = append(next.Progress, metrics.PeerProgress{
 			ReplicaID:    id,
+			Snapshot:     transfers[id],
 			Match:        p.Match,
 			RecentActive: p.RecentActive,
 			AckSequence:  ack.sequence,
@@ -168,6 +170,7 @@ func (g *Group) metricsSample(now time.Time) metrics.ReplicaSample {
 		s.WALStall = internalmetrics.Age(now, g.writerSince)
 	}
 	for i := range s.Progress {
+		internalmetrics.AgeSnapshot(s.Progress[i].Snapshot, internalmetrics.Age(now, g.raftSampleAt))
 		s.Progress[i].AckAge = internalmetrics.AddDuration(s.Progress[i].AckAge, internalmetrics.Age(now,
 			g.raftSampleAt))
 	}
