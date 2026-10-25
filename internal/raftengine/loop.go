@@ -197,6 +197,9 @@ func (g *Group) finishWrite(kind writeKind) error {
 		return errors.New("unexpected persistence completion")
 	}
 	job := g.pending
+	if kind == writeRecoveryCheckpoint || kind == writeRecoveryFinish {
+		return g.finishRecoveryCheckpoint()
+	}
 	if kind == writeSnapshot {
 		if err := g.ms.Compact(job.snapshot.Metadata.Index); err != nil {
 			return err
@@ -323,6 +326,9 @@ func (g *Group) queueRetirement(entry raftpb.Entry, peer uint64) {
 	})
 }
 func (g *Group) beginSnapshot(req *request) error {
+	if req != nil && req.recoveryCheckpoint != nil {
+		return g.beginRecoveryCheckpoint(req)
+	}
 	if req != nil && req.ctx.Err() != nil {
 		return req.ctx.Err()
 	}

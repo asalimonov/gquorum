@@ -164,10 +164,11 @@ type SeedKey struct {
 
 // SeedSpec supplies the accepted source and ordinary destination creation grant.
 type SeedSpec struct {
-	Key       SeedKey
-	Source    SeedSource
-	Grant     topology.AuthorityGrant
-	Resources Resources
+	Key        SeedKey
+	BackupName string
+	Source     SeedSource
+	Grant      topology.AuthorityGrant
+	Resources  Resources
 }
 
 // CheckpointProof identifies the actual durable normalized destination snapshot.

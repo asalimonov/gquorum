@@ -832,3 +832,66 @@ Verified
 - Pure FSM/service/runtime units PASS including committed refusal. Existing frozen
   fixtures unchanged; git diff --check PASS. No broad process/image or Meridian work.
 - This is a checkpoint correction, not a new numbered task; Tasks11–16 remain.
+
+
+## Task 11 — Durable recovered WAL seeds and normalized checkpoints
+Date: 2026-10-25
+
+Implemented
+- Private managed adapter for Node-owned WAL storage; no exported walstore.Store
+  methods or public recovery contracts changed. Protection precedes writer open,
+  forces WAL/applied/checkpoint synchronization, and releases only at an engine
+  writer boundary with exact normalized checkpoint and real creation receipt.
+- Accepted backup locator/history captured before WAL lease transfer. Revalidate
+  source identity, semantic digest, retained positions and complete shared Replay;
+  preserve exact application entries through C, replace validated admin/native
+  entries with empty entries at their original positions, discard every tail >C.
+- Fresh B singleton snapshot/pin with the actual creation grant at source S/term;
+  HardState retains source term with Vote=0/Commit=C and applied hint S. Complete
+  seed/marker sync precedes no-clobber live publication and parent synchronization.
+- Building intent, prepared, installed and acquired records distinguish resumable
+  staging from established B data. Unproven staging/live paths refuse; incomplete
+  owned staging is archived. Missing installed/acquired B never refills from A.
+- Owned NewRecoveryContext removes only the recovery Restore cutoff. Serialized
+  checkpoint writer supports atomic normalization at the same snapshot index;
+  stable Raft storage facade exposes that normalized snapshot to ordinary sends.
+  Persisted proof survives intermediate snapshots/compaction and acquired restart.
+  Verify refuses the original transplant as normalization proof. Finish is exact,
+  idempotent, and preserves protection after refusal without halting the engine.
+- Fixed the source-S receipt assumption: fences install at S; ordinary creation
+  receipts record the later committed ObserveEffect. Actual B engine receipts pass
+  the metadata catalog, consumption, restart and pruning. Frozen fixtures unchanged.
+
+Verified
+- make test PASS2,100/58 reports,8.267s across all five modules:
+  test-reports/unit/20261025T062205.804270Z-__8815ip/report.md.
+- make lint PASS all configured modules/tags/tools:
+  /tmp/gquorum-task11-commit-lint.log.
+- Full affected functional/race suites PASS WAL14.643s/engine9.086s/meta26.999s/
+  managed17.314s/disk5.452s/root47.760s:
+  /tmp/gquorum-task11-full-functional-race.log.
+- Later focused functional/race regressions PASS WAL8.712s/disk2.623s/meta3.671s/
+  engine2.503s/root25.622s:
+  /tmp/gquorum-task11-last-functional-race.log.
+- Final staging/foreign-path/intent regressions -race PASS2.516s; whole final WAL
+  recovery suite -race PASS8.303s; finish exactness/race PASS3.288s.
+  Logs: /tmp/gquorum-task11-building-race.log,
+  /tmp/gquorum-task11-staging-final-race.log,
+  /tmp/gquorum-task11-finish-race2.log.
+- Additional unsynced-tail seed and actual native configuration transformation
+  regressions pass; malformed native input refuses before replacement. Backup
+  bytes unchanged; ordinary retained restart needs no InitialAuthority override.
+- git diff --check PASS. No Docker image/process or Meridian work in this task.
+
+Design corrections and remaining scope
+- Announced and backed up target before changes:
+  docs/brainstorms/20261024-permanent-majority-loss-recovery-target-before-seed-checkpoint-20261025T055743Z.md.
+- Private SeedSpec adds accepted BackupName. A mandatory SeedReplay argument from
+  the managed adapter calls shared Replay; this avoids an engine/backend test
+  import cycle without creating an application callback or duplicate interpreter.
+- Separate seed-state directory avoids group-name/file collisions. Building intent
+  precedes stage creation; original marker/attempt remains immutable across retry.
+- Public Run and managed publication remain explicitly gated until Task12. The
+  checkpoint-only consumption command simplification still awaits user approval;
+  no command payload/schema change was made. Task14 retains real cluster
+  promote/transfer/demote and retry scenarios.

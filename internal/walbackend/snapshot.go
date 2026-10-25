@@ -251,6 +251,10 @@ func pruneSnapshots(g *group) error {
 	if err != nil {
 		return err
 	}
+	if g.checkpoint != nil {
+		protected := fmt.Sprintf("%016x-%016x.snap", g.checkpoint.Position.Term, g.checkpoint.Position.Index)
+		names = slices.DeleteFunc(names, func(name string) bool { return name == protected })
+	}
 	for len(names) > 2 {
 		if err := os.Remove(filepath.Join(g.dir, SnapDir, names[0])); err != nil {
 			return err

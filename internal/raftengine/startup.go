@@ -123,8 +123,9 @@ func initializeFounding(ctx context.Context, options Options, state *groupRecove
 }
 
 type initializedRaft struct {
-	memory *raft.MemoryStorage
-	raw    *raft.RawNode
+	memory    *raft.MemoryStorage
+	snapshots *checkpointMemory
+	raw       *raft.RawNode
 }
 
 func initializeRaft(options Options, recovery storage.Recovery) (initializedRaft, error) {
@@ -140,11 +141,12 @@ func initializeRaft(options Options, recovery storage.Recovery) (initializedRaft
 	if err := ms.SetHardState(recovery.HardState); err != nil {
 		return initializedRaft{}, err
 	}
+	snapshots := &checkpointMemory{MemoryStorage: ms}
 	rn, err := raft.NewRawNode(&raft.Config{
 		ID:                        options.ReplicaID,
 		ElectionTick:              options.Timing.ElectionTicks,
 		HeartbeatTick:             options.Timing.HeartbeatTicks,
-		Storage:                   ms,
+		Storage:                   snapshots,
 		Applied:                   recovery.Snapshot.Metadata.Index,
 		MaxSizePerMsg:             64 << 10,
 		MaxInflightMsgs:           256,
@@ -158,7 +160,7 @@ func initializeRaft(options Options, recovery storage.Recovery) (initializedRaft
 	if err != nil {
 		return initializedRaft{}, err
 	}
-	return initializedRaft{memory: ms, raw: rn}, nil
+	return initializedRaft{memory: ms, snapshots: snapshots, raw: rn}, nil
 }
 
 // newRestoredCore initializes the same complete, worker-free engine for normal
@@ -178,29 +180,30 @@ func newRestoredCore(ctx context.Context, options Options, state groupRecovery) 
 		return nil, err
 	}
 	g := &Group{
-		opts:           options,
-		rn:             initialized.raw,
-		ms:             initialized.memory,
-		cs:             copyConf(recovery.Snapshot.Metadata.ConfState),
-		applied:        recovery.Snapshot.Metadata.Index,
-		snapshotIndex:  recovery.Snapshot.Metadata.Index,
-		recoveryCommit: recovery.HardState.Commit,
-		durableHS:      recovery.HardState,
-		done:           make(chan struct{}),
-		ready:          make(chan struct{}),
-		proposals:      make(chan *request, proposalQueueCapacity),
-		inbound:        make(chan *request, inboundQueueCapacity),
-		controls:       make(chan *request, controlQueueCapacity),
-		snapshots:      make(chan *request, snapshotQueueCapacity),
-		slots:          make(chan struct{}, options.MaxPendingProposals),
-		unreachable:    make(chan uint64, unreachableQueueCapacity),
-		reports:        make(chan snapshotReport, snapshotReportQueueCapacity),
-		sendC:          make(chan []raftpb.Message, outboundBatchQueueCapacity),
-		writeC:         make(chan writeJob, 1),
-		writeDone:      make(chan writeResult, 1),
-		props:          make(map[string]*request),
-		changes:        make(map[string]*request),
-		nonce:          hex.EncodeToString(seed[:]),
+		opts:             options,
+		rn:               initialized.raw,
+		ms:               initialized.memory,
+		checkpointMemory: initialized.snapshots,
+		cs:               copyConf(recovery.Snapshot.Metadata.ConfState),
+		applied:          recovery.Snapshot.Metadata.Index,
+		snapshotIndex:    recovery.Snapshot.Metadata.Index,
+		recoveryCommit:   recovery.HardState.Commit,
+		durableHS:        recovery.HardState,
+		done:             make(chan struct{}),
+		ready:            make(chan struct{}),
+		proposals:        make(chan *request, proposalQueueCapacity),
+		inbound:          make(chan *request, inboundQueueCapacity),
+		controls:         make(chan *request, controlQueueCapacity),
+		snapshots:        make(chan *request, snapshotQueueCapacity),
+		slots:            make(chan struct{}, options.MaxPendingProposals),
+		unreachable:      make(chan uint64, unreachableQueueCapacity),
+		reports:          make(chan snapshotReport, snapshotReportQueueCapacity),
+		sendC:            make(chan []raftpb.Message, outboundBatchQueueCapacity),
+		writeC:           make(chan writeJob, 1),
+		writeDone:        make(chan writeResult, 1),
+		props:            make(map[string]*request),
+		changes:          make(map[string]*request),
+		nonce:            hex.EncodeToString(seed[:]),
 	}
 	g.observations = watchstate.New(options.MaxWatchers, replicastate.Observation{},
 		func(o replicastate.Observation) replicastate.Observation { return o })

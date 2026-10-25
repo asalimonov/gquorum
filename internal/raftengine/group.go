@@ -13,6 +13,7 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	internalmetrics "github.com/asalimonov/gquorum/internal/metrics"
 	"github.com/asalimonov/gquorum/internal/raftstate"
+	model "github.com/asalimonov/gquorum/internal/recoverymodel"
 	"github.com/asalimonov/gquorum/internal/replicastate"
 	"github.com/asalimonov/gquorum/internal/watchstate"
 	"github.com/asalimonov/gquorum/membership"
@@ -39,19 +40,21 @@ type response struct {
 	err    error
 }
 type request struct {
-	expectedTerm uint64
-	ctx          context.Context
-	correlation  string
-	proposal     Proposal
-	messages     []raftpb.Message
-	change       *raftpb.ConfChangeV2
-	admin        *raftstate.Entry
-	expected     *raftpb.ConfState
-	transfer     uint64
-	snapshot     bool
-	reply        chan response
-	retried      bool
-	retryAt      time.Time
+	expectedTerm       uint64
+	ctx                context.Context
+	correlation        string
+	proposal           Proposal
+	messages           []raftpb.Message
+	change             *raftpb.ConfChangeV2
+	admin              *raftstate.Entry
+	expected           *raftpb.ConfState
+	transfer           uint64
+	snapshot           bool
+	recoveryCheckpoint *model.SeedKey
+	consumed           *model.Consumed
+	reply              chan response
+	retried            bool
+	retryAt            time.Time
 }
 type snapshotReport struct {
 	id     uint64
@@ -70,6 +73,8 @@ type Group struct {
 	opts                                      Options
 	rn                                        *raft.RawNode
 	ms                                        *raft.MemoryStorage
+	checkpointMemory                          *checkpointMemory
+	recoveryKey                               *model.SeedKey
 	cs                                        raftpb.ConfState
 	applied, snapshotIndex, recoveryCommit    uint64
 	durableHS                                 raftpb.HardState

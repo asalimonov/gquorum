@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/managed"
 	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/internal/recoverydisk"
 	"github.com/asalimonov/gquorum/internal/recoverymodel"
@@ -156,7 +157,7 @@ func (n *node) openLoadResources(m *metaservice.Group) error {
 		n.mu.Lock()
 		n.ownedWAL = owned
 		n.mu.Unlock()
-		store, retirement = owned, owned
+		store, retirement = managed.RecoveryStore(owned), owned
 	}
 	// Groups created with topology.StorageMemory keep their Raft state
 	// here.

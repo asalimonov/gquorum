@@ -15,6 +15,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/recoverydisk"
+	model "github.com/asalimonov/gquorum/internal/recoverymodel"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 	bolt "go.etcd.io/bbolt"
@@ -68,14 +69,16 @@ func (e *IdentityMismatchError) Error() string {
 func (*IdentityMismatchError) Unwrap() error { return fault.ErrIdentityMismatch }
 
 type group struct {
-	mu       sync.Mutex
-	dir      string
-	identity storage.Identity
-	w        *wal.WAL
-	ss       *snap.Snapshotter
-	state    *bolt.DB
-	hs       raftpb.HardState
-	last     uint64
+	mu          sync.Mutex
+	dir         string
+	identity    storage.Identity
+	w           *wal.WAL
+	ss          *snap.Snapshotter
+	state       *bolt.DB
+	hs          raftpb.HardState
+	last        uint64
+	recoveryKey *model.SeedKey
+	checkpoint  *model.CheckpointProof
 	// markers caches the durable WAL snapshot markers. It is scanned once when
 	// the group opens and then maintained by SaveSnapshot and Compact, so those
 	// hot paths never re-read the whole WAL.
@@ -87,18 +90,21 @@ type group struct {
 
 // Store owns node-local replica WALs, snapshotters and applied-state databases.
 type Store struct {
-	rootLease *recoverydisk.Lease
-	mu        sync.Mutex
-	opts      Options
-	logger    *slog.Logger
-	rootInfo  os.FileInfo
-	groups    map[string]*group
-	bindings  map[string]storage.Identity
-	closed    bool
-	stopC     chan struct{}
-	wg        sync.WaitGroup
-	closeOnce sync.Once
-	closeErr  error
+	rootLease        *recoverydisk.Lease
+	mu               sync.Mutex
+	opts             Options
+	logger           *slog.Logger
+	rootInfo         os.FileInfo
+	groups           map[string]*group
+	bindings         map[string]storage.Identity
+	protection       map[string]model.SeedKey
+	finished         map[model.SeedKey]model.Consumed
+	recoveryBoundary func(string) error
+	closed           bool
+	stopC            chan struct{}
+	wg               sync.WaitGroup
+	closeOnce        sync.Once
+	closeErr         error
 }
 
 var segmentConfig struct {
@@ -156,13 +162,15 @@ func openOwnedStore(opts Options, lease *recoverydisk.Lease) (*Store, error) {
 		return nil, err
 	}
 	return &Store{
-		rootLease: resource.lease,
-		opts:      opts,
-		rootInfo:  resource.info,
-		logger:    opts.Logger,
-		groups:    make(map[string]*group),
-		bindings:  make(map[string]storage.Identity),
-		stopC:     make(chan struct{}),
+		rootLease:  resource.lease,
+		opts:       opts,
+		rootInfo:   resource.info,
+		logger:     opts.Logger,
+		groups:     make(map[string]*group),
+		bindings:   make(map[string]storage.Identity),
+		protection: make(map[string]model.SeedKey),
+		finished:   make(map[model.SeedKey]model.Consumed),
+		stopC:      make(chan struct{}),
 	}, nil
 }
 
@@ -257,12 +265,25 @@ func (s *Store) openGroup(id string) (*group, error) {
 	if !bound {
 		return nil, fault.New(fault.Invalid, "bind replica before creating a group store", nil)
 	}
+	if err := s.acquireRecoveryGroup(id); err != nil {
+		return nil, err
+	}
 	dir := filepath.Join(s.opts.RootDir, id)
 	g, err := s.openGroupFiles(dir, want)
 	if err != nil {
 		return nil, err
 	}
 	wdir := filepath.Join(dir, WALDir)
+	if key, ok := s.protection[id]; ok {
+		g.recoveryKey = &key
+		found, findErr := s.findSeedControl(context.Background(), key)
+		if findErr != nil {
+			return nil, errors.Join(findErr, g.w.Close(), g.state.Close())
+		}
+		if found != nil {
+			g.checkpoint = found.control.Checkpoint
+		}
+	}
 	s.groups[id] = g
 	if *s.opts.Prewrite {
 		g.refillStop, g.refillDone = make(chan struct{}), make(chan struct{})
@@ -315,7 +336,8 @@ func (s *Store) openGroupFiles(dir string, want storage.Identity) (*group, error
 	if err := os.MkdirAll(filepath.Join(dir, SnapDir), dirMode); err != nil {
 		return nil, err
 	}
-	state, err := openState(filepath.Join(dir, StateFile), s.opts.DisableFSync)
+	_, protected := s.protection[want.GroupID]
+	state, err := openState(filepath.Join(dir, StateFile), s.opts.DisableFSync && !protected)
 	if err != nil {
 		return nil, err
 	}
@@ -334,7 +356,7 @@ func (s *Store) openGroupFiles(dir string, want storage.Identity) (*group, error
 	if err != nil {
 		return nil, err
 	}
-	if s.opts.DisableFSync {
+	if s.opts.DisableFSync && !protected {
 		w.SetUnsafeNoFsync()
 	}
 	g.w = w

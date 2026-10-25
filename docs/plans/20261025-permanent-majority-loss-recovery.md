@@ -16,7 +16,7 @@
 
 **Review/clarifications:** [docs/review/feat_permanent-majority-loss-recovery.md](../review/feat_permanent-majority-loss-recovery.md)
 
-**Status:** implementation in progress; Tasks 1–10 complete; checkpoint review due; next is durable WAL seeds.
+**Status:** implementation in progress; Tasks 1–11 complete; next is managed recovery replay, consumption and publication.
 
 ## Scope and precedence
 
@@ -739,59 +739,60 @@ writer/control/snapshot owners and functional tests.
 **Dependencies:** Tasks 1–10. **Outcome:** valid new-identity retained input, with
 real durable proof distinct from publication, replay and consumption.
 
-- [ ] Implement private recoveryStore adapter and backend functions from Appendix D.
+- [x] Implement private recoveryStore adapter and backend functions from Appendix D.
   Keep all new recovery operations inside internal packages. ProtectRecovery runs
   before opening a group and forces fsync independently of ordinary DisableFSync.
-- [ ] Revalidate archived source semantics/digest under the accepted operation and
+- [x] Revalidate archived source semantics/digest under the accepted operation and
   exact ordinary creation grant. Build a complete private staged B directory with
   fresh pin/metadata, source application snapshot at S, B singleton ConfState and
   the actual B creation grant installed at that retained snapshot position.
-- [ ] Use the shared model.CommittedPrefix view; never seed a classified unsynced
+- [x] Use the shared model.CommittedPrefix view; never seed a classified unsynced
   higher-term suffix beyond C. Copy application entries `(S,C]` byte-for-byte with original indexes, terms,
   RequestID/correlation. Validate source administrative/configuration semantics,
   then replace only those entries with empty normal entries at the same positions.
   Exclude `(C,L]`, retain source HardState.Term, set Vote=0/Commit=C and hint=S.
-- [ ] Fsync the complete staged store and marker before no-clobber directory
+- [x] Fsync the complete staged store and marker before no-clobber directory
   publication/parent sync. Record prepared then installed evidence. Preserve owned
   incomplete staging for reconciliation; refuse foreign paths. Never publish a
   partial WAL, overwrite a live store or rename a mountpoint.
-- [ ] Distinguish never-published staging from an installed/acquired identity.
+- [x] Distinguish never-published staging from an installed/acquired identity.
   Missing live WAL after installation/acquisition parks; never silently recreate
   that established B identity from A. Retry grants must follow the exact immutable
   predecessor chain and destination without rewriting original seed provenance.
-- [ ] Add the private NewRecoveryContext path using the startup owner's lifetime,
+- [x] Add the private NewRecoveryContext path using the startup owner's lifetime,
   removing the fixed five-second Restore cutoff for this recovery path only.
   Keep ordinary startup semantics and callback ownership intact. Cancellation
   joins restore/engine work; waiter timeout does not cancel accepted startup.
-- [ ] Implement RecoveryCheckpoint through the serialized engine/writer control
+- [x] Implement RecoveryCheckpoint through the serialized engine/writer control
   path. Persist a portable normalized B application snapshot and return actual
   durable Position/Digest. Validate checkpoint/seed identity through the backend;
   status/applied observations are not durability proof.
-- [ ] Permit legitimate intermediate B checkpoints during resumed unconsumed
+- [x] Permit legitimate intermediate B checkpoints during resumed unconsumed
   replay: the initial seed checksum is not a permanent live-store checksum.
   After normalized checkpoint plus replicated consumption, A is never refill input.
-- [ ] Implement FinishRecovery at a joined writer boundary after exact consumed
+- [x] Implement FinishRecovery at a joined writer boundary after exact consumed
   proof; restore the configured ordinary durability option without weakening
   another pending group. Manifest/marker writes always remain synchronous.
-- [ ] Validate seeded authority positions through the real metaengine authority
-  catalog: B's creation grant/receipt/fence uses the source snapshot index/term,
-  and a subsequent legitimate higher-revision group effect has strictly later
+- [x] Validate seeded authority positions through the real metaengine authority
+  catalog: B's creation grant/fence installs at the source snapshot index/term;
+  its ordinary creation receipt records the later committed ObserveEffect entry.
+  The checkpoint covers that actual receipt. A legitimate higher-revision group effect has strictly later
   position and nondecreasing term. Recheck after B restart and metadata pruning;
   include a real promote/transfer/demote path in Task 14. A fabricated monotonic
   tuple alone is not a substitute for validating the actual retained receipts.
-- [ ] Add functional tests for exact transformed entries/config/authority, tail
+- [x] Add functional tests for exact transformed entries/config/authority, tail
   exclusion, index continuity, snapshot normalization, interrupted staging/rename,
   post-install missing data, retry grants, long Restore, DisableFSync protection
   and checksum changes caused by legitimate B snapshots.
 
 #### Verification
 
-- [ ] `make test`; focused WAL/engine functional and race suites, including existing
+- [x] `make test`; focused WAL/engine functional and race suites, including existing
   normal startup/snapshot/compaction tests after extraction.
-- [ ] Validate seeded stores through the ordinary retained reader and no InitialAuthority
+- [x] Validate seeded stores through the ordinary retained reader and no InitialAuthority
   override; compare preserved A bytes. Verify forced synchronization before any
   returned checkpoint/seed proof and correct ownership after errors.
-- [ ] Record results; no data is publicly released until Task 12 validates all groups.
+- [x] Record results; no data is publicly released until Task 12 validates all groups.
 
 ### Task 12: Complete managed replay, consumption, publication and shutdown
 
@@ -1861,6 +1862,7 @@ type recoveryStore interface {
     ProtectRecovery(ctx context.Context, key model.SeedKey) error
     InstallRecoverySeed(ctx context.Context, seed model.SeedSpec) (model.SeedMarker,error)
     ReadRecoverySeed(ctx context.Context, key model.SeedKey) (model.SeedMarker,bool,error)
+    SaveRecoveryCheckpoint(ctx context.Context, key model.SeedKey, snapshot raftpb.Snapshot) error
     VerifyRecoveryCheckpoint(ctx context.Context, key model.SeedKey,
         point model.Position) (model.CheckpointProof,error)
     FinishRecovery(ctx context.Context, key model.SeedKey, proof model.Consumed) error
@@ -1879,7 +1881,8 @@ func Open(opts Options) (*Store, error) // delegates to walbackend.Open
 func OpenWithLease(opts Options, lease *recoverydisk.Lease) (*Store,error)
 func RecoveryRoot(s *Store) string
 func ProtectRecovery(ctx context.Context, s *Store, key model.SeedKey) error
-func InstallRecoverySeed(ctx context.Context, s *Store, seed model.SeedSpec) (model.SeedMarker,error)
+type SeedReplay func(context.Context, storage.Recovery) (model.Position,error)
+func InstallRecoverySeed(ctx context.Context, s *Store, seed model.SeedSpec, replay SeedReplay) (model.SeedMarker,error)
 func ReadRecoverySeed(ctx context.Context, s *Store, key model.SeedKey) (model.SeedMarker,bool,error)
 func VerifyRecoveryCheckpoint(ctx context.Context, s *Store, key model.SeedKey,
     point model.Position) (model.CheckpointProof,error)
@@ -1971,6 +1974,7 @@ type SeedKey struct {
 }
 type SeedSpec struct {
     Key SeedKey
+    BackupName string
     Source SeedSource
     Grant topology.AuthorityGrant
     Resources Resources
@@ -2011,3 +2015,22 @@ reconcile affected tasks rather than implementing stale declarations.
 
 - `docs/brainstorms/20261024-permanent-majority-loss-recovery-target.md`: SHA-256 `587068c901f0174a682bd2b9eb8dad491cc9d09d70490682dab96ca60df7d845`.
 - `docs/brainstorms/20261024-permanent-majority-loss-recovery.md`: SHA-256 `5ae72f61c80ec4b0bb1e8cfe208c93ea1440f1ffac30e69e1a4a394c07be040e`.
+
+### Task 11 private refinements (2026-10-25)
+
+- SeedSpec carries the accepted BackupName, checked against validated lease history,
+  so separate WAL/system roots locate exactly the accepted backup.
+- Recovery normalization handles C == S with atomic same-index snapshot replacement;
+  ordinary SaveSnapshot deliberately ignores that index and cannot provide proof.
+- Corrected creation fence versus receipt positions using authority_effects.go and
+  authority_membership.go: ObserveEffect produces the receipt at its committed
+  entry, not at the seed installation position. No fabricated receipt is allowed.
+- Checkpoint-only command simplification remains pending user approval.
+
+- Source validation is mandatory private adapter wiring: backend InstallRecoverySeed
+  takes SeedReplay as its fourth argument; the adapter supplies shared engine Replay.
+  This avoids a backend/engine test import cycle and introduces no app callback.
+- Separate seed-state records persist installation/acquisition before writer opening,
+  and retain normalized proof through ordinary intermediate snapshots/compaction.
+  Verify refuses the original seed as normalization proof; Finish checks the actual
+  snapshot receipt and releases only the exact group's durability protection.

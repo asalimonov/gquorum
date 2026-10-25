@@ -27,6 +27,11 @@ func TestObservedEffectsAndTransferIntentSurviveRestart(t *testing.T) {
 	observed, err := g.ObserveAuthorizedEffect(testContext(t), initial)
 	must(t, err)
 	must(t, observed.Validate(initial))
+	initialFence, err := g.InstallAuthority(testContext(t), initial)
+	must(t, err)
+	if observed.AppliedIndex <= initialFence.AppliedIndex || observed.AppliedTerm < initialFence.AppliedTerm {
+		t.Fatal("creation receipt must record its committed effect after authority installation", observed, initialFence)
+	}
 	if observed.Outcome != topology.EffectAlreadySatisfied {
 		t.Fatal(observed)
 	}

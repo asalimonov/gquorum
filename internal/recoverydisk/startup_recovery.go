@@ -33,6 +33,7 @@ func (o *Owner) PendingStartup(ctx context.Context) (*Journal, error) {
 			pending = record
 		}
 	}
+	o.captureRecoveryManifests(records)
 	if err := o.bindStartupHistory(ctx, names); err != nil {
 		return nil, err
 	}
@@ -75,5 +76,16 @@ func (o *Owner) openStartupJournal(ctx context.Context, pending *model.LocalMani
 		return nil, fault.New(fault.Unavailable, "recovery_pending", nil)
 	default:
 		return Open(ctx, o, pending.Request.RecoveryID)
+	}
+}
+
+func (o *Owner) captureRecoveryManifests(records []model.LocalManifest) {
+	if o.wal != nil {
+		o.wal.mu.Lock()
+		o.wal.manifests = make(map[string]model.LocalManifest, len(records))
+		for _, record := range records {
+			o.wal.manifests[record.BackupName] = model.CloneManifest(record)
+		}
+		o.wal.mu.Unlock()
 	}
 }

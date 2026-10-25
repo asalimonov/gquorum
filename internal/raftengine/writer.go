@@ -8,6 +8,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metrics"
+	model "github.com/asalimonov/gquorum/internal/recoverymodel"
 	"github.com/asalimonov/gquorum/storage"
 	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"
@@ -20,6 +21,8 @@ type writeKind uint8
 const (
 	writeReady writeKind = iota + 1
 	writeSnapshot
+	writeRecoveryCheckpoint
+	writeRecoveryFinish
 )
 
 type writeJob struct {
@@ -27,6 +30,7 @@ type writeJob struct {
 	rd       raft.Ready
 	snapshot raftpb.Snapshot
 	request  *request
+	proof    *model.CheckpointProof
 }
 
 // appliedHint carries the latest applied index from the run loop to the
@@ -156,6 +160,9 @@ func (g *Group) flushAppliedHint() {
 }
 
 func (g *Group) persistJob(ctx context.Context, job writeJob) error {
+	if job.kind == writeRecoveryCheckpoint || job.kind == writeRecoveryFinish {
+		return g.persistRecoveryCheckpoint(ctx, job)
+	}
 	if job.kind == writeSnapshot {
 		if err := g.opts.Store.SaveSnapshot(ctx, g.opts.GroupID, job.snapshot); err != nil {
 			return err

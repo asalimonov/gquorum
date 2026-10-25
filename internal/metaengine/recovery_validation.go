@@ -105,8 +105,8 @@ func validateRecoveryConsumed(state *scopedState, index *scopedIndexes, group mo
 		evidence.Identity != group.Destination || !validRecoveryDigest(evidence.SnapshotDigest) {
 		return fault.ErrIdentityMismatch
 	}
-	if evidence.GroupReceipt.AppliedIndex != group.Source.Snapshot.Index ||
-		evidence.GroupReceipt.AppliedTerm != group.Source.Snapshot.Term ||
+	if evidence.GroupReceipt.AppliedIndex < group.Source.Snapshot.Index ||
+		evidence.GroupReceipt.AppliedTerm < group.Source.Snapshot.Term ||
 		evidence.GroupReceipt.AppliedIndex > evidence.Checkpoint.Index ||
 		evidence.GroupReceipt.AppliedTerm > evidence.Checkpoint.Term {
 		return fault.ErrIdentityMismatch

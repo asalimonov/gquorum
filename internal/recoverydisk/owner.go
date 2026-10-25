@@ -31,6 +31,7 @@ type Lease struct {
 	lock            *fileutil.LockedFile
 	root            *os.Root
 	closed          bool
+	manifests       map[string]recoverymodel.LocalManifest
 	history         map[string]bool // validated system-journal names; never inferred from WAL entries
 }
 
@@ -243,6 +244,11 @@ func (o *Owner) TakeWALLease() (*Lease, error) {
 	if err := o.CheckRoots(); err != nil {
 		return nil, err
 	}
+	records, err := readNamespace(context.Background(), o.paths.StorageDir)
+	if err != nil {
+		return nil, err
+	}
+	o.captureRecoveryManifests(records)
 	lease := o.wal
 	o.wal = nil
 	return lease, nil
