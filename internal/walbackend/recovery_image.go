@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	model "github.com/asalimonov/gquorum/internal/recoverymodel"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
 	"github.com/asalimonov/gquorum/storage"
 	bolt "go.etcd.io/bbolt"
 	"go.etcd.io/etcd/server/v3/storage/wal"

@@ -23,7 +23,7 @@ import (
 	"github.com/asalimonov/gquorum/internal/metastore"
 	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/internal/raftstate"
-	"github.com/asalimonov/gquorum/internal/recoverydisk"
+	recoverydisk "github.com/asalimonov/gquorum/internal/recovery/disk"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )

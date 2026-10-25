@@ -585,6 +585,11 @@ lock and resolves peer names through the managed catalog outside that lock.
 
 ## Permanent-majority-loss recovery
 
+The root `recovery.go` adapter delegates to `internal/recovery`; Node wiring is
+consolidated in `node_recovery.go`. Accepted-start validation and partial-start
+reconciliation live in `internal/recovery/runtime`, and seed progress belongs to
+`internal/recovery/disk.Journal`.
+
 A `Recovery` handle owns configuration, with no open lifetime or Close method.
 Each I/O call acquires its own exclusive source ownership. Stop and join Node,
 including application callbacks and Node-owned stores, before Inspect/Approve/Run.

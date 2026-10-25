@@ -3,8 +3,9 @@
 Tests are grouped by what they exercise. Units check deterministic logic and
 isolated components. Non-Docker functional tests cover a single running
 participant, isolated Raft engines, protocol doubles, background application
-workers and persistence/recovery fixtures. Units and functional tests stay in
-the original packages beside the code they test. Multi-node consensus and
+workers and persistence/recovery fixtures. Tests of private implementation stay
+beside that implementation; public recovery API and Node integration coverage is
+grouped in the root-module `tests/recovery` package. Multi-node consensus and
 application scenarios live in `tests/cluster` and use real Docker processes
 through the bounded pool. Deterministic multi-node simulations live separately
 in `tests/sim`; `make test-sim` runs the real metadata transport and storage on
@@ -304,3 +305,31 @@ build) and `BenchmarkRecoveryMetadataResources` (`internal/metaengine` functiona
 build) cover large local recovery input. Compile a binary before OS RSS measurement
 and run one case at a time with `-test.benchtime=1x`; these large fixtures are not
 part of normal fast/functional runs. See the [qualification record](permanent-majority-loss-recovery.md).
+
+## Recovery source layout
+
+`tests/recovery` belongs to the root module and is discovered by the ordinary
+unit/functional commands. It groups public contracts, source inspection/approval,
+execution, Node startup/application/restart flows and resource benchmarks. No
+permanent-majority-loss recovery test remains in the repository root.
+Implementation-specific assertions stay beside `internal/recovery` components,
+metadata, managed replicas, WAL and engine code. Shared recovery tests use their
+own temporary single-Node fixtures and joined cleanup.
+
+`TestPublicLabelEditUsesDocumentWorkflow` now runs under `tests/sim`: it edits a
+complete document through public placement preparation/Stage/Approve and verifies
+replicated labels and unchanged replica allocation through quorum reads on all
+three simulated participants. Select it with:
+
+```sh
+make test-sim SIM_SEEDS=1-3 SIM_ARGS='-run TestPublicLabelEditUsesDocumentWorkflow'
+```
+
+Recovery resource reproduction now compiles `./tests/recovery` instead of `.`:
+
+```sh
+go test -c -tags=functional -o /tmp/gquorum-recovery-resources.test ./tests/recovery
+```
+
+Prior qualification records retain their original revision, binary hash and source
+paths. Source moves do not turn those historical measurements into new runs.

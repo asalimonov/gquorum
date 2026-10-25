@@ -1309,3 +1309,67 @@ Task16 selected-case result and completion
 - Final docs/path/fence/diff checks pass. No gquorum-test containers/volumes
   remain. Post-audit peer review was cancelled by the user. Meridian wiring and
   the already documented feature exclusions remain outside this implementation.
+
+
+## Approved recovery package-layout refactor (post-plan)
+
+Date:2026-10-25. Baseline:e09ec75. User approved the proposed package and test
+layout, refined it to internal/recovery/{word}, required zero root recovery tests
+and selected simulation for the public placement workflow. This is the approved
+post-plan maintenance change, not a seventeenth feature-plan task.
+
+Implemented
+- Moved all flat internal/recoveryword packages beneath internal/recovery:
+  disk,exec,inspect,model,placement,runtime,testutil. Updated callers without
+  compatibility shims. Child dependencies remain acyclic; no child imports the
+  parent facade. The runtime path retains package runtime with a local naming
+  exception and descriptive recoveryruntime imports to avoid standard-library
+  ambiguity. No global lint rule was weakened.
+- Parent internal/recovery owns offline configuration, Inspect/Approve,
+  Run/Cancel/history, diagnostics and old-member probes. Root recovery.go is a
+  91-line adapter preserving public signatures, zero-value configuration shape
+  and pure startup-option transformation. Mutable option copying is grouped
+  with NodeOptions. Root node_recovery.go owns synchronization/lifecycle wiring;
+  startup guards/partial-start checks moved to runtime and seed reconciliation
+  to disk.Journal. Removed private Node protocol-injection/observer fields.
+- Merged progress/reads/status/RetireOptions into cluster.go229lines and
+  MetricsOptions into node_options.go. Root production files34→19; recovery
+  implementation files12→2. Source/WAL/FSM algorithms and formats are preserved.
+- Zero recovery test files OR recovery-named test functions remain in root,
+  including the pending-startup case formerly in node_storage_owner_func_test.go.
+  Public tests/benchmarks are grouped by workflow in tests/recovery. Constructor
+  copies/probes and journal discovery assertions follow their internal owners.
+  Lost import/consumption replies, startup limits and causal failure assertions
+  are covered at the runtime boundary; public Node cases use lifecycle/status.
+  The actual-applied command trace follows its owning metadata catalog test.
+  No public testing hooks or global failpoints were added.
+- Moved TestPublicLabelEditUsesDocumentWorkflow into tests/sim. It edits a complete
+  document through PreparePlacement/Stage/Approve, then checks Latest/Target labels
+  and unchanged _meta allocation on all three real simulated participants using
+  quorum-confirmed reads. No Docker fixture is used for that case.
+- Updated current architecture/package map/testing guidance, AGENTS navigation and
+  benchmark reproduction path. Historical plan/review/format captures retain
+  their original provenance; the audit points to the new source map.
+
+Verified
+- make test PASS2139/2139,7.763s across all five application modules:
+  test-reports/unit/20261025T110715.493588Z-3wwwvz2p/report.md.
+- New placement simulation selected alone, seeds1–3 PASS3/3,46.140s:
+  test-reports/sim/20261025T110507.768231Z-me8_2nm2/report.md.
+- Functional suites compiled with -tags=functional -run '^$'; full lint also
+  compiled/vetted functional, cluster/example and simulation tags across modules.
+  No functional, Docker cluster, example or resource suite was executed during
+  this refactor, following the user's restriction on heavy reruns.
+- Lint initially found import aliases/package comments and formatting after the
+  move; corrected them. The last full lint completed successfully. The user then
+  required file-scoped lint during editing; the final recovery.go-only analyzer
+  selection passed: /tmp/gquorum-layout-lint-recovery-file.log. No further full
+  make lint was called. Recorded this rule in AGENTS.md for future work.
+- No old flat recovery import remains in Go source. Public API call sites in all
+  modules compile. No .proto/.pb.go, go.mod/go.sum, .gitignore or physical fixture
+  was changed. git diff --check and current-document links/fences passed.
+
+Limitations
+- Functional tests modified/moved by the refactor are compiled, not newly run.
+  Earlier runtime/resource qualification remains historical evidence; it is not
+  presented as a rerun of the refactored tree. No peer review or Meridian wiring.

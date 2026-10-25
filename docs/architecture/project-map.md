@@ -983,12 +983,12 @@ Further contract detail: [library integration](library.md), [Raft](raft.md),
 
 Root `recovery*.go` exposes configuration, inspection, approval, archive/cancel and
 history; `node_recovery*.go` validates and resumes accepted startup.
-`internal/recoverymodel` owns shared values and strict local records;
-`internal/recoverydisk` owns leases/journals/readonly evidence;
-`internal/recoveryinspect` classifies complete retained sources;
-`internal/recoveryexec` owns Backup/Undo/archive;
-`internal/recoveryruntime` coordinates ordinary metadata import and consumption;
-`internal/recoveryplacement` isolates retained policy deficits.
+`internal/recovery/model` owns shared values and strict local records;
+`internal/recovery/disk` owns leases/journals/readonly evidence;
+`internal/recovery/inspect` classifies complete retained sources;
+`internal/recovery/exec` owns Backup/Undo/archive;
+`internal/recovery/runtime` coordinates ordinary metadata import and consumption;
+`internal/recovery/placement` isolates retained policy deficits.
 
 `internal/walbackend` implements the public `storage/walstore` aliases, with
 private seed/protection/checkpoint operations composed through
@@ -1001,3 +1001,19 @@ The separate `tests/cluster/testapp/recovery*.go` files implement an application
 job/Files hook and authenticated remote controls using public APIs. Process cases
 in `permanent_majority_loss*_test.go` use three original nodes and return them via
 explicit reset/admission. These are independent callers, not Meridian wiring.
+
+## Recovery source navigation (2026-10-25 layout)
+
+| Path | Role |
+| --- | --- |
+| `recovery.go` | Stable public facade and pure NodeOptions transformation. |
+| `node_recovery.go` | Node synchronization, lifecycle composition and resource adoption. |
+| `internal/recovery` | Configured offline Inspect/Approve/Run/Cancel/Status/List orchestration and reachability precheck. |
+| `internal/recovery/{disk,exec,inspect,model}` | Root ownership and journals, archive/Undo execution, source inventory/readers and shared schemas. |
+| `internal/recovery/{placement,runtime,testutil}` | Retained deficits, Node startup/control/publication, and pure record fixtures. |
+| `tests/recovery` | Public contracts, single-participant recovery flows and opt-in resource benchmarks. |
+| `tests/sim` | Replicated label/document Stage/Approve regression, executed inside each simulated machine. |
+
+No recovery test remains in the root. Metadata/WAL/engine recovery tests continue
+in their owning internal packages. Nested package paths replace former flat
+internal/recoveryword paths without changing disk formats or public signatures.

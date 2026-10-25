@@ -5,8 +5,8 @@ import (
 	"errors"
 
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/internal/recoverydisk"
-	model "github.com/asalimonov/gquorum/internal/recoverymodel"
+	recoverydisk "github.com/asalimonov/gquorum/internal/recovery/disk"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
 	"github.com/asalimonov/gquorum/topology"
 	bolt "go.etcd.io/bbolt"
 )

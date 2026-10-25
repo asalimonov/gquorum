@@ -8,11 +8,10 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/authoritystore"
 	"github.com/asalimonov/gquorum/internal/managed"
-	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metaservice"
-	"github.com/asalimonov/gquorum/internal/recoverydisk"
-	model "github.com/asalimonov/gquorum/internal/recoverymodel"
-	"github.com/asalimonov/gquorum/internal/recoveryruntime"
+	recoverydisk "github.com/asalimonov/gquorum/internal/recovery/disk"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
+	recoveryruntime "github.com/asalimonov/gquorum/internal/recovery/runtime"
 	"github.com/asalimonov/gquorum/internal/watchstate"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/storage"
@@ -134,8 +133,6 @@ type node struct {
 	storageOwner            *recoverydisk.Owner
 	recoveryJournal         *recoverydisk.Journal
 	recoveryCoordinator     *recoveryruntime.Coordinator
-	recoveryMetaPort        func(recoveryruntime.MetaPort) recoveryruntime.MetaPort // instance-owned protocol test seam
-	recoveryCommandObserver func(metaengine.ProposalKind, error)                    // instance-owned test seam
 	recoveryManifest        *model.LocalManifest
 	limitsExplicit          bool
 	ownedMemory             *memstore.Store

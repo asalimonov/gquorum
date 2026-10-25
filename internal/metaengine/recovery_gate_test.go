@@ -4,11 +4,12 @@ package metaengine
 
 import (
 	"encoding/json"
-	"github.com/asalimonov/gquorum/fault"
 	"testing"
 	"time"
 
-	model "github.com/asalimonov/gquorum/internal/recoverymodel"
+	"github.com/asalimonov/gquorum/fault"
+
+	"github.com/asalimonov/gquorum/internal/recovery/model"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3/raftpb"
 )

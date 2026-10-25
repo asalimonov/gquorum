@@ -10,7 +10,7 @@ import (
 	"os"
 
 	"github.com/asalimonov/gquorum/fault"
-	model "github.com/asalimonov/gquorum/internal/recoverymodel"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
 	"go.etcd.io/etcd/server/v3/storage/wal"
 	"go.etcd.io/etcd/server/v3/storage/wal/walpb"
 )

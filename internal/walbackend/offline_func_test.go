@@ -15,7 +15,7 @@ import (
 	"testing"
 
 	"github.com/asalimonov/gquorum/fault"
-	model "github.com/asalimonov/gquorum/internal/recoverymodel"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/storage/storagetest"
 	bolt "go.etcd.io/bbolt"

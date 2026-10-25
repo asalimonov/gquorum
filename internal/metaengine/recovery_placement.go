@@ -1,8 +1,8 @@
 package metaengine
 
 import (
-	model "github.com/asalimonov/gquorum/internal/recoverymodel"
-	"github.com/asalimonov/gquorum/internal/recoveryplacement"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
+	recoveryplacement "github.com/asalimonov/gquorum/internal/recovery/placement"
 	"github.com/asalimonov/gquorum/topology"
 )
 

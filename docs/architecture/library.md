@@ -673,3 +673,29 @@ hints, force-elects an old replica or truncates A.
 See [runtime ownership](runtime.md#permanent-majority-loss-recovery),
 [policy deficits](placement.md#recovery-policy-deficits) and the
 [validation record](../testing/permanent-majority-loss-recovery.md).
+
+## Recovery package layout
+
+The public Recovery type, NewRecovery and RecoveryStartOptions remain in
+`recovery.go`. That file translates NodeOptions and delegates the offline work to
+`internal/recovery`; `node_recovery.go` contains only Node lifecycle wiring and
+synchronization. Cluster read/status/progress adapters and RetireOptions are grouped
+in `cluster.go`; MetricsOptions and mutable NodeOptions copying live in
+`node_options.go`.
+
+The private recovery subtree separates source inspection (`inspect`), durable
+ownership/journals (`disk`), offline Backup/Undo/archive execution (`exec`), shared
+records/codecs (`model`), retained policy adaptation (`placement`) and Node startup/
+consumption/publication (`runtime`). Pure record fixtures live in `testutil`.
+Children depend on lower-level siblings/model rather than importing the parent.
+The runtime package is imported as recoveryruntime to distinguish Go's runtime.
+Recovery logic specific to the metadata FSM, managed replicas, WAL backend and
+Raft interpreter stays beside those owners. Public APIs and persisted schemas are
+unchanged by this source-layout refactor.
+
+Implementation tests follow their internal owner. Public API and single-Node
+recovery integration tests and resource benchmarks are in `tests/recovery`, within
+the root module. That fixture records caller-supplied options; it does not inspect
+the root Node implementation or expose production testing hooks. The placement
+label/document workflow runs in `tests/sim`, using real simulated Nodes and quorum
+reads on every participant.

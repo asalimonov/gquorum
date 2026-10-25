@@ -2,7 +2,7 @@ package metaservice
 
 import (
 	"github.com/asalimonov/gquorum/internal/metaengine"
-	"github.com/asalimonov/gquorum/internal/recoveryplacement"
+	recoveryplacement "github.com/asalimonov/gquorum/internal/recovery/placement"
 )
 
 func planRecoveryContext(read metaengine.PlanRead) (recoveryplacement.Context, error) {

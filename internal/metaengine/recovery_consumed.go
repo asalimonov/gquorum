@@ -2,7 +2,7 @@ package metaengine
 
 import (
 	"github.com/asalimonov/gquorum/fault"
-	model "github.com/asalimonov/gquorum/internal/recoverymodel"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
 	"github.com/asalimonov/gquorum/topology"
 )
 

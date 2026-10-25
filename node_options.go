@@ -1,12 +1,14 @@
 //revive:disable:max-public-structs Keep Node and subsystem options together for API navigation.
-
 package gquorum
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"log/slog"
+	"maps"
 	"net"
+	"slices"
 	"strings"
 	"time"
 
@@ -352,4 +354,47 @@ func validateLoadOptions(o LoadOptions) error {
 		o.Engine.Reads), Timing: raftengine.Timing(
 		o.Engine.Timing), MaxPendingProposals: o.Engine.MaxPendingProposals,
 		ProposalTimeout: o.Engine.ProposalTimeout}).ValidateSettings()
+}
+
+// MetricsOptions bounds local sampling and cluster observation. Zero fields
+// select defaults. Raw history is process-local and is lost on restart.
+type MetricsOptions struct {
+	SampleInterval   time.Duration // default 1s
+	CollectInterval  time.Duration // default 5s
+	CollectTimeout   time.Duration // default 2s per metrics round or native load status read
+	MaxSampleAge     time.Duration // default 15s
+	HistoryRetention time.Duration // default 10m
+	MaxHistoryPoints int           // default 600 per series
+	MaxParallelReads int           // default 8 per pool; independent collector and native load status pools
+}
+
+func cloneNodeOptions(opts NodeOptions) NodeOptions {
+	out := opts
+	out.Node.Labels = maps.Clone(opts.Node.Labels)
+	out.Placement = opts.Placement.Clone()
+	out.Bootstrap.JoinSeeds = slices.Clone(opts.Bootstrap.JoinSeeds)
+	out.Bootstrap.Founders = slices.Clone(opts.Bootstrap.Founders)
+	for i := range out.Bootstrap.Founders {
+		out.Bootstrap.Founders[i].Node.Labels = maps.Clone(opts.Bootstrap.Founders[i].Node.Labels)
+	}
+	if opts.Loads.Storage.WAL != nil {
+		wal := *opts.Loads.Storage.WAL
+		if wal.Prewrite != nil {
+			value := *wal.Prewrite
+			wal.Prewrite = &value
+		}
+		out.Loads.Storage.WAL = &wal
+	}
+	if opts.Meta.VoterConfig != nil {
+		config := *opts.Meta.VoterConfig
+		out.Meta.VoterConfig = &config
+	}
+	out.Meta.Network.ClusterCredential = bytes.Clone(opts.Meta.Network.ClusterCredential)
+	if opts.Meta.Network.TLS != nil {
+		out.Meta.Network.TLS = opts.Meta.Network.TLS.Clone()
+	}
+	if opts.Meta.Network.ClientTLS != nil {
+		out.Meta.Network.ClientTLS = opts.Meta.Network.ClientTLS.Clone()
+	}
+	return out
 }

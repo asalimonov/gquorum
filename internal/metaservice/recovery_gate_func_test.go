@@ -11,8 +11,8 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metapb"
 	"github.com/asalimonov/gquorum/internal/metatransport"
-	model "github.com/asalimonov/gquorum/internal/recoverymodel"
-	"github.com/asalimonov/gquorum/internal/recoverytest"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
+	recoverytest "github.com/asalimonov/gquorum/internal/recovery/testutil"
 )
 
 func TestRecoveryPreImportGateBlocksJoinAndSchedulerOnAnActualLeader(t *testing.T) {

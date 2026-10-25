@@ -8,8 +8,9 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/managed"
 	"github.com/asalimonov/gquorum/internal/metaservice"
-	"github.com/asalimonov/gquorum/internal/recoverydisk"
-	"github.com/asalimonov/gquorum/internal/recoverymodel"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
+
+	recoverydisk "github.com/asalimonov/gquorum/internal/recovery/disk"
 	"github.com/asalimonov/gquorum/internal/walbackend"
 	"github.com/asalimonov/gquorum/lifecycle"
 	"github.com/asalimonov/gquorum/storage/memstore"
@@ -76,7 +77,7 @@ func (n *node) Start(parent context.Context) error {
 }
 
 func (n *node) acquireStorageOwner() error {
-	paths := recoverymodel.Paths{StorageDir: n.opts.StorageDir}
+	paths := model.Paths{StorageDir: n.opts.StorageDir}
 	if wal := n.opts.Loads.Storage.WAL; wal != nil {
 		paths.LoadWALDir = wal.RootDir
 	}
@@ -113,7 +114,6 @@ func (n *node) acceptNodeStart(parent context.Context) (bool, error) {
 // runtimeMetaOptions binds metadata callbacks to this exact Node owner.
 func (n *node) runtimeMetaOptions() metaservice.Options {
 	meta := n.metaOpts
-	meta.ObserveRecoveryCommand = n.recoveryCommandObserver
 	meta.BeforeOpenEngine = n.acquireMetaAuthority
 	meta.AfterOpenEngine = n.markMetaAcquired
 	meta.RequestOwnerStop = n.metaRequestedStop

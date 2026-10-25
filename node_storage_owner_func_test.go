@@ -12,15 +12,16 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/internal/recoverydisk"
-	"github.com/asalimonov/gquorum/internal/recoverymodel"
-	"github.com/asalimonov/gquorum/internal/recoverytest"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
+
+	recoverydisk "github.com/asalimonov/gquorum/internal/recovery/disk"
+
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/storage/walstore"
 )
 
-func nodeStoragePaths(o NodeOptions) recoverymodel.Paths {
-	paths := recoverymodel.Paths{StorageDir: o.StorageDir}
+func nodeStoragePaths(o NodeOptions) model.Paths {
+	paths := model.Paths{StorageDir: o.StorageDir}
 	if o.Loads.Storage.WAL != nil {
 		paths.LoadWALDir = o.Loads.Storage.WAL.RootDir
 	}
@@ -159,41 +160,4 @@ func TestNodeStorageContentionBeforeMetadataAcquisition(t *testing.T) {
 			assertNodeStorageReleased(t, o)
 		})
 	}
-}
-
-func TestNodePendingRecoveryCannotRefound(t *testing.T) {
-	t.Parallel()
-	root := t.TempDir()
-	o := authorityNodeOptions(t, root, "pending")
-	at := time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC)
-	name, err := recoverymodel.BackupName(at, "pending")
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := recoverytest.Manifest(nodeStoragePaths(o), "pending", at, recoverymodel.Approved)
-	data, err := recoverymodel.EncodeCanonical(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := filepath.Join(root, recoverydisk.Namespace, name)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), data, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	n, err := NewNode(o)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := n.Start(t.Context()); !errors.Is(err, fault.ErrUnavailable) {
-		t.Fatal("pending recovery permitted founding", err)
-	}
-	stopAuthorityNode(t, n)
-	for _, file := range []string{"_meta.bolt", "_authority.bolt"} {
-		if _, err := os.Stat(filepath.Join(root, file)); !errors.Is(err, os.ErrNotExist) {
-			t.Fatal("pending startup acquired metadata", file, err)
-		}
-	}
-	assertNodeStorageReleased(t, o)
 }

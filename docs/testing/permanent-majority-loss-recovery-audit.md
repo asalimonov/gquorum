@@ -8,6 +8,12 @@ and its approved refinements define the contracts. The
 resource, compatibility and benchmark results. Review discussions are retained
 separately; they are not execution authority.
 
+Source paths below describe the audited pre-layout-refactor revision e09ec75.
+The subsequently approved package move is documented in the current
+[package map](../architecture/project-map.md#recovery-source-navigation-2026-10-25-layout).
+Public signatures and durable contracts remain; root implementation/test filenames
+were consolidated or moved into internal/recovery and tests/recovery.
+
 The audit covers gquorum and its independent caller fixture. Meridian's wiring,
 deployment, SQL repair and business consistency checks remain outside this plan.
 There is no new HTTP server in the library, SQL schema, remote cache, migration,

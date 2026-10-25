@@ -12,7 +12,7 @@ import (
 	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/internal/metastore"
 	internalmetrics "github.com/asalimonov/gquorum/internal/metrics"
-	model "github.com/asalimonov/gquorum/internal/recoverymodel"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
@@ -104,9 +104,7 @@ func (n *node) newHost(m *metaservice.Group) (*managed.Host, error) {
 	recoveryJournal := n.recoveryJournal
 	n.mu.RUnlock()
 	if recoveryJournal != nil {
-		cfg.RecordRecoverySeed = func(ctx context.Context, progress model.SeedProgress) error {
-			return recordManagedRecoverySeed(ctx, recoveryJournal, progress)
-		}
+		cfg.RecordRecoverySeed = recoveryJournal.ReconcileSeed
 	}
 	host, err := managed.New(cfg)
 	if err != nil {

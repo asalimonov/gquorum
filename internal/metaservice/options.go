@@ -22,7 +22,7 @@ import (
 	"github.com/asalimonov/gquorum/internal/observe"
 	"github.com/asalimonov/gquorum/internal/operator"
 	"github.com/asalimonov/gquorum/internal/raftengine"
-	model "github.com/asalimonov/gquorum/internal/recoverymodel"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
 	internalscheduling "github.com/asalimonov/gquorum/internal/scheduling"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/metrics"

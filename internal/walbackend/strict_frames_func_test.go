@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	model "github.com/asalimonov/gquorum/internal/recoverymodel"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
 )
 
 func TestStrictZeroFrameCannotHideLaterData(t *testing.T) {

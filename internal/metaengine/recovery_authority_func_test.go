@@ -14,7 +14,7 @@ import (
 
 	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/internal/raftstate"
-	model "github.com/asalimonov/gquorum/internal/recoverymodel"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/storage/walstore"
 	"github.com/asalimonov/gquorum/topology"
@@ -59,7 +59,7 @@ func applyRecoveryCatalog(t *testing.T, m *Machine, proposal any) ApplyResult {
 	return decoded
 }
 
-func recoveredCatalogGrant(t *testing.T) (*Machine, topology.AuthorityGrant) {
+func recoveredCatalogGrant(t *testing.T, observers ...func(ProposalKind, error)) (*Machine, topology.AuthorityGrant) {
 	t.Helper()
 	raw, err := os.ReadFile("testdata/recovery-schema1/importing.json")
 	catalogCheck(t, err)
@@ -68,6 +68,9 @@ func recoveredCatalogGrant(t *testing.T) (*Machine, topology.AuthorityGrant) {
 	m, err := NewMachine(source.Rules, nil)
 	catalogCheck(t, err)
 	catalogCheck(t, m.Restore(t.Context(), raw))
+	if len(observers) > 0 {
+		m.OnRecoveryCommand = observers[0]
+	}
 	op := m.scoped.indexes.operations[m.scoped.indexes.first[2]].Clone()
 	action := scopedPlanAction(&op, op.Plan.Steps[0])
 	applyRecoveryCatalog(t, m, TransitionOperationProposal{ProposalID: "start",
@@ -82,7 +85,8 @@ func recoveredCatalogGrant(t *testing.T) (*Machine, topology.AuthorityGrant) {
 
 func TestRecoveredCreationReceiptValidatesThroughRealCatalogAfterRestartAndPrune(t *testing.T) {
 	t.Parallel()
-	m, grant := recoveredCatalogGrant(t)
+	trace := map[ProposalKind]error{}
+	m, grant := recoveredCatalogGrant(t, func(kind ProposalKind, err error) { trace[kind] = err })
 	group := m.RecoveryState().Groups[0]
 	store, err := walstore.Open(walstore.Options{RootDir: t.TempDir(), NodeName: "n1", ClusterID: "recovered"})
 	catalogCheck(t, err)
@@ -144,6 +148,12 @@ func TestRecoveredCreationReceiptValidatesThroughRealCatalogAfterRestartAndPrune
 		Term: retained.Snapshot.Metadata.Term}, SnapshotDigest: hex.EncodeToString(digest[:]), HostReceipt: host, GroupReceipt: receipt}
 	applyRecoveryCatalog(t, m, model.GroupConsumedProposal{RecoveryID: m.RecoveryState().RecoveryID,
 		PlanDigest: m.RecoveryState().PlanDigest, GroupID: "shard0", Checkpoint: model.CheckpointProof{Identity: evidence.Identity, Position: evidence.Checkpoint, Digest: evidence.SnapshotDigest}, ProposalID: "consumed"})
+	for _, kind := range []ProposalKind{KindBeginEffect, KindRecordEffect, KindTransitionOperation, KindRecoveryGroupConsumed} {
+		allowed, found := trace[kind]
+		if !found || allowed != nil {
+			t.Fatal("committed recovery command absent or refused", kind, found, allowed)
+		}
+	}
 	catalogCheck(t, core.Stop(ctx))
 	opts.InstanceID = "restart"
 	restarted, err := raftengine.NewContext(ctx, opts)

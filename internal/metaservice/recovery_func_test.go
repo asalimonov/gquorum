@@ -12,8 +12,8 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metapb"
-	model "github.com/asalimonov/gquorum/internal/recoverymodel"
-	"github.com/asalimonov/gquorum/internal/recoverytest"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
+	recoverytest "github.com/asalimonov/gquorum/internal/recovery/testutil"
 	"github.com/asalimonov/gquorum/topology"
 )
 

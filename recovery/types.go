@@ -2,97 +2,97 @@
 
 package recovery
 
-import "github.com/asalimonov/gquorum/internal/recoverymodel"
+import "github.com/asalimonov/gquorum/internal/recovery/model"
 
 // Mode selects rebuilding a survivor or resetting an old participant for admission.
-type Mode = recoverymodel.Mode
+type Mode = model.Mode
 
 // Request identifies an audited recovery inspection and its desired lineage.
-type Request = recoverymodel.Request
+type Request = model.Request
 
 // Acceptance records exact-plan loss and deployment-fencing attestations.
-type Acceptance = recoverymodel.Acceptance
+type Acceptance = model.Acceptance
 
 // Position identifies a retained Raft log position.
-type Position = recoverymodel.Position
+type Position = model.Position
 
 // Remedy suggests an operator response without authorizing an effect.
-type Remedy = recoverymodel.Remedy
+type Remedy = model.Remedy
 
 // Issue describes a recovery blocker or observation.
-type Issue = recoverymodel.Issue
+type Issue = model.Issue
 
 // GroupRecovery reports retained evidence for one required group.
-type GroupRecovery = recoverymodel.GroupRecovery
+type GroupRecovery = model.GroupRecovery
 
 // Summary reports old work preserved in the backup rather than resumed.
-type Summary = recoverymodel.Summary
+type Summary = model.Summary
 
 // Plan is an owned operator report, never executable authority.
-type Plan = recoverymodel.Plan
+type Plan = model.Plan
 
 // Operation identifies one durable accepted recovery.
-type Operation = recoverymodel.Operation
+type Operation = model.Operation
 
 // FilesAction selects an idempotent application-owned file operation.
-type FilesAction = recoverymodel.FilesAction
+type FilesAction = model.FilesAction
 
 // FilesTask supplies an owned node-wide backup or undo request.
-type FilesTask = recoverymodel.FilesTask
+type FilesTask = model.FilesTask
 
 // FilesHook backs up or restores application-owned files and joins all work before returning.
-type FilesHook = recoverymodel.FilesHook
+type FilesHook = model.FilesHook
 
 // Resources bounds encoded recovery input sizes.
-type Resources = recoverymodel.Resources
+type Resources = model.Resources
 
 // Options selects the application-files hook and optional resource limits.
-type Options = recoverymodel.Options
+type Options = model.Options
 
 // Phase describes durable local recovery progress.
-type Phase = recoverymodel.Phase
+type Phase = model.Phase
 
 // GroupProgress reports restoration progress for one exact load replica.
-type GroupProgress = recoverymodel.GroupProgress
+type GroupProgress = model.GroupProgress
 
 // StatusEvent records a bounded durable local progress observation.
-type StatusEvent = recoverymodel.StatusEvent
+type StatusEvent = model.StatusEvent
 
 // Status reports durable historical recovery progress, not current quorum.
-type Status = recoverymodel.Status
+type Status = model.Status
 
 // Modes choose complete-survivor rebuilding or explicit reset for join.
 const (
-	Rebuild      = recoverymodel.Rebuild
-	ResetForJoin = recoverymodel.ResetForJoin
+	Rebuild      = model.Rebuild
+	ResetForJoin = model.ResetForJoin
 )
 
 // Remedies describe operator responses, never authorization.
 const (
-	RemedyRetry       = recoverymodel.RemedyRetry
-	RemedyCancel      = recoverymodel.RemedyCancel
-	RemedyInvestigate = recoverymodel.RemedyInvestigate
+	RemedyRetry       = model.RemedyRetry
+	RemedyCancel      = model.RemedyCancel
+	RemedyInvestigate = model.RemedyInvestigate
 )
 
 // FilesBackup and FilesUndo select the application-owned action.
 const (
-	FilesBackup = recoverymodel.FilesBackup
-	FilesUndo   = recoverymodel.FilesUndo
+	FilesBackup = model.FilesBackup
+	FilesUndo   = model.FilesUndo
 )
 
 // Phases describe durable operation progress; rollback values are reserved.
 const (
-	Approved      = recoverymodel.Approved
-	Files         = recoverymodel.Files
-	Cancelling    = recoverymodel.Cancelling
-	Cancelled     = recoverymodel.Cancelled
-	RollingBack   = recoverymodel.RollingBack
-	RolledBack    = recoverymodel.RolledBack
-	Archiving     = recoverymodel.Archiving
-	AwaitingStart = recoverymodel.AwaitingStart
-	Importing     = recoverymodel.Importing
-	Validating    = recoverymodel.Validating
-	Complete      = recoverymodel.Complete
-	JoinReady     = recoverymodel.JoinReady
-	Joined        = recoverymodel.Joined
+	Approved      = model.Approved
+	Files         = model.Files
+	Cancelling    = model.Cancelling
+	Cancelled     = model.Cancelled
+	RollingBack   = model.RollingBack
+	RolledBack    = model.RolledBack
+	Archiving     = model.Archiving
+	AwaitingStart = model.AwaitingStart
+	Importing     = model.Importing
+	Validating    = model.Validating
+	Complete      = model.Complete
+	JoinReady     = model.JoinReady
+	Joined        = model.Joined
 )

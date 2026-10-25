@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/internal/recoverydisk"
+	recoverydisk "github.com/asalimonov/gquorum/internal/recovery/disk"
 	"github.com/asalimonov/gquorum/storage"
 	bolt "go.etcd.io/bbolt"
 	"go.etcd.io/raft/v3/raftpb"

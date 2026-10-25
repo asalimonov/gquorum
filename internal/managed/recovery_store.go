@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/asalimonov/gquorum/internal/raftengine"
-	model "github.com/asalimonov/gquorum/internal/recoverymodel"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
 	"github.com/asalimonov/gquorum/internal/walbackend"
 	"github.com/asalimonov/gquorum/storage"
 	"go.etcd.io/raft/v3/raftpb"

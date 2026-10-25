@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	model "github.com/asalimonov/gquorum/internal/recoverymodel"
-	"github.com/asalimonov/gquorum/internal/recoveryplacement"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
+	recoveryplacement "github.com/asalimonov/gquorum/internal/recovery/placement"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3/raftpb"
 )

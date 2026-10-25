@@ -88,7 +88,7 @@ A cancelled Files hook separately measures joined Run and durable Cancel latency
 Compile and run one selected case at a time:
 
 ```sh
-go test -c -tags=functional -o /tmp/gquorum-recovery-resources.test .
+go test -c -tags=functional -o /tmp/gquorum-recovery-resources.test ./tests/recovery
 /usr/bin/time -l /tmp/gquorum-recovery-resources.test \
   -test.run '^$' -test.bench '^BenchmarkRecoveryResources/snapshot-64MiB-tail/disable-fsync-false$' \
   -test.benchtime=1x -test.benchmem
@@ -222,3 +222,14 @@ pass. The user-requested verification is complete. No post-audit peer review or
 further functional/cluster run was requested. Rolling report retention removed
 some older Task14/15 report directories; their original execution remains in
 progress, while final Task16 reports are retained at the links above.
+
+## Approved source-layout refactor
+
+Public methods and durable schemas are preserved. Current implementation lives in
+`internal/recovery/{disk,exec,inspect,model,placement,runtime,testutil}` and the parent
+offline facade; the root contains only `recovery.go` and `node_recovery.go` adapters.
+Public tests/benchmarks moved to `tests/recovery`, and implementation assertions
+moved beside their component. Earlier audit/qualification paths describe the
+recorded pre-refactor revision; use the current architecture package map for
+navigation. Root recovery tests are zero. The public placement workflow is now
+covered in simulation rather than a root functional test.

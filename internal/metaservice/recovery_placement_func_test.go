@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asalimonov/gquorum/internal/recoveryplacement"
+	recoveryplacement "github.com/asalimonov/gquorum/internal/recovery/placement"
 	"github.com/asalimonov/gquorum/topology"
 )
 

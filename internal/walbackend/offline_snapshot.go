@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/asalimonov/gquorum/fault"
-	model "github.com/asalimonov/gquorum/internal/recoverymodel"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/snap"
 	"go.etcd.io/etcd/server/v3/etcdserver/api/snap/snappb"
 	"go.etcd.io/etcd/server/v3/storage/wal/walpb"

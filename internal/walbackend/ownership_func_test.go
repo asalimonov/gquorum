@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/asalimonov/gquorum/fault"
-	"github.com/asalimonov/gquorum/internal/recoverydisk"
+	recoverydisk "github.com/asalimonov/gquorum/internal/recovery/disk"
 )
 
 func TestWALLeaseAdoptionAndFailureOwnership(t *testing.T) {
