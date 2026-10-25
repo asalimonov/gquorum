@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/recoverymodel"
@@ -36,6 +37,9 @@ type Lease struct {
 // Owner holds system and optional WAL roots until work and callbacks are joined.
 type Owner struct {
 	system, wal *Lease
+	journalMu   sync.Mutex
+	now         func() time.Time
+	boundary    func(string) error
 }
 
 // Acquire locks both roots nonblocking, releasing partial acquisitions on error.
@@ -52,7 +56,8 @@ func Acquire(ctx context.Context, paths recoverymodel.Paths) (*Owner, error) {
 		}
 		owner.wal = wal
 		if within(system.path, wal.path) {
-			return nil, errors.Join(fault.New(fault.Invalid, "system root is inside the WAL root", nil), owner.Close())
+			return nil, errors.Join(fault.New(fault.Invalid, "system root is inside the WAL root", nil),
+				owner.Close())
 		}
 	}
 	return owner, nil

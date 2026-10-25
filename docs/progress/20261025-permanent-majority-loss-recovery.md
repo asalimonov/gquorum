@@ -160,3 +160,63 @@ Notes
   and wait for asynchronous request cancellation rather than assuming AfterFunc
   executes synchronously. Initial lint findings were fixed before final validation.
 - Recovery jobs/routes remain Task 13; no stubbed recovery I/O method is called.
+
+
+## Task 4 — Durable journals and read-only discovery
+Date: 2026-10-25. Commit: included with this task's implementation commit.
+
+Implemented
+- Canonical accepted evidence/digest, bounded schema-1 manifest/current/seed
+  codecs, complete identity/inventory/resource/phase validation and monotonic CAS
+  updates. Exact JSON field spelling rejects case aliases as well as duplicate,
+  unknown, trailing, oversized and malformed records. Resource settings remain
+  latched immutable acceptance even though the content digest excludes them.
+- Durable Create/Open/View/Update, per-action Files attempts, cancellation audit
+  and completion, write-once successor marker, archive/seed progress and matching
+  pointer clearing. Reset journals deliberately contain no replay seeds; actual
+  join identity is write-once. Reserved rollback records decode/report but refuse
+  mutation/startup. No public Inspect/Approve/Run/Cancel behavior is enabled yet.
+- Private filesystem helpers use no-follow directory handles, exclusive-owner
+  no-clobber rename, temporary file sync/close/publication and both parent syncs.
+  Newly created directory ancestors are synced. Fault dependencies belong to each
+  Owner; no global failpoint was introduced. Unpublished owned empty directories
+  are cleaned up; observed approved manifests survive uncertain publication.
+- Read-only Status/List work while runtime leases are held and the configured WAL
+  mount is unavailable, without live-pin/quorum reads, factories or Files hooks.
+  Discovery retains valid rows plus typed errors, excludes duplicate/renamed IDs,
+  bounds each read before allocation and sorts acceptance time/ID deterministically.
+  Stale/missing pointers cannot bypass startup guards or reserve an ID anew.
+- Startup now uses these exact semantic codecs. Guard tests use complete pure
+  records via internal/recoverytest rather than earlier temporary header fixtures.
+  WAL archive inventory supports verified collection-marker files as well as dirs.
+
+Verified
+- make test: PASS, 2,019 tests/54 reports, 14.390s across all five modules. Report:
+  test-reports/unit/20261025T003100.441106Z-bvjesz_r/report.md.
+- Full root and recoverydisk functional suites: PASS (18.715s and 1.034s).
+- Same full functional suites with -race -count=1: PASS (20.087s and 2.079s).
+- make lint: PASS across every configured module/build tag/tooling module.
+- make test-sim SIM_SEEDS=1-3: PASS, 21/21 cases, 47.803s. Report:
+  test-reports/sim/20261025T002415.782454Z-ss564phi/report.md.
+- Fault coverage includes manifest/current temp sync, rename and parent sync;
+  uncertain phase reopen, explicit Undo after an attempted Backup, stale/empty/
+  matching-only pointers, reserved IDs, concurrent atomic readers/writers,
+  duplicate/mismatched names, sparse oversized records and symlink/hard-link refusal.
+- Reset progress regression verifies no replay seeds, JoinReady completion,
+  successor-before-join ordering and immutable joined identity.
+- Legacy physical fixture hashes match, scoped fixture trees have no diff,
+  and git diff --check passes. Original source files remain intact in fault tests.
+
+Notes
+- Direct Go os.Root.Lstat was already known unsupported by Gosim. This task also
+  verified that pinned Gosim's fs.dirInode accepts only AT_FDCWD and Openat rejects
+  real directory descriptors, despite exposing Openat/Fstatat/Renameat hooks.
+  Source: gosim v0.9.1 internal/fs/ops.go:33-66. Initial simulation failed on
+  openat(".") accordingly. Ordinary startup now checks namespace absence under
+  the existing stable leases before entering descriptor-based journal readers.
+  This is the same production path, with no simulation tag or lock bypass.
+  Existing journal namespaces and all recovery writes retain the no-follow handle
+  protocol; recovery filesystem operations are verified by native functional/
+  process suites, not new Gosim recovery scenarios.
+- A pure test-model helper package and split validation/progress files keep the
+  shared schema and tests coherent. No persisted legacy encoding was changed.

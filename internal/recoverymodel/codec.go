@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"unicode/utf8"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -30,7 +31,7 @@ func DecodeStrict(data []byte, into any, maxBytes uint64) error {
 	}
 	tokens := json.NewDecoder(bytes.NewReader(data))
 	tokens.UseNumber()
-	if err := checkJSONValue(tokens, 0); err != nil {
+	if err := checkJSONValue(tokens, 0, reflect.TypeOf(into)); err != nil {
 		return fault.New(fault.Unreadable, "invalid recovery record", err)
 	}
 	if _, err := tokens.Token(); err != io.EOF {
@@ -44,7 +45,7 @@ func DecodeStrict(data []byte, into any, maxBytes uint64) error {
 	return nil
 }
 
-func checkJSONValue(d *json.Decoder, depth int) error {
+func checkJSONValue(d *json.Decoder, depth int, shape reflect.Type) error {
 	if depth > maxJSONDepth {
 		return errors.New("recovery record nesting exceeds limit")
 	}
@@ -58,10 +59,10 @@ func checkJSONValue(d *json.Decoder, depth int) error {
 	}
 	switch opening {
 	case '{':
-		return checkJSONObject(d, depth)
+		return checkJSONObject(d, depth, shape)
 	case '[':
 		for d.More() {
-			if err := checkJSONValue(d, depth+1); err != nil {
+			if err := checkJSONValue(d, depth+1, arrayItem(shape)); err != nil {
 				return err
 			}
 		}
@@ -71,7 +72,7 @@ func checkJSONValue(d *json.Decoder, depth int) error {
 	}
 }
 
-func checkJSONObject(d *json.Decoder, depth int) error {
+func checkJSONObject(d *json.Decoder, depth int, shape reflect.Type) error {
 	keys := make(map[string]bool)
 	for d.More() {
 		key, err := d.Token()
@@ -83,7 +84,11 @@ func checkJSONObject(d *json.Decoder, depth int) error {
 			return fmt.Errorf("duplicate or invalid recovery field %q", name)
 		}
 		keys[name] = true
-		if err := checkJSONValue(d, depth+1); err != nil {
+		child, known := objectField(shape, name)
+		if !known {
+			return fmt.Errorf("unknown recovery field %q", name)
+		}
+		if err := checkJSONValue(d, depth+1, child); err != nil {
 			return err
 		}
 	}

@@ -7,12 +7,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/recoverymodel"
+	"github.com/asalimonov/gquorum/internal/recoverytest"
 )
 
 func TestOwnerExclusionAndWALTransfer(t *testing.T) {
@@ -155,11 +155,7 @@ func TestStartupGuardValidatesHistoryAndPendingRecords(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			record := recoverymodel.LocalManifest{Schema: 1, Revision: 1, Request: recoverymodel.Request{RecoveryID: "incident", Mode: recoverymodel.Rebuild, Actor: "operator", Comment: "loss"}, Paths: recoverymodel.Paths{StorageDir: root}, BackupName: name, AcceptedAt: at, Phase: phase, PlanDigest: strings.Repeat("a", 64)}
-			record.Acceptance.PlanDigest = record.PlanDigest
-			if phase == recoverymodel.Complete {
-				record.CompletedAt = &at
-			}
+			record := recoverytest.Manifest(recoverymodel.Paths{StorageDir: root}, "incident", at, phase)
 			dir := filepath.Join(root, Namespace, name)
 			if err := os.MkdirAll(dir, 0o700); err != nil {
 				t.Fatal(err)
@@ -278,8 +274,7 @@ func TestValidatedHistoryExcludesOnlyOwnedWALArchive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := recoverymodel.LocalManifest{Schema: 1, Revision: 1, Request: recoverymodel.Request{RecoveryID: "history", Mode: recoverymodel.Rebuild, Actor: "test", Comment: "completed recovery"}, Paths: paths, BackupName: name, AcceptedAt: at, Phase: recoverymodel.Complete, CompletedAt: &at, PlanDigest: strings.Repeat("a", 64)}
-	r.Acceptance.PlanDigest = r.PlanDigest
+	r := recoverytest.Manifest(paths, "history", at, recoverymodel.Complete)
 	dir := filepath.Join(root, Namespace, name)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)

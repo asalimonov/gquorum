@@ -16,7 +16,7 @@
 
 **Review/clarifications:** [docs/review/feat_permanent-majority-loss-recovery.md](../review/feat_permanent-majority-loss-recovery.md)
 
-**Status:** implementation in progress; Tasks 1–3 complete; Task 4 next.
+**Status:** implementation in progress; Tasks 1–4 complete; Task 5 next.
 
 ## Scope and precedence
 
@@ -341,42 +341,42 @@ CREATED `internal/recoverydisk/{journal,archive}.go` and atomic filesystem helpe
 **Dependencies:** Tasks 1–3. **Outcome:** durable operation history and startup guards,
 with no source archive or application callback yet.
 
-- [ ] Implement bounded canonical encoding/strict decoding for every schema-1 record
+- [x] Implement bounded canonical encoding/strict decoding for every schema-1 record
   in Appendix B. Reject duplicate/unknown keys, unsafe names, enum/version errors,
   overflow and conflicting immutable fields. Enforce target manifest/header bounds
   before unbounded allocation. Reserved rollback fields decode but authorize no action.
-- [ ] Implement Create/Open/Read/List/View/Update and durable progress methods from
+- [x] Implement Create/Open/Read/List/View/Update and durable progress methods from
   target §10.2, including per-action MarkFiles, cancellation audit/completion,
   SuccessorStartedAt, matching-only ClearCurrent, seed and phase updates. Keep
   immutable acceptance separate from mutable progress; store callbacks nowhere.
-- [ ] Generate BackupName once from AcceptedAt UTC and effective RecoveryID; use the
+- [x] Generate BackupName once from AcceptedAt UTC and effective RecoveryID; use the
   same name in both roots. Validate directory-name/manifest agreement, duplicates
   across timestamps, root bindings, action audit and monotonic revisions.
-- [ ] Implement temp-write/fsync/close/atomic publication/parent fsync, restrictive
+- [x] Implement temp-write/fsync/close/atomic publication/parent fsync, restrictive
   permissions, no-clobber moves and exact evidence reconciliation. Publish no
   successful phase until its facts are durable. Initial approval publication
   failure must preserve A; only identifiable durable accepted evidence can resume.
-- [ ] Reconcile a durable manifest with a missing/stale current pointer. A pointer
+- [x] Reconcile a durable manifest with a missing/stale current pointer. A pointer
   never proves completion or overrides another pending record. Terminal cancelled
   history releases its guard before matching pointer clearing; reserved IDs persist.
-- [ ] Implement read-only Recovery.Status/List without runtime leases, WAL payload
+- [x] Implement read-only Recovery.Status/List without runtime leases, WAL payload
   scans or quorum calls. Return valid listed statuses plus typed diagnostics for
   invalid entries, sorted by AcceptedAt descending then RecoveryID ascending;
   exclude conflicting duplicate IDs. An empty current pointer means not-found.
-- [ ] Preserve historical completed/cancelled records through subsequent operations.
+- [x] Preserve historical completed/cancelled records through subsequent operations.
   Missing forensic material cannot authorize source reseeding or deleting B.
   Enforce the startup namespace checks from Task 2 against these exact codecs.
-- [ ] Add functional fault cases at manifest/current publication, phase sync and
+- [x] Add functional fault cases at manifest/current publication, phase sync and
   pointer clearing; duplicate IDs/names, corrupt manifests, renamed directories,
   unavailable WAL mount during status, and no ownership adoption from names alone.
 
 #### Verification
 
-- [ ] `make test`; model/codec units plus recoverydisk/status functional tests and
+- [x] `make test`; model/codec units plus recoverydisk/status functional tests and
   writer/reader race tests. Check both roots' timestamps/names and stable historical IDs.
-- [ ] Verify approval-format records alone guard startup and List/Status never invoke
+- [x] Verify approval-format records alone guard startup and List/Status never invoke
   Files, factories or storage writers. Preserve both/no-path conflict evidence.
-- [ ] Record fault-boundary results and fix failures; no public mutation is enabled yet.
+- [x] Record fault-boundary results and fix failures; no public mutation is enabled yet.
 
 ### Task 5: Build bounded read-only readers and the shared replay interpreter
 

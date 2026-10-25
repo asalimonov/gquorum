@@ -7,7 +7,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,6 +14,7 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/recoverydisk"
 	"github.com/asalimonov/gquorum/internal/recoverymodel"
+	"github.com/asalimonov/gquorum/internal/recoverytest"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/storage/walstore"
 )
@@ -170,8 +170,7 @@ func TestNodePendingRecoveryCannotRefound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := recoverymodel.LocalManifest{Schema: 1, Revision: 1, Request: recoverymodel.Request{RecoveryID: "pending", Mode: recoverymodel.Rebuild, Actor: "test", Comment: "lost quorum"}, Paths: nodeStoragePaths(o), BackupName: name, AcceptedAt: at, Phase: recoverymodel.Approved, PlanDigest: strings.Repeat("a", 64)}
-	r.Acceptance.PlanDigest = r.PlanDigest
+	r := recoverytest.Manifest(nodeStoragePaths(o), "pending", at, recoverymodel.Approved)
 	data, err := recoverymodel.EncodeCanonical(r)
 	if err != nil {
 		t.Fatal(err)
