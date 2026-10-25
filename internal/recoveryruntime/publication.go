@@ -70,6 +70,11 @@ func (c *Coordinator) CommitLocalCompletion(ctx context.Context, identity topolo
 	if !published {
 		return fault.ErrReplicaNotReady
 	}
+	if c.config.Host != nil {
+		if err := c.config.Host.FinishRecovery(call.context, identity); err != nil {
+			return err
+		}
+	}
 	if c.config.Journal.View().Phase != model.Complete {
 		if err := c.config.Journal.SetPhase(call.context, model.Complete, nil); err != nil {
 			return err

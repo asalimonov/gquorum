@@ -113,6 +113,7 @@ func (n *node) acceptNodeStart(parent context.Context) (bool, error) {
 // runtimeMetaOptions binds metadata callbacks to this exact Node owner.
 func (n *node) runtimeMetaOptions() metaservice.Options {
 	meta := n.metaOpts
+	meta.ObserveRecoveryCommand = n.recoveryCommandObserver
 	meta.BeforeOpenEngine = n.acquireMetaAuthority
 	meta.AfterOpenEngine = n.markMetaAcquired
 	meta.RequestOwnerStop = n.metaRequestedStop

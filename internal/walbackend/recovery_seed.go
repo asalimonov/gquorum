@@ -34,6 +34,7 @@ type seedControl struct {
 	State      string                 `json:"state"`
 	Marker     model.SeedMarker       `json:"marker"`
 	Checkpoint *model.CheckpointProof `json:"checkpoint,omitempty"`
+	Consumed   *model.Consumed        `json:"consumed,omitempty"`
 }
 
 type seedLocation struct {
@@ -377,7 +378,10 @@ func validateSeedControl(control seedControl) error {
 	if err := model.ValidateSeedMarker(control.Marker); err != nil {
 		return err
 	}
-	return validateSeedCheckpoint(control)
+	if err := validateSeedCheckpoint(control); err != nil {
+		return err
+	}
+	return validateSeedConsumption(control)
 }
 
 func decodeSeedControl(data []byte) (seedControl, error) {
@@ -440,6 +444,28 @@ func (s *Store) beginSeedBuild(ctx context.Context, root *os.Root, seed model.Se
 		return fault.New(fault.Unreadable, "unproven recovery staging directory", err)
 	}
 	const unfinishedDigest = "0000000000000000000000000000000000000000000000000000000000000000"
-	control := seedControl{Schema: model.SchemaVersion, State: seedBuilding, Marker: seedMarker(seed, unfinishedDigest)}
+	control := seedControl{Schema: model.SchemaVersion, State: seedBuilding, Marker: seedMarker(seed,
+		unfinishedDigest)}
 	return writeSeedControl(root, seed.BackupName, control, false)
+}
+
+func validateSeedConsumption(control seedControl) error {
+	if control.State != seedConsumed {
+		if control.Consumed != nil {
+			return fault.ErrUnreadable
+		}
+		return nil
+	}
+	proof := control.Consumed
+	if proof == nil || control.Checkpoint == nil {
+		return fault.ErrUnreadable
+	}
+	checkpoint := control.Checkpoint
+	if proof.Identity != control.Marker.Destination || proof.Checkpoint != checkpoint.Position ||
+		proof.SnapshotDigest != checkpoint.Digest || proof.GroupReceipt.Key != proof.HostReceipt.Key ||
+		proof.GroupReceipt.Key.ClusterID != proof.Identity.ClusterID ||
+		proof.GroupReceipt.Key.GroupID != proof.Identity.GroupID {
+		return fault.ErrIdentityMismatch
+	}
+	return nil
 }

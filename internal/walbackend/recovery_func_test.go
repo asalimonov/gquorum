@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -637,5 +638,66 @@ func TestRecoveryRefusesUnprovenStagingAndForeignLiveDirectory(t *testing.T) {
 				t.Fatal("foreign evidence changed")
 			}
 		})
+	}
+}
+
+func TestRecoveryConsumedRestartReleasesProtectionAfterOldCheckpointWasPruned(t *testing.T) {
+	t.Parallel()
+	store, seed, owner := seedFixtureOwned(t, true)
+	_, err := InstallRecoverySeed(t.Context(), store, seed, seedReplay(seed))
+	check(t, err)
+	core, err := raftengine.NewRecoveryContext(t.Context(), seedEngineOptions(store, seed, new(portableMachine)), seed.Key)
+	check(t, err)
+	check(t, core.Start(t.Context()))
+	t.Cleanup(func() { check(t, core.Stop(context.Background())) })
+	check(t, core.WaitReady(t.Context()))
+	waitSeedLeader(t, core)
+	receipt, err := core.ObserveAuthorizedEffect(t.Context(), seed.Grant)
+	check(t, err)
+	proof, err := core.RecoveryCheckpoint(t.Context(), seed.Key)
+	check(t, err)
+	host := topology.EffectReceipt{Key: seed.Grant.Key, Action: seed.Grant.Action,
+		Resource: topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: "load", NodeName: "n1"},
+		Target:   seed.Grant.Targets[0], Outcome: topology.EffectApplied, LocalSequence: 1}
+	consumed := model.Consumed{Identity: seed.Key.Destination, Checkpoint: proof.Position, SnapshotDigest: proof.Digest,
+		HostReceipt: host, GroupReceipt: receipt}
+	check(t, core.FinishRecovery(t.Context(), seed.Key, consumed))
+	for _, request := range []string{"one", "two", "three"} {
+		_, err := core.Propose(t.Context(), raftengine.Proposal{RequestID: request, Data: []byte(request)})
+		check(t, err)
+		check(t, core.Snapshot(t.Context()))
+	}
+	old := filepath.Join(store.opts.RootDir, "load", SnapDir, fmt.Sprintf("%016x-%016x.snap", proof.Position.Term, proof.Position.Index))
+	if _, err := os.Stat(old); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("test did not prune consumed checkpoint", err)
+	}
+	check(t, core.Stop(t.Context()))
+	check(t, store.Close())
+	check(t, owner.Close())
+	nextOwner, err := recoverydisk.Acquire(t.Context(), owner.Paths())
+	check(t, err)
+	t.Cleanup(func() { check(t, nextOwner.Close()) })
+	_, err = nextOwner.PendingStartup(t.Context())
+	check(t, err)
+	lease, err := nextOwner.TakeWALLease()
+	check(t, err)
+	reopened, err := OpenWithLease(store.opts, lease)
+	check(t, err)
+	t.Cleanup(func() { check(t, reopened.Close()) })
+	check(t, ProtectRecovery(t.Context(), reopened, seed.Key))
+	_, found, err := ReadRecoverySeed(t.Context(), reopened, seed.Key)
+	check(t, err)
+	if !found {
+		t.Fatal("consumed B lost provenance")
+	}
+	machine := new(portableMachine)
+	next, err := raftengine.NewRecoveryContext(t.Context(), seedEngineOptions(reopened, seed, machine), seed.Key)
+	check(t, err)
+	check(t, next.Start(t.Context()))
+	t.Cleanup(func() { check(t, next.Stop(context.Background())) })
+	check(t, next.WaitReady(t.Context()))
+	check(t, next.FinishRecovery(t.Context(), seed.Key, consumed))
+	if string(machine.restored) != "portable-B" || !reopened.groups["load"].state.NoSync {
+		t.Fatal("retained B did not restore ordinary durability", string(machine.restored))
 	}
 }

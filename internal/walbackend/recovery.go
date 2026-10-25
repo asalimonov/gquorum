@@ -99,17 +99,7 @@ func FinishRecovery(ctx context.Context, s *Store, key model.SeedKey, proof mode
 	if g.closed {
 		return fault.ErrStopped
 	}
-	if g.checkpoint == nil || g.checkpoint.Position != proof.Checkpoint {
-		return fault.ErrOperationAuthorization
-	}
-	actual, err := checkpointProof(g, proof.Checkpoint)
-	if err != nil {
-		return err
-	}
-	if actual.Digest != proof.SnapshotDigest {
-		return fault.ErrIdentityMismatch
-	}
-	if err := validateConsumedCheckpoint(g, proof); err != nil {
+	if err := s.verifyRecoveryFinish(ctx, g, key, proof); err != nil {
 		return err
 	}
 	if s.opts.DisableFSync {
@@ -157,4 +147,45 @@ func validateConsumedCheckpoint(g *group, proof model.Consumed) error {
 		return fault.ErrIdentityMismatch
 	}
 	return proof.HostReceipt.Validate(*decoded.Authority.Grant)
+}
+
+func (s *Store) verifyRecoveryFinish(ctx context.Context, g *group, key model.SeedKey, proof model.Consumed) error {
+	found, err := s.findSeedControl(ctx, key)
+	if err != nil {
+		return err
+	}
+	if found == nil {
+		return fault.ErrOperationAuthorization
+	}
+	if found.control.State == seedConsumed {
+		if g.hs.Term < proof.Checkpoint.Term || g.hs.Commit < proof.Checkpoint.Index ||
+			found.control.Consumed == nil || !reflect.DeepEqual(*found.control.Consumed, proof) {
+			return fault.ErrIdentityMismatch
+		}
+		return nil
+	}
+	if g.checkpoint == nil || g.checkpoint.Position != proof.Checkpoint {
+		return fault.ErrOperationAuthorization
+	}
+	actual, err := checkpointProof(g, proof.Checkpoint)
+	if err != nil {
+		return err
+	}
+	if actual.Digest != proof.SnapshotDigest {
+		return fault.ErrIdentityMismatch
+	}
+	if err := validateConsumedCheckpoint(g, proof); err != nil {
+		return err
+	}
+
+	root, err := s.rootLease.OpenRecoveryRoot(found.name)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	proof.HostReceipt = proof.HostReceipt.Clone()
+	proof.GroupReceipt = proof.GroupReceipt.Clone()
+	found.control.Consumed = &proof
+	found.control.State = seedConsumed
+	return writeSeedControl(root, found.name, found.control, true)
 }

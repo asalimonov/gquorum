@@ -16,8 +16,7 @@ import (
 	"github.com/asalimonov/gquorum/recovery"
 )
 
-// Task12 replaces the deliberate intermediate refusal with exact seeded replay.
-func TestRecoveryNodePendingLoadCannotFoundEmptyOrRecreateMissingBMetadata(t *testing.T) {
+func TestRecoveryNodeCannotRecreateMissingCompletedBMetadata(t *testing.T) {
 	t.Parallel()
 	source := recoveryFixtureOptions(t, true)
 	facade, operation := acceptedRecovery(t, source, nil)
@@ -48,29 +47,17 @@ func TestRecoveryNodePendingLoadCannotFoundEmptyOrRecreateMissingBMetadata(t *te
 	if err := participant.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Second)
 	defer cancel()
-	observations, err := participant.Watch(ctx)
-	if err != nil {
-		t.Fatal(err)
+	if err := participant.WaitReady(ctx); err != nil {
+		t.Fatal("recovered load did not become ready", err, participant.Status())
 	}
-	for {
-		select {
-		case observation := <-observations:
-			if observation.Status.ErrorCode != fault.Unsupported {
-				continue
-			}
-		case <-ctx.Done():
-			t.Fatal("recovery did not report its pending capability", participant.Status(), ctx.Err())
-		}
-		break
-	}
-	if participant.Status().Ready || factories.Load() != 0 || len(participant.LoadGroupIDs()) != 0 {
-		t.Fatal("partial implementation published an empty recovered application")
+	if factories.Load() != 1 || len(participant.LoadGroupIDs()) != 1 {
+		t.Fatal("load was not reconstructed", factories.Load())
 	}
 	stopAuthorityNode(t, participant)
 	current, err := facade.Status(t.Context(), operation.RecoveryID)
-	if err != nil || current.Phase != recovery.Importing {
+	if err != nil || current.Phase != recovery.Complete {
 		t.Fatal(current, err)
 	}
 	for _, name := range []string{metaDBFilename, authorityDBFilename} {
@@ -80,10 +67,9 @@ func TestRecoveryNodePendingLoadCannotFoundEmptyOrRecreateMissingBMetadata(t *te
 	}
 	retry := authorityNodeOptions(t, source.StorageDir, "missing-B")
 	retry.Node, retry.Loads = options.Node, options.Loads
-	retry, err = RecoveryStartOptions(current, retry)
-	if err != nil {
-		t.Fatal(err)
-	}
+	retry.Identity.ClusterID = current.Identity.ClusterID
+	retry.Identity.MemberID = current.Identity.MemberID
+	retry.Bootstrap.Founders[0].MemberID = current.Identity.MemberID
 	restarted, err := NewNode(retry)
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +79,7 @@ func TestRecoveryNodePendingLoadCannotFoundEmptyOrRecreateMissingBMetadata(t *te
 		t.Fatal("established B was silently refounded", err)
 	}
 	stopAuthorityNode(t, restarted)
-	if factories.Load() != 0 {
+	if factories.Load() != 1 {
 		t.Fatal("missing B identity replayed source application")
 	}
 	for _, name := range []string{metaDBFilename, authorityDBFilename} {

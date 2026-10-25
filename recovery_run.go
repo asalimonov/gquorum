@@ -32,11 +32,6 @@ func (r *Recovery) Run(ctx context.Context, id string) (status recovery.Status, 
 	if err := r.validateExecutionOptions(owner, manifest); err != nil {
 		return status, inspectionRefusal(err, nil)
 	}
-	if manifest.Phase == recovery.Approved || manifest.Phase == recovery.Files ||
-		manifest.Phase == recovery.Archiving {
-		// Temporary gate until Task12 provides the matching safe Node startup.
-		return status, pendingRecovery(ctx, "destructive recovery execution")
-	}
 	executor, err := recoveryexec.New(recoveryexec.Config{Owner: owner, Journal: journal, Files: r.options.Files})
 	if err != nil {
 		return status, inspectionRefusal(err, nil)

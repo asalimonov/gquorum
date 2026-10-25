@@ -67,7 +67,8 @@ func sameOperationScope(expected, actual topology.Operation, group string) error
 }
 
 func (g *Group) validateOperationRead(read metaengine.PlanRead, group string) error {
-	view := operator.RemainingPlanView{Input: read.Input, Target: read.Target, Previous: read.Previous,
+	view := operator.RemainingPlanView{RecoveryFoundingSeeds: read.RecoveryFoundingSeeds,
+		Input: read.Input, Target: read.Target, Previous: read.Previous,
 		Grants: read.Grants, Receipts: read.Receipts, Consumed: read.Consumed}
 	if err := operator.ValidateRemainingScope(view, read.Operation, group, g.rules); err != nil {
 		return err

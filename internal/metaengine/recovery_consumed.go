@@ -34,6 +34,13 @@ func (s *scopedState) applyRecoveryGroupConsumed(index uint64,
 	if s.Recovery.Phase != "importing" {
 		return proposalApplication{}, fault.ErrConflict
 	}
+	current, err := s.currentRecoveryCreation(group)
+	if err != nil {
+		return proposalApplication{}, err
+	}
+	if current.Grant.Key != p.Evidence.GroupReceipt.Key {
+		return proposalApplication{}, fault.ErrAuthorityFenced
+	}
 	if err := validateRecoveryConsumed(s, s.indexes, group, p.Evidence); err != nil {
 		return proposalApplication{}, err
 	}
@@ -45,7 +52,6 @@ func (s *scopedState) applyRecoveryGroupConsumed(index uint64,
 	next := *s
 	next.Recovery = &owned
 	next.AppliedIndex = index
-	var err error
 	next.indexes, err = prepareScopedGraph(&next, next.Rules)
 	if err != nil {
 		return proposalApplication{}, err

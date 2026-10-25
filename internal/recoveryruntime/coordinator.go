@@ -249,6 +249,9 @@ func (c *Coordinator) finishImport(ctx context.Context, operation topology.Opera
 			return err
 		}
 	}
+	if err := c.replayGroups(ctx, record); err != nil {
+		return err
+	}
 	resumed, err := fault.Retry(ctx, fault.RetryOptions{},
 		func(attempt context.Context) (topology.OperationID, error) {
 			return c.resumeExistingOperation(attempt, operation)
@@ -256,12 +259,23 @@ func (c *Coordinator) finishImport(ctx context.Context, operation topology.Opera
 	if err != nil {
 		return err
 	}
-	if len(record.Groups) > 0 {
-		// Task12 replaces this refusal with private checkpoint/receipt consumption.
-		return fault.New(fault.Unsupported, "recovery seed/publication implementation pending", nil)
+	if err := c.consumeGroups(ctx, resumed, record); err != nil {
+		return err
 	}
 	if err := c.completeMetadataOnly(ctx, resumed, record); err != nil {
 		return err
+	}
+	confirmed, err := c.readRecovery(ctx)
+	if err != nil {
+		return err
+	}
+	if err := c.validateRecord(confirmed); err != nil {
+		return err
+	}
+	if c.config.Host != nil {
+		if err := c.config.Host.SetRecovery(ctx, confirmed, c.config.Manifest); err != nil {
+			return err
+		}
 	}
 	if c.config.Journal.View().Phase == model.Importing {
 		if err := c.config.Journal.SetPhase(ctx, model.Validating, nil); err != nil {

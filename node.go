@@ -8,6 +8,7 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/authoritystore"
 	"github.com/asalimonov/gquorum/internal/managed"
+	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/internal/recoverydisk"
 	model "github.com/asalimonov/gquorum/internal/recoverymodel"
@@ -134,6 +135,7 @@ type node struct {
 	recoveryJournal         *recoverydisk.Journal
 	recoveryCoordinator     *recoveryruntime.Coordinator
 	recoveryMetaPort        func(recoveryruntime.MetaPort) recoveryruntime.MetaPort // instance-owned protocol test seam
+	recoveryCommandObserver func(metaengine.ProposalKind, error)                    // instance-owned test seam
 	recoveryManifest        *model.LocalManifest
 	limitsExplicit          bool
 	ownedMemory             *memstore.Store

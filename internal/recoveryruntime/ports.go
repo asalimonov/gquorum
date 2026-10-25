@@ -14,6 +14,7 @@ type MetaPort interface {
 	WaitRecoveryReplay(context.Context) error
 	ImportRecovery(context.Context, model.ImportProposal) (topology.OperationID, error)
 	ReadRecovery(context.Context) (*model.ImportState, error)
+	RecoveryEvidence(context.Context, model.CheckpointProof) (model.Consumed, error)
 	RecordRecoveredGroup(context.Context, model.GroupConsumedProposal) error
 	CompleteRecovery(context.Context, model.CompleteImportProposal) error
 	Operation(context.Context, topology.OperationID) (topology.OperationStatus, error)
@@ -24,7 +25,9 @@ type MetaPort interface {
 // HostPort never transfers application ownership out of the managed host.
 type HostPort interface {
 	SetRecovery(context.Context, *model.ImportState, model.LocalManifest) error
+	ReplayRecovery(context.Context, load.ReplicaRef) error
 	RecoveryCheckpoint(context.Context, load.ReplicaRef) (model.CheckpointProof, error)
 	PublishRecovery(context.Context, topology.Identity) error
+	FinishRecovery(context.Context, topology.Identity) error
 	ReleaseRecoveryRun(context.Context, topology.Identity) error
 }

@@ -18,6 +18,7 @@ import (
 
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/observe"
 	"github.com/asalimonov/gquorum/internal/operator"
 	"github.com/asalimonov/gquorum/internal/raftengine"
@@ -47,6 +48,7 @@ const (
 // Options supplies private meta identity, storage, networking and orchestration
 // dependencies.
 type Options struct {
+	ObserveRecoveryCommand func(metaengine.ProposalKind, error)
 	RecoveryResumeFounding bool // Node proved pin-only B with no completed metadata acquisition
 
 	Recovery *model.LocalManifest // accepted private Node startup scope; never a general API request

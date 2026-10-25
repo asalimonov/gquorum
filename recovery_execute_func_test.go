@@ -112,11 +112,7 @@ func TestRecoveryResetArchiveAndBeforeBackupCancellation(t *testing.T) {
 				}
 				return
 			}
-			guarded, err := facade.Run(t.Context(), operation.RecoveryID)
-			if err == nil || guarded.Phase != recovery.Approved || actions.Load() != 0 {
-				t.Fatal("public reset bypassed intermediate guard", guarded, err)
-			}
-			status, err := executeRecovery(t.Context(), facade, operation.RecoveryID)
+			status, err := facade.Run(t.Context(), operation.RecoveryID)
 			if err != nil || status.Phase != recovery.JoinReady || !status.Complete || status.Identity.MemberID != 0 || actions.Load() != 1 {
 				t.Fatal(status, err)
 			}
@@ -348,7 +344,7 @@ func executeRecovery(ctx context.Context, facade *Recovery, id string) (model.St
 	return executor.Run(ctx)
 }
 
-func TestRecoveryPrivateArchivePreservesOriginalsAndPublicDestructiveGate(t *testing.T) {
+func TestRecoveryPublicArchivePreservesOriginalsAndResumesExactly(t *testing.T) {
 	t.Parallel()
 	for _, withLoad := range []bool{false, true} {
 		t.Run(map[bool]string{false: "metadata only", true: "nested WAL"}[withLoad], func(t *testing.T) {
@@ -356,12 +352,7 @@ func TestRecoveryPrivateArchivePreservesOriginalsAndPublicDestructiveGate(t *tes
 			opts := recoveryFixtureOptions(t, withLoad)
 			before := sourceFileHashes(t, opts.StorageDir)
 			facade, operation := acceptedRecovery(t, opts, nil)
-			guarded, err := facade.Run(t.Context(), operation.RecoveryID)
-			var refusal *recovery.Refusal
-			if !errors.As(err, &refusal) || refusal.Issue.Code != "implementation_pending" || guarded.Phase != recovery.Approved {
-				t.Fatal("intermediate public Run archived A", guarded, err)
-			}
-			status, err := executeRecovery(t.Context(), facade, operation.RecoveryID)
+			status, err := facade.Run(t.Context(), operation.RecoveryID)
 			if err != nil || status.Phase != recovery.AwaitingStart || status.Complete {
 				t.Fatal(status, err)
 			}

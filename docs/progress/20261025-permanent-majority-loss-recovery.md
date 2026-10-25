@@ -895,3 +895,73 @@ Design corrections and remaining scope
   checkpoint-only consumption command simplification still awaits user approval;
   no command payload/schema change was made. Task14 retains real cluster
   promote/transfer/demote and retry scenarios.
+
+
+## Task 12 — Managed replay, consumption, publication and shutdown
+Date: 2026-10-25
+
+Implemented
+- Ordinary exact startup reservations install protected accepted WAL seeds before
+  factories, re-probe them, and open retained B with no InitialAuthority. Only
+  unconsumed factories receive owned RecoveryInfo. A Host gate serializes required
+  replay; private recovery_ready closes startup without handles or Run.
+- Approved internal effects/native observations can finish real creation receipts.
+  Normal observations report recovery_ready/replica_not_ready; public starts,
+  handles and forwarded business proposals remain gated during import.
+- Coordinator privately reopens B before operation retry, confirms exact current
+  same-key receipt pairs and normalized checkpoints, resolves lost consumption
+  replies, and advances local consumed only from replicated evidence. One failed
+  application acquisition remains the owned result for that Node lifetime.
+- The real retry regression found that a native retry fence hides the original
+  birth grant from remaining-plan validation. Added an import-only confirmed
+  metadata basis requiring exact recovered singleton identity, retained birth
+  grant/ancestry and known recorded native fence. It cannot fabricate a receipt
+  or skip the new attempt; real K2 effects then complete through ordinary authority.
+- Publish all recovered handles for application validation only after replicated
+  completion. Readiness approval joins protected writer release, durable local
+  Complete, then deferred Run. Stop and holds win without late launches.
+- Finish synchronously records exact confirmed consumption before restoring the
+  configured durability setting. A crash before local Complete can resume B after
+  old-checkpoint pruning, without A input. Missing installed/acquired/consumed B
+  refuses. Public Run’s final implementation guard is removed for rebuild/reset.
+- Instance-owned post-commit observer captures the actual pending metadata command
+  kinds and shared predicate outcomes. No public methods or consumption payload
+  simplification was added; the latter remains pending user approval.
+
+Verified
+- make test PASS2,116/58 reports,7.920s, all five modules:
+  test-reports/unit/20261025T072331.180293Z-0wzg1ban/report.md.
+- make lint PASS all modules/tags/tools: /tmp/gquorum-task12-lint6.log.
+- Complete affected internal functional/race suites PASS managed15.215s,
+  engine8.627s, meta27.551s, metaservice30.101s, coordinator3.439s, disk4.728s,
+  WAL22.805s: /tmp/gquorum-task12-full-functional-race.log.
+- Full root functional/race suite PASS74.156s at parallel8:
+  /tmp/gquorum-task12-final-root-race.log.
+  The first combined qualification had one former intermediate-state test with
+  a ten-second budget; it now waits for full load completion, so its deadline was
+  aligned to 25 seconds. The full root suite passed after that test-only fix.
+- Focused functional/race evidence: multi-group/retry/retained restart PASS32.952s;
+  stop/readiness/long Restore/late factory/failed validation PASS25.479s; actual
+  command trace PASS19.674s; consumed checkpoint-pruning restart PASS4.203s.
+  Logs: /tmp/gquorum-task12-multi-retry-race2.log,
+  /tmp/gquorum-task12-barrier-race3.log,
+  /tmp/gquorum-task12-trace-race.log,
+  /tmp/gquorum-task12-consumed-restart-race.log.
+- Tests cover public archive/reset execution, metadata-only and load completion,
+  factory RecoveryInfo, exact later receipts, lost reply, serial two-group replay,
+  one failed checkpoint, explicit hold, rejected forwarding, readiness validation,
+  Stop races, owned Restore beyond five seconds, late factory Close ownership,
+  portable ordinary restart, missing consumed WAL/metadata and no refilling A.
+  Existing ownership/readmission regressions pass in their full owning suites.
+- New pure selector/fence-basis units pass; all prior frozen fixtures unchanged;
+  git diff --check PASS. No Docker image/process or Meridian work.
+
+Notes and next scope
+- Target backed up before private-port/sequence reconciliation:
+  docs/brainstorms/20261024-permanent-majority-loss-recovery-target-before-managed-replay-20261025T071738Z.md.
+- Reset preparation/start and exclusion of A application replay are verified here.
+  Successful cross-node reset admission stays in Task14’s three-node Docker pool,
+  avoiding an unauthorized in-process multi-node functional fixture.
+- Thread6 arrived during this task with user-approved old-member reachability and
+  Status history additions, plus multi-survivor selection as backlog. Incorporate
+  them after this commit into existing Tasks13–14, keeping sixteen total tasks.

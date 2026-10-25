@@ -84,6 +84,9 @@ func queryScopedPlan(s *scopedState, q QueryRequest) (PlanRead, error) {
 	}
 	if read.Operation.Status.ID != "" {
 		err = s.collectScopedPlanEvidence(&read)
+		if err == nil {
+			read.RecoveryFoundingSeeds = s.recoveryFoundingSeeds(read)
+		}
 	}
 	return read, err
 }

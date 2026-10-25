@@ -11,12 +11,13 @@ import (
 
 // RemainingPlanView pairs retained resources with the approved target document.
 type RemainingPlanView struct {
-	Input    topology.PlanInput
-	Target   Document
-	Plan     topology.Plan
-	Previous []topology.Operation
-	Grants   []topology.AuthorityGrant
-	Receipts []topology.EffectReceipt
+	RecoveryFoundingSeeds []string // Confirmed metadata proof for initial recovery creation only.
+	Input                 topology.PlanInput
+	Target                Document
+	Plan                  topology.Plan
+	Previous              []topology.Operation
+	Grants                []topology.AuthorityGrant
+	Receipts              []topology.EffectReceipt
 	// Consumed comes from the same confirmed metadata read, including exact
 	// required stops discharged by a retained readmission batch.
 	Consumed []int

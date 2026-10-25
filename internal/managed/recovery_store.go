@@ -11,6 +11,7 @@ import (
 )
 
 type recoveryStore interface {
+	storage.Store
 	RecoveryRoot() string
 	ProtectRecovery(context.Context, model.SeedKey) error
 	InstallRecoverySeed(context.Context, model.SeedSpec) (model.SeedMarker, error)

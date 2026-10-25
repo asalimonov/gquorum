@@ -480,6 +480,7 @@ func (g *Group) engineMachine(store *metastore.Store, identity topology.Identity
 	if err != nil {
 		return nil, err
 	}
+	machine.OnRecoveryCommand = g.opts.ObserveRecoveryCommand
 	machine.OnApplied = func(index uint64, cs raftpb.ConfState) {
 		views := machine.Views()
 		target := views.Target

@@ -23,7 +23,8 @@ type Machine struct {
 	// OnApplied is installed before the engine is constructed. It runs after
 	// durable application persistence, outside the FSM lock, and must be
 	// bounded.
-	OnApplied func(uint64, raftpb.ConfState)
+	OnApplied         func(uint64, raftpb.ConfState)
+	OnRecoveryCommand func(ProposalKind, error) // instance-owned diagnostics, installed before engine startup
 }
 
 // NewMachine validates replicated rules and constructs an empty schema-4
@@ -50,9 +51,13 @@ func (m *Machine) Apply(ctx context.Context, c raftengine.Command) (raftengine.R
 	if err := ctx.Err(); err != nil {
 		return raftengine.Result{}, err
 	}
+	trace := m.recoveryCommandTrace(c.Data)
 	result, err := m.applyScoped(c.Index, c.Term, c.Data, c.ConfState)
 	if err != nil {
 		return raftengine.Result{}, err
+	}
+	if trace != nil {
+		trace()
 	}
 	data, err := json.Marshal(result)
 	return raftengine.Result{Code: string(result.Code), Data: data}, err
@@ -255,7 +260,8 @@ func (m *Machine) FullyConvergedDocument() (topology.Document, error) {
 
 // AdmissionForOperator finds the exact admission bound to an operator, node and
 // member.
-func (m *Machine) AdmissionForOperator(id topology.OperationID, name string, member uint64) (AdmissionRecord, bool) {
+func (m *Machine) AdmissionForOperator(id topology.OperationID, name string,
+	member uint64) (AdmissionRecord, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, record := range m.scoped.Admissions {

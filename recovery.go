@@ -1,7 +1,6 @@
 package gquorum
 
 import (
-	"context"
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
@@ -79,11 +78,4 @@ func recoveryRefusal(code, message string, cause error) error {
 	return &recovery.Refusal{Issue: recovery.Issue{
 		Code: code, Message: message, Blocking: true, Remedy: recovery.RemedyInvestigate,
 	}, Cause: cause}
-}
-
-func pendingRecovery(ctx context.Context, operation string) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	return recoveryRefusal("implementation_pending", operation+" is not implemented yet", fault.ErrUnsupported)
 }

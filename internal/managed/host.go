@@ -38,7 +38,8 @@ const (
 // dependencies for a node's replicas.
 type Config struct {
 	// OnChange only wakes the owning Node; it runs outside host locks.
-	OnChange func()
+	OnChange           func()
+	RecordRecoverySeed func(context.Context, model.SeedProgress) error
 	// Authority becomes available once a fresh join receives its member
 	// identity.
 	// The Node owns this store beyond all Host work and callbacks.
@@ -97,6 +98,8 @@ type Host struct {
 	recoveryManifest            *model.LocalManifest
 	recoveryImport              *model.ImportState
 	recoveryReleased            bool
+	recoveryGate                chan struct{}
+	recoveryResumes             map[string]bool
 	runFailures                 map[storage.Identity]ReplicaStatus
 	actionWorks                 map[string]*actionWork
 	fenceWorks                  map[string]*fenceWork

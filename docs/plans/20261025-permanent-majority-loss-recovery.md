@@ -16,7 +16,7 @@
 
 **Review/clarifications:** [docs/review/feat_permanent-majority-loss-recovery.md](../review/feat_permanent-majority-loss-recovery.md)
 
-**Status:** implementation in progress; Tasks 1–11 complete; next is managed recovery replay, consumption and publication.
+**Status:** implementation in progress; Tasks 1–12 complete; next is durable remote fixture recovery and approved UX refinements.
 
 ## Scope and precedence
 
@@ -803,42 +803,42 @@ load/lifecycle/readiness/shutdown composition and functional/race tests.
 **Dependencies:** Tasks 1–11. **Outcome:** fully usable library rebuild/reset workflow
 through normal Node ownership, including all completion and stop races.
 
-- [ ] Install recovery context before the ordinary host's effects can start. Under
+- [x] Install recovery context before the ordinary host's effects can start. Under
   the one exact startup reservation, begin/validate the ordinary host effect,
   protect/install the seed, then **re-probe** it and select retained startup with
   no InitialAuthority. Never use a stale pre-install fresh probe.
-- [ ] Supply an owned RecoveryInfo to the normal GroupFactory only for unconsumed
+- [x] Supply an owned RecoveryInfo to the normal GroupFactory only for unconsumed
   recovery input. The machine may accept the declared A snapshot or a resumed B
   snapshot and must emit portable B state. Preserve ordinary factory timeout,
   late-success transfer, failed-factory cleanup and serialized Close retries.
-- [ ] Introduce private-ready completion distinct from public start completion.
+- [x] Introduce private-ready completion distinct from public start completion.
   Exact granted internal actions may obtain the ready core and finish receipts;
   public LoadGroup/StartLoadGroup, application proposals/forwarding, observations
   that imply ready publication and Application.Run remain gated as specified.
-- [ ] Preserve Task 10's manifest-derived gate from before v1 founding through
+- [x] Preserve Task 10's manifest-derived gate from before v1 founding through
   replicated import completion; the public readiness gate is not a substitute
   for guarding direct Cluster mutations or join ingress before that record exists.
-- [ ] Ensure the operator never waits for a public handle to finish the import that
+- [x] Ensure the operator never waits for a public handle to finish the import that
   will publish that handle. Preserve current grant/identity/floor rechecks after
   waits and scope changes; no unguarded raw-core access becomes public.
-- [ ] Coordinate serial required-group replay, normalized checkpoints, ordinary
+- [x] Coordinate serial required-group replay, normalized checkpoints, ordinary
   host/group receipts and exact RecordRecoveredGroup proposals. Persist local
   consumed progress only from confirmed replicated evidence. Resume lost replies
   idempotently and never confuse ledger existence with consumption.
-- [ ] Complete import only after every required group and the actual ordinary
+- [x] Complete import only after every required group and the actual ordinary
   operation are complete. Support metadata-only recovery. Publish all recovered
   handles for application validation, but hold Application.Run until existing
   serialized lifecycle readiness approves the initial recovery startup.
-- [ ] Recheck mandatory recovery facts, exact identity and stop state; finish temporary
+- [x] Recheck mandatory recovery facts, exact identity and stop state; finish temporary
   durability protection at joined boundaries, persist local Complete, then release
   deferred Run. A racing stop wins without a late callback launch. External traffic
   remains application-controlled; historical Status.Complete is not live readiness.
-- [ ] Join coordinator/effects/replay/Run before Close and storage release on failure,
+- [x] Join coordinator/effects/replay/Run before Close and storage release on failure,
   cancellation, readmission or Stop. Failed Close retains ownership and prevents a
   successor. Preserve StopLoadGroup holds, ordinary nil-Recovery behavior and later
   valid B readmission. Remove all temporary library recovery stubs, including the
   public Run guard from Task 7, only after both rebuild/reset restart paths are wired.
-- [ ] Add meaningful multi-group **single-participant** functional/race tests for
+- [x] Add meaningful multi-group **single-participant** functional/race tests for
   one group failing while another replays, stalled callbacks, explicit holds,
   receipts before publication, validation failure, slow Restore, late factory
   success, stopped handles, missing consumed B WAL and repeated terminal recovery IDs.
@@ -850,13 +850,14 @@ positions explicit in the real catalog tests; do not substitute fabricated tuple
 
 #### Verification
 
-- [ ] `make test` and `make lint`; complete focused root/managed/engine/recoveryruntime functional
+- [x] `make test` and `make lint`; complete focused root/managed/engine/recoveryruntime functional
   and race suites. Use real single-participant Node APIs where lifecycle wiring is
   under test; do not add in-process multi-node fixtures.
-- [ ] Prove no early Application.Run/public business path, no import/publication
+- [x] Prove no early Application.Run/public business path, no import/publication
   deadlock, no overlapping unresolved owner and no old-source reseeding after B
-  accepts newer work. Validate reset admission completes without A data replay.
-- [ ] Verify all public methods now execute their intended behavior or documented
+  accepts newer work. Validate reset preparation/startup excludes A data replay; cross-node admission
+  completion remains in Task14’s three-node process coverage.
+- [x] Verify all public methods now execute their intended behavior or documented
   final refusals, not implementation-pending placeholders. Record/fix failures.
 
 ### Task 13: Add durable recovery jobs and independent remote test controls
@@ -1249,6 +1250,16 @@ prevent completion; an accepted out-of-scope item belongs in the table above.
 Do not pre-mark the absence of implementation as a passed delta audit.
 
 ## NOT PLANNED CHANGES
+
+- Task12 adds a private import-only planner proof for a reopened B singleton after
+  a real retry fence replaces its birth grant. The failed-factory restart test
+  exposed this gap in remaining-plan validation. Metadata requires the retained
+  exact native fence/acknowledgement, import identity and original grant/ancestry;
+  the proof changes only voter-basis selection and cannot consume an effect.
+  Also adds a durable local consumption acknowledgement before restoring ordinary
+  durability, so a resumed B can have pruned its original checkpoint. No public
+  API, existing frozen storage bytes or protocol envelopes changed. Private
+  command-observer wiring verifies the actual committed allowlist trace.
 
 - Task 7 places semantic archive orchestration in private recoveryexec above
   recoverydisk and WAL/system readers. Keeping it in recoverydisk would create a
@@ -1948,6 +1959,7 @@ type MetaPort interface {
     WaitRecoveryReplay(context.Context) error
     ImportRecovery(context.Context, model.ImportProposal) (topology.OperationID,error)
     ReadRecovery(context.Context) (*model.ImportState,error)
+    RecoveryEvidence(context.Context, model.CheckpointProof) (model.Consumed,error)
     RecordRecoveredGroup(context.Context, model.GroupConsumedProposal) error
     CompleteRecovery(context.Context, model.CompleteImportProposal) error
     Operation(context.Context, topology.OperationID) (topology.OperationStatus,error)
@@ -1956,8 +1968,10 @@ type MetaPort interface {
 }
 type HostPort interface {
     SetRecovery(context.Context, *model.ImportState, model.LocalManifest) error
+    ReplayRecovery(context.Context, load.ReplicaRef) error
     RecoveryCheckpoint(context.Context, load.ReplicaRef) (model.CheckpointProof,error)
     PublishRecovery(context.Context, topology.Identity) error
+    FinishRecovery(context.Context, topology.Identity) error
     ReleaseRecoveryRun(context.Context, topology.Identity) error
 }
 ```
@@ -2034,3 +2048,25 @@ reconcile affected tasks rather than implementing stale declarations.
   and retain normalized proof through ordinary intermediate snapshots/compaction.
   Verify refuses the original seed as normalization proof; Finish checks the actual
   snapshot receipt and releases only the exact group's durability protection.
+
+### Task 12 private refinements (2026-10-25)
+
+- Target backed up before reconciling private replay/consumption ports and the
+  actual retry sequence. Replay accepted B before issuing retry, so its native
+  fence has a real receiver. Failed factories remain owned results for this Node
+  lifetime. The operation retry remains explicit, exact and bounded to one.
+- The failed-factory restart test exposed a planner gap: a real retry fence
+  replaces the visible birth grant. Added an import-only confirmed metadata proof
+  of the initial recovered singleton's result voter basis. It requires the exact
+  retained fence and ancestry; it cannot consume a step or fabricate a receipt.
+- Added private journal progress wiring and read-only current-key receipt
+  selection. The replicated command retains its approved full Evidence payload;
+  the checkpoint-only simplification remains pending user approval.
+- Finish durably acknowledges confirmed consumption before ordinary durability is
+  restored, permitting safe retained B restart after its old checkpoint is pruned.
+- Added an instance-owned committed-command observer to test the actual pending
+  allowlist path. It is absent by default and changes no persisted envelope.
+- Reset preparation/startup and exclusion of A application replay are tested in
+  owning single-participant fixtures. Successful admission to another real
+  participant remains in Task14's authorized three-node Docker scenarios, rather
+  than introducing a forbidden multi-node functional fixture in Task12.

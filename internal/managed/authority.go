@@ -73,7 +73,8 @@ func (h *Host) authorityStore() (*authoritystore.Store, error) {
 
 // InstallHostFence persists admission blocking before it joins older owners.
 // Cancellation only ends the caller's wait; completion belongs to the Host.
-func (h *Host) InstallHostFence(parent context.Context, grant topology.AuthorityGrant) (topology.FenceEvidence, error) {
+func (h *Host) InstallHostFence(parent context.Context,
+	grant topology.AuthorityGrant) (topology.FenceEvidence, error) {
 	ctxHandle, err := h.beginAuthorityWork(parent)
 	ctx, release := ctxHandle.Context, ctxHandle.Release
 	if err != nil {
@@ -164,8 +165,9 @@ func (h *Host) joinHostFence(ctx context.Context, s *authoritystore.Store,
 	// own that gate while waiting for a factory which honors this cancellation.
 	h.mu.Lock()
 	var attempt *releaseAttempt
-	if slot := h.slots[group]; slot != nil && !slot.released && slot.authorityKey.Revision < floor.Grant.Key.Revision &&
-		slot.state != "ready" {
+	if slot := h.slots[group]; slot != nil && !slot.released &&
+		slot.authorityKey.Revision < floor.Grant.Key.Revision &&
+		slot.state != "ready" && slot.state != recoveryReady {
 		attempt = h.beginStopLocked(slot)
 	}
 	h.mu.Unlock()
@@ -179,8 +181,9 @@ func (h *Host) joinHostFence(ctx context.Context, s *authoritystore.Store,
 	// left a still-owned Close behind when its caller timed out. Inspect again
 	// under the gate before treating the group as joined.
 	h.mu.Lock()
-	if slot := h.slots[group]; slot != nil && !slot.released && slot.authorityKey.Revision < floor.Grant.Key.Revision &&
-		slot.state != "ready" {
+	if slot := h.slots[group]; slot != nil && !slot.released &&
+		slot.authorityKey.Revision < floor.Grant.Key.Revision &&
+		slot.state != "ready" && slot.state != recoveryReady {
 		attempt = h.beginStopLocked(slot)
 	}
 	h.mu.Unlock()
@@ -243,7 +246,7 @@ func (h *Host) reconcileStartupAuthority(ctx context.Context, ref load.ReplicaRe
 	h.mu.Lock()
 	slot := h.slots[ref.GroupID]
 	accepted := slot != nil && !slot.released && slot.identity.ReplicaID == ref.ReplicaID &&
-		(slot.state == "starting" || slot.state == "ready")
+		(slot.state == "starting" || slot.state == "ready" || slot.state == recoveryReady)
 	h.mu.Unlock()
 	if accepted {
 		return nil

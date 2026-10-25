@@ -101,6 +101,7 @@ func scopedRemainingProofs(view RemainingPlanView, op topology.Operation) (map[i
 		// mark the effect consumed or authorize skipping a new attempt's grant.
 		proofs[grant.Action.StepSeq] = proofs[grant.Action.StepSeq] || complete
 	}
+	addRecoveryFoundingProofs(proofs, view, op)
 	return proofs, nil
 }
 
@@ -133,4 +134,12 @@ func validateRetainedScope(view RemainingPlanView, ex Record, group string) erro
 		}
 	}
 	return nil
+}
+
+func addRecoveryFoundingProofs(proofs map[int]bool, view RemainingPlanView, op topology.Operation) {
+	for _, step := range op.Plan.Steps {
+		if step.Kind == StepCreateFoundingGroup && slices.Contains(view.RecoveryFoundingSeeds, step.GroupID) {
+			proofs[step.Seq] = true // Before/result selection only; no consumption or receipt is invented.
+		}
+	}
 }

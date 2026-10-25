@@ -35,17 +35,18 @@ type LockRead = topology.LockHolder
 // PlanRead captures an operation, its topology boundaries and retained authority
 // evidence.
 type PlanRead struct {
-	Recovery  *model.ImportState        `json:"recovery,omitempty"`
-	Latest    topology.Document         `json:"latest"`
-	Operation topology.Operation        `json:"operation"`
-	Previous  []topology.Operation      `json:"previous,omitempty"`
-	Scopes    []ScopeExpectation        `json:"scopes"`
-	Consumed  []int                     `json:"consumed,omitempty"`
-	Accepted  topology.OperationID      `json:"accepted,omitempty"`
-	Input     topology.PlanInput        `json:"input"`
-	Target    topology.Document         `json:"target"`
-	Grants    []topology.AuthorityGrant `json:"grants,omitempty"`
-	Receipts  []topology.EffectReceipt  `json:"receipts,omitempty"`
+	RecoveryFoundingSeeds []string                  `json:"recovery_founding_seeds,omitempty"`
+	Recovery              *model.ImportState        `json:"recovery,omitempty"`
+	Latest                topology.Document         `json:"latest"`
+	Operation             topology.Operation        `json:"operation"`
+	Previous              []topology.Operation      `json:"previous,omitempty"`
+	Scopes                []ScopeExpectation        `json:"scopes"`
+	Consumed              []int                     `json:"consumed,omitempty"`
+	Accepted              topology.OperationID      `json:"accepted,omitempty"`
+	Input                 topology.PlanInput        `json:"input"`
+	Target                topology.Document         `json:"target"`
+	Grants                []topology.AuthorityGrant `json:"grants,omitempty"`
+	Receipts              []topology.EffectReceipt  `json:"receipts,omitempty"`
 }
 
 // SupportsQuery reports that the metadata machine implements serialized engine

@@ -100,6 +100,14 @@ func (n *node) newHost(m *metaservice.Group) (*managed.Host, error) {
 	if memory != nil {
 		cfg.MemoryStore, cfg.MemoryRetirement = memory, memory
 	}
+	n.mu.RLock()
+	recoveryJournal := n.recoveryJournal
+	n.mu.RUnlock()
+	if recoveryJournal != nil {
+		cfg.RecordRecoverySeed = func(ctx context.Context, progress model.SeedProgress) error {
+			return recordManagedRecoverySeed(ctx, recoveryJournal, progress)
+		}
+	}
 	host, err := managed.New(cfg)
 	if err != nil {
 		return nil, err
@@ -127,7 +135,7 @@ func (n *node) heldLoads() []storage.Identity {
 
 func (n *node) StartLoadGroup(ctx context.Context, ref load.ReplicaRef) (*load.Group, error) {
 	if err := n.recoveryMutationAllowed(); err != nil {
-		return nil, err
+		return nil, fault.New(fault.ReplicaNotReady, "recovery_in_progress", err)
 	}
 	h, err := n.loadHost(ctx)
 	if err != nil {
