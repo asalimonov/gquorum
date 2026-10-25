@@ -20,6 +20,7 @@ type ReplicaSpec struct {
 	Node            topology.Identity
 	Group           topology.Group
 	ApprovedVersion uint64
+	Recovery        *RecoveryInfo
 }
 
 // Application transfers machine lifetime ownership from a successful factory

@@ -11,6 +11,7 @@ import (
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metastore"
 	"github.com/asalimonov/gquorum/internal/raftengine"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
@@ -40,6 +41,10 @@ const (
 )
 
 type replica struct {
+	recoveryKey       *model.SeedKey
+	recoveryInfo      *load.RecoveryInfo
+	recoveryMarker    *model.SeedMarker
+	recoveryProof     *model.CheckpointProof
 	runDone           chan struct{}
 	runCancel         context.CancelFunc
 	authorityKey      topology.AuthorityKey
@@ -121,6 +126,9 @@ func (h *Host) acceptGuardedStart(ctx context.Context, ref load.ReplicaRef, why 
 	if h.quiescing || h.stopped || h.ctx.Err() != nil {
 		return nil, fault.ErrStopped
 	}
+	if err := h.recoveryStartAllowedLocked(why, id); err != nil {
+		return nil, err
+	}
 	grant, err := h.startAuthority(ctx, id, node)
 	if err != nil {
 		return nil, err
@@ -129,10 +137,11 @@ func (h *Host) acceptGuardedStart(ctx context.Context, ref load.ReplicaRef, why 
 	if slot != nil && !slot.released && (slot.identity != id || slot.node != node) {
 		return nil, fault.ErrIdentityMismatch
 	}
-	if why == StartExplicit {
-		delete(h.holds, id)
-		delete(h.runFailures, id)
+	if existing := h.failedRecoveryStartLocked(slot); existing != nil {
+		return existing, nil
 	}
+	h.clearExplicitStartLocked(why, id)
+
 	if h.holds[id] {
 		return nil, fault.New(fault.ReplicaNotReady, "local replica is explicitly held", nil)
 	}
@@ -152,6 +161,7 @@ func (h *Host) acceptGuardedStart(ctx context.Context, ref load.ReplicaRef, why 
 	if grant != nil {
 		slot.authorityKey, slot.startGrant = grant.Key, grant
 	}
+	h.configureRecoverySlotLocked(slot)
 	slot.startGuard = guard
 	h.slots[id.GroupID] = slot
 	go h.runReplicaStartup(slot)
@@ -192,16 +202,11 @@ func (h *Host) runReplicaStartup(slot *replica) {
 		h.mu.Lock()
 		active := slot.ctx.Err() == nil
 		if active && slot.state == "starting" && h.checkStartupFloor(slot) == nil {
-			finishErr := h.finishStartupEffect(slot)
-			if finishErr == nil {
-				slot.handle, slot.state = loadhandle.New(slot.core, slot.identity), "ready"
-				delete(h.parked, slot.identity.GroupID)
-				h.startApplicationRunLocked(slot)
-				close(slot.startDone)
+			err = h.finishReplicaStartupLocked(slot)
+			if err == nil {
 				h.mu.Unlock()
 				return
 			}
-			err = finishErr
 		}
 		h.mu.Unlock()
 		if err == nil {
@@ -228,6 +233,21 @@ func (h *Host) openReplica(slot *replica) error {
 	if err := h.checkStartupFloor(slot); err != nil {
 		return err
 	}
+	release, err := h.acquireRecoveryReplay(slot)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if slot.recoveryKey != nil {
+		if slot.startGrant == nil {
+			return fault.ErrAuthorityFenced
+		}
+		prepareErr := h.PrepareRecoverySeed(ctx, load.ReplicaRef{GroupID: slot.identity.GroupID,
+			ReplicaID: slot.identity.ReplicaID}, *slot.startGrant)
+		if prepareErr != nil {
+			return prepareErr
+		}
+	}
 	preflight, err := h.preflight(ctx, slot)
 	if err != nil {
 		return err
@@ -247,26 +267,18 @@ func (h *Host) openReplica(slot *replica) error {
 	if err != nil {
 		return err
 	}
-	current, err := h.startScope(ctx, slot.node, slot.identity)
+	current, err := h.validateAcquiredReplica(slot, scope, probe)
 	if err != nil {
 		return err
 	}
-	// Version is document context for the factory. Independent approvals may
-	// advance it while this exact assignment and startup seed remain unchanged.
-	if current.Replica != scope.Replica || !probe.HasLog && current.Founding != scope.Founding ||
-		!reflect.DeepEqual(current.Group, scope.Group) {
-		return fault.ErrVersionConflict
-	}
-	// Metadata may learn a retained creation receipt while the factory waits.
-	// An unchanged declaration cannot hide newly proven missing durable state.
-	if _, err := h.authorizeBoot(slot, bootEvidence{probe: probe, scope: current}); err != nil {
-		return err
-	}
-	if err := h.checkGuardedStartup(slot); err != nil {
-		return err
-	}
 	seed := replicaMembership(current, probe, slot.startGrant)
-	core, err := raftengine.NewContext(ctx, h.engineOptions(slot, app, seed.mode, seed.peers))
+	options := h.engineOptions(slot, app, seed.mode, seed.peers)
+	var core *raftengine.Group
+	if slot.recoveryKey != nil {
+		core, err = raftengine.NewRecoveryContext(ctx, options, *slot.recoveryKey)
+	} else {
+		core, err = raftengine.NewContext(ctx, options)
+	}
 	if err != nil {
 		return h.park(slot, parkReason(err), err)
 	}
@@ -487,7 +499,8 @@ func (m machineAdapter) Query(ctx context.Context, query []byte) (raftengine.Res
 
 func reusableStart(slot *replica) (*replica, error) {
 	if slot != nil {
-		if slot.state == "stopping" || slot.release != nil || slot.state != "starting" && slot.state != "ready" &&
+		if slot.state == "stopping" || slot.release != nil || slot.state != "starting" &&
+			slot.state != "ready" && slot.state != recoveryReady &&
 			!slot.released {
 			return nil, fault.ErrReplicaNotReady
 		}
@@ -517,6 +530,7 @@ func (h *Host) acquireApplication(slot *replica, scope metaengine.LoadScope) (lo
 		Node:            slot.node,
 		Group:           (topology.Document{Groups: []topology.Group{scope.Group}}).Clone().Groups[0],
 		ApprovedVersion: scope.Version,
+		Recovery:        cloneRecoveryInfo(slot.recoveryInfo),
 	}
 	call, cancel := context.WithTimeout(ctx, h.cfg.CallbackTimeout)
 	app, factoryErr := h.cfg.Factory(call, spec)
@@ -590,4 +604,61 @@ func (h *Host) startReplicaEngine(slot *replica, core *raftengine.Group, boot bo
 		err = h.checkStartupFloor(slot)
 	}
 	return err
+}
+
+func (h *Host) finishReplicaStartupLocked(slot *replica) error {
+	if err := h.finishStartupEffect(slot); err != nil {
+		return err
+	}
+	if slot.recoveryKey != nil && !h.recoveryReleased {
+		slot.state = recoveryReady
+	} else {
+		slot.handle, slot.state = loadhandle.New(slot.core, slot.identity), "ready"
+		h.startApplicationRunLocked(slot)
+	}
+	delete(h.parked, slot.identity.GroupID)
+	close(slot.startDone)
+	return nil
+}
+
+func (h *Host) validateAcquiredReplica(slot *replica, scope metaengine.LoadScope,
+	probe storage.Probe) (metaengine.LoadScope, error) {
+	ctx := slot.ctx
+	current, err := h.startScope(ctx, slot.node, slot.identity)
+	if err != nil {
+		return metaengine.LoadScope{}, err
+	}
+	// Version is document context for the factory. Independent approvals may
+	// advance it while this exact assignment and startup seed remain unchanged.
+	if current.Replica != scope.Replica || !probe.HasLog && current.Founding != scope.Founding ||
+		!reflect.DeepEqual(current.Group, scope.Group) {
+		return metaengine.LoadScope{}, fault.ErrVersionConflict
+	}
+	// Metadata may learn a retained creation receipt while the factory waits.
+	// An unchanged declaration cannot hide newly proven missing durable state.
+	if _, err := h.authorizeBoot(slot, bootEvidence{probe: probe, scope: current}); err != nil {
+		return metaengine.LoadScope{}, err
+	}
+	if err := h.checkGuardedStartup(slot); err != nil {
+		return metaengine.LoadScope{}, err
+	}
+
+	return current, nil
+}
+
+func (h *Host) failedRecoveryStartLocked(slot *replica) *replica {
+	if h.recoveryManifest == nil || h.recoveryReleased {
+		return nil
+	}
+	if slot != nil && slot.released && slot.err != nil {
+		return slot
+	}
+	return nil
+}
+
+func (h *Host) clearExplicitStartLocked(why StartReason, id storage.Identity) {
+	if why == StartExplicit {
+		delete(h.holds, id)
+		delete(h.runFailures, id)
+	}
 }

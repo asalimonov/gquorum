@@ -8,6 +8,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
+	recoveryplacement "github.com/asalimonov/gquorum/internal/recovery/placement"
 	"github.com/asalimonov/gquorum/internal/votercheck"
 	schedulingapi "github.com/asalimonov/gquorum/scheduling"
 	"github.com/asalimonov/gquorum/topology"
@@ -25,6 +26,9 @@ func (r *Scheduler) commitScopedRepair(ctx context.Context, in schedulingapi.Sch
 	}
 	doc, err := scopedRepairDocument(fresh, action, r.now().UTC())
 	if err != nil {
+		return "", err
+	}
+	if err := validateRepairRecovery(fresh, doc); err != nil {
 		return "", err
 	}
 	if err := metaengine.ValidateRepairIndependence(fresh.Target, fresh.Latest, doc); err != nil {
@@ -45,14 +49,18 @@ func (r *Scheduler) commitScopedRepair(ctx context.Context, in schedulingapi.Sch
 		!sameRepairMembership(after, fresh) {
 		return "", fault.ErrVersionConflict
 	}
+	if err := validateRepairRecovery(after, doc); err != nil {
+		return "", err
+	}
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	if !r.host.IsLeader() || !r.enabled.Load() {
 		return "", fault.ErrNotLeader
 	}
-	commit := RepairCommit{Document: doc, ExpectedVersion: fresh.Latest.Version, ExpectedTarget: fresh.Target.Version,
-		Scopes: slices.Clone(fresh.Scopes), Plan: plan}
+	commit := RepairCommit{Document: doc, ExpectedVersion: fresh.Latest.Version,
+		ExpectedTarget: fresh.Target.Version,
+		Scopes:         slices.Clone(fresh.Scopes), Plan: plan}
 	var id topology.OperationID
 	if action.Kind == schedulingapi.ReconfigureVoters {
 		id, err = r.host.CommitVoterChange(ctx, action.VoterChange.Clone(), commit)
@@ -66,6 +74,14 @@ func (r *Scheduler) commitScopedRepair(ctx context.Context, in schedulingapi.Sch
 		r.host.WakeOperations()
 	}
 	return id, err
+}
+
+func validateRepairRecovery(read metaengine.PlanRead, doc topology.Document) error {
+	ctx, err := recoveryplacement.FromImport(read.Recovery, read.Target)
+	if err != nil {
+		return err
+	}
+	return recoveryplacement.ValidateEdit(ctx, read.Target, doc)
 }
 
 func (r *Scheduler) recheckScopedRepair(ctx context.Context, in schedulingapi.ScheduleInput,
@@ -125,8 +141,9 @@ func (r *Scheduler) checkRepairEvidence(in schedulingapi.ScheduleInput, fresh me
 		return fault.ErrUnavailable
 	}
 	if action.Kind == schedulingapi.ReconfigureVoters {
-		why := votercheck.Check(votercheck.Input{Target: fresh.Target, Groups: fresh.Input.Groups, Metrics: observed,
-			Status: map[string]topology.GroupStatus{group: *status}, Held: r.heldIdentities()}, *action.VoterChange)
+		why := votercheck.Check(votercheck.Input{Target: fresh.Target, Groups: fresh.Input.Groups,
+			Metrics: observed,
+			Status:  map[string]topology.GroupStatus{group: *status}, Held: r.heldIdentities()}, *action.VoterChange)
 		if why != "" {
 			return fault.New(fault.OperationAuthorization, why, nil)
 		}

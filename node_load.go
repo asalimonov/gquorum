@@ -12,6 +12,7 @@ import (
 	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/internal/metastore"
 	internalmetrics "github.com/asalimonov/gquorum/internal/metrics"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
@@ -62,7 +63,8 @@ func (n *node) newHost(m *metaservice.Group) (*managed.Host, error) {
 		Authority: n.localAuthority, ValidateGrant: m.ValidateGrant, ValidateCourier: m.ValidateAuthorityCourier,
 		ResolveAuthorityPeer: m.ResolveAuthorityPeer, RecordFence: m.RecordFence,
 		ForgetGrantedReplica: m.ForgetGrantedLoadReplica,
-		Collection:           managed.CollectionCallbacks{Report: m.ReportCollection, Status: m.ReportCleanupStatus},
+		Collection: managed.CollectionCallbacks{Report: m.ReportCollection,
+			Status: m.ReportCleanupStatus},
 		AuthorityFloors: func(ctx context.Context) ([]topology.AuthorityGrant, error) {
 			return m.ReadAuthorityFloors(ctx, m.Identity().NodeName)
 		},
@@ -73,10 +75,13 @@ func (n *node) newHost(m *metaservice.Group) (*managed.Host, error) {
 		Scope: m.LoadReplicaScope, LookupRecord: m.LookupLoadReplica, RecordReplica: m.RecordLoadReplica,
 		Catalog: m.LoadCatalog, Progress: m.LocalProgress,
 		RetireApplication: n.opts.Loads.Retire,
-		Retirement:        retirement, Retention: runner.Retention, RetirementInterval: n.opts.Loads.RetirementInterval,
-		Assignments: m.LoadAssignments, Factory: n.opts.Loads.Factory, Store: store, Transport: n.opts.Loads.Transport,
+		Retirement:        retirement, Retention: runner.Retention,
+		RetirementInterval: n.opts.Loads.RetirementInterval,
+		Assignments:        m.LoadAssignments, Factory: n.opts.Loads.Factory, Store: store,
+		Transport:   n.opts.Loads.Transport,
 		ResolvePeer: m.ResolveLoadPeer, ValidatePeer: m.ValidateLoadPeer, ValidateNode: m.ValidateLoadNode,
-		Engine: n.opts.Loads.Engine, EffectTimeout: n.opts.Loads.EffectTimeout, CallbackTimeout: n.opts.CallbackTimeout,
+		Engine: n.opts.Loads.Engine, EffectTimeout: n.opts.Loads.EffectTimeout,
+		CallbackTimeout:  n.opts.CallbackTimeout,
 		Metrics:          internalmetrics.Settings(n.opts.Metrics),
 		RecoveryInterval: n.opts.Loads.RecoveryInterval, Events: n.opts.Events, Logger: n.opts.Logger,
 		// A memory replica restarted without its state replaces itself through
@@ -95,7 +100,25 @@ func (n *node) newHost(m *metaservice.Group) (*managed.Host, error) {
 	if memory != nil {
 		cfg.MemoryStore, cfg.MemoryRetirement = memory, memory
 	}
-	return managed.New(cfg)
+	n.mu.RLock()
+	recoveryJournal := n.recoveryJournal
+	n.mu.RUnlock()
+	if recoveryJournal != nil {
+		cfg.RecordRecoverySeed = recoveryJournal.ReconcileSeed
+	}
+	host, err := managed.New(cfg)
+	if err != nil {
+		return nil, err
+	}
+	n.mu.RLock()
+	recovery, journal := n.recoveryManifest, n.recoveryJournal
+	n.mu.RUnlock()
+	if recovery != nil && recovery.Request.Mode == model.Rebuild && journal.View().Phase != model.Complete {
+		if err := host.SetRecovery(n.ctx, nil, *recovery); err != nil {
+			return nil, err
+		}
+	}
+	return host, nil
 }
 
 func (n *node) heldLoads() []storage.Identity {
@@ -109,6 +132,9 @@ func (n *node) heldLoads() []storage.Identity {
 }
 
 func (n *node) StartLoadGroup(ctx context.Context, ref load.ReplicaRef) (*load.Group, error) {
+	if err := n.recoveryMutationAllowed(); err != nil {
+		return nil, fault.New(fault.ReplicaNotReady, "recovery_in_progress", err)
+	}
 	h, err := n.loadHost(ctx)
 	if err != nil {
 		return nil, err
@@ -117,8 +143,9 @@ func (n *node) StartLoadGroup(ctx context.Context, ref load.ReplicaRef) (*load.G
 	var parked *managed.ParkedError
 	if errors.As(err, &parked) {
 		err = &LoadParkedError{
-			ParkedLoad: ParkedLoad{Identity: parked.Identity, Reason: ParkReason(parked.Reason), Since: parked.Since},
-			Cause:      parked.Cause,
+			ParkedLoad: ParkedLoad{Identity: parked.Identity, Reason: ParkReason(parked.Reason),
+				Since: parked.Since},
+			Cause: parked.Cause,
 		}
 	}
 	return (*load.Group)(handle), err
@@ -234,7 +261,8 @@ func (n *node) reserveReadmission(parent context.Context, m *metaservice.Group,
 		return readmissionOwner{}, fault.ErrOperationAuthorization
 	}
 	ctx, cancel := context.WithCancel(parent)
-	retirement := &readmissionWork{cancel: cancel, done: make(chan struct{}), revision: grant.Grants[0].Key.Revision}
+	retirement := &readmissionWork{cancel: cancel, done: make(chan struct{}),
+		revision: grant.Grants[0].Key.Revision}
 	n.readmissionWork = retirement
 	granted := grant.Granted
 	n.pending = &granted

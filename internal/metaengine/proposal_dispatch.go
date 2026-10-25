@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
 )
 
 type proposalApplication struct {
@@ -19,9 +20,19 @@ func applyScopedProposal(state *scopedState, index uint64, kind ProposalKind,
 		return proposalApplication{}, err
 	}
 	next := *state
+	if err := next.recoveryCommandAllowed(kind, body); err != nil {
+		return proposalApplication{}, err
+	}
 	result, err := dispatchScopedProposal(&next, index, kind, body)
 	if err != nil || !result.changed {
 		return result, err
+	}
+	if next.Recovery != nil {
+		next.refreshRecoveryPolicies()
+		next.indexes, err = prepareScopedGraph(&next, next.Rules)
+		if err != nil {
+			return proposalApplication{}, err
+		}
 	}
 	if len(next.History) > historyRetention {
 		if err := next.pruneRetainedProofs(); err != nil {
@@ -39,6 +50,9 @@ func dispatchScopedProposal(state *scopedState, index uint64, kind ProposalKind,
 			return proposalApplication{}, err
 		}
 		return *result, err
+	}
+	if isRecoveryProposal(kind) {
+		return dispatchRecoveryProposal(state, index, kind, body)
 	}
 	switch kind {
 	case "record_collection":
@@ -84,6 +98,15 @@ func dispatchScopedProposal(state *scopedState, index uint64, kind ProposalKind,
 	}
 }
 
+func applyStrictRecoveryProposal[P any](index uint64, body []byte, apply func(uint64,
+	P) (proposalApplication, error)) (proposalApplication, error) {
+	var proposal P
+	if err := model.DecodeStrict(body, &proposal, model.ManifestMaxBytes); err != nil {
+		return proposalApplication{}, err
+	}
+	return apply(index, proposal)
+}
+
 func dispatchScopedEvidence(state *scopedState, index uint64, kind ProposalKind,
 	body json.RawMessage) (*proposalApplication, error) {
 	switch kind {
@@ -120,4 +143,22 @@ func applyScopedJSONProposal[P any](index uint64, body json.RawMessage,
 		return proposalApplication{}, err
 	}
 	return apply(index, p)
+}
+
+func isRecoveryProposal(kind ProposalKind) bool {
+	return kind == KindImportRecovery || kind == KindRecoveryGroupConsumed || kind == KindCompleteRecoveryImport
+}
+
+func dispatchRecoveryProposal(state *scopedState, index uint64, kind ProposalKind,
+	body json.RawMessage) (proposalApplication, error) {
+	switch kind {
+	case KindImportRecovery:
+		return applyStrictRecoveryProposal(index, body, state.applyRecoveryImport)
+	case KindRecoveryGroupConsumed:
+		return applyStrictRecoveryProposal(index, body, state.applyRecoveryGroupConsumed)
+	case KindCompleteRecoveryImport:
+		return applyStrictRecoveryProposal(index, body, state.applyCompleteRecoveryImport)
+	default:
+		return proposalApplication{}, fault.ErrUnsupported
+	}
 }

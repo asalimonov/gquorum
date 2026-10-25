@@ -365,9 +365,29 @@ leader.
 | [Load contracts](../../load/machine.go), [transport](../../load/transport.go), [group handle](../../load/group.go) | Application integration and replica-facing API. |
 | [Meta protobuf](../../internal/metapb/meta.proto), [transport](../../internal/metatransport/transport.go) | Included meta RPCs and serialized Raft message delivery. |
 | [Meta service](../../internal/metaservice/group.go), [session renewal](../../internal/metaservice/session.go), [expiry](../../internal/metaservice/expiry.go) | Node coordination and session maintenance. |
-| [Storage contract](../../storage/storage.go), [meta adapter](../../internal/metastore/adapter.go), [WAL writes](../../storage/walstore/operations.go), [in-memory store](../../storage/memstore/store.go) | Identity and consensus persistence. |
+| [Storage contract](../../storage/storage.go), [meta adapter](../../internal/metastore/adapter.go), [WAL writes](../../internal/walbackend/operations.go), [in-memory store](../../storage/memstore/store.go) | Identity and consensus persistence. |
 | [Membership safety](../../membership/safety.go), [managed ownership](../../internal/managed/host.go) | Safe group changes and exact replica lifetimes. |
 
 See the [testing guide](../testing/tests.md) for unit, functional, race and
 process coverage, and the [physical compatibility baseline](../testing/api-baseline-physical.md)
 for retained storage and protocol fixtures.
+
+
+## Disaster recovery and consensus boundaries
+
+Permanent-majority-loss recovery creates a new lineage from one complete
+survivor's validated retained commit. Ordinary restart and offline inspection
+share the replay interpreter for complete snapshots, application entries and
+native/admin records. Applied hints never replace commit evidence, and an
+uncommitted suffix is reported/preserved in A's backup rather than applied or
+truncated. Required snapshots, gaps, invalid terms/CRC and nonfinal torn frames
+refuse recovery. Only a validated final torn tail beyond retained evidence may
+be ignored for interpretation; bytes remain intact.
+
+B uses ordinary single-node metadata founding, one scoped import and normal
+load creation authority. It transplants committed application state into fresh
+replicas, writes a normalized complete checkpoint and confirms actual effect
+receipts before consumption. The metadata recovery subtree is independently
+versioned; old decoders explicitly refuse it. No force-leader RPC, forged vote,
+new protobuf or copied A authority is introduced. Local reconstruction does not
+solve large remote snapshot transfer; GQ-02 remains separate.

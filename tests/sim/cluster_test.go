@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum"
+	"github.com/asalimonov/gquorum/topology"
 	simnet "github.com/neria-cloud/gosim/net"
 	"github.com/neria-cloud/gosim/rt"
 )
@@ -137,6 +138,70 @@ func (c *simCluster) partition(t *testing.T, node int, isolate bool) {
 		}
 		if err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+// Document edits are exercised through real Node APIs and replication, inside
+// each simulated machine rather than a Docker fixture or root-package test.
+func TestPublicLabelEditUsesDocumentWorkflow(t *testing.T) {
+	configure(t, 0, 0)
+	cluster := startCluster(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var version, nextID uint64
+	if err := cluster.nodes[cluster.leader(t)].call(ctx, func(ctx context.Context, n gquorum.Node) error {
+		c := n.Cluster()
+		view, err := c.ReadTopology(ctx)
+		if err != nil {
+			return err
+		}
+		edited := view.Latest.Clone()
+		labels := edited.Node("node1").GetLabels()
+		labels["network"] = "public_ip"
+		if err := edited.Node("node1").SetLabels(labels); err != nil {
+			return err
+		}
+		if err := edited.MetaGroup().SetLabels(map[string]string{"purpose": "accounting"}); err != nil {
+			return err
+		}
+		edited.ChangedBy = "operator"
+		prepared, err := topology.PreparePlacement(view, edited, c.Rules(), time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		staged, err := c.Stage(ctx, prepared.Document, view.Latest.Version)
+		if err != nil {
+			return err
+		}
+		nextID = view.Latest.MetaGroup().NextReplicaID
+		version = staged.Version
+		if version != view.Latest.Version+1 || staged.Node("node1").GetLabels()["network"] != "public_ip" || staged.MetaGroup().GetLabels()["purpose"] != "accounting" || staged.MetaGroup().NextReplicaID != nextID {
+			return fmt.Errorf("Stage changed prepared labels or replica allocation: %+v", staged)
+		}
+		operation, err := c.Approve(ctx, version)
+		if err != nil {
+			return err
+		}
+		_, err = c.WaitOperation(ctx, operation)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, node := range cluster.nodes {
+		if err := node.call(ctx, func(ctx context.Context, n gquorum.Node) error {
+			view, err := n.Cluster().ReadTopology(ctx)
+			if err != nil {
+				return err
+			}
+			for _, doc := range []topology.Document{view.Latest, view.Target} {
+				if doc.Version != version || doc.Node("node1").GetLabels()["network"] != "public_ip" || doc.MetaGroup().GetLabels()["purpose"] != "accounting" || doc.MetaGroup().NextReplicaID != nextID {
+					return fmt.Errorf("replicated document lost prepared labels or allocation: %+v", doc)
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(node.name, err)
 		}
 	}
 }

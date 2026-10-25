@@ -54,7 +54,7 @@ of new authority; accepted healthy load owners can continue their own consensus.
 
 | Area | Package directories / purpose |
 | --- | --- |
-| Public composition | Root `gquorum`: Node lifetime and Cluster view |
+| Public composition | Root `gquorum`: Node lifetime, Cluster view and local Recovery handle; package `recovery`: plain values |
 | Declarations and application contracts | `topology`, `load`, `storage`, `membership`, `scheduling`, `lifecycle` |
 | Public infrastructure | `events`, `fault`, `metrics`, `util`, `storage/{walstore,memstore}`, `transport/loadgrpc` |
 | Caller contract checks | `storage/storagetest`, `scheduling/schedulingtest`, `lifecycle/lifecycletest` |
@@ -977,3 +977,42 @@ Reports: `test-reports/<suite>/latest/{report.md,timeline.md}` and package logs.
 Further contract detail: [library integration](library.md), [Raft](raft.md),
 [ownership/recovery](runtime.md), [placement](placement.md),
 [load transport multiplexing](load-transport-multiplexing.md).
+
+
+## Permanent-majority-loss composition
+
+Root `recovery*.go` exposes configuration, inspection, approval, archive/cancel and
+history; `node_recovery*.go` validates and resumes accepted startup.
+`internal/recovery/model` owns shared values and strict local records;
+`internal/recovery/disk` owns leases/journals/readonly evidence;
+`internal/recovery/inspect` classifies complete retained sources;
+`internal/recovery/exec` owns Backup/Undo/archive;
+`internal/recovery/runtime` coordinates ordinary metadata import and consumption;
+`internal/recovery/placement` isolates retained policy deficits.
+
+`internal/walbackend` implements the public `storage/walstore` aliases, with
+private seed/protection/checkpoint operations composed through
+`internal/managed`. `internal/raftengine` supplies shared replay and serialized
+normalized checkpoints. `metaengine`/`metaservice` own the narrow replicated import
+and exact receipt gates. Existing metatransport IdentityPing supplies the bounded
+client-only old-member check. No storage interface or protobuf grows for recovery.
+
+The separate `tests/cluster/testapp/recovery*.go` files implement an application
+job/Files hook and authenticated remote controls using public APIs. Process cases
+in `permanent_majority_loss*_test.go` use three original nodes and return them via
+explicit reset/admission. These are independent callers, not Meridian wiring.
+
+## Recovery source navigation (2026-10-25 layout)
+
+| Path | Role |
+| --- | --- |
+| `node_recovery.go` | Public Recovery interface, Node.Recovery and standalone constructors, startup-options transformation, Node synchronization and resource adoption. |
+| `internal/recovery` | Configured offline Inspect/Approve/Run/Cancel/Status/List orchestration and reachability precheck. |
+| `internal/recovery/{disk,exec,inspect,model}` | Root ownership and journals, archive/Undo execution, source inventory/readers and shared schemas. |
+| `internal/recovery/{placement,runtime,testutil}` | Retained deficits, Node startup/control/publication, and pure record fixtures. |
+| `tests/recovery` | Public contracts, single-participant recovery flows and opt-in resource benchmarks. |
+| `tests/sim` | Replicated label/document Stage/Approve regression, executed inside each simulated machine. |
+
+No recovery test remains in the root. Metadata/WAL/engine recovery tests continue
+in their owning internal packages. Nested package paths replace former flat
+internal/recoveryword paths without changing disk formats or public signatures.

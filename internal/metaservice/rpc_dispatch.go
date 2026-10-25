@@ -178,6 +178,9 @@ func (g *Group) metaControlReply(ctx context.Context, header *metapb.Header, dat
 }
 
 func (g *Group) applyVersionReply(ctx context.Context, data []byte) *metapb.Reply {
+	if err := g.guardRecoveryMutation(); err != nil {
+		return metatransport.Reply(err)
+	}
 	request, err := decodeApplyVersionRequest(data)
 	if err != nil {
 		return metatransport.Reply(err)
@@ -230,6 +233,9 @@ func (g *Group) keepAliveReply(header *metapb.Header, data []byte) *metapb.Reply
 }
 
 func (g *Group) validateProposalCourier(proposal any, header *metapb.Header) error {
+	if err := g.validateRecoveryCourier(proposal); err != nil {
+		return err
+	}
 	switch p := proposal.(type) {
 	case *metaengine.RecordCollectionProposal, *metaengine.RecordCleanupStatusProposal:
 		return fault.ErrOperationAuthorization // Restricted reports enter through MetaControl only.

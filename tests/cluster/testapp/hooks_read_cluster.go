@@ -161,7 +161,7 @@ func (a *application) recordReadSend(batch load.RaftBatch) {
 // Fault drops preserve the exact destination. Remaining messages still pass
 // Node's normal authenticated identity and Raft validation before application.
 func (a *application) filterReadRaft(batch load.RaftBatch) (load.RaftBatch, error) {
-	if a.clusterHooks == nil || batch.To.Node != a.node.Identity() {
+	if a.clusterHooks == nil || batch.To.Node != a.currentNode().Identity() {
 		return batch, nil
 	}
 	h := a.clusterHooks
@@ -232,7 +232,7 @@ func (a *application) registerReadRoutes(mux *http.ServeMux, protect func(http.H
 			httpError(w, err)
 			return
 		}
-		if body.Identity != a.node.Identity() {
+		if body.Identity != a.currentNode().Identity() {
 			httpError(w, fault.ErrIdentityMismatch)
 			return
 		}
@@ -249,7 +249,7 @@ func (a *application) registerReadRoutes(mux *http.ServeMux, protect func(http.H
 			seen[sender] = true
 		}
 		if r.Method == "PUT" {
-			g, found := a.node.LoadGroup(group)
+			g, found := a.currentNode().LoadGroup(group)
 			if !found || g.ReplicaID() != replica {
 				httpError(w, fault.ErrIdentityMismatch)
 				return

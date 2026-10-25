@@ -31,7 +31,7 @@ import (
 	"go.etcd.io/raft/v3/raftpb"
 )
 
-func authorityNodeOptions(t *testing.T, root, instance string) NodeOptions {
+func authorityNodeOptions(t testing.TB, root, instance string) NodeOptions {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -40,7 +40,7 @@ func authorityNodeOptions(t *testing.T, root, instance string) NodeOptions {
 	t.Cleanup(func() { _ = listener.Close() })
 	return NodeOptions{StorageDir: root, Identity: topology.Identity{ClusterID: "cluster", NodeName: "n1", InstanceID: instance}, Bootstrap: BootstrapOptions{Founders: []FoundingMember{{Node: topology.Node{Name: "n1", Type: "worker"}, MemberID: 1, Address: listener.Addr().String()}}}, Meta: MetaOptions{Network: MetaNetworkOptions{Listener: listener, AdvertiseAddress: listener.Addr().String(), AllowPlaintext: true, ClusterCredential: []byte("test")}}, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 }
-func stopAuthorityNode(t *testing.T, n Node) {
+func stopAuthorityNode(t testing.TB, n Node) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

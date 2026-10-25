@@ -105,6 +105,9 @@ Raft and CRDT libraries, Zookeeper or PostgreSQL:
   Writes still commit on a quorum. Memory cache has persist on a disk for
   durability, but it easily achieves for a single Raft group 4000 RPS
   and under 1mks for operation on mediocre hardware.
+- **Permanent majority loss:** recover one complete survivor into a fresh cluster,
+  then start an ordinary Node on the same roots.
+  See the [recovery lifecycle](docs/architecture/runtime.md#permanent-majority-loss-recovery).
 - **Durable recovery:** bbolt-backed metadata, an included etcd WAL backend for
   load groups, full state-machine snapshots, committed-tail replay, compaction
   and snapshot catch-up.

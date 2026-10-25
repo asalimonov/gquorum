@@ -8,6 +8,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
+	recoveryplacement "github.com/asalimonov/gquorum/internal/recovery/placement"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -110,7 +111,11 @@ func (g *Group) planOperation(read metaengine.PlanRead) (topology.Plan, error) {
 			return topology.Plan{}, err
 		}
 	}
-	return topology.BuildPlanPreferred(read.Input, read.Target,
+	placementCtx, err := planRecoveryContext(read)
+	if err != nil {
+		return topology.Plan{}, err
+	}
+	return recoveryplacement.BuildPlan(placementCtx, read.Input, read.Target,
 		topology.PlanOptions{Rules: g.rules, PreferredMetaTransfer: preferred})
 }
 

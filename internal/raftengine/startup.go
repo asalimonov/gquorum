@@ -3,11 +3,17 @@ package raftengine
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"slices"
 
 	"github.com/asalimonov/gquorum/fault"
+	internalmetrics "github.com/asalimonov/gquorum/internal/metrics"
 	"github.com/asalimonov/gquorum/internal/raftlog"
 	"github.com/asalimonov/gquorum/internal/raftstate"
+	"github.com/asalimonov/gquorum/internal/replicastate"
+	"github.com/asalimonov/gquorum/internal/watchstate"
+	"github.com/asalimonov/gquorum/metrics"
 	"github.com/asalimonov/gquorum/storage"
 	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"
@@ -69,7 +75,7 @@ func loadGroupRecovery(ctx context.Context, options Options) (groupRecovery, err
 	if err := validateAuthorityRecovery(options, recovery, restored); err != nil {
 		return groupRecovery{}, err
 	}
-	if err := options.Machine.Restore(ctx, bytes.Clone(restored.Application)); err != nil {
+	if err := restoreMachine(ctx, options.Machine, restored.Application, recovery.Snapshot.Metadata); err != nil {
 		return groupRecovery{}, fault.New(fault.Unreadable, "restore load machine", err)
 	}
 	if err := ctx.Err(); err != nil {
@@ -117,8 +123,9 @@ func initializeFounding(ctx context.Context, options Options, state *groupRecove
 }
 
 type initializedRaft struct {
-	memory *raft.MemoryStorage
-	raw    *raft.RawNode
+	memory    *raft.MemoryStorage
+	snapshots *checkpointMemory
+	raw       *raft.RawNode
 }
 
 func initializeRaft(options Options, recovery storage.Recovery) (initializedRaft, error) {
@@ -134,11 +141,12 @@ func initializeRaft(options Options, recovery storage.Recovery) (initializedRaft
 	if err := ms.SetHardState(recovery.HardState); err != nil {
 		return initializedRaft{}, err
 	}
+	snapshots := &checkpointMemory{MemoryStorage: ms}
 	rn, err := raft.NewRawNode(&raft.Config{
 		ID:                        options.ReplicaID,
 		ElectionTick:              options.Timing.ElectionTicks,
 		HeartbeatTick:             options.Timing.HeartbeatTicks,
-		Storage:                   ms,
+		Storage:                   snapshots,
 		Applied:                   recovery.Snapshot.Metadata.Index,
 		MaxSizePerMsg:             64 << 10,
 		MaxInflightMsgs:           256,
@@ -152,5 +160,69 @@ func initializeRaft(options Options, recovery storage.Recovery) (initializedRaft
 	if err != nil {
 		return initializedRaft{}, err
 	}
-	return initializedRaft{memory: ms, raw: rn}, nil
+	return initializedRaft{memory: ms, snapshots: snapshots, raw: rn}, nil
+}
+
+// newRestoredCore initializes the same complete, worker-free engine for normal
+// startup and offline interpretation. It neither acquires storage nor restores
+// an application; the owner has already completed those steps.
+func newRestoredCore(ctx context.Context, options Options, state groupRecovery) (*Group, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	recovery, restored := state.recovery, state.restored
+	initialized, err := initializeRaft(options, recovery)
+	if err != nil {
+		return nil, err
+	}
+	var seed [16]byte
+	if _, err := rand.Read(seed[:]); err != nil {
+		return nil, err
+	}
+	g := &Group{
+		opts:             options,
+		rn:               initialized.raw,
+		ms:               initialized.memory,
+		checkpointMemory: initialized.snapshots,
+		cs:               copyConf(recovery.Snapshot.Metadata.ConfState),
+		applied:          recovery.Snapshot.Metadata.Index,
+		snapshotIndex:    recovery.Snapshot.Metadata.Index,
+		recoveryCommit:   recovery.HardState.Commit,
+		durableHS:        recovery.HardState,
+		done:             make(chan struct{}),
+		ready:            make(chan struct{}),
+		proposals:        make(chan *request, proposalQueueCapacity),
+		inbound:          make(chan *request, inboundQueueCapacity),
+		controls:         make(chan *request, controlQueueCapacity),
+		snapshots:        make(chan *request, snapshotQueueCapacity),
+		slots:            make(chan struct{}, options.MaxPendingProposals),
+		unreachable:      make(chan uint64, unreachableQueueCapacity),
+		reports:          make(chan snapshotReport, snapshotReportQueueCapacity),
+		sendC:            make(chan []raftpb.Message, outboundBatchQueueCapacity),
+		writeC:           make(chan writeJob, 1),
+		writeDone:        make(chan writeResult, 1),
+		props:            make(map[string]*request),
+		changes:          make(map[string]*request),
+		nonce:            hex.EncodeToString(seed[:]),
+	}
+	g.observations = watchstate.New(options.MaxWatchers, replicastate.Observation{},
+		func(o replicastate.Observation) replicastate.Observation { return o })
+	g.leadershipChanged = make(chan struct{})
+	g.authority = restored.Authority.Clone()
+	g.reads = make(chan *readRequest, options.Reads.MaxPending)
+	g.readSlots = make(chan struct{}, options.Reads.MaxPending)
+	g.peerAcks = make(map[uint64]peerAck)
+	g.meter, err = internalmetrics.NewMeter(metrics.ReplicaIdentity{
+		ClusterID:  options.ClusterID,
+		GroupID:    options.GroupID,
+		NodeName:   options.NodeName,
+		ReplicaID:  options.ReplicaID,
+		InstanceID: options.InstanceID,
+		RunID:      g.nonce,
+	}, options.Metrics)
+	if err != nil {
+		return nil, err
+	}
+	g.refresh()
+	return g, nil
 }

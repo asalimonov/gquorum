@@ -134,3 +134,96 @@ type Cluster interface {
 type clusterView struct{ node *node }
 
 var _ Cluster = (*clusterView)(nil)
+
+func (c *clusterView) ReadProgress(ctx context.Context, query topology.ProgressQuery) (topology.ProgressPage, error) {
+	if err := query.Validate(); err != nil {
+		return topology.ProgressPage{}, err
+	}
+	service, err := c.node.service(ctx, workService)
+	if err != nil {
+		return topology.ProgressPage{}, err
+	}
+	return service.ReadProgress(ctx, query)
+}
+
+func (c *clusterView) ReadBarrier(ctx context.Context) error {
+	m, err := c.node.service(ctx, workService)
+	if err != nil {
+		return err
+	}
+	return m.ReadBarrier(ctx)
+}
+
+func (c *clusterView) ReadTopology(ctx context.Context) (topology.ReadView, error) {
+	m, err := c.node.service(ctx, workService)
+	if err != nil {
+		return topology.ReadView{}, err
+	}
+	return m.ReadTopology(ctx)
+}
+
+func (c *clusterView) ReadLockHolder(ctx context.Context, key string) (topology.LockHolder, error) {
+	m, err := c.node.service(ctx, workService)
+	if err != nil {
+		return topology.LockHolder{}, err
+	}
+	return m.ReadLockHolder(ctx, key)
+}
+
+func (c *clusterView) ReadAuthority(ctx context.Context, id topology.OperationID) (topology.AuthorityStatus, error) {
+	m, err := c.node.service(ctx, workService)
+	if err != nil {
+		return topology.AuthorityStatus{}, err
+	}
+	return m.ReadAuthority(ctx, topology.OperationID(id))
+}
+
+func (c *clusterView) WaitRevoked(ctx context.Context, id topology.OperationID) (topology.AuthorityStatus, error) {
+	m, err := c.node.service(ctx, workService)
+	if err != nil {
+		return topology.AuthorityStatus{}, err
+	}
+	return m.WaitRevoked(ctx, topology.OperationID(id))
+}
+
+func (c *clusterView) Rules() topology.Rules {
+	return topology.Rules{SchemaVersion: 1, Limits: c.node.opts.Limits}
+}
+func (c *clusterView) IsLeader() bool {
+	m, err := c.node.service(context.Background(), workService)
+	return err == nil && m.IsLeader()
+}
+func (c *clusterView) HealthObservation() topology.HealthObservation {
+	m, err := c.node.service(context.Background(), readService)
+	if err != nil {
+		return topology.HealthObservation{}
+	}
+	return m.HealthObservation()
+}
+
+func (c *clusterView) Status(parent context.Context) (topology.ClusterStatus, error) {
+	m, err := c.node.service(parent, readService)
+	if err != nil {
+		return topology.ClusterStatus{}, err
+	}
+	n := c.node
+	n.mu.RLock()
+	cached := n.stopping || n.fenced
+	n.mu.RUnlock()
+	if cached {
+		return m.CachedStatus(parent)
+	}
+	timeout := n.opts.Loads.EffectTimeout
+	if timeout == 0 {
+		timeout = defaultEffectTimeout
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	return m.Status(ctx)
+}
+
+// RetireOptions supplies the retirement reason and topology mutation controls.
+type RetireOptions struct {
+	Reason   string          `json:"reason"`
+	Mutation MutationOptions `json:"mutation"`
+}

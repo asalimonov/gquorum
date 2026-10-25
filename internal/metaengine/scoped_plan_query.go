@@ -67,6 +67,7 @@ func queryScopedPlan(s *scopedState, q QueryRequest) (PlanRead, error) {
 	if err != nil || read.Accepted != "" {
 		return read, err
 	}
+	read.Recovery = s.recoveryPlacementState()
 	input := s.planningDeclarations()
 	input.Native = make(map[string]topology.NativeState, len(q.Native))
 	for id, native := range q.Native {
@@ -83,6 +84,9 @@ func queryScopedPlan(s *scopedState, q QueryRequest) (PlanRead, error) {
 	}
 	if read.Operation.Status.ID != "" {
 		err = s.collectScopedPlanEvidence(&read)
+		if err == nil {
+			read.RecoveryFoundingSeeds = s.recoveryFoundingSeeds(read)
+		}
 	}
 	return read, err
 }
@@ -108,7 +112,7 @@ func (s *scopedState) planReadBase(q QueryRequest) (PlanRead, error) {
 	if read.Target.ClusterID != s.Target.ClusterID && s.Target.ClusterID != "" {
 		return PlanRead{}, fault.ErrIdentityMismatch
 	}
-	if err := read.Target.Validate(s.Rules); err != nil {
+	if err := s.validateRecoveryDocument(read.Target); err != nil {
 		return PlanRead{}, err
 	}
 	read.Scopes = s.capturePlanScopes(topology.AffectedGroups(s.Target, read.Target))

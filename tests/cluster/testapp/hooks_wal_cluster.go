@@ -131,6 +131,10 @@ func (h *clusterHooks) walMetrics(key walKey) walCounters {
 }
 func (a *application) registerWALRoutes(mux *http.ServeMux, protect func(http.HandlerFunc) http.HandlerFunc) {
 	mutate := func(w http.ResponseWriter, r *http.Request) {
+		if a.store == nil {
+			httpError(w, fault.ErrUnsupported)
+			return
+		}
 		group := r.PathValue("group")
 		if err := topology.ValidateLoadID(group); err != nil {
 			httpError(w, err)
@@ -145,7 +149,7 @@ func (a *application) registerWALRoutes(mux *http.ServeMux, protect func(http.Ha
 			httpError(w, err)
 			return
 		}
-		local, found := a.node.LoadGroup(group)
+		local, found := a.currentNode().LoadGroup(group)
 		if !found || body.ReplicaID == 0 || local.ReplicaID() != body.ReplicaID {
 			httpError(w, fault.ErrIdentityMismatch)
 			return

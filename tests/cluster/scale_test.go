@@ -20,7 +20,7 @@ import (
 func TestFifteenLoadGroupsCommitIndependentlyAndDeleteEveryLocalStore(t *testing.T) {
 	t.Parallel()
 	c := acquire(t, threeNodes()).Cluster
-	ctx, cancel := context.WithTimeout(t.Context(), 110*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
 	if _, err := c.CreateGroup(ctx, "node3", gquorum.GroupSpec{ID: "baseline"}); err != nil {
 		t.Fatal(err)

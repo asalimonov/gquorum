@@ -68,6 +68,9 @@ func (g *Group) History(ctx context.Context, page topology.Page) (topology.Histo
 // Stage proposes an owned document under replicated expected-version
 // compare-and-swap.
 func (g *Group) Stage(ctx context.Context, doc topology.Document, expected uint64) (topology.Document, error) {
+	if err := g.guardRecoveryMutation(); err != nil {
+		return topology.Document{}, err
+	}
 	if err := ctx.Err(); err != nil {
 		return topology.Document{}, err
 	}

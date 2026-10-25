@@ -59,7 +59,7 @@ func (g *Group) restoreReadySnapshot(snapshot raftpb.Snapshot) error {
 		}
 		g.restoring.Store(true)
 		g.refresh()
-		err = g.opts.Machine.Restore(g.ctx, bytes.Clone(state.Application))
+		err = restoreMachine(g.ctx, g.opts.Machine, state.Application, snapshot.Metadata)
 		g.restoring.Store(false)
 		if err != nil {
 			return fault.New(fault.Unreadable, "restore received snapshot", err)

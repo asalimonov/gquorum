@@ -163,3 +163,11 @@ go mod edit -dropreplace github.com/neria-cloud/gosim
 Do not commit an absolute replacement. A workspace containing both modules
 currently exposes a Gosim module-graph validation limitation; use the replacement
 above for development.
+
+## Document/placement workflow
+
+`TestPublicLabelEditUsesDocumentWorkflow` exercises label edits, complete placement
+preparation, Stage CAS and approval through real Node APIs. It checks Latest and
+Target labels and unchanged metadata replica allocation on every simulated node
+using quorum-confirmed reads. All calls stay inside the owning simulated machine;
+this replaces the former root placement functional test and needs no Docker.

@@ -137,6 +137,7 @@ func TestIndependentGroupConvergesWhileFactoryRemainsOwned(t *testing.T) {
 				if !errors.Is(err, context.DeadlineExceeded) {
 					t.Fatal("shutdown released an owned factory", err)
 				}
+				assertNodeStorageBusy(t, o)
 				select {
 				case <-closed:
 					t.Fatal("application closed before factory returned")
@@ -151,6 +152,7 @@ func TestIndependentGroupConvergesWhileFactoryRemainsOwned(t *testing.T) {
 				default:
 					t.Fatal("late factory application was not released by joined Stop")
 				}
+				assertNodeStorageReleased(t, o)
 			} else {
 				unblock()
 				status, err := c.WaitOperation(ctx, first.OperationID)

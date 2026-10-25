@@ -123,9 +123,10 @@ func New(input Options) (*Group, error) {
 }
 
 type metaStartup struct {
-	options       Options
-	pinFound      bool
-	foundingRoles map[string]topology.ReplicaRole
+	options        Options
+	pinFound       bool
+	resumeFounding bool
+	foundingRoles  map[string]topology.ReplicaRole
 }
 
 func prepareMetaStartup(input Options) (metaStartup, error) {
@@ -134,6 +135,10 @@ func prepareMetaStartup(input Options) (metaStartup, error) {
 		return metaStartup{}, err
 	}
 	opts := startup.options
+	resume, err := recoveryFoundingResume(startup)
+	if err != nil {
+		return metaStartup{}, err
+	}
 	if opts.Join && !startup.pinFound && opts.Identity.MemberID != 0 {
 		return metaStartup{}, fault.New(fault.IdentityMismatch,
 			"a retained joining identity requires a pinned store; fresh joiners must request an identity", nil)
@@ -141,20 +146,21 @@ func prepareMetaStartup(input Options) (metaStartup, error) {
 	if !opts.Join && !startup.pinFound && len(opts.Founders) == 0 {
 		return metaStartup{}, fault.New(fault.Invalid, "fresh meta storage requires founding members", nil)
 	}
-	if !startup.pinFound && !opts.Join {
+	if (!startup.pinFound || resume) && !opts.Join {
 		if err := opts.freshVoterConfig().Validate(1, opts.Limits.MaxNodes); err != nil {
 			return metaStartup{}, err
 		}
 	}
 	var foundingRoles map[string]topology.ReplicaRole
-	if !startup.pinFound && !opts.Join {
+	if (!startup.pinFound || resume) && !opts.Join {
 		roles, err := opts.selectFoundingRoles()
 		if err != nil {
 			return metaStartup{}, err
 		}
 		foundingRoles = roles
 	}
-	return metaStartup{options: opts, pinFound: startup.pinFound, foundingRoles: foundingRoles}, nil
+	return metaStartup{options: opts, pinFound: startup.pinFound, resumeFounding: resume,
+		foundingRoles: foundingRoles}, nil
 }
 
 func inspectMetaStartup(input Options) (metaStartup, error) {
@@ -203,7 +209,7 @@ func (startup metaStartup) constructGroup() (*Group, error) {
 		removalSignal:       make(chan struct{}, 1),
 		sessionToken:        make(chan struct{}, 1),
 	}
-	g.firstBootstrap = !startup.pinFound && !opts.Join
+	g.firstBootstrap = (!startup.pinFound || startup.resumeFounding) && !opts.Join
 	g.foundingRoles = startup.foundingRoles
 	g.lastLoadStatus = make(map[string]topology.GroupStatus)
 	for _, founder := range opts.Founders {
@@ -313,7 +319,7 @@ func (g *Group) openInitialEngine(startup metaStartup) error {
 	}
 	mode := raftengine.Joining
 	var peers []raft.Peer
-	if !startup.pinFound && !opts.Join {
+	if (!startup.pinFound || startup.resumeFounding) && !opts.Join {
 		mode = raftengine.Founding
 		roles := g.foundingRoles
 		for _, founder := range opts.Founders {
@@ -474,6 +480,7 @@ func (g *Group) engineMachine(store *metastore.Store, identity topology.Identity
 	if err != nil {
 		return nil, err
 	}
+	machine.OnRecoveryCommand = g.opts.ObserveRecoveryCommand
 	machine.OnApplied = func(index uint64, cs raftpb.ConfState) {
 		views := machine.Views()
 		target := views.Target
@@ -586,7 +593,8 @@ func (g *Group) Rules() topology.Rules { return g.rules }
 // observations.
 func (g *Group) IsLeader() bool {
 	g.mu.RLock()
-	running := g.started && !g.controlOnly && !g.quiescing && g.selfRemoval == nil && g.ctx != nil && g.ctx.Err() == nil
+	running := g.started && !g.controlOnly && !g.quiescing && g.selfRemoval == nil && g.ctx != nil &&
+		g.ctx.Err() == nil
 	g.mu.RUnlock()
 	if !running {
 		return false

@@ -38,6 +38,7 @@ func (r *scopedRetention) roots() {
 	r.checkpointRoots()
 	r.admissionRoots()
 	r.pendingDeletionRoots()
+	r.recoveryRoots()
 }
 
 func cleanupComplete(debt cleanupRecord) bool {
@@ -73,7 +74,8 @@ func (r *scopedRetention) checkpointRoots() {
 }
 
 func (r *scopedRetention) checkpointWitness(source topology.Document, row groupConvergence) topology.Document {
-	for _, doc := range []topology.Document{r.state.Target, r.state.indexes.documents[r.state.FullyConverged.Version]} {
+	for _, doc := range []topology.Document{r.state.Target,
+		r.state.indexes.documents[r.state.FullyConverged.Version]} {
 		if doc.Version != 0 && reflect.DeepEqual(doc.Group(row.GroupID), row.Declaration) &&
 			sameGroupMembers(source, doc, row.Declaration) {
 			return doc
@@ -178,6 +180,20 @@ func (r *scopedRetention) deletionGroup(group string) {
 	for _, debt := range r.state.Cleanup {
 		if debt.Identity.GroupID == group {
 			r.cleanup[debt.Identity] = true
+		}
+	}
+}
+
+func (r *scopedRetention) recoveryRoots() {
+	s := r.state
+	if s.Recovery != nil {
+		r.document(s.Recovery.Version)
+		r.operation(s.indexes.first[s.Recovery.Version])
+		for _, group := range s.Recovery.Groups {
+			if group.Consumed != nil {
+				r.grants[group.Consumed.HostReceipt.Key] = true
+				r.grants[group.Consumed.GroupReceipt.Key] = true
+			}
 		}
 	}
 }

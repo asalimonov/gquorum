@@ -189,7 +189,7 @@ func (a *application) registerProjectionRoutes(mux *http.ServeMux, protect func(
 			httpError(w, fault.ErrInvalid)
 			return
 		}
-		g, found := a.node.LoadGroup(group)
+		g, found := a.currentNode().LoadGroup(group)
 		if !found || g.ReplicaID() != replica {
 			httpError(w, fault.ErrIdentityMismatch)
 			return
@@ -286,5 +286,5 @@ func (a *application) joinProjection(ctx context.Context, key walKey) error {
 }
 
 func (a *application) projectionIdentity(key walKey) storage.Identity {
-	return storage.Identity{NodeName: a.cfg.NodeName, ClusterID: a.cfg.ClusterID, GroupID: key.group, ReplicaID: key.replica}
+	return storage.Identity{NodeName: a.cfg.NodeName, ClusterID: a.clusterID(), GroupID: key.group, ReplicaID: key.replica}
 }

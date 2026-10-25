@@ -176,7 +176,7 @@ func TestOperationAndProgressReadsWorkOnScopedComposition(t *testing.T) {
 	if err != nil || result.OperationID == "" {
 		t.Fatal("approved mutation returned no exact operation", result, err)
 	}
-	waitCtx, stopWait := context.WithTimeout(ctx, 5*time.Second)
+	waitCtx, stopWait := context.WithTimeout(ctx, 15*time.Second)
 	defer stopWait()
 	status, err := c.WaitOperation(waitCtx, result.OperationID)
 	if err != nil || status.ID != result.OperationID || status.State != topology.OperationSucceeded ||

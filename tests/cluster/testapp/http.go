@@ -23,19 +23,22 @@ import (
 // Fresh health and exact approved identity remain required. Consensus writes keep
 // their ordinary Raft quorum requirements regardless of this local decision.
 func (a *application) canServe(ctx context.Context) bool {
-	if a.node.OwnSessionLive() {
+	if a.recoveryMaintenance() {
+		return false
+	}
+	if a.currentNode().OwnSessionLive() {
 		return true
 	}
-	minimum := a.node.ServeOverride()
-	if minimum == 0 || !a.node.Status().Meta.Found {
+	minimum := a.currentNode().ServeOverride()
+	if minimum == 0 || !a.currentNode().Status().Meta.Found {
 		return false
 	}
-	active, err := a.cluster.Target(ctx)
+	active, err := a.currentCluster().Target(ctx)
 	if err != nil || active.Version == 0 || active.MetaGroup() == nil ||
-		active.MemberID(a.cfg.NodeName) != a.node.Identity().MemberID {
+		active.MemberID(a.cfg.NodeName) != a.currentNode().Identity().MemberID {
 		return false
 	}
-	observation := a.cluster.HealthObservation()
+	observation := a.currentCluster().HealthObservation()
 	if observation.Version != active.Version || observation.At.IsZero() || time.Since(observation.At) > a.cfg.SessionTTL {
 		return false
 	}
@@ -63,7 +66,7 @@ func (a *application) localServing(ctx context.Context, id string) (*localReplic
 	if !a.canServe(ctx) {
 		return nil, fault.ErrUnavailable
 	}
-	identity := a.node.Identity()
+	identity := a.currentNode().Identity()
 	group, err := a.servingGroup(ctx, id)
 	if err != nil {
 		return nil, err
@@ -72,7 +75,7 @@ func (a *application) localServing(ctx context.Context, id string) (*localReplic
 	if local == nil || !local.group.Running() || local.group.Error() != nil {
 		return nil, fault.ErrReplicaNotReady
 	}
-	native, found := a.node.LoadGroup(id)
+	native, found := a.currentNode().LoadGroup(id)
 	if !found || native != local.group {
 		return nil, fault.ErrReplicaNotReady
 	}
@@ -105,7 +108,7 @@ func httpError(w http.ResponseWriter, err error) {
 	switch code {
 	case fault.Invalid, fault.Unsupported:
 		status = http.StatusBadRequest
-	case fault.VersionConflict, fault.GroupRetired, fault.IdentityMismatch, fault.OperationAuthorization, fault.AuthorityFenced, fault.ReplanRequired:
+	case fault.Conflict, fault.VersionConflict, fault.GroupRetired, fault.IdentityMismatch, fault.OperationAuthorization, fault.AuthorityFenced, fault.ReplanRequired:
 		status = http.StatusConflict
 	case fault.UnsafeMembership:
 		status = http.StatusUnprocessableEntity
@@ -224,7 +227,7 @@ func (a *application) routes() http.Handler {
 	})
 	mux.HandleFunc("GET /health/ready", a.readyHTTP)
 	mux.HandleFunc("GET /api/cluster/parked", func(w http.ResponseWriter, r *http.Request) {
-		parked, err := a.cluster.ParkedJoins(r.Context())
+		parked, err := a.currentCluster().ParkedJoins(r.Context())
 		if err != nil {
 			httpError(w, err)
 			return
@@ -245,7 +248,7 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		result, err := a.cluster.ReadmitNode(r.Context(), r.PathValue("name"), body.ExpectedMemberID, opts)
+		result, err := a.currentCluster().ReadmitNode(r.Context(), r.PathValue("name"), body.ExpectedMemberID, opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("GET /api/progress", func(w http.ResponseWriter, r *http.Request) {
@@ -257,7 +260,7 @@ func (a *application) routes() http.Handler {
 				query.Limit = -1
 			}
 		}
-		page, err := a.cluster.ReadProgress(r.Context(), query)
+		page, err := a.currentCluster().ReadProgress(r.Context(), query)
 		if err != nil {
 			httpError(w, err)
 			return
@@ -265,7 +268,7 @@ func (a *application) routes() http.Handler {
 		jsonResponse(w, http.StatusOK, page)
 	})
 	mux.HandleFunc("GET /api/cluster/status", func(w http.ResponseWriter, r *http.Request) {
-		status, err := a.cluster.Status(r.Context())
+		status, err := a.currentCluster().Status(r.Context())
 		if err != nil {
 			httpError(w, err)
 			return
@@ -278,16 +281,16 @@ func (a *application) routes() http.Handler {
 		var err error
 		switch r.PathValue("view") {
 		case "latest":
-			doc, err = a.cluster.Latest(r.Context())
+			doc, err = a.currentCluster().Latest(r.Context())
 		case "target":
-			doc, err = a.cluster.Target(r.Context())
+			doc, err = a.currentCluster().Target(r.Context())
 		case "active":
-			doc, err = readConvergedTopology(r.Context(), a.cluster)
+			doc, err = readConvergedTopology(r.Context(), a.currentCluster())
 		default:
 			var version uint64
 			version, err = positiveNumber(r.PathValue("view"))
 			if err == nil {
-				doc, err = a.cluster.Get(r.Context(), version)
+				doc, err = a.currentCluster().Get(r.Context(), version)
 			}
 		}
 		if err != nil {
@@ -308,7 +311,7 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		committed, err := a.cluster.Stage(r.Context(), doc, version)
+		committed, err := a.currentCluster().Stage(r.Context(), doc, version)
 		mutationResponse(w, gquorum.MutationResult{Document: committed}, err)
 	})
 	mux.HandleFunc("POST /api/topology/preview/plan", func(w http.ResponseWriter, r *http.Request) {
@@ -317,7 +320,7 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		plan, err := a.cluster.PlanFor(r.Context(), doc)
+		plan, err := a.currentCluster().PlanFor(r.Context(), doc)
 		if err != nil {
 			httpError(w, err)
 			return
@@ -338,7 +341,7 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		result, err := a.cluster.SetPlacement(r.Context(), body.Placement, opts)
+		result, err := a.currentCluster().SetPlacement(r.Context(), body.Placement, opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("POST /api/topology/{version}/plan", func(w http.ResponseWriter, r *http.Request) {
@@ -347,7 +350,7 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		plan, err := a.cluster.Plan(r.Context(), version)
+		plan, err := a.currentCluster().Plan(r.Context(), version)
 		if err != nil {
 			httpError(w, err)
 			return
@@ -364,7 +367,7 @@ func (a *application) routes() http.Handler {
 			httpError(w, fault.New(fault.Invalid, fmt.Sprintf("approve accepts no options; preview with POST /api/topology/%d/plan", version), err))
 			return
 		}
-		id, err := a.cluster.Approve(r.Context(), version)
+		id, err := a.currentCluster().Approve(r.Context(), version)
 		if err != nil {
 			httpError(w, err)
 			return
@@ -372,7 +375,7 @@ func (a *application) routes() http.Handler {
 		jsonResponse(w, http.StatusAccepted, map[string]any{"operation_id": id})
 	})
 	mux.HandleFunc("POST /api/operations/{id}/retry", func(w http.ResponseWriter, r *http.Request) {
-		id, err := a.cluster.RetryOperation(r.Context(), topology.OperationID(r.PathValue("id")))
+		id, err := a.currentCluster().RetryOperation(r.Context(), topology.OperationID(r.PathValue("id")))
 		if err != nil {
 			httpError(w, err)
 			return
@@ -380,7 +383,7 @@ func (a *application) routes() http.Handler {
 		jsonResponse(w, http.StatusAccepted, map[string]any{"operation_id": id})
 	})
 	mux.HandleFunc("GET /api/operations/{id}", func(w http.ResponseWriter, r *http.Request) {
-		status, err := a.cluster.Operation(r.Context(), topology.OperationID(r.PathValue("id")))
+		status, err := a.currentCluster().Operation(r.Context(), topology.OperationID(r.PathValue("id")))
 		if err != nil {
 			httpError(w, err)
 			return
@@ -401,7 +404,7 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		result, err := a.cluster.AddNode(r.Context(), body.Node, opts)
+		result, err := a.currentCluster().AddNode(r.Context(), body.Node, opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("POST /api/nodes/{name}/{action}", func(w http.ResponseWriter, r *http.Request) {
@@ -418,11 +421,11 @@ func (a *application) routes() http.Handler {
 		var result gquorum.MutationResult
 		switch r.PathValue("action") {
 		case "drain":
-			result, err = a.cluster.DrainNode(r.Context(), r.PathValue("name"), opts)
+			result, err = a.currentCluster().DrainNode(r.Context(), r.PathValue("name"), opts)
 		case "activate":
-			result, err = a.cluster.ActivateNode(r.Context(), r.PathValue("name"), opts)
+			result, err = a.currentCluster().ActivateNode(r.Context(), r.PathValue("name"), opts)
 		case "exclude":
-			result, err = a.cluster.ExcludeNode(r.Context(), r.PathValue("name"), opts)
+			result, err = a.currentCluster().ExcludeNode(r.Context(), r.PathValue("name"), opts)
 		default:
 			err = fault.ErrInvalid
 		}
@@ -442,7 +445,7 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		result, err := a.cluster.CreateGroup(r.Context(), body.Group, opts)
+		result, err := a.currentCluster().CreateGroup(r.Context(), body.Group, opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("DELETE /api/groups/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -456,7 +459,7 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		result, err := a.cluster.DeleteGroup(r.Context(), r.PathValue("id"), opts)
+		result, err := a.currentCluster().DeleteGroup(r.Context(), r.PathValue("id"), opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("PUT /api/groups/{id}/placement", func(w http.ResponseWriter, r *http.Request) {
@@ -473,7 +476,7 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		result, err := a.cluster.SetGroupPlacement(r.Context(), r.PathValue("id"), body.Placement, opts)
+		result, err := a.currentCluster().SetGroupPlacement(r.Context(), r.PathValue("id"), body.Placement, opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("PUT /api/groups/{id}/voter-config", func(w http.ResponseWriter, r *http.Request) {
@@ -490,7 +493,7 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		result, err := a.cluster.SetGroupVoterConfig(r.Context(), r.PathValue("id"), body.VoterConfig, opts)
+		result, err := a.currentCluster().SetGroupVoterConfig(r.Context(), r.PathValue("id"), body.VoterConfig, opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("PUT /api/groups/{id}/hosting", func(w http.ResponseWriter, r *http.Request) {
@@ -507,7 +510,7 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		result, err := a.cluster.SetGroupHosting(r.Context(), r.PathValue("id"), body.Hosting, opts)
+		result, err := a.currentCluster().SetGroupHosting(r.Context(), r.PathValue("id"), body.Hosting, opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("PUT /api/groups/{id}/pinned-learner", func(w http.ResponseWriter, r *http.Request) {
@@ -526,11 +529,11 @@ func (a *application) routes() http.Handler {
 			return
 		}
 		pin := topology.LearnerPin{Replica: body.Replica, Pinned: body.Pinned}
-		result, err := a.cluster.SetReplicaPinnedLearner(r.Context(), r.PathValue("id"), pin, opts)
+		result, err := a.currentCluster().SetReplicaPinnedLearner(r.Context(), r.PathValue("id"), pin, opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("POST /api/groups/{id}/leader/{name}", func(w http.ResponseWriter, r *http.Request) {
-		if err := a.cluster.TransferLeader(r.Context(), r.PathValue("id"), r.PathValue("name")); err != nil {
+		if err := a.currentCluster().TransferLeader(r.Context(), r.PathValue("id"), r.PathValue("name")); err != nil {
 			httpError(w, err)
 			return
 		}
@@ -548,7 +551,7 @@ func (a *application) routes() http.Handler {
 			return
 		}
 		opts.Mutation = mutation
-		result, err := a.cluster.ForceRetireNode(r.Context(), r.PathValue("name"), opts)
+		result, err := a.currentCluster().ForceRetireNode(r.Context(), r.PathValue("name"), opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("POST /api/groups/{id}/replicas/{name}/reseat", func(w http.ResponseWriter, r *http.Request) {
@@ -565,7 +568,7 @@ func (a *application) routes() http.Handler {
 			httpError(w, err)
 			return
 		}
-		result, err := a.cluster.ReseatReplica(r.Context(), r.PathValue("id"), topology.ReplicaKey{NodeName: r.PathValue("name"), ReplicaID: body.ReplicaID}, opts)
+		result, err := a.currentCluster().ReseatReplica(r.Context(), r.PathValue("id"), topology.ReplicaKey{NodeName: r.PathValue("name"), ReplicaID: body.ReplicaID}, opts)
 		mutationResponse(w, result, err)
 	})
 	mux.HandleFunc("PUT /api/load/{id}/keys/{key}", a.putHTTP)
@@ -574,13 +577,21 @@ func (a *application) routes() http.Handler {
 	mux.HandleFunc("GET /api/events", a.eventsHTTP)
 	mux.HandleFunc("GET /api/events/watch", a.watchHTTP)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx, done, err := a.beginEffect(r.Context())
+		if a.recoveryMaintenance() && (strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/health/ready") {
+			httpError(w, fault.New(fault.Unavailable, "recovery maintenance", nil))
+			return
+		}
+		begin := a.beginEffect
+		if managementRoute(r.URL.Path) {
+			begin = a.beginProcessEffect
+		}
+		ctx, done, err := begin(r.Context())
 		if err != nil {
 			httpError(w, err)
 			return
 		}
 		defer done()
-		if a.cfg.GateFounders && a.node != nil && !a.node.Status().Ready && (strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/health/ready") {
+		if a.cfg.GateFounders && a.currentNode() != nil && !a.currentNode().Status().Ready && (strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/health/ready") {
 			httpError(w, fault.New(fault.Unavailable, a.foundingMessage(), nil))
 			return
 		}
@@ -632,12 +643,12 @@ func (a *application) readyHTTP(w http.ResponseWriter, r *http.Request) {
 		httpError(w, fault.ErrUnavailable)
 		return
 	}
-	target, err := a.cluster.Target(r.Context())
+	target, err := a.currentCluster().Target(r.Context())
 	if err != nil {
 		httpError(w, err)
 		return
 	}
-	if target.Version == 0 || target.MemberID(a.cfg.NodeName) != a.node.Identity().MemberID {
+	if target.Version == 0 || target.MemberID(a.cfg.NodeName) != a.currentNode().Identity().MemberID {
 		httpError(w, fault.ErrReplicaNotReady)
 		return
 	}
@@ -663,7 +674,7 @@ func (a *application) readyHTTP(w http.ResponseWriter, r *http.Request) {
 		httpError(w, fault.ErrReplicaNotReady)
 		return
 	}
-	jsonResponse(w, http.StatusOK, map[string]any{"node": a.cfg.NodeName, "session_live": a.node.OwnSessionLive(), "serve_override": a.node.ServeOverride(), "groups": groups, "target_version": target.Version})
+	jsonResponse(w, http.StatusOK, map[string]any{"node": a.cfg.NodeName, "session_live": a.currentNode().OwnSessionLive(), "serve_override": a.currentNode().ServeOverride(), "groups": groups, "target_version": target.Version})
 }
 func (a *application) historyHTTP(w http.ResponseWriter, r *http.Request) {
 	offset, limit := 0, 100
@@ -686,7 +697,7 @@ func (a *application) historyHTTP(w http.ResponseWriter, r *http.Request) {
 		httpError(w, fault.ErrInvalid)
 		return
 	}
-	result, err := a.cluster.History(r.Context(), topology.Page{Offset: offset, Limit: limit})
+	result, err := a.currentCluster().History(r.Context(), topology.Page{Offset: offset, Limit: limit})
 	if err != nil {
 		httpError(w, err)
 		return

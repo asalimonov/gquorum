@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -41,6 +42,12 @@ type application struct {
 	cfg                          config
 	logger                       *slog.Logger
 	node                         gquorum.Node
+	nodeOptions                  gquorum.NodeOptions
+	recoveryJobs                 *recoveryJobs
+	recoveryControls             recoveryControls
+	generationMu                 sync.RWMutex
+	nodeOpMu                     sync.Mutex
+	generation                   *nodeGeneration
 	cluster                      gquorum.Cluster
 	store                        *walstore.Store
 	journal                      *events.Journal
@@ -116,8 +123,11 @@ func (c *config) recoverBootMode() (bool, error) {
 	return false, nil
 }
 func (a *application) markEstablished() {
-	if err := a.node.WaitReady(a.workCtx); err != nil {
-		status := a.node.Status()
+	a.markEstablishedFor(a.workCtx, a.currentNode())
+}
+func (a *application) markEstablishedFor(ctx context.Context, n gquorum.Node) {
+	if err := n.WaitReady(ctx); err != nil {
+		status := n.Status()
 		if errors.Is(err, fault.ErrStopped) && status.State == gquorum.NodeFenced && status.SelfRemoval != nil && status.SelfRemoval.Fenced &&
 			status.SelfRemoval.MemberID == status.Identity.MemberID && status.SelfRemoval.Version != 0 && status.SelfRemoval.AppliedIndex != 0 {
 			// An admission can be superseded before serving. Keep authenticated
@@ -128,7 +138,7 @@ func (a *application) markEstablished() {
 		select {
 		case <-a.closing:
 		default:
-			if a.workCtx.Err() == nil {
+			if ctx.Err() == nil {
 				a.fail(err)
 			}
 		}
@@ -139,7 +149,8 @@ func (a *application) markEstablished() {
 	}
 }
 func (a *application) persistEstablished() error {
-	raw, err := json.Marshal(struct{ ClusterID, NodeName string }{a.cfg.ClusterID, a.cfg.NodeName})
+	identity := a.currentNode().Identity()
+	raw, err := json.Marshal(struct{ ClusterID, NodeName string }{identity.ClusterID, identity.NodeName})
 	if err != nil {
 		return err
 	}
@@ -168,6 +179,11 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 	}
 	if cfg.NodeName == "" || cfg.ClusterID == "" || cfg.InstanceID == "" || cfg.DataDir == "" || cfg.Credential == "" || cfg.NodeType == "" {
 		return nil, fault.New(fault.Invalid, "node, type, cluster, process, data path and credential required", nil)
+	}
+	cfg.Peers = slices.Clone(cfg.Peers)
+	if cfg.MetaVoterConfig != nil {
+		v := *cfg.MetaVoterConfig
+		cfg.MetaVoterConfig = &v
 	}
 	cfg.Limits = cfg.Limits.WithDefaults()
 	if err = cfg.Limits.Validate(); err != nil {
@@ -203,11 +219,23 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 			return nil, err
 		}
 	}
-	resume, err := cfg.recoverBootMode()
+	savedJob, err := readRecoveryJob(cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	var resume bool
+	if savedJob == nil || !savedJob.Maintenance {
+		if savedJob != nil && savedJob.Phase == "complete" && savedJob.Status != nil {
+			cfg.ClusterID = savedJob.Status.Identity.ClusterID
+			cfg.Bootstrap = false
+		}
+		resume, err = cfg.recoverBootMode()
+	}
 	if err != nil {
 		return nil, err
 	}
 	a := &application{cfg: cfg, logger: logger, machines: map[load.ReplicaRef]*kvMachine{}, clients: map[string]*loadClient{}, closing: make(chan struct{}), closed: make(chan struct{})}
+	a.recoveryJobs = &recoveryJobs{app: a, job: savedJob}
 	a.workCtx, a.stopWork = context.WithCancel(context.Background())
 	a.clusterHooks = newClusterHooks()
 	a.lifeCtx, a.stopLife = context.WithCancel(context.Background())
@@ -255,9 +283,11 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 		return nil, err
 	}
 	prewrite := false
-	a.store, err = walstore.Open(walstore.Options{RootDir: filepath.Join(cfg.DataDir, "load"), NodeName: cfg.NodeName, ClusterID: cfg.ClusterID, SegmentBytes: 1 << 20, Prewrite: &prewrite, Logger: logger})
-	if err != nil {
-		return nil, err
+	if !cfg.NodeOwnedWAL {
+		a.store, err = walstore.Open(walstore.Options{RootDir: filepath.Join(cfg.DataDir, "load"), NodeName: cfg.NodeName, ClusterID: cfg.ClusterID, SegmentBytes: 1 << 20, Prewrite: &prewrite, Logger: logger})
+		if err != nil {
+			return nil, err
+		}
 	}
 	var founders []gquorum.FoundingMember
 	var seeds []string
@@ -298,7 +328,7 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 	}
 	scheduleOptions := cfg.Scheduling
 	scheduleOptions.Policy = scheduler
-	a.node, err = gquorum.NewNode(gquorum.NodeOptions{
+	a.nodeOptions = gquorum.NodeOptions{
 		StorageDir: cfg.DataDir,
 		Identity:   topology.Identity{NodeName: cfg.NodeName, ClusterID: cfg.ClusterID, InstanceID: cfg.InstanceID, MemberID: member},
 		Node:       cfg.nodeForPeer(peer{Name: cfg.NodeName, Type: cfg.NodeType, MetaAddress: cfg.MetaAddress, LoadAddress: cfg.LoadAddress, HTTPAddress: cfg.HTTPAddress}),
@@ -311,19 +341,22 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 			// Process tests exercise two collection passes across a crash. Keep
 			// maintenance prompt; retention still decides whether deletion is due.
 			RetirementInterval: 250 * time.Millisecond,
-			Storage:            gquorum.LoadStorageOptions{Store: &fixtureStore{Store: a.store, app: a}, Retirement: fixtureRetirement{RetirementStore: a.store, app: a}},
+			Storage:            a.loadStorageOptions(),
 			Engine:             load.EngineOptions{Timing: load.Timing{TickInterval: cfg.TickInterval, ElectionTicks: cfg.ElectionTicks, WALWriteWait: cfg.WALWriteWait}, SnapshotThreshold: cfg.SnapshotThreshold, ProposalTimeout: cfg.ProposalTimeout}},
 		Scheduling: scheduleOptions,
 		Metrics:    cfg.Metrics,
 		Lifecycle:  lifecycle.Options{Hooks: &fixtureLifecycle{DefaultHooks: defaults, app: a}},
-	})
+	}
+
+	a.node, err = gquorum.NewNode(a.nodeOptions)
 	if err != nil {
 		return nil, err
 	}
 	if cfg.AdmissionPinPhase != "" {
 		_ = ls.meta.Close()
 	}
-	a.cluster = a.node.Cluster()
+	a.cluster = a.currentNode().Cluster()
+	a.generation = a.makeNodeGeneration(a.node, a.nodeOptions.Meta.Network.Listener)
 	a.loadServer = grpc.NewServer(grpc.MaxRecvMsgSize(64<<20), grpc.MaxSendMsgSize(64<<20), grpc.MaxConcurrentStreams(128), grpc.WaitForHandlers(true))
 	loadpb.RegisterLoadServer(a.loadServer, a)
 	a.httpServer = &http.Server{Handler: a.routes(), ReadHeaderTimeout: 3 * time.Second, IdleTimeout: 30 * time.Second, BaseContext: func(net.Listener) context.Context { return a.httpCtx }}
@@ -368,7 +401,13 @@ func (a *application) Start(parent context.Context) error {
 			}
 		})
 	}
-	if err := a.node.Start(a.lifeCtx); err != nil {
+	if a.recoveryMaintenance() {
+		a.recoveryJobs.mu.Lock()
+		if a.recoveryJobs.job.Phase != "prepared" {
+			a.recoveryJobs.launchLocked()
+		}
+		a.recoveryJobs.mu.Unlock()
+	} else if err := a.startNodeGeneration(); err != nil {
 		a.RequestClose()
 		return err
 	}
@@ -379,11 +418,7 @@ func (a *application) Start(parent context.Context) error {
 		case <-a.workCtx.Done():
 		}
 	})
-	a.workWG.Go(a.markEstablished)
-	a.workWG.Go(a.observeServing)
-	if a.cfg.Bootstrap {
-		a.workWG.Go(a.bootstrap)
-	}
+
 	return nil
 }
 func (a *application) RequestClose() {
@@ -419,8 +454,11 @@ func (a *application) finishClose() {
 	}
 	a.workWG.Wait()
 	a.effectWG.Wait()
-	if a.node != nil {
-		remember(a.node.Stop(context.Background()))
+	if a.recoveryJobs != nil {
+		a.recoveryJobs.workers.Wait()
+	}
+	if a.currentNode() != nil {
+		remember(a.stopNodeGeneration(context.Background()))
 	}
 	if a.metaProxy != nil {
 		a.metaProxy.server.Stop()
@@ -480,10 +518,10 @@ func (a *application) address(ctx context.Context, name, label string) (string, 
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if a.cluster != nil {
+	if a.currentCluster() != nil {
 		// Routing must work before election and during metadata quorum loss.
 		// The receiver validates identity; resolving an address grants no authority.
-		target, err := a.cluster.Target(ctx)
+		target, err := a.currentCluster().Target(ctx)
 		if node := target.Node(name); err == nil && node != nil && node.Labels[label] != "" {
 			return node.Labels[label], nil
 		}
@@ -521,26 +559,26 @@ func (a *application) owner(ctx context.Context, group string, replica uint64) (
 	return replicaOwner(doc.Group(group), replica), nil
 }
 
-func (a *application) bootstrap() {
-	if err := a.node.WaitReady(a.workCtx); err != nil {
+func (a *application) bootstrapContext(parent context.Context, n gquorum.Node) {
+	if err := n.WaitReady(parent); err != nil {
 		return
 	}
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if a.cluster.IsLeader() {
-			ctx, cancel := context.WithTimeout(a.workCtx, 5*time.Second)
+		if a.currentCluster().IsLeader() {
+			ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 			done, err := a.bootstrapOnce(ctx)
 			cancel()
 			if done {
 				return
 			}
-			if err != nil && a.workCtx.Err() == nil {
+			if err != nil && parent.Err() == nil {
 				a.logger.Debug("demo bootstrap pending", "error", err)
 			}
 		}
 		select {
-		case <-a.workCtx.Done():
+		case <-parent.Done():
 			return
 		case <-ticker.C:
 		}
@@ -550,19 +588,19 @@ func (a *application) bootstrapOnce(ctx context.Context) (bool, error) {
 	workersConfig := topology.DefaultVoterConfig()
 	workersConfig.TargetVoters = 2
 	for _, spec := range []gquorum.GroupSpec{{ID: "demo"}, {ID: "workers", VoterConfig: &workersConfig, Placement: &topology.PlacementRule{MinReplicas: 1, MaxReplicas: 2, AllowedNodeTypes: []topology.NodeType{"worker"}}}} {
-		latest, err := a.cluster.Latest(ctx)
+		latest, err := a.currentCluster().Latest(ctx)
 		if err != nil {
 			return false, err
 		}
 		if latest.Group(spec.ID) == nil {
-			created, err := a.cluster.CreateGroup(ctx, spec, gquorum.MutationOptions{ExpectedVersion: latest.Version, Actor: a.cfg.NodeName, Approve: true})
+			created, err := a.currentCluster().CreateGroup(ctx, spec, gquorum.MutationOptions{ExpectedVersion: latest.Version, Actor: a.cfg.NodeName, Approve: true})
 			if errors.Is(err, fault.ErrGroupRetired) {
 				continue
 			}
 			if err != nil {
 				return false, err
 			}
-			status, err := a.cluster.WaitOperation(ctx, created.OperationID)
+			status, err := a.currentCluster().WaitOperation(ctx, created.OperationID)
 			if err != nil {
 				return false, err
 			}
@@ -570,16 +608,16 @@ func (a *application) bootstrapOnce(ctx context.Context) (bool, error) {
 				return false, fault.New(fault.Unavailable, status.Error, nil)
 			}
 		} else {
-			active, err := readConvergedTopology(ctx, a.cluster)
+			active, err := readConvergedTopology(ctx, a.currentCluster())
 			if err != nil {
 				return false, err
 			}
 			if active.Group(spec.ID) == nil {
-				id, err := a.cluster.Approve(ctx, latest.Version)
+				id, err := a.currentCluster().Approve(ctx, latest.Version)
 				if err != nil {
 					return false, err
 				}
-				status, err := a.cluster.WaitOperation(ctx, id)
+				status, err := a.currentCluster().WaitOperation(ctx, id)
 				if err != nil || status.State != topology.OperationSucceeded {
 					return false, err
 				}

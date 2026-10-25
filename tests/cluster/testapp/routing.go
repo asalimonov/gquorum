@@ -13,17 +13,17 @@ func (a *application) approvedRoute(ctx context.Context, match func(topology.Doc
 	if err := ctx.Err(); err != nil {
 		return topology.Document{}, err
 	}
-	if a.cluster == nil {
+	if a.currentCluster() == nil {
 		return topology.Document{}, fault.ErrUnavailable
 	}
-	target, err := a.cluster.Target(ctx)
+	target, err := a.currentCluster().Target(ctx)
 	if err != nil {
 		return topology.Document{}, err
 	}
 	if match(target) {
 		return target, nil
 	}
-	history, err := a.cluster.History(ctx, topology.Page{})
+	history, err := a.currentCluster().History(ctx, topology.Page{})
 	if err != nil {
 		return topology.Document{}, err
 	}
@@ -32,7 +32,7 @@ func (a *application) approvedRoute(ctx context.Context, match func(topology.Doc
 			continue
 		}
 		id := topology.MakeOperationID(doc.Version, 1)
-		op, err := a.cluster.Operation(ctx, id)
+		op, err := a.currentCluster().Operation(ctx, id)
 		if err == nil && op.ID == id && op.Version == doc.Version {
 			return doc, nil
 		}

@@ -141,17 +141,7 @@ func (h *Host) ReadReplica(ctx context.Context, query load.ReplicaQuery) (load.R
 		h.mu.Unlock()
 		return result, nil
 	}
-	result.LocalState = slot.state
-	// Only a published replica can attest to a completed topology effect.
-	// During startup the engine already exchanges Raft traffic, but replay and
-	// the final authorization check still belong to the startup reservation.
-	// Advertising it early could advance its operator and invalidate that
-	// check.
-	if slot.state == "ready" && slot.handle != nil && slot.core != nil && !slot.released && slot.core.Running() {
-		result.Found, result.Status = true, slot.core.Status()
-		sample := slot.core.Metrics().Sample
-		result.Metrics = &sample
-	}
+	fillReplicaStatusLocked(slot, query, &result)
 	core := slot.core
 	h.mu.Unlock()
 	if query.Native && result.Found {
@@ -316,7 +306,8 @@ func stepReceivedRaft(ctx context.Context, receiver receivedReplica, messages []
 	// An unpublished replica refuses forwarded proposals; messages before the
 	// first one are still stepped, as when each message was delivered alone.
 	if !published {
-		if i := slices.IndexFunc(messages, func(m raftpb.Message) bool { return m.Type == raftpb.MsgProp }); i >= 0 {
+		i := slices.IndexFunc(messages, func(m raftpb.Message) bool { return m.Type == raftpb.MsgProp })
+		if i >= 0 {
 			if i > 0 {
 				if err := core.StepBatch(ctx, messages[:i]); err != nil {
 					return err
@@ -340,7 +331,8 @@ func (h *Host) readNativeReplica(ctx context.Context, slot *replica,
 	// successor's membership, even when the durable identity was reused.
 	h.mu.Lock()
 	current := h.slots[result.Peer.Replica.GroupID]
-	valid := current == slot && slot.core == core && slot.state == "ready" && !slot.released && core.Running()
+	valid := current == slot && slot.core == core && (slot.state == "ready" ||
+		slot.state == recoveryReady) && !slot.released && core.Running()
 	h.mu.Unlock()
 	if !valid {
 		return load.ReplicaStatus{}, fault.ErrStopped
@@ -372,4 +364,22 @@ func applyDeliveryReport(core *raftengine.Group, d delivery, kind load.DeliveryK
 	default: // Other delivery reports do not update Raft progress.
 	}
 	return nil
+}
+
+func fillReplicaStatusLocked(slot *replica, query load.ReplicaQuery, result *load.ReplicaStatus) {
+	result.LocalState = slot.state
+	// Only a published replica can attest to a completed topology effect.
+	// During startup the engine already exchanges Raft traffic, but replay and
+	// the final authorization check still belong to the startup reservation.
+	// Advertising it early could advance its operator and invalidate that
+	// check.
+	if (slot.state == "ready" && slot.handle != nil || slot.state == recoveryReady) && slot.core != nil &&
+		!slot.released && slot.core.Running() {
+		result.Found, result.Status = true, slot.core.Status()
+		if slot.state == recoveryReady && !query.Native {
+			result.Status.ErrorCode = string(fault.ReplicaNotReady)
+		}
+		sample := slot.core.Metrics().Sample
+		result.Metrics = &sample
+	}
 }

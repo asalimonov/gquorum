@@ -50,6 +50,7 @@ type config struct {
 	AdmissionPinPhase                                    string
 	CallerScheduler, RetryRemoval                        bool
 	MetaFaultProxy                                       bool
+	NodeOwnedWAL                                         bool
 }
 
 func envOr(name, fallback string) string {
@@ -75,6 +76,7 @@ func main() {
 	flag.StringVar(&c.LoadAddress, "load-address", os.Getenv("GQUORUM_LOAD_ADDRESS"), "advertised load address; defaults to local manifest entry")
 	flag.StringVar(&c.HTTPAddress, "http-address", os.Getenv("GQUORUM_HTTP_ADDRESS"), "advertised HTTP address; defaults to local manifest entry")
 	flag.BoolVar(&c.AddressFree, "address-free", false, "resolve all locations from the caller manifest without topology labels")
+	flag.BoolVar(&c.NodeOwnedWAL, "node-owned-wal", false, "fixture: Node owns WAL storage")
 	flag.BoolVar(&c.Join, "join", false, "join through supplied peers instead of founding")
 	flag.BoolVar(&c.Bootstrap, "bootstrap", true, "declare the demo groups after founding")
 	flag.BoolVar(&c.GateFounders, "gate-founders", false, "caller startup gate: require every configured founder before serving")

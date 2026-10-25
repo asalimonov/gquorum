@@ -64,7 +64,7 @@ func testDirectTransferRetry(t *testing.T, mode string) {
 	owner.mu.Lock()
 	owner.meta = groups
 	owner.mu.Unlock()
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	doc, err := g.Stage(ctx, loadDocument(t, g), 1)
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metatransport"
+	recoveryplacement "github.com/asalimonov/gquorum/internal/recovery/placement"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -40,10 +41,11 @@ func (g *Group) PlanFor(ctx context.Context, doc topology.Document) (topology.Pl
 	if approved.ClusterID == "" {
 		approved.ClusterID = doc.ClusterID
 	}
-	if err := topology.ValidateHostingCapacityFor(approved, doc, g.rules); err != nil {
+	placementCtx, err := planRecoveryContext(read)
+	if err != nil {
 		return topology.Plan{}, err
 	}
-	if err := topology.ValidatePlacementTransition(approved, approved, doc); err != nil {
+	if err := recoveryplacement.Validate(placementCtx, approved, approved, doc, g.rules); err != nil {
 		return topology.Plan{}, err
 	}
 	plan, err := g.planOperation(read)

@@ -32,7 +32,7 @@ type loadClient struct {
 }
 
 func (a *application) header() *loadpb.Header {
-	id := a.node.Identity()
+	id := a.currentNode().Identity()
 	return &loadpb.Header{ClusterId: id.ClusterID, NodeName: id.NodeName, InstanceId: id.InstanceID, MemberId: id.MemberID}
 }
 func (a *application) client(ctx context.Context, name string, member uint64) (*loadClient, error) {
@@ -75,10 +75,10 @@ func (a *application) auth(ctx context.Context) error {
 	return nil
 }
 func (a *application) validateHeader(ctx context.Context, h *loadpb.Header) error {
-	if h == nil || h.ClusterId != a.cfg.ClusterID || h.NodeName == "" || h.InstanceId == "" || h.MemberId == 0 {
+	if h == nil || h.ClusterId != a.clusterID() || h.NodeName == "" || h.InstanceId == "" || h.MemberId == 0 {
 		return fault.ErrIdentityMismatch
 	}
-	target, err := a.cluster.Target(ctx)
+	target, err := a.currentCluster().Target(ctx)
 	if err != nil {
 		return err
 	}
@@ -218,7 +218,7 @@ func (a *application) receiveCall(ctx context.Context, request *loadpb.Request) 
 		if err := a.waitAuthorityFence(ctx, fence, false); err != nil {
 			return domainReply(err), nil
 		}
-		result, err := a.node.InstallLoadFence(ctx, fence)
+		result, err := a.currentNode().InstallLoadFence(ctx, fence)
 		if err != nil {
 			return domainReply(err), nil
 		}
@@ -235,7 +235,7 @@ func (a *application) receiveCall(ctx context.Context, request *loadpb.Request) 
 		if headerIdentity(request.Header) != query.From || query.To.Replica.GroupID != request.GroupId || query.To.Replica.ReplicaID != request.ReplicaId {
 			return domainReply(fault.ErrIdentityMismatch), nil
 		}
-		result, err := a.node.ReadLoadReplica(ctx, query)
+		result, err := a.currentNode().ReadLoadReplica(ctx, query)
 		if err != nil {
 			return domainReply(err), nil
 		}
@@ -254,7 +254,7 @@ func (a *application) receiveCall(ctx context.Context, request *loadpb.Request) 
 		if err := a.beforeClusterEffect(ctx, action.Authorization); err != nil {
 			return domainReply(err), nil
 		}
-		result, err := a.node.ApplyLoadAction(ctx, action)
+		result, err := a.currentNode().ApplyLoadAction(ctx, action)
 		a.afterClusterEffect(action.Authorization, err)
 		if err == nil {
 			a.captureAuthorityReceipt(result)
@@ -268,7 +268,7 @@ func (a *application) receiveCall(ctx context.Context, request *loadpb.Request) 
 	if err := a.validateHeader(ctx, request.Header); err != nil {
 		return domainReply(err), nil
 	}
-	g, found := a.node.LoadGroup(request.GroupId)
+	g, found := a.currentNode().LoadGroup(request.GroupId)
 	if !found || !g.Running() {
 		return domainReply(fault.ErrReplicaNotReady), nil
 	}
@@ -307,6 +307,37 @@ func (a *application) receiveCall(ctx context.Context, request *loadpb.Request) 
 	}
 }
 func (a *application) beginEffect(parent context.Context) (context.Context, func(), error) {
+	ctx, processDone, err := a.beginProcessEffect(parent)
+	if err != nil {
+		return nil, nil, err
+	}
+	a.generationMu.Lock()
+	g := a.generation
+	if g == nil {
+		a.generationMu.Unlock()
+		return ctx, processDone, nil
+	}
+	if !g.accepting {
+		a.generationMu.Unlock()
+		processDone()
+		return nil, nil, fault.ErrStopped
+	}
+	g.effects.Add(1)
+	a.generationMu.Unlock()
+	ctx, cancel := context.WithCancel(ctx)
+	joined := make(chan struct{})
+	stop := context.AfterFunc(g.ctx, func() { cancel(); close(joined) })
+	return ctx, func() {
+		cancel()
+		if !stop() {
+			<-joined
+		}
+		g.effects.Done()
+		processDone()
+	}, nil
+}
+
+func (a *application) beginProcessEffect(parent context.Context) (context.Context, func(), error) {
 	a.effectMu.Lock()
 	select {
 	case <-a.closing:
@@ -329,6 +360,13 @@ func (a *application) beginEffect(parent context.Context) (context.Context, func
 }
 
 func (a *application) Deliver(ctx context.Context, frame *loadpb.Frame) (*loadpb.Reply, error) {
+	owned, done, err := a.beginEffect(ctx)
+	if err != nil {
+		return domainReply(err), nil
+	}
+	defer done()
+	ctx = owned
+
 	if err := a.auth(ctx); err != nil {
 		return domainReply(err), nil
 	}
@@ -345,14 +383,17 @@ func (a *application) Deliver(ctx context.Context, frame *loadpb.Frame) (*loadpb
 	if len(batch.Messages) == 0 {
 		return domainReply(fault.ErrInvalid), nil
 	}
-	batch, err := a.filterReadRaft(batch)
+	if batch.To.Node != a.currentNode().Identity() {
+		return domainReply(fault.ErrIdentityMismatch), nil
+	}
+	batch, err = a.filterReadRaft(batch)
 	if err != nil {
 		return domainReply(err), nil
 	}
 	if len(batch.Messages) == 0 {
 		return &loadpb.Reply{}, nil // authenticated fault drop; no effect acknowledgement
 	}
-	if err := a.node.ReceiveLoadRaft(ctx, batch); err != nil {
+	if err := a.currentNode().ReceiveLoadRaft(ctx, batch); err != nil {
 		return domainReply(err), nil
 	}
 	a.recordReadReceive(batch)
@@ -388,7 +429,7 @@ func (t loadTransport) SendRaft(ctx context.Context, batch load.RaftBatch) error
 	}
 	for _, message := range batch.Messages {
 		if message.Type == raftpb.MsgSnap {
-			return t.app.node.ReportLoadDelivery(ctx, load.DeliveryReport{From: batch.From, To: batch.To, DeliveryID: batch.DeliveryID, Kind: load.DeliverySnapshotSucceeded})
+			return t.app.currentNode().ReportLoadDelivery(ctx, load.DeliveryReport{From: batch.From, To: batch.To, DeliveryID: batch.DeliveryID, Kind: load.DeliverySnapshotSucceeded})
 		}
 	}
 	return nil

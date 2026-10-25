@@ -9,6 +9,7 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/authoritystore"
 	"github.com/asalimonov/gquorum/internal/metastore"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -165,10 +166,7 @@ func (n *node) inspectAuthority() error {
 	}
 	authorityExists := statErr == nil
 	if meta.Found {
-		if !authorityExists {
-			return fault.New(fault.Unreadable, "retained meta identity has no authority database", nil)
-		}
-		return n.acquirePinnedAuthority(meta.Identity)
+		return n.inspectPinnedRecoveryAuthority(meta.Identity, statErr)
 	}
 	fresh, err := metastore.StoreIsFresh(n.opts.metaDBPath())
 	if err != nil {
@@ -178,6 +176,9 @@ func (n *node) inspectAuthority() error {
 		return fault.New(fault.Unreadable, "unpinned retained metadata cannot initialize authority", nil)
 	}
 	if authorityExists {
+		if resumed, err := n.resumeRecoveryAuthority(); resumed || err != nil {
+			return err
+		}
 		return n.acquireReadmissionAuthority()
 	}
 	if err := n.inspectFreshLoadStorage(); err != nil {
@@ -251,7 +252,8 @@ func (n *node) acquireMetaAuthority(id topology.Identity) error {
 			return err
 		}
 		if !meta.Found {
-			return fault.New(fault.Unreadable, "acquired metadata is missing; the same member cannot be recreated", nil)
+			return fault.New(fault.Unreadable,
+				"acquired metadata is missing; the same member cannot be recreated", nil)
 		}
 		if meta.Identity.ClusterID != id.ClusterID || meta.Identity.NodeName != id.NodeName ||
 			meta.Identity.MemberID != id.MemberID {
@@ -269,7 +271,16 @@ func (n *node) acquireMetaAuthority(id topology.Identity) error {
 }
 
 func (n *node) markMetaAcquired(id topology.Identity) error {
-	return n.localAuthority().MarkMetadataAcquired(n.ctx, id)
+	if err := n.localAuthority().MarkMetadataAcquired(n.ctx, id); err != nil {
+		return err
+	}
+	n.mu.RLock()
+	journal := n.recoveryJournal
+	n.mu.RUnlock()
+	if journal != nil && journal.View().Phase == model.JoinReady {
+		return journal.MarkJoined(n.ctx, id)
+	}
+	return nil
 }
 
 func (n *node) acquirePinnedAuthority(pin metastore.Identity) error {
@@ -299,11 +310,11 @@ func (n *node) acquireReadmissionAuthority() error {
 
 func (n *node) inspectFreshLoadStorage() error {
 	if wal := n.opts.Loads.Storage.WAL; wal != nil {
-		entries, err := os.ReadDir(wal.RootDir)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
+		retained, err := n.storageOwner.HasLiveLoadEvidence(n.ctx)
+		if err != nil {
 			return err
 		}
-		if len(entries) != 0 {
+		if retained {
 			return fault.New(fault.Unreadable, "retained load storage has no authority database", nil)
 		}
 	} else if store := n.opts.Loads.Storage.Store; store != nil {
@@ -323,4 +334,14 @@ func (n *node) inspectFreshLoadStorage() error {
 		}
 	}
 	return nil
+}
+
+func (n *node) inspectPinnedRecoveryAuthority(identity metastore.Identity, missing error) error {
+	if missing != nil {
+		return fault.New(fault.Unreadable, "retained meta identity has no authority database", missing)
+	}
+	if resumed, err := n.resumePinnedRecoveryFounding(); resumed || err != nil {
+		return err
+	}
+	return n.acquirePinnedAuthority(identity)
 }

@@ -9,8 +9,12 @@ import (
 	"github.com/asalimonov/gquorum/internal/authoritystore"
 	"github.com/asalimonov/gquorum/internal/managed"
 	"github.com/asalimonov/gquorum/internal/metaservice"
+	recoverydisk "github.com/asalimonov/gquorum/internal/recovery/disk"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
+	recoveryruntime "github.com/asalimonov/gquorum/internal/recovery/runtime"
 	"github.com/asalimonov/gquorum/internal/watchstate"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/recovery"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/storage/memstore"
 	"github.com/asalimonov/gquorum/storage/walstore"
@@ -46,6 +50,9 @@ type Node interface {
 	Watch(context.Context) (<-chan NodeObservation, error)
 	// Cluster returns the administration view owned by this Node.
 	Cluster() Cluster
+	// Recovery configures local maintenance without starting or stopping Node.
+	// Join shutdown before inspecting or archiving; Status/List can run online.
+	Recovery(...recovery.Options) (Recovery, error)
 
 	// Managed load replicas. StartLoadGroup and StopLoadGroup address an exact
 	// replica; LoadGroup and LoadGroupIDs inspect currently published handles.
@@ -127,6 +134,11 @@ type node struct {
 	store                   storage.Store
 	retirement              storage.RetirementStore
 	ownedWAL                *walstore.Store
+	storageOwner            *recoverydisk.Owner
+	recoveryJournal         *recoverydisk.Journal
+	recoveryCoordinator     *recoveryruntime.Coordinator
+	recoveryManifest        *model.LocalManifest
+	limitsExplicit          bool
 	ownedMemory             *memstore.Store
 	lifecycle               *lifecycleRunner
 	pending                 *topology.Identity
@@ -151,14 +163,15 @@ func NewNode(input NodeOptions) (Node, error) {
 	}
 	opts, meta := resolved.node, resolved.meta
 	n := &node{
-		opts:        opts,
-		metaOpts:    meta,
-		state:       NodeNew,
-		readySignal: make(chan struct{}),
-		wake:        make(chan struct{}, 1),
-		removal:     make(chan struct{}, 1),
-		retryStop:   make(chan *nodeStopAttempt, 1),
-		stopped:     make(chan struct{}),
+		opts:           opts,
+		limitsExplicit: input.Limits != (topology.Limits{}),
+		metaOpts:       meta,
+		state:          NodeNew,
+		readySignal:    make(chan struct{}),
+		wake:           make(chan struct{}, 1),
+		removal:        make(chan struct{}, 1),
+		retryStop:      make(chan *nodeStopAttempt, 1),
+		stopped:        make(chan struct{}),
 	}
 	n.cluster = &clusterView{node: n}
 	n.observation = NodeObservation{Revision: 1, Status: n.Status()}

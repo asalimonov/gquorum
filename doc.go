@@ -5,7 +5,4 @@
 // Applications supply load state machines and transport, and may replace the
 // built-in repair decisions through package scheduling and local lifecycle
 // decisions through package lifecycle.
-//
-// TODO(not planned): key-range splitting/merging, MVCC, timestamp allocation
-// and a separate PD service. Application data semantics stay outside this owner.
 package gquorum

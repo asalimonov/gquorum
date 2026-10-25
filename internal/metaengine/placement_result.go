@@ -28,15 +28,3 @@ func placementResult(approved, desired topology.Document, ids []string) (*topolo
 	}
 	return &report, nil
 }
-
-// An empty same-cluster reference provides no retained-placement exceptions.
-func validateScopedPlacement(approved, desired topology.Document, rules topology.Rules) error {
-	reference := approved
-	if reference.ClusterID == "" {
-		reference.ClusterID = desired.ClusterID
-	}
-	if err := topology.ValidateHostingCapacityFor(reference, desired, rules); err != nil {
-		return err
-	}
-	return topology.ValidatePlacementTransition(reference, reference, desired)
-}

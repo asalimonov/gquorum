@@ -54,7 +54,7 @@ func (a *application) registerMetaFaultRoutes(mux *http.ServeMux, protect func(h
 			httpError(w, err)
 			return
 		}
-		if a.metaProxy == nil || body.Identity != a.node.Identity() {
+		if a.metaProxy == nil || body.Identity != a.currentNode().Identity() {
 			httpError(w, fault.ErrIdentityMismatch)
 			return
 		}
@@ -72,7 +72,7 @@ func (a *application) registerMetaFaultRoutes(mux *http.ServeMux, protect func(h
 }
 
 func (a *application) dropMetaRaft(frame []byte) bool {
-	id := a.node.Identity()
+	id := a.currentNode().Identity()
 	a.clusterHooks.mu.Lock()
 	defer a.clusterHooks.mu.Unlock()
 	control := &a.clusterHooks.metaRaft
@@ -137,6 +137,12 @@ func (p *metaFaultProxy) forward(_ any, downstream grpc.ServerStream) error {
 	if err := downstream.RecvMsg(&frame); err != nil {
 		return err
 	}
+	owned, done, err := p.app.beginEffect(ctx)
+	if err != nil {
+		return status.Error(codes.Unavailable, err.Error())
+	}
+	defer done()
+	ctx = owned
 	if strings.HasSuffix(method, "/MetaControl") {
 		if err := p.app.waitCollectionReport(ctx, frame); err != nil {
 			return status.FromContextError(err).Err()

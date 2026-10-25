@@ -11,6 +11,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
+	recoveryplacement "github.com/asalimonov/gquorum/internal/recovery/placement"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -71,9 +72,17 @@ func (g *Group) preparePlacementEdit(before topology.Document, doc *topology.Doc
 	if doc.ChangedBy == "" {
 		doc.ChangedBy = g.currentIdentity().NodeName
 	}
-	preparation, err := topology.PreparePlacement(topology.ReadView{Latest: before, Target: target}, *doc, g.rules, now)
+	placementCtx, err := g.state().RecoveryPlacementContext()
+	if err != nil {
+		return err
+	}
+	preparation, err := recoveryplacement.Prepare(placementCtx, topology.ReadView{Latest: before,
+		Target: target}, *doc, g.rules, now)
 	prepared := preparation.Document
 	if err != nil {
+		return err
+	}
+	if err := raisePreparedGroupFloors(before, &prepared, g.state().AllocationFloors()); err != nil {
 		return err
 	}
 	*doc = prepared
@@ -82,6 +91,9 @@ func (g *Group) preparePlacementEdit(before topology.Document, doc *topology.Doc
 
 func (g *Group) mutation(ctx context.Context, o MutationOptions, policy mutationPolicy,
 	edit documentEdit) (MutationResult, error) {
+	if err := g.guardRecoveryMutation(); err != nil {
+		return MutationResult{}, err
+	}
 	documents, err := g.computeMutation(ctx, o, policy, edit)
 	base, next := documents.Base, documents.Next
 	if err != nil {
@@ -143,10 +155,15 @@ func (g *Group) computeMutation(ctx context.Context, o MutationOptions, policy m
 		next.Comment = policy.Comment
 	}
 	next.CreatedAt = now
-	if err := next.Validate(g.rules); err != nil {
+	placementCtx, placementErr := g.state().RecoveryPlacementContext()
+	if placementErr != nil {
+		return mutationDocuments{Base: base}, placementErr
+	}
+	target := g.state().Views().Target
+	if err := recoveryplacement.ValidateDocument(placementCtx, target, next, g.rules); err != nil {
 		return mutationDocuments{Base: base}, err
 	}
-	if err := checkLoadBounds(next); err != nil {
+	if err := recoveryplacement.CheckLoadBounds(placementCtx, target, next); err != nil {
 		return mutationDocuments{Base: base}, err
 	}
 	if err := g.state().ValidateDesired(next); err != nil {
@@ -158,17 +175,6 @@ func (g *Group) computeMutation(ctx context.Context, o MutationOptions, policy m
 		}
 	}
 	return mutationDocuments{Base: base, Next: next, Intent: intent}, nil
-}
-func checkLoadBounds(doc topology.Document) error {
-	for _, group := range doc.LoadGroups() {
-		lo, hi := doc.GroupBounds(group.ID)
-		count := len(doc.VotersOf(group.ID))
-		if count < lo || count > hi {
-			return fault.New(fault.Invalid,
-				fmt.Sprintf("group %q would have %d voters outside [%d,%d]", group.ID, count, lo, hi), nil)
-		}
-	}
-	return nil
 }
 
 func (g *Group) checkMutationHealth(ctx context.Context, before, after topology.Document) error {
@@ -201,8 +207,9 @@ func (g *Group) checkMutationHealth(ctx context.Context, before, after topology.
 			}
 		}
 		if alive < topology.QuorumOf(len(b)) {
-			return fault.New(fault.UnsafeMembership, fmt.Sprintf("group %q would retain %d live voters of %d", group.ID,
-				alive, len(b)), nil)
+			return fault.New(fault.UnsafeMembership,
+				fmt.Sprintf("group %q would retain %d live voters of %d", group.ID,
+					alive, len(b)), nil)
 		}
 	}
 	return nil
@@ -221,7 +228,8 @@ func removeNodeReplicas(doc *topology.Document, name string, scope replicaRemova
 		if group.ID == topology.MetaGroupID && scope != allReplicaRemoval {
 			continue
 		}
-		group.Replicas = slices.DeleteFunc(group.Replicas, func(r topology.Replica) bool { return r.NodeName == name })
+		group.Replicas = slices.DeleteFunc(group.Replicas,
+			func(r topology.Replica) bool { return r.NodeName == name })
 	}
 }
 func unknownNode(name string) error {
@@ -630,7 +638,8 @@ func (g *Group) ReseatReplica(ctx context.Context, id string, key topology.Repli
 		Input:   mutationInput{GroupID: id, NodeName: name, PreviousID: key.ReplicaID},
 		Comment: "reseat replica"},
 		func(doc *topology.Document, now time.Time) error {
-			options := metaengine.ReplicaRepairOptions{GroupID: id, NodeName: name, ReplicaID: key.ReplicaID, At: now,
+			options := metaengine.ReplicaRepairOptions{GroupID: id, NodeName: name,
+				ReplicaID: key.ReplicaID, At: now,
 				Origin: topology.OriginOperator, Actor: o.Actor}
 			return g.prepareReseat(ctx, doc, options)
 		})

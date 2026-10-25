@@ -29,7 +29,7 @@ func prepareScopedApproval(s *scopedState, desired topology.Document,
 	if err := s.validateFoundingApproval(desired, p.Plan); err != nil {
 		return nil, err
 	}
-	if err := validateScopedPlacement(s.Target, desired, s.Rules); err != nil {
+	if err := s.validateRecoveryPlacement(s.Target, s.Target, desired); err != nil {
 		return nil, err
 	}
 	collector := s.planningCollector()
@@ -37,7 +37,7 @@ func prepareScopedApproval(s *scopedState, desired topology.Document,
 	if err != nil {
 		return nil, err
 	}
-	if err := topology.ValidatePlanShape(input, desired, p.Plan); err != nil {
+	if err := s.validateRecoveryPlan(input, desired, p.Plan); err != nil {
 		return nil, planContentRefusal(err)
 	}
 	if err := validateNewRetirement(collector, input, desired, p.Plan); err != nil {

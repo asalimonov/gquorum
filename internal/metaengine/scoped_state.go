@@ -6,6 +6,8 @@ import (
 	"io"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
+	recoveryplacement "github.com/asalimonov/gquorum/internal/recovery/placement"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3/raftpb"
 )
@@ -20,6 +22,7 @@ type scopedState struct {
 	// Ephemeral engine-supplied context for one committed application entry.
 	// Convergence persists the resulting proof; snapshots cannot provide this.
 	nativeConf       *raftpb.ConfState
+	importPlacement  *recoveryplacement.Context  // owned atomic-import analysis only; never serialized/published
 	SchemaVersion    uint32                      `json:"schema_version"`
 	Rules            topology.Rules              `json:"rules"`
 	Latest           topology.Document           `json:"latest"`
@@ -43,6 +46,7 @@ type scopedState struct {
 	VoterSwitches    []topology.VoterSwitchState `json:"voter_switches,omitempty"`
 	AppliedIndex     uint64                      `json:"applied_index"`
 	AppliedTerm      uint64                      `json:"applied_term"`
+	Recovery         *model.ImportState          `json:"recovery,omitempty"`
 }
 
 // The shared grant/evidence shape is flattened in JSON. Class is derived by

@@ -227,15 +227,19 @@ func (t *Transport) fail(msg raftpb.Message) {
 	}
 }
 func (t *Transport) connection(address string) (*grpc.ClientConn, error) {
+	return controlConnection(address, t.opts.ClientTLS)
+}
+func controlConnection(address string, clientTLS *tls.Config) (*grpc.ClientConn, error) {
 	var credential credentials.TransportCredentials
-	if t.opts.ClientTLS != nil {
-		credential = credentials.NewTLS(t.opts.ClientTLS.Clone())
+	if clientTLS != nil {
+		credential = credentials.NewTLS(clientTLS.Clone())
 	} else {
 		credential = insecure.NewCredentials()
 	}
-	return grpc.NewClient(address, grpc.WithTransportCredentials(
-		credential), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(4<<20)))
+	return grpc.NewClient(address, grpc.WithTransportCredentials(credential),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(4<<20)))
 }
+
 func (t *Transport) authenticated(ctx context.Context) context.Context {
 	return metadata.AppendToOutgoingContext(ctx, credentialKey, hex.EncodeToString(t.opts.Credential))
 }

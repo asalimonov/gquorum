@@ -18,9 +18,11 @@ import (
 
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/observe"
 	"github.com/asalimonov/gquorum/internal/operator"
 	"github.com/asalimonov/gquorum/internal/raftengine"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
 	internalscheduling "github.com/asalimonov/gquorum/internal/scheduling"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/metrics"
@@ -46,6 +48,10 @@ const (
 // Options supplies private meta identity, storage, networking and orchestration
 // dependencies.
 type Options struct {
+	ObserveRecoveryCommand func(metaengine.ProposalKind, error)
+	RecoveryResumeFounding bool // Node proved pin-only B with no completed metadata acquisition
+
+	Recovery *model.LocalManifest // accepted private Node startup scope; never a general API request
 	Identity topology.Identity
 	// Node is the caller-defined local admission document. Founders may instead
 	// supply it in the matching FoundingMember; joiners must supply its type
@@ -136,6 +142,10 @@ func DefaultTiming() Timing {
 func (o Options) WithDefaults() Options { return o.defaults() }
 
 func (o Options) defaults() Options {
+	if o.Recovery != nil {
+		owned := model.CloneManifest(*o.Recovery)
+		o.Recovery = &owned
+	}
 	o.Metrics, _ = o.Metrics.Resolve()
 	o.Limits = o.Limits.WithDefaults()
 	o.Scheduling = o.Scheduling.WithDefaults()

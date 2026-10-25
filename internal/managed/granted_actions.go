@@ -81,7 +81,8 @@ func (h *Host) finishStartupEffect(slot *replica) error {
 		},
 		Action: slot.startGrant.Action, Target: topology.AuthorityTarget{NodeName: slot.node.NodeName,
 			MemberID:  slot.node.MemberID,
-			ReplicaID: slot.identity.ReplicaID}, Outcome: topology.EffectApplied, LocalSequence: slot.startSequence})
+			ReplicaID: slot.identity.ReplicaID}, Outcome: topology.EffectApplied,
+		LocalSequence: slot.startSequence})
 }
 
 func actionTargets(ctx context.Context, a topology.AuthorizedStep,
@@ -248,6 +249,14 @@ func (h *Host) applyGrantedAction(parent context.Context, req load.ActionRequest
 
 func (h *Host) runGrantedAction(work *actionWork) {
 	ctx, cancel := context.WithTimeout(h.authorityContext, h.cfg.EffectTimeout)
+	h.mu.Lock()
+	recovery := h.recoveryManifest != nil && !h.recoveryReleased &&
+		work.request.Authorization.Kind == topology.StepCreateFoundingGroup
+	h.mu.Unlock()
+	if recovery {
+		cancel()
+		ctx, cancel = context.WithCancel(h.authorityContext)
+	}
 	result, err := h.executeGrantedLocal(ctx, work.request)
 	cancel()
 	h.mu.Lock()
@@ -414,7 +423,7 @@ func (h *Host) runLocalAction(ctx context.Context, req load.ActionRequest) error
 			return h.validateGrantedAction(ctx, req)
 		})
 		if err == nil {
-			_, err = h.waitStarted(ctx, slot)
+			err = h.waitPrivateStarted(ctx, slot)
 		}
 	case topology.StepStopReplica:
 		err = h.stopRetiringIdentity(ctx, req.LocalTarget, req.Authorization, req.Grant)

@@ -3,8 +3,9 @@
 Tests are grouped by what they exercise. Units check deterministic logic and
 isolated components. Non-Docker functional tests cover a single running
 participant, isolated Raft engines, protocol doubles, background application
-workers and persistence/recovery fixtures. Units and functional tests stay in
-the original packages beside the code they test. Multi-node consensus and
+workers and persistence/recovery fixtures. Tests of private implementation stay
+beside that implementation; public recovery API and Node integration coverage is
+grouped in the root-module `tests/recovery` package. Multi-node consensus and
 application scenarios live in `tests/cluster` and use real Docker processes
 through the bounded pool. Deterministic multi-node simulations live separately
 in `tests/sim`; `make test-sim` runs the real metadata transport and storage on
@@ -228,7 +229,7 @@ See the [process migration map](cluster-migration.md),
 [Node ownership](../architecture/runtime.md) and
 [measured performance gates](performance.md). Milestone validation and earlier
 timings remain historical records in repository history. Current scoped validation
-is recorded in the [implementation log](../plans/20261015-failure-isolation-and-operational-api.md#progress-log).
+is recorded in the [validation record](api-refactor-validation.md).
 
 The scheduler module has unit validation (CAS transitions, codec, revocation
 rules, executor choice, configuration) and functional SQLite/FSM, snapshot,
@@ -292,7 +293,43 @@ go test -tags=functional -run '^$' -bench '^BenchmarkCleanupDebtApply$' -benchme
 
 These are coverage locations and commands, not a claim that a listed process
 scenario has passed. Actual revisions, image/report paths, outcomes and cleanup
-are recorded in the [implementation log](../plans/20261015-failure-isolation-and-operational-api.md#progress-log).
+are recorded in the [validation record](api-refactor-validation.md).
 The final scoped architecture review requires complete functional,
 functional-race and cluster runs after any corrections; earlier runs do not
 replace that final gate.
+
+Permanent-majority-loss component cases stay in owning functional packages;
+`TestPermanentMajorityLoss*` uses the three-node Docker pool and authenticated
+remote maintenance controls. Opt-in `BenchmarkRecoveryResources` (root functional
+build) and `BenchmarkRecoveryMetadataResources` (`internal/metaengine` functional
+build) cover large local recovery input. Compile a binary before OS RSS measurement
+and run one case at a time with `-test.benchtime=1x`; these large fixtures are not
+part of normal fast/functional runs. See the [qualification record](permanent-majority-loss-recovery.md).
+
+## Recovery source layout
+
+`tests/recovery` belongs to the root module and is discovered by the ordinary
+unit/functional commands. It groups public contracts, source inspection/approval,
+execution, Node startup/application/restart flows and resource benchmarks. No
+permanent-majority-loss recovery test remains in the repository root.
+Implementation-specific assertions stay beside `internal/recovery` components,
+metadata, managed replicas, WAL and engine code. Shared recovery tests use their
+own temporary single-Node fixtures and joined cleanup.
+
+`TestPublicLabelEditUsesDocumentWorkflow` now runs under `tests/sim`: it edits a
+complete document through public placement preparation/Stage/Approve and verifies
+replicated labels and unchanged replica allocation through quorum reads on all
+three simulated participants. Select it with:
+
+```sh
+make test-sim SIM_SEEDS=1-3 SIM_ARGS='-run TestPublicLabelEditUsesDocumentWorkflow'
+```
+
+Recovery resource reproduction now compiles `./tests/recovery` instead of `.`:
+
+```sh
+go test -c -tags=functional -o /tmp/gquorum-recovery-resources.test ./tests/recovery
+```
+
+Prior qualification records retain their original revision, binary hash and source
+paths. Source moves do not turn those historical measurements into new runs.

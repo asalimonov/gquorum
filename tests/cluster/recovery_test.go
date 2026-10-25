@@ -542,7 +542,12 @@ func TestLostMetaLeaderAutomaticallyReadmitsFreshIdentityThreeNodes(t *testing.T
 
 func lostMetaLeaderReadmission(t *testing.T, size int) {
 	t.Helper()
-	ctx, c := performanceCluster(t, size)
+	lostMetaLeaderReadmissionSpec(t, matrixSpec(size))
+}
+func lostMetaLeaderReadmissionSpec(t *testing.T, spec Spec) {
+	t.Helper()
+	size := len(spec.Nodes)
+	ctx, c := performanceClusterSpec(t, spec)
 	created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: 2, MaxReplicas: 3, AllowedNodeTypes: []topology.NodeType{"worker"}}})
 	if err != nil {
 		t.Fatal(err)

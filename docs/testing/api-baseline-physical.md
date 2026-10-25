@@ -56,3 +56,23 @@ retain full provenance. v3 metadata and v1 authority journals refuse without
 migration. Native load envelope v2, old immutable fixture files and event journal
 encodings remain unchanged. OperationID replaces public OperatorID; retained event
 spelling and the admission `execution_id` field are intentional stable encodings.
+
+
+## Native pre-recovery Node restart fixture
+
+The separate [2684202 native capture](../../internal/metaengine/testdata/native-2684202/README.md)
+was generated once by that baseline's public Node runtime on 2026-10-25. It
+contains a nonempty native metadata snapshot (33/term 2), committed tail through
+35 and matching authority journal. It supplements the bare scoped FSM fixture;
+no existing frozen artifact changed. Owning functional coverage validates exact
+raw hashes, read-only replay and an ordinary current Node restart from private
+copies. The adjacent capture source and raw/compressed hashes record provenance.
+
+## Optional disaster-recovery subtree
+
+The separately named [recovery-schema1 fixtures](../../internal/metaengine/testdata/recovery-schema1/README.md)
+retain exact capture inputs, hashes and the actual pre-recovery decoder refusal.
+They add the optional recovery subtree to metadata schema 4 and preserve ordinary
+nil-recovery encodings. Existing legacy, scoped and native stores remain immutable.
+The [recovery qualification record](permanent-majority-loss-recovery.md) records
+current unit/functional/process validation and unchanged physical hashes.

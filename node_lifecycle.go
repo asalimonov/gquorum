@@ -2,10 +2,16 @@ package gquorum
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/managed"
 	"github.com/asalimonov/gquorum/internal/metaservice"
+	"github.com/asalimonov/gquorum/internal/recovery/model"
+
+	recoverydisk "github.com/asalimonov/gquorum/internal/recovery/disk"
+	"github.com/asalimonov/gquorum/internal/walbackend"
 	"github.com/asalimonov/gquorum/lifecycle"
 	"github.com/asalimonov/gquorum/storage/memstore"
 	"github.com/asalimonov/gquorum/storage/walstore"
@@ -22,6 +28,9 @@ func (n *node) Start(parent context.Context) error {
 	n.publishObservation()
 
 	if err := n.checkAuthorityPath(); err != nil {
+		return n.fail(err)
+	}
+	if err := n.acquireStorageOwner(); err != nil {
 		return n.fail(err)
 	}
 	if err := n.inspectAuthority(); err != nil {
@@ -59,9 +68,27 @@ func (n *node) Start(parent context.Context) error {
 	if err := m.Start(context.WithoutCancel(n.ctx)); err != nil {
 		return n.fail(err)
 	}
+	if err := n.startRecoveryCoordinator(m); err != nil {
+		return n.fail(err)
+	}
 	n.wg.Add(1)
 	go n.monitor()
 	return nil
+}
+
+func (n *node) acquireStorageOwner() error {
+	paths := model.Paths{StorageDir: n.opts.StorageDir}
+	if wal := n.opts.Loads.Storage.WAL; wal != nil {
+		paths.LoadWALDir = wal.RootDir
+	}
+	owner, err := recoverydisk.Acquire(n.ctx, paths)
+	if err != nil {
+		return err
+	}
+	n.mu.Lock()
+	n.storageOwner = owner
+	n.mu.Unlock()
+	return n.prepareRecoveryStart(n.ctx)
 }
 
 func (n *node) acceptNodeStart(parent context.Context) (bool, error) {
@@ -112,7 +139,11 @@ func (n *node) openLoadResources(m *metaservice.Group) error {
 	}
 	store, retirement := n.opts.Loads.Storage.Store, n.opts.Loads.Storage.Retirement
 	if o := n.opts.Loads.Storage.WAL; o != nil {
-		owned, err := walstore.Open(walstore.Options{
+		lease, err := n.storageOwner.TakeWALLease()
+		if err != nil {
+			return err
+		}
+		owned, err := walbackend.OpenWithLease(walstore.Options{
 			RootDir:      o.RootDir,
 			NodeName:     m.Identity().NodeName,
 			ClusterID:    m.Identity().ClusterID,
@@ -120,14 +151,14 @@ func (n *node) openLoadResources(m *metaservice.Group) error {
 			Prewrite:     o.Prewrite,
 			DisableFSync: o.DisableFSync,
 			Logger:       n.opts.Logger,
-		})
+		}, lease)
 		if err != nil {
-			return err
+			return errors.Join(err, n.storageOwner.ReturnWALLease(lease))
 		}
 		n.mu.Lock()
 		n.ownedWAL = owned
 		n.mu.Unlock()
-		store, retirement = owned, owned
+		store, retirement = managed.RecoveryStore(owned), owned
 	}
 	// Groups created with topology.StorageMemory keep their Raft state
 	// here.
@@ -238,6 +269,10 @@ func (n *node) updateReadmittedHost(m *metaservice.Group) {
 
 func (n *node) checkReadiness(m *metaservice.Group) error {
 	in := m.Readiness(n.startedAt)
+	if err := n.prepareRecoveryReadiness(in.Identity); err != nil {
+		n.recordError(err)
+		return nil
+	}
 	decision, err := n.lifecycle.Readiness(n.ctx, in)
 	if err != nil {
 		n.recordError(err)
@@ -257,6 +292,10 @@ func (n *node) completeReadiness(m *metaservice.Group, expected topology.Identit
 	// Recheck mandatory state after caller code, outside any lock.
 	current := m.Readiness(n.startedAt)
 	if current.Identity != expected || !current.Admitted || !current.Recovered || !current.SessionLive {
+		return
+	}
+	if err := n.commitRecoveryReadiness(expected); err != nil {
+		n.recordError(err)
 		return
 	}
 	n.mu.Lock()
@@ -350,7 +389,8 @@ func (n *node) handleRemoval(m *metaservice.Group, removal topology.SelfRemovalS
 		n.recordError(err)
 		return false
 	}
-	decision, err := n.lifecycle.Removal(n.ctx, lifecycle.RemovalInput{Identity: id, Removal: removal, Fenced: true})
+	decision, err := n.lifecycle.Removal(n.ctx, lifecycle.RemovalInput{Identity: id, Removal: removal,
+		Fenced: true})
 	if err != nil {
 		n.recordError(err)
 		return false
@@ -476,19 +516,12 @@ func (n *node) teardown(initialAttempt *nodeStopAttempt) {
 func (n *node) teardownResources() error {
 	n.startGate.Lock()
 	n.mu.RLock()
-	m, p := n.meta, n.lifecycle
+	m, p, coordinator := n.meta, n.lifecycle, n.recoveryCoordinator
 	n.mu.RUnlock()
 	n.startGate.Unlock()
 	ctx := context.Background()
-	if m != nil {
-		if err := m.Quiesce(ctx); err != nil {
-			return err
-		}
-	}
-	if p != nil {
-		if err := p.Stop(ctx); err != nil {
-			return err
-		}
+	if err := joinNodeControl(ctx, m, p, coordinator); err != nil {
+		return err
 	}
 	n.wg.Wait()
 	n.mu.RLock()
@@ -507,7 +540,13 @@ func (n *node) teardownResources() error {
 			return err
 		}
 	}
-	return n.closeAuthority()
+	if err := n.closeAuthority(); err != nil {
+		return err
+	}
+	if n.storageOwner != nil {
+		return n.storageOwner.Close()
+	}
+	return nil
 }
 
 func closeLoadStores(memory *memstore.Store, owned *walstore.Store) error {

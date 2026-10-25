@@ -22,8 +22,11 @@ func (a *application) newReplica(ctx context.Context, spec load.ReplicaSpec) (lo
 	if err := ctx.Err(); err != nil {
 		return load.Application{}, err
 	}
-	if spec.Identity.NodeName != a.cfg.NodeName || spec.Identity.ClusterID != a.cfg.ClusterID || spec.Node != a.node.Identity() {
+	if spec.Identity.NodeName != a.cfg.NodeName || spec.Identity.ClusterID != a.clusterID() || spec.Node != a.currentNode().Identity() {
 		return load.Application{}, fault.ErrIdentityMismatch
+	}
+	if spec.Recovery != nil {
+		a.recoveryControls.recoveredFactories.Add(1)
 	}
 	ref := load.ReplicaRef{GroupID: spec.Identity.GroupID, ReplicaID: spec.Identity.ReplicaID}
 	machine := newMachine()
@@ -49,11 +52,15 @@ func (a *application) newReplica(ctx context.Context, spec load.ReplicaSpec) (lo
 		delete(a.machines, ref)
 		a.forgetReadControl(walKey{ref.GroupID, ref.ReplicaID})
 		return nil
+	}, Run: func(ctx context.Context, _ *load.Group) error {
+		a.recoveryControls.runs.Add(1)
+		<-ctx.Done()
+		return nil
 	}}, nil
 }
 
 func (a *application) local(id string) *localReplica {
-	group, found := a.node.LoadGroup(id)
+	group, found := a.currentNode().LoadGroup(id)
 	if !found {
 		return nil
 	}
@@ -78,10 +85,10 @@ func (p *fixtureLifecycle) Removal(ctx context.Context, input lifecycle.RemovalI
 	if err != nil {
 		return decision, err
 	}
-	if input.Identity != p.app.node.Identity() {
+	if input.Identity != p.app.currentNode().Identity() {
 		return lifecycle.RemovalDecision{}, fault.ErrIdentityMismatch
 	}
-	status := p.app.node.Status()
+	status := p.app.currentNode().Status()
 	if status.State != gquorum.NodeFenced || status.Ready || status.SessionLive || status.Meta.Found {
 		return lifecycle.RemovalDecision{}, fault.New(fault.Invalid, "removal hooks ran before mandatory fence", nil)
 	}
@@ -105,13 +112,13 @@ func (p *fixtureLifecycle) Removal(ctx context.Context, input lifecycle.RemovalI
 // Routing application writes needs only this group's leader hint. It does not
 // probe every other group or supply membership-health authority to Node.
 func (a *application) groupStatus(ctx context.Context, id string) (topology.GroupStatus, error) {
-	if group, found := a.node.LoadGroup(id); found {
+	if group, found := a.currentNode().LoadGroup(id); found {
 		status := group.Status()
 		if status.Found && status.LeaderID != 0 {
 			return status, nil
 		}
 	}
-	active, err := a.cluster.Target(ctx)
+	active, err := a.currentCluster().Target(ctx)
 	if err != nil {
 		return topology.GroupStatus{}, err
 	}
@@ -138,6 +145,9 @@ func (a *application) groupStatus(ctx context.Context, id string) (topology.Grou
 }
 
 func (p *fixtureLifecycle) Readiness(ctx context.Context, input lifecycle.ReadinessInput) (lifecycle.ReadinessDecision, error) {
+	if p.app.recoveryReadinessHeld() {
+		return lifecycle.ReadinessDecision{State: lifecycle.Waiting, Reason: "fixture recovery validation"}, nil
+	}
 	decision, err := p.DefaultHooks.Readiness(ctx, input)
 	if err != nil {
 		return decision, err

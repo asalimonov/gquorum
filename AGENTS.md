@@ -61,6 +61,8 @@ cleanup evidence and shutdown release ownership.
 | `scheduling/`, `lifecycle/` and their test-helper packages | Repair policies, local lifecycle hooks and caller contract helpers. |
 | `storage/`, `storage/walstore/`, `storage/memstore/`, `storage/storagetest/` | Persistence/retirement contracts, WAL backend, in-memory store and conformance helpers. |
 | `events/`, `fault/`, `membership/` | Local events/journal, classified errors and membership safety. |
+| `internal/recovery/` | Offline recovery facade with nested disk, exec, inspect, model, placement, runtime and testutil packages. Root recovery files contain public adapters and Node wiring. |
+| `tests/recovery/` | Root-module public recovery API, single-Node integration and opt-in resource benchmarks; no recovery tests live in the root. |
 | `internal/managed/`, `internal/loadhandle/` | Exact replica ownership, recovery, approved effects and retirement. |
 | `internal/metaservice/` | Topology service, admission, documents, sessions and protocol integration. |
 | `internal/metaengine/`, `internal/metastore/` | Replicated metadata FSM and bbolt persistence, pins and ledgers. |
@@ -200,7 +202,13 @@ caller-owned; replicated implementation agreement is deferred.
 
 Applications build autoscaling controllers with membership and placement APIs.
 Infrastructure provisioning, workload scheduling and stream ingestion stay in
-the application. Forced recovery after permanent majority loss is deferred.
+the application. Permanent-majority-loss recovery uses `Node.Recovery` or
+standalone `NewRecovery`, returning the same public Recovery interface, with a
+complete stopped survivor, Node-owned WAL, explicit loss acceptance, in-root
+backups and a fresh lineage. Applications own durable remote maintenance jobs and
+Files Backup/Undo; ordinary GroupFactory/Node startup perform replay. Old nodes
+require explicit reset-for-join. Custom/in-memory recovery donors, multiple
+survivors and disaster rollback remain unsupported. See the current runtime docs.
 Events are node-local and never replicated through `_meta`.
 
 Keep `examples/cluster` small and meta-only. Full load integration and fault
@@ -230,6 +238,9 @@ separate example and test modules. Choose checks according to the change:
 | `make test-perf` / `make bench` | Process performance/resource gates or planner/snapshot benchmarks. |
 | `make generate` / `make proto-check` | Regenerate protocols / require no generated diff; needs `protoc`. |
 
+During editing, lint only the specific changed files in their owning package.
+Reserve full `make lint` for the checkpoint before cluster tests; do not repeat
+it after small edits. The pre-commit hook already limits reports to staged files.
 For Go changes, run focused regressions and relevant unit/vet checks. Use race
 checks for concurrency changes and integration/process coverage for behavior
 crossing replica or process boundaries. For documentation-only changes, verify

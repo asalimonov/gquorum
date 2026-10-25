@@ -179,3 +179,43 @@ Collection recovery needs no application cleanup loop: Node resumes prepared
 journal rows, retries original collected receipts, and releases markers only
 after verified metadata acceptance/settlement. Tests copy the authority database
 only while its process is stopped; opening a second live owner is forbidden.
+
+The Node-owned fixture exposes remote permanent-majority-loss recovery through
+credential-protected `/internal/test/recovery` routes. These are caller controls,
+not library HTTP APIs. `POST /prepare` takes `{id, request}` with a stable caller
+job ID and a public `recovery.Request`. It persists maintenance, joins the old
+Node, inspects retained storage, and saves the effective request and plan.
+`GET /{id}` reports the saved job and public `Recovery.Status`; `GET` on the
+collection returns that job plus `Recovery.List`, including bounded history.
+`POST /{id}/confirm` takes the exact public Acceptance. `retry` resumes the same
+operation; `cancel` takes stable `{actor, reason}` audit fields. Responses are
+202 acknowledgements, not completion proofs. Request cancellation never owns
+these workers. The fixture supports one maintenance job per retained data root;
+use a new isolated deployment for a different scenario.
+
+`recovery-job.json` is caller-owned durable state outside library archival.
+Process startup reads it before checking the original cluster affiliation. A
+saved maintenance job boots management first, with consensus stopped; a completed
+job supplies the recovered affiliation even when container arguments still name
+A. A normal GroupFactory reconstructs the machine from the library's recovery
+input. Recreated Node generations use fresh process identities and
+`RecoveryStartOptions`, then release maintenance after validated readiness.
+Old delivery identities cannot target the replacement generation.
+
+The Files hook moves only caller `established.json` and `projection/` into its
+library-generated application backup directory. Its own inventory makes Backup
+and Undo idempotent; Undo failures retain maintenance. The active job and event
+journal stay live. Authenticated `PUT /controls` can hold Files, hold after
+application moves, hold readiness, or fail the next Backup/Undo call;
+`GET /metrics` counts these callbacks and actual Application.Run starts. All
+control paths begin `/internal/test/recovery`; management remains available while
+Node is stopped. Borrowed-store mode explicitly refuses recovery.
+
+For committed-prefix process scenarios, arm the existing exact-incarnation
+`DropAppend` control on both followers, keeping heartbeats alive. After proposing
+on the stable leader, require dropped-append evidence and unchanged committed
+values, stop the lost peers and prepare recovery on that leader. The harness's
+`RequireRecoveryTail` accepts the setup only when the offline public inspection
+reports usable load data with `LastLog.Index > Commit.Index`. A proposal timeout
+alone is insufficient evidence. Metadata-tail and corruption cases remain in
+owning component suites.

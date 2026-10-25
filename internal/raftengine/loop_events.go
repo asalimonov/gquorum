@@ -123,6 +123,11 @@ func (g *Group) captureReady(state *loopState) error {
 
 func (g *Group) completeLoopWrite(state *loopState, result writeResult) bool {
 	if result.err != nil {
+		if result.kind == writeRecoveryFinish && g.pending != nil {
+			answer(g.pending.request, Result{}, result.err)
+			g.pending = nil
+			return true
+		}
 		if g.ctx.Err() == nil {
 			g.halt(result.err)
 		}

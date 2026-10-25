@@ -49,19 +49,19 @@ func (a *application) servingGroup(ctx context.Context, id string) (*topology.Gr
 		row = a.serving[id].Clone()
 		a.mu.RUnlock()
 	}
-	return servingGroup(ctx, a.cluster, row, a.node.Identity())
+	return servingGroup(ctx, a.currentCluster(), row, a.currentNode().Identity())
 }
 
 // Status may probe remote replicas. Keep those observations off application
 // requests: only its locally applied convergence rows feed this readiness cache.
 // The existing work lifetime joins the single bounded refresher during shutdown.
-func (a *application) observeServing() {
+func (a *application) observeServingContext(ctx context.Context) {
 	tick := time.NewTicker(100 * time.Millisecond)
 	defer tick.Stop()
 	for {
-		a.refreshServing(a.workCtx)
+		a.refreshServing(ctx)
 		select {
-		case <-a.workCtx.Done():
+		case <-ctx.Done():
 			return
 		case <-tick.C:
 		}
@@ -71,7 +71,7 @@ func (a *application) observeServing() {
 func (a *application) refreshServing(parent context.Context) {
 	ctx, cancel := context.WithTimeout(parent, 250*time.Millisecond)
 	defer cancel()
-	status, err := a.cluster.Status(ctx)
+	status, err := a.currentCluster().Status(ctx)
 	if err != nil {
 		return
 	}
