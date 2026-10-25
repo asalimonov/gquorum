@@ -7,6 +7,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
+	"github.com/asalimonov/gquorum/internal/metastore"
 	model "github.com/asalimonov/gquorum/internal/recoverymodel"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -119,23 +120,18 @@ func (g *Group) validateRecoveryCourier(proposal any) error {
 	if !g.recoveryPending() {
 		return nil
 	}
-	switch p := proposal.(type) {
-	case *metaengine.GrantSession, *metaengine.RevokeSession,
-		*metaengine.RecordFenceProposal, *metaengine.RecordEffectProposal, *metaengine.BeginEffectProposal,
-		*metaengine.TransitionOperationProposal, *metaengine.GrantTransferProposal:
-		return nil // Existing courier and exact replicated resource checks still apply.
-	case *metaengine.AcquireLock:
-		if p.Key == "node/"+g.currentIdentity().NodeName {
-			return nil
+	scope := metaengine.RecoveryCommandScope{Owner: g.currentIdentity()}
+	if state := g.state(); state != nil {
+		if recovery := state.RecoveryState(); recovery != nil {
+			scope.Version = recovery.Version
 		}
-	case *metaengine.BindAdmissionProposal:
-		identity := g.currentIdentity()
-		if p.Founding && p.Admission.NodeName == identity.NodeName && p.Admission.MemberID == identity.MemberID {
-			return nil
+		if retry, ok := proposal.(*metaengine.RetryOperationProposal); ok {
+			if operation, err := state.Operation(retry.Previous); err == nil {
+				scope.RetryVersion = operation.Version
+			}
 		}
-	default:
 	}
-	return fault.New(fault.OperationAuthorization, "recovery_in_progress", nil)
+	return metaengine.ValidateRecoveryCommand(proposal, scope)
 }
 
 // The accepted import timestamp precedes B's startup. Its ordinary v1 founding
@@ -151,3 +147,25 @@ func (g *Group) recoveryFoundingTime(ordinary time.Time) time.Time {
 // RecoveryInProgress exposes the local applied import gate to its owning Node.
 // It is an authorization refusal check, not a quorum or readiness observation.
 func (g *Group) RecoveryInProgress() bool { return g.recoveryPending() }
+
+func recoveryFoundingResume(startup metaStartup) (bool, error) {
+	options := startup.options
+	if !options.RecoveryResumeFounding {
+		return false, nil
+	}
+	accepted := options.Recovery
+	if accepted == nil || !startup.pinFound || options.Join || accepted.Request.Mode != model.Rebuild ||
+		accepted.Phase != model.AwaitingStart || accepted.SuccessorStartedAt == nil {
+		return false, fault.ErrOperationAuthorization
+	}
+	identity := options.Identity
+	identity.InstanceID = ""
+	if identity != accepted.Identity {
+		return false, fault.ErrIdentityMismatch
+	}
+	only, err := metastore.StoreHasOnlyIdentity(options.DBPath, identity)
+	if err != nil || !only {
+		return false, fault.New(fault.OperationAuthorization, "recovery founding requires pin-only metadata", err)
+	}
+	return true, nil
+}

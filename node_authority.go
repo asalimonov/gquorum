@@ -166,10 +166,7 @@ func (n *node) inspectAuthority() error {
 	}
 	authorityExists := statErr == nil
 	if meta.Found {
-		if !authorityExists {
-			return fault.New(fault.Unreadable, "retained meta identity has no authority database", nil)
-		}
-		return n.acquirePinnedAuthority(meta.Identity)
+		return n.inspectPinnedRecoveryAuthority(meta.Identity, statErr)
 	}
 	fresh, err := metastore.StoreIsFresh(n.opts.metaDBPath())
 	if err != nil {
@@ -179,6 +176,9 @@ func (n *node) inspectAuthority() error {
 		return fault.New(fault.Unreadable, "unpinned retained metadata cannot initialize authority", nil)
 	}
 	if authorityExists {
+		if resumed, err := n.resumeRecoveryAuthority(); resumed || err != nil {
+			return err
+		}
 		return n.acquireReadmissionAuthority()
 	}
 	if err := n.inspectFreshLoadStorage(); err != nil {
@@ -334,4 +334,14 @@ func (n *node) inspectFreshLoadStorage() error {
 		}
 	}
 	return nil
+}
+
+func (n *node) inspectPinnedRecoveryAuthority(identity metastore.Identity, missing error) error {
+	if missing != nil {
+		return fault.New(fault.Unreadable, "retained meta identity has no authority database", missing)
+	}
+	if resumed, err := n.resumePinnedRecoveryFounding(); resumed || err != nil {
+		return err
+	}
+	return n.acquirePinnedAuthority(identity)
 }

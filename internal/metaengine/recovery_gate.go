@@ -4,58 +4,65 @@ import (
 	"encoding/json"
 
 	"github.com/asalimonov/gquorum/fault"
+	model "github.com/asalimonov/gquorum/internal/recoverymodel"
+	"github.com/asalimonov/gquorum/topology"
 )
+
+// RecoveryCommandScope contains authoritative identity and retained retry version.
+// Local ingress also uses it before a replicated import exists (Version=0).
+type RecoveryCommandScope struct {
+	Owner                 topology.Identity
+	Version, RetryVersion uint64
+}
+
+// ValidateRecoveryCommand is the shared pending-import command predicate.
+// General ingress must separately reject all private recovery commands.
+func ValidateRecoveryCommand(proposal any, scope RecoveryCommandScope) error {
+	switch p := proposal.(type) {
+	case *model.ImportProposal, *model.GroupConsumedProposal, *model.CompleteImportProposal,
+		*RevokeSession, *RecordFenceProposal, *RecordEffectProposal, *BeginEffectProposal,
+		*TransitionOperationProposal, *GrantTransferProposal:
+		return nil // Existing exact courier/grant/resource validation still applies.
+	case *RetryOperationProposal:
+		if scope.Version != 0 && scope.RetryVersion == scope.Version {
+			return nil
+		}
+	case *GrantSession:
+		if p.NodeName == scope.Owner.NodeName {
+			return nil
+		}
+	case *AcquireLock:
+		if p.Key == "node/"+scope.Owner.NodeName {
+			return nil
+		}
+	case *BindAdmissionProposal:
+		if p.Founding && p.Admission.NodeName == scope.Owner.NodeName &&
+			p.Admission.MemberID == scope.Owner.MemberID {
+			return nil
+		}
+	default:
+	}
+	return fault.New(fault.OperationAuthorization, "recovery_in_progress", nil)
+}
 
 func (s *scopedState) recoveryCommandAllowed(kind ProposalKind, body []byte) error {
 	if s.Recovery == nil || s.Recovery.Phase != "importing" {
 		return nil
 	}
-	switch kind {
-	case KindImportRecovery, KindRecoveryGroupConsumed, KindCompleteRecoveryImport, KindRevokeSession,
-		KindRecordFence, KindRecordEffect, KindBeginEffect, KindTransitionOperation, KindGrantTransfer:
-		return nil // Existing exact immutable-grant/action/resource authorization still applies.
-	case KindRetryOperation:
-		var p RetryOperationProposal
-		if err := json.Unmarshal(body, &p); err != nil {
-			return err
-		}
-		if op := s.indexes.operations[p.Previous]; op != nil && op.Status.Version == s.Recovery.Version {
-			return nil
-		}
-	default:
-		return s.recoveryProcessCommandAllowed(kind, body)
+	proposal, err := newProposal(kind)
+	if err != nil {
+		return err
 	}
-	return fault.New(fault.OperationAuthorization, "recovery_in_progress", nil)
-}
-
-func (s *scopedState) recoveryProcessCommandAllowed(kind ProposalKind, body []byte) error {
-	switch kind {
-	case KindGrantSession:
-		var p GrantSession
-		if err := json.Unmarshal(body, &p); err != nil {
-			return err
-		}
-		if p.NodeName == s.Recovery.Survivor.NodeName {
-			return nil
-		}
-	case KindAcquireLock:
-		var p AcquireLock
-		if err := json.Unmarshal(body, &p); err != nil {
-			return err
-		}
-		if p.Key == "node/"+s.Recovery.Survivor.NodeName {
-			return nil
-		}
-	case KindBindAdmission:
-		var p BindAdmissionProposal
-		if err := json.Unmarshal(body, &p); err != nil {
-			return err
-		}
-		if p.Founding && p.Admission.NodeName == s.Recovery.Survivor.NodeName &&
-			p.Admission.MemberID == s.Recovery.Survivor.ReplicaID {
-			return nil
-		}
-	default:
+	if err := json.Unmarshal(body, proposal); err != nil {
+		return err
 	}
-	return fault.New(fault.OperationAuthorization, "recovery_in_progress", nil)
+	owner := s.Recovery.Survivor
+	scope := RecoveryCommandScope{Owner: topology.Identity{NodeName: owner.NodeName,
+		ClusterID: owner.ClusterID, MemberID: owner.ReplicaID}, Version: s.Recovery.Version}
+	if retry, ok := proposal.(*RetryOperationProposal); ok {
+		if operation := s.indexes.operations[retry.Previous]; operation != nil {
+			scope.RetryVersion = operation.Status.Version
+		}
+	}
+	return ValidateRecoveryCommand(proposal, scope)
 }

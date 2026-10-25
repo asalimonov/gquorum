@@ -17,11 +17,15 @@ import (
 
 type recoveryMetaFixture struct {
 	MetaPort
-	manifest                 model.LocalManifest
-	record                   model.ImportState
-	attempts                 map[topology.OperationID]topology.OperationStatus
-	retried                  []topology.OperationID
-	importLost, completeLost bool
+	manifest                                             model.LocalManifest
+	record                                               model.ImportState
+	attempts                                             map[topology.OperationID]topology.OperationStatus
+	retried                                              []topology.OperationID
+	importLost, completeLost                             bool
+	pendingReads, unavailableReads, unavailableCompletes int
+	imported                                             []model.ImportProposal
+	importUnavailable                                    bool
+	absentRead                                           bool
 }
 
 func (m *recoveryMetaFixture) Identity() topology.Identity {
@@ -30,18 +34,36 @@ func (m *recoveryMetaFixture) Identity() topology.Identity {
 	return identity
 }
 func (*recoveryMetaFixture) WaitRecoveryReplay(context.Context) error { return nil }
-func (m *recoveryMetaFixture) ImportRecovery(context.Context, model.ImportProposal) (topology.OperationID, error) {
+func (m *recoveryMetaFixture) ImportRecovery(_ context.Context, proposal model.ImportProposal) (topology.OperationID, error) {
+	m.imported = append(m.imported, proposal)
+	if m.importUnavailable {
+		m.importUnavailable = false
+		m.absentRead = true
+		return "", fault.ErrUnavailable
+	}
 	if m.importLost {
 		return "", errors.New("lost import reply")
 	}
 	return topology.MakeOperationID(2, 1), nil
 }
 func (m *recoveryMetaFixture) ReadRecovery(context.Context) (*model.ImportState, error) {
+	if m.absentRead {
+		m.absentRead = false
+		return nil, nil
+	}
+	if m.unavailableReads > 0 {
+		m.unavailableReads--
+		return nil, fault.ErrUnavailable
+	}
 	owned := model.CloneImport(m.record)
 	return &owned, nil
 }
 func (m *recoveryMetaFixture) Operation(_ context.Context, id topology.OperationID) (topology.OperationStatus, error) {
 	if status, found := m.attempts[id]; found {
+		if m.pendingReads > 0 {
+			m.pendingReads--
+			status.State = topology.OperationRunning
+		}
 		return status, nil
 	}
 	return topology.OperationStatus{}, fault.ErrHistoryUnavailable
@@ -55,6 +77,10 @@ func (m *recoveryMetaFixture) RetryOperation(_ context.Context, id topology.Oper
 	return next.ID, nil
 }
 func (m *recoveryMetaFixture) CompleteRecovery(_ context.Context, proposal model.CompleteImportProposal) error {
+	if m.unavailableCompletes > 0 {
+		m.unavailableCompletes--
+		return fault.ErrUnavailable
+	}
 	m.record.Phase, m.record.CompletedAt = "complete", &proposal.At
 	if m.completeLost {
 		return errors.New("lost completion reply")
@@ -233,5 +259,42 @@ func TestRecoveryCoordinatorRejectsConflictingReadBackAfterLostImportReply(t *te
 	<-coordinator.done
 	if coordinator.Error() == nil || coordinator.DataReady() || coordinator.config.Journal.View().Phase != model.Importing {
 		t.Fatal("conflicting prior import escaped recovery barrier")
+	}
+}
+
+func TestRecoveryCoordinatorRetriesTransientControlAndWaitsForAsyncOperation(t *testing.T) {
+	t.Parallel()
+	coordinator, meta := coordinatorFixture(t, nil)
+	meta.importUnavailable, meta.unavailableReads, meta.unavailableCompletes, meta.pendingReads = true, 2, 2, 3
+	awaitRecoveryData(t, coordinator)
+	if len(meta.imported) != 2 {
+		t.Fatal("transient import did not retry exact proposal", len(meta.imported))
+	}
+	first, _ := model.ImportRequestDigest(meta.imported[0])
+	second, _ := model.ImportRequestDigest(meta.imported[1])
+	if first != second || len(meta.retried) != 0 {
+		t.Fatal("control retries changed identity or created factory attempts")
+	}
+}
+
+func TestRecoveryCoordinatorRetryLatchRejectsAnotherFailedFactoryAttempt(t *testing.T) {
+	t.Parallel()
+	coordinator, meta := coordinatorFixture(t, nil)
+	first := topology.MakeOperationID(2, 1)
+	status := meta.attempts[first]
+	status.State = topology.OperationFailed
+	meta.attempts[first] = status
+	successor, err := coordinator.resumeExistingOperation(t.Context(), first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status = meta.attempts[successor]
+	status.State = topology.OperationFailed
+	meta.attempts[successor] = status
+	if _, err := coordinator.resumeExistingOperation(t.Context(), first); !errors.Is(err, fault.ErrOperationAuthorization) {
+		t.Fatal("failed factory entered automatic retry loop", err)
+	}
+	if len(meta.retried) != 1 {
+		t.Fatal(meta.retried)
 	}
 }

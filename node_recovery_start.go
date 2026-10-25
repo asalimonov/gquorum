@@ -2,6 +2,10 @@ package gquorum
 
 import (
 	"context"
+	"errors"
+
+	"github.com/asalimonov/gquorum/internal/authoritystore"
+	"github.com/asalimonov/gquorum/internal/metastore"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/recoverydisk"
@@ -175,4 +179,49 @@ func (n *node) requireRecoverySuccessor() error {
 		}
 	}
 	return nil
+}
+
+// Resume only the journaled interval before the first metadata acquisition.
+// Freshness of unpinned metadata was independently proved by inspectAuthority.
+func (n *node) resumeRecoveryAuthority() (bool, error) {
+	manifest := n.recoveryManifest
+	if manifest == nil || manifest.Request.Mode != model.Rebuild || manifest.Phase != model.AwaitingStart ||
+		manifest.SuccessorStartedAt == nil {
+		return false, nil
+	}
+	reader, err := authoritystore.OpenReadOnly(n.ctx, n.opts.authorityDBPath(), manifest.Resources.MaxMetadataBytes)
+	if err != nil {
+		return true, err
+	}
+	evidence, readErr := reader.Evidence(n.ctx)
+	if err := errors.Join(readErr, reader.Close()); err != nil {
+		return true, err
+	}
+	if evidence.Identity != manifest.Identity || evidence.MetadataAcquired || evidence.AdmissionID != "" ||
+		len(evidence.Fences) != 0 || len(evidence.Effects) != 0 || len(evidence.Collections) != 0 {
+		return true, fault.New(fault.Unreadable, "partial recovery authority is not fresh accepted B evidence", nil)
+	}
+	if err := n.inspectFreshLoadStorage(); err != nil {
+		return true, err
+	}
+	identity := manifest.Identity
+	identity.InstanceID = n.opts.Identity.InstanceID
+	n.authorityFreshness = authoritystore.RetainedEvidence
+	return true, n.acquireAuthority(identity)
+}
+
+func (n *node) resumePinnedRecoveryFounding() (bool, error) {
+	manifest := n.recoveryManifest
+	if manifest == nil || manifest.Request.Mode != model.Rebuild || manifest.Phase != model.AwaitingStart {
+		return false, nil
+	}
+	onlyPin, err := metastore.StoreHasOnlyIdentity(n.opts.metaDBPath(), manifest.Identity)
+	if err != nil || !onlyPin {
+		return false, err
+	}
+	resumed, err := n.resumeRecoveryAuthority()
+	if resumed && err == nil {
+		n.metaOpts.RecoveryResumeFounding = true
+	}
+	return resumed, err
 }

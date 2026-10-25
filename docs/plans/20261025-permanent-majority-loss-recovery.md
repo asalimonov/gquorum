@@ -842,6 +842,11 @@ through normal Node ownership, including all completion and stop races.
   receipts before publication, validation failure, slow Restore, late factory
   success, stopped handles, missing consumed B WAL and repeated terminal recovery IDs.
 
+Peer checkpoint follow-up M2: capture the actual committed proposal kinds for one
+recovered load creation through block completion and verify the shared pending
+predicate admits each. Keep source-S seed authority and later retry-grant receipt
+positions explicit in the real catalog tests; do not substitute fabricated tuples.
+
 #### Verification
 
 - [ ] `make test` and `make lint`; complete focused root/managed/engine/recoveryruntime functional

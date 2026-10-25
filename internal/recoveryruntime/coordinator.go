@@ -32,6 +32,7 @@ type Coordinator struct {
 	started, stopped, dataReady, published bool
 	err                                    error
 	gate                                   chan struct{}
+	retryPrevious                          topology.OperationID
 }
 
 // New validates/copies configuration without callbacks, I/O or goroutines.
@@ -125,7 +126,7 @@ func (c *Coordinator) rebuild(ctx context.Context) error {
 	if err := model.SameAcceptance(c.config.Manifest, c.config.Journal.View()); err != nil {
 		return err
 	}
-	if err := c.config.Meta.WaitRecoveryReplay(ctx); err != nil {
+	if err := retryControl(ctx, c.config.Meta.WaitRecoveryReplay); err != nil {
 		return err
 	}
 	if err := c.checkIdentity(c.config.Meta.Identity()); err != nil {
@@ -136,11 +137,11 @@ func (c *Coordinator) rebuild(ctx context.Context) error {
 			return err
 		}
 	}
-	operation, err := c.importAccepted(ctx)
+	operation, err := fault.Retry(ctx, fault.RetryOptions{}, c.importAccepted)
 	if err != nil {
 		return err
 	}
-	record, err := c.config.Meta.ReadRecovery(ctx)
+	record, err := c.readRecovery(ctx)
 	if err != nil {
 		return err
 	}
@@ -165,10 +166,15 @@ func (c *Coordinator) importAccepted(ctx context.Context) (topology.OperationID,
 		return operation, nil
 	}
 	// Resolve an uncertain response from exact replicated provenance; never approve Latest.
-	record, readErr := c.config.Meta.ReadRecovery(ctx)
-	validationErr := c.validateRecord(record)
-	if readErr != nil || validationErr != nil {
-		return "", errors.Join(err, readErr, validationErr)
+	record, readErr := c.readRecovery(ctx)
+	if readErr != nil {
+		return "", errors.Join(err, readErr)
+	}
+	if record == nil {
+		return "", err
+	}
+	if validationErr := c.validateRecord(record); validationErr != nil {
+		return "", validationErr
 	}
 	return topology.MakeOperationID(record.Version, 1), nil
 }
@@ -198,22 +204,23 @@ func (c *Coordinator) completeMetadataOnly(ctx context.Context, operation topolo
 	if record.Phase == "complete" {
 		return nil
 	}
-	status, err := c.config.Meta.Operation(ctx, operation)
-	if err != nil {
+	if err := c.waitImportOperation(ctx, operation); err != nil {
 		return err
 	}
-	if status.State != topology.OperationSucceeded {
-		return fault.ErrUnavailable
-	}
-	err = c.config.Meta.CompleteRecovery(ctx, model.CompleteImportProposal{
+	proposal := model.CompleteImportProposal{
 		RecoveryID: c.config.Manifest.Request.RecoveryID, PlanDigest: c.config.Manifest.PlanDigest,
 		At:         c.config.Manifest.AcceptedAt.Add(time.Nanosecond),
 		ProposalID: c.config.Manifest.Request.RecoveryID + ".complete",
-	})
+	}
+	return retryControl(ctx, func(attempt context.Context) error { return c.completeAccepted(attempt, proposal) })
+}
+
+func (c *Coordinator) completeAccepted(ctx context.Context, proposal model.CompleteImportProposal) error {
+	err := c.config.Meta.CompleteRecovery(ctx, proposal)
 	if err == nil {
 		return nil
 	}
-	confirmed, readErr := c.config.Meta.ReadRecovery(ctx)
+	confirmed, readErr := c.readRecovery(ctx)
 	if readErr != nil {
 		return errors.Join(err, readErr)
 	}
@@ -242,7 +249,10 @@ func (c *Coordinator) finishImport(ctx context.Context, operation topology.Opera
 			return err
 		}
 	}
-	resumed, err := c.resumeExistingOperation(ctx, operation)
+	resumed, err := fault.Retry(ctx, fault.RetryOptions{},
+		func(attempt context.Context) (topology.OperationID, error) {
+			return c.resumeExistingOperation(attempt, operation)
+		})
 	if err != nil {
 		return err
 	}

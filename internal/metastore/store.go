@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/topology"
 	bolt "go.etcd.io/bbolt"
 	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"
@@ -203,10 +204,12 @@ func validateDiskSchema(tx *bolt.Tx) error {
 	return nil
 }
 
-func diskIsFresh(tx *bolt.Tx) bool {
+func diskIsFresh(tx *bolt.Tx) bool { return diskIsFreshExcept(tx, nil) }
+
+func diskIsFreshExcept(tx *bolt.Tx, ignored []byte) bool {
 	fresh := true
 	_ = tx.ForEach(func(name []byte, b *bolt.Bucket) error {
-		if string(name) == string(bucketFormat) {
+		if string(name) == string(bucketFormat) || ignored != nil && string(name) == string(ignored) {
 			return nil
 		}
 		known := false
@@ -327,4 +330,26 @@ func validateHardState(old, next raftpb.HardState) error {
 		return fault.New(fault.Invalid, "hard state would regress or change vote in one term", nil)
 	}
 	return nil
+}
+
+// StoreHasOnlyIdentity recognizes the interrupted pin acquisition before any
+// consensus, application or ledger evidence. It never opens a writer.
+func StoreHasOnlyIdentity(path string, expected topology.Identity) (bool, error) {
+	only := false
+	err := withReadOnly(path, func(tx *bolt.Tx) error {
+		if err := validateDiskSchema(tx); err != nil {
+			return err
+		}
+		pinned, err := readIdentityChecked(tx)
+		if err != nil {
+			return err
+		}
+		if !pinned.Found || pinned.Identity.NodeName != expected.NodeName ||
+			pinned.Identity.ClusterID != expected.ClusterID || pinned.Identity.MemberID != expected.MemberID {
+			return fault.ErrIdentityMismatch
+		}
+		only = tx.Bucket(bucketIdentity).Get(keyMemberSeen) == nil && diskIsFreshExcept(tx, bucketIdentity)
+		return nil
+	})
+	return only, err
 }

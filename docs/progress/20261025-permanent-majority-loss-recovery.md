@@ -785,3 +785,50 @@ Expected remaining work
   deliberately not claimed. Public destructive Run stays gated until Task12.
 - The next action is the user-requested colleague checkpoint after Tasks6–10,
   before proceeding to Task11. Keep the 16-task plan and active overall goal.
+
+
+## Checkpoint after Task 10 — Thread 5 correctness fixes
+Date: 2026-10-25
+
+- H1 confirmed by inspecting the real BeforeOpenEngine→metastore pin→AfterOpenEngine
+  order. Added an AwaitingStart-only resume for exact accepted B authority which
+  has never acquired metadata and has no effect/fence/collection/readmission work.
+  Unpinned metadata must be independently fresh. Pin-only metadata additionally
+  requires the same accepted pin and no native/application/ledger evidence or local
+  membership marker; Node alone authorizes finishing native singleton founding.
+  Established Importing/Validating identities and ordinary readmission remain strict.
+- The first new crash regression exposed that a pin-only store has no native Raft
+  membership, so opening it as ordinary Joining waits forever. The narrow private
+  RecoveryResumeFounding context finishes that interrupted acquisition; it is not
+  a public force flag or permission to refound established B state.
+- H1 real NewNode/Start tests now restart authority-only, fresh-unpinned metadata,
+  and pin-only pre-v1 boundaries to Complete without deleting/repairing any file.
+  Already-acquired/missing metadata, foreign authority and nonfresh unpinned
+  metadata refuse. Root crash/gate regression -race PASS7.254s.
+- M1: retry only exact transient metadata calls under bounded fault.Retry backoff,
+  wait asynchronously for the actual import operation, and confirm uncertain
+  replies from exact request/source/destination provenance. A latch is set before
+  RetryOperation so even an uncertain reply cannot create another factory attempt.
+  Permanent failures stay terminal. Transient import/read/completion, async operation
+  and one-retry tests -race PASS2.808s.
+- M2: local ingress and the FSM use one metaengine.ValidateRecoveryCommand predicate
+  with authoritative scope/retry version. General ingress still independently rejects
+  all private recovery commands. A real Machine.Apply regression proves a blocked
+  well-formed command produces a committed rejected result and advances applied
+  position without changing topology or halting the replica. Task12 now explicitly
+  captures the full recovered-load proposal-kind trace.
+- M3 receipt-command simplification was submitted to the user for approval; no
+  payload/schema/design change has been made pending their answer. No public API
+  changed. L1 remains a seed-position invariant; L2's optional inspection shortcut
+  is deferred; L3's immutable historical limits are covered by Task15 documentation.
+
+Verified
+- make test PASS2,100/58 reports,7.492s, all five modules.
+  test-reports/unit/20261025T054603.390458Z-kac1lllw/report.md.
+- make lint PASS all configured modules/tags/tools; /tmp/gquorum-checkpoint10-lint2.log.
+- Full affected functional -race -p4 -parallel8 -count=1 PASS root50.839s,
+  service26.124s, metastore3.865s, coordinator3.838s.
+  /tmp/gquorum-checkpoint10-functional-race.log.
+- Pure FSM/service/runtime units PASS including committed refusal. Existing frozen
+  fixtures unchanged; git diff --check PASS. No broad process/image or Meridian work.
+- This is a checkpoint correction, not a new numbered task; Tasks11–16 remain.

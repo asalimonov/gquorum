@@ -31,6 +31,11 @@ func (c *Coordinator) resumeExistingOperation(ctx context.Context,
 		status = next
 	}
 	if status.State == topology.OperationFailed {
+		if c.retryPrevious != "" && c.retryPrevious != status.ID {
+			return "", fault.New(fault.OperationAuthorization,
+				"recovery retry already used for this Node start", nil)
+		}
+		c.retryPrevious = status.ID // latch before the uncertain mutation, not after its reply
 		return c.config.Meta.RetryOperation(ctx, status.ID)
 	}
 	if status.State == topology.OperationSuperseded {

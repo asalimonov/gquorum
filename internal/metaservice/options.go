@@ -47,6 +47,8 @@ const (
 // Options supplies private meta identity, storage, networking and orchestration
 // dependencies.
 type Options struct {
+	RecoveryResumeFounding bool // Node proved pin-only B with no completed metadata acquisition
+
 	Recovery *model.LocalManifest // accepted private Node startup scope; never a general API request
 	Identity topology.Identity
 	// Node is the caller-defined local admission document. Founders may instead

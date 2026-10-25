@@ -10,6 +10,7 @@ import (
 	"github.com/asalimonov/gquorum/internal/recoveryruntime"
 	"github.com/asalimonov/gquorum/lifecycle"
 	"github.com/asalimonov/gquorum/load"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -99,16 +100,17 @@ func recoveryMetadataOnly(t *testing.T, gate lifecycle.StartupGate) {
 
 type heldRecoveryMeta struct {
 	recoveryruntime.MetaPort
-	entered chan struct{}
-	release <-chan struct{}
-	imports atomic.Int32
+	entered     chan struct{}
+	release     <-chan struct{}
+	imports     atomic.Int32
+	enteredOnce sync.Once
 }
 
 func (m *heldRecoveryMeta) WaitRecoveryReplay(ctx context.Context) error {
 	if err := m.MetaPort.WaitRecoveryReplay(ctx); err != nil {
 		return err
 	}
-	close(m.entered)
+	m.enteredOnce.Do(func() { close(m.entered) })
 	select {
 	case <-m.release:
 		return nil

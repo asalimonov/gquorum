@@ -4,6 +4,7 @@ package metaengine
 
 import (
 	"encoding/json"
+	"github.com/asalimonov/gquorum/fault"
 	"testing"
 	"time"
 
@@ -29,7 +30,8 @@ func TestRecoveryPendingGatePermitsOnlyExactInternalProgress(t *testing.T) {
 		}
 	}
 	for _, p := range []any{
-		BeginEffectProposal{}, RecordEffectProposal{}, RecordFenceProposal{}, TransitionOperationProposal{},
+		BeginEffectProposal{ProposalID: "progress"}, RecordEffectProposal{ProposalID: "progress"},
+		RecordFenceProposal{ProposalID: "progress"}, TransitionOperationProposal{ProposalID: "progress"},
 		GrantSession{NodeName: "n1"}, RevokeSession{}, AcquireLock{Key: "node/n1"},
 		BindAdmissionProposal{Founding: true, Admission: AdmissionRecord{NodeName: "n1", MemberID: 5}},
 		RetryOperationProposal{Previous: topology.MakeOperationID(2, 1), Scopes: []ScopeExpectation{}, ProposalID: "retry"},
@@ -77,5 +79,19 @@ func TestRecoveryMetadataOnlyCompletesThroughOrdinaryOperation(t *testing.T) {
 	}
 	if err := restored.recoveryCommandAllowed(KindProposeDocument, nil); err != nil {
 		t.Fatal("completed metadata-only recovery retained public mutation gate", err)
+	}
+}
+
+func TestRecoveryPendingRefusalIsACommittedResultRatherThanApplyFailure(t *testing.T) {
+	t.Parallel()
+	state, _ := importedRecoveryWithPolicy(t, false)
+	machine := restoreMachineFixture(t, state)
+	before, _ := machine.AppliedState()
+	result := applyMachine(t, machine, ProposeDocument{Doc: state.Latest.Clone(),
+		ExpectedVersion: state.Latest.Version, ProposalID: "blocked-user-stage"})
+	after, _ := machine.AppliedState()
+	if result.Accepted || result.Code != proposalErrorCode(fault.OperationAuthorization) || after != before+1 ||
+		machine.Target().Version != 2 {
+		t.Fatal("pending gate halted apply or changed topology", result, before, after)
 	}
 }
