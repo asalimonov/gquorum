@@ -55,6 +55,9 @@ func prepareScopedGraph(state *scopedState, rules topology.Rules) (*scopedIndexe
 	if err := validateScopedVoterSwitches(state, index, catalog); err != nil {
 		return nil, err
 	}
+	if err := validateRecoveryState(state, index); err != nil {
+		return nil, err
+	}
 	return index, nil
 }
 
@@ -79,7 +82,8 @@ func validateScopedDocuments(state *scopedState, index *scopedIndexes) error {
 		return err
 	}
 	marker := state.FullyConverged
-	if marker.Version > state.Target.Version || marker.Version != 0 && index.documents[marker.Version].Version == 0 ||
+	if marker.Version > state.Target.Version || marker.Version != 0 &&
+		index.documents[marker.Version].Version == 0 ||
 		(marker.Version == 0) != marker.At.IsZero() {
 		return invalidScopedState("fully converged marker lacks retained document evidence")
 	}

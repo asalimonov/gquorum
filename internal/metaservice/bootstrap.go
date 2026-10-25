@@ -232,7 +232,7 @@ func (g *Group) seedTopology(ctx context.Context, identity topology.Identity) er
 	if len(g.opts.Founders) == 0 {
 		return fault.ErrUnavailable
 	}
-	now := time.Now().UTC()
+	now := g.recoveryFoundingTime(time.Now().UTC())
 	voterConfig := g.opts.freshVoterConfig()
 	doc := topology.Document{
 		ClusterID: identity.ClusterID,

@@ -157,10 +157,11 @@ func validateManifestSeed(r LocalManifest, source SeedSource) error {
 	if source.Bytes > limit {
 		return fault.ErrInvalid
 	}
-	return validateSeedSource(source, r.Source)
+	return ValidateSeedSource(source, r.Source)
 }
 
-func validateSeedSource(s SeedSource, owner topology.Identity) error {
+// ValidateSeedSource checks exact ownership and retained source positions.
+func ValidateSeedSource(s SeedSource, owner topology.Identity) error {
 	if s.Bytes == 0 || s.SourceVersion == 0 || s.Identity.ReplicaID == 0 || s.Identity.GroupID != s.GroupID ||
 		s.Identity.NodeName != owner.NodeName || s.Identity.ClusterID != owner.ClusterID ||
 		s.MemberID != owner.MemberID ||
@@ -178,6 +179,7 @@ func validateSeedSource(s SeedSource, owner topology.Identity) error {
 	}
 	return nil
 }
+
 func validateIssue(issue Issue) error {
 	if !validText(issue.Code) || !validText(issue.Message) || issue.GroupID != "" &&
 		topology.ValidateID(issue.GroupID) != nil {

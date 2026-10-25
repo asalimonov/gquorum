@@ -111,6 +111,11 @@ func (m *Machine) queryValueLocked(q QueryRequest) (any, error) {
 		return queryScopedAuthority(m.scoped, q)
 	}
 	switch q.Kind {
+	case "recovery":
+		if q.Key != "" || q.AuthorityKey != nil || q.CollectionIdentity != nil || q.Progress != nil {
+			return nil, fault.ErrInvalid
+		}
+		return m.scoped.recoveryPlacementState(), nil
 	case "progress":
 		return queryScopedProgress(m.scoped, *q.Progress)
 	case "collection_check":

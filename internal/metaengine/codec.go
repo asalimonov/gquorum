@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/asalimonov/gquorum/fault"
+	model "github.com/asalimonov/gquorum/internal/recoverymodel"
 	"github.com/asalimonov/gquorum/topology"
 )
 
@@ -38,6 +39,9 @@ const (
 	KindRecordCollection          ProposalKind = "record_collection"
 	KindBeginCleanupEffect        ProposalKind = "begin_cleanup_effect"
 	KindRecordCleanupStatus       ProposalKind = "record_cleanup_status"
+	KindImportRecovery            ProposalKind = "import_recovery"
+	KindRecoveryGroupConsumed     ProposalKind = "recovery_group_consumed"
+	KindCompleteRecoveryImport    ProposalKind = "complete_recovery_import"
 )
 
 type envelope struct {
@@ -60,7 +64,8 @@ type ProposeDocument struct {
 func Encode(proposal any) ([]byte, error) {
 	kind, ok := proposalKind(proposal)
 	if !ok {
-		return nil, fault.New(fault.Unsupported, fmt.Sprintf("meta: cannot encode proposal of type %T", proposal), nil)
+		return nil, fault.New(fault.Unsupported, fmt.Sprintf("meta: cannot encode proposal of type %T",
+			proposal), nil)
 	}
 	body, err := json.Marshal(proposal)
 	if err != nil {
@@ -74,6 +79,9 @@ func Encode(proposal any) ([]byte, error) {
 }
 
 func proposalKind(proposal any) (ProposalKind, bool) {
+	if kind, ok := recoveryProposalKind(proposal); ok {
+		return kind, true
+	}
 	switch proposal.(type) {
 	case BeginOperationProposal:
 		return KindBeginOperation, true
@@ -159,6 +167,9 @@ func DecodeProposal(data []byte) (any, error) {
 }
 
 func newProposal(kind ProposalKind) (any, error) {
+	if proposal := newRecoveryProposal(kind); proposal != nil {
+		return proposal, nil
+	}
 	var proposal any
 	switch kind {
 	case KindBeginOperation:
@@ -207,4 +218,30 @@ func newProposal(kind ProposalKind) (any, error) {
 		return nil, fmt.Errorf("meta: unknown proposal kind %q", kind)
 	}
 	return proposal, nil
+}
+
+func recoveryProposalKind(proposal any) (ProposalKind, bool) {
+	switch proposal.(type) {
+	case model.ImportProposal:
+		return KindImportRecovery, true
+	case model.GroupConsumedProposal:
+		return KindRecoveryGroupConsumed, true
+	case model.CompleteImportProposal:
+		return KindCompleteRecoveryImport, true
+	default:
+		return "", false
+	}
+}
+
+func newRecoveryProposal(kind ProposalKind) any {
+	switch kind {
+	case KindImportRecovery:
+		return &model.ImportProposal{}
+	case KindRecoveryGroupConsumed:
+		return &model.GroupConsumedProposal{}
+	case KindCompleteRecoveryImport:
+		return &model.CompleteImportProposal{}
+	default:
+		return nil
+	}
 }

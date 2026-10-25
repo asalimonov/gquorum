@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/asalimonov/gquorum/fault"
+	model "github.com/asalimonov/gquorum/internal/recoverymodel"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -20,6 +21,18 @@ func (s scopedState) canonical() (scopedState, error) {
 		}
 	}
 	err := errors.Join(s.sortProgress(), s.sortEvidence(), s.sortUnchanged())
+	if s.Recovery != nil {
+		owned := model.CloneImport(*s.Recovery)
+		err = errors.Join(err, sortStateRows(&owned.Groups, func(a,
+			b model.ImportGroup) int {
+			return cmp.Compare(a.GroupID, b.GroupID)
+		}),
+			sortStateRows(&owned.Policies, func(a, b model.PolicyState) int {
+				return cmp.Compare(a.GroupID,
+					b.GroupID)
+			}))
+		s.Recovery = &owned
+	}
 	return s, err
 }
 

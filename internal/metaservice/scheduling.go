@@ -20,7 +20,14 @@ func (g *Group) SchedulingStatus() topology.SchedulingStatus {
 
 // SetSchedulingEnabled changes this node's local automatic-repair switch.
 // It never changes a topology document or cancels already approved execution.
+//
+//revive:disable-next-line:flag-parameter The existing public setting permits disabling during recovery.
 func (g *Group) SetSchedulingEnabled(ctx context.Context, enabled bool) error {
+	if enabled {
+		if err := g.guardRecoveryMutation(); err != nil {
+			return err
+		}
+	}
 	if err := g.ensureRunning(ctx); err != nil {
 		return err
 	}
@@ -49,7 +56,7 @@ type schedulingHost struct{ g *Group }
 
 var _ internalscheduling.Host = schedulingHost{}
 
-func (h schedulingHost) IsLeader() bool { return h.g.IsLeader() }
+func (h schedulingHost) IsLeader() bool { return !h.g.recoveryPending() && h.g.IsLeader() }
 
 func (h schedulingHost) WakeOperations() { h.g.controller.Signal() }
 

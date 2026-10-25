@@ -82,12 +82,18 @@ func (g *Group) preparePlacementEdit(before topology.Document, doc *topology.Doc
 	if err != nil {
 		return err
 	}
+	if err := raisePreparedGroupFloors(before, &prepared, g.state().AllocationFloors()); err != nil {
+		return err
+	}
 	*doc = prepared
 	return nil
 }
 
 func (g *Group) mutation(ctx context.Context, o MutationOptions, policy mutationPolicy,
 	edit documentEdit) (MutationResult, error) {
+	if err := g.guardRecoveryMutation(); err != nil {
+		return MutationResult{}, err
+	}
 	documents, err := g.computeMutation(ctx, o, policy, edit)
 	base, next := documents.Base, documents.Next
 	if err != nil {

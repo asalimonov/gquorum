@@ -1,0 +1,23 @@
+//go:build functional
+
+package metaengine
+
+import (
+ "os"
+ "errors"
+ "path/filepath"
+ "strings"
+ "testing"
+)
+
+func TestRecoverySchemaOneRefusedByBaseline2684202(t *testing.T) {
+ t.Parallel()
+ for _, name := range []string{"importing.json", "complete.json"} {
+  data, err := os.ReadFile(filepath.Join("/replace/with/recovery-schema1", name))
+  if err != nil { t.Fatal(err) }
+  machine := mustMachine(t, testRules(), nil)
+  if err := machine.Restore(t.Context(), data); err == nil || !strings.Contains(errors.Unwrap(err).Error(), "unknown field \"recovery\"") {
+   t.Fatal("baseline decoder did not reject the new subtree", name, err)
+  }
+ }
+}

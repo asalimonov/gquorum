@@ -68,6 +68,9 @@ func (g *Group) primeAddress(name, address string) {
 }
 
 func (g *Group) handleJoin(ctx context.Context, h *metapb.Header, data []byte) (reply *metapb.Reply) {
+	if err := g.guardRecoveryMutation(); err != nil {
+		return metatransport.Reply(err)
+	}
 	req, err := decodeJoinRequest(h, data)
 	if err != nil {
 		return metatransport.Reply(err)
@@ -476,7 +479,8 @@ func (g *Group) acceptAddressHints(h *metapb.Header) {
 		return
 	}
 	for _, peer := range h.Peers {
-		if peer != nil && peer.NodeName != own && peer.MemberId != 0 && g.memberNode(peer.MemberId) == peer.NodeName {
+		if peer != nil && peer.NodeName != own && peer.MemberId != 0 &&
+			g.memberNode(peer.MemberId) == peer.NodeName {
 			g.primeAddress(peer.NodeName, peer.Address)
 		}
 	}

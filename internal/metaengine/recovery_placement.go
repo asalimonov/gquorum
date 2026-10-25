@@ -6,8 +6,8 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// RecoveryPlacementContext reads only applied metadata provenance. Task9 adds the
-// optional replicated import state; ordinary state remains the exact zero context.
+// RecoveryPlacementContext reads only applied metadata provenance; ordinary
+// state retains the exact zero context.
 func (m *Machine) RecoveryPlacementContext() (recoveryplacement.Context, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -15,10 +15,19 @@ func (m *Machine) RecoveryPlacementContext() (recoveryplacement.Context, error) 
 }
 
 func (s *scopedState) recoveryPlacementContext() (recoveryplacement.Context, error) {
+	if s.importPlacement != nil {
+		return *s.importPlacement, nil
+	}
 	return recoveryplacement.FromImport(s.recoveryPlacementState(), s.Target)
 }
 
-func (*scopedState) recoveryPlacementState() *model.ImportState { return nil }
+func (s *scopedState) recoveryPlacementState() *model.ImportState {
+	if s.Recovery == nil {
+		return nil
+	}
+	owned := model.CloneImport(*s.Recovery)
+	return &owned
+}
 
 func (s *scopedState) validateRecoveryDocument(doc topology.Document) error {
 	ctx, err := s.recoveryPlacementContext()

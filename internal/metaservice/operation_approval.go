@@ -12,11 +12,21 @@ import (
 
 // Approve approves staged intent once; it never retries an existing failed attempt.
 func (g *Group) Approve(ctx context.Context, version uint64) (topology.OperationID, error) {
+	if err := g.guardRecoveryMutation(); err != nil {
+		return "", err
+	}
 	return g.applyOperation(ctx, applyVersionRequest{Kind: "approve", Version: version})
 }
 
 // RetryOperation derives one successor to the exact retained failed attempt.
 func (g *Group) RetryOperation(ctx context.Context, previous topology.OperationID) (topology.OperationID, error) {
+	if g.recoveryPending() {
+		state := g.state().RecoveryState()
+		operation, err := g.state().Operation(previous)
+		if err != nil || state == nil || operation.Version != state.Version {
+			return "", fault.New(fault.OperationAuthorization, "recovery_in_progress", err)
+		}
+	}
 	return g.applyOperation(ctx, applyVersionRequest{Kind: "retry", Previous: previous})
 }
 
@@ -47,7 +57,8 @@ func forwardOperation(ctx context.Context, request applyVersionRequest,
 	return id, nil
 }
 
-func (g *Group) applyOperationLocal(ctx context.Context, request applyVersionRequest) (topology.OperationID, error) {
+func (g *Group) applyOperationLocal(ctx context.Context, request applyVersionRequest) (topology.OperationID,
+	error) {
 	if !g.IsLeader() {
 		return "", fault.ErrNotLeader
 	}
@@ -89,6 +100,14 @@ func (g *Group) operationProposal(read metaengine.PlanRead, request applyVersion
 		return nil, err
 	}
 	return metaengine.BeginOperationProposal{Version: request.Version, Plan: plan, Scopes: read.Scopes,
-		Actor: g.currentIdentity().NodeName, Origin: read.Target.Origin, At: time.Now().UTC(),
+		Actor: g.currentIdentity().NodeName, Origin: read.Target.Origin, At: g.approvalTime(read.Target),
 		ProposalID: newProposalID()}, nil
+}
+
+func (g *Group) approvalTime(desired topology.Document) time.Time {
+	now := time.Now().UTC()
+	if desired.Version == 1 && desired.Origin == topology.OriginFounding {
+		return g.recoveryFoundingTime(now)
+	}
+	return now
 }

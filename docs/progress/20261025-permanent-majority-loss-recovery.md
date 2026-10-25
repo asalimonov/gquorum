@@ -627,3 +627,72 @@ Notes
   restored. Structural-history validation and count gates remain separate.
 - Continue Task9; no new task section, public API or user decision was added. The
   next regular peer checkpoint remains after Task10.
+
+
+## Task 9 — Replicated import, exact consumption and private gates
+Date: 2026-10-25
+
+Implemented
+- Optional recovery schema-1 provenance in the existing schema-4 FSM, strict
+  decoding/canonical ownership, private import/consumed/complete command kinds and
+  bounded owned recovery query. No protobuf or public API change; ordinary states
+  omit the subtree and preserve existing encodings.
+- Atomic import requires ordinary completed singleton v1 founding, exact engine
+  native configuration, completed founding admission/activation, immutable local
+  acceptance, complete sources and fresh identities above retained allocation
+  floors. Reuses owned stage and ordinary approval preparation; errors install no
+  partial documents/floors/tombstones. Old A execution authority is not copied.
+- The private record keeps the SHA-256 of the complete original import proposal.
+  Exact historical retries preserve the original operation after restart/pruning;
+  changed payloads, audit, floors or source definitions conflict.
+- Service private owner additionally validates accepted marker, exact destination
+  identity and immutable Rules. All three private commands refuse generic RPC.
+  A manifest-derived pre-import service gate overlaps the replicated pending gate;
+  ordinary founding, local session/grant/fence/receipt progress remains possible.
+  Public mutations/join/enable-scheduling refuse while data import is pending.
+- Consumed proof binds the fresh B replica, a normalized checkpoint at/after source
+  C, SHA-256 and both exact recorded creation receipts, including source-S native
+  membership receipt. Complete requires every load plus actual ordinary import
+  operation success; zero-load import completes normally. Pin existence is unused.
+- Actual replicated policy context now feeds all Task8 adapters. Permanent release
+  follows authoritative ordinary convergence, remains independent of data import,
+  and survives restart/pruning. Retention preserves original import operation,
+  policy provenance and exact consumed grants. A later ordinary deletion produces
+  B cleanup/tombstones and validates after pruning without authority over A.
+- Ordinary new-group preparation rebases only tentative fresh allocations onto
+  historical floors before staging; existing/expert identities are untouched.
+  Functional staged-only floor50 case creates replica50/next51 and stages normally.
+- Recovery-only v1 founding document/approval use AcceptedAt. The actual service
+  test exposed that wall-time founding would otherwise make the immutable import
+  older than its normal completion proof. No approval clock checks were weakened.
+  Target backed up before updating this detail and RequestDigest; plan Appendix C
+  reconciled. These private refinements are recorded under NOT PLANNED CHANGES.
+
+Verified
+- make test: PASS2,098 tests/57 reports, all five modules,7.911s.
+  test-reports/unit/20261025T043420.625138Z-nubmqt46/report.md.
+- make lint: PASS all configured modules/tags/tools.
+  /tmp/gquorum-task9-qualification-lint.log.
+- Focused recovery FSM suites, atomic failures/native mismatch/overflow, exact
+  retries, forged receipt/checkpoint cases, zero loads, pending gates, explicit
+  policy repair/release and later deletion/pruning all PASS.
+- Full affected pure packages -race PASS: FSM4.208s/service1.443s/model1.296s/
+  placement1.301s/scheduler1.324s. /tmp/gquorum-task9-unit-race.log.
+- Full FSM/service/internal-scheduler functional -race -p4 -parallel8 -count=1
+  PASS26.907s/20.419s/2.317s. /tmp/gquorum-task9-function-race.log.
+- Final local-owner/rules regressions -race PASS1.383s; real single-participant
+  metadata service recovery and staged-floor functionals -race PASS2.865s.
+  /tmp/gquorum-task9-owner-{unit,functional}.log. Later-deletion unit -race PASS1.382s.
+- New immutable importing/complete recovery fixtures (10,345/14,452 bytes) embed
+  their hashes and restore/re-encode byte-identically; strict unknown/duplicate/
+  contradictory recovery fields refuse. Existing baseline/scoped files unchanged.
+- Real older decoder from git-archive of immutable26842024d2fb4fe6fd74b15efa5106749a8b0674
+  refuses both new fixtures with fault.Unreadable / unknown field recovery. PASS
+  /tmp/gquorum-task9-older-decoder.log; capture/probe provenance retained separately
+  under internal/metaengine/testdata/recovery-schema1. No mixed-version claim.
+- git diff --check PASS. No broad Docker/image update or Meridian work in this task.
+
+Handoff
+- Continue Task10 Node early marker/bootstrap/coordinator. Public destructive Run
+  remains explicitly gated until seed/publication work in Tasks11–12; Task9 does
+  not claim an end-to-end recovered Node. Peer checkpoint follows Task10.

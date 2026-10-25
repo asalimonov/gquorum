@@ -196,7 +196,7 @@ func ValidateSeedMarker(m SeedMarker) error {
 	}
 	sourceOwner := topology.Identity{NodeName: m.Source.Identity.NodeName,
 		ClusterID: m.Source.Identity.ClusterID, MemberID: m.Source.MemberID}
-	if err := validateSeedSource(m.Source, sourceOwner); err != nil {
+	if err := ValidateSeedSource(m.Source, sourceOwner); err != nil {
 		return err
 	}
 	if err := m.Grant.Validate(); err != nil {

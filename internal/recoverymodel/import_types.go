@@ -10,17 +10,18 @@ import (
 
 // ImportState defines private replicated recovery evidence.
 type ImportState struct {
-	Schema      uint32            `json:"schema"` // 1
-	RecoveryID  string            `json:"recovery_id"`
-	PlanDigest  string            `json:"plan_digest"`
-	Source      topology.Identity `json:"source"`
-	Survivor    storage.Identity  `json:"survivor"` // B's exact _meta identity
-	Version     uint64            `json:"version"`  // recovery topology version, initially 2
-	Phase       string            `json:"phase"`    // importing or complete
-	Groups      []ImportGroup     `json:"groups"`
-	Policies    []PolicyState     `json:"policies"`
-	AcceptedAt  time.Time         `json:"accepted_at"`
-	CompletedAt *time.Time        `json:"completed_at,omitempty"`
+	Schema        uint32            `json:"schema"` // 1
+	RecoveryID    string            `json:"recovery_id"`
+	PlanDigest    string            `json:"plan_digest"`
+	Source        topology.Identity `json:"source"`
+	Survivor      storage.Identity  `json:"survivor"` // B's exact _meta identity
+	Version       uint64            `json:"version"`  // recovery topology version, initially 2
+	Phase         string            `json:"phase"`    // importing or complete
+	Groups        []ImportGroup     `json:"groups"`
+	Policies      []PolicyState     `json:"policies"`
+	AcceptedAt    time.Time         `json:"accepted_at"`
+	CompletedAt   *time.Time        `json:"completed_at,omitempty"`
+	RequestDigest string            `json:"request_digest"`
 }
 
 // ImportGroup defines private replicated recovery evidence.

@@ -16,7 +16,7 @@
 
 **Review/clarifications:** [docs/review/feat_permanent-majority-loss-recovery.md](../review/feat_permanent-majority-loss-recovery.md)
 
-**Status:** implementation in progress; Tasks 1–8 complete; next is replicated recovery import; checkpoint review closed.
+**Status:** implementation in progress; Tasks 1–9 complete; next is Node bootstrap/coordinator; checkpoint review closed.
 
 ## Scope and precedence
 
@@ -604,56 +604,56 @@ stage/approval/allocation/retirement helpers, metaservice RPC/mutation gates.
 **Dependencies:** Tasks 1–8. **Outcome:** ordinary v1 founding followed by one atomic
 v2 recovery import with preserved proof, not synthetic genesis.
 
-- [ ] Add the optional schema-1 Recovery subtree and three private command kinds
+- [x] Add the optional schema-1 Recovery subtree and three private command kinds
   exactly as Appendix C. Keep outer metadata store/FSM/envelope v4, authority v2
   and engine v2 otherwise unchanged. Ordinary snapshots omit the field and retain
   canonical bytes. Strict validation covers every record/receipt/policy binding.
-- [ ] Implement Machine.RecoveryState/RecoveryInventory and the target metaservice
+- [x] Implement Machine.RecoveryState/RecoveryInventory and the target metaservice
   WaitRecoveryReplay/ImportRecovery/ReadRecovery/RecordRecoveredGroup/CompleteRecovery
   methods. Reads return owned data; waiters must not depend on public Node readiness.
-- [ ] Authorize first import only against the accepted local operation and normal
+- [x] Authorize first import only against the accepted local operation and normal
   completed singleton v1 founding, expected version 1, exact source/destination,
   complete source coverage and no intervening topology mutation. Repeated exact
   proposals return original results before first-application preconditions.
-- [ ] Prepare the complete import candidate atomically: raise allocation floors,
+- [x] Prepare the complete import candidate atomically: raise allocation floors,
   reserve old deleted IDs at B's baseline version, derive original approved group
   definitions with fresh single-survivor replicas, retain other names as Excluded,
   and stage/approve v2 through existing owned preparations and graph validation.
   Install no partially staged topology or partially raised floor map on error.
-- [ ] Generate ordinary creation steps/grants/receipts. Never copy A operations,
+- [x] Generate ordinary creation steps/grants/receipts. Never copy A operations,
   sessions, locks, admissions or execution authority into B. Floors from staged
   allocation history prevent reuse without importing that unapproved intent.
-- [ ] Wire Task 8's exact replicated policy context into all mutation, approval,
+- [x] Wire Task 8's exact replicated policy context into all mutation, approval,
   restore/graph and repair paths. Include `_meta`. Persist permanent policy release
   through normal authoritative transitions, never from a local status estimate.
-- [ ] Validate consumed group evidence against destination identity, exact ordinary
+- [x] Validate consumed group evidence against destination identity, exact ordinary
   host/group receipts and a durable normalized B checkpoint at/after source C.
   Pin/ledger existence and replay observations are insufficient. CompleteImport
   requires all required groups and the actual import operation; handle zero loads.
-- [ ] Enforce pending-import command restrictions in the FSM/service in addition
+- [x] Enforce pending-import command restrictions in the FSM/service in addition
   to Task 10's local manifest-derived gate before the import record exists. A nil
   replicated Recovery field is never permission to bypass an active local recovery
   start. Coordinate handoff with no unguarded interval.
-- [ ] Gate general RPC/public topology mutation and joining during import while
+- [x] Gate general RPC/public topology mutation and joining during import while
   permitting exact internal founding/session/grant/fence/receipt progress. Reject
   private recovery commands at general mutation ingress; codec recognition is not
   authorization. No new protobuf or public metadata mutation method is required.
-- [ ] Extend pruning/retention to preserve pending import and consumed identity/
+- [x] Extend pruning/retention to preserve pending import and consumed identity/
   grant provenance and active policy exceptions. Completed records remain bounded
   history; later retirement/replacement must validate without resurrecting A.
-- [ ] Add deterministic FSM tests for atomic failure/no partial candidate, exact
+- [x] Add deterministic FSM tests for atomic failure/no partial candidate, exact
   retries/lost replies, high floors/overflow, tombstones, staged/unapproved source,
   pending topology work, ordinary founding/session proof, premature completion,
   receipt mismatch, post-completion policy repair, pruning and recovered-state restart.
 
 #### Verification
 
-- [ ] `make test`; focused metaengine/metaservice/placement functional suites and
+- [x] `make test`; focused metaengine/metaservice/placement functional suites and
   relevant races. Exercise internal progress while the public mutation gate is closed.
-- [ ] Frozen ordinary fixture bytes/hashes remain unchanged. Add separate recovered
+- [x] Frozen ordinary fixture bytes/hashes remain unchanged. Add separate recovered
   state fixtures/capture provenance and verify the older strict decoder rejects
   the new subtree without claiming mixed-version compatibility.
-- [ ] Check all adapter paths consume actual replicated context, private commands
+- [x] Check all adapter paths consume actual replicated context, private commands
   cannot enter through generic RPC, and no synthetic founding proof is added.
 
 ### Task 10: Integrate Node bootstrap, reset admission and the recovery coordinator
@@ -1300,6 +1300,22 @@ Do not pre-mark the absence of implementation as a passed delta audit.
   see Task 5 commit/progress for the complete diff and validation.
 
 
+- Task 9 concrete persistence refinement: `internal/recoverymodel/import_types.go`
+  adds a private schema-1 `RequestDigest`, binding the full original import proposal
+  for exact historical retries without persisting a duplicate approved source.
+  `internal/metaengine/recovery.go` validates native singleton membership and uses
+  the existing atomic stage/approval preparations. Recovery schema-1 fixtures are
+  new; ordinary v4/v2 formats and existing frozen files are unchanged.
+- Task 9 pulls the recovery-only founding timestamp selection forward from Task 10:
+  `internal/metaservice/{bootstrap,operation_approval,recovery}.go` uses AcceptedAt
+  for the ordinary v1 founding document/approval. Actual single-participant service
+  verification showed that using wall time would make the immutable import appear
+  older than normal per-group completion proof and correctly refuse it. Normal
+  starts keep current timestamps; no clock/authorization validation is bypassed.
+  Target backed up to
+  `docs/brainstorms/20261024-permanent-majority-loss-recovery-target-before-import-provenance-20261025T0432.md`
+  before documenting both details; Appendix C matches the private field addition.
+
 None during planning. During implementation record each necessary out-of-plan
 change with path, rationale, relation to a required fix, validation and commit/diff
 reference. This includes fixes for unrelated failing checks; do not silently grow
@@ -1701,6 +1717,7 @@ type recoveryImportState struct {
     Policies      []recoveryPolicyState `json:"policies"`
     AcceptedAt    time.Time             `json:"accepted_at"`
     CompletedAt   *time.Time            `json:"completed_at,omitempty"`
+    RequestDigest string                `json:"request_digest"` // SHA-256 of the complete original import proposal
 }
 type recoveryImportGroup struct {
     GroupID       string           `json:"group_id"`
