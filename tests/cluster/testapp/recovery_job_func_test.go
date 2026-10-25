@@ -122,7 +122,7 @@ func TestRemoteRecoveryJobCompleteAndRetainedRestart(t *testing.T) {
 	}
 	acceptance := recovery.Acceptance{PlanDigest: job.Plan.Digest, AcknowledgeDataLoss: true, OldDeploymentFenced: true}
 	recoveryHTTP(t, a, "POST", "/internal/test/recovery/job/confirm", acceptance, 202)
-	apiEventually(t, func() bool { return a.recoveryControls.readiness.Load() > 0 })
+	waitRecoveryJob(t, a, func(*recoveryJob) bool { return a.recoveryControls.readiness.Load() > 0 })
 	if a.recoveryControls.runs.Load() != runs {
 		t.Fatal("Run escaped validation")
 	}

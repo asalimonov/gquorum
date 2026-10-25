@@ -5,7 +5,7 @@
 **Project source:** `../..` relative to this plan (repository root `.`)
 **Branch:** `feat/large-snapshots-transfer`
 **Source checkout inspected:** `646e9c1` (implementation baseline `14a54c2`, transport-document correction `2ba951a`, current lint/testing updates in `646e9c1`)
-**Target architecture SHA256:** `2b217f098376a903d0419b26b1a8c9d9a7ca2e7a35e6e01e1f53e7dddf7b1d55` (current target including implementation refinements through Task 12)
+**Target architecture SHA256:** `bcbb3836b4c3dd941aa1a9c07c9c2e12b62de2d24c14c5d4b840cff5046bd203` (current target including implementation refinements through Task 13)
 **Target architecture:** [20261025-large-load-snapshot-transfer-target.md](../brainstorms/20261025-large-load-snapshot-transfer-target.md)
 **Full brainstorm log:** [20261025-large-load-snapshot-transfer.md](../brainstorms/20261025-large-load-snapshot-transfer.md)
 **Review history:** [feature review thread](../review/feat_large-snapshots-transfer.md)
@@ -331,18 +331,18 @@ Review baseline: `251a594`; findings in review Thread 3. The original six-commit
 **Files:** tests/cluster/testapp app/transport/hooks and helpers; existing root/recovery/managed functional helpers; example and adapter mocks as required. No new root test files.
 **References:** target [§9.5 migration prerequisite](../brainstorms/20261025-large-load-snapshot-transfer-target.md#95-prerequisite-fixture-migration-generation-and-documentation), §4 capability contract, §10, §11 compatibility; current testapp README/fault contracts.
 
-- [ ] Inventory implementations with `rg` across all five application modules, root recovery helpers and optional tests/sim. Add snapshot.Transport to managed transports and LoadSnapshots to Node/Ingress doubles. Unused doubles may return Unsupported; exercised loopbacks must call the real common service contract, not report success without transfer.
-- [ ] Construct/bind/register production loadgrpc before serving the fixture's existing load listener. The fixture's `gquorum.fixture.load.v1` service and production `gquorum.load.v1` service can coexist on that listener; no extra port.
-- [ ] Ensure snapshot process cases use the real production SendSnapshot/RPC/service. Their ordinary-traffic isolation cases must also use production SendRaft/StreamRaft, not an unrelated legacy fixture connection that makes isolation assertions vacuous.
-- [ ] Preserve existing custom-transport coverage via a compliant wrapper/delegate. Preserve authenticated drop_raft/drop_append/snapshot delays/corruption, read tracking, storage/Close barriers and identity-bound controls. Dropped snapshots are failures, not completed deliveries.
-- [ ] Add service/ingress decorators in the **test fixture** for exact chunk/Finish/receipt fault injection and counters. Distinguish header-only not_needed from a complete received handoff and from durable restoration. Do not add test-only application semantics to the library.
-- [ ] Adapt example Node binding and test doubles. Keep examples/cluster meta-only. Tests/sim is currently meta-only and needs no new load mechanism; verify its source dependencies and do not add simulation dependencies to the library.
-- [ ] Add fixture unit/functional tests for default mode registration, credential rejection, exact successors, legacy wrapper migration and callback/join ownership. The still-selected old send path must continue to pass until Task 15.
+- [x] Inventory implementations with `rg` across all five application modules, root recovery helpers and optional tests/sim. Add snapshot.Transport to managed transports and LoadSnapshots to Node/Ingress doubles. Unused doubles may return Unsupported; exercised loopbacks must call the real common service contract, not report success without transfer.
+- [x] Construct/bind/register production loadgrpc before serving the fixture's existing load listener. The fixture's `gquorum.fixture.load.v1` service and production `gquorum.load.v1` service can coexist on that listener; no extra port.
+- [x] Ensure snapshot process cases use the real production SendSnapshot/RPC/service. Their ordinary-traffic isolation cases must also use production SendRaft/StreamRaft, not an unrelated legacy fixture connection that makes isolation assertions vacuous.
+- [x] Preserve existing custom-transport coverage via a compliant wrapper/delegate. Preserve authenticated drop_raft/drop_append/snapshot delays/corruption, read tracking, storage/Close barriers and identity-bound controls. Dropped snapshots are failures, not completed deliveries.
+- [x] Add service/ingress decorators in the **test fixture** for exact chunk/Finish/receipt fault injection and counters. Distinguish header-only not_needed from a complete received handoff and from durable restoration. Do not add test-only application semantics to the library.
+- [x] Adapt example Node binding and test doubles. Keep examples/cluster meta-only. Tests/sim is currently meta-only and needs no new load mechanism; verify its source dependencies and do not add simulation dependencies to the library.
+- [x] Add fixture unit/functional tests for default mode registration, credential rejection, exact successors, legacy wrapper migration and callback/join ownership. The still-selected old send path must continue to pass until Task 15.
 
 #### Verification
 
-- [ ] `make test`; focused fixture/root/recovery/managed functional checks and vet in each owning module.
-- [ ] Compile process tests without running TestMain using `go -C tests/cluster test -c -tags=clustertest -o "$SNAPSHOT_TEST_COMPILE_DIR/cluster.test" .`; create the temporary directory using the Validation Commands sequence and remove only those artifacts afterward. No intermediate Docker run.
+- [x] `make test`; focused fixture/root/recovery/managed functional checks and vet in each owning module.
+- [x] Compile process tests without running TestMain using `go -C tests/cluster test -c -tags=clustertest -o "$SNAPSHOT_TEST_COMPILE_DIR/cluster.test" .`; create the temporary directory using the Validation Commands sequence and remove only those artifacts afterward. No intermediate Docker run.
 
 ### Task 14: Add bounded catch-up evidence to repair policy inputs
 
@@ -678,6 +678,21 @@ Task 12 routing and lifecycle refinements:
 + await(..., func() bool { return exactSlot.state == "stopping" })
 + cancel()
 + err := <-stopped
+```
+
+Task 13 fixture ownership and verification refinements:
+- `tests/cluster/testapp/load_snapshot.go` and existing generation wiring: one adapter cannot be rebound across retained Node restarts/recovery. A fixture-owned public ServiceRegistrar wrapper registers the existing load service once and captures each exact generation at RPC dispatch. No internal protobuf import, additional listener or library mode. Retired adapters join before replacement; template/compatibility references release the initial binding.
+- `tests/cluster/testapp/hooks_projection_cluster_func_test.go`: cancellation can catch one additional projection attempt after two successful full-state writes; the established fixture counts that canceled attempt as a failure. Check zero failures before cancellation, then stopped/zero-active, balanced attempts and full final state with at most that one cancellation failure. No production projection-accounting change.
+- `tests/cluster/testapp/recovery_job_func_test.go`: use the existing durable-job waiter for readiness, retaining job-phase/error diagnostics instead of an opaque generic convergence timeout.
+- Process compile cleanup uses Python TemporaryDirectory and preserves the compiler status. Automatic command review rejected the plan's shell `rm -f` cleanup syntax; no approval was needed because the scoped temporary-directory alternative completed safely.
+
+```diff
+- apiEventually(t, func() bool { return readiness.Load() > 0 })
++ waitRecoveryJob(t, app, func(*recoveryJob) bool { return readiness.Load() > 0 })
+- require(final.Failures == 0)
++ require(beforeCancel.Failures == 0)
++ require(final.Failures <= 1 && final.Attempts == final.Writes + final.Failures)
++ require(final.Stopped && final.Active == 0 && final.State.AppliedIndex == 2)
 ```
 
 ## NOT IMPLEMENTED GAPS

@@ -52,12 +52,15 @@ func TestCallerProjectionStallCatchesUpFullStateAndJoins(t *testing.T) {
 	a.clusterHooks.mu.Unlock()
 	projectionPoll(deadline, t, func() bool {
 		view, err := a.projectionView(key)
-		return err == nil && view.Writes >= 2 && view.State.AppliedIndex == 2 && len(view.State.Requests) == 2 && maps.Equal(view.State.Values, map[string]string{"before": "before", "during": "during"})
+		return err == nil && view.Failures == 0 && view.Writes >= 2 && view.State.AppliedIndex == 2 && len(view.State.Requests) == 2 && maps.Equal(view.State.Values, map[string]string{"before": "before", "during": "during"})
 	})
 	cancel()
 	a.workWG.Wait()
 	view, err := a.projectionView(key)
-	if err != nil || !view.Stopped || view.Active != 0 || view.Failures != 0 {
+	// Cancellation can catch one subsequent projection attempt after the
+	// complete state was observed; that canceled attempt is counted as failure.
+	if err != nil || !view.Stopped || view.Active != 0 || view.Failures > 1 ||
+		view.Attempts != view.Writes+view.Failures || view.State.AppliedIndex != 2 {
 		t.Fatal("caller worker did not release owned writes", view, err)
 	}
 }

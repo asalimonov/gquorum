@@ -310,3 +310,26 @@ Findings and corrections
 - The first broad managed race run exposed an existing 20ms pre-admission timing assumption. Replaced it with a stopping-state barrier before canceling; the original resource assertions remain. All subsequent focused/full managed race checks pass.
 - A simultaneous unconstrained metadata/recovery/compile run hit several metadata fixture deadlines. Re-running the metadata suite alone at the documented eight-worker limit passes without changing those tests.
 - No root file was created, no large fixture/persistent transfer record was added, and the unrelated .gitignore edit remains excluded. Further implementation proceeds without colleague review per the user's latest instruction.
+
+## Task 13 — production fixture transport and capability migration
+
+Date: 2026-10-26. Commit: this task commit; prior fce9876. Further colleague review remains canceled by the user.
+
+Implemented
+- Process fixture uses a separately bound production adapter per Node generation and production ordinary Raft/snapshot RPCs on its existing load listener. Both existing service names are registered once; per-RPC implementation capture prevents redirecting old work into a successor. Node joins before adapter Close, which must finish before replacement publication.
+- Preserved legacy application/control service and custom protocol wrappers, read-send/receive tracking and authenticated drop_raft/drop_append snapshot refusal. Snapshot drops cannot report successful delivery.
+- Fixture-owned chunk/Finish/receipt and actual Ack-write fault seams allow bounded corruption/delay/stream-loss controls without modifying the library. Ack pumps capture the exact old service. Counters distinguish header-only not_needed from accepted full handoff and suppress duplicate accepted replies while retained; installation remains the Node/application observation.
+- Managed, root, recovery and API-network loopbacks now call the real service Begin/Write/Finish contract and report cumulative progress. Unused constructor doubles expose a capability that refuses/panics on actual use; no success stub. Ordinary-only adapter Ingress doubles expose an explicit unsupported service; exercised snapshot doubles retain their real protocol implementations.
+- Inventory found scheduler/cache examples already use production loadgrpc and examples/cluster plus tests/sim remain meta-only. No simulation dependency or extra root file.
+
+Verified
+- make test: 2,275 tests across 62 reports/five modules pass (8.216s); report test-reports/unit/20261025T204709.541309Z-8qlc935k/report.md.
+- Pending make lint passes owning vet/revive/unused and compile-only clustertest/example variants. git diff --check passes.
+- Full fixture functional race suite at parallel=8 passes (18.021s); new focused production registration/authentication/blocked-Ack-generation cases also passed (4.601s). Coverage proves ordinary production RPC wiring, wrong-credential refusal before transfer admission, adapter ownership after client/Node stop, and exact old recipient refusal after retained restart on the same listener.
+- Full transport functional race suite passes (1.861s), including the pinned server/client teardown gates. Managed/recovery functional suites pass (33.975s / 78.124s) during the broader checkpoint; focused recovery race passes (6.561s).
+- Process module compiled with clustertest using go test -c in a scoped temporary directory, exit 0. TestMain/Docker and large generators were not executed. Cleanup completed without retained artifacts.
+
+Findings
+- A broader concurrent run exposed an existing projection cancellation-accounting assumption; test assertions now retain the full-state/join guarantees while allowing its documented one canceled attempt. Recovery readiness now uses the existing job diagnostic waiter; subsequent full fixture race passes.
+- Initial heavily overlapping checks increased unit wall time to 61.817s; the final routine checkpoint is 8.216s. No default large allocation/generation was introduced.
+- The unrelated .gitignore edit became staged externally during this task. It remains preserved and is excluded using an explicit-path commit.

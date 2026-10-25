@@ -431,3 +431,7 @@ func TestMetaOnlyNodeHasNoSnapshotService(t *testing.T) {
 		t.Fatal("metadata-only Node acquired a load service")
 	}
 }
+
+func (unopenedTransport) SendSnapshot(context.Context, snapshot.Send) (snapshot.Ack, error) {
+	panic("snapshot transport used before resource acquisition")
+}

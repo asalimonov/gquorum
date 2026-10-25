@@ -14,6 +14,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/load/snapshot"
 	"github.com/asalimonov/gquorum/membership"
 	"github.com/asalimonov/gquorum/topology"
 	"github.com/asalimonov/gquorum/transport/loadgrpc/internal/loadpb"
@@ -327,3 +328,33 @@ func TestConnectionAndCallBounds(t *testing.T) {
 // The generated protocol remains internal; application integration only needs
 // the public adapter and the caller's grpc.Server.
 var _ loadpb.LoadServer = (*serverAdapter)(nil)
+
+func (*ingressDouble) LoadSnapshots() snapshot.Service { return unsupportedSnapshotService{} }
+
+type unsupportedSnapshotService struct{}
+
+func (unsupportedSnapshotService) Options() snapshot.Options {
+	options, _ := (snapshot.Options{}).Resolve()
+	return options
+}
+func (unsupportedSnapshotService) Begin(context.Context, snapshot.BeginRequest) (snapshot.Ack, error) {
+	return snapshot.Ack{}, snapshotWireError(snapshot.ReasonUnsupported, nil)
+}
+func (unsupportedSnapshotService) Write(context.Context, snapshot.Chunk) (snapshot.Ack, error) {
+	return snapshot.Ack{}, snapshotWireError(snapshot.ReasonUnsupported, nil)
+}
+func (unsupportedSnapshotService) Finish(context.Context, snapshot.Session) (snapshot.Ack, error) {
+	return snapshot.Ack{}, snapshotWireError(snapshot.ReasonUnsupported, nil)
+}
+func (unsupportedSnapshotService) Detach(context.Context, snapshot.Session) error {
+	return snapshotWireError(snapshot.ReasonUnsupported, nil)
+}
+func (unsupportedSnapshotService) Abort(context.Context, snapshot.Session) error {
+	return snapshotWireError(snapshot.ReasonUnsupported, nil)
+}
+func (unsupportedSnapshotService) SessionDone(snapshot.Session) <-chan struct{} {
+	done := make(chan struct{})
+	close(done)
+	return done
+}
+func (unsupportedSnapshotService) List(snapshot.Query) snapshot.Page { return snapshot.Page{} }

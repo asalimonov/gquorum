@@ -17,6 +17,7 @@ import (
 // A generation remains installed through request cancellation, callback joining
 // and Node teardown. A later generation never receives an old generation's work.
 type nodeGeneration struct {
+	production         *fixtureLoadBinding
 	node               gquorum.Node
 	listener           net.Listener
 	ctx                context.Context
@@ -85,6 +86,11 @@ func (a *application) stopNodeGeneration(ctx context.Context) error {
 	if err := g.node.Stop(ctx); err != nil {
 		return err
 	}
+	if g.production != nil {
+		if err := g.production.transport.Close(ctx); err != nil {
+			return err
+		}
+	}
 	// A failed Start may never have transferred this listener to Node.
 	if err := g.listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
 		return err
@@ -131,12 +137,24 @@ func (a *application) restartNodeGeneration(ctx context.Context) error {
 		return err
 	}
 	opts.Meta.Network.Listener = listener
+	binding, err := a.prepareLoadBinding(&opts)
+	if err != nil {
+		_ = listener.Close()
+		return err
+	}
 	n, err := gquorum.NewNode(opts)
 	if err != nil {
 		_ = listener.Close()
 		return err
 	}
+	if err = binding.bind(a, n); err != nil {
+		_ = n.Stop(ctx)
+		_ = binding.transport.Close(ctx)
+		_ = listener.Close()
+		return err
+	}
 	next := a.makeNodeGeneration(n, listener)
+	next.production = binding
 	a.mu.Lock()
 	a.serving = make(map[string]topology.GroupProgress)
 	a.startupObserved = false
@@ -144,6 +162,7 @@ func (a *application) restartNodeGeneration(ctx context.Context) error {
 	a.mu.Unlock()
 	a.generationMu.Lock()
 	a.generation = next
+	a.node, a.cluster = nil, nil
 	a.generationMu.Unlock()
 	if a.metaProxy != nil {
 		a.metaProxy.internal = listener

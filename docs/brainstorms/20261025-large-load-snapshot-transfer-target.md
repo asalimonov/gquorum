@@ -953,6 +953,8 @@ Public legacy ReportSnapshot remains available for standalone callers; its deliv
 - CREATED `tests/cluster/snapshot_large_test.go` for resource qualification (`clustertest && snapshotlarge`). Large-only helpers carry the same tag where possible; no default generation/startup allocation.
 - Existing Makefile/report runner can pass explicit tags through CLUSTER_ARGS; avoid a runner change unless command-construction validation requires one. If changed, run the runner's Python unit suite and relevant targets.
 
+Fixture generation detail: the process test app creates and binds a fresh production loadgrpc adapter per Node generation. Its existing load listener registers both service names once through a fixture-owned ServiceRegistrar wrapper; each RPC captures the exact generation's implementation, including its snapshot Ack fault seam. Node stop precedes adapter Close, and replacement waits for both. Restart templates and compatibility fields do not retain the initial adapter. Ordinary Raft isolation traffic uses production SendRaft/StreamRaft; the old fixture service remains for application controls/custom protocol coverage.
+
 ## 10. Verification specification
 
 ### 10.1 Acceptance mapping
