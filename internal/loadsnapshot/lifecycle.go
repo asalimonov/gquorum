@@ -12,13 +12,16 @@ import (
 const snapshotExpiryTick = 100 * time.Millisecond
 
 func (c *Coordinator) startOwnerWorker(owner OwnerKey, work func()) {
+	c.workerStarted(owner)
+	go func() { defer c.workerReturned(owner); work() }()
+}
+func (c *Coordinator) workerStarted(owner OwnerKey) {
 	c.mu.Lock()
 	c.workers++
 	if owner.RunID != "" {
 		c.ownerWorkers[owner]++
 	}
 	c.mu.Unlock()
-	go func() { defer c.workerReturned(owner); work() }()
 }
 func (c *Coordinator) workerReturned(owner OwnerKey) {
 	c.mu.Lock()
@@ -39,6 +42,7 @@ func (c *Coordinator) expiryLoop() {
 		select {
 		case <-c.ctx.Done():
 			c.cancelReceives(OwnerKey{})
+			c.cancelSends(OwnerKey{})
 			return
 		case now := <-ticker.C:
 			c.expire(now)
@@ -92,6 +96,7 @@ func (c *Coordinator) StopOwner(ctx context.Context, owner OwnerKey) error {
 	c.fencedOwners[owner] = struct{}{}
 	c.mu.Unlock()
 	c.cancelReceives(owner)
+	c.cancelSends(owner)
 	if err := c.joinSnapshotOwnership(ctx, owner); err != nil {
 		return err
 	}
@@ -103,6 +108,7 @@ func (c *Coordinator) StopOwner(ctx context.Context, owner OwnerKey) error {
 		}
 	}
 	c.clearDigestsLocked(owner.RunID)
+	delete(c.digestOwners, owner.RunID)
 	c.mu.Unlock()
 	return nil
 }
@@ -280,4 +286,18 @@ func (c *Coordinator) snapshotCleanupError(owner OwnerKey) error {
 		}
 	}
 	return nil
+}
+
+func (c *Coordinator) cancelSends(owner OwnerKey) {
+	c.mu.Lock()
+	jobs := make([]*snapshotSendJob, 0, len(c.outgoing))
+	for job := range c.outgoing {
+		if owner.RunID == "" || job.source.key == owner {
+			jobs = append(jobs, job)
+		}
+	}
+	c.mu.Unlock()
+	for _, job := range jobs {
+		job.Discard(transferError(snapshot.ReasonStopped))
+	}
 }

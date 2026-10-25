@@ -20,7 +20,7 @@ func RequireTransport(transport load.Transport) (snapshot.Transport, error) {
 	return capable, nil
 }
 
-func isNilTransport(transport load.Transport) bool {
+func isNilTransport(transport any) bool {
 	if transport == nil {
 		return true
 	}

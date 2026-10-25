@@ -221,3 +221,23 @@ Notes
 - Initial allocation assertions inside parallel unit tests were rejected by Go 1.26 AllocsPerRun, which changes GOMAXPROCS and disallows parallel tests. Moved measurements to benchmarks, preserving parallel unit isolation.
 - The colleague's allocation wording was broader than measured behavior: the old voter-map work was stack-allocated here (already zero heap allocations); the measured improvement is CPU work.
 - The remaining P2-3b obligation is the future Task 12 O(1) authorization routing index. RPC teardown and Host stop ordering remain later-task qualification gates.
+
+## Task 9 — source pins, digest sharing and verified progress
+
+Date: 2026-10-26. Commit: this task commit; prior c24dfd2. Three implementation commits after review anchor 251a594; next colleague review after three further commits.
+
+Implemented
+- Bounded pure source admission pins the immutable native slice without cloning. Resolve, block-cancellable hash, exact delivery registration and transport run after dispatch. Prepared jobs expire on epoch/total cancellation; active jobs retain ownership until transport and reporting return.
+- Two completed digests per live run, singleflight misses and publication-scoped keys retain no payload. Failed hashes are not cached. Capacity retries reuse the digest and release bytes before cooldown.
+- Exact receiver-run/offset/final-Ack validation, local verified-progress clocks, duplicate suppression and joined timeout monitor. All verified bytes switch finalization to the original total deadline. Stale external progress callbacks have no effect after transport return.
+- Added a private exact-attempt failure port for pre-registration failures and outer-fault retry classification; target/plan record both refinements. Successful Stop clears borrowed ports and digest owner references only after joins.
+
+Verified
+- make test: 2,262 tests pass across 62 reports/five modules (11.237s); report test-reports/unit/20261025T195027.628453Z-g0ul_nt9/report.md.
+- go vet ./internal/loadsnapshot ./internal/raftengine: pass. SnapshotReports unit race: pass (1.290s).
+- loadsnapshot functional race, five repetitions: pass (1.730s), including borrowed old bytes, failed-hash sharing/cancellation, publication change, repeated capacity refusal, stale callbacks, missing/duplicate progress timeout, finalization total timeout, prepared-job expiry and transport/report actual-return joins.
+- Pending make lint and git diff --check: pass.
+
+Notes
+- Report notification intentionally precedes pin release; the prepared-cancellation test joins exact-owner ownership before asserting release, avoiding a false test race.
+- Managed ports, transport network integration and repair policy consumption remain later tasks. No listener, root source, persisted format or large fixture was added. Unrelated .gitignore edit is preserved and excluded.

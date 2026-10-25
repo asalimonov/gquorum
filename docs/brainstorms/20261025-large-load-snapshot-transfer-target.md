@@ -838,11 +838,14 @@ type Ports struct {
     ValidateOutgoing func(context.Context, Owner, load.Peer) error
     RegisterDelivery func(Owner, raftengine.SnapshotAttempt, load.Peer, time.Time) (uint64, error)
     ReportDelivery func(Owner, snapshot.Key, snapshot.Ack, error)
+    ReportSnapshotFailure func(Owner, raftengine.SnapshotAttempt, error) // before registration
     Transport snapshot.Transport // optional; nil capability returns Unsupported
 }
 ```
 
 CREATED `internal/managed/snapshot_ports.go`: implement the above functions using existing Host authority and exact replica/run state; implement the private Owner wrapper over the exact replica; delegate `engineTransport.PrepareSnapshot(raftengine.SnapshotOffer) (raftengine.SnapshotJob, error)` to Coordinator.PrepareSend. This is the only new snapshot-specific file needed in managed; core coordination/state/staging are in internal/loadsnapshot. Host exposes `SnapshotCoordinator() *loadsnapshot.Coordinator` for Node's existing-file resolver. Host stop calls Coordinator.StopOwner with the exact OwnerKey after requesting engine cancellation and before releasing application/storage ownership.
+
+Implementation refinement: `Ports.ReportSnapshotFailure` reports an exact native attempt when a prepared job is discarded or fails before Resolve/RegisterDelivery produced a delivery key. It performs no resolution or I/O. Registered deliveries continue through ReportDelivery. This closes the pre-registration failure path without a destination-only legacy report.
 
 Dependency rules: `load/snapshot` may import `load` for Peer; **load must not import load/snapshot**. `internal/loadsnapshot` may import load/snapshot and raftengine, but never managed or root gquorum. Managed imports internal/loadsnapshot and implements its ports. Raftengine knows only its generic snapshot job/ingress/attempt-observation contracts and never imports load/snapshot/internal/loadsnapshot. Root composes these packages in existing files. These rules avoid both root-coupled mechanism code and Go import cycles.
 

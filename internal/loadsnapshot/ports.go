@@ -32,11 +32,12 @@ type Owner interface {
 // Ports joins transport coordination to managed authorization without importing
 // managed or root gquorum. Callbacks never run under the coordinator mutex.
 type Ports struct {
-	Authorize            func(context.Context, snapshot.Key) (Owner, error)
-	ResolvePeer          func(context.Context, Owner, uint64) (load.Peer, error)
-	ValidateOutgoing     func(context.Context, Owner, load.Peer) error
-	RegisterDelivery     func(Owner, raftengine.SnapshotAttempt, load.Peer, time.Time) (uint64, error)
-	ReportDelivery       func(Owner, snapshot.Key, snapshot.Ack, error)
-	NoteSnapshotProgress func(Owner, raftengine.SnapshotAttempt, metrics.SnapshotCatchUp)
-	Transport            snapshot.Transport
+	Authorize             func(context.Context, snapshot.Key) (Owner, error)
+	ResolvePeer           func(context.Context, Owner, uint64) (load.Peer, error)
+	ValidateOutgoing      func(context.Context, Owner, load.Peer) error
+	RegisterDelivery      func(Owner, raftengine.SnapshotAttempt, load.Peer, time.Time) (uint64, error)
+	ReportDelivery        func(Owner, snapshot.Key, snapshot.Ack, error)
+	ReportSnapshotFailure func(Owner, raftengine.SnapshotAttempt, error)
+	NoteSnapshotProgress  func(Owner, raftengine.SnapshotAttempt, metrics.SnapshotCatchUp)
+	Transport             snapshot.Transport
 }

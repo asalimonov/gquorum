@@ -25,6 +25,10 @@ func (c *Coordinator) List(q snapshot.Query) snapshot.Page {
 	for i, status := range c.history {
 		rows = append(rows, snapshotStatusRow{c.historyIDs[i], status})
 	}
+	sends := make([]*snapshotSendJob, 0, len(c.outgoing))
+	for job := range c.outgoing {
+		sends = append(sends, job)
+	}
 	active := make([]*snapshotReceive, 0, len(c.incoming))
 	for _, tr := range c.incoming {
 		active = append(active, tr)
@@ -34,6 +38,11 @@ func (c *Coordinator) List(q snapshot.Query) snapshot.Page {
 		tr.mu.Lock()
 		rows = append(rows, snapshotStatusRow{tr.statusID, tr.statusLocked()})
 		tr.mu.Unlock()
+	}
+	for _, job := range sends {
+		job.mu.Lock()
+		rows = append(rows, snapshotStatusRow{job.statusID, job.status})
+		job.mu.Unlock()
 	}
 	slices.SortFunc(rows, func(a, b snapshotStatusRow) int { return cmp.Compare(a.id, b.id) })
 	for _, row := range rows {

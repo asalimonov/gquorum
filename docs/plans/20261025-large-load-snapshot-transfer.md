@@ -5,7 +5,7 @@
 **Project source:** `../..` relative to this plan (repository root `.`)
 **Branch:** `feat/large-snapshots-transfer`
 **Source checkout inspected:** `646e9c1` (implementation baseline `14a54c2`, transport-document correction `2ba951a`, current lint/testing updates in `646e9c1`)
-**Target architecture SHA256:** `2be53d3cfda9357b564e1b1e3be73cb16fba38ac7f026eef8ad6f49e37c1962f` (current target, including Task 7 transport-cap refinement; original reviewed digest retained in review history)
+**Target architecture SHA256:** `7847b314fc5eb373445a86671c01ebb3a0f33080a1cb346cba484469bc78b202` (current target, including Task 7 transport-cap and Task 9 exact-failure-port refinements; original reviewed digest retained in review history)
 **Target architecture:** [20261025-large-load-snapshot-transfer-target.md](../brainstorms/20261025-large-load-snapshot-transfer-target.md)
 **Full brainstorm log:** [20261025-large-load-snapshot-transfer.md](../brainstorms/20261025-large-load-snapshot-transfer.md)
 **Review history:** [feature review thread](../review/feat_large-snapshots-transfer.md)
@@ -254,17 +254,17 @@ Review baseline: `251a594`; findings in review Thread 3. The next review is due 
 **Files:** `internal/loadsnapshot/{send,digest}.go`, ports/state and tests.
 **References:** target §4.1 Send/Progress/Transport, §7.1/7.4/7.5, §9.2/9.4 and §12 PrepareSend/Run/Discard/digest/reporting.
 
-- [ ] Implement Coordinator.PrepareSend(Owner, raftengine.SnapshotOffer), snapshotSendJob.Run/Discard/recordVerifiedProgress and finishSnapshotDelivery. Preparation is bounded/no-I/O; hash/resolve/network happen on the bulk worker.
-- [ ] Borrow the pinned immutable native slice without a sender clone. Charge every destination conservatively even for a shared artifact. Release only after actual workers join.
-- [ ] Implement SourceSnapshotID (RunID, generation, index, term, bytes) and a two-completed-entry-per-live-run digest cache with singleflight misses. Failed/incomplete hashes never cache; completed entries retain no payload reference.
-- [ ] Bind resolved recipient, exact source run/epoch, original total deadline and SnapshotAttempt to managed delivery registration. A canceled/deposed source cannot send/report for a successor.
-- [ ] Supply Send.ReportProgress as a nonblocking closure tied to the job. Validate cumulative verified offsets/receiver run/negotiated bounds; stamp time locally; duplicates cannot renew progress. Callback cannot run after SendSnapshot returns/joins.
-- [ ] Handle accepted and native-proven not_needed distinctly; report one managed outcome through the exact-attempt mailbox. No duplicate adapter ReportLoadDelivery.
+- [x] Implement Coordinator.PrepareSend(Owner, raftengine.SnapshotOffer), snapshotSendJob.Run/Discard/recordVerifiedProgress and finishSnapshotDelivery. Preparation is bounded/no-I/O; hash/resolve/network happen on the bulk worker.
+- [x] Borrow the pinned immutable native slice without a sender clone. Charge every destination conservatively even for a shared artifact. Release only after actual workers join.
+- [x] Implement SourceSnapshotID (RunID, generation, index, term, bytes) and a two-completed-entry-per-live-run digest cache with singleflight misses. Failed/incomplete hashes never cache; completed entries retain no payload reference.
+- [x] Bind resolved recipient, exact source run/epoch, original total deadline and SnapshotAttempt to managed delivery registration. A canceled/deposed source cannot send/report for a successor.
+- [x] Supply Send.ReportProgress as a nonblocking closure tied to the job. Validate cumulative verified offsets/receiver run/negotiated bounds; stamp time locally; duplicates cannot renew progress. Callback cannot run after SendSnapshot returns/joins.
+- [x] Handle accepted and native-proven not_needed distinctly; report one managed outcome through the exact-attempt mailbox. No duplicate adapter ReportLoadDelivery.
 
 #### Verification
 
-- [ ] `make test`; `go vet ./internal/loadsnapshot`; functional/race tests for digest sharing, cancellation during hashing, old source bytes surviving replacement, stale callbacks and delayed reports.
-- [ ] Repeated receiver capacity refusal must not clone/rehash the unchanged snapshot or retain payload during cooldown.
+- [x] `make test`; `go vet ./internal/loadsnapshot`; functional/race tests for digest sharing, cancellation during hashing, old source bytes surviving replacement, stale callbacks and delayed reports.
+- [x] Repeated receiver capacity refusal must not clone/rehash the unchanged snapshot or retain payload during cooldown.
 
 ### Task 10: Implement gRPC receiving and qualify the teardown mechanism
 
@@ -648,6 +648,18 @@ Task 7 transport-cap refinement:
  }
 ```
 
+Task 9 exact pre-registration reporting refinement:
+- `internal/loadsnapshot/ports.go` and target §9.2: add `ReportSnapshotFailure func(Owner, raftengine.SnapshotAttempt, error)`. Discard/hash/resolve failures precede delivery registration, so no delivery key exists. This private port reports the exact attempt without discovery or I/O; registered jobs retain ReportDelivery.
+- `internal/raftengine/snapshot_reports.go`: classify the outer fault code rather than nested causes. An admitted ingress_failed wrapping Overloaded must retain admitted-failure backoff, rather than masquerading as pre-admission capacity.
+
+```diff
+ type Ports struct {
++    ReportSnapshotFailure func(Owner, raftengine.SnapshotAttempt, error)
+ }
+- errors.Is(err, fault.ErrOverloaded)
++ errors.As(err, &classified) // select classified.Code, preserving the outer policy
+```
+
 ## NOT IMPLEMENTED GAPS
 
 No implementation exists yet; ordinary unchecked tasks are not defects in the plan. During execution, record discovered deviations here with task/target references and evidence. Use `[_]` for an unresolved gap that could not be corrected; such a mark is not a passed task or an approved deferral.
@@ -999,6 +1011,7 @@ type Ports struct {
     ValidateOutgoing func(context.Context, Owner, load.Peer) error
     RegisterDelivery func(Owner, raftengine.SnapshotAttempt, load.Peer, time.Time) (uint64, error)
     ReportDelivery func(Owner, snapshot.Key, snapshot.Ack, error)
+    ReportSnapshotFailure func(Owner, raftengine.SnapshotAttempt, error) // before registration
     NoteSnapshotProgress func(Owner, raftengine.SnapshotAttempt, metrics.SnapshotCatchUp)
     Transport snapshot.Transport // optional; nil capability returns Unsupported
 }

@@ -58,12 +58,15 @@ func (g *Group) ReportSnapshotAttempt(a SnapshotAttempt, result raft.SnapshotSta
 // Invalid/Unsupported are permanent protocol or policy refusals.
 func (g *Group) ReportSnapshotAttemptError(a SnapshotAttempt, err error) {
 	kind := snapshotAdmittedFailure
-	switch {
-	case errors.Is(err, fault.ErrOverloaded):
-		kind = snapshotCapacityRefusal
-	case errors.Is(err, fault.ErrInvalid), errors.Is(err, fault.ErrUnsupported):
-		kind = snapshotPermanentRefusal
-	default:
+	var classified *fault.Error
+	if errors.As(err, &classified) {
+		switch classified.Code {
+		case fault.Overloaded:
+			kind = snapshotCapacityRefusal
+		case fault.Invalid, fault.Unsupported:
+			kind = snapshotPermanentRefusal
+		default:
+		}
 	}
 	g.recordSnapshotReport(a, raft.SnapshotFailure, kind)
 }

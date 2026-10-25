@@ -182,3 +182,16 @@ func BenchmarkSnapshotIdleEpochRefresh(b *testing.B) {
 		g.refreshSnapshotEpochStatus(status)
 	}
 }
+
+func TestSnapshotReportsAdmittedIngressFailureKeepsOuterClassification(t *testing.T) {
+	t.Parallel()
+	g := snapshotMailbox(t, 1)
+	record := g.snapshotReports[1]
+	// Overload before receiver admission is transient capacity. Once ingress
+	// failed, an inner overload cause must not select the short admission retry.
+	err := fault.New(fault.Unavailable, "native ingress failed", fault.ErrOverloaded)
+	g.ReportSnapshotAttemptError(record.attempt, err)
+	if record.backoff != time.Second || record.pending == nil {
+		t.Fatal("inner overload overrode admitted failure", record)
+	}
+}

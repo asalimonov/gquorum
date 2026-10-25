@@ -22,6 +22,9 @@ const (
 // Coordinator owns Node-wide volatile transfer reservations and bounded
 // metadata. Payload work, callbacks and joins happen outside mu.
 type Coordinator struct {
+	outgoing     map[*snapshotSendJob]struct{}
+	hashWork     map[SourceSnapshotID]*snapshotHashWork
+	digestOwners map[string]OwnerKey
 	waiters      int
 	workers      int
 	ownerWorkers map[OwnerKey]int
@@ -62,7 +65,9 @@ func NewCoordinator(options snapshot.Options, ports Ports) *Coordinator {
 		groupReservations: make(map[string]*snapshotReservation), reservations: make(map[*snapshotReservation]struct{}),
 		terminal: make(map[snapshot.Key]*snapshotTerminal), digests: make(map[SourceSnapshotID][32]byte),
 		digestOrder:  make(map[string][]SourceSnapshotID),
-		ownerWorkers: make(map[OwnerKey]int), fencedOwners: make(map[OwnerKey]struct{})}
+		ownerWorkers: make(map[OwnerKey]int), fencedOwners: make(map[OwnerKey]struct{}),
+		outgoing: make(map[*snapshotSendJob]struct{}), hashWork: make(map[SourceSnapshotID]*snapshotHashWork),
+		digestOwners: make(map[string]OwnerKey)}
 }
 
 // Start binds the coordinator to the Host lifetime once. It never restarts a
@@ -105,7 +110,20 @@ func (c *Coordinator) Fence() {
 func (c *Coordinator) Stop(ctx context.Context) error {
 	c.Fence()
 	c.cancelReceives(OwnerKey{})
-	return c.joinSnapshotOwnership(ctx, OwnerKey{})
+	c.cancelSends(OwnerKey{})
+	if err := c.joinSnapshotOwnership(ctx, OwnerKey{}); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	clear(c.terminal)
+	clear(c.digests)
+	clear(c.digestOrder)
+	clear(c.digestOwners)
+	c.ports = Ports{}
+	c.ctx = nil
+	c.cancel = nil
+	c.mu.Unlock()
+	return nil
 }
 
 func (c *Coordinator) signalLocked() {
