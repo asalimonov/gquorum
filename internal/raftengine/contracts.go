@@ -1,3 +1,4 @@
+//revive:disable:max-public-structs // Internal engine extension contracts are kept together.
 package raftengine
 
 import (
@@ -28,4 +29,18 @@ type AppliedObserver interface {
 // through ReportUnreachable and ReportSnapshot.
 type Transport interface {
 	Send(context.Context, []raftpb.Message) error
+}
+
+// SnapshotJob owns one admitted bulk attempt and its terminal report.
+// Discard releases an unstarted job and must be idempotent and nonblocking.
+// Run joins all work before returning, including after cancellation.
+type SnapshotJob interface {
+	Run(context.Context)
+	Discard(error)
+}
+
+// SnapshotJobTransport optionally admits jobs without I/O, hashing or copying
+// payloads on the Raft owner. Only managed load adapters opt into this seam.
+type SnapshotJobTransport interface {
+	PrepareSnapshot(SnapshotOffer) (SnapshotJob, error)
 }

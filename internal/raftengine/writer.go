@@ -26,12 +26,13 @@ const (
 )
 
 type writeJob struct {
-	ingress  *ownedSnapshotTicket
-	kind     writeKind
-	rd       raft.Ready
-	snapshot raftpb.Snapshot
-	request  *request
-	proof    *model.CheckpointProof
+	snapshotJobs []SnapshotJob
+	ingress      *ownedSnapshotTicket
+	kind         writeKind
+	rd           raft.Ready
+	snapshot     raftpb.Snapshot
+	request      *request
+	proof        *model.CheckpointProof
 }
 
 // appliedHint carries the latest applied index from the run loop to the

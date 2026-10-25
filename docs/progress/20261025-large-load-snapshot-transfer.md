@@ -93,3 +93,26 @@ Verified
 Notes
 - Two new fixture mistakes were corrected before completion: log setup now goes through native MsgApp instead of modifying initialized MemoryStorage, and the Restore gate lets startup Restore(nil) return. The first hung fixture run was terminated for a stack trace; a second bounded run confirmed that fixture issue. No production workaround was needed.
 - Tests explicitly cover zero-term index-ahead attacks, timer/ticket/pending-Ready collision gates, higher-term obsolete headers, matching-log skip, pointer reuse, blocked write/Restore, queue cancellation and joined failure. Only one local engine per fixture; no Docker or large payloads.
+
+## Task 5 — independent outbound jobs and exact reports
+
+Date: 2026-10-25. Commit: this task commit; prior task 717df68.
+
+Implemented
+- Added optional SnapshotJobTransport offers, immutable pins and publication generations. Ready retains admitted jobs until persistence/application completes; joined bulk workers run separately from ordinary per-peer senders.
+- Added cancelable native leadership epochs and idempotent unstarted-job discard, including Ready failure and shutdown. Managed engineTransport still does not implement the selecting method (Task 15).
+- Replaced dropping report channels with exact run/term/peer/generation terminal records and one wake signal. Separate cooldown timers do not depend on Raft tick timing; capacity uses 100ms–1s jitter, admitted failures exponential 1s–30s, permanent refusals 30s.
+- Added SnapshotCatchUp DTO and bounded locally timestamped progress storage; no observer/repair behavior is enabled yet. Backoff survives engine-only receiver restart and source epoch changes; actual Match advance or a changed receiver process resets it.
+- Added ReportSnapshotAttemptError alongside the specified status-only method so future managed wiring can retain typed refusal classification. Recorded this internal refinement in the plan.
+
+Verified
+- make test: all 2,245 tests across 62 reports/five modules pass, 20.313s; report test-reports/unit/20261025T173823.586896Z-q8kw1xn0/report.md.
+- go vet ./internal/raftengine ./metrics; make lint (pending changes); git diff --check: pass.
+- Focused functional race for all SnapshotIngress/Outbound cases: pass (final run 1.403s).
+- Focused unit race for SnapshotReports: pass (1.374s), including concurrent terminal reports with a saturated wake signal.
+- Functional regressions in internal/raftengine, internal/metaengine, internal/metaservice and load: pass.
+
+Notes
+- A native rejection fixture initially used Index=2 instead of the append prefix Index=1; correcting the protocol-double reply produced the real StateSnapshot path. Another new fixture omitted required entry correlation; fixed before verification.
+- Tests prove heartbeat sends while bulk is blocked, epoch cancellation plus join, stale report rejection, native failure cooldown, failed-Ready discard, legacy snapshot copy behavior and publication generation. No multi-node functional fixture or large payload was added.
+- Reuse the existing status capture for epoch refresh to avoid a second RawNode.Status allocation on every ordinary refresh. Empty bulk dispatch does no extra work.

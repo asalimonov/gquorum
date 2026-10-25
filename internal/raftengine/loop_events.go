@@ -11,6 +11,13 @@ import (
 
 func (g *Group) finishRun() {
 	g.cancel()
+	if g.cancelSnapshotEpoch != nil {
+		g.cancelSnapshotEpoch()
+	}
+	if g.pending != nil {
+		discardSnapshotJobs(g.pending.snapshotJobs, g.ctx.Err())
+		g.pending.snapshotJobs = nil
+	}
 	g.mu.Lock()
 	g.stopped = true
 	if g.err == nil {
@@ -30,12 +37,16 @@ func (g *Group) finishRun() {
 }
 
 type loopState struct {
-	lastEntriesWrite time.Time
-	readyTimer       *time.Timer
-	ticks, metrics   <-chan time.Time
+	snapshotReportTimer *time.Timer
+	lastEntriesWrite    time.Time
+	readyTimer          *time.Timer
+	ticks, metrics      <-chan time.Time
 }
 
 func (s *loopState) stopReadyTimer() {
+	if s.snapshotReportTimer != nil {
+		s.snapshotReportTimer.Stop()
+	}
 	if s.readyTimer != nil {
 		s.readyTimer.Stop()
 	}
@@ -79,6 +90,7 @@ func (g *Group) receiveLoopEvent(state *loopState) bool {
 	case <-state.ticks:
 		g.rn.Tick()
 		g.refresh()
+		g.drainSnapshotReports(time.Now())
 		g.retryDroppedProposals(time.Now())
 		g.resetReadRounds()
 		g.retryReadRound(time.Now())
@@ -111,8 +123,10 @@ func (g *Group) receiveLoopEvent(state *loopState) bool {
 		}
 	case id := <-g.unreachable:
 		g.rn.ReportUnreachable(id)
-	case report := <-g.reports:
-		g.rn.ReportSnapshot(report.id, report.status)
+	case <-g.snapshotReportDeadline(state):
+		g.drainSnapshotReports(time.Now())
+	case <-g.snapshotReportWake:
+		g.drainSnapshotReports(time.Now())
 	}
 	return true
 }

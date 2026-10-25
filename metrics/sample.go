@@ -1,3 +1,4 @@
+//revive:disable:max-public-structs // Related observation DTOs share the sample schema.
 package metrics
 
 import "time"
@@ -55,4 +56,25 @@ type ReplicaSample struct {
 	ResultLatency      Latency         `json:"result_latency"`
 	PersistenceLatency Latency         `json:"persistence_latency"`
 	ApplyLatency       Latency         `json:"apply_latency"`
+}
+
+// SnapshotCatchUp is exact-attempt bulk progress, not a heartbeat or quorum ack.
+// Episode fields are owned by the source engine, never the remote adapter.
+type SnapshotCatchUp struct {
+	DeliveryID         uint64          `json:"delivery_id"`
+	SnapshotIndex      uint64          `json:"snapshot_index"`
+	SnapshotTerm       uint64          `json:"snapshot_term"`
+	LeaderTerm         uint64          `json:"leader_term"`
+	Destination        ReplicaIdentity `json:"destination"`
+	VerifiedBytes      uint64          `json:"verified_bytes"`
+	TotalBytes         uint64          `json:"total_bytes"`
+	ProgressSequence   uint64          `json:"progress_sequence"`
+	ProgressAge        time.Duration   `json:"progress_age_ns"`
+	ProgressTimeout    time.Duration   `json:"progress_timeout_ns"`
+	RemainingTotal     time.Duration   `json:"remaining_total_ns"`
+	Phase              string          `json:"phase"`
+	RemainingGrace     time.Duration   `json:"remaining_grace_ns"`
+	EpisodeAnchorMatch uint64          `json:"episode_anchor_match"`
+	EpisodeRemaining   time.Duration   `json:"episode_remaining_ns"`
+	EpisodeFailed      bool            `json:"episode_failed"`
 }

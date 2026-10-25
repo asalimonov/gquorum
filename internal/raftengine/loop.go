@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/asalimonov/gquorum/events"
@@ -172,10 +173,16 @@ func (g *Group) beginReady() error {
 	if err := g.classifyOwnedSnapshotReady(&rd); err != nil {
 		return err
 	}
-	rd, err := ownReady(rd)
+	rd, jobs, err := g.ownReady(rd)
 	if err != nil {
 		return err
 	}
+	retained := false
+	defer func() {
+		if !retained {
+			discardSnapshotJobs(jobs, fault.ErrStopped)
+		}
+	}()
 	if err := g.stageReadySnapshot(&rd); err != nil {
 		return err
 	}
@@ -187,7 +194,8 @@ func (g *Group) beginReady() error {
 			return err
 		}
 	}
-	job := writeJob{kind: writeReady, rd: rd, ingress: g.activeSnapshot}
+	job := writeJob{kind: writeReady, rd: rd, ingress: g.activeSnapshot, snapshotJobs: jobs}
+	retained = true
 	g.pending = &job
 	if len(rd.Entries) == 0 && raft.IsEmptySnap(rd.Snapshot) && raft.IsEmptyHardState(rd.HardState) {
 		return g.finishWrite(writeReady)
@@ -255,11 +263,14 @@ func (g *Group) advance() error {
 			for _, m := range rd.Messages {
 				g.rn.ReportUnreachable(m.To)
 				if m.Type == raftpb.MsgSnap {
-					g.rn.ReportSnapshot(m.To, raft.SnapshotFailure)
+					g.ReportSnapshot(m.To, raft.SnapshotFailure)
 				}
 			}
 		}
 	}
+	jobs := g.pending.snapshotJobs
+	g.pending.snapshotJobs = nil
+	g.dispatchSnapshotJobs(jobs)
 	g.acceptReadStates(rd.ReadStates)
 	g.releaseRemoteReads(rd.Messages)
 	g.rn.Advance(rd)
@@ -355,10 +366,14 @@ func (g *Group) beginSnapshot(req *request) error {
 		return err
 	}
 	cs := copyConf(g.cs)
+	if g.snapshotPublication == math.MaxUint64 {
+		return fault.ErrOverloaded
+	}
 	ss, err := g.ms.CreateSnapshot(g.applied, &cs, bytes.Clone(data))
 	if err != nil {
 		return err
 	}
+	g.snapshotPublication++
 	job := writeJob{kind: writeSnapshot, snapshot: ss, request: req}
 	g.pending = &job
 	g.writeC <- job
@@ -377,6 +392,7 @@ func copyEntries(entries []raftpb.Entry) []raftpb.Entry {
 }
 func (g *Group) refresh() {
 	status := g.rn.Status()
+	g.refreshSnapshotEpochStatus(status)
 	bounds := SnapshotBounds{RunID: g.nonce, Term: status.Term, Commit: status.Commit}
 	status.Commit = min(status.Commit, g.durableHS.Commit)
 	status.Applied = g.applied

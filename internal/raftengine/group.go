@@ -25,14 +25,13 @@ import (
 )
 
 const (
-	proposalQueueCapacity       = 256
-	inboundQueueCapacity        = 1024
-	controlQueueCapacity        = 16
-	snapshotQueueCapacity       = 16
-	unreachableQueueCapacity    = 256
-	snapshotReportQueueCapacity = 64
-	outboundBatchQueueCapacity  = 256
-	engineWorkerCount           = 4 // Raft loop, writer, sender and metrics sampler.
+	proposalQueueCapacity      = 256
+	inboundQueueCapacity       = 1024
+	controlQueueCapacity       = 16
+	snapshotQueueCapacity      = 16
+	unreachableQueueCapacity   = 256
+	outboundBatchQueueCapacity = 256
+	engineWorkerCount          = 4 // Raft loop, writer, sender and metrics sampler.
 )
 
 type response struct {
@@ -58,14 +57,20 @@ type request struct {
 	retried            bool
 	retryAt            time.Time
 }
-type snapshotReport struct {
-	id     uint64
-	status raft.SnapshotStatus
-}
 
 // Group owns one exact persistence-ordered Raft replica and its serialized
 // application work.
 type Group struct {
+	snapshotEpoch           context.Context
+	cancelSnapshotEpoch     context.CancelFunc
+	snapshotEpochTerm       uint64
+	snapshotPublication     uint64
+	snapshotAttemptSequence uint64
+	snapshotReportMu        sync.Mutex
+	snapshotReports         map[uint64]*snapshotReportState
+	snapshotReportWake      chan struct{}
+	snapshotReportsClosed   bool
+
 	snapshotIngress                           chan *request
 	activeSnapshot                            *ownedSnapshotTicket
 	headerOnlyTicket                          *request
@@ -103,7 +108,6 @@ type Group struct {
 	adminNotify                               []adminReply
 	transferIssuedTerm                        uint64
 	unreachable                               chan uint64
-	reports                                   chan snapshotReport
 	sendC                                     chan []raftpb.Message
 	sendWorkers                               atomic.Int64
 	writeC                                    chan writeJob
@@ -181,7 +185,13 @@ func (g *Group) Start(parent context.Context) error {
 	go g.writer()
 	go g.sender()
 	go g.sampleMetrics()
-	go func() { g.wg.Wait(); g.finishSnapshotIngressAfterJoin(); g.finishObservations(); close(g.done) }()
+	go func() {
+		g.wg.Wait()
+		g.finishSnapshotIngressAfterJoin()
+		g.closeSnapshotReportsAfterJoin()
+		g.finishObservations()
+		close(g.done)
+	}()
 	return nil
 }
 
@@ -203,7 +213,7 @@ func (g *Group) RequestStop() {
 	g.publishObservationLocked(regularObservation)
 	g.mu.Unlock()
 	if finish {
-		go func() { g.finishObservations(); close(g.done) }()
+		go func() { g.closeSnapshotReportsAfterJoin(); g.finishObservations(); close(g.done) }()
 	}
 }
 
@@ -483,12 +493,18 @@ func (g *Group) ReportUnreachable(id uint64) {
 	}
 }
 
-// ReportSnapshot queues a completed snapshot-transfer outcome without blocking.
+// ReportSnapshot adapts a legacy destination-only report to its current offer.
+// Legacy transports cannot distinguish their own delayed prior attempts; managed
+// transfers always use the exact SnapshotAttempt API instead.
 func (g *Group) ReportSnapshot(id uint64, status raft.SnapshotStatus) {
-	select {
-	case g.reports <- snapshotReport{id, status}:
-	default:
+	g.snapshotReportMu.Lock()
+	record := g.snapshotReports[id]
+	var attempt SnapshotAttempt
+	if record != nil {
+		attempt = record.attempt
 	}
+	g.snapshotReportMu.Unlock()
+	g.ReportSnapshotAttempt(attempt, status)
 }
 func copyConf(cs raftpb.ConfState) raftpb.ConfState {
 	cs.Voters = slices.Clone(cs.Voters)

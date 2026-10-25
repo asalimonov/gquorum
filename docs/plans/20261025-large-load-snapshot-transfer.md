@@ -160,19 +160,19 @@ The target's historical final `make lint` command means full validation; on the 
 **Files:** create `internal/raftengine/snapshot_outbound.go`, `snapshot_reports.go`; update contracts/ready_apply/writer/loop/outbound/group/metrics as needed.
 **References:** target [§7.1 sending](../brainstorms/20261025-large-load-snapshot-transfer-target.md#71-outgoing-snapshots), [§7.4 isolation/reporting](../brainstorms/20261025-large-load-snapshot-transfer-target.md#74-heartbeats-leadership-epochs-and-non-lossy-reporting), §7.5, §9.3/9.4 and §12 report algorithms. Appendix B holds SnapshotOffer/Job/Attempt contracts.
 
-- [ ] Add SnapshotJob.Run/Discard, SnapshotOffer with exact attempt/publication generation/epoch, and SnapshotJobTransport. Only transports implementing the new seam use it; do not yet add the method to managed engineTransport (activation is Task 15).
-- [ ] Split eligible MsgSnap jobs from ordinary Ready messages without a payload marshal/unmarshal copy. Reserve/pin through PrepareSnapshot; store jobs alongside writeJob and release them only after the existing Ready durability/application boundary.
-- [ ] Dispatch through joined bulk workers independent of per-destination ordinary workers. Discard every unstarted job on persistence failure, dropped dispatch, cancellation or stop. Preserve ordinary-segment order without waiting for bulk completion before heartbeats.
-- [ ] Create/cancel source leadership epochs on native term/role changes. Pin source run/term; no resolver, hash, network or large copy on the loop.
-- [ ] Add per-run snapshot publication generation at local publication, received publication and startup restore; no new persisted field.
-- [ ] Replace dropping snapshot reports with the exact-attempt coalescing mailbox and wake signal. Match run/term/destination/generation before applying; adapt legacy standalone reports without removing their API.
-- [ ] Implement short 100ms–1s jitter for local capacity and remote pre-admission capacity/group_busy; admitted failures back off 1s→30s, permanent refusals use the ceiling. No byte-progress reset of failed backoff; no payload/permit retention while waiting to report failure.
-- [ ] Introduce the exact metrics.SnapshotCatchUp DTO from Appendix D here so the engine method signatures compile; defer PeerProgress publication and policy behavior to Task 14. Add bounded progress-update plumbing for Task 14 without manufacturing heartbeat freshness or changing current repair policy yet.
+- [x] Add SnapshotJob.Run/Discard, SnapshotOffer with exact attempt/publication generation/epoch, and SnapshotJobTransport. Only transports implementing the new seam use it; do not yet add the method to managed engineTransport (activation is Task 15).
+- [x] Split eligible MsgSnap jobs from ordinary Ready messages without a payload marshal/unmarshal copy. Reserve/pin through PrepareSnapshot; store jobs alongside writeJob and release them only after the existing Ready durability/application boundary.
+- [x] Dispatch through joined bulk workers independent of per-destination ordinary workers. Discard every unstarted job on persistence failure, dropped dispatch, cancellation or stop. Preserve ordinary-segment order without waiting for bulk completion before heartbeats.
+- [x] Create/cancel source leadership epochs on native term/role changes. Pin source run/term; no resolver, hash, network or large copy on the loop.
+- [x] Add per-run snapshot publication generation at local publication, received publication and startup restore; no new persisted field.
+- [x] Replace dropping snapshot reports with the exact-attempt coalescing mailbox and wake signal. Match run/term/destination/generation before applying; adapt legacy standalone reports without removing their API.
+- [x] Implement short 100ms–1s jitter for local capacity and remote pre-admission capacity/group_busy; admitted failures back off 1s→30s, permanent refusals use the ceiling. No byte-progress reset of failed backoff; no payload/permit retention while waiting to report failure.
+- [x] Introduce the exact metrics.SnapshotCatchUp DTO from Appendix D here so the engine method signatures compile; defer PeerProgress publication and policy behavior to Task 14. Add bounded progress-update plumbing for Task 14 without manufacturing heartbeat freshness or changing current repair policy yet.
 
 #### Verification
 
-- [ ] `make test`; `go vet ./internal/raftengine`; focused functional/race tests for non-lossy wake saturation, stale reports, epoch cancellation, mixed batches and unstarted-job discard.
-- [ ] Use a protocol double blocked in bulk Send to prove the same peer's ordinary sender continues. Verify _meta/standalone still use their existing paths where intended.
+- [x] `make test`; `go vet ./internal/raftengine`; focused functional/race tests for non-lossy wake saturation, stale reports, epoch cancellation, mixed batches and unstarted-job discard.
+- [x] Use a protocol double blocked in bulk Send to prove the same peer's ordinary sender continues. Verify _meta/standalone still use their existing paths where intended.
 
 ### Task 6: Implement coordinator budgets and the memory staging backend
 
@@ -605,6 +605,16 @@ index 997cc85..ec269f7 100644
 
 Record any later necessary deviations with files, reasons, target references and verification; preserve unrelated user work.
 
+Task 5 internal reporting refinement:
+- `internal/raftengine/snapshot_reports.go`: the specified status-only report cannot distinguish pre-admission capacity from permanent or admitted failures. Added an error-bearing companion while retaining the exact original signature. Managed delivery wiring in Task 12 must call it on errors; no new public load API or policy decision.
+
+```diff
++func (g *Group) ReportSnapshotAttemptError(a SnapshotAttempt, err error) {
++    // Overloaded: 100 ms–1 s; Invalid/Unsupported: 30 s; other: 1 s–30 s.
++    // Classified result is retained in the same exact-attempt mailbox.
++}
+```
+
 ## NOT IMPLEMENTED GAPS
 
 No implementation exists yet; ordinary unchecked tasks are not defects in the plan. During execution, record discovered deviations here with task/target references and evidence. Use `[_]` for an unresolved gap that could not be corrected; such a mark is not a passed task or an approved deferral.
@@ -842,6 +852,7 @@ func (g *Group) finishSnapshotIngressAfterJoin()
 ```go
 type SnapshotAttempt struct { RunID string; Term, ReplicaID, Generation uint64 }
 func (g *Group) ReportSnapshotAttempt(SnapshotAttempt, raft.SnapshotStatus)
+func (g *Group) ReportSnapshotAttemptError(SnapshotAttempt, error) // classified failure companion
 func (g *Group) drainSnapshotReports(time.Time)
 func (g *Group) refreshSnapshotEpoch()
 func (g *Group) NoteSnapshotProgress(SnapshotAttempt, metrics.SnapshotCatchUp)
