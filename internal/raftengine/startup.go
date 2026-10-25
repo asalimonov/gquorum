@@ -195,6 +195,7 @@ func newRestoredCore(ctx context.Context, options Options, state groupRecovery) 
 		inbound:          make(chan *request, inboundQueueCapacity),
 		controls:         make(chan *request, controlQueueCapacity),
 		snapshots:        make(chan *request, snapshotQueueCapacity),
+		snapshotIngress:  make(chan *request, snapshotQueueCapacity),
 		slots:            make(chan struct{}, options.MaxPendingProposals),
 		unreachable:      make(chan uint64, unreachableQueueCapacity),
 		reports:          make(chan snapshotReport, snapshotReportQueueCapacity),

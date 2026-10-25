@@ -32,8 +32,11 @@ func ownReady(rd raft.Ready) (raft.Ready, error) {
 
 func (g *Group) stageReadySnapshot(rd *raft.Ready) error {
 	if !raft.IsEmptySnap(rd.Snapshot) {
-		if _, err := g.decodeSnapshot(rd.Snapshot); err != nil {
-			return err
+		owned := g.activeSnapshot != nil && g.activeSnapshot.selected
+		if !owned {
+			if _, err := g.decodeSnapshot(rd.Snapshot); err != nil {
+				return err
+			}
 		}
 		if g.opts.GroupID != topology.MetaGroupID {
 			for id, req := range g.props {
@@ -42,7 +45,9 @@ func (g *Group) stageReadySnapshot(rd *raft.Ready) error {
 					fault.New(fault.Unavailable, "snapshot may cover proposal result; outcome unknown", nil))
 			}
 		}
-		rd.Snapshot.Data = bytes.Clone(rd.Snapshot.Data)
+		if !owned {
+			rd.Snapshot.Data = bytes.Clone(rd.Snapshot.Data)
+		}
 		rd.Snapshot.Metadata.ConfState = copyConf(rd.Snapshot.Metadata.ConfState)
 		if err := g.ms.ApplySnapshot(rd.Snapshot); err != nil {
 			return err
@@ -53,13 +58,24 @@ func (g *Group) stageReadySnapshot(rd *raft.Ready) error {
 
 func (g *Group) restoreReadySnapshot(snapshot raftpb.Snapshot) error {
 	if !raft.IsEmptySnap(snapshot) {
-		state, err := g.decodeSnapshot(snapshot)
-		if err != nil {
-			return err
+		var state raftstate.Snapshot
+		var err error
+		owned := g.activeSnapshot != nil && g.activeSnapshot.selected
+		if owned {
+			state = g.activeSnapshot.ingress.Decoded
+		} else {
+			state, err = g.decodeSnapshot(snapshot)
+			if err != nil {
+				return err
+			}
 		}
 		g.restoring.Store(true)
 		g.refresh()
-		err = restoreMachine(g.ctx, g.opts.Machine, state.Application, snapshot.Metadata)
+		if owned {
+			err = restoreOwnedMachine(g.ctx, g.opts.Machine, state.Application, snapshot.Metadata)
+		} else {
+			err = restoreMachine(g.ctx, g.opts.Machine, state.Application, snapshot.Metadata)
+		}
 		g.restoring.Store(false)
 		if err != nil {
 			return fault.New(fault.Unreadable, "restore received snapshot", err)
@@ -69,6 +85,9 @@ func (g *Group) restoreReadySnapshot(snapshot raftpb.Snapshot) error {
 		g.applied, g.snapshotIndex = snapshot.Metadata.Index, snapshot.Metadata.Index
 		g.cs = copyConf(snapshot.Metadata.ConfState)
 		g.durableHS.Commit = max(g.durableHS.Commit, g.applied)
+		if owned {
+			g.finishOwnedSnapshot(SnapshotInstalled, nil)
+		}
 	}
 	return nil
 }

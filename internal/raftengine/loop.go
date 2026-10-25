@@ -169,6 +169,9 @@ func (g *Group) pruneWaiters() {
 }
 func (g *Group) beginReady() error {
 	rd := g.rn.Ready()
+	if err := g.classifyOwnedSnapshotReady(&rd); err != nil {
+		return err
+	}
 	rd, err := ownReady(rd)
 	if err != nil {
 		return err
@@ -184,7 +187,7 @@ func (g *Group) beginReady() error {
 			return err
 		}
 	}
-	job := writeJob{kind: writeReady, rd: rd}
+	job := writeJob{kind: writeReady, rd: rd, ingress: g.activeSnapshot}
 	g.pending = &job
 	if len(rd.Entries) == 0 && raft.IsEmptySnap(rd.Snapshot) && raft.IsEmptyHardState(rd.HardState) {
 		return g.finishWrite(writeReady)
@@ -374,10 +377,12 @@ func copyEntries(entries []raftpb.Entry) []raftpb.Entry {
 }
 func (g *Group) refresh() {
 	status := g.rn.Status()
+	bounds := SnapshotBounds{RunID: g.nonce, Term: status.Term, Commit: status.Commit}
 	status.Commit = min(status.Commit, g.durableHS.Commit)
 	status.Applied = g.applied
 	g.mu.Lock()
 	old := g.cached
+	g.snapshotBounds = bounds
 	g.cached = status
 	g.cachedPending = len(g.props)
 	g.publishObservationLocked(regularObservation)

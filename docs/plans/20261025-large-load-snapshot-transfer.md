@@ -139,20 +139,20 @@ The target's historical final `make lint` command means full validation; on the 
 **Files:** create `internal/raftengine/snapshot_ingress.go`; update existing group/loop/loop_events/ready_apply/remote_validation/restore/writer code as required; owning units/functional tests.
 **References:** target [§7.2 incoming handoff](../brainstorms/20261025-large-load-snapshot-transfer-target.md#72-incoming-owned-handoff), §7.5, §9.3 and §12 PrepareOwnedSnapshot, snapshotBoundaryReady, handleSnapshotPreflight, classifyOwnedSnapshotReady. Exact type states are in Appendix B.
 
-- [ ] Add SnapshotIngress with cached `raftstate.Snapshot` and one Done callback, SnapshotBounds, SnapshotPreflight and the exact methods from Appendix B. Give enqueue ownership an explicit enqueued/not-enqueued result; caller cancellation does not release enqueued payloads.
-- [ ] PrepareOwnedSnapshot fully decodes/validates the envelope on the caller worker using immutable engine options. JSON decode is not claimed to be interruptible: cancellation waits for actual return before releasing buffers.
-- [ ] Publish exact-run monotonic term/commit lower bounds for cheap obsolescence checks. Cached bounds prove only obsolescence; they cannot authorize acceptance, restore or a native reply.
-- [ ] Gate header-only preflight and owned ingress: no pending write, Ready timer, full/header ticket or outstanding Ready. Validate nonzero/consistent terms/index before Step; closed gate returns busy without Step.
-- [ ] Implement header-only not_needed only when the owner immediately proves lower positive term or index <= commit. Preserve native term/reply/persistence behavior; require no Snapshot in the ensuing Ready. Clear its ticket immediately if no Ready results.
-- [ ] Keep one Ready consumer: store the owned ticket, let existing beginReady classify install versus skip, and apply dynamic authority-progress validation only to a selected snapshot. Reuse cached state for Restore and avoid cloning the immutable received payload again.
-- [ ] Invoke Done exactly once on refusal, skip, successful persistence/Restore, or joined failure. Abnormal shutdown callbacks run after all engine workers join and before closing done; never release a buffer while the writer still owns it.
-- [ ] Use the engine-owned context for full-snapshot persistence retries; ordinary WAL attempts retain their current timeout. Do not modify disk formats or persistence-before-publication ordering.
+- [x] Add SnapshotIngress with cached `raftstate.Snapshot` and one Done callback, SnapshotBounds, SnapshotPreflight and the exact methods from Appendix B. Give enqueue ownership an explicit enqueued/not-enqueued result; caller cancellation does not release enqueued payloads.
+- [x] PrepareOwnedSnapshot fully decodes/validates the envelope on the caller worker using immutable engine options. JSON decode is not claimed to be interruptible: cancellation waits for actual return before releasing buffers.
+- [x] Publish exact-run monotonic term/commit lower bounds for cheap obsolescence checks. Cached bounds prove only obsolescence; they cannot authorize acceptance, restore or a native reply.
+- [x] Gate header-only preflight and owned ingress: no pending write, Ready timer, full/header ticket or outstanding Ready. Validate nonzero/consistent terms/index before Step; closed gate returns busy without Step.
+- [x] Implement header-only not_needed only when the owner immediately proves lower positive term or index <= commit. Preserve native term/reply/persistence behavior; require no Snapshot in the ensuing Ready. Clear its ticket immediately if no Ready results.
+- [x] Keep one Ready consumer: store the owned ticket, let existing beginReady classify install versus skip, and apply dynamic authority-progress validation only to a selected snapshot. Reuse cached state for Restore and avoid cloning the immutable received payload again.
+- [x] Invoke Done exactly once on refusal, skip, successful persistence/Restore, or joined failure. Abnormal shutdown callbacks run after all engine workers join and before closing done; never release a buffer while the writer still owns it.
+- [x] Use the engine-owned context for full-snapshot persistence retries; ordinary WAL attempts retain their current timeout. Do not modify disk formats or persistence-before-publication ordering.
 
 #### Verification
 
-- [ ] `make test`; `go vet ./internal/raftengine`; focused `go test -tags=functional -count=1 ./internal/raftengine -run '^TestSnapshotIngress_'`.
-- [ ] Focused functional race cases for queued cancellation, blocked Restore/write and exactly-once Done. Test zero-term index-ahead attacks and the WALWriteWait ticket collision explicitly, with no native mutation on refusal.
-- [ ] Regress existing _meta, standalone and full snapshot/tail recovery behavior locally; no multi-node functional fixture.
+- [x] `make test`; `go vet ./internal/raftengine`; focused `go test -tags=functional -count=1 ./internal/raftengine -run '^TestSnapshotIngress_'`.
+- [x] Focused functional race cases for queued cancellation, blocked Restore/write and exactly-once Done. Test zero-term index-ahead attacks and the WALWriteWait ticket collision explicitly, with no native mutation on refusal.
+- [x] Regress existing _meta, standalone and full snapshot/tail recovery behavior locally; no multi-node functional fixture.
 
 ### Task 5: Add outbound offers, leadership epochs and reliable reports
 

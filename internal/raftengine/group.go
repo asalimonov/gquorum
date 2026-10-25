@@ -40,6 +40,8 @@ type response struct {
 	err    error
 }
 type request struct {
+	ownedSnapshot      *ownedSnapshotTicket
+	preflightReply     chan snapshotPreflightReply
 	expectedTerm       uint64
 	ctx                context.Context
 	correlation        string
@@ -64,6 +66,10 @@ type snapshotReport struct {
 // Group owns one exact persistence-ordered Raft replica and its serialized
 // application work.
 type Group struct {
+	snapshotIngress                           chan *request
+	activeSnapshot                            *ownedSnapshotTicket
+	headerOnlyTicket                          *request
+	snapshotBounds                            SnapshotBounds
 	observations                              *watchstate.Latest[replicastate.Observation]
 	observation                               replicastate.Observation
 	leadership                                LeadershipEpoch
@@ -175,7 +181,7 @@ func (g *Group) Start(parent context.Context) error {
 	go g.writer()
 	go g.sender()
 	go g.sampleMetrics()
-	go func() { g.wg.Wait(); g.finishObservations(); close(g.done) }()
+	go func() { g.wg.Wait(); g.finishSnapshotIngressAfterJoin(); g.finishObservations(); close(g.done) }()
 	return nil
 }
 

@@ -47,7 +47,8 @@ func (g *Group) prepareReady(state *loopState) error {
 		// inbound entries received during this window join the durable
 		// batch.
 		// The loop keeps handling ticks, cancellation and network traffic.
-		if wait := g.opts.Timing.WALWriteWait; wait > 0 && !state.lastEntriesWrite.IsZero() &&
+		if wait := g.opts.Timing.WALWriteWait; wait > 0 && g.activeSnapshot == nil &&
+			g.headerOnlyTicket == nil && !state.lastEntriesWrite.IsZero() &&
 			time.Since(state.lastEntriesWrite) < readyBatchRecencyWindow {
 			state.readyTimer = time.NewTimer(wait)
 		} else {
@@ -94,6 +95,12 @@ func (g *Group) receiveLoopEvent(state *loopState) bool {
 		g.admitRead(req)
 	case req := <-g.proposals:
 		g.handleProposal(req)
+	case req := <-g.snapshotIngress:
+		if req.ownedSnapshot != nil {
+			g.handleOwnedSnapshot(req, state)
+		} else {
+			g.handleSnapshotPreflight(req, state)
+		}
 	case req := <-g.inbound:
 		g.handleInbound(req)
 	case req := <-controlC:
