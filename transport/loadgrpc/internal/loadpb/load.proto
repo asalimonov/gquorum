@@ -39,8 +39,60 @@ message StreamRefusal {
   string error_code = 2;
   string error_message = 3;
 }
+// Snapshot transfer uses bounded frames; application data never enters NativeHeader.
+message SnapshotOpen {
+  uint32 version = 1; // Must be 1.
+  RaftPeer from = 2;
+  RaftPeer to = 3;
+  uint64 delivery_id = 4;
+  bytes native_header = 5;
+  uint64 total_bytes = 6;
+  bytes sha256 = 7;
+  uint32 chunk_bytes = 8;
+  uint64 remaining_total_nanos = 9;
+  bool resume = 10;
+  uint64 progress_timeout_nanos = 11;
+}
+message SnapshotData {
+  uint64 attachment = 1;
+  uint64 ordinal = 2;
+  uint64 offset = 3;
+  bytes data = 4;
+  bytes sha256 = 5;
+}
+message SnapshotFinish { uint64 attachment = 1; }
+message SnapshotAbort { uint64 attachment = 1; }
+message SnapshotFrame {
+  oneof body {
+    SnapshotOpen open = 1;
+    SnapshotData data = 2;
+    SnapshotFinish finish = 3;
+    SnapshotAbort abort = 4;
+  }
+}
+message SnapshotFailure {
+  string code = 1;
+  string reason = 2;
+  string message = 3;
+  uint64 size = 4;
+  uint64 limit = 5;
+}
+message SnapshotAck {
+  uint64 delivery_id = 1;
+  uint64 attachment = 2;
+  uint64 next_offset = 3;
+  uint32 chunk_bytes = 4;
+  string state = 5;
+  bool restart_needed = 6;
+  SnapshotFailure failure = 7;
+  uint64 remaining_total_nanos = 8;
+  uint64 progress_timeout_nanos = 9;
+  string receiver_run_id = 10;
+}
+
 service Load {
   rpc SendRaft(RaftFrame) returns (Reply);
+  rpc TransferSnapshot(stream SnapshotFrame) returns (stream SnapshotAck);
   // StreamRaft carries ordered Raft batches from one sender replica to one
   // recipient replica without waiting for each batch to be stepped.
   rpc StreamRaft(stream RaftFrame) returns (stream StreamRefusal);

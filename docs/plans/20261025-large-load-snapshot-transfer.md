@@ -121,17 +121,17 @@ The target's historical final `make lint` command means full validation; on the 
 **Files:** `transport/loadgrpc/internal/loadpb/load.proto` and generated files; create `transport/loadgrpc/snapshot_wire.go` and owning unit tests.
 **References:** target [§5 wire/resume](../brainstorms/20261025-large-load-snapshot-transfer-target.md#5-wire-protocol-and-resume-semantics), §4.1, §9.4 and §10 SNAP-04/05/11. Exact proto field numbering remains the target §5 block, not an independently invented schema.
 
-- [ ] Add SnapshotOpen/Data/Finish/Abort/Frame/Failure/Ack and bidirectional TransferSnapshot. Include relative timing fields and ReceiverRunID; retain all ordinary/admin service schemas unchanged.
-- [ ] Implement encodeSnapshotOpen, decodeSnapshotOpen, encode/decodeSnapshotAck and snapshotChunkCapacity with checked protobuf overhead, bounded 64 KiB native header and individual MaxMessageBytes. Encode no complete application snapshot as one new native/wire message.
-- [ ] Enforce positive message term/index, `0 < SnapshotTerm <= MessageTerm`, exact endpoints, MsgSnap type, nil native-header Data and no Entries/Responses at this boundary. Direct service/native validation later must repeat safety checks.
-- [ ] Implement explicit unknown-version/capability, malformed, size/frame, checksum, busy and restart classifications. Preserve accepted versus not_needed; not_needed can have no attachment/chunk negotiation but must bind delivery and receiver run.
-- [ ] Generate using pinned `make generate`. Compare resulting file hashes across a second generation to prove idempotence while changes are uncommitted. Do not hand-edit .pb.go or regenerate baseline fixtures.
-- [ ] Add units at frame edges, maximum integer arithmetic, malicious length declarations, digest size, zero/inconsistent terms, original-requested versus negotiated ChunkBytes and timing conversions.
+- [x] Add SnapshotOpen/Data/Finish/Abort/Frame/Failure/Ack and bidirectional TransferSnapshot. Include relative timing fields and ReceiverRunID; retain all ordinary/admin service schemas unchanged.
+- [x] Implement encodeSnapshotOpen, decodeSnapshotOpen, encode/decodeSnapshotAck and snapshotChunkCapacity with checked protobuf overhead, bounded 64 KiB native header and individual MaxMessageBytes. Encode no complete application snapshot as one new native/wire message.
+- [x] Enforce positive message term/index, `0 < SnapshotTerm <= MessageTerm`, exact endpoints, MsgSnap type, nil native-header Data and no Entries/Responses at this boundary. Direct service/native validation later must repeat safety checks.
+- [x] Implement explicit unknown-version/capability, malformed, size/frame, checksum, busy and restart classifications. Preserve accepted versus not_needed; not_needed can have no attachment/chunk negotiation but must bind delivery and receiver run.
+- [x] Generate using pinned `make generate`. Compare resulting file hashes across a second generation to prove idempotence while changes are uncommitted. Do not hand-edit .pb.go or regenerate baseline fixtures.
+- [x] Add units at frame edges, maximum integer arithmetic, malicious length declarations, digest size, zero/inconsistent terms, original-requested versus negotiated ChunkBytes and timing conversions.
 
 #### Verification
 
-- [ ] `make test`; `go vet ./transport/loadgrpc`; generator idempotence as above. Generated-code volume is exempt from the 1,500-line task estimate.
-- [ ] Do not run `make proto-check` against intentionally uncommitted generated changes; its HEAD-relative no-diff check belongs after generated changes are committed, at Task 20.
+- [x] `make test`; `go vet ./transport/loadgrpc`; generator idempotence as above. Generated-code volume is exempt from the 1,500-line task estimate.
+- [x] Do not run `make proto-check` against intentionally uncommitted generated changes; its HEAD-relative no-diff check belongs after generated changes are committed, at Task 20.
 
 ### Task 4: Implement owned snapshot ingress and isolated native preflight
 
