@@ -31,7 +31,7 @@ func (s *scopedState) repairPlanRead(q QueryRequest) (PlanRead, error) {
 	if q.Desired.ClusterID != s.Target.ClusterID {
 		return PlanRead{}, fault.ErrIdentityMismatch
 	}
-	if err := q.Desired.Validate(s.Rules); err != nil {
+	if err := s.validateRecoveryDocument(*q.Desired); err != nil {
 		return PlanRead{}, err
 	}
 	affected := topology.AffectedGroups(s.Target, *q.Desired)

@@ -117,13 +117,10 @@ func (s *scopedState) validateRepairCandidate(base, doc topology.Document) error
 	for _, group := range s.RetiredGroups {
 		retired[group.ID] = true
 	}
-	if err := topology.ValidateTransition(base, doc, s.Rules, retired); err != nil {
+	if err := s.validateRecoveryTransition(base, doc, retired); err != nil {
 		return err
 	}
-	if err := topology.ValidateHostingCapacityFor(base, doc, s.Rules); err != nil {
-		return err
-	}
-	if err := topology.ValidatePlacementTransition(base, base, doc); err != nil {
+	if err := s.validateRecoveryPlacement(base, base, doc); err != nil {
 		return err
 	}
 	return s.validateRepairAllocations(doc)

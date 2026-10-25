@@ -520,3 +520,110 @@ Notes
   missing data as completion, runs the hook, archives A or clears its guard.
 - Ordinary post-archive startup remains intentionally refused until Task10–12.
   Policy repair (Task8) is next; peer review remains scheduled after Task10.
+
+
+## Task 8 — In progress: private placement adapter foundations
+Date: 2026-10-25. Not complete; no task checkbox ticked or implementation commit.
+
+- Created private recoveryplacement Context/FromImport/PolicyDigest, exact policy
+  scoping including released-state refusal, count-normalized owned copies,
+  Prepare/Validate/BuildPlan/ValidatePlan/CanRelease scaffolding and pure tests.
+- Initial strict-AZ singleton→two→three preparation/promotion and forged/released
+  provenance tests pass: go test ./internal/recoveryplacement -v -count=1.
+- Preparation preserves ordinary learner-first admission. Normalized minima must
+  follow currently assigned voters, while normalized voter targets follow eligible
+  capacity; requiring the attainable target as the current minimum blocked safe
+  intermediate learner admission. Original count policies are restored in output.
+- These files are uncommitted. No authoritative replicated recovery state exists
+  until Task9 and no adapter is wired into service/FSM/repair paths yet. Do not
+  claim Task8 complete from its isolated pure tests.
+- Next: preserve zero-context behavior precisely (the adapter currently adds a
+  load minimum-count check that must not silently tighten expert Stage semantics),
+  add the planned native-plan/deficit/pin/policy-edit/release cases, trace/refactor
+  every service/FSM/repair refusal path and wire absent/default context until Task9.
+  Verify initial v1→v2 import scope and progressive repair separately. Then run
+  all task verification and commit Task8 as one substantial task.
+
+
+## Task 8 — Scoped recovery placement and repair adapters
+Date: 2026-10-25. Commit: included with this task's implementation commit.
+
+Implemented
+- Completed private Context/FromImport/PolicyDigest and the approved Prepare,
+  Validate, BuildPlan, ValidatePlan and CanRelease contracts. Context owns exact
+  imported group/policy identities; malformed, duplicate, foreign and permanently
+  released provenance cannot create permission. Initial singleton-v1→v2 import
+  has its own exact founder/destination check. Data consumption and retained
+  policy deficit are independent facts.
+- Count-normalized owned analysis copies preserve identities, source/proven/native
+  membership, selectors/types, pin/reservation rules, actual distinct voter domains,
+  bounds and original policies. Preparation restores original desired policy and
+  report targets. Public topology helpers remain strict; no public recovery context
+  or skip flag was introduced. No last-voter removal or worsened assigned/eligible
+  deficit is permitted by the exception. Native planner catch-up/live-quorum guards
+  remain the existing implementation.
+- Kept structural document validation strict, including immutable history. Cardinal
+  deficit allowances belong only in placement/count/planning paths; applying a
+  transition deficit comparison to old history would incorrectly reject valid
+  earlier checkpoints after progressive repair.
+- Admission remains learner-first. Normalized minimum reflects current assigned
+  voters; normalized target follows eligible capacity. A second eligible node can
+  be hosted/promoted while the original three-AZ target remains unchanged. Public
+  default/custom repair signatures and the original documents given to callbacks
+  remain unchanged; the existing built-in chooser already selects that promotion.
+- Release requires proven original-policy satisfaction or normally valid explicit
+  policy change/retirement; data import completion alone is insufficient. Released
+  records cannot reauthorize a later deficit.
+
+Routed call sites / Task9 handoff
+- metaengine: RecoveryPlacementContext and scoped helpers; staged historical
+  transition/tombstone validation; scoped placement approval; immutable plan shape;
+  materialized/history structural checks; planning and repair query validation;
+  repair rebase transitions/placement. Removed superseded strict helper wrappers.
+- metaservice: declarative preparation; mutation structural/count checks; PlanFor
+  placement; operation/repair plan construction. Placement explanations restore
+  original required-voter targets and existing status reports retain original policy.
+- internal scheduling: exact replicated policy/deficit revalidation before planning
+  and again after policy callback/native recapture, without replacing existing
+  votercheck, liveness, membership or CAS checks. Public built-in candidate regression
+  proves promotion with only two eligible AZs under the retained three-AZ intent.
+- PlanRead has an optional, owned Recovery provenance field, omitted for ordinary
+  reads. recoveryPlacementState currently returns nil by design: Task9 installs
+  the actual optional replicated state and durable release updates. Task8's call
+  paths are wired now; no isolated adapter-only implementation is being claimed.
+
+Verified
+- make test: PASS, 2,061 tests/57 reports, all five modules, 10.477s.
+  test-reports/unit/20261025T035424.443687Z-p607hg61/report.md.
+- make lint: PASS all configured modules/build tags/tooling.
+  /tmp/gquorum-task8-lint.log.
+- Focused unit suites: metadata FSM/service, internal scheduler, public repair
+  policy and placement all PASS. Same changed pure packages under -race PASS:
+  placement1.296s/internal-scheduler1.294s/repair1.273s/FSM3.894s/service1.436s.
+  /tmp/gquorum-task8-unit-race.log.
+- Full owning non-race functionals PASS FSM5.253s/service16.737s/scheduler0.559s.
+  Full root/FSM/service/scheduler functionals -race -p4 -parallel8 -count=1 PASS
+  40.654s/26.498s/26.450s/2.103s.
+  /tmp/gquorum-task8-function-race.log.
+- New service functional check uses the real FSM document store with owned views:
+  absent context cannot be forged through audit text, the extra voter-count gate
+  stays strict, ordinary preparation is identical and source views remain unchanged.
+- Pure cases cover exact initial import, singleton→two→three, native wait/promote
+  steps and lost quorum, unchanged/unrelated deficient groups, nil legacy policy,
+  policy edit/release, forged/released context, worsened deficit, pinned/learner-only
+  voters, selector changes, duplicate AZs and last-voter removal. Inputs/original
+  policies are preserved.
+- make test-sim SIM_SEEDS=1-3: PASS21/21,71.495s.
+  test-reports/sim/20261025T035613.995209Z-s73988rn/report.md.
+- git diff --check PASS. Existing frozen fixtures/ordinary persisted encodings
+  remain unchanged. No Docker image change or new broad process suite at this task.
+
+Notes
+- Ordinary founding regressions caught that an empty pre-founding approved reference
+  must also supply the desired cluster identity as the placement base. Corrected
+  the adapter to preserve that existing special case; full founding suites pass.
+- A first normalization gave _meta a separate placement override, which is invalid;
+  metadata changes only its private voter count in analysis. Original policy remains
+  restored. Structural-history validation and count gates remain separate.
+- Continue Task9; no new task section, public API or user decision was added. The
+  next regular peer checkpoint remains after Task10.

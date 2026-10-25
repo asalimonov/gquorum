@@ -37,6 +37,40 @@ func voterInput() ScheduleInput {
 	}
 	return ScheduleInput{Target: doc, Groups: provenPolicyGroups(doc), Metrics: metrics.ClusterSnapshot{TargetVersion: 1, IsCollectorLeader: true, CollectorRunID: "collector", Groups: []metrics.GroupObservation{group}}, Status: map[string]topology.GroupStatus{topology.MetaGroupID: {GroupID: topology.MetaGroupID, SourceVersion: 1, Found: true, LeaderID: 1, Term: 2, ConfState: raftpb.ConfState{Voters: []uint64{1, 2, 3}, Learners: []uint64{4, 5}}, HealthKnown: true, LiveVoters: map[uint64]bool{1: true, 2: true, 3: false, 4: true, 5: true}}}}
 }
+
+func TestRetainedThreeAZPolicyCanPromoteSecondEligibleNode(t *testing.T) {
+	t.Parallel()
+	in := voterInput()
+	in.Target.Nodes = []topology.Node{in.Target.Nodes[0], in.Target.Nodes[3]}
+	in.Target.Nodes[0].Labels = map[string]string{"az": "a"}
+	in.Target.Nodes[1].Labels = map[string]string{"az": "b"}
+	group := in.Target.MetaGroup()
+	group.Replicas = []topology.Replica{group.Replicas[0], group.Replicas[3]}
+	group.VoterConfig.DistinctVoterLabel = "az"
+	observed := &in.Metrics.Groups[0]
+	observed.NativeVoters = 1
+	observed.Replicas = []metrics.ReplicaObservation{observed.Replicas[0], observed.Replicas[3]}
+	for i := range observed.Replicas {
+		observed.Replicas[i].Sample.Voters = []uint64{1}
+		observed.Replicas[i].Sample.Learners = []uint64{4}
+	}
+	status := in.Status[topology.MetaGroupID]
+	status.ConfState = raftpb.ConfState{Voters: []uint64{1}, Learners: []uint64{4}}
+	status.LiveVoters = map[uint64]bool{1: true, 4: true}
+	in.Status[topology.MetaGroupID] = status
+	in.Groups = provenPolicyGroups(in.Target)
+	policy, err := NewDefaultRepairPolicy(DefaultRepairOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision, err := policy.Schedule(t.Context(), in)
+	if err != nil || decision.Action == nil || decision.Action.VoterChange.Promote == nil || decision.Action.VoterChange.Promote.ReplicaID != 4 || decision.Action.VoterChange.Demote != nil {
+		t.Fatal("retained third-domain deficit blocked second voter", decision, err)
+	}
+	if in.Target.MetaGroup().VoterConfig.TargetVoters != 3 {
+		t.Fatal("policy input was normalized")
+	}
+}
 func TestVoterConfigSelectsOneStableLearnerAndPreservesHealthyVoters(t *testing.T) {
 	t.Parallel()
 	in := voterInput()

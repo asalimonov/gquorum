@@ -10,6 +10,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/raftengine"
+	model "github.com/asalimonov/gquorum/internal/recoverymodel"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -34,6 +35,7 @@ type LockRead = topology.LockHolder
 // PlanRead captures an operation, its topology boundaries and retained authority
 // evidence.
 type PlanRead struct {
+	Recovery  *model.ImportState        `json:"recovery,omitempty"`
 	Latest    topology.Document         `json:"latest"`
 	Operation topology.Operation        `json:"operation"`
 	Previous  []topology.Operation      `json:"previous,omitempty"`

@@ -55,10 +55,10 @@ func (s *scopedState) validateStagedDocument(doc topology.Document) error {
 	}
 	// This inventory supplies retained identities to transition validation only;
 	// it is never used as a converged topology or planning source.
-	if err := topology.ValidateTransition(retainedIdentities(s.Latest, s.Target), doc, s.Rules, retired); err != nil {
+	if err := s.validateRecoveryTransition(retainedIdentities(s.Latest, s.Target), doc, retired); err != nil {
 		return err
 	}
-	if err := validateScopedPlacement(s.Target, doc, s.Rules); err != nil {
+	if err := s.validateRecoveryPlacement(s.Target, s.Target, doc); err != nil {
 		return err
 	}
 	if err := s.validateRepairAllocations(doc); err != nil {

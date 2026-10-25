@@ -16,7 +16,7 @@
 
 **Review/clarifications:** [docs/review/feat_permanent-majority-loss-recovery.md](../review/feat_permanent-majority-loss-recovery.md)
 
-**Status:** implementation in progress; Tasks 1–7 complete; next task is recovery placement/repair; checkpoint review closed.
+**Status:** implementation in progress; Tasks 1–8 complete; next is replicated recovery import; checkpoint review closed.
 
 ## Scope and precedence
 
@@ -552,47 +552,47 @@ internal scheduling, including `mutations.go`, `operation_planning.go`,
 **Dependencies:** Tasks 1–7. **Outcome:** private deficit-aware planning with strict
 ordinary behavior; Task 9 supplies the authoritative replicated context.
 
-- [ ] Implement Context and the exact Prepare/Validate/BuildPlan/ValidatePlan/
+- [x] Implement Context and the exact Prepare/Validate/BuildPlan/ValidatePlan/
   CanRelease signatures in Appendix D. Authorize only exact unreleased policy
   scopes from replicated recovery provenance; caller observations/audit text never
   create this permission. Zero context delegates to existing strict behavior.
-- [ ] Model source policy deficits for `_meta` and load groups separately from load
+- [x] Model source policy deficits for `_meta` and load groups separately from load
   seed consumption. Allow unchanged recovered assignments and safe progressive
   repair, preserving actual identities, selectors/types, pins, reserved/learner-only
   rules, capacities and distinctness of current voters. Never remove the last voter.
-- [ ] Normalize only count targets/minima in owned planning/validation copies; call
+- [x] Normalize only count targets/minima in owned planning/validation copies; call
   existing pure topology helpers and restore original policy fields in output.
   Normalized intent must never be staged, persisted, exposed as desired policy or
   used to bypass catch-up/live-quorum/leadership-transfer checks.
-- [ ] Trace **all** refusal paths: declarative preparation, placement explanations,
+- [x] Trace **all** refusal paths: declarative preparation, placement explanations,
   checkLoadBounds, ValidateDesired, approval-plan creation, plan-shape validation,
   FSM graph validation, repair candidates and post-callback revalidation. Refactor
   internal helpers where necessary; no public skip-validation option or new
   application-supplied recovery context is allowed.
-- [ ] Keep default/custom repair-policy public signatures unchanged. Verify built-in
+- [x] Keep default/custom repair-policy public signatures unchanged. Verify built-in
   candidate selection can make progress toward the retained target with two
   eligible nodes. Internal authorization rechecks exact context after callbacks;
   do not silently rewrite the policy document supplied to applications.
-- [ ] Provide the context plumbing initially as absent/default until Task 9 installs
+- [x] Provide the context plumbing initially as absent/default until Task 9 installs
   the optional replicated state. Every ordinary operation must remain equivalent
   in that case. Finish actual recovery-context wiring in Task 9, not an isolated
   adapter used only by tests.
-- [ ] Define permanent release based on proven original-policy satisfaction or a
+- [x] Define permanent release based on proven original-policy satisfaction or a
   normally valid explicit policy edit; retirement closes the scope. Completion of
   import alone does not release it. Group policy digests and identity scope must
   still match after restart/pruning; permission never reactivates automatically.
-- [ ] Add pure selection/plan cases for singleton→two→three, strict AZ, unchanged
+- [x] Add pure selection/plan cases for singleton→two→three, strict AZ, unchanged
   deficient groups during unrelated edits, legacy/nil voter policy, policy changes,
   release, forged context, worsened deficit, pinned learners and last-voter removal.
   Functional tests cover the service's extra count/report checks with owned views.
 
 #### Verification
 
-- [ ] `make test`; focused placement, scheduling/votercheck, metaengine and
+- [x] `make test`; focused placement, scheduling/votercheck, metaengine and
   metaservice tests. Add race coverage only where callback/context plumbing changes.
-- [ ] Existing ordinary strict-placement and membership-safety suites stay green;
+- [x] Existing ordinary strict-placement and membership-safety suites stay green;
   all returned/persisted policy values remain the originals.
-- [ ] Record exact call sites routed through the adapter for Task 9/16 review.
+- [x] Record exact call sites routed through the adapter for Task 9/16 review.
 
 ### Task 9: Add the replicated import, exact consumption and private command gates
 

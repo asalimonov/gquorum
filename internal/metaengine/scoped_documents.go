@@ -21,7 +21,7 @@ func prepareScopedGraph(state *scopedState, rules topology.Rules) (*scopedIndexe
 	if err != nil {
 		return nil, err
 	}
-	if err := validateScopedDocuments(state, index, rules); err != nil {
+	if err := validateScopedDocuments(state, index); err != nil {
 		return nil, err
 	}
 	if err := validateScopedOperations(state, index); err != nil {
@@ -62,12 +62,12 @@ func invalidScopedState(message string) error {
 	return fault.New(fault.Unreadable, message, nil)
 }
 
-func validateScopedDocuments(state *scopedState, index *scopedIndexes, rules topology.Rules) error {
+func validateScopedDocuments(state *scopedState, index *scopedIndexes) error {
 	if state.Target.Version > state.Latest.Version || (state.AppliedIndex == 0) != (state.AppliedTerm == 0) {
 		return invalidScopedState("invalid document/applied boundaries")
 	}
 	for _, doc := range []*topology.Document{&state.Latest, &state.Target} {
-		if err := doc.Validate(rules); err != nil {
+		if err := state.validateRecoveryDocument(*doc); err != nil {
 			return fault.New(fault.Unreadable, "invalid materialized document", err)
 		}
 		if doc.Version == 0 && (doc.ParentVersion != 0 || doc.RebasedFrom != 0 ||
@@ -75,7 +75,7 @@ func validateScopedDocuments(state *scopedState, index *scopedIndexes, rules top
 			return invalidScopedState("unversioned document carries declarations or ancestry")
 		}
 	}
-	if err := validateScopedHistory(state, index, rules); err != nil {
+	if err := validateScopedHistory(state, index); err != nil {
 		return err
 	}
 	marker := state.FullyConverged
@@ -87,14 +87,14 @@ func validateScopedDocuments(state *scopedState, index *scopedIndexes, rules top
 	return nil
 }
 
-func validateScopedHistory(state *scopedState, index *scopedIndexes, rules topology.Rules) error {
+func validateScopedHistory(state *scopedState, index *scopedIndexes) error {
 	for _, doc := range state.History {
 		if doc.Version == 0 {
 			return invalidScopedState("history contains an unversioned document")
 		}
 	}
 	for _, doc := range index.documents {
-		if err := doc.Validate(rules); err != nil {
+		if err := state.validateRecoveryDocument(doc); err != nil {
 			return fault.New(fault.Unreadable, "invalid retained document", err)
 		}
 		if doc.ClusterID != state.Latest.ClusterID || doc.Version > state.Latest.Version ||
