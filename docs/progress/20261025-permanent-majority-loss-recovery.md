@@ -360,3 +360,88 @@ Review dispositions / design notes
   docs/brainstorms/20261024-permanent-majority-loss-recovery-target.before-implementation-review-20261025.md.
   Brainstorm sources remain ignored local design inputs as before; the tracked
   plan records the implementation correction and the checkpoint commit its diff.
+
+
+## Task 6 — Complete-survivor inspection and exact approval
+Date: 2026-10-25. Commit: included with this task's implementation commit.
+
+Implemented
+- Replaced public Inspect/Approve stubs. Inspection owns both root leases,
+  retains read-only system readers, reconstructs native metadata through C with
+  a nil-persister machine, validates the whole scoped graph and source pins,
+  and returns owned S/C/L/term/byte reports and collected blockers.
+- Metadata projection separates Target requirements and exact approved/proven
+  donors, includes pending-predecessor/retirement evidence, archives operation,
+  session, lock and unresolved-cleanup summaries, and preserves staged allocation
+  high-water marks plus approved-deleted/retired group reservations. No global
+  FullyConverged prerequisite or import of staged-only intent.
+- Bounded WAL inventory checks every entry. Physical pins must match source
+  identity, exact metadata proof and the local ledger; completed retirement
+  excludes donors. Unknown live WAL blocks and reports readable retained
+  positions. Collection markers need exact validated journal proof. Verified
+  readmission backups bind their admission-derived names and old pins.
+- Reset classifies proven ownership without load application replay: a damaged
+  owned payload can be archived, but foreign/unrecognized/contradictory identity
+  evidence still blocks. No application callback, source move, live engine,
+  network service or application Run executes during inspection/approval.
+- Generated effective request IDs, deterministic fresh lineages, unused monotonic
+  identities, overflow and survivor eligibility checks. Caller RequiredGroups
+  supplements every approved group. Future manifest/import/identity/seed header
+  bounds are checked before approval, including the engine's base64 entry wrapper
+  and normal metadata entry ceiling, rather than only raw proposal JSON.
+- Added logical bbolt digests for every ordered bucket/key/value and sequence.
+  They bind cached state, pins, ledger, hints and journal counters while ignoring
+  unused pages. Active WAL fingerprints retain validated semantic input; opaque
+  retained artifacts use streaming canonical whole-content hashes. Tree checks
+  reject symlinks, writable hard links, special files and device crossings,
+  without hashing active preallocation. Task7 completes same-device mount proof
+  before destructive execution, as explicitly recorded in its existing checkbox.
+- Approval re-inspects under the same owner, requires exact digest and loss/fencing
+  attestations, latches resources/hook presence and publishes Approved through the
+  crash-safe journal. Exact historical repeats use saved evidence, never evolving
+  B; changed audit/destination/hook declaration/explicit bounds conflict. Cancelled
+  IDs remain reserved. Concurrent exact approvals share one guard/result.
+- Accepted peer M3 correction: track WAL batch term provenance; report only a
+  final unsynced newer-term suffix wholly beyond C; refuse a later lower-term
+  HardState or any such committed entry. Preserve the complete tail/digest/bytes,
+  and pass model.CommittedPrefix to the unchanged shared replay validator. The
+  real managed-native snapshot test proves malformed uncommitted application
+  bytes are not interpreted. Ordinary startup remains strict. Task11 reuses the
+  same prefix helper. This supersedes the checkpoint's temporary refusal limit.
+
+Verified
+- make test: PASS, 2,045 tests/55 reports across all five modules, 8.895s.
+  test-reports/unit/20261025T025209.809063Z-xovhelk5/report.md.
+  An earlier run overlapping race compilation/lint took30.237s; isolated run above
+  confirms the fast-unit budget. No service/filesystem tests were moved into units.
+- Full make lint: PASS across configured modules/build tags/tooling.
+  /tmp/gquorum-task6-lint-final.log.
+- Full affected functional suites -race -p4 -parallel8 -count=1: all PASS:
+  root32.623s, disk4.260s, backend10.170s, facade8.225s, metadata FSM28.226s,
+  meta-store4.200s, authority7.409s, engine9.328s.
+  /tmp/gquorum-task6-functional-race-final.log.
+- Root recovery non-race cases PASS; all owning disk/backend functionals PASS.
+  Additional exact concurrent-approval race PASS3.934s and actual unknown-WAL
+  positions race PASS7.272s. Pure changed-package race checks all PASS, including
+  model1.448s/inspector1.345s/disk1.302s/FSM3.936s/backend1.336s.
+- make test-sim SIM_SEEDS=1-3: PASS21/21,65.578s.
+  test-reports/sim/20261025T025420.849250Z-uvw3w784/report.md.
+- Source-preservation, same-digest unused-page padding, stale logical metadata,
+  complete load/metadata-only, additive coverage, damaged reset, unsupported memory,
+  source busy/mismatch, historical B mutation, cancellation ID, bounds/header,
+  pending/proven/retired classification, staged floors and retired-ID cases pass.
+- Existing frozen artifacts remain untouched. git diff --check passes. No new
+  Docker run/image replacement at this task; process recovery coverage remains
+  scheduled after the fixture/executor/startup pieces are complete.
+
+Notes
+- Thread4 closed after round3: peer confirmed checkpoint fixes and no Task6
+  blocker; M3 accepted as above. No pending user decision or public API redesign.
+- Actual source proof is layered: ClassifyReplicas projects trusted local metadata
+  classes, then the owned WAL scan validates physical pins/payloads and collects
+  every unmatched artifact. A declaration alone never promises usable data.
+- The first added unknown-WAL fixture omitted the standard Store's required
+  NodeName/ClusterID. Fixed that fixture setup; product validation stayed strict.
+- Public Run remains temporarily non-destructive and startup refuses AwaitingStart
+  until the scheduled matching Node integration. Continue with Task7. Next regular
+  peer checkpoint remains after Task10 (five completed tasks since Task5).

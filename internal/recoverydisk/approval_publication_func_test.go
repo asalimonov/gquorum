@@ -18,7 +18,7 @@ func TestAbandonedApprovalIsNonAuthorizingAcrossOwnerRestart(t *testing.T) {
 		t.Run(shape, func(t *testing.T) {
 			t.Parallel()
 			owner := journalOwner(t)
-			paths := owner.paths()
+			paths := owner.Paths()
 			base := filepath.Join(paths.StorageDir, Namespace)
 			mustJournal(t, os.Mkdir(base, 0o700))
 			if shape != "empty namespace" {
@@ -76,7 +76,7 @@ func TestApprovalStagingDoesNotHideForeignContents(t *testing.T) {
 			case "hardlink":
 				mustJournal(t, os.Link(filepath.Join(owner.system.path, "_meta.bolt"), path))
 			}
-			if err := CheckStartup(t.Context(), owner.paths()); err == nil {
+			if err := CheckStartup(t.Context(), owner.Paths()); err == nil {
 				t.Fatal("foreign data hidden by staging-shaped name")
 			}
 			if err := owner.cleanupApprovals(t.Context()); err == nil {

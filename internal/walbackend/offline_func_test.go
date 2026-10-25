@@ -102,21 +102,42 @@ func TestOfflineSnapshotCRCRefusesWithoutBrokenRename(t *testing.T) {
 	}
 }
 
-func TestOfflineUnacknowledgedHigherTermTailRefusesWithoutChangingEvidence(t *testing.T) {
+func TestOfflineUnacknowledgedHigherTermTailIsReportedWithoutChangingCommitOrEvidence(t *testing.T) {
 	t.Parallel()
 	root := offlineWAL(t)
 	s := boundTest(t, root, false)
 	g, err := s.openGroup("group")
 	check(t, err)
 	// Model etcd's entries-before-HardState write order interrupted before the
-	// new term is durable. V1 deliberately retains the ordinary strict contract;
-	// it must never raise the saved term or claim this inconsistent tail is used.
+	// new term is durable. Disaster recovery preserves this discarded suffix in
+	// its evidence, while ordinary restart remains strict.
 	check(t, g.w.Save(raftpb.HardState{}, []raftpb.Entry{{Index: 6, Term: 2, Data: []byte("unacknowledged")}}))
 	check(t, g.w.Sync())
 	check(t, s.Close())
 	before := sourceHashes(t, root)
-	if _, err := ReadRecovery(t.Context(), root, "group", offlineLimits()); err == nil {
-		t.Fatal("entries above retained HardState term were silently accepted")
+	result, err := ReadRecovery(t.Context(), root, "group", offlineLimits())
+	check(t, err)
+	if result.Recovery.HardState.Commit != 4 || result.Recovery.HardState.Term != 1 || result.LastLog.Index != 6 || result.LastLog.Term != 2 {
+		t.Fatal("unsynced tail changed the retained commit or lost evidence", result)
+	}
+	found := false
+	for _, issue := range result.Issues {
+		if issue.Code == "unsynced_tail_term" && !issue.Blocking {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("unsynced final batch was not reported", result.Issues)
+	}
+	prefix, err := model.CommittedPrefix(result.Recovery)
+	check(t, err)
+	if len(prefix.Entries) != 2 || prefix.Entries[len(prefix.Entries)-1].Index != 4 || prefix.HardState != result.Recovery.HardState {
+		t.Fatal("replay prefix changed commit or included unsynced data", prefix)
+	}
+	again, err := ReadRecovery(t.Context(), root, "group", offlineLimits())
+	check(t, err)
+	if result.Digest != again.Digest {
+		t.Fatal("stable unsynced evidence changed digest")
 	}
 	if !reflect.DeepEqual(before, sourceHashes(t, root)) {
 		t.Fatal("inconsistent unacknowledged tail was repaired or discarded")
@@ -156,6 +177,34 @@ func TestOfflineCRCValidCommittedRewriteRefusesButExactRetryPreservesSuffix(t *t
 			}
 			if !reflect.DeepEqual(before, sourceHashes(t, root)) {
 				t.Fatal("source changed during committed retry validation")
+			}
+		})
+	}
+}
+
+func TestOfflineNewerTermCannotPrecedeLowerHardStateOrCrossCommit(t *testing.T) {
+	t.Parallel()
+	for _, shape := range []string{"later lower term", "committed higher term"} {
+		t.Run(shape, func(t *testing.T) {
+			t.Parallel()
+			root := offlineWAL(t)
+			s := boundTest(t, root, false)
+			g, err := s.openGroup("group")
+			check(t, err)
+			if shape == "committed higher term" {
+				check(t, g.w.Save(raftpb.HardState{Term: 1, Vote: 7, Commit: 6}, nil))
+			}
+			check(t, g.w.Save(raftpb.HardState{}, []raftpb.Entry{{Index: 6, Term: 2, Data: []byte("new term")}}))
+			if shape == "later lower term" {
+				check(t, g.w.Save(raftpb.HardState{Term: 1, Vote: 7, Commit: 4}, nil))
+			}
+			check(t, s.Close())
+			before := sourceHashes(t, root)
+			if _, err := ReadRecovery(t.Context(), root, "group", offlineLimits()); err == nil {
+				t.Fatal("contradictory newer-term source accepted", shape)
+			}
+			if !reflect.DeepEqual(before, sourceHashes(t, root)) {
+				t.Fatal("refusal changed source")
 			}
 		})
 	}

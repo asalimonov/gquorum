@@ -39,7 +39,7 @@ func journalOwner(t *testing.T) *Owner {
 }
 func acceptedJournal(t *testing.T, owner *Owner, id string, files bool) (*Journal, model.AcceptedPlan, model.Acceptance) {
 	t.Helper()
-	p := recoverytest.Accepted(owner.paths(), id)
+	p := recoverytest.Accepted(owner.Paths(), id)
 	p.FilesRequired = files
 	digest, err := model.DigestAccepted(p)
 	if err != nil {
@@ -65,7 +65,7 @@ func TestApprovalPublicationFaultsPreserveSourceAndGuard(t *testing.T) {
 		t.Run(point, func(t *testing.T) {
 			t.Parallel()
 			owner := journalOwner(t)
-			p := recoverytest.Accepted(owner.paths(), "fault")
+			p := recoverytest.Accepted(owner.Paths(), "fault")
 			digest, err := model.DigestAccepted(p)
 			mustJournal(t, err)
 			a := model.Acceptance{PlanDigest: digest, AcknowledgeDataLoss: true, OldDeploymentFenced: true}
@@ -91,17 +91,17 @@ func TestApprovalPublicationFaultsPreserveSourceAndGuard(t *testing.T) {
 				if j != nil {
 					t.Fatal("unpublished approval was adopted")
 				}
-				rows, err := List(t.Context(), owner.paths())
+				rows, err := List(t.Context(), owner.Paths())
 				mustJournal(t, err)
 				if len(rows) != 0 {
 					t.Fatal("unpublished approval became history")
 				}
-				mustJournal(t, CheckStartup(t.Context(), owner.paths()))
+				mustJournal(t, CheckStartup(t.Context(), owner.Paths()))
 			} else {
 				if j == nil {
 					t.Fatal("published manifest was lost")
 				}
-				if err := CheckStartup(t.Context(), owner.paths()); !errors.Is(err, fault.ErrUnavailable) {
+				if err := CheckStartup(t.Context(), owner.Paths()); !errors.Is(err, fault.ErrUnavailable) {
 					t.Fatal("approval failed to guard startup", err)
 				}
 			}
@@ -110,7 +110,7 @@ func TestApprovalPublicationFaultsPreserveSourceAndGuard(t *testing.T) {
 			if j != nil && retried.View().AcceptedAt != j.View().AcceptedAt {
 				t.Fatal("retry changed acceptance time")
 			}
-			current, err := Read(t.Context(), owner.paths(), "")
+			current, err := Read(t.Context(), owner.Paths(), "")
 			mustJournal(t, err)
 			if current.Request.RecoveryID != "fault" || current.BackupName != retried.View().BackupName {
 				t.Fatal("retry did not reconcile pointer")
@@ -133,7 +133,7 @@ func TestCancellationHistoryAndMatchingPointerClearing(t *testing.T) {
 	mustJournal(t, j.MarkFiles(t.Context(), model.FilesUndo, "running", 1))
 	mustJournal(t, j.MarkFiles(t.Context(), model.FilesUndo, "complete", 1))
 	mustJournal(t, j.CompleteCancellation(t.Context(), audit.At.Add(time.Second)))
-	mustJournal(t, CheckStartup(t.Context(), owner.paths()))
+	mustJournal(t, CheckStartup(t.Context(), owner.Paths()))
 	injected := errors.New("pointer clear interrupted")
 	owner.boundary = func(at string) error {
 		if at == "current.rename" {
@@ -145,13 +145,13 @@ func TestCancellationHistoryAndMatchingPointerClearing(t *testing.T) {
 		t.Fatal(err)
 	}
 	owner.boundary = nil
-	current, err := Read(t.Context(), owner.paths(), "")
+	current, err := Read(t.Context(), owner.Paths(), "")
 	mustJournal(t, err)
 	if current.Phase != model.Cancelled {
 		t.Fatal("stale pointer reactivated cancellation")
 	}
 	mustJournal(t, j.ClearCurrent(t.Context()))
-	if _, err := Read(t.Context(), owner.paths(), ""); !errors.Is(err, fault.ErrHistoryUnavailable) {
+	if _, err := Read(t.Context(), owner.Paths(), ""); !errors.Is(err, fault.ErrHistoryUnavailable) {
 		t.Fatal("empty pointer guessed history", err)
 	}
 	if _, err := Create(t.Context(), owner, p, a); !errors.Is(err, fault.ErrConflict) {
@@ -159,12 +159,12 @@ func TestCancellationHistoryAndMatchingPointerClearing(t *testing.T) {
 	}
 	next, _, _ := acceptedJournal(t, owner, "next", false)
 	mustJournal(t, j.ClearCurrent(t.Context()))
-	current, err = Read(t.Context(), owner.paths(), "")
+	current, err = Read(t.Context(), owner.Paths(), "")
 	mustJournal(t, err)
 	if current.Request.RecoveryID != next.View().Request.RecoveryID {
 		t.Fatal("old cancellation cleared another operation")
 	}
-	rows, err := List(t.Context(), owner.paths())
+	rows, err := List(t.Context(), owner.Paths())
 	mustJournal(t, err)
 	if len(rows) != 2 || rows[0].Request.RecoveryID != "cancel" || rows[1].Request.RecoveryID != "next" {
 		t.Fatal("historical ID/tie ordering lost", rows)
@@ -206,7 +206,7 @@ func TestPhasePublicationReopenAndConcurrentReaders(t *testing.T) {
 	failures := make(chan error, 1)
 	readers.Go(func() {
 		for ctx.Err() == nil {
-			rows, err := List(ctx, owner.paths())
+			rows, err := List(ctx, owner.Paths())
 			if err != nil && !errors.Is(err, context.Canceled) {
 				select {
 				case failures <- err:
@@ -264,7 +264,7 @@ func TestPhasePublicationReopenAndConcurrentReaders(t *testing.T) {
 func TestResetJournalHasNoReplaySeedsAndRecordsExactJoin(t *testing.T) {
 	t.Parallel()
 	owner := journalOwner(t)
-	p := recoverytest.Accepted(owner.paths(), "reset")
+	p := recoverytest.Accepted(owner.Paths(), "reset")
 	p.Request.Mode = model.ResetForJoin
 	p.Request.ClusterID = p.Identity.ClusterID
 	p.Identity.MemberID = 0

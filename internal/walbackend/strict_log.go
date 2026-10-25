@@ -18,12 +18,16 @@ import (
 )
 
 type strictLog struct {
-	point     walpb.Snapshot
-	result    model.WALEvidence
-	matched   bool
-	collect   bool
-	bytes     uint64
-	tailLimit uint64
+	point            walpb.Snapshot
+	result           model.WALEvidence
+	matched          bool
+	collect          bool
+	bytes            uint64
+	tailLimit        uint64
+	finalSegment     bool
+	batchTerm        uint64
+	batchHighFirst   uint64
+	batchHighEarlier bool
 }
 
 func readLogStrict(ctx context.Context, dir string, point walpb.Snapshot,
@@ -55,6 +59,7 @@ func scanStrictLog(ctx context.Context, dir string, limits model.ReadBounds, sta
 		}
 		decoder.offset = 0
 		decoder.final = i == len(names)-1
+		state.finalSegment = decoder.final
 		decoder.file = name.name
 		if err := scanStrictSegment(filepath.Join(dir, name.name), &decoder, state); err != nil {
 			return err
@@ -99,15 +104,7 @@ func (s *strictLog) record(record walpb.Record, maxBytes uint64) error {
 		s.result.Metadata = bytes.Clone(record.Data)
 		return nil
 	case wal.StateType:
-		var next raftpb.HardState
-		if err := next.Unmarshal(record.Data); err != nil {
-			return err
-		}
-		if err := validateStrictHardState(s.result.Recovery.HardState, next); err != nil {
-			return err
-		}
-		s.result.Recovery.HardState = next
-		return nil
+		return s.hardStateRecord(record.Data)
 	case wal.SnapshotType:
 		var marker walpb.Snapshot
 		if err := marker.Unmarshal(record.Data); err != nil {
@@ -133,9 +130,11 @@ func (s *strictLog) entry(data []byte, maxBytes uint64) error {
 	if err := entry.Unmarshal(data); err != nil {
 		return err
 	}
-	if entry.Index == 0 || entry.Term == 0 {
+	if entry.Index == 0 || entry.Term == 0 || entry.Type < raftpb.EntryNormal ||
+		entry.Type > raftpb.EntryConfChangeV2 {
 		return fault.ErrUnreadable
 	}
+	s.observeBatch(entry)
 	if !s.collect || entry.Index <= s.point.Index {
 		s.result.LastLog = model.Position{Index: entry.Index, Term: entry.Term}
 		return nil
@@ -167,6 +166,38 @@ func (s *strictLog) entry(data []byte, maxBytes uint64) error {
 	s.result.LastLog = model.Position{Index: entry.Index, Term: entry.Term}
 	s.result.Recovery.Entries = append(s.result.Recovery.Entries, entry)
 	s.result.Bytes = s.bytes
+	return nil
+}
+
+func (s *strictLog) observeBatch(entry raftpb.Entry) {
+	s.batchTerm = max(s.batchTerm, entry.Term)
+	if entry.Term <= s.result.Recovery.HardState.Term {
+		return
+	}
+	if s.batchHighFirst == 0 {
+		s.batchHighFirst = entry.Index
+	} else {
+		s.batchHighFirst = min(s.batchHighFirst, entry.Index)
+	}
+	if !s.finalSegment {
+		s.batchHighEarlier = true
+	}
+}
+
+// Only the offline recovery reader permits an entries-before-HardState crash
+// suffix. It retains the original bytes and positions; normal restart stays strict.
+func (s *strictLog) classifyUnsyncedTail() error {
+	hs := s.result.Recovery.HardState
+	if s.batchTerm <= hs.Term {
+		return nil
+	}
+	if s.batchHighFirst == 0 || s.batchHighFirst <= hs.Commit || s.batchHighEarlier {
+		return unreadable("newer-term WAL entries contradict retained committed evidence", nil)
+	}
+	s.result.Issues = append(s.result.Issues, model.Issue{Code: "unsynced_tail_term",
+		Message: fmt.Sprintf("unsynced tail indexes %d..%d: term %d above retained term %d; commit %d unchanged",
+			s.batchHighFirst, s.result.LastLog.Index, s.batchTerm, hs.Term, hs.Commit),
+		Remedy: model.RemedyInvestigate})
 	return nil
 }
 
@@ -210,4 +241,20 @@ func strictEntrySize(entry raftpb.Entry) (uint64, error) {
 		return 0, fault.ErrUnreadable
 	}
 	return uint64(size), nil
+}
+
+func (s *strictLog) hardStateRecord(data []byte) error {
+	var next raftpb.HardState
+	if err := next.Unmarshal(data); err != nil {
+		return err
+	}
+	if err := validateStrictHardState(s.result.Recovery.HardState, next); err != nil {
+		return err
+	}
+	if next.Term < s.batchTerm {
+		return unreadable("WAL hard state term is below its preceding entries", nil)
+	}
+	s.result.Recovery.HardState = next
+	s.batchTerm, s.batchHighFirst, s.batchHighEarlier = 0, 0, false
+	return nil
 }

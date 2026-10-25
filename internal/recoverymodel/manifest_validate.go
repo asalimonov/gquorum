@@ -172,7 +172,8 @@ func validateSeedSource(s SeedSource, owner topology.Identity) error {
 	}
 	if s.Snapshot.Index == 0 || s.Snapshot.Index > s.Commit.Index || s.Commit.Index > s.LastLog.Index ||
 		s.Snapshot.Term == 0 || s.Snapshot.Term > s.Commit.Term || s.Commit.Term > s.LastLog.Term ||
-		s.LastLog.Term > s.HardStateTerm {
+		s.Commit.Term > s.HardStateTerm ||
+		s.LastLog.Index == s.Commit.Index && s.LastLog.Term != s.Commit.Term {
 		return fault.ErrInvalid
 	}
 	return nil

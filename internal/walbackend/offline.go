@@ -65,7 +65,7 @@ func ReadRecovery(ctx context.Context, root, group string, limits model.ReadBoun
 	issues = append(issues, orphans...)
 	result.Identity = pin.Identity
 	result.Recovery.Snapshot = snapshot
-	result.Issues = issues
+	result.Issues = append(result.Issues, issues...)
 	if err := validateWALMetadata(result, pin); err != nil {
 		return model.WALEvidence{}, err
 	}
@@ -160,7 +160,7 @@ func validateOfflineRecovery(result *model.WALEvidence, limits model.ReadBounds)
 	}
 	previous := r.Snapshot.Metadata.Term
 	for _, entry := range r.Entries {
-		if entry.Term < previous || entry.Term > r.HardState.Term {
+		if entry.Term < previous || entry.Index <= r.HardState.Commit && entry.Term > r.HardState.Term {
 			return fault.ErrUnreadable
 		}
 		previous = entry.Term
@@ -258,6 +258,10 @@ func readOfflineTail(ctx context.Context, dir string, snapshot raftpb.Snapshot,
 	result := tail.result
 	if err == nil && !tail.matched {
 		err = wal.ErrSnapshotNotFound
+	}
+	if err == nil {
+		err = tail.classifyUnsyncedTail()
+		result = tail.result
 	}
 	if err != nil {
 		return model.WALEvidence{}, err

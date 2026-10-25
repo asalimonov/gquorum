@@ -24,7 +24,7 @@ func TestDiscoveryKeepsValidRowsAndExcludesDuplicateOrRenamedIDs(t *testing.T) {
 	next, _, _ := acceptedJournal(t, owner, "pending", false)
 	unknown := filepath.Join(owner.system.path, Namespace, "foreign")
 	mustJournal(t, os.WriteFile(unknown, []byte("unowned"), 0o600))
-	rows, err := List(t.Context(), owner.paths())
+	rows, err := List(t.Context(), owner.Paths())
 	if err == nil || len(rows) != 2 {
 		t.Fatal("unowned entry hid valid history", rows, err)
 	}
@@ -46,7 +46,7 @@ func TestDiscoveryKeepsValidRowsAndExcludesDuplicateOrRenamedIDs(t *testing.T) {
 	data, err := model.EncodeManifest(clone)
 	mustJournal(t, err)
 	mustJournal(t, os.WriteFile(filepath.Join(path, "manifest.json"), data, 0o600))
-	rows, err = List(t.Context(), owner.paths())
+	rows, err = List(t.Context(), owner.Paths())
 	if !errors.Is(err, fault.ErrConflict) || len(rows) != 1 || rows[0].Request.RecoveryID != next.View().Request.RecoveryID {
 		t.Fatal("duplicate ID adopted or unrelated row hidden", rows, err)
 	}
@@ -54,7 +54,7 @@ func TestDiscoveryKeepsValidRowsAndExcludesDuplicateOrRenamedIDs(t *testing.T) {
 	mustJournal(t, os.Remove(path))
 	original := filepath.Join(owner.system.path, Namespace, cancelled.View().BackupName)
 	mustJournal(t, os.Rename(original, original+"-renamed"))
-	rows, err = List(t.Context(), owner.paths())
+	rows, err = List(t.Context(), owner.Paths())
 	if err == nil || len(rows) != 1 || rows[0].Request.RecoveryID != "pending" {
 		t.Fatal("renamed manifest adopted", rows, err)
 	}
@@ -66,7 +66,7 @@ func TestOrphanControlRecordsAndBoundedReadRefuseWithoutAdoption(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			t.Parallel()
 			owner := journalOwner(t)
-			record := recoverytest.Manifest(owner.paths(), "orphan", owner.clock(), model.Approved)
+			record := recoverytest.Manifest(owner.Paths(), "orphan", owner.clock(), model.Approved)
 			dir := filepath.Join(owner.system.path, Namespace, record.BackupName)
 			mustJournal(t, os.MkdirAll(dir, 0o700))
 			data, err := model.EncodeManifest(record)
@@ -85,7 +85,7 @@ func TestOrphanControlRecordsAndBoundedReadRefuseWithoutAdoption(t *testing.T) {
 				mustJournal(t, os.WriteFile(foreign, data, 0o600))
 				mustJournal(t, os.Symlink(foreign, path))
 			}
-			rows, err := List(t.Context(), owner.paths())
+			rows, err := List(t.Context(), owner.Paths())
 			if err == nil || len(rows) != 0 {
 				t.Fatal("unowned/oversized control data adopted", rows, err)
 			}

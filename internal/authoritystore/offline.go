@@ -58,6 +58,16 @@ func (r *Reader) Identity() (topology.Identity, error) {
 	return id, nil
 }
 
+// Digest binds all retained logical journal records, including allocation counters.
+func (r *Reader) Digest(ctx context.Context) (string, error) {
+	r.store.mu.RLock()
+	defer r.store.mu.RUnlock()
+	if r.store.db == nil {
+		return "", fault.ErrStopped
+	}
+	return recoverydisk.DigestDB(ctx, r.store.db, r.maxBytes)
+}
+
 // Evidence returns owned source records after complete retained validation.
 func (r *Reader) Evidence(ctx context.Context) (model.AuthorityEvidence, error) {
 	id, err := r.Identity()

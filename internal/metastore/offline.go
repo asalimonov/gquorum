@@ -67,6 +67,16 @@ func (r *Reader) Identity() (Identity, error) {
 	return result, err
 }
 
+// Digest binds all retained logical metadata records without hashing unused pages.
+func (r *Reader) Digest(ctx context.Context) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.db == nil {
+		return "", fault.ErrStopped
+	}
+	return recoverydisk.DigestDB(ctx, r.db, r.maxBytes)
+}
+
 // Recovery reads one complete retained transaction; applied state remains a hint.
 //
 //revive:disable-next-line:function-result-limit Target returns recovery and ledger from one transaction.

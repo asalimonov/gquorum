@@ -37,7 +37,7 @@ func Create(ctx context.Context, owner *Owner, input recoverymodel.AcceptedPlan,
 		return nil, err
 	}
 	accepted.Resources = resources
-	if accepted.Paths != owner.paths() {
+	if accepted.Paths != owner.Paths() {
 		return nil, fault.ErrIdentityMismatch
 	}
 	for _, issue := range accepted.Issues {
@@ -45,7 +45,7 @@ func Create(ctx context.Context, owner *Owner, input recoverymodel.AcceptedPlan,
 			return nil, fault.ErrInvalid
 		}
 	}
-	records, err := List(ctx, owner.paths())
+	records, err := List(ctx, owner.Paths())
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +126,7 @@ func Open(ctx context.Context, owner *Owner, id string) (*Journal, error) {
 	if err := recoverymodel.ValidateRecoveryID(id); err != nil {
 		return nil, err
 	}
-	records, err := List(ctx, owner.paths())
+	records, err := List(ctx, owner.Paths())
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +149,7 @@ func Open(ctx context.Context, owner *Owner, id string) (*Journal, error) {
 	if found.Phase == recoverymodel.RollingBack || found.Phase == recoverymodel.RolledBack {
 		return nil, fault.ErrUnsupported
 	}
-	if found.Paths != owner.paths() {
+	if found.Paths != owner.Paths() {
 		return nil, fault.ErrIdentityMismatch
 	}
 	if err := SyncParents(owner.system.root, manifestRelative(found.BackupName)); err != nil {
@@ -168,13 +168,16 @@ func (j *Journal) View() recoverymodel.LocalManifest {
 	defer j.mu.Unlock()
 	return recoverymodel.CloneManifest(j.value)
 }
-func (owner *Owner) paths() recoverymodel.Paths {
+
+// Paths returns canonical configuration bound to the held root leases.
+func (owner *Owner) Paths() recoverymodel.Paths {
 	paths := recoverymodel.Paths{StorageDir: owner.system.path}
 	if owner.wal != nil {
 		paths.LoadWALDir = owner.wal.path
 	}
 	return paths
 }
+
 func (owner *Owner) clock() time.Time {
 	if owner.now != nil {
 		return owner.now().UTC()

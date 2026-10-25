@@ -63,6 +63,9 @@ func ValidateRecoveryID(id string) error {
 
 // ValidateRequest validates inspection input; Inspect may generate an absent ID.
 func ValidateRequest(r Request) error {
+	if err := validateRequestBudget(r); err != nil {
+		return err
+	}
 	if r.Mode != Rebuild && r.Mode != ResetForJoin {
 		return fault.New(fault.Invalid, "unknown recovery mode", nil)
 	}
@@ -81,6 +84,29 @@ func ValidateRequest(r Request) error {
 		return fault.New(fault.Invalid, "reset requires a destination and no group assertions", nil)
 	}
 	return validateRequiredGroups(r.RequiredGroups)
+}
+
+func validateRequestBudget(request Request) error {
+	remaining := ManifestMaxBytes
+	consume := func(value string) bool {
+		if uint64(len(value)) > remaining {
+			return false
+		}
+		remaining -= uint64(len(value))
+		return true
+	}
+	for _, value := range []string{request.RecoveryID, request.ClusterID, request.Actor, request.Comment} {
+		if !consume(value) {
+			return fault.New(fault.Invalid, "request cannot fit accepted manifest", nil)
+		}
+	}
+	for _, group := range request.RequiredGroups {
+		if remaining < 2 || uint64(len(group)) > remaining-2 {
+			return fault.New(fault.Invalid, "group assertions cannot fit accepted manifest", nil)
+		}
+		remaining -= uint64(len(group)) + 2
+	}
+	return nil
 }
 
 func validateRequiredGroups(groups []string) error {

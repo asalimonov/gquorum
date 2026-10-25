@@ -16,7 +16,7 @@
 
 **Review/clarifications:** [docs/review/feat_permanent-majority-loss-recovery.md](../review/feat_permanent-majority-loss-recovery.md)
 
-**Status:** implementation in progress; Tasks 1–5 complete; scheduled peer review before Task 6.
+**Status:** implementation in progress; Tasks 1–6 complete; checkpoint review closed; next task is backup/cancellation.
 
 ## Scope and precedence
 
@@ -435,43 +435,48 @@ projection, `recovery_inspect.go`, `recovery_approve.go`; model helpers/tests.
 **Dependencies:** Tasks 1–5. **Outcome:** usable public Inspect/Approve, still no
 application work or archive move from approval.
 
-- [ ] Reconstruct metadata through retained commit and validate its whole graph,
-  pins, authority and ledger. Compare configured source node and optional cluster
+- [x] Reconstruct metadata through retained commit and validate its whole graph,
+  pins, authority and ledger. Bind every logical bbolt key/value/sequence without
+  unused pages. Apply accepted checkpoint review M3: classify only a final unsynced
+  newer-term batch beyond C, retain it in the fingerprint/backup, refuse a later
+  lower-term HardState or any such committed entry, and supply CommittedPrefix
+  through C to the unchanged shared replay validator. Ordinary restart stays strict.
+  Compare configured source node and optional cluster
   to the retained pin; never infer identity from stale bootstrap declarations.
-- [ ] Separate required groups (approved Target plus additive caller assertions)
+- [x] Separate required groups (approved Target plus additive caller assertions)
   from eligible exact donor replicas (approved/proven historical inventory).
   Include a legitimate pending-replacement predecessor; exclude staged-only,
   foreign, ambiguous or retired sources. No global FullyConverged prerequisite.
-- [ ] Classify **every** unmatched live WAL as retired, approved-deleted, a proven
+- [x] Classify **every** unmatched live WAL as retired, approved-deleted, a proven
   predecessor or a blocker. Collect missing/corrupt/unsupported groups instead of
   silently archiving them. Preserve old operations, cleanup debt and audit summaries.
-- [ ] Implement reset inspection without a replay promise: require valid ownership
+- [x] Implement reset inspection without a replay promise: require valid ownership
   and named destination; corrupt load payloads may be archived only when exact
   owner/inventory evidence is established. Contradictory owner schemas still refuse.
-- [ ] Generate the effective ID for empty requests and derive a fresh lineage from
+- [x] Generate the effective ID for empty requests and derive a fresh lineage from
   source identity/fingerprint/ID. Allocate destination identities above retained
   floors, preserve tombstones, check overflow and donor voter eligibility. Public
   reports include `_meta` and each required load group's S/C/L/terms and loss risk.
-- [ ] Build the canonical accepted digest over all target §5.3 evidence, declared
+- [x] Build the canonical accepted digest over all target §5.3 evidence, declared
   hook presence and request/audit. Exclude its own value, acceptance time and
   irrelevant padding. Validate future manifest/import size against normal metadata
   bounds; never approve a source that will need silent evidence omission.
-- [ ] Implement Approve(Request,Acceptance) with same-owner reinspection and exact
+- [x] Implement Approve(Request,Acceptance) with same-owner reinspection and exact
   comparison, attestation checks, immutable resource latching and journal creation
   in Approved. Repeat existing exact approvals from saved evidence, not evolving B.
   Cancelled IDs cannot be reapproved. No callback/rename/Node startup occurs here.
-- [ ] Add REC-02/03/05/06/11/12 units/functional tests: stale evidence, additive
+- [x] Add REC-02/03/05/06/11/12 units/functional tests: stale evidence, additive
   RequiredGroups, missing coverage, pending replacement, staged-only allocations,
   known retired IDs, generated-ID retries, changed audit/destination, hook mismatch,
   empty-ID Approve refusal and historical repeat after B replaces A.
 
 #### Verification
 
-- [ ] `make test`; inspection/approval functional tests and root lease/approval race
+- [x] `make test`; inspection/approval functional tests and root lease/approval race
   tests. Exercise metadata-only and unsupported memory/injected-store cases.
-- [ ] Prove blockers cause no Files invocation or source move and Approved blocks
+- [x] Prove blockers cause no Files invocation or source move and Approved blocks
   normal startup. Verify all diagnostic positions and potential-loss acceptance.
-- [ ] Record results; retain temporary startup refusal for AwaitingStart until Task 10.
+- [x] Record results; retain temporary startup refusal for AwaitingStart until Task 10.
 
 ### Task 7: Implement backup, cancellation and in-root execution
 
@@ -509,7 +514,11 @@ finishes the matching Node restore/publication paths.
   handle lost cancellation responses without reactivating the operation.
 - [ ] After Backup, revalidate A and persist Archiving before the first library move.
   Rename authority, metadata, verified readmission backups and owned WAL entries
-  into their respective in-root backups. Never move a root/mountpoint, copy across
+  into their respective in-root backups. Extend preparation checks from device
+  boundaries to descriptor-bound mount identity, including nested bind mounts on
+  the same device, before any first move; a device number alone is insufficient.
+  Add native/Linux process coverage or an explicit unsupported refusal when that
+  proof is unavailable. Never move a root/mountpoint, copy across
   filesystems, overwrite a destination or collect old forensic data.
 - [ ] Reconcile each uncertain move against its immutable evidence and both paths.
   Source absent alone is not success. Both/neither/conflicting paths refuse and
@@ -736,7 +745,8 @@ real durable proof distinct from publication, replay and consumption.
   exact ordinary creation grant. Build a complete private staged B directory with
   fresh pin/metadata, source application snapshot at S, B singleton ConfState and
   the actual B creation grant installed at that retained snapshot position.
-- [ ] Copy application entries `(S,C]` byte-for-byte with original indexes, terms,
+- [ ] Use the shared model.CommittedPrefix view; never seed a classified unsynced
+  higher-term suffix beyond C. Copy application entries `(S,C]` byte-for-byte with original indexes, terms,
   RequestID/correlation. Validate source administrative/configuration semantics,
   then replace only those entries with empty normal entries at the same positions.
   Exclude `(C,L]`, retain source HardState.Term, set Vote=0/Commit=C and hint=S.
@@ -1232,6 +1242,21 @@ prevent completion; an accepted out-of-scope item belongs in the table above.
 Do not pre-mark the absence of implementation as a passed delta audit.
 
 ## NOT PLANNED CHANGES
+
+- Task 6 accepts checkpoint review M3 as a recovery availability correction:
+  the strict WAL reader tracks batch term provenance, classifies an unsynced
+  final newer-term suffix only beyond C, preserves its evidence/digest, and uses
+  model.CommittedPrefix for offline replay. Ordinary startup's validator remains
+  strict. Includes native managed-source integration and negative corruption
+  cases; the local target supersedes the checkpoint's temporary conservative
+  boundary. No public API change or source truncation.
+- Task 6 adds logical read-only bbolt digests, in addition to replay validation,
+  to bind local metadata/authority records and counters omitted by the earlier
+  evidence projection while excluding unused physical pages. The read-only
+  Reader.Digest methods and Owner.Paths/ValidateApprovalShape/opaque-artifact
+  helpers are private composition capabilities. Device/link validation is in
+  place; Task 7 explicitly completes same-device mount-boundary proof before
+  destructive execution. Public Run remains guarded through Task 12.
 
 - Tasks 1–5 peer-review checkpoint (no additional task section):
   `internal/recoverydisk/{approval_publication,discovery,journal,owner}.go` now
