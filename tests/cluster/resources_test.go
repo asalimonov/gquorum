@@ -171,12 +171,14 @@ func fifteenGroupResources(t *testing.T, size int) {
 	if _, err := c.Approve(ctx, "node2", staged.Document.Version); err != nil {
 		t.Fatal(err)
 	}
+	cleanupSamples := make(map[string]processResources)
 	if err := Poll(ctx, func() (bool, error) {
 		for _, node := range c.Nodes() {
 			observed, err := c.resources(ctx, node.Spec.Name)
 			if err != nil {
 				return false, err
 			}
+			cleanupSamples[node.Spec.Name] = observed
 			base := baseline[node.Spec.Name]
 			if observed.Identity != base.Identity {
 				return false, fmt.Errorf("cleanup sample changed process")
@@ -187,7 +189,7 @@ func fifteenGroupResources(t *testing.T, size int) {
 		}
 		return true, nil
 	}); err != nil {
-		t.Fatal("teardown retained runtime resources", err)
+		t.Fatal("teardown retained runtime resources", err, "last", cleanupSamples, "baseline", baseline)
 	}
 	for _, node := range c.Nodes() {
 		doc, err := c.Document(ctx, node.Spec.Name, "active")

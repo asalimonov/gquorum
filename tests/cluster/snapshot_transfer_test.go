@@ -25,11 +25,15 @@ type snapshotProcessControl struct {
 	FailRestoreCount uint64            `json:"fail_restore_count"`
 }
 type snapshotProcessObservation struct {
-	Wire      struct{ Frames, ChunkPeak, WindowPeak uint64 } `json:"wire"`
-	Identity  topology.Identity                              `json:"identity"`
-	ReplicaID uint64                                         `json:"replica_id"`
-	Active    uint64                                         `json:"active"`
-	Hits      map[string]uint64                              `json:"hits"`
+	Wire struct {
+		Frames     uint64 `json:"frames"`
+		ChunkPeak  uint64 `json:"chunk_peak"`
+		WindowPeak uint64 `json:"window_peak"`
+	} `json:"wire"`
+	Identity  topology.Identity `json:"identity"`
+	ReplicaID uint64            `json:"replica_id"`
+	Active    uint64            `json:"active"`
+	Hits      map[string]uint64 `json:"hits"`
 	Offer     struct {
 		Index, Term  uint64
 		EncodedBytes uint64 `json:"encoded_bytes"`
@@ -59,6 +63,7 @@ func snapshotProcessSetup(t *testing.T, spec Spec, policies ...*topology.VoterCo
 	group := gquorum.GroupSpec{ID: "work", Placement: &topology.PlacementRule{MinReplicas: len(spec.Nodes), MaxReplicas: len(spec.Nodes)}}
 	if len(policies) > 0 {
 		group.VoterConfig = policies[0]
+		group.Placement.MinReplicas = policies[0].TargetVoters
 	}
 	created, err := c.CreateGroup(ctx, "node1", group)
 	if err != nil {
@@ -297,7 +302,7 @@ func TestSnapshotTransfer_RepairProtectionFourNodes(t *testing.T) {
 	// Preserve default 30-second lag/stall failure windows. Only standby wait and
 	// the entry threshold are reduced so small generated state exercises them.
 	policy.StandbyWindow = 3 * time.Second
-	policy.FailureLagEntries = 1
+	policy.FailureLagEntries, policy.StandbyLagEntries = 1, 0
 	spec.SnapshotTransfer = snapshot.Options{TotalTimeout: 45 * time.Second, ProgressTimeout: 2 * time.Second}
 	spec.Metrics = gquorum.MetricsOptions{SampleInterval: 100 * time.Millisecond, CollectInterval: 200 * time.Millisecond, CollectTimeout: 150 * time.Millisecond}
 	ctx, c, doc := snapshotProcessSetup(t, spec, &policy)

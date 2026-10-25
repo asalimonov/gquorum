@@ -124,9 +124,11 @@ func qualifyLargeSnapshot(t *testing.T, size uint64) {
 	if err = requireStatus(response, err, 200); err != nil {
 		t.Fatal(err)
 	}
+	creationDone := time.Now()
 	if err = c.Put(ctx, "node1", "work", "tail", "large-tail", "committed"); err != nil {
 		t.Fatal(err)
 	}
+	networkStarted := time.Now()
 	if _, err = c.SetReadFaults(ctx, "node3", "work", target.ReplicaID, "DELETE", ReadFaults{Identity: target.Identity}); err != nil {
 		t.Fatal(err)
 	}
@@ -136,12 +138,14 @@ func qualifyLargeSnapshot(t *testing.T, size uint64) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	trafficStarted := time.Now()
 	if err = c.Put(ctx, "node1", "traffic", "live", "large-isolation", "progress"); err != nil {
 		t.Fatal(err)
 	}
 	if err = c.WaitValue(ctx, "node3", "traffic", "live", "progress"); err != nil {
 		t.Fatal(err)
 	}
+	trafficElapsed := time.Since(trafficStarted)
 	snapshotProcessFault(ctx, t, c, "node3", "work", target.ReplicaID, snapshotProcessControl{Identity: target.Identity, DropChunkAckAt: 1 << 20})
 	var peakHeap, peakRSS, peakDisk, peakReceive, peakSend uint64
 	var transferDone, restoreDone time.Time
@@ -186,12 +190,33 @@ func qualifyLargeSnapshot(t *testing.T, size uint64) {
 	if observed.Offer.EncodedBytes > size || size-observed.Offer.EncodedBytes >= 4 {
 		t.Fatal("qualification did not reach the requested encoded ceiling within base64 granularity", observed.Offer.EncodedBytes, size)
 	}
+	if observed.Wire.Frames == 0 || observed.Wire.ChunkPeak == 0 || observed.Wire.ChunkPeak > uint64(resolved.ChunkBytes) || observed.Wire.WindowPeak == 0 || observed.Wire.WindowPeak > uint64(resolved.WindowChunks) {
+		t.Fatal("missing or excessive observed wire bounds", observed.Wire)
+	}
 	if err = c.Put(ctx, "node3", "work", "after", "large-after", "accepted"); err != nil {
 		t.Fatal(err)
 	}
 	if err = c.WaitValue(ctx, "node3", "work", "after", "accepted"); err != nil {
 		t.Fatal(err)
 	}
+	if err = Poll(ctx, func() (bool, error) {
+		for _, endpoint := range []struct {
+			node    string
+			replica uint64
+		}{{"node1", source.ReplicaID}, {"node3", target.ReplicaID}} {
+			view, err := snapshotProcessView(ctx, c, endpoint.node, "work", endpoint.replica)
+			if err != nil {
+				return false, err
+			}
+			if view.Transfers.Incoming != 0 || view.Transfers.Outgoing != 0 || view.Transfers.ReceiveBytes != 0 || view.Transfers.SendBytes != 0 {
+				return false, nil
+			}
+		}
+		return true, nil
+	}); err != nil {
+		t.Fatal("completed transfers retained reservations", err)
+	}
+	restartStarted := time.Now()
 	if err = c.Node("node3").Kill(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -201,9 +226,9 @@ func qualifyLargeSnapshot(t *testing.T, size uint64) {
 	if err = c.WaitValue(ctx, "node3", "work", "after", "accepted"); err != nil {
 		t.Fatal("large snapshot restart/tail replay failed", err)
 	}
-	t.Logf("requested=%d encoded=%d digest=%s peak_heap=%d peak_rss=%d store_disk_high_water=%d receive_reserved_peak=%d send_reserved_peak=%d baseline_heap=%d baseline_rss=%d transfer=%s restore_wait=%s total=%s chunk=%d window=%d wire_frames=%d observed_chunk_peak=%d observed_window_peak=%d",
+	t.Logf("requested=%d encoded=%d digest=%s peak_heap=%d peak_rss=%d store_disk_high_water=%d receive_reserved_peak=%d send_reserved_peak=%d baseline_heap=%d baseline_rss=%d creation=%s transfer_with_injected_hold=%s restore_wait=%s restart=%s ordinary_traffic=%s total=%s chunk=%d window=%d wire_frames=%d observed_chunk_peak=%d observed_window_peak=%d",
 		size, observed.Offer.EncodedBytes, observed.Offer.SHA256, peakHeap, peakRSS, peakDisk, peakReceive, peakSend, before.HeapBytes, before.ResidentBytes,
-		transferDone.Sub(started), restoreDone.Sub(transferDone), time.Since(started), spec.SnapshotTransfer.ChunkBytes, spec.SnapshotTransfer.WindowChunks, observed.Wire.Frames, observed.Wire.ChunkPeak, observed.Wire.WindowPeak)
+		creationDone.Sub(started), transferDone.Sub(networkStarted), restoreDone.Sub(transferDone), time.Since(restartStarted), trafficElapsed, time.Since(started), spec.SnapshotTransfer.ChunkBytes, spec.SnapshotTransfer.WindowChunks, observed.Wire.Frames, observed.Wire.ChunkPeak, observed.Wire.WindowPeak)
 }
 
 func largeSnapshotResources(ctx context.Context, c *Cluster, node string) (processResources, error) {

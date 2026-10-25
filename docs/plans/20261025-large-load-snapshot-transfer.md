@@ -5,15 +5,15 @@
 **Project source:** `../..` relative to this plan (repository root `.`)
 **Branch:** `feat/large-snapshots-transfer`
 **Source checkout inspected:** `646e9c1` (implementation baseline `14a54c2`, transport-document correction `2ba951a`, current lint/testing updates in `646e9c1`)
-**Target architecture SHA256:** `da404e371c22924cc4ba26e5264d0bbfbf1aa69617ca61d2ec31ffd85ace6359` (current target including implementation refinements through Task 18)
+**Target architecture SHA256:** `51153100bde98a940b612a5f3b4f0e080341381d973ceb5413603c23c049926f` (final target including validated implementation refinements through Task 20)
 **Target architecture:** [20261025-large-load-snapshot-transfer-target.md](../brainstorms/20261025-large-load-snapshot-transfer-target.md)
 **Full brainstorm log:** [20261025-large-load-snapshot-transfer.md](../brainstorms/20261025-large-load-snapshot-transfer.md)
 **Review history:** [feature review thread](../review/feat_large-snapshots-transfer.md)
-**Status:** implementation in progress under the user's subsequent explicit goal. Task completion and verification are recorded below and in the execution log; the earlier plan-review provider limit remains historical.
+**Status:** all 20 tasks complete. Final checks and generated qualification through 2 GB passed; see the execution log and measured cluster-test resource record. Further colleague review remains canceled by user.
 
 ## Execution contract and current-state reconciliation
 
-The reviewed target is the design authority. This plan sequences its interfaces, algorithms, schema and lifecycle; it does not introduce a different architecture. All implementation checkboxes start unchecked. This planning session only prepares/reviews/fixes this document, then stops for the user's instructions.
+The reviewed target is the design authority. This plan sequences its interfaces, algorithms, schema and lifecycle; it does not introduce a different architecture. All implementation checkboxes start unchecked. The original planning session prepared this document; the subsequent explicit implementation goal authorized execution, now completed.
 
 Preserve the user's constraints:
 
@@ -461,17 +461,17 @@ Review baseline: `251a594`; findings in review Thread 3. The original six-commit
 **References:** target **all sections**, especially §6 schemas, §8 flows, §9 exact inventory, §10 acceptance, §11 exclusions and §13 final gates.
 **Verification:** run the final-checkpoint commands below, including full unit race/full lint only here, followed by process coverage using one per-run image tag. Fix findings and rerun affected checks. Explicit large qualification is a separate opt-in command with its own recorded result. The last checkbox is intentionally the actual-wiring audit.
 
-- [ ] Run all final non-Docker checks and the gRPC `-race`/stats-handler gate; record commands, versions, report directories and outcomes. No skipped failing case is an acceptance proof.
-- [ ] Build one uniquely tagged fixture image and run the focused snapshot process suite and the final full ordinary cluster suite. Run explicit large qualification when the host meets its resource envelope; otherwise retain a clearly blocking/unqualified qualification record instead of marking it passed.
-- [ ] Audit configuration/public contracts: every Options field/default/validation, Service/Transport method, protocol/status/error type, construction rule and minimal root composition matches target §§3–4 and Appendix A.
-- [ ] Audit volatile/persistent schema: exact owner/key/manifest/generation maps, counters, two-digest bound, Ack eviction/TTL, live-handoff retention and history/page bounds match §§3.2/6; no persistent schema, WAL/application encoding or frozen baseline changed.
-- [ ] Audit engine: strict preflight, one Ready consumer, cached off-loop decode, selected-only authority checks, ownership callbacks, epoch cancellation, publication generations, mailbox/cooldown and preserved _meta/standalone behavior match §§7.1–7.5/12.
-- [ ] Audit coordinator/managed lifecycle: immutable pins, whole digest, chunk/resume/preemption, finalization, Host handover, Node stop/Close retries and observation-only fallback match §§6–8 and Appendix C.
-- [ ] Audit gRPC: exact wire fields/method registration, frame math, independent same-endpoint connection pools, pre-Open/authenticated quotas, Recv/Send pumps, deadlines, progress callback and teardown gate match §§5/7.6/9.4.
-- [ ] Audit metrics/repair: exact observations, local episode timestamps, timeout latch, same-peer receiver-run churn, Match reset, finite grace and shared policy/revalidation evidence match §7.7/13 and Appendix D; no weakening of quorum, promotion, availability or identity checks.
-- [ ] Audit examples/fixtures/test modules: all custom transports and mocks migrated, production path actually tested, exact fault controls preserved, no private imports, all SNAP-01–15 mapped, only named four-node case, large fixtures generated/tagged/cleaned and never checked in.
-- [ ] Audit documentation, scope and final validation evidence. Review every NOT IMPLEMENTED GAP; fix against target and rerun affected checks. A difficult unresolved item is marked `[_]` with evidence, not silently dropped or treated as done. No new deferral is inferred from effort or elapsed time.
-- [ ] **Verify all methods/components are WIRED for actual use:** NewNode constructs the pure facade and validates capability; Start creates the owned coordinator; adapter Bind/Register reaches the same load listener; native Ready selects PrepareSnapshot; actual transport Acks invoke the source-bound ReportProgress; received verified data reaches the real owned native ingress; persistence/Restore/skip complete the retained permit; native reports and repair evidence consume the results; Stop/readmission joins every owner before release. Trace these through real entry points/process assertions, not only test-created objects or unused declarations.
+- [x] Run all final non-Docker checks and the gRPC `-race`/stats-handler gate; record commands, versions, report directories and outcomes. No skipped failing case is an acceptance proof.
+- [x] Build one uniquely tagged fixture image and run the focused snapshot process suite and the final full ordinary cluster suite. Run explicit large qualification when the host meets its resource envelope; otherwise retain a clearly blocking/unqualified qualification record instead of marking it passed.
+- [x] Audit configuration/public contracts: every Options field/default/validation, Service/Transport method, protocol/status/error type, construction rule and minimal root composition matches target §§3–4 and Appendix A.
+- [x] Audit volatile/persistent schema: exact owner/key/manifest/generation maps, counters, two-digest bound, Ack eviction/TTL, live-handoff retention and history/page bounds match §§3.2/6; no persistent schema, WAL/application encoding or frozen baseline changed.
+- [x] Audit engine: strict preflight, one Ready consumer, cached off-loop decode, selected-only authority checks, ownership callbacks, epoch cancellation, publication generations, mailbox/cooldown and preserved _meta/standalone behavior match §§7.1–7.5/12.
+- [x] Audit coordinator/managed lifecycle: immutable pins, whole digest, chunk/resume/preemption, finalization, Host handover, Node stop/Close retries and observation-only fallback match §§6–8 and Appendix C.
+- [x] Audit gRPC: exact wire fields/method registration, frame math, independent same-endpoint connection pools, pre-Open/authenticated quotas, Recv/Send pumps, deadlines, progress callback and teardown gate match §§5/7.6/9.4.
+- [x] Audit metrics/repair: exact observations, local episode timestamps, timeout latch, same-peer receiver-run churn, Match reset, finite grace and shared policy/revalidation evidence match §7.7/13 and Appendix D; no weakening of quorum, promotion, availability or identity checks.
+- [x] Audit examples/fixtures/test modules: all custom transports and mocks migrated, production path actually tested, exact fault controls preserved, no private imports, all SNAP-01–15 mapped, only named four-node case, large fixtures generated/tagged/cleaned and never checked in.
+- [x] Audit documentation, scope and final validation evidence. Review every NOT IMPLEMENTED GAP; fix against target and rerun affected checks. A difficult unresolved item is marked `[_]` with evidence, not silently dropped or treated as done. No new deferral is inferred from effort or elapsed time.
+- [x] **Verify all methods/components are WIRED for actual use:** NewNode constructs the pure facade and validates capability; Start creates the owned coordinator; adapter Bind/Register reaches the same load listener; native Ready selects PrepareSnapshot; actual transport Acks invoke the source-bound ReportProgress; received verified data reaches the real owned native ingress; persistence/Restore/skip complete the retained permit; native reports and repair evidence consume the results; Stop/readmission joins every owner before release. Trace these through real entry points/process assertions, not only test-created objects or unused declarations.
 
 ## GQ-02 traceability
 
@@ -593,6 +593,22 @@ These exclusions were agreed in the brainstorm/target and are carried forward wi
 The single code TODO is reproduced with the staging interface in Appendix C. Do not scatter additional TODO/WARN/NotImplemented markers for these exclusions: the user explicitly requested one deferred disk-backend note and the reviewed target specifies ordinary supported/refusal behavior.
 
 ## NOT PLANNED CHANGES
+
+Task 20 final process/resource evidence required these in-scope refinements beyond the initial inventory: optional Node local-group observation and graceful bounded ordinary-stream retirement in `transport/loadgrpc/stream.go`; managed owner-context full read/Restore in `internal/raftengine/group.go`; focused ownership regressions in the corresponding functional tests; and process-only generation timeout/measurement/repair-fixture corrections in `tests/cluster/{http,resources_test,snapshot_transfer_test,snapshot_large_test}.go`. Target/current documentation was updated explicitly. The Task 20 commit contains the exact diff; representative critical deltas are:
+
+```diff
+-ctx, cancel := context.WithTimeout(parent, 5*time.Second)
++// Node-owned snapshot-policy engines use parent startup ownership;
++// legacy constructors retain the previous five-second bound.
++ctx, cancel := context.WithCancel(parent)
+
+-stream.cancel() // idle retirement
++stream.stream.CloseSend() // drain already written native frames through EOF
++// A joined retirement owner cancels a stalled drain at CallTimeout.
+```
+
+These do not change the public configuration surface, ordinary wire versions, storage encodings, repair windows or selected memory-only scope. See the Task 20 checkpoint findings in the execution log for failing and corrected run evidence.
+
 
 Task 2 required one unrelated test-only correction to keep the required five-module unit checkpoint green. `events/events_test.go` sampled subscriber loss before journal progress and could combine stale ingress-loss evidence with a later append. Read journal progress first, establishing that the first dispatch has consumed ingress loss before inspecting subscriber overflow. Production bus code and persisted events are unchanged. Failure evidence: test-reports/unit/20261025T164607.543982Z-v_apavlc/library-events.log. The corrected focused test passed 100 repetitions; all 2,194 module unit tests then passed.
 
@@ -726,11 +742,11 @@ Task 17 concrete SNAP verification matrix (process execution is Task 20):
 
 ## NOT IMPLEMENTED GAPS
 
-No implementation exists yet; ordinary unchecked tasks are not defects in the plan. During execution, record discovered deviations here with task/target references and evidence. Use `[_]` for an unresolved gap that could not be corrected; such a mark is not a passed task or an approved deferral.
+All 20 tasks are implemented and verified; no unresolved implementation gap remains. Record discovered deviations here with task/target references and evidence. Use `[_]` for an unresolved gap that could not be corrected; such a mark is not a passed task or an approved deferral.
 
 | Gap | Target/task | Evidence | Resolution / status |
 |---|---|---|---|
-| Private progress-port shorthand | Target §9.2/9.4; Tasks 6/12 | NoteSnapshotProgress is required but omitted from the Ports sketch | Explicit private callback in Appendix C; external review still pending |
+| Private progress-port shorthand | Target §9.2/9.4; Tasks 6/12 | NoteSnapshotProgress is required but omitted from the Ports sketch | Implemented exact-owner nonblocking port in Task 12; further review canceled by user |
 | External plan review unavailable | Planning/review only | Selected colleague returned a provider session-limit message, no findings | Historical review gap; subsequent explicit implementation goal authorizes execution. Do not describe the plan as colleague-reviewed |
 
 ## Progress log

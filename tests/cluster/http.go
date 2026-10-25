@@ -55,7 +55,15 @@ func (c *Cluster) Request(ctx context.Context, name, method, path string, body a
 	if expected > 0 {
 		request.Header.Set("If-Match", strconv.FormatUint(expected, 10))
 	}
-	result, err := c.http.Do(request)
+	client := c.http
+	// Generation owns real full-buffer snapshot creation/persistence. Its HTTP
+	// wait must not inherit the ordinary six-second management client bound.
+	if strings.HasPrefix(path, "/internal/test/snapshot/") && strings.HasSuffix(path, "/generate") {
+		generationClient := *c.http
+		generationClient.Timeout = 30 * time.Minute
+		client = &generationClient
+	}
+	result, err := client.Do(request)
 	if err != nil {
 		return response, err
 	}

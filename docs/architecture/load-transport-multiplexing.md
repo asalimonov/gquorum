@@ -160,8 +160,7 @@ ordering between different groups and no cross-group transaction implied by
 sharing a connection.
 
 Managed `MsgSnap` is rejected by ordinary send/receive paths. Ordinary traffic never downgrades to unary calls: a recipient without `StreamRaft`
-fails the send. Streams unused for two minutes are retired by a background
-janitor; the next send opens a fresh stream.
+fails the send. Streams unused for two minutes are retired by a background janitor. With Node local group lookup, idle routes for stopped/replaced replicas begin retirement within two one-second ticks; live routes retain their normal reuse policy. Retirement half-closes the send side so already written native frames drain before EOF; CallTimeout bounds a stalled drain and Close joins it. This observation only closes a network stream and never authorizes or stops a replica. The next send revalidates normally; the next send opens a fresh stream.
 
 ## 4. Receiving and selecting the replica
 

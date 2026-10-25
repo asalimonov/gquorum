@@ -76,7 +76,7 @@ link is not limited to one batch per round trip. The recipient steps frames in
 order and answers only refused batches; the sender reports each refusal as an
 unreachable delivery through `Node.ReportLoadDelivery`. A broken stream reports
 its last delivery unreachable so Raft resends promptly, and the next batch opens
-a new stream. Streams idle for two minutes are closed. Missing stream methods
+a new stream. Streams idle for two minutes are closed. When the bound Node exposes its local group lookup, idle routes for stopped/replaced replicas begin retirement within two janitor ticks. Retirement drains already written frames through CloseSend/EOF, with CallTimeout bounding stalled drains and adapter Close joining them. Missing stream methods
 fail; there is no unary downgrade or JSON Raft fallback.
 
 `TransferSnapshot` is a version-1 bidirectional RPC registered on the same load server. Its bounded Open/Data/Finish/Abort frames use independent cached bulk connections to the same resolved address. Ordinary Raft workers, streams, connection flow control and short deadlines remain separate; no third port is opened. CPU, memory, NIC bandwidth and the server are still shared.
@@ -101,3 +101,5 @@ This is an unreleased breaking wire revision: rebuild and upgrade all participan
 using this adapter together. Ordinary Raft frames require version 2; snapshot Open requires version 1. Unsupported versions refuse explicitly. Retained volumes,
 WALs, snapshots, metadata and application encodings need no migration. The process fixture uses this production adapter for Raft and snapshots. See the [validation record](../../docs/testing/binary-raft-transport.md)
 for measured codec costs, real-example checks and profiling limitations.
+
+Generated qualification passed through 2,000,000,000 encoded bytes, with a sampled maximum of about 13.6 GB RSS across sender/receiver observations. This is not their sum or a memory bound. See [the measured fixture and phase/resource limits](../../tests/cluster/README.md#measured-snapshot-resources). Larger configured sizes remain unmeasured.

@@ -158,7 +158,15 @@ func newGroup(parent context.Context, opts Options, mode engineMode) (*Group, er
 		return nil, err
 	}
 	options := ownGroupOptions(opts.defaults())
-	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if options.SnapshotPolicy.TotalTimeout > 0 {
+		// Managed full-buffer recovery belongs to the startup owner. Reading and
+		// restoring a large durable snapshot must not loop on a five-second retry.
+		ctx, cancel = context.WithCancel(parent)
+	} else {
+		ctx, cancel = context.WithTimeout(parent, 5*time.Second)
+	}
 	defer cancel()
 	state, err := loadGroupRecovery(ctx, options)
 	if err != nil {

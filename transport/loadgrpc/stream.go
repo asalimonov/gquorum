@@ -32,6 +32,7 @@ type raftStream struct {
 	stream  loadpb.Load_StreamRaftClient
 	cancel  context.CancelFunc
 	release func()
+	done    chan struct{}
 	mu      sync.Mutex // serializes Send; a gRPC stream allows one sender
 	// lastUsed (Unix nanoseconds) selects idle streams.
 	lastUsed atomic.Int64
@@ -134,7 +135,8 @@ func (t *Transport) openRaftStream(key streamKey, address string) (*raftStream, 
 		conn.Release()
 		return nil, transportError(err)
 	}
-	s := &raftStream{key: key, address: address, stream: stream, cancel: cancel, release: conn.Release}
+	s := &raftStream{key: key, address: address, stream: stream,
+		cancel: cancel, release: conn.Release, done: make(chan struct{})}
 	s.lastUsed.Store(time.Now().UnixNano())
 	return s, nil
 }
@@ -173,6 +175,7 @@ func (t *Transport) publishRaftStream(s *raftStream) (*raftStream, error) {
 // readRefusals owns the stream's receive side and its connection reference.
 func (t *Transport) readRefusals(s *raftStream) {
 	defer t.wg.Done()
+	defer close(s.done)
 	defer s.release()
 	defer s.cancel()
 	for {
@@ -208,29 +211,93 @@ func (t *Transport) reportUnreachable(s *raftStream, delivery uint64) {
 		load.DeliveryReport{From: s.key.from, To: s.key.to, DeliveryID: delivery, Kind: load.DeliveryUnreachable})
 }
 
-// retireIdleStreams closes streams of routes that stopped sending, such as a
-// replaced replica's, and ends with the transport.
+// localGroupView is an optional, local observation available on Node. It is
+// used only to retire idle network resources, never to authorize delivery.
+// Ingress doubles/custom owners without this view retain normal idle eviction.
+type localGroupView interface {
+	LoadGroup(string) (*load.Group, bool)
+}
+
+// retireIdleStreams closes stale routes and ends with the transport. Managed
+// owners also release idle streams after replica stop instead of keeping a
+// deleted group's goroutines alive for the full connection reuse interval.
 func (t *Transport) retireIdleStreams() {
 	defer t.wg.Done()
-	tick := time.NewTicker(t.streamIdle / 2)
+	t.mu.Lock()
+	node := t.node
+	t.mu.Unlock()
+	period := t.streamIdle / 2
+	if _, ok := node.(localGroupView); ok {
+		period = min(period, time.Second)
+	}
+	tick := time.NewTicker(period)
 	defer tick.Stop()
 	for {
 		select {
 		case <-t.ctx.Done():
 			return
-		case <-tick.C:
+		case now := <-tick.C:
+			t.retireStreams(now, node)
 		}
-		cutoffNs := time.Now().Add(-t.streamIdle).UnixNano()
-		t.mu.Lock()
-		for key, s := range t.streams {
-			if s.lastUsed.Load() < cutoffNs {
-				delete(t.streams, key)
-				s.retired.Store(true)
-				s.cancel()
+	}
+}
+
+func (t *Transport) retireStreams(now time.Time, node Ingress) {
+	// Copy only idle route metadata. Local observation never runs under mu.
+	cutoffNs := now.Add(-min(time.Second, t.streamIdle)).UnixNano()
+	t.mu.Lock()
+	candidates := make(map[*raftStream]int64)
+	for _, stream := range t.streams {
+		used := stream.lastUsed.Load()
+		if used <= cutoffNs {
+			candidates[stream] = used
+		}
+	}
+	t.mu.Unlock()
+	for stream, used := range candidates {
+		expired := now.Sub(time.Unix(0, used)) >= t.streamIdle
+		if !expired {
+			view, ok := node.(localGroupView)
+			if !ok {
+				continue
 			}
+			group, found := view.LoadGroup(stream.key.from.Replica.GroupID)
+			if found && group != nil && group.ReplicaID() == stream.key.from.Replica.ReplicaID && group.Running() {
+				continue
+			}
+		}
+		t.mu.Lock()
+		// A concurrent sender may have refreshed or replaced this route.
+		if t.streams[stream.key] == stream && stream.lastUsed.Load() == used && stream.mu.TryLock() {
+			delete(t.streams, stream.key)
+			stream.retired.Store(true)
+			stream.mu.Unlock()
+			// Drain frames already written before ending the RPC. Canceling here
+			// could discard a final native removal message after its owner stopped.
+			t.wg.Add(1)
+			go t.finishStreamRetirement(stream)
 		}
 		t.mu.Unlock()
 	}
+}
+
+// The reader owns the connection reference until EOF. A stalled peer is still
+// bounded and joined, with adapter Close canceling both owners.
+func (t *Transport) finishStreamRetirement(stream *raftStream) {
+	defer t.wg.Done()
+	timer := time.NewTimer(t.options.CallTimeout)
+	defer timer.Stop()
+	if err := stream.stream.CloseSend(); err != nil {
+		stream.cancel()
+	}
+	select {
+	case <-stream.done:
+		return
+	case <-timer.C:
+	case <-t.ctx.Done():
+	}
+	stream.cancel()
+	<-stream.done
 }
 
 // StreamRaft steps each frame in arrival order and replies only to refusals.

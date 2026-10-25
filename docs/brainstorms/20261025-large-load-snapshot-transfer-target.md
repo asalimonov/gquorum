@@ -1,7 +1,7 @@
 # Large load-snapshot transfer — target architecture
 
 Date: 2026-10-25. Source baseline: implementation `14a54c2`; current architecture correction `2ba951a`.
-Status: ready for implementation planning after three colleague review passes; final review suggestions incorporated. Not implemented or performance-qualified.
+Status: implemented and release-verified on 2026-10-26; explicitly generated qualification passed through 2,000,000,000 encoded bytes. Larger configured sizes remain unmeasured. Design review history is retained below; execution and measured scope are recorded in the [progress log](../progress/20261025-large-load-snapshot-transfer.md).
 Session record: [brainstorm](20261025-large-load-snapshot-transfer.md).
 
 ## 1. Request, scope and decision record
@@ -32,11 +32,11 @@ The test environment can qualify at most **2 GB = 2,000,000,000 complete encoded
 | Listeners/ports | Existing _meta and load listeners only; bulk connection uses the same load endpoint | User requested |
 | Package boundaries | Contracts in load/snapshot, mechanism in internal/loadsnapshot; no new root files | User requested; concrete layout proposed |
 
-The requirements questions are resolved. The selected colleague's final verdict is ready for implementation planning, with no open architecture decisions or blocking findings. Remaining release/qualification checks are listed explicitly. User acceptance of the completed target is distinct from that technical review; no implementation has begun.
+The requirements questions are resolved. The selected colleague's final verdict is ready for implementation planning, with no open architecture decisions or blocking findings. Remaining release/qualification checks are listed explicitly. Those reviews preceded implementation; the implementation plan and progress log now record execution and qualification independently of that historical design verdict.
 
 ## 2. Architectural boundaries
 
-Current-state reference: the colleague-updated [load transport architecture](../architecture/load-transport-multiplexing.md) now describes binary RaftFrame v2/native message encoding, JSON administrative envelopes, unary snapshot-containing batches, no ordinary unary fallback and ingress-only delivery success. This target preserves that distinction: the existing engine snapshot data still contains its JSON/base64 application envelope inside a binary native message. The new chunk RPC changes how that encoded payload is transported, not its persisted encoding. Treat the updated working-tree architecture document, together with current source, as the baseline rather than its stale committed wording.
+Design-baseline reference: the colleague-updated [load transport architecture](../architecture/load-transport-multiplexing.md) described binary RaftFrame v2/native message encoding, JSON administrative envelopes, unary snapshot-containing batches, no ordinary unary fallback and ingress-only delivery success. The current architecture document now describes the implemented chunk path. This target preserves the original encoding distinction: the existing engine snapshot data still contains its JSON/base64 application envelope inside a binary native message. The new chunk RPC changes how that encoded payload is transported, not its persisted encoding. Treat the updated working-tree architecture document, together with current source, as the baseline rather than its stale committed wording.
 
 ```mermaid
 flowchart LR
@@ -878,7 +878,7 @@ Dependency rules: `load/snapshot` may import `load` for Peer; **load must not im
 | `internal/observe/evidence_round.go`, `evidence_snapshot.go` | UPDATED | Bound catch-up suppression of failure predicates and expose reason; raw lag and quorum guards unchanged |
 | `internal/votercheck/check_test.go` and owning evidence tests | UPDATED | Verify both repair policy and mandatory checks share revised evidence, with no promotion/health bypass |
 
-UPDATED writer signature: `func (g *Group) retry(write func(context.Context) error, fullSnapshot bool) error`. Callers select fullSnapshot for local writeSnapshot and Ready with nonempty Snapshot; regular writes remain false. The persistence format and commit-order functions do not change.
+UPDATED writer signature: `func (g *Group) retry(write func(context.Context) error, fullSnapshot bool) error`. Callers select fullSnapshot for local writeSnapshot and Ready with nonempty Snapshot; regular writes remain false. The persistence format and commit-order functions do not change. Final retained-restart qualification also found the existing five-second NewContext cutoff caused repeated full-buffer replay failure under load. Managed engines with SnapshotPolicy use the owning startup context for constructor read/Restore; legacy _meta and standalone constructors keep their prior bound. Startup waiter cancellation still cannot cancel accepted owner work.
 
 Snapshot publication generation increments at successful local snapshot publication, received owned snapshot publication and startup restore; it is never persisted and starts fresh with the engine RunID. Digest cache identity includes this generation. Keep `_meta` snapshot send behavior intact. Standalone owners retain their existing transport contract; managed Node chunk RPC is not presented as a standalone service. If standalone callers want equivalent networking they must provide their own owner/adapter integration; no new standalone chunk server is included. Shared engine regressions must cover these untouched modes.
 
@@ -924,12 +924,14 @@ Before first Recv use only the separate small pre-Open quota and its at-most-thr
 
 UPDATED `client.go`/`raft_wire.go`: ordinary SendRaft never routes managed snapshots through giant unary frames; reject a snapshot submitted to that ordinary path. Existing ordinary v2 framing remains. UPDATED Close joins snapshot RPCs before closing bulk connections. Server and listener ownership remain with the application.
 
+Implementation refinement from final process validation: ordinary production streams otherwise retain deleted replicas' goroutines for the normal two-minute idle reuse period. The adapter may use the bound Node's existing local LoadGroup lookup (optional on protocol doubles) to begin retiring an idle source route whose exact replica has stopped or changed, within two one-second janitor ticks. Half-close and drain frames already written before EOF; bound stalled drain by CallTimeout, and join its reader/retirement owner at adapter Close. Abrupt cancellation here can lose final native removal messages after the sender has stopped. This closes only network resources, never authorizes effects or changes consensus. Live replica routes keep normal idle reuse; plain Ingress implementations without that view retain ordinary TTL eviction. Local lookup runs outside adapter locks, and replacement/fresh-send checks guard retirement.
+
 CREATED `internal/loadsnapshot/digest.go`:
 
 ```go
 type SourceSnapshotID struct { RunID string; Generation, Index, Term, Bytes uint64 }
 func (c *Coordinator) snapshotDigest(context.Context, SourceSnapshotID, []byte) ([32]byte, error)
-func (c *Coordinator) dropRunDigests(OwnerKey)
+func (c *Coordinator) clearDigestsLocked(string) // exact StopOwner joins before clearing its run cache
 ```
 
 CREATED `internal/raftengine/snapshot_reports.go`:
@@ -999,7 +1001,7 @@ make test-cluster-run CLUSTER_PARALLEL=1 CLUSTER_TIMEOUT=2h \
   CLUSTER_ARGS='-tags=clustertest,snapshotlarge -run ^TestLargeSnapshot_ -v'
 ```
 
-This command is for the future implementation, not something run during this brainstorm. Ordinary `make test-cluster`, unit, functional, performance and broad default `go test -tags=clustertest` must not include the large cases. The outer two-hour timeout is a test harness allowance, not a production default.
+The command was not executed during the brainstorm. Its implementation-time results are recorded separately in the progress log. Ordinary `make test-cluster`, unit, functional, performance and broad default `go test -tags=clustertest` must not include the large cases. The outer two-hour timeout is a test harness allowance, not a production default.
 
 Run independent size cases sequentially at 256 MB, 1 GB and up to 2 GB encoded bytes. The tests explicitly set MaxSnapshotBytes and derived budgets to their case sizes. Because the existing JSON/base64 envelope adds metadata and quantizes payload size, choose the largest valid generated encoded fixture not exceeding the requested ceiling, record its actual size, and keep the shortfall bounded by the encoding granularity. Never treat raw application length as encoded length.
 

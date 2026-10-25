@@ -384,4 +384,18 @@ make test-cluster-run CLUSTER_IMAGE="$SNAPSHOT_TEST_IMAGE" \
 
 The test refuses insufficient resources rather than shrinking a case. It requires Docker memory of at least twelve times the requested encoded length and available storage of at least eight times that length. Each case generates reproducible actual bytes, uses production chunks/Node-owned WAL/Restore, verifies tail/new writes/restart and a lost chunk Ack, and checks ordinary traffic on another group. Reports retain compact sizes/hashes and sampled heap/RSS/store high-water, reservations, wire chunk/window peaks and phase timing. These observations are not RSS/throughput guarantees; serialized full-buffer callbacks and resident state remain material costs.
 
-Qualification status: not yet measured in this execution. Compile-only/tag-selection checks are not qualification. Retain an explicit unqualified result when the host cannot run a case; record actual report paths and limits when it does. Release gates also include five-module units/race/functional/race, full lint, proto-check, the gRPC teardown race gate, focused snapshot faults and the full ordinary cluster suite.
+Qualification passed on 2026-10-26 with Go 1.26.5, etcd Raft 3.6.0 and gRPC 1.79.3 on Linux/arm64 Docker 29.6.1 (39,878,758,400 bytes VM memory). All three exact encoded ceilings passed, with reconnect, ordinary traffic, persistence/Restore, tail/new writes, retained restart and zero transfer reservations after completion. Evidence: `test-reports/cluster/20261025T222708.955256Z-4acyzfy_/report.md`. Sizes above 2 GB remain unmeasured. Five-module units/race/functional/race, full lint, proto-check, the gRPC teardown race gate and all 122 ordinary cluster cases also passed. See [measured resource details](#measured-snapshot-resources) for the scope and sampling limits.
+
+### Measured snapshot resources
+
+Final image: `gquorum-test:snapshot-20261026-final3`, SHA256 `a48e0c77d8fb56480230e5915f1dc8555207c0af7874091b6246a6077f41300e`. The explicitly tagged ladder took 92.558 seconds including acquisition and cleanup. No other cluster suite ran concurrently.
+
+| Encoded bytes (requested = actual) | Sampled peak heap | Sampled peak RSS | Load-store disk high-water | Creation | Transfer with injected hold/reconnect | Verify/persist/Restore wait | Retained restart | Ordinary traffic |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 256,000,000 | 1,224,085,968 | 1,911,697,408 | 260,460,001 | 0.996s | 0.428s | 1.680s | 6.784s | 2.13ms |
+| 1,000,000,000 | 4,838,602,520 | 6,902,104,064 | 1,004,460,003 | 3.293s | 1.453s | 5.939s | 6.502s | 3.50ms |
+| 2,000,000,000 | 9,669,169,368 | 13,639,368,704 | 2,004,460,004 | 6.218s | 2.409s | 14.704s | 11.649s | 2.34ms |
+
+Heap/RSS/disk are sampled maxima across the sender and receiver, not their sum or a guaranteed complete allocation peak. Sampling starts after creation and the held first chunk, so it does not capture every creation allocation. Creation is measured separately; transfer includes the deliberate first-chunk hold/ordinary-traffic check and reconnect. Restore wait starts at sampled full byte verification and includes decoding and persistence, not only the application callback. Phase totals exclude acquisition/cleanup. The baseline was an empty fixture (roughly 35–38 MB RSS), not an equally large resident application.
+
+Both directional reservation peaks equaled each requested encoded size; all counts/bytes returned to zero before restart. Each maximum chunk was 1,048,576 bytes. Observed client outstanding-window peaks were 6/5/6 against configuration eight; stats ordering can under-sample that peak, while transport tests separately assert the actual window bound. Data-frame observations were 250/958/1,912. Results demonstrate this fixture/host, with substantial full-buffer amplification; they establish no general throughput, latency or RSS guarantee.
