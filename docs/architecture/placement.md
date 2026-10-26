@@ -1,7 +1,7 @@
 # Labels and placement
 
 Status: **implemented**. This document describes the current feature contract.
-The broader library context is in [library.md](library.md). The original design
+The broader library context is in [runtime overview](runtime.md). The original design
 was recorded as `20261013-labels-node-selector-target.md` and
 `20261013-labels-node-selector.md`; those historical brainstorms are not included
 in this checkout. Current persistence and execution contracts are described here

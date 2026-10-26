@@ -27,9 +27,11 @@ const (
 	commandTimeout = 3 * time.Second
 )
 
-// retry bounds each proposal or read attempt inside one command deadline.
+// retry bounds read attempts; proposal retries use the full command deadline.
 var retry = fault.RetryOptions{AttemptTimeout: time.Second, InitialBackoff: 20 * time.Millisecond,
 	MaxBackoff: 200 * time.Millisecond}
+
+var proposalRetry = load.ProposalRetryOptions{InitialBackoff: 20 * time.Millisecond, MaxBackoff: 200 * time.Millisecond}
 
 const (
 	setCommandArgs = 3
@@ -178,9 +180,7 @@ type writeRequest struct {
 	result  any
 }
 
-// write proposes a command through any replica and retries transient failures
-// with the same bytes. SET and DEL are idempotent, so a retry after an
-// uncertain outcome is harmless.
+// write submits through the library's safe proposal retry helper.
 func write(ctx context.Context, group *load.Group, w resp.Writer, request writeRequest) bool {
 	cmd, out := request.command, request.result
 	if cmd.Op == "set" && (cmd.Key == "" || len(cmd.Key) > cache.MaxKeyBytes || len(cmd.Value) > cache.MaxValueBytes) {
@@ -191,17 +191,17 @@ func write(ctx context.Context, group *load.Group, w resp.Writer, request writeR
 	id := make([]byte, requestIDBytes)
 	_, _ = rand.Read(id)
 	result, err := load.ProposeRetry(ctx, group.Propose, load.Proposal{RequestID: cmd.Op + "/" + hex.EncodeToString(
-		id), Data: data}, retry)
+		id), Data: data}, proposalRetry)
 	if err != nil {
-		replyError(w, err)
+		w.Error("ERR " + err.Error())
 		return false
 	}
-	if result.Code != "ok" {
-		w.Error("ERR rejected: " + result.Code)
+	if result.Result.Code != "ok" {
+		w.Error("ERR rejected: " + result.Result.Code)
 		return false
 	}
 	if out != nil {
-		_ = json.Unmarshal(result.Data, out)
+		_ = json.Unmarshal(result.Result.Data, out)
 	}
 	return true
 }

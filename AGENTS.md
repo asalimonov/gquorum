@@ -29,7 +29,7 @@ Start with [README.md](README.md), then the relevant contracts:
 
 - [Raft overview](docs/architecture/raft.md): consensus scope, elections,
   heartbeat protocols, proposal ordering, persistence and group boundaries.
-- [Library architecture](docs/architecture/library.md): public handles, topology
+- [Project map](docs/architecture/project-map.md): public handles, topology
   workflow, integration interfaces and package boundaries.
 - [Node ownership and recovery](docs/architecture/runtime.md): durable evidence,
   startup, shutdown, retirement, readmission and callback ownership.

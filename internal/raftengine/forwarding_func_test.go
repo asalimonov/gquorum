@@ -66,7 +66,7 @@ func TestLearnerForwardsAndWaitsForLocalAppliedResult(t *testing.T) {
 	done := make(chan response, 1)
 	go func() {
 		r, e := g.Propose(testContext(t), Proposal{RequestID: "stable-request", Data: []byte("value")})
-		done <- response{r, e}
+		done <- response{result: r, err: e}
 	}()
 	forward := capturedProposal(t, c)
 	if forward.From != 2 || forward.To != 1 || forward.Type != raftpb.MsgProp {

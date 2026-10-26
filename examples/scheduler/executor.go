@@ -146,7 +146,12 @@ func (e *executor) drain(ctx context.Context, group *load.Group) error {
 			return nil
 		}
 		if err := e.runTask(ctx, group, *next); err != nil {
-			return err
+			if ctx.Err() != nil || !fault.Retryable(err) {
+				return err
+			}
+			// Re-read committed state; Apply revalidates every task CAS.
+			// An error code alone would not justify replaying an arbitrary write.
+			e.logger.Info("executor_waiting", "error", err)
 		}
 	}
 }
@@ -195,12 +200,14 @@ func (e *executor) runTask(ctx context.Context, group *load.Group, t task.Task) 
 	return nil
 }
 
-// submit retries the exact command; start and finish are idempotent per
-// attempt.
+// submit retries proven refusals; task state owns the start/finish guards.
 func submit(ctx context.Context, group *load.Group, kind string, body any) (load.Result, error) {
+	call, cancel := context.WithTimeout(ctx, proposalTimeout)
+	defer cancel()
 	p, err := task.Encode(kind, body)
 	if err != nil {
 		return load.Result{}, err
 	}
-	return load.ProposeRetry(ctx, group.Propose, p, retry)
+	submission, err := load.ProposeRetry(call, group.Propose, p, proposalRetry)
+	return submission.Result, err
 }

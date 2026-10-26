@@ -53,9 +53,8 @@ func (g *Group) run() {
 	}
 }
 func (g *Group) handleProposal(req *request) {
-	refuse := func(err error) { delete(g.props, req.correlation); answer(req, Result{}, err) }
 	if err := g.proposalAdmission(req); err != nil {
-		refuse(err)
+		g.refuseProposal(req, err)
 		return
 	}
 	requestID := req.proposal.RequestID
@@ -63,29 +62,33 @@ func (g *Group) handleProposal(req *request) {
 		requestID = req.correlation
 	}
 	data, err := raftstate.EncodeEntry(raftstate.Entry{
-		Schema:      raftstate.Schema,
-		Kind:        raftstate.Application,
-		Correlation: req.correlation,
-		RequestID:   requestID,
-		Data:        req.proposal.Data,
+		Schema: raftstate.Schema, Kind: raftstate.Application,
+		Correlation: req.correlation, RequestID: requestID, Data: req.proposal.Data,
 	})
 	if err == nil && uint64(len(data)) > g.opts.MaxUncommittedBytes {
 		err = fault.ErrOverloaded
-	}
-	if err == nil {
-		err = g.rn.Propose(data)
+		if req.reportSubmission {
+			err = fault.New(fault.Invalid, "encoded proposal exceeds engine capacity", nil)
+		}
 	}
 	if err != nil {
-		if g.opts.GroupID != topology.MetaGroupID && !req.retried && errors.Is(err, raft.ErrProposalDropped) {
+		g.refuseProposal(req, err)
+		return
+	}
+	err = g.rn.Propose(data)
+	if errors.Is(err, raft.ErrProposalDropped) {
+		if g.opts.GroupID != topology.MetaGroupID && !req.retried {
 			req.retried = true
 			req.retryAt = time.Now().Add(g.opts.Timing.TickInterval)
 			g.props[req.correlation] = req
 			return
 		}
-		if errors.Is(err, raft.ErrProposalDropped) {
-			err = fault.New(fault.Unavailable, "Raft did not accept proposal", err)
-		}
-		refuse(err)
+		g.refuseProposal(req, fault.New(fault.Unavailable, "Raft did not accept proposal", err))
+		return
+	}
+	if err != nil {
+		delete(g.props, req.correlation)
+		answer(req, Result{}, err)
 		return
 	}
 	g.props[req.correlation] = req

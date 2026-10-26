@@ -101,7 +101,7 @@ func TestOwnedFixtureRetainedRestartAndConcurrentIngress(t *testing.T) {
 			t.Fatal("no recovered handle")
 		}
 		apiEventually(t, func() bool { return g.IsLeader() })
-		if result, err := g.Propose(ctx, load.Proposal{RequestID: key, Data: command}); err != nil || result.Code != "ok" {
+		if result, err := g.Propose(ctx, load.Proposal{RequestID: key, Data: command}); err != nil || result.Result.Code != "ok" {
 			t.Fatal(result, err)
 		}
 		if err := g.Snapshot(ctx); err != nil {

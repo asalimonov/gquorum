@@ -13,6 +13,7 @@ import (
 )
 
 var retry = fault.RetryOptions{}
+var proposalRetry = load.ProposalRetryOptions{}
 
 type reconcileTrigger uint8
 
@@ -104,17 +105,19 @@ func (s *replicaService) reconcile(ctx context.Context, leader *load.Leadership,
 // propose submits a scheduler command in this leadership term. A refusal such
 // as stale or capacity_full is a normal outcome: the next tick re-reads.
 func (s *replicaService) propose(ctx context.Context, leader *load.Leadership, kind string, body any) error {
+	call, cancel := context.WithTimeout(ctx, proposalTimeout)
+	defer cancel()
 	p, err := task.Encode(kind, body)
 	if err != nil {
 		return err
 	}
-	out, err := load.ProposeRetry(ctx, leader.Propose, p, retry)
+	out, err := load.ProposeRetry(call, leader.Propose, p, proposalRetry)
 	if err != nil {
 		return err
 	}
-	s.logger.Info("schedule_committed", "operation", kind, "term", leader.Term(), "outcome", out.Code)
-	if out.Code == "invalid_command" {
-		return &task.Error{Code: out.Code}
+	s.logger.Info("schedule_committed", "operation", kind, "term", leader.Term(), "outcome", out.Result.Code)
+	if out.Result.Code == "invalid_command" {
+		return &task.Error{Code: out.Result.Code}
 	}
 	return nil
 }

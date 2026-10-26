@@ -63,10 +63,11 @@ func TestProposalPressureBoundsCancellationAndRecovery(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			var wg sync.WaitGroup
 			errs := make([]error, limit)
+			receipts := make([]load.Submission, limit)
 			// Join callers before cleanup stops the engine/store.
 			t.Cleanup(func() { cancel(); wg.Wait() })
 			for i := range limit {
-				wg.Go(func() { _, errs[i] = g.Propose(ctx, pressureCommand(fmt.Sprint(i))) })
+				wg.Go(func() { receipts[i], errs[i] = g.Propose(ctx, pressureCommand(fmt.Sprint(i))) })
 			}
 			pressureEventually(t, func() bool {
 				p := g.ProposalStats()
@@ -74,8 +75,8 @@ func TestProposalPressureBoundsCancellationAndRecovery(t *testing.T) {
 			})
 			started := time.Now()
 			for range 4000 {
-				_, err := g.Propose(t.Context(), pressureCommand("shed"))
-				if !errors.Is(err, fault.ErrOverloaded) {
+				receipt, err := g.Propose(t.Context(), pressureCommand("shed"))
+				if !errors.Is(err, fault.ErrOverloaded) || receipt.Disposition != load.SubmissionNotSubmitted {
 					t.Fatalf("pressure result: %v", err)
 				}
 			}
@@ -87,8 +88,8 @@ func TestProposalPressureBoundsCancellationAndRecovery(t *testing.T) {
 			}
 			cancel()
 			wg.Wait()
-			for _, err := range errs {
-				if !errors.Is(err, context.Canceled) {
+			for i, err := range errs {
+				if !errors.Is(err, context.Canceled) || receipts[i].Disposition != load.SubmissionIndeterminate {
 					t.Fatalf("canceled waiter result: %v", err)
 				}
 			}

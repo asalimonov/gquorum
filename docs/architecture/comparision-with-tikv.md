@@ -244,7 +244,7 @@ specified workloads, storage/transport implementations, placement, deployment
 versions and measured failure/recovery evidence.
 
 Related gquorum documentation: [Raft boundaries](raft.md),
-[library architecture](library.md), [ownership and recovery](runtime.md), and
+[library architecture](runtime.md), [ownership and recovery](runtime.md), and
 [target adaptation details](../brainstorms/20261015-failure-isolation-and-operational-api-target.md#9-tikvpd-adaptations-and-differences).
 
 <!-- Source references: upstream URLs identify the exact locally inspected revision. -->

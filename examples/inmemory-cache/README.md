@@ -140,7 +140,8 @@ redis-cli -p 16383 DBSIZE                    # node3 caught up from the leader
 The restarted node replays its local snapshot and log, then catches up from the
 leader. Its health endpoint returns 503 until its replica can confirm reads,
 then the loader returns it to the rotation. Killing two nodes removes
-quorum and commands return `TRYAGAIN`; restarting them with their retained volumes
+quorum; reads may return `TRYAGAIN`, while write failures return an error.
+Restarting with retained volumes
 restores quorum. This tests process failure, not host/VM failure or erased disks.
 
 ## Supported commands
@@ -152,9 +153,10 @@ restores quorum. This tests process failure, not host/VM failure or erased disks
 | `DEL key...`, `EXISTS key...`, `DBSIZE` | As in Redis. |
 | `PING`, `ECHO`, `INFO`, `COMMAND`, `QUIT` | `INFO` shows the replica role, leader, term and applied index. |
 
-Writes are retried with the same bytes after transient failures. `SET` and `DEL`
-are idempotent, so a retry after an uncertain outcome is harmless; non-idempotent
-commands such as `INCR` are deliberately not offered.
+The server retries only writes proven not submitted, then returns ordinary
+write errors. A failed write or lost connection may still have applied; durable
+idempotency across independent Redis calls is application work. Commands such as
+INCR are deliberately not offered.
 
 ## Read the code
 

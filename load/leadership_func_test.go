@@ -140,7 +140,7 @@ func TestLeadershipDirectCancellationAndJoinAcrossTerms(t *testing.T) {
 	}
 	result, err := first.Propose(ctx, load.Proposal{RequestID: "scoped", Data: []byte("value")})
 	require(t, err)
-	if result.Code != "ok" {
+	if result.Result.Code != "ok" {
 		t.Fatal(result)
 	}
 	if err := g.RunWhileLeader(ctx, func(context.Context, *load.Leadership) error { return nil }); !errors.Is(err, fault.ErrInvalid) {
@@ -154,7 +154,7 @@ func TestLeadershipDirectCancellationAndJoinAcrossTerms(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("leadership cancellation depended on watch consumption")
 	}
-	if _, err := first.Propose(ctx, load.Proposal{Data: []byte("stale")}); err == nil {
+	if _, err := first.Propose(ctx, load.Proposal{RequestID: "stale-scope", Data: []byte("stale")}); err == nil {
 		t.Fatal("lost epoch accepted a proposal")
 	}
 	nextObservation(ctx, t, watch, func(o load.Observation) bool { return o.IsLeader && o.Term > first.Term() })
@@ -180,7 +180,7 @@ func TestLeadershipDirectCancellationAndJoinAcrossTerms(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("supervisor did not join")
 	}
-	if _, err := second.Propose(ctx, load.Proposal{}); err == nil {
+	if _, err := second.Propose(ctx, load.Proposal{RequestID: "expired"}); err == nil {
 		t.Fatal("retained callback handle still usable")
 	}
 }
@@ -221,7 +221,7 @@ func TestLeadershipCallbackCompletionAndErrors(t *testing.T) {
 	if calls.Load() != 1 {
 		t.Fatal("nil return restarted same term")
 	}
-	if _, err := l.Propose(ctx, load.Proposal{}); err == nil {
+	if _, err := l.Propose(ctx, load.Proposal{RequestID: "expired"}); err == nil {
 		t.Fatal("completed callback retained authority")
 	}
 }

@@ -59,6 +59,10 @@ make clean-scheduler-example  # delete this example's containers and volumes
 Volumes created by the earlier version of this example (manifest member IDs
 1–3) are not compatible; run `make clean-scheduler-example` once.
 
+Writes use receipt-returning proposal calls and retry only proven transient
+refusals. Task guards and RequestIDs belong to the application. Read retries use
+their own policy.
+
 ## Read the code
 
 Start with `runtime.newApplication` in [runtime.go](runtime.go). It opens the

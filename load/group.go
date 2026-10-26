@@ -28,16 +28,23 @@ func (g *Group) ReplicaID() uint64 { return g.Identity().ReplicaID }
 
 func (g *Group) core() *raftengine.Group { return (*loadhandle.Handle)(g).Core() }
 
-// Propose cancellation ends the caller's wait; it cannot roll back a command
-// already committed by Raft. Preserve the request's application identity on
-// retry.
-func (g *Group) Propose(ctx context.Context, p Proposal) (Result, error) {
+// Propose returns an observation of one attempt at this exact replica. A nil
+// error means successful committed application with the complete business result.
+// Cancellation ends the wait and may leave the outcome indeterminate. RequestID
+// is required and unchanged; applications own deduplication across calls.
+// Use Submission.CanResubmit to decide write repetition, not fault.Retryable alone.
+// TODO(not planned): cluster-scoped remote routing belongs to a separate client.
+func (g *Group) Propose(ctx context.Context, p Proposal) (Submission, error) {
 	core := g.core()
-	if core == nil {
-		return Result{}, fault.ErrInvalid
+	s := newSubmission(core, g.Identity(), p)
+	if err := validateRequestID(p.RequestID); err != nil {
+		return refusedSubmission(s), err
 	}
-	result, err := core.Propose(ctx, raftengine.Proposal(p))
-	return Result(result), err
+	if core == nil {
+		return refusedSubmission(s), fault.ErrInvalid
+	}
+	out, err := core.Submit(ctx, raftengine.Proposal(p), s.AttemptID, 0)
+	return submissionFromEngine(out), err
 }
 
 // ReadBarrier confirms a quorum after invocation and waits for local

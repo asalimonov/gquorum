@@ -8,9 +8,10 @@ import (
 )
 
 const (
-	suspectAfter  = 5 * time.Second  // owner inactive this long loses its work
-	runningGrace  = 10 * time.Second // allowance beyond a task's own duration
-	schedulerTick = time.Second
+	suspectAfter    = 5 * time.Second  // owner inactive this long loses its work
+	runningGrace    = 10 * time.Second // allowance beyond a task's own duration
+	schedulerTick   = time.Second
+	proposalTimeout = 3 * time.Second // re-read task state promptly after uncertainty
 )
 
 // schedulerSession holds one leadership term's local timers. They are hints:

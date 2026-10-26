@@ -162,7 +162,7 @@ func TestLearnerReadWaitsForApplyAndNewReadNeedsNewRound(t *testing.T) {
 	t.Parallel()
 	g, c := readFixture(t, &queryMachine{}, ReadOptions{}, true)
 	first := make(chan response, 1)
-	go func() { r, err := g.Read(testContext(t), nil); first <- response{r, err} }()
+	go func() { r, err := g.Read(testContext(t), nil); first <- response{result: r, err: err} }()
 	round := capturedRead(t, c)
 	if round.From != 2 || round.To != 1 || len(round.Entries[0].Data) != readContextSize {
 		t.Fatal(round)

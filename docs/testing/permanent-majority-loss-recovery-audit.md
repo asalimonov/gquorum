@@ -10,7 +10,7 @@ separately; they are not execution authority.
 
 Source paths below describe the audited pre-layout-refactor revision e09ec75.
 The subsequently approved package move is documented in the current
-[package map](../architecture/project-map.md#recovery-source-navigation-2026-10-25-layout).
+[package map](../architecture/project-map.md#responsibility-zones).
 Public signatures and durable contracts remain; root implementation/test filenames
 were consolidated or moved into internal/recovery and tests/recovery.
 
