@@ -9,7 +9,7 @@
 **Target SHA-256:** `cd9d1d8c4b47d4532eb92a5a43297449837a1afa01f2f2772fa57fe690f56370`
 **Full brainstorm log:** [20261026-group-deletion-unreachable-owner.md](../brainstorms/20261026-group-deletion-unreachable-owner.md)
 **Issue:** <https://github.com/asalimonov/gquorum/issues/5>
-**Status:** implementation in progress; task checkboxes record verified completion.
+**Status:** complete; all seven tasks and required verification gates passed.
 
 ## User execution instruction — 2026-10-26
 
@@ -672,69 +672,69 @@ complete persistence contract, §9 every method/component, §10 every flow/failu
 §11 gates and §12 exclusions. Use §13 as decision-logic cross-check, not a reason
 to duplicate existing equivalent helpers.
 
-- [ ] Verify public API and configuration delta against target §3/§9.17:
+- [x] Verify public API and configuration delta against target §3/§9.17:
   signatures, JSON field names, options, transport methods, ports, constructors,
   storage interfaces and error codes are unchanged; existing callers compile
   across all five modules.
-- [ ] Verify planner delta against target §5.4/§6/§9.1–§9.5:
+- [x] Verify planner delta against target §5.4/§6/§9.1–§9.5:
   new exact cleanup partitions, inherited-debt deduplication, readmission
   preservation, no load-native read for deletion and unchanged same-host
   replacement barriers.
-- [ ] Verify approval/FSM delta against target §5.2–§5.5/§7:
+- [x] Verify approval/FSM delta against target §5.2–§5.5/§7:
   every possible issued owner is covered before atomic nil-checkpoint success;
   mixed blocks aggregate correctly; CAS/replay/preview/refusal/cancellation
   retain their existing meanings.
-- [ ] Verify readmission and authority delta against target §8.2–§8.3:
+- [x] Verify readmission and authority delta against target §8.2–§8.3:
   ordinary old-member dispatch defers correctly, complete batches settle only
   exact identities, partial proof remains incomplete, and native/host
   revocation is not inferred from logical deletion.
-- [ ] Verify cleanup/runtime delta against target §8.1/§8.4/§9.16:
+- [x] Verify cleanup/runtime delta against target §8.1/§8.4/§9.16:
   actual controller queues reach host stop and retirement after operation
   success, callbacks remain owned and joined, retries remain bounded and
   independent, and foreign/successor resources are preserved.
-- [ ] Verify database/schema/index/cache delta against target §5:
+- [x] Verify database/schema/index/cache delta against target §5:
   bbolt buckets and all included record fields/tags match, metadata snapshot schema 4 and
   journal schema 2 remain, the sole internal command marker matches target §5.8,
   no SQL/ORM/cache/migration is introduced, incomplete
   debt pins complete proof through restart/snapshot/pruning, and no
   index/catalog recursion or cross-product owner/debt scan was added.
-- [ ] Verify collection/local storage delta against target §5.6/§8.4/§10.11:
+- [x] Verify collection/local storage delta against target §5.6/§8.4/§10.11:
   preparation, actual deletion, durable receipt, report, marker release and
   journal removal keep their established order; WAL/memory behavior stays exact.
-- [ ] Verify legacy/compatibility delta against target §3.3:
+- [x] Verify legacy/compatibility delta against target §3.3:
   old committed commands replay after snapshots with original semantics, old
   immutable plans and their retries retain semantics, and marker-1 approvals use
   the new shape; immutable fixtures/hashes remain unchanged; no silent
   migration, downgrade or mixed-version claim.
-- [ ] Verify caller fixture/process delta against target §9.17/§11.4:
+- [x] Verify caller fixture/process delta against target §9.17/§11.4:
   all three-node scenarios exist and use authenticated exact controls, real
   metadata snapshot evidence and observed cleanup; no multi-node root
   functional helper or unregistered control was introduced.
-- [ ] Verify all target §10 data flows and failure cases against code and test
+- [x] Verify all target §10 data flows and failure cases against code and test
   evidence, including missing load quorum, all missing owners, late factory
   success, readmission overlap, independent sibling work and permanently
   unconfirmed physical cleanup.
-- [ ] Verify excluded scenarios against the target/exclusions table. Per user
+- [x] Verify excluded scenarios against the target/exclusions table. Per user
   correction, leave feature documentation/public comments unchanged; write only
   the brief changelog. Implement no excluded feature merely to resolve a TODO.
-- [ ] Enter every found mismatch in NOT IMPLEMENTED GAPS with target section,
+- [x] Enter every found mismatch in NOT IMPLEMENTED GAPS with target section,
   affected paths and evidence. Fix it under the target/plan, or record an
   explicit user-approved deferral. Mark any unresolved item `[_]` and do not
   report the plan complete while required gaps remain.
-- [ ] After corrections, run the final commands below in the stated order.
+- [x] After corrections, run the final commands below in the stated order.
   Record non-cluster suite reports and reuse the verified Task 6 cluster evidence.
   Reopen Task 6 if an audit fix requires cluster reruns; do not run them in Task 7.
   Retain pass/fail status, source revision, case names, image and cleanup evidence. Do not count
   historical or compile-only runs as fresh runtime validation.
-- [ ] Create the user-facing changelog describing only visible improvements:
+- [x] Create the user-facing changelog describing only visible improvements:
   deleting an unused group no longer waits for unavailable former hosts;
   returning hosts clean up automatically; cleanup status remains observable.
   Mention the new-approval scope where relevant. Do not include private method
   names, implementation history, unexecuted claims or task numbers.
-- [ ] Finalize the progress log and resolve every NOT IMPLEMENTED GAPS item;
+- [x] Finalize the progress log and resolve every NOT IMPLEMENTED GAPS item;
   preserve accurate NOT PLANNED CHANGES and validation records. Record final
   architecture verification and commit the complete task.
-- [ ] **Verify every component is wired for actual use as the final subtask:**
+- [x] **Verify every component is wired for actual use as the final subtask:**
   trace public DeleteGroup through staging, Approve, capturePlan/BuildPlan,
   applyBeginOperation and validateDetachedCoverage to the logical checkpoint;
   trace the real operation controller through ReadyCleanup/ReadyFences,
@@ -859,7 +859,26 @@ gquorum identity and receipt contracts remain the implementation foundation.
 
 ## NOT IMPLEMENTED GAPS
 
-No implementation has been attempted by this planning session.
+Final audit findings:
+
+- [x] Target §11.2/§11.3: snapshot_bench_helpers_test.go constructed current
+  deletion plans with an unmarked legacy command. Select mode 1 for this current
+  generated fixture. Focused full snapshot matrix now passes; historical frozen
+  fixtures remain unchanged.
+- [x] Target §3.2/§8.4: node_recovery_api_func_test.go assumed WaitOperation
+  synchronously unregisters load handles. Observe both actual handle absence and
+  physical retirement before checking permanent startup refusal. Focused case passes.
+- [x] Target §9.15/§12: corrected the internal remaining-scope comment and added
+  the planned internal mixed-version exclusion marker. No public comment or
+  feature documentation update, runtime change, migration or new API was made.
+
+- [x] Unrelated functional timing: node_storage_owner_func_test.go reused the
+  startup deadline for two shutdown attempts. Give each teardown attempt its own
+  existing ten-second budget; preserve exact two Close calls and lease retention
+  checks. No runtime change.
+
+No unresolved implementation gap remains. Final validation/wiring completion is
+recorded by Task 7's checkboxes and progress log.
 
 During execution record each gap as:
 
@@ -871,6 +890,19 @@ During execution record each gap as:
 Do not use an out-of-scope label to hide a required target feature.
 
 ## NOT PLANNED CHANGES
+
+Task 7 implementation adjustments (reviewable in its commit):
+- snapshot_bench_helpers_test.go and testapp/node_recovery_api_func_test.go:
+  full functional validation exposed the two outdated fixture assumptions recorded
+  in NOT IMPLEMENTED GAPS. Fixes affect tests only; Task 6 cluster runtime evidence
+  remains applicable. The other two edits are internal comments only.
+- Target §13.10 pseudocode's per-step retainedStopAllowed helper is implemented
+  by a batch retainedStopBindings lookup to avoid repeated debt scans; exact
+  predicates and all §9 method signatures remain as specified.
+- node_storage_owner_func_test.go: full functional load exposed reused shutdown
+  deadline; separate waiter budgets retain the same ownership assertions.
+- The user explicitly waived target §12 feature-document updates, retaining a
+  brief changelog. No excluded feature was implemented.
 
 Task 6 implementation adjustments (reviewable in its commit):
 - scoped_revocation_scope.go and scoped_approval_retirement.go: index exact
@@ -949,6 +981,10 @@ reconciliation with the target rather than an undocumented alternate algorithm.
 
 | Date | Task | Work/result | Validation |
 | --- | --- | --- | --- |
+| 2026-10-26 | Task 7 | Final architecture/wiring audit, fixture corrections and brief changelog complete. | Unit 2364/2364; unit race 2364/2364; functional 1439/1439; focused functional race 251/251; lint PASS. |
+| 2026-10-26 | Task 6 | Full cluster validation and affected fixture fixes complete. | Full cluster 126/126 PASS, report 20261026T145139.617382Z-7uv1hte3; Docker resources/workers released. |
+| 2026-10-26 | Task 5 | Four process scenarios and exact fixture controls added. | Compile-only process check, fixture local tests, unit/vet/lint PASS. |
+| 2026-10-26 | Task 4 | Historical replay, retention and local lifecycle verified. | Unit 2361/2361; focused functional 256/256; lint/vet PASS. |
 | 2026-10-26 | Task 3 | Activated detached deletion with exact retained debt and inherited readmission authority. | Unit 2349/2349; focused functional 10/10; focused regressions/vet/lint PASS. |
 | 2026-10-26 | Task 2 | Internal command marker, exact coverage/restore validation and physical settlement support. | Focused tests/vet/lint PASS; unit report 20261026T132448.610357Z-il0ggigv: 2342/2342. |
 | 2026-10-26 | Task 1 | Plan validators accept exact deferred deletion and inherited debt; generator selection remains unchanged. | Focused tests/vet/lint PASS; unit report 20261026T130516.077623Z-9xhac48t: 2323/2323. |

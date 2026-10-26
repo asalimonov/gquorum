@@ -201,3 +201,98 @@ Date: 2026-10-26. Commit: this task's commit.
 - Docker queries for label gquorum.test.run returned no containers, volumes or
   networks after completion; no cluster.test/go cluster test workers remained.
 - git diff --check passed. No product documentation was changed.
+
+## Task 7 — Final audit and validation (in progress)
+Date: 2026-10-26. Previous task commit: 343f627.
+
+Audit findings
+- Target §1–§4: existing public mutations and metadata quorum install versioned
+  omission, permanent retired ID, exact debt and nil checkpoint atomically.
+  Load serving has no new metadata lease or request-time gate. Public interfaces,
+  fields, errors, options, listeners and root composition signatures are unchanged.
+- Target §5: unchanged snapshot v4, journal v2, buckets and public progress DTOs.
+  Only the specified optional internal approval marker is serialized. Retention
+  roots incomplete cleanup independently of Deleting; pruning tests retain source
+  and action provenance without pinning unrelated document history indefinitely.
+- Target §6–§7/§13: planner partitions exact Stop/DeleteState actions into cleanup;
+  inherited bindings are reused, same-host replacement remains required. Candidate
+  coverage validates source owners before completion/full graph installation.
+  Pseudocode per-step helper is a batch lookup in code, avoiding repeated debt scans.
+- Target §8: old-member dispatch defers to readmission. Complete batch receipts,
+  actual stop and retirement/collection remain separate. Native settlement checks
+  every retained stop; host authority is never settled by a logical tombstone.
+- Target §9–§10: signatures and actual flows match, including unissued/issued
+  creation, mixed blocks, canceled waiters, missing quorum, snapshot catch-up,
+  restart, leader loss and indefinite offline debt. Constructors and storage
+  callbacks are reused. New fixture controls are authenticated and registered.
+- Target §11–§12: exact historical snapshots replay byte-for-byte; frozen baseline
+  files have no diff. All four process regressions passed in the full cluster suite.
+  User waived architecture/README/AGENTS/public-comment updates; only a brief
+  changelog will be added. No excluded runtime feature was introduced.
+
+Validation findings
+- Final make test: 2,364/2,364 PASS, unit/20261026T145559.376552Z-4telkr7a.
+- Final unit race: 2,364/2,364 PASS (35.755s),
+  unit-race/20261026T145609.341989Z-xjl672ja.
+- First full functional run: 1,434/1,439 PASS,
+  function/20261026T145645.604531Z-fxgkyguq. Snapshot matrix (parent plus three
+  cases) used legacy approval with a new plan; a local API case assumed handle
+  removal at logical success. Both test fixtures are fixed and focused cases pass.
+- These are test-only changes plus two internal comments; no runtime change
+  requires reopening Task 6. Full functional rerun and focused race are pending.
+
+Task 7 validation follow-up
+- Second full functional run: 1,438/1,439 PASS,
+  function/20261026T145936.548737Z-jt30pq9x. Both deletion fixture corrections
+  passed. Existing TestNodeStorageLeaseAndFailedApplicationClose exhausted its
+  reused startup deadline on the second Stop. Each teardown attempt now receives
+  its own ten-second waiter budget; lease and exact two-Close assertions remain.
+  This is a test-only timing correction, recorded as unplanned work.
+- Full functional rerun and focused race (including all three corrected fixture
+  cases) are running. No cluster invocation occurs in this final task.
+
+## Task 7 — Final validation and wiring complete
+Date: 2026-10-26. Commit: this task's commit.
+
+Final fresh validation
+- Unit: 2,364/2,364 PASS, unit/20261026T145559.376552Z-4telkr7a.
+- Unit race: 2,364/2,364 PASS (35.755s), unit-race/20261026T145609.341989Z-xjl672ja.
+- Full functional: 1,439/1,439 PASS (107.070s),
+  function/20261026T150331.533360Z-2m818bh6.
+- Focused functional race: 251/251 PASS (70.735s),
+  function-race/20261026T150518.852668Z-jhxljs3b. The required deletion, cleanup,
+  collection, readmission, startup, fencing and restart patterns also include the
+  corrected snapshot matrix, approved-load recovery and failed-Close fixtures.
+- Failed-Close waiter-budget correction passed three focused repetitions and
+  both full functional/focused race runs, preserving exact release count/leases.
+- Full lint in Task 6 and final pending lint pass. Diff whitespace, unchanged
+  physical baseline paths, new historical fixture hashes and target hash verified.
+- Full process evidence remains Task 6's 126/126 PASS with its recorded image;
+  no executable production changes or cluster runs occurred in Task 7.
+
+Final wiring subtask
+- Public clusterView.DeleteGroup reaches metaservice.DeleteLoadGroup/mutation,
+  applyOperationLocal, capturePlan (skips deleted native scopes), and
+  operationProposal (commits marker 1). applyBeginOperation prepares exact debt,
+  completeDetachedBlocks calls validateDetachedCoverage then completeApprovalGroup,
+  and full graph validation precedes the single candidate installation.
+- metaservice.group constructs operator.New with OperationControllerConfig and
+  operationCoordinator. Existing ReadyCleanup/BeginCleanupEffect flows dispatch
+  through groupControllers.DispatchEffect, nodeEffects and Host.DispatchEffect.
+  Exact receiver ApplyAction joins stop/retirement; Controller.finishRequest records
+  actual receipts through RecordEffect. No new helper is test-only or unregistered.
+- runtimeMetaOptions binds readmission and nodeEffects to the real Node;
+  node.newHost binds scope/current floors, factory/retirement ownership and
+  Collection.Report/Status callbacks. Retired startup refuses before publication.
+  Existing retention/journal ordering carries actual collection completion.
+- Existing DELETE fixture route calls the public Cluster API. Snapshot observations
+  and partial-readmission controls are registered through the authenticated fixture
+  routes/proxy, with existing listeners. Full process cases exercised these routes.
+
+Run summary
+- All seven tasks completed and committed as individual checkpoints.
+- No unresolved required implementation gaps. Historical pending legacy plans
+  deliberately keep their original semantics; no migration or physical waiver.
+- Brief changelog: docs/changelogs/20261026-group-deletion-unreachable-owner.md.
+- README, AGENTS and architecture documents were left unchanged as directed.
+- The unrelated user deletion of the earlier snapshot target remains untouched.

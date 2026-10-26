@@ -1,5 +1,7 @@
 package metaengine
 
+// TODO(not planned): negotiate mixed-version deletion semantics or downgrade new tombstones.
+
 // DeletionSemantics binds approval interpretation to its committed command.
 type DeletionSemantics uint8
 
