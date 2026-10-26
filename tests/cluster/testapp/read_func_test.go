@@ -79,7 +79,7 @@ func TestApplicationReadUsesManagedQueryAndStopsWithExactReplica(t *testing.T) {
 	// Operator receipts precede publishing the converged Active topology.
 	apiEventually(t, func() bool { _, err := a.localServing(ctx, "work"); return err == nil })
 	data, _ := json.Marshal(putCommand{RequestID: "one", Key: "key", Value: "value"})
-	if result, err := g.Propose(ctx, load.Proposal{RequestID: "one", Data: data}); err != nil || result.Code != "ok" {
+	if result, err := g.Propose(ctx, load.Proposal{RequestID: "one", Data: data}); err != nil || result.Result.Code != "ok" {
 		t.Fatal(result, err)
 	}
 	request := func(path string) *httptest.ResponseRecorder {

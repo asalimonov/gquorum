@@ -293,10 +293,10 @@ func (a *application) receiveCall(ctx context.Context, request *loadpb.Request) 
 		if err != nil {
 			return domainReply(err), nil
 		}
-		if result.Code != "ok" {
-			return domainReply(fault.New(fault.Code(result.Code), "load proposal refused", nil)), nil
+		if result.Result.Code != "ok" {
+			return domainReply(fault.New(fault.Code(result.Result.Code), "load proposal refused", nil)), nil
 		}
-		return dataReply(map[string]any{"request_id": put.RequestID, "key": put.Key, "value": put.Value, "commit": g.Status().Commit}, g.ReplicaID())
+		return dataReply(map[string]any{"request_id": put.RequestID, "key": put.Key, "value": put.Value, "commit": result.Index}, g.ReplicaID())
 	case "Snapshot":
 		if err := g.Snapshot(ctx); err != nil {
 			return domainReply(err), nil

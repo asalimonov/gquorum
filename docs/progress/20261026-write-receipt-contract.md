@@ -24,3 +24,11 @@ Date: 2026-10-26. Commit: this task commit.
 Implemented Submit and exact identity/evidence conversion using existing slots, queue and buffered reply. Added explicit owner refusal/applied responses, terminal halted-engine errors, waiter-only attribution rejection, cancellation publication priority and shared metric observation. Existing metadata/read/control paths keep their result/error behavior and frozen storage encodings were untouched. No new shutdown gate or queue cleanup.
 
 Verified: make test PASS 2,326/2,326 in test-reports/unit/20261026T130946.881053Z-hx_n36ch; focused make test-function PASS 6/6 in test-reports/function/20261026T130946.880154Z-g2rrcgax; go vet ./internal/raftengine PASS; make lint PASS after correcting line length/receiver style and documenting the deliberate Submit/submit name distinction. Pure and functional receipt tests include successful application, business rejection, pre-dispatch validation/cancellation, late publication, and actual Apply failure followed by terminal refusal.
+
+## Task 3 — Public activation and caller migration
+
+Date: 2026-10-26. Commit: this task commit.
+
+Switched Group/Leadership/ProposeRetry to Submission, required unchanged logical IDs, generated distinct attempt tokens, and implemented refusal-only retry with capped overflow-safe jitter and one caller budget. Migrated public tests, scheduler/executor, cache and caller fixture together. Read retry policy stays separate. Cache emits uncertainty/applied-unavailable errors instead of TRYAGAIN; loader tests preserve that distinction. Scheduler uses the receipt to yield before a fresh read/CAS decision rather than blindly retrying or permanently failing on short refusal exhaustion.
+
+Verified: make test PASS 2,343/2,343 in test-reports/unit/20261026T132236.365856Z-9zkh58vu; focused functional PASS 8/8 in test-reports/function/20261026T132110.836374Z-4hvuc924; all-five functional compile-only PASS in test-reports/function/20261026T131845.582684Z-6c49o5f5; clustertest compile-only PASS (no Docker execution); root/load/fault/engine, scheduler, cache and fixture vet PASS; pending lint PASS. An initial new cache unit expected a message without its Stopped code; corrected the assertion after reading the failing log and reran the suite. tests/sim contains no proposal call sites, confirmed by search; no sim work needed.

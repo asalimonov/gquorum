@@ -308,10 +308,10 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 		}
 		data, err := json.Marshal(command)
 		if err == nil {
-			var result load.Result
+			var result load.Submission
 			result, err = g.Propose(r.Context(), load.Proposal{RequestID: command.RequestID, Data: data})
-			if err == nil && result.Code != "ok" {
-				err = fault.New(fault.Code(result.Code), "proposal rejected", nil)
+			if err == nil && result.Result.Code != "ok" {
+				err = fault.New(fault.Code(result.Result.Code), "proposal rejected", nil)
 			}
 		}
 		if err != nil {

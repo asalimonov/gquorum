@@ -15,7 +15,8 @@ const (
 // Retryable reports transient conditions where repeating the same request may
 // succeed: leadership changes, replicas that are not ready yet, unavailable or
 // overloaded services, a missing controller, and an expired attempt deadline.
-// Caller cancellation is not retryable.
+// Caller cancellation is not retryable. This classification alone does not
+// establish safe write repetition; proposal callers use load.Submission.CanResubmit.
 func Retryable(err error) bool {
 	if err == nil {
 		return false
@@ -53,6 +54,7 @@ func (o RetryOptions) resolved() RetryOptions {
 // After caller cancellation Retry returns ctx.Err(). Retrying does not undo an
 // earlier attempt: a timed-out write may still have taken effect, so callers
 // retry only idempotent or compare-and-swap operations.
+// For load proposals use load.ProposeRetry and receipt-aware eligibility.
 func Retry[T any](ctx context.Context, o RetryOptions, call func(context.Context) (T, error)) (T, error) {
 	settings := o.resolved()
 	delay := settings.InitialBackoff

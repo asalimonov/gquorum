@@ -40,7 +40,7 @@ func TestUninitializedHandlesRejectOperations(t *testing.T) {
 		if g.Identity() != (storage.Identity{}) || g.Running() || g.IsLeader() || !errors.Is(g.Error(), fault.ErrInvalid) {
 			t.Fatal("zero handle appears usable")
 		}
-		_, err := g.Propose(t.Context(), load.Proposal{Data: []byte("x")})
+		_, err := g.Propose(t.Context(), load.Proposal{RequestID: "invalid-handle", Data: []byte("x")})
 		_, readErr := g.Read(t.Context(), nil)
 		_, watchErr := g.Watch(t.Context())
 		leaderErr := g.RunWhileLeader(t.Context(), func(context.Context, *load.Leadership) error { return nil })
@@ -67,7 +67,7 @@ func TestUninitializedLeadershipRejectsProposals(t *testing.T) {
 		if leader.Term() != 0 {
 			t.Fatal("zero handle has a term")
 		}
-		if _, err := leader.Propose(t.Context(), load.Proposal{}); !errors.Is(err, fault.ErrInvalid) {
+		if _, err := leader.Propose(t.Context(), load.Proposal{RequestID: "invalid-leader"}); !errors.Is(err, fault.ErrInvalid) {
 			t.Fatal(err)
 		}
 	}

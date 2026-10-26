@@ -57,7 +57,7 @@ func TestStandaloneRecoveryAndMembershipOwnership(t *testing.T) {
 		t.Helper()
 		result, err := group.Propose(ctx, load.Proposal{RequestID: id, Data: []byte(data)})
 		require(t, err)
-		if result.Code != "ok" || string(result.Data) != data {
+		if result.Result.Code != "ok" || string(result.Result.Data) != data {
 			t.Fatal(result)
 		}
 	}
@@ -86,7 +86,7 @@ func TestStandaloneRecoveryAndMembershipOwnership(t *testing.T) {
 	propose(next.Group(), "two", "tail")
 	result, err := next.Group().Propose(ctx, load.Proposal{RequestID: "two", Data: []byte("different")})
 	require(t, err)
-	if result.Code != "conflict" || opts.StateMachine.(*deduplicatingMachine).count() != 2 {
+	if result.Result.Code != "conflict" || opts.StateMachine.(*deduplicatingMachine).count() != 2 {
 		t.Fatal("snapshot/tail recovery lost request identities", result)
 	}
 	if _, err := g.Propose(ctx, load.Proposal{RequestID: "old", Data: []byte("old")}); !errors.Is(err, fault.ErrStopped) {

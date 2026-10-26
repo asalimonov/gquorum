@@ -28,23 +28,36 @@ func (l *Leadership) Term() uint64 {
 // Propose checks the captured term at Raft admission, including internal retry,
 // and never forwards through a follower. Both ctx and the leadership lifetime
 // bound the call. A handle retained after its callback exits cannot submit.
-func (l *Leadership) Propose(ctx context.Context, p Proposal) (Result, error) {
+func (l *Leadership) Propose(ctx context.Context, p Proposal) (Submission, error) {
+	s := newSubmissionFromLeadership(l, p)
+	if err := validateRequestID(p.RequestID); err != nil {
+		return refusedSubmission(s), err
+	}
 	if l == nil || l.core == nil || l.ctx == nil || l.term == 0 {
-		return Result{}, fault.ErrInvalid
+		return refusedSubmission(s), fault.ErrInvalid
 	}
 	if err := ctx.Err(); err != nil {
-		return Result{}, err
+		if l.ctx.Err() != nil {
+			err = fault.New(fault.Stopped, "leadership scope ended", err)
+		}
+		return refusedSubmission(s), err
 	}
 	if err := l.ctx.Err(); err != nil {
-		return Result{}, err
+		return refusedSubmission(s), fault.New(fault.Stopped, "leadership scope ended", err)
 	}
 	scoped, cleanup := leadershipContext(l.ctx, ctx)
 	defer cleanup()
-	result, err := l.core.ProposeInTerm(scoped, l.term, raftengine.Proposal(p))
-	if err != nil && ctx.Err() != nil {
-		err = ctx.Err()
+	out, err := l.core.Submit(scoped, raftengine.Proposal(p), s.AttemptID, l.term)
+	if err != nil {
+		expired := errors.Is(err, fault.ErrNotLeader) || l.ctx.Err() != nil
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		if expired {
+			err = fault.New(fault.Stopped, "leadership scope ended", err)
+		}
 	}
-	return Result(result), err
+	return submissionFromEngine(out), err
 }
 
 // ReplicaProgress is the leader's observation of one configured replica.

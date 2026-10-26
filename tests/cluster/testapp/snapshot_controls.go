@@ -341,7 +341,7 @@ func (a *application) generateSnapshotHTTP(w http.ResponseWriter, r *http.Reques
 		httpError(w, err)
 		return
 	}
-	if result.Code != "ok" {
+	if result.Result.Code != "ok" {
 		httpError(w, fault.ErrInvalid)
 		return
 	}

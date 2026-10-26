@@ -23,6 +23,8 @@ func TestRetryRequestLimitsAndErrorClassification(t *testing.T) {
 		{"transport", resp.Reply{}, errors.New("connection lost"), 3},
 		{"loading", resp.Reply{Kind: '-', Str: "LOADING replica starting"}, nil, 3},
 		{"quorum", resp.Reply{Kind: '-', Str: "TRYAGAIN no quorum"}, nil, 3},
+		{"uncertain-write", resp.Reply{Kind: '-', Str: "ERR proposal outcome unknown"}, nil, 1},
+		{"applied-without-result", resp.Reply{Kind: '-', Str: "ERR proposal applied; result unavailable"}, nil, 1},
 		{"permanent", resp.Reply{Kind: '-', Str: "ERR invalid command"}, nil, 1},
 		{"protocol", resp.Reply{}, resp.ErrProtocol, 1},
 	}

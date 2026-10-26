@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	mathrand "math/rand/v2"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 )
 
 var retry = fault.RetryOptions{}
+var proposalRetry = load.ProposalRetryOptions{}
 
 type reconcileTrigger uint8
 
@@ -108,13 +110,14 @@ func (s *replicaService) propose(ctx context.Context, leader *load.Leadership, k
 	if err != nil {
 		return err
 	}
-	out, err := load.ProposeRetry(ctx, leader.Propose, p, retry)
+	out, err := load.ProposeRetry(ctx, leader.Propose, p, proposalRetry)
 	if err != nil {
-		return err
+		s.logger.Info("schedule_outcome", "operation", kind, "disposition", out.Disposition, "error", err)
+		return waitProposalReconcile(ctx, out, err)
 	}
-	s.logger.Info("schedule_committed", "operation", kind, "term", leader.Term(), "outcome", out.Code)
-	if out.Code == "invalid_command" {
-		return &task.Error{Code: out.Code}
+	s.logger.Info("schedule_committed", "operation", kind, "term", leader.Term(), "outcome", out.Result.Code)
+	if out.Result.Code == "invalid_command" {
+		return &task.Error{Code: out.Result.Code}
 	}
 	return nil
 }
@@ -138,4 +141,32 @@ func pendingAssignments(view task.State, slots map[uint64]int, replicas []load.R
 			Executor: executor})
 	}
 	return assign, pending
+}
+
+// waitProposalReconcile yields before a new state read. It never resubmits the
+// prior command; the application's next CAS decision is based on that fresh view.
+func waitProposalReconcile(ctx context.Context, s load.Submission, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	for _, terminal := range []error{fault.ErrStopped, fault.ErrInvalid, fault.ErrUnreadable,
+		fault.ErrIdentityMismatch, fault.ErrUnsupported, context.Canceled} {
+		if errors.Is(err, terminal) {
+			return err
+		}
+	}
+	appliedWithoutResult := s.Disposition == load.SubmissionApplied && !s.ResultAvailable
+	uncertain := s.Disposition == load.SubmissionIndeterminate && fault.Retryable(err)
+	refused := s.CanResubmit(err)
+	if !appliedWithoutResult && !uncertain && !refused {
+		return err
+	}
+	timer := time.NewTimer(schedulerTick)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

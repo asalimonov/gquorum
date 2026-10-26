@@ -158,18 +158,19 @@ func (e *executor) runTask(ctx context.Context, group *load.Group, t task.Task) 
 	e.setPhase(&key, "starting")
 	out, err := submit(ctx, group, "start", task.Start{Key: key, Executor: e.self})
 	if err != nil {
-		return err
+		logger.Info("proposal_outcome", "disposition", out.Disposition, "error", err)
+		return waitProposalReconcile(ctx, out, err)
 	}
-	switch out.Code {
+	switch out.Result.Code {
 	case "ok", "already_running":
 	case "succeeded", "failed":
-		logger.Info("finished", "outcome", out.Code, "recovered", true)
+		logger.Info("finished", "outcome", out.Result.Code, "recovered", true)
 		return nil
 	case "stale", "task_retired", "not_found":
-		logger.Info("attempt_abandoned", "reason", out.Code)
+		logger.Info("attempt_abandoned", "reason", out.Result.Code)
 		return nil
 	default:
-		return &task.Error{Code: out.Code}
+		return &task.Error{Code: out.Result.Code}
 	}
 	e.setPhase(&key, "calculating")
 	logger.Info("started", "term", group.Status().Term)
@@ -181,26 +182,27 @@ func (e *executor) runTask(ctx context.Context, group *load.Group, t task.Task) 
 	e.setPhase(&key, "finishing")
 	out, err = submit(ctx, group, "finish", task.Finish{Key: key, Executor: e.self, Value: value})
 	if err != nil {
-		return err
+		logger.Info("proposal_outcome", "disposition", out.Disposition, "error", err)
+		return waitProposalReconcile(ctx, out, err)
 	}
-	switch out.Code {
+	switch out.Result.Code {
 	case "succeeded", "failed":
-		logger.Info("quorum_committed", "outcome", out.Code)
-		logger.Info("finished", "outcome", out.Code)
+		logger.Info("quorum_committed", "outcome", out.Result.Code)
+		logger.Info("finished", "outcome", out.Result.Code)
 	case "stale", "task_retired", "not_found":
-		logger.Info("attempt_abandoned", "reason", out.Code)
+		logger.Info("attempt_abandoned", "reason", out.Result.Code)
 	default:
-		return &task.Error{Code: out.Code}
+		return &task.Error{Code: out.Result.Code}
 	}
 	return nil
 }
 
-// submit retries the exact command; start and finish are idempotent per
-// attempt.
-func submit(ctx context.Context, group *load.Group, kind string, body any) (load.Result, error) {
+// submit repeats only proven refusals and preserves the receipt for the
+// executor to choose a later fresh-state reconciliation.
+func submit(ctx context.Context, group *load.Group, kind string, body any) (load.Submission, error) {
 	p, err := task.Encode(kind, body)
 	if err != nil {
-		return load.Result{}, err
+		return load.Submission{}, err
 	}
-	return load.ProposeRetry(ctx, group.Propose, p, retry)
+	return load.ProposeRetry(ctx, group.Propose, p, proposalRetry)
 }

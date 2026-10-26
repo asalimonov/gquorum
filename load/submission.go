@@ -2,9 +2,13 @@ package load
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/storage"
 )
 
@@ -23,6 +27,8 @@ const (
 // Submission describes one attempt at an exact replica. It is an observation,
 // not an authorization or a guarantee about other calls with the same RequestID.
 // A zero value is indeterminate. Application deduplication remains caller-owned.
+// TODO(not planned): durable deduplication and per-attempt outcome lookup belong
+// to an application protocol or a separately designed resolver.
 type Submission struct {
 	// AttemptID is an opaque library correlation, distinct from RequestID.
 	AttemptID string
@@ -65,4 +71,37 @@ func (s Submission) CanResubmit(err error) bool {
 		}
 	}
 	return fault.Retryable(err)
+}
+
+func newSubmission(core *raftengine.Group, identity storage.Identity, p Proposal) Submission {
+	s := Submission{AttemptID: rand.Text(), RequestID: p.RequestID, Identity: identity}
+	if core != nil {
+		s.RunID = core.RunID()
+	}
+	return s
+}
+
+func newSubmissionFromLeadership(l *Leadership, p Proposal) Submission {
+	if l == nil || l.core == nil {
+		return newSubmission(nil, storage.Identity{}, p)
+	}
+	return newSubmission(l.core, l.core.Identity(), p)
+}
+
+func refusedSubmission(s Submission) Submission {
+	s.Disposition = SubmissionNotSubmitted
+	return s
+}
+
+func validateRequestID(id string) error {
+	if !utf8.ValidString(id) || strings.TrimSpace(id) == "" || strings.ContainsRune(id, 0) {
+		return fault.New(fault.Invalid, "caller-owned RequestID is required and must be valid text", nil)
+	}
+	return nil
+}
+
+func submissionFromEngine(s raftengine.Submission) Submission {
+	return Submission{AttemptID: s.AttemptID, RequestID: s.RequestID, Identity: s.Identity,
+		RunID: s.RunID, Disposition: SubmissionDisposition(s.Disposition), Index: s.Index,
+		Term: s.Term, Result: Result(s.Result), ResultAvailable: s.ResultAvailable}
 }

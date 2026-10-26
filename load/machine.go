@@ -17,7 +17,9 @@ type Result struct {
 	Data []byte
 }
 
-// Proposal carries an application request ID and command data for consensus.
+// Proposal carries a required caller-owned logical request ID and command data.
+// Reuse the exact ID and bytes for the same operation across calls/restarts.
+// RequestID is passed unchanged to Apply; the library does not deduplicate it.
 type Proposal struct {
 	RequestID string
 	Data      []byte

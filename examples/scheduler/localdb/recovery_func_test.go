@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/examples/scheduler/task"
-	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/storage/walstore"
 	"go.etcd.io/raft/v3"
@@ -102,8 +101,8 @@ func TestSQLiteRecoversThroughPublicGroupAndWAL(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		out, err := load.ProposeRetry(ctx, group.Propose, p, fault.RetryOptions{})
-		if err != nil || out.Code != "ok" {
+		out, err := load.ProposeRetry(ctx, group.Propose, p, load.ProposalRetryOptions{})
+		if err != nil || out.Result.Code != "ok" {
 			t.Fatal(out, err)
 		}
 	}
