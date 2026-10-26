@@ -10,7 +10,7 @@
 **Full brainstorm log:** [session and final decisions](../brainstorms/20261026-write-receipt-contract.md)
 **Reference comparison:** [etcd, TiKV and PD](../brainstorms/20261026-proposal-retry-reference-comparison.md)
 **Peer review:** [thread 1 and user addenda](../review/feat_receipt-error-contract.md)
-**Status:** planned; seven-checkpoint grouping accepted by the user. All implementation tasks are unchecked. This planning session executes no implementation tests.
+**Status:** execution started. User directs all cluster/Compose execution to penultimate Task 6 and a colleague review of every implementation commit after final verification.
 
 ## Execution contract
 
@@ -31,6 +31,10 @@ Preserve the agreed contract:
 
 The source directory is this worktree; there is no project.txt or separate/symlinked docs repository. Use the existing branch and explicitly add the ignored plan file. Do not create a new repository or switch the source branch. The skill-requested planning commit is `Plan write receipt contract (go-brainstorm)` and contains the new plan only; other pending documentation is not part of that commit. No push is requested.
 
+## Execution steering
+
+The implementation goal supersedes the original gate schedule: all cluster and Compose tests run only in penultimate Task 6, after final unit/functional/race/lint validation. Task 7 performs the architectural delta audit and final wiring verification, then asks the existing Claude peer to review all implementation commits. Fix review findings and revalidate affected non-cluster checks; if a fix needs cluster verification, reopen Task 6 and run its gate there before re-completing the final audit. No cluster execution is moved into another task.
+
 ## Sequencing and green checkpoints
 
 The user accepted this sequence: receipt types → engine support → atomic API/caller migration → functional regressions → three-node process coverage → documentation → final validation and architecture audit.
@@ -49,9 +53,9 @@ Task 1 adds real standalone value behavior without changing Propose. Task 2 adds
 
 Each task targets at most about 1,500 non-generated changed lines. If measured scope exceeds that, split into independently green sub-checkpoints and record them here; do not split Task 3 into a broken public API and a later caller repair. Necessary preparatory factoring can precede its atomic switch without exposing new public API.
 
-**Per-task verification:** format changed Go files, run `make test` across all five application modules, run `make lint` while changes are pending, and execute the focused checks listed for the task. Fix all failures in executed checks, including those outside the edited files, and log necessary unrelated fixes under NOT PLANNED CHANGES. A genuine external blocker or unresolved failure belongs in NOT IMPLEMENTED GAPS and prevents marking the task complete. Documentation-only tasks run documentation checks. Full lint, full unit-race, full functional suites and Docker execution are reserved for Task 7; focused owning-package race tests in Task 4 verify concurrency changes earlier.
+**Per-task verification:** format changed Go files, run `make test` across all five application modules, run `make lint` while changes are pending, and execute the focused checks listed for the task. Fix all failures in executed checks, including those outside the edited files, and log necessary unrelated fixes under NOT PLANNED CHANGES. A genuine external blocker or unresolved failure belongs in NOT IMPLEMENTED GAPS and prevents marking the task complete. Documentation-only tasks run documentation checks. Full lint, full unit-race, full functional suites and Docker execution are reserved for penultimate Task 6; focused owning-package race tests in Task 4 verify concurrency changes earlier.
 
-Every implementation task ends with its verification, checked boxes, a progress-log entry and a coherent commit. Record actual commands and report directories, not historical results or expected counts. Do not automatically contact another reviewer; the completed design review is already recorded.
+Every implementation task ends with its verification, checked boxes, a progress-log entry and a coherent commit. Record actual commands and report directories, not historical results or expected counts. After final verification, request the user-directed Claude colleague review of all implementation commits via paseo-peer, and resolve its findings before completion.
 
 ## Design-to-implementation mapping
 
@@ -102,16 +106,16 @@ var ErrResultUnavailable = errors.New("proposal result unavailable")
 func (s Submission) CanResubmit(err error) bool
 ```
 
-- [ ] Implement exactly these public values and comments: no Result embedding, duplicate GroupID, aggregate outcome, transferable-proof semantics or wire-format promise. Unknown values are conservative.
-- [ ] Implement CanResubmit as the sole write-specific classification: require NotSubmitted, reject Stopped/Invalid/Unreadable/IdentityMismatch/Unsupported/context.Canceled anywhere in the chain, then consult unchanged fault.Retryable. It does not inspect caller budgets or authenticate fabricated structs.
-- [ ] Add parallel pure units (`TestSubmission…`) covering zero/unknown disposition, nil errors, each transient code, terminal-over-transient wrapping, Applied with a transient delivery error and unknown outcomes. Assert the old generic fault predicate remains unchanged even where CanResubmit must reject.
-- [ ] Keep facade token generation, engine conversion and new Propose/ProposeRetry signatures for Task 3; do not introduce unresolved engine-type dependencies or speculative unused helpers now.
+- [x] Implement exactly these public values and comments: no Result embedding, duplicate GroupID, aggregate outcome, transferable-proof semantics or wire-format promise. Unknown values are conservative.
+- [x] Implement CanResubmit as the sole write-specific classification: require NotSubmitted, reject Stopped/Invalid/Unreadable/IdentityMismatch/Unsupported/context.Canceled anywhere in the chain, then consult unchanged fault.Retryable. It does not inspect caller budgets or authenticate fabricated structs.
+- [x] Add parallel pure units (`TestSubmission…`) covering zero/unknown disposition, nil errors, each transient code, terminal-over-transient wrapping, Applied with a transient delivery error and unknown outcomes. Assert the old generic fault predicate remains unchanged even where CanResubmit must reject.
+- [x] Keep facade token generation, engine conversion and new Propose/ProposeRetry signatures for Task 3; do not introduce unresolved engine-type dependencies or speculative unused helpers now.
 
 #### Verification
 
-- [ ] `make test` and `make lint` pass.
-- [ ] `go vet ./load ./fault` passes. Tests here are units only; no running engine, network or application fixture.
-- [ ] Record results and commit this additive value checkpoint.
+- [x] `make test` and `make lint` pass.
+- [x] `go vet ./load ./fault` passes. Tests here are units only; no running engine, network or application fixture.
+- [x] Record results and commit this additive value checkpoint.
 
 ### Task 2: Implement internal receipts using the existing engine lifecycle
 
@@ -232,7 +236,7 @@ func waitProposalRetry(context.Context, time.Duration) error
 - [ ] `make test`, `make lint` and owning-package vet pass.
 - [ ] `make test-function FUNCTIONAL_ARGS='-v -run "TestSubmission|TestLearnerForwards|TestForwardedWait|TestUnknownLeaderRetry|TestForwardingSnapshot|TestScoped|TestLeadership|TestProposalPressure|TestBaselinePhysical|TestFrozen"'` passes; inspect report names and ensure intended tests were selected.
 - [ ] `go test -tags=functional -race -count=1 -run 'TestSubmission|TestLearnerForwards|TestForwardedWait|TestForwardingSnapshot|TestScoped|TestLeadership' ./load ./internal/raftengine` passes. This is focused concurrency coverage, not the full unit-race suite.
-- [ ] Check `git diff --name-only` for unchanged frozen fixtures/proto/storage artifacts. Record results and commit; full suites remain in Task 7.
+- [ ] Check `git diff --name-only` for unchanged frozen fixtures/proto/storage artifacts. Record results and commit; full suites run in penultimate Task 6.
 
 ### Task 5: Expose receipts through the authenticated process fixture and add three-node regressions
 
@@ -269,10 +273,10 @@ type submissionReply struct {
 #### Verification
 
 - [ ] `make test`, `make lint`, `go -C tests/cluster vet ./testapp/...` and compile-only `go -C tests/cluster test -c -tags=clustertest -o /tmp/gquorum-write-receipts-cluster.test .` pass.
-- [ ] Focused fixture functionals pass if changed. Docker execution is deliberately deferred to the final Task 7 checkpoint, after all fixture/source edits and full lint; do not build/replace a shared image tag during another run.
-- [ ] Record compile/local results and commit the fixture and process scenarios with their runtime gate explicitly pending Task 7.
+- [ ] Focused fixture functionals pass if changed. Docker execution is deliberately deferred to the penultimate Task 6 checkpoint, after all fixture/source edits and full lint; do not build/replace a shared image tag during another run.
+- [ ] Record compile/local results and commit the fixture and process scenarios with their runtime gate explicitly pending Task 6.
 
-### Task 6: Update current architecture and caller guidance
+### Task 6: Update documentation and run final validation
 
 **Goal:** make current documentation describe the activated implementation while keeping the brainstorm/target as design history and preserving all exclusion decisions.
 **Files:** `README.md`, `docs/architecture/library.md`, `raft.md`, `runtime.md`, `docs/testing/tests.md`, `examples/scheduler/README.md`, `examples/inmemory-cache/README.md`, `tests/cluster/testapp/README.md`, and owning GoDoc comments. No proposal document or new architecture hierarchy.
@@ -289,7 +293,8 @@ type submissionReply struct {
 #### Verification
 
 - [ ] Verify API names/signatures, relative links, source paths, commands and example snippets against implemented code; run `git diff --check`.
-- [ ] If only documentation/GoDoc changed, do not rerun runtime suites here. Record checks and commit; the public changelog is created in the final task after actual verification.
+- [ ] Run final five-module units/race, functionals/race and full lint, then build the dedicated image and execute focused receipt and non-performance cluster suites plus scheduler/cache/meta Compose checks. All cluster execution belongs to this penultimate task only. Inspect reports and cleanup; fix failures and rerun affected checks.
+- [ ] Record final gate results and commit; the public changelog is created in the final audit task.
 
 ### Task 7: Final validation and architectural delta verification
 
@@ -299,8 +304,8 @@ type submissionReply struct {
 
 #### Verification gates
 
-- [ ] Run the final commands below in order: full five-module units/race, full functionals/race, full lint once, then build one dedicated image and execute focused receipt process cases and the final non-performance clustertest suite. Run the existing scheduler/cache/meta Compose suites because their callers/build integrations are part of the change. Inspect reports and cleanup, not just exit status.
-- [ ] Fix all failures encountered in these gates, including those beyond directly edited files; record necessary scope expansions. Re-run the affected gate after fixes. Do not repeat broad checks without a relevant change or failure, and do not mark completion with unresolved runtime failures.
+- [ ] Confirm Task 6's final evidence covers the current implementation. Repair audit gaps and rerun affected non-cluster checks; reopen Task 6 for any necessary cluster rerun rather than running it in the final task.
+- [ ] After the final audit/verification commit, ask Claude agent 77d41568-9e29-4cab-a227-ce5be07190c0 to review all implementation commits since eca48ad. Verify and resolve findings, revalidate affected work and record review disposition before declaring completion.
 
 #### Architectural delta audit
 
@@ -331,7 +336,7 @@ git diff --check
 
 Use each task's focused functional/vet commands in addition. Format edited Go files with gofmt before running them. Five-module test flags are selected through `UNIT_ARGS` and `FUNCTIONAL_ARGS`; do not substitute root `go test ./...` for the all-module checkpoint. Test functions proposed in this plan must exist under those prefixes before treating a filter's success as coverage. Make consumes dollar signs in variables: the compile-only regex is written `FUNCTIONAL_ARGS='-run ^$$'` so the executed Go command receives `^$`; using a single dollar sign would accidentally run all functional tests.
 
-**Final Task 7 gates:**
+**Final gates, executed in penultimate Task 6:**
 
 ```sh
 make test
