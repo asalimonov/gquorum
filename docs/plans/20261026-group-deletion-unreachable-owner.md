@@ -6,7 +6,7 @@
 **Branch:** `feat/group-deletition-wo-node`
 **Source revision inspected:** `8e57798`
 **Target architecture:** [20261026-group-deletion-unreachable-owner-target.md](../brainstorms/20261026-group-deletion-unreachable-owner-target.md)
-**Target SHA-256:** `35a5814f4addbd580914d4811ae09fc9dabbea806d16a61cffec70fa46cc8946`
+**Target SHA-256:** `45f33e730531e7389fa2e3365e644aa087b4714611aae936bda9bbeb53d01c44`
 **Full brainstorm log:** [20261026-group-deletion-unreachable-owner.md](../brainstorms/20261026-group-deletion-unreachable-owner.md)
 **Issue:** <https://github.com/asalimonov/gquorum/issues/5>
 **Status:** implementation in progress; task checkboxes record verified completion.
@@ -302,60 +302,60 @@ state, debt and index schemas; §7.3/§7.5 coverage and restore; §8.1–§8.3 c
 readmission priority and physical authority; §9.7/§9.9/§9.12–§9.15c signatures;
 §13.14/§13.18–§13.24 algorithms; §11.2 acceptance.
 
-- [ ] Add the target §5.8 internal enum and optional `BeginOperationProposal`
+- [x] Add the target §5.8 internal enum and optional `BeginOperationProposal`
   field. Extend its custom decoder to accept absence/0 as legacy, accept 1 and
   reject unknown values without changing required-field/plan-scope validation.
   Existing zero-command encoding must remain byte-identical.
-- [ ] Keep service-created proposals at zero until Task 3. Temporarily refuse
+- [x] Keep service-created proposals at zero until Task 3. Temporarily refuse
   marker-1 Apply with an explicit unsupported result before candidate mutation;
   do not decode and silently execute it with legacy semantics. Record removal
   of this internal preparation guard in Task 3.
-- [ ] Add codec tests for absent/zero/one/unknown markers and old serialized
+- [x] Add codec tests for absent/zero/one/unknown markers and old serialized
   approvals. Do not add a marker to public DTOs or alter the proposal kind.
-- [ ] Add `validateDetachedCoverage(blocks []topology.PlanBlock) error` exactly as
+- [x] Add `validateDetachedCoverage(blocks []topology.PlanBlock) error` exactly as
   specified. Reuse `deletionPreparation`, the source collector, and candidate
   operation/debt maps; inspect source owners once per approval batch.
-- [ ] Validate exact group, member, replica, storage class, operation/action tuple,
+- [x] Validate exact group, member, replica, storage class, operation/action tuple,
   cleanup partition, permanent ID and complete owner coverage. Do not call
   network, application callbacks, storage acquisition or recursive catalog
   reconstruction from this helper.
-- [ ] Require no required steps for the new deletion shape. Treat missing debt,
+- [x] Require no required steps for the new deletion shape. Treat missing debt,
   foreign identity and malformed source provenance as hard errors; a nil physical
   receipt by itself is valid pending work.
-- [ ] Update `validateScopedDeletion` to allow a logically completed tombstone
+- [x] Update `validateScopedDeletion` to allow a logically completed tombstone
   with exact detached debt, while keeping missing/foreign/required-stop-only
   coverage invalid for that new terminal state.
-- [ ] Keep historical pending deletion/readmission rows valid on restore.
+- [x] Keep historical pending deletion/readmission rows valid on restore.
   Decoding must not complete an operation, manufacture a milestone, or modify
   its immutable plan.
-- [ ] Update `scopedCleanupValidation.stopAction` to validate a detached Stop
+- [x] Update `scopedCleanupValidation.stopAction` to validate a detached Stop
   paired with `StepDeleteGroupState` under permanent approved retirement.
   Preserve bound-operation provenance, handover ordering and exact receipts.
-- [ ] Add `cleanupWaitsForReadmission(debt *cleanupRecord) bool` and invoke it
+- [x] Add `cleanupWaitsForReadmission(debt *cleanupRecord) bool` and invoke it
   after existing exact binding/class/assignment checks in `cleanupDebtForAction`.
   It defers ordinary dispatch for a deleted group's historical member when a
   newer member is approved; it must not affect approval or unrelated identities.
-- [ ] Tighten `completedDeletions` to filter out candidates with any retained
+- [x] Tighten `completedDeletions` to filter out candidates with any retained
   unstopped owner. Use state slices while indexes are being built. Do not call
   `authorityCatalog` recursively or settle host resources from a tombstone.
-- [ ] Exercise actual `ReadyCleanup`, `BeginCleanupEffect` and restore/query
+- [x] Exercise actual `ReadyCleanup`, `BeginCleanupEffect` and restore/query
   entry points on manually constructed valid candidate states: terminal operation
   still exposes Stop; retirement waits for Stop; readmission priority yields;
   incorrect action tuples refuse; native revocation stays pending until actual
   host stops.
-- [ ] Add negative tests for removing one known debt row, partial readmission
+- [x] Add negative tests for removing one known debt row, partial readmission
   proof, inconsistent timestamps and false physical settlement. Compare source
   bytes before/after refusals to prove no partial mutation.
-- [ ] Keep the new coverage helper unselected by production approval until Task
+- [x] Keep the new coverage helper unselected by production approval until Task
   3; it is test-exercised supporting logic, not an alternate execution path.
 
 #### Verification
 
-- [ ] `go test ./internal/metaengine -run 'Deletion|Cleanup|ReadyFence|Authority|Frozen' -count=1`.
-- [ ] `make test`, `go vet ./internal/metaengine` and `make lint` pass.
-- [ ] Existing generated/approved deletion behavior remains unchanged. Existing
+- [x] `go test ./internal/metaengine -run 'Deletion|Cleanup|ReadyFence|Authority|Frozen' -count=1`.
+- [x] `make test`, `go vet ./internal/metaengine` and `make lint` pass.
+- [x] Existing generated/approved deletion behavior remains unchanged. Existing
   snapshots and required-stop plans still restore without rewrite.
-- [ ] Check snapshot/journal struct fields, tags and version constants have no
+- [x] Check snapshot/journal struct fields, tags and version constants have no
   delta, and only the documented optional internal command field was added; record results and commit.
 
 ### Task 3: Activate metadata-only deletion in planner and approval together
@@ -889,6 +889,19 @@ Do not use an out-of-scope label to hide a required target feature.
 
 ## NOT PLANNED CHANGES
 
+Task 2 implementation adjustments (reviewable in its commit):
+- internal/metaengine/deletion_semantics.go: enum declaration moved to a companion
+  file because revive limits public declarations per file. Optional command field
+  remains in operation_proposals.go; no semantic/API change.
+- scoped_deletion.go and scoped_deletion_detached.go: restore reuses exact coverage
+  validation and recovers known former owners from retained plan-source
+  declarations. A corruption regression proved that a nil checkpoint plus a
+  deleted debt row could otherwise hide a previously proven owner. This also
+  gives the pure helper a real restore callsite before approval activation.
+- Validation helpers were factored to meet complexity/line-length lint limits;
+  no new state, transport, or worker was introduced.
+
+
 Planning found and corrected the historical command-replay gap described above:
 target §5.8 adds one internal semantics marker and mode propagation. This is the
 only design correction; public API and snapshot/journal shapes remain unchanged.
@@ -901,6 +914,7 @@ reconciliation with the target rather than an undocumented alternate algorithm.
 
 | Date | Task | Work/result | Validation |
 | --- | --- | --- | --- |
+| 2026-10-26 | Task 2 | Internal command marker, exact coverage/restore validation and physical settlement support. | Focused tests/vet/lint PASS; unit report 20261026T132448.610357Z-il0ggigv: 2342/2342. |
 | 2026-10-26 | Task 1 | Plan validators accept exact deferred deletion and inherited debt; generator selection remains unchanged. | Focused tests/vet/lint PASS; unit report 20261026T130516.077623Z-9xhac48t: 2323/2323. |
 | 2026-10-26 | Planning | Read target, current contracts, planner/FSM and fixture seams; defined seven green checkpoints and the Task 3 activation boundary. | Documentation/source-reference checks only; no implementation suite executed. |
 

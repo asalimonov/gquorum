@@ -768,6 +768,12 @@ reject:
 - Bare readmission intent presented as a receipt.
 - Partial/closed/readmission grants used to invent stopped or retired milestones.
 
+Restore reuses validateDetachedCoverage for completed tombstones and retains
+the original pending-readmission checks for legacy Deleting rows. Recover former
+proven owners from retained plan SourceVersion declarations as well as current
+checkpoints: replacing a declaration with nil must not let a missing cleanup row
+erase its own proof obligation.
+
 Preserve valid legacy pending rows and completed physical-deletion rows.
 Restoration never completes an operation or rewrites its immutable plan as a side
 effect of decoding.
@@ -1053,7 +1059,9 @@ updated; no new native read is required.
 func (p *BeginOperationProposal) UnmarshalJSON(data []byte) error
 ~~~
 
-Add the exact section 5.8 enum and optional command field. Validate known values;
+Add the optional section 5.8 command field; declare its enum in the small
+deletion_semantics.go companion to respect the per-file public-declaration limit.
+Validate known values;
 retain absent-field behavior, required fields and exact plan-scope validation.
 
 ### 9.15b UPDATED: internal/metaservice/operation_approval.go
@@ -1077,6 +1085,11 @@ Validate and propagate the committed semantics marker to the approval-only
 helpers. Mode 0 preserves the current branches; mode 1 selects sections 6–8.
 `applyBeginOperation`, proposal kind, decoder dispatch and final atomic state
 installation are reused. No replay-specific live-process flag is introduced.
+
+### 9.15d CREATED: internal/metaengine/deletion_semantics.go
+
+Declares the exact section 5.8 DeletionSemantics enum and constants. This is an
+internal companion file, not a public API addition.
 
 ### 9.16 Reused without production behavior changes
 

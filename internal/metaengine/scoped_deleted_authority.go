@@ -6,9 +6,9 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-// Completed deletion already joined every possible former owner, including
-// never-converged founding targets. The permanent group ID and tombstone make
-// native authority vacuous, without manufacturing a Raft fence receipt.
+// Native settlement requires the permanent logical tombstone and actual stops
+// for every retained owner, including never-converged founding targets. Logical
+// deletion alone cannot manufacture a Raft fence receipt.
 // Host floors must remain independent: they reject delayed old start requests.
 func (s *scopedState) completedDeletions() map[string]bool {
 	retired := make(map[string]uint64, len(s.RetiredGroups))
@@ -26,6 +26,11 @@ func (s *scopedState) completedDeletions() map[string]bool {
 			completed = make(map[string]bool)
 		}
 		completed[row.GroupID] = true
+	}
+	for _, debt := range s.Cleanup {
+		if debt.Stopped == nil {
+			delete(completed, debt.Identity.GroupID)
+		}
 	}
 	return completed
 }

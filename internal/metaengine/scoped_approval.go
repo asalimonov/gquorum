@@ -20,6 +20,11 @@ const (
 // before this candidate can replace live state. No application callbacks or I/O.
 func prepareScopedApproval(s *scopedState, desired topology.Document,
 	p BeginOperationProposal, kind approvalKind) (*scopedState, error) {
+	// The new interpretation is selected only after its planner and approval
+	// preparation are activated together in the next implementation checkpoint.
+	if p.DeletionSemantics != DeletionSemanticsLegacy {
+		return nil, fault.ErrUnsupported
+	}
 	if err := knownPlanSteps(p.Plan); err != nil {
 		return nil, err
 	}

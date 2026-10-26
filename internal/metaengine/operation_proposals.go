@@ -3,18 +3,20 @@ package metaengine
 import (
 	"time"
 
+	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/topology"
 )
 
 // BeginOperationProposal approves an immutable plan against captured scope owners.
 type BeginOperationProposal struct {
-	Version    uint64             `json:"version"`
-	Plan       topology.Plan      `json:"plan"`
-	Scopes     []ScopeExpectation `json:"scopes"`
-	Actor      string             `json:"actor"`
-	Origin     topology.Origin    `json:"origin"`
-	At         time.Time          `json:"at"`
-	ProposalID string             `json:"proposal_id"`
+	Version           uint64             `json:"version"`
+	Plan              topology.Plan      `json:"plan"`
+	Scopes            []ScopeExpectation `json:"scopes"`
+	Actor             string             `json:"actor"`
+	Origin            topology.Origin    `json:"origin"`
+	At                time.Time          `json:"at"`
+	ProposalID        string             `json:"proposal_id"`
+	DeletionSemantics DeletionSemantics  `json:"deletion_semantics,omitempty"`
 }
 
 // RetryOperationProposal names a failed attempt; the FSM derives its immutable plan.
@@ -40,6 +42,9 @@ func (p *BeginOperationProposal) UnmarshalJSON(data []byte) error {
 	}
 	if err := validatePlanScopes(decoded.Plan, decoded.Scopes); err != nil {
 		return err
+	}
+	if decoded.DeletionSemantics > DeletionSemanticsDetached {
+		return fault.ErrUnsupported
 	}
 	*p = BeginOperationProposal(decoded)
 	return nil

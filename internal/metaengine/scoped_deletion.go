@@ -183,37 +183,77 @@ func (c planningCollector) deletionReadmission(group string, target topology.Aut
 func validateScopedDeletion(state *scopedState, index *scopedIndexes) error {
 	source := *state
 	source.indexes = index
-	collector := source.planningCollector()
-	input := source.planningDeclarations()
-	for i, doc := range collector.evidence.documents {
-		doc.Groups = slices.DeleteFunc(slices.Clone(doc.Groups), func(g topology.Group) bool {
-			row := index.groups[g.ID]
-			return g.ID != topology.MetaGroupID && !deletionRow(row)
-		})
-		collector.evidence.documents[i] = doc
+	collector, err := deletionCollector(&source, index)
+	if err != nil {
+		return err
 	}
-	if _, err := collector.collect(input, topology.Document{}); err != nil {
-		return invalidScopedState("deletion ownership contradicts retained identity")
+	var completed []topology.PlanBlock
+	for _, row := range state.Groups {
+		if !row.Deleting && deletionRow(&row) {
+			completed = append(completed, topology.PlanBlock{GroupID: row.GroupID})
+		}
 	}
-	collector.markConvergedOwners(input.Groups)
-	for key, owner := range collector.owners {
+	if err := (deletionPreparation{&source, &source, collector}).validateDetachedCoverage(completed); err != nil {
+		return invalidScopedState("completed deletion lacks exact retained cleanup coverage")
+	}
+	for _, key := range collector.sortedOwners() {
+		owner := collector.owners[key]
 		row := index.groups[key.group]
+		if owner.progress == "" || row == nil || !row.Deleting {
+			continue
+		}
 		id := storage.Identity{ClusterID: source.Target.ClusterID, GroupID: key.group,
 			NodeName: owner.target.NodeName, ReplicaID: key.id}
-		if owner.progress == "" || !deletionRow(row) {
-			continue
-		}
 		if debt := index.cleanup[id]; debt != nil && (debt.Stopped != nil || state.deletionStop(id)) {
 			continue
-		}
-		if !row.Deleting {
-			return invalidScopedState("completed deletion lacks exact retained host-stop debt")
 		}
 		if _, err := collector.deletionReadmission(key.group, owner.target, source.Target); err != nil {
 			return invalidScopedState("pending deletion lacks exact debt or usable readmission coverage")
 		}
 	}
 	return nil
+}
+
+func deletionCollector(source *scopedState, index *scopedIndexes) (planningCollector, error) {
+	collector := source.planningCollector()
+	input := source.planningDeclarations()
+	for i, doc := range collector.evidence.documents {
+		doc.Groups = slices.DeleteFunc(slices.Clone(doc.Groups), func(g topology.Group) bool {
+			return g.ID != topology.MetaGroupID && !deletionRow(index.groups[g.ID])
+		})
+		collector.evidence.documents[i] = doc
+	}
+	if _, err := collector.collect(input, topology.Document{}); err != nil {
+		return planningCollector{}, invalidScopedState("deletion ownership contradicts retained identity")
+	}
+	collector.markConvergedOwners(input.Groups)
+	collector.markDeletionSources(source, index)
+	return collector, nil
+}
+
+// A nil checkpoint no longer carries its former declaration. Retained plan
+// sources still prove those owners existed, even if a corrupt snapshot loses
+// the corresponding cleanup row. Staged and never-converged declarations do not.
+func (c planningCollector) markDeletionSources(state *scopedState, index *scopedIndexes) {
+	for _, operation := range state.Operations {
+		for _, block := range operation.Plan.Blocks {
+			if block.SourceVersion != 0 && deletionRow(index.groups[block.GroupID]) {
+				doc := index.documents[block.SourceVersion]
+				c.markDeletionGroup(doc.Group(block.GroupID))
+			}
+		}
+	}
+}
+
+func (c planningCollector) markDeletionGroup(group *topology.Group) {
+	if group == nil {
+		return
+	}
+	for _, replica := range group.Replicas {
+		if owner := c.owners[planningReplicaKey{group.ID, replica.ReplicaID}]; owner != nil {
+			owner.hosted()
+		}
+	}
 }
 
 func (c planningCollector) readmissionMembers(node string) map[string]uint64 {
