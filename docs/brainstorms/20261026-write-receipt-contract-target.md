@@ -480,10 +480,10 @@ Do the breaking source migration as one planned change set. This includes Standa
 | UPDATED files / area | Migration |
 |---|---|
 | `load/group_test.go`, `group_func_test.go`, `leadership_func_test.go`, `retry_test.go` | Assertions inspect receipt.Result/Disposition/identity; preserve invalid/stopped/term checks with otherwise-valid IDs |
-| `examples/scheduler/scheduler.go` | Use CanResubmit for write-specific failure handling and inspect Submission.Result on success; distinguish fresh read/reconciliation from repeating an uncertain command |
-| `examples/scheduler/executor.go` | Existing application helper may still return load.Result after explicitly checking/extracting Submission.Result; propagate unknown outcomes appropriately |
+| `examples/scheduler/scheduler.go` | Adapt retry options and read Submission.Result on success; keep ordinary error propagation and the existing scheduling flow |
+| `examples/scheduler/executor.go` | Keep its result/error convenience helper by returning submission.Result and the error; after transient failures, re-read committed task state before deciding the next guarded transition |
 | `examples/scheduler/localdb/recovery_func_test.go` | New retry return/options, stable logical IDs |
-| `examples/inmemory-cache/server/redis.go` | New retry options, Submission.Result and receipt-aware errors: TRYAGAIN only if CanResubmit; distinct uncertain-outcome response otherwise |
+| `examples/inmemory-cache/server/redis.go` | Adapt retry options and read Submission.Result; report write errors simply without an outcome-specific helper or write-side TRYAGAIN inference |
 | `tests/cluster/testapp/load_transport.go`, `hooks_cluster.go`, `snapshot_controls.go` | Keep fixture business response shapes intentional; derive applied coordinates from receipt instead of status when claiming command position; add receipt controls for new tests |
 | `tests/cluster/testapp/read_func_test.go`, `node_generation_func_test.go` | Result assertions use receipt.Result |
 | Other public call sites in root integration, `tests/recovery`, `tests/cluster/testapp`, optional `tests/sim` | Verify stable IDs and compile against new signatures; ignored receipt remains valid only where error-only behavior is intentional |
@@ -493,9 +493,7 @@ Do the breaking source migration as one planned change set. This includes Standa
 
 Migrate all examples to proven-refusal-only retries and preserve unknown outcomes at their application boundaries. Do not replace the old helper behavior with another generic fault.Retry loop around proposals. Scheduler commands retain their existing CAS/idempotent transitions; those guards do not enable uncertain retries in this helper. For cache SET/DEL, an intervening write or differing returned delete count makes blind repetition especially misleading. Update comments and error paths to surface uncertainty. Library deduplication is not added to fix the example.
 
-The cache's existing error-only replyError maps DeadlineExceeded to TRYAGAIN explicitly; changing a generic retry predicate cannot fix that. Its write path must pass the receipt and emit TRYAGAIN only when CanResubmit is true. Unknown gets a distinct uncertain-outcome error, and Applied without result must not suggest a safe repeat. Leave read-side retry classification separate. The cache's generated RequestID is stable within one helper invocation, not across a separately issued Redis command or process restart.
-
-Scheduler write paths must retain receipt information until deciding whether the same command can repeat. A new reconciliation after a fresh state read is an application decision, not automatic retry of the previous unknown command. Its leadership cancellation path still exits the expired scope. The example's internal result-only convenience function may remain only where it cannot hide information needed by an outer retry decision.
+Examples remain intentionally simple per the user's implementation steering. Keep the proposal-return/options migration and ordinary application flow. The executor may recover transient failures in its existing worker loop by re-reading committed task state before its next guarded transition; do not replay a cached proposal. Do not add waitProposalReconcile, replyProposalError, special outcome orchestration or receipt-feature tests under examples. The cache reports ordinary ERR for failed writes so it does not reuse its read-side TRYAGAIN classifier to infer write safety. Core receipt/retry behavior is covered in load/raftengine and the dedicated test fixture; pre-existing example tests still compile/run with the new API.
 
 Document latency honestly: a forwarded proposal with lost evidence may wait until the caller deadline or engine ProposalTimeout (default 30 seconds), then return Unknown and stop. Applications choose deadlines to meet their own latency requirements; heartbeats and a three-attempt cap cannot promise failover completion or a particular tail latency. This API change is not a new performance validation of README claims.
 
@@ -524,7 +522,7 @@ Additional core regressions:
 - Apply error after application-side mutation never yields a successful applied receipt.
 - Cancellation concurrent with an already-buffered terminal Applied returns that evidence. Before terminal publication, cancellation returns Unknown even after Apply completes; a later owner send does not block or mutate the returned receipt.
 - An already-published Applied outcome survives engine stop, post-Apply bookkeeping failure and Leadership context error rewriting; known result-delivery failure publishes Applied without fabricated result.
-- Halted-handle refusal is Stopped even when its cause is Unavailable; CanResubmit is false. Verify the same predicate is used by the helper and write-specific example mappings, while generic fault.Retryable retains its existing behavior.
+- Halted-handle refusal is Stopped even when its cause is Unavailable; CanResubmit is false. Verify the helper uses that same predicate, while generic fault.Retryable retains its existing behavior.
 - Helper always stops on Unknown, including zero receipts and unrecognized disposition values; Applied+DeadlineExceeded never retries.
 - Script Unknown→Applied and Unknown→NotSubmitted; assert the second invocation never runs. Verify separate calls retain independent receipts.
 - Retry all-not-submitted sequences with a private test invocation count; cap exhaustion/backoff cancellation preserve the actual last receipt. Preflight failure has explicit NotSubmitted and empty AttemptID without invoking the callback.

@@ -90,9 +90,9 @@ Raft and CRDT libraries, Zookeeper or PostgreSQL:
 
 ### Other
 
-- **Replica-local proposal results:** ready load followers and learners forward
-  ordinary writes to their leader and return results after local application,
-  with bounded waits and application request IDs preserved across forwarding.
+- **Proposal receipts:** writes report whether they were applied, refused before
+  submission, or have an unknown outcome. Supply a stable RequestID; applications
+  own deduplication. Optional retries repeat only proven transient refusals.
 - **Consistent reads:** ready voters, followers and learners confirm reads with
   ReadIndex and local apply waiting; optional application queries run serialized
   with Apply/Restore. Authoritative topology and lock reads have explicit APIs.

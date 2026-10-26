@@ -146,7 +146,11 @@ func (e *executor) drain(ctx context.Context, group *load.Group) error {
 			return nil
 		}
 		if err := e.runTask(ctx, group, *next); err != nil {
-			return err
+			if ctx.Err() != nil || !fault.Retryable(err) {
+				return err
+			}
+			// Re-read committed state before choosing another guarded command.
+			e.logger.Info("executor_waiting", "error", err)
 		}
 	}
 }
@@ -158,19 +162,18 @@ func (e *executor) runTask(ctx context.Context, group *load.Group, t task.Task) 
 	e.setPhase(&key, "starting")
 	out, err := submit(ctx, group, "start", task.Start{Key: key, Executor: e.self})
 	if err != nil {
-		logger.Info("proposal_outcome", "disposition", out.Disposition, "error", err)
-		return waitProposalReconcile(ctx, out, err)
+		return err
 	}
-	switch out.Result.Code {
+	switch out.Code {
 	case "ok", "already_running":
 	case "succeeded", "failed":
-		logger.Info("finished", "outcome", out.Result.Code, "recovered", true)
+		logger.Info("finished", "outcome", out.Code, "recovered", true)
 		return nil
 	case "stale", "task_retired", "not_found":
-		logger.Info("attempt_abandoned", "reason", out.Result.Code)
+		logger.Info("attempt_abandoned", "reason", out.Code)
 		return nil
 	default:
-		return &task.Error{Code: out.Result.Code}
+		return &task.Error{Code: out.Code}
 	}
 	e.setPhase(&key, "calculating")
 	logger.Info("started", "term", group.Status().Term)
@@ -182,27 +185,28 @@ func (e *executor) runTask(ctx context.Context, group *load.Group, t task.Task) 
 	e.setPhase(&key, "finishing")
 	out, err = submit(ctx, group, "finish", task.Finish{Key: key, Executor: e.self, Value: value})
 	if err != nil {
-		logger.Info("proposal_outcome", "disposition", out.Disposition, "error", err)
-		return waitProposalReconcile(ctx, out, err)
+		return err
 	}
-	switch out.Result.Code {
+	switch out.Code {
 	case "succeeded", "failed":
-		logger.Info("quorum_committed", "outcome", out.Result.Code)
-		logger.Info("finished", "outcome", out.Result.Code)
+		logger.Info("quorum_committed", "outcome", out.Code)
+		logger.Info("finished", "outcome", out.Code)
 	case "stale", "task_retired", "not_found":
-		logger.Info("attempt_abandoned", "reason", out.Result.Code)
+		logger.Info("attempt_abandoned", "reason", out.Code)
 	default:
-		return &task.Error{Code: out.Result.Code}
+		return &task.Error{Code: out.Code}
 	}
 	return nil
 }
 
-// submit repeats only proven refusals and preserves the receipt for the
-// executor to choose a later fresh-state reconciliation.
-func submit(ctx context.Context, group *load.Group, kind string, body any) (load.Submission, error) {
+// submit retries proven refusals; task state owns the start/finish guards.
+func submit(ctx context.Context, group *load.Group, kind string, body any) (load.Result, error) {
+	call, cancel := context.WithTimeout(ctx, proposalTimeout)
+	defer cancel()
 	p, err := task.Encode(kind, body)
 	if err != nil {
-		return load.Submission{}, err
+		return load.Result{}, err
 	}
-	return load.ProposeRetry(ctx, group.Propose, p, proposalRetry)
+	submission, err := load.ProposeRetry(call, group.Propose, p, proposalRetry)
+	return submission.Result, err
 }

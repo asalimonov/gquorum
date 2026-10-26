@@ -1,231 +1,58 @@
 # Process-test application
 
-The Dockerfile builds the dedicated caller-owned key/value fixture in this
-directory. It supplies a state-machine factory, typed load transport, application retirement
-callback and process lifecycle around a `gquorum.Node`. Node owns Raft startup,
-recovery, approved effects, membership, readmission and local stop holds.
-`node.Cluster()` supplies the topology API. The fixture imports no private meta
-or Raft engine packages. The Compose demo
-is a separate application; fixture controls and integration tests stay here.
+This package is the key/value application used by the Docker cluster tests.
+It supplies a state machine, transport, storage and test controls around
+`gquorum.Node`. The small Compose example lives separately in `examples/cluster`.
 
-The process fixture accepts `-meta-voter-config` (complete JSON
-`topology.VoterConfig`, or `null` for defaults), `-metrics` (JSON
-`gquorum.MetricsOptions`, with duration fields in nanoseconds), and
-`-election-ticks` (zero selects the library default). These map directly to
-public Node options. Metadata voter configuration applies only to fresh
-founding; retained replicas use approved replicated configuration.
-The Docker pool exposes these as `Spec.MetaVoterConfig`, `Spec.Metrics` and
-`Spec.ElectionTicks` for per-test overrides.
+## Package structure
 
-Test controls live in `hooks_cluster.go`. They provide direct
-local replica and actual storage identities, membership/materialized values, durable snapshot size and
-index, received-snapshot counts, exact successful effect receipts and cancelable
-effect barriers. Barriers can hold prepare, add learner, promote, demote,
-leadership transfer, stop, cleanup or delete
-effects. Released effects recheck their complete authorization before changing
-state. The transport also routes local actions through the Node receiver, so
-fault injection covers the same path on every host. RPC cancellation releases its own wait; the armed barrier
-remains for a later retry until the test explicitly releases it.
+| Files | Purpose |
+|---|---|
+| [main.go](main.go), [app.go](app.go) | Configuration, application construction and process lifetime. |
+| [node_generation.go](node_generation.go), [controller.go](controller.go) | Node generations and topology operations. |
+| [machine.go](machine.go), [store.go](store.go) | KV state, application request deduplication, snapshots and storage. |
+| [http.go](http.go), [routing.go](routing.go), [serving.go](serving.go) | Application HTTP API, routing and readiness. |
+| [load_transport.go](load_transport.go), [load_snapshot.go](load_snapshot.go) | Authenticated load transport and snapshot integration. |
+| [hooks_cluster.go](hooks_cluster.go), `hooks_*` | Test routes, observations and fault controls. |
+| [submission_controls.go](submission_controls.go) | Exact-replica proposal receipts for process tests. |
+| `recovery_*`, [meta_proxy_cluster.go](meta_proxy_cluster.go) | Recovery jobs and optional metadata fault proxy. |
+| `snapshot_*`, [load_snapshot_stats.go](load_snapshot_stats.go) | Generated snapshot fixtures, controls and resource observations. |
+| `*_test.go`, `*_func_test.go` | Units and isolated functional checks; multi-node scenarios live in the parent package. |
+| `load.proto`, `loadpb/`, [Dockerfile](Dockerfile) | Fixture protocol and process-test image. |
 
-Action errors preserve structured `membership.SafetyRefusal` details in the
-existing reply data envelope, including on loopback calls. A transient loss of
-post-change live quorum therefore keeps the affected operation block waiting instead
-of becoming an unclassified terminal failure. Unknown detail schemas retain the
-conservative unstructured refusal; error messages are never parsed for policy.
+## Run checks
 
-Local inspection includes the library's native proposal-admission observation.
-`POST /internal/test/propose/{group}/{replica}` submits to the exact local
-engine without aggregate peer probes. The thirty-second pending-waiter test
-explicitly sets `-proposal-timeout=1m`; other cases use the library's thirty-second
-default. The control's HTTP deadline is one minute and ordinary application
-requests keep their ten-second deadline. Request cancellation participates in the
-application's owned effect lifetime and engine waiter cleanup.
+From the repository root:
 
-`GET /api/load/{id}/read/{key}` queries `Group.Read`: any ready local hosting
-replica, including a follower or learner, obtains leader-confirmed ReadIndex,
-waits for its own application state and runs the optional KV Query on the machine
-owner. Successful replies identify `consistency: linearizable`; missing keys
-return 404 after the same barrier. Query errors do not halt the replica. The
-existing `GET /api/load/{id}/keys/{key}` remains an explicit local observation
-with `consistency: local`. Both routes apply the caller's serving gate; neither
-redirects a stopped local handle. The process-test `Cluster.Read` helper uses the
-consistent route. No internal authority data appears in application query payloads.
+```sh
+make test
+make test-function
+make test-cluster-build
+make test-cluster-run CLUSTER_ARGS='-v -run ^TestSubmission'
+```
 
-The typed load transport preserves `ReplicaQuery.Native` and `ReplicaStatus.Native`
-through its authenticated ReadReplica route, including exact applied indexes and
-member/replica identities. Diagnostic replies do not supply native proof. Node
-performs the authority and identity checks after the protocol validates its header
-and route. Pending authority maps to HTTP 503; a fenced grant or replan-required
-result maps to HTTP 409.
+Rebuild the image after application changes. The harness owns isolated clusters
+and their cleanup. See the [cluster testing guide](../README.md) for other suites.
 
-Approved load learners can serve local observations and forward writes through
-their Raft leader. The serving gate reads exact group/node convergence from one
-bounded ReadProgress page and checks the local handle plus matching native role, so prepared replicas cannot serve early. Bootstrap gives
-the `workers` group an explicit two-voter target and places learners on remaining
-eligible hosts. Group administration also exposes `voter-config`, `hosting` and
-`pinned-learner` mutations through the fixture's public API adapter.
+## Key information
 
-`PUT /internal/test/fences/{group}/{host|group}` arms a resource fence delivery
-barrier. Its body requires the current node/member/process `identity`; group
-barriers also bind the exact local `replica_id` (zero selects the current one).
-`purpose` defaults to revocation `fence`, `min_revision` selects newer grants,
-and `after: true` holds response delivery after Node durably installs the fence.
-The default holds delivery before installation. Cancellation ends an individual
-wait while the barrier remains armed for retries; authenticated `DELETE` releases
-it. A former-member or replaced group-replica control cannot hold its successor.
-
-`GET /internal/test/authority/{group}` returns bounded owned captures of delivered
-actions, successful receiver receipts, installed fence evidence and armed fence
-barriers. Captures keep exact uint64 revisions and clone immutable grant/proof
-fields. They are diagnostic and do not authorize an effect. Authenticated
-`POST /internal/test/authority/{group}/action` replays a supplied action through
-Node's ordinary ingress with the original courier/grant/target; refusals do not
-produce completion receipts. `GET /internal/test/revocation/{operation}` uses the
-public safe `Cluster.ReadAuthority` API to observe pending/completed obligations.
-These controls let process tests distinguish approval, local fencing and receipt
-acknowledgement, including a lost fence reply.
-
-`PUT /internal/test/reads/{group}/{replica}` arms exact local read faults using
-an `identity` equal to the current node/member/process. Flags can drop append and
-snapshot traffic (`drop_append`), drop all incoming load Raft (`drop_raft`), drop
-only ReadIndex replies (`drop_read_response`), or hold the actual machine owner
-in Apply/Query (`hold_apply`, `hold_query`). `DELETE` with the same identity clears
-that exact control. All routes require the test credential. Other groups and
-successor replica IDs remain independent. A dropped snapshot reports failure
-instead of manufacturing snapshot delivery success.
-
-Local inspection includes callback attempts, active/completed callbacks, actual
-applied indexes, dropped-message counts, accepted ReadIndex reply indexes and
-sent request/context counts. It retains one diagnostic read context per owned
-replica, so retransmission does not grow the observation store. Controls are
-volatile and disappear only after Node joins the machine and application Close.
-Canceling a Query wait releases its callback without halting the replica; stopping
-a replica cancels and joins even an armed machine barrier.
-
-`read_queue` and `read_queue_stamp` expose the engine's existing metrics sample:
-request limit, in-flight/queued requests, quorum/apply waits and local/remote
-round counts. They share the Raft owner's generation and age; blocked callbacks
-freeze the sample and status reads cannot freshen it. These fields are diagnostics
-for queue-bound assertions, never read or authority evidence.
-
-`hooks_wal_cluster.go` wraps the actual load store with cancelable write stalls
-and bounded transient-failure injection, keyed by group and exact replica ID.
-Local inspection distinguishes attempted writes, entry attempts, failed calls,
-active calls and successfully persisted entry batches. Failed or canceled calls
-do not contribute to successful entry accounting. Meta uses its own unwrapped
-bbolt store. The fixture passes its requested load WAL coalescing wait through
-the application's constructor settings.
-
-`hooks_projection_cluster.go` implements an auxiliary caller-owned full-FSM
-projection only after an authenticated test requests it. It writes atomic JSON
-files below the application's supplied data directory, independently of Raft
-and the local event journal. Controls target an exact group/replica and can stall
-a real pending projection write. Observation reads the actual stored file and
-reports waiting/active writes separately from completed writes. A stalled worker
-does not hold the FSM lock; release resumes catch-up, and cancellation/replica
-retirement joins the worker before application storage teardown. Projection files
-carry their complete storage identity. The retirement callback verifies that pin,
-removes only the exact file, syncs its directory and repeats safely after success. The fixture runs independently of the ordinary Compose demo.
-
-Every control request requires the fixture's fresh credential in
-`X-Gquorum-Test-Credential`. The normal application protocol keeps its existing
-credential and exact cluster/member/replica checks. None of these controls add
-library configuration or load-protocol fields.
-
-Use `make test-cluster-build` to build the image. Run focused scenarios with
-`make test-cluster-run CLUSTER_ARGS='-race -v -run TestRuntimeGrowth'`.
-
-HTTP mutations use `approve` and return `operation_id`. Separate approval uses
-`POST /api/topology/{version}/approve`; scoped convergence uses `GET /api/progress`
-and exact execution status uses `GET /api/operations/{id}`. Explicit failed-attempt
-retry uses `POST /api/operations/{id}/retry`; lost-response retries preserve the
-original CAS/identity. Version-conflict errors preserve `rebased_to`.
-The fixture retains its additional load/group/event and fault endpoints. The
-small example remains limited to `_meta` topology/status/drain/activate.
-
-In-process application and private metadata-ledger assertions run through
-`make test-function`, in tagged `*_func_test.go` files in `tests/cluster/testapp`
-and `internal/managed`, together with exact retirement
-and readmission tests. Process tests still prove missing-store parking, persisted
-identity, fresh-ID reseating, verified cleanup and recovery from actual WAL data;
-its inspection endpoint reads the caller-supplied store rather than meta internals.
-
-`-meta-fault-proxy=true` opts into a caller-owned metadata listener proxy for
-resource-fencing scenarios. It forwards authenticated unary and client-streaming
-protocol frames to the real library service and applies the existing fence
-barriers to actual metadata `InstallFence` delivery or replies. Captured evidence
-comes from successful real receiver replies. The proxy owns and joins its
-listener, handlers and outgoing connection; normal process and performance cases
-leave it disabled. No test-only hook was added to the library.
-
-The proxy's authenticated `/internal/test/meta` control can withhold Raft message
-and snapshot delivery to one exact metadata process/member while continuing to
-forward control/proof RPCs. Its dropped-frame counter and the receiver's local
-Target show metadata staleness. Snapshot drops return a transport refusal, and
-controls cannot affect a successor identity.
-
-For collection-outage tests, the same proxy accepts authenticated
-`PUT/GET/DELETE /internal/test/collection-report` for one exact `storage.Identity`.
-It holds only matching ReportCollection frames, records the immutable receipt
-and releases individual canceled RPC waits. Other metadata traffic remains live.
-`GET /internal/test/collections/{group}/{replica}` returns process-local Collect
-call counts (bounded to 128 identities); restarting resets those counters. Durable
-success evidence comes from the library journal, not these counters.
-`-retention` explicitly configures the fixture lifecycle retention; zero preserves
-the library default of seven days. Fast collection scenarios use a positive short
-duration. The retirement wrapper delegates actual proof handling to WAL storage.
-
-Collection recovery needs no application cleanup loop: Node resumes prepared
-journal rows, retries original collected receipts, and releases markers only
-after verified metadata acceptance/settlement. Tests copy the authority database
-only while its process is stopped; opening a second live owner is forbidden.
-
-The Node-owned fixture exposes remote permanent-majority-loss recovery through
-credential-protected `/internal/test/recovery` routes. These are caller controls,
-not library HTTP APIs. `POST /prepare` takes `{id, request}` with a stable caller
-job ID and a public `recovery.Request`. It persists maintenance, joins the old
-Node, inspects retained storage, and saves the effective request and plan.
-`GET /{id}` reports the saved job and public `Recovery.Status`; `GET` on the
-collection returns that job plus `Recovery.List`, including bounded history.
-`POST /{id}/confirm` takes the exact public Acceptance. `retry` resumes the same
-operation; `cancel` takes stable `{actor, reason}` audit fields. Responses are
-202 acknowledgements, not completion proofs. Request cancellation never owns
-these workers. The fixture supports one maintenance job per retained data root;
-use a new isolated deployment for a different scenario.
-
-`recovery-job.json` is caller-owned durable state outside library archival.
-Process startup reads it before checking the original cluster affiliation. A
-saved maintenance job boots management first, with consensus stopped; a completed
-job supplies the recovered affiliation even when container arguments still name
-A. A normal GroupFactory reconstructs the machine from the library's recovery
-input. Recreated Node generations use fresh process identities and
-`RecoveryStartOptions`, then release maintenance after validated readiness.
-Old delivery identities cannot target the replacement generation.
-
-The Files hook moves only caller `established.json` and `projection/` into its
-library-generated application backup directory. Its own inventory makes Backup
-and Undo idempotent; Undo failures retain maintenance. The active job and event
-journal stay live. Authenticated `PUT /controls` can hold Files, hold after
-application moves, hold readiness, or fail the next Backup/Undo call;
-`GET /metrics` counts these callbacks and actual Application.Run starts. All
-control paths begin `/internal/test/recovery`; management remains available while
-Node is stopped. Borrowed-store mode explicitly refuses recovery.
-
-For committed-prefix process scenarios, arm the existing exact-incarnation
-`DropAppend` control on both followers, keeping heartbeats alive. After proposing
-on the stable leader, require dropped-append evidence and unchanged committed
-values, stop the lost peers and prepare recovery on that leader. The harness's
-`RequireRecoveryTail` accepts the setup only when the offline public inspection
-reports usable load data with `LastLog.Index > Commit.Index`. A proposal timeout
-alone is insufficient evidence. Metadata-tail and corruption cases remain in
-owning component suites.
+- Configuration is declared in `main.go`; the harness `Spec` supplies per-test
+  overrides. Use an explicit data directory and preserve it for retained restarts.
+- The process serves HTTP on 8080, metadata on 9000 and load traffic on 9001.
+- Every `/internal/test/` request requires the fresh fixture credential in
+  `X-Gquorum-Test-Credential`. Normal application traffic also authenticates its
+  cluster and peer identity. Controls are not production library APIs.
+- Controls target exact replica/process identities. Release armed barriers and
+  join workers during cleanup; stale controls must not affect replacements.
+- `POST /internal/test/submission/{group}/{replica}` returns the local proposal's
+  receipt and error. Business rejection stays in the applied result code.
+- Consistent reads use `Group.Read`; local inspection is observational. Topology
+  edits use version checks, approval and operation status.
+- Recovery requires Node-owned WAL. Its caller-owned maintenance job survives
+  process restart; a request acknowledgement is not proof of completion.
 
 ## Snapshot controls
 
-The fixture now uses production `loadgrpc` for ordinary Raft and chunked snapshots on the same existing load server. `-snapshot-transfer` carries JSON `snapshot.Options` from pool `Spec.SnapshotTransfer` to Node creation. Factory, transport binding and controls capture exact Node generations; old controls cannot affect a replacement.
-
-Authenticated `/internal/test/snapshot/{group}/{replica}` GET returns compact application/offer/transfer observations; PUT arms identity-bound chunk delay/corruption, one-shot admission/chunk/final Ack loss and phase holds. POST on its `/generate` child replicates a versioned synthetic configuration and forces a snapshot. No ordinary startup generates large data. The snapshot preserves full KV/dedup state, counters and opaque prepared/replay records, then reproducible generated bytes and a digest; Restore verifies every byte with bounded scratch. Only compact seed/size/hash/index metadata leaves inspection endpoints. Generation HTTP waits allow 30 minutes independently of Node policy.
-
-Phase holds include chunk, before Finish/after handoff, before/after persistence and before/after Restore. Persistence holds require the borrowed fixture WAL; Node-owned WAL cases refuse unsupported holds. Cancellation releases an individual wait and cleanup joins actual workers. A bounded exact-identity Restore failure count tests automatic recovery after accepted ingress without turning acceptance into install proof. Resource inspection optionally adds `?store_disk=1` for actual load-store size; ordinary resource reads avoid that walk.
-
-The explicit large suite uses small observed envelope calibration, full generated payloads and Node-owned WAL. See [qualification selection and resource requirements](../README.md#explicit-large-snapshot-qualification). Runtime outcomes remain unqualified until executed; generated blobs never belong in source control.
+Ordinary startup generates no large payloads. Snapshot controls and generated
+qualification data are opt-in; never commit generated blobs. See
+[large-snapshot qualification](../README.md#explicit-large-snapshot-qualification).

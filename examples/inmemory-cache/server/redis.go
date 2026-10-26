@@ -180,9 +180,7 @@ type writeRequest struct {
 	result  any
 }
 
-// write repeats only proven refusals through the exact local replica.
-// TODO(not planned): durable logical IDs across independent Redis commands
-// need an application protocol; a lost reply can leave the outcome unknown.
+// write submits through the library's safe proposal retry helper.
 func write(ctx context.Context, group *load.Group, w resp.Writer, request writeRequest) bool {
 	cmd, out := request.command, request.result
 	if cmd.Op == "set" && (cmd.Key == "" || len(cmd.Key) > cache.MaxKeyBytes || len(cmd.Value) > cache.MaxValueBytes) {
@@ -195,7 +193,7 @@ func write(ctx context.Context, group *load.Group, w resp.Writer, request writeR
 	result, err := load.ProposeRetry(ctx, group.Propose, load.Proposal{RequestID: cmd.Op + "/" + hex.EncodeToString(
 		id), Data: data}, proposalRetry)
 	if err != nil {
-		replyProposalError(w, result, err)
+		w.Error("ERR " + err.Error())
 		return false
 	}
 	if result.Result.Code != "ok" {
@@ -238,19 +236,6 @@ func replyError(w resp.Writer, err error) {
 		return
 	}
 	w.Error("ERR " + err.Error())
-}
-
-func replyProposalError(w resp.Writer, s load.Submission, err error) {
-	switch {
-	case s.CanResubmit(err):
-		w.Error("TRYAGAIN " + err.Error())
-	case s.Disposition == load.SubmissionApplied:
-		w.Error("ERR proposal applied; result unavailable")
-	case s.Disposition != load.SubmissionNotSubmitted:
-		w.Error("ERR proposal outcome unknown")
-	default:
-		w.Error("ERR " + err.Error())
-	}
 }
 
 func wrongArgs(w resp.Writer, name string) {

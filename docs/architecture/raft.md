@@ -182,7 +182,8 @@ and lease checks do not replace Raft's quorum rules.
 ## 5. From an application proposal to an applied result
 
 1. The application calls `Propose` on a ready local `load.Group`, supplying
-   command bytes and an application request ID when retries need deduplication.
+   command bytes and a required stable nonempty application RequestID. Each call
+   gets a distinct AttemptID in the existing log envelope's Correlation field.
 2. The engine bounds admission, copies the command into an envelope and submits
    it to RawNode. The group run loop serializes access to Raft and the machine.
    A follower or learner forwards an ordinary MsgProp through the authenticated
@@ -194,7 +195,8 @@ and lease checks do not replace Raft's quorum rules.
    the leader to establish the committed prefix under the current voter quorum.
 5. The engine persists the resulting durable state and applies committed entries
    in order. `StateMachine.Apply` receives index, term, request ID and command
-   bytes. The matching proposal gets the result after local application.
+   bytes. The matching proposal returns a receipt with its business result and
+   applied position after successful local application.
 6. After the committed batch, any meta materialization hook runs on the same
    loop. Applied bookkeeping is handed to the writer before the engine advances
    RawNode and releases the batch's outgoing messages. Snapshot work can follow
@@ -218,7 +220,12 @@ effects and outboxes remain application responsibilities.
 deadline takes precedence. A definitive local `ErrProposalDropped` gets at most
 one retry on the owned Raft loop, retaining the same correlation and request ID.
 Ambiguous transport outcomes are not automatically retried. Installing a snapshot
-that may subsume a pending result returns unavailable with an uncertain outcome.
+that may subsume a pending result returns unavailable with an indeterminate receipt.
+Public load calls return a receipt: Applied, NotSubmitted or Indeterminate.
+Only proven transient refusals are automatically retried by load.ProposeRetry.
+A lost reply or canceled wait may remain indeterminate even when the command
+applied. Use a caller deadline for your latency requirements; heartbeats do not
+resolve an uncertain business outcome.
 
 Replicas must implement deterministic application decisions for the same command
 stream. Inputs such as business timestamps or random choices that affect state
@@ -342,38 +349,3 @@ resolve names. A known leader ID is not proof that the caller can currently
 reach a committing quorum. Events are local and are not replicated through
 `_meta`; their leader fields retain decimal Raft IDs, with `"0"` meaning no known
 leader.
-
-## 10. Implementation map
-
-| Source | Responsibility |
-| --- | --- |
-| [Shared engine](../../internal/raftengine/group.go), [run loop](../../internal/raftengine/loop.go), [writer](../../internal/raftengine/writer.go), [sender](../../internal/raftengine/outbound.go) | RawNode integration, admission, persistence ordering, apply and outgoing traffic. |
-| [Load contracts](../../load/machine.go), [transport](../../load/transport.go), [group handle](../../load/group.go) | Application integration and replica-facing API. |
-| [Meta protobuf](../../internal/metapb/meta.proto), [transport](../../internal/metatransport/transport.go) | Included meta RPCs and serialized Raft message delivery. |
-| [Meta service](../../internal/metaservice/group.go), [session renewal](../../internal/metaservice/session.go), [expiry](../../internal/metaservice/expiry.go) | Node coordination and session maintenance. |
-| [Storage contract](../../storage/storage.go), [meta adapter](../../internal/metastore/adapter.go), [WAL writes](../../internal/walbackend/operations.go), [in-memory store](../../storage/memstore/store.go) | Identity and consensus persistence. |
-| [Membership safety](../../membership/safety.go), [managed ownership](../../internal/managed/host.go) | Safe group changes and exact replica lifetimes. |
-
-See the [testing guide](../testing/tests.md) for unit, functional, race and
-process coverage, and the [physical compatibility baseline](../testing/api-baseline-physical.md)
-for retained storage and protocol fixtures.
-
-
-## Disaster recovery and consensus boundaries
-
-Permanent-majority-loss recovery creates a new lineage from one complete
-survivor's validated retained commit. Ordinary restart and offline inspection
-share the replay interpreter for complete snapshots, application entries and
-native/admin records. Applied hints never replace commit evidence, and an
-uncommitted suffix is reported/preserved in A's backup rather than applied or
-truncated. Required snapshots, gaps, invalid terms/CRC and nonfinal torn frames
-refuse recovery. Only a validated final torn tail beyond retained evidence may
-be ignored for interpretation; bytes remain intact.
-
-B uses ordinary single-node metadata founding, one scoped import and normal
-load creation authority. It transplants committed application state into fresh
-replicas, writes a normalized complete checkpoint and confirms actual effect
-receipts before consumption. The metadata recovery subtree is independently
-versioned; old decoders explicitly refuse it. No force-leader RPC, forged vote,
-new protobuf or copied A authority is introduced. Local reconstruction does not
-change the full-buffer application/storage contract. Remote chunking is described in [load transport multiplexing](load-transport-multiplexing.md).

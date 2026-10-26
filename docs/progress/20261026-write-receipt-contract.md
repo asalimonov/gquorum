@@ -48,3 +48,21 @@ Date: 2026-10-26. Commit: this task commit.
 Registered the fixture-only exact-replica submission route with existing credential protection. It preserves the full returned receipt and library error separately from business rejection. Added three-node follower/learner, business-rejection and concurrent logical-ID cases plus a pure authentication/invalid-group unit. Application fingerprint dedup remains inside the existing caller FSM; no schema or production transport changes.
 
 Verified: make test PASS 2,344/2,344 in test-reports/unit/20261026T133302.966439Z-clcv14j8; pending lint and fixture vet PASS; clustertest compile-only PASS. No Docker executed: the three new process cases are compiled and their runtime gate is explicitly pending penultimate Task 6.
+
+## Task 6 steering — Minimal public docs and examples
+
+User requested concise external documentation, then explicitly removed waitProposalReconcile/replyProposalError and all newly added tests under examples. Removed both helpers, the two example-only unit files and added loader test cases, retaining only receipt.Result/options adaptation and ordinary errors. Cache write failures use ERR directly rather than a read-side TRYAGAIN safety inference. Existing example tests remain. Updated target §8 and the plan to reflect this overriding instruction; core receipt and fixture coverage is retained. Full functional/race suites passed for the unchanged library; example checks are refreshed after this simplification.
+
+## Task 6 — Validation underway
+
+Published docs kept concise per user direction; fixture README reduced from 236 to 58 lines, retaining only package map and key use/test information. Removed newly added example policy helpers and tests as requested. Final units and unit race both PASS 2,338/2,338: test-reports/unit/20261026T134926.182363Z-ij294c1c and test-reports/unit-race/20261026T134927.270283Z-689zqxu1. Full functional and functional-race suites each PASS 1,448/1,448: test-reports/function/20261026T133853.164377Z-qli5viig and test-reports/function-race/20261026T134214.748396Z-nahnsg8_. After the example simplification, directly refreshed scheduler/cache functional-race checks, all PASS. Full make lint-full PASS across all modules/build variants, including compile checks for tests/sim. Docker server 29.6.1 is available; dedicated image build started in penultimate Task 6. No cluster gate has been marked complete yet.
+
+## Task 6 — Scheduler regression diagnosis
+
+Scheduler Compose failed after partition/reconnect in example/20261026T140306.342034Z-eddz07y1; diagnostic rerun example/20261026T140651.017372Z-f0at66k4 failed after leader crash. Full logs confirmed a proposal wait timed out and the executor propagated it as a permanent Application.Run failure, stopping the replica. Kept the requested simple example: no receipt helper or new tests. Its existing worker now re-enters drain on transient failure; drain starts with a fresh committed-state read and task CAS guards decide the next command. Updated target §8/plan for this narrow, evidence-driven exception to purely mechanical migration. No uncertain replay was added to the library helper.
+
+## Task 6 — User-requested intermediate commit
+
+User requested committing all changed files, including their background architecture-document simplification and deletion of library.md. This checkpoint includes those edits with Task 6 still open. Full ordinary cluster suite passed 123/123 (cluster/20261026T135718.827563Z-v_n52v9h), focused receipts passed 3/3 (cluster/20261026T135529.050247Z-m0hu8cfs), meta Compose passed (example/20261026T140228.631074Z-jl1t8g10), and cache Compose passed (example/20261026T140652.182746Z-dqiy0ih6). Scheduler still requires verification.
+
+The first executor fix recovered instead of stopping, but its default 30-second proposal wait plus queued work exceeded the existing process test's completion window (example/20261026T141026.513734Z-gv6ltkdu). Moved the small recovery branch into the existing drain loop to satisfy lint and gave scheduler writes an explicit three-second application call budget. Each uncertain return is followed by a committed-state read and application CAS checks; the library helper still never retries uncertainty. No test timeout increase, receipt-specific helper or new example test. Fresh targeted validation follows this checkpoint.
