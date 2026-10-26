@@ -480,70 +480,70 @@ unless a concrete gap requires a recorded minimal expansion.
 §10.3–§10.12 recovery/failures, §11.2–§11.3 verification, and §13.18–§13.23.
 Current [physical fixture provenance](../testing/api-baseline-physical.md).
 
-- [ ] Replay pre-change serialized unmarked `begin_operation` commands after a
+- [x] Replay pre-change serialized unmarked `begin_operation` commands after a
   pre-deletion snapshot, through retained committed indexes. Cover required-stop
   deletion, inherited detached debt and zero-step pending readmission. Compare
   original expected state, status and subsequent legacy completion/retry; a
   decoder-only test is insufficient.
-- [ ] Separately replay marker-1 commands to the new logically completed state;
+- [x] Separately replay marker-1 commands to the new logically completed state;
   prove unknown values refuse without state changes and old zero encodings
   remain exact. Mixed-operation retry must preserve successful deletion blocks
   while retrying only failed siblings, without a snapshot/public operation mode.
-- [ ] Add metadata snapshot/restore and history-pruning regressions after logical
+- [x] Add metadata snapshot/restore and history-pruning regressions after logical
   completion with an unreachable owner. Verify the permanent tombstone,
   historical member, bound actions, source documents and actual timestamps survive.
-- [ ] Prove incomplete debt roots its evidence even with `GroupProgress.Deleting == false`. Preserve bounded progress pages and complete aggregate operation
+- [x] Prove incomplete debt roots its evidence even with `GroupProgress.Deleting == false`. Preserve bounded progress pages and complete aggregate operation
   status. Do not pin every historical group document indefinitely.
-- [ ] Exercise repeated/lost/late effect receipts after completion and
+- [x] Exercise repeated/lost/late effect receipts after completion and
   supersession. Preserve first timestamps and exact tuple/attempt attribution;
   conflicting receipts must refuse without partial mutation.
-- [ ] Exercise missing, partial, complete and superseded readmission batches.
+- [x] Exercise missing, partial, complete and superseded readmission batches.
   Logical deletion remains successful with ordinary debt; only whole-batch proof
   updates stop/retirement, only its exact historical identities, and no ordinary
   RPC reaches the replacement under the predecessor's member ID.
-- [ ] Exercise a current deleted replica, prepared-only owner and held local
+- [x] Exercise a current deleted replica, prepared-only owner and held local
   replica through the actual cleanup ingress. A local hold does not prevent
   approved retirement; foreign/successor storage remains untouched.
-- [ ] Verify retained startup and startup recapture reject the retired ID before
+- [x] Verify retained startup and startup recapture reject the retired ID before
   handle publication. Reuse `TestStartupRecaptureIgnoresIndependentVersionAndRejectsAssignmentChange`
   and the existing exact authority-floor checks.
-- [ ] Verify a delayed factory, Apply/replay, failed Close and canceled waiter
+- [x] Verify a delayed factory, Apply/replay, failed Close and canceled waiter
   retain ownership for serialized retries. Logical completion cannot release
   borrowed or Node-owned resources before their owners join.
-- [ ] Verify terminal deletion cleanup through the real controller path:
+- [x] Verify terminal deletion cleanup through the real controller path:
   `ReadyCleanup -> BeginCleanupEffect -> exact dispatch -> RecordEffects`,
   not just pure predicate tests.
-- [ ] Hold unreachable native fence work under the normal cleanup budget and
+- [x] Hold unreachable native fence work under the normal cleanup budget and
   prove reachable host stops eventually progress using existing rotation/backoff.
   Preserve the distinction between `WaitOperation` and `WaitRevoked`.
-- [ ] Verify all-host stop evidence activates native settlement but leaves
+- [x] Verify all-host stop evidence activates native settlement but leaves
   outstanding host retirement/collection separate. Reject premature physical
   settlement when any known host remains unproven.
-- [ ] Exercise the existing collection transaction order: preparation before
+- [x] Exercise the existing collection transaction order: preparation before
   deletion, durable completion before report, exact store marker release before
   journal row removal. Test callback/store failure and retry with original proof.
-- [ ] Validate both WAL and memory debt completion semantics; do not fabricate
+- [x] Validate both WAL and memory debt completion semantics; do not fabricate
   `CollectedAt` for memory storage.
-- [ ] Run existing frozen metadata, authority and native restart fixtures as
+- [x] Run existing frozen metadata, authority and native restart fixtures as
   read-only originals with private writable copies. Preserve hashes and canonical
   encodings; never regenerate baseline artifacts to satisfy changed expectations.
-- [ ] Keep historical required-stop operations restorable and executable with
+- [x] Keep historical required-stop operations restorable and executable with
   original retry semantics. New approvals must reject that old shape without
   changing decoding behavior.
-- [ ] Record any necessary implementation corrections in NOT PLANNED CHANGES and
+- [x] Record any necessary implementation corrections in NOT PLANNED CHANGES and
   rerun affected tests; do not add a new scheduler, watcher, store schema or
   public API as a test convenience.
 
 #### Verification
 
-- [ ] `make test` and `make lint`; focused vet for every production package changed
+- [x] `make test` and `make lint`; focused vet for every production package changed
   by a correction.
-- [ ] `make test-function FUNCTIONAL_ARGS="-run 'Deletion|Cleanup|Collection|Readmission|StartupRecapture|FencedHost|FullStop|Frozen|Restart'"`.
-- [ ] Check owning functional tests call `t.Parallel()` before acquiring fixtures,
+- [x] `make test-function FUNCTIONAL_ARGS="-run 'Deletion|Cleanup|Collection|Readmission|StartupRecapture|FencedHost|FullStop|Frozen|Restart'"`.
+- [x] Check owning functional tests call `t.Parallel()` before acquiring fixtures,
   use joined cleanup and do not introduce multi-node in-process consensus.
-- [ ] Record case names and fresh report paths. Race execution is reserved for
+- [x] Record case names and fresh report paths. Race execution is reserved for
   Task 7 unless a new concrete concurrency defect requires a focused run now.
-- [ ] Commit the verified checkpoint.
+- [x] Commit the verified checkpoint.
 
 ### Task 5: Add three-node offline, missing-load-quorum and catch-up regressions
 
@@ -890,6 +890,14 @@ During execution record each gap as:
 Do not use an out-of-scope label to hide a required target feature.
 
 ## NOT PLANNED CHANGES
+
+Task 4 implementation adjustments (reviewable in its commit):
+- cleanup_debt_bench_func_test.go: its functional query regression builds current
+  plans; select mode 1 and record a real detached Stop before scaling retirement
+  debt. The initial focused functional run exposed the obsolete mode-0 pairing.
+- New testdata/deletion-replay captures came from the unchanged 8e57798 worktree;
+  no existing frozen fixture was regenerated or edited. Complete resulting
+  snapshots match byte-for-byte, then legacy failure/retry retains original plans.
 
 Task 3 implementation adjustments (reviewable in its commit):
 - scoped_approval_retirement.go: use a planningCollector receiver to meet the

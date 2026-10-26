@@ -1,0 +1,1 @@
+{"schema_version":4,"kind":"begin_operation","body":{"version":3,"plan":{"version":3,"steps":null,"blocks":[{"group_id":"shard0","source_version":1,"steps":null}]},"scopes":[{"group_id":"shard0","source_version":1,"owner":"exec-v2-a1"}],"actor":"","origin":"","at":"2026-10-15T00:00:01Z","proposal_id":"historical-pending-readmission"}}

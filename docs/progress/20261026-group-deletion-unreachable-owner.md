@@ -93,3 +93,40 @@ Findings and corrections
   its readmission floor. A regression exposed and now prevents that fence.
 - Target §9.15e documents the scoped authority correction; old command behavior
   stays explicit. Helper extraction satisfies lint without public API changes.
+
+## Task 4 — Persistence, replay and local lifecycle verification
+Date: 2026-10-26. Previous task commit: 12ce6f8. Commit: this task's commit.
+
+Implemented and verified
+- Captured three additional historical snapshot/command/result fixtures from
+  unchanged revision 8e57798. New Machine.Restore/Apply reproduces each complete
+  original result byte-for-byte, including inherited debt and zero-step pending
+  readmission; legacy failure/retry retains immutable plans and pending deletion.
+- New marker replay, pruning/restore with unstopped debt, successful deletion
+  sibling retry, missing/closed/partial readmission, actual whole-batch settlement,
+  late duplicate/conflicting effect receipt tests passed.
+- Actual local cleanup covers current/prepared/held replicas. Startup recapture
+  now explicitly tests a retired-group refusal before handle publication.
+- Existing functional cases cover bounded fence/cleanup alternation, late factory,
+  failed Close, canceled waiters, joined replay, exact successor refusal, memory
+  retirement and collection transaction/report ordering. Existing frozen physical
+  baseline paths have no diff from 8e57798.
+
+Validation
+- make test: 2,361/2,361 PASS (9.729s), unit/20261026T142032.190219Z-7brg5tdw.
+- Expanded focused functional suite: 256/256 PASS (39.183s),
+  function/20261026T142104.423749Z-t3_jye0p; includes all Task 4 required patterns
+  plus delayed factory/Close/cancellation/retirement regressions.
+- Added terminal receipt and historical retry tests passed after the full unit run.
+- make lint, owning-package vet, diff check and unchanged frozen paths passed.
+
+Findings
+- Initial functional run failed only the cleanup benchmark fixture's legacy-mode
+  approval of a new planner shape; fixed with mode 1 and actual Stop receipt.
+- A malformed missing-readmission test initially deleted evidence still referenced
+  by other completed debt. The missing-batch case now uses a valid unissued-batch
+  source; inherited closed/partial batch cases retain their original evidence.
+- The conflict test initially checked only Go errors, overlooking the FSM
+  refusal result. Corrected it to check Accepted as well; the foreign replica
+  target refuses without changing retained evidence.
+- No production correction or public/schema change was needed in this task.

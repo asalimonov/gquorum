@@ -114,8 +114,8 @@ func TestDeletionApprovalCompletesWithExactPendingCleanup(t *testing.T) {
 	}
 }
 
-func TestDeletionApprovalDoesNotCompleteRequiredSibling(t *testing.T) {
-	t.Parallel()
+func mixedDeletionApprovalFixture(t *testing.T) (scopedState, BeginOperationProposal) {
+	t.Helper()
 	s, p := deletionApprovalFixture(t)
 	p = planDetachedApproval(t, &s, p)
 	s.Latest.MetaGroup().Labels = map[string]string{"owner": "other"}
@@ -130,6 +130,12 @@ func TestDeletionApprovalDoesNotCompleteRequiredSibling(t *testing.T) {
 	p.Plan.Blocks = append([]topology.PlanBlock{{GroupID: topology.MetaGroupID,
 		SourceVersion: s.indexes.groups[topology.MetaGroupID].SourceVersion, Steps: []int{1}}}, p.Plan.Blocks...)
 	p.Scopes = s.capturePlanScopes(topology.AffectedGroups(s.Target, s.Latest))
+	return s, p
+}
+
+func TestDeletionApprovalDoesNotCompleteRequiredSibling(t *testing.T) {
+	t.Parallel()
+	s, p := mixedDeletionApprovalFixture(t)
 	applyScopedApprovalFixture(t, &s, p)
 	op := s.Operations[len(s.Operations)-1]
 	if op.Status.State.Terminal() || op.Status.Blocks[0].State.Terminal() ||
