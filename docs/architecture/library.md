@@ -11,18 +11,18 @@ The public handles separate participant operation, administration, consensus and
 | `*load.Group` | One local replica: application proposals, leadership/status, snapshots and proposal-pressure diagnostics. A stopped handle never redirects into its replacement. |
 | `gquorum.Recovery` | Configuration for inspecting, accepting and archiving a stopped survivor. Each call owns and releases its resources; the handle has no Close lifetime. |
 
-```mermaid
-flowchart TD
-    Application --> Node
-    Node --> Cluster[Cluster administration view]
-    Node --> Host[Managed local replicas]
-    Cluster --> Meta[Internal meta FSM and bbolt]
-    Meta --> Controller[Independent approved group operations]
-    Controller --> Host
-    Host --> Group[load.Group and Raft engine]
-    Host --> Integration[Application factory, transport and retirement]
-    Node --> Scheduler[Internal scheduler and scheduling.RepairPolicy]
-    Node --> Lifecycle[lifecycle.Hooks]
+```text
+Application
+    |
+    v
+gquorum.Node
+    |-- Cluster administration --> _meta Raft group
+    |                               |-- approved operations --------+
+    |                               `-- scheduler and repair policy |
+    |-- managed local replicas <------------------------------------+
+    |      |-- load.Group and Raft engine
+    |      `-- application factory, transport and retirement
+    `-- lifecycle hooks
 ```
 
 ## Construct and start a node
