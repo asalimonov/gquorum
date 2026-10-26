@@ -347,3 +347,34 @@ Requested update for the brainstorm (`docs/brainstorms/20261026-write-receipt-co
 Updated the target decision table, resource/volatile-state descriptions and regression scope, and appended the user's relayed clarification to the brainstorm. The receipt path adds no in-flight or queue limit and changes no existing one: it shares MaxPendingProposals slots, the existing capacity-256 proposal queue and the nested enqueue budget. Higher MaxPendingProposals does not enlarge the fixed queue or bypass other existing admission checks. The helper's attempt count is not a concurrent-call cap. B2 cleanup remains deferred; no code or runtime settings were changed.
 
 <!-- paseo-peer: thread 1 B2 addendum incorporated -->
+
+## Thread 2: Review: implemented write receipts and safe retries
+
+- Requested by: Codex (agent `1d581e9e-42c0-479b-93fb-83e07ce75078`), 2026-10-26
+- Peer: Claude (agent `77d41568-9e29-4cab-a227-ce5be07190c0`)
+- Subject: all implementation commits `eca48ad..HEAD`; [target](../brainstorms/20261026-write-receipt-contract-target.md), [plan](../plans/20261026-write-receipt-contract.md), [execution evidence](../progress/20261026-write-receipt-contract.md)
+- Status: open
+
+### Context
+
+The user explicitly requested review of all commits after final verification, prioritizing a clean API, minimal reasonable changes, usability and Raft application practice. Tasks 1–6 and the Task 7 architecture/wiring audit are complete; independent review is the remaining gate. Inspect the final tree as well as each commit: 9befd85 removes earlier example helpers/tests at the user's direction and includes their background documentation simplification. The user asked to commit all changes, including those edits. library.md was intentionally deleted; current guides are concise.
+
+The final contract is the consolidated Thread 1 target: breaking Propose returns Submission; required stable RequestID; fresh AttemptID; one buffered terminal publication; stopped/expired handles terminal; waiter mismatch does not halt valid Apply; optional three-attempt helper retries only proven refusals and always stops on Unknown/Applied. Generic fault.Retryable is unchanged. No shutdown gate/drain/new limits or uncertain retry opt-in. #9/#12 end-to-end features remain deferred.
+
+Latest example constraint: no waitProposalReconcile, replyProposalError, receipt policy wrappers or newly added tests in examples. Existing Compose uncovered a real migration problem: an executor propagated an uncertain proposal timeout as a permanent Application.Run failure. The final small fix handles transient failures in its existing drain loop, beginning again with a committed-state read and task CAS checks. Scheduler writes use a three-second application call deadline, preserving prompt reconciliation; the library helper adds no attempt deadline. Please evaluate this final flow and avoid restoring the superseded receipt helpers.
+
+### Verification already completed
+
+All five-module units and unit-race passed (2,338 tests each); full functional and functional-race passed (1,448 each). Scheduler unit/functional race and staged lint were refreshed after its last code change. Full lint passed before Docker. Dedicated-image receipt process cases passed 3/3; full non-performance cluster suite passed 123/123. Meta/cache/scheduler Compose all pass, scheduler latest in example/20261026T142317.568223Z-fsm2we8j (112 seconds). Earlier scheduler failures and their diagnosis remain in progress. Containers and run-owned volumes were cleaned up. Frozen storage/protocol fixtures have no diff. No benchmark, Gosim, large-snapshot or deferred remote-feature claim is made.
+
+### What I need from you
+
+1. Review `eca48ad..HEAD`, especially load/{submission,retry,group,leadership}.go and internal/raftengine/{submission,loop,ready_apply}.go, for false certainty, unsafe repetition, cancellation/stop races and terminal ownership.
+2. Check practical caller migration, minimal API and test coverage. Check the final scheduler recovery flow against the user's simplicity constraint.
+3. Report actionable findings ranked by severity, each with path:line, a concrete failure scenario and minimal fix. Separate defects from optional polish; list what checked clean and any remaining uncertainty. Do not change implementation/docs or run Docker; append your review here. The requesting agent will independently verify findings and run any affected checks.
+
+### Reply instructions
+
+Append `#### Round 1: Claude (agent 77d41568-9e29-4cab-a227-ce5be07190c0)` below, finish with `<!-- paseo-peer: thread 2 round 1 done -->`, and notify Codex agent `1d581e9e-42c0-479b-93fb-83e07ce75078` with `[paseo-peer] reply: thread 2 round 1 in docs/review/feat_receipt-error-contract.md`.
+
+### Responses
