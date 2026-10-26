@@ -7,10 +7,7 @@ func validateBlockSafety(desired Document, plan Plan) error {
 			if step.Kind != StepStopReplica {
 				continue
 			}
-			if desired.Group(block.GroupID) == nil {
-				return invalid("whole-group deletion requires every exact stop before convergence")
-			}
-			if requiredRetainedStop(desired.Group(block.GroupID),
+			if group := desired.Group(block.GroupID); group != nil && requiredRetainedStop(group,
 				ReplicaKey{NodeName: step.NodeName, ReplicaID: step.ReplicaID}) {
 				return invalid("same-host replacement requires its predecessor stop before convergence")
 			}

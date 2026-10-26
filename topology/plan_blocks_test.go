@@ -98,7 +98,7 @@ func TestPlanBlocksCloneAndEquality(t *testing.T) {
 	}
 }
 
-func TestPlanBlocksKeepDeletionAndReplacementStopsRequired(t *testing.T) {
+func TestPlanBlocksAllowDeletionCleanupButRequireReplacementStop(t *testing.T) {
 	t.Parallel()
 	for _, replacement := range []bool{false, true} {
 		plan := Plan{Version: 2, Steps: []Step{{Seq: 1, GroupID: "work", NodeName: "n1", ReplicaID: 1, Kind: StepStopReplica}},
@@ -109,8 +109,12 @@ func TestPlanBlocksKeepDeletionAndReplacementStopsRequired(t *testing.T) {
 			plan.Steps = append(plan.Steps, Step{Seq: 2, GroupID: "work", NodeName: "n1", ReplicaID: 2, Kind: StepPrepareReplica})
 			plan.Blocks[0].Steps = []int{2}
 		}
-		if err := ValidatePlanShape(PlanInput{}, desired, plan); err == nil || !strings.Contains(err.Error(), "requires") {
-			t.Fatalf("replacement=%v accepted detached required stop: %v", replacement, err)
+		err := validateBlockSafety(desired, plan)
+		if replacement && (err == nil || !strings.Contains(err.Error(), "requires")) {
+			t.Fatalf("replacement accepted detached required stop: %v", err)
+		}
+		if !replacement && err != nil {
+			t.Fatal("deletion cleanup partition refused", err)
 		}
 		plan.Blocks[0].Cleanup = nil
 		plan.Blocks[0].Steps = append([]int{1}, plan.Blocks[0].Steps...)

@@ -63,8 +63,8 @@ func validateRetainedReplica(view RemainingPlanView, ex Record, group string,
 		return nil
 	}
 	desired := view.Target.Group(group)
-	if replica.Progress == topology.RetainedCleanup && desired != nil &&
-		!slices.ContainsFunc(desired.Replicas, func(r Replica) bool { return r.NodeName == replica.NodeName }) {
+	if replica.Progress == topology.RetainedCleanup && (desired == nil ||
+		!slices.ContainsFunc(desired.Replicas, func(r Replica) bool { return r.NodeName == replica.NodeName })) {
 		return nil // Detached debt owns this host; no new prerequisite is needed.
 	}
 	if !remainingPlanHas(ex, StepStopReplica, group, replica.ReplicaKey) {

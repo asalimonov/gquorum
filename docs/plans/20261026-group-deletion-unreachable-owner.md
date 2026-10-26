@@ -9,7 +9,16 @@
 **Target SHA-256:** `35a5814f4addbd580914d4811ae09fc9dabbea806d16a61cffec70fa46cc8946`
 **Full brainstorm log:** [20261026-group-deletion-unreachable-owner.md](../brainstorms/20261026-group-deletion-unreachable-owner.md)
 **Issue:** <https://github.com/asalimonov/gquorum/issues/5>
-**Status:** ready for implementation; all implementation tasks are unchecked.
+**Status:** implementation in progress; task checkboxes record verified completion.
+
+## User execution instruction — 2026-10-26
+
+Run cluster tests only in Task 6, the penultimate task. Task 6 now includes full
+lint before image build, focused and full Docker verification, and their fixes.
+Task 7 performs the final architectural audit and non-cluster checks. If its
+audit finds a code gap requiring cluster revalidation, reopen Task 6, complete
+those runs there, then return to Task 7; do not run cluster tests in the final
+task. This instruction supersedes the original command placement below.
 
 ## Execution contract
 
@@ -109,7 +118,7 @@ would likewise break current callers.
   completion together.
 - Task 4 verifies persistence, compatibility, readmission and local ownership.
 - Task 5 adds the three-node process regressions and necessary test-only controls.
-- Task 6 aligns current public and architectural documentation.
+- Task 6 aligns current documentation and runs penultimate cluster validation.
 - Task 7 closes all gaps, runs final gates, creates the public changelog, and ends
   with a production wiring audit.
 
@@ -242,40 +251,40 @@ planner's selected output or the current approval completion path.
 schemas, §6.1–§6.2 validation and inherited debt, §9.1/§9.3/§9.4/§9.15 method
 inventory, §13.3/§13.5/§13.6/§13.23 algorithms; target §11.1 tests.
 
-- [ ] Remove only the whole-deletion prohibition on cleanup stop steps from
+- [x] Remove only the whole-deletion prohibition on cleanup stop steps from
   `validateBlockSafety`. Because the old shared predicate still treats nil desired
   groups as required until Task 3, guard the replacement check with a nonnil
   desired group so it does not reintroduce the deletion rejection.
-- [ ] Retain the same-host replacement and founding/admission dependency checks;
+- [x] Retain the same-host replacement and founding/admission dependency checks;
   reject cleanup stops that would bypass an actual surviving replacement.
-- [ ] Update `validateDeletionOrder` and `applyDeleteGroupState` to recognize
+- [x] Update `validateDeletionOrder` and `applyDeleteGroupState` to recognize
   retained cleanup as existing obligation coverage. Continue to require exact
   stop/retirement planning for a possibly hosted owner without retained proof.
-- [ ] Preserve readmission-covered historical plan shape validation. Shape
+- [x] Preserve readmission-covered historical plan shape validation. Shape
   acceptance alone must not be treated as proof of consumed readmission.
-- [ ] Update `validateRetainedReplica` to accept a deleted group's already-owned
+- [x] Update `validateRetainedReplica` to accept a deleted group's already-owned
   detached debt; keep required checks for surviving same-host replacements.
-- [ ] Leave `requiredRetainedStop`, `planDeletedGroup` generation,
+- [x] Leave `requiredRetainedStop`, `planDeletedGroup` generation,
   `readmissionPlanBuilder` and the metadata approval path unchanged in this task.
   Do not add a second partition builder or temporary public flag.
-- [ ] Reuse `validateStopOrder`, `detachingStop` and
+- [x] Reuse `validateStopOrder`, `detachingStop` and
   `validateDeletionRetirement` as specified in target §6.2/§13.4/§13.7; do not
   rewrite them simply to match pseudocode formatting.
-- [ ] Add parallel units using hand-built exact cleanup partitions: accept valid
+- [x] Add parallel units using hand-built exact cleanup partitions: accept valid
   deletion cleanup and inherited debt, reject missing hosted-owner coverage,
   reject replacement-stop bypass, preserve flat stop-before-retire order, and
   accept valid historical required-stop plans.
-- [ ] Keep generator expectation tests asserting the old generated partition
+- [x] Keep generator expectation tests asserting the old generated partition
   until Task 3. Split validator tests from generator tests where they currently
   conflate those behaviors.
 
 #### Verification
 
-- [ ] `go test ./topology ./internal/operator -run 'Plan|Retained|Deletion|Remaining' -count=1`.
-- [ ] `make test`, `go vet ./topology ./internal/operator` and `make lint` pass.
-- [ ] Inspect representative generated deletion plans and confirm they still
+- [x] `go test ./topology ./internal/operator -run 'Plan|Retained|Deletion|Remaining' -count=1`.
+- [x] `make test`, `go vet ./topology ./internal/operator` and `make lint` pass.
+- [x] Inspect representative generated deletion plans and confirm they still
   have the old required-stop partition; only validation support was prepared.
-- [ ] Record actual results and commit this coherent checkpoint.
+- [x] Record actual results and commit this coherent checkpoint.
 
 ### Task 2: Prepare metadata coverage, cleanup validation and physical settlement
 
@@ -593,7 +602,7 @@ not change library constructors or configuration schemas.
   in the caller fixture. Reuse existing load/meta listeners; no test-only
   mechanism enters the library or the small example.
 - [ ] Compile the process suite and run fixture units/local functional checks.
-  Defer Docker image build/run to Task 7 after final full lint, avoiding
+  Defer Docker image build/run to Task 6 after final full lint, avoiding
   intermediate expensive process runs and shared-image replacement.
 
 #### Verification
@@ -608,9 +617,9 @@ not change library constructors or configuration schemas.
   `go test -tags=functional -run 'ReadFault|Meta|Deletion|Snapshot' -count=1 ./testapp`
   from `tests/cluster`; confirm selected tests exist and report what actually ran.
 - [ ] Check all four public process-case names and controls are ready for Task
-  7; no Docker success is claimed from compile-only checks. Commit the checkpoint.
+  6; no Docker success is claimed from compile-only checks. Commit the checkpoint.
 
-### Task 6: Align public comments and current architecture
+### Task 6: Align architecture and complete penultimate cluster validation
 
 **Goal:** document implemented behavior without changing public interfaces or
 claiming physical cleanup from logical success.
@@ -654,6 +663,10 @@ availability.
 
 #### Verification
 
+- [ ] Run final full lint, build the current fixture image, run focused deletion
+  cluster cases and the complete process suite in this penultimate task only.
+  Fix every failure and rerun affected cluster coverage here before final audit.
+  Record reports, image identity, and confirmed container/volume/worker cleanup.
 - [ ] Check local links and API names against the actual source, and run
   `git diff --check` including any explicitly staged ignored documentation.
 - [ ] Confirm only documentation/comments changed in this task; if executable
@@ -726,8 +739,9 @@ to duplicate existing equivalent helpers.
   explicit user-approved deferral. Mark any unresolved item `[_]` and do not
   report the plan complete while required gaps remain.
 - [ ] After corrections, run the final commands below in the stated order.
-  Record suite report paths, pass/fail status, source revision, exact selected
-  process case names, image identity and cleanup evidence. Do not count
+  Record non-cluster suite reports and reuse the verified Task 6 cluster evidence.
+  Reopen Task 6 if an audit fix requires cluster reruns; do not run them in Task 7.
+  Retain pass/fail status, source revision, case names, image and cleanup evidence. Do not count
   historical or compile-only runs as fresh runtime validation.
 - [ ] Create the user-facing changelog describing only visible improvements:
   deleting an unused group no longer waits for unavailable former hosts;
@@ -770,7 +784,7 @@ Run focused package tests/vet listed in each task; `make test` compiles all five
 application modules and runs uncached units. No full Docker/full lint/full race
 loop is required between intermediate tasks.
 
-### Final checkpoint: Task 7 only
+### Final non-cluster checkpoint: Tasks 6–7
 
 First close architectural gaps, then run:
 
@@ -782,11 +796,11 @@ make test-function-race FUNCTIONAL_ARGS="-run 'Deletion|Cleanup|Collection|Readm
 make lint-full
 ~~~
 
-Run full lint once on the finished code before Docker. If a later concrete fix
+In Task 6, run full lint once on the finished code before Docker. If a later concrete fix
 changes code, rerun its affected checks and required gates; do not repeat broad
 suites after documentation-only edits.
 
-Build the current fixture image once, then run focused and full process coverage
+In Task 6 only, build the current fixture image once, then run focused and full process coverage
 without replacing that image during either run:
 
 ~~~sh
@@ -887,6 +901,7 @@ reconciliation with the target rather than an undocumented alternate algorithm.
 
 | Date | Task | Work/result | Validation |
 | --- | --- | --- | --- |
+| 2026-10-26 | Task 1 | Plan validators accept exact deferred deletion and inherited debt; generator selection remains unchanged. | Focused tests/vet/lint PASS; unit report 20261026T130516.077623Z-9xhac48t: 2323/2323. |
 | 2026-10-26 | Planning | Read target, current contracts, planner/FSM and fixture seams; defined seven green checkpoints and the Task 3 activation boundary. | Documentation/source-reference checks only; no implementation suite executed. |
 
 ## Planning verification notes

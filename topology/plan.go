@@ -313,7 +313,8 @@ func (v *planShapeValidator) detachingStop(step Step, key ReplicaKey) bool {
 
 func (v *planShapeValidator) validateDeletionOrder(current Step) error {
 	for _, replica := range v.input.formerReplicas(current.GroupID) {
-		if replica.Progress != RetainedStopped && !v.stopped[current.GroupID][replica.ReplicaID] &&
+		if replica.Progress != RetainedStopped && replica.Progress != RetainedCleanup &&
+			!v.stopped[current.GroupID][replica.ReplicaID] &&
 			!ReadmissionCovers(v.input, v.desired, v.plan, replica.NodeName) {
 			return fmt.Errorf("delete group %q lacks stop for replica %d", current.GroupID, replica.ReplicaID)
 		}

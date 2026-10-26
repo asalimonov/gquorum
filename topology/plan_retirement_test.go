@@ -142,7 +142,7 @@ func TestRetainedCleanupRefusesContradictoryNativeMember(t *testing.T) {
 	}
 }
 
-func TestRetainedDeletionNeedsEveryUnprovenHostStop(t *testing.T) {
+func TestRetainedDeletionKeepsHostedStopsAndInheritsCleanup(t *testing.T) {
 	t.Parallel()
 	input, desired := retainedPlanFixture()
 	input.Groups["work"] = GroupProgress{GroupID: "work"}
@@ -160,19 +160,19 @@ func TestRetainedDeletionNeedsEveryUnprovenHostStop(t *testing.T) {
 	broken.Steps = append(broken.Steps[:1], broken.Steps[2:]...)
 	broken.Steps[1].Seq = 2
 	bindPlanBlocks(input, desired, &broken, []string{"work"})
-	if err := ValidatePlanShape(input, desired, broken); err == nil {
-		t.Fatal("deletion shape waived another debt's unproven stop")
+	if err := ValidatePlanShape(input, desired, broken); err != nil {
+		t.Fatal("deletion shape lost inherited cleanup coverage", err)
 	}
-	if err := validatePlannedSteps(input, desired, map[string]GroupStatus{"work": status}, broken); err == nil {
-		t.Fatal("deletion simulation waived another debt's unproven stop")
+	if err := validatePlannedSteps(input, desired, map[string]GroupStatus{"work": status}, broken); err != nil {
+		t.Fatal("deletion simulation lost inherited cleanup coverage", err)
 	}
 	input.Retained["work"].Replicas[0].Progress = RetainedStopped
 	plan, err = retainedRetirementPlan(input, desired, status)
 	if err != nil || len(plan.Steps) != 1 || plan.Steps[0].Kind != StepStopReplica || plan.Steps[0].ReplicaID != 5 {
 		t.Fatal("debt-only deletion duplicated retirement or lost its last stop", plan, err)
 	}
-	if err := ValidatePlanShape(input, desired, Plan{Version: desired.Version, Blocks: []PlanBlock{{GroupID: "work"}}}); err == nil {
-		t.Fatal("zero-step deletion bypassed the remaining cleanup stop")
+	if err := ValidatePlanShape(input, desired, Plan{Version: desired.Version, Blocks: []PlanBlock{{GroupID: "work"}}}); err != nil {
+		t.Fatal("zero-step deletion lost inherited cleanup coverage", err)
 	}
 }
 
