@@ -163,6 +163,13 @@ func (g *Group) applyNormalEntry(entry raftpb.Entry) error {
 	if e.Kind != raftstate.Application {
 		return g.applyAuthority(entry, e)
 	}
+	req := g.props[e.Correlation]
+	if req != nil && req.reportSubmission &&
+		(req.proposal.RequestID != e.RequestID || !bytes.Equal(req.proposal.Data, e.Data)) {
+		delete(g.props, e.Correlation)
+		answer(req, Result{}, fault.ErrIdentityMismatch)
+		req = nil
+	}
 	started := time.Now()
 	command := Command{Index: entry.Index, Term: entry.Term, RequestID: e.RequestID, Data: bytes.Clone(e.Data)}
 	if g.opts.GroupID == topology.MetaGroupID {
@@ -173,9 +180,9 @@ func (g *Group) applyNormalEntry(entry raftpb.Entry) error {
 	if err != nil {
 		return fault.New(fault.Unavailable, "load machine apply failed: "+err.Error(), err)
 	}
-	if req := g.props[e.Correlation]; req != nil {
+	if req != nil {
 		delete(g.props, e.Correlation)
-		answer(req, result, nil)
+		g.answerApplied(req, entry, result)
 	}
 	return nil
 }

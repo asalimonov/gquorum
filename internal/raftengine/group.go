@@ -3,7 +3,6 @@ package raftengine
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -35,10 +34,14 @@ const (
 )
 
 type response struct {
-	result Result
-	err    error
+	result          Result
+	err             error
+	disposition     SubmissionDisposition
+	index, term     uint64
+	resultAvailable bool
 }
 type request struct {
+	reportSubmission   bool
 	ownedSnapshot      *ownedSnapshotTicket
 	preflightReply     chan snapshotPreflightReply
 	expectedTerm       uint64
@@ -324,21 +327,7 @@ func (g *Group) submitProposal(parent context.Context, p Proposal, expectedTerm 
 	}
 	started := time.Now()
 	g.meter.ObserveProposal()
-	defer func() {
-		outcome := internalmetrics.Applied
-		switch {
-		case errors.Is(err, context.DeadlineExceeded):
-			outcome = internalmetrics.TimedOut
-		case errors.Is(err, context.Canceled):
-			outcome = internalmetrics.Canceled
-		case errors.Is(err, fault.ErrOverloaded):
-			outcome = internalmetrics.Overloaded
-		case err != nil:
-			outcome = internalmetrics.Unavailable
-		default: // Keep the applied outcome when no error applies.
-		}
-		g.meter.ObserveResult(time.Since(started), outcome)
-	}()
+	defer func() { g.observeProposalResult(started, err) }()
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
@@ -384,6 +373,7 @@ func (g *Group) ProposalStats() ProposalStats {
 
 func (g *Group) newID() string { return fmt.Sprintf("%s-%d", g.nonce, g.sequence.Add(1)) }
 
+//revive:disable-next-line:confusing-naming // Legacy queue helper; Submit exposes application receipts.
 func (g *Group) submit(ctx context.Context, queue chan *request, req *request) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
@@ -536,7 +526,7 @@ func copyMessage(m raftpb.Message) (raftpb.Message, error) {
 }
 func answer(req *request, result Result, err error) {
 	if req != nil {
-		req.reply <- response{Result{Code: result.Code, Data: bytes.Clone(result.Data)}, err}
+		req.reply <- response{result: Result{Code: result.Code, Data: bytes.Clone(result.Data)}, err: err}
 	}
 }
 
