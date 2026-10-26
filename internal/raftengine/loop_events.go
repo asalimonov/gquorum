@@ -11,6 +11,13 @@ import (
 
 func (g *Group) finishRun() {
 	g.cancel()
+	if g.cancelSnapshotEpoch != nil {
+		g.cancelSnapshotEpoch()
+	}
+	if g.pending != nil {
+		discardSnapshotJobs(g.pending.snapshotJobs, g.ctx.Err())
+		g.pending.snapshotJobs = nil
+	}
 	g.mu.Lock()
 	g.stopped = true
 	if g.err == nil {
@@ -30,12 +37,17 @@ func (g *Group) finishRun() {
 }
 
 type loopState struct {
-	lastEntriesWrite time.Time
-	readyTimer       *time.Timer
-	ticks, metrics   <-chan time.Time
+	snapshotReportDue   time.Time
+	snapshotReportTimer *time.Timer
+	lastEntriesWrite    time.Time
+	readyTimer          *time.Timer
+	ticks, metrics      <-chan time.Time
 }
 
 func (s *loopState) stopReadyTimer() {
+	if s.snapshotReportTimer != nil {
+		s.snapshotReportTimer.Stop()
+	}
 	if s.readyTimer != nil {
 		s.readyTimer.Stop()
 	}
@@ -47,7 +59,8 @@ func (g *Group) prepareReady(state *loopState) error {
 		// inbound entries received during this window join the durable
 		// batch.
 		// The loop keeps handling ticks, cancellation and network traffic.
-		if wait := g.opts.Timing.WALWriteWait; wait > 0 && !state.lastEntriesWrite.IsZero() &&
+		if wait := g.opts.Timing.WALWriteWait; wait > 0 && g.activeSnapshot == nil &&
+			g.headerOnlyTicket == nil && !state.lastEntriesWrite.IsZero() &&
 			time.Since(state.lastEntriesWrite) < readyBatchRecencyWindow {
 			state.readyTimer = time.NewTimer(wait)
 		} else {
@@ -64,6 +77,10 @@ func (g *Group) receiveLoopEvent(state *loopState) bool {
 	if g.pending == nil && state.readyTimer == nil {
 		snapshotC = g.snapshots
 	}
+	var ingressC chan *request
+	if g.snapshotBoundaryReady(state) {
+		ingressC = g.snapshotIngress
+	}
 	var readyC <-chan time.Time
 	controlC := g.controls
 	if state.readyTimer != nil {
@@ -78,6 +95,7 @@ func (g *Group) receiveLoopEvent(state *loopState) bool {
 	case <-state.ticks:
 		g.rn.Tick()
 		g.refresh()
+		g.drainSnapshotReports(time.Now())
 		g.retryDroppedProposals(time.Now())
 		g.resetReadRounds()
 		g.retryReadRound(time.Now())
@@ -94,6 +112,12 @@ func (g *Group) receiveLoopEvent(state *loopState) bool {
 		g.admitRead(req)
 	case req := <-g.proposals:
 		g.handleProposal(req)
+	case req := <-ingressC:
+		if req.ownedSnapshot != nil {
+			g.handleOwnedSnapshot(req, state)
+		} else {
+			g.handleSnapshotPreflight(req, state)
+		}
 	case req := <-g.inbound:
 		g.handleInbound(req)
 	case req := <-controlC:
@@ -104,8 +128,11 @@ func (g *Group) receiveLoopEvent(state *loopState) bool {
 		}
 	case id := <-g.unreachable:
 		g.rn.ReportUnreachable(id)
-	case report := <-g.reports:
-		g.rn.ReportSnapshot(report.id, report.status)
+	case <-g.snapshotReportDeadline(state):
+		state.snapshotReportDue = time.Time{}
+		g.drainSnapshotReports(time.Now())
+	case <-g.snapshotReportWake:
+		g.drainSnapshotReports(time.Now())
 	}
 	return true
 }

@@ -23,6 +23,9 @@ import (
 )
 
 func clusterRequestTimeout(r *http.Request) time.Duration {
+	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/internal/test/snapshot/") && strings.HasSuffix(r.URL.Path, "/generate") {
+		return 30 * time.Minute
+	}
 	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/internal/test/propose/") {
 		return time.Minute
 	}
@@ -43,6 +46,7 @@ type effectBarrier struct {
 	after   bool
 }
 type clusterHooks struct {
+	snapshotControls  map[walKey]*snapshotControl
 	collectionReport  collectionReportControl
 	collections       map[storage.Identity]uint64
 	runtime           runtimeHooks
@@ -61,7 +65,7 @@ type clusterHooks struct {
 }
 
 func newClusterHooks() *clusterHooks {
-	return &clusterHooks{runtime: runtimeHooks{stopped: map[load.ReplicaRef]*load.Group{}}, barriers: map[effectKey]*effectBarrier{}, snapshots: map[string]uint64{}, wals: map[walKey]*walControl{}, projections: map[walKey]*projectionControl{}, reads: map[walKey]*readControl{}, fenceBarriers: map[fenceControlKey]*fenceControl{}}
+	return &clusterHooks{snapshotControls: make(map[walKey]*snapshotControl), runtime: runtimeHooks{stopped: map[load.ReplicaRef]*load.Group{}}, barriers: map[effectKey]*effectBarrier{}, snapshots: map[string]uint64{}, wals: map[walKey]*walControl{}, projections: map[walKey]*projectionControl{}, reads: map[walKey]*readControl{}, fenceBarriers: map[fenceControlKey]*fenceControl{}}
 }
 func (a *application) beforeClusterEffect(ctx context.Context, approved topology.AuthorizedStep) error {
 	if a.clusterHooks == nil {
@@ -190,6 +194,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 	a.registerResourceRoutes(mux, protect)
 	a.registerWALRoutes(mux, protect)
 	a.registerReadRoutes(mux, protect)
+	a.registerSnapshotRoutes(mux, protect)
 	a.registerAuthorityRoutes(mux, protect)
 	a.registerProjectionRoutes(mux, protect)
 	a.registerCollectionRoutes(mux, protect)

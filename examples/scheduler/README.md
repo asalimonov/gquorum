@@ -190,7 +190,7 @@ remain monotonic.
 
 ```sh
 make test                     # fast units in all modules
-make lint
+make lint                      # For briefe lint verification before commit
 make test-function-race        # includes SQLite, recovery and library lifetimes
 make test-scheduler-example    # isolated real three-process lifecycle test
 ```

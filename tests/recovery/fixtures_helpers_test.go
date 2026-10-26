@@ -1,6 +1,7 @@
 package recovery_test
 
 import (
+	"context"
 	"net"
 
 	"github.com/asalimonov/gquorum/internal/recovery/model"
@@ -8,6 +9,7 @@ import (
 
 	quorum "github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/load/snapshot"
 	"github.com/asalimonov/gquorum/storage"
 )
 
@@ -43,3 +45,7 @@ func filesHook(facade *recoveryFacade) recovery.FilesHook { return facade.files 
 
 const metaDBFilename = "_meta.bolt"
 const authorityDBFilename = "_authority.bolt"
+
+func (unopenedTransport) SendSnapshot(context.Context, snapshot.Send) (snapshot.Ack, error) {
+	panic("snapshot transport used before resource acquisition")
+}

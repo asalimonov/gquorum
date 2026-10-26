@@ -24,6 +24,7 @@ func AgeObservation(s api.ReplicaObservation, elapsed, bound time.Duration) api.
 	}
 	for i := range aged.Sample.Progress {
 		aged.Sample.Progress[i].AckAge = AddDuration(aged.Sample.Progress[i].AckAge, elapsed)
+		AgeSnapshot(aged.Sample.Progress[i].Snapshot, elapsed)
 	}
 	if aged.Sample.Meter.State != api.Current && aged.Sample.Rates.State == api.Current {
 		aged.Sample.Rates.State = api.Stale
@@ -36,4 +37,26 @@ func AgeObservation(s api.ReplicaObservation, elapsed, bound time.Duration) api.
 		aged.State = api.Stale
 	}
 	return aged
+}
+
+// AgeSnapshot advances verified-progress age and consumes all remaining bounds
+// without manufacturing a new acknowledgement, episode or grace interval.
+func AgeSnapshot(snapshot *api.SnapshotCatchUp, elapsed time.Duration) {
+	if snapshot == nil {
+		return
+	}
+	age := max(time.Duration(0), elapsed)
+	if snapshot.ProgressAge >= 0 {
+		snapshot.ProgressAge = AddDuration(snapshot.ProgressAge, age)
+	}
+	snapshot.RemainingTotal = snapshotRemaining(snapshot.RemainingTotal, age)
+	snapshot.RemainingGrace = snapshotRemaining(snapshot.RemainingGrace, age)
+	snapshot.EpisodeRemaining = snapshotRemaining(snapshot.EpisodeRemaining, age)
+}
+
+func snapshotRemaining(value, elapsed time.Duration) time.Duration {
+	if value <= 0 || elapsed >= value {
+		return 0
+	}
+	return value - elapsed
 }

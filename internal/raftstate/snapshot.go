@@ -119,7 +119,7 @@ func EncodeSnapshot(s Snapshot) ([]byte, error) {
 // validate authority against the Raft snapshot metadata's applied index.
 func DecodeSnapshot(data []byte, cluster, group string) (Snapshot, error) {
 	var s Snapshot
-	if err := decode(data, &s); err != nil {
+	if err := decodeSnapshotEnvelope(data, &s); err != nil {
 		return Snapshot{}, err
 	}
 	if err := s.validate(); err != nil {

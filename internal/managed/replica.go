@@ -291,19 +291,22 @@ func (h *Host) openReplica(slot *replica) error {
 func (h *Host) engineOptions(slot *replica, app load.Application, mode raftengine.Mode,
 	peers []raft.Peer) raftengine.Options {
 	options := raftengine.Options{
-		NodeName:            slot.identity.NodeName,
-		ClusterID:           slot.identity.ClusterID,
-		GroupID:             slot.identity.GroupID,
-		ReplicaID:           slot.identity.ReplicaID,
-		InstanceID:          slot.node.InstanceID,
-		Mode:                mode,
-		Peers:               peers,
-		Metrics:             h.cfg.Metrics.Local(),
-		Store:               slot.store,
-		Machine:             machineAdapter{app.StateMachine},
-		Transport:           engineTransport{h, slot},
-		Timing:              raftengine.Timing(h.cfg.Engine.Timing),
-		SnapshotThreshold:   h.cfg.Engine.SnapshotThreshold,
+		NodeName:          slot.identity.NodeName,
+		ClusterID:         slot.identity.ClusterID,
+		GroupID:           slot.identity.GroupID,
+		ReplicaID:         slot.identity.ReplicaID,
+		InstanceID:        slot.node.InstanceID,
+		Mode:              mode,
+		Peers:             peers,
+		Metrics:           h.cfg.Metrics.Local(),
+		Store:             slot.store,
+		Machine:           machineAdapter{app.StateMachine},
+		Transport:         engineTransport{h, slot},
+		Timing:            raftengine.Timing(h.cfg.Engine.Timing),
+		SnapshotThreshold: h.cfg.Engine.SnapshotThreshold,
+		SnapshotPolicy: raftengine.SnapshotPolicy{TotalTimeout: h.cfg.SnapshotTransfer.TotalTimeout,
+			ProgressTimeout:  h.cfg.SnapshotTransfer.ProgressTimeout,
+			MaxSnapshotBytes: h.cfg.SnapshotTransfer.MaxSnapshotBytes},
 		MaxPendingProposals: h.cfg.Engine.MaxPendingProposals,
 		MaxWatchers:         h.cfg.Engine.MaxWatchers,
 		ProposalTimeout:     h.cfg.Engine.ProposalTimeout,
@@ -440,6 +443,9 @@ func (h *Host) releaseResources(slot *replica) error {
 	h.mu.Unlock()
 	if runCancel != nil {
 		runCancel()
+	}
+	if err := h.joinSnapshotOwner(slot, core); err != nil {
+		return err
 	}
 	if core != nil && !joined {
 		ctx, cancel := context.WithTimeout(context.Background(), h.cfg.EffectTimeout)

@@ -12,6 +12,7 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/load/snapshot"
 	"github.com/asalimonov/gquorum/topology"
 	"github.com/asalimonov/gquorum/transport/loadgrpc/internal/loadpb"
 	"google.golang.org/grpc"
@@ -31,6 +32,7 @@ const (
 // after constructing it with this Transport, before starting it or serving
 // RPCs.
 type Ingress interface {
+	LoadSnapshots() snapshot.Service
 	Identity() topology.Identity
 	ReceiveLoadRaft(context.Context, load.RaftBatch) error
 	ReadLoadReplica(context.Context, load.ReplicaQuery) (load.ReplicaStatus, error)
@@ -74,6 +76,12 @@ type Options struct {
 // server. Stop Node while this adapter and the server are still available, then
 // Close the adapter and stop the server. Close timeouts retain join ownership.
 type Transport struct {
+	snapshotClients                                     map[string]*connection
+	snapshotSending                                     int
+	snapshotService                                     snapshot.Service
+	snapshotOptions                                     snapshot.Options
+	snapshotPreOpen, snapshotHandlers, snapshotPreLimit int
+
 	options Options
 	mu      sync.Mutex
 	node    Ingress
@@ -122,13 +130,15 @@ func New(options Options) (*Transport, error) {
 	options.DialOptions = append([]grpc.DialOption(nil), options.DialOptions...)
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Transport{
-		options:    options,
-		clients:    make(map[string]*connection),
-		streams:    make(map[streamKey]*raftStream),
-		streamIdle: defaultStreamIdle,
-		ctx:        ctx,
-		cancel:     cancel,
-		done:       make(chan struct{}),
+		options:          options,
+		clients:          make(map[string]*connection),
+		snapshotClients:  make(map[string]*connection),
+		streams:          make(map[streamKey]*raftStream),
+		streamIdle:       defaultStreamIdle,
+		ctx:              ctx,
+		cancel:           cancel,
+		done:             make(chan struct{}),
+		snapshotPreLimit: snapshotPreOpenMinimum,
 	}, nil
 }
 
@@ -137,6 +147,21 @@ func New(options Options) (*Transport, error) {
 func (t *Transport) Bind(node Ingress) error {
 	if node == nil || (reflect.ValueOf(node).Kind() == reflect.Pointer && reflect.ValueOf(node).IsNil()) {
 		return fault.ErrInvalid
+	}
+	service := node.LoadSnapshots()
+	if nilSnapshotService(service) {
+		return fault.New(fault.Unsupported, "loadgrpc requires snapshot service support", nil)
+	}
+	options := service.Options()
+	resolved, err := options.Resolve()
+	if err != nil {
+		return err
+	}
+	if resolved != options {
+		return fault.New(fault.Invalid, "snapshot service options must be resolved", nil)
+	}
+	if _, err = snapshotChunkCapacity(t.options.MaxMessageBytes, options.ChunkBytes); err != nil {
+		return err
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -147,6 +172,8 @@ func (t *Transport) Bind(node Ingress) error {
 		return fault.New(fault.Invalid, "loadgrpc already bound", nil)
 	}
 	t.node = node
+	t.snapshotService, t.snapshotOptions = service, options
+	t.snapshotPreLimit = max(snapshotPreOpenMinimum, 2*options.MaxIncoming)
 	return nil
 }
 
@@ -290,6 +317,7 @@ func (t *Transport) Close(ctx context.Context) error {
 			for _, c := range clients {
 				_ = c.conn.Close()
 			}
+			_ = t.closeSnapshotConnections()
 			close(t.done)
 		}()
 	}

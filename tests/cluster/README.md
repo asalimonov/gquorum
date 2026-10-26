@@ -150,8 +150,9 @@ cancels and joins every lifecycle worker before returning; the reaper is a
 fallback, not the success criterion for cleanup.
 
 Ordinary quorum, fault, API and performance tests use three nodes. Generic five-
-and seven-node repetitions are omitted. The only four-node membership cases are:
+and seven-node repetitions are omitted. Four-node cases with named capacity requirements include:
 
+- `TestSnapshotTransfer_RepairProtectionFourNodes`: three voters retain a live majority while a fourth stable learner proves guarded replacement after bounded snapshot protection expires.
 - `TestMetaAdmissionUsesLearnerBeforeServingAndRetainsIdentityOnRestart`: learner-first admission, early-serving refusal and retained promotion.
 - `TestAdmissionOperatorResumesAfterMetaLeaderElectionWithoutNewAttempt`: leadership changes during admission must retain the exact operator attempt.
 - `TestMetaPinnedAdmissionRestartsBeforeAndAfterReadyWithoutAllocatingIDs`, with `pending` and `ready` cases: a crash after durable pinning must preserve the member ID and admission attempt.
@@ -366,3 +367,51 @@ advances the same approved operator to promotion. Replaying its earlier action
 before and after promotion cannot toggle the voter back to a learner. A changed
 target set using the same revision is also refused; retained values and storage
 pins are checked alongside membership.
+
+## Explicit large-snapshot qualification
+
+Ordinary units, functional checks, performance targets and `clustertest` alone exclude large generated payloads. The additional `snapshotlarge` build tag selects `TestLargeSnapshot_`; there is no default Make dependency or checked-in snapshot blob. The generated cases request 256,000,000, 1,000,000,000 and 2,000,000,000 encoded bytes, with observed envelope calibration and explicit per-node policy. This ceiling is a test choice; production options accept larger representable sizes.
+
+Use one unique image tag for the final ordinary suite and qualification; do not replace it during a run:
+
+```sh
+SNAPSHOT_TEST_IMAGE=gquorum-test:snapshot-20261026
+make test-cluster-build CLUSTER_IMAGE="$SNAPSHOT_TEST_IMAGE"
+make test-cluster-run CLUSTER_IMAGE="$SNAPSHOT_TEST_IMAGE" \
+  CLUSTER_PARALLEL=1 CLUSTER_TIMEOUT=2h \
+  CLUSTER_ARGS='-tags=clustertest,snapshotlarge -run ^TestLargeSnapshot_ -v'
+```
+
+The test refuses insufficient resources rather than shrinking a case. It requires Docker memory of at least twelve times the requested encoded length and available storage of at least eight times that length. Each case generates reproducible actual bytes, uses production chunks/Node-owned WAL/Restore, verifies tail/new writes/restart and a lost chunk Ack, and checks ordinary traffic on another group. Reports retain compact sizes/hashes and sampled heap/RSS/store high-water, reservations, wire chunk/window peaks and phase timing. These observations are not RSS/throughput guarantees; serialized full-buffer callbacks and resident state remain material costs.
+
+Qualification passed on 2026-10-26 with Go 1.26.5, etcd Raft 3.6.0 and gRPC 1.79.3 on Linux/arm64 Docker 29.6.1 (39,878,758,400 bytes VM memory). All three exact encoded ceilings passed, with reconnect, ordinary traffic, persistence/Restore, tail/new writes, retained restart and zero transfer reservations after completion. Evidence: `test-reports/cluster/20261025T222708.955256Z-4acyzfy_/report.md`. Sizes above 2 GB remain unmeasured. Five-module units/race/functional/race, full lint, proto-check, the gRPC teardown race gate and all 122 ordinary cluster cases also passed. See [measured resource details](#measured-snapshot-resources) for the scope and sampling limits.
+
+### Measured snapshot resources
+
+Final image: `gquorum-test:snapshot-20261026-final3`, SHA256 `a48e0c77d8fb56480230e5915f1dc8555207c0af7874091b6246a6077f41300e`. The explicitly tagged ladder took 92.558 seconds including acquisition and cleanup. No other cluster suite ran concurrently.
+
+| Encoded bytes (requested = actual) | Sampled peak heap | Sampled peak RSS | Load-store disk high-water | Creation | Transfer with injected hold/reconnect | Verify/persist/Restore wait | Retained restart | Ordinary traffic |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 256,000,000 | 1,224,085,968 | 1,911,697,408 | 260,460,001 | 0.996s | 0.428s | 1.680s | 6.784s | 2.13ms |
+| 1,000,000,000 | 4,838,602,520 | 6,902,104,064 | 1,004,460,003 | 3.293s | 1.453s | 5.939s | 6.502s | 3.50ms |
+| 2,000,000,000 | 9,669,169,368 | 13,639,368,704 | 2,004,460,004 | 6.218s | 2.409s | 14.704s | 11.649s | 2.34ms |
+
+Heap/RSS/disk are sampled maxima across the sender and receiver, not their sum or a guaranteed complete allocation peak. Sampling starts after creation and the held first chunk, so it does not capture every creation allocation. Creation is measured separately; transfer includes the deliberate first-chunk hold/ordinary-traffic check and reconnect. Restore wait starts at sampled full byte verification and includes decoding and persistence, not only the application callback. Phase totals exclude acquisition/cleanup. The baseline was an empty fixture (roughly 35–38 MB RSS), not an equally large resident application.
+
+Both directional reservation peaks equaled each requested encoded size; all counts/bytes returned to zero before restart. Each maximum chunk was 1,048,576 bytes. Observed client outstanding-window peaks were 6/5/6 against configuration eight; stats ordering can under-sample that peak, while transport tests separately assert the actual window bound. Data-frame observations were 250/958/1,912. Results demonstrate this fixture/host, with substantial full-buffer amplification; they establish no general throughput, latency or RSS guarantee.
+
+### Post-review decoder and refusal correction qualification
+
+The two review findings against dd10d21 were corrected without changing application/store/wire encodings. The decoder now reads the encoded slice directly, preserving strict envelope/nested-authority validation. The 4 MiB application allocation regression limits bytes/op to application size + 256 KiB. An isolated three-sample comparison on Go1.26.5/M4 Pro measured about 4,209,405–4,209,490 bytes/op for slice decode versus 20,981,805–20,981,835 for the previous buffered decoder. CPU ranges overlap (17.54–18.12ms versus 17.46–18.59ms); this is allocation evidence, not a promised CPU speedup.
+
+A new three-node process case, `TestSnapshotTransfer_LocalOversizeRefusalIsObservable`, builds ordinary application state larger than an explicitly small 8 KiB transfer allowance. Local snapshot creation succeeds, the unissued send refusal exposes actual size/limit/count/time without a permit, both oversize/refusal events reach the journal, and an unrelated group still commits. Remote refusal dimensions, 600-route bounded cache/event pressure and reminder/reason-change rate limits have owning functional/race coverage.
+
+The complete ordinary suite passed 123 reported cases (202.439s), report `test-reports/cluster/20261026T053118.067136Z-1t1siqzj/report.md`. The refreshed generated ladder passed all exact encoded ceilings (92.046s), report `test-reports/cluster/20261026T053440.558197Z-nmspls08/report.md`, using `gquorum-test:snapshot-review-p1-r2-20261026` image SHA256 `7387ad063385e8738845493883a9df22db5d8f2fcff69eb464197014248f54bf`.
+
+| Encoded bytes | Sampled peak heap | Sampled peak RSS | Creation | Transfer with injected hold | Verify/persist/Restore wait | Retained restart |
+|---|---:|---:|---:|---:|---:|---:|
+| 256,000,000 | 1,479,471,192 | 1,583,050,752 | 0.882s | 0.428s | 1.620s | 3.750s |
+| 1,000,000,000 | 5,772,420,408 | 6,802,784,256 | 3.718s | 1.387s | 6.961s | 7.213s |
+| 2,000,000,000 | 11,529,869,736 | 13,557,772,288 | 9.315s | 3.009s | 17.160s | 12.944s |
+
+Both reservation peaks still match encoded size and all counts/bytes return to zero. Observed chunks are 1 MiB and window peaks 6/6/6 against configured eight. At 2 GB, the unrelated-group probe took 2.56ms. The same sampling caveats above apply: maxima are across source/receiver processes, not a sum, sampling excludes some creation allocations, and the baseline has no large resident application. Whole-process RSS did not show a reliable reduction from the earlier ~13.6 GB observation; remaining creation/persistence/restore buffers and GC materially affect it. The removed per-decode input allocation does not establish a new RSS bound or qualification above 2 GB.

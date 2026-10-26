@@ -26,11 +26,13 @@ const (
 )
 
 type writeJob struct {
-	kind     writeKind
-	rd       raft.Ready
-	snapshot raftpb.Snapshot
-	request  *request
-	proof    *model.CheckpointProof
+	snapshotJobs []SnapshotJob
+	ingress      *ownedSnapshotTicket
+	kind         writeKind
+	rd           raft.Ready
+	snapshot     raftpb.Snapshot
+	request      *request
+	proof        *model.CheckpointProof
 }
 
 // appliedHint carries the latest applied index from the run loop to the
@@ -90,7 +92,8 @@ func (g *Group) writer() {
 		case now := <-metricsTicker.C:
 			g.sampleWriter(now)
 		case job := <-g.writeC:
-			err := g.retry(func(ctx context.Context) error { return g.persistJob(ctx, job) })
+			fullSnapshot := job.kind == writeSnapshot || !raft.IsEmptySnap(job.rd.Snapshot)
+			err := g.retry(func(ctx context.Context) error { return g.persistJob(ctx, job) }, fullSnapshot)
 			select {
 			case g.writeDone <- writeResult{job.kind, err}:
 			case <-g.ctx.Done():
@@ -99,7 +102,9 @@ func (g *Group) writer() {
 		}
 	}
 }
-func (g *Group) retry(write func(context.Context) error) (result error) {
+
+//revive:disable-next-line:flag-parameter // Full snapshots use the owner lifetime; ordinary WAL attempts stay bounded.
+func (g *Group) retry(write func(context.Context) error, fullSnapshot bool) (result error) {
 	g.beginWriteMetric(time.Now())
 	defer func() { g.finishWriteMetric(time.Now(), result) }()
 	g.stallSince.Store(time.Now().UnixNano())
@@ -109,7 +114,10 @@ func (g *Group) retry(write func(context.Context) error) (result error) {
 		if err := g.ctx.Err(); err != nil {
 			return err
 		}
-		ctx, cancel := context.WithTimeout(g.ctx, 5*time.Second)
+		ctx, cancel := g.ctx, context.CancelFunc(func() {})
+		if !fullSnapshot {
+			ctx, cancel = context.WithTimeout(g.ctx, 5*time.Second)
+		}
 		started := time.Now()
 		err := write(ctx)
 		cancel()

@@ -98,7 +98,24 @@ func TestFailureIsolation_DeletionStopProof(t *testing.T) {
 	if err := c.WaitOperation(ctx, ingress, independent.OperationID); err != nil {
 		t.Fatal("deletion stop blocked independent founding", err)
 	}
-	if err := c.Put(ctx, ingress, "independent", "during-delete", "during-delete", "available"); err != nil {
+	// Operation success is not the caller's local serving-observation barrier.
+	// Retry only that transient refusal, preserving the exact command identity.
+	if err := Poll(ctx, func() (bool, error) {
+		response, err := c.Request(ctx, ingress, "PUT", "/api/load/independent/keys/during-delete",
+			map[string]string{"request_id": "during-delete", "value": "available"}, 0)
+		if err == nil && response.Status == 503 {
+			var refusal struct {
+				Code string `json:"code"`
+			}
+			if decodeErr := response.Decode(&refusal); decodeErr != nil {
+				return false, decodeErr
+			}
+			if refusal.Code == "replica_not_ready" {
+				return false, nil
+			}
+		}
+		return true, requireStatus(response, err, 200)
+	}); err != nil {
 		t.Fatal(err)
 	}
 	old := storage.Identity{ClusterID: c.ID, GroupID: "delete-wait", NodeName: stopped.Spec.Name,

@@ -2,6 +2,7 @@ package raftengine
 
 import (
 	"bytes"
+	"math"
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
@@ -11,7 +12,9 @@ import (
 	"go.etcd.io/raft/v3/raftpb"
 )
 
-func ownReady(rd raft.Ready) (raft.Ready, error) {
+//revive:disable-next-line:function-result-limit // Separate ordinary work, bulk jobs and errors.
+func (g *Group) ownReady(rd raft.Ready) (raft.Ready, []SnapshotJob, error) {
+	var jobs []SnapshotJob
 	rd.Entries = copyEntries(rd.Entries)
 	rd.CommittedEntries = copyEntries(rd.CommittedEntries)
 	rd.ReadStates = append([]raft.ReadState(nil), rd.ReadStates...)
@@ -19,47 +22,86 @@ func ownReady(rd raft.Ready) (raft.Ready, error) {
 		rd.ReadStates[i].RequestCtx = bytes.Clone(rd.ReadStates[i].RequestCtx)
 	}
 	messages := rd.Messages
-	rd.Messages = make([]raftpb.Message, len(messages))
-	for i, m := range messages {
+	rd.Messages = make([]raftpb.Message, 0, len(messages))
+	bulk, managed := g.opts.Transport.(SnapshotJobTransport)
+	if !managed {
+		bulk = nil
+	}
+	for _, m := range messages {
+		if m.Type == raftpb.MsgSnap {
+			if job, handled := g.prepareReadySnapshot(m, bulk); handled {
+				if job != nil {
+					jobs = append(jobs, job)
+				}
+				continue
+			}
+		}
+
 		owned, err := copyMessage(m)
 		if err != nil {
-			return rd, err
+			discardSnapshotJobs(jobs, err)
+			return rd, nil, err
 		}
-		rd.Messages[i] = owned
+		rd.Messages = append(rd.Messages, owned)
 	}
-	return rd, nil
+	return rd, jobs, nil
 }
 
 func (g *Group) stageReadySnapshot(rd *raft.Ready) error {
-	if !raft.IsEmptySnap(rd.Snapshot) {
+	if raft.IsEmptySnap(rd.Snapshot) {
+		return nil
+	}
+	owned := g.activeSnapshot != nil && g.activeSnapshot.selected
+	if !owned {
 		if _, err := g.decodeSnapshot(rd.Snapshot); err != nil {
 			return err
 		}
-		if g.opts.GroupID != topology.MetaGroupID {
-			for id, req := range g.props {
-				delete(g.props, id)
-				answer(req, Result{},
-					fault.New(fault.Unavailable, "snapshot may cover proposal result; outcome unknown", nil))
-			}
-		}
-		rd.Snapshot.Data = bytes.Clone(rd.Snapshot.Data)
-		rd.Snapshot.Metadata.ConfState = copyConf(rd.Snapshot.Metadata.ConfState)
-		if err := g.ms.ApplySnapshot(rd.Snapshot); err != nil {
-			return err
+	}
+	if g.opts.GroupID != topology.MetaGroupID {
+		for id, req := range g.props {
+			delete(g.props, id)
+			answer(req, Result{},
+				fault.New(fault.Unavailable, "snapshot may cover proposal result; outcome unknown", nil))
 		}
 	}
+	if !owned {
+		rd.Snapshot.Data = bytes.Clone(rd.Snapshot.Data)
+	}
+	rd.Snapshot.Metadata.ConfState = copyConf(rd.Snapshot.Metadata.ConfState)
+	if g.snapshotPublication == math.MaxUint64 {
+		return fault.ErrOverloaded
+	}
+	if err := g.ms.ApplySnapshot(rd.Snapshot); err != nil {
+		return err
+	}
+	g.snapshotPublication++
 	return nil
 }
 
 func (g *Group) restoreReadySnapshot(snapshot raftpb.Snapshot) error {
 	if !raft.IsEmptySnap(snapshot) {
-		state, err := g.decodeSnapshot(snapshot)
-		if err != nil {
-			return err
+		var state raftstate.Snapshot
+		var err error
+		ticket := g.pending.ingress
+		owned := ticket != nil && ticket.selected
+		if owned {
+			if ticket != g.activeSnapshot {
+				return fault.New(fault.Invalid, "snapshot write lost its owned ingress ticket", nil)
+			}
+			state = ticket.ingress.Decoded
+		} else {
+			state, err = g.decodeSnapshot(snapshot)
+			if err != nil {
+				return err
+			}
 		}
 		g.restoring.Store(true)
 		g.refresh()
-		err = restoreMachine(g.ctx, g.opts.Machine, state.Application, snapshot.Metadata)
+		if owned {
+			err = restoreOwnedMachine(g.ctx, g.opts.Machine, state.Application, snapshot.Metadata)
+		} else {
+			err = restoreMachine(g.ctx, g.opts.Machine, state.Application, snapshot.Metadata)
+		}
 		g.restoring.Store(false)
 		if err != nil {
 			return fault.New(fault.Unreadable, "restore received snapshot", err)
@@ -69,6 +111,9 @@ func (g *Group) restoreReadySnapshot(snapshot raftpb.Snapshot) error {
 		g.applied, g.snapshotIndex = snapshot.Metadata.Index, snapshot.Metadata.Index
 		g.cs = copyConf(snapshot.Metadata.ConfState)
 		g.durableHS.Commit = max(g.durableHS.Commit, g.applied)
+		if owned {
+			g.finishOwnedSnapshot(SnapshotInstalled, nil)
+		}
 	}
 	return nil
 }

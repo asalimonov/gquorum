@@ -191,3 +191,65 @@ func TestIdleStreamsAreRetired(t *testing.T) {
 		t.Fatal("Close did not join stream work", err)
 	}
 }
+
+// This owner supplies Node's local lookup and has already released its replica.
+type stoppedStreamOwner struct{ *ingressDouble }
+
+func (*stoppedStreamOwner) LoadGroup(string) (*load.Group, bool) { return nil, false }
+
+func TestStreamRetiresReleasedReplicaWithoutWaitingForIdleTTL(t *testing.T) {
+	t.Parallel()
+	sender, _, local, remote := newProtocolPair(t, 4096)
+	sender.mu.Lock()
+	sender.node = &stoppedStreamOwner{local}
+	sender.mu.Unlock()
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	var count atomic.Int32
+	var discarded atomic.Bool
+	remote.receive = func(ctx context.Context, _ load.RaftBatch) error {
+		if count.Add(1) == 1 {
+			select {
+			case <-release:
+			case <-ctx.Done():
+				discarded.Store(true)
+				return ctx.Err()
+			}
+		}
+		return nil
+	}
+	reports := make(chan load.DeliveryReport, 2)
+	local.report = func(_ context.Context, report load.DeliveryReport) error { reports <- report; return nil }
+	for delivery := uint64(1); delivery <= 2; delivery++ {
+		if err := sender.SendRaft(t.Context(), appendBatch(local, remote, delivery)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitFor(t, "retired route", func() bool {
+		sender.mu.Lock()
+		defer sender.mu.Unlock()
+		return len(sender.streams) == 0
+	})
+	// Retirement must finish the receiver's already written frames before EOF,
+	// even if its engine has briefly blocked. An abrupt cancel loses this tail.
+	releaseOnce.Do(func() { close(release) })
+	waitFor(t, "released stream and connection reference", func() bool {
+		sender.mu.Lock()
+		defer sender.mu.Unlock()
+		for _, conn := range sender.clients {
+			if conn.refs != 0 {
+				return false
+			}
+		}
+		return true
+	})
+	if discarded.Load() || count.Load() != 2 {
+		t.Fatal("retirement discarded queued native frames", discarded.Load(), count.Load())
+	}
+	select {
+	case report := <-reports:
+		t.Fatal("intentional retirement reported a lost delivery", report)
+	default:
+	}
+}

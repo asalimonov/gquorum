@@ -16,10 +16,11 @@ import (
 
 // Machine adapts the deterministic topology FSM to the shared Raft loop.
 type Machine struct {
-	mu        sync.RWMutex
-	persister statePersister
-	rules     topology.Rules
-	scoped    *scopedState
+	processIdentities map[string]topology.Identity
+	mu                sync.RWMutex
+	persister         statePersister
+	rules             topology.Rules
+	scoped            *scopedState
 	// OnApplied is installed before the engine is constructed. It runs after
 	// durable application persistence, outside the FSM lock, and must be
 	// bounded.
@@ -42,7 +43,8 @@ func NewMachine(rules topology.Rules, persister statePersister) (*Machine, error
 		return nil, err
 	}
 	state.indexes = indexes
-	return &Machine{rules: rules, persister: persister, scoped: &state}, nil
+	return &Machine{rules: rules, persister: persister, scoped: &state,
+		processIdentities: indexProcessIdentities(&state)}, nil
 }
 
 // Apply applies a committed metadata command and encodes its deterministic
@@ -96,6 +98,9 @@ func (m *Machine) applyScoped(index, term uint64, data []byte, conf raftpb.ConfS
 		state.AppliedIndex = index
 	}
 	state.AppliedTerm = term
+	if application.changed {
+		m.processIdentities = indexProcessIdentities(state)
+	}
 	if application.result.CurrentVersion == 0 {
 		application.result.CurrentVersion = state.Latest.Version
 	}
@@ -161,6 +166,7 @@ func (m *Machine) Restore(ctx context.Context, data []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.scoped = &next
+	m.processIdentities = indexProcessIdentities(&next)
 	return nil
 }
 

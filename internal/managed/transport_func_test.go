@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/load"
 	"go.etcd.io/raft/v3/raftpb"
 )
@@ -28,7 +29,7 @@ func (c *captureTransport) SendRaft(ctx context.Context, batch load.RaftBatch) e
 }
 func (c *captureTransport) last() load.RaftBatch { c.mu.Lock(); defer c.mu.Unlock(); return c.batch }
 
-func TestDeliveryProofRejectsForeignTuplesAndExpiresSnapshots(t *testing.T) {
+func TestDeliveryProofRejectsForeignTuplesAndExpiresOrdinaryTokens(t *testing.T) {
 	functional(t)
 	f := newFixture(t)
 	transport := &captureTransport{}
@@ -41,11 +42,11 @@ func TestDeliveryProofRejectsForeignTuplesAndExpiresSnapshots(t *testing.T) {
 	slot := h.slots[ref.GroupID]
 	h.mu.Unlock()
 	sender := engineTransport{h, slot}
-	// A nil Send result cannot certify a snapshot. The exact issued token and
-	// both complete peers are required for the later delivery report.
-	must(t, sender.Send(deadline(t), []raftpb.Message{{From: 1, To: 2, Type: raftpb.MsgSnap}}))
+	// A nil Send accepts queued work. The exact issued token and both complete
+	// peers are required before a later transport failure can affect this engine.
+	must(t, sender.Send(deadline(t), []raftpb.Message{{From: 1, To: 2, Type: raftpb.MsgHeartbeat}}))
 	batch := transport.last()
-	report := load.DeliveryReport{From: batch.From, To: batch.To, DeliveryID: batch.DeliveryID, Kind: load.DeliverySnapshotSucceeded}
+	report := load.DeliveryReport{From: batch.From, To: batch.To, DeliveryID: batch.DeliveryID, Kind: load.DeliveryUnreachable}
 	foreign := report
 	foreign.To.Node.InstanceID = "different-process"
 	if err := h.ReportDelivery(deadline(t), foreign); !errors.Is(err, fault.ErrIdentityMismatch) {
@@ -65,7 +66,7 @@ func TestDeliveryProofRejectsForeignTuplesAndExpiresSnapshots(t *testing.T) {
 	if pending != 0 {
 		t.Fatal("accepted report retained snapshot token")
 	}
-	must(t, sender.Send(deadline(t), []raftpb.Message{{From: 1, To: 2, Type: raftpb.MsgSnap}}))
+	must(t, sender.Send(deadline(t), []raftpb.Message{{From: 1, To: 2, Type: raftpb.MsgHeartbeat}}))
 	h.expireDeliveries(time.Now().Add(2 * time.Second))
 	h.mu.Lock()
 	pending = len(slot.deliveries)
@@ -80,7 +81,7 @@ func TestDeliveryProofRejectsForeignTuplesAndExpiresSnapshots(t *testing.T) {
 	h.mu.Lock()
 	next := h.slots[ref.GroupID]
 	h.mu.Unlock()
-	must(t, (engineTransport{h, next}).Send(deadline(t), []raftpb.Message{{From: 1, To: 2, Type: raftpb.MsgSnap}}))
+	must(t, (engineTransport{h, next}).Send(deadline(t), []raftpb.Message{{From: 1, To: 2, Type: raftpb.MsgHeartbeat}}))
 	must(t, h.ReportDelivery(deadline(t), report))
 	h.mu.Lock()
 	pending = len(next.deliveries)
@@ -157,7 +158,12 @@ func TestDeliveryBookkeepingIsBoundedWithoutDiscardingSnapshots(t *testing.T) {
 	slot := h.slots[ref.GroupID]
 	h.mu.Unlock()
 	sender := engineTransport{h, slot}
-	must(t, sender.Send(deadline(t), []raftpb.Message{{From: 1, To: 2, Type: raftpb.MsgSnap}}))
+	owner := managedSnapshotOwnerFor(t, h)
+	to, err := h.cfg.ResolvePeer(deadline(t), load.ReplicaRef{GroupID: "work", ReplicaID: 2})
+	must(t, err)
+	_, err = h.registerSnapshotDelivery(owner, raftengine.SnapshotAttempt{RunID: owner.key.RunID,
+		ReplicaID: 2, Term: owner.core.Status().Term, Generation: 1}, to, time.Now().Add(time.Minute))
+	must(t, err)
 	for i := 0; i < deliveryWindow*2; i++ {
 		must(t, sender.Send(deadline(t), []raftpb.Message{{From: 1, To: 2, Type: raftpb.MsgHeartbeat}}))
 	}

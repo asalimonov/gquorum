@@ -337,7 +337,7 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 		Meta: gquorum.MetaOptions{SessionTTL: cfg.SessionTTL, VoterConfig: cfg.MetaVoterConfig,
 			Timing:  gquorum.MetaTiming{TickInterval: cfg.TickInterval, ElectionTicks: cfg.ElectionTicks},
 			Network: gquorum.MetaNetworkOptions{Listener: ls.meta, AdvertiseAddress: cfg.MetaAddress, AllowPlaintext: true, ClusterCredential: []byte(cfg.Credential), Resolver: metaResolver{a}}},
-		Loads: gquorum.LoadOptions{Factory: a.newReplica, Retire: a.retireReplica, Transport: loadTransport{app: a},
+		Loads: gquorum.LoadOptions{SnapshotTransfer: cfg.SnapshotTransfer, Factory: a.newReplica, Retire: a.retireReplica, Transport: loadTransport{app: a},
 			// Process tests exercise two collection passes across a crash. Keep
 			// maintenance prompt; retention still decides whether deletion is due.
 			RetirementInterval: 250 * time.Millisecond,
@@ -348,6 +348,10 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 		Lifecycle:  lifecycle.Options{Hooks: &fixtureLifecycle{DefaultHooks: defaults, app: a}},
 	}
 
+	binding, err := a.prepareLoadBinding(&a.nodeOptions)
+	if err != nil {
+		return nil, err
+	}
 	a.node, err = gquorum.NewNode(a.nodeOptions)
 	if err != nil {
 		return nil, err
@@ -356,9 +360,16 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 		_ = ls.meta.Close()
 	}
 	a.cluster = a.currentNode().Cluster()
+	if err = binding.bind(a, a.node); err != nil {
+		return nil, err
+	}
 	a.generation = a.makeNodeGeneration(a.node, a.nodeOptions.Meta.Network.Listener)
+	a.generation.production = binding
+	// Configuration is a template, not another owner of the initial adapter.
+	a.nodeOptions.Loads.Transport = loadTransport{app: a}
 	a.loadServer = grpc.NewServer(grpc.MaxRecvMsgSize(64<<20), grpc.MaxSendMsgSize(64<<20), grpc.MaxConcurrentStreams(128), grpc.WaitForHandlers(true))
 	loadpb.RegisterLoadServer(a.loadServer, a)
+	a.registerProductionLoad(a.loadServer, binding)
 	a.httpServer = &http.Server{Handler: a.routes(), ReadHeaderTimeout: 3 * time.Second, IdleTimeout: 30 * time.Second, BaseContext: func(net.Listener) context.Context { return a.httpCtx }}
 	return a, nil
 }

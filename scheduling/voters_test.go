@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asalimonov/gquorum/internal/votercheck"
 	"github.com/asalimonov/gquorum/metrics"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
@@ -212,5 +213,43 @@ func TestScheduleInputOwnsMetricsAndSwitchRecords(t *testing.T) {
 	copy.Switches[0].Replicas[0].Index = 99
 	if in.Metrics.Groups[0].Replicas[0].Sample.Voters[0] != 1 || in.Switches[0].Replicas[0].Index != 7 {
 		t.Fatal("callback aliases evidence")
+	}
+}
+
+func TestSnapshotCatchupEvidenceIsSharedByPolicyAndMandatoryCheck(t *testing.T) {
+	t.Parallel()
+	in := voterInput()
+	policy, err := NewDefaultRepairPolicy(DefaultRepairOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := policy.Schedule(t.Context(), in)
+	if err != nil || failed.Action == nil || failed.Action.VoterChange == nil {
+		t.Fatal(failed, err)
+	}
+	change := *failed.Action.VoterChange
+	victim := &in.Metrics.Groups[0].Replicas[2]
+	victim.Evidence.UnavailableFor = metrics.DurationValue{State: metrics.Current}
+	victim.Evidence.ReplicationLagFor = metrics.DurationValue{State: metrics.Current}
+	victim.Evidence.NoProgressFor = metrics.DurationValue{State: metrics.Current}
+	victim.Evidence.Reasons = []string{"snapshot_catchup"}
+	victim.ReplicationLag = metrics.UnsignedValue{State: metrics.Current, Value: 1990}
+	decision, err := policy.Schedule(t.Context(), in)
+	if err != nil || decision.Action != nil {
+		t.Fatal("policy replaced progressing snapshot", decision, err)
+	}
+	mandatory := votercheck.Input{Target: in.Target, Groups: in.Groups, Metrics: in.Metrics, Status: in.Status, Held: in.Held}
+	if why := votercheck.Check(mandatory, change); why == "" {
+		t.Fatal("mandatory check bypassed catch-up evidence")
+	}
+	victim.Evidence.Reasons = []string{"snapshot_transfer_failed"}
+	victim.Evidence.ReplicationLagFor.Value = 30 * time.Second
+	decision, err = policy.Schedule(t.Context(), in)
+	if err != nil || decision.Action == nil {
+		t.Fatal("bounded episode prevented later replacement", decision, err)
+	}
+	mandatory.Metrics = in.Metrics
+	if why := votercheck.Check(mandatory, *decision.Action.VoterChange); why != "" {
+		t.Fatal("mandatory check disagreed with policy", why)
 	}
 }

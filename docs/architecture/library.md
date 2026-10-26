@@ -289,8 +289,9 @@ Supply the following through `LoadOptions`:
 | `Application.Run` | Optional exact-replica background work started after authorized publication. Node cancels and joins it before Close; use Group.RunWhileLeader for leadership-scoped work. |
 | `Application.Close` | Optional application-resource release. A successful factory transfers this responsibility to Node, even if its caller subsequently cancels. A failed factory releases its own partial acquisitions. |
 | `Storage LoadStorageOptions` | Choose Node-owned `WAL: &WALOptions{RootDir: ...}`, or a borrowed `storage.Store` and explicit `storage.RetirementStore`, for groups of the default storage class. `Store.HasState` reports all retained evidence for fresh-start validation. Node also owns an in-memory store for groups created with `topology.StorageMemory`; it needs no option. |
-| `Transport load.Transport` | Application-selected authenticated adapter implementing `SendRaft`, `ReadReplica`, `InstallFence` and `ApplyAction`. Use the optional public `transport/loadgrpc` adapter or supply another protocol. |
+| `Transport load.Transport` | Application-selected authenticated adapter implementing `SendRaft`, `ReadReplica`, `InstallFence`, `ApplyAction` and the additional `snapshot.Transport.SendSnapshot` capability. Use the optional public `transport/loadgrpc` adapter or supply another protocol. |
 | `Retire RetireReplicaFunc` | Optional callback for application state outside the Raft store; verifies exact identity and authorization (`RetirementRequest.Verify`), performs idempotent cleanup and echoes the complete verified proof (`RetirementRequest.Result`). Leave nil when the application keeps no state outside Raft. |
+| `SnapshotTransfer snapshot.Options` | Local construction-time admission, sizes, chunk window and independent snapshot deadlines. Resolved without I/O; the maximum is encoded Snapshot.Data, including the engine envelope. |
 | `Engine load.EngineOptions` | Timing, snapshot threshold, bounded proposal/application batches and read settings. `MetaOptions.Reads` configures metadata reads separately. |
 
 `WALOptions.DisableFSync` (also `walstore.Options.DisableFSync`) is an explicit
@@ -321,8 +322,7 @@ policy. Neither listener creation nor configuration loading moves into Node.
 Transport values contain exact node/process/member and load replica identities.
 The receiver authenticates its application protocol, decodes the typed request,
 then calls `Node.ReceiveLoadRaft`, `ReadLoadReplica`, `InstallLoadFence` or `ApplyLoadAction`.
-Successful snapshot delivery and asynchronous failure reports use
-`ReportLoadDelivery` with the issued delivery ID and exact endpoints. Stale
+Ordinary asynchronous failure reports use `ReportLoadDelivery` with the issued delivery ID and exact endpoints. Managed snapshot jobs own their terminal reports; adapters return the `SendSnapshot` result instead. Stale
 reports cannot affect a replacement handle. `ApplyAction` is used for local
 and remote destinations; an in-process adapter may forward directly to Node.
 Retain exact endpoints for outstanding granted cleanup even if the host disappears
@@ -339,6 +339,10 @@ one worker per destination and coalesces batches queued behind a send into
 one ordered call, and steps each received batch in one loop turn. An adapter
 may return before the recipient steps a batch and report refusals
 asynchronously; `loadgrpc` streams non-snapshot batches this way.
+`Node.LoadSnapshots()` returns a stable borrowed `snapshot.Service`; it has no independent lifetime or application export/import API. `Begin`, `Write`, `Finish`, `Detach`, `Abort` and `SessionDone` preserve exact attachment ownership. `Options` returns a copy and `List` returns bounded local observations. Public contracts live in `load/snapshot`, coordination/staging in `internal/loadsnapshot`, and exact engine ports in `internal/managed`.
+
+Snapshot defaults are 256 MiB encoded, one incoming/one outgoing, directional budgets derived from maximum times concurrency, 1 MiB chunks/window eight, 30-minute total and one-minute verified-progress timeout. All are Node-creation settings; zero selects defaults. Sizes above 2 GB are configurable subject to platform representability and available memory; 2 GB is only the opt-in qualification ceiling. See [resource ownership](runtime.md#managed-load-snapshot-ownership).
+
 Read admission and protocol-round bounds are observable in
 `metrics.ReplicaSample.ReadQueue`. The Raft owner samples the configured limit,
 request slots/queue, quorum/application waiters and local/remote protocol rounds.

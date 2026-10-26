@@ -4,6 +4,7 @@ package managed
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"log/slog"
@@ -15,10 +16,12 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/loadhandle"
+	"github.com/asalimonov/gquorum/internal/loadsnapshot"
 	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/internal/metastore"
 	"github.com/asalimonov/gquorum/lifecycle"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/load/snapshot"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/storage/walstore"
 	"github.com/asalimonov/gquorum/topology"
@@ -468,9 +471,15 @@ func TestStopTimeoutKeepsStartupOwnedUntilRestoreAndCloseJoin(t *testing.T) {
 	started := make(chan error, 1)
 	go func() { _, err := h.StartReplica(deadline(t), ref, StartExplicit); started <- err }()
 	waitSignal(t, m.entered)
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	if err := h.StopReplica(ctx, ref, StopExplicit); !errors.Is(err, fault.ErrShutdownTimeout) {
+	stopped := make(chan error, 1)
+	go func() { stopped <- h.StopReplica(ctx, ref, StopExplicit) }()
+	// Cancellation ends a wait only after the exact stop has been admitted.
+	// A short wall-clock deadline can otherwise expire before StopReplica runs.
+	await(deadline(t), t, func() bool { h.mu.Lock(); defer h.mu.Unlock(); return h.slots[ref.GroupID].state == "stopping" })
+	cancel()
+	if err := <-stopped; !errors.Is(err, fault.ErrShutdownTimeout) {
 		t.Fatal(err)
 	}
 	waitSignal(t, m.canceled)
@@ -549,4 +558,61 @@ func (t *loopbackTransport) InstallFence(ctx context.Context, request load.Fence
 		return load.FenceResult{}, fault.ErrUnavailable
 	}
 	return t.host.InstallFence(ctx, request)
+}
+
+func (discardTransport) SendSnapshot(context.Context, snapshot.Send) (snapshot.Ack, error) {
+	return snapshot.Ack{}, &snapshot.TransferError{Reason: snapshot.ReasonUnsupported}
+}
+func (t *loopbackTransport) SendSnapshot(ctx context.Context, send snapshot.Send) (snapshot.Ack, error) {
+	return sendLoopbackSnapshot(ctx, loadsnapshot.NewService(t.host.cfg.SnapshotTransfer, func() (*loadsnapshot.Coordinator, error) { return t.host.snapshots, nil }), send)
+}
+
+func sendLoopbackSnapshot(ctx context.Context, service snapshot.Service, send snapshot.Send) (snapshot.Ack, error) {
+	if service == nil {
+		return snapshot.Ack{}, &snapshot.TransferError{Reason: snapshot.ReasonUnsupported}
+	}
+	policy := service.Options()
+	remaining := policy.TotalTimeout
+	if due, ok := ctx.Deadline(); ok {
+		remaining = min(remaining, time.Until(due))
+	}
+	ack, err := service.Begin(ctx, snapshot.BeginRequest{Manifest: send.Manifest, RemainingTotal: remaining, ProgressTimeout: min(policy.ProgressTimeout, remaining)})
+	if err != nil {
+		return ack, err
+	}
+	if ack.State != snapshot.DeliveryNotNeeded {
+		defer func() {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+			defer cancel()
+			_ = service.Detach(cleanup, ack.Session)
+		}()
+	}
+	report := func(ack snapshot.Ack) {
+		if send.ReportProgress != nil {
+			send.ReportProgress(snapshot.Progress{
+				ReceiverRunID: ack.ReceiverRunID, VerifiedBytes: ack.NextOffset, State: ack.State, RemainingTotal: ack.RemainingTotal, ProgressTimeout: ack.ProgressTimeout})
+		}
+	}
+	report(ack)
+	if ack.State == snapshot.DeliveryNotNeeded || ack.State == snapshot.DeliveryAccepted {
+		return ack, nil
+	}
+	if ack.ChunkBytes == 0 {
+		return snapshot.Ack{}, &snapshot.TransferError{Reason: snapshot.ReasonMalformed}
+	}
+	for ack.NextOffset < uint64(len(send.Data)) {
+		offset := ack.NextOffset
+		n := min(uint64(ack.ChunkBytes), uint64(len(send.Data))-offset)
+		data := send.Data[offset : offset+n]
+		ack, err = service.Write(ctx, snapshot.Chunk{Session: ack.Session, Offset: offset, Ordinal: offset / uint64(ack.ChunkBytes), Data: data, SHA256: sha256.Sum256(data)})
+		if err != nil {
+			return ack, err
+		}
+		report(ack)
+	}
+	ack, err = service.Finish(ctx, ack.Session)
+	if err == nil {
+		report(ack)
+	}
+	return ack, err
 }

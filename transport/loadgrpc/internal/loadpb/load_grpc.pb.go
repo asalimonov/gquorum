@@ -19,11 +19,12 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Load_SendRaft_FullMethodName     = "/gquorum.load.v1.Load/SendRaft"
-	Load_StreamRaft_FullMethodName   = "/gquorum.load.v1.Load/StreamRaft"
-	Load_ReadReplica_FullMethodName  = "/gquorum.load.v1.Load/ReadReplica"
-	Load_ApplyAction_FullMethodName  = "/gquorum.load.v1.Load/ApplyAction"
-	Load_InstallFence_FullMethodName = "/gquorum.load.v1.Load/InstallFence"
+	Load_SendRaft_FullMethodName         = "/gquorum.load.v1.Load/SendRaft"
+	Load_TransferSnapshot_FullMethodName = "/gquorum.load.v1.Load/TransferSnapshot"
+	Load_StreamRaft_FullMethodName       = "/gquorum.load.v1.Load/StreamRaft"
+	Load_ReadReplica_FullMethodName      = "/gquorum.load.v1.Load/ReadReplica"
+	Load_ApplyAction_FullMethodName      = "/gquorum.load.v1.Load/ApplyAction"
+	Load_InstallFence_FullMethodName     = "/gquorum.load.v1.Load/InstallFence"
 )
 
 // LoadClient is the client API for Load service.
@@ -31,6 +32,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type LoadClient interface {
 	SendRaft(ctx context.Context, in *RaftFrame, opts ...grpc.CallOption) (*Reply, error)
+	TransferSnapshot(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SnapshotFrame, SnapshotAck], error)
 	// StreamRaft carries ordered Raft batches from one sender replica to one
 	// recipient replica without waiting for each batch to be stepped.
 	StreamRaft(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[RaftFrame, StreamRefusal], error)
@@ -57,9 +59,22 @@ func (c *loadClient) SendRaft(ctx context.Context, in *RaftFrame, opts ...grpc.C
 	return out, nil
 }
 
+func (c *loadClient) TransferSnapshot(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[SnapshotFrame, SnapshotAck], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Load_ServiceDesc.Streams[0], Load_TransferSnapshot_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[SnapshotFrame, SnapshotAck]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Load_TransferSnapshotClient = grpc.BidiStreamingClient[SnapshotFrame, SnapshotAck]
+
 func (c *loadClient) StreamRaft(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[RaftFrame, StreamRefusal], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Load_ServiceDesc.Streams[0], Load_StreamRaft_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &Load_ServiceDesc.Streams[1], Load_StreamRaft_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +120,7 @@ func (c *loadClient) InstallFence(ctx context.Context, in *Envelope, opts ...grp
 // for forward compatibility.
 type LoadServer interface {
 	SendRaft(context.Context, *RaftFrame) (*Reply, error)
+	TransferSnapshot(grpc.BidiStreamingServer[SnapshotFrame, SnapshotAck]) error
 	// StreamRaft carries ordered Raft batches from one sender replica to one
 	// recipient replica without waiting for each batch to be stepped.
 	StreamRaft(grpc.BidiStreamingServer[RaftFrame, StreamRefusal]) error
@@ -123,6 +139,9 @@ type UnimplementedLoadServer struct{}
 
 func (UnimplementedLoadServer) SendRaft(context.Context, *RaftFrame) (*Reply, error) {
 	return nil, status.Error(codes.Unimplemented, "method SendRaft not implemented")
+}
+func (UnimplementedLoadServer) TransferSnapshot(grpc.BidiStreamingServer[SnapshotFrame, SnapshotAck]) error {
+	return status.Error(codes.Unimplemented, "method TransferSnapshot not implemented")
 }
 func (UnimplementedLoadServer) StreamRaft(grpc.BidiStreamingServer[RaftFrame, StreamRefusal]) error {
 	return status.Error(codes.Unimplemented, "method StreamRaft not implemented")
@@ -174,6 +193,13 @@ func _Load_SendRaft_Handler(srv interface{}, ctx context.Context, dec func(inter
 	}
 	return interceptor(ctx, in, info, handler)
 }
+
+func _Load_TransferSnapshot_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(LoadServer).TransferSnapshot(&grpc.GenericServerStream[SnapshotFrame, SnapshotAck]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type Load_TransferSnapshotServer = grpc.BidiStreamingServer[SnapshotFrame, SnapshotAck]
 
 func _Load_StreamRaft_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(LoadServer).StreamRaft(&grpc.GenericServerStream[RaftFrame, StreamRefusal]{ServerStream: stream})
@@ -261,6 +287,12 @@ var Load_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "TransferSnapshot",
+			Handler:       _Load_TransferSnapshot_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
 		{
 			StreamName:    "StreamRaft",
 			Handler:       _Load_StreamRaft_Handler,

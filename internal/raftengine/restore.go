@@ -8,7 +8,11 @@ import (
 )
 
 func restoreMachine(ctx context.Context, machine Machine, data []byte, boundary raftpb.SnapshotMetadata) error {
-	if err := machine.Restore(ctx, bytes.Clone(data)); err != nil {
+	return restoreOwnedMachine(ctx, machine, bytes.Clone(data), boundary)
+}
+
+func restoreOwnedMachine(ctx context.Context, machine Machine, data []byte, boundary raftpb.SnapshotMetadata) error {
+	if err := machine.Restore(ctx, data); err != nil {
 		return err
 	}
 	if validator, ok := machine.(RestoredValidator); ok {

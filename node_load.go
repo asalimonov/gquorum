@@ -8,12 +8,14 @@ import (
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/authoritystore"
+	"github.com/asalimonov/gquorum/internal/loadsnapshot"
 	"github.com/asalimonov/gquorum/internal/managed"
 	"github.com/asalimonov/gquorum/internal/metaservice"
 	"github.com/asalimonov/gquorum/internal/metastore"
 	internalmetrics "github.com/asalimonov/gquorum/internal/metrics"
 	"github.com/asalimonov/gquorum/internal/recovery/model"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/load/snapshot"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -54,6 +56,21 @@ func (*LoadParkedError) Is(err error) bool {
 	return errors.Is(fault.ErrReplicaNotReady, err)
 }
 
+// LoadSnapshots returns the stable borrowed snapshot facade for managed loads.
+func (n *node) LoadSnapshots() snapshot.Service { return n.snapshots }
+
+func (n *node) snapshotCoordinator() (*loadsnapshot.Coordinator, error) {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	if n.stopping || n.state == NodeStopped {
+		return nil, fault.ErrStopped
+	}
+	if n.host == nil {
+		return nil, fault.ErrReplicaNotReady
+	}
+	return n.host.SnapshotCoordinator(), nil
+}
+
 func (n *node) newHost(m *metaservice.Group) (*managed.Host, error) {
 	n.mu.RLock()
 	store, retirement, memory, runner := n.store, n.retirement, n.ownedMemory, n.lifecycle
@@ -78,8 +95,9 @@ func (n *node) newHost(m *metaservice.Group) (*managed.Host, error) {
 		Retirement:        retirement, Retention: runner.Retention,
 		RetirementInterval: n.opts.Loads.RetirementInterval,
 		Assignments:        m.LoadAssignments, Factory: n.opts.Loads.Factory, Store: store,
-		Transport:   n.opts.Loads.Transport,
-		ResolvePeer: m.ResolveLoadPeer, ValidatePeer: m.ValidateLoadPeer, ValidateNode: m.ValidateLoadNode,
+		Transport:        n.opts.Loads.Transport,
+		SnapshotTransfer: n.opts.Loads.SnapshotTransfer,
+		ResolvePeer:      m.ResolveLoadPeer, ValidatePeer: m.ValidateLoadPeer, ValidateNode: m.ValidateLoadNode,
 		Engine: n.opts.Loads.Engine, EffectTimeout: n.opts.Loads.EffectTimeout,
 		CallbackTimeout:  n.opts.CallbackTimeout,
 		Metrics:          internalmetrics.Settings(n.opts.Metrics),

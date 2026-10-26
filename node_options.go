@@ -14,11 +14,13 @@ import (
 
 	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/loadsnapshot"
 	"github.com/asalimonov/gquorum/internal/metaservice"
 	internalmetrics "github.com/asalimonov/gquorum/internal/metrics"
 	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/lifecycle"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/load/snapshot"
 	"github.com/asalimonov/gquorum/scheduling"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
@@ -159,6 +161,7 @@ type LoadOptions struct {
 	Transport                            load.Transport
 	Storage                              LoadStorageOptions
 	Engine                               load.EngineOptions
+	SnapshotTransfer                     snapshot.Options
 	EffectTimeout                        time.Duration
 	RecoveryInterval, RetirementInterval time.Duration
 }
@@ -236,7 +239,10 @@ func resolveNodeOptions(input NodeOptions) (resolvedNodeOptions, error) {
 	if err := validateLoadOptions(o.Loads); err != nil {
 		return resolvedNodeOptions{}, err
 	}
-	o.Loads = resolveLoadDefaults(o.Loads)
+	o.Loads, err = resolveLoadDefaults(o.Loads)
+	if err != nil {
+		return resolvedNodeOptions{}, err
+	}
 	m := metaservice.Options{
 		Identity: o.Identity, Node: o.Node, DBPath: o.metaDBPath(),
 		Join: o.Bootstrap.Join, JoinSeeds: o.Bootstrap.JoinSeeds,
@@ -287,7 +293,7 @@ func validateNodeSettings(o NodeOptions) error {
 	return nil
 }
 
-func resolveLoadDefaults(loads LoadOptions) LoadOptions {
+func resolveLoadDefaults(loads LoadOptions) (LoadOptions, error) {
 	if loads.Storage.WAL != nil {
 		owned := *loads.Storage.WAL
 		if owned.Prewrite != nil {
@@ -297,6 +303,11 @@ func resolveLoadDefaults(loads LoadOptions) LoadOptions {
 		loads.Storage.WAL = &owned
 	}
 	if loads.Factory != nil {
+		policy, err := loads.SnapshotTransfer.Resolve()
+		if err != nil {
+			return LoadOptions{}, err
+		}
+		loads.SnapshotTransfer = policy
 		if loads.EffectTimeout == 0 {
 			loads.EffectTimeout = defaultEffectTimeout
 		}
@@ -308,7 +319,7 @@ func resolveLoadDefaults(loads LoadOptions) LoadOptions {
 		}
 	}
 
-	return loads
+	return loads, nil
 }
 
 func (o *NodeOptions) applyMetaDefaults(m metaservice.Options) {
@@ -332,12 +343,16 @@ func validateLoadOptions(o LoadOptions) error {
 	invalid := func(message string) error { return fault.New(fault.Invalid, message, nil) }
 	hasLoads := o.Factory != nil || o.Retire != nil || o.Transport != nil || o.Storage.WAL != nil ||
 		o.Storage.Store != nil || o.Storage.Retirement != nil || o.Engine != (load.EngineOptions{}) ||
-		o.EffectTimeout != 0 || o.RecoveryInterval != 0 || o.RetirementInterval != 0
+		o.EffectTimeout != 0 || o.RecoveryInterval != 0 || o.RetirementInterval != 0 ||
+		o.SnapshotTransfer != (snapshot.Options{})
 	if !hasLoads {
 		return nil
 	}
 	if o.Factory == nil || o.Transport == nil {
 		return invalid("managed loads require Factory and Transport")
+	}
+	if _, err := loadsnapshot.RequireTransport(o.Transport); err != nil {
+		return err
 	}
 	if o.Storage.WAL != nil {
 		if o.Storage.Store != nil || o.Storage.Retirement != nil {

@@ -26,6 +26,7 @@ import (
 	"github.com/asalimonov/gquorum/internal/metatransport"
 	"github.com/asalimonov/gquorum/lifecycle"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/load/snapshot"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 	"go.etcd.io/raft/v3/raftpb"
@@ -530,4 +531,8 @@ func TestNodeRetainsGrantedIngressAfterWholeNodeFence(t *testing.T) {
 	if _, err = n.InstallLoadFence(ctx, load.FenceRequest{From: id, To: id, Resource: grant.Resources[0], Grant: grant}); !errors.Is(err, fault.ErrStopped) {
 		t.Fatal("full shutdown retained ingress", err)
 	}
+}
+
+func (unusedAuthorityTransport) SendSnapshot(context.Context, snapshot.Send) (snapshot.Ack, error) {
+	panic("unused authority transport invoked")
 }

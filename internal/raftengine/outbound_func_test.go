@@ -45,7 +45,7 @@ func TestOutboundQueuesPreserveFIFOAndRetireIdleMembershipWorkers(t *testing.T) 
 	t.Parallel()
 	transport := &orderedTransport{indexes: map[uint64][]uint64{}, delivered: make(chan uint64, 20)}
 	ctx, cancel := context.WithCancel(t.Context())
-	group := &Group{ctx: ctx, opts: Options{Transport: transport, Timing: Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 10}}, sendC: make(chan []raftpb.Message, 20), unreachable: make(chan uint64, 20), reports: make(chan snapshotReport, 20), cached: raft.Status{Config: tracker.Config{Voters: quorum.JointConfig{quorum.MajorityConfig{1: {}, 2: {}}, nil}}}}
+	group := &Group{ctx: ctx, opts: Options{Transport: transport, Timing: Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 10}}, sendC: make(chan []raftpb.Message, 20), unreachable: make(chan uint64, 20), cached: raft.Status{Config: tracker.Config{Voters: quorum.JointConfig{quorum.MajorityConfig{1: {}, 2: {}}, nil}}}}
 	group.meter = outboundTestMeter(t)
 	group.wg.Add(1)
 	go group.sender()
@@ -117,7 +117,7 @@ func TestRemovedDestinationDropsStaleBacklogAndAttemptsFinalCommit(t *testing.T)
 	t.Parallel()
 	transport := &retiringTransport{entered: make(chan struct{}, 1), final: make(chan struct{})}
 	ctx, cancel := context.WithCancel(t.Context())
-	group := &Group{ctx: ctx, opts: Options{Transport: transport, Timing: Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 20}}, sendC: make(chan []raftpb.Message, 64), unreachable: make(chan uint64, 64), reports: make(chan snapshotReport, 64), cached: raft.Status{Config: tracker.Config{Voters: quorum.JointConfig{quorum.MajorityConfig{1: {}, 2: {}}, nil}}}}
+	group := &Group{ctx: ctx, opts: Options{Transport: transport, Timing: Timing{TickInterval: 10 * time.Millisecond, ElectionTicks: 20}}, sendC: make(chan []raftpb.Message, 64), unreachable: make(chan uint64, 64), cached: raft.Status{Config: tracker.Config{Voters: quorum.JointConfig{quorum.MajorityConfig{1: {}, 2: {}}, nil}}}}
 	group.meter = outboundTestMeter(t)
 	group.wg.Add(1)
 	go group.sender()

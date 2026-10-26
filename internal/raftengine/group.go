@@ -25,14 +25,13 @@ import (
 )
 
 const (
-	proposalQueueCapacity       = 256
-	inboundQueueCapacity        = 1024
-	controlQueueCapacity        = 16
-	snapshotQueueCapacity       = 16
-	unreachableQueueCapacity    = 256
-	snapshotReportQueueCapacity = 64
-	outboundBatchQueueCapacity  = 256
-	engineWorkerCount           = 4 // Raft loop, writer, sender and metrics sampler.
+	proposalQueueCapacity      = 256
+	inboundQueueCapacity       = 1024
+	controlQueueCapacity       = 16
+	snapshotQueueCapacity      = 16
+	unreachableQueueCapacity   = 256
+	outboundBatchQueueCapacity = 256
+	engineWorkerCount          = 4 // Raft loop, writer, sender and metrics sampler.
 )
 
 type response struct {
@@ -40,6 +39,8 @@ type response struct {
 	err    error
 }
 type request struct {
+	ownedSnapshot      *ownedSnapshotTicket
+	preflightReply     chan snapshotPreflightReply
 	expectedTerm       uint64
 	ctx                context.Context
 	correlation        string
@@ -56,14 +57,27 @@ type request struct {
 	retried            bool
 	retryAt            time.Time
 }
-type snapshotReport struct {
-	id     uint64
-	status raft.SnapshotStatus
-}
 
 // Group owns one exact persistence-ordered Raft replica and its serialized
 // application work.
 type Group struct {
+	snapshotEpisodes        map[uint64]*snapshotEpisode
+	snapshotEpoch           context.Context
+	cancelSnapshotEpoch     context.CancelFunc
+	snapshotEpochTerm       uint64
+	snapshotPublication     uint64
+	snapshotSizeWarned      bool
+	snapshotAttemptSequence uint64
+	snapshotReportMu        sync.Mutex
+	snapshotReports         map[uint64]*snapshotReportState
+	snapshotReportWake      chan struct{}
+	snapshotReportDue       time.Time // snapshotReportMu; earliest retained terminal report
+	snapshotReportsClosed   bool
+
+	snapshotIngress                           chan *request
+	activeSnapshot                            *ownedSnapshotTicket
+	headerOnlyTicket                          *request
+	snapshotBounds                            SnapshotBounds
 	observations                              *watchstate.Latest[replicastate.Observation]
 	observation                               replicastate.Observation
 	leadership                                LeadershipEpoch
@@ -97,7 +111,6 @@ type Group struct {
 	adminNotify                               []adminReply
 	transferIssuedTerm                        uint64
 	unreachable                               chan uint64
-	reports                                   chan snapshotReport
 	sendC                                     chan []raftpb.Message
 	sendWorkers                               atomic.Int64
 	writeC                                    chan writeJob
@@ -146,7 +159,15 @@ func newGroup(parent context.Context, opts Options, mode engineMode) (*Group, er
 		return nil, err
 	}
 	options := ownGroupOptions(opts.defaults())
-	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if options.SnapshotPolicy.TotalTimeout > 0 {
+		// Managed full-buffer recovery belongs to the startup owner. Reading and
+		// restoring a large durable snapshot must not loop on a five-second retry.
+		ctx, cancel = context.WithCancel(parent)
+	} else {
+		ctx, cancel = context.WithTimeout(parent, 5*time.Second)
+	}
 	defer cancel()
 	state, err := loadGroupRecovery(ctx, options)
 	if err != nil {
@@ -175,7 +196,13 @@ func (g *Group) Start(parent context.Context) error {
 	go g.writer()
 	go g.sender()
 	go g.sampleMetrics()
-	go func() { g.wg.Wait(); g.finishObservations(); close(g.done) }()
+	go func() {
+		g.wg.Wait()
+		g.finishSnapshotIngressAfterJoin()
+		g.closeSnapshotReportsAfterJoin()
+		g.finishObservations()
+		close(g.done)
+	}()
 	return nil
 }
 
@@ -197,7 +224,7 @@ func (g *Group) RequestStop() {
 	g.publishObservationLocked(regularObservation)
 	g.mu.Unlock()
 	if finish {
-		go func() { g.finishObservations(); close(g.done) }()
+		go func() { g.closeSnapshotReportsAfterJoin(); g.finishObservations(); close(g.done) }()
 	}
 }
 
@@ -477,12 +504,19 @@ func (g *Group) ReportUnreachable(id uint64) {
 	}
 }
 
-// ReportSnapshot queues a completed snapshot-transfer outcome without blocking.
+// ReportSnapshot adapts a legacy destination-only report to its current offer.
+// Legacy transports cannot distinguish their own delayed prior attempts; managed
+// transfers always use the exact SnapshotAttempt API instead.
 func (g *Group) ReportSnapshot(id uint64, status raft.SnapshotStatus) {
-	select {
-	case g.reports <- snapshotReport{id, status}:
-	default:
+	g.snapshotReportMu.Lock()
+	record := g.snapshotReports[id]
+	var attempt SnapshotAttempt
+	if record != nil {
+		attempt = record.attempt
 	}
+	g.snapshotReportMu.Unlock()
+	// Legacy _meta and standalone callers retain immediate native reports.
+	g.recordSnapshotReport(attempt, status, snapshotLegacyReport)
 }
 func copyConf(cs raftpb.ConfState) raftpb.ConfState {
 	cs.Voters = slices.Clone(cs.Voters)

@@ -208,12 +208,23 @@ func (a *application) startRecoveredGeneration(ctx context.Context, status recov
 		return err
 	}
 	opts.Meta.Network.Listener = listener
+	binding, err := a.prepareLoadBinding(&opts)
+	if err != nil {
+		_ = listener.Close()
+		return err
+	}
 	node, err := gquorum.NewNode(opts)
 	if err != nil {
 		_ = listener.Close()
 		return err
 	}
-	a.installGeneration(node, listener)
+	if err = binding.bind(a, node); err != nil {
+		_ = node.Stop(ctx)
+		_ = binding.transport.Close(ctx)
+		_ = listener.Close()
+		return err
+	}
+	a.installGeneration(node, listener, binding)
 	if a.metaProxy != nil {
 		a.metaProxy.internal = listener
 	}
@@ -226,13 +237,15 @@ func (a *application) startRecoveredGeneration(ctx context.Context, status recov
 	generation.workers.Go(func() { a.observeServingContext(generation.ctx) })
 	return nil
 }
-func (a *application) installGeneration(node gquorum.Node, listener net.Listener) {
+func (a *application) installGeneration(node gquorum.Node, listener net.Listener, binding *fixtureLoadBinding) {
 	next := a.makeNodeGeneration(node, listener)
+	next.production = binding
 	a.mu.Lock()
 	a.serving = make(map[string]topology.GroupProgress)
 	a.startupObserved, a.startupMissing = false, ""
 	a.mu.Unlock()
 	a.generationMu.Lock()
 	a.generation = next
+	a.node, a.cluster = nil, nil
 	a.generationMu.Unlock()
 }

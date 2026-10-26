@@ -108,6 +108,7 @@ Raft and CRDT libraries, Zookeeper or PostgreSQL:
 - **Permanent majority loss:** recover one complete survivor into a fresh cluster,
   then start an ordinary Node on the same roots.
   See the [recovery lifecycle](docs/architecture/runtime.md#permanent-majority-loss-recovery).
+- **Large load snapshots:** bounded chunked transfers run alongside ordinary Raft on separate connections to the existing load port. Configure `Loads.SnapshotTransfer` at Node creation; the default encoded allowance is 256 MiB, and larger sizes are supported by configuration. Full-buffer application/storage APIs require memory for multiple snapshot-sized buffers. See [transport and resource contracts](transport/loadgrpc/README.md).
 - **Durable recovery:** bbolt-backed metadata, an included etcd WAL backend for
   load groups, full state-machine snapshots, committed-tail replay, compaction
   and snapshot catch-up.
@@ -206,16 +207,17 @@ compatibility impact.
 2. Make a focused change with regression coverage appropriate to the behavior.
    Keep documentation and examples aligned with public API changes.
    Run `make install-hooks` once to enable lint checks for staged files before
-   each commit. Use `make lint-staged` to run those checks manually.
+   each commit. Use `make lint-staged` to run those checks manually, or
+   `make lint` to check all pending staged, unstaged and untracked changes.
 3. Run all tests before sending of a request:
 
    ```sh
    make test          # Compile all five application modules and run fast, uncached units
    make lint          # vet, revive style and unused-code checks across modules
-   make test-race     # Fast unit checks under the race detector
-   make test-function # Isolated non-Docker functional and storage tests
-   make test-cluster  # Cluster tests
-   make test-sim      # Deterministic three-node latency and partition simulations
+   make test-race     # SLOW unit checks under the race detector
+   make test-function # SLOW isolated non-Docker functional and storage tests
+   make test-cluster  # VERY SLOW cluster tests, run only after large tasks or several large commits
+   make test-sim      # SLOW deterministic three-node latency and partition simulations
    ```
 
 The [testing guide](docs/testing/tests.md) describes test boundaries and commands.

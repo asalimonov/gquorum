@@ -298,13 +298,17 @@ func TestBus_BoundedIngressAndSubscriberLoss(t *testing.T) {
 	must(t, <-finished)
 	// Wait until both accepted events have been dispatched into the bounded subscriber.
 	for {
+		// The second append follows the first dispatch, which consumes the
+		// ingress-loss count. Read the journal first so a later lost count
+		// cannot be confused with that earlier ingress loss.
+		journaled := len(listTest(t, j, Query{})) >= 2
 		b.mu.Lock()
 		pendingLoss := uint64(0)
 		for s := range b.subs {
 			pendingLoss = s.lost
 		}
 		b.mu.Unlock()
-		if pendingLoss == 1 && len(listTest(t, j, Query{})) >= 2 {
+		if journaled && pendingLoss == 1 {
 			break
 		}
 		select {

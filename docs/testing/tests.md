@@ -70,7 +70,8 @@ The five modules are run in sequence, including `examples/scheduler` and
 | `make test-sim` | Seeded three-node latency and intermittent-connectivity simulations in a separate module |
 | `make test-perf` | Three measured Docker cases, each under two minutes |
 | `make bench` | Planner and complete meta FSM snapshot matrices |
-| `make lint` | Vet all module/build variants; TiDB revive style rules and merged Staticcheck unused declarations |
+| `make lint` | The same checks for pending Go files: staged, unstaged and untracked changes in the working tree |
+| `make lint-full` | Vet all module/build variants; TiDB revive style rules and merged Staticcheck unused declarations |
 | `make proto-check` | Regenerate pinned protocol code and require no diff |
 
 `make test-functional` and `make test-functional-race` remain aliases for the
@@ -93,7 +94,7 @@ the 100 ms quorum sampling contract, network/timing settings, current coverage
 boundaries and reproducible seed commands.
 
 
-`make lint` installs versioned binaries under the ignored `.tools/lint/` directory:
+`make lint-full` installs versioned binaries under the ignored `.tools/lint/` directory:
 revive v1.17.1 and Staticcheck v0.8.2. The checked-in [revive configuration](../../revive.toml)
 copies `tools/check/revive.toml` from the local TiDB checkout, including its 16
 enabled style rules, confidence threshold and severity. These
@@ -120,6 +121,11 @@ lint configuration changes check every module, and staged `go.mod`/`go.sum`
 changes check their entire module. Documentation-only commits skip lint.
 Pinned tools are installed automatically when needed. The checks never run tests
 or change staged files. Run `make lint-staged` to invoke them manually.
+
+`make lint` applies the same scoping to all pending work instead of the index:
+staged, unstaged and untracked (non-ignored) files are linted in place using
+their working-tree contents. Use it while editing; `make lint-full` remains the
+complete check before cluster tests.
 
 ## Test reports
 
@@ -235,7 +241,7 @@ The scheduler module has unit validation (CAS transitions, codec, revocation
 rules, executor choice, configuration) and functional SQLite/FSM, snapshot,
 schema-reset, retirement and single-replica recovery coverage under the same
 tags as the library. `make test` and `make test-function` include it, and
-`make lint` checks both variants. The public load gRPC adapter has
+`make lint-full` checks both variants. The public load gRPC adapter has
 protocol-double tests under its owning package's `functional` tag. Process
 failover acceptance is the separate `make test-scheduler-example` Compose
 scenario.
@@ -333,3 +339,21 @@ go test -c -tags=functional -o /tmp/gquorum-recovery-resources.test ./tests/reco
 
 Prior qualification records retain their original revision, binary hash and source
 paths. Source moves do not turn those historical measurements into new runs.
+
+## Explicit large-snapshot qualification
+
+Ordinary units, functional checks, performance targets and `clustertest` alone exclude large generated payloads. The additional `snapshotlarge` build tag selects `TestLargeSnapshot_`; there is no default Make dependency or checked-in snapshot blob. The generated cases request 256,000,000, 1,000,000,000 and 2,000,000,000 encoded bytes, with observed envelope calibration and explicit per-node policy. This ceiling is a test choice; production options accept larger representable sizes.
+
+Use one unique image tag for the final ordinary suite and qualification; do not replace it during a run:
+
+```sh
+SNAPSHOT_TEST_IMAGE=gquorum-test:snapshot-20261026
+make test-cluster-build CLUSTER_IMAGE="$SNAPSHOT_TEST_IMAGE"
+make test-cluster-run CLUSTER_IMAGE="$SNAPSHOT_TEST_IMAGE" \
+  CLUSTER_PARALLEL=1 CLUSTER_TIMEOUT=2h \
+  CLUSTER_ARGS='-tags=clustertest,snapshotlarge -run ^TestLargeSnapshot_ -v'
+```
+
+The test refuses insufficient resources rather than shrinking a case. It requires Docker memory of at least twelve times the requested encoded length and available storage of at least eight times that length. Each case generates reproducible actual bytes, uses production chunks/Node-owned WAL/Restore, verifies tail/new writes/restart and a lost chunk Ack, and checks ordinary traffic on another group. Reports retain compact sizes/hashes and sampled heap/RSS/store high-water, reservations, wire chunk/window peaks and phase timing. These observations are not RSS/throughput guarantees; serialized full-buffer callbacks and resident state remain material costs.
+
+Qualification passed on 2026-10-26 with Go 1.26.5, etcd Raft 3.6.0 and gRPC 1.79.3 on Linux/arm64 Docker 29.6.1 (39,878,758,400 bytes VM memory). All three exact encoded ceilings passed, with reconnect, ordinary traffic, persistence/Restore, tail/new writes, retained restart and zero transfer reservations after completion. Evidence: `test-reports/cluster/20261025T222708.955256Z-4acyzfy_/report.md`. Sizes above 2 GB remain unmeasured. Five-module units/race/functional/race, full lint, proto-check, the gRPC teardown race gate and all 122 ordinary cluster cases also passed. See [measured resource details](../../tests/cluster/README.md#measured-snapshot-resources) for the scope and sampling limits.

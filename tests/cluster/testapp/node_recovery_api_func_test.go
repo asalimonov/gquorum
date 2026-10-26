@@ -15,6 +15,7 @@ import (
 	quorum "github.com/asalimonov/gquorum"
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load"
+	"github.com/asalimonov/gquorum/load/snapshot"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/storage/walstore"
 	"github.com/asalimonov/gquorum/topology"
@@ -291,4 +292,11 @@ func TestPublicNodeStopJoinsEffectsBeforeDatabase(t *testing.T) {
 	if probe, err := store.Probe(ctx, "work"); err != nil || !probe.HasLog {
 		t.Fatal("borrowed WAL store not retained", probe, err)
 	}
+}
+
+func (t *joiningActionTransport) SendSnapshot(ctx context.Context, send snapshot.Send) (snapshot.Ack, error) {
+	if transport, ok := t.Transport.(snapshot.Transport); ok {
+		return transport.SendSnapshot(ctx, send)
+	}
+	return snapshot.Ack{}, &snapshot.TransferError{Reason: snapshot.ReasonUnsupported}
 }

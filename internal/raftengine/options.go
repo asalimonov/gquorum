@@ -54,6 +54,7 @@ type Timing struct {
 // Options supplies exact identity, initial membership, bounded engine settings
 // and borrowed dependencies.
 type Options struct {
+	SnapshotPolicy SnapshotPolicy
 	// MaxWatchers bounds local current-state subscriptions; zero selects 128.
 	MaxWatchers                  int
 	GroupID, NodeName, ClusterID string
@@ -144,6 +145,9 @@ func (o Options) validateFoundingMembers() error {
 // ValidateSettings checks tuning without requiring an open store or a machine.
 // Node uses this same validation before acquiring any per-replica resources.
 func (o Options) ValidateSettings() error {
+	if err := o.SnapshotPolicy.validate(); err != nil {
+		return err
+	}
 	if err := o.Reads.Validate(); err != nil {
 		return err
 	}

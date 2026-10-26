@@ -59,93 +59,31 @@ func (t *Transport) invokeOnRoute(ctx context.Context, to topology.Identity, exc
 	return invoke(ctx, conn.Conn, exchange)
 }
 
-// SendRaft delivers ordered subsets with unchanged endpoints and delivery ID.
-// Batches without a snapshot are written to the route's stream and return once
-// sent; a later refusal is reported as an unreachable delivery. Snapshot
-// batches use a unary call, and success is reported only after every subset
-// is accepted. Returning an error also lets Node's sender report failure if its
-// context has already expired and no explicit delivery report can be accepted.
+// SendRaft streams ordinary consensus traffic on the independent Raft pool.
+// Snapshots must use SendSnapshot and are refused before acquisition or I/O.
 func (t *Transport) SendRaft(parent context.Context, batch load.RaftBatch) error {
-	ctx, err := t.begin(parent)
-	if err != nil {
-		return err
-	}
-	defer ctx.Release()
-	if err := checkRoute(ctx.Node.Identity(), batch.From.Node, batch.To.Node); err != nil {
-		return err
-	}
-	outcome := t.sendBatchFrames(ctx.Context, batch)
-	return outcome.report(ctx.Context, ctx.Node, batch)
-}
-
-type sendOutcome struct {
-	snapshot bool
-	err      error
-}
-
-func hasSnapshot(messages []raftpb.Message) bool {
-	snapshot := false
-	for _, m := range messages {
-		snapshot = snapshot || m.Type == raftpb.MsgSnap
-	}
-	return snapshot
-}
-
-func (t *Transport) sendBatchFrames(ctx context.Context, batch load.RaftBatch) sendOutcome {
-	outcome := sendOutcome{snapshot: hasSnapshot(batch.Messages)}
-	frames, err := encodeRaftFrames(batch, t.options.MaxMessageBytes)
-	if err != nil {
-		outcome.err = err
-		return outcome
-	}
-	outcome.err = t.sendFrames(ctx, batch, frames, outcome)
-	return outcome
-}
-
-func (t *Transport) sendFrames(ctx context.Context, batch load.RaftBatch, frames []*loadpb.RaftFrame,
-	outcome sendOutcome) error {
-	if !outcome.snapshot {
-		return t.sendStream(ctx, batch, frames)
-	}
-	return t.sendUnary(ctx, batch.To.Node, frames)
-}
-
-func (o sendOutcome) deliveryKind() load.DeliveryKind {
-	if !o.snapshot {
-		return load.DeliveryUnreachable
-	}
-	if o.err == nil {
-		return load.DeliverySnapshotSucceeded
-	}
-	return load.DeliverySnapshotFailed
-}
-
-func (o sendOutcome) report(ctx context.Context, node Ingress, batch load.RaftBatch) error {
-	if !o.snapshot && o.err == nil {
-		return nil
-	}
-	reportErr := node.ReportLoadDelivery(ctx,
-		load.DeliveryReport{From: batch.From, To: batch.To, DeliveryID: batch.DeliveryID, Kind: o.deliveryKind()})
-	if o.err == nil {
-		return reportErr
-	}
-	return o.err
-}
-
-func (t *Transport) sendUnary(ctx context.Context, to topology.Identity, frames []*loadpb.RaftFrame) error {
-	conn, err := t.client(ctx, to)
-	if err != nil {
-		return err
-	}
-	defer conn.Release()
-	for _, frame := range frames {
-		exchange := rpcExchange{method: loadpb.Load_SendRaft_FullMethodName, input: frame,
-			limit: t.options.MaxMessageBytes}
-		if err := invoke(ctx, conn.Conn, exchange); err != nil {
-			return err
+	for _, message := range batch.Messages {
+		if message.Type == raftpb.MsgSnap {
+			return fault.ErrUnsupported
 		}
 	}
-	return nil
+	call, err := t.begin(parent)
+	if err != nil {
+		return err
+	}
+	defer call.Release()
+	if err = checkRoute(call.Node.Identity(), batch.From.Node, batch.To.Node); err != nil {
+		return err
+	}
+	frames, err := encodeRaftFrames(batch, t.options.MaxMessageBytes)
+	if err == nil {
+		err = t.sendStream(call.Context, batch, frames)
+	}
+	if err != nil {
+		_ = call.Node.ReportLoadDelivery(call.Context, load.DeliveryReport{
+			From: batch.From, To: batch.To, DeliveryID: batch.DeliveryID, Kind: load.DeliveryUnreachable})
+	}
+	return err
 }
 
 // ReadReplica preserves diagnostic status and quorum-confirmed native evidence.

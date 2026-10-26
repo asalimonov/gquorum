@@ -405,10 +405,16 @@ func (a *application) Deliver(ctx context.Context, frame *loadpb.Frame) (*loadpb
 	return &loadpb.Reply{}, nil
 }
 
-type loadTransport struct{ app *application }
+type loadTransport struct {
+	app     *application
+	binding *fixtureLoadBinding
+}
 
 func (t loadTransport) SendRaft(ctx context.Context, batch load.RaftBatch) error {
 	t.app.recordReadSend(batch)
+	if t.binding != nil {
+		return t.binding.transport.SendRaft(ctx, batch)
+	}
 	client, err := t.app.client(ctx, batch.To.Node.NodeName, batch.To.Node.MemberID)
 	if err != nil {
 		return err

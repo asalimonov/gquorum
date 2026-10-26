@@ -42,6 +42,8 @@ type readControl struct {
 	lastContext                []byte // one bounded diagnostic context, never quorum authority
 }
 type controlledMachine struct {
+	app  *application
+	node topology.Identity
 	*kvMachine
 	hooks *clusterHooks
 	key   walKey
@@ -57,7 +59,7 @@ func (a *application) clusterMachine(machine *kvMachine, key walKey) load.StateM
 		h.reads[key] = &readControl{}
 	}
 	h.mu.Unlock()
-	return &controlledMachine{kvMachine: machine, hooks: h, key: key}
+	return &controlledMachine{kvMachine: machine, hooks: h, key: key, app: a, node: a.snapshotNodeIdentity()}
 }
 
 // Node calls application Close only after the machine owner joins. Removing
@@ -295,4 +297,17 @@ func (a *application) registerReadRoutes(mux *http.ServeMux, protect func(http.H
 	}
 	mux.HandleFunc("PUT /internal/test/reads/{group}/{replica}", protect(mutate))
 	mux.HandleFunc("DELETE /internal/test/reads/{group}/{replica}", protect(mutate))
+}
+
+func (m *controlledMachine) Restore(ctx context.Context, data []byte) error {
+	if err := m.app.snapshotPhase(ctx, m.node, m.key, "before_restore", 0); err != nil {
+		return err
+	}
+	if err := m.app.snapshotRestoreFailure(m.node, m.key); err != nil {
+		return err
+	}
+	if err := m.kvMachine.Restore(ctx, data); err != nil {
+		return err
+	}
+	return m.app.snapshotPhase(ctx, m.node, m.key, "after_restore", 0)
 }

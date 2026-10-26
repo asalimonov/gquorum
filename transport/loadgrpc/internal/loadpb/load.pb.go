@@ -381,6 +381,601 @@ func (x *StreamRefusal) GetErrorMessage() string {
 	return ""
 }
 
+// Snapshot transfer uses bounded frames; application data never enters NativeHeader.
+type SnapshotOpen struct {
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	Version              uint32                 `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"` // Must be 1.
+	From                 *RaftPeer              `protobuf:"bytes,2,opt,name=from,proto3" json:"from,omitempty"`
+	To                   *RaftPeer              `protobuf:"bytes,3,opt,name=to,proto3" json:"to,omitempty"`
+	DeliveryId           uint64                 `protobuf:"varint,4,opt,name=delivery_id,json=deliveryId,proto3" json:"delivery_id,omitempty"`
+	NativeHeader         []byte                 `protobuf:"bytes,5,opt,name=native_header,json=nativeHeader,proto3" json:"native_header,omitempty"`
+	TotalBytes           uint64                 `protobuf:"varint,6,opt,name=total_bytes,json=totalBytes,proto3" json:"total_bytes,omitempty"`
+	Sha256               []byte                 `protobuf:"bytes,7,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	ChunkBytes           uint32                 `protobuf:"varint,8,opt,name=chunk_bytes,json=chunkBytes,proto3" json:"chunk_bytes,omitempty"`
+	RemainingTotalNanos  uint64                 `protobuf:"varint,9,opt,name=remaining_total_nanos,json=remainingTotalNanos,proto3" json:"remaining_total_nanos,omitempty"`
+	Resume               bool                   `protobuf:"varint,10,opt,name=resume,proto3" json:"resume,omitempty"`
+	ProgressTimeoutNanos uint64                 `protobuf:"varint,11,opt,name=progress_timeout_nanos,json=progressTimeoutNanos,proto3" json:"progress_timeout_nanos,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *SnapshotOpen) Reset() {
+	*x = SnapshotOpen{}
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SnapshotOpen) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SnapshotOpen) ProtoMessage() {}
+
+func (x *SnapshotOpen) ProtoReflect() protoreflect.Message {
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SnapshotOpen.ProtoReflect.Descriptor instead.
+func (*SnapshotOpen) Descriptor() ([]byte, []int) {
+	return file_transport_loadgrpc_internal_loadpb_load_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SnapshotOpen) GetVersion() uint32 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+func (x *SnapshotOpen) GetFrom() *RaftPeer {
+	if x != nil {
+		return x.From
+	}
+	return nil
+}
+
+func (x *SnapshotOpen) GetTo() *RaftPeer {
+	if x != nil {
+		return x.To
+	}
+	return nil
+}
+
+func (x *SnapshotOpen) GetDeliveryId() uint64 {
+	if x != nil {
+		return x.DeliveryId
+	}
+	return 0
+}
+
+func (x *SnapshotOpen) GetNativeHeader() []byte {
+	if x != nil {
+		return x.NativeHeader
+	}
+	return nil
+}
+
+func (x *SnapshotOpen) GetTotalBytes() uint64 {
+	if x != nil {
+		return x.TotalBytes
+	}
+	return 0
+}
+
+func (x *SnapshotOpen) GetSha256() []byte {
+	if x != nil {
+		return x.Sha256
+	}
+	return nil
+}
+
+func (x *SnapshotOpen) GetChunkBytes() uint32 {
+	if x != nil {
+		return x.ChunkBytes
+	}
+	return 0
+}
+
+func (x *SnapshotOpen) GetRemainingTotalNanos() uint64 {
+	if x != nil {
+		return x.RemainingTotalNanos
+	}
+	return 0
+}
+
+func (x *SnapshotOpen) GetResume() bool {
+	if x != nil {
+		return x.Resume
+	}
+	return false
+}
+
+func (x *SnapshotOpen) GetProgressTimeoutNanos() uint64 {
+	if x != nil {
+		return x.ProgressTimeoutNanos
+	}
+	return 0
+}
+
+type SnapshotData struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Attachment    uint64                 `protobuf:"varint,1,opt,name=attachment,proto3" json:"attachment,omitempty"`
+	Ordinal       uint64                 `protobuf:"varint,2,opt,name=ordinal,proto3" json:"ordinal,omitempty"`
+	Offset        uint64                 `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"`
+	Data          []byte                 `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
+	Sha256        []byte                 `protobuf:"bytes,5,opt,name=sha256,proto3" json:"sha256,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SnapshotData) Reset() {
+	*x = SnapshotData{}
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SnapshotData) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SnapshotData) ProtoMessage() {}
+
+func (x *SnapshotData) ProtoReflect() protoreflect.Message {
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SnapshotData.ProtoReflect.Descriptor instead.
+func (*SnapshotData) Descriptor() ([]byte, []int) {
+	return file_transport_loadgrpc_internal_loadpb_load_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *SnapshotData) GetAttachment() uint64 {
+	if x != nil {
+		return x.Attachment
+	}
+	return 0
+}
+
+func (x *SnapshotData) GetOrdinal() uint64 {
+	if x != nil {
+		return x.Ordinal
+	}
+	return 0
+}
+
+func (x *SnapshotData) GetOffset() uint64 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *SnapshotData) GetData() []byte {
+	if x != nil {
+		return x.Data
+	}
+	return nil
+}
+
+func (x *SnapshotData) GetSha256() []byte {
+	if x != nil {
+		return x.Sha256
+	}
+	return nil
+}
+
+type SnapshotFinish struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Attachment    uint64                 `protobuf:"varint,1,opt,name=attachment,proto3" json:"attachment,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SnapshotFinish) Reset() {
+	*x = SnapshotFinish{}
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SnapshotFinish) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SnapshotFinish) ProtoMessage() {}
+
+func (x *SnapshotFinish) ProtoReflect() protoreflect.Message {
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SnapshotFinish.ProtoReflect.Descriptor instead.
+func (*SnapshotFinish) Descriptor() ([]byte, []int) {
+	return file_transport_loadgrpc_internal_loadpb_load_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *SnapshotFinish) GetAttachment() uint64 {
+	if x != nil {
+		return x.Attachment
+	}
+	return 0
+}
+
+type SnapshotAbort struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Attachment    uint64                 `protobuf:"varint,1,opt,name=attachment,proto3" json:"attachment,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SnapshotAbort) Reset() {
+	*x = SnapshotAbort{}
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SnapshotAbort) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SnapshotAbort) ProtoMessage() {}
+
+func (x *SnapshotAbort) ProtoReflect() protoreflect.Message {
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SnapshotAbort.ProtoReflect.Descriptor instead.
+func (*SnapshotAbort) Descriptor() ([]byte, []int) {
+	return file_transport_loadgrpc_internal_loadpb_load_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *SnapshotAbort) GetAttachment() uint64 {
+	if x != nil {
+		return x.Attachment
+	}
+	return 0
+}
+
+type SnapshotFrame struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Body:
+	//
+	//	*SnapshotFrame_Open
+	//	*SnapshotFrame_Data
+	//	*SnapshotFrame_Finish
+	//	*SnapshotFrame_Abort
+	Body          isSnapshotFrame_Body `protobuf_oneof:"body"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SnapshotFrame) Reset() {
+	*x = SnapshotFrame{}
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SnapshotFrame) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SnapshotFrame) ProtoMessage() {}
+
+func (x *SnapshotFrame) ProtoReflect() protoreflect.Message {
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SnapshotFrame.ProtoReflect.Descriptor instead.
+func (*SnapshotFrame) Descriptor() ([]byte, []int) {
+	return file_transport_loadgrpc_internal_loadpb_load_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *SnapshotFrame) GetBody() isSnapshotFrame_Body {
+	if x != nil {
+		return x.Body
+	}
+	return nil
+}
+
+func (x *SnapshotFrame) GetOpen() *SnapshotOpen {
+	if x != nil {
+		if x, ok := x.Body.(*SnapshotFrame_Open); ok {
+			return x.Open
+		}
+	}
+	return nil
+}
+
+func (x *SnapshotFrame) GetData() *SnapshotData {
+	if x != nil {
+		if x, ok := x.Body.(*SnapshotFrame_Data); ok {
+			return x.Data
+		}
+	}
+	return nil
+}
+
+func (x *SnapshotFrame) GetFinish() *SnapshotFinish {
+	if x != nil {
+		if x, ok := x.Body.(*SnapshotFrame_Finish); ok {
+			return x.Finish
+		}
+	}
+	return nil
+}
+
+func (x *SnapshotFrame) GetAbort() *SnapshotAbort {
+	if x != nil {
+		if x, ok := x.Body.(*SnapshotFrame_Abort); ok {
+			return x.Abort
+		}
+	}
+	return nil
+}
+
+type isSnapshotFrame_Body interface {
+	isSnapshotFrame_Body()
+}
+
+type SnapshotFrame_Open struct {
+	Open *SnapshotOpen `protobuf:"bytes,1,opt,name=open,proto3,oneof"`
+}
+
+type SnapshotFrame_Data struct {
+	Data *SnapshotData `protobuf:"bytes,2,opt,name=data,proto3,oneof"`
+}
+
+type SnapshotFrame_Finish struct {
+	Finish *SnapshotFinish `protobuf:"bytes,3,opt,name=finish,proto3,oneof"`
+}
+
+type SnapshotFrame_Abort struct {
+	Abort *SnapshotAbort `protobuf:"bytes,4,opt,name=abort,proto3,oneof"`
+}
+
+func (*SnapshotFrame_Open) isSnapshotFrame_Body() {}
+
+func (*SnapshotFrame_Data) isSnapshotFrame_Body() {}
+
+func (*SnapshotFrame_Finish) isSnapshotFrame_Body() {}
+
+func (*SnapshotFrame_Abort) isSnapshotFrame_Body() {}
+
+type SnapshotFailure struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          string                 `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`
+	Reason        string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	Size          uint64                 `protobuf:"varint,4,opt,name=size,proto3" json:"size,omitempty"`
+	Limit         uint64                 `protobuf:"varint,5,opt,name=limit,proto3" json:"limit,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SnapshotFailure) Reset() {
+	*x = SnapshotFailure{}
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SnapshotFailure) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SnapshotFailure) ProtoMessage() {}
+
+func (x *SnapshotFailure) ProtoReflect() protoreflect.Message {
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SnapshotFailure.ProtoReflect.Descriptor instead.
+func (*SnapshotFailure) Descriptor() ([]byte, []int) {
+	return file_transport_loadgrpc_internal_loadpb_load_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *SnapshotFailure) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+func (x *SnapshotFailure) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+func (x *SnapshotFailure) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *SnapshotFailure) GetSize() uint64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+func (x *SnapshotFailure) GetLimit() uint64 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type SnapshotAck struct {
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	DeliveryId           uint64                 `protobuf:"varint,1,opt,name=delivery_id,json=deliveryId,proto3" json:"delivery_id,omitempty"`
+	Attachment           uint64                 `protobuf:"varint,2,opt,name=attachment,proto3" json:"attachment,omitempty"`
+	NextOffset           uint64                 `protobuf:"varint,3,opt,name=next_offset,json=nextOffset,proto3" json:"next_offset,omitempty"`
+	ChunkBytes           uint32                 `protobuf:"varint,4,opt,name=chunk_bytes,json=chunkBytes,proto3" json:"chunk_bytes,omitempty"`
+	State                string                 `protobuf:"bytes,5,opt,name=state,proto3" json:"state,omitempty"`
+	RestartNeeded        bool                   `protobuf:"varint,6,opt,name=restart_needed,json=restartNeeded,proto3" json:"restart_needed,omitempty"`
+	Failure              *SnapshotFailure       `protobuf:"bytes,7,opt,name=failure,proto3" json:"failure,omitempty"`
+	RemainingTotalNanos  uint64                 `protobuf:"varint,8,opt,name=remaining_total_nanos,json=remainingTotalNanos,proto3" json:"remaining_total_nanos,omitempty"`
+	ProgressTimeoutNanos uint64                 `protobuf:"varint,9,opt,name=progress_timeout_nanos,json=progressTimeoutNanos,proto3" json:"progress_timeout_nanos,omitempty"`
+	ReceiverRunId        string                 `protobuf:"bytes,10,opt,name=receiver_run_id,json=receiverRunId,proto3" json:"receiver_run_id,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *SnapshotAck) Reset() {
+	*x = SnapshotAck{}
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SnapshotAck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SnapshotAck) ProtoMessage() {}
+
+func (x *SnapshotAck) ProtoReflect() protoreflect.Message {
+	mi := &file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SnapshotAck.ProtoReflect.Descriptor instead.
+func (*SnapshotAck) Descriptor() ([]byte, []int) {
+	return file_transport_loadgrpc_internal_loadpb_load_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *SnapshotAck) GetDeliveryId() uint64 {
+	if x != nil {
+		return x.DeliveryId
+	}
+	return 0
+}
+
+func (x *SnapshotAck) GetAttachment() uint64 {
+	if x != nil {
+		return x.Attachment
+	}
+	return 0
+}
+
+func (x *SnapshotAck) GetNextOffset() uint64 {
+	if x != nil {
+		return x.NextOffset
+	}
+	return 0
+}
+
+func (x *SnapshotAck) GetChunkBytes() uint32 {
+	if x != nil {
+		return x.ChunkBytes
+	}
+	return 0
+}
+
+func (x *SnapshotAck) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *SnapshotAck) GetRestartNeeded() bool {
+	if x != nil {
+		return x.RestartNeeded
+	}
+	return false
+}
+
+func (x *SnapshotAck) GetFailure() *SnapshotFailure {
+	if x != nil {
+		return x.Failure
+	}
+	return nil
+}
+
+func (x *SnapshotAck) GetRemainingTotalNanos() uint64 {
+	if x != nil {
+		return x.RemainingTotalNanos
+	}
+	return 0
+}
+
+func (x *SnapshotAck) GetProgressTimeoutNanos() uint64 {
+	if x != nil {
+		return x.ProgressTimeoutNanos
+	}
+	return 0
+}
+
+func (x *SnapshotAck) GetReceiverRunId() string {
+	if x != nil {
+		return x.ReceiverRunId
+	}
+	return ""
+}
+
 var File_transport_loadgrpc_internal_loadpb_load_proto protoreflect.FileDescriptor
 
 const file_transport_loadgrpc_internal_loadpb_load_proto_rawDesc = "" +
@@ -419,9 +1014,71 @@ const file_transport_loadgrpc_internal_loadpb_load_proto_rawDesc = "" +
 	"deliveryId\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x02 \x01(\tR\terrorCode\x12#\n" +
-	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage2\xdb\x02\n" +
+	"\rerror_message\x18\x03 \x01(\tR\ferrorMessage\"\xa4\x03\n" +
+	"\fSnapshotOpen\x12\x18\n" +
+	"\aversion\x18\x01 \x01(\rR\aversion\x12-\n" +
+	"\x04from\x18\x02 \x01(\v2\x19.gquorum.load.v1.RaftPeerR\x04from\x12)\n" +
+	"\x02to\x18\x03 \x01(\v2\x19.gquorum.load.v1.RaftPeerR\x02to\x12\x1f\n" +
+	"\vdelivery_id\x18\x04 \x01(\x04R\n" +
+	"deliveryId\x12#\n" +
+	"\rnative_header\x18\x05 \x01(\fR\fnativeHeader\x12\x1f\n" +
+	"\vtotal_bytes\x18\x06 \x01(\x04R\n" +
+	"totalBytes\x12\x16\n" +
+	"\x06sha256\x18\a \x01(\fR\x06sha256\x12\x1f\n" +
+	"\vchunk_bytes\x18\b \x01(\rR\n" +
+	"chunkBytes\x122\n" +
+	"\x15remaining_total_nanos\x18\t \x01(\x04R\x13remainingTotalNanos\x12\x16\n" +
+	"\x06resume\x18\n" +
+	" \x01(\bR\x06resume\x124\n" +
+	"\x16progress_timeout_nanos\x18\v \x01(\x04R\x14progressTimeoutNanos\"\x8c\x01\n" +
+	"\fSnapshotData\x12\x1e\n" +
+	"\n" +
+	"attachment\x18\x01 \x01(\x04R\n" +
+	"attachment\x12\x18\n" +
+	"\aordinal\x18\x02 \x01(\x04R\aordinal\x12\x16\n" +
+	"\x06offset\x18\x03 \x01(\x04R\x06offset\x12\x12\n" +
+	"\x04data\x18\x04 \x01(\fR\x04data\x12\x16\n" +
+	"\x06sha256\x18\x05 \x01(\fR\x06sha256\"0\n" +
+	"\x0eSnapshotFinish\x12\x1e\n" +
+	"\n" +
+	"attachment\x18\x01 \x01(\x04R\n" +
+	"attachment\"/\n" +
+	"\rSnapshotAbort\x12\x1e\n" +
+	"\n" +
+	"attachment\x18\x01 \x01(\x04R\n" +
+	"attachment\"\xf4\x01\n" +
+	"\rSnapshotFrame\x123\n" +
+	"\x04open\x18\x01 \x01(\v2\x1d.gquorum.load.v1.SnapshotOpenH\x00R\x04open\x123\n" +
+	"\x04data\x18\x02 \x01(\v2\x1d.gquorum.load.v1.SnapshotDataH\x00R\x04data\x129\n" +
+	"\x06finish\x18\x03 \x01(\v2\x1f.gquorum.load.v1.SnapshotFinishH\x00R\x06finish\x126\n" +
+	"\x05abort\x18\x04 \x01(\v2\x1e.gquorum.load.v1.SnapshotAbortH\x00R\x05abortB\x06\n" +
+	"\x04body\"\x81\x01\n" +
+	"\x0fSnapshotFailure\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\tR\x04code\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\x12\x12\n" +
+	"\x04size\x18\x04 \x01(\x04R\x04size\x12\x14\n" +
+	"\x05limit\x18\x05 \x01(\x04R\x05limit\"\x9b\x03\n" +
+	"\vSnapshotAck\x12\x1f\n" +
+	"\vdelivery_id\x18\x01 \x01(\x04R\n" +
+	"deliveryId\x12\x1e\n" +
+	"\n" +
+	"attachment\x18\x02 \x01(\x04R\n" +
+	"attachment\x12\x1f\n" +
+	"\vnext_offset\x18\x03 \x01(\x04R\n" +
+	"nextOffset\x12\x1f\n" +
+	"\vchunk_bytes\x18\x04 \x01(\rR\n" +
+	"chunkBytes\x12\x14\n" +
+	"\x05state\x18\x05 \x01(\tR\x05state\x12%\n" +
+	"\x0erestart_needed\x18\x06 \x01(\bR\rrestartNeeded\x12:\n" +
+	"\afailure\x18\a \x01(\v2 .gquorum.load.v1.SnapshotFailureR\afailure\x122\n" +
+	"\x15remaining_total_nanos\x18\b \x01(\x04R\x13remainingTotalNanos\x124\n" +
+	"\x16progress_timeout_nanos\x18\t \x01(\x04R\x14progressTimeoutNanos\x12&\n" +
+	"\x0freceiver_run_id\x18\n" +
+	" \x01(\tR\rreceiverRunId2\xb1\x03\n" +
 	"\x04Load\x12>\n" +
-	"\bSendRaft\x12\x1a.gquorum.load.v1.RaftFrame\x1a\x16.gquorum.load.v1.Reply\x12L\n" +
+	"\bSendRaft\x12\x1a.gquorum.load.v1.RaftFrame\x1a\x16.gquorum.load.v1.Reply\x12T\n" +
+	"\x10TransferSnapshot\x12\x1e.gquorum.load.v1.SnapshotFrame\x1a\x1c.gquorum.load.v1.SnapshotAck(\x010\x01\x12L\n" +
 	"\n" +
 	"StreamRaft\x12\x1a.gquorum.load.v1.RaftFrame\x1a\x1e.gquorum.load.v1.StreamRefusal(\x010\x01\x12@\n" +
 	"\vReadReplica\x12\x19.gquorum.load.v1.Envelope\x1a\x16.gquorum.load.v1.Reply\x12@\n" +
@@ -440,32 +1097,48 @@ func file_transport_loadgrpc_internal_loadpb_load_proto_rawDescGZIP() []byte {
 	return file_transport_loadgrpc_internal_loadpb_load_proto_rawDescData
 }
 
-var file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_transport_loadgrpc_internal_loadpb_load_proto_goTypes = []any{
-	(*RaftPeer)(nil),      // 0: gquorum.load.v1.RaftPeer
-	(*RaftFrame)(nil),     // 1: gquorum.load.v1.RaftFrame
-	(*Envelope)(nil),      // 2: gquorum.load.v1.Envelope
-	(*Reply)(nil),         // 3: gquorum.load.v1.Reply
-	(*StreamRefusal)(nil), // 4: gquorum.load.v1.StreamRefusal
+	(*RaftPeer)(nil),        // 0: gquorum.load.v1.RaftPeer
+	(*RaftFrame)(nil),       // 1: gquorum.load.v1.RaftFrame
+	(*Envelope)(nil),        // 2: gquorum.load.v1.Envelope
+	(*Reply)(nil),           // 3: gquorum.load.v1.Reply
+	(*StreamRefusal)(nil),   // 4: gquorum.load.v1.StreamRefusal
+	(*SnapshotOpen)(nil),    // 5: gquorum.load.v1.SnapshotOpen
+	(*SnapshotData)(nil),    // 6: gquorum.load.v1.SnapshotData
+	(*SnapshotFinish)(nil),  // 7: gquorum.load.v1.SnapshotFinish
+	(*SnapshotAbort)(nil),   // 8: gquorum.load.v1.SnapshotAbort
+	(*SnapshotFrame)(nil),   // 9: gquorum.load.v1.SnapshotFrame
+	(*SnapshotFailure)(nil), // 10: gquorum.load.v1.SnapshotFailure
+	(*SnapshotAck)(nil),     // 11: gquorum.load.v1.SnapshotAck
 }
 var file_transport_loadgrpc_internal_loadpb_load_proto_depIdxs = []int32{
-	0, // 0: gquorum.load.v1.RaftFrame.from:type_name -> gquorum.load.v1.RaftPeer
-	0, // 1: gquorum.load.v1.RaftFrame.to:type_name -> gquorum.load.v1.RaftPeer
-	1, // 2: gquorum.load.v1.Load.SendRaft:input_type -> gquorum.load.v1.RaftFrame
-	1, // 3: gquorum.load.v1.Load.StreamRaft:input_type -> gquorum.load.v1.RaftFrame
-	2, // 4: gquorum.load.v1.Load.ReadReplica:input_type -> gquorum.load.v1.Envelope
-	2, // 5: gquorum.load.v1.Load.ApplyAction:input_type -> gquorum.load.v1.Envelope
-	2, // 6: gquorum.load.v1.Load.InstallFence:input_type -> gquorum.load.v1.Envelope
-	3, // 7: gquorum.load.v1.Load.SendRaft:output_type -> gquorum.load.v1.Reply
-	4, // 8: gquorum.load.v1.Load.StreamRaft:output_type -> gquorum.load.v1.StreamRefusal
-	3, // 9: gquorum.load.v1.Load.ReadReplica:output_type -> gquorum.load.v1.Reply
-	3, // 10: gquorum.load.v1.Load.ApplyAction:output_type -> gquorum.load.v1.Reply
-	3, // 11: gquorum.load.v1.Load.InstallFence:output_type -> gquorum.load.v1.Reply
-	7, // [7:12] is the sub-list for method output_type
-	2, // [2:7] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	0,  // 0: gquorum.load.v1.RaftFrame.from:type_name -> gquorum.load.v1.RaftPeer
+	0,  // 1: gquorum.load.v1.RaftFrame.to:type_name -> gquorum.load.v1.RaftPeer
+	0,  // 2: gquorum.load.v1.SnapshotOpen.from:type_name -> gquorum.load.v1.RaftPeer
+	0,  // 3: gquorum.load.v1.SnapshotOpen.to:type_name -> gquorum.load.v1.RaftPeer
+	5,  // 4: gquorum.load.v1.SnapshotFrame.open:type_name -> gquorum.load.v1.SnapshotOpen
+	6,  // 5: gquorum.load.v1.SnapshotFrame.data:type_name -> gquorum.load.v1.SnapshotData
+	7,  // 6: gquorum.load.v1.SnapshotFrame.finish:type_name -> gquorum.load.v1.SnapshotFinish
+	8,  // 7: gquorum.load.v1.SnapshotFrame.abort:type_name -> gquorum.load.v1.SnapshotAbort
+	10, // 8: gquorum.load.v1.SnapshotAck.failure:type_name -> gquorum.load.v1.SnapshotFailure
+	1,  // 9: gquorum.load.v1.Load.SendRaft:input_type -> gquorum.load.v1.RaftFrame
+	9,  // 10: gquorum.load.v1.Load.TransferSnapshot:input_type -> gquorum.load.v1.SnapshotFrame
+	1,  // 11: gquorum.load.v1.Load.StreamRaft:input_type -> gquorum.load.v1.RaftFrame
+	2,  // 12: gquorum.load.v1.Load.ReadReplica:input_type -> gquorum.load.v1.Envelope
+	2,  // 13: gquorum.load.v1.Load.ApplyAction:input_type -> gquorum.load.v1.Envelope
+	2,  // 14: gquorum.load.v1.Load.InstallFence:input_type -> gquorum.load.v1.Envelope
+	3,  // 15: gquorum.load.v1.Load.SendRaft:output_type -> gquorum.load.v1.Reply
+	11, // 16: gquorum.load.v1.Load.TransferSnapshot:output_type -> gquorum.load.v1.SnapshotAck
+	4,  // 17: gquorum.load.v1.Load.StreamRaft:output_type -> gquorum.load.v1.StreamRefusal
+	3,  // 18: gquorum.load.v1.Load.ReadReplica:output_type -> gquorum.load.v1.Reply
+	3,  // 19: gquorum.load.v1.Load.ApplyAction:output_type -> gquorum.load.v1.Reply
+	3,  // 20: gquorum.load.v1.Load.InstallFence:output_type -> gquorum.load.v1.Reply
+	15, // [15:21] is the sub-list for method output_type
+	9,  // [9:15] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_transport_loadgrpc_internal_loadpb_load_proto_init() }
@@ -473,13 +1146,19 @@ func file_transport_loadgrpc_internal_loadpb_load_proto_init() {
 	if File_transport_loadgrpc_internal_loadpb_load_proto != nil {
 		return
 	}
+	file_transport_loadgrpc_internal_loadpb_load_proto_msgTypes[9].OneofWrappers = []any{
+		(*SnapshotFrame_Open)(nil),
+		(*SnapshotFrame_Data)(nil),
+		(*SnapshotFrame_Finish)(nil),
+		(*SnapshotFrame_Abort)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_transport_loadgrpc_internal_loadpb_load_proto_rawDesc), len(file_transport_loadgrpc_internal_loadpb_load_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

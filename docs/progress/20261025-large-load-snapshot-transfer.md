@@ -1,0 +1,563 @@
+# Large load-snapshot transfer execution
+
+Plan: `docs/plans/20261025-large-load-snapshot-transfer.md`
+Target: `docs/brainstorms/20261025-large-load-snapshot-transfer-target.md`
+Branch: `feat/large-snapshots-transfer`
+Started: 2026-10-25
+
+The user goal named `plans/brainstorms/20261025-large-load-snapshot-transfer.md`; that path does not exist. The unique matching committed implementation plan is the docs/plans path above. The subsequent explicit goal authorizes implementation; the earlier colleague plan review was unavailable due to provider limits and is not claimed complete. Initial checkout had only the existing untracked review transcript, which is left untouched.
+
+## Task 1 — public contracts, policy and errors
+
+Date: 2026-10-25. Commit: this task commit.
+
+Implemented
+- Added load/snapshot Options, protocol/service/status contracts and structured TransferError; no runtime selection, root source files or persistent changes.
+- Pure option resolution validates platform/header allocation arithmetic, directional products, chunk/window and timeout sums; defaults are configurable and 64 GiB policy validates without allocation on 64-bit platforms.
+- Added 42 unit cases/subtests covering defaults/idempotence, >2 GB settings, explicit budgets, malformed/overflow policy, fault/cause preservation and conservative zero values.
+
+Verified
+- go test -count=1 ./load/snapshot: pass.
+- go vet ./load/snapshot: pass.
+- make test: all 2,182 tests passed across 61 package reports and five application modules; 11.453 seconds.
+- Report: test-reports/unit/20261025T163340.128319Z-0wxmtozx/report.md.
+
+Notes
+- No large payload, network service, Docker or runtime snapshot test was run in this contract-only task.
+- Existing StateMachine/Store APIs, wire paths and immutable fixtures are untouched. Constructor capability enforcement remains deferred to Task 15.
+
+Task 1 validation follow-up
+- The first commit hook rejected strict production lint findings (named constants, switch default, grouped DTO style and a conversion whose positive guard was outside its function). No commit was made on failure.
+- Fixed the code, including a local positive chunk/window guard before the unsigned conversion. Kept target DTO grouping with narrow max-public-structs exemptions, matching repository conventions.
+- make lint (pending files only): pass, including unit/functional vet, production checks, revive and unused analysis.
+- Re-ran make test after fixes: all 2,182 tests pass; 6.484 seconds. Report: test-reports/unit/20261025T163713.024365Z-mb3uckv2/report.md.
+
+## Task 2 — pure facade and Node construction
+
+Date: 2026-10-25. Commit: this task commit; prior task 821ca49.
+
+Implemented
+- Added Node.LoadSnapshots and LoadOptions.SnapshotTransfer in existing root files; only configured managed loads construct a facade. Metadata-only Nodes return nil.
+- Resolved/copied snapshot policy during construction with no resolver/callback/I/O; immutable options remain available after stop.
+- Added internal pure facade, observation-only fallback, closed unknown-session signal and pure typed-nil-aware RequireTransport helper. Constructor capability enforcement remains deferred to task 15.
+- Coordinator methods deliberately refuse with ReplicaNotReady until tasks 6–8; root Host attachment remains deferred to task 12. These are the plan's explicit temporary seams, not completed runtime transfer behavior.
+
+Verified
+- go vet ./internal/loadsnapshot .: pass.
+- go test -count=1 ./internal/loadsnapshot .: pass, including construction/cancellation/capability and stable options tests.
+- make lint (pending changes only): pass after correcting stub receiver names/context helper order.
+- Initial make test failed one existing event-bus timing test (2193/2194 passed); report test-reports/unit/20261025T164607.543982Z-v_apavlc/report.md.
+- Corrected journal/loss observation order in that test only; go test -count=100 -parallel=1 ./events -run '^TestBus_BoundedIngressAndSubscriberLoss$': pass (1.502s). The pre-fix focused repetition also passed, confirming the observed full-suite failure was schedule-dependent rather than a consistently failing case.
+- Re-run make test: all 2,194 tests across 62 package reports/five modules passed in 10.476s. Report test-reports/unit/20261025T165018.031700Z-85j2spjz/report.md.
+
+Notes
+- Event test correction is recorded with its diff in the plan's NOT PLANNED CHANGES; no bus behavior/encoding changed.
+- No new root files, live application replicas, network services, Docker or large-data tests introduced/run for this task. Existing native snapshot send selection is unchanged.
+
+## Task 3 — snapshot RPC and bounded codecs
+
+Date: 2026-10-25. Commit: this task commit; prior task 4a92e8e.
+
+Implemented
+- Added version-1 TransferSnapshot protobuf messages/RPC without changing ordinary RaftFrame v2 or administration fields.
+- Added bounded Open/Ack codecs, positive native term/index and identity validation, explicit failure details, safe duration conversions and allocation-free worst-case chunk frame sizing.
+- Added malformed/native-safety, frame-boundary, 64 GiB declaration and acknowledgement units; no large payload fixtures.
+
+Verified
+- go test -count=1 ./transport/loadgrpc: pass; go vet ./transport/loadgrpc: pass.
+- make test: all 2,228 tests across 62 reports/five modules pass (9.403s). Report: test-reports/unit/20261025T171829.622598Z-u8agyk72/report.md.
+- make generate twice: identical SHA256 for both load generated files; only intended load protocol generated files changed. proto-check deferred until committed final verification.
+- make lint (pending changes): pass after checked conversion and style fixes; git diff --check: pass.
+
+Notes
+- Codec file has a temporary unused exemption because production stream callers arrive in tasks 10–11. Remove it at cutover; the codecs already have unit coverage.
+- A decoded Ack deliberately contains only the wire delivery ID/attachment; task 11 must validate and bind the immutable request peer key before reporting progress.
+
+## Task 4 — owned native ingress and preflight
+
+Date: 2026-10-25. Commit: this task commit; prior task 7c5a013.
+
+Implemented
+- Added exact-run monotonic bounds, off-loop envelope preparation, bounded ownership-aware submission and a guarded header-only native preflight.
+- Existing beginReady remains the only Ready consumer. Exact pointer/metadata matching binds cached decode to the write job; native skips ignore unused older authority. Owned tickets bypass WAL batching delay to prevent intervening steps from sharing their capture.
+- Owned payloads are not cloned by staging/Restore. Full snapshot persistence retries use the engine lifetime; ordinary WAL writes retain their five-second attempt timeout.
+- Done is release-once, queued cancellation keeps ownership, failed tickets complete after all workers join, and completed tickets drop decoded buffers/callback references.
+
+Verified
+- make test: all 2,241 tests across 62 reports/five modules pass (15.767s); report test-reports/unit/20261025T172538.636558Z-moc3sasg/report.md.
+- go vet ./internal/raftengine; make lint (pending files); git diff --check: pass.
+- go test -tags=functional -count=1 -timeout=30s ./internal/raftengine -run '^TestSnapshotIngress_': pass.
+- Focused functional race run of the same ingress cases: pass, final run 1.389s after matching the specified retry signature.
+- Functional regression packages internal/raftengine, internal/metaengine, internal/metaservice and load: pass, including existing standalone/WAL/full snapshot-tail recovery tests.
+
+Notes
+- Two new fixture mistakes were corrected before completion: log setup now goes through native MsgApp instead of modifying initialized MemoryStorage, and the Restore gate lets startup Restore(nil) return. The first hung fixture run was terminated for a stack trace; a second bounded run confirmed that fixture issue. No production workaround was needed.
+- Tests explicitly cover zero-term index-ahead attacks, timer/ticket/pending-Ready collision gates, higher-term obsolete headers, matching-log skip, pointer reuse, blocked write/Restore, queue cancellation and joined failure. Only one local engine per fixture; no Docker or large payloads.
+
+## Task 5 — independent outbound jobs and exact reports
+
+Date: 2026-10-25. Commit: this task commit; prior task 717df68.
+
+Implemented
+- Added optional SnapshotJobTransport offers, immutable pins and publication generations. Ready retains admitted jobs until persistence/application completes; joined bulk workers run separately from ordinary per-peer senders.
+- Added cancelable native leadership epochs and idempotent unstarted-job discard, including Ready failure and shutdown. Managed engineTransport still does not implement the selecting method (Task 15).
+- Replaced dropping report channels with exact run/term/peer/generation terminal records and one wake signal. Separate cooldown timers do not depend on Raft tick timing; capacity uses 100ms–1s jitter, admitted failures exponential 1s–30s, permanent refusals 30s.
+- Added SnapshotCatchUp DTO and bounded locally timestamped progress storage; no observer/repair behavior is enabled yet. Backoff survives engine-only receiver restart and source epoch changes; actual Match advance or a changed receiver process resets it.
+- Added ReportSnapshotAttemptError alongside the specified status-only method so future managed wiring can retain typed refusal classification. Recorded this internal refinement in the plan.
+
+Verified
+- make test: all 2,245 tests across 62 reports/five modules pass, 20.313s; report test-reports/unit/20261025T173823.586896Z-q8kw1xn0/report.md.
+- go vet ./internal/raftengine ./metrics; make lint (pending changes); git diff --check: pass.
+- Focused functional race for all SnapshotIngress/Outbound cases: pass (final run 1.403s).
+- Focused unit race for SnapshotReports: pass (1.374s), including concurrent terminal reports with a saturated wake signal.
+- Functional regressions in internal/raftengine, internal/metaengine, internal/metaservice and load: pass.
+
+Notes
+- A native rejection fixture initially used Index=2 instead of the append prefix Index=1; correcting the protocol-double reply produced the real StateSnapshot path. Another new fixture omitted required entry correlation; fixed before verification.
+- Tests prove heartbeat sends while bulk is blocked, epoch cancellation plus join, stale report rejection, native failure cooldown, failed-Ready discard, legacy snapshot copy behavior and publication generation. No multi-node functional fixture or large payload was added.
+- Reuse the existing status capture for epoch refresh to avoid a second RawNode.Status allocation on every ordinary refresh. Empty bulk dispatch does no extra work.
+
+## Task 6 — coordinator admission and memory staging
+
+Date: 2026-10-25. Commit: this task commit; prior task dde2701.
+
+Implemented
+- Added exact Owner/Ports contracts and volatile transfer state, plus pure coordinator construction, Host lifetime binding, fencing and retryable joined Stop.
+- Atomic directional count/byte reservations include exact owner/run validation and a group slot reserved before allocation/publication. Release is idempotent, rejects foreign reservations and cannot erase a successor slot.
+- Added memory staging with contiguous owned appends, poisoned failed appends, bounded ReadAt, complete Seal and zero-copy immutable Materialize. Close drops references without zeroing native-retained bytes.
+- Added the single future-disk TODO at the staging interface, using the stable group-scoped incoming-snapshot name.
+- Added evictable completed-Ack metadata, bounded history and two digest entries per run; none of these caches is an admission permit. Attachment/history counters never wrap.
+
+Verified
+- make test: all 2,257 tests across 62 reports/five modules pass (7.748s); report test-reports/unit/20261025T174716.663600Z-17j1vsen/report.md.
+- go test -race -count=1 ./internal/loadsnapshot: pass (1.342s); go vet ./internal/loadsnapshot: pass.
+- make lint (pending changes); git diff --check: pass.
+- Pure units cover independent budgets, concurrent 64-way admission, duplicate release, group successors, stop timeout retention, cache eviction independent of admission, overflow and borrowed-view lifetime. A 64 GiB reservation uses metadata only; no large payload allocation.
+
+Notes
+- Receive operations remain explicit unavailable methods in receive.go until tasks 7–8. New state/backend declarations have temporary unused exemptions until those tasks and task 9 connect them; remove them during that wiring/cutover.
+- No root, persistent-format, fixture-baseline or filesystem-staging changes. Coordinator Stop currently joins reservations and operation ownership; receiver cleanup/expiry is completed with receiver lifecycle in task 8 before Host attachment.
+
+## Task 7 — authenticated receive, chunks and same-run resume
+
+Date: 2026-10-25. Commit: this task commit; prior task c8b1e07.
+
+Implemented
+- Added bounded authorization-operation admission, independent service/native-header validation, exact owner checks before/after waits, native preflight before allocation and post-allocation authorization before publication.
+- Added contiguous chunk SHA verification, cumulative offsets, duplicate comparison without clock renewal, fixed negotiated mapping and cached exact-run obsolescence checks. Hashing/staging do not hold the coordinator or transfer metadata mutex.
+- Resume fences the old attachment and joins its active mutation before issuing a new generation. Abort/failed chunks keep reservations until joined cleanup. Obsolete pre-handoff work and canceled old owners can be joined before group-slot reuse.
+- Added optional transport-local BeginRequest.MaxChunkBytes, preserving the original requested Manifest.ChunkBytes. Documented the gap/refinement in the target and plan; gRPC supplies this cap in Task 10. Recorded the formerly locally ignored target so this refinement and its design basis are reviewable with the implementation.
+
+Verified
+- make test: all 2,257 tests across 62 reports/five modules pass (7.956s); report test-reports/unit/20261025T180528.339047Z-ejwvga9h/report.md.
+- Focused functional/race receive tests: pass (1.506s), including blocked backend writes, reconnect fencing/join, Abort timeout retention, bounded blocked authorization and Stop ownership, native-skip cache/miss, malformed headers, chunk corruption/duplicates, timeout/obsolete cleanup, source process and receiver-run replacement, post-allocation owner change, and negotiated-cap immutability.
+- go vet ./internal/loadsnapshot ./load/snapshot; make lint (pending changes); git diff --check: pass.
+
+Notes
+- Finish, diagnostic List and background expiry remain for Task 8; no incomplete native handoff can return success. The memory backend now has production callers, so its temporary unused exemption was removed.
+- Cleanup currently handles pre-ingress work. Task 8 must extend it to wait for finalizer/native completion, retain close failures for retry, and guard preemption/Abort races against an entered handoff.
+- No generated payload files, root files, new listeners or persistent format changes.
+
+## Task 8 — finalization, observations and joined receiver teardown
+
+Date: 2026-10-25. Commit: this task commit; prior task 174d4f8.
+
+Implemented
+- One finalizer verifies the full digest, seals/materializes staging and prepares the complete envelope off-loop before exact-owner native handoff. Duplicate Finish/resume shares its completion.
+- Native callbacks only record/signal. A failed native callback racing a successful Step reply cannot publish a false transport refusal. Installed/skipped completion also proves prior acceptance when a waiter was canceled.
+- Cleanup joins active writes, finalizer return and any entered native owner before closing staging/releasing its reservation. Failed Close retains ownership for serialized Stop retries. Exact-owner stop, background expiry and group preemption preserve entered native ownership.
+- Added bounded active/history List observations and cursor paging, completed-Ack cache replay/TTL and post-stop observations. Accepted delivery remains separate from installed/skipped/failed receiver outcome.
+- User steering: request the named colleague's review after this task, then every six implementation commits; cadence is now in the plan.
+
+Verified
+- make test: all 2,258 tests across 62 reports/five modules pass (8.712s); report test-reports/unit/20261025T184048.279611Z-yjxgubnr/report.md.
+- go vet ./internal/loadsnapshot; make lint (pending changes); git diff --check: pass.
+- go test -race -tags=functional -count=1 -timeout=90s ./internal/loadsnapshot: pass (1.470s), including real single-participant engine persistence, blocked Restore, Restore/write failure, native skip and partial-data exclusion.
+- Protocol-double cases cover lost final Ack replay, canceled queued ingress, acceptance-versus-failed-callback race, duplicate native completion, off-loop decode cancellation, retained permits, Close/Stop retry, exact-owner stop, detached expiry, and callback/error-inspection separation.
+- Pure status tests verify bounded history, bounded filtered pagination and owned result values. Pure admission tests now construct live value state without launching the expiry worker; functional fixtures exercise Start/Stop.
+
+Notes
+- No new root files, persistent encodings, listeners or large payloads. Sender, network RPC and managed production activation remain in Tasks 9–15.
+- Review request will pin this completed checkpoint and include target/brainstorm/plan. The earlier plan-review session-limit response is not claimed as a completed review.
+
+## Review 1 — reliability and compatibility corrections
+
+Date: 2026-10-26. Commit: this correction commit. Review anchor: 251a594. This is the first implementation commit after the anchor; five more commits trigger the next requested colleague review.
+
+Findings accepted and fixed
+- P1-1: the engine now consumes owned snapshot/preflight requests only at a safe Ready boundary. Fully prepared data waits in the existing bounded queue through a writer stall or WAL batching timer. Handler refusal remains a defensive invariant check.
+- P1-2: legacy ReportSnapshot retains immediate native delivery, including failure, through the non-lossy mailbox. Managed exact-attempt reports alone use the cooldown policy.
+- P2-1: recovery checkpoint publication/normalization increments the publication generation; legacy snapshots do not require the bulk digest generation.
+- P2-4: Restore now reads and validates the exact ingress ticket bound to its persisted write job.
+
+Verified
+- make test: all 2,259 tests across 62 reports/five modules pass (11.507s); report test-reports/unit/20261025T185952.913055Z-2jlssmiu/report.md.
+- Pending make lint, focused go vet ./internal/raftengine and git diff --check: pass.
+- Focused functional SnapshotIngress/Outbound race tests: pass (1.420s), including queued handoff through a blocked HardState write and explicit Ready timer, immediate legacy native reports for _meta and standalone engines, and both recovery publication paths.
+- Focused SnapshotReports unit race: pass (1.299s).
+- Functional regressions: internal/raftengine, internal/metaservice, load and tests/recovery all pass (5.885s / 23.294s / 1.613s / 54.947s).
+
+Remaining review work
+- P2-2, P2-3a and P2-5 form the next performance/observation checkpoint. Constant-time Authorize remains an explicit Task 12 wiring check. The full response and dispositions are retained in review Thread 3; no gRPC/Host runtime verification is claimed yet.
+
+## Review 1 — performance and observation corrections
+
+Date: 2026-10-26. Commit: this correction commit. Prior correction: 1bb509c. This is implementation commit two after review anchor 251a594; four further commits trigger the next requested review.
+
+Implemented
+- P2-2: idle epoch refresh avoids report locking/map work when no records exist, and membership checks use existing voter maps. The mailbox caches its earliest deadline; unchanged deadlines do not rescan records or reset timers on every event. Timer consumption explicitly permits rearming a retained deadline.
+- P2-3a: duplicate bytes compare directly in memory staging, with a bounded ReadAt fallback for future backends. A chunk uses one cancellable operation context; attachment cancellation reuses it. Coordinator wake channels are recreated only while a join waiter exists, with waiter registration and state changes serialized to avoid lost wakeups.
+- P2-5: active-to-completed observations retain the same row ID. Cursor continuation no longer repeats a transfer after completion; fresh reads still see its updated final state.
+
+Verified
+- make test: all 2,261 tests across 62 reports/five modules pass (10.638s); report test-reports/unit/20261025T192221.058706Z-wu8r1x7w/report.md.
+- go vet ./internal/raftengine ./internal/loadsnapshot; pending make lint; git diff --check: pass.
+- Focused default-package race: raftengine and loadsnapshot pass (1.487s / 1.488s).
+- Focused functional ingress/outbound/receive/finish race: both packages pass (1.454s / 1.331s).
+- Microbenchmarks on this Apple M4 Pro, 100ms benchtime: idle epoch refresh 63.03 ns before versus 3.618 ns after, both 0 B/op and 0 allocs/op. This measures only the no-record helper, not end-to-end throughput.
+- Idle coordinator wake: 2.265 ns/op, 0 B/op, 0 allocs/op. In-memory 1 MiB duplicate comparison: 18,659 ns/op, 0 B/op, 0 allocs/op. Bench fixtures are generated in memory and not committed data.
+
+Notes
+- Initial allocation assertions inside parallel unit tests were rejected by Go 1.26 AllocsPerRun, which changes GOMAXPROCS and disallows parallel tests. Moved measurements to benchmarks, preserving parallel unit isolation.
+- The colleague's allocation wording was broader than measured behavior: the old voter-map work was stack-allocated here (already zero heap allocations); the measured improvement is CPU work.
+- The remaining P2-3b obligation is the future Task 12 O(1) authorization routing index. RPC teardown and Host stop ordering remain later-task qualification gates.
+
+## Task 9 — source pins, digest sharing and verified progress
+
+Date: 2026-10-26. Commit: this task commit; prior c24dfd2. Three implementation commits after review anchor 251a594; next colleague review after three further commits.
+
+Implemented
+- Bounded pure source admission pins the immutable native slice without cloning. Resolve, block-cancellable hash, exact delivery registration and transport run after dispatch. Prepared jobs expire on epoch/total cancellation; active jobs retain ownership until transport and reporting return.
+- Two completed digests per live run, singleflight misses and publication-scoped keys retain no payload. Failed hashes are not cached. Capacity retries reuse the digest and release bytes before cooldown.
+- Exact receiver-run/offset/final-Ack validation, local verified-progress clocks, duplicate suppression and joined timeout monitor. All verified bytes switch finalization to the original total deadline. Stale external progress callbacks have no effect after transport return.
+- Added a private exact-attempt failure port for pre-registration failures and outer-fault retry classification; target/plan record both refinements. Successful Stop clears borrowed ports and digest owner references only after joins.
+
+Verified
+- make test: 2,262 tests pass across 62 reports/five modules (11.237s); report test-reports/unit/20261025T195027.628453Z-g0ul_nt9/report.md.
+- go vet ./internal/loadsnapshot ./internal/raftengine: pass. SnapshotReports unit race: pass (1.290s).
+- loadsnapshot functional race, five repetitions: pass (1.730s), including borrowed old bytes, failed-hash sharing/cancellation, publication change, repeated capacity refusal, stale callbacks, missing/duplicate progress timeout, finalization total timeout, prepared-job expiry and transport/report actual-return joins.
+- Pending make lint and git diff --check: pass.
+
+Notes
+- Report notification intentionally precedes pin release; the prepared-cancellation test joins exact-owner ownership before asserting release, avoiding a false test race.
+- Managed ports, transport network integration and repair policy consumption remain later tasks. No listener, root source, persisted format or large fixture was added. Unrelated .gitignore edit is preserved and excluded.
+
+## Task 10 — bounded gRPC receiving and pinned teardown gate
+
+Date: 2026-10-26. Commit: this task commit; prior 526efec. Four implementation commits after review anchor 251a594; next review after two further commits.
+
+Implemented
+- Snapshot RPC on the existing load registration. A private optional service provider preserves ordinary-only doubles until Task 15. Bind copies resolved Node policy; no additional port or listener.
+- Separate pre-Open quota max(8, 2*MaxIncoming), min(3s, local policy, RPC deadline) handshake lifetime, authenticated 2*MaxIncoming quota and bounded single Recv/Send pumps. Ordinary call admission is independent.
+- Handler return causes actual gRPC stream cancellation; an adapter-owned finalizer joins both pumps and the returned handler before releasing its quota/wait-group owner. Blocking authentication/Node calls retain ownership through actual return and Close retries.
+- Exact-generation dispatch, separate checked frame cap, immutable requested chunk size and verified-prefix/total phase clocks. Accepted final Ack remains writable when native cleanup closes its completed SessionDone; target clarification recorded.
+
+Verified
+- make test: 2,262 tests across 62 reports/five modules pass (8.116s); report test-reports/unit/20261025T195628.191729Z-k_nf21z2/report.md.
+- go vet ./transport/loadgrpc; pending make lint; git diff --check: pass.
+- Required real gRPC 1.79.3 functional race gate with stats.Handler, five repetitions: pass (1.659s). Covers empty and admitted half-open Recv, flow-control-blocked Send, attachment replacement, Abort, progress deadline, owner/session stop, adapter Close and exact single RPC completion with joined pumps/quotas.
+- Cancellation-ignoring authentication/Write callbacks retain their permits until actual return; Close timeout/retry joins. Saturated pre-Open slots coexist with a progressing authenticated transfer and successful ordinary ReadReplica RPC. Invalid versions, pre-Open data, repeated Open and stale attachment refuse without mutation.
+- Full owning-package functional suite passes (0.369s). Transport-local 1024-byte frame test preserves the 4096-byte manifest request and supplies a smaller explicit cap.
+
+Notes
+- The pinned pump teardown feasibility gate passes; no architectural replacement or suppressed race was needed. Re-run it on gRPC upgrades.
+- Source networking and managed activation remain later tasks. No new root source, port, persistent encoding or large fixture. The unrelated .gitignore change remains excluded.
+
+## Task 11 — independent bulk clients, pipeline and retained resume clocks
+
+Date: 2026-10-26. Commit: this task commit; prior 2168c6e. Five implementation commits after review anchor 251a594; request the next colleague review after Task 12 (sixth commit), counting any additional correction commit.
+
+Implemented
+- Snapshot-only bounded outgoing admission and ClientConn cache use the existing caller resolver/load address while remaining independent of ordinary Raft/control connections. Close cancels/joins all accepted send work before closing bulk connections.
+- Independent joined chunk sender/Ack receiver enforce the negotiated window, exact session/run/chunk mapping and cumulative prefix bounded by issued chunks. No Data before admission, no Finish before all bytes are verified, no callback after joined return.
+- Resume preserves the original manifest and total/progress clocks, accepts tighter policy only, and joins old workers before replacement. Transient stream loss uses 100ms-to-2s capped jittered backoff; permanent/capacity/restart-required refusals end this delivery without unary fallback.
+- Header/frame/size validation, exact typed errors and native-proven not_needed remain distinct from accepted full receipt. Effective callbacks/Acks use locally narrowed timings; synchronous timeout checks prevent a late Ack from renewing an expired clock.
+- Removed the codec's temporary unused exemption now that both directions have production callers.
+
+Verified
+- make test: 2,272 tests across 62 reports/five modules pass (8.503s); report test-reports/unit/20261025T200445.349913Z-oalwwdg9/report.md.
+- go vet ./transport/loadgrpc; pending make lint; git diff --check: pass.
+- Owning-package unit race passes (1.311s). Functional snapshot RPC race suite, three repetitions, passes (2.843s), including the required server teardown gate.
+- Lost Open/chunk/final Ack resume with unchanged manifest; native not_needed sends no payload; unsupported peer and typed capacity/restart refusals do not retry/fallback. Missing/duplicate admission progress expires, total lifetime survives reconnects, finalization after verified bytes uses total lifetime, frame mismatch refuses before Data, and callbacks/workers join on Close.
+- An eight-MiB generated transfer blocks on bulk flow control while ordinary ReadReplica succeeds to the identical address over a distinct ClientConn. A three-chunk window test observes exactly three issued chunks while the first verified write is blocked; outgoing admission also remains held during a blocked Begin.
+- Pure regressions reject wrong delivery/run/attachment, changed chunk mapping, unaligned/unissued offsets and premature accepted Acks; duplicate and late Acks cannot renew progress.
+
+Notes
+- No new listener, root source, persisted encoding or committed payload. Ordinary legacy snapshot routing remains selected until Task 15; managed Host wiring is Task 12. Unrelated .gitignore edit remains excluded.
+
+## Task 12 — managed ownership, exact ports and lifetime joins
+
+Date: 2026-10-26. Commit: this task commit; prior 1bd6373. User steering canceled subsequent colleague reviews; no six-commit request is due and none will be sent.
+
+Implemented
+- Host constructs/starts/fences/stops one coordinator from copied Node policy. Node's existing accessor/resolver reaches it; publication remembers the coordinator for observation-only source history after Stop.
+- Exact Owner wrappers pin slot/core/run/context, allow unpublished running replicas to catch up and revalidate before native handoff. A refusal before native enqueue completes its owned callback; accepted ownership cannot be undone by a later check.
+- Private ports resolve/validate off-loop, register the exact native attempt and original deadline, and retain one terminal result against expiry. Ordinary adapter reports cannot consume job tokens; stale destination failures still end only their original source attempt.
+- Replica release requests engine stop before StopOwner, then joins core/application ownership. Host-wide Stop/readmission joins all coordinator reservations before completion/new Host creation; timeout and failed Close retain the old owner.
+- Closed P2-3b: load-peer catalog lookup was already indexed; added an applied derived process index to remove the remaining per-chunk member/admission/session/lock scans. No new persisted field or baseline encoding.
+- Source selection remains a private lowercase prepareSnapshot bridge, explicitly tested not to satisfy SnapshotJobTransport before Task 15.
+
+Verified
+- make test: 2,274 tests across 62 reports/five modules pass (10.504s); report test-reports/unit/20261025T201829.891258Z-j2qnev5s/report.md.
+- Owning-package vet, pending make lint and git diff --check pass.
+- Focused managed snapshot/shutdown race regressions, five repetitions: pass (4.187s). Full managed functional race at parallel=8 passes (14.615s). Covers blocked source actual return, received native Restore, failed Close/retry, unpublished startup skip, old coordinator/new run resume refusal, original delivery deadline/private CAS and retained permits.
+- Node binding race passes (3.048s); expanded Node binding/readmission/factory ownership race selection passes (14.772s).
+- loadsnapshot/metaengine unit races pass (1.422s / 3.853s), including source-only observation fallback and index session/lock/revoke/restore equivalence. Existing replacement-admission routing regression remains green.
+- Recovery functional suite passes (67.121s). Metaservice functional suite passes at repository parallel=8 (16.416s).
+- Process lookup microbenchmark, 100ms runs on Apple M4 Pro: 1/100/10,000 identities take 14.80/14.93/15.38 ns/op, all 0 B/op and 0 allocs/op. This measures lookup only, not metadata rebuild cost or transfer throughput.
+
+Findings and corrections
+- The first broad managed race run exposed an existing 20ms pre-admission timing assumption. Replaced it with a stopping-state barrier before canceling; the original resource assertions remain. All subsequent focused/full managed race checks pass.
+- A simultaneous unconstrained metadata/recovery/compile run hit several metadata fixture deadlines. Re-running the metadata suite alone at the documented eight-worker limit passes without changing those tests.
+- No root file was created, no large fixture/persistent transfer record was added, and the unrelated .gitignore edit remains excluded. Further implementation proceeds without colleague review per the user's latest instruction.
+
+## Task 13 — production fixture transport and capability migration
+
+Date: 2026-10-26. Commit: this task commit; prior fce9876. Further colleague review remains canceled by the user.
+
+Implemented
+- Process fixture uses a separately bound production adapter per Node generation and production ordinary Raft/snapshot RPCs on its existing load listener. Both existing service names are registered once; per-RPC implementation capture prevents redirecting old work into a successor. Node joins before adapter Close, which must finish before replacement publication.
+- Preserved legacy application/control service and custom protocol wrappers, read-send/receive tracking and authenticated drop_raft/drop_append snapshot refusal. Snapshot drops cannot report successful delivery.
+- Fixture-owned chunk/Finish/receipt and actual Ack-write fault seams allow bounded corruption/delay/stream-loss controls without modifying the library. Ack pumps capture the exact old service. Counters distinguish header-only not_needed from accepted full handoff and suppress duplicate accepted replies while retained; installation remains the Node/application observation.
+- Managed, root, recovery and API-network loopbacks now call the real service Begin/Write/Finish contract and report cumulative progress. Unused constructor doubles expose a capability that refuses/panics on actual use; no success stub. Ordinary-only adapter Ingress doubles expose an explicit unsupported service; exercised snapshot doubles retain their real protocol implementations.
+- Inventory found scheduler/cache examples already use production loadgrpc and examples/cluster plus tests/sim remain meta-only. No simulation dependency or extra root file.
+
+Verified
+- make test: 2,275 tests across 62 reports/five modules pass (8.216s); report test-reports/unit/20261025T204709.541309Z-8qlc935k/report.md.
+- Pending make lint passes owning vet/revive/unused and compile-only clustertest/example variants. git diff --check passes.
+- Full fixture functional race suite at parallel=8 passes (18.021s); new focused production registration/authentication/blocked-Ack-generation cases also passed (4.601s). Coverage proves ordinary production RPC wiring, wrong-credential refusal before transfer admission, adapter ownership after client/Node stop, and exact old recipient refusal after retained restart on the same listener.
+- Full transport functional race suite passes (1.861s), including the pinned server/client teardown gates. Managed/recovery functional suites pass (33.975s / 78.124s) during the broader checkpoint; focused recovery race passes (6.561s).
+- Process module compiled with clustertest using go test -c in a scoped temporary directory, exit 0. TestMain/Docker and large generators were not executed. Cleanup completed without retained artifacts.
+
+Findings
+- A broader concurrent run exposed an existing projection cancellation-accounting assumption; test assertions now retain the full-state/join guarantees while allowing its documented one canceled attempt. Recovery readiness now uses the existing job diagnostic waiter; subsequent full fixture race passes.
+- Initial heavily overlapping checks increased unit wall time to 61.817s; the final routine checkpoint is 8.216s. No default large allocation/generation was introduced.
+- The unrelated .gitignore edit became staged externally during this task. It remains preserved and is excluded using an explicit-path commit.
+
+## Task 14 — bounded repair catch-up episodes and shared failure evidence
+
+Date: 2026-10-26. Commit: this task commit; prior 797adba. No further colleague review requested per user steering.
+
+Implemented
+- Optional PeerProgress.Snapshot publishes the complete planned DTO, with owned pointer clones and omission when absent. Native owner sampling alone exposes progress; worker callbacks cannot refresh Raft stamps, Match, RecentActive or AckSequence.
+- One source-owned episode per native peer anchors historical Match and a locally configured TotalTimeout+ProgressTimeout deadline. Bytes, retries, artifacts, source term renewal and receiver engine-only run changes preserve it. Total/progress timeout latches failure; strict native Match advance or a changed process/durable peer permits a new episode. Native peer retirement removes it.
+- Added private generic policy and timeout-report inputs omitted from the original sketch, preserving the engine/load package boundary. Immutable owner-core forwarding avoids a Host lock on each progress Ack.
+- Relative progress, total, grace and episode durations age at native/meter/transit/cache boundaries. Invalid negative remaining values cannot wrap into fresh protection. Sending requires fresh normal target Raft evidence; bounded handoff grace tolerates Restore while rejecting contrary run/term/stopped evidence.
+- Observer suppresses only lag/stall predicates, leaves raw numeric lag visible and records snapshot_catchup/snapshot_transfer_failed reasons. Independent unavailability, learner promotion and quorum checks remain unchanged. Built-in policy and mandatory votercheck consume the same derived evidence.
+
+Verified
+- make test: 2,298 tests across 62 reports/five modules pass (7.967s); report test-reports/unit/20261025T211313.995417Z-8iaem78v/report.md.
+- Focused owning vet, pending make lint and git diff --check pass.
+- Default-package race checks: metrics 1.317s, internal/metrics 1.353s, observe 1.543s, raftengine 1.285s and scheduling 1.217s; all pass.
+- Real one-engine snapshot ingress/outbound functional race selection passes (1.483s). New case proves native-only publication, no fabricated Match/RecentActive/AckSequence, timeout latch across receiver-run churn and cleanup at native peer retirement.
+- Controlled-clock units cover retry/term/run changes, process replacement, unknown receiver run, native Match reset, bounded grace, expired/stale/zero-byte/contrary target evidence and cached reads. Later fresh progress cannot reset a failed episode's ordinary failure window. Pointer clone, JSON omission, duration arithmetic and shared policy/mandatory-check agreement regressions pass.
+
+Notes
+- _meta/standalone use a zero generic snapshot policy and retain legacy send/report behavior. Full four-node repair and process transfer scenarios remain Tasks 17/20; no Docker or large generation was run here.
+- Activation is still deferred to Task 15. The unrelated staged .gitignore change remains excluded from feature commits.
+
+## Task 15 — atomic managed cutover and ordinary-path closure
+
+Date: 2026-10-26. Commit: this task commit; prior a1d1412. Further colleague review remains canceled.
+
+Implemented
+- Managed engineTransport now implements the actual selecting PrepareSnapshot method. Native Ready selects common source admission/jobs for every managed MsgSnap, preserving generic _meta/standalone transport behavior.
+- NewNode performs pure missing/typed-nil snapshot capability refusal. loadgrpc.Ingress requires LoadSnapshots; Bind captures a nonnil borrowed service with already-resolved policy and checked frame feasibility. Removed the optional provider and default-policy bridge.
+- Ordinary managed ingress, managed sender and production loadgrpc sender/codec reject MsgSnap. Removed the adapter's old unary snapshot send/report path; snapshot jobs alone own terminal managed reports.
+- Removed transitional unused exemptions and renamed the private preparation bridge. Migrated obsolete ordinary-snapshot tests/benchmarks to refusal semantics, retaining ordinary token identity/expiry and snapshot reservation-window regressions.
+- Added real native Ready → Node-owned managed coordinator → production gRPC → common receiver ingress → exact native report integration. One actual managed engine adds a protocol-double learner through authorized membership, sends a native snapshot and resumes append probing only after the terminal report. The double reports injected installation failure after accepting ownership, proving accepted transport is not an installed claim. Public Node construction/Bind/Start composition is covered by the prior Node regression; real multi-node process qualification follows in Tasks 17/20.
+
+Verified
+- make test: 2,299 tests across 62 reports/five modules pass (17.887s); report test-reports/unit/20261025T212345.398911Z-f3facj7l/report.md.
+- Owning pending lint/vet, merged unused analysis, git diff --check and process compile-only clustertest binary pass. No TestMain/Docker run.
+- Full managed/adapter functional race checks pass (14.171s / 1.874s), including the native activation path, safe-boundary queue ownership, legacy _meta/standalone reporting and pinned gRPC teardown.
+- Full fixture functional race passes (35.179s). Recovery functional suite passes (69.893s). Full public Node functional suite passes on its own (15.098s).
+- Constructor tests reject ordinary-only and typed-nil transports without callbacks; Bind tests reject nil/unresolved services. Ordinary mixed batches refuse snapshots before any partial dispatch or fabricated report.
+
+Findings
+- The new integration test's first cleanup used t.Context, which Go cancels before cleanup. Switched only cleanup to a fresh bounded background context; the actual protocol run and ownership assertions remain unchanged.
+- An overlapping broad run timed out the existing storage-lease test during operation convergence and its intentional first Close failure. It passed alone (4.155s), then the complete public suite passed sequentially without changing its timeout or production storage behavior.
+- No runtime rollout flag, giant unary fallback, additional listener, root file or persistent format change. The unrelated staged .gitignore change remains excluded.
+
+## Task 16 — explicit generated state and identity-bound phase controls
+
+Date: 2026-10-26. Commit: this task commit; prior 0c1daca.
+
+Implemented
+- Explicit replicated synthetic configuration extends the fixture FSM; ordinary state remains small JSON. Generated binary snapshots preserve KV/dedup state, logical counter, prepared/replay records, deterministic seeded bytes and full integrity digest. Restore validates all bytes and semantics with bounded scratch; cancellable block hashing/generation avoids another full fixture allocation.
+- Authenticated group/replica endpoints configure generation through public Group.Propose, force snapshots and return compact state/manifest/progress observations. Generation above the local encoded allowance refuses before materializing data. Requested encoded budgets reserve 64 KiB engine framing headroom; qualification observes actual manifest length/digest/index/term.
+- Exact node/process/group/replica controls implement one-shot admission/chunk/final Ack loss at actual wire writes, bounded chunk corruption/delay and before/after Finish/handoff, persistence and Restore gates. Canceled gates join and retain active counts until actual return. Old identities cannot affect successors.
+- Snapshot options now flow from process Spec through one JSON flag into Node creation. Borrowed fixture WAL provides persistence gates; Node-owned WAL explicitly refuses them. Existing meta/load listeners and transport services remain unchanged.
+
+Verified
+- make test: 2,306 tests across 62 reports/five modules pass (18.933s); report test-reports/unit/20261025T213712.819137Z-6vornj6k/report.md.
+- Full fixture functional race suite passes (16.782s); final focused generator/control/authentication/cancellation race checks pass (2.867s).
+- Pending owning vet/lint, clustertest/example compile variants, git diff --check and explicit process go test -c compilation pass. No TestMain/Docker or large generator ran.
+- Pure cases verify deterministic complete-state restore plus committed tail/dedup, corruption/truncation/forged digest/JSON-only rejection, no publication on failed restore, cancellation and small ordinary snapshots. Functional controls reject absent credentials/stale identities and oversize generation; phase cancellation and one-shot wire loss/corruption preserve ownership and borrowed data.
+
+Notes
+- Initial identity capture assumed every focused fixture had a live Node; fixed capture to tolerate protocol-only fixtures while running controls retain exact identity checks. Existing tests remain green.
+- No payload/testdata file, implicit storage root, extra listener or new root file. Generated qualification remains opt-in and unexecuted until the process tasks. Unrelated staged .gitignore remains preserved and excluded.
+
+## Task 17 — process matrix and the justified four-node repair regression
+
+Date: 2026-10-26. Commit: this task commit; prior 76cabfb.
+
+Implemented
+- Added isolated three-node generated snapshot scenarios for 32MiB multi-frame transfer/tail/later leadership, production same-peer ordinary traffic during held bulk, lost admission/chunk/final Acks, corruption/retry, source election, receiver process incarnation and stale control refusal.
+- Crash cases gate before Finish, before/after persistence and after Restore, then verify complete generated state and committed tail on retained restart. Automatic receiver recovery uses an exact-process bounded Restore failure budget; a unit verifies it cannot affect a successor.
+- Multi-group capacity case holds the sole incoming slot, observes a second source's remote capacity refusal and requires refill/catch-up within eight seconds after release, detecting the old long native backoff.
+- Four-node regression names its required capacity: three voters retain quorum and one stable learner enables guarded replacement. It preserves default 30s failure windows, throttles 32MiB beyond them and observes snapshot_catchup; a second episode repeatedly acknowledges one chunk then times out and must qualify replacement despite renewed bytes.
+- Added the concrete SNAP-01–15 suite/test mapping to the plan. All actual process execution remains reserved for Task 20.
+
+Verified
+- make test: 2,307 tests across 62 reports/five modules pass (7.343s); report test-reports/unit/20261025T214845.642502Z-ydoaev0e/report.md.
+- Focused fixture snapshot/control functional race selection passes (4.710s). Pending owning lint/vet and git diff --check pass.
+- All clustertest cases compile through go test -c in an automatically cleaned temporary directory, exit 0. No TestMain/Docker was run, so cross-node runtime outcomes are not yet claimed.
+
+Notes
+- No private library imports added to the application, no larger ordinary cluster fixtures, no payload files or new listeners. The Restore failure budget extends the existing exact-identity fixture seam and remains outside library behavior.
+- Process cases may need correction from final runtime evidence; green compilation is not acceptance proof. The unrelated staged .gitignore change remains excluded.
+
+## Task 18 — explicitly tagged generated encoded-size qualification
+
+Date: 2026-10-26. Commit: this task commit; prior 3c6ba22.
+
+Implemented
+- Added clustertest && snapshotlarge cases for 256,000,000, 1,000,000,000 and 2,000,000,000 encoded bytes. Explicit options, sequential qualification, Docker memory/free-disk preflight and full generated transfer/WAL/Restore/restart prevent silently substituting smaller data.
+- Small observed manifest calibration sizes the unchanged JSON/base64 envelope within encoding granularity. Changed fixture filler to reproducible ChaCha8 bytes, verified byte-for-byte on Restore; no compression, sparse files or payload artifacts. Target fixture-sizing paragraph updated to reflect this refinement.
+- Qualification exercises lost chunk Ack/resume, other-group traffic, committed tail and new writes, and logs sampled heap/RSS/store-disk/reservations plus wire frames/chunk/window peaks and phase times. Optional disk inspection walks only caller-supplied load storage. Wire stats retain scalar offsets, not payloads. Generation HTTP wait is explicitly bounded at 30 minutes.
+
+Verified
+- make test: 2,309 tests / 62 reports / five modules pass (7.194s), test-reports/unit/20261025T215905.608439Z-81xf1hhk/report.md.
+- Fixture unit race pass (1.622s); focused snapshot/synthetic functional race pass (4.633s); pending owning lint/vet pass.
+- Explicit opt-in process binary compiles into an automatically cleaned temporary directory. Go file selection excludes snapshot_large_test.go with clustertest and includes it only with both tags. No TestMain/Docker or large payload generation executed for this task.
+- Docker preflight reports 39,878,758,400 bytes memory and host has 2.7 TiB available. Actual qualification remains unqualified until Task 20 executes it; this is resource availability, not a passing qualification result.
+
+Notes
+- Measurements are sampled high-water observations, not hard RSS or throughput guarantees. Producer-window bounds are separately asserted by transport tests. All fixtures remain runtime-generated. Unrelated staged .gitignore remains excluded.
+
+## Task 19 — current architecture and operational contracts
+
+Date: 2026-10-26. Commit: this task commit; prior cf6c79f.
+
+Implemented
+- Updated existing root/adapter/fixture READMEs, Raft/library/runtime/multiplexing architecture and testing guides. Removed stale unary/unchunked snapshot descriptions while preserving ordinary/admin encodings, health/session text and application routing.
+- Documented construction-time options/defaults, custom capability refusal, same-port independent bulk connections, explicit plaintext policy, accepted versus installed/not_needed, exact-run resume and fixed clocks.
+- Explained full-buffer memory amplification outside transfer budgets, memory-only staging and the single future-backend TODO, joined ownership and finite source repair episodes including timeout latches and receiver-run churn.
+- Added explicit generated qualification command/resource envelope and named four-node repair justification. Qualification remains explicitly unmeasured pending Task 20. No compatibility baseline or persisted encoding was regenerated.
+
+Verified
+- Local Markdown links in all nine updated documents resolve; API/options/protocol names checked against current sources. git diff --check passes.
+- Exactly one mechanism code TODO remains, at internal/loadsnapshot/staging.go for the deferred group-scoped disk backend. No Go/support snippet changed, so no redundant unit run for this documentation task.
+
+Notes
+- Applied go-upd-arch guidance to the already authorized target/plan; no new proposal/approval cycle was necessary. No new root files or design scope. Unrelated staged .gitignore remains excluded.
+
+## Task 20 — final checkpoint findings (in progress)
+
+Date: 2026-10-26. No Task 20 completion or qualification claim yet.
+
+- Initial final units (2,309), unit race (2,309), functional (1,427) and functional race (1,427) all pass. Proto-check regenerates the pinned artifacts with no diff; full lint initially passed before later checkpoint fixes.
+- First focused snapshot process suite passed all fault/crash/isolation/recovery cases except repair setup: placement minimum four contradicted target voters three, and lag threshold one needed standby threshold zero for valid hysteresis. Corrected fixture only; the default 30s failure windows remain. Isolated repair passes (85.090s), and the full ordinary rerun passes all 122 reported cases (217.980s), report cluster/20261025T221040.485358Z-91h19hvo.
+- Initial broad ordinary run found the fifteen-group resource gate retaining idle stream goroutines (zero groups, 154 goroutines versus baseline 42), plus one process-stop grace failure that passed isolated and on full rerun. Production fixture migration exposed ordinary stream cleanup outside the old unary fixture. Added optional existing Node local-group observation to retire stale idle source routes; no mandatory/public interface addition. A stronger regression requires draining already written native frames before EOF, with bounded/joined stalled retirement. Abrupt cancel can lose a final removal frame after its sender has stopped.
+- First large run passed exact 256,000,000 and 1,000,000,000 encoded cases, then 2 GB generation hit the harness client six-second timeout despite server generation allowance. Fixed only that route's caller timeout. Also corrected missing snake_case JSON tags in the process wire-measurement DTO and made large qualification assert observed chunk/window bounds.
+- Under overlapping load, a retained 1 GB restart repeatedly failed the shared constructor's five-second full read/Restore deadline (eleven factory attempts while work remained starting). Interrupted that qualification runner with SIGINT, preserving interrupted report/verified cleanup. Managed engines with SnapshotPolicy now use their owning startup context; legacy meta/standalone keep their prior constructor bound. Strengthened the actual Restore cancellation/borrowed-store regression to check both policies. Target/current docs updated openly to reflect these final-validation refinements.
+- Final-image rebuild gquorum-test:snapshot-20261026-final3 contains graceful stream retirement and managed replay fix. Latest five-module units pass (2,309, 12.128s); full adapter/engine functional race pass (3.387s/6.484s), managed functional race passes (14.003s). Large qualification and final ordinary rerun are now sequential to avoid contaminating resource measurements. Full lint is being repeated after its reported naming/line-length findings were corrected.
+
+The unrelated staged .gitignore change remains preserved and excluded. Historical failed/interrupted runs are diagnostic evidence, not acceptance proof.
+
+## Task 20 — section-by-section architectural delta audit
+
+Date: 2026-10-26. Source inspected after final-image fixes; release-check repeat remains running.
+
+| Target sections | Verified implementation and evidence |
+|---|---|
+| 1–2 scope/boundaries | Contracts in load/snapshot, mechanism in internal/loadsnapshot, one managed snapshot_ports.go. Git added-file audit finds no new root Go source; frozen baseline paths have no diff. Full application/storage buffers retained; existing load port shared by separate ordinary/bulk pools. |
+| 3–4 configuration/contracts | All Options fields/defaults, checked integer/count/window/deadline arithmetic, capability/typed-nil refusal, minimal LoadSnapshots facade and bounded statuses/errors match. Resolve is pure and configurations above 2 GB have nonallocating coverage. Every public Service/Transport method is implemented. |
+| 5 wire/resume | SnapshotOpen/Data/Finish/Abort/Ack/Failure fields and TransferSnapshot registration match. New version 1 coexists with ordinary v2/admin v1. Frame negotiation preserves original manifest chunk size separately from adapter cap. Ack callbacks bind exact job/run; resume joins old attachment, retains fixed clocks and refuses changed runs. Tests cover lost admission/chunk/final Acks, frame mismatch and unsupported peers without fallback. |
+| 6 volatile/persistent state | Full exact key, owner run and group maps; before-allocation directional count/byte reservations; memory staging interface; SHA256, singleflight and two completed digests/run; evictable terminal cache and TTL; 256-row/128-page observations. Live handoffs retain payload ownership. Private cache cleanup is clearDigestsLocked in joined StopOwner (inventory name reconciled). No WAL/state/schema/baseline or disk-staging change. |
+| 7.1–7.5 / 12 engine algorithms | One Ready consumer; owned queue gated at safe boundary; strict positive-term native preflight; exact selected-snapshot ticket; cached off-loop decode; dynamic authority validation only for selected snapshot; joined Done after persistence/Restore or skip. Immutable source slices are pinned without full clone, jobs dispatch after durability, leadership epochs cancel, exact mailboxes do not drop or renew failed backoff from byte progress. Legacy meta/standalone immediate reports and publication generations have regressions. Full-snapshot writer and managed retained replay use owner contexts. |
+| 7.6 / 9.4 gRPC | Independent same-address pools; pre-Open max(8,2*incoming) and authenticated 2*incoming quotas; one Recv/Send pump per stream; fixed total/progress bounds; handler-return-before-I/O-join. Real stats/race half-open/blocked-Send gate passes, including exactly one RPC completion. Ordinary retirement now drains queued frames with bounded joined ownership. |
+| 7.7 / 13 repair | Coalesced exact-attempt source progress, local episode deadline/anchor and sticky terminal timeout; strict Match/destination-process reset only, receiver engine churn never renews. Observation aging and finite handoff grace feed the same evidence used by built-in policy and mandatory revalidation. Quorum/promotion/availability guards unchanged. Default-window four-node process regression passes. |
+| 7.8 / 8 lifecycle | Stop requests engine cancellation before coordinator join; StopOwner waits chunk/hash/network/finalizer/native users; readmission joins/fences old coordinator before replacement. Facade fallback is observation-only and remembers source-only histories. Source/receiver Close timeouts retain exact owner and reservations until actual return. Managed/adapter/core functional race regressions and crash/restart process cases pass. |
+| 9–10 fixtures/testing | All five modules compile and capability mocks migrated. Production adapter serves ordinary and bulk on the existing fixture load listener per Node generation. Authenticated identity-bound hooks, generated complete synthetic state, Node-owned WAL qualification, normal small process faults and SNAP-01–15 mapping are present. Four-node snapshot repair case names its required standby; ordinary cases use three nodes. |
+| 11 exclusions/current docs | Memory-only receive staging with one future-backend TODO; no streaming storage/application API, cross-process resume, compression feature, remote installed receipt or standalone chunk server. Larger production configurations remain allowed; sizes above 2 GB remain unmeasured. Current docs disclose memory amplification and serialized local callbacks. |
+
+Production wiring trace (last audit item): NewNode validates/copies policy and constructs facade → node_lifecycle.newHost/RememberCoordinator → Host.Start coordinator with exact managed ports → engineOptions.engineTransport → native ownReady/PrepareSnapshot → after-write dispatchSnapshotJobs → coordinator job/production SendSnapshot → authenticated TransferSnapshot on existing load service → common Begin/Write/Finish → exact owner PrepareOwnedSnapshot/StepOwnedSnapshot → existing Ready writer/Restore/Done → joined reservation release and native attempt report → source metrics/aged shared repair evidence. Node stop/readmission request cancellation and join before application/store release. Native activation functional integration and the real process suite reach these entry points; they are not test-only declarations.
+
+Final-image ordinary cluster suite passes all 122 reported cases in 217.361s: test-reports/cluster/20261025T221708.616425Z-w3s0go7i/report.md. Full encoded ladder also passed 256M/1B/2B in 100.270s, cluster/20261025T221528.282721Z-yonwfr37; final reporting refinement adds separate creation/network/restore/restart/ordinary-traffic times and explicit zero-reservation assertions, so that explicitly tagged command will run once more.
+
+## Task 20 — completed release validation and wiring
+
+Date: 2026-10-26. Commit: this task commit; prior 62d0c3f. All 20 tasks are complete. Further colleague reviews remain canceled.
+
+Final checks (after runtime fixes)
+- make test: 2,309 / 62 reports / all five modules pass, 8.909s; unit/20261025T222131.693770Z-e3b3wdl8/report.md.
+- make test-race: the same 2,309 pass, 29.327s; unit-race/20261025T222140.975242Z-aadthyic/report.md.
+- make test-function: 1,430 pass, 118.867s; function/20261025T222210.685441Z-lgrwrecd/report.md.
+- make test-function-race: 1,430 pass, 162.639s; function-race/20261025T222409.729078Z-xj6hpbvd/report.md. This includes pinned gRPC half-open/blocked-send/stats completion and the strengthened replay/stream drain ownership regressions.
+- make proto-check: pass, pinned generation leaves no diff. make lint-full: pass across module/build variants. Explicit large-tag go vet and Markdown path/diff checks pass. Logs retained at /tmp/snapshot-final-release-*.log and the suite report directories under test-reports.
+- Final-image full ordinary cluster suite: 122 reported cases pass, 217.361s; cluster/20261025T221708.616425Z-w3s0go7i/report.md. This includes the snapshot matrix, named four-node default-window repair case, resource gate and graceful process stop.
+- Final explicit CLUSTER_PARALLEL=1, snapshotlarge qualification: all three exact encoded sizes pass, 92.558s; cluster/20261025T222708.955256Z-4acyzfy_/report.md. Generation stayed behind the explicit tag. Full body chunks, digest/semantic Restore, reconnect, same-peer other-group traffic, tail/new writes, zero returned reservations and retained restart all passed.
+
+Measured qualification
+- Encoded 256,000,000 / 1,000,000,000 / 2,000,000,000 bytes; actual lengths match each request exactly. Both directional reservation peaks equal each size. Maximum observed payload is 1,048,576 bytes and observed windows are 6/5/6 <= configured eight. Counts/bytes return to zero before retained restart.
+- Sampled peak RSS across source/receiver: 1,911,697,408 / 6,902,104,064 / 13,639,368,704 bytes. Sampled peak heap: 1,224,085,968 / 4,838,602,520 / 9,669,169,368 bytes. These are per-process maxima across the two participants, not their sum or guaranteed complete peaks; sampling follows creation.
+- The 2 GB case: creation 6.218s; transfer including injected hold/reconnect 2.409s; verify/persist/Restore wait 14.704s; retained restart 11.649s; other-group operation 2.34ms. Actual load-store high-water 2,004,460,004 bytes. Full table and sampling/baseline caveats are in tests/cluster/README.md#measured-snapshot-resources.
+- Go 1.26.5 host and Linux/arm64 image; etcd Raft 3.6.0; gRPC 1.79.3; Docker 29.6.1 with 39,878,758,400-byte VM memory. Image gquorum-test:snapshot-20261026-final3, sha256:a48e0c77d8fb56480230e5915f1dc8555207c0af7874091b6246a6077f41300e. The final large run was separate from ordinary process/resource checks. All test containers/workers/volumes joined through verified pool cleanup; final docker ps is empty.
+
+Completion
+- Section audit and production wiring trace above are complete and exercised by the real process paths. Target SHA256 is synchronized in the completed plan. All task/verification checkboxes are checked; no unresolved implementation gap remains.
+- Production configured sizes above 2 GB remain valid but unmeasured. Full-buffer APIs, resident snapshots, serialized local callbacks and resulting RAM requirements remain explicit. Memory-only staging and its one future disk-backend TODO are preserved.
+- No new root Go files, payload/testdata blobs, listener, persisted format change, frozen fixture regeneration, legacy fallback or additional service owner. Earlier failures/interruption were corrected and superseded by the passing final checks above.
+- Task 18 cf6c79f, Task 19 62d0c3f and this Task 20 commit finish this continuation. The user's staged .gitignore change remains excluded and untouched.
+
+## Post-review P1 corrections — implementation and current validation
+
+Date: 2026-10-26. User: “Will you fix it?” for the two P1s, then “Continue.” Source review baseline dd10d21; first architecture and Meridian assessments are recorded in review Threads 4–6. Main-agent fixes are authorized; peer reviews remain analysis-only.
+
+Implemented
+- Slice-based snapshot decoding eliminates the growing whole-envelope Decoder buffer. Standard Unmarshal checks syntax/types and owns decoded application bytes; zero-copy span walking enforces top-level keys and strict authority decoding preserves nested rejection. Differential seeds cover escaped/case-folded/duplicate keys, byte arrays/nulls, nested unknowns and trailing/malformed JSON.
+- Bounded pre-admission refusal history/cache, source run/destination/reason coalescing, actual byte dimensions, count/time and explicit unissued-delivery status. No destination resolution, hashing, native job, payload pin or reservation. Remote errors retain size/limit too. Events use the existing bounded bus with per-route and global caps; creation/run-start warns once for an oversize resident/local snapshot.
+- Pure tests verify 50 repeated refusals, 600-route cache pressure, no callbacks/permits; functional/race checks cover event counts, reason changes/reminders, cache-churn flood caps, remote errors and resident/creation warnings. Added an actual three-node oversize refusal/status/journal test while another group progresses.
+
+Evidence so far
+- Initial focused process suite: 16/16 pass, 81.681s, cluster/20261026T051139.704850Z-i43y0pca/report.md.
+- Full functional race with final decoder: 1,434 pass, 157.356s, function-race/20261026T052526.003054Z-vf_n835n/report.md. Full lint passes. Owning unit-race checks pass.
+- Final differential fuzz pass: 832,908 executions / 15s fuzz interval plus shutdown, no behavioral mismatch. The earlier candidate also passed 701,486 executions. No generated corpus payload was committed.
+- 4 MiB application / 5,593,342-byte envelope allocation gate: roughly 4.21 MB/op, bounded at application bytes + 256 KiB. Previous strict buffered decoder benchmark: 20.98 MB/op. First candidate duplicated a syntax scan and showed a CPU cost; it was revised. Latest comparable benchmark sample: slice 23.23 ms/4,209,634 B/op, previous buffered 22.75 ms/20,981,823 B/op on Apple M4 Pro/Go1.26.5. This proves allocation removal, not a CPU speedup guarantee.
+- An intermediate broad cluster run failed only TestFailureIsolation_DeletionStopProof at its immediate write with replica_not_ready. Corrected the test's readiness race by retrying only that refusal with the same command identity; exact deletion proof assertions stay intact. Final-image full cluster and generated qualification are running separately in sequence; no new passing qualification claim yet.
+
+No P2 hash-waiter, creation-clone or running-replica-view change is included in these two quoted P1 fixes. Those findings remain recorded. Full-buffer RAM requirements and the explicit <=2 GB qualification scope remain unchanged. The user's staged .gitignore is preserved and excluded from all commits.
+
+## Post-review P1 corrections — verified and ready for follow-up review
+
+Date: 2026-10-26. Correction commit: this commit; parent dd10d21. Both requested P1 areas are implemented. Independent re-review remains pending; this record is not a new Meridian sign-off.
+
+Final evidence
+- make test: 2,320 pass / 62 reports / five modules, 10.316s; unit/20261026T053350.506943Z-_we6ad4p/report.md. One earlier concurrent cold-build pass took 50.899s; the final warm-cache run remains lightweight.
+- Owning unit race: raftstate/loadsnapshot/raftengine/managed pass. Full make test-function-race: 1,434 pass, 157.356s; function-race/20261026T052526.003054Z-vf_n835n/report.md. Full lint and final pending-file vet/lint pass.
+- Final differential fuzz: 832,908 executions, no acceptance/state mismatch; earlier candidate 701,486. No failed corpus/testdata file was produced. New strict codec tests cover nested unknown fields, alias keys, duplicate merges, byte-array/null application encodings and trailing/malformed input.
+- Allocation gate passes for generated 4 MiB application/5,593,342-byte envelope. Isolated benchmark repeat: slice 4,209,405–4,209,490 B/op and 17.54–18.12ms, buffered 20,981,805–20,981,835 B/op and 17.46–18.59ms. About 80% fewer allocated bytes per decode; no CPU speedup or overall RSS reduction asserted.
+- Final full ordinary cluster: 123 pass, 202.439s; cluster/20261026T053118.067136Z-1t1siqzj/report.md. Final explicit 256M/1B/2B generated ladder: 4 reported parent/subcases pass, 92.046s; cluster/20261026T053440.558197Z-nmspls08/report.md. Fresh image snapshot-review-p1-r2-20261026, sha256:7387ad063385e8738845493883a9df22db5d8f2fcff69eb464197014248f54bf.
+- After the test-only readiness correction, focused TestFailureIsolation_DeletionStopProof passes, 13.621s; cluster/20261026T053648.611916Z-97_77ly1/report.md. That corrected probe retries only replica_not_ready with the original idempotent command; original exact stop/deletion/cleanup assertions remain.
+- New qualification: 2 GB sampled peak heap 11,529,869,736 / RSS 13,557,772,288 bytes, 1 MiB chunks/window peak six, full size reservations both directions returned to zero, ordinary traffic 2.56ms, verified tail/new writes/restart. The complete refreshed table and caveats are in tests/cluster/README.md. Per-decode allocation fell; whole-process measured RSS remains about 13.6 GB because other buffers and GC dominate. Sizes above 2 GB remain unmeasured.
+- Final Docker process list is empty; cleanup verified through the pool. No new root Go file, blob, protocol/store format change, regenerated frozen fixture or extra disk-backend TODO. Unrelated staged .gitignore remains untouched.
+
+Scope and review
+- Decoder and refusal P1s are corrected; prior dd10d21 source-review verdicts remain historical and are not rewritten as approvals of this commit. Updated target describes these corrections and the plan pins its hash.
+- P2 hash-owner cancellation, pre-existing local creation/startup clones and unpublished-replica stream churn are recorded separate follow-ups, unchanged by the two quoted P1 fixes. Full-buffer resource/provisioning and same-process resume choices remain intact.
+- Request a new architecture review of this pinned correction commit, then pass that completed result to the Meridian reviewer for readiness reconsideration, as the user requested sequential reviews.
+
+
+## Post-review P1 corrections — sequential reviews completed
+
+Date: 2026-10-26. Reviewed implementation: 037b299a56d0b411964c99e25768430a3c5441ed. Target SHA256: 6dc8fdd5c197eaa1bf1ac094d889cd34c0020bf3e3b7452f65aab0d9c7ae9dd4. Full returned reviews and dispositions are in docs/review/feat_large-snapshots-transfer.md, Threads 7–8.
+
+- Architecture reviewer 43cff8c6-3dab-4f3f-a0eb-d4393c777725: both P1s closed, no regression/new blocker. Decoder strictness, refusal ownership/bounds and integration wiring verified in source.
+- After architecture completion, Meridian reviewer 3ee32258-9c92-4c46-a75a-c5444e543898: ready with explicit integration and provisioning conditions for GQ-02; supersedes the negative dd10d21 verdict for this requirement. No mandatory additional upstream implementation identified. Neither reviewer ran tests; they inspected pinned source and existing recorded validation.
+- Remaining P2s: routine capacity events resemble errors and share history; permanent remote refusal history churn/no event coalescing; in-place status cursor updates; incomplete oversize-warning coverage; concurrent digest-waiter cancellation; creation/startup copies; unpublished-replica stream churn.
+- Meridian must wire the actual adapter and shutdown ownership, align complete encoded size/frame limits, interpret refusal/acceptance/install observations correctly, refresh diagnostic pages from cursor zero, provision resident state plus full-buffer costs and run Meridian-specific snapshot-plus-tail integration tests. Initial qualification remains MaxOutgoing=1. Sizes above 2 GB and larger concurrency need separate qualification.
+- Sampled process RSS at 2 GB remains about 13.56 GB; allocation savings are per decode, not a whole-process RSS bound. Existing full-buffer/memory-staging choices remain accepted.
+- This is review-completion bookkeeping only; no source behavior or new tests changed. Preserve unrelated staged .gitignore. Await subsequent user instructions.

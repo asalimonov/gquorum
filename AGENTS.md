@@ -15,18 +15,13 @@ and protobuf. Five application modules are the root, `examples/cluster`,
 `examples/scheduler`, `examples/inmemory-cache` and `tests/cluster` (including the
 caller fixture). Kong and Docker tooling stay outside the library module.
 
-The public API refactor established these boundaries:
-
-- `NewNode(NodeOptions)` constructs the participant; `Node` owns its lifecycle
-  and managed replicas. `node.Cluster()` is an administration view with no
-  independent lifetime.
-- `*load.Group` represents one exact local replica and exposes application
-  consensus. It has no independent start/stop or raw membership controls.
-- `GroupFactory`, `load.StateMachine`, `load.Transport`, storage interfaces and
-  `scheduling.RepairPolicy` and `lifecycle.Hooks` are application extension points.
-- The former public `Runtime`, `OpenMeta` and `OpenLoad` APIs were removed.
-  Keep orchestration in the library and applications on public APIs.
-  `load.NewStandalone` is the explicit low-level alternative with a separate owner.
+The library is focused on automation of management of nodes and raft groups with
+implementation opiniotated apprach to keep its public API keep and clean.
+The top priority of the library - make development and operations of clusters simple
+and reliable. Thus, library should hide its internal complexity for ideomatic use cases
+with full management of these cases inside itself to avoid leaking internal logic
+outside of the library. The cases which are not idiomatic should be avoided as
+not supported by design. When you don't know it is main use case or not - ask user.
 
 ## Read before changing behavior
 
@@ -75,7 +70,21 @@ cleanup evidence and shutdown release ownership.
 | `tests/sim/` | Separate opt-in Gosim module: deterministic runtime/filesystem/network simulations using real Node APIs and metadata gRPC transport. |
 | `scripts/test_report.py` | Shared test runner: Meridian-style stdout summaries, persistent package logs/JUnit and Markdown timelines. |
 
+Keep root `gquorum` package with small number of files.
+
 ## Contracts to preserve
+
+### High level overview
+
+- Each node of cluster should have `_meta` raft group, it is mandatory requirement.
+  `_meta` raft group contains full information about topology of cluster and allows
+  to implement core components for routing of requests to proper nodes and leaders,
+  determine status and health of node and connectivity to other nodes
+- Not `_meta` raft groups are "Load groups" which handles user's business logic and
+  help to implement Raft state-machine and durable persistence for WALs and
+  Key-Value storage.
+- NO hiearchical Raft groups
+- ONLY TWO listening network ports: 1 for `_meta` a 1 for other multiplexed load groups
 
 ### Topology and authorization
 
@@ -229,17 +238,18 @@ separate example and test modules. Choose checks according to the change:
 | Command | Coverage |
 | --- | --- |
 | `make test` / `make test-unit` | Compile all five application modules and run fast, uncached units with default build tags. |
-| `make lint` | Vet, revive and merged unused analysis across all modules/build tags, including compile-only process tests. |
-| `make test-race` / `make test-unit-race` | Fast unit checks under the race detector. |
+| `make lint` | The same vet, revive and unused checks for pending Go files only: staged, unstaged and untracked changes, linted in place. |
+| `make lint-full` | Vet, revive and merged unused analysis across all modules/build tags, including compile-only process tests. SLOW operation. Use only on the latest task before final validation of feature implementation. Don't run for small fixes and sub-task. |
+| `make test-race` / `make test-unit-race` | Unit checks under the race detector. SLOW operation. Run only on the latest task of a plan. Don't run for small changes. |
 | `make test-function` / `make test-function-race` | Non-Docker functional tests using `-tags=functional`, with optional race detection. |
 | `make test-example` | Actual demo; requires Docker Compose. |
 | `make test-cluster` | VERY SLOW Docker process scenarios with the `clustertest` tag. Run only at the end of a set of changes/commits, not after small or intermediate changes. |
-| `make test-sim` | Deterministic three-node simulations; `SIM_SEEDS` selects replay seeds and `SIM_ARGS` filters tests. |
-| `make test-perf` / `make bench` | Process performance/resource gates or planner/snapshot benchmarks. |
+| `make test-sim` | Deterministic three-node simulations; `SIM_SEEDS` selects replay seeds and `SIM_ARGS` filters tests. SLOW. Don't run without needs. |
+| `make test-perf` / `make bench` | Process performance/resource gates or planner/snapshot benchmarks. SLOW. Don't run without needs. |
 | `make generate` / `make proto-check` | Regenerate protocols / require no generated diff; needs `protoc`. |
 
-During editing, lint only the specific changed files in their owning package.
-Reserve full `make lint` for the checkpoint before cluster tests; do not repeat
+During editing, use `make lint` to lint only pending changes.
+Reserve `make lint-full` for the checkpoint before cluster tests; do not repeat
 it after small edits. The pre-commit hook already limits reports to staged files.
 For Go changes, run focused regressions and relevant unit/vet checks. Use race
 checks for concurrency changes and integration/process coverage for behavior

@@ -23,7 +23,7 @@
 - Constructor validation does no I/O or callbacks. Successful factories transfer Application.Close to Node; failed factories release partial resources. Borrowed dependencies remain borrowed. Join engine/replay/callback work before releasing owned resources; failed release retains ownership and blocks successors.
 - Keep callback inputs owned, calls serialized and queues bounded. Overdue callbacks remain owned until return. A callback may inspect status or RequestStop, but must not join teardown that waits for itself. Proposal cancellation cannot undo committed commands.
 - Library enforces authorization and membership safety; replaceable scheduler/lifecycle policies only choose supported decisions. Autoscaling, infrastructure provisioning, cross-group transactions and external side effects belong to applications.
-- Root, examples/cluster and tests/cluster are separate Go modules. Root `make test-unit` and `make lint` cover all three; Docker/process tests are separate. Generated protobuf, immutable fixtures and historical validation records are not evidence of new checks.
+- Root, examples/cluster and tests/cluster are separate Go modules. Root `make test-unit` and `make lint-full` cover all three; Docker/process tests are separate. Generated protobuf, immutable fixtures and historical validation records are not evidence of new checks.
 
 ## Reporting bar
 
