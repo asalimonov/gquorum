@@ -40,3 +40,11 @@ Date: 2026-10-26. Commit: this task commit.
 Added real receipt-path learner forwarding, unknown cancellation/snapshot, native-drop refusal, attribution collision without halting, blocked Apply ownership, metric single-counting and no-runtime-dedup coverage. Public Standalone tests preserve exact logical IDs/runs across restart and verify expired Leadership is invoked once by the safe helper. Existing pressure fixture now verifies saturation is NotSubmitted and accepted canceled calls stay Unknown at a nondefault limit. Known encoded oversize is Invalid on the receipt path and retains legacy private Overloaded classification.
 
 Verified: make test PASS 2,343/2,343 in test-reports/unit/20261026T132830.181322Z-t21a7zww; focused functional/physical/frozen selection PASS 95/95 in test-reports/function/20261026T132707.912371Z-b9e3i9_j. Focused functional race on load and raftengine PASS (including subsequently added encoded-size and scoped-drop receipt assertions); owning vet and pending lint PASS. Frozen/protocol/storage paths have no diff. No cluster execution.
+
+## Task 5 — Authenticated process receipt integration
+
+Date: 2026-10-26. Commit: this task commit.
+
+Registered the fixture-only exact-replica submission route with existing credential protection. It preserves the full returned receipt and library error separately from business rejection. Added three-node follower/learner, business-rejection and concurrent logical-ID cases plus a pure authentication/invalid-group unit. Application fingerprint dedup remains inside the existing caller FSM; no schema or production transport changes.
+
+Verified: make test PASS 2,344/2,344 in test-reports/unit/20261026T133302.966439Z-clcv14j8; pending lint and fixture vet PASS; clustertest compile-only PASS. No Docker executed: the three new process cases are compiled and their runtime gate is explicitly pending penultimate Task 6.

@@ -26,7 +26,8 @@ func clusterRequestTimeout(r *http.Request) time.Duration {
 	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/internal/test/snapshot/") && strings.HasSuffix(r.URL.Path, "/generate") {
 		return 30 * time.Minute
 	}
-	if r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/internal/test/propose/") {
+	if r.Method == "POST" && (strings.HasPrefix(r.URL.Path, "/internal/test/propose/") ||
+		strings.HasPrefix(r.URL.Path, "/internal/test/submission/")) {
 		return time.Minute
 	}
 	return 10 * time.Second
@@ -188,6 +189,7 @@ func (a *application) registerClusterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /internal/test/metrics", protect(func(w http.ResponseWriter, _ *http.Request) {
 		jsonResponse(w, http.StatusOK, a.currentCluster().Metrics())
 	}))
+	a.registerSubmissionRoutes(mux, protect)
 	a.registerRuntimeRoutes(mux, protect)
 	a.registerNodeGenerationRoutes(mux, protect)
 	a.registerRecoveryRoutes(mux, protect)
