@@ -20,6 +20,13 @@ audit finds a code gap requiring cluster revalidation, reopen Task 6, complete
 those runs there, then return to Task 7; do not run cluster tests in the final
 task. This instruction supersedes the original command placement below.
 
+## User documentation scope — 2026-10-26
+
+The user removed feature documentation updates from Tasks 6 and 7. Keep a brief
+changelog as the explicit exception. Preserve validation, final implementation
+and wiring audit, plus accurate plan/progress records. This overrides earlier
+requirements to update README, AGENTS, architecture documents or public comments.
+
 ## Execution contract
 
 The linked target is the design authority. Section references below refer to that
@@ -561,120 +568,94 @@ with owning unit/functional tests.
 §10.1–§10.11 flows, §11.4 process scenarios. These tests use public APIs and do
 not change library constructors or configuration schemas.
 
-- [ ] Rename/rewrite `TestFailureIsolation_DeletionStopProof` as
+- [x] Rename/rewrite `TestFailureIsolation_DeletionStopProof` as
   `TestFailureIsolation_DeletionWithoutFormerHost`. Kill a non-meta-leader former
   host; require approved deletion and operation success while it remains killed.
-- [ ] Preserve exact old identity, retained-volume and missing-stop/retirement/
+- [x] Preserve exact old identity, retained-volume and missing-stop/retirement/
   collection assertions for the unreachable host. Create/use an independent
   group while cleanup is pending, then restart the host and require eventual
   exact cleanup and retired-ID rejection.
-- [ ] Add `TestFailureIsolation_DeletionWithoutLoadQuorum` with three metadata
+- [x] Add `TestFailureIsolation_DeletionWithoutLoadQuorum` with three metadata
   participants alive. Use existing authenticated `SetReadFaults` /
   `ReadFaults{DropRaft:true}` for the selected group and exact process/replica.
   Confirm traffic-drop counters and loss of that group's progress; do not kill
   two metadata voters or break unrelated load groups.
-- [ ] Approve deletion through surviving metadata quorum without restoring the
+- [x] Approve deletion through surviving metadata quorum without restoring the
   selected load quorum. Verify logical success and independent-group progress,
   then release faults and observe exact cleanup.
-- [ ] Add `TestFailureIsolation_DeletionSnapshotCatchup`: hold one host offline
+- [x] Add `TestFailureIsolation_DeletionSnapshotCatchup`: hold one host offline
   across deletion and actual metadata compaction, restart from retained storage,
   prove snapshot catch-up occurred and the retired replica was never published,
   and require eventual physical cleanup.
-- [ ] Do not confuse fixture `Spec.SnapshotThreshold` / `-snapshot-threshold`
+- [x] Do not confuse fixture `Spec.SnapshotThreshold` / `-snapshot-threshold`
   with metadata compaction: those currently configure load snapshots only.
   For deterministic small tests, add the test-only `MetaSnapshotThreshold uint64`
   field to `cluster.Spec` and testapp configuration, an optional
   `-meta-snapshot-threshold` flag defaulting to zero, and pass it to the existing
   public `NodeOptions.Meta.SnapshotThreshold`. Zero retains library defaults;
   no public gquorum setting or storage root is added.
-- [ ] Reuse authenticated metadata-proxy observations or the existing public
+- [x] Reuse authenticated metadata-proxy observations or the existing public
   event/metrics surfaces to establish snapshot catch-up and exact process
   incarnation. If an observation is missing, add only the necessary bounded
   counter to the existing fixture proxy/control response, validate its binding,
   and test it. A sent snapshot or a polling gap alone cannot prove installed
   catch-up or absence of transient publication.
-- [ ] Add `TestFailureIsolation_DeletionDuringReadmission` using existing
+- [x] Add `TestFailureIsolation_DeletionDuringReadmission` using existing
   readmission/effect barriers: hold a partial batch, approve deletion and require
   logical completion with no fabricated host proof, then release and verify
   exact retirement. Preserve stable identity and cleanup assertions.
-- [ ] Ensure every independent case uses `t.Parallel()` and its own pool lease,
+- [x] Ensure every independent case uses `t.Parallel()` and its own pool lease,
   roots, fault controls and cleanup. Use explicit observable barriers rather
   than sleeps as evidence; use three hosts.
-- [ ] Keep controls authenticated, exact to process/replica and registered only
+- [x] Keep controls authenticated, exact to process/replica and registered only
   in the caller fixture. Reuse existing load/meta listeners; no test-only
   mechanism enters the library or the small example.
-- [ ] Compile the process suite and run fixture units/local functional checks.
+- [x] Compile the process suite and run fixture units/local functional checks.
   Defer Docker image build/run to Task 6 after final full lint, avoiding
   intermediate expensive process runs and shared-image replacement.
 
 #### Verification
 
-- [ ] `make test` and `make lint`; vet changed fixture packages through
+- [x] `make test` and `make lint`; vet changed fixture packages through
   `go vet ./testapp` from `tests/cluster` if production fixture files changed.
-- [ ] From `tests/cluster`:
+- [x] From `tests/cluster`:
   `go test -tags=clustertest -run '^$' -exec=true ./...` compiles process tests without
   executing their binaries. The exec wrapper is required because TestMain starts
   the Docker pool even when no test names match.
-- [ ] Run relevant local fixture functional cases if new controls were added:
+- [x] Run relevant local fixture functional cases if new controls were added:
   `go test -tags=functional -run 'ReadFault|Meta|Deletion|Snapshot' -count=1 ./testapp`
   from `tests/cluster`; confirm selected tests exist and report what actually ran.
-- [ ] Check all four public process-case names and controls are ready for Task
+- [x] Check all four public process-case names and controls are ready for Task
   6; no Docker success is claimed from compile-only checks. Commit the checkpoint.
 
-### Task 6: Align architecture and complete penultimate cluster validation
+### Task 6: Complete penultimate cluster validation
 
-**Goal:** document implemented behavior without changing public interfaces or
-claiming physical cleanup from logical success.
+**User scope correction (2026-10-26):** omit feature documentation updates to
+README, AGENTS, architecture documents and public comments. The behavior is
+obvious to external users. Keep a brief changelog as the explicit exception in
+Task 7. Execution records continue to record actual work and verification.
 
-**Files:** `AGENTS.md`, `README.md`, existing public comments in `cluster.go` /
-`cluster_mutations.go` / `topology/progress*.go` as needed;
-`docs/architecture/library.md`, `runtime.md`, `project-map.md`,
-`comparision-with-tikv.md`, `raft.md`. Keep the target as the design source.
+**Goal:** complete full lint and real process verification before the final audit.
 
-**References:** target §1–§4 public contract/diagram, §5.3–§5.6 record meanings,
-§8 physical authority, §9.17 unchanged wiring, §10 failure flows, §12 documentation
-and all agreed exclusions; brainstorm decision section on independent load
-availability.
+**Files:** executable corrections only if verification reveals a concrete defect;
+this plan and its progress record. No feature documentation updates.
 
-- [ ] Replace the current universal all-former-host-stop deletion rule with
-  metadata-only completion for new plans plus retained exact deferred cleanup.
-  Preserve the required-stop interpretation for already-approved legacy plans.
-- [ ] Document that staged intent authorizes nothing, approval permanently
-  retires the ID, and operation success can precede all physical milestones.
-- [ ] Explain `GroupProgress.Deleting=false` at logical completion, nil versioned
-  checkpoint, independent `FullyConverged` and honest `CleanupProgress` fields.
-  Do not overload status fields or add DTO aliases.
-- [ ] Explain the difference between `WaitOperation` and physical revocation/
-  shutdown/collection; preserve actual receipt requirements for `WaitRevoked`
-  and host resource ownership.
-- [ ] Document no-load-quorum deletion, eventual offline return, snapshot-retained
-  tombstones, pending readmission and operator/application quiescence.
-- [ ] State that load serving remains independent of metadata connectivity;
-  this change introduces no lease, per-request metadata round trip or
-  synchronous global cutoff.
-- [ ] Update the TiKV comparison's implemented status, preserving the difference
-  between destructive application-group deletion and Region merge.
-- [ ] Add or refine the concise `TODO(not planned)` comments specified below
-  at relevant existing implementation boundaries. Avoid redundant TODOs,
-  unsupported public stubs or WARN logs for normal expected offline behavior.
-- [ ] Keep existing storage schema/version claims and fixture provenance accurate.
-  Record fresh test evidence only after Task 7; do not rewrite historical runs.
-- [ ] Verify all referenced paths/API names/commands. The known unrelated removed
-  snapshot brainstorm file is not part of this feature; do not rewrite its
-  historical references as a substitute for user-owned work.
+**References:** target §3–§11 contracts, runtime and process verification.
+
+- [ ] Run `make lint-full` before building the current fixture image.
+- [ ] Run `make test-cluster-build`, record image identity, then run focused
+  deletion cluster cases and the complete process suite in this task only.
+- [ ] Fix every failure, run focused owning checks and rerun affected cluster
+  coverage here before the final audit. Rebuild only after an active run finishes.
+- [ ] Record reports and confirm container, volume and worker cleanup.
 
 #### Verification
 
-- [ ] Run final full lint, build the current fixture image, run focused deletion
-  cluster cases and the complete process suite in this penultimate task only.
-  Fix every failure and rerun affected cluster coverage here before final audit.
-  Record reports, image identity, and confirmed container/volume/worker cleanup.
-- [ ] Check local links and API names against the actual source, and run
-  `git diff --check` including any explicitly staged ignored documentation.
-- [ ] Confirm only documentation/comments changed in this task; if executable
-  code is corrected, run its relevant code-task gates before committing.
-- [ ] Commit the documentation checkpoint. Leave the public changelog for the
-  final completed-feature audit.
+- [ ] Full lint, image build, focused deletion process cases and full process
+  suite pass with fresh reports; no compile-only claim substitutes for execution.
+- [ ] Run `git diff --check`; executable corrections receive appropriate unit,
+  functional and vet checks before committing.
+- [ ] Commit this verification checkpoint with the execution records.
 
 ### Task 7: Final validation and architectural delta verification
 
@@ -682,7 +663,7 @@ availability.
 component, close all gaps, validate real operation, and confirm production wiring.
 
 **Files:** full source delta from the implementation baseline, all plan task
-artifacts and tests, current architecture documents, this plan; create
+artifacts and tests, current architecture documents for read-only comparison, this plan; create
 `docs/changelogs/20261026-group-deletion-unreachable-owner.md` only after the
 implemented behavior has been verified.
 
@@ -733,9 +714,9 @@ to duplicate existing equivalent helpers.
   evidence, including missing load quorum, all missing owners, late factory
   success, readmission overlap, independent sibling work and permanently
   unconfirmed physical cleanup.
-- [ ] Verify current docs/public comments and each excluded scenario against
-  target §12 and the exclusions table. Implement no excluded feature merely
-  to resolve a TODO.
+- [ ] Verify excluded scenarios against the target/exclusions table. Per user
+  correction, leave feature documentation/public comments unchanged; write only
+  the brief changelog. Implement no excluded feature merely to resolve a TODO.
 - [ ] Enter every found mismatch in NOT IMPLEMENTED GAPS with target section,
   affected paths and evidence. Fix it under the target/plan, or record an
   explicit user-approved deferral. Mark any unresolved item `[_]` and do not
@@ -890,6 +871,20 @@ During execution record each gap as:
 Do not use an out-of-scope label to hide a required target feature.
 
 ## NOT PLANNED CHANGES
+
+Task 5 implementation adjustments (reviewable in its commit):
+- Added fixture-only hooks_readmission_report.go because existing action/fence
+  barriers cannot hold a locally produced readmission receipt batch across a
+  process restart. The authenticated existing metadata proxy forwards the exact
+  load receipts while withholding the metadata receipt, bound to admission
+  node/member/operation and the first authenticated incarnation. Release forwards
+  the original full batch. No library API, schema or listener was added.
+- Added bounded accepted-snapshot boundary observations to the existing proxy.
+  Process verification also requires the same incarnation's applied index to
+  reach that boundary and zero load factories since restart; a send alone is
+  never counted as installed catch-up.
+- User removed Task 6/7 feature documentation updates, keeping only a brief
+  changelog exception. The validation and final wiring audit remain required.
 
 Task 4 implementation adjustments (reviewable in its commit):
 - cleanup_debt_bench_func_test.go: its functional query regression builds current

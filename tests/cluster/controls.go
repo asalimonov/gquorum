@@ -208,9 +208,11 @@ type FenceFault struct {
 
 // MetaFaultObservation reports meta Raft frame drops for an exact process incarnation.
 type MetaFaultObservation struct {
-	Identity      topology.Identity `json:"identity"`
-	DropRaft      bool              `json:"drop_raft"`
-	FramesDropped uint64            `json:"frames_dropped"`
+	Identity          topology.Identity `json:"identity"`
+	DropRaft          bool              `json:"drop_raft"`
+	FramesDropped     uint64            `json:"frames_dropped"`
+	SnapshotIndex     uint64            `json:"snapshot_index"`
+	SnapshotsAccepted uint64            `json:"snapshots_accepted"`
 }
 
 // MetaFault changes or reads authenticated meta Raft drop controls.

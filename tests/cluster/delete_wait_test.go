@@ -15,7 +15,7 @@ import (
 	docker "github.com/moby/moby/client"
 )
 
-func TestFailureIsolation_DeletionStopProof(t *testing.T) {
+func TestFailureIsolation_DeletionWithoutFormerHost(t *testing.T) {
 	t.Parallel()
 	c := acquire(t, matrixSpec(3)).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 110*time.Second)
@@ -57,25 +57,10 @@ func TestFailureIsolation_DeletionStopProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	operatorID := startApply(ctx, t, c, ingress, staged.Document.Version)
-	if err := Poll(ctx, func() (bool, error) {
-		operator, err := c.Operation(ctx, ingress, operatorID)
-		if err != nil {
-			return false, err
-		}
-		if operator.State.Terminal() {
-			t.Fatalf("deletion finished without unreachable former host: %+v", operator)
-		}
-		for _, block := range operator.Blocks {
-			if block.Blocked != nil && block.Blocked.NodeName == stopped.Spec.Name {
-				return operator.State.Waiting(), nil
-			}
-		}
-		return false, nil
-	}); err != nil {
-		t.Fatal("deletion did not wait for the exact unreachable host", err)
+	if err := c.WaitOperation(ctx, ingress, operatorID); err != nil {
+		t.Fatal("metadata deletion waited for unreachable former host", err)
 	}
-	// A second group's founding must proceed while every exact stop for this
-	// deletion is still required. Host it only on the two available processes.
+	// Independent work continues while the former host retains exact cleanup debt.
 	var survivors []string
 	for _, node := range c.Nodes() {
 		if node.running.Load() {
@@ -123,25 +108,26 @@ func TestFailureIsolation_DeletionStopProof(t *testing.T) {
 	for _, name := range survivors {
 		page, err := c.Progress(ctx, name, topology.ProgressQuery{GroupID: "delete-wait"})
 		debt, found := exactCleanup(page, old)
-		if err != nil || page.FullyConverged.Version != created.Document.Version || page.TargetVersion != independent.Document.Version ||
-			len(page.Groups) != 1 || !page.Groups[0].Deleting || page.Groups[0].Approved != nil ||
-			page.Groups[0].ConvergedVersion != created.Document.Version || page.Groups[0].OperationID != operatorID ||
+		if err != nil || page.TargetVersion != independent.Document.Version ||
+			len(page.Groups) != 1 || page.Groups[0].Deleting || page.Groups[0].Approved != nil ||
+			page.Groups[0].ConvergedVersion != staged.Document.Version || page.Groups[0].OperationID != "" ||
 			!found || debt.StoppedAt != nil || debt.RetiredAt != nil || debt.CollectedAt != nil {
 			t.Fatal("deletion manufactured exact stop or collection proof", name, page, err)
 		}
 		op, err := c.Operation(ctx, name, operatorID)
-		if err != nil || op.State.Terminal() {
-			t.Fatal("later group completion changed pending deletion", op, err)
+		if err != nil || op.State != topology.OperationSucceeded {
+			t.Fatal("later group completion changed logical deletion", op, err)
 		}
 	}
 	if _, err := c.docker.ContainerStatPath(ctx, stopped.Container.GetContainerID(), docker.ContainerStatPathOptions{Path: "/data/load/delete-wait"}); err != nil {
 		t.Fatal("unreachable host lost its retained state before stop acknowledgement", err)
 	}
+	volume := stopped.Volume
 	if err := stopped.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.WaitOperation(ctx, ingress, operatorID); err != nil {
-		t.Fatal(err)
+	if stopped.Volume != volume {
+		t.Fatal("return replaced retained volume")
 	}
 	if err := c.WaitFullyConverged(ctx, independent.Document.Version); err != nil {
 		t.Fatal(err)
@@ -150,8 +136,7 @@ func TestFailureIsolation_DeletionStopProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, node := range c.Nodes() {
-		// Required stops converge the declaration. Physical collection is later
-		// detached work and must be observed separately on each retained volume.
+		// Physical cleanup is observed independently of logical operation success.
 		if err := Poll(ctx, func() (bool, error) {
 			_, err := c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(), docker.ContainerStatPathOptions{Path: "/data/load/delete-wait"})
 			if errdefs.IsNotFound(err) {
@@ -161,6 +146,9 @@ func TestFailureIsolation_DeletionStopProof(t *testing.T) {
 		}); err != nil {
 			t.Fatal("collection did not release former-host state", node.Spec.Name, err)
 		}
+		id := storage.Identity{ClusterID: c.ID, GroupID: "delete-wait", NodeName: node.Spec.Name,
+			ReplicaID: replicaID(created.Document, "delete-wait", node.Spec.Name)}
+		waitDeletionCleanup(ctx, t, c, ingress, id)
 		response, err := c.Request(ctx, node.Spec.Name, "GET", "/api/load/delete-wait/keys/retained", nil, 0)
 		if err := requireStatus(response, err, 503); err != nil {
 			t.Fatal("deleted group still serves", err)

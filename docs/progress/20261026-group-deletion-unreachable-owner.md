@@ -130,3 +130,32 @@ Findings
   refusal result. Corrected it to check Accepted as well; the foreign replica
   target refuses without changing retained evidence.
 - No production correction or public/schema change was needed in this task.
+
+## Task 5 — Three-node process regressions and fixture observations
+Date: 2026-10-26. Previous task commit: 00b6cdd. Commit: this task's commit.
+
+Implemented
+- DeletionWithoutFormerHost requires logical success before restart, exact pending
+  debt, independent traffic, retained volume and eventual physical cleanup.
+- DeletionWithoutLoadQuorum withholds real group Raft traffic while metadata and
+  an independent group remain available; local Stop barriers preserve proof checks.
+- DeletionSnapshotCatchup configures only the existing public metadata snapshot
+  threshold through fixture wiring. It requires an accepted inbound boundary,
+  same-process applied progress, retained disk and zero transient load factories.
+- DeletionDuringReadmission holds the metadata receipt while forwarding load
+  receipts through the authenticated proxy, then verifies logical deletion and
+  exact retirement after release. The singleton control binds exact admission
+  and process incarnation. Existing two library listeners remain unchanged.
+
+Verified
+- make test: 2,364/2,364 PASS (9.749s), unit/20261026T143205.563292Z-x0q2n2e4.
+- Fixture snapshot/readmission-control units passed. Local fixture functional
+  selection ReadFault|Meta|Deletion|Snapshot passed (4.398s).
+- Fixture vet and make lint passed; process suite compiled using clustertest,
+  -run '^$' and -exec=true. No Docker runtime result is claimed in this task.
+- All four process cases are parallel with isolated leases and retained roots.
+
+Scope correction
+- User explicitly removed feature documentation changes from Tasks 6 and 7,
+  then retained a brief changelog as the exception. Plan now records this;
+  full penultimate cluster validation and final implementation audit still apply.
