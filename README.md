@@ -107,7 +107,7 @@ Raft and CRDT libraries, Zookeeper or PostgreSQL:
   and under 1mks for operation on mediocre hardware.
 - **Permanent majority loss:** recover one complete survivor into a fresh cluster,
   then start an ordinary Node on the same roots.
-  See the [recovery lifecycle](docs/architecture/runtime.md#permanent-majority-loss-recovery).
+  See the [recovery lifecycle](docs/architecture/runtime.md#key-public-entities-and-interfaces).
 - **Large load snapshots:** bounded chunked transfers run alongside ordinary Raft on separate connections to the existing load port. Configure `Loads.SnapshotTransfer` at Node creation; the default encoded allowance is 256 MiB, and larger sizes are supported by configuration. Full-buffer application/storage APIs require memory for multiple snapshot-sized buffers. See [transport and resource contracts](transport/loadgrpc/README.md).
 - **Durable recovery:** bbolt-backed metadata, an included etcd WAL backend for
   load groups, full state-machine snapshots, committed-tail replay, compaction

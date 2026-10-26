@@ -487,7 +487,7 @@ Do the breaking source migration as one planned change set. This includes Standa
 | `tests/cluster/testapp/load_transport.go`, `hooks_cluster.go`, `snapshot_controls.go` | Keep fixture business response shapes intentional; derive applied coordinates from receipt instead of status when claiming command position; add receipt controls for new tests |
 | `tests/cluster/testapp/read_func_test.go`, `node_generation_func_test.go` | Result assertions use receipt.Result |
 | Other public call sites in root integration, `tests/recovery`, `tests/cluster/testapp`, optional `tests/sim` | Verify stable IDs and compile against new signatures; ignored receipt remains valid only where error-only behavior is intentional |
-| `README.md`, `docs/architecture/library.md`, `raft.md`, `runtime.md` | Explain managed/Standalone API break, receipt-aware retries, caller deadlines, single publication and retained stopped-handle queue limits |
+| `README.md`, `docs/architecture/raft.md`, `runtime.md` | Brief managed/Standalone receipt API, retry and deadline guidance. The user removed library.md during implementation; keep internal delivery/retention details in this target |
 | `fault/retry.go` comments | Point write callers to Submission.CanResubmit/ProposeRetry; leave generic retry behavior unchanged |
 | `docs/testing/tests.md` or dedicated validation record | Record implemented acceptance coverage and real executions later |
 

@@ -6,11 +6,11 @@
 **Branch:** `feat/receipt-error-contract`
 **Implementation baseline inspected:** `8e57798`
 **Target architecture:** [write receipt contract](../brainstorms/20261026-write-receipt-contract-target.md)
-**Target SHA-256:** `ff0328efd620ecaab34aa730c236acf2ddd6b3eb5b2192ab72be8b9b7fcaf29b`
+**Target SHA-256:** `da3ca3bfd6e5f702738a6794f7b395afaf8021a86a9aa1368cd30ee6354df06f`
 **Full brainstorm log:** [session and final decisions](../brainstorms/20261026-write-receipt-contract.md)
 **Reference comparison:** [etcd, TiKV and PD](../brainstorms/20261026-proposal-retry-reference-comparison.md)
 **Peer review:** [thread 1 and user addenda](../review/feat_receipt-error-contract.md)
-**Status:** execution started. User directs all cluster/Compose execution to penultimate Task 6 and a colleague review of every implementation commit after final verification.
+**Status:** Tasks 1–6 complete; final architecture audit and implementation peer review pending. User directs all cluster/Compose execution to penultimate Task 6 and a colleague review of every implementation commit after final verification.
 
 ## Execution contract
 
@@ -284,19 +284,19 @@ type submissionReply struct {
 **Files:** `README.md`, `docs/architecture/library.md`, `raft.md`, `runtime.md`, `docs/testing/tests.md`, `examples/scheduler/README.md`, `examples/inmemory-cache/README.md`, `tests/cluster/testapp/README.md`, and owning GoDoc comments. No proposal document or new architecture hierarchy.
 **References:** target §1–3 public semantics, §4.3/4.5 publication/retention, §6 deferred integration, §8 migrations, §9 verification; all source statements checked against Tasks 1–5.
 
-- [ ] Explain the one-time breaking API migration for both Node-owned and Standalone groups, required stable RequestID, opaque AttemptID, exact receipt identity and meaningful fields. Show callers consuming both Submission and error; handle business Result.Code only when available.
-- [ ] Document CanResubmit as the library's write retry predicate without adding manual policy helpers to examples. Explain that it does not grant authorization or account for the caller budget; generic fault.Retryable remains useful for non-write transient classification and is insufficient for proposal safety.
-- [ ] Document optional three-attempt refusal-only retry, timing defaults, unchanged caller context/engine cap and configurable-election gap. Do not promise a healthy pending command is resent or that the default spans failover. Explain separate-call uncertainty and application dedup responsibility without an exactly-once claim.
-- [ ] Keep published architecture guidance concise and caller-focused per the user's latest instruction. Describe outcomes, deadlines, stable IDs and terminal scopes; retain detailed publication mechanics, exact queue bounds and deferred cleanup tradeoffs in the implementation target/progress rather than adding a wall of internal detail to external guides.
-- [ ] Keep example documentation brief and user-facing: examples use the safe library helper, return ordinary errors and preserve existing application flow. Do not add per-outcome helper logic or feature tests in examples; library/fixture tests own those guarantees.
-- [ ] Document the authenticated fixture receipt route and new process cases as test-app-only. Keep README meta-only example boundaries and normal two-port library integration intact. Preserve old test reports as historical; do not add pass counts until execution supplies them.
-- [ ] Describe #9/#12 integration requirements and actual coverage honestly; do not claim end-to-end remote receipt authenticity or configured proposal-result size limits exist. Add/retain only the targeted `TODO(not planned)` comments from the exclusion table, no unused methods or WARN logs for normal operation.
+- [x] Explain the one-time breaking API migration for both Node-owned and Standalone groups, required stable RequestID, opaque AttemptID, exact receipt identity and meaningful fields. Show callers consuming both Submission and error; handle business Result.Code only when available.
+- [x] Document CanResubmit as the library's write retry predicate without adding manual policy helpers to examples. Explain that it does not grant authorization or account for the caller budget; generic fault.Retryable remains useful for non-write transient classification and is insufficient for proposal safety.
+- [x] Document optional three-attempt refusal-only retry, timing defaults, unchanged caller context/engine cap and configurable-election gap. Do not promise a healthy pending command is resent or that the default spans failover. Explain separate-call uncertainty and application dedup responsibility without an exactly-once claim.
+- [x] Keep published architecture guidance concise and caller-focused per the user's latest instruction. Describe outcomes, deadlines, stable IDs and terminal scopes; retain detailed publication mechanics, exact queue bounds and deferred cleanup tradeoffs in the implementation target/progress rather than adding a wall of internal detail to external guides.
+- [x] Keep example documentation brief and user-facing: examples use the safe library helper, return ordinary errors and preserve existing application flow. Do not add per-outcome helper logic or feature tests in examples; library/fixture tests own those guarantees.
+- [x] Document the authenticated fixture receipt route and new process cases as test-app-only. Keep README meta-only example boundaries and normal two-port library integration intact. Preserve old test reports as historical; do not add pass counts until execution supplies them.
+- [x] Describe #9/#12 integration requirements and actual coverage honestly; do not claim end-to-end remote receipt authenticity or configured proposal-result size limits exist. Add/retain only the targeted `TODO(not planned)` comments from the exclusion table, no unused methods or WARN logs for normal operation.
 
 #### Verification
 
-- [ ] Verify API names/signatures, relative links, source paths, commands and example snippets against implemented code; run `git diff --check`.
-- [ ] Run final five-module units/race, functionals/race and full lint, then build the dedicated image and execute focused receipt and non-performance cluster suites plus scheduler/cache/meta Compose checks. All cluster execution belongs to this penultimate task only. Inspect reports and cleanup; fix failures and rerun affected checks.
-- [ ] Record final gate results and commit; the public changelog is created in the final audit task.
+- [x] Verify API names/signatures, relative links, source paths, commands and example snippets against implemented code; run `git diff --check`.
+- [x] Run final five-module units/race, functionals/race and full lint, then build the dedicated image and execute focused receipt and non-performance cluster suites plus scheduler/cache/meta Compose checks. All cluster execution belongs to this penultimate task only. Inspect reports and cleanup; fix failures and rerun affected checks.
+- [x] Record final gate results and commit; the public changelog is created in the final audit task.
 
 ### Task 7: Final validation and architectural delta verification
 
@@ -399,7 +399,9 @@ None identified at planning time within the approved core scope. Intentional #9/
 
 ## NOT PLANNED CHANGES
 
-Task 6: `examples/scheduler/executor.go` keeps its existing drain worker alive after transient failures, starting each new pass with a committed-state read. Real Compose failures showed a timed-out uncertain proposal otherwise permanently stops the application replica. This replaces neither receipt semantics nor caller deduplication, adds no helper/tests/options, and never blindly replays a cached proposal. Scheduler writes also use a three-second application call budget to return to reconciliation promptly. Verification through the existing scheduler Compose lifecycle regression remains pending; see progress for reports.
+Task 6: `examples/scheduler/executor.go` keeps its existing drain worker alive after transient failures, starting each new pass with a committed-state read. Real Compose failures showed a timed-out uncertain proposal otherwise permanently stops the application replica. This replaces neither receipt semantics nor caller deduplication, adds no helper/tests/options, and never blindly replays a cached proposal. Scheduler writes also use a three-second application call budget to return to reconciliation promptly. The existing scheduler Compose lifecycle regression passes after this change (112 seconds), along with refreshed scheduler unit/functional race checks and staged lint; see progress for reports.
+
+Task 6 also incorporates the user's background documentation simplification, including removal of `docs/architecture/library.md`. Updated active links to the retained runtime overview and kept the receipt summary in `raft.md`; no replacement long-form guide was created.
 
 ## Progress log
 

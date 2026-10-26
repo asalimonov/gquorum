@@ -11,7 +11,7 @@ the recorded source revision.
 Current contracts supersede the historical Active/global-operator model below:
 Latest/Target intent, independent group/node convergence, Operation/WaitOperation/
 RetryOperation, exact CAS/rebase and detached cleanup. See the
-[current architecture](../architecture/library.md) and
+[current architecture](../architecture/runtime.md) and
 [implementation log](../plans/20261015-failure-isolation-and-operational-api.md#progress-log).
 Metadata store/FSM/envelopes are v4; the independent authority journal is v2.
 Changed older formats refuse unchanged; there is no migration or mixed-version

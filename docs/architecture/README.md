@@ -1,6 +1,6 @@
 # Architecture
 
-Start with the [library API and integration guide](library.md), then use the
+Start with the [runtime overview](runtime.md), then use the
 [Raft model](raft.md), [node lifecycle and recovery](runtime.md), and
 [placement contract](placement.md) for details. See
 [load transport multiplexing](load-transport-multiplexing.md) for how independent
@@ -23,7 +23,7 @@ group has its own log, leader, membership, and application state machine. A
 `*load.Group` handle refers to **one exact local replica**, not the whole
 distributed group. For example, `orders` may have replicas on all three nodes,
 while `node.LoadGroup("orders")` returns only this node's handle. “Load” does
-not mean a CPU or request-load measurement. See [managed load integration](library.md).
+not mean a CPU or request-load measurement. See [managed load integration](runtime.md).
 
 **Replica.** One group's copy on one node, identified by its node name and a
 numeric `ReplicaID` within that group. The same node may host both an `_meta`
@@ -90,13 +90,13 @@ membership workflow. Admission binds node name, numeric member ID, process
 instance, approved topology, and durable local evidence. For example, adding
 `n3` is not merely opening a listener: `n3` must be admitted as an `_meta`
 member before its assigned load replicas can become ready. See
-[construction](library.md) and [startup evidence](runtime.md).
+[construction](runtime.md) and [startup evidence](runtime.md).
 
 **Drain.** An approved topology change that moves load replicas away from a
 node while retaining its `_meta` membership. `Cluster.DrainNode(ctx, "n3", opts)`
 marks `n3` draining and plans safe load movement; normal exclusion follows a
 converged drain. This differs from the `reserved` label, which blocks new load
-identities without moving existing replicas. See [topology administration](library.md).
+identities without moving existing replicas. See [topology administration](runtime.md).
 
 **Readmission.** Replacement of a declared active node after fresh health
 reports it dead. `Cluster.ReadmitNode` allocates fresh meta/load identities and
@@ -152,7 +152,7 @@ cluster lock key. `Cluster.LockHolder(ctx, "jobs/settlement")` returns a local
 observation; `ReadLockHolder` confirms `_meta` quorum and local application
 before returning committed ownership. The returned TTL is configured duration,
 not remaining lease time or proof that the holder process is alive. See
-[sessions and locks](library.md).
+[sessions and locks](runtime.md).
 
 **Leader transfer (`TransferLeader`).** A guarded request to hand a group's
 leadership to another declared, active voter. For example,
@@ -160,7 +160,7 @@ leadership to another declared, active voter. For example,
 and initiates an election; it does not change group membership. The target
 still needs the group's election quorum to become leader, and a timed-out
 caller cannot assume the transfer was undone. See
-[topology administration](library.md) and [Raft elections](raft.md).
+[topology administration](runtime.md) and [Raft elections](raft.md).
 
 ## Architecture
 
@@ -197,5 +197,5 @@ erDiagram
 For example, three Nodes each host one `_meta` replica, while the `orders` load
 group may have one replica on each Node. An operator approved through `_meta`
 can change `orders` membership, but `orders` proposals and reads use the
-`orders` Raft group. See the [library integration guide](library.md) for the
+`orders` Raft group. See the [runtime overview](runtime.md) for the
 public handles and [Raft model](raft.md) for the group boundaries.

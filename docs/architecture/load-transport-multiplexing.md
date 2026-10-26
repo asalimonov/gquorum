@@ -9,7 +9,7 @@ This document describes the current managed load transport and gRPC adapter.
 Custom implementations of `load.Transport` may use another network protocol,
 but must preserve the same identity, authentication and delivery contracts.
 For consensus behavior, see [the Raft model](raft.md); for application wiring,
-see [the library guide](library.md).
+see [the runtime overview](runtime.md).
 
 ## 1. What is shared and what is independent
 

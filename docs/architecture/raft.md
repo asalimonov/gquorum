@@ -2,8 +2,8 @@
 
 How gquorum uses Raft consensus, which state it replicates, and how elections,
 transport, persistence and recovery fit together. This document describes the
-current implementation; the [library guide](library.md) covers public integration
-and the [runtime guide](runtime.md) covers ownership and recovery authorization.
+current implementation; the [runtime overview](runtime.md) introduces the public
+entities, ownership and main flows.
 
 gquorum uses `go.etcd.io/raft/v3` for two kinds of consensus group: one `_meta`
 group for cluster coordination, and independent application groups called
@@ -221,8 +221,12 @@ deadline takes precedence. A definitive local `ErrProposalDropped` gets at most
 one retry on the owned Raft loop, retaining the same correlation and request ID.
 Ambiguous transport outcomes are not automatically retried. Installing a snapshot
 that may subsume a pending result returns unavailable with an indeterminate receipt.
-Public load calls return a receipt: Applied, NotSubmitted or Indeterminate.
-Only proven transient refusals are automatically retried by load.ProposeRetry.
+`Group.Propose` and `Leadership.Propose` return `(load.Submission, error)`,
+including Standalone groups. The receipt reports Applied, NotSubmitted or
+Indeterminate; read `Result` only when `ResultAvailable` is true. Use
+`Submission.CanResubmit(err)` for write retry decisions. `load.ProposeRetry`
+repeats only proven transient refusals, with three attempts by default and
+100 ms–1 s backoff. It adds no attempt deadline and need not span an election.
 A lost reply or canceled wait may remain indeterminate even when the command
 applied. Use a caller deadline for your latency requirements; heartbeats do not
 resolve an uncertain business outcome.

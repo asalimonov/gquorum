@@ -62,7 +62,7 @@ Explain only the most important and high level parts of runtime of the library.
 | --- | --- |
 | Start a node | `Node.Start` → metadata and authority checks → `_meta` founding, join or recovery → `managed.Host` recovers assigned replicas → publish handles. |
 | Change topology | `Cluster` mutation → staged `Latest` (CAS) → `Approve` → immutable plan and grants → `operator` → host/group effects → receipts → per-group convergence. |
-| Write a command | `load.Group.Propose` → engine admission → leader (or forwarded) proposal → durable commit → local `Apply` → result. |
+| Write a command | `load.Group.Propose` → engine admission → leader (or forwarded) proposal → durable commit → local `Apply` → receipt and result. |
 | Read | `Group.Read` / `Cluster.ReadTopology` → ReadIndex → wait for local apply → serialized query. |
 | Repair | `observe` evidence → `RepairPolicy` → scheduler revalidation → CAS approval → normal operator execution. |
 | Retire or readmit | Fence and join the exact owner → application `Retire` → quarantine Raft state → ledger cleanup; readmission installs fresh IDs. |
