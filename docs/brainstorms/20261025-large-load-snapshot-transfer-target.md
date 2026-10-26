@@ -1,7 +1,7 @@
 # Large load-snapshot transfer — target architecture
 
 Date: 2026-10-25. Source baseline: implementation `14a54c2`; current architecture correction `2ba951a`.
-Status: implemented and release-verified on 2026-10-26; explicitly generated qualification passed through 2,000,000,000 encoded bytes. Larger configured sizes remain unmeasured. Design review history is retained below; execution and measured scope are recorded in the [progress log](../progress/20261025-large-load-snapshot-transfer.md).
+Status: initial implementation verified, subsequent P1 decoder/diagnostic corrections implemented and tested on 2026-10-26; independent follow-up review pending; explicitly generated qualification passed through 2,000,000,000 encoded bytes. Larger configured sizes remain unmeasured. Design review history is retained below; execution and measured scope are recorded in the [progress log](../progress/20261025-large-load-snapshot-transfer.md).
 Session record: [brainstorm](20261025-large-load-snapshot-transfer.md).
 
 ## 1. Request, scope and decision record
@@ -1634,3 +1634,13 @@ func sameEpisodePeerIgnoringEngineRun(a, b metrics.ReplicaIdentity) bool {
     return a == b // preserves cluster/group/node/process/replica identity boundaries
 }
 ```
+
+## 14. Post-review P1 corrections (2026-10-26)
+
+The dd10d21 review found two implemented-path gaps against §§3.2/7.4: a growing JSON stream-decoder buffer duplicated complete encoded application data, and sender refusals before reservation/job creation were absent from observations. The user explicitly authorized correcting both. The original qualification and reviews remain pinned historical evidence; correction validation is recorded separately in the progress log.
+
+`internal/raftstate/snapshot_decode.go` decodes the existing envelope directly from its input slice and strictly checks recognized top-level keys over zero-copy spans. The original strict decoder validates the small authority object, including nested unknown fields. Escaped/case-folded keys, duplicate-field semantics, trailing data, schema, identity and authority validation remain compatible. No encoding change or streaming FSM/storage interface is introduced. Differential tests/fuzzing and an allocation gate ensure that a 4 MiB application does not allocate another complete encoded input buffer.
+
+`Status` additionally exposes AdmissionRefused, ErrorSize, ErrorLimit, Refusals and LastRefusedAt. A local refused offer is DeliveryFailed/ReceiverUnknown, with zero DeliveryID, reserved/verified bytes and progress time; its destination contains known group/replica IDs, with node identity unresolved. StartedAt is first retained refusal time and LastRefusedAt is the latest coalesced attempt. Both the existing history and refusal metadata caches are bounded at 256; eviction is diagnostic only. Byte-bound details are also retained on admitted jobs rejected by a remote peer. No payload, owner handle, resolution call or waiter queue is retained for refusal observation.
+
+The private Ports.Events pointer borrows the existing bounded event bus. Publish happens outside the coordinator lock, without I/O or user callbacks. Events use existing RuntimeError records, Code snapshot_<reason>, State send_refused, throttled per exact source run/destination/reason for one minute unless reason changes, plus a node-wide cap of 256 refusal events/minute to bound cache-churn floods. An oversize resident or newly created snapshot produces Code snapshot_size_limit, State local_snapshot_oversize, once on entering that state; it neither rejects local creation nor changes ordinary frame limits. The generic private SnapshotPolicy carries the resolved MaxSnapshotBytes for this warning only. No public event/store/wire encoding changes or extra code TODOs.

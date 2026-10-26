@@ -46,6 +46,13 @@ type Status struct {
 	ReceiverOutcome ReceiverOutcome
 	ReservedBytes   uint64
 	ErrorReason     string
+	// AdmissionRefused distinguishes a local refusal from an issued delivery.
+	// Its key has DeliveryID zero and only the destination's group/replica IDs;
+	// resolving the remote node is deliberately deferred until admission.
+	AdmissionRefused      bool
+	ErrorSize, ErrorLimit uint64
+	Refusals              uint64
+	LastRefusedAt         time.Time
 }
 
 // Query selects bounded local observations. An empty GroupID selects all

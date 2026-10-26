@@ -20,6 +20,7 @@ const readyBatchRecencyWindow = 10 * time.Millisecond
 func (g *Group) run() {
 	defer g.wg.Done()
 	defer g.finishRun()
+	g.warnResidentSnapshotSize()
 	ticker := time.NewTicker(g.opts.Timing.TickInterval)
 	defer ticker.Stop()
 	g.sampleRaftMetrics(time.Now())
@@ -375,6 +376,7 @@ func (g *Group) beginSnapshot(req *request) error {
 	}
 	g.snapshotPublication++
 	job := writeJob{kind: writeSnapshot, snapshot: ss, request: req}
+	g.warnSnapshotSize(uint64(len(ss.Data)))
 	g.pending = &job
 	g.writeC <- job
 	return nil

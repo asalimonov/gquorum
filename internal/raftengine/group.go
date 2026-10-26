@@ -66,6 +66,7 @@ type Group struct {
 	cancelSnapshotEpoch     context.CancelFunc
 	snapshotEpochTerm       uint64
 	snapshotPublication     uint64
+	snapshotSizeWarned      bool
 	snapshotAttemptSequence uint64
 	snapshotReportMu        sync.Mutex
 	snapshotReports         map[uint64]*snapshotReportState

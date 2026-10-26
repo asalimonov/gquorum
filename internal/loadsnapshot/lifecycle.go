@@ -107,6 +107,11 @@ func (c *Coordinator) StopOwner(ctx context.Context, owner OwnerKey) error {
 			delete(c.terminal, key)
 		}
 	}
+	for key := range c.refusals {
+		if key.owner == owner {
+			delete(c.refusals, key)
+		}
+	}
 	c.clearDigestsLocked(owner.RunID)
 	delete(c.digestOwners, owner.RunID)
 	c.mu.Unlock()

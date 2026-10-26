@@ -12,7 +12,10 @@ import (
 
 // SnapshotPolicy supplies managed source deadlines without importing the load
 // transfer mechanism. Zero disables repair observations for legacy owners.
-type SnapshotPolicy struct{ TotalTimeout, ProgressTimeout time.Duration }
+type SnapshotPolicy struct {
+	TotalTimeout, ProgressTimeout time.Duration
+	MaxSnapshotBytes              uint64 // Managed encoded allowance; zero disables size warnings.
+}
 
 func (p SnapshotPolicy) validate() error {
 	if p == (SnapshotPolicy{}) {

@@ -63,17 +63,20 @@ func (c *Coordinator) PrepareSend(owner Owner, offer raftengine.SnapshotOffer) (
 	if err != nil {
 		return nil, err
 	}
-	if ports.ResolvePeer == nil || ports.ValidateOutgoing == nil || ports.RegisterDelivery == nil ||
-		ports.ReportDelivery == nil || ports.ReportSnapshotFailure == nil || ports.NoteSnapshotProgress == nil ||
-		isNilTransport(ports.Transport) {
-		return nil, transferError(snapshot.ReasonUnsupported)
-	}
 	source, err := validateSnapshotOffer(owner, offer)
 	if err != nil {
 		return nil, err
 	}
+	if ports.ResolvePeer == nil || ports.ValidateOutgoing == nil || ports.RegisterDelivery == nil ||
+		ports.ReportDelivery == nil || ports.ReportSnapshotFailure == nil || ports.NoteSnapshotProgress == nil ||
+		isNilTransport(ports.Transport) {
+		err = transferError(snapshot.ReasonUnsupported)
+		c.observeSendRefusal(source.key, offer, err, time.Now())
+		return nil, err
+	}
 	r, err := c.reserve(outgoing, source, uint64(len(offer.Message.Snapshot.Data)))
 	if err != nil {
+		c.observeSendRefusal(source.key, offer, err, time.Now())
 		return nil, err
 	}
 	j := c.newSendJob(source, offer, r)
@@ -339,6 +342,10 @@ func (c *Coordinator) finishSnapshotDelivery(j *snapshotSendJob, ack snapshot.Ac
 	if err != nil {
 		j.status.Delivery = snapshot.DeliveryFailed
 		j.status.ErrorReason = reason
+		var detail *snapshot.TransferError
+		if errors.As(err, &detail) {
+			j.status.ErrorSize, j.status.ErrorLimit = detail.Size, detail.Limit
+		}
 	} else {
 		j.status.Delivery = ack.State
 		if ack.State == snapshot.DeliveryAccepted {

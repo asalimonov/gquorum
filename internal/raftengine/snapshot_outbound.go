@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/fault"
 	"go.etcd.io/raft/v3"
 	"go.etcd.io/raft/v3/raftpb"
@@ -23,6 +24,26 @@ type SnapshotOffer struct {
 type SnapshotAttempt struct {
 	RunID                       string
 	Term, ReplicaID, Generation uint64
+}
+
+// Warn once on entering an oversize state, before a follower needs catch-up.
+// This never rejects local creation or raises the ordinary message limit.
+func (g *Group) warnSnapshotSize(size uint64) {
+	limit := g.opts.SnapshotPolicy.MaxSnapshotBytes
+	oversize := limit > 0 && size > limit
+	if oversize && !g.snapshotSizeWarned {
+		g.emit(events.Event{Type: events.RuntimeError, Code: "snapshot_size_limit", State: "local_snapshot_oversize"})
+	}
+	g.snapshotSizeWarned = oversize
+}
+
+func (g *Group) warnResidentSnapshotSize() {
+	if g.opts.SnapshotPolicy.MaxSnapshotBytes == 0 {
+		return
+	}
+	if resident, err := g.ms.Snapshot(); err == nil {
+		g.warnSnapshotSize(uint64(len(resident.Data)))
+	}
 }
 
 func (g *Group) prepareSnapshotOffer(m raftpb.Message) (SnapshotOffer, error) {

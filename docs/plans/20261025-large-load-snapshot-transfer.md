@@ -5,11 +5,11 @@
 **Project source:** `../..` relative to this plan (repository root `.`)
 **Branch:** `feat/large-snapshots-transfer`
 **Source checkout inspected:** `646e9c1` (implementation baseline `14a54c2`, transport-document correction `2ba951a`, current lint/testing updates in `646e9c1`)
-**Target architecture SHA256:** `51153100bde98a940b612a5f3b4f0e080341381d973ceb5413603c23c049926f` (final target including validated implementation refinements through Task 20)
+**Target architecture SHA256:** `6dc8fdd5c197eaa1bf1ac094d889cd34c0020bf3e3b7452f65aab0d9c7ae9dd4` (including post-review P1 corrections; follow-up review pending)
 **Target architecture:** [20261025-large-load-snapshot-transfer-target.md](../brainstorms/20261025-large-load-snapshot-transfer-target.md)
 **Full brainstorm log:** [20261025-large-load-snapshot-transfer.md](../brainstorms/20261025-large-load-snapshot-transfer.md)
 **Review history:** [feature review thread](../review/feat_large-snapshots-transfer.md)
-**Status:** all 20 tasks complete. Final checks and generated qualification through 2 GB passed; see the execution log and measured cluster-test resource record. Further colleague review remains canceled by user.
+**Status:** original 20 tasks and post-review P1 corrections implemented and tested. Independent correction re-review is pending; prior review/test evidence remains pinned to its respective revision.
 
 ## Execution contract and current-state reconciliation
 
@@ -1132,3 +1132,15 @@ type snapshotEpisode struct {
     Failed bool
 }
 ```
+
+## Post-review corrections — user authorized 2026-10-26
+
+Original Tasks 1–20 remain completed historical checkpoints. Subsequent source reviews at dd10d21 found two P1 gaps; the user requested fixes and continuation. These corrections supersede the earlier no-unresolved-gap claim for dd10d21, without rewriting past validation evidence.
+
+- [x] P1 decoder buffer: decode in-memory application data without a stream-decoder-sized copy; preserve strict/nested/schema/identity/authority behavior. Add differential/fuzz and allocation evidence.
+- [x] P1 refusal visibility: bounded coalesced source refusal status, typed size/limit/time/count, rate-limited events and proactive oversize warning; no pin/permit/resolution/callback on refusal. Preserve remote size details.
+- [x] Add pure bound/coalescing checks, event/race checks and a real process regression proving refusal cause and unrelated-group progress.
+- [x] Complete final unit/vet/lint, functional/race, full cluster and explicitly tagged generated 2 GB qualification; record commands/results and memory/CPU limits.
+- [ ] Commit corrections, request a pinned architecture follow-up, then request Meridian re-evaluation after that first follow-up completes.
+
+Verification-only test correction: delete_wait_test.go now retries only replica_not_ready while probing the same idempotent command after independent operation success. Operation status is not a local serving-observation barrier. The original one-shot probe failed at line 102 under concurrent validation; no deletion, exact stop, durable identity or cleanup assertion was weakened. The correction commit contains the exact diff.

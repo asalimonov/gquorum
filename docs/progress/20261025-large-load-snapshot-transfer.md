@@ -512,3 +512,40 @@ Completion
 - Production configured sizes above 2 GB remain valid but unmeasured. Full-buffer APIs, resident snapshots, serialized local callbacks and resulting RAM requirements remain explicit. Memory-only staging and its one future disk-backend TODO are preserved.
 - No new root Go files, payload/testdata blobs, listener, persisted format change, frozen fixture regeneration, legacy fallback or additional service owner. Earlier failures/interruption were corrected and superseded by the passing final checks above.
 - Task 18 cf6c79f, Task 19 62d0c3f and this Task 20 commit finish this continuation. The user's staged .gitignore change remains excluded and untouched.
+
+## Post-review P1 corrections — implementation and current validation
+
+Date: 2026-10-26. User: “Will you fix it?” for the two P1s, then “Continue.” Source review baseline dd10d21; first architecture and Meridian assessments are recorded in review Threads 4–6. Main-agent fixes are authorized; peer reviews remain analysis-only.
+
+Implemented
+- Slice-based snapshot decoding eliminates the growing whole-envelope Decoder buffer. Standard Unmarshal checks syntax/types and owns decoded application bytes; zero-copy span walking enforces top-level keys and strict authority decoding preserves nested rejection. Differential seeds cover escaped/case-folded/duplicate keys, byte arrays/nulls, nested unknowns and trailing/malformed JSON.
+- Bounded pre-admission refusal history/cache, source run/destination/reason coalescing, actual byte dimensions, count/time and explicit unissued-delivery status. No destination resolution, hashing, native job, payload pin or reservation. Remote errors retain size/limit too. Events use the existing bounded bus with per-route and global caps; creation/run-start warns once for an oversize resident/local snapshot.
+- Pure tests verify 50 repeated refusals, 600-route cache pressure, no callbacks/permits; functional/race checks cover event counts, reason changes/reminders, cache-churn flood caps, remote errors and resident/creation warnings. Added an actual three-node oversize refusal/status/journal test while another group progresses.
+
+Evidence so far
+- Initial focused process suite: 16/16 pass, 81.681s, cluster/20261026T051139.704850Z-i43y0pca/report.md.
+- Full functional race with final decoder: 1,434 pass, 157.356s, function-race/20261026T052526.003054Z-vf_n835n/report.md. Full lint passes. Owning unit-race checks pass.
+- Final differential fuzz pass: 832,908 executions / 15s fuzz interval plus shutdown, no behavioral mismatch. The earlier candidate also passed 701,486 executions. No generated corpus payload was committed.
+- 4 MiB application / 5,593,342-byte envelope allocation gate: roughly 4.21 MB/op, bounded at application bytes + 256 KiB. Previous strict buffered decoder benchmark: 20.98 MB/op. First candidate duplicated a syntax scan and showed a CPU cost; it was revised. Latest comparable benchmark sample: slice 23.23 ms/4,209,634 B/op, previous buffered 22.75 ms/20,981,823 B/op on Apple M4 Pro/Go1.26.5. This proves allocation removal, not a CPU speedup guarantee.
+- An intermediate broad cluster run failed only TestFailureIsolation_DeletionStopProof at its immediate write with replica_not_ready. Corrected the test's readiness race by retrying only that refusal with the same command identity; exact deletion proof assertions stay intact. Final-image full cluster and generated qualification are running separately in sequence; no new passing qualification claim yet.
+
+No P2 hash-waiter, creation-clone or running-replica-view change is included in these two quoted P1 fixes. Those findings remain recorded. Full-buffer RAM requirements and the explicit <=2 GB qualification scope remain unchanged. The user's staged .gitignore is preserved and excluded from all commits.
+
+## Post-review P1 corrections — verified and ready for follow-up review
+
+Date: 2026-10-26. Correction commit: this commit; parent dd10d21. Both requested P1 areas are implemented. Independent re-review remains pending; this record is not a new Meridian sign-off.
+
+Final evidence
+- make test: 2,320 pass / 62 reports / five modules, 10.316s; unit/20261026T053350.506943Z-_we6ad4p/report.md. One earlier concurrent cold-build pass took 50.899s; the final warm-cache run remains lightweight.
+- Owning unit race: raftstate/loadsnapshot/raftengine/managed pass. Full make test-function-race: 1,434 pass, 157.356s; function-race/20261026T052526.003054Z-vf_n835n/report.md. Full lint and final pending-file vet/lint pass.
+- Final differential fuzz: 832,908 executions, no acceptance/state mismatch; earlier candidate 701,486. No failed corpus/testdata file was produced. New strict codec tests cover nested unknown fields, alias keys, duplicate merges, byte-array/null application encodings and trailing/malformed input.
+- Allocation gate passes for generated 4 MiB application/5,593,342-byte envelope. Isolated benchmark repeat: slice 4,209,405–4,209,490 B/op and 17.54–18.12ms, buffered 20,981,805–20,981,835 B/op and 17.46–18.59ms. About 80% fewer allocated bytes per decode; no CPU speedup or overall RSS reduction asserted.
+- Final full ordinary cluster: 123 pass, 202.439s; cluster/20261026T053118.067136Z-1t1siqzj/report.md. Final explicit 256M/1B/2B generated ladder: 4 reported parent/subcases pass, 92.046s; cluster/20261026T053440.558197Z-nmspls08/report.md. Fresh image snapshot-review-p1-r2-20261026, sha256:7387ad063385e8738845493883a9df22db5d8f2fcff69eb464197014248f54bf.
+- After the test-only readiness correction, focused TestFailureIsolation_DeletionStopProof passes, 13.621s; cluster/20261026T053648.611916Z-97_77ly1/report.md. That corrected probe retries only replica_not_ready with the original idempotent command; original exact stop/deletion/cleanup assertions remain.
+- New qualification: 2 GB sampled peak heap 11,529,869,736 / RSS 13,557,772,288 bytes, 1 MiB chunks/window peak six, full size reservations both directions returned to zero, ordinary traffic 2.56ms, verified tail/new writes/restart. The complete refreshed table and caveats are in tests/cluster/README.md. Per-decode allocation fell; whole-process measured RSS remains about 13.6 GB because other buffers and GC dominate. Sizes above 2 GB remain unmeasured.
+- Final Docker process list is empty; cleanup verified through the pool. No new root Go file, blob, protocol/store format change, regenerated frozen fixture or extra disk-backend TODO. Unrelated staged .gitignore remains untouched.
+
+Scope and review
+- Decoder and refusal P1s are corrected; prior dd10d21 source-review verdicts remain historical and are not rewritten as approvals of this commit. Updated target describes these corrections and the plan pins its hash.
+- P2 hash-owner cancellation, pre-existing local creation/startup clones and unpublished-replica stream churn are recorded separate follow-ups, unchanged by the two quoted P1 fixes. Full-buffer resource/provisioning and same-process resume choices remain intact.
+- Request a new architecture review of this pinned correction commit, then pass that completed result to the Meridian reviewer for readiness reconsideration, as the user requested sequential reviews.

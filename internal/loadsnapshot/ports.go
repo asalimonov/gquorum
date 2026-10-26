@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/internal/raftengine"
 	"github.com/asalimonov/gquorum/internal/raftstate"
 	"github.com/asalimonov/gquorum/load"
@@ -40,4 +41,5 @@ type Ports struct {
 	ReportSnapshotFailure func(Owner, raftengine.SnapshotAttempt, error)
 	NoteSnapshotProgress  func(Owner, raftengine.SnapshotAttempt, metrics.SnapshotCatchUp)
 	Transport             snapshot.Transport
+	Events                *events.Bus // Borrowed, bounded asynchronous publication only.
 }

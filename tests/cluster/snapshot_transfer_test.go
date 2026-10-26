@@ -5,10 +5,12 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/asalimonov/gquorum"
+	"github.com/asalimonov/gquorum/events"
 	"github.com/asalimonov/gquorum/load/snapshot"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -24,6 +26,87 @@ type snapshotProcessControl struct {
 	DropFinalAck     bool              `json:"drop_final_ack"`
 	FailRestoreCount uint64            `json:"fail_restore_count"`
 }
+
+func TestSnapshotTransfer_LocalOversizeRefusalIsObservable(t *testing.T) {
+	t.Parallel()
+	spec := matrixSpec(3)
+	spec.SnapshotTransfer = snapshot.Options{MaxSnapshotBytes: 8 << 10}
+	ctx, c, _ := snapshotProcessSetup(t, spec)
+	source, err := c.Local(ctx, "node1", "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := c.Local(ctx, "node3", "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = c.SetReadFaults(ctx, "node3", "work", target.ReplicaID, "PUT", ReadFaults{Identity: target.Identity, DropAppend: true}); err != nil {
+		t.Fatal(err)
+	}
+	// Ordinary application state can exceed transfer policy. Local snapshot
+	// creation remains supported; the refusal belongs to sending it, not Apply.
+	if err = c.Put(ctx, "node1", "work", "large", "oversize-state", strings.Repeat("x", 32<<10)); err != nil {
+		t.Fatal(err)
+	}
+	if err = c.Snapshot(ctx, "node1", "work"); err != nil {
+		t.Fatal("local snapshot was incorrectly rejected", err)
+	}
+	if err = c.Put(ctx, "node1", "work", "tail", "oversize-tail", "committed"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = c.SetReadFaults(ctx, "node3", "work", target.ReplicaID, "DELETE", ReadFaults{Identity: target.Identity}); err != nil {
+		t.Fatal(err)
+	}
+	if err = Poll(ctx, func() (bool, error) {
+		view, err := snapshotProcessView(ctx, c, "node1", "work", source.ReplicaID)
+		if err != nil {
+			return false, err
+		}
+		for _, row := range view.Transfers.Items {
+			if row.AdmissionRefused && row.ErrorReason == snapshot.ReasonSizeLimit && row.Key.To.Replica.ReplicaID == target.ReplicaID {
+				if row.ErrorSize <= 8<<10 || row.ErrorLimit != 8<<10 || row.Refusals == 0 || row.LastRefusedAt.IsZero() || row.Key.DeliveryID != 0 || row.ReservedBytes != 0 || view.Transfers.SendBytes != 0 || view.Transfers.Outgoing != 0 {
+					return false, fmt.Errorf("invalid local refusal: %+v", row)
+				}
+				return true, nil
+			}
+		}
+		return false, nil
+	}); err != nil {
+		t.Fatal("source refusal not observable", err)
+	}
+	if err = Poll(ctx, func() (bool, error) {
+		response, err := c.Request(ctx, "node1", "GET", "/api/events?group=work&type="+string(events.RuntimeError), nil, 0)
+		if err = requireStatus(response, err, 200); err != nil {
+			return false, err
+		}
+		var page struct {
+			Events []events.Event `json:"events"`
+		}
+		if err = response.Decode(&page); err != nil {
+			return false, err
+		}
+		warning, refused := false, false
+		for _, event := range page.Events {
+			if event.Code == "snapshot_size_limit" {
+				warning = warning || event.State == "local_snapshot_oversize"
+				refused = refused || event.State == "send_refused"
+			}
+		}
+		return warning && refused, nil
+	}); err != nil {
+		t.Fatal("allowance warning/refusal events missing", err)
+	}
+	if _, err = c.CreateGroup(ctx, "node1", gquorum.GroupSpec{ID: "traffic", Placement: &topology.PlacementRule{MinReplicas: 3, MaxReplicas: 3}}); err != nil {
+		t.Fatal(err)
+	}
+	if err = c.Put(ctx, "node1", "traffic", "live", "refusal-isolation", "progress"); err != nil {
+		t.Fatal(err)
+	}
+	if err = c.WaitValue(ctx, "node3", "traffic", "live", "progress"); err != nil {
+		t.Fatal("refusal blocked unrelated group", err)
+	}
+}
+
 type snapshotProcessObservation struct {
 	Wire struct {
 		Frames     uint64 `json:"frames"`

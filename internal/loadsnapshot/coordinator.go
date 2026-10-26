@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"sync"
+	"time"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load/snapshot"
@@ -29,6 +30,10 @@ type Coordinator struct {
 	ownerWorkers map[OwnerKey]int
 	fencedOwners map[OwnerKey]struct{}
 	historyIDs   []uint64
+	refusals     map[snapshotRefusalKey]snapshotRefusal
+
+	refusalEventWindow time.Time
+	refusalEventCount  int
 
 	options                      snapshot.Options
 	ports                        Ports
@@ -118,6 +123,7 @@ func (c *Coordinator) Stop(ctx context.Context) error {
 	clear(c.digests)
 	clear(c.digestOrder)
 	clear(c.digestOwners)
+	clear(c.refusals)
 	c.ports = Ports{}
 	c.ctx = nil
 	c.cancel = nil

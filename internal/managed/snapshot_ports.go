@@ -73,7 +73,7 @@ func (h *Host) snapshotPorts() loadsnapshot.Ports {
 	return loadsnapshot.Ports{Authorize: h.authorizeSnapshot, ResolvePeer: h.resolveSnapshotPeer,
 		ValidateOutgoing: h.validateOutgoingSnapshot, RegisterDelivery: h.registerSnapshotDelivery,
 		ReportDelivery: h.reportSnapshotDelivery, ReportSnapshotFailure: h.reportSnapshotFailure,
-		NoteSnapshotProgress: h.noteSnapshotProgress, Transport: transport}
+		NoteSnapshotProgress: h.noteSnapshotProgress, Transport: transport, Events: h.cfg.Events}
 }
 func (h *Host) snapshotOwnerLocked(slot *replica) (*managedSnapshotOwner, error) {
 	if !h.started || h.quiescing || h.stopped || h.ctx.Err() != nil {

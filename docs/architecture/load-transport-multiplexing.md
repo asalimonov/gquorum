@@ -212,7 +212,7 @@ per-delivery refusal.
 
 Stream refusals are reported through `Node.ReportLoadDelivery` as unreachable
 deliveries. A broken stream reports its last delivery unreachable so Raft can
-resend. Delivery reports retain exact endpoints and delivery IDs; stale reports cannot affect replacements. Managed snapshot jobs own native reporting, independently of ordinary delivery-window expiry. A successful terminal Ack means native ingress accepted ownership, not that persistence or Restore finished. `not_needed` is an owner-confirmed native skip. The bounded local `LoadSnapshots().List` observation separates delivery state from receiver installed/skipped/failed outcomes.
+resend. Delivery reports retain exact endpoints and delivery IDs; stale reports cannot affect replacements. Managed snapshot jobs own native reporting, independently of ordinary delivery-window expiry. A successful terminal Ack means native ingress accepted ownership, not that persistence or Restore finished. `not_needed` is an owner-confirmed native skip. The bounded local `LoadSnapshots().List` observation separates delivery state from receiver installed/skipped/failed outcomes. It also includes coalesced local admission refusals with explicit unissued-delivery markers, byte-bound details, counts and timestamps; they never consume a transfer permit.
 
 The adapter defaults to 64 cached connections, 128 concurrent incoming/outgoing
 operations, 16 MiB `MaxMessageBytes` per protobuf request or reply, and a
