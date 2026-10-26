@@ -642,20 +642,20 @@ this plan and its progress record. No feature documentation updates.
 
 **References:** target §3–§11 contracts, runtime and process verification.
 
-- [ ] Run `make lint-full` before building the current fixture image.
-- [ ] Run `make test-cluster-build`, record image identity, then run focused
+- [x] Run `make lint-full` before building the current fixture image.
+- [x] Run `make test-cluster-build`, record image identity, then run focused
   deletion cluster cases and the complete process suite in this task only.
-- [ ] Fix every failure, run focused owning checks and rerun affected cluster
+- [x] Fix every failure, run focused owning checks and rerun affected cluster
   coverage here before the final audit. Rebuild only after an active run finishes.
-- [ ] Record reports and confirm container, volume and worker cleanup.
+- [x] Record reports and confirm container, volume and worker cleanup.
 
 #### Verification
 
-- [ ] Full lint, image build, focused deletion process cases and full process
+- [x] Full lint, image build, focused deletion process cases and full process
   suite pass with fresh reports; no compile-only claim substitutes for execution.
-- [ ] Run `git diff --check`; executable corrections receive appropriate unit,
+- [x] Run `git diff --check`; executable corrections receive appropriate unit,
   functional and vet checks before committing.
-- [ ] Commit this verification checkpoint with the execution records.
+- [x] Commit this verification checkpoint with the execution records.
 
 ### Task 7: Final validation and architectural delta verification
 
@@ -871,6 +871,24 @@ During execution record each gap as:
 Do not use an out-of-scope label to hide a required target feature.
 
 ## NOT PLANNED CHANGES
+
+Task 6 implementation adjustments (reviewable in its commit):
+- scoped_revocation_scope.go and scoped_approval_retirement.go: index exact
+  cleanup/action bindings once instead of scanning all debt per new deletion
+  action. The same authorization predicates and historical replay results hold.
+- Deletion process fixtures now explicitly enable immediate retention when they
+  assert CollectedAt; default retention intentionally leaves retired storage.
+- failure_replay_test.go and authority_host_test.go now use required same-host
+  replacement stops for failed-attempt retry/revocation coverage. Whole deletion
+  cannot supply a failed required stop under the new semantics. Original CAS,
+  immutable retry, exact fence and successor-preservation assertions remain.
+- execution_test.go now checks successful logical deletion with refused physical
+  cleanup, exact data retention, automatic retry after process return, and an
+  unchanged state-file digest in quarantine. No new operation is needed to retry
+  cleanup. resources_test.go waits for physical retirement after engine release.
+- authority_quorum_test.go waits for a successful exact read after restoring
+  connectivity; a confirmed fence alone does not prove follower read readiness.
+  Initial full-suite evidence exposed a transient unavailable response.
 
 Task 5 implementation adjustments (reviewable in its commit):
 - Added fixture-only hooks_readmission_report.go because existing action/fence

@@ -17,7 +17,9 @@ import (
 
 func TestFailureIsolation_DeletionWithoutFormerHost(t *testing.T) {
 	t.Parallel()
-	c := acquire(t, matrixSpec(3)).Cluster
+	spec := matrixSpec(3)
+	spec.Retention = time.Nanosecond
+	c := acquire(t, spec).Cluster
 	ctx, cancel := context.WithTimeout(t.Context(), 110*time.Second)
 	defer cancel()
 	created, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "delete-wait"})

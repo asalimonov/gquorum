@@ -23,37 +23,38 @@ func (c planningCollector) validateNewRetirement(input topology.PlanInput,
 			hosted[key.group] = true
 		}
 	}
+	allowedStops := c.retainedStopBindings(desired, semantics)
 	for _, step := range plan.Steps {
 		owner := c.owners[planningReplicaKey{step.GroupID, step.ReplicaID}]
+		reusable := owner != nil && owner.progress == topology.RetainedCleanup &&
+			step.Kind == topology.StepStopReplica &&
+			allowedStops[planningReplicaKey{step.GroupID, step.ReplicaID}] == step.NodeName
 		if step.Kind == topology.StepDeleteGroupState && !hosted[step.GroupID] ||
-			owner != nil && duplicateRetirement(*owner, desired.Group(step.GroupID), step, semantics) &&
-				!c.retainedStopAllowed(*owner, desired.Group(step.GroupID), step, semantics) {
+			owner != nil && !reusable && duplicateRetirement(*owner, desired.Group(step.GroupID), step, semantics) {
 			return fault.New(fault.OperationAuthorization, "retirement already belongs to retained cleanup", nil)
 		}
 	}
 	return nil
 }
 
-func (c planningCollector) retainedStopAllowed(owner planningReplica, desired *topology.Group,
-	step topology.Step, semantics DeletionSemantics) bool {
-	return owner.progress == topology.RetainedCleanup && (c.detachingRequiredStop(step) ||
-		semantics == DeletionSemanticsDetached && desired == nil && c.reusingDetachedStop(step))
-}
-
-// PlanInput describes possible host overlap, not an action's binding. If its
-// conservative handover Stop is already detached, keep the original debt action;
-// the extra planned step has no independent cleanup grant or dispatch authority.
-func (c planningCollector) reusingDetachedStop(step topology.Step) bool {
-	if step.Kind != topology.StepStopReplica {
-		return false
-	}
+// PlanInput can conservatively include a handover Stop that is already detached.
+// Index exact reusable bindings once; the original debt retains dispatch authority.
+func (c planningCollector) retainedStopBindings(desired topology.Document,
+	semantics DeletionSemantics) map[planningReplicaKey]string {
+	allowed := make(map[planningReplicaKey]string)
 	for _, debt := range c.evidence.cleanup {
-		if debt.Identity.GroupID == step.GroupID && debt.Identity.NodeName == step.NodeName &&
-			debt.Identity.ReplicaID == step.ReplicaID && debt.Stopped == nil && debt.StopAction != nil {
-			return detachedCleanupStop(c.evidence.operations[debt.StopAction.OperationID], debt.StopAction)
+		if debt.Stopped != nil || debt.StopAction == nil {
+			continue
+		}
+		bound := c.evidence.operations[debt.StopAction.OperationID]
+		reusable := requiredCleanupStop(bound, *debt.StopAction) ||
+			semantics == DeletionSemanticsDetached && desired.Group(debt.Identity.GroupID) == nil &&
+				detachedCleanupStop(bound, debt.StopAction)
+		if reusable {
+			allowed[planningReplicaKey{debt.Identity.GroupID, debt.Identity.ReplicaID}] = debt.Identity.NodeName
 		}
 	}
-	return false
+	return allowed
 }
 
 func validateDeletionPartition(desired topology.Document, plan topology.Plan, semantics DeletionSemantics) error {
@@ -66,21 +67,6 @@ func validateDeletionPartition(desired topology.Document, plan topology.Plan, se
 		}
 	}
 	return nil
-}
-
-func (c planningCollector) detachingRequiredStop(step topology.Step) bool {
-	if step.Kind != topology.StepStopReplica {
-		return false
-	}
-	for _, debt := range c.evidence.cleanup {
-		if debt.Identity.GroupID != step.GroupID || debt.Identity.NodeName != step.NodeName ||
-			debt.Identity.ReplicaID != step.ReplicaID || debt.Stopped != nil || debt.StopAction == nil {
-			continue
-		}
-		bound := c.evidence.operations[topology.OperationID(debt.StopAction.OperationID)]
-		return requiredCleanupStop(bound, *debt.StopAction)
-	}
-	return false
 }
 
 func (c planningCollector) markConvergedOwners(groups map[string]topology.GroupProgress) {

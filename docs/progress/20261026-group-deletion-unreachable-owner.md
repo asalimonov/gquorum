@@ -159,3 +159,45 @@ Scope correction
 - User explicitly removed feature documentation changes from Tasks 6 and 7,
   then retained a brief changelog as the exception. Plan now records this;
   full penultimate cluster validation and final implementation audit still apply.
+
+## Task 6 — Validation attempts (in progress)
+Date: 2026-10-26. Previous task commit: 1ac9b61.
+
+- make lint-full passed across all modules/tags before Docker execution.
+- First focused process run (cluster/20261026T143522.875011Z-0os5n32h)
+  reached logical completion in all four cases, then timed out on CollectedAt:
+  the fixture retention default disables physical collection. Explicit immediate
+  retention fixed the setup; all four passed in 14.366s in
+  cluster/20261026T143808.226698Z-8x0mu2ph.
+- First full process suite (cluster/20261026T143848.780208Z-xsy043rz)
+  passed 121/126. Three fixtures expected deletion stop refusal to fail its
+  operation; adapted required retry/fence scenarios to replica replacement and
+  deletion refusal to honest asynchronous debt. Resource teardown now waits for
+  physical retirement; restored-quorum read assertion retries transient readiness.
+- All five failures passed their focused rerun (61.008s),
+  cluster/20261026T144849.790855Z-iqh1zdkx.
+- Indexed exact deletion action/debt bindings in revocation and inherited-stop
+  validation to remove repeated full-debt scans. Metadata units, vet and pending
+  lint pass; historical captured replay snapshots remain byte-identical.
+- Final rebuilt image for the second full run:
+  sha256:dc7b3cb5b64b2f457518654bb2de6ecfd64a958a170827165edc79f61dca4418.
+  Full suite is running in cluster/20261026T145139.617382Z-7uv1hte3.
+- No README, AGENTS, architecture document or public API comment was updated,
+  following the user's documentation scope correction.
+
+## Task 6 — Penultimate cluster validation complete
+Date: 2026-10-26. Commit: this task's commit.
+
+- Final full cluster run: 126/126 PASS, 198.906s,
+  cluster/20261026T145139.617382Z-7uv1hte3/report.md.
+- Final image: sha256:dc7b3cb5b64b2f457518654bb2de6ecfd64a958a170827165edc79f61dca4418.
+  No shared image was replaced during an active run.
+- All four deletion scenarios and all five initially failing cases passed again
+  within that full run, including exact state-file preservation in quarantine.
+- Unit suite after final production changes: 2,364/2,364 PASS (13.185s),
+  unit/20261026T145140.799701Z-_ik3qrum/report.md.
+- Metadata package unit/vet and targeted service/operator functional regressions
+  passed. Full lint passed before Docker; pending lint passed after corrections.
+- Docker queries for label gquorum.test.run returned no containers, volumes or
+  networks after completion; no cluster.test/go cluster test workers remained.
+- git diff --check passed. No product documentation was changed.

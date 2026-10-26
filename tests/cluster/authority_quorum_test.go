@@ -170,8 +170,16 @@ func TestAuthorityGroupRevocationRemainsPendingWithoutLoadQuorumThreeNodes(t *te
 	// membership_unproven diagnostic. Assert the safety state after fresh
 	// quorum reads, rather than requiring that historical reason to persist.
 	for _, node := range c.Nodes() {
-		value, err := c.Read(ctx, node.Spec.Name, "work", "key")
-		requireReadValue(t, value, err, node.Spec.Name, "before")
+		if err := Poll(ctx, func() (bool, error) {
+			value, err := c.Read(ctx, node.Spec.Name, "work", "key")
+			if err != nil {
+				return false, err
+			}
+			requireReadValue(t, value, nil, node.Spec.Name, "before")
+			return true, nil
+		}); err != nil {
+			t.Fatal("restored follower did not regain read quorum", err)
+		}
 		status, err := c.Operation(ctx, node.Spec.Name, newOp)
 		block, found := operationBlock(status, "work")
 		if err != nil || !found || block.State.Terminal() || block.TotalSteps != 0 || block.Blocked == nil {

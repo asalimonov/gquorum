@@ -36,7 +36,13 @@ func waitDeletionCleanup(ctx context.Context, t *testing.T, c *Cluster, node str
 	if err := Poll(ctx, func() (bool, error) {
 		page, err := c.Progress(ctx, node, topology.ProgressQuery{GroupID: id.GroupID})
 		debt, found := exactCleanup(page, id)
-		return found && debt.StoppedAt != nil && debt.RetiredAt != nil && debt.CollectedAt != nil, err
+		if err != nil {
+			return false, err
+		}
+		if !found || debt.StoppedAt == nil || debt.RetiredAt == nil || debt.CollectedAt == nil {
+			return false, fmt.Errorf("cleanup found=%t progress=%+v", found, debt)
+		}
+		return true, nil
 	}); err != nil {
 		t.Fatal("exact physical cleanup did not complete", id, err)
 	}
@@ -44,7 +50,9 @@ func waitDeletionCleanup(ctx context.Context, t *testing.T, c *Cluster, node str
 
 func TestFailureIsolation_DeletionWithoutLoadQuorum(t *testing.T) {
 	t.Parallel()
-	ctx, c, doc := readProcessCluster(t, "node1")
+	spec := matrixSpec(3)
+	spec.Retention = time.Nanosecond
+	ctx, c, doc := readProcessClusterSpec(t, "node1", spec)
 	independent, err := c.CreateGroup(ctx, "node2", gquorum.GroupSpec{ID: "independent"})
 	if err != nil {
 		t.Fatal(err)
@@ -108,6 +116,7 @@ func TestFailureIsolation_DeletionSnapshotCatchup(t *testing.T) {
 	t.Parallel()
 	spec := matrixSpec(3)
 	spec.MetaFaultProxy = true
+	spec.Retention = time.Nanosecond
 	spec.MetaSnapshotThreshold = 8
 	ctx, c, doc := readProcessClusterSpec(t, "node1", spec)
 	if err := transferMeta(ctx, c, "node1", "node1", doc.MemberID("node1")); err != nil {
@@ -171,6 +180,13 @@ func TestFailureIsolation_DeletionSnapshotCatchup(t *testing.T) {
 	if err != nil || response.Decode(&refusal) != nil || refusal.Code != "group_retired" {
 		t.Fatal("retired ID did not refuse exact restart", response, err)
 	}
+	response, err = c.Request(ctx, "node1", "POST", "/api/groups", map[string]any{
+		"group": gquorum.GroupSpec{ID: "work"}, "mutation": gquorum.MutationOptions{Actor: "reuse-check"},
+	}, latest.Version)
+	refusal.Code = ""
+	if err != nil || response.Decode(&refusal) != nil || refusal.Code != "group_retired" {
+		t.Fatal("deleted group ID became reusable after snapshot", response, err)
+	}
 }
 
 type deletionReadmissionReport struct {
@@ -186,6 +202,7 @@ func TestFailureIsolation_DeletionDuringReadmission(t *testing.T) {
 	t.Parallel()
 	spec := matrixSpec(3)
 	spec.MetaFaultProxy = true
+	spec.Retention = time.Nanosecond
 	ctx, c, doc := readProcessClusterSpec(t, "node1", spec)
 	if err := transferMeta(ctx, c, "node1", "node1", doc.MemberID("node1")); err != nil {
 		t.Fatal(err)
@@ -254,7 +271,15 @@ func TestFailureIsolation_DeletionDuringReadmission(t *testing.T) {
 		}
 	}
 	waitDeletionCleanup(ctx, t, c, "node1", id)
-	if err = c.WaitOperation(ctx, "node1", rotated.OperationID); err != nil {
+	if err = Poll(ctx, func() (bool, error) {
+		op, err := c.Operation(ctx, "node1", rotated.OperationID)
+		for _, block := range op.Blocks {
+			if block.GroupID == topology.MetaGroupID {
+				return block.State == topology.OperationSucceeded, err
+			}
+		}
+		return false, err
+	}); err != nil {
 		t.Fatal("deletion blocked independent metadata readmission", err)
 	}
 	if victim.Volume != volume || deleted.Document.MemberID("node3") != rotated.Document.MemberID("node3") {

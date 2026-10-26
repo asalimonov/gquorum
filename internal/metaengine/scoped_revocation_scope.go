@@ -29,9 +29,11 @@ func (s *scopedState) successorResources(operation *topology.Operation,
 	if operation == nil {
 		return resources
 	}
+	if semantics == DeletionSemanticsDetached {
+		s.deletionSuccessorResources(operation, resources)
+	}
 	for _, step := range s.successorSteps(operation) {
 		if semantics == DeletionSemanticsDetached && s.Target.Group(step.GroupID) == nil {
-			s.deletionSuccessorResources(operation, step, resources)
 			continue
 		}
 		resource := topology.AuthorityResource{GroupID: step.GroupID, NodeName: step.NodeName}
@@ -60,11 +62,17 @@ func (s *scopedState) successorResources(operation *topology.Operation,
 // Logical deletion inherits existing cleanup rather than claiming every former
 // host anew. In particular, an unused conservative Stop cannot fence a still-
 // bound readmission batch which owns that host's real retirement.
-func (s *scopedState) deletionSuccessorResources(operation *topology.Operation, step topology.Step,
+func (s *scopedState) deletionSuccessorResources(operation *topology.Operation,
 	resources map[topology.AuthorityResource]bool) {
-	action := scopedPlanAction(operation, step)
+	actions := make(map[topology.AuthorizedStep]bool)
+	for _, step := range s.successorSteps(operation) {
+		if s.Target.Group(step.GroupID) == nil {
+			actions[scopedPlanAction(operation, step)] = true
+		}
+	}
 	for _, debt := range s.Cleanup {
-		if exactCleanupBinding(&debt, action) {
+		if debt.StopAction != nil && actions[*debt.StopAction] ||
+			debt.RetireAction != nil && actions[*debt.RetireAction] {
 			resources[topology.AuthorityResource{Kind: topology.AuthorityHost,
 				GroupID: debt.Identity.GroupID, NodeName: debt.Identity.NodeName}] = true
 		}

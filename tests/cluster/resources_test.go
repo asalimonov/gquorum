@@ -197,7 +197,14 @@ func fifteenGroupResources(t *testing.T, size int) {
 			t.Fatal("scale teardown changed meta or retained a group", doc, err)
 		}
 		for _, group := range document.LoadGroups() {
-			if _, err := c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(), docker.ContainerStatPathOptions{Path: "/data/load/" + group.ID}); !errdefs.IsNotFound(err) {
+			if err := Poll(ctx, func() (bool, error) {
+				_, err := c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(),
+					docker.ContainerStatPathOptions{Path: "/data/load/" + group.ID})
+				if errdefs.IsNotFound(err) {
+					return true, nil
+				}
+				return false, err
+			}); err != nil {
 				t.Fatal("teardown retained usable store", node.Spec.Name, group.ID, err)
 			}
 		}

@@ -3,12 +3,12 @@
 package cluster
 
 import (
+	"archive/tar"
 	"context"
 	"crypto/sha256"
 	"fmt"
 	"github.com/asalimonov/gquorum"
 	"io"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -202,9 +202,8 @@ func TestCallerRefusedDeletionRetainsDataThreeNodes(t *testing.T) {
 	callerRefusedDeletion(t, 3)
 }
 
-// Port of the source non-empty deletion refusal. Application occupancy belongs
-// to the caller: refuse the first destructive callback, persist its failure,
-// and retry the same desired version under a fresh authorized attempt.
+// Callback refusal retains exact physical debt after logical deletion. Cleanup
+// retries automatically under its original approval, including after restart.
 func callerRefusedDeletion(t *testing.T, size int) {
 	t.Helper()
 	ctx, c := performanceClusterSpec(t, matrixSpec(size))
@@ -267,75 +266,43 @@ func callerRefusedDeletion(t *testing.T, size int) {
 		}
 		return result.ID
 	}
-	failedID := approve()
-	var failed topology.OperationStatus
-	if err := Poll(ctx, func() (bool, error) {
-		var err error
-		failed, err = c.Operation(ctx, "node2", failedID)
-		return failed.State.Terminal(), err
-	}); err != nil {
+	operation := approve()
+	if err := c.WaitOperation(ctx, "node2", operation); err != nil {
 		t.Fatal(err)
 	}
-	block, found := operationBlock(failed, "occupied")
-	if failed.State != topology.OperationFailed || failed.Attempt != 1 || failed.Version != deleted.Document.Version ||
-		!found || block.State != topology.OperationFailed || block.CurrentStep != 1 ||
-		!strings.Contains(block.Error, "caller refuses deletion") {
-		t.Fatal(failed)
-	}
-	assertFailure := func(restarted string) {
-		t.Helper()
-		for _, node := range c.Nodes() {
-			if err := Poll(ctx, func() (bool, error) {
-				status, err := c.Status(ctx, node.Spec.Name)
-				summary, found := operationSummary(status, failed.ID)
-				return status.LatestVersion == deleted.Document.Version && status.TargetVersion == deleted.Document.Version && status.FullyConverged.Version == created.Document.Version && found && summary.State == failed.State && summary.Attempt == failed.Attempt, err
-			}); err != nil {
-				t.Fatal(node.Spec.Name, err)
-			}
-		}
-		serving := created.Document.Clone()
-		serving.Group("occupied").Replicas = slices.DeleteFunc(serving.Group("occupied").Replicas, func(r topology.Replica) bool { return r.NodeName == restarted })
-		if err := exactOwnedValues(ctx, c, serving, "occupied", expected); err != nil {
-			t.Fatal("refusal destroyed surviving data", err)
-		}
-		for _, replica := range created.Document.Group("occupied").Replicas {
-			local, err := c.Local(ctx, replica.NodeName, "occupied")
-			if err != nil || local.StorageIdentity == nil || local.StorageIdentity.ReplicaID != replica.ReplicaID || replica.NodeName != restarted && (!local.Found || local.ReplicaID != replica.ReplicaID) || replica.NodeName == restarted && local.Found {
-				t.Fatal("refusal changed retained owner or reopened a retired group", local, err)
-			}
-			if err := ownDurableFiles(ctx, c, replica.NodeName, "occupied"); err != nil {
-				t.Fatal("refusal lost durable files", err)
-			}
-			if _, err := c.docker.ContainerStatPath(ctx, c.Node(replica.NodeName).Container.GetContainerID(), client.ContainerStatPathOptions{Path: "/data/load/occupied"}); err != nil {
-				t.Fatal("refusal removed physical store", err)
-			}
-		}
-	}
-	assertFailure("")
-	hits := uint64(0)
 	for _, replica := range created.Document.Group("occupied").Replicas {
-		controls, err := c.Controls(ctx, replica.NodeName)
-		if err != nil {
+		if err := Poll(ctx, func() (bool, error) {
+			controls, err := c.Controls(ctx, replica.NodeName)
+			for _, b := range controls.Barriers {
+				if b.Group != "occupied" || b.Hits == 0 {
+					continue
+				}
+				step := plan.Steps[replica.ReplicaID-1]
+				if !b.Refuse || !b.Last.Matches(operation, 1, deleted.Document.Version, step) {
+					return true, fmt.Errorf("refusal lost exact action: %+v", b)
+				}
+				return true, err
+			}
+			return false, err
+		}); err != nil {
 			t.Fatal(err)
 		}
-		for _, b := range controls.Barriers {
-			if b.Group == "occupied" {
-				hits += b.Hits
-			}
-			if b.Group == "occupied" && b.Hits > 0 && (!b.Refuse || !b.Last.Matches(topology.OperationID(failedID), 1, deleted.Document.Version, plan.Steps[0])) {
-				t.Fatal("refusal lost exact authorized scope", b)
-			}
+		local, err := c.Local(ctx, replica.NodeName, "occupied")
+		if err != nil || !local.Found || local.StorageIdentity == nil || local.StorageIdentity.ReplicaID != replica.ReplicaID {
+			t.Fatal("refusal changed retained owner", local, err)
 		}
-		for _, receipt := range controls.Receipts {
-			if receipt.OperationID == topology.OperationID(failedID) {
-				t.Fatal("refused attempt performed an effect", receipt)
-			}
+		if err := ownDurableFiles(ctx, c, replica.NodeName, "occupied"); err != nil {
+			t.Fatal(err)
+		}
+		page, err := c.Progress(ctx, "node2", topology.ProgressQuery{GroupID: "occupied"})
+		debt, found := exactCleanup(page, *local.StorageIdentity)
+		if err != nil || !found || debt.StoppedAt != nil || debt.RetiredAt != nil || debt.CollectedAt != nil {
+			t.Fatal("refusal manufactured physical completion", debt, err)
 		}
 	}
-	if hits == 0 {
-		t.Fatal("no caller observed the refused identity")
+	if err := exactOwnedValues(ctx, c, created.Document, "occupied", expected); err != nil {
+		t.Fatal("refusal destroyed surviving data", err)
 	}
-	// The failed attempt survives replacement of the meta leader and its disk restart.
 	status, err := c.Status(ctx, "node2")
 	if err != nil {
 		t.Fatal(err)
@@ -352,112 +319,81 @@ func callerRefusedDeletion(t *testing.T, size int) {
 	if err := oldLeader.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
-	var retainedDigest [32]byte
-	wasOwner := slices.ContainsFunc(created.Document.Group("occupied").Replicas, func(r topology.Replica) bool { return r.NodeName == oldLeader.Spec.Name })
-	digest := func() [32]byte {
-		t.Helper()
-		reader, err := oldLeader.Container.CopyFileFromContainer(ctx, "/data/load/occupied/state.bolt")
-		if err != nil {
-			t.Fatal(err)
-		}
-		data, readErr := io.ReadAll(io.LimitReader(reader, (16<<20)+1))
-		closeErr := reader.Close()
-		if readErr != nil || closeErr != nil || len(data) == 0 || len(data) > 16<<20 {
-			t.Fatal("unreadable retained state", len(data), readErr, closeErr)
-		}
-		return sha256.Sum256(data)
+	reader, err := oldLeader.Container.CopyFileFromContainer(ctx, "/data/load/occupied/state.bolt")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if wasOwner {
-		retainedDigest = digest()
+	data, err := io.ReadAll(io.LimitReader(reader, (16<<20)+1))
+	closeErr := reader.Close()
+	if err != nil || closeErr != nil || len(data) == 0 || len(data) > 16<<20 {
+		t.Fatal("invalid retained state", err, closeErr)
 	}
-	var survivor string
-	for _, node := range c.Nodes() {
-		if node != oldLeader {
-			survivor = node.Spec.Name
-			break
-		}
-	}
-	if err := Poll(ctx, func() (bool, error) {
-		observed, err := c.Status(ctx, survivor)
-		summary, found := operationSummary(observed, failed.ID)
-		return observed.MetaLeaderID != 0 && observed.MetaLeaderID != status.MetaLeaderID && found && summary.State == failed.State && summary.Attempt == failed.Attempt, err
-	}); err != nil {
-		t.Fatal("failed execution did not survive leader replacement", err)
-	}
+	retainedDigest := sha256.Sum256(data)
+	volume := oldLeader.Volume
 	if err := oldLeader.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
+	// The restarted process has no ephemeral refusal barrier. Its retained exact
+	// cleanup must resume automatically without another operation attempt.
 	if err := Poll(ctx, func() (bool, error) {
-		observed, err := c.Status(ctx, oldLeader.Spec.Name)
-		summary, found := operationSummary(observed, failed.ID)
-		return observed.SessionLive && observed.MetaLeaderID != 0 && found && summary.State == failed.State && summary.Attempt == failed.Attempt, err
+		local, err := c.Local(ctx, oldLeader.Spec.Name, "occupied")
+		return !local.Found && local.StorageIdentity == nil, err
 	}); err != nil {
-		t.Fatal("retained meta did not recover the failed execution", err)
+		t.Fatal(err)
 	}
-	assertFailure(oldLeader.Spec.Name)
-	if wasOwner && digest() != retainedDigest {
-		t.Fatal("restart changed the refused group's durable state")
+	if oldLeader.Volume != volume || retiredStateDigest(ctx, t, c, oldLeader, "occupied") != retainedDigest {
+		t.Fatal("restart changed quarantined physical evidence")
 	}
-
-	// Process controls are intentionally ephemeral. Re-arm only the restarted
-	// owner's control so removal below has the same exact local lifecycle.
-	if wasOwner {
-		response, err := c.Request(ctx, oldLeader.Spec.Name, "PUT", "/internal/test/barriers/occupied/stop_replica?refuse=true", nil, 0)
-		if err := requireStatus(response, err, 200); err != nil {
-			t.Fatal(err)
-		}
-	}
-	// The caller permits deletion. The same desired version gets a fresh attempt.
 	for _, replica := range created.Document.Group("occupied").Replicas {
-		if err := c.SetBarrier(ctx, replica.NodeName, "occupied", topology.StepStopReplica, false); err != nil {
-			t.Fatal(err)
+		if replica.NodeName != oldLeader.Spec.Name {
+			if err := c.SetBarrier(ctx, replica.NodeName, "occupied", topology.StepStopReplica, false); err != nil {
+				t.Fatal(err)
+			}
 		}
-	}
-
-	response, err = c.Request(ctx, "node2", "POST", "/api/operations/"+string(failedID)+"/retry", nil, 0)
-	if err := requireStatus(response, err, 202); err != nil {
-		t.Fatal(err)
-	}
-	var retryResult struct {
-		ID topology.OperationID `json:"operation_id"`
-	}
-	if err := response.Decode(&retryResult); err != nil || retryResult.ID == "" {
-		t.Fatal(retryResult, err)
-	}
-	retryID := retryResult.ID
-	if retryID == failedID {
-		t.Fatal("retry reused failed attempt", retryID)
-	}
-	if err := c.WaitOperation(ctx, "node2", retryID); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.WaitFullyConverged(ctx, deleted.Document.Version); err != nil {
-		t.Fatal(err)
-	}
-	retry, err := c.Operation(ctx, "node2", retryID)
-	if err != nil || retry.Attempt != 2 || retry.Version != failed.Version {
-		t.Fatal(retry, err)
 	}
 	for _, node := range c.Nodes() {
-		prior, err := c.Operation(ctx, node.Spec.Name, failedID)
-		if err != nil || !reflect.DeepEqual(prior, failed) {
-			t.Fatal("retry rewrote historical failure", prior, err)
-		}
-		// Required stops complete the operation; quarantine is detached and
-		// must be observed independently before asserting physical absence.
 		if err := Poll(ctx, func() (bool, error) {
-			_, err := c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(),
-				client.ContainerStatPathOptions{Path: "/data/load/occupied"})
+			_, err := c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(), client.ContainerStatPathOptions{Path: "/data/load/occupied"})
 			if errdefs.IsNotFound(err) {
 				return true, nil
 			}
 			return false, err
 		}); err != nil {
-			t.Fatal("successful deletion retained usable store", node.Spec.Name, err)
+			t.Fatal("cleanup did not retire former state", err)
+		}
+		prior, err := c.Operation(ctx, node.Spec.Name, operation)
+		if err != nil || prior.State != topology.OperationSucceeded || prior.Attempt != 1 {
+			t.Fatal(prior, err)
 		}
 	}
 	response, err = c.Request(ctx, "node2", "POST", "/api/groups", map[string]any{"group": gquorum.GroupSpec{ID: "occupied"}, "mutation": gquorum.MutationOptions{Actor: "cluster-test"}}, deleted.Document.Version)
 	if err := requireStatus(response, err, 409); err != nil {
 		t.Fatal("deleted group ID became reusable", err)
+	}
+}
+
+func retiredStateDigest(ctx context.Context, t *testing.T, c *Cluster, node *Node, group string) [32]byte {
+	t.Helper()
+	archive, err := c.docker.CopyFromContainer(ctx, node.Container.GetContainerID(), client.CopyFromContainerOptions{SourcePath: "/data/load"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer archive.Content.Close()
+	reader := tar.NewReader(archive.Content)
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			t.Fatal("retired state file missing")
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(header.Name, group+".quarantine-") && strings.HasSuffix(header.Name, "/state.bolt") {
+			data, err := io.ReadAll(io.LimitReader(reader, (16<<20)+1))
+			if err != nil || len(data) == 0 || len(data) > 16<<20 {
+				t.Fatal("invalid retired state", err)
+			}
+			return sha256.Sum256(data)
+		}
 	}
 }

@@ -12,7 +12,6 @@ import (
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/topology"
-	"github.com/containerd/errdefs"
 	docker "github.com/moby/moby/client"
 )
 
@@ -41,15 +40,16 @@ func TestAuthorityHostRevocationWaitsForExactRetainedProcessReturnThreeNodes(t *
 			t.Error("host action barrier cleanup", err)
 		}
 	})
-	response, err = c.Request(ctx, "node2", "DELETE", "/api/groups/work", gquorum.MutationOptions{Actor: "cluster-test"}, original.Version)
-	if err := requireStatus(response, err, 200); err != nil {
+	response, err = c.Request(ctx, "node2", "POST", "/api/groups/work/replicas/node1/reseat",
+		map[string]any{"replica_id": owner.ReplicaID, "actor": "cluster-test"}, original.Version)
+	if err := requireStatus(response, err, 202); err != nil {
 		t.Fatal(err)
 	}
-	var deleted gquorum.MutationResult
-	if err := response.Decode(&deleted); err != nil {
+	var replaced gquorum.MutationResult
+	if err := response.Decode(&replaced); err != nil {
 		t.Fatal(err)
 	}
-	old := startApply(ctx, t, c, "node2", deleted.Document.Version)
+	old := startApply(ctx, t, c, "node2", replaced.Document.Version)
 	var delayed load.ActionRequest
 	if err := Poll(ctx, func() (bool, error) {
 		view, err := c.Authority(ctx, "node1", "work")
@@ -81,9 +81,9 @@ func TestAuthorityHostRevocationWaitsForExactRetainedProcessReturnThreeNodes(t *
 	if _, err := c.docker.ContainerStatPath(ctx, victim.Container.GetContainerID(), docker.ContainerStatPathOptions{Path: "/data/load/work"}); err != nil {
 		t.Fatal("unconsumed stop lost retained application storage", err)
 	}
-	// Retry the exact failed deletion. Staging identical intent does not replace
+	// Retry the exact failed replacement. Staging identical intent does not replace
 	// an owned scope; RetryOperation creates the new attempt and revokes its old
-	// issued host grant without restoring the permanently retired group ID.
+	// issued host grant while preserving the surviving group and its monotonic replacement ID.
 	response, err = c.Request(ctx, "node2", "POST", "/api/operations/"+string(old)+"/retry", nil, 0)
 	if err := requireStatus(response, err, 202); err != nil {
 		t.Fatal(err)
@@ -152,7 +152,7 @@ func TestAuthorityHostRevocationWaitsForExactRetainedProcessReturnThreeNodes(t *
 		}
 		t.Fatal("returning retained host could not finish exact fence and successor cleanup", err)
 	}
-	if err := c.WaitFullyConverged(ctx, deleted.Document.Version); err != nil {
+	if err := c.WaitFullyConverged(ctx, replaced.Document.Version); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.WaitReady(ctx); err != nil {
@@ -180,18 +180,10 @@ func TestAuthorityHostRevocationWaitsForExactRetainedProcessReturnThreeNodes(t *
 		t.Fatal("absent data substituted for exact stale-authority refusal", refusal, err)
 	}
 	for _, node := range c.Nodes() {
-		if err := Poll(ctx, func() (bool, error) {
-			_, err := c.docker.ContainerStatPath(ctx, node.Container.GetContainerID(), docker.ContainerStatPathOptions{Path: "/data/load/work"})
-			if errdefs.IsNotFound(err) {
-				return true, nil
-			}
-			return false, err
-		}); err != nil {
-			t.Fatal("completed cleanup or old replay retained/recreated storage", node.Spec.Name, err)
-		}
 		local, err := c.Local(ctx, node.Spec.Name, "work")
-		if err != nil || local.Found || local.StorageIdentity != nil {
-			t.Fatal("deleted replica reopened after old host action", local, err)
+		wanted := replicaID(replaced.Document, "work", node.Spec.Name)
+		if err != nil || !local.Found || local.ReplicaID != wanted || local.StorageIdentity == nil || local.StorageIdentity.ReplicaID != wanted {
+			t.Fatal("old host action damaged a surviving or successor replica", local, err)
 		}
 	}
 }
