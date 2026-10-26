@@ -149,7 +149,8 @@ func (e *executor) drain(ctx context.Context, group *load.Group) error {
 			if ctx.Err() != nil || !fault.Retryable(err) {
 				return err
 			}
-			// Re-read committed state before choosing another guarded command.
+			// Re-read committed state; Apply revalidates every task CAS.
+			// An error code alone would not justify replaying an arbitrary write.
 			e.logger.Info("executor_waiting", "error", err)
 		}
 	}

@@ -10,7 +10,7 @@
 **Full brainstorm log:** [session and final decisions](../brainstorms/20261026-write-receipt-contract.md)
 **Reference comparison:** [etcd, TiKV and PD](../brainstorms/20261026-proposal-retry-reference-comparison.md)
 **Peer review:** [thread 1 and user addenda](../review/feat_receipt-error-contract.md)
-**Status:** Tasks 1–6 complete; final architecture audit complete, implementation peer review pending. User directs all cluster/Compose execution to penultimate Task 6 and a colleague review of every implementation commit after final verification.
+**Status:** Complete: all seven tasks and the implementation peer review are finished. User directs all cluster/Compose execution to penultimate Task 6 and a colleague review of every implementation commit after final verification.
 
 ## Execution contract
 
@@ -307,7 +307,7 @@ type submissionReply struct {
 #### Verification gates
 
 - [x] Confirm Task 6's final evidence covers the current implementation. Repair audit gaps and rerun affected non-cluster checks; reopen Task 6 for any necessary cluster rerun rather than running it in the final task.
-- [ ] After the final audit/verification commit, ask Claude agent 77d41568-9e29-4cab-a227-ce5be07190c0 to review all implementation commits since eca48ad. Verify and resolve findings, revalidate affected work and record review disposition before declaring completion.
+- [x] After the final audit/verification commit, ask Claude agent 77d41568-9e29-4cab-a227-ce5be07190c0 to review all implementation commits since eca48ad. Verify and resolve findings, revalidate affected work and record review disposition before declaring completion.
 
 #### Architectural delta audit
 
@@ -395,7 +395,7 @@ No new tables, ORM models, DDL, bbolt keys, durable receipt records, migrations,
 
 ## NOT IMPLEMENTED GAPS
 
-Final audit at 089c1d6 found no unresolved implementation gap within the approved core scope. The scheduler migration regression was resolved and verified in Task 6; independent peer review is still pending. Intentional #9/#12 and other exclusions are listed above and are not delivered capabilities. During execution add each unexpected gap with its target section, affected file, consequence, owning task, fix and verification. Use `[_]` for an unresolved implementation gap and leave the owning/final task incomplete; do not confuse this marker with an approved deferral.
+Final audit at 089c1d6 found no unresolved implementation gap within the approved core scope. The scheduler migration regression was resolved and verified in Task 6; Claude approved the implementation without correctness findings; optional suggestions were dispositioned in review thread 2. Intentional #9/#12 and other exclusions are listed above and are not delivered capabilities. During execution add each unexpected gap with its target section, affected file, consequence, owning task, fix and verification. Use `[_]` for an unresolved implementation gap and leave the owning/final task incomplete; do not confuse this marker with an approved deferral.
 
 ## NOT PLANNED CHANGES
 
