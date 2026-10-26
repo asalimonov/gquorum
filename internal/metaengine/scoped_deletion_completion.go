@@ -11,8 +11,14 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
-func prepareDeletionCompletions(source, next *scopedState, collector planningCollector) error {
-	p := deletionPreparation{source, next, collector}
+func prepareDeletionCompletions(source, next *scopedState, collector planningCollector,
+	semantics DeletionSemantics) error {
+	p := deletionPreparation{source: source, next: next, collector: collector, semantics: semantics}
+	if semantics == DeletionSemanticsDetached {
+		return p.completeDetachedBlocks()
+	}
+	// TODO(not planned): migrate previously approved required-stop deletion plans.
+	// Unmarked committed commands retain this exact receipt-waiting interpretation.
 	if err := p.protectReadmission(); err != nil {
 		return err
 	}
@@ -156,6 +162,13 @@ func (p deletionPreparation) protectReadmission() error {
 }
 
 func (p deletionPreparation) dependsOnReadmission(key planningReplicaKey, target topology.AuthorityTarget) bool {
+	latest := &p.next.Operations[len(p.next.Operations)-1]
+	if p.semantics == DeletionSemanticsDetached && p.next.Target.Group(key.group) == nil &&
+		slices.ContainsFunc(latest.Plan.Blocks, func(block topology.PlanBlock) bool {
+			return block.GroupID == key.group && len(block.Steps) == 0
+		}) {
+		return false // completeDetachedBlocks validates independent debt first.
+	}
 	id := storage.Identity{ClusterID: p.next.Target.ClusterID, GroupID: key.group,
 		NodeName: target.NodeName, ReplicaID: key.id}
 	deleting := slices.ContainsFunc(p.next.Groups, func(row groupConvergence) bool {

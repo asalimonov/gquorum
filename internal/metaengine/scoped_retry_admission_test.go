@@ -97,7 +97,7 @@ func TestScopedRetryRetainsUnobservedCatchupAndScopesRevocations(t *testing.T) {
 	if retry.Status.Blocks[0].CurrentStep != 3 {
 		t.Fatal("retry fabricated a catchup observation")
 	}
-	resources := s.successorResources(retry)
+	resources := s.successorResources(retry, DeletionSemanticsLegacy)
 	host := topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: topology.MetaGroupID, NodeName: "n2"}
 	if resources[host] || !resources[topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: topology.MetaGroupID}] {
 		t.Fatal("retry resource selection included consumed preparation or omitted live membership")

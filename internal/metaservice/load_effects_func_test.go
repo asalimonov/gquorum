@@ -27,6 +27,8 @@ type verifiedLoadController struct {
 	creates      int
 	firstEffect  chan struct{}
 	firstRelease <-chan struct{}
+	stopRelease  <-chan struct{}
+	stopStarted  chan struct{}
 }
 
 func (c *verifiedLoadController) leader() *Group {
@@ -137,6 +139,17 @@ func (c *verifiedLoadController) StopReplica(ctx context.Context, grant topology
 	if _, err := c.authorized(ctx, grant); err != nil {
 		return nil, err
 	}
+	if c.stopRelease != nil {
+		select {
+		case c.stopStarted <- struct{}{}:
+		default:
+		}
+		select {
+		case <-c.stopRelease:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if a.Kind != topology.StepStopReplica {
@@ -174,7 +187,11 @@ func (c *verifiedLoadController) DeleteGroupState(ctx context.Context, grant top
 func TestMetaDeletesInterruptedFoundingBeforeConvergence(t *testing.T) {
 	t.Parallel()
 	release := make(chan struct{})
-	controller := &verifiedLoadController{groups: map[string]topology.Group{}, hosts: map[string]map[string]uint64{}, firstEffect: make(chan struct{}), firstRelease: release, deleted: make(chan struct{})}
+	stopRelease := make(chan struct{})
+	var releaseOnce, stopOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	defer stopOnce.Do(func() { close(stopRelease) })
+	controller := &verifiedLoadController{groups: map[string]topology.Group{}, hosts: map[string]map[string]uint64{}, firstEffect: make(chan struct{}), firstRelease: release, deleted: make(chan struct{}), stopRelease: stopRelease, stopStarted: make(chan struct{}, 1)}
 	effect, deleted := controller.firstEffect, controller.deleted
 	groups := singleMetaFixtureWith(t, func(o *Options) { o.LoadGroups = controller; o.InstallLocalFence = controller.installFence })
 	leader := readyPublic(t, groups)
@@ -213,11 +230,22 @@ func TestMetaDeletesInterruptedFoundingBeforeConvergence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	close(release) // The old RPC returns without a durable completion record.
 	status, err := leader.WaitOperation(ctx, deleting)
 	if err != nil || status.State != topology.OperationSucceeded {
 		t.Fatal(status, err)
 	}
+	releaseOnce.Do(func() { close(release) }) // Return the unacknowledged creation only after logical success.
+	select {
+	case <-controller.stopStarted:
+	case <-ctx.Done():
+		t.Fatal("deferred host stop was not dispatched", ctx.Err())
+	}
+	page, err := leader.ReadProgress(ctx, topology.ProgressQuery{GroupID: "load-one"})
+	if err != nil || len(page.Cleanup) != 1 || page.Cleanup[0].StoppedAt != nil ||
+		page.Cleanup[0].RetiredAt != nil || page.Cleanup[0].CollectedAt != nil {
+		t.Fatal("logical completion manufactured physical cleanup proof", page, err)
+	}
+	stopOnce.Do(func() { close(stopRelease) })
 	old, err := leader.Operation(ctx, creating)
 	if err != nil || old.State != topology.OperationSuperseded {
 		t.Fatal(old, err)

@@ -89,7 +89,7 @@ func replicaNode(group *Group, id uint64) string {
 func (b *topologyPlanBuilder) planDeletedGroup(groupID string) {
 	retire := false
 	for _, replica := range b.input.formerReplicas(groupID) {
-		if replica.Progress != RetainedStopped {
+		if replica.Progress == RetainedHosted {
 			b.emit(groupID, StepStopReplica, replica.NodeName, replica.ReplicaID)
 		}
 		retire = retire || replica.Progress == RetainedHosted

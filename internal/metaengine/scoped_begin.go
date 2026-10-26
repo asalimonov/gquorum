@@ -20,7 +20,7 @@ func (s *scopedState) applyBeginOperation(index uint64, p BeginOperationProposal
 		return proposalApplication{}, err
 	}
 	op := &next.Operations[len(next.Operations)-1]
-	if err := next.revokeAuthorityLocked(index, s.supersededBlocks(op), op.Status.ID); err != nil {
+	if err := next.revokeAuthorityLocked(index, s.supersededBlocks(op), op.Status.ID, p.DeletionSemantics); err != nil {
 		return proposalApplication{}, err
 	}
 	next.AppliedIndex = index

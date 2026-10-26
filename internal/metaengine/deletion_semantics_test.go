@@ -78,13 +78,13 @@ func TestDeletionSemanticsDecodesUnmarkedHistoricalEnvelope(t *testing.T) {
 	}
 }
 
-func TestDeletionSemanticsActivationWaitsForCompleteApprovalPath(t *testing.T) {
+func TestDeletionSemanticsNewApprovalRejectsLegacyRequiredStops(t *testing.T) {
 	t.Parallel()
 	s, proposal := deletionApprovalFixture(t)
 	before, _ := json.Marshal(s)
 	proposal.DeletionSemantics = DeletionSemanticsDetached
-	if _, err := prepareScopedApproval(&s, s.Latest, proposal, explicitApproval); !errors.Is(err, fault.ErrUnsupported) {
-		t.Fatal("new command silently used legacy approval", err)
+	if _, err := prepareScopedApproval(&s, s.Latest, proposal, explicitApproval); !errors.Is(err, fault.ErrOperationAuthorization) {
+		t.Fatal("new command accepted legacy required-stop shape", err)
 	}
 	after, _ := json.Marshal(s)
 	if !bytes.Equal(before, after) {

@@ -29,7 +29,7 @@ func detachedDeletionFixture(t *testing.T) (scopedState, *scopedState, planningC
 	op.Status.State, op.Status.Blocks[0].State = topology.OperationSucceeded, topology.OperationSucceeded
 	op.Status.Blocks[0].TotalSteps = 0
 	next.completeApprovalGroup("shard0", op)
-	if err := next.revokeAuthorityLocked(source.AppliedIndex+1, source.supersededBlocks(op), op.Status.ID); err != nil {
+	if err := next.revokeAuthorityLocked(source.AppliedIndex+1, source.supersededBlocks(op), op.Status.ID, DeletionSemanticsLegacy); err != nil {
 		t.Fatal(err)
 	}
 	next.AppliedIndex = source.AppliedIndex + 1
@@ -46,7 +46,7 @@ func TestDetachedDeletionCoverageAndCleanupRemainIndependent(t *testing.T) {
 	t.Parallel()
 	source, next, collector := detachedDeletionFixture(t)
 	op := next.Operations[len(next.Operations)-1]
-	if err := (deletionPreparation{&source, next, collector}).validateDetachedCoverage(op.Plan.Blocks); err != nil {
+	if err := (deletionPreparation{source: &source, next: next, collector: collector}).validateDetachedCoverage(op.Plan.Blocks); err != nil {
 		t.Fatal("unacknowledged but exact cleanup does not cover deletion", err)
 	}
 	native := topology.AuthorityResource{Kind: topology.AuthorityGroup, GroupID: "shard0"}
@@ -119,7 +119,7 @@ func TestDetachedDeletionCoverageRejectsMissingOrContradictoryOwners(t *testing.
 			}
 			sourceBefore, _ := json.Marshal(source)
 			op := next.Operations[len(next.Operations)-1]
-			if err := (deletionPreparation{&source, next, collector}).validateDetachedCoverage(op.Plan.Blocks); err == nil {
+			if err := (deletionPreparation{source: &source, next: next, collector: collector}).validateDetachedCoverage(op.Plan.Blocks); err == nil {
 				t.Fatal("contradictory deletion coverage accepted")
 			}
 			after, _ := json.Marshal((*wire)(next))
@@ -170,7 +170,7 @@ func TestDetachedDeletionCoverageRejectsPartialReadmissionWithoutDebt(t *testing
 		t.Fatal(err)
 	}
 	collector.markConvergedOwners(source.planningDeclarations().Groups)
-	if err := (deletionPreparation{&source, next, collector}).validateDetachedCoverage(approval.Plan.Blocks); err == nil {
+	if err := (deletionPreparation{source: &source, next: next, collector: collector}).validateDetachedCoverage(approval.Plan.Blocks); err == nil {
 		t.Fatal("partial readmission created independent deletion coverage")
 	}
 }

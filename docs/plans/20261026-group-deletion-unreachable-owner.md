@@ -6,7 +6,7 @@
 **Branch:** `feat/group-deletition-wo-node`
 **Source revision inspected:** `8e57798`
 **Target architecture:** [20261026-group-deletion-unreachable-owner-target.md](../brainstorms/20261026-group-deletion-unreachable-owner-target.md)
-**Target SHA-256:** `45f33e730531e7389fa2e3365e644aa087b4714611aae936bda9bbeb53d01c44`
+**Target SHA-256:** `cd9d1d8c4b47d4532eb92a5a43297449837a1afa01f2f2772fa57fe690f56370`
 **Full brainstorm log:** [20261026-group-deletion-unreachable-owner.md](../brainstorms/20261026-group-deletion-unreachable-owner.md)
 **Issue:** <https://github.com/asalimonov/gquorum/issues/5>
 **Status:** implementation in progress; task checkboxes record verified completion.
@@ -376,89 +376,91 @@ legacy plans, §4 diagram, §5.3–§5.5 unchanged schemas, §5.8 replay marker,
 §8.2 readmission, §9.1/§9.2/§9.5–§9.11/§9.15a–§9.15c inventory, §13.1/§13.2/§13.8–§13.17/§13.24
 algorithms; §10.1/§10.2/§10.6/§10.7 flows and §11.1–§11.2 tests.
 
-- [ ] Set `DeletionSemanticsDetached` in the real
+- [x] Set `DeletionSemanticsDetached` in the real
   `metaservice.operationProposal` approve constructor. Preserve the Retry
   command shape and existing recovery/repair emitters' semantics.
-- [ ] Validate and propagate the committed mode through `prepareScopedApproval`,
+- [x] Validate and propagate the committed mode through `prepareScopedApproval`,
   `validateNewRetirement` / `duplicateRetirement`,
   `prepareCleanupHandovers`, `prepareDeletionDebts` and
   `prepareDeletionCompletions`. Add the ephemeral semantics field to the existing
   deletion/handover helpers and use keyed construction literals.
-- [ ] Preserve the complete original mode-0 decision branches, including old
+- [x] Preserve the complete original mode-0 decision branches, including old
   duplicate-retirement rules, required-step action lookup and zero-step
   readmission waits. Remove Task 2's temporary refusal of mode 1. Do not infer
   mode from plan shape, runtime version, health, time or a replay flag.
-- [ ] Change `requiredRetainedStop` to require a stop only when a nonnil desired
+- [x] Change `requiredRetainedStop` to require a stop only when a nonnil desired
   group reuses the host for another replica ID. Reuse `detachedPlanStep` and
   `bindPlanBlocks` so deletion stops enter `Cleanup`.
-- [ ] Change `planDeletedGroup` to emit exact stops only for `RetainedHosted`
+- [x] Change `planDeletedGroup` to emit exact stops only for `RetainedHosted`
   owners, and one shared deletion-state step when newly owned retirement exists.
   Existing `RetainedCleanup` and `RetainedStopped` owners keep their original
   debt/proof; `bindDetachedStops` owns required-to-detached handover.
-- [ ] Preserve deletion Stop/DeleteState steps for pending readmission hosts in
+- [x] Preserve deletion Stop/DeleteState steps for pending readmission hosts in
   `readmissionPlanBuilder.appendStep` and `requiresDeletion`. Do not alter
   ordinary surviving-group readmission omissions or metadata admission sequences.
-- [ ] In marker-1 approval retirement validation, require empty required partitions
+- [x] In marker-1 approval retirement validation, require empty required partitions
   for deletion blocks, count hosted deletion owners independently of planned
-  readmission, reject duplicate retirement, and allow only the existing exact
-  required-to-detached stop-handover exception.
-- [ ] Update debt preparation to find new Stop and DeleteState actions in
+  readmission, reject duplicate retirement issuance, preserve exact
+  required-to-detached handover, and retain the original binding for conservative
+  already-detached Stop entries (target §9.6/§9.15e).
+- [x] Update debt preparation to find new Stop and DeleteState actions in
   `block.Cleanup`. Preserve exact historical member/storage/origin and every
   existing receipt. A returned zero identity means no appended row; a nonzero
   actionless row backed by consumed readmission must be retained.
-- [ ] Reuse `readmissionDebt` only to materialize already-proven complete
+- [x] Reuse `readmissionDebt` only to materialize already-proven complete
   readmission. Missing or partial batch proof cannot become a stop timestamp.
   New pending readmission instead receives ordinary action-bearing debt.
-- [ ] Let `deletionDebt` retain existing valid debt without waiting for the host
+- [x] Let `deletionDebt` retain existing valid debt without waiting for the host
   or consumption of a pending batch. Keep hard identity/storage/provenance errors
   and deterministic traversal/refusal.
-- [ ] Allow required-to-detached handover for desired group absence, including
+- [x] Allow required-to-detached handover for desired group absence, including
   exact old-member debt with a newer approved member. Preserve the old retirement
   action and rely on Task 2's dispatch guard; never deliver the old Stop to a
   replacement identity.
-- [ ] Wire `validateDetachedCoverage` into `prepareDeletionCompletions` for the
+- [x] Wire `validateDetachedCoverage` into `prepareDeletionCompletions` for the
   whole new operation before changing any completion row. Skip surviving groups.
   After validation, reuse `completeApprovalGroup` and aggregate only the existing
   block states.
-- [ ] Bypass the old receipt-waiting completion path for new approvals; retain it
+- [x] Bypass the old receipt-waiting completion path for new approvals; retain it
   where necessary for restored legacy operations. New deletion block success has
   `CurrentStep=0`, `TotalSteps=0`, no blocker and a nil versioned checkpoint.
-- [ ] Narrow `protectReadmission` / `dependsOnReadmission` only where new ordinary
+- [x] Narrow `protectReadmission` / `dependsOnReadmission` only where new ordinary
   detached coverage already owns every relevant identity. Preserve protection
   for genuine legacy omitted-action dependencies.
-- [ ] Keep `applyBeginOperation` candidate preparation, authority revocation,
-  full graph validation and atomic installation unchanged. A failing sibling
+- [x] Preserve `applyBeginOperation` candidate preparation, full graph validation
+  and atomic installation; limit mode-1 deletion resource conflicts to actual
+  cleanup bindings as specified in target §9.15e. A failing sibling
   validation must publish neither partial tombstone nor partial cleanup.
-- [ ] Update generator/approval expectations only now. Separate current-plan
+- [x] Update generator/approval expectations only now. Separate current-plan
   fixture builders from historical fixture builders; construct legacy retained
   states directly or from immutable artifacts rather than asking marker-1 approval
   to accept an old plan. Explicit unmarked mode-0 command fixtures must still
   replay to their original result.
-- [ ] Cover a pure deletion with all hosts unavailable; inherited debt only;
+- [x] Cover a pure deletion with all hosts unavailable; inherited debt only;
   zero-issued creation; issued but unacknowledged founding/preparation; mixed
   operation with one pending sibling; pending readmission; hard refusal despite
   other pending owners; exact approval replay/CAS and canceled waiter semantics.
-- [ ] Preserve physical assertions: operation success must not populate
+- [x] Preserve physical assertions: operation success must not populate
   Removed/Stopped/Retired/Collected receipts, settle unresolved host/native
   revocation, permit group ID reuse or authorize a successor's deletion.
-- [ ] Add concise `TODO(not planned)` comments at the owning boundaries for
+- [x] Add concise `TODO(not planned)` comments at the owning boundaries for
   excluded legacy-plan conversion and permanent-host debt waiver, with current
   default behavior as specified in the exclusions table below. Do not add a
   runtime warning or public stub for expected offline cleanup.
-- [ ] Confirm the helper introduced in Task 2 is now reached from real approval.
+- [x] Confirm the helper introduced in Task 2 is now reached from real approval.
   No temporary activation flag, fallback or second planner remains.
 
 #### Verification
 
-- [ ] `go test ./topology ./internal/metaengine ./internal/operator -run 'Deletion|Cleanup|Readmission|Retained|Retry|Approval' -count=1`.
-- [ ] `make test`, `go vet ./topology ./internal/metaengine ./internal/operator`
+- [x] `go test ./topology ./internal/metaengine ./internal/operator -run 'Deletion|Cleanup|Readmission|Retained|Retry|Approval' -count=1`.
+- [x] `make test`, `go vet ./topology ./internal/metaengine ./internal/operator`
   and `make lint` pass across the newly activated behavior.
-- [ ] Run focused functional planning/ledger regressions:
+- [x] Run focused functional planning/ledger regressions:
   `make test-function FUNCTIONAL_ARGS="-run 'PlanningDeletion|ScopedPlanningDeletion|DeletesInterruptedFounding|GrantedLoadLedgerCleanup|RollbackApprovedGroupDeletion'"`.
-- [ ] Inspect actual `BuildPlan -> Approve -> ReadProgress/WaitOperation` results:
+- [x] Inspect actual `BuildPlan -> Approve -> ReadProgress/WaitOperation` results:
   no load-native read, successful deletion with exact unresolved debt, and
   unchanged behavior for staged-only deletion.
-- [ ] Repair every test affected by the intentional semantics without weakening
+- [x] Repair every test affected by the intentional semantics without weakening
   its durable identity/resource ownership assertions; record results and commit.
 
 ### Task 4: Verify retained evidence, compatibility and managed lifecycle
@@ -889,6 +891,18 @@ Do not use an out-of-scope label to hide a required target feature.
 
 ## NOT PLANNED CHANGES
 
+Task 3 implementation adjustments (reviewable in its commit):
+- scoped_approval_retirement.go: use a planningCollector receiver to meet the
+  four-argument lint rule; validation behavior and internal semantics stay explicit.
+- scoped_cleanup_handover.go and scoped_revocation_scope.go: a pending readmission
+  regression exposed conservative redundant planner stops. Keep their original
+  detached debt/action binding and derive mode-1 deletion conflicts only from
+  actually bound actions, preserving readmission floors. Thread the marker through
+  scoped_begin/revocation; repair/retry keep legacy selection. Target §9.15e records
+  this necessary authority correction; old command interpretation is unchanged.
+- replicas_func_test.go: replace old required-stop fixture execution with actual
+  deferred Stop grants/receipts before ledger retirement assertions.
+
 Task 2 implementation adjustments (reviewable in its commit):
 - internal/metaengine/deletion_semantics.go: enum declaration moved to a companion
   file because revive limits public declarations per file. Optional command field
@@ -914,6 +928,7 @@ reconciliation with the target rather than an undocumented alternate algorithm.
 
 | Date | Task | Work/result | Validation |
 | --- | --- | --- | --- |
+| 2026-10-26 | Task 3 | Activated detached deletion with exact retained debt and inherited readmission authority. | Unit 2349/2349; focused functional 10/10; focused regressions/vet/lint PASS. |
 | 2026-10-26 | Task 2 | Internal command marker, exact coverage/restore validation and physical settlement support. | Focused tests/vet/lint PASS; unit report 20261026T132448.610357Z-il0ggigv: 2342/2342. |
 | 2026-10-26 | Task 1 | Plan validators accept exact deferred deletion and inherited debt; generator selection remains unchanged. | Focused tests/vet/lint PASS; unit report 20261026T130516.077623Z-9xhac48t: 2323/2323. |
 | 2026-10-26 | Planning | Read target, current contracts, planner/FSM and fixture seams; defined seven green checkpoints and the Task 3 activation boundary. | Documentation/source-reference checks only; no implementation suite executed. |

@@ -71,11 +71,17 @@ func TestReadmissionPlanUsesPreparationAsHostRetirementBoundary(t *testing.T) {
 			}
 			for _, s := range plan.Steps {
 				if s.NodeName == "a" && s.ReplicaID == 1 && (s.Kind == StepStopReplica || s.Kind == StepCleanupReplicaState) {
-					t.Fatal("plan dispatches to retired host", s)
+					if s.GroupID != MetaGroupID && desired.Group(s.GroupID) == nil &&
+						slices.ContainsFunc(plan.Blocks, func(block PlanBlock) bool {
+							return block.GroupID == s.GroupID && len(block.Steps) == 0 && slices.Contains(block.Cleanup, s.Seq)
+						}) {
+						continue // Retained deletion debt waits for actual readmission proof.
+					}
+					t.Fatal("surviving group dispatches to retired host", s)
 				}
 			}
 			hasDelete := slices.ContainsFunc(plan.Steps, func(s Step) bool { return s.GroupID == group && s.Kind == StepDeleteGroupState })
-			if hasDelete != (mode == "partial deletion") {
+			if hasDelete != (mode == "partial deletion" || mode == "complete deletion") {
 				t.Fatal("wrong residual deletion", plan)
 			}
 			if mode == "old member" && !slices.ContainsFunc(plan.Steps, func(s Step) bool { return s.GroupID == MetaGroupID && s.Kind == StepRemoveReplica && s.ReplicaID == 1 }) {

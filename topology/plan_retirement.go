@@ -45,7 +45,7 @@ func (in PlanInput) formerReplica(step Step) bool {
 }
 
 func requiredRetainedStop(desired *Group, key ReplicaKey) bool {
-	return desired == nil || slices.ContainsFunc(desired.Replicas, func(r Replica) bool {
+	return desired != nil && slices.ContainsFunc(desired.Replicas, func(r Replica) bool {
 		return r.NodeName == key.NodeName && r.ReplicaID != key.ReplicaID
 	})
 }

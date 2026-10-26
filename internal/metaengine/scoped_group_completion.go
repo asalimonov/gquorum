@@ -31,7 +31,8 @@ func (s *scopedState) prepareGroupCompletion(t topology.OperationTransition) (*s
 			return nil, err
 		}
 		collector.markConvergedOwners(input.Groups)
-		if err := (deletionPreparation{s, next, collector}).complete(t.GroupID, t.At); err != nil {
+		preparation := deletionPreparation{source: s, next: next, collector: collector}
+		if err := preparation.complete(t.GroupID, t.At); err != nil {
 			return nil, err
 		}
 	} else if len(op.Plan.Blocks[position].Steps) == 0 &&

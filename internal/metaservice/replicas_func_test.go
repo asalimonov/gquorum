@@ -7,6 +7,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/internal/metaengine"
@@ -150,20 +151,30 @@ func cleanupLedgerFixture(t *testing.T) (*mutationFixture, topology.AuthorizedSt
 	f.commit(t, doc, false)
 	approval := f.fixtureApproval(t, f.g.machine.Latest())
 	begin := f.command(t, approval)
-	work, err := f.g.machine.ReadyBlocks("", 1)
-	if err != nil || len(work) != 1 {
-		t.Fatal(work, err)
-	}
-	f.completeFixtureWork(t, work[0].Operation, "work", f.g.machine.Target())
 	status, err := f.g.machine.Operation(begin.OperationID)
 	if err != nil || status.State != topology.OperationSucceeded {
 		t.Fatal(status, err)
 	}
 	block := approval.Plan.Blocks[0]
-	if len(block.Steps) != 3 || len(block.Cleanup) != 1 {
+	if len(block.Steps) != 0 || len(block.Cleanup) != 4 {
 		t.Fatal(approval.Plan)
 	}
-	step := approval.Plan.Steps[block.Cleanup[0]-1]
+	work, err := f.g.machine.ReadyCleanup(storage.Identity{}, 10)
+	if err != nil || len(work) != 3 {
+		t.Fatal(work, err)
+	}
+	for _, item := range work {
+		if item.Action.Kind != topology.StepStopReplica {
+			t.Fatal("retirement issued before stop", item)
+		}
+		grant := f.command(t, metaengine.BeginCleanupEffectProposal{Identity: item.Identity,
+			Action: item.Action, ProposalID: newProposalID()}).Grant
+		for _, receipt := range protocolEffectReceipts(*grant) {
+			f.command(t, metaengine.RecordEffectProposal{Receipt: receipt, At: time.Now().UTC(),
+				ProposalID: newProposalID()})
+		}
+	}
+	step := approval.Plan.Steps[block.Cleanup[len(block.Cleanup)-1]-1]
 	if step.Kind != topology.StepDeleteGroupState {
 		t.Fatal(step)
 	}

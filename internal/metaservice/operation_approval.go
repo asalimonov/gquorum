@@ -101,7 +101,7 @@ func (g *Group) operationProposal(read metaengine.PlanRead, request applyVersion
 	}
 	return metaengine.BeginOperationProposal{Version: request.Version, Plan: plan, Scopes: read.Scopes,
 		Actor: g.currentIdentity().NodeName, Origin: read.Target.Origin, At: g.approvalTime(read.Target),
-		ProposalID: newProposalID()}, nil
+		ProposalID: newProposalID(), DeletionSemantics: metaengine.DeletionSemanticsDetached}, nil
 }
 
 func (g *Group) approvalTime(desired topology.Document) time.Time {

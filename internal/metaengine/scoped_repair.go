@@ -100,7 +100,8 @@ func (s *scopedState) commitRepairDocuments(index uint64, pair repairDocuments,
 		next.Intents = append(slices.Clone(next.Intents), *p.Intent)
 	}
 	op := &next.Operations[len(next.Operations)-1]
-	if err := next.revokeAuthorityLocked(index, s.supersededBlocks(op), op.Status.ID); err != nil {
+	err = next.revokeAuthorityLocked(index, s.supersededBlocks(op), op.Status.ID, DeletionSemanticsLegacy)
+	if err != nil {
 		return proposalApplication{}, err
 	}
 	next.AppliedIndex = index

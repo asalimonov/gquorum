@@ -677,7 +677,7 @@ below is the mode-1 path; mode 0 executes the original decisions.
 5. Prepare deletion debts and permanent retired IDs.
 6. Validate complete detached coverage and complete new deletion blocks.
 7. Existing history, node progress and `FullyConverged` processing.
-8. Existing authority closure/fence preparation.
+8. Authority closure/fence preparation, claiming only actually bound new deletion actions (§9.15e).
 9. Rebuild and validate the complete graph.
 10. Install the candidate atomically.
 
@@ -936,7 +936,7 @@ plans keep their existing omission and preparation rules.
 ### 9.6 UPDATED: internal/metaengine/scoped_approval_retirement.go
 
 ~~~go
-func validateNewRetirement(c planningCollector, input topology.PlanInput,
+func (c planningCollector) validateNewRetirement(input topology.PlanInput,
     desired topology.Document, plan topology.Plan, semantics DeletionSemantics) error
 func duplicateRetirement(owner planningReplica, desired *topology.Group,
     step topology.Step, semantics DeletionSemantics) bool
@@ -945,6 +945,9 @@ func duplicateRetirement(owner planningReplica, desired *topology.Group,
 Require the new detached deletion shape for marker-1 approval. Count hosted deletion
 owners even when readmission is planned. Reject duplicate issuance for existing
 detached debt; retain the exact required-to-detached stop-handover exception.
+A conservative planner handover Stop may already have an exact detached debt
+binding. Accept that redundant plan entry while retaining the original binding;
+the new entry has no independent grant or dispatch authority.
 
 ### 9.7 UPDATED: internal/metaengine/scoped_deletion.go
 
@@ -1008,7 +1011,8 @@ func detachedCleanupAllowed(desired topology.Document, id storage.Identity) bool
 Allow detachment when the desired group is absent. Rebinding an exact old-member
 stop into deletion cleanup may coexist with a newer approved member; it does not
 authorize dispatch to that newer member. Preserve timestamps, original retirement
-action, and every consumed milestone.
+action, and every consumed milestone. If the planner conservatively includes an
+already-detached Stop, retain the original debt binding instead of rebinding it.
 
 ### 9.12 UPDATED: internal/metaengine/scoped_cleanup_progress.go
 
@@ -1091,13 +1095,22 @@ installation are reused. No replay-specific live-process flag is introduced.
 Declares the exact section 5.8 DeletionSemantics enum and constants. This is an
 internal companion file, not a public API addition.
 
+### 9.15e UPDATED: internal/metaengine/scoped_revocation_scope.go and scoped_revocation.go
+
+Thread the committed semantics into revokeAuthorityLocked and successorResources.
+For mode 1 deleted groups, derive conflicting host resources only from actions
+actually bound in candidate cleanup debt. A conservative unused Stop must not
+advance an inherited cleanup/readmission floor. Mode 0 retains its original
+resource selection. scoped_begin.go supplies the committed marker; repair and
+retry callsites explicitly retain legacy selection (retry selects failed blocks).
+
 ### 9.16 Reused without production behavior changes
 
 | Files/components | Existing functions or responsibilities |
 | --- | --- |
 | `cluster_mutations.go`, `internal/metaservice/mutations.go` | `DeleteGroup` / `DeleteLoadGroup` CAS staging |
 | `internal/metaservice/operation_planning.go` | `capturePlan` already skips native reads for deleted scopes |
-| `internal/metaengine/scoped_begin.go` | `applyBeginOperation` atomic preparation/revocation/installation |
+| `internal/metaengine/scoped_begin.go` | Atomic preparation/revocation/installation retained; threads committed semantics as specified in §9.15e |
 | `internal/metaengine/scoped_approval_completion.go` | `completeApprovalGroup` and aggregate/marker processing |
 | `internal/metaengine/ready_cleanup.go` | `ReadyCleanup`, `queryReadyCleanup`, `pendingCleanupAction` |
 | `internal/metaengine/scoped_cleanup_issue.go` | `applyBeginCleanupEffect` exact grants and resource checks |
@@ -1578,7 +1591,7 @@ func (p *readmissionPlanBuilder) requiresDeletion(step Step) bool {
 ### 13.10 validateNewRetirement and duplicateRetirement
 
 ~~~go
-func validateNewRetirement(c planningCollector, input PlanInput, desired Document, plan Plan, semantics DeletionSemantics) error {
+func (c planningCollector) validateNewRetirement(input PlanInput, desired Document, plan Plan, semantics DeletionSemantics) error {
     if semantics == DeletionSemanticsLegacy {
         // Execute the original validation branch, including old duplicate rules.
         return originalRetirementValidation(c, input, desired, plan)
@@ -1599,7 +1612,7 @@ func validateNewRetirement(c planningCollector, input PlanInput, desired Documen
         }
         owner := c.owners[exactPlanningKey(step)]
         if owner != nil && duplicateRetirement(*owner, desired.Group(step.GroupID), step, semantics) &&
-            !(owner.progress == RetainedCleanup && c.detachingRequiredStop(step)) {
+            !c.retainedStopAllowed(*owner, desired.Group(step.GroupID), step, semantics) {
             return fault.ErrOperationAuthorization
         }
     }

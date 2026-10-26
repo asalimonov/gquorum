@@ -117,7 +117,7 @@ func TestScopedRevocationFencesReboundStopAndPreservesOtherCleanup(t *testing.T)
 	before := s.AuthorityRecords
 	// A second scoped revocation reuses the same unfinished resource fence.
 	op := s.indexes.operations["exec-v7-a1"]
-	if err := s.revokeAuthorityLocked(32, s.supersededBlocks(op), op.Status.ID); err != nil {
+	if err := s.revokeAuthorityLocked(32, s.supersededBlocks(op), op.Status.ID, DeletionSemanticsLegacy); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(before, s.AuthorityRecords) {
@@ -309,7 +309,7 @@ func TestScopedReadmissionRevocationRetainsExactOriginOutsideExecutionBlock(t *t
 	next := s
 	next.Target = s.Target.Clone()
 	next.Target.MetaGroup().Replicas[0].ReplicaID = 3
-	if err := next.revokeAuthorityLocked(31, []blockRef{{"exec-v3-a1", topology.MetaGroupID}}, "exec-v3-a1"); err != nil {
+	if err := next.revokeAuthorityLocked(31, []blockRef{{"exec-v3-a1", topology.MetaGroupID}}, "exec-v3-a1", DeletionSemanticsLegacy); err != nil {
 		t.Fatal(err)
 	}
 	next.AppliedIndex = 31

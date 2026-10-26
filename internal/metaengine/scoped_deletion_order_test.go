@@ -31,7 +31,7 @@ func TestScopedDeletionHardRefusalOutranksPendingProof(t *testing.T) {
 	before, _ := json.Marshal(next)
 	source, _ := json.Marshal(s)
 	for range 200 {
-		if err := prepareDeletionCompletions(&s, next, collector); !errors.Is(err, fault.ErrOperationAuthorization) {
+		if err := prepareDeletionCompletions(&s, next, collector, DeletionSemanticsLegacy); !errors.Is(err, fault.ErrOperationAuthorization) {
 			t.Fatal("pending proof hid a hard refusal", err)
 		}
 		after, _ := json.Marshal(next)
@@ -59,7 +59,7 @@ func TestScopedDeletionDebtHardRefusalOutranksMissingIssuance(t *testing.T) {
 	next := s.prepareApprovalOwners(s.Latest, proposal)
 	before, _ := json.Marshal(next)
 	for range 200 {
-		if err := prepareDeletionDebts(&s, next, collector); !errors.Is(err, fault.ErrIdentityMismatch) {
+		if err := prepareDeletionDebts(&s, next, collector, DeletionSemanticsLegacy); !errors.Is(err, fault.ErrIdentityMismatch) {
 			t.Fatal("missing issuance hid missing historical storage", err)
 		}
 		after, _ := json.Marshal(next)
@@ -69,7 +69,7 @@ func TestScopedDeletionDebtHardRefusalOutranksMissingIssuance(t *testing.T) {
 	}
 	delete(collector.owners, planningReplicaKey{"shard0", 9})
 	for range 20 {
-		if err := prepareDeletionDebts(&s, next, collector); !errors.Is(err, fault.ErrUnavailable) {
+		if err := prepareDeletionDebts(&s, next, collector, DeletionSemanticsLegacy); !errors.Is(err, fault.ErrUnavailable) {
 			t.Fatal("pure missing issuance stopped being retryable", err)
 		}
 	}

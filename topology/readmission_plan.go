@@ -162,7 +162,8 @@ func (p *readmissionPlanBuilder) appendStep(step Step) {
 			return
 		}
 	}
-	if r != nil && (step.Kind == StepStopReplica || step.Kind == StepCleanupReplicaState) &&
+	deletingLoad := step.GroupID != MetaGroupID && p.desired.Group(step.GroupID) == nil
+	if r != nil && !deletingLoad && (step.Kind == StepStopReplica || step.Kind == StepCleanupReplicaState) &&
 		exactPlanReplica(p.desired, step) == nil {
 		return
 	}
@@ -175,6 +176,7 @@ func (p *readmissionPlanBuilder) appendStep(step Step) {
 func (p *readmissionPlanBuilder) requiresDeletion(step Step) bool {
 	owners := p.input.formerReplicas(step.GroupID)
 	return len(owners) == 0 || slices.ContainsFunc(owners, func(r RetainedReplica) bool {
-		return r.Progress == RetainedHosted && p.replacement(r.NodeName) == nil
+		return r.Progress == RetainedHosted &&
+			(p.desired.Group(step.GroupID) == nil || p.replacement(r.NodeName) == nil)
 	})
 }

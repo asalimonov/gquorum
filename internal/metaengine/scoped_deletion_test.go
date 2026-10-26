@@ -77,7 +77,7 @@ func TestScopedDeletionRefusesMissingActionsWithoutPartialMutation(t *testing.T)
 			collector.markConvergedOwners(s.planningDeclarations().Groups)
 			next := s.prepareApprovalOwners(s.Latest, p)
 			before, _ := json.Marshal(s)
-			if err := prepareDeletionDebts(&s, next, collector); !errors.Is(err, fault.ErrOperationAuthorization) {
+			if err := prepareDeletionDebts(&s, next, collector, DeletionSemanticsLegacy); !errors.Is(err, fault.ErrOperationAuthorization) {
 				t.Fatal("deletion lost a required exact action", err)
 			}
 			after, _ := json.Marshal(s)
@@ -114,52 +114,58 @@ func TestScopedDeletionPreservesInheritedRetirement(t *testing.T) {
 
 func TestScopedDeletionBeforeFirstConvergence(t *testing.T) {
 	t.Parallel()
-	for _, issued := range []bool{false, true} {
-		s, p := deletionApprovalFixture(t)
-		s.History[0].Groups = slices.DeleteFunc(s.History[0].Groups, func(g topology.Group) bool { return g.ID == "shard0" })
-		s.Groups[1].SourceVersion, s.Groups[1].Declaration, s.Groups[1].CompletedAt = 0, nil, time.Time{}
-		p.Scopes[0].SourceVersion, p.Plan.Blocks[0].SourceVersion = 0, 0
-		for i := range s.Operations {
-			s.Operations[i].Plan.Blocks[1].SourceVersion = 0
-			s.Operations[i].Plan.Steps[1].Kind = topology.StepPrepareReplica
-		}
-		if issued {
-			action := scopedPlanAction(&s.Operations[0], s.Operations[0].Plan.Steps[1])
-			key := topology.AuthorityKey{ClusterID: s.Target.ClusterID, GroupID: "shard0", Revision: 5}
-			host := topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: "shard0", NodeName: "n1"}
-			s.AuthorityRecords = append(s.AuthorityRecords, scopedAuthorityRecord{Class: "execution",
-				authorityRecord: authorityRecord{Grant: topology.AuthorityGrant{Key: key, Purpose: topology.AuthorityEffect,
-					OperationID: action.OperationID, Action: &action, Resources: []topology.AuthorityResource{host},
-					Targets: []topology.AuthorityTarget{{NodeName: "n1", MemberID: 1, ReplicaID: 1}}}}})
-			s.AuthorityFloors = append(s.AuthorityFloors, resourceFloor{Resource: host, Key: key})
-		} else {
-			p.Plan.Steps, p.Plan.Blocks[0].Steps, p.Plan.Blocks[0].Cleanup = nil, nil, nil
-		}
-		var err error
-		s.indexes, err = prepareScopedGraph(&s, s.Rules)
-		if err != nil {
-			t.Fatal(err)
-		}
-		next, err := prepareScopedApproval(&s, s.Latest, p, explicitApproval)
-		if err != nil {
-			t.Fatal(err)
-		}
-		row := next.Groups[1]
-		wantSource, wantOwner := uint64(3), topology.OperationID("")
-		if issued {
-			wantSource, wantOwner = 0, "exec-v3-a1"
-		}
-		if row.SourceVersion != wantSource || row.Declaration != nil || row.Deleting != issued || row.Owner != wantOwner ||
-			(len(next.Cleanup) != 0) != issued || !slices.Contains(next.RetiredGroups, retiredGroup{ID: "shard0", Version: 3}) {
-			t.Fatal("deletion invented convergence or lost issued ownership", row, next.Cleanup)
-		}
-		next.History = append(slices.Clone(next.History), s.Target.Clone())
-		if _, err := prepareScopedGraph(next, next.Rules); err != nil {
-			t.Fatal("unknown deletion cannot restore", err)
-		}
-		next.Groups[1].SourceVersion, next.Groups[1].CompletedAt = 1, p.At
-		if _, err := prepareScopedGraph(next, next.Rules); !errors.Is(err, fault.ErrUnreadable) {
-			t.Fatal("pending deletion accepted a fabricated tombstone", err)
+	for _, mode := range []DeletionSemantics{DeletionSemanticsLegacy, DeletionSemanticsDetached} {
+		for _, issued := range []bool{false, true} {
+			s, p := deletionApprovalFixture(t)
+			s.History[0].Groups = slices.DeleteFunc(s.History[0].Groups, func(g topology.Group) bool { return g.ID == "shard0" })
+			s.Groups[1].SourceVersion, s.Groups[1].Declaration, s.Groups[1].CompletedAt = 0, nil, time.Time{}
+			p.Scopes[0].SourceVersion, p.Plan.Blocks[0].SourceVersion = 0, 0
+			for i := range s.Operations {
+				s.Operations[i].Plan.Blocks[1].SourceVersion = 0
+				s.Operations[i].Plan.Steps[1].Kind = topology.StepPrepareReplica
+			}
+			if issued {
+				action := scopedPlanAction(&s.Operations[0], s.Operations[0].Plan.Steps[1])
+				key := topology.AuthorityKey{ClusterID: s.Target.ClusterID, GroupID: "shard0", Revision: 5}
+				host := topology.AuthorityResource{Kind: topology.AuthorityHost, GroupID: "shard0", NodeName: "n1"}
+				s.AuthorityRecords = append(s.AuthorityRecords, scopedAuthorityRecord{Class: "execution",
+					authorityRecord: authorityRecord{Grant: topology.AuthorityGrant{Key: key, Purpose: topology.AuthorityEffect,
+						OperationID: action.OperationID, Action: &action, Resources: []topology.AuthorityResource{host},
+						Targets: []topology.AuthorityTarget{{NodeName: "n1", MemberID: 1, ReplicaID: 1}}}}})
+				s.AuthorityFloors = append(s.AuthorityFloors, resourceFloor{Resource: host, Key: key})
+			} else {
+				p.Plan.Steps, p.Plan.Blocks[0].Steps, p.Plan.Blocks[0].Cleanup = nil, nil, nil
+			}
+			var err error
+			s.indexes, err = prepareScopedGraph(&s, s.Rules)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == DeletionSemanticsDetached {
+				p = planDetachedApproval(t, &s, p)
+			}
+			next, err := prepareScopedApproval(&s, s.Latest, p, explicitApproval)
+			if err != nil {
+				t.Fatal(err)
+			}
+			row := next.Groups[1]
+			wantSource, wantOwner := uint64(3), topology.OperationID("")
+			pending := issued && mode == DeletionSemanticsLegacy
+			if pending {
+				wantSource, wantOwner = 0, "exec-v3-a1"
+			}
+			if row.SourceVersion != wantSource || row.Declaration != nil || row.Deleting != pending || row.Owner != wantOwner ||
+				(len(next.Cleanup) != 0) != issued || !slices.Contains(next.RetiredGroups, retiredGroup{ID: "shard0", Version: 3}) {
+				t.Fatal("deletion invented convergence or lost issued ownership", row, next.Cleanup)
+			}
+			next.History = append(slices.Clone(next.History), s.Target.Clone())
+			if _, err := prepareScopedGraph(next, next.Rules); err != nil {
+				t.Fatal("unknown deletion cannot restore", err)
+			}
+			next.Groups[1].SourceVersion, next.Groups[1].CompletedAt = 1, p.At
+			if _, err := prepareScopedGraph(next, next.Rules); !errors.Is(err, fault.ErrUnreadable) {
+				t.Fatal("pending deletion accepted a fabricated tombstone", err)
+			}
 		}
 	}
 }
@@ -217,7 +223,7 @@ func TestScopedDeletionReadmissionCoverage(t *testing.T) {
 				}
 			}
 			before, _ := json.Marshal(s)
-			err := prepareDeletionDebts(&s, next, collector)
+			err := prepareDeletionDebts(&s, next, collector, DeletionSemanticsLegacy)
 			want := map[string]error{"missing": fault.ErrUnavailable, "foreign": fault.ErrOperationAuthorization,
 				"closed": fault.ErrAuthorityFenced, "displaced": fault.ErrAuthorityFenced}[mode]
 			if !errors.Is(err, want) {

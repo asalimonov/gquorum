@@ -6,6 +6,29 @@ import (
 	"github.com/asalimonov/gquorum/topology"
 )
 
+// Logical completion does not wait for host work and never creates its receipts.
+// TODO(not planned): provide a global serving-cutoff barrier for logical group deletion.
+func (p deletionPreparation) completeDetachedBlocks() error {
+	op := &p.next.Operations[len(p.next.Operations)-1]
+	if err := p.validateDetachedCoverage(op.Plan.Blocks); err != nil {
+		return err
+	}
+	if err := p.protectReadmission(); err != nil {
+		return err
+	}
+	for i, block := range op.Plan.Blocks {
+		if p.next.Target.Group(block.GroupID) != nil {
+			continue
+		}
+		p.next.completeApprovalGroup(block.GroupID, op)
+		op.Status.Blocks[i].State = topology.OperationSucceeded
+		op.Status.Blocks[i].CurrentStep = 0
+		op.Status.Blocks[i].Blocked = nil
+	}
+	op.Status.State = aggregateBlockStates(op.Status.Blocks)
+	return nil
+}
+
 // Validate coverage against the source's exact owners before publishing any
 // logical checkpoint. Pending actions are obligations, never stop receipts.
 // Restore reuses this check for already-completed logical checkpoints.

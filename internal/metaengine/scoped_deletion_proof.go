@@ -1,6 +1,7 @@
 package metaengine
 
 import (
+	"github.com/asalimonov/gquorum/fault"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
 )
@@ -56,6 +57,20 @@ func (p deletionPreparation) deletionDebt(id storage.Identity, block topology.Pl
 	existing *cleanupRecord) (cleanupRecord, error) {
 	if existing == nil {
 		return p.ordinaryDebt(id, block)
+	}
+	if p.semantics == DeletionSemanticsDetached {
+		owner := p.collector.owners[planningReplicaKey{id.GroupID, id.ReplicaID}]
+		if existing.Identity != id || owner == nil || existing.MemberID != owner.target.MemberID {
+			return cleanupRecord{}, fault.ErrIdentityMismatch
+		}
+		class, err := p.source.formerReplicaStorage(id, existing.MemberID)
+		if err != nil {
+			return cleanupRecord{}, err
+		}
+		if existing.Storage != class {
+			return cleanupRecord{}, fault.ErrIdentityMismatch
+		}
+		return cleanupRecord{}, nil // Existing exact debt keeps its origin and proof.
 	}
 	op := &p.next.Operations[len(p.next.Operations)-1]
 	if existing.Stopped != nil || requiredPlanStop(op, block, id) {

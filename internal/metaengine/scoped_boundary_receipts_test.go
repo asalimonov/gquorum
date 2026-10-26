@@ -154,7 +154,7 @@ func TestScopedLateReadmissionReceiptsSettleWithoutResurrectingAdmission(t *test
 	s := threeMemberReadmissionFixture(t, false)
 	s.AuthorityRecords, s.AuthorityFloors = original.AuthorityRecords, original.AuthorityFloors
 	prepareScopedFixture(t, &s)
-	if err := s.revokeAuthorityLocked(11, []blockRef{{"exec-v2-a1", topology.MetaGroupID}}, "exec-v3-a1"); err != nil {
+	if err := s.revokeAuthorityLocked(11, []blockRef{{"exec-v2-a1", topology.MetaGroupID}}, "exec-v3-a1", DeletionSemanticsLegacy); err != nil {
 		t.Fatal(err)
 	}
 	s.AppliedIndex = 11

@@ -62,3 +62,34 @@ Findings and adjustments
 - Moved enum to deletion_semantics.go for the public-declaration lint limit.
 - Reused the coverage helper in real restore validation and split validation
   predicates to satisfy unused/complexity lint. Target and plan reflect this.
+
+## Task 3 — Atomic planner and approval activation
+Date: 2026-10-26. Previous task commit: b7279ba. Commit: this task's commit.
+
+Implemented
+- New public-service approvals select internal mode 1; legacy commands preserve
+  their original semantics. Planner emits detached stops for deletion.
+- Atomic approval retains exact cleanup and completes nil checkpoints without
+  physical receipts. Same-host replacement safety and independent blocks remain.
+- Existing readmission/debt retains original provenance, including complete
+  actionless batches. Authority conflicts use actual bindings for new deletion.
+- Regressions cover inherited/pending/complete readmission, zero-issued and
+  interrupted creation, atomic refusal, replay and pending sibling execution.
+
+Verified
+- Focused topology/metaengine/operator regressions and vet passed.
+- make test: 2,349/2,349 PASS, 11.585s; report unit/20261026T141246.822117Z-aax6k2vj.
+- Focused functional: 10/10 PASS; report function/20261026T141247.984946Z-r1lj1h0n.
+- Final metadata unit rerun, first-convergence regressions, make lint and diff check passed.
+- Functional deletion planning does not read deleted native quorum. Interrupted
+  founding completes logically before physical stop; ledger tests consume actual
+  deferred Stop receipts before retirement authorization.
+
+Findings and corrections
+- Old ledger fixture assumed required deletion stops; adapted actual grant/effect
+  flow while retaining successor and foreign-proof refusal assertions.
+- Complete readmission debt must retain batch origin rather than new operation ID.
+- Conservative inherited Stop entries must not rebind existing debt or advance
+  its readmission floor. A regression exposed and now prevents that fence.
+- Target §9.15e documents the scoped authority correction; old command behavior
+  stays explicit. Helper extraction satisfies lint without public API changes.

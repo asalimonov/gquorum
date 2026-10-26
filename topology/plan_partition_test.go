@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestScopedPartitionsDetachRemovalButKeepDeletionStops(t *testing.T) {
+func TestScopedPartitionsDetachRemovalAndDeletionStops(t *testing.T) {
 	t.Parallel()
 	for _, deletion := range []bool{false, true} {
 		t.Run(map[bool]string{false: "replica removal", true: "whole group"}[deletion], func(t *testing.T) {
@@ -30,7 +30,7 @@ func TestScopedPartitionsDetachRemovalButKeepDeletionStops(t *testing.T) {
 			block := plan.Blocks[0]
 			wantRequired, wantCleanup := []int{1}, []int{2, 3}
 			if deletion {
-				wantRequired, wantCleanup = []int{1, 2}, []int{3}
+				wantRequired, wantCleanup = nil, []int{1, 2, 3}
 			}
 			if !slices.Equal(block.Steps, wantRequired) || !slices.Equal(block.Cleanup, wantCleanup) {
 				t.Fatal("wrong execution boundary", plan)
@@ -157,7 +157,7 @@ func TestScopedAdmissionEdgesCoverExactFoundersAndLearners(t *testing.T) {
 	}
 }
 
-func TestScopedRemovalEdgeUsesRequiredEvacuation(t *testing.T) {
+func TestScopedRemovalDoesNotWaitForDeletedGroupCleanup(t *testing.T) {
 	t.Parallel()
 	base := planDoc(1, 3, []string{"n1", "n2", "n3"}, shardOf("work", rep("n3", 1)))
 	desired := base.Clone()
@@ -170,14 +170,12 @@ func TestScopedRemovalEdgeUsesRequiredEvacuation(t *testing.T) {
 	status.HealthKnown, status.LiveVoters = true, map[uint64]bool{1: true, 2: true, 3: true}
 	observed[MetaGroupID] = status
 	plan, err := BuildPlanPreferred(testPlanInput(base, observed), desired, PlanOptions{Rules: plannerRules()})
-	if err != nil || len(plan.Dependencies) != 1 || len(plan.Dependencies[0].Requires) != 1 {
-		t.Fatal("decommission omitted exact stop barrier", plan, err)
+	if err != nil || len(plan.Dependencies) != 0 || len(plan.Blocks) != 2 {
+		t.Fatal("decommission depends on deleted group host cleanup", plan, err)
 	}
-	edge := plan.Dependencies[0]
-	if plan.Steps[edge.StepSeq-1].Kind != StepRemoveReplica ||
-		plan.Steps[edge.Requires[0]-1].Kind != StepStopReplica ||
-		!slices.Contains(plan.Blocks[1].Steps, edge.Requires[0]) {
-		t.Fatal("detached retirement substituted for evacuation", plan)
+	if len(plan.Blocks[0].Steps) != 1 || plan.Steps[plan.Blocks[0].Steps[0]-1].Kind != StepRemoveReplica ||
+		len(plan.Blocks[1].Steps) != 0 || len(plan.Blocks[1].Cleanup) != 2 {
+		t.Fatal("logical deletion changed native removal or lost host cleanup", plan)
 	}
 	// A replacement member must not wait for evacuation of its successor.
 	desired.MetaGroup().Replicas = append(desired.MetaGroup().Replicas, learner("n3", 4))
@@ -208,6 +206,9 @@ func TestScopedDeclarationBlockKeepsItsOwnSource(t *testing.T) {
 func TestScopedDeletionUsesCompletedReadmissionWithoutOwningMetadata(t *testing.T) {
 	t.Parallel()
 	input, desired, _ := scopedReadmissionPlanFixture()
+	input.Retained = map[string]RetainedGroup{"work": {Replicas: []RetainedReplica{
+		{ReplicaKey: ReplicaKey{NodeName: "a", ReplicaID: 1}, Progress: RetainedStopped},
+	}}}
 	input.Approved = desired.Clone()
 	input.Groups[MetaGroupID] = GroupProgress{GroupID: MetaGroupID, ConvergedVersion: desired.Version,
 		Converged: input.Approved.MetaGroup()}
@@ -218,7 +219,7 @@ func TestScopedDeletionUsesCompletedReadmissionWithoutOwningMetadata(t *testing.
 		t.Fatal("load-only deletion repeated metadata admission or contacted its retired predecessor", plan, err)
 	}
 	if plan.Steps[0].NodeName != "b" || plan.Steps[1].NodeName != "c" ||
-		!slices.Equal(plan.Blocks[0].Steps, []int{1, 2}) || !slices.Equal(plan.Blocks[0].Cleanup, []int{3}) {
+		len(plan.Blocks[0].Steps) != 0 || !slices.Equal(plan.Blocks[0].Cleanup, []int{1, 2, 3}) {
 		t.Fatal("completed readmission waived unrelated host stops", plan)
 	}
 }

@@ -16,13 +16,15 @@ type cleanupHandover struct {
 	at        time.Time
 	required  map[storage.Identity]topology.AuthorizedStep
 	detached  map[storage.Identity]topology.AuthorizedStep
+	semantics DeletionSemantics
 }
 
-func prepareCleanupHandovers(source, next *scopedState, collector planningCollector) error {
+func prepareCleanupHandovers(source, next *scopedState, collector planningCollector,
+	semantics DeletionSemantics) error {
 	operation := next.Operations[len(next.Operations)-1]
 	h := cleanupHandover{source: source, desired: next.Target, collector: collector, at: operation.UpdatedAt,
 		required: make(map[storage.Identity]topology.AuthorizedStep),
-		detached: make(map[storage.Identity]topology.AuthorizedStep)}
+		detached: make(map[storage.Identity]topology.AuthorizedStep), semantics: semantics}
 	groups := make(map[string]bool, len(operation.Plan.Blocks))
 	for _, block := range operation.Plan.Blocks {
 		groups[block.GroupID] = true
@@ -59,18 +61,20 @@ func (h cleanupHandover) prepare(debt cleanupRecord) (cleanupRecord, error) {
 	bound := h.source.indexes.operations[topology.OperationID(debt.StopAction.OperationID)]
 	required := requiredCleanupStop(bound, *debt.StopAction)
 	action, found := h.required[debt.Identity]
+	deleted := h.desired.Group(debt.Identity.GroupID) == nil
 	if detached, ok := h.detached[debt.Identity]; ok {
-		if !required || !detachedCleanupAllowed(h.desired, debt.Identity) {
+		if !required && deleted && h.semantics == DeletionSemanticsDetached &&
+			detachedCleanupStop(bound, debt.StopAction) {
+			return debt, nil // Keep already-detached ownership rather than reissuing it.
+		}
+		if deleted && h.semantics == DeletionSemanticsLegacy ||
+			!required || !detachedCleanupAllowed(h.desired, debt.Identity) {
 			return cleanupRecord{}, fault.ErrOperationAuthorization
 		}
 		action, found = detached, true
 	}
 	if found {
-		if h.at.Before(debt.UpdatedAt) || h.desired.MemberID(debt.Identity.NodeName) > debt.MemberID {
-			return cleanupRecord{}, fault.ErrOperationAuthorization
-		}
-		debt.StopAction, debt.UpdatedAt = &action, h.at
-		return debt, nil
+		return h.rebindStop(debt, action)
 	}
 	if !required {
 		return debt, nil // Unchanged detached work keeps its exact bound approval.
@@ -86,9 +90,18 @@ func (h cleanupHandover) prepare(debt cleanupRecord) (cleanupRecord, error) {
 	return debt, nil
 }
 
+func (h cleanupHandover) rebindStop(debt cleanupRecord, action topology.AuthorizedStep) (cleanupRecord, error) {
+	deleted := h.semantics == DeletionSemanticsDetached && h.desired.Group(debt.Identity.GroupID) == nil
+	if h.at.Before(debt.UpdatedAt) || !deleted && h.desired.MemberID(debt.Identity.NodeName) > debt.MemberID {
+		return cleanupRecord{}, fault.ErrOperationAuthorization
+	}
+	debt.StopAction, debt.UpdatedAt = &action, h.at
+	return debt, nil
+}
+
 func detachedCleanupAllowed(desired topology.Document, id storage.Identity) bool {
 	group := desired.Group(id.GroupID)
-	return group != nil && !slices.ContainsFunc(group.Replicas, func(r topology.Replica) bool {
+	return group == nil || !slices.ContainsFunc(group.Replicas, func(r topology.Replica) bool {
 		return r.NodeName == id.NodeName && r.ReplicaID != id.ReplicaID
 	})
 }

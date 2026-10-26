@@ -14,13 +14,14 @@ import (
 type deletionPreparation struct {
 	source, next *scopedState
 	collector    planningCollector
+	semantics    DeletionSemantics
 }
 
 // Prepare new debt without changing existing proof or inventing native removal.
 // The caller has already validated scopes and prepared required-stop handover.
-// TODO(not planned): a physically destroyed-host waiver. Missing exact stop
-// proof keeps whole-group deletion pending; collection remains unconfirmed.
-func prepareDeletionDebts(source, next *scopedState, collector planningCollector) error {
+// TODO(not planned): retire unconfirmed cleanup through an explicit permanent-host declaration.
+func prepareDeletionDebts(source, next *scopedState, collector planningCollector,
+	semantics DeletionSemantics) error {
 	operation := &next.Operations[len(next.Operations)-1]
 	deleting, retired := next.deletionScopes(operation)
 	debts := slices.Clone(next.Cleanup)
@@ -28,7 +29,7 @@ func prepareDeletionDebts(source, next *scopedState, collector planningCollector
 	for i := range debts {
 		existing[debts[i].Identity] = &debts[i]
 	}
-	preparation := deletionPreparation{source, next, collector}
+	preparation := deletionPreparation{source: source, next: next, collector: collector, semantics: semantics}
 	var pending error
 	for _, key := range collector.sortedOwners() {
 		owner := collector.owners[key]
@@ -46,7 +47,7 @@ func prepareDeletionDebts(source, next *scopedState, collector planningCollector
 		if err != nil {
 			return err
 		}
-		if debt.StopAction != nil {
+		if debt.StopAction != nil || semantics == DeletionSemanticsDetached && debt.Identity != (storage.Identity{}) {
 			debts = append(debts, debt)
 		}
 	}
@@ -84,7 +85,15 @@ func (p deletionPreparation) ordinaryDebt(id storage.Identity, block topology.Pl
 	if err != nil {
 		return cleanupRecord{}, err
 	}
-	for _, seq := range block.Steps {
+	stopSteps := block.Steps
+	if p.semantics == DeletionSemanticsDetached {
+		if owner.progress == topology.RetainedStopped {
+			debt.OperationID = "" // The consumed batch owns actionless retirement provenance.
+			return p.readmissionDebt(debt, operation.UpdatedAt)
+		}
+		stopSteps = block.Cleanup
+	}
+	for _, seq := range stopSteps {
 		step := operation.Plan.Steps[seq-1]
 		if step.Kind == topology.StepStopReplica && step.NodeName == id.NodeName && step.ReplicaID == id.ReplicaID {
 			action := scopedPlanAction(operation, step)
@@ -99,6 +108,9 @@ func (p deletionPreparation) ordinaryDebt(id storage.Identity, block topology.Pl
 		}
 	}
 	if debt.StopAction == nil {
+		if p.semantics == DeletionSemanticsDetached {
+			return cleanupRecord{}, fault.ErrOperationAuthorization
+		}
 		// The batch remains the obligation; actionless debt waits for completion.
 		_, err := p.collector.deletionReadmission(id.GroupID, owner.target, p.next.Target)
 		return cleanupRecord{}, err
@@ -193,7 +205,8 @@ func validateScopedDeletion(state *scopedState, index *scopedIndexes) error {
 			completed = append(completed, topology.PlanBlock{GroupID: row.GroupID})
 		}
 	}
-	if err := (deletionPreparation{&source, &source, collector}).validateDetachedCoverage(completed); err != nil {
+	preparation := deletionPreparation{source: &source, next: &source, collector: collector}
+	if err := preparation.validateDetachedCoverage(completed); err != nil {
 		return invalidScopedState("completed deletion lacks exact retained cleanup coverage")
 	}
 	for _, key := range collector.sortedOwners() {

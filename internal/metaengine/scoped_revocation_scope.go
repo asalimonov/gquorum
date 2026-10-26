@@ -23,12 +23,17 @@ func (s *scopedState) supersededBlocks(successor *topology.Operation) []blockRef
 
 // Only host actions conflict with detached host cleanup. A native membership
 // change on another host in the same group cannot fence that cleanup away.
-func (s *scopedState) successorResources(operation *topology.Operation) map[topology.AuthorityResource]bool {
+func (s *scopedState) successorResources(operation *topology.Operation,
+	semantics DeletionSemantics) map[topology.AuthorityResource]bool {
 	resources := make(map[topology.AuthorityResource]bool)
 	if operation == nil {
 		return resources
 	}
 	for _, step := range s.successorSteps(operation) {
+		if semantics == DeletionSemanticsDetached && s.Target.Group(step.GroupID) == nil {
+			s.deletionSuccessorResources(operation, step, resources)
+			continue
+		}
 		resource := topology.AuthorityResource{GroupID: step.GroupID, NodeName: step.NodeName}
 		switch step.Kind {
 		case topology.StepPrepareReplica, topology.StepStopReplica, topology.StepCleanupReplicaState:
@@ -45,14 +50,32 @@ func (s *scopedState) successorResources(operation *topology.Operation) map[topo
 			resource.Kind, resource.NodeName = topology.AuthorityGroup, ""
 			resources[resource] = true
 		case topology.StepDeleteGroupState:
-			for _, debt := range s.Cleanup {
-				if debt.Identity.GroupID == step.GroupID {
-					resources[topology.AuthorityResource{Kind: topology.AuthorityHost,
-						GroupID: step.GroupID, NodeName: debt.Identity.NodeName}] = true
-				}
-			}
+			s.deletionHostResources(step.GroupID, resources)
 		default: // An observational wait issues no authority.
 		}
 	}
 	return resources
+}
+
+// Logical deletion inherits existing cleanup rather than claiming every former
+// host anew. In particular, an unused conservative Stop cannot fence a still-
+// bound readmission batch which owns that host's real retirement.
+func (s *scopedState) deletionSuccessorResources(operation *topology.Operation, step topology.Step,
+	resources map[topology.AuthorityResource]bool) {
+	action := scopedPlanAction(operation, step)
+	for _, debt := range s.Cleanup {
+		if exactCleanupBinding(&debt, action) {
+			resources[topology.AuthorityResource{Kind: topology.AuthorityHost,
+				GroupID: debt.Identity.GroupID, NodeName: debt.Identity.NodeName}] = true
+		}
+	}
+}
+
+func (s *scopedState) deletionHostResources(group string, resources map[topology.AuthorityResource]bool) {
+	for _, debt := range s.Cleanup {
+		if debt.Identity.GroupID == group {
+			resources[topology.AuthorityResource{Kind: topology.AuthorityHost,
+				GroupID: group, NodeName: debt.Identity.NodeName}] = true
+		}
+	}
 }
