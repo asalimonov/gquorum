@@ -38,13 +38,13 @@ func TestScopedDroppedRetryNeverForwardsAfterLeadershipLoss(t *testing.T) {
 	must(t, g.rn.Campaign())
 	term := g.rn.BasicStatus().Term
 	close(g.ready)
-	req := &request{ctx: context.Background(), correlation: "retry", expectedTerm: term,
-		proposal: Proposal{Data: []byte("must not forward")}, reply: make(chan response, 1), retried: true, retryAt: time.Now()}
+	req := &request{ctx: context.Background(), correlation: "retry", expectedTerm: term, reportSubmission: true,
+		proposal: Proposal{RequestID: "scoped", Data: []byte("must not forward")}, reply: make(chan response, 1), retried: true, retryAt: time.Now()}
 	g.props[req.correlation] = req
 	must(t, g.rn.Step(raftpb.Message{Type: raftpb.MsgHeartbeat, From: 2, To: 1, Term: term + 1}))
 	g.retryDroppedProposals(time.Now().Add(time.Second))
 	result := <-req.reply
-	if !errors.Is(result.err, fault.ErrNotLeader) || len(g.props) != 0 {
+	if !errors.Is(result.err, fault.ErrNotLeader) || result.disposition != SubmissionNotSubmitted || len(g.props) != 0 {
 		t.Fatal(result, len(g.props))
 	}
 	for _, msg := range g.rn.Ready().Messages {
