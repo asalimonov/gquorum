@@ -1141,6 +1141,6 @@ Original Tasks 1–20 remain completed historical checkpoints. Subsequent source
 - [x] P1 refusal visibility: bounded coalesced source refusal status, typed size/limit/time/count, rate-limited events and proactive oversize warning; no pin/permit/resolution/callback on refusal. Preserve remote size details.
 - [x] Add pure bound/coalescing checks, event/race checks and a real process regression proving refusal cause and unrelated-group progress.
 - [x] Complete final unit/vet/lint, functional/race, full cluster and explicitly tagged generated 2 GB qualification; record commands/results and memory/CPU limits.
-- [ ] Commit corrections, request a pinned architecture follow-up, then request Meridian re-evaluation after that first follow-up completes.
+- [x] Commit corrections, request a pinned architecture follow-up, then request Meridian re-evaluation after that first follow-up completes. Both reviews completed at 037b299: architecture P1s closed; Meridian GQ-02 ready with explicit integration/provisioning conditions (review Threads 7–8).
 
 Verification-only test correction: delete_wait_test.go now retries only replica_not_ready while probing the same idempotent command after independent operation success. Operation status is not a local serving-observation barrier. The original one-shot probe failed at line 102 under concurrent validation; no deletion, exact stop, durable identity or cleanup assertion was weakened. The correction commit contains the exact diff.

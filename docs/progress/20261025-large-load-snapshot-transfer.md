@@ -549,3 +549,15 @@ Scope and review
 - Decoder and refusal P1s are corrected; prior dd10d21 source-review verdicts remain historical and are not rewritten as approvals of this commit. Updated target describes these corrections and the plan pins its hash.
 - P2 hash-owner cancellation, pre-existing local creation/startup clones and unpublished-replica stream churn are recorded separate follow-ups, unchanged by the two quoted P1 fixes. Full-buffer resource/provisioning and same-process resume choices remain intact.
 - Request a new architecture review of this pinned correction commit, then pass that completed result to the Meridian reviewer for readiness reconsideration, as the user requested sequential reviews.
+
+
+## Post-review P1 corrections — sequential reviews completed
+
+Date: 2026-10-26. Reviewed implementation: 037b299a56d0b411964c99e25768430a3c5441ed. Target SHA256: 6dc8fdd5c197eaa1bf1ac094d889cd34c0020bf3e3b7452f65aab0d9c7ae9dd4. Full returned reviews and dispositions are in docs/review/feat_large-snapshots-transfer.md, Threads 7–8.
+
+- Architecture reviewer 43cff8c6-3dab-4f3f-a0eb-d4393c777725: both P1s closed, no regression/new blocker. Decoder strictness, refusal ownership/bounds and integration wiring verified in source.
+- After architecture completion, Meridian reviewer 3ee32258-9c92-4c46-a75a-c5444e543898: ready with explicit integration and provisioning conditions for GQ-02; supersedes the negative dd10d21 verdict for this requirement. No mandatory additional upstream implementation identified. Neither reviewer ran tests; they inspected pinned source and existing recorded validation.
+- Remaining P2s: routine capacity events resemble errors and share history; permanent remote refusal history churn/no event coalescing; in-place status cursor updates; incomplete oversize-warning coverage; concurrent digest-waiter cancellation; creation/startup copies; unpublished-replica stream churn.
+- Meridian must wire the actual adapter and shutdown ownership, align complete encoded size/frame limits, interpret refusal/acceptance/install observations correctly, refresh diagnostic pages from cursor zero, provision resident state plus full-buffer costs and run Meridian-specific snapshot-plus-tail integration tests. Initial qualification remains MaxOutgoing=1. Sizes above 2 GB and larger concurrency need separate qualification.
+- Sampled process RSS at 2 GB remains about 13.56 GB; allocation savings are per decode, not a whole-process RSS bound. Existing full-buffer/memory-staging choices remain accepted.
+- This is review-completion bookkeeping only; no source behavior or new tests changed. Preserve unrelated staged .gitignore. Await subsequent user instructions.
