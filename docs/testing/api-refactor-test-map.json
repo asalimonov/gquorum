@@ -1,6 +1,6 @@
 {
   "baseline_commit": "75ba513f07405dafd4cafdac7369814aed6e31da",
-  "note": "Only renamed or split tests; unchanged test names remain discoverable in source. Assertion responsibilities and intentional contract changes are documented in runtime-ports.md. Symbol resolution alone is not behavioral verification.",
+  "note": "Only renamed or split tests; unchanged test names remain discoverable in source. Assertion responsibilities and intentional contract changes are in the archived runtime-ports.md at commit 353b57d. Symbol resolution alone is not behavioral verification.",
   "renamed_tests": {
     "internal/convergence/engine_test.go::TestConvergence_LearnerFirstSteps": [
       "internal/operator/controller_test.go::TestController_LearnerFirstSteps"

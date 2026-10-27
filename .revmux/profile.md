@@ -14,13 +14,21 @@
 
 - Go library (`github.com/asalimonov/gquorum`) for durable clustered applications using etcd Raft, bbolt, WAL, gRPC and protobuf. Applications supply business state machines, load transport, identities and deployment configuration.
 - Read `AGENTS.md`, `README.md` and the relevant current contracts in `docs/architecture/library.md` and `docs/architecture/raft.md`.
-- Latest is staged intent, Target approved intent, Active converged topology. Staged intent cannot authorize startup or cleanup. Status/document reads are observations, not linearizable barriers. HostNode denotes the reporting node.
+- Latest is staged intent and Target approved intent; independent group/node progress records proven declarations. There is no Active document. Staged intent cannot authorize startup or cleanup. Status/document reads are observations, not linearizable barriers. HostNode denotes the reporting node.
 - Preserve exact replica identity, authorized retirement/readmission proofs, foreign or contradictory storage evidence, process fencing and monotonically fresh replacement IDs. Deleted group IDs cannot be reused.
 - Preserve persisted encodings, protobuf fields and immutable compatibility fixtures. Public API renames are not authorization for changing storage/wire formats. The HTTP example is a separate application boundary; distinguish its JSON contracts from durable metadata encodings.
 - Constructor validation does no I/O or callbacks. Successful factories transfer Application.Close to Node; failed factories release partial resources. Borrowed dependencies remain borrowed. Join engine/replay/callback work before releasing owned resources; failed release retains ownership and blocks successors.
 - Keep callback inputs owned, calls serialized and queues bounded. Overdue callbacks remain owned until return. A callback may inspect status or RequestStop, but must not join teardown that waits for itself. Proposal cancellation cannot undo committed commands.
 - Library enforces authorization and membership safety; replaceable scheduler/lifecycle policies only choose supported decisions. Autoscaling, infrastructure provisioning, cross-group transactions and external side effects belong to applications.
-- Root, examples/cluster and tests/cluster are separate Go modules. Root `make test-unit` and `make lint-full` cover all three; Docker/process tests are separate. Generated protobuf, immutable fixtures and historical validation records are not evidence of new checks.
+- The root, examples/cluster, examples/scheduler, examples/inmemory-cache and tests/cluster are separate Go modules. Root `make test-unit` and `make lint-full` cover all five; Docker/process tests are separate. Generated protobuf, immutable fixtures and historical validation records are not evidence of new checks.
+- The library shouldn't allow parallel operations with topology of cluster. Thus it shouldn't try to resolve or prevents conflicts of such operations.
+- The library shouldn't try to guarantee handling of all possible sequences of destuctive operations with topology of a clustr from a user (operator) when the cluster is in degraded state (when one or more nodes are not available). Example: A node in a cluster is in offline, a user removed group `X` with a replica on that node. When _meta is quorum - the cluster accepts the change. When the user do readmission of this node with a new ID, the node should cleanup itself to empty state for load group, then recieve state of `_meta` to the latest version and only after that recive groups if scheduler decide to do it. This means that the past operation under group `X` should be transfered to final state with assumption that retirement of this replica done indirectly.
+
+## Documentation
+
+- Remove outdatted information and don't leave reference on docs in the previous commits on GitHub
+- Documentation should be consise and well structured, each file should have not more 10.000 words. Avoid walls of texts.
+- Don't leave self descriptive docs and comments in code, only not obvious flows, side-effects consequences or examplantions of algorithms.
 
 ## Reporting bar
 

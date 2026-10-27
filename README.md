@@ -107,7 +107,6 @@ Raft and CRDT libraries, Zookeeper or PostgreSQL:
   and under 1mks for operation on mediocre hardware.
 - **Permanent majority loss:** recover one complete survivor into a fresh cluster,
   then start an ordinary Node on the same roots.
-  See the [recovery lifecycle](docs/architecture/runtime.md#key-public-entities-and-interfaces).
 - **Large load snapshots:** bounded chunked transfers run alongside ordinary Raft on separate connections to the existing load port. Configure `Loads.SnapshotTransfer` at Node creation; the default encoded allowance is 256 MiB, and larger sizes are supported by configuration. Full-buffer application/storage APIs require memory for multiple snapshot-sized buffers. See [transport and resource contracts](transport/loadgrpc/README.md).
 - **Durable recovery:** bbolt-backed metadata, an included etcd WAL backend for
   load groups, full state-machine snapshots, committed-tail replay, compaction
@@ -223,9 +222,8 @@ compatibility impact.
 The [testing guide](docs/testing/tests.md) describes test boundaries and commands.
 Test targets require Python 3.9+ and save detailed results and Markdown Gantt
 timelines under `test-reports/<suite>/latest/`. Each run keeps its own directory.
-The [API validation record](docs/testing/api-refactor-validation.md) records the
-completed public API refactor checks. The [stable learner validation record](docs/testing/stable-learner-validation.md)
-maps voter configurations, metrics, forwarding and recovery to their implementation and tests.
+The [baseline validation record](docs/testing/validation.md) retains historical
+pre-refactor results; run the current suites for new changes.
 
 ## License
 

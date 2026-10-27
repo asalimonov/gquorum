@@ -34,10 +34,8 @@ Start with [README.md](README.md), then the relevant contracts:
 - [Project map](docs/architecture/project-map.md): public handles, topology
   workflow, integration interfaces and package boundaries.
 - [Testing guide](docs/testing/tests.md): suite boundaries and commands.
-- [API refactor validation](docs/testing/api-refactor-validation.md) and
-  [audit](docs/testing/api-refactor-audit.md): completed coverage and known scope.
-- [Physical compatibility](docs/testing/api-baseline-physical.md): fixture
-  provenance and immutable hashes for retained storage and protocols.
+- [Physical compatibility hashes](docs/testing/api-baseline-physical.json):
+  immutable fixture provenance for retained storage and protocols.
 
 Inspect implementation and nearby tests when changing a contract.
 `docs/brainstorms` and `docs/plans` retain history; some describe superseded APIs.
@@ -71,6 +69,11 @@ cleanup evidence and shutdown release ownership.
 | `scripts/test_report.py` | Shared test runner: Meridian-style stdout summaries, persistent package logs/JUnit and Markdown timelines. |
 
 Keep root `gquorum` package with small number of files.
+
+## Code review
+
+- Use `revmux` skills for running a code review. Always create a new terminal via `paseo` skill and run `revmux` there, it should be visible for the user
+- Don't copy review report to user, user can see it in a terminal and as a file.
 
 ## Contracts to preserve
 
@@ -147,9 +150,11 @@ Keep root `gquorum` package with small number of files.
   obligations are proven complete. Readmission fences and joins the old owner
   before installing the exact granted replacement identity.
 - Separate native removal, joined stop, retirement and physical collection.
-  Whole-group deletion requires exact stop/readmission proof for every former
-  owner; detached collection does not delay group convergence. Missing data alone
-  is not collection proof. Custom RetirementStore must implement ForgetCollection.
+  A new whole-group deletion completes through `_meta` quorum after retaining
+  exact cleanup debt for every former owner; stop, retirement and collection
+  continue when each owner returns. Native deletion authority settles only after
+  actual stops. Legacy approvals retain their original required-stop semantics.
+  Missing data alone is not collection proof. Custom RetirementStore must implement ForgetCollection.
   Persist preparation before Collect, completion before report, and release the
   exact store marker before removing the collected journal row. Permanently lost
   hosts retain unconfirmed debt; no destroyed-host waiver is implemented.
@@ -217,7 +222,7 @@ complete stopped survivor, Node-owned WAL, explicit loss acceptance, in-root
 backups and a fresh lineage. Applications own durable remote maintenance jobs and
 Files Backup/Undo; ordinary GroupFactory/Node startup perform replay. Old nodes
 require explicit reset-for-join. Custom/in-memory recovery donors, multiple
-survivors and disaster rollback remain unsupported. See the current runtime docs.
+survivors and disaster rollback remain unsupported.
 Events are node-local and never replicated through `_meta`.
 
 Keep `examples/cluster` small and meta-only. Full load integration and fault

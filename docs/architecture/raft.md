@@ -2,7 +2,7 @@
 
 How gquorum uses Raft consensus, which state it replicates, and how elections,
 transport, persistence and recovery fit together. This document describes the
-current implementation; the [runtime overview](runtime.md) introduces the public
+current implementation; the [library architecture](library.md) introduces the public
 entities, ownership and main flows.
 
 gquorum uses `go.etcd.io/raft/v3` for two kinds of consensus group: one `_meta`
@@ -262,7 +262,7 @@ writes survive while a quorum of the group's replicas keeps running. A restarted
 replica has no state, so it cannot resume its old Raft identity (an amnesiac
 voter could vote twice). It parks as `store_missing`, as a voter with a lost WAL
 would, and its node then reseats its own replica under a fresh ID; see
-[node ownership and recovery](runtime.md#in-memory-load-groups).
+[node life cycle](library.md#nodes-life-cycle).
 
 Startup verifies durable identity and recovery evidence, restores the snapshot,
 and replays the full committed tail. An applied hint is not permission to skip

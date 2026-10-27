@@ -1,5 +1,10 @@
 # gquorum project info
 
+## MANDATORY for brainstorm and code review
+
+1. Re-read `## Design constraints` section in `./docs/architecture/library.md` before brainstorm, design of the target architecture and code review
+2. Ask user for review and approval for cases which can violate design constraints but looks correct or needed.
+
 ## Documentation rules
 
 - Documentation is markdown files WITHOUT line lenght limit, we are not in ancient period with 15" CRT screens.

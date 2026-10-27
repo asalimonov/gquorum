@@ -2,7 +2,7 @@
 
 How the repository is organized: modules, responsibility zones and the key
 entities and interfaces each zone owns. Contracts and behavior live in the
-[runtime overview](runtime.md), [Raft model](raft.md) and [placement](placement.md); test
+[library architecture](library.md), [Raft model](raft.md) and [placement](placement.md); test
 commands live in the [testing guide](../testing/tests.md).
 
 | Path | Responsibility |

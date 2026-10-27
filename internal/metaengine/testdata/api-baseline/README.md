@@ -24,4 +24,4 @@ store and Raft engine, restores its FSM and checks every retained bucket row
 without rewriting identities or legacy operator records.
 
 Provenance, generator and immutable hashes are recorded in
-[the physical compatibility notes](../../../../docs/testing/api-baseline-physical.md).
+[the physical compatibility hash manifest](../../../../docs/testing/api-baseline-physical.json).

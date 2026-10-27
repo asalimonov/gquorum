@@ -18,7 +18,7 @@ XML, detailed Markdown results and a Markdown Gantt timeline in a fresh
 `test-reports/cluster/<timestamp>/` directory. `test-reports/cluster/latest`
 links to the latest completed run. The `make test-cluster` report includes the
 image-build phase and its full log, including failed builds. See the
-[reporting guide](../../docs/testing/tests.md#test-reports).
+[reporting guide](../../docs/testing/tests.md#reports-and-focused-runs).
 
 The console distinguishes test entry, queueing and actual execution. The timeline
 sorts leaf tests and parallel subtests by execution start, excluding Go's
@@ -179,9 +179,10 @@ Admission also isolates the meta leader's Raft traffic during the learner phase,
 elects its replacement through the healthy majority and requires
 the same execution ID, attempt and exact authorized promotion to finish. A real
 one-second repair interval preserves intentional learners through several ticks;
-a staged promotion remains inert until approval. Whole-group deletion waits for
-an unreachable former host while its last proven declaration and retained local
-state remain intact; independent groups may still converge. Multi-group shutdown uses three founders, verifies each host's membership and
+a staged promotion remains inert until approval. `TestFailureIsolation_DeletionWithoutFormerHost`
+verifies whole-group deletion completes through `_meta` quorum while a former
+host is unreachable; its exact cleanup debt and retained local state remain for
+later reconciliation. Independent groups may still converge. Multi-group shutdown uses three founders, verifies each host's membership and
 acknowledged values, then requires
 all concurrent process stops to finish within thirty seconds with exit code zero.
 Node limits come from `topology.Limits`; routine scenarios use three nodes. Fixtures use the library default 100ms Raft tick and a five-second
@@ -191,7 +192,7 @@ module and compiler caches across source changes. Source adaptations are tracked
 in the [migration map](../../docs/testing/cluster-migration.md);
 [validation](../../docs/testing/validation.md) retains historical results. Current
 scoped process cases and final-gate requirements are indexed in the
-[test guide](../../docs/testing/tests.md#scoped-operations-and-cleanup-validation).
+[test guide](../../docs/testing/tests.md#docker-process-tests).
 
 The [test application](testapp/README.md) is a dedicated binary under `tests/cluster/testapp`; the ordinary Compose
 example contains no test instrumentation. Adding a
