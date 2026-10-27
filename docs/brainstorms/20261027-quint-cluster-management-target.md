@@ -80,7 +80,7 @@ EffectKey  = { operation: AttemptKey, step: int, action: ActionKind,
                target: EffectTarget, grantRevision: int }
 EffectTarget = GroupTarget(str) | ReplicaTarget(ReplicaKey)
 RequestKey = { caller: ProcessKey, sequence: int }
-Audit      = { actor: str, comment: str }
+Audit      = { actor: str, comment: str, forced: Option[{ node: str, reason: str }] }
 MutationOptions = { expectedVersion: int, audit: Audit, preview: bool, approve: bool }
 ```
 
@@ -92,20 +92,27 @@ Model expected-version zero by capturing the caller's locally observed Latest be
 NodeDecl = { name: str, member: int, state: Active | Draining | Drained | Excluded,
              nodeType: str, labels: str -> str }
 ReplicaDecl = { key: ReplicaKey, role: Voter | Learner, pinnedLearner: bool }
-PlacementRule = { replicas: int, allowedTypes: Set[str], selector: str -> str,
-                  voterDomain: Option[str] }
-HostingRule = { mode: HostingMode, selectedNodes: Set[str] }
-VoterConfig = { target: int, domain: Option[str] }
+PlacementRule = { minVoters: int, maxVoters: int,
+                  allowedTypes: Set[str], selector: str -> str }
+HostingRule = { mode: HostingMode, selectedNodes: List[str] }
+VoterConfig = { target: int, domain: Option[str], maxSurge: int,
+                failureWindow: int, standbyWindow: int,
+                failureLag: int, standbyLag: int, standbyApplyBacklog: int,
+                replaceNoProgress: bool, noProgressWindow: int,
+                maxObservationGap: int, switchCooldown: int, demotionCooldown: int,
+                allowNewFailureDuringCooldown: bool }
 GroupDecl = { id: str, storage: StorageDefault | StorageMemory,
               labels: str -> str, replicas: Set[ReplicaDecl],
               placement: Option[PlacementRule], hosting: Option[HostingRule],
-              voterConfig: Option[VoterConfig] }
+              voterConfig: Option[VoterConfig], nextReplica: int }
 Document = { cluster: str, version: int, parent: int, rebasedFrom: Option[int],
              nodes: str -> NodeDecl, groups: str -> GroupDecl,
              placement: PlacementRule, audit: Audit }
 ```
 
 Map actual hosting/placement variants from `topology` into a bounded vocabulary; every distinct branch that affects eligibility needs a representative class and witness. Do not make all hosts interchangeable when testing pinned learners, strict failure domains or reserved nodes. Labels on a group are edited through Stage, not an invented SetGroupLabels API.
+
+Execution refinement (Task 4, source-grounded): PlacementRule.MinReplicas/MaxReplicas bound voters; they are distinct from the total hosted-replica capacity. Distinct voter domains belong to VoterConfig, not PlacementRule. Preserve surge and bounded abstract stability/lag/cooldown controls so configuration validation and later scheduler cases remain representable. Hosting names use a list at validation boundaries: typed convenience methods normalize ordering, while duplicate names must not disappear into a set. Group allocation cursors persist even while a fresh document is staged.
 
 Planning clarification: `topology/storage_class.go` admits only default and memory as replicated storage classes. Model Node-owned WAL versus borrowed custom backing separately in node configuration; it affects recovery eligibility but is not a third GroupSpec storage value. `topology/hosting.go` also preserves legacy groups without a hosting declaration. Missing hosting and explicit/all-eligible hosting must remain distinguishable.
 
@@ -123,7 +130,8 @@ ProcessState = {
 HostState = {
   pin: Option[DurableNodeIdentity], replicaEvidence: ReplicaKey -> StorageEvidence,
   authorityFloors: ResourceKey -> int, receipts: Set[Receipt],
-  collectionMarkers: ReplicaKey -> CollectionState
+  collectionMarkers: ReplicaKey -> CollectionState,
+  metaImage: Option[ReadView], metaIndex: int
 }
 NodeState = { volatile: ProcessState, durable: HostState }
 NodeStorageConfig = { defaultBackend: OwnedWAL | BorrowedCustom }
@@ -131,7 +139,7 @@ OwnerState = { key: ReplicaKey, phase: OwnerPhase, held: bool,
                reservation: Option[RequestKey], replayReady: bool,
                startupAuthorized: bool, published: bool,
                factoryOutstanding: bool, engineJoined: bool,
-               applicationClose: ClosePhase }
+               applicationClose: ClosePhase, engineRunning: bool }
 ```
 
 `OwnerPhase` distinguishes absent, reserved, opening, replaying, ready, parked, stopping and stopped. A retained failed Close keeps ownership until a serialized successful retry. Crash destroys process-owned work but does not fabricate graceful-stop receipts. Runtime holds and observations follow their actual persistence behavior; do not accidentally persist every volatile field. Storage evidence distinguishes valid, missing, foreign, unreadable and contradictory; memory replicas lose their image on process restart.
@@ -171,7 +179,9 @@ MetadataState = {
 }
 Operation = { key: AttemptKey, predecessor: Option[AttemptKey], origin: Origin,
               plan: Plan, blocks: str -> BlockProgress, audit: Audit }
-Plan = { version: int, blocks: str -> List[PlannedStep] }
+Plan = { version: int, blocks: str -> List[PlannedStep],
+         cleanup: str -> List[PlannedStep], sources: str -> int,
+         dependencies: Set[(int, int)] }
 GroupProgress = { sourceVersion: int, proven: Option[GroupDecl],
                   owner: Option[AttemptKey], deleting: bool }
 BlockProgress = { phase: Pending | Running | WaitingReplica | WaitingCatchUp |
@@ -241,7 +251,7 @@ All files in this table are **CREATED** unless explicitly marked otherwise. Name
 | File under scripts/quint | Exports and responsibility |
 | --- | --- |
 | `types.qnt` | All shared records/enums; no state variables or transitions. |
-| `topology.qnt` | `validateDocument(doc, rules): Set[Refusal]`; `mutationGuard(view, request): bool`; `mutateDocument(view, request): Document`; `affectedScopes(before, after): Set[str]`; `eligibleHosts(doc, group): Set[str]`; `makePlan(input, desired): Plan`; `preview(input, request): PreviewResult`. |
+| `topology.qnt` | `validateDocument(doc, rules): Set[Refusal]`; `mutationGuard(view, request): bool`; `mutateDocument(view, request): Document`; `affectedScopes(before, after): Set[str]`; `eligibleHosts(doc, group): Set[str]`; `makePlan(input, desired): PlanResult`; `preview(input, request): PreviewResult`. |
 | `membership.qnt` | `hasCommitPath(consensus, nodes, links): bool`; `canProposeChange(input, change): bool`; `proposeChange(consensus, change): ConsensusState`; `canCommitChange(input): bool`; `commitChange(input): ConsensusState`; `canTransfer(input, target): bool`; `transfer(input, target): ConsensusState`. |
 | `authority.qnt` | `canApprove(meta, captured): bool`; `approve(meta, captured): MetadataState`; `canRetry(meta, predecessor): bool`; `retry(meta, predecessor): MetadataState`; `validateEffect(local, grant, effect): bool`; `installFence(host, grant): HostState`; `acceptReceipt(meta, receipt): MetadataState`; `revocationComplete(meta, key): bool`. |
 | `lifecycle.qnt` | `canReserve(input, key): bool`; `reserve(input, key): OwnerState`; `canPublish(input, key): bool`; `publish(owner): OwnerState`; `requestStop(owner): OwnerState`; `canJoin(owner): bool`; `join(owner): OwnerState`; `canRetire(input): bool`; `retire(input): RetirementUpdate`; `canCollect(input): bool`; `collect(input): CollectionUpdate`. |
@@ -258,6 +268,9 @@ All files in this table are **CREATED** unless explicitly marked otherwise. Name
 | `vendor/*` | Pinned Choreo/basicSpells sources, upstream commit, license and checksums; preserve provenance of any adapter changes. |
 | `run.py` | Profile validation and tool orchestration; exact exit status, bounded timeouts and complete run manifests. No installation or network download by default. |
 | `README.md`, `coverage.md`, `regressions.md` | Scope/commands, full API correspondence, and manually reproducible Go scenarios. |
+
+Execution refinement (Task 4): PlanResult is `Planned(Plan) | PlanRejected(Set[Refusal])`, matching the Go planner's `(Plan, error)` contract. Never represent a refused plan as an empty successful plan. PlannedStep retains its sequence, expected/result voter identities and optional transfer target. Required blocks, detached cleanup and explicit dependencies remain distinct so logical deletion does not imply stop and replacement ordering can be checked. PlanningInput also carries retained owner milestones (hosted, stopped or cleanup-owned), so a proven old stop is not turned into a new unreachable-host obligation. Source-aligned helpers are split into placement.qnt and planning.qnt behind the topology.qnt interface; these remain pure modules with no independent state. Native observation identities must be grounded in the retained inventory before planning effects.
+
 
 Pure guard/update pairs are separate. If rejection is observable, use a separate rejection transition, not a successful no-op fallback. Inputs to pure updates include all evidence required by the modeled source contract. Helpers must be total for admissible input domains; map lookup, list head and Option unwrap need explicit shape validation before use.
 
@@ -299,7 +312,7 @@ Add separate collection/startup/stop actions for every durable or callback bound
 
 ### 6.2 Public API request vocabulary
 
-`ApiRequest` has named variants with the public method's semantic arguments. Distinguish `Stage(document, expectedVersion)`, `Approve(version)`, `RetryOperation(predecessor)`, and each mutation convenience method. Convenience methods compile to sequences of capture/stage/approval actions; they are not separate atomic shortcuts.
+`ApiRequest` has named variants with the public method's semantic arguments. Distinguish `Stage(document, expectedVersion)`, `Approve(version)`, `RetryOperation(predecessor)`, and each mutation convenience method. Ordinary convenience methods compile to sequences of capture/stage/approval actions. ReseatReplica is the implemented exception: after capture/barrier/validation it atomically commits a repair and approval, rebasing independent staged intent; it does not require Approve=true. Preview remains non-mutating.
 
 | API methods | Semantic request fields / model mapping |
 | --- | --- |

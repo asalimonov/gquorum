@@ -9,7 +9,7 @@
 **Target SHA-256 at planning:** `64b1a24b8068997529445ce6e92c44c12a8ebb455a5d728cb34ba0533c64ff9b`
 **Full brainstorm log:** [20261027-quint-cluster-management.md](../brainstorms/20261027-quint-cluster-management.md)
 **Execution progress:** `docs/progress/20261027-quint-cluster-management.md` (create during execution).
-**Status:** executing; Tasks 1–3 complete, Tasks 4–22 pending. The user approved this sequence during planning.
+**Status:** paused at user request after Task 4; Tasks 1–4 complete, Tasks 5–22 pending. Resume at Task 5. The user approved this sequence during planning.
 
 ## Objective and execution contract
 
@@ -132,20 +132,20 @@ For Python runner changes: run its full unit suite, syntax checks, and a real re
 
 ### Task 4: Implement document edits, placement and pure plan construction
 
-**Files:** `topology.qnt`, `topology_test.qnt` (new); types, shared tests and coverage (updated).
+**Files:** `topology.qnt`, `placement.qnt`, `planning.qnt` and their test modules, `instances/topologyChecks.qnt` (new); types, shared tests, profiles, target clarifications and coverage (updated).
 **References:** target §§5.2–5.3/6/6.2/8.1–8.3; topology schemas and `makePlan` interfaces; source `topology/{document,hosting,placement,voter_config,plan}*.go` and `cluster_mutations.go`.
 
-- [ ] Implement `validateDocument`, `mutationGuard`, `mutateDocument`, `affectedScopes`, `eligibleHosts`, `makePlan` and `preview` with the target signatures and narrower typed input records. Guard and update functions remain separate.
-- [ ] Define named request variants for every document mutation, including full Stage, placement/hosting/voter config, pins, roles, reseat, group/node edits, forced retirement and RollbackTo. Use exact fields from target §6.2; full-document labels remain Stage edits.
-- [ ] Model bounded representative node types, selectors, reserved/learner-only hosts, explicit/all-eligible/legacy hosting, voter domains and pinned learners. Capacity limits are replicated inputs distinct from search bounds.
-- [ ] Plan only declared affected scopes with ordered step/guard dependencies; preserve immutable source identities, allocation floors and retired IDs. Keep legacy group grammar distinct where it changes behavior.
-- [ ] Make preview pure, reject preview+approve, validate malformed ID/role/options and immutable storage class. Full shape validation catches sorted/unique input requirements before abstracting lists to sets.
+- [x] Implement `validateDocument`, `mutationGuard`, `mutateDocument`, `affectedScopes`, `eligibleHosts`, `makePlan` and `preview` with the target signatures and narrower typed input records. Guard and update functions remain separate.
+- [x] Define named request variants for every document mutation, including full Stage, placement/hosting/voter config, pins, roles, reseat, group/node edits, forced retirement and RollbackTo. Use exact fields from target §6.2; full-document labels remain Stage edits.
+- [x] Model bounded representative node types, selectors, reserved/learner-only hosts, explicit/all-eligible/legacy hosting, voter domains and pinned learners. Capacity limits are replicated inputs distinct from search bounds.
+- [x] Plan only declared affected scopes with ordered step/guard dependencies; preserve immutable source identities, allocation floors and retired IDs. Keep legacy group grammar distinct where it changes behavior.
+- [x] Make preview pure, reject preview+approve, validate malformed ID/role/options and immutable storage class. Full shape validation catches sorted/unique input requirements before abstracting lists to sets.
 
 #### Verification
 
-- [ ] Table tests cover eligible/ineligible placement, absent hosting versus explicit hosting, strict-domain refusal, last-voter constraints delegated to membership checks and tombstone refusal.
-- [ ] Plans retain exact identities and stable structure; unrelated labels/scopes do not create fictitious effects. Preview changes no durable or authority state.
-- [ ] Common checks pass with no newly enabled API falsely claiming execution before later task wiring.
+- [x] Table tests cover eligible/ineligible placement, absent hosting versus explicit hosting, strict-domain refusal, last-voter constraints delegated to membership checks and tombstone refusal.
+- [x] Plans retain exact identities and stable structure; unrelated labels/scopes do not create fictitious effects. Preview changes no durable or authority state.
+- [x] Common checks pass with no newly enabled API falsely claiming execution before later task wiring.
 
 ### Task 5: Wire staged CAS, scoped approval, supersession and retries
 
@@ -562,6 +562,8 @@ The exclusions below were agreed in the brainstorm/target. No new product API st
 | [too-complex] | Unsupported multi-survivor/custom/in-memory donor recovery or disaster rollback | recovery model: `TODO(not planned): unsupported recovery modes`; include explicit source-equivalent refusal witnesses, no successful action. |
 
 ## NOT PLANNED CHANGES
+
+Task 4 source-grounded refinements: voter min/max bounds replace the target sketch's single replica count; hosting validation retains lists; voter surge/lag/stability/cooldown fields and group allocation cursors are explicit; forced-retirement audit, required/cleanup plan separation, voter guard sets and typed PlanResult refusal preserve source behavior. ReseatReplica is documented as an atomic repair-and-approval exception. Pure placement/planning helpers are separate files behind topology.qnt. These refinements update the target and do not change Go behavior.
 
 Task 1: the target record field `action` is implemented as `kind` because Quint reserves `action`; the mapping is documented in the model README/coverage. Choreo source is unchanged: its pure helpers operate on one application-owned GlobalContext instead of its own unused state variables. Planning clarified existing target sketches for storage backend versus class, optional legacy hosting, group-wide effects and distinct fence/readmission evidence; these are documented in Planning reconciliation, not production behavior changes. During execution record unexpected file changes, rationale and relevant diff here.
 

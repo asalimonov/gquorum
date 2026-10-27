@@ -15,6 +15,7 @@ module handlers {
         call.key.caller.node == ctx.state.process_id,
         call.key.caller.incarnation == ctx.state.volatile.incarnation,
         ctx.state.volatile.pendingCalls.keys().contains(call.key),
+        call.request == ObserveLocal or call.request == InvalidRequest,
       }
     })
 
@@ -30,6 +31,7 @@ module handlers {
       val result = match call.request {
         | ObserveLocal => Observed(ctx.state.volatile.phase)
         | InvalidRequest => Refused(Invalid)
+        | Mutate(_) => Refused(Unsupported)
       }
       val prior = ctx.state.volatile.pendingCalls.get(call.key)
       val updated = { ...prior, phase: Replied, result: Some(result) }

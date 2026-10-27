@@ -54,6 +54,52 @@
         "droppedRequestIsNotReplyTest",
         "learnerDoesNotVoteTest"
       ]
+    },
+    {
+      "file": "instances/topologyChecks.qnt",
+      "main": "topologyChecks",
+      "expected": [
+        "previewIsPureTest",
+        "previewAndApproveRefusedTest",
+        "originalCasIsRequiredTest",
+        "addNodeAllocatesFreshMetaTest",
+        "drainPreservesMetaTest",
+        "excludeNeedsProvenDrainTest",
+        "forceRetirementKeepsAuditTest",
+        "readmissionNeedsExactDeadPredecessorTest",
+        "adoptionPinsLegacyLearnersTest",
+        "typedHostingSortsButRejectsDuplicatesTest",
+        "descriptiveLabelDoesNotChangeNativeIntentTest",
+        "freshGroupUsesConfiguredHostingTest",
+        "reseatUsesApprovedIntentAndBothFloorsTest",
+        "stagedRemovalCanRestoreApprovedIdentityTest",
+        "unpinDoesNotPromoteTest",
+        "metaCannotBeDeletedOrMadeMemoryTest",
+        "stageCannotReuseUnapprovedAllocationTest",
+        "invalidMutationTargetsAreTotalTest",
+        "rollbackKeepsCasAndHistoricalParentSeparateTest",
+        "currentDeclarationValidTest",
+        "reservedRetainsOnlyExactReplicaTest",
+        "learnerOnlyStillHostsMetaTest",
+        "missingSelectorIsNotEmptyLabelTest",
+        "duplicateHostingCannotDisappearTest",
+        "configuredHostingRequiredTest",
+        "storageClassImmutableTest",
+        "retiredGroupCannotReturnTest",
+        "strictDomainsRequireFullTargetTest",
+        "configuredShortfallWithoutDomainsAllowedTest",
+        "voterConfigurationValidationTest",
+        "labelsHaveNoNativeEffectsTest",
+        "deletionNeedsNoNativeQuorumPlanTest",
+        "leaderRemovalTransfersFirstTest",
+        "twoToOneIsNotAPlanTest",
+        "sameHostStopsBeforePreparingSuccessorTest",
+        "capReplacementWaitsAgainAfterRemovalTest",
+        "missingEstablishedObservationIsNotRefoundingTest",
+        "stoppedOwnerDoesNotNeedAnotherStopTest",
+        "freshGroupHasFoundingAuthorityTest",
+        "foreignNativeIdentityRefusesPlanTest"
+      ]
     }
   ]
 }

@@ -5,8 +5,8 @@ module initial {
 
   pure val emptyDocument: Document = {
     cluster: "c1", version: 0, parent: 0, rebasedFrom: None, nodes: Map(), groups: Map(),
-    placement: { replicas: 3, allowedTypes: Set("worker"), selector: Map(), voterDomain: None },
-    audit: { actor: "", comment: "" },
+    placement: { minVoters: 1, maxVoters: 3, allowedTypes: Set("worker"), selector: Map() },
+    audit: { actor: "", comment: "", forced: None },
   }
 
   pure def replica(founders: NodeName -> int, group: GroupId, node: NodeName): ReplicaKey =
@@ -15,12 +15,13 @@ module initial {
   pure def declarations(founders: NodeName -> int, loads: Set[GroupId]): Document =
     if (founders.keys().size() == 0) emptyDocument else {
       val groups = loads.union(Set("_meta"))
-      { ...emptyDocument, version: 1, audit: { actor: "founders", comment: "established fixture" },
+      { ...emptyDocument, version: 1, audit: { actor: "founders", comment: "established fixture", forced: None },
         nodes: founders.keys().mapBy(n => { name: n, member: founders.get(n), state: Active,
                                             nodeType: "worker", labels: Map() }),
         groups: groups.mapBy(g => {
           id: g, storage: StorageDefault, labels: Map(), placement: None,
           hosting: None, voterConfig: None,
+          nextReplica: founders.values().fold(1, (acc, id) => max(acc, id + 1)),
           replicas: founders.keys().map(n => {
             key: replica(founders, g, n), role: Voter, pinnedLearner: false }),
         }),

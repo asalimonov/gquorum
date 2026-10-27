@@ -43,3 +43,19 @@ Verified:
 Test semantics: Quint fail() does not carry a successor state for subsequent then/expect clauses. Negative transition checks now end their traces, after all state assertions. No production fallback/stutter action was added to accommodate tests.
 
 A concurrent edit to docs/project.md appeared during this task, adding technical-debt documentation guidance. It was read and preserved, and is not staged in this task's commit. The active goal and remaining plan are unchanged.
+
+## Task 4 — Document edits, placement and immutable plans
+Date: 2026-10-27 (Task 3 commit: 6050704)
+
+Implemented pure topology validation, request guards, document mutation, placement/hosting/voter selection, preview and typed plan construction. Required steps and detached cleanup retain exact identities, source versions, voter guards, sequence/dependency ordering, already-proven stops and allocation floors. API dispatch remains intentionally pending Task 5; pure variants do not fabricate successful executed calls.
+
+The target sketches were refined against implementation: min/max voters versus hosted-replica capacity; explicit surge/lag/stability/cooldown controls; raw hosting-list duplicate checks; group allocation cursors; forced audit; typed PlanResult refusal; separate required/cleanup steps; and retained owner milestones. ReseatReplica's atomic repair/approval differs from ordinary Stage/Approve. Helpers placement.qnt/planning.qnt stay pure behind topology.qnt. The final target SHA-256 for this checkpoint is 348e833b952a28ae4dedd8bf9fc6f03f68ccfc8ed6d618584efc9e6d99116f11.
+
+Verified:
+- 40 focused topology/placement/planning tests pass through instances/topologyChecks.qnt, including rollback ancestry, retained staged identity restoration, same-host replacement ordering, transfer before removal, two-to-one refusal and deletion without load-native observation.
+- Accumulated smoke3 test profile passes all 16 existing scenario tests plus all 40 topology cases. Report: test-reports/quint/20261027T125655851067Z-51d85f51.
+- Smoke3 seeded simulation passes: 50 samples, depth 60, seed 1. Report: test-reports/quint/20261027T125713174404Z-c9fb9269.
+- Foundation profile and 17 runner tests passed during this task; their code paths were unchanged by the subsequent pure topology/rollback additions.
+- Current model/profile source hashes were compared against the passing full test report; all match. Document links, fences and whitespace checked. No Go tests or exhaustive model checking claimed.
+
+User requested: “Pause after finishing the current task.” Task 4 is finished and committed with this entry. Pause before Task 5; Tasks 5–22 remain unchecked. The concurrent docs/project.md edit is preserved outside this commit. The full goal remains unfinished.

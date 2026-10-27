@@ -8,7 +8,7 @@ module types {
   type ReplicaKey = { cluster: str, group: GroupId, node: NodeName, member: int, replica: int }
   type DurableNodeIdentity = { cluster: str, node: NodeName, member: int }
   type AttemptKey = { version: int, attempt: int }
-  type Audit = { actor: str, comment: str }
+  type Audit = { actor: str, comment: str, forced: Option[{ node: NodeName, reason: str }] }
   type MutationOptions = { expectedVersion: int, audit: Audit, preview: bool, approve: bool }
   type NodePhase = Active | Draining | Drained | Excluded
   type ReplicaRole = Voter | Learner
@@ -20,15 +20,22 @@ module types {
   }
   type ReplicaDecl = { key: ReplicaKey, role: ReplicaRole, pinnedLearner: bool }
   type PlacementRule = {
-    replicas: int, allowedTypes: Set[str], selector: str -> str, voterDomain: Option[str],
+    minVoters: int, maxVoters: int, allowedTypes: Set[str], selector: str -> str,
   }
   type HostingMode = AllEligible | ExplicitHosts
-  type HostingRule = { mode: HostingMode, selectedNodes: Set[NodeName] }
-  type VoterConfig = { target: int, domain: Option[str] }
+  type HostingRule = { mode: HostingMode, selectedNodes: List[NodeName] }
+  type VoterConfig = {
+    target: int, domain: Option[str], maxSurge: int,
+    failureWindow: int, standbyWindow: int, failureLag: int, standbyLag: int,
+    standbyApplyBacklog: int, replaceNoProgress: bool, noProgressWindow: int,
+    maxObservationGap: int, switchCooldown: int, demotionCooldown: int,
+    allowNewFailureDuringCooldown: bool,
+  }
   type GroupDecl = {
     id: GroupId, storage: StorageClass, labels: str -> str, replicas: Set[ReplicaDecl],
     placement: Option[PlacementRule], hosting: Option[HostingRule],
     voterConfig: Option[VoterConfig],
+    nextReplica: int,
   }
   type Document = {
     cluster: str, version: int, parent: int, rebasedFrom: Option[int],
@@ -70,8 +77,13 @@ module types {
   type PlannedStep = {
     kind: ActionKind, target: EffectTarget, resources: Set[ResourceKey],
     targets: Set[ReplicaKey],
+    seq: int, expectedVoters: Set[ReplicaKey], resultVoters: Set[ReplicaKey],
+    transferTarget: Option[ReplicaKey],
   }
-  type Plan = { version: int, blocks: GroupId -> List[PlannedStep] }
+  type Plan = {
+    version: int, blocks: GroupId -> List[PlannedStep], cleanup: GroupId -> List[PlannedStep],
+    sources: GroupId -> int, dependencies: Set[(int, int)],
+  }
   type OperationPhase = OpPending | OpRunning | WaitingReplica | WaitingCatchUp
     | WaitingLeader | OpSucceeded | OpFailed | Superseded
   type BlockReason = NoQuorum | HostOffline | CatchUpRequired | LeaderRequired
@@ -119,7 +131,7 @@ module types {
     appliedPositions: ReplicaKey -> int, catchUp: ReplicaKey -> CatchUpClass,
     pendingChange: Option[NativeChange],
   }
-  type HealthClass = Healthy | Unreachable | HealthUnknown
+  type HealthClass = Healthy | Unreachable | HealthUnknown | ConfirmedDead
   type Age = Fresh | Stale
   type Observation = {
     group: GroupId, replica: ReplicaKey, incarnation: int, observedConfig: int,
@@ -166,7 +178,45 @@ module types {
   }
   type ProcessPhase = New | Starting | Ready | Fenced | Stopping | Stopped | Failed
   type Refusal = Invalid | Conflict | Unavailable | UnsafeMembership | Unauthorized
-  type ApiRequest = ObserveLocal | InvalidRequest
+    | IdentityMismatch | NotFound | Unsupported | CapacityExceeded
+  type Rules = {
+    maxNodes: int, maxReplicas: int, concurrentGroups: int, concurrentCleanup: int,
+    nodeOrder: List[NodeName], groupOrder: List[GroupId],
+  }
+  type GroupSpec = {
+    id: GroupId, labels: str -> str, storage: StorageClass, placement: Option[PlacementRule],
+    nodes: Option[List[NodeName]], hosting: Option[HostingRule], voterConfig: Option[VoterConfig],
+  }
+  type DocumentEdit = StageDocument(Document) | AddNode(NodeDecl)
+    | ReadmitNode({ name: NodeName, expectedMember: int })
+    | DrainNode(NodeName) | ActivateNode(NodeName) | ExcludeNode(NodeName)
+    | ForceRetireNode({ name: NodeName, reason: str })
+    | SetPlacement(PlacementRule) | SetGroupPlacement({ group: GroupId, rule: PlacementRule })
+    | SetGroupVoterConfig({ group: GroupId, config: VoterConfig })
+    | SetGroupHosting({ group: GroupId, hosting: HostingRule })
+    | SetReplicaPinnedLearner({ key: ReplicaKey, pinned: bool })
+    | CreateGroup(GroupSpec) | DeleteGroup(GroupId)
+    | ChangeReplica({ group: GroupId, node: NodeName, role: ReplicaRole })
+    | ReseatReplica(ReplicaKey) | RollbackTo(int)
+  type MutationRequest = { edit: DocumentEdit, options: MutationOptions }
+  type MutationInput = {
+    view: ReadView, retired: Set[GroupId], memberFloor: int, replicaFloors: GroupId -> int,
+    history: int -> Document, groups: GroupId -> GroupProgress, nodes: NodeName -> NodeProgress,
+    health: NodeName -> HealthClass, rules: Rules,
+  }
+  type NativeObservation = {
+    native: ConsensusState, healthKnown: bool, live: Set[ReplicaKey], ready: Set[ReplicaKey],
+  }
+  type PlanningInput = {
+    approved: Document, groups: GroupId -> GroupProgress, retained: Set[ReplicaKey],
+    observations: GroupId -> NativeObservation, rules: Rules,
+    retainedStates: ReplicaKey -> RetainedPhase,
+  }
+  type RetainedPhase = RetainedHosted | RetainedStopped | RetainedCleanup
+  type PlanResult = Planned(Plan) | PlanRejected(Set[Refusal])
+  type PreviewResult = { document: Option[Document], plan: Option[Plan], errors: Set[Refusal] }
+  // Mutation handlers arrive in Task 5. Their presence as values is not execution.
+  type ApiRequest = ObserveLocal | InvalidRequest | Mutate(MutationRequest)
   type ApiResult = Observed(ProcessPhase) | Refused(Refusal) | Indeterminate
   type CallPhase = Captured | Submitted | Committed | Replied
   type CallState = {

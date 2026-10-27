@@ -1,6 +1,6 @@
 # Model coverage ledger
 
-Implemented checkpoint: Tasks 1–3 (foundation, runner, consensus/network). Source baseline: `e8e85dbd7879b1c858252cd2a6126a36920f8a8e`.
+Implemented checkpoint: Tasks 1–4 (foundation, runner, consensus/network, pure topology/planning). Source baseline: `e8e85dbd7879b1c858252cd2a6126a36920f8a8e`.
 
 The table enumerates public methods, not completed behavior. `Planned` means no modeled implementation yet. Task 16 must resolve every entry to actions, observation projection or a justified exclusion and executable witness. A generic invalid request currently tests transport/refusal wiring; it does not count as each mutation's validation coverage.
 
@@ -24,30 +24,30 @@ The table enumerates public methods, not completed behavior. `Planned` means no 
 | `Cluster.Get` | `cluster.go` | Planned | Pending owning plan task; no success stub |
 | `Cluster.History` | `cluster.go` | Planned | Pending owning plan task; no success stub |
 | `Cluster.Watch` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.Stage` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.Plan` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.PlanFor` | `cluster.go` | Planned | Pending owning plan task; no success stub |
+| `Cluster.Stage` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
+| `Cluster.Plan` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
+| `Cluster.PlanFor` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
 | `Cluster.Approve` | `cluster.go` | Planned | Pending owning plan task; no success stub |
 | `Cluster.Operation` | `cluster.go` | Planned | Pending owning plan task; no success stub |
 | `Cluster.WaitOperation` | `cluster.go` | Planned | Pending owning plan task; no success stub |
 | `Cluster.RetryOperation` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.AddNode` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.ReadmitNode` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.DrainNode` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.ActivateNode` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.ExcludeNode` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.ForceRetireNode` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.SetPlacement` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.SetGroupPlacement` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.SetGroupVoterConfig` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.SetGroupHosting` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.SetReplicaPinnedLearner` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.CreateGroup` | `cluster.go` | Planned | Pending owning plan task; no success stub |
+| `Cluster.AddNode` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
+| `Cluster.ReadmitNode` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
+| `Cluster.DrainNode` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
+| `Cluster.ActivateNode` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
+| `Cluster.ExcludeNode` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
+| `Cluster.ForceRetireNode` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
+| `Cluster.SetPlacement` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
+| `Cluster.SetGroupPlacement` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
+| `Cluster.SetGroupVoterConfig` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
+| `Cluster.SetGroupHosting` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
+| `Cluster.SetReplicaPinnedLearner` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
+| `Cluster.CreateGroup` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
 | `Cluster.EnsureGroup` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.DeleteGroup` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.ChangeReplica` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.ReseatReplica` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.RollbackTo` | `cluster.go` | Planned | Pending owning plan task; no success stub |
+| `Cluster.DeleteGroup` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
+| `Cluster.ChangeReplica` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
+| `Cluster.ReseatReplica` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
+| `Cluster.RollbackTo` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
 | `Cluster.TransferLeader` | `cluster.go` | Planned | Pending owning plan task; no success stub |
 | `Cluster.AcquireLock` | `cluster.go` | Planned | Pending owning plan task; no success stub |
 | `Cluster.LockHolder` | `cluster.go` | Planned | Pending owning plan task; no success stub |
@@ -120,3 +120,9 @@ The smoke3 instance runs the four common tests plus twelve membership/environmen
 `metaFailureDoesNotStopLoadTest`, `loadFailureDoesNotStopMetaTest`, `commitBeforeLocalApplyTest`, `majorityLossDespiteHealthyCacheTest`, `loadMajorityLossTest`, `staleLeaderObservationTest`, `retainedRestartCatchUpTest`, `oldIncarnationMessageTest`, `duplicateDeliveryTest`, `droppedRequestIsNotReplyTest` and `learnerDoesNotVoteTest` demonstrate their named conditions. `membershipFixtureTest` checks the concrete scenario assumptions. Pure learner-certificate input is explicitly adversarial; ordinary scenarios use composed actions.
 
 The native-service helpers may access global consensus facts as the abstract environment; Choreo handlers only inspect delivered messages and their own local state. No handler consults shared current topology to simulate a fresh read. The target's durable host schema is refined with metaImage/metaIndex for crash-recovered local application and engineRunning for participation independently of handle publication.
+
+## Pure topology and planning evidence (Task 4)
+
+`topologyChecks` runs 40 cases from topology_test, placement_test and planning_test. It verifies preview purity; captured CAS; typed node/group operations; legacy learner preservation; explicit hosting normalization and duplicate refusal; reserved/learner-only/domain placement; immutable storage and retired IDs; forced audit, dead-predecessor readmission, allocation floors, rollback ancestry and retained identity restoration; founding authority; missing/foreign native observation refusal; logical deletion's detached cleanup; transfer/removal order; same-host replacement; repeated catch-up around removal; and retained stop evidence.
+
+Source correspondence: `topology/{validate,document_rules,placement,placement_selection,hosting,voter_config,plan_scopes,planner,voter_moves,plan_retirement}.go`, `internal/metaservice/{mutations,voter_mutations,mutation_edits,replacement_scope}.go`, and `internal/metaengine/{scoped_stage,repair_document,metadata}.go`. Pure helper separation does not add another state machine. State-changing API dispatch, replicated CAS, approval and execution remain future tasks; the presence of a pure request variant is not counted as an executed API.
