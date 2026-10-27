@@ -62,19 +62,25 @@ module types {
   type Grant = {
     key: GrantKey, purpose: GrantPurpose, effect: Option[EffectKey],
     admission: Option[AdmissionKey], resources: Set[ResourceKey], targets: Set[ReplicaKey],
+    planStep: Option[PlannedStep],
+    request: Option[RequestKey],
   }
   type ReceiptOutcome = EffectApplied | AlreadySatisfied | TransferStarted
   type Receipt = {
     grant: GrantKey, effect: Option[EffectKey], admission: Option[AdmissionKey],
-    target: ReplicaKey, resource: ResourceKey, outcome: ReceiptOutcome,
+    target: Option[ReplicaKey], resource: ResourceKey, outcome: ReceiptOutcome,
+    planStep: Option[PlannedStep],
+    durablePosition: int, durableTerm: int,
   }
   type FenceEvidence = {
     grant: GrantKey, resource: ResourceKey, receiver: DurableNodeIdentity,
     replica: Option[ReplicaKey], durablePosition: int,
+    durableTerm: int,
   }
   type Revocation = {
     requested: bool, requiredResources: Set[ResourceKey], provenResources: Set[ResourceKey],
     evidence: Set[FenceEvidence],
+    fences: ResourceKey -> GrantKey,
   }
   type PlannedStep = {
     kind: ActionKind, target: EffectTarget, resources: Set[ResourceKey],
@@ -136,6 +142,9 @@ module types {
     retiredGroupIds: Set[GroupId], sessions: SessionKey -> Session, locks: str -> SessionKey,
     // Exact semantic request provenance, independent of a transport call ID.
     stagedIntents: int -> MutationRequest,
+    authorityFloors: ResourceKey -> GrantKey, closedGrants: Set[GrantKey],
+    effectReceipts: Set[Receipt], fenceEvidence: Set[FenceEvidence],
+    couriers: NodeName -> { process: ProcessKey, member: int },
   }
   type CatchUpClass = Behind | CaughtUp | CatchUpUnknown
   type NativeChange = { kind: ActionKind, target: ReplicaKey, sourceConfig: int }
@@ -144,6 +153,7 @@ module types {
     leaderAuthority: Option[ReplicaKey], committedPosition: int,
     appliedPositions: ReplicaKey -> int, catchUp: ReplicaKey -> CatchUpClass,
     pendingChange: Option[NativeChange],
+    authorityFloor: int, authorityReceipts: Set[Receipt], authorityFences: Set[FenceEvidence],
   }
   type HealthClass = Healthy | Unreachable | HealthUnknown | ConfirmedDead
   type Age = Fresh | Stale
@@ -233,8 +243,12 @@ module types {
     staged: Option[int], operation: Option[AttemptKey], rebasedTo: Option[int], errors: Set[Refusal],
   }
   type StageCommand = { request: MutationRequest, desired: Document }
+  type ControlCommand = BeginBlock({ operation: AttemptKey, group: GroupId })
+    | IssueEffect(ApprovedAction) | IssueTransfer({ target: ReplicaKey, request: RequestKey, sourceVersion: int })
+    | RecordEffect(Receipt) | RecordFence(FenceEvidence)
+    | CompleteStep({ approved: ApprovedAction, observedLeader: Option[ReplicaKey] })
   type MetaCommand = StageProposal(StageCommand) | ApprovalProposal(ApprovalCommand)
-    | RetryProposal(RetryCommand) | RepairProposal(RepairCommand)
+    | RetryProposal(RetryCommand) | RepairProposal(RepairCommand) | ControlProposal(ControlCommand)
   type OperationRequest = ApproveVersion(int) | RetryAttempt(AttemptKey) | RepairRequest(MutationRequest)
   type ApiRequest = ObserveLocal | InvalidRequest | ConfirmedRead | Mutate(MutationRequest) | Operate(OperationRequest)
   type ApiResult = Observed(ProcessPhase) | Refused(Refusal) | Indeterminate
@@ -257,6 +271,11 @@ module types {
     scopes: GroupId -> ScopeExpectation, command: Option[MetaCommand],
     commitIndex: Option[int], result: Option[MutationOutcome], replySent: bool,
   }
+  type EffectDelivery = {
+    delivery: int, sender: ProcessKey, senderMember: int, receiver: ProcessKey,
+    proofIndex: Option[int],
+    replica: ReplicaKey, grant: Grant, resource: ResourceKey,
+  }
   type ProcessState = {
     phase: ProcessPhase, incarnation: int, pendingCalls: RequestKey -> CallState,
     appliedMetaVersion: int, appliedMetaIndex: int, localView: ReadView,
@@ -264,10 +283,12 @@ module types {
     session: Option[SessionKey], schedulerEnabled: bool, serveOverride: int,
     schedulerCapture: Option[SchedulerCapture],
     operationWork: ProposalKey -> OperationWork,
+    waitingEffects: Set[EffectDelivery], authorityReads: int -> int,
   }
   type HostState = {
     pin: Option[DurableNodeIdentity], replicaEvidence: ReplicaKey -> StorageEvidence,
     authorityFloors: ResourceKey -> int, receipts: Set[Receipt], fences: Set[FenceEvidence],
+    journalPosition: int,
     collectionMarkers: ReplicaKey -> CollectionState,
     metaImage: Option[ReadView], metaIndex: int,
   }
@@ -278,6 +299,7 @@ module types {
     | ReadProbe(ReadTicket) | ReadAck({ ticket: ReadTicket, index: int })
     | MetaProposal({ key: ProposalKey, coordinator: ProcessKey, forWork: bool, command: MetaCommand })
     | MetaAck({ key: ProposalKey, coordinator: ProcessKey, forWork: bool, index: int, outcome: MutationOutcome })
+    | ExecuteGrant(EffectDelivery)
     | OperationCall({ key: ProposalKey, request: OperationRequest })
     | OperationAck({ key: ProposalKey, outcome: MutationOutcome })
   type Channel = MetaChannel | LoadChannel
@@ -289,10 +311,17 @@ module types {
     metaLinks: Set[(NodeName, NodeName)], loadLinks: Set[(NodeName, NodeName)],
     pending: Set[Envelope], delivered: Set[int],
   }
+  // Bounded history monitor: captures actual receiver identity at consumption,
+  // so subsequent restart/readmission cannot rewrite the safety witness.
+  type ConsumptionEvidence = {
+    delivery: EffectDelivery, pin: Option[DurableNodeIdentity], incarnation: int,
+    owner: Option[ReplicaKey],
+  }
   type Environment = {
     network: NetworkState, nextDelivery: int, metadata: MetadataState,
     consensus: GroupId -> ConsensusState, recovery: NodeName -> RecoveryState,
     storageConfig: NodeName -> NodeStorageConfig,
     metaLog: int -> MetadataState,
+    consumptions: Set[ConsumptionEvidence],
   }
 }

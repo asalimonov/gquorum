@@ -1,4 +1,7 @@
 module cluster {
+  import grants as G from "./grants"
+  import controls as Ctrl from "./controls"
+  import execution as E from "./execution"
   import initial as I from "./initial"
   import membership as M from "./membership"
   import scope as S from "./scope"
@@ -155,7 +158,7 @@ module cluster {
         | None => Set()
       }
       val errors = Tx::commandErrors(world.extensions.metadata, proposal.command, rules)
-      val meta = if (errors.size() == 0) Tx::applyCommand(world.extensions.metadata, proposal.command)
+      val meta = if (errors.size() == 0) Tx::applyAt(world.extensions.metadata, proposal.command, c.committedPosition + 1)
         else world.extensions.metadata
       val outcome = if (errors.size() == 0) Tx::commandOutcome(world.extensions.metadata, proposal.command)
         else A::refused(errors)
@@ -479,7 +482,7 @@ module cluster {
       M::running(owner),
       world' = { ...world,
         system: world.system.put(node, { ...owner, volatile: { ...owner.volatile,
-          phase: Stopped, pendingCalls: Map(), owners: Map(), observations: Map(), operationWork: Map(),
+          phase: Stopped, pendingCalls: Map(), owners: Map(), observations: Map(), operationWork: Map(), waitingEffects: Set(), authorityReads: Map(),
           session: None, schedulerCapture: None, appliedMetaIndex: 0, appliedMetaVersion: 0,
           localView: { latest: I::emptyDocument, target: I::emptyDocument } } }),
         messages: world.messages.put(node, Set()),
@@ -593,6 +596,252 @@ module cluster {
     }
   }
 
+  // Internal authority mutations share the same Raft commit, durable apply and
+  // transport as public mutations. Negative request sequences cannot alias an
+  // application call. They identify transport work, not a public API request.
+  action submitControl(node: NodeName, command: ControlCommand): bool = {
+    val owner = world.system.get(node)
+    val local = world.extensions.metaLog.get(owner.volatile.appliedMetaIndex)
+    val leader = owner.volatile.observations.get("_meta").observedLeader
+    val caller = { node: node, incarnation: owner.volatile.incarnation }
+    match leader {
+      | Some(r) => all {
+          M::running(owner), Ctrl::errors(local, command).size() == 0,
+          world.extensions.nextDelivery <= MAX_DELIVERIES,
+          not(world.extensions.network.pending.union(world.messages.values().flatten()).exists(msg =>
+            msg.source == caller and match msg.payload {
+              | MetaProposal(p) => p.command == ControlProposal(command) | _ => false })),
+          world' = apply_custom_effect(world, Queue({ delivery: world.extensions.nextDelivery,
+            source: caller, destination: r.node, channel: MetaChannel,
+            payload: MetaProposal({ key: { request: { caller: caller, sequence: -world.extensions.nextDelivery }, sequence: 0 },
+              coordinator: caller, forWork: false, command: ControlProposal(command) }) })),
+        }
+      | None => all { false, world' = world }
+    }
+  }
+
+  action observeAuthorityLeader(node: NodeName, group: GroupId): bool = {
+    val c = world.extensions.consensus.get(group)
+    val owner = world.system.get(node)
+    match c.leaderAuthority {
+      | Some(leader) => all {
+          M::running(owner), M::readableIdentity(world.system, leader),
+          M::communicates(M::linksFor(world.extensions.network, group), node, leader.node),
+          not(owner.volatile.observations.keys().contains(group) and
+            owner.volatile.observations.get(group).observedLeader == Some(leader)),
+          world' = { ...world, system: world.system.put(node, { ...owner,
+            volatile: { ...owner.volatile, observations: owner.volatile.observations.put(group,
+              { group: group, replica: leader, incarnation: world.system.get(leader.node).volatile.incarnation,
+                observedConfig: c.configRevision, observedLeader: Some(leader), health: Healthy, age: Fresh }) } }) },
+        }
+      | None => all { false, world' = world }
+    }
+  }
+
+  action dispatchGrant(node: NodeName, key: GrantKey, resource: ResourceKey): bool = {
+    val owner = world.system.get(node)
+    val local = world.extensions.metaLog.get(owner.volatile.appliedMetaIndex)
+    val grant = local.grants.get(key)
+    val candidates = match resource {
+      | HostResource(host) => grant.targets.filter(r => r.node == host.node)
+      | GroupResource(group) => if (owner.volatile.observations.keys().contains(group))
+          match owner.volatile.observations.get(group).observedLeader { | Some(r) => Set(r) | None => Set() }
+          else Set()
+    }
+    nondet replica = candidates.oneOf()
+    val delivery: EffectDelivery = { delivery: world.extensions.nextDelivery,
+      sender: { node: node, incarnation: owner.volatile.incarnation },
+      senderMember: match owner.durable.pin { | Some(pin) => pin.member | None => 0 }, proofIndex: None,
+      receiver: { node: replica.node, incarnation: world.system.get(replica.node).volatile.incarnation },
+      replica: replica, grant: grant, resource: resource }
+    all {
+      M::running(owner), grant.resources.contains(resource), G::currentForIssuance(local, grant),
+      E::courierMatches(world.extensions.metadata, delivery),
+      M::hasCommitPath(world.extensions.consensus.get("_meta"), world.system, world.extensions.network.metaLinks),
+      match world.extensions.consensus.get("_meta").leaderAuthority { | Some(leader) =>
+        M::communicates(world.extensions.network.metaLinks, node, leader.node) | None => false },
+      not(G::resourceConsumed(local, grant, resource)), E::executable(delivery),
+      world.extensions.nextDelivery <= MAX_DELIVERIES,
+      world' = apply_custom_effect(world, Queue({ delivery: delivery.delivery, source: delivery.sender,
+        destination: replica.node, channel: if (grant.key.group == "_meta") MetaChannel else LoadChannel,
+        payload: ExecuteGrant(delivery) })),
+    }
+  }
+
+  // ValidateAuthorityCourier reads a quorum-confirmed authority proof. Capture
+  // that immutable query result separately from acceptance and native waiting.
+  action confirmGrant(msg: Envelope): bool = match msg.payload {
+    | ExecuteGrant(_) => {
+      val node = world.system.get(msg.destination)
+      val c = world.extensions.consensus.get("_meta")
+      all {
+        world.messages.get(msg.destination).contains(msg), M::running(node),
+        not(node.volatile.authorityReads.keys().contains(msg.delivery)),
+        M::hasCommitPath(c, world.system, world.extensions.network.metaLinks),
+        match c.leaderAuthority { | Some(leader) =>
+          M::communicates(world.extensions.network.metaLinks, msg.destination, leader.node) | None => false },
+        world' = { ...world, system: world.system.put(msg.destination, { ...node,
+          volatile: { ...node.volatile, authorityReads: node.volatile.authorityReads.put(msg.delivery, c.committedPosition) } }) },
+      }
+    }
+    | _ => all { false, world' = world }
+  }
+
+  action receiveGrant(msg: Envelope): bool = match msg.payload {
+    | ExecuteGrant(delivery) => {
+      val node = world.system.get(msg.destination)
+      val authenticated = { ...delivery, proofIndex: if (node.volatile.authorityReads.keys().contains(msg.delivery))
+        Some(node.volatile.authorityReads.get(msg.delivery)) else None }
+      val accepted = delivery.sender == msg.source and delivery.receiver.node == msg.destination and
+        E::mayReceive(world, authenticated)
+      all {
+        world.messages.get(msg.destination).contains(msg),
+        node.volatile.authorityReads.keys().contains(msg.delivery),
+        world' = apply_custom_effect({ ...world, system: world.system.put(msg.destination, { ...node,
+          volatile: { ...node.volatile, waitingEffects: if (accepted)
+            node.volatile.waitingEffects.union(Set(authenticated)) else node.volatile.waitingEffects,
+            authorityReads: node.volatile.authorityReads.mapRemove(msg.delivery) } }) }, Consume(msg)),
+      }
+    }
+    | _ => all { false, world' = world }
+  }
+
+  action consumeGrant(delivery: EffectDelivery): bool = {
+    val node = world.system.get(delivery.receiver.node)
+    val nativeReady = match delivery.resource {
+      | HostResource(_) => node.durable.journalPosition < MAX_POSITION
+      | GroupResource(group) => {
+          val c = world.extensions.consensus.get(group)
+          c.leaderAuthority == Some(delivery.replica) and c.committedPosition < MAX_POSITION and
+            M::hasCommitPath(c, world.system, M::linksFor(world.extensions.network, group)) and
+            (delivery.grant.purpose == Fence or match delivery.grant.effect {
+              | Some(e) => match e.target { | ReplicaTarget(r) => c.voters.contains(r) and
+                  M::readableIdentity(world.system, r) and c.catchUp.getOrElse(r, Behind) == CaughtUp
+                  | _ => false }
+              | None => false })
+        }
+    }
+    all {
+      node.volatile.waitingEffects.contains(delivery), E::executable(delivery),
+      E::mayConsume(world, delivery), E::consumed(world, delivery) or nativeReady,
+      world' = E::consume(world, delivery),
+    }
+  }
+
+  action refuseGrant(delivery: EffectDelivery): bool = all {
+    world.system.get(delivery.receiver.node).volatile.waitingEffects.contains(delivery),
+    not(E::mayConsume(world, delivery)),
+    world' = E::forgetWait(world, delivery),
+  }
+
+  action reportHostFence(node: NodeName, fence: FenceEvidence): bool = all {
+    world.system.get(node).durable.fences.contains(fence),
+    submitControl(node, RecordFence(fence)),
+  }
+
+  // A native proof is a fresh quorum-confirmed read of the durable native
+  // ledger; reporting it into _meta is a distinct subsequent transaction.
+  action reportNative(node: NodeName, group: GroupId, command: ControlCommand): bool = {
+    val c = world.extensions.consensus.get(group)
+    val sender = world.system.get(node)
+    val local = world.extensions.metaLog.get(sender.volatile.appliedMetaIndex)
+    val fresh = match c.leaderAuthority { | Some(leader) =>
+      M::communicates(M::linksFor(world.extensions.network, group), node, leader.node) and
+        M::hasCommitPath(c, world.system, M::linksFor(world.extensions.network, group)) | None => false }
+    val present = match command {
+      | RecordEffect(r) => c.authorityReceipts.contains(r) and not(local.effectReceipts.contains(r))
+      | RecordFence(f) => c.authorityFences.contains(f) and not(local.fenceEvidence.contains(f))
+      | _ => false
+    }
+    all { fresh, present, submitControl(node, command) }
+  }
+
+  action finishTransfer(group: GroupId, key: GrantKey): bool = {
+    val c = world.extensions.consensus.get(group)
+    val receipts = c.authorityReceipts.filter(r => r.grant == key and r.outcome == TransferStarted)
+    nondet receipt = receipts.oneOf()
+    val target = receipt.target
+    match target {
+      | Some(replica) => all {
+          c.authorityFloor == key.revision,
+          // Retained transfer intent is resumable only under its exact floor.
+          elect(group, replica),
+        }
+      | None => all { false, world' = world }
+    }
+  }
+
+  action checkpointTransfer(node: NodeName, approved: ApprovedAction): bool = {
+    val group = G::groupOf(approved.step.target)
+    val c = world.extensions.consensus.get(group)
+    all {
+      approved.step.kind == TransferLeadership,
+      M::hasCommitPath(c, world.system, M::linksFor(world.extensions.network, group)),
+      match c.leaderAuthority { | Some(leader) =>
+        M::communicates(M::linksFor(world.extensions.network, group), node, leader.node) | None => false },
+      submitControl(node, CompleteStep({ approved: approved, observedLeader: c.leaderAuthority })),
+    }
+  }
+
+  action authorityStep = any {
+    nondet node = NODE_POOL.filter(n => M::running(world.system.get(n)) and
+      world.system.get(n).volatile.observations.keys().contains("_meta")).oneOf()
+    val local = world.extensions.metaLog.get(world.system.get(node).volatile.appliedMetaIndex)
+    nondet grant = local.grants.values().filter(g => g.purpose == Effect).oneOf()
+    match grant.effect { | Some(effect) => match grant.planStep {
+      | Some(step) => checkpointTransfer(node, { operation: effect.operation, step: step })
+      | None => all { false, world' = world } } | None => all { false, world' = world } },
+    nondet node = NODE_POOL.filter(n => M::running(world.system.get(n)) and
+      world.system.get(n).volatile.observations.keys().contains("_meta")).oneOf()
+    val local = world.extensions.metaLog.get(world.system.get(node).volatile.appliedMetaIndex)
+    nondet key = local.operations.keys().oneOf()
+    nondet group = local.operations.get(key).blocks.keys().oneOf()
+    submitControl(node, BeginBlock({ operation: key, group: group })),
+    nondet node = NODE_POOL.filter(n => M::running(world.system.get(n)) and
+      world.system.get(n).volatile.observations.keys().contains("_meta")).oneOf()
+    val local = world.extensions.metaLog.get(world.system.get(node).volatile.appliedMetaIndex)
+    nondet key = local.operations.keys().oneOf()
+    nondet group = local.operations.get(key).blocks.keys().oneOf()
+    nondet stepIndex = local.operations.get(key).plan.blocks.get(group).indices().oneOf()
+    val step = local.operations.get(key).plan.blocks.get(group).nth(stepIndex)
+    all { G::actionGrants(local, { operation: key, step: step }).size() == 0,
+      submitControl(node, IssueEffect({ operation: key, step: step })) },
+    nondet node = NODE_POOL.filter(n => M::running(world.system.get(n))).oneOf()
+    val local = world.extensions.metaLog.get(world.system.get(node).volatile.appliedMetaIndex)
+    nondet key = local.grants.keys().oneOf()
+    nondet resource = local.grants.get(key).resources.oneOf()
+    dispatchGrant(node, key, resource),
+    nondet node = NODE_POOL.oneOf()
+    nondet msg = world.messages.get(node).oneOf()
+    receiveGrant(msg),
+    nondet node = NODE_POOL.oneOf()
+    nondet msg = world.messages.get(node).oneOf()
+    confirmGrant(msg),
+    nondet node = NODE_POOL.oneOf()
+    nondet delivery = world.system.get(node).volatile.waitingEffects.oneOf()
+    consumeGrant(delivery),
+    nondet node = NODE_POOL.oneOf()
+    nondet delivery = world.system.get(node).volatile.waitingEffects.oneOf()
+    refuseGrant(delivery),
+    nondet node = NODE_POOL.filter(n => M::running(world.system.get(n)) and
+      world.system.get(n).volatile.observations.keys().contains("_meta")).oneOf()
+    nondet fence = world.system.get(node).durable.fences.oneOf()
+    val local = world.extensions.metaLog.get(world.system.get(node).volatile.appliedMetaIndex)
+    all { not(local.fenceEvidence.contains(fence)), reportHostFence(node, fence) },
+    nondet node = NODE_POOL.filter(n => M::running(world.system.get(n)) and
+      world.system.get(n).volatile.observations.keys().contains("_meta")).oneOf()
+    nondet group = world.extensions.consensus.keys().oneOf()
+    nondet command = world.extensions.consensus.get(group).authorityReceipts.map(r => RecordEffect(r)).union(
+      world.extensions.consensus.get(group).authorityFences.map(f => RecordFence(f))).oneOf()
+    reportNative(node, group, command),
+    nondet node = NODE_POOL.filter(n => M::running(world.system.get(n))).oneOf()
+    nondet group = world.extensions.consensus.keys().oneOf()
+    observeAuthorityLeader(node, group),
+    nondet group = world.extensions.consensus.keys().oneOf()
+    nondet receipt = world.extensions.consensus.get(group).authorityReceipts.oneOf()
+    finishTransfer(group, receipt.grant),
+  }
+
   // This subset is useful for reachability checks under healthy communication.
   // It remains part of the same production step relation, with the same state.
   action requestStep = any {
@@ -629,6 +878,7 @@ module cluster {
   }
 
   action protocolStep = any {
+    authorityStep,
     nondet msg = world.extensions.network.pending.oneOf()
     deliver(msg),
     nondet node = NODE_POOL.oneOf()

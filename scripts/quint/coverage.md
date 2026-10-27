@@ -1,6 +1,6 @@
 # Initial-model scope and coverage
 
-Scope revision approved on 2026-10-27: **lean cluster management**. Task 5 is complete. Active invocation/safety checks enforce lean scope; smoke3 selects retained core tests through coreChecks. Shared reads, staging, approval, exact retry and atomic reseat/rebase have asynchronous scenario coverage. Native effects, lifecycle and scheduler work remain; this is not completed v1 coverage.
+Scope revision approved on 2026-10-27: **lean cluster management**. Tasks 1–6 are complete. Active invocation/safety checks enforce lean scope; smoke3 selects retained core tests through coreChecks. Shared reads, staging, approval, exact retry and atomic reseat/rebase have asynchronous scenario coverage. Transfer/fence execution and receipt-aware retry checks now exist; membership, lifecycle and scheduler work remain; this is not completed v1 coverage.
 
 The original 82-entry ledger was an API inventory, not a requirement to implement 82 state machines. Initial disposition: **17 Core**, **15 Primitive**, **19 Observe**, **8 Omit**, **23 Deferred**. Every entry remains accounted for.
 
@@ -37,7 +37,7 @@ Deferring offline Recovery does not defer ReadmitNode, ReseatReplica, retained r
 | --- | --- | --- | --- |
 | `Cluster.Stage` | `cluster.go` | Task 5: asynchronous CAS/apply/reply and exact replay checks | Bounded complete-document edits for core operations only; labels/policy changes are outside v1. |
 | `Cluster.Approve` | `cluster.go` | Task 5: leader reads/recapture, immutable scopes, replay and deletion debt | Immutable approved plan, exact captured scopes and detached deletion debt. |
-| `Cluster.RetryOperation` | `cluster.go` | Task 5: routed retained failed-attempt scenarios; consumed effects in Task 6 | Exact failed predecessor and at most one successor; preserve uncertain replay. |
+| `Cluster.RetryOperation` | `cluster.go` | Tasks 5–6: routed retries and immutable remaining-plan/receipt validation | Exact failed predecessor and at most one successor; preserve uncertain replay. |
 | `Cluster.AddNode` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Fresh identity and mandatory learner-first _meta admission. |
 | `Cluster.ReadmitNode` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Exact returning predecessor, fencing and retirement batch; not offline Rebuild. |
 | `Cluster.DrainNode` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Evacuate loads while retaining _meta membership. |
@@ -61,7 +61,7 @@ Deferring offline Recovery does not defer ReadmitNode, ReseatReplica, retained r
 | `Cluster.ReadTopology` | `cluster.go` | Task 5: confirmed-view projection with exact read ticket | Reuse confirmed-read primitive and local topology snapshot. |
 | `Cluster.Plan` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Reuse pure makePlan for a staged version; no separate RPC machine. |
 | `Cluster.PlanFor` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Reuse pure makePlan for a candidate; preview cannot authorize effects. |
-| `Cluster.TransferLeader` | `cluster.go` | No method-specific implementation | Reuse transfer request/proof phases; preserve manual transfer grant versus approved-plan authority. |
+| `Cluster.TransferLeader` | `cluster.go` | Task 6: shared manual grant/proof/transfer path; full public waiter mapping remains Task 12 | Reuse transfer request/proof phases; preserve manual transfer grant versus approved-plan authority. |
 | `Node.Start` | `node.go` | No method-specific implementation | Shared Starting → replay/authorization/session → Ready phases. |
 | `Node.WaitReady` | `node.go` | No method-specific implementation | Observe shared readiness; cancellation stops waiting only. |
 | `Node.Stop` | `node.go` | No method-specific implementation | Join shared teardown; timeout/failed release retains ownership. |
@@ -161,3 +161,9 @@ The source baseline remains `e8e85dbd7879b1c858252cd2a6126a36920f8a8e`. Exact be
 Foundation: 7 tests. smoke3: 43 asynchronous scenarios plus 60 retained pure/scope checks. Reports: `test-reports/quint/20261027T154905846454Z-d5708b3f`, `20261027T154929137587Z-91c5bd39`; 50 fault samples at depth 60 passed in `20261027T155031955190Z-bb318403`. These are sampled/scenario checks, not exhaustive or Go-conformance proof. A separate healthy protocol-only approval run reached approval and its reply in all 50 samples (seed 1, depth 160).
 
 The full step relation retains retries, loss and partitions. The healthy subset excludes retry flooding, which otherwise can consume finite proposal/message bounds before ordinary work finishes. Initial failed-operation fixtures cover public retry routing; runtime execution failures and consumed-receipt suffix validation are Task 6 work. Source-faithful failing library scenarios are tracked in [the findings report](../../docs/reports/20261027-quint-cluster-management.md).
+
+## Task 6 authority coverage
+
+The `authority3` profile exercises transfer authority through issuance, confirmed courier authentication, native consumption, durable receipt reporting and approved-step checkpoint. It includes exact duplicate replay, closed-grant history, native/host revocation obligations, stale receiver/sender identities, partial host receipt batches, captured manual-transfer source versions and immutable retry suffix validation. Omitted fence/identity checks have intentional violating variants.
+
+Native Raft ordering is abstracted to durable positions and one term epoch. The consumption monitor is verification history, not a new library API. Retained readmission/failure fixtures test shared authority rules without claiming a completed admission/lifecycle API. Delayed host callbacks and effect-specific lifecycle/membership/cleanup mechanics are the next tasks. No library defect has been confirmed from the current scenarios.

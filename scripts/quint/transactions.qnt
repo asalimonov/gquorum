@@ -4,6 +4,7 @@ module transactions {
   import authority as A from "./authority"
   import topology as T from "./topology"
   import membership as M from "./membership"
+  import controls as Ctrl from "./controls"
   import repair as Repair from "./repair"
 
   pure def newCall(request: ApiRequest, localVersion: int, caller: NodeName): CallState = {
@@ -70,6 +71,7 @@ module transactions {
       | ApprovalProposal(approval) => A::approvalErrors(meta, approval, rules)
       | RetryProposal(retry) => A::retryErrors(meta, retry)
       | RepairProposal(repair) => Repair::errors(meta, repair, rules)
+      | ControlProposal(control) => Ctrl::errors(meta, control)
     }
   pure def applyCommand(meta: MetadataState, command: MetaCommand): MetadataState =
     match command {
@@ -77,9 +79,17 @@ module transactions {
       | ApprovalProposal(approval) => A::applyApproval(meta, approval)
       | RetryProposal(retry) => A::applyRetry(meta, retry)
       | RepairProposal(repair) => Repair::applyRepair(meta, repair)
+      | ControlProposal(_) => meta // Applied with the metadata commit index below.
     }
+  pure def applyAt(meta: MetadataState, command: MetaCommand, revision: int): MetadataState =
+    match command {
+      | ControlProposal(control) => Ctrl::apply(meta, control, revision)
+      | _ => Ctrl::reconcile(meta, applyCommand(meta, command), revision)
+    }
+
   pure def commandOutcome(meta: MetadataState, command: MetaCommand): MutationOutcome =
     match command {
+      | ControlProposal(_) => A::refused(Set())
       | StageProposal(stage) => A::acceptedStage(meta, stage)
       | ApprovalProposal(approval) => A::stageOutcome(A::applyApproval(meta, approval), approval.desired.version)
       | RetryProposal(retry) => { staged: Some(retry.previous.version), operation: Some(A::retryKey(meta, retry)),

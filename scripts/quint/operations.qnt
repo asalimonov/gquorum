@@ -2,6 +2,7 @@ module operations {
   import types.* from "./types"
   import basicSpells.* from "./vendor/spells/basicSpells"
   import authority as A from "./authority"
+  import remaining as Remaining from "./remaining"
   import topology as T from "./topology"
 
   pure def newWork(request: OperationRequest): OperationWork = {
@@ -106,7 +107,9 @@ module operations {
                     o.healthKnown and o.native.pendingChange == None and
                       o.native.voters.intersect(o.live).size() * 2 > o.native.voters.size()
                   })
-                  if (not(valid)) finished(work, A::refused(Set(Unavailable))) else
+                  val suffixErrors = Remaining::errors(meta, previous, input)
+                  if (not(valid)) finished(work, A::refused(Set(Unavailable)))
+                  else if (suffixErrors.size() > 0) finished(work, A::refused(suffixErrors)) else
                     { ...work, phase: WorkPrepared,
                       command: Some(RetryProposal({ previous: previous, scopes: work.scopes })) }
                 }

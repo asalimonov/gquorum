@@ -3,6 +3,8 @@ module properties {
   import handlers.* from "./handlers"
   import basicSpells.* from "./vendor/spells/basicSpells"
   import scope as S from "./scope"
+  import grants as G from "./grants"
+  import execution as E from "./execution"
   import authority as A from "./authority"
 
   pure def initialScope(w: World): bool = and {
@@ -59,6 +61,14 @@ module properties {
   pure def metadataWellFormed(w: World): bool = {
     val m = w.extensions.metadata
     and {
+      E::physicalEvidenceValid(w),
+      m.grants.values().forall(grant => G::wellFormed(grant)),
+      m.authorityFloors.keys().forall(r => m.grants.keys().contains(m.authorityFloors.get(r)) and
+        m.grants.get(m.authorityFloors.get(r)).resources.contains(r)),
+      m.effectReceipts.forall(r => G::canRecordReceipt(m, r)),
+      m.fenceEvidence.forall(f => G::canRecordFence(m, f)),
+      m.revocations.keys().forall(k => m.grants.keys().contains(k) and m.closedGrants.contains(k) and
+        m.revocations.get(k).provenResources.subseteq(m.revocations.get(k).requiredResources)),
       m.history.get(m.latest.version) == m.latest,
       m.target.version <= m.latest.version,
       m.history.get(m.target.version) == m.target,

@@ -50,6 +50,7 @@ module handlers {
       // The consensus primitive consumes probes separately from host handling.
       | ReadProbe(_) => false
       | MetaProposal(_) => false
+      | ExecuteGrant(_) => false
       | _ => true
     })
 

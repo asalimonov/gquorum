@@ -39,6 +39,8 @@ module initial {
     replicaAllocationFloors: doc.groups.keys().mapBy(g =>
       doc.groups.get(g).replicas.fold(1, (acc, r) => max(acc, r.key.replica + 1))),
     retiredGroupIds: Set(), sessions: Map(), locks: Map(), stagedIntents: Map(),
+    couriers: doc.nodes.keys().mapBy(n => { process: { node: n, incarnation: 1 }, member: doc.nodes.get(n).member }),
+    authorityFloors: Map(), closedGrants: Set(), effectReceipts: Set(), fenceEvidence: Set(),
   }
 
   pure def consensus(doc: Document, leader: NodeName): GroupId -> ConsensusState =
@@ -49,6 +51,7 @@ module initial {
         leaderAuthority: Some(replicas.filter(r => r.node == leader).getOnlyElement()),
         committedPosition: 1, appliedPositions: replicas.mapBy(_ => 1),
         catchUp: replicas.mapBy(_ => CaughtUp), pendingChange: None,
+        authorityFloor: 0, authorityReceipts: Set(), authorityFences: Set(),
       }
     })
 
@@ -74,12 +77,12 @@ module initial {
             startupAuthorized: true, published: true, factoryOutstanding: false,
             engineJoined: false, engineRunning: true, applicationClose: Acquired }
         }),
-        session: None, schedulerEnabled: true, serveOverride: 0, schedulerCapture: None, operationWork: Map(),
+        session: None, schedulerEnabled: true, serveOverride: 0, schedulerCapture: None, operationWork: Map(), waitingEffects: Set(), authorityReads: Map(),
       },
       durable: {
         pin: if (admitted) Some({ cluster: doc.cluster, node: n, member: doc.nodes.get(n).member }) else None,
         replicaEvidence: replicas.mapBy(_ => ValidStore({ snapshot: 0, commit: 1, tail: 1, appliedHint: 1 })),
-        authorityFloors: Map(), receipts: Set(), fences: Set(), collectionMarkers: Map(),
+        authorityFloors: Map(), receipts: Set(), fences: Set(), journalPosition: 0, collectionMarkers: Map(),
         metaImage: if (admitted) Some(view) else None, metaIndex: if (admitted) 1 else 0,
       },
     }
@@ -100,6 +103,7 @@ module initial {
         network: { metaLinks: links, loadLinks: links, pending: Set(), delivered: Set() },
         nextDelivery: 1, metadata: meta, consensus: native, recovery: Map(),
         storageConfig: pool.mapBy(_ => { defaultBackend: OwnedWAL }),
+        consumptions: Set(),
         metaLog: Map((if (founders.keys().size() > 0) 1 else 0) -> meta),
       },
     }

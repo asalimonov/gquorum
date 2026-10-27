@@ -99,3 +99,41 @@ Corrections found during implementation: explicit imports fixed a collision betw
 The task grew beyond its initial line estimate to keep the source's read/recapture and transport boundaries explicit. Pure helpers remain under scripts/quint and use one composed world; vendor libraries and production Go are unchanged. Retry routing uses a retained failed-before-effect fixture; native execution, receipt-prefix reconciliation, grant revocation/fencing and runtime failure generation remain in Task 6. This checkpoint does not claim full cluster-management coverage or qualified exhaustive/progress checking. The concurrent user edit in docs/architecture/library.md is preserved outside this commit; source/document contract differences remain an architectural-audit concern under the agreed implemented-code baseline.
 
 Final checkpoint audit: all 37 recorded model/configuration hashes match the current files; documentation links resolve and `git diff --check` passes. Target SHA-256: `0b4997c5fa252b5ad298de7d63f4cab9a02d7b137b79b7b499dc3aff3bb64ea8`.
+
+## Task 6 — in progress
+
+Task 5 committed as `5152a75`. Began source-grounded authority catalog rules in grants.qnt and extended records with immutable planned-step/request bindings, optional whole-group receipt targets, durable receipt/fence positions/terms, metadata resource floors, closure state and explicit revocation fence keys. Pure helpers distinguish immutable grant validation from issuance eligibility, exact receipt/fence replay, boundary ordering, command consumption and resumable transfer settlement. They are not yet wired to dispatch or consumption; no Task 6 completion is claimed. Typechecks passed for grants.qnt and smoke3. Full tests are deferred until the next substantial implementation batch, per the user’s requested cadence.
+
+Source findings to preserve: ValidateGrant intentionally accepts a closed but exact retained grant; physical resource fencing limits delayed execution. A transfer-start receipt consumes a command but cannot alone complete transfer or settle resumable intent. Fence/receipt order is checked by native applied index/term or host-local sequence. Whole-group founding may use a targetless group receipt; host receipts always name an exact target.
+
+### Task 6 — executable authority checkpoint, 2026-10-27
+
+Wired authority control commands into the existing metadata proposal/commit/apply path, using metadata log positions for grant revisions. Added immutable step authorization, manual-transfer authority, grant replay, scoped closure/fence obligations, receipt/fence ordering and settlement. Added receiver delivery/wait/revalidation/consumption, durable native transfer-start receipts, separate reporting and transfer observation/checkpoint actions. Native/host fencing and ordinary/readmission receipt validation remain distinct. Transfers and fences exercise the physical path now; lifecycle, membership and cleanup effect bodies belong to Tasks 7–10 and are not simulated as automatic successes.
+
+Added remaining-plan retry validation against captured native membership, exact consumed current-step/prefix receipts, predecessor/result voter sets and transfer prerequisites. Existing immutable successor routing and completed sibling preservation remain unchanged. Runtime failure fixtures still need a final audit; no Task 6 completion or commit is claimed.
+
+Validation at this checkpoint:
+- `quint typecheck scripts/quint/instances/authority3.qnt`: passed.
+- `python3 scripts/quint/run.py --profile smoke3 --mode test --seed 1`: 43 smoke scenarios and 75 core checks passed; report `test-reports/quint/20261027T173550168309Z-b3dff5b1/report.md`.
+- `quint test scripts/quint/instances/authority3.qnt --main authority3 --seed 1 --max-samples 1`: 48 scenarios passed, including five new transfer/durable-report/duplicate/stale-incarnation/post-wait-fence cases. This instance has position bound 16 and delivery bound 80; other bounds match smoke3. Its omitted-fence-check variant violates physical receipt/fence ordering as intended.
+- `git diff --check`: passed before this log append.
+- No new sampled exploration, exhaustive verification or Go regression run is claimed. No confirmed source-faithful library failure was found. A new scenario initially used Quint `then` for a read-only assertion; corrected to `expect` before validation. This was a model test-construction error.
+
+Remaining before Task 6 completion: strengthen offline-host/native-quorum revocation and omitted-identity-check scenarios; audit receiver/proof/checkpoint wiring and action barriers against the subsequent lifecycle/membership tasks; integrate the authority instance into runner coverage; run the final scoped exploration/checkpoint. The current task remains unchecked. User feedback identified excessive analysis as the primary delay; test execution alone did not account for it.
+
+## Task 6 — effect authority, fences, receipts and immutable retry suffixes
+Date: 2026-10-27
+
+Implemented authority control proposals in the existing metadata commit/apply path; exact approved-step and manual-transfer grants; immutable historical catalogue validation versus issuance eligibility; resource-sensitive closure/revocation; native/host durable floors and evidence; confirmed courier identity proofs; receiver revalidation after waits; durable transfer consumption, separate report and observed-leader checkpoint; and remaining-plan retry validation against consumed receipt prefixes, native predecessor/result membership, transfer prerequisites and capacities. Retrying a failed block preserves completed siblings and revokes only the failed/conflicting scope. Added a bounded consumption-identity monitor so later restart cannot rewrite the witness.
+
+The complete approved-transfer scenario enters through a public topology mutation and approval, then executes grant/dispatch/proof/consume/report/leader-observation/checkpoint. Added native-quorum and offline-host revocation cases, stale courier binding and receiver identity cases, host report ordering, exact replay, partial host batches and deliberate omitted-floor/identity controls. The authority3 profile starts simulation from an issued/authenticated manual transfer, with 3 nodes, 2 loads, position bound 16, delivery bound 80, request bound 3 and incarnation bound 2.
+
+Validation on the final executable files:
+- authority3: 57 asynchronous scenarios and 80 core checks passed, seed 1, 10 samples/test: `test-reports/quint/20261027T175518147536Z-68290e5b/report.md`.
+- authority3 full fault relation: sampled safety passed, seed 1, 50 samples, depth 100: `test-reports/quint/20261027T175524093311Z-27f2ba93/report.md`.
+- foundation: 7 tests passed: `test-reports/quint/20261027T175524093311Z-d6c634ca/report.md`.
+- Python runner tests: 17 passed. Typecheck and bound preflights passed; diff whitespace check passed. No exhaustive/progress or Go conformance claim is made.
+
+Model corrections during the task: native grants must use approved history rather than every earlier staged document; manual transfers preserve their captured source version; courier authentication requires a fresh metadata proof; retries must not close completed siblings' resources. One offline-host test used `fail()` around a multi-step helper; it was corrected to assert the disabled delivery action directly. These are model/test corrections, not confirmed library defects. No source-faithful failing library scenario was found; the existing findings report remains applicable.
+
+Task boundaries: physical transfer and fencing exercise the shared authority pipeline now. Lifecycle, native membership and cleanup action bodies (including their runtime failure generation) remain Tasks 7–10; unsupported bodies do not emit fake successful receipts. Task 7 extends host-floor installation/join/completion when callbacks or Close are outstanding. Minimum session activation will update the replicated courier binding; current initial bindings represent the established fixture. Full public TransferLeader waiter coverage belongs to Task 12. No production Go or vendor source changed.

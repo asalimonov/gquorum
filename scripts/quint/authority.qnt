@@ -216,20 +216,8 @@ module authority {
         owner: None, deleting: false,
       } else { ...old, owner: Some(key), deleting: deleted.contains(g) })
     })
-    val obsolete = meta.grants.keys().filter(k => match meta.grants.get(k).effect {
-      | Some(effect) => if (not(affected.contains(k.group)) or not(meta.operations.keys().contains(effect.operation))) false
-        else if (not(meta.operations.get(effect.operation).blocks.keys().contains(k.group))) false
-        else not(terminal(meta.operations.get(effect.operation).blocks.get(k.group).phase))
-      | None => false
-    })
-    val revocations = obsolete.fold(meta.revocations, (rows, k) => {
-      val prior = rows.getOrElse(k, { requested: false, requiredResources: Set(),
-        provenResources: Set(), evidence: Set() })
-      rows.put(k, { ...prior, requested: true,
-        requiredResources: prior.requiredResources.union(meta.grants.get(k).resources) })
-    })
     { ...meta, target: command.desired, operations: operations, groups: groups,
-      firstAttempts: meta.firstAttempts.put(key.version, key), cleanup: cleanup, revocations: revocations,
+      firstAttempts: meta.firstAttempts.put(key.version, key), cleanup: cleanup,
       retiredGroupIds: meta.retiredGroupIds.union(deleted) }
   }
 
@@ -268,7 +256,8 @@ module authority {
       val key = retryKey(meta, request)
       val failed = failedGroups(previous)
       val retry = { ...previous, key: key, predecessor: Some(previous.key),
-        // Task 6 reconciles the remaining prefix against consumed effect receipts.
+        // Leader-side remaining-plan validation checks this retained cursor and
+        // consumed prefix before proposing the exact immutable successor.
         blocks: previous.blocks.keys().mapBy(g => {
           val block = previous.blocks.get(g)
           if (failed.contains(g)) { ...block, phase: OpPending, reason: None } else block

@@ -149,7 +149,27 @@
         "repairChecksBothVersionCapturesTest",
         "rebaseLookupFollowsWholeChainTest",
         "rawStageHasNoConvenienceOptionsTest",
-        "standalonePinAndVoterSettersExcludedTest"
+        "standalonePinAndVoterSettersExcludedTest",
+        "grantRequiresExactRunningStepTest",
+        "grantReplayRetainsRevisionTest",
+        "exactReceiptAndReplayTest",
+        "revocationNeedsPhysicalFenceTest",
+        "fenceAllowsEarlierHistoricalReceiptTest",
+        "consumedOneShotNeedsNoNewFenceTest",
+        "manualTransferHasDistinctAuthorityTest",
+        "transferStartDoesNotSettleIntentTest",
+        "manualTransferReplayKeepsOriginalRequestTest",
+        "partialHostReceiptsDoNotSettleBatchTest",
+        "retryValidatesOriginalNativePredecessorTest",
+        "retryAcceptsConsumedCurrentNativeStepTest",
+        "retryRejectsReceiptWithoutNativeResultTest",
+        "retryRejectsMissingCompletedPrefixTest",
+        "retryRejectsLostTransferPrerequisiteTest",
+        "nativeGrantExcludesUnapprovedHistoryTest",
+        "transferCheckpointRequiresReceiptAndLeaderTest",
+        "manualTransferPreservesCapturedSourceTest",
+        "retryUsesConfiguredSurgeAndCapacityTest",
+        "retryRevokesOnlyFailedGroupEffectsTest"
       ]
     }
   ]

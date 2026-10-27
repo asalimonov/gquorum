@@ -11,7 +11,7 @@
 **Full brainstorm log:** [discussion](../brainstorms/20261027-quint-cluster-management.md)
 **Execution progress:** `docs/progress/20261027-quint-cluster-management.md`
 **Library scenario findings:** `docs/reports/20261027-quint-cluster-management.md`
-**Status:** Tasks 1–5 completed; continue at Task 6. Five completed tasks and thirteen remaining tasks; eighteen total. Validation and implementation details are in the execution log.
+**Status:** Tasks 1–6 completed; continue at Task 7. Six completed tasks and twelve remaining tasks; eighteen total. Validation and implementation details are in the execution log.
 
 ## Revised objective and execution contract
 
@@ -59,7 +59,7 @@ Per the user’s reporting instruction, failures in implemented library scenario
 | --- | --- | --- |
 | 1–4 | Foundation, runner, consensus/network, pure topology/planning | Completed historical checkpoint |
 | 5 | Enforce lean domains and wire CAS/approval/retry | Completed |
-| 6 | Exact effects/fences/receipts/revocation | Pending |
+| 6 | Exact effects/fences/receipts/revocation | Completed |
 | 7 | Local ownership/lifecycle and minimum internal sessions | Pending |
 | 8 | Native membership and 3–5-node scaling | Pending |
 | 9 | Healthy/degraded create and detached delete | Pending |
@@ -169,24 +169,24 @@ Per the user’s reporting instruction, failures in implemented library scenario
 **Files:** authority/handlers/cluster/types/properties/tests (updated); negative-control cases (new).
 **References:** target §§5.2/5.6/6.1/9/10; §14 executeAuthorizedEffect.
 
-- [ ] Implement grant→dispatch→consume→durable receipt→report→checkpoint with exact operation/version/attempt/step/action/identity/revision checks, including after waits.
-- [ ] Preserve group-wide versus host resources, effect/readmission receipts versus fence evidence, and manual transfer grants versus approved-step authority. Reuse primitives without erasing these semantic differences.
-- [ ] Keep revocation requested versus proven complete separate. Retain every required resource obligation across logical operation completion and unreachable hosts.
-- [ ] Replay exact durable receipts idempotently; refusal, partial acknowledgement or transfer-start cannot prove completion. Exercise stale sender/incarnation/delivery/receipt paths.
-- [ ] Extend failed-before-effect retry validation to the immutable remaining native plan and consumed receipt prefix; retain completed siblings and revoke outstanding predecessor effects before successor consumption.
+- [x] Implement grant→dispatch→consume→durable receipt→report→checkpoint with exact operation/version/attempt/step/action/identity/revision checks, including after waits.
+- [x] Preserve group-wide versus host resources, effect/readmission receipts versus fence evidence, and manual transfer grants versus approved-step authority. Reuse primitives without erasing these semantic differences.
+- [x] Keep revocation requested versus proven complete separate. Retain every required resource obligation across logical operation completion and unreachable hosts.
+- [x] Replay exact durable receipts idempotently; refusal, partial acknowledgement or transfer-start cannot prove completion. Exercise stale sender/incarnation/delivery/receipt paths.
+- [x] Extend failed-before-effect retry validation to the immutable remaining native plan and consumed receipt prefix; retain completed siblings and revoke outstanding predecessor effects before successor consumption.
 
 #### Verification
 
-- [ ] Common checks pass; stale work cannot affect successors and duplicate delivery cannot duplicate effects.
-- [ ] Offline/native-quorum revocation remains pending with exact evidence retained.
-- [ ] Deliberately omitted revalidation/identity checks produce the intended counterexamples.
+- [x] Common checks pass; stale work cannot affect successors and duplicate delivery cannot duplicate effects.
+- [x] Offline/native-quorum revocation remains pending with exact evidence retained.
+- [x] Deliberately omitted revalidation/identity checks produce the intended counterexamples.
 
 ### Task 7: Model local ownership, retained lifetime and minimum sessions
 
 **Files:** lifecycle.qnt/tests (new); shared types/handlers/cluster/properties (updated).
 **References:** target §§5.4/6/8.6/8.8/9; §14 startAndPublishReplica, stopAndRetire.
 
-- [ ] Implement shared reserve/acquire/replay/authorize/publish and request-stop/join/release phases. Lifetime APIs reuse those phases; no separate constructor, accessor or DI state machine.
+- [ ] Implement shared reserve/acquire/replay/authorize/publish and request-stop/join/release phases. Lifetime APIs reuse those phases; no separate constructor, accessor or DI state machine. Extend host-fence floor installation versus completion around older startup/action/Close ownership; Task 6 fixtures have no in-flight host callbacks.
 - [ ] Preserve exact local holds, explicit matching clearance, concurrent exact-start reservation, late successful factory ownership and failed/timeout Close ownership. Model callbacks as bounded outcomes, not Go threads or application implementations.
 - [ ] Add minimum internal session activation/renewal/expiry/exact-process recheck/revocation bound to durable identity and incarnation. Readiness requires admitted/recovered/current live session; neither health nor session state substitutes for quorum.
 - [ ] Retained restart restores valid storage with a fresh incarnation and must re-establish publication/authority. Do not introduce store-loss, memory/custom-store or offline-recovery paths.
