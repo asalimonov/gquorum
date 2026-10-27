@@ -131,7 +131,7 @@ module types {
   }
   type SessionKey = { owner: ProcessKey, generation: int }
   type SessionPhase = Live | ExpiredObserved | Revoked
-  type Session = { owner: ProcessKey, phase: SessionPhase, renewalGeneration: int }
+  type Session = { owner: ProcessKey, member: int, phase: SessionPhase, renewalGeneration: int }
   type MetadataState = {
     latest: Document, target: Document, history: int -> Document,
     groups: GroupId -> GroupProgress, nodes: NodeName -> NodeProgress,
@@ -139,7 +139,7 @@ module types {
     successors: AttemptKey -> AttemptKey, grants: GrantKey -> Grant,
     revocations: GrantKey -> Revocation, cleanup: ReplicaKey -> CleanupDebt,
     memberAllocationFloor: int, replicaAllocationFloors: GroupId -> int,
-    retiredGroupIds: Set[GroupId], sessions: SessionKey -> Session, locks: str -> SessionKey,
+    retiredGroupIds: Set[GroupId], sessions: SessionKey -> Session, activeSessions: NodeName -> SessionKey, locks: str -> SessionKey,
     // Exact semantic request provenance, independent of a transport call ID.
     stagedIntents: int -> MutationRequest,
     authorityFloors: ResourceKey -> GrantKey, closedGrants: Set[GrantKey],
@@ -169,6 +169,8 @@ module types {
     replayReady: bool, startupAuthorized: bool, published: bool,
     factoryOutstanding: bool, engineJoined: bool, applicationClose: ClosePhase,
     engineRunning: bool,
+    process: ProcessKey, waiters: Set[RequestKey], callbackExpired: bool, closeExpired: bool,
+    replayOutstanding: bool, startDeclaration: Option[GroupDecl], authorityRevision: int, scopeIndex: int,
   }
   type StorageEvidence = ValidStore({ snapshot: int, commit: int, tail: int, appliedHint: int })
     | MissingStore | ForeignStore(ReplicaKey) | UnreadableStore | ContradictoryStore
@@ -243,7 +245,9 @@ module types {
     staged: Option[int], operation: Option[AttemptKey], rebasedTo: Option[int], errors: Set[Refusal],
   }
   type StageCommand = { request: MutationRequest, desired: Document }
-  type ControlCommand = BeginBlock({ operation: AttemptKey, group: GroupId })
+  type SessionCommand = GrantInternalSession({ key: SessionKey, member: int })
+    | BindInternalSession(SessionKey) | RevokeInternalSession(SessionKey)
+  type ControlCommand = SessionControl(SessionCommand) | BeginBlock({ operation: AttemptKey, group: GroupId })
     | IssueEffect(ApprovedAction) | IssueTransfer({ target: ReplicaKey, request: RequestKey, sourceVersion: int })
     | RecordEffect(Receipt) | RecordFence(FenceEvidence)
     | CompleteStep({ approved: ApprovedAction, observedLeader: Option[ReplicaKey] })
@@ -276,6 +280,12 @@ module types {
     proofIndex: Option[int],
     replica: ReplicaKey, grant: Grant, resource: ResourceKey,
   }
+  type Lease = { phase: SessionPhase, epoch: int, probe: Option[int], failedProbe: bool }
+  type Renewal = { key: SessionKey, round: int, member: int }
+  type StartPhase = StartPreparing | StartAccepted | StartSucceeded | StartRefused
+  type StartWork = { key: ReplicaKey, request: RequestKey, explicit: bool,
+    floorIndex: Option[int], phase: StartPhase, error: Option[Refusal] }
+  type HostFenceWork = { delivery: EffectDelivery, position: int }
   type ProcessState = {
     phase: ProcessPhase, incarnation: int, pendingCalls: RequestKey -> CallState,
     appliedMetaVersion: int, appliedMetaIndex: int, localView: ReadView,
@@ -284,11 +294,19 @@ module types {
     schedulerCapture: Option[SchedulerCapture],
     operationWork: ProposalKey -> OperationWork,
     waitingEffects: Set[EffectDelivery], authorityReads: int -> int,
+    holds: Set[ReplicaKey], starts: RequestKey -> StartWork,
+    fenceWorkers: Set[ResourceKey], metaRunning: bool, stopTimedOut: bool,
+    ownLease: SessionPhase, leases: SessionKey -> Lease,
+    renewal: Option[Renewal], renewalExpired: bool,
+    revokeGate: Option[{ key: SessionKey, proposal: ProposalKey }],
   }
   type HostState = {
     pin: Option[DurableNodeIdentity], replicaEvidence: ReplicaKey -> StorageEvidence,
-    authorityFloors: ResourceKey -> int, receipts: Set[Receipt], fences: Set[FenceEvidence],
-    journalPosition: int,
+    authorityFloors: ResourceKey -> int, authorityGrants: ResourceKey -> Grant, receipts: Set[Receipt], fences: Set[FenceEvidence],
+    journalPosition: int, pendingFences: ResourceKey -> HostFenceWork,
+    // Established fixture abstracts already-consumed founding grants. Exact
+    // retained identities keep their initial floor until an explicit grant wins.
+    seedAuthority: Set[ReplicaKey],
     collectionMarkers: ReplicaKey -> CollectionState,
     metaImage: Option[ReadView], metaIndex: int,
   }
@@ -299,6 +317,9 @@ module types {
     | ReadProbe(ReadTicket) | ReadAck({ ticket: ReadTicket, index: int })
     | MetaProposal({ key: ProposalKey, coordinator: ProcessKey, forWork: bool, command: MetaCommand })
     | MetaAck({ key: ProposalKey, coordinator: ProcessKey, forWork: bool, index: int, outcome: MutationOutcome })
+    | SessionRenew(Renewal) | SessionRenewed(Renewal)
+    | SessionProbe({ key: SessionKey, epoch: int, round: int, leader: ProcessKey })
+    | SessionProbed({ key: SessionKey, epoch: int, round: int, leader: ProcessKey, observed: ProcessKey, member: int })
     | ExecuteGrant(EffectDelivery)
     | OperationCall({ key: ProposalKey, request: OperationRequest })
     | OperationAck({ key: ProposalKey, outcome: MutationOutcome })

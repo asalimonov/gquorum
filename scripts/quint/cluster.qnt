@@ -2,6 +2,8 @@ module cluster {
   import grants as G from "./grants"
   import controls as Ctrl from "./controls"
   import execution as E from "./execution"
+  import sessions as Sessions from "./sessions"
+  import lifecycle as Life from "./lifecycle"
   import initial as I from "./initial"
   import membership as M from "./membership"
   import scope as S from "./scope"
@@ -404,14 +406,18 @@ module cluster {
     val owner = world.system.get(node)
     val c = world.extensions.consensus.get("_meta")
     match c.leaderAuthority {
-      | Some(leader) => all {
-          M::running(owner), owner.volatile.observations.keys().contains("_meta"),
-          M::liveIdentity(world.system, leader), M::communicates(world.extensions.network.metaLinks, node, leader.node),
-          owner.volatile.observations.get("_meta").observedLeader != Some(leader) or
-            owner.volatile.observations.get("_meta").observedConfig != c.configRevision,
-          world' = { ...world, system: world.system.put(node, { ...owner, volatile: { ...owner.volatile,
-            observations: owner.volatile.observations.setBy("_meta", o =>
-              { ...o, observedLeader: Some(leader), observedConfig: c.configRevision }) } }) },
+      | Some(leader) => {
+          val prior = owner.volatile.observations.getOrElse("_meta", {
+            group: "_meta", replica: leader, incarnation: owner.volatile.incarnation,
+            observedConfig: 0, observedLeader: None, health: Healthy, age: Fresh })
+          all {
+            M::running(owner), M::liveIdentity(world.system, leader),
+            M::communicates(world.extensions.network.metaLinks, node, leader.node),
+            prior.observedLeader != Some(leader) or prior.observedConfig != c.configRevision,
+            world' = { ...world, system: world.system.put(node, { ...owner, volatile: { ...owner.volatile,
+              observations: owner.volatile.observations.put("_meta", { ...prior,
+                observedLeader: Some(leader), observedConfig: c.configRevision }) } }) },
+          }
         }
       | None => all { false, world' = world }
     }
@@ -482,7 +488,7 @@ module cluster {
       M::running(owner),
       world' = { ...world,
         system: world.system.put(node, { ...owner, volatile: { ...owner.volatile,
-          phase: Stopped, pendingCalls: Map(), owners: Map(), observations: Map(), operationWork: Map(), waitingEffects: Set(), authorityReads: Map(),
+          phase: Stopped, pendingCalls: Map(), owners: Map(), observations: Map(), operationWork: Map(), waitingEffects: Set(), authorityReads: Map(), holds: Set(), starts: Map(), fenceWorkers: Set(), metaRunning: false, stopTimedOut: false, ownLease: Revoked, leases: Map(), renewal: None, renewalExpired: false, revokeGate: None,
           session: None, schedulerCapture: None, appliedMetaIndex: 0, appliedMetaVersion: 0,
           localView: { latest: I::emptyDocument, target: I::emptyDocument } } }),
         messages: world.messages.put(node, Set()),
@@ -500,7 +506,11 @@ module cluster {
       owner.volatile.phase == Stopped,
       owner.volatile.incarnation < MAX_INCARNATION,
       world' = { ...world, system: world.system.put(node, { ...owner,
-        volatile: { ...owner.volatile, phase: Starting,
+        volatile: { ...owner.volatile, phase: Starting, metaRunning: owner.durable.pin != None, stopTimedOut: false,
+          owners: Map(), starts: Map(), holds: Set(), session: None, ownLease: Revoked,
+          renewal: None, renewalExpired: false, leases: Map(), revokeGate: None,
+          fenceWorkers: Set(), authorityReads: Map(), waitingEffects: Set(), pendingCalls: Map(),
+          observations: Map(), operationWork: Map(),
           incarnation: owner.volatile.incarnation + 1,
           localView: view,
           appliedMetaIndex: owner.durable.metaIndex,
@@ -540,8 +550,13 @@ module cluster {
     all {
       valid, retained, c.leaderAuthority != Some(candidate),
       M::certificate(c, world.system, M::linksFor(world.extensions.network, group), candidate).size() * 2 > c.voters.size(),
-      world' = { ...world, extensions: { ...world.extensions,
-        consensus: world.extensions.consensus.put(group, { ...c, leaderAuthority: Some(candidate) }) } },
+      world' = { ...world,
+        system: if (group == "_meta") world.system.setBy(candidate.node, node => { ...node, volatile: { ...node.volatile,
+          leases: world.extensions.metaLog.get(node.volatile.appliedMetaIndex).sessions.keys().filter(k =>
+            world.extensions.metaLog.get(node.volatile.appliedMetaIndex).sessions.get(k).phase == Live).mapBy(_ => Sessions::freshLease) } })
+          else world.system,
+        extensions: { ...world.extensions,
+          consensus: world.extensions.consensus.put(group, { ...c, leaderAuthority: Some(candidate) }) } },
     }
   }
 
@@ -596,6 +611,496 @@ module cluster {
     }
   }
 
+  action beginSession(node: NodeName): bool = {
+    val host = world.system.get(node)
+    val key: SessionKey = { owner: { node: node, incarnation: host.volatile.incarnation }, generation: 1 }
+    all {
+      M::running(host), host.volatile.session == None, host.durable.pin != None,
+      world' = { ...world, system: world.system.put(node, { ...host,
+        volatile: { ...host.volatile, session: Some(key), ownLease: Revoked } }) },
+    }
+  }
+  action proposeSession(node: NodeName): bool = {
+    val host = world.system.get(node)
+    val local = world.extensions.metaLog.get(host.volatile.appliedMetaIndex)
+    match host.volatile.session {
+      | Some(key) => match host.durable.pin {
+          | Some(pin) => {
+              val missing = not(local.sessions.keys().contains(key)) or local.sessions.get(key).phase == Revoked
+              val unbound = local.activeSessions.getOrElse(node, { owner: { node: "", incarnation: 0 }, generation: 0 }) != key
+              all { key.owner == { node: node, incarnation: host.volatile.incarnation }, missing or unbound,
+                submitControl(node, SessionControl(if (missing) GrantInternalSession({ key: key, member: pin.member })
+                  else BindInternalSession(key))) }
+            }
+          | None => all { false, world' = world }
+        }
+      | None => all { false, world' = world }
+    }
+  }
+  action renewSession(node: NodeName): bool = {
+    val host = world.system.get(node)
+    val local = world.extensions.metaLog.get(host.volatile.appliedMetaIndex)
+    val leader = host.volatile.observations.get("_meta").observedLeader
+    match host.volatile.session {
+      | Some(key) => match host.durable.pin {
+          | Some(pin) => match leader {
+              | Some(destination) => {
+                  val renewal: Renewal = { key: key, round: world.extensions.nextDelivery, member: pin.member }
+                  all {
+                    M::running(host), host.volatile.ownLease != Live, host.volatile.renewal == None,
+                    local.activeSessions.getOrElse(node, { owner: { node: "", incarnation: 0 }, generation: 0 }) == key,
+                    Sessions::renewalMatches(local, renewal, { node: node, incarnation: host.volatile.incarnation }),
+                    world.extensions.nextDelivery <= MAX_DELIVERIES,
+                    world' = apply_custom_effect({ ...world, system: world.system.put(node, { ...host,
+                      volatile: { ...host.volatile, renewal: Some(renewal), renewalExpired: false } }) },
+                      Queue({ delivery: world.extensions.nextDelivery, source: key.owner, destination: destination.node,
+                        channel: MetaChannel, payload: SessionRenew(renewal) })),
+                  }
+                }
+              | None => all { false, world' = world }
+            }
+          | None => all { false, world' = world }
+        }
+      | None => all { false, world' = world }
+    }
+  }
+  pure def locallyLeader(host: LocalNode): bool =
+    if (not(host.volatile.observations.keys().contains("_meta"))) false else match host.volatile.observations.get("_meta").observedLeader {
+      | Some(leader) => leader.node == host.process_id | None => false }
+
+  action handleSession(msg: Envelope): bool = {
+    val host = world.system.get(msg.destination)
+    val local = world.extensions.metaLog.get(host.volatile.appliedMetaIndex)
+    val source = { node: msg.destination, incarnation: host.volatile.incarnation }
+    match msg.payload {
+      | SessionRenew(renewal) => {
+          val valid = locallyLeader(host) and host.volatile.revokeGate == None and
+            Sessions::renewalMatches(local, renewal, msg.source)
+          val lease = host.volatile.leases.getOrElse(renewal.key, Sessions::freshLease)
+          all {
+            world.messages.get(msg.destination).contains(msg), M::running(host),
+            world.extensions.nextDelivery <= MAX_DELIVERIES, lease.epoch < MAX_DELIVERIES,
+            // KeepAlive is leader-local, not a Raft commit or a quorum proof.
+            world' = if (valid) apply_custom_effect(apply_custom_effect({ ...world,
+              system: world.system.put(msg.destination, { ...host, volatile: { ...host.volatile,
+                leases: host.volatile.leases.put(renewal.key, Sessions::refreshed(lease)) } }) }, Consume(msg)),
+              Queue({ delivery: world.extensions.nextDelivery, source: source, destination: renewal.key.owner.node,
+                channel: MetaChannel, payload: SessionRenewed(renewal) }))
+              else if (host.volatile.revokeGate == None) apply_custom_effect(world, Consume(msg)) else world,
+            host.volatile.revokeGate == None,
+          }
+        }
+      | SessionRenewed(renewal) => {
+          val exact = host.volatile.session == Some(renewal.key) and renewal.key.owner == source and
+            host.volatile.renewal == Some(renewal)
+          all {
+            world.messages.get(msg.destination).contains(msg), M::running(host),
+            world' = apply_custom_effect({ ...world, system: world.system.put(msg.destination,
+              if (exact) { ...host, volatile: { ...host.volatile, renewal: None,
+                ownLease: if (host.volatile.renewalExpired) ExpiredObserved else Live,
+                phase: if (host.volatile.renewalExpired) host.volatile.phase else Ready } } else host) }, Consume(msg)),
+          }
+        }
+      | SessionProbe(probe) => match host.durable.pin {
+          | Some(pin) => all {
+              world.messages.get(msg.destination).contains(msg), M::running(host),
+              world.extensions.nextDelivery <= MAX_DELIVERIES,
+              world' = apply_custom_effect(apply_custom_effect(world, Consume(msg)), Queue({ delivery: world.extensions.nextDelivery,
+                source: source, destination: probe.leader.node, channel: MetaChannel,
+                payload: SessionProbed({ key: probe.key, epoch: probe.epoch, round: probe.round, leader: probe.leader, observed: source, member: pin.member }) })),
+            }
+          | None => all { false, world' = world }
+        }
+      | SessionProbed(probe) => {
+          val lease = host.volatile.leases.getOrElse(probe.key, Sessions::freshLease)
+          val exact = probe.leader == source and lease.phase == ExpiredObserved and lease.epoch == probe.epoch and
+            lease.probe == Some(probe.round) and not(lease.failedProbe)
+          val same = probe.observed == probe.key.owner and Sessions::eligible(local, probe.observed, probe.member)
+          all {
+            world.messages.get(msg.destination).contains(msg), M::running(host), lease.epoch < MAX_DELIVERIES,
+            world' = apply_custom_effect({ ...world, system: world.system.put(msg.destination, if (exact) { ...host,
+              volatile: { ...host.volatile, leases: host.volatile.leases.put(probe.key,
+                if (same) Sessions::refreshed(lease) else { ...lease, failedProbe: true }) } } else host) }, Consume(msg)),
+          }
+        }
+      | MetaAck(ack) => match host.volatile.revokeGate {
+          | Some(gate) => all {
+              world.messages.get(msg.destination).contains(msg), ack.key == gate.proposal, ack.coordinator == source,
+              host.volatile.appliedMetaIndex >= ack.index,
+              world' = apply_custom_effect({ ...world, system: world.system.put(msg.destination, { ...host,
+                volatile: { ...host.volatile, revokeGate: None, leases: host.volatile.leases.mapRemove(gate.key) } }) }, Consume(msg)),
+            }
+          | None => all { false, world' = world }
+        }
+      | _ => all { false, world' = world }
+    }
+  }
+
+  action seedLeases(node: NodeName): bool = {
+    val host = world.system.get(node)
+    val local = world.extensions.metaLog.get(host.volatile.appliedMetaIndex)
+    val missing = local.sessions.keys().filter(k => local.sessions.get(k).phase == Live).exclude(host.volatile.leases.keys())
+    all { M::running(host), locallyLeader(host), missing.size() > 0,
+      world' = { ...world, system: world.system.put(node, { ...host, volatile: { ...host.volatile,
+        leases: missing.fold(host.volatile.leases, (leases, key) => leases.put(key, Sessions::freshLease)) } }) } }
+  }
+  action forgetRevokedLease(node: NodeName, key: SessionKey): bool = {
+    val host = world.system.get(node)
+    val local = world.extensions.metaLog.get(host.volatile.appliedMetaIndex)
+    all { locallyLeader(host), host.volatile.leases.keys().contains(key), host.volatile.revokeGate == None,
+      not(local.sessions.keys().contains(key)) or local.sessions.get(key).phase == Revoked,
+      world' = { ...world, system: world.system.put(node, { ...host,
+        volatile: { ...host.volatile, leases: host.volatile.leases.mapRemove(key) } }) } }
+  }
+  action expireLease(node: NodeName, key: SessionKey): bool = {
+    val host = world.system.get(node)
+    val lease = host.volatile.leases.get(key)
+    all { M::running(host), locallyLeader(host), lease.phase == Live, host.volatile.revokeGate == None,
+      world' = { ...world, system: world.system.put(node, { ...host, volatile: { ...host.volatile,
+        leases: host.volatile.leases.put(key, { ...lease, phase: ExpiredObserved }) } }) } }
+  }
+  action expireOwnLease(node: NodeName): bool = {
+    val host = world.system.get(node)
+    all { M::running(host), host.volatile.ownLease == Live or (host.volatile.renewal != None and not(host.volatile.renewalExpired)),
+      world' = { ...world, system: world.system.put(node, { ...host, volatile: { ...host.volatile,
+        ownLease: ExpiredObserved, renewalExpired: host.volatile.renewal != None } }) } }
+  }
+  action cancelRenewal(node: NodeName): bool = {
+    val host = world.system.get(node)
+    all { host.volatile.renewal != None, world' = { ...world, system: world.system.put(node, { ...host,
+      volatile: { ...host.volatile, renewal: None } }) } }
+  }
+  action probeSession(node: NodeName, key: SessionKey): bool = {
+    val host = world.system.get(node)
+    val lease = host.volatile.leases.get(key)
+    val source = { node: node, incarnation: host.volatile.incarnation }
+    val round = world.extensions.nextDelivery
+    all { M::running(host), locallyLeader(host), lease.phase == ExpiredObserved,
+      world.extensions.metaLog.get(host.volatile.appliedMetaIndex).sessions.keys().contains(key),
+      world.extensions.metaLog.get(host.volatile.appliedMetaIndex).sessions.get(key).phase == Live,
+      lease.probe == None, not(lease.failedProbe), round <= MAX_DELIVERIES,
+      world' = if (key.owner.node == node) { ...world, system: world.system.put(node, { ...host,
+        volatile: { ...host.volatile, leases: host.volatile.leases.put(key,
+          if (key.owner == source and match host.durable.pin { | Some(pin) => Sessions::eligible(
+            world.extensions.metaLog.get(host.volatile.appliedMetaIndex), source, pin.member) | None => false })
+            Sessions::refreshed(lease) else { ...lease, failedProbe: true }) } }) }
+      else apply_custom_effect({ ...world, system: world.system.put(node, { ...host, volatile: { ...host.volatile,
+        leases: host.volatile.leases.put(key, { ...lease, probe: Some(round) }) } }) },
+        Queue({ delivery: round, source: source, destination: key.owner.node, channel: MetaChannel,
+          payload: SessionProbe({ key: key, epoch: lease.epoch, round: round, leader: source }) })),
+    }
+  }
+  action timeoutSessionProbe(node: NodeName, key: SessionKey): bool = {
+    val host = world.system.get(node)
+    val lease = host.volatile.leases.get(key)
+    all { lease.phase == ExpiredObserved, lease.probe != None, not(lease.failedProbe),
+      world' = { ...world, system: world.system.put(node, { ...host, volatile: { ...host.volatile,
+        leases: host.volatile.leases.put(key, { ...lease, failedProbe: true }) } }) } }
+  }
+  action revokeExpiredSession(node: NodeName, key: SessionKey): bool = {
+    val host = world.system.get(node)
+    val lease = host.volatile.leases.get(key)
+    all { M::running(host), locallyLeader(host), host.volatile.revokeGate == None,
+      lease.phase == ExpiredObserved, lease.failedProbe,
+      submitControl(node, SessionControl(RevokeInternalSession(key))) }
+  }
+  action abandonSessionRevoke(node: NodeName): bool = {
+    val host = world.system.get(node)
+    all { host.volatile.revokeGate != None, world' = { ...world, system: world.system.put(node, { ...host,
+      volatile: { ...host.volatile, revokeGate: None } }) } }
+  }
+  action sessionStep = any {
+    nondet node = NODE_POOL.filter(n => M::running(world.system.get(n)) and
+      world.system.get(n).volatile.observations.keys().contains("_meta")).oneOf()
+    any { beginSession(node), proposeSession(node), renewSession(node), seedLeases(node) },
+    nondet node = NODE_POOL.oneOf()
+    nondet msg = world.messages.get(node).oneOf()
+    handleSession(msg),
+    nondet node = NODE_POOL.oneOf()
+    nondet key = world.system.get(node).volatile.leases.keys().oneOf()
+    any { probeSession(node, key), revokeExpiredSession(node, key), forgetRevokedLease(node, key) },
+  }
+
+  pure def freshMetaAvailable(env: Environment, nodes: NodeStates, node: NodeName): bool = {
+    val c = env.consensus.get("_meta")
+    M::running(nodes.get(node)) and M::hasCommitPath(c, nodes, env.network.metaLinks) and
+      match c.leaderAuthority { | Some(leader) => M::communicates(env.network.metaLinks, node, leader.node)
+        | None => false }
+  }
+
+  action requestStart(node: NodeName, replica: ReplicaKey, explicit: bool): bool = {
+    val owner = world.system.get(node)
+    val key = { caller: { node: node, incarnation: owner.volatile.incarnation },
+      sequence: owner.volatile.starts.keys().size() + 1 }
+    all {
+      M::running(owner), replica.node == node, replica.group != "_meta", key.sequence <= MAX_REQUESTS,
+      world' = { ...world, system: world.system.put(node, { ...owner, volatile: { ...owner.volatile,
+        starts: owner.volatile.starts.put(key, { key: replica, request: key, explicit: explicit,
+          floorIndex: None, phase: StartPreparing, error: None }) } }) },
+    }
+  }
+
+  action readStartScope(request: RequestKey): bool = {
+    val node = world.system.get(request.caller.node)
+    val work = node.volatile.starts.get(request)
+    all {
+      request.caller.incarnation == node.volatile.incarnation,
+      work.phase == StartPreparing, work.floorIndex == None,
+      (Life::canReuse(node, work.key) or freshMetaAvailable(world.extensions, world.system, request.caller.node)),
+      world' = { ...world, system: world.system.put(request.caller.node, { ...node,
+        volatile: { ...node.volatile, starts: node.volatile.starts.put(request,
+          { ...work, floorIndex: Some(if (Life::canReuse(node, work.key)) node.volatile.appliedMetaIndex
+            else world.extensions.consensus.get("_meta").committedPosition) }) } }) },
+    }
+  }
+
+  action reserveOwner(request: RequestKey): bool = {
+    val node = world.system.get(request.caller.node)
+    val work = node.volatile.starts.get(request)
+    match work.floorIndex {
+      | Some(index) => {
+          val floors = world.extensions.metaLog.get(index)
+          val meta = world.extensions.metaLog.get(node.volatile.appliedMetaIndex)
+          val staleFloor = floors.authorityFloors.keys().contains(Life::resource(work.key)) and
+            Life::floorRevision(node, work.key) > floors.authorityFloors.get(Life::resource(work.key)).revision
+          val valid = not(staleFloor) and Life::assigned(meta, work.key) and Life::retainedStore(node, work.key) and
+            Life::canReserve(node, work.key, request, work.explicit)
+          val imported = Life::canReuse(node, work.key) or Life::importedFloor(node, floors, work.key)
+          val accepted = if (valid and imported) Life::reserve(node, work.key, request, work.explicit,
+            meta.target.groups.get(work.key.group), Life::floorRevision(node, work.key)) else node
+          all {
+            M::running(node), request.caller.incarnation == node.volatile.incarnation,
+            work.phase == StartPreparing, imported or not(valid),
+            world' = { ...world, system: world.system.put(request.caller.node, { ...accepted,
+              volatile: { ...accepted.volatile, starts: accepted.volatile.starts.put(request,
+                { ...work, phase: if (valid) StartAccepted else StartRefused,
+                  error: if (valid) None else Some(Unavailable) }) } }) },
+          }
+        }
+      | None => all { false, world' = world }
+    }
+  }
+
+  action beginOwnerFactory(node: NodeName, group: GroupId): bool = {
+    val owner = world.system.get(node).volatile.owners.get(group)
+    all { M::running(world.system.get(node)), owner.phase == Reserved,
+      world' = { ...world, system: world.system.setBy(node, n => { ...n,
+        volatile: { ...n.volatile, owners: n.volatile.owners.put(group, Life::beginFactory(owner)) } }) } }
+  }
+  action returnOwnerFactory(node: NodeName, group: GroupId, success: bool): bool = {
+    val owner = world.system.get(node).volatile.owners.get(group)
+    all { world.system.get(node).volatile.phase != Stopped, owner.factoryOutstanding,
+      world' = { ...world, system: world.system.setBy(node, n => { ...n,
+        volatile: { ...n.volatile, owners: n.volatile.owners.put(group, Life::factoryReturned(owner, success)) } }) } }
+  }
+  action expireOwnerFactory(node: NodeName, group: GroupId): bool = {
+    val owner = world.system.get(node).volatile.owners.get(group)
+    all { owner.factoryOutstanding, not(owner.callbackExpired),
+      world' = { ...world, system: world.system.setBy(node, n => { ...n,
+        volatile: { ...n.volatile, owners: n.volatile.owners.put(group, Life::expireFactory(owner)) } }) } }
+  }
+  action finishOwnerReplay(node: NodeName, group: GroupId): bool = {
+    val owner = world.system.get(node).volatile.owners.get(group)
+    all { owner.replayOutstanding,
+      world' = { ...world, system: world.system.setBy(node, n => { ...n,
+        volatile: { ...n.volatile, owners: n.volatile.owners.put(group, Life::replayFinished(owner)) } }) } }
+  }
+  action authorizeOwner(node: NodeName, group: GroupId): bool = {
+    val owner = world.system.get(node).volatile.owners.get(group)
+    val index = world.system.get(node).volatile.appliedMetaIndex
+    val meta = world.extensions.metaLog.get(index)
+    val allowed = if (not(Life::assigned(meta, owner.key))) false else true and owner.startDeclaration == Some(meta.target.groups.get(group)) and
+      Life::exactPin(world.system.get(node), owner.key) and Life::importedFloor(world.system.get(node), meta, owner.key) and
+      owner.authorityRevision == Life::floorRevision(world.system.get(node), owner.key)
+    all {
+      owner.phase == Replaying, owner.replayReady, not(owner.startupAuthorized), M::running(world.system.get(node)),
+      world' = { ...world, system: world.system.setBy(node, n => { ...n, volatile: { ...n.volatile,
+        owners: n.volatile.owners.put(group, if (allowed) { ...Life::authorize(owner), scopeIndex: index }
+          else Life::requestStop(owner)) } }) },
+    }
+  }
+  action publishOwner(node: NodeName, group: GroupId): bool = {
+    val owner = world.system.get(node).volatile.owners.get(group)
+    all { Life::publicationAllowed(world.system.get(node), owner),
+      world' = { ...world, system: world.system.setBy(node, n => { ...n,
+        volatile: { ...n.volatile, owners: n.volatile.owners.put(group, Life::publish(owner)) } }) } }
+  }
+  action replyStart(request: RequestKey): bool = {
+    val node = world.system.get(request.caller.node)
+    val work = node.volatile.starts.get(request)
+    val owner = node.volatile.owners.get(work.key.group)
+    all { work.phase == StartAccepted, owner.key == work.key,
+      owner.phase == OwnerReady or owner.phase == OwnerStopped,
+      world' = { ...world, system: world.system.setBy(request.caller.node, n => { ...n,
+        volatile: { ...n.volatile, starts: n.volatile.starts.put(request,
+          { ...work, phase: if (owner.phase == OwnerReady) StartSucceeded else StartRefused,
+            error: if (owner.phase == OwnerReady) None else Some(Unavailable) }) } }) } }
+  }
+  action cancelStart(request: RequestKey): bool = {
+    val node = world.system.get(request.caller.node)
+    val work = node.volatile.starts.get(request)
+    all { work.phase == StartPreparing or work.phase == StartAccepted,
+      world' = { ...world, system: world.system.setBy(request.caller.node, n => { ...n,
+        volatile: { ...n.volatile,
+          starts: n.volatile.starts.put(request, { ...work, phase: StartRefused, error: Some(WaitCancelled) }),
+          owners: if (work.phase == StartAccepted) n.volatile.owners.setBy(work.key.group,
+            owner => Life::cancelWaiter(owner, request)) else n.volatile.owners } }) } }
+  }
+  action stopOwner(node: NodeName, replica: ReplicaKey, explicit: bool): bool = {
+    val host = world.system.get(node)
+    all { replica.node == node, replica.group != "_meta", host.volatile.phase != Stopped,
+      if (explicit) not(host.volatile.holds.contains(replica)) else
+        host.volatile.owners.keys().contains(replica.group) and
+          host.volatile.owners.get(replica.group).key == replica and
+          not(Set(OwnerStopping, OwnerStopped).contains(host.volatile.owners.get(replica.group).phase)),
+      world' = { ...world, system: world.system.put(node, if (explicit) Life::hold(host, replica) else { ...host,
+        volatile: { ...host.volatile, owners: host.volatile.owners.setBy(replica.group, owner => Life::requestStop(owner)) } }) } }
+  }
+  action joinOwner(node: NodeName, group: GroupId): bool = {
+    val owner = world.system.get(node).volatile.owners.get(group)
+    all { Life::canJoin(owner), world' = { ...world, system: world.system.setBy(node, n => { ...n,
+      volatile: { ...n.volatile, owners: n.volatile.owners.put(group, Life::joined(owner)) } }) } }
+  }
+  action beginOwnerClose(node: NodeName, group: GroupId): bool = {
+    val owner = world.system.get(node).volatile.owners.get(group)
+    all { Life::canClose(owner), world' = { ...world, system: world.system.setBy(node, n => { ...n,
+      volatile: { ...n.volatile, owners: n.volatile.owners.put(group, Life::beginClose(owner)) } }) } }
+  }
+  action returnOwnerClose(node: NodeName, group: GroupId, success: bool): bool = {
+    val owner = world.system.get(node).volatile.owners.get(group)
+    all { owner.applicationClose == Closing, world' = { ...world, system: world.system.setBy(node, n => { ...n,
+      volatile: { ...n.volatile, owners: n.volatile.owners.put(group, Life::closeReturned(owner, success)) } }) } }
+  }
+  action releaseOwner(node: NodeName, group: GroupId): bool = {
+    val owner = world.system.get(node).volatile.owners.get(group)
+    all { owner.phase == OwnerStopping, Life::released(owner),
+      world' = { ...world, system: world.system.setBy(node, n => { ...n,
+        volatile: { ...n.volatile, owners: n.volatile.owners.put(group, Life::finishRelease(owner)),
+          starts: n.volatile.starts.transformValues(work => if (work.key == owner.key and work.phase == StartAccepted)
+            { ...work, phase: StartRefused, error: Some(Unavailable) } else work) } }) } }
+  }
+
+  action stopOlderForFence(node: NodeName, resource: ResourceKey): bool = {
+    val host = world.system.get(node)
+    val pending = host.durable.pendingFences.get(resource)
+    val group = pending.delivery.grant.key.group
+    val owner = host.volatile.owners.get(group)
+    all { host.volatile.fenceWorkers.contains(resource), owner.authorityRevision < pending.delivery.grant.key.revision,
+      not(Set(OwnerReady, OwnerStopping, OwnerStopped).contains(owner.phase)),
+      world' = { ...world, system: world.system.put(node, { ...host, volatile: { ...host.volatile,
+        owners: host.volatile.owners.put(group, Life::requestStop(owner)) } }) } }
+  }
+  action completeHostFence(node: NodeName, resource: ResourceKey): bool = {
+    val host = world.system.get(node)
+    val pending = host.durable.pendingFences.get(resource)
+    val group = pending.delivery.grant.key.group
+    val ownerJoined = if (not(host.volatile.owners.keys().contains(group))) true else {
+      val owner = host.volatile.owners.get(group)
+      owner.phase == OwnerReady or Life::released(owner)
+    }
+    val proof = E::fence(pending.delivery, pending.position)
+    all { M::running(host), host.volatile.fenceWorkers.contains(resource), ownerJoined,
+      E::receiverExact(world, pending.delivery),
+      host.durable.authorityFloors.get(resource) == pending.delivery.grant.key.revision,
+      world' = { ...world, system: world.system.put(node, { ...host,
+        volatile: { ...host.volatile, fenceWorkers: host.volatile.fenceWorkers.exclude(Set(resource)) },
+        durable: { ...host.durable, pendingFences: host.durable.pendingFences.mapRemove(resource),
+          fences: host.durable.fences.union(Set(proof)) } }) },
+    }
+  }
+  action importStartFloor(request: RequestKey): bool = {
+    val host = world.system.get(request.caller.node)
+    val work = host.volatile.starts.get(request)
+    match work.floorIndex {
+      | Some(index) => {
+          val meta = world.extensions.metaLog.get(index)
+          val resource = Life::resource(work.key)
+          all { work.phase == StartPreparing, not(Life::canReuse(host, work.key)),
+            meta.authorityFloors.keys().contains(resource), not(Life::importedFloor(host, meta, work.key)),
+            dispatchGrantFrom(request.caller.node, meta.authorityFloors.get(resource), resource, index) }
+        }
+      | None => all { false, world' = world }
+    }
+  }
+  action requestNodeStop(node: NodeName): bool = {
+    val host = world.system.get(node)
+    val caller = { node: node, incarnation: host.volatile.incarnation }
+    val stopping = { ...world, system: world.system.put(node, { ...host, volatile: { ...host.volatile,
+      phase: Stopping, ownLease: Revoked, renewal: None,
+      owners: host.volatile.owners.transformValues(owner => if (owner.phase == OwnerStopped) owner else Life::requestStop(owner)) } }) }
+    val leader = if (host.volatile.observations.keys().contains("_meta")) host.volatile.observations.get("_meta").observedLeader else None
+    val nextWorld = match host.volatile.session {
+      | Some(key) => match leader {
+          | Some(destination) => if (world.extensions.nextDelivery <= MAX_DELIVERIES) apply_custom_effect(stopping,
+              Queue({ delivery: world.extensions.nextDelivery, source: caller, destination: destination.node, channel: MetaChannel,
+                payload: MetaProposal({ key: { request: { caller: caller, sequence: -world.extensions.nextDelivery }, sequence: 0 },
+                  coordinator: caller, forWork: false, command: ControlProposal(SessionControl(RevokeInternalSession(key))) }) }))
+            else stopping
+          | None => stopping }
+      | None => stopping
+    }
+    all { M::running(host), world' = nextWorld }
+  }
+  action joinAuthorityWorkers(node: NodeName): bool = {
+    val host = world.system.get(node)
+    all { host.volatile.phase == Stopping, host.volatile.fenceWorkers.size() > 0 or host.volatile.waitingEffects.size() > 0,
+      world' = { ...world, system: world.system.put(node, { ...host, volatile: { ...host.volatile,
+        fenceWorkers: Set(), waitingEffects: Set() } }) } }
+  }
+  action timeoutNodeStop(node: NodeName): bool = {
+    val host = world.system.get(node)
+    all { host.volatile.phase == Stopping, not(host.volatile.stopTimedOut),
+      world' = { ...world, system: world.system.put(node, { ...host,
+        volatile: { ...host.volatile, stopTimedOut: true } }) } }
+  }
+  action expireOwnerClose(node: NodeName, group: GroupId): bool = {
+    val owner = world.system.get(node).volatile.owners.get(group)
+    all { owner.applicationClose == Closing, not(owner.closeExpired),
+      world' = { ...world, system: world.system.setBy(node, host => { ...host, volatile: { ...host.volatile,
+        owners: host.volatile.owners.put(group, { ...owner, closeExpired: true }) } }) } }
+  }
+  action finishNodeStop(node: NodeName): bool = {
+    val host = world.system.get(node)
+    all { host.volatile.phase == Stopping,
+      host.volatile.owners.values().forall(owner => owner.phase == OwnerStopped and Life::released(owner)),
+      host.volatile.fenceWorkers.size() == 0, host.volatile.waitingEffects.size() == 0,
+      world' = { ...world, system: world.system.put(node, { ...host, volatile: { ...host.volatile,
+        phase: Stopped, metaRunning: false, session: None, ownLease: Revoked } }) } }
+  }
+  action beginNodeStart(node: NodeName): bool = {
+    val host = world.system.get(node)
+    all { host.volatile.phase == New,
+      world' = { ...world, system: world.system.put(node, { ...host,
+        volatile: { ...host.volatile, phase: Starting, metaRunning: host.durable.pin != None } }) } }
+  }
+
+  action localLifetimeStep = any {
+    nondet node = NODE_POOL.oneOf()
+    any { beginNodeStart(node), joinAuthorityWorkers(node), finishNodeStop(node) },
+    nondet node = NODE_POOL.oneOf()
+    nondet resource = world.system.get(node).volatile.fenceWorkers.oneOf()
+    any { completeHostFence(node, resource),
+      all { world.system.get(node).volatile.owners.keys().contains(world.system.get(node).durable.pendingFences.get(resource).delivery.grant.key.group),
+        stopOlderForFence(node, resource) } },
+    nondet node = NODE_POOL.oneOf()
+    nondet request = world.system.get(node).volatile.starts.keys().oneOf()
+    importStartFloor(request),
+    nondet node = NODE_POOL.oneOf()
+    nondet request = world.system.get(node).volatile.starts.keys().oneOf()
+    readStartScope(request),
+    nondet node = NODE_POOL.oneOf()
+    nondet request = world.system.get(node).volatile.starts.keys().oneOf()
+    reserveOwner(request),
+    nondet node = NODE_POOL.oneOf()
+    nondet request = world.system.get(node).volatile.starts.keys().oneOf()
+    replyStart(request),
+    nondet node = NODE_POOL.oneOf()
+    nondet group = world.system.get(node).volatile.owners.keys().oneOf()
+    any { beginOwnerFactory(node, group), returnOwnerFactory(node, group, true), finishOwnerReplay(node, group),
+      authorizeOwner(node, group), publishOwner(node, group), joinOwner(node, group), beginOwnerClose(node, group),
+      returnOwnerClose(node, group, true), releaseOwner(node, group) },
+  }
+
   // Internal authority mutations share the same Raft commit, durable apply and
   // transport as public mutations. Negative request sequences cannot alias an
   // application call. They identify transport work, not a public API request.
@@ -604,6 +1109,14 @@ module cluster {
     val local = world.extensions.metaLog.get(owner.volatile.appliedMetaIndex)
     val leader = owner.volatile.observations.get("_meta").observedLeader
     val caller = { node: node, incarnation: owner.volatile.incarnation }
+    val proposalKey: ProposalKey = { request: { caller: caller, sequence: -world.extensions.nextDelivery }, sequence: 0 }
+    val submitting = match command {
+      | SessionControl(sessionCommand) => match sessionCommand {
+          | RevokeInternalSession(key) => { ...world, system: world.system.put(node, { ...owner,
+              volatile: { ...owner.volatile, revokeGate: Some({ key: key, proposal: proposalKey }) } }) }
+          | _ => world }
+      | _ => world
+    }
     match leader {
       | Some(r) => all {
           M::running(owner), Ctrl::errors(local, command).size() == 0,
@@ -611,9 +1124,9 @@ module cluster {
           not(world.extensions.network.pending.union(world.messages.values().flatten()).exists(msg =>
             msg.source == caller and match msg.payload {
               | MetaProposal(p) => p.command == ControlProposal(command) | _ => false })),
-          world' = apply_custom_effect(world, Queue({ delivery: world.extensions.nextDelivery,
+          world' = apply_custom_effect(submitting, Queue({ delivery: world.extensions.nextDelivery,
             source: caller, destination: r.node, channel: MetaChannel,
-            payload: MetaProposal({ key: { request: { caller: caller, sequence: -world.extensions.nextDelivery }, sequence: 0 },
+            payload: MetaProposal({ key: proposalKey,
               coordinator: caller, forWork: false, command: ControlProposal(command) }) })),
         }
       | None => all { false, world' = world }
@@ -638,9 +1151,9 @@ module cluster {
     }
   }
 
-  action dispatchGrant(node: NodeName, key: GrantKey, resource: ResourceKey): bool = {
+  action dispatchGrantFrom(node: NodeName, key: GrantKey, resource: ResourceKey, proofIndex: int): bool = {
     val owner = world.system.get(node)
-    val local = world.extensions.metaLog.get(owner.volatile.appliedMetaIndex)
+    val local = world.extensions.metaLog.get(proofIndex)
     val grant = local.grants.get(key)
     val candidates = match resource {
       | HostResource(host) => grant.targets.filter(r => r.node == host.node)
@@ -667,6 +1180,9 @@ module cluster {
         payload: ExecuteGrant(delivery) })),
     }
   }
+
+  action dispatchGrant(node: NodeName, key: GrantKey, resource: ResourceKey): bool =
+    dispatchGrantFrom(node, key, resource, world.system.get(node).volatile.appliedMetaIndex)
 
   // ValidateAuthorityCourier reads a quorum-confirmed authority proof. Capture
   // that immutable query result separately from acceptance and native waiting.
@@ -846,6 +1362,17 @@ module cluster {
   // It remains part of the same production step relation, with the same state.
   action requestStep = any {
     nondet node = NODE_POOL.oneOf()
+    requestNodeStop(node),
+    nondet node = NODE_POOL.oneOf()
+    val local = world.system.get(node).volatile.localView.target
+    nondet group = local.groups.keys().exclude(Set("_meta")).oneOf()
+    nondet replica = local.groups.get(group).replicas.filter(r => r.key.node == node).oneOf()
+    nondet explicit = Set(true, false).oneOf()
+    requestStart(node, replica.key, explicit),
+    nondet node = NODE_POOL.oneOf()
+    nondet group = world.system.get(node).volatile.owners.keys().oneOf()
+    stopOwner(node, world.system.get(node).volatile.owners.get(group).key, true),
+    nondet node = NODE_POOL.oneOf()
     nondet request = (if (FOUNDERS.keys().size() == 0) Set(ObserveLocal, InvalidRequest)
       else Set(ObserveLocal, InvalidRequest, ConfirmedRead)).oneOf()
     invoke(node, request),
@@ -878,6 +1405,8 @@ module cluster {
   }
 
   action protocolStep = any {
+    sessionStep,
+    localLifetimeStep,
     authorityStep,
     nondet msg = world.extensions.network.pending.oneOf()
     deliver(msg),
@@ -953,6 +1482,17 @@ module cluster {
   }
 
   action faultStep = any {
+    nondet node = NODE_POOL.oneOf()
+    any { expireOwnLease(node), cancelRenewal(node), abandonSessionRevoke(node), timeoutNodeStop(node) },
+    nondet node = NODE_POOL.oneOf()
+    nondet key = world.system.get(node).volatile.leases.keys().oneOf()
+    any { expireLease(node, key), timeoutSessionProbe(node, key) },
+    nondet node = NODE_POOL.oneOf()
+    nondet request = world.system.get(node).volatile.starts.keys().oneOf()
+    cancelStart(request),
+    nondet node = NODE_POOL.oneOf()
+    nondet group = world.system.get(node).volatile.owners.keys().oneOf()
+    any { expireOwnerFactory(node, group), expireOwnerClose(node, group), returnOwnerFactory(node, group, false), returnOwnerClose(node, group, false) },
     nondet node = NODE_POOL.oneOf()
     nondet key = world.system.get(node).volatile.pendingCalls.keys().oneOf()
     retryRead(key),

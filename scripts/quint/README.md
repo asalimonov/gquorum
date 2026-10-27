@@ -104,11 +104,26 @@ Batch `quint test` runs after significant implementation changes; use cheap type
 
 `grants.qnt`, `controls.qnt`, `execution.qnt` and `remaining.qnt` implement immutable grant issuance, exact replay, closure, resource fencing, durable receipts, reporting, operator checkpointing and receipt-aware retries. Authority commands share the existing metadata proposal/commit/apply path. Receivers confirm a metadata authority proof that binds the courier's process and member identity, then recheck their own exact identity and physical resource floor after waiting. A bounded consumption-history monitor preserves the identity actually used at that boundary.
 
-The physical path currently executes transfer requests and host/native fences. Transfer-start is durable command consumption, not observed transfer completion. Metadata receipt reporting and checkpointing remain separate. Native fences need native quorum; offline host obligations retain their exact resource/fence keys. Lifecycle, native membership and cleanup effect bodies are added in Tasks 7–10; no success receipt is fabricated for those unfinished paths. In particular, Task 7 must extend host-fence installation/completion around delayed startup and Close work; current host-fence fixtures have no older in-flight callback.
+The physical path currently executes transfer requests and host/native fences. Transfer-start is durable command consumption, not observed transfer completion. Metadata receipt reporting and checkpointing remain separate. Native fences need native quorum; offline host obligations retain their exact resource/fence keys. Lifecycle, native membership and cleanup effect bodies are added in Tasks 7–10; no success receipt is fabricated for those unfinished paths. Task 7 now separates host-floor installation from completion and waits for older startup/Close work to join.
 
 ```sh
 python3 scripts/quint/run.py --profile authority3 --mode test --seed 1
 python3 scripts/quint/run.py --profile authority3 --mode simulate --seed 1
 ```
 
-`authority3` uses three nodes, two loads, position bound 16, delivery bound 80 and the same request/incarnation bounds as smoke3. Its simulation starts with a manual transfer already issued and authenticated at the receiver; this is a focused authority fixture, not a fresh-cluster reachability claim. Its test list includes the normal smoke cases, authority regressions and the shared core checks. Metadata records courier bindings for the forthcoming session lifecycle. Full public TransferLeader waiter/routing coverage remains part of the API coverage task.
+`authority3` uses three nodes, two loads, position bound 16, delivery bound 80 and the same request/incarnation bounds as smoke3. Its simulation starts with a manual transfer already issued and authenticated at the receiver; this is a focused authority fixture, not a fresh-cluster reachability claim. Its test list includes the normal smoke cases, authority regressions and the shared core checks. The internal session lifecycle updates replicated courier bindings. Full public TransferLeader waiter/routing coverage remains part of the API coverage task.
+
+## Local lifetime and internal sessions
+
+`lifecycle.qnt` and `sessions.qnt` share the same world and metadata commit path. Local startup separates one exact reservation, shared/cancelable waiters, factory ownership transfer, replay, local Target/floor revalidation and publication. Stop separates admission blocking, engine/callback join, serialized application Close and final release. A timeout does not discard an outstanding factory or Close; a late successful factory still transfers ownership. Holds name exact replicas. Node shutdown keeps metadata participation until managed owners release.
+
+New-owner recovery confirms current host floors; sharing an accepted owner does not require a new quorum query. Scope recapture uses locally applied approved Target, as the implementation does. Established fixtures retain an exact `seedAuthority` set for already-consumed founding history at floor 1. This baseline cannot authorize new identities/effects and is superseded by explicit host authority. Interrupted host fencing retains its durable position and finishes only after older work joins.
+
+Internal session grant and reserved node binding commit separately. Renewal is leader-local and does not prove quorum. Expiry observation precedes an exact-process probe and serialized revoke decision. Renewal replies bind process, member, session and round; delayed expired replies cannot ready a restarted process. Node readiness is an observed local lease/eligibility predicate. A load handle can publish after its own startup checks before the node's session becomes ready. No public session controls or application lock model is enabled.
+
+```sh
+python3 scripts/quint/run.py --profile lifetime3 --mode test --seed 1
+python3 scripts/quint/run.py --profile lifetime3 --mode simulate --seed 1
+```
+
+`lifetime3` uses authority3's bounds and starts simulation with a retained replica reserved for restart. Its 76 runtime scenarios include the earlier management/authority cases; 91 shared core checks are selected explicitly. Coverage remains bounded/sampled. Membership/scaling, complete group/cleanup execution and scheduling are later tasks.

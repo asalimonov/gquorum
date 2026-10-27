@@ -101,10 +101,16 @@ module execution {
       match delivery.resource {
         | HostResource(_) => {
           val node = base.system.get(delivery.receiver.node)
-          val position = node.durable.journalPosition + 1
-          { ...base, system: base.system.put(delivery.receiver.node, { ...node, durable: { ...node.durable,
-            authorityFloors: node.durable.authorityFloors.put(delivery.resource, delivery.grant.key.revision),
-            journalPosition: position, fences: node.durable.fences.union(Set(fence(delivery, position))) } }) }
+          val prior = node.durable.pendingFences.getOrElse(delivery.resource,
+            { delivery: delivery, position: node.durable.journalPosition + 1 })
+          val position = if (prior.delivery.grant.key == delivery.grant.key) prior.position else node.durable.journalPosition + 1
+          { ...base, system: base.system.put(delivery.receiver.node, { ...node,
+            volatile: { ...node.volatile, fenceWorkers: node.volatile.fenceWorkers.union(Set(delivery.resource)) },
+            durable: { ...node.durable,
+              authorityFloors: node.durable.authorityFloors.put(delivery.resource, delivery.grant.key.revision),
+              authorityGrants: node.durable.authorityGrants.put(delivery.resource, delivery.grant),
+              journalPosition: max(position, node.durable.journalPosition),
+              pendingFences: node.durable.pendingFences.put(delivery.resource, { delivery: delivery, position: position }) } }) }
         }
         | GroupResource(group) => {
           val c = base.extensions.consensus.get(group)

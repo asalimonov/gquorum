@@ -19,9 +19,9 @@ module membership {
     if (not(nodes.keys().contains(key.node))) false else {
       val node = nodes.get(key.node)
       and {
-        running(node),
+        node.volatile.phase != Stopped and node.volatile.phase != Failed,
         node.durable.pin == Some({ cluster: key.cluster, node: key.node, member: key.member }),
-        if (key.group == "_meta") true
+        if (key.group == "_meta") node.volatile.metaRunning
         else if (node.volatile.owners.keys().contains(key.group)) {
           val owner = node.volatile.owners.get(key.group)
           owner.key == key and owner.engineRunning

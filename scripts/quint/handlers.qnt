@@ -51,6 +51,9 @@ module handlers {
       | ReadProbe(_) => false
       | MetaProposal(_) => false
       | ExecuteGrant(_) => false
+      | SessionRenew(_) => false | SessionRenewed(_) => false | SessionProbe(_) => false | SessionProbed(_) => false
+      | MetaAck(ack) => match ctx.state.volatile.revokeGate {
+          | Some(gate) => gate.proposal != ack.key | None => true }
       | _ => true
     })
 

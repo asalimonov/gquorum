@@ -38,7 +38,10 @@ module initial {
     cleanup: Map(), memberAllocationFloor: doc.nodes.values().fold(1, (acc, n) => max(acc, n.member + 1)),
     replicaAllocationFloors: doc.groups.keys().mapBy(g =>
       doc.groups.get(g).replicas.fold(1, (acc, r) => max(acc, r.key.replica + 1))),
-    retiredGroupIds: Set(), sessions: Map(), locks: Map(), stagedIntents: Map(),
+    retiredGroupIds: Set(),
+    sessions: doc.nodes.keys().map(n => { owner: { node: n, incarnation: 1 }, generation: 1 }).mapBy(key =>
+      { owner: key.owner, member: doc.nodes.get(key.owner.node).member, phase: Live, renewalGeneration: 0 }),
+    activeSessions: doc.nodes.keys().mapBy(n => { owner: { node: n, incarnation: 1 }, generation: 1 }), locks: Map(), stagedIntents: Map(),
     couriers: doc.nodes.keys().mapBy(n => { process: { node: n, incarnation: 1 }, member: doc.nodes.get(n).member }),
     authorityFloors: Map(), closedGrants: Set(), effectReceipts: Set(), fenceEvidence: Set(),
   }
@@ -75,14 +78,17 @@ module initial {
           val r = loads.filter(key => key.group == g).getOnlyElement()
           { key: r, phase: OwnerReady, held: false, reservation: None, replayReady: true,
             startupAuthorized: true, published: true, factoryOutstanding: false,
-            engineJoined: false, engineRunning: true, applicationClose: Acquired }
+            engineJoined: false, engineRunning: true, applicationClose: Acquired,
+            process: { node: n, incarnation: 1 }, waiters: Set(), callbackExpired: false, closeExpired: false,
+            replayOutstanding: false, startDeclaration: Some(doc.groups.get(g)), authorityRevision: 1, scopeIndex: 1 }
         }),
-        session: None, schedulerEnabled: true, serveOverride: 0, schedulerCapture: None, operationWork: Map(), waitingEffects: Set(), authorityReads: Map(),
+        session: if (admitted) Some({ owner: { node: n, incarnation: 1 }, generation: 1 }) else None, schedulerEnabled: true, serveOverride: 0, schedulerCapture: None, operationWork: Map(), waitingEffects: Set(), authorityReads: Map(), holds: Set(), starts: Map(), fenceWorkers: Set(), metaRunning: admitted, stopTimedOut: false,
+        ownLease: if (admitted) Live else Revoked, leases: Map(), renewal: None, renewalExpired: false, revokeGate: None,
       },
       durable: {
         pin: if (admitted) Some({ cluster: doc.cluster, node: n, member: doc.nodes.get(n).member }) else None,
         replicaEvidence: replicas.mapBy(_ => ValidStore({ snapshot: 0, commit: 1, tail: 1, appliedHint: 1 })),
-        authorityFloors: Map(), receipts: Set(), fences: Set(), journalPosition: 0, collectionMarkers: Map(),
+        authorityFloors: Map(), authorityGrants: Map(), receipts: Set(), fences: Set(), journalPosition: 0, pendingFences: Map(), seedAuthority: loads, collectionMarkers: Map(),
         metaImage: if (admitted) Some(view) else None, metaIndex: if (admitted) 1 else 0,
       },
     }
@@ -104,7 +110,7 @@ module initial {
         nextDelivery: 1, metadata: meta, consensus: native, recovery: Map(),
         storageConfig: pool.mapBy(_ => { defaultBackend: OwnedWAL }),
         consumptions: Set(),
-        metaLog: Map((if (founders.keys().size() > 0) 1 else 0) -> meta),
+        metaLog: Map(0 -> metadata(emptyDocument)).put((if (founders.keys().size() > 0) 1 else 0), meta),
       },
     }
   }

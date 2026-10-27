@@ -137,3 +137,31 @@ Validation on the final executable files:
 Model corrections during the task: native grants must use approved history rather than every earlier staged document; manual transfers preserve their captured source version; courier authentication requires a fresh metadata proof; retries must not close completed siblings' resources. One offline-host test used `fail()` around a multi-step helper; it was corrected to assert the disabled delivery action directly. These are model/test corrections, not confirmed library defects. No source-faithful failing library scenario was found; the existing findings report remains applicable.
 
 Task boundaries: physical transfer and fencing exercise the shared authority pipeline now. Lifecycle, native membership and cleanup action bodies (including their runtime failure generation) remain Tasks 7–10; unsupported bodies do not emit fake successful receipts. Task 7 extends host-floor installation/join/completion when callbacks or Close are outstanding. Minimum session activation will update the replicated courier binding; current initial bindings represent the established fixture. Full public TransferLeader waiter coverage belongs to Task 12. No production Go or vendor source changed.
+
+## Task 7 — in-progress ownership foundation
+
+Task 6 committed as `4059cfd`. Added `lifecycle.qnt` pure ownership transitions and `lifecycle_test.qnt` scenarios for one exact reservation, shared waiters, waiter cancellation, late successful factory acquisition, failed factory ownership, replay/publication boundaries, engine join, serialized Close retry and exact local holds. Owner records now retain their process, waiters, callback/replay status, captured declaration and authority revision. Process-local holds survive slot changes but are cleared by process crash; an old identity's stop cannot stop its successor.
+
+Typechecks passed for the composed authority3 instance after record expansion and for the new lifecycle test module. These new lifecycle tests have not been executed yet, consistent with the requested batched cadence. They are not yet in the production step relation/coreChecks. Remaining Task 7 work: actor/network wiring and startup scope/floor recapture; interrupted host-fence installation versus join/completion; minimum session activation/renewal/expiry/recheck/revocation and readiness; retained restart recovery; scenario validation. No Task 7 completion is claimed.
+
+Grounding: managed.reserveStart/reconcileStartupAuthority distinguish accepted-owner replay from new-owner floor import; runReplicaStartup/acquireApplication transfer ownership on successful late factory return and publish only after final authorization; failed factories keep their partial acquisitions. Node StartLoadGroup/StopLoadGroup delegate to these shared ownership phases. Before wiring session readiness, inspect the internal activation/lease path; public manual session and application lock APIs remain excluded.
+
+## Task 7 — local ownership, retained lifetime and internal sessions
+Date: 2026-10-27
+
+Implemented and wired shared reservation/start/replay/authorization/publication and stop/join/Close/release transitions. Concurrent exact starts share one owner; canceling a waiter leaves accepted work owned. Successful late factory return transfers application release ownership, failed factories retain responsibility for their partial acquisition, and failed/timed-out Close cannot release a slot. Exact holds affect only their matching replica. Node shutdown leaves metadata participation running until managed work releases.
+
+Host fencing now persists its floor before completing proof, joins older startup/Close work, survives interruption with the same durable position and reports completion separately. Retained restart clears volatile work/holds, preserves valid WAL and authority evidence, uses a fresh incarnation, reauthorizes local handles and establishes its new internal session.
+
+Internal session grant and reserved node binding are separate metadata commands; no application lock API is modeled. Renewal is leader-local. Expiry observation, exact-process probe, serialized revoke submission and durable revocation remain separate. Late replies bind the exact process/member/session/round and respect request expiry. Source-grounding clarified that load scope is locally applied Target, accepted owners bypass new floor-query quorum work, and load-handle publication is distinct from observed session-based node readiness. Target §§5.4/8.6/10.1 and the model README were clarified accordingly. Established fixture authority is explicitly represented by exact retained seed identities at floor 1; new identity/effect authority still requires grants.
+
+Validation:
+- lifetime3: 76 runtime scenarios and 91 core checks passed, seed 1, 10 samples/test: `test-reports/quint/20261027T184618336599Z-6d59ee80/report.md`.
+- lifetime3 full fault relation: sampled safety passed, seed 1, 50 samples, depth 120: `test-reports/quint/20261027T184745295488Z-daa25d54/report.md`.
+- foundation: 7 tests passed: `test-reports/quint/20261027T184745295788Z-7b998eaf/report.md`.
+- Python runner checks: 17 passed.
+- All 53 recorded model/configuration hashes matched the final executable files. Typecheck/bound preflights and diff whitespace checks passed. No exhaustive, temporal-progress or Go conformance claim is made.
+
+The first batch passed 69/70 runtime cases; restart activation exposed a model leader-discovery guard that required an existing observation after crash had cleared it. The guard now permits first discovery. This was a model defect, not a confirmed library failure. No source-faithful failing library scenario was found. The test/report changes preserve all previous authority and management cases.
+
+User requested stopping after committing the current task. Task 8 has not been started; pause the active goal after the Task 7 commit. No production Go or vendor source changed.

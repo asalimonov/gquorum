@@ -3,6 +3,8 @@ module properties {
   import handlers.* from "./handlers"
   import basicSpells.* from "./vendor/spells/basicSpells"
   import scope as S from "./scope"
+  import lifecycle as Life from "./lifecycle"
+  import sessions as Sessions from "./sessions"
   import grants as G from "./grants"
   import execution as E from "./execution"
   import authority as A from "./authority"
@@ -61,7 +63,8 @@ module properties {
   pure def metadataWellFormed(w: World): bool = {
     val m = w.extensions.metadata
     and {
-      E::physicalEvidenceValid(w),
+      E::physicalEvidenceValid(w), Sessions::metadataSafety(m),
+      w.system.values().forall(n => n.volatile.owners.values().forall(owner => Life::ownerSafety(owner))),
       m.grants.values().forall(grant => G::wellFormed(grant)),
       m.authorityFloors.keys().forall(r => m.grants.keys().contains(m.authorityFloors.get(r)) and
         m.grants.get(m.authorityFloors.get(r)).resources.contains(r)),

@@ -1,6 +1,7 @@
 module controls {
   import types.* from "./types"
   import basicSpells.* from "./vendor/spells/basicSpells"
+  import sessions as Sessions from "./sessions"
   import grants as G from "./grants"
   import authority as A from "./authority"
 
@@ -57,6 +58,7 @@ module controls {
   }
 
   pure def errors(meta: MetadataState, command: ControlCommand): Set[Refusal] = match command {
+    | SessionControl(command) => Sessions::errors(meta, command)
     | BeginBlock(b) => if (not(meta.operations.keys().contains(b.operation)) or not(meta.groups.keys().contains(b.group))) Set(NotFound)
         else if (meta.groups.get(b.group).owner != Some(b.operation)) Set(Unauthorized)
         else if (meta.operations.get(b.operation).blocks.get(b.group).phase != OpPending) Set(Conflict) else Set()
@@ -90,6 +92,7 @@ module controls {
 
   pure def apply(meta: MetadataState, command: ControlCommand, revision: int): MetadataState =
     G::settleRevocations(match command {
+      | SessionControl(command) => Sessions::apply(meta, command)
       | BeginBlock(b) => { ...meta, operations: meta.operations.setBy(b.operation, op => { ...op,
           blocks: op.blocks.setBy(b.group, block => { ...block, phase: OpRunning }) }) }
       | IssueEffect(a) => G::issueStep(meta, a, revision)

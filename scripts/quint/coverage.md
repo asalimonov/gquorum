@@ -1,6 +1,6 @@
 # Initial-model scope and coverage
 
-Scope revision approved on 2026-10-27: **lean cluster management**. Tasks 1–6 are complete. Active invocation/safety checks enforce lean scope; smoke3 selects retained core tests through coreChecks. Shared reads, staging, approval, exact retry and atomic reseat/rebase have asynchronous scenario coverage. Transfer/fence execution and receipt-aware retry checks now exist; membership, lifecycle and scheduler work remain; this is not completed v1 coverage.
+Scope revision approved on 2026-10-27: **lean cluster management**. Tasks 1–7 are complete. Active invocation/safety checks enforce lean scope; smoke3 selects retained core tests through coreChecks. Shared reads, staging, approval, exact retry and atomic reseat/rebase have asynchronous scenario coverage. Transfer/fence execution and receipt-aware retry checks now exist; local lifecycle/session transitions are wired; membership, complete cleanup and scheduler work remain; this is not completed v1 coverage.
 
 The original 82-entry ledger was an API inventory, not a requirement to implement 82 state machines. Initial disposition: **17 Core**, **15 Primitive**, **19 Observe**, **8 Omit**, **23 Deferred**. Every entry remains accounted for.
 
@@ -49,8 +49,8 @@ Deferring offline Recovery does not defer ReadmitNode, ReseatReplica, retained r
 | `Cluster.DeleteGroup` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Logical deletion through _meta plus exact detached cleanup debt. |
 | `Cluster.ChangeReplica` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Manual voter/learner role changes through guarded membership. |
 | `Cluster.ReseatReplica` | `cluster.go` | Task 5: atomic approved repair/rebase and fresh-read CAS scenarios | Atomic approved fresh-ID repair; protect old owner and independent staged intent. |
-| `Node.StartLoadGroup` | `node.go` | No method-specific implementation | Exact local start/hold clearance; reuse shared startup phases. |
-| `Node.StopLoadGroup` | `node.go` | No method-specific implementation | Exact hold distinct from failure or retirement; must not be undone by repair. |
+| `Node.StartLoadGroup` | `node.go` | Task 7: shared reservation, factory/replay, authorization and waiter scenarios | Exact local start/hold clearance; reuse shared startup phases. |
+| `Node.StopLoadGroup` | `node.go` | Task 7: exact hold, joined stop and retained Close ownership | Exact hold distinct from failure or retirement; must not be undone by repair. |
 | `Node.SetSchedulingEnabled` | `node.go` | No method-specific implementation | Scheduler enable/disable as a control input and progress premise. |
 
 ### Primitive
@@ -62,10 +62,10 @@ Deferring offline Recovery does not defer ReadmitNode, ReseatReplica, retained r
 | `Cluster.Plan` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Reuse pure makePlan for a staged version; no separate RPC machine. |
 | `Cluster.PlanFor` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Reuse pure makePlan for a candidate; preview cannot authorize effects. |
 | `Cluster.TransferLeader` | `cluster.go` | Task 6: shared manual grant/proof/transfer path; full public waiter mapping remains Task 12 | Reuse transfer request/proof phases; preserve manual transfer grant versus approved-plan authority. |
-| `Node.Start` | `node.go` | No method-specific implementation | Shared Starting → replay/authorization/session → Ready phases. |
-| `Node.WaitReady` | `node.go` | No method-specific implementation | Observe shared readiness; cancellation stops waiting only. |
-| `Node.Stop` | `node.go` | No method-specific implementation | Join shared teardown; timeout/failed release retains ownership. |
-| `Node.RequestStop` | `node.go` | No method-specific implementation | Begin shared teardown separately from successful join. |
+| `Node.Start` | `node.go` | Task 7: shared lifetime and retained restart/session; fresh admission remains Task 8 | Shared Starting → replay/authorization/session → Ready phases. |
+| `Node.WaitReady` | `node.go` | Task 7: observed session readiness; full caller projection remains Task 12 | Observe shared readiness; cancellation stops waiting only. |
+| `Node.Stop` | `node.go` | Task 7: joined teardown, timeout and failed/late Close scenarios | Join shared teardown; timeout/failed release retains ownership. |
+| `Node.RequestStop` | `node.go` | Task 7: stop request separated from managed joins and metadata release | Begin shared teardown separately from successful join. |
 | `Node.LoadSnapshots` | `node.go` | No method-specific implementation | Abstract complete catch-up; omit service accessor, chunks and transfer tuning. |
 | `Node.ReceiveLoadRaft` | `node.go` | No method-specific implementation | Abstract native consensus/network boundary; no per-Raft-message implementation. |
 | `Node.ReadLoadReplica` | `node.go` | No method-specific implementation | Exact native observation/capture used by planner and scheduler. |
@@ -166,4 +166,10 @@ The full step relation retains retries, loss and partitions. The healthy subset 
 
 The `authority3` profile exercises transfer authority through issuance, confirmed courier authentication, native consumption, durable receipt reporting and approved-step checkpoint. It includes exact duplicate replay, closed-grant history, native/host revocation obligations, stale receiver/sender identities, partial host receipt batches, captured manual-transfer source versions and immutable retry suffix validation. Omitted fence/identity checks have intentional violating variants.
 
-Native Raft ordering is abstracted to durable positions and one term epoch. The consumption monitor is verification history, not a new library API. Retained readmission/failure fixtures test shared authority rules without claiming a completed admission/lifecycle API. Delayed host callbacks and effect-specific lifecycle/membership/cleanup mechanics are the next tasks. No library defect has been confirmed from the current scenarios.
+Native Raft ordering is abstracted to durable positions and one term epoch. The consumption monitor is verification history, not a new library API. Retained readmission/failure fixtures test shared authority rules without claiming a completed admission/lifecycle API. Delayed host callbacks, joined fencing and local lifecycle are now implemented; native membership and complete cleanup effect mechanics remain later tasks. No library defect has been confirmed from the current scenarios.
+
+## Task 7 lifetime coverage
+
+`requestStart`/`stopOwner` and their shared reservation/factory/replay/authorization/join/Close/release actions cover local load lifetime; node start/stop and retained restart reuse that ownership state. The lifetime3 scenarios cover shared starts, cancelled waits, late factory success, failed factory ownership, exact holds, failed/timed-out Close, node-stop timeout, metadata release ordering, interrupted host fencing, and deliberate early-publication/release variants.
+
+Internal session scenarios cover separate grant/bind commits, exact process/member renewal, observed expiry versus committed revoke, process recheck, lease-gate serialization, expired replies and successful activation after retained restart. These implement the minimum session safety scope only; public session controls and application locks remain deferred. Full method-to-trace coverage and manual Go regression recipes are still Task 12 work.

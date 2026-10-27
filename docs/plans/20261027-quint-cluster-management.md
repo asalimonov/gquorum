@@ -11,7 +11,7 @@
 **Full brainstorm log:** [discussion](../brainstorms/20261027-quint-cluster-management.md)
 **Execution progress:** `docs/progress/20261027-quint-cluster-management.md`
 **Library scenario findings:** `docs/reports/20261027-quint-cluster-management.md`
-**Status:** Tasks 1–6 completed; continue at Task 7. Six completed tasks and twelve remaining tasks; eighteen total. Validation and implementation details are in the execution log.
+**Status:** Tasks 1–7 completed; next is Task 8. Seven completed tasks and eleven remaining tasks; eighteen total. Pause after the Task 7 commit as requested by the user. Validation and implementation details are in the execution log.
 
 ## Revised objective and execution contract
 
@@ -60,7 +60,7 @@ Per the user’s reporting instruction, failures in implemented library scenario
 | 1–4 | Foundation, runner, consensus/network, pure topology/planning | Completed historical checkpoint |
 | 5 | Enforce lean domains and wire CAS/approval/retry | Completed |
 | 6 | Exact effects/fences/receipts/revocation | Completed |
-| 7 | Local ownership/lifecycle and minimum internal sessions | Pending |
+| 7 | Local ownership/lifecycle and minimum internal sessions | Completed |
 | 8 | Native membership and 3–5-node scaling | Pending |
 | 9 | Healthy/degraded create and detached delete | Pending |
 | 10 | Cleanup/collection and returning-owner readmission | Pending |
@@ -186,16 +186,16 @@ Per the user’s reporting instruction, failures in implemented library scenario
 **Files:** lifecycle.qnt/tests (new); shared types/handlers/cluster/properties (updated).
 **References:** target §§5.4/6/8.6/8.8/9; §14 startAndPublishReplica, stopAndRetire.
 
-- [ ] Implement shared reserve/acquire/replay/authorize/publish and request-stop/join/release phases. Lifetime APIs reuse those phases; no separate constructor, accessor or DI state machine. Extend host-fence floor installation versus completion around older startup/action/Close ownership; Task 6 fixtures have no in-flight host callbacks.
-- [ ] Preserve exact local holds, explicit matching clearance, concurrent exact-start reservation, late successful factory ownership and failed/timeout Close ownership. Model callbacks as bounded outcomes, not Go threads or application implementations.
-- [ ] Add minimum internal session activation/renewal/expiry/exact-process recheck/revocation bound to durable identity and incarnation. Readiness requires admitted/recovered/current live session; neither health nor session state substitutes for quorum.
-- [ ] Retained restart restores valid storage with a fresh incarnation and must re-establish publication/authority. Do not introduce store-loss, memory/custom-store or offline-recovery paths.
+- [x] Implement shared reserve/acquire/replay/authorize/publish and request-stop/join/release phases. Lifetime APIs reuse those phases; no separate constructor, accessor or DI state machine. Extend host-fence floor installation versus completion around older startup/action/Close ownership; Task 6 fixtures have no in-flight host callbacks.
+- [x] Preserve exact local holds, explicit matching clearance, concurrent exact-start reservation, late successful factory ownership and failed/timeout Close ownership. Model callbacks as bounded outcomes, not Go threads or application implementations.
+- [x] Add minimum internal session activation/renewal/expiry/exact-process recheck/revocation bound to durable identity and incarnation. Readiness requires admitted/recovered/current live session; neither health nor session state substitutes for quorum.
+- [x] Retained restart restores valid storage with a fresh incarnation and must re-establish publication/authority. Do not introduce store-loss, memory/custom-store or offline-recovery paths.
 
 #### Verification
 
-- [ ] Common checks and start/stop/cancellation/late-return/hold/failed-release scenarios pass without successor overlap.
-- [ ] Old-incarnation renewal or readiness acknowledgements cannot authorize the new process; expiry observation differs from committed revocation.
-- [ ] Early publication/release negative controls fail. No application lock or public manual-session workflow is activated.
+- [x] Common checks and start/stop/cancellation/late-return/hold/failed-release scenarios pass without successor overlap.
+- [x] Old-incarnation renewal or readiness acknowledgements cannot authorize the new process; expiry observation differs from committed revocation.
+- [x] Early publication/release negative controls fail. No application lock or public manual-session workflow is activated.
 
 ### Task 8: Implement guarded membership and dynamic scaling
 

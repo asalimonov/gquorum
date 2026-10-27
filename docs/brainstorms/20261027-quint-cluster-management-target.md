@@ -107,9 +107,11 @@ Stage accepts bounded complete documents representing combinations of **in-scope
 
 Keep node process phase/incarnation, locally applied metadata index/view, exact captured topology/native facts, pending calls, leader-side operation work, local owner reservations and scheduler capture. Operation work separates the initial confirmed metadata read, native membership read, availability observation, metadata recapture, immutable proposal and reply. Durable host state retains pin, valid replica evidence, metadata replay image/index, authority floors, effect/fence receipts and collection markers.
 
-Owner state separates engine participation, replay readiness, authorization, handle publication, hold, stop request, actual join and application release. Delayed/failed callbacks or Close retain ownership. Represent callbacks as bounded pending/success/failure outcomes; no application implementation, DI system or thread scheduler is needed.
+Owner state separates engine participation, replay readiness, authorization, handle publication, hold, stop request, actual join and application release. Startup scope uses locally applied approved Target, matching `LoadReplicaScope`; new-owner floor import requires a confirmed metadata query, while an already accepted owner can share its reservation without another quorum read. Delayed/failed callbacks or Close retain ownership. Represent callbacks as bounded pending/success/failure outcomes; no application implementation, DI system or thread scheduler is needed.
 
-Minimum internal session state binds the admitted durable identity to the current process incarnation. Distinguish live, expiry observation, exact-process recheck and committed revocation. Readiness cannot be granted to an unadmitted/unrecovered/wrong-incarnation process. Internal renewal cannot become a quorum certificate. No lock map, lock acquisition, lock-holder APIs, manual session pausing or serving-override workflow belongs to v1.
+Established profiles abstract already-consumed founding authority as an exact durable `seedAuthority` set at floor 1. It authorizes retained recovery of those seeded identities only; issued host grants/fences supersede it, and it cannot authorize fresh identities or new effects. Other authority is retained explicitly in the model catalogue and host journal.
+
+Minimum internal session state binds the admitted durable identity to the current process incarnation. Distinguish live, expiry observation, exact-process recheck and committed revocation. Readiness cannot be granted to an unadmitted/unrecovered/wrong-incarnation process. Grant and reserved node binding are separate replicated steps. Renewal refreshes a leader-local lease; expiry observes that lease, probes the exact process and serializes the final revoke decision with renewal acknowledgements. A delayed reply beyond its request deadline cannot extend the local lease. Internal renewal cannot become a quorum certificate. Node readiness is an observed local lease/eligibility predicate, not a linearizable statement about every remote replica. No lock map, lock acquisition, lock-holder APIs, manual session pausing or serving-override workflow belongs to v1.
 
 ### 5.5 Native consensus and observations
 
@@ -206,7 +208,7 @@ Leader/enabled controller captures approved/proven state, current availability a
 
 ### 8.6 Lifetime and sessions
 
-Start → acquire/replay → current startup authorization and exact live process session → publish readiness. Cancellation of a waiter does not undo accepted work. Stop request precedes actual joins/releases; delayed success or failed release remains owned. Internal session expiry/recheck/revocation is distinct from health/quorum. Local load holds remain explicit.
+Load startup follows reserve → acquire/replay → exact local scope/floor authorization → handle publication. Node session activation separately establishes reserved node ownership and a live local lease before reporting node readiness; load-handle publication does not itself require a live session. Cancellation of a waiter does not undo accepted work. Stop request precedes actual joins/releases; delayed success or failed release remains owned. Internal session expiry/recheck/revocation is distinct from health/quorum. Local load holds remain explicit.
 
 ### 8.7 Reads and operator visibility
 
@@ -237,7 +239,7 @@ Crash discards volatile ownership/observations but does not fabricate durable re
 
 ### 10.1 Safety
 
-Keep domain/identity validity, mandatory admitted `_meta`, staging grants no effects, exact effect authority, exclusive local ownership, publication after replay/authorization/session, no identity/group-ID reuse, safe membership changes, exact receipts, complete deletion debt, ordered collection proof, immutable retry plan, repair preserving foreign intent and fences protecting successors. Add the minimum exact-session ownership/readiness invariant. No lock-ownership or recovery-lineage proof is required.
+Keep domain/identity validity, mandatory admitted `_meta`, staging grants no effects, exact effect authority, exclusive local ownership, load-handle publication after replay/startup authorization, exact-session node readiness, no identity/group-ID reuse, safe membership changes, exact receipts, complete deletion debt, ordered collection proof, immutable retry plan, repair preserving foreign intent and fences protecting successors. Add the minimum exact-session ownership/readiness invariant. No lock-ownership or recovery-lineage proof is required.
 
 ### 10.2 Progress
 

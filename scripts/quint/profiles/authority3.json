@@ -178,7 +178,18 @@
         "transferCheckpointRequiresReceiptAndLeaderTest",
         "manualTransferPreservesCapturedSourceTest",
         "retryUsesConfiguredSurgeAndCapacityTest",
-        "retryRevokesOnlyFailedGroupEffectsTest"
+        "retryRevokesOnlyFailedGroupEffectsTest",
+        "concurrentStartsShareOneOwnerTest",
+        "cancelledStartWaiterDoesNotCancelFactoryTest",
+        "lateFactorySuccessRetainsCloseOwnershipTest",
+        "failedFactoryDoesNotTransferPartialAcquisitionTest",
+        "failedClosePreventsReplacementTest",
+        "explicitStartClearsOnlyMatchingHoldTest",
+        "earlyPublicationAndReleaseControlsTest",
+        "sessionGrantDoesNotOwnNodeNameTest",
+        "staleSessionRevokeCannotRemoveSuccessorTest",
+        "renewalRequiresExactProcessAndMemberTest",
+        "sessionCannotActivateUnadmittedIdentityTest"
       ]
     }
   ]

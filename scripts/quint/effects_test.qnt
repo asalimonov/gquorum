@@ -3,6 +3,7 @@ module effects_test {
   import basicSpells.* from "./vendor/spells/basicSpells"
   import operations_test.* from "./operations_test"
   import membership as ProofMembership from "./membership"
+  import sessions as SessionRules from "./sessions"
   import initial as AuthorityInitial from "./initial"
   import grants as GrantRules from "./grants"
   import execution as ExecRules from "./execution"
@@ -137,13 +138,14 @@ module effects_test {
   pure val oldHostKey: GrantKey = { cluster: "c1", group: "a", revision: 2 }
   pure val hostFenceKey: GrantKey = { cluster: "c1", group: "a", revision: 3 }
   pure val hostResource = HostResource({ group: "a", node: "n3" })
-  action retainedHostFenceInit: bool = init.then({
+  action retainHostFence: bool = {
     val replica: ReplicaKey = { cluster: "c1", group: "a", node: "n3", member: 3, replica: 3 }
     val old: Grant = { key: oldHostKey, purpose: Readmission, effect: None,
       admission: Some({ node: "n3", predecessor: 3, successor: 4 }),
       resources: Set(hostResource), targets: Set(replica), planStep: None, request: None }
     fixtureMetadata(GrantRules::closeGrants(GrantRules::install(world.extensions.metadata, old), Set(oldHostKey), 3), 3)
-  })
+  }
+  action retainedHostFenceInit: bool = init.then(retainHostFence)
   run offlineHostRetainsExactFenceDebtTest = retainedHostFenceInit.then(crash("n3"))
     .then(dispatchGrant("n1", hostFenceKey, hostResource))
     .expect(world.extensions.metadata.revocations.get(oldHostKey).requiredResources == Set(hostResource))
@@ -158,6 +160,8 @@ module effects_test {
     .then(dispatchGrant("n1", hostFenceKey, hostResource)).then(receiveQueuedGrant)
     .then({ nondet delivery = world.system.get("n3").volatile.waitingEffects.oneOf()
       consumeGrant(delivery) })
+    .expect(world.system.get("n3").durable.fences.size() == 0)
+    .then(completeHostFence("n3", hostResource))
     .expect(world.system.get("n3").durable.fences.size() == 1)
     .expect(world.extensions.metadata.revocations.get(oldHostKey).provenResources == Set())
     .then({ nondet proof = world.system.get("n3").durable.fences.oneOf()
@@ -199,8 +203,10 @@ module effects_test {
   run newCourierBindingRejectsOldSenderTest = transferIssued.then(applyMeta("n2"))
     .then(dispatchGrant("n2", transferGrantKey, GroupResource("a")))
     .then(crash("n2")).then(restart("n2"))
-    .then(fixtureMetadata({ ...world.extensions.metadata, couriers: world.extensions.metadata.couriers.put("n2",
-      { process: { node: "n2", incarnation: 2 }, member: 2 }) }, 3))
+    .then(fixtureMetadata(SessionRules::apply(SessionRules::apply(SessionRules::apply(world.extensions.metadata,
+      RevokeInternalSession({ owner: { node: "n2", incarnation: 1 }, generation: 1 })),
+      GrantInternalSession({ key: { owner: { node: "n2", incarnation: 2 }, generation: 1 }, member: 2 })),
+      BindInternalSession({ owner: { node: "n2", incarnation: 2 }, generation: 1 })), 3))
     .then(receiveQueuedGrant)
     .expect(world.system.get("n1").volatile.waitingEffects.size() == 0)
     .expect(world.extensions.consensus.get("a").authorityReceipts.size() == 0)
