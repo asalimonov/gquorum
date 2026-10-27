@@ -10,7 +10,7 @@
 **Refactoring request:** user discussion on 2026-10-28: group modules, hide contextual complexity, reuse higher-order functions, and mirror familiar Go subsystem boundaries.
 **Parent implementation plan:** [cluster-management plan](20261027-quint-cluster-management.md)
 **Execution log when implemented:** `docs/progress/20261028-quint-module-refactoring.md`
-**Status:** refactoring authorized on 2026-10-28; executing from Task 1. Parent protocol Tasks 8–18 remain paused.
+**Status:** refactoring authorized on 2026-10-28; Tasks 1–4 complete; colleague review and documentation closure pending. Parent protocol Tasks 8–18 remain paused.
 **Reviewed corrections:** peer thread 1, rounds 3–5 in `docs/review/feat_quint-spec.md`.
 **Execution baseline:** `85cd75d` (model unchanged from `b39764c`).
 
@@ -239,18 +239,18 @@ Compare representative intermediate states for metadata commit/apply, authority 
 **Files:** migration ledger, implementation files, this plan's gap/deviation records.
 **References:** target §§2–6, 8–10, 14–15; this plan D1–D6.
 
-- [ ] Verify state/runtime ownership: unchanged schema and initialization, one world, correct framing, no function values in model state and no new omniscient actor reads.
-- [ ] Verify topology and metadata boundaries: pure edits/planning, exact CAS/replay, scoped ownership, grant/session FSM updates and complete receipt/fence history remain equivalent.
-- [ ] Verify service/operator boundaries: request/read/capture/commit/apply/reply and dispatch/checkpoint steps retain their original enabledness and evidence requirements.
-- [ ] Verify managed/consensus/environment boundaries: callback ownership, holds, stop/join/release, session leases, native quorums and independent network/failure actions retain their interleavings.
-- [ ] Verify fixtures, named scenarios, properties, profiles, runner artifact paths and all baseline test inventories. Historical or deferred checks retain their previous classification.
-- [ ] Record and fix every structural or behavioral gap in **NOT IMPLEMENTED GAPS**; do not mark an unimplemented requirement complete.
-- [ ] Verify final wiring: every moved action/helper is reachable from the intended production `init/step` or named test entry point, every required property/profile still executes, and no subsystem exists only as unused code.
+- [x] Verify state/runtime ownership: unchanged schema and initialization, one world, correct framing, no function values in model state and no new omniscient actor reads.
+- [x] Verify topology and metadata boundaries: pure edits/planning, exact CAS/replay, scoped ownership, grant/session FSM updates and complete receipt/fence history remain equivalent.
+- [x] Verify service/operator boundaries: request/read/capture/commit/apply/reply and dispatch/checkpoint steps retain their original enabledness and evidence requirements.
+- [x] Verify managed/consensus/environment boundaries: callback ownership, holds, stop/join/release, session leases, native quorums and independent network/failure actions retain their interleavings.
+- [x] Verify fixtures, named scenarios, properties, profiles, runner artifact paths and all baseline test inventories. Historical or deferred checks retain their previous classification.
+- [x] Record and fix every structural or behavioral gap in **NOT IMPLEMENTED GAPS**; do not mark an unimplemented requirement complete.
+- [x] Verify final wiring: every moved action/helper is reachable from the intended production `init/step` or named test entry point, every required property/profile still executes, and no subsystem exists only as unused code.
 
 #### Verification
 
-- [ ] Every baseline action has a reviewed migration entry; all D1–D6 requirements have concrete file/test evidence.
-- [ ] Changes since the last batch receive appropriate focused checks; repeat full batches only for broad semantic/wiring changes. No unsupported equivalence or exhaustive-verification claim is made.
+- [x] Every baseline action has a reviewed migration entry; all D1–D6 requirements have concrete file/test evidence.
+- [x] Changes since the last batch receive appropriate focused checks; repeat full batches only for broad semantic/wiring changes. No unsupported equivalence or exhaustive-verification claim is made.
 
 ### Task 5: Obtain the requested colleague review and resolve findings
 
