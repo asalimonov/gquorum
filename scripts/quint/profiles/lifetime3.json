@@ -117,7 +117,9 @@
         "transactionsSharesWorldTest",
         "operationsSharesWorldTest",
         "effectsSharesWorldTest",
-        "lifetimeSharesWorldTest"
+        "lifetimeSharesWorldTest",
+        "disabledFrameDoesNotEvaluatePostTest",
+        "guardedFrameUpdatesTheSharedWorldTest"
       ]
     },
     {
@@ -214,7 +216,10 @@
         "sessionGrantDoesNotOwnNodeNameTest",
         "staleSessionRevokeCannotRemoveSuccessorTest",
         "renewalRequiresExactProcessAndMemberTest",
-        "sessionCannotActivateUnadmittedIdentityTest"
+        "sessionCannotActivateUnadmittedIdentityTest",
+        "ownerUpdatePreservesOtherFramesTest",
+        "processUpdatePreservesDurableEvidenceTest",
+        "nodeUpdatePreservesIdentityAndPeersTest"
       ]
     }
   ]

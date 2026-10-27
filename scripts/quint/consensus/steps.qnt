@@ -8,10 +8,6 @@ module consensus_steps {
   pure def commitProgressEnabled(w: World, group: GroupId, MAX_POSITION: int): bool = {
     val c = w.extensions.consensus.get(group)
     val links = M::linksFor(w.extensions.network, group)
-    val voters = match c.leaderAuthority {
-      | Some(leader) => M::certificate(c, w.system, links, leader)
-      | None => Set()
-    }
     val position = c.committedPosition + 1
     and {
       M::hasCommitPath(c, w.system, links),
@@ -53,11 +49,6 @@ module consensus_steps {
 
   pure def electNext(w: World, group: GroupId, candidate: ReplicaKey): World = {
     val c = w.extensions.consensus.get(group)
-    val valid = M::liveIdentity(w.system, candidate)
-    val retained = if (valid) match w.system.get(candidate.node).durable.replicaEvidence.get(candidate) {
-      | ValidStore(p) => p.commit >= c.committedPosition
-      | _ => false
-    } else false
     ({ ...w,
         system: if (group == "_meta") w.system.setBy(candidate.node, node => { ...node, volatile: { ...node.volatile,
           leases: w.extensions.metaLog.get(node.volatile.appliedMetaIndex).sessions.keys().filter(k =>
@@ -91,18 +82,7 @@ module consensus_steps {
 
   pure def catchUpNext(w: World, group: GroupId, replica: ReplicaKey): World = {
     val c = w.extensions.consensus.get(group)
-    val valid = M::liveIdentity(w.system, replica)
-    val source = match c.leaderAuthority {
-      | Some(leader) => M::liveIdentity(w.system, leader) and
-        M::communicates(M::linksFor(w.extensions.network, group), leader.node, replica.node)
-      | None => false
-    }
     val node = w.system.get(replica.node)
-    val evidence = node.durable.replicaEvidence.getOrElse(replica, MissingStore)
-    val lagging = match evidence {
-      | ValidStore(p) => p.commit < c.committedPosition
-      | _ => false
-    }
     ({ ...w, system: w.system.put(replica.node, { ...node,
         durable: { ...node.durable, replicaEvidence: node.durable.replicaEvidence.put(replica,
           ValidStore({ snapshot: 0, commit: c.committedPosition, tail: c.committedPosition,
@@ -114,7 +94,6 @@ module consensus_steps {
   }
 
   pure def applyMetaCandidates(w: World, node: NodeName): Set[ReplicaKey] = {
-    val owner = w.system.get(node)
     val replicas = w.extensions.consensus.get("_meta").voters.union(
       w.extensions.consensus.get("_meta").learners).filter(r => r.node == node)
 
@@ -123,16 +102,10 @@ module consensus_steps {
 
   pure def applyMetaEnabled(w: World, node: NodeName, replica: ReplicaKey): bool = {
     val owner = w.system.get(node)
-    val replicas = w.extensions.consensus.get("_meta").voters.union(
-      w.extensions.consensus.get("_meta").learners).filter(r => r.node == node)
-
-
     val position = match owner.durable.replicaEvidence.getOrElse(replica, MissingStore) {
       | ValidStore(p) => p.commit
       | _ => 0
     }
-    val image = w.extensions.metaLog.getOrElse(position, w.extensions.metadata)
-    val view = { latest: image.latest, target: image.target }
     and {
       M::liveIdentity(w.system, replica),
       position > owner.volatile.appliedMetaIndex,
@@ -142,10 +115,6 @@ module consensus_steps {
 
   pure def applyMetaNext(w: World, node: NodeName, replica: ReplicaKey): World = {
     val owner = w.system.get(node)
-    val replicas = w.extensions.consensus.get("_meta").voters.union(
-      w.extensions.consensus.get("_meta").learners).filter(r => r.node == node)
-
-
     val position = match owner.durable.replicaEvidence.getOrElse(replica, MissingStore) {
       | ValidStore(p) => p.commit
       | _ => 0
@@ -160,4 +129,5 @@ module consensus_steps {
           { ...c, appliedPositions: c.appliedPositions.put(replica, position) }) },
       })
   }
+
 }

@@ -41,7 +41,9 @@
         "stageScopeEnforcedAtInvocationTest",
         "admissionScopeEnforcedAtInvocationTest",
         "creationScopeEnforcedAtInvocationTest",
-        "clusterSharesWorldTest"
+        "clusterSharesWorldTest",
+        "disabledFrameDoesNotEvaluatePostTest",
+        "guardedFrameUpdatesTheSharedWorldTest"
       ]
     }
   ]

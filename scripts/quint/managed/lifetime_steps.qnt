@@ -1,4 +1,5 @@
 module managed_lifetime_steps {
+  import frames as Frames from "../runtime/frames"
   import lifecycle as Life from "./lifecycle"
   import membership as M from "../consensus/membership"
   import types.* from "../types"
@@ -21,9 +22,9 @@ module managed_lifetime_steps {
     val owner = w.system.get(node)
     val key = { caller: { node: node, incarnation: owner.volatile.incarnation },
       sequence: owner.volatile.starts.keys().size() + 1 }
-    ({ ...w, system: w.system.put(node, { ...owner, volatile: { ...owner.volatile,
-        starts: owner.volatile.starts.put(key, { key: replica, request: key, explicit: explicit,
-          floorIndex: None, phase: StartPreparing, error: None }) } }) })
+    (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess,
+        starts: updatedProcess.starts.put(key, { key: replica, request: key, explicit: explicit,
+          floorIndex: None, phase: StartPreparing, error: None }) }))
   }
 
   pure def readStartScopeEnabled(w: World, request: RequestKey): bool = {
@@ -40,10 +41,10 @@ module managed_lifetime_steps {
   pure def readStartScopeNext(w: World, request: RequestKey): World = {
     val node = w.system.get(request.caller.node)
     val work = node.volatile.starts.get(request)
-    ({ ...w, system: w.system.put(request.caller.node, { ...node,
+    (Frames::withNode(w, request.caller.node, _ => { ...node,
         volatile: { ...node.volatile, starts: node.volatile.starts.put(request,
           { ...work, floorIndex: Some(if (Life::canReuse(node, work.key)) node.volatile.appliedMetaIndex
-            else w.extensions.consensus.get("_meta").committedPosition) }) } }) })
+            else w.extensions.consensus.get("_meta").committedPosition) }) } }))
   }
 
   pure def reserveOwnerEnabled(w: World, request: RequestKey): bool = {
@@ -58,8 +59,6 @@ module managed_lifetime_steps {
           val valid = not(staleFloor) and Life::assigned(meta, work.key) and Life::retainedStore(node, work.key) and
             Life::canReserve(node, work.key, request, work.explicit)
           val imported = Life::canReuse(node, work.key) or Life::importedFloor(node, floors, work.key)
-          val accepted = if (valid and imported) Life::reserve(node, work.key, request, work.explicit,
-            meta.target.groups.get(work.key.group), Life::floorRevision(node, work.key)) else node
           and {
             M::running(node),
             request.caller.incarnation == node.volatile.incarnation,
@@ -87,10 +86,10 @@ module managed_lifetime_steps {
           val imported = Life::canReuse(node, work.key) or Life::importedFloor(node, floors, work.key)
           val accepted = if (valid and imported) Life::reserve(node, work.key, request, work.explicit,
             meta.target.groups.get(work.key.group), Life::floorRevision(node, work.key)) else node
-          ({ ...w, system: w.system.put(request.caller.node, { ...accepted,
+          (Frames::withNode(w, request.caller.node, _ => { ...accepted,
               volatile: { ...accepted.volatile, starts: accepted.volatile.starts.put(request,
                 { ...work, phase: if (valid) StartAccepted else StartRefused,
-                  error: if (valid) None else Some(Unavailable) }) } }) })
+                  error: if (valid) None else Some(Unavailable) }) } }))
         }
       | None => (w)
     }
@@ -105,9 +104,7 @@ module managed_lifetime_steps {
   }
 
   pure def beginOwnerFactoryNext(w: World, node: NodeName, group: GroupId): World = {
-    val owner = w.system.get(node).volatile.owners.get(group)
-    ({ ...w, system: w.system.setBy(node, n => { ...n,
-        volatile: { ...n.volatile, owners: n.volatile.owners.put(group, Life::beginFactory(owner)) } }) })
+    (Frames::withOwner(w, node, group, slot => Life::beginFactory(slot)))
   }
 
   pure def returnOwnerFactoryEnabled(w: World, node: NodeName, group: GroupId, success: bool): bool = {
@@ -119,9 +116,7 @@ module managed_lifetime_steps {
   }
 
   pure def returnOwnerFactoryNext(w: World, node: NodeName, group: GroupId, success: bool): World = {
-    val owner = w.system.get(node).volatile.owners.get(group)
-    ({ ...w, system: w.system.setBy(node, n => { ...n,
-        volatile: { ...n.volatile, owners: n.volatile.owners.put(group, Life::factoryReturned(owner, success)) } }) })
+    (Frames::withOwner(w, node, group, slot => Life::factoryReturned(slot, success)))
   }
 
   pure def expireOwnerFactoryEnabled(w: World, node: NodeName, group: GroupId): bool = {
@@ -133,9 +128,7 @@ module managed_lifetime_steps {
   }
 
   pure def expireOwnerFactoryNext(w: World, node: NodeName, group: GroupId): World = {
-    val owner = w.system.get(node).volatile.owners.get(group)
-    ({ ...w, system: w.system.setBy(node, n => { ...n,
-        volatile: { ...n.volatile, owners: n.volatile.owners.put(group, Life::expireFactory(owner)) } }) })
+    (Frames::withOwner(w, node, group, slot => Life::expireFactory(slot)))
   }
 
   pure def finishOwnerReplayEnabled(w: World, node: NodeName, group: GroupId): bool = {
@@ -146,18 +139,11 @@ module managed_lifetime_steps {
   }
 
   pure def finishOwnerReplayNext(w: World, node: NodeName, group: GroupId): World = {
-    val owner = w.system.get(node).volatile.owners.get(group)
-    ({ ...w, system: w.system.setBy(node, n => { ...n,
-        volatile: { ...n.volatile, owners: n.volatile.owners.put(group, Life::replayFinished(owner)) } }) })
+    (Frames::withOwner(w, node, group, slot => Life::replayFinished(slot)))
   }
 
   pure def authorizeOwnerEnabled(w: World, node: NodeName, group: GroupId): bool = {
     val owner = w.system.get(node).volatile.owners.get(group)
-    val index = w.system.get(node).volatile.appliedMetaIndex
-    val meta = w.extensions.metaLog.get(index)
-    val allowed = if (not(Life::assigned(meta, owner.key))) false else true and owner.startDeclaration == Some(meta.target.groups.get(group)) and
-      Life::exactPin(w.system.get(node), owner.key) and Life::importedFloor(w.system.get(node), meta, owner.key) and
-      owner.authorityRevision == Life::floorRevision(w.system.get(node), owner.key)
     and {
       owner.phase == Replaying,
       owner.replayReady,
@@ -173,9 +159,8 @@ module managed_lifetime_steps {
     val allowed = if (not(Life::assigned(meta, owner.key))) false else true and owner.startDeclaration == Some(meta.target.groups.get(group)) and
       Life::exactPin(w.system.get(node), owner.key) and Life::importedFloor(w.system.get(node), meta, owner.key) and
       owner.authorityRevision == Life::floorRevision(w.system.get(node), owner.key)
-    ({ ...w, system: w.system.setBy(node, n => { ...n, volatile: { ...n.volatile,
-        owners: n.volatile.owners.put(group, if (allowed) { ...Life::authorize(owner), scopeIndex: index }
-          else Life::requestStop(owner)) } }) })
+    (Frames::withOwner(w, node, group, slot => if (allowed) { ...Life::authorize(slot), scopeIndex: index }
+          else Life::requestStop(slot)))
   }
 
   pure def publishOwnerEnabled(w: World, node: NodeName, group: GroupId): bool = {
@@ -186,9 +171,7 @@ module managed_lifetime_steps {
   }
 
   pure def publishOwnerNext(w: World, node: NodeName, group: GroupId): World = {
-    val owner = w.system.get(node).volatile.owners.get(group)
-    ({ ...w, system: w.system.setBy(node, n => { ...n,
-        volatile: { ...n.volatile, owners: n.volatile.owners.put(group, Life::publish(owner)) } }) })
+    (Frames::withOwner(w, node, group, slot => Life::publish(slot)))
   }
 
   pure def replyStartEnabled(w: World, request: RequestKey): bool = {
@@ -206,10 +189,9 @@ module managed_lifetime_steps {
     val node = w.system.get(request.caller.node)
     val work = node.volatile.starts.get(request)
     val owner = node.volatile.owners.get(work.key.group)
-    ({ ...w, system: w.system.setBy(request.caller.node, n => { ...n,
-        volatile: { ...n.volatile, starts: n.volatile.starts.put(request,
+    (Frames::withProcess(w, request.caller.node, updatedProcess => { ...updatedProcess, starts: updatedProcess.starts.put(request,
           { ...work, phase: if (owner.phase == OwnerReady) StartSucceeded else StartRefused,
-            error: if (owner.phase == OwnerReady) None else Some(Unavailable) }) } }) })
+            error: if (owner.phase == OwnerReady) None else Some(Unavailable) }) }))
   }
 
   pure def cancelStartEnabled(w: World, request: RequestKey): bool = {
@@ -223,11 +205,10 @@ module managed_lifetime_steps {
   pure def cancelStartNext(w: World, request: RequestKey): World = {
     val node = w.system.get(request.caller.node)
     val work = node.volatile.starts.get(request)
-    ({ ...w, system: w.system.setBy(request.caller.node, n => { ...n,
-        volatile: { ...n.volatile,
-          starts: n.volatile.starts.put(request, { ...work, phase: StartRefused, error: Some(WaitCancelled) }),
-          owners: if (work.phase == StartAccepted) n.volatile.owners.setBy(work.key.group,
-            owner => Life::cancelWaiter(owner, request)) else n.volatile.owners } }) })
+    (Frames::withProcess(w, request.caller.node, updatedProcess => { ...updatedProcess,
+          starts: updatedProcess.starts.put(request, { ...work, phase: StartRefused, error: Some(WaitCancelled) }),
+          owners: if (work.phase == StartAccepted) updatedProcess.owners.setBy(work.key.group,
+            owner => Life::cancelWaiter(owner, request)) else updatedProcess.owners }))
   }
 
   pure def stopOwnerEnabled(w: World, node: NodeName, replica: ReplicaKey, explicit: bool): bool = {
@@ -245,8 +226,8 @@ module managed_lifetime_steps {
 
   pure def stopOwnerNext(w: World, node: NodeName, replica: ReplicaKey, explicit: bool): World = {
     val host = w.system.get(node)
-    ({ ...w, system: w.system.put(node, if (explicit) Life::hold(host, replica) else { ...host,
-        volatile: { ...host.volatile, owners: host.volatile.owners.setBy(replica.group, owner => Life::requestStop(owner)) } }) })
+    (Frames::withNode(w, node, _ => if (explicit) Life::hold(host, replica) else { ...host,
+        volatile: { ...host.volatile, owners: host.volatile.owners.setBy(replica.group, owner => Life::requestStop(owner)) } }))
   }
 
   pure def joinOwnerEnabled(w: World, node: NodeName, group: GroupId): bool = {
@@ -257,9 +238,7 @@ module managed_lifetime_steps {
   }
 
   pure def joinOwnerNext(w: World, node: NodeName, group: GroupId): World = {
-    val owner = w.system.get(node).volatile.owners.get(group)
-    ({ ...w, system: w.system.setBy(node, n => { ...n,
-      volatile: { ...n.volatile, owners: n.volatile.owners.put(group, Life::joined(owner)) } }) })
+    (Frames::withOwner(w, node, group, slot => Life::joined(slot)))
   }
 
   pure def beginOwnerCloseEnabled(w: World, node: NodeName, group: GroupId): bool = {
@@ -270,9 +249,7 @@ module managed_lifetime_steps {
   }
 
   pure def beginOwnerCloseNext(w: World, node: NodeName, group: GroupId): World = {
-    val owner = w.system.get(node).volatile.owners.get(group)
-    ({ ...w, system: w.system.setBy(node, n => { ...n,
-      volatile: { ...n.volatile, owners: n.volatile.owners.put(group, Life::beginClose(owner)) } }) })
+    (Frames::withOwner(w, node, group, slot => Life::beginClose(slot)))
   }
 
   pure def returnOwnerCloseEnabled(w: World, node: NodeName, group: GroupId, success: bool): bool = {
@@ -283,9 +260,7 @@ module managed_lifetime_steps {
   }
 
   pure def returnOwnerCloseNext(w: World, node: NodeName, group: GroupId, success: bool): World = {
-    val owner = w.system.get(node).volatile.owners.get(group)
-    ({ ...w, system: w.system.setBy(node, n => { ...n,
-      volatile: { ...n.volatile, owners: n.volatile.owners.put(group, Life::closeReturned(owner, success)) } }) })
+    (Frames::withOwner(w, node, group, slot => Life::closeReturned(slot, success)))
   }
 
   pure def releaseOwnerEnabled(w: World, node: NodeName, group: GroupId): bool = {
@@ -298,9 +273,9 @@ module managed_lifetime_steps {
 
   pure def releaseOwnerNext(w: World, node: NodeName, group: GroupId): World = {
     val owner = w.system.get(node).volatile.owners.get(group)
-    ({ ...w, system: w.system.setBy(node, n => { ...n,
-        volatile: { ...n.volatile, owners: n.volatile.owners.put(group, Life::finishRelease(owner)),
-          starts: n.volatile.starts.transformValues(work => if (work.key == owner.key and work.phase == StartAccepted)
-            { ...work, phase: StartRefused, error: Some(Unavailable) } else work) } }) })
+    Frames::withProcess(w, node, updatedProcess => { ...updatedProcess, owners: updatedProcess.owners.put(group, Life::finishRelease(owner)),
+        starts: updatedProcess.starts.transformValues(work => if (work.key == owner.key and work.phase == StartAccepted)
+          { ...work, phase: StartRefused, error: Some(Unavailable) } else work) })
   }
+
 }

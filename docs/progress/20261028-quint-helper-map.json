@@ -1,0 +1,666 @@
+{
+  "mechanical_commit": "c5ece71",
+  "scope": "Changed pure definitions; 75 facade adapters additionally use guarded. Existing function signatures retained.",
+  "changes": [
+    {
+      "file": "metaservice/transaction_steps.qnt",
+      "definition": "handleEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "metaservice/transaction_steps.qnt",
+      "definition": "handleNext",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "metaservice/transaction_steps.qnt",
+      "definition": "confirmReadEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "metaservice/transaction_steps.qnt",
+      "definition": "finishReadNext",
+      "frame_helpers": [
+        "withNode"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/transaction_steps.qnt",
+      "definition": "prepareMutationEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "metaservice/transaction_steps.qnt",
+      "definition": "prepareMutationNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/transaction_steps.qnt",
+      "definition": "submitMutationNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/transaction_steps.qnt",
+      "definition": "commitMutationEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "metaservice/transaction_steps.qnt",
+      "definition": "finishMutationNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/transaction_steps.qnt",
+      "definition": "beginReseatReadNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/transaction_steps.qnt",
+      "definition": "finishReseatReadNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/authority_steps.qnt",
+      "definition": "submitControlEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "metaservice/authority_steps.qnt",
+      "definition": "submitControlNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/authority_steps.qnt",
+      "definition": "observeAuthorityLeaderNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/authority_steps.qnt",
+      "definition": "dispatchGrantFromEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "metaservice/authority_steps.qnt",
+      "definition": "dispatchGrantFromNext",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "metaservice/operation_steps.qnt",
+      "definition": "dispatchOperationEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "metaservice/operation_steps.qnt",
+      "definition": "dispatchOperationNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/operation_steps.qnt",
+      "definition": "transmitOperationReadEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "metaservice/operation_steps.qnt",
+      "definition": "transmitOperationReadNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/operation_steps.qnt",
+      "definition": "captureOperationEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "metaservice/operation_steps.qnt",
+      "definition": "captureOperationNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/operation_steps.qnt",
+      "definition": "observeOperationEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "metaservice/operation_steps.qnt",
+      "definition": "observeOperationNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/operation_steps.qnt",
+      "definition": "observeOperationHealthEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "metaservice/operation_steps.qnt",
+      "definition": "observeOperationHealthNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/operation_steps.qnt",
+      "definition": "beginOperationRecaptureNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/operation_steps.qnt",
+      "definition": "buildOperationNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/operation_steps.qnt",
+      "definition": "submitOperationNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/operation_steps.qnt",
+      "definition": "finishOperationNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/operation_steps.qnt",
+      "definition": "replyOperationNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/operation_steps.qnt",
+      "definition": "observeMetaLeaderNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/operation_steps.qnt",
+      "definition": "retryReadNext",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "metaservice/operation_steps.qnt",
+      "definition": "cancelCallNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/session_steps.qnt",
+      "definition": "beginSessionEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "metaservice/session_steps.qnt",
+      "definition": "beginSessionNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/session_steps.qnt",
+      "definition": "renewSessionNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/session_steps.qnt",
+      "definition": "handleSessionEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "metaservice/session_steps.qnt",
+      "definition": "handleSessionNext",
+      "frame_helpers": [
+        "withProcess",
+        "withNode",
+        "withNode",
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/session_steps.qnt",
+      "definition": "seedLeasesNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/session_steps.qnt",
+      "definition": "forgetRevokedLeaseNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/session_steps.qnt",
+      "definition": "expireLeaseNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/session_steps.qnt",
+      "definition": "expireOwnLeaseNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/session_steps.qnt",
+      "definition": "cancelRenewalNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/session_steps.qnt",
+      "definition": "probeSessionEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "metaservice/session_steps.qnt",
+      "definition": "probeSessionNext",
+      "frame_helpers": [
+        "withNode",
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/session_steps.qnt",
+      "definition": "timeoutSessionProbeNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "metaservice/session_steps.qnt",
+      "definition": "abandonSessionRevokeNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/receiver_steps.qnt",
+      "definition": "confirmGrantNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/receiver_steps.qnt",
+      "definition": "receiveGrantEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "managed/receiver_steps.qnt",
+      "definition": "receiveGrantNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/receiver_steps.qnt",
+      "definition": "consumeGrantNext",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "managed/node_steps.qnt",
+      "definition": "stopOlderForFenceNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/node_steps.qnt",
+      "definition": "completeHostFenceEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "managed/node_steps.qnt",
+      "definition": "completeHostFenceNext",
+      "frame_helpers": [
+        "withNode"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/node_steps.qnt",
+      "definition": "requestNodeStopEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "managed/node_steps.qnt",
+      "definition": "requestNodeStopNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/node_steps.qnt",
+      "definition": "joinAuthorityWorkersNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/node_steps.qnt",
+      "definition": "timeoutNodeStopNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/node_steps.qnt",
+      "definition": "expireOwnerCloseNext",
+      "frame_helpers": [
+        "withOwner"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/node_steps.qnt",
+      "definition": "finishNodeStopNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/node_steps.qnt",
+      "definition": "beginNodeStartNext",
+      "frame_helpers": [
+        "withNode"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/lifetime_steps.qnt",
+      "definition": "requestStartNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/lifetime_steps.qnt",
+      "definition": "readStartScopeNext",
+      "frame_helpers": [
+        "withNode"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/lifetime_steps.qnt",
+      "definition": "reserveOwnerEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "managed/lifetime_steps.qnt",
+      "definition": "reserveOwnerNext",
+      "frame_helpers": [
+        "withNode"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/lifetime_steps.qnt",
+      "definition": "beginOwnerFactoryNext",
+      "frame_helpers": [
+        "withOwner"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/lifetime_steps.qnt",
+      "definition": "returnOwnerFactoryNext",
+      "frame_helpers": [
+        "withOwner"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/lifetime_steps.qnt",
+      "definition": "expireOwnerFactoryNext",
+      "frame_helpers": [
+        "withOwner"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/lifetime_steps.qnt",
+      "definition": "finishOwnerReplayNext",
+      "frame_helpers": [
+        "withOwner"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/lifetime_steps.qnt",
+      "definition": "authorizeOwnerEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "managed/lifetime_steps.qnt",
+      "definition": "authorizeOwnerNext",
+      "frame_helpers": [
+        "withOwner"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/lifetime_steps.qnt",
+      "definition": "publishOwnerNext",
+      "frame_helpers": [
+        "withOwner"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/lifetime_steps.qnt",
+      "definition": "replyStartNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/lifetime_steps.qnt",
+      "definition": "cancelStartNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/lifetime_steps.qnt",
+      "definition": "stopOwnerNext",
+      "frame_helpers": [
+        "withNode"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/lifetime_steps.qnt",
+      "definition": "joinOwnerNext",
+      "frame_helpers": [
+        "withOwner"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/lifetime_steps.qnt",
+      "definition": "beginOwnerCloseNext",
+      "frame_helpers": [
+        "withOwner"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/lifetime_steps.qnt",
+      "definition": "returnOwnerCloseNext",
+      "frame_helpers": [
+        "withOwner"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "managed/lifetime_steps.qnt",
+      "definition": "releaseOwnerNext",
+      "frame_helpers": [
+        "withProcess"
+      ],
+      "unused_binding_cleanup": false
+    },
+    {
+      "file": "consensus/steps.qnt",
+      "definition": "commitProgressEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "consensus/steps.qnt",
+      "definition": "electNext",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "consensus/steps.qnt",
+      "definition": "catchUpNext",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "consensus/steps.qnt",
+      "definition": "applyMetaCandidates",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "consensus/steps.qnt",
+      "definition": "applyMetaEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "consensus/steps.qnt",
+      "definition": "applyMetaNext",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "harness/environment_steps.qnt",
+      "definition": "invokeEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "harness/environment_steps.qnt",
+      "definition": "setLinkEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "harness/environment_steps.qnt",
+      "definition": "restartEnabled",
+      "frame_helpers": [],
+      "unused_binding_cleanup": true
+    },
+    {
+      "file": "harness/environment_steps.qnt",
+      "definition": "restartNext",
+      "frame_helpers": [
+        "withNode"
+      ],
+      "unused_binding_cleanup": false
+    }
+  ]
+}

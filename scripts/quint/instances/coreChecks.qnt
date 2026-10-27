@@ -90,4 +90,7 @@ module coreChecks {
   import sessions_test.staleSessionRevokeCannotRemoveSuccessorTest from "../tests/unit/sessions_test"
   import sessions_test.renewalRequiresExactProcessAndMemberTest from "../tests/unit/sessions_test"
   import sessions_test.sessionCannotActivateUnadmittedIdentityTest from "../tests/unit/sessions_test"
+  import frames_test.ownerUpdatePreservesOtherFramesTest from "../tests/unit/frames_test"
+  import frames_test.processUpdatePreservesDurableEvidenceTest from "../tests/unit/frames_test"
+  import frames_test.nodeUpdatePreservesIdentityAndPeersTest from "../tests/unit/frames_test"
 }

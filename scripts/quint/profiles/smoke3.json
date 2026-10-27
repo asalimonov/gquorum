@@ -88,7 +88,9 @@
         "membershipSharesWorldTest",
         "readsSharesWorldTest",
         "transactionsSharesWorldTest",
-        "operationsSharesWorldTest"
+        "operationsSharesWorldTest",
+        "disabledFrameDoesNotEvaluatePostTest",
+        "guardedFrameUpdatesTheSharedWorldTest"
       ]
     },
     {
@@ -185,7 +187,10 @@
         "sessionGrantDoesNotOwnNodeNameTest",
         "staleSessionRevokeCannotRemoveSuccessorTest",
         "renewalRequiresExactProcessAndMemberTest",
-        "sessionCannotActivateUnadmittedIdentityTest"
+        "sessionCannotActivateUnadmittedIdentityTest",
+        "ownerUpdatePreservesOtherFramesTest",
+        "processUpdatePreservesDurableEvidenceTest",
+        "nodeUpdatePreservesIdentityAndPeersTest"
       ]
     }
   ]

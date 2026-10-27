@@ -1,4 +1,5 @@
 module metaservice_session_steps {
+  import frames as Frames from "../runtime/frames"
   import membership as M from "../consensus/membership"
   import sessions as Sessions from "../metaengine/sessions"
   import types.* from "../types"
@@ -8,7 +9,6 @@ module metaservice_session_steps {
 
   pure def beginSessionEnabled(w: World, node: NodeName): bool = {
     val host = w.system.get(node)
-    val key: SessionKey = { owner: { node: node, incarnation: host.volatile.incarnation }, generation: 1 }
     and {
       M::running(host),
       host.volatile.session == None,
@@ -19,8 +19,7 @@ module metaservice_session_steps {
   pure def beginSessionNext(w: World, node: NodeName): World = {
     val host = w.system.get(node)
     val key: SessionKey = { owner: { node: node, incarnation: host.volatile.incarnation }, generation: 1 }
-    ({ ...w, system: w.system.put(node, { ...host,
-        volatile: { ...host.volatile, session: Some(key), ownLease: Revoked } }) })
+    (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess, session: Some(key), ownLease: Revoked }))
   }
 
   pure def renewSessionEnabled(w: World, node: NodeName, MAX_DELIVERIES: int): bool = {
@@ -57,15 +56,13 @@ module metaservice_session_steps {
 
   pure def renewSessionNext(w: World, node: NodeName, MAX_DELIVERIES: int): World = {
     val host = w.system.get(node)
-    val local = w.extensions.metaLog.get(host.volatile.appliedMetaIndex)
     val leader = host.volatile.observations.get("_meta").observedLeader
     match host.volatile.session {
       | Some(key) => match host.durable.pin {
           | Some(pin) => match leader {
               | Some(destination) => {
                   val renewal: Renewal = { key: key, round: w.extensions.nextDelivery, member: pin.member }
-                  (apply_custom_effect({ ...w, system: w.system.put(node, { ...host,
-                      volatile: { ...host.volatile, renewal: Some(renewal), renewalExpired: false } }) },
+                  (apply_custom_effect(Frames::withProcess(w, node, updatedProcess => { ...updatedProcess, renewal: Some(renewal), renewalExpired: false }),
                       Queue({ delivery: w.extensions.nextDelivery, source: key.owner, destination: destination.node,
                         channel: MetaChannel, payload: SessionRenew(renewal) })))
                 }
@@ -79,12 +76,9 @@ module metaservice_session_steps {
 
   pure def handleSessionEnabled(w: World, msg: Envelope, MAX_DELIVERIES: int): bool = {
     val host = w.system.get(msg.destination)
-    val local = w.extensions.metaLog.get(host.volatile.appliedMetaIndex)
     val source = { node: msg.destination, incarnation: host.volatile.incarnation }
     match msg.payload {
       | SessionRenew(renewal) => {
-          val valid = Sessions::locallyLeader(host) and host.volatile.revokeGate == None and
-            Sessions::renewalMatches(local, renewal, msg.source)
           val lease = host.volatile.leases.getOrElse(renewal.key, Sessions::freshLease)
           and {
             w.messages.get(msg.destination).contains(msg),
@@ -116,7 +110,6 @@ w.extensions.nextDelivery <= MAX_DELIVERIES
           val lease = host.volatile.leases.getOrElse(probe.key, Sessions::freshLease)
           val exact = probe.leader == source and lease.phase == ExpiredObserved and lease.epoch == probe.epoch and
             lease.probe == Some(probe.round) and not(lease.failedProbe)
-          val same = probe.observed == probe.key.owner and Sessions::eligible(local, probe.observed, probe.member)
           and {
             w.messages.get(msg.destination).contains(msg),
             M::running(host),
@@ -149,9 +142,8 @@ host.volatile.appliedMetaIndex >= ack.index
           val valid = Sessions::locallyLeader(host) and host.volatile.revokeGate == None and
             Sessions::renewalMatches(local, renewal, msg.source)
           val lease = host.volatile.leases.getOrElse(renewal.key, Sessions::freshLease)
-          (if (valid) apply_custom_effect(apply_custom_effect({ ...w,
-              system: w.system.put(msg.destination, { ...host, volatile: { ...host.volatile,
-                leases: host.volatile.leases.put(renewal.key, Sessions::refreshed(lease)) } }) }, Consume(msg)),
+          (if (valid) apply_custom_effect(apply_custom_effect(Frames::withProcess(w, msg.destination, updatedProcess => { ...updatedProcess,
+                leases: updatedProcess.leases.put(renewal.key, Sessions::refreshed(lease)) }), Consume(msg)),
               Queue({ delivery: w.extensions.nextDelivery, source: source, destination: renewal.key.owner.node,
                 channel: MetaChannel, payload: SessionRenewed(renewal) }))
               else if (host.volatile.revokeGate == None) apply_custom_effect(w, Consume(msg)) else w)
@@ -159,10 +151,9 @@ host.volatile.appliedMetaIndex >= ack.index
       | SessionRenewed(renewal) => {
           val exact = host.volatile.session == Some(renewal.key) and renewal.key.owner == source and
             host.volatile.renewal == Some(renewal)
-          (apply_custom_effect({ ...w, system: w.system.put(msg.destination,
-              if (exact) { ...host, volatile: { ...host.volatile, renewal: None,
+          (apply_custom_effect(Frames::withNode(w, msg.destination, _ => if (exact) { ...host, volatile: { ...host.volatile, renewal: None,
                 ownLease: if (host.volatile.renewalExpired) ExpiredObserved else Live,
-                phase: if (host.volatile.renewalExpired) host.volatile.phase else Ready } } else host) }, Consume(msg)))
+                phase: if (host.volatile.renewalExpired) host.volatile.phase else Ready } } else host), Consume(msg)))
         }
       | SessionProbe(probe) => match host.durable.pin {
           | Some(pin) => (apply_custom_effect(apply_custom_effect(w, Consume(msg)), Queue({ delivery: w.extensions.nextDelivery,
@@ -175,13 +166,12 @@ host.volatile.appliedMetaIndex >= ack.index
           val exact = probe.leader == source and lease.phase == ExpiredObserved and lease.epoch == probe.epoch and
             lease.probe == Some(probe.round) and not(lease.failedProbe)
           val same = probe.observed == probe.key.owner and Sessions::eligible(local, probe.observed, probe.member)
-          (apply_custom_effect({ ...w, system: w.system.put(msg.destination, if (exact) { ...host,
+          (apply_custom_effect(Frames::withNode(w, msg.destination, _ => if (exact) { ...host,
               volatile: { ...host.volatile, leases: host.volatile.leases.put(probe.key,
-                if (same) Sessions::refreshed(lease) else { ...lease, failedProbe: true }) } } else host) }, Consume(msg)))
+                if (same) Sessions::refreshed(lease) else { ...lease, failedProbe: true }) } } else host), Consume(msg)))
         }
       | MetaAck(ack) => match host.volatile.revokeGate {
-          | Some(gate) => (apply_custom_effect({ ...w, system: w.system.put(msg.destination, { ...host,
-                volatile: { ...host.volatile, revokeGate: None, leases: host.volatile.leases.mapRemove(gate.key) } }) }, Consume(msg)))
+          | Some(gate) => (apply_custom_effect(Frames::withProcess(w, msg.destination, updatedProcess => { ...updatedProcess, revokeGate: None, leases: updatedProcess.leases.mapRemove(gate.key) }), Consume(msg)))
           | None => (w)
         }
       | _ => (w)
@@ -203,8 +193,8 @@ host.volatile.appliedMetaIndex >= ack.index
     val host = w.system.get(node)
     val local = w.extensions.metaLog.get(host.volatile.appliedMetaIndex)
     val missing = local.sessions.keys().filter(k => local.sessions.get(k).phase == Live).exclude(host.volatile.leases.keys())
-    ({ ...w, system: w.system.put(node, { ...host, volatile: { ...host.volatile,
-        leases: missing.fold(host.volatile.leases, (leases, key) => leases.put(key, Sessions::freshLease)) } }) })
+    (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess,
+        leases: missing.fold(updatedProcess.leases, (leases, key) => leases.put(key, Sessions::freshLease)) }))
   }
 
   pure def forgetRevokedLeaseEnabled(w: World, node: NodeName, key: SessionKey): bool = {
@@ -220,9 +210,7 @@ host.volatile.appliedMetaIndex >= ack.index
 
   pure def forgetRevokedLeaseNext(w: World, node: NodeName, key: SessionKey): World = {
     val host = w.system.get(node)
-    val local = w.extensions.metaLog.get(host.volatile.appliedMetaIndex)
-    ({ ...w, system: w.system.put(node, { ...host,
-        volatile: { ...host.volatile, leases: host.volatile.leases.mapRemove(key) } }) })
+    (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess, leases: updatedProcess.leases.mapRemove(key) }))
   }
 
   pure def expireLeaseEnabled(w: World, node: NodeName, key: SessionKey): bool = {
@@ -239,8 +227,8 @@ host.volatile.appliedMetaIndex >= ack.index
   pure def expireLeaseNext(w: World, node: NodeName, key: SessionKey): World = {
     val host = w.system.get(node)
     val lease = host.volatile.leases.get(key)
-    ({ ...w, system: w.system.put(node, { ...host, volatile: { ...host.volatile,
-        leases: host.volatile.leases.put(key, { ...lease, phase: ExpiredObserved }) } }) })
+    (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess,
+        leases: updatedProcess.leases.put(key, { ...lease, phase: ExpiredObserved }) }))
   }
 
   pure def expireOwnLeaseEnabled(w: World, node: NodeName): bool = {
@@ -253,8 +241,8 @@ host.volatile.appliedMetaIndex >= ack.index
 
   pure def expireOwnLeaseNext(w: World, node: NodeName): World = {
     val host = w.system.get(node)
-    ({ ...w, system: w.system.put(node, { ...host, volatile: { ...host.volatile,
-        ownLease: ExpiredObserved, renewalExpired: host.volatile.renewal != None } }) })
+    (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess,
+        ownLease: ExpiredObserved, renewalExpired: updatedProcess.renewal != None }))
   }
 
   pure def cancelRenewalEnabled(w: World, node: NodeName): bool = {
@@ -266,14 +254,12 @@ host.volatile.appliedMetaIndex >= ack.index
 
   pure def cancelRenewalNext(w: World, node: NodeName): World = {
     val host = w.system.get(node)
-    ({ ...w, system: w.system.put(node, { ...host,
-      volatile: { ...host.volatile, renewal: None } }) })
+    (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess, renewal: None }))
   }
 
   pure def probeSessionEnabled(w: World, node: NodeName, key: SessionKey, MAX_DELIVERIES: int): bool = {
     val host = w.system.get(node)
     val lease = host.volatile.leases.get(key)
-    val source = { node: node, incarnation: host.volatile.incarnation }
     val round = w.extensions.nextDelivery
     and {
       M::running(host),
@@ -292,13 +278,13 @@ host.volatile.appliedMetaIndex >= ack.index
     val lease = host.volatile.leases.get(key)
     val source = { node: node, incarnation: host.volatile.incarnation }
     val round = w.extensions.nextDelivery
-    (if (key.owner.node == node) { ...w, system: w.system.put(node, { ...host,
+    (if (key.owner.node == node) Frames::withNode(w, node, _ => { ...host,
         volatile: { ...host.volatile, leases: host.volatile.leases.put(key,
           if (key.owner == source and match host.durable.pin { | Some(pin) => Sessions::eligible(
             w.extensions.metaLog.get(host.volatile.appliedMetaIndex), source, pin.member) | None => false })
-            Sessions::refreshed(lease) else { ...lease, failedProbe: true }) } }) }
-      else apply_custom_effect({ ...w, system: w.system.put(node, { ...host, volatile: { ...host.volatile,
-        leases: host.volatile.leases.put(key, { ...lease, probe: Some(round) }) } }) },
+            Sessions::refreshed(lease) else { ...lease, failedProbe: true }) } })
+      else apply_custom_effect(Frames::withProcess(w, node, updatedProcess => { ...updatedProcess,
+        leases: updatedProcess.leases.put(key, { ...lease, probe: Some(round) }) }),
         Queue({ delivery: round, source: source, destination: key.owner.node, channel: MetaChannel,
           payload: SessionProbe({ key: key, epoch: lease.epoch, round: round, leader: source }) })))
   }
@@ -316,8 +302,8 @@ host.volatile.appliedMetaIndex >= ack.index
   pure def timeoutSessionProbeNext(w: World, node: NodeName, key: SessionKey): World = {
     val host = w.system.get(node)
     val lease = host.volatile.leases.get(key)
-    ({ ...w, system: w.system.put(node, { ...host, volatile: { ...host.volatile,
-        leases: host.volatile.leases.put(key, { ...lease, failedProbe: true }) } }) })
+    (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess,
+        leases: updatedProcess.leases.put(key, { ...lease, failedProbe: true }) }))
   }
 
   pure def abandonSessionRevokeEnabled(w: World, node: NodeName): bool = {
@@ -329,7 +315,7 @@ host.volatile.appliedMetaIndex >= ack.index
 
   pure def abandonSessionRevokeNext(w: World, node: NodeName): World = {
     val host = w.system.get(node)
-    ({ ...w, system: w.system.put(node, { ...host,
-      volatile: { ...host.volatile, revokeGate: None } }) })
+    (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess, revokeGate: None }))
   }
+
 }

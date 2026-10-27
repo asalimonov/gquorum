@@ -1,4 +1,5 @@
 module metaservice_authority_steps {
+  import frames as Frames from "../runtime/frames"
   import controls as Ctrl from "../metaengine/controls"
   import execution as E from "../managed/execution"
   import grants as G from "../metaengine/grants"
@@ -13,14 +14,6 @@ module metaservice_authority_steps {
     val local = w.extensions.metaLog.get(owner.volatile.appliedMetaIndex)
     val leader = owner.volatile.observations.get("_meta").observedLeader
     val caller = { node: node, incarnation: owner.volatile.incarnation }
-    val proposalKey: ProposalKey = { request: { caller: caller, sequence: -w.extensions.nextDelivery }, sequence: 0 }
-    val submitting = match command {
-      | SessionControl(sessionCommand) => match sessionCommand {
-          | RevokeInternalSession(key) => { ...w, system: w.system.put(node, { ...owner,
-              volatile: { ...owner.volatile, revokeGate: Some({ key: key, proposal: proposalKey }) } }) }
-          | _ => w }
-      | _ => w
-    }
     match leader {
       | Some(r) => and {
 M::running(owner),
@@ -38,14 +31,12 @@ not(w.extensions.network.pending.union(w.messages.values().flatten()).exists(msg
 
   pure def submitControlNext(w: World, node: NodeName, command: ControlCommand, MAX_DELIVERIES: int): World = {
     val owner = w.system.get(node)
-    val local = w.extensions.metaLog.get(owner.volatile.appliedMetaIndex)
     val leader = owner.volatile.observations.get("_meta").observedLeader
     val caller = { node: node, incarnation: owner.volatile.incarnation }
     val proposalKey: ProposalKey = { request: { caller: caller, sequence: -w.extensions.nextDelivery }, sequence: 0 }
     val submitting = match command {
       | SessionControl(sessionCommand) => match sessionCommand {
-          | RevokeInternalSession(key) => { ...w, system: w.system.put(node, { ...owner,
-              volatile: { ...owner.volatile, revokeGate: Some({ key: key, proposal: proposalKey }) } }) }
+          | RevokeInternalSession(key) => Frames::withProcess(w, node, updatedProcess => { ...updatedProcess, revokeGate: Some({ key: key, proposal: proposalKey }) })
           | _ => w }
       | _ => w
     }
@@ -79,10 +70,9 @@ not(owner.volatile.observations.keys().contains(group) and
     val c = w.extensions.consensus.get(group)
     val owner = w.system.get(node)
     match c.leaderAuthority {
-      | Some(leader) => ({ ...w, system: w.system.put(node, { ...owner,
-            volatile: { ...owner.volatile, observations: owner.volatile.observations.put(group,
+      | Some(leader) => (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess, observations: updatedProcess.observations.put(group,
               { group: group, replica: leader, incarnation: w.system.get(leader.node).volatile.incarnation,
-                observedConfig: c.configRevision, observedLeader: Some(leader), health: Healthy, age: Fresh }) } }) })
+                observedConfig: c.configRevision, observedLeader: Some(leader), health: Healthy, age: Fresh }) }))
       | None => (w)
     }
   }
@@ -105,14 +95,6 @@ not(owner.volatile.observations.keys().contains(group) and
     val owner = w.system.get(node)
     val local = w.extensions.metaLog.get(proofIndex)
     val grant = local.grants.get(key)
-    val candidates = match resource {
-      | HostResource(host) => grant.targets.filter(r => r.node == host.node)
-      | GroupResource(group) => if (owner.volatile.observations.keys().contains(group))
-          match owner.volatile.observations.get(group).observedLeader { | Some(r) => Set(r) | None => Set() }
-          else Set()
-    }
-
-
     val delivery: EffectDelivery = { delivery: w.extensions.nextDelivery,
       sender: { node: node, incarnation: owner.volatile.incarnation },
       senderMember: match owner.durable.pin { | Some(pin) => pin.member | None => 0 }, proofIndex: None,
@@ -136,14 +118,6 @@ not(owner.volatile.observations.keys().contains(group) and
     val owner = w.system.get(node)
     val local = w.extensions.metaLog.get(proofIndex)
     val grant = local.grants.get(key)
-    val candidates = match resource {
-      | HostResource(host) => grant.targets.filter(r => r.node == host.node)
-      | GroupResource(group) => if (owner.volatile.observations.keys().contains(group))
-          match owner.volatile.observations.get(group).observedLeader { | Some(r) => Set(r) | None => Set() }
-          else Set()
-    }
-
-
     val delivery: EffectDelivery = { delivery: w.extensions.nextDelivery,
       sender: { node: node, incarnation: owner.volatile.incarnation },
       senderMember: match owner.durable.pin { | Some(pin) => pin.member | None => 0 }, proofIndex: None,
@@ -153,4 +127,5 @@ not(owner.volatile.observations.keys().contains(group) and
         destination: replica.node, channel: if (grant.key.group == "_meta") MetaChannel else LoadChannel,
         payload: ExecuteGrant(delivery) })))
   }
+
 }

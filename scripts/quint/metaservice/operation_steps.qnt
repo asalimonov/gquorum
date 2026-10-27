@@ -1,4 +1,5 @@
 module metaservice_operation_steps {
+  import frames as Frames from "../runtime/frames"
   import handlers.isReseat from "./handlers"
   import authority as A from "../metaengine/authority"
   import membership as M from "../consensus/membership"
@@ -17,7 +18,6 @@ module metaservice_operation_steps {
     match Tx::operationToSend(call) {
       | Some(request) => match leader {
           | Some(r) => {
-            val updated = Tx::awaitingOperation(call, request)
             and {
               M::running(owner),
               key.caller.incarnation == owner.volatile.incarnation,
@@ -44,8 +44,7 @@ module metaservice_operation_steps {
       | Some(request) => match leader {
           | Some(r) => {
             val updated = Tx::awaitingOperation(call, request)
-            (apply_custom_effect({ ...w, system: w.system.put(key.caller.node, { ...owner,
-                volatile: { ...owner.volatile, pendingCalls: owner.volatile.pendingCalls.put(key, updated) } }) },
+            (apply_custom_effect(Frames::withProcess(w, key.caller.node, updatedProcess => { ...updatedProcess, pendingCalls: updatedProcess.pendingCalls.put(key, updated) }),
                 Queue({ delivery: w.extensions.nextDelivery, source: key.caller, destination: r.node,
                   channel: MetaChannel, payload: OperationCall({
                     key: { request: key, sequence: updated.proposalSequence }, request: request }) })))
@@ -59,7 +58,6 @@ module metaservice_operation_steps {
   pure def transmitOperationReadEnabled(w: World, node: NodeName, key: ProposalKey, retry: bool, MAX_DELIVERIES: int): bool = {
     val owner = w.system.get(node)
     val work = owner.volatile.operationWork.get(key)
-    val process = { node: node, incarnation: owner.volatile.incarnation }
     and {
       M::running(owner),
       work.phase == (if (retry) WorkReadQueued else WorkReading),
@@ -71,8 +69,8 @@ module metaservice_operation_steps {
     val owner = w.system.get(node)
     val work = owner.volatile.operationWork.get(key)
     val process = { node: node, incarnation: owner.volatile.incarnation }
-    (apply_custom_effect({ ...w, system: w.system.put(node, { ...owner, volatile: { ...owner.volatile,
-        operationWork: owner.volatile.operationWork.put(key, { ...work, phase: WorkReadQueued }) } }) },
+    (apply_custom_effect(Frames::withProcess(w, node, updatedProcess => { ...updatedProcess,
+        operationWork: updatedProcess.operationWork.put(key, { ...work, phase: WorkReadQueued }) }),
         Queue({ delivery: w.extensions.nextDelivery,
         source: process, destination: node, channel: MetaChannel,
         payload: ReadProbe({ owner: process, request: key.request, proposal: Some(key.sequence), round: work.readRound }) })))
@@ -81,7 +79,6 @@ module metaservice_operation_steps {
   pure def captureOperationEnabled(w: World, node: NodeName, key: ProposalKey, rules: Rules): bool = {
     val owner = w.system.get(node)
     val work = owner.volatile.operationWork.get(key)
-    val localMeta = w.extensions.metaLog.get(owner.volatile.appliedMetaIndex)
     and {
       M::running(owner),
       work.phase == WorkApplying,
@@ -93,32 +90,14 @@ module metaservice_operation_steps {
     val owner = w.system.get(node)
     val work = owner.volatile.operationWork.get(key)
     val localMeta = w.extensions.metaLog.get(owner.volatile.appliedMetaIndex)
-    ({ ...w, system: w.system.put(node, { ...owner, volatile: { ...owner.volatile,
-        operationWork: owner.volatile.operationWork.put(key,
-          if (work.captured == None) O::capture(work, localMeta, rules) else O::recapture(work, localMeta, rules)) } }) })
+    (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess,
+        operationWork: updatedProcess.operationWork.put(key,
+          if (work.captured == None) O::capture(work, localMeta, rules) else O::recapture(work, localMeta, rules)) }))
   }
 
   pure def observeOperationEnabled(w: World, node: NodeName, key: ProposalKey, group: GroupId): bool = {
     val owner = w.system.get(node)
     val work = owner.volatile.operationWork.get(key)
-    val links = M::linksFor(w.extensions.network, group)
-    val observed = if (not(w.extensions.consensus.keys().contains(group))) None else {
-      val native = w.extensions.consensus.get(group)
-      val responders = native.voters.union(native.learners).filter(r =>
-        M::readableIdentity(w.system, r) and M::communicates(links, node, r.node) and
-          native.catchUp.getOrElse(r, CatchUpUnknown) == CaughtUp and
-          match native.leaderAuthority { | Some(leader) => M::communicates(links, r.node, leader.node) | None => false })
-      if (responders.size() == 0 or not(M::hasCommitPath(native, w.system, links))) None
-      else Some({ native: native, healthKnown: false, live: Set(), ready: Set() })
-    }
-    val updated = match work.input {
-      | Some(input) => match observed {
-          | Some(o) => { ...work, queried: work.queried.union(Set(group)), input: Some({ ...input,
-              observations: input.observations.put(group, o) }) }
-          | None => O::finished(work, A::refused(Set(Unavailable)))
-        }
-      | None => work
-    }
     and {
       M::running(owner),
       work.phase == WorkObserving,
@@ -148,8 +127,8 @@ module metaservice_operation_steps {
         }
       | None => work
     }
-    ({ ...w, system: w.system.put(node, { ...owner, volatile: { ...owner.volatile,
-        operationWork: owner.volatile.operationWork.put(key, updated) } }) })
+    (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess,
+        operationWork: updatedProcess.operationWork.put(key, updated) }))
   }
 
   pure def observeOperationHealthEnabled(w: World, node: NodeName, key: ProposalKey, group: GroupId): bool = {
@@ -160,12 +139,6 @@ module metaservice_operation_steps {
 false
 } else {
           val prior = input.observations.get(group)
-          val links = M::linksFor(w.extensions.network, group)
-          val live = prior.native.voters.union(prior.native.learners).filter(r =>
-            M::liveIdentity(w.system, r) and M::communicates(links, node, r.node))
-          val observed = { ...prior, healthKnown: true, live: live,
-            ready: live.filter(r => if (w.extensions.consensus.keys().contains(group))
-              w.extensions.consensus.get(group).catchUp.getOrElse(r, CatchUpUnknown) == CaughtUp else false) }
           and {
             M::running(owner),
             work.phase == WorkObserving,
@@ -190,9 +163,9 @@ false
           val observed = { ...prior, healthKnown: true, live: live,
             ready: live.filter(r => if (w.extensions.consensus.keys().contains(group))
               w.extensions.consensus.get(group).catchUp.getOrElse(r, CatchUpUnknown) == CaughtUp else false) }
-          ({ ...w, system: w.system.put(node, { ...owner, volatile: { ...owner.volatile,
-              operationWork: owner.volatile.operationWork.put(key, { ...work,
-                input: Some({ ...input, observations: input.observations.put(group, observed) }) }) } }) })
+          (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess,
+              operationWork: updatedProcess.operationWork.put(key, { ...work,
+                input: Some({ ...input, observations: input.observations.put(group, observed) }) }) }))
         }
       | None => (w)
     }
@@ -210,8 +183,8 @@ false
   pure def beginOperationRecaptureNext(w: World, node: NodeName, key: ProposalKey): World = {
     val owner = w.system.get(node)
     val work = owner.volatile.operationWork.get(key)
-    ({ ...w, system: w.system.put(node, { ...owner, volatile: { ...owner.volatile,
-        operationWork: owner.volatile.operationWork.put(key, { ...work, phase: WorkReading, readIndex: None, readRound: work.readRound + 1 }) } }) })
+    (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess,
+        operationWork: updatedProcess.operationWork.put(key, { ...work, phase: WorkReading, readIndex: None, readRound: work.readRound + 1 }) }))
   }
 
   pure def buildOperationEnabled(w: World, node: NodeName, key: ProposalKey): bool = {
@@ -226,8 +199,8 @@ false
   pure def buildOperationNext(w: World, node: NodeName, key: ProposalKey): World = {
     val owner = w.system.get(node)
     val work = owner.volatile.operationWork.get(key)
-    ({ ...w, system: w.system.put(node, { ...owner, volatile: { ...owner.volatile,
-        operationWork: owner.volatile.operationWork.put(key, O::build(work)) } }) })
+    (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess,
+        operationWork: updatedProcess.operationWork.put(key, O::build(work)) }))
   }
 
   pure def submitOperationEnabled(w: World, node: NodeName, key: ProposalKey, MAX_DELIVERIES: int): bool = {
@@ -250,8 +223,8 @@ w.extensions.nextDelivery <= MAX_DELIVERIES
     val owner = w.system.get(node)
     val work = owner.volatile.operationWork.get(key)
     match work.command {
-      | Some(command) => (apply_custom_effect({ ...w, system: w.system.put(node, { ...owner, volatile: { ...owner.volatile,
-            operationWork: owner.volatile.operationWork.put(key, { ...work, phase: WorkSubmitted }) } }) },
+      | Some(command) => (apply_custom_effect(Frames::withProcess(w, node, updatedProcess => { ...updatedProcess,
+            operationWork: updatedProcess.operationWork.put(key, { ...work, phase: WorkSubmitted }) }),
             Queue({ delivery: w.extensions.nextDelivery, source: { node: node, incarnation: owner.volatile.incarnation },
               destination: node, channel: MetaChannel, payload: MetaProposal({ key: key,
                 coordinator: { node: node, incarnation: owner.volatile.incarnation }, forWork: true, command: command }) })))
@@ -273,8 +246,8 @@ w.extensions.nextDelivery <= MAX_DELIVERIES
   pure def finishOperationNext(w: World, node: NodeName, key: ProposalKey): World = {
     val owner = w.system.get(node)
     val work = owner.volatile.operationWork.get(key)
-    ({ ...w, system: w.system.put(node, { ...owner, volatile: { ...owner.volatile,
-        operationWork: owner.volatile.operationWork.put(key, { ...work, phase: WorkFinished, replySent: false }) } }) })
+    (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess,
+        operationWork: updatedProcess.operationWork.put(key, { ...work, phase: WorkFinished, replySent: false }) }))
   }
 
   pure def replyOperationEnabled(w: World, node: NodeName, key: ProposalKey, MAX_DELIVERIES: int): bool = {
@@ -300,8 +273,8 @@ w.extensions.nextDelivery <= MAX_DELIVERIES
     val owner = w.system.get(node)
     val work = owner.volatile.operationWork.get(key)
     match work.result {
-      | Some(result) => (apply_custom_effect({ ...w, system: w.system.put(node, { ...owner, volatile: { ...owner.volatile,
-            operationWork: owner.volatile.operationWork.put(key, { ...work, replySent: true }) } }) },
+      | Some(result) => (apply_custom_effect(Frames::withProcess(w, node, updatedProcess => { ...updatedProcess,
+            operationWork: updatedProcess.operationWork.put(key, { ...work, replySent: true }) }),
             Queue({ delivery: w.extensions.nextDelivery, source: { node: node, incarnation: owner.volatile.incarnation },
               destination: key.request.caller.node, channel: MetaChannel, payload: OperationAck({ key: key, outcome: result }) })))
       | None => (w)
@@ -340,9 +313,9 @@ w.extensions.nextDelivery <= MAX_DELIVERIES
           val prior = owner.volatile.observations.getOrElse("_meta", {
             group: "_meta", replica: leader, incarnation: owner.volatile.incarnation,
             observedConfig: 0, observedLeader: None, health: Healthy, age: Fresh })
-          ({ ...w, system: w.system.put(node, { ...owner, volatile: { ...owner.volatile,
-              observations: owner.volatile.observations.put("_meta", { ...prior,
-                observedLeader: Some(leader), observedConfig: c.configRevision }) } }) })
+          (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess,
+              observations: updatedProcess.observations.put("_meta", { ...prior,
+                observedLeader: Some(leader), observedConfig: c.configRevision }) }))
         }
       | None => (w)
     }
@@ -372,7 +345,6 @@ w.extensions.nextDelivery <= MAX_DELIVERIES
 
   pure def retryReadNext(w: World, key: RequestKey, MAX_DELIVERIES: int): World = {
     val owner = w.system.get(key.caller.node)
-    val call = owner.volatile.pendingCalls.get(key)
     val leader = if (owner.volatile.observations.keys().contains("_meta"))
       owner.volatile.observations.get("_meta").observedLeader else None
     match leader {
@@ -398,8 +370,8 @@ w.extensions.nextDelivery <= MAX_DELIVERIES
   pure def cancelCallNext(w: World, key: RequestKey): World = {
     val owner = w.system.get(key.caller.node)
     val call = owner.volatile.pendingCalls.get(key)
-    ({ ...w, system: w.system.put(key.caller.node, { ...owner,
-        volatile: { ...owner.volatile, pendingCalls: owner.volatile.pendingCalls.put(key,
-          Tx::cancelled(call)) } }) })
+    (Frames::withProcess(w, key.caller.node, updatedProcess => { ...updatedProcess, pendingCalls: updatedProcess.pendingCalls.put(key,
+          Tx::cancelled(call)) }))
   }
+
 }

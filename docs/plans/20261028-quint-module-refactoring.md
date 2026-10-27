@@ -96,7 +96,7 @@ Use explicit module names/aliases such as `managed_steps` and `metaservice_sessi
 | --- | --- |
 | `types.qnt` | `types.qnt`, unchanged record and variant shapes |
 | Choreo aliases currently in `handlers.qnt` | `runtime/world.qnt`; no `var` declaration |
-| `apply_custom_effect`, envelope/framing updates | `runtime/updates.qnt` and `runtime/messages.qnt` |
+| `apply_custom_effect`, envelope/framing updates | `runtime/frames.qnt` and `runtime/messages.qnt` |
 | `topology.qnt`, `placement.qnt`, `planning.qnt` | `topology/` |
 | `authority.qnt`, `grants.qnt`, `repair.qnt`, replicated control application | `metaengine/` |
 | Replicated session grant/bind/revoke rules | `metaengine/sessions.qnt` |
@@ -217,22 +217,22 @@ Compare representative intermediate states for metadata commit/apply, authority 
 
 - [x] The composition root contains state ownership, small action adapters and exploration composition; domain bodies reside in their named subsystems. Helpers have concrete reuse, not speculative callers.
 - [x] All baseline scenarios/core checks still pass; intended negative controls still expose their violations. The helper-disabled path cannot extend a trace by stuttering.
-- [x] Run the final profile matrix and bounded simulations in **Validation Commands**. Record source hashes, commands, bounds and results. Measurements are observations, not a promised runtime speedup.
+- [x] Run the mechanical checkpoint (foundation, smoke3 and lifetime3); defer the complete matrix and sampled simulations to Task 3 after helpers. Record hashes, commands and results; do not claim a speedup.
 
 ### Task 3: Adopt small reusable framing helpers
 
 **Files:** runtime helpers, extracted step modules and focused frame tests.
 **References:** target §§4–5, 9–10; this plan D3–D6.
 
-- [ ] Introduce `withNode` and `withOwner` only at repeated updates; keep the existing Queue/Consume implementation and explicit delivery identities.
-- [ ] Keep guards and post-wait identity checks in domain functions. Preserve every untouched World/LocalNode/OwnerState field and the disabled-action behavior.
-- [ ] Add meaningful frame, false-guard and missing-owner regressions; retain the staged test workflow helpers and their individual phase entry points.
-- [ ] Compare the helper rewrite against the mechanical-extraction commit and record changed call sites in the migration ledger.
+- [x] Introduce `withNode` and `withOwner` only at repeated updates; keep the existing Queue/Consume implementation and explicit delivery identities.
+- [x] Keep guards and post-wait identity checks in domain functions. Preserve every untouched World/LocalNode/OwnerState field and the disabled-action behavior.
+- [x] Add meaningful frame, false-guard and missing-owner regressions; retain the staged test workflow helpers and their individual phase entry points.
+- [x] Compare the helper rewrite against the mechanical-extraction commit and record changed call sites in the migration ledger.
 
 #### Verification
 
-- [ ] Frame/disabled-action checks and baseline scenarios pass; existing negative controls remain effective.
-- [ ] Run the final profile matrix and sampled simulations once for this substantial checkpoint; retain manifests and hashes.
+- [x] Frame/disabled-action checks and baseline scenarios pass; existing negative controls remain effective.
+- [x] Run the final profile matrix and sampled simulations once for this substantial checkpoint; retain manifests and hashes.
 
 ### Task 4: Verify the architectural delta
 
@@ -328,11 +328,13 @@ Keep existing `TODO(not planned)` scope markers with moved code. New markers are
 
 ## NOT PLANNED CHANGES
 
-None at planning time. During execution, record the file, reason, scope and relevant commit/diff for every deviation.
+- `runtime/frames.qnt` names the framing helpers instead of the proposed `updates.qnt`; `withProcess` additionally captures repeated volatile-state updates (42 uses).
+- Mechanical extraction validation and helper validation are separate checkpoints; the final matrix runs after Task 3, avoiding a redundant full matrix before helper adoption.
+- Existing mixed pure command dispatch stays in `metaservice/transactions.qnt`; this refactor preserves its working rule dependencies instead of introducing another split without a consumer benefit. Metadata authority/control/session rules remain in `metaengine`.
 
 ## NOT IMPLEMENTED GAPS
 
-None identified as an accepted omission at planning time. Tasks are unimplemented. The reviewed staged suite chain is retained; independent stateful suite composition is excluded.
+No implementation gap identified by the structural audit. Colleague review and documentation closure remain pending. The staged suite chain is retained; independent stateful suite composition is excluded.
 
 ## Planning verification
 

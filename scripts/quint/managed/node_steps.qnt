@@ -1,4 +1,5 @@
 module managed_node_steps {
+  import frames as Frames from "../runtime/frames"
   import execution as E from "./execution"
   import lifecycle as Life from "./lifecycle"
   import membership as M from "../consensus/membership"
@@ -24,8 +25,8 @@ module managed_node_steps {
     val pending = host.durable.pendingFences.get(resource)
     val group = pending.delivery.grant.key.group
     val owner = host.volatile.owners.get(group)
-    ({ ...w, system: w.system.put(node, { ...host, volatile: { ...host.volatile,
-        owners: host.volatile.owners.put(group, Life::requestStop(owner)) } }) })
+    (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess,
+        owners: updatedProcess.owners.put(group, Life::requestStop(owner)) }))
   }
 
   pure def completeHostFenceEnabled(w: World, node: NodeName, resource: ResourceKey): bool = {
@@ -36,7 +37,6 @@ module managed_node_steps {
       val owner = host.volatile.owners.get(group)
       owner.phase == OwnerReady or Life::released(owner)
     }
-    val proof = E::fence(pending.delivery, pending.position)
     and {
       M::running(host),
       host.volatile.fenceWorkers.contains(resource),
@@ -49,35 +49,15 @@ module managed_node_steps {
   pure def completeHostFenceNext(w: World, node: NodeName, resource: ResourceKey): World = {
     val host = w.system.get(node)
     val pending = host.durable.pendingFences.get(resource)
-    val group = pending.delivery.grant.key.group
-    val ownerJoined = if (not(host.volatile.owners.keys().contains(group))) true else {
-      val owner = host.volatile.owners.get(group)
-      owner.phase == OwnerReady or Life::released(owner)
-    }
     val proof = E::fence(pending.delivery, pending.position)
-    ({ ...w, system: w.system.put(node, { ...host,
+    (Frames::withNode(w, node, _ => { ...host,
         volatile: { ...host.volatile, fenceWorkers: host.volatile.fenceWorkers.exclude(Set(resource)) },
         durable: { ...host.durable, pendingFences: host.durable.pendingFences.mapRemove(resource),
-          fences: host.durable.fences.union(Set(proof)) } }) })
+          fences: host.durable.fences.union(Set(proof)) } }))
   }
 
   pure def requestNodeStopEnabled(w: World, node: NodeName, MAX_DELIVERIES: int): bool = {
     val host = w.system.get(node)
-    val caller = { node: node, incarnation: host.volatile.incarnation }
-    val stopping = { ...w, system: w.system.put(node, { ...host, volatile: { ...host.volatile,
-      phase: Stopping, ownLease: Revoked, renewal: None,
-      owners: host.volatile.owners.transformValues(owner => if (owner.phase == OwnerStopped) owner else Life::requestStop(owner)) } }) }
-    val leader = if (host.volatile.observations.keys().contains("_meta")) host.volatile.observations.get("_meta").observedLeader else None
-    val nextWorld = match host.volatile.session {
-      | Some(key) => match leader {
-          | Some(destination) => if (w.extensions.nextDelivery <= MAX_DELIVERIES) apply_custom_effect(stopping,
-              Queue({ delivery: w.extensions.nextDelivery, source: caller, destination: destination.node, channel: MetaChannel,
-                payload: MetaProposal({ key: { request: { caller: caller, sequence: -w.extensions.nextDelivery }, sequence: 0 },
-                  coordinator: caller, forWork: false, command: ControlProposal(SessionControl(RevokeInternalSession(key))) }) }))
-            else stopping
-          | None => stopping }
-      | None => stopping
-    }
     and {
       M::running(host)
     }
@@ -86,9 +66,9 @@ module managed_node_steps {
   pure def requestNodeStopNext(w: World, node: NodeName, MAX_DELIVERIES: int): World = {
     val host = w.system.get(node)
     val caller = { node: node, incarnation: host.volatile.incarnation }
-    val stopping = { ...w, system: w.system.put(node, { ...host, volatile: { ...host.volatile,
+    val stopping = Frames::withProcess(w, node, updatedProcess => { ...updatedProcess,
       phase: Stopping, ownLease: Revoked, renewal: None,
-      owners: host.volatile.owners.transformValues(owner => if (owner.phase == OwnerStopped) owner else Life::requestStop(owner)) } }) }
+      owners: updatedProcess.owners.transformValues(owner => if (owner.phase == OwnerStopped) owner else Life::requestStop(owner)) })
     val leader = if (host.volatile.observations.keys().contains("_meta")) host.volatile.observations.get("_meta").observedLeader else None
     val nextWorld = match host.volatile.session {
       | Some(key) => match leader {
@@ -113,8 +93,8 @@ module managed_node_steps {
 
   pure def joinAuthorityWorkersNext(w: World, node: NodeName): World = {
     val host = w.system.get(node)
-    ({ ...w, system: w.system.put(node, { ...host, volatile: { ...host.volatile,
-        fenceWorkers: Set(), waitingEffects: Set() } }) })
+    (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess,
+        fenceWorkers: Set(), waitingEffects: Set() }))
   }
 
   pure def timeoutNodeStopEnabled(w: World, node: NodeName): bool = {
@@ -127,8 +107,7 @@ module managed_node_steps {
 
   pure def timeoutNodeStopNext(w: World, node: NodeName): World = {
     val host = w.system.get(node)
-    ({ ...w, system: w.system.put(node, { ...host,
-        volatile: { ...host.volatile, stopTimedOut: true } }) })
+    (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess, stopTimedOut: true }))
   }
 
   pure def expireOwnerCloseEnabled(w: World, node: NodeName, group: GroupId): bool = {
@@ -140,9 +119,7 @@ module managed_node_steps {
   }
 
   pure def expireOwnerCloseNext(w: World, node: NodeName, group: GroupId): World = {
-    val owner = w.system.get(node).volatile.owners.get(group)
-    ({ ...w, system: w.system.setBy(node, host => { ...host, volatile: { ...host.volatile,
-        owners: host.volatile.owners.put(group, { ...owner, closeExpired: true }) } }) })
+    (Frames::withOwner(w, node, group, slot => { ...slot, closeExpired: true }))
   }
 
   pure def finishNodeStopEnabled(w: World, node: NodeName): bool = {
@@ -157,8 +134,8 @@ module managed_node_steps {
 
   pure def finishNodeStopNext(w: World, node: NodeName): World = {
     val host = w.system.get(node)
-    ({ ...w, system: w.system.put(node, { ...host, volatile: { ...host.volatile,
-        phase: Stopped, metaRunning: false, session: None, ownLease: Revoked } }) })
+    (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess,
+        phase: Stopped, metaRunning: false, session: None, ownLease: Revoked }))
   }
 
   pure def beginNodeStartEnabled(w: World, node: NodeName): bool = {
@@ -170,7 +147,8 @@ module managed_node_steps {
 
   pure def beginNodeStartNext(w: World, node: NodeName): World = {
     val host = w.system.get(node)
-    ({ ...w, system: w.system.put(node, { ...host,
-        volatile: { ...host.volatile, phase: Starting, metaRunning: host.durable.pin != None } }) })
+    (Frames::withNode(w, node, _ => { ...host,
+        volatile: { ...host.volatile, phase: Starting, metaRunning: host.durable.pin != None } }))
   }
+
 }

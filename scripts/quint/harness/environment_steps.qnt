@@ -1,4 +1,5 @@
 module harness_environment_steps {
+  import frames as Frames from "../runtime/frames"
   import initial as I from "./initial"
   import membership as M from "../consensus/membership"
   import scope as S from "./scope"
@@ -10,12 +11,6 @@ module harness_environment_steps {
   pure def invokeEnabled(w: World, node: NodeName, request: ApiRequest, MAX_REQUESTS: int, MAX_DELIVERIES: int): bool = {
     val owner = w.system.get(node)
     val sequence = owner.volatile.pendingCalls.keys().size() + 1
-    val caller = { node: node, incarnation: owner.volatile.incarnation }
-    val key = { caller: caller, sequence: sequence }
-    val call = Tx::newCall(request, owner.volatile.localView.latest.version, node)
-    val msg = { delivery: w.extensions.nextDelivery, source: caller,
-                destination: node, channel: MetaChannel,
-                payload: ApiCall({ key: key, request: call.request }) }
     and {
       S::requestInScope(owner.volatile.localView.latest, request),
       sequence <= MAX_REQUESTS,
@@ -81,7 +76,6 @@ w.extensions.nextDelivery <= MAX_DELIVERIES
     val net = w.extensions.network
     val links = if (channel == MetaChannel) net.metaLinks else net.loadLinks
     val edge = (source, destination)
-    val changed = if (up) links.union(Set(edge)) else links.exclude(Set(edge))
     and {
       source != destination,
       links.contains(edge) != up
@@ -118,10 +112,6 @@ w.extensions.nextDelivery <= MAX_DELIVERIES
 
   pure def restartEnabled(w: World, node: NodeName, MAX_INCARNATION: int): bool = {
     val owner = w.system.get(node)
-    val view = match owner.durable.metaImage {
-      | Some(image) => image
-      | None => { latest: I::emptyDocument, target: I::emptyDocument }
-    }
     and {
       owner.volatile.phase == Stopped,
       owner.volatile.incarnation < MAX_INCARNATION
@@ -137,7 +127,7 @@ w.extensions.nextDelivery <= MAX_DELIVERIES
       | Some(image) => image
       | None => { latest: I::emptyDocument, target: I::emptyDocument }
     }
-    ({ ...w, system: w.system.put(node, { ...owner,
+    (Frames::withNode(w, node, _ => { ...owner,
         volatile: { ...owner.volatile, phase: Starting, metaRunning: owner.durable.pin != None, stopTimedOut: false,
           owners: Map(), starts: Map(), holds: Set(), session: None, ownLease: Revoked,
           renewal: None, renewalExpired: false, leases: Map(), revokeGate: None,
@@ -146,9 +136,10 @@ w.extensions.nextDelivery <= MAX_DELIVERIES
           incarnation: owner.volatile.incarnation + 1,
           localView: view,
           appliedMetaIndex: owner.durable.metaIndex,
-          appliedMetaVersion: view.latest.version } }) })
+          appliedMetaVersion: view.latest.version } }))
   }
 
   // TODO(not planned): application business semantics. A bounded committed
   // position witnesses independent consensus, not a business command result.
+
 }

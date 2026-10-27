@@ -48,181 +48,150 @@ module cluster {
   pure val generatedOptions: MutationOptions = { expectedVersion: 0,
     audit: { actor: "", comment: "generated", forced: None }, preview: false, approve: false }
 
+  action guarded(canRun: bool, update: (World) => World): bool =
+    if (canRun) world' = update(world) else all { false, world' = world }
+
   action init = world' = I::worldFor(NODE_POOL, FOUNDERS, LOAD_IDS, INITIAL_LEADER)
 
   action invoke(node: NodeName, request: ApiRequest): bool = {
-    if (Environment::invokeEnabled(world, node, request, MAX_REQUESTS, MAX_DELIVERIES)) world' = Environment::invokeNext(world, node, request, MAX_REQUESTS, MAX_DELIVERIES)
-    else all { false, world' = world }
+    guarded(Environment::invokeEnabled(world, node, request, MAX_REQUESTS, MAX_DELIVERIES), before => Environment::invokeNext(before, node, request, MAX_REQUESTS, MAX_DELIVERIES))
   }
 
   action deliver(msg: Envelope): bool = {
-    if (Environment::deliverEnabled(world, msg)) world' = Environment::deliverNext(world, msg)
-    else all { false, world' = world }
+    guarded(Environment::deliverEnabled(world, msg), before => Environment::deliverNext(before, msg))
   }
 
   action handle(node: NodeName): bool = {
     nondet tr = Calls::handleCandidates(world, node, MAX_DELIVERIES).oneOf()
-    if (Calls::handleEnabled(world, node, tr, MAX_DELIVERIES)) world' = Calls::handleNext(world, node, tr, MAX_DELIVERIES)
-    else all { false, world' = world }
+    guarded(Calls::handleEnabled(world, node, tr, MAX_DELIVERIES), before => Calls::handleNext(before, node, tr, MAX_DELIVERIES))
   }
 
   action confirmRead(msg: Envelope): bool = {
-    if (Calls::confirmReadEnabled(world, msg, MAX_DELIVERIES)) world' = Calls::confirmReadNext(world, msg, MAX_DELIVERIES)
-    else all { false, world' = world }
+    guarded(Calls::confirmReadEnabled(world, msg, MAX_DELIVERIES), before => Calls::confirmReadNext(before, msg, MAX_DELIVERIES))
   }
 
   action finishRead(key: RequestKey): bool = {
-    if (Calls::finishReadEnabled(world, key)) world' = Calls::finishReadNext(world, key)
-    else all { false, world' = world }
+    guarded(Calls::finishReadEnabled(world, key), before => Calls::finishReadNext(before, key))
   }
 
   action prepareMutation(key: RequestKey): bool = {
-    if (Calls::prepareMutationEnabled(world, key, rules)) world' = Calls::prepareMutationNext(world, key, rules)
-    else all { false, world' = world }
+    guarded(Calls::prepareMutationEnabled(world, key, rules), before => Calls::prepareMutationNext(before, key, rules))
   }
 
   action submitMutation(key: RequestKey): bool = {
-    if (Calls::submitMutationEnabled(world, key, MAX_DELIVERIES)) world' = Calls::submitMutationNext(world, key, MAX_DELIVERIES)
-    else all { false, world' = world }
+    guarded(Calls::submitMutationEnabled(world, key, MAX_DELIVERIES), before => Calls::submitMutationNext(before, key, MAX_DELIVERIES))
   }
 
   action commitMutation(msg: Envelope): bool = {
-    if (Calls::commitMutationEnabled(world, msg, MAX_POSITION, MAX_DELIVERIES, rules)) world' = Calls::commitMutationNext(world, msg, MAX_POSITION, MAX_DELIVERIES, rules)
-    else all { false, world' = world }
+    guarded(Calls::commitMutationEnabled(world, msg, MAX_POSITION, MAX_DELIVERIES, rules), before => Calls::commitMutationNext(before, msg, MAX_POSITION, MAX_DELIVERIES, rules))
   }
 
   action finishMutation(key: RequestKey): bool = {
-    if (Calls::finishMutationEnabled(world, key)) world' = Calls::finishMutationNext(world, key)
-    else all { false, world' = world }
+    guarded(Calls::finishMutationEnabled(world, key), before => Calls::finishMutationNext(before, key))
   }
 
   action beginReseatRead(key: RequestKey): bool = {
-    if (Calls::beginReseatReadEnabled(world, key, MAX_DELIVERIES)) world' = Calls::beginReseatReadNext(world, key, MAX_DELIVERIES)
-    else all { false, world' = world }
+    guarded(Calls::beginReseatReadEnabled(world, key, MAX_DELIVERIES), before => Calls::beginReseatReadNext(before, key, MAX_DELIVERIES))
   }
 
   action finishReseatRead(key: RequestKey): bool = {
-    if (Calls::finishReseatReadEnabled(world, key)) world' = Calls::finishReseatReadNext(world, key)
-    else all { false, world' = world }
+    guarded(Calls::finishReseatReadEnabled(world, key), before => Calls::finishReseatReadNext(before, key))
   }
 
   action dispatchOperation(key: RequestKey): bool = {
-    if (Operations::dispatchOperationEnabled(world, key, MAX_DELIVERIES)) world' = Operations::dispatchOperationNext(world, key, MAX_DELIVERIES)
-    else all { false, world' = world }
+    guarded(Operations::dispatchOperationEnabled(world, key, MAX_DELIVERIES), before => Operations::dispatchOperationNext(before, key, MAX_DELIVERIES))
   }
 
   action transmitOperationRead(node: NodeName, key: ProposalKey, retry: bool): bool = {
-    if (Operations::transmitOperationReadEnabled(world, node, key, retry, MAX_DELIVERIES)) world' = Operations::transmitOperationReadNext(world, node, key, retry, MAX_DELIVERIES)
-    else all { false, world' = world }
+    guarded(Operations::transmitOperationReadEnabled(world, node, key, retry, MAX_DELIVERIES), before => Operations::transmitOperationReadNext(before, node, key, retry, MAX_DELIVERIES))
   }
 
   action startOperationRead(node: NodeName, key: ProposalKey): bool = transmitOperationRead(node, key, false)
   action retryOperationRead(node: NodeName, key: ProposalKey): bool = transmitOperationRead(node, key, true)
 
   action captureOperation(node: NodeName, key: ProposalKey): bool = {
-    if (Operations::captureOperationEnabled(world, node, key, rules)) world' = Operations::captureOperationNext(world, node, key, rules)
-    else all { false, world' = world }
+    guarded(Operations::captureOperationEnabled(world, node, key, rules), before => Operations::captureOperationNext(before, node, key, rules))
   }
 
   action observeOperation(node: NodeName, key: ProposalKey, group: GroupId): bool = {
-    if (Operations::observeOperationEnabled(world, node, key, group)) world' = Operations::observeOperationNext(world, node, key, group)
-    else all { false, world' = world }
+    guarded(Operations::observeOperationEnabled(world, node, key, group), before => Operations::observeOperationNext(before, node, key, group))
   }
 
   action observeOperationHealth(node: NodeName, key: ProposalKey, group: GroupId): bool = {
-    if (Operations::observeOperationHealthEnabled(world, node, key, group)) world' = Operations::observeOperationHealthNext(world, node, key, group)
-    else all { false, world' = world }
+    guarded(Operations::observeOperationHealthEnabled(world, node, key, group), before => Operations::observeOperationHealthNext(before, node, key, group))
   }
 
   action beginOperationRecapture(node: NodeName, key: ProposalKey): bool = {
-    if (Operations::beginOperationRecaptureEnabled(world, node, key)) world' = Operations::beginOperationRecaptureNext(world, node, key)
-    else all { false, world' = world }
+    guarded(Operations::beginOperationRecaptureEnabled(world, node, key), before => Operations::beginOperationRecaptureNext(before, node, key))
   }
 
   action buildOperation(node: NodeName, key: ProposalKey): bool = {
-    if (Operations::buildOperationEnabled(world, node, key)) world' = Operations::buildOperationNext(world, node, key)
-    else all { false, world' = world }
+    guarded(Operations::buildOperationEnabled(world, node, key), before => Operations::buildOperationNext(before, node, key))
   }
 
   action submitOperation(node: NodeName, key: ProposalKey): bool = {
-    if (Operations::submitOperationEnabled(world, node, key, MAX_DELIVERIES)) world' = Operations::submitOperationNext(world, node, key, MAX_DELIVERIES)
-    else all { false, world' = world }
+    guarded(Operations::submitOperationEnabled(world, node, key, MAX_DELIVERIES), before => Operations::submitOperationNext(before, node, key, MAX_DELIVERIES))
   }
 
   action finishOperation(node: NodeName, key: ProposalKey): bool = {
-    if (Operations::finishOperationEnabled(world, node, key)) world' = Operations::finishOperationNext(world, node, key)
-    else all { false, world' = world }
+    guarded(Operations::finishOperationEnabled(world, node, key), before => Operations::finishOperationNext(before, node, key))
   }
 
   action replyOperation(node: NodeName, key: ProposalKey): bool = {
-    if (Operations::replyOperationEnabled(world, node, key, MAX_DELIVERIES)) world' = Operations::replyOperationNext(world, node, key, MAX_DELIVERIES)
-    else all { false, world' = world }
+    guarded(Operations::replyOperationEnabled(world, node, key, MAX_DELIVERIES), before => Operations::replyOperationNext(before, node, key, MAX_DELIVERIES))
   }
 
   action observeMetaLeader(node: NodeName): bool = {
-    if (Operations::observeMetaLeaderEnabled(world, node)) world' = Operations::observeMetaLeaderNext(world, node)
-    else all { false, world' = world }
+    guarded(Operations::observeMetaLeaderEnabled(world, node), before => Operations::observeMetaLeaderNext(before, node))
   }
 
   action retryRead(key: RequestKey): bool = {
-    if (Operations::retryReadEnabled(world, key, MAX_DELIVERIES)) world' = Operations::retryReadNext(world, key, MAX_DELIVERIES)
-    else all { false, world' = world }
+    guarded(Operations::retryReadEnabled(world, key, MAX_DELIVERIES), before => Operations::retryReadNext(before, key, MAX_DELIVERIES))
   }
 
   action cancelCall(key: RequestKey): bool = {
-    if (Operations::cancelCallEnabled(world, key)) world' = Operations::cancelCallNext(world, key)
-    else all { false, world' = world }
+    guarded(Operations::cancelCallEnabled(world, key), before => Operations::cancelCallNext(before, key))
   }
 
   action drop(msg: Envelope): bool = {
-    if (Environment::dropEnabled(world, msg)) world' = Environment::dropNext(world, msg)
-    else all { false, world' = world }
+    guarded(Environment::dropEnabled(world, msg), before => Environment::dropNext(before, msg))
   }
 
   action duplicate(msg: Envelope): bool = {
-    if (Environment::duplicateEnabled(world, msg, MAX_DELIVERIES)) world' = Environment::duplicateNext(world, msg, MAX_DELIVERIES)
-    else all { false, world' = world }
+    guarded(Environment::duplicateEnabled(world, msg, MAX_DELIVERIES), before => Environment::duplicateNext(before, msg, MAX_DELIVERIES))
   }
 
   action setLink(channel: Channel, source: NodeName, destination: NodeName, up: bool): bool = {
-    if (Environment::setLinkEnabled(world, channel, source, destination, up)) world' = Environment::setLinkNext(world, channel, source, destination, up)
-    else all { false, world' = world }
+    guarded(Environment::setLinkEnabled(world, channel, source, destination, up), before => Environment::setLinkNext(before, channel, source, destination, up))
   }
 
   action crash(node: NodeName): bool = {
-    if (Environment::crashEnabled(world, node)) world' = Environment::crashNext(world, node)
-    else all { false, world' = world }
+    guarded(Environment::crashEnabled(world, node), before => Environment::crashNext(before, node))
   }
 
   action restart(node: NodeName): bool = {
-    if (Environment::restartEnabled(world, node, MAX_INCARNATION)) world' = Environment::restartNext(world, node, MAX_INCARNATION)
-    else all { false, world' = world }
+    guarded(Environment::restartEnabled(world, node, MAX_INCARNATION), before => Environment::restartNext(before, node, MAX_INCARNATION))
   }
 
   action commitProgress(group: GroupId): bool = {
-    if (Native::commitProgressEnabled(world, group, MAX_POSITION)) world' = Native::commitProgressNext(world, group, MAX_POSITION)
-    else all { false, world' = world }
+    guarded(Native::commitProgressEnabled(world, group, MAX_POSITION), before => Native::commitProgressNext(before, group, MAX_POSITION))
   }
 
   action elect(group: GroupId, candidate: ReplicaKey): bool = {
-    if (Native::electEnabled(world, group, candidate)) world' = Native::electNext(world, group, candidate)
-    else all { false, world' = world }
+    guarded(Native::electEnabled(world, group, candidate), before => Native::electNext(before, group, candidate))
   }
 
   action catchUp(group: GroupId, replica: ReplicaKey): bool = {
-    if (Native::catchUpEnabled(world, group, replica)) world' = Native::catchUpNext(world, group, replica)
-    else all { false, world' = world }
+    guarded(Native::catchUpEnabled(world, group, replica), before => Native::catchUpNext(before, group, replica))
   }
 
   action applyMeta(node: NodeName): bool = {
     nondet replica = Native::applyMetaCandidates(world, node).oneOf()
-    if (Native::applyMetaEnabled(world, node, replica)) world' = Native::applyMetaNext(world, node, replica)
-    else all { false, world' = world }
+    guarded(Native::applyMetaEnabled(world, node, replica), before => Native::applyMetaNext(before, node, replica))
   }
 
   action beginSession(node: NodeName): bool = {
-    if (SessionSteps::beginSessionEnabled(world, node)) world' = SessionSteps::beginSessionNext(world, node)
-    else all { false, world' = world }
+    guarded(SessionSteps::beginSessionEnabled(world, node), before => SessionSteps::beginSessionNext(before, node))
   }
 
   action proposeSession(node: NodeName): bool = {
@@ -243,50 +212,41 @@ module cluster {
     }
   }
   action renewSession(node: NodeName): bool = {
-    if (SessionSteps::renewSessionEnabled(world, node, MAX_DELIVERIES)) world' = SessionSteps::renewSessionNext(world, node, MAX_DELIVERIES)
-    else all { false, world' = world }
+    guarded(SessionSteps::renewSessionEnabled(world, node, MAX_DELIVERIES), before => SessionSteps::renewSessionNext(before, node, MAX_DELIVERIES))
   }
 
   pure def locallyLeader(host: LocalNode): bool = Sessions::locallyLeader(host)
 
   action handleSession(msg: Envelope): bool = {
-    if (SessionSteps::handleSessionEnabled(world, msg, MAX_DELIVERIES)) world' = SessionSteps::handleSessionNext(world, msg, MAX_DELIVERIES)
-    else all { false, world' = world }
+    guarded(SessionSteps::handleSessionEnabled(world, msg, MAX_DELIVERIES), before => SessionSteps::handleSessionNext(before, msg, MAX_DELIVERIES))
   }
 
   action seedLeases(node: NodeName): bool = {
-    if (SessionSteps::seedLeasesEnabled(world, node)) world' = SessionSteps::seedLeasesNext(world, node)
-    else all { false, world' = world }
+    guarded(SessionSteps::seedLeasesEnabled(world, node), before => SessionSteps::seedLeasesNext(before, node))
   }
 
   action forgetRevokedLease(node: NodeName, key: SessionKey): bool = {
-    if (SessionSteps::forgetRevokedLeaseEnabled(world, node, key)) world' = SessionSteps::forgetRevokedLeaseNext(world, node, key)
-    else all { false, world' = world }
+    guarded(SessionSteps::forgetRevokedLeaseEnabled(world, node, key), before => SessionSteps::forgetRevokedLeaseNext(before, node, key))
   }
 
   action expireLease(node: NodeName, key: SessionKey): bool = {
-    if (SessionSteps::expireLeaseEnabled(world, node, key)) world' = SessionSteps::expireLeaseNext(world, node, key)
-    else all { false, world' = world }
+    guarded(SessionSteps::expireLeaseEnabled(world, node, key), before => SessionSteps::expireLeaseNext(before, node, key))
   }
 
   action expireOwnLease(node: NodeName): bool = {
-    if (SessionSteps::expireOwnLeaseEnabled(world, node)) world' = SessionSteps::expireOwnLeaseNext(world, node)
-    else all { false, world' = world }
+    guarded(SessionSteps::expireOwnLeaseEnabled(world, node), before => SessionSteps::expireOwnLeaseNext(before, node))
   }
 
   action cancelRenewal(node: NodeName): bool = {
-    if (SessionSteps::cancelRenewalEnabled(world, node)) world' = SessionSteps::cancelRenewalNext(world, node)
-    else all { false, world' = world }
+    guarded(SessionSteps::cancelRenewalEnabled(world, node), before => SessionSteps::cancelRenewalNext(before, node))
   }
 
   action probeSession(node: NodeName, key: SessionKey): bool = {
-    if (SessionSteps::probeSessionEnabled(world, node, key, MAX_DELIVERIES)) world' = SessionSteps::probeSessionNext(world, node, key, MAX_DELIVERIES)
-    else all { false, world' = world }
+    guarded(SessionSteps::probeSessionEnabled(world, node, key, MAX_DELIVERIES), before => SessionSteps::probeSessionNext(before, node, key, MAX_DELIVERIES))
   }
 
   action timeoutSessionProbe(node: NodeName, key: SessionKey): bool = {
-    if (SessionSteps::timeoutSessionProbeEnabled(world, node, key)) world' = SessionSteps::timeoutSessionProbeNext(world, node, key)
-    else all { false, world' = world }
+    guarded(SessionSteps::timeoutSessionProbeEnabled(world, node, key), before => SessionSteps::timeoutSessionProbeNext(before, node, key))
   }
 
   action revokeExpiredSession(node: NodeName, key: SessionKey): bool = {
@@ -297,8 +257,7 @@ module cluster {
       submitControl(node, SessionControl(RevokeInternalSession(key))) }
   }
   action abandonSessionRevoke(node: NodeName): bool = {
-    if (SessionSteps::abandonSessionRevokeEnabled(world, node)) world' = SessionSteps::abandonSessionRevokeNext(world, node)
-    else all { false, world' = world }
+    guarded(SessionSteps::abandonSessionRevokeEnabled(world, node), before => SessionSteps::abandonSessionRevokeNext(before, node))
   }
 
   action sessionStep = any {
@@ -317,93 +276,75 @@ module cluster {
     M::freshMetaAvailable(env, nodes, node)
 
   action requestStart(node: NodeName, replica: ReplicaKey, explicit: bool): bool = {
-    if (Lifetime::requestStartEnabled(world, node, replica, explicit, MAX_REQUESTS)) world' = Lifetime::requestStartNext(world, node, replica, explicit, MAX_REQUESTS)
-    else all { false, world' = world }
+    guarded(Lifetime::requestStartEnabled(world, node, replica, explicit, MAX_REQUESTS), before => Lifetime::requestStartNext(before, node, replica, explicit, MAX_REQUESTS))
   }
 
   action readStartScope(request: RequestKey): bool = {
-    if (Lifetime::readStartScopeEnabled(world, request)) world' = Lifetime::readStartScopeNext(world, request)
-    else all { false, world' = world }
+    guarded(Lifetime::readStartScopeEnabled(world, request), before => Lifetime::readStartScopeNext(before, request))
   }
 
   action reserveOwner(request: RequestKey): bool = {
-    if (Lifetime::reserveOwnerEnabled(world, request)) world' = Lifetime::reserveOwnerNext(world, request)
-    else all { false, world' = world }
+    guarded(Lifetime::reserveOwnerEnabled(world, request), before => Lifetime::reserveOwnerNext(before, request))
   }
 
   action beginOwnerFactory(node: NodeName, group: GroupId): bool = {
-    if (Lifetime::beginOwnerFactoryEnabled(world, node, group)) world' = Lifetime::beginOwnerFactoryNext(world, node, group)
-    else all { false, world' = world }
+    guarded(Lifetime::beginOwnerFactoryEnabled(world, node, group), before => Lifetime::beginOwnerFactoryNext(before, node, group))
   }
 
   action returnOwnerFactory(node: NodeName, group: GroupId, success: bool): bool = {
-    if (Lifetime::returnOwnerFactoryEnabled(world, node, group, success)) world' = Lifetime::returnOwnerFactoryNext(world, node, group, success)
-    else all { false, world' = world }
+    guarded(Lifetime::returnOwnerFactoryEnabled(world, node, group, success), before => Lifetime::returnOwnerFactoryNext(before, node, group, success))
   }
 
   action expireOwnerFactory(node: NodeName, group: GroupId): bool = {
-    if (Lifetime::expireOwnerFactoryEnabled(world, node, group)) world' = Lifetime::expireOwnerFactoryNext(world, node, group)
-    else all { false, world' = world }
+    guarded(Lifetime::expireOwnerFactoryEnabled(world, node, group), before => Lifetime::expireOwnerFactoryNext(before, node, group))
   }
 
   action finishOwnerReplay(node: NodeName, group: GroupId): bool = {
-    if (Lifetime::finishOwnerReplayEnabled(world, node, group)) world' = Lifetime::finishOwnerReplayNext(world, node, group)
-    else all { false, world' = world }
+    guarded(Lifetime::finishOwnerReplayEnabled(world, node, group), before => Lifetime::finishOwnerReplayNext(before, node, group))
   }
 
   action authorizeOwner(node: NodeName, group: GroupId): bool = {
-    if (Lifetime::authorizeOwnerEnabled(world, node, group)) world' = Lifetime::authorizeOwnerNext(world, node, group)
-    else all { false, world' = world }
+    guarded(Lifetime::authorizeOwnerEnabled(world, node, group), before => Lifetime::authorizeOwnerNext(before, node, group))
   }
 
   action publishOwner(node: NodeName, group: GroupId): bool = {
-    if (Lifetime::publishOwnerEnabled(world, node, group)) world' = Lifetime::publishOwnerNext(world, node, group)
-    else all { false, world' = world }
+    guarded(Lifetime::publishOwnerEnabled(world, node, group), before => Lifetime::publishOwnerNext(before, node, group))
   }
 
   action replyStart(request: RequestKey): bool = {
-    if (Lifetime::replyStartEnabled(world, request)) world' = Lifetime::replyStartNext(world, request)
-    else all { false, world' = world }
+    guarded(Lifetime::replyStartEnabled(world, request), before => Lifetime::replyStartNext(before, request))
   }
 
   action cancelStart(request: RequestKey): bool = {
-    if (Lifetime::cancelStartEnabled(world, request)) world' = Lifetime::cancelStartNext(world, request)
-    else all { false, world' = world }
+    guarded(Lifetime::cancelStartEnabled(world, request), before => Lifetime::cancelStartNext(before, request))
   }
 
   action stopOwner(node: NodeName, replica: ReplicaKey, explicit: bool): bool = {
-    if (Lifetime::stopOwnerEnabled(world, node, replica, explicit)) world' = Lifetime::stopOwnerNext(world, node, replica, explicit)
-    else all { false, world' = world }
+    guarded(Lifetime::stopOwnerEnabled(world, node, replica, explicit), before => Lifetime::stopOwnerNext(before, node, replica, explicit))
   }
 
   action joinOwner(node: NodeName, group: GroupId): bool = {
-    if (Lifetime::joinOwnerEnabled(world, node, group)) world' = Lifetime::joinOwnerNext(world, node, group)
-    else all { false, world' = world }
+    guarded(Lifetime::joinOwnerEnabled(world, node, group), before => Lifetime::joinOwnerNext(before, node, group))
   }
 
   action beginOwnerClose(node: NodeName, group: GroupId): bool = {
-    if (Lifetime::beginOwnerCloseEnabled(world, node, group)) world' = Lifetime::beginOwnerCloseNext(world, node, group)
-    else all { false, world' = world }
+    guarded(Lifetime::beginOwnerCloseEnabled(world, node, group), before => Lifetime::beginOwnerCloseNext(before, node, group))
   }
 
   action returnOwnerClose(node: NodeName, group: GroupId, success: bool): bool = {
-    if (Lifetime::returnOwnerCloseEnabled(world, node, group, success)) world' = Lifetime::returnOwnerCloseNext(world, node, group, success)
-    else all { false, world' = world }
+    guarded(Lifetime::returnOwnerCloseEnabled(world, node, group, success), before => Lifetime::returnOwnerCloseNext(before, node, group, success))
   }
 
   action releaseOwner(node: NodeName, group: GroupId): bool = {
-    if (Lifetime::releaseOwnerEnabled(world, node, group)) world' = Lifetime::releaseOwnerNext(world, node, group)
-    else all { false, world' = world }
+    guarded(Lifetime::releaseOwnerEnabled(world, node, group), before => Lifetime::releaseOwnerNext(before, node, group))
   }
 
   action stopOlderForFence(node: NodeName, resource: ResourceKey): bool = {
-    if (NodeSteps::stopOlderForFenceEnabled(world, node, resource)) world' = NodeSteps::stopOlderForFenceNext(world, node, resource)
-    else all { false, world' = world }
+    guarded(NodeSteps::stopOlderForFenceEnabled(world, node, resource), before => NodeSteps::stopOlderForFenceNext(before, node, resource))
   }
 
   action completeHostFence(node: NodeName, resource: ResourceKey): bool = {
-    if (NodeSteps::completeHostFenceEnabled(world, node, resource)) world' = NodeSteps::completeHostFenceNext(world, node, resource)
-    else all { false, world' = world }
+    guarded(NodeSteps::completeHostFenceEnabled(world, node, resource), before => NodeSteps::completeHostFenceNext(before, node, resource))
   }
 
   action importStartFloor(request: RequestKey): bool = {
@@ -421,33 +362,27 @@ module cluster {
     }
   }
   action requestNodeStop(node: NodeName): bool = {
-    if (NodeSteps::requestNodeStopEnabled(world, node, MAX_DELIVERIES)) world' = NodeSteps::requestNodeStopNext(world, node, MAX_DELIVERIES)
-    else all { false, world' = world }
+    guarded(NodeSteps::requestNodeStopEnabled(world, node, MAX_DELIVERIES), before => NodeSteps::requestNodeStopNext(before, node, MAX_DELIVERIES))
   }
 
   action joinAuthorityWorkers(node: NodeName): bool = {
-    if (NodeSteps::joinAuthorityWorkersEnabled(world, node)) world' = NodeSteps::joinAuthorityWorkersNext(world, node)
-    else all { false, world' = world }
+    guarded(NodeSteps::joinAuthorityWorkersEnabled(world, node), before => NodeSteps::joinAuthorityWorkersNext(before, node))
   }
 
   action timeoutNodeStop(node: NodeName): bool = {
-    if (NodeSteps::timeoutNodeStopEnabled(world, node)) world' = NodeSteps::timeoutNodeStopNext(world, node)
-    else all { false, world' = world }
+    guarded(NodeSteps::timeoutNodeStopEnabled(world, node), before => NodeSteps::timeoutNodeStopNext(before, node))
   }
 
   action expireOwnerClose(node: NodeName, group: GroupId): bool = {
-    if (NodeSteps::expireOwnerCloseEnabled(world, node, group)) world' = NodeSteps::expireOwnerCloseNext(world, node, group)
-    else all { false, world' = world }
+    guarded(NodeSteps::expireOwnerCloseEnabled(world, node, group), before => NodeSteps::expireOwnerCloseNext(before, node, group))
   }
 
   action finishNodeStop(node: NodeName): bool = {
-    if (NodeSteps::finishNodeStopEnabled(world, node)) world' = NodeSteps::finishNodeStopNext(world, node)
-    else all { false, world' = world }
+    guarded(NodeSteps::finishNodeStopEnabled(world, node), before => NodeSteps::finishNodeStopNext(before, node))
   }
 
   action beginNodeStart(node: NodeName): bool = {
-    if (NodeSteps::beginNodeStartEnabled(world, node)) world' = NodeSteps::beginNodeStartNext(world, node)
-    else all { false, world' = world }
+    guarded(NodeSteps::beginNodeStartEnabled(world, node), before => NodeSteps::beginNodeStartNext(before, node))
   }
 
   action localLifetimeStep = any {
@@ -481,19 +416,16 @@ module cluster {
   // transport as public mutations. Negative request sequences cannot alias an
   // application call. They identify transport work, not a public API request.
   action submitControl(node: NodeName, command: ControlCommand): bool = {
-    if (AuthoritySteps::submitControlEnabled(world, node, command, MAX_DELIVERIES)) world' = AuthoritySteps::submitControlNext(world, node, command, MAX_DELIVERIES)
-    else all { false, world' = world }
+    guarded(AuthoritySteps::submitControlEnabled(world, node, command, MAX_DELIVERIES), before => AuthoritySteps::submitControlNext(before, node, command, MAX_DELIVERIES))
   }
 
   action observeAuthorityLeader(node: NodeName, group: GroupId): bool = {
-    if (AuthoritySteps::observeAuthorityLeaderEnabled(world, node, group)) world' = AuthoritySteps::observeAuthorityLeaderNext(world, node, group)
-    else all { false, world' = world }
+    guarded(AuthoritySteps::observeAuthorityLeaderEnabled(world, node, group), before => AuthoritySteps::observeAuthorityLeaderNext(before, node, group))
   }
 
   action dispatchGrantFrom(node: NodeName, key: GrantKey, resource: ResourceKey, proofIndex: int): bool = {
     nondet replica = AuthoritySteps::dispatchGrantFromCandidates(world, node, key, resource, proofIndex, MAX_DELIVERIES).oneOf()
-    if (AuthoritySteps::dispatchGrantFromEnabled(world, node, key, resource, proofIndex, replica, MAX_DELIVERIES)) world' = AuthoritySteps::dispatchGrantFromNext(world, node, key, resource, proofIndex, replica, MAX_DELIVERIES)
-    else all { false, world' = world }
+    guarded(AuthoritySteps::dispatchGrantFromEnabled(world, node, key, resource, proofIndex, replica, MAX_DELIVERIES), before => AuthoritySteps::dispatchGrantFromNext(before, node, key, resource, proofIndex, replica, MAX_DELIVERIES))
   }
 
   action dispatchGrant(node: NodeName, key: GrantKey, resource: ResourceKey): bool =
@@ -502,23 +434,19 @@ module cluster {
   // ValidateAuthorityCourier reads a quorum-confirmed authority proof. Capture
   // that immutable query result separately from acceptance and native waiting.
   action confirmGrant(msg: Envelope): bool = {
-    if (Receiver::confirmGrantEnabled(world, msg)) world' = Receiver::confirmGrantNext(world, msg)
-    else all { false, world' = world }
+    guarded(Receiver::confirmGrantEnabled(world, msg), before => Receiver::confirmGrantNext(before, msg))
   }
 
   action receiveGrant(msg: Envelope): bool = {
-    if (Receiver::receiveGrantEnabled(world, msg)) world' = Receiver::receiveGrantNext(world, msg)
-    else all { false, world' = world }
+    guarded(Receiver::receiveGrantEnabled(world, msg), before => Receiver::receiveGrantNext(before, msg))
   }
 
   action consumeGrant(delivery: EffectDelivery): bool = {
-    if (Receiver::consumeGrantEnabled(world, delivery, MAX_POSITION)) world' = Receiver::consumeGrantNext(world, delivery, MAX_POSITION)
-    else all { false, world' = world }
+    guarded(Receiver::consumeGrantEnabled(world, delivery, MAX_POSITION), before => Receiver::consumeGrantNext(before, delivery, MAX_POSITION))
   }
 
   action refuseGrant(delivery: EffectDelivery): bool = {
-    if (Receiver::refuseGrantEnabled(world, delivery)) world' = Receiver::refuseGrantNext(world, delivery)
-    else all { false, world' = world }
+    guarded(Receiver::refuseGrantEnabled(world, delivery), before => Receiver::refuseGrantNext(before, delivery))
   }
 
   action reportHostFence(node: NodeName, fence: FenceEvidence): bool = all {

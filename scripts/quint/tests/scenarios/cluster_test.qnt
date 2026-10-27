@@ -1,4 +1,5 @@
 module cluster_test {
+  import frames as Frames from "../../runtime/frames"
   import types.* from "../../types"
   import basicSpells.* from "../../vendor/spells/basicSpells"
   import cluster.* from "../../cluster"
@@ -76,4 +77,9 @@ module cluster_test {
   action clusterStageProbe = world' = world
   run clusterSharesWorldTest = clusterStageInit.then(clusterStageInit).then(clusterStageProbe)
     .expect(world.system.keys() == NODE_POOL)
+  run disabledFrameDoesNotEvaluatePostTest = init.then(
+    guarded(false, before => Frames::withOwner(before, "n1", "missing", owner => owner)).fail())
+  run guardedFrameUpdatesTheSharedWorldTest = init.then(
+    guarded(true, before => Frames::withProcess(before, "n1", process => { ...process, schedulerEnabled: false })))
+    .expect(not(world.system.get("n1").volatile.schedulerEnabled))
 }
