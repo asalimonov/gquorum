@@ -9,7 +9,7 @@
 **Target SHA-256 at planning:** `64b1a24b8068997529445ce6e92c44c12a8ebb455a5d728cb34ba0533c64ff9b`
 **Full brainstorm log:** [20261027-quint-cluster-management.md](../brainstorms/20261027-quint-cluster-management.md)
 **Execution progress:** `docs/progress/20261027-quint-cluster-management.md` (create during execution).
-**Status:** ready for implementation; all 22 tasks are pending. The user approved this sequence during planning.
+**Status:** executing; Task 1 complete, Tasks 2–22 pending. The user approved this sequence during planning.
 
 ## Objective and execution contract
 
@@ -82,18 +82,18 @@ For Python runner changes: run its full unit suite, syntax checks, and a real re
 **Files:** `scripts/quint/{types,handlers,cluster,properties,cluster_test}.qnt`, `instances/foundation.qnt`, `README.md`, `coverage.md`, `vendor/*` (new).
 **References:** target §§1–6, §§10.4/12; §4 composition diagram; schemas §§5.1–5.8. Sources: `cluster.go`, `node.go`, `node_recovery.go`, `topology/authority*.go`, `topology/storage_class.go`, `topology/hosting.go`; local Quint examples at checkout `bd327e32`.
 
-- [ ] Pin Quint 0.33.0 and vendor the exact Choreo/basicSpells files with license, upstream revision, file hashes and documented local adapter delta. No absolute checkout imports or npm dependency inside a Go module.
-- [ ] Define target identities and grouped state records incrementally: `ReplicaKey`, `ProcessKey`, `AttemptKey`, `EffectTarget`, `EffectKey`, `RequestKey`, volatile/durable node records, `NodeStorageConfig`, topology/native/metadata/network/recovery records. Resolve referenced enum/input/update types from actual source branches; record each mapping instead of inventing missing behavior.
-- [ ] Preserve corrected forms: `GroupDecl.storage: StorageDefault | StorageMemory`, `hosting: Option[HostingRule]`, action/admission receipt shape plus separate `FenceEvidence`. Keep request IDs, process incarnation and durable member/replica identities distinct.
-- [ ] Instantiate one node actor and exact finite constants. Build one real `listen_*`/`act_*` pair through `main_listener`, an explicit enqueue→delivery boundary, and `init/step`. Use a harmless local observation or invalid-request refusal; do not pretend to commit a topology change before consensus exists.
-- [ ] Add one named invariant, one delivered-request witness, and configuration-assumption `run` assertions. Extend type definitions only after the previous executable slice runs. Add a coverage ledger with planned/implemented/excluded status and exact public API names.
-- [ ] Document every future-handler placeholder and its owning task. Import each stateful cluster exactly once; frame all actual variables including any derived Choreo display state.
+- [x] Pin Quint 0.33.0 and vendor the exact Choreo/basicSpells files with license, upstream revision, file hashes and documented local adapter delta. No absolute checkout imports or npm dependency inside a Go module.
+- [x] Define target identities and grouped state records incrementally: `ReplicaKey`, `ProcessKey`, `AttemptKey`, `EffectTarget`, `EffectKey`, `RequestKey`, volatile/durable node records, `NodeStorageConfig`, topology/native/metadata/network/recovery records. Resolve referenced enum/input/update types from actual source branches; record each mapping instead of inventing missing behavior.
+- [x] Preserve corrected forms: `GroupDecl.storage: StorageDefault | StorageMemory`, `hosting: Option[HostingRule]`, action/admission receipt shape plus separate `FenceEvidence`. Keep request IDs, process incarnation and durable member/replica identities distinct.
+- [x] Instantiate one node actor and exact finite constants. Build one real `listen_*`/`act_*` pair through `main_listener`, an explicit enqueue→delivery boundary, and `init/step`. Use a harmless local observation or invalid-request refusal; do not pretend to commit a topology change before consensus exists.
+- [x] Add one named invariant, one delivered-request witness, and configuration-assumption `run` assertions. Extend type definitions only after the previous executable slice runs. Add a coverage ledger with planned/implemented/excluded status and exact public API names.
+- [x] Document every future-handler placeholder and its owning task. Import each stateful cluster exactly once; frame all actual variables including any derived Choreo display state.
 
 #### Verification
 
-- [ ] `quint typecheck scripts/quint/instances/foundation.qnt`, deterministic foundation tests and a short seeded foundation simulation all pass; no uninitialized const or undefined map/Option/list access.
-- [ ] The witness exercises actual handler wiring and delayed delivery, not a test-only state mutation. All foundational invariants execute with `step`.
-- [ ] Vendor license/hash/path checks and `git diff --check` pass; record commands/output in progress before committing.
+- [x] `quint typecheck scripts/quint/instances/foundation.qnt`, deterministic foundation tests and a short seeded foundation simulation all pass; no uninitialized const or undefined map/Option/list access.
+- [x] The witness exercises actual handler wiring and delayed delivery, not a test-only state mutation. All foundational invariants execute with `step`.
+- [x] Vendor license/hash/path checks and `git diff --check` pass; record commands/output in progress before committing.
 
 ### Task 2: Add the profile runner and honest run manifests
 
@@ -563,7 +563,7 @@ The exclusions below were agreed in the brainstorm/target. No new product API st
 
 ## NOT PLANNED CHANGES
 
-None during implementation yet. Planning clarified existing target sketches for storage backend versus class, optional legacy hosting, group-wide effects and distinct fence/readmission evidence; these are documented in Planning reconciliation, not production behavior changes. During execution record unexpected file changes, rationale and relevant diff here.
+Task 1: the target record field `action` is implemented as `kind` because Quint reserves `action`; the mapping is documented in the model README/coverage. Choreo source is unchanged: its pure helpers operate on one application-owned GlobalContext instead of its own unused state variables. Planning clarified existing target sketches for storage backend versus class, optional legacy hosting, group-wide effects and distinct fence/readmission evidence; these are documented in Planning reconciliation, not production behavior changes. During execution record unexpected file changes, rationale and relevant diff here.
 
 ## NOT IMPLEMENTED GAPS
 

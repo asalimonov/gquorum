@@ -1,0 +1,23 @@
+{
+  "repository": "https://github.com/quint-co/quint",
+  "revision": "bd327e32df01a578a0f7270ed7e80d0e4b0b0c6e",
+  "quint_version": "0.33.0",
+  "local_changes": [],
+  "files": [
+    {
+      "path": "choreo.qnt",
+      "source": "skills/quint-modeling/examples/tendermint/choreo.qnt",
+      "sha256": "d2f93ccd70dfa7f7365acbc442dfc0fb83cb3711091202e0079b4b2dc1a5dafd"
+    },
+    {
+      "path": "spells/basicSpells.qnt",
+      "source": "skills/quint-modeling/examples/tendermint/spells/basicSpells.qnt",
+      "sha256": "60e566ee21ed308c7f33069199b277fcbc9856bc16b0ac877cacc81d61926102"
+    },
+    {
+      "path": "LICENSE",
+      "source": "LICENSE",
+      "sha256": "0f8c4f9a99d4861ee62ade9a9526d09570844bdeab3e6bca500383d5ae7d9495"
+    }
+  ]
+}
