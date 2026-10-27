@@ -1,6 +1,6 @@
 # Quint model of gquorum cluster management
 
-Status: brainstorm complete; implementation has not started. Date: 2026-10-27. Detailed specification: [target design](20261027-quint-cluster-management-target.md).
+Historical brainstorm completed; implementation subsequently reached Task 4 and is paused. Initial scope was revised on 2026-10-27; see the final scope-review entry and current target. Date: 2026-10-27. Detailed specification: [target design](20261027-quint-cluster-management-target.md).
 
 ## Initial request
 
@@ -256,3 +256,25 @@ Three complementary suites are proposed: (1) reachability witnesses and determin
 Additional tool finding: local Quint `quint/src/tlc.ts` passes `-deadlock` to TLC, which disables built-in deadlock checking ([TLC option reference](https://docs.tlapl.us/using%3Atlc%3Astart)). The target therefore mandates explicit meaningful-progress/stuck predicates and known-failing controls. Temporal backend behavior must also be validated with a small passing/failing pair before making liveness claims.
 
 BRAINSTORM DONE
+
+
+## Scope review — 2026-10-27, after Task 4
+
+User requested a review of coverage.md to remove redundant API modeling and defer features such as labels, then simplify the target and plan. The implementation goal remained paused throughout this documentation review.
+
+The user selected: “Lean management scope; defer offline recovery (recommended).” This supersedes the earlier demand to include storage-loss/Recovery profiles in the first version. The retained objective is core topology transactions, scaling/group operations, automatic repair, exact identity/fencing, retained restarts, minimum session/admission safety and cleanup/readmission.
+
+All 82 public entries were reclassified: 17 Core administrative controls; 15 reused Primitives; 19 Observe projections; 8 Omit wrappers/diagnostics; 23 Deferred feature methods. Metrics/history/watch/getter machinery does not need its own state machine. Labels are deferred as logic across all entry points, including Stage and creation. Live placement/voter tuning, standalone pin setters, EnsureGroup/RollbackTo, application locks/manual sessions, serving override, disk-loss/memory/custom-storage and offline recovery are outside initial scope.
+
+Two source-driven safeguards prevent over-simplification. Node readiness requires an exact admitted/recovered live process session (node_lifecycle.go), so minimum internal session transitions remain. Default voter repair consumes internal metric evidence (scheduling/voters.go and internal/votercheck), so freshness, identity, lag/backlog and stability/no-progress classes remain even though public Metrics/MetricsHistory are omitted. Exact cleanup/collection ordering and returning-owner fencing are also retained.
+
+The revised plan has 18 tasks: four historically completed and fourteen remaining, down from eighteen remaining. The full sessions/locks/read-API task was eliminated, folding necessary primitives into existing work. Three storage/offline-recovery tasks were deferred. Substantive profiles drop from nine to six; foundation remains a bootstrap check. Architectural delta, external review and documentation remain the last three tasks, now 16–18.
+
+Known integration debt is explicit: existing Task 4 extension helpers/tests still appear in executable source/profiles. Revised Task 5 must enforce lean domains and separate extension-only tests before claiming v1 results. No executable .qnt/Python/profile files were changed by this review, no tests were rerun, and no deferred implementation is claimed completed. Historical evidence remains in the progress log/Git.
+
+
+### Follow-up: metrics always good
+
+The user narrowed the initial scope further: “metrics are always good, we don't simulate issues with lags and stability for this iteration.” This supersedes the preceding recommendation to explore internal metric threshold/stability classes. Initial metric evidence is now fixed favorable: lag/backlog within limits, healthy progress, current/fresh metrics and collector, standby stability satisfied and cooldowns clear. No lag/no-progress repair, observation-gap/metric-age faults, window counters or hysteresis/timing guarantees.
+
+Crashes, partitions, actual native quorum and exact identity remain explicit. Availability-driven repair is retained with detection eligibility abstracted without elapsed-window timing. A new/returning replica still passes a successful catch-up protocol milestone, without slowness or lag-failure regimes. Decisions becoming obsolete due to real topology/identity/leadership changes still require revalidation. Formal management deadlock/livelock checks remain; good metrics do not assume the controller correct. Minimum internal session/admission transitions remain independently necessary.

@@ -5,9 +5,5 @@
 /.tools/
 .revmux/
 !.revmux/profile.md
-/docs/plans/
-/docs/brainstorms/
-/docs/progress/
-/docs/reports
 .DS_Store
 docs/review/

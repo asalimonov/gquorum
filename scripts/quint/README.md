@@ -1,6 +1,12 @@
 # gquorum management model
 
-This is the executable specification being built from the [target design](../../docs/brainstorms/20261027-quint-cluster-management-target.md) and [22-task plan](../../docs/plans/20261027-quint-cluster-management.md). The implemented checkpoint and omissions are explicit in [coverage.md](coverage.md). It is not yet a complete cluster-management model and does not prove the Go implementation correct.
+This is the executable specification being built from the [target design](../../docs/brainstorms/20261027-quint-cluster-management-target.md) and [revised 18-task plan](../../docs/plans/20261027-quint-cluster-management.md). The implemented checkpoint and omissions are explicit in [coverage.md](coverage.md). It is not yet a complete cluster-management model and does not prove the Go implementation correct.
+
+## Initial scope revision
+
+The user approved a lean first version after Task 4. The [coverage ledger](coverage.md), target and plan now defer labels/selectors/domain placement, live policy tuning, EnsureGroup/RollbackTo, application locks/manual session workflows, serving override, storage-loss/memory-store suites and offline Recovery. Public metrics/getter/watch/history plumbing is omitted; derived operator visibility and minimum internal session/availability safety remain. The user further fixed performance/stability/metric-freshness evidence to favorable values: no lag/backlog, no-progress, stale-metric or stability/cooldown scenarios in the initial iteration. Quorum/crash/partition behavior and the successful join catch-up milestone remain.
+
+This documentation change did not alter executable profiles. Current `smoke3` still includes the broader 40-test Task 4 suite. Revised Task 5 must enforce scope assumptions and separate extension-only tests before any initial-scope verification claim. Implementation remains paused. Existing tests/code are historical work, not a requirement to finish deferred workflows.
 
 ## Run the current checkpoint
 
@@ -26,7 +32,7 @@ Profiles pin concrete modules, tests, properties, bounds, seeds/sample counts an
 
 Artifacts are retained under `test-reports/quint/<run>/`: `report.md`, `manifest.json`, separate child logs, machine-readable Quint output and available ITF traces. `--reports-dir` overrides `TEST_REPORTS_DIR`; either specifies the report root, with `quint/` appended. `latest` changes only after reporting a finished non-interrupted run. Failures keep their artifacts and nonzero status. A timeout or signal is incomplete, not a verified pass.
 
-The default profile uses the bundled TypeScript evaluator. Rust profiles require the preinstalled evaluator pinned by Quint 0.33.0 (v0.7.0); verification needs explicitly provisioned pinned Apalache/JVM files. No backend is downloaded by this runner. Verification is refused until a profile is marked qualified following Task 17's backend controls. Its implementation is not a current claim of exhaustive/liveness qualification.
+The default profile uses the bundled TypeScript evaluator. Rust profiles require the preinstalled evaluator pinned by Quint 0.33.0 (v0.7.0); verification needs explicitly provisioned pinned Apalache/JVM files. No backend is downloaded by this runner. Verification is refused until a profile is marked qualified following revised Task 13's backend controls. Its implementation is not a current claim of exhaustive/liveness qualification.
 
 Quint 0.33.0's machine-readable simulation output omits witness counts. The manifest records that omission instead of inventing counts; deterministic witness tests are separate evidence. Direct `quint run` above prints sampled witness counts. Model hashes and original child exit statuses are retained for reproduction.
 
@@ -40,7 +46,7 @@ The target's record field `action` is spelled `kind` in Quint because `action` i
 
 ## Pending implementation
 
-The state schema is present, but handlers for stateful topology/CAS dispatch (Task 5), authority (6), ownership (7), membership (8), groups (9), cleanup/readmission (10), scheduling (11), sessions/reads (12), storage faults (13), and recovery (14–15) are not implemented yet. These paths are absent rather than returning invented successful results. Independent consensus/network failures are implemented in Task 3; restart restores retained metadata into Starting, while load owner reconstruction/publication remains Task 7. Progress/liveness and exhaustive profile qualification arrive in Tasks 17–18.
+Core stateful dispatch, authority, ownership, membership, creation/deletion, cleanup and scheduler work remain in Tasks 5–11. Minimum internal sessions belong to Task 7 and shared fresh reads to Task 5; no separate public session/lock or offline Recovery workflow is required. Tasks 12–18 cover core visibility/coverage, progress/verification, tooling, audit, review and documentation. No pending path returns an invented successful result.
 
 Do not infer completed coverage from the presence of a record or enum. Add each transition with an executable witness and invariants, retain counterexamples, and update the coverage matrix before extending claims.
 
@@ -68,9 +74,9 @@ The environment abstracts consensus commitment/election/catch-up. A commit requi
 
 Crashes discard process-owned calls/observations/owners and retain durable pin/storage evidence. Restart supplies a new incarnation and restores only retained metadata into Starting; it does not restore published load handles. Delayed old-incarnation replies are consumed without completing a current call. Loads stop contributing votes after their local engine is gone. `HostState.metaImage/metaIndex` represent retained metadata state, and `OwnerState.engineRunning` distinguishes native participation from public publication. Those implementation fields refine the target records without changing production storage.
 
-Management inboxes and in-flight messages are distinct, and link changes, loss and duplicate delivery are explicit actions. Current request tests are local calls; cross-node membership/authority message workflows are added in their later tasks. Tests exercise both directions of metadata/load isolation, asymmetric links, stale observations, delayed application, majority loss, restart/catch-up, old messages, duplicates and loss. Progress/liveness qualification remains pending; no automatic readiness after restart is claimed yet.
+Management inboxes and in-flight messages are distinct, and link changes, loss and duplicate delivery are explicit actions. Current request tests are local calls; cross-node membership/authority message workflows are added in their later tasks. Tests exercise both directions of metadata/load isolation, asymmetric links, stale observations, delayed application, majority loss, restart/catch-up, old messages, duplicates and loss. Progress/liveness qualification remains pending in revised Tasks 13–14; no automatic readiness after restart is claimed yet.
 
-## Document/placement/planning checkpoint
+## Historical Task 4 checkpoint (broader than initial scope)
 
 Task 4 implements pure validation, edits, placement and immutable plan construction in `topology.qnt`, with `placement.qnt` and `planning.qnt` helpers. `smoke3 --mode test` includes the concrete `topologyChecks` suite. The API message dispatcher does not yet execute these mutations; Task 5 connects capture, commit and replies.
 
@@ -78,6 +84,6 @@ Placement has distinct minimum/maximum voter bounds and total host capacity. Con
 
 The planner returns `Planned(plan)` or `PlanRejected(errors)`, never an empty successful plan for a refusal. Required steps and detached cleanup remain separate, with exact identities, voter-set guards, source versions, step sequences and dependencies. Replacements respect host ownership, learner-first admission, catch-up revalidation and transfer before leader removal. Already-proven stops are retained. Deleted-group plans require no native load observation/quorum and carry host cleanup authority separately from logical deletion.
 
-`ReseatReplica` prepares an atomic repair-and-approval against approved intent and the retained allocation floors; Task 5/11 will wire that commit and independent-intent rebase. Rollback has a new version and historical parent independently of the original CAS. The retained identity inventory supplements unapproved removals without reusing retired or overwritten allocations.
+`ReseatReplica` prepares an atomic repair-and-approval against approved intent and the retained allocation floors; Tasks 5/11 will wire that commit and independent-intent rebase. Rollback has a new version and historical parent independently of the original CAS. The retained identity inventory supplements unapproved removals without reusing retired or overwritten allocations.
 
 The 40 topology tests cover semantic input classes and plan sequencing. Symbolic strings represent valid names/labels except explicit empty/reserved cases; byte-level encoding/UTF-8/JSON validation is outside this model. Malformed role encodings are represented by the generic InvalidRequest path before constructing typed ReplicaRole values. No exhaustive verification or Go conformance claim follows from these unit/scenario checks.

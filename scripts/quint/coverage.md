@@ -1,128 +1,157 @@
-# Model coverage ledger
+# Initial-model scope and coverage
 
-Implemented checkpoint: Tasks 1–4 (foundation, runner, consensus/network, pure topology/planning). Source baseline: `e8e85dbd7879b1c858252cd2a6126a36920f8a8e`.
+Scope revision approved on 2026-10-27: **lean cluster management**. Implementation is paused after Tasks 1–4. This revision changes the design/backlog, not executable code. Existing `smoke3` still runs the broader Task 4 tests; revised Task 5 must enforce the new scope and separate extension-only tests before claiming v1 coverage.
 
-The table enumerates public methods, not completed behavior. `Planned` means no modeled implementation yet. Task 16 must resolve every entry to actions, observation projection or a justified exclusion and executable witness. A generic invalid request currently tests transport/refusal wiring; it does not count as each mutation's validation coverage.
+The original 82-entry ledger was an API inventory, not a requirement to implement 82 state machines. Initial disposition: **17 Core**, **15 Primitive**, **19 Observe**, **8 Omit**, **23 Deferred**. Every entry remains accounted for.
 
-| Public API | Source | Status | Action / evidence |
-| --- | --- | --- | --- |
-| `Cluster.ReadBarrier` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.ReadTopology` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.ReadProgress` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.ReadAuthority` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.WaitRevoked` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.ReadLockHolder` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.Rules` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.IsLeader` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.Status` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.HealthObservation` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.Metrics` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.MetricsHistory` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.ParkedJoins` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.Latest` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.Target` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.Get` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.History` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.Watch` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.Stage` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
-| `Cluster.Plan` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
-| `Cluster.PlanFor` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
-| `Cluster.Approve` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.Operation` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.WaitOperation` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.RetryOperation` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.AddNode` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
-| `Cluster.ReadmitNode` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
-| `Cluster.DrainNode` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
-| `Cluster.ActivateNode` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
-| `Cluster.ExcludeNode` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
-| `Cluster.ForceRetireNode` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
-| `Cluster.SetPlacement` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
-| `Cluster.SetGroupPlacement` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
-| `Cluster.SetGroupVoterConfig` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
-| `Cluster.SetGroupHosting` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
-| `Cluster.SetReplicaPinnedLearner` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
-| `Cluster.CreateGroup` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
-| `Cluster.EnsureGroup` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.DeleteGroup` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
-| `Cluster.ChangeReplica` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
-| `Cluster.ReseatReplica` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
-| `Cluster.RollbackTo` | `cluster.go` | Pure logic; dispatch pending | topology.mutationGuard/mutateDocument/preview/makePlan; topologyChecks |
-| `Cluster.TransferLeader` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.AcquireLock` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Cluster.LockHolder` | `cluster.go` | Planned | Pending owning plan task; no success stub |
-| `Node.Start` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.WaitReady` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.Stop` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.RequestStop` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.Identity` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.Status` | `node.go` | Partial: phase projection only | ObserveLocal → invoke/deliver/handle; deliveredObservationTest |
-| `Node.Watch` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.Cluster` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.Recovery` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.StartLoadGroup` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.LoadGroup` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.LoadGroupIDs` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.LoadSnapshots` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.StopLoadGroup` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.ParkedLoads` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.ReceiveLoadRaft` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.ReadLoadReplica` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.ApplyLoadAction` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.InstallLoadFence` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.ReportLoadDelivery` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.ActivateSession` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.KeepAlive` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.DeactivateSession` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.OwnSessionLive` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.ServeOverride` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.SetServeOverride` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.SchedulingStatus` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Node.SetSchedulingEnabled` | `node.go` | Planned | Pending owning plan task; no success stub |
-| `Recovery.Inspect` | `node_recovery.go` | Planned | Pending owning plan task; no success stub |
-| `Recovery.Approve` | `node_recovery.go` | Planned | Pending owning plan task; no success stub |
-| `Recovery.Run` | `node_recovery.go` | Planned | Pending owning plan task; no success stub |
-| `Recovery.Cancel` | `node_recovery.go` | Planned | Pending owning plan task; no success stub |
-| `Recovery.Status` | `node_recovery.go` | Planned | Pending owning plan task; no success stub |
-| `Recovery.List` | `node_recovery.go` | Planned | Pending owning plan task; no success stub |
-| `NewNode` | `node.go` | Planned | Pending lifecycle/recovery tasks |
-| `NewRecovery` | `node_recovery.go` | Planned | Pending lifecycle/recovery tasks |
-| `RecoveryStartOptions` | `node_recovery.go` | Planned | Pending lifecycle/recovery tasks |
-
-## State correspondence
-
-| Record family | Source | Current treatment |
+| Disposition | Meaning | Initial acceptance |
 | --- | --- | --- |
-| Durable/process identities and topology declarations | `topology/identity.go`, `topology/document.go`, `topology/nodes.go` | Typed vocabulary; foundation is unadmitted. |
-| Storage class and hosting | `topology/storage_class.go`, `topology/hosting.go` | Default/memory and optional hosting; backend is node configuration. |
-| Operations / planned steps | `topology/operation.go`, `topology/operator_steps.go` | Typed vocabulary; later tasks supply guards/transitions. |
-| Grants / receipts / fences | `topology/authority_grant.go`, `topology/authority_receipt.go`, `topology/authority_fence.go` | Distinct typed records; no evidence produced yet. |
-| Owner lifecycle | `node_lifecycle.go`, `node_load.go`, `internal/managed` | New/Ready fixture and crash/Starting restart; complete startup/teardown remains Task 7. |
-| Native consensus / observations | `internal/raftengine`, `topology/status.go` | Exact native commit/election/catch-up and per-node application; membership changes arrive in Task 8. |
-| Scheduler | `scheduling/scheduler.go`, `internal/scheduling` | Typed capture/decision; handlers absent (Task 11). |
-| Sessions and locks | `topology/sessions.go`, `node_session.go` | Typed records; transitions absent (Task 12). |
-| Recovery | `recovery/types.go`, `internal/recovery/model/types.go` | Typed phases/evidence; execution absent (Tasks 14–15). |
+| Core | Distinct administrative input/transition that changes management state. | Reachable success/refusal/wait/uncertainty cases as applicable. |
+| Primitive | Reuse a shared protocol mechanism; do not duplicate it for each public wrapper. | Verify the mechanism and meaningful differences in authorization/cancellation. |
+| Observe | Derived output or already-required local observation. | Check freshness boundaries needed by actors; expose useful trace state. No getter/polling machine. |
+| Omit | Accessor, telemetry or presentation mechanics with no relevant protocol effect. | No implementation backlog item; keep the reason here. |
+| Deferred | A real independent feature excluded from v1. | Do not generate it or claim correctness for it. Not a successful stub or a simulated library refusal. |
 
-## Reachability and checks
+## Functional groups and decisions
 
-`foundation::deliveredObservationTest` queues and delivers a local call through the shared Choreo handler. `invalidRequestRefusedTest` proves the call is unanswered before handling and returns Invalid without domain effects. `requestBoundTest` verifies that calls stop at the declared harness limit without reusing request identity. `assumptionsTest` executes domain premises. `safety` checks call structure and absence of authority/domain effects at this checkpoint; `deliveredRequest` counts sampled reachable replies.
+| Group | Keep in the initial model | Remove from initial work |
+| --- | --- | --- |
+| Topology transaction | Stage, immutable approval, exact retry, scope ownership, supersession, uncertain replies. | EnsureGroup and RollbackTo convenience/history workflows. |
+| Cluster and group administration | Admit/readmit, drain/activate/exclude/force-retire, create/delete, exact hosting changes and replica roles/reseating. | Live placement/voter-policy configuration and standalone pin toggles. |
+| Membership and authority | Native quorum, learners/catch-up, transfer, exact grants/fences/receipts, predecessor ownership. | Detailed Raft algorithm and network framing. |
+| Runtime/faults | Retained-storage crash/restart, independent network partitions, stale messages, holds, asynchronous startup/stop/release. | Disk-loss/corruption fault suites, memory-storage semantics and offline disaster recovery. |
+| Automatic work | Supported repair choices, outdated-decision revalidation, independent intent protection, scheduler enablement; metrics always good. | Custom workload-metric policy design, dynamic tuning and custom policy implementation internals. |
+| Sessions | Minimum exact-process session activation/renewal/expiry/revocation required by admission/readiness. | Public manual session workflows and application locks. |
+| Operator visibility | Derived Latest/Target, operations, blocked reasons, native membership, owner/debt/fence state. | Metrics, metrics history, watch delivery, query pagination and getter plumbing. |
+| Labels and placement dimensions | One node type; fixed voter/capacity presets; explicit or all-eligible host sets. | All labels/selectors, AZ domains, reserved/learner-only labels and descriptive label edits. |
 
-## Naming and abstraction notes
+Labels are deferred **as logic**, including paths through Stage, AddNode, CreateGroup and voter config—not just by omitting setters. Empty label/selector maps, no domain policy and one node type are v1 assumptions. Numeric quorum/host limits, exact identity and internal learner/pin safety remain essential.
 
-The target's `action` record field is `kind` because Quint reserves `action`. Process phases follow NodeStatus; operation phases use an `Op` prefix where a constructor would otherwise collide. `PrepareReplica` corresponds to `StepPrepareReplica`, `WaitCatchUp` to `StepWaitCaughtUp`, `PromoteLearner` to `StepPromoteVoter`, `TransferLeadership` to `StepTransferLeader`, `RemoveMember` to `StepRemoveReplica`, and `RetireReplica` to `StepCleanupReplicaState`. These aliases do not yet imply that the effect protocol is implemented.
+Deferring offline Recovery does not defer ReadmitNode, ReseatReplica, retained replay, predecessor stop/retirement or cleanup debt. A permanently missing quorum can remain an expected blocker; v1 makes no claim that it can rebuild the cluster.
 
-No claims are made about deadlock freedom, eventual progress, exhaustive exploration or Go conformance at this checkpoint. The exclusions and future handler tasks are listed in README.md.
+## Method dispositions
 
-## Consensus and environment evidence (Task 3)
+### Core
 
-The smoke3 instance runs the four common tests plus twelve membership/environment tests from `membership_test.qnt`. The initializer represents an established approved/proven cluster, not a successful create/admit API. `commitProgress`, `elect`, `catchUp` and `applyMeta` model the trusted Raft boundary; `crash`, `restart`, `setLink`, `drop` and `duplicate` model the fault environment. No application payloads or Raft wire internals are implemented.
+| Public API | Source | Current evidence | Initial treatment / reason |
+| --- | --- | --- | --- |
+| `Cluster.Stage` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Bounded complete-document edits for core operations only; labels/policy changes are outside v1. |
+| `Cluster.Approve` | `cluster.go` | No method-specific implementation | Immutable approved plan, exact captured scopes and detached deletion debt. |
+| `Cluster.RetryOperation` | `cluster.go` | No method-specific implementation | Exact failed predecessor and at most one successor; preserve uncertain replay. |
+| `Cluster.AddNode` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Fresh identity and mandatory learner-first _meta admission. |
+| `Cluster.ReadmitNode` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Exact returning predecessor, fencing and retirement batch; not offline Rebuild. |
+| `Cluster.DrainNode` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Evacuate loads while retaining _meta membership. |
+| `Cluster.ActivateNode` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Undo drain eligibility; needed to recover a valid management workflow. |
+| `Cluster.ExcludeNode` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Remove a proven drained member without bypassing quorum. |
+| `Cluster.ForceRetireNode` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Explicit degraded-cluster path; retain audit, quorum and cleanup obligations. |
+| `Cluster.SetGroupHosting` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Keep explicit/all-eligible host changes; core relocation without labels. |
+| `Cluster.CreateGroup` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Create on fixed simple hosting/voter presets, including unavailable hosts. |
+| `Cluster.DeleteGroup` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Logical deletion through _meta plus exact detached cleanup debt. |
+| `Cluster.ChangeReplica` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Manual voter/learner role changes through guarded membership. |
+| `Cluster.ReseatReplica` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Atomic approved fresh-ID repair; protect old owner and independent staged intent. |
+| `Node.StartLoadGroup` | `node.go` | No method-specific implementation | Exact local start/hold clearance; reuse shared startup phases. |
+| `Node.StopLoadGroup` | `node.go` | No method-specific implementation | Exact hold distinct from failure or retirement; must not be undone by repair. |
+| `Node.SetSchedulingEnabled` | `node.go` | No method-specific implementation | Scheduler enable/disable as a control input and progress premise. |
 
-`metaFailureDoesNotStopLoadTest`, `loadFailureDoesNotStopMetaTest`, `commitBeforeLocalApplyTest`, `majorityLossDespiteHealthyCacheTest`, `loadMajorityLossTest`, `staleLeaderObservationTest`, `retainedRestartCatchUpTest`, `oldIncarnationMessageTest`, `duplicateDeliveryTest`, `droppedRequestIsNotReplyTest` and `learnerDoesNotVoteTest` demonstrate their named conditions. `membershipFixtureTest` checks the concrete scenario assumptions. Pure learner-certificate input is explicitly adversarial; ordinary scenarios use composed actions.
+### Primitive
 
-The native-service helpers may access global consensus facts as the abstract environment; Choreo handlers only inspect delivered messages and their own local state. No handler consults shared current topology to simulate a fresh read. The target's durable host schema is refined with metaImage/metaIndex for crash-recovered local application and engineRunning for participation independently of handle publication.
+| Public API | Source | Current evidence | Initial treatment / reason |
+| --- | --- | --- | --- |
+| `Cluster.ReadBarrier` | `cluster.go` | No method-specific implementation | One shared quorum-confirmation plus local-apply primitive. |
+| `Cluster.ReadTopology` | `cluster.go` | No method-specific implementation | Reuse confirmed-read primitive and local topology snapshot. |
+| `Cluster.Plan` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Reuse pure makePlan for a staged version; no separate RPC machine. |
+| `Cluster.PlanFor` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Reuse pure makePlan for a candidate; preview cannot authorize effects. |
+| `Cluster.TransferLeader` | `cluster.go` | No method-specific implementation | Reuse transfer request/proof phases; preserve manual transfer grant versus approved-plan authority. |
+| `Node.Start` | `node.go` | No method-specific implementation | Shared Starting → replay/authorization/session → Ready phases. |
+| `Node.WaitReady` | `node.go` | No method-specific implementation | Observe shared readiness; cancellation stops waiting only. |
+| `Node.Stop` | `node.go` | No method-specific implementation | Join shared teardown; timeout/failed release retains ownership. |
+| `Node.RequestStop` | `node.go` | No method-specific implementation | Begin shared teardown separately from successful join. |
+| `Node.LoadSnapshots` | `node.go` | No method-specific implementation | Abstract complete catch-up; omit service accessor, chunks and transfer tuning. |
+| `Node.ReceiveLoadRaft` | `node.go` | No method-specific implementation | Abstract native consensus/network boundary; no per-Raft-message implementation. |
+| `Node.ReadLoadReplica` | `node.go` | No method-specific implementation | Exact native observation/capture used by planner and scheduler. |
+| `Node.ApplyLoadAction` | `node.go` | No method-specific implementation | Core message receiver and exact authorized-effect consumption. |
+| `Node.InstallLoadFence` | `node.go` | No method-specific implementation | Core durable resource fence and acknowledgement. |
+| `Node.ReportLoadDelivery` | `node.go` | No method-specific implementation | Identity/delivery-bound feedback; no transport counters or per-packet model. |
 
-## Pure topology and planning evidence (Task 4)
+### Observe
 
-`topologyChecks` runs 40 cases from topology_test, placement_test and planning_test. It verifies preview purity; captured CAS; typed node/group operations; legacy learner preservation; explicit hosting normalization and duplicate refusal; reserved/learner-only/domain placement; immutable storage and retired IDs; forced audit, dead-predecessor readmission, allocation floors, rollback ancestry and retained identity restoration; founding authority; missing/foreign native observation refusal; logical deletion's detached cleanup; transfer/removal order; same-host replacement; repeated catch-up around removal; and retained stop evidence.
+| Public API | Source | Current evidence | Initial treatment / reason |
+| --- | --- | --- | --- |
+| `Cluster.ReadProgress` | `cluster.go` | No method-specific implementation | Derived progress output; no pages, cursor, attachment or formatting workflow. |
+| `Cluster.ReadAuthority` | `cluster.go` | No method-specific implementation | Derived exact revocation obligations; use confirmed-read primitive where an actor needs freshness. |
+| `Cluster.WaitRevoked` | `cluster.go` | No method-specific implementation | Observe revocation proof; no polling loop or extra state machine. |
+| `Cluster.Rules` | `cluster.go` | No method-specific implementation | Fixed replicated capacity/configuration parameters. |
+| `Cluster.IsLeader` | `cluster.go` | No method-specific implementation | Stale leadership observation, never quorum proof. |
+| `Cluster.Status` | `cluster.go` | No method-specific implementation | Compact derived operator summary of topology, group state and blockers. |
+| `Cluster.HealthObservation` | `cluster.go` | No method-specific implementation | Current modeled availability for repair; performance/stability metric evidence is fixed good. |
+| `Cluster.ParkedJoins` | `cluster.go` | No method-specific implementation | Derived admission blockers for trace diagnosis. |
+| `Cluster.Latest` | `cluster.go` | No method-specific implementation | Existing per-node staged view; no separate getter action. |
+| `Cluster.Target` | `cluster.go` | No method-specific implementation | Existing per-node approved view; no separate getter action. |
+| `Cluster.Operation` | `cluster.go` | No method-specific implementation | Derived immutable attempt/block progress. |
+| `Cluster.WaitOperation` | `cluster.go` | No method-specific implementation | Observe terminal state; caller cancellation cannot undo work. |
+| `Node.Identity` | `node.go` | No method-specific implementation | Existing durable identity plus incarnation fields. |
+| `Node.Status` | `node.go` | Task 1 phase projection | Derived process phase/readiness; phase projection already exercised. |
+| `Node.LoadGroup` | `node.go` | No method-specific implementation | Derived exact published handle identity; no accessor model. |
+| `Node.LoadGroupIDs` | `node.go` | No method-specific implementation | Derived set of published groups. |
+| `Node.ParkedLoads` | `node.go` | No method-specific implementation | Derived exact parked/held-owner reasons. |
+| `Node.OwnSessionLive` | `node.go` | No method-specific implementation | Observe minimum internal session state needed by readiness. |
+| `Node.SchedulingStatus` | `node.go` | No method-specific implementation | Derived scheduler phase/reason and affected group. |
 
-Source correspondence: `topology/{validate,document_rules,placement,placement_selection,hosting,voter_config,plan_scopes,planner,voter_moves,plan_retirement}.go`, `internal/metaservice/{mutations,voter_mutations,mutation_edits,replacement_scope}.go`, and `internal/metaengine/{scoped_stage,repair_document,metadata}.go`. Pure helper separation does not add another state machine. State-changing API dispatch, replicated CAS, approval and execution remain future tasks; the presence of a pure request variant is not counted as an executed API.
+### Omit
+
+| Public API | Source | Current evidence | Initial treatment / reason |
+| --- | --- | --- | --- |
+| `Cluster.Metrics` | `cluster.go` | No method-specific implementation | No topology or authority effect; metrics API is not a model feature. |
+| `Cluster.MetricsHistory` | `cluster.go` | No method-specific implementation | Historical telemetry/pagination adds no core protocol transition. |
+| `Cluster.Get` | `cluster.go` | No method-specific implementation | Omit history lookup API; keep internal history/proof needed for retries and cleanup. |
+| `Cluster.History` | `cluster.go` | No method-specific implementation | Omit history pagination/export; protected evidence remains core state. |
+| `Cluster.Watch` | `cluster.go` | No method-specific implementation | Omit subscriptions/coalescing/backpressure; stale observations remain modeled. |
+| `Node.Watch` | `node.go` | No method-specific implementation | Omit event-stream wrapper; process observations remain available. |
+| `Node.Cluster` | `node.go` | No method-specific implementation | Pure handle accessor with no independent lifetime or transition. |
+| `NewNode` | `node.go` | No method-specific implementation | Configuration/initial-state construction; no separate constructor/DI/I/O test machine. |
+
+### Deferred
+
+| Public API | Source | Current evidence | Initial treatment / reason |
+| --- | --- | --- | --- |
+| `Cluster.ReadLockHolder` | `cluster.go` | No method-specific implementation | Application lock semantics deferred, including linearizable lock queries. |
+| `Cluster.SetPlacement` | `cluster.go` | Task 4 pure helpers; dispatch not implemented; extension work, not v1 obligation | Live placement-rule changes deferred; numeric capacity/voter presets stay fixed. |
+| `Cluster.SetGroupPlacement` | `cluster.go` | Task 4 pure helpers; dispatch not implemented; extension work, not v1 obligation | Selectors, node-type policy and live bound changes deferred. |
+| `Cluster.SetGroupVoterConfig` | `cluster.go` | Task 4 pure helpers; dispatch not implemented; extension work, not v1 obligation | Live policy tuning deferred; fixed target/surge presets and guarded role transitions retained. |
+| `Cluster.SetReplicaPinnedLearner` | `cluster.go` | Task 4 pure helpers; dispatch not implemented; extension work, not v1 obligation | Standalone pin/unpin API deferred; existing/role-derived pins still constrain promotion. |
+| `Cluster.EnsureGroup` | `cluster.go` | No method-specific implementation | Compound convenience/retry-recognition workflow; use CreateGroup/Stage/Approve in v1. |
+| `Cluster.RollbackTo` | `cluster.go` | Task 4 pure helpers; dispatch not implemented; extension work, not v1 obligation | Historical desired-topology workflow deferred; no identity reuse remains a core invariant. |
+| `Cluster.AcquireLock` | `cluster.go` | No method-specific implementation | Application lock ownership is outside the management protocol focus. |
+| `Cluster.LockHolder` | `cluster.go` | No method-specific implementation | Application lock reads deferred with acquisition. |
+| `Node.Recovery` | `node.go` | No method-specific implementation | Offline recovery handle/workflow deferred; ordinary retained restart remains. |
+| `Node.ActivateSession` | `node.go` | No method-specific implementation | Manual API deferred; internal exact-process activation retained. |
+| `Node.KeepAlive` | `node.go` | No method-specific implementation | Manual API/retry behavior deferred; internal renewal/expiry retained abstractly. |
+| `Node.DeactivateSession` | `node.go` | No method-specific implementation | Manual session-pausing/lock-release workflow deferred. |
+| `Node.ServeOverride` | `node.go` | No method-specific implementation | Deferred with serving override controls; v1 uses normal/default serving policy. |
+| `Node.SetServeOverride` | `node.go` | No method-specific implementation | Advanced local override deferred; core authority never bypassed. |
+| `Recovery.Inspect` | `node_recovery.go` | No method-specific implementation | Offline Inspect/accept/archive/import/cancel/history workflow deferred as a unit. |
+| `Recovery.Approve` | `node_recovery.go` | No method-specific implementation | Offline Inspect/accept/archive/import/cancel/history workflow deferred as a unit. |
+| `Recovery.Run` | `node_recovery.go` | No method-specific implementation | Offline Inspect/accept/archive/import/cancel/history workflow deferred as a unit. |
+| `Recovery.Cancel` | `node_recovery.go` | No method-specific implementation | Offline Inspect/accept/archive/import/cancel/history workflow deferred as a unit. |
+| `Recovery.Status` | `node_recovery.go` | No method-specific implementation | Offline Inspect/accept/archive/import/cancel/history workflow deferred as a unit. |
+| `Recovery.List` | `node_recovery.go` | No method-specific implementation | Offline Inspect/accept/archive/import/cancel/history workflow deferred as a unit. |
+| `NewRecovery` | `node_recovery.go` | No method-specific implementation | Offline recovery constructor deferred. |
+| `RecoveryStartOptions` | `node_recovery.go` | No method-specific implementation | Fresh-lineage/reset startup adaptation deferred. |
+
+## State and visibility that must survive simplification
+
+Keep the separation between staged/approved/proven/native/local-observed state, exact member/replica/incarnation, immutable operation attempts, resource fences, partial receipts and per-owner cleanup milestones. Status convenience does not justify dropping these records. Actor decisions still use their own applied/cached views or a modeled fresh-read result; a human trace projection is not permission for an omniscient controller.
+
+Minimum internal sessions remain because `node_lifecycle.go` requires the current identity to be admitted, recovered and SessionLive before readiness. No application lock map or public session API state machine is required for that property.
+
+The default voter scheduler consumes internal metrics in `scheduling/voters.go`/`internal/votercheck`, but the user explicitly chose **metrics always good for this iteration**. Fix replication lag/apply backlog within limits, metric freshness/current collector valid, progress healthy, standby stability satisfied and cooldowns clear. Do not generate lag, no-progress, age/gap or stability-window failures, or implement elapsed-window counters. Crashes/partitions and native quorum remain separate actual conditions. Unavailable-replica repair eligibility is abstracted without detection-window timing; a newly joined replica still needs its successful native catch-up milestone. Decisions captured before a real topology/identity/leadership change must still be revalidated. This does not remove controller deadlock/livelock checks.
+
+Keep sampled and bounded/exhaustive results distinct, explicit unexpected-stuck checks, fair-progress assumptions and negative controls. Removing diagnostics is safe; removing safety evidence would change the protocol under test.
+
+## Existing evidence and migration into the smaller model
+
+Tasks 1–4 and commits through `fa2e8ad` remain completed historical work. The foundation has four tests; smoke3 has 16 core scenarios and the broader topologyChecks suite has 40 tests. Some of the latter cover labels, domain placement, pin setters, policy tuning and rollback, which are now outside v1. Passing them is not evidence that their full workflows were implemented.
+
+On implementation resume, Task 5 will restrict the active request/fault/configuration domains and separate extension-only tests from initial acceptance. Existing helpers can be retained for later work, but no deferred path may re-enter through generic Stage or defaults. The current `.qnt` files and JSON profiles were not changed by this scope review.
+
+The source baseline remains `e8e85dbd7879b1c858252cd2a6126a36920f8a8e`. Exact behavior and earlier validation evidence are recorded in [the execution log](../../docs/progress/20261027-quint-cluster-management.md). Full design history before this scope revision is retained in Git; the [target](../../docs/brainstorms/20261027-quint-cluster-management-target.md) and [plan](../../docs/plans/20261027-quint-cluster-management.md) now define initial acceptance.

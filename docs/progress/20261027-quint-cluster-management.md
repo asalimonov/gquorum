@@ -59,3 +59,15 @@ Verified:
 - Current model/profile source hashes were compared against the passing full test report; all match. Document links, fences and whitespace checked. No Go tests or exhaustive model checking claimed.
 
 User requested: “Pause after finishing the current task.” Task 4 is finished and committed with this entry. Pause before Task 5; Tasks 5–22 remain unchecked. The concurrent docs/project.md edit is preserved outside this commit. The full goal remains unfinished.
+
+## Scope revision while paused — 2026-10-27
+
+User requested a grouped review of coverage.md to remove redundant model work and defer labels/other features. User approved “Lean management scope; defer offline recovery,” then required metrics always good with no lag/stability issues this iteration.
+
+Documentation now classifies all 82 methods: 17 Core controls, 15 shared Primitives, 19 Observe projections, 8 Omit wrappers/diagnostics and 23 Deferred feature methods. Labels are excluded from every active input path. Live policy tuning, EnsureGroup/RollbackTo, manual sessions/application locks, serving override, storage-loss/memory/custom-store and offline Recovery are outside v1. Minimum internal sessions, actual availability/native quorum, ownership/fencing, returning-node readmission and cleanup remain core.
+
+Performance metric inputs are fixed favorable: lag/backlog within limits, no no-progress failure, freshness/current collector valid, stability satisfied and cooldowns clear. Availability-driven repair has no elapsed detection-window timing. Successful native catch-up milestones and revalidation after actual topology/identity/leadership changes remain; management deadlock/livelock is still checked.
+
+The plan is revised from 22 to 18 tasks: Tasks 1–4 remain historical completed work; Tasks 5–18 remain pending. Full sessions/read-API work is folded into existing primitives; old Tasks 13–15 (storage/offline recovery) are deferred. Old Tasks 16–22 become 12–18. Substantive profiles decrease from nine to six, plus foundation. Resume at revised Task 5, beginning with scope assertions/request generation and separation of extension-only tests.
+
+This was documentation-only analysis. Executable .qnt/Python/profile files were not changed, implementation was not resumed, and no model test/verification claim was rerun. Existing broad Task 4 tests remain on disk until Task 5 normalizes scope. The concurrent user edit in docs/project.md remains untouched.

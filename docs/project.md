@@ -4,6 +4,8 @@
 
 1. Re-read `## Design constraints` section in `./docs/architecture/library.md` before brainstorm, design of the target architecture and code review
 2. Ask user for review and approval for cases which can violate design constraints but looks correct or needed.
+3. The target architecture shouldn't leave technical debt in the project. Need to reveal and highlight all cases which are not coverted
+   and lead to read defects. When fix of the tech-debt is small - add to the target architecture. When it is to big - add to "NOT COSIDERED" section with tag `tech-debt`.
 
 ## Documentation rules
 
