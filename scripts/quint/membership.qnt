@@ -34,6 +34,12 @@ module membership {
   pure def communicates(links: Set[(NodeName, NodeName)], a: NodeName, b: NodeName): bool =
     a == b or (links.contains((a, b)) and links.contains((b, a)))
 
+  pure def readableIdentity(nodes: NodeStates, key: ReplicaKey): bool =
+    if (not(liveIdentity(nodes, key))) false else if (key.group == "_meta") true else {
+      val owner = nodes.get(key.node).volatile.owners.get(key.group)
+      owner.published and owner.replayReady and owner.startupAuthorized and owner.phase == OwnerReady
+    }
+
   pure def certificate(c: ConsensusState, nodes: NodeStates,
                        links: Set[(NodeName, NodeName)], leader: ReplicaKey): Set[ReplicaKey] =
     if (not(c.voters.contains(leader)) or not(liveIdentity(nodes, leader))) Set()
@@ -47,4 +53,20 @@ module membership {
 
   pure def linksFor(net: NetworkState, group: GroupId): Set[(NodeName, NodeName)] =
     if (group == "_meta") net.metaLinks else net.loadLinks
+
+  pure def persistCertificate(nodes: NodeStates, voters: Set[ReplicaKey], position: int): NodeStates =
+    voters.fold(nodes, (current, r) => {
+      val node = current.get(r.node)
+      val evidence = node.durable.replicaEvidence.get(r)
+      val updated = match evidence {
+        | ValidStore(p) => ValidStore({ ...p, commit: position, tail: position })
+        | _ => evidence
+      }
+      current.put(r.node, { ...node, durable: { ...node.durable,
+        replicaEvidence: node.durable.replicaEvidence.put(r, updated) } })
+    })
+
+  pure def committed(c: ConsensusState, voters: Set[ReplicaKey], position: int): ConsensusState =
+    { ...c, committedPosition: position,
+      catchUp: c.catchUp.keys().mapBy(r => if (voters.contains(r)) CaughtUp else Behind) }
 }

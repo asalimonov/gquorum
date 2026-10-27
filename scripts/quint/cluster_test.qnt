@@ -5,10 +5,33 @@ module cluster_test {
   export cluster.*
   import properties.* from "./properties"
 
-  val safety = callsWellFormed(world) and
+  val safety = initialScope(world) and callsWellFormed(world) and metadataWellFormed(world) and
     (if (FOUNDERS.keys().size() == 0) foundationHasNoEffects(world) else consensusWellFormed(world))
   val deliveredRequest = world.system.keys().exists(n =>
-    world.system.get(n).volatile.pendingCalls.values().exists(c => c.phase == Replied))
+    world.system.get(n).volatile.pendingCalls.values().exists(c => c.phase == Replied and not(c.waiterCancelled)))
+  pure val scopeOptions: MutationOptions = {
+    expectedVersion: 1, audit: { actor: "operator", comment: "scope", forced: None },
+    preview: false, approve: false,
+  }
+  run stageScopeEnforcedAtInvocationTest = {
+    nondet node = NODE_POOL.oneOf()
+    init.then({
+      val doc = world.system.get(node).volatile.localView.latest
+      invoke(node, Mutate({ edit: StageDocument({ ...doc,
+        placement: { ...doc.placement, selector: Map("az" -> "x") } }), options: scopeOptions })).fail()
+    })
+  }
+  run admissionScopeEnforcedAtInvocationTest = {
+    nondet node = NODE_POOL.oneOf()
+    init.then(invoke(node, Mutate({ edit: AddNode({ name: "n4", member: 0, state: Active,
+      nodeType: "worker", labels: Map("az" -> "x") }), options: scopeOptions })).fail())
+  }
+  run creationScopeEnforcedAtInvocationTest = {
+    nondet node = NODE_POOL.oneOf()
+    init.then(invoke(node, Mutate({ edit: CreateGroup({ id: "c", labels: Map("az" -> "x"),
+      storage: StorageDefault, placement: None, nodes: None, hosting: None, voterConfig: None }),
+      options: scopeOptions })).fail())
+  }
   run assumptionsTest = and {
     NODE_POOL.size() > 0, MAX_REQUESTS >= 1, MAX_POSITION >= 1,
     MAX_INCARNATION >= 1, MAX_DELIVERIES >= MAX_REQUESTS,

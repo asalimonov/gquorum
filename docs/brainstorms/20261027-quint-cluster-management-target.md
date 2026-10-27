@@ -1,7 +1,7 @@
 # Target design: initial Quint cluster-management model
 
 **Scope revision:** 2026-10-27. User approved “Lean management scope; defer offline recovery” and then specified that metrics are always good: no lag/stability issues in this iteration.
-**Implementation:** paused after Tasks 1–4. This document defines the reduced initial deliverable; it does not claim that it is implemented or verified.
+**Implementation:** Tasks 1–5 complete; Tasks 6–18 remain. This document defines the reduced initial deliverable; it does not claim that it is implemented or verified.
 **Method disposition:** [coverage ledger](../../scripts/quint/coverage.md).
 **Execution plan:** [implementation plan](../plans/20261027-quint-cluster-management.md).
 **Discussion:** [brainstorm log](20261027-quint-cluster-management.md).
@@ -85,11 +85,15 @@ AttemptKey = { version, attempt }
 EffectKey = { operation, step, kind, target, grantRevision }
 EffectTarget = GroupTarget(group) | ReplicaTarget(ReplicaKey)
 RequestKey = { caller: ProcessKey, sequence }
-MutationOptions = { expectedVersion, actor, comment, preview, approve }
-CallState = { capturedRequest, phase, result, waiterCancelled }
+ProposalKey = { request: RequestKey, sequence }
+ReadTicket = { owner: ProcessKey, request: RequestKey, proposal, round }
+Audit = { actor, comment, forced }
+MutationOptions = { expectedVersion, audit: Audit, preview, approve }
+CallState = { request, phase, result, waiterCancelled, readIndex, command,
+              proposalSequence, commitIndex, commitOutcome, stagedVersion, operationRequest }
 ```
 
-Preserve actual CAS, audit and exact predecessor arguments across uncertain replay. Convenience ExpectedVersion=0 captures local Latest; Stage's explicit expected-version argument retains its own semantics. Refusals and indeterminate replies are observable call outcomes. Caller cancellation never rolls back a committed effect.
+Bind each confirmed-read round to its exact process/request and distinguish the later metadata recapture from the initial read. Preserve actual CAS, audit and exact predecessor arguments across uncertain replay. Convenience ExpectedVersion=0 captures local Latest; Stage's explicit expected-version argument retains its own semantics. Refusals and indeterminate replies are observable call outcomes. Caller cancellation never rolls back a committed effect.
 
 ### 5.3 Topology and fixed policy
 
@@ -101,7 +105,7 @@ Stage accepts bounded complete documents representing combinations of **in-scope
 
 ### 5.4 Local state and minimum sessions
 
-Keep node process phase/incarnation, locally applied metadata index/view, exact captured topology/native facts, pending calls, local owner reservations and scheduler capture. Durable host state retains pin, valid replica evidence, metadata replay image/index, authority floors, effect/fence receipts and collection markers.
+Keep node process phase/incarnation, locally applied metadata index/view, exact captured topology/native facts, pending calls, leader-side operation work, local owner reservations and scheduler capture. Operation work separates the initial confirmed metadata read, native membership read, availability observation, metadata recapture, immutable proposal and reply. Durable host state retains pin, valid replica evidence, metadata replay image/index, authority floors, effect/fence receipts and collection markers.
 
 Owner state separates engine participation, replay readiness, authorization, handle publication, hold, stop request, actual join and application release. Delayed/failed callbacks or Close retain ownership. Represent callbacks as bounded pending/success/failure outcomes; no application implementation, DI system or thread scheduler is needed.
 
@@ -123,7 +127,7 @@ Keep per-group operation owners, block/step state, first attempts, immediate ret
 
 Keep removed/stopped/retired/collected milestones with exact proof and identity. Collection preparation, physical effect, durable completion, report and exact marker release remain distinct where a process crash can expose their ordering. Retention is an abstract eligibility condition, not a configurable retention-policy implementation.
 
-Logical deletion can finish through `_meta` while an offline owner retains cleanup debt. Returning-owner readmission must fence/join/retire its predecessor and report the required exact batch before successor readiness. Missing files, a fresh member ID or a bare verified flag are never completion proof. Offline disaster recovery/fresh-lineage rebuild is a separate deferred feature.
+Approval retains exact planned stop/retirement actions before execution grants exist. Cleanup debt distinguishes those immutable obligations from optional issued grant keys and actual receipts. Logical deletion can finish through `_meta` while an offline owner retains cleanup debt. Returning-owner readmission must fence/join/retire its predecessor and report the required exact batch before successor readiness. Missing files, a fresh member ID or a bare verified flag are never completion proof. Offline disaster recovery/fresh-lineage rebuild is a separate deferred feature.
 
 ### 5.8 Network and fault state
 
@@ -138,6 +142,7 @@ Do not inject lost/corrupt stores or memory loss in initial profiles. Loss of a 
 | `types.qnt` | Core records; deferred fields fixed/isolated and excluded from active request domains. |
 | `topology.qnt`, `placement.qnt`, `planning.qnt` | Validate/transform in-scope documents and build immutable plans. Labels/policy extensions are not v1 acceptance. |
 | `membership.qnt` | Commit paths, learner/promotion/removal/transfer and native observation boundaries. |
+| `reads.qnt`, `transactions.qnt`, `operations.qnt`, `repair.qnt` | Pure shared reads, call/CAS sequencing, leader planning and atomic repair/rebase rules used by the single composition. |
 | `authority.qnt` | Approval/retry, scope ownership, grants/fences/receipts and supersession. |
 | `lifecycle.qnt` | Start/replay/publication/holds/stop/join/release, minimum internal session gates, retirement/collection. |
 | `scheduler.qnt` | Supported availability/target-count repairs and revalidation/CAS with fixed good metrics. |
@@ -264,7 +269,7 @@ The six substantive profiles replace the previous nine; foundation remains a boo
 
 Preserve completed Tasks 1–4. Continue with scope normalization plus CAS/approval (5), authority (6), local ownership/minimum sessions (7), membership/scaling (8), create/delete (9), cleanup/readmission (10), scheduler (11), core API/visibility coverage (12), progress/backend calibration (13), profile/negative-control qualification (14), Make/report integration (15), architectural delta (16), external review (17), and documentation/gap closure (18).
 
-Acceptance requires all 82 entries classified, retained actions/mechanisms exercised, core degraded cases reachable, selected safety/progress checks completed at reported bounds, negative controls effective, scope assumptions enforced and useful trace output. It does not require implementing Deferred/Omit entries. The full implementation remains paused until the user resumes it.
+Acceptance requires all 82 entries classified, retained actions/mechanisms exercised, core degraded cases reachable, selected safety/progress checks completed at reported bounds, negative controls effective, scope assumptions enforced and useful trace output. It does not require implementing Deferred/Omit entries. Implementation is in progress; this acceptance gate remains unsatisfied.
 
 ## 13. Evidence and future expansion
 
@@ -296,6 +301,8 @@ reply with retained version/operation; cancellation changes only waiter state
 ```text
 if retained first attempt exists for requested version:
     return it if exact replay matches; otherwise conflict
+confirm/apply metadata, collect native membership and availability separately,
+confirm/apply metadata again and compare the affected scope captures
 validate current staged version, complete immutable plan, scope captures,
          identities, placement, admission and all evidence prerequisites
 prepare candidate ownership and exact resource revocations
@@ -435,4 +442,4 @@ if waiter cancels, stop waiting without undoing an already committed command
 | [potential-improvement] | Strict global operation gate | Preserve implemented scoped baseline. |
 | [too-complex] | Concrete Raft, payload semantics, byte-level/OS/crypto verification | Abstract only the boundary needed for core properties. |
 
-**[tech-debt, required in Task 5] Scope normalization:** the current executable prototype still contains broader schemas/helpers and default test selections. Documentation alone cannot establish the reduced scope. Add executable scope assertions, restrict generation, separate extension-only tests and remove initial-profile activation of deferred features before making v1 verification claims. This is known integration work to finish, not a new deferred product feature.
+**[resolved in Task 5] Scope normalization:** executable invocation/safety checks constrain active features, and coreChecks explicitly selects retained tests. Broader schemas/helpers remain inert or available through the separate historical test entry point. Later modules must preserve these restrictions; complete v1 verification remains pending.

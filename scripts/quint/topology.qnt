@@ -305,14 +305,16 @@ module topology {
           | Some(reason) => reason.node != "" and reason.reason != "" and changed.audit.actor != ""
           | None => true
         }
-        val inventory = retainedIdentities(input.view)
+        val repairGroup = match request.edit { | ReseatReplica(key) => Some(key.group) | _ => None }
+        val inventory = if (repairGroup != None) input.view.target else retainedIdentities(input.view)
         val floorsValid = changed.groups.values().forall(g => {
           val floor = input.replicaFloors.getOrElse(g.id, 1)
-          g.nextReplica >= floor and g.replicas.forall(r => r.key.replica >= floor or
+          (g.nextReplica >= floor or (repairGroup != None and repairGroup != Some(g.id))) and
+            g.replicas.forall(r => r.key.replica >= floor or
             (if (inventory.groups.keys().contains(g.id)) inventory.groups.get(g.id).replicas.exists(old =>
               old.key.node == r.key.node and old.key.replica == r.key.replica) else false))
         })
-        P::validateTransition(retainedIdentities(input.view), changed, input.retired, input.rules).union(selected)
+        P::validateTransition(inventory, changed, input.retired, input.rules).union(selected)
           .union(if (placementValid and forcedValid and floorsValid and changed.parent < changed.version) Set() else Set(Invalid))
       }
     }

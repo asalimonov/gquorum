@@ -5,6 +5,8 @@ module types {
   type GroupId = str
   type ProcessKey = { node: NodeName, incarnation: int }
   type RequestKey = { caller: ProcessKey, sequence: int }
+  type ProposalKey = { request: RequestKey, sequence: int }
+  type ReadTicket = { owner: ProcessKey, request: RequestKey, proposal: Option[int], round: int }
   type ReplicaKey = { cluster: str, group: GroupId, node: NodeName, member: int, replica: int }
   type DurableNodeIdentity = { cluster: str, node: NodeName, member: int }
   type AttemptKey = { version: int, attempt: int }
@@ -84,6 +86,14 @@ module types {
     version: int, blocks: GroupId -> List[PlannedStep], cleanup: GroupId -> List[PlannedStep],
     sources: GroupId -> int, dependencies: Set[(int, int)],
   }
+  type ApprovedAction = { operation: AttemptKey, step: PlannedStep }
+  type ScopeExpectation = { sourceVersion: int, owner: Option[AttemptKey] }
+  type ApprovalCommand = {
+    desired: Document, plan: Plan, scopes: GroupId -> ScopeExpectation,
+    captured: PlanningInput, origin: Origin, audit: Audit,
+  }
+  type RetryCommand = { previous: AttemptKey, scopes: GroupId -> ScopeExpectation }
+  type RepairCommand = { request: MutationRequest, expectedTarget: int, approval: ApprovalCommand }
   type OperationPhase = OpPending | OpRunning | WaitingReplica | WaitingCatchUp
     | WaitingLeader | OpSucceeded | OpFailed | Superseded
   type BlockReason = NoQuorum | HostOffline | CatchUpRequired | LeaderRequired
@@ -105,7 +115,9 @@ module types {
   type RetentionClass = Retain | EligibleForCollection
   type CleanupDebt = {
     identity: ReplicaKey, sourceOperation: AttemptKey, storage: StorageClass,
-    stopGrant: GrantKey, stopped: Option[Receipt], retired: Option[Receipt],
+    // Approval retains exact obligations before any execution grant is issued.
+    stopAction: Option[ApprovedAction], retireAction: Option[ApprovedAction],
+    stopGrant: Option[GrantKey], stopped: Option[Receipt], retired: Option[Receipt],
     collected: Option[Receipt], retention: RetentionClass, collectionPhase: CollectionPhase,
   }
   type CollectionState = {
@@ -122,6 +134,8 @@ module types {
     revocations: GrantKey -> Revocation, cleanup: ReplicaKey -> CleanupDebt,
     memberAllocationFloor: int, replicaAllocationFloors: GroupId -> int,
     retiredGroupIds: Set[GroupId], sessions: SessionKey -> Session, locks: str -> SessionKey,
+    // Exact semantic request provenance, independent of a transport call ID.
+    stagedIntents: int -> MutationRequest,
   }
   type CatchUpClass = Behind | CaughtUp | CatchUpUnknown
   type NativeChange = { kind: ActionKind, target: ReplicaKey, sourceConfig: int }
@@ -178,7 +192,7 @@ module types {
   }
   type ProcessPhase = New | Starting | Ready | Fenced | Stopping | Stopped | Failed
   type Refusal = Invalid | Conflict | Unavailable | UnsafeMembership | Unauthorized
-    | IdentityMismatch | NotFound | Unsupported | CapacityExceeded
+    | IdentityMismatch | NotFound | Unsupported | CapacityExceeded | WaitCancelled
   type Rules = {
     maxNodes: int, maxReplicas: int, concurrentGroups: int, concurrentCleanup: int,
     nodeOrder: List[NodeName], groupOrder: List[GroupId],
@@ -215,12 +229,33 @@ module types {
   type RetainedPhase = RetainedHosted | RetainedStopped | RetainedCleanup
   type PlanResult = Planned(Plan) | PlanRejected(Set[Refusal])
   type PreviewResult = { document: Option[Document], plan: Option[Plan], errors: Set[Refusal] }
-  // Mutation handlers arrive in Task 5. Their presence as values is not execution.
-  type ApiRequest = ObserveLocal | InvalidRequest | Mutate(MutationRequest)
+  type MutationOutcome = {
+    staged: Option[int], operation: Option[AttemptKey], rebasedTo: Option[int], errors: Set[Refusal],
+  }
+  type StageCommand = { request: MutationRequest, desired: Document }
+  type MetaCommand = StageProposal(StageCommand) | ApprovalProposal(ApprovalCommand)
+    | RetryProposal(RetryCommand) | RepairProposal(RepairCommand)
+  type OperationRequest = ApproveVersion(int) | RetryAttempt(AttemptKey) | RepairRequest(MutationRequest)
+  type ApiRequest = ObserveLocal | InvalidRequest | ConfirmedRead | Mutate(MutationRequest) | Operate(OperationRequest)
   type ApiResult = Observed(ProcessPhase) | Refused(Refusal) | Indeterminate
-  type CallPhase = Captured | Submitted | Committed | Replied
+    | ConfirmedView({ index: int, applied: int, view: ReadView })
+    | MutationResult(MutationOutcome) | Previewed(PreviewResult)
+  type CallPhase = Captured | PreparingCall | PreparedCall | Submitted | AwaitingReadApply
+    | Committed | AwaitingApproval | WaitingOperation | Replied
   type CallState = {
     request: ApiRequest, phase: CallPhase, result: Option[ApiResult], waiterCancelled: bool,
+    readIndex: Option[int],
+    command: Option[MetaCommand], proposalSequence: int, commitIndex: Option[int],
+    commitOutcome: Option[MutationOutcome], stagedVersion: Option[int],
+    operationRequest: Option[OperationRequest],
+  }
+  type WorkPhase = WorkReading | WorkReadQueued | WorkApplying | WorkObserving | WorkPrepared | WorkSubmitted | WorkCommitted | WorkFinished
+  type OperationWork = {
+    request: OperationRequest, phase: WorkPhase, readIndex: Option[int],
+    captured: Option[MetadataState], desired: Option[Document], input: Option[PlanningInput],
+    queried: Set[GroupId], revalidated: bool, readRound: int,
+    scopes: GroupId -> ScopeExpectation, command: Option[MetaCommand],
+    commitIndex: Option[int], result: Option[MutationOutcome], replySent: bool,
   }
   type ProcessState = {
     phase: ProcessPhase, incarnation: int, pendingCalls: RequestKey -> CallState,
@@ -228,6 +263,7 @@ module types {
     observations: GroupId -> Observation, owners: GroupId -> OwnerState,
     session: Option[SessionKey], schedulerEnabled: bool, serveOverride: int,
     schedulerCapture: Option[SchedulerCapture],
+    operationWork: ProposalKey -> OperationWork,
   }
   type HostState = {
     pin: Option[DurableNodeIdentity], replicaEvidence: ReplicaKey -> StorageEvidence,
@@ -239,6 +275,11 @@ module types {
   type LocalNode = { process_id: NodeName, volatile: ProcessState, durable: HostState }
   type NodeStates = NodeName -> LocalNode
   type ManagementMessage = ApiCall({ key: RequestKey, request: ApiRequest })
+    | ReadProbe(ReadTicket) | ReadAck({ ticket: ReadTicket, index: int })
+    | MetaProposal({ key: ProposalKey, coordinator: ProcessKey, forWork: bool, command: MetaCommand })
+    | MetaAck({ key: ProposalKey, coordinator: ProcessKey, forWork: bool, index: int, outcome: MutationOutcome })
+    | OperationCall({ key: ProposalKey, request: OperationRequest })
+    | OperationAck({ key: ProposalKey, outcome: MutationOutcome })
   type Channel = MetaChannel | LoadChannel
   type Envelope = {
     delivery: int, source: ProcessKey, destination: NodeName,

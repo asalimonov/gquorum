@@ -7,9 +7,11 @@
 **Source baseline:** `e8e85dbd7879b1c858252cd2a6126a36920f8a8e`
 **Target architecture:** [target](../brainstorms/20261027-quint-cluster-management-target.md)
 **Target SHA-256 at scope revision:** `ef805050edbda81419326482776bf27bf06a1046f85de84c8e590749c3847873`
+**Target SHA-256 at Task 5 checkpoint:** `0b4997c5fa252b5ad298de7d63f4cab9a02d7b137b79b7b499dc3aff3bb64ea8`
 **Full brainstorm log:** [discussion](../brainstorms/20261027-quint-cluster-management.md)
 **Execution progress:** `docs/progress/20261027-quint-cluster-management.md`
-**Status:** paused after Tasks 1–4, committed through `fa2e8ad`. Resume at revised Task 5 only when the user resumes implementation. Four completed tasks and fourteen remaining tasks; eighteen total.
+**Library scenario findings:** `docs/reports/20261027-quint-cluster-management.md`
+**Status:** Tasks 1–5 completed; continue at Task 6. Five completed tasks and thirteen remaining tasks; eighteen total. Validation and implementation details are in the execution log.
 
 ## Revised objective and execution contract
 
@@ -45,16 +47,18 @@ This reduces remaining tasks from **18 to 14** and substantive profiles from **9
 
 ## Common validation
 
-After model changes, typecheck all active initial instances, run all retained deterministic tests and seeded smoke3 safety simulation. Preserve existing completed checks during the transition; Task 5 explicitly separates extension-only tests rather than silently skipping retained failures. Every profile checks scope assumptions and actual executable bounds.
+Use cheap typechecks during editing. Per the user’s 2026-10-27 instruction, batch roughly 4–6 times more implementation work between `quint test` runs than the previous small-patch cadence; run deterministic suites after significant changes and at task validation, not after each helper. At the task checkpoint, typecheck all active initial instances, run all retained deterministic tests and seeded smoke3 safety simulation. Preserve existing completed checks during the transition; Task 5 explicitly separates extension-only tests rather than silently skipping retained failures. Every profile checks scope assumptions and actual executable bounds.
 
 For runner changes, run its complete unit suite, syntax check and real profile smoke. Fix failures in the suites run and log unrelated fixes. Go/race/Docker/Gosim/performance suites are not blanket checks for model-only changes. If an authorized deviation touches Go/shared tooling, apply the repository's relevant checks and report it.
+
+Per the user’s reporting instruction, failures in implemented library scenarios that are fully represented within the agreed abstraction must be recorded in `docs/reports/20261027-quint-cluster-management.md`. Confirm source-to-model correspondence first; include the violated property, exact scenario/trace, Go paths, revisions/hashes, bounds, command/seed, assumptions and a manual Go regression recipe. Preserve confirmed counterexamples and do not weaken properties to make checks pass. Distinguish source-faithful counterexamples from model/fixture defects, artificial bound exhaustion and expected availability blockers. Report actual failed verification outcomes; a reproduced library finding is not a passing safety check.
 
 ## Task overview
 
 | Task | Deliverable | State |
 | --- | --- | --- |
 | 1–4 | Foundation, runner, consensus/network, pure topology/planning | Completed historical checkpoint |
-| 5 | Enforce lean domains and wire CAS/approval/retry | Pending |
+| 5 | Enforce lean domains and wire CAS/approval/retry | Completed |
 | 6 | Exact effects/fences/receipts/revocation | Pending |
 | 7 | Local ownership/lifecycle and minimum internal sessions | Pending |
 | 8 | Native membership and 3–5-node scaling | Pending |
@@ -145,20 +149,20 @@ For runner changes, run its complete unit suite, syntax check and real profile s
 
 ### Task 5: Enforce initial scope and wire CAS, approval and exact retries
 
-**Files:** active types/handlers/cluster/topology/properties, profile/test entry points, README/coverage (updated); authority.qnt and authority tests (new).
+**Files:** active types/handlers/cluster/topology/properties, profile/test entry points, README/coverage (updated); authority/reads/transactions/operations/repair/scope modules and tests (new).
 **References:** target §§1–6, §§8.1/8.7/10/12; §14 mutateAndMaybeApprove, approvePlan, retryOperation, quorumRead.
 
-- [ ] Add executable v1 scope assertions and request/configuration-domain checks: empty labels/selectors, no domain policy, one node type, fixed voter presets, always-good performance/stability/metric-freshness evidence, retained owned WAL, no lock/offline-recovery/manual-session/override/convenience-policy actions. Restrict generic Stage and creation inputs too; out-of-scope scenarios are harness exclusions, not simulated library refusals.
-- [ ] Separate Task 4 extension-only label/policy/pin-setter/rollback tests from required initial test entry points. Retain their history/code if useful without creating new extension implementation work. Update expected test lists and stale task references; do not suppress any retained-core failure.
-- [ ] Wire capture→submit→commit→local apply→reply/cancel/retry and the shared confirmed-metadata-read primitive. Capture convenience CAS once; preserve Stage's explicit CAS and original audit/predecessors across uncertain replay.
-- [ ] Implement guarded approve/retry with immutable plans, exact group scopes, first-attempt replay, one immediate failed-attempt successor and affected-block supersession. Stage success followed by approval failure preserves its staged version.
-- [ ] Wire ReseatReplica's distinct atomic repair/approval and independent-intent handling; never route it through an invented ordinary two-commit workflow. Leave physical revocation obligations for Task 6.
+- [x] Add executable v1 scope assertions and request/configuration-domain checks: empty labels/selectors, no domain policy, one node type, fixed voter presets, always-good performance/stability/metric-freshness evidence, retained owned WAL, no lock/offline-recovery/manual-session/override/convenience-policy actions. Restrict generic Stage and creation inputs too; out-of-scope scenarios are harness exclusions, not simulated library refusals.
+- [x] Separate Task 4 extension-only label/policy/pin-setter/rollback tests from required initial test entry points. Retain their history/code if useful without creating new extension implementation work. Update expected test lists and stale task references; do not suppress any retained-core failure.
+- [x] Wire capture→submit→commit→local apply→reply/cancel/retry and the shared confirmed-metadata-read primitive. Capture convenience CAS once; preserve Stage's explicit CAS and original audit/predecessors across uncertain replay.
+- [x] Implement guarded approve/retry with immutable plans, exact group scopes, first-attempt replay, one immediate failed-attempt successor and affected-block supersession. Stage success followed by approval failure preserves its staged version.
+- [x] Wire ReseatReplica's distinct atomic repair/approval and independent-intent handling; never route it through an invented ordinary two-commit workflow. Leave physical revocation obligations for Task 6.
 
 #### Verification
 
-- [ ] Scope tests show deferred data cannot enter active init/step through direct setters, Stage, AddNode or CreateGroup. Initial profiles select only retained-core evidence.
-- [ ] Common checks plus stale CAS, partial stage success, lost replies, exact approval/retry and disjoint-owner cases pass. A confirmed read waits for local apply; an observation does not grant authority.
-- [ ] Current profile bounds and source hashes match reports; no second cluster instantiation or fabricated success stub appears.
+- [x] Scope tests show deferred data cannot enter active init/step through direct setters, Stage, AddNode or CreateGroup. Initial profiles select only retained-core evidence.
+- [x] Common checks plus stale CAS, partial stage success, lost replies, exact approval/retry and disjoint-owner cases pass. A confirmed read waits for local apply; an observation does not grant authority.
+- [x] Current profile bounds and source hashes match reports; no second cluster instantiation or fabricated success stub appears.
 
 ### Task 6: Enforce effect authority, resource fences and receipts
 
@@ -169,6 +173,7 @@ For runner changes, run its complete unit suite, syntax check and real profile s
 - [ ] Preserve group-wide versus host resources, effect/readmission receipts versus fence evidence, and manual transfer grants versus approved-step authority. Reuse primitives without erasing these semantic differences.
 - [ ] Keep revocation requested versus proven complete separate. Retain every required resource obligation across logical operation completion and unreachable hosts.
 - [ ] Replay exact durable receipts idempotently; refusal, partial acknowledgement or transfer-start cannot prove completion. Exercise stale sender/incarnation/delivery/receipt paths.
+- [ ] Extend failed-before-effect retry validation to the immutable remaining native plan and consumed receipt prefix; retain completed siblings and revoke outstanding predecessor effects before successor consumption.
 
 #### Verification
 
@@ -427,13 +432,13 @@ Deferred cases need scope comments/documentation, not new production NotImplemen
 
 ## NOT PLANNED CHANGES
 
-Task 1 used `kind` because Quint reserves `action` and used Choreo pure helpers over one application-owned world. Tasks 3–4 refined source-grounded state/placement/plan schemas; see the execution log and target history. This scope revision is explicitly user-approved, not an unplanned implementation change. No executable model or production files changed in this review.
+Task 1 used `kind` because Quint reserves `action` and used Choreo pure helpers over one application-owned world. Tasks 3–4 refined source-grounded state/placement/plan schemas; see the execution log and target history. This scope revision is explicitly user-approved, not an unplanned implementation change. No executable model or production files changed in the scope-review step. Task 5 subsequently added pure sequencing/repair helpers and the read/proposal correlation fields required by the source. It also corrected reseat validation of independent staged allocation floors and kept hosted-node normalization in core tests using a fixed policy fixture. Production Go remains unchanged.
 
 ## NOT IMPLEMENTED GAPS
 
-- [ ] [tech-debt] Scope normalization: current executable profiles still include broader Task 4 tests/helpers. Revised Task 5 must enforce lean domains and separate extension-only tests before initial-scope verification claims. This is required integration work, not a deferred core defect.
+- [x] Scope normalization completed in Task 5: executable feature guards/safety assumptions, explicit retained-core test imports, and separate extension-only tests. Later task machinery must retain these assumptions.
 
-Implementation remains incomplete and paused. Deferred/Omit features are not hidden unfinished tasks.
+Implementation remains incomplete; Tasks 6–18 remain. Task 5 completion does not imply native effect, lifecycle, scheduler or progress-verification completion. Deferred/Omit features are not hidden unfinished tasks.
 
 ## Scope-review validation
 

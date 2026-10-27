@@ -95,9 +95,10 @@ module topology_test {
   }
 
   run typedHostingSortsButRejectsDuplicatesTest = {
-    val config = { ...F::config, target: 2 }
-    val configured = T::mutateDocument(input, request(SetGroupVoterConfig({ group: "a", config: config })))
-    val context = { ...input, view: { latest: { ...configured, version: 1 }, target: configured } }
+    // A fixed initial preset; this core hosting check does not activate live policy tuning.
+    val configured = { ...base, groups: base.groups.setBy("a", g => { ...g,
+      voterConfig: Some(T::defaultVoterConfig), hosting: Some({ mode: AllEligible, selectedNodes: List() }) }) }
+    val context = { ...input, view: { latest: configured, target: configured }, groups: I::metadata(configured).groups }
     val req = request(SetGroupHosting({ group: "a", hosting: { mode: ExplicitHosts, selectedNodes: List("n2", "n1") } }))
     val changed = T::mutateDocument(context, req)
     all {
@@ -132,7 +133,8 @@ module topology_test {
   }
 
   run reseatUsesApprovedIntentAndBothFloorsTest = {
-    val staged = { ...base, version: 2, groups: base.groups.setBy("b", g => { ...g, labels: Map("new" -> "intent") }) }
+    val staged = { ...base, version: 2, groups: base.groups.setBy("b", g => { ...g,
+      replicas: g.replicas.map(r => if (r.key.node == "n3") { ...r, role: Learner } else r) }) }
     val context = { ...input, view: { latest: staged, target: base }, replicaFloors: input.replicaFloors.put("a", 7) }
     val key = I::replica(Map("n1" -> 1), "a", "n1")
     val req = { edit: ReseatReplica(key), options: { ...options, expectedVersion: 2 } }

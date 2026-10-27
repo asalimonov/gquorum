@@ -37,7 +37,10 @@
         "assumptionsTest",
         "deliveredObservationTest",
         "invalidRequestRefusedTest",
-        "requestBoundTest"
+        "requestBoundTest",
+        "stageScopeEnforcedAtInvocationTest",
+        "admissionScopeEnforcedAtInvocationTest",
+        "creationScopeEnforcedAtInvocationTest"
       ]
     }
   ]

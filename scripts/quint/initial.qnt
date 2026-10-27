@@ -38,7 +38,7 @@ module initial {
     cleanup: Map(), memberAllocationFloor: doc.nodes.values().fold(1, (acc, n) => max(acc, n.member + 1)),
     replicaAllocationFloors: doc.groups.keys().mapBy(g =>
       doc.groups.get(g).replicas.fold(1, (acc, r) => max(acc, r.key.replica + 1))),
-    retiredGroupIds: Set(), sessions: Map(), locks: Map(),
+    retiredGroupIds: Set(), sessions: Map(), locks: Map(), stagedIntents: Map(),
   }
 
   pure def consensus(doc: Document, leader: NodeName): GroupId -> ConsensusState =
@@ -74,7 +74,7 @@ module initial {
             startupAuthorized: true, published: true, factoryOutstanding: false,
             engineJoined: false, engineRunning: true, applicationClose: Acquired }
         }),
-        session: None, schedulerEnabled: true, serveOverride: 0, schedulerCapture: None,
+        session: None, schedulerEnabled: true, serveOverride: 0, schedulerCapture: None, operationWork: Map(),
       },
       durable: {
         pin: if (admitted) Some({ cluster: doc.cluster, node: n, member: doc.nodes.get(n).member }) else None,

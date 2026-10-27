@@ -1,6 +1,6 @@
 # Initial-model scope and coverage
 
-Scope revision approved on 2026-10-27: **lean cluster management**. Implementation is paused after Tasks 1–4. This revision changes the design/backlog, not executable code. Existing `smoke3` still runs the broader Task 4 tests; revised Task 5 must enforce the new scope and separate extension-only tests before claiming v1 coverage.
+Scope revision approved on 2026-10-27: **lean cluster management**. Task 5 is complete. Active invocation/safety checks enforce lean scope; smoke3 selects retained core tests through coreChecks. Shared reads, staging, approval, exact retry and atomic reseat/rebase have asynchronous scenario coverage. Native effects, lifecycle and scheduler work remain; this is not completed v1 coverage.
 
 The original 82-entry ledger was an API inventory, not a requirement to implement 82 state machines. Initial disposition: **17 Core**, **15 Primitive**, **19 Observe**, **8 Omit**, **23 Deferred**. Every entry remains accounted for.
 
@@ -35,20 +35,20 @@ Deferring offline Recovery does not defer ReadmitNode, ReseatReplica, retained r
 
 | Public API | Source | Current evidence | Initial treatment / reason |
 | --- | --- | --- | --- |
-| `Cluster.Stage` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Bounded complete-document edits for core operations only; labels/policy changes are outside v1. |
-| `Cluster.Approve` | `cluster.go` | No method-specific implementation | Immutable approved plan, exact captured scopes and detached deletion debt. |
-| `Cluster.RetryOperation` | `cluster.go` | No method-specific implementation | Exact failed predecessor and at most one successor; preserve uncertain replay. |
-| `Cluster.AddNode` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Fresh identity and mandatory learner-first _meta admission. |
-| `Cluster.ReadmitNode` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Exact returning predecessor, fencing and retirement batch; not offline Rebuild. |
-| `Cluster.DrainNode` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Evacuate loads while retaining _meta membership. |
-| `Cluster.ActivateNode` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Undo drain eligibility; needed to recover a valid management workflow. |
-| `Cluster.ExcludeNode` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Remove a proven drained member without bypassing quorum. |
-| `Cluster.ForceRetireNode` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Explicit degraded-cluster path; retain audit, quorum and cleanup obligations. |
-| `Cluster.SetGroupHosting` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Keep explicit/all-eligible host changes; core relocation without labels. |
-| `Cluster.CreateGroup` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Create on fixed simple hosting/voter presets, including unavailable hosts. |
-| `Cluster.DeleteGroup` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Logical deletion through _meta plus exact detached cleanup debt. |
-| `Cluster.ChangeReplica` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Manual voter/learner role changes through guarded membership. |
-| `Cluster.ReseatReplica` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Atomic approved fresh-ID repair; protect old owner and independent staged intent. |
+| `Cluster.Stage` | `cluster.go` | Task 5: asynchronous CAS/apply/reply and exact replay checks | Bounded complete-document edits for core operations only; labels/policy changes are outside v1. |
+| `Cluster.Approve` | `cluster.go` | Task 5: leader reads/recapture, immutable scopes, replay and deletion debt | Immutable approved plan, exact captured scopes and detached deletion debt. |
+| `Cluster.RetryOperation` | `cluster.go` | Task 5: routed retained failed-attempt scenarios; consumed effects in Task 6 | Exact failed predecessor and at most one successor; preserve uncertain replay. |
+| `Cluster.AddNode` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Fresh identity and mandatory learner-first _meta admission. |
+| `Cluster.ReadmitNode` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Exact returning predecessor, fencing and retirement batch; not offline Rebuild. |
+| `Cluster.DrainNode` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Evacuate loads while retaining _meta membership. |
+| `Cluster.ActivateNode` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Undo drain eligibility; needed to recover a valid management workflow. |
+| `Cluster.ExcludeNode` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Remove a proven drained member without bypassing quorum. |
+| `Cluster.ForceRetireNode` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Explicit degraded-cluster path; retain audit, quorum and cleanup obligations. |
+| `Cluster.SetGroupHosting` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Keep explicit/all-eligible host changes; core relocation without labels. |
+| `Cluster.CreateGroup` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Create on fixed simple hosting/voter presets, including unavailable hosts. |
+| `Cluster.DeleteGroup` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Logical deletion through _meta plus exact detached cleanup debt. |
+| `Cluster.ChangeReplica` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Manual voter/learner role changes through guarded membership. |
+| `Cluster.ReseatReplica` | `cluster.go` | Task 5: atomic approved repair/rebase and fresh-read CAS scenarios | Atomic approved fresh-ID repair; protect old owner and independent staged intent. |
 | `Node.StartLoadGroup` | `node.go` | No method-specific implementation | Exact local start/hold clearance; reuse shared startup phases. |
 | `Node.StopLoadGroup` | `node.go` | No method-specific implementation | Exact hold distinct from failure or retirement; must not be undone by repair. |
 | `Node.SetSchedulingEnabled` | `node.go` | No method-specific implementation | Scheduler enable/disable as a control input and progress premise. |
@@ -57,8 +57,8 @@ Deferring offline Recovery does not defer ReadmitNode, ReseatReplica, retained r
 
 | Public API | Source | Current evidence | Initial treatment / reason |
 | --- | --- | --- | --- |
-| `Cluster.ReadBarrier` | `cluster.go` | No method-specific implementation | One shared quorum-confirmation plus local-apply primitive. |
-| `Cluster.ReadTopology` | `cluster.go` | No method-specific implementation | Reuse confirmed-read primitive and local topology snapshot. |
+| `Cluster.ReadBarrier` | `cluster.go` | Task 5: shared quorum-confirmed read and local-apply checks | One shared quorum-confirmation plus local-apply primitive. |
+| `Cluster.ReadTopology` | `cluster.go` | Task 5: confirmed-view projection with exact read ticket | Reuse confirmed-read primitive and local topology snapshot. |
 | `Cluster.Plan` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Reuse pure makePlan for a staged version; no separate RPC machine. |
 | `Cluster.PlanFor` | `cluster.go` | Task 4 pure helpers; dispatch not implemented | Reuse pure makePlan for a candidate; preview cannot authorize effects. |
 | `Cluster.TransferLeader` | `cluster.go` | No method-specific implementation | Reuse transfer request/proof phases; preserve manual transfer grant versus approved-plan authority. |
@@ -152,6 +152,12 @@ Keep sampled and bounded/exhaustive results distinct, explicit unexpected-stuck 
 
 Tasks 1–4 and commits through `fa2e8ad` remain completed historical work. The foundation has four tests; smoke3 has 16 core scenarios and the broader topologyChecks suite has 40 tests. Some of the latter cover labels, domain placement, pin setters, policy tuning and rollback, which are now outside v1. Passing them is not evidence that their full workflows were implemented.
 
-On implementation resume, Task 5 will restrict the active request/fault/configuration domains and separate extension-only tests from initial acceptance. Existing helpers can be retained for later work, but no deferred path may re-enter through generic Stage or defaults. The current `.qnt` files and JSON profiles were not changed by this scope review.
+Task 5 now restricts invocation/configuration domains and separates extension-only tests from initial acceptance. Original broader helpers and topologyChecks remain available separately. Later task machinery must preserve these scope checks; no deferred path may re-enter through generic Stage or defaults.
 
 The source baseline remains `e8e85dbd7879b1c858252cd2a6126a36920f8a8e`. Exact behavior and earlier validation evidence are recorded in [the execution log](../../docs/progress/20261027-quint-cluster-management.md). Full design history before this scope revision is retained in Git; the [target](../../docs/brainstorms/20261027-quint-cluster-management-target.md) and [plan](../../docs/plans/20261027-quint-cluster-management.md) now define initial acceptance.
+
+## Task 5 validation checkpoint
+
+Foundation: 7 tests. smoke3: 43 asynchronous scenarios plus 60 retained pure/scope checks. Reports: `test-reports/quint/20261027T154905846454Z-d5708b3f`, `20261027T154929137587Z-91c5bd39`; 50 fault samples at depth 60 passed in `20261027T155031955190Z-bb318403`. These are sampled/scenario checks, not exhaustive or Go-conformance proof. A separate healthy protocol-only approval run reached approval and its reply in all 50 samples (seed 1, depth 160).
+
+The full step relation retains retries, loss and partitions. The healthy subset excludes retry flooding, which otherwise can consume finite proposal/message bounds before ordinary work finishes. Initial failed-operation fixtures cover public retry routing; runtime execution failures and consumed-receipt suffix validation are Task 6 work. Source-faithful failing library scenarios are tracked in [the findings report](../../docs/reports/20261027-quint-cluster-management.md).

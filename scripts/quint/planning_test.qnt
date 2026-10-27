@@ -105,7 +105,8 @@ module planning_test {
   }
 
   run missingEstablishedObservationIsNotRefoundingTest = {
-    val desired = { ...base, version: 2, groups: base.groups.setBy("a", g => { ...g, labels: Map("x" -> "y") }) }
+    val desired = { ...base, version: 2, groups: base.groups.setBy("a", g => { ...g,
+      replicas: g.replicas.map(r => if (r.key.node == "n3") { ...r, role: Learner } else r) }) }
     match T::makePlan({ ...input, observations: input.observations.mapRemove("a") }, desired) {
       | PlanRejected(errors) => errors.contains(Unavailable)
       | _ => false
@@ -140,7 +141,8 @@ module planning_test {
     val alien = I::replica(Map("n1" -> 9), "a", "n1")
     val bad = { ...input, observations: input.observations.setBy("a", o =>
       { ...o, native: { ...o.native, voters: o.native.voters.union(Set(alien)) } }) }
-    val desired = { ...base, version: 2, groups: base.groups.setBy("a", g => { ...g, labels: Map("x" -> "y") }) }
+    val desired = { ...base, version: 2, groups: base.groups.setBy("a", g => { ...g,
+      replicas: g.replicas.map(r => if (r.key.node == "n3") { ...r, role: Learner } else r) }) }
     T::makePlan(bad, desired) == PlanRejected(Set(Unauthorized))
   }
 }
