@@ -9,7 +9,7 @@
 **Target SHA-256 at planning:** `64b1a24b8068997529445ce6e92c44c12a8ebb455a5d728cb34ba0533c64ff9b`
 **Full brainstorm log:** [20261027-quint-cluster-management.md](../brainstorms/20261027-quint-cluster-management.md)
 **Execution progress:** `docs/progress/20261027-quint-cluster-management.md` (create during execution).
-**Status:** executing; Task 1 complete, Tasks 2–22 pending. The user approved this sequence during planning.
+**Status:** executing; Tasks 1–2 complete, Tasks 3–22 pending. The user approved this sequence during planning.
 
 ## Objective and execution contract
 
@@ -100,18 +100,18 @@ For Python runner changes: run its full unit suite, syntax checks, and a real re
 **Files:** `scripts/quint/run.py`, `run_test.py`, `profiles/foundation.json`, runner fixtures and README (new/updated).
 **References:** target §§6/6.3/11/13; reporting requirements and CLI contract. Existing style: `scripts/test_report.py` and its tests (read-only).
 
-- [ ] Implement the target CLI `--profile NAME --mode {test,simulate,verify} [--seed INTEGER] [--reports-dir PATH]` with Python 3.9-compatible standard library code. Initial profile schema: version, pinned CLI version, instance/main/init/step, bounds, properties, witnesses, backend, samples/steps, timeout and optional TLC config; add explicit test entry points so zero selected tests cannot pass.
-- [ ] Define small typed runner records/functions: `load_profile(path) -> Profile`, `validate_profile(profile, root) -> None`, `build_commands(profile, mode, seed) -> list[list[str]]`, `run_command(argv, timeout, artifacts) -> CommandResult`, `write_report(manifest, results) -> None`, `main(argv) -> int`. Use subprocess argument lists; never shell-concatenate profile data.
-- [ ] Validate names, existing paths, required const/instance bounds and supported mode/backend combinations. Separate simulation/test backend selection from verification backend selection. Keep report bounds consistent with concrete instance constants through executable assumption checks; do not trust JSON declarations alone.
-- [ ] Before execution, record CLI/backend availability and version; fail clearly for missing pinned dependencies without downloading/installing them. Supply explicit samples even with a seed and explicit init/step/main/property selection.
-- [ ] Persist exact commands, revision/hashes, bounds/seed, stdout/stderr, ITF artifacts, child exit/timeout/signal and a result category: sampled-pass, bounded-pass, exhaustive-complete, counterexample, infrastructure-error or incomplete. Retain failures/interruption evidence; publish latest only after completed reporting.
-- [ ] Use a real foundation profile for integration tests and controlled fake child processes for timeout/exit/report tests. No Go execution or replay adapter.
+- [x] Implement the target CLI `--profile NAME --mode {test,simulate,verify} [--seed INTEGER] [--reports-dir PATH]` with Python 3.9-compatible standard library code. Initial profile schema: version, pinned CLI version, instance/main/init/step, bounds, properties, witnesses, backend, samples/steps, timeout and optional TLC config; add explicit test entry points so zero selected tests cannot pass.
+- [x] Define small typed runner records/functions: `load_profile(path) -> Profile`, `validate_profile(profile, root) -> None`, `build_commands(profile, mode, seed) -> list[list[str]]`, `run_command(argv, timeout, artifacts) -> CommandResult`, `write_report(manifest, results) -> None`, `main(argv) -> int`. Use subprocess argument lists; never shell-concatenate profile data.
+- [x] Validate names, existing paths, required const/instance bounds and supported mode/backend combinations. Separate simulation/test backend selection from verification backend selection. Keep report bounds consistent with concrete instance constants through executable assumption checks; do not trust JSON declarations alone.
+- [x] Before execution, record CLI/backend availability and version; fail clearly for missing pinned dependencies without downloading/installing them. Supply explicit samples even with a seed and explicit init/step/main/property selection.
+- [x] Persist exact commands, revision/hashes, bounds/seed, stdout/stderr, ITF artifacts, child exit/timeout/signal and a result category: sampled-pass, bounded-pass, exhaustive-complete, counterexample, infrastructure-error or incomplete. Retain failures/interruption evidence; publish latest only after completed reporting.
+- [x] Use a real foundation profile for integration tests and controlled fake child processes for timeout/exit/report tests. No Go execution or replay adapter.
 
 #### Verification
 
-- [ ] `python3 -m unittest discover -s scripts/quint -p '*_test.py'` and `python3 -m py_compile scripts/quint/run.py` pass.
-- [ ] Foundation `--mode test` and `--mode simulate --seed 1` run the real CLI and retain manifests. Missing CLI, wrong version, malformed bounds, zero tests and timed-out children fail with accurate artifacts.
-- [ ] Common model checks remain green; the runner never reports a timeout or failed tool as verification success.
+- [x] `python3 -m unittest discover -s scripts/quint -p '*_test.py'` and `python3 -m py_compile scripts/quint/run.py` pass.
+- [x] Foundation `--mode test` and `--mode simulate --seed 1` run the real CLI and retain manifests. Missing CLI, wrong version, malformed bounds, zero tests and timed-out children fail with accurate artifacts.
+- [x] Common model checks remain green; the runner never reports a timeout or failed tool as verification success.
 
 ### Task 3: Model independent consensus, network faults and applied views
 

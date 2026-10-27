@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "quint_version": "0.33.0",
+  "instance": "instances/foundation.qnt",
+  "main": "foundation",
+  "init": "init",
+  "step": "step",
+  "bounds": {"nodeCount": 1, "maxRequests": 2},
+  "properties": ["safety"],
+  "witnesses": ["deliveredRequest"],
+  "backend": "typescript",
+  "verification_backend": "apalache",
+  "verification_qualified": false,
+  "apalache_version": "0.62.1",
+  "max_steps": 20,
+  "max_samples": 50,
+  "test_samples": 10,
+  "timeout_seconds": 60,
+  "temporal": [],
+  "tests": [{
+    "file": "instances/foundation.qnt",
+    "main": "foundation",
+    "expected": ["assumptionsTest", "deliveredObservationTest", "invalidRequestRefusedTest", "requestBoundTest"]
+  }]
+}

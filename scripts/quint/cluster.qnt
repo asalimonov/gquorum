@@ -7,6 +7,7 @@ module cluster {
   const NODE_POOL: Set[NodeName]
   const MAX_REQUESTS: int
   var world: World
+  pure val modelBounds = Map("nodeCount" -> NODE_POOL.size(), "maxRequests" -> MAX_REQUESTS)
 
   pure val emptyDocument: Document = {
     cluster: "c1", version: 0, parent: 0, rebasedFrom: None, nodes: Map(), groups: Map(),

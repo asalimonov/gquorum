@@ -14,6 +14,22 @@ quint run scripts/quint/instances/foundation.qnt --main foundation --invariant s
 
 The foundation has one newly constructed, unadmitted actor and a bound of two calls. It models queuing, delivery and Choreo handling of a local phase observation and an invalid request. Neither operation creates consensus or authority. The bound can terminate exploration once all requests are handled; that is a finite harness boundary, not evidence of a protocol deadlock. Successful `run` means no violation in sampled traces, not exhaustive checking.
 
+## Profile runner
+
+```sh
+python3 scripts/quint/run.py --profile foundation --mode test
+python3 scripts/quint/run.py --profile foundation --mode simulate --seed 1
+python3 -m unittest discover -s scripts/quint -p '*_test.py'
+```
+
+Profiles pin concrete modules, tests, properties, bounds, seeds/sample counts and backends. Before the requested check, the runner executes a zero-step invariant comparing the instance's `modelBounds` to the manifest; a stale profile cannot claim different bounds from those executed. Every declared test name must appear as passed; empty/missing/skipped selections fail.
+
+Artifacts are retained under `test-reports/quint/<run>/`: `report.md`, `manifest.json`, separate child logs, machine-readable Quint output and available ITF traces. `--reports-dir` overrides `TEST_REPORTS_DIR`; either specifies the report root, with `quint/` appended. `latest` changes only after reporting a finished non-interrupted run. Failures keep their artifacts and nonzero status. A timeout or signal is incomplete, not a verified pass.
+
+The default profile uses the bundled TypeScript evaluator. Rust profiles require the preinstalled evaluator pinned by Quint 0.33.0 (v0.7.0); verification needs explicitly provisioned pinned Apalache/JVM files. No backend is downloaded by this runner. Verification is refused until a profile is marked qualified following Task 17's backend controls. Its implementation is not a current claim of exhaustive/liveness qualification.
+
+Quint 0.33.0's machine-readable simulation output omits witness counts. The manifest records that omission instead of inventing counts; deterministic witness tests are separate evidence. Direct `quint run` above prints sampled witness counts. Model hashes and original child exit statuses are retained for reproduction.
+
 ## Composition
 
 `types.qnt` contains data records. `handlers.qnt` uses the unmodified Choreo `cue`, `convert_context` and `apply_effect` functions. `cluster.qnt` owns the single `world` state variable; Choreo's unused own state/display actions are not invoked. Its `GlobalContext` groups actors and inboxes, with separately typed metadata, consensus, network and recovery records in `extensions`.
