@@ -10,7 +10,7 @@
 **Refactoring request:** user discussion on 2026-10-28: group modules, hide contextual complexity, reuse higher-order functions, and mirror familiar Go subsystem boundaries.
 **Parent implementation plan:** [cluster-management plan](20261027-quint-cluster-management.md)
 **Execution log when implemented:** `docs/progress/20261028-quint-module-refactoring.md`
-**Status:** refactoring authorized on 2026-10-28; Tasks 1–4 complete; colleague review and documentation closure pending. Parent protocol Tasks 8–18 remain paused.
+**Status:** refactoring authorized on 2026-10-28; Tasks 1–5 complete; documentation closure pending. Parent protocol Tasks 8–18 remain paused.
 **Reviewed corrections:** peer thread 1, rounds 3–5 in `docs/review/feat_quint-spec.md`.
 **Execution baseline:** `85cd75d` (model unchanged from `b39764c`).
 
@@ -256,14 +256,14 @@ Compare representative intermediate states for metadata commit/apply, authority 
 
 **References:** target §§3–4, 9–10; this plan D3–D6; `.revmux/profile.md` and `AGENTS.md`.
 
-- [ ] Per the user’s explicit request, use paseo-peer to ask existing agent `e77ec353-b3eb-4158-9cb2-c3a160ddd0c2` to review the refactoring commits. This replaces the default revmux review route for this task. Keep the discussion in the branch peer file and do not start parent protocol work.
-- [ ] Review only the refactoring commit range from the recorded execution baseline. Supply the original target, this plan, migration ledger and validation results; prioritize accidentally collapsed transitions, duplicate state, weakened guards, lost tests and misleading package boundaries.
-- [ ] Explicitly preserve the user-approved implemented-code baseline where review guidance requests stricter global topology serialization. Such protocol changes are outside this refactor.
-- [ ] Confirm findings against source and traces. Fix confirmed critical/major issues; retain minor findings with reasons. Re-review affected changes and record the report location under `docs/review/` without copying the report into chat.
+- [x] Per the user’s explicit request, use paseo-peer to ask existing agent `e77ec353-b3eb-4158-9cb2-c3a160ddd0c2` to review the refactoring commits. This replaces the default revmux review route for this task. Keep the discussion in the branch peer file and do not start parent protocol work.
+- [x] Review only the refactoring commit range from the recorded execution baseline. Supply the original target, this plan, migration ledger and validation results; prioritize accidentally collapsed transitions, duplicate state, weakened guards, lost tests and misleading package boundaries.
+- [x] Explicitly preserve the user-approved implemented-code baseline where review guidance requests stricter global topology serialization. Such protocol changes are outside this refactor.
+- [x] Confirm findings against source and traces. Fix confirmed critical/major issues; retain minor findings with reasons. Re-review affected changes and record the report location under `docs/review/` without copying the report into chat.
 
 #### Verification
 
-- [ ] No unresolved critical/major refactoring defect; review findings have evidence and disposition. Required corrections pass their focused checks, with broader reruns for cross-cutting changes.
+- [x] No unresolved critical/major refactoring defect; review findings have evidence and disposition. Required corrections pass their focused checks, with broader reruns for cross-cutting changes.
 
 ### Task 6: Close gaps, update documentation and hand back the paused backlog
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Audit the mechanical Quint extraction against its recorded baseline.
 
-After helper adoption, pass --revision with the mechanical extraction commit.
+Defaults to the mechanical extraction commit c5ece71; --revision overrides it.
 This checks token-preserving transforms and adapters, not semantic equivalence.
 """
 from pathlib import Path
@@ -75,7 +75,7 @@ def convert(body, mode):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--revision', help='Read candidate files from this git revision instead of the worktree')
+    parser.add_argument('--revision', default='c5ece71', help='Mechanical snapshot to audit (default: c5ece71; later helper revisions are not supported)')
     args = parser.parse_args()
     ledger = json.loads((REPO / 'docs/progress/20261028-quint-action-map.json').read_text())
 
@@ -89,7 +89,8 @@ def main():
     aliases = {m.group(1): m.group(2) for m in re.finditer('import (\\w+) as (\\w+) from', facade)}
     normalize = lambda s: [t[0] for t in tokens(s)]
     failures = []
-    assert set(original) == set(actual), 'Public action inventory changed'
+    if set(original) != set(actual):
+        parser.error('Action inventory differs from the mechanical snapshot. Use --revision c5ece71; this audit does not validate subsequent helper rewrites.')
     candidate_types = {'handle': ('tr', 'Transition'), 'applyMeta': ('replica', 'ReplicaKey'), 'dispatchGrantFrom': ('replica', 'ReplicaKey')}
     for row in ledger['actions']:
         name = row['action']
@@ -130,7 +131,7 @@ def main():
             failures.append(name + ': adapter differs')
     for fail in failures:
         print(fail)
-    print(f'{len(original)} action mappings checked; {len(failures)} differences')
+    print(f'{args.revision}: {len(original)} action mappings checked; {len(failures)} differences')
     return bool(failures)
 if __name__ == '__main__':
     raise SystemExit(main())

@@ -75,6 +75,7 @@ module cluster_test {
   }
   action clusterStageInit = init
   action clusterStageProbe = world' = world
+  // Root-stage baseline; later suites connect distinct adjacent stage actions.
   run clusterSharesWorldTest = clusterStageInit.then(clusterStageInit).then(clusterStageProbe)
     .expect(world.system.keys() == NODE_POOL)
   run disabledFrameDoesNotEvaluatePostTest = init.then(

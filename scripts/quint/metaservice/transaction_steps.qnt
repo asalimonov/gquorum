@@ -9,7 +9,7 @@ module metaservice_transaction_steps {
   import world_types.* from "../runtime/world"
   import basicSpells.* from "../vendor/spells/basicSpells"
   import message_effects.* from "../runtime/messages"
-  import handlers.* from "handlers"
+  import handlers.* from "./handlers"
 
   pure def handleCandidates(w: World, node: NodeName, MAX_DELIVERIES: int): Set[Transition] = {
     val ctx = C::convert_context(w, node)
