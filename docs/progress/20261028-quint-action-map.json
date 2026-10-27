@@ -1,0 +1,966 @@
+{
+  "baseline": "da9f52d",
+  "actions": [
+    {
+      "action": "init",
+      "location": "cluster.qnt",
+      "kind": "selector",
+      "delegates": []
+    },
+    {
+      "action": "invoke",
+      "location": "harness/environment_steps.qnt",
+      "module": "harness_environment_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, request: ApiRequest",
+      "constants": [
+        "MAX_REQUESTS",
+        "MAX_DELIVERIES"
+      ],
+      "baseline_body_sha256": "ef465153fc24e4bfa6a5702162e4c556498fb2318438218163fb7edc3dadbdbd"
+    },
+    {
+      "action": "deliver",
+      "location": "harness/environment_steps.qnt",
+      "module": "harness_environment_steps",
+      "kind": "guard/post",
+      "parameters": "msg: Envelope",
+      "constants": [],
+      "baseline_body_sha256": "44ddd8fdcf233ad93db8a87df501458d1ec1b52fdbdb135f06ceaeff643c6126"
+    },
+    {
+      "action": "handle",
+      "location": "metaservice/transaction_steps.qnt",
+      "module": "metaservice_transaction_steps",
+      "kind": "candidate/guard/post",
+      "parameters": "node: NodeName, tr: Transition",
+      "constants": [
+        "MAX_DELIVERIES"
+      ],
+      "baseline_body_sha256": "6028296bed76015b8882e1ff4d6da171dfc25e46f29a37921e20e8321503cbeb"
+    },
+    {
+      "action": "confirmRead",
+      "location": "metaservice/transaction_steps.qnt",
+      "module": "metaservice_transaction_steps",
+      "kind": "guard/post",
+      "parameters": "msg: Envelope",
+      "constants": [
+        "MAX_DELIVERIES"
+      ],
+      "baseline_body_sha256": "434a800d2300d942c17739fd09bacd3cceb4d825301536ca8186fe58b2cbe282"
+    },
+    {
+      "action": "finishRead",
+      "location": "metaservice/transaction_steps.qnt",
+      "module": "metaservice_transaction_steps",
+      "kind": "guard/post",
+      "parameters": "key: RequestKey",
+      "constants": [],
+      "baseline_body_sha256": "e89b184d2fe248e6a4f9715c77819d241e5fcc41766f744de9e5dc1acb7ab5b7"
+    },
+    {
+      "action": "prepareMutation",
+      "location": "metaservice/transaction_steps.qnt",
+      "module": "metaservice_transaction_steps",
+      "kind": "guard/post",
+      "parameters": "key: RequestKey",
+      "constants": [
+        "rules"
+      ],
+      "baseline_body_sha256": "ac02e96e626685bd80526435ab2859b62d3e46faa6cfe3657fdf4d78678be049"
+    },
+    {
+      "action": "submitMutation",
+      "location": "metaservice/transaction_steps.qnt",
+      "module": "metaservice_transaction_steps",
+      "kind": "guard/post",
+      "parameters": "key: RequestKey",
+      "constants": [
+        "MAX_DELIVERIES"
+      ],
+      "baseline_body_sha256": "040fdd091006fa5291e9d9a047189cc711d20e4febff7f9ffc1c17684540466b"
+    },
+    {
+      "action": "commitMutation",
+      "location": "metaservice/transaction_steps.qnt",
+      "module": "metaservice_transaction_steps",
+      "kind": "guard/post",
+      "parameters": "msg: Envelope",
+      "constants": [
+        "MAX_POSITION",
+        "MAX_DELIVERIES",
+        "rules"
+      ],
+      "baseline_body_sha256": "197bb43802d5df809b312c8dc974802571897adb5a626bbbda9cec14d3c4f4e9"
+    },
+    {
+      "action": "finishMutation",
+      "location": "metaservice/transaction_steps.qnt",
+      "module": "metaservice_transaction_steps",
+      "kind": "guard/post",
+      "parameters": "key: RequestKey",
+      "constants": [],
+      "baseline_body_sha256": "e5194c66d4882319a5d92dde94e0c1f6835332065b00347f600a1833158cbc8a"
+    },
+    {
+      "action": "beginReseatRead",
+      "location": "metaservice/transaction_steps.qnt",
+      "module": "metaservice_transaction_steps",
+      "kind": "guard/post",
+      "parameters": "key: RequestKey",
+      "constants": [
+        "MAX_DELIVERIES"
+      ],
+      "baseline_body_sha256": "a25eb62d8b9be0517e4cbc64e66174da12013c9f4afa0cc2bf88ab2f1ea4bcf5"
+    },
+    {
+      "action": "finishReseatRead",
+      "location": "metaservice/transaction_steps.qnt",
+      "module": "metaservice_transaction_steps",
+      "kind": "guard/post",
+      "parameters": "key: RequestKey",
+      "constants": [],
+      "baseline_body_sha256": "a46346ce3433ae02abeb7bdeb43225f433d56ebb6712afacd103222163cf8a93"
+    },
+    {
+      "action": "dispatchOperation",
+      "location": "metaservice/operation_steps.qnt",
+      "module": "metaservice_operation_steps",
+      "kind": "guard/post",
+      "parameters": "key: RequestKey",
+      "constants": [
+        "MAX_DELIVERIES"
+      ],
+      "baseline_body_sha256": "ed2bad4addab2aeb4b03f2862a0a8a4cc1699d20c16f5ae0b8261b38cf87d6d4"
+    },
+    {
+      "action": "transmitOperationRead",
+      "location": "metaservice/operation_steps.qnt",
+      "module": "metaservice_operation_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, key: ProposalKey, retry: bool",
+      "constants": [
+        "MAX_DELIVERIES"
+      ],
+      "baseline_body_sha256": "50e5586253ed2a06402f3502938d2b0f10c39bdcfe906f25a6461d7ea6ea9c8d"
+    },
+    {
+      "action": "startOperationRead",
+      "location": "cluster.qnt",
+      "kind": "delegating facade",
+      "delegates": [
+        "transmitOperationRead"
+      ]
+    },
+    {
+      "action": "retryOperationRead",
+      "location": "cluster.qnt",
+      "kind": "delegating facade",
+      "delegates": [
+        "transmitOperationRead"
+      ]
+    },
+    {
+      "action": "captureOperation",
+      "location": "metaservice/operation_steps.qnt",
+      "module": "metaservice_operation_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, key: ProposalKey",
+      "constants": [
+        "rules"
+      ],
+      "baseline_body_sha256": "e8f8af354a51016ba54e73dbf9b0042f7979ba08fc10e47910af12b01848dcc4"
+    },
+    {
+      "action": "observeOperation",
+      "location": "metaservice/operation_steps.qnt",
+      "module": "metaservice_operation_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, key: ProposalKey, group: GroupId",
+      "constants": [],
+      "baseline_body_sha256": "7b2dc609e93b2140e6e73b619b54162b2182ac69f0dc0d31bc8a7cf055d49792"
+    },
+    {
+      "action": "observeOperationHealth",
+      "location": "metaservice/operation_steps.qnt",
+      "module": "metaservice_operation_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, key: ProposalKey, group: GroupId",
+      "constants": [],
+      "baseline_body_sha256": "162f9801b55ed153df4fb18c4aef635b5e3066e04e63e9a36a15a21575781c06"
+    },
+    {
+      "action": "beginOperationRecapture",
+      "location": "metaservice/operation_steps.qnt",
+      "module": "metaservice_operation_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, key: ProposalKey",
+      "constants": [],
+      "baseline_body_sha256": "5f84129ec79cc6f72c2fa215efb86e676dee77db46d7f703623fea3148765734"
+    },
+    {
+      "action": "buildOperation",
+      "location": "metaservice/operation_steps.qnt",
+      "module": "metaservice_operation_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, key: ProposalKey",
+      "constants": [],
+      "baseline_body_sha256": "63c8e7f59c8ffe787b146e55cfbba4207bfb73b00a3ed0005a531d879d939fc4"
+    },
+    {
+      "action": "submitOperation",
+      "location": "metaservice/operation_steps.qnt",
+      "module": "metaservice_operation_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, key: ProposalKey",
+      "constants": [
+        "MAX_DELIVERIES"
+      ],
+      "baseline_body_sha256": "7ca5fb998c6da3629740d4a57e3fe34c6ca408e4fe78b57bdd7926972ebfb178"
+    },
+    {
+      "action": "finishOperation",
+      "location": "metaservice/operation_steps.qnt",
+      "module": "metaservice_operation_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, key: ProposalKey",
+      "constants": [],
+      "baseline_body_sha256": "1ff4ec7f7061f81db455f937ada32ef383d0ad20571bd4e94673a5d8c131b2df"
+    },
+    {
+      "action": "replyOperation",
+      "location": "metaservice/operation_steps.qnt",
+      "module": "metaservice_operation_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, key: ProposalKey",
+      "constants": [
+        "MAX_DELIVERIES"
+      ],
+      "baseline_body_sha256": "07d645605c024fd86b6718e36e760aed62226896319cc50ae7b14d58505d3005"
+    },
+    {
+      "action": "observeMetaLeader",
+      "location": "metaservice/operation_steps.qnt",
+      "module": "metaservice_operation_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName",
+      "constants": [],
+      "baseline_body_sha256": "574949f8bbdd3ca3cf355cc7df5c0cfe3d4aa03b6438df934c65b61d89986378"
+    },
+    {
+      "action": "retryRead",
+      "location": "metaservice/operation_steps.qnt",
+      "module": "metaservice_operation_steps",
+      "kind": "guard/post",
+      "parameters": "key: RequestKey",
+      "constants": [
+        "MAX_DELIVERIES"
+      ],
+      "baseline_body_sha256": "8a135f7d938450e8093b491825ec2465eafa6329f0e9cfbcda351436493ec11b"
+    },
+    {
+      "action": "cancelCall",
+      "location": "metaservice/operation_steps.qnt",
+      "module": "metaservice_operation_steps",
+      "kind": "guard/post",
+      "parameters": "key: RequestKey",
+      "constants": [],
+      "baseline_body_sha256": "1b8dd9e519ed63d222ac9718f21aaf1a875207db69433ca38face5ae575698df"
+    },
+    {
+      "action": "drop",
+      "location": "harness/environment_steps.qnt",
+      "module": "harness_environment_steps",
+      "kind": "guard/post",
+      "parameters": "msg: Envelope",
+      "constants": [],
+      "baseline_body_sha256": "5cca916c30de5b68893c5c67c4ab7f60a87155356d3e9b0133277744462682d2"
+    },
+    {
+      "action": "duplicate",
+      "location": "harness/environment_steps.qnt",
+      "module": "harness_environment_steps",
+      "kind": "guard/post",
+      "parameters": "msg: Envelope",
+      "constants": [
+        "MAX_DELIVERIES"
+      ],
+      "baseline_body_sha256": "92f6a59dca9763bf7c5ddd5f59f0c013a48fab0dc124939429d286de976a1314"
+    },
+    {
+      "action": "setLink",
+      "location": "harness/environment_steps.qnt",
+      "module": "harness_environment_steps",
+      "kind": "guard/post",
+      "parameters": "channel: Channel, source: NodeName, destination: NodeName, up: bool",
+      "constants": [],
+      "baseline_body_sha256": "488012acff6cbfb4f0b6f4ed781bd37a241b6d4d0abfdbff03cbc3e7ae99ed23"
+    },
+    {
+      "action": "crash",
+      "location": "harness/environment_steps.qnt",
+      "module": "harness_environment_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName",
+      "constants": [],
+      "baseline_body_sha256": "509284f13c65de64de66da91033df064dfc723aba89bbd77a541f75cea6809e3"
+    },
+    {
+      "action": "restart",
+      "location": "harness/environment_steps.qnt",
+      "module": "harness_environment_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName",
+      "constants": [
+        "MAX_INCARNATION"
+      ],
+      "baseline_body_sha256": "6b97e17bc39222d095490fce54705d5916ed45a57b28f850eb7766e5e569919a"
+    },
+    {
+      "action": "commitProgress",
+      "location": "consensus/steps.qnt",
+      "module": "consensus_steps",
+      "kind": "guard/post",
+      "parameters": "group: GroupId",
+      "constants": [
+        "MAX_POSITION"
+      ],
+      "baseline_body_sha256": "2d31dd8a1647d60f0ab6de738c7a9f6b66973914039b401529b8fc98aa86c561"
+    },
+    {
+      "action": "elect",
+      "location": "consensus/steps.qnt",
+      "module": "consensus_steps",
+      "kind": "guard/post",
+      "parameters": "group: GroupId, candidate: ReplicaKey",
+      "constants": [],
+      "baseline_body_sha256": "2ad8f0d27c355fc96682943bdb18b32d9637dc135532d69b13791c411f7c01c5"
+    },
+    {
+      "action": "catchUp",
+      "location": "consensus/steps.qnt",
+      "module": "consensus_steps",
+      "kind": "guard/post",
+      "parameters": "group: GroupId, replica: ReplicaKey",
+      "constants": [],
+      "baseline_body_sha256": "5388472a813bd4e6de609fb9b4239b7a9958040b4bd9441db567581c0fcd3de2"
+    },
+    {
+      "action": "applyMeta",
+      "location": "consensus/steps.qnt",
+      "module": "consensus_steps",
+      "kind": "candidate/guard/post",
+      "parameters": "node: NodeName, replica: ReplicaKey",
+      "constants": [],
+      "baseline_body_sha256": "89ffa2c3677eb9357663a70039a03be04a37603e6eabec0a045e9b53e8114b2b"
+    },
+    {
+      "action": "beginSession",
+      "location": "metaservice/session_steps.qnt",
+      "module": "metaservice_session_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName",
+      "constants": [],
+      "baseline_body_sha256": "aff0526cc8a11384d76ff395d9850dca0f1d481eec190f8ebbed710be7e5c9f0"
+    },
+    {
+      "action": "proposeSession",
+      "location": "cluster.qnt",
+      "kind": "delegating facade",
+      "delegates": [
+        "submitControl"
+      ]
+    },
+    {
+      "action": "renewSession",
+      "location": "metaservice/session_steps.qnt",
+      "module": "metaservice_session_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName",
+      "constants": [
+        "MAX_DELIVERIES"
+      ],
+      "baseline_body_sha256": "4a0c18d19554063bdcfa17b838328c21a92246e8239c93beab0120bcba14269a"
+    },
+    {
+      "action": "handleSession",
+      "location": "metaservice/session_steps.qnt",
+      "module": "metaservice_session_steps",
+      "kind": "guard/post",
+      "parameters": "msg: Envelope",
+      "constants": [
+        "MAX_DELIVERIES"
+      ],
+      "baseline_body_sha256": "80538140d5a4810733a74c54a530b0c6a6d0e8c4dbf0bdcea225678cf31d49cb"
+    },
+    {
+      "action": "seedLeases",
+      "location": "metaservice/session_steps.qnt",
+      "module": "metaservice_session_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName",
+      "constants": [],
+      "baseline_body_sha256": "4ab33677f0c329a1238ce802cd6e9c6df959c4ac13eb1dfc25293eca6695ba94"
+    },
+    {
+      "action": "forgetRevokedLease",
+      "location": "metaservice/session_steps.qnt",
+      "module": "metaservice_session_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, key: SessionKey",
+      "constants": [],
+      "baseline_body_sha256": "5250522a50a3f544069cedab1149516b446b5eb40f2ae851ce777f52efaf70e0"
+    },
+    {
+      "action": "expireLease",
+      "location": "metaservice/session_steps.qnt",
+      "module": "metaservice_session_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, key: SessionKey",
+      "constants": [],
+      "baseline_body_sha256": "0ae372ef1c8dae19c0eafac5c5a495244a85c3f1f09d0b4705723a5ccf897810"
+    },
+    {
+      "action": "expireOwnLease",
+      "location": "metaservice/session_steps.qnt",
+      "module": "metaservice_session_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName",
+      "constants": [],
+      "baseline_body_sha256": "e9f87db055eab49c1f3c4773e8c2ab29b3ed948a638443da7dd1e45c1fb879ef"
+    },
+    {
+      "action": "cancelRenewal",
+      "location": "metaservice/session_steps.qnt",
+      "module": "metaservice_session_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName",
+      "constants": [],
+      "baseline_body_sha256": "c512fe2352f71b83237bccd48751b989433ef35901a3573ded742e97d642c587"
+    },
+    {
+      "action": "probeSession",
+      "location": "metaservice/session_steps.qnt",
+      "module": "metaservice_session_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, key: SessionKey",
+      "constants": [
+        "MAX_DELIVERIES"
+      ],
+      "baseline_body_sha256": "4ee1ebf8f1ab3be695257db308ee8f0ece9ead2e7a02a49cd4c2dbe7282fda80"
+    },
+    {
+      "action": "timeoutSessionProbe",
+      "location": "metaservice/session_steps.qnt",
+      "module": "metaservice_session_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, key: SessionKey",
+      "constants": [],
+      "baseline_body_sha256": "f6f296ae85fb587338360caf83ce48cfb58f805b0a1e6ce8ceede99bba93dd1d"
+    },
+    {
+      "action": "revokeExpiredSession",
+      "location": "cluster.qnt",
+      "kind": "delegating facade",
+      "delegates": [
+        "submitControl"
+      ]
+    },
+    {
+      "action": "abandonSessionRevoke",
+      "location": "metaservice/session_steps.qnt",
+      "module": "metaservice_session_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName",
+      "constants": [],
+      "baseline_body_sha256": "d7dccd044b4fbb0f36cbe3dd3457e257d779e9d6c8ca88303ae4cf637f52ca6b"
+    },
+    {
+      "action": "sessionStep",
+      "location": "cluster.qnt",
+      "kind": "selector",
+      "delegates": [
+        "beginSession",
+        "forgetRevokedLease",
+        "handleSession",
+        "probeSession",
+        "proposeSession",
+        "renewSession",
+        "revokeExpiredSession",
+        "seedLeases"
+      ]
+    },
+    {
+      "action": "requestStart",
+      "location": "managed/lifetime_steps.qnt",
+      "module": "managed_lifetime_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, replica: ReplicaKey, explicit: bool",
+      "constants": [
+        "MAX_REQUESTS"
+      ],
+      "baseline_body_sha256": "309fa0c406ea51a4b4399e543e0f5e7a17c4118b27900020e8eefd686a50e3e0"
+    },
+    {
+      "action": "readStartScope",
+      "location": "managed/lifetime_steps.qnt",
+      "module": "managed_lifetime_steps",
+      "kind": "guard/post",
+      "parameters": "request: RequestKey",
+      "constants": [],
+      "baseline_body_sha256": "3443564a7e9939e700ec8296a5b594f2521ceeef377f5efc4b04a97cd682c7c6"
+    },
+    {
+      "action": "reserveOwner",
+      "location": "managed/lifetime_steps.qnt",
+      "module": "managed_lifetime_steps",
+      "kind": "guard/post",
+      "parameters": "request: RequestKey",
+      "constants": [],
+      "baseline_body_sha256": "ce3abe7dc6399c2aec6fb225053e6c23e53bb3835e0d5d5eaa3218f93a485d20"
+    },
+    {
+      "action": "beginOwnerFactory",
+      "location": "managed/lifetime_steps.qnt",
+      "module": "managed_lifetime_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, group: GroupId",
+      "constants": [],
+      "baseline_body_sha256": "a6294ee39dcfa29a2bdd24ef4516681fa091a567e6cd63a39c6466c078f57f61"
+    },
+    {
+      "action": "returnOwnerFactory",
+      "location": "managed/lifetime_steps.qnt",
+      "module": "managed_lifetime_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, group: GroupId, success: bool",
+      "constants": [],
+      "baseline_body_sha256": "7851c9b51caeec5153101b6f96dfcc6eb13a4689ee06374206602ccbe6c4d1ca"
+    },
+    {
+      "action": "expireOwnerFactory",
+      "location": "managed/lifetime_steps.qnt",
+      "module": "managed_lifetime_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, group: GroupId",
+      "constants": [],
+      "baseline_body_sha256": "beba77df5ff7e65100c9fa951bb7be76e1980729a6620d542412c997db81a70c"
+    },
+    {
+      "action": "finishOwnerReplay",
+      "location": "managed/lifetime_steps.qnt",
+      "module": "managed_lifetime_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, group: GroupId",
+      "constants": [],
+      "baseline_body_sha256": "fa148905d32f2c8c227044e21e17f4590e258d8fd726fa2ed846679ebffe81bc"
+    },
+    {
+      "action": "authorizeOwner",
+      "location": "managed/lifetime_steps.qnt",
+      "module": "managed_lifetime_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, group: GroupId",
+      "constants": [],
+      "baseline_body_sha256": "1c64feced9f94bfec553b6126b3f6e8877cfdec1788df75da32e713cc36cae11"
+    },
+    {
+      "action": "publishOwner",
+      "location": "managed/lifetime_steps.qnt",
+      "module": "managed_lifetime_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, group: GroupId",
+      "constants": [],
+      "baseline_body_sha256": "ef7a91da90907f19c76602ce6b5e5a7bc22f2feee3ce4f2387e6e377f36eb7d8"
+    },
+    {
+      "action": "replyStart",
+      "location": "managed/lifetime_steps.qnt",
+      "module": "managed_lifetime_steps",
+      "kind": "guard/post",
+      "parameters": "request: RequestKey",
+      "constants": [],
+      "baseline_body_sha256": "baa86a3116b40ff51ebaa0e86ab275a8560915203f9fcd704bd4aa388ec6e6fc"
+    },
+    {
+      "action": "cancelStart",
+      "location": "managed/lifetime_steps.qnt",
+      "module": "managed_lifetime_steps",
+      "kind": "guard/post",
+      "parameters": "request: RequestKey",
+      "constants": [],
+      "baseline_body_sha256": "16d2303290bb7f5c7bf1a308085eb52087ae83044b554d07c5a67fdcdb85f8ca"
+    },
+    {
+      "action": "stopOwner",
+      "location": "managed/lifetime_steps.qnt",
+      "module": "managed_lifetime_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, replica: ReplicaKey, explicit: bool",
+      "constants": [],
+      "baseline_body_sha256": "f79065c3dc065299b5cc44bf9e493b23bdf26a468fd8830a53075093694f3d88"
+    },
+    {
+      "action": "joinOwner",
+      "location": "managed/lifetime_steps.qnt",
+      "module": "managed_lifetime_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, group: GroupId",
+      "constants": [],
+      "baseline_body_sha256": "5cfeb90f3955f8d9108bc6a06567a6f365d22a83dfa6efab0b39e2c6b58291d7"
+    },
+    {
+      "action": "beginOwnerClose",
+      "location": "managed/lifetime_steps.qnt",
+      "module": "managed_lifetime_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, group: GroupId",
+      "constants": [],
+      "baseline_body_sha256": "916e5f42767f62e04229882615a4304b140747a0885ae3dfc0bb2739b0fc2958"
+    },
+    {
+      "action": "returnOwnerClose",
+      "location": "managed/lifetime_steps.qnt",
+      "module": "managed_lifetime_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, group: GroupId, success: bool",
+      "constants": [],
+      "baseline_body_sha256": "16f53a9d877ee6124ba89dc70c647beb091c47d0ccc0eaa47f45f01fb8a4fee8"
+    },
+    {
+      "action": "releaseOwner",
+      "location": "managed/lifetime_steps.qnt",
+      "module": "managed_lifetime_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, group: GroupId",
+      "constants": [],
+      "baseline_body_sha256": "3771a3d6f04f48fd020ad4f9179aa5c587f4755c0fd72d87a2fecead751123b9"
+    },
+    {
+      "action": "stopOlderForFence",
+      "location": "managed/node_steps.qnt",
+      "module": "managed_node_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, resource: ResourceKey",
+      "constants": [],
+      "baseline_body_sha256": "cb0e25e8774318cfb56002374debff7b003ff543cd14a290ca2e6f25cb881016"
+    },
+    {
+      "action": "completeHostFence",
+      "location": "managed/node_steps.qnt",
+      "module": "managed_node_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, resource: ResourceKey",
+      "constants": [],
+      "baseline_body_sha256": "13ae9bf3d69ee05736fa600d8c301c212d67e4e2486d50313a0b61fce3986bcc"
+    },
+    {
+      "action": "importStartFloor",
+      "location": "cluster.qnt",
+      "kind": "delegating facade",
+      "delegates": [
+        "dispatchGrantFrom"
+      ]
+    },
+    {
+      "action": "requestNodeStop",
+      "location": "managed/node_steps.qnt",
+      "module": "managed_node_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName",
+      "constants": [
+        "MAX_DELIVERIES"
+      ],
+      "baseline_body_sha256": "157c5d72cb010a26ceb66cabcacc05154126152564b8bc439932a18249ffabfa"
+    },
+    {
+      "action": "joinAuthorityWorkers",
+      "location": "managed/node_steps.qnt",
+      "module": "managed_node_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName",
+      "constants": [],
+      "baseline_body_sha256": "b2aa37de9c3de7263c11f1ce6fc9e101c57d9a86717c2ee33b79778b33e57229"
+    },
+    {
+      "action": "timeoutNodeStop",
+      "location": "managed/node_steps.qnt",
+      "module": "managed_node_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName",
+      "constants": [],
+      "baseline_body_sha256": "07a2064c8d3968b71cb977be4043f9f81105ef8e37191944608d666aba4968e1"
+    },
+    {
+      "action": "expireOwnerClose",
+      "location": "managed/node_steps.qnt",
+      "module": "managed_node_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, group: GroupId",
+      "constants": [],
+      "baseline_body_sha256": "43d057aae029c3932469e159238c4a880480a57f240767af46b3705fd682ffde"
+    },
+    {
+      "action": "finishNodeStop",
+      "location": "managed/node_steps.qnt",
+      "module": "managed_node_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName",
+      "constants": [],
+      "baseline_body_sha256": "1dfa1357c5d77fbe3548022d1619e5b18a96301236e3ff8c9fb8ad12cc1141d4"
+    },
+    {
+      "action": "beginNodeStart",
+      "location": "managed/node_steps.qnt",
+      "module": "managed_node_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName",
+      "constants": [],
+      "baseline_body_sha256": "bc807982b92f4e792d74534ee8be1e911feb5da59ce26284a5549a77bf0ce7d8"
+    },
+    {
+      "action": "localLifetimeStep",
+      "location": "cluster.qnt",
+      "kind": "selector",
+      "delegates": [
+        "authorizeOwner",
+        "beginNodeStart",
+        "beginOwnerClose",
+        "beginOwnerFactory",
+        "completeHostFence",
+        "finishNodeStop",
+        "finishOwnerReplay",
+        "importStartFloor",
+        "joinAuthorityWorkers",
+        "joinOwner",
+        "publishOwner",
+        "readStartScope",
+        "releaseOwner",
+        "replyStart",
+        "reserveOwner",
+        "returnOwnerClose",
+        "returnOwnerFactory",
+        "stopOlderForFence"
+      ]
+    },
+    {
+      "action": "submitControl",
+      "location": "metaservice/authority_steps.qnt",
+      "module": "metaservice_authority_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, command: ControlCommand",
+      "constants": [
+        "MAX_DELIVERIES"
+      ],
+      "baseline_body_sha256": "ad3b45b35c97530e77eea0f4876e3f18d245d5001a430bf0500aa806d38bf027"
+    },
+    {
+      "action": "observeAuthorityLeader",
+      "location": "metaservice/authority_steps.qnt",
+      "module": "metaservice_authority_steps",
+      "kind": "guard/post",
+      "parameters": "node: NodeName, group: GroupId",
+      "constants": [],
+      "baseline_body_sha256": "a3f867ae16bb8abeee2079bdd3fea93c8a11d34b563ceb68c15e9cc834fe4132"
+    },
+    {
+      "action": "dispatchGrantFrom",
+      "location": "metaservice/authority_steps.qnt",
+      "module": "metaservice_authority_steps",
+      "kind": "candidate/guard/post",
+      "parameters": "node: NodeName, key: GrantKey, resource: ResourceKey, proofIndex: int, replica: ReplicaKey",
+      "constants": [
+        "MAX_DELIVERIES"
+      ],
+      "baseline_body_sha256": "bf54f980d9d4a992bf59f408a3b1238a979475924793c48d864456357a5ffc80"
+    },
+    {
+      "action": "dispatchGrant",
+      "location": "cluster.qnt",
+      "kind": "delegating facade",
+      "delegates": [
+        "dispatchGrantFrom"
+      ]
+    },
+    {
+      "action": "confirmGrant",
+      "location": "managed/receiver_steps.qnt",
+      "module": "managed_receiver_steps",
+      "kind": "guard/post",
+      "parameters": "msg: Envelope",
+      "constants": [],
+      "baseline_body_sha256": "35da9d037e433b1f92de6d232b7015979cfe11cfc0f31b676fc7b734fbaa7a6c"
+    },
+    {
+      "action": "receiveGrant",
+      "location": "managed/receiver_steps.qnt",
+      "module": "managed_receiver_steps",
+      "kind": "guard/post",
+      "parameters": "msg: Envelope",
+      "constants": [],
+      "baseline_body_sha256": "27b2000ea8877122d356609f0c41720b4fa70b69a645cbf49a71896c3ed2db5a"
+    },
+    {
+      "action": "consumeGrant",
+      "location": "managed/receiver_steps.qnt",
+      "module": "managed_receiver_steps",
+      "kind": "guard/post",
+      "parameters": "delivery: EffectDelivery",
+      "constants": [
+        "MAX_POSITION"
+      ],
+      "baseline_body_sha256": "f5b780ac23e43004fa86ec19d8e3347d53f02d832789cf2e9e9f98dc708b107e"
+    },
+    {
+      "action": "refuseGrant",
+      "location": "managed/receiver_steps.qnt",
+      "module": "managed_receiver_steps",
+      "kind": "guard/post",
+      "parameters": "delivery: EffectDelivery",
+      "constants": [],
+      "baseline_body_sha256": "5c325385304c8e4a0bf5cbf317be034a7ca8d7838140364a5776408bd75cb82f"
+    },
+    {
+      "action": "reportHostFence",
+      "location": "cluster.qnt",
+      "kind": "delegating facade",
+      "delegates": [
+        "submitControl"
+      ]
+    },
+    {
+      "action": "reportNative",
+      "location": "cluster.qnt",
+      "kind": "delegating facade",
+      "delegates": [
+        "submitControl"
+      ]
+    },
+    {
+      "action": "finishTransfer",
+      "location": "cluster.qnt",
+      "kind": "delegating facade",
+      "delegates": [
+        "elect"
+      ]
+    },
+    {
+      "action": "checkpointTransfer",
+      "location": "cluster.qnt",
+      "kind": "delegating facade",
+      "delegates": [
+        "submitControl"
+      ]
+    },
+    {
+      "action": "authorityStep",
+      "location": "cluster.qnt",
+      "kind": "selector",
+      "delegates": [
+        "checkpointTransfer",
+        "confirmGrant",
+        "consumeGrant",
+        "dispatchGrant",
+        "finishTransfer",
+        "observeAuthorityLeader",
+        "receiveGrant",
+        "refuseGrant",
+        "reportHostFence",
+        "reportNative",
+        "submitControl"
+      ]
+    },
+    {
+      "action": "requestStep",
+      "location": "cluster.qnt",
+      "kind": "selector",
+      "delegates": [
+        "invoke",
+        "requestNodeStop",
+        "requestStart",
+        "stopOwner"
+      ]
+    },
+    {
+      "action": "protocolStep",
+      "location": "cluster.qnt",
+      "kind": "selector",
+      "delegates": [
+        "applyMeta",
+        "beginOperationRecapture",
+        "beginReseatRead",
+        "buildOperation",
+        "captureOperation",
+        "catchUp",
+        "commitMutation",
+        "confirmRead",
+        "deliver",
+        "dispatchOperation",
+        "finishMutation",
+        "finishOperation",
+        "finishRead",
+        "finishReseatRead",
+        "handle",
+        "observeMetaLeader",
+        "observeOperation",
+        "observeOperationHealth",
+        "prepareMutation",
+        "replyOperation",
+        "startOperationRead",
+        "submitMutation",
+        "submitOperation"
+      ]
+    },
+    {
+      "action": "faultStep",
+      "location": "cluster.qnt",
+      "kind": "selector",
+      "delegates": [
+        "abandonSessionRevoke",
+        "cancelCall",
+        "cancelRenewal",
+        "cancelStart",
+        "crash",
+        "dispatchOperation",
+        "drop",
+        "duplicate",
+        "expireLease",
+        "expireOwnLease",
+        "expireOwnerClose",
+        "expireOwnerFactory",
+        "restart",
+        "retryOperationRead",
+        "retryRead",
+        "returnOwnerClose",
+        "returnOwnerFactory",
+        "setLink",
+        "submitMutation",
+        "submitOperation",
+        "timeoutNodeStop",
+        "timeoutSessionProbe"
+      ]
+    },
+    {
+      "action": "nativeStep",
+      "location": "cluster.qnt",
+      "kind": "selector",
+      "delegates": [
+        "commitProgress",
+        "elect"
+      ]
+    },
+    {
+      "action": "managementStep",
+      "location": "cluster.qnt",
+      "kind": "selector",
+      "delegates": []
+    },
+    {
+      "action": "step",
+      "location": "cluster.qnt",
+      "kind": "selector",
+      "delegates": []
+    }
+  ]
+}

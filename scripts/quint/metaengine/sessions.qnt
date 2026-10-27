@@ -56,4 +56,7 @@ module sessions {
       meta.couriers.getOrElse(node, { process: { node: "", incarnation: 0 }, member: 0 }) ==
         { process: key.owner, member: meta.sessions.get(key).member }
   })
+  pure def locallyLeader(host: LocalNode): bool =
+    if (not(host.volatile.observations.keys().contains("_meta"))) false else match host.volatile.observations.get("_meta").observedLeader {
+      | Some(leader) => leader.node == host.process_id | None => false }
 }

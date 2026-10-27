@@ -154,7 +154,7 @@ Allowed imports (within each row, same-subsystem imports are also permitted):
 | runtime | types, vendored Choreo/basicSpells |
 | topology | types, runtime |
 | metaengine | types, runtime, topology |
-| consensus | types, runtime |
+| consensus | types, runtime, metaengine read-only session seed rules |
 | managed | types, runtime, consensus, metaengine read-only/rule functions |
 | metaservice | types, runtime, topology, metaengine, consensus, managed |
 | harness | any production rule/transition family, but never cluster/test state |
@@ -206,18 +206,18 @@ Compare representative intermediate states for metadata commit/apply, authority 
 **Files:** `cluster.qnt`, runtime helpers, subsystem step modules, scenario support and focused tests.
 **References:** target §§4–5, 8–10 and 14; this plan D2–D6.
 
-- [ ] Create the action migration ledger and extract bodies in cohesive groups: metadata request/commit processing; authority dispatch/consumption; lifecycle/host fencing; sessions; consensus/environment. Preserve guard ordering where partial accesses depend on it.
-- [ ] Keep one `world`, the stable named action facade and the existing exploration grouping. Use the Task 1-proven transition interface; preserve nondeterministic domains and disabled branches without introducing a generic command/workflow DSL.
-- [ ] Keep existing update bodies unchanged apart from state/parameter qualification. Check normalized action bodies against the baseline; do not combine helper adoption with mechanical extraction.
-- [ ] Reuse scenario setup/phase helpers while keeping crash/partition/cancel injection points available. Keep production phase actions independent; do not call multi-step test scripts from simulation drivers.
-- [ ] Add focused frame and disabled-action regressions, including missing owner/map entries, false guards, late callbacks, stale incarnation/receipt/courier data and preservation of unrelated operation ownership.
-- [ ] Check all ledger entries against the baseline guards and post-states. Record representative intermediate-state comparisons and unchanged negative-control failures; investigate semantic drift rather than updating assertions to accept it.
+- [x] Create the action migration ledger and extract bodies in cohesive groups: metadata request/commit processing; authority dispatch/consumption; lifecycle/host fencing; sessions; consensus/environment. Preserve guard ordering where partial accesses depend on it.
+- [x] Keep one `world`, the stable named action facade and the existing exploration grouping. Use the Task 1-proven transition interface; preserve nondeterministic domains and disabled branches without introducing a generic command/workflow DSL.
+- [x] Keep existing update bodies unchanged apart from state/parameter qualification. Check normalized action bodies against the baseline; do not combine helper adoption with mechanical extraction.
+- [x] Reuse scenario setup/phase helpers while keeping crash/partition/cancel injection points available. Keep production phase actions independent; do not call multi-step test scripts from simulation drivers.
+- [x] Add focused frame and disabled-action regressions, including missing owner/map entries, false guards, late callbacks, stale incarnation/receipt/courier data and preservation of unrelated operation ownership.
+- [x] Check all ledger entries against the baseline guards and post-states. Record representative intermediate-state comparisons and unchanged negative-control failures; investigate semantic drift rather than updating assertions to accept it.
 
 #### Verification
 
-- [ ] The composition root contains state ownership, small action adapters and exploration composition; domain bodies reside in their named subsystems. Helpers have concrete reuse, not speculative callers.
-- [ ] All baseline scenarios/core checks still pass; intended negative controls still expose their violations. The helper-disabled path cannot extend a trace by stuttering.
-- [ ] Run the final profile matrix and bounded simulations in **Validation Commands**. Record source hashes, commands, bounds and results. Measurements are observations, not a promised runtime speedup.
+- [x] The composition root contains state ownership, small action adapters and exploration composition; domain bodies reside in their named subsystems. Helpers have concrete reuse, not speculative callers.
+- [x] All baseline scenarios/core checks still pass; intended negative controls still expose their violations. The helper-disabled path cannot extend a trace by stuttering.
+- [x] Run the final profile matrix and bounded simulations in **Validation Commands**. Record source hashes, commands, bounds and results. Measurements are observations, not a promised runtime speedup.
 
 ### Task 3: Adopt small reusable framing helpers
 

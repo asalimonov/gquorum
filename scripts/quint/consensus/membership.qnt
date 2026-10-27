@@ -69,4 +69,10 @@ module membership {
   pure def committed(c: ConsensusState, voters: Set[ReplicaKey], position: int): ConsensusState =
     { ...c, committedPosition: position,
       catchUp: c.catchUp.keys().mapBy(r => if (voters.contains(r)) CaughtUp else Behind) }
+  pure def freshMetaAvailable(env: Environment, nodes: NodeStates, node: NodeName): bool = {
+    val c = env.consensus.get("_meta")
+    running(nodes.get(node)) and hasCommitPath(c, nodes, env.network.metaLinks) and
+      match c.leaderAuthority { | Some(leader) => communicates(env.network.metaLinks, node, leader.node)
+        | None => false }
+  }
 }
