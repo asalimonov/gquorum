@@ -45,6 +45,7 @@ type config struct {
 	WALWriteWait, Retention                              time.Duration
 	ProposalTimeout                                      time.Duration
 	SnapshotThreshold                                    uint64
+	MetaSnapshotThreshold                                uint64
 	Bootstrap                                            bool
 	GateFounders                                         bool
 	FoundingTimeout                                      time.Duration
@@ -98,6 +99,7 @@ func main() {
 	flag.DurationVar(&c.WALWriteWait, "wal-write-wait", 0, "load WAL coalescing wait")
 	flag.DurationVar(&c.ProposalTimeout, "proposal-timeout", 0, "load proposal result timeout; zero selects the library default")
 	flag.Func("snapshot-transfer", "fixture: JSON snapshot transfer options", func(value string) error { return decodeJSON([]byte(value), &c.SnapshotTransfer) })
+	flag.Uint64Var(&c.MetaSnapshotThreshold, "meta-snapshot-threshold", 0, "metadata snapshot interval; zero uses library default")
 	flag.Uint64Var(&c.SnapshotThreshold, "snapshot-threshold", 64, "load snapshot interval in applied entries")
 	flag.BoolVar(&c.Scheduling.Disabled, "disable-reconciliation", false, "disable automatic load replica repair")
 	flag.DurationVar(&c.Scheduling.Interval, "reconciliation-interval", 0, "automatic repair observation interval; zero selects the library default")

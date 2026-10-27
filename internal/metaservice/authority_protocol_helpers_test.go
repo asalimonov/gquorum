@@ -122,7 +122,8 @@ func (f *mutationFixture) fixtureApproval(t *testing.T, doc topology.Document) m
 		t.Fatal(err)
 	}
 	return metaengine.BeginOperationProposal{Version: doc.Version, Plan: plan, Scopes: read.Scopes,
-		Actor: "test", Origin: doc.Origin, At: time.Now().UTC(), ProposalID: newProposalID()}
+		Actor: "test", Origin: doc.Origin, At: time.Now().UTC(), ProposalID: newProposalID(),
+		DeletionSemantics: metaengine.DeletionSemanticsDetached}
 }
 
 func (f *mutationFixture) approveFixture(t *testing.T, doc topology.Document) {

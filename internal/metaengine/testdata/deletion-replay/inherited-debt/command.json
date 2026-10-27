@@ -1,0 +1,1 @@
+{"schema_version":4,"kind":"begin_operation","body":{"version":7,"plan":{"version":7,"steps":null,"blocks":[{"group_id":"a","source_version":1,"steps":null}]},"scopes":[{"group_id":"a","source_version":1}],"actor":"","origin":"","at":"2026-10-15T00:00:01Z","proposal_id":"historical-inherited-debt"}}

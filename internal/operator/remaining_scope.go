@@ -45,7 +45,7 @@ func ValidateRemainingScope(view RemainingPlanView, op topology.Operation, group
 	approved := view.Target.Group(group)
 	if approved == nil {
 		return nil
-	} // Deletion uses exact stopped-owner proof in metadata.
+	} // Metadata validates retained cleanup; legacy required stops retain their proof.
 	required := make(map[int]bool, len(block.Steps))
 	for _, seq := range block.Steps {
 		required[seq] = true

@@ -11,4 +11,4 @@ The test copies `work` into a temporary caller-owned root and recovers it throug
 membership and byte-for-byte preservation of the identity pin.
 
 Do not regenerate with current code. See
-[physical compatibility provenance](../../../docs/testing/api-baseline-physical.md).
+[physical compatibility hash manifest](../../../docs/testing/api-baseline-physical.json).

@@ -13,4 +13,4 @@ names, and journal reads without rewriting retained rows.
 reconciliation spellings and retain the native bbolt sequence. The physical
 compatibility test reads them through current public operator/scheduling values,
 appends sequence 3, reopens, and verifies the old records were never rewritten.
-See [physical compatibility provenance](../../docs/testing/api-baseline-physical.md).
+See the [physical compatibility hash manifest](../../docs/testing/api-baseline-physical.json).

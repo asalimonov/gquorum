@@ -40,10 +40,20 @@ func (s *scopedState) cleanupDebtForAction(id storage.Identity,
 		replica.NodeName == id.NodeName && s.Target.MemberID(id.NodeName) == debt.MemberID {
 		return nil, fault.ErrOperationAuthorization
 	}
+	if s.cleanupWaitsForReadmission(debt) {
+		return nil, fault.ErrAuthorityPending
+	}
 	if action.Kind != topology.StepStopReplica && debt.Stopped == nil {
 		return nil, fault.ErrAuthorityPending
 	}
 	return debt, nil
+}
+
+func (s *scopedState) cleanupWaitsForReadmission(debt *cleanupRecord) bool {
+	return debt.Identity.GroupID != topology.MetaGroupID && debt.Retired == nil &&
+		s.Target.Group(debt.Identity.GroupID) == nil &&
+		s.Target.MemberID(debt.Identity.NodeName) > debt.MemberID &&
+		slices.ContainsFunc(s.RetiredGroups, func(row retiredGroup) bool { return row.ID == debt.Identity.GroupID })
 }
 
 func exactCleanupBinding(debt *cleanupRecord, action topology.AuthorizedStep) bool {

@@ -9,7 +9,7 @@ This document describes the current managed load transport and gRPC adapter.
 Custom implementations of `load.Transport` may use another network protocol,
 but must preserve the same identity, authentication and delivery contracts.
 For consensus behavior, see [the Raft model](raft.md); for application wiring,
-see [the runtime overview](runtime.md).
+see [the library architecture](library.md).
 
 ## 1. What is shared and what is independent
 
@@ -238,7 +238,7 @@ Open authenticates and authorizes exact peers and carries a small native MsgSnap
 
 Defaults are 256 MiB encoded maximum, one transfer in each direction, derived directional byte budgets, 1 MiB payloads/window eight, 30-minute total and one-minute verified-progress timeout. Reconnect preserves both clocks and exact manifest/process/receiver-run identity. A restart/replacement requires a new transfer. Terminal cache eviction degrades safely to restart; it cannot refuse new admission. Invalid data and size/frame/capability refusal differ from transient capacity/group_busy backoff.
 
-Full-buffer state-machine/storage APIs remain. In-memory staging is behind a private backend interface; no receive files or caller storage-location parameters exist. Transfer budgets exclude resident snapshots, encoding/decoded copies and application state, so RSS can exceed them substantially. Local Snapshot/Restore callbacks remain serialized and can delay their replica. See [ownership and bounded repair protection](runtime.md#managed-load-snapshot-ownership) and [adapter settings](../../transport/loadgrpc/README.md).
+Full-buffer state-machine/storage APIs remain. In-memory staging is behind a private backend interface; no receive files or caller storage-location parameters exist. Transfer budgets exclude resident snapshots, encoding/decoded copies and application state, so RSS can exceed them substantially. Local Snapshot/Restore callbacks remain serialized and can delay their replica. See [node ownership](library.md#construct-and-start-a-node) and [adapter settings](../../transport/loadgrpc/README.md).
 
 ## 7. Application request routing
 

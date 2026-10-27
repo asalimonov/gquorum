@@ -26,7 +26,8 @@ func (s *scopedState) applyRetryOperation(index uint64, p RetryOperationProposal
 	if err := next.recordRetryPrefix(index, previous, retry); err != nil {
 		return proposalApplication{}, err
 	}
-	if err := next.revokeAuthorityLocked(index, failedBlockRefs(previous), retry.Status.ID); err != nil {
+	err = next.revokeAuthorityLocked(index, failedBlockRefs(previous), retry.Status.ID, DeletionSemanticsLegacy)
+	if err != nil {
 		return proposalApplication{}, err
 	}
 	if err := next.advanceNodeProgressLocked(p.At); err != nil {

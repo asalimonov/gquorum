@@ -1,14 +1,14 @@
 # Architecture
 
-Start with the [runtime overview](runtime.md), then use the
-[Raft model](raft.md), [node lifecycle and recovery](runtime.md), and
-[placement contract](placement.md) for details. See
+Start with the [library](library.md) and [project map](project-map.md), then use the
+[Raft model](raft.md), and [placement contract](placement.md) for details. See
 [load transport multiplexing](load-transport-multiplexing.md) for how independent
-Raft groups share a listener and peer connections. The terms below describe the
-current library behavior. Examples use an application group named `orders` and
-nodes named `n1`, `n2`, and `n3`.
+Raft groups share a listener and peer connections.
 
 ## Dictionary
+
+The terms below describe the current library behavior. Examples use an application
+group named `orders` and nodes named `n1`, `n2`, and `n3`.
 
 ### Groups, replicas, and placement
 
@@ -23,7 +23,7 @@ group has its own log, leader, membership, and application state machine. A
 `*load.Group` handle refers to **one exact local replica**, not the whole
 distributed group. For example, `orders` may have replicas on all three nodes,
 while `node.LoadGroup("orders")` returns only this node's handle. “Load” does
-not mean a CPU or request-load measurement. See [managed load integration](runtime.md).
+not mean a CPU or request-load measurement. See [managed load integration](library.md#construct-and-start-a-node).
 
 **Replica.** One group's copy on one node, identified by its node name and a
 numeric `ReplicaID` within that group. The same node may host both an `_meta`
@@ -80,7 +80,7 @@ which validates and binds its identity. TLS uses caller-supplied server/client
 settings; plaintext requires an explicit opt-in. The shared credential is not
 a per-node cryptographic identity, and it does not itself approve membership or
 administrative effects. See [meta transport](../../internal/metatransport/server.go)
-and [admission](runtime.md).
+and [node admission](library.md#nodes-life-cycle).
 It is NOT A SECURITY mechanism, only guard for prevent collisions between nodes
 of the different clusters. For securing connections you need to use mTLS.
 
@@ -90,13 +90,13 @@ membership workflow. Admission binds node name, numeric member ID, process
 instance, approved topology, and durable local evidence. For example, adding
 `n3` is not merely opening a listener: `n3` must be admitted as an `_meta`
 member before its assigned load replicas can become ready. See
-[construction](runtime.md) and [startup evidence](runtime.md).
+[construction](library.md#construct-and-start-a-node) and [startup evidence](raft.md#6-persistence-snapshots-and-recovery).
 
 **Drain.** An approved topology change that moves load replicas away from a
 node while retaining its `_meta` membership. `Cluster.DrainNode(ctx, "n3", opts)`
 marks `n3` draining and plans safe load movement; normal exclusion follows a
 converged drain. This differs from the `reserved` label, which blocks new load
-identities without moving existing replicas. See [topology administration](runtime.md).
+identities without moving existing replicas. See [topology administration](library.md#topology-and-cluster-administration).
 
 **Readmission.** Replacement of a declared active node after fresh health
 reports it dead. `Cluster.ReadmitNode` allocates fresh meta/load identities and
@@ -104,7 +104,7 @@ uses exact grants, fencing, and retirement evidence before the successor takes
 over. For example, a replacement process may keep the name `n3` but cannot
 reuse the departed process's member and replica IDs. A retained restart of the
 same durable identity is recovery, not readmission. See
-[readmission and removal](runtime.md).
+[readmission and removal](library.md#nodes-life-cycle).
 
 **Retirement.** Authorized removal of an old exact replica or node identity and
 its owned state. Normal node exclusion follows drain; `ForceRetireNode` requires
@@ -113,7 +113,7 @@ application retirement callback must verify the matching identity and proof,
 even if its data is already absent. For example, deleting `orders` does not
 license deletion of a foreign or newer `orders` replica on the same path.
 Retirement does not create a new quorum after permanent majority loss. See
-[retirement and recovery](runtime.md).
+[node life cycle](library.md#nodes-life-cycle).
 
 ### Authority, reads, and leadership
 
@@ -126,7 +126,7 @@ returns that operation's **revocation status and outstanding resource
 obligations**; `WaitRevoked` waits until a requested revocation is durably
 complete. For example, a superseded operation can remain pending while `n3` is
 unreachable and its old action cannot yet be fenced. This is effect authority,
-not user authentication. See [approved actions](runtime.md).
+not user authentication. See [approved actions](library.md#topology-and-cluster-administration).
 
 ```mermaid
 flowchart LR
@@ -152,7 +152,7 @@ cluster lock key. `Cluster.LockHolder(ctx, "jobs/settlement")` returns a local
 observation; `ReadLockHolder` confirms `_meta` quorum and local application
 before returning committed ownership. The returned TTL is configured duration,
 not remaining lease time or proof that the holder process is alive. See
-[sessions and locks](runtime.md).
+[sessions and locks](raft.md#1-scope-what-uses-raft-and-what-does-not).
 
 **Leader transfer (`TransferLeader`).** A guarded request to hand a group's
 leadership to another declared, active voter. For example,
@@ -160,42 +160,4 @@ leadership to another declared, active voter. For example,
 and initiates an election; it does not change group membership. The target
 still needs the group's election quorum to become leader, and a timed-out
 caller cannot assume the transfer was undone. See
-[topology administration](runtime.md) and [Raft elections](raft.md).
-
-## Architecture
-
-An application constructs a `gquorum.Node` for each participant and supplies
-its identities, configuration, load state machines, storage, and load transport.
-Each Node owns one local `_meta` replica and any assigned local load replicas;
-`node.Cluster()` is its administration view, not another running service. The
-distributed `_meta` group replicates topology documents and approved operators.
-Those documents declare independent load groups and assign their replicas to
-nodes. An approved plan authorizes changes to those replicas; each load group
-then runs its own Raft consensus and application state machine, independently of
-`_meta`. The diagram shows logical relationships for admitted nodes and active
-groups; a parked replica may have no running handle or state machine.
-`CALLER_` marks application-created components; `LIB_` marks components whose
-lifecycle and coordination the library manages. The caller constructs each
-`LIB_NODE` with `NewNode`, then the library manages it after `Start`.
-
-```mermaid
-erDiagram
-    CALLER_APPLICATION ||--|{ LIB_NODE : constructs
-    LIB_NODE ||--|| LIB_CLUSTER_VIEW : exposes
-    LIB_META_GROUP ||--|{ LIB_CLUSTER_VIEW : administered_through
-    LIB_NODE ||--|| LIB_META_REPLICA : hosts
-    LIB_NODE ||--o{ LIB_LOAD_REPLICA : hosts
-    LIB_META_GROUP ||--|{ LIB_META_REPLICA : consists_of
-    LIB_META_GROUP ||--|{ LIB_TOPOLOGY_DOCUMENT : replicates_versions
-    LIB_META_GROUP ||--o{ LIB_OPERATOR : approves
-    LIB_TOPOLOGY_DOCUMENT ||--o{ LIB_LOAD_GROUP : declares
-    LIB_LOAD_GROUP ||--o{ LIB_LOAD_REPLICA : consists_of
-    LIB_LOAD_REPLICA ||--o| LIB_LOAD_GROUP_HANDLE : exposes_when_ready
-    LIB_LOAD_REPLICA ||--o| CALLER_STATE_MACHINE : runs_when_ready
-```
-
-For example, three Nodes each host one `_meta` replica, while the `orders` load
-group may have one replica on each Node. An operator approved through `_meta`
-can change `orders` membership, but `orders` proposals and reads use the
-`orders` Raft group. See the [runtime overview](runtime.md) for the
-public handles and [Raft model](raft.md) for the group boundaries.
+[topology administration](library.md#topology-and-cluster-administration) and [Raft elections](raft.md).

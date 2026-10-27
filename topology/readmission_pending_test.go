@@ -83,17 +83,21 @@ func TestPendingReadmissionDeletionKeepsOtherHostsAndNoSyntheticAdmission(t *tes
 			if err != nil || len(plan.Blocks) != 1 || plan.Blocks[0].GroupID != "work" {
 				t.Fatal("pending retirement prevented scoped deletion", plan, err)
 			}
+			if len(plan.Blocks[0].Steps) != 0 {
+				t.Fatal("pending readmission became a deletion prerequisite", plan)
+			}
 			if all {
-				// This is ownership selection only. FSM completion must still wait
-				// for the exact readmission receipt even though no step can call a/1.
-				if len(plan.Steps) != 0 || plan.IsEmpty() {
-					t.Fatal("readmission-owned deletion lost its zero-step block", plan)
+				if len(plan.Steps) != 2 || plan.Steps[0].NodeName != "a" ||
+					plan.Steps[1].Kind != StepDeleteGroupState ||
+					!slices.Equal(plan.Blocks[0].Cleanup, []int{1, 2}) {
+					t.Fatal("pending readmission lost ordinary deletion debt", plan)
 				}
 				return
 			}
-			if len(plan.Steps) != 3 || plan.Steps[0].NodeName != "b" || plan.Steps[1].NodeName != "c" ||
-				plan.Steps[2].Kind != StepDeleteGroupState || !slices.Equal(plan.Blocks[0].Steps, []int{1, 2}) {
-				t.Fatal("readmission waived another host's retirement", plan)
+			if len(plan.Steps) != 4 || plan.Steps[0].NodeName != "a" || plan.Steps[1].NodeName != "b" ||
+				plan.Steps[2].NodeName != "c" || plan.Steps[3].Kind != StepDeleteGroupState ||
+				!slices.Equal(plan.Blocks[0].Cleanup, []int{1, 2, 3, 4}) {
+				t.Fatal("pending readmission waived exact host cleanup", plan)
 			}
 		})
 	}

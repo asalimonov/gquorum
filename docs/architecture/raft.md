@@ -2,7 +2,7 @@
 
 How gquorum uses Raft consensus, which state it replicates, and how elections,
 transport, persistence and recovery fit together. This document describes the
-current implementation; the [runtime overview](runtime.md) introduces the public
+current implementation; the [library architecture](library.md) introduces the public
 entities, ownership and main flows.
 
 gquorum uses `go.etcd.io/raft/v3` for two kinds of consensus group: one `_meta`
@@ -262,7 +262,7 @@ writes survive while a quorum of the group's replicas keeps running. A restarted
 replica has no state, so it cannot resume its old Raft identity (an amnesiac
 voter could vote twice). It parks as `store_missing`, as a voter with a lost WAL
 would, and its node then reseats its own replica under a fresh ID; see
-[node ownership and recovery](runtime.md#in-memory-load-groups).
+[node life cycle](library.md#nodes-life-cycle).
 
 Startup verifies durable identity and recovery evidence, restores the snapshot,
 and replays the full committed tail. An applied hint is not permission to skip
@@ -312,29 +312,7 @@ healthy groups or provision machines. Configured groups, including `_meta`,
 support guarded voter-role changes. Repair policies choose
 supported decisions; they cannot bypass quorum or ownership constraints.
 
-## 8. Performance and bounded work
-
-The write path includes durable storage, communication with enough voters and
-state-machine application. Slow storage, slow Apply/Snapshot callbacks or a slow
-voter needed for quorum increase latency. Independent destination queues prevent
-one slow peer's send from directly blocking other peers; bounded queues report
-overload or unreachable destinations instead of accumulating unlimited work.
-They cannot remove shared CPU, disk or network bottlenecks.
-
-The shared engine defaults to 256 pending proposal slots, 64 MiB of uncommitted
-entries and a 1 MiB committed-entry batch limit. Load `EngineOptions` exposes
-these controls. `WALWriteWait` is disabled by default; when enabled, it provides
-a bounded capture delay for batching during closely spaced writes, trading
-waiting time for fewer persistence batches. It does not weaken durability.
-
-`ProposalStats`, `WALStall` and replica errors expose pressure. A WAL stall over
-one second rejects new proposals as overloaded. Raft storage writes and peer
-sends use separate workers. Machine calls and meta materialization hooks remain
-serialized on the run loop and can perform application or metadata I/O. Snapshot
-work and application callbacks therefore need bounded execution. No throughput
-or latency target is guaranteed by the default settings.
-
-## 9. Failure behavior and limits
+## 8. Failure behavior and limits
 
 | Condition | Result |
 | --- | --- |

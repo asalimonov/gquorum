@@ -94,7 +94,7 @@ func TestScopedEffectRefusesFencedGrantWithoutChangingState(t *testing.T) {
 	s.Operations[1].Status.State, s.Operations[1].Status.Blocks[1].State = topology.OperationRunning, topology.OperationRunning
 	key := scopedPendingTransfer(&s)
 	prepareScopedFixture(t, &s)
-	if err := s.revokeAuthorityLocked(11, []blockRef{{"exec-v2-a2", "shard0"}}, ""); err != nil {
+	if err := s.revokeAuthorityLocked(11, []blockRef{{"exec-v2-a2", "shard0"}}, "", DeletionSemanticsLegacy); err != nil {
 		t.Fatal(err)
 	}
 	s.AppliedIndex = 11

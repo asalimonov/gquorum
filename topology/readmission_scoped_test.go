@@ -67,7 +67,7 @@ func TestReadmissionReplanPreservesOrdinaryMetaPromotion(t *testing.T) {
 	}
 }
 
-func TestReadmissionConvergenceCoversOnlyExactDeletionHosts(t *testing.T) {
+func TestReadmissionConvergencePreservesUnprovenDeletionOwners(t *testing.T) {
 	t.Parallel()
 	for _, partial := range []bool{false, true} {
 		t.Run(fmt.Sprint(partial), func(t *testing.T) {
@@ -85,12 +85,16 @@ func TestReadmissionConvergenceCoversOnlyExactDeletionHosts(t *testing.T) {
 			}
 			plan.Steps = append(plan.Steps, Step{GroupID: "work", Kind: StepDeleteGroupState})
 			bound := bindReadmissionRetirement(input, desired, plan, unionGroupIDs(input, desired))
+			want := 2
 			if partial {
-				if len(bound.Steps) != 2 || bound.Steps[0].NodeName != "b" || bound.Steps[1].Kind != StepDeleteGroupState {
-					t.Fatal("completed readmission waived another host's deletion", bound)
-				}
-			} else if len(bound.Steps) != 0 {
-				t.Fatal("completed readmission repeated retired host deletion", bound)
+				want = 3
+			}
+			if len(bound.Steps) != want || bound.Steps[0].NodeName != "a" ||
+				bound.Steps[want-1].Kind != StepDeleteGroupState {
+				t.Fatal("metadata convergence alone dropped deletion obligations", bound)
+			}
+			if partial && bound.Steps[1].NodeName != "b" {
+				t.Fatal("readmission dropped an unrelated former host", bound)
 			}
 		})
 	}

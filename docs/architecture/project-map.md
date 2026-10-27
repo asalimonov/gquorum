@@ -2,8 +2,29 @@
 
 How the repository is organized: modules, responsibility zones and the key
 entities and interfaces each zone owns. Contracts and behavior live in the
-[runtime overview](runtime.md), [Raft model](raft.md) and [placement](placement.md); test
+[library architecture](library.md), [Raft model](raft.md) and [placement](placement.md); test
 commands live in the [testing guide](../testing/tests.md).
+
+| Path | Responsibility |
+| --- | --- |
+| `node*.go`, `cluster*.go` | Public handles, settings, methods and lifecycle composition. |
+| `topology/` | Documents, identities, placement, plans, operations, session/status values and validation. |
+| `load/` | Explicit application types, Group, typed transport and Standalone owner. |
+| `transport/loadgrpc/` | Optional public load gRPC adapter, bounded connections, authentication and internal wire protocol. |
+| `scheduling/`, `lifecycle/` and their test-helper packages | Repair policies, lifecycle hooks, built-ins and caller contract helpers. |
+| `storage/`, `storage/walstore/`, `storage/memstore/`, `storage/storagetest/` | Raft persistence/retirement contracts, etcd WAL backend, in-memory store and conformance helpers. |
+| `events/`, `fault/`, `membership/` | Local events/journal, classified faults and advanced fixed safety helpers. |
+| `internal/managed/`, `internal/loadhandle/` | Exact replica ownership, recovery, approved actions, retirement and opaque group representation. |
+| `internal/metaservice/` | Private topology service, admission, documents, local ledger and protocol integration. |
+| `internal/metaengine/`, `internal/metastore/` | Meta FSM and bbolt durable state. |
+| `internal/authoritystore/` | Independent node-bound durable host floors, effect receipts and readmission rebind evidence. |
+| `internal/metatransport/`, `internal/metapb/` | Included meta transport, protocol and generated code. |
+| `internal/operator/`, `internal/scheduling/`, `internal/observe/` | Approved plan execution, scheduling driver and health observations. |
+| `internal/raftengine/`, `internal/raftlog/` | Shared Raft loop, replay, persistence, queues, pressure and logging. |
+| `examples/cluster/` | Separate Go module for the small meta-only HTTP/Compose demo, with Kong configuration and distinct cluster/HTTP files; `make run-example`. |
+| `tests/cluster/` | Separate Go module for Docker correctness/fault/scale tests and the actual example smoke test. |
+| `tests/cluster/testapp/` | Full application FSM, typed protocol adapter, application retirement and test-only fault controls; public Node integration tests. |
+| `docs/architecture/`, `docs/testing/` | Current contracts, test commands, coverage and validation evidence. |
 
 ## Structure and dependency direction
 
@@ -40,11 +61,6 @@ flowchart TD
 Arrows show composition/call relationships, not exclusively Go imports.
 `topology`, `storage`, `load`, `metrics`, `fault` and `events` provide shared
 contracts. `membership` and `internal/votercheck` enforce safety beneath policy.
-Each Node owns one `_meta` replica and zero or more independent load replicas;
-ordinary load proposals/reads use their own group's quorum. `_meta` coordinates
-admission, topology, authority, sessions and locks; it is not a load-command relay.
-`KB_GROUP_BOUNDARY`: losing meta progress blocks administration and acquisition
-of new authority; accepted healthy load owners can continue their own consensus.
 
 | Area | Package directories / purpose |
 | --- | --- |

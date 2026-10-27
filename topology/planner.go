@@ -89,7 +89,7 @@ func replicaNode(group *Group, id uint64) string {
 func (b *topologyPlanBuilder) planDeletedGroup(groupID string) {
 	retire := false
 	for _, replica := range b.input.formerReplicas(groupID) {
-		if replica.Progress != RetainedStopped {
+		if replica.Progress == RetainedHosted {
 			b.emit(groupID, StepStopReplica, replica.NodeName, replica.ReplicaID)
 		}
 		retire = retire || replica.Progress == RetainedHosted
@@ -494,7 +494,8 @@ func (v *plannedStepValidator) applyCleanupReplicaState(i int, step Step, state 
 
 func (v *plannedStepValidator) applyDeleteGroupState(step Step, state *validationGroup) error {
 	for _, replica := range v.input.formerReplicas(step.GroupID) {
-		if replica.Progress != RetainedStopped && !state.stopped[replica.ReplicaID] &&
+		if replica.Progress != RetainedStopped && replica.Progress != RetainedCleanup &&
+			!state.stopped[replica.ReplicaID] &&
 			!ReadmissionCovers(v.input, v.desired, v.plan, replica.NodeName) {
 			return planUnsafef("delete group %q lacks stop for replica %d", step.GroupID, replica.ReplicaID)
 		}

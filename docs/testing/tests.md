@@ -1,359 +1,64 @@
 # Test suites
 
-Tests are grouped by what they exercise. Units check deterministic logic and
-isolated components. Non-Docker functional tests cover a single running
-participant, isolated Raft engines, protocol doubles, background application
-workers and persistence/recovery fixtures. Tests of private implementation stay
-beside that implementation; public recovery API and Node integration coverage is
-grouped in the root-module `tests/recovery` package. Multi-node consensus and
-application scenarios live in `tests/cluster` and use real Docker processes
-through the bounded pool. Deterministic multi-node simulations live separately
-in `tests/sim`; `make test-sim` runs the real metadata transport and storage on
-Gosim's runtime, filesystem and network providers.
+Use the root `Makefile` for repository checks. `make test` compiles all five application modules—the library, three examples and the cluster caller fixture—and runs uncached unit tests. Root `go test ./...` covers only the library module.
 
-`make test` compiles the library, the separate `examples/cluster`,
-`examples/scheduler` and `examples/inmemory-cache` modules and the caller application fixture, then runs their uncached units with `-count=1`.
-Go build constraints select the suites at the file level:
-
-| File | Build constraint | Contents |
-| --- | --- | --- |
-| `*_test.go` | `//go:build !functional` | Unit tests and benchmarks |
-| `*_func_test.go` | `//go:build functional` | Non-Docker functional tests and exclusive helpers |
-| `*_helpers_test.go` | None | Helpers shared by both suites |
-
-Put each build constraint at the top of the file, followed by a blank line before
-`package`. Shared helper-only files may retain their existing names, such as
-`fixtures_test.go`. Unit helpers used only by units stay with their unit files.
-
-`make test-function` uses `go test -tags=functional` in all five application modules, so it
-runs only functional tests. The `!functional` constraint excludes unit tests
-from that command; default `go test` excludes functional files. Classification
-does not depend on `testing.Short()` or per-test skip guards. Lightweight value
-stubs and callbacks testing a single local component are units; fixtures modeling
-interacting services are functional.
-
-Suite reports count parent tests and subtests separately. Use the latest report
-for executed counts; source-level test inventories do not include table cases.
-
-The scheduler Compose suite runs separately from the small metadata example:
-`make test-scheduler-example` builds an isolated image and tests transfer,
-executor/leader failure, retained recovery, quorum loss, and a live partition.
-
-Independent units call `t.Parallel()`. The defaults run four packages and eight
-cases per package concurrently; `UNIT_PACKAGES` and `UNIT_PARALLEL` override them.
-Keep units fast and the complete warm-cache unit command below 30 seconds on the
-development machine. Dependency download and a cold compiler cache are separate
-setup costs. Tests must not mutate process environment, working directory or the
-upstream WAL segment-size global while running in parallel.
-
-Independent functional tests also call `t.Parallel()` before creating their
-fixtures. Each test owns its temporary storage, listeners on ephemeral ports,
-transport and cleanup. Independent table cases may run in parallel; cases that
-mutate one shared component or store stay sequential within their parent test.
-Functional runs default to four packages and eight cases per package, controlled
-by `FUNCTIONAL_PACKAGES` and `FUNCTIONAL_PARALLEL`. The same limits apply to race
-runs. This bounds disk and network contention while isolated components
-progress concurrently. Functional fixtures must not start a multi-node cluster.
-The five modules are run in sequence, including `examples/scheduler` and
-`examples/inmemory-cache`.
+## Choose a suite
 
 | Command | Coverage |
 | --- | --- |
-| `make test-cache-example` | Isolated cache Compose recovery after one-node and full process restarts |
-| `make test-scheduler-example` | Isolated three-process scheduler Compose lifecycle, recovery and partition checks |
-| `make test` / `make test-unit` | Compile the library, example and fixture; run uncached parallel units |
-| `make test-race` / `make test-unit-race` | The same units under the race detector |
-| `make test-function` | Non-Docker functional tests in `*_func_test.go` files |
-| `make test-function-race` | Functional tests under the race detector |
-| `make test-example` | Actual small Compose demo REST e2e |
-| `make test-cluster` | Build the image, then run Docker process tests with `-tags=clustertest` |
-| `make test-sim` | Seeded three-node latency and intermittent-connectivity simulations in a separate module |
-| `make test-perf` | Three measured Docker cases, each under two minutes |
-| `make bench` | Planner and complete meta FSM snapshot matrices |
-| `make lint` | The same checks for pending Go files: staged, unstaged and untracked changes in the working tree |
-| `make lint-full` | Vet all module/build variants; TiDB revive style rules and merged Staticcheck unused declarations |
-| `make proto-check` | Regenerate pinned protocol code and require no diff |
+| `make test` (`make test-unit`) | Fast units across all five modules; use during development. |
+| `make test-unit-race` (`make test-race`) | The same units with the race detector. |
+| `make test-function` | Local functional, storage and protocol tests across all five modules. |
+| `make test-function-race` | Functional tests with the race detector. |
+| `make test-cluster` | Build the caller image and run Docker process scenarios. |
+| `make test-cluster-build` / `make test-cluster-run` | Build once, then run or focus process tests against that image. |
+| `make test-example` | Small `_meta` Compose demo. |
+| `make test-scheduler-example` / `make test-cache-example` | Separate application Compose suites. |
+| `make test-sim` | Opt-in deterministic three-node Gosim scenarios. |
+| `make test-perf` / `make bench` | Process resource gates / planner and snapshot benchmarks. |
+| `make lint` / `make lint-full` | Pending Go files / all modules and build tags. |
+| `make proto-check` | Regenerate pinned protocols and require no diff. |
 
-`make test-functional` and `make test-functional-race` remain aliases for the
-`test-function` targets. Use `make test-function FUNCTIONAL_ARGS='-v -run TestName'` for a focused
-non-Docker regression. `FUNCTIONAL_TIMEOUT` defaults to eight minutes per package.
-Use functional race checks for changes to ownership and concurrency. Keep the
-full Docker suite for the end of a related set of changes.
+`make test-functional` and `make test-functional-race` are aliases for the functional targets. Run focused checks while editing; reserve full race, lint and Docker suites for the final checkpoint of a feature. Use `make lint` on pending changes and `make lint-full` once before cluster validation. The pre-commit hook checks staged Go files; install it with `make install-hooks`.
 
-For animated Docker status captures, set `CLUSTER_REPLAY=1` on `make test-cluster`
-or `make test-cluster-run`, optionally selecting cases with `CLUSTER_ARGS`.
-The run directory gains `cluster-replay.jsonl`, `cluster-replay.html` and
-individual raw captures under `replay/`. Sampling is opt-in; see
-[capture semantics and limitations](../../tests/cluster/README.md#optional-status-replay).
+## Where tests belong
 
-The simulation suite is opt-in and uses `//go:build sim`; it does not join the
-five-module unit or functional loop. `SIM_SEEDS` defaults to `1-3`, and
-`SIM_ARGS='-run TestName'` selects cases. Reports are retained under
-`test-reports/sim/`. See [the simulation guide](../../tests/sim/README.md) for
-the 100 ms quorum sampling contract, network/timing settings, current coverage
-boundaries and reproducible seed commands.
+| Files or module | Build tag | Scope |
+| --- | --- | --- |
+| `*_test.go` | `!functional` | Isolated units and benchmarks. |
+| `*_func_test.go` | `functional` | One local participant, storage or protocol doubles. |
+| `*_helpers_test.go` | None | Helpers shared by unit and functional suites. |
+| `tests/cluster` process cases | `clustertest` | Multi-node consensus and application behavior in Docker. |
+| `tests/sim` | `sim` | Deterministic multi-node simulation in a separate module. |
 
+Put a build constraint on the first line, then a blank line before `package`. Select suites with tags rather than `testing.Short()` or skip guards. Keep private implementation tests beside their package; public recovery API and single-Node coverage belongs in `tests/recovery`.
 
-`make lint-full` installs versioned binaries under the ignored `.tools/lint/` directory:
-revive v1.17.1 and Staticcheck v0.8.2. The checked-in [revive configuration](../../revive.toml)
-copies `tools/check/revive.toml` from the local TiDB checkout, including its 16
-enabled style rules, confidence threshold and severity. These
-[revive rules](https://github.com/revive-lint/revive/blob/v1.17.1/RULES_DESCRIPTIONS.md)
-do not detect unused declarations. Staticcheck supplies `U1000`, with a
-[merged build matrix](https://staticcheck.dev/docs/running-staticcheck/cli/build-tags/)
-so helpers used only in functional or process tests remain live. The runner vets
-unit/functional builds in all five application modules, clustertest/example builds
-in the test module and the lint wrapper's unit build. It passes every selected
-source file to a small wrapper around the pinned revive library. The wrapper groups files by directory to preserve package comments
-and cross-file type information while including all selected build tags. Generated files retain their
-generated-code exclusion. Lint compiles and analyzes tests without executing them or starting Docker. Build
-failures and findings return nonzero status; there are no blanket unused-code
-suppressions. The wrapper's regression check is available with
-`cd scripts/revive && go test ./...`.
+Units call `t.Parallel()` when independent and must not start services, replicas or subprocesses. Functional tests call `t.Parallel()` before acquiring private temporary roots, ephemeral listeners and joined cleanup. Parallel table cases need separate fixtures; mutations of one shared component stay sequential. Do not put multi-node fixtures in functional packages. Do not mutate process environment, working directory or the upstream WAL segment-size global from parallel tests. Keep `make test` below 30 seconds on the documented warm machine.
 
-Enable the pre-commit hook once after cloning with `make install-hooks`.
-The hook runs `make lint-staged`'s checks against a temporary copy of the Git
-index, so partially staged files use the contents being committed. It vets
-affected packages and runs the same production, revive and merged unused-code
-checks, reporting lint findings only in staged Go files. Compilation failures
-still block the commit. Renames and deletions include the affected packages;
-lint configuration changes check every module, and staged `go.mod`/`go.sum`
-changes check their entire module. Documentation-only commits skip lint.
-Pinned tools are installed automatically when needed. The checks never run tests
-or change staged files. Run `make lint-staged` to invoke them manually.
+Unit and functional runs default to four packages and eight parallel tests per package (`UNIT_PACKAGES`, `UNIT_PARALLEL`, `FUNCTIONAL_PACKAGES`, `FUNCTIONAL_PARALLEL`). The five modules run sequentially. Preserve frozen baseline fixtures; copy them to private roots for tests instead of regenerating them.
 
-`make lint` applies the same scoping to all pending work instead of the index:
-staged, unstaged and untracked (non-ignored) files are linted in place using
-their working-tree contents. Use it while editing; `make lint-full` remains the
-complete check before cluster tests.
+## Docker process tests
 
-## Test reports
+Use three nodes for ordinary quorum and fault cases; use more only for a regression that requires the extra capacity. Process cases call `t.Parallel()` before acquiring an isolated pool lease, and must join and remove their containers, volumes and workers. Subtests sharing one lease stay sequential. `CLUSTER_PARALLEL` defaults to eight; pool size and concurrent startup follow Go's `-parallel` setting unless explicitly overridden. Performance runs default to one parallel case.
 
-The test targets require Python 3.9 or newer for the shared
-[`scripts/test_report.py`](../../scripts/test_report.py) runner. It uses the
-standard library and Go's `-json` event stream. Unit, functional, Docker cluster,
-Compose and race runs use the same Meridian-style console summary:
+Build the image after caller-application changes. Do not replace a shared image tag during a run. `CLUSTER_TIMEOUT` defaults to ten minutes. A compile-only check needs `-exec=true` because the process suite's `TestMain` starts Docker even with no selected tests:
 
-```text
-REPORT                                               TESTS    PASS    FAIL     ERR    SKIP
-...
-TOTAL (26 reports)                                     ...     ...     ...     ...     ...
-Unit tests: PASS
-Wall time: ...s
+```sh
+make test-cluster-build
+make test-cluster-run CLUSTER_ARGS='-v -run TestName'
+go -C tests/cluster test -tags=clustertest -run '^$' -exec=true ./...
 ```
 
-Console output shows package progress, failures and report paths. Cluster and
-Compose runs also show progress for each top-level test. Verbose test output is
-flushed to files while the run is in progress. The summary counts all testcase
-instances, including parent tests, subtests, repeated runs and executable
-examples, matching JUnit reporting; these counts differ from the top-level
-source inventory above. Package failures outside a test and unfinished tests
-produce entries in the `ERR` column.
+Use [the process harness](../../tests/cluster/README.md) for fault controls and cleanup details. `CLUSTER_REPLAY=1` adds optional status captures. Large generated snapshots use the separate `snapshotlarge` tag and explicit resource qualification described in that guide; they are outside ordinary suites. The [simulation guide](../../tests/sim/README.md) covers seeds and reproducible network faults.
 
-Each invocation creates a unique UTC timestamped directory under
-`test-reports/<suite>/`. Suites are `unit`, `function`, `cluster`, `example` and
-their `-race` variants. Concurrent runs use separate directories; old reports
-are preserved. `test-reports/<suite>/latest` links to the latest completed run.
-`TEST_REPORTS_DIR` overrides the report root. The default root is ignored by Git.
+## Reports and focused runs
 
-Every run saves:
-
-- `report.md`: summary table, durations, commands and links to package details.
-- `timeline.md`: timing report with an ASCII Gantt diagram and the complete
-  test timing table. The chart shows command phases and leaf tests, including
-  parallel subtests, sorted by actual execution start. Parent coordinators appear
-  in the table. Entered (`run`), execution (`cont` for parallel tests), queue
-  time and active time are separate columns; queued intervals are excluded from
-  the execution bars. Execution includes fixture acquisition and cleanup.
-  Wall time includes compilation, setup, teardown and the image
-  build when running `make test-cluster`.
-- `timeline.json`: machine-readable timings and execution segments.
-- `events.json`: the merged raw Go event stream.
-- `console.log` and `command-<module>.log`: full output, including compiler,
-  process and Docker build diagnostics.
-- `<module>-<pkg>.xml`, `.json`, `.log` and `.md`: JUnit XML, raw events,
-  verbose output and detailed Markdown results for each package.
-
-Reports are written on test/build failures and interruptions as well as success.
-The runner preserves failure exit status, and a failed Docker image build stops
-before starting tests. Non-Docker runs finish the remaining modules after a
-failure so their results are also available.
+Targets require Python 3.9 or newer. Each run writes `test-reports/<suite>/<timestamp>/`; `latest` points to the last completed run, and `TEST_REPORTS_DIR` changes the root. Read `report.md` for results, `timeline.md` for execution order, and package `.log` files for failures. JUnit XML, raw events and command logs are retained. Counts include parent tests and subtests. Failed builds and interrupted runs retain reports and nonzero exit status.
 
 ```sh
 make test UNIT_ARGS='-run TestName'
 make test-function FUNCTIONAL_ARGS='-run TestName'
-make test-cluster-run CLUSTER_ARGS='-run TestName'
-python3 -m unittest discover -s scripts -p '*_test.py'  # Reporting-tool regressions
+make test-sim SIM_SEEDS=1-3 SIM_ARGS='-run TestName'
 ```
 
-## Docker suites
-
-The small `_meta` demo contains topology/status/drain/activate HTTP routes.
-Its actual Compose e2e lives in `tests/cluster/example_test.go` and uses private
-project/image names, random ports and temporary volumes. Full load FSMs,
-protocols, application retirement and fault controls belong to
-`tests/cluster/testapp`; all process scenarios belong to `tests/cluster`.
-The separate test module keeps Docker tooling outside the library dependency
-graph. The example module keeps Kong outside the library dependency graph;
-root test and vet targets include its tests explicitly. Use
-`go -C examples/cluster test ./...` for a focused example check.
-
-Multi-node scenarios run only here with the `clustertest` build tag, including
-the former in-process meta, engine and caller-fixture runtime cases. The
-[migration map](cluster-migration.md) records their process replacements and
-retained component assertions. Single-node functional fixtures cannot accept
-a cluster-size argument.
-
-Ordinary cluster and quorum scenarios use three nodes; larger node-count
-matrices are omitted. Four-node admission/promotion, durable admission-pin restart
-and interrupted voter-swap, guarded leadership transfer and replication-lag
-regressions require a fourth member for three voters plus one learner. Strict
-three-AZ placement uses the fourth member as a same-AZ standby to verify its
-guarded voter switch and refusal after a survivor loss. The five-node automatic-promotion acceptance case needs two
-standbys to prove that exactly one is promoted and the other retains its learner
-role; it also checks retained return and a second failure during cooldown.
-The seven-host capacity regression proves atomic rejection at the default five
-load replicas and complete all-host placement after explicitly raising the cap.
-Larger cases do not repeat the ordinary fault matrix.
-
-Cluster cases and independent admission-phase subtests call `t.Parallel()` before setup.
-`CLUSTER_PARALLEL` defaults to eight for both cluster targets. Pool capacity and
-concurrent startup follow Go's `-parallel` setting (also eight by default for raw
-cluster invocations); existing `GQUORUM_TEST_POOL_SIZE` and
-`GQUORUM_TEST_COOK_PARALLEL` overrides remain available. Each case owns isolated
-testcontainers resources; the bounded pool reuses only its private network after
-verified cleanup. Subtests sharing a lease stay sequential. Dedicated performance
-targets default to `PERF_PARALLEL=1` for comparable latency measurements.
-`CLUSTER_TIMEOUT` sets the suite deadline and defaults to ten minutes. Each performance case separately
-bounds deployment, workload and release and must finish in less than two minutes.
-Use `make test-cluster-run CLUSTER_ARGS='-race -v -run TestRuntimeGrowth'` to
-reuse a built image for focused checks. Short or focused runs complement the
-complete regression.
-
-See the [process migration map](cluster-migration.md),
-[process harness](../../tests/cluster/README.md),
-[Node ownership](../architecture/runtime.md) and
-[measured performance gates](performance.md). Milestone validation and earlier
-timings remain historical records in repository history. Current scoped validation
-is recorded in the [validation record](api-refactor-validation.md).
-
-The scheduler module has unit validation (CAS transitions, codec, revocation
-rules, executor choice, configuration) and functional SQLite/FSM, snapshot,
-schema-reset, retirement and single-replica recovery coverage under the same
-tags as the library. `make test` and `make test-function` include it, and
-`make lint-full` checks both variants. The public load gRPC adapter has
-protocol-double tests under its owning package's `functional` tag. Process
-failover acceptance is the separate `make test-scheduler-example` Compose
-scenario.
-
-In-memory load storage is covered at every layer. `storage/memstore` units run
-the shared `storagetest.Run` conformance suite plus snapshot, retirement and
-ownership cases without touching disk. `internal/managed` functional tests check
-store selection by storage class, conflicting state, retirement through the
-memory store and the own-reseat loop (memory voters only, pinned to the observed
-proven group source plus Latest/Target CAS, joined on Stop). A root functional test creates a memory group
-with `EnsureGroup`. `TestMemoryGroupReseatsARestartedReplicaThreeNodes` in
-`tests/cluster` restarts a node and verifies that its memory replica is reseated
-without human intervention while its persistent replica keeps its identity. The
-in-memory cache example's functional test closes and reopens a WAL store with
-`DisableFSync` enabled, rebuilding a fresh cache machine from snapshots and log.
-`make test-cache-example` runs the actual three-node cache Compose application
-with private volumes, ports and an image tag. It kills/restarts one process and
-then all three, verifying retained values, unchanged replica IDs and new writes.
-It exercises process failure with the OS running, not host/VM power loss.
-
-## Scoped operations and cleanup validation
-
-All five application modules are the root library, `examples/cluster`,
-`examples/scheduler`, `examples/inmemory-cache` and `tests/cluster` (including
-its caller fixture). The lint wrapper is separate tooling. Component tests stay
-beside their owners: metadata planning/Apply/restore/progress are units; actual
-bbolt/WAL, Node, managed owners and protocol doubles use `functional`. New
-three-process acceptance cases use the existing Docker pool:
-
-| Case | Boundary exercised |
-| --- | --- |
-| `TestFailureIsolation_BlockedGroup` | Hold A's founding effect; B creates, reseats and serves while A retains original owner/source and the historical marker stays behind. |
-| `TestFailureIsolation_StagedRebase` | Repair B preserves unapproved A through atomic R/S ancestry, meta leader loss/retained restart and typed old-version conflict. |
-| `TestFailureIsolation_RemovedHostCleanup` | Offline former host leaves exact debt; surviving quorum converges, return retires/collects, stale cleanup cannot affect a fresh-ID successor. |
-| `TestFailureIsolation_DeletionStopProof` | Missing exact stop keeps whole-group deletion pending while an independent group converges and serves. |
-| `TestFailureIsolation_CollectionReporting` | Hold durable report, lose metadata quorum, crash reporter, inspect stopped journal, restart and deliver original receipt without redoing deletion. |
-| `TestFailureIsolation_ExactMutationReplay` | Lose accepted HTTP replies to Stage/Approve/Reseat/Retry; original request returns the same version, identity and immediate attempt. |
-
-Build only after application changes settle, then reuse the image:
-
-```sh
-make test-cluster-build
-make test-cluster-run CLUSTER_ARGS='-v -run ^TestFailureIsolation_'
-make test-cluster-run
-```
-
-`BenchmarkCleanupDebtApply` lives in the functional suite because it opens a real
-store. It scales validated retained proof at 0/1k/10k debts and measures changed
-Apply serialization, bbolt bytes/allocations, snapshot/restore and bounded query
-selection. Run independently of other heavy checks to reduce measurement noise:
-
-```sh
-go test -tags=functional -run '^$' -bench '^BenchmarkCleanupDebtApply$' -benchmem -count=3 ./internal/metaengine
-```
-
-These are coverage locations and commands, not a claim that a listed process
-scenario has passed. Actual revisions, image/report paths, outcomes and cleanup
-are recorded in the [validation record](api-refactor-validation.md).
-The final scoped architecture review requires complete functional,
-functional-race and cluster runs after any corrections; earlier runs do not
-replace that final gate.
-
-Permanent-majority-loss component cases stay in owning functional packages;
-`TestPermanentMajorityLoss*` uses the three-node Docker pool and authenticated
-remote maintenance controls. Opt-in `BenchmarkRecoveryResources` (root functional
-build) and `BenchmarkRecoveryMetadataResources` (`internal/metaengine` functional
-build) cover large local recovery input. Compile a binary before OS RSS measurement
-and run one case at a time with `-test.benchtime=1x`; these large fixtures are not
-part of normal fast/functional runs. See the [qualification record](permanent-majority-loss-recovery.md).
-
-## Recovery source layout
-
-`tests/recovery` belongs to the root module and is discovered by the ordinary
-unit/functional commands. It groups public contracts, source inspection/approval,
-execution, Node startup/application/restart flows and resource benchmarks. No
-permanent-majority-loss recovery test remains in the repository root.
-Implementation-specific assertions stay beside `internal/recovery` components,
-metadata, managed replicas, WAL and engine code. Shared recovery tests use their
-own temporary single-Node fixtures and joined cleanup.
-
-`TestPublicLabelEditUsesDocumentWorkflow` now runs under `tests/sim`: it edits a
-complete document through public placement preparation/Stage/Approve and verifies
-replicated labels and unchanged replica allocation through quorum reads on all
-three simulated participants. Select it with:
-
-```sh
-make test-sim SIM_SEEDS=1-3 SIM_ARGS='-run TestPublicLabelEditUsesDocumentWorkflow'
-```
-
-Recovery resource reproduction now compiles `./tests/recovery` instead of `.`:
-
-```sh
-go test -c -tags=functional -o /tmp/gquorum-recovery-resources.test ./tests/recovery
-```
-
-Prior qualification records retain their original revision, binary hash and source
-paths. Source moves do not turn those historical measurements into new runs.
-
-## Explicit large-snapshot qualification
-
-Ordinary units, functional checks, performance targets and `clustertest` alone exclude large generated payloads. The additional `snapshotlarge` build tag selects `TestLargeSnapshot_`; there is no default Make dependency or checked-in snapshot blob. The generated cases request 256,000,000, 1,000,000,000 and 2,000,000,000 encoded bytes, with observed envelope calibration and explicit per-node policy. This ceiling is a test choice; production options accept larger representable sizes.
-
-Use one unique image tag for the final ordinary suite and qualification; do not replace it during a run:
-
-```sh
-SNAPSHOT_TEST_IMAGE=gquorum-test:snapshot-20261026
-make test-cluster-build CLUSTER_IMAGE="$SNAPSHOT_TEST_IMAGE"
-make test-cluster-run CLUSTER_IMAGE="$SNAPSHOT_TEST_IMAGE" \
-  CLUSTER_PARALLEL=1 CLUSTER_TIMEOUT=2h \
-  CLUSTER_ARGS='-tags=clustertest,snapshotlarge -run ^TestLargeSnapshot_ -v'
-```
-
-The test refuses insufficient resources rather than shrinking a case. It requires Docker memory of at least twelve times the requested encoded length and available storage of at least eight times that length. Each case generates reproducible actual bytes, uses production chunks/Node-owned WAL/Restore, verifies tail/new writes/restart and a lost chunk Ack, and checks ordinary traffic on another group. Reports retain compact sizes/hashes and sampled heap/RSS/store high-water, reservations, wire chunk/window peaks and phase timing. These observations are not RSS/throughput guarantees; serialized full-buffer callbacks and resident state remain material costs.
-
-Qualification passed on 2026-10-26 with Go 1.26.5, etcd Raft 3.6.0 and gRPC 1.79.3 on Linux/arm64 Docker 29.6.1 (39,878,758,400 bytes VM memory). All three exact encoded ceilings passed, with reconnect, ordinary traffic, persistence/Restore, tail/new writes, retained restart and zero transfer reservations after completion. Evidence: `test-reports/cluster/20261025T222708.955256Z-4acyzfy_/report.md`. Sizes above 2 GB remain unmeasured. Five-module units/race/functional/race, full lint, proto-check, the gRPC teardown race gate and all 122 ordinary cluster cases also passed. See [measured resource details](../../tests/cluster/README.md#measured-snapshot-resources) for the scope and sampling limits.
+If you change the report runner, run `python3 -m unittest discover -s scripts -p '*_test.py'` and exercise its affected Make targets. Historical results in repository history do not replace a fresh run.

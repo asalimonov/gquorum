@@ -39,12 +39,15 @@ type proxyFrame []byte
 type proxyCodec struct{}
 
 type metaRaftControl struct {
-	Identity      topology.Identity `json:"identity"`
-	DropRaft      bool              `json:"drop_raft"`
-	FramesDropped uint64            `json:"frames_dropped"`
+	Identity          topology.Identity `json:"identity"`
+	DropRaft          bool              `json:"drop_raft"`
+	FramesDropped     uint64            `json:"frames_dropped"`
+	SnapshotIndex     uint64            `json:"snapshot_index"`
+	SnapshotsAccepted uint64            `json:"snapshots_accepted"`
 }
 
 func (a *application) registerMetaFaultRoutes(mux *http.ServeMux, protect func(http.HandlerFunc) http.HandlerFunc) {
+	a.registerReadmissionReportRoutes(mux, protect)
 	mux.HandleFunc("PUT /internal/test/meta", protect(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Identity topology.Identity `json:"identity"`
@@ -67,7 +70,9 @@ func (a *application) registerMetaFaultRoutes(mux *http.ServeMux, protect func(h
 	mux.HandleFunc("GET /internal/test/meta", protect(func(w http.ResponseWriter, _ *http.Request) {
 		a.clusterHooks.mu.Lock()
 		defer a.clusterHooks.mu.Unlock()
-		jsonResponse(w, http.StatusOK, a.clusterHooks.metaRaft)
+		view := a.clusterHooks.metaRaft
+		view.Identity = a.currentNode().Identity()
+		jsonResponse(w, http.StatusOK, view)
 	}))
 }
 
@@ -148,6 +153,10 @@ func (p *metaFaultProxy) forward(_ any, downstream grpc.ServerStream) error {
 			return status.FromContextError(err).Err()
 		}
 	}
+	snapshotIndex := uint64(0)
+	if strings.HasSuffix(method, "/SendSnapshot") {
+		snapshotIndex = proxySnapshotIndex(frame, p.app.currentNode().Identity())
+	}
 	var fence *load.FenceRequest
 	if strings.HasSuffix(method, "/InstallFence") {
 		request, err := proxyFenceRequest(frame)
@@ -157,6 +166,12 @@ func (p *metaFaultProxy) forward(_ any, downstream grpc.ServerStream) error {
 		fence = &request
 		if err := p.app.waitAuthorityFence(ctx, request, false); err != nil {
 			return status.FromContextError(err).Err()
+		}
+	}
+	if strings.HasSuffix(method, "/JoinReady") {
+		frame, err = p.app.partialReadmissionReport(frame)
+		if err != nil {
+			return status.Error(codes.InvalidArgument, err.Error())
 		}
 	}
 	upstream, err := p.conn.NewStream(ctx, &grpc.StreamDesc{ClientStreams: true}, method)
@@ -186,6 +201,15 @@ func (p *metaFaultProxy) forward(_ any, downstream grpc.ServerStream) error {
 	if err := upstream.RecvMsg(&frame); err != nil {
 		downstream.SetTrailer(upstream.Trailer())
 		return err
+	}
+	if snapshotIndex != 0 {
+		code, decodeErr := proxyBytesField(frame, 1)
+		if decodeErr == nil && len(code) == 0 {
+			p.app.clusterHooks.mu.Lock()
+			p.app.clusterHooks.metaRaft.SnapshotIndex = snapshotIndex
+			p.app.clusterHooks.metaRaft.SnapshotsAccepted++
+			p.app.clusterHooks.mu.Unlock()
+		}
 	}
 	if fence != nil {
 		code, err := proxyBytesField(frame, 1)

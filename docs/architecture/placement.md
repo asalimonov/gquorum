@@ -1,11 +1,11 @@
 # Labels and placement
 
 Status: **implemented**. This document describes the current feature contract.
-The broader library context is in [runtime overview](runtime.md). The original design
+The broader library context is in [library architecture](library.md). The original design
 was recorded as `20261013-labels-node-selector-target.md` and
 `20261013-labels-node-selector.md`; those historical brainstorms are not included
 in this checkout. Current persistence and execution contracts are described here
-and in [runtime.md](runtime.md).
+and in [library.md](library.md).
 
 ## Ownership and purpose
 
@@ -228,8 +228,8 @@ decision; the library never deletes incompatible state automatically.
 
 The implementation specification records exact format changes. Existing
 immutable compatibility fixtures were not regenerated to hide a format change.
-Current and rejected-format verification is recorded in
-[placement validation](../testing/placement-validation.md).
+Historical current- and rejected-format verification is recorded in the
+[archived placement validation](https://github.com/asalimonov/gquorum/blob/353b57d76cba13758910d36c4ade399e35f89574/docs/testing/placement-validation.md).
 
 
 ## Recovery policy deficits

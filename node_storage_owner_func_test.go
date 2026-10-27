@@ -94,13 +94,15 @@ func TestNodeStorageLeaseAndFailedApplicationClose(t *testing.T) {
 	if _, err := n.Cluster().WaitOperation(ctx, result.OperationID); err != nil {
 		t.Fatal(err)
 	}
-	if err := n.Stop(ctx); !errors.Is(err, closeFailure) {
+	stopCtx, stopCancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer stopCancel()
+	if err := n.Stop(stopCtx); !errors.Is(err, closeFailure) {
 		t.Fatal("Close failure was not retained", err)
 	}
 	assertNodeStorageBusy(t, o)
-	if err := n.Stop(ctx); err != nil {
-		t.Fatal(err)
-	}
+	// Each retry gets its own wait budget; startup and the first failed Close
+	// must not consume the deadline used to verify the second teardown attempt.
+	stopAuthorityNode(t, n)
 	assertNodeStorageReleased(t, o)
 	if closes.Load() != 2 {
 		t.Fatal("application release did not retry exactly once", closes.Load())

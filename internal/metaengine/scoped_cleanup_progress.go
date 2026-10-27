@@ -11,7 +11,7 @@ import (
 func (check scopedCleanupValidation) stopAction(debt cleanupRecord) bool {
 	origin := check.index.operations[debt.OperationID]
 	bound := check.index.operations[topology.OperationID(debt.StopAction.OperationID)]
-	if bound == nil || bound.Status.Version < origin.Status.Version ||
+	if origin == nil || bound == nil || bound.Status.Version < origin.Status.Version ||
 		bound.Status.Version == origin.Status.Version && bound.Status.Attempt < origin.Status.Attempt {
 		return false
 	}
@@ -27,9 +27,18 @@ func (check scopedCleanupValidation) stopAction(debt cleanupRecord) bool {
 		return check.pendingStop(debt, bound)
 	}
 	// Only Stop may change binding; retirement and removal retain their origin.
-	return debt.RetireAction.Kind != topology.StepDeleteGroupState &&
-		slices.ContainsFunc(bound.Plan.Blocks, func(block topology.PlanBlock) bool {
-			return block.GroupID == debt.Identity.GroupID && slices.Contains(block.Cleanup, debt.StopAction.StepSeq)
+	return detachedCleanupStop(bound, debt.StopAction) &&
+		(debt.RetireAction.Kind != topology.StepDeleteGroupState ||
+			check.state.Target.Group(debt.Identity.GroupID) == nil &&
+				slices.ContainsFunc(check.state.RetiredGroups, func(row retiredGroup) bool {
+					return row.ID == debt.Identity.GroupID
+				}))
+}
+
+func detachedCleanupStop(operation *topology.Operation, action *topology.AuthorizedStep) bool {
+	return operation != nil && action != nil && action.Kind == topology.StepStopReplica &&
+		slices.ContainsFunc(operation.Plan.Blocks, func(block topology.PlanBlock) bool {
+			return block.GroupID == action.GroupID && slices.Contains(block.Cleanup, action.StepSeq)
 		})
 }
 

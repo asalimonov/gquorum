@@ -25,7 +25,7 @@ type scopedRevocation struct {
 
 // Called on an owned candidate only. All fallible work precedes publication.
 func (s *scopedState) revokeAuthorityLocked(index uint64, blocks []blockRef,
-	successor topology.OperationID) error {
+	successor topology.OperationID, semantics DeletionSemantics) error {
 	if index <= s.AppliedIndex {
 		return fault.ErrOperationAuthorization
 	}
@@ -47,7 +47,7 @@ func (s *scopedState) revokeAuthorityLocked(index uint64, blocks []blockRef,
 		selected[block] = true
 		t.request(block)
 	}
-	conflicts := s.successorResources(lookup.operations[successor])
+	conflicts := s.successorResources(lookup.operations[successor], semantics)
 	for _, record := range s.AuthorityRecords {
 		if t.shouldClose(record, selected, conflicts) {
 			if err := t.closeRecord(record.Grant, successor); err != nil {

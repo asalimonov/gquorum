@@ -129,18 +129,21 @@ func TestFailureIsolation_ExactMutationReplay(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	response, err = c.Request(ctx, "node1", "DELETE", "/api/groups/work", gquorum.MutationOptions{Actor: "uncertain-caller", Approve: true}, replacementReplay.Document.Version)
+	response, err = c.Request(ctx, "node1", "POST", "/api/groups/work/replicas/node3/reseat", map[string]any{
+		"replica_id": replicaID(replacementReplay.Document, "work", "node3"),
+		"actor":      "uncertain-caller", "comment": "required replacement stop retry",
+	}, replacementReplay.Document.Version)
 	if err := requireStatus(response, err, 202); err != nil {
 		t.Fatal(err)
 	}
-	var deletion gquorum.MutationResult
-	if err := response.Decode(&deletion); err != nil {
+	var retryMutation gquorum.MutationResult
+	if err := response.Decode(&retryMutation); err != nil {
 		t.Fatal(err)
 	}
 	var failed topology.OperationStatus
 	if err := Poll(ctx, func() (bool, error) {
 		var err error
-		failed, err = c.Operation(ctx, "node1", deletion.OperationID)
+		failed, err = c.Operation(ctx, "node1", retryMutation.OperationID)
 		return failed.State.Terminal(), err
 	}); err != nil || failed.State != topology.OperationFailed {
 		t.Fatal("fixture did not create a retryable failed attempt", failed, err)
@@ -172,11 +175,11 @@ func TestFailureIsolation_ExactMutationReplay(t *testing.T) {
 	if err != nil || op.Version != failed.Version || op.Attempt != failed.Attempt+1 {
 		t.Fatal("retry changed its approved version or attempt", op, err)
 	}
-	if got := startApply(ctx, t, c, "node1", deletion.Document.Version); got != failed.ID {
+	if got := startApply(ctx, t, c, "node1", retryMutation.Document.Version); got != failed.ID {
 		t.Fatal("approval replay silently selected retry", got, failed.ID)
 	}
 	latest, err := c.Document(ctx, "node1", "latest")
-	if err != nil || latest.Version != deletion.Document.Version {
+	if err != nil || latest.Version != retryMutation.Document.Version {
 		t.Fatal("replay allocated another topology version", latest, err)
 	}
 }

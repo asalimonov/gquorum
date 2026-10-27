@@ -334,7 +334,7 @@ func newApplication(cfg config, logger *slog.Logger, supplied *listeners) (_ *ap
 		Node:       cfg.nodeForPeer(peer{Name: cfg.NodeName, Type: cfg.NodeType, MetaAddress: cfg.MetaAddress, LoadAddress: cfg.LoadAddress, HTTPAddress: cfg.HTTPAddress}),
 		Bootstrap:  gquorum.BootstrapOptions{Founders: founders, Join: cfg.Join, JoinSeeds: seeds},
 		Limits:     cfg.Limits, Placement: placement, Events: a.bus, Logger: logger,
-		Meta: gquorum.MetaOptions{SessionTTL: cfg.SessionTTL, VoterConfig: cfg.MetaVoterConfig,
+		Meta: gquorum.MetaOptions{SnapshotThreshold: cfg.MetaSnapshotThreshold, SessionTTL: cfg.SessionTTL, VoterConfig: cfg.MetaVoterConfig,
 			Timing:  gquorum.MetaTiming{TickInterval: cfg.TickInterval, ElectionTicks: cfg.ElectionTicks},
 			Network: gquorum.MetaNetworkOptions{Listener: ls.meta, AdvertiseAddress: cfg.MetaAddress, AllowPlaintext: true, ClusterCredential: []byte(cfg.Credential), Resolver: metaResolver{a}}},
 		Loads: gquorum.LoadOptions{SnapshotTransfer: cfg.SnapshotTransfer, Factory: a.newReplica, Retire: a.retireReplica, Transport: loadTransport{app: a},

@@ -125,7 +125,7 @@ func TestScopedDeletionRejectsCancellationOfDependedOnBatch(t *testing.T) {
 		}
 		collector.markConvergedOwners(s.planningDeclarations().Groups)
 		before, _ := json.Marshal(next)
-		prep := deletionPreparation{&s, &candidate, collector}
+		prep := deletionPreparation{source: &s, next: &candidate, collector: collector}
 		err := prep.protectReadmission()
 		if member == 2 && err != nil || member != 2 && !errors.Is(err, fault.ErrOperationAuthorization) {
 			t.Fatal("pending retirement source was canceled or same-member handover refused", member, err)
@@ -162,7 +162,7 @@ func TestScopedDeletionReusesProofAndRefusesPartialCompletionAtomically(t *testi
 		t.Fatal(err)
 	}
 	collector.markConvergedOwners(s.planningDeclarations().Groups)
-	prep := deletionPreparation{&s, next, collector}
+	prep := deletionPreparation{source: &s, next: next, collector: collector}
 	before, _ := json.Marshal(next)
 	if err := prep.complete("shard0", proposal.At.Add(time.Second)); err != nil {
 		t.Fatal(err)

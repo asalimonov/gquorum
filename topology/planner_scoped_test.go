@@ -93,7 +93,7 @@ func TestScopedPlannerLeavesIndependentDeletionDebt(t *testing.T) {
 	}
 }
 
-func TestScopedDeletionKeepsExactRequiredHosts(t *testing.T) {
+func TestScopedDeletionKeepsExactHostedAndCleanupOwners(t *testing.T) {
 	t.Parallel()
 	base := scopeDocument()
 	base.Group("a").NextReplicaID = 3
@@ -104,11 +104,12 @@ func TestScopedDeletionKeepsExactRequiredHosts(t *testing.T) {
 	input.Retained = map[string]RetainedGroup{"a": {Replicas: []RetainedReplica{
 		{ReplicaKey: ReplicaKey{NodeName: "n3", ReplicaID: 2}, Progress: RetainedCleanup}}}}
 	plan, err := BuildPlanPreferred(input, desired, PlanOptions{Rules: plannerRules()})
-	if err != nil || len(plan.Steps) != 3 {
+	if err != nil || len(plan.Steps) != 2 {
 		t.Fatal("deletion omitted required old hosts or needed a quorum", plan, err)
 	}
-	if plan.Steps[0].NodeName != "n1" || plan.Steps[1].NodeName != "n3" ||
-		plan.Steps[1].ReplicaID != 2 || plan.Steps[2].Kind != StepDeleteGroupState {
+	if plan.Steps[0].NodeName != "n1" || plan.Steps[0].ReplicaID != 1 ||
+		plan.Steps[1].Kind != StepDeleteGroupState || len(plan.Blocks[0].Steps) != 0 ||
+		!slices.Equal(plan.Blocks[0].Cleanup, []int{1, 2}) {
 		t.Fatal("deletion lost exact identity", plan)
 	}
 	input.Approved = desired.Clone() // Original-plan validation must not rederive an empty delta.
@@ -116,8 +117,8 @@ func TestScopedDeletionKeepsExactRequiredHosts(t *testing.T) {
 		t.Fatal("approval invalidated its immutable deletion plan", err)
 	}
 	broken := plan.Clone()
-	broken.Steps = slices.Delete(broken.Steps, 1, 2)
-	broken.Steps[1].Seq = 2
+	broken.Steps = []Step{{Seq: 1, GroupID: "a", Kind: StepDeleteGroupState}}
+	broken.Blocks[0].Cleanup = []int{1}
 	if err := validatePlanShapeFor(input, desired, broken, []string{"a"}); err == nil {
 		t.Fatal("scoped deletion waived an unconsumed required stop")
 	}

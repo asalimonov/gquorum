@@ -124,7 +124,7 @@ func TestScopedCleanupHandoverRefusesOmittedOrForeignStops(t *testing.T) {
 			mutate(&p)
 			next := s.prepareApprovalOwners(s.Latest, p)
 			before, _ := json.Marshal(s)
-			if err := prepareCleanupHandovers(&s, next, s.planningCollector()); !errors.Is(err, fault.ErrOperationAuthorization) {
+			if err := prepareCleanupHandovers(&s, next, s.planningCollector(), DeletionSemanticsLegacy); !errors.Is(err, fault.ErrOperationAuthorization) {
 				t.Fatal("lost required-stop boundary", err)
 			}
 			after, _ := json.Marshal(s)
@@ -161,7 +161,7 @@ func TestScopedCleanupHandoverPreservesConsumedAndReadmissionProof(t *testing.T)
 			At: s.Cleanup[0].UpdatedAt.Add(time.Second), Plan: topology.Plan{Version: 7,
 				Blocks: []topology.PlanBlock{{GroupID: "a", SourceVersion: 1}}}}))
 		before, _ := json.Marshal(s)
-		err = prepareCleanupHandovers(&s, &next, s.planningCollector())
+		err = prepareCleanupHandovers(&s, &next, s.planningCollector(), DeletionSemanticsLegacy)
 		if !consumed {
 			if !errors.Is(err, fault.ErrOperationAuthorization) {
 				t.Fatal("approval alone supplied omitted retirement", err)
@@ -326,7 +326,7 @@ func TestScopedCleanupHandoverRebindsFailedRetry(t *testing.T) {
 	next := retryScopedDeletion()
 	// Exercise preparation rather than the fixture's manually rebound action.
 	next.Cleanup[1] = s.Cleanup[1]
-	if err := prepareCleanupHandovers(&s, &next, s.planningCollector()); err != nil {
+	if err := prepareCleanupHandovers(&s, &next, s.planningCollector(), DeletionSemanticsLegacy); err != nil {
 		t.Fatal(err)
 	}
 	if next.Cleanup[1].StopAction.OperationID != "exec-v2-a2" ||

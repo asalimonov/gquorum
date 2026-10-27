@@ -43,7 +43,7 @@ func TestScopedApprovalRetirementDoesNotReissueConsumedWork(t *testing.T) {
 				progress: tc.progress, removed: tc.removed}}}
 			plan := topology.Plan{Version: 2, Steps: []topology.Step{{Seq: 1, GroupID: "shard0",
 				NodeName: "n1", ReplicaID: 1, Kind: tc.kind}}}
-			err := validateNewRetirement(collector, input, desired, plan)
+			err := collector.validateNewRetirement(input, desired, plan, DeletionSemanticsLegacy)
 			if tc.refuse != errors.Is(err, fault.ErrOperationAuthorization) {
 				t.Fatal("incorrect new ownership decision", err)
 			}
@@ -51,7 +51,7 @@ func TestScopedApprovalRetirementDoesNotReissueConsumedWork(t *testing.T) {
 	}
 	owner := planningReplica{progress: topology.RetainedCleanup}
 	stop := topology.Step{GroupID: "shard0", NodeName: "n1", ReplicaID: 1, Kind: topology.StepStopReplica}
-	if !duplicateRetirement(owner, base.Group("shard0"), stop) || duplicateRetirement(owner, nil, stop) {
+	if !duplicateRetirement(owner, base.Group("shard0"), stop, DeletionSemanticsLegacy) || duplicateRetirement(owner, nil, stop, DeletionSemanticsLegacy) {
 		t.Fatal("cleanup stop must be required by replacement or deletion")
 	}
 }
@@ -76,7 +76,7 @@ func TestScopedImmutableRetirementShapeSurvivesConsumption(t *testing.T) {
 	}
 	collector := planningCollector{owners: map[planningReplicaKey]*planningReplica{{"shard0", 1}: {
 		target: topology.AuthorityTarget{NodeName: "n1", MemberID: 1, ReplicaID: 1}, progress: topology.RetainedStopped}}}
-	if err := validateNewRetirement(collector, input, desired, plan); !errors.Is(err, fault.ErrOperationAuthorization) {
+	if err := collector.validateNewRetirement(input, desired, plan, DeletionSemanticsLegacy); !errors.Is(err, fault.ErrOperationAuthorization) {
 		t.Fatal("new approval reclaimed completed work", err)
 	}
 }

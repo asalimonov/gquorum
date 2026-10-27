@@ -20,6 +20,9 @@ const (
 // before this candidate can replace live state. No application callbacks or I/O.
 func prepareScopedApproval(s *scopedState, desired topology.Document,
 	p BeginOperationProposal, kind approvalKind) (*scopedState, error) {
+	if p.DeletionSemantics > DeletionSemanticsDetached {
+		return nil, fault.ErrUnsupported
+	}
 	if err := knownPlanSteps(p.Plan); err != nil {
 		return nil, err
 	}
@@ -40,20 +43,20 @@ func prepareScopedApproval(s *scopedState, desired topology.Document,
 	if err := s.validateRecoveryPlan(input, desired, p.Plan); err != nil {
 		return nil, planContentRefusal(err)
 	}
-	if err := validateNewRetirement(collector, input, desired, p.Plan); err != nil {
+	if err := collector.validateNewRetirement(input, desired, p.Plan, p.DeletionSemantics); err != nil {
 		return nil, err
 	}
 	next := s.prepareApprovalOwners(desired, p)
 	if err := prepareAdmissionHandovers(s, next); err != nil {
 		return nil, err
 	}
-	if err := prepareCleanupHandovers(s, next, collector); err != nil {
+	if err := prepareCleanupHandovers(s, next, collector, p.DeletionSemantics); err != nil {
 		return nil, err
 	}
-	if err := prepareDeletionDebts(s, next, collector); err != nil {
+	if err := prepareDeletionDebts(s, next, collector, p.DeletionSemantics); err != nil {
 		return nil, err
 	}
-	if err := prepareDeletionCompletions(s, next, collector); err != nil {
+	if err := prepareDeletionCompletions(s, next, collector, p.DeletionSemantics); err != nil {
 		return nil, err
 	}
 	if err := prepareApprovalCompletion(s, next); err != nil {

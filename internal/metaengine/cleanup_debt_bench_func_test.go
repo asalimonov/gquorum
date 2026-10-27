@@ -41,7 +41,7 @@ func cleanupDebtSeed(tb testing.TB) *Machine {
 			tb.Fatal(err)
 		}
 		at := time.Date(2026, 10, 17, 0, 0, int(version), 0, time.UTC)
-		op := benchSubmit(tb, m, seed, BeginOperationProposal{ProposalID: "benchmark", Version: version, Plan: plan, Scopes: read.Scopes, Actor: "benchmark", Origin: topology.OriginOperator, At: at})
+		op := benchSubmit(tb, m, seed, BeginOperationProposal{DeletionSemantics: DeletionSemanticsDetached, ProposalID: "benchmark", Version: version, Plan: plan, Scopes: read.Scopes, Actor: "benchmark", Origin: topology.OriginOperator, At: at})
 		for _, block := range plan.Blocks {
 			for i, seq := range block.Steps {
 				step := plan.Steps[seq-1]
@@ -61,6 +61,16 @@ func cleanupDebtSeed(tb testing.TB) *Machine {
 				}
 			}
 		}
+	}
+	work, err := m.ReadyCleanup(storage.Identity{}, 1)
+	if err != nil || len(work) != 1 || work[0].Action.Kind != topology.StepStopReplica {
+		tb.Fatal("seed lacks deferred stop", work, err)
+	}
+	grant := benchSubmit(tb, m, seed, BeginCleanupEffectProposal{ProposalID: "benchmark",
+		Identity: work[0].Identity, Action: work[0].Action}).Grant
+	for _, receipt := range fixtureEffectReceipts(*grant) {
+		benchSubmit(tb, m, seed, RecordEffectProposal{ProposalID: "benchmark", Receipt: receipt,
+			At: time.Date(2026, 10, 17, 0, 0, 3, 0, time.UTC)})
 	}
 	if len(m.scoped.Cleanup) != 1 || m.scoped.Cleanup[0].Stopped == nil || m.scoped.Cleanup[0].Retired != nil {
 		tb.Fatal("seed lacks detached unresolved retirement")
@@ -194,7 +204,7 @@ func cleanupDebtFixture(tb testing.TB, count int) *Machine {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	benchSubmit(tb, m, conf, BeginOperationProposal{ProposalID: "benchmark", Version: staged.Doc.Version, Plan: plan, Scopes: read.Scopes, Actor: "benchmark", Origin: topology.OriginOperator, At: time.Date(2026, 10, 17, 0, 1, 0, 0, time.UTC)})
+	benchSubmit(tb, m, conf, BeginOperationProposal{DeletionSemantics: DeletionSemanticsDetached, ProposalID: "benchmark", Version: staged.Doc.Version, Plan: plan, Scopes: read.Scopes, Actor: "benchmark", Origin: topology.OriginOperator, At: time.Date(2026, 10, 17, 0, 1, 0, 0, time.UTC)})
 	if len(m.scoped.Cleanup) != count {
 		tb.Fatal("unresolved debt count changed", len(m.scoped.Cleanup), count)
 	}

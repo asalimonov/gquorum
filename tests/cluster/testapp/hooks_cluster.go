@@ -63,6 +63,7 @@ type clusterHooks struct {
 	authorityReceipts []load.ActionResult
 	authorityFences   []load.FenceResult
 	metaRaft          metaRaftControl
+	readmissionReport readmissionReportControl
 }
 
 func newClusterHooks() *clusterHooks {

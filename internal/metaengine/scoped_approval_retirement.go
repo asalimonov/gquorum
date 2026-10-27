@@ -9,40 +9,64 @@ import (
 
 // New ownership is stricter than immutable-plan shape validation: completed
 // actions stay in historical plans, but another approval cannot reissue them.
-func validateNewRetirement(c planningCollector, input topology.PlanInput,
-	desired topology.Document, plan topology.Plan) error {
+func (c planningCollector) validateNewRetirement(input topology.PlanInput,
+	desired topology.Document, plan topology.Plan, semantics DeletionSemantics) error {
 	c.markConvergedOwners(input.Groups)
+	if err := validateDeletionPartition(desired, plan, semantics); err != nil {
+		return err
+	}
 	hosted := make(map[string]bool)
 	for key, owner := range c.owners {
 		if owner.progress == topology.RetainedHosted &&
-			!topology.ReadmissionCovers(input, desired, plan, owner.target.NodeName) {
+			(semantics == DeletionSemanticsDetached && desired.Group(key.group) == nil ||
+				!topology.ReadmissionCovers(input, desired, plan, owner.target.NodeName)) {
 			hosted[key.group] = true
 		}
 	}
+	allowedStops := c.retainedStopBindings(desired, semantics)
 	for _, step := range plan.Steps {
 		owner := c.owners[planningReplicaKey{step.GroupID, step.ReplicaID}]
+		reusable := owner != nil && owner.progress == topology.RetainedCleanup &&
+			step.Kind == topology.StepStopReplica &&
+			allowedStops[planningReplicaKey{step.GroupID, step.ReplicaID}] == step.NodeName
 		if step.Kind == topology.StepDeleteGroupState && !hosted[step.GroupID] ||
-			owner != nil && duplicateRetirement(*owner, desired.Group(step.GroupID), step) &&
-				!(owner.progress == topology.RetainedCleanup && c.detachingRequiredStop(step)) {
+			owner != nil && !reusable && duplicateRetirement(*owner, desired.Group(step.GroupID), step, semantics) {
 			return fault.New(fault.OperationAuthorization, "retirement already belongs to retained cleanup", nil)
 		}
 	}
 	return nil
 }
 
-func (c planningCollector) detachingRequiredStop(step topology.Step) bool {
-	if step.Kind != topology.StepStopReplica {
-		return false
-	}
+// PlanInput can conservatively include a handover Stop that is already detached.
+// Index exact reusable bindings once; the original debt retains dispatch authority.
+func (c planningCollector) retainedStopBindings(desired topology.Document,
+	semantics DeletionSemantics) map[planningReplicaKey]string {
+	allowed := make(map[planningReplicaKey]string)
 	for _, debt := range c.evidence.cleanup {
-		if debt.Identity.GroupID != step.GroupID || debt.Identity.NodeName != step.NodeName ||
-			debt.Identity.ReplicaID != step.ReplicaID || debt.Stopped != nil || debt.StopAction == nil {
+		if debt.Stopped != nil || debt.StopAction == nil {
 			continue
 		}
-		bound := c.evidence.operations[topology.OperationID(debt.StopAction.OperationID)]
-		return requiredCleanupStop(bound, *debt.StopAction)
+		bound := c.evidence.operations[debt.StopAction.OperationID]
+		reusable := requiredCleanupStop(bound, *debt.StopAction) ||
+			semantics == DeletionSemanticsDetached && desired.Group(debt.Identity.GroupID) == nil &&
+				detachedCleanupStop(bound, debt.StopAction)
+		if reusable {
+			allowed[planningReplicaKey{debt.Identity.GroupID, debt.Identity.ReplicaID}] = debt.Identity.NodeName
+		}
 	}
-	return false
+	return allowed
+}
+
+func validateDeletionPartition(desired topology.Document, plan topology.Plan, semantics DeletionSemantics) error {
+	if semantics != DeletionSemanticsDetached {
+		return nil
+	}
+	for _, block := range plan.Blocks {
+		if len(block.Steps) != 0 && desired.Group(block.GroupID) == nil {
+			return fault.New(fault.OperationAuthorization, "deletion stop work must be detached", nil)
+		}
+	}
+	return nil
 }
 
 func (c planningCollector) markConvergedOwners(groups map[string]topology.GroupProgress) {
@@ -58,7 +82,8 @@ func (c planningCollector) markConvergedOwners(groups map[string]topology.GroupP
 	}
 }
 
-func duplicateRetirement(owner planningReplica, desired *topology.Group, step topology.Step) bool {
+func duplicateRetirement(owner planningReplica, desired *topology.Group, step topology.Step,
+	semantics DeletionSemantics) bool {
 	switch step.Kind {
 	case topology.StepRemoveReplica:
 		return owner.removed != 0
@@ -68,8 +93,11 @@ func duplicateRetirement(owner planningReplica, desired *topology.Group, step to
 		if owner.progress == topology.RetainedStopped {
 			return true
 		}
-		if owner.progress != topology.RetainedCleanup || desired == nil {
+		if owner.progress != topology.RetainedCleanup {
 			return false
+		}
+		if desired == nil {
+			return semantics == DeletionSemanticsDetached
 		}
 		return !slices.ContainsFunc(desired.Replicas, func(r topology.Replica) bool {
 			return r.NodeName == step.NodeName && r.ReplicaID != step.ReplicaID

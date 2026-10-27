@@ -27,7 +27,7 @@ func TestRemainingPlanDistinguishesRetainedHostObligations(t *testing.T) {
 		{"required debt stop missing", topology.RetainedCleanup, "a", false, nil, true},
 		{"required debt stop", topology.RetainedCleanup, "a", false, []StepKind{StepStopReplica}, false},
 		{"already stopped", topology.RetainedStopped, "a", false, nil, false},
-		{"deletion debt stop missing", topology.RetainedCleanup, "b", true, nil, true},
+		{"deletion inherits detached debt", topology.RetainedCleanup, "b", true, nil, false},
 		{"deletion debt stop", topology.RetainedCleanup, "b", true, []StepKind{StepStopReplica}, false},
 		{"hosted deletion missing", topology.RetainedHosted, "b", true, []StepKind{StepStopReplica}, true},
 		{"stopped deletion", topology.RetainedStopped, "b", true, nil, false},

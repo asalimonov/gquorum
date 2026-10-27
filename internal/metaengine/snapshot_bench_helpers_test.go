@@ -83,7 +83,7 @@ func snapshotMatrix(tb testing.TB, size int) *Machine {
 			tb.Fatal("fixture plan", version, err)
 		}
 		now := at.Add(time.Duration(index) * time.Second)
-		begun := submit(BeginOperationProposal{Version: version, Plan: plan, Scopes: read.Scopes,
+		begun := submit(BeginOperationProposal{DeletionSemantics: DeletionSemanticsDetached, Version: version, Plan: plan, Scopes: read.Scopes,
 			Actor: "benchmark", Origin: topology.OriginAPI, At: now, ProposalID: fmt.Sprintf("begin-%d", version)})
 		if preferred != 0 {
 			if len(plan.Steps) != 1 || plan.Steps[0].Kind != topology.StepTransferLeader {

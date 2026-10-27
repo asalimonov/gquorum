@@ -202,12 +202,10 @@ func TestPublicNodeApprovedLoadParksLostWALRecoversAndRetires(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitAPIOperation(ctx, t, n, deleted.OperationID)
-	if _, exists := n.LoadGroup("work"); exists {
-		t.Fatal("deleted handle stayed registered")
-	}
 	apiEventually(t, func() bool {
+		_, exists := n.LoadGroup("work")
 		probe, err := store.Probe(ctx, "work")
-		return err == nil && !probe.Exists
+		return err == nil && !exists && !probe.Exists
 	})
 	if _, err := n.StartLoadGroup(ctx, ref); !errors.Is(err, fault.ErrGroupRetired) {
 		t.Fatal("retired ID reopened", err)

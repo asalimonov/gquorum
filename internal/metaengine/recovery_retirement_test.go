@@ -36,7 +36,7 @@ func TestRecoveryProvenanceSurvivesOrdinaryLaterDeletionAndPruning(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	approval := BeginOperationProposal{Version: s.Latest.Version, Plan: plan,
+	approval := BeginOperationProposal{Version: s.Latest.Version, Plan: plan, DeletionSemantics: DeletionSemanticsDetached,
 		Actor: "operator", Origin: topology.OriginOperator, At: time.Unix(130, 0).UTC(), ProposalID: "delete-after-recovery",
 		Scopes: s.capturePlanScopes(topology.AffectedGroups(s.Target, s.Latest))}
 	body, _ = json.Marshal(approval)

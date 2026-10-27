@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/asalimonov/gquorum/fault"
+	"github.com/asalimonov/gquorum/internal/metaengine"
 	"github.com/asalimonov/gquorum/load"
 	"github.com/asalimonov/gquorum/storage"
 	"github.com/asalimonov/gquorum/topology"
@@ -18,10 +19,18 @@ import (
 
 func TestStartupRecaptureIgnoresIndependentVersionAndRejectsAssignmentChange(t *testing.T) {
 	t.Parallel()
-	for _, change := range []string{"unrelated_version", "assignment", "founding_seed", "storage", "creation_receipt"} {
+	for _, change := range []string{"unrelated_version", "assignment", "founding_seed", "storage", "creation_receipt", "deleted"} {
 		t.Run(change, func(t *testing.T) {
 			t.Parallel()
 			f := newFixture(t)
+			var deleted atomic.Bool
+			scopeRead := f.cfg.Scope
+			f.cfg.Scope = func(ctx context.Context, id storage.Identity) (metaengine.LoadScope, error) {
+				if deleted.Load() {
+					return metaengine.LoadScope{}, fault.ErrGroupRetired
+				}
+				return scopeRead(ctx, id)
+			}
 			entered, release := make(chan struct{}), make(chan struct{})
 			var once sync.Once
 			unblock := func() { once.Do(func() { close(release) }) }
@@ -50,6 +59,8 @@ func TestStartupRecaptureIgnoresIndependentVersionAndRejectsAssignmentChange(t *
 			// Break slice aliases to the owned startup capture.
 			scope.Group = (topology.Document{Groups: []topology.Group{scope.Group}}).Clone().Groups[0]
 			switch change {
+			case "deleted":
+				deleted.Store(true)
 			case "assignment":
 				scope.Group.Replicas[0].Role, scope.Replica.Role = topology.ReplicaLearner, topology.ReplicaLearner
 			case "founding_seed":
@@ -71,6 +82,9 @@ func TestStartupRecaptureIgnoresIndependentVersionAndRejectsAssignmentChange(t *
 				}
 			} else {
 				want := fault.ErrVersionConflict
+				if change == "deleted" {
+					want = fault.ErrGroupRetired
+				}
 				if change == "creation_receipt" {
 					want = fault.ErrReplicaNotReady
 				}

@@ -1,10 +1,7 @@
 # Baseline validation record
 
-These results precede the public Node/Cluster API refactor. Current results and
-acceptance status are recorded in the
-[API refactor validation](api-refactor-validation.md), with stage history in the
-[implementation progress](../plans/20261011-api-refactor.md). This baseline
-remains comparison evidence.
+These results precede the public Node/Cluster API refactor and remain comparison
+evidence. Use the [testing guide](tests.md) for current suite commands.
 
 Validated October 11, 2026, with Go 1.26.5 on macOS arm64, Apple M4 Pro
 (14 logical CPUs), Docker 29.6.1 linux arm64 and Compose 5.3.
@@ -48,14 +45,6 @@ acknowledged commands, then remove every usable store and runtime registration.
 Detailed bounds and prior benchmark/resource measurements are in
 [performance checks](performance.md).
 
-The source process inventory contains all 150 scenarios exactly once: 60
-applicable adaptations, 89 application cases and one deferred force-new case.
-All 156 expanded target symbol references resolve. Assertions preserve native
-membership, quorum behavior, learner-first admission, staged intent, exact
-authorized identities, durable recovery, ownership and cleanup. The
-[source inventory](../brainstorms/20261010-raft-library-test-port.md) records the
-application-helper and protocol adaptations; counts alone are not evidence of
-behavioral equivalence.
 
 The public API/schema audit covers Runtime ownership, explicit settings/paths,
 caller node types, Latest/Target/Active and document history/watches, all twelve

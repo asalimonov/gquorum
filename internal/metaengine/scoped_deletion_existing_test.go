@@ -153,7 +153,7 @@ func TestScopedExistingDebtDeletionProtectsReadmissionFromCancellation(t *testin
 		candidate := *next
 		candidate.Target = next.Target.Clone()
 		candidate.Target.MetaGroup().Replicas[0].ReplicaID = member
-		prep := deletionPreparation{&s, &candidate, collector}
+		prep := deletionPreparation{source: &s, next: &candidate, collector: collector}
 		err := prep.protectReadmission()
 		if member == 2 && err != nil || member != 2 && !errors.Is(err, fault.ErrOperationAuthorization) {
 			t.Fatal("detached original stop bypassed deletion's batch dependency", member, err)
