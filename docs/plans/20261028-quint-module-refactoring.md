@@ -10,7 +10,7 @@
 **Refactoring request:** user discussion on 2026-10-28: group modules, hide contextual complexity, reuse higher-order functions, and mirror familiar Go subsystem boundaries.
 **Parent implementation plan:** [cluster-management plan](20261027-quint-cluster-management.md)
 **Execution log when implemented:** `docs/progress/20261028-quint-module-refactoring.md`
-**Status:** refactoring authorized on 2026-10-28; Tasks 1–5 complete; documentation closure pending. Parent protocol Tasks 8–18 remain paused.
+**Status:** refactoring authorized on 2026-10-28; all six refactoring tasks complete, including colleague review and documentation. Parent protocol Tasks 8–18 remain paused.
 **Reviewed corrections:** peer thread 1, rounds 3–5 in `docs/review/feat_quint-spec.md`.
 **Execution baseline:** `85cd75d` (model unchanged from `b39764c`).
 
@@ -270,16 +270,16 @@ Compare representative intermediate states for metadata commit/apply, authority 
 **Files:** model README/coverage, target §4 organization details, parent plan file paths, execution log, `docs/changelogs/20261028-quint-module-refactoring.md`.
 **References:** target §§4–6 and 13–15; this plan D1–D6; `docs/project.md` documentation rules.
 
-- [ ] Resolve every **NOT IMPLEMENTED GAPS** entry against the original requirements. An unresolved required behavior/coverage gap prevents completion; any explicitly accepted structural deviation must be documented, not hidden behind passing tests.
-- [ ] Document the subsystem map, one-world rule, supported helper pattern, workflow phase boundaries and where a future task should add a transition/test. Remove stale path/composition descriptions without rewriting historical validation evidence.
-- [ ] Update the existing target's organization section and pending parent Tasks 8–18 file references to the implemented locations. Preserve completed task history, remaining protocol scope and pause status; do not restart or renumber the parent implementation.
-- [ ] Write a concise changelog about easier navigation, traceability and extension of the model. Do not claim new library behavior, improved correctness coverage or faster simulation without evidence.
-- [ ] Record final commit range, source hashes, test/profile inventories, validation/review artifacts and limitations. Verify documentation links and `git diff --check`.
+- [x] Resolve every **NOT IMPLEMENTED GAPS** entry against the original requirements. An unresolved required behavior/coverage gap prevents completion; any explicitly accepted structural deviation must be documented, not hidden behind passing tests.
+- [x] Document the subsystem map, one-world rule, supported helper pattern, workflow phase boundaries and where a future task should add a transition/test. Remove stale path/composition descriptions without rewriting historical validation evidence.
+- [x] Update the existing target's organization section and pending parent Tasks 8–18 file references to the implemented locations. Preserve completed task history, remaining protocol scope and pause status; do not restart or renumber the parent implementation.
+- [x] Write a concise changelog about easier navigation, traceability and extension of the model. Do not claim new library behavior, improved correctness coverage or faster simulation without evidence.
+- [x] Record final commit range, source hashes, test/profile inventories, validation/review artifacts and limitations. Verify documentation links and `git diff --check`.
 
 #### Verification
 
-- [ ] Readers can locate topology, metadata FSM, service coordination, managed lifetime and harness code using the documented map.
-- [ ] Only necessary compatibility entry points remain; no duplicate implementation or inactive parallel model was left behind. Documentation-only final edits do not trigger unnecessary Quint reruns.
+- [x] Readers can locate topology, metadata FSM, service coordination, managed lifetime and harness code using the documented map.
+- [x] Only necessary compatibility entry points remain; no duplicate implementation or inactive parallel model was left behind. Documentation-only final edits do not trigger unnecessary Quint reruns.
 
 ## Validation Commands
 
@@ -334,7 +334,7 @@ Keep existing `TODO(not planned)` scope markers with moved code. New markers are
 
 ## NOT IMPLEMENTED GAPS
 
-No implementation gap identified by the structural audit. Colleague review and documentation closure remain pending. The staged suite chain is retained; independent stateful suite composition is excluded.
+No unresolved refactoring requirement. Structural audit, colleague review and documentation closure are complete. The staged suite chain is retained; independent stateful suite composition is excluded.
 
 ## Planning verification
 

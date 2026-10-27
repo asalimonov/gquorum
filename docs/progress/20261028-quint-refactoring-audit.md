@@ -1,6 +1,6 @@
 # Quint refactoring architectural delta
 
-Baseline: `85cd75d`; mechanical extraction: `c5ece71`. This audit covers the helper checkpoint and uses the [action ledger](20261028-quint-action-map.json), [module map](20261028-quint-module-map.json) and [helper ledger](20261028-quint-helper-map.json). Peer review remains a separate gate.
+Baseline: `85cd75d`; mechanical extraction: `c5ece71`. This audit covers the helper checkpoint and uses the [action ledger](20261028-quint-action-map.json), [module map](20261028-quint-module-map.json) and [helper ledger](20261028-quint-helper-map.json). Peer review completed after this audit; see the outcome below.
 
 ## Ownership and dependencies
 
@@ -29,3 +29,9 @@ All four profile control objects (excluding explicit test inventories) match the
 The execution log records final tests and smoke3/lifetime3 sampled simulations. Twelve temporary differential checks compare old/new lifecycle guards and full next-world values across 50 constructed owner/Close/join combinations; all pass. These input states are frame-comparison fixtures, not a claim that every combination is reachable. These 12 cases cover a lifecycle subset of the 90 changed definitions; node/process conversions rely on source review and suites. The successful log and source are available locally only (gitignored; absent from a clean checkout) under `test-reports/quint/refactoring-evidence`; the probe uses a scratch checkout of c5ece71 with renamed baseline modules to prevent import shadowing.
 
 No Go, vendor, runner, dependency, state-schema or exploration-bound change is part of this refactor. This evidence combines mechanical comparison, source review, regression tests and sampled simulation; it is not an exhaustive equivalence proof or new verification-backend qualification. No faithful library scenario failure was found, so there is no library-defect report to add. Parent protocol Tasks 8–18 remain paused.
+
+## Peer review outcome
+
+Agent e77ec353-b3eb-4158-9cb2-c3a160ddd0c2 reviewed 85cd75d..5ea256c using the requested paseo-peer workflow (local branch file, thread 2). No semantic regression or blocking issue found. The reviewer independently checked facade argument correspondence, assigned fields/effect ordering, unused-binding removal, fixture references, inventories and suite composition. Static checks and a focused laziness probe supplement the existing runs; reachable-state equivalence, Apalache behavior and sampling-distribution preservation were not established.
+
+Low findings were resolved in f8cd519: explicit local-only differential-evidence wording, a useful mechanical-audit default/diagnostic and consistent relative import spelling. The root sharing test is documented as the root-stage baseline. Keeping the audit tool inside the recursively hashed model tree is intentional provenance for maintenance tooling. No substantive model change required another peer round or full suite run. No unresolved critical/major finding remains.

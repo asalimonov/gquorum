@@ -13,6 +13,8 @@
 **Library scenario findings:** `docs/reports/20261027-quint-cluster-management.md`
 **Status:** Tasks 1–7 completed; next is Task 8. Seven completed tasks and eleven remaining tasks; eighteen total. Pause after the Task 7 commit as requested by the user. Validation and implementation details are in the execution log.
 
+Module organization was refactored separately on 2026-10-28; see the [refactoring plan](20261028-quint-module-refactoring.md). Pending file paths below are relative to `scripts/quint/` unless stated otherwise. Completed task records retain their original paths as history. The protocol pause remains in force.
+
 ## Revised objective and execution contract
 
 The user approved **lean management scope; defer offline recovery**, then specified **metrics always good; no lag/stability issues this iteration**. Implement core topology transactions, scaling, group/replica operations, scheduler repair, identity/fencing, retained restart, ownership and cleanup. Reuse shared quorum/lifecycle/transport primitives and derive operator visibility. Do not implement one state machine per public API.
@@ -199,7 +201,7 @@ Per the user’s reporting instruction, failures in implemented library scenario
 
 ### Task 8: Implement guarded membership and dynamic scaling
 
-**Files:** membership/topology/authority/handlers/cluster/tests (updated); admission4 and scale5 instances/profiles (new).
+**Files:** `consensus/`, `topology/`, `metaengine/authority.qnt`, `metaservice/handlers.qnt`, relevant subsystem steps, `cluster.qnt`, `tests/` (updated); admission4 and scale5 instances/profiles (new).
 **References:** target §§5.3/5.5/8.2/11; §14 membershipChange.
 
 - [ ] Implement guarded propose/commit/transfer with learner-first admission, catch-up, promotion, leader transfer before removal/demotion, last-voter and live post-change quorum checks. Keep precheck/proposal/commit/observation distinct.
@@ -215,7 +217,7 @@ Per the user’s reporting instruction, failures in implemented library scenario
 
 ### Task 9: Wire healthy/degraded creation and detached deletion
 
-**Files:** topology/authority/lifecycle/handlers/cluster/tests (updated); deletion3 instance/profile (new).
+**Files:** `topology/`, `metaengine/authority.qnt`, `managed/`, `metaservice/handlers.qnt`, relevant subsystem steps, `cluster.qnt`, `tests/` (updated); deletion3 instance/profile (new).
 **References:** target §§5.7/8.3–8.4/9/11; §14 approvePlan.
 
 - [ ] Wire CreateGroup with fixed supported hosting/storage/voter presets, immutable founding authorization, exact local startup and convergence. Cover successful degraded placement and a required offline host that must wait.
@@ -231,7 +233,7 @@ Per the user’s reporting instruction, failures in implemented library scenario
 
 ### Task 10: Complete cleanup, collection and returning-owner handover
 
-**Files:** lifecycle/authority/handlers/cluster/properties/tests (updated).
+**Files:** `managed/`, `metaengine/authority.qnt`, `metaservice/handlers.qnt`, `cluster.qnt`, `harness/properties.qnt`, `tests/` (updated).
 **References:** target §§5.6–5.8/8.4/8.8/9; §14 stopAndRetire, collectRetiredReplica, readmitReturningNode.
 
 - [ ] Keep native removal, actual joined stop, retirement and physical collection distinct; verify exact grant/identity/ledger/token/assignment even when data is absent.
@@ -247,7 +249,7 @@ Per the user’s reporting instruction, failures in implemented library scenario
 
 ### Task 11: Implement supported scheduler repairs with fixed policy
 
-**Files:** scheduler.qnt/tests and scoped3 profile (new); shared composition/types/properties (updated).
+**Files:** `metaservice/scheduler.qnt`, scheduler tests under `tests/`, scoped3 profile (new); `cluster.qnt`, `types.qnt`, `harness/properties.qnt` (updated).
 **References:** target §§5.3/5.4/8.5/10/11; §14 schedulerRepair.
 
 - [ ] Implement capture, supported target-count/unavailability decisions, fresh revalidation and replicated repair CAS with exact group/source/owner/native identity. Fix lag/backlog within limits, progress healthy, metrics/current collector fresh, standby stability satisfied and cooldowns clear. Do not implement metric-fault generators, elapsed-window counters, no-progress repair or hysteresis scenarios. Actual unavailability remains explicit, with detection eligibility abstracted without timing.
@@ -280,7 +282,7 @@ Per the user’s reporting instruction, failures in implemented library scenario
 
 ### Task 13: Qualify stuck, fair-progress and core recovery checks
 
-**Files:** properties/tests and progress_small profile/backend controls (new/updated).
+**Files:** `harness/properties.qnt`, `tests/`, progress_small profile/backend controls (new/updated).
 **References:** target §§7/10.2–10.3/11–13.
 
 - [ ] Implement pending obligations, expected blockers, enabled useful actions and unexpected-stuck checks. Distinguish terminal/bound-exhausted states from internal deadlock; irrelevant getters/rejects/fault toggles cannot conceal a stuck obligation.
@@ -297,7 +299,7 @@ Per the user’s reporting instruction, failures in implemented library scenario
 
 ### Task 14: Qualify core negative controls and six substantive profiles
 
-**Files:** retained properties/tests/instances/profiles/coverage/reports (updated).
+**Files:** `harness/properties.qnt`, `tests/`, `instances/`, `profiles/`, coverage/reports (updated).
 **References:** target §§10–13; six substantive profiles plus foundation in §11.
 
 - [ ] Finish faulty variants for stale authority, lost debt, successor receipt confusion, early publication/release, false transfer completion, foreign-intent approval and false collection proof.

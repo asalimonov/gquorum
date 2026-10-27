@@ -6,7 +6,7 @@ This is the executable specification being built from the [target design](../../
 
 The user approved a lean first version after Task 4. The [coverage ledger](coverage.md), target and plan now defer labels/selectors/domain placement, live policy tuning, EnsureGroup/RollbackTo, application locks/manual session workflows, serving override, storage-loss/memory-store suites and offline Recovery. Public metrics/getter/watch/history plumbing is omitted; derived operator visibility and minimum internal session/availability safety remain. The user further fixed performance/stability/metric-freshness evidence to favorable values: no lag/backlog, no-progress, stale-metric or stability/cooldown scenarios in the initial iteration. Quorum/crash/partition behavior and the successful join catch-up milestone remain.
 
-Implementation resumed at Task 5. Executable scope checks constrain invocation and every safety check; `coreChecks` selects retained tests explicitly. Broader Task 4 helpers/tests remain separate historical work. Metrics are fixed favorable; availability, quorum, exact identity, captured topology and local apply still matter.
+Protocol implementation completed Tasks 1–7 and is paused before Task 8. The separate module refactoring is complete. Executable scope checks constrain invocation and every safety check; `coreChecks` selects retained tests explicitly. Broader Task 4 helpers/tests remain separate historical work. Metrics are fixed favorable; availability, quorum, exact identity, captured topology and local apply still matter.
 
 ## Run the current checkpoint
 
@@ -36,17 +36,33 @@ The default profile uses the bundled TypeScript evaluator. Rust profiles require
 
 Quint 0.33.0's machine-readable simulation output omits witness counts. The manifest records that omission instead of inventing counts; deterministic witness tests are separate evidence. Direct `quint run` above prints sampled witness counts. Model hashes and original child exit statuses are retained for reproduction.
 
-## Composition
+## Composition and module ownership
 
-`types.qnt` contains data records. `handlers.qnt` uses the unmodified Choreo `cue`, `convert_context` and `apply_effect` functions. `cluster.qnt` owns the single `world` state variable; Choreo's unused own state/display actions are not invoked. Its `GlobalContext` groups actors and inboxes, with separately typed metadata, consensus, network and recovery records in `extensions`.
+`cluster.qnt` owns the only mutable `world`, stable named action adapters and exploration selectors. `types.qnt` contains the unchanged data catalogue; `runtime/world.qnt` provides Choreo aliases without another state instance. Pure subsystem functions receive World explicitly. Choreo's unused state/display actions are not invoked.
 
-Enqueue and delivery are explicit transitions before `main_listener` can consume a request. Built-in Choreo Send/Broadcast are not used to skip transport delivery. `cluster_test.qnt` explicitly re-exports core actions; concrete instances bind the core once and expose the tests and state-reading properties. `properties.qnt` reads records through pure predicates, with no second cluster instantiation.
+| Location | Responsibility |
+| --- | --- |
+| `topology/` | Document edits, placement and immutable planning |
+| `metaengine/` | Approval, scoped ownership, grants, repair and session rules |
+| `metaservice/` | Reads, caller/leader coordination, listeners, authority and session steps |
+| `managed/` | Replica ownership, local lifetime, node shutdown and effect consumption |
+| `consensus/` | Abstract quorum, election, commit/apply and catch-up |
+| `runtime/` | World aliases, canonical Queue/Consume effects and state framing |
+| `harness/` | Initial states, scope, properties and environment faults |
+| `tests/fixtures/`, `tests/unit/`, `tests/scenarios/` | Stateless setup, pure rule checks and asynchronous traces |
+| `instances/`, `profiles/` | Concrete bounds, entry points and exact test inventories |
 
-The target's record field `action` is spelled `kind` in Quint because `action` is a reserved keyword. Proof forms remain distinct: action/readmission receipts carry exact optional fields, while fences retain separate evidence. StorageDefault/StorageMemory is the replicated group class; OwnedWAL/BorrowedCustom is a node setting.
+A deterministic phase uses `phaseEnabled(w, ...)` and `phaseNext(w, ...)` in its subsystem. Its facade action uses `guarded(condition, before => phaseNext(before, ...))`; a false guard disables the action without evaluating the callback. `withNode`, `withProcess` and `withOwner` preserve the surrounding state frame. They do not authorize changes or supply missing map entries: guards and exact identity checks stay in domain code. Nondeterministic choices remain in the facade. Enqueue, delivery, handling, commitment, application and reply stay separate transitions.
+
+Runtime suites deliberately form one chain: cluster → membership → reads → transactions → operations → effects → lifetime. A concrete instance binds constants once at its leaf. Distinct adjacent-stage tests check shared state through effect typing; the root check is its baseline. Do not compose independently instantiated sibling suites. Pure fixtures have no `var` or `run` declarations and do not import test suites.
+
+For a new protocol phase, extend the owning rule/step module and its named facade action, wire the appropriate selector, then add an interruptible scenario at the relevant chain stage and list it in affected profile inventories. Reuse stateless fixtures and frame helpers. Production modules cannot import tests or cluster; runtime cannot import domain rules. The detailed dependency table is in the [refactoring plan](../../docs/plans/20261028-quint-module-refactoring.md).
+
+The target's record field `action` is spelled `kind` because Quint reserves `action`. Action/readmission receipts and fences retain distinct proof forms. StorageDefault/StorageMemory is the group class; OwnedWAL/BorrowedCustom is a node setting. Deferred records do not imply active coverage.
 
 ## Pending implementation
 
-Task 5 now wires shared reads, staging, approval, exact retry and atomic reseat/rebase. Execution grants/fences/receipts, ownership, membership, creation/deletion effects, cleanup and scheduler work remain in Tasks 6–11. Minimum internal sessions belong to Task 7 and shared fresh reads to Task 5; no separate public session/lock or offline Recovery workflow is required. Tasks 12–18 cover core visibility/coverage, progress/verification, tooling, audit, review and documentation. No pending path returns an invented successful result.
+Tasks 1–7 implement shared reads, staging/approval/retry/reseat, authority execution/fencing, local ownership/lifetime and minimum internal sessions. Tasks 8–11 remain paused: membership/scaling, complete group creation/deletion, cleanup and scheduler repair. Tasks 12–18 retain coverage/visibility, progress/verification, tooling, audit, review and documentation work. Refactoring does not complete those protocol tasks or introduce successful placeholders.
 
 Do not infer completed coverage from the presence of a record or enum. Add each transition with an executable witness and invariants, retain counterexamples, and update the coverage matrix before extending claims.
 
@@ -78,7 +94,7 @@ Management inboxes and in-flight messages are distinct, and link changes, loss a
 
 ## Historical Task 4 checkpoint (broader than initial scope)
 
-Task 4 implements pure validation, edits, placement and immutable plan construction in `topology.qnt`, with `placement.qnt` and `planning.qnt` helpers. The original concrete `topologyChecks` suite remains available separately. Initial acceptance uses `coreChecks`, which excludes label/policy/rollback extension tests and imports only named tests to avoid helper-name collisions.
+Task 4 implements pure validation, edits, placement and immutable plan construction in `topology/topology.qnt`, with `topology/placement.qnt` and `topology/planning.qnt` helpers. The original concrete `topologyChecks` suite remains available separately. Initial acceptance uses `coreChecks`, which excludes label/policy/rollback extension tests and imports only named tests to avoid helper-name collisions.
 
 Placement has distinct minimum/maximum voter bounds and total host capacity. Configured hosting differs from legacy placement; adoption pins intentional learners, explicit host lists retain duplicate validation before normalization, and reserved nodes retain only exact approved identities. Defaults and configuration validation preserve voter surge, lag and stability/cooldown controls. Full-document Stage, typed mutations, preview, forced retirement, readmission, reseating and rollback have separate guarded edit paths.
 
@@ -90,9 +106,9 @@ The 40 topology tests cover semantic input classes and plan sequencing. Symbolic
 
 ## Metadata transaction checkpoint
 
-`reads.qnt`, `transactions.qnt`, `operations.qnt`, `authority.qnt` and `repair.qnt` keep pure rules separate from the single Choreo composition. A request captures its original CAS/audit, queues work, commits through native `_meta` quorum, waits for the relevant local application and replies separately. Raw Stage preserves literal CAS; a convenience zero CAS is captured once. Reseat first confirms/applies a read before capturing zero CAS, then commits its repair, approval and any independent-intent rebase atomically.
+`metaservice/reads.qnt`, `metaservice/transactions.qnt`, `metaservice/operations.qnt`, `metaengine/authority.qnt` and `metaengine/repair.qnt` keep pure rules separate from the single Choreo composition. A request captures its original CAS/audit, queues work, commits through native `_meta` quorum, waits for the relevant local application and replies separately. Raw Stage preserves literal CAS; a convenience zero CAS is captured once. Reseat first confirms/applies a read before capturing zero CAS, then commits its repair, approval and any independent-intent rebase atomically.
 
-Approval work runs on the receiving leader after a shared quorum-read/local-apply barrier. Quorum-confirmed native reads and availability observations are separate steps. A second metadata confirmation then recaptures the affected scopes; distinct read rounds reject delayed earlier acknowledgements. Metadata commitment rechecks the captured scopes and immutable plan content. Replaying approval returns the retained first attempt; RetryOperation derives one exact successor of a failed attempt. Retry scenarios include retained failure fixtures before and after consumption. `remaining.qnt` validates the immutable suffix against exact receipt proof, native predecessor/result membership, transfer prerequisites and capacity; later lifecycle/membership tasks supply their effect-specific failure transitions.
+Approval work runs on the receiving leader after a shared quorum-read/local-apply barrier. Quorum-confirmed native reads and availability observations are separate steps. A second metadata confirmation then recaptures the affected scopes; distinct read rounds reject delayed earlier acknowledgements. Metadata commitment rechecks the captured scopes and immutable plan content. Replaying approval returns the retained first attempt; RetryOperation derives one exact successor of a failed attempt. Retry scenarios include retained failure fixtures before and after consumption. `metaservice/remaining.qnt` validates the immutable suffix against exact receipt proof, native predecessor/result membership, transfer prerequisites and capacity; later lifecycle/membership tasks supply their effect-specific failure transitions.
 
 Logical deletion retains exact stop/retirement actions and cleanup debt without inventing receipts or issuing execution grants. Existing native replicas remain until later execution/lifecycle tasks implement their obligations. A staged version survives approval failure. Cancellation stops a waiter without undoing a submitted mutation. It returns an indeterminate outcome for a pending submission, or preserves a known staged version with cancellation; old-incarnation acknowledgements cannot complete its replacement's call.
 
@@ -102,9 +118,9 @@ Batch `quint test` runs after significant implementation changes; use cheap type
 
 ## Authority execution checkpoint
 
-`grants.qnt`, `controls.qnt`, `execution.qnt` and `remaining.qnt` implement immutable grant issuance, exact replay, closure, resource fencing, durable receipts, reporting, operator checkpointing and receipt-aware retries. Authority commands share the existing metadata proposal/commit/apply path. Receivers confirm a metadata authority proof that binds the courier's process and member identity, then recheck their own exact identity and physical resource floor after waiting. A bounded consumption-history monitor preserves the identity actually used at that boundary.
+`metaengine/grants.qnt`, `metaengine/controls.qnt`, `managed/execution.qnt` and `metaservice/remaining.qnt` implement immutable grant issuance, exact replay, closure, resource fencing, durable receipts, reporting, operator checkpointing and receipt-aware retries. Authority commands share the existing metadata proposal/commit/apply path. Receivers confirm a metadata authority proof that binds the courier's process and member identity, then recheck their own exact identity and physical resource floor after waiting. A bounded consumption-history monitor preserves the identity actually used at that boundary.
 
-The physical path currently executes transfer requests and host/native fences. Transfer-start is durable command consumption, not observed transfer completion. Metadata receipt reporting and checkpointing remain separate. Native fences need native quorum; offline host obligations retain their exact resource/fence keys. Lifecycle, native membership and cleanup effect bodies are added in Tasks 7–10; no success receipt is fabricated for those unfinished paths. Task 7 now separates host-floor installation from completion and waits for older startup/Close work to join.
+The physical path currently executes transfer requests and host/native fences. Transfer-start is durable command consumption, not observed transfer completion. Metadata receipt reporting and checkpointing remain separate. Native fences need native quorum; offline host obligations retain their exact resource/fence keys. Local lifetime is implemented in Task 7; native membership and cleanup effect bodies remain in Tasks 8–10; no success receipt is fabricated for those unfinished paths. Task 7 now separates host-floor installation from completion and waits for older startup/Close work to join.
 
 ```sh
 python3 scripts/quint/run.py --profile authority3 --mode test --seed 1
@@ -115,7 +131,7 @@ python3 scripts/quint/run.py --profile authority3 --mode simulate --seed 1
 
 ## Local lifetime and internal sessions
 
-`lifecycle.qnt` and `sessions.qnt` share the same world and metadata commit path. Local startup separates one exact reservation, shared/cancelable waiters, factory ownership transfer, replay, local Target/floor revalidation and publication. Stop separates admission blocking, engine/callback join, serialized application Close and final release. A timeout does not discard an outstanding factory or Close; a late successful factory still transfers ownership. Holds name exact replicas. Node shutdown keeps metadata participation until managed owners release.
+`managed/lifecycle.qnt` and `metaengine/sessions.qnt` share the same world and metadata commit path. Local startup separates one exact reservation, shared/cancelable waiters, factory ownership transfer, replay, local Target/floor revalidation and publication. Stop separates admission blocking, engine/callback join, serialized application Close and final release. A timeout does not discard an outstanding factory or Close; a late successful factory still transfers ownership. Holds name exact replicas. Node shutdown keeps metadata participation until managed owners release.
 
 New-owner recovery confirms current host floors; sharing an accepted owner does not require a new quorum query. Scope recapture uses locally applied approved Target, as the implementation does. Established fixtures retain an exact `seedAuthority` set for already-consumed founding history at floor 1. This baseline cannot authorize new identities/effects and is superseded by explicit host authority. Interrupted host fencing retains its durable position and finishes only after older work joins.
 
@@ -126,4 +142,10 @@ python3 scripts/quint/run.py --profile lifetime3 --mode test --seed 1
 python3 scripts/quint/run.py --profile lifetime3 --mode simulate --seed 1
 ```
 
-`lifetime3` uses authority3's bounds and starts simulation with a retained replica reserved for restart. Its 76 runtime scenarios include the earlier management/authority cases; 91 shared core checks are selected explicitly. Coverage remains bounded/sampled. Membership/scaling, complete group/cleanup execution and scheduling are later tasks.
+`lifetime3` uses authority3's bounds and starts simulation with a retained replica reserved for restart. Its 85 runtime scenarios include the earlier management/authority cases and composition/frame checks; 94 shared core checks are selected explicitly. Coverage remains bounded/sampled. Membership/scaling, complete group/cleanup execution and scheduling are later tasks.
+
+## Refactoring evidence
+
+The [execution log](../../docs/progress/20261028-quint-module-refactoring.md) records commits, source-hashed reports and peer review. All original actions and tests remain; current inventories are foundation 10, smoke3 50 + core 94, authority3 65 + core 94, and lifetime3 85 + core 94. These are overlapping suites. New checks validate composition/framing, not additional public API coverage.
+
+`python3 scripts/quint/refactor_audit.py` defaults to the historical mechanical extraction commit `c5ece71`. It checks 95 action mappings against the organization checkpoint; it does not compare current helpers or prove semantic equivalence. Later helper evidence consists of frame tests, preserved scenarios, sampled simulations and source review. Temporary differential artifacts are local-only under gitignored test-reports. See the [delta audit](../../docs/progress/20261028-quint-refactoring-audit.md) for limits. No faster exploration or exhaustive equivalence is claimed.

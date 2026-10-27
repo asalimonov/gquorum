@@ -66,6 +66,10 @@ flowchart TD
 
 Keep one composed `cluster.init/step`. Pure modules implement rules and transformations; Choreo supplies local listeners and message effects. Enqueue, delivery, processing, persistence and acknowledgement remain independently interleavable where they affect safety. Abstract consensus can access global native facts; a node handler can only use its local applied/cached view or an explicitly obtained read result.
 
+The implemented layout keeps `cluster.qnt` as the sole mutable-state/action facade and `types.qnt` as the cohesive data catalogue. `runtime/` holds World aliases, Queue/Consume and framing helpers. `topology/`, `metaengine/`, `metaservice/` and `managed/` mirror responsibilities familiar from Go; `consensus/` and `harness/` explicitly name model abstractions. These are organizational boundaries, not independently instantiated state machines.
+
+Subsystem steps expose pure guard/post functions; the facade evaluates post callbacks only when enabled and retains nondeterministic choices and all phase boundaries. Small node/process/owner helpers frame updates without adding authority. Tests use stateless fixtures and a linear scenario-suite chain with one leaf constant binding, checked by distinct cross-stage effect tests. See the [model README](../../scripts/quint/README.md) for extension guidance and the [refactoring plan](../plans/20261028-quint-module-refactoring.md) for allowed imports. This layout change adds no protocol scope and does not resume paused Tasks 8–18.
+
 A human/operator projection may inspect model state for diagnosis. It is not an additional source of authoritative facts for actor decisions. Avoid separate state machines for every status/read/wait wrapper.
 
 ## 5. Initial state schema
@@ -142,14 +146,14 @@ Do not inject lost/corrupt stores or memory loss in initial profiles. Loss of a 
 | Component | Initial responsibility |
 | --- | --- |
 | `types.qnt` | Core records; deferred fields fixed/isolated and excluded from active request domains. |
-| `topology.qnt`, `placement.qnt`, `planning.qnt` | Validate/transform in-scope documents and build immutable plans. Labels/policy extensions are not v1 acceptance. |
-| `membership.qnt` | Commit paths, learner/promotion/removal/transfer and native observation boundaries. |
-| `reads.qnt`, `transactions.qnt`, `operations.qnt`, `repair.qnt` | Pure shared reads, call/CAS sequencing, leader planning and atomic repair/rebase rules used by the single composition. |
-| `authority.qnt` | Approval/retry, scope ownership, grants/fences/receipts and supersession. |
-| `lifecycle.qnt` | Start/replay/publication/holds/stop/join/release, minimum internal session gates, retirement/collection. |
-| `scheduler.qnt` | Supported availability/target-count repairs and revalidation/CAS with fixed good metrics. |
-| `handlers.qnt`, `cluster.qnt` | One asynchronous composition with explicit message/durable boundaries. |
-| `properties.qnt` | Core safety, useful-progress predicates and derived operator summaries. |
+| `topology/topology.qnt`, `topology/placement.qnt`, `topology/planning.qnt` | Validate/transform in-scope documents and build immutable plans. Labels/policy extensions are not v1 acceptance. |
+| `consensus/membership.qnt` | Commit paths, learner/promotion/removal/transfer and native observation boundaries. |
+| `metaservice/reads.qnt`, `metaservice/transactions.qnt`, `metaservice/operations.qnt`, `metaengine/repair.qnt` | Pure shared reads, call/CAS sequencing, leader planning and atomic repair/rebase rules used by the single composition. |
+| `metaengine/authority.qnt` | Approval/retry, scope ownership, grants/fences/receipts and supersession. |
+| `managed/lifecycle.qnt` | Start/replay/publication/holds/stop/join/release, minimum internal session gates, retirement/collection. |
+| `metaservice/scheduler.qnt` (planned) | Supported availability/target-count repairs and revalidation/CAS with fixed good metrics. |
+| `metaservice/handlers.qnt`, subsystem step modules, `cluster.qnt` | One asynchronous composition with explicit message/durable boundaries. |
+| `harness/properties.qnt` | Core safety, useful-progress predicates and derived operator summaries. |
 | Tests / `instances` / `profiles` | Only in-scope behavior in required profiles; isolate existing extension-only tests. |
 | `run.py`, Make targets | Pinned execution, failure-preserving reports and explicit verification qualification. |
 | README / coverage / regressions | Scope, evidence and manual Go regression recipes. |
