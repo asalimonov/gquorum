@@ -1,6 +1,6 @@
 # Model coverage ledger
 
-Implemented checkpoint: Task 1 (foundation). Source baseline: `e8e85dbd7879b1c858252cd2a6126a36920f8a8e`.
+Implemented checkpoint: Tasks 1–3 (foundation, runner, consensus/network). Source baseline: `e8e85dbd7879b1c858252cd2a6126a36920f8a8e`.
 
 The table enumerates public methods, not completed behavior. `Planned` means no modeled implementation yet. Task 16 must resolve every entry to actions, observation projection or a justified exclusion and executable witness. A generic invalid request currently tests transport/refusal wiring; it does not count as each mutation's validation coverage.
 
@@ -97,8 +97,8 @@ The table enumerates public methods, not completed behavior. `Planned` means no 
 | Storage class and hosting | `topology/storage_class.go`, `topology/hosting.go` | Default/memory and optional hosting; backend is node configuration. |
 | Operations / planned steps | `topology/operation.go`, `topology/operator_steps.go` | Typed vocabulary; later tasks supply guards/transitions. |
 | Grants / receipts / fences | `topology/authority_grant.go`, `topology/authority_receipt.go`, `topology/authority_fence.go` | Distinct typed records; no evidence produced yet. |
-| Owner lifecycle | `node_lifecycle.go`, `node_load.go`, `internal/managed` | Typed ownership phases; only New process phase exercised. |
-| Native consensus / observations | `internal/raftengine`, `topology/status.go` | Typed abstraction; no commit/election action yet (Task 3). |
+| Owner lifecycle | `node_lifecycle.go`, `node_load.go`, `internal/managed` | New/Ready fixture and crash/Starting restart; complete startup/teardown remains Task 7. |
+| Native consensus / observations | `internal/raftengine`, `topology/status.go` | Exact native commit/election/catch-up and per-node application; membership changes arrive in Task 8. |
 | Scheduler | `scheduling/scheduler.go`, `internal/scheduling` | Typed capture/decision; handlers absent (Task 11). |
 | Sessions and locks | `topology/sessions.go`, `node_session.go` | Typed records; transitions absent (Task 12). |
 | Recovery | `recovery/types.go`, `internal/recovery/model/types.go` | Typed phases/evidence; execution absent (Tasks 14–15). |
@@ -112,3 +112,11 @@ The table enumerates public methods, not completed behavior. `Planned` means no 
 The target's `action` record field is `kind` because Quint reserves `action`. Process phases follow NodeStatus; operation phases use an `Op` prefix where a constructor would otherwise collide. `PrepareReplica` corresponds to `StepPrepareReplica`, `WaitCatchUp` to `StepWaitCaughtUp`, `PromoteLearner` to `StepPromoteVoter`, `TransferLeadership` to `StepTransferLeader`, `RemoveMember` to `StepRemoveReplica`, and `RetireReplica` to `StepCleanupReplicaState`. These aliases do not yet imply that the effect protocol is implemented.
 
 No claims are made about deadlock freedom, eventual progress, exhaustive exploration or Go conformance at this checkpoint. The exclusions and future handler tasks are listed in README.md.
+
+## Consensus and environment evidence (Task 3)
+
+The smoke3 instance runs the four common tests plus twelve membership/environment tests from `membership_test.qnt`. The initializer represents an established approved/proven cluster, not a successful create/admit API. `commitProgress`, `elect`, `catchUp` and `applyMeta` model the trusted Raft boundary; `crash`, `restart`, `setLink`, `drop` and `duplicate` model the fault environment. No application payloads or Raft wire internals are implemented.
+
+`metaFailureDoesNotStopLoadTest`, `loadFailureDoesNotStopMetaTest`, `commitBeforeLocalApplyTest`, `majorityLossDespiteHealthyCacheTest`, `loadMajorityLossTest`, `staleLeaderObservationTest`, `retainedRestartCatchUpTest`, `oldIncarnationMessageTest`, `duplicateDeliveryTest`, `droppedRequestIsNotReplyTest` and `learnerDoesNotVoteTest` demonstrate their named conditions. `membershipFixtureTest` checks the concrete scenario assumptions. Pure learner-certificate input is explicitly adversarial; ordinary scenarios use composed actions.
+
+The native-service helpers may access global consensus facts as the abstract environment; Choreo handlers only inspect delivered messages and their own local state. No handler consults shared current topology to simulate a fresh read. The target's durable host schema is refined with metaImage/metaIndex for crash-recovered local application and engineRunning for participation independently of handle publication.

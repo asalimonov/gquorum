@@ -28,3 +28,18 @@ Verified:
 - Real foundation test profile: all four deterministic tests pass; real simulation profile: no sampled safety violation, 50 samples/depth 20/seed 1. Reports: test-reports/quint/20261027T115342384324Z-2c7c87e7 and 20261027T115346605296Z-b32bcea1.
 
 Evidence changed the bounds-check implementation: importing/re-exporting an already concretely instantiated module exposed unbound consts in Quint. A zero-step invariant run against the original concrete instance verifies modelBounds without a duplicate instantiation. The failed prototype is removed. Quint's JSON run format omits witness counts; reports explicitly preserve that limitation rather than fabricate coverage. All handlers/protocol scope beyond Task 1 remain pending.
+
+## Task 3 — Independent consensus, network and local views
+Date: 2026-10-27 (Task 2 commit: 27fabe9)
+
+Added an established three-node/two-load fixture, exact native commit certificates, independent directed meta/load connectivity, commitment separate from local metadata application, safe abstract election/catch-up, crash/retained restart with fresh incarnation, stale message consumption, explicit loss and duplicate delivery. Host metadata image/index and owner engineRunning fields refine the target's durable/volatile distinctions; they do not change any Go format. Restart returns Starting and does not republish loads; Task 7 owns completion of the startup protocol.
+
+Verified:
+- Smoke3 typecheck; 16 deterministic tests passed (four shared + twelve membership/environment tests).
+- 50 seeded Rust samples, depth 60: no safety violation; independent-load-progress witness in 15/50, local-apply lag in 33/50, retained restart in 50/50 traces.
+- 17 runner tests passed after extending the runtime bounds assertion.
+- Real runner foundation tests, smoke3 tests and smoke3 simulation passed. Reports: test-reports/quint/20261027T120907345573Z-ae10a21a, 20261027T120913042812Z-195f7833, 20261027T120920437014Z-e6b46d34.
+
+Test semantics: Quint fail() does not carry a successor state for subsequent then/expect clauses. Negative transition checks now end their traces, after all state assertions. No production fallback/stutter action was added to accommodate tests.
+
+A concurrent edit to docs/project.md appeared during this task, adding technical-debt documentation guidance. It was read and preserved, and is not staged in this task's commit. The active goal and remaining plan are unchanged.

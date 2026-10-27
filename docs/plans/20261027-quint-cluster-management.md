@@ -9,7 +9,7 @@
 **Target SHA-256 at planning:** `64b1a24b8068997529445ce6e92c44c12a8ebb455a5d728cb34ba0533c64ff9b`
 **Full brainstorm log:** [20261027-quint-cluster-management.md](../brainstorms/20261027-quint-cluster-management.md)
 **Execution progress:** `docs/progress/20261027-quint-cluster-management.md` (create during execution).
-**Status:** executing; Tasks 1–2 complete, Tasks 3–22 pending. The user approved this sequence during planning.
+**Status:** executing; Tasks 1–3 complete, Tasks 4–22 pending. The user approved this sequence during planning.
 
 ## Objective and execution contract
 
@@ -118,17 +118,17 @@ For Python runner changes: run its full unit suite, syntax checks, and a real re
 **Files:** `membership.qnt`, `membership_test.qnt`, `instances/smoke3.qnt`, `profiles/smoke3.json` (new); shared model/types/handlers/properties (updated).
 **References:** target §§4/5.5/5.8/6.1/7/8.7/10.1/11; §14 `quorumRead`; `docs/architecture/raft.md`, `internal/raftengine`, `internal/metaservice` read paths.
 
-- [ ] Implement `hasCommitPath(consensus, nodes, links): bool`, abstract leader authority/election, commit/apply positions and catch-up classes. Use exact native voter identities and valid durable evidence; observations/session health cannot create a commit certificate.
-- [ ] Add directed independent meta/load link sets and `deliver/drop/duplicate/setLink` actions. Intercept Choreo sends as explicit queued management effects; partitioned messages cannot teleport to mailboxes. Model duplicate delivery without changing request/effect identity.
-- [ ] Add `crash/restart`, fresh incarnations and retained valid disk for this task. Keep metadata commitment separate from per-node local apply; capture local read views, stale observations and old-process messages.
-- [ ] Create `smoke3` with three nodes and two exact preexisting load groups as a validated initializer. Add an abstract load-commit token so load progress can be witnessed without modeling payloads. Creation of new groups remains Task 9.
-- [ ] Add a non-omniscience check: handler inputs expose applied/cached values and exact supplied proofs; current shared metadata/native state is accessed only by the specified consensus/environment transitions.
+- [x] Implement `hasCommitPath(consensus, nodes, links): bool`, abstract leader authority/election, commit/apply positions and catch-up classes. Use exact native voter identities and valid durable evidence; observations/session health cannot create a commit certificate.
+- [x] Add directed independent meta/load link sets and `deliver/drop/duplicate/setLink` actions. Intercept Choreo sends as explicit queued management effects; partitioned messages cannot teleport to mailboxes. Model duplicate delivery without changing request/effect identity.
+- [x] Add `crash/restart`, fresh incarnations and retained valid disk for this task. Keep metadata commitment separate from per-node local apply; capture local read views, stale observations and old-process messages.
+- [x] Create `smoke3` with three nodes and two exact preexisting load groups as a validated initializer. Add an abstract load-commit token so load progress can be witnessed without modeling payloads. Creation of new groups remains Task 9.
+- [x] Add a non-omniscience check: handler inputs expose applied/cached values and exact supplied proofs; current shared metadata/native state is accessed only by the specified consensus/environment transitions.
 
 #### Verification
 
-- [ ] Common checks pass. Witness delayed local apply, asymmetric isolation, leader replacement, fresh restart incarnation and independent load commits while `_meta` cannot commit.
-- [ ] With two of three voters unavailable, new commits are refused/blocked; a learner cannot substitute for a vote. Meta and load partition tests have distinguishable outcomes.
-- [ ] Seeded `smoke3` exercises crash/partition/recovery actions without artificial identity reuse or undefined accesses.
+- [x] Common checks pass. Witness delayed local apply, asymmetric isolation, leader replacement, fresh restart incarnation and independent load commits while `_meta` cannot commit.
+- [x] With two of three voters unavailable, new commits are refused/blocked; a learner cannot substitute for a vote. Meta and load partition tests have distinguishable outcomes.
+- [x] Seeded `smoke3` exercises crash/partition/recovery actions without artificial identity reuse or undefined accesses.
 
 ### Task 4: Implement document edits, placement and pure plan construction
 

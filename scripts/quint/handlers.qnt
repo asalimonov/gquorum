@@ -18,6 +18,13 @@ module handlers {
       }
     })
 
+  pure def listen_stale(ctx: Context): Set[Envelope] =
+    ctx.messages.exclude(listen_local(ctx))
+
+  pure def act_stale(ctx: Context, msg: Envelope): Transition = {
+    post_state: ctx.state, effects: Set(C::CustomEffect(Consume(msg))),
+  }
+
   pure def act_local(ctx: Context, msg: Envelope): Transition = match msg.payload {
     | ApiCall(call) => {
       val result = match call.request {
@@ -36,7 +43,7 @@ module handlers {
   }
 
   pure def main_listener(ctx: Context): Set[Transition] =
-    C::cue(ctx, listen_local, act_local)
+    C::cue(ctx, listen_local, act_local).union(C::cue(ctx, listen_stale, act_stale))
 
   pure def apply_custom_effect(env: World, effect: HostEffect): World = match effect {
     | Consume(msg) => { ...env,

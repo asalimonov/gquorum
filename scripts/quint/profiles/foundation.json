@@ -5,9 +5,21 @@
   "main": "foundation",
   "init": "init",
   "step": "step",
-  "bounds": {"nodeCount": 1, "maxRequests": 2},
-  "properties": ["safety"],
-  "witnesses": ["deliveredRequest"],
+  "bounds": {
+    "nodeCount": 1,
+    "maxRequests": 2,
+    "founderCount": 0,
+    "loadCount": 0,
+    "maxPosition": 3,
+    "maxIncarnation": 2,
+    "maxDeliveries": 8
+  },
+  "properties": [
+    "safety"
+  ],
+  "witnesses": [
+    "deliveredRequest"
+  ],
   "backend": "typescript",
   "verification_backend": "apalache",
   "verification_qualified": false,
@@ -17,9 +29,16 @@
   "test_samples": 10,
   "timeout_seconds": 60,
   "temporal": [],
-  "tests": [{
-    "file": "instances/foundation.qnt",
-    "main": "foundation",
-    "expected": ["assumptionsTest", "deliveredObservationTest", "invalidRequestRefusedTest", "requestBoundTest"]
-  }]
+  "tests": [
+    {
+      "file": "instances/foundation.qnt",
+      "main": "foundation",
+      "expected": [
+        "assumptionsTest",
+        "deliveredObservationTest",
+        "invalidRequestRefusedTest",
+        "requestBoundTest"
+      ]
+    }
+  ]
 }

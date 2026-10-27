@@ -14,7 +14,7 @@ module properties {
         match call.result {
           | Some(result) => match result {
             | Refused(reason) => reason == Invalid and call.request == InvalidRequest
-            | Observed(phase) => call.request == ObserveLocal and phase == New
+            | Observed(_) => call.request == ObserveLocal
             | Indeterminate => false
           }
           | _ => true
@@ -32,6 +32,32 @@ module properties {
       w.system.get(n).durable.pin == None,
       w.system.get(n).durable.receipts.size() == 0,
       w.system.get(n).volatile.owners.keys().size() == 0,
+    }),
+  }
+
+  pure def consensusWellFormed(w: World): bool = and {
+    w.extensions.consensus.keys().contains("_meta"),
+    w.extensions.consensus.keys().forall(g => {
+      val c = w.extensions.consensus.get(g)
+      and {
+        c.voters.size() > 0,
+        c.voters.intersect(c.learners).size() == 0,
+        c.voters.union(c.learners).forall(r => r.group == g and r.cluster == c.lineage),
+        c.appliedPositions.values().forall(index => index <= c.committedPosition),
+        match c.leaderAuthority {
+          | Some(leader) => c.voters.contains(leader)
+          | None => true
+        },
+      }
+    }),
+    w.system.keys().forall(n => {
+      val node = w.system.get(n)
+      and {
+        node.volatile.appliedMetaIndex <= w.extensions.consensus.get("_meta").committedPosition,
+        node.durable.metaIndex <= w.extensions.consensus.get("_meta").committedPosition,
+        node.volatile.incarnation >= 1,
+        node.volatile.owners.values().forall(owner => owner.key.node == n),
+      }
     }),
   }
 }

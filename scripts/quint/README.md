@@ -12,7 +12,7 @@ quint test scripts/quint/instances/foundation.qnt --main foundation --seed 1 --m
 quint run scripts/quint/instances/foundation.qnt --main foundation --invariant safety --witnesses deliveredRequest --seed 1 --max-samples 50 --max-steps 20
 ```
 
-The foundation has one newly constructed, unadmitted actor and a bound of two calls. It models queuing, delivery and Choreo handling of a local phase observation and an invalid request. Neither operation creates consensus or authority. The bound can terminate exploration once all requests are handled; that is a finite harness boundary, not evidence of a protocol deadlock. Successful `run` means no violation in sampled traces, not exhaustive checking.
+The foundation has one newly constructed, unadmitted actor and bounds of two calls and eight delivery identities. It models queuing, delivery and Choreo handling of a local phase observation and an invalid request. Neither operation creates consensus or authority. The request/delivery bounds and dropped calls can terminate exploration; that is a finite harness boundary, not evidence of a protocol deadlock. Successful `run` means no violation in sampled traces, not exhaustive checking.
 
 ## Profile runner
 
@@ -40,7 +40,7 @@ The target's record field `action` is spelled `kind` in Quint because `action` i
 
 ## Pending implementation
 
-The state schema is present, but handlers for topology/CAS (Tasks 4–5), authority (6), ownership (7), membership (8), groups (9), cleanup/readmission (10), scheduling (11), sessions/reads (12), storage faults (13), and recovery (14–15) are not implemented yet. These paths are absent rather than returning invented successful results. Independent consensus/network failures arrive in Task 3. Progress/liveness and exhaustive profile qualification arrive in Tasks 17–18.
+The state schema is present, but handlers for topology/CAS (Tasks 4–5), authority (6), ownership (7), membership (8), groups (9), cleanup/readmission (10), scheduling (11), sessions/reads (12), storage faults (13), and recovery (14–15) are not implemented yet. These paths are absent rather than returning invented successful results. Independent consensus/network failures are implemented in Task 3; restart restores retained metadata into Starting, while load owner reconstruction/publication remains Task 7. Progress/liveness and exhaustive profile qualification arrive in Tasks 17–18.
 
 Do not infer completed coverage from the presence of a record or enum. Add each transition with an executable witness and invariants, retain counterexamples, and update the coverage matrix before extending claims.
 
@@ -54,3 +54,18 @@ Do not infer completed coverage from the presence of a record or enum. Add each 
 - TODO(not planned): universal five-node exhaustive guarantee; all results require named finite bounds and completion evidence.
 
 No production Go, storage format, public API or default test target is changed by this checkpoint.
+
+## Three-node consensus/network checkpoint
+
+```sh
+python3 scripts/quint/run.py --profile smoke3 --mode test
+python3 scripts/quint/run.py --profile smoke3 --mode simulate --seed 1
+```
+
+`smoke3` initializes three established nodes, `_meta`, and load groups `a` and `b`. Its initializer assumes consistent approved/proven declarations, pins, valid stores and running replicas; it is not a shortcut for the later create/admit workflows. The profile binds position 4, incarnation 2 and delivery ID 16 limits and uses the preinstalled pinned Rust evaluator.
+
+The environment abstracts consensus commitment/election/catch-up. A commit requires an exact running leader plus a bidirectionally reachable majority of native voters with valid retained identity/storage; learners and healthy observations cannot supply votes. Host membership is distinct from connectivity. `commitProgress` advances a bounded consensus position, not an application result. Metadata commit and each node's durable/local application are separate actions. Native leader authority may change while local leader observations stay stale.
+
+Crashes discard process-owned calls/observations/owners and retain durable pin/storage evidence. Restart supplies a new incarnation and restores only retained metadata into Starting; it does not restore published load handles. Delayed old-incarnation replies are consumed without completing a current call. Loads stop contributing votes after their local engine is gone. `HostState.metaImage/metaIndex` represent retained metadata state, and `OwnerState.engineRunning` distinguishes native participation from public publication. Those implementation fields refine the target records without changing production storage.
+
+Management inboxes and in-flight messages are distinct, and link changes, loss and duplicate delivery are explicit actions. Current request tests are local calls; cross-node membership/authority message workflows are added in their later tasks. Tests exercise both directions of metadata/load isolation, asymmetric links, stale observations, delayed application, majority loss, restart/catch-up, old messages, duplicates and loss. Progress/liveness qualification remains pending; no automatic readiness after restart is claimed yet.

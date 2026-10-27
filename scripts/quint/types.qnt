@@ -132,6 +132,7 @@ module types {
     key: ReplicaKey, phase: OwnerPhase, held: bool, reservation: Option[RequestKey],
     replayReady: bool, startupAuthorized: bool, published: bool,
     factoryOutstanding: bool, engineJoined: bool, applicationClose: ClosePhase,
+    engineRunning: bool,
   }
   type StorageEvidence = ValidStore({ snapshot: int, commit: int, tail: int, appliedHint: int })
     | MissingStore | ForeignStore(ReplicaKey) | UnreadableStore | ContradictoryStore
@@ -182,8 +183,11 @@ module types {
     pin: Option[DurableNodeIdentity], replicaEvidence: ReplicaKey -> StorageEvidence,
     authorityFloors: ResourceKey -> int, receipts: Set[Receipt], fences: Set[FenceEvidence],
     collectionMarkers: ReplicaKey -> CollectionState,
+    metaImage: Option[ReadView], metaIndex: int,
   }
   type NodeState = { volatile: ProcessState, durable: HostState }
+  type LocalNode = { process_id: NodeName, volatile: ProcessState, durable: HostState }
+  type NodeStates = NodeName -> LocalNode
   type ManagementMessage = ApiCall({ key: RequestKey, request: ApiRequest })
   type Channel = MetaChannel | LoadChannel
   type Envelope = {
@@ -198,5 +202,6 @@ module types {
     network: NetworkState, nextDelivery: int, metadata: MetadataState,
     consensus: GroupId -> ConsensusState, recovery: NodeName -> RecoveryState,
     storageConfig: NodeName -> NodeStorageConfig,
+    metaLog: int -> MetadataState,
   }
 }
