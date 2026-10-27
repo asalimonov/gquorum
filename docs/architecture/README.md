@@ -1,14 +1,14 @@
 # Architecture
 
-Start with the [runtime overview](runtime.md), then use the
-[Raft model](raft.md), [node lifecycle and recovery](runtime.md), and
-[placement contract](placement.md) for details. See
+Start with the [library](library.md) and [project map](project-map.md), then use the
+[Raft model](raft.md), and [placement contract](placement.md) for details. See
 [load transport multiplexing](load-transport-multiplexing.md) for how independent
-Raft groups share a listener and peer connections. The terms below describe the
-current library behavior. Examples use an application group named `orders` and
-nodes named `n1`, `n2`, and `n3`.
+Raft groups share a listener and peer connections.
 
 ## Dictionary
+
+The terms below describe the current library behavior. Examples use an application
+group named `orders` and nodes named `n1`, `n2`, and `n3`.
 
 ### Groups, replicas, and placement
 
@@ -161,41 +161,3 @@ and initiates an election; it does not change group membership. The target
 still needs the group's election quorum to become leader, and a timed-out
 caller cannot assume the transfer was undone. See
 [topology administration](runtime.md) and [Raft elections](raft.md).
-
-## Architecture
-
-An application constructs a `gquorum.Node` for each participant and supplies
-its identities, configuration, load state machines, storage, and load transport.
-Each Node owns one local `_meta` replica and any assigned local load replicas;
-`node.Cluster()` is its administration view, not another running service. The
-distributed `_meta` group replicates topology documents and approved operators.
-Those documents declare independent load groups and assign their replicas to
-nodes. An approved plan authorizes changes to those replicas; each load group
-then runs its own Raft consensus and application state machine, independently of
-`_meta`. The diagram shows logical relationships for admitted nodes and active
-groups; a parked replica may have no running handle or state machine.
-`CALLER_` marks application-created components; `LIB_` marks components whose
-lifecycle and coordination the library manages. The caller constructs each
-`LIB_NODE` with `NewNode`, then the library manages it after `Start`.
-
-```mermaid
-erDiagram
-    CALLER_APPLICATION ||--|{ LIB_NODE : constructs
-    LIB_NODE ||--|| LIB_CLUSTER_VIEW : exposes
-    LIB_META_GROUP ||--|{ LIB_CLUSTER_VIEW : administered_through
-    LIB_NODE ||--|| LIB_META_REPLICA : hosts
-    LIB_NODE ||--o{ LIB_LOAD_REPLICA : hosts
-    LIB_META_GROUP ||--|{ LIB_META_REPLICA : consists_of
-    LIB_META_GROUP ||--|{ LIB_TOPOLOGY_DOCUMENT : replicates_versions
-    LIB_META_GROUP ||--o{ LIB_OPERATOR : approves
-    LIB_TOPOLOGY_DOCUMENT ||--o{ LIB_LOAD_GROUP : declares
-    LIB_LOAD_GROUP ||--o{ LIB_LOAD_REPLICA : consists_of
-    LIB_LOAD_REPLICA ||--o| LIB_LOAD_GROUP_HANDLE : exposes_when_ready
-    LIB_LOAD_REPLICA ||--o| CALLER_STATE_MACHINE : runs_when_ready
-```
-
-For example, three Nodes each host one `_meta` replica, while the `orders` load
-group may have one replica on each Node. An operator approved through `_meta`
-can change `orders` membership, but `orders` proposals and reads use the
-`orders` Raft group. See the [runtime overview](runtime.md) for the
-public handles and [Raft model](raft.md) for the group boundaries.

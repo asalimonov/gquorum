@@ -13,10 +13,7 @@
 ## Architectural contracts
 
 - Go library (`github.com/asalimonov/gquorum`) for durable clustered applications using etcd Raft, bbolt, WAL, gRPC and protobuf. Applications supply business state machines, load transport, identities and deployment configuration.
-- Read `AGENTS.md`, `README.md` and the relevant current contracts in `docs/architecture/library.md` and `docs/architecture/runtime.md`. Archived brainstorms/plans describe historical APIs, not requirements for current behavior.
-- `Node` owns participant lifetime and managed replicas. `Cluster` is an administration view; a managed `load.Group` represents one exact local replica. `load.NewStandalone` deliberately has separate ownership. Do not reintroduce public Runtime/OpenMeta/OpenLoad APIs.
-- String `Identity.NodeName`, `Node.Name` and `Replica.NodeName` identify the stable logical node. `InstanceID` is fresh per process. Numeric `MemberID` and `ReplicaID` are Raft identities. Their distinction is deliberate; a wholesale NodeID rename was declined.
-- `ClusterStatus.MetaLeaderID` and `GroupStatus.LeaderID` are numeric; `MetaLeaderNodeName` and `LeaderNodeName` are readable strings. Resolve names through Active by exact group/replica ID; unknown/unmapped leaders have empty names and preserve observed numeric IDs. Raw load status has no topology resolver.
+- Read `AGENTS.md`, `README.md` and the relevant current contracts in `docs/architecture/library.md` and `docs/architecture/raft.md`.
 - Latest is staged intent, Target approved intent, Active converged topology. Staged intent cannot authorize startup or cleanup. Status/document reads are observations, not linearizable barriers. HostNode denotes the reporting node.
 - Preserve exact replica identity, authorized retirement/readmission proofs, foreign or contradictory storage evidence, process fencing and monotonically fresh replacement IDs. Deleted group IDs cannot be reused.
 - Preserve persisted encodings, protobuf fields and immutable compatibility fixtures. Public API renames are not authorization for changing storage/wire formats. The HTTP example is a separate application boundary; distinguish its JSON contracts from durable metadata encodings.

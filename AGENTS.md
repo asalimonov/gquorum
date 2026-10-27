@@ -27,12 +27,12 @@ not supported by design. When you don't know it is main use case or not - ask us
 
 Start with [README.md](README.md), then the relevant contracts:
 
+- [Key concepts of the library](docs/architecture/library.md): key entities,
+  design constraints, topology overview.
 - [Raft overview](docs/architecture/raft.md): consensus scope, elections,
   heartbeat protocols, proposal ordering, persistence and group boundaries.
 - [Project map](docs/architecture/project-map.md): public handles, topology
   workflow, integration interfaces and package boundaries.
-- [Node ownership and recovery](docs/architecture/runtime.md): durable evidence,
-  startup, shutdown, retirement, readmission and callback ownership.
 - [Testing guide](docs/testing/tests.md): suite boundaries and commands.
 - [API refactor validation](docs/testing/api-refactor-validation.md) and
   [audit](docs/testing/api-refactor-audit.md): completed coverage and known scope.
