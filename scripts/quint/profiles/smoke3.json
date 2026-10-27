@@ -83,7 +83,12 @@
         "approveFailedVersionReplaysFirstAttemptTest",
         "planningNativeReadNeedsLoadQuorumTest",
         "approvalRecaptureNeedsMetaQuorumTest",
-        "oldReadAckCannotSatisfyRecaptureTest"
+        "oldReadAckCannotSatisfyRecaptureTest",
+        "clusterSharesWorldTest",
+        "membershipSharesWorldTest",
+        "readsSharesWorldTest",
+        "transactionsSharesWorldTest",
+        "operationsSharesWorldTest"
       ]
     },
     {

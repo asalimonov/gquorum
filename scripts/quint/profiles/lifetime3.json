@@ -110,7 +110,14 @@
         "stopAndCloseTimeoutsDoNotReleaseOwnersTest",
         "earlyLocalPublicationHasCounterexampleTest",
         "earlyLocalReleaseHasCounterexampleTest",
-        "renewalInvalidatesPendingExpiryProbeTest"
+        "renewalInvalidatesPendingExpiryProbeTest",
+        "clusterSharesWorldTest",
+        "membershipSharesWorldTest",
+        "readsSharesWorldTest",
+        "transactionsSharesWorldTest",
+        "operationsSharesWorldTest",
+        "effectsSharesWorldTest",
+        "lifetimeSharesWorldTest"
       ]
     },
     {

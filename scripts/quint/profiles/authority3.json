@@ -92,7 +92,13 @@
         "hostFenceNeedsDurableReportTest",
         "approvedTransferRunsThroughCheckpointTest",
         "newCourierBindingRejectsOldSenderTest",
-        "courierProofRequiresMetaQuorumTest"
+        "courierProofRequiresMetaQuorumTest",
+        "clusterSharesWorldTest",
+        "membershipSharesWorldTest",
+        "readsSharesWorldTest",
+        "transactionsSharesWorldTest",
+        "operationsSharesWorldTest",
+        "effectsSharesWorldTest"
       ]
     },
     {

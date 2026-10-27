@@ -40,7 +40,8 @@
         "requestBoundTest",
         "stageScopeEnforcedAtInvocationTest",
         "admissionScopeEnforcedAtInvocationTest",
-        "creationScopeEnforcedAtInvocationTest"
+        "creationScopeEnforcedAtInvocationTest",
+        "clusterSharesWorldTest"
       ]
     }
   ]

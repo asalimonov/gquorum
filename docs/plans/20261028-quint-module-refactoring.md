@@ -10,15 +10,28 @@
 **Refactoring request:** user discussion on 2026-10-28: group modules, hide contextual complexity, reuse higher-order functions, and mirror familiar Go subsystem boundaries.
 **Parent implementation plan:** [cluster-management plan](20261027-quint-cluster-management.md)
 **Execution log when implemented:** `docs/progress/20261028-quint-module-refactoring.md`
-**Status:** planned, not implemented. The parent goal remains paused; writing this plan does not authorize resuming it.
+**Status:** refactoring authorized on 2026-10-28; executing from Task 1. Parent protocol Tasks 8–18 remain paused.
+**Reviewed corrections:** peer thread 1, rounds 3–5 in `docs/review/feat_quint-spec.md`.
+**Execution baseline:** `85cd75d` (model unchanged from `b39764c`).
 
 ## Objective and execution position
 
 Reduce the effort needed to navigate, extend and review the current model before implementing parent Task 8. Preserve the existing modeled behavior, assumptions, state schema, interleavings, properties and coverage. This is a structural refactoring, not a smaller model or a new protocol implementation.
 
-Use two substantial implementation commits, followed by architectural verification, external review and documentation. Execute this plan independently from parent Tasks 8–18. Completion does not automatically resume that paused plan.
+Use three implementation commits (organization, mechanical extraction, reusable helpers), followed by architectural verification, external review and documentation. Execute this plan independently from parent Tasks 8–18. Completion does not automatically resume that paused plan.
 
-The expected benefit is clearer ownership and less repeated state-update/transport code. The prior estimate of 10–25% less routine implementation/debugging effort is a planning estimate, not a measured performance promise. Moving files or using higher-order functions does not itself reduce the model's reachable state space or simulator runtime.
+The expected benefit is clearer ownership and less repeated state-update/transport code. No numerical authoring-speed improvement is claimed. Moving files or using higher-order functions does not itself reduce the model's reachable state space or simulator runtime.
+
+## Motivation: why refactor before the next protocol tasks
+
+The model is already difficult to extend locally: 38 top-level modules mix production rules and tests, while the 1,542-line composition module owns 95 actions across several subsystems. Membership/scaling, group execution, cleanup and scheduling will add more workflows. Refactoring now avoids building those additions on a structure that already requires reading many unrelated definitions for a small change.
+
+- **Make ownership discoverable.** Familiar Go subsystem names let a contributor locate metadata rules, request coordination, replica lifetime or operator execution without reconstructing the import graph. Mirror responsibilities, not every Go implementation file.
+- **Reduce inconsistent changes.** Repeated nested world updates and envelope handling make it easy to fix one path while leaving another different. Small framing helpers preserve unrelated fields consistently; domain-specific authorization and safety guards remain explicit.
+- **Make tests easier to extend.** Shared stateless fixtures and deliberate suite composition remove the need to import another test module merely to obtain setup data. New scenarios can reuse setup while still interrupting individual protocol phases.
+- **Keep protocol reasoning visible.** A smaller composition root makes enabled actions and fault choices easier to inspect. Abstraction should hide record-update mechanics, while retaining commit/apply, consume/report and stop/join boundaries that expose races and deadlocks.
+
+Success means domain bodies leave the composition root, new localized rules have an obvious owner, and fixtures are independent of test modules. Scaling and cleanup remain cross-cutting work. It does not mean fewer total files, fewer modeled states or faster simulation. Source analysis and verification remain necessary; the estimated implementation-effort saving is uncertain. The refactor is worthwhile only if it preserves current coverage and interleavings without introducing a larger framework to maintain.
 
 ## Important notices
 
@@ -57,19 +70,16 @@ Use Go subsystem names where responsibilities match. Keep abstract consensus, en
 ```text
 scripts/quint/
   cluster.qnt                 # sole world variable, stable action facade, step composition
-  state/                      # types.qnt; declarations only, no mutable state
+  types.qnt                   # cohesive declarations; no mutable state
   runtime/                    # World/Choreo aliases, framing and envelope primitives
   topology/                   # edits, placement, immutable plan construction
   metaengine/                 # replicated metadata rules, grants, receipts, sessions
   metaservice/                # request/read/approval work and node-side session steps
-  operator/                   # remaining-plan checks, dispatch/checkpoint coordination
   managed/                    # replica lifetime, effect consumption, host fencing
   consensus/                  # safe Raft abstraction and native guards
-  environment/                # transport delivery, partitions, crash/restart inputs
-  harness/                    # initialization, scope assumptions, properties
+  harness/                    # initialization, properties and environment faults
   tests/
     fixtures/                 # pure data fixtures; no run declarations or model instance
-    support/                  # shared scenario helpers and composition support
     unit/                     # pure rule tests, grouped by subsystem where useful
     scenarios/                # named asynchronous scenarios by responsibility
   instances/                  # existing concrete instance paths/names retained
@@ -84,7 +94,7 @@ Use explicit module names/aliases such as `managed_steps` and `metaservice_sessi
 
 | Existing component | Intended owner |
 | --- | --- |
-| `types.qnt` | `state/types.qnt`, preserving record and variant shapes |
+| `types.qnt` | `types.qnt`, unchanged record and variant shapes |
 | Choreo aliases currently in `handlers.qnt` | `runtime/world.qnt`; no `var` declaration |
 | `apply_custom_effect`, envelope/framing updates | `runtime/updates.qnt` and `runtime/messages.qnt` |
 | `topology.qnt`, `placement.qnt`, `planning.qnt` | `topology/` |
@@ -92,10 +102,10 @@ Use explicit module names/aliases such as `managed_steps` and `metaservice_sessi
 | Replicated session grant/bind/revoke rules | `metaengine/sessions.qnt` |
 | `reads.qnt`, caller transaction state, approval capture/recapture | `metaservice/` |
 | Local listeners and session renewal/probe handling | `metaservice/handlers.qnt` and cohesive step modules |
-| `remaining.qnt`, effect dispatch/checkpoint coordination | `operator/` |
+| `remaining.qnt`, effect dispatch/checkpoint coordination | `metaservice/` |
 | `lifecycle.qnt`, receiver execution and host-fence completion | `managed/` |
 | `membership.qnt`, abstract native commit/election/catch-up | `consensus/` |
-| Link changes, delivery/loss/duplication, crash/restart orchestration | `environment/` |
+| Link changes, delivery/loss/duplication, crash/restart orchestration | `harness/` |
 | `initial.qnt`, `scope.qnt`, `properties.qnt` | `harness/` |
 
 A current file may span two responsibilities. Split mixed files only at existing functional boundaries: for example, caller preparation stays in `metaservice`, while metadata command validation/application belongs in `metaengine`. Keep exact guard/update behavior and document the old-to-new symbol mapping. Avoid inventing a one-file-per-action convention.
@@ -114,7 +124,7 @@ flowchart TD
     Tests --> Steps
 ```
 
-`state` contains no imports from handlers, tests or composition. `runtime` may import state declarations and vendored Choreo, but not domain rules. Domain transition functions do not import `cluster` or define another mutable world. Production code never imports tests. Harness properties inspect state for verification; actors do not gain access to facts through those properties.
+`types.qnt` contains no imports from handlers, tests or composition. `runtime` may import state declarations and vendored Choreo, but not domain rules. Domain transition functions do not import `cluster` or define another mutable world. Production code never imports tests. Harness properties inspect state for verification; actors do not gain access to facts through those properties.
 
 Keep `cluster.init`, `cluster.step`, `requestStep`, `protocolStep`, `faultStep`, `nativeStep` and existing named action entry points usable by scenarios. Move substantive guard/update bodies into their owning modules and leave thin wrappers where needed. Aim to remove the majority of domain bodies from `cluster.qnt`; do not achieve a line-count target by hiding phase boundaries or introducing an interpreter.
 
@@ -127,15 +137,30 @@ pure def withNode(w: World, node: NodeName,
                  update: (LocalNode) => LocalNode): World
 pure def withOwner(w: World, node: NodeName, group: GroupId,
                   update: (OwnerState) => OwnerState): World
-pure def enqueue(w: World, envelope: Envelope): World
-pure def consumeEnvelope(w: World, envelope: Envelope): World
+// Move existing apply_custom_effect unchanged; Queue/Consume stay canonical.
 ```
 
 These helpers frame updates; they do not authorize operations, allocate replacement identities, select a newer version, or supply default missing owners. Keep business guards in domain code and guard partial map/Option/list access before evaluating it. Test that unrelated state is preserved, in addition to testing the intended update.
 
-For deterministic extracted steps, prefer a pure function returning `Option[World]`: `None` means disabled, `Some(updated)` means the existing transition is enabled. One action adapter in `cluster` converts this to the next-state assignment. Its `None` branch must remain disabled, not become a stutter. If the prototype shows this representation adds substantial copying or obscures diagnostics, use explicit guard/post-state functions with the same single-owner facade instead.
+For deterministic steps use explicit guard/post functions as the default. Keep shared local bindings unchanged; evaluate post-state expressions only in the guarded branch, preserving partial-access protection. An `Option[World]` result is optional only where it makes the existing control flow clearer; a disabled result must never become stutter.
 
-Keep nondeterministic choices and exploration grouping visible. Do not collapse separate branches into a set of successor worlds that deduplicates choices or changes sampling weights unintentionally. Operators/functions are source-level parameters, never fields added to persisted model state.
+Four non-selector actions have internal nondeterminism: `handle`, `applyMeta`, `dispatchGrantFrom`, `finishTransfer`. Extract `candidates(w,args): Set[X]` plus guard/post functions with an explicit choice parameter; keep `nondet choice = candidates(world,args).oneOf()` in the action adapter. Keep all seven existing exploration selectors, choice domains and branch order. Do not collect successor worlds into a deduplicating set or store functions in protocol state.
+
+Allowed imports (within each row, same-subsystem imports are also permitted):
+
+| Module family | Allowed production dependencies |
+| --- | --- |
+| types | vendored basicSpells |
+| runtime | types, vendored Choreo/basicSpells |
+| topology | types, runtime |
+| metaengine | types, runtime, topology |
+| consensus | types, runtime |
+| managed | types, runtime, consensus, metaengine read-only/rule functions |
+| metaservice | types, runtime, topology, metaengine, consensus, managed |
+| harness | any production rule/transition family, but never cluster/test state |
+| cluster | all production families; owns the only world |
+
+Folders name responsibilities, not a requirement to copy Go's exact import graph. Node decisions retain local/confirmed views; pure functions receiving `World` cannot invent new authoritative reads.
 
 ### D5. Reusable workflows and tests
 
@@ -143,7 +168,9 @@ Production workflows remain the existing phase machines and independently enable
 
 Scenario helpers may compose existing `.then` steps because a deterministic test prescribes a trace. Preserve access to individual phase actions for injecting a crash or competing operation between them. Do not use these scenario scripts as the production `step` relation.
 
-Extract fixtures from test modules into stateless fixture modules. Replace test-to-test fixture imports and incidental wildcard re-exports with deliberate suite composition. Prototype shared scenario composition first: use a supported singleton import arrangement or stateless higher-order scenario builders invoked by one stateful suite entry point. Inspect the instantiated model to prove it contains only one mutable world. Do not solve compiler limitations by duplicating the cluster or copying entire scenario suites between profiles.
+Extract pure fixtures from test modules, but retain the staged runtime suite chain and its single constant-binding point. It provides the nested smoke/authority/lifetime inventories. Independently instantiated sibling suites have distinct state entities even when constants match; unqualified re-exports can conceal the split.
+
+Add distinct, non-shadowable stage actions and cross-stage `run` checks in each suite. Their effect types must connect the core initialization and every included stage's world. Typecheck and execute these checks; compiled simulation output alone cannot prove sharing in test-only state. Record newly added composition tests explicitly while preserving every baseline test. Keep stateful scenario helpers with their chain stage; fixtures remain stateless.
 
 ### D6. Behavioral preservation and evidence
 
@@ -160,28 +187,28 @@ Compare representative intermediate states for metadata commit/apply, authority 
 **Files:** module moves under D1/D2; `runtime/world.qnt`; `tests/`; `instances/`; affected profile paths; runner tests only where needed.
 **References:** target §§4–6 and 10.3–10.4; this plan D1–D3, D5–D6.
 
-- [ ] Confirm the execution baseline and record revision, model/configuration hashes, current test inventories, public action/property names and profile settings in the execution log. Reuse prior validation only when hashes match; otherwise obtain a fresh baseline.
-- [ ] Prototype one higher-order state-update helper and one independently composed scenario on Quint 0.33.0/Rust v0.7.0. Typecheck and execute them; inspect instantiated state ownership and same-named helper imports. Resolve the composition encoding before bulk moves. If no supported encoding preserves one world, record the blocker instead of introducing duplicate state.
-- [ ] Move cohesive pure modules using D2, retaining semantics and stable public action/profile names. Extract state/Choreo aliases from handlers into `runtime/world.qnt`; remove handler dependencies from initialization, properties and pure execution solely used for types.
-- [ ] Move tests into unit/scenario areas, extract shared data into `tests/fixtures`, and replace test-module fixture dependencies and the incidental suite-inheritance chain with the validated explicit composition.
-- [ ] Keep instance file paths and profile names stable. Update imports and manifests; preserve leaf test names and exact per-profile inventories, including historical `topologyChecks` availability. Do not broaden initial scope by activating historical extension tests.
-- [ ] Confirm nested modules appear in recursive run manifests. Change `run.py` only if an actual relocation incompatibility is demonstrated; preserve missing/ignored/duplicate-name rejection, exit codes and artifact behavior.
-- [ ] Remove obsolete forwarding modules after consumers migrate; retain a compatibility shim only for a documented external entry point, not every former leaf path.
+- [x] Confirm the execution baseline and record revision, model/configuration hashes, current test inventories, public action/property names and profile settings in the execution log. Reuse prior validation only when hashes match; otherwise obtain a fresh baseline.
+- [x] Use the reviewed LocalNode framing prototype and add distinct cross-stage sharing checks on Quint 0.33.0/Rust v0.7.0. Retain one leaf instantiation and the staged suite chain. Check every stage boundary and retain baseline inventories plus explicitly named new checks.
+- [x] Move cohesive pure modules using D2, retaining semantics and stable public action/profile names. Extract state/Choreo aliases from handlers into `runtime/world.qnt`; remove handler dependencies from initialization, properties and pure execution solely used for types.
+- [x] Move tests into unit/scenario areas, extract shared data into `tests/fixtures`, and remove fixture dependencies on test modules. Retain and document the staged suite-inheritance chain.
+- [x] Keep instance file paths and profile names stable. Update imports and manifests; preserve leaf test names and exact per-profile inventories, including historical `topologyChecks` availability. Do not broaden initial scope by activating historical extension tests.
+- [x] Confirm nested modules appear in recursive run manifests. Change `run.py` only if an actual relocation incompatibility is demonstrated; preserve missing/ignored/duplicate-name rejection, exit codes and artifact behavior.
+- [x] Remove obsolete forwarding modules after consumers migrate; retain a compatibility shim only for a documented external entry point, not every former leaf path.
 
 #### Verification
 
-- [ ] Acyclic imports; no production-to-test imports or test-to-test fixture dependencies; exactly one instantiated mutable world in every concrete instance.
-- [ ] Baseline expected test-name sets and profile bounds/init/step/property selections remain intact. Folder moves do not silently omit checks or artifacts.
-- [ ] Relevant concrete modules typecheck; foundation and lifetime3 test batches pass. Run focused extra profile checks only for entry points whose wiring differs. Record outcomes before committing this task.
+- [x] Acyclic imports; no production-to-test imports or test-to-test fixture dependencies; exactly one instantiated mutable world in every concrete instance.
+- [x] Every baseline test remains selected; new sharing checks are explicitly listed. Profile bounds/init/step/property selections remain intact. Folder moves do not silently omit checks or artifacts.
+- [x] Relevant concrete modules typecheck; foundation and lifetime3 test batches pass. Run focused extra profile checks only for entry points whose wiring differs. Record outcomes before committing this task.
 
-### Task 2: Extract transition bodies and reuse framing/workflow helpers
+### Task 2: Mechanically extract transition bodies
 
 **Files:** `cluster.qnt`, runtime helpers, subsystem step modules, scenario support and focused tests.
 **References:** target §§4–5, 8–10 and 14; this plan D2–D6.
 
 - [ ] Create the action migration ledger and extract bodies in cohesive groups: metadata request/commit processing; authority dispatch/consumption; lifecycle/host fencing; sessions; consensus/environment. Preserve guard ordering where partial accesses depend on it.
 - [ ] Keep one `world`, the stable named action facade and the existing exploration grouping. Use the Task 1-proven transition interface; preserve nondeterministic domains and disabled branches without introducing a generic command/workflow DSL.
-- [ ] Implement only repeatedly useful higher-order helpers such as owner/node updates and envelope effects. Keep authorization, quorum, identity and post-wait checks explicit in domain functions; preserve unrelated world fields and durable/volatile separation.
+- [ ] Keep existing update bodies unchanged apart from state/parameter qualification. Check normalized action bodies against the baseline; do not combine helper adoption with mechanical extraction.
 - [ ] Reuse scenario setup/phase helpers while keeping crash/partition/cancel injection points available. Keep production phase actions independent; do not call multi-step test scripts from simulation drivers.
 - [ ] Add focused frame and disabled-action regressions, including missing owner/map entries, false guards, late callbacks, stale incarnation/receipt/courier data and preservation of unrelated operation ownership.
 - [ ] Check all ledger entries against the baseline guards and post-states. Record representative intermediate-state comparisons and unchanged negative-control failures; investigate semantic drift rather than updating assertions to accept it.
@@ -192,7 +219,22 @@ Compare representative intermediate states for metadata commit/apply, authority 
 - [ ] All baseline scenarios/core checks still pass; intended negative controls still expose their violations. The helper-disabled path cannot extend a trace by stuttering.
 - [ ] Run the final profile matrix and bounded simulations in **Validation Commands**. Record source hashes, commands, bounds and results. Measurements are observations, not a promised runtime speedup.
 
-### Task 3: Verify the architectural delta
+### Task 3: Adopt small reusable framing helpers
+
+**Files:** runtime helpers, extracted step modules and focused frame tests.
+**References:** target §§4–5, 9–10; this plan D3–D6.
+
+- [ ] Introduce `withNode` and `withOwner` only at repeated updates; keep the existing Queue/Consume implementation and explicit delivery identities.
+- [ ] Keep guards and post-wait identity checks in domain functions. Preserve every untouched World/LocalNode/OwnerState field and the disabled-action behavior.
+- [ ] Add meaningful frame, false-guard and missing-owner regressions; retain the staged test workflow helpers and their individual phase entry points.
+- [ ] Compare the helper rewrite against the mechanical-extraction commit and record changed call sites in the migration ledger.
+
+#### Verification
+
+- [ ] Frame/disabled-action checks and baseline scenarios pass; existing negative controls remain effective.
+- [ ] Run the final profile matrix and sampled simulations once for this substantial checkpoint; retain manifests and hashes.
+
+### Task 4: Verify the architectural delta
 
 **Files:** migration ledger, implementation files, this plan's gap/deviation records.
 **References:** target §§2–6, 8–10, 14–15; this plan D1–D6.
@@ -210,11 +252,11 @@ Compare representative intermediate states for metadata commit/apply, authority 
 - [ ] Every baseline action has a reviewed migration entry; all D1–D6 requirements have concrete file/test evidence.
 - [ ] Changes since the last batch receive appropriate focused checks; repeat full batches only for broad semantic/wiring changes. No unsupported equivalence or exhaustive-verification claim is made.
 
-### Task 4: Run visible external review and resolve findings
+### Task 5: Obtain the requested colleague review and resolve findings
 
 **References:** target §§3–4, 9–10; this plan D3–D6; `.revmux/profile.md` and `AGENTS.md`.
 
-- [ ] Read the current revmux and Paseo skills at execution time. `revmux` is currently available and the repository has `.revmux/profile.md`; run the review in a new visible Paseo terminal as required by the repository.
+- [ ] Per the user’s explicit request, use paseo-peer to ask existing agent `e77ec353-b3eb-4158-9cb2-c3a160ddd0c2` to review the refactoring commits. This replaces the default revmux review route for this task. Keep the discussion in the branch peer file and do not start parent protocol work.
 - [ ] Review only the refactoring commit range from the recorded execution baseline. Supply the original target, this plan, migration ledger and validation results; prioritize accidentally collapsed transitions, duplicate state, weakened guards, lost tests and misleading package boundaries.
 - [ ] Explicitly preserve the user-approved implemented-code baseline where review guidance requests stricter global topology serialization. Such protocol changes are outside this refactor.
 - [ ] Confirm findings against source and traces. Fix confirmed critical/major issues; retain minor findings with reasons. Re-review affected changes and record the report location under `docs/review/` without copying the report into chat.
@@ -223,7 +265,7 @@ Compare representative intermediate states for metadata commit/apply, authority 
 
 - [ ] No unresolved critical/major refactoring defect; review findings have evidence and disposition. Required corrections pass their focused checks, with broader reruns for cross-cutting changes.
 
-### Task 5: Close gaps, update documentation and hand back the paused backlog
+### Task 6: Close gaps, update documentation and hand back the paused backlog
 
 **Files:** model README/coverage, target §4 organization details, parent plan file paths, execution log, `docs/changelogs/20261028-quint-module-refactoring.md`.
 **References:** target §§4–6 and 13–15; this plan D1–D6; `docs/project.md` documentation rules.
@@ -241,7 +283,7 @@ Compare representative intermediate states for metadata commit/apply, authority 
 
 ## Validation Commands
 
-Planning does not run these commands. During implementation, use the pinned local CLI/evaluator and existing runner; do not download or upgrade dependencies. Full tests run at the two implementation checkpoints, not after each mechanical edit.
+Planning does not run these commands. During implementation, use the pinned local CLI/evaluator and existing runner; do not download or upgrade dependencies. Tests run at substantial commit checkpoints, not after each mechanical edit.
 
 ```sh
 # Focused syntax/effect checks during editing; include historical entry points.
@@ -254,7 +296,7 @@ quint typecheck scripts/quint/instances/topologyChecks.qnt
 python3 scripts/quint/run.py --profile foundation --mode test --seed 1
 python3 scripts/quint/run.py --profile lifetime3 --mode test --seed 1
 
-# Task 2 final entry-point matrix; run each once after the substantial batch.
+# Task 3 final entry-point matrix; run each once after the substantial batch.
 python3 scripts/quint/run.py --profile smoke3 --mode test --seed 1
 python3 scripts/quint/run.py --profile authority3 --mode test --seed 1
 python3 scripts/quint/run.py --profile lifetime3 --mode test --seed 1
@@ -269,7 +311,7 @@ git diff --check
 
 Use the same profile bounds, backend and samples for baseline/candidate comparisons. Do not shrink scenarios or lower samples to fit a timeout. Count missing/ignored tests as failure. Empty, interrupted, unsupported and timed-out runs remain incomplete; they are not behavior-preservation evidence. Preserve each run's artifacts under the existing report root.
 
-Use structural inspection of parsed/flattened output for the single-world check, with the pinned CLI's documented options. Do not add unverified CLI syntax to automated checks. No new `quint verify`/TLC qualification or Go/Docker/race suite is required by this structural plan; parent verification tasks remain pending.
+Use distinctly named cross-stage effect/typechecking regressions for shared test state. Compiled simulation output is supporting evidence only; it can omit test-only worlds. Do not add unverified CLI syntax to automated checks. No new `quint verify`/TLC qualification or Go/Docker/race suite is required by this structural plan; parent verification tasks remain pending.
 
 ## NOT CONSIDERED & TODOs
 
@@ -290,8 +332,8 @@ None at planning time. During execution, record the file, reason, scope and rele
 
 ## NOT IMPLEMENTED GAPS
 
-None identified as an accepted omission at planning time. Tasks are unimplemented. The pinned-tool scenario-composition prototype is an explicit Task 1 gate, not a claim that its encoding is already verified.
+None identified as an accepted omission at planning time. Tasks are unimplemented. The reviewed staged suite chain is retained; independent stateful suite composition is excluded.
 
 ## Planning verification
 
-The plan is grounded in the Task 7 checkout, existing target, Go package map, model imports, profiles, runner implementation, repository documentation rules and review profile. It contains two implementation tasks, then architectural verification, visible external review and documentation. All validation above is prospective; no Quint suite or review was run to write this plan.
+The plan is grounded in the Task 7 checkout, existing target, Go package map, model imports, profiles, runner implementation, repository documentation rules and review profile. After peer corrections it contains three implementation tasks, architectural verification, the user-requested colleague review and documentation. All validation above is prospective; no Quint suite or review was run to write this plan.
