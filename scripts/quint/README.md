@@ -6,7 +6,7 @@ This is the executable specification being built from the [target design](../../
 
 The user approved a lean first version after Task 4. The [coverage ledger](coverage.md), target and plan now defer labels/selectors/domain placement, live policy tuning, EnsureGroup/RollbackTo, application locks/manual session workflows, serving override, storage-loss/memory-store suites and offline Recovery. Public metrics/getter/watch/history plumbing is omitted; derived operator visibility and minimum internal session/availability safety remain. The user further fixed performance/stability/metric-freshness evidence to favorable values: no lag/backlog, no-progress, stale-metric or stability/cooldown scenarios in the initial iteration. Quorum/crash/partition behavior and the successful join catch-up milestone remain.
 
-Protocol implementation has completed Tasks 1–8; group creation/deletion is next in Task 9. The separate module refactoring is complete. Executable scope checks constrain invocation and every safety check; `coreChecks` selects retained tests explicitly. Broader Task 4 helpers/tests remain separate historical work. Metrics are fixed favorable; availability, quorum, exact identity, captured topology and local apply still matter.
+Protocol implementation has completed Tasks 1–9; cleanup, collection and readmission are next in Task 10. The separate module refactoring is complete. Executable scope checks constrain invocation and every safety check; `coreChecks` selects retained tests explicitly. Broader Task 4 helpers/tests remain separate historical work. Metrics are fixed favorable; availability, quorum, exact identity, captured topology and local apply still matter.
 
 ## Run the current checkpoint
 
@@ -62,7 +62,7 @@ The target's record field `action` is spelled `kind` because Quint reserves `act
 
 ## Pending implementation
 
-Tasks 1–7 implement shared reads, staging/approval/retry/reseat, authority execution/fencing, local ownership/lifetime and minimum internal sessions. Task 8 adds membership/scaling. Tasks 9–11 retain complete group creation/deletion, retirement/collection/readmission and scheduler repair. Tasks 12–18 retain coverage/visibility, progress/verification, tooling, audit, review and documentation work. Refactoring does not complete those protocol tasks or introduce successful placeholders.
+Tasks 1–7 implement shared reads, staging/approval/retry/reseat, authority execution/fencing, local ownership/lifetime and minimum internal sessions. Tasks 8–9 add membership/scaling and group creation/detached deletion. Tasks 10–11 retain retirement/collection/readmission and scheduler repair. Tasks 12–18 retain coverage/visibility, progress/verification, tooling, audit, review and documentation work. Refactoring does not complete those protocol tasks or introduce successful placeholders.
 
 Do not infer completed coverage from the presence of a record or enum. Add each transition with an executable witness and invariants, retain counterexamples, and update the coverage matrix before extending claims.
 
@@ -170,3 +170,16 @@ Large profiles declare a 16 GiB Node frontend heap limit; it is a tooling resour
 Rules live in `consensus/membership.qnt`, `metaengine/admission.qnt` and `metaengine/completion.qnt`; `managed/{membership,prepare,stop,removal}_steps.qnt` and `metaservice/admission_steps.qnt` expose the asynchronous phases. `cluster.qnt` wires them into the shared step relation. This checkpoint is scenario/sampled evidence, not exhaustive verification or Go conformance.
 
 Task 8 also preserves live-admission courier identity before session activation and carries same-member admissions into superseding topology operations with their original provenance. `_meta` learner addition requires the admission's Prepared/Ready evidence. The separate desired-success check in `instances/admissionRestartExpected.qnt` intentionally fails for the crash-after-preparation/before-Ready case; [QCM-001](../../docs/reports/20261028-quint-admission-prepared-restart.md) records the source-grounded model reproduction and pending Go regression. Positive profiles include a refusal-state witness and do not claim that this automatic recovery succeeded.
+
+## Group creation and detached deletion (Task 9)
+
+Founding uses the immutable approved peer set. Each required host acquires and publishes its exact replica, then records a host receipt. The native group separately confirms the complete voter set through quorum; host readiness alone is not group completion. Explicit placement on healthy hosts can succeed in a degraded cluster, while an offline required founder must return. A late founder never resets the established native state.
+
+Deletion commits through `_meta`, retains exact stop/retirement obligations and permanently retires the group ID. It does not require load quorum or instantly stop replicas. Pending cleanup and revocation remain separate from logical completion, and unrelated groups may progress. Retirement/collection continue in Task 10. A verification-only obligation monitor detects omitted debt and is not an input to actor decisions.
+
+```sh
+python3 scripts/quint/run.py --profile deletion3 --mode test --seed 1
+python3 scripts/quint/run.py --profile deletion3 --mode simulate --seed 1
+```
+
+The profile has three nodes, two initial loads and one bounded creatable ID `c`; request/position/incarnation/delivery bounds are 6/64/2/256. Initial voter policy remains fixed, with explicit/all-eligible hosting. EnsureGroup and historical required-stop deletion semantics remain excluded.

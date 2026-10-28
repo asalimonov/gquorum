@@ -11,7 +11,7 @@
 **Full brainstorm log:** [discussion](../brainstorms/20261027-quint-cluster-management.md)
 **Execution progress:** `docs/progress/20261027-quint-cluster-management.md`
 **Library scenario findings:** `docs/reports/20261027-quint-cluster-management.md`
-**Status:** Tasks 1–8 completed; next is Task 9. The resumed goal remains active. QCM-001 is a retained model reproduction with Go regression pending; validation and limitations are in the execution log.
+**Status:** Tasks 1–9 completed; next is Task 10. The resumed goal remains active. QCM-001 is a retained model reproduction with Go regression pending; validation and limitations are in the execution log.
 
 Module organization was refactored separately on 2026-10-28; see the [refactoring plan](20261028-quint-module-refactoring.md). Pending file paths below are relative to `scripts/quint/` unless stated otherwise. Completed task records retain their original paths as history. The prior protocol pause ended when the goal was resumed.
 
@@ -63,8 +63,8 @@ Per the user’s reporting instruction, failures in implemented library scenario
 | 5 | Enforce lean domains and wire CAS/approval/retry | Completed |
 | 6 | Exact effects/fences/receipts/revocation | Completed |
 | 7 | Local ownership/lifecycle and minimum internal sessions | Completed |
-| 8 | Native membership and 3–5-node scaling | Pending |
-| 9 | Healthy/degraded create and detached delete | Pending |
+| 8 | Native membership and 3–5-node scaling | Completed |
+| 9 | Healthy/degraded create and detached delete | Completed |
 | 10 | Cleanup/collection and returning-owner readmission | Pending |
 | 11 | Supported fixed-policy scheduler repairs | Pending |
 | 12 | Core API coverage and derived operator visibility | Pending |
@@ -220,16 +220,16 @@ Per the user’s reporting instruction, failures in implemented library scenario
 **Files:** `topology/`, `metaengine/authority.qnt`, `managed/`, `metaservice/handlers.qnt`, relevant subsystem steps, `cluster.qnt`, `tests/` (updated); deletion3 instance/profile (new).
 **References:** target §§5.7/8.3–8.4/9/11; §14 approvePlan.
 
-- [ ] Wire CreateGroup with fixed supported hosting/storage/voter presets, immutable founding authorization, exact local startup and convergence. Cover successful degraded placement and a required offline host that must wait.
-- [ ] Commit current detached deletion through `_meta`, retaining complete exact former-owner debt and retiring the group ID atomically with logical completion.
-- [ ] Keep native/host cleanup and revocation outstanding independently of logical deletion, including absent load quorum. Preserve unrelated group progress and disallow group-ID reuse through core Stage/create paths.
-- [ ] Exclude EnsureGroup and historical required-stop deletion/replay-compatibility profiles from v1; do not create stubs or claim their correctness.
+- [x] Wire CreateGroup with fixed supported hosting/storage/voter presets, immutable founding authorization, exact local startup and convergence. Cover successful degraded placement and a required offline host that must wait.
+- [x] Commit current detached deletion through `_meta`, retaining complete exact former-owner debt and retiring the group ID atomically with logical completion.
+- [x] Keep native/host cleanup and revocation outstanding independently of logical deletion, including absent load quorum. Preserve unrelated group progress and disallow group-ID reuse through core Stage/create paths.
+- [x] Exclude EnsureGroup and historical required-stop deletion/replay-compatibility profiles from v1; do not create stubs or claim their correctness.
 
 #### Verification
 
-- [ ] Common checks and healthy/degraded create/delete cases pass through actual composed actions.
-- [ ] Deletion can finish without load quorum while exact cleanup debt remains; no global instant stop is asserted.
-- [ ] Missing former-owner debt is caught; existing independent groups remain capable of progress.
+- [x] Common checks and healthy/degraded create/delete cases pass through actual composed actions.
+- [x] Deletion can finish without load quorum while exact cleanup debt remains; no global instant stop is asserted.
+- [x] Missing former-owner debt is caught; existing independent groups remain capable of progress.
 
 ### Task 10: Complete cleanup, collection and returning-owner handover
 

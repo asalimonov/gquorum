@@ -109,7 +109,7 @@ module initial {
         network: { metaLinks: links, loadLinks: links, pending: Set(), delivered: Set() },
         nextDelivery: 1, metadata: meta, consensus: native, recovery: Map(),
         storageConfig: pool.mapBy(_ => { defaultBackend: OwnedWAL }),
-        consumptions: Set(),
+        consumptions: Set(), deletionObligations: Map(),
         metaLog: Map(0 -> metadata(emptyDocument)).put((if (founders.keys().size() > 0) 1 else 0), meta),
       },
     }

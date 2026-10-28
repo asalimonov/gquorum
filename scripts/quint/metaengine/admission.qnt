@@ -51,20 +51,21 @@ module admission {
     | ReadyAdmission(a) => { ...meta, admissions: meta.admissions.setBy(a.owner.node, old => { ...old, ready: true }) }
   }
 
+  pure def loadHostAllowed(meta: MetadataState, replica: ReplicaKey): bool =
+    meta.target.groups.keys().contains(replica.group) and meta.target.groups.get(replica.group).replicas.exists(r => r.key == replica) and
+    meta.cleanup.values().filter(debt => debt.identity.group == replica.group and
+      debt.identity.node == replica.node and debt.identity != replica).forall(debt => debt.retired != None) and
+    ((match meta.groups.get("_meta").proven { | Some(group) => group.replicas.exists(r =>
+      r.key.node == replica.node and r.key.member == replica.member) | None => false }) or
+      (meta.admissions.keys().contains(replica.node) and {
+        val a = meta.admissions.get(replica.node)
+        a.replica.member == replica.member and preparedProcess(meta, a) and prepared(meta, a.replica)
+      }))
+
   pure def preparationAllowed(meta: MetadataState, approved: ApprovedAction): bool =
-    if (approved.step.kind != PrepareReplica) true else match approved.step.target {
-      | ReplicaTarget(replica) => if (replica.group != "_meta")
-          meta.cleanup.values().filter(debt => debt.identity.group == replica.group and
-            debt.identity.node == replica.node and debt.identity != replica).forall(debt => debt.retired != None) and
-          ((match meta.groups.get("_meta").proven { | Some(group) => group.replicas.exists(r =>
-            r.key.node == replica.node and r.key.member == replica.member) | None => false }) or
-          (meta.admissions.keys().contains(replica.node) and {
-            val a = meta.admissions.get(replica.node)
-            a.replica.member == replica.member and (a.ready or
-              meta.operations.get(a.operation).plan.blocks.get("_meta").select(s => s.kind == AddLearner and
-                s.target == ReplicaTarget(a.replica) and s.seq < meta.operations.get(a.operation).blocks.get("_meta").step).length() > 0) and
-              prepared(meta, a.replica)
-          }))
+    if (approved.step.kind == CreateFoundingGroup) approved.step.targets.forall(r => loadHostAllowed(meta, r))
+    else if (approved.step.kind != PrepareReplica) true else match approved.step.target {
+      | ReplicaTarget(replica) => if (replica.group != "_meta") loadHostAllowed(meta, replica)
           else if (not(meta.admissions.keys().contains(replica.node))) false else {
             val a = meta.admissions.get(replica.node)
             a.replica == replica and a.operation == approved.operation and current(meta, a)

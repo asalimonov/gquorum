@@ -1,7 +1,7 @@
 # Target design: initial Quint cluster-management model
 
 **Scope revision:** 2026-10-27. User approved “Lean management scope; defer offline recovery” and then specified that metrics are always good: no lag/stability issues in this iteration.
-**Implementation:** Tasks 1–5 complete; Tasks 6–18 remain. This document defines the reduced initial deliverable; it does not claim that it is implemented or verified.
+**Implementation:** Tasks 1–9 complete; Tasks 10–18 remain. This document defines the reduced initial deliverable; it does not claim that it is implemented or verified.
 **Method disposition:** [coverage ledger](../../scripts/quint/coverage.md).
 **Execution plan:** [implementation plan](../plans/20261027-quint-cluster-management.md).
 **Discussion:** [brainstorm log](20261027-quint-cluster-management.md).
@@ -200,7 +200,7 @@ Fresh node identity → process-bound admission and Ready acknowledgement → `_
 
 ### 8.3 Group creation
 
-Validate unused ID and fixed simple hosting/policy → immutable founding plan → approval → exact local startup/replay/authorization → native group → proven convergence. Include degraded placements that can start and required-offline-host cases that must wait. EnsureGroup is not part of this flow.
+Validate unused ID and fixed simple hosting/policy → immutable founding plan → approval → exact local startup/replay/authorization → native group → proven convergence. The first authorized founding engine seeds the immutable voter configuration without electing a leader or proving completion. Later hosts cannot reset it. All required host receipts precede native confirmation through a live exact quorum; receipt reporting and checkpointing remain separate. Include degraded placements that can start and required-offline-host cases that must wait. EnsureGroup is not part of this flow.
 
 ### 8.4 Deletion and return
 

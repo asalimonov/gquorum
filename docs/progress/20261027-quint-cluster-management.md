@@ -220,3 +220,35 @@ Ordinary profiles use 10 maximum samples/test; each named long REPL witness exec
 QCM-001 is not a passing recovery claim: the separate `retainedPreparationRestartShouldContinueTest` returns exit 1/QNT513 at the required learner precheck. The refused-binding/disabled-add witness passes and preserves safety. Local partial ITF trace, command output and source hashes are in `test-reports/quint/task8-admission-gap/`; the report and source reproduction remain in the repository. Go reproduction has not been run. This finding was exposed by correcting an omitted source Ready gate, not by weakening that gate or changing production behavior.
 
 No Go, vendor, public API, storage format or default Make target changed. Full retirement/collection/readmission, scheduler repair, API/visibility closure and progress/backend qualification remain Tasks 9–18. Scenario/sampled results do not establish exhaustive equivalence, temporal progress or Go conformance. The goal remains active; continue with Task 9 after this commit.
+
+
+## Task 9 — group creation/deletion in progress
+
+Started from clean Task 8 commit 5da0c3a. Added approved founding-host startup through the existing reservation/factory/replay/publication path, plus separate native confirmation of the exact immutable voter set. Initial native configuration is seeded when the first authorized engine starts; it has no leader, commit or completion receipt. Later hosts cannot reset existing consensus. All required host receipts precede native confirmation, matching operator/scoped_effects.go and managed/granted_actions.go. Metadata/load channels and native elections remain separate.
+
+Added healthy creation, explicit healthy-host placement with one offline node, required-offline-founder wait, late founder startup after native progress, staged-create refusal, deletion without load quorum, offline debt, ID-reuse refusal, incomplete-founding cancellation and unrelated-group progress cases. A verification-only deletion-obligation monitor captures exact former-owner obligations before approval mutates metadata; the missing-debt negative control checks the monitor without granting actors new knowledge.
+
+Source correction during implementation: retained startup may use a current complete resource floor; creation-grant restrictions belong to fresh storage/configuration acquisition (managed/authority.go:startAuthority and boot.go:checkBootCreation). Kept retained recovery behavior unchanged rather than imposing a new grant-kind restriction. A draft revocation test assumed manual transfer closure on detached deletion; source successor-resource selection does not make that assertion. Replaced its setup with a genuinely superseded executing transfer, retaining the intended native-revocation and independent-group checks.
+
+Initial focused creation tests: 5 passed. Focused deletion batch: 6 passed. First full deletion3 run passed 97/98 scenarios and stopped before core checks (`test-reports/quint/20261028T024343744165Z-c1977133`); its failed test was the setup assumption above, not a library counterexample. The same source's simulation passed 50 samples at depth 100 (`20261028T024344921525Z-3389e48c`). Final validation remains pending. No Go or vendor code changed; QCM-001 remains separately documented.
+
+
+## Task 9 — validated checkpoint
+
+Completed healthy/degraded founding and detached deletion; retirement/collection/readmission remain Task 10. The target's creation flow and checkpoint status, README and API evidence ledger now describe the implementation. The target update makes initial configuration versus native completion explicit; it does not change the agreed abstraction or deferred scope.
+
+Final validation on the current executable hashes (Quint 0.33.0 / Rust v0.7.0, seed 1):
+
+| Check | Result | Report directory under test-reports/quint |
+| --- | --- | --- |
+| deletion3 tests | 98 scenarios + 118 core checks; passed | 20261028T025232467610Z-b77fdc0b |
+| admission4 tests | 109 ordinary scenarios + 118 core + 5 long witnesses; passed | 20261028T025629620337Z-cf369b1d |
+| scale5 tests | 111 ordinary scenarios + 118 core + 6 long witnesses; passed | 20261028T025629620340Z-22562ada |
+| foundation tests | 10 passed | 20261028T025954366302Z-648b8a3d |
+| smoke3 simulation | 50 samples, depth 60; sampled-pass | 20261028T025232467621Z-dfef6f5e |
+
+Ordinary tests retain 10 maximum samples/test; each long REPL witness executes once with exact-result checks. Inventories overlap. All final report hashes match the executable tree. Authority3 also typechecks. Deletion3 includes every lifetime3 scenario and core check; native/scaling suites retain the earlier chain. Import audit: 85 nonvendor modules, resolving/acyclic imports and one world declaration in cluster.qnt. Documentation links and git diff --check pass.
+
+The separate lifetime3 run timed out at its configured 60-second test-command limit (exit -15), recorded as incomplete in 20261028T025232467634Z-7654d06d. It is not a passing run. Its entire 85-scenario/118-core inventory passed in deletion3, so no redundant rerun or timeout-setting change was made. The earlier deletion3 simulation (50 samples, depth 100) predates only the corrected revocation test setup and is historical evidence, not a final-hash run.
+
+The first deletion3 failure was a test setup error about manual-transfer revocation, corrected by using a genuinely superseded executing operation. No new source-faithful library failure was found; QCM-001 remains separately documented with Go reproduction pending. No Go/vendor/dependency/default Make changes. This checkpoint supplies scenario and sampled evidence, not exhaustive progress, verification or implementation conformance. The active goal continues with Task 10.

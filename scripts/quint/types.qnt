@@ -358,5 +358,7 @@ module types {
     storageConfig: NodeName -> NodeStorageConfig,
     metaLog: int -> MetadataState,
     consumptions: Set[ConsumptionEvidence],
+    // Verification-only obligation history; actors never read this monitor.
+    deletionObligations: GroupId -> Set[ReplicaKey],
   }
 }

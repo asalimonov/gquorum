@@ -69,8 +69,9 @@ module execution {
   pure def dispatchable(delivery: EffectDelivery): bool = executable(delivery) or
     match delivery.grant.effect { | Some(e) => delivery.grant.planStep != None and (
       (M::nativeKind(e.kind) and delivery.resource == GroupResource(delivery.grant.key.group)) or
-      ((e.kind == PrepareReplica or (e.kind == StopReplica and delivery.grant.key.group != "_meta")) and match delivery.resource {
-        | HostResource(_) => true | _ => false })) | None => false }
+      ((e.kind == PrepareReplica or e.kind == CreateFoundingGroup or (e.kind == StopReplica and delivery.grant.key.group != "_meta")) and match delivery.resource {
+        | HostResource(_) => true | _ => false }) or
+      (e.kind == CreateFoundingGroup and delivery.resource == GroupResource(delivery.grant.key.group))) | None => false }
 
   pure def receipt(delivery: EffectDelivery, position: int): Receipt = {
     grant: delivery.grant.key, effect: delivery.grant.effect, admission: delivery.grant.admission,

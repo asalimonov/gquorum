@@ -114,4 +114,7 @@ module coreChecks {
   import membership_safety_test.explicitNodeCapacityIsEnforcedTest from "../tests/unit/membership_safety_test"
   import membership_safety_test.manualLearnerRoleRemainsPinnedTest from "../tests/unit/membership_safety_test"
   import grants_test.failedStepRetainsPlanAndReleasesOnlyItsScopeTest from "../tests/unit/grants_test"
+  import founding_test.foundingRequiresExactVoterProofTest from "../tests/unit/founding_test"
+  import founding_test.foundingConfigurationIsNotCompletionTest from "../tests/unit/founding_test"
+  import founding_test.foundingCannotResetExistingConsensusTest from "../tests/unit/founding_test"
 }

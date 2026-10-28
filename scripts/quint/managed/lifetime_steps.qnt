@@ -1,4 +1,5 @@
 module managed_lifetime_steps {
+  import founding as Founding from "../consensus/founding"
   import frames as Frames from "../runtime/frames"
   import lifecycle as Life from "./lifecycle"
   import membership as M from "../consensus/membership"
@@ -116,7 +117,7 @@ module managed_lifetime_steps {
   }
 
   pure def returnOwnerFactoryNext(w: World, node: NodeName, group: GroupId, success: bool): World = {
-    (Frames::withOwner(w, node, group, slot => Life::factoryReturned(slot, success)))
+    Founding::engineStarted(Frames::withOwner(w, node, group, slot => Life::factoryReturned(slot, success)), node, group)
   }
 
   pure def expireOwnerFactoryEnabled(w: World, node: NodeName, group: GroupId): bool = {

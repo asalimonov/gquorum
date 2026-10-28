@@ -113,6 +113,9 @@ not(owner.volatile.observations.keys().contains(group) and
         M::communicates(w.extensions.network.metaLinks, node, leader.node) | None => false },
       not(G::resourceConsumed(local, grant, resource)),
       E::dispatchable(delivery),
+      (match grant.effect { | Some(e) => e.kind != CreateFoundingGroup or resource != GroupResource(key.group) or
+          grant.resources.filter(r => r != GroupResource(key.group)).forall(r => G::resourceConsumed(local, grant, r))
+        | None => true }),
       w.extensions.nextDelivery <= MAX_DELIVERIES
     }
   }

@@ -1,4 +1,5 @@
 module managed_prepare_steps {
+  import founding as NativeSeed from "../consensus/founding"
   import types.* from "../types"
   import world_types.* from "../runtime/world"
   import basicSpells.* from "../vendor/spells/basicSpells"
@@ -9,7 +10,10 @@ module managed_prepare_steps {
 
   pure def loadPreparation(delivery: EffectDelivery): bool = delivery.grant.key.group != "_meta" and
     delivery.resource == HostResource({ group: delivery.grant.key.group, node: delivery.receiver.node }) and
-    (match delivery.grant.effect { | Some(e) => e.kind == PrepareReplica and e.target == ReplicaTarget(delivery.replica) | None => false })
+    (match delivery.grant.effect {
+      | Some(e) => (e.kind == PrepareReplica and e.target == ReplicaTarget(delivery.replica)) or
+          (NativeSeed::isFounding(delivery.grant) and delivery.grant.targets.contains(delivery.replica))
+      | None => false })
 
   // Exact fresh authority permits first acquisition, never refounding an
   // established native member or overwriting an unresolved/foreign owner.
@@ -25,6 +29,14 @@ module managed_prepare_steps {
         host.durable.replicaEvidence.keys().filter(r => r.group == group).forall(r => r == delivery.replica) and
         (not(host.volatile.owners.keys().contains(group)) or Life::released(host.volatile.owners.get(group))) and
         (host.durable.replicaEvidence.keys().contains(delivery.replica) or
+          not(w.extensions.consensus.keys().contains(group)) or
+          (match delivery.grant.effect {
+            | Some(e) => e.kind == CreateFoundingGroup and not(host.durable.seedAuthority.contains(delivery.replica)) and
+                not(host.durable.receipts.exists(r => r.target == Some(delivery.replica))) and
+                (not(host.durable.authorityGrants.keys().contains(delivery.resource)) or
+                  host.durable.authorityGrants.get(delivery.resource).purpose == Fence) and
+                w.extensions.consensus.get(group).voters == delivery.grant.targets
+            | None => false }) or
           not(w.extensions.consensus.get(group).voters.union(w.extensions.consensus.get(group).learners).contains(delivery.replica)))
     }
 
@@ -58,7 +70,7 @@ module managed_prepare_steps {
     if (E::consumed(w, delivery)) E::forgetWait(w, delivery) else {
       val host = w.system.get(delivery.receiver.node)
       val position = host.durable.journalPosition + 1
-      val receipt = { ...E::receipt(delivery, position), outcome: EffectApplied, durableTerm: 0 }
+      val receipt = { ...E::receipt(delivery, position), target: Some(delivery.replica), outcome: EffectApplied, durableTerm: 0 }
       val evidence: ConsumptionEvidence = { delivery: delivery, pin: host.durable.pin,
         incarnation: host.volatile.incarnation, owner: Some(delivery.replica) }
       val base = F::withNode(E::forgetWait(w, delivery), delivery.receiver.node, n => { ...n,

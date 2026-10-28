@@ -240,7 +240,10 @@
         "unprovenMetaPreventsNodeProgressTest",
         "explicitNodeCapacityIsEnforcedTest",
         "manualLearnerRoleRemainsPinnedTest",
-        "failedStepRetainsPlanAndReleasesOnlyItsScopeTest"
+        "failedStepRetainsPlanAndReleasesOnlyItsScopeTest",
+        "foundingRequiresExactVoterProofTest",
+        "foundingConfigurationIsNotCompletionTest",
+        "foundingCannotResetExistingConsensusTest"
       ]
     }
   ]

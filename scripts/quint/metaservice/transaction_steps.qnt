@@ -165,6 +165,9 @@ w.extensions.nextDelivery <= MAX_DELIVERIES
       (apply_custom_effect(apply_custom_effect({ ...w,
           system: M::persistCertificate(w.system, voters, position),
           extensions: { ...w.extensions, metadata: meta,
+            deletionObligations: meta.retiredGroupIds.exclude(w.extensions.metadata.retiredGroupIds)
+              .fold(w.extensions.deletionObligations, (rows, group) => rows.put(group,
+                A::retainedOwners(w.extensions.metadata).filter(r => r.group == group))),
             consensus: w.extensions.consensus.put("_meta", M::committed(c, voters, position)),
             metaLog: w.extensions.metaLog.put(position, meta) } }, Consume(msg)), Queue(reply)))
     }

@@ -62,10 +62,15 @@ module properties {
     })
   })
 
+  pure def deletionDebtComplete(w: World): bool = w.extensions.deletionObligations.keys().forall(group =>
+    w.extensions.metadata.retiredGroupIds.contains(group) and not(w.extensions.metadata.target.groups.keys().contains(group)) and
+      w.extensions.deletionObligations.get(group).forall(key => w.extensions.metadata.cleanup.keys().contains(key) and
+        w.extensions.metadata.cleanup.get(key).identity == key))
+
   pure def metadataWellFormed(w: World): bool = {
     val m = w.extensions.metadata
     and {
-      E::physicalEvidenceValid(w), Removal::removalSafety(w), Sessions::metadataSafety(m), Admission::metadataSafety(m),
+      E::physicalEvidenceValid(w), deletionDebtComplete(w), Removal::removalSafety(w), Sessions::metadataSafety(m), Admission::metadataSafety(m),
       w.system.values().forall(n => n.volatile.owners.values().forall(owner => Life::ownerSafety(owner))),
       m.grants.values().forall(grant => G::wellFormed(grant)),
       m.authorityFloors.keys().forall(r => m.grants.keys().contains(m.authorityFloors.get(r)) and

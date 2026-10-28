@@ -1,6 +1,6 @@
 # Initial-model scope and coverage
 
-Scope revision approved on 2026-10-27: **lean cluster management**. Tasks 1–7 are complete. Active invocation/safety checks enforce lean scope; smoke3 selects retained core tests through coreChecks. Shared reads, staging, approval, exact retry and atomic reseat/rebase have asynchronous scenario coverage. Transfer/fence execution and receipt-aware retry checks now exist; local lifecycle/session transitions are wired; membership, complete cleanup and scheduler work remain; this is not completed v1 coverage.
+Scope revision approved on 2026-10-27: **lean cluster management**. Tasks 1–9 are complete. Active invocation/safety checks enforce lean scope; smoke3 selects retained core tests through coreChecks. Shared reads, staging, approval, exact retry and atomic reseat/rebase have asynchronous scenario coverage. Transfer/fence execution and receipt-aware retry checks now exist; local lifecycle/session transitions are wired; membership/scaling and group founding/detached deletion are wired; complete cleanup and scheduler work remain; this is not completed v1 coverage.
 
 The original 82-entry ledger was an API inventory, not a requirement to implement 82 state machines. Initial disposition: **17 Core**, **15 Primitive**, **19 Observe**, **8 Omit**, **23 Deferred**. Every entry remains accounted for.
 
@@ -45,8 +45,8 @@ Deferring offline Recovery does not defer ReadmitNode, ReseatReplica, retained r
 | `Cluster.ExcludeNode` | `cluster.go` | Task 8: proven drain, stop-receipt gates, native removal and retained self-fencing | Remove a proven drained member without bypassing quorum. |
 | `Cluster.ForceRetireNode` | `cluster.go` | Task 8: audited fourth-host metadata replacement; load evacuation gates retained | Explicit degraded-cluster path; retain audit, quorum and cleanup obligations. |
 | `Cluster.SetGroupHosting` | `cluster.go` | Shared edit/planning and Task 8 relocation mechanisms; dedicated API trace remains Task 12 | Keep explicit/all-eligible host changes; core relocation without labels. |
-| `Cluster.CreateGroup` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Create on fixed simple hosting/voter presets, including unavailable hosts. |
-| `Cluster.DeleteGroup` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Logical deletion through _meta plus exact detached cleanup debt. |
+| `Cluster.CreateGroup` | `cluster.go` | Task 9: approved host startup, exact native founding proof and healthy/degraded scenarios in `groups_test` | Create on fixed simple hosting/voter presets, including unavailable hosts. |
+| `Cluster.DeleteGroup` | `cluster.go` | Task 9: detached deletion without load quorum, exact debt monitor, ID-reuse refusal and independent progress | Logical deletion through _meta plus exact detached cleanup debt. |
 | `Cluster.ChangeReplica` | `cluster.go` | Task 8: granted native demotion/promotion, source rechecks and role-derived pin checks | Manual voter/learner role changes through guarded membership. |
 | `Cluster.ReseatReplica` | `cluster.go` | Task 5: atomic approved repair/rebase and fresh-read CAS scenarios | Atomic approved fresh-ID repair; protect old owner and independent staged intent. |
 | `Node.StartLoadGroup` | `node.go` | Task 7: shared reservation, factory/replay, authorization and waiter scenarios | Exact local start/hold clearance; reuse shared startup phases. |

@@ -1,4 +1,5 @@
 module cluster {
+  import managed_founding_steps as Founding from "./managed/founding_steps"
   import managed_stop_steps as Stops from "./managed/stop_steps"
   import managed_prepare_steps as Preparation from "./managed/prepare_steps"
   import managed_removal_steps as Removal from "./managed/removal_steps"
@@ -493,12 +494,14 @@ module cluster {
 
   action checkpointEffect(node: NodeName, approved: ApprovedAction): bool = {
     val group = G::groupOf(approved.step.target)
+    if (not(world.extensions.consensus.keys().contains(group))) all { false, world' = world } else {
     val c = world.extensions.consensus.get(group)
     all {
       approved.step.kind != TransferLeadership or (M::hasCommitPath(c, world.system, M::linksFor(world.extensions.network, group)) and
         match c.leaderAuthority { | Some(leader) =>
           M::communicates(M::linksFor(world.extensions.network, group), node, leader.node) | None => false }),
       submitControl(node, CompleteStep({ approved: approved, observedLeader: c.leaderAuthority })),
+    }
     }
   }
 
@@ -592,6 +595,11 @@ module cluster {
   // This subset is useful for reachability checks under healthy communication.
   // It remains part of the same production step relation, with the same state.
   action requestStep = any {
+    nondet caller = NODE_POOL.filter(n => M::running(world.system.get(n)) and world.system.get(n).durable.pin != None).oneOf()
+    nondet hosts = Set(List("n1", "n2"), List("n1", "n2", "n3")).oneOf()
+    invoke(caller, Mutate({ edit: CreateGroup({ id: "c", storage: StorageDefault, labels: Map(), placement: None,
+      nodes: None, hosting: Some({ mode: ExplicitHosts, selectedNodes: hosts }), voterConfig: None }),
+      options: { ...generatedOptions, approve: true } })),
     nondet caller = NODE_POOL.filter(n => M::running(world.system.get(n)) and world.system.get(n).durable.pin != None).oneOf()
     nondet node = NODE_POOL.oneOf()
     nondet edit = Set(AddNode({ name: node, member: 0, state: Active, nodeType: "worker", labels: Map() }),
@@ -925,10 +933,14 @@ module cluster {
     any { beginGrantedStop(delivery), finishGrantedStop(delivery) },
   }
 
+  action confirmFounding(delivery: EffectDelivery): bool =
+    guarded(Founding::confirmFoundingEnabled(world, delivery, MAX_POSITION),
+      before => Founding::confirmFoundingNext(before, delivery, MAX_DELIVERIES))
+
   action membershipStep = any {
     nondet node = NODE_POOL.oneOf()
     nondet delivery = world.system.get(node).volatile.waitingEffects.oneOf()
-    any { beginLoadPreparation(delivery), finishLoadPreparation(delivery) },
+    any { beginLoadPreparation(delivery), finishLoadPreparation(delivery), confirmFounding(delivery) },
     nondet node = NODE_POOL.oneOf()
     nondet receipt = world.extensions.consensus.get("_meta").authorityReceipts.oneOf()
     applyRemovedMeta(node, receipt),
