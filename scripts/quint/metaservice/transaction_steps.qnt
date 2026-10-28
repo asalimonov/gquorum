@@ -75,9 +75,9 @@ module metaservice_transaction_steps {
   pure def prepareMutationNext(w: World, key: RequestKey, rules: Rules): World = {
     val owner = w.system.get(key.caller.node)
     val localMeta = w.extensions.metaLog.get(owner.volatile.appliedMetaIndex)
-    // Remote admission-health observations are collected by the admission
-    // workflow. Unknown evidence cannot authorize readmission here.
-    val health = Map(key.caller.node -> Healthy)
+    // Convenience readmission uses the caller's explicit availability sample.
+    // The FSM still applies the captured document with its original CAS.
+    val health = owner.volatile.pendingCalls.get(key).health.put(key.caller.node, Healthy)
     (Frames::withProcess(w, key.caller.node, updatedProcess => { ...updatedProcess, pendingCalls: updatedProcess.pendingCalls.setBy(key,
           call => Tx::prepare(call, localMeta, health, rules)) }))
   }

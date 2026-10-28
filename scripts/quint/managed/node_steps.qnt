@@ -38,7 +38,7 @@ module managed_node_steps {
       owner.phase == OwnerReady or Life::released(owner)
     }
     and {
-      M::running(host),
+      E::hostAvailable(host),
       host.volatile.fenceWorkers.contains(resource),
       ownerJoined,
       E::receiverExact(w, pending.delivery),
@@ -87,14 +87,16 @@ module managed_node_steps {
     val host = w.system.get(node)
     and {
       host.volatile.phase == Stopping,
-      host.volatile.fenceWorkers.size() > 0 or host.volatile.waitingEffects.size() > 0
+      host.volatile.retirementWork.values().forall(work => work.phase != RetireWaiting),
+      host.volatile.fenceWorkers.size() > 0 or host.volatile.waitingEffects.size() > 0 or
+        host.volatile.retirementWork.keys().size() > 0 or host.volatile.collectionRequests.keys().size() > 0
     }
   }
 
   pure def joinAuthorityWorkersNext(w: World, node: NodeName): World = {
     val host = w.system.get(node)
     (Frames::withProcess(w, node, updatedProcess => { ...updatedProcess,
-        fenceWorkers: Set(), waitingEffects: Set() }))
+        fenceWorkers: Set(), waitingEffects: Set(), retirementWork: Map(), collectionRequests: Map(), collectionAcks: Set() }))
   }
 
   pure def timeoutNodeStopEnabled(w: World, node: NodeName): bool = {
@@ -128,7 +130,9 @@ module managed_node_steps {
       host.volatile.phase == Stopping,
       host.volatile.owners.values().forall(owner => owner.phase == OwnerStopped and Life::released(owner)),
       host.volatile.fenceWorkers.size() == 0,
-      host.volatile.waitingEffects.size() == 0
+      host.volatile.waitingEffects.size() == 0,
+      host.volatile.retirementWork.keys().size() == 0,
+      host.volatile.collectionRequests.keys().size() == 0
     }
   }
 

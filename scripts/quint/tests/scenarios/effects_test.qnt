@@ -1,4 +1,7 @@
 module effects_test {
+  import authority as FenceAuthority from "../../metaengine/authority"
+  import topology as FenceTopology from "../../topology/topology"
+  import readmission as FenceReadmission from "../../metaengine/readmission"
   import types.* from "../../types"
   import basicSpells.* from "../../vendor/spells/basicSpells"
   import operations_test.* from "./operations_test"
@@ -133,17 +136,39 @@ module effects_test {
     world' = ExecRules::consume(world, old)
   }).expect(not(ExecRules::physicalEvidenceValid(world)))
 
-  // Authority-catalog fixture for one retained readmission host obligation.
-  // Admission workflow/replacement mechanics are tested in Task 10.
+  // Isolated fence fixture with a complete approved readmission origin/batch.
+  // The full transport/retirement workflow is covered by readmission_test.
   pure val oldHostKey: GrantKey = { cluster: "c1", group: "a", revision: 2 }
   pure val hostFenceKey: GrantKey = { cluster: "c1", group: "a", revision: 3 }
   pure val hostResource = HostResource({ group: "a", node: "n3" })
   action retainHostFence: bool = {
-    val replica: ReplicaKey = { cluster: "c1", group: "a", node: "n3", member: 3, replica: 3 }
-    val old: Grant = { key: oldHostKey, purpose: Readmission, effect: None,
-      admission: Some({ node: "n3", predecessor: 3, successor: 4 }),
-      resources: Set(hostResource), targets: Set(replica), planStep: None, request: None }
-    fixtureMetadata(GrantRules::closeGrants(GrantRules::install(world.extensions.metadata, old), Set(oldHostKey), 3), 3)
+    val meta = world.extensions.metadata
+    val request: MutationRequest = { edit: ReadmitNode({ name: "n3", expectedMember: 3 }),
+      options: { ...options, expectedVersion: meta.latest.version } }
+    val desired = FenceTopology::mutateDocument(FenceAuthority::mutationInput(meta, Map("n3" -> ConfirmedDead), rules), request)
+    val captured = { ...FenceAuthority::planningInput(meta, rules), observations: world.extensions.consensus.keys().mapBy(group => {
+      native: world.extensions.consensus.get(group), healthKnown: true,
+      ready: ProofMembership::observedLive(world.extensions.consensus.get(group), world.system,
+        ProofMembership::linksFor(world.extensions.network, group)),
+      live: ProofMembership::observedLive(world.extensions.consensus.get(group), world.system,
+        ProofMembership::linksFor(world.extensions.network, group)) }) }
+    match FenceTopology::makePlan(captured, desired) {
+      | PlanRejected(_) => all { false, world' = world }
+      | Planned(plan) => {
+          val staged = FenceAuthority::installStage(meta, { request: request, desired: desired })
+          val approved = FenceAuthority::installApproval(staged, { desired: desired, plan: plan, captured: captured,
+            scopes: FenceTopology::affectedScopes(meta.target, desired).mapBy(g => FenceAuthority::scopeAt(meta, g)),
+            origin: Operator, audit: options.audit })
+          val binding: ProcessAdmission = { owner: { node: "n3", incarnation: world.system.get("n3").volatile.incarnation },
+            replica: desired.groups.get("_meta").replicas.filter(r => r.key.node == "n3").getOnlyElement().key,
+            operation: { version: desired.version, attempt: 1 }, origin: None, ready: false }
+          val bound = { ...approved, admissions: approved.admissions.put("n3", binding) }
+          val granted = FenceReadmission::begin(bound, binding, 3, 2)
+          fixtureMetadata(GrantRules::closeGrants(granted, Set(oldHostKey), 3), 3)
+            .then({ world' = { ...world, system: world.system.setBy("n3", n => { ...n,
+              volatile: { ...n.volatile, phase: Starting, ownLease: Revoked } }) } })
+        }
+    }
   }
   action retainedHostFenceInit: bool = init.then(retainHostFence)
   run offlineHostRetainsExactFenceDebtTest = retainedHostFenceInit.then(crash("n3"))

@@ -46,6 +46,7 @@ module managed_prepare_steps {
         host.durable.authorityGrants.get(delivery.resource) == delivery.grant) host.durable.journalPosition else host.durable.journalPosition + 1,
       authorityFloors: host.durable.authorityFloors.put(delivery.resource, delivery.grant.key.revision),
       authorityGrants: host.durable.authorityGrants.put(delivery.resource, delivery.grant),
+      replicaLedger: host.durable.replicaLedger.union(Set(delivery.replica)),
       replicaEvidence: if (host.durable.replicaEvidence.keys().contains(delivery.replica)) host.durable.replicaEvidence
         else host.durable.replicaEvidence.put(delivery.replica, ValidStore({ snapshot: 0, commit: 0, tail: 0, appliedHint: 0 })) } })
     Starts::requestStartNext(base, delivery.receiver.node, delivery.replica, false, requests)

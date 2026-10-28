@@ -233,6 +233,17 @@ module planning {
   pure def number(steps: List[PlannedStep], start: int): List[PlannedStep] =
     steps.foldl(List(), (out, step) => out.append({ ...step, seq: start + out.length() }))
 
+  // topology.bindReadmissionRetirement: fresh metadata admission owns former
+  // host retirement. Keep detached whole-group deletion obligations, but never
+  // route later per-replica host calls to the already retired member.
+  pure def readmissionOwnsHostStep(input: PlanningInput, desired: Document, step: PlannedStep): bool =
+    if (not(Set(StopReplica, RetireReplica).contains(step.kind))) false else match step.target {
+      | GroupTarget(_) => false
+      | ReplicaTarget(key) => desired.groups.keys().contains(key.group) and desired.nodes.keys().contains(key.node) and
+          desired.nodes.get(key.node).member > key.member and input.retained.contains(key) and
+          desired.groups.get("_meta").replicas.exists(r => r.key.node == key.node and r.key.member == desired.nodes.get(key.node).member)
+    }
+
   pure def buildPlan(input: PlanningInput, desired: Document, scopes: Set[GroupId]): PlanResult = {
     val emptyPlan: Plan = { version: desired.version, blocks: Map(), cleanup: Map(), sources: Map(), dependencies: Set() }
     val valid = P::validateDocument(desired, input.rules)
@@ -248,8 +259,8 @@ module planning {
     val built = input.rules.groupOrder.select(g => scopes.contains(g)).foldl(
       { plan: emptyPlan, seq: 1, errors: valid }, (acc, id) => {
         val block = planBlock(input, desired, id)
-        val required = number(block.required, acc.seq)
-        val cleanup = number(block.cleanup, acc.seq + required.length())
+        val required = number(block.required.select(s => not(readmissionOwnsHostStep(input, desired, s))), acc.seq)
+        val cleanup = number(block.cleanup.select(s => not(readmissionOwnsHostStep(input, desired, s))), acc.seq + required.length())
         val chain = required.indices().filter(i => i > 0).map(i => (required.nth(i).seq, required.nth(i - 1).seq))
         val retireDeps = P::toSet(cleanup).filter(s => s.kind == RetireReplica).map(retirement =>
           P::toSet(required.concat(cleanup)).filter(s => s.kind == StopReplica and s.target == retirement.target)

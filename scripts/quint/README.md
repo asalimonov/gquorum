@@ -6,7 +6,7 @@ This is the executable specification being built from the [target design](../../
 
 The user approved a lean first version after Task 4. The [coverage ledger](coverage.md), target and plan now defer labels/selectors/domain placement, live policy tuning, EnsureGroup/RollbackTo, application locks/manual session workflows, serving override, storage-loss/memory-store suites and offline Recovery. Public metrics/getter/watch/history plumbing is omitted; derived operator visibility and minimum internal session/availability safety remain. The user further fixed performance/stability/metric-freshness evidence to favorable values: no lag/backlog, no-progress, stale-metric or stability/cooldown scenarios in the initial iteration. Quorum/crash/partition behavior and the successful join catch-up milestone remain.
 
-Protocol implementation has completed Tasks 1–9; cleanup, collection and readmission are next in Task 10. The separate module refactoring is complete. Executable scope checks constrain invocation and every safety check; `coreChecks` selects retained tests explicitly. Broader Task 4 helpers/tests remain separate historical work. Metrics are fixed favorable; availability, quorum, exact identity, captured topology and local apply still matter.
+Protocol implementation has completed Tasks 1–10; fixed-policy scheduler repair is next in Task 11. The separate module refactoring is complete. Executable scope checks constrain invocation and every safety check; `coreChecks` selects retained tests explicitly. Broader Task 4 helpers/tests remain separate historical work. Metrics are fixed favorable; availability, quorum, exact identity, captured topology and local apply still matter.
 
 ## Run the current checkpoint
 
@@ -62,7 +62,7 @@ The target's record field `action` is spelled `kind` because Quint reserves `act
 
 ## Pending implementation
 
-Tasks 1–7 implement shared reads, staging/approval/retry/reseat, authority execution/fencing, local ownership/lifetime and minimum internal sessions. Tasks 8–9 add membership/scaling and group creation/detached deletion. Tasks 10–11 retain retirement/collection/readmission and scheduler repair. Tasks 12–18 retain coverage/visibility, progress/verification, tooling, audit, review and documentation work. Refactoring does not complete those protocol tasks or introduce successful placeholders.
+Tasks 1–7 implement shared reads, staging/approval/retry/reseat, authority execution/fencing, local ownership/lifetime and minimum internal sessions. Tasks 8–9 add membership/scaling and group creation/detached deletion. Task 10 adds retirement/collection/readmission. Task 11 retains scheduler repair. Tasks 12–18 retain coverage/visibility, progress/verification, tooling, audit, review and documentation work. Refactoring does not complete those protocol tasks or introduce successful placeholders.
 
 Do not infer completed coverage from the presence of a record or enum. Add each transition with an executable witness and invariants, retain counterexamples, and update the coverage matrix before extending claims.
 
@@ -183,3 +183,16 @@ python3 scripts/quint/run.py --profile deletion3 --mode simulate --seed 1
 ```
 
 The profile has three nodes, two initial loads and one bounded creatable ID `c`; request/position/incarnation/delivery bounds are 6/64/2/256. Initial voter policy remains fixed, with explicit/all-eligible hosting. EnsureGroup and historical required-stop deletion semantics remain excluded.
+
+
+## Retirement, collection and readmission (Task 10)
+
+Cleanup grants bind one exact former replica even when their immutable deletion step names several owners. Retirement waits for released ownership, validates the complete callback result, quarantines only that identity, releases its ledger and persists an exact receipt before reporting. Callback completion remains owned during Node shutdown. Unavailable hosts keep their debt.
+
+Collection separates retention eligibility, durable preparation, physical token-bound deletion, durable completion, metadata acknowledgement, exact marker release and journal removal. A crash preserves the store token and journal row; missing files or a released marker cannot authorize another collection. Complete local retirement supplies assignment-exclusion proof, allowing excluded hosts to finish maintenance without a current Target read. Metadata still requires its retained matching retirement evidence before accepting collection.
+
+Manual ReadmitNode uses ordinary staging/approval with an explicit availability sample and predecessor CAS. A returning pinned process receives a complete immutable readmission batch. Each group's floor is installed separately before old owners are stopped/joined. Load retirement and metadata backup/retirement remain distinct; a complete local batch permits successor pin installation, while complete replicated batch consumption gates metadata preparation and admission readiness. Partial reports cannot settle debt. Completed journal rebindings authorize later collection reports from the exact successor member; old cleanup cannot affect successor replicas.
+
+The native configuration may temporarily contain different numeric members associated with the same node name during metadata replacement. Only the exact current pin/engine can participate. Readmission-owned plans omit redundant per-replica stop/retirement calls to the old member; whole-group deletion retains its detached obligations. These rules follow topology/readmission_plan.go and internal/metaengine/scoped_barriers.go.
+
+`deletion3` covers cleanup and collection. `admission4` adds manual readmission, partial-batch refusal, fresh session/two-load convergence and deletion/collection handover. Its long traces use the existing explicitly named REPL witnesses; ordinary tests retain their configured sampling. An explicitly joining fenced host may send an authenticated request using its retained control-only store; the request does not unfence or restart its old engine. This is not a storage-loss or offline Recovery model.

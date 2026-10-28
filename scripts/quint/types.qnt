@@ -119,21 +119,27 @@ module types {
   type CollectionPhase = Unprepared | Prepared | PhysicallyCollected
     | CompletionDurable | Reported | MarkerReleased
   type RetentionClass = Retain | EligibleForCollection
+  type CollectionReceipt = { identity: ReplicaKey, grant: GrantKey, token: int, sequence: int }
+  type CollectionReport = { receipt: CollectionReceipt, courier: ProcessKey, member: int }
+  type RetiredStore = { token: int, dataPresent: bool, markerPresent: bool }
   type CleanupDebt = {
     identity: ReplicaKey, sourceOperation: AttemptKey, storage: StorageClass,
     // Approval retains exact obligations before any execution grant is issued.
     stopAction: Option[ApprovedAction], retireAction: Option[ApprovedAction],
     stopGrant: Option[GrantKey], removed: Option[Receipt], stopped: Option[Receipt], retired: Option[Receipt],
-    collected: Option[Receipt], retention: RetentionClass, collectionPhase: CollectionPhase,
+    collected: Option[CollectionReceipt], retention: RetentionClass, collectionPhase: CollectionPhase,
   }
   type CollectionState = {
     identity: ReplicaKey, grant: GrantKey, phase: CollectionPhase, token: int,
+    sequence: int, retirement: Receipt,
   }
   type SessionKey = { owner: ProcessKey, generation: int }
   type SessionPhase = Live | ExpiredObserved | Revoked
   type Session = { owner: ProcessKey, member: int, phase: SessionPhase, renewalGeneration: int }
   type ProcessAdmission = { owner: ProcessKey, replica: ReplicaKey, operation: AttemptKey, origin: Option[AttemptKey], ready: bool }
   type JoinOffer = { admission: ProcessAdmission, proofIndex: int }
+  type ReadmissionOffer = { admission: ProcessAdmission, prior: AdmissionKey, grants: Set[Grant],
+    proofIndex: int, sender: ProcessKey, senderMember: int, delivery: int }
   type AdmissionCommand = BindAdmission({ admission: ProcessAdmission, previous: Option[ProcessKey] })
     | ReadyAdmission(ProcessAdmission)
   type MetadataState = {
@@ -150,6 +156,7 @@ module types {
     effectReceipts: Set[Receipt], fenceEvidence: Set[FenceEvidence],
     couriers: NodeName -> { process: ProcessKey, member: int },
     admissions: NodeName -> ProcessAdmission,
+    readmissionOrigins: AdmissionKey -> AttemptKey,
   }
   type CatchUpClass = Behind | CaughtUp | CatchUpUnknown
   type NativeChange = {
@@ -258,6 +265,9 @@ module types {
   type ControlCommand = AdmissionControl(AdmissionCommand) | SessionControl(SessionCommand) | BeginBlock({ operation: AttemptKey, group: GroupId })
     | IssueEffect(ApprovedAction) | IssueCleanupStop(ApprovedAction) | IssueTransfer({ target: ReplicaKey, request: RequestKey, sourceVersion: int })
     | RecordEffect(Receipt) | RecordFence(FenceEvidence)
+    | IssueRetirement({ identity: ReplicaKey, approved: ApprovedAction }) | RecordCollection(CollectionReport)
+    | BeginReadmission({ admission: ProcessAdmission, predecessor: int })
+    | RecordReadmission({ admission: ProcessAdmission, receipts: Set[Receipt] })
     | CompleteStep({ approved: ApprovedAction, observedLeader: Option[ReplicaKey] })
     | CompleteCatchUp(ApprovedAction)
     | RecordStepStatus({ approved: ApprovedAction, phase: OperationPhase, reason: Option[BlockReason] })
@@ -276,6 +286,7 @@ module types {
     command: Option[MetaCommand], proposalSequence: int, commitIndex: Option[int],
     commitOutcome: Option[MutationOutcome], stagedVersion: Option[int],
     operationRequest: Option[OperationRequest],
+    health: NodeName -> HealthClass,
   }
   type WorkPhase = WorkReading | WorkReadQueued | WorkApplying | WorkObserving | WorkPrepared | WorkSubmitted | WorkCommitted | WorkFinished
   type OperationWork = {
@@ -296,6 +307,9 @@ module types {
   type StartWork = { key: ReplicaKey, request: RequestKey, explicit: bool,
     floorIndex: Option[int], phase: StartPhase, error: Option[Refusal] }
   type HostFenceWork = { delivery: EffectDelivery, position: int }
+  type RetirementPhase = RetireWaiting | RetireChecked | RetireQuarantined
+  type RetirementWork = { delivery: EffectDelivery, phase: RetirementPhase }
+  type RetirementResult = { grant: Grant, identity: ReplicaKey, verified: bool }
   type ProcessState = {
     phase: ProcessPhase, incarnation: int, pendingCalls: RequestKey -> CallState,
     appliedMetaVersion: int, appliedMetaIndex: int, localView: ReadView,
@@ -310,6 +324,10 @@ module types {
     ownLease: SessionPhase, leases: SessionKey -> Lease,
     renewal: Option[Renewal], renewalExpired: bool,
     revokeGate: Option[{ key: SessionKey, proposal: ProposalKey }],
+    retirementWork: ReplicaKey -> RetirementWork,
+    collectionRequests: ProposalKey -> CollectionReceipt, collectionAcks: Set[CollectionReceipt],
+    retentionEligible: Set[ReplicaKey],
+    readmissionOffer: Option[ReadmissionOffer], handoverJoined: bool,
   }
   type HostState = {
     pin: Option[DurableNodeIdentity], replicaEvidence: ReplicaKey -> StorageEvidence,
@@ -319,13 +337,15 @@ module types {
     // retained identities keep their initial floor until an explicit grant wins.
     seedAuthority: Set[ReplicaKey],
     collectionMarkers: ReplicaKey -> CollectionState,
+    replicaLedger: Set[ReplicaKey], retiredStores: ReplicaKey -> RetiredStore,
+    readmissionBackup: Set[ReplicaKey],
     metaImage: Option[ReadView], metaIndex: int, metaSeen: bool, metaRemoved: Option[ReplicaKey],
   }
   type NodeState = { volatile: ProcessState, durable: HostState }
   type LocalNode = { process_id: NodeName, volatile: ProcessState, durable: HostState }
   type NodeStates = NodeName -> LocalNode
   type ManagementMessage = JoinRequest({ owner: ProcessKey, member: int })
-    | JoinAccepted(JoinOffer) | JoinPrepared(ProcessAdmission)
+    | JoinAccepted(JoinOffer) | ReadmissionAccepted(ReadmissionOffer) | JoinPrepared(ProcessAdmission)
     | ApiCall({ key: RequestKey, request: ApiRequest })
     | ReadProbe(ReadTicket) | ReadAck({ ticket: ReadTicket, index: int })
     | MetaProposal({ key: ProposalKey, coordinator: ProcessKey, forWork: bool, command: MetaCommand })

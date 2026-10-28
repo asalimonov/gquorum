@@ -113,7 +113,7 @@ module scaling_helpers {
   action executeMetaBlock(version: int): bool = executeGroupBlock(version, "_meta")
 
   action activateJoinedNode(node: NodeName): bool = {
-    val session: SessionKey = { owner: { node: node, incarnation: 1 }, generation: 1 }
+    val session: SessionKey = { owner: { node: node, incarnation: world.system.get(node).volatile.incarnation }, generation: 1 }
     syncMeta(node).then(observeMetaLeader(node)).then(beginSession(node)).then(proposeSession(node))
       .then(controlCommit(SessionControl(GrantInternalSession({ key: session, member: metaReplica(node).member }))))
       .then(applyMeta(node)).then(proposeSession(node))

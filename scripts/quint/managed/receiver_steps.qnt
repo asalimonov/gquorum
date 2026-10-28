@@ -14,7 +14,7 @@ module managed_receiver_steps {
       val c = w.extensions.consensus.get("_meta")
       and {
         w.messages.get(msg.destination).contains(msg),
-        M::running(node),
+        E::hostAvailable(node),
         not(node.volatile.authorityReads.keys().contains(msg.delivery)),
         M::hasCommitPath(c, w.system, w.extensions.network.metaLinks),
         match c.leaderAuthority { | Some(leader) =>

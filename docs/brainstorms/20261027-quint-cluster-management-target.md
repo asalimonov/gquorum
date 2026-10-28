@@ -1,7 +1,7 @@
 # Target design: initial Quint cluster-management model
 
 **Scope revision:** 2026-10-27. User approved “Lean management scope; defer offline recovery” and then specified that metrics are always good: no lag/stability issues in this iteration.
-**Implementation:** Tasks 1–9 complete; Tasks 10–18 remain. This document defines the reduced initial deliverable; it does not claim that it is implemented or verified.
+**Implementation:** Tasks 1–10 complete; Tasks 11–18 remain. This document defines the reduced initial deliverable; it does not claim that it is implemented or verified.
 **Method disposition:** [coverage ledger](../../scripts/quint/coverage.md).
 **Execution plan:** [implementation plan](../plans/20261027-quint-cluster-management.md).
 **Discussion:** [brainstorm log](20261027-quint-cluster-management.md).
@@ -133,7 +133,7 @@ Keep per-group operation owners, block/step state, first attempts, immediate ret
 
 Keep removed/stopped/retired/collected milestones with exact proof and identity. Collection preparation, physical effect, durable completion, report and exact marker release remain distinct where a process crash can expose their ordering. Retention is an abstract eligibility condition, not a configurable retention-policy implementation.
 
-Approval retains exact planned stop/retirement actions before execution grants exist. Cleanup debt distinguishes those immutable obligations from optional issued grant keys and actual receipts. Logical deletion can finish through `_meta` while an offline owner retains cleanup debt. Returning-owner readmission must fence/join/retire its predecessor and report the required exact batch before successor readiness. Missing files, a fresh member ID or a bare verified flag are never completion proof. Offline disaster recovery/fresh-lineage rebuild is a separate deferred feature.
+Approval retains exact planned stop/retirement actions before execution grants exist. Cleanup debt distinguishes those immutable obligations from optional issued grant keys and actual receipts. Logical deletion can finish through `_meta` while an offline owner retains cleanup debt. Returning-owner readmission must fence/join/retire its predecessor and report the required exact batch before successor readiness. Missing files, a fresh member ID or a bare verified flag are never completion proof. Offline disaster recovery/fresh-lineage rebuild is a separate deferred feature. Manual ReadmitNode keeps ordinary staging/approval and its explicit predecessor/availability check. The join response supplies an immutable complete batch; each host floor is installed separately before joining old owners. A local complete batch permits journal/pin rebinding, while replicated complete-batch consumption gates metadata preparation and admission readiness. Retained batch origins and monotonic member links authorize collection reporting through successor identities. Host fencing remains distinct from receipt consumption, even when both use the same readmission grant and local sequence.
 
 ### 5.8 Network and fault state
 

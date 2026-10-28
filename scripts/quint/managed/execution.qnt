@@ -7,6 +7,8 @@ module execution {
   import grants as G from "../metaengine/grants"
   import membership as M from "../consensus/membership"
 
+  pure def hostAvailable(node: LocalNode): bool = M::running(node) or node.volatile.phase == Fenced
+
   pure def floorAt(w: World, delivery: EffectDelivery): int = match delivery.resource {
     | GroupResource(group) => w.extensions.consensus.get(group).authorityFloor
     | HostResource(_) => w.system.get(delivery.receiver.node).durable.authorityFloors.getOrElse(delivery.resource, 0)
@@ -21,13 +23,14 @@ module execution {
     | HostResource(_) => w.system.get(delivery.receiver.node).durable.fences
   }
   pure def consumed(w: World, delivery: EffectDelivery): bool =
-    receiptsAt(w, delivery).exists(r => r.grant == delivery.grant.key and r.resource == delivery.resource) or
-      fencesAt(w, delivery).exists(f => f.grant == delivery.grant.key and f.resource == delivery.resource)
+    receiptsAt(w, delivery).exists(r => r.grant == delivery.grant.key and r.resource == delivery.resource and
+      (match delivery.resource { | HostResource(_) => r.target == Some(delivery.replica) | GroupResource(_) => true })) or
+      (delivery.grant.purpose == Fence and fencesAt(w, delivery).exists(f => f.grant == delivery.grant.key and f.resource == delivery.resource))
 
   pure def receiverExact(w: World, delivery: EffectDelivery): bool = {
     val receiver = w.system.get(delivery.receiver.node)
     and {
-      M::running(receiver), delivery.receiver.incarnation == receiver.volatile.incarnation,
+      (match delivery.resource { | HostResource(_) => hostAvailable(receiver) | GroupResource(_) => M::running(receiver) }), delivery.receiver.incarnation == receiver.volatile.incarnation,
       delivery.replica.node == delivery.receiver.node,
       receiver.durable.pin == Some({ cluster: delivery.replica.cluster, node: delivery.replica.node,
         member: delivery.replica.member }),
@@ -69,7 +72,7 @@ module execution {
   pure def dispatchable(delivery: EffectDelivery): bool = executable(delivery) or
     match delivery.grant.effect { | Some(e) => delivery.grant.planStep != None and (
       (M::nativeKind(e.kind) and delivery.resource == GroupResource(delivery.grant.key.group)) or
-      ((e.kind == PrepareReplica or e.kind == CreateFoundingGroup or (e.kind == StopReplica and delivery.grant.key.group != "_meta")) and match delivery.resource {
+      ((e.kind == PrepareReplica or e.kind == CreateFoundingGroup or e.kind == RetireReplica or e.kind == DeleteGroupState or (e.kind == StopReplica and delivery.grant.key.group != "_meta")) and match delivery.resource {
         | HostResource(_) => true | _ => false }) or
       (e.kind == CreateFoundingGroup and delivery.resource == GroupResource(delivery.grant.key.group))) | None => false }
 
@@ -148,7 +151,7 @@ module execution {
       | GroupResource(_) => match receiver.durable.replicaEvidence.getOrElse(delivery.replica, MissingStore) {
           | ValidStore(p) => p.commit >= receipt.durablePosition | _ => false }
     }
-    if (w.extensions.nextDelivery > limit or not(M::running(receiver)) or
+    if (w.extensions.nextDelivery > limit or not(hostAvailable(receiver)) or
         receiver.volatile.incarnation != delivery.receiver.incarnation or not(applied)) w else
       apply_custom_effect(w, Queue({ delivery: w.extensions.nextDelivery, source: delivery.receiver,
         destination: delivery.sender.node, channel: if (delivery.grant.key.group == "_meta") MetaChannel else LoadChannel,

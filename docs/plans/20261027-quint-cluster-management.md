@@ -11,7 +11,7 @@
 **Full brainstorm log:** [discussion](../brainstorms/20261027-quint-cluster-management.md)
 **Execution progress:** `docs/progress/20261027-quint-cluster-management.md`
 **Library scenario findings:** `docs/reports/20261027-quint-cluster-management.md`
-**Status:** Tasks 1–9 completed; next is Task 10. The resumed goal remains active. QCM-001 is a retained model reproduction with Go regression pending; validation and limitations are in the execution log.
+**Status:** Tasks 1–10 completed; next is Task 11. The resumed goal remains active. QCM-001 is a retained model reproduction with Go regression pending; validation and limitations are in the execution log.
 
 Module organization was refactored separately on 2026-10-28; see the [refactoring plan](20261028-quint-module-refactoring.md). Pending file paths below are relative to `scripts/quint/` unless stated otherwise. Completed task records retain their original paths as history. The prior protocol pause ended when the goal was resumed.
 
@@ -65,7 +65,7 @@ Per the user’s reporting instruction, failures in implemented library scenario
 | 7 | Local ownership/lifecycle and minimum internal sessions | Completed |
 | 8 | Native membership and 3–5-node scaling | Completed |
 | 9 | Healthy/degraded create and detached delete | Completed |
-| 10 | Cleanup/collection and returning-owner readmission | Pending |
+| 10 | Cleanup/collection and returning-owner readmission | Completed |
 | 11 | Supported fixed-policy scheduler repairs | Pending |
 | 12 | Core API coverage and derived operator visibility | Pending |
 | 13 | Explicit stuck/fair-progress and backend calibration | Pending |
@@ -236,16 +236,16 @@ Per the user’s reporting instruction, failures in implemented library scenario
 **Files:** `managed/`, `metaengine/authority.qnt`, `metaservice/handlers.qnt`, `cluster.qnt`, `harness/properties.qnt`, `tests/` (updated).
 **References:** target §§5.6–5.8/8.4/8.8/9; §14 stopAndRetire, collectRetiredReplica, readmitReturningNode.
 
-- [ ] Keep native removal, actual joined stop, retirement and physical collection distinct; verify exact grant/identity/ledger/token/assignment even when data is absent.
-- [ ] Preserve collection preparation before effect, durable completion before report and exact marker release before journal removal. Use abstract retention eligibility rather than retention-policy tuning.
-- [ ] Wire ReadmitNode's successor grant, predecessor fence/join, complete exact retirement batch, meta catch-up and current assignments before readiness.
-- [ ] Settle matching debt without reopening terminal deletion or resurrecting a group. Protect required history/proof and foreign/successor resources; offline hosts retain unconfirmed debt.
+- [x] Keep native removal, actual joined stop, retirement and physical collection distinct; verify exact grant/identity/ledger/token/assignment even when data is absent.
+- [x] Preserve collection preparation before effect, durable completion before report and exact marker release before journal removal. Use abstract retention eligibility rather than retention-policy tuning.
+- [x] Wire ReadmitNode's successor grant, predecessor fence/join, complete exact retirement batch, meta catch-up and current assignments before readiness.
+- [x] Settle matching debt without reopening terminal deletion or resurrecting a group. Protect required history/proof and foreign/successor resources; offline hosts retain unconfirmed debt.
 
 #### Verification
 
-- [ ] Common checks plus offline return, delete/readmission overlap, partial batch, proof retention and process-crash-at-collection-boundary cases pass.
-- [ ] Missing files, fresh IDs or bare verified flags cannot substitute for receipts; successor resources survive old cleanup.
-- [ ] No dependency on deferred offline Recovery or disk-loss profiles is introduced.
+- [x] Common checks plus offline return, delete/readmission overlap, partial batch, proof retention and process-crash-at-collection-boundary cases pass.
+- [x] Missing files, fresh IDs or bare verified flags cannot substitute for receipts; successor resources survive old cleanup.
+- [x] No dependency on deferred offline Recovery or disk-loss profiles is introduced.
 
 ### Task 11: Implement supported scheduler repairs with fixed policy
 
@@ -268,7 +268,7 @@ Per the user’s reporting instruction, failures in implemented library scenario
 **Files:** coverage.md/regressions.md, retained test entry points, profiles and display/projection helpers (updated/new).
 **References:** target §§6.2/8.7/10/11–13; all 82 ledger dispositions.
 
-- [ ] Audit all public entries against the live interfaces, but require executable coverage only for Core controls and retained Primitive semantics. Observe entries map to derived views; Omit/Deferred entries need reasons, not fake implementations.
+- [ ] Audit all public entries against the live interfaces, but require executable coverage only for Core controls and retained Primitive semantics. Classify automatic join-time identity allocation against the retained-storage scope; manual ReadmitNode coverage does not by itself cover that distinct branch. Observe entries map to derived views; Omit/Deferred entries need reasons, not fake implementations.
 - [ ] Complete integrated healthy/degraded group/node cases, two-node unavailability, independent channels/groups, 3→5→3 with two groups, manual/scheduler races and returning owners.
 - [ ] Add accepted/refused/waiting/uncertain outcomes for retained mutation families. Check version/predecessor/partial-commit results and ensure action witnesses use composed entry points.
 - [ ] Expose concise derived trace summaries: Latest/Target, operation/block/step, node/member/replica/incarnation, native membership, held/parked owners, fences, cleanup debt and blockers. Do not implement metrics, watch streams, query pagination or polling loops.
@@ -438,11 +438,13 @@ Task 1 used `kind` because Quint reserves `action` and used Choreo pure helpers 
 
 Task 8 brought forward the minimal granted load-stop/debt path needed by metadata evacuation barriers; retirement, collection and full readmission remain Tasks 9–10. It also added explicit long-witness REPL routing and frontend heap settings after reproducing Quint trace-export limits; root Make integration remains Task 15. QCM-001 is an explicitly retained source-grounded progress finding, not an omitted model mechanism or a passing recovery claim.
 
+Task 10 corrected the pre-existing native membership predicate's host-name uniqueness assumption to match numeric Raft identity, and rebuilt historical readmission fixtures with valid predecessor-only batches and retained origins. These are model/source-correspondence fixes; no Go behavior changed. Final validation reuses successful ordinary scenario selections, with corrected shared core checks and separately recorded long witnesses, rather than rerunning whole suites for a pure fixture correction. Failed aggregate reports retain their original result.
+
 ## NOT IMPLEMENTED GAPS
 
 - [x] Scope normalization completed in Task 5: executable feature guards/safety assumptions, explicit retained-core test imports, and separate extension-only tests. Later task machinery must retain these assumptions.
 
-Implementation remains incomplete. Tasks 9–18 retain group workflows, retirement/collection/readmission, scheduling, coverage and progress/backend qualification. Task 8 checks and its explicit known-finding record are complete. QCM-001 remains a reported model reproduction with Go regression pending. Deferred/Omit features are not hidden unfinished tasks.
+Implementation remains incomplete. Tasks 11–18 retain scheduling, coverage and progress/backend qualification, tooling, audit, review and documentation. Task 8 checks and its explicit known-finding record are complete. QCM-001 remains a reported model reproduction with Go regression pending. Deferred/Omit features are not hidden unfinished tasks.
 
 ## Scope-review validation
 

@@ -1,4 +1,8 @@
 module cluster {
+  import managed_readmission_steps as Readmit from "./managed/readmission_steps"
+  import metaservice_readmission_steps as ReadmitService from "./metaservice/readmission_steps"
+  import managed_retirement_steps as Retire from "./managed/retirement_steps"
+  import managed_collection_steps as Collect from "./managed/collection_steps"
   import managed_founding_steps as Founding from "./managed/founding_steps"
   import managed_stop_steps as Stops from "./managed/stop_steps"
   import managed_prepare_steps as Preparation from "./managed/prepare_steps"
@@ -595,6 +599,14 @@ module cluster {
   // This subset is useful for reachability checks under healthy communication.
   // It remains part of the same production step relation, with the same state.
   action requestStep = any {
+    nondet node = NODE_POOL.oneOf()
+    nondet seed = NODE_POOL.oneOf()
+    requestReadmissionJoin(node, seed),
+    nondet caller = NODE_POOL.filter(n => M::running(world.system.get(n))).oneOf()
+    val local = world.system.get(caller).volatile.localView.latest
+    nondet node = local.nodes.keys().oneOf()
+    invoke(caller, Mutate({ edit: ReadmitNode({ name: node, expectedMember: local.nodes.get(node).member }),
+      options: { ...generatedOptions, approve: true } })),
     nondet caller = NODE_POOL.filter(n => M::running(world.system.get(n)) and world.system.get(n).durable.pin != None).oneOf()
     nondet hosts = Set(List("n1", "n2"), List("n1", "n2", "n3")).oneOf()
     invoke(caller, Mutate({ edit: CreateGroup({ id: "c", storage: StorageDefault, labels: Map(), placement: None,
@@ -655,6 +667,9 @@ module cluster {
     membershipStep,
     admissionStep,
     cleanupStopStep,
+    retirementStep,
+    readmissionStep,
+    collectionStep,
     nondet msg = world.extensions.network.pending.oneOf()
     deliver(msg),
     nondet node = NODE_POOL.oneOf()
@@ -807,7 +822,7 @@ module cluster {
   action reportHostEffect(node: NodeName, receipt: Receipt): bool = match receipt.resource {
     | HostResource(host) => all {
         world.system.get(host.node).durable.receipts.contains(receipt),
-        M::running(world.system.get(host.node)),
+        E::hostAvailable(world.system.get(host.node)),
         M::communicates(world.extensions.network.metaLinks, node, host.node),
         submitControl(node, RecordEffect(receipt)),
       }
@@ -962,4 +977,126 @@ module cluster {
 
   action managementStep = any { requestStep, protocolStep }
   action step = any { managementStep, faultStep, nativeStep }
+
+  action beginRetirement(d: EffectDelivery): bool =
+    guarded(Retire::beginEnabled(world, d, MAX_POSITION), before => Retire::beginNext(before, d))
+  action returnRetirement(node: NodeName, key: ReplicaKey, result: RetirementResult): bool =
+    guarded(Retire::returnEnabled(world, node, key), before => Retire::returnNext(before, node, key, result))
+  action quarantineRetirement(node: NodeName, key: ReplicaKey): bool =
+    guarded(Retire::phaseEnabled(world, node, key, RetireChecked, MAX_POSITION), before => Retire::quarantineNext(before, node, key))
+  action finishRetirement(node: NodeName, key: ReplicaKey): bool =
+    guarded(Retire::phaseEnabled(world, node, key, RetireQuarantined, MAX_POSITION), before => Retire::finishNext(before, node, key, MAX_DELIVERIES))
+  action abandonRetirement(node: NodeName, key: ReplicaKey): bool =
+    guarded(Retire::abandonEnabled(world, node, key), before => Retire::abandonNext(before, node, key))
+  action replayRetirement(d: EffectDelivery): bool =
+    guarded(Retire::replayEnabled(world, d), before => Retire::replayNext(before, d, MAX_DELIVERIES))
+  action observeMaintenanceLeader(node: NodeName): bool =
+    guarded(Collect::observeLeaderEnabled(world, node), before => Collect::observeLeaderNext(before, node))
+  action retentionDecision(node: NodeName, key: ReplicaKey, eligible: bool): bool =
+    guarded(Collect::retentionEnabled(world, node, key, eligible), before => Collect::retentionNext(before, node, key, eligible))
+  action prepareCollection(node: NodeName, key: ReplicaKey, proof: Receipt): bool =
+    guarded(Collect::prepareEnabled(world, node, key, proof, MAX_POSITION), before => Collect::prepareNext(before, node, key, proof))
+  action collectRetired(node: NodeName, key: ReplicaKey): bool =
+    guarded(Collect::collectEnabled(world, node, key), before => Collect::collectNext(before, node, key))
+  action completeCollection(node: NodeName, key: ReplicaKey): bool =
+    guarded(Collect::completeEnabled(world, node, key, MAX_POSITION), before => Collect::completeNext(before, node, key))
+  action reportCollection(node: NodeName, key: ReplicaKey): bool =
+    guarded(Collect::reportEnabled(world, node, key, MAX_DELIVERIES), before => Collect::reportNext(before, node, key))
+  action receiveCollectionAck(msg: Envelope): bool =
+    guarded(Collect::ackEnabled(world, msg), before => Collect::ackNext(before, msg))
+  action releaseCollectionMarker(node: NodeName, key: ReplicaKey): bool =
+    guarded(Collect::releaseEnabled(world, node, key), before => Collect::releaseNext(before, node, key))
+  action removeCollectionJournal(node: NodeName, key: ReplicaKey): bool =
+    guarded(Collect::removeEnabled(world, node, key), before => Collect::removeNext(before, node, key))
+
+  action retirementStep = any {
+    nondet node = NODE_POOL.filter(n => M::running(world.system.get(n))).oneOf()
+    val local = world.extensions.metaLog.get(world.system.get(node).volatile.appliedMetaIndex)
+    nondet key = local.cleanup.keys().filter(r => local.cleanup.get(r).retired == None and local.cleanup.get(r).retireAction != None).oneOf()
+    submitControl(node, IssueRetirement({ identity: key, approved: local.cleanup.get(key).retireAction.unwrap() })),
+    nondet node = NODE_POOL.oneOf()
+    nondet d = world.system.get(node).volatile.waitingEffects.oneOf()
+    any { beginRetirement(d), replayRetirement(d) },
+    nondet node = NODE_POOL.oneOf()
+    nondet key = world.system.get(node).volatile.retirementWork.keys().oneOf()
+    nondet valid = Set(true, false).oneOf()
+    any {
+      returnRetirement(node, key, { ...Retire::resultFor(world.system.get(node).volatile.retirementWork.get(key).delivery), verified: valid }),
+      quarantineRetirement(node, key), finishRetirement(node, key), abandonRetirement(node, key),
+    },
+  }
+
+  action collectionStep = any {
+    nondet node = NODE_POOL.oneOf()
+    observeMaintenanceLeader(node),
+    nondet node = NODE_POOL.oneOf()
+    nondet key = world.system.get(node).durable.retiredStores.keys().oneOf()
+    nondet eligible = Set(true, false).oneOf()
+    retentionDecision(node, key, eligible),
+    nondet node = NODE_POOL.oneOf()
+    nondet key = world.system.get(node).durable.retiredStores.keys().oneOf()
+    nondet proof = world.system.get(node).durable.receipts.filter(r => r.target == Some(key)).oneOf()
+    prepareCollection(node, key, proof),
+    nondet node = NODE_POOL.oneOf()
+    nondet key = world.system.get(node).durable.collectionMarkers.keys().oneOf()
+    any { collectRetired(node, key), completeCollection(node, key), reportCollection(node, key),
+      releaseCollectionMarker(node, key), removeCollectionJournal(node, key) },
+    nondet node = NODE_POOL.oneOf()
+    nondet msg = world.messages.get(node).oneOf()
+    receiveCollectionAck(msg),
+  }
+
+  action observeMutationHealth(request: RequestKey, node: NodeName): bool =
+    guarded(ReadmitService::healthEnabled(world, request, node), before => ReadmitService::healthNext(before, request, node))
+  action requestReadmissionJoin(node: NodeName, seed: NodeName): bool =
+    guarded(ReadmitService::controlJoinEnabled(world, node, seed, MAX_DELIVERIES),
+      before => AdmissionSteps::requestJoinNext(before, node, seed))
+  action reportReadmissionBatch(courier: NodeName, node: NodeName, receipts: Set[Receipt]): bool = {
+    val local = world.extensions.metaLog.get(world.system.get(courier).volatile.appliedMetaIndex)
+    all { E::hostAvailable(world.system.get(node)), receipts.size() > 0,
+      receipts.subseteq(world.system.get(node).durable.receipts),
+      M::communicates(world.extensions.network.metaLinks, courier, node), local.admissions.keys().contains(node),
+      submitControl(courier, RecordReadmission({ admission: local.admissions.get(node), receipts: receipts })) }
+  }
+  action issueReadmission(msg: Envelope): bool = match ReadmitService::command(world, msg) {
+    | Some(command) => all { AdmissionSteps::joinApplied(world, msg), submitControl(msg.destination, command) }
+    | None => all { false, world' = world }
+  }
+  action replyReadmission(msg: Envelope): bool =
+    guarded(ReadmitService::replyEnabled(world, msg, MAX_DELIVERIES), before => ReadmitService::replyNext(before, msg))
+  action receiveReadmission(msg: Envelope): bool =
+    guarded(Readmit::receiveEnabled(world, msg), before => Readmit::receiveNext(before, msg))
+  action fenceReadmissionScope(node: NodeName, group: GroupId): bool =
+    guarded(Readmit::fenceEnabled(world, node, group, MAX_POSITION), before => Readmit::fenceNext(before, node, group))
+  action stopReadmissionOwners(node: NodeName): bool =
+    guarded(Readmit::stopEnabled(world, node), before => Readmit::stopNext(before, node))
+  action joinReadmissionOwners(node: NodeName): bool =
+    guarded(Readmit::joinEnabled(world, node), before => Readmit::joinNext(before, node))
+  action beginReadmissionRetirement(node: NodeName, key: ReplicaKey): bool =
+    guarded(Readmit::beginLoadEnabled(world, node, key, MAX_POSITION), before => Readmit::beginLoadNext(before, node, key))
+  action backupReadmissionMeta(node: NodeName): bool =
+    guarded(Readmit::backupEnabled(world, node), before => Readmit::backupNext(before, node))
+  action finishReadmissionMeta(node: NodeName): bool =
+    guarded(Readmit::finishMetaEnabled(world, node, MAX_POSITION), before => Readmit::finishMetaNext(before, node, MAX_DELIVERIES))
+  action installReadmissionPin(node: NodeName): bool =
+    guarded(Readmit::installPinEnabled(world, node), before => Readmit::installPinNext(before, node))
+
+  action readmissionStep = any {
+    nondet caller = NODE_POOL.oneOf()
+    nondet key = world.system.get(caller).volatile.pendingCalls.keys().oneOf()
+    nondet node = NODE_POOL.oneOf()
+    observeMutationHealth(key, node),
+    nondet node = NODE_POOL.oneOf()
+    nondet msg = world.messages.get(node).oneOf()
+    any { issueReadmission(msg), replyReadmission(msg), receiveReadmission(msg) },
+    nondet node = NODE_POOL.filter(n => world.system.get(n).volatile.readmissionOffer != None).oneOf()
+    nondet grant = world.system.get(node).volatile.readmissionOffer.unwrap().grants.oneOf()
+    nondet target = grant.targets.oneOf()
+    any { fenceReadmissionScope(node, grant.key.group), stopReadmissionOwners(node), joinReadmissionOwners(node),
+      beginReadmissionRetirement(node, target), backupReadmissionMeta(node), finishReadmissionMeta(node), installReadmissionPin(node) },
+    nondet host = NODE_POOL.oneOf()
+    nondet receipt = world.system.get(host).durable.receipts.filter(r => r.admission != None).oneOf()
+    nondet courier = NODE_POOL.filter(n => M::running(world.system.get(n))).oneOf()
+    reportHostEffect(courier, receipt),
+  }
 }

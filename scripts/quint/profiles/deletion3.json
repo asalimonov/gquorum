@@ -131,7 +131,20 @@
         "stagedCreationCannotStartAReplicaTest",
         "healthyCreationThenDeletionKeepsPhysicalDebtTest",
         "deletionKeepsUnavailableNativeRevocationIndependentTest",
-        "groupsShareWorldTest"
+        "groupsShareWorldTest",
+        "deletionRetiresOnlineOwnerWithoutOfflineOwnerTest",
+        "retirementBareVerifiedFlagIsInsufficientTest",
+        "retirementMissingDataDoesNotSkipAuthorityTest",
+        "collectionRequiresRetentionDecisionTest",
+        "collectionPhysicalEffectDoesNotReportCompletionTest",
+        "collectionReportsBeforeMarkerReleaseTest",
+        "collectionResumesAfterPhysicalCrashTest",
+        "collectionTokenMismatchIsRejectedTest",
+        "cleanupSharesWorldTest",
+        "collectionMarkerReleaseSurvivesCrashTest",
+        "nodeStopJoinsRetirementCallbackTest",
+        "collectionPreservesSuccessorResourcesTest",
+        "collectionWaitsForRecordedRetirementTest"
       ]
     },
     {
@@ -255,7 +268,8 @@
         "failedStepRetainsPlanAndReleasesOnlyItsScopeTest",
         "foundingRequiresExactVoterProofTest",
         "foundingConfigurationIsNotCompletionTest",
-        "foundingCannotResetExistingConsensusTest"
+        "foundingCannotResetExistingConsensusTest",
+        "nativeReadmissionAllowsDistinctMemberOnSameHostTest"
       ]
     }
   ],

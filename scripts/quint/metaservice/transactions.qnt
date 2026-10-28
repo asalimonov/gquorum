@@ -18,7 +18,7 @@ module transactions {
     },
     phase: Captured, result: None, waiterCancelled: false, readIndex: None,
     command: None, proposalSequence: 0, commitIndex: None, commitOutcome: None, stagedVersion: None,
-    operationRequest: None,
+    operationRequest: None, health: Map(),
   }
 
   pure def canPrepare(owner: LocalNode, key: RequestKey): bool =
@@ -29,7 +29,9 @@ module transactions {
         call.phase == PreparingCall, not(call.waiterCancelled),
         match call.request {
           // Reseat uses the separate atomic repair workflow, never Stage.
-          | Mutate(m) => match m.edit { | ReseatReplica(_) => m.options.preview | _ => true }
+          | Mutate(m) => match m.edit { | ReseatReplica(_) => m.options.preview
+              | ReadmitNode(r) => not(owner.volatile.localView.latest.nodes.keys().contains(r.name)) or call.health.keys().contains(r.name)
+              | _ => true }
           | _ => false
         },
       }

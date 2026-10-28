@@ -91,17 +91,18 @@ module grants_test {
   }
 
   run partialHostReceiptsDoNotSettleBatchTest = {
-    val successor = { ...replica, member: 4, replica: 4 }
+    val otherFormer = { ...replica, replica: 4 }
     val resource = HostResource({ group: "a", node: "n3" })
     val readmit: Grant = { ...grant, purpose: Readmission, effect: None, planStep: None,
       admission: Some({ node: "n3", predecessor: 3, successor: 4 }),
-      resources: Set(resource), targets: Set(replica, successor) }
+      resources: Set(resource), targets: Set(replica, otherFormer) }
     val first = { ...receipt, effect: None, planStep: None, admission: readmit.admission,
       resource: resource, durableTerm: 0 }
     val meta = G::recordReceipt(G::install(F::meta, readmit), first)
     and { G::wellFormed(readmit), G::canRecordReceipt(meta, first),
+      not(G::wellFormed({ ...readmit, targets: Set(replica, { ...otherFormer, member: 4 }) })),
       not(G::resourceConsumed(meta, readmit, resource)),
-      G::resourceConsumed(G::recordReceipt(meta, { ...first, target: Some(successor), durablePosition: 3 }), readmit, resource) }
+      G::resourceConsumed(G::recordReceipt(meta, { ...first, target: Some(otherFormer) }), readmit, resource) }
   }
 
   run nativeGrantExcludesUnapprovedHistoryTest = {

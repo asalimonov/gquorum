@@ -1,6 +1,6 @@
 # Initial-model scope and coverage
 
-Scope revision approved on 2026-10-27: **lean cluster management**. Tasks 1–9 are complete. Active invocation/safety checks enforce lean scope; smoke3 selects retained core tests through coreChecks. Shared reads, staging, approval, exact retry and atomic reseat/rebase have asynchronous scenario coverage. Transfer/fence execution and receipt-aware retry checks now exist; local lifecycle/session transitions are wired; membership/scaling and group founding/detached deletion are wired; complete cleanup and scheduler work remain; this is not completed v1 coverage.
+Scope revision approved on 2026-10-27: **lean cluster management**. Tasks 1–10 are complete. Active invocation/safety checks enforce lean scope; smoke3 selects retained core tests through coreChecks. Shared reads, staging, approval, exact retry and atomic reseat/rebase have asynchronous scenario coverage. Transfer/fence execution and receipt-aware retry checks now exist; local lifecycle/session transitions are wired; membership/scaling and group founding/detached deletion are wired; cleanup/readmission now have composed scenarios; scheduler work remains; this is not completed v1 coverage.
 
 The original 82-entry ledger was an API inventory, not a requirement to implement 82 state machines. Initial disposition: **17 Core**, **15 Primitive**, **19 Observe**, **8 Omit**, **23 Deferred**. Every entry remains accounted for.
 
@@ -39,7 +39,7 @@ Deferring offline Recovery does not defer ReadmitNode, ReseatReplica, retained r
 | `Cluster.Approve` | `cluster.go` | Task 5: leader reads/recapture, immutable scopes, replay and deletion debt | Immutable approved plan, exact captured scopes and detached deletion debt. |
 | `Cluster.RetryOperation` | `cluster.go` | Tasks 5–6: routed retries and immutable remaining-plan/receipt validation | Exact failed predecessor and at most one successor; preserve uncertain replay. |
 | `Cluster.AddNode` | `cluster.go` | Task 8: approved process binding, retained pin, learner/catch-up/promotion and session activation | Fresh identity and mandatory learner-first _meta admission. |
-| `Cluster.ReadmitNode` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Exact returning predecessor, fencing and retirement batch; not offline Rebuild. |
+| `Cluster.ReadmitNode` | `cluster.go` | Task 10: sampled availability, predecessor CAS, complete handover batch, new pin/session and two-load convergence | Exact returning predecessor, fencing and retirement batch; not offline Rebuild. |
 | `Cluster.DrainNode` | `cluster.go` | Task 8: two-load evacuation, native proof, exact joined stops and node progress | Evacuate loads while retaining _meta membership. |
 | `Cluster.ActivateNode` | `cluster.go` | Task 8: approved activation after drain, preserving metadata membership | Undo drain eligibility; needed to recover a valid management workflow. |
 | `Cluster.ExcludeNode` | `cluster.go` | Task 8: proven drain, stop-receipt gates, native removal and retained self-fencing | Remove a proven drained member without bypassing quorum. |

@@ -51,7 +51,17 @@ module membership_safety_test {
   }
   run nativeExactIdentityCannotAliasTest = and {
     not(M::safeChange(native, AddLearner, { ...incoming, replica: first.replica }, native.voters, true)),
-    not(M::safeChange(native, AddLearner, { ...incoming, node: first.node }, native.voters, true)),
+    not(M::safeChange(native, AddLearner, { ...third, member: 4 }, native.voters, true)),
+  }
+  run nativeReadmissionAllowsDistinctMemberOnSameHostTest = {
+    val meta = seed.extensions.consensus.get("_meta")
+    val successor: ReplicaKey = { ...incoming, group: "_meta", node: "n3" }
+    val prior: ReplicaKey = { ...third, group: "_meta" }
+    val rebound = seed.system.setBy("n3", host => { ...host, durable: { ...host.durable,
+      pin: Some({ cluster: "c1", node: "n3", member: 4 }),
+      replicaEvidence: host.durable.replicaEvidence.put(successor, ValidStore({ snapshot: 0, commit: 0, tail: 0, appliedHint: 0 })) } })
+    and { M::safeChange(meta, AddLearner, successor, meta.voters.exclude(Set(prior)), false),
+      not(M::liveIdentity(rebound, prior)), M::liveIdentity(rebound, successor) }
   }
   run nativeApprovedVoterProjectionRequiredTest = {
     val step = P::stepFor(DemoteVoter, third, native.voters, native.voters.exclude(Set(third)))

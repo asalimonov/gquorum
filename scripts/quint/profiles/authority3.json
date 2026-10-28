@@ -224,7 +224,8 @@
         "failedStepRetainsPlanAndReleasesOnlyItsScopeTest",
         "foundingRequiresExactVoterProofTest",
         "foundingConfigurationIsNotCompletionTest",
-        "foundingCannotResetExistingConsensusTest"
+        "foundingCannotResetExistingConsensusTest",
+        "nativeReadmissionAllowsDistinctMemberOnSameHostTest"
       ]
     }
   ]

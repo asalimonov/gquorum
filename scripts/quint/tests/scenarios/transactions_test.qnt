@@ -35,7 +35,9 @@ module transactions_test {
     deliver(msg)
   }
   action beginMutation(key: RequestKey, request: ApiRequest): bool = invoke(key.caller.node, request)
-    .then(deliverApi(key)).then(handle(key.caller.node)).then(prepareMutation(key))
+    .then(deliverApi(key)).then(handle(key.caller.node))
+    .then(match request { | Mutate(m) => match m.edit { | ReadmitNode(r) => observeMutationHealth(key, r.name)
+      | _ => { world' = world } } | _ => { world' = world } }).then(prepareMutation(key))
     .then(submitMutation(key)).then(deliverProposal(key))
   action receiveMutationAck(key: RequestKey): bool = deliverMutationAck(key).then(handle(key.caller.node))
 

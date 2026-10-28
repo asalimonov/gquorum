@@ -1,4 +1,6 @@
 module controls {
+  import readmission as Readmit from "./readmission"
+  import cleanup as Cleanup from "./cleanup"
   import completion as Completion from "./completion"
   import admission as Admission from "./admission"
   import types.* from "../types"
@@ -8,7 +10,7 @@ module controls {
   import authority as A from "./authority"
 
   pure def leaderOnly(command: ControlCommand): bool = match command {
-    | BeginBlock(_) => true | IssueEffect(_) => true | IssueCleanupStop(_) => true | _ => false
+    | BeginBlock(_) => true | IssueEffect(_) => true | IssueCleanupStop(_) => true | IssueRetirement(_) => true | BeginReadmission(_) => true | _ => false
   }
 
   pure def manualGrant(meta: MetadataState, target: ReplicaKey, request: RequestKey, revision: int): Grant = {
@@ -64,11 +66,15 @@ module controls {
   }
 
   pure def errors(meta: MetadataState, command: ControlCommand): Set[Refusal] = match command {
+    | BeginReadmission(b) => Readmit::beginErrors(meta, b.admission, b.predecessor)
+    | RecordReadmission(b) => Readmit::recordErrors(meta, b.admission, b.receipts)
     | AdmissionControl(command) => Admission::errors(meta, command)
     | SessionControl(command) => Sessions::errors(meta, command)
     | BeginBlock(b) => if (not(meta.operations.keys().contains(b.operation)) or not(meta.groups.keys().contains(b.group))) Set(NotFound)
         else if (meta.groups.get(b.group).owner != Some(b.operation)) Set(Unauthorized)
         else if (meta.operations.get(b.operation).blocks.get(b.group).phase != OpPending) Set(Conflict) else Set()
+    | IssueRetirement(r) => if (Cleanup::mayIssue(meta, r.identity, r.approved)) Set() else Set(Unauthorized)
+    | RecordCollection(r) => Cleanup::collectionErrors(meta, r)
     | IssueCleanupStop(a) => if (G::canIssueCleanupStop(meta, a)) Set() else Set(Unauthorized)
     | IssueEffect(a) => if (G::canIssueStep(meta, a)) Set() else Set(Unauthorized)
     | IssueTransfer(t) => {
@@ -104,11 +110,15 @@ module controls {
 
   pure def apply(meta: MetadataState, command: ControlCommand, revision: int): MetadataState =
     G::settleRevocations(match command {
+      | BeginReadmission(b) => Readmit::begin(meta, b.admission, b.predecessor, revision)
+      | RecordReadmission(b) => Readmit::record(meta, b.receipts)
       | AdmissionControl(command) => Admission::apply(meta, command)
       | SessionControl(command) => Sessions::apply(meta, command)
       | BeginBlock(b) => { ...meta, operations: meta.operations.setBy(b.operation, op => { ...op,
           blocks: op.blocks.setBy(b.group, block => { ...block, phase: OpRunning }) }) }
       | IssueEffect(a) => G::issueStep(meta, a, revision)
+      | IssueRetirement(r) => Cleanup::issue(meta, r.identity, r.approved, revision)
+      | RecordCollection(r) => Cleanup::recordCollection(meta, r)
       | IssueCleanupStop(a) => G::issueCleanupStop(meta, a, revision)
       | IssueTransfer(t) => beginManual(meta, t.target, t.request, revision)
       | RecordEffect(r) => G::recordReceipt(meta, r)

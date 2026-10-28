@@ -1,4 +1,5 @@
 module completion {
+  import readmission_base as Readmit from "./readmission_base"
   import types.* from "../types"
   import basicSpells.* from "../vendor/spells/basicSpells"
   import topology as T from "../topology/topology"
@@ -103,10 +104,12 @@ module completion {
     val retained = meta.history.values().filter(d => d.version == 1 or meta.firstAttempts.keys().contains(d.version))
       .map(d => d.groups.values().map(g => g.replicas.map(r => r.key)).flatten()).flatten()
       .filter(r => r.group != "_meta" and r.node == key.node and r.member == key.member)
-    // Replacing a meta member additionally needs the readmission batch (Task 10).
-    not(meta.target.groups.get("_meta").replicas.exists(r => r.key.node == key.node)) and
+    val successors = meta.target.groups.get("_meta").replicas.filter(r => r.key.node == key.node)
+    if (successors.size() > 0) successors.forall(r => r.key.member > key.member and
+      Readmit::consumed(meta, { node: key.node, predecessor: key.member, successor: r.key.member })) else
       loads.forall(g => not(namesNode(meta.groups.get(g).proven, key.node)) and not(namesNode(targetGroup(meta, g), key.node))) and
       retained.forall(r => meta.effectReceipts.exists(receipt => receipt.target == Some(r) and
-        match receipt.effect { | Some(e) => Set(StopReplica, RetireReplica, DeleteGroupState).contains(e.kind) | None => false }))
+        match receipt.effect { | Some(e) => Set(StopReplica, RetireReplica, DeleteGroupState).contains(e.kind)
+          | None => match receipt.admission { | Some(a) => Readmit::consumed(meta, a) | None => false } }))
   }
 }

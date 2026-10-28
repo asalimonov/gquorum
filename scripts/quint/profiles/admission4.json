@@ -142,13 +142,25 @@
         "capacitySharesWorldTest",
         "nativeLivenessWaitKeepsScopedOwnerTest",
         "returnedReceiptSurvivesPostChangeQuorumLossTest",
-        "preparedRestartBeforeReadyExposesBindingBlockTest"
+        "preparedRestartBeforeReadyExposesBindingBlockTest",
+        "manualReadmissionKeepsPredecessorUntilHandoverTest",
+        "readmissionNeedsEveryFloorBeforeJoiningTest",
+        "readmissionPartialBatchCannotSettleDebtTest",
+        "readmissionLocalCompletionPrecedesMetadataAcceptanceTest",
+        "readmissionCompleteBatchRetainsAllFormerOwnersTest",
+        "readmissionSharesWorldTest",
+        "readmissionRejectsIncompleteOfferAndForeignPinTest",
+        "readmissionPartialBatchBlocksMetadataPreparationTest",
+        "readmissionOriginProofCannotBePrunedTest"
       ],
       "exclude": [
         "removedMemberStaysFencedAfterRestartTest",
         "drainedMetadataMemberCanActivateTest",
         "drainEvacuatesTwoLoadsBeforeExclusionTest",
-        "failedFreshFactoryResumesExactPreparationTest"
+        "failedFreshFactoryResumesExactPreparationTest",
+        "readmissionConvergesTwoLoadsAndFreshSessionTest",
+        "deletedGroupReadmissionSettlesDebtAndCollectsViaSuccessorTest",
+        "fencedReturningHostMustObtainNewApprovalTest"
       ]
     },
     {
@@ -272,7 +284,8 @@
         "failedStepRetainsPlanAndReleasesOnlyItsScopeTest",
         "foundingRequiresExactVoterProofTest",
         "foundingConfigurationIsNotCompletionTest",
-        "foundingCannotResetExistingConsensusTest"
+        "foundingCannotResetExistingConsensusTest",
+        "nativeReadmissionAllowsDistinctMemberOnSameHostTest"
       ]
     },
     {
@@ -314,6 +327,30 @@
         "failedFreshFactoryResumesExactPreparationTest"
       ],
       "mode": "repl"
+    },
+    {
+      "file": "instances/admission4.qnt",
+      "main": "admission4",
+      "mode": "repl",
+      "expected": [
+        "readmissionConvergesTwoLoadsAndFreshSessionTest"
+      ]
+    },
+    {
+      "file": "instances/admission4.qnt",
+      "main": "admission4",
+      "mode": "repl",
+      "expected": [
+        "deletedGroupReadmissionSettlesDebtAndCollectsViaSuccessorTest"
+      ]
+    },
+    {
+      "file": "instances/admission4.qnt",
+      "main": "admission4",
+      "mode": "repl",
+      "expected": [
+        "fencedReturningHostMustObtainNewApprovalTest"
+      ]
     }
   ],
   "node_heap_mb": 16384

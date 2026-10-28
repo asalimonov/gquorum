@@ -101,6 +101,7 @@ module coreChecks {
   import membership_safety_test.nativeLeaderMustTransferTest from "../tests/unit/membership_safety_test"
   import membership_safety_test.nativeFinalVoterCannotLeaveTest from "../tests/unit/membership_safety_test"
   import membership_safety_test.nativeRemovalNeedsLivePostQuorumTest from "../tests/unit/membership_safety_test"
+  import membership_safety_test.nativeReadmissionAllowsDistinctMemberOnSameHostTest from "../tests/unit/membership_safety_test"
   import membership_safety_test.nativeExactIdentityCannotAliasTest from "../tests/unit/membership_safety_test"
   import membership_safety_test.nativeApprovedVoterProjectionRequiredTest from "../tests/unit/membership_safety_test"
   import membership_safety_test.nativeDemotionPreservesLearnerIdentityTest from "../tests/unit/membership_safety_test"

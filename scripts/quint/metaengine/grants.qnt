@@ -1,4 +1,5 @@
 module grants {
+  import readmission_base as Readmit from "./readmission_base"
   import completion as Completion from "./completion"
   import admission as Admission from "./admission"
   import types.* from "../types"
@@ -117,7 +118,7 @@ module grants {
           stopped: if (debt.stopped == None and matchesAction(receipt, debt.stopAction)) Some(receipt) else debt.stopped,
           retired: if (debt.retired == None and matchesAction(receipt, debt.retireAction)) Some(receipt) else debt.retired })
       | None => retained }
-    { ...meta, effectReceipts: meta.effectReceipts.union(Set(receipt)), cleanup: debts }
+    Readmit::settle({ ...meta, effectReceipts: meta.effectReceipts.union(Set(receipt)), cleanup: debts })
   }
 
   // Consumption of a transfer command is not completion of the transfer or
@@ -142,6 +143,11 @@ module grants {
   }
 
   pure def resourceSettled(meta: MetadataState, grant: Grant, resource: ResourceKey): bool =
+    (match resource { | GroupResource(group) => group != "_meta" and meta.retiredGroupIds.contains(group) and
+        not(meta.target.groups.keys().contains(group)) and
+        meta.cleanup.values().filter(d => d.identity.group == group).forall(d => d.stopped != None) and grant.targets.forall(key =>
+          meta.cleanup.keys().contains(key) and meta.cleanup.get(key).stopped != None)
+      | _ => false }) or
     (not(transferIntent(grant)) and resourceConsumed(meta, grant, resource)) or
       meta.fenceEvidence.exists(f => f.resource == resource and f.grant.group == grant.key.group and
         f.grant.revision > grant.key.revision)
@@ -201,7 +207,8 @@ module grants {
       | Fence => grant.effect == None and grant.admission == None and grant.planStep == None and grant.request == None
       | Readmission => grant.effect == None and grant.planStep == None and grant.request == None and
           match grant.admission { | Some(a) => a.predecessor > 0 and a.successor > a.predecessor and
-            grant.resources.forall(r => r == HostResource({ group: grant.key.group, node: a.node }))
+            grant.resources.forall(r => r == HostResource({ group: grant.key.group, node: a.node })) and
+            grant.targets.forall(t => t.node == a.node and t.member == a.predecessor)
             | None => false }
       | _ => grant.admission == None and match grant.effect {
           | None => false

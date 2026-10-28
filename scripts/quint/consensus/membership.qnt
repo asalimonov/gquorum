@@ -115,8 +115,11 @@ module membership {
   pure def safeChange(c: ConsensusState, kind: ActionKind, target: ReplicaKey,
                       live: Set[ReplicaKey], caughtUp: bool): bool = {
     val after = postVoters(c, kind, target)
+    // Native Raft membership uses numeric IDs, not unique host names. During
+    // metadata readmission the fenced predecessor and successor may coexist in
+    // ConfState; liveIdentity still accepts only the host's exact current pin.
     val knownIdentity = c.voters.union(c.learners).forall(r =>
-      (r.replica != target.replica and r.node != target.node) or r == target)
+      r.replica != target.replica or r == target)
     if (not(nativeKind(kind)) or target.replica <= 0 or not(knownIdentity)) false
     else if (nativeSatisfied(c, kind, target)) true
     else if (kind == AddLearner) not(c.voters.contains(target))

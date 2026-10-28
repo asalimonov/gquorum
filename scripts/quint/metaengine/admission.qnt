@@ -1,4 +1,5 @@
 module admission {
+  import readmission_base as Readmit from "./readmission_base"
   import types.* from "../types"
   import basicSpells.* from "../vendor/spells/basicSpells"
 
@@ -41,7 +42,8 @@ module admission {
         } else if (b.previous != None) Set(Conflict) else Set()
       }
     | ReadyAdmission(a) => if (not(current(meta, a)) or not(meta.admissions.keys().contains(a.owner.node))) Set(Unauthorized)
-        else if (not(same(meta.admissions.get(a.owner.node), a))) Set(IdentityMismatch) else Set()
+        else if (not(same(meta.admissions.get(a.owner.node), a))) Set(IdentityMismatch)
+        else if (not(Readmit::ready(meta, a))) Set(Unavailable) else Set()
   }
 
   pure def apply(meta: MetadataState, command: AdmissionCommand): MetadataState = match command {
@@ -68,7 +70,7 @@ module admission {
       | ReplicaTarget(replica) => if (replica.group != "_meta") loadHostAllowed(meta, replica)
           else if (not(meta.admissions.keys().contains(replica.node))) false else {
             val a = meta.admissions.get(replica.node)
-            a.replica == replica and a.operation == approved.operation and current(meta, a)
+            a.replica == replica and a.operation == approved.operation and current(meta, a) and Readmit::ready(meta, a)
           }
       | _ => false
     }

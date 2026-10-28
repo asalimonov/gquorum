@@ -1,4 +1,5 @@
 module metaservice_admission_steps {
+  import readmission_base as Readmit from "../metaengine/readmission_base"
   import types.* from "../types"
   import world_types.* from "../runtime/world"
   import basicSpells.* from "../vendor/spells/basicSpells"
@@ -46,7 +47,9 @@ module metaservice_admission_steps {
         if (j.owner != msg.source or not(local.target.nodes.keys().contains(j.owner.node)) or
             not(local.groups.keys().contains("_meta"))) None
         else if ((j.member == 0 and local.target.nodes.get(j.owner.node).state != Active) or
-          (j.member != 0 and j.member != local.target.nodes.get(j.owner.node).member)) None
+          (j.member != 0 and j.member != local.target.nodes.get(j.owner.node).member and
+            j.member != Readmit::previousMember(local, j.owner.node, local.target.nodes.get(j.owner.node).member)) or
+          (j.member == 0 and Readmit::previousMember(local, j.owner.node, local.target.nodes.get(j.owner.node).member) > 0)) None
         else match local.groups.get("_meta").owner {
           | None => None
           | Some(operation) => {
@@ -71,7 +74,8 @@ module metaservice_admission_steps {
           val local = w.extensions.metaLog.get(w.system.get(msg.destination).volatile.appliedMetaIndex)
           if (not(local.admissions.keys().contains(j.owner.node))) false else {
             val a = local.admissions.get(j.owner.node)
-            a.owner == j.owner and j.owner == msg.source and A::current(local, a)
+            a.owner == j.owner and j.owner == msg.source and A::current(local, a) and
+              (j.member == 0 or j.member == a.replica.member)
           }
         }
       | _ => false

@@ -1,4 +1,5 @@
 module properties {
+  import cleanup_properties as CleanupChecks from "./cleanup_properties"
   import managed_removal_steps as Removal from "../managed/removal_steps"
   import admission as Admission from "../metaengine/admission"
   import types.* from "../types"
@@ -70,7 +71,7 @@ module properties {
   pure def metadataWellFormed(w: World): bool = {
     val m = w.extensions.metadata
     and {
-      E::physicalEvidenceValid(w), deletionDebtComplete(w), Removal::removalSafety(w), Sessions::metadataSafety(m), Admission::metadataSafety(m),
+      E::physicalEvidenceValid(w), deletionDebtComplete(w), CleanupChecks::safety(w), Removal::removalSafety(w), Sessions::metadataSafety(m), Admission::metadataSafety(m),
       w.system.values().forall(n => n.volatile.owners.values().forall(owner => Life::ownerSafety(owner))),
       m.grants.values().forall(grant => G::wellFormed(grant)),
       m.authorityFloors.keys().forall(r => m.grants.keys().contains(m.authorityFloors.get(r)) and
