@@ -11,9 +11,9 @@
 **Full brainstorm log:** [discussion](../brainstorms/20261027-quint-cluster-management.md)
 **Execution progress:** `docs/progress/20261027-quint-cluster-management.md`
 **Library scenario findings:** `docs/reports/20261027-quint-cluster-management.md`
-**Status:** Tasks 1–7 completed; next is Task 8. Seven completed tasks and eleven remaining tasks; eighteen total. Pause after the Task 7 commit as requested by the user. Validation and implementation details are in the execution log.
+**Status:** Tasks 1–8 completed; next is Task 9. The resumed goal remains active. QCM-001 is a retained model reproduction with Go regression pending; validation and limitations are in the execution log.
 
-Module organization was refactored separately on 2026-10-28; see the [refactoring plan](20261028-quint-module-refactoring.md). Pending file paths below are relative to `scripts/quint/` unless stated otherwise. Completed task records retain their original paths as history. The protocol pause remains in force.
+Module organization was refactored separately on 2026-10-28; see the [refactoring plan](20261028-quint-module-refactoring.md). Pending file paths below are relative to `scripts/quint/` unless stated otherwise. Completed task records retain their original paths as history. The prior protocol pause ended when the goal was resumed.
 
 ## Revised objective and execution contract
 
@@ -204,16 +204,16 @@ Per the user’s reporting instruction, failures in implemented library scenario
 **Files:** `consensus/`, `topology/`, `metaengine/authority.qnt`, `metaservice/handlers.qnt`, relevant subsystem steps, `cluster.qnt`, `tests/` (updated); admission4 and scale5 instances/profiles (new).
 **References:** target §§5.3/5.5/8.2/11; §14 membershipChange.
 
-- [ ] Implement guarded propose/commit/transfer with learner-first admission, catch-up, promotion, leader transfer before removal/demotion, last-voter and live post-change quorum checks. Keep precheck/proposal/commit/observation distinct.
-- [ ] Wire node add/drain/activate/exclude/force-retire and replica role changes through approved plans; every admitted node retains `_meta`. Distinguish explicit hosting from fixed voter targets and total host capacity.
-- [ ] Allocate fresh monotonic identities and exact predecessor captures. Retain intrinsic/role-derived learner pins without standalone pin API or label-based eligibility.
-- [ ] Add four-node learner/replacement and five-node scaling cases. Configure capacity five; use no AZ/label/type-placement scenarios. Initial metadata-only scale witness is extended to two loads in Task 12.
+- [x] Implement guarded propose/commit/transfer with learner-first admission, catch-up, promotion, leader transfer before removal/demotion, last-voter and live post-change quorum checks. Keep precheck/proposal/commit/observation distinct.
+- [x] Wire node add/drain/activate/exclude/force-retire and replica role changes through approved plans; every admitted node retains `_meta`. Distinguish explicit hosting from fixed voter targets and total host capacity.
+- [x] Allocate fresh monotonic identities and exact predecessor captures. Retain intrinsic/role-derived learner pins without standalone pin API or label-based eligibility.
+- [x] Add four-node learner/replacement and five-node scaling cases. Configure capacity five; use no AZ/label/type-placement scenarios. Initial metadata-only scale witness is extended to two loads in Task 12.
 
 #### Verification
 
-- [ ] Common checks and named 3→4→5→4→3 cases pass; premature promotion, unsupported joint changes and unsafe leader removal refuse.
-- [ ] Quorum loss after precheck cannot fabricate commitment, and existing/role-derived pinned learners remain protected.
-- [ ] Manual transfer uses the shared mechanism with its proper authorization purpose.
+- [x] Common checks and named 3→4→5→4→3 cases pass; premature promotion, unsupported joint changes and unsafe leader removal refuse.
+- [x] Quorum loss after precheck cannot fabricate commitment, and existing/role-derived pinned learners remain protected.
+- [x] Manual transfer uses the shared mechanism with its proper authorization purpose.
 
 ### Task 9: Wire healthy/degraded creation and detached deletion
 
@@ -436,11 +436,13 @@ Deferred cases need scope comments/documentation, not new production NotImplemen
 
 Task 1 used `kind` because Quint reserves `action` and used Choreo pure helpers over one application-owned world. Tasks 3–4 refined source-grounded state/placement/plan schemas; see the execution log and target history. This scope revision is explicitly user-approved, not an unplanned implementation change. No executable model or production files changed in the scope-review step. Task 5 subsequently added pure sequencing/repair helpers and the read/proposal correlation fields required by the source. It also corrected reseat validation of independent staged allocation floors and kept hosted-node normalization in core tests using a fixed policy fixture. Production Go remains unchanged.
 
+Task 8 brought forward the minimal granted load-stop/debt path needed by metadata evacuation barriers; retirement, collection and full readmission remain Tasks 9–10. It also added explicit long-witness REPL routing and frontend heap settings after reproducing Quint trace-export limits; root Make integration remains Task 15. QCM-001 is an explicitly retained source-grounded progress finding, not an omitted model mechanism or a passing recovery claim.
+
 ## NOT IMPLEMENTED GAPS
 
 - [x] Scope normalization completed in Task 5: executable feature guards/safety assumptions, explicit retained-core test imports, and separate extension-only tests. Later task machinery must retain these assumptions.
 
-Implementation remains incomplete; Tasks 6–18 remain. Task 5 completion does not imply native effect, lifecycle, scheduler or progress-verification completion. Deferred/Omit features are not hidden unfinished tasks.
+Implementation remains incomplete. Tasks 9–18 retain group workflows, retirement/collection/readmission, scheduling, coverage and progress/backend qualification. Task 8 checks and its explicit known-finding record are complete. QCM-001 remains a reported model reproduction with Go regression pending. Deferred/Omit features are not hidden unfinished tasks.
 
 ## Scope-review validation
 

@@ -119,6 +119,8 @@ def validate_profile(profile, root):
         raise ProfileError("invalid Apalache version")
     if p.get("temporal") and p["verification_backend"] != "tlc":
         raise ProfileError("temporal properties require a qualified TLC profile")
+    if "node_heap_mb" in p and (type(p["node_heap_mb"]) is not int or not 256 <= p["node_heap_mb"] <= 65536):
+        raise ProfileError("node_heap_mb must be an integer between 256 and 65536")
     tests = p.get("tests")
     if not isinstance(tests, list) or not tests:
         raise ProfileError("tests must have explicit nonempty entry points")
@@ -128,6 +130,19 @@ def validate_profile(profile, root):
         profile.path(entry.get("file", ""))
         _names([entry.get("main")], "test main")
         _names(entry.get("expected"), "expected tests")
+        if entry.get("mode", "test") not in ("test", "repl"):
+            raise ProfileError("unsupported test entry mode")
+        _names(entry.get("exclude", []), "excluded tests", False)
+        if entry.get("mode") == "repl" and (p["backend"] != "rust" or entry.get("exclude") or
+                                              any(not name.endswith("Test") for name in entry["expected"])):
+            raise ProfileError("REPL witnesses require named Test definitions, Rust, and no exclusions")
+    for entry in tests:
+        excluded = set(entry.get("exclude", []))
+        rerouted = {name for other in tests if other.get("mode") == "repl" and
+                    other["file"] == entry["file"] and other["main"] == entry["main"]
+                    for name in other["expected"]}
+        if not excluded <= rerouted or excluded.intersection(entry["expected"]):
+            raise ProfileError("excluded tests must be selected as REPL witnesses of the same instance")
     if p.get("tlc_config"):
         config = _read_json(profile.path(p["tlc_config"]))
         if not isinstance(config, dict) or set(config) - {"maxHeap", "stackSize", "workers"}:
@@ -147,9 +162,18 @@ def build_commands(profile, mode, seed):
     commands = [["quint", "typecheck", str(profile.path(p["instance"]))]]
     if mode == "test":
         for entry in p["tests"]:
-            commands.append(["quint", "test", str(profile.path(entry["file"])), "--main", entry["main"],
-                             "--backend", p["backend"], "--seed", str(seed),
-                             "--max-samples", str(p["test_samples"])])
+            if entry.get("mode") == "repl":
+                # One named deterministic witness per expression; no trace export.
+                commands.append(["quint", "repl", "--backend", "rust", "--seed", str(seed), "--quiet",
+                                 "--require", profile.path(entry["file"]).name + "::" + entry["main"]] + entry["expected"])
+            else:
+                command = ["quint", "test", str(profile.path(entry["file"])), "--main", entry["main"],
+                           "--backend", p["backend"], "--seed", str(seed),
+                           "--max-samples", str(p["test_samples"])]
+                if entry.get("exclude"):
+                    names = "|".join(re.escape(name) for name in entry["exclude"])
+                    command += ["--match", r"^(?!.*(?:^|::)(?:" + names + r")$).*Test$"]
+                commands.append(command)
     elif mode == "simulate":
         args = ["quint", "run"] + common + ["--init", p["init"], "--step", p["step"],
                 "--backend", p["backend"], "--seed", str(seed), "--max-samples", str(p["max_samples"]),
@@ -174,7 +198,7 @@ def build_commands(profile, mode, seed):
     return commands
 
 
-def run_command(argv, timeout, artifacts):
+def run_command(argv, timeout, artifacts, cwd=None, env=None):
     prefix = Path(artifacts)
     out, err = prefix.with_suffix(".stdout.log"), prefix.with_suffix(".stderr.log")
     start = time.monotonic()
@@ -182,7 +206,7 @@ def run_command(argv, timeout, artifacts):
     proc = None
     try:
         with out.open("wb") as stdout, err.open("wb") as stderr:
-            proc = subprocess.Popen(argv, cwd=REPO_ROOT, stdin=subprocess.DEVNULL,
+            proc = subprocess.Popen(argv, cwd=cwd or REPO_ROOT, env=env, stdin=subprocess.DEVNULL,
                                     stdout=stdout, stderr=stderr, start_new_session=True)
             try:
                 proc.wait(timeout=timeout)
@@ -210,6 +234,24 @@ def run_command(argv, timeout, artifacts):
     finally:
         result.elapsed_seconds = round(time.monotonic() - start, 6)
     return result
+
+
+def classify_repl(result, expected):
+    """REPL may exit zero after a parse/evaluation error: require exact Boolean results."""
+    if result.timed_out or result.interrupted or (result.returncode is not None and result.returncode < 0):
+        return "incomplete"
+    if result.error or result.returncode != 0:
+        return "infrastructure-error"
+    try:
+        lines = [line.strip() for line in Path(result.stdout).read_text().splitlines() if line.strip()]
+        errors = Path(result.stderr).read_text().strip()
+    except OSError:
+        return "infrastructure-error"
+    if any("runtime error:" in line for line in lines) and any(re.search(r"QNT5[0-9][0-9]", line) for line in lines):
+        return "test-failure"
+    if not expected or errors or len(lines) != len(expected) or any(line not in ("true", "false") for line in lines):
+        return "infrastructure-error"
+    return "tests-pass" if all(line == "true" for line in lines) else "test-failure"
 
 
 def classify(result, json_path, kind, backend, expected=()):
@@ -323,6 +365,12 @@ def main(argv=None):
         validate_profile(profile, MODEL_ROOT)
         manifest["configuration"] = profile.data
         commands = build_commands(profile, args.mode, args.seed)
+        child_env = None
+        if profile.data.get("node_heap_mb"):
+            child_env = dict(os.environ)
+            child_env["NODE_OPTIONS"] = (child_env.get("NODE_OPTIONS", "") +
+                " --max-old-space-size=" + str(profile.data["node_heap_mb"])).strip()
+            manifest["frontend_heap_mb"] = profile.data["node_heap_mb"]
         manifest["model_hashes"] = {str(p.relative_to(MODEL_ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
                                     for p in sorted(MODEL_ROOT.rglob("*"))
                                     if p.is_file() and p.suffix in (".qnt", ".py", ".json")}
@@ -350,16 +398,26 @@ def main(argv=None):
         for index, command in enumerate(commands):
             prefix = directory / ("command-" + str(index))
             output = prefix.with_suffix(".json")
-            command += ["--out", str(output)]
             kind = command[1]
+            if kind != "repl":
+                command += ["--out", str(output)]
             if kind in ("test", "run"):
                 command += ["--out-itf", str(directory / ("trace-" + str(index) + "-{test}-{seq}.itf.json")
                                           if kind == "test" else directory / ("trace-" + str(index) + "-{seq}.itf.json"))]
             expected = []
-            if kind == "test":
-                expected = profile.data["tests"][index - 2]["expected"]
-            result = run_command(command, profile.data["timeout_seconds"], prefix)
-            outcome = classify(result, output, kind, profile.data["verification_backend"], expected)
+            if kind in ("test", "repl"):
+                entry = profile.data["tests"][index - 2]
+                expected = entry["expected"]
+            if kind == "repl":
+                cwd = profile.path(entry["file"]).parent
+                result = run_command(command, profile.data["timeout_seconds"], prefix, cwd=cwd, env=child_env)
+                outcome = classify_repl(result, expected)
+                output.write_text(json.dumps({"mode": "repl", "expected": expected, "outcome": outcome,
+                                              "seed": args.seed, "executions_per_test": 1,
+                                              "cwd": str(cwd), "trace_export": False}, indent=2) + "\n")
+            else:
+                result = run_command(command, profile.data["timeout_seconds"], prefix, env=child_env)
+                outcome = classify(result, output, kind, profile.data["verification_backend"], expected)
             item = asdict(result)
             item.update(name=str(index) + ":" + kind, outcome=outcome, output=str(output))
             results.append(item)

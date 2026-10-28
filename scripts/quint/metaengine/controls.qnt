@@ -1,9 +1,15 @@
 module controls {
+  import completion as Completion from "./completion"
+  import admission as Admission from "./admission"
   import types.* from "../types"
   import basicSpells.* from "../vendor/spells/basicSpells"
   import sessions as Sessions from "./sessions"
   import grants as G from "./grants"
   import authority as A from "./authority"
+
+  pure def leaderOnly(command: ControlCommand): bool = match command {
+    | BeginBlock(_) => true | IssueEffect(_) => true | IssueCleanupStop(_) => true | _ => false
+  }
 
   pure def manualGrant(meta: MetadataState, target: ReplicaKey, request: RequestKey, revision: int): Grant = {
     key: { cluster: target.cluster, group: target.group, revision: revision }, purpose: Transfer,
@@ -58,10 +64,12 @@ module controls {
   }
 
   pure def errors(meta: MetadataState, command: ControlCommand): Set[Refusal] = match command {
+    | AdmissionControl(command) => Admission::errors(meta, command)
     | SessionControl(command) => Sessions::errors(meta, command)
     | BeginBlock(b) => if (not(meta.operations.keys().contains(b.operation)) or not(meta.groups.keys().contains(b.group))) Set(NotFound)
         else if (meta.groups.get(b.group).owner != Some(b.operation)) Set(Unauthorized)
         else if (meta.operations.get(b.operation).blocks.get(b.group).phase != OpPending) Set(Conflict) else Set()
+    | IssueCleanupStop(a) => if (G::canIssueCleanupStop(meta, a)) Set() else Set(Unauthorized)
     | IssueEffect(a) => if (G::canIssueStep(meta, a)) Set() else Set(Unauthorized)
     | IssueTransfer(t) => {
         val replay = manualReplay(meta, t.request)
@@ -73,7 +81,11 @@ module controls {
       }
     | RecordEffect(r) => if (G::canRecordReceipt(meta, r)) Set() else Set(Unauthorized)
     | RecordFence(f) => if (G::canRecordFence(meta, f)) Set() else Set(Unauthorized)
-    | CompleteStep(c) => if (G::exactStep(meta, c.approved) and stepComplete(meta, c.approved, c.observedLeader)) Set()
+    | RecordStepStatus(s) => if (G::exactStep(meta, s.approved) and
+        Set(OpFailed, WaitingReplica, WaitingCatchUp, WaitingLeader).contains(s.phase) and
+        ((s.phase == OpFailed) iff (s.reason == None))) Set() else Set(Unauthorized)
+    | CompleteCatchUp(a) => if (a.step.kind == WaitCatchUp and G::exactStep(meta, a) and Admission::completionAllowed(meta, a)) Set() else Set(Unauthorized)
+    | CompleteStep(c) => if (G::exactStep(meta, c.approved) and Admission::completionAllowed(meta, c.approved) and stepComplete(meta, c.approved, c.observedLeader)) Set()
         else Set(Unauthorized)
   }
 
@@ -82,24 +94,33 @@ module controls {
     val op = meta.operations.get(approved.operation)
     val remaining = op.plan.blocks.get(group).select(s => s.seq > approved.step.seq)
     val finished = remaining.length() == 0
-    { ...meta, operations: meta.operations.setBy(approved.operation, old => { ...old,
+    Completion::advanceNodes({ ...meta, operations: meta.operations.setBy(approved.operation, old => { ...old,
       blocks: old.blocks.put(group, { phase: if (finished) OpSucceeded else OpRunning,
         step: if (finished) approved.step.seq else remaining.head().seq, reason: None }) }),
       groups: if (finished) meta.groups.setBy(group, row => { ...row, owner: None,
         sourceVersion: approved.operation.version,
-        proven: Some(meta.history.get(approved.operation.version).groups.get(group)) }) else meta.groups }
+        proven: Some(meta.history.get(approved.operation.version).groups.get(group)) }) else meta.groups })
   }
 
   pure def apply(meta: MetadataState, command: ControlCommand, revision: int): MetadataState =
     G::settleRevocations(match command {
+      | AdmissionControl(command) => Admission::apply(meta, command)
       | SessionControl(command) => Sessions::apply(meta, command)
       | BeginBlock(b) => { ...meta, operations: meta.operations.setBy(b.operation, op => { ...op,
           blocks: op.blocks.setBy(b.group, block => { ...block, phase: OpRunning }) }) }
       | IssueEffect(a) => G::issueStep(meta, a, revision)
+      | IssueCleanupStop(a) => G::issueCleanupStop(meta, a, revision)
       | IssueTransfer(t) => beginManual(meta, t.target, t.request, revision)
       | RecordEffect(r) => G::recordReceipt(meta, r)
       | RecordFence(f) => G::recordFence(meta, f)
       | CompleteStep(c) => complete(meta, c.approved)
+      | CompleteCatchUp(a) => complete(meta, a)
+      | RecordStepStatus(s) => {
+          val group = G::groupOf(s.approved.step.target)
+          { ...meta, operations: meta.operations.setBy(s.approved.operation, op => { ...op,
+            blocks: op.blocks.put(group, { phase: s.phase, step: s.approved.step.seq, reason: s.reason }) }),
+            groups: if (s.phase == OpFailed) meta.groups.setBy(group, row => { ...row, owner: None }) else meta.groups }
+        }
     })
 
   // A successor closes both superseded execution and exact conflicting resources;

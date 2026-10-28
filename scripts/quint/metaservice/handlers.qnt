@@ -47,7 +47,8 @@ module handlers {
       // The consensus primitive consumes probes separately from host handling.
       | ReadProbe(_) => false
       | MetaProposal(_) => false
-      | ExecuteGrant(_) => false
+      | ExecuteGrant(_) => false | EffectResult(_) => false
+      | JoinRequest(_) => false | JoinAccepted(_) => false | JoinPrepared(_) => false
       | SessionRenew(_) => false | SessionRenewed(_) => false | SessionProbe(_) => false | SessionProbed(_) => false
       | MetaAck(ack) => match ctx.state.volatile.revokeGate {
           | Some(gate) => gate.proposal != ack.key | None => true }

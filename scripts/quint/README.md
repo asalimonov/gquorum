@@ -6,7 +6,7 @@ This is the executable specification being built from the [target design](../../
 
 The user approved a lean first version after Task 4. The [coverage ledger](coverage.md), target and plan now defer labels/selectors/domain placement, live policy tuning, EnsureGroup/RollbackTo, application locks/manual session workflows, serving override, storage-loss/memory-store suites and offline Recovery. Public metrics/getter/watch/history plumbing is omitted; derived operator visibility and minimum internal session/availability safety remain. The user further fixed performance/stability/metric-freshness evidence to favorable values: no lag/backlog, no-progress, stale-metric or stability/cooldown scenarios in the initial iteration. Quorum/crash/partition behavior and the successful join catch-up milestone remain.
 
-Protocol implementation completed Tasks 1–7 and is paused before Task 8. The separate module refactoring is complete. Executable scope checks constrain invocation and every safety check; `coreChecks` selects retained tests explicitly. Broader Task 4 helpers/tests remain separate historical work. Metrics are fixed favorable; availability, quorum, exact identity, captured topology and local apply still matter.
+Protocol implementation has completed Tasks 1–8; group creation/deletion is next in Task 9. The separate module refactoring is complete. Executable scope checks constrain invocation and every safety check; `coreChecks` selects retained tests explicitly. Broader Task 4 helpers/tests remain separate historical work. Metrics are fixed favorable; availability, quorum, exact identity, captured topology and local apply still matter.
 
 ## Run the current checkpoint
 
@@ -62,7 +62,7 @@ The target's record field `action` is spelled `kind` because Quint reserves `act
 
 ## Pending implementation
 
-Tasks 1–7 implement shared reads, staging/approval/retry/reseat, authority execution/fencing, local ownership/lifetime and minimum internal sessions. Tasks 8–11 remain paused: membership/scaling, complete group creation/deletion, cleanup and scheduler repair. Tasks 12–18 retain coverage/visibility, progress/verification, tooling, audit, review and documentation work. Refactoring does not complete those protocol tasks or introduce successful placeholders.
+Tasks 1–7 implement shared reads, staging/approval/retry/reseat, authority execution/fencing, local ownership/lifetime and minimum internal sessions. Task 8 adds membership/scaling. Tasks 9–11 retain complete group creation/deletion, retirement/collection/readmission and scheduler repair. Tasks 12–18 retain coverage/visibility, progress/verification, tooling, audit, review and documentation work. Refactoring does not complete those protocol tasks or introduce successful placeholders.
 
 Do not infer completed coverage from the presence of a record or enum. Add each transition with an executable witness and invariants, retain counterexamples, and update the coverage matrix before extending claims.
 
@@ -149,3 +149,24 @@ python3 scripts/quint/run.py --profile lifetime3 --mode simulate --seed 1
 The [execution log](../../docs/progress/20261028-quint-module-refactoring.md) records commits, source-hashed reports and peer review. All original actions and tests remain; current inventories are foundation 10, smoke3 50 + core 94, authority3 65 + core 94, and lifetime3 85 + core 94. These are overlapping suites. New checks validate composition/framing, not additional public API coverage.
 
 `python3 scripts/quint/refactor_audit.py` defaults to the historical mechanical extraction commit `c5ece71`. It checks 95 action mappings against the organization checkpoint; it does not compare current helpers or prove semantic equivalence. Later helper evidence consists of frame tests, preserved scenarios, sampled simulations and source review. Temporary differential artifacts are local-only under gitignored test-reports. See the [delta audit](../../docs/progress/20261028-quint-refactoring-audit.md) for limits. No faster exploration or exhaustive equivalence is claimed.
+
+## Membership, admission and scaling (Task 8)
+
+Native changes use separate authority installation, precheck, revalidated proposal and current-quorum commit actions. Exact receipts precede metadata reporting/checkpointing. Learners cannot vote; promotion needs catch-up; removal/demotion preserve the last voter and require safe post-change membership. A failure after proposal can leave the resulting group unavailable without undoing its committed change. Returned receipts are process-bound cached evidence and can be reported after native quorum is lost; transfer completion still needs observed leadership.
+
+Fresh admission binds an approved member to a process, returns immutable proof, pins the identity and starts the metadata engine. Host preparation, learner addition, catch-up, promotion and internal session activation remain separate. Retained restart cannot reuse an old reply for a new process. Load preparation reuses reservation/factory/replay/publication phases, including retry after a failed factory. No missing established identity is silently refounded.
+
+Node progress waits for relevant load dependencies. `_meta` removal also waits for exact load-stop receipts; native eviction alone is insufficient. Stop authorization, callback/engine joins, application release, durable receipt and metadata reporting remain separate. Native removal creates cleanup debt when its receipt reaches metadata; whole-group deletion retains debt at approval. Applied approved self-removal persists a fence across restart. Retirement, physical collection and complete returning-owner readmission remain Task 10 work.
+
+```sh
+python3 scripts/quint/run.py --profile admission4 --mode test --seed 1
+python3 scripts/quint/run.py --profile scale5 --mode test --seed 1
+```
+
+`admission4` uses four potential nodes, three established founders and two loads, with request/position/incarnation/delivery bounds 3/128/2/512. `scale5` uses five potential nodes with bounds 8/256/2/1024. Its 3→4→5→4→3 witness preserves the original two load groups; the four-node evacuation witness also moves both loads before exclusion. A separate `admission4Meta` case isolates metadata-only host replacement. Provisioning is external: the potential node pool stays fixed while admitted membership changes.
+
+Large profiles declare a 16 GiB Node frontend heap limit; it is a tooling resource setting, not model state. Quint 0.33.0 exports huge full traces for long `quint test` cases, exceeding its Node wrapper's string/heap limits. The profile runner routes explicitly named long witnesses through the same pinned Rust evaluator's REPL. Every listed expression must return exactly `true`; a zero process exit by itself is insufficient. These witnesses execute once at the recorded seed, without full trace export. Ordinary suites retain their configured sample counts, exact test inventories and ITF artifacts; exclusions require matching REPL entries. See the [tooling report](../../docs/reports/20261028-quint-task8-tooling.md).
+
+Rules live in `consensus/membership.qnt`, `metaengine/admission.qnt` and `metaengine/completion.qnt`; `managed/{membership,prepare,stop,removal}_steps.qnt` and `metaservice/admission_steps.qnt` expose the asynchronous phases. `cluster.qnt` wires them into the shared step relation. This checkpoint is scenario/sampled evidence, not exhaustive verification or Go conformance.
+
+Task 8 also preserves live-admission courier identity before session activation and carries same-member admissions into superseding topology operations with their original provenance. `_meta` learner addition requires the admission's Prepared/Ready evidence. The separate desired-success check in `instances/admissionRestartExpected.qnt` intentionally fails for the crash-after-preparation/before-Ready case; [QCM-001](../../docs/reports/20261028-quint-admission-prepared-restart.md) records the source-grounded model reproduction and pending Go regression. Positive profiles include a refusal-state witness and do not claim that this automatic recovery succeeded.

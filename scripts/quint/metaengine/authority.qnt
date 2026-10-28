@@ -1,4 +1,6 @@
 module authority {
+  import admission as Admission from "./admission"
+  import completion as Completion from "./completion"
   import types.* from "../types"
   import basicSpells.* from "../vendor/spells/basicSpells"
   import topology as T from "../topology/topology"
@@ -154,6 +156,8 @@ module authority {
       if (not(captures)) Set(Conflict)
       else if (not(shape) or command.captured.rules != rules or retained != captured) Set(Unauthorized)
       else if (T::makePlan(command.captured, command.desired) != Planned(command.plan)) Set(Unauthorized)
+      else if (not(Admission::validSuccessor(meta, command.desired, command.plan,
+        { version: command.desired.version, attempt: 1 }))) Set(Unauthorized)
       else if (not(deletionObligationsCovered(meta, command))) Set(Unauthorized)
       else P::validateTransition(T::retainedIdentities({ latest: meta.latest, target: meta.target }),
         command.desired, meta.retiredGroupIds, rules)
@@ -165,12 +169,7 @@ module authority {
 
   pure def zeroStepProven(meta: MetadataState, command: ApprovalCommand, group: GroupId): bool =
     if (not(command.desired.groups.keys().contains(group))) true
-    // Issued effects need receipt-based proof (Task 6), not just declarations.
-    else if (meta.grants.keys().exists(k => k.group == group)) false
-    else if (not(meta.groups.keys().contains(group))) false else match meta.groups.get(group).proven {
-      | Some(prior) => prior.replicas == command.desired.groups.get(group).replicas
-      | None => false
-    }
+    else Completion::zeroStepMembership(meta, command.desired, group)
 
   pure def approvedBlocks(meta: MetadataState, command: ApprovalCommand): GroupId -> BlockProgress =
     command.plan.blocks.keys().mapBy(g => {
@@ -184,12 +183,12 @@ module authority {
   pure def deletionDebt(command: ApprovalCommand, key: ReplicaKey): CleanupDebt = {
     val operation = { version: command.desired.version, attempt: 1 }
     val cleanup = command.plan.cleanup.get(key.group)
-    val stops = cleanup.select(s => s.kind == StopReplica and s.target == ReplicaTarget(key))
-    val retirements = cleanup.select(s => s.kind == DeleteGroupState and s.targets.contains(key))
+    val stops = cleanup.concat(command.plan.blocks.getOrElse(key.group, List())).select(s => s.kind == StopReplica and s.target == ReplicaTarget(key))
+    val retirements = cleanup.select(s => Set(DeleteGroupState, RetireReplica).contains(s.kind) and s.targets.contains(key))
     { identity: key, sourceOperation: operation, storage: StorageDefault,
       stopAction: if (stops.length() == 1) Some({ operation: operation, step: stops.head() }) else None,
       retireAction: if (retirements.length() == 1) Some({ operation: operation, step: retirements.head() }) else None,
-      stopGrant: None, stopped: None, retired: None, collected: None,
+      stopGrant: None, removed: None, stopped: None, retired: None, collected: None,
       retention: Retain, collectionPhase: Unprepared }
   }
 
@@ -216,9 +215,9 @@ module authority {
         owner: None, deleting: false,
       } else { ...old, owner: Some(key), deleting: deleted.contains(g) })
     })
-    { ...meta, target: command.desired, operations: operations, groups: groups,
+    Completion::advanceNodes(Admission::handover(meta, { ...meta, target: command.desired, operations: operations, groups: groups,
       firstAttempts: meta.firstAttempts.put(key.version, key), cleanup: cleanup,
-      retiredGroupIds: meta.retiredGroupIds.union(deleted) }
+      retiredGroupIds: meta.retiredGroupIds.union(deleted) }, key))
   }
 
   pure def applyApproval(meta: MetadataState, command: ApprovalCommand): MetadataState =
@@ -262,7 +261,7 @@ module authority {
           val block = previous.blocks.get(g)
           if (failed.contains(g)) { ...block, phase: OpPending, reason: None } else block
         }) }
-      { ...meta, successors: meta.successors.put(previous.key, key), operations: meta.operations.put(key, retry),
-        groups: failed.fold(meta.groups, (rows, g) => rows.setBy(g, row => { ...row, owner: Some(key) })) }
+      Admission::handover(meta, { ...meta, successors: meta.successors.put(previous.key, key), operations: meta.operations.put(key, retry),
+        groups: failed.fold(meta.groups, (rows, g) => rows.setBy(g, row => { ...row, owner: Some(key) })) }, key)
     }
 }

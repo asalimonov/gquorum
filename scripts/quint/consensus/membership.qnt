@@ -63,7 +63,8 @@ module membership {
         | _ => evidence
       }
       current.put(r.node, { ...node, durable: { ...node.durable,
-        replicaEvidence: node.durable.replicaEvidence.put(r, updated) } })
+        replicaEvidence: node.durable.replicaEvidence.put(r, updated),
+        metaSeen: node.durable.metaSeen or r.group == "_meta" } })
     })
 
   pure def committed(c: ConsensusState, voters: Set[ReplicaKey], position: int): ConsensusState =
@@ -74,5 +75,81 @@ module membership {
     running(nodes.get(node)) and hasCommitPath(c, nodes, env.network.metaLinks) and
       match c.leaderAuthority { | Some(leader) => communicates(env.network.metaLinks, node, leader.node)
         | None => false }
+  }
+
+  // membership/safety.go: only one automatic non-joint change is supported.
+  pure def singleAutomatic(kinds: List[ActionKind], joint: bool, automatic: bool): bool =
+    if (kinds.length() != 1) false else not(joint) and automatic and nativeKind(kinds.head())
+
+  pure def nativeKind(kind: ActionKind): bool =
+    Set(AddLearner, PromoteLearner, DemoteVoter, RemoveMember).contains(kind)
+
+  pure def postVoters(c: ConsensusState, kind: ActionKind, target: ReplicaKey): Set[ReplicaKey] =
+    match kind {
+      | PromoteLearner => c.voters.union(Set(target))
+      | DemoteVoter => c.voters.exclude(Set(target))
+      | RemoveMember => c.voters.exclude(Set(target))
+      | _ => c.voters
+    }
+
+  pure def postLearners(c: ConsensusState, kind: ActionKind, target: ReplicaKey): Set[ReplicaKey] =
+    match kind {
+      | AddLearner => c.learners.union(Set(target))
+      | DemoteVoter => c.learners.union(Set(target))
+      | PromoteLearner => c.learners.exclude(Set(target))
+      | RemoveMember => c.learners.exclude(Set(target))
+      | _ => c.learners
+    }
+
+  pure def nativeSatisfied(c: ConsensusState, kind: ActionKind, target: ReplicaKey): bool =
+    match kind {
+      | AddLearner => c.learners.contains(target)
+      | PromoteLearner => c.voters.contains(target)
+      | DemoteVoter => c.learners.contains(target) and not(c.voters.contains(target))
+      | RemoveMember => not(c.voters.union(c.learners).contains(target))
+      | _ => false
+    }
+
+  // Health is supplied by a fresh native observation. Good metric assumptions
+  // do not supply a vote or the successful learner catch-up milestone.
+  pure def safeChange(c: ConsensusState, kind: ActionKind, target: ReplicaKey,
+                      live: Set[ReplicaKey], caughtUp: bool): bool = {
+    val after = postVoters(c, kind, target)
+    val knownIdentity = c.voters.union(c.learners).forall(r =>
+      (r.replica != target.replica and r.node != target.node) or r == target)
+    if (not(nativeKind(kind)) or target.replica <= 0 or not(knownIdentity)) false
+    else if (nativeSatisfied(c, kind, target)) true
+    else if (kind == AddLearner) not(c.voters.contains(target))
+    else and {
+      kind != PromoteLearner or (c.learners.contains(target) and caughtUp),
+      kind != DemoteVoter or c.voters.contains(target),
+      after.size() > 0,
+      c.leaderAuthority != Some(target) or after.contains(target),
+      after.intersect(live).size() * 2 > after.size(),
+    }
+  }
+
+  pure def observedLive(c: ConsensusState, nodes: NodeStates,
+                        links: Set[(NodeName, NodeName)]): Set[ReplicaKey] = match c.leaderAuthority {
+    | Some(leader) => c.voters.union(c.learners).filter(r =>
+        liveIdentity(nodes, r) and communicates(links, leader.node, r.node))
+    | None => Set()
+  }
+
+  pure def expectedChange(c: ConsensusState, step: PlannedStep): bool = match step.target {
+    | ReplicaTarget(target) => if (nativeSatisfied(c, step.kind, target)) c.voters == step.resultVoters
+        else c.voters == step.expectedVoters and postVoters(c, step.kind, target) == step.resultVoters
+    | _ => false
+  }
+
+  pure def applyChange(c: ConsensusState, kind: ActionKind, target: ReplicaKey): ConsensusState = {
+    val voters = postVoters(c, kind, target)
+    val learners = postLearners(c, kind, target)
+    val members = voters.union(learners)
+    { ...c, voters: voters, learners: learners, configRevision: c.configRevision + 1,
+      catchUp: members.mapBy(r => c.catchUp.getOrElse(r, Behind)),
+      appliedPositions: members.mapBy(r => c.appliedPositions.getOrElse(r, 0)),
+      pendingChange: None, leaderAuthority: match c.leaderAuthority {
+        | Some(leader) => if (voters.contains(leader)) Some(leader) else None | None => None } }
   }
 }

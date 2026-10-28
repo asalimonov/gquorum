@@ -1,4 +1,6 @@
 module properties {
+  import managed_removal_steps as Removal from "../managed/removal_steps"
+  import admission as Admission from "../metaengine/admission"
   import types.* from "../types"
   import world_types.* from "../runtime/world"
   import basicSpells.* from "../vendor/spells/basicSpells"
@@ -63,7 +65,7 @@ module properties {
   pure def metadataWellFormed(w: World): bool = {
     val m = w.extensions.metadata
     and {
-      E::physicalEvidenceValid(w), Sessions::metadataSafety(m),
+      E::physicalEvidenceValid(w), Removal::removalSafety(w), Sessions::metadataSafety(m), Admission::metadataSafety(m),
       w.system.values().forall(n => n.volatile.owners.values().forall(owner => Life::ownerSafety(owner))),
       m.grants.values().forall(grant => G::wellFormed(grant)),
       m.authorityFloors.keys().forall(r => m.grants.keys().contains(m.authorityFloors.get(r)) and
@@ -108,8 +110,10 @@ module properties {
           match debt.stopAction {
             | Some(actionKey) => and { actionKey.step.target == ReplicaTarget(r), actionKey.step.kind == StopReplica,
                 m.operations.keys().contains(actionKey.operation),
-                m.operations.get(actionKey.operation).plan.cleanup.get(r.group).indices().exists(i =>
-                  m.operations.get(actionKey.operation).plan.cleanup.get(r.group).nth(i) == actionKey.step) }
+                m.operations.get(actionKey.operation).plan.cleanup.get(r.group)
+                  .concat(m.operations.get(actionKey.operation).plan.blocks.getOrElse(r.group, List())).indices().exists(i =>
+                    m.operations.get(actionKey.operation).plan.cleanup.get(r.group)
+                      .concat(m.operations.get(actionKey.operation).plan.blocks.getOrElse(r.group, List())).nth(i) == actionKey.step) }
             | None => debt.stopped != None
           },
           match debt.retireAction { | Some(actionKey) => actionKey.step.targets.contains(r) | None => debt.retired != None },

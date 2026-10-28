@@ -4,7 +4,7 @@ Plan: [cluster-management model](../plans/20261027-quint-cluster-management.md).
 
 ## Status
 
-No failing library scenario has yet been confirmed as faithfully represented by the model. Implementation and validation are ongoing. This is not a claim that the library is free of defects.
+QCM-001 reproduces a blocked automatic admission continuation in the source-grounded Quint model. Go reproduction is pending; no production defect is claimed as Go-confirmed. Implementation and validation are ongoing.
 
 ## Reporting rule
 
@@ -24,4 +24,4 @@ For each finding include:
 
 ## Findings
 
-None confirmed yet.
+- [QCM-001: prepared admission restart before Ready](20261028-quint-admission-prepared-restart.md): model reproduction retained, Go regression pending.

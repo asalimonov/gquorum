@@ -43,7 +43,7 @@ module initial {
       { owner: key.owner, member: doc.nodes.get(key.owner.node).member, phase: Live, renewalGeneration: 0 }),
     activeSessions: doc.nodes.keys().mapBy(n => { owner: { node: n, incarnation: 1 }, generation: 1 }), locks: Map(), stagedIntents: Map(),
     couriers: doc.nodes.keys().mapBy(n => { process: { node: n, incarnation: 1 }, member: doc.nodes.get(n).member }),
-    authorityFloors: Map(), closedGrants: Set(), effectReceipts: Set(), fenceEvidence: Set(),
+    admissions: Map(), authorityFloors: Map(), closedGrants: Set(), effectReceipts: Set(), fenceEvidence: Set(),
   }
 
   pure def consensus(doc: Document, leader: NodeName): GroupId -> ConsensusState =
@@ -82,14 +82,14 @@ module initial {
             process: { node: n, incarnation: 1 }, waiters: Set(), callbackExpired: false, closeExpired: false,
             replayOutstanding: false, startDeclaration: Some(doc.groups.get(g)), authorityRevision: 1, scopeIndex: 1 }
         }),
-        session: if (admitted) Some({ owner: { node: n, incarnation: 1 }, generation: 1 }) else None, schedulerEnabled: true, serveOverride: 0, schedulerCapture: None, operationWork: Map(), waitingEffects: Set(), authorityReads: Map(), holds: Set(), starts: Map(), fenceWorkers: Set(), metaRunning: admitted, stopTimedOut: false,
+        session: if (admitted) Some({ owner: { node: n, incarnation: 1 }, generation: 1 }) else None, schedulerEnabled: true, serveOverride: 0, schedulerCapture: None, operationWork: Map(), waitingEffects: Set(), authorityReads: Map(), nativeChecks: Map(), joinOffer: None, effectResults: Set(), holds: Set(), starts: Map(), fenceWorkers: Set(), metaRunning: admitted, stopTimedOut: false,
         ownLease: if (admitted) Live else Revoked, leases: Map(), renewal: None, renewalExpired: false, revokeGate: None,
       },
       durable: {
         pin: if (admitted) Some({ cluster: doc.cluster, node: n, member: doc.nodes.get(n).member }) else None,
         replicaEvidence: replicas.mapBy(_ => ValidStore({ snapshot: 0, commit: 1, tail: 1, appliedHint: 1 })),
         authorityFloors: Map(), authorityGrants: Map(), receipts: Set(), fences: Set(), journalPosition: 0, pendingFences: Map(), seedAuthority: loads, collectionMarkers: Map(),
-        metaImage: if (admitted) Some(view) else None, metaIndex: if (admitted) 1 else 0,
+        metaImage: if (admitted) Some(view) else None, metaIndex: if (admitted) 1 else 0, metaSeen: admitted, metaRemoved: None,
       },
     }
   }

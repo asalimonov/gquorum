@@ -127,7 +127,7 @@ Keep independent directed meta/load connectivity, delayed local metadata applica
 
 Keep immutable Plan required blocks, detached cleanup, source versions, step sequences, voter-set guards and dependencies. Planning returns `Planned(Plan) | PlanRejected(errors)`; refused planning is never an empty successful plan. Retained owner milestones distinguish hosted, stopped and cleanup-owned resources.
 
-Keep per-group operation owners, block/step state, first attempts, immediate retry successors, grants and revocation obligations. Authority keys bind cluster/group/revision, purpose, exact action or admission, resources and targets. Ordinary effect/readmission receipts and fence evidence remain distinct. Retain enough history for exact retry and outstanding proof; public history-query APIs are unnecessary.
+Keep per-group operation owners, block/step state, first attempts, immediate retry successors, grants and revocation obligations. Authority keys bind cluster/group/revision, purpose, exact action or admission, resources and targets. Ordinary effect/readmission receipts and fence evidence remain distinct. Retain enough history for exact retry and outstanding proof; public history-query APIs are unnecessary. Native removal creates cleanup debt when its exact receipt is recorded. Returned physical receipts bind the original caller process/member and may be reported from its cache without a new native quorum; receipt delivery, metadata reporting and checkpointing remain distinct.
 
 ### 5.7 Cleanup and returning owners
 
@@ -196,7 +196,7 @@ Capture original arguments/CAS → stage through `_meta` → retain staged versi
 
 ### 8.2 Scaling and membership
 
-Fresh node identity → `_meta` learner admission/catch-up → guarded promotion if required by the fixed preset. Drain evacuates loads, activation reverses eligibility, exclusion removes a proven drained member. Force retirement remains audited and quorum-safe. Transfer before leader removal/demotion; post-check failures cannot manufacture native commitment.
+Fresh node identity → process-bound admission and Ready acknowledgement → `_meta` learner admission/catch-up → guarded promotion if required by the fixed preset. Local engine readiness/host preparation alone does not supply the Ready acknowledgement. Same-member admission handover retains the original operation provenance and consumed prefix when topology work is superseded. Drain evacuates loads, activation reverses eligibility, exclusion removes a proven drained member. Force retirement remains audited and quorum-safe. Transfer before leader removal/demotion; post-check failures cannot manufacture native commitment. Relevant load native progress gates node declarations, while exact joined load-stop receipts additionally gate metadata-member removal. Applied approved self-removal remains fenced across retained restart.
 
 ### 8.3 Group creation
 
@@ -212,7 +212,7 @@ Leader/enabled controller captures approved/proven state, current availability a
 
 ### 8.6 Lifetime and sessions
 
-Load startup follows reserve → acquire/replay → exact local scope/floor authorization → handle publication. Node session activation separately establishes reserved node ownership and a live local lease before reporting node readiness; load-handle publication does not itself require a live session. Cancellation of a waiter does not undo accepted work. Stop request precedes actual joins/releases; delayed success or failed release remains owned. Internal session expiry/recheck/revocation is distinct from health/quorum. Local load holds remain explicit.
+Load startup follows reserve → acquire/replay → exact local scope/floor authorization → handle publication. Node session activation separately establishes reserved node ownership and a live local lease before reporting node readiness; load-handle publication does not itself require a live session. Cancellation of a waiter does not undo accepted work. Stop request precedes actual joins/releases; delayed success or failed release remains owned. Internal session expiry/recheck/revocation is distinct from health/quorum. Local load holds remain explicit. Granted load preparation reuses these phases; failed factories may retry under the same exact unconsumed grant after releasing ownership.
 
 ### 8.7 Reads and operator visibility
 

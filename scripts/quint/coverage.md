@@ -38,16 +38,16 @@ Deferring offline Recovery does not defer ReadmitNode, ReseatReplica, retained r
 | `Cluster.Stage` | `cluster.go` | Task 5: asynchronous CAS/apply/reply and exact replay checks | Bounded complete-document edits for core operations only; labels/policy changes are outside v1. |
 | `Cluster.Approve` | `cluster.go` | Task 5: leader reads/recapture, immutable scopes, replay and deletion debt | Immutable approved plan, exact captured scopes and detached deletion debt. |
 | `Cluster.RetryOperation` | `cluster.go` | Tasks 5–6: routed retries and immutable remaining-plan/receipt validation | Exact failed predecessor and at most one successor; preserve uncertain replay. |
-| `Cluster.AddNode` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Fresh identity and mandatory learner-first _meta admission. |
+| `Cluster.AddNode` | `cluster.go` | Task 8: approved process binding, retained pin, learner/catch-up/promotion and session activation | Fresh identity and mandatory learner-first _meta admission. |
 | `Cluster.ReadmitNode` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Exact returning predecessor, fencing and retirement batch; not offline Rebuild. |
-| `Cluster.DrainNode` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Evacuate loads while retaining _meta membership. |
-| `Cluster.ActivateNode` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Undo drain eligibility; needed to recover a valid management workflow. |
-| `Cluster.ExcludeNode` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Remove a proven drained member without bypassing quorum. |
-| `Cluster.ForceRetireNode` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Explicit degraded-cluster path; retain audit, quorum and cleanup obligations. |
-| `Cluster.SetGroupHosting` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Keep explicit/all-eligible host changes; core relocation without labels. |
+| `Cluster.DrainNode` | `cluster.go` | Task 8: two-load evacuation, native proof, exact joined stops and node progress | Evacuate loads while retaining _meta membership. |
+| `Cluster.ActivateNode` | `cluster.go` | Task 8: approved activation after drain, preserving metadata membership | Undo drain eligibility; needed to recover a valid management workflow. |
+| `Cluster.ExcludeNode` | `cluster.go` | Task 8: proven drain, stop-receipt gates, native removal and retained self-fencing | Remove a proven drained member without bypassing quorum. |
+| `Cluster.ForceRetireNode` | `cluster.go` | Task 8: audited fourth-host metadata replacement; load evacuation gates retained | Explicit degraded-cluster path; retain audit, quorum and cleanup obligations. |
+| `Cluster.SetGroupHosting` | `cluster.go` | Shared edit/planning and Task 8 relocation mechanisms; dedicated API trace remains Task 12 | Keep explicit/all-eligible host changes; core relocation without labels. |
 | `Cluster.CreateGroup` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Create on fixed simple hosting/voter presets, including unavailable hosts. |
 | `Cluster.DeleteGroup` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Logical deletion through _meta plus exact detached cleanup debt. |
-| `Cluster.ChangeReplica` | `cluster.go` | Pure edit + shared staging; operation-specific execution remains pending | Manual voter/learner role changes through guarded membership. |
+| `Cluster.ChangeReplica` | `cluster.go` | Task 8: granted native demotion/promotion, source rechecks and role-derived pin checks | Manual voter/learner role changes through guarded membership. |
 | `Cluster.ReseatReplica` | `cluster.go` | Task 5: atomic approved repair/rebase and fresh-read CAS scenarios | Atomic approved fresh-ID repair; protect old owner and independent staged intent. |
 | `Node.StartLoadGroup` | `node.go` | Task 7: shared reservation, factory/replay, authorization and waiter scenarios | Exact local start/hold clearance; reuse shared startup phases. |
 | `Node.StopLoadGroup` | `node.go` | Task 7: exact hold, joined stop and retained Close ownership | Exact hold distinct from failure or retirement; must not be undone by repair. |
@@ -69,8 +69,8 @@ Deferring offline Recovery does not defer ReadmitNode, ReseatReplica, retained r
 | `Node.LoadSnapshots` | `node.go` | No method-specific implementation | Abstract complete catch-up; omit service accessor, chunks and transfer tuning. |
 | `Node.ReceiveLoadRaft` | `node.go` | No method-specific implementation | Abstract native consensus/network boundary; no per-Raft-message implementation. |
 | `Node.ReadLoadReplica` | `node.go` | No method-specific implementation | Exact native observation/capture used by planner and scheduler. |
-| `Node.ApplyLoadAction` | `node.go` | No method-specific implementation | Core message receiver and exact authorized-effect consumption. |
-| `Node.InstallLoadFence` | `node.go` | No method-specific implementation | Core durable resource fence and acknowledgement. |
+| `Node.ApplyLoadAction` | `node.go` | Tasks 6–8: exact grant reception, phased native/prepare/stop effects; retirement remains Task 10 | Core message receiver and exact authorized-effect consumption. |
+| `Node.InstallLoadFence` | `node.go` | Tasks 6–7: physical floor, join boundary, exact durable evidence and reporting | Core durable resource fence and acknowledgement. |
 | `Node.ReportLoadDelivery` | `node.go` | No method-specific implementation | Identity/delivery-bound feedback; no transport counters or per-packet model. |
 
 ### Observe
@@ -179,3 +179,13 @@ Internal session scenarios cover separate grant/bind commits, exact process/memb
 Protocol coverage and method dispositions above are unchanged. Pure rules now live in topology/metaengine/metaservice/managed/consensus, with environment and properties in harness and World/message/frame helpers in runtime. Tests are separated into fixtures, unit checks and the retained scenario chain. See the [module map](../../docs/progress/20261028-quint-module-map.json) and [model README](README.md).
 
 Current inventories: foundation 10; smoke3 50 + core 94; authority3 65 + core 94; lifetime3 85 + core 94. Earlier checkpoint counts remain historical evidence. The additions are seven composition checks, two guarded-adapter checks and three frame checks; no deferred API is activated. All four test profiles and smoke3/lifetime3 sampled simulations passed at the helper checkpoint, with source hashes and commands in the [refactoring execution log](../../docs/progress/20261028-quint-module-refactoring.md). Peer review found no semantic regression; this is not exhaustive equivalence or Go-conformance proof. Parent Tasks 8–18 remain paused.
+
+## Task 8 membership/scaling checkpoint
+
+AddNode, DrainNode, ActivateNode, ExcludeNode, ForceRetireNode and replica-role changes now reach approved native execution, with exact identity allocation, learner-first changes, catch-up, captured/proposed/committed boundaries and metadata completion. New-node session activation reuses the internal Task 7 path. Physical load preparation and granted joined stops support evacuation; applied `_meta` removal fences retained restarts. Existing transfer tests remain selected, and pure checks cover capacity, unsupported joint/multi-change shapes, last-voter safety and role-derived learner pins.
+
+The full scaling witness follows 3→4→5→4→3 through public mutations. A fourth-host replacement case isolates metadata membership, while a separate four-node case evacuates both load groups and proves that each exact stop receipt gates metadata removal. Quorum-loss, restart, receipt-return, stale admission and factory-failure cases preserve their asynchronous boundaries. Native removal debt begins at recorded native receipt; logical whole-group deletion retains its original approval-time debt semantics.
+
+The new profile runner distinguishes ordinary sampled tests from explicitly named, single-execution long REPL witnesses. No test name is silently excluded and no tool failure is counted as verification. Final commands, bounds, source hashes, counts and limitations belong to the [execution log](../../docs/progress/20261027-quint-cluster-management.md). Complete group creation/deletion, retirement/collection/readmission, repair policies, progress checking and full method-to-trace closure remain Tasks 9–18.
+
+Known progress finding: [QCM-001](../../docs/reports/20261028-quint-admission-prepared-restart.md) covers retained restart after consumed host preparation but before Ready. The blocked state is a positive regression witness; the desired-success test remains separately executable and failing. This is a model reproduction with Go conformance pending, not a passing recovery guarantee.

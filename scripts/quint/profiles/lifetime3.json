@@ -219,7 +219,28 @@
         "sessionCannotActivateUnadmittedIdentityTest",
         "ownerUpdatePreservesOtherFramesTest",
         "processUpdatePreservesDurableEvidenceTest",
-        "nodeUpdatePreservesIdentityAndPeersTest"
+        "nodeUpdatePreservesIdentityAndPeersTest",
+        "singleAutomaticChangeRequiredTest",
+        "nativePromotionRequiresLearnerTest",
+        "nativePromotionRequiresCatchUpTest",
+        "nativePromotionRequiresPostQuorumTest",
+        "nativeLearnerAdditionIsQuorumNeutralTest",
+        "nativeLeaderMustTransferTest",
+        "nativeFinalVoterCannotLeaveTest",
+        "nativeRemovalNeedsLivePostQuorumTest",
+        "nativeExactIdentityCannotAliasTest",
+        "nativeApprovedVoterProjectionRequiredTest",
+        "nativeDemotionPreservesLearnerIdentityTest",
+        "unconsumedMembershipCannotProveEmptyPlanTest",
+        "exactConsumedMembershipProvesEmptyPlanTest",
+        "foreignReceiptCannotProveMembershipTest",
+        "checkpointSubsumesOldGrantsTest",
+        "nodeProgressWaitsForLoadEvacuationTest",
+        "nativeEvacuationAllowsNodeProgressTest",
+        "unprovenMetaPreventsNodeProgressTest",
+        "explicitNodeCapacityIsEnforcedTest",
+        "manualLearnerRoleRemainsPinnedTest",
+        "failedStepRetainsPlanAndReleasesOnlyItsScopeTest"
       ]
     }
   ]

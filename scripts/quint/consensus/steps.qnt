@@ -84,7 +84,7 @@ module consensus_steps {
     val c = w.extensions.consensus.get(group)
     val node = w.system.get(replica.node)
     ({ ...w, system: w.system.put(replica.node, { ...node,
-        durable: { ...node.durable, replicaEvidence: node.durable.replicaEvidence.put(replica,
+        durable: { ...node.durable, metaSeen: node.durable.metaSeen or group == "_meta", replicaEvidence: node.durable.replicaEvidence.put(replica,
           ValidStore({ snapshot: 0, commit: c.committedPosition, tail: c.committedPosition,
                        appliedHint: 0 })) } }),
         extensions: { ...w.extensions,

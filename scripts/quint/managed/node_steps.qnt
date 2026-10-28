@@ -59,7 +59,7 @@ module managed_node_steps {
   pure def requestNodeStopEnabled(w: World, node: NodeName, MAX_DELIVERIES: int): bool = {
     val host = w.system.get(node)
     and {
-      M::running(host)
+      M::running(host) or host.volatile.phase == Fenced
     }
   }
 
@@ -148,7 +148,7 @@ module managed_node_steps {
   pure def beginNodeStartNext(w: World, node: NodeName): World = {
     val host = w.system.get(node)
     (Frames::withNode(w, node, _ => { ...host,
-        volatile: { ...host.volatile, phase: Starting, metaRunning: host.durable.pin != None } }))
+        volatile: { ...host.volatile, phase: Starting, metaRunning: host.durable.pin != None and host.durable.metaRemoved == None } }))
   }
 
 }

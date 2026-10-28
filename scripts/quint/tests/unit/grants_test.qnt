@@ -177,4 +177,16 @@ module grants_test {
       G::resourcesAvailable(result, Set(GroupResource("b"))),
     }
   }
+  run failedStepRetainsPlanAndReleasesOnlyItsScopeTest = {
+    val command = RecordStepStatus({ approved: approved, phase: OpFailed, reason: None })
+    val result = Ctrl::apply(running, command, 9)
+    and { Ctrl::errors(running, command) == Set(),
+      result.operations.get(key).blocks.get("a").phase == OpFailed,
+      result.operations.get(key).plan == running.operations.get(key).plan,
+      result.groups.get("a").owner == None,
+      result.groups.get("a").proven == running.groups.get("a").proven,
+      result.groups.mapRemove("a") == running.groups.mapRemove("a"),
+      result.grants == running.grants, result.history == running.history,
+      not(G::canIssueStep(result, approved)) }
+  }
 }

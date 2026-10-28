@@ -1,4 +1,5 @@
 module managed_receiver_steps {
+  import grants as G from "../metaengine/grants"
   import frames as Frames from "../runtime/frames"
   import execution as E from "./execution"
   import membership as M from "../consensus/membership"
@@ -67,7 +68,7 @@ module managed_receiver_steps {
       | HostResource(_) => node.durable.journalPosition < MAX_POSITION
       | GroupResource(group) => {
           val c = w.extensions.consensus.get(group)
-          c.leaderAuthority == Some(delivery.replica) and c.committedPosition < MAX_POSITION and
+          c.leaderAuthority == Some(delivery.replica) and c.pendingChange == None and c.committedPosition < MAX_POSITION and
             M::hasCommitPath(c, w.system, M::linksFor(w.extensions.network, group)) and
             (delivery.grant.purpose == Fence or match delivery.grant.effect {
               | Some(e) => match e.target { | ReplicaTarget(r) => c.voters.contains(r) and
@@ -95,4 +96,22 @@ not(E::mayConsume(w, delivery))
 
   pure def refuseGrantNext(w: World, delivery: EffectDelivery): World = (E::forgetWait(w, delivery))
 
+
+  pure def receiveResultEnabled(w: World, msg: Envelope): bool =
+    w.messages.get(msg.destination).contains(msg) and (match msg.payload { | EffectResult(_) => true | _ => false })
+
+  pure def receiveResultNext(w: World, msg: Envelope): World = match msg.payload {
+    | EffectResult(result) => {
+        val host = w.system.get(msg.destination)
+        val d = result.delivery
+        val local = w.extensions.metaLog.get(host.volatile.appliedMetaIndex)
+        val exact = d.sender == { node: msg.destination, incarnation: host.volatile.incarnation } and
+          msg.source == d.receiver and host.durable.pin == Some({ cluster: d.grant.key.cluster,
+            node: msg.destination, member: d.senderMember }) and
+          G::catalogued(local, d.grant) and G::receiptIdentifiesGrant(d.grant, result.receipt)
+        apply_custom_effect(if (exact) Frames::withProcess(w, msg.destination,
+          p => { ...p, effectResults: p.effectResults.union(Set(result.receipt)) }) else w, Consume(msg))
+      }
+    | _ => w
+  }
 }

@@ -1,4 +1,6 @@
 module execution {
+  import admission as Admission from "../metaengine/admission"
+  import message_effects.* from "../runtime/messages"
   import types.* from "../types"
   import basicSpells.* from "../vendor/spells/basicSpells"
   import world_types.* from "../runtime/world"
@@ -39,8 +41,7 @@ module execution {
   }
 
   pure def courierMatches(meta: MetadataState, delivery: EffectDelivery): bool =
-    meta.couriers.getOrElse(delivery.sender.node, { process: { node: "", incarnation: 0 }, member: 0 }) ==
-      { process: delivery.sender, member: delivery.senderMember }
+    Admission::courier(meta, delivery.sender.node) == Some({ process: delivery.sender, member: delivery.senderMember })
 
   pure def mayReceive(w: World, delivery: EffectDelivery): bool = match delivery.proofIndex {
     | None => false
@@ -62,6 +63,14 @@ module execution {
       | Some(e) => e.kind == TransferLeadership and delivery.resource == GroupResource(delivery.grant.key.group)
       | None => false
     }
+
+  // Dispatch only mechanisms with a wired receiver path. Native membership
+  // uses its phased install/precheck/propose/commit path, not consume().
+  pure def dispatchable(delivery: EffectDelivery): bool = executable(delivery) or
+    match delivery.grant.effect { | Some(e) => delivery.grant.planStep != None and (
+      (M::nativeKind(e.kind) and delivery.resource == GroupResource(delivery.grant.key.group)) or
+      ((e.kind == PrepareReplica or (e.kind == StopReplica and delivery.grant.key.group != "_meta")) and match delivery.resource {
+        | HostResource(_) => true | _ => false })) | None => false }
 
   pure def receipt(delivery: EffectDelivery, position: int): Receipt = {
     grant: delivery.grant.key, effect: delivery.grant.effect, admission: delivery.grant.admission,
@@ -128,6 +137,22 @@ module execution {
         }
       }
     }
+
+  // Returning a durable receipt is distinct from later metadata reporting.
+  // A lost result does not undo the effect; a cached result needs no new quorum.
+  pure def returnReceipt(w: World, delivery: EffectDelivery, receipt: Receipt, limit: int): World = {
+    val receiver = w.system.get(delivery.receiver.node)
+    val applied = match delivery.resource {
+      | HostResource(_) => receiver.durable.receipts.contains(receipt)
+      | GroupResource(_) => match receiver.durable.replicaEvidence.getOrElse(delivery.replica, MissingStore) {
+          | ValidStore(p) => p.commit >= receipt.durablePosition | _ => false }
+    }
+    if (w.extensions.nextDelivery > limit or not(M::running(receiver)) or
+        receiver.volatile.incarnation != delivery.receiver.incarnation or not(applied)) w else
+      apply_custom_effect(w, Queue({ delivery: w.extensions.nextDelivery, source: delivery.receiver,
+        destination: delivery.sender.node, channel: if (delivery.grant.key.group == "_meta") MetaChannel else LoadChannel,
+        payload: EffectResult({ delivery: delivery, receipt: receipt }) }))
+  }
 
   pure def physicalEvidenceValid(w: World): bool = {
     val receipts = w.system.values().map(n => n.durable.receipts).flatten().union(

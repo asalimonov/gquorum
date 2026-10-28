@@ -165,3 +165,58 @@ Validation:
 The first batch passed 69/70 runtime cases; restart activation exposed a model leader-discovery guard that required an existing observation after crash had cleared it. The guard now permits first discovery. This was a model defect, not a confirmed library failure. No source-faithful failing library scenario was found. The test/report changes preserve all previous authority and management cases.
 
 User requested stopping after committing the current task. Task 8 has not been started; pause the active goal after the Task 7 commit. No production Go or vendor source changed.
+
+
+## Task 8 — resumed, native membership checkpoint (in progress)
+
+The persisted goal was resumed after the refactoring finished (f43d20e). Task 8 is active; its checklist remains incomplete. Added native guard rules and a phased shared-world path: durable authority install → precheck → rechecked proposal → current-quorum commitment/configuration/receipt → separate report/checkpoint. Uncommitted work may be lost after its leader fails; exact receipt replay never changes configuration again. Dispatch now distinguishes these phased native effects from the older immediate transfer/fence consume path. No Go code changed.
+
+Source grounding: membership/safety.go and coordinator.go; internal/raftengine/authority_membership.go. Safety/health is rechecked before proposal, not fabricated at commit. A failure after a valid proposal can leave the resulting configuration unavailable; that is represented as expected unavailability, not mislabeled a violation. Approval/voter-result/identity checks and current-quorum commitment remain separate.
+
+Validation of this intermediate source snapshot: lifetime3 runner completed with 85 scenarios + 105 explicit core checks (`test-reports/quint/20261027T210314553586Z-52784f42`); 11 new pure membership checks passed (the direct command also ran 23 basicSpells checks); 8 new native scenarios plus the inherited native-quorum regression passed. Direct Rust simulation of admission4's demotionWaiting fixture, full step/safety, seed 1, 50 samples ×40 steps returned status ok. Local logs, JSON and source hashes: `test-reports/quint/task8-native-checkpoint/`. This is not completed admission4 coverage: fresh-node binding/preparation and scale5 are still pending.
+
+Construction fixes: added the native dispatch eligibility missing from the prior transfer/fence-only gate, renamed a fixture conflicting with basicSpells.last, and moved assertions before fail() in two scenario scripts. These were model/test-construction errors, not faithful failing library scenarios, so no library-defect report was added. Next: source-grounded fresh admission handshake, host preparation and catch-up checkpointing; then full scaling and capacity scenarios.
+
+### Task 8 — fresh admission and 3→4 checkpoint (still in progress)
+
+Added process-bound admission records and immutable join-response proof; fresh requests, confirmed leader reads, binding commit, reply delivery, exact durable pin and local metadata startup remain separate. Preparation requires a bound approved admission and produces an exact host receipt; it is not native membership. Ready acknowledgement is a separate replicated command. Native catch-up checkpoints and promotion use the same approved operation. Preserved the source distinction that engine WaitReady is local replay readiness, not a voter/quorum certificate (`internal/raftengine/loop.go`, `metaservice/authority_host.go`). Already-satisfied native effects retain configuration revision.
+
+Source grounding: `internal/metaservice/join.go`, `join_admission.go`, `join_client.go`, `join_checks.go`; `internal/metaengine/scoped_joining_admission.go`, `scoped_admission_prefix.go`, `scoped_barriers.go`. Added model modules `metaengine/admission.qnt` and `metaservice/admission_steps.qnt`, extending the existing staged suite chain through native_test and admission_test. `instances/admission4.qnt` is a working four-node instance, not a completed admission4 profile yet.
+
+Latest checkpoint validation: admission4 typechecks; 19 selected scenarios pass at seed 1/max-samples 1 (18 new native/admission/composition cases plus the inherited native-quorum regression). This includes real public AddNode→approval→join→prepare→learner→catch-up→promotion→metadata completion for 3→4, stale join replies, unprepared rebinding and premature catch-up refusal. `test-reports/quint/task8-admission-checkpoint/` retains local-only scenario log and source hashes. Full lifetime3 regression completed: 85 scenarios + 105 core checks (`test-reports/quint/20261027T212332826502Z-c98977f9`); whitespace check passes. No library defect established. Task 8 has not been committed or marked complete.
+
+Remaining Task 8 work: parameterized growth/shrink trace and scale5 profile; four-node replacement/capacity/pin cases; node progress/evacuation proof; durable self-removal fencing; explicit native refusal/failure routing where the library returns a terminal effect error; retained restart during partially completed admission; final profile inventories/evidence. Specifically, the earlier `authority.zeroStepProven` blanket refusal after any historical grant is a model checkpoint limitation: source `scoped_approval_completion.go:zeroStepMembership` reuses prior proven membership and exact subsequent consumed effects. Reconcile that source rule before draining/excluding already-admitted nodes, rather than bypassing it in a fixture. Node progress follows `scoped_node_progress.go` (converged current meta plus relevant load dependencies), and self-removal follows `metaservice/removal.go` (applied native removal AND approved exclusion/replacement, with a sticky retained membership-seen boundary). These are pending model work, not confirmed library failures. Parent Tasks 9–18 remain unstarted.
+
+
+### Task 8 — source corrections, tooling and reported progress finding
+
+Implemented node progress from current metadata proof plus relevant load dependencies, replay of retained membership proof for empty plans, and durable applied self-removal fencing. Native removal now creates cleanup debt on receipt recording, matching `scoped_cleanup_effect.go`; whole-group deletion keeps approval-time debt. Exact granted load preparation and joined load-stop receipts support two-load evacuation, with metadata removal gated on both native exclusion and host-stop proof (`scoped_barriers.go`). Retirement/collection remain deferred to their planned tasks.
+
+The complete 3→4→5→4→3 script, fourth-host replacement, activation, two-load evacuation and fenced restart execute through the shared facade. New nodes complete internal session activation in the scaling script. Added scoped failure/wait reporting, exact cached effect-result delivery, and metadata completion from returned receipts after native quorum loss. Host preparation resumes its exact grant after a failed factory releases ownership.
+
+Tooling: long Rust test trace serialization exceeded Node's string limit; the TypeScript fallback and an ordinary admission batch hit its default heap. Those were incomplete runs. Explicit long-witness REPL entries avoid full trace export without changing the test sequence; exact Boolean output is required because REPL can exit zero after errors. Ordinary suites retain their samples and exact inventories. Large profiles record a 16384 MiB frontend heap. The runner's 19 unit checks pass. Details: `docs/reports/20261028-quint-task8-tooling.md`.
+
+Further source checks corrected `_meta` AddLearner's Ready-admission gate, live-admission courier resolution and same-member operation handover. The pre-Ready prepared restart no longer falsely succeeds. QCM-001 is reproduced by `admissionRestartExpected.qnt`; its desired continuation fails at the native precheck. A positive witness verifies both binding refusal and missing admission readiness. The acknowledged restart and superseding-operation witnesses pass. Go reproduction remains pending; the source map, command, bounded assumptions and manual regression recipe are in `docs/reports/20261028-quint-admission-prepared-restart.md`. No Go/vendor changes were made.
+
+Final validation is being recorded below before Task 8 is committed. Earlier development-run manifests retain their original source hashes and must not be presented as final-snapshot evidence.
+
+
+### Task 8 completed — final evidence
+
+All Task 8 requirements are implemented and wired through the shared world: exact admission and same-member handover, fresh/retained identity, native role and quorum guards, scoped failure/wait handling, load preparation, load-stop evacuation gates, node progress and persistent self-removal fencing. Four-node capacity/replacement/pin cases and the full 3→4→5→4→3 sequence execute; the load-evacuation witness moves both loads before exclusion. Source-derived permission checks distinguish a live admission courier from session-based fallback. No global topology-operation gate was introduced.
+
+Final source-matched validation (Quint 0.33.0, Rust v0.7.0, seed 1):
+
+| Check | Result | Report directory under test-reports/quint |
+| --- | --- | --- |
+| admission4 | 109 ordinary scenarios, 115 core checks, 5 named long witnesses; passed | 20261028T012751654586Z-7edbd141 |
+| scale5 | 111 ordinary scenarios, 115 core checks, 6 named long witnesses; passed | 20261028T013239014267Z-2f207252 |
+| smoke3 simulation | 50 samples, depth 60; sampled-pass | 20261028T013240216789Z-91588f12 |
+| admission4 simulation | 50 samples, depth 60; sampled-pass | 20261028T013540065756Z-4ce7e584 |
+| scale5 simulation | 50 samples, depth 80; sampled-pass | 20261028T013540065756Z-5c16411b |
+
+Ordinary profiles use 10 maximum samples/test; each named long REPL witness executes once, with exact-result validation and no full trace export. Counts overlap across profiles. All hashes in these five final manifests match the executable tree. The earlier smoke3 test (50 +115) and foundation test (10) passed at the preceding source checkpoint (`20261027T232324338219Z-dea7d4dc`, `20261027T231035723930Z-f5b1cd75`); they are historical, not reruns on the final admission-handover revision. The final admission/scale suites retain their inherited scenarios and explicit core inventory. Runner unit checks: 19 passed. Import paths, acyclicity, sole world ownership, documentation links and `git diff --check` passed.
+
+QCM-001 is not a passing recovery claim: the separate `retainedPreparationRestartShouldContinueTest` returns exit 1/QNT513 at the required learner precheck. The refused-binding/disabled-add witness passes and preserves safety. Local partial ITF trace, command output and source hashes are in `test-reports/quint/task8-admission-gap/`; the report and source reproduction remain in the repository. Go reproduction has not been run. This finding was exposed by correcting an omitted source Ready gate, not by weakening that gate or changing production behavior.
+
+No Go, vendor, public API, storage format or default Make target changed. Full retirement/collection/readmission, scheduler repair, API/visibility closure and progress/backend qualification remain Tasks 9–18. Scenario/sampled results do not establish exhaustive equivalence, temporal progress or Go conformance. The goal remains active; continue with Task 9 after this commit.

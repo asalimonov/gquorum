@@ -12,11 +12,13 @@ module metaservice_authority_steps {
   pure def submitControlEnabled(w: World, node: NodeName, command: ControlCommand, MAX_DELIVERIES: int): bool = {
     val owner = w.system.get(node)
     val local = w.extensions.metaLog.get(owner.volatile.appliedMetaIndex)
-    val leader = owner.volatile.observations.get("_meta").observedLeader
+    val leader = if (Ctrl::leaderOnly(command)) w.extensions.consensus.get("_meta").leaderAuthority
+      else owner.volatile.observations.get("_meta").observedLeader
     val caller = { node: node, incarnation: owner.volatile.incarnation }
     match leader {
       | Some(r) => and {
 M::running(owner),
+(not(Ctrl::leaderOnly(command)) or r.node == node),
 Ctrl::errors(local, command).size() == 0,
 w.extensions.nextDelivery <= MAX_DELIVERIES,
 not(w.extensions.network.pending.union(w.messages.values().flatten()).exists(msg =>
@@ -31,7 +33,8 @@ not(w.extensions.network.pending.union(w.messages.values().flatten()).exists(msg
 
   pure def submitControlNext(w: World, node: NodeName, command: ControlCommand, MAX_DELIVERIES: int): World = {
     val owner = w.system.get(node)
-    val leader = owner.volatile.observations.get("_meta").observedLeader
+    val leader = if (Ctrl::leaderOnly(command)) w.extensions.consensus.get("_meta").leaderAuthority
+      else owner.volatile.observations.get("_meta").observedLeader
     val caller = { node: node, incarnation: owner.volatile.incarnation }
     val proposalKey: ProposalKey = { request: { caller: caller, sequence: -w.extensions.nextDelivery }, sequence: 0 }
     val submitting = match command {
@@ -109,7 +112,7 @@ not(owner.volatile.observations.keys().contains(group) and
       match w.extensions.consensus.get("_meta").leaderAuthority { | Some(leader) =>
         M::communicates(w.extensions.network.metaLinks, node, leader.node) | None => false },
       not(G::resourceConsumed(local, grant, resource)),
-      E::executable(delivery),
+      E::dispatchable(delivery),
       w.extensions.nextDelivery <= MAX_DELIVERIES
     }
   }

@@ -1,4 +1,6 @@
 module grants {
+  import completion as Completion from "./completion"
+  import admission as Admission from "./admission"
   import types.* from "../types"
   import basicSpells.* from "../vendor/spells/basicSpells"
 
@@ -59,15 +61,64 @@ module grants {
     else true,
   }
 
+  // Native removal creates exact cleanup debt when its receipt reaches _meta.
+  // Whole-group deletion instead retains debt at approval (authority.qnt).
+  pure def removalDebt(meta: MetadataState, receipt: Receipt): Option[CleanupDebt] = match receipt.target {
+    | None => None
+    | Some(key) => match receipt.effect {
+        | Some(e) => if (e.kind != RemoveMember or not(meta.operations.keys().contains(e.operation))) None else {
+            val op = meta.operations.get(e.operation)
+            val steps = op.plan.blocks.getOrElse(key.group, List()).concat(op.plan.cleanup.getOrElse(key.group, List()))
+            val stops = steps.select(s => s.kind == StopReplica and s.target == ReplicaTarget(key))
+            val retires = if (key.group == "_meta") stops else steps.select(s => s.kind == RetireReplica and s.target == ReplicaTarget(key))
+            if (stops.length() != 1 or retires.length() != 1) None else Some({
+              identity: key, sourceOperation: e.operation, storage: StorageDefault,
+              stopAction: Some({ operation: e.operation, step: stops.head() }),
+              retireAction: Some({ operation: e.operation, step: retires.head() }),
+              stopGrant: None, removed: Some(receipt), stopped: None, retired: None, collected: None,
+              retention: Retain, collectionPhase: Unprepared })
+          }
+        | None => None }
+  }
+
+  pure def cleanupReceiptAllowed(meta: MetadataState, receipt: Receipt): bool = match receipt.effect {
+    | None => true
+    | Some(e) => if (not(Set(StopReplica, RetireReplica, DeleteGroupState).contains(e.kind))) true else match receipt.target {
+        | None => false
+        | Some(key) => if (not(meta.cleanup.keys().contains(key))) false else {
+            val debt = meta.cleanup.get(key)
+            if (e.kind == StopReplica) matchesAction(receipt, debt.stopAction)
+            else debt.stopped != None and matchesAction(receipt, debt.retireAction)
+          }
+      }
+  }
+
   pure def canRecordReceipt(meta: MetadataState, receipt: Receipt): bool =
     if (not(meta.grants.keys().contains(receipt.grant))) false else and {
-      receiptIdentifiesGrant(meta.grants.get(receipt.grant), receipt),
+      receiptIdentifiesGrant(meta.grants.get(receipt.grant), receipt), cleanupReceiptAllowed(meta, receipt),
+      match receipt.effect { | Some(e) => e.kind != RemoveMember or removalDebt(meta, receipt) != None or
+          (match receipt.target { | Some(key) => meta.cleanup.keys().contains(key) | None => false }) | None => true },
       meta.effectReceipts.forall(old => not(sameReceiptSlot(old, receipt)) or old == receipt),
       meta.fenceEvidence.forall(fence => receiptFitsFence(receipt, fence)),
     }
 
-  pure def recordReceipt(meta: MetadataState, receipt: Receipt): MetadataState =
-    { ...meta, effectReceipts: meta.effectReceipts.union(Set(receipt)) }
+  pure def matchesAction(receipt: Receipt, approved: Option[ApprovedAction]): bool = match approved {
+    | None => false
+    | Some(a) => match receipt.effect { | Some(e) => e.operation == a.operation and e.step == a.step.seq and
+        e.kind == a.step.kind and e.target == a.step.target | None => false }
+  }
+
+  pure def recordReceipt(meta: MetadataState, receipt: Receipt): MetadataState = {
+    val retained = match removalDebt(meta, receipt) {
+      | Some(debt) => if (meta.cleanup.keys().contains(debt.identity)) meta.cleanup else meta.cleanup.put(debt.identity, debt)
+      | None => meta.cleanup }
+    val debts = match receipt.target {
+      | Some(key) => if (not(retained.keys().contains(key))) retained else retained.setBy(key, debt => { ...debt,
+          stopped: if (debt.stopped == None and matchesAction(receipt, debt.stopAction)) Some(receipt) else debt.stopped,
+          retired: if (debt.retired == None and matchesAction(receipt, debt.retireAction)) Some(receipt) else debt.retired })
+      | None => retained }
+    { ...meta, effectReceipts: meta.effectReceipts.union(Set(receipt)), cleanup: debts }
+  }
 
   // Consumption of a transfer command is not completion of the transfer or
   // settlement of resumable intent. Those require separate checks below.
@@ -217,13 +268,34 @@ module grants {
 
   pure def canIssueStep(meta: MetadataState, approved: ApprovedAction): bool = {
     val existing = actionGrants(meta, approved)
-    exactStep(meta, approved) and approved.step.kind != WaitCatchUp and
+    exactStep(meta, approved) and Admission::preparationAllowed(meta, approved) and
+      (match approved.step.target { | ReplicaTarget(key) => key.group != "_meta" or approved.step.kind != RemoveMember or
+          Completion::metaEvacuated(meta, key) | _ => true }) and approved.step.kind != WaitCatchUp and
       (if (existing.size() > 0) existing.size() == 1 and currentForIssuance(meta, existing.getOnlyElement())
        else resourcesAvailable(meta, approved.step.resources))
   }
 
   pure def issueStep(meta: MetadataState, approved: ApprovedAction, revision: int): MetadataState =
     if (actionGrants(meta, approved).size() > 0) meta else install(meta, stepGrant(meta, approved, revision))
+
+  pure def canIssueCleanupStop(meta: MetadataState, a: ApprovedAction): bool = match a.step.target {
+    | GroupTarget(_) => false
+    | ReplicaTarget(key) => if (key.group == "_meta" or a.step.kind != StopReplica or not(meta.cleanup.keys().contains(key))) false else {
+        val debt = meta.cleanup.get(key)
+        val existing = actionGrants(meta, a).filter(g => currentForIssuance(meta, g))
+        debt.stopAction == Some(a) and
+          (not(meta.target.groups.keys().contains(key.group)) or not(meta.target.groups.get(key.group).replicas.exists(r => r.key == key))) and
+          (existing.size() == 1 or (existing.size() == 0 and debt.stopped == None and resourcesAvailable(meta, a.step.resources)))
+      }
+  }
+
+  pure def issueCleanupStop(meta: MetadataState, a: ApprovedAction, revision: int): MetadataState = {
+    val existing = actionGrants(meta, a).filter(g => currentForIssuance(meta, g))
+    val grant = if (existing.size() > 0) existing.getOnlyElement() else stepGrant(meta, a, revision)
+    val key = match a.step.target { | ReplicaTarget(r) => r | _ => grant.targets.getOnlyElement() }
+    val installed = if (existing.size() > 0) meta else install(meta, grant)
+    { ...installed, cleanup: installed.cleanup.setBy(key, debt => { ...debt, stopGrant: Some(grant.key) }) }
+  }
 
   // Closure does not pretend an offline resource has installed its fence.
   // One fence per affected group is shared by exact resource obligations.

@@ -123,7 +123,7 @@ module types {
     identity: ReplicaKey, sourceOperation: AttemptKey, storage: StorageClass,
     // Approval retains exact obligations before any execution grant is issued.
     stopAction: Option[ApprovedAction], retireAction: Option[ApprovedAction],
-    stopGrant: Option[GrantKey], stopped: Option[Receipt], retired: Option[Receipt],
+    stopGrant: Option[GrantKey], removed: Option[Receipt], stopped: Option[Receipt], retired: Option[Receipt],
     collected: Option[Receipt], retention: RetentionClass, collectionPhase: CollectionPhase,
   }
   type CollectionState = {
@@ -132,6 +132,10 @@ module types {
   type SessionKey = { owner: ProcessKey, generation: int }
   type SessionPhase = Live | ExpiredObserved | Revoked
   type Session = { owner: ProcessKey, member: int, phase: SessionPhase, renewalGeneration: int }
+  type ProcessAdmission = { owner: ProcessKey, replica: ReplicaKey, operation: AttemptKey, origin: Option[AttemptKey], ready: bool }
+  type JoinOffer = { admission: ProcessAdmission, proofIndex: int }
+  type AdmissionCommand = BindAdmission({ admission: ProcessAdmission, previous: Option[ProcessKey] })
+    | ReadyAdmission(ProcessAdmission)
   type MetadataState = {
     latest: Document, target: Document, history: int -> Document,
     groups: GroupId -> GroupProgress, nodes: NodeName -> NodeProgress,
@@ -145,9 +149,13 @@ module types {
     authorityFloors: ResourceKey -> GrantKey, closedGrants: Set[GrantKey],
     effectReceipts: Set[Receipt], fenceEvidence: Set[FenceEvidence],
     couriers: NodeName -> { process: ProcessKey, member: int },
+    admissions: NodeName -> ProcessAdmission,
   }
   type CatchUpClass = Behind | CaughtUp | CatchUpUnknown
-  type NativeChange = { kind: ActionKind, target: ReplicaKey, sourceConfig: int }
+  type NativeChange = {
+    kind: ActionKind, target: ReplicaKey, sourceConfig: int,
+    evidence: ConsumptionEvidence, live: Set[ReplicaKey],
+  }
   type ConsensusState = {
     lineage: str, configRevision: int, voters: Set[ReplicaKey], learners: Set[ReplicaKey],
     leaderAuthority: Option[ReplicaKey], committedPosition: int,
@@ -247,10 +255,12 @@ module types {
   type StageCommand = { request: MutationRequest, desired: Document }
   type SessionCommand = GrantInternalSession({ key: SessionKey, member: int })
     | BindInternalSession(SessionKey) | RevokeInternalSession(SessionKey)
-  type ControlCommand = SessionControl(SessionCommand) | BeginBlock({ operation: AttemptKey, group: GroupId })
-    | IssueEffect(ApprovedAction) | IssueTransfer({ target: ReplicaKey, request: RequestKey, sourceVersion: int })
+  type ControlCommand = AdmissionControl(AdmissionCommand) | SessionControl(SessionCommand) | BeginBlock({ operation: AttemptKey, group: GroupId })
+    | IssueEffect(ApprovedAction) | IssueCleanupStop(ApprovedAction) | IssueTransfer({ target: ReplicaKey, request: RequestKey, sourceVersion: int })
     | RecordEffect(Receipt) | RecordFence(FenceEvidence)
     | CompleteStep({ approved: ApprovedAction, observedLeader: Option[ReplicaKey] })
+    | CompleteCatchUp(ApprovedAction)
+    | RecordStepStatus({ approved: ApprovedAction, phase: OperationPhase, reason: Option[BlockReason] })
   type MetaCommand = StageProposal(StageCommand) | ApprovalProposal(ApprovalCommand)
     | RetryProposal(RetryCommand) | RepairProposal(RepairCommand) | ControlProposal(ControlCommand)
   type OperationRequest = ApproveVersion(int) | RetryAttempt(AttemptKey) | RepairRequest(MutationRequest)
@@ -294,6 +304,7 @@ module types {
     schedulerCapture: Option[SchedulerCapture],
     operationWork: ProposalKey -> OperationWork,
     waitingEffects: Set[EffectDelivery], authorityReads: int -> int,
+    nativeChecks: GrantKey -> NativeChange, joinOffer: Option[JoinOffer], effectResults: Set[Receipt],
     holds: Set[ReplicaKey], starts: RequestKey -> StartWork,
     fenceWorkers: Set[ResourceKey], metaRunning: bool, stopTimedOut: bool,
     ownLease: SessionPhase, leases: SessionKey -> Lease,
@@ -308,12 +319,14 @@ module types {
     // retained identities keep their initial floor until an explicit grant wins.
     seedAuthority: Set[ReplicaKey],
     collectionMarkers: ReplicaKey -> CollectionState,
-    metaImage: Option[ReadView], metaIndex: int,
+    metaImage: Option[ReadView], metaIndex: int, metaSeen: bool, metaRemoved: Option[ReplicaKey],
   }
   type NodeState = { volatile: ProcessState, durable: HostState }
   type LocalNode = { process_id: NodeName, volatile: ProcessState, durable: HostState }
   type NodeStates = NodeName -> LocalNode
-  type ManagementMessage = ApiCall({ key: RequestKey, request: ApiRequest })
+  type ManagementMessage = JoinRequest({ owner: ProcessKey, member: int })
+    | JoinAccepted(JoinOffer) | JoinPrepared(ProcessAdmission)
+    | ApiCall({ key: RequestKey, request: ApiRequest })
     | ReadProbe(ReadTicket) | ReadAck({ ticket: ReadTicket, index: int })
     | MetaProposal({ key: ProposalKey, coordinator: ProcessKey, forWork: bool, command: MetaCommand })
     | MetaAck({ key: ProposalKey, coordinator: ProcessKey, forWork: bool, index: int, outcome: MutationOutcome })
@@ -321,6 +334,7 @@ module types {
     | SessionProbe({ key: SessionKey, epoch: int, round: int, leader: ProcessKey })
     | SessionProbed({ key: SessionKey, epoch: int, round: int, leader: ProcessKey, observed: ProcessKey, member: int })
     | ExecuteGrant(EffectDelivery)
+    | EffectResult({ delivery: EffectDelivery, receipt: Receipt })
     | OperationCall({ key: ProposalKey, request: OperationRequest })
     | OperationAck({ key: ProposalKey, outcome: MutationOutcome })
   type Channel = MetaChannel | LoadChannel

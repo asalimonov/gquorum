@@ -1,4 +1,9 @@
 module cluster {
+  import managed_stop_steps as Stops from "./managed/stop_steps"
+  import managed_prepare_steps as Preparation from "./managed/prepare_steps"
+  import managed_removal_steps as Removal from "./managed/removal_steps"
+  import metaservice_admission_steps as AdmissionSteps from "./metaservice/admission_steps"
+  import managed_membership_steps as Membership from "./managed/membership_steps"
   import harness_environment_steps as Environment from "./harness/environment_steps"
   import metaservice_transaction_steps as Calls from "./metaservice/transaction_steps"
   import metaservice_operation_steps as Operations from "./metaservice/operation_steps"
@@ -486,25 +491,52 @@ module cluster {
     }
   }
 
-  action checkpointTransfer(node: NodeName, approved: ApprovedAction): bool = {
+  action checkpointEffect(node: NodeName, approved: ApprovedAction): bool = {
     val group = G::groupOf(approved.step.target)
     val c = world.extensions.consensus.get(group)
     all {
-      approved.step.kind == TransferLeadership,
-      M::hasCommitPath(c, world.system, M::linksFor(world.extensions.network, group)),
-      match c.leaderAuthority { | Some(leader) =>
-        M::communicates(M::linksFor(world.extensions.network, group), node, leader.node) | None => false },
+      approved.step.kind != TransferLeadership or (M::hasCommitPath(c, world.system, M::linksFor(world.extensions.network, group)) and
+        match c.leaderAuthority { | Some(leader) =>
+          M::communicates(M::linksFor(world.extensions.network, group), node, leader.node) | None => false }),
       submitControl(node, CompleteStep({ approved: approved, observedLeader: c.leaderAuthority })),
     }
   }
 
+  action checkpointTransfer(node: NodeName, approved: ApprovedAction): bool = all {
+    approved.step.kind == TransferLeadership, checkpointEffect(node, approved),
+  }
+
+  action receiveEffectResult(msg: Envelope): bool =
+    guarded(Receiver::receiveResultEnabled(world, msg), before => Receiver::receiveResultNext(before, msg))
+
+  action reportCachedEffect(node: NodeName, receipt: Receipt): bool = all {
+    world.system.get(node).volatile.effectResults.contains(receipt),
+    submitControl(node, RecordEffect(receipt)),
+  }
+
   action authorityStep = any {
+    nondet node = NODE_POOL.oneOf()
+    nondet msg = world.messages.get(node).oneOf()
+    receiveEffectResult(msg),
+    nondet node = NODE_POOL.filter(n => M::running(world.system.get(n)) and
+      world.system.get(n).volatile.observations.keys().contains("_meta")).oneOf()
+    nondet receipt = world.system.get(node).volatile.effectResults.oneOf()
+    val local = world.extensions.metaLog.get(world.system.get(node).volatile.appliedMetaIndex)
+    all { not(local.effectReceipts.contains(receipt)), reportCachedEffect(node, receipt) },
+    nondet node = NODE_POOL.filter(n => M::running(world.system.get(n)) and
+      world.system.get(n).volatile.observations.keys().contains("_meta")).oneOf()
+    val local = world.extensions.metaLog.get(world.system.get(node).volatile.appliedMetaIndex)
+    nondet operation = local.operations.keys().oneOf()
+    nondet group = local.operations.get(operation).plan.blocks.keys().oneOf()
+    nondet stepIndex = local.operations.get(operation).plan.blocks.get(group).indices().oneOf()
+    val step = local.operations.get(operation).plan.blocks.get(group).nth(stepIndex)
+    checkpointCatchUp(node, { operation: operation, step: step }),
     nondet node = NODE_POOL.filter(n => M::running(world.system.get(n)) and
       world.system.get(n).volatile.observations.keys().contains("_meta")).oneOf()
     val local = world.extensions.metaLog.get(world.system.get(node).volatile.appliedMetaIndex)
     nondet grant = local.grants.values().filter(g => g.purpose == Effect).oneOf()
     match grant.effect { | Some(effect) => match grant.planStep {
-      | Some(step) => checkpointTransfer(node, { operation: effect.operation, step: step })
+      | Some(step) => checkpointEffect(node, { operation: effect.operation, step: step })
       | None => all { false, world' = world } } | None => all { false, world' = world } },
     nondet node = NODE_POOL.filter(n => M::running(world.system.get(n)) and
       world.system.get(n).volatile.observations.keys().contains("_meta")).oneOf()
@@ -560,6 +592,11 @@ module cluster {
   // This subset is useful for reachability checks under healthy communication.
   // It remains part of the same production step relation, with the same state.
   action requestStep = any {
+    nondet caller = NODE_POOL.filter(n => M::running(world.system.get(n)) and world.system.get(n).durable.pin != None).oneOf()
+    nondet node = NODE_POOL.oneOf()
+    nondet edit = Set(AddNode({ name: node, member: 0, state: Active, nodeType: "worker", labels: Map() }),
+      DrainNode(node), ActivateNode(node), ExcludeNode(node), ForceRetireNode({ name: node, reason: "operator" })).oneOf()
+    invoke(caller, Mutate({ edit: edit, options: { ...generatedOptions, approve: true } })),
     nondet node = NODE_POOL.oneOf()
     requestNodeStop(node),
     nondet node = NODE_POOL.oneOf()
@@ -607,6 +644,9 @@ module cluster {
     sessionStep,
     localLifetimeStep,
     authorityStep,
+    membershipStep,
+    admissionStep,
+    cleanupStopStep,
     nondet msg = world.extensions.network.pending.oneOf()
     deliver(msg),
     nondet node = NODE_POOL.oneOf()
@@ -726,6 +766,178 @@ module cluster {
     crash(node),
     nondet node = NODE_POOL.oneOf()
     restart(node),
+  }
+
+  action requestJoin(node: NodeName, seed: NodeName): bool =
+    guarded(AdmissionSteps::requestJoinEnabled(world, node, seed, MAX_DELIVERIES),
+      before => AdmissionSteps::requestJoinNext(before, node, seed))
+
+  action confirmJoin(msg: Envelope): bool =
+    guarded(AdmissionSteps::confirmJoinEnabled(world, msg), before => AdmissionSteps::confirmJoinNext(before, msg))
+
+  action bindJoin(msg: Envelope): bool = match AdmissionSteps::bindCommand(world, msg) {
+    | Some(command) => all { AdmissionSteps::joinApplied(world, msg),
+        submitControl(msg.destination, AdmissionControl(command)) }
+    | None => all { false, world' = world }
+  }
+
+  action replyJoin(msg: Envelope): bool =
+    guarded(AdmissionSteps::replyJoinEnabled(world, msg, MAX_DELIVERIES), before => AdmissionSteps::replyJoinNext(before, msg))
+
+  action receiveJoin(msg: Envelope): bool =
+    guarded(AdmissionSteps::receiveJoinEnabled(world, msg), before => AdmissionSteps::receiveJoinNext(before, msg))
+
+  action pinJoin(node: NodeName): bool =
+    guarded(AdmissionSteps::pinJoinEnabled(world, node), before => AdmissionSteps::pinJoinNext(before, node))
+
+  action startJoinedMeta(node: NodeName): bool =
+    guarded(AdmissionSteps::startJoinedMetaEnabled(world, node), before => AdmissionSteps::startJoinedMetaNext(before, node))
+
+  action prepareMeta(delivery: EffectDelivery): bool =
+    guarded(AdmissionSteps::prepareMetaEnabled(world, delivery, MAX_POSITION), before => AdmissionSteps::prepareMetaNext(before, delivery, MAX_DELIVERIES))
+
+  action reportHostEffect(node: NodeName, receipt: Receipt): bool = match receipt.resource {
+    | HostResource(host) => all {
+        world.system.get(host.node).durable.receipts.contains(receipt),
+        M::running(world.system.get(host.node)),
+        M::communicates(world.extensions.network.metaLinks, node, host.node),
+        submitControl(node, RecordEffect(receipt)),
+      }
+    | _ => all { false, world' = world }
+  }
+
+  action announcePrepared(node: NodeName, seed: NodeName): bool =
+    guarded(AdmissionSteps::announcePreparedEnabled(world, node, seed, MAX_DELIVERIES),
+      before => AdmissionSteps::announcePreparedNext(before, node, seed))
+
+  action acceptPrepared(msg: Envelope): bool = match msg.payload {
+    | JoinPrepared(a) => {
+        val command = AdmissionControl(ReadyAdmission(a))
+        guarded(AdmissionSteps::readyMessage(world, msg) and
+          AuthoritySteps::submitControlEnabled(world, msg.destination, command, MAX_DELIVERIES),
+          before => apply_custom_effect(AuthoritySteps::submitControlNext(before, msg.destination, command, MAX_DELIVERIES), Consume(msg)))
+      }
+    | _ => all { false, world' = world }
+  }
+
+  action checkpointCatchUp(node: NodeName, approved: ApprovedAction): bool = match approved.step.target {
+    | ReplicaTarget(replica) => {
+        val c = world.extensions.consensus.get(replica.group)
+        all { approved.step.kind == WaitCatchUp,
+          c.voters.union(c.learners).contains(replica),
+          M::liveIdentity(world.system, replica), c.catchUp.getOrElse(replica, Behind) == CaughtUp,
+          M::hasCommitPath(c, world.system, M::linksFor(world.extensions.network, replica.group)),
+          match c.leaderAuthority { | Some(leader) =>
+            M::communicates(M::linksFor(world.extensions.network, replica.group), node, leader.node) | None => false },
+          submitControl(node, CompleteCatchUp(approved)) }
+      }
+    | _ => all { false, world' = world }
+  }
+
+  action admissionStep = any {
+    nondet node = NODE_POOL.oneOf()
+    nondet seed = NODE_POOL.oneOf()
+    any { requestJoin(node, seed), announcePrepared(node, seed) },
+    nondet node = NODE_POOL.oneOf()
+    nondet msg = world.messages.get(node).oneOf()
+    any { confirmJoin(msg), bindJoin(msg), replyJoin(msg), receiveJoin(msg), acceptPrepared(msg) },
+    nondet node = NODE_POOL.oneOf()
+    any { pinJoin(node), startJoinedMeta(node) },
+    nondet node = NODE_POOL.oneOf()
+    nondet delivery = world.system.get(node).volatile.waitingEffects.oneOf()
+    prepareMeta(delivery),
+    nondet sender = NODE_POOL.filter(n => M::running(world.system.get(n)) and
+      world.system.get(n).volatile.observations.keys().contains("_meta")).oneOf()
+    nondet host = NODE_POOL.oneOf()
+    nondet receipt = world.system.get(host).durable.receipts.oneOf()
+    val local = world.extensions.metaLog.get(world.system.get(sender).volatile.appliedMetaIndex)
+    all { not(local.effectReceipts.contains(receipt)), reportHostEffect(sender, receipt) },
+  }
+
+  action installNativeAuthority(delivery: EffectDelivery): bool =
+    guarded(Membership::installNativeEnabled(world, delivery, MAX_POSITION),
+      before => Membership::installNativeNext(before, delivery))
+
+  action precheckNative(delivery: EffectDelivery): bool =
+    guarded(Membership::precheckNativeEnabled(world, delivery),
+      before => Membership::precheckNativeNext(before, delivery))
+
+  action proposeNative(delivery: EffectDelivery): bool =
+    guarded(Membership::proposeNativeEnabled(world, delivery),
+      before => Membership::proposeNativeNext(before, delivery))
+
+  action commitNative(group: GroupId): bool =
+    guarded(Membership::commitNativeEnabled(world, group, MAX_POSITION),
+      before => Membership::commitNativeNext(before, group, MAX_DELIVERIES))
+
+  action discardNative(group: GroupId): bool =
+    guarded(Membership::discardNativeEnabled(world, group), before => Membership::discardNativeNext(before, group))
+
+  action replayNative(delivery: EffectDelivery): bool =
+    guarded(Membership::replayNativeEnabled(world, delivery),
+      before => Membership::replayNativeNext(before, delivery))
+
+  action applyRemovedMeta(node: NodeName, receipt: Receipt): bool =
+    guarded(Removal::applyRemovalEnabled(world, node, receipt), before => Removal::applyRemovalNext(before, node, receipt))
+
+  action reportNativeStatus(node: NodeName, delivery: EffectDelivery): bool = match Membership::nativeStatus(world, delivery) {
+    | Some(status) => {
+        val approved = { operation: delivery.grant.effect.unwrap().operation, step: delivery.grant.planStep.unwrap() }
+        val local = world.extensions.metaLog.get(world.system.get(node).volatile.appliedMetaIndex)
+        val group = delivery.grant.key.group
+        if (not(M::running(world.system.get(node))) or
+            not(world.system.get(node).volatile.observations.keys().contains("_meta")) or
+            not(local.operations.keys().contains(approved.operation))) all { false, world' = world } else all {
+          world.system.get(delivery.receiver.node).volatile.waitingEffects.contains(delivery),
+          M::running(world.system.get(delivery.receiver.node)),
+          delivery.sender == { node: node, incarnation: world.system.get(node).volatile.incarnation },
+          M::communicates(M::linksFor(world.extensions.network, group), node, delivery.receiver.node),
+          local.operations.keys().contains(approved.operation),
+          local.operations.get(approved.operation).blocks.get(group) != status,
+          submitControl(node, RecordStepStatus({ approved: approved, phase: status.phase, reason: status.reason })),
+        }
+      }
+    | None => all { false, world' = world }
+  }
+
+  action beginLoadPreparation(delivery: EffectDelivery): bool =
+    guarded(Preparation::beginPrepareEnabled(world, delivery, MAX_REQUESTS, MAX_POSITION),
+      before => Preparation::beginPrepareNext(before, delivery, MAX_REQUESTS))
+
+  action finishLoadPreparation(delivery: EffectDelivery): bool =
+    guarded(Preparation::finishPrepareEnabled(world, delivery, MAX_POSITION),
+      before => Preparation::finishPrepareNext(before, delivery, MAX_DELIVERIES))
+
+  action beginGrantedStop(delivery: EffectDelivery): bool =
+    guarded(Stops::beginStopEnabled(world, delivery, MAX_POSITION), before => Stops::beginStopNext(before, delivery))
+
+  action finishGrantedStop(delivery: EffectDelivery): bool =
+    guarded(Stops::finishStopEnabled(world, delivery, MAX_POSITION), before => Stops::finishStopNext(before, delivery, MAX_DELIVERIES))
+
+  action cleanupStopStep = any {
+    nondet node = NODE_POOL.filter(n => M::running(world.system.get(n)) and
+      world.system.get(n).volatile.observations.keys().contains("_meta")).oneOf()
+    val local = world.extensions.metaLog.get(world.system.get(node).volatile.appliedMetaIndex)
+    nondet key = local.cleanup.keys().filter(r => local.cleanup.get(r).stopped == None and local.cleanup.get(r).stopAction != None).oneOf()
+    submitControl(node, IssueCleanupStop(local.cleanup.get(key).stopAction.unwrap())),
+    nondet node = NODE_POOL.oneOf()
+    nondet delivery = world.system.get(node).volatile.waitingEffects.oneOf()
+    any { beginGrantedStop(delivery), finishGrantedStop(delivery) },
+  }
+
+  action membershipStep = any {
+    nondet node = NODE_POOL.oneOf()
+    nondet delivery = world.system.get(node).volatile.waitingEffects.oneOf()
+    any { beginLoadPreparation(delivery), finishLoadPreparation(delivery) },
+    nondet node = NODE_POOL.oneOf()
+    nondet receipt = world.extensions.consensus.get("_meta").authorityReceipts.oneOf()
+    applyRemovedMeta(node, receipt),
+    nondet node = NODE_POOL.oneOf()
+    nondet delivery = world.system.get(node).volatile.waitingEffects.filter(d => Membership::isNative(d)).oneOf()
+    any { installNativeAuthority(delivery), precheckNative(delivery), proposeNative(delivery), replayNative(delivery),
+      reportNativeStatus(delivery.sender.node, delivery) },
+    nondet group = world.extensions.consensus.keys().oneOf()
+    any { commitNative(group), discardNative(group) },
   }
 
   action nativeStep = any {

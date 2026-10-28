@@ -95,7 +95,7 @@ w.extensions.nextDelivery <= MAX_DELIVERIES
   pure def crashEnabled(w: World, node: NodeName): bool = {
     val owner = w.system.get(node)
     and {
-      M::running(owner)
+      Set(Ready, Starting, Stopping, Fenced).contains(owner.volatile.phase)
     }
   }
 
@@ -103,7 +103,7 @@ w.extensions.nextDelivery <= MAX_DELIVERIES
     val owner = w.system.get(node)
     ({ ...w,
         system: w.system.put(node, { ...owner, volatile: { ...owner.volatile,
-          phase: Stopped, pendingCalls: Map(), owners: Map(), observations: Map(), operationWork: Map(), waitingEffects: Set(), authorityReads: Map(), holds: Set(), starts: Map(), fenceWorkers: Set(), metaRunning: false, stopTimedOut: false, ownLease: Revoked, leases: Map(), renewal: None, renewalExpired: false, revokeGate: None,
+          phase: Stopped, pendingCalls: Map(), owners: Map(), observations: Map(), operationWork: Map(), waitingEffects: Set(), authorityReads: Map(), nativeChecks: Map(), joinOffer: None, effectResults: Set(), holds: Set(), starts: Map(), fenceWorkers: Set(), metaRunning: false, stopTimedOut: false, ownLease: Revoked, leases: Map(), renewal: None, renewalExpired: false, revokeGate: None,
           session: None, schedulerCapture: None, appliedMetaIndex: 0, appliedMetaVersion: 0,
           localView: { latest: I::emptyDocument, target: I::emptyDocument } } }),
         messages: w.messages.put(node, Set()),
@@ -128,10 +128,11 @@ w.extensions.nextDelivery <= MAX_DELIVERIES
       | None => { latest: I::emptyDocument, target: I::emptyDocument }
     }
     (Frames::withNode(w, node, _ => { ...owner,
-        volatile: { ...owner.volatile, phase: Starting, metaRunning: owner.durable.pin != None, stopTimedOut: false,
+        volatile: { ...owner.volatile, phase: if (owner.durable.metaRemoved == None) Starting else Fenced,
+          metaRunning: owner.durable.pin != None and owner.durable.metaRemoved == None, stopTimedOut: false,
           owners: Map(), starts: Map(), holds: Set(), session: None, ownLease: Revoked,
           renewal: None, renewalExpired: false, leases: Map(), revokeGate: None,
-          fenceWorkers: Set(), authorityReads: Map(), waitingEffects: Set(), pendingCalls: Map(),
+          fenceWorkers: Set(), authorityReads: Map(), nativeChecks: Map(), joinOffer: None, effectResults: Set(), waitingEffects: Set(), pendingCalls: Map(),
           observations: Map(), operationWork: Map(),
           incarnation: owner.volatile.incarnation + 1,
           localView: view,

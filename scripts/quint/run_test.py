@@ -33,6 +33,41 @@ class RunnerTests(unittest.TestCase):
     def result(self, code=0, **kwargs):
         return runner.CommandResult(["quint"], code, 0.1, "stdout", "stderr", **kwargs)
 
+    def test_repl_requires_exact_nonempty_boolean_results(self):
+        out, err = self.directory / "stdout", self.directory / "stderr"
+        result = runner.CommandResult(["quint", "repl"], 0, 0, str(out), str(err))
+        err.write_text("")
+        for output, outcome in [("true\n", "tests-pass"), ("false\n", "test-failure"),
+                                ("", "infrastructure-error"), ("true\ntrue\n", "infrastructure-error"),
+                                ("Error [QNT404]: absent\ntrue\n", "infrastructure-error"),
+                                ("runtime error: Error [QNT511]: assertion failed\n", "test-failure")]:
+            out.write_text(output)
+            self.assertEqual(runner.classify_repl(result, ["longTest"]), outcome)
+        out.write_text("true\n")
+        err.write_text("fatal error")
+        self.assertEqual(runner.classify_repl(result, ["longTest"]), "infrastructure-error")
+        result.timed_out = True
+        self.assertEqual(runner.classify_repl(result, ["longTest"]), "incomplete")
+
+    def test_exclusion_requires_an_explicit_repl_witness(self):
+        profile = copy.deepcopy(self.profile)
+        profile.data["backend"] = "rust"
+        entry = profile.data["tests"][0]
+        entry["exclude"] = ["longTest"]
+        with self.assertRaises(runner.ProfileError):
+            runner.validate_profile(profile, runner.MODEL_ROOT)
+        profile.data["tests"].append({"file": entry["file"], "main": entry["main"],
+                                     "expected": ["longTest"], "mode": "repl"})
+        runner.validate_profile(profile, runner.MODEL_ROOT)
+        commands = runner.build_commands(profile, "test", 1)
+        self.assertIn("--match", commands[1])
+        self.assertEqual(commands[-1][1], "repl")
+        self.assertEqual(commands[-1][-1], "longTest")
+        self.assertNotIn("--out-itf", commands[-1])
+        profile.data["tests"][-1]["expected"] = ["true"]
+        with self.assertRaises(runner.ProfileError):
+            runner.validate_profile(profile, runner.MODEL_ROOT)
+
     def test_profile_and_explicit_sample_counts(self):
         runner.validate_profile(self.profile, runner.MODEL_ROOT)
         commands = runner.build_commands(self.profile, "simulate", 42)
@@ -46,6 +81,7 @@ class RunnerTests(unittest.TestCase):
         changes = [
             {"tests": []}, {"properties": []}, {"bounds": {}}, {"bounds": {"nodes": True}},
             {"max_samples": 0}, {"max_steps": -1}, {"timeout_seconds": False},
+            {"node_heap_mb": True}, {"node_heap_mb": 0}, {"node_heap_mb": 999999},
             {"quint_version": "latest"}, {"schema_version": 99}, {"backend": "unknown"},
             {"instance": "../../../go.mod"}, {"main": "x; touch bad"},
             {"temporal": ["progress"], "verification_backend": "apalache"},
