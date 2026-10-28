@@ -1,4 +1,6 @@
 module cluster {
+  import metaservice_scheduler_steps as Scheduler from "./metaservice/scheduler_steps"
+  import scheduling_policy as SchedulerPolicy from "./scheduling/policy"
   import managed_readmission_steps as Readmit from "./managed/readmission_steps"
   import metaservice_readmission_steps as ReadmitService from "./metaservice/readmission_steps"
   import managed_retirement_steps as Retire from "./managed/retirement_steps"
@@ -62,6 +64,7 @@ module cluster {
     if (canRun) world' = update(world) else all { false, world' = world }
 
   action init = world' = I::worldFor(NODE_POOL, FOUNDERS, LOAD_IDS, INITIAL_LEADER)
+  action initScoped = world' = I::schedulerWorld(NODE_POOL, FOUNDERS, LOAD_IDS, INITIAL_LEADER)
 
   action invoke(node: NodeName, request: ApiRequest): bool = {
     guarded(Environment::invokeEnabled(world, node, request, MAX_REQUESTS, MAX_DELIVERIES), before => Environment::invokeNext(before, node, request, MAX_REQUESTS, MAX_DELIVERIES))
@@ -188,7 +191,7 @@ module cluster {
   }
 
   action elect(group: GroupId, candidate: ReplicaKey): bool = {
-    guarded(Native::electEnabled(world, group, candidate), before => Native::electNext(before, group, candidate))
+    guarded(world.extensions.consensus.get(group).leadershipEpoch < MAX_POSITION and Native::electEnabled(world, group, candidate), before => Native::electNext(before, group, candidate))
   }
 
   action catchUp(group: GroupId, replica: ReplicaKey): bool = {
@@ -600,6 +603,9 @@ module cluster {
   // It remains part of the same production step relation, with the same state.
   action requestStep = any {
     nondet node = NODE_POOL.oneOf()
+    nondet value = Set(true, false).oneOf()
+    setSchedulingEnabled(node, value),
+    nondet node = NODE_POOL.oneOf()
     nondet seed = NODE_POOL.oneOf()
     requestReadmissionJoin(node, seed),
     nondet caller = NODE_POOL.filter(n => M::running(world.system.get(n))).oneOf()
@@ -661,6 +667,7 @@ module cluster {
   }
 
   action protocolStep = any {
+    schedulerStep,
     sessionStep,
     localLifetimeStep,
     authorityStep,
@@ -1098,5 +1105,52 @@ module cluster {
     nondet receipt = world.system.get(host).durable.receipts.filter(r => r.admission != None).oneOf()
     nondet courier = NODE_POOL.filter(n => M::running(world.system.get(n))).oneOf()
     reportHostEffect(courier, receipt),
+  }
+
+  action setSchedulingEnabled(node: NodeName, value: bool): bool =
+    guarded(Scheduler::toggleEnabled(world, node, value), before => Scheduler::toggleNext(before, node, value))
+  action startScheduler(node: NodeName): bool =
+    guarded(Scheduler::startEnabled(world, node), before => Scheduler::startNext(before, node))
+  action captureScheduler(node: NodeName): bool =
+    guarded(Scheduler::captureEnabled(world, node), before => Scheduler::captureNext(before, node))
+  action sampleSchedulerGroup(node: NodeName, group: GroupId): bool =
+    guarded(Scheduler::sampleEnabled(world, node, group), before => Scheduler::sampleNext(before, node, group))
+  action callScheduler(node: NodeName): bool =
+    guarded(Scheduler::callEnabled(world, node), before => Scheduler::callNext(before, node))
+  action returnScheduler(node: NodeName): bool =
+    guarded(Scheduler::returnEnabled(world, node), before => Scheduler::returnNext(before, node,
+      SchedulerPolicy::choose(before.system.get(node).volatile.schedulerCapture.unwrap().input.unwrap(),
+        before.system.get(node).volatile.schedulerCursor, rules.groupOrder, rules.nodeOrder)))
+  action recheckScheduler(node: NodeName, finalRead: bool): bool =
+    guarded(Scheduler::readEnabled(world, node, finalRead), before => Scheduler::readNext(before, node, finalRead))
+  action refreshScheduler(node: NodeName): bool =
+    guarded(Scheduler::refreshEnabled(world, node), before => Scheduler::refreshNext(before, node))
+  action observeSchedulerRepair(node: NodeName): bool =
+    guarded(Scheduler::observeFreshEnabled(world, node), before => Scheduler::observeFreshNext(before, node))
+  action planSchedulerRepair(node: NodeName): bool =
+    guarded(Scheduler::buildEnabled(world, node), before => Scheduler::buildNext(before, node, rules))
+  action validateSchedulerRepair(node: NodeName): bool =
+    guarded(Scheduler::validateEnabled(world, node), before => Scheduler::validateNext(before, node))
+  action submitSchedulerRepair(node: NodeName): bool =
+    guarded(Scheduler::submitEnabled(world, node, MAX_DELIVERIES), before => Scheduler::submitNext(before, node))
+  action receiveSchedulerResult(msg: Envelope): bool =
+    guarded(Scheduler::ackEnabled(world, msg), before => Scheduler::ackNext(before, msg))
+  action releaseScheduler(node: NodeName): bool =
+    guarded(Scheduler::releaseEnabled(world, node), before => Scheduler::releaseNext(before, node))
+  action timeoutScheduler(node: NodeName): bool =
+    guarded(Scheduler::timeoutEnabled(world, node), before => Scheduler::timeoutNext(before, node))
+
+  action schedulerStep = any {
+    nondet node = NODE_POOL.oneOf()
+    any { startScheduler(node), captureScheduler(node), callScheduler(node), returnScheduler(node),
+      recheckScheduler(node, false), refreshScheduler(node), observeSchedulerRepair(node), planSchedulerRepair(node),
+      recheckScheduler(node, true), validateSchedulerRepair(node), submitSchedulerRepair(node), releaseScheduler(node), timeoutScheduler(node) },
+    nondet node = NODE_POOL.filter(n => world.system.get(n).volatile.schedulerCapture != None and
+      world.system.get(n).volatile.schedulerCapture.unwrap().input != None).oneOf()
+    nondet group = world.system.get(node).volatile.schedulerCapture.unwrap().input.unwrap().target.groups.keys().oneOf()
+    sampleSchedulerGroup(node, group),
+    nondet node = NODE_POOL.oneOf()
+    nondet msg = world.messages.get(node).oneOf()
+    receiveSchedulerResult(msg),
   }
 }

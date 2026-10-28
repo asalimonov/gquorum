@@ -1,4 +1,5 @@
 module transactions {
+  import scheduler_repair as Scheduler from "../metaengine/scheduler_repair"
   import types.* from "../types"
   import basicSpells.* from "../vendor/spells/basicSpells"
   import authority as A from "../metaengine/authority"
@@ -73,6 +74,7 @@ module transactions {
       | ApprovalProposal(approval) => A::approvalErrors(meta, approval, rules)
       | RetryProposal(retry) => A::retryErrors(meta, retry)
       | RepairProposal(repair) => Repair::errors(meta, repair, rules)
+      | SchedulerProposal(command) => Scheduler::errors(meta, command, rules)
       | ControlProposal(control) => Ctrl::errors(meta, control)
     }
   pure def applyCommand(meta: MetadataState, command: MetaCommand): MetadataState =
@@ -81,6 +83,7 @@ module transactions {
       | ApprovalProposal(approval) => A::applyApproval(meta, approval)
       | RetryProposal(retry) => A::applyRetry(meta, retry)
       | RepairProposal(repair) => Repair::applyRepair(meta, repair)
+      | SchedulerProposal(command) => Scheduler::apply(meta, command)
       | ControlProposal(_) => meta // Applied with the metadata commit index below.
     }
   pure def applyAt(meta: MetadataState, command: MetaCommand, revision: int): MetadataState =
@@ -91,6 +94,7 @@ module transactions {
 
   pure def commandOutcome(meta: MetadataState, command: MetaCommand): MutationOutcome =
     match command {
+      | SchedulerProposal(command) => A::stageOutcome(Scheduler::apply(meta, command), command.approval.desired.version)
       | ControlProposal(_) => A::refused(Set())
       | StageProposal(stage) => A::acceptedStage(meta, stage)
       | ApprovalProposal(approval) => A::stageOutcome(A::applyApproval(meta, approval), approval.desired.version)

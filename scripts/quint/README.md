@@ -38,7 +38,7 @@ Quint 0.33.0's machine-readable simulation output omits witness counts. The mani
 
 ## Composition and module ownership
 
-`cluster.qnt` owns the only mutable `world`, stable named action adapters and exploration selectors. `types.qnt` contains the unchanged data catalogue; `runtime/world.qnt` provides Choreo aliases without another state instance. Pure subsystem functions receive World explicitly. Choreo's unused state/display actions are not invoked.
+`cluster.qnt` owns the only mutable `world`, stable named action adapters and exploration selectors. `types.qnt` contains the shared data catalogue; `runtime/world.qnt` provides Choreo aliases without another state instance. Pure subsystem functions receive World explicitly. Choreo's unused state/display actions are not invoked.
 
 | Location | Responsibility |
 | --- | --- |

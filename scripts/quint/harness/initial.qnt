@@ -1,4 +1,5 @@
 module initial {
+  import topology as T from "../topology/topology"
   import types.* from "../types"
   import world_types.* from "../runtime/world"
   import basicSpells.* from "../vendor/spells/basicSpells"
@@ -50,8 +51,10 @@ module initial {
     doc.groups.keys().mapBy(g => {
       val replicas = doc.groups.get(g).replicas.map(r => r.key)
       {
-        lineage: doc.cluster, configRevision: 1, voters: replicas, learners: Set(),
-        leaderAuthority: Some(replicas.filter(r => r.node == leader).getOnlyElement()),
+        lineage: doc.cluster, configRevision: 1,
+        voters: doc.groups.get(g).replicas.filter(r => r.role == Voter).map(r => r.key),
+        learners: doc.groups.get(g).replicas.filter(r => r.role == Learner).map(r => r.key),
+        leadershipEpoch: 1, leaderAuthority: Some(replicas.filter(r => r.node == leader).getOnlyElement()),
         committedPosition: 1, appliedPositions: replicas.mapBy(_ => 1),
         catchUp: replicas.mapBy(_ => CaughtUp), pendingChange: None,
         authorityFloor: 0, authorityReceipts: Set(), authorityFences: Set(),
@@ -82,7 +85,7 @@ module initial {
             process: { node: n, incarnation: 1 }, waiters: Set(), callbackExpired: false, closeExpired: false,
             replayOutstanding: false, startDeclaration: Some(doc.groups.get(g)), authorityRevision: 1, scopeIndex: 1 }
         }),
-        session: if (admitted) Some({ owner: { node: n, incarnation: 1 }, generation: 1 }) else None, schedulerEnabled: true, serveOverride: 0, schedulerCapture: None, operationWork: Map(), waitingEffects: Set(), authorityReads: Map(), nativeChecks: Map(), joinOffer: None, effectResults: Set(), holds: Set(), starts: Map(), fenceWorkers: Set(), metaRunning: admitted, stopTimedOut: false,
+        session: if (admitted) Some({ owner: { node: n, incarnation: 1 }, generation: 1 }) else None, schedulerEnabled: true, serveOverride: 0, schedulerCapture: None, schedulerCursor: None, operationWork: Map(), waitingEffects: Set(), authorityReads: Map(), nativeChecks: Map(), joinOffer: None, effectResults: Set(), holds: Set(), starts: Map(), fenceWorkers: Set(), metaRunning: admitted, stopTimedOut: false,
         ownLease: if (admitted) Live else Revoked, leases: Map(), renewal: None, renewalExpired: false, revokeGate: None, retirementWork: Map(), collectionRequests: Map(), collectionAcks: Set(), retentionEligible: Set(), readmissionOffer: None, handoverJoined: false,
       },
       durable: {
@@ -98,7 +101,22 @@ module initial {
   // fresh startup and group creation use their own transitions in Tasks 7–9.
   pure def worldFor(pool: Set[NodeName], founders: NodeName -> int,
                     loads: Set[GroupId], leader: NodeName): World = {
-    val doc = declarations(founders, loads)
+    worldFromDocument(pool, declarations(founders, loads), leader)
+  }
+
+  // Fixed established snapshot: configured a is one voter below its target;
+  // its retained unpinned learner is already caught up. No policy tuning or
+  // metric-fault operation creates this state inside the simulation.
+  pure def schedulerWorld(pool: Set[NodeName], founders: NodeName -> int,
+                          loads: Set[GroupId], leader: NodeName): World = {
+    val base = declarations(founders, loads)
+    val configured = { ...base, groups: base.groups.setBy("a", group => { ...group,
+      hosting: Some({ mode: AllEligible, selectedNodes: List() }), voterConfig: Some(T::defaultVoterConfig),
+      replicas: group.replicas.map(r => if (r.key.node == "n3") { ...r, role: Learner } else r) }) }
+    worldFromDocument(pool, configured, leader)
+  }
+
+  pure def worldFromDocument(pool: Set[NodeName], doc: Document, leader: NodeName): World = {
     val native = consensus(doc, leader)
     val meta = metadata(doc)
     val links = pool.map(a => pool.map(b => (a, b))).flatten()
@@ -109,8 +127,8 @@ module initial {
         network: { metaLinks: links, loadLinks: links, pending: Set(), delivered: Set() },
         nextDelivery: 1, metadata: meta, consensus: native, recovery: Map(),
         storageConfig: pool.mapBy(_ => { defaultBackend: OwnedWAL }),
-        consumptions: Set(), deletionObligations: Map(),
-        metaLog: Map(0 -> metadata(emptyDocument)).put((if (founders.keys().size() > 0) 1 else 0), meta),
+        consumptions: Set(), deletionObligations: Map(), schedulerSubmissions: Set(),
+        metaLog: Map(0 -> metadata(emptyDocument)).put((if (doc.version > 0) 1 else 0), meta),
       },
     }
   }

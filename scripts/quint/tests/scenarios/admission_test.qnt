@@ -94,20 +94,6 @@ module admission_test {
     step: world.extensions.metadata.operations.get(joinAttempt).plan.blocks.get("_meta").select(s => s.kind == kind).head() }
   val freshMetaReplica = world.extensions.metadata.target.groups.get("_meta").replicas.filter(r => r.key.node == joinNode).getOnlyElement().key
 
-  action reportAndCheckpoint(approved: ApprovedAction): bool = {
-    val grant = JoinGrants::actionGrants(world.extensions.metadata, approved).getOnlyElement()
-    nondet receipt = world.system.values().map(n => n.durable.receipts).flatten().union(
-      world.extensions.consensus.get(grant.key.group).authorityReceipts).filter(r => r.grant == grant.key).oneOf()
-    (match receipt.resource {
-      | HostResource(_) => reportHostEffect("n1", receipt)
-      | GroupResource(group) => reportNative("n1", group, RecordEffect(receipt))
-    }).then(controlCommit(RecordEffect(receipt))).then(applyMeta("n1"))
-      .then(checkpointEffect("n1", approved))
-      .then(controlCommit(CompleteStep({ approved: approved,
-        observedLeader: world.extensions.consensus.get(grant.key.group).leaderAuthority })))
-      .then(applyMeta("n1"))
-  }
-
   action readyJoin = announcePrepared(joinNode, "n1").then({
     nondet msg = world.extensions.network.pending.filter(m => match m.payload {
       | JoinPrepared(a) => a.owner.node == joinNode | _ => false }).oneOf()

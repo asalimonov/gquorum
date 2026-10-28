@@ -55,7 +55,7 @@ module consensus_steps {
             w.extensions.metaLog.get(node.volatile.appliedMetaIndex).sessions.get(k).phase == Live).mapBy(_ => Sessions::freshLease) } })
           else w.system,
         extensions: { ...w.extensions,
-          consensus: w.extensions.consensus.put(group, { ...c, leaderAuthority: Some(candidate) }) } })
+          consensus: w.extensions.consensus.put(group, { ...c, leaderAuthority: Some(candidate), leadershipEpoch: c.leadershipEpoch + 1 }) } })
   }
 
   pure def catchUpEnabled(w: World, group: GroupId, replica: ReplicaKey): bool = {

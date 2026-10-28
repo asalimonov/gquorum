@@ -11,13 +11,8 @@ module scaling_helpers {
   pure def scaleAttempt(version: int): AttemptKey = { version: version, attempt: 1 }
   def scaleStep(version: int, kind: ActionKind): ApprovedAction = { operation: scaleAttempt(version),
     step: world.extensions.metadata.operations.get(scaleAttempt(version)).plan.blocks.get("_meta").select(s => s.kind == kind).head() }
-  def metaReplica(node: NodeName): ReplicaKey = world.extensions.metadata.target.groups.get("_meta").replicas.filter(r => r.key.node == node).getOnlyElement().key
-
   // Scenario orchestration only: all production phases remain separately
   // selectable and every state update is through the shared model facade.
-  action syncMeta(node: NodeName): bool = if (world.system.get(node).volatile.appliedMetaIndex <
-    world.extensions.consensus.get("_meta").committedPosition) applyMeta(node) else { world' = world }
-
   action approveScaleEdit(edit: DocumentEdit, sequence: int, version: int): bool = {
     val key = scaleKey(sequence)
     val work = { request: key, sequence: 1 }
@@ -57,60 +52,6 @@ module scaling_helpers {
       | _ => AdmissionControl(ReadyAdmission(world.extensions.metadata.admissions.get(node))) }
     deliver(msg).then(acceptPrepared(msg)).then(controlCommit(command))
   }).then(applyMeta("n1"))
-
-  action runNativeApproved(approved: ApprovedAction): bool = {
-    val group = SG::groupOf(approved.step.target)
-    commitAndApplyControl(IssueEffect(approved)).then({
-      val grant = SG::actionGrants(world.extensions.metadata, approved).getOnlyElement()
-      dispatchGrant("n1", grant.key, GroupResource(group))
-    }).then(receiveQueuedGrant).then({
-      nondet delivery = world.system.get("n1").volatile.waitingEffects.filter(d => d.grant.planStep == Some(approved.step)).oneOf()
-      installNativeAuthority(delivery).then(if (approved.step.kind == PromoteLearner)
-        catchUp(group, (match approved.step.target { | ReplicaTarget(r) => r | _ => metaReplica("n1") })) else { world' = world })
-        .then(precheckNative(delivery)).then(proposeNative(delivery))
-    }).then(commitNative(group)).then(reportAndCheckpoint(approved)).expect(safety)
-  }
-
-  action runMetaStep(approved: ApprovedAction): bool = match approved.step.kind {
-    | PrepareReplica => commitAndApplyControl(IssueEffect(approved)).then({
-        val grant = SG::actionGrants(world.extensions.metadata, approved).getOnlyElement()
-        nondet resource = grant.resources.oneOf()
-        dispatchGrant("n1", grant.key, resource)
-      }).then(receiveQueuedGrant).then({
-        val target = match approved.step.target { | ReplicaTarget(r) => r.node | _ => "" }
-        nondet delivery = world.system.get(target).volatile.waitingEffects.filter(d => d.grant.planStep == Some(approved.step)).oneOf()
-        if (delivery.grant.key.group == "_meta") prepareMeta(delivery) else
-          syncMeta(target).then(beginLoadPreparation(delivery)).then({
-            nondet work = world.system.get(target).volatile.starts.keys().filter(k =>
-              world.system.get(target).volatile.starts.get(k).key == delivery.replica).oneOf()
-            readStartScope(work).then(reserveOwner(work)).then(startupBody(target, delivery.grant.key.group))
-              .then(replyStart(work)).then(finishLoadPreparation(delivery))
-          })
-      }).then(reportAndCheckpoint(approved))
-    | WaitCatchUp => {
-        val replica = match approved.step.target { | ReplicaTarget(r) => r | _ => metaReplica("n1") }
-        catchUp(replica.group, replica).then(checkpointCatchUp("n1", approved))
-          .then(controlCommit(CompleteCatchUp(approved))).then(applyMeta("n1"))
-      }
-    | AddLearner => runNativeApproved(approved)
-    | PromoteLearner => runNativeApproved(approved)
-    | DemoteVoter => runNativeApproved(approved)
-    | RemoveMember => runNativeApproved(approved)
-    | _ => all { false, world' = world }
-  }
-
-  action executeGroupBlock(version: int, group: GroupId): bool = {
-    val key = scaleAttempt(version)
-    val steps = world.extensions.metadata.operations.get(key).plan.blocks.get(group)
-    (if (steps.length() == 0) { world' = world } else
-      (if (world.extensions.metadata.operations.get(key).blocks.get(group).phase == OpPending)
-        commitAndApplyControl(BeginBlock({ operation: key, group: group })) else { world' = world })
-        .then(8.reps(i => if (i < steps.length()) runMetaStep({ operation: key, step: steps.nth(i) }) else { world' = world })))
-      .expect(steps.length() <= 8)
-      .expect(world.extensions.metadata.operations.get(key).blocks.get(group).phase == OpSucceeded)
-  }
-
-  action executeMetaBlock(version: int): bool = executeGroupBlock(version, "_meta")
 
   action activateJoinedNode(node: NodeName): bool = {
     val session: SessionKey = { owner: { node: node, incarnation: world.system.get(node).volatile.incarnation }, generation: 1 }

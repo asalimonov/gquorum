@@ -14,7 +14,7 @@ module founding {
   // This initializes configuration, not a leader, quorum commit or completion.
   pure def initial(grant: Grant): ConsensusState = {
     lineage: grant.key.cluster, configRevision: 1, voters: grant.targets, learners: Set(),
-    leaderAuthority: None, committedPosition: 0,
+    leaderAuthority: None, leadershipEpoch: 0, committedPosition: 0,
     appliedPositions: grant.targets.mapBy(_ => 0), catchUp: grant.targets.mapBy(_ => Behind), pendingChange: None,
     authorityFloor: grant.key.revision, authorityReceipts: Set(), authorityFences: Set(),
   }

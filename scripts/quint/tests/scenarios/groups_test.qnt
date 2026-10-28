@@ -2,11 +2,11 @@ module groups_test {
   import properties as GroupChecks from "../../harness/properties"
   import types.* from "../../types"
   import basicSpells.* from "../../vendor/spells/basicSpells"
-  import lifetime_test.* from "./lifetime_test"
+  import native_helpers.* from "./native_helpers"
   import operations as Work from "../../metaservice/operations"
   import grants as GroupGrants from "../../metaengine/grants"
   import membership as GroupMembership from "../../consensus/membership"
-  export lifetime_test.*
+  export native_helpers.*
 
   pure def groupKey(sequence: int): RequestKey = { caller: { node: "n2", incarnation: 1 }, sequence: sequence }
   pure def groupAttempt(version: int): AttemptKey = { version: version, attempt: 1 }

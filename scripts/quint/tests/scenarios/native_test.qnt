@@ -1,11 +1,11 @@
 module native_test {
   import types.* from "../../types"
   import basicSpells.* from "../../vendor/spells/basicSpells"
-  import lifetime_test.* from "./lifetime_test"
+  import native_helpers.* from "./native_helpers"
   import grants as GrantRules from "../../metaengine/grants"
   import managed_membership_steps as NativeEffects from "../../managed/membership_steps"
   import membership as NativeRules from "../../consensus/membership"
-  export lifetime_test.*
+  export native_helpers.*
 
   pure val demotionRequest: ApiRequest = Mutate({ edit: ChangeReplica({ group: "a", node: "n3", role: Learner }),
     options: { ...options, approve: true } })

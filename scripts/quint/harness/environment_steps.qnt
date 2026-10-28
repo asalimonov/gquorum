@@ -104,7 +104,7 @@ w.extensions.nextDelivery <= MAX_DELIVERIES
     ({ ...w,
         system: w.system.put(node, { ...owner, volatile: { ...owner.volatile,
           phase: Stopped, pendingCalls: Map(), owners: Map(), observations: Map(), operationWork: Map(), waitingEffects: Set(), authorityReads: Map(), nativeChecks: Map(), joinOffer: None, effectResults: Set(), holds: Set(), starts: Map(), fenceWorkers: Set(), metaRunning: false, stopTimedOut: false, ownLease: Revoked, leases: Map(), renewal: None, renewalExpired: false, revokeGate: None, retirementWork: Map(), collectionRequests: Map(), collectionAcks: Set(), retentionEligible: Set(), readmissionOffer: None, handoverJoined: false,
-          session: None, schedulerCapture: None, appliedMetaIndex: 0, appliedMetaVersion: 0,
+          session: None, schedulerCapture: None, schedulerCursor: None, appliedMetaIndex: 0, appliedMetaVersion: 0,
           localView: { latest: I::emptyDocument, target: I::emptyDocument } } }),
         messages: w.messages.put(node, Set()),
       })
@@ -133,7 +133,7 @@ w.extensions.nextDelivery <= MAX_DELIVERIES
           owners: Map(), starts: Map(), holds: Set(), session: None, ownLease: Revoked,
           renewal: None, renewalExpired: false, leases: Map(), revokeGate: None, retirementWork: Map(), collectionRequests: Map(), collectionAcks: Set(), retentionEligible: Set(), readmissionOffer: None, handoverJoined: false,
           fenceWorkers: Set(), authorityReads: Map(), nativeChecks: Map(), joinOffer: None, effectResults: Set(), waitingEffects: Set(), pendingCalls: Map(),
-          observations: Map(), operationWork: Map(),
+          observations: Map(), operationWork: Map(), schedulerCapture: None, schedulerCursor: None,
           incarnation: owner.volatile.incarnation + 1,
           localView: view,
           appliedMetaIndex: owner.durable.metaIndex,

@@ -165,7 +165,7 @@ module types {
   }
   type ConsensusState = {
     lineage: str, configRevision: int, voters: Set[ReplicaKey], learners: Set[ReplicaKey],
-    leaderAuthority: Option[ReplicaKey], committedPosition: int,
+    leaderAuthority: Option[ReplicaKey], leadershipEpoch: int, committedPosition: int,
     appliedPositions: ReplicaKey -> int, catchUp: ReplicaKey -> CatchUpClass,
     pendingChange: Option[NativeChange],
     authorityFloor: int, authorityReceipts: Set[Receipt], authorityFences: Set[FenceEvidence],
@@ -190,11 +190,27 @@ module types {
   type StorageEvidence = ValidStore({ snapshot: int, commit: int, tail: int, appliedHint: int })
     | MissingStore | ForeignStore(ReplicaKey) | UnreadableStore | ContradictoryStore
   type RepairKind = RestoreMissingReplica | ReconfigureVoters
-  type RepairDecision = { kind: RepairKind, group: GroupId, target: ReplicaKey, role: ReplicaRole }
-  type SchedulerCapture = {
-    target: Document, sourceVersions: GroupId -> int, owners: GroupId -> Option[AttemptKey],
-    observations: GroupId -> Observation, decision: Option[RepairDecision],
+  type RepairDecision = { kind: RepairKind, group: GroupId, missing: Option[ReplicaKey],
+    promote: Option[ReplicaKey], demote: Option[ReplicaKey] }
+  type SchedulerInput = {
+    target: Document, groups: GroupId -> GroupProgress, observations: GroupId -> NativeObservation,
+    healthyNodes: Set[NodeName], held: Set[ReplicaKey],
   }
+  type SchedulerCommand = { decision: RepairDecision, expectedVersion: int, expectedTarget: int,
+    approval: ApprovalCommand }
+  type SchedulerPhase = ScheduleApplying | ScheduleSampling | ScheduleCallback | ScheduleReturned
+    | ScheduleRechecking | ScheduleFresh | ScheduleObserved | SchedulePlanned | ScheduleFinalRead
+    | ScheduleValidated | ScheduleSubmitted | ScheduleDone
+  type SchedulerSample = { observation: NativeObservation, leaderProcess: ProcessKey }
+  type SchedulerCapture = {
+    phase: SchedulerPhase, process: ProcessKey, epoch: int, readIndex: int,
+    input: Option[SchedulerInput], sampled: Set[GroupId], decision: Option[RepairDecision],
+    fresh: Option[MetadataState], sample: Option[SchedulerSample], finalSample: Option[SchedulerSample],
+    freshInput: Option[SchedulerInput], command: Option[SchedulerCommand], validations: int,
+    proposal: Option[ProposalKey], result: Option[MutationOutcome],
+  }
+  type SchedulerSubmission = { process: ProcessKey, authorized: bool, command: SchedulerCommand, validations: int,
+    first: SchedulerSample, last: SchedulerSample, input: SchedulerInput }
 
   // Recovery phases match recovery/types.go; reserved rollback phases are not actions.
   type RecoveryMode = Rebuild | ResetForJoin
@@ -273,6 +289,7 @@ module types {
     | RecordStepStatus({ approved: ApprovedAction, phase: OperationPhase, reason: Option[BlockReason] })
   type MetaCommand = StageProposal(StageCommand) | ApprovalProposal(ApprovalCommand)
     | RetryProposal(RetryCommand) | RepairProposal(RepairCommand) | ControlProposal(ControlCommand)
+    | SchedulerProposal(SchedulerCommand)
   type OperationRequest = ApproveVersion(int) | RetryAttempt(AttemptKey) | RepairRequest(MutationRequest)
   type ApiRequest = ObserveLocal | InvalidRequest | ConfirmedRead | Mutate(MutationRequest) | Operate(OperationRequest)
   type ApiResult = Observed(ProcessPhase) | Refused(Refusal) | Indeterminate
@@ -315,7 +332,7 @@ module types {
     appliedMetaVersion: int, appliedMetaIndex: int, localView: ReadView,
     observations: GroupId -> Observation, owners: GroupId -> OwnerState,
     session: Option[SessionKey], schedulerEnabled: bool, serveOverride: int,
-    schedulerCapture: Option[SchedulerCapture],
+    schedulerCapture: Option[SchedulerCapture], schedulerCursor: Option[GroupId],
     operationWork: ProposalKey -> OperationWork,
     waitingEffects: Set[EffectDelivery], authorityReads: int -> int,
     nativeChecks: GrantKey -> NativeChange, joinOffer: Option[JoinOffer], effectResults: Set[Receipt],
@@ -333,7 +350,7 @@ module types {
     pin: Option[DurableNodeIdentity], replicaEvidence: ReplicaKey -> StorageEvidence,
     authorityFloors: ResourceKey -> int, authorityGrants: ResourceKey -> Grant, receipts: Set[Receipt], fences: Set[FenceEvidence],
     journalPosition: int, pendingFences: ResourceKey -> HostFenceWork,
-    // Established fixture abstracts already-consumed founding grants. Exact
+    // Established fixture abstracts already-consumed startup grants. Exact
     // retained identities keep their initial floor until an explicit grant wins.
     seedAuthority: Set[ReplicaKey],
     collectionMarkers: ReplicaKey -> CollectionState,
@@ -380,5 +397,6 @@ module types {
     consumptions: Set[ConsumptionEvidence],
     // Verification-only obligation history; actors never read this monitor.
     deletionObligations: GroupId -> Set[ReplicaKey],
+    schedulerSubmissions: Set[SchedulerSubmission],
   }
 }

@@ -269,7 +269,25 @@
         "foundingRequiresExactVoterProofTest",
         "foundingConfigurationIsNotCompletionTest",
         "foundingCannotResetExistingConsensusTest",
-        "nativeReadmissionAllowsDistinctMemberOnSameHostTest"
+        "nativeReadmissionAllowsDistinctMemberOnSameHostTest",
+        "schedulerKeepsHealthySeatsTest",
+        "schedulerPromotesToFixedTargetTest",
+        "schedulerExcessMetadataVotersPreferFollowerTest",
+        "schedulerReplacesUnavailableVoterTest",
+        "schedulerDoesNotReplaceHealthyVoterTest",
+        "schedulerPreservesPinnedLearnerTest",
+        "schedulerPreservesLocalHoldTest",
+        "schedulerNeedsNativeQuorumTest",
+        "schedulerNeedsExactNativeConfigurationTest",
+        "schedulerLegacyMissingIdentityIsExactTest",
+        "schedulerUnavailableGroupDoesNotBlockAnotherTest",
+        "schedulerOwnedGroupCannotOriginateRepairTest",
+        "schedulerDecisionCursorAdvancesBeforeCommitTest",
+        "schedulerAutomaticDemotionDoesNotPinTest",
+        "schedulerReplicatedCASRejectsOutdatedCaptureTest",
+        "schedulerExactRoleEditRejectsForeignChangesTest",
+        "schedulerRepairDoesNotApproveStagedIntentTest",
+        "schedulerVoterPlanCannotOmitRequestedPromotionTest"
       ]
     }
   ],

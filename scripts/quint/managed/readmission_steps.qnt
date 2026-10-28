@@ -94,7 +94,8 @@ module managed_readmission_steps {
     host.volatile.phase == Fenced and floorsInstalled(host) and not(host.volatile.handoverJoined) and
       host.volatile.owners.values().forall(owner => owner.phase == OwnerStopped and Life::released(owner) and
         host.volatile.readmissionOffer.unwrap().grants.exists(g => g.targets.contains(owner.key))) and
-      host.volatile.retirementWork.values().forall(work => work.phase != RetireWaiting)
+      host.volatile.retirementWork.values().forall(work => work.phase != RetireWaiting) and
+      (match host.volatile.schedulerCapture { | Some(work) => work.phase != ScheduleCallback | None => true })
   }
 
   pure def joinNext(w: World, node: NodeName): World = F::withNode(w, node, host => {
@@ -103,7 +104,7 @@ module managed_readmission_steps {
       val pending = host.durable.pendingFences.get(r)
       E::fence(pending.delivery, pending.position)
     })
-    { ...host, volatile: { ...host.volatile, handoverJoined: true, metaRunning: false,
+    { ...host, volatile: { ...host.volatile, handoverJoined: true, metaRunning: false, schedulerCapture: None,
         retirementWork: Map(), collectionRequests: Map(), collectionAcks: Set(), fenceWorkers: Set(), waitingEffects: Set() },
       durable: { ...host.durable, fences: host.durable.fences.union(fences),
         pendingFences: resources.fold(host.durable.pendingFences, (pending, resource) => pending.mapRemove(resource)) } }
